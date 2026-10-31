@@ -1,6 +1,7 @@
 #!/bin/bash
 # The end of an end-to-end job, in one command, on the final (served) build:
-#   1. Loom perf on the final build: perf.py (short, --long) + c4_steady, label "final"
+#   1. perf on the final build, llama.cpp then Loom back to back (perf.py short/--long + c4_steady);
+#      roofline.json baselines are refreshed from this llama.cpp run (SKIP_LLAMA_PERF=1 skips it)
 #   2. LEVEL=full gates (llama.cpp references come from the cache that qualify.sh filled; llama-server
 #      only starts on a cache miss) - includes the full-context needle probe
 #   3. audit.py (definition of done)
@@ -18,7 +19,43 @@ model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['mode
 cd "$bench"
 step() { echo "== $* ($(date +%T))"; }
 rc=0
-step "1/4 final Loom perf"
+step "1/4 final perf: llama.cpp and Loom back to back"
+# Load swings between qualify and now (or an A/B run left on the GPU) skew the comparison: measure
+# both engines here, one right after the other, and refresh the roofline baselines from it.
+if [ -n "${LLAMACPP_DIR:-}" ] && [ "${SKIP_LLAMA_PERF:-0}" != 1 ]; then
+  kv=$("$T" -c "import json;print(min(next(iter(json.load(open('$pkg/model.json'))['presets'].values()))['execution']['context_capacity'], 34000) + 1024)")
+  if "$S/llamacpp_server.sh" "$gguf" "$lport" 4 "$kv" unified; then
+    L=http://127.0.0.1:$lport
+    "$T" "$S/perf.py" "$L" llama-final --kind llama --log perf_log.jsonl | grep "^{" | tail -1
+    "$T" "$S/perf.py" "$L" llama-final --kind llama --long --log perf_log.jsonl | grep "^{" | tail -1
+    "$T" "$S/c4_steady.py" "$L" 4 --label llama-final --log perf_log.jsonl | tail -1
+    kill "$(cat "$LLAMACPP_STATE/llamacpp-$lport.pid")" 2>/dev/null; rm -f "$LLAMACPP_STATE/llamacpp-$lport.pid"; sleep 2
+    "$T" - <<'PY'
+import json
+base = {}
+for l in open("perf_log.jsonl"):
+    r = json.loads(l)
+    if r.get("kind") != "llama":
+        continue
+    for k in ("decode_tps", "decode_tps_2k", "decode_tps_32k", "c4_steady"):
+        if k in r:
+            base[k] = r[k]
+    for p in r.get("prefill", []) + r.get("prefill_long", []):
+        n = min((1000, 2000, 8000, 16000, 32000), key=lambda x: abs(x - p["prompt_tokens"]))
+        base[f"prefill_{n}"] = p["prefill_tps"]
+roof = json.load(open("roofline.json"))
+for m in roof["metrics"]:
+    b = base.get(m["metric"])
+    if b:
+        m.update(baseline=b, baseline_eff=round(b / m["ceiling"], 3), margin=round(m["target"] / b - 1, 3),
+                 stretch_margin=round(m["stretch"] / b - 1, 3))
+json.dump(roof, open("roofline.json", "w"), indent=1)
+print("roofline.json baselines refreshed from the back-to-back llama.cpp run")
+PY
+  else
+    echo "WARNING: could not start llama-server; the report uses the qualify baseline"
+  fi
+fi
 "$T" "$S/perf.py" "$url" final --model "$model" --log perf_log.jsonl | grep "^{" | tail -1
 "$T" "$S/perf.py" "$url" final --model "$model" --long --log perf_log.jsonl | grep "^{" | tail -1
 "$T" "$S/c4_steady.py" "$url" 4 --model "$model" --label final --log perf_log.jsonl | grep -v "^\[campaign\]" | tail -1
