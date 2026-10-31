@@ -86,8 +86,8 @@ For `needle.py` sizes above the llama.cpp slot's context, drop `--llama` (Loom-o
 it then must find the needle) or give `--sizes`. A 262k-token prefill takes minutes.
 - **How golden.py works.** It renders each prompt with the package's chat block
   and sends the *token ids* to llama.cpp `/completion` (greedy, `n_probs: 5`). Both
-  engines therefore see identical prompts: 20 short prompts × 96 tokens, plus 2
-  prompts per long document × 64 tokens.
+  engines therefore see identical prompts: 20 short prompts × 64 tokens, plus 1
+  prompt per long document × 64 tokens (both questions kinds alternate across sizes).
 - **How compare.py works.** It asks Loom for the same completion through chat,
   rebuilds the raw text from the reasoning/answer channels, re-tokenizes it, and
   finds the first divergence. It reports the **golden log-prob gap**
@@ -213,7 +213,7 @@ Fix every FAIL before reporting, and report every WARN. The headline table is th
 source for the report's numbers.
 
 - **Lead with the bottom line**: a table with Loom and llama.cpp ROCm side by side
-  for each metric, followed by one line on the correctness gate (e.g. "28 prompts
+  for each metric, followed by one line on the correctness gate (e.g. "24 prompts
   up to 32k tokens; all divergences near-ties (max gap 0.97); concurrent ==
   sequential").
 - **State the setup**:
