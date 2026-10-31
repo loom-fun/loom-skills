@@ -271,6 +271,9 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   - **Tensors.** bf16 tensors need a bf16 value helper (`view<32xbf16>` →
     `vector.extf`).
 
+  **Sliding layers with a small window (≤ ~1k keys, Gemma's 512) don't need flash prefill**: the
+  window bounds their attention cost, so the split-K path is fine there. A trial spent 15 min
+  getting flash2 to fit registers for them, for no gain; spend it on the global layers instead.
   Gemma's 512-wide global heads exceed the starter's head_dim 128/256 kernels: generalize
   the split-K attention (D/32 values per lane) and, for prefill, flash2 (it already loops
   over D/16 fragments and reloads Q when registers run out). Record it as a lever in the roofline.
