@@ -147,7 +147,7 @@ each. In short:
 trials re-tested them on Qwen3.5-0.8B and the defaults won or tied every time:
 `GEMM_N_FASTEST=0` (slower prefill, 3 trials), `MV_WG1=1024` (no decode win), `--prefill 4096`
 (short prefill −20–37 %; 2048 ≈ 1024 within noise). On a starter port, spend the budget on fusion
-(fewer launches per layer: fused QKV, norm fusion; pairing Qwen3.5's tiny GDN alpha/beta matvecs
+(fewer launches per layer: fused QKV or norm fusion, which you write in a copy of the generator; pairing Qwen3.5's tiny GDN alpha/beta matvecs
 measured neutral) or on the long
 prefill path. Bigger or MoE models: the chunk size is worth one A/B (4096 helped MoE).
 
