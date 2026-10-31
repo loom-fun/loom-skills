@@ -71,6 +71,10 @@ cfg = {
     "chat": None,
     "tensors": tensors,
 }
+_g = cfg["heads"] // max(cfg["kv_heads"], 1)
+if _g & (_g - 1):
+    print(f"WARNING: head_dim {head_dim}: {_g} query heads per KV head; the prefill flash attention (gen_flash2.py) "
+          "tiles head_dim over 32*G lanes and needs G to be a power of two: generalize it first (new kernel work)")
 # Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style).
 pat = A("attention.sliding_window_pattern")
 if cfg["sliding_window"] and isinstance(pat, list) and len(pat) == L:

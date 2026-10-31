@@ -1095,7 +1095,7 @@ def qk_rope():
     else:
         assert D == 128 and RD == 128, "interleaved RoPE is implemented for head_dim 128"
         dims = ["%e0", "%e1", "%e2", "%e3"]
-        dim_defs = "  %e0 = index.mul %lane, %c4 : index\n  %e1 = index.add %e0, %c1 : index\n  %e2 = index.add %e0, %c2 : index\n  %e3 = index.add %e0, %c3 : index\n  %f0 = index.mul %lane, %c2 : index\n  %f1 = index.add %f0, %c1 : index\n"
+        dim_defs = "  %c1 = index.constant 1 : index\n  %e0 = index.mul %lane, %c4 : index\n  %e1 = index.add %e0, %c1 : index\n  %e2 = index.add %e0, %c2 : index\n  %e3 = index.add %e0, %c3 : index\n  %f0 = index.mul %lane, %c2 : index\n  %f1 = index.add %f0, %c1 : index\n"
         freq_idx = ["%f0", "%f1"]; pairs = [(0, 1, 0), (2, 3, 1)]
         ln_scale = math.log(THETA) / 64.0
     yt = ", ".join(["f32"] * n)
