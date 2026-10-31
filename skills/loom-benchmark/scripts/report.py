@@ -55,6 +55,10 @@ roof = load("roofline.json", {})
 cmp_rows = load("compare.json", [])
 agent = load("agent_golden.json", {})
 needle = load("needle.json", {})
+_full = load("needle_full.json", {})
+if _full:  # finalize's full-context probe (the compared half-context probe may be in needle.json)
+    needle = {"context": _full.get("context", needle.get("context")), "over_capacity": _full.get("over_capacity", {}),
+              "results": needle.get("results", []) + _full.get("results", [])}
 decisions = jl("decisions.jsonl")
 targets = jl("targets.jsonl")
 cfg, preset = {}, {}

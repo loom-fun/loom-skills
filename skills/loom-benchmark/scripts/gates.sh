@@ -38,8 +38,25 @@ else
 fi
 declare -A result secs
 order=()
+# A gate that already PASSED on this exact build (same model.json + program/*.loom) is not re-run:
+# the inputs are identical (llama.cpp references are cached too). FORCE=1 re-runs everything.
+pkg_hash=$(cat "$pkg/model.json" "$pkg"/program/*.loom 2>/dev/null | sha256sum | cut -c1-12)
+passed_before() {  # passed_before NAME [NEEDLE_SIZE]
+  [ "${FORCE:-0}" = 1 ] && return 1
+  [ -f gates_runs.jsonl ] || return 1
+  "$T" - "$pkg_hash" "$1" <<'PY'
+import json, sys
+h, name = sys.argv[1], sys.argv[2]
+ok = any(r.get("pkg_hash") == h and r.get("gates", {}).get(name, {}).get("pass") for r in map(json.loads, open("gates_runs.jsonl")))
+sys.exit(0 if ok else 1)
+PY
+}
 run() {  # run NAME CMD...
   local name=$1; shift; local t0=$(date +%s)
+  if passed_before "$name"; then
+    echo "== $name: PASSED earlier on this exact build (pkg $pkg_hash), not re-run"
+    result[$name]=0; secs[$name]=0; order+=("$name"); return
+  fi
   echo "== $name"; "$@" > "gates_$name.log" 2>&1; local rc=$?
   tail -4 "gates_$name.log"; result[$name]=$rc; secs[$name]=$(( $(date +%s) - t0 )); order+=("$name")
 }
@@ -58,13 +75,19 @@ if [ "$level" != fast ]; then
   # probe (LEVEL=full) proves the size is served.
   cmp=$(( ctx / 2 < 61440 ? ctx / 2 : 61440 ))
   needle_args=(--llama "$L" --llama-max $(( slot - 1024 )) --out needle.json)
-  if [ "$level" = quick ]; then needle_args+=(--sizes $cmp --probes 1); else needle_args+=(--sizes $cmp $(( ctx - 2048 )) --probes 1 --top-probes 1); fi
-  run needle "$T" "$S/needle.py" "$pkg" "$url" "${needle_args[@]}"
+  if [ "$level" = quick ]; then
+    needle_args+=(--sizes $cmp --probes 1)
+    run needle "$T" "$S/needle.py" "$pkg" "$url" "${needle_args[@]}"
+  else
+    # The compared half-context probe passed on this build already (qualify): only the full-context probe is new.
+    needle_args=(--llama "$L" --llama-max $(( slot - 1024 )) --out needle_full.json)
+    if passed_before needle; then needle_args+=(--sizes $(( ctx - 2048 )) --probes 1); else needle_args+=(--sizes $cmp $(( ctx - 2048 )) --probes 1 --top-probes 1); fi
+    run needle_full "$T" "$S/needle.py" "$pkg" "$url" "${needle_args[@]}"
+  fi
 fi
 if [ $started_llama = 1 ] && [ -f "$LLAMACPP_STATE/llamacpp-$lport.pid" ]; then
   kill "$(cat "$LLAMACPP_STATE/llamacpp-$lport.pid")" 2>/dev/null; rm -f "$LLAMACPP_STATE/llamacpp-$lport.pid"
 fi
-pkg_hash=$(cat "$pkg/model.json" "$pkg"/program/*.loom 2>/dev/null | sha256sum | cut -c1-12)
 args=()
 for n in "${order[@]}"; do args+=("$n" "${result[$n]}" "${secs[$n]}"); done
 "$T" - "$level" "$pkg_hash" $(( $(date +%s) - t_start )) "${args[@]}" <<'EOF'

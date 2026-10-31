@@ -12,10 +12,11 @@
 # Prints PORT_RESULT {...} with the package, model id, context and memory_bytes; the server keeps
 # running (stop: LOOM_SERVE_STATE=WORKDIR/state stop.sh port). Exit codes: 2 download, 3 chat
 # template needs a hand-written block, 4 build/serve, 5 kernel tests, 6 smoke test.
-# Then run loom-benchmark/scripts/gates.sh for the correctness gates.
+# Then run loom-benchmark/scripts/qualify.sh (or gates.sh). After hand-fixing cfg.json (exit 3), resume
+# with FROM=build port.sh ORG/REPO WORKDIR [PORT] [MEMORY_GIB] [MODEL_ID] (stages 3-6; KIT=DIR uses your kit copy).
 set -u
 spec=$1; work=$(mkdir -p "$2" && cd "$2" && pwd); port=${3:-8160}; mem_gib=${4:-56}; model_id=${5:-}
-here=$(cd "$(dirname "$0")" && pwd); K=$here/starter; S=$here/../loom-setup/scripts
+here=$(cd "$(dirname "$0")" && pwd); K=${KIT:-$here/starter}; S=$here/../loom-setup/scripts
 root=${LOOM_ROOT:-$HOME/loom}
 bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts
 T=$bin/python; venv=$root/.venv; hf=$venv/bin/hf; [ -x "$hf" ] || hf=$venv/Scripts/hf
@@ -25,6 +26,12 @@ cd "$work"
 [ -s .e2e_start ] || date +%s > .e2e_start
 step() { echo "== $* ($(date +%T))"; }
 
+# FROM=build: resume after hand-fixing cfg.json (exit 3): reuse WORKDIR/gguf, tok and cfg.json, run 3-6.
+if [ "${FROM:-}" = build ]; then
+  gguf=$(ls "$work"/gguf/*.gguf | head -1); [ -f cfg.json ] && [ -f tok/tokenizer.json ] && [ -n "$gguf" ] || { echo "FROM=build needs WORKDIR/cfg.json, tok/tokenizer.json and gguf/"; exit 2; }
+  [ -n "$model_id" ] || model_id=$("$T" -c "import json;print(json.load(open('cfg.json')).get('model_id') or '')")
+  [ -n "$model_id" ] || { echo "FROM=build: pass MODEL_ID (5th argument)"; exit 2; }
+else
 step "1/6 download"
 if [ -z "$file" ]; then
   file=$("$T" -I "$K/pick_gguf.py" "$repo") || { echo "STOP: no usable GGUF in $repo (see above); pass ORG/REPO:FILE.gguf"; exit 2; }
@@ -61,6 +68,8 @@ step "2/6 inspect (chat block derived from the template and verified)"
 if [ "${PIPESTATUS[0]}" != 0 ] || grep -q "^chat FAIL\|not derivable\|WARNING: no chat block\|WARNING: no kernels\|WARNING: head_dim\|Traceback" inspect.log; then
   echo "STOP: see inspect.log; fix cfg.json (chat block / formats) by hand as loom-port-llm/SKILL.md describes, then rerun build.py"; exit 3
 fi
+
+fi  # FROM=build
 
 step "3/6 build"
 "$T" "$K/build.py" cfg.json pkg --tokenizer tok/tokenizer.json --model-id "$model_id" --memory-gib "$mem_gib" | tee build.log || exit 4

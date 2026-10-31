@@ -46,6 +46,9 @@ def measure(model, metric):
         return stream(a.url, model, [{"role": "user", "content": n + "Write a long, detailed essay discussing this documentation.\n\n" + d}], 256)["decode_tps"]
     if metric.startswith("prefill_"):
         s = stream(a.url, model, [{"role": "user", "content": n + "Summarize this documentation in one sentence.\n\n" + doc(DOCS[metric.split("_")[1]])}], 4)
+        if not s["ttft"]:
+            raise SystemExit(f"{metric}: {model} returned no tokens (prompt longer than the package's context? "
+                             "A/B packages built with --context 8192 can't take 8k+ prompts)")
         return s["prompt_tokens"] / s["ttft"]
     if metric == "c4":
         t0 = time.perf_counter()
