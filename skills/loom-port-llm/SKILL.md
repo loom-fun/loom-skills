@@ -66,7 +66,8 @@ The expensive path. Keep it short:
    thinking)` if you define one (how a reply's channels map back to raw text, for a format the
    default doesn't cover). No need to copy the skills tree. Reuse before
    writing: `../loom-optimize/reference/flint-moe-example/` has MoE routing, expert GEMMs,
-   attention sinks and sliding windows; the Gemma notes below list each Gemma-3n/4 feature.
+   attention sinks and sliding windows; `reference/gemma4-example/` is a whole Gemma 4 port (kernels and
+   chat format); the starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
 4. **Check numerically, node by node.** A short numpy forward of layers 0–1 on the trace's tokens
    (gguf `dequantize` for weights) compared with the trace's sums and edge values names the first
    misunderstood op in minutes. Then the Loom kernels against numpy (kernel tests), then the gates.
@@ -254,7 +255,9 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   2. bucket tokens by expert, using an info buffer;
   3. grouped expert GEMMs over the buckets;
   4. combine.
-- **Gemma-3n / Gemma-4 family (arch `gemma3n`, `gemma4`).** Read llama.cpp's
+- **Gemma-3n / Gemma-4 family (arch `gemma3n`, `gemma4`).** Start from `reference/gemma4-example/`: a
+  complete, gate-passing Gemma 4 port (kernels, head_dim-512 flash prefill, the chat format in
+  `control.loom` + `chat_probe.py`). Merge it into your kit copy instead of re-deriving it. Read llama.cpp's
   `src/models/gemma*.cpp` closely. The starter has none of these features, and each
   one silently breaks output if missed:
   - **Per-layer embeddings (PLE).** A gathered `per_layer_token_embd` row, plus a

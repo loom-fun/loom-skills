@@ -96,7 +96,7 @@ def main():
                     calls_ok = False
             rec["calls_ok"] = calls_ok
             if a.llama:
-                raw = P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking)
+                raw = P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
                 loom_ids = P.ids(raw)
                 g = llama_completion(a.llama, {
                     "prompt": ids, "n_predict": max(1, u["completion_tokens"]), "temperature": 0, "n_probs": 5,
