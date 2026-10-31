@@ -19,6 +19,7 @@ reads the reader slot, otherwise the writer; a span at position 0 starts from ze
 span publishes its final state to the writer. The register recurrence is adapted from
 hrx-loom-library model/Qwen/Qwen3.8-27B/program/kernel/gdn_prefill.loom.
 """
+import os
 
 
 def gdn_geometry(cfg):
@@ -89,6 +90,7 @@ func.def inline @g_gdn_span(%metadata: buffer, %spans: index, %span: index) -> (
 def gdn_kernels(cfg, eps):
     G = gdn_geometry(cfg)
     HK, HV, DK, DV, K, C, VD = G["HK"], G["HV"], G["DK"], G["DV"], G["K"], G["C"], G["VD"]
+    CB = int(os.environ.get("GDN_CB", str((C + 255) // 256)))  # channel blocks per token/span (1 = original serial grid)
     NG = len(cfg["recurrent_layers"])
     SB, LB = G["state_bytes"], G["layer_bytes"]
     RK, RV = DK // 32, DV // 32
@@ -124,7 +126,11 @@ def gdn_kernels(cfg, eps):
 kernel.def export("g_gdn_conv") @g_gdn_conv(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
-  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+  %cblocks = index.constant {CB} : index
+  %cmany = index.constant 64 : index
+  %few = index.cmp ult, %tokens, %cmany : index
+  %cbsel = scf.select %few, %cblocks, %c1 : index
+  kernel.launch.config workgroups(%tokens, %cbsel, %c1) workgroup_size(%c256, %c1, %c1) : index
 }} launch(%tokens_arg: index, %spans_arg: index, %layer_arg: index, %metadata: buffer, %info: buffer, %origins: buffer, %arena: buffer, %qkv: buffer, %weight: buffer, %out: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
@@ -158,7 +164,16 @@ kernel.def export("g_gdn_conv") @g_gdn_conv(%tokens: index) {{
     %w_view = buffer.view %weight[%zero] : buffer -> view<{C}x{K}xf32>
     %rel_value = index.sub %token, %first : index
     %rel = index.assume %rel_value [range(%rel_value, 0, 8191)] : index
-    scf.for %c = [%thread to %cC step %c256] {{
+    %cblk_id = kernel.workgroup.id<y> : index
+    %cblk_off = index.mul %cblk_id, %c256 : index
+    %cstart = index.add %thread, %cblk_off : index
+    %cmany_b = index.constant 64 : index
+    %few_b = index.cmp ult, %tokens, %cmany_b : index
+    %cbk = index.constant {CB} : index
+    %cone = index.constant 1 : index
+    %cbn = scf.select %few_b, %cbk, %cone : index
+    %cstride = index.mul %cbn, %c256 : index
+    scf.for %c = [%cstart to %cC step %cstride] {{
       %ch = index.assume %c [range(%c, 0, {C - 1})] : index
 {chr(10).join(taps)}
       %sig = scalar.logisticf<afn> %acc{K - 1} : f32
@@ -197,7 +212,8 @@ kernel.def export("g_gdn_conv") @g_gdn_conv(%tokens: index) {{
 kernel.def export("g_gdn_conv_commit") @g_gdn_conv_commit(%spans: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
-  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+  %cblocks = index.constant {CB} : index
+  kernel.launch.config workgroups(%spans, %cblocks, %c1) workgroup_size(%c256, %c1, %c1) : index
 }} launch(%tokens_arg: index, %spans_arg: index, %layer_arg: index, %metadata: buffer, %origins: buffer, %arena: buffer, %qkv: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
@@ -221,7 +237,11 @@ kernel.def export("g_gdn_conv_commit") @g_gdn_conv_commit(%spans: index) {{
     %old_view = buffer.view %arena[%old_at] : buffer -> view<{K - 1}x{C}xf32>
     %new_view = buffer.view %arena[%new_at] : buffer -> view<{K - 1}x{C}xf32>
     %qkv_view = buffer.view %qkv[%zero] : buffer -> view<[%tokens]x{C}xf32>
-    scf.for %c = [%thread to %cC step %c256] {{
+    %cblk_id = kernel.workgroup.id<y> : index
+    %cblk_off = index.mul %cblk_id, %c256 : index
+    %cstart = index.add %thread, %cblk_off : index
+    %cstride = index.constant {256 * CB} : index
+    scf.for %c = [%cstart to %cC step %cstride] {{
       %ch = index.assume %c [range(%c, 0, {C - 1})] : index
 {chr(10).join(reads)}
 {chr(10).join(writes)}

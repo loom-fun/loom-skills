@@ -151,6 +151,10 @@ trials re-tested them on Qwen3.5-0.8B and the defaults won or tied every time:
 measured neutral) or on the long
 prefill path. Bigger or MoE models: the chunk size is worth one A/B (4096 helped MoE).
 
+**Folded into the starter from trials** (already on; don't redo): the gated delta-net conv and
+history-commit kernels spread channels over `GDN_CB` workgroups per token when fewer than 64
+tokens are in flight (Qwen3.5-0.8B decode +18 %, identical output; `GDN_CB=1` restores the old grid).
+
 **Tried and did not help (don't repeat without a new reason):**
 - 64-key flash tiles;
 - expert gate_up prefetch;
