@@ -75,8 +75,11 @@ class Package:
     def raw_from_chat(self, message, finished, thinking=None):
         """Rebuild the model's raw output text from Loom's parsed channels so it can be
         re-tokenized and compared token-by-token with the golden ids. `thinking` is the
-        request's thinking selection (default: the template default)."""
+        request's thinking selection (default: the template default). A kit (LOOM_KIT) whose
+        chat_probe.py defines raw_from_chat(chat, message, finished, thinking) overrides this."""
         c = self.chat
+        if hasattr(chat_probe, "raw_from_chat"):
+            return chat_probe.raw_from_chat(c, message, finished, thinking)
         on = c.get("thinking_default", c.get("starts_in_reasoning")) if thinking is None else thinking
         reasoning = message.get("reasoning_content")
         content = message.get("content") or ""

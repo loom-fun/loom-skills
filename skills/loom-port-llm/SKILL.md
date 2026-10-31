@@ -62,7 +62,9 @@ The expensive path. Keep it short:
    the copy: a cfg flag per feature in `inspect_gguf.py`, the op in `gen_llm.py` (decode first:
    matvec path, prefill later), and a kernel test case in `make_kernel_tests.py`. If you change
    `chat_probe.py` (a chat format it can't model), `export LOOM_KIT=W/kit`: the benchmark
-   scripts then render prompts with your copy. Reuse before
+   scripts then render prompts with your copy, and use its `raw_from_chat(chat, message, finished,
+   thinking)` if you define one (how a reply's channels map back to raw text, for a format the
+   default doesn't cover). No need to copy the skills tree. Reuse before
    writing: `../loom-optimize/reference/flint-moe-example/` has MoE routing, expert GEMMs,
    attention sinks and sliding windows; the Gemma notes below list each Gemma-3n/4 feature.
 4. **Check numerically, node by node.** A short numpy forward of layers 0–1 on the trace's tokens
