@@ -6,8 +6,18 @@ cd "$dir" && cat "$pkg/program/llm.loom" cases.loom-test > combined.loom
 "$bin/loom-test" combined.loom --device=${DEVICE:-amdgpu} > out.json 2> err.txt
 grep -v '^{"format' err.txt | head -20
 "$bin/python" - <<'PY'
-import json
-d = json.load(open("out.json")); bad = 0
+import json, sys
+try:
+    d = json.load(open("out.json"))
+except ValueError:  # loom-test did not get to run the cases: a compile/link error (PARSE, TYPE, SYMBOL...)
+    err = [l for l in open("err.txt", errors="replace") if not l.startswith('{"format')]
+    out = open("out.json", errors="replace").read()
+    print("FAIL compile: loom-test produced no results. Diagnostics (err.txt / out.json):")
+    print("".join(err[-30:]) or out[-3000:])
+    print("(a case launching a kernel the generator no longer emits shows up as a SYMBOL error: regenerate the tests "
+          "with make_kernel_tests.py after changing the generator)")
+    sys.exit(1)
+bad = 0
 for s in d["samples"]:
     fails = [f.get("detail", f.get("message", "")) if isinstance(f, dict) else str(f) for f in s["expectations"].get("failures", [])]
     issues = [i.get("message", "") for i in s.get("issues", [])]
