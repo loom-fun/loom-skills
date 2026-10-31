@@ -67,7 +67,7 @@ The expensive path. Keep it short:
    default doesn't cover). No need to copy the skills tree. Reuse before
    writing: `../loom-optimize/reference/flint-moe-example/` has MoE routing, expert GEMMs,
    attention sinks and sliding windows; `reference/gemma4-example/` is a whole Gemma 4 port (kernels and
-   chat format); the starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
+   chat format); `reference/lfm2moe-example/` has LFM2 short-conv layers and a top-k MoE with grouped WMMA prefill; the starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
 4. **Check numerically, node by node.** A short numpy forward of layers 0–1 on the trace's tokens
    (gguf `dequantize` for weights) compared with the trace's sums and edge values names the first
    misunderstood op in minutes. Then the Loom kernels against numpy (kernel tests), then the gates.
