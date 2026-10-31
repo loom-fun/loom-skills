@@ -21,6 +21,8 @@ Before you start you need:
   b/model.json`), then alternate requests: an interleaved A/B is both faster and more
   reliable than restarting servers between runs. Use `--context 8192` for A/B packages
   (faster to serve, same kernels) and rebuild the winner at full context for the gates.
+  Give that server headroom: `--memory_bytes` well above the sum of build.py's per-package
+  figures (a tight budget skewed an A/B by model order).
 - Generator switches (env vars) make a variant a rebuild, not an edit: try those first.
 - `perf.py` takes 1–3 min; for a decision on one metric, time just that metric
   (e.g. `bench_common.stream()` on the decode prompt, 3–5 interleaved rounds) and run the
@@ -145,7 +147,8 @@ each. In short:
 trials re-tested them on Qwen3.5-0.8B and the defaults won or tied every time:
 `GEMM_N_FASTEST=0` (slower prefill, 3 trials), `MV_WG1=1024` (no decode win), `--prefill 4096`
 (short prefill −20–37 %; 2048 ≈ 1024 within noise). On a starter port, spend the budget on fusion
-(fewer launches per layer: paired matvecs `MV_PAIR=1`, fused QKV, norm fusion) or on the long
+(fewer launches per layer: fused QKV, norm fusion; pairing Qwen3.5's tiny GDN alpha/beta matvecs
+measured neutral) or on the long
 prefill path. Bigger or MoE models: the chunk size is worth one A/B (4096 helped MoE).
 
 **Tried and did not help (don't repeat without a new reason):**
