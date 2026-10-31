@@ -2,7 +2,25 @@
 # usage: VENV=~/loom/.venv run_kernel_tests.sh PACKAGE TESTDIR   (TESTDIR from make_kernel_tests.py)
 pkg=$(cd "$1" && pwd); dir=$2; venv=${VENV:-$HOME/loom/.venv}
 bin=$venv/bin; [ -d "$bin" ] || bin=$venv/Scripts   # Windows venvs use Scripts/
-cd "$dir" && cat "$pkg/program/llm.loom" cases.loom-test > combined.loom
+cd "$dir" || exit 1
+# Keep only cases whose kernels the generator emitted (mixed tensor formats or a changed generator
+# can drop a variant a case launches: that was a SYMBOL error for the whole file).
+"$bin/python" - "$pkg/program/llm.loom" <<'PY'
+import re, sys
+lib = open(sys.argv[1]).read()
+defined = set(re.findall(r'kernel\.def export\("([^"]+)"\)', lib)) | set(re.findall(r'kernel\.def[^@]*@([\w.]+)', lib))
+text = open("cases.loom-test").read()
+blocks = re.split(r'(?m)^(?=check\.case )', text)
+keep = []
+for b in blocks:
+    missing = sorted(set(re.findall(r'kernel\.launch @([\w.]+)', b)) - defined)
+    if b.startswith("check.case") and missing:
+        print(f"SKIP {re.search(r'@([\w.]+)', b).group(1)}: kernel(s) not in this build: {', '.join(missing)}")
+        continue
+    keep.append(b)
+open("cases_used.loom-test", "w").write("".join(keep))
+PY
+cat "$pkg/program/llm.loom" cases_used.loom-test > combined.loom
 "$bin/loom-test" combined.loom --device=${DEVICE:-amdgpu} > out.json 2> err.txt
 grep -v '^{"format' err.txt | head -20
 "$bin/python" - <<'PY'

@@ -36,8 +36,18 @@ ap.add_argument("--grep", default=None)
 a = ap.parse_args()
 d = os.path.abspath(a.llamacpp_dir)
 exe = os.path.join(d, "llama-eval-callback")
-if not os.path.exists(exe):
-    sys.exit(f"{exe} not found (any lemonade llama.cpp build has it)")
+if not os.path.exists(exe):  # some builds ship only llama-server: borrow a sibling build's tool
+    import glob
+    for c in sorted(glob.glob(os.path.join(os.path.dirname(d), "*", "llama-eval-callback"))
+                    + glob.glob(os.path.join(os.path.dirname(os.path.dirname(d)), "*", "*", "llama-eval-callback"))
+                    + glob.glob(os.path.expanduser("~/.cache/lemonade/bin/llamacpp/*/llama-eval-callback"))
+                    + glob.glob(os.path.expanduser("~/.cache/lemonade/bin/llamacpp/*/*/llama-eval-callback"))):
+        d, exe = os.path.dirname(c), c
+        print(f"using {exe} (not in the given build)", file=sys.stderr)
+        break
+    else:
+        sys.exit("llama-eval-callback not found in any llama.cpp build. Fallback: GGML_SCHED_DEBUG=2 "
+                 "llama-completion -m MODEL -p hi -n 1 -v prints the compute graph (ops and inputs, no values)")
 tmp = None
 if not os.access(exe, os.X_OK):
     tmp = tempfile.mkdtemp()

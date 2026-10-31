@@ -71,6 +71,13 @@ cfg = {
     "chat": None,
     "tensors": tensors,
 }
+# Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style).
+pat = A("attention.sliding_window_pattern")
+if cfg["sliding_window"] and isinstance(pat, list) and len(pat) == L:
+    cfg["sliding_layers"] = [i for i, sl in enumerate(pat) if sl]
+elif cfg["sliding_window"]:
+    print(f"WARNING: sliding_window {cfg['sliding_window']} but no per-layer pattern in the GGUF: fill "
+          "sliding_layers (and nope_layers) by hand from llama.cpp's src/models/<arch>.cpp or llama_trace.py")
 # Partial rotary embedding (e.g. qwen35: 64 of 256 dims).
 rope_dims = A("rope.dimension_count")
 if rope_dims and rope_dims != head_dim:
