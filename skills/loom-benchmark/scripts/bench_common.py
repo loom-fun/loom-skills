@@ -129,7 +129,18 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
         except ValueError:
             pass
     ensure_llama(url)
-    r = requests.post(url + "/completion", json=body, timeout=timeout).json()
+    for attempt in range(2):
+        r = requests.post(url + "/completion", json=body, timeout=timeout).json()
+        # llama.cpp must have evaluated the whole prompt: fewer tokens means it answered from some
+        # cached state (seen: an old build answering the previous prompt). Retry once, never cache it.
+        n_eval = (r.get("timings") or {}).get("prompt_n")
+        ok = n_eval is None or not isinstance(body.get("prompt"), list) or n_eval == len(body["prompt"])
+        if ok:
+            break
+        print(f"[llama] WARNING: evaluated {n_eval} of {len(body['prompt'])} prompt tokens; retrying", flush=True)
+    if not ok:
+        r["_suspect"] = f"llama.cpp evaluated {n_eval} of {len(body['prompt'])} prompt tokens"
+        return r
     if "completion_probabilities" in r or "tokens" in r:  # don't cache errors
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = path + f".{os.getpid()}"

@@ -33,10 +33,11 @@ Before you start you need:
    `loom-roofline` target, measured in milliseconds per token of gap, not in
    percent.
 2. **Attribute by ablation.** Hardware counters are unavailable (`loom-benchmark`
-   counters are UNIMPLEMENTED on gfx1151). Instead, temporarily skip a kernel or
-   launch it twice in the command program, rebuild, and measure end to end. The
-   delta is that kernel's cost. Wrong outputs are fine for an ablation build; never
-   ship one.
+   counters are UNIMPLEMENTED on gfx1151). Instead, launch a kernel twice (or skip it)
+   and measure end to end: `${CLAUDE_SKILL_DIR}/ablate.py PKG pkg_abl '@attn_decode'`
+   writes the copy with its own model id; serve both in one loom-serve and run
+   `ab_perf.py URL <id> <id>-abl-<name>`. The delta is that kernel's cost. Wrong outputs
+   are fine for an ablation build; never ship one.
 3. **Change one thing** in the generator: kernel shape, fusion, tiling or dispatch.
    Keep the old variant callable. Generators take env switches (`GEMM_SKIP_PADDING`,
    `GEMM_N_FASTEST`, `FLASH2_KT`, …) so A/B is a rebuild, not a code revert. Both
@@ -139,6 +140,13 @@ each. In short:
 6. Fused RMSNorm + f16 row scale.
 7. Large prefill chunks: `prefill_capacity` 4096 for MoE; 1024–2048 is enough for
    dense models.
+
+**Settled for starter ports (dense / Qwen3.5 hybrid, ≤ 4B): don't re-run these A/Bs.** Fresh-agent
+trials re-tested them on Qwen3.5-0.8B and the defaults won or tied every time:
+`GEMM_N_FASTEST=0` (slower prefill, 3 trials), `MV_WG1=1024` (no decode win), `--prefill 4096`
+(short prefill −20–37 %; 2048 ≈ 1024 within noise). On a starter port, spend the budget on fusion
+(fewer launches per layer: paired matvecs `MV_PAIR=1`, fused QKV, norm fusion) or on the long
+prefill path. Bigger or MoE models: the chunk size is worth one A/B (4096 helped MoE).
 
 **Tried and did not help (don't repeat without a new reason):**
 - 64-key flash tiles;

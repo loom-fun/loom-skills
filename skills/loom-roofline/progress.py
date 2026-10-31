@@ -111,7 +111,7 @@ def main():
                 last_gain, run = t(r), r["value"]
         stalled = (now - last_gain).total_seconds() / 60 > a.stall_min
         start = t(next((r for r in ev if r.get("change") == "start"), ev[0]))
-        used_h = (now - start).total_seconds() / 3600
+        used_h = (max(now, datetime.now()) - start).total_seconds() / 3600   # wall clock, not the last row
         left_h = a.budget_h - used_h - a.reserve_min / 60
         horizon = a.horizon_h if a.horizon_h is not None else left_h
         early = span_h < 2 / 60 or len(ev) < 2

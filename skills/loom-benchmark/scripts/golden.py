@@ -35,6 +35,9 @@ for prompt, n_predict in items:
     r = llama_completion(a.llama, {"prompt": ids, "n_predict": n_predict, "temperature": 0, "n_probs": 5,
                                    "cache_prompt": False, "return_tokens": True,
                                    "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}, pkg, a.salt)
+    if r.get("_suspect"):  # llama.cpp answered from a stale state: a wrong golden is worse than none
+        print(f"SKIP {len(ids)} prompt tokens: {r['_suspect']}", flush=True)
+        continue
     if "tokens" not in r:  # e.g. the prompt exceeds the server's context: skip, don't crash
         print(f"SKIP {len(ids)} prompt tokens: {str(r)[:200]}", flush=True)
         continue
