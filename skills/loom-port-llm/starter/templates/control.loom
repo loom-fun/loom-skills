@@ -404,6 +404,8 @@ global.rodata.def @tools_suffix = bytes("@@HEX_TOOLS_SUFFIX@@")
 
 global.rodata.def @tool_line_prefix = bytes("@@HEX_TOOL_LINE_PREFIX@@")
 
+global.rodata.def @tool_separator = bytes("@@HEX_TOOL_SEPARATOR@@")
+
 global.rodata.def @tools_system_separator = bytes("@@HEX_TOOLS_SYSTEM_SEPARATOR@@")
 
 global.rodata.def @tool_turn_prefix = bytes("@@HEX_TOOL_TURN_PREFIX@@")
@@ -465,12 +467,20 @@ func.def @tools_body(%tools: buffer, %tool_fields: buffer, %tool_count: i64) -> 
   %prefix = global.load @tools_prefix : buffer
   %suffix = global.load @tools_suffix : buffer
   %newline = global.load @tool_line_prefix : buffer
+  %separator = global.load @tool_separator : buffer
   %body = scf.for %i = [%c0 to %extent step %c1](%text = %prefix : buffer) -> (buffer) {
     %value_origin = view.load %records[%i, 2] : view<[%extent]x5xi64> -> i64
     %value_length = view.load %records[%i, 3] : view<[%extent]x5xi64> -> i64
     %value = func.call @json_range(%tools, %value_origin, %value_length) : (buffer, i64, i64) -> (buffer)
     %printed = func.call @tool_printed(%value) : (buffer) -> (buffer)
-    %line = func.call @join(%newline, %printed) : (buffer, buffer) -> (buffer)
+    %first = index.cmp eq, %i, %c0 : index
+    %lead = scf.if %first -> (buffer) {
+      scf.yield %newline : buffer
+    } else {
+      %separated = func.call @join(%separator, %newline) : (buffer, buffer) -> (buffer)
+      scf.yield %separated : buffer
+    }
+    %line = func.call @join(%lead, %printed) : (buffer, buffer) -> (buffer)
     %next = func.call @join(%text, %line) : (buffer, buffer) -> (buffer)
     scf.yield %next : buffer
   }

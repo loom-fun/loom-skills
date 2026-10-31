@@ -97,6 +97,7 @@ subs = {
     "@@HEX_DEFAULT_SYSTEM@@": hx(chat.get("default_system", "")), "@@HEX_BOS@@": hx(chat.get("bos", "")),
     "@@HEX_TOOLS_PREFIX@@": hx(chat["tools_prefix"]), "@@HEX_TOOLS_SUFFIX@@": hx(chat["tools_suffix"]),
     "@@HEX_TOOL_LINE_PREFIX@@": hx(chat.get("tool_line_prefix", "\n")),
+    "@@HEX_TOOL_SEPARATOR@@": hx(chat.get("tool_separator", "")),
     "@@HEX_TOOLS_SYSTEM_SEPARATOR@@": hx(chat["tools_system_separator"]),
     "@@HEX_TOOL_TURN_PREFIX@@": hx(chat["tool_turn_prefix"]), "@@HEX_TOOL_ITEM_PREFIX@@": hx(chat["tool_item_prefix"]),
     "@@HEX_TOOL_ITEM_SUFFIX@@": hx(chat["tool_item_suffix"]), "@@HEX_TOOL_TURN_SUFFIX@@": hx(chat["tool_turn_suffix"]),

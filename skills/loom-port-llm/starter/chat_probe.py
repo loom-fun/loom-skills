@@ -19,6 +19,18 @@ import sys
 
 import jinja2
 from jinja2.sandbox import ImmutableSandboxedEnvironment
+from jinja2.ext import Extension
+
+
+class GenerationTag(Extension):
+    """HF's `{% generation %}...{% endgeneration %}` (marks assistant tokens for training masks, e.g.
+    LFM2.5): renders its body unchanged, as transformers' apply_chat_template does."""
+    tags = {"generation"}
+
+    def parse(self, parser):
+        lineno = next(parser.stream).lineno
+        body = parser.parse_statements(("name:endgeneration",), drop_needle=True)
+        return jinja2.nodes.Scope(body, lineno=lineno)
 
 TOOLS = [
     {"type": "function", "function": {"name": "get_weather", "description": "Weather for a city.",
@@ -39,7 +51,8 @@ def environment():
     def raise_exception(message):
         raise ProbeError(message)
 
-    env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True, extensions=["jinja2.ext.loopcontrols"])
+    env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True,
+                                        extensions=["jinja2.ext.loopcontrols", GenerationTag])
     # Same as transformers' chat-template environment.
     env.filters["tojson"] = lambda x, ensure_ascii=False, indent=None, separators=None, sort_keys=False: json.dumps(
         x, ensure_ascii=ensure_ascii, indent=indent, separators=separators, sort_keys=sort_keys)
@@ -187,11 +200,13 @@ def derive(template_text, bos="", eos=""):
     body = block[len(chat["system_prefix"]):len(block) - len(chat["suffix"])]
     i0, i1 = body.index(printed[0]), body.index(printed[1])
     # Each tool is preceded by tool_line_prefix (Qwen: "\n"; GLM: "").
-    chat["tool_line_prefix"] = line = body[i0 + len(printed[0]):i1]
-    if line.strip():
-        raise ProbeError(f"tools are separated by non-whitespace text {line!r}; fill tools_* by hand")
-    if not body[:i0].endswith(line):
-        raise ProbeError("the first tool is not preceded like the others")
+    gap_tools = body[i0 + len(printed[0]):i1]
+    if gap_tools.strip() or not body[:i0].endswith(gap_tools):
+        # A separator between tools (LFM2.5: a JSON list "[t0, t1]"), not a prefix before each.
+        chat["tool_line_prefix"], chat["tool_separator"] = "", gap_tools
+    else:
+        chat["tool_line_prefix"], chat["tool_separator"] = gap_tools, ""
+    line = chat["tool_line_prefix"]
     tools_prefix, tools_suffix = body[:i0 - len(line)] if line else body[:i0], body[i1 + len(printed[1]):]
     s_body = t_sys[:t_sys.index("USERPROBE1")]
     s_body = s_body[len(bos) if bos and s_body.startswith(bos) else 0:]
@@ -264,8 +279,9 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None):
     use_default = not first_system and chat["default_system"]
     body = chat["default_system"] if use_default else sys_text
     if tools:
-        printed = "".join(chat["tool_line_prefix"] + json.dumps(t["function"] if chat["tools_function_only"] else t, ensure_ascii=False)
-                          for t in tools)
+        printed = chat.get("tool_separator", "").join(
+            chat["tool_line_prefix"] + json.dumps(t["function"] if chat["tools_function_only"] else t, ensure_ascii=False)
+            for t in tools)
         tb = chat["tools_prefix"] + printed + chat["tools_suffix"]
         sep = chat["tools_system_separator"] if body else ""
         merged = body + sep + tb if chat["tools_after_system"] else tb + sep + body

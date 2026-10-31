@@ -57,8 +57,8 @@ done
 [ -n "$model_id" ] || model_id=$(echo "$tokrepos" | cut -d' ' -f1)
 
 step "2/6 inspect (chat block derived from the template and verified)"
-"$T" -I "$K/inspect_gguf.py" "$gguf" cfg.json | tee inspect.log | grep -v "^chat OK"
-if grep -q "^chat FAIL\|not derivable\|WARNING: no chat block\|WARNING: no kernels" inspect.log; then
+"$T" -I "$K/inspect_gguf.py" "$gguf" cfg.json 2>&1 | tee inspect.log | grep -v "^chat OK"
+if [ "${PIPESTATUS[0]}" != 0 ] || grep -q "^chat FAIL\|not derivable\|WARNING: no chat block\|WARNING: no kernels\|WARNING: head_dim\|Traceback" inspect.log; then
   echo "STOP: see inspect.log; fix cfg.json (chat block / formats) by hand as loom-port-llm/SKILL.md describes, then rerun build.py"; exit 3
 fi
 
