@@ -106,7 +106,9 @@ for g in json.load(open(a.golden)):
                                        "top": [[(t["id"], t["logprob"]) for t in x["top_logprobs"]] for x in cp]})
             n2, gap2 = match(got, g2)
             print(f"       re-recorded (llama.cpp run-to-run check): {n2} matched, gap {gap2}", flush=True)
-            if n2 > n:
+            # Further match wins; at the same position the smaller gap wins (llama.cpp itself moved there).
+            better_gap = isinstance(gap2, float) and (isinstance(gap, str) or gap2 < gap)
+            if n2 > n or (n2 == n and better_gap):
                 g, n, gap = g2, n2, gap2
     gold = g["ids"]
     full = n >= min(len(gold), len(got)) and abs(len(got) - len(gold)) <= 1

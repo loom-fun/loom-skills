@@ -80,8 +80,7 @@ class Package:
         on = c.get("thinking_default", c.get("starts_in_reasoning")) if thinking is None else thinking
         reasoning = message.get("reasoning_content")
         content = message.get("content") or ""
-        calls = "".join((c["call_separator"] if i else "") + chat_probe.render_call(c, t["function"])
-                        for i, t in enumerate(message.get("tool_calls") or []))
+        calls = chat_probe.render_calls(c, message.get("tool_calls") or [])   # wraps pythonic call lists
         answer = content + (c["content_call_separator"] if content and calls else "") + calls
         if not (c.get("starts_in_reasoning") and on):
             return answer

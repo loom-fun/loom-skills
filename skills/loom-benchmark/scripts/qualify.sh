@@ -4,7 +4,7 @@
 #   2. ONE llama-server from the fastest build: 4 slots sharing a unified KV pool big enough for the
 #      long goldens and the needle comparison, reused by every step below (no restarts)
 #   3. LEVEL=quick gates (goldens, compare, consistency, agent tool loop, sampling, half-context needle)
-#      -> stops here (exit 1) if a gate fails: fix the port first
+#      -> a failing gate is reported (exit 1 at the end) but the measurements still run
 #   4. llama.cpp baseline: perf.py --kind llama (short and --long) and c4_steady -> perf_log.jsonl
 #   5. roofline.py -> roofline.json; the optimization budget is what is left of the end-to-end budget
 #      (E2E_BUDGET_MIN, default 60) after the time already spent (WORKDIR/.e2e_start, written by
@@ -40,7 +40,10 @@ stop_llama() { [ "${KEEP_LLAMA:-0}" = 1 ] || { kill "$(cat "$LLAMACPP_STATE/llam
 trap stop_llama EXIT
 
 step "3/6 gates (LEVEL=quick)"
-LEVEL=quick LLAMA_URL=$L "$S/gates.sh" "$pkg" "$url" "$gguf" "$bench" || { echo "STOP: a gate failed (gates.json, gates_*.log): fix the port before measuring"; exit 1; }
+gates_rc=0
+LEVEL=quick LLAMA_URL=$L "$S/gates.sh" "$pkg" "$url" "$gguf" "$bench" || { gates_rc=1
+  echo "WARNING: a gate failed (gates.json, gates_*.log). Measuring anyway so the budget and targets exist;"
+  echo "         fix it (or document a proven near-tie) before finalize: a FAIL there fails the audit."; }
 
 step "4/6 llama.cpp baseline"
 "$T" "$S/perf.py" "$L" llama-rocm --kind llama --log perf_log.jsonl | tail -1
@@ -89,3 +92,4 @@ print("QUALIFY_RESULT " + json.dumps({"gates": g["verdict"], "gates_seconds": g[
       "budget_min": round(float(sys.argv[2]) * 60),
       "metrics": {m["metric"]: {k: m.get(k) for k in ("baseline", "target", "stretch", "ceiling")} for m in roof["metrics"]}}))
 EOF
+exit $gates_rc

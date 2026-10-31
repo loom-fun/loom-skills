@@ -49,7 +49,7 @@ run golden "$T" "$S/golden.py" "$pkg" golden.json --llama "$L" --long "$long"
 # run-to-run near-tie flips), instead of a full second recording.
 run compare "$T" "$S/compare.py" "$pkg" golden.json --llama "$L" --url "$url"
 grep -q '"verdict": "PASS"' gates_compare.log || result[compare]=1
-run consistency "$T" "$S/consistency.py" "$url" --model "$model"
+run consistency "$T" "$S/consistency.py" "$url" --model "$model" --pkg "$pkg" --llama "$L"
 grep -q "^PASS$" gates_consistency.log || result[consistency]=1
 if [ "$level" != fast ]; then
   run agent "$T" "$S/agent_golden.py" "$pkg" "$url" --llama "$L" --out agent_golden.json
