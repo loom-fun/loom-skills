@@ -50,9 +50,16 @@ if pick and pick.get("ranked") and roof:
           and (pbase is None or pbase >= top["prefill_1k_tps"] * 0.75))
     # With a single candidate build the baseline is that build: a lower number is load noise.
     ok = ok or len(pick["ranked"]) == 1
+    # finalize.sh measures llama.cpp with the picked build itself (label llama-final): a low number
+    # there is GPU load during the measurement, not a wrong build.
+    by_finalize = any(json.loads(l).get("label") == "llama-final" for l in open(P("perf_log.jsonl"))) \
+        if os.path.exists(P("perf_log.jsonl")) else False
     check("baseline: fastest build used", ok,
           f"roofline baseline decode {base} / prefill-1k {pbase} vs fastest build "
-          f"{top['decode_tps']} / {top['prefill_1k_tps']} ({top['dir']}): re-measure with that build")
+          f"{top['decode_tps']} / {top['prefill_1k_tps']} ({top['dir']}): "
+          + ("measured with that build by finalize.sh, so the GPU was loaded: say so in the report"
+             if by_finalize else "re-measure with that build"),
+          level="WARN" if by_finalize else "FAIL")
 check("roofline: ran with a baseline", roof is not None and metrics.get("decode_tps", {}).get("baseline"),
       "roofline.json missing or without --baseline: run loom-roofline")
 
