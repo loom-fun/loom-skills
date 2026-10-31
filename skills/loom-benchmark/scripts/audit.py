@@ -98,6 +98,9 @@ if s is not None and s["verdict"] != "PASS" and note:
 else:
     check("gates: consistency", s is not None and s["verdict"] == "PASS",
           f"latest consistency: {s and s['verdict']} (a near-tie with a known cause needs consistency_note.md)")
+gj = json.load(open(P("gates.json"))) if os.path.exists(P("gates.json")) else None
+check("gates: full run PASS", gj is not None and gj.get("verdict") == "PASS" and gj.get("level", "full") == "full",
+      f"gates.json: {gj and {k: gj.get(k) for k in ('verdict', 'level')}}: run finalize.sh (LEVEL=full gates) on the final build")
 kept = [r for r in targets if r.get("kept", True) and r.get("commit", "-") != "-"]
 if kept and c and c.get("commit", "-") != "-":
     check("gates: ran on the final build", c["commit"] == kept[-1]["commit"],

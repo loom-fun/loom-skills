@@ -9,10 +9,22 @@ Before you start you need:
 - a package that passes the golden gate (`loom-port-llm` + `loom-benchmark`);
 - a baseline row in `perf_log.jsonl`;
 - llama.cpp ROCm numbers on the same GGUF and workloads;
-- **targets from `loom-roofline`** (`bench/roofline.json`). If the user said
-  "optimize this" with no target or time, run `loom-roofline` first, announce the
-  targets and the 1 h budget, then loop here under its rate controller. Don't ask
-  the user to pick a number, and don't stop after the first win.
+- **targets from `loom-roofline`** (`bench/roofline.json`; `qualify.sh` writes it in an
+  end-to-end job). If the user said "optimize this" with no target or time, run
+  `loom-roofline` first, announce the targets and the budget (section 0 there), then loop
+  here under its rate controller. Don't ask the user to pick a number, and don't stop
+  after the first win.
+
+**Fast iteration (the budget is short).**
+- Build each variant into its own package dir with its own `--model-id`, and serve the
+  baseline and the variant in ONE loom-serve (`serve.sh NAME PORT amdgpu MEM a/model.json
+  b/model.json`), then alternate requests: an interleaved A/B is both faster and more
+  reliable than restarting servers between runs. Use `--context 8192` for A/B packages
+  (faster to serve, same kernels) and rebuild the winner at full context for the gates.
+- Generator switches (env vars) make a variant a rebuild, not an edit: try those first.
+- `perf.py` takes 1–3 min; for a decision on one metric, time just that metric
+  (e.g. `bench_common.stream()` on the decode prompt, 3–5 interleaved rounds) and run the
+  full `perf.py` only on the build you keep.
 
 ## The loop (one change at a time)
 
@@ -41,15 +53,16 @@ Before you start you need:
    --xfail=@ab_negative_control=EXPECT/003`; the skeleton in ab_kernel.py shows it. Use the real shapes, including edge counts
    (t=1, t=4, t=63/64, a partial last tile, mixed-sequence tiles, the full context).
    Run it with `loom-test` (see the cookbook in `loom-port-llm/reference/`).
-5. **End-to-end gates, all required.** In order:
+5. **End-to-end gates.** `LEVEL=fast gates.sh PKG URL GGUF BENCH_DIR` (`loom-benchmark`):
    - `compare.py` on short prompts and the 1k/2k/16k/32k goldens. Every divergence
      must be a near-tie (gap ≤ ~0.6–1.0, token in the golden top-5). A new
      divergence with a large gap is a bug even if the text "looks fine".
    - `consistency.py`: concurrent outputs must equal sequential outputs. This
      catches mixed-tile and padding bugs that single requests never hit.
-   - A spot-check that a few factual prompts give the **same answer as the baseline
-     build**. Compare against the baseline, not the true answer: small models get
-     some facts wrong in both builds.
+   The llama.cpp goldens come from the cache `qualify.sh` filled, so this costs only the
+   Loom side (≈1–3 min). Use `LEVEL=quick` if the change touched the chat glue, the
+   recurrent state or the sampling head. Run the gates only on a build you intend to keep
+   (it won on perf): a reverted build needs no gates.
 6. **Measure again** on the same workloads. Run `perf.py` from `bench/` with a
    label for the build (add `--reverted` if you discard it). It logs the result
    and prints the controller verdict by itself. Keep the change only if it wins on the
@@ -76,8 +89,9 @@ Before you start you need:
   `pgrep -a 'loom-serve|llama-server'` and the GPU busy %), the same build swings 30–50 %
   and more between runs. A/B **interleaved**: serve both variants in one loom-serve
   (build each with a distinct `--model-id` and a small `--context`, e.g. 8192, and pass
-  both `--model=` paths to serve.sh), then alternate requests between them for several
-  rounds and compare medians. Measure llama.cpp right next to the final Loom run. Say in
+  both `--model=` paths to serve.sh), then run `${CLAUDE_SKILL_DIR}/ab_perf.py URL MODEL_A MODEL_B
+  --metrics decode,prefill_2k --rounds 5`: it alternates requests, prints medians, B/A and a
+  WINS/LOSES/TIE verdict against the noise band, and logs to `ab_log.jsonl`. Measure llama.cpp right next to the final Loom run. Say in
   the report that the GPU was shared, and budget extra time: gates alone can take 5–10
   minutes each under load.
 

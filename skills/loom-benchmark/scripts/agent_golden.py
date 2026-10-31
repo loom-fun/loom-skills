@@ -19,7 +19,7 @@ import sys
 
 import requests
 
-from bench_common import Package
+from bench_common import Package, llama_completion
 
 TOOLS = [
     {"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city.",
@@ -98,9 +98,9 @@ def main():
             if a.llama:
                 raw = P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking)
                 loom_ids = P.ids(raw)
-                g = requests.post(a.llama + "/completion", timeout=1800, json={
+                g = llama_completion(a.llama, {
                     "prompt": ids, "n_predict": max(1, u["completion_tokens"]), "temperature": 0, "n_probs": 5,
-                    "cache_prompt": False}).json()
+                    "cache_prompt": False}, P)
                 gids = [x["id"] for x in g["completion_probabilities"]]
                 k = next((i for i, (x, y) in enumerate(zip(loom_ids, gids)) if x != y), None)
                 rec["golden_match"] = k is None

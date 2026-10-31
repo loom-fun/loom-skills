@@ -12,9 +12,7 @@ with --alt so a prompt where llama.cpp disagrees with itself is not called a FAI
 import argparse
 import json
 
-import requests
-
-from bench_common import PROMPTS, Package, doc
+from bench_common import PROMPTS, Package, doc, llama_completion
 
 ap = argparse.ArgumentParser()
 ap.add_argument("package")
@@ -22,6 +20,7 @@ ap.add_argument("out")
 ap.add_argument("--llama", default="http://127.0.0.1:8130")
 ap.add_argument("--tokens", type=int, default=96)
 ap.add_argument("--long", default="", help="comma-separated doc sizes for long-context goldens (64 tokens each)")
+ap.add_argument("--salt", default="", help="cache salt: a 2nd recording (golden2) needs its own (llama.cpp is not run-to-run deterministic)")
 a = ap.parse_args()
 pkg = Package(a.package)
 items = [(p, a.tokens) for p in PROMPTS]
@@ -33,9 +32,9 @@ out = []
 # applies even at temperature 0, and Loom decodes greedily.
 for prompt, n_predict in items:
     ids = pkg.ids(pkg.render(prompt))
-    r = requests.post(a.llama + "/completion", json={"prompt": ids, "n_predict": n_predict, "temperature": 0, "n_probs": 5,
-                                                     "cache_prompt": False, "return_tokens": True,
-                                                     "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}).json()
+    r = llama_completion(a.llama, {"prompt": ids, "n_predict": n_predict, "temperature": 0, "n_probs": 5,
+                                   "cache_prompt": False, "return_tokens": True,
+                                   "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}, pkg, a.salt)
     if "tokens" not in r:  # e.g. the prompt exceeds the server's context: skip, don't crash
         print(f"SKIP {len(ids)} prompt tokens: {str(r)[:200]}", flush=True)
         continue

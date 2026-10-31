@@ -5,8 +5,10 @@ A *package* is a directory with model.json + tokenizer.json + llm_config.json
 the single source of truth for prompt rendering, so llama.cpp (golden, fed raw
 token ids) and Loom (fed chat messages) see byte-identical prompts.
 """
+import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -14,8 +16,11 @@ import requests
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(os.path.dirname(HERE), "data")
-# chat_probe.simulate() is the Python model of the starter's control.loom rendering.
+# chat_probe.simulate() is the Python model of the starter's control.loom rendering. A port that
+# extends the kit (a copied starter with its own chat_probe.py) sets LOOM_KIT=that dir.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "loom-port-llm", "starter"))
+if os.environ.get("LOOM_KIT"):
+    sys.path.insert(0, os.path.abspath(os.environ["LOOM_KIT"]))
 import chat_probe  # noqa: E402
 
 PROMPTS = [
@@ -86,6 +91,66 @@ class Package:
         if answer or finished:
             text += end + after + answer
         return text
+
+
+def _gguf_fingerprint(path):
+    """Identity of a GGUF without hashing gigabytes: name, size and the first 4 MiB."""
+    if not path or not os.path.exists(path):
+        return str(path)
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        h.update(f.read(4 << 20))
+    return f"{os.path.basename(os.path.realpath(path))}:{os.path.getsize(path)}:{h.hexdigest()[:16]}"
+
+
+_FP = {}
+
+
+def llama_completion(url, body, pkg=None, salt="", timeout=7200):
+    """llama.cpp /completion with a persistent on-disk cache.
+
+    The llama.cpp reference only depends on the GGUF, the llama.cpp build and the request,
+    never on the Loom build, so every gate run after the first reuses it: re-running the gates
+    on an optimized build costs Loom time only. Cache: $LLAMA_CACHE or ./llama_cache (bench/).
+    `salt` separates deliberate re-recordings (golden2: llama.cpp is not run-to-run deterministic).
+    On a miss, when nothing answers at `url` and $LLAMA_START is set (gates.sh sets it), that
+    command is run once to start llama-server (lazy start: a fully cached gate run never loads it).
+    """
+    gguf = pkg.cfg.get("gguf") if pkg is not None else os.environ.get("LLAMA_GGUF")
+    if gguf not in _FP:
+        _FP[gguf] = _gguf_fingerprint(gguf)
+    key = hashlib.sha256(json.dumps({"gguf": _FP[gguf], "build": os.environ.get("LLAMACPP_DIR", ""),
+                                     "body": body, "salt": salt}, sort_keys=True).encode()).hexdigest()
+    d = os.environ.get("LLAMA_CACHE", "llama_cache")
+    path = os.path.join(d, key[:2], key + ".json")
+    if os.path.exists(path):
+        try:
+            return json.load(open(path))
+        except ValueError:
+            pass
+    ensure_llama(url)
+    r = requests.post(url + "/completion", json=body, timeout=timeout).json()
+    if "completion_probabilities" in r or "tokens" in r:  # don't cache errors
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + f".{os.getpid()}"
+        json.dump(r, open(tmp, "w"))
+        os.replace(tmp, path)
+    return r
+
+
+def ensure_llama(url):
+    try:
+        if requests.get(url + "/health", timeout=3).ok:
+            return
+    except requests.RequestException:
+        pass
+    cmd = os.environ.get("LLAMA_START")
+    if not cmd:
+        raise SystemExit(f"llama.cpp is not answering at {url} (and LLAMA_START is not set)")
+    print(f"[llama] cache miss: starting llama-server ({cmd})", flush=True)
+    r = subprocess.run(cmd, shell=True)
+    if r.returncode:
+        raise SystemExit(f"could not start llama-server: {cmd}")
 
 
 def stream(url, model, messages, max_tokens, extra=None):

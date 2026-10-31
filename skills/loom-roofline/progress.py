@@ -55,7 +55,7 @@ def main():
     ap.add_argument("--metric")
     ap.add_argument("--window-min", type=float, default=45)
     ap.add_argument("--budget-h", type=float, help="default: roofline.json campaign.budget_h, else 1")
-    ap.add_argument("--reserve-min", type=float, default=10)
+    ap.add_argument("--reserve-min", type=float, help="default: roofline.json campaign.reserve_min, else 10")
     ap.add_argument("--goal-tps", type=float)
     ap.add_argument("--horizon-h", type=float)
     ap.add_argument("--add", type=float)
@@ -68,6 +68,8 @@ def main():
     camp = rj.get("campaign", {})
     if a.budget_h is None:
         a.budget_h = camp.get("budget_h", 1.0)
+    if a.reserve_min is None:
+        a.reserve_min = camp.get("reserve_min", 10)
     if a.stall_min is None:
         a.stall_min = min(90, max(20, a.budget_h * 30))
     if a.add is not None:

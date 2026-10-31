@@ -16,7 +16,7 @@ import sys
 
 import requests
 
-from bench_common import Package
+from bench_common import Package, llama_completion
 
 PROMPT = "Pick a random fruit: apple, banana, cherry or grape. Answer with just the fruit name in lowercase."
 
@@ -57,8 +57,8 @@ def main():
         for s in range(a.draws):
             first[P.ids(ask(max_tokens=1, temperature=1.0, top_p=1.0, top_k=0, seed=1000 + s))[0]] += 1
         ids = P.ids(P.render_messages(msgs, None, thinking))
-        g = requests.post(a.llama + "/completion", json={"prompt": ids, "n_predict": 1, "temperature": 0, "n_probs": 20,
-                                                          "cache_prompt": False}).json()
+        g = llama_completion(a.llama, {"prompt": ids, "n_predict": 1, "temperature": 0, "n_probs": 20,
+                                       "cache_prompt": False}, P)
         probs = {t["id"]: math.exp(t["logprob"]) for t in g["completion_probabilities"][0]["top_logprobs"]}
         support = set(probs) | set(first)
         tv = 0.5 * sum(abs(probs.get(t, 0.0) - first[t] / a.draws) for t in support)

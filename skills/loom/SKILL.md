@@ -57,14 +57,17 @@ Windows 11 on Strix Halo. Run the scripts from **Git Bash**. Differences:
   `llamacpp_server.sh` refuses a build that lists no `ROCm` device, so
   `pick_llamacpp.sh` skips it.
 
-Typical cold-start order: `loom-setup` → (`loom-demo-ui`) → `loom-port-llm` →
-`loom-benchmark` (baseline + golden) → `loom-roofline` (targets) → `loom-optimize` ↔ `loom-benchmark`.
+Typical cold-start order: `loom-setup` → `loom-port-llm` (`port.sh`) → `loom-benchmark`
+(`qualify.sh`: gates, baselines, roofline targets) → `loom-optimize` → `finalize.sh`.
 
-**"Optimize this model".** Run `loom-roofline`. It turns the request into a goal
-and a time budget:
-- with no target and no time given, the goal is the roofline targets and the
-  budget is **1 h** of the user's time;
-- a stated target and/or a time budget replaces the defaults.
+**Time budget.** With no target and no time given, an end-to-end job ("get X working,
+optimize it, report") has a **60-minute budget for the whole job**, from the first
+command to the published report. The optimization phase gets what is left after the
+port and the qualification, minus a reserve for the final gates and the report;
+`qualify.sh` computes it from the clock that `port.sh` starts (`WORKDIR/.e2e_start`).
+A stated time ("spend 3 hours") or target replaces the default (`BUDGET_H=` /
+`E2E_BUDGET_MIN=`, see `loom-roofline` section 0). "Optimize this model" on an existing
+port, with no time given, gets **30 min** of optimization.
 
 Announce the targets and the budget without asking, then iterate in
 `loom-optimize`. After each measurement, `progress.py` checks how fast the gap to
@@ -76,33 +79,50 @@ the roofline is closing, per hour, and gives one of four verdicts:
 
 Report met or short for each metric, with the approach curve.
 
-## End-to-end requests: one turn
+## End-to-end requests: one turn, four commands
 
-"Get X working, optimize it and report" is a single job. Run the whole pipeline
-without stopping:
-1. reuse the install;
-2. port: `loom-port-llm/port.sh REPO WORKDIR` (native context, tools, kernel tests,
-   smoke test; ≈40 s for a small model). Hand-work only where it stops;
-3. pass the gates: `loom-benchmark/scripts/gates.sh` (golden ×2 + compare,
-   consistency, tool-calling agent loop, sampling, full-context needle) → `bench/gates.json`;
-4. measure the llama.cpp baseline;
-5. run `loom-roofline` to set targets and a budget. This is **not optional**: the
-   report must contain the roofline table (`bench/roofline.json`) and the approach
-   curve (`bench/targets.jsonl`), and a report without them is incomplete;
-6. optimize, under the rate controller;
-7. pass the gates again;
-8. serve;
-9. run `loom-benchmark/scripts/audit.py` from `bench/`. It must print `AUDIT PASS`
-   (fix any FAIL first). Then report, using its headline table.
+"Get X working, optimize it and report" is a single job. Run it without stopping:
+```bash
+K=${CLAUDE_SKILL_DIR}/..; W=~/work/<name>; export LOOM_ROOT=~/loom LOOM_SERVE_STATE=$W/state
+bash $K/loom-setup/scripts/install_loom.sh $LOOM_ROOT          # only if $LOOM_ROOT/.venv/bin/loom-serve is missing
+$K/loom-port-llm/port.sh <org>/<repo> $W 8160                   # 1. port: download, inspect, build, serve, kernel tests, smoke (~1 min)
+G=$(ls $W/gguf/*.gguf)
+$K/loom-benchmark/scripts/qualify.sh $W/pkg http://127.0.0.1:8160 $G $W/bench   # 2. llama.cpp pick, gates, baselines, roofline, budget
+#                                                               # 3. optimize (loom-optimize) for the budget qualify printed
+$K/loom-benchmark/scripts/finalize.sh $W/pkg http://127.0.0.1:8160 $G $W/bench  # 4. final perf, full gates, audit, report.html
+```
+1. **Port.** `port.sh` stops with an exit code naming the stage that needs hand-work
+   (3: the chat template, or an architecture the starter doesn't cover). Then follow
+   `loom-port-llm` for that stage only, and continue with step 2 once the package
+   serves and its kernel tests pass.
+2. **Qualify.** `qualify.sh` picks the fastest llama.cpp ROCm build on the machine,
+   starts ONE llama-server for everything, runs the gates (`LEVEL=quick`), measures
+   the llama.cpp and Loom baselines, runs the roofline (targets + budget) and prints
+   `QUALIFY_RESULT`. A failing gate stops it: fix the port first. The roofline table
+   (`bench/roofline.json`) and the approach curve (`bench/targets.jsonl`) are
+   required in the report; this step creates both.
+3. **Optimize** (`loom-optimize`), under the rate controller, for the budget printed
+   by qualify. After each kept change: rebuild, restart, `perf.py`, and
+   `LEVEL=fast gates.sh` (≈1–3 min: the llama.cpp references are cached).
+   Stop at BUDGET even if a lever is half done: revert to the last kept build.
+4. **Finalize.** Serve the best build, run `finalize.sh`. It runs the full gates
+   (with the full-context probe), the final perf, `audit.py` (must print
+   `AUDIT PASS`) and writes `bench/report.html` + `report.md` from the logs. Add a
+   short notes file (what was optimized, what was skipped and why) with
+   `report.py --notes`, then publish `report.html`.
+
+The budget is real: keep tool calls short, don't re-run a passing step, and don't
+re-read files you already read. Long steps (`qualify.sh`, `finalize.sh`) print a
+timestamp per stage; while one runs, prepare the next step instead of waiting idle.
 
 Stop to ask only for what the hard rules require: a gated-license click, or
 approval of a binary you downloaded. Avoid both where possible:
 - **Reuse what is installed.** Check `~/loom/.venv/bin/loom-serve` (Windows: `.venv/Scripts/loom-serve.exe`) and the HF cache.
-- **Baseline = the fastest llama.cpp ROCm build already on the machine.** Run
-  `loom-benchmark/scripts/pick_llamacpp.sh MODEL.gguf`. It finds and benchmarks
-  every HIP build. Version strings can't be trusted, and an old build inflated a
-  margin from +25 % to 2.5× in one run. A build the user already installed doesn't
-  need approval; one you download in this session does.
+- **Baseline = the fastest llama.cpp ROCm build already on the machine.** `qualify.sh`
+  runs `pick_llamacpp.sh` (set `SEARCH_ROOT=` to limit where it looks). Version
+  strings can't be trusted, and an old build inflated a margin from +25 % to 2.5× in
+  one run. A build the user already installed doesn't need approval; one you download
+  in this session does.
 
 The `loom-roofline` skill is at `${CLAUDE_SKILL_DIR}/../loom-roofline/SKILL.md`.
 Read it from there if it isn't in your skill list.
@@ -113,7 +133,9 @@ Read it from there if it isn't in your skill list.
   On the Strix Halo box (128 GB RAM) the GPU limit is ~61 GiB GTT. Qwen3.8-Flash-Next
   (104 GiB) hard-crashed the machine during the original evaluation. Never retry it on a 128 GB box. Check
   `du -shL <weights>` against `cat /sys/class/drm/card*/device/mem_info_gtt_total`
-  before serving anything big.
+  before serving anything big. The gates run llama.cpp and Loom side by side, so the
+  GGUF must fit **twice** (plus KV): `port.sh` picks the quant that does
+  (`starter/pick_gguf.py`, e.g. a 40B repo's UD-Q5_K_XL instead of its 39 GiB Q8_0).
 - **Always pass `--memory_bytes`** to `loom-serve` (weights + KV pool + ~2 GiB
   workspace). Too small → HTTP 503 "retained state leaves insufficient completion
   capacity". Several models can share one budget with `--parameter_idle_ms=60000`.

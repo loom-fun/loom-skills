@@ -1,7 +1,11 @@
 #!/bin/bash
 # One command from a Hugging Face GGUF repo to a served, tested Loom package.
-# usage: [LOOM_ROOT=~/loom] port.sh ORG/REPO[:FILE.gguf] WORKDIR [PORT=8160] [MEMORY_GIB=56] [MODEL_ID]
-#   1. download the GGUF (FILE, else the repo's Q4_K_M, else Q8_0) and the base model's tokenizer.json
+# usage: [LOOM_ROOT=~/loom] port.sh ORG/REPO[:FILE.gguf] WORKDIR [PORT] [MEMORY_GIB] [MODEL_ID]
+#   positional: PORT (default 8160), MEMORY_GIB (default 56), e.g. port.sh org/repo ~/work/m 8260 40
+#   0. starts the end-to-end clock (WORKDIR/.e2e_start, unless it exists): qualify.sh sizes the
+#      optimization budget from it
+#   1. download the GGUF (FILE, else pick_gguf.py: the best quant whose formats the starter supports
+#      and that fits twice in GPU memory; header-only probe) and the base model's tokenizer.json
 #   2. inspect_gguf.py: config + chat block derived from the template and verified (stops on any FAIL)
 #   3. build.py at the native context, fitted to MEMORY_GIB
 #   4. serve.sh (state in WORKDIR/state), kernel unit tests, smoke test (chat, thinking off, a tool call)
@@ -18,24 +22,18 @@ T=$bin/python; venv=$root/.venv; hf=$venv/bin/hf; [ -x "$hf" ] || hf=$venv/Scrip
 export LOOM_SERVE_STATE=$work/state PYTHONDONTWRITEBYTECODE=1
 repo=${spec%%:*}; file=""; [ "$spec" != "$repo" ] && file=${spec#*:}
 cd "$work"
-step() { echo "== $*"; }
+[ -s .e2e_start ] || date +%s > .e2e_start
+step() { echo "== $* ($(date +%T))"; }
 
 step "1/6 download"
 if [ -z "$file" ]; then
-  file=$("$T" - "$repo" <<'EOF'
-import json, sys, urllib.request
-files = [f["path"] for f in json.load(urllib.request.urlopen(f"https://huggingface.co/api/models/{sys.argv[1]}/tree/main?recursive=true"))
-         if f["path"].lower().endswith(".gguf") and "mmproj" not in f["path"].lower()]
-for q in ("Q4_K_M", "Q4_K_S", "Q5_K_M", "Q6_K", "Q8_0"):
-    hit = [f for f in files if q.lower() in f.lower() and "-of-" not in f]
-    if hit:
-        print(sorted(hit, key=len)[0]); break
-EOF
-)
+  file=$("$T" -I "$K/pick_gguf.py" "$repo") || { echo "STOP: no usable GGUF in $repo (see above); pass ORG/REPO:FILE.gguf"; exit 2; }
 fi
-[ -n "$file" ] || { echo "no supported single-file GGUF (Q4_K_M/Q4_K_S/Q5_K_M/Q6_K/Q8_0) in $repo"; exit 2; }
-"$hf" download "$repo" "$file" --local-dir gguf >/dev/null || { echo "download of $repo/$file failed"; exit 2; }
-gguf=$work/gguf/$file
+# Into the shared HF cache (reused by later runs and by llama.cpp tools), symlinked into WORKDIR/gguf.
+cached=$("$hf" download "$repo" "$file" 2>/dev/null | tail -1 | sed "s/^path=//")
+[ -f "$cached" ] || { echo "download of $repo/$file failed"; exit 2; }
+mkdir -p gguf && ln -sf "$cached" "gguf/$(basename "$file")"
+gguf=$work/gguf/$(basename "$file")
 # Tokenizer: the base model named in the GGUF, else the repo name without -GGUF.
 tokrepos=$("$T" - "$gguf" "$repo" <<'EOF'
 import re, sys

@@ -48,15 +48,29 @@ big Loom model at the same time if together they exceed GPU memory.
 
 ## 1. Correctness gates (before any performance claim)
 
-**One command:** `gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT]` (needs `LLAMACPP_DIR`)
-starts llama.cpp with one slot sized for the long goldens, runs everything below in
-order, stops llama.cpp and writes `BENCH_DIR/gates.json` (`verdict` PASS/FAIL per gate,
-logs in `gates_*.log`). Use the individual scripts to rerun or debug one gate.
-**Order:** `QUICK=1 gates.sh …` after the port and after each kept optimization (needle
-at half the context, one probe: ≈7–10 min), and the full `gates.sh` once on the final
-build. The full needle is a full-context prefill, the most expensive step (a 261k prompt
-took ~11 min on a busy GPU, ~40 min for the whole gate run); running it on the slowest
-(unoptimized) build twice wastes the most time.
+**End-to-end jobs use two wrappers** (see the `loom` skill): `qualify.sh` (after the port: llama.cpp
+pick, one shared llama-server, `LEVEL=quick` gates, llama.cpp + Loom baselines, roofline and budget)
+and `finalize.sh` (on the final build: final perf, `LEVEL=full` gates, audit, `report.html`).
+
+**One command for the gates:** `[LEVEL=fast|quick|full] gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT]`
+(needs `LLAMACPP_DIR`, or `LLAMA_URL` for a running llama-server) runs the gates below in order
+and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `gates_*.log`).
+
+| LEVEL | When | Gates | Cost |
+|---|---|---|---|
+| `fast` | after each kept optimization | goldens (cached) + compare, consistency | 1–3 min |
+| `quick` | after the port (`qualify.sh` runs it) | fast + agent tool loop, sampling, needle at half the context (≤ 60k) vs llama.cpp | 5–15 min the first time |
+| `full` | once, on the final build (`finalize.sh` runs it) | quick + one Loom-only probe at the full context | + one full-context prefill |
+
+- **The llama.cpp side is cached** (`BENCH_DIR/llama_cache`, keyed on the GGUF, the build and the
+  request): it never depends on the Loom build, so only the first run pays for it, and llama-server
+  starts lazily on the first cache miss. Re-running the gates on an optimized build costs Loom time only.
+- `fast` is enough inside the loop because the kernel paths an optimization touches are what the
+  goldens exercise (short prompts, 1k–32k documents: prefill, KV paging, attention) and consistency
+  covers mixed batches. Run `quick` instead when you changed the chat glue (`control.loom`), the
+  storage/recurrent state, or the sampling head.
+- The full-context probe is the most expensive step (a 261k prompt: ~8 min for a 0.8B hybrid) and
+  only proves the size is served: run it once, on the final build.
 
 ```bash
 S=${CLAUDE_SKILL_DIR}/scripts; P=~/work/mymodel/pkg; T=~/loom/.tools/bin/python; mkdir -p ~/work/mymodel/bench && cd ~/work/mymodel/bench   # outputs land here, not in the skill
@@ -151,9 +165,9 @@ $T $S/c4_steady.py http://127.0.0.1:8160 4 --model <id>;  $T $S/c4_steady.py htt
 |---|---|
 | decode_tps | 300-token essay from a short prompt. Client-side: (tokens−1)/(total−TTFT). |
 | prefill[] | 1k and 2k-token documents with max_tokens=4. prompt_tokens / TTFT, the median of 5 runs (`--repeats`); single runs varied 1.5–2.9k tok/s on one build. |
-| decode_tps_1k / _2k / _32k | Decode with that much context in the KV cache. |
+| decode_tps_2k / _32k | Decode with that much context in the KV cache. |
 | prefill_long[] | 8k / 16k / 32k documents. |
-| c4_agg_tps | 8 requests through 4 threads, total tokens / wall time (includes ramp). |
+| c4_agg_tps | `--c4` only: 8 requests through 4 threads, total tokens / wall time (includes ramp). |
 | c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding. Use this for "N requests at once". |
 
 Rules:
@@ -214,7 +228,12 @@ source for the report's numbers.
   images).
 - **No "before this session" columns** in executive tables. Give current Loom
   against the current baseline.
-- **Format.** Write executive reports as a single-page HTML artifact (Artifact tool;
+- **Generate it.** `scripts/report.py BENCH_DIR --pkg PKG [--notes notes.txt]` (`finalize.sh` runs it)
+  writes `report.html` (single page, light/dark) and `report.md` from the logs: bottom line,
+  headline table, gates, setup, decisions, audit, timeline. Write only the notes yourself (what
+  was optimized, what was skipped and why, losses), rerun `report.py --notes`, and publish
+  `report.html` as is. Extend the generated page only if the user asked for more.
+- **Format** (for a hand-extended report). A single-page HTML artifact (Artifact tool;
   load the artifact-design skill first). The sections:
   1. methodology;
   2. functional;

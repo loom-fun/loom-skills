@@ -1,13 +1,15 @@
 #!/bin/bash
 # Start the llama.cpp ROCm reference server (lemonade-sdk/llamacpp-rocm build) on a GGUF.
-# usage: LLAMACPP_DIR=~/llamacpp-rocm llamacpp_server.sh MODEL.gguf [PORT=8130] [PARALLEL=4] [CTX_PER_SLOT=8192]
+# usage: LLAMACPP_DIR=~/llamacpp-rocm llamacpp_server.sh MODEL.gguf [PORT=8130] [PARALLEL=4] [CTX_PER_SLOT=8192] [unified]
 #   golden / long-context runs: PARALLEL=1 CTX_PER_SLOT=34000
+#   `unified` (5th arg): one KV pool of CTX_PER_SLOT tokens shared by PARALLEL slots (-kvu), so a single
+#   request can use all of it and 4 streams still run: one server covers goldens, needle and perf.
 #   stop: kill $(cat ${LLAMACPP_STATE:-/tmp}/llamacpp-$PORT.pid)   (LLAMACPP_STATE: pid/log dir, default /tmp)
 # Refuses a build that does not see a ROCm device: on Windows, builds missing their HIP/BLAS DLLs
 # silently fall back to CPU.
 set -e
 state=${LLAMACPP_STATE:-/tmp}; mkdir -p "$state"
-gguf=$1; port=${2:-8130}; np=${3:-4}; per=${4:-8192}
+gguf=$1; port=${2:-8130}; np=${3:-4}; per=${4:-8192}; mode=${5:-}
 case "$gguf" in /*|?:*) ;; *) gguf=$PWD/$gguf;; esac   # the server runs from LLAMACPP_DIR
 dir=${LLAMACPP_DIR:?set LLAMACPP_DIR to the unzipped llamacpp-rocm release}
 listeners() { if command -v ss >/dev/null; then ss -ltnp | grep ":$port "; else netstat -ano -p tcp | tr -d '\r' | grep LISTENING | grep ":$port "; fi; }
@@ -17,7 +19,8 @@ fi
 cd "$dir"
 exe=./llama-server; [ -f $exe.exe ] && { exe=$exe.exe; command -v cygpath >/dev/null && gguf=$(cygpath -w "$gguf"); }
 LD_LIBRARY_PATH=$PWD $exe --list-devices 2>&1 | grep -q ROCm || { echo "$dir/llama-server sees no ROCm device:"; LD_LIBRARY_PATH=$PWD $exe --list-devices 2>&1 | tail -5; exit 1; }
-LD_LIBRARY_PATH=$PWD nohup $exe -m "$gguf" -ngl 99 -c $((np * per)) -np $np --port $port --host 127.0.0.1 > $state/llamacpp-$port.log 2>&1 &
+ctxarg=(-c $((np * per))); [ "$mode" = unified ] && ctxarg=(-c $per -kvu)
+LD_LIBRARY_PATH=$PWD nohup $exe -m "$gguf" -ngl 99 "${ctxarg[@]}" -np $np --port $port --host 127.0.0.1 > $state/llamacpp-$port.log 2>&1 &
 echo $! > $state/llamacpp-$port.pid
 for i in $(seq 300); do
   curl -s localhost:$port/health | grep -q ok && { echo "READY llama.cpp $($exe --version 2>&1 | grep -m1 version) on :$port (pid $(cat $state/llamacpp-$port.pid))"; exit 0; }

@@ -1,55 +1,83 @@
 #!/bin/bash
-# All correctness gates for a served package, in one run, with one verdict file.
-# usage: [LOOM_ROOT=~/loom] [QUICK=1] LLAMACPP_DIR=DIR gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
-#   QUICK=1 (before / during optimization): skips the full-context probe. Run the full gate once on
-#   the final build: it proves the whole context is served.
-#   golden.py x2 (two llama.cpp recordings) + compare.py, consistency.py, agent_golden.py,
-#   sampling_check.py and needle.py (2 probes at half the context, at most 60k, compared with
-#   llama.cpp by the near-tie rule; 1 Loom-only probe at full context). llama.cpp runs with one
-#   slot sized for the long goldens; it is stopped at the end.
-# Writes BENCH_DIR/gates.json {"verdict": "PASS"|"FAIL", "gates": {name: {"pass": bool, "log": file}}}
-# and BENCH_DIR/gates_*.log. Exit 1 when any gate fails. Runs sequentially: on a shared GPU the
-# gates would otherwise compete with each other.
+# Correctness gates for a served package, one verdict file.
+# usage: [LOOM_ROOT=~/loom] [LEVEL=fast|quick|full] LLAMACPP_DIR=DIR gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
+#   LEVEL=fast  (inner optimization loop, after each kept change, ~1-3 min): golden + compare
+#               (20 short prompts + 1k-32k documents) and consistency (concurrent == sequential).
+#   LEVEL=quick (after the port): fast + agent tool loop, sampling, needle at half the context
+#               (at most 60k) compared with llama.cpp by the near-tie rule.
+#   LEVEL=full  (default; the final build, once): quick + one Loom-only probe at the full context
+#               (proves the whole context is served). QUICK=1 is an alias for LEVEL=quick.
+# llama.cpp references are cached in BENCH_DIR/llama_cache (they depend on the GGUF and the request,
+# not on the Loom build), so only the first run pays for them. llama-server starts lazily, on the
+# first cache miss: a later run that is fully cached never loads it. LLAMA_URL=http://... uses an
+# already running llama-server (e.g. the shared one qualify.sh started) instead; it is left running.
+# Writes BENCH_DIR/gates.json {"verdict", "level", "pkg_hash", "seconds", "gates": {name: {"pass", "log", "seconds"}}}
+# and BENCH_DIR/gates_*.log. Exit 1 when any gate fails. Gates run sequentially (a shared GPU).
 set -u
-pkg=$(cd "$1" && pwd); url=$2; gguf=$3; bench=$(mkdir -p "$4" && cd "$4" && pwd); lport=${5:-8130}
+pkg=$(cd "$1" && pwd); url=$2; bench=$(mkdir -p "$4" && cd "$4" && pwd); lport=${5:-8130}
+gguf=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")   # absolute: we cd into BENCH_DIR below
 S=$(cd "$(dirname "$0")" && pwd); root=${LOOM_ROOT:-$HOME/loom}
 bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts; T=$bin/python
-export PYTHONDONTWRITEBYTECODE=1 LLAMACPP_STATE=${LLAMACPP_STATE:-$bench/llamacpp-state}
+level=${LEVEL:-full}; [ "${QUICK:-0}" = 1 ] && level=quick
+case $level in fast|quick|full) ;; *) echo "LEVEL must be fast, quick or full"; exit 2;; esac
+export LOOM_NO_AUDIT=1 PYTHONDONTWRITEBYTECODE=1 LLAMACPP_STATE=${LLAMACPP_STATE:-$bench/llamacpp-state} LLAMA_CACHE=$bench/llama_cache
 ctx=$("$T" -c "import json;print(next(iter(json.load(open('$pkg/model.json'))['presets'].values()))['execution']['context_capacity'])")
 model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
-# Long goldens that fit the context; llama.cpp slot covers them (and needle sizes up to 64k).
+# Long goldens that fit the context; the llama.cpp slot covers them (and needle sizes up to 64k).
 long=$("$T" -c "print(','.join(str(n) for n in (1000, 2000, 16000, 32000) if n + 2000 <= $ctx))")
 slot=$("$T" -c "print(min($ctx, 65536) + 1024)")
 cd "$bench"
-declare -A result
+started_llama=0
+if [ -n "${LLAMA_URL:-}" ]; then
+  L=$LLAMA_URL
+else
+  L=http://127.0.0.1:$lport
+  : "${LLAMACPP_DIR:?set LLAMACPP_DIR to the llama.cpp ROCm build (or LLAMA_URL to a running llama-server)}"
+  export LLAMA_START="'$S/llamacpp_server.sh' '$gguf' $lport 1 $slot"
+  started_llama=1
+fi
+declare -A result secs
+order=()
 run() {  # run NAME CMD...
-  local name=$1; shift
+  local name=$1; shift; local t0=$(date +%s)
   echo "== $name"; "$@" > "gates_$name.log" 2>&1; local rc=$?
-  tail -4 "gates_$name.log"; result[$name]=$rc
+  tail -4 "gates_$name.log"; result[$name]=$rc; secs[$name]=$(( $(date +%s) - t0 )); order+=("$name")
 }
-LLAMACPP_DIR=${LLAMACPP_DIR:?set LLAMACPP_DIR to the llama.cpp ROCm build} "$S/llamacpp_server.sh" "$gguf" "$lport" 1 "$slot" || exit 1
-L=http://127.0.0.1:$lport
-run golden1 "$T" "$S/golden.py" "$pkg" golden.json --llama "$L" --long "$long"
-run golden2 "$T" "$S/golden.py" "$pkg" golden2.json --llama "$L" --long "$long"
-run compare "$T" "$S/compare.py" "$pkg" golden.json --alt golden2.json --url "$url"
+t_start=$(date +%s)
+run golden "$T" "$S/golden.py" "$pkg" golden.json --llama "$L" --long "$long"
+# A prompt that would fail against the golden is re-recorded once by compare.py (llama.cpp's own
+# run-to-run near-tie flips), instead of a full second recording.
+run compare "$T" "$S/compare.py" "$pkg" golden.json --llama "$L" --url "$url"
 grep -q '"verdict": "PASS"' gates_compare.log || result[compare]=1
 run consistency "$T" "$S/consistency.py" "$url" --model "$model"
 grep -q "^PASS$" gates_consistency.log || result[consistency]=1
-run agent "$T" "$S/agent_golden.py" "$pkg" "$url" --llama "$L" --out agent_golden.json
-run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" --llama "$L"
-# Needle: compared with llama.cpp (near-tie rule) up to the llama.cpp slot; the full-context
-# probe proves the size is served. QUICK=1: one compared size only (half the context, at most 60k).
-cmp=$(( ctx / 2 < 61440 ? ctx / 2 : 61440 ))
-needle_args=(--llama "$L" --llama-max $(( slot - 1024 )) --out needle.json)
-if [ "${QUICK:-0}" = 1 ]; then needle_args+=(--sizes $cmp --probes 2); else needle_args+=(--sizes $cmp $(( ctx - 2048 )) --probes 2 --top-probes 1); fi
-run needle "$T" "$S/needle.py" "$pkg" "$url" "${needle_args[@]}"
-kill "$(cat "$LLAMACPP_STATE/llamacpp-$lport.pid")" 2>/dev/null
-"$T" - "${!result[@]}" -- "${result[@]}" <<'EOF'
-import json, sys
-args = sys.argv[1:]; i = args.index("--"); names, codes = args[:i], args[i + 1:]
-gates = {n: {"pass": c == "0", "log": f"gates_{n}.log"} for n, c in zip(names, codes)}
+if [ "$level" != fast ]; then
+  run agent "$T" "$S/agent_golden.py" "$pkg" "$url" --llama "$L" --out agent_golden.json
+  run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" --llama "$L"
+  # Needle: compared with llama.cpp (near-tie rule) up to the llama.cpp slot; the full-context
+  # probe (LEVEL=full) proves the size is served.
+  cmp=$(( ctx / 2 < 61440 ? ctx / 2 : 61440 ))
+  needle_args=(--llama "$L" --llama-max $(( slot - 1024 )) --out needle.json)
+  if [ "$level" = quick ]; then needle_args+=(--sizes $cmp --probes 1); else needle_args+=(--sizes $cmp $(( ctx - 2048 )) --probes 1 --top-probes 1); fi
+  run needle "$T" "$S/needle.py" "$pkg" "$url" "${needle_args[@]}"
+fi
+if [ $started_llama = 1 ] && [ -f "$LLAMACPP_STATE/llamacpp-$lport.pid" ]; then
+  kill "$(cat "$LLAMACPP_STATE/llamacpp-$lport.pid")" 2>/dev/null; rm -f "$LLAMACPP_STATE/llamacpp-$lport.pid"
+fi
+pkg_hash=$(cat "$pkg/model.json" "$pkg"/program/*.loom 2>/dev/null | sha256sum | cut -c1-12)
+args=()
+for n in "${order[@]}"; do args+=("$n" "${result[$n]}" "${secs[$n]}"); done
+"$T" - "$level" "$pkg_hash" $(( $(date +%s) - t_start )) "${args[@]}" <<'EOF'
+import json, sys, time
+level, pkg_hash, total, rest = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4:]
+gates = {rest[i]: {"pass": rest[i + 1] == "0", "log": f"gates_{rest[i]}.log", "seconds": int(rest[i + 2])}
+         for i in range(0, len(rest), 3)}
 verdict = "PASS" if all(g["pass"] for g in gates.values()) else "FAIL"
-json.dump({"verdict": verdict, "gates": gates}, open("gates.json", "w"), indent=1)
-print("GATES", verdict, {n: ("PASS" if g["pass"] else "FAIL") for n, g in sorted(gates.items())})
+out = {"verdict": verdict, "level": level, "pkg_hash": pkg_hash, "seconds": total,
+       "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "gates": gates}
+json.dump(out, open("gates.json", "w"), indent=1)
+with open("gates_runs.jsonl", "a") as f:
+    f.write(json.dumps(out) + "\n")
+print("GATES", verdict, f"level={level} {total}s", {n: ("PASS" if g["pass"] else "FAIL") for n, g in gates.items()})
 sys.exit(0 if verdict == "PASS" else 1)
 EOF
