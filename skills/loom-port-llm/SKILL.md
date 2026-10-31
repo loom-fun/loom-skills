@@ -119,7 +119,7 @@ valid calls), and `needle.py` passes up to the context capacity with a clean 400
 | File | Role |
 |---|---|
 | `inspect_gguf.py` | GGUF metadata → `cfg.json`: hidden, layers, heads/kv_heads, head_dim, ffn, vocab, **context_length**, rms_eps, rope_theta/type, **rope_dims** (partial RoPE), qk_norm, attn_gate (`true`: separate tensor; `"fused_q"`: packed in attn_q), post_norms, sliding window/layers, NoPE layers, tied embeddings, eos ids, **recurrent_layers / gdn** (hybrids), the chat block (via `chat_probe.py`), and every tensor's format and shape. |
-| `chat_probe.py` | Renders the model's Jinja chat template on probe conversations and cuts out what the control program needs: role prefixes/suffix, BOS, default system prompt, generation prompts with thinking on/off, the tools block and its order relative to the system message, the tool-call format (`hermes` JSON, `qwen_xml`, `glm`) and separators, tool-response framing, reasoning-in-history policy, trimming. `verify()` re-renders a dozen conversations exactly as `control.loom` will (`simulate()`) and diffs them against the template. `simulate()` is also what the benchmark scripts use to build golden prompts. |
+| `chat_probe.py` | Renders the model's Jinja chat template on probe conversations and cuts out what the control program needs: role prefixes/suffix, BOS, default system prompt, generation prompts with thinking on/off, the tools block and its order relative to the system message, the tool-call format (`hermes` JSON, `qwen_xml`, `glm`, `pythonic`) and separators, tool-response framing, reasoning-in-history policy, trimming. `verify()` re-renders a dozen conversations exactly as `control.loom` will (`simulate()`) and diffs them against the template. `simulate()` is also what the benchmark scripts use to build golden prompts. |
 | `gen_llm.py` | `cfg.json` → `llm.loom`: all kernels plus the `@llm_advance` command program. The command program is a **static per-layer unroll**, so each layer's kind (attention or gated delta-net) and tensor formats come from the GGUF (Q4_K_M mixes Q4_K/Q5_K/Q6_K/Q8_0 per tensor). |
 | `gen_gdn.py` | Gated delta-net kernels (conv1d + SiLU, history commit, q/k L2 norms, register recurrence, gated RMSNorm) and the fused q/gate split, for hybrids. Recurrent state lives in the runtime's recurrent slots (see porting-notes). |
 | `gen_gemm.py` | WMMA prefill GEMMs per (format, mode). Formats: q4_k, q5_k, q6_k, q8_0. Modes: store, acc, swiglu. |
@@ -197,7 +197,8 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   are exact. Check the printed summary against the model card:
   - `thinking`: `toggle` (Qwen3, Qwen3.5: `enable_thinking`), `always`, or `never`
     (`*-Instruct-2507`); `thinking_default` (Qwen3: on; Qwen3.5 small models: **off**);
-  - `call_format`: `hermes` (Qwen2.5/Qwen3), `qwen_xml` (Qwen3.5/Qwen3-Coder), `glm`;
+  - `call_format`: `hermes` (Qwen2.5/Qwen3), `qwen_xml` (Qwen3.5/Qwen3-Coder), `glm`, `pythonic`
+    (LFM2: `<|tool_call_start|>[f(a='x', n=3)]<|tool_call_end|>`, parsed in control.loom);
   - `default_system` (Qwen2.5 inserts "You are Qwen, created by Alibaba Cloud…").
 
   Templates the probe can't model (e.g. role tags with no closing suffix, tools
