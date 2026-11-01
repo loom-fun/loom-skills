@@ -15,14 +15,14 @@ eval guidance; sources at the end).
 
 | KPI | Target | Measured by |
 |---|---|---|
-| **Wall clock** | ≤ 60 min end to end (install -> published report), default prompt, no hand-holding | trial `phases.log` (`scripts/kpi.py summarize`) |
+| **Wall clock** | within **the model's roofline budget** end to end (install -> published report), default prompt, no hand-holding: `loom-roofline/e2e_budget.py` = fixed agent work + optimization + the pipeline's token workload at this model's decode/prefill speed (0.8B ≈ 46 min, 30B dense ≈ 106). A constant target would punish big models for physics and let small ones be sloppy | trial `phases.log` (`scripts/kpi.py summarize`: `wall_min` vs `budget_min`) |
 | **Quality** (agentic correctness vs llama.cpp) | final `LEVEL=full` gates PASS and `AUDIT PASS`: golden compare (all divergences near-ties), consistency, agent tool loop (rendering, history reuse, valid calls), sampling, needle at half and full native context, clean 400 over capacity | trial `bench/gates.json`, `audit.json`; re-checked by `scripts/eval.sh` with a frozen skill tree |
 | **Performance** | decode (TG) and prefill (PP 1k/2k, long) at or above llama.cpp ROCm on the same GGUF; never lower than the previous skill revision | `scripts/eval.sh` on a quiet GPU (interleaved, medians). In-trial numbers are informational only |
 
 Secondary (diagnostic, not goals): manual minutes (hand-work phases), friction notes (each `#` line a
 trial agent logs is a skill gap), time per phase, tool calls.
 
-**A change ships only if:** wall clock doesn't rise > 10 % on any reference model, no gate goes PASS ->
+**A change ships only if:** every reference model stays within its budget, wall clock doesn't rise > 10 % on any reference model, no gate goes PASS ->
 FAIL, compare max gap doesn't rise > 0.3, and quiet-GPU perf margins don't drop beyond noise
 (`kpi.py compare` checks the first three; `eval.sh` the last). Never "fix" time by dropping a check
 that carries weight: a gate may only be removed if another gate provably covers the same failure.
@@ -107,7 +107,7 @@ template, not generalization: say so, and also run a model the example doesn't c
 format. Diff `TRIAL/work/kit` (or `skills-local`) against the snapshot; merge what is general and
 verified (gates passed on it), with the trial's measurement in the commit message.
 
-**8. Stop** when all reference models meet the target, or the top remaining cause is outside the
+**8. Stop** when all reference models finish within their roofline budgets with all gates passing, or the top remaining cause is outside the
 skill (hardware speed, model size, upstream SDK/llama.cpp bugs): report it with the minutes.
 
 ## 4. Running trials with subagents

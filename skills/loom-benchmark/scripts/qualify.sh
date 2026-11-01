@@ -8,7 +8,7 @@
 #      -> a failing gate is reported (exit 1 at the end) but the measurements still run
 #   4. llama.cpp baseline: perf.py --kind llama (short and --long) and c4_steady -> perf_log.jsonl
 #   5. roofline.py -> roofline.json; the optimization budget is what is left of the end-to-end budget
-#      (E2E_BUDGET_MIN, default 60) after the time already spent (WORKDIR/.e2e_start, written by
+#      (E2E_BUDGET_MIN, default: loom-roofline/e2e_budget.py, from this model's roofline TG/PP) after the time already spent (WORKDIR/.e2e_start, written by
 #      port.sh) and a reserve for the final gates + report (measured from this run's gates)
 #   6. Loom baseline: perf.py (short, --long) and c4_steady -> the start rows of targets.jsonl
 # usage: [LOOM_ROOT=~/loom] [SEARCH_ROOT=$HOME] [E2E_BUDGET_MIN=60] [BUDGET_H=h] qualify.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
@@ -70,12 +70,16 @@ step "4/6 llama.cpp baseline"
 stop_llama
 
 step "5/6 roofline + targets + budget"
+[ -z "${E2E_BUDGET_MIN:-}" ] && export MODEL_BUDGET_MIN=$("$T" "$R/e2e_budget.py" "$gguf" --cfg "$pkg/llm_config.json" --context "$ctx" --json | "$T" -c "import json,sys;print(json.load(sys.stdin)['budget_min'])")
+"$T" "$R/e2e_budget.py" "$gguf" --cfg "$pkg/llm_config.json" --context "$ctx"
 budget=${BUDGET_H:-$("$T" - "$bench" <<'EOF'
 import json, os, sys, time
 bench = sys.argv[1]
 start = next((float(open(p).read().split()[0]) for p in (os.path.join(bench, "..", ".e2e_start"), os.path.join(bench, ".e2e_start"))
               if os.path.exists(p)), time.time())
-total = float(os.environ.get("E2E_BUDGET_MIN", 60))
+# The whole job's budget is a function of this model's speed (loom-roofline/e2e_budget.py), unless the
+# user gave one (E2E_BUDGET_MIN).
+total = float(os.environ.get("E2E_BUDGET_MIN") or os.environ.get("MODEL_BUDGET_MIN") or 60)
 g = json.load(open(os.path.join(bench, "gates.json")))
 # The final run (LEVEL=full) re-uses the cached llama.cpp references, so it costs about the Loom
 # share of this run (~60 %) plus the full-context probe, then a few minutes of perf + report.
@@ -83,7 +87,7 @@ reserve = 0.6 * g["seconds"] / 60 + 8
 elapsed = (time.time() - start) / 60
 opt = max(10.0, total - elapsed - reserve)
 print(f"{opt / 60:.2f}")
-sys.stderr.write(f"budget: end-to-end {total:.0f} min, elapsed {elapsed:.0f} min, reserve {reserve:.0f} min "
+sys.stderr.write(f"budget: end-to-end {total:.0f} min (this model's roofline budget), elapsed {elapsed:.0f} min, reserve {reserve:.0f} min "
                  f"for final gates + report -> optimization {opt:.0f} min\n")
 EOF
 )}

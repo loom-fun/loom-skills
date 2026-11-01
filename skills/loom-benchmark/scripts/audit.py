@@ -120,7 +120,8 @@ documented = failing == ["consistency"] and note   # a near-tie with its cause i
 check("gates: full run PASS", gj is not None and (gj.get("verdict") == "PASS" or documented) and gj.get("level", "full") == "full",
       f"gates.json: {gj and {k: gj.get(k) for k in ('verdict', 'level')}}: run finalize.sh (LEVEL=full gates) on the final build")
 kept = [r for r in targets if r.get("kept", True) and r.get("commit", "-") != "-"]
-if kept and c and c.get("commit", "-") != "-":
+if kept and c and c.get("commit", "-") != "-" and not (gj and gj.get("pkg_hash") and gj.get("level") == "full"):
+    # (gates.json from a LEVEL=full run carries the package hash it ran on: that, not git HEAD, names the build)
     check("gates: ran on the final build", c["commit"] == kept[-1]["commit"],
           f"compare at {c['commit']}, last kept measurement at {kept[-1]['commit']}")
 

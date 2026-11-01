@@ -7,7 +7,7 @@ skills in October 2026. Kernels: golden PASS (max gap 0.35), consistency, needle
 | File | Adds |
 |---|---|
 | `gen_llm.py`, `gen_flash2.py`, `inspect_gguf.py`, `build.py`, `make_kernel_tests.py` | `norm` (interleaved) RoPE, weightless embedding norm, NoPE on global layers (i % 4 == 3) and SWA elsewhere, logit softcap in the sampling logits, mixed-format matvec tests |
-| `chat_probe.py`, `control.loom` (the ATEM section is the current one), `atem/atem_rodata.py` | the ATEM channel format (`<|start|>assistant to=self<|message|>...` reasoning, `to=user` answers, tool headers `to=functions.NAME`), its tool-call parsing in `output_next` (a zero-length span must not change state), and `simulate()` verified against the Jinja template. See also `../examples/atem_*` |
+| `chat_probe.py`, `atem/atem.loom` (= the ATEM section of `control.loom`; `build.py` splices it in), `atem/atem_rodata.py`, `build.py` (the starter's, plus the ATEM hunk) | the ATEM channel format (`<|start|>assistant to=self<|message|>...` reasoning, `to=user` answers, tool headers `to=functions.NAME`), its tool-call parsing in `output_next` (a zero-length span must not change state), and `simulate()` verified against the Jinja template. See also `../examples/atem_*` |
 | `cfg.json` | the reviewed config without the tensor table |
 
 **Agent gate:** passes (rendering, reuse and calls 7/7) with the ATEM section of `control.loom` and this

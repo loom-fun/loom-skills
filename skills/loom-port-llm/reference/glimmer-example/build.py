@@ -64,6 +64,10 @@ pool = max(pool, context)
 # loom-serve rejects a pool its paged cache geometry can't represent ("source cache geometry cannot
 # represent this pool", e.g. 43352): keep it a multiple of 1024 positions.
 pool = max(pool // 1024 * 1024, -(-context // 1024) * 1024)
+if pool < 1.5 * context:
+    print(f"WARNING: KV pool {pool} < 1.5x context {context}: a full-context request can fail with 503 while other rows "
+          f"retain history (the full-context gate did on flint). Raise --memory-gib (pool 2x context needs "
+          f"~{(weights_bytes + 2 * context * kv_per_position) / 2**30 + 6:.0f} GiB) or lower --context.")
 a.context, a.pool = context, pool
 model_id = a.model_id or re.sub(r"[^A-Za-z0-9._/-]+", "-", cfg.get("name", "llm")).strip("-")
 pkg = os.path.abspath(a.package)
@@ -99,7 +103,7 @@ subs = {
     "@@HEX_TOOL_LINE_PREFIX@@": hx(chat.get("tool_line_prefix", "\n")),
     "@@HEX_TOOL_SEPARATOR@@": hx(chat.get("tool_separator", "")),
     "@@HEX_CALLS_OPEN@@": hx(chat.get("calls_open", "")), "@@HEX_CALLS_CLOSE@@": hx(chat.get("calls_close", "")),
-    "@@HEX_CALL_END@@": hx(chat.get("call_end", "")),
+    "@@HEX_CALL_END@@": hx(chat.get("call_end", "")), "@@HEX_STOP_AFTER_CALLS@@": hx(chat.get("stop_after_calls", "")), "@@HEX_STOP_AFTER_ANSWER@@": hx(chat.get("stop_after_answer", "")),
     "@@HEX_TOOLS_SYSTEM_SEPARATOR@@": hx(chat["tools_system_separator"]),
     "@@HEX_TOOL_TURN_PREFIX@@": hx(chat["tool_turn_prefix"]), "@@HEX_TOOL_ITEM_PREFIX@@": hx(chat["tool_item_prefix"]),
     "@@HEX_TOOL_ITEM_SUFFIX@@": hx(chat["tool_item_suffix"]), "@@HEX_TOOL_TURN_SUFFIX@@": hx(chat["tool_turn_suffix"]),

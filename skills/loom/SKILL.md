@@ -62,13 +62,15 @@ Typical cold-start order: `loom-setup` → `loom-port-llm` (`port.sh`) → `loom
 (`qualify.sh`: gates, baselines, roofline targets) → `loom-optimize` → `finalize.sh`.
 
 **Time budget.** With no target and no time given, an end-to-end job ("get X working,
-optimize it, report") has a **60-minute budget for the whole job**, from the first
-command to the published report. The optimization phase gets what is left after the
-port and the qualification, minus a reserve for the final gates and the report;
-`qualify.sh` computes it from the clock that `port.sh` starts (`WORKDIR/.e2e_start`).
-A stated time ("spend 3 hours") or target replaces the default (`BUDGET_H=` /
-`E2E_BUDGET_MIN=`, see `loom-roofline` section 0). "Optimize this model" on an existing
-port, with no time given, gets **30 min** of optimization.
+optimize it, report") gets **this model's roofline budget for the whole job**, from the first
+command to the published report: `loom-roofline/e2e_budget.py` turns the model's decode/prefill
+ceilings into the time the pipeline's measurements and gates take on both engines, plus a fixed
+allowance for the agent's own work and optimization (Qwen3.5-0.8B ≈ 46 min, LFM2.5-24B-A2B ≈ 53,
+flint ≈ 75, a 30B dense model ≈ 106). The optimization phase gets what is left after the port and
+the qualification, minus the final gates and report; `qualify.sh` computes all of it from the clock
+that `port.sh` starts (`WORKDIR/.e2e_start`). A stated time ("spend 3 hours") or target replaces
+the default (`BUDGET_H=` / `E2E_BUDGET_MIN=`, see `loom-roofline` section 0). "Optimize this model"
+on an existing port, with no time given, gets **30 min** of optimization.
 
 Announce the targets and the budget without asking, then iterate in
 `loom-optimize`. After each measurement, `progress.py` checks how fast the gap to

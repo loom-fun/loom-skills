@@ -10,6 +10,8 @@ tool-response framing, how reasoning appears in history, and content trimming.
 before anything runs on the GPU.
 
 usage: python chat_probe.py TEMPLATE_SOURCE [OUT.json]
+       python chat_probe.py TEMPLATE_SOURCE --verify cfg.json   (a hand-filled chat block: verify only;
+                         with a kit's own chat_probe.py for formats this one can't simulate)
   TEMPLATE_SOURCE: a .gguf (tokenizer.chat_template), a tokenizer_config.json, or a .jinja file
   (inspect_gguf.py calls derive() + verify() for you)
 """
@@ -429,6 +431,15 @@ def main():
         f, tokens = r.fields.get("tokenizer.ggml.bos_token_id"), r.fields.get("tokenizer.ggml.tokens")
         if f is not None and tokens is not None:
             bos = tokens.contents()[f.contents()]
+    if len(sys.argv) > 3 and sys.argv[2] == "--verify":
+        # A hand-filled block (a format derive() can't model): verify cfg.json's chat block only.
+        chat = json.load(open(sys.argv[3]))
+        chat = chat.get("chat", chat)
+        bad = 0
+        for name, ok, detail in verify(text, chat, bos):
+            bad += ok is False
+            print(("OK  " if ok else "SKIP" if ok is None else "FAIL"), name, "-", detail)
+        sys.exit(1 if bad else 0)
     chat, notes = derive(text, bos)
     for n in notes:
         print("note:", n)

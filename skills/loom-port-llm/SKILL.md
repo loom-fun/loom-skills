@@ -222,7 +222,7 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   `complete_text` publishes them (flint: every reused turn otherwise carried a duplicated token).
   Templates the probe can't model (e.g. role tags with no closing suffix, tools
   inside the first user message, channel formats): fill the block by hand, keep
-  `simulate()` in step, and rerun `chat_probe.py` until every line is OK. If the
+  `simulate()` in step, and run `chat_probe.py MODEL.gguf --verify cfg.json` (your kit's copy) until every line is OK. If the
   control program must parse structural tokens out of the generated text (e.g.
   channel tags), list them in `chat.nonspecial_tokens`: loom-serve strips special
   tokens from decoded text.

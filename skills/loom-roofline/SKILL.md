@@ -19,7 +19,7 @@ counted, but report how long they took.
 
 | User said | Goal | Budget (`--budget-h`) |
 |---|---|---|
-| Nothing, end-to-end job ("get X working, optimize, report") | The roofline TARGET per headline metric, then stretch | **60 min for the whole job**. `qualify.sh` passes what is left after the port and qualification, minus the final gates + report (at least 10 min) |
+| Nothing, end-to-end job ("get X working, optimize, report") | The roofline TARGET per headline metric, then stretch | **The model's roofline budget for the whole job** (`e2e_budget.py MODEL.gguf`: fixed agent work + optimization + the measured workload at this model's decode/prefill speed). `qualify.sh` passes what is left after the port and qualification, minus the final gates + report (at least 10 min) |
 | Nothing, existing port ("optimize this model") | TARGET, then stretch | **30 min** |
 | A time only ("spend 3 hours", "quick pass", "overnight") | TARGET, then stretch | As stated. "Quick" ≈ 0.5 h, "thorough" ≈ 4 h, "overnight" ≈ 8 h, "don't work all night" caps it |
 | A target only ("+50 % decode", "70 tok/s") | The user's target (`--goal-tps`) | No fixed cap. The rate controller still stops when no path can reach the target. If the projected time is more than ~2 h, say so with the numbers as soon as it is known |

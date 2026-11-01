@@ -1,7 +1,8 @@
 # Trial results: the baselines to beat
 
 One row per end-to-end trial (fresh agent, `trial_prompt.md`, Strix Halo gfx1151). Append new rows;
-never edit old ones. Wall clock is install -> done. "Contended" = another trial shared the GPU
+never edit old ones. Wall clock is install -> done; the target is the model's roofline budget
+(`loom-roofline/e2e_budget.py`: Qwen3.5-0.8B 46, LFM2.5 53, Bolt-E4B 53, flint 75, Muse-Glimmer-30B 106 min). "Contended" = another trial shared the GPU
 (perf numbers then only valid from `scripts/eval.sh` on a quiet GPU, see the table at the end).
 
 ## End-to-end trials
@@ -19,6 +20,7 @@ never edit old ones. Wall clock is install -> done. "Contended" = another trial 
 | 2026-11-01 | LFM2.5-24B-A2B | faster-e2e v8 | 32 | 2 | full: all PASS but consistency (0.085 near-tie, deterministic alone; passes under the aligned rule since) | 0.63 | 6/6 | quiet GPU; beat llama.cpp on every metric; reference from the same model |
 | 2026-11-01 | flint | faster-e2e v9 | 50.6 | 8 | full FAIL: compare 1 prompt at 1.03 (llama.cpp self 1.05), agent reuse turns 1.22/2.74 | 1.03 | 6/6 | quiet GPU; fresh prompts match llama.cpp: decode-vs-prefill numerics via MoE routing most likely (flint-example README) |
 | 2026-11-01 | Muse-Glimmer-30B | faster-e2e v10 | 76 | 4 | **full PASS** (agent 7/7) | 0.41 | 7/7 | quiet GPU; ~25 min were skill bugs fixed since (stale reference signature, sampling crash, raw ambiguity) |
+| 2026-11-01 | Muse-Glimmer-30B | faster-e2e v11 | 70.6 | 2 | **full PASS, AUDIT PASS** | 0.41 | 7/7 | quiet GPU; within its 106-min budget |
 
 ## Lessons with numbers (why the skill looks the way it does)
 - The default "1 h of optimization" made every end-to-end job > 1 h by construction: the budget is now

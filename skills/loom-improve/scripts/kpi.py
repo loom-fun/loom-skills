@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """KPIs of one end-to-end trial of the loom skills, and the comparison of two trials.
 
-usage: kpi.py summarize TRIAL_DIR [--label NAME] [--skill-rev REV] [--log kpis.jsonl]
+usage (tools venv python, for gguf): kpi.py summarize TRIAL_DIR [--label NAME] [--skill-rev REV] [--log kpis.jsonl]
        kpi.py compare BASE.json NEW.json        (or two labels from --log: kpi.py compare --log kpis.jsonl BASE NEW)
 
 TRIAL_DIR is what the trial prompt (trial_prompt.md) creates: phases.log (`<epoch> <phase>` lines and
 `# friction` comments) and work/ with the bench/ directory that qualify.sh / finalize.sh fill.
 summarize prints one JSON object (and appends it to --log):
-  wall_min        install -> done, minutes (the headline KPI; budget 60)
+  wall_min        install -> done, minutes (the headline KPI)
+  budget_min      this model's roofline budget (loom-roofline/e2e_budget.py); within_budget = the KPI target
   phase_min       minutes per phase (port, port_*, qualify, optimize, finalize, report, ...)
   manual_min      time in hand-work phases (port_* other than port itself, *_debug, *_chat)
   friction        number of `# ...` friction notes the agent logged (each one is a skill gap)
@@ -72,6 +73,23 @@ def summarize(trial, label, rev):
     out.update(phases(trial))
     b = bench_dir(trial)
     out["bench"] = b
+    # The wall-clock target is this model's roofline budget (loom-roofline/e2e_budget.py), not a constant.
+    try:
+        pkgs = [os.path.dirname(p) for p in glob.glob(os.path.join(trial, "work", "**", "llm_config.json"), recursive=True)
+                if os.path.exists(os.path.join(os.path.dirname(p), "model.json"))]
+        if pkgs:
+            pkg = max(pkgs, key=os.path.getmtime)
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "loom-roofline"))
+            import e2e_budget as E
+            cfg = json.load(open(os.path.join(pkg, "llm_config.json")))
+            card = json.load(open(os.path.join(pkg, "model.json")))
+            ctx = next(iter(card["presets"].values()))["execution"]["context_capacity"]
+            gguf = os.path.realpath(os.path.join(pkg, "parameter", os.listdir(os.path.join(pkg, "parameter"))[0]))
+            dec, pre = E.speeds(gguf, cfg, [ctx])
+            out["budget_min"] = round(E.FIXED_MIN + E.OPT_MIN + sum(E.workload(dec, pre, ctx).values()) / 60)
+            out["within_budget"] = out["wall_min"] is not None and out["wall_min"] <= out["budget_min"]
+    except Exception as e:  # the budget is informative; never fail the summary on it
+        out["budget_error"] = str(e)[:200]
     if not b:
         return out
     g = load(os.path.join(b, "gates.json"), {})
@@ -110,6 +128,8 @@ def compare(a, b, noise=0.10, judge_perf=False):
         reg += verdict == "REGRESSION"
         rows.append((k, va, vb, verdict))
     wa, wb = a.get("wall_min"), b.get("wall_min")
+    if b.get("budget_min"):
+        row("wall vs model budget", f"{wb}/{b['budget_min']}", "", "within" if b.get("within_budget") else "OVER BUDGET")
     if wa and wb:
         row("wall_min", wa, wb, "REGRESSION" if wb > wa * 1.10 else "improved" if wb < wa * 0.95 else "same")
     row("manual_min", a.get("manual_min"), b.get("manual_min"), "info")
