@@ -81,9 +81,12 @@ for m, rs in final.items():   # final build = last kept label; median of its run
 for m, R in metrics.items():
     if m in best:
         e = best[m] / R["ceiling"]
+        # 216 GB/s is a conservative measured bandwidth: dense ports reached 221-237 GB/s. Above 0.97 is a
+        # WARN (check the byte count first); above 1.10 the roofline certainly undercounts.
         check(f"plausible: Loom {m}", e <= 0.97,
-              f"Loom at {e:.2f} of the ceiling: the roofline undercounts (sliding window, KV sharing, "
-              "hybrid layers, expert count?)")
+              f"Loom at {e:.2f} of the ceiling: check the roofline's byte count (sliding window, KV sharing, "
+              "hybrid layers, expert count); a dense model at 1.0-1.1 means the bandwidth constant is conservative",
+              level="WARN" if e <= 1.10 else "FAIL")
     be = R.get("baseline_eff")
     if be is not None:
         floor = 0.10 if m.startswith("prefill") else 0.30

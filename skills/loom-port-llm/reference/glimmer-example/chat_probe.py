@@ -556,7 +556,7 @@ def atem_render_calls(tool_calls):
                    + atem_call(c["function"]["name"], c["function"]["arguments"]) for j, c in enumerate(tool_calls))
 
 
-def raw_from_chat(chat, message, finished, thinking=None):
+def raw_from_chat(chat, message, finished, thinking=None, prompt=None):
     """The model's raw output after the generation prompt "<|start|>assistant", rebuilt from the
     parsed channels. Ambiguity: the model closes reasoning with "<|eom|>" before a tool call but
     starts the to=user answer header directly (no <|eom|>), as greedy llama.cpp output shows."""
@@ -573,6 +573,14 @@ def raw_from_chat(chat, message, finished, thinking=None):
     if content or finished:
         text += "<|start|>assistant to=user<|message|>" + content
     return text
+
+
+def raw_alternatives(chat, message, finished, thinking=None, prompt=None):
+    """Every raw text consistent with the parsed channels: the model may or may not write <|eom|>
+    between its reasoning and the to=user answer header (both occur in greedy llama.cpp output)."""
+    raw = raw_from_chat(chat, message, finished, thinking, prompt)
+    alt = raw.replace("<|start|>assistant to=user<|message|>", "<|eom|><|start|>assistant to=user<|message|>", 1)
+    return [raw] + ([alt] if alt != raw else [])
 
 
 _generic_simulate, _generic_render_calls, _generic_verify = simulate, render_calls, verify

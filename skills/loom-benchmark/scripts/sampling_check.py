@@ -65,7 +65,15 @@ def main():
     if a.llama:
         first = collections.Counter()
         for s in range(a.draws):
-            first[P.ids(ask(max_tokens=1, temperature=1.0, top_p=1.0, top_k=0, seed=1000 + s))[0]] += 1
+            t1 = P.ids(ask(max_tokens=1, temperature=1.0, top_p=1.0, top_k=0, seed=1000 + s))
+            if not t1:   # the first token is structural (a channel header stripped from the text)
+                if s >= 4:
+                    break
+                continue
+            first[t1[0]] += 1
+        if not first:
+            print("SKIP first-token distribution: the first generated token is a structural channel header (not in the text)")
+            sys.exit(1 if fails else 0)
         ids = P.ids(P.render_messages(msgs, None, thinking))
         g = llama_completion(a.llama, {"prompt": ids, "n_predict": 1, "temperature": 0, "n_probs": 20,
                                        "cache_prompt": False}, P)

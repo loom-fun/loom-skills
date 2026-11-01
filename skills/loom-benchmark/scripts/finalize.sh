@@ -33,7 +33,13 @@ if [ -n "${LLAMACPP_DIR:-}" ] && [ "${SKIP_LLAMA_PERF:-0}" != 1 ]; then
 fi
 L=http://127.0.0.1:$lport
 llama_perf() { "$T" "$S/perf.py" "$L" llama-final --kind llama --log perf_log.jsonl "$@" | grep "^{" | tail -1; }
-for round in 1 2; do
+# Two interleaved short rounds, one for slow models (< 20 tok/s decode: a round costs minutes there).
+rounds=$("$T" -c "
+import json
+d=[json.loads(l).get('decode_tps') for l in open('perf_log.jsonl') if json.loads(l).get('kind')=='loom'] if __import__('os').path.exists('perf_log.jsonl') else []
+d=[x for x in d if x]
+print(1 if d and d[-1] < 20 else 2)" 2>/dev/null || echo 2)
+for round in $(seq "$rounds"); do
   [ $started = 1 ] && llama_perf
   loom_perf
 done

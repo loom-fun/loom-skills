@@ -71,7 +71,8 @@ The expensive path. Keep it short:
    grouped WMMA prefill on top of the starter; a flint port added sinks, NoPE and shared experts on it
    in ~12 min); `../loom-optimize/reference/flint-moe-example/` is an older hand-written MoE (q4_1)
    for ideas, not a base; `reference/gemma4-example/` is a whole Gemma 4 port (kernels and
-   chat format); `reference/lfm2moe-example/` has LFM2 short-conv layers and a top-k MoE with grouped WMMA prefill; the starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
+   chat format; reference files are snapshots from older starters: overlay only the files the
+   example's README lists, merging shared ones by diff against your starter copy); `reference/lfm2moe-example/` has LFM2 short-conv layers and a top-k MoE with grouped WMMA prefill; the starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
 4. **Check numerically, node by node.** A short numpy forward of layers 0–1 on the trace's tokens
    (gguf `dequantize` for weights) compared with the trace's sums and edge values names the first
    misunderstood op in minutes. Then the Loom kernels against numpy (kernel tests), then the gates.

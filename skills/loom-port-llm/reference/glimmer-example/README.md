@@ -10,14 +10,10 @@ skills in October 2026. Kernels: golden PASS (max gap 0.35), consistency, needle
 | `chat_probe.py`, `control.loom` (the ATEM section is the current one), `atem/atem_rodata.py` | the ATEM channel format (`<|start|>assistant to=self<|message|>...` reasoning, `to=user` answers, tool headers `to=functions.NAME`), its tool-call parsing in `output_next` (a zero-length span must not change state), and `simulate()` verified against the Jinja template. See also `../examples/atem_*` |
 | `cfg.json` | the reviewed config without the tensor table |
 
-**Open issue to fix first (root cause not confirmed):** after a tool call `reuse_ok` fails with
-`cached_tokens` 0. The model often omits the `<|eom|>` the template renders after reasoning, so the
-re-rendered history differs from the device state at that byte; that alone would still allow reuse
-up to the difference, so 0 points at the turn not being published as reusable (`complete_text`'s
-`reusable` = `final_state >= 2`: check which state a tool-call turn ends in) or at the history
-starting to differ earlier. Don't "fix" it by inserting `<|eom|>` into the published text: the
-published history must match the tokens in the KV cache. Diff `input_tokens` of the next turn against
-`chat_probe.simulate()` and print `final_state` for a tool-call turn first.
+**Agent gate:** passes (rendering, reuse and calls 7/7) with the ATEM section of `control.loom` and this
+`chat_probe.py` (a second fresh-agent run, Nov 2026, 76 min end to end, all full gates PASS). The model
+sometimes writes `<|eom|>` before the `to=user` header: `chat_probe.raw_alternatives()` lists both raw
+texts and `agent_golden.py` compares the closer one.
 The sampling gate's seed-variety check failed only because this prompt is
 near-deterministic for the model (now skipped by `sampling_check.py`).
 

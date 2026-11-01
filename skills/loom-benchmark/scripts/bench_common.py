@@ -81,7 +81,10 @@ class Package:
         reasoning channel, e.g. Gemma 4 after tool results, needs it)."""
         c = self.chat
         if hasattr(chat_probe, "raw_from_chat"):
-            return chat_probe.raw_from_chat(c, message, finished, thinking, prompt)
+            try:
+                return chat_probe.raw_from_chat(c, message, finished, thinking, prompt)
+            except TypeError:   # a kit written before the prompt argument existed
+                return chat_probe.raw_from_chat(c, message, finished, thinking)
         on = c.get("thinking_default", c.get("starts_in_reasoning")) if thinking is None else thinking
         reasoning = message.get("reasoning_content")
         content = message.get("content") or ""

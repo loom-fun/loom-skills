@@ -103,12 +103,26 @@ def main():
                     "cache_prompt": False}, P)
                 gids = [x["id"] for x in g["completion_probabilities"]]
                 k = next((i for i, (x, y) in enumerate(zip(loom_ids, gids)) if x != y), None)
+                import chat_probe as _cp
+                if k is not None and hasattr(_cp, "raw_alternatives"):
+                    # A kit whose channel format is ambiguous in the parsed message (Glimmer: an optional
+                    # <|eom|> before the answer header) lists every raw text consistent with it: use the
+                    # one that agrees longest with the golden.
+                    for alt in _cp.raw_alternatives(P.chat, m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)[1:]:
+                        aids = P.ids(alt)
+                        ka = next((i for i, (x, y) in enumerate(zip(aids, gids)) if x != y), None)
+                        if ka is None or ka > k:
+                            loom_ids, k = aids, ka
                 rec["golden_match"] = k is None
                 if k is not None:
                     top = {t["id"]: t["logprob"] for t in g["completion_probabilities"][k]["top_logprobs"]}
                     gap = top[gids[k]] - top[loom_ids[k]] if loom_ids[k] in top else None
                     # Same near-tie rule as compare.py (gap <= 1 nat, Loom's token in llama.cpp's top-5).
                     rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=gap is not None and gap <= 1.0)
+                    if not rec["near_tie"]:
+                        print("     at the divergence: loom", repr(P.tok.decode(loom_ids[max(0, k - 8):k + 4], skip_special_tokens=False)),
+                              "| llama", repr(P.tok.decode(gids[max(0, k - 8):k + 4], skip_special_tokens=False)),
+                              "| top", [(P.tok.id_to_token(t), round(v, 2)) for t, v in top.items()], flush=True)
             golden_ok = rec.get("golden_match", True) or rec.get("near_tie", False)
             ok = rec["render_ok"] and rec["reuse_ok"] and rec["calls_ok"] and golden_ok
             failures += not ok
