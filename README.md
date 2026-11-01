@@ -127,6 +127,7 @@ name:
 | `/loom:loom-roofline` | `/loom-roofline` | Roofline for decode/prefill/c4 from the GGUF, calibrated against achieved Loom efficiency; picks per-metric targets vs llama.cpp and a time budget; a rate-of-approach controller decides continue / pivot / stop |
 | `/loom:loom-optimize` | `/loom-optimize` | The measure / ablate / change / verify loop, a kernel A/B helper, a catalog of optimizations that worked (and that didn't), and the sources of a hand-tuned MoE port |
 | `/loom:loom-benchmark` | `/loom-benchmark` | Token-by-token golden comparison against llama.cpp ROCm, a multi-turn tool-calling gate, a full-context needle gate, a batching-consistency check, throughput workloads, reporting rules |
+| `/loom:loom-improve` | `/loom-improve` | Improve the skills themselves: the KPIs (wall clock, agentic correctness vs llama.cpp, speed), fresh-agent trials on a reference model suite, a stall watchdog, a KPI regression check and a fixed quiet-GPU evaluator. Prompt: "your goal is to improve the loom skill at X" |
 
 A starter-covered model goes from prompt to report in about an hour (port ≈1 min, qualify
 ≈10 min, optimization ≈30 min, finalize ≈10–15 min). An architecture the starter doesn't
@@ -161,7 +162,7 @@ optimization budget shrinks to fit.
 
 ```
 .claude-plugin/{plugin.json,marketplace.json}   # plugin + single-plugin marketplace
-skills/<skill>/SKILL.md                          # the six skills, with their scripts and references
+skills/<skill>/SKILL.md                          # the eight skills, with their scripts and references
 install.sh                                       # copy-install alternative
 LICENSE                                          # MIT
 THIRD_PARTY_NOTICES.md

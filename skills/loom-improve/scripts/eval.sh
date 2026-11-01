@@ -31,7 +31,8 @@ busy=$(pgrep -af "loom-serve|llama-server" | grep -v pgrep | wc -l)
 [ "$busy" -gt 0 ] && echo "WARNING: $busy other GPU servers are running: perf numbers will not be comparable"
 VENV=$root/.venv "$SV/serve.sh" eval "$port" amdgpu "$mem" "$pkg/model.json" || exit 1
 trap '"$SV/stop.sh" eval >/dev/null 2>&1' EXIT
-LLAMACPP_DIR=${LLAMACPP_DIR:-$("$T" -c "import json,glob;import sys" 2>/dev/null)}
+# Same reference for every evaluation: the given build, else the latest lemonade release.
+LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" | tail -1)}; export LLAMACPP_DIR
 echo "== gates (LEVEL=full, FORCE=1)"
 FORCE=1 LEVEL=full LOOM_ROOT=$root "$B/gates.sh" "$pkg" "http://127.0.0.1:$port" "$gguf" "$out/gates" "$lport" > "$out/gates.out" 2>&1
 tail -1 "$out/gates.out"
