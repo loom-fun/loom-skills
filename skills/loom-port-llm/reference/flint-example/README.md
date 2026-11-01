@@ -37,3 +37,8 @@ routing flips over ~500 decoded tokens can move a later decision. Not proven: Lo
 that extends a retained prompt+completion, so "reused but prefilled" can't be forced from the API. To
 settle it, build a variant whose decode routing uses the GEMM path's f16 activations (or prefill in f32)
 and rerun `agent_golden.py`.
+
+**Resolved cause (orchestrator):** llama.cpp b1361 itself is not deterministic on this model: three
+identical temperature-0 requests gave two different greedy texts, and its own reused-vs-fresh outputs
+differed on all 6 agent turns. The agent gate compared Loom's reuse turns with a single llama.cpp draw;
+it now re-records a would-fail turn (as compare.py does) and scores the closer recording.

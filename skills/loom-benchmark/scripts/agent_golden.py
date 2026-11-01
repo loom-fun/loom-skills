@@ -117,8 +117,28 @@ def main():
                 if k is not None:
                     top = {t["id"]: t["logprob"] for t in g["completion_probabilities"][k]["top_logprobs"]}
                     gap = top[gids[k]] - top[loom_ids[k]] if loom_ids[k] in top else None
-                    # Same near-tie rule as compare.py (gap <= 1 nat, Loom's token in llama.cpp's top-5).
-                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=gap is not None and gap <= 1.0)
+                    # llama.cpp ROCm is not run-to-run deterministic on some models (flint: identical
+                    # temperature-0 requests gave different greedy text): as compare.py does, re-record a
+                    # turn that would fail and score against the recording Loom follows further.
+                    for salt in ("rec2", "rec3"):
+                        if gap is not None and gap <= 1.0:
+                            break
+                        g2 = llama_completion(a.llama, {
+                            "prompt": ids, "n_predict": max(1, u["completion_tokens"]), "temperature": 0, "n_probs": 5,
+                            "cache_prompt": False}, P, salt)
+                        cp2 = g2["completion_probabilities"]; gids2 = [x["id"] for x in cp2]
+                        k2 = next((i for i, (x, y) in enumerate(zip(loom_ids, gids2)) if x != y), None)
+                        rec.setdefault("rerecorded", []).append(k2)
+                        if k2 is None:
+                            k, gap, gids = None, None, gids2
+                            break
+                        if k2 > k:
+                            top2 = {t["id"]: t["logprob"] for t in cp2[k2]["top_logprobs"]}
+                            k, gids, top = k2, gids2, top2
+                            gap = top[gids[k]] - top[loom_ids[k]] if loom_ids[k] in top else None
+                    if k is None:
+                        rec["golden_match"] = True
+                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=k is None or (gap is not None and gap <= 1.0))
                     if not rec["near_tie"]:
                         print("     at the divergence: loom", repr(P.tok.decode(loom_ids[max(0, k - 8):k + 4], skip_special_tokens=False)),
                               "| llama", repr(P.tok.decode(gids[max(0, k - 8):k + 4], skip_special_tokens=False)),
