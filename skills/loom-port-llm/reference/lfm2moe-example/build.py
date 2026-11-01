@@ -50,7 +50,7 @@ weights_bytes = os.path.getsize(os.path.abspath(cfg["gguf"]))
 sys.path.insert(0, HERE)
 from gen_gdn import gdn_geometry  # noqa: E402
 recurrent_bytes = gdn_geometry(cfg)["slot_bytes"] if cfg.get("recurrent_layers") else 0
-if cfg.get("shortconv_layers"):
+if cfg.get("shortconv_layers"):  # LFM2 short-conv conv history lives in the recurrent slots too
     from gen_sconv import sconv_geometry  # noqa: E402
     recurrent_bytes += sconv_geometry(cfg)["slot_bytes"]
 budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
@@ -67,6 +67,10 @@ pool = max(pool, context)
 # loom-serve rejects a pool its paged cache geometry can't represent ("source cache geometry cannot
 # represent this pool", e.g. 43352): keep it a multiple of 1024 positions.
 pool = max(pool // 1024 * 1024, -(-context // 1024) * 1024)
+if pool < 1.5 * context:
+    print(f"WARNING: KV pool {pool} < 1.5x context {context}: a full-context request can fail with 503 while other rows "
+          f"retain history (the full-context gate did on flint). Raise --memory-gib (pool 2x context needs "
+          f"~{(weights_bytes + 2 * context * kv_per_position) / 2**30 + 6:.0f} GiB) or lower --context.")
 a.context, a.pool = context, pool
 model_id = a.model_id or re.sub(r"[^A-Za-z0-9._/-]+", "-", cfg.get("name", "llm")).strip("-")
 pkg = os.path.abspath(a.package)

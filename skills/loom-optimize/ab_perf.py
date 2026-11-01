@@ -34,7 +34,7 @@ ap.add_argument("--metrics", default="decode,prefill_1k,prefill_2k")
 ap.add_argument("--log", default="ab_log.jsonl")
 ap.add_argument("--label", default="")
 a = ap.parse_args()
-DOCS = {"1k": 1000, "2k": 2000, "8k": 8000, "16k": 16000, "32k": 32000}
+DOCS = {"1k": 1000, "2k": 2000, "8k": 8000, "16k": 16000, "32k": 32000}   # the benchmark documents that exist
 
 
 def measure(model, metric):
@@ -59,6 +59,9 @@ def measure(model, metric):
 
 
 metrics = a.metrics.split(",")
+bad = [m for m in metrics if m not in ("decode", "c4") and m.split("_")[-1] not in DOCS]
+if bad:
+    raise SystemExit(f"unknown metric(s) {bad}: sizes are {sorted(DOCS, key=DOCS.get)} (decode, decode_2k, prefill_1k, ..., c4)")
 for m in (a.a, a.b):  # warm-up: lazy weight load
     stream(a.url, m, [{"role": "user", "content": "Say hi."}], 8)
 res = {m: {"A": [], "B": []} for m in metrics}

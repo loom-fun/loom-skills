@@ -17,19 +17,21 @@ def row_bytes(fmt, k):
 def route(H, E, KU, gating, norm, bias):
     HG = H // 32
     assert E % 8 == 0 and E <= 256 and KU <= 8
-    EPW = E // 8
+    import os as _os0
+    NWV = int(_os0.environ.get("MOE_ROUTE_WAVES", "32"))
+    EPW = E // NWV
     L = [f"""
 // Router: wave w scores experts w*{EPW}..; lane 0 then picks the top {KU} of sigmoid(logit) + bias.
 kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   %c1 = index.constant 1 : index
-  %c256 = index.constant 256 : index
+  %c256 = index.constant {NWV * 32} : index
   kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
 }} launch(%tokens_arg: index, %x: buffer, %w: buffer, %b: buffer, %ids: buffer, %wts: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %token_id = kernel.workgroup.id<x> : index
   %token = index.assume %token_id [lt(%token_id, %tokens)] : index
   %wave_id = kernel.subgroup.id : index
-  %wave = index.assume %wave_id [range(%wave_id, 0, 7)] : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, {NWV - 1})] : index
   %lane_id = kernel.subgroup.lane.id : index
   %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
   %zero = index.constant 0 : offset
@@ -114,6 +116,74 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
         L.append(f"""    view.store %id{k}, %ids_view[%token, {k}] : i32, view<[%tokens]x{KU}xi32>
     view.store %wn{k}, %wts_view[%token, {k}] : f32, view<[%tokens]x{KU}xf32>""")
     L.append("""  }
+  kernel.return
+}
+""")
+    import os as _os
+    if _os.environ.get("MOE_ROUTE_PAR", "1") not in ("", "0"):
+        first = L[0]
+        cut = first.index("  %t0 = kernel.workitem.id<x> : index")
+        return first[:cut] + _route_par_select(E, KU, gating, norm, bias)
+    return "\n".join(L)
+
+
+
+
+def _route_par_select(E, KU, gating, norm, bias):
+    """Wave 0 selects the top-KU experts in parallel (lane l holds experts l and l+32): per pick, a max
+    reduce over the scores and a min reduce over the indices of the lanes at the max (lowest index
+    wins ties, as the serial loop's strict '>' does). Same arithmetic as the serial loop per expert."""
+    assert E == 64
+    L = ["""  %is_w0 = index.cmp eq, %wave, %c0 : index
+  scf.if %is_w0 {
+    %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]x""" + str(KU) + """xi32>
+    %wts_view = buffer.view %wts[%zero] : buffer -> view<[%tokens]x""" + str(KU) + """xf32>
+    %neg_big = scalar.constant -3.0e38 : f32
+    %big_idx = scalar.constant 1.0e9 : f32
+    %ea = index.add %lane, %c0 : index
+    %eb_raw = index.add %lane, %c32 : index
+    %ea_b = index.assume %ea [range(%ea, 0, 31)] : index
+    %eb_b = index.assume %eb_raw [range(%eb_raw, 32, 63)] : index"""]
+    for s_, e in (("a", "%ea_b"), ("b", "%eb_b")):
+        L.append(f"""    %lg_{s_} = view.load %lg_view[{e}] : view<{E}xf32> -> f32
+    %p_{s_} = {"scalar.logisticf<afn> %lg_" + s_ + " : f32" if gating == 2 else "scalar.addf %lg_" + s_ + ", %zero_f : f32"}
+    %bias_{s_} = view.load %b_view[{e}] : view<{E}xf32> -> f32
+    %sc_{s_}_0 = {"scalar.addf %p_" + s_ + ", %bias_" + s_ + " : f32" if bias else "scalar.addf %p_" + s_ + ", %zero_f : f32"}
+    %ei_{s_} = index.cast {e} : index to i32
+    %ef_{s_} = scalar.sitofp %ei_{s_} : i32 to f32""")
+    for k in range(KU):
+        L.append(f"""    %lb{k} = scalar.maxnumf %sc_a_{k}, %sc_b_{k} : f32
+    %a_ge{k} = scalar.cmpf oge, %sc_a_{k}, %sc_b_{k} : f32
+    %li{k} = scf.select %a_ge{k}, %ef_a, %ef_b : f32
+    %m{k} = kernel.subgroup.reduce<maxnumf> %lb{k} : f32
+    %at{k} = scalar.cmpf oeq, %lb{k}, %m{k} : f32
+    %cand{k} = scf.select %at{k}, %li{k}, %big_idx : f32
+    %ncand{k} = scalar.negf %cand{k} : f32
+    %nmin{k} = kernel.subgroup.reduce<maxnumf> %ncand{k} : f32
+    %idf{k} = scalar.negf %nmin{k} : f32
+    %hit_a{k} = scalar.cmpf oeq, %ef_a, %idf{k} : f32
+    %hit_b{k} = scalar.cmpf oeq, %ef_b, %idf{k} : f32
+    %pa{k} = scf.select %hit_a{k}, %p_a, %zero_f : f32
+    %pb{k} = scf.select %hit_b{k}, %p_b, %zero_f : f32
+    %pab{k} = scalar.addf %pa{k}, %pb{k} : f32
+    %pr{k} = kernel.subgroup.reduce<addf> %pab{k} : f32
+    %id{k} = scalar.fptosi %idf{k} : f32 to i32
+    %sc_a_{k + 1} = scf.select %hit_a{k}, %neg_big, %sc_a_{k} : f32
+    %sc_b_{k + 1} = scf.select %hit_b{k}, %neg_big, %sc_b_{k} : f32""")
+    s_ = "%pr0"
+    for k in range(1, KU):
+        L.append(f"    %ws{k} = scalar.addf {s_}, %pr{k} : f32"); s_ = f"%ws{k}"
+    if norm:
+        L.append(f"""    %min_sum = scalar.constant 6.103515625e-05 : f32
+    %wsum = scalar.maxnumf {s_}, %min_sum : f32""")
+    L.append("""    %lane0 = index.cmp eq, %lane, %c0 : index
+    scf.if %lane0 {""")
+    for k in range(KU):
+        L.append(f"      %wn{k} = scalar.divf %pr{k}, %wsum : f32" if norm else f"      %wn{k} = scalar.addf %pr{k}, %zero_f : f32")
+        L.append(f"""      view.store %id{k}, %ids_view[%token, {k}] : i32, view<[%tokens]x{KU}xi32>
+      view.store %wn{k}, %wts_view[%token, {k}] : f32, view<[%tokens]x{KU}xf32>""")
+    L.append("""    }
+  }
   kernel.return
 }
 """)

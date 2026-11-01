@@ -2210,7 +2210,8 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %pml_size = index.scale %t, %pml_bytes : index, offset -> offset
   %pacc = buffer.alloca<global> align(256) %pacc_size : buffer
   %pml = buffer.alloca<global> align(256) %pml_size : buffer
-  %gemm = index.cmp uge, %t, %c64 : index
+  %c_gemm_min = index.constant {int(os.environ.get("GEMM_MIN_TOKENS", "64"))} : index
+  %gemm = index.cmp uge, %t, %c_gemm_min : index
   %single = index.cmp eq, %t, %c1 : index
   %big = index.cmp uge, %t, %c128 : index
   %scale_entry = index.constant 8 : offset
@@ -2428,7 +2429,13 @@ if __name__ == "__main__":
         _spec = importlib.util.spec_from_file_location("gen_gemm_mod", os.path.join(here, "gen_gemm.py"))
         _gg = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_gg)
         for fmt, K, N, mode in sorted(USED_MOE):
-            parts.append(GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], _gg.gemm))
+            _txt = GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], _gg.gemm)
+            if os.environ.get("MOE_N_FASTEST", "1") not in ("", "0") and (mode in os.environ.get("MOE_N_FASTEST_MODES", "gu,dn").split(",")):
+                # output-column tiles fastest: consecutive workgroups share one expert row tile (A and that expert's weights in L2)
+                _a, _b = "workgroups(%row_tiles, %out_tiles, %c1)", "  %row_group_id = kernel.workgroup.id<x> : index\n  %out_group_id = kernel.workgroup.id<y> : index"
+                assert _a in _txt and _b in _txt, "grouped gemm text changed"
+                _txt = _txt.replace(_a, "workgroups(%out_tiles, %row_tiles, %c1)").replace(_b, "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
+            parts.append(_txt)
     env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
     # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
     env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
