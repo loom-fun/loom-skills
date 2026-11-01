@@ -164,6 +164,11 @@ the prompt is near-deterministic for that model, or llama.cpp disagreeing with i
 - Adding a fallback or generalization without a model that exercises it.
 - Treating a template or reference win on the same model as generalization.
 - Writing docs for imagined problems: every addition should trace to a trial note or measurement.
+- Declaring a root cause before the gate confirms it (flint: "llama.cpp nondeterminism" was written up,
+  then re-recording showed llama.cpp stable on those ids; the real cause was a sink mismatch between
+  two attention kernels). Prove it with the failing gate, then write it down.
+- Loosening a gate rule to make a model pass. Bisect first (config variants that switch one feature
+  off, comparing Loom with Loom), then fix the kernel or document the evidence.
 
 ## Files
 
