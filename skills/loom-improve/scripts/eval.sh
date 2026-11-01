@@ -8,6 +8,7 @@
 #        eval.sh OUT_DIR PKG GGUF [PORT=8460] [LLAMA_PORT=8430] [MEMORY_BYTES from the package]
 #   1. serves PKG alone on PORT
 #   2. LEVEL=full gates (FORCE=1: nothing reused from earlier runs) -> OUT_DIR/gates/gates.json
+#      (GATES=0: perf only, when the trial's own full gates are trusted)
 #   3. perf: llama.cpp and Loom interleaved, 3 rounds of the short set + 1 long set each
 #      (perf.py --no-campaign) -> OUT_DIR/perf.jsonl, medians in OUT_DIR/eval.json
 set -u
@@ -33,9 +34,11 @@ VENV=$root/.venv "$SV/serve.sh" eval "$port" amdgpu "$mem" "$pkg/model.json" || 
 trap '"$SV/stop.sh" eval >/dev/null 2>&1' EXIT
 # Same reference for every evaluation: the given build, else the latest lemonade release.
 LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" | tail -1)}; export LLAMACPP_DIR
-echo "== gates (LEVEL=full, FORCE=1)"
-FORCE=1 LEVEL=full LOOM_ROOT=$root "$B/gates.sh" "$pkg" "http://127.0.0.1:$port" "$gguf" "$out/gates" "$lport" > "$out/gates.out" 2>&1
-tail -1 "$out/gates.out"
+if [ "${GATES:-1}" = 1 ]; then
+  echo "== gates (LEVEL=full, FORCE=1)"
+  FORCE=1 LEVEL=full LOOM_ROOT=$root "$B/gates.sh" "$pkg" "http://127.0.0.1:$port" "$gguf" "$out/gates" "$lport" > "$out/gates.out" 2>&1
+  tail -1 "$out/gates.out"
+fi
 echo "== perf (interleaved)"
 cd "$out"
 started=0
@@ -59,7 +62,8 @@ for l in open("perf.jsonl"):
         n = min((1000, 2000, 8000, 16000, 32000), key=lambda x: abs(x - p["prompt_tokens"]))
         runs.setdefault((k, f"prefill_{n}"), []).append(p["prefill_tps"])
 med = {f"{k}:{m}": round(statistics.median(v), 1) for (k, m), v in runs.items()}
-g = json.load(open("gates/gates.json"))
+import os
+g = json.load(open("gates/gates.json")) if os.path.exists("gates/gates.json") else {"verdict": "not run", "gates": {}}
 res = {"gates": g["verdict"], "per_gate": {n: x["pass"] for n, x in g["gates"].items()}, "perf_median": med,
        "margin": {m.split(":")[1]: round(med[m] / med["llama:" + m.split(":")[1]] - 1, 3)
                   for m in med if m.startswith("loom:") and "llama:" + m.split(":")[1] in med}}
