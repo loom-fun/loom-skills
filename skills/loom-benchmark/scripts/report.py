@@ -151,6 +151,9 @@ if runs:
     if start:
         lines.append(f"- end to end: {elapsed_min} min since {time.strftime('%H:%M', time.localtime(start))}")
     lines.append("")
+if os.path.exists(B("consistency_note.md")):
+    lines.append("## Consistency note\n")
+    lines.append(open(B("consistency_note.md"), encoding="utf-8").read().strip() + "\n")
 if a.notes and os.path.exists(a.notes):
     lines.append("## Notes\n")
     lines.append(open(a.notes, encoding="utf-8").read().strip() + "\n")
