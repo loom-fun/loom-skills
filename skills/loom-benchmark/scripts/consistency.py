@@ -80,5 +80,5 @@ if not all(same) and near:
     print("near-tie divergences only (mixed-epoch f16 path), deterministic alone")
 print("PASS" if all(same) or near else "FAIL")
 from campaign import log_gate, run_audit
-log_gate("consistency", "PASS" if all(same) else "FAIL", identical=same)
+log_gate("consistency", "PASS" if all(same) or near else "FAIL", identical=same, near_tie_only=bool(near and not all(same)))
 run_audit()
