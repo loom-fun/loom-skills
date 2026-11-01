@@ -1,6 +1,6 @@
 ---
 name: loom-improve
-description: Improve the loom skills themselves (port, optimize, qualify, report) without regressing them - the KPIs (end-to-end wall clock, correctness vs llama.cpp in agentic use, decode/prefill speed), how to measure them with fresh-agent trials on a reference model suite, the improve-retest loop, subagent handling, and the rules that keep changes general. Use for "improve the loom skill at X", "make the loom skill faster/more reliable", "why did the skill take so long on model Y", or any change to the skills in this repo.
+description: Improves the loom skills themselves (port, optimize, qualify, report) without regressing them - the KPIs (end-to-end wall clock, correctness vs llama.cpp in agentic use, decode/prefill speed), how to measure them with fresh-agent trials on a reference model suite, the improve-retest loop, subagent handling, and the rules that keep changes general. Use for "improve the loom skill at X", "make the loom skill faster/more reliable", "why did the skill take so long on model Y", or any change to the skills in this repo.
 ---
 
 # Improve the loom skills
