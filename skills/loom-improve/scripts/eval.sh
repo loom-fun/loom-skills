@@ -42,7 +42,7 @@ fi
 echo "== perf (interleaved)"
 cd "$out"
 started=0
-if [ -n "${LLAMACPP_DIR:-}" ]; then "$B/llamacpp_server.sh" "$gguf" "$lport" 4 34000 unified >/dev/null && started=1; fi
+if [ -n "${LLAMACPP_DIR:-}" ]; then "$B/llamacpp_server.sh" "$gguf" "$lport" 4 40960 unified >/dev/null && started=1; fi
 for r in 1 2 3; do
   [ $started = 1 ] && "$T" "$B/perf.py" "http://127.0.0.1:$lport" llama --kind llama --no-campaign --log perf.jsonl >/dev/null
   "$T" "$B/perf.py" "http://127.0.0.1:$port" loom --model "$model" --no-campaign --log perf.jsonl >/dev/null

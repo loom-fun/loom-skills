@@ -32,6 +32,21 @@ never edit old ones. Wall clock is install -> done. "Contended" = another trial 
 
 ## Quiet-GPU evaluations (`scripts/eval.sh`), the only perf numbers to compare across revisions
 
-| Date | Model | Skill rev | Gates (frozen) | decode Loom / llama | prefill 2k Loom / llama | Notes |
-|---|---|---|---|---|---|---|
-| | | | | | | (fill on the next quiet-GPU pass) |
+Measured 2026-11-01 with `GATES=0 scripts/eval.sh` (perf only; the trials' own full gates are in the
+table above), one package at a time on an idle GPU, llama.cpp b1360 (latest lemonade release), medians of
+3 interleaved rounds. tok/s, Loom / llama.cpp (margin). Each package against its own GGUF (base Bolt used
+UD-Q6_K_XL, the others the quant `pick_gguf.py` chose).
+
+| Model | Skill rev | Decode | Prefill 1k | Prefill 2k | Prefill 32k |
+|---|---|---|---|---|---|
+| Qwen3.5-0.8B | main ea305b0 | 223.9 / 181.4 (+23%) | 9111 / 7558 (+21%) | 9078 / 7425 (+22%) | 3566 / 4667 (-24%) |
+| Qwen3.5-0.8B | faster-e2e v1 | 265.1 / 180.7 (+47%) | 9071 / 7494 (+21%) | 8991 / 7446 (+21%) | 3553 / 4606 (-23%) |
+| Bolt-E4B | main ea305b0 | 40.7 / 33.9 (+20%) | 1863 / 1504 (+24%) | 1867 / 1470 (+27%) | 768 / - |
+| Bolt-E4B | faster-e2e v6 | 47.0 / 40.0 (+18%) | 1855 / 1239 (+50%) | 1932 / 1214 (+59%) | 855 / - |
+| LFM2.5-24B-A2B | faster-e2e v3 | 100.9 / 84.0 (+20%) | 1732 / 2000 (-13%) | 1882 / 2076 (-9%) | 1832 / 1647 (+11%) |
+| flint | faster-e2e v7 | 61.0 / 46.9 (+30%) | 765 / 1212 (-37%) | 1226 / 1187 (+3%) | 1108 / 871 (+27%) |
+| Muse-Glimmer-30B | faster-e2e v5 | 12.2 / 11.3 (+8%) | 388 / 335 (+16%) | 420 / 333 (+26%) | 408 / 307 (+33%) |
+
+(Bolt 32k: the 32k document is ~35k tokens with Gemma's tokenizer, over eval.sh's 34k llama.cpp context.)
+Open perf gaps worth a campaign: long prefill on Qwen3.5 (-23% at 32k: gated delta-net prefill is
+sequential), short prefill on the MoE ports (LFM2.5, flint at 1k: flint's 4096 chunk regressed 1k).
