@@ -25,7 +25,12 @@ PROGRESS = os.path.join(here, "..", "..", "loom-roofline", "progress.py")
 checks = []
 
 
+NO_REF = False   # set below: no installed llama.cpp runs this model (qualify.sh NO_LLAMACPP)
+
+
 def check(name, ok, msg, level="FAIL"):
+    if NO_REF and name.startswith(("baseline:", "gates: compare", "roofline: ran with a baseline", "gates: full run")):
+        level, msg = "WARN", msg + " [no llama.cpp build runs this model: correctness vs a reference is UNVERIFIED]"
     checks.append({"check": name, "result": "ok" if ok else level, "detail": msg})
 
 
@@ -38,6 +43,7 @@ pick = json.load(open(P("llamacpp_pick.json"))) if os.path.exists(P("llamacpp_pi
 targets, gates = jl("targets.jsonl"), jl("gates.jsonl")
 metrics = {m["metric"]: m for m in roof["metrics"]} if roof else {}
 
+NO_REF = pick is not None and not pick.get("ranked")
 # baseline
 check("baseline: picker ran", pick is not None and pick.get("ranked"),
       "llamacpp_pick.json missing: run pick_llamacpp.sh MODEL.gguf from bench/")

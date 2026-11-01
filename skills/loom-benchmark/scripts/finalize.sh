@@ -15,7 +15,8 @@ S=$(cd "$(dirname "$0")" && pwd); root=${LOOM_ROOT:-$HOME/loom}
 bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts; T=$bin/python
 export PYTHONDONTWRITEBYTECODE=1 LLAMACPP_STATE=${LLAMACPP_STATE:-$bench/llamacpp-state}
 model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
-[ -s "$bench/llamacpp_pick.json" ] && export LLAMACPP_DIR=${LLAMACPP_DIR:-$("$T" -c "import json;print(json.load(open('$bench/llamacpp_pick.json'))['ranked'][0]['dir'])")}
+[ -s "$bench/llamacpp_pick.json" ] && export LLAMACPP_DIR=${LLAMACPP_DIR:-$("$T" -c "import json;r=json.load(open('$bench/llamacpp_pick.json'))['ranked'];print(r[0]['dir'] if r else '')")}
+[ -z "${LLAMACPP_DIR:-}" ] && { export NO_LLAMA=1; echo "NO_LLAMACPP: Loom-only final gates and perf (no reference build runs this model)"; }
 cd "$bench"
 step() { echo "== $* ($(date +%T))"; }
 rc=0

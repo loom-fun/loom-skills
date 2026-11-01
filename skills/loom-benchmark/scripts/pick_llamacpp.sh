@@ -20,7 +20,10 @@ mapfile -t dirs < <(find "$root" -maxdepth 7 \( -name llama-server -o -name llam
 echo "candidates (deduplicated by binary hash): ${#dirs[@]}"
 res=()
 for d in "${dirs[@]}"; do
-  LLAMACPP_DIR=$d bash "$here/llamacpp_server.sh" "$gguf" "$port" 1 8192 >/dev/null 2>&1 || { echo "  $d: failed to start"; continue; }
+  if ! out=$(LLAMACPP_DIR=$d bash "$here/llamacpp_server.sh" "$gguf" "$port" 1 8192 2>&1); then
+    why=$({ echo "$out"; cat "${LLAMACPP_STATE:-/tmp}/llamacpp-$port.log" 2>/dev/null; } | grep -iE "unknown model architecture|error|failed|sees no ROCm" | tail -1)
+    echo "  $d: failed to start: ${why:-$(echo "$out" | tail -1)}"; continue
+  fi
   line=$("$py" - "$port" "$doc" <<'E'
 import json, sys, requests
 port, doc = sys.argv[1], open(sys.argv[2], encoding="utf-8").read()

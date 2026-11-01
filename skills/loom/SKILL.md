@@ -98,7 +98,10 @@ $K/loom-benchmark/scripts/finalize.sh $W/pkg http://127.0.0.1:8160 $G $W/bench  
 2. **Qualify.** `qualify.sh` picks the fastest llama.cpp ROCm build on the machine,
    starts ONE llama-server for everything, runs the gates (`LEVEL=quick`), measures
    the llama.cpp and Loom baselines, runs the roofline (targets + budget) and prints
-   `QUALIFY_RESULT`. A failing gate stops it: fix the port first. The roofline table
+   `QUALIFY_RESULT`. A failing gate doesn't stop the measurements, but fix it before finalize.
+   Exit 4 `NO_LLAMACPP`: no installed llama.cpp runs this architecture. Ask the user once whether to
+   download a newer lemonade build (it needs their approval); otherwise continue Loom-only, and state
+   in the report that correctness is not verified against a reference. The roofline table
    (`bench/roofline.json`) and the approach curve (`bench/targets.jsonl`) are
    required in the report; this step creates both.
 3. **Optimize** (`loom-optimize`), under the rate controller, for the budget printed
