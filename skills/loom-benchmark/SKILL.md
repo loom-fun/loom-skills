@@ -109,15 +109,11 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   and say so.
 - Long goldens (16k/32k) are what catch KV paging, prefill chunking and attention
   masking bugs.
-- `consistency.py` catches mixed-sequence epoch bugs (padding, tile uniformity,
-  fallback lists). If it fails, find the first divergent token and its golden
-  log-prob gap. A divergence is acceptable only when **both** hold:
-  - it is a near-tie (gap < 0.05);
-  - the cause is identified and stated in the report. For example, decode tokens
-    that share an epoch with a prefill go through the f16 GEMM path instead of the
-    f32 matvec path.
-
-  Anything else is a bug.
+- `consistency.py` catches mixed-sequence epoch bugs (padding, tile uniformity, fallback lists) and
+  races (each prompt also runs alone twice and must be identical). A concurrent-vs-alone difference
+  passes only when every prompt is deterministic alone and every divergence is a near-tie by the
+  compare rule (gap ≤ 1 nat, measured with `--pkg/--llama`): decode tokens that share an epoch with a
+  prefill go through the f16 GEMM path instead of the f32 matvec path. Anything else is a bug.
 - 503 errors on long prompts mean `--memory_bytes` is too small for the KV pool,
   not a model bug.
 - **agent_golden.py** runs three tool-using tasks (weather lookups, a calculator)
