@@ -50,6 +50,9 @@ weights_bytes = os.path.getsize(os.path.abspath(cfg["gguf"]))
 sys.path.insert(0, HERE)
 from gen_gdn import gdn_geometry  # noqa: E402
 recurrent_bytes = gdn_geometry(cfg)["slot_bytes"] if cfg.get("recurrent_layers") else 0
+if cfg.get("shortconv_layers"):  # LFM2 short-conv history lives in the recurrent slots too (reference/lfm2moe-example)
+    from gen_sconv import sconv_geometry  # noqa: E402
+    recurrent_bytes += sconv_geometry(cfg)["slot_bytes"]
 budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
 native = cfg.get("context_length") or 32768
 if native > KERNEL_CONTEXT and not a.context:
