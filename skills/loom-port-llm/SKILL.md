@@ -73,19 +73,23 @@ The expensive path. Keep it short:
    for ideas, not a base; `reference/gemma4-example/` is a whole Gemma 4 port (kernels and
    chat format; reference files are snapshots from older starters: overlay only the files the
    example's README lists, merging shared ones by diff against your starter copy); `reference/lfm2moe-example/` has LFM2 short-conv layers and a top-k MoE with grouped WMMA prefill; the starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
-4. **Check numerically, node by node.** A short numpy forward of layers 0–1 on the trace's tokens
+4. **Test every path that implements an op.** Attention runs in three kernels (decode split-K + combine,
+   prefill `flash2`, the listed fallback for mixed tiles); a feature added to one (sinks, softcap, a gate,
+   a window) must be added and unit-tested in all of them. A mismatch passes the goldens and shows up only
+   when a turn reuses history the model decoded itself (flint: sinks differed between flash2 and split-K).
+5. **Check numerically, node by node.** A short numpy forward of layers 0–1 on the trace's tokens
    (gguf `dequantize` for weights) compared with the trace's sums and edge values names the first
    misunderstood op in minutes. Then the Loom kernels against numpy (kernel tests), then the gates.
-5. **Resume the scripted path** once the kit builds: `FROM=build KIT=W/kit port.sh ORG/REPO W [PORT]
+6. **Resume the scripted path** once the kit builds: `FROM=build KIT=W/kit port.sh ORG/REPO W [PORT]
    [MEMORY_GIB] MODEL_ID` reruns build, serve, kernel tests and the smoke test from your `cfg.json`
    (no need to replay those stages by hand), then go on with `qualify.sh`.
-6. **Prefill can come second.** A decode-only port (prefill through the matvec path, chunk 1) is
+7. **Prefill can come second.** A decode-only port (prefill through the matvec path, chunk 1) is
    correct but slow: get the gates passing first, then add GEMM prefill as the first optimization.
-7. **The chat block** for templates `chat_probe.py` can't model (channels, role tags without a
+8. **The chat block** for templates `chat_probe.py` can't model (channels, role tags without a
    suffix, tools inside a message): see the checklist below and
    `reference/examples/atem_*` (a channel format end to end).
-8. **Work in parallel when you can spawn agents.** The kernels (steps 1–5) and the chat block
-   (step 7: `chat_probe.py` + `control.loom`, verified against the Jinja template) are
+9. **Work in parallel when you can spawn agents.** The kernels (steps 1–6) and the chat block
+   (step 8: `chat_probe.py` + `control.loom`, verified against the Jinja template) are
    independent until `build.py`. Give the chat work to a subagent on its own copy of the kit and
    its own port; merge when both pass.
 
