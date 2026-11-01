@@ -76,7 +76,7 @@ os.makedirs(os.path.join(pkg, "parameter"), exist_ok=True)
 
 # 1. Kernel library + command program.
 gen = os.path.join(pkg, "gen")
-env = dict(os.environ, LLM_CONFIG=os.path.abspath(a.config), LLM_OUT=gen)
+env = dict(os.environ, LLM_CONFIG=os.path.abspath(a.config), LLM_OUT=gen, LLM_TOKENIZER=os.path.abspath(a.tokenizer))
 subprocess.run([sys.executable, os.path.join(HERE, "gen_llm.py"), os.path.abspath(a.config)], check=True, env=env, stdout=subprocess.DEVNULL)
 os.replace(os.path.join(gen, "model.loom"), os.path.join(pkg, "program", "llm.loom"))
 

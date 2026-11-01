@@ -222,8 +222,9 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   after a call that the template drops. If `reuse_ok` fails after a tool call, diff Loom's
   `input_tokens` rendering of the next turn against `chat_probe.simulate()` and canonicalize those bytes.
   GLM-style templates: the model ends a call turn with `<|observation|>` and an answer with `<|user|>`;
-  those stop tokens stay in the KV row, so set `chat.stop_after_calls` / `chat.stop_after_answer` and
-  `complete_text` publishes them (flint: every reused turn otherwise carried a duplicated token).
+  those stop tokens stay in the KV row, so set `chat.stop_after_calls` / `chat.stop_after_answer`:
+  `complete_text` publishes them, and `g_embed` maps the service terminal loom-serve feeds back at the
+  next turn to the real stop token (`stop_restore()`; flint reused turns diverged at gaps up to 2.7 without it).
   Templates the probe can't model (e.g. role tags with no closing suffix, tools
   inside the first user message, channel formats): fill the block by hand, keep
   `simulate()` in step, and run `chat_probe.py MODEL.gguf --verify cfg.json` (your kit's copy) until every line is OK. If the

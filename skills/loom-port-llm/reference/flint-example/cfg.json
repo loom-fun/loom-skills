@@ -116,7 +116,9 @@
   "tool_item_prefix": "<|observation|><tool_response>",
   "tool_item_suffix": "</tool_response>",
   "tool_turn_suffix": "",
-  "terminal": "<|end_of_text|>"
+  "terminal": "<|end_of_text|>",
+  "stop_after_calls": "<|observation|>",
+  "stop_after_answer": "<|user|>"
  },
  "attn_sinks": true,
  "moe": {

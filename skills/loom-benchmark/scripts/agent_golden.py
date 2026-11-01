@@ -55,6 +55,25 @@ def post(url, body, path="/v1/chat/completions"):
     return requests.post(url + path, data=data, timeout=1800, headers={"Content-Type": "application/json"}).json()
 
 
+def golden_ids(g):
+    """llama.cpp's generated ids and the top-5 lists that line up with them. completion_probabilities
+    omits byte-fallback tokens (emoji, partial UTF-8), so ids come from `tokens` and the top-5 lists are
+    trusted only while they align (the golden.py / compare.py rule)."""
+    cp = g.get("completion_probabilities", [])
+    ids = g.get("tokens") or [x["id"] for x in cp]
+    k = next((i for i, x in enumerate(cp) if i >= len(ids) or x["id"] != ids[i]), len(cp))
+    return ids, cp[:k]
+
+
+def gap_at(ids, tops, loom_ids, k):
+    """logp(golden) - logp(loom) at divergence k; 0.0 past the aligned top-5 lists (a byte-split token,
+    counted as a near-tie as in compare.py); None when Loom's token is outside the top-5."""
+    if k >= len(tops):
+        return 0.0
+    top = {t["id"]: t["logprob"] for t in tops[k]["top_logprobs"]}
+    return top[ids[k]] - top[loom_ids[k]] if loom_ids[k] in top else None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pkg")
@@ -100,8 +119,8 @@ def main():
                 loom_ids = P.ids(raw)
                 g = llama_completion(a.llama, {
                     "prompt": ids, "n_predict": max(1, u["completion_tokens"]), "temperature": 0, "n_probs": 5,
-                    "cache_prompt": False}, P)
-                gids = [x["id"] for x in g["completion_probabilities"]]
+                    "cache_prompt": False, "return_tokens": True}, P)
+                gids, gtops = golden_ids(g)
                 k = next((i for i, (x, y) in enumerate(zip(loom_ids, gids)) if x != y), None)
                 import chat_probe as _cp
                 if k is not None and hasattr(_cp, "raw_alternatives"):
@@ -115,8 +134,8 @@ def main():
                             loom_ids, k = aids, ka
                 rec["golden_match"] = k is None
                 if k is not None:
-                    top = {t["id"]: t["logprob"] for t in g["completion_probabilities"][k]["top_logprobs"]}
-                    gap = top[gids[k]] - top[loom_ids[k]] if loom_ids[k] in top else None
+                    gap = gap_at(gids, gtops, loom_ids, k)
+                    top = {t["id"]: t["logprob"] for t in gtops[k]["top_logprobs"]} if k < len(gtops) else {}
                     # llama.cpp ROCm is not run-to-run deterministic on some models (flint: identical
                     # temperature-0 requests gave different greedy text): as compare.py does, re-record a
                     # turn that would fail and score against the recording Loom follows further.
@@ -125,17 +144,17 @@ def main():
                             break
                         g2 = llama_completion(a.llama, {
                             "prompt": ids, "n_predict": max(1, u["completion_tokens"]), "temperature": 0, "n_probs": 5,
-                            "cache_prompt": False}, P, salt)
-                        cp2 = g2["completion_probabilities"]; gids2 = [x["id"] for x in cp2]
+                            "cache_prompt": False, "return_tokens": True}, P, salt)
+                        gids2, cp2 = golden_ids(g2)
                         k2 = next((i for i, (x, y) in enumerate(zip(loom_ids, gids2)) if x != y), None)
                         rec.setdefault("rerecorded", []).append(k2)
                         if k2 is None:
                             k, gap, gids = None, None, gids2
                             break
                         if k2 > k:
-                            top2 = {t["id"]: t["logprob"] for t in cp2[k2]["top_logprobs"]}
-                            k, gids, top = k2, gids2, top2
-                            gap = top[gids[k]] - top[loom_ids[k]] if loom_ids[k] in top else None
+                            k, gids, gtops = k2, gids2, cp2
+                            gap = gap_at(gids, gtops, loom_ids, k)
+                            top = {t["id"]: t["logprob"] for t in gtops[k]["top_logprobs"]} if k < len(gtops) else {}
                     if k is None:
                         rec["golden_match"] = True
                     rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=k is None or (gap is not None and gap <= 1.0))

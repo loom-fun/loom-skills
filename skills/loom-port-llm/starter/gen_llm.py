@@ -771,6 +771,55 @@ EMBED_PRE = (_EN if EMBED_NORM else
               "  %normalized = vector.addf %values, %zero32 : vector<32xf32>\n"))
 if _ES:
     EMBED_PRE = f"  %escale_s = scalar.constant {float(_ES)} : f32\n" + EMBED_PRE
+
+
+def stop_restore():
+    """Ids for restoring a retained row's stop token. The head reports any end-of-turn id as the
+    service terminal (eos_id), and on the next turn loom-serve feeds that *prediction* in place of the
+    first delimiter of the new suffix, i.e. where the canonical history (complete_text) has
+    chat.stop_after_calls / stop_after_answer. Without a fix the reused row holds <eos> where a fresh
+    prompt holds the model's real stop token (GLM style: <|observation|> after calls, <|user|> after an
+    answer), so reused turns diverge from the same prompt sent fresh. A fed terminal is therefore mapped
+    back: to the calls stop when the next input token opens a tool result (the token after
+    stop_after_calls in tool_item_prefix), else to the answer stop -- the same choice complete_text makes.
+    Returns (eos, calls_id, follower_id, answer_id) or None."""
+    chat = CFG.get("chat") or {}
+    sc, sa = chat.get("stop_after_calls", ""), chat.get("stop_after_answer", "")
+    path = os.environ.get("LLM_TOKENIZER")
+    if not (sc and sa and path and CFG.get("extra_eos_ids")):
+        return None
+    added = {t["content"]: t["id"] for t in json.load(open(path, encoding="utf-8")).get("added_tokens", [])}
+    rest = chat.get("tool_item_prefix", "")
+    rest = rest[len(sc):] if rest.startswith(sc) else ""
+    follow = max((t for t in added if rest.startswith(t)), key=len, default=None)
+    if sc not in added or sa not in added or follow is None:
+        print(f"gen_llm: stop-token restore disabled (stop markers / tool-result opener are not single added tokens)", file=sys.stderr)
+        return None
+    return CFG["eos_id"], added[sc], added[follow], added[sa]
+
+
+STOP_RESTORE = stop_restore()
+EMBED_RAW = "  %raw = view.load %ids_view[%token] : view<[%tokens]xi32> -> i32\n"
+if STOP_RESTORE:
+    _e, _sc, _fo, _sa = STOP_RESTORE
+    EMBED_RAW = f"""  %raw_in = view.load %ids_view[%token] : view<[%tokens]xi32> -> i32
+  // A fed service terminal is the previous turn's stop token: restore the real one (see stop_restore).
+  %term_id = scalar.constant {_e} : i32
+  %stop_calls_id = scalar.constant {_sc} : i32
+  %stop_follow_id = scalar.constant {_fo} : i32
+  %stop_answer_id = scalar.constant {_sa} : i32
+  %one_idx = index.constant 1 : index
+  %next_value = index.add %token, %one_idx : index
+  %has_next = index.cmp ult, %next_value, %tokens : index
+  %next_sel = scf.select %has_next, %next_value, %token : index
+  %next_token = index.assume %next_sel [lt(%next_sel, %tokens)] : index
+  %next_raw = view.load %ids_view[%next_token] : view<[%tokens]xi32> -> i32
+  %opens_result = scalar.cmpi eq, %next_raw, %stop_follow_id : i32
+  %after_calls = scalar.andi %opens_result, %has_next : i1
+  %stop_id = scf.select %after_calls, %stop_calls_id, %stop_answer_id : i32
+  %is_term = scalar.cmpi eq, %raw_in, %term_id : i32
+  %raw = scf.select %is_term, %stop_id, %raw_in : i32
+"""
 EMBED_PRE += "  %count = scalar.constant " + str(float(H)) + " : f32\n  %eps = scalar.constant " + str(EPS) + " : f32\n"
 
 NORMS = f"""
@@ -842,8 +891,7 @@ kernel.def export("g_embed") @g_embed(%tokens: index) {{
   %groups = index.constant {HG} : index
   %zero_f = scalar.constant 0.0 : f32
   %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
-  %raw = view.load %ids_view[%token] : view<[%tokens]xi32> -> i32
-  %c0_i32 = scalar.constant 0 : i32
+{EMBED_RAW}  %c0_i32 = scalar.constant 0 : i32
   %vocab_last = scalar.constant {V - 1} : i32
   %low = scalar.maxsi %raw, %c0_i32 : i32
   %clamped = scalar.minsi %low, %vocab_last : i32
@@ -2145,8 +2193,10 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %partials = buffer.alloca<global> align(256) %partial_size : buffer
   // 64 splits per head for decode, 16 for the prefill fallback.
   %c64 = index.constant 64 : index
+  // NO_GEMM=1 (diagnostic build): %c_never keeps every epoch on the decode kernels.
+  %c_never = index.constant 1000000 : index
   %c128 = index.constant 128 : index
-  %prefill_shape = index.cmp uge, %t, %c64 : index
+  %prefill_shape = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c64"} : index
   %pacc_dec = index.constant {QH * 64 * D * 4} : offset
   %pacc_pre = index.constant {QH * 16 * D * 4} : offset
   %pml_dec = index.constant {QH * 64 * 2 * 4} : offset
@@ -2157,7 +2207,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %pml_size = index.scale %t, %pml_bytes : index, offset -> offset
   %pacc = buffer.alloca<global> align(256) %pacc_size : buffer
   %pml = buffer.alloca<global> align(256) %pml_size : buffer
-  %gemm = index.cmp uge, %t, %c64 : index
+  %gemm = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c64"} : index
   %single = index.cmp eq, %t, %c1 : index
   %big = index.cmp uge, %t, %c128 : index
   %scale_entry = index.constant 8 : offset

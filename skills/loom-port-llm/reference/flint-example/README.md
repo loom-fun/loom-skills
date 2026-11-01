@@ -38,10 +38,14 @@ that extends a retained prompt+completion, so "reused but prefilled" can't be fo
 settle it, build a variant whose decode routing uses the GEMM path's f16 activations (or prefill in f32)
 and rerun `agent_golden.py`.
 
-**Root cause narrowed (orchestrator, Nov 2026):** not llama.cpp noise (re-recording on the same token
-ids reproduces the same divergence). Bisected with config variants, comparing a reused turn with the
-same prompt sent fresh: sinks + sliding window: different on 5/5 reuse turns; sliding window off: still
-different; **attention sinks off: same**. So the two attention implementations disagree on the sink
-term: decode (split-K + combine, unit-tested with sinks, passes) vs prefill (`g_attention_flash2`,
-not unit-tested with sinks). History the model decoded itself then carries different hidden states than
-the same tokens prefilled. Test flash2 with sinks against the numpy reference before reusing this kit.
+**Root cause found and fixed (Nov 2026; validated: agent gate 6/6, every divergence a near-tie):** the
+reuse divergence was a stop-token bug, not numerics or sinks. The head reports any end-of-turn id as the
+service terminal (`<|end_of_text|>`), and on the next turn loom-serve feeds that prediction where the
+canonical history has the real stop token (`<|observation|>` after calls, `<|user|>` after an answer), so
+a reused row held the wrong token's KV. `g_embed` now maps a fed terminal back to the real stop token
+(`stop_restore()` in `gen_llm.py`, driven by `chat.stop_after_calls/answer` and the tokenizer; now in the
+starter too). With that fixed, reused == fresh on 5/5 turns when decode and prefill share kernels; on the
+default build the remaining differences are f32-decode vs f16-prefill numerics, all near-ties against
+llama.cpp. `make_kernel_tests.py` here also tests flash2 with sinks on a span continuing stored KV
+(section 3c: matches numpy at f16 rounding) and the stop-token restore. An earlier bisect ("sinks off ->
+reused == fresh") was misleading: that variant produced garbage, which agrees with itself.

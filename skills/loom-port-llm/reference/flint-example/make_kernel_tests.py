@@ -45,6 +45,34 @@ cases.append(f"""check.case public @embed {{
   check.return
 }}
 """)
+# 1b. stop-token restore in g_embed (gen_llm.stop_restore; needs LLM_TOKENIZER like build.py passes):
+# a fed service terminal becomes stop_after_calls before a tool-result opener, else stop_after_answer.
+_ch = cfg.get("chat") or {}
+if os.environ.get("LLM_TOKENIZER") and _ch.get("stop_after_calls") and _ch.get("stop_after_answer") and cfg.get("extra_eos_ids"):
+    _added = {a["content"]: a["id"] for a in json.load(open(os.environ["LLM_TOKENIZER"], encoding="utf-8"))["added_tokens"]}
+    _rest = _ch.get("tool_item_prefix", "")[len(_ch["stop_after_calls"]):]
+    _fo = max((a for a in _added if _rest.startswith(a)), key=len, default=None)
+    if _fo and _ch["stop_after_calls"] in _added and _ch["stop_after_answer"] in _added:
+        _e, _sc, _sa, _f = cfg["eos_id"], _added[_ch["stop_after_calls"]], _added[_ch["stop_after_answer"]], _added[_fo]
+        ids = np.array([_e, _f, 1000, _e, 1000, _e], dtype=np.int32); t = len(ids)
+        want = np.array([_sc, _f, 1000, _sa, 1000, _sa], dtype=np.int32)
+        x = E[want]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
+        for n, a in [("sr_ids", ids), ("sr_x", x.astype(np.float32)), ("sr_h", h.astype(np.float32))]: save(n, a)
+        cases.append(f"""check.case public @embed_stop_restore {{
+  %t = check.literal value({t}) : index
+  %ids = check.file.read.npy path("sr_ids.npy") : {ty(ids)}
+  %tab = check.file.read.npy path("e_tab.npy") : {ty(tab)}
+  %w = check.file.read.npy path("e_w.npy") : tensor<{H}xf32>
+  %ex = check.file.read.npy path("sr_x.npy") : tensor<{t}x{H}xf32>
+  %eh = check.file.read.npy path("sr_h.npy") : tensor<{t}x{H}xf32>
+  %x = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
+  %h = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
+  kernel.launch @g_embed[%t](%t, %ids, %tab, %w, %x, %h) : [index](index, {ty(ids)}, {ty(tab)}, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
+  check.expect.close actual(%x) expected(%ex) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.return
+}}
+""")
 # 2. matvec per (tensor) for t=1 and t=4 variants
 seen = set(); todo = []
 VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
@@ -207,6 +235,103 @@ cases.append(f"""check.case public @attention_chain {{
   check.return
 }}
 """)
+# 3c. prefill attention on a span that CONTINUES stored KV: history positions [0, p0) are written
+# by g_qk_rope_store, then a span at p0 (t tokens, the last `pad` rows not live) runs the prefill
+# path (g_attention_flash2 on uniform 16-token tiles + the listed split/combine fallback for the
+# rest) and, separately, the decode path (g_attention_split + combine). Both vs numpy, on a
+# sliding and a non-sliding layer with that layer's real norms and sinks.
+def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
+    sl = 1 if li in set(cfg.get("sliding_layers", [])) else 0
+    rp = 0 if li in set(cfg.get("nope_layers", [])) else 1
+    W = cfg.get("sliding_window") or 0
+    qn_ = (deq(f"blk.{li}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)) * np.float32(qscale)
+    kn_ = deq(f"blk.{li}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
+    snk = deq(f"blk.{li}.attn_sinks.weight").astype(np.float32) if cfg.get("attn_sinks") else np.zeros(QH, np.float32)
+    n = p0 + t; ctx = ((n + 15) // 16) * 16 + 64; blocks = ctx // 16
+    allpos = np.arange(n)
+    qa = (rng.standard_normal((n, QH, D)) * (1.0 if cfg["qk_norm"] else qscale)).astype(np.float32); ka = rng.standard_normal((n, KVH, D)).astype(np.float32)
+    va = rng.standard_normal((n, KVH, D)).astype(np.float32)
+    def rope_p(a, p):
+        inv = cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD); ang = p[:, None] * inv[None]
+        c, s = np.cos(ang)[:, None], np.sin(ang)[:, None]
+        if cfg["rope_type"] == "neox":
+            a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
+        a1, a2 = a[..., 0::2], a[..., 1::2]; o = np.empty_like(a); o[..., 0::2] = a1 * c - a2 * s; o[..., 1::2] = a2 * c + a1 * s; return o
+    qr_ = norm(qa, qn_) if cfg["qk_norm"] else qa; kr_ = norm(ka, kn_) if cfg["qk_norm"] else ka
+    if rp: qr_, kr_ = rope_p(qr_, allpos), rope_p(kr_, allpos)
+    kf = kr_.astype(np.float16).astype(np.float64); vf = va.astype(np.float16).astype(np.float64)
+    live = np.ones(t, bool); live[t - pad:] = False
+    att = np.zeros((t, QH, D))
+    for i in range(t):
+        if not live[i]: continue
+        p = p0 + i; lo = max(0, p - (W - 1)) if (sl and W) else 0
+        for hh in range(QH):
+            kv = hh // (QH // KVH)
+            sc = kf[lo:p + 1, kv] @ qr_[p, hh].astype(np.float64) / np.sqrt(D)
+            mx = max(sc.max(), snk[hh]) if cfg.get("attn_sinks") else sc.max()
+            pr = np.exp(sc - mx); den = pr.sum() + (np.exp(snk[hh] - mx) if cfg.get("attn_sinks") else 0.0)
+            att[i, hh] = (pr @ vf[lo:p + 1, kv]) / den
+    att_f = att.copy()
+    for tl in range(t // 16):
+        if not live[tl * 16:tl * 16 + 16].all(): att_f[tl * 16:tl * 16 + 16] = 0
+    orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
+    hinfo = np.zeros((p0, 4), np.int32); hinfo[:, 1] = allpos[:p0]; hinfo[:, 2] = 1
+    sinfo = np.zeros((t, 4), np.int32); sinfo[:, 1] = allpos[p0:]; sinfo[:, 2] = live
+    for nn, a in [("hq", qa[:p0].reshape(p0, -1)), ("hk", ka[:p0].reshape(p0, -1)), ("hv", va[:p0].reshape(p0, -1)), ("hinfo", hinfo),
+                  ("sq", qa[p0:].reshape(t, -1)), ("sk", ka[p0:].reshape(t, -1)), ("sv", va[p0:].reshape(t, -1)), ("sinfo", sinfo),
+                  ("orig", orig), ("qn", qn_.astype(np.float32)), ("kn", kn_.astype(np.float32)), ("sinks", snk), ("o", att.reshape(t, -1).astype(np.float32)), ("of", att_f.reshape(t, -1).astype(np.float32))]:
+        save(f"{tag}_{nn}", a)
+    print(f"{tag}: layer {li} sliding={sl} rope={rp} p0={p0} t={t} pad={pad} |o| max {np.abs(att).max():.4f} mean {np.abs(att).mean():.5f}")
+    QD = QH * D; KD = KVH * D; AR = f"tensor<{2 * ctx * KD}xf16>"; OT = f"tensor<{t}x{QD}xf32>"
+    S = 64; S16 = 16
+    gt = f"tensor<{QH}xf32>" if cfg.get("attn_sinks") else OT
+    gv = "%sinks" if cfg.get("attn_sinks") else "%sq"
+    def st(tt, pre):
+        return (f"  kernel.launch @g_qk_rope_store[%{pre}t](%{pre}t, %layer, %rope, %ctx, %pool, %{pre}q, %{pre}k, %{pre}v, %qn, %kn, %{pre}info, %orig, %arena) : "
+                f"[index](index, index, i32, index, index, tensor<{tt}x{QD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{tt}x4xi32>, tensor<{10 + blocks}xi32>, {AR})\n")
+    cases.append(f"""check.case public @{tag} {{
+  %ht = check.literal value({p0}) : index
+  %st = check.literal value({t}) : index
+  %layer = check.literal value(0) : index
+  %rope = check.literal value({rp}) : i32
+  %sliding = check.literal value({sl}) : i32
+  %ctx = check.literal value({ctx}) : index
+  %pool = check.literal value({ctx}) : index
+  %hq = check.file.read.npy path("{tag}_hq.npy") : tensor<{p0}x{QD}xf32>
+  %hk = check.file.read.npy path("{tag}_hk.npy") : tensor<{p0}x{KD}xf32>
+  %hv = check.file.read.npy path("{tag}_hv.npy") : tensor<{p0}x{KD}xf32>
+  %hinfo = check.file.read.npy path("{tag}_hinfo.npy") : tensor<{p0}x4xi32>
+  %sq = check.file.read.npy path("{tag}_sq.npy") : {OT}
+  %sk = check.file.read.npy path("{tag}_sk.npy") : tensor<{t}x{KD}xf32>
+  %sv = check.file.read.npy path("{tag}_sv.npy") : tensor<{t}x{KD}xf32>
+  %sinfo = check.file.read.npy path("{tag}_sinfo.npy") : tensor<{t}x4xi32>
+  %orig = check.file.read.npy path("{tag}_orig.npy") : tensor<{10 + blocks}xi32>
+  %qn = check.file.read.npy path("{tag}_qn.npy") : tensor<{D}xf32>
+  %kn = check.file.read.npy path("{tag}_kn.npy") : tensor<{D}xf32>
+  %sinks = check.file.read.npy path("{tag}_sinks.npy") : tensor<{QH}xf32>
+  %eo = check.file.read.npy path("{tag}_o.npy") : {OT}
+  %eof = check.file.read.npy path("{tag}_of.npy") : {OT}
+  %arena = check.generate.fill value(0.0) : {AR}
+  %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
+  %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
+  %o_pre = check.generate.fill value(0.0) : {OT}
+  %o_dec = check.generate.fill value(0.0) : {OT}
+{st(p0, "h")}{st(t, "s")}  kernel.launch @g_attention_flash2[%st](%st, %layer, %sliding, %ctx, %pool, %sq, {gv}, %sinfo, %orig, %arena, %o_pre) : [index](index, index, i32, index, index, {OT}, {gt}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, {OT})
+  kernel.launch @g_attention_split[%st](%st, %layer, %sliding, %ctx, %pool, %sq, %sinfo, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, {OT}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
+  kernel.launch @g_attention_combine[%st](%st, %sliding, %sinfo, %pacc, %pml, {gv}, %o_dec) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, {gt}, {OT})
+  check.expect.close actual(%o_dec) expected(%eo) atol(1.5e-3) rtol(3.0e-3) nan(different) : {OT}
+  check.expect.close actual(%o_pre) expected(%eof) atol(2.5e-3) rtol(1.0e-2) nan(different) : {OT}
+  check.return
+}}
+""")
+if os.environ.get("PREFILL_CONT", "1") != "0":
+    _sl = cfg.get("sliding_layers") or []
+    _ns = [i for i in range(cfg["layers"]) if i not in set(_sl) and i not in set(cfg.get("recurrent_layers", []))]
+    _p0 = max(300, (cfg.get("sliding_window") or 0) + 100)
+    for _li in ([_sl[0]] if _sl else []) + _ns[:1]:
+        prefill_cont_case(_li, _p0, 48, 0, f"pc_full_{_li}")     # 3 uniform tiles: flash2 only
+        prefill_cont_case(_li, _p0, 48, 7, f"pc_part_{_li}")     # last tile partly padding: listed fallback
+        prefill_cont_case(_li, _p0, 48, 0, f"pc_small_{_li}", 0.1)  # small scores: the sink dominates the softmax
 # 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
 if cfg.get("recurrent_layers"):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
