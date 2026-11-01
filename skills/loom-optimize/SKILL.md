@@ -84,7 +84,8 @@ Before you start you need:
    - DONE: move to the next metric.
 
    Record design choices, including the rejected options and their numbers, in
-   `bench/decisions.jsonl`.
+   `bench/decisions.jsonl`, one JSON object per line (report.py renders it):
+   `{"ts": "...", "decision": "prefill chunk", "chosen": "2048", "rejected": [{"option": "4096", "measured": "1k -12 %", "why": "slower short prefill"}]}`.
 
 ## Measurement pitfalls
 
@@ -150,7 +151,8 @@ trials re-tested them on Qwen3.5-0.8B and the defaults won or tied every time:
 (short prefill −20–37 %; 2048 ≈ 1024 within noise). On a starter port, spend the budget on fusion
 (fewer launches per layer: fused QKV or norm fusion, which you write in a copy of the generator; pairing Qwen3.5's tiny GDN alpha/beta matvecs
 measured neutral) or on the long
-prefill path. Bigger or MoE models: the chunk size is worth one A/B (4096 helped MoE).
+prefill path. Bigger or MoE models: the chunk size is worth one A/B measured at 1k too (4096 helped
+one MoE port; 2048 and 4096 both cost 12-18 % at 1k on flint).
 
 **Folded into the starter from trials** (already on; don't redo): the gated delta-net conv and
 history-commit kernels spread channels over `GDN_CB` workgroups per token when fewer than 64

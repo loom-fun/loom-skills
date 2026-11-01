@@ -17,3 +17,12 @@ consistency; sampling; needle at 130k and the full 262k (with the KV pool at 2x 
 Notes: the tokenizer is in `RecursiveSI/flint` (the GGUF doesn't name its base model; port.sh now
 searches the Hub). Prefill chunk 4096 helped 2k+ but cost 12 % at 1k: A/B the 1k size too. Build with
 `--memory-gib` large enough for a pool of 2x the context, or the full-context gate gets a 503.
+
+**Second run (Nov 2026, 50.6 min end to end, built on this example):** the agent loop's reuse turns
+diverged from llama.cpp at gaps 1.22 and 2.74 while the same prompts sent fresh matched llama.cpp for 40
+tokens, after a stop-token publishing bug was fixed (`chat.stop_after_calls` = `<|observation|>`,
+`stop_after_answer` = `<|user|>`, now in the starter). Open, not root-caused: suspect the reuse path with
+sliding window 513 + sinks (KV of the window written by decode vs prefill, or the window origin on a
+resumed row). Probe: run turn N with reuse and fresh (new conversation with the same rendered prompt)
+and diff the first logits. One golden prompt (2k document) sits at gap 1.03 (llama.cpp's own re-record
+1.05, top-1 p 0.37).

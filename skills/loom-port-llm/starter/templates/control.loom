@@ -412,6 +412,11 @@ global.rodata.def @tool_separator = bytes("@@HEX_TOOL_SEPARATOR@@")
 global.rodata.def @calls_open = bytes("@@HEX_CALLS_OPEN@@")
 
 global.rodata.def @calls_close = bytes("@@HEX_CALLS_CLOSE@@")
+// Stop token the model emits to end a turn when the template renders that same token next
+// (GLM-style: <|observation|> after calls, <|user|> after an answer). It stays in the KV row, so the
+// published history must contain it too, or the next turn duplicates it.
+global.rodata.def @stop_after_calls = bytes("@@HEX_STOP_AFTER_CALLS@@")
+global.rodata.def @stop_after_answer = bytes("@@HEX_STOP_AFTER_ANSWER@@")
 
 global.rodata.def @call_end = bytes("@@HEX_CALL_END@@")
 
@@ -2188,8 +2193,13 @@ func.def public @complete_text(%prompt: buffer, %response: buffer, %content: buf
   %close = scf.select %has_calls, %close_value, %empty : buffer
   %head = func.call @join4(%prefix, %content, %separator, %tools) : (buffer, buffer, buffer, buffer) -> (buffer)
   %answer = func.call @join(%head, %close) : (buffer, buffer) -> (buffer)
-  %result = func.call @join(%answer, %suffix) : (buffer, buffer) -> (buffer)
+  %suffixed = func.call @join(%answer, %suffix) : (buffer, buffer) -> (buffer)
   %closed = scalar.cmpi ne, %final_state, %c1_i64 : i64
+  %stop_calls = global.load @stop_after_calls : buffer
+  %stop_answer = global.load @stop_after_answer : buffer
+  %stop_kind = scf.select %has_calls, %stop_calls, %stop_answer : buffer
+  %stop = scf.select %closed, %stop_kind, %empty : buffer
+  %result = func.call @join(%suffixed, %stop) : (buffer, buffer) -> (buffer)
   %prompt_length = buffer.length %prompt
   %answer_length = buffer.length %answer
   %generated_length = index.sub %answer_length, %prompt_length : offset
