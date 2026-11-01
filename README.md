@@ -62,7 +62,8 @@ with the agent's judgment only where it is needed:
 4. `loom-benchmark/scripts/finalize.sh`: the full gates (including a full-context probe)
    on the final build, final perf, the audit, and a generated report.
 
-It stops to ask only for a gated-model license or approval of a downloaded binary.
+It stops to ask only for a gated-model license. Loom (PyPI) and the latest lemonade-sdk/llamacpp-rocm
+release (the reference) are downloaded without asking.
 
 **What a port includes.** The model's native context length (40,960 for Qwen3-0.6B,
 262,144 for Qwen3.5-0.8B), tool calling in the model's own format, reasoning with an
@@ -143,15 +144,16 @@ optimization budget shrinks to fit.
   ([`hrx-loom`](https://pypi.org/project/hrx-loom/), Linux glibc ≥ 2.39 or Windows 11).
   `gh` is only needed for development wheels from CI (`install_loom.sh ROOT ci-latest`).
 - For the golden reference: a llama.cpp ROCm build from
-  [lemonade-sdk/llamacpp-rocm](https://github.com/lemonade-sdk/llamacpp-rocm). The
-  skill asks before running any downloaded binary.
+  [lemonade-sdk/llamacpp-rocm](https://github.com/lemonade-sdk/llamacpp-rocm). The skills
+  download its latest release by themselves (pre-approved); they ask before running a binary
+  from any other source.
 
 ## Safety notes baked into the skills
 
 - **Memory limit.** Never serve models whose weights exceed the GPU's memory budget:
   a 104 GiB model hard-crashed a 128 GB machine.
 - **`--memory_bytes`.** Always pass it to `loom-serve`.
-- **Downloaded binaries.** Ask before running one.
+- **Downloaded binaries.** Ask before running one, except Loom from PyPI and lemonade-sdk/llamacpp-rocm releases (pre-approved).
 - **Golden references.** They are external (llama.cpp), never a model written by
   hand.
 

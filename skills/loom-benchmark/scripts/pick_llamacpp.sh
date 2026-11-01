@@ -3,7 +3,7 @@
 # and print them fastest first. The baseline is the strongest build available:
 # version strings are unreliable (the lemonade nightly prints "version: 1") and builds
 # differ a lot (Bolt-E4B c4: b1274 125 vs b1355 157; LFM2.5-24B prefill: 1062 vs 2140).
-# usage: pick_llamacpp.sh MODEL.gguf [PORT=8139] [SEARCH_ROOT=$HOME]
+# usage: pick_llamacpp.sh MODEL.gguf [PORT=8139] [SEARCH_ROOT=$HOME]   (several roots: A:B)
 #   writes the ranking to ./llamacpp_pick.json (run it from bench/; audit.py checks it)
 set -u
 gguf=$1; port=${2:-8139}; root=${3:-$HOME}
@@ -12,7 +12,8 @@ root_loom=${LOOM_ROOT:-$HOME/loom}
 py=${PY:-$root_loom/.tools/bin/python}; [ -x "$py" ] || py=$root_loom/.tools/Scripts/python   # Windows venvs use Scripts/
 doc=$here/../data/doc_1000.txt
 # HIP builds: libggml-hip.so (Linux) or ggml-hip.dll (Windows) next to llama-server[.exe].
-mapfile -t dirs < <(find "$root" -maxdepth 7 \( -name llama-server -o -name llama-server.exe \) -type f 2>/dev/null \
+IFS=: read -r -a roots <<< "$root"   # several roots: colon-separated
+mapfile -t dirs < <(find "${roots[@]}" -maxdepth 7 \( -name llama-server -o -name llama-server.exe \) -type f 2>/dev/null \
   | xargs -r -n1 dirname | while read -r d; do { [ -e "$d/libggml-hip.so" ] || [ -e "$d/ggml-hip.dll" ]; } && echo "$d"; done \
   | while read -r d; do echo "$(readlink -f "$d"/llama-server* | head -1 | xargs sha256sum | cut -c1-16) $d"; done \
   | sort -u -k1,1 | cut -d' ' -f2-)

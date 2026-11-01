@@ -1,6 +1,7 @@
 #!/bin/bash
 # Everything between "the port serves" and "start optimizing", in one command:
-#   1. pick_llamacpp.sh: benchmark every llama.cpp ROCm build on the machine -> llamacpp_pick.json
+#   1. fetch_llamacpp.sh (latest lemonade-sdk/llamacpp-rocm, pre-approved) + pick_llamacpp.sh: benchmark
+#      it and every llama.cpp ROCm build on the machine -> llamacpp_pick.json
 #   2. ONE llama-server from the fastest build: 4 slots sharing a unified KV pool big enough for the
 #      long goldens and the needle comparison, reused by every step below (no restarts)
 #   3. LEVEL=quick gates (goldens, compare, consistency, agent tool loop, sampling, half-context needle)
@@ -27,15 +28,18 @@ step() { echo "== $* ($(date +%T))"; }
 
 step "1/6 pick the llama.cpp ROCm baseline build"
 if [ ! -s llamacpp_pick.json ]; then
-  "$S/pick_llamacpp.sh" "$gguf" $((lport + 9)) "${SEARCH_ROOT:-$HOME}" || exit 1
+  # The latest lemonade-sdk/llamacpp-rocm release always competes (pre-approved download, ~25 s):
+  # new architectures need recent builds (no installed build knew `flint`).
+  newest=$("$S/fetch_llamacpp.sh" "${LLAMACPP_HOME:-$HOME/llamacpp-rocm}" | tail -1) || newest=""
+  "$S/pick_llamacpp.sh" "$gguf" $((lport + 9)) "${SEARCH_ROOT:-$HOME}${newest:+:$newest}" || exit 1
 fi
 LLAMACPP_DIR=$("$T" -c "import json;r=json.load(open('llamacpp_pick.json'))['ranked'];print(r[0]['dir'] if r else '')" 2>/dev/null)
 if [ -z "$LLAMACPP_DIR" ]; then
   # No installed llama.cpp runs this GGUF (e.g. an architecture newer than every build on the machine).
   # Loom-only qualification: everything that doesn't need a reference, then stop with exit 4.
   echo "NO_LLAMACPP: no installed llama.cpp ROCm build runs this model (reasons above)."
-  echo "  Ask the user to approve a newer build (loom-benchmark section 0: lemonade-sdk/llamacpp-rocm), or"
-  echo "  continue Loom-only: correctness is then NOT verified against a reference; say so in the report."
+  echo "  Even the latest lemonade-sdk/llamacpp-rocm release doesn't know this architecture: continue"
+  echo "  Loom-only; correctness is then NOT verified against a reference: say so in the report."
   NO_LLAMA=1 LEVEL=quick "$S/gates.sh" "$pkg" "$url" "$gguf" "$bench"
   budget=${BUDGET_H:-0.5}
   "$T" "$R/roofline.py" "$gguf" --cfg "$pkg/llm_config.json" --out roofline.json --budget-h "$budget" --reserve-min 0 | tee roofline.txt

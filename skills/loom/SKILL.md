@@ -120,14 +120,15 @@ timestamp per stage; while one runs, prepare the next step instead of waiting id
 write generator code, build packages. **Don't use the GPU while they measure** (qualify stages
 4 and 6, finalize stage 1): an A/B run or a second server then corrupts the baselines.
 
-Stop to ask only for what the hard rules require: a gated-license click, or
-approval of a binary you downloaded. Avoid both where possible:
+Stop to ask only for what the hard rules require: a gated-license click, or approval of a
+binary from a source other than PyPI and lemonade-sdk/llamacpp-rocm. Avoid both where possible:
 - **Reuse what is installed.** Check `~/loom/.venv/bin/loom-serve` (Windows: `.venv/Scripts/loom-serve.exe`) and the HF cache.
-- **Baseline = the fastest llama.cpp ROCm build already on the machine.** `qualify.sh`
-  runs `pick_llamacpp.sh` (set `SEARCH_ROOT=` to limit where it looks). Version
-  strings can't be trusted, and an old build inflated a margin from +25 % to 2.5× in
-  one run. A build the user already installed doesn't need approval; one you download
-  in this session does.
+- **Baseline = the fastest llama.cpp ROCm build: the latest lemonade-sdk/llamacpp-rocm release
+  or one already installed.** `qualify.sh` downloads the latest release (`fetch_llamacpp.sh`,
+  ~25 s, no approval needed: this source is pre-approved) and runs `pick_llamacpp.sh` on it and
+  the installed builds (`SEARCH_ROOT=` limits where it looks). Version strings can't be trusted,
+  and an old build inflated a margin from +25 % to 2.5× in one run; a new architecture usually
+  needs the newest build.
 
 The `loom-roofline` skill is at `${CLAUDE_SKILL_DIR}/../loom-roofline/SKILL.md`.
 Read it from there if it isn't in your skill list.
@@ -144,8 +145,9 @@ Read it from there if it isn't in your skill list.
 - **Always pass `--memory_bytes`** to `loom-serve` (weights + KV pool + ~2 GiB
   workspace). Too small → HTTP 503 "retained state leaves insufficient completion
   capacity". Several models can share one budget with `--parameter_idle_ms=60000`.
-- **Freshly downloaded binaries need explicit user approval before running**
-  (e.g. llama.cpp release zips). Loom itself is installed from PyPI with pip.
+- **Freshly downloaded binaries need explicit user approval before running**, except the two
+  pre-approved sources: Loom from PyPI (pip) and lemonade-sdk/llamacpp-rocm releases
+  (`fetch_llamacpp.sh`). Don't stop to ask about those.
 - Gated Hugging Face models: give the user the exact model page URL so they can
   accept the license; don't try to work around the gate.
 - Every chat/completions POST needs `Content-Type: application/json`. (Python

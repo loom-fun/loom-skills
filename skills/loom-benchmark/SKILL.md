@@ -13,30 +13,25 @@ id from a package built by `loom-port-llm/starter/build.py`.
 
 ## 0. Reference: llama.cpp ROCm (not Vulkan, not CPU)
 
-**First, use what is already on the machine, and pick the fastest.**
+**Get the latest lemonade build, then pick the fastest of it and what is installed** (`qualify.sh`
+does both):
 ```bash
 S=${CLAUDE_SKILL_DIR}/scripts
-$S/pick_llamacpp.sh MODEL.gguf     # finds every llama-server with libggml-hip.so, benchmarks each, ranks them
+$S/fetch_llamacpp.sh                 # latest lemonade-sdk/llamacpp-rocm for this GPU -> ~/llamacpp-rocm/<tag> (pre-approved, ~25 s)
+$S/pick_llamacpp.sh MODEL.gguf 8139 "$HOME"   # every llama-server with libggml-hip.so, benchmarked and ranked
 ```
 The baseline is the top-ranked build. Don't choose by version string: the lemonade
 nightly prints `version: 1`, and the tag is usually only in the directory name.
 Builds differ a lot on the same GGUF:
 - LFM2.5-24B prefill: b1274 1,062 tok/s vs b1355 2,140 tok/s;
 - Bolt-E4B with 4 streams: b1274 125 tok/s vs b1355 157 tok/s.
+- A new architecture can need the newest release: no installed build knew `flint`.
 
-A weaker baseline inflates every margin you report. Report the chosen build's path
-and tag.
-
-If none is installed, download the lemonade-sdk ROCm build:
-```bash
-mkdir -p ~/llamacpp-rocm && cd ~/llamacpp-rocm
-gh release download -R lemonade-sdk/llamacpp-rocm -p 'llama-*-ubuntu-rocm-gfx1151-x64.zip'   # latest; or pin a tag, e.g. b1355
-unzip -q llama-*-gfx1151-x64.zip && chmod +x llama-server
-```
-On Windows, download the `llama-*-windows-rocm-gfx1151-x64.zip` asset instead, or reuse a
-lemonade build from `~/.cache/lemonade/bin/llamacpp/`. Either way, check that
-`llama-server --list-devices` shows `ROCm0`, because a build missing its DLLs falls back to CPU silently.
-**Ask the user before running a freshly downloaded binary.** Pick the zip that matches the GPU (`gfx1151` = Strix
+A weaker baseline inflates every margin you report. Report the chosen build's path and tag.
+lemonade-sdk/llamacpp-rocm releases are pre-approved: download them without asking. Check that
+`llama-server --list-devices` shows `ROCm0` (`llamacpp_server.sh` does), because a build missing its
+libraries falls back to CPU silently; `llamacpp_server.sh` also adds lemonade's TheRock runtime libraries
+when a build needs them. Pick the zip that matches the GPU (`gfx1151` = Strix
 Halo). Then:
 ```bash
 LLAMACPP_DIR=<dir> $S/llamacpp_server.sh MODEL.gguf 8130 1 34000   # goldens / long context (1 slot, 34k)
