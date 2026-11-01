@@ -74,6 +74,11 @@ done
 step "2/6 inspect (chat block derived from the template and verified)"
 "$T" -I "$K/inspect_gguf.py" "$gguf" cfg.json 2>&1 | tee inspect.log | grep -v "^chat OK"
 if [ "${PIPESTATUS[0]}" != 0 ] || grep -q "^chat FAIL\|not derivable\|WARNING: no chat block\|WARNING: no kernels\|WARNING: head_dim\|Traceback" inspect.log; then
+  arch=$("$T" -c "import json;print(json.load(open('cfg.json')).get('arch',''))" 2>/dev/null)
+  for ex in "$here"/reference/*-example; do
+    [ -f "$ex/cfg.json" ] && [ "$("$T" -c "import json;print(json.load(open('$ex/cfg.json')).get('arch',''))" 2>/dev/null)" = "$arch" ] && \
+      echo "HINT: reference/$(basename "$ex") is a working port of arch '$arch': cp -r $K kit, overlay the files its README lists, then FROM=build KIT=kit $0 $spec $work $port $mem_gib MODEL_ID"
+  done
   echo "STOP: see inspect.log; fix cfg.json (chat block / formats) by hand as loom-port-llm/SKILL.md describes, then rerun build.py"; exit 3
 fi
 

@@ -119,7 +119,9 @@ $K/loom-benchmark/scripts/finalize.sh $W/pkg http://127.0.0.1:8160 $G $W/bench  
 
 The budget is real: keep tool calls short, don't re-run a passing step, and don't
 re-read files you already read. Long steps (`qualify.sh`, `finalize.sh`) print a
-timestamp per stage; while one runs, prepare the next step instead of waiting idle: read,
+timestamp per stage (run them in the background with output to a log, then
+`loom-benchmark/scripts/wait_log.sh LOG '^QUALIFY_RESULT|^FINALIZE '`; never `until ! pgrep -f ...`, which
+matches itself); while one runs, prepare the next step instead of waiting idle: read,
 write generator code, build packages. **Don't use the GPU while they measure** (qualify stages
 4 and 6, finalize stage 1): an A/B run or a second server then corrupts the baselines.
 

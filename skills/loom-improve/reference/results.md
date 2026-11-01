@@ -21,6 +21,8 @@ never edit old ones. Wall clock is install -> done; the target is the model's ro
 | 2026-11-01 | flint | faster-e2e v9 | 50.6 | 8 | full FAIL: compare 1 prompt at 1.03 (llama.cpp self 1.05), agent reuse turns 1.22/2.74 | 1.03 | 6/6 | quiet GPU; fresh prompts match llama.cpp: decode-vs-prefill numerics via MoE routing most likely (flint-example README) |
 | 2026-11-01 | Muse-Glimmer-30B | faster-e2e v10 | 76 | 4 | **full PASS** (agent 7/7) | 0.41 | 7/7 | quiet GPU; ~25 min were skill bugs fixed since (stale reference signature, sampling crash, raw ambiguity) |
 | 2026-11-01 | Muse-Glimmer-30B | faster-e2e v11 | 70.6 | 2 | **full PASS, AUDIT PASS** | 0.41 | 7/7 | quiet GPU; within its 106-min budget |
+| 2026-11-01 | Bolt-E4B | faster-e2e v12 | **52** (budget 53) | 2 | **full PASS, AUDIT PASS** | 0.35 | 6/6 | quiet GPU; prefill 1k/2k +44/+58 %, decode @2k +12 % vs llama.cpp b1360 |
+| 2026-11-01 | flint (gate re-check) | faster-e2e v12 | – | – | agent 6/6 near-ties, compare all real prompts PASS | 0.50 | 6/6 | stop-token restore fix on the v9 build |
 
 ## Lessons with numbers (why the skill looks the way it does)
 - The default "1 h of optimization" made every end-to-end job > 1 h by construction: the budget is now

@@ -47,7 +47,8 @@ lever says otherwise
   projection (the 1-token rule) decode keeps the whole gain and 4 streams most of it
   (interleaved medians: fixed R=16 118 / 249 tok/s, same R 131 / 368, separate R 131 / 514
   for decode / 4 streams). Setting `MV_WG4` opts into separate 4-token R; then the
-  consistency gate fails by design, so state the batch dependence in the report.
+  consistency gate can fail (it did on Qwen3-0.6B), so run it; on Bolt-E4B `MV_WG4=128` passed
+  consistency and gave 4 streams +8.6 % with decode unchanged (Nov 2026 trial). Keep it only if the gate passes.
 
 ### Fused 1-token QKV and paired-row gated FFN
 - **Fused QKV.** For a single decode token, one launch computes the q, k and v rows
