@@ -26,3 +26,14 @@ sliding window 513 + sinks (KV of the window written by decode vs prefill, or th
 resumed row). Probe: run turn N with reuse and fresh (new conversation with the same rendered prompt)
 and diff the first logits. One golden prompt (2k document) sits at gap 1.03 (llama.cpp's own re-record
 1.05, top-1 p 0.37).
+
+**Diagnosis so far (orchestrator, same build):** reproduced (turns at 541 and 721 tokens diverge after
+4-5 tokens; turns at 262 and 390 match). Sending the same message prefix to a freshly started server
+(cache empty) matches llama.cpp for 42 tokens and fully, respectively. So the forward pass is right and
+the rendering/reuse mechanics check out (byte-exact rendering, identical token counts, full cache
+coverage). What differs is how the reused history's KV was produced: decoded token by token (f32 matvec
+path) vs prefilled (f16 GEMM path, as llama.cpp does for a fresh prompt); with 256 experts, borderline
+routing flips over ~500 decoded tokens can move a later decision. Not proven: Loom reuses only a prompt
+that extends a retained prompt+completion, so "reused but prefilled" can't be forced from the API. To
+settle it, build a variant whose decode routing uses the GEMM path's f16 activations (or prefill in f32)
+and rerun `agent_golden.py`.
