@@ -14,6 +14,7 @@ usage: ablate.py PKG OUT_PKG REGEX [--skip] [--name NAME]
   launch-bound kernels: either works).
   --skip can leave a weight unused (e.g. decode-only expert matvecs), and registration then fails
   ('stage parameter counts differ'): double those instead.
+  Skipping the output head ends generation at once (decode then reports absurd tok/s): double it.
   Examples: REGEX '@attn_decode' (decode attention), '@mv_.*ffn_down' (one matvec), '@rms' (norms).
 """
 import argparse

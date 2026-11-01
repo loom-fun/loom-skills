@@ -23,6 +23,7 @@ never edit old ones. Wall clock is install -> done; the target is the model's ro
 | 2026-11-01 | Muse-Glimmer-30B | faster-e2e v11 | 70.6 | 2 | **full PASS, AUDIT PASS** | 0.41 | 7/7 | quiet GPU; within its 106-min budget |
 | 2026-11-01 | Bolt-E4B | faster-e2e v12 | **52** (budget 53) | 2 | **full PASS, AUDIT PASS** | 0.35 | 6/6 | quiet GPU; prefill 1k/2k +44/+58 %, decode @2k +12 % vs llama.cpp b1360 |
 | 2026-11-01 | flint (gate re-check) | faster-e2e v12 | – | – | agent 6/6 near-ties, compare all real prompts PASS | 0.50 | 6/6 | stop-token restore fix on the v9 build |
+| 2026-11-01 | Qwen3.5-0.8B | faster-e2e v13 | **24.1** (budget 46) | 0 | **full PASS, AUDIT PASS** | 0.36 | 6/6 | quiet GPU; decode +27 %, prefill 1k/2k +22/+28 %, c4 +57 %, 32k prefill -20 % vs llama.cpp b1360 |
 
 ## Lessons with numbers (why the skill looks the way it does)
 - The default "1 h of optimization" made every end-to-end job > 1 h by construction: the budget is now

@@ -80,8 +80,8 @@ The expensive path. Keep it short:
 5. **Check numerically, node by node.** A short numpy forward of layers 0–1 on the trace's tokens
    (gguf `dequantize` for weights) compared with the trace's sums and edge values names the first
    misunderstood op in minutes. Then the Loom kernels against numpy (kernel tests), then the gates.
-6. **Resume the scripted path** once the kit builds: `FROM=build KIT=W/kit port.sh ORG/REPO W [PORT]
-   [MEMORY_GIB] MODEL_ID` reruns build, serve, kernel tests and the smoke test from your `cfg.json`
+6. **Resume the scripted path** once the kit builds: `FROM=build KIT=W/kit port.sh ORG/REPO W PORT
+   MEMORY_GIB MODEL_ID` (all three positionals) reruns build, serve, kernel tests and the smoke test from your `cfg.json`
    (no need to replay those stages by hand), then go on with `qualify.sh`.
 7. **Prefill can come second.** A decode-only port (prefill through the matvec path, chunk 1) is
    correct but slow: get the gates passing first, then add GEMM prefill as the first optimization.

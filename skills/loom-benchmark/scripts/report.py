@@ -105,7 +105,8 @@ for r in audit.get("headline", []):
 lines.append("")
 lines.append("## Correctness gates\n")
 for n, g in gates.get("gates", {}).items():
-    lines.append(f"- **{n}**: {'PASS' if g['pass'] else 'FAIL'} ({g.get('seconds', '?')} s)")
+    when = "passed earlier on this exact build, not re-run" if g.get("seconds") == 0 and g["pass"] else f"{g.get('seconds', '?')} s"
+    lines.append(f"- **{n}**: {'PASS' if g['pass'] else 'FAIL'} ({when})")
 if cmp_ok:
     lines.append(f"- golden compare: {len(cmp_ok)} prompts up to {max(r.get('prompt_tokens') or 0 for r in cmp_ok):,} tokens, "
                  f"{sum(r['full_match'] for r in cmp_ok)} exact matches, every divergence a near-tie: "
