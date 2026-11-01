@@ -78,7 +78,9 @@ def summarize(trial, label, rev):
         pkgs = [os.path.dirname(p) for p in glob.glob(os.path.join(trial, "work", "**", "llm_config.json"), recursive=True)
                 if os.path.exists(os.path.join(os.path.dirname(p), "model.json"))]
         if pkgs:
-            pkg = max(pkgs, key=os.path.getmtime)
+            # the final build serves the native context; A/B variants are often built at 8k
+            ctx_of = lambda d: next(iter(json.load(open(os.path.join(d, "model.json")))["presets"].values()))["execution"]["context_capacity"]
+            pkg = max(pkgs, key=lambda d: (ctx_of(d), os.path.getmtime(d)))
             sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "loom-roofline"))
             import e2e_budget as E
             cfg = json.load(open(os.path.join(pkg, "llm_config.json")))
