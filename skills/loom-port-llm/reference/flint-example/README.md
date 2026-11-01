@@ -38,7 +38,10 @@ that extends a retained prompt+completion, so "reused but prefilled" can't be fo
 settle it, build a variant whose decode routing uses the GEMM path's f16 activations (or prefill in f32)
 and rerun `agent_golden.py`.
 
-**Resolved cause (orchestrator):** llama.cpp b1361 itself is not deterministic on this model: three
-identical temperature-0 requests gave two different greedy texts, and its own reused-vs-fresh outputs
-differed on all 6 agent turns. The agent gate compared Loom's reuse turns with a single llama.cpp draw;
-it now re-records a would-fail turn (as compare.py does) and scores the closer recording.
+**Root cause narrowed (orchestrator, Nov 2026):** not llama.cpp noise (re-recording on the same token
+ids reproduces the same divergence). Bisected with config variants, comparing a reused turn with the
+same prompt sent fresh: sinks + sliding window: different on 5/5 reuse turns; sliding window off: still
+different; **attention sinks off: same**. So the two attention implementations disagree on the sink
+term: decode (split-K + combine, unit-tested with sinks, passes) vs prefill (`g_attention_flash2`,
+not unit-tested with sinks). History the model decoded itself then carries different hidden states than
+the same tokens prefilled. Test flash2 with sinks against the numpy reference before reusing this kit.
