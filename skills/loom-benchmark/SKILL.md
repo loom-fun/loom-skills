@@ -129,7 +129,7 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     prompt + completion (history reuse works, including recurrent state).
   - `calls_ok`: tool calls name a declared function with JSON arguments.
   - golden: Loom's turn vs llama.cpp `/completion` on the same prompt ids; a
-    divergence must be a near-tie (gap < 0.5).
+    divergence must be a near-tie (gap ≤ 1.0 with the token in the top-5, the compare.py rule).
   "The model ended inside its reasoning" notes are a greedy-decoding behavior of
   small thinking models, confirmed when llama.cpp's own distribution at that
   point prefers EOS; not a Loom bug by itself.

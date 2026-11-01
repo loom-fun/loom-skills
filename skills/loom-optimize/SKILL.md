@@ -93,7 +93,8 @@ Before you start you need:
   and more between runs. A/B **interleaved**: serve both variants in one loom-serve
   (build each with a distinct `--model-id` and a small `--context`, e.g. 8192, and pass
   both `--model=` paths to serve.sh), then run `${CLAUDE_SKILL_DIR}/ab_perf.py URL MODEL_A MODEL_B
-  --metrics decode,prefill_2k --rounds 5`: it alternates requests, prints medians, B/A and a
+  --metrics decode,prefill_1k,prefill_2k --rounds 5` (always include the shortest size you report:
+  a chunk-size change that won at 2k/8k lost 12 % at 1k on flint): it alternates requests, prints medians, B/A and a
   WINS/LOSES/TIE verdict against the noise band, and logs to `ab_log.jsonl`. Measure llama.cpp right next to the final Loom run. Say in
   the report that the GPU was shared, and budget extra time: gates alone can take 5–10
   minutes each under load.

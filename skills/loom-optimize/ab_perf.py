@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Interleaved A/B of two builds served by ONE loom-serve: the reliable way to decide on a shared GPU.
 
-usage: ab_perf.py URL MODEL_A MODEL_B [--rounds 5] [--metrics decode,prefill_2k] [--log ab_log.jsonl] [--label NAME]
+usage: ab_perf.py URL MODEL_A MODEL_B [--rounds 5] [--metrics decode,prefill_1k,prefill_2k] [--log ab_log.jsonl] [--label NAME]
   metrics: decode (300-token essay, tok/s), decode_2k (256 tokens after a 2k doc),
            prefill_1k / prefill_2k / prefill_8k / prefill_16k / prefill_32k (prompt tok/s, max_tokens 4),
            c4 (4 concurrent 200-token streams, aggregate tok/s)
@@ -30,7 +30,7 @@ ap.add_argument("url")
 ap.add_argument("a")
 ap.add_argument("b")
 ap.add_argument("--rounds", type=int, default=5)
-ap.add_argument("--metrics", default="decode,prefill_2k")
+ap.add_argument("--metrics", default="decode,prefill_1k,prefill_2k")
 ap.add_argument("--log", default="ab_log.jsonl")
 ap.add_argument("--label", default="")
 a = ap.parse_args()

@@ -7,7 +7,7 @@ For every assistant turn of a deterministic tool-using conversation it checks
      lower: the previous turn's EOS is already in the row);
   2. reuse: prompt_tokens_details.cached_tokens (the previous turn's history is retained);
   3. golden: Loom's greedy output vs llama.cpp's on the *same prompt ids* (log-prob gap at
-     the first divergence; a near-tie is < 0.5 nats), when --llama is given;
+     the first divergence; a near-tie is <= 1 nat with Loom's token in the top-5, as in compare.py), when --llama is given;
   4. tool calls: parsed name/arguments are valid JSON for the declared function.
 
 usage: agent_golden.py PKG LOOM_URL [--llama URL] [--thinking on|off|default] [--out FILE]
@@ -107,7 +107,8 @@ def main():
                 if k is not None:
                     top = {t["id"]: t["logprob"] for t in g["completion_probabilities"][k]["top_logprobs"]}
                     gap = top[gids[k]] - top[loom_ids[k]] if loom_ids[k] in top else None
-                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=gap is not None and gap < 0.5)
+                    # Same near-tie rule as compare.py (gap <= 1 nat, Loom's token in llama.cpp's top-5).
+                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=gap is not None and gap <= 1.0)
             golden_ok = rec.get("golden_match", True) or rec.get("near_tie", False)
             ok = rec["render_ok"] and rec["reuse_ok"] and rec["calls_ok"] and golden_ok
             failures += not ok

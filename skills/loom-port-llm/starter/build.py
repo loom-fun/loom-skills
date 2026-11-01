@@ -64,6 +64,10 @@ pool = max(pool, context)
 # loom-serve rejects a pool its paged cache geometry can't represent ("source cache geometry cannot
 # represent this pool", e.g. 43352): keep it a multiple of 1024 positions.
 pool = max(pool // 1024 * 1024, -(-context // 1024) * 1024)
+if pool < 1.5 * context:
+    print(f"WARNING: KV pool {pool} < 1.5x context {context}: a full-context request can fail with 503 while other rows "
+          f"retain history (the full-context gate did on flint). Raise --memory-gib (pool 2x context needs "
+          f"~{(weights_bytes + 2 * context * kv_per_position) / 2**30 + 6:.0f} GiB) or lower --context.")
 a.context, a.pool = context, pool
 model_id = a.model_id or re.sub(r"[^A-Za-z0-9._/-]+", "-", cfg.get("name", "llm")).strip("-")
 pkg = os.path.abspath(a.package)

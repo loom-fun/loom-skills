@@ -53,6 +53,14 @@ repo = sys.argv[2]; base = re.sub(r"[-_.]gguf$", "", repo, flags=re.I)
 out += [base, repo]
 org, name = base.split("/", 1)
 out += [f"Qwen/{name}", f"{org}/{name}-Instruct"]
+# Not named in the GGUF and not at the guessed repos (flint: RecursiveSI/flint, not unsloth/flint):
+# ask the Hub for repos of the same name, most downloaded first (non-GGUF repos carry tokenizer.json).
+try:
+    import json, urllib.request
+    q = urllib.request.urlopen(f"https://huggingface.co/api/models?search={name}&sort=downloads&limit=10", timeout=20)
+    out += [m["id"] for m in json.load(q) if "gguf" not in m["id"].lower()]
+except Exception:
+    pass
 print(" ".join(dict.fromkeys(out)))
 EOF
 )

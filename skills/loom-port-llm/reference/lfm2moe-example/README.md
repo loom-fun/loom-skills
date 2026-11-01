@@ -21,4 +21,10 @@ the full 131k. Open at the time (both in near-ties of the MoE router, neither pr
 - one prompt diverged at gap 1.4 (llama.cpp itself moved 0.44 nats there between runs);
 - consistency failed intermittently (gap 0.33): a decode token sharing an epoch with a prefill takes
   the f16 GEMM path, and the difference flips a router near-tie.
-Start there if you port an LFM2 MoE: give the router logits an f32 path in mixed epochs.
+A later flint port built on this file found run-to-run nondeterminism in prefill with the same
+structure (a prompt alone, 4 runs, different greedy text): the router wrote its top-k weights to
+global memory and re-read them after a workgroup barrier, and workgroups of neighboring tokens
+share cache lines, so some reads were stale. Keeping the winners' probabilities in registers fixed
+it. Check `gen_moe_lfm.py`'s routing for the same pattern first: it is the likelier cause of the
+LFM2.5 consistency failure than the f16 path. Test: send one >= 64-token prompt alone several times;
+greedy output must be identical.
