@@ -16,6 +16,9 @@ never edit old ones. Wall clock is install -> done. "Contended" = another trial 
 | 2026-10-31 | LFM2.5-24B-A2B (lfm2moe) | faster-e2e v3 | 48 | 17 | full FAIL (compare 1 prompt, consistency near-tie) | 1.42 | 6/6 | new MoE + short-conv kernels written in the run; contended |
 | 2026-10-31 | Muse-Glimmer-30B | faster-e2e v5 | 182 | 37 | full FAIL (agent reuse, sampling) | 0.35 | 6/7 | qualify 72 min (llama.cpp goldens 22 min on a 30B at ~9 tok/s); contended |
 | 2026-11-01 | flint (40B MoE, sinks, SWA) | faster-e2e v7 | 69 | 7 | full FAIL (1 agent turn at gap 0.70; rule since aligned to 1.0) | 0.50 | 6/6 | ~19 min lost: no installed llama.cpp knew `flint` (fetch_llamacpp.sh since); router race fixed in-trial; uncontended GPU |
+| 2026-11-01 | LFM2.5-24B-A2B | faster-e2e v8 | 32 | 2 | full: all PASS but consistency (0.085 near-tie, deterministic alone; passes under the aligned rule since) | 0.63 | 6/6 | quiet GPU; beat llama.cpp on every metric; reference from the same model |
+| 2026-11-01 | flint | faster-e2e v9 | 50.6 | 8 | full FAIL: compare 1 prompt at 1.03 (llama.cpp self 1.05), agent reuse turns 1.22/2.74 | 1.03 | 6/6 | quiet GPU; fresh prompts match llama.cpp: decode-vs-prefill numerics via MoE routing most likely (flint-example README) |
+| 2026-11-01 | Muse-Glimmer-30B | faster-e2e v10 | 76 | 4 | **full PASS** (agent 7/7) | 0.41 | 7/7 | quiet GPU; ~25 min were skill bugs fixed since (stale reference signature, sampling crash, raw ambiguity) |
 
 ## Lessons with numbers (why the skill looks the way it does)
 - The default "1 h of optimization" made every end-to-end job > 1 h by construction: the budget is now
