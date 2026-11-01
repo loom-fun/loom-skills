@@ -24,22 +24,74 @@ Prerequisites:
 - The llama.cpp ROCm reference is available (`loom-benchmark`), for the golden
   comparison.
 
-## Fast path: one command (≈40 s for a 0.6–0.8B model)
+## Fast path: one command (≈1 min for a 0.6–0.8B model)
 
 ```bash
-LOOM_ROOT=~/loom ${CLAUDE_SKILL_DIR}/port.sh <org>/<repo-GGUF>[:file.gguf] ~/work/mymodel [PORT=8160] [MEMORY_GIB=56] [MODEL_ID]
-# then the gates (loom-benchmark), with the same package:
+LOOM_ROOT=~/loom ${CLAUDE_SKILL_DIR}/port.sh <org>/<repo-GGUF>[:file.gguf] ~/work/mymodel [PORT] [MEMORY_GIB] [MODEL_ID]
+#   PORT, MEMORY_GIB, MODEL_ID are positional (defaults 8160, 56, derived): e.g. ... ~/work/m 8260 40
+# then, in an end-to-end job, loom-benchmark/scripts/qualify.sh (gates + baselines + roofline);
+# or just the gates:
 LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmark/scripts/gates.sh \
   ~/work/mymodel/pkg http://127.0.0.1:8160 ~/work/mymodel/gguf/<file.gguf> ~/work/mymodel/bench [LLAMA_PORT=8130]
 ```
-`port.sh` runs steps 1–6 below deterministically: it downloads the GGUF (Q4_K_M, else
-Q8_0) and the base model's tokenizer, inspects, stops if the chat block isn't verified,
-builds at the native context, serves (state in `WORKDIR/state`), runs the kernel tests and
-a smoke test (chat + a tool call), and prints `PORT_RESULT {...}`. Its exit code says
-where it stopped (2 download, 3 chat template, 4 build/serve, 5 kernel tests, 6 smoke);
-only then do you need the manual steps below for that stage. `gates.sh` writes
-`bench/gates.json` with one verdict (see `loom-benchmark`). Verified on Qwen3-0.6B
-(Q8_0) and Qwen3.5-0.8B (Q4_K_M).
+`port.sh` runs steps 1–6 below deterministically:
+- picks the GGUF (`starter/pick_gguf.py`: reads only the headers; the best quant whose tensor
+  formats the starter supports and that fits twice in GPU memory; it names the formats that need
+  a dequant helper when no file is fully supported), downloads it into the HF cache (symlinked as
+  `WORKDIR/gguf/`), and fetches the base model's tokenizer;
+- inspects, stops if the chat block isn't verified, builds at the native context, serves (state
+  in `WORKDIR/state`), runs the kernel tests and a smoke test (chat + a tool call), and prints
+  `PORT_RESULT {...}`;
+- starts the end-to-end clock (`WORKDIR/.e2e_start`).
+
+Its exit code says where it stopped (2 download, 3 chat template or uncovered architecture,
+4 build/serve, 5 kernel tests, 6 smoke); only then do you need the manual steps below for that
+stage. Verified on Qwen3-0.6B (Q8_0/Q4_K_M) and Qwen3.5-0.8B (Q4_K_M).
+
+## New architecture (port.sh exit 3 with "no kernels", or a model the starter doesn't cover)
+
+The expensive path. Keep it short:
+1. **Get the spec from llama.cpp itself.** `starter/llama_trace.py LLAMACPP_DIR MODEL.gguf "Hello world" --grep '-0$'`
+   prints layer 0's compute graph as llama.cpp runs it (op, input names, shapes, values). Use
+   `--grep '-N$'` for a layer of each kind (sliding/global, attention/recurrent, dense/MoE). This
+   is faster and more exact than reading C++; the GGUF's `arch.*` metadata gives the constants.
+2. **Diff it against what the starter does** for a dense layer (Qwen3: `attn_norm → Qcur/Kcur/Vcur
+   (+ q/k norm, RoPE) → attention → attn_output → ffn_inp → ffn_norm → gate/up → swiglu → down →
+   l_out`). Every extra node or different op is a feature to add; write the list down first.
+3. **Copy the starter into the work dir** (`cp -r ${CLAUDE_SKILL_DIR}/starter W/kit`) and extend
+   the copy: a cfg flag per feature in `inspect_gguf.py`, the op in `gen_llm.py` (decode first:
+   matvec path, prefill later), and a kernel test case in `make_kernel_tests.py`. If you change
+   `chat_probe.py` (a chat format it can't model), `export LOOM_KIT=W/kit`: the benchmark
+   scripts then render prompts with your copy, and use its `raw_from_chat(chat, message, finished,
+   thinking)` if you define one (how a reply's channels map back to raw text, for a format the
+   default doesn't cover). No need to copy the skills tree. Reuse before
+   writing: **check `reference/` for the architecture family first** (`gemma4-example`, `lfm2moe-example`,
+   `flint-example` (MoE + sinks + SWA), `glimmer-example` (ATEM channel chat, norm RoPE, NoPE)); **for any MoE,
+   start from `reference/lfm2moe-example/` or `flint-example/`** (top-k router, expert matvecs and
+   grouped WMMA prefill on top of the starter; a flint port added sinks, NoPE and shared experts on it
+   in ~12 min); `../loom-optimize/reference/flint-moe-example/` is an older hand-written MoE (q4_1)
+   for ideas, not a base; `reference/gemma4-example/` is a whole Gemma 4 port (kernels and
+   chat format; reference files are snapshots from older starters: overlay only the files the
+   example's README lists, merging shared ones by diff against your starter copy); `reference/lfm2moe-example/` has LFM2 short-conv layers and a top-k MoE with grouped WMMA prefill; the starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
+4. **Test every path that implements an op.** Attention runs in three kernels (decode split-K + combine,
+   prefill `flash2`, the listed fallback for mixed tiles); a feature added to one (sinks, softcap, a gate,
+   a window) must be added and unit-tested in all of them. A mismatch passes the goldens and shows up only
+   when a turn reuses history the model decoded itself (flint: sinks differed between flash2 and split-K).
+5. **Check numerically, node by node.** A short numpy forward of layers 0–1 on the trace's tokens
+   (gguf `dequantize` for weights) compared with the trace's sums and edge values names the first
+   misunderstood op in minutes. Then the Loom kernels against numpy (kernel tests), then the gates.
+6. **Resume the scripted path** once the kit builds: `FROM=build KIT=W/kit port.sh ORG/REPO W PORT
+   MEMORY_GIB MODEL_ID` (all three positionals) reruns build, serve, kernel tests and the smoke test from your `cfg.json`
+   (no need to replay those stages by hand), then go on with `qualify.sh`.
+7. **Prefill can come second.** A decode-only port (prefill through the matvec path, chunk 1) is
+   correct but slow: get the gates passing first, then add GEMM prefill as the first optimization.
+8. **The chat block** for templates `chat_probe.py` can't model (channels, role tags without a
+   suffix, tools inside a message): see the checklist below and
+   `reference/examples/atem_*` (a channel format end to end).
+9. **Work in parallel when you can spawn agents.** The kernels (steps 1–6) and the chat block
+   (step 8: `chat_probe.py` + `control.loom`, verified against the Jinja template) are
+   independent until `build.py`. Give the chat work to a subagent on its own copy of the kit and
+   its own port; merge when both pass.
 
 ## Workflow, step by step (what port.sh does; use it to debug a stage)
 
@@ -82,7 +134,7 @@ valid calls), and `needle.py` passes up to the context capacity with a clean 400
 | File | Role |
 |---|---|
 | `inspect_gguf.py` | GGUF metadata → `cfg.json`: hidden, layers, heads/kv_heads, head_dim, ffn, vocab, **context_length**, rms_eps, rope_theta/type, **rope_dims** (partial RoPE), qk_norm, attn_gate (`true`: separate tensor; `"fused_q"`: packed in attn_q), post_norms, sliding window/layers, NoPE layers, tied embeddings, eos ids, **recurrent_layers / gdn** (hybrids), the chat block (via `chat_probe.py`), and every tensor's format and shape. |
-| `chat_probe.py` | Renders the model's Jinja chat template on probe conversations and cuts out what the control program needs: role prefixes/suffix, BOS, default system prompt, generation prompts with thinking on/off, the tools block and its order relative to the system message, the tool-call format (`hermes` JSON, `qwen_xml`, `glm`) and separators, tool-response framing, reasoning-in-history policy, trimming. `verify()` re-renders a dozen conversations exactly as `control.loom` will (`simulate()`) and diffs them against the template. `simulate()` is also what the benchmark scripts use to build golden prompts. |
+| `chat_probe.py` | Renders the model's Jinja chat template on probe conversations and cuts out what the control program needs: role prefixes/suffix, BOS, default system prompt, generation prompts with thinking on/off, the tools block and its order relative to the system message, the tool-call format (`hermes` JSON, `qwen_xml`, `glm`, `pythonic`) and separators, tool-response framing, reasoning-in-history policy, trimming. `verify()` re-renders a dozen conversations exactly as `control.loom` will (`simulate()`) and diffs them against the template. `simulate()` is also what the benchmark scripts use to build golden prompts. |
 | `gen_llm.py` | `cfg.json` → `llm.loom`: all kernels plus the `@llm_advance` command program. The command program is a **static per-layer unroll**, so each layer's kind (attention or gated delta-net) and tensor formats come from the GGUF (Q4_K_M mixes Q4_K/Q5_K/Q6_K/Q8_0 per tensor). |
 | `gen_gdn.py` | Gated delta-net kernels (conv1d + SiLU, history commit, q/k L2 norms, register recurrence, gated RMSNorm) and the fused q/gate split, for hybrids. Recurrent state lives in the runtime's recurrent slots (see porting-notes). |
 | `gen_gemm.py` | WMMA prefill GEMMs per (format, mode). Formats: q4_k, q5_k, q6_k, q8_0. Modes: store, acc, swiglu. |
@@ -90,6 +142,8 @@ valid calls), and `needle.py` passes up to the context capacity with a clean 400
 | `tile_uniform.loom` | Helper that classifies 16-token tiles for flash2. |
 | `templates/*.loom` | Serving glue for the hrx-loom 0.1.0 text ABI (`text_*_v1` exports). `prepare` stages one program per packing shape. `storage` sets the KV geometry (2 planes per attention layer, F16) and the recurrent slot size. `control` is the chat policy: rendering, tools, reasoning, thinking switch, tokenization, output channels, tool-call parsing, canonical history for reuse. `service` maps the ABI exports. `weights.loom` is the parameter policy. |
 | `build.py` | Fills the templates from `cfg.json["chat"]`, sizes context/pool/memory, then writes `model.json`, `tokenizer.json`, the GGUF symlink and `llm_config.json` (read by the benchmark scripts). |
+| `pick_gguf.py` | Chooses the GGUF in a repo from the headers only (HTTP range read): quant preference, tensor formats the kit supports, and the memory rule (the file must fit twice: llama.cpp and Loom run side by side in the gates). |
+| `llama_trace.py` | llama.cpp's intermediate tensors and compute graph for a prompt (`llama-eval-callback`): the spec and the node-by-node reference for a new architecture. |
 | `make_kernel_tests.py`, `run_kernel_tests.sh` | `check.case` unit tests with numpy references (gguf dequantize) on the real tensor shapes: embed, matvecs (every format/K in use), QK-norm + RoPE, the attention chain (q/gate split → RoPE + paged KV store → split-K attention → gated combine), the output head argmax, and the gated delta-net chain on a span that continues a stored state. |
 
 Kernel inventory:
@@ -158,12 +212,22 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   are exact. Check the printed summary against the model card:
   - `thinking`: `toggle` (Qwen3, Qwen3.5: `enable_thinking`), `always`, or `never`
     (`*-Instruct-2507`); `thinking_default` (Qwen3: on; Qwen3.5 small models: **off**);
-  - `call_format`: `hermes` (Qwen2.5/Qwen3), `qwen_xml` (Qwen3.5/Qwen3-Coder), `glm`;
+  - `call_format`: `hermes` (Qwen2.5/Qwen3), `qwen_xml` (Qwen3.5/Qwen3-Coder), `glm`, `pythonic`
+    (LFM2: `<|tool_call_start|>[f(a='x', n=3)]<|tool_call_end|>`, parsed in control.loom);
   - `default_system` (Qwen2.5 inserts "You are Qwen, created by Alibaba Cloud…").
 
+  **History reuse depends on the canonical rendering.** `complete_text` must store the turn as the
+  template re-renders it, not as the model generated it. Two trials failed `reuse_ok` here: a model
+  that omits `<|eom|>` before a tool call (the template renders it), and one that writes newlines
+  after a call that the template drops. If `reuse_ok` fails after a tool call, diff Loom's
+  `input_tokens` rendering of the next turn against `chat_probe.simulate()` and canonicalize those bytes.
+  GLM-style templates: the model ends a call turn with `<|observation|>` and an answer with `<|user|>`;
+  those stop tokens stay in the KV row, so set `chat.stop_after_calls` / `chat.stop_after_answer`:
+  `complete_text` publishes them, and `g_embed` maps the service terminal loom-serve feeds back at the
+  next turn to the real stop token (`stop_restore()`; flint reused turns diverged at gaps up to 2.7 without it).
   Templates the probe can't model (e.g. role tags with no closing suffix, tools
   inside the first user message, channel formats): fill the block by hand, keep
-  `simulate()` in step, and rerun `chat_probe.py` until every line is OK. If the
+  `simulate()` in step, and run `chat_probe.py MODEL.gguf --verify cfg.json` (your kit's copy) until every line is OK. If the
   control program must parse structural tokens out of the generated text (e.g.
   channel tags), list them in `chat.nonspecial_tokens`: loom-serve strips special
   tokens from decoded text.
@@ -195,7 +259,8 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
    kernel holds too much in registers for this model's shape. Reload operands per
    iteration instead of keeping them live (flash2 does this for head_dim 256).
 7. **Coherent but wrong from the first token, kernel tests pass.** A wiring or
-   config bug: read the generated command program for one layer of each kind
+   config bug. Compare against `starter/llama_trace.py` (llama.cpp's intermediate tensors,
+   node by node) with a numpy forward of layers 0–1; then read the generated command program for one layer of each kind
    (`awk '/---- layer N$/,/---- layer N+1/' pkg/program/llm.loom`). A real example:
    a stale cfg.json with `qk_norm: false` left Qwen3.5's Q/K norms out (`%no_norm`).
    An independent numpy forward of a short prompt that matches llama.cpp's top
@@ -211,7 +276,9 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   2. bucket tokens by expert, using an info buffer;
   3. grouped expert GEMMs over the buckets;
   4. combine.
-- **Gemma-3n / Gemma-4 family (arch `gemma3n`, `gemma4`).** Read llama.cpp's
+- **Gemma-3n / Gemma-4 family (arch `gemma3n`, `gemma4`).** Start from `reference/gemma4-example/`: a
+  complete, gate-passing Gemma 4 port (kernels, head_dim-512 flash prefill, the chat format in
+  `control.loom` + `chat_probe.py`). Merge it into your kit copy instead of re-deriving it. Read llama.cpp's
   `src/models/gemma*.cpp` closely. The starter has none of these features, and each
   one silently breaks output if missed:
   - **Per-layer embeddings (PLE).** A gathered `per_layer_token_embd` row, plus a
@@ -231,6 +298,9 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   - **Tensors.** bf16 tensors need a bf16 value helper (`view<32xbf16>` →
     `vector.extf`).
 
+  **Sliding layers with a small window (≤ ~1k keys, Gemma's 512) don't need flash prefill**: the
+  window bounds their attention cost, so the split-K path is fine there. A trial spent 15 min
+  getting flash2 to fit registers for them, for no gain; spend it on the global layers instead.
   Gemma's 512-wide global heads exceed the starter's head_dim 128/256 kernels: generalize
   the split-K attention (D/32 values per lane) and, for prefill, flash2 (it already loops
   over D/16 fragments and reloads Q when registers run out). Record it as a lever in the roofline.

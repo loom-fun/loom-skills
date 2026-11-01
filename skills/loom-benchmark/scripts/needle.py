@@ -32,7 +32,7 @@ import time
 
 import requests
 
-from bench_common import DATA, Package
+from bench_common import DATA, Package, llama_completion
 
 QUESTIONS = {
     1: ("\n\n----\nSomewhere in the material above there is exactly one sentence of the form "
@@ -127,8 +127,8 @@ def main():
             if ok and a.llama and n <= a.llama_max:
                 pids = P.ids(P.render_messages([{"role": "user", "content": prompt}], None, thinking))
                 t0 = time.time()
-                g = requests.post(a.llama + "/completion", timeout=7200, json={
-                    "prompt": pids, "n_predict": a.max_tokens, "temperature": 0, "n_probs": 5, "cache_prompt": False}).json()
+                g = llama_completion(a.llama, {
+                    "prompt": pids, "n_predict": a.max_tokens, "temperature": 0, "n_probs": 5, "cache_prompt": False}, P)
                 cp = g.get("completion_probabilities", [])
                 gids = [x["id"] for x in cp]
                 lids = P.ids(text)

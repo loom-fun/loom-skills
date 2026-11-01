@@ -71,6 +71,21 @@ cfg = {
     "chat": None,
     "tensors": tensors,
 }
+if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3"):
+    print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
+          "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
+          "before trusting a golden FAIL or PASS")
+_g = cfg["heads"] // max(cfg["kv_heads"], 1)
+if _g & (_g - 1):
+    print(f"WARNING: head_dim {head_dim}: {_g} query heads per KV head; the prefill flash attention (gen_flash2.py) "
+          "tiles head_dim over 32*G lanes and needs G to be a power of two: generalize it first (new kernel work)")
+# Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style).
+pat = A("attention.sliding_window_pattern")
+if cfg["sliding_window"] and isinstance(pat, list) and len(pat) == L:
+    cfg["sliding_layers"] = [i for i, sl in enumerate(pat) if sl]
+elif cfg["sliding_window"]:
+    print(f"WARNING: sliding_window {cfg['sliding_window']} but no per-layer pattern in the GGUF: fill "
+          "sliding_layers (and nope_layers) by hand from llama.cpp's src/models/<arch>.cpp or llama_trace.py")
 # Partial rotary embedding (e.g. qwen35: 64 of 256 dims).
 rope_dims = A("rope.dimension_count")
 if rope_dims and rope_dims != head_dim:

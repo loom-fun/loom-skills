@@ -5,8 +5,10 @@ A *package* is a directory with model.json + tokenizer.json + llm_config.json
 the single source of truth for prompt rendering, so llama.cpp (golden, fed raw
 token ids) and Loom (fed chat messages) see byte-identical prompts.
 """
+import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -14,8 +16,11 @@ import requests
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(os.path.dirname(HERE), "data")
-# chat_probe.simulate() is the Python model of the starter's control.loom rendering.
+# chat_probe.simulate() is the Python model of the starter's control.loom rendering. A port that
+# extends the kit (a copied starter with its own chat_probe.py) sets LOOM_KIT=that dir.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "loom-port-llm", "starter"))
+if os.environ.get("LOOM_KIT"):
+    sys.path.insert(0, os.path.abspath(os.environ["LOOM_KIT"]))
 import chat_probe  # noqa: E402
 
 PROMPTS = [
@@ -67,16 +72,23 @@ class Package:
     def ids(self, text):
         return self.tok.encode(text, add_special_tokens=False).ids
 
-    def raw_from_chat(self, message, finished, thinking=None):
+    def raw_from_chat(self, message, finished, thinking=None, prompt=None):
         """Rebuild the model's raw output text from Loom's parsed channels so it can be
         re-tokenized and compared token-by-token with the golden ids. `thinking` is the
-        request's thinking selection (default: the template default)."""
+        request's thinking selection (default: the template default). A kit (LOOM_KIT) whose
+        chat_probe.py defines raw_from_chat(chat, message, finished, thinking, prompt) overrides this;
+        `prompt` is the rendered prompt when known (a format whose prompt can already open the
+        reasoning channel, e.g. Gemma 4 after tool results, needs it)."""
         c = self.chat
+        if hasattr(chat_probe, "raw_from_chat"):
+            try:
+                return chat_probe.raw_from_chat(c, message, finished, thinking, prompt)
+            except TypeError:   # a kit written before the prompt argument existed
+                return chat_probe.raw_from_chat(c, message, finished, thinking)
         on = c.get("thinking_default", c.get("starts_in_reasoning")) if thinking is None else thinking
         reasoning = message.get("reasoning_content")
         content = message.get("content") or ""
-        calls = "".join((c["call_separator"] if i else "") + chat_probe.render_call(c, t["function"])
-                        for i, t in enumerate(message.get("tool_calls") or []))
+        calls = chat_probe.render_calls(c, message.get("tool_calls") or [])   # wraps pythonic call lists
         answer = content + (c["content_call_separator"] if content and calls else "") + calls
         if not (c.get("starts_in_reasoning") and on):
             return answer
@@ -86,6 +98,77 @@ class Package:
         if answer or finished:
             text += end + after + answer
         return text
+
+
+def _gguf_fingerprint(path):
+    """Identity of a GGUF without hashing gigabytes: name, size and the first 4 MiB."""
+    if not path or not os.path.exists(path):
+        return str(path)
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        h.update(f.read(4 << 20))
+    return f"{os.path.basename(os.path.realpath(path))}:{os.path.getsize(path)}:{h.hexdigest()[:16]}"
+
+
+_FP = {}
+
+
+def llama_completion(url, body, pkg=None, salt="", timeout=7200):
+    """llama.cpp /completion with a persistent on-disk cache.
+
+    The llama.cpp reference only depends on the GGUF, the llama.cpp build and the request,
+    never on the Loom build, so every gate run after the first reuses it: re-running the gates
+    on an optimized build costs Loom time only. Cache: $LLAMA_CACHE or ./llama_cache (bench/).
+    `salt` separates deliberate re-recordings (golden2: llama.cpp is not run-to-run deterministic).
+    On a miss, when nothing answers at `url` and $LLAMA_START is set (gates.sh sets it), that
+    command is run once to start llama-server (lazy start: a fully cached gate run never loads it).
+    """
+    gguf = pkg.cfg.get("gguf") if pkg is not None else os.environ.get("LLAMA_GGUF")
+    if gguf not in _FP:
+        _FP[gguf] = _gguf_fingerprint(gguf)
+    key = hashlib.sha256(json.dumps({"gguf": _FP[gguf], "build": os.environ.get("LLAMACPP_DIR", ""),
+                                     "body": body, "salt": salt}, sort_keys=True).encode()).hexdigest()
+    d = os.environ.get("LLAMA_CACHE", "llama_cache")
+    path = os.path.join(d, key[:2], key + ".json")
+    if os.path.exists(path):
+        try:
+            return json.load(open(path))
+        except ValueError:
+            pass
+    ensure_llama(url)
+    for attempt in range(2):
+        r = requests.post(url + "/completion", json=body, timeout=timeout).json()
+        # llama.cpp must have evaluated the whole prompt: fewer tokens means it answered from some
+        # cached state (seen: an old build answering the previous prompt). Retry once, never cache it.
+        n_eval = (r.get("timings") or {}).get("prompt_n")
+        ok = n_eval is None or not isinstance(body.get("prompt"), list) or n_eval == len(body["prompt"])
+        if ok:
+            break
+        print(f"[llama] WARNING: evaluated {n_eval} of {len(body['prompt'])} prompt tokens; retrying", flush=True)
+    if not ok:
+        r["_suspect"] = f"llama.cpp evaluated {n_eval} of {len(body['prompt'])} prompt tokens"
+        return r
+    if "completion_probabilities" in r or "tokens" in r:  # don't cache errors
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + f".{os.getpid()}"
+        json.dump(r, open(tmp, "w"))
+        os.replace(tmp, path)
+    return r
+
+
+def ensure_llama(url):
+    try:
+        if requests.get(url + "/health", timeout=3).ok:
+            return
+    except requests.RequestException:
+        pass
+    cmd = os.environ.get("LLAMA_START")
+    if not cmd:
+        raise SystemExit(f"llama.cpp is not answering at {url} (and LLAMA_START is not set)")
+    print(f"[llama] cache miss: starting llama-server ({cmd})", flush=True)
+    r = subprocess.run(cmd, shell=True)
+    if r.returncode:
+        raise SystemExit(f"could not start llama-server: {cmd}")
 
 
 def stream(url, model, messages, max_tokens, extra=None):

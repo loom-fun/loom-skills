@@ -1,13 +1,15 @@
 #!/bin/bash
 # Start the llama.cpp ROCm reference server (lemonade-sdk/llamacpp-rocm build) on a GGUF.
-# usage: LLAMACPP_DIR=~/llamacpp-rocm llamacpp_server.sh MODEL.gguf [PORT=8130] [PARALLEL=4] [CTX_PER_SLOT=8192]
+# usage: LLAMACPP_DIR=~/llamacpp-rocm llamacpp_server.sh MODEL.gguf [PORT=8130] [PARALLEL=4] [CTX_PER_SLOT=8192] [unified]
 #   golden / long-context runs: PARALLEL=1 CTX_PER_SLOT=34000
+#   `unified` (5th arg): one KV pool of CTX_PER_SLOT tokens shared by PARALLEL slots (-kvu), so a single
+#   request can use all of it and 4 streams still run: one server covers goldens, needle and perf.
 #   stop: kill $(cat ${LLAMACPP_STATE:-/tmp}/llamacpp-$PORT.pid)   (LLAMACPP_STATE: pid/log dir, default /tmp)
 # Refuses a build that does not see a ROCm device: on Windows, builds missing their HIP/BLAS DLLs
 # silently fall back to CPU.
 set -e
 state=${LLAMACPP_STATE:-/tmp}; mkdir -p "$state"
-gguf=$1; port=${2:-8130}; np=${3:-4}; per=${4:-8192}
+gguf=$1; port=${2:-8130}; np=${3:-4}; per=${4:-8192}; mode=${5:-}
 case "$gguf" in /*|?:*) ;; *) gguf=$PWD/$gguf;; esac   # the server runs from LLAMACPP_DIR
 dir=${LLAMACPP_DIR:?set LLAMACPP_DIR to the unzipped llamacpp-rocm release}
 listeners() { if command -v ss >/dev/null; then ss -ltnp | grep ":$port "; else netstat -ano -p tcp | tr -d '\r' | grep LISTENING | grep ":$port "; fi; }
@@ -16,8 +18,27 @@ if curl -s -m 2 localhost:$port/health >/dev/null 2>&1 || listeners >/dev/null; 
 fi
 cd "$dir"
 exe=./llama-server; [ -f $exe.exe ] && { exe=$exe.exe; command -v cygpath >/dev/null && gguf=$(cygpath -w "$gguf"); }
-LD_LIBRARY_PATH=$PWD $exe --list-devices 2>&1 | grep -q ROCm || { echo "$dir/llama-server sees no ROCm device:"; LD_LIBRARY_PATH=$PWD $exe --list-devices 2>&1 | tail -5; exit 1; }
-LD_LIBRARY_PATH=$PWD nohup $exe -m "$gguf" -ngl 99 -c $((np * per)) -np $np --port $port --host 127.0.0.1 > $state/llamacpp-$port.log 2>&1 &
+# Libraries: the build dir, plus any ROCm runtime it links but doesn't ship (lemonade's rocm-stable
+# builds use the TheRock runtime from ~/.cache/lemonade/bin/therock-wheels). LLAMACPP_LIBS= adds dirs.
+libpath=$PWD${LLAMACPP_LIBS:+:$LLAMACPP_LIBS}
+probe=$exe; [ -f libggml-hip.so ] && probe=./libggml-hip.so   # the HIP backend is dlopened: ldd it, not the exe
+if command -v ldd >/dev/null && LD_LIBRARY_PATH=$libpath ldd $probe 2>/dev/null | grep -q "not found"; then
+  # Add one runtime install's lib dirs, all of them (the HIP runtime dlopens more than ldd lists).
+  for sp in $(ls -d "$HOME"/.cache/lemonade/bin/therock-wheels/*/venv/lib/python*/site-packages 2>/dev/null) /opt/rocm; do
+    cand=$libpath
+    for d in "$sp"/_rocm_sdk_core/lib "$sp"/_rocm_sdk_core/lib/llvm/lib "$sp"/_rocm_sdk_libraries/lib "$sp"/lib; do
+      [ -d "$d" ] && cand=$cand:$d
+    done
+    LD_LIBRARY_PATH=$cand ldd $probe 2>/dev/null | grep -q "not found" || { libpath=$cand; break; }
+  done
+  LD_LIBRARY_PATH=$libpath ldd $probe 2>/dev/null | grep "not found" && { echo "$dir/llama-server: missing libraries (set LLAMACPP_LIBS)"; exit 1; }
+fi
+export LD_LIBRARY_PATH=$libpath
+$exe --list-devices 2>&1 | grep -q ROCm || { echo "$dir/llama-server sees no ROCm device:"; $exe --list-devices 2>&1 | tail -5; exit 1; }
+ctxarg=(-c $((np * per))); [ "$mode" = unified ] && ctxarg=(-c $per -kvu)
+# -cram 0: no host-RAM prompt cache. Every reference request is independent (cache_prompt false), and
+# an old build (b10820, a sliding-window model) answered the PREVIOUS prompt from that cache.
+nohup $exe -m "$gguf" -ngl 99 -cram 0 "${ctxarg[@]}" -np $np --port $port --host 127.0.0.1 > $state/llamacpp-$port.log 2>&1 &
 echo $! > $state/llamacpp-$port.pid
 for i in $(seq 300); do
   curl -s localhost:$port/health | grep -q ok && { echo "READY llama.cpp $($exe --version 2>&1 | grep -m1 version) on :$port (pid $(cat $state/llamacpp-$port.pid))"; exit 0; }

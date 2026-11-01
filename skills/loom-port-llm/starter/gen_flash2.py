@@ -33,8 +33,13 @@ QH = KVH * G
 LANES = 32 * G
 DPT = D * 32 // LANES            # staged dims per thread per key tile
 TPK = D // DPT                   # threads per key
-assert D in (128, 256) and DPT >= 1 and TPK * DPT == D
+assert D in (128, 256) and DPT >= 1 and TPK * DPT == D, (
+    f"flash2 needs head_dim 128/256 and a power-of-two query heads per KV head (got D={D}, G={G}): "
+    "generalize the staging (32*G lanes tile head_dim) before porting this model")
 KT = int(os.environ.get("FLASH2_KT", "32"))   # keys per tile
+# The K staging loop runs KT // 32 passes of 32 keys: KT=16 generated a kernel that stores nothing
+# (empty output for prompts >= 64 tokens). To cut registers, split the output dims instead.
+assert KT % 32 == 0, f"FLASH2_KT={KT}: must be a multiple of 32"
 KB = KT // 16
 VTC, KBYTES, VTBYTES, KT_LESS = KT + 8, KT * (D + 8) * 2, D * (KT + 8) * 2, KT - 1
 

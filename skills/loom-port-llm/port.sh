@@ -1,41 +1,46 @@
 #!/bin/bash
 # One command from a Hugging Face GGUF repo to a served, tested Loom package.
-# usage: [LOOM_ROOT=~/loom] port.sh ORG/REPO[:FILE.gguf] WORKDIR [PORT=8160] [MEMORY_GIB=56] [MODEL_ID]
-#   1. download the GGUF (FILE, else the repo's Q4_K_M, else Q8_0) and the base model's tokenizer.json
+# usage: [LOOM_ROOT=~/loom] port.sh ORG/REPO[:FILE.gguf] WORKDIR [PORT] [MEMORY_GIB] [MODEL_ID]
+#   positional: PORT (default 8160), MEMORY_GIB (default 56), e.g. port.sh org/repo ~/work/m 8260 40
+#   0. starts the end-to-end clock (WORKDIR/.e2e_start, unless it exists): qualify.sh sizes the
+#      optimization budget from it
+#   1. download the GGUF (FILE, else pick_gguf.py: the best quant whose formats the starter supports
+#      and that fits twice in GPU memory; header-only probe) and the base model's tokenizer.json
 #   2. inspect_gguf.py: config + chat block derived from the template and verified (stops on any FAIL)
 #   3. build.py at the native context, fitted to MEMORY_GIB
 #   4. serve.sh (state in WORKDIR/state), kernel unit tests, smoke test (chat, thinking off, a tool call)
 # Prints PORT_RESULT {...} with the package, model id, context and memory_bytes; the server keeps
 # running (stop: LOOM_SERVE_STATE=WORKDIR/state stop.sh port). Exit codes: 2 download, 3 chat
 # template needs a hand-written block, 4 build/serve, 5 kernel tests, 6 smoke test.
-# Then run loom-benchmark/scripts/gates.sh for the correctness gates.
+# Then run loom-benchmark/scripts/qualify.sh (or gates.sh). After hand-fixing cfg.json (exit 3), resume
+# with FROM=build port.sh ORG/REPO WORKDIR [PORT] [MEMORY_GIB] [MODEL_ID] (stages 3-6; KIT=DIR uses your kit copy).
 set -u
 spec=$1; work=$(mkdir -p "$2" && cd "$2" && pwd); port=${3:-8160}; mem_gib=${4:-56}; model_id=${5:-}
-here=$(cd "$(dirname "$0")" && pwd); K=$here/starter; S=$here/../loom-setup/scripts
+here=$(cd "$(dirname "$0")" && pwd); K=${KIT:-$here/starter}; S=$here/../loom-setup/scripts
 root=${LOOM_ROOT:-$HOME/loom}
 bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts
 T=$bin/python; venv=$root/.venv; hf=$venv/bin/hf; [ -x "$hf" ] || hf=$venv/Scripts/hf
 export LOOM_SERVE_STATE=$work/state PYTHONDONTWRITEBYTECODE=1
 repo=${spec%%:*}; file=""; [ "$spec" != "$repo" ] && file=${spec#*:}
 cd "$work"
-step() { echo "== $*"; }
+[ -s .e2e_start ] || date +%s > .e2e_start
+step() { echo "== $* ($(date +%T))"; }
 
+# FROM=build: resume after hand-fixing cfg.json (exit 3): reuse WORKDIR/gguf, tok and cfg.json, run 3-6.
+if [ "${FROM:-}" = build ]; then
+  gguf=$(ls "$work"/gguf/*.gguf | head -1); [ -f cfg.json ] && [ -f tok/tokenizer.json ] && [ -n "$gguf" ] || { echo "FROM=build needs WORKDIR/cfg.json, tok/tokenizer.json and gguf/"; exit 2; }
+  [ -n "$model_id" ] || model_id=$("$T" -c "import json;print(json.load(open('cfg.json')).get('model_id') or '')")
+  [ -n "$model_id" ] || { echo "FROM=build: pass MODEL_ID (5th argument)"; exit 2; }
+else
 step "1/6 download"
 if [ -z "$file" ]; then
-  file=$("$T" - "$repo" <<'EOF'
-import json, sys, urllib.request
-files = [f["path"] for f in json.load(urllib.request.urlopen(f"https://huggingface.co/api/models/{sys.argv[1]}/tree/main?recursive=true"))
-         if f["path"].lower().endswith(".gguf") and "mmproj" not in f["path"].lower()]
-for q in ("Q4_K_M", "Q4_K_S", "Q5_K_M", "Q6_K", "Q8_0"):
-    hit = [f for f in files if q.lower() in f.lower() and "-of-" not in f]
-    if hit:
-        print(sorted(hit, key=len)[0]); break
-EOF
-)
+  file=$("$T" -I "$K/pick_gguf.py" "$repo") || { echo "STOP: no usable GGUF in $repo (see above); pass ORG/REPO:FILE.gguf"; exit 2; }
 fi
-[ -n "$file" ] || { echo "no supported single-file GGUF (Q4_K_M/Q4_K_S/Q5_K_M/Q6_K/Q8_0) in $repo"; exit 2; }
-"$hf" download "$repo" "$file" --local-dir gguf >/dev/null || { echo "download of $repo/$file failed"; exit 2; }
-gguf=$work/gguf/$file
+# Into the shared HF cache (reused by later runs and by llama.cpp tools), symlinked into WORKDIR/gguf.
+cached=$("$hf" download "$repo" "$file" 2>/dev/null | tail -1 | sed "s/^path=//")
+[ -f "$cached" ] || { echo "download of $repo/$file failed"; exit 2; }
+mkdir -p gguf && ln -sf "$cached" "gguf/$(basename "$file")"
+gguf=$work/gguf/$(basename "$file")
 # Tokenizer: the base model named in the GGUF, else the repo name without -GGUF.
 tokrepos=$("$T" - "$gguf" "$repo" <<'EOF'
 import re, sys
@@ -48,6 +53,14 @@ repo = sys.argv[2]; base = re.sub(r"[-_.]gguf$", "", repo, flags=re.I)
 out += [base, repo]
 org, name = base.split("/", 1)
 out += [f"Qwen/{name}", f"{org}/{name}-Instruct"]
+# Not named in the GGUF and not at the guessed repos (flint: RecursiveSI/flint, not unsloth/flint):
+# ask the Hub for repos of the same name, most downloaded first (non-GGUF repos carry tokenizer.json).
+try:
+    import json, urllib.request
+    q = urllib.request.urlopen(f"https://huggingface.co/api/models?search={name}&sort=downloads&limit=10", timeout=20)
+    out += [m["id"] for m in json.load(q) if "gguf" not in m["id"].lower()]
+except Exception:
+    pass
 print(" ".join(dict.fromkeys(out)))
 EOF
 )
@@ -59,13 +72,21 @@ done
 [ -n "$model_id" ] || model_id=$(echo "$tokrepos" | cut -d' ' -f1)
 
 step "2/6 inspect (chat block derived from the template and verified)"
-"$T" -I "$K/inspect_gguf.py" "$gguf" cfg.json | tee inspect.log | grep -v "^chat OK"
-if grep -q "^chat FAIL\|not derivable\|WARNING: no chat block\|WARNING: no kernels" inspect.log; then
+"$T" -I "$K/inspect_gguf.py" "$gguf" cfg.json 2>&1 | tee inspect.log | grep -v "^chat OK"
+if [ "${PIPESTATUS[0]}" != 0 ] || grep -q "^chat FAIL\|not derivable\|WARNING: no chat block\|WARNING: no kernels\|WARNING: head_dim\|Traceback" inspect.log; then
+  arch=$("$T" -c "import json;print(json.load(open('cfg.json')).get('arch',''))" 2>/dev/null)
+  for ex in "$here"/reference/*-example; do
+    [ -f "$ex/cfg.json" ] && [ "$("$T" -c "import json;print(json.load(open('$ex/cfg.json')).get('arch',''))" 2>/dev/null)" = "$arch" ] && \
+      echo "HINT: reference/$(basename "$ex") is a working port of arch '$arch': cp -r $K kit, overlay the files its README lists, then FROM=build KIT=kit $0 $spec $work $port $mem_gib MODEL_ID"
+  done
   echo "STOP: see inspect.log; fix cfg.json (chat block / formats) by hand as loom-port-llm/SKILL.md describes, then rerun build.py"; exit 3
 fi
 
+fi  # FROM=build
+
 step "3/6 build"
-"$T" "$K/build.py" cfg.json pkg --tokenizer tok/tokenizer.json --model-id "$model_id" --memory-gib "$mem_gib" | tee build.log || exit 4
+"$T" "$K/build.py" cfg.json pkg --tokenizer tok/tokenizer.json --model-id "$model_id" --memory-gib "$mem_gib" | tee build.log
+[ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: build.py failed (build.log)"; exit 4; }
 mem=$(grep -o -- "--memory_bytes=[0-9]*" build.log | cut -d= -f2)
 ctx=$(grep -o "^context [0-9]*" build.log | cut -d' ' -f2)
 

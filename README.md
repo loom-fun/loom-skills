@@ -51,27 +51,27 @@ git clone https://github.com/loom-fun/loom-skills && ./loom-skills/install.sh   
 /loom get <hf-org>/<model> working on loom-serve, optimize it, and report the performance relative to llamacpp rocm
 ```
 
-Claude runs the whole pipeline without stopping:
-1. reuse or install Loom;
-2. port the GGUF;
-3. pass the token-by-token correctness gate against llama.cpp ROCm;
-4. measure the llama.cpp baseline;
-5. run a **roofline analysis** that sets realistic per-metric targets;
-6. optimize under a rate-of-approach controller;
-7. re-run the gates;
-8. serve the model and report.
+Claude runs the whole pipeline without stopping, in about an hour, as four scripted steps
+with the agent's judgment only where it is needed:
+1. `loom-port-llm/port.sh`: pick the GGUF (header-only probe: supported formats, fits in GPU
+   memory), port, build at the native context, serve, kernel tests, smoke test;
+2. `loom-benchmark/scripts/qualify.sh`: pick the fastest llama.cpp ROCm build, run the
+   correctness gates against it, measure both baselines, run the **roofline analysis**
+   (per-metric targets) and size the optimization budget;
+3. optimize under a rate-of-approach controller, with fast gates after each kept change;
+4. `loom-benchmark/scripts/finalize.sh`: the full gates (including a full-context probe)
+   on the final build, final perf, the audit, and a generated report.
 
-It stops to ask only for a gated-model license or approval of a downloaded binary.
+It stops to ask only for a gated-model license. Loom (PyPI) and the latest lemonade-sdk/llamacpp-rocm
+release (the reference) are downloaded without asking.
 
 **What a port includes.** The model's native context length (40,960 for Qwen3-0.6B,
 262,144 for Qwen3.5-0.8B), tool calling in the model's own format, reasoning with an
 on/off switch, history reuse between agent turns, and per-request sampling
 (`temperature`, `top_p`, `top_k`, `seed`). The chat glue is derived from the model's own
 Jinja chat template and verified against it. Dense transformers and Qwen3.5-style
-gated delta-net hybrids are covered by the starter kit. Two scripts make the port and the
-gates deterministic: `loom-port-llm/port.sh` (Hugging Face repo → served, tested
-package in about 40 s) and `loom-benchmark/scripts/gates.sh` (every correctness gate,
-one verdict).
+gated delta-net hybrids are covered by the starter kit. The llama.cpp reference
+outputs are cached, so re-running the gates on an optimized build only costs the Loom side.
 
 **hrx-loom 0.1.0 (PyPI), October 2026.** Fresh agents given only these skills ported
 `Qwen/Qwen3-0.6B-GGUF` (Q8_0) and `unsloth/Qwen3.5-0.8B-GGUF` (Q4_K_M) in one shot, with a
@@ -99,11 +99,12 @@ llama.cpp ROCm b1355 on the same GGUF:
 
 Every divergence from llama.cpp's output was a near-tie, up to 32k-token prompts.
 
-**Effort control.** With no target and no time given, the optimization phase gets
-**1 hour**. Add either to the prompt to change it, for example "…optimize it for 3
-hours…" or "…until decode is 50 % faster than llama.cpp…". The roofline step checks
-a stated target against the hardware ceiling and says so up front if it is out of
-reach.
+**Effort control.** With no target and no time given, the **whole job** gets about
+**60 minutes**: the optimization phase gets what is left after the port and the
+qualification, minus a reserve for the final gates and the report. Add a time or a target
+to the prompt to change it, for example "…optimize it for 3 hours…" or "…until decode is
+50 % faster than llama.cpp…". The roofline step checks a stated target against the
+hardware ceiling and says so up front if it is out of reach.
 
 ### Other examples
 
@@ -111,7 +112,7 @@ Ask in plain language, for example:
 - "install Loom and serve moonshine";
 - "port Qwen3-4B-Instruct-2507 to loom-serve and validate it against llama.cpp";
 - "benchmark my Loom port";
-- "optimize this model" (roofline → targets → about 1 h of optimization → report);
+- "optimize this model" (roofline → targets → about 30 min of optimization → report);
 - "what's the roofline for this model?" or "is +50 % decode achievable?".
 
 The skill descriptions make Claude pick the right one. You can also invoke a skill by
@@ -123,19 +124,16 @@ name:
 | `/loom:loom-setup` | `/loom-setup` | Install the SDK (`hrx-loom` from PyPI) and the matching model library, `loom-fetch`, start/stop/inspect `loom-serve` (GPU and NPU) |
 | `/loom:loom-demo-ui` | `/loom-demo-ui` | Web playground: chat, transcribe, speak, image, embed. It finds models from the servers' `/v1/status` |
 | `/loom:loom-port-llm` | `/loom-port-llm` | Config-driven starter kit that turns a GGUF LLM (dense, or a Qwen3.5-style gated delta-net hybrid) into a Loom package at its native context length, with tool calling, reasoning and history reuse derived from the model's own chat template: inspect → generate kernels → build → kernel unit tests → golden, agent and full-context gates |
-| `/loom:loom-roofline` | `/loom-roofline` | Roofline for decode/prefill/c4 from the GGUF, calibrated against achieved Loom efficiency; picks per-metric targets vs llama.cpp and a time budget (default 1 h); a rate-of-approach controller decides continue / pivot / stop |
+| `/loom:loom-roofline` | `/loom-roofline` | Roofline for decode/prefill/c4 from the GGUF, calibrated against achieved Loom efficiency; picks per-metric targets vs llama.cpp and a time budget; a rate-of-approach controller decides continue / pivot / stop |
 | `/loom:loom-optimize` | `/loom-optimize` | The measure / ablate / change / verify loop, a kernel A/B helper, a catalog of optimizations that worked (and that didn't), and the sources of a hand-tuned MoE port |
 | `/loom:loom-benchmark` | `/loom-benchmark` | Token-by-token golden comparison against llama.cpp ROCm, a multi-turn tool-calling gate, a full-context needle gate, a batching-consistency check, throughput workloads, reporting rules |
+| `/loom:loom-improve` | `/loom-improve` | Improve the skills themselves: the KPIs (wall clock, agentic correctness vs llama.cpp, speed), fresh-agent trials on a reference model suite, a stall watchdog, a KPI regression check and a fixed quiet-GPU evaluator. Prompt: "your goal is to improve the loom skill at X" |
 
-A full cold-start port takes about 10–25 minutes for a small dense model, and about
-35 minutes for an architecture the starter kit doesn't cover (Gemma-4 E4B). In
-order:
-1. install (≈15 s);
-2. port a model;
-3. pass the golden check;
-4. measure performance against llama.cpp;
-5. roofline and targets;
-6. optimize (1 h by default).
+A starter-covered model goes from prompt to report in about an hour (port ≈1 min, qualify
+≈10 min, optimization ≈30 min, finalize ≈10–15 min). An architecture the starter doesn't
+cover adds the hand port; `loom-port-llm` has a playbook for it (llama.cpp's own compute
+graph and intermediate tensors via `llama_trace.py`, numpy node-by-node checks), and the
+optimization budget shrinks to fit.
 
 ## Requirements
 
@@ -147,15 +145,16 @@ order:
   ([`hrx-loom`](https://pypi.org/project/hrx-loom/), Linux glibc ≥ 2.39 or Windows 11).
   `gh` is only needed for development wheels from CI (`install_loom.sh ROOT ci-latest`).
 - For the golden reference: a llama.cpp ROCm build from
-  [lemonade-sdk/llamacpp-rocm](https://github.com/lemonade-sdk/llamacpp-rocm). The
-  skill asks before running any downloaded binary.
+  [lemonade-sdk/llamacpp-rocm](https://github.com/lemonade-sdk/llamacpp-rocm). The skills
+  download its latest release by themselves (pre-approved); they ask before running a binary
+  from any other source.
 
 ## Safety notes baked into the skills
 
 - **Memory limit.** Never serve models whose weights exceed the GPU's memory budget:
   a 104 GiB model hard-crashed a 128 GB machine.
 - **`--memory_bytes`.** Always pass it to `loom-serve`.
-- **Downloaded binaries.** Ask before running one.
+- **Downloaded binaries.** Ask before running one, except Loom from PyPI and lemonade-sdk/llamacpp-rocm releases (pre-approved).
 - **Golden references.** They are external (llama.cpp), never a model written by
   hand.
 
@@ -163,7 +162,7 @@ order:
 
 ```
 .claude-plugin/{plugin.json,marketplace.json}   # plugin + single-plugin marketplace
-skills/<skill>/SKILL.md                          # the six skills, with their scripts and references
+skills/<skill>/SKILL.md                          # the eight skills, with their scripts and references
 install.sh                                       # copy-install alternative
 LICENSE                                          # MIT
 THIRD_PARTY_NOTICES.md

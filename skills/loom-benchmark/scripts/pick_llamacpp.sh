@@ -3,7 +3,7 @@
 # and print them fastest first. The baseline is the strongest build available:
 # version strings are unreliable (the lemonade nightly prints "version: 1") and builds
 # differ a lot (Bolt-E4B c4: b1274 125 vs b1355 157; LFM2.5-24B prefill: 1062 vs 2140).
-# usage: pick_llamacpp.sh MODEL.gguf [PORT=8139] [SEARCH_ROOT=$HOME]
+# usage: pick_llamacpp.sh MODEL.gguf [PORT=8139] [SEARCH_ROOT=$HOME]   (several roots: A:B)
 #   writes the ranking to ./llamacpp_pick.json (run it from bench/; audit.py checks it)
 set -u
 gguf=$1; port=${2:-8139}; root=${3:-$HOME}
@@ -12,7 +12,8 @@ root_loom=${LOOM_ROOT:-$HOME/loom}
 py=${PY:-$root_loom/.tools/bin/python}; [ -x "$py" ] || py=$root_loom/.tools/Scripts/python   # Windows venvs use Scripts/
 doc=$here/../data/doc_1000.txt
 # HIP builds: libggml-hip.so (Linux) or ggml-hip.dll (Windows) next to llama-server[.exe].
-mapfile -t dirs < <(find "$root" -maxdepth 7 \( -name llama-server -o -name llama-server.exe \) -type f 2>/dev/null \
+IFS=: read -r -a roots <<< "$root"   # several roots: colon-separated
+mapfile -t dirs < <(find "${roots[@]}" -maxdepth 7 \( -name llama-server -o -name llama-server.exe \) -type f 2>/dev/null \
   | xargs -r -n1 dirname | while read -r d; do { [ -e "$d/libggml-hip.so" ] || [ -e "$d/ggml-hip.dll" ]; } && echo "$d"; done \
   | while read -r d; do echo "$(readlink -f "$d"/llama-server* | head -1 | xargs sha256sum | cut -c1-16) $d"; done \
   | sort -u -k1,1 | cut -d' ' -f2-)
@@ -20,7 +21,10 @@ mapfile -t dirs < <(find "$root" -maxdepth 7 \( -name llama-server -o -name llam
 echo "candidates (deduplicated by binary hash): ${#dirs[@]}"
 res=()
 for d in "${dirs[@]}"; do
-  LLAMACPP_DIR=$d bash "$here/llamacpp_server.sh" "$gguf" "$port" 1 8192 >/dev/null 2>&1 || { echo "  $d: failed to start"; continue; }
+  if ! out=$(LLAMACPP_DIR=$d bash "$here/llamacpp_server.sh" "$gguf" "$port" 1 8192 2>&1); then
+    why=$({ echo "$out"; cat "${LLAMACPP_STATE:-/tmp}/llamacpp-$port.log" 2>/dev/null; } | grep -iE "unknown model architecture|error|failed|sees no ROCm" | tail -1)
+    echo "  $d: failed to start: ${why:-$(echo "$out" | tail -1)}"; continue
+  fi
   line=$("$py" - "$port" "$doc" <<'E'
 import json, sys, requests
 port, doc = sys.argv[1], open(sys.argv[2], encoding="utf-8").read()

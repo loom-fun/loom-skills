@@ -80,6 +80,10 @@ exactly what agent loops need. `gen_gdn.py` implements this protocol.
 
      State 1 means inside `<think>`, and state 2 skips the whitespace after
      `</think>`.
+     **Host rule:** a span of zero length must not change the state. Returning an empty span with
+     a new state (e.g. at a channel/tool header whose end isn't generated yet) fails the request
+     with "source returned an invalid output span". Wait (return the previous position, same state)
+     until the whole marker is in the response, then consume it as a kind-0 span.
    - `encode_epoch` and `publish_epoch` translate the runtime's span plan into the
      **metadata packet**:
      - a 16-byte header, whose word 0 is the span count;

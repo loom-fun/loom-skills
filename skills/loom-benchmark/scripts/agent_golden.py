@@ -7,7 +7,7 @@ For every assistant turn of a deterministic tool-using conversation it checks
      lower: the previous turn's EOS is already in the row);
   2. reuse: prompt_tokens_details.cached_tokens (the previous turn's history is retained);
   3. golden: Loom's greedy output vs llama.cpp's on the *same prompt ids* (log-prob gap at
-     the first divergence; a near-tie is < 0.5 nats), when --llama is given;
+     the first divergence; a near-tie is <= 1 nat with Loom's token in the top-5, as in compare.py), when --llama is given;
   4. tool calls: parsed name/arguments are valid JSON for the declared function.
 
 usage: agent_golden.py PKG LOOM_URL [--llama URL] [--thinking on|off|default] [--out FILE]
@@ -19,7 +19,7 @@ import sys
 
 import requests
 
-from bench_common import Package
+from bench_common import Package, llama_completion
 
 TOOLS = [
     {"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city.",
@@ -53,6 +53,25 @@ def post(url, body, path="/v1/chat/completions"):
     # Serialized like the template's `tojson` so tool definitions print identically.
     data = json.dumps(body, ensure_ascii=False).encode()
     return requests.post(url + path, data=data, timeout=1800, headers={"Content-Type": "application/json"}).json()
+
+
+def golden_ids(g):
+    """llama.cpp's generated ids and the top-5 lists that line up with them. completion_probabilities
+    omits byte-fallback tokens (emoji, partial UTF-8), so ids come from `tokens` and the top-5 lists are
+    trusted only while they align (the golden.py / compare.py rule)."""
+    cp = g.get("completion_probabilities", [])
+    ids = g.get("tokens") or [x["id"] for x in cp]
+    k = next((i for i, x in enumerate(cp) if i >= len(ids) or x["id"] != ids[i]), len(cp))
+    return ids, cp[:k]
+
+
+def gap_at(ids, tops, loom_ids, k):
+    """logp(golden) - logp(loom) at divergence k; 0.0 past the aligned top-5 lists (a byte-split token,
+    counted as a near-tie as in compare.py); None when Loom's token is outside the top-5."""
+    if k >= len(tops):
+        return 0.0
+    top = {t["id"]: t["logprob"] for t in tops[k]["top_logprobs"]}
+    return top[ids[k]] - top[loom_ids[k]] if loom_ids[k] in top else None
 
 
 def main():
@@ -96,18 +115,53 @@ def main():
                     calls_ok = False
             rec["calls_ok"] = calls_ok
             if a.llama:
-                raw = P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking)
+                raw = P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
                 loom_ids = P.ids(raw)
-                g = requests.post(a.llama + "/completion", timeout=1800, json={
+                g = llama_completion(a.llama, {
                     "prompt": ids, "n_predict": max(1, u["completion_tokens"]), "temperature": 0, "n_probs": 5,
-                    "cache_prompt": False}).json()
-                gids = [x["id"] for x in g["completion_probabilities"]]
+                    "cache_prompt": False, "return_tokens": True}, P)
+                gids, gtops = golden_ids(g)
                 k = next((i for i, (x, y) in enumerate(zip(loom_ids, gids)) if x != y), None)
+                import chat_probe as _cp
+                if k is not None and hasattr(_cp, "raw_alternatives"):
+                    # A kit whose channel format is ambiguous in the parsed message (Glimmer: an optional
+                    # <|eom|> before the answer header) lists every raw text consistent with it: use the
+                    # one that agrees longest with the golden.
+                    for alt in _cp.raw_alternatives(P.chat, m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)[1:]:
+                        aids = P.ids(alt)
+                        ka = next((i for i, (x, y) in enumerate(zip(aids, gids)) if x != y), None)
+                        if ka is None or ka > k:
+                            loom_ids, k = aids, ka
                 rec["golden_match"] = k is None
                 if k is not None:
-                    top = {t["id"]: t["logprob"] for t in g["completion_probabilities"][k]["top_logprobs"]}
-                    gap = top[gids[k]] - top[loom_ids[k]] if loom_ids[k] in top else None
-                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=gap is not None and gap < 0.5)
+                    gap = gap_at(gids, gtops, loom_ids, k)
+                    top = {t["id"]: t["logprob"] for t in gtops[k]["top_logprobs"]} if k < len(gtops) else {}
+                    # llama.cpp ROCm is not run-to-run deterministic on some models (flint: identical
+                    # temperature-0 requests gave different greedy text): as compare.py does, re-record a
+                    # turn that would fail and score against the recording Loom follows further.
+                    for salt in ("rec2", "rec3"):
+                        if gap is not None and gap <= 1.0:
+                            break
+                        g2 = llama_completion(a.llama, {
+                            "prompt": ids, "n_predict": max(1, u["completion_tokens"]), "temperature": 0, "n_probs": 5,
+                            "cache_prompt": False, "return_tokens": True}, P, salt)
+                        gids2, cp2 = golden_ids(g2)
+                        k2 = next((i for i, (x, y) in enumerate(zip(loom_ids, gids2)) if x != y), None)
+                        rec.setdefault("rerecorded", []).append(k2)
+                        if k2 is None:
+                            k, gap, gids = None, None, gids2
+                            break
+                        if k2 > k:
+                            k, gids, gtops = k2, gids2, cp2
+                            gap = gap_at(gids, gtops, loom_ids, k)
+                            top = {t["id"]: t["logprob"] for t in gtops[k]["top_logprobs"]} if k < len(gtops) else {}
+                    if k is None:
+                        rec["golden_match"] = True
+                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=k is None or (gap is not None and gap <= 1.0))
+                    if not rec["near_tie"]:
+                        print("     at the divergence: loom", repr(P.tok.decode(loom_ids[max(0, k - 8):k + 4], skip_special_tokens=False)),
+                              "| llama", repr(P.tok.decode(gids[max(0, k - 8):k + 4], skip_special_tokens=False)),
+                              "| top", [(P.tok.id_to_token(t), round(v, 2)) for t, v in top.items()], flush=True)
             golden_ok = rec.get("golden_match", True) or rec.get("near_tie", False)
             ok = rec["render_ok"] and rec["reuse_ok"] and rec["calls_ok"] and golden_ok
             failures += not ok

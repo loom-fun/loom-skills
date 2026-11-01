@@ -55,7 +55,7 @@ def main():
     ap.add_argument("--metric")
     ap.add_argument("--window-min", type=float, default=45)
     ap.add_argument("--budget-h", type=float, help="default: roofline.json campaign.budget_h, else 1")
-    ap.add_argument("--reserve-min", type=float, default=10)
+    ap.add_argument("--reserve-min", type=float, help="default: roofline.json campaign.reserve_min, else 10")
     ap.add_argument("--goal-tps", type=float)
     ap.add_argument("--horizon-h", type=float)
     ap.add_argument("--add", type=float)
@@ -68,6 +68,8 @@ def main():
     camp = rj.get("campaign", {})
     if a.budget_h is None:
         a.budget_h = camp.get("budget_h", 1.0)
+    if a.reserve_min is None:
+        a.reserve_min = camp.get("reserve_min", 10)
     if a.stall_min is None:
         a.stall_min = min(90, max(20, a.budget_h * 30))
     if a.add is not None:
@@ -109,7 +111,7 @@ def main():
                 last_gain, run = t(r), r["value"]
         stalled = (now - last_gain).total_seconds() / 60 > a.stall_min
         start = t(next((r for r in ev if r.get("change") == "start"), ev[0]))
-        used_h = (now - start).total_seconds() / 3600
+        used_h = (max(now, datetime.now()) - start).total_seconds() / 3600   # wall clock, not the last row
         left_h = a.budget_h - used_h - a.reserve_min / 60
         horizon = a.horizon_h if a.horizon_h is not None else left_h
         early = span_h < 2 / 60 or len(ev) < 2

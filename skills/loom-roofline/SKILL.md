@@ -19,7 +19,8 @@ counted, but report how long they took.
 
 | User said | Goal | Budget (`--budget-h`) |
 |---|---|---|
-| Nothing ("optimize this model") | The roofline TARGET per headline metric, then stretch | **1 h**: return a reasonable degree of optimization in an hour |
+| Nothing, end-to-end job ("get X working, optimize, report") | The roofline TARGET per headline metric, then stretch | **The model's roofline budget for the whole job** (`e2e_budget.py MODEL.gguf`: fixed agent work + optimization + the measured workload at this model's decode/prefill speed). `qualify.sh` passes what is left after the port and qualification, minus the final gates + report (at least 10 min) |
+| Nothing, existing port ("optimize this model") | TARGET, then stretch | **30 min** |
 | A time only ("spend 3 hours", "quick pass", "overnight") | TARGET, then stretch | As stated. "Quick" ≈ 0.5 h, "thorough" ≈ 4 h, "overnight" ≈ 8 h, "don't work all night" caps it |
 | A target only ("+50 % decode", "70 tok/s") | The user's target (`--goal-tps`) | No fixed cap. The rate controller still stops when no path can reach the target. If the projected time is more than ~2 h, say so with the numbers as soon as it is known |
 | Both | The user's target | As stated. If the projected time exceeds the budget, say so early: give what the budget buys, and what the target would take |
@@ -37,9 +38,13 @@ In every case:
   that have a measured gain on a similar model are the cheapest ms/h there is. Apply
   them in catalog order before inventing new ones. In run 2, skipping fused QKV and
   paired-row gate/up, and trying two untested ideas instead, cost about 1–2 % decode.
-- Keep a reserve (default 10 min) at the end for the final `compare.py` +
-  `consistency.py`, the server restart and the report. Never overrun the budget by
-  starting an attempt that cannot finish its gates in time.
+- Keep a reserve at the end for the final gates, the server restart and the report
+  (`qualify.sh` already subtracts it from the budget it computes; by hand, `--reserve-min`,
+  default 10). Never overrun the budget by starting an attempt that cannot finish its
+  gates in time.
+- **Short budgets (≤ 30 min): one or two levers.** Pick the catalog lever with the best
+  expected ms/h for the headline metric, A/B it interleaved, keep or revert, then stop.
+  A new kernel only fits a budget of an hour or more.
 
 ## 1. Inputs (all from the same session, on an idle machine)
 
@@ -55,8 +60,9 @@ In every case:
 
 ```bash
 T=~/loom/.tools/bin/python; R=${CLAUDE_SKILL_DIR}
+# qualify.sh runs this for you, with the budget from section 0. By hand:
 $T $R/roofline.py MODEL.gguf --cfg cfg.json --baseline bench/perf_log.jsonl --ctx 1000,2000,16000 --out bench/roofline.json \
-   --budget-h 1            # the user's budget (section 0); add --goal decode_tps=70 for a user target
+   --budget-h 0.5          # the user's budget (section 0); add --goal decode_tps=70 for a user target
 ```
 **Long-context models (context ≥ 128k):** add the long sizes to `--ctx` (e.g.
 `--ctx 1000,2000,16000,131072`) and measure them (`perf.py --long`), so long prefill

@@ -34,7 +34,10 @@ def require(kind, log_path="perf_log.jsonl"):
 
 
 def run_audit():
-    """Run the definition-of-done audit after a gate, so the agent sees what is missing."""
+    """Run the definition-of-done audit after a gate, so the agent sees what is missing.
+    gates.sh / qualify.sh set LOOM_NO_AUDIT=1: mid-pipeline the audit can only list steps not run yet."""
+    if os.environ.get("LOOM_NO_AUDIT"):
+        return
     r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "audit.py"), "."], capture_output=True, text=True)
     lines = [l for l in r.stdout.splitlines() if l.startswith(("[FAIL]", "[WARN]", "AUDIT"))]
     print("\n[audit] " + "\n[audit] ".join(lines or ["(audit produced no output)"]), flush=True)

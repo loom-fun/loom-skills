@@ -174,8 +174,11 @@ def main():
     ap.add_argument("--bw", type=float, default=216e9)
     ap.add_argument("--flops", type=float, default=59e12)
     ap.add_argument("--ctx", default="1000,2000,16000,32000")
-    ap.add_argument("--budget-h", type=float, default=1.0,
-                    help="the user's time budget for optimization (default 1 h); saved for progress.py")
+    ap.add_argument("--budget-h", type=float, default=0.5,
+                    help="the user's time budget for optimization (default 0.5 h; qualify.sh computes it for end-to-end jobs); saved for progress.py")
+    ap.add_argument("--reserve-min", type=float, default=10,
+                    help="minutes kept back at the end of the budget for the final gates + report "
+                         "(qualify.sh passes 0: its budget already excludes them)")
     ap.add_argument("--goal", action="append", default=[],
                     help="user target, METRIC=TOK_S (e.g. decode_tps=70); replaces target/stretch for it")
     a = ap.parse_args()
@@ -234,7 +237,7 @@ def main():
                bytes_by_kind={k: round(v) for k, v in detail.items()},
                matmul_params=round(params), efficiency_assumed=EFF, stretch_assumed=STRETCH,
                bw=a.bw, flops=a.flops, metrics=rows,
-               campaign=dict(budget_h=a.budget_h,
+               campaign=dict(budget_h=a.budget_h, reserve_min=a.reserve_min,
                              goals={g.split("=")[0]: float(g.split("=")[1]) for g in a.goal}))
     if a.out:
         json.dump(out, open(a.out, "w"), indent=1)

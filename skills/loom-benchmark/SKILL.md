@@ -13,30 +13,25 @@ id from a package built by `loom-port-llm/starter/build.py`.
 
 ## 0. Reference: llama.cpp ROCm (not Vulkan, not CPU)
 
-**First, use what is already on the machine, and pick the fastest.**
+**Get the latest lemonade build, then pick the fastest of it and what is installed** (`qualify.sh`
+does both):
 ```bash
 S=${CLAUDE_SKILL_DIR}/scripts
-$S/pick_llamacpp.sh MODEL.gguf     # finds every llama-server with libggml-hip.so, benchmarks each, ranks them
+$S/fetch_llamacpp.sh                 # latest lemonade-sdk/llamacpp-rocm for this GPU -> ~/llamacpp-rocm/<tag> (pre-approved, ~25 s)
+$S/pick_llamacpp.sh MODEL.gguf 8139 "$HOME"   # every llama-server with libggml-hip.so, benchmarked and ranked
 ```
 The baseline is the top-ranked build. Don't choose by version string: the lemonade
 nightly prints `version: 1`, and the tag is usually only in the directory name.
 Builds differ a lot on the same GGUF:
 - LFM2.5-24B prefill: b1274 1,062 tok/s vs b1355 2,140 tok/s;
 - Bolt-E4B with 4 streams: b1274 125 tok/s vs b1355 157 tok/s.
+- A new architecture can need the newest release: no installed build knew `flint`.
 
-A weaker baseline inflates every margin you report. Report the chosen build's path
-and tag.
-
-If none is installed, download the lemonade-sdk ROCm build:
-```bash
-mkdir -p ~/llamacpp-rocm && cd ~/llamacpp-rocm
-gh release download -R lemonade-sdk/llamacpp-rocm -p 'llama-*-ubuntu-rocm-gfx1151-x64.zip'   # latest; or pin a tag, e.g. b1355
-unzip -q llama-*-gfx1151-x64.zip && chmod +x llama-server
-```
-On Windows, download the `llama-*-windows-rocm-gfx1151-x64.zip` asset instead, or reuse a
-lemonade build from `~/.cache/lemonade/bin/llamacpp/`. Either way, check that
-`llama-server --list-devices` shows `ROCm0`, because a build missing its DLLs falls back to CPU silently.
-**Ask the user before running a freshly downloaded binary.** Pick the zip that matches the GPU (`gfx1151` = Strix
+A weaker baseline inflates every margin you report. Report the chosen build's path and tag.
+lemonade-sdk/llamacpp-rocm releases are pre-approved: download them without asking. Check that
+`llama-server --list-devices` shows `ROCm0` (`llamacpp_server.sh` does), because a build missing its
+libraries falls back to CPU silently; `llamacpp_server.sh` also adds lemonade's TheRock runtime libraries
+when a build needs them. Pick the zip that matches the GPU (`gfx1151` = Strix
 Halo). Then:
 ```bash
 LLAMACPP_DIR=<dir> $S/llamacpp_server.sh MODEL.gguf 8130 1 34000   # goldens / long context (1 slot, 34k)
@@ -48,15 +43,29 @@ big Loom model at the same time if together they exceed GPU memory.
 
 ## 1. Correctness gates (before any performance claim)
 
-**One command:** `gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT]` (needs `LLAMACPP_DIR`)
-starts llama.cpp with one slot sized for the long goldens, runs everything below in
-order, stops llama.cpp and writes `BENCH_DIR/gates.json` (`verdict` PASS/FAIL per gate,
-logs in `gates_*.log`). Use the individual scripts to rerun or debug one gate.
-**Order:** `QUICK=1 gates.sh …` after the port and after each kept optimization (needle
-at half the context, one probe: ≈7–10 min), and the full `gates.sh` once on the final
-build. The full needle is a full-context prefill, the most expensive step (a 261k prompt
-took ~11 min on a busy GPU, ~40 min for the whole gate run); running it on the slowest
-(unoptimized) build twice wastes the most time.
+**End-to-end jobs use two wrappers** (see the `loom` skill): `qualify.sh` (after the port: llama.cpp
+pick, one shared llama-server, `LEVEL=quick` gates, llama.cpp + Loom baselines, roofline and budget)
+and `finalize.sh` (on the final build: final perf, `LEVEL=full` gates, audit, `report.html`).
+
+**One command for the gates:** `[LEVEL=fast|quick|full] gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT]`
+(needs `LLAMACPP_DIR`, or `LLAMA_URL` for a running llama-server) runs the gates below in order
+and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `gates_*.log`).
+
+| LEVEL | When | Gates | Cost |
+|---|---|---|---|
+| `fast` | after each kept optimization | goldens (cached) + compare, consistency | 1–3 min |
+| `quick` | after the port (`qualify.sh` runs it) | fast + agent tool loop, sampling, needle at half the context (≤ 60k) vs llama.cpp | 5–15 min the first time |
+| `full` | once, on the final build (`finalize.sh` runs it) | quick + one Loom-only probe at the full context | + one full-context prefill |
+
+- **The llama.cpp side is cached** (`BENCH_DIR/llama_cache`, keyed on the GGUF, the build and the
+  request): it never depends on the Loom build, so only the first run pays for it, and llama-server
+  starts lazily on the first cache miss. Re-running the gates on an optimized build costs Loom time only.
+- `fast` is enough inside the loop because the kernel paths an optimization touches are what the
+  goldens exercise (short prompts, 1k–32k documents: prefill, KV paging, attention) and consistency
+  covers mixed batches. Run `quick` instead when you changed the chat glue (`control.loom`), the
+  storage/recurrent state, or the sampling head.
+- The full-context probe is the most expensive step (a 261k prompt: ~8 min for a 0.8B hybrid) and
+  only proves the size is served: run it once, on the final build.
 
 ```bash
 S=${CLAUDE_SKILL_DIR}/scripts; P=~/work/mymodel/pkg; T=~/loom/.tools/bin/python; mkdir -p ~/work/mymodel/bench && cd ~/work/mymodel/bench   # outputs land here, not in the skill
@@ -72,8 +81,8 @@ For `needle.py` sizes above the llama.cpp slot's context, drop `--llama` (Loom-o
 it then must find the needle) or give `--sizes`. A 262k-token prefill takes minutes.
 - **How golden.py works.** It renders each prompt with the package's chat block
   and sends the *token ids* to llama.cpp `/completion` (greedy, `n_probs: 5`). Both
-  engines therefore see identical prompts: 20 short prompts × 96 tokens, plus 2
-  prompts per long document × 64 tokens.
+  engines therefore see identical prompts: 20 short prompts × 64 tokens, plus 1
+  prompt per long document × 64 tokens (the two question kinds alternate across sizes).
 - **How compare.py works.** It asks Loom for the same completion through chat,
   rebuilds the raw text from the reasoning/answer channels, re-tokenizes it, and
   finds the first divergence. It reports the **golden log-prob gap**
@@ -100,15 +109,11 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   and say so.
 - Long goldens (16k/32k) are what catch KV paging, prefill chunking and attention
   masking bugs.
-- `consistency.py` catches mixed-sequence epoch bugs (padding, tile uniformity,
-  fallback lists). If it fails, find the first divergent token and its golden
-  log-prob gap. A divergence is acceptable only when **both** hold:
-  - it is a near-tie (gap < 0.05);
-  - the cause is identified and stated in the report. For example, decode tokens
-    that share an epoch with a prefill go through the f16 GEMM path instead of the
-    f32 matvec path.
-
-  Anything else is a bug.
+- `consistency.py` catches mixed-sequence epoch bugs (padding, tile uniformity, fallback lists) and
+  races (each prompt also runs alone twice and must be identical). A concurrent-vs-alone difference
+  passes only when every prompt is deterministic alone and every divergence is a near-tie by the
+  compare rule (gap ≤ 1 nat, measured with `--pkg/--llama`): decode tokens that share an epoch with a
+  prefill go through the f16 GEMM path instead of the f32 matvec path. Anything else is a bug.
 - 503 errors on long prompts mean `--memory_bytes` is too small for the KV pool,
   not a model bug.
 - **agent_golden.py** runs three tool-using tasks (weather lookups, a calculator)
@@ -120,7 +125,10 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     prompt + completion (history reuse works, including recurrent state).
   - `calls_ok`: tool calls name a declared function with JSON arguments.
   - golden: Loom's turn vs llama.cpp `/completion` on the same prompt ids; a
-    divergence must be a near-tie (gap < 0.5).
+    divergence must be a near-tie (gap ≤ 1.0 with the token in the top-5, the compare.py rule). A turn that
+  would fail is re-recorded on llama.cpp (up to twice) and scored against the recording Loom follows
+  further: llama.cpp ROCm isn't run-to-run deterministic on some MoE models (flint: three identical
+  temperature-0 requests gave two different greedy texts).
   "The model ended inside its reasoning" notes are a greedy-decoding behavior of
   small thinking models, confirmed when llama.cpp's own distribution at that
   point prefers EOS; not a Loom bug by itself.
@@ -151,9 +159,9 @@ $T $S/c4_steady.py http://127.0.0.1:8160 4 --model <id>;  $T $S/c4_steady.py htt
 |---|---|
 | decode_tps | 300-token essay from a short prompt. Client-side: (tokens−1)/(total−TTFT). |
 | prefill[] | 1k and 2k-token documents with max_tokens=4. prompt_tokens / TTFT, the median of 5 runs (`--repeats`); single runs varied 1.5–2.9k tok/s on one build. |
-| decode_tps_1k / _2k / _32k | Decode with that much context in the KV cache. |
+| decode_tps_2k / _32k | Decode with that much context in the KV cache. |
 | prefill_long[] | 8k / 16k / 32k documents. |
-| c4_agg_tps | 8 requests through 4 threads, total tokens / wall time (includes ramp). |
+| c4_agg_tps | `--c4` only: 8 requests through 4 threads, total tokens / wall time (includes ramp). |
 | c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding. Use this for "N requests at once". |
 
 Rules:
@@ -199,7 +207,7 @@ Fix every FAIL before reporting, and report every WARN. The headline table is th
 source for the report's numbers.
 
 - **Lead with the bottom line**: a table with Loom and llama.cpp ROCm side by side
-  for each metric, followed by one line on the correctness gate (e.g. "28 prompts
+  for each metric, followed by one line on the correctness gate (e.g. "24 prompts
   up to 32k tokens; all divergences near-ties (max gap 0.97); concurrent ==
   sequential").
 - **State the setup**:
@@ -214,7 +222,12 @@ source for the report's numbers.
   images).
 - **No "before this session" columns** in executive tables. Give current Loom
   against the current baseline.
-- **Format.** Write executive reports as a single-page HTML artifact (Artifact tool;
+- **Generate it.** `scripts/report.py BENCH_DIR --pkg PKG [--notes notes.txt]` (`finalize.sh` runs it)
+  writes `report.html` (single page, light/dark) and `report.md` from the logs: bottom line,
+  headline table, gates, setup, decisions, audit, timeline. Write only the notes yourself (what
+  was optimized, what was skipped and why, losses), rerun `report.py --notes`, and publish
+  `report.html` as is. Extend the generated page only if the user asked for more.
+- **Format** (for a hand-extended report). A single-page HTML artifact (Artifact tool;
   load the artifact-design skill first). The sections:
   1. methodology;
   2. functional;

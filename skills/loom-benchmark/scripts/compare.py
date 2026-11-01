@@ -25,6 +25,9 @@ ap.add_argument("--url", default="http://127.0.0.1:8160")
 ap.add_argument("--out", default="compare.json")
 ap.add_argument("--max-gap", type=float, default=1.0)
 ap.add_argument("--alt", default=None, help="second golden recording; per prompt the better-matching one is used")
+ap.add_argument("--llama", default=None, help="llama.cpp URL: a prompt that would FAIL against the golden is re-recorded "
+                "once (llama.cpp is not run-to-run deterministic at near-ties) and scored against the better recording; "
+                "replaces a full second recording (--alt)")
 a = ap.parse_args()
 pkg = Package(a.package)
 rows = []
@@ -87,6 +90,26 @@ for g in json.load(open(a.golden)):
         n2, gap2 = match(got, alt[g["prompt"]])
         if n2 > n:
             g, n, gap = alt[g["prompt"]], n2, gap2
+    is_bad = isinstance(gap, str) or (gap is not None and gap > a.max_gap)
+    if is_bad and a.llama and g["prompt"] not in alt:  # on-demand second recording of this prompt only
+        from bench_common import llama_completion
+        ids_p = pkg.ids(pkg.render(g["prompt"]))
+        r2 = llama_completion(a.llama, {"prompt": ids_p, "n_predict": len(g["ids"]), "temperature": 0, "n_probs": 5,
+                                        "cache_prompt": False, "return_tokens": True, "repeat_penalty": 1.0,
+                                        "presence_penalty": 0.0, "frequency_penalty": 0.0}, pkg, "rec2")
+        if "tokens" in r2:
+            cp = r2["completion_probabilities"]
+            if len(cp) != len(r2["tokens"]):
+                k = next((i for i, x in enumerate(cp) if i >= len(r2["tokens"]) or x["id"] != r2["tokens"][i]), len(cp))
+                cp = cp[:k]
+            g2 = strip_ws_after_think({"prompt": g["prompt"], "prompt_tokens": len(ids_p), "ids": r2["tokens"],
+                                       "top": [[(t["id"], t["logprob"]) for t in x["top_logprobs"]] for x in cp]})
+            n2, gap2 = match(got, g2)
+            print(f"       re-recorded (llama.cpp run-to-run check): {n2} matched, gap {gap2}", flush=True)
+            # Further match wins; at the same position the smaller gap wins (llama.cpp itself moved there).
+            better_gap = isinstance(gap2, float) and (isinstance(gap, str) or gap2 < gap)
+            if n2 > n or (n2 == n and better_gap):
+                g, n, gap = g2, n2, gap2
     gold = g["ids"]
     full = n >= min(len(gold), len(got)) and abs(len(got) - len(gold)) <= 1
     bad = isinstance(gap, str) or (gap is not None and gap > a.max_gap)

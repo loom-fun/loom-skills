@@ -10,6 +10,8 @@ tool-response framing, how reasoning appears in history, and content trimming.
 before anything runs on the GPU.
 
 usage: python chat_probe.py TEMPLATE_SOURCE [OUT.json]
+       python chat_probe.py TEMPLATE_SOURCE --verify cfg.json   (a hand-filled chat block: verify only;
+                         with a kit's own chat_probe.py for formats this one can't simulate)
   TEMPLATE_SOURCE: a .gguf (tokenizer.chat_template), a tokenizer_config.json, or a .jinja file
   (inspect_gguf.py calls derive() + verify() for you)
 """
@@ -31,6 +33,20 @@ CALL1 = {"name": "get_weather", "arguments": {"city": "Paris", "days": 3}}
 CALL2 = {"name": "search", "arguments": {"query": "louvre hours"}}
 
 
+from jinja2 import nodes as _nodes
+from jinja2.ext import Extension as _Extension
+
+
+class GenerationTag(_Extension):
+    """transformers' {% generation %}...{% endgeneration %} (assistant mask marker): renders its body."""
+    tags = {"generation"}
+
+    def parse(self, parser):
+        lineno = next(parser.stream).lineno
+        body = parser.parse_statements(["name:endgeneration"], drop_needle=True)
+        return _nodes.Scope(body).set_lineno(lineno)
+
+
 class ProbeError(Exception):
     pass
 
@@ -39,7 +55,7 @@ def environment():
     def raise_exception(message):
         raise ProbeError(message)
 
-    env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True, extensions=["jinja2.ext.loopcontrols"])
+    env = ImmutableSandboxedEnvironment(trim_blocks=True, lstrip_blocks=True, extensions=["jinja2.ext.loopcontrols", GenerationTag])
     # Same as transformers' chat-template environment.
     env.filters["tojson"] = lambda x, ensure_ascii=False, indent=None, separators=None, sort_keys=False: json.dumps(
         x, ensure_ascii=ensure_ascii, indent=indent, separators=separators, sort_keys=sort_keys)
@@ -187,11 +203,14 @@ def derive(template_text, bos="", eos=""):
     body = block[len(chat["system_prefix"]):len(block) - len(chat["suffix"])]
     i0, i1 = body.index(printed[0]), body.index(printed[1])
     # Each tool is preceded by tool_line_prefix (Qwen: "\n"; GLM: "").
-    chat["tool_line_prefix"] = line = body[i0 + len(printed[0]):i1]
-    if line.strip():
-        raise ProbeError(f"tools are separated by non-whitespace text {line!r}; fill tools_* by hand")
-    if not body[:i0].endswith(line):
-        raise ProbeError("the first tool is not preceded like the others")
+    line = body[i0 + len(printed[0]):i1]
+    if line and body[:i0].endswith(line) and not line.strip():
+        # Every tool is preceded by tool_line_prefix (Qwen: "\n"; GLM: "").
+        chat["tool_line_prefix"], chat["tool_separator"] = line, ""
+    else:
+        # Tools joined by a separator printed between them only (LFM2: ", " inside "[...]").
+        chat["tool_line_prefix"], chat["tool_separator"] = "", line
+        line = ""
     tools_prefix, tools_suffix = body[:i0 - len(line)] if line else body[:i0], body[i1 + len(printed[1]):]
     s_body = t_sys[:t_sys.index("USERPROBE1")]
     s_body = s_body[len(bos) if bos and s_body.startswith(bos) else 0:]
@@ -219,7 +238,24 @@ def derive(template_text, bos="", eos=""):
                     {"role": "tool", "tool_call_id": "call_1", "content": "TOOLPROBE2"},
                     {"role": "user", "content": "USERPROBE2"}], tools=TOOLS)
     turn = two[two.index("ASSTPROBE1"):]
-    if '{"name": "get_weather"' in turn:
+    if "get_weather(city=" in turn:
+        # Pythonic calls (LFM2): <|tool_call_start|>[f(a='x', b=3), g()]<|tool_call_end|>
+        chat["call_format"] = "pythonic"
+        name0 = turn.index("get_weather(")
+        chat["calls_open"] = opened = turn[len("ASSTPROBE1"):name0]
+        end1 = turn.index(")", name0) + 1
+        chat["call_separator"] = turn[end1:turn.index("search(", end1)]
+        close_at = turn.index(")", turn.index("search(")) + 1
+        chat["calls_close"] = turn[close_at:turn.index(chat["suffix"], close_at)]
+        chat["call_marker"] = opened.rstrip("[(")  # output_next stops content here
+        chat["call_end"] = chat["calls_close"].lstrip("])")
+        chat["content_call_separator"] = ""
+        if not opened.startswith(chat["call_marker"]) or not chat["call_marker"]:
+            raise ProbeError(f"unexpected pythonic call framing: {opened!r}")
+        after_calls = turn[close_at + len(chat["calls_close"]):]
+        two = "ASSTPROBE1" + after_calls  # tool-response framing below
+        end2 = len("ASSTPROBE1")
+    elif '{"name": "get_weather"' in turn:
         chat["call_format"] = "hermes"
     elif "<function=get_weather>" in turn:
         chat["call_format"] = "qwen_xml"
@@ -227,13 +263,15 @@ def derive(template_text, bos="", eos=""):
         chat["call_format"] = "glm"
     else:
         raise ProbeError("unknown tool-call format: " + turn[:300])
-    start1 = two.index("<tool_call>", two.index("ASSTPROBE1"))
-    chat["call_marker"] = "<tool_call>"
-    chat["content_call_separator"] = two[two.index("ASSTPROBE1") + len("ASSTPROBE1"):start1]
-    end1 = two.index("</tool_call>", start1) + len("</tool_call>")
-    start2 = two.index("<tool_call>", end1)
-    chat["call_separator"] = two[end1:start2]
-    end2 = two.index("</tool_call>", start2) + len("</tool_call>")
+    if chat["call_format"] != "pythonic":
+        chat["calls_open"] = chat["calls_close"] = chat["call_end"] = ""
+        start1 = two.index("<tool_call>", two.index("ASSTPROBE1"))
+        chat["call_marker"] = "<tool_call>"
+        chat["content_call_separator"] = two[two.index("ASSTPROBE1") + len("ASSTPROBE1"):start1]
+        end1 = two.index("</tool_call>", start1) + len("</tool_call>")
+        start2 = two.index("<tool_call>", end1)
+        chat["call_separator"] = two[end1:start2]
+        end2 = two.index("</tool_call>", start2) + len("</tool_call>")
     after_calls = two[end2:]
     if not after_calls.startswith(chat["suffix"]):
         raise ProbeError(f"assistant turn with calls is not closed by the suffix: {after_calls[:80]!r}")
@@ -264,8 +302,9 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None):
     use_default = not first_system and chat["default_system"]
     body = chat["default_system"] if use_default else sys_text
     if tools:
-        printed = "".join(chat["tool_line_prefix"] + json.dumps(t["function"] if chat["tools_function_only"] else t, ensure_ascii=False)
-                          for t in tools)
+        printed = chat.get("tool_separator", "").join(
+            chat["tool_line_prefix"] + json.dumps(t["function"] if chat["tools_function_only"] else t, ensure_ascii=False)
+            for t in tools)
         tb = chat["tools_prefix"] + printed + chat["tools_suffix"]
         sep = chat["tools_system_separator"] if body else ""
         merged = body + sep + tb if chat["tools_after_system"] else tb + sep + body
@@ -286,8 +325,7 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None):
             thought = (m.get("reasoning_content") or "").strip()
             shown = chat["history_think_scope"] == "all" or i > last_query
             think = chat["think_open"] + thought + chat["think_close"] if shown and (thought or chat["history_think"] == "always") and chat["think_open"] else ""
-            calls = "".join((chat["call_separator"] if j else "") + render_call(chat, c["function"])
-                            for j, c in enumerate(m.get("tool_calls") or []))
+            calls = render_calls(chat, m.get("tool_calls") or [])
             sep = chat["content_call_separator"] if text and calls else ""
             out += chat["assistant_prefix"] + think + text + sep + calls + chat["suffix"]
         else:
@@ -303,12 +341,22 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None):
     return out
 
 
+def render_calls(chat, tool_calls):
+    """All of an assistant turn's calls as control.loom prints them (render_tool per call + CALLS_CLOSE)."""
+    calls = "".join((chat["call_separator"] if j else "") + render_call(chat, c["function"]) for j, c in enumerate(tool_calls))
+    if calls and chat.get("calls_open"):
+        calls = chat["calls_open"] + calls + chat["calls_close"]
+    return calls
+
+
 def render_call(chat, call):
     args = call["arguments"]
     if chat["call_format"] == "hermes":
         a = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
         return '<tool_call>\n{"name": "' + call["name"] + '", "arguments": ' + a + "}\n</tool_call>"
     args = json.loads(args) if isinstance(args, str) else args
+    if chat["call_format"] == "pythonic":
+        return call["name"] + "(" + ", ".join(f"{k}={py_value(v)}" for k, v in args.items()) + ")"
     val = lambda v: v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, separators=(",", ":"))
     if chat["call_format"] == "qwen_xml":
         return ("<tool_call>\n<function=" + call["name"] + ">\n"
@@ -317,6 +365,18 @@ def render_call(chat, call):
     return ("<tool_call>" + call["name"]
             + "".join(f"<arg_key>{k}</arg_key><arg_value>{val(v)}</arg_value>" for k, v in args.items()) + "</tool_call>")
 
+
+def py_value(v):
+    """LFM2 template's format_arg_value: quoted escaped strings, tojson containers, str() otherwise."""
+    if isinstance(v, str):
+        return "'" + v.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r") + "'"
+    if isinstance(v, (dict, list)):
+        return json.dumps(v, ensure_ascii=False)
+    return str(v)
+
+
+TYPED_CALL = {"name": "get_weather", "arguments": {"city": "O'Hare \\ \"x\"\nline", "days": 3, "ratio": 0.5, "flag": True,
+                                                   "off": False, "none": None, "tags": ["a", 1], "opts": {"k": "v", "n": [1, 2]}}}
 
 CONVERSATIONS = [
     ("chat", [{"role": "user", "content": "Hi there"}], None),
@@ -338,7 +398,10 @@ def verify(template_text, chat, bos="", eos=""):
     """Returns [(name, ok, detail)]: template render vs simulate() for each conversation."""
     T = Template(template_text, bos, eos)
     results = []
-    for name, msgs, tools in CONVERSATIONS:
+    extra = [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL, CALL2], reasoning="R"),
+                                   {"role": "tool", "tool_call_id": "call_0", "content": "ok"}], TOOLS)] \
+        if chat["call_format"] == "pythonic" else []
+    for name, msgs, tools in CONVERSATIONS + extra:
         for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
             label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")
             try:
@@ -368,6 +431,15 @@ def main():
         f, tokens = r.fields.get("tokenizer.ggml.bos_token_id"), r.fields.get("tokenizer.ggml.tokens")
         if f is not None and tokens is not None:
             bos = tokens.contents()[f.contents()]
+    if len(sys.argv) > 3 and sys.argv[2] == "--verify":
+        # A hand-filled block (a format derive() can't model): verify cfg.json's chat block only.
+        chat = json.load(open(sys.argv[3]))
+        chat = chat.get("chat", chat)
+        bad = 0
+        for name, ok, detail in verify(text, chat, bos):
+            bad += ok is False
+            print(("OK  " if ok else "SKIP" if ok is None else "FAIL"), name, "-", detail)
+        sys.exit(1 if bad else 0)
     chat, notes = derive(text, bos)
     for n in notes:
         print("note:", n)

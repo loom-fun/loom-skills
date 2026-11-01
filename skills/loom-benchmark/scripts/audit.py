@@ -25,7 +25,12 @@ PROGRESS = os.path.join(here, "..", "..", "loom-roofline", "progress.py")
 checks = []
 
 
+NO_REF = False   # set below: no installed llama.cpp runs this model (qualify.sh NO_LLAMACPP)
+
+
 def check(name, ok, msg, level="FAIL"):
+    if NO_REF and name.startswith(("baseline:", "gates: compare", "roofline: ran with a baseline", "gates: full run")):
+        level, msg = "WARN", msg + " [no llama.cpp build runs this model: correctness vs a reference is UNVERIFIED]"
     checks.append({"check": name, "result": "ok" if ok else level, "detail": msg})
 
 
@@ -38,6 +43,7 @@ pick = json.load(open(P("llamacpp_pick.json"))) if os.path.exists(P("llamacpp_pi
 targets, gates = jl("targets.jsonl"), jl("gates.jsonl")
 metrics = {m["metric"]: m for m in roof["metrics"]} if roof else {}
 
+NO_REF = pick is not None and not pick.get("ranked")
 # baseline
 check("baseline: picker ran", pick is not None and pick.get("ranked"),
       "llamacpp_pick.json missing: run pick_llamacpp.sh MODEL.gguf from bench/")
@@ -50,9 +56,16 @@ if pick and pick.get("ranked") and roof:
           and (pbase is None or pbase >= top["prefill_1k_tps"] * 0.75))
     # With a single candidate build the baseline is that build: a lower number is load noise.
     ok = ok or len(pick["ranked"]) == 1
+    # finalize.sh measures llama.cpp with the picked build itself (label llama-final): a low number
+    # there is GPU load during the measurement, not a wrong build.
+    by_finalize = any(json.loads(l).get("label") == "llama-final" for l in open(P("perf_log.jsonl"))) \
+        if os.path.exists(P("perf_log.jsonl")) else False
     check("baseline: fastest build used", ok,
           f"roofline baseline decode {base} / prefill-1k {pbase} vs fastest build "
-          f"{top['decode_tps']} / {top['prefill_1k_tps']} ({top['dir']}): re-measure with that build")
+          f"{top['decode_tps']} / {top['prefill_1k_tps']} ({top['dir']}): "
+          + ("measured with that build by finalize.sh, so the GPU was loaded: say so in the report"
+             if by_finalize else "re-measure with that build"),
+          level="WARN" if by_finalize else "FAIL")
 check("roofline: ran with a baseline", roof is not None and metrics.get("decode_tps", {}).get("baseline"),
       "roofline.json missing or without --baseline: run loom-roofline")
 
@@ -68,9 +81,12 @@ for m, rs in final.items():   # final build = last kept label; median of its run
 for m, R in metrics.items():
     if m in best:
         e = best[m] / R["ceiling"]
+        # 216 GB/s is a conservative measured bandwidth: dense ports reached 221-237 GB/s. Above 0.97 is a
+        # WARN (check the byte count first); above 1.10 the roofline certainly undercounts.
         check(f"plausible: Loom {m}", e <= 0.97,
-              f"Loom at {e:.2f} of the ceiling: the roofline undercounts (sliding window, KV sharing, "
-              "hybrid layers, expert count?)")
+              f"Loom at {e:.2f} of the ceiling: check the roofline's byte count (sliding window, KV sharing, "
+              "hybrid layers, expert count); a dense model at 1.0-1.1 means the bandwidth constant is conservative",
+              level="WARN" if e <= 1.10 else "FAIL")
     be = R.get("baseline_eff")
     if be is not None:
         floor = 0.10 if m.startswith("prefill") else 0.30
@@ -98,8 +114,14 @@ if s is not None and s["verdict"] != "PASS" and note:
 else:
     check("gates: consistency", s is not None and s["verdict"] == "PASS",
           f"latest consistency: {s and s['verdict']} (a near-tie with a known cause needs consistency_note.md)")
+gj = json.load(open(P("gates.json"))) if os.path.exists(P("gates.json")) else None
+failing = [n for n, g in (gj or {}).get("gates", {}).items() if not g["pass"]]
+documented = failing == ["consistency"] and note   # a near-tie with its cause in consistency_note.md
+check("gates: full run PASS", gj is not None and (gj.get("verdict") == "PASS" or documented) and gj.get("level", "full") == "full",
+      f"gates.json: {gj and {k: gj.get(k) for k in ('verdict', 'level')}}: run finalize.sh (LEVEL=full gates) on the final build")
 kept = [r for r in targets if r.get("kept", True) and r.get("commit", "-") != "-"]
-if kept and c and c.get("commit", "-") != "-":
+if kept and c and c.get("commit", "-") != "-" and not (gj and gj.get("pkg_hash") and gj.get("level") == "full"):
+    # (gates.json from a LEVEL=full run carries the package hash it ran on: that, not git HEAD, names the build)
     check("gates: ran on the final build", c["commit"] == kept[-1]["commit"],
           f"compare at {c['commit']}, last kept measurement at {kept[-1]['commit']}")
 

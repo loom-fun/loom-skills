@@ -1,0 +1,169 @@
+"""Reads a GGUF and writes the LLM_CONFIG json that gen_llm.py, build.py and
+the benchmark scripts consume. The "chat" block is derived from the embedded
+chat template by chat_probe.py and verified against it (the printed OK/FAIL
+lines); a FAIL or a probe error means fill or fix it by hand. Architecture quirks (sliding layers, NoPE layers, output gate, post norms,
+embedding scale) must be checked against llama.cpp's src/models/<arch>.cpp.
+
+usage: python inspect_gguf.py MODEL.gguf OUT.json   (needs `pip install gguf`)
+"""
+import json
+import os
+import sys
+
+import gguf
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import chat_probe  # noqa: E402
+
+path, out = sys.argv[1], sys.argv[2]
+r = gguf.GGUFReader(path)
+
+
+def field(key, default=None):
+    f = r.fields.get(key)
+    if f is None:
+        return default
+    v = f.contents()
+    return v
+
+
+arch = field("general.architecture")
+A = lambda k, d=None: field(f"{arch}.{k}", d)
+tensors = {}
+for t in r.tensors:
+    tensors[t.name] = {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]}
+H = A("embedding_length")
+heads = A("attention.head_count")
+kv = A("attention.head_count_kv")
+head_dim = A("attention.key_length") or H // heads
+L = A("block_count")
+vocab = tensors["token_embd.weight"]["shape"][1]
+template = field("tokenizer.chat_template", "") or ""
+eos = field("tokenizer.ggml.eos_token_id")
+tokens = field("tokenizer.ggml.tokens") or []
+im_end = tokens.index("<|im_end|>") if "<|im_end|>" in tokens else None
+endoftext = tokens.index("<|endoftext|>") if "<|endoftext|>" in tokens else None
+
+cfg = {
+    "name": field("general.name", arch),
+    "arch": arch,
+    "gguf": path,
+    "hidden": H, "layers": L, "heads": heads, "kv_heads": kv if isinstance(kv, int) else max(kv),
+    "head_dim": head_dim, "ffn": A("feed_forward_length"), "vocab": vocab,
+    "context_length": A("context_length"),
+    "rms_eps": A("attention.layer_norm_rms_epsilon", 1e-6),
+    "rope_theta": A("rope.freq_base", 10000.0),
+    # neox: rotary pairs (d, d + head_dim/2) -- qwen2/qwen3/gemma/...; norm: (2d, 2d+1) -- llama
+    "rope_type": "norm" if arch in ("llama", "mistral", "granite") else "neox",
+    "qk_norm": any(k.endswith(".attn_q_norm.weight") for k in tensors),
+    "attn_gate": "blk.0.attn_gate.weight" in tensors,
+    "post_norms": "blk.0.post_attention_norm.weight" in tensors,
+    "embed_norm": False,
+    "embed_scale": None,
+    "sliding_window": A("attention.sliding_window") or 0,
+    "sliding_layers": [],
+    "nope_layers": [],
+    "tied_embeddings": "output.weight" not in tensors,
+    "eos_id": eos,
+    # head_select stops on any of these; keep <|endoftext|> for ChatML models.
+    "extra_eos_ids": sorted({i for i in (im_end, endoftext) if i is not None and i != eos}),
+    "bos_id": field("tokenizer.ggml.bos_token_id") if field("tokenizer.ggml.add_bos_token", False) else None,
+    "chat": None,
+    "tensors": tensors,
+}
+if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3", "flint"):
+    print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
+          "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
+          "before trusting a golden FAIL or PASS")
+_g = cfg["heads"] // max(cfg["kv_heads"], 1)
+if _g & (_g - 1):
+    print(f"WARNING: head_dim {head_dim}: {_g} query heads per KV head; the prefill flash attention (gen_flash2.py) "
+          "tiles head_dim over 32*G lanes and needs G to be a power of two: generalize it first (new kernel work)")
+# Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style).
+pat = A("attention.sliding_window_pattern")
+if cfg["sliding_window"] and isinstance(pat, list) and len(pat) == L:
+    cfg["sliding_layers"] = [i for i, sl in enumerate(pat) if sl]
+elif cfg["sliding_window"]:
+    print(f"WARNING: sliding_window {cfg['sliding_window']} but no per-layer pattern in the GGUF: fill "
+          "sliding_layers (and nope_layers) by hand from llama.cpp's src/models/<arch>.cpp or llama_trace.py")
+# Partial rotary embedding (e.g. qwen35: 64 of 256 dims).
+rope_dims = A("rope.dimension_count")
+if rope_dims and rope_dims != head_dim:
+    cfg["rope_dims"] = rope_dims
+# Hybrid models: gated delta-net (linear attention) layers carry recurrent state
+# instead of KV (llama.cpp qwen35/qwen3next: layer i is recurrent unless (i+1) % interval == 0).
+if A("ssm.inner_size"):
+    interval = A("full_attention_interval", 4)
+    cfg["recurrent_layers"] = [i for i in range(L) if (i + 1) % interval != 0]
+    cfg["gdn"] = {"conv_kernel": A("ssm.conv_kernel"), "k_heads": A("ssm.group_count"), "v_heads": A("ssm.time_step_rank"),
+                  "head_k": A("ssm.state_size"), "inner": A("ssm.inner_size")}
+    cfg["gdn"]["head_v"] = cfg["gdn"]["inner"] // cfg["gdn"]["v_heads"]
+    cfg["kv_layers"] = L - len(cfg["recurrent_layers"])
+    # qwen35-style attention: attn_q packs [query | sigmoid gate] per head; the FFN norm is post_attention_norm.
+    attn0 = next(i for i in range(L) if i not in cfg["recurrent_layers"])
+    if tensors[f"blk.{attn0}.attn_q.weight"]["shape"][1] == 2 * heads * head_dim:
+        cfg["attn_gate"] = "fused_q"
+    if f"blk.{attn0}.ffn_norm.weight" not in tensors and f"blk.{attn0}.post_attention_norm.weight" in tensors:
+        cfg["post_norms"] = False
+        cfg["ffn_norm_tensor"] = "post_attention_norm"
+    print(f"hybrid: {len(cfg['recurrent_layers'])} gated delta-net layers + {cfg['kv_layers']} attention layers;", cfg["gdn"])
+# Per-layer RoPE pattern (flint: false = NoPE on the full-attention layers).
+rpat = A("attention.rope_pattern", A("rope_pattern"))
+if isinstance(rpat, list) and len(rpat) == L:
+    cfg["nope_layers"] = [i for i, r in enumerate(rpat) if not r]
+# Attention sinks (one learned logit per query head, added to the softmax denominator).
+cfg["attn_sinks"] = "blk.0.attn_sinks.weight" in tensors
+# MoE FFN after the leading dense layers: router (f32/bf16), top-k, optional selection bias, shared experts.
+if A("expert_count"):
+    cfg["moe"] = {"experts": A("expert_count"), "used": A("expert_used_count"), "ffn": A("expert_feed_forward_length"),
+                  "leading_dense": A("leading_dense_block_count", 0), "gating": A("expert_gating_func", 1),
+                  "norm_weights": bool(A("expert_weights_norm", False)), "scale": A("expert_weights_scale", 1.0),
+                  "probs_bias": any(k.endswith("exp_probs_b.bias") for k in tensors)}
+    sh = next((v for k, v in tensors.items() if k.endswith("ffn_gate_shexp.weight")), None)
+    if sh:
+        cfg["moe"]["shared_ffn"] = sh["shape"][1]
+    print("moe:", cfg["moe"])
+
+
+def generation_block(tpl):
+    """Text the template emits for add_generation_prompt (what decides thinking mode)."""
+    i = tpl.rfind("add_generation_prompt")
+    return tpl[i:i + 300] if i >= 0 else ""
+
+
+if template:
+    try:
+        bos_text = tokens[field("tokenizer.ggml.bos_token_id")] if field("tokenizer.ggml.bos_token_id") is not None else ""
+        chat, notes = chat_probe.derive(template, bos_text)
+        for n in notes:
+            print("chat note:", n)
+        results = chat_probe.verify(template, chat, bos_text)
+        for name, ok, detail in results:
+            print("chat", "OK  " if ok else "SKIP" if ok is None else "FAIL", name, "-", detail)
+        cfg["chat"] = chat
+        print(f"chat: thinking={chat['thinking']} (default {'on' if chat['thinking_default'] else 'off'}), "
+              f"tool calls={chat['call_format']}; generation prompt {chat['generation_prompt']!r}")
+        if any(ok is False for _, ok, _ in results):
+            print("WARNING: the derived chat block does not reproduce the template (FAIL above); fix it by hand")
+    except (chat_probe.ProbeError, ValueError, KeyError) as e:
+        print("WARNING: chat template not derivable automatically:", e)
+# End-of-generation ids from the GGUF (flint: <|end_of_text|>, <|user|>, <|observation|>, <|developer|>).
+eog = field("tokenizer.ggml.eog_token_ids")
+if isinstance(eog, list):
+    cfg["extra_eos_ids"] = sorted(set(cfg["extra_eos_ids"]) | {int(i) for i in eog if int(i) != eos})
+# A chat format without a message suffix needs a terminal marker: the EOS token text.
+if cfg["chat"] is not None and not cfg["chat"].get("terminal") and eos is not None:
+    cfg["chat"]["terminal"] = tokens[eos]
+fmts = sorted({v["type"] for k, v in tensors.items() if k.endswith(".weight") and len(v["shape"]) == 2})
+print(f"{cfg['name']}: arch={arch} L={L} H={H} heads={heads}/{cfg['kv_heads']} d={head_dim} ffn={cfg['ffn']} vocab={vocab} formats={fmts}")
+unsupported = [f for f in fmts if f not in ("q4_k", "q5_k", "q6_k", "q8_0")
+               and not (f == "f32" and cfg.get("gdn"))
+               and not (f in ("bf16", "f32") and cfg.get("moe"))]  # MoE router weights are read directly by g_moe_route  # f32 conv1d weights are read directly by the GDN kernels
+if unsupported:
+    print("WARNING: no kernels for", unsupported, "- add dequant helpers (see reference/porting-notes.md)")
+if head_dim not in (128, 256):
+    print("WARNING: head_dim", head_dim, "is not 128 or 256: the attention kernels support only those")
+if cfg["chat"] is None:
+    print("WARNING: no chat block; fill it by hand from tokenizer.chat_template (fields: see chat_probe.py)")
+json.dump(cfg, open(out, "w"), indent=1)
+print("wrote", out)
