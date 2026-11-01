@@ -207,6 +207,11 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
     (LFM2: `<|tool_call_start|>[f(a='x', n=3)]<|tool_call_end|>`, parsed in control.loom);
   - `default_system` (Qwen2.5 inserts "You are Qwen, created by Alibaba Cloud…").
 
+  **History reuse depends on the canonical rendering.** `complete_text` must store the turn as the
+  template re-renders it, not as the model generated it. Two trials failed `reuse_ok` here: a model
+  that omits `<|eom|>` before a tool call (the template renders it), and one that writes newlines
+  after a call that the template drops. If `reuse_ok` fails after a tool call, diff Loom's
+  `input_tokens` rendering of the next turn against `chat_probe.simulate()` and canonicalize those bytes.
   Templates the probe can't model (e.g. role tags with no closing suffix, tools
   inside the first user message, channel formats): fill the block by hand, keep
   `simulate()` in step, and rerun `chat_probe.py` until every line is OK. If the
