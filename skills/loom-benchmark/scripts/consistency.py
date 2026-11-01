@@ -39,8 +39,15 @@ run.raw = {}
 alone = [run(p) for p in prompts]
 with cf.ThreadPoolExecutor(a.n) as ex:
     together = list(ex.map(run, prompts))
-same = [x[0] == y[0] for x, y in zip(alone, together)]
-print("prompt tokens", [x[1] for x in alone], "identical when concurrent:", same)
+# Run-to-run determinism alone (a kernel race, e.g. a router reading back its own writes across a
+# barrier, shows up here before it shows up anywhere else).
+again = [run(p) for p in prompts]
+repeat = [x[0] == y[0] for x, y in zip(alone, again)]
+same = [x[0] == y[0] and r for x, y, r in zip(alone, together, repeat)]
+print("prompt tokens", [x[1] for x in alone], "identical when concurrent:", [x[0] == y[0] for x, y in zip(alone, together)],
+      "identical when repeated alone:", repeat)
+if not all(repeat):
+    print("NOT DETERMINISTIC: the same prompt alone gave different greedy output (a race in a kernel, not a near-tie)")
 if a.pkg and not all(same):
     from bench_common import Package, llama_completion
     P = Package(a.pkg)
