@@ -10,7 +10,7 @@ these skills in October 2026, in about 48 minutes end to end. LFM2.5 mixes **sho
 | `gen_sconv.py` | Short-conv layers (in-proj -> B*x gate -> causal conv over the conv state -> C* gate -> out-proj), reusing the recurrent-slot protocol of `gen_gdn.py` (read the fork position's slot, publish the final state) |
 | `gen_moe_lfm.py` | Router + top-k (sigmoid scores, normalized; the whole wave picks the top-k: decode +3.9 %), per-expert decode matvecs (`MOE_R` rows per workgroup: 8 won), and a grouped 64x64 WMMA prefill GEMM over tokens bucketed by expert, output tiles fastest (`MOE_N_FASTEST`: prefill +24-30 %) |
 | `gen_llm.py` | Wiring: layer kinds from the GGUF (`shortconv_layers`, attention layers), head_dim 64 accepted by the attention and flash2 generators |
-| `build.py`, `gen_flash2.py` | recurrent slot size includes the short-conv state (`sconv_geometry`); flash2 accepts head_dim 64 |
+| `gen_flash2.py` | flash2 accepts head_dim 64 (the short-conv slot sizing is in the starter's `build.py`) |
 | `inspect_gguf.py`, `make_kernel_tests.py`, `cfg.json` | Config extraction for `lfm2moe`, kernel tests for the short-conv chain and the MoE chain (13/13) |
 
 The chat side is in the starter: `chat_probe.py` derives LFM2's template (`{% generation %}` tags, a

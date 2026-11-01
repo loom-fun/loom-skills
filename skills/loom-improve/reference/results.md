@@ -26,6 +26,7 @@ never edit old ones. Wall clock is install -> done; the target is the model's ro
 | 2026-11-01 | Qwen3.5-0.8B | faster-e2e v13 | **24.1** (budget 46) | 0 | **full PASS, AUDIT PASS** | 0.36 | 6/6 | quiet GPU; decode +27 %, prefill 1k/2k +22/+28 %, c4 +57 %, 32k prefill -20 % vs llama.cpp b1360 |
 | 2026-11-01 | flint | faster-e2e v13 | **58.2** (budget 75) | 2 | **full PASS, AUDIT PASS** (agent 6/6) | 0.50 | 6/6 | quiet GPU; starter stop-token restore working from scratch; decode +25 %, c4 +14 %, prefill 1k -35 % |
 | 2026-11-01 | LFM2.5-24B-A2B (consistency re-check) | faster-e2e v13 rule | – | – | consistency PASS 3/3 (deterministic alone; one near-tie at gap 0.25 when concurrent) | – | – | v8 package, current consistency.py |
+| 2026-11-01 | LFM2.5-24B-A2B (rebuilt from reference) | main fc680fc | – | – | **current full gates: all PASS** (fresh, nothing reused; max gap 0.63); previous skill's gates: golden/compare/needle/sampling PASS, consistency + agent FAIL on the old rules (strict concurrent equality; no byte-fallback alignment) | 0.63 | 6/6 | answers the open LFM2.5 gate question |
 
 ## Lessons with numbers (why the skill looks the way it does)
 - The default "1 h of optimization" made every end-to-end job > 1 h by construction: the budget is now
