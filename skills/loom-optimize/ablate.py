@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ablation package: the cost of a kernel, measured end to end (hardware counters are unavailable).
+r"""Ablation package: the cost of a kernel, measured end to end (hardware counters are unavailable).
 
 usage: ablate.py PKG OUT_PKG REGEX [--skip] [--name NAME]
   Copies PKG to OUT_PKG (the GGUF link and tokenizer are shared), then in program/*.loom DOUBLES
@@ -16,6 +16,8 @@ usage: ablate.py PKG OUT_PKG REGEX [--skip] [--name NAME]
   ('stage parameter counts differ'): double those instead.
   Skipping the output head ends generation at once (decode then reports absurd tok/s): double it.
   Examples: REGEX '@attn_decode' (decode attention), '@mv_.*ffn_down' (one matvec), '@rms' (norms).
+  Launch lines read `kernel.launch @NAME[GRID](ARGS) : ...`: match the name (end a pattern with `\[`,
+  not `$` or `\(`). A copy that matched nothing is still written: delete it before serving (duplicate id).
 """
 import argparse
 import json
