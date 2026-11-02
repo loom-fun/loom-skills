@@ -16,7 +16,7 @@ llama.cpp's top two first tokens 0.013 nats apart), so found/missed is reported 
 decides a probe when it agrees. A probe passes when the request succeeds with a non-empty
 answer and, for sizes up to --llama-max with --llama, Loom found the needle, or llama.cpp
 missed it too, or Loom's first divergence from llama.cpp on the same prompt ids is a near-tie
-(the compare.py rule: gap <= 1 nat and Loom's token in llama.cpp's top-5). Beyond --llama-max
+(the compare rule, bench_common.near_tie). Beyond --llama-max
 (a llama.cpp prefill there takes many minutes) a probe proves that the server serves the
 size. Exit status 1 on a failed probe or a failed over-limit check. Answers go to --out.
 """
@@ -31,7 +31,7 @@ import time
 
 import requests
 
-from bench_common import Package, doc, llama_greedy, stream, top_logprobs
+from bench_common import Package, doc, llama_greedy, near_tie, stream, top_logprobs
 
 QUESTIONS = {
     1: ("\n\n----\nSomewhere in the material above there is exactly one sentence of the form "
@@ -109,8 +109,8 @@ def main():
                     gap = 0.0 if k >= len(cp) else round(top[gids[k]] - top[lids[k]], 3) if lids[k] in top else "not in top-5"
                 rec.update(llama_found=sum(v in g.get("content", "") for v in needles.values()), llama_s=round(time.time() - t0, 1),
                            diverge_at=k, gap=gap, llama_answer=g.get("content", "")[-400:])
-                near_tie = k is None or (isinstance(gap, float) and gap <= 1.0)
-                ok = rec["found"] >= rec["llama_found"] or near_tie
+                near = k is None or k >= len(cp) or near_tie(top, gids[k], lids[k])
+                ok = rec["found"] >= rec["llama_found"] or near
             rec["pass"] = ok
             failures += not ok
             loom_total += rec["found"]; probes_total += 1

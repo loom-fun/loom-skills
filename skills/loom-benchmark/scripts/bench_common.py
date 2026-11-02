@@ -7,6 +7,7 @@ token ids) and Loom (fed chat messages) see byte-identical prompts.
 """
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -197,6 +198,20 @@ def llama_greedy(url, ids, n_predict, pkg, salt="", n_probs=5):
     gen = r.get("tokens") or [x["id"] for x in cp]
     k = next((i for i, x in enumerate(cp) if i >= len(gen) or x["id"] != gen[i]), len(cp))
     return r, gen, cp[:k]
+
+
+def near_tie(top, gold_id, loom_id, max_gap=1.0):
+    """Is Loom's token at a divergence a near-tie of llama.cpp's greedy token? top: {id: logprob} from
+    llama.cpp at that position. Yes when the log-prob gap is <= max_gap, or when llama.cpp itself is
+    unsure there: Loom picked its second choice and its first has probability < 0.5 (flint: p 0.38 vs
+    0.13, gap 1.03, while llama.cpp's own re-recording of the same prompt sat at gap 1.05). A token
+    llama.cpp is confident against, or ranks lower, is a bug."""
+    if gold_id not in top or loom_id not in top:
+        return False
+    if top[gold_id] - top[loom_id] <= max_gap:
+        return True
+    ranked = sorted(top, key=top.get, reverse=True)
+    return ranked[:2] == [gold_id, loom_id] and math.exp(top[gold_id]) < 0.5
 
 
 def top_logprobs(tops, k):

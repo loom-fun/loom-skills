@@ -55,7 +55,7 @@ Before you start you need:
    Run it with `loom-test` (see the cookbook in `loom-port-llm/reference/`).
 5. **End-to-end gates.** `LEVEL=fast gates.sh PKG URL GGUF BENCH_DIR` (`loom-benchmark`):
    - `compare.py` on short prompts and the 1k/2k/16k/32k goldens. Every divergence
-     must be a near-tie (the compare rule: gap ≤ 1.0, token in the golden top-5). A new
+     must be a near-tie (the compare rule, `bench_common.near_tie`). A new
      divergence with a large gap is a bug even if the text "looks fine".
    - `consistency.py`: concurrent outputs must equal sequential outputs. This
      catches mixed-tile and padding bugs that single requests never hit.

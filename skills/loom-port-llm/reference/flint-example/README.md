@@ -16,8 +16,8 @@ the starter.
 
 Notes: the tokenizer is in `RecursiveSI/flint` (the GGUF doesn't name its base model; port.sh searches
 the Hub). Prefill chunk 4096 helped 2k+ but cost 12 % at 1k: A/B the 1k size too. Build with
-`--memory-gib` large enough for a pool of >= 1.5x the context, or the full-context gate gets a 503; within the
-GPU share in the loom hard rules (~61 GiB) that may mean building at a shorter `--context` and saying so.
+`--memory-gib` large enough for a pool of >= 1.5x the context, or the full-context gate gets a 503 (`auto`,
+the default, gives ~73 GiB on a 128 GB Strix Halo: pool ~450k for the 262k context).
 
 **Agent-gate history reuse (root-caused, fixed in the starter):** reused turns diverged (gaps 1.22, 2.74)
 while the same prompts sent fresh matched llama.cpp. The cause was the stop token, not numerics or sinks:

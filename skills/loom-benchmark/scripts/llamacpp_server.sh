@@ -13,6 +13,8 @@ if [ "${1:-}" = --stop ]; then   # the server this script started on PORT (only 
   f=$state/llamacpp-${2:?--stop PORT}.pid; [ -f "$f" ] || exit 0; pid=$(cat "$f")
   if [ -r /proc/$pid/cmdline ]; then tr '\0' ' ' < /proc/$pid/cmdline | grep -q llama-server && kill "$pid" 2>/dev/null || true
   else kill "$pid" 2>/dev/null || true; fi
+  # wait until it has exited (its memory is free) before anything loads the next model
+  for _ in $(seq 60); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done; kill -9 "$pid" 2>/dev/null
   rm -f "$f"; exit 0
 fi
 gguf=$1; port=${2:-8130}; np=${3:-4}; per=${4:-8192}; mode=${5:-}

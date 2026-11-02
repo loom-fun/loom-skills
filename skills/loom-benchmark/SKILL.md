@@ -93,7 +93,9 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   logp(golden) − logp(loom token) at that point.
 - **Interpretation.** Greedy decoding through different summation orders
   *always* diverges eventually at near-ties.
-  - **PASS**: every divergence has gap ≤ 1.0 and the token is in the golden top-5.
+  - **PASS**: every divergence is a near-tie (`bench_common.near_tie`): gap ≤ 1.0 with the token in the
+    golden top-5, or Loom picked llama.cpp's second choice where llama.cpp's first has p < 0.5
+    (llama.cpp itself is unsure there: on flint its own re-recording moved by gap 1.05).
     Typical healthy ports have max gap 0.1–0.6, and full matches on a quarter or
     more of the prompts.
   - **FAIL**: a large gap, or a token outside the top-5. That is a real bug, even
@@ -145,7 +147,7 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   needle on a near-tie first token (Qwen3.5-0.8B at 130k: llama.cpp's top two first tokens
   0.013 nats apart), so a handful of probes says nothing statistically. Up to `--llama-max`
   each probe is compared with llama.cpp on the same ids and passes when Loom found the
-  needle, llama.cpp missed it too, or the first divergence is a near-tie (gap ≤ 1 nat, in
+  needle, llama.cpp missed it too, or the first divergence is a near-tie (the compare rule, in
   the top-5: the compare.py rule). The full-context probe (Loom only; llama.cpp would take
   many minutes) proves the size is served. Found counts are reported as information.
 

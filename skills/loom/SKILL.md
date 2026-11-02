@@ -124,7 +124,8 @@ Read it from there if it isn't in your skill list.
 ## Hard rules (learned the expensive way)
 
 - **Never load a model whose weights exceed the GPU's GTT/unified-memory budget.**
-  On the Strix Halo box (128 GB RAM) the GPU limit is ~61 GiB GTT. Qwen3.8-Flash-Next
+  GPU memory is system RAM: keep one model's weights + KV pool within 60 % of RAM (~73 GiB on a
+  128 GB Strix Halo; build.py's default budget). Qwen3.8-Flash-Next
   (104 GiB) hard-crashed the machine during the original evaluation. Never retry it on a 128 GB box. Check
   `du -shL <weights>` against `cat /sys/class/drm/card*/device/mem_info_gtt_total`
   before serving anything big. The scripts load **one model at a time** (Loom is stopped while

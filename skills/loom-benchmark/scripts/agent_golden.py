@@ -7,7 +7,7 @@ For every assistant turn of a deterministic tool-using conversation it checks
      lower: the previous turn's EOS is already in the row);
   2. reuse: prompt_tokens_details.cached_tokens (the previous turn's history is retained);
   3. golden: Loom's greedy output vs llama.cpp's on the *same prompt ids* (log-prob gap at
-     the first divergence; a near-tie is <= 1 nat with Loom's token in the top-5, as in compare.py), when --llama is given;
+     the first divergence; a near-tie by the compare rule, bench_common.near_tie), when --llama is given;
   4. tool calls: parsed name/arguments are valid JSON for the declared function.
 
 usage: agent_golden.py PKG LOOM_URL [--llama URL] [--thinking on|off|default] [--out FILE]
@@ -19,7 +19,7 @@ import sys
 
 import requests
 
-from bench_common import Package, llama_greedy, top_logprobs
+from bench_common import Package, llama_greedy, near_tie, top_logprobs
 
 TOOLS = [
     {"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city.",
@@ -53,6 +53,12 @@ def post(url, body, path="/v1/chat/completions"):
     # Serialized like the template's `tojson` so tool definitions print identically.
     data = json.dumps(body, ensure_ascii=False).encode()
     return requests.post(url + path, data=data, timeout=1800, headers={"Content-Type": "application/json"}).json()
+
+
+def near_at(ids, tops, loom_ids, k):
+    """The compare rule (bench_common.near_tie) at divergence k; past the aligned top-5 lists (a
+    byte-split token) it counts as a near-tie, as in compare.py."""
+    return k >= len(tops) or near_tie(top_logprobs(tops, k), ids[k], loom_ids[k])
 
 
 def gap_at(ids, tops, loom_ids, k):
@@ -127,7 +133,7 @@ def main():
                     # temperature-0 requests gave different greedy text): as compare.py does, re-record a
                     # turn that would fail and score against the recording Loom follows further.
                     for salt in ("rec2", "rec3"):
-                        if gap is not None and gap <= 1.0:
+                        if near_at(gids, gtops, loom_ids, k):
                             break
                         _, gids2, cp2 = llama_greedy(a.llama, ids, max(1, u["completion_tokens"]), P, salt)
                         k2 = next((i for i, (x, y) in enumerate(zip(loom_ids, gids2)) if x != y), None)
@@ -141,7 +147,7 @@ def main():
                             top = {t["id"]: t["logprob"] for t in gtops[k]["top_logprobs"]} if k < len(gtops) else {}
                     if k is None:
                         rec["golden_match"] = True
-                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=k is None or (gap is not None and gap <= 1.0))
+                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=k is None or near_at(gids, gtops, loom_ids, k))
                     if not rec["near_tie"]:
                         print("     at the divergence: loom", repr(P.tok.decode(loom_ids[max(0, k - 8):k + 4], skip_special_tokens=False)),
                               "| llama", repr(P.tok.decode(gids[max(0, k - 8):k + 4], skip_special_tokens=False)),

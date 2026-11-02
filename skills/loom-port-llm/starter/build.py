@@ -1,7 +1,7 @@
 """Builds a loom-serve package for a dense GGUF LLM from its LLM_CONFIG json.
 
 usage: python build.py CONFIG.json PACKAGE_DIR --tokenizer TOKENIZER.json
-           [--context N] [--pool N] [--memory-gib 56] [--prefill 1024] [--rows 4] [--max-tokens 4096] [--model-id ID]
+           [--context N] [--pool N] [--memory-gib auto] [--prefill 1024] [--rows 4] [--max-tokens 4096] [--model-id ID]
 
 --context defaults to the model's native context (cfg context_length, up to the kernels' 262144) and
 --pool (KV positions shared by all rows) to twice that, both reduced to fit --memory-gib.
@@ -24,7 +24,10 @@ ap.add_argument("package")
 ap.add_argument("--tokenizer", required=True, help="HF tokenizer.json of the same model (download from the base repo)")
 ap.add_argument("--context", type=int, default=None, help="max tokens per sequence (default: the model's native context)")
 ap.add_argument("--pool", type=int, default=None, help="KV positions shared by all rows and the prefix cache (default: 2x context)")
-ap.add_argument("--memory-gib", type=float, default=56.0, help="device memory budget for weights + KV pool + workspace")
+ap.add_argument("--memory-gib", default="auto",
+                help="device memory budget for weights + KV pool + workspace. auto (default): enough for a KV pool of "
+                     "2x the context, capped at 60%% of physical RAM (GPU memory is system RAM on Strix Halo; the "
+                     "benchmarks load one model at a time); 56 when RAM can't be read")
 ap.add_argument("--prefill", type=int, default=1024, help="prefill chunk (prefill_capacity); 1024-4096")
 ap.add_argument("--rows", type=int, default=4, help="initial resident rows (grows on demand); c4 benchmarks need >= 4")
 ap.add_argument("--max-tokens", type=int, default=4096, help="default completion length when a request sets none")
@@ -57,6 +60,16 @@ native = cfg.get("context_length") or 32768
 if native > KERNEL_CONTEXT and not a.context:
     print(f"NOTE: native context {native} exceeds the kernels' {KERNEL_CONTEXT}; using {KERNEL_CONTEXT}")
 context = a.context or min(native, KERNEL_CONTEXT)
+if a.memory_gib == "auto":
+    try:
+        cap = 0.6 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, ValueError, OSError):
+        cap = None
+    need = weights_bytes + 4 * 2**30 + 2 * a.rows * recurrent_bytes + 2 * context * kv_per_position
+    a.memory_gib = round(min(need, cap) / 2**30, 1) if cap else 56.0
+    print(f"memory budget {a.memory_gib} GiB (pool 2x context needs {need / 2**30:.0f} GiB"
+          + (f"; cap 60% of RAM = {cap / 2**30:.0f} GiB)" if cap else "; RAM unknown)"))
+a.memory_gib = float(a.memory_gib)
 budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
 if context * kv_per_position > budget:
     fit = max(4096, (budget // kv_per_position) // 1024 * 1024)
