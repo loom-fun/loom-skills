@@ -43,6 +43,6 @@ async def proxy(target: str, path: str, request: Request):
     return StreamingResponse(body(), status_code=upstream.status_code, media_type=upstream.headers.get("content-type"))
 
 
-@app.get("/sample.wav")
+@app.get("/sample.mp3")
 async def sample():
-    return FileResponse(HERE / "short.wav", media_type="audio/wav")
+    return FileResponse(HERE / "short.mp3", media_type="audio/mpeg")

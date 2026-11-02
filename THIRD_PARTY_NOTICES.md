@@ -4,7 +4,7 @@
   documentation (`loom/docs/src/**/*.md`) from
   [ROCm/hrx-system](https://github.com/ROCm/hrx-system), licensed under
   Apache-2.0. They are excerpts used as real-text benchmark prompts.
-- `skills/loom-demo-ui/ui/short.wav` is the moonshine test recording
+- `skills/loom-demo-ui/ui/short.mp3` is the moonshine test recording (re-encoded from WAV)
   (`model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm`) from
   [ROCm/hrx-loom-library](https://github.com/ROCm/hrx-loom-library), licensed under
   MIT (Copyright (c) 2026 AMD ROCm Software), wrapped in a WAV header.
