@@ -20,7 +20,7 @@ import time
 
 import requests
 
-from bench_common import doc, stream
+from bench_common import doc, perf_metrics, stream
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -80,8 +80,4 @@ with open(a.log, "a") as f:
     f.write(json.dumps(out) + "\n")
 if a.kind == "loom" and not a.no_campaign:  # campaign tracking: targets.jsonl + rate-of-approach verdict (needs roofline.json)
     from campaign import log_metrics
-    vals = {k: out.get(k) for k in ("decode_tps", "decode_tps_1k", "decode_tps_2k", "decode_tps_32k")}
-    for p in out.get("prefill", []) + out.get("prefill_long", []):
-        n = min((1000, 2000, 8000, 16000, 32000), key=lambda x: abs(x - p["prompt_tokens"]))
-        vals[f"prefill_{n}"] = p["prefill_tps"]
-    log_metrics(vals, a.label, a.reverted, a.log)
+    log_metrics(perf_metrics(out), a.label, a.reverted, a.log)

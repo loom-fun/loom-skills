@@ -50,17 +50,15 @@ done
 [ $started = 1 ] && "$T" "$B/perf.py" "http://127.0.0.1:$lport" llama --kind llama --no-campaign --long --log perf.jsonl >/dev/null
 "$T" "$B/perf.py" "http://127.0.0.1:$port" loom --model "$model" --no-campaign --long --log perf.jsonl >/dev/null
 [ $started = 1 ] && "$B/llamacpp_server.sh" --stop "$lport"
-"$T" - <<'EOF'
-import json, statistics
+"$T" - "$B" <<'EOF'
+import json, statistics, sys
+sys.path.insert(0, sys.argv[1])
+from bench_common import perf_metrics
 runs = {}
 for l in open("perf.jsonl"):
-    r = json.loads(l); k = r["kind"]
-    for m in ("decode_tps", "decode_tps_2k", "decode_tps_32k"):
-        if r.get(m):
-            runs.setdefault((k, m), []).append(r[m])
-    for p in r.get("prefill", []) + r.get("prefill_long", []):
-        n = min((1000, 2000, 8000, 16000, 32000), key=lambda x: abs(x - p["prompt_tokens"]))
-        runs.setdefault((k, f"prefill_{n}"), []).append(p["prefill_tps"])
+    r = json.loads(l)
+    for m, v in perf_metrics(r).items():
+        runs.setdefault((r["kind"], m), []).append(v)
 med = {f"{k}:{m}": round(statistics.median(v), 1) for (k, m), v in runs.items()}
 import os
 g = json.load(open("gates/gates.json")) if os.path.exists("gates/gates.json") else {"verdict": "not run", "gates": {}}

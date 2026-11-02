@@ -47,6 +47,19 @@ PROMPTS = [
 ]
 
 
+DOC_SIZES = (1000, 2000, 8000, 16000, 32000)
+
+
+def perf_metrics(row):
+    """{metric: tok/s} of one perf_log.jsonl row, in roofline.json metric names: decode_tps[_1k/_2k/_32k],
+    c4_steady, and prefill_<document size> (each prefill sample bucketed by its prompt tokens)."""
+    out = {k: row[k] for k in ("decode_tps", "decode_tps_1k", "decode_tps_2k", "decode_tps_32k", "c4_steady")
+           if row.get(k) is not None}
+    for p in row.get("prefill", []) + row.get("prefill_long", []):
+        out[f"prefill_{min(DOC_SIZES, key=lambda x: abs(x - p['prompt_tokens']))}"] = p["prefill_tps"]
+    return out
+
+
 # The smaller documents are byte-exact prefixes of the two stored ones (prompts and reference-cache keys unchanged).
 DOC_PREFIX = {1000: (2000, 4688), 8000: (32000, 36510), 16000: (32000, 73839)}
 
@@ -198,18 +211,24 @@ def ensure_llama(url):
         raise SystemExit(f"could not start llama-server: {cmd}")
 
 
-def stream(url, model, messages, max_tokens, extra=None):
-    """Streams one chat completion; returns client-side TTFT, decode tok/s and usage."""
+def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=None):
+    """Streams one chat completion (greedy unless `extra` says otherwise). Returns client-side TTFT,
+    decode tok/s, usage, the text (reasoning + content), the finish reason and the HTTP status;
+    on_token(t) is called with time.perf_counter() at every streamed token."""
     t0 = time.perf_counter()
-    first = None
+    first = finish = None
     n = pt = 0
+    text = ""
     body = {"messages": messages, "max_tokens": max_tokens, "stream": True, "temperature": 0,
             "stream_options": {"include_usage": True}}
     if model:
         body["model"] = model
     body.update(extra or {})
-    with requests.post(url + "/v1/chat/completions", json=body, stream=True,
+    with requests.post(url + "/v1/chat/completions", json=body, stream=True, timeout=timeout,
                        headers={"Content-Type": "application/json"}) as r:
+        if r.status_code != 200:
+            return dict(status=r.status_code, error=r.text[:300], ttft=None, total=time.perf_counter() - t0,
+                        tokens=0, prompt_tokens=0, decode_tps=None, text="", finish=None)
         for line in r.iter_lines():
             if not line.startswith(b"data: {"):
                 continue
@@ -219,8 +238,14 @@ def stream(url, model, messages, max_tokens, extra=None):
                 pt = d["usage"]["prompt_tokens"]
             for ch in d.get("choices", []):
                 dl = ch.get("delta", {})
-                if (dl.get("content") or dl.get("reasoning_content")) and first is None:
-                    first = time.perf_counter() - t0
+                piece = (dl.get("reasoning_content") or "") + (dl.get("content") or "")
+                if piece:
+                    now = time.perf_counter()
+                    first = now - t0 if first is None else first
+                    if on_token:
+                        on_token(now)
+                    text += piece
+                finish = ch.get("finish_reason") or finish
     total = time.perf_counter() - t0
-    return dict(ttft=first, total=total, tokens=n, prompt_tokens=pt,
+    return dict(status=200, ttft=first, total=total, tokens=n, prompt_tokens=pt, text=text, finish=finish,
                 decode_tps=(n - 1) / (total - first) if n > 1 and first else None)

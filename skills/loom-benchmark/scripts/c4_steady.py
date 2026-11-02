@@ -10,7 +10,7 @@ import json
 import threading
 import time
 
-import requests
+from bench_common import stream
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -26,24 +26,11 @@ events = [[] for _ in range(a.n)]
 
 
 def run(i):
-    body = {"messages": [{"role": "user", "content": f"[{time.time()} {i}] Write a very long, detailed essay about the history of lighthouses."}],
-            "max_tokens": a.max_tokens, "stream": True, "temperature": 0}
-    if a.model:
-        body["model"] = a.model
-    with requests.post(a.url + "/v1/chat/completions", json=body, stream=True, headers={"Content-Type": "application/json"}) as r:
-        for line in r.iter_lines():
-            if not line.startswith(b"data: {"):
-                continue
-            for c in json.loads(line[6:]).get("choices", []):
-                dl = c.get("delta", {})
-                if dl.get("content") or dl.get("reasoning_content"):
-                    events[i].append(time.perf_counter())
+    stream(a.url, a.model, [{"role": "user", "content": f"[{time.time()} {i}] Write a very long, detailed essay about the history of lighthouses."}],
+           a.max_tokens, on_token=events[i].append)
 
 
-warm = {"messages": [{"role": "user", "content": "Say hi."}], "max_tokens": 8, "temperature": 0}
-if a.model:
-    warm["model"] = a.model
-requests.post(a.url + "/v1/chat/completions", json=warm, headers={"Content-Type": "application/json"})  # warm-up
+stream(a.url, a.model, [{"role": "user", "content": "Say hi."}], 8)  # warm-up
 ts = [threading.Thread(target=run, args=(i,)) for i in range(a.n)]
 [t.start() for t in ts]
 [t.join() for t in ts]

@@ -31,7 +31,7 @@ import time
 
 import requests
 
-from bench_common import Package, doc, llama_greedy, top_logprobs
+from bench_common import Package, doc, llama_greedy, stream, top_logprobs
 
 QUESTIONS = {
     1: ("\n\n----\nSomewhere in the material above there is exactly one sentence of the form "
@@ -57,28 +57,6 @@ def haystack(P, ids, n, seed, count=1):
         cut = body.rfind("\n", 0, int(len(body) * depth)) + 1
         body = body[:cut] + f"The access code for vault {name} is {code}.\n" + body[cut:]
     return body + QUESTIONS[count], dict(zip(names, codes))
-
-
-def chat(url, model, prompt, max_tokens, extra):
-    t0 = time.time(); ttft = None; text = ""; usage = None; finish = None
-    r = requests.post(url + "/v1/chat/completions", stream=True, timeout=7200, json={
-        "model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens,
-        "temperature": 0, "stream": True, "stream_options": {"include_usage": True}, **extra})
-    if r.status_code != 200:
-        return {"status": r.status_code, "error": r.text[:300]}
-    for line in r.iter_lines():
-        if not line.startswith(b"data: {"):
-            continue
-        d = json.loads(line[6:])
-        usage = d.get("usage") or usage
-        for c in d.get("choices", []):
-            delta = c.get("delta", {})
-            piece = (delta.get("reasoning_content") or "") + (delta.get("content") or "")
-            if piece and ttft is None:
-                ttft = time.time() - t0
-            text += piece
-            finish = c.get("finish_reason") or finish
-    return {"status": 200, "text": text, "ttft_s": ttft, "total_s": time.time() - t0, "usage": usage, "finish": finish}
 
 
 def main():
@@ -113,9 +91,9 @@ def main():
         for probe in range(a.top_probes if n == max(sizes) and len(sizes) > 1 else a.probes):
             prompt, needles = haystack(P, ids, n, n * 31 + probe)
             rec = {"n": n, "probe": probe}
-            r = chat(a.url, P.model_id, prompt, a.max_tokens, extra)
-            text = r.get("text", "")
-            rec.update(prompt_tokens=(r.get("usage") or {}).get("prompt_tokens"), status=r["status"], ttft_s=r.get("ttft_s"),
+            r = stream(a.url, P.model_id, [{"role": "user", "content": prompt}], a.max_tokens, extra, timeout=7200)
+            text = r["text"]
+            rec.update(prompt_tokens=r["prompt_tokens"] or None, status=r["status"], ttft_s=r["ttft"],
                        finish=r.get("finish"), found=sum(v in text for v in needles.values()), error=r.get("error"),
                        needles=needles, answer=text[-400:])
             ok = r["status"] == 200 and bool(text.strip())

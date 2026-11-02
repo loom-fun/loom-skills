@@ -1,7 +1,7 @@
 """Builds a loom-serve package for a dense GGUF LLM from its LLM_CONFIG json.
 
 usage: python build.py CONFIG.json PACKAGE_DIR --tokenizer TOKENIZER.json
-           [--context N] [--pool N] [--memory-gib 56] [--prefill 1024] [--rows 4] [--max-tokens 4096] [--model-id ID]
+           [--context N] [--pool N] [--memory-gib auto] [--prefill 1024] [--rows 4] [--max-tokens 4096] [--model-id ID]
 
 --context defaults to the model's native context (cfg context_length, up to the kernels' 262144) and
 --pool (KV positions shared by all rows) to twice that, both reduced to fit --memory-gib.
@@ -24,7 +24,10 @@ ap.add_argument("package")
 ap.add_argument("--tokenizer", required=True, help="HF tokenizer.json of the same model (download from the base repo)")
 ap.add_argument("--context", type=int, default=None, help="max tokens per sequence (default: the model's native context)")
 ap.add_argument("--pool", type=int, default=None, help="KV positions shared by all rows and the prefix cache (default: 2x context)")
-ap.add_argument("--memory-gib", type=float, default=56.0, help="device memory budget for weights + KV pool + workspace")
+ap.add_argument("--memory-gib", default="auto",
+                help="device memory budget for weights + KV pool + workspace. auto: enough for a pool of 2x the context, "
+                     "capped by the GPU's GTT minus a llama.cpp copy of the model next to it (the gates run both); 56 "
+                     "when the GTT size is unknown")
 ap.add_argument("--prefill", type=int, default=1024, help="prefill chunk (prefill_capacity); 1024-4096")
 ap.add_argument("--rows", type=int, default=4, help="initial resident rows (grows on demand); c4 benchmarks need >= 4")
 ap.add_argument("--max-tokens", type=int, default=4096, help="default completion length when a request sets none")
@@ -53,11 +56,22 @@ recurrent_bytes = gdn_geometry(cfg)["slot_bytes"] if cfg.get("recurrent_layers")
 if cfg.get("shortconv_layers"):  # LFM2 short-conv history lives in the recurrent slots too (reference/lfm2moe-example)
     from gen_sconv import sconv_geometry  # noqa: E402
     recurrent_bytes += sconv_geometry(cfg)["slot_bytes"]
-budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
 native = cfg.get("context_length") or 32768
 if native > KERNEL_CONTEXT and not a.context:
     print(f"NOTE: native context {native} exceeds the kernels' {KERNEL_CONTEXT}; using {KERNEL_CONTEXT}")
 context = a.context or min(native, KERNEL_CONTEXT)
+if a.memory_gib == "auto":
+    # The default 56 GiB left flint's pool under 1.5x its 262k context: the full-context gate got a 503.
+    gtt = None
+    for f in __import__("glob").glob("/sys/class/drm/card*/device/mem_info_gtt_total"):
+        gtt = max(gtt or 0, int(open(f).read()))
+    need = weights_bytes + 2 * context * kv_per_position + 6 * 2**30
+    llama = weights_bytes + (min(context, 65536) + 1024) * kv_per_position   # qualify's llama-server, same GPU
+    a.memory_gib = round(max(16 * 2**30, min(need, gtt - llama - 8 * 2**30)) / 2**30, 1) if gtt else 56.0
+    print(f"memory budget {a.memory_gib} GiB (auto: pool 2x context needs {need / 2**30:.0f} GiB"
+          + (f", GTT {gtt / 2**30:.0f} GiB minus llama.cpp's copy {llama / 2**30:.0f} GiB and 8 GiB headroom)" if gtt else ")"))
+a.memory_gib = float(a.memory_gib)
+budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
 if context * kv_per_position > budget:
     fit = max(4096, (budget // kv_per_position) // 1024 * 1024)
     print(f"WARNING: context {context} needs {context * kv_per_position / 2**30:.1f} GiB of KV; {a.memory_gib} GiB budget fits {fit}")

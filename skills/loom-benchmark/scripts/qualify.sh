@@ -16,15 +16,9 @@
 #   stopped at the end (KEEP_LLAMA=1 keeps it; its URL is printed).
 # Prints QUALIFY_RESULT {...}: gates verdict, baseline build, the roofline table, budget minutes.
 set -u
-pkg=$(cd "$1" && pwd); url=$2; bench=$(mkdir -p "$4" && cd "$4" && pwd); lport=${5:-8130}
-gguf=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")
-S=$(cd "$(dirname "$0")" && pwd); R=$S/../../loom-roofline; root=${LOOM_ROOT:-$HOME/loom}
-bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts; T=$bin/python
-export LOOM_NO_AUDIT=1 PYTHONDONTWRITEBYTECODE=1 LLAMACPP_STATE=${LLAMACPP_STATE:-$bench/llamacpp-state} LLAMA_CACHE=$bench/llama_cache
-model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
-ctx=$("$T" -c "import json;print(next(iter(json.load(open('$pkg/model.json'))['presets'].values()))['execution']['context_capacity'])")
+. "$(dirname "$0")/_lib.sh"; R=$S/../../loom-roofline
+export LOOM_NO_AUDIT=1 LLAMA_CACHE=$bench/llama_cache
 cd "$bench"
-step() { echo "== $* ($(date +%T))"; }
 
 step "1/6 pick the llama.cpp ROCm baseline build"
 if [ ! -s llamacpp_pick.json ]; then

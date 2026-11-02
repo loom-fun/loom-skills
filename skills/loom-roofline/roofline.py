@@ -15,7 +15,10 @@ llama.cpp ROCm numbers, keys as in perf.py output:
   {"decode_tps": 52.7, "decode_tps_2k": 48.7, "prefill_1000": 1593, "prefill_2000": 1678,
    "c4_steady": 157}
 """
-import argparse, json, math, re
+import argparse, json, math, os, re, sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "loom-benchmark", "scripts"))
+from bench_common import perf_metrics  # noqa: E402
 
 # Demonstrated efficiencies on Strix Halo (fraction of the roofline actually reached by
 # a tuned Loom port, end to end). Update these when a port beats them; cite the source.
@@ -193,12 +196,7 @@ def main():
             r = json.loads(l)
             if r.get("kind") != "llama":
                 continue
-            for k in ("decode_tps", "decode_tps_1k", "decode_tps_2k", "decode_tps_32k", "c4_steady"):
-                if k in r:
-                    base[k] = r[k]
-            for p in r.get("prefill", []) + r.get("prefill_long", []):
-                n = min((1000, 2000, 8000, 16000, 32000), key=lambda x: abs(x - p["prompt_tokens"]))
-                base[f"prefill_{n}"] = p["prefill_tps"]
+            base.update(perf_metrics(r))
     elif a.baseline:
         base = json.load(open(a.baseline))
     ctxs = [int(x) for x in a.ctx.split(",")]

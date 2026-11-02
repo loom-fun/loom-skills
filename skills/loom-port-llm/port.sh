@@ -1,7 +1,7 @@
 #!/bin/bash
 # One command from a Hugging Face GGUF repo to a served, tested Loom package.
 # usage: [LOOM_ROOT=~/loom] port.sh ORG/REPO[:FILE.gguf] WORKDIR [PORT] [MEMORY_GIB] [MODEL_ID]
-#   positional: PORT (default 8160), MEMORY_GIB (default 56), e.g. port.sh org/repo ~/work/m 8260 40
+#   positional: PORT (default 8160), MEMORY_GIB (default auto, see build.py), e.g. port.sh org/repo ~/work/m 8260 40
 #   0. starts the end-to-end clock (WORKDIR/.e2e_start, unless it exists): qualify.sh sizes the
 #      optimization budget from it
 #   1. download the GGUF (FILE, else pick_gguf.py: the best quant whose formats the starter supports
@@ -15,7 +15,7 @@
 # Then run loom-benchmark/scripts/qualify.sh (or gates.sh). After hand-fixing cfg.json (exit 3), resume
 # with FROM=build port.sh ORG/REPO WORKDIR [PORT] [MEMORY_GIB] [MODEL_ID] (stages 3-6; KIT=DIR uses your kit copy).
 set -u
-spec=$1; work=$(mkdir -p "$2" && cd "$2" && pwd); port=${3:-8160}; mem_gib=${4:-56}; model_id=${5:-}
+spec=$1; work=$(mkdir -p "$2" && cd "$2" && pwd); port=${3:-8160}; mem_gib=${4:-auto}; model_id=${5:-}
 here=$(cd "$(dirname "$0")" && pwd); K=${KIT:-$here/starter}; S=$here/../loom-setup/scripts
 root=${LOOM_ROOT:-$HOME/loom}
 bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts

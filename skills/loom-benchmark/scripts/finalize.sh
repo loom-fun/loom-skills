@@ -9,16 +9,10 @@
 # usage: [LOOM_ROOT=~/loom] finalize.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
 # Exit 1 if a gate or the audit fails (the report is still written, with the failure in it).
 set -u
-pkg=$(cd "$1" && pwd); url=$2; bench=$(mkdir -p "$4" && cd "$4" && pwd); lport=${5:-8130}
-gguf=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")
-S=$(cd "$(dirname "$0")" && pwd); root=${LOOM_ROOT:-$HOME/loom}
-bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts; T=$bin/python
-export PYTHONDONTWRITEBYTECODE=1 LLAMACPP_STATE=${LLAMACPP_STATE:-$bench/llamacpp-state}
-model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
+. "$(dirname "$0")/_lib.sh"
 [ -s "$bench/llamacpp_pick.json" ] && export LLAMACPP_DIR=${LLAMACPP_DIR:-$("$T" -c "import json;r=json.load(open('$bench/llamacpp_pick.json'))['ranked'];print(r[0]['dir'] if r else '')")}
 [ -z "${LLAMACPP_DIR:-}" ] && { export NO_LLAMA=1; echo "NO_LLAMACPP: Loom-only final gates and perf (no reference build runs this model)"; }
 cd "$bench"
-step() { echo "== $* ($(date +%T))"; }
 rc=0
 step "1/4 final perf: llama.cpp and Loom interleaved"
 # Load swings (a shared GPU, a second job) skew a single llama.cpp-then-Loom pass: both servers stay
@@ -28,7 +22,7 @@ step "1/4 final perf: llama.cpp and Loom interleaved"
 loom_perf() { "$T" "$S/perf.py" "$url" final --model "$model" --log perf_log.jsonl "$@" | grep "^{" | tail -1; }
 started=0
 if [ -n "${LLAMACPP_DIR:-}" ] && [ "${SKIP_LLAMA_PERF:-0}" != 1 ]; then
-  kv=$("$T" -c "import json;print(min(next(iter(json.load(open('$pkg/model.json'))['presets'].values()))['execution']['context_capacity'], 34000) + 1024)")
+  kv=$(( (ctx < 34000 ? ctx : 34000) + 1024 ))
   "$S/llamacpp_server.sh" "$gguf" "$lport" 4 "$kv" unified && started=1 || echo "WARNING: could not start llama-server; the report uses the qualify baseline"
 fi
 L=http://127.0.0.1:$lport
@@ -48,19 +42,16 @@ loom_perf --long
 "$T" "$S/c4_steady.py" "$url" 4 --model "$model" --label final --log perf_log.jsonl | grep -v "^\[campaign\]" | tail -1
 if [ $started = 1 ]; then
   "$S/llamacpp_server.sh" --stop "$lport"
-  "$T" - <<'PY'
-import json
+  "$T" - "$S" <<'PY'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from bench_common import perf_metrics
 runs = {}
 for l in open("perf_log.jsonl"):
     r = json.loads(l)
-    if r.get("kind") != "llama" or r.get("label") != "llama-final":
-        continue
-    for k in ("decode_tps", "decode_tps_2k", "decode_tps_32k", "c4_steady"):
-        if k in r:
-            runs.setdefault(k, []).append(r[k])
-    for p in r.get("prefill", []) + r.get("prefill_long", []):
-        n = min((1000, 2000, 8000, 16000, 32000), key=lambda x: abs(x - p["prompt_tokens"]))
-        runs.setdefault(f"prefill_{n}", []).append(p["prefill_tps"])
+    if r.get("kind") == "llama" and r.get("label") == "llama-final":
+        for k, v in perf_metrics(r).items():
+            runs.setdefault(k, []).append(v)
 base = {k: sorted(v)[len(v) // 2] for k, v in runs.items()}   # same rule as audit.py's Loom headline
 roof = json.load(open("roofline.json"))
 for m in roof["metrics"]:

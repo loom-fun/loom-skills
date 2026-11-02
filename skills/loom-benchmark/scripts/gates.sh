@@ -16,15 +16,10 @@
 # Writes BENCH_DIR/gates.json {"verdict", "level", "pkg_hash", "seconds", "gates": {name: {"pass", "log", "seconds"}}}
 # and BENCH_DIR/gates_*.log. Exit 1 when any gate fails. Gates run sequentially (a shared GPU).
 set -u
-pkg=$(cd "$1" && pwd); url=$2; bench=$(mkdir -p "$4" && cd "$4" && pwd); lport=${5:-8130}
-gguf=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")   # absolute: we cd into BENCH_DIR below
-S=$(cd "$(dirname "$0")" && pwd); root=${LOOM_ROOT:-$HOME/loom}
-bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts; T=$bin/python
+. "$(dirname "$0")/_lib.sh"
 level=${LEVEL:-full}; [ "${QUICK:-0}" = 1 ] && level=quick
 case $level in fast|quick|full) ;; *) echo "LEVEL must be fast, quick or full"; exit 2;; esac
-export LOOM_NO_AUDIT=1 PYTHONDONTWRITEBYTECODE=1 LLAMACPP_STATE=${LLAMACPP_STATE:-$bench/llamacpp-state} LLAMA_CACHE=$bench/llama_cache
-ctx=$("$T" -c "import json;print(next(iter(json.load(open('$pkg/model.json'))['presets'].values()))['execution']['context_capacity'])")
-model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
+export LOOM_NO_AUDIT=1 LLAMA_CACHE=$bench/llama_cache
 # Long goldens that fit the context; the llama.cpp slot covers them (and needle sizes up to 64k).
 long=$("$T" -c "print(','.join(str(n) for n in (1000, 2000, 16000, 32000) if n + 2000 <= $ctx))")
 slot=$("$T" -c "print(min($ctx, 65536) + 1024)")
