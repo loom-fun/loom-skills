@@ -17,7 +17,7 @@ import os
 T = os.environ.get("FLASH2_TARGET", "llm")
 if T == "llm":  # gen_llm.py: geometry from the LLM_CONFIG json (see inspect_gguf.py)
     _c = json.load(open(os.environ["LLM_CONFIG"]))
-    CFG = dict(prefix="g", kvh=_c["kv_heads"], group=_c["heads"] // _c["kv_heads"], sinks=False,
+    CFG = dict(prefix="g", kvh=_c["kv_heads"], group=_c["heads"] // _c["kv_heads"], sinks=_c.get("attn_sinks", False),
                window=_c.get("sliding_window") or 262144, kv_f32=False, gate=_c.get("attn_gate", False), layers=_c["layers"] - 1,
                dim=_c["head_dim"])
 else:
@@ -33,8 +33,8 @@ QH = KVH * G
 LANES = 32 * G
 DPT = D * 32 // LANES            # staged dims per thread per key tile
 TPK = D // DPT                   # threads per key
-assert D in (128, 256) and DPT >= 1 and TPK * DPT == D, (
-    f"flash2 needs head_dim 128/256 and a power-of-two query heads per KV head (got D={D}, G={G}): "
+assert D in (64, 128, 256) and DPT >= 1 and TPK * DPT == D, (
+    f"flash2 needs head_dim 64/128/256 and a power-of-two query heads per KV head (got D={D}, G={G}): "
     "generalize the staging (32*G lanes tile head_dim) before porting this model")
 KT = int(os.environ.get("FLASH2_KT", "32"))   # keys per tile
 # The K staging loop runs KT // 32 passes of 32 keys: KT=16 generated a kernel that stores nothing

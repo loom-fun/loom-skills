@@ -3,14 +3,14 @@
 #
 # Generalized from the Muse Glimmer 30B port; end-to-end validated (llama.cpp
 # golden, 1k-32k prompts) on Qwen3-0.6B. Supported:
-#   * head_dim 128, any query/KV head counts with heads % kv_heads == 0
+#   * head_dim 128 or 256, any query/KV head counts with heads % kv_heads == 0
 #   * GGUF weight formats q4_k, q5_k, q6_k, q8_0 (mixed per tensor is fine)
 #   * RMSNorm, SwiGLU FFN, NeoX or interleaved ("norm") RoPE, optional per-head
 #     Q/K RMSNorm, optional per-layer sliding window, optional sigmoid attention
 #     output gate and post-attention/post-FFN norms (Glimmer), optional
 #     embedding RMSNorm, tied or separate output head.
-# Greedy decoding only: the head computes an argmax (logit scale/softcap are
-# monotonic and therefore skipped).
+# The head keeps the top-64 candidates for sampling; an optional final logit softcap/scale
+# (cfg logit_softcap / logit_scale) is applied to the sampling logits (argmax unaffected).
 import json, math, os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -38,6 +38,16 @@ FFN_NORM = CFG.get("ffn_norm_tensor", "ffn_norm")
 POST_NORM = CFG.get("post_norms", False)
 POST_EPS = CFG.get("post_norm_eps", 1e-8)
 EMBED_NORM = CFG.get("embed_norm", False)
+_LS = CFG.get("logit_scale") or 1.0; _SC = CFG.get("logit_softcap") or 0.0
+if _SC:  # sampling sees llama.cpp's logits: softcap * tanh(scale * z / softcap) (argmax unaffected)
+    SOFTCAP_STORE = (f"            %sc_y = scalar.mulf %best, %sc_k : f32\n            %sc_y2 = scalar.addf %sc_y, %sc_y : f32\n"
+                     f"            %sc_e = scalar.expf<afn> %sc_y2 : f32\n            %sc_one = scalar.constant 1.0 : f32\n            %sc_two = scalar.constant 2.0 : f32\n"
+                     f"            %sc_d = scalar.addf %sc_e, %sc_one : f32\n            %sc_q = scalar.divf %sc_two, %sc_d : f32\n            %sc_t = scalar.subf %sc_one, %sc_q : f32\n"
+                     f"            %sc_cap = scalar.constant {float(_SC)} : f32\n            %sc_v = scalar.mulf %sc_t, %sc_cap : f32\n"
+                     f"            view.store %sc_v, %cand_v[%rr] : f32, view<64xf32>")
+    SOFTCAP_STORE = f"            %sc_k = scalar.constant {float(_LS) / float(_SC)} : f32\n" + SOFTCAP_STORE
+else:
+    SOFTCAP_STORE = "            view.store %best, %cand_v[%rr] : f32, view<64xf32>"
 EPS = CFG["rms_eps"]
 QK_NORM = CFG.get("qk_norm", False)
 ROPE = CFG.get("rope_type", "neox")       # "neox": pairs (d, d+64); "norm": pairs (2d, 2d+1)
@@ -184,167 +194,14 @@ func.def inline @g_q4_k_values(%w: buffer, %origin: offset, %group: index) -> (v
   func.return %values : vector<32xf32>
 }
 
-// Dot of group `group` of a Q4_K superblock with 32 inputs.
-func.def inline @g_q4_k_dot(%w: buffer, %origin: offset, %group: index, %inputs: vector<32xf32>) -> (f32) {
-  %c2 = index.constant 2 : index
-  %c4 = index.constant 4 : index
-  %header_bytes = index.constant 16 : offset
-  %page_bytes = index.constant 32 : offset
-  %zero_f = scalar.constant 0.0 : f32
-  %nibble_mask = vector.constant 252645135 : vector<8xi32>
-  %header_view = buffer.view %w[%origin] : buffer -> view<4xi32>
-  %header = vector.load %header_view[0] : view<4xi32> -> vector<4xi32>
-  %scale, %minimum = func.call @g_k_metadata(%header, %group) : (vector<4xi32>, index) -> (f32, f32)
-  %page = index.div %group, %c2 : index
-  %nibble = index.rem %group, %c2 : index
-  %page_add = index.scale %page, %page_bytes : index, offset -> offset
-  %payload = index.add %origin, %header_bytes : offset
-  %codes_origin = index.add %payload, %page_add : offset
-  %code_view = buffer.view %w[%codes_origin] : buffer -> view<8xi32>
-  %packed = vector.load %code_view[0] : view<8xi32> -> vector<8xi32>
-  %shift_bits = index.mul %nibble, %c4 : index
-  %shift_i32 = index.cast %shift_bits : index to i32
-  %shift = vector.splat %shift_i32 : vector<8xi32>
-  %shifted = vector.shrui %packed, %shift : vector<8xi32>
-  %masked = vector.andi %shifted, %nibble_mask : vector<8xi32>
-  %bytes = vector.bitcast %masked : vector<8xi32> to vector<32xi8>
-  %codes = vector.uitofp %bytes : vector<32xi8> to vector<32xf32>
-  %products = vector.mulf %codes, %inputs : vector<32xf32>
-  %qx = vector.reduce<addf> %products, %zero_f : vector<32xf32>, f32
-  %xs = vector.reduce<addf> %inputs, %zero_f : vector<32xf32>, f32
-  %scaled = scalar.mulf %qx, %scale : f32
-  %offset_term = scalar.mulf %xs, %minimum : f32
-  %dot = scalar.subf %scaled, %offset_term : f32
-  func.return %dot : f32
-}
 
-// Q5_K: header (d, dmin, 12 scale bytes), 32 high-bit bytes, 128 nibble bytes.
-// Value of group g: d*scale_g * (nibble | (qh_bit_g << 4)) - dmin*min_g.
-func.def inline @g_q5_k_dot(%w: buffer, %origin: offset, %group: index, %inputs: vector<32xf32>) -> (f32) {
-  %c2 = index.constant 2 : index
-  %c4 = index.constant 4 : index
-  %high_bytes = index.constant 16 : offset
-  %low_bytes = index.constant 48 : offset
-  %page_bytes = index.constant 32 : offset
-  %zero_f = scalar.constant 0.0 : f32
-  %nibble_mask = vector.constant 252645135 : vector<8xi32>
-  %bit_mask = vector.constant 16843009 : vector<8xi32>
-  %four = vector.constant 4 : vector<8xi32>
-  %header_view = buffer.view %w[%origin] : buffer -> view<4xi32>
-  %header = vector.load %header_view[0] : view<4xi32> -> vector<4xi32>
-  %scale, %minimum = func.call @g_k_metadata(%header, %group) : (vector<4xi32>, index) -> (f32, f32)
-  %page = index.div %group, %c2 : index
-  %nibble = index.rem %group, %c2 : index
-  %page_add = index.scale %page, %page_bytes : index, offset -> offset
-  %payload = index.add %origin, %low_bytes : offset
-  %codes_origin = index.add %payload, %page_add : offset
-  %code_view = buffer.view %w[%codes_origin] : buffer -> view<8xi32>
-  %packed = vector.load %code_view[0] : view<8xi32> -> vector<8xi32>
-  %high_origin = index.add %origin, %high_bytes : offset
-  %high_view = buffer.view %w[%high_origin] : buffer -> view<8xi32>
-  %high_packed = vector.load %high_view[0] : view<8xi32> -> vector<8xi32>
-  %shift_bits = index.mul %nibble, %c4 : index
-  %shift_i32 = index.cast %shift_bits : index to i32
-  %shift = vector.splat %shift_i32 : vector<8xi32>
-  %shifted = vector.shrui %packed, %shift : vector<8xi32>
-  %low = vector.andi %shifted, %nibble_mask : vector<8xi32>
-  %group_i32 = index.cast %group : index to i32
-  %group_shift = vector.splat %group_i32 : vector<8xi32>
-  %high_shifted = vector.shrui %high_packed, %group_shift : vector<8xi32>
-  %high_bit = vector.andi %high_shifted, %bit_mask : vector<8xi32>
-  %high = vector.shli %high_bit, %four : vector<8xi32>
-  %combined = vector.ori %low, %high : vector<8xi32>
-  %bytes = vector.bitcast %combined : vector<8xi32> to vector<32xi8>
-  %codes = vector.uitofp %bytes : vector<32xi8> to vector<32xf32>
-  %products = vector.mulf %codes, %inputs : vector<32xf32>
-  %qx = vector.reduce<addf> %products, %zero_f : vector<32xf32>, f32
-  %xs = vector.reduce<addf> %inputs, %zero_f : vector<32xf32>, f32
-  %scaled = scalar.mulf %qx, %scale : f32
-  %offset_term = scalar.mulf %xs, %minimum : f32
-  %dot = scalar.subf %scaled, %offset_term : f32
-  func.return %dot : f32
-}
+
 
 // Q6_K (210-byte superblock): ql[128] low nibbles, qh[64] high 2 bits,
 // 16 int8 scales, F16 d. Group g = 4*half + j covers values half*128 + j*32
 // + l: q = ((ql[half*64 + (j%2)*32 + l] >> 4*(j/2)) & 15)
 //        | (((qh[half*32 + l] >> 2*j) & 3) << 4), value = d * sc[half*8 + 2j
 // + l/16] * (q - 32). Superblocks are only 2-byte aligned, so codes load as bytes.
-func.def inline @g_q6_k_dot(%w: buffer, %origin: offset, %group: index, %inputs: vector<32xf32>) -> (f32) {
-  %c2 = index.constant 2 : index
-  %c4 = index.constant 4 : index
-  %c32 = index.constant 32 : index
-  %c64 = index.constant 64 : index
-  %qh_base = index.constant 128 : index
-  %sc_base = index.constant 192 : index
-  %d_bytes = index.constant 208 : offset
-  %zero_f = scalar.constant 0.0 : f32
-  %thirty_two = scalar.constant 32.0 : f32
-  %low_mask = vector.constant 15 : vector<32xi8>
-  %two_bits = vector.constant 3 : vector<32xi8>
-  %four8 = vector.constant 4 : vector<32xi8>
-  %bounded = index.assume %group [range(%group, 0, 7)] : index
-  %half = index.div %bounded, %c4 : index
-  %j = index.rem %bounded, %c4 : index
-  %j_low = index.rem %j, %c2 : index
-  %j_high = index.div %j, %c2 : index
-  %ql_half = index.mul %half, %c64 : index
-  %ql_part = index.mul %j_low, %c32 : index
-  %ql_index = index.add %ql_half, %ql_part : index
-  %qh_half = index.mul %half, %c32 : index
-  %qh_index = index.add %qh_base, %qh_half : index
-  %sc_half = index.mul %half, %c8_q6 : index
-  %sc_j = index.mul %j, %c2 : index
-  %sc_part = index.add %sc_half, %sc_j : index
-  %sc_index = index.add %sc_base, %sc_part : index
-  %ql_add = index.cast %ql_index : index to offset
-  %qh_add = index.cast %qh_index : index to offset
-  %sc_add = index.cast %sc_index : index to offset
-  %ql_origin = index.add %origin, %ql_add : offset
-  %qh_origin = index.add %origin, %qh_add : offset
-  %sc_origin = index.add %origin, %sc_add : offset
-  %d_origin = index.add %origin, %d_bytes : offset
-  %ql_view = buffer.view %w[%ql_origin] : buffer -> view<32xi8>
-  %qh_view = buffer.view %w[%qh_origin] : buffer -> view<32xi8>
-  %sc_view = buffer.view %w[%sc_origin] : buffer -> view<2xi8>
-  %d_view = buffer.view %w[%d_origin] : buffer -> view<1xf16>
-  %ql = vector.load %ql_view[0] : view<32xi8> -> vector<32xi8>
-  %qh = vector.load %qh_view[0] : view<32xi8> -> vector<32xi8>
-  %sc = vector.load %sc_view[0] : view<2xi8> -> vector<2xi8>
-  %d_half = view.load %d_view[0] : view<1xf16> -> f16
-  %d = scalar.extf %d_half : f16 to f32
-  %shift_low = index.mul %j_high, %c4 : index
-  %shift_high = index.mul %j, %c2 : index
-  %shift_low32 = index.cast %shift_low : index to i32
-  %shift_high32 = index.cast %shift_high : index to i32
-  %shift_low8 = scalar.trunci %shift_low32 : i32 to i8
-  %shift_high8 = scalar.trunci %shift_high32 : i32 to i8
-  %shift_low_v = vector.splat %shift_low8 : vector<32xi8>
-  %shift_high_v = vector.splat %shift_high8 : vector<32xi8>
-  %ql_shifted = vector.shrui %ql, %shift_low_v : vector<32xi8>
-  %low = vector.andi %ql_shifted, %low_mask : vector<32xi8>
-  %qh_shifted = vector.shrui %qh, %shift_high_v : vector<32xi8>
-  %qh_bits = vector.andi %qh_shifted, %two_bits : vector<32xi8>
-  %high = vector.shli %qh_bits, %four8 : vector<32xi8>
-  %combined = vector.ori %low, %high : vector<32xi8>
-  %codes = vector.uitofp %combined : vector<32xi8> to vector<32xf32>
-  %s0_i8 = vector.extract %sc[0] : vector<2xi8> -> i8
-  %s1_i8 = vector.extract %sc[1] : vector<2xi8> -> i8
-  %s0 = scalar.sitofp %s0_i8 : i8 to f32
-  %s1 = scalar.sitofp %s1_i8 : i8 to f32
-  %s0_v = vector.splat %s0 : vector<16xf32>
-  %s1_v = vector.splat %s1 : vector<16xf32>
-  %scale_v = vector.concat<0> %s0_v, %s1_v : vector<16xf32>, vector<16xf32> -> vector<32xf32>
-  %weighted = vector.mulf %inputs, %scale_v : vector<32xf32>
-  %products = vector.mulf %codes, %weighted : vector<32xf32>
-  %qx = vector.reduce<addf> %products, %zero_f : vector<32xf32>, f32
-  %xs = vector.reduce<addf> %weighted, %zero_f : vector<32xf32>, f32
-  %offset_term = scalar.mulf %xs, %thirty_two : f32
-  %centered = scalar.subf %qx, %offset_term : f32
-  %dot = scalar.mulf %centered, %d : f32
-  func.return %dot : f32
-}
-
 // Group `group` of a Q6_K superblock as 32 F32 values.
 func.def inline @g_q6_k_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
   %c2 = index.constant 2 : index
@@ -418,6 +275,8 @@ func.def inline @g_q6_k_values(%w: buffer, %origin: offset, %group: index) -> (v
   func.return %values : vector<32xf32>
 }
 
+// Q5_K: header (d, dmin, 12 scale bytes), 32 high-bit bytes, 128 nibble bytes.
+// Value of group g: d*scale_g * (nibble | (qh_bit_g << 4)) - dmin*min_g.
 // Group `group` of a Q5_K superblock as 32 F32 values.
 func.def inline @g_q5_k_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
   %c2 = index.constant 2 : index
@@ -529,78 +388,7 @@ func.def inline @g_q8_0_values(%w: buffer, %origin: offset, %group: index) -> (v
   func.return %scaled : vector<32xf32>
 }
 
-func.def inline @g_q8_0_dot(%w: buffer, %origin: offset, %group: index, %inputs: vector<32xf32>) -> (f32) {
-  %zero_f = scalar.constant 0.0 : f32
-  %values = func.call @g_q8_0_values(%w, %origin, %group) : (buffer, offset, index) -> (vector<32xf32>)
-  %dot = vector.dotf<reassoc|contract> %values, %inputs, %zero_f : vector<32xf32>, vector<32xf32>, f32
-  func.return %dot : f32
-}
-
 // Q5_K group as values (for heads/embeddings) is g_q5_k_values; Q4_K is g_q4_k_values.
-"""
-
-
-def row_dot(fmt):
-    """Partial dot of one lane's 32-value groups of a K-quant row with x[token]."""
-    return f"""
-func.def inline @g_{fmt}_row_dot(%w: buffer, %row_origin: offset, %x_view: view<[%tokens]x[%groups]x32xf32>, %tokens: index, %groups: index, %token: index, %lane: index, %lanes: index) -> (f32) {{
-  %c0 = index.constant 0 : index
-  %cgpb = index.constant {SB[fmt] // 32} : index
-  %block_bytes = index.constant {FMT[fmt]} : offset
-  %zero_f = scalar.constant 0.0 : f32
-  %bounded_token = index.assume %token [lt(%token, %tokens)] : index
-  %partial = scf.for %group = [%lane to %groups step %lanes](%sum = %zero_f : f32) -> (f32) {{
-    %block = index.div %group, %cgpb : index
-    %within = index.rem %group, %cgpb : index
-    %block_add = index.scale %block, %block_bytes : index, offset -> offset
-    %block_origin = index.add %row_origin, %block_add : offset
-    %inputs = vector.load %x_view[%bounded_token, %group, %c0] : view<[%tokens]x[%groups]x32xf32> -> vector<32xf32>
-    %dot = func.call @g_{fmt}_dot(%w, %block_origin, %within, %inputs) : (buffer, offset, index, vector<32xf32>) -> (f32)
-    %next = scalar.addf %sum, %dot : f32
-    scf.yield %next : f32
-  }}
-  func.return %partial : f32
-}}
-"""
-
-
-def matmul(fmt, lanes=32):
-    """y[t, n] (+)= W[n, :] . x[t, :]; one workgroup of `lanes` per (row, token)."""
-    name = f"g_matmul_{fmt}" + ("" if lanes == 32 else f"_w{lanes}")
-    return f"""
-kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
-  %c1 = index.constant 1 : index
-  %c32 = index.constant {lanes} : index
-  kernel.launch.config workgroups(%tokens, %n, %c1) workgroup_size(%c32, %c1, %c1) : index
-}} launch(%k_arg: index, %n_arg: index, %tokens_arg: index, %accumulate: i32, %x: buffer, %w: buffer, %y: buffer) {{
-  %k = index.assume %k_arg [range(%k_arg, 256, 65536), multiple_of(%k_arg, 256)] : index
-  %n = index.assume %n_arg [range(%n_arg, 1, 262144)] : index
-  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
-  %row_id = kernel.workgroup.id<y> : index
-  %token_id = kernel.workgroup.id<x> : index
-  %row = index.assume %row_id [lt(%row_id, %n)] : index
-  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
-  %lane = kernel.workitem.id<x> : index
-  %lanes = kernel.workgroup.size<x> : index
-  %c0 = index.constant 0 : index
-  %c32 = index.constant 32 : index
-  %c256 = index.constant 256 : index
-  %zero = index.constant 0 : offset
-  %block_bytes = index.constant {FMT[fmt]} : offset
-  %groups = index.div %k, %c32 : index
-  %csb = index.constant {SB[fmt]} : index
-  %blocks = index.div %k, %csb : index
-  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
-  %row_origin = index.scale %row, %row_bytes : index, offset -> offset
-  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x[%groups]x32xf32>
-  %partial = func.call @g_{fmt}_row_dot(%w, %row_origin, %x_view, %tokens, %groups, %token, %lane, %lanes) : (buffer, offset, view<[%tokens]x[%groups]x32xf32>, index, index, index, index, index) -> (f32)
-  %total = kernel.workgroup.reduce<addf> %partial : f32
-  %first = index.cmp eq, %lane, %c0 : index
-  scf.if %first {{
-    func.call @g_store_row(%y, %tokens, %n, %token, %row, %total, %accumulate) : (buffer, index, index, index, index, f32, i32)
-  }}
-  kernel.return
-}}
 """
 
 
@@ -1063,61 +851,6 @@ kernel.def export("g_row_scale_f16") @g_row_scale_f16(%rows: index) {
   scf.if %first {
     %s_view = buffer.view %scales[%zero] : buffer -> view<[%rows]x2xf32>
     view.store %scale, %s_view[%row, %c0] : f32, view<[%rows]x2xf32>
-    view.store %inverse, %s_view[%row, %c1] : f32, view<[%rows]x2xf32>
-  }
-  kernel.return
-}
-// Per-row power-of-two scaling so F16 GEMM operands cannot overflow: rows
-// whose max |value| exceeds 2^14 get scale 2^-e (max * scale < 2^15), others
-// 1. Writes (scale, 1/scale) per row; power-of-two scaling is exact.
-kernel.def export("g_row_scale") @g_row_scale(%rows: index) {
-  %c1 = index.constant 1 : index
-  %c256 = index.constant 256 : index
-  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
-} launch(%rows_arg: index, %k_arg: index, %x: buffer, %scales: buffer) {
-  %rows = index.assume %rows_arg [range(%rows_arg, 1, 2097152)] : index
-  %k = index.assume %k_arg [range(%k_arg, 256, 65536), multiple_of(%k_arg, 256)] : index
-  %row_id = kernel.workgroup.id<x> : index
-  %row = index.assume %row_id [lt(%row_id, %rows)] : index
-  %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %c0 = index.constant 0 : index
-  %c256 = index.constant 256 : index
-  %zero_f = scalar.constant 0.0 : f32
-  %x_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k]xf32>
-  %local = scf.for %c = [%lane to %k step %c256](%m = %zero_f : f32) -> (f32) {
-    %bc = index.assume %c [lt(%c, %k)] : index
-    %v = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32
-    %a = scalar.absf %v : f32
-    %n = scalar.maxnumf %m, %a : f32
-    scf.yield %n : f32
-  }
-  %maximum = kernel.workgroup.reduce<maxnumf> %local : f32
-  %first = index.cmp eq, %lane, %c0 : index
-  scf.if %first {
-    %bits = scalar.bitcast %maximum : f32 to i32
-    %c23 = scalar.constant 23 : i32
-    %c255 = scalar.constant 255 : i32
-    %shifted = scalar.shrui %bits, %c23 : i32
-    %biased = scalar.andi %shifted, %c255 : i32
-    // e = exponent(max) - 13 when max >= 2^14 (biased exponent 141), else 0.
-    %c127 = scalar.constant 127 : i32
-    %c13 = scalar.constant 13 : i32
-    %c0_i32 = scalar.constant 0 : i32
-    %c100 = scalar.constant 100 : i32
-    %unbiased = scalar.subi %biased, %c127 : i32
-    %raw_e = scalar.subi %unbiased, %c13 : i32
-    %positive = scalar.maxsi %raw_e, %c0_i32 : i32
-    %e = scalar.minsi %positive, %c100 : i32
-    %scale_exp = scalar.subi %c127, %e : i32
-    %inverse_exp = scalar.addi %c127, %e : i32
-    %scale_bits = scalar.shli %scale_exp, %c23 : i32
-    %inverse_bits = scalar.shli %inverse_exp, %c23 : i32
-    %scale = scalar.bitcast %scale_bits : i32 to f32
-    %inverse = scalar.bitcast %inverse_bits : i32 to f32
-    %s_view = buffer.view %scales[%zero] : buffer -> view<[%rows]x2xf32>
-    view.store %scale, %s_view[%row, %c0] : f32, view<[%rows]x2xf32>
-    %c1 = index.constant 1 : index
     view.store %inverse, %s_view[%row, %c1] : f32, view<[%rows]x2xf32>
   }
   kernel.return
@@ -1761,7 +1494,7 @@ kernel.def export("g_head_select") @g_head_select(%spans: index) {{
           %winner = kernel.workgroup.reduce<minsi> %cand_id : i32
           scf.if %first {{
             %rr = index.assume %r [range(%r, 0, 63)] : index
-            view.store %best, %cand_v[%rr] : f32, view<64xf32>
+{SOFTCAP_STORE}
             view.store %winner, %cand_i[%rr] : i32, view<64xi32>
           }}
           scf.yield %best, %winner : f32, i32
@@ -2049,33 +1782,12 @@ kernel.def export("{name}") @{name}(%spans: index) {{
     return "\n".join(L)
 
 
-USED_MV = set()      # (fmt, K, swiglu) decode matrix-vector kernels the model launches
+USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
 USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
 NVAL = {"%nH": H, "%nFF": FF, "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D}
 if GDN:
     NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
-ADAPT = os.environ.get("MV_ADAPT", "1") not in ("", "0")
-WG1 = int(os.environ.get("MV_WG1", "4096")); WG4 = int(os.environ.get("MV_WG4", "128"))
-
-
-# The 1- and 4-token variants of a projection must use the same R: R changes the
-# summation order, so different R makes a request's output depend on whether it was
-# decoded alone or batched (consistency.py fails). MV_WG4 opts into a separate 4-token
-# target anyway (more c4 throughput, batch-dependent output: record it in the report).
-SAME_R = "MV_WG4" not in os.environ
-
-
-def pick_r(n, K, TG):
-    """Catalog lever: halve rows/workgroup while the grid is under-filled."""
-    if not ADAPT or n is None:
-        return 16
-    if SAME_R:
-        TG = 1
-    target = (640 if K >= 8192 else WG1) if TG == 1 else WG4
-    R = 16
-    while R > 1 and n // R < target and n % (R // 2) == 0:
-        R //= 2
-    return R
+from mv_rows import pick_r  # noqa: E402  (shared with make_kernel_tests.py)
 
 
 def mv_name(fmt, kval, sw, n, TG):
@@ -2083,6 +1795,7 @@ def mv_name(fmt, kval, sw, n, TG):
     R = pick_r(nv, kval, TG)
     base = f"g_mv_{fmt}_k{kval}" + ("_swiglu" if sw else "") + (f"_t{TG}" if TG > 1 else "")
     if R == 16:
+        USED_MV.add((fmt, kval, sw, TG))
         return base
     USED_MV_R.add((fmt, kval, sw, R, TG))
     return base + f"_r{R}"
@@ -2090,15 +1803,12 @@ USED_GEMM = {}       # fmt -> set of GEMM modes
 
 
 def lin(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
-    USED_MV.add((fmt, kval, mode == "swiglu"))
     USED_GEMM.setdefault(fmt, set()).add(mode)
     return linear(fmt, x, s, w, wsize, y, k, n, kval, mode)
 
 
 def lin_mv(fmt, x, w, wsize, y, n, kval):
     """Always the matrix-vector kernels (any token count): for tiny projections (n = 16)."""
-    USED_MV.add((fmt, kval, False))
-    base = f"g_mv_{fmt}_k{kval}"
     a = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
     return f"""scf.if %single {{
     kernel.launch @{mv_name(fmt, kval, False, n, 1)}[{n}, %t]{a}
@@ -2348,10 +2058,8 @@ if __name__ == "__main__":
     program, head_fmt = model()  # first: records the mv / GEMM variants it launches
     parts = [f"// Generated by gen_llm.py from {os.environ.get('LLM_CONFIG') or sys.argv[1]}.\n", COMMON.replace("%c8_q6", "%c8q6").replace(
         "  %c64 = index.constant 64 : index\n  %qh_base", "  %c64 = index.constant 64 : index\n  %c8q6 = index.constant 8 : index\n  %qh_base")]
-    for fmt in ("q4_k", "q5_k", "q6_k", "q8_0"):
-        parts.append(row_dot(fmt))
     for TG in (1, 4):
-        for fmt, K, sw in sorted(USED_MV):
+        for fmt, K, sw in sorted((f, k, w) for f, k, w, t in USED_MV if t == TG):
             parts.append(mv(fmt, K, TG=TG, swiglu=sw))
     for fmt, K, sw, R, TG in sorted(USED_MV_R):
         parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))

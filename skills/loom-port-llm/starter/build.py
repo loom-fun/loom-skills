@@ -88,6 +88,12 @@ hx = lambda s: s.encode().hex()
 thinking = chat.get("thinking", "toggle" if chat.get("starts_in_reasoning") else "never")
 reasoning = {"toggle": (1, 1 | 16, 4 if chat.get("thinking_default", True) else 0), "always": (1, 0, 0), "never": (0, 0, 0)}[thinking]
 B = lambda v: "true" if v else "false"
+CALL_FORMATS = {"hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4}
+# A chat format the generic control functions can't express (e.g. Glimmer's ATEM channels): the kit
+# ships chat/<call_format>.loom (replacement chat functions) and optionally chat/<call_format>_rodata.py
+# (a rodata() returning its string constants); see reference/glimmer-example.
+custom_chat = os.path.join(HERE, "chat", chat["call_format"] + ".loom")
+custom_chat = custom_chat if chat["call_format"] not in CALL_FORMATS and os.path.exists(custom_chat) else None
 subs = {
     "@@POS_BYTES@@": str(pos_bytes), "@@PLANES@@": str(2 * kv_layers), "@@BLOCK_BYTES@@": str(16 * pos_bytes),
     "@@RECURRENT_BYTES@@": str(recurrent_bytes or 4),
@@ -113,7 +119,7 @@ subs = {
     "@@HEX_CONTENT_CALL_SEPARATOR@@": hx(chat["content_call_separator"]), "@@HEX_CALL_SEPARATOR@@": hx(chat["call_separator"]),
     "@@HEX_CALL_MARKER@@": hx(chat.get("call_marker", "<tool_call>")),
     "@@DEFAULT_TEMPERATURE@@": repr(float(a.temperature)), "@@DEFAULT_TOP_P@@": repr(float(a.top_p)), "@@DEFAULT_TOP_K@@": str(a.top_k),
-    "@@CALL_FORMAT@@": str({"hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4}[chat["call_format"]]),
+    "@@CALL_FORMAT@@": str(CALL_FORMATS.get(chat["call_format"], 1) if custom_chat else CALL_FORMATS[chat["call_format"]]),
     "@@TOOLS_AFTER_SYSTEM@@": B(chat["tools_after_system"]), "@@TOOLS_FUNCTION_ONLY@@": B(chat["tools_function_only"]),
     "@@TRIM_CONTENT@@": B(chat["trim_content"]),
     "@@HISTORY_THINK_ALWAYS@@": B(chat["history_think"] == "always"),
@@ -126,6 +132,14 @@ for name in ("prepare", "control", "storage", "service"):
     text = open(os.path.join(HERE, "templates", name + ".loom"), encoding="utf-8").read()
     for k, v in subs.items():
         text = text.replace(k, v)
+    if name == "control" and custom_chat:
+        for fn in ("chat_begin", "chat_message", "chat_end", "render_tool", "parse_tools", "output_next", "complete_text"):
+            text = text.replace(f"func.def public @{fn}(", f"func.def @generic_{fn}(")
+        rodata_py = custom_chat[:-len(".loom")] + "_rodata.py"
+        if os.path.exists(rodata_py):
+            sys.path.insert(0, os.path.dirname(rodata_py))
+            text += "\n" + __import__(os.path.basename(rodata_py)[:-3]).rodata()
+        text += "\n" + open(custom_chat, encoding="utf-8").read()
     assert "@@" not in text, (name, [l for l in text.splitlines() if "@@" in l])
     open(os.path.join(pkg, "program", name + ".loom"), "w", encoding="utf-8", newline="\n").write(text)
 open(os.path.join(pkg, "weights.loom"), "w", encoding="utf-8", newline="\n").write(open(os.path.join(HERE, "templates", "weights.loom"), encoding="utf-8").read())
