@@ -130,6 +130,11 @@ Read it from there if it isn't in your skill list.
   before serving anything big. The gates run llama.cpp and Loom side by side, so the
   GGUF must fit **twice** (plus KV): `port.sh` picks the quant that does
   (`starter/pick_gguf.py`, e.g. a 40B repo's UD-Q5_K_XL instead of its 39 GiB Q8_0).
+- **GPU memory is system RAM** (unified memory: GTT reports ~115 GiB on a 128 GB box, but the desktop
+  and every process share it). Before loading any extra llama-server or loom-serve by hand, check
+  `MemAvailable` in /proc/meminfo exceeds that model's weights + KV + 16 GiB: a second flint
+  llama-server next to a 79 GB Loom server ran the machine out of RAM and the OOM killer took the
+  desktop session.
 - **Always pass `--memory_bytes`** to `loom-serve` (weights + KV pool + ~2 GiB
   workspace). Too small → HTTP 503 "retained state leaves insufficient completion
   capacity". Several models can share one budget with `--parameter_idle_ms=60000`.
