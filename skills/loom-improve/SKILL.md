@@ -22,19 +22,19 @@ eval guidance; sources at the end).
 Secondary (diagnostic, not goals): manual minutes (hand-work phases), friction notes (each `#` line a
 trial agent logs is a skill gap), time per phase, tool calls.
 
-**A change ships only if:** every reference model stays within its budget, wall clock doesn't rise > 10 % on any reference model, no gate goes PASS ->
+**A change ships only if,** on every model its checks covered (section 3, step 5): it stays within its budget, wall clock doesn't rise > 10 %, no gate goes PASS ->
 FAIL, compare max gap doesn't rise > 0.3, and quiet-GPU perf margins don't drop beyond noise
 (`kpi.py compare` checks the first three; `eval.sh` the last). Never "fix" time by dropping a check
 that carries weight: a gate may only be removed if another gate provably covers the same failure.
 
 ## 2. Reference models (the eval suite)
 
-Run the cheapest model on every change; the challenge set before a PR. Each one stresses something
-different; don't tune to one.
+No model runs by default and there is no full-suite run before a PR: each change gets the checks it
+needs (section 3, step 5). Each model stresses something different; don't tune to one.
 
 | Model (HF repo) | Role | What it stresses |
 |---|---|---|
-| `unsloth/Qwen3.5-0.8B-GGUF` | smoke, every change (~45 min) | starter path end to end, gated delta-net hybrid, 262k context (the full-context probe is the slow step) |
+| `unsloth/Qwen3.5-0.8B-GGUF` | cheapest trial (~20 min); the only starter-path model | starter path end to end, gated delta-net hybrid, 262k context (the full-context probe is the slow step) |
 | `unsloth/NVIDIA-Nemotron-3.5-Bolt-E4B-GGUF` | challenge | gemma4: PLE, KV sharing, head_dim 256/512, bf16, Gemma-4 tool/channel chat format (has `reference/gemma4-example`) |
 | `LiquidAI/LFM2.5-24B-A2B-GGUF` | challenge | lfm2moe: short-conv + MoE, head_dim 64, pythonic tool calls, `{% generation %}` template |
 | `unsloth/Muse-Glimmer-30B-GGUF` | challenge | 30B dense at ~9 tok/s: gate cost on big models, channel (ATEM) chat format, norm RoPE, NoPE/SWA layers |
@@ -53,11 +53,11 @@ Progress:
 - [ ] 2. Profile: kpi.py summarize; read phases.log friction notes AND the agent's final report
 - [ ] 3. Rank causes by minutes (or by gate failures); pick the biggest general one
 - [ ] 4. Change the skills on a branch (one cause per change; prefer scripts over prose)
-- [ ] 5. Verify the change locally before any trial (bash -n, a dry run, a regression model)
-- [ ] 6. Re-run the same model on a NEW snapshot; kpi.py compare; then a different model
+- [ ] 5. Plan the checks (what the change can affect, the cheapest evidence for each), write the plan down, run the deterministic ones
+- [ ] 6. Run the planned agent trials, if any, on a NEW snapshot; kpi.py compare
 - [ ] 7. Fold the trial's own discoveries back (bugs it fixed in its kit, tools it wrote)
 - [ ] 8. Repeat 3-7 until the goal is met or the top remaining cause is not fixable in the skill
-- [ ] 9. Quiet-GPU eval.sh on every finished package; results.md rows; PR
+- [ ] 9. Quiet-GPU eval.sh on the packages the checks produced; results.md rows (with the plans); PR
 ```
 
 **0. Snapshots.** Trials read a frozen copy, never the working tree: you will edit files while trials
@@ -97,20 +97,44 @@ the reviewed `cfg.json` and a README stating what it covers and what was left op
 any model could use into the starter instead (default off, so the Qwen programs stay byte-identical).
 After any starter change, `reference/rebase_examples.sh OLD_STARTER` and `check_examples.sh`.
 
-**5. Verify before spending a trial.** Syntax (`bash -n`, `python -c "import ast..."`), the changed
-script on a finished trial's package, and a regression model for anything touching the starter or
-chat glue (both Qwen chat blocks still derive 12/12 and pass `agent_golden.py`). A fallback you add
-must be tested on a model that takes it (a split-K prefill fallback once produced garbage).
+**5. Plan the checks.** An agent trial costs $2-6 in API tokens and 20-85 min; a deterministic check
+costs GPU time only. Choose by judgment, not a fixed suite. Before running anything, write down what
+the change can affect, which models exercise that path, the cheapest evidence for each, and what result
+would count as a regression; it goes in the results.md row. Reason from what each model's trial actually
+uses: an example's files only by its model; the starter path only by models without an example (Qwen3.5
+today); a doc only by trials that read it (past trial transcripts show which: only flint read
+`porting-notes.md` and `loom-ir-cookbook.md`). The maker of a change wants it to pass: plan before
+seeing results, and don't shrink the plan afterwards. Cheapest evidence first:
+- Syntax: `bash -n`, `python3 -m py_compile`.
+- Benchmark, gate or perf scripts: replay `qualify.sh` + `finalize.sh` (or `eval.sh`) on finished trial
+  packages of every model the change can reach. No agent needed (the one-model-at-a-time change was
+  validated this way on all five).
+- Starter or a reference example: rebuild every affected model's package (`apply_example.sh` + `port.sh`,
+  or `port.sh` alone on the starter path), diff it against the last trial's package, and run that
+  example's own checks (`chat_probe --verify`, kernel tests, gates). An identical package is not enough:
+  glimmer's `chat_probe --verify` CLI broke while its package stayed byte-identical, and an example's
+  stale `build.py` broke the chat placeholders at run time. Chat glue: both Qwen chat blocks still derive
+  12/12 and pass `agent_golden.py`. A fallback you add must be tested on a model that takes it (a split-K
+  prefill fallback once produced garbage).
+- An agent trial only where the change can alter what the agent does: instructions, workflow, hints, the
+  interface or output of a script the agent reads. Use the cheapest model that takes the changed path;
+  add another only for a different path (starter vs example) or a risk specific to a model (memory and
+  context changes: the largest-context model; the auto memory budget ran the machine out of RAM only on
+  flint). A doc tweak usually needs no trial.
 
-**6. Re-test.** Same model first (did the change work?), then a different family (does it
-generalize?). A re-test that benefits from a reference example of the same model measures the
-template, not generalization: say so, and also run a model the example doesn't cover.
+Misses surface on their own: every trial runs the whole current skill tree, so a regression on a model
+you didn't trial shows at its next trial against its results.md baseline. Trace it to the change and add
+what the plan missed to this step.
+
+**6. Run the agent trials.** Same model first (did the change work?); a different family only if the
+plan says the change should generalize there. A re-test that benefits from a reference example of the
+same model measures the template, not generalization: say so.
 
 **7. Fold back.** Each trial's kit diff is free engineering: generator fixes, missing helpers, a chat
 format. Diff `TRIAL/work/kit` (or `skills-local`) against the snapshot; merge what is general and
 verified (gates passed on it), with the trial's measurement in the commit message.
 
-**8. Stop** when all reference models finish within their roofline budgets with all gates passing, or the top remaining cause is outside the
+**8. Stop** when the goal's models finish within their roofline budgets with all gates passing, or the top remaining cause is outside the
 skill (hardware speed, model size, upstream SDK/llama.cpp bugs): report it with the minutes.
 
 ## 4. Running trials with subagents
@@ -137,9 +161,6 @@ gate run holds llama.cpp + Loom: 2x weights per trial; GPU queues run out at ~6 
 inflates every trial's wall clock and makes in-trial perf meaningless: compare wall clock only
 between runs with similar contention, and take perf from `eval.sh`. Stop finished trials' servers
 promptly (they hold GPU queues and memory).
-
-**Effort scaling.** Smoke (Qwen3.5-0.8B) on every change; one challenge model to validate a fix for
-it; the full challenge set before a PR. Don't run the full suite for a doc tweak.
 
 **Reading results.** Grade outcomes, not paths: the gates and the wall clock, not whether the agent
 followed your expected steps. Read the transcript summary for failures; a failure must be clearly the
