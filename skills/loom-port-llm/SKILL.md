@@ -113,7 +113,7 @@ $T -I $K/inspect_gguf.py /path/model-Q4_K_M.gguf cfg.json
 # 3. Tokenizer: the HF tokenizer.json of the *same* model (base repo; GGUF repos often lack it)
 ~/loom/.venv/bin/hf download <org>/<base-model> tokenizer.json --local-dir tok
 # 4. Build: context defaults to the model's native context, the KV pool to 2x that, both fitted to
-#    --memory-gib (default auto: a KV pool of 2x the context within the GPU's GTT, leaving room for llama.cpp; give a number on a busy machine). Prints the model id and --memory_bytes.
+#    --memory-gib (default 56; lower it if the machine is busy). Never above the loom hard rule's GPU share. Prints the model id and --memory_bytes.
 $T $K/build.py cfg.json pkg --tokenizer tok/tokenizer.json --model-id <org>/<name-without-spaces>
 # 5. Serve + smoke test
 VENV=~/loom/.venv ${CLAUDE_SKILL_DIR}/../loom-setup/scripts/serve.sh mine 8160 amdgpu <memory_bytes> pkg/model.json
