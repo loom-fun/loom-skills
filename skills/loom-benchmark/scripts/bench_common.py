@@ -47,9 +47,15 @@ PROMPTS = [
 ]
 
 
+# The smaller documents are byte-exact prefixes of the two stored ones (prompts and reference-cache keys unchanged).
+DOC_PREFIX = {1000: (2000, 4688), 8000: (32000, 36510), 16000: (32000, 73839)}
+
+
 def doc(n):
     """Real-text document of ~n tokens (Loom docs markdown): 1000 2000 8000 16000 32000."""
-    return open(os.path.join(DATA, f"doc_{n}.txt"), encoding="utf-8").read()
+    base, size = DOC_PREFIX.get(n, (n, None))
+    data = open(os.path.join(DATA, f"doc_{base}.txt"), "rb").read()
+    return (data if size is None else data[:size]).decode("utf-8")
 
 
 class Package:
@@ -154,6 +160,27 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
         json.dump(r, open(tmp, "w"))
         os.replace(tmp, path)
     return r
+
+
+# Every llama.cpp reference is greedy with the samplers forced off: some GGUFs set penalty_repeat
+# (LFM2.5: 1.05), which llama.cpp applies even at temperature 0, while Loom decodes greedily.
+GREEDY = {"temperature": 0, "cache_prompt": False, "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}
+
+
+def llama_greedy(url, ids, n_predict, pkg, salt="", n_probs=5):
+    """Greedy llama.cpp continuation of prompt ids -> (response, generated ids, aligned top lists).
+    completion_probabilities omits byte-fallback tokens (emoji, partial UTF-8), so the ids come from
+    `tokens` and the top-n lists are trusted only while they line up with them."""
+    r = llama_completion(url, dict(GREEDY, prompt=ids, n_predict=n_predict, n_probs=n_probs, return_tokens=True), pkg, salt)
+    cp = r.get("completion_probabilities", [])
+    gen = r.get("tokens") or [x["id"] for x in cp]
+    k = next((i for i, x in enumerate(cp) if i >= len(gen) or x["id"] != gen[i]), len(cp))
+    return r, gen, cp[:k]
+
+
+def top_logprobs(tops, k):
+    """{id: logprob} at generated position k, or {} past the aligned lists (a byte-split token)."""
+    return {t["id"]: t["logprob"] for t in tops[k]["top_logprobs"]} if k < len(tops) else {}
 
 
 def ensure_llama(url):

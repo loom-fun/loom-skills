@@ -6,7 +6,7 @@ description: Correctness and performance methodology for Loom models vs llama.cp
 # Benchmark and verify Loom models
 
 Scripts are in `${CLAUDE_SKILL_DIR}/scripts/`; run them with the tools
-venv (`~/loom/.tools/bin/python`). Workload documents are in `data/doc_{1000,2000,8000,16000,32000}.txt`.
+venv (`~/loom/.tools/bin/python`). Workload documents: `bench_common.doc(n)` for n in 1000, 2000, 8000, 16000, 32000 (stored as `data/doc_2000.txt` and `doc_32000.txt`; the others are byte prefixes).
 They are real text (Loom's own markdown docs) and their sizes are approximate token counts.
 Scripts that take `PACKAGE` read `llm_config.json`, `tokenizer.json` and the model
 id from a package built by `loom-port-llm/starter/build.py`.
