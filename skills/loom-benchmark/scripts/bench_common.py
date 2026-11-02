@@ -139,8 +139,10 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
     never on the Loom build, so every gate run after the first reuses it: re-running the gates
     on an optimized build costs Loom time only. Cache: $LLAMA_CACHE or ./llama_cache (bench/).
     `salt` separates deliberate re-recordings (golden2: llama.cpp is not run-to-run deterministic).
-    On a miss, when nothing answers at `url` and $LLAMA_START is set (gates.sh sets it), that
-    command is run once to start llama-server (lazy start: a fully cached gate run never loads it).
+    On a miss with $LLAMA_DEFER set (gates.sh: one model at a time), the request is appended to that
+    file and a placeholder without tokens is returned; llama_fill.py answers the pending requests with
+    only llama.cpp loaded, and the gate re-runs from the cache. Otherwise, when nothing answers at
+    `url` and $LLAMA_START is set, that command is run once to start llama-server.
     """
     gguf = pkg.cfg.get("gguf") if pkg is not None else os.environ.get("LLAMA_GGUF")
     if gguf not in _FP:
@@ -154,6 +156,12 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
             return json.load(open(path))
         except ValueError:
             pass
+    defer = os.environ.get("LLAMA_DEFER")
+    if defer:
+        with open(defer, "a") as f:
+            f.write(json.dumps({"key": key, "gguf": gguf, "body": body, "salt": salt}) + "\n")
+        return {"_suspect": "deferred: answered by llama_fill.py, then the gate re-runs", "_pending": True,
+                "content": "", "completion_probabilities": []}
     ensure_llama(url)
     for attempt in range(2):
         r = requests.post(url + "/completion", json=body, timeout=timeout).json()

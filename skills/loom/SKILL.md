@@ -84,9 +84,9 @@ $K/loom-benchmark/scripts/finalize.sh $W/pkg http://127.0.0.1:8160 $G $W/bench  
    (3: the chat template, or an architecture the starter doesn't cover). Then follow
    `loom-port-llm` for that stage only, and continue with step 2 once the package
    serves and its kernel tests pass.
-2. **Qualify.** `qualify.sh` picks the fastest llama.cpp ROCm build on the machine,
-   starts ONE llama-server for everything, runs the gates (`LEVEL=quick`), measures
-   the llama.cpp and Loom baselines, runs the roofline (targets + budget) and prints
+2. **Qualify.** `qualify.sh` picks the fastest llama.cpp ROCm build on the machine, measures
+   its baseline with Loom stopped, runs the gates (`LEVEL=quick`; llama.cpp references are filled
+   with Loom stopped), measures the Loom baseline, runs the roofline (targets + budget) and prints
    `QUALIFY_RESULT`. A failing gate doesn't stop the measurements, but fix it before finalize.
    Exit 4 `NO_LLAMACPP`: no installed llama.cpp runs this architecture. Ask the user once whether to
    download a newer lemonade build (it needs their approval); otherwise continue Loom-only, and state
@@ -127,9 +127,9 @@ Read it from there if it isn't in your skill list.
   On the Strix Halo box (128 GB RAM) the GPU limit is ~61 GiB GTT. Qwen3.8-Flash-Next
   (104 GiB) hard-crashed the machine during the original evaluation. Never retry it on a 128 GB box. Check
   `du -shL <weights>` against `cat /sys/class/drm/card*/device/mem_info_gtt_total`
-  before serving anything big. The gates run llama.cpp and Loom side by side, so the
-  GGUF must fit **twice** (plus KV): `port.sh` picks the quant that does
-  (`starter/pick_gguf.py`, e.g. a 40B repo's UD-Q5_K_XL instead of its 39 GiB Q8_0).
+  before serving anything big. The scripts load **one model at a time** (Loom is stopped while
+  llama.cpp runs), but `starter/pick_gguf.py` still keeps a GGUF that fits twice (a 40B repo's
+  UD-Q5_K_XL instead of its 39 GiB Q8_0) until quant choice accounts for the KV pool at full context.
 - **GPU memory is system RAM** (unified memory: GTT reports ~115 GiB on a 128 GB box, but the desktop
   and every process share it). Before loading any extra llama-server or loom-serve by hand, check
   `MemAvailable` in /proc/meminfo exceeds that model's weights + KV + 16 GiB: a second flint

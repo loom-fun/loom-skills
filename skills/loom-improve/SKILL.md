@@ -84,7 +84,7 @@ wrote "45 min" for a 6-minute step): use the timestamps.
 | A brittle script or silent failure | make it fail loudly with the reason | picker "failed to start" with no reason; FLASH2_KT=16 silently empty |
 | A policy that forces waste | change the policy | 1 h optimization on top of everything else -> one budget for the whole job |
 | Architecture or chat format not covered | a reference example or a starter feature, from the trial that solved it | gemma4-example cut a 45-min hand port to 5 min |
-| Shared-GPU noise | interleave, re-measure on quiet GPU | finalize interleaves llama.cpp and Loom |
+| Shared-GPU noise | re-measure on a quiet GPU, medians | finalize and eval.sh take medians of repeated runs, one model at a time |
 
 Prefer, in order: deleting a step, scripting it, caching it, documenting it. Put deterministic work
 in scripts (low freedom); leave judgment (kernel design, debugging) as guidance (high freedom).
@@ -149,7 +149,7 @@ the prompt is near-deterministic for that model, or llama.cpp disagreeing with i
 ## 5. Measuring correctly
 
 - In-trial perf is informational. Comparable perf comes from `scripts/eval.sh OUT PKG GGUF` on a quiet
-  GPU (no other loom-serve/llama-server), same llama.cpp build for every revision, interleaved runs,
+  GPU (no other loom-serve/llama-server), same llama.cpp build for every revision, one model at a time,
   medians. Re-serve a finished package from its trial dir to evaluate it later.
 - Quality is re-checked by `eval.sh` with a frozen skill tree (`EVAL_SKILLS=`), so a skill change
   can't relax the gates it is graded by.
@@ -178,7 +178,7 @@ the prompt is near-deterministic for that model, or llama.cpp disagreeing with i
 - `trial_prompt.md`: the brief for a trial agent (fill the placeholders).
 - `scripts/kpi.py`: trial KPIs (`summarize`) and regression check between two trials (`compare`).
 - `scripts/watch_trial.sh`: trial watchdog (DONE / STALLED / TIMEOUT).
-- `scripts/eval.sh`: fixed quiet-GPU evaluation of a package (frozen gates + interleaved perf).
+- `scripts/eval.sh`: fixed quiet-GPU evaluation of a package (frozen gates + perf, one model at a time).
 - `reference/results.md`: every trial so far: the baselines to beat, and the lessons behind each rule.
 
 ## Sources

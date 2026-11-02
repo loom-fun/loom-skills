@@ -42,7 +42,7 @@ big Loom model at the same time if together they exceed GPU memory.
 ## 1. Correctness gates (before any performance claim)
 
 **End-to-end jobs use two wrappers** (see the `loom` skill): `qualify.sh` (after the port: llama.cpp
-pick, one shared llama-server, `LEVEL=quick` gates, llama.cpp + Loom baselines, roofline and budget)
+pick, llama.cpp + Loom baselines, `LEVEL=quick` gates, roofline and budget)
 and `finalize.sh` (on the final build: final perf, `LEVEL=full` gates, audit, `report.html`).
 
 **One command for the gates:** `[LEVEL=fast|quick|full] gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT]`
@@ -55,9 +55,15 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
 | `quick` | after the port (`qualify.sh` runs it) | fast + agent tool loop, sampling, needle at half the context (≤ 60k) vs llama.cpp | 5–15 min the first time |
 | `full` | once, on the final build (`finalize.sh` runs it) | quick + one Loom-only probe at the full context | + one full-context prefill |
 
+- **One model at a time** (GPU memory is system RAM): the gates run with only Loom loaded; every
+  llama.cpp reference missing from the cache is deferred, then gates.sh stops Loom (remembering its
+  command line), lets `llama_fill.py` answer them with only llama.cpp loaded, restarts Loom and re-runs
+  from the cache (a few rounds: re-recordings appear only once the first references exist). qualify.sh
+  and finalize.sh measure llama.cpp with Loom stopped too. `LLAMA_URL` (a running llama-server) skips
+  this and keeps both loaded: only when memory clearly allows.
 - **The llama.cpp side is cached** (`BENCH_DIR/llama_cache`, keyed on the GGUF, the build and the
-  request): it never depends on the Loom build, so only the first run pays for it, and llama-server
-  starts lazily on the first cache miss. Re-running the gates on an optimized build costs Loom time only.
+  request): it never depends on the Loom build, so only the first run pays for it. Re-running the
+  gates on an optimized build costs Loom time only.
 - `fast` is enough inside the loop because the kernel paths an optimization touches are what the
   goldens exercise (short prompts, 1k–32k documents: prefill, KV paging, attention) and consistency
   covers mixed batches. Run `quick` instead when you changed the chat glue (`control.loom`), the

@@ -9,7 +9,7 @@
 #   1. serves PKG alone on PORT
 #   2. LEVEL=full gates (FORCE=1: nothing reused from earlier runs) -> OUT_DIR/gates/gates.json
 #      (GATES=0: perf only, when the trial's own full gates are trusted)
-#   3. perf: llama.cpp and Loom interleaved, 3 rounds of the short set + 1 long set each
+#   3. perf: llama.cpp (Loom stopped), then Loom: 3 rounds of the short set + 1 long set each
 #      (perf.py --no-campaign) -> OUT_DIR/perf.jsonl, medians in OUT_DIR/eval.json
 set -u
 out=$(mkdir -p "$1" && cd "$1" && pwd); pkg=$(cd "$2" && pwd); gguf=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")
@@ -39,17 +39,19 @@ if [ "${GATES:-1}" = 1 ]; then
   FORCE=1 LEVEL=full LOOM_ROOT=$root "$B/gates.sh" "$pkg" "http://127.0.0.1:$port" "$gguf" "$out/gates" "$lport" > "$out/gates.out" 2>&1
   tail -1 "$out/gates.out"
 fi
-echo "== perf (interleaved)"
+echo "== perf (llama.cpp with Loom stopped, then Loom: one model at a time)"
 cd "$out"
-started=0
-if [ -n "${LLAMACPP_DIR:-}" ]; then "$B/llamacpp_server.sh" "$gguf" "$lport" 4 40960 unified >/dev/null && started=1; fi
-for r in 1 2 3; do
-  [ $started = 1 ] && "$T" "$B/perf.py" "http://127.0.0.1:$lport" llama --kind llama --no-campaign --log perf.jsonl >/dev/null
-  "$T" "$B/perf.py" "http://127.0.0.1:$port" loom --model "$model" --no-campaign --log perf.jsonl >/dev/null
-done
-[ $started = 1 ] && "$T" "$B/perf.py" "http://127.0.0.1:$lport" llama --kind llama --no-campaign --long --log perf.jsonl >/dev/null
+if [ -n "${LLAMACPP_DIR:-}" ]; then
+  "$SV/stop.sh" eval >/dev/null 2>&1
+  if "$B/llamacpp_server.sh" "$gguf" "$lport" 4 40960 unified >/dev/null; then
+    for r in 1 2 3; do "$T" "$B/perf.py" "http://127.0.0.1:$lport" llama --kind llama --no-campaign --log perf.jsonl >/dev/null; done
+    "$T" "$B/perf.py" "http://127.0.0.1:$lport" llama --kind llama --no-campaign --long --log perf.jsonl >/dev/null
+    "$B/llamacpp_server.sh" --stop "$lport"
+  fi
+  VENV=$root/.venv "$SV/serve.sh" eval "$port" amdgpu "$mem" "$pkg/model.json" >/dev/null || exit 1
+fi
+for r in 1 2 3; do "$T" "$B/perf.py" "http://127.0.0.1:$port" loom --model "$model" --no-campaign --log perf.jsonl >/dev/null; done
 "$T" "$B/perf.py" "http://127.0.0.1:$port" loom --model "$model" --no-campaign --long --log perf.jsonl >/dev/null
-[ $started = 1 ] && "$B/llamacpp_server.sh" --stop "$lport"
 "$T" - "$B" <<'EOF'
 import json, statistics, sys
 sys.path.insert(0, sys.argv[1])

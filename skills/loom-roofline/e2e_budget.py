@@ -8,7 +8,7 @@ usage: e2e_budget.py MODEL.gguf [--cfg cfg.json] [--context N] [--json] [--manua
 budget = FIXED_MIN (agent work: install, port, reading, decisions, report; the optimization
          phase's own share, OPT_MIN)
        + measured workload: every token the pipeline must decode and prefill on BOTH engines
-         (qualify: picker, quick gates, llama.cpp + Loom baselines; finalize: interleaved perf,
+         (qualify: picker, quick gates, llama.cpp + Loom baselines; finalize: final perf,
          full gates incl. the full-context probe), at the speed this model reaches here:
          decode at DEC_EFF x its decode ceiling, prefill at PRE_EFF x its prefill ceiling at that
          length (attention makes long prefill slower: the roofline counts it)

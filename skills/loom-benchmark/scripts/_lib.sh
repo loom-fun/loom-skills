@@ -8,3 +8,36 @@ export PYTHONDONTWRITEBYTECODE=1 LLAMACPP_STATE=${LLAMACPP_STATE:-$bench/llamacp
 model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
 ctx=$("$T" -c "import json;print(next(iter(json.load(open('$pkg/model.json'))['presets'].values()))['execution']['context_capacity'])")
 step() { echo "== $* ($(date +%T))"; }
+
+# One model at a time: GPU memory is system RAM on Strix Halo, so Loom and llama.cpp never run
+# together. loom_down stops the loom-serve listening on $url's port and remembers its exact command
+# line; loom_up starts that command again (same models, same --memory_bytes), updates serve.sh's
+# pid file and waits for registration. No-ops when no loom-serve owns the port (or without /proc).
+loom_port=${url##*:}; loom_port=${loom_port%%/*}
+loom_down() {
+  local pid; pid=$(ss -ltnpH "sport = :$loom_port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+  { [ -n "$pid" ] && [ "$(cat /proc/$pid/comm 2>/dev/null)" = loom-serve ]; } || return 0
+  loom_cwd=$(readlink /proc/$pid/cwd); mapfile -d '' -t loom_argv < /proc/$pid/cmdline
+  echo "[one model at a time] stopping loom-serve pid $pid on :$loom_port"
+  kill "$pid"; for _ in $(seq 120); do kill -0 "$pid" 2>/dev/null || return 0; sleep 0.5; done; kill -9 "$pid" 2>/dev/null
+}
+loom_up() {
+  [ ${#loom_argv[@]} -gt 0 ] || return 0
+  local state=${LOOM_SERVE_STATE:-$HOME/.cache/loom-serve} name=gates-$loom_port pid st
+  local f; f=$(grep -lx "$loom_port" "$state"/*.port 2>/dev/null | head -1); [ -n "$f" ] && name=$(basename "$f" .port)
+  mkdir -p "$state"
+  (cd "$loom_cwd" && nohup "${loom_argv[@]}" >> "$state/$name.log" 2>&1 & echo $! > "$state/$name.pid")
+  echo "$loom_port" > "$state/$name.port"; pid=$(cat "$state/$name.pid")
+  for _ in $(seq 1800); do
+    kill -0 "$pid" 2>/dev/null || { echo "loom-serve died on restart (see $state/$name.log)"; return 1; }
+    st=$(curl -s -m 2 "$url/v1/status" | "$T" -c 'import sys,json; d=json.load(sys.stdin)["data"]; print(",".join(x["loom"]["registration"] for x in d) if d else "none")' 2>/dev/null)
+    case "$st" in *fail*) echo "loom-serve registration failed on restart: $st"; return 1;; esac
+    if [ -n "$st" ] && [ "$st" != none ] && ! echo "$st" | tr ',' '\n' | grep -qv '^ready$'; then
+      # the pid that owns the port (not the launching subshell's): stop.sh reads it from the pid file
+      pid=$(ss -ltnpH "sport = :$loom_port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); echo "$pid" > "$state/$name.pid"
+      echo "[one model at a time] loom-serve back on :$loom_port (pid $pid)"; loom_argv=(); return 0
+    fi
+    sleep 1
+  done
+  echo "loom-serve did not become ready on restart"; return 1
+}

@@ -2,25 +2,27 @@
 # Everything between "the port serves" and "start optimizing", in one command:
 #   1. fetch_llamacpp.sh (latest lemonade-sdk/llamacpp-rocm, pre-approved) + pick_llamacpp.sh: benchmark
 #      it and every llama.cpp ROCm build on the machine -> llamacpp_pick.json
-#   2. ONE llama-server from the fastest build: 4 slots sharing a unified KV pool big enough for the
-#      long goldens and the needle comparison, reused by every step below (no restarts)
+#   2. llama.cpp baseline, with Loom stopped: perf.py --kind llama (short and --long) and c4_steady
+#      -> perf_log.jsonl. One model at a time: GPU memory is system RAM, so Loom and llama.cpp never
+#      run together (Loom is restarted with its own command line afterwards)
 #   3. LEVEL=quick gates (goldens, compare, consistency, agent tool loop, sampling, half-context needle)
-#      -> a failing gate is reported (exit 1 at the end) but the measurements still run
-#   4. llama.cpp baseline: perf.py --kind llama (short and --long) and c4_steady -> perf_log.jsonl
-#   5. roofline.py -> roofline.json; the optimization budget is what is left of the end-to-end budget
+#      -> a failing gate is reported (exit 1 at the end) but the measurements still run. llama.cpp
+#      references are filled with Loom stopped (gates.sh)
+#   4. roofline.py -> roofline.json; the optimization budget is what is left of the end-to-end budget
 #      (E2E_BUDGET_MIN, default: loom-roofline/e2e_budget.py, from this model's roofline TG/PP) after the time already spent (WORKDIR/.e2e_start, written by
 #      port.sh) and a reserve for the final gates + report (measured from this run's gates)
-#   6. Loom baseline: perf.py (short, --long) and c4_steady -> the start rows of targets.jsonl
+#   5. Loom baseline: perf.py (short, --long) and c4_steady -> the start rows of targets.jsonl
 # usage: [LOOM_ROOT=~/loom] [SEARCH_ROOT=$HOME] [E2E_BUDGET_MIN=60] [BUDGET_H=h] qualify.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
-#   BUDGET_H overrides the computed optimization budget (the user gave a time). The llama-server is
-#   stopped at the end (KEEP_LLAMA=1 keeps it; its URL is printed).
+#   BUDGET_H overrides the computed optimization budget (the user gave a time).
 # Prints QUALIFY_RESULT {...}: gates verdict, baseline build, the roofline table, budget minutes.
 set -u
 . "$(dirname "$0")/_lib.sh"; R=$S/../../loom-roofline
 export LOOM_NO_AUDIT=1 LLAMA_CACHE=$bench/llama_cache
 cd "$bench"
+loom_down   # one model at a time: the picker and the llama.cpp baseline run with Loom stopped
+trap '"$S/llamacpp_server.sh" --stop "$lport"; loom_up' EXIT   # whatever happens, Loom serves again at the end
 
-step "1/6 pick the llama.cpp ROCm baseline build"
+step "1/5 pick the llama.cpp ROCm baseline build"
 if [ ! -s llamacpp_pick.json ]; then
   # The latest lemonade-sdk/llamacpp-rocm release always competes (pre-approved download, ~25 s):
   # new architectures need recent builds (no installed build knew `flint`).
@@ -34,6 +36,7 @@ if [ -z "$LLAMACPP_DIR" ]; then
   echo "NO_LLAMACPP: no installed llama.cpp ROCm build runs this model (reasons above)."
   echo "  Even the latest lemonade-sdk/llamacpp-rocm release doesn't know this architecture: continue"
   echo "  Loom-only; correctness is then NOT verified against a reference: say so in the report."
+  loom_up || exit 1
   NO_LLAMA=1 LEVEL=quick "$S/gates.sh" "$pkg" "$url" "$gguf" "$bench"
   budget=${BUDGET_H:-0.5}
   "$T" "$R/roofline.py" "$gguf" --cfg "$pkg/llm_config.json" --out roofline.json --budget-h "$budget" --reserve-min 0 | tee roofline.txt
@@ -44,26 +47,22 @@ fi
 export LLAMACPP_DIR
 echo "baseline build: $LLAMACPP_DIR"
 
-step "2/6 one shared llama-server (4 slots, unified KV)"
-kv=$("$T" -c "print(min($ctx, 65536) + 1024)")
+step "2/5 llama.cpp baseline (Loom stopped)"
 L=http://127.0.0.1:$lport
-"$S/llamacpp_server.sh" "$gguf" "$lport" 4 "$kv" unified || exit 1
-stop_llama() { [ "${KEEP_LLAMA:-0}" = 1 ] || "$S/llamacpp_server.sh" --stop "$lport"; }
-trap stop_llama EXIT
-
-step "3/6 gates (LEVEL=quick)"
-gates_rc=0
-LEVEL=quick LLAMA_URL=$L "$S/gates.sh" "$pkg" "$url" "$gguf" "$bench" || { gates_rc=1
-  echo "WARNING: a gate failed (gates.json, gates_*.log). Measuring anyway so the budget and targets exist;"
-  echo "         fix it (or document a proven near-tie) before finalize: a FAIL there fails the audit."; }
-
-step "4/6 llama.cpp baseline"
+"$S/llamacpp_server.sh" "$gguf" "$lport" 4 "$(( (ctx < 34000 ? ctx : 34000) + 1024 ))" unified || exit 1
 "$T" "$S/perf.py" "$L" llama-rocm --kind llama --log perf_log.jsonl | tail -1
 "$T" "$S/perf.py" "$L" llama-rocm --kind llama --long --log perf_log.jsonl | tail -1
 "$T" "$S/c4_steady.py" "$L" 4 --label llama-rocm --log perf_log.jsonl | tail -1
-stop_llama
+"$S/llamacpp_server.sh" --stop "$lport"
+loom_up || exit 1
 
-step "5/6 roofline + targets + budget"
+step "3/5 gates (LEVEL=quick)"
+gates_rc=0
+LEVEL=quick "$S/gates.sh" "$pkg" "$url" "$gguf" "$bench" "$lport" || { gates_rc=1
+  echo "WARNING: a gate failed (gates.json, gates_*.log). Measuring anyway so the budget and targets exist;"
+  echo "         fix it (or document a proven near-tie) before finalize: a FAIL there fails the audit."; }
+
+step "4/5 roofline + targets + budget"
 [ -z "${E2E_BUDGET_MIN:-}" ] && export MODEL_BUDGET_MIN=$("$T" "$R/e2e_budget.py" "$gguf" --cfg "$pkg/llm_config.json" --context "$ctx" --json | "$T" -c "import json,sys;print(json.load(sys.stdin)['budget_min'])")
 "$T" "$R/e2e_budget.py" "$gguf" --cfg "$pkg/llm_config.json" --context "$ctx"
 budget=${BUDGET_H:-$("$T" - "$bench" <<'EOF'
@@ -89,7 +88,7 @@ longctx=1000,2000,16000; [ "$ctx" -ge 34000 ] && longctx=1000,2000,16000,32000
 "$T" "$R/roofline.py" "$gguf" --cfg "$pkg/llm_config.json" --baseline perf_log.jsonl --ctx $longctx \
   --out roofline.json --budget-h "$budget" --reserve-min 0 | tee roofline.txt
 
-step "6/6 Loom baseline"
+step "5/5 Loom baseline"
 "$T" "$S/perf.py" "$url" loom-baseline --model "$model" --log perf_log.jsonl | grep -v "^\[campaign\]  " | tail -12
 "$T" "$S/perf.py" "$url" loom-baseline --model "$model" --long --log perf_log.jsonl | grep "^{" | tail -1
 "$T" "$S/c4_steady.py" "$url" 4 --model "$model" --label loom-baseline --log perf_log.jsonl | grep -v "^\[campaign\]  " | tail -3
