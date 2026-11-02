@@ -82,7 +82,7 @@ for g in json.load(open(a.golden)):
     ch = r["choices"][0]
     text = pkg.raw_from_chat(ch["message"], ch["finish_reason"] == "stop")
     got = pkg.ids(text)
-    n, gap = match(got, g)
+    n, gap, near = match(got, g)
     # llama.cpp can emit a non-canonical split (e.g. '[' 'A' where the HF tokenizer gives '[A');
     # identical text is a match, whatever the token boundaries.
     gold_text = pkg.tok.decode(g["ids"])

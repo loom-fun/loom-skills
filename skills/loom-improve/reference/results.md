@@ -36,6 +36,11 @@ never edit old ones. Wall clock is install -> done; the target is the model's ro
 | 2026-11-02 | Qwen3.5-0.8B | streamline v2 | 25.1 (budget 46) | 0 | **full PASS, AUDIT PASS** | 0.36 | 6/6 | consolidated scripts (_lib.sh, stream(), perf_metrics) |
 | 2026-11-02 | Muse-Glimmer-30B | streamline v2 | 85 (budget 106) | 2 | **full PASS, AUDIT PASS** | 0.41 | 7/7 | +~15 min self-inflicted: A/Bs on the GPU during qualify's gates (qualify 41 vs ~30 min), git add of 5 GB; both now in the skill |
 | 2026-11-02 | flint | streamline v3 | – (interrupted) | 1 | finalize: all PASS but compare (same 1.027 prompt); AUDIT FAIL on it | 1.03 | – | full-context gate served with the then-auto 79 GB budget; **the machine then ran out of RAM** (GTT is system RAM) when the agent loaded a second llama-server by hand: desktop OOM-killed. Auto budget removed; default 56 GiB again |
+| 2026-11-02 | Qwen3.5-0.8B (scripts only) | one model at a time | – | – | **qualify + finalize: full PASS, AUDIT PASS** | 0.36 | 6/6 | empty reference cache, one fill round (32 refs); qualify's llama.cpp decode baseline 204 tok/s (side by side it read ~114) |
+| 2026-11-02 | Bolt-E4B (scripts only) | one model at a time | – | – | **full PASS, AUDIT PASS** | – | – | |
+| 2026-11-02 | LFM2.5-24B-A2B (scripts only) | one model at a time | – | – | **full PASS, AUDIT PASS** | – | – | |
+| 2026-11-02 | Muse-Glimmer-30B (scripts only) | one model at a time | – | – | **full PASS, AUDIT PASS** | 0.41 | – | |
+| 2026-11-02 | flint (scripts only) | one model at a time, near_tie, auto budget | – | – | **full PASS, AUDIT PASS** | 0.56 | – | full-context needle at 260k served (pool 457k, 79 GB alone); the borderline prompt is a near-tie under the new rule; a 2 s sampler never saw Loom and llama.cpp loaded together (2,700+ samples, all five models) |
 
 ## Lessons with numbers (why the skill looks the way it does)
 - The default "1 h of optimization" made every end-to-end job > 1 h by construction: the budget is now
