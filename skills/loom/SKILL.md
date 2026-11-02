@@ -108,8 +108,9 @@ re-read files you already read. Long steps (`qualify.sh`, `finalize.sh`) print a
 timestamp per stage (run them in the background with output to a log, then
 `loom-benchmark/scripts/wait_log.sh LOG '^QUALIFY_RESULT|^FINALIZE '`; never `until ! pgrep -f ...`, which
 matches itself); while one runs, prepare the next step instead of waiting idle: read,
-write generator code, build packages. **Don't use the GPU while they measure** (qualify stages
-4 and 6, finalize stage 1): an A/B run or a second server then corrupts the baselines.
+write generator code, build packages. **Don't use the GPU while they run** (no A/B, perf or second
+server until QUALIFY_RESULT): a Glimmer trial that ran A/Bs during qualify's gates slowed the
+llama.cpp references (qualify 41 instead of ~30 min) and got A/B numbers too noisy to use.
 
 Stop to ask only for what the hard rules require: a gated-license click, or approval of a
 binary from a source other than PyPI and lemonade-sdk/llamacpp-rocm. Avoid both where possible:

@@ -12,6 +12,10 @@ in the sampling logits are starter features driven by `cfg.json`.
 | `starter.patch` | `chat_probe.py`: the ATEM model (`simulate()` verified against the Jinja template, `raw_from_chat()` / `raw_alternatives()` for the benchmark); `make_kernel_tests.py`: mixed-format matvec tests |
 | `cfg.json` | the reviewed config without the tensor table |
 
+Its `make_kernel_tests.py` reads the kernels to test from `KTEST_LLM` (default `pkg/program/llm.loom`):
+for a variant package, set it and the same env switches (`MV_WG4=...`) the variant was built with, or
+the cases silently test the old build (9 of 14 ran in a trial).
+
 The model sometimes writes `<|eom|>` before the `to=user` header: `chat_probe.raw_alternatives()` lists
 both raw texts and `agent_golden.py` compares the closer one. The sampling gate's seed-variety check is
 skipped when the prompt is near-deterministic for the model (it is for this one).
