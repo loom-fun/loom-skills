@@ -1,11 +1,10 @@
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -456,3 +456,204 @@
+@@ -454,5 +454,206 @@
+         json.dump(chat, open(sys.argv[2], "w"), indent=1, ensure_ascii=False)
  
- if __name__ == "__main__":
-     main()
-+
-+
+ 
+-if __name__ == "__main__":
 +# ---- Muse Glimmer ATEM channel format (call_format "atem") -------------------------------
 +# Template: chat_template.jinja of unsloth/Muse-Glimmer-30B. control.loom renders the whole
 +# conversation in chat_begin (a tool result needs the name of the call it answers, found by
@@ -205,6 +204,10 @@
 +            k = next((i for i, (a, b) in enumerate(zip(got, ref)) if a != b), min(len(got), len(ref)))
 +            results.append((name, False, f"differs at byte {k}: loom {got[max(0, k - 40):k + 60]!r} vs template {ref[max(0, k - 40):k + 60]!r}"))
 +    return results
++
++
++if __name__ == "__main__":  # last: main() must see the ATEM overrides above
+     main()
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
 @@ -29,7 +29,10 @@
