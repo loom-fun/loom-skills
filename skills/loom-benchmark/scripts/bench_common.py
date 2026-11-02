@@ -7,6 +7,7 @@ token ids) and Loom (fed chat messages) see byte-identical prompts.
 """
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -47,9 +48,28 @@ PROMPTS = [
 ]
 
 
+DOC_SIZES = (1000, 2000, 8000, 16000, 32000)
+
+
+def perf_metrics(row):
+    """{metric: tok/s} of one perf_log.jsonl row, in roofline.json metric names: decode_tps[_1k/_2k/_32k],
+    c4_steady, and prefill_<document size> (each prefill sample bucketed by its prompt tokens)."""
+    out = {k: row[k] for k in ("decode_tps", "decode_tps_1k", "decode_tps_2k", "decode_tps_32k", "c4_steady")
+           if row.get(k) is not None}
+    for p in row.get("prefill", []) + row.get("prefill_long", []):
+        out[f"prefill_{min(DOC_SIZES, key=lambda x: abs(x - p['prompt_tokens']))}"] = p["prefill_tps"]
+    return out
+
+
+# The smaller documents are byte-exact prefixes of the two stored ones (prompts and reference-cache keys unchanged).
+DOC_PREFIX = {1000: (2000, 4688), 8000: (32000, 36510), 16000: (32000, 73839)}
+
+
 def doc(n):
     """Real-text document of ~n tokens (Loom docs markdown): 1000 2000 8000 16000 32000."""
-    return open(os.path.join(DATA, f"doc_{n}.txt"), encoding="utf-8").read()
+    base, size = DOC_PREFIX.get(n, (n, None))
+    data = open(os.path.join(DATA, f"doc_{base}.txt"), "rb").read()
+    return (data if size is None else data[:size]).decode("utf-8")
 
 
 class Package:
@@ -120,8 +140,10 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
     never on the Loom build, so every gate run after the first reuses it: re-running the gates
     on an optimized build costs Loom time only. Cache: $LLAMA_CACHE or ./llama_cache (bench/).
     `salt` separates deliberate re-recordings (golden2: llama.cpp is not run-to-run deterministic).
-    On a miss, when nothing answers at `url` and $LLAMA_START is set (gates.sh sets it), that
-    command is run once to start llama-server (lazy start: a fully cached gate run never loads it).
+    On a miss with $LLAMA_DEFER set (gates.sh: one model at a time), the request is appended to that
+    file and a placeholder without tokens is returned; llama_fill.py answers the pending requests with
+    only llama.cpp loaded, and the gate re-runs from the cache. Otherwise, when nothing answers at
+    `url` and $LLAMA_START is set, that command is run once to start llama-server.
     """
     gguf = pkg.cfg.get("gguf") if pkg is not None else os.environ.get("LLAMA_GGUF")
     if gguf not in _FP:
@@ -135,6 +157,12 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
             return json.load(open(path))
         except ValueError:
             pass
+    defer = os.environ.get("LLAMA_DEFER")
+    if defer:
+        with open(defer, "a") as f:
+            f.write(json.dumps({"key": key, "gguf": gguf, "body": body, "salt": salt}) + "\n")
+        return {"_suspect": "deferred: answered by llama_fill.py, then the gate re-runs", "_pending": True,
+                "content": "", "completion_probabilities": []}
     ensure_llama(url)
     for attempt in range(2):
         r = requests.post(url + "/completion", json=body, timeout=timeout).json()
@@ -156,6 +184,41 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
     return r
 
 
+# Every llama.cpp reference is greedy with the samplers forced off: some GGUFs set penalty_repeat
+# (LFM2.5: 1.05), which llama.cpp applies even at temperature 0, while Loom decodes greedily.
+GREEDY = {"temperature": 0, "cache_prompt": False, "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}
+
+
+def llama_greedy(url, ids, n_predict, pkg, salt="", n_probs=5):
+    """Greedy llama.cpp continuation of prompt ids -> (response, generated ids, aligned top lists).
+    completion_probabilities omits byte-fallback tokens (emoji, partial UTF-8), so the ids come from
+    `tokens` and the top-n lists are trusted only while they line up with them."""
+    r = llama_completion(url, dict(GREEDY, prompt=ids, n_predict=n_predict, n_probs=n_probs, return_tokens=True), pkg, salt)
+    cp = r.get("completion_probabilities", [])
+    gen = r.get("tokens") or [x["id"] for x in cp]
+    k = next((i for i, x in enumerate(cp) if i >= len(gen) or x["id"] != gen[i]), len(cp))
+    return r, gen, cp[:k]
+
+
+def near_tie(top, gold_id, loom_id, max_gap=1.0):
+    """Is Loom's token at a divergence a near-tie of llama.cpp's greedy token? top: {id: logprob} from
+    llama.cpp at that position. Yes when the log-prob gap is <= max_gap, or when llama.cpp itself is
+    unsure there: Loom picked its second choice and its first has probability < 0.5 (flint: p 0.38 vs
+    0.13, gap 1.03, while llama.cpp's own re-recording of the same prompt sat at gap 1.05). A token
+    llama.cpp is confident against, or ranks lower, is a bug."""
+    if gold_id not in top or loom_id not in top:
+        return False
+    if top[gold_id] - top[loom_id] <= max_gap:
+        return True
+    ranked = sorted(top, key=top.get, reverse=True)
+    return ranked[:2] == [gold_id, loom_id] and math.exp(top[gold_id]) < 0.5
+
+
+def top_logprobs(tops, k):
+    """{id: logprob} at generated position k, or {} past the aligned lists (a byte-split token)."""
+    return {t["id"]: t["logprob"] for t in tops[k]["top_logprobs"]} if k < len(tops) else {}
+
+
 def ensure_llama(url):
     try:
         if requests.get(url + "/health", timeout=3).ok:
@@ -171,18 +234,24 @@ def ensure_llama(url):
         raise SystemExit(f"could not start llama-server: {cmd}")
 
 
-def stream(url, model, messages, max_tokens, extra=None):
-    """Streams one chat completion; returns client-side TTFT, decode tok/s and usage."""
+def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=None):
+    """Streams one chat completion (greedy unless `extra` says otherwise). Returns client-side TTFT,
+    decode tok/s, usage, the text (reasoning + content), the finish reason and the HTTP status;
+    on_token(t) is called with time.perf_counter() at every streamed token."""
     t0 = time.perf_counter()
-    first = None
+    first = finish = None
     n = pt = 0
+    text = ""
     body = {"messages": messages, "max_tokens": max_tokens, "stream": True, "temperature": 0,
             "stream_options": {"include_usage": True}}
     if model:
         body["model"] = model
     body.update(extra or {})
-    with requests.post(url + "/v1/chat/completions", json=body, stream=True,
+    with requests.post(url + "/v1/chat/completions", json=body, stream=True, timeout=timeout,
                        headers={"Content-Type": "application/json"}) as r:
+        if r.status_code != 200:
+            return dict(status=r.status_code, error=r.text[:300], ttft=None, total=time.perf_counter() - t0,
+                        tokens=0, prompt_tokens=0, decode_tps=None, text="", finish=None)
         for line in r.iter_lines():
             if not line.startswith(b"data: {"):
                 continue
@@ -192,8 +261,14 @@ def stream(url, model, messages, max_tokens, extra=None):
                 pt = d["usage"]["prompt_tokens"]
             for ch in d.get("choices", []):
                 dl = ch.get("delta", {})
-                if (dl.get("content") or dl.get("reasoning_content")) and first is None:
-                    first = time.perf_counter() - t0
+                piece = (dl.get("reasoning_content") or "") + (dl.get("content") or "")
+                if piece:
+                    now = time.perf_counter()
+                    first = now - t0 if first is None else first
+                    if on_token:
+                        on_token(now)
+                    text += piece
+                finish = ch.get("finish_reason") or finish
     total = time.perf_counter() - t0
-    return dict(ttft=first, total=total, tokens=n, prompt_tokens=pt,
+    return dict(status=200, ttft=first, total=total, tokens=n, prompt_tokens=pt, text=text, finish=finish,
                 decode_tps=(n - 1) / (total - first) if n > 1 and first else None)

@@ -16,31 +16,26 @@
 # Writes BENCH_DIR/gates.json {"verdict", "level", "pkg_hash", "seconds", "gates": {name: {"pass", "log", "seconds"}}}
 # and BENCH_DIR/gates_*.log. Exit 1 when any gate fails. Gates run sequentially (a shared GPU).
 set -u
-pkg=$(cd "$1" && pwd); url=$2; bench=$(mkdir -p "$4" && cd "$4" && pwd); lport=${5:-8130}
-gguf=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")   # absolute: we cd into BENCH_DIR below
-S=$(cd "$(dirname "$0")" && pwd); root=${LOOM_ROOT:-$HOME/loom}
-bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts; T=$bin/python
+. "$(dirname "$0")/_lib.sh"
 level=${LEVEL:-full}; [ "${QUICK:-0}" = 1 ] && level=quick
 case $level in fast|quick|full) ;; *) echo "LEVEL must be fast, quick or full"; exit 2;; esac
-export LOOM_NO_AUDIT=1 PYTHONDONTWRITEBYTECODE=1 LLAMACPP_STATE=${LLAMACPP_STATE:-$bench/llamacpp-state} LLAMA_CACHE=$bench/llama_cache
-ctx=$("$T" -c "import json;print(next(iter(json.load(open('$pkg/model.json'))['presets'].values()))['execution']['context_capacity'])")
-model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
+export LOOM_NO_AUDIT=1 LLAMA_CACHE=$bench/llama_cache
 # Long goldens that fit the context; the llama.cpp slot covers them (and needle sizes up to 64k).
 long=$("$T" -c "print(','.join(str(n) for n in (1000, 2000, 16000, 32000) if n + 2000 <= $ctx))")
 slot=$("$T" -c "print(min($ctx, 65536) + 1024)")
 cd "$bench"
-started_llama=0
+defer=0
 if [ "${NO_LLAMA:-0}" = 1 ]; then
   L=""   # Loom-only: no golden/compare; agent, sampling and needle run their reference-free checks
 elif [ -n "${LLAMA_URL:-}" ]; then
-  L=$LLAMA_URL
+  L=$LLAMA_URL   # an already running llama-server (both models loaded: only if memory allows)
 else
   L=http://127.0.0.1:$lport
   : "${LLAMACPP_DIR:?set LLAMACPP_DIR to the llama.cpp ROCm build (or LLAMA_URL to a running llama-server)}"
   export LLAMA_START="'$S/llamacpp_server.sh' '$gguf' $lport 1 $slot"
-  started_llama=1
+  defer=1   # one model at a time: references missing from the cache are filled with Loom stopped
 fi
-declare -A result secs
+declare -A result secs done
 order=()
 # A gate that already PASSED on this exact build (same model.json + program/*.loom) is not re-run:
 # the inputs are identical (llama.cpp references are cached too). FORCE=1 re-runs everything.
@@ -55,46 +50,68 @@ ok = any(r.get("pkg_hash") == h and r.get("gates", {}).get(name, {}).get("pass")
 sys.exit(0 if ok else 1)
 PY
 }
-run() {  # run NAME CMD...
+pending=()
+run() {  # run NAME CMD...: a gate whose llama.cpp references were all cached gets its verdict;
+         # one with deferred references is pending and runs again after the fill
   local name=$1; shift; local t0=$(date +%s)
+  [ -n "${done[$name]:-}" ] && return
   if passed_before "$name"; then
     echo "== $name: PASSED earlier on this exact build (pkg $pkg_hash), not re-run"
-    result[$name]=0; secs[$name]=0; order+=("$name"); return
+    result[$name]=0; secs[$name]=0; order+=("$name"); done[$name]=1; return
   fi
-  echo "== $name"; "$@" > "gates_$name.log" 2>&1; local rc=$?
-  tail -4 "gates_$name.log"; result[$name]=$rc; secs[$name]=$(( $(date +%s) - t0 )); order+=("$name")
+  echo "== $name"; rm -f "pending_$name.jsonl"
+  if [ $defer = 1 ]; then LLAMA_DEFER=$bench/pending_$name.jsonl "$@" > "gates_$name.log" 2>&1; else "$@" > "gates_$name.log" 2>&1; fi
+  local rc=$?
+  secs[$name]=$(( ${secs[$name]:-0} + $(date +%s) - t0 ))
+  if [ -s "pending_$name.jsonl" ]; then
+    echo "   $(wc -l < "pending_$name.jsonl") llama.cpp references pending"; pending+=("$name"); return
+  fi
+  tail -4 "gates_$name.log"; result[$name]=$rc; order+=("$name"); done[$name]=1
 }
 t_start=$(date +%s)
 LL=(); [ -n "$L" ] && LL=(--llama "$L")
-if [ -n "$L" ]; then
-run golden "$T" "$S/golden.py" "$pkg" golden.json --llama "$L" --long "$long"
-# A prompt that would fail against the golden is re-recorded once by compare.py (llama.cpp's own
-# run-to-run near-tie flips), instead of a full second recording.
-run compare "$T" "$S/compare.py" "$pkg" golden.json --llama "$L" --url "$url"
-grep -q '"verdict": "PASS"' gates_compare.log || result[compare]=1
-fi
-run consistency "$T" "$S/consistency.py" "$url" --model "$model" --pkg "$pkg" "${LL[@]}"
-grep -q "^PASS$" gates_consistency.log || result[consistency]=1
-if [ "$level" != fast ]; then
-  run agent "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --out agent_golden.json
-  run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" "${LL[@]}"
-  # Needle: compared with llama.cpp (near-tie rule) up to the llama.cpp slot; the full-context
-  # probe (LEVEL=full) proves the size is served.
-  cmp=$(( ctx / 2 < 61440 ? ctx / 2 : 61440 ))
-  needle_args=("${LL[@]}" --llama-max $(( slot - 1024 )) --out needle.json)
-  if [ "$level" = quick ]; then
-    needle_args+=(--sizes $cmp --probes 1)
-    run needle "$T" "$S/needle.py" "$pkg" "$url" "${needle_args[@]}"
-  else
-    # The compared half-context probe passed on this build already (qualify): only the full-context probe is new.
-    needle_args=("${LL[@]}" --llama-max $(( slot - 1024 )) --out needle_full.json)
-    if passed_before needle; then needle_args+=(--sizes $(( ctx - 2048 )) --probes 1); else needle_args+=(--sizes $cmp $(( ctx - 2048 )) --probes 1 --top-probes 1); fi
-    run needle_full "$T" "$S/needle.py" "$pkg" "$url" "${needle_args[@]}"
+cmp=$(( ctx / 2 < 61440 ? ctx / 2 : 61440 ))
+all_gates() {
+  if [ -n "$L" ]; then
+    run golden "$T" "$S/golden.py" "$pkg" golden.json --llama "$L" --long "$long"
+    # A prompt that would fail against the golden is re-recorded once by compare.py (llama.cpp's own
+    # run-to-run near-tie flips), instead of a full second recording. Needs the complete golden.
+    if [ -n "${done[golden]:-}" ]; then
+      run compare "$T" "$S/compare.py" "$pkg" golden.json --llama "$L" --url "$url"
+      [ -n "${done[compare]:-}" ] && { grep -q '"verdict": "PASS"' gates_compare.log || result[compare]=1; }
+    fi
   fi
-fi
-if [ $started_llama = 1 ] && [ -f "$LLAMACPP_STATE/llamacpp-$lport.pid" ]; then
-  kill "$(cat "$LLAMACPP_STATE/llamacpp-$lport.pid")" 2>/dev/null; rm -f "$LLAMACPP_STATE/llamacpp-$lport.pid"
-fi
+  run consistency "$T" "$S/consistency.py" "$url" --model "$model" --pkg "$pkg" "${LL[@]}"
+  [ -n "${done[consistency]:-}" ] && { grep -q "^PASS$" gates_consistency.log || result[consistency]=1; }
+  if [ "$level" != fast ]; then
+    run agent "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --out agent_golden.json
+    run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" "${LL[@]}"
+    # Needle: compared with llama.cpp (near-tie rule) up to the llama.cpp slot; the full-context
+    # probe (LEVEL=full) proves the size is served.
+    if [ "$level" = quick ]; then
+      run needle "$T" "$S/needle.py" "$pkg" "$url" "${LL[@]}" --llama-max $(( slot - 1024 )) --out needle.json --sizes $cmp --probes 1
+    else
+      # The compared half-context probe passed on this build already (qualify): only the full-context probe is new.
+      local sizes=(--sizes $cmp $(( ctx - 2048 )) --probes 1 --top-probes 1)
+      passed_before needle && sizes=(--sizes $(( ctx - 2048 )) --probes 1)
+      run needle_full "$T" "$S/needle.py" "$pkg" "$url" "${LL[@]}" --llama-max $(( slot - 1024 )) --out needle_full.json "${sizes[@]}"
+    fi
+  fi
+}
+for round in 1 2 3 4 5; do
+  pending=()
+  all_gates
+  [ ${#pending[@]} = 0 ] && break
+  # Re-recordings only become known once the first references exist, so this converges in a few rounds.
+  echo "== round $round: filling llama.cpp references for ${pending[*]} with Loom stopped ($(date +%T))"
+  loom_down
+  files=(); for p in "${pending[@]}"; do files+=("pending_$p.jsonl"); done
+  "$T" "$S/llama_fill.py" "$L" "${files[@]}" > llama_fill.log 2>&1; tail -1 llama_fill.log
+  rm -f "${files[@]}"
+  "$S/llamacpp_server.sh" --stop "$lport"
+  loom_up || { echo "FAIL: could not restart Loom after the llama.cpp fill"; exit 1; }
+done
+for p in "${pending[@]}"; do result[$p]=1; order+=("$p"); echo "== $p: references still pending after 5 rounds (FAIL)"; done
 args=()
 for n in "${order[@]}"; do args+=("$n" "${result[$n]}" "${secs[$n]}"); done
 "$T" - "$level" "$pkg_hash" $(( $(date +%s) - t_start )) "${args[@]}" <<'EOF'

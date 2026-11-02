@@ -10,7 +10,7 @@ gguf=$1; port=${2:-8139}; root=${3:-$HOME}
 here=$(cd "$(dirname "$0")" && pwd)
 root_loom=${LOOM_ROOT:-$HOME/loom}
 py=${PY:-$root_loom/.tools/bin/python}; [ -x "$py" ] || py=$root_loom/.tools/Scripts/python   # Windows venvs use Scripts/
-doc=$here/../data/doc_1000.txt
+doc=$here/../data/doc_2000.txt   # its first 4688 bytes are bench_common.doc(1000)
 # HIP builds: libggml-hip.so (Linux) or ggml-hip.dll (Windows) next to llama-server[.exe].
 IFS=: read -r -a roots <<< "$root"   # several roots: colon-separated
 mapfile -t dirs < <(find "${roots[@]}" -maxdepth 7 \( -name llama-server -o -name llama-server.exe \) -type f 2>/dev/null \
@@ -27,7 +27,7 @@ for d in "${dirs[@]}"; do
   fi
   line=$("$py" - "$port" "$doc" <<'E'
 import json, sys, requests
-port, doc = sys.argv[1], open(sys.argv[2], encoding="utf-8").read()
+port, doc = sys.argv[1], open(sys.argv[2], "rb").read()[:4688].decode("utf-8")
 u = f"http://127.0.0.1:{port}/completion"
 requests.post(u, json={"prompt": "hi", "n_predict": 8})                  # warm-up
 d = requests.post(u, json={"prompt": "Write an essay about rivers.", "n_predict": 200,
@@ -37,7 +37,7 @@ p = requests.post(u, json={"prompt": "nonce 7\n" + doc + "\nSummarize.", "n_pred
 print(f"{d['predicted_per_second']:.1f} {p['prompt_per_second']:.0f}")
 E
 )
-  kill "$(cat ${LLAMACPP_STATE:-/tmp}/llamacpp-$port.pid)" 2>/dev/null; sleep 2
+  "$here/llamacpp_server.sh" --stop "$port"; sleep 2
   echo "  decode ${line% *} tok/s  prefill-1k ${line#* } tok/s  $d"
   res+=("$line $d")
 done

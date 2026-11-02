@@ -6,7 +6,7 @@ description: Correctness and performance methodology for Loom models vs llama.cp
 # Benchmark and verify Loom models
 
 Scripts are in `${CLAUDE_SKILL_DIR}/scripts/`; run them with the tools
-venv (`~/loom/.tools/bin/python`). Workload documents are in `data/doc_{1000,2000,8000,16000,32000}.txt`.
+venv (`~/loom/.tools/bin/python`). Workload documents: `bench_common.doc(n)` for n in 1000, 2000, 8000, 16000, 32000 (stored as `data/doc_2000.txt` and `doc_32000.txt`; the others are byte prefixes).
 They are real text (Loom's own markdown docs) and their sizes are approximate token counts.
 Scripts that take `PACKAGE` read `llm_config.json`, `tokenizer.json` and the model
 id from a package built by `loom-port-llm/starter/build.py`.
@@ -22,10 +22,8 @@ $S/pick_llamacpp.sh MODEL.gguf 8139 "$HOME"   # every llama-server with libggml-
 ```
 The baseline is the top-ranked build. Don't choose by version string: the lemonade
 nightly prints `version: 1`, and the tag is usually only in the directory name.
-Builds differ a lot on the same GGUF:
-- LFM2.5-24B prefill: b1274 1,062 tok/s vs b1355 2,140 tok/s;
-- Bolt-E4B with 4 streams: b1274 125 tok/s vs b1355 157 tok/s.
-- A new architecture can need the newest release: no installed build knew `flint`.
+Builds differ up to 2× on the same GGUF (a stale build once inflated a margin from +25 % to 2.5×),
+and a new architecture can need the newest release (no installed build knew `flint`).
 
 A weaker baseline inflates every margin you report. Report the chosen build's path and tag.
 lemonade-sdk/llamacpp-rocm releases are pre-approved: download them without asking. Check that
@@ -36,7 +34,7 @@ Halo). Then:
 ```bash
 LLAMACPP_DIR=<dir> $S/llamacpp_server.sh MODEL.gguf 8130 1 34000   # goldens / long context (1 slot, 34k)
 LLAMACPP_DIR=<dir> $S/llamacpp_server.sh MODEL.gguf 8130 4 8192    # perf incl. 4 streams
-kill $(cat ${LLAMACPP_STATE:-/tmp}/llamacpp-8130.pid)
+$S/llamacpp_server.sh --stop 8130
 ```
 Always use the **same GGUF file** as the Loom package. Never run llama.cpp and a
 big Loom model at the same time if together they exceed GPU memory.
@@ -44,7 +42,7 @@ big Loom model at the same time if together they exceed GPU memory.
 ## 1. Correctness gates (before any performance claim)
 
 **End-to-end jobs use two wrappers** (see the `loom` skill): `qualify.sh` (after the port: llama.cpp
-pick, one shared llama-server, `LEVEL=quick` gates, llama.cpp + Loom baselines, roofline and budget)
+pick, llama.cpp + Loom baselines, `LEVEL=quick` gates, roofline and budget)
 and `finalize.sh` (on the final build: final perf, `LEVEL=full` gates, audit, `report.html`).
 
 **One command for the gates:** `[LEVEL=fast|quick|full] gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT]`
@@ -57,9 +55,15 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
 | `quick` | after the port (`qualify.sh` runs it) | fast + agent tool loop, sampling, needle at half the context (≤ 60k) vs llama.cpp | 5–15 min the first time |
 | `full` | once, on the final build (`finalize.sh` runs it) | quick + one Loom-only probe at the full context | + one full-context prefill |
 
+- **One model at a time** (GPU memory is system RAM): the gates run with only Loom loaded; every
+  llama.cpp reference missing from the cache is deferred, then gates.sh stops Loom (remembering its
+  command line), lets `llama_fill.py` answer them with only llama.cpp loaded, restarts Loom and re-runs
+  from the cache (a few rounds: re-recordings appear only once the first references exist). qualify.sh
+  and finalize.sh measure llama.cpp with Loom stopped too. `LLAMA_URL` (a running llama-server) skips
+  this and keeps both loaded: only when memory clearly allows.
 - **The llama.cpp side is cached** (`BENCH_DIR/llama_cache`, keyed on the GGUF, the build and the
-  request): it never depends on the Loom build, so only the first run pays for it, and llama-server
-  starts lazily on the first cache miss. Re-running the gates on an optimized build costs Loom time only.
+  request): it never depends on the Loom build, so only the first run pays for it. Re-running the
+  gates on an optimized build costs Loom time only.
 - `fast` is enough inside the loop because the kernel paths an optimization touches are what the
   goldens exercise (short prompts, 1k–32k documents: prefill, KV paging, attention) and consistency
   covers mixed batches. Run `quick` instead when you changed the chat glue (`control.loom`), the
@@ -89,7 +93,9 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   logp(golden) − logp(loom token) at that point.
 - **Interpretation.** Greedy decoding through different summation orders
   *always* diverges eventually at near-ties.
-  - **PASS**: every divergence has gap ≤ 1.0 and the token is in the golden top-5.
+  - **PASS**: every divergence is a near-tie (`bench_common.near_tie`): gap ≤ 1.0 with the token in the
+    golden top-5, or Loom picked llama.cpp's second choice where llama.cpp's first has p < 0.5
+    (llama.cpp itself is unsure there: on flint its own re-recording moved by gap 1.05).
     Typical healthy ports have max gap 0.1–0.6, and full matches on a quarter or
     more of the prompts.
   - **FAIL**: a large gap, or a token outside the top-5. That is a real bug, even
@@ -125,10 +131,9 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     prompt + completion (history reuse works, including recurrent state).
   - `calls_ok`: tool calls name a declared function with JSON arguments.
   - golden: Loom's turn vs llama.cpp `/completion` on the same prompt ids; a
-    divergence must be a near-tie (gap ≤ 1.0 with the token in the top-5, the compare.py rule). A turn that
-  would fail is re-recorded on llama.cpp (up to twice) and scored against the recording Loom follows
-  further: llama.cpp ROCm isn't run-to-run deterministic on some MoE models (flint: three identical
-  temperature-0 requests gave two different greedy texts).
+    divergence must be a near-tie (the compare rule). A turn that would fail is re-recorded on
+    llama.cpp (up to twice) and scored against the recording Loom follows further (llama.cpp's
+    run-to-run nondeterminism, above).
   "The model ended inside its reasoning" notes are a greedy-decoding behavior of
   small thinking models, confirmed when llama.cpp's own distribution at that
   point prefers EOS; not a Loom bug by itself.
@@ -142,7 +147,7 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   needle on a near-tie first token (Qwen3.5-0.8B at 130k: llama.cpp's top two first tokens
   0.013 nats apart), so a handful of probes says nothing statistically. Up to `--llama-max`
   each probe is compared with llama.cpp on the same ids and passes when Loom found the
-  needle, llama.cpp missed it too, or the first divergence is a near-tie (gap ≤ 1 nat, in
+  needle, llama.cpp missed it too, or the first divergence is a near-tie (the compare rule, in
   the top-5: the compare.py rule). The full-context probe (Loom only; llama.cpp would take
   many minutes) proves the size is served. Found counts are reported as information.
 
@@ -161,7 +166,6 @@ $T $S/c4_steady.py http://127.0.0.1:8160 4 --model <id>;  $T $S/c4_steady.py htt
 | prefill[] | 1k and 2k-token documents with max_tokens=4. prompt_tokens / TTFT, the median of 5 runs (`--repeats`); single runs varied 1.5–2.9k tok/s on one build. |
 | decode_tps_2k / _32k | Decode with that much context in the KV cache. |
 | prefill_long[] | 8k / 16k / 32k documents. |
-| c4_agg_tps | `--c4` only: 8 requests through 4 threads, total tokens / wall time (includes ramp). |
 | c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding. Use this for "N requests at once". |
 
 Rules:
@@ -227,16 +231,7 @@ source for the report's numbers.
   headline table, gates, setup, decisions, audit, timeline. Write only the notes yourself (what
   was optimized, what was skipped and why, losses), rerun `report.py --notes`, and publish
   `report.html` as is. Extend the generated page only if the user asked for more.
-- **Format** (for a hand-extended report). A single-page HTML artifact (Artifact tool;
-  load the artifact-design skill first). The sections:
-  1. methodology;
-  2. functional;
-  3. pressure: concurrency, long context and memory limits;
-  4. quality;
-  5. performance;
-  6. an appendix of what was skipped and why.
-
-  Diagrams should be drawn from the user's point of view, with readable font
-  sizes (≥ 14 px). Generate the page from the results JSON with a small script, so no number is typed by hand.
+- A hand-extended report (only on request): load the artifact-design skill first, and generate it from
+  the results JSON with a small script, so no number is typed by hand.
 - Keep raw logs (`perf_log.jsonl`, `compare.json`, `golden.json`) next to the
   report, so every number can be traced.

@@ -169,57 +169,12 @@ jobs:
       - name: Get the latest llama.cpp ROCm build
         env:
           GH_TOKEN: ${{ github.token }}
-          LLAMACPP_REPO: lemonade-sdk/llamacpp-rocm
-          LLAMACPP_ASSET: ubuntu-rocm-gfx1151-x64.zip
         run: |
           set -euo pipefail
-          python3 - <<'EOF'
-          import json, os, shutil, tempfile, urllib.request, zipfile
-
-          repo, suffix = os.environ["LLAMACPP_REPO"], os.environ["LLAMACPP_ASSET"]
-          auth = {"Authorization": f"Bearer {os.environ['GH_TOKEN']}"}
-          req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases/latest", headers=auth)
-          rel = json.load(urllib.request.urlopen(req))
-          tag = rel["tag_name"]
-          asset = next(a for a in rel["assets"] if a["name"].endswith(suffix))
-          root = os.path.expanduser("~/llamacpp-rocm")
-          dest = os.path.join(root, tag)
-          if os.path.isdir(dest):
-              msg = f"llama.cpp ROCm {tag}: already available locally ({dest}), not downloaded"
-          else:
-              os.makedirs(root, exist_ok=True)
-              tmp = tempfile.mkdtemp(dir=root, prefix=f".{tag}-")
-              try:
-                  zpath = os.path.join(tmp, asset["name"])
-                  urllib.request.urlretrieve(asset["browser_download_url"], zpath)
-                  out = os.path.join(tmp, "build")
-                  with zipfile.ZipFile(zpath) as z:
-                      z.extractall(out)
-                  # zipfile drops the executable bit.
-                  for d, _, files in os.walk(out):
-                      for f in files:
-                          if f.startswith("llama-") and "." not in f:
-                              os.chmod(os.path.join(d, f), 0o755)
-                  os.rename(out, dest)
-              finally:
-                  shutil.rmtree(tmp, ignore_errors=True)
-              msg = f"llama.cpp ROCm {tag}: downloaded {asset['name']} to {dest}"
-          server = next((os.path.join(d, "llama-server") for d, _, files in os.walk(dest) if "llama-server" in files), None)
-          if not server:
-              raise SystemExit(f"::error::{asset['name']} has no llama-server")
-          print(msg)
-          with open(os.environ["GITHUB_ENV"], "a") as f:
-              f.write(f"LLAMACPP_LATEST={os.path.dirname(server)}\nLLAMACPP_LATEST_TAG={tag}\n")
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as s:
-              s.write(f"\n- {msg}\n")
-          EOF
-
-      - name: Check that the llama.cpp build sees the GPU
-        run: |
-          set -euo pipefail
-          cd "$LLAMACPP_LATEST"
-          LD_LIBRARY_PATH=$PWD ./llama-server --list-devices 2>&1 | grep ROCm \
-            || echo "::warning::llama.cpp ROCm $LLAMACPP_LATEST_TAG at $LLAMACPP_LATEST lists no ROCm device"
+          dir=$(skills/loom-benchmark/scripts/fetch_llamacpp.sh "$HOME/llamacpp-rocm" latest gfx1151 | tail -1)
+          tag=$(basename "$dir")
+          { echo "LLAMACPP_LATEST=$dir"; echo "LLAMACPP_LATEST_TAG=$tag"; } >> "$GITHUB_ENV"
+          echo "- llama.cpp ROCm $tag in $dir" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Port the model with the Loom skills
         timeout-minutes: 540
@@ -314,10 +269,9 @@ jobs:
           for f in "$WORK"/serve/*.pid; do
             [ -f "$f" ] && "$GITHUB_WORKSPACE/skills/loom-setup/scripts/stop.sh" "$(basename "$f" .pid)" || true
           done
-          for f in $(find /tmp -maxdepth 1 -name 'llamacpp-*.pid' -newer "$WORK/attempt.json" 2>/dev/null); do
-            pid=$(cat "$f")
-            tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q llama-server && kill "$pid" || true
-            rm -f "$f"
+          # llama-servers started by the skills: LLAMACPP_STATE is inside the work dir (gates/qualify/finalize) or /tmp.
+          for f in $( { find "$WORK" -name 'llamacpp-*.pid' 2>/dev/null; find /tmp -maxdepth 1 -name 'llamacpp-*.pid' -newer "$WORK/attempt.json" 2>/dev/null; } ); do
+            port=$(basename "$f" .pid); LLAMACPP_STATE=$(dirname "$f") "$GITHUB_WORKSPACE/skills/loom-benchmark/scripts/llamacpp_server.sh" --stop "${port#llamacpp-}" || true
           done
 
       - name: Delete downloaded models if disk space is low

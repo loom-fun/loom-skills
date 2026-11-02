@@ -14,6 +14,8 @@ real shapes of the model, not toy ones.
 import json, sys, os, numpy as np
 from gguf import GGUFReader
 from gguf.quants import dequantize
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from mv_rows import pick_r  # noqa: E402
 cfg = json.load(open(sys.argv[1])); out = sys.argv[2]; os.makedirs(out, exist_ok=True)
 r = GGUFReader(cfg["gguf"]); T = {t.name: t for t in r.tensors}
 def raw(name): return np.asarray(T[name].data).view(np.int8).reshape(-1)
@@ -63,9 +65,7 @@ for name, K in todo:
         tag = name.replace(".", "_") + f"_t{tg}"
         save(tag + "_w", raw(name)); save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
         kern = f"g_mv_{fmt}_k{K}" + ("_t4" if tg == 4 else "")
-        # adaptive rows per workgroup (same rule as gen_llm.pick_r): test the variant the model launches
-        _tgt = (640 if K >= 8192 else int(os.environ.get("MV_WG1", "4096"))) if (tg == 1 or "MV_WG4" not in os.environ) else int(os.environ["MV_WG4"]); _R = 16
-        while _R > 1 and n // _R < _tgt and n % (_R // 2) == 0: _R //= 2
+        _R = pick_r(n, K, tg)   # the variant the model launches (gen_llm uses the same rule)
         if _R != 16: kern += f"_r{_R}"
         wt = ty(raw(name))
         cases.append(f"""check.case public @mv_{tag} {{

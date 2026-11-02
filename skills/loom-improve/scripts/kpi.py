@@ -87,7 +87,7 @@ def summarize(trial, label, rev):
             card = json.load(open(os.path.join(pkg, "model.json")))
             ctx = next(iter(card["presets"].values()))["execution"]["context_capacity"]
             gguf = os.path.realpath(os.path.join(pkg, "parameter", os.listdir(os.path.join(pkg, "parameter"))[0]))
-            dec, pre = E.speeds(gguf, cfg, [ctx])
+            dec, pre = E.speeds(*E.R.load(gguf), cfg)
             out["budget_min"] = round(E.FIXED_MIN + E.OPT_MIN + sum(E.workload(dec, pre, ctx).values()) / 60)
             out["within_budget"] = out["wall_min"] is not None and out["wall_min"] <= out["budget_min"]
     except Exception as e:  # the budget is informative; never fail the summary on it
@@ -137,8 +137,7 @@ def compare(a, b, noise=0.10, judge_perf=False):
     row("manual_min", a.get("manual_min"), b.get("manual_min"), "info")
     row("friction notes", a.get("friction"), b.get("friction"), "info")
     alias = {"golden1": "golden", "golden2": "golden", "needle_full": "needle"}
-    norm = lambda d: {alias.get(k, k): (v and norm_acc.get(alias.get(k, k), True)) for k, v in d.items()} if d else {}
-    norm_acc = {}
+    norm = lambda d: {alias.get(k, k): v for k, v in d.items()} if d else {}
     ga, gb = norm((a.get("gates") or {}).get("pass", {})), norm((b.get("gates") or {}).get("pass", {}))
     for k in sorted(set(ga) | set(gb)):
         va, vb = ga.get(k), gb.get(k)

@@ -1,0 +1,436 @@
+--- a/gen_llm.py
++++ b/gen_llm.py
+@@ -21,7 +21,7 @@
+ QH, KVH, D = CFG["heads"], CFG["kv_heads"], CFG["head_dim"]
+ FF, V, L = CFG["ffn"], CFG["vocab"], CFG["layers"]
+ G = QH // KVH                             # query heads per KV head (waves per attention workgroup)
+-assert D in (128, 256), "attention kernels support head_dim 128 or 256 (lane l owns dims l, l+32, ...)"
++assert D in (64, 128, 256), "attention kernels support head_dim 64, 128 or 256 (lane l owns dims l, l+32, ...)"
+ DL = D // 32                              # head dims per lane in the attention kernels
+ RD = CFG.get("rope_dims") or D            # rotary dims (partial RoPE rotates the first RD dims)
+ assert RD % 64 == 0 and RD <= D, "rope_dims must be a multiple of 64"
+@@ -34,6 +34,11 @@
+ FUSED_Q = GATE == "fused_q"
+ RECUR = set(CFG.get("recurrent_layers", []))  # gated delta-net layers (hybrid models)
+ GDN = gdn_geometry(CFG) if RECUR else None
++SCONV = set(CFG.get("shortconv_layers", []))   # LFM2 short-conv layers (conv history in recurrent slots)
++NONATT = RECUR | SCONV
++MOE = CFG.get("moe")
++MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) if MOE else set()
++OUT_NORM = CFG.get("output_norm_tensor", "output_norm.weight")
+ FFN_NORM = CFG.get("ffn_norm_tensor", "ffn_norm")
+ POST_NORM = CFG.get("post_norms", False)
+ POST_EPS = CFG.get("post_norm_eps", 1e-8)
+@@ -1784,7 +1789,7 @@
+ 
+ USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
+ USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
+-NVAL = {"%nH": H, "%nFF": FF, "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D}
++NVAL = {"%nH": H, "%nFF": FF, "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D, "%n3H": 3 * H}
+ if GDN:
+     NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
+ ADAPT = os.environ.get("MV_ADAPT", "1") not in ("", "0")
+@@ -1865,6 +1870,54 @@
+     return "".join(T)
+ 
+ 
++USED_MOE = set()     # (fmt, K, N, mode) expert matvec kernels
++MOE_R = int(os.environ.get("MOE_R", "8"))
++
++
++def sconv_layer(i, b, nm, sz, par):
++    """LFM2 short-conv token mixer: h -> in_proj (B|C|X) -> C * conv(B*X) -> o, then o16 for out_proj."""
++    K = CFG["shortconv"]["l_cache"]
++    P = [par("win", "shortconv.in_proj"), par("wout", "shortconv.out_proj"),
++         f'    %conv_{i} = command.parameter %weights, "{b}shortconv.conv.weight" : view<{H * K}xf32>\n']
++    return "".join(P + [
++        "  " + lin(fmt_of(nm("shortconv.in_proj")), "%h", "%s_h", f"%win_{i}", sz("shortconv.in_proj"), "%bcx", "%nH", "%n3H", H) + "\n",
++        f"""  kernel.launch @g_sc_conv[%t](%t, %spans, %layer_{i}, %metadata, %info, %origins, %arena, %bcx, %conv_{i}, %o) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, view<{H * K}xf32>, buffer)
++  kernel.launch @g_sc_commit[%spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %bcx) : [index](index, index, index, buffer, buffer, buffer, buffer)
++  scf.if %gemm {{
++    kernel.launch @g_row_scale_f16[%t](%t, %nH, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
++  }}
++""",
++        "  " + lin(fmt_of(nm("shortconv.out_proj")), "%o", "%s_o", f"%wout_{i}", sz("shortconv.out_proj"), "%y", "%nH", "%nH", H) + "\n"])
++
++
++def moe_layer(i, b, nm):
++    """Routed experts: router -> per-assignment gate/up (swiglu) and down matvecs -> weighted combine into y."""
++    E, KU, FE = MOE["experts"], MOE["used"], MOE["ffn"]
++    fg, fu, fd = fmt_of(b + "ffn_gate_exps.weight"), fmt_of(b + "ffn_up_exps.weight"), fmt_of(b + "ffn_down_exps.weight")
++    assert fg == fu
++    sg, sd = tensor_bytes(b + "ffn_gate_exps.weight"), tensor_bytes(b + "ffn_down_exps.weight")
++    USED_MOE.add((fg, H, FE, "gu")); USED_MOE.add((fd, FE, H, "dn"))
++    R = MOE_R
++    return f"""  %router_{i} = command.parameter %weights, "{b}ffn_gate_inp.weight" : view<{E * H}xf32>
++  %ebias_{i} = command.parameter %weights, "{b}exp_probs_b.bias" : view<{E}xf32>
++  %wge_{i} = command.parameter %weights, "{b}ffn_gate_exps.weight" : view<{sg}xi8>
++  %wue_{i} = command.parameter %weights, "{b}ffn_up_exps.weight" : view<{sg}xi8>
++  %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
++  kernel.launch @g_moe_route[%t](%t, %h, %router_{i}, %ebias_{i}, %ids, %wts) : [index](index, buffer, view<{E * H}xf32>, view<{E}xf32>, buffer, buffer)
++  scf.if %gemm {{
++    kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
++    kernel.launch @g_moe_ggu_{fg}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, %wue_{i}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{sg}xi8>, buffer)
++    kernel.launch @g_row_scale_f16[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16) : [index](index, index, buffer, buffer, buffer)
++    kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>, buffer)
++    kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, %y) : [index](index, index, buffer, buffer, buffer, buffer)
++  }} else {{
++    kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wge_{i}, %wue_{i}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{sg}xi8>, buffer)
++    kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wde_{i}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>, buffer)
++    kernel.launch @g_moe_combine[%t](%t, %ys, %wts, %y) : [index](index, buffer, buffer, buffer)
++  }}
++"""
++
++
+ def model():
+     """Command program: embed, then a statically unrolled layer loop (each
+     layer's tensor formats come from the GGUF), then the argmax head."""
+@@ -1938,7 +1991,8 @@
+   %pml_size = index.scale %t, %pml_bytes : index, offset -> offset
+   %pacc = buffer.alloca<global> align(256) %pacc_size : buffer
+   %pml = buffer.alloca<global> align(256) %pml_size : buffer
+-  %gemm = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c64"} : index
++  %c_gemm_min = index.constant {int(os.environ.get("GEMM_MIN_TOKENS", "64"))} : index
++  %gemm = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c_gemm_min"} : index
+   %single = index.cmp eq, %t, %c1 : index
+   %big = index.cmp uge, %t, %c128 : index
+   %scale_entry = index.constant 8 : offset
+@@ -1970,6 +2024,49 @@
+         L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
+     if not QK_NORM:
+         L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
++    if SCONV:
++        L_.append(f"  %n3H = index.constant {3 * H} : index\n  %bcx_bytes = index.constant {3 * H * 4} : offset\n  %bcx_size = index.scale %t, %bcx_bytes : index, offset -> offset\n"
++                  "  %bcx = buffer.alloca<global> align(256) %bcx_size : buffer\n")
++    if MOE:
++        KU, FE = MOE["used"], MOE["ffn"]
++        L_.append(f"""  %cKU = index.constant {KU} : index
++  %ta = index.mul %t, %cKU : index
++  %nFE = index.constant {FE} : index
++  %ids_bytes = index.constant {KU * 4} : offset
++  %ids_size = index.scale %t, %ids_bytes : index, offset -> offset
++  %ids = buffer.alloca<global> align(256) %ids_size : buffer
++  %wts = buffer.alloca<global> align(256) %ids_size : buffer
++  %act_bytes = index.constant {KU * FE * 4} : offset
++  %act_size = index.scale %t, %act_bytes : index, offset -> offset
++  %act = buffer.alloca<global> align(256) %act_size : buffer
++  %ys_bytes = index.constant {KU * H * 4} : offset
++  %ys_size = index.scale %t, %ys_bytes : index, offset -> offset
++  %ys = buffer.alloca<global> align(256) %ys_size : buffer
++  %c64m = index.constant 64 : index
++  %cEm = index.constant {MOE["experts"]} : index
++  %ta_tiles = index.div %ta, %c64m : index
++  %max_tiles = index.add %ta_tiles, %cEm : index
++  %max_rows = index.mul %max_tiles, %c64m : index
++  %b8 = index.constant 8 : offset
++  %b4 = index.constant 4 : offset
++  %ti_size = index.scale %max_tiles, %b8 : index, offset -> offset
++  %tile_info = buffer.alloca<global> align(256) %ti_size : buffer
++  %rm_size = index.scale %max_rows, %b4 : index, offset -> offset
++  %rowmap = buffer.alloca<global> align(256) %rm_size : buffer
++  %pos_size = index.scale %ta, %b4 : index, offset -> offset
++  %pos = buffer.alloca<global> align(256) %pos_size : buffer
++  %fe4 = index.constant {FE * 4} : offset
++  %fe2 = index.constant {FE * 2} : offset
++  %h4 = index.constant {H * 4} : offset
++  %as_size = index.scale %max_rows, %fe4 : index, offset -> offset
++  %act_sorted = buffer.alloca<global> align(256) %as_size : buffer
++  %a16_size = index.scale %max_rows, %fe2 : index, offset -> offset
++  %act16 = buffer.alloca<global> align(256) %a16_size : buffer
++  %sr_size = index.scale %max_rows, %b8 : index, offset -> offset
++  %s_rows = buffer.alloca<global> align(256) %sr_size : buffer
++  %yss_size = index.scale %max_rows, %h4 : index, offset -> offset
++  %ys_sorted = buffer.alloca<global> align(256) %yss_size : buffer
++""")
+     L_.append(f"""
+   kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
+   %list_entry = index.constant 4 : offset
+@@ -1983,10 +2080,11 @@
+   %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
+   %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
+   kernel.launch @g_embed[%t](%t, %tokens, %embedding, %first_norm, %x, %h) : [index](index, buffer, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
+-  %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
++  %output_norm = command.parameter %weights, "{OUT_NORM}" : view<{H}xf32>
+ """)
+     gate = "%gate" if GATE else "%q"
+-    attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in RECUR)}
++    attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in NONATT)}
++    sconv_ordinal = {i: n for n, i in enumerate(sorted(SCONV))}
+     gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
+     for i in range(L):
+         b = f"blk.{i}."
+@@ -1995,37 +2093,40 @@
+         par = lambda var, n, ty=None: f'    %{var}_{i} = command.parameter %weights, "{nm(n)}" : {ty or f"view<{sz(n)}xi8>"}\n'
+         kind = " (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else "")
+         T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
+-             f"  %layer_{i} = index.constant {attn_ordinal.get(i, gdn_ordinal.get(i))} : index\n  %sliding_{i} = scalar.constant {1 if i in sliding else 0} : i32\n  %rope_{i} = scalar.constant {0 if i in nope else 1} : i32\n"]
+-        T += [par("w_gate", "ffn_gate"), par("w_up", "ffn_up"), par("w_down", "ffn_down"),
+-              par("ffn_norm", FFN_NORM, f"view<{H}xf32>")]
++             f"  %layer_{i} = index.constant {attn_ordinal.get(i, gdn_ordinal.get(i, sconv_ordinal.get(i)))} : index\n  %sliding_{i} = scalar.constant {1 if i in sliding else 0} : i32\n  %rope_{i} = scalar.constant {0 if i in nope else 1} : i32\n"]
++        if i not in MOE_LAYERS:
++            T += [par("w_gate", "ffn_gate"), par("w_up", "ffn_up"), par("w_down", "ffn_down")]
++        T += [par("ffn_norm", FFN_NORM, f"view<{H}xf32>")]
+         if i in RECUR:
+             T.append(gdn_layer(i, b, nm, sz, par))
++        elif i in SCONV:
++            T.append(sconv_layer(i, b, nm, sz, par))
+         else:
+             T += [par("wq", "attn_q"), par("wk", "attn_k"), par("wv", "attn_v"), par("wo", "attn_output")]
+-        if i in RECUR:
++        if i in NONATT:
+             pass
+         elif GATE and not FUSED_Q:
+             T.append(par("wg", "attn_gate"))
+-        if QK_NORM and i not in RECUR:
++        if QK_NORM and i not in NONATT:
+             T += [par("q_norm", "attn_q_norm", f"view<{D}xf32>"), par("k_norm", "attn_k_norm", f"view<{D}xf32>")]
+         if POST_NORM:
+             T += [par("post_attn", "post_attention_norm", f"view<{H}xf32>"), par("post_ffn", "post_ffw_norm", f"view<{H}xf32>")]
+-        if i in RECUR:
++        if i in NONATT:
+             pass
+         elif FUSED_Q:
+             T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%qg", "%nH", "%nQ2", H) + "\n")
+             T.append("  kernel.launch @g_split_qgate[%t](%t, %qg, %q, %gate) : [index](index, buffer, buffer, buffer)\n")
+         else:
+             T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", "%nQ", H) + "\n")
+-        if i not in RECUR:
++        if i not in NONATT:
+           T.append("  " + lin(fmt_of(nm("attn_k")), "%h", "%s_h", f"%wk_{i}", sz("attn_k"), "%k", "%nH", "%nKV", H) + "\n")
+-        if i not in RECUR:
++        if i not in NONATT:
+           T.append("  " + lin(fmt_of(nm("attn_v")), "%h", "%s_h", f"%wv_{i}", sz("attn_v"), "%v", "%nH", "%nKV", H) + "\n")
+-        if GATE and not FUSED_Q and i not in RECUR:
++        if GATE and not FUSED_Q and i not in NONATT:
+             T.append("  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wg_{i}", sz("attn_gate"), "%gate", "%nH", "%nQ", H) + "\n")
+         qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
+         nty = f"view<{D}xf32>" if QK_NORM else "buffer"
+-        if i not in RECUR:
++        if i not in NONATT:
+           T.append(f"""  kernel.launch @g_qk_rope_store[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer)
+   scf.if %gemm {{
+     kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
+@@ -2039,16 +2140,19 @@
+     kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
+   }}
+ """)
+-        if i not in RECUR:
++        if i not in NONATT:
+           T.append("  " + lin(fmt_of(nm("attn_output")), "%o", "%s_o", f"%wo_{i}", sz("attn_output"), "%y", "%nQ", "%nH", QD) + "\n")
+         pa = f"%post_attn_{i}" if POST_NORM else f"%ffn_norm_{i}"
+         T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, {pa}, %x, %ffn_norm_{i}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
+         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
+-        fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
+-        assert fg == fu, f"layer {i}: ffn_gate {fg} != ffn_up {fu} (split the swiglu linear)"
+-        T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", "%nFF", H, mode="swiglu") + "\n")
+-        T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nFF, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
+-        T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", "%nFF", "%nH", FF) + "\n")
++        if i in MOE_LAYERS:
++            T.append(moe_layer(i, b, nm))
++        else:
++          fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
++          assert fg == fu, f"layer {i}: ffn_gate {fg} != ffn_up {fu} (split the swiglu linear)"
++          T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", "%nFF", H, mode="swiglu") + "\n")
++          T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nFF, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
++          T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", "%nFF", "%nH", FF) + "\n")
+         pf = f"%post_ffn_{i}" if POST_NORM else f"%ffn_norm_{i}"
+         if i == L - 1:
+             nn = "%output_norm"
+@@ -2089,6 +2193,28 @@
+         parts.append(split_qgate(QH, D))
+     if RECUR:
+         parts.append(gdn_kernels(CFG, EPS))
++    if SCONV:
++        from gen_sconv import sconv_kernels
++        parts.append(sconv_kernels(CFG, with_slot=not RECUR))
++    if MOE:
++        import gen_moe_lfm as GM
++        parts.append(GM.route(H, MOE["experts"], MOE["used"], MOE["gating"], MOE["norm_weights"], MOE["probs_bias"]))
++        for fmt, K, N, mode in sorted(USED_MOE):
++            parts.append(GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode))
++        parts.append(GM.combine(H, MOE["used"]))
++        parts.append(GM.bucket(MOE["experts"], MOE["used"]))
++        parts.append(GM.combine_sorted(H, MOE["used"]))
++        import importlib.util
++        _spec = importlib.util.spec_from_file_location("gen_gemm_mod", os.path.join(here, "gen_gemm.py"))
++        _gg = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_gg)
++        for fmt, K, N, mode in sorted(USED_MOE):
++            _txt = GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], _gg.gemm)
++            if os.environ.get("MOE_N_FASTEST", "1") not in ("", "0") and (mode in os.environ.get("MOE_N_FASTEST_MODES", "gu,dn").split(",")):
++                # output-column tiles fastest: consecutive workgroups share one expert row tile (A and that expert's weights in L2)
++                _a, _b = "workgroups(%row_tiles, %out_tiles, %c1)", "  %row_group_id = kernel.workgroup.id<x> : index\n  %out_group_id = kernel.workgroup.id<y> : index"
++                assert _a in _txt and _b in _txt, "grouped gemm text changed"
++                _txt = _txt.replace(_a, "workgroups(%out_tiles, %row_tiles, %c1)").replace(_b, "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
++            parts.append(_txt)
+     env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
+     # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
+     env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
+--- a/inspect_gguf.py
++++ b/inspect_gguf.py
+@@ -107,6 +107,23 @@
+         cfg["post_norms"] = False
+         cfg["ffn_norm_tensor"] = "post_attention_norm"
+     print(f"hybrid: {len(cfg['recurrent_layers'])} gated delta-net layers + {cfg['kv_layers']} attention layers;", cfg["gdn"])
++# LFM2 / LFM2-MoE: short-conv layers (head_count_kv == 0) carry a conv history instead of KV;
++# MoE FFN (sigmoid router + expert bias, normalized top-k weights) after the leading dense layers;
++# the final norm is token_embd_norm.
++if arch in ("lfm2", "lfm2moe"):
++    cfg["shortconv_layers"] = [i for i in range(L) if isinstance(kv, list) and kv[i] == 0]
++    cfg["shortconv"] = {"l_cache": A("shortconv.l_cache", 3)}
++    cfg["kv_layers"] = L - len(cfg["shortconv_layers"])
++    cfg["output_norm_tensor"] = "token_embd_norm.weight"
++    print(f"lfm2: {len(cfg['shortconv_layers'])} short-conv layers + {cfg['kv_layers']} attention layers")
++if A("expert_count"):
++    cfg["moe"] = {"experts": A("expert_count"), "used": A("expert_used_count"), "ffn": A("expert_feed_forward_length"),
++                  "leading_dense": A("leading_dense_block_count", 0), "gating": A("expert_gating_func", 1),
++                  "norm_weights": bool(A("expert_weights_norm", arch in ("lfm2moe",))),
++                  "probs_bias": any(k.endswith("exp_probs_b.bias") for k in tensors)}
++    print("moe:", cfg["moe"])
++
++
+ def generation_block(tpl):
+     """Text the template emits for add_generation_prompt (what decides thinking mode)."""
+     i = tpl.rfind("add_generation_prompt")
+@@ -132,10 +149,10 @@
+ fmts = sorted({v["type"] for k, v in tensors.items() if k.endswith(".weight") and len(v["shape"]) == 2})
+ print(f"{cfg['name']}: arch={arch} L={L} H={H} heads={heads}/{cfg['kv_heads']} d={head_dim} ffn={cfg['ffn']} vocab={vocab} formats={fmts}")
+ unsupported = [f for f in fmts if f not in ("q4_k", "q5_k", "q6_k", "q8_0")
+-               and not (f == "f32" and cfg.get("gdn"))]  # f32 conv1d weights are read directly by the GDN kernels
++               and not (f == "f32" and (cfg.get("gdn") or cfg.get("shortconv") or cfg.get("moe")))]  # f32 conv1d weights are read directly by the GDN kernels
+ if unsupported:
+     print("WARNING: no kernels for", unsupported, "- add dequant helpers (see reference/porting-notes.md)")
+-if head_dim not in (128, 256):
++if head_dim not in (64, 128, 256):
+     print("WARNING: head_dim", head_dim, "is not 128 or 256: the attention kernels support only those")
+ if cfg["chat"] is None:
+     print("WARNING: no chat block; fill it by hand from tokenizer.chat_template (fields: see chat_probe.py)")
+--- a/make_kernel_tests.py
++++ b/make_kernel_tests.py
+@@ -49,8 +49,9 @@
+ seen = set(); todo = []
+ VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
+ for li in range(cfg["layers"]):
+-    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"]), ("attn_output", QH * D), ("ffn_gate", H),
+-                   ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD)]:
++    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"]), ("attn_output", QH * D),
++                   ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD),
++                   ("shortconv.in_proj", H), ("shortconv.out_proj", H), ("ffn_gate", H)]:
+         name = f"blk.{li}.{nm_}.weight"
+         if name not in T:
+             continue
+@@ -83,7 +84,7 @@
+ """)
+ # 3. qk norm + rope on q (live = 0: no KV store)
+ t = 4; pos = np.array([0, 1, 7, 300])
+-A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", [])))
++A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", []) + cfg.get("shortconv_layers", [])))
+ RD = cfg.get("rope_dims") or D
+ qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
+ kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
+@@ -281,6 +282,106 @@
+   check.return
+ }}
+ """)
++# 5. LFM2 short-conv chain: a 5-token span at position 3 continuing the reader slot's conv history
++if cfg.get("shortconv_layers"):
++    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++    from gen_sconv import sconv_geometry
++    G = sconv_geometry(cfg); K, LB = G["K"], G["layer_bytes"]
++    li = cfg["shortconv_layers"][0]; b = f"blk.{li}."
++    conv_w = deq(b + "shortconv.conv.weight").reshape(H, K).astype(np.float32)
++    t, p0 = 5, 3
++    bcx = rng.standard_normal((t, 3, H)).astype(np.float32); hist0 = rng.standard_normal((K - 1, H)).astype(np.float32)
++    bx = bcx[:, 0] * bcx[:, 2]
++    full = np.concatenate([hist0, bx], 0)
++    conv = np.stack([(full[i:i + K] * conv_w.T).sum(0) for i in range(t)])
++    y = bcx[:, 1] * conv; hist1 = full[-(K - 1):]
++    arena = np.zeros(2 * LB // 4, np.float32); arena[:(K - 1) * H] = hist0.reshape(-1)
++    expect = arena.copy(); expect[LB // 4:LB // 4 + (K - 1) * H] = hist1.reshape(-1)
++    meta = np.zeros(4 + 9, np.int32); meta[0] = 1; meta[4 + 0] = t; meta[4 + 1] = p0
++    origins = np.zeros(5, np.int64); origins[0] = 0; origins[1] = LB; origins[3] = p0
++    info = np.zeros((t, 4), np.int32); info[:, 1] = p0 + np.arange(t); info[:, 2] = 1
++    for n, a in [("s_meta", meta), ("s_orig", origins.view(np.int32)), ("s_info", info), ("s_arena", arena), ("s_expect", expect),
++                 ("s_bcx", bcx.reshape(t, 3 * H)), ("s_w", conv_w.reshape(-1)), ("s_y", y.astype(np.float32))]:
++        save(n, a)
++    AT = f"tensor<{2 * LB // 4}xf32>"
++    cases.append(f"""check.case public @shortconv_chain {{
++  %t = check.literal value({t}) : index
++  %spans = check.literal value(1) : index
++  %layer = check.literal value(0) : index
++  %meta = check.file.read.npy path("s_meta.npy") : tensor<13xi32>
++  %orig = check.file.read.npy path("s_orig.npy") : tensor<10xi32>
++  %info = check.file.read.npy path("s_info.npy") : tensor<{t}x4xi32>
++  %arena = check.file.read.npy path("s_arena.npy") : {AT}
++  %expect = check.file.read.npy path("s_expect.npy") : {AT}
++  %bcx = check.file.read.npy path("s_bcx.npy") : tensor<{t}x{3 * H}xf32>
++  %w = check.file.read.npy path("s_w.npy") : tensor<{H * K}xf32>
++  %ey = check.file.read.npy path("s_y.npy") : tensor<{t}x{H}xf32>
++  %y = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
++  kernel.launch @g_sc_conv[%t](%t, %spans, %layer, %meta, %info, %orig, %arena, %bcx, %w, %y) : [index](index, index, index, tensor<13xi32>, tensor<{t}x4xi32>, tensor<10xi32>, {AT}, tensor<{t}x{3 * H}xf32>, tensor<{H * K}xf32>, tensor<{t}x{H}xf32>)
++  kernel.launch @g_sc_commit[%spans](%t, %spans, %layer, %meta, %orig, %arena, %bcx) : [index](index, index, index, tensor<13xi32>, tensor<10xi32>, {AT}, tensor<{t}x{3 * H}xf32>)
++  check.expect.close actual(%y) expected(%ey) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
++  check.expect.close actual(%arena) expected(%expect) atol(1.0e-5) rtol(1.0e-4) nan(different) : {AT}
++  check.return
++}}
++""")
++# 6. MoE chain on real tensors (one Q4_K-down and one Q6_K-down layer): router -> top-k -> gate/up -> down -> combine
++if cfg.get("moe"):
++    M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ.get("MOE_R", "8"))
++    def deq3(name):
++        tt = T[name]; return dequantize(np.asarray(tt.data), tt.tensor_type).reshape(E_, int(tt.shape[1]), int(tt.shape[0]))
++    done = set()
++    for li in range(M["leading_dense"], cfg["layers"]):
++        b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower(); fg = T[b + "ffn_gate_exps.weight"].tensor_type.name.lower()
++        if fd in done: continue
++        done.add(fd)
++        t = 3
++        hx = rng.standard_normal((t, H)).astype(np.float32)
++        Wr = np.asarray(T[b + "ffn_gate_inp.weight"].data, np.float32).reshape(E_, H); bias = np.asarray(T[b + "exp_probs_b.bias"].data, np.float32)
++        logit = hx.astype(np.float64) @ Wr.T.astype(np.float64); prob = 1 / (1 + np.exp(-logit)); sel = prob + bias
++        ids = np.argsort(-sel, -1, kind="stable")[:, :KU].astype(np.int32)
++        wts = np.take_along_axis(prob, ids, -1); wts = wts / np.maximum(wts.sum(-1, keepdims=True), 6.103515625e-05)
++        Wg, Wu, Wd = deq3(b + "ffn_gate_exps.weight"), deq3(b + "ffn_up_exps.weight"), deq3(b + "ffn_down_exps.weight")
++        yref = np.zeros((t, H))
++        for i in range(t):
++            for k in range(KU):
++                e = ids[i, k]; g = Wg[e] @ hx[i]; u = Wu[e] @ hx[i]; a = g / (1 + np.exp(-g)) * u
++                yref[i] += wts[i, k] * (Wd[e] @ a)
++        tag = f"m{li}"
++        for n, a in [(tag + "_h", hx), (tag + "_wr", Wr.reshape(-1)), (tag + "_b", bias), (tag + "_ids", ids), (tag + "_wts", wts.astype(np.float32)),
++                     (tag + "_wg", raw(b + "ffn_gate_exps.weight")), (tag + "_wu", raw(b + "ffn_up_exps.weight")), (tag + "_wd", raw(b + "ffn_down_exps.weight")),
++                     (tag + "_y", yref.astype(np.float32))]:
++            save(n, a)
++        print(f"moe test layer {li}: ids", ids.tolist(), "min score gap k/k+1", float(np.min(np.sort(sel, -1)[:, ::-1][:, KU - 1] - np.sort(sel, -1)[:, ::-1][:, KU])))
++        gt, dt_ = ty(raw(b + "ffn_gate_exps.weight")), ty(raw(b + "ffn_down_exps.weight"))
++        cases.append(f"""check.case public @moe_chain_{li} {{
++  %t = check.literal value({t}) : index
++  %ta = check.literal value({t * KU}) : index
++  %nFE = check.literal value({FE}) : index
++  %nH = check.literal value({H}) : index
++  %h = check.file.read.npy path("{tag}_h.npy") : tensor<{t}x{H}xf32>
++  %wr = check.file.read.npy path("{tag}_wr.npy") : tensor<{E_ * H}xf32>
++  %b = check.file.read.npy path("{tag}_b.npy") : tensor<{E_}xf32>
++  %eids = check.file.read.npy path("{tag}_ids.npy") : tensor<{t}x{KU}xi32>
++  %ewts = check.file.read.npy path("{tag}_wts.npy") : tensor<{t}x{KU}xf32>
++  %wg = check.file.read.npy path("{tag}_wg.npy") : {gt}
++  %wu = check.file.read.npy path("{tag}_wu.npy") : {gt}
++  %wd = check.file.read.npy path("{tag}_wd.npy") : {dt_}
++  %ey = check.file.read.npy path("{tag}_y.npy") : tensor<{t}x{H}xf32>
++  %ids = check.generate.fill value(0) : tensor<{t}x{KU}xi32>
++  %wts = check.generate.fill value(0.0) : tensor<{t}x{KU}xf32>
++  %act = check.generate.fill value(0.0) : tensor<{t * KU}x{FE}xf32>
++  %ys = check.generate.fill value(0.0) : tensor<{t * KU}x{H}xf32>
++  %y = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
++  kernel.launch @g_moe_route[%t](%t, %h, %wr, %b, %ids, %wts) : [index](index, tensor<{t}x{H}xf32>, tensor<{E_ * H}xf32>, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>)
++  kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {gt}, tensor<{t * KU}x{FE}xf32>)
++  kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wd, %ys) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t * KU}x{FE}xf32>, {dt_}, tensor<{t * KU}x{H}xf32>)
++  kernel.launch @g_moe_combine[%t](%t, %ys, %wts, %y) : [index](index, tensor<{t * KU}x{H}xf32>, tensor<{t}x{KU}xf32>, tensor<{t}x{H}xf32>)
++  check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
++  check.expect.close actual(%wts) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
++  check.expect.close actual(%y) expected(%ey) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{t}x{H}xf32>
++  check.return
++}}
++""")
+ import re
+ # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
+ text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)

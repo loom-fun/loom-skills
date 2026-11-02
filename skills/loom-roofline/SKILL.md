@@ -12,17 +12,16 @@ decision is a measurement rather than a debate.
 ## 0. Effort: what the user asked for
 
 Read the request for two optional inputs: a **performance target** and a **time
-budget**. The time budget is the user's wall-clock time for the optimization
-campaign, from the roofline run to the final report, including builds, gates and
-reverted attempts. Porting and baseline measurement are prerequisites and are not
-counted, but report how long they took.
+budget**. A budget the user states covers what they asked for; by default it is the
+whole job, from the first command to the published report (table row 1), including
+builds, gates and reverted attempts. Report how long each phase took.
 
 | User said | Goal | Budget (`--budget-h`) |
 |---|---|---|
 | Nothing, end-to-end job ("get X working, optimize, report") | The roofline TARGET per headline metric, then stretch | **The model's roofline budget for the whole job** (`e2e_budget.py MODEL.gguf`: fixed agent work + optimization + the measured workload at this model's decode/prefill speed). `qualify.sh` passes what is left after the port and qualification, minus the final gates + report (at least 10 min) |
 | Nothing, existing port ("optimize this model") | TARGET, then stretch | **30 min** |
 | A time only ("spend 3 hours", "quick pass", "overnight") | TARGET, then stretch | As stated. "Quick" ≈ 0.5 h, "thorough" ≈ 4 h, "overnight" ≈ 8 h, "don't work all night" caps it |
-| A target only ("+50 % decode", "70 tok/s") | The user's target (`--goal-tps`) | No fixed cap. The rate controller still stops when no path can reach the target. If the projected time is more than ~2 h, say so with the numbers as soon as it is known |
+| A target only ("+50 % decode", "70 tok/s") | The user's target (`--goal decode_tps=N`) | No fixed cap. The rate controller still stops when no path can reach the target. If the projected time is more than ~2 h, say so with the numbers as soon as it is known |
 | Both | The user's target | As stated. If the projected time exceeds the budget, say so early: give what the budget buys, and what the target would take |
 
 In every case:
@@ -31,13 +30,12 @@ In every case:
 - If a user target is below TARGET, say how much more is available, then honor
   their target as the finish line.
 - Within a budget, spend time where the **expected gain per hour** is highest
-  across the headline metrics. New kernels count too. On Bolt-E4B, a flash prefill
-  kernel for head_dim 256/512 took about 30 min and gave +19–28 % prefill inside a
-  1 h budget.
+  across the headline metrics. New kernels count too: a flash prefill kernel for a new
+  head_dim is ~30 min and paid off (+19–28 % prefill) inside a 1 h budget.
 - **Catalog levers first.** Levers in `loom-optimize/reference/optimization-catalog.md`
   that have a measured gain on a similar model are the cheapest ms/h there is. Apply
-  them in catalog order before inventing new ones. In run 2, skipping fused QKV and
-  paired-row gate/up, and trying two untested ideas instead, cost about 1–2 % decode.
+  them in catalog order before inventing new ones (skipping them for untested ideas cost
+  a trial 1–2 % decode).
 - Keep a reserve at the end for the final gates, the server restart and the report
   (`qualify.sh` already subtracts it from the budget it computes; by hand, `--reserve-min`,
   default 10). Never overrun the budget by starting an attempt that cannot finish its
@@ -187,17 +185,6 @@ The horizon is what is left of the budget, minus the reserve.
 - **DONE**: the goal is met (the user's target, or else the stretch), or the gap to the ceiling is within noise. Move on
   to the next headline metric.
 
-On this session's Bolt decode run (ceiling 14.68 ms/token), with the default 1 h
-budget, the replay goes:
-- at 16 minutes, the first lever had closed 1.74 ms, 46 % of the gap (6.6 ms/h):
-  CONTINUE;
-- at 36 minutes the target was met, but the stretch was 21 minutes away at the
-  current rate with only 14 left: REVIEW. Pivot to a cheap lever, or wrap up;
-- past the budget: BUDGET.
-
-With a 4 h budget the same log says CONTINUE. This replaces the session's
-back-and-forth about feasibility with a measurement.
-
 ### Plateau review (REVIEW verdict): pivot or stop
 
 1. **Re-ablate the current best build.** Diminishing returns usually mean the cost
@@ -213,7 +200,8 @@ back-and-forth about feasibility with a measurement.
      whose rejection reason no longer holds. For example, fusing the norm into the
      matvec lost when the matvec was under-filled, and may win now that it isn't.
      To fork, branch from that decision's commit (`git worktree add ../fork-X <commit>`),
-     then build and serve on a separate port with `tools/variant.sh`. Choose an
+     then build it with its own `--model-id` and serve it next to the best build
+     (`loom-optimize` "Fast iteration"). Choose an
      earlier commit when a later choice blocks the lever, for example a layout that
      prevents a fusion.
 3. **Pick the best candidate** if its expected rate gives an ETA to the goal within

@@ -9,14 +9,14 @@
 #   1. serves PKG alone on PORT
 #   2. LEVEL=full gates (FORCE=1: nothing reused from earlier runs) -> OUT_DIR/gates/gates.json
 #      (GATES=0: perf only, when the trial's own full gates are trusted)
-#   3. perf: llama.cpp and Loom interleaved, 3 rounds of the short set + 1 long set each
+#   3. perf: llama.cpp (Loom stopped), then Loom: 3 rounds of the short set + 1 long set each
 #      (perf.py --no-campaign) -> OUT_DIR/perf.jsonl, medians in OUT_DIR/eval.json
 set -u
 out=$(mkdir -p "$1" && cd "$1" && pwd); pkg=$(cd "$2" && pwd); gguf=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")
 port=${4:-8460}; lport=${5:-8430}
 here=$(cd "$(dirname "$0")" && pwd); SK=${EVAL_SKILLS:-$here/../..}
 B=$SK/loom-benchmark/scripts; SV=$SK/loom-setup/scripts
-root=${LOOM_ROOT:-$HOME/loom}; T=$root/.tools/bin/python
+root=${LOOM_ROOT:-$HOME/loom}; bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts; T=$bin/python   # Windows venvs use Scripts/
 export LOOM_SERVE_STATE=$out/state LLAMACPP_STATE=$out/llstate PYTHONDONTWRITEBYTECODE=1
 model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
 mem=${6:-$("$T" - "$pkg" <<'EOF'
@@ -39,28 +39,28 @@ if [ "${GATES:-1}" = 1 ]; then
   FORCE=1 LEVEL=full LOOM_ROOT=$root "$B/gates.sh" "$pkg" "http://127.0.0.1:$port" "$gguf" "$out/gates" "$lport" > "$out/gates.out" 2>&1
   tail -1 "$out/gates.out"
 fi
-echo "== perf (interleaved)"
+echo "== perf (llama.cpp with Loom stopped, then Loom: one model at a time)"
 cd "$out"
-started=0
-if [ -n "${LLAMACPP_DIR:-}" ]; then "$B/llamacpp_server.sh" "$gguf" "$lport" 4 40960 unified >/dev/null && started=1; fi
-for r in 1 2 3; do
-  [ $started = 1 ] && "$T" "$B/perf.py" "http://127.0.0.1:$lport" llama --kind llama --no-campaign --log perf.jsonl >/dev/null
-  "$T" "$B/perf.py" "http://127.0.0.1:$port" loom --model "$model" --no-campaign --log perf.jsonl >/dev/null
-done
-[ $started = 1 ] && "$T" "$B/perf.py" "http://127.0.0.1:$lport" llama --kind llama --no-campaign --long --log perf.jsonl >/dev/null
+if [ -n "${LLAMACPP_DIR:-}" ]; then
+  "$SV/stop.sh" eval >/dev/null 2>&1
+  if "$B/llamacpp_server.sh" "$gguf" "$lport" 4 40960 unified >/dev/null; then
+    for r in 1 2 3; do "$T" "$B/perf.py" "http://127.0.0.1:$lport" llama --kind llama --no-campaign --log perf.jsonl >/dev/null; done
+    "$T" "$B/perf.py" "http://127.0.0.1:$lport" llama --kind llama --no-campaign --long --log perf.jsonl >/dev/null
+    "$B/llamacpp_server.sh" --stop "$lport"
+  fi
+  VENV=$root/.venv "$SV/serve.sh" eval "$port" amdgpu "$mem" "$pkg/model.json" >/dev/null || exit 1
+fi
+for r in 1 2 3; do "$T" "$B/perf.py" "http://127.0.0.1:$port" loom --model "$model" --no-campaign --log perf.jsonl >/dev/null; done
 "$T" "$B/perf.py" "http://127.0.0.1:$port" loom --model "$model" --no-campaign --long --log perf.jsonl >/dev/null
-[ $started = 1 ] && kill "$(cat "$LLAMACPP_STATE/llamacpp-$lport.pid")" 2>/dev/null
-"$T" - <<'EOF'
-import json, statistics
+"$T" - "$B" <<'EOF'
+import json, statistics, sys
+sys.path.insert(0, sys.argv[1])
+from bench_common import perf_metrics
 runs = {}
 for l in open("perf.jsonl"):
-    r = json.loads(l); k = r["kind"]
-    for m in ("decode_tps", "decode_tps_2k", "decode_tps_32k"):
-        if r.get(m):
-            runs.setdefault((k, m), []).append(r[m])
-    for p in r.get("prefill", []) + r.get("prefill_long", []):
-        n = min((1000, 2000, 8000, 16000, 32000), key=lambda x: abs(x - p["prompt_tokens"]))
-        runs.setdefault((k, f"prefill_{n}"), []).append(p["prefill_tps"])
+    r = json.loads(l)
+    for m, v in perf_metrics(r).items():
+        runs.setdefault((r["kind"], m), []).append(v)
 med = {f"{k}:{m}": round(statistics.median(v), 1) for (k, m), v in runs.items()}
 import os
 g = json.load(open("gates/gates.json")) if os.path.exists("gates/gates.json") else {"verdict": "not run", "gates": {}}

@@ -50,7 +50,7 @@ print("prompt tokens", [x[1] for x in alone], "identical when concurrent:", [x[0
 if not all(repeat):
     print("NOT DETERMINISTIC: the same prompt alone gave different greedy output (a race in a kernel, not a near-tie)")
 if a.pkg and not all(same):
-    from bench_common import Package, llama_completion
+    from bench_common import Package, llama_greedy
     P = Package(a.pkg)
     for i, ok in enumerate(same):
         if ok:
@@ -62,7 +62,7 @@ if a.pkg and not all(same):
         msg = f"prompt {i}: first divergence at generated token {k}: alone {P.tok.decode(t1[k:k + 1])!r} vs concurrent {P.tok.decode(t2[k:k + 1])!r}"
         if a.llama and k < min(len(t1), len(t2)):
             ids = P.ids(P.render(prompts[i])) + t1[:k]
-            g = llama_completion(a.llama, {"prompt": ids, "n_predict": 1, "temperature": 0, "n_probs": 10, "cache_prompt": False}, P)
+            g = llama_greedy(a.llama, ids, 1, P, n_probs=10)[0]
             top = {t["id"]: t["logprob"] for t in g["completion_probabilities"][0]["top_logprobs"]}
             if t1[k] in top and t2[k] in top:
                 gap_val = abs(top[t1[k]] - top[t2[k]])

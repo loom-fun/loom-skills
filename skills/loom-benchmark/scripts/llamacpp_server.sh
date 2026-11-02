@@ -4,11 +4,19 @@
 #   golden / long-context runs: PARALLEL=1 CTX_PER_SLOT=34000
 #   `unified` (5th arg): one KV pool of CTX_PER_SLOT tokens shared by PARALLEL slots (-kvu), so a single
 #   request can use all of it and 4 streams still run: one server covers goldens, needle and perf.
-#   stop: kill $(cat ${LLAMACPP_STATE:-/tmp}/llamacpp-$PORT.pid)   (LLAMACPP_STATE: pid/log dir, default /tmp)
+#   stop: llamacpp_server.sh --stop PORT   (LLAMACPP_STATE: pid/log dir, default /tmp)
 # Refuses a build that does not see a ROCm device: on Windows, builds missing their HIP/BLAS DLLs
 # silently fall back to CPU.
 set -e
 state=${LLAMACPP_STATE:-/tmp}; mkdir -p "$state"
+if [ "${1:-}" = --stop ]; then   # the server this script started on PORT (only if that pid is still a llama-server)
+  f=$state/llamacpp-${2:?--stop PORT}.pid; [ -f "$f" ] || exit 0; pid=$(cat "$f")
+  if [ -r /proc/$pid/cmdline ]; then tr '\0' ' ' < /proc/$pid/cmdline | grep -q llama-server && kill "$pid" 2>/dev/null || true
+  else kill "$pid" 2>/dev/null || true; fi
+  # wait until it has exited (its memory is free) before anything loads the next model
+  for _ in $(seq 60); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done; kill -9 "$pid" 2>/dev/null
+  rm -f "$f"; exit 0
+fi
 gguf=$1; port=${2:-8130}; np=${3:-4}; per=${4:-8192}; mode=${5:-}
 case "$gguf" in /*|?:*) ;; *) gguf=$PWD/$gguf;; esac   # the server runs from LLAMACPP_DIR
 dir=${LLAMACPP_DIR:?set LLAMACPP_DIR to the unzipped llamacpp-rocm release}

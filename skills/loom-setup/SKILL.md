@@ -1,6 +1,6 @@
 ---
 name: loom-setup
-description: Install AMD Loom (hrx-loom wheel from ROCm/hrx-system CI) and the hrx-loom-library catalog from a cold start, fetch catalog models with loom-fetch, and start/stop/inspect loom-serve on the GPU or NPU. Use for "install loom", "loom-fetch a model", "start loom-serve for X", "is the server ready", NPU serving.
+description: Install AMD Loom (hrx-loom from PyPI, or a ROCm/hrx-system CI wheel) and the hrx-loom-library catalog from a cold start, fetch catalog models with loom-fetch, and start/stop/inspect loom-serve on the GPU or NPU. Use for "install loom", "loom-fetch a model", "start loom-serve for X", "is the server ready", NPU serving.
 ---
 
 # Loom setup: install → fetch → serve

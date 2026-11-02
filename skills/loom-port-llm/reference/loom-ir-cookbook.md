@@ -120,7 +120,7 @@ check.case public @mv_q6 {
   %e = check.file.read.npy path("y.npy") : tensor<4x1024xf32>       // numpy reference
   %y = check.generate.fill value(0.0) : tensor<4x1024xf32>
   kernel.launch @g_mv_q6_k_k1024_t4[%n, %t](%n, %t, %acc, %x, %w, %y) : [index, index](index, index, i32, tensor<4x1024xf32>, tensor<860160xi8>, tensor<4x1024xf32>)
-  check.expect.close actual(%y) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<4x1024xf32>
+  check.expect.approximate actual(%y) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<4x1024xf32>, tensor<4x1024xf32>
   check.return
 }
 ```
@@ -129,7 +129,7 @@ check.case public @mv_q6 {
   `out.json["samples"]` has `case`, `passed` and `expectations.failures[].detail`
   ("element at index 8 (0) is not close to …").
 - `check.generate.iota offset(a) step(b)` gives synthetic inputs. To A/B a new kernel
-  against the old one, launch both on identical inputs and use `check.expect.close`.
+  against the old one, launch both on identical inputs and use `check.expect.approximate`.
   This is how every optimization was verified before the end-to-end golden run.
 - For references, use `gguf.quants.dequantize(np.asarray(t.data), t.tensor_type)`;
   shapes are reversed (`t.shape = [K, N]`).

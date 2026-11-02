@@ -12,7 +12,7 @@ with --alt so a prompt where llama.cpp disagrees with itself is not called a FAI
 import argparse
 import json
 
-from bench_common import PROMPTS, Package, doc, llama_completion
+from bench_common import PROMPTS, Package, doc, llama_greedy
 
 ap = argparse.ArgumentParser()
 ap.add_argument("package")
@@ -30,24 +30,15 @@ QS = ("Summarize this documentation in one sentence.", "What is the main command
 for k, n in enumerate(int(x) for x in a.long.split(",") if x):
     items.append((QS[k % 2] + "\n\n" + doc(n), 64))
 out = []
-# Samplers are forced off: some GGUFs set penalty_repeat (LFM2.5: 1.05), which llama.cpp
-# applies even at temperature 0, and Loom decodes greedily.
 for prompt, n_predict in items:
     ids = pkg.ids(pkg.render(prompt))
-    r = llama_completion(a.llama, {"prompt": ids, "n_predict": n_predict, "temperature": 0, "n_probs": 5,
-                                   "cache_prompt": False, "return_tokens": True,
-                                   "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}, pkg, a.salt)
+    r, gen, cp = llama_greedy(a.llama, ids, n_predict, pkg, a.salt)
     if r.get("_suspect"):  # llama.cpp answered from a stale state: a wrong golden is worse than none
         print(f"SKIP {len(ids)} prompt tokens: {r['_suspect']}", flush=True)
         continue
     if "tokens" not in r:  # e.g. the prompt exceeds the server's context: skip, don't crash
         print(f"SKIP {len(ids)} prompt tokens: {str(r)[:200]}", flush=True)
         continue
-    gen = r["tokens"]  # completion_probabilities omits byte-fallback (partial UTF-8) tokens, e.g. emoji
-    cp = r["completion_probabilities"]
-    if len(cp) != len(gen):  # keep top-5 lists only while they line up with the ids
-        k = next((i for i, x in enumerate(cp) if i >= len(gen) or x["id"] != gen[i]), len(cp))
-        cp = cp[:k]
     out.append({"prompt": prompt, "prompt_tokens": len(ids), "ids": gen, "text": r["content"],
                 "top": [[(t["id"], t["logprob"]) for t in x["top_logprobs"]] for x in cp]})
     print(f"{len(ids):6d} prompt tokens -> {len(gen):3d} {r['content'][:60]!r}", flush=True)

@@ -1,7 +1,6 @@
 """Throughput on fixed workloads, for Loom or llama.cpp (same prompts both sides).
 
 usage: python perf.py URL LABEL [--kind loom|llama] [--model MODEL_ID] [--long] [--log perf_log.jsonl] [--reverted]
-       python perf.py - - --mark-reverted LABEL      (a build you discarded after measuring it)
 
 Metrics (all greedy, real-text documents, each prompt starts with a nonce so no
 prefix cache can help):
@@ -9,22 +8,19 @@ prefix cache can help):
   prefill[]         ~1k and ~2k-token documents, max_tokens=4: prompt_tokens / TTFT,
                     median (and min/max) of --repeats runs; single samples vary up to 2x
   decode_tps_2k     256-token generation after a 2k document (decode with KV in use)
-  c4_agg_tps        (--c4 only) 8 requests of 200 tokens through 4 client threads: total tokens /
-                    wall time (includes ramp-up/tail; c4_steady.py measures the tracked steady state)
   --long: prefill 8k/16k/32k documents and decode_tps_32k (128 tokens after 32k)
 Loom numbers are client-side (streaming TTFT and token arrival). llama.cpp
 numbers come from its server-side `timings` (excludes HTTP and tokenization),
 which slightly favours llama.cpp.
 """
 import argparse
-import concurrent.futures as cf
 import json
 import random
 import time
 
 import requests
 
-from bench_common import doc, stream
+from bench_common import doc, perf_metrics, stream
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -34,24 +30,10 @@ ap.add_argument("--model", default=None, help="Loom model id (model.json model.i
 ap.add_argument("--long", action="store_true")
 ap.add_argument("--log", default="perf_log.jsonl")
 ap.add_argument("--reverted", action="store_true", help="this build is not kept (still logged: its time counts)")
-ap.add_argument("--mark-reverted", metavar="LABEL",
-                help="mark every targets.jsonl row of build LABEL as not kept (forgot --reverted), then exit")
 ap.add_argument("--no-campaign", action="store_true",
                 help="ad-hoc/ablation measurement: skip the roofline/baseline requirement and don't log it")
-ap.add_argument("--c4", action="store_true", help="also c4_agg_tps (8 requests through 4 threads; c4_steady.py is the tracked metric)")
 ap.add_argument("--repeats", type=int, default=5, help="samples per short-prefill size (median reported)")
 a = ap.parse_args()
-if a.mark_reverted:
-    import os
-    from campaign import find_roofline
-    tj = os.path.join(os.path.dirname(find_roofline(a.log) or os.path.abspath(a.log)), "targets.jsonl")
-    rows = [json.loads(l) for l in open(tj) if l.strip()]
-    n = 0
-    for r in rows:
-        if r.get("label") == a.mark_reverted and r.get("kept", True):
-            r["kept"] = False; n += 1
-    open(tj, "w").write("".join(json.dumps(r) + "\n" for r in rows))
-    raise SystemExit(f"marked {n} rows of {a.mark_reverted!r} as reverted in {tj}")
 U, M = a.url, a.model
 if not a.no_campaign:  # required steps fail loudly instead of warning (warnings get ignored)
     from campaign import require
@@ -90,14 +72,6 @@ else:
         out["prefill"].append({"prompt_tokens": samples[0][0], "prefill_tps": round(pps[len(pps) // 2], 1),
                                "min": round(pps[0], 1), "max": round(pps[-1], 1), "n": len(pps)})
     _, _, out["decode_tps_2k"], _ = run(f"[{nonce} ctx] Write a long, detailed essay discussing this documentation.\n\n" + doc(2000), 256)
-    if a.c4:  # c4_steady.py is the concurrency metric the roofline tracks; this ramp-inclusive one is opt-in
-
-        def one(i):
-            return run(f"[{nonce}] Write a short story ({i}) about a lighthouse keeper, about 200 words.", 200)[3]
-        t0 = time.perf_counter()
-        with cf.ThreadPoolExecutor(4) as ex:
-            toks = list(ex.map(one, range(8)))
-        out["c4_agg_tps"] = round(sum(toks) / (time.perf_counter() - t0), 1)
 for k, v in list(out.items()):
     if isinstance(v, float):
         out[k] = round(v, 2)
@@ -106,8 +80,4 @@ with open(a.log, "a") as f:
     f.write(json.dumps(out) + "\n")
 if a.kind == "loom" and not a.no_campaign:  # campaign tracking: targets.jsonl + rate-of-approach verdict (needs roofline.json)
     from campaign import log_metrics
-    vals = {k: out.get(k) for k in ("decode_tps", "decode_tps_1k", "decode_tps_2k", "decode_tps_32k", "c4_agg_tps")}
-    for p in out.get("prefill", []) + out.get("prefill_long", []):
-        n = min((1000, 2000, 8000, 16000, 32000), key=lambda x: abs(x - p["prompt_tokens"]))
-        vals[f"prefill_{n}"] = p["prefill_tps"]
-    log_metrics(vals, a.label, a.reverted, a.log)
+    log_metrics(perf_metrics(out), a.label, a.reverted, a.log)

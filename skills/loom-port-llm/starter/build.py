@@ -1,7 +1,7 @@
 """Builds a loom-serve package for a dense GGUF LLM from its LLM_CONFIG json.
 
 usage: python build.py CONFIG.json PACKAGE_DIR --tokenizer TOKENIZER.json
-           [--context N] [--pool N] [--memory-gib 56] [--prefill 1024] [--rows 4] [--max-tokens 4096] [--model-id ID]
+           [--context N] [--pool N] [--memory-gib auto] [--prefill 1024] [--rows 4] [--max-tokens 4096] [--model-id ID]
 
 --context defaults to the model's native context (cfg context_length, up to the kernels' 262144) and
 --pool (KV positions shared by all rows) to twice that, both reduced to fit --memory-gib.
@@ -24,7 +24,10 @@ ap.add_argument("package")
 ap.add_argument("--tokenizer", required=True, help="HF tokenizer.json of the same model (download from the base repo)")
 ap.add_argument("--context", type=int, default=None, help="max tokens per sequence (default: the model's native context)")
 ap.add_argument("--pool", type=int, default=None, help="KV positions shared by all rows and the prefix cache (default: 2x context)")
-ap.add_argument("--memory-gib", type=float, default=56.0, help="device memory budget for weights + KV pool + workspace")
+ap.add_argument("--memory-gib", default="auto",
+                help="device memory budget for weights + KV pool + workspace. auto (default): enough for a KV pool of "
+                     "2x the context, capped at 60%% of physical RAM (GPU memory is system RAM on Strix Halo; the "
+                     "benchmarks load one model at a time); 56 when RAM can't be read")
 ap.add_argument("--prefill", type=int, default=1024, help="prefill chunk (prefill_capacity); 1024-4096")
 ap.add_argument("--rows", type=int, default=4, help="initial resident rows (grows on demand); c4 benchmarks need >= 4")
 ap.add_argument("--max-tokens", type=int, default=4096, help="default completion length when a request sets none")
@@ -53,11 +56,21 @@ recurrent_bytes = gdn_geometry(cfg)["slot_bytes"] if cfg.get("recurrent_layers")
 if cfg.get("shortconv_layers"):  # LFM2 short-conv history lives in the recurrent slots too (reference/lfm2moe-example)
     from gen_sconv import sconv_geometry  # noqa: E402
     recurrent_bytes += sconv_geometry(cfg)["slot_bytes"]
-budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
 native = cfg.get("context_length") or 32768
 if native > KERNEL_CONTEXT and not a.context:
     print(f"NOTE: native context {native} exceeds the kernels' {KERNEL_CONTEXT}; using {KERNEL_CONTEXT}")
 context = a.context or min(native, KERNEL_CONTEXT)
+if a.memory_gib == "auto":
+    try:
+        cap = 0.6 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, ValueError, OSError):
+        cap = None
+    need = weights_bytes + 4 * 2**30 + 2 * a.rows * recurrent_bytes + 2 * context * kv_per_position
+    a.memory_gib = round(min(need, cap) / 2**30, 1) if cap else 56.0
+    print(f"memory budget {a.memory_gib} GiB (pool 2x context needs {need / 2**30:.0f} GiB"
+          + (f"; cap 60% of RAM = {cap / 2**30:.0f} GiB)" if cap else "; RAM unknown)"))
+a.memory_gib = float(a.memory_gib)
+budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
 if context * kv_per_position > budget:
     fit = max(4096, (budget // kv_per_position) // 1024 * 1024)
     print(f"WARNING: context {context} needs {context * kv_per_position / 2**30:.1f} GiB of KV; {a.memory_gib} GiB budget fits {fit}")
@@ -88,6 +101,14 @@ hx = lambda s: s.encode().hex()
 thinking = chat.get("thinking", "toggle" if chat.get("starts_in_reasoning") else "never")
 reasoning = {"toggle": (1, 1 | 16, 4 if chat.get("thinking_default", True) else 0), "always": (1, 0, 0), "never": (0, 0, 0)}[thinking]
 B = lambda v: "true" if v else "false"
+CALL_FORMATS = {"hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4}
+# A chat format the generic control functions can't express (Glimmer's ATEM channels, Gemma 4): the kit
+# ships chat/<call_format>.loom, whose public chat functions replace the generic ones (renamed
+# @generic_<fn>, still callable), and optionally chat/<call_format>_rodata.py (a rodata() returning its
+# string constants). In it, @@HEX_CHAT:<key>@@ is the hex of chat[<key>]; chat.base_call_format (default
+# hermes) is the tool-call format the generic functions use underneath. See reference/glimmer-example.
+custom_chat = os.path.join(HERE, "chat", chat["call_format"] + ".loom")
+custom_chat = custom_chat if chat["call_format"] not in CALL_FORMATS and os.path.exists(custom_chat) else None
 subs = {
     "@@POS_BYTES@@": str(pos_bytes), "@@PLANES@@": str(2 * kv_layers), "@@BLOCK_BYTES@@": str(16 * pos_bytes),
     "@@RECURRENT_BYTES@@": str(recurrent_bytes or 4),
@@ -113,7 +134,7 @@ subs = {
     "@@HEX_CONTENT_CALL_SEPARATOR@@": hx(chat["content_call_separator"]), "@@HEX_CALL_SEPARATOR@@": hx(chat["call_separator"]),
     "@@HEX_CALL_MARKER@@": hx(chat.get("call_marker", "<tool_call>")),
     "@@DEFAULT_TEMPERATURE@@": repr(float(a.temperature)), "@@DEFAULT_TOP_P@@": repr(float(a.top_p)), "@@DEFAULT_TOP_K@@": str(a.top_k),
-    "@@CALL_FORMAT@@": str({"hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4}[chat["call_format"]]),
+    "@@CALL_FORMAT@@": str(CALL_FORMATS[chat.get("base_call_format", "hermes") if custom_chat else chat["call_format"]]),
     "@@TOOLS_AFTER_SYSTEM@@": B(chat["tools_after_system"]), "@@TOOLS_FUNCTION_ONLY@@": B(chat["tools_function_only"]),
     "@@TRIM_CONTENT@@": B(chat["trim_content"]),
     "@@HISTORY_THINK_ALWAYS@@": B(chat["history_think"] == "always"),
@@ -124,6 +145,15 @@ subs = {
 }
 for name in ("prepare", "control", "storage", "service"):
     text = open(os.path.join(HERE, "templates", name + ".loom"), encoding="utf-8").read()
+    if name == "control" and custom_chat:
+        for fn in ("chat_begin", "chat_message", "chat_end", "render_tool", "parse_tools", "output_next", "complete_text"):
+            text = text.replace(f"func.def public @{fn}(", f"func.def @generic_{fn}(")
+        rodata_py = custom_chat[:-len(".loom")] + "_rodata.py"
+        if os.path.exists(rodata_py):
+            sys.path.insert(0, os.path.dirname(rodata_py))
+            text += "\n" + __import__(os.path.basename(rodata_py)[:-3]).rodata()
+        text += "\n" + open(custom_chat, encoding="utf-8").read()
+        text = re.sub(r"@@HEX_CHAT:(\w+)@@", lambda m: hx(chat.get(m.group(1), "")), text)
     for k, v in subs.items():
         text = text.replace(k, v)
     assert "@@" not in text, (name, [l for l in text.splitlines() if "@@" in l])

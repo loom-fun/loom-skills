@@ -229,7 +229,7 @@ async function setAudio(blob) {
   $("asrgo").disabled = false;
 }
 $("asrfile").onchange = e => e.target.files[0] && setAudio(e.target.files[0]);
-$("asrsample").onclick = async () => setAudio(await (await fetch("/sample.wav")).blob());
+$("asrsample").onclick = async () => setAudio(await (await fetch("/sample.mp3")).blob());
 let rec = null;
 $("asrrec").onclick = async () => {
   if (rec) { rec.stop(); return; }

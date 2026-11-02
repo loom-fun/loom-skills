@@ -27,10 +27,24 @@ never edit old ones. Wall clock is install -> done; the target is the model's ro
 | 2026-11-01 | flint | faster-e2e v13 | **58.2** (budget 75) | 2 | **full PASS, AUDIT PASS** (agent 6/6) | 0.50 | 6/6 | quiet GPU; starter stop-token restore working from scratch; decode +25 %, c4 +14 %, prefill 1k -35 % |
 | 2026-11-01 | LFM2.5-24B-A2B (consistency re-check) | faster-e2e v13 rule | – | – | consistency PASS 3/3 (deterministic alone; one near-tie at gap 0.25 when concurrent) | – | – | v8 package, current consistency.py |
 | 2026-11-01 | LFM2.5-24B-A2B (rebuilt from reference) | main fc680fc | – | – | **current full gates: all PASS** (fresh, nothing reused; max gap 0.63); previous skill's gates: golden/compare/needle/sampling PASS, consistency + agent FAIL on the old rules (strict concurrent equality; no byte-fallback alignment) | 0.63 | 6/6 | answers the open LFM2.5 gate question |
+| 2026-11-01 | Qwen3.5-0.8B | streamline v1 | **20.4** (budget 46) | 0 | **full PASS, AUDIT PASS** | 0.36 | 6/6 | streamlined repo (-54 % lines); decode +27 %, prefill 1k/2k +23/+27 %, c4 +42 % vs b1361; qualify's llama.cpp baseline read low (finalize re-measures) |
+| 2026-11-01 | Bolt-E4B (gemma4) | streamline v1 | **43.5** (budget 53) | 2 | **full PASS, AUDIT PASS** | 0.35 | 6/6 | gemma4 example as starter.patch + chat/gemma4.loom splice; prefill 1k/2k +46/+59 %, decode @2k +13 %, c4 -4 % |
+| 2026-11-01 | LFM2.5-24B-A2B | streamline v1 | **25** (budget 53) | 2 | **full PASS, AUDIT PASS** | 0.63 | 6/6 | apply_example.sh lfm2moe; beat b1361 on every metric (decode +12 %, prefill 2k/32k +27/+54 %, c4 +17 %); MOE_R=4 won here |
+| 2026-11-01 | flint | streamline v1 | 68.8 (budget 75) | 3 | full: all PASS but compare (1 prompt, 2k doc, gap 1.027 vs b1361); AUDIT FAIL on it | 1.03 | 6/6 | **same divergence with main's skills and kit** (main compare.py, main-kit package, same golden: token 30, gap 1.027): a near-tie of the new reference build, not the branch. +15 min: full-context 503 at the default 56 GiB pool, rebuilt at 72 GiB; +12 min near-tie diagnosis (f32/split-K/matvec-MoE variants each match 64/64) |
+| 2026-11-02 | Muse-Glimmer-30B | streamline v1 | 78 (budget 106) | 2 | **full PASS, AUDIT PASS** | 0.41 | 7/7 | ATEM via chat/atem.loom splice; prefill 1k/2k/32k +14/+26/+32 %, decode +6 %, c4 -2 %; ~5 min were two branch issues fixed after the snapshot (chat_probe --verify ran before the ATEM overrides; manual cfg merge) |
+| 2026-11-02 | flint (main re-check) | main 20871ee | – | – | compare FAIL: same prompt, token 30, gap 1.027 (main's compare.py, a main-kit package, the streamline trial's b1361 golden) | 1.03 | – | the flint compare FAIL is the reference build's near-tie, not the branch |
+| 2026-11-02 | Qwen3.5-0.8B | streamline v2 | 25.1 (budget 46) | 0 | **full PASS, AUDIT PASS** | 0.36 | 6/6 | consolidated scripts (_lib.sh, stream(), perf_metrics) |
+| 2026-11-02 | Muse-Glimmer-30B | streamline v2 | 85 (budget 106) | 2 | **full PASS, AUDIT PASS** | 0.41 | 7/7 | +~15 min self-inflicted: A/Bs on the GPU during qualify's gates (qualify 41 vs ~30 min), git add of 5 GB; both now in the skill |
+| 2026-11-02 | flint | streamline v3 | – (interrupted) | 1 | finalize: all PASS but compare (same 1.027 prompt); AUDIT FAIL on it | 1.03 | – | full-context gate served with the then-auto 79 GB budget; **the machine then ran out of RAM** (GTT is system RAM) when the agent loaded a second llama-server by hand: desktop OOM-killed. Auto budget removed; default 56 GiB again |
+| 2026-11-02 | Qwen3.5-0.8B (scripts only) | one model at a time | – | – | **qualify + finalize: full PASS, AUDIT PASS** | 0.36 | 6/6 | empty reference cache, one fill round (32 refs); qualify's llama.cpp decode baseline 204 tok/s (side by side it read ~114) |
+| 2026-11-02 | Bolt-E4B (scripts only) | one model at a time | – | – | **full PASS, AUDIT PASS** | – | – | |
+| 2026-11-02 | LFM2.5-24B-A2B (scripts only) | one model at a time | – | – | **full PASS, AUDIT PASS** | – | – | |
+| 2026-11-02 | Muse-Glimmer-30B (scripts only) | one model at a time | – | – | **full PASS, AUDIT PASS** | 0.41 | – | |
+| 2026-11-02 | flint (scripts only) | one model at a time, near_tie, auto budget | – | – | **full PASS, AUDIT PASS** | 0.56 | – | full-context needle at 260k served (pool 457k, 79 GB alone); the borderline prompt is a near-tie under the new rule; a 2 s sampler never saw Loom and llama.cpp loaded together (2,700+ samples, all five models) |
 
 ## Lessons with numbers (why the skill looks the way it does)
 - The default "1 h of optimization" made every end-to-end job > 1 h by construction: the budget is now
-  the whole job (60 min), sized by `qualify.sh`.
+  the whole job (the model's roofline budget, `e2e_budget.py`), sized by `qualify.sh`.
 - Final gates re-recorded both llama.cpp goldens (6 min for golden2 on a 0.8B): the reference cache
   made a re-run cost only the Loom side (31 -> 9.5 min on Qwen3.5-0.8B).
 - A reference example for the architecture family cut the Bolt hand port from ~45 to ~5 min.

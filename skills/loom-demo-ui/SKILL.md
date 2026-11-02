@@ -12,7 +12,7 @@ the tabs:
 | Tab | Model kind | What it does |
 |---|---|---|
 | Chat | `text` | Dropdown of every text model. Streams the reply, shows reasoning first, then reports TTFT and decode tok/s. Image attach is allowed when the model lists `image` input. |
-| Transcribe | `recognition` | Upload a file, record from the mic, or use the bundled `short.wav`. The browser converts audio to 16 kHz mono PCM. |
+| Transcribe | `recognition` | Upload a file, record from the mic, or use the bundled `short.mp3`. The browser converts audio to 16 kHz mono PCM. |
 | Speak | `speech` | Plays the result and reports real-time factor. |
 | Image | `image` | 512² or 1024², with a seed. |
 | Embed | `embedding` | One sentence per line; shows a cosine-similarity matrix. |

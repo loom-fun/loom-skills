@@ -6,7 +6,8 @@ Per prompt: length of the token prefix matching the golden, and at the first
 divergence the golden log-prob gap  logp(golden token) - logp(loom token).
 Greedy decoding diverges at near-ties under any change of summation order, so
 the gate is about *where* divergences happen, not whether:
-  PASS   every divergence has gap <= 1.0 (near-tie) and the loom token is in the golden top-5
+  PASS   every divergence is a near-tie (bench_common.near_tie: gap <= 1.0 with Loom's token in the golden
+         top-5, or Loom picked llama.cpp's second choice where its first has p < 0.5)
   FAIL   any divergence with a large gap, or a token outside the golden top-5
 (Two llama.cpp builds disagree with each other in the same way.)
 """
@@ -16,7 +17,7 @@ import time
 
 import requests
 
-from bench_common import Package
+from bench_common import Package, near_tie
 
 ap = argparse.ArgumentParser()
 ap.add_argument("package")
@@ -56,14 +57,15 @@ def match(got, g):
     n = 0
     while n < min(len(got), len(gold)) and got[n] == gold[n]:
         n += 1
-    gap = None
+    gap, near = None, True
     if n < min(len(got), len(gold)):
         if n >= len(g["top"]):
             gap = 0.0  # no top-5 recorded here (byte-split token); counted as a near-tie
         else:
             top = dict((int(i), lp) for i, lp in g["top"][n])
             gap = (top[gold[n]] - top[got[n]]) if got[n] in top else "not in golden top-5"
-    return n, gap
+            near = near_tie(top, gold[n], got[n], a.max_gap)
+    return n, gap, near
 
 
 alt = {k: strip_ws_after_think(v) for k, v in alt.items()}
@@ -80,39 +82,32 @@ for g in json.load(open(a.golden)):
     ch = r["choices"][0]
     text = pkg.raw_from_chat(ch["message"], ch["finish_reason"] == "stop")
     got = pkg.ids(text)
-    n, gap = match(got, g)
+    n, gap, near = match(got, g)
     # llama.cpp can emit a non-canonical split (e.g. '[' 'A' where the HF tokenizer gives '[A');
     # identical text is a match, whatever the token boundaries.
     gold_text = pkg.tok.decode(g["ids"])
     if n < min(len(got), len(g["ids"])) and (text.startswith(gold_text) or gold_text.startswith(text)):
-        n, gap = min(len(got), len(g["ids"])), None
+        n, gap, near = min(len(got), len(g["ids"])), None, True
     if g["prompt"] in alt:  # llama.cpp disagreed with itself? take the recording Loom follows further
-        n2, gap2 = match(got, alt[g["prompt"]])
+        n2, gap2, near2 = match(got, alt[g["prompt"]])
         if n2 > n:
-            g, n, gap = alt[g["prompt"]], n2, gap2
-    is_bad = isinstance(gap, str) or (gap is not None and gap > a.max_gap)
-    if is_bad and a.llama and g["prompt"] not in alt:  # on-demand second recording of this prompt only
-        from bench_common import llama_completion
+            g, n, gap, near = alt[g["prompt"]], n2, gap2, near2
+    if not near and a.llama and g["prompt"] not in alt:  # on-demand second recording of this prompt only
+        from bench_common import llama_greedy
         ids_p = pkg.ids(pkg.render(g["prompt"]))
-        r2 = llama_completion(a.llama, {"prompt": ids_p, "n_predict": len(g["ids"]), "temperature": 0, "n_probs": 5,
-                                        "cache_prompt": False, "return_tokens": True, "repeat_penalty": 1.0,
-                                        "presence_penalty": 0.0, "frequency_penalty": 0.0}, pkg, "rec2")
+        r2, _, cp = llama_greedy(a.llama, ids_p, len(g["ids"]), pkg, "rec2")
         if "tokens" in r2:
-            cp = r2["completion_probabilities"]
-            if len(cp) != len(r2["tokens"]):
-                k = next((i for i, x in enumerate(cp) if i >= len(r2["tokens"]) or x["id"] != r2["tokens"][i]), len(cp))
-                cp = cp[:k]
             g2 = strip_ws_after_think({"prompt": g["prompt"], "prompt_tokens": len(ids_p), "ids": r2["tokens"],
                                        "top": [[(t["id"], t["logprob"]) for t in x["top_logprobs"]] for x in cp]})
-            n2, gap2 = match(got, g2)
+            n2, gap2, near2 = match(got, g2)
             print(f"       re-recorded (llama.cpp run-to-run check): {n2} matched, gap {gap2}", flush=True)
             # Further match wins; at the same position the smaller gap wins (llama.cpp itself moved there).
             better_gap = isinstance(gap2, float) and (isinstance(gap, str) or gap2 < gap)
-            if n2 > n or (n2 == n and better_gap):
-                g, n, gap = g2, n2, gap2
+            if n2 > n or (n2 == n and (better_gap or near2)):
+                g, n, gap, near = g2, n2, gap2, near2
     gold = g["ids"]
     full = n >= min(len(gold), len(got)) and abs(len(got) - len(gold)) <= 1
-    bad = isinstance(gap, str) or (gap is not None and gap > a.max_gap)
+    bad = not near
     rows.append({"prompt": g["prompt"][:80], "prompt_tokens": g.get("prompt_tokens"), "golden_tokens": len(gold), "matched": n,
                  "full_match": full, "divergence_gap": gap, "bad": bad, "seconds": round(time.perf_counter() - t0, 2), "loom_text": text[:160]})
     print(f"{g.get('prompt_tokens', 0):6d} {n:3d}/{len(gold):3d} gap={gap if not isinstance(gap, float) else round(gap, 3)} {'BAD ' if bad else ''}{g['prompt'][:50]!r}", flush=True)

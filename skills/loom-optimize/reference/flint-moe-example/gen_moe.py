@@ -6,9 +6,10 @@ gives each padded tile row's assignment (or -1); pos gives each assignment's
 padded row. Gate/up writes act_sorted[padded_row, 512]; down writes
 y_sorted[padded_row, 2048]; combine adds the weighted rows into the residual.
 """
+import os
 import sys
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from gen_gemm import dequant16
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "loom-port-llm", "starter"))
+from gen_gemm import dequant16  # noqa: E402  (the starter's generator)
 
 BUCKET = r"""
 // Bucket the tokens' six routed experts into 32-row tiles. One workgroup with

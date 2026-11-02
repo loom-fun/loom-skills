@@ -220,6 +220,10 @@ def derive(template_text, bos="", eos=""):
         rest = s_body[len("SYSPROBE"):]
         lead = rest[:rest.index(printed[0]) - len(line)]
         body_start = len(lead) - len(lead.lstrip())
+        # Tools in their own system block after the system message (Flint: "<|system|>SYS<|system|>\n# Tools"):
+        # the second role tag belongs to the separator, not to the tools prefix.
+        if chat["system_prefix"] and lead.startswith(chat["system_prefix"]):
+            body_start = len(chat["system_prefix"])
         chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
     elif s_body.endswith("SYSPROBE"):
         chat["tools_after_system"] = False
