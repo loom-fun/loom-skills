@@ -92,16 +92,10 @@ for g in json.load(open(a.golden)):
             g, n, gap = alt[g["prompt"]], n2, gap2
     is_bad = isinstance(gap, str) or (gap is not None and gap > a.max_gap)
     if is_bad and a.llama and g["prompt"] not in alt:  # on-demand second recording of this prompt only
-        from bench_common import llama_completion
+        from bench_common import llama_greedy
         ids_p = pkg.ids(pkg.render(g["prompt"]))
-        r2 = llama_completion(a.llama, {"prompt": ids_p, "n_predict": len(g["ids"]), "temperature": 0, "n_probs": 5,
-                                        "cache_prompt": False, "return_tokens": True, "repeat_penalty": 1.0,
-                                        "presence_penalty": 0.0, "frequency_penalty": 0.0}, pkg, "rec2")
+        r2, _, cp = llama_greedy(a.llama, ids_p, len(g["ids"]), pkg, "rec2")
         if "tokens" in r2:
-            cp = r2["completion_probabilities"]
-            if len(cp) != len(r2["tokens"]):
-                k = next((i for i, x in enumerate(cp) if i >= len(r2["tokens"]) or x["id"] != r2["tokens"][i]), len(cp))
-                cp = cp[:k]
             g2 = strip_ws_after_think({"prompt": g["prompt"], "prompt_tokens": len(ids_p), "ids": r2["tokens"],
                                        "top": [[(t["id"], t["logprob"]) for t in x["top_logprobs"]] for x in cp]})
             n2, gap2 = match(got, g2)

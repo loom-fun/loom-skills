@@ -92,9 +92,7 @@ if [ "$level" != fast ]; then
     run needle_full "$T" "$S/needle.py" "$pkg" "$url" "${needle_args[@]}"
   fi
 fi
-if [ $started_llama = 1 ] && [ -f "$LLAMACPP_STATE/llamacpp-$lport.pid" ]; then
-  kill "$(cat "$LLAMACPP_STATE/llamacpp-$lport.pid")" 2>/dev/null; rm -f "$LLAMACPP_STATE/llamacpp-$lport.pid"
-fi
+[ $started_llama = 1 ] && "$S/llamacpp_server.sh" --stop "$lport"
 args=()
 for n in "${order[@]}"; do args+=("$n" "${result[$n]}" "${secs[$n]}"); done
 "$T" - "$level" "$pkg_hash" $(( $(date +%s) - t_start )) "${args[@]}" <<'EOF'

@@ -47,7 +47,7 @@ done
 loom_perf --long
 "$T" "$S/c4_steady.py" "$url" 4 --model "$model" --label final --log perf_log.jsonl | grep -v "^\[campaign\]" | tail -1
 if [ $started = 1 ]; then
-  kill "$(cat "$LLAMACPP_STATE/llamacpp-$lport.pid")" 2>/dev/null; rm -f "$LLAMACPP_STATE/llamacpp-$lport.pid"
+  "$S/llamacpp_server.sh" --stop "$lport"
   "$T" - <<'PY'
 import json
 runs = {}

@@ -37,8 +37,7 @@ PRE_EFF_DENSE = lambda active_b: min(0.33, max(0.13, 0.13 + 0.06 * math.log2(max
 C4_GAIN = 2.5       # 4-stream aggregate vs single-stream decode
 
 
-def speeds(gguf, cfg, ctxs):
-    meta, tensors = R.load(gguf)
+def speeds(meta, tensors, cfg):
     geo = R.geometry(meta, cfg)
     geo["attn"] = R.attn_layers(tensors, geo["L"])
     wb, params, head, _ = R.weight_bytes(tensors, geo)
@@ -73,7 +72,7 @@ def workload(dec, pre, context):
         + 2 * (perf_short + perf_long + c4)
     full_probe = (context - 2048) / pre(context - 2048)
     t["finalize"] = 2 * (2 * perf_short + perf_long + c4) + golden + agent + sampling + consistency + full_probe
-    return {k: v for k, v in t.items()}
+    return t
 
 
 def main():
@@ -85,11 +84,11 @@ def main():
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     cfg = json.load(open(a.cfg)) if a.cfg else {}
-    meta, _ = R.load(a.gguf)
+    meta, tensors = R.load(a.gguf)
     arch = meta.get("general.architecture", "")
     context = a.context or cfg.get("context_length") or int(meta.get(f"{arch}.context_length", 32768))
     context = min(context, 262144)
-    dec, pre = speeds(a.gguf, cfg, [context])
+    dec, pre = speeds(meta, tensors, cfg)
     w = workload(dec, pre, context)
     meas = sum(w.values()) / 60
     budget = FIXED_MIN + OPT_MIN + meas + a.manual_min

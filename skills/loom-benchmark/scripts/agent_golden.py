@@ -19,7 +19,7 @@ import sys
 
 import requests
 
-from bench_common import Package, llama_completion
+from bench_common import Package, llama_greedy, top_logprobs
 
 TOOLS = [
     {"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city.",
@@ -55,22 +55,12 @@ def post(url, body, path="/v1/chat/completions"):
     return requests.post(url + path, data=data, timeout=1800, headers={"Content-Type": "application/json"}).json()
 
 
-def golden_ids(g):
-    """llama.cpp's generated ids and the top-5 lists that line up with them. completion_probabilities
-    omits byte-fallback tokens (emoji, partial UTF-8), so ids come from `tokens` and the top-5 lists are
-    trusted only while they align (the golden.py / compare.py rule)."""
-    cp = g.get("completion_probabilities", [])
-    ids = g.get("tokens") or [x["id"] for x in cp]
-    k = next((i for i, x in enumerate(cp) if i >= len(ids) or x["id"] != ids[i]), len(cp))
-    return ids, cp[:k]
-
-
 def gap_at(ids, tops, loom_ids, k):
     """logp(golden) - logp(loom) at divergence k; 0.0 past the aligned top-5 lists (a byte-split token,
     counted as a near-tie as in compare.py); None when Loom's token is outside the top-5."""
     if k >= len(tops):
         return 0.0
-    top = {t["id"]: t["logprob"] for t in tops[k]["top_logprobs"]}
+    top = top_logprobs(tops, k)
     return top[ids[k]] - top[loom_ids[k]] if loom_ids[k] in top else None
 
 
@@ -117,10 +107,7 @@ def main():
             if a.llama:
                 raw = P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
                 loom_ids = P.ids(raw)
-                g = llama_completion(a.llama, {
-                    "prompt": ids, "n_predict": max(1, u["completion_tokens"]), "temperature": 0, "n_probs": 5,
-                    "cache_prompt": False, "return_tokens": True}, P)
-                gids, gtops = golden_ids(g)
+                g, gids, gtops = llama_greedy(a.llama, ids, max(1, u["completion_tokens"]), P)
                 k = next((i for i, (x, y) in enumerate(zip(loom_ids, gids)) if x != y), None)
                 import chat_probe as _cp
                 if k is not None and hasattr(_cp, "raw_alternatives"):
@@ -142,10 +129,7 @@ def main():
                     for salt in ("rec2", "rec3"):
                         if gap is not None and gap <= 1.0:
                             break
-                        g2 = llama_completion(a.llama, {
-                            "prompt": ids, "n_predict": max(1, u["completion_tokens"]), "temperature": 0, "n_probs": 5,
-                            "cache_prompt": False, "return_tokens": True}, P, salt)
-                        gids2, cp2 = golden_ids(g2)
+                        _, gids2, cp2 = llama_greedy(a.llama, ids, max(1, u["completion_tokens"]), P, salt)
                         k2 = next((i for i, (x, y) in enumerate(zip(loom_ids, gids2)) if x != y), None)
                         rec.setdefault("rerecorded", []).append(k2)
                         if k2 is None:

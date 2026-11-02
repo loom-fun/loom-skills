@@ -1,6 +1,6 @@
 """Steady-state aggregate decode throughput with N concurrent streams: tokens
 produced by all streams inside the window where every stream is decoding
-(excludes ramp-up and tail, unlike perf.py's c4_agg_tps).
+(excludes ramp-up and tail).
 
 usage: python c4_steady.py URL [N=4] [--model MODEL_ID]   (omit --model for llama.cpp)
 Loom needs execution.rows >= N in the package preset; llama-server needs -np N.

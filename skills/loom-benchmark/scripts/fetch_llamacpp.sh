@@ -14,7 +14,8 @@ if [ "$gfx" = auto ]; then
 fi
 os=ubuntu; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) os=windows;; esac
 api=https://api.github.com/repos/lemonade-sdk/llamacpp-rocm/releases/$([ "$tag" = latest ] && echo latest || echo "tags/$tag")
-meta=$(curl -fsSL "$api") || { echo "cannot reach the GitHub API for lemonade-sdk/llamacpp-rocm" >&2; exit 1; }
+auth=(); [ -n "${GH_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $GH_TOKEN")   # avoids API rate limits on CI
+meta=$(curl -fsSL "${auth[@]}" "$api") || { echo "cannot reach the GitHub API for lemonade-sdk/llamacpp-rocm" >&2; exit 1; }
 read -r rtag url < <(python3 -c '
 import json, sys
 d = json.loads(sys.argv[1]); want = f"-{sys.argv[2]}-rocm-{sys.argv[3]}-x64.zip"

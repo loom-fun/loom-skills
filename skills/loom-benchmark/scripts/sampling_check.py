@@ -10,13 +10,12 @@ usage: sampling_check.py PKG LOOM_URL [--llama URL] [--draws 200]
 """
 import argparse
 import collections
-import json
 import math
 import sys
 
 import requests
 
-from bench_common import Package, llama_completion
+from bench_common import Package, llama_greedy
 
 PROMPT = "Pick a random fruit: apple, banana, cherry or grape. Answer with just the fruit name in lowercase."
 
@@ -53,7 +52,7 @@ def main():
     top_p1 = None
     if a.llama:
         ids0 = P.ids(P.render_messages(msgs, None, thinking))
-        g0 = llama_completion(a.llama, {"prompt": ids0, "n_predict": 1, "temperature": 0, "n_probs": 20, "cache_prompt": False}, P)
+        g0 = llama_greedy(a.llama, ids0, 1, P, n_probs=20)[0]
         top_p1 = max(math.exp(t["logprob"]) for t in g0["completion_probabilities"][0]["top_logprobs"])
     if len(varied) > 1 or top_p1 is None or top_p1 < 0.9:
         checks.append((f"different seeds vary ({len(varied)} distinct of 12)", len(varied) > 1))
@@ -74,9 +73,7 @@ def main():
         if not first:
             print("SKIP first-token distribution: the first generated token is a structural channel header (not in the text)")
             sys.exit(1 if fails else 0)
-        ids = P.ids(P.render_messages(msgs, None, thinking))
-        g = llama_completion(a.llama, {"prompt": ids, "n_predict": 1, "temperature": 0, "n_probs": 20,
-                                       "cache_prompt": False}, P)
+        g = g0 if top_p1 is not None else llama_greedy(a.llama, P.ids(P.render_messages(msgs, None, thinking)), 1, P, n_probs=20)[0]
         probs = {t["id"]: math.exp(t["logprob"]) for t in g["completion_probabilities"][0]["top_logprobs"]}
         support = set(probs) | set(first)
         tv = 0.5 * sum(abs(probs.get(t, 0.0) - first[t] / a.draws) for t in support)

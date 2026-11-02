@@ -54,7 +54,7 @@ step "2/6 one shared llama-server (4 slots, unified KV)"
 kv=$("$T" -c "print(min($ctx, 65536) + 1024)")
 L=http://127.0.0.1:$lport
 "$S/llamacpp_server.sh" "$gguf" "$lport" 4 "$kv" unified || exit 1
-stop_llama() { [ "${KEEP_LLAMA:-0}" = 1 ] || [ ! -f "$LLAMACPP_STATE/llamacpp-$lport.pid" ] || { kill "$(cat "$LLAMACPP_STATE/llamacpp-$lport.pid")" 2>/dev/null; rm -f "$LLAMACPP_STATE/llamacpp-$lport.pid"; }; }
+stop_llama() { [ "${KEEP_LLAMA:-0}" = 1 ] || "$S/llamacpp_server.sh" --stop "$lport"; }
 trap stop_llama EXIT
 
 step "3/6 gates (LEVEL=quick)"

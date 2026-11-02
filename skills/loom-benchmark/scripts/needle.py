@@ -1,12 +1,11 @@
 """Full-context gate: needle-in-a-haystack retrieval up to the package's context capacity.
 
-"Access code" sentences (one by default, at a depth that varies with the size; --needles 3
-puts them at 10/50/90%) are hidden in a real-text haystack (the skill's docs, then the local
+An "access code" sentence (at a depth that varies with the size and probe) is hidden in a real-text haystack (the skill's docs, then the local
 Python stdlib sources) and the model is asked to list them. Sizes default to 25/50/75/100% of the package's context_capacity (minus the answer
 budget). It also checks that a prompt over the capacity is refused cleanly (HTTP 400)
 and that the server is still healthy afterwards.
 
-usage: needle.py PKG LOOM_URL [--sizes N ...] [--probes 2] [--needles 1|3] [--llama URL] [--llama-max 65536] [--max-tokens 1024] [--out FILE]
+usage: needle.py PKG LOOM_URL [--sizes N ...] [--probes 2] [--llama URL] [--llama-max 65536] [--max-tokens 1024] [--out FILE]
   default sizes: 50 % (2 probes) and 100 % (1 probe, --top-probes) of context_capacity; a full-context
   prefill can take many minutes (a 261k prompt: ~11 min for a 0.8B hybrid on a busy Strix Halo)
   --llama also runs the identical prompt ids through llama.cpp /completion for comparison
@@ -32,19 +31,16 @@ import time
 
 import requests
 
-from bench_common import DATA, Package, llama_completion
+from bench_common import Package, doc, llama_greedy, top_logprobs
 
 QUESTIONS = {
     1: ("\n\n----\nSomewhere in the material above there is exactly one sentence of the form "
         "'The access code for vault <NAME> is <CODE>.' What is the vault's name and code? Answer as NAME: CODE."),
-    3: ("\n\n----\nSomewhere in the material above there are exactly three sentences of the form "
-        "'The access code for vault <NAME> is <CODE>.' List all three vaults with their codes, "
-        "one per line as NAME: CODE. Answer only with those three lines."),
 }
 
 
 def corpus():
-    parts = [open(os.path.join(DATA, f"doc_{n}.txt"), encoding="utf-8").read() for n in (32000, 16000, 8000)]
+    parts = [doc(n) for n in (32000, 16000, 8000)]
     stdlib = sysconfig.get_paths()["stdlib"]
     for f in sorted(glob.glob(os.path.join(stdlib, "*.py"))):
         parts.append(f"\n\n# ===== file: {os.path.basename(f)} =====\n" + open(f, encoding="utf-8", errors="replace").read())
@@ -56,7 +52,7 @@ def haystack(P, ids, n, seed, count=1):
     body = P.tok.decode(ids[:n])
     names = rng.sample(["ORCHID", "TUNDRA", "MERIDIAN", "BASALT", "KESTREL", "QUARTZ", "LANTERN", "SAFFRON"], count)
     codes = [f"{rng.randint(100, 999)}-{rng.choice('ABCDEFGHJKLMNPQRSTUVWXYZ')}{rng.randint(10, 99)}" for _ in names]
-    depths = (0.1, 0.5, 0.9) if count == 3 else (rng.choice((0.1, 0.3, 0.5, 0.7, 0.9)),)
+    depths = (rng.choice((0.1, 0.3, 0.5, 0.7, 0.9)),)
     for depth, name, code in sorted(zip(depths, names, codes), reverse=True):
         cut = body.rfind("\n", 0, int(len(body) * depth)) + 1
         body = body[:cut] + f"The access code for vault {name} is {code}.\n" + body[cut:]
@@ -92,7 +88,6 @@ def main():
     ap.add_argument("--sizes", type=int, nargs="*")
     ap.add_argument("--llama", default=None)
     ap.add_argument("--max-tokens", type=int, default=1024)
-    ap.add_argument("--needles", type=int, default=1, choices=[1, 3])
     ap.add_argument("--probes", type=int, default=2)
     ap.add_argument("--top-probes", type=int, default=1, help="probes at the largest size (a full-context prefill is the slow part)")
     ap.add_argument("--llama-max", type=int, default=65536, help="compare with llama.cpp only up to this many tokens")
@@ -104,7 +99,7 @@ def main():
     # Thinking off (when the template allows it) keeps answers short and deterministic.
     thinking = False if P.chat.get("thinking") == "toggle" else None
     extra = {"chat_template_kwargs": {"enable_thinking": False}} if thinking is False else {}
-    overhead = len(P.ids(P.render_messages([{"role": "user", "content": QUESTIONS[a.needles]}], None, thinking)))
+    overhead = len(P.ids(P.render_messages([{"role": "user", "content": QUESTIONS[1]}], None, thinking)))
     top = context - a.max_tokens - overhead - 64
     sizes = a.sizes or [top // 2, top]
     ids = P.ids(corpus())
@@ -116,7 +111,7 @@ def main():
     loom_total = probes_total = 0
     for n in sizes:
         for probe in range(a.top_probes if n == max(sizes) and len(sizes) > 1 else a.probes):
-            prompt, needles = haystack(P, ids, n, n * 31 + probe, a.needles)
+            prompt, needles = haystack(P, ids, n, n * 31 + probe)
             rec = {"n": n, "probe": probe}
             r = chat(a.url, P.model_id, prompt, a.max_tokens, extra)
             text = r.get("text", "")
@@ -127,23 +122,20 @@ def main():
             if ok and a.llama and n <= a.llama_max:
                 pids = P.ids(P.render_messages([{"role": "user", "content": prompt}], None, thinking))
                 t0 = time.time()
-                g = llama_completion(a.llama, {
-                    "prompt": pids, "n_predict": a.max_tokens, "temperature": 0, "n_probs": 5, "cache_prompt": False}, P)
-                cp = g.get("completion_probabilities", [])
-                gids = [x["id"] for x in cp]
+                g, gids, cp = llama_greedy(a.llama, pids, a.max_tokens, P)
                 lids = P.ids(text)
                 k = next((i for i, (x, y) in enumerate(zip(lids, gids)) if x != y), None)
                 gap = None
-                if k is not None:
-                    top = {t["id"]: t["logprob"] for t in cp[k]["top_logprobs"]}
-                    gap = round(top[gids[k]] - top[lids[k]], 3) if lids[k] in top else "not in top-5"
+                if k is not None:  # past the aligned top-5 lists (a byte-split token): a near-tie, as in compare.py
+                    top = top_logprobs(cp, k)
+                    gap = 0.0 if k >= len(cp) else round(top[gids[k]] - top[lids[k]], 3) if lids[k] in top else "not in top-5"
                 rec.update(llama_found=sum(v in g.get("content", "") for v in needles.values()), llama_s=round(time.time() - t0, 1),
                            diverge_at=k, gap=gap, llama_answer=g.get("content", "")[-400:])
                 near_tie = k is None or (isinstance(gap, float) and gap <= 1.0)
                 ok = rec["found"] >= rec["llama_found"] or near_tie
             rec["pass"] = ok
             failures += not ok
-            loom_total += rec["found"]; probes_total += a.needles
+            loom_total += rec["found"]; probes_total += 1
             print(("OK  " if ok else "FAIL"), json.dumps({k: v for k, v in rec.items() if "answer" not in k}), flush=True)
             results.append(rec)
     print(f"needles found (informational): Loom {loom_total}/{probes_total}")

@@ -15,7 +15,7 @@ llama.cpp ROCm numbers, keys as in perf.py output:
   {"decode_tps": 52.7, "decode_tps_2k": 48.7, "prefill_1000": 1593, "prefill_2000": 1678,
    "c4_steady": 157}
 """
-import argparse, json, math, re, sys
+import argparse, json, math, re
 
 # Demonstrated efficiencies on Strix Halo (fraction of the roofline actually reached by
 # a tuned Loom port, end to end). Update these when a port beats them; cite the source.

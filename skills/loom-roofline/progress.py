@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Rate of approach to the roofline, and what to do next.
 
-usage: progress.py bench/roofline.json bench/targets.jsonl --add VALUE --change "what" [--reverted] [--metric decode_tps]
-       progress.py bench/roofline.json bench/targets.jsonl [--metric decode_tps]
+usage: progress.py bench/roofline.json bench/targets.jsonl [--metric decode_tps]
                    [--budget-h 1] [--reserve-min 10] [--goal-tps N]
                    [--window-min 45] [--horizon-h H] [--stall-min M]
 
@@ -10,11 +9,8 @@ usage: progress.py bench/roofline.json bench/targets.jsonl --add VALUE --change 
 counted from the first "start" line in the log. The horizon is what is left of it,
 minus --reserve-min for the final gates and report. --horizon-h overrides that.
 --goal-tps: a user-supplied target, which replaces target/stretch as the goal.
---add: append a correctly formatted line (ts = now, commit = git HEAD) and then
-evaluate. The first --add for a metric should be --change start. Prefer this to
-writing the log by hand.
 
-targets.jsonl: one line per measured build (kept or not), appended by the loop:
+targets.jsonl: one line per measured build (kept or not), appended by perf.py (campaign.log_metrics):
   {"ts": "2026-10-26 22:09:18", "metric": "decode_tps", "value": 59.87,
    "commit": "abc123", "change": "adaptive matvec rows", "kept": true}
 A first line with "change": "start" marks the starting point. Time spent on
@@ -31,7 +27,7 @@ over the trailing window. Verdicts:
   BUDGET    the time budget (minus the reserve) is used up: run the final gates and report.
   DONE      the goal is met (the user's --goal-tps, or else the stretch), or the gap to the ceiling is below measurement noise.
 """
-import argparse, json, subprocess
+import argparse, json
 from datetime import datetime
 
 NOISE = 0.02  # ±2 % run-to-run on decode/c4
@@ -58,9 +54,6 @@ def main():
     ap.add_argument("--reserve-min", type=float, help="default: roofline.json campaign.reserve_min, else 10")
     ap.add_argument("--goal-tps", type=float)
     ap.add_argument("--horizon-h", type=float)
-    ap.add_argument("--add", type=float)
-    ap.add_argument("--change", default="")
-    ap.add_argument("--reverted", action="store_true")
     ap.add_argument("--stall-min", type=float, help="default: budget/2, clamped to 20-90 min")
     a = ap.parse_args()
     rj = json.load(open(a.roofline))
@@ -72,14 +65,6 @@ def main():
         a.reserve_min = camp.get("reserve_min", 10)
     if a.stall_min is None:
         a.stall_min = min(90, max(20, a.budget_h * 30))
-    if a.add is not None:
-        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
-                                text=True).stdout.strip() or "-"
-        with open(a.log, "a") as f:
-            f.write(json.dumps({"ts": datetime.now().isoformat(timespec="seconds"),
-                                "metric": a.metric or "decode_tps", "value": a.add,
-                                "commit": commit, "change": a.change,
-                                "kept": not a.reverted}) + "\n")
     rows = [json.loads(l) for l in open(a.log) if l.strip()]
     metrics = [a.metric] if a.metric else sorted({r["metric"] for r in rows})
     for m in metrics:

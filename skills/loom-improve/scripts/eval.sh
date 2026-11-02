@@ -16,7 +16,7 @@ out=$(mkdir -p "$1" && cd "$1" && pwd); pkg=$(cd "$2" && pwd); gguf=$(cd "$(dirn
 port=${4:-8460}; lport=${5:-8430}
 here=$(cd "$(dirname "$0")" && pwd); SK=${EVAL_SKILLS:-$here/../..}
 B=$SK/loom-benchmark/scripts; SV=$SK/loom-setup/scripts
-root=${LOOM_ROOT:-$HOME/loom}; T=$root/.tools/bin/python
+root=${LOOM_ROOT:-$HOME/loom}; bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts; T=$bin/python   # Windows venvs use Scripts/
 export LOOM_SERVE_STATE=$out/state LLAMACPP_STATE=$out/llstate PYTHONDONTWRITEBYTECODE=1
 model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
 mem=${6:-$("$T" - "$pkg" <<'EOF'
@@ -49,7 +49,7 @@ for r in 1 2 3; do
 done
 [ $started = 1 ] && "$T" "$B/perf.py" "http://127.0.0.1:$lport" llama --kind llama --no-campaign --long --log perf.jsonl >/dev/null
 "$T" "$B/perf.py" "http://127.0.0.1:$port" loom --model "$model" --no-campaign --long --log perf.jsonl >/dev/null
-[ $started = 1 ] && kill "$(cat "$LLAMACPP_STATE/llamacpp-$lport.pid")" 2>/dev/null
+[ $started = 1 ] && "$B/llamacpp_server.sh" --stop "$lport"
 "$T" - <<'EOF'
 import json, statistics
 runs = {}
