@@ -30,7 +30,7 @@ never edit old ones. Wall clock is install -> done; the target is the model's ro
 
 ## Lessons with numbers (why the skill looks the way it does)
 - The default "1 h of optimization" made every end-to-end job > 1 h by construction: the budget is now
-  the whole job (60 min), sized by `qualify.sh`.
+  the whole job (the model's roofline budget, `e2e_budget.py`), sized by `qualify.sh`.
 - Final gates re-recorded both llama.cpp goldens (6 min for golden2 on a 0.8B): the reference cache
   made a re-run cost only the Loom side (31 -> 9.5 min on Qwen3.5-0.8B).
 - A reference example for the architecture family cut the Bolt hand port from ~45 to ~5 min.

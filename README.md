@@ -51,7 +51,8 @@ git clone https://github.com/loom-fun/loom-skills && ./loom-skills/install.sh   
 /loom get <hf-org>/<model> working on loom-serve, optimize it, and report the performance relative to llamacpp rocm
 ```
 
-Claude runs the whole pipeline without stopping, in about an hour, as four scripted steps
+Claude runs the whole pipeline without stopping, within the model's roofline time budget (about
+25 min for a 0.8B to 70 min for a 30B dense model in recent trials), as four scripted steps
 with the agent's judgment only where it is needed:
 1. `loom-port-llm/port.sh`: pick the GGUF (header-only probe: supported formats, fits in GPU
    memory), port, build at the native context, serve, kernel tests, smoke test;
@@ -73,35 +74,15 @@ Jinja chat template and verified against it. Dense transformers and Qwen3.5-styl
 gated delta-net hybrids are covered by the starter kit. The llama.cpp reference
 outputs are cached, so re-running the gates on an optimized build only costs the Loom side.
 
-**hrx-loom 0.1.0 (PyPI), October 2026.** Fresh agents given only these skills ported
-`Qwen/Qwen3-0.6B-GGUF` (Q8_0) and `unsloth/Qwen3.5-0.8B-GGUF` (Q4_K_M) in one shot, with a
-20-minute optimization budget, on a Strix Halo that other jobs kept 100 % busy:
+**Recent fresh-agent trials (hrx-loom 0.1.0, Strix Halo, November 2026)**, one prompt each, full
+gates and audit PASS, against the fastest llama.cpp ROCm build on the same GGUF: Qwen3.5-0.8B in 24 min
+(decode +27 %, prefill 1k/2k +22/+28 %), Bolt-E4B (Gemma 4) in 52 min (prefill 1k/2k +44/+58 %),
+flint (40B MoE) in 58 min (decode +25 %), Muse-Glimmer-30B in 71 min. Every trial and its lessons:
+`skills/loom-improve/reference/results.md`.
 
-| Model | Context | Gates | Decode vs llama.cpp ROCm |
-|---|---|---|---|
-| Qwen3-0.6B | 40,960 | golden PASS, agent tool loop 6/6, needle to 30k (single miss at 39.8k, matched by llama.cpp flipping nearby) | ≈2.0× (157 vs 77 tok/s); 4 streams ≈1.65× |
-| Qwen3.5-0.8B | 262,144 | golden (11 exact matches, max gap 0.36), agent tool loop 6/6, needle found at 65k/131k/196k/261k | ≈2.0× (144 vs 70 tok/s, interleaved medians); 4 streams ≈1.7× |
-
-The numbers are noisy (shared GPU). The trials' findings were folded back into the
-skills (a sturdier needle gate, hybrid-aware roofline, adaptive matvec rows in the
-starter, shared-machine paths).
-
-Earlier, on nvidia/NVIDIA-Nemotron-3.5-Bolt-E4B-4GB (Gemma-4 E4B architecture), with a
-fresh agent and this single prompt. The run took 79 minutes. The results, against
-llama.cpp ROCm b1355 on the same GGUF:
-
-| Metric | Margin |
-|---|---|
-| Decode | +14 % |
-| Prefill 1k | +38 % |
-| Prefill 2k | +39 % |
-| 4 streams | +7 % |
-
-Every divergence from llama.cpp's output was a near-tie, up to 32k-token prompts.
-
-**Effort control.** With no target and no time given, the **whole job** gets about
-**60 minutes**: the optimization phase gets what is left after the port and the
-qualification, minus a reserve for the final gates and the report. Add a time or a target
+**Effort control.** With no target and no time given, the **whole job** gets the model's
+roofline budget (`loom-roofline/e2e_budget.py`): the optimization phase gets what is left after
+the port and the qualification, minus a reserve for the final gates and the report. Add a time or a target
 to the prompt to change it, for example "…optimize it for 3 hours…" or "…until decode is
 50 % faster than llama.cpp…". The roofline step checks a stated target against the
 hardware ceiling and says so up front if it is out of reach.
@@ -125,12 +106,12 @@ name:
 | `/loom:loom-demo-ui` | `/loom-demo-ui` | Web playground: chat, transcribe, speak, image, embed. It finds models from the servers' `/v1/status` |
 | `/loom:loom-port-llm` | `/loom-port-llm` | Config-driven starter kit that turns a GGUF LLM (dense, or a Qwen3.5-style gated delta-net hybrid) into a Loom package at its native context length, with tool calling, reasoning and history reuse derived from the model's own chat template: inspect → generate kernels → build → kernel unit tests → golden, agent and full-context gates |
 | `/loom:loom-roofline` | `/loom-roofline` | Roofline for decode/prefill/c4 from the GGUF, calibrated against achieved Loom efficiency; picks per-metric targets vs llama.cpp and a time budget; a rate-of-approach controller decides continue / pivot / stop |
-| `/loom:loom-optimize` | `/loom-optimize` | The measure / ablate / change / verify loop, a kernel A/B helper, a catalog of optimizations that worked (and that didn't), and the sources of a hand-tuned MoE port |
+| `/loom:loom-optimize` | `/loom-optimize` | The measure / ablate / change / verify loop, a kernel A/B helper, and a catalog of optimizations that worked (and that didn't) |
 | `/loom:loom-benchmark` | `/loom-benchmark` | Token-by-token golden comparison against llama.cpp ROCm, a multi-turn tool-calling gate, a full-context needle gate, a batching-consistency check, throughput workloads, reporting rules |
 | `/loom:loom-improve` | `/loom-improve` | Improve the skills themselves: the KPIs (wall clock, agentic correctness vs llama.cpp, speed), fresh-agent trials on a reference model suite, a stall watchdog, a KPI regression check and a fixed quiet-GPU evaluator. Prompt: "your goal is to improve the loom skill at X" |
 
-A starter-covered model goes from prompt to report in about an hour (port ≈1 min, qualify
-≈10 min, optimization ≈30 min, finalize ≈10–15 min). An architecture the starter doesn't
+A starter-covered model goes from prompt to report within its roofline budget (port ≈1 min,
+qualify ≈10 min, then optimization and finalize). An architecture the starter doesn't
 cover adds the hand port; `loom-port-llm` has a playbook for it (llama.cpp's own compute
 graph and intermediate tensors via `llama_trace.py`, numpy node-by-node checks), and the
 optimization budget shrinks to fit.

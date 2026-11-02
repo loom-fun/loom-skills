@@ -22,10 +22,8 @@ $S/pick_llamacpp.sh MODEL.gguf 8139 "$HOME"   # every llama-server with libggml-
 ```
 The baseline is the top-ranked build. Don't choose by version string: the lemonade
 nightly prints `version: 1`, and the tag is usually only in the directory name.
-Builds differ a lot on the same GGUF:
-- LFM2.5-24B prefill: b1274 1,062 tok/s vs b1355 2,140 tok/s;
-- Bolt-E4B with 4 streams: b1274 125 tok/s vs b1355 157 tok/s.
-- A new architecture can need the newest release: no installed build knew `flint`.
+Builds differ up to 2× on the same GGUF (a stale build once inflated a margin from +25 % to 2.5×),
+and a new architecture can need the newest release (no installed build knew `flint`).
 
 A weaker baseline inflates every margin you report. Report the chosen build's path and tag.
 lemonade-sdk/llamacpp-rocm releases are pre-approved: download them without asking. Check that
@@ -36,7 +34,7 @@ Halo). Then:
 ```bash
 LLAMACPP_DIR=<dir> $S/llamacpp_server.sh MODEL.gguf 8130 1 34000   # goldens / long context (1 slot, 34k)
 LLAMACPP_DIR=<dir> $S/llamacpp_server.sh MODEL.gguf 8130 4 8192    # perf incl. 4 streams
-kill $(cat ${LLAMACPP_STATE:-/tmp}/llamacpp-8130.pid)
+$S/llamacpp_server.sh --stop 8130
 ```
 Always use the **same GGUF file** as the Loom package. Never run llama.cpp and a
 big Loom model at the same time if together they exceed GPU memory.
@@ -125,10 +123,9 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     prompt + completion (history reuse works, including recurrent state).
   - `calls_ok`: tool calls name a declared function with JSON arguments.
   - golden: Loom's turn vs llama.cpp `/completion` on the same prompt ids; a
-    divergence must be a near-tie (gap ≤ 1.0 with the token in the top-5, the compare.py rule). A turn that
-  would fail is re-recorded on llama.cpp (up to twice) and scored against the recording Loom follows
-  further: llama.cpp ROCm isn't run-to-run deterministic on some MoE models (flint: three identical
-  temperature-0 requests gave two different greedy texts).
+    divergence must be a near-tie (the compare rule). A turn that would fail is re-recorded on
+    llama.cpp (up to twice) and scored against the recording Loom follows further (llama.cpp's
+    run-to-run nondeterminism, above).
   "The model ended inside its reasoning" notes are a greedy-decoding behavior of
   small thinking models, confirmed when llama.cpp's own distribution at that
   point prefers EOS; not a Loom bug by itself.
@@ -161,7 +158,6 @@ $T $S/c4_steady.py http://127.0.0.1:8160 4 --model <id>;  $T $S/c4_steady.py htt
 | prefill[] | 1k and 2k-token documents with max_tokens=4. prompt_tokens / TTFT, the median of 5 runs (`--repeats`); single runs varied 1.5–2.9k tok/s on one build. |
 | decode_tps_2k / _32k | Decode with that much context in the KV cache. |
 | prefill_long[] | 8k / 16k / 32k documents. |
-| c4_agg_tps | `--c4` only: 8 requests through 4 threads, total tokens / wall time (includes ramp). |
 | c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding. Use this for "N requests at once". |
 
 Rules:
@@ -227,16 +223,7 @@ source for the report's numbers.
   headline table, gates, setup, decisions, audit, timeline. Write only the notes yourself (what
   was optimized, what was skipped and why, losses), rerun `report.py --notes`, and publish
   `report.html` as is. Extend the generated page only if the user asked for more.
-- **Format** (for a hand-extended report). A single-page HTML artifact (Artifact tool;
-  load the artifact-design skill first). The sections:
-  1. methodology;
-  2. functional;
-  3. pressure: concurrency, long context and memory limits;
-  4. quality;
-  5. performance;
-  6. an appendix of what was skipped and why.
-
-  Diagrams should be drawn from the user's point of view, with readable font
-  sizes (≥ 14 px). Generate the page from the results JSON with a small script, so no number is typed by hand.
+- A hand-extended report (only on request): load the artifact-design skill first, and generate it from
+  the results JSON with a small script, so no number is typed by hand.
 - Keep raw logs (`perf_log.jsonl`, `compare.json`, `golden.json`) next to the
   report, so every number can be traced.

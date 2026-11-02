@@ -52,35 +52,21 @@ Windows 11 on Strix Halo. Run the scripts from **Git Bash**. Differences:
     on a 128 GB box with a 32 GiB BIOS carve-out).
 - `build.py` symlinks the GGUF. Without Developer Mode it hard-links it instead,
   which needs the package and the GGUF on the same drive.
-- **llama.cpp:** lemonade installs builds in `~/.cache/lemonade/bin/llamacpp/{rocm,rocm-stable,rocm-preview}`.
-  A build missing its HIP/BLAS DLLs **silently runs on CPU**: on the original
-  machine only one of the three saw the GPU. Check with `llama-server --list-devices`.
-  `llamacpp_server.sh` refuses a build that lists no `ROCm` device, so
-  `pick_llamacpp.sh` skips it.
+- **llama.cpp:** lemonade installs builds in `~/.cache/lemonade/bin/llamacpp/{rocm,rocm-stable,rocm-preview}`;
+  one missing its HIP/BLAS DLLs silently runs on CPU (`llamacpp_server.sh` refuses it, see `loom-benchmark`).
 
 Typical cold-start order: `loom-setup` → `loom-port-llm` (`port.sh`) → `loom-benchmark`
 (`qualify.sh`: gates, baselines, roofline targets) → `loom-optimize` → `finalize.sh`.
 
 **Time budget.** With no target and no time given, an end-to-end job ("get X working,
-optimize it, report") gets **this model's roofline budget for the whole job**, from the first
-command to the published report: `loom-roofline/e2e_budget.py` turns the model's decode/prefill
-ceilings into the time the pipeline's measurements and gates take on both engines, plus a fixed
-allowance for the agent's own work and optimization (Qwen3.5-0.8B ≈ 46 min, LFM2.5-24B-A2B ≈ 53,
-flint ≈ 75, a 30B dense model ≈ 106). The optimization phase gets what is left after the port and
-the qualification, minus the final gates and report; `qualify.sh` computes all of it from the clock
-that `port.sh` starts (`WORKDIR/.e2e_start`). A stated time ("spend 3 hours") or target replaces
-the default (`BUDGET_H=` / `E2E_BUDGET_MIN=`, see `loom-roofline` section 0). "Optimize this model"
-on an existing port, with no time given, gets **30 min** of optimization.
-
-Announce the targets and the budget without asking, then iterate in
-`loom-optimize`. After each measurement, `progress.py` checks how fast the gap to
-the roofline is closing, per hour, and gives one of four verdicts:
-- continue;
-- review (pivot to another path, or fork from an earlier decision);
-- budget used up;
-- done.
-
-Report met or short for each metric, with the approach curve.
+optimize it, report") gets **this model's roofline budget for the whole job**, first command to
+published report (`loom-roofline/e2e_budget.py`: the pipeline's workload at this model's speed plus a
+fixed allowance; `qualify.sh` gives optimization what is left, from the clock `port.sh` starts). A
+stated time or target replaces it (`BUDGET_H=` / `E2E_BUDGET_MIN=`, `loom-roofline` section 0);
+"optimize this model" on an existing port gets **30 min**. Announce the targets and the budget
+without asking, iterate in `loom-optimize`, and act on the verdict `perf.py` prints (CONTINUE /
+REVIEW / BUDGET / DONE, `loom-roofline` section 5). Report met or short for each metric, with the
+approach curve.
 
 ## End-to-end requests: one turn, four commands
 
@@ -128,12 +114,8 @@ write generator code, build packages. **Don't use the GPU while they measure** (
 Stop to ask only for what the hard rules require: a gated-license click, or approval of a
 binary from a source other than PyPI and lemonade-sdk/llamacpp-rocm. Avoid both where possible:
 - **Reuse what is installed.** Check `~/loom/.venv/bin/loom-serve` (Windows: `.venv/Scripts/loom-serve.exe`) and the HF cache.
-- **Baseline = the fastest llama.cpp ROCm build: the latest lemonade-sdk/llamacpp-rocm release
-  or one already installed.** `qualify.sh` downloads the latest release (`fetch_llamacpp.sh`,
-  ~25 s, no approval needed: this source is pre-approved) and runs `pick_llamacpp.sh` on it and
-  the installed builds (`SEARCH_ROOT=` limits where it looks). Version strings can't be trusted,
-  and an old build inflated a margin from +25 % to 2.5× in one run; a new architecture usually
-  needs the newest build.
+- **Baseline = the fastest llama.cpp ROCm build** (latest lemonade release or an installed one):
+  `qualify.sh` fetches the latest and picks the fastest (`loom-benchmark` section 0).
 
 The `loom-roofline` skill is at `${CLAUDE_SKILL_DIR}/../loom-roofline/SKILL.md`.
 Read it from there if it isn't in your skill list.

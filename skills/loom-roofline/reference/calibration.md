@@ -26,6 +26,11 @@ campaign, including ones that missed their target.
 | 〃 | prefill 2k | 11946 | ~2650 | 0.22 | 1509 | |
 | 〃 | prefill 32k | 7041 | 1976 | 0.28 | 1047 | |
 | 〃 | c4 steady | 244 | 181 | 0.74 | 152 | |
+| Muse-Glimmer-30B (dense, Q5_K_M) | decode | – | 13.1 | – | 12.4 | |
+| 〃 | prefill 2k / 32k | – | ~430 / 420 | – | 355 / 359 | |
+| Qwen3-0.6B (dense, Q8_0; starter, no tuning) | decode / decode @2k | – | 252 / 179 | – | 253 / 193 | per-layer launch and attention cost dominate at 2k |
+| 〃 | prefill 2k | – | 13.0k | – | 10.5k | |
+| 〃 | c4 steady | – | 690 | – | 578 | |
 
 Observations:
 - Dense decode reaches about 0.9 of the bandwidth roofline. The last 10 % is the

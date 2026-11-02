@@ -28,13 +28,13 @@ scale 0. The easiest source is to launch g_row_scale_f16 on your f32 x inside th
     %y_old = check.generate.fill value(0.0) : tensor<192x4096xf32>
     kernel.launch @KERNEL[...](... %y_new) : [...](...)
     kernel.launch @KERNEL_old[...](... %y_old) : [...](...)
-    check.expect.close actual(%y_new) expected(%y_old) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<192x4096xf32>
+    check.expect.approximate actual(%y_new) expected(%y_old) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<192x4096xf32>, tensor<192x4096xf32>
     check.return
   }
   check.case public @ab_negative_control {
     ... same inputs, launch only @KERNEL into %y_new ...
     %zeros = check.generate.fill value(0.0) : tensor<192x4096xf32>
-    check.expect.close actual(%y_new) expected(%zeros) atol(0.0) rtol(0.0) nan(different) : tensor<192x4096xf32>
+    check.expect.approximate actual(%y_new) expected(%zeros) atol(0.0) rtol(0.0) nan(different) : tensor<192x4096xf32>, tensor<192x4096xf32>
     check.return
   }
 """
