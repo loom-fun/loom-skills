@@ -31,6 +31,7 @@ never edit old ones. Wall clock is install -> done; the target is the model's ro
 | 2026-11-01 | Bolt-E4B (gemma4) | streamline v1 | **43.5** (budget 53) | 2 | **full PASS, AUDIT PASS** | 0.35 | 6/6 | gemma4 example as starter.patch + chat/gemma4.loom splice; prefill 1k/2k +46/+59 %, decode @2k +13 %, c4 -4 % |
 | 2026-11-01 | LFM2.5-24B-A2B | streamline v1 | **25** (budget 53) | 2 | **full PASS, AUDIT PASS** | 0.63 | 6/6 | apply_example.sh lfm2moe; beat b1361 on every metric (decode +12 %, prefill 2k/32k +27/+54 %, c4 +17 %); MOE_R=4 won here |
 | 2026-11-01 | flint | streamline v1 | 68.8 (budget 75) | 3 | full: all PASS but compare (1 prompt, 2k doc, gap 1.027 vs b1361); AUDIT FAIL on it | 1.03 | 6/6 | **same divergence with main's skills and kit** (main compare.py, main-kit package, same golden: token 30, gap 1.027): a near-tie of the new reference build, not the branch. +15 min: full-context 503 at the default 56 GiB pool, rebuilt at 72 GiB; +12 min near-tie diagnosis (f32/split-K/matvec-MoE variants each match 64/64) |
+| 2026-11-02 | Muse-Glimmer-30B | streamline v1 | 78 (budget 106) | 2 | **full PASS, AUDIT PASS** | 0.41 | 7/7 | ATEM via chat/atem.loom splice; prefill 1k/2k/32k +14/+26/+32 %, decode +6 %, c4 -2 %; ~5 min were two branch issues fixed after the snapshot (chat_probe --verify ran before the ATEM overrides; manual cfg merge) |
 
 ## Lessons with numbers (why the skill looks the way it does)
 - The default "1 h of optimization" made every end-to-end job > 1 h by construction: the budget is now
