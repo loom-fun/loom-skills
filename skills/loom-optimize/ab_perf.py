@@ -47,8 +47,7 @@ def measure(model, metric):
     if metric.startswith("prefill_"):
         s = stream(a.url, model, [{"role": "user", "content": n + "Summarize this documentation in one sentence.\n\n" + doc(DOCS[metric.split("_")[1]])}], 4)
         if not s["ttft"]:
-            raise SystemExit(f"{metric}: {model} returned no tokens (prompt longer than the package's context? "
-                             "A/B packages built with --context 8192 can't take 8k+ prompts)")
+            return None   # no tokens: the prompt is longer than the package's context (an 8192 A/B package)
         return s["prompt_tokens"] / s["ttft"]
     if metric == "c4":
         t0 = time.perf_counter()
@@ -67,9 +66,17 @@ for m in (a.a, a.b):  # warm-up: lazy weight load
 res = {m: {"A": [], "B": []} for m in metrics}
 for r in range(a.rounds):
     order = [("A", a.a), ("B", a.b)] if r % 2 == 0 else [("B", a.b), ("A", a.a)]
-    for metric in metrics:
-        for side, model in order:
-            res[metric][side].append(measure(model, metric))
+    for metric in list(metrics):
+        vals = [(side, measure(model, metric)) for side, model in order]
+        if any(v is None for _, v in vals):
+            print(f"SKIP {metric}: no tokens (prompt longer than an A/B package's context: build it larger "
+                  f"or drop the metric)", flush=True)
+            metrics.remove(metric); res.pop(metric)
+            continue
+        for side, v in vals:
+            res[metric][side].append(v)
+    if not metrics:
+        raise SystemExit("no metric could be measured")
     print(f"round {r + 1}: " + "  ".join(f"{m} A {res[m]['A'][-1]:.1f} B {res[m]['B'][-1]:.1f}" for m in metrics), flush=True)
 out = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "label": a.label, "A": a.a, "B": a.b, "rounds": a.rounds, "metrics": {}}
 for m in metrics:

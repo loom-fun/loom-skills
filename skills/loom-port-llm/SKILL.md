@@ -66,8 +66,8 @@ The expensive path. Keep it short:
    thinking)` if you define one (how a reply's channels map back to raw text, for a format the
    default doesn't cover). No need to copy the skills tree. Reuse before
    writing: **check `reference/` for the architecture family first** and make the kit with
-   `${CLAUDE_SKILL_DIR}/reference/apply_example.sh EXAMPLE W/kit` (the starter + the example's files +
-   its `starter.patch`; take the reviewed fields of its `cfg.json`):
+   `${CLAUDE_SKILL_DIR}/reference/apply_example.sh EXAMPLE W/kit W/cfg.json` (the starter + the example's
+   files + its `starter.patch`, and its reviewed `cfg.json` fields merged into yours):
 
    | Family | Example |
    |---|---|
