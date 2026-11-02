@@ -17,7 +17,7 @@ usage: ablate.py PKG OUT_PKG REGEX [--skip] [--name NAME]
   Skipping the output head ends generation at once (decode then reports absurd tok/s): double it.
   Examples: REGEX '@attn_decode' (decode attention), '@mv_.*ffn_down' (one matvec), '@rms' (norms).
   Launch lines read `kernel.launch @NAME[GRID](ARGS) : ...`: match the name (end a pattern with `\[`,
-  not `$` or `\(`). A copy that matched nothing is still written: delete it before serving (duplicate id).
+  not `$` or `\(`); `kernel.launch.config` lines never match. A pattern that matches nothing writes no copy.
 """
 import argparse
 import json
@@ -33,6 +33,7 @@ ap.add_argument("--skip", action="store_true")
 ap.add_argument("--name")
 a = ap.parse_args()
 rx = re.compile(a.regex)
+LAUNCH = re.compile(r"\s*kernel\.launch @")
 name = a.name or re.sub(r"[^A-Za-z0-9]+", "-", a.regex).strip("-")[:24] or "x"
 if os.path.exists(a.out):
     shutil.rmtree(a.out)
@@ -44,7 +45,7 @@ for f in sorted(os.listdir(os.path.join(a.out, "program"))):
     p = os.path.join(a.out, "program", f)
     out, n = [], 0
     for line in open(p):
-        hit = "kernel.launch" in line and rx.search(line)
+        hit = LAUNCH.match(line) and rx.search(line)   # not kernel.launch.config lines
         if hit:
             n += 1
             if a.skip:
@@ -56,6 +57,7 @@ for f in sorted(os.listdir(os.path.join(a.out, "program"))):
         print(f"{f}: {'skipped' if a.skip else 'doubled'} {n} launches")
     total += n
 if not total:
+    shutil.rmtree(a.out)   # an unmodified copy would register a duplicate model id
     raise SystemExit(f"no kernel.launch line matches {a.regex!r}")
 card = json.load(open(os.path.join(a.out, "model.json")))
 mid = card["model"]["id"] + f"-abl-{name}"
