@@ -65,14 +65,19 @@ The expensive path. Keep it short:
    scripts then render prompts with your copy, and use its `raw_from_chat(chat, message, finished,
    thinking)` if you define one (how a reply's channels map back to raw text, for a format the
    default doesn't cover). No need to copy the skills tree. Reuse before
-   writing: **check `reference/` for the architecture family first** (`gemma4-example`, `lfm2moe-example`,
-   `flint-example` (MoE + sinks + SWA), `glimmer-example` (ATEM channel chat, norm RoPE, NoPE)); **for any MoE,
-   start from `reference/lfm2moe-example/` or `flint-example/`** (top-k router, expert matvecs and
-   grouped WMMA prefill on top of the starter; a flint port added sinks, NoPE and shared experts on it
-   in ~12 min); `../loom-optimize/reference/flint-moe-example/` is an older hand-written MoE (q4_1)
-   for ideas, not a base; `reference/gemma4-example/` is a whole Gemma 4 port (kernels and
-   chat format; reference files are snapshots from older starters: overlay only the files the
-   example's README lists, merging shared ones by diff against your starter copy); `reference/lfm2moe-example/` has LFM2 short-conv layers and a top-k MoE with grouped WMMA prefill; the starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
+   writing: **check `reference/` for the architecture family first** and make the kit with
+   `${CLAUDE_SKILL_DIR}/reference/apply_example.sh EXAMPLE W/kit` (the starter + the example's files +
+   its `starter.patch`; take the reviewed fields of its `cfg.json`):
+
+   | Family | Example |
+   |---|---|
+   | Gemma-3n / Gemma-4 (PLE, KV sharing, head_dim 512, Gemma chat format) | `gemma4` |
+   | MoE; LFM2 short-conv hybrids | `lfm2moe` (top-k router, expert matvecs, grouped WMMA prefill) |
+   | MoE + attention sinks, SWA, NoPE, shared experts | `flint` (built on lfm2moe in ~12 min) |
+   | channel chat formats (ATEM), norm RoPE, NoPE | `glimmer` |
+
+   `../loom-optimize/reference/flint-moe-example/` holds one more MoE idea (bucketed grouped GEMM), not
+   a base. The starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
 4. **Test every path that implements an op.** Attention runs in three kernels (decode split-K + combine,
    prefill `flash2`, the listed fallback for mixed tiles); a feature added to one (sinks, softcap, a gate,
    a window) must be added and unit-tested in all of them. A mismatch passes the goldens and shows up only
@@ -87,7 +92,7 @@ The expensive path. Keep it short:
    correct but slow: get the gates passing first, then add GEMM prefill as the first optimization.
 8. **The chat block** for templates `chat_probe.py` can't model (channels, role tags without a
    suffix, tools inside a message): see the checklist below and
-   `reference/examples/atem_*` (a channel format end to end).
+   `reference/glimmer-example` (a channel format end to end: `chat/atem.loom` + its `chat_probe.py`).
 9. **Work in parallel when you can spawn agents.** The kernels (steps 1–6) and the chat block
    (step 8: `chat_probe.py` + `control.loom`, verified against the Jinja template) are
    independent until `build.py`. Give the chat work to a subagent on its own copy of the kit and
@@ -269,44 +274,18 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
 
 ## Beyond the starter (MoE, other formats, new ops)
 
-- **MoE.** See `${CLAUDE_SKILL_DIR}/../loom-optimize/reference/flint-moe-example/`. It
-  holds the generators from the RecursiveSI/flint port: a 40B MoE with sinks and
-  sliding windows, about 1.6× llama.cpp decode. The pattern:
-  1. router top-k;
-  2. bucket tokens by expert, using an info buffer;
-  3. grouped expert GEMMs over the buckets;
-  4. combine.
-- **Gemma-3n / Gemma-4 family (arch `gemma3n`, `gemma4`).** Start from `reference/gemma4-example/`: a
-  complete, gate-passing Gemma 4 port (kernels, head_dim-512 flash prefill, the chat format in
-  `control.loom` + `chat_probe.py`). Merge it into your kit copy instead of re-deriving it. Read llama.cpp's
-  `src/models/gemma*.cpp` closely. The starter has none of these features, and each
-  one silently breaks output if missed:
-  - **Per-layer embeddings (PLE).** A gathered `per_layer_token_embd` row, plus a
-    projection of the hidden state, then norm, then a per-layer gate, projection
-    and post-norm added to the residual. Count only the row read for bandwidth.
-  - **KV sharing.** Layers ≥ `n_layer_kv_from_start` reuse the KV of the last
-    owning layer of the same type (sliding or global), so they skip k/v and store
-    nothing. Size the KV planes for the owning layers only.
-  - **Mixed head_dim.** Sliding and global layers can differ (256 vs 512), with
-    different rope theta.
-  - **Partial "proportional" rope.** Global layers rotate only the pairs whose
-    `rope_freqs` entry is finite (the rest are 1e30).
-  - **Norms.** Q/K RMSNorm with weights, V RMSNorm *without* weights, attention
-    scale 1.0, post-attention and post-FFN norms, and a `layer_output_scale`.
-  - **FFN, embedding and head.** GELU-tanh gated FFN; embedding × √hidden; a final
-    logit softcap, which doesn't affect argmax.
-  - **Tensors.** bf16 tensors need a bf16 value helper (`view<32xbf16>` →
-    `vector.extf`).
-
-  **Sliding layers with a small window (≤ ~1k keys, Gemma's 512) don't need flash prefill**: the
-  window bounds their attention cost, so the split-K path is fine there. A trial spent 15 min
-  getting flash2 to fit registers for them, for no gain; spend it on the global layers instead.
-  Gemma's 512-wide global heads exceed the starter's head_dim 128/256 kernels: generalize
-  the split-K attention (D/32 values per lane) and, for prefill, flash2 (it already loops
-  over D/16 fragments and reloads Q when registers run out). Record it as a lever in the roofline.
-- **New quant format.** Add `@g_<fmt>_values` and `@g_<fmt>_dot` funcs in `COMMON`
-  (gen_llm.py), add the entries to `FMT`/`SB`, and add a `dequant16` case in
-  `gen_gemm.py`. Unit-test against `gguf.quants.dequantize`.
+- **MoE.** Start from `reference/lfm2moe-example` or `flint-example` (table in step 3). The pattern:
+  router top-k (weights kept in registers), bucket tokens by expert, grouped expert GEMMs over the
+  buckets, combine.
+- **Gemma-3n / Gemma-4 family (arch `gemma3n`, `gemma4`).** `apply_example.sh gemma4`: a complete,
+  gate-passing port whose README lists every feature the starter lacks (PLE, KV sharing, mixed
+  head_dim 256/512, proportional partial RoPE, V norm without weights, GEGLU, softcap, bf16); each
+  one silently breaks output if missed. Read llama.cpp's `src/models/gemma*.cpp` for a new variant.
+  Sliding layers with a small window (<= ~1k keys) don't need flash prefill: split-K is fine there
+  (a trial spent 15 min on it for no gain).
+- **New quant format.** Add a `@g_<fmt>_values` func in `COMMON` (gen_llm.py; `mv()` calls it),
+  add the entries to `FMT`/`SB`, and add a `dequant16` case in `gen_gemm.py`. bf16 needs a
+  value helper (`view<32xbf16>` -> `vector.extf`). Unit-test against `gguf.quants.dequantize`.
 - **Other recurrent layers (Mamba, RWKV, other delta-net variants).** Follow
   `gen_gdn.py`: per-span kernels read the reader slot at the fork position (else the
   row's writer slot), start from zeros at position 0, and publish the final state to
@@ -325,7 +304,6 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
 - `reference/loom-ir-cookbook.md`: IR idioms, proof facts, and compile-error fixes.
 - `reference/porting-notes.md`: how the text service drives the program (epochs,
   spans, metadata packets, KV paging), and what each glue file does.
-- Worked examples: `${CLAUDE_SKILL_DIR}/../loom-optimize/reference/flint-moe-example/`
-  (MoE port sources), plus `reference/examples/atem_channel_control.loom` and
-  `atem_render_and_reconstruct.py` (Glimmer's channel-based chat format, its prompt
-  rendering, and how the raw output is rebuilt for golden comparison).
+- `reference/*-example/`: worked ports (table in step 3), applied with `apply_example.sh`.
+  Maintainers: after changing the starter, `reference/rebase_examples.sh OLD_STARTER` rebuilds the
+  examples' patches and `check_examples.sh` must pass.

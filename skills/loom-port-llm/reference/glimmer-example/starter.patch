@@ -1,0 +1,251 @@
+--- a/chat_probe.py
++++ b/chat_probe.py
+@@ -456,3 +456,204 @@
+ 
+ if __name__ == "__main__":
+     main()
++
++
++# ---- Muse Glimmer ATEM channel format (call_format "atem") -------------------------------
++# Template: chat_template.jinja of unsloth/Muse-Glimmer-30B. control.loom renders the whole
++# conversation in chat_begin (a tool result needs the name of the call it answers, found by
++# tool_call_id in an earlier message), so this model mirrors chat_begin + chat_end.
++# Deliberate deviation: the template's optional "Current date: <strftime_now>" line in the
++# default system block is never rendered (verify() renders the template without strftime_now).
++ATEM_TOOL_HEAD = ("In this environment you have access to a set of tools you can use to answer the user's question.\n\n"
++                  'You can invoke a function by writing a "<atem:function_calls>" block like the following:\n'
++                  '<atem:function_calls>\n<atem:invoke name="$FUNCTION_NAME">\n<atem:parameter name="$PARAMETER_NAME">$PARAMETER_VALUE</atem:parameter>\n...\n</atem:invoke>\n</atem:function_calls>\n\n'
++                  "String and scalar parameters should be specified as is, while lists and objects should use JSON format. Note that spaces for string values are not stripped. The output is not expected to be valid XML and is parsed with regular expressions.\n"
++                  "Here are the functions available in JSONSchema format:\n// Tool metadata\n")
++ATEM_TOOL_TAIL = ("\n\nHere's an example of how to call a function in the tool set:\n"
++                  "(If the tool namespace is not specified, invoke the function directly as `example_function_name` rather than `example_tool_name.example_function_name`)\n\n"
++                  "to=example_tool_name.example_function_name\n\n"
++                  '<atem:function_calls>\n<atem:invoke name="example_tool_name.example_function_name">\n'
++                  '<atem:parameter name="example_parameter_1">value_1</atem:parameter>\n'
++                  '<atem:parameter name="example_parameter_2">This is the value for the second parameter\nthat can span\n"multiple" lines\n</atem:parameter>\n'
++                  "</atem:invoke>\n</atem:function_calls>")
++ATEM_DEFAULT_SYSTEM = "You are a helpful AI assistant.\nKnowledge cutoff: 2026-01-04."
++ATEM_REASONING = "\n\nReasoning strength: high."
++ATEM_GENERATION = "<|start|>assistant"
++
++
++def _atem_content(c):
++    if c is None:
++        return ""
++    if isinstance(c, str):
++        return c
++    return "".join(p.get("text", "") for p in c if p.get("type") == "text")
++
++
++def _atem_namespaces(tools):
++    seen = []
++    for t in tools or []:
++        ns = t.get("function", t)["name"].split(".")[0]
++        if ns not in seen:
++            seen.append(ns)
++    return seen
++
++
++def _atem_system_meta(tools):
++    out = ATEM_REASONING
++    if tools:
++        out += "\n\n" + ATEM_TOOL_HEAD
++        out += "".join('{"name": ' + json.dumps(ns, ensure_ascii=False) + ', "description": ""}\n' for ns in _atem_namespaces(tools))
++        out += "// Function schemas"
++        for t in tools:
++            fn = t.get("function", t)
++            out += ("\n{\"name\": " + json.dumps(fn["name"], ensure_ascii=False) + ", \"description\": "
++                    + json.dumps(fn.get("description"), ensure_ascii=False) + ", \"parameters\": "
++                    + json.dumps(fn.get("parameters"), ensure_ascii=False) + "}")
++        out += ATEM_TOOL_TAIL
++    rec = ['"self"'] + ['"' + ns + '.*"' for ns in _atem_namespaces(tools)] + ['"user"']
++    return out + "\n\n# Valid recipients: " + ", ".join(rec) + ".<|eot|>"
++
++
++def _atem_value(v):
++    if isinstance(v, bool):
++        return "true" if v else "false"
++    if v is None:
++        return "null"
++    if isinstance(v, (dict, list)):
++        return json.dumps(v, ensure_ascii=False)
++    return str(v)
++
++
++def atem_call(name, args):
++    args = json.loads(args) if isinstance(args, str) else args
++    return ('<atem:function_calls>\n<atem:invoke name="' + name + '">\n'
++            + "".join('<atem:parameter name="' + k + '">' + _atem_value(v) + "</atem:parameter>\n" for k, v in args.items())
++            + "</atem:invoke>\n</atem:function_calls>")
++
++
++def atem_simulate(chat, messages, tools=None, gen=False, enable_thinking=None):
++    out = chat.get("bos", "")
++    if not any(m["role"] == "system" for m in messages):
++        out += "<|start|>system<|message|>" + ATEM_DEFAULT_SYSTEM + _atem_system_meta(tools)
++    for i, m in enumerate(messages):
++        role = m["role"]
++        nxt = messages[i + 1]["role"] if i + 1 < len(messages) else None
++        if role == "system":
++            out += "<|start|>system<|message|>" + _atem_content(m.get("content")) + _atem_system_meta(tools)
++        elif role == "user":
++            out += "<|start|>user<|message|>" + _atem_content(m.get("content")) + "<|eot|>"
++        elif role == "tool":
++            name = m.get("name")
++            if not name:
++                tcid = m.get("tool_call_id")
++                name = tcid or ""
++                for o in messages:
++                    for tc in o.get("tool_calls") or []:
++                        if tcid is not None and tc.get("id") == tcid:
++                            name = tc["function"]["name"]
++            out += ("<|start|>tool " + name + '<|message|><tool_output name="' + name + '">\n'
++                    + _atem_content(m.get("content")) + "\n</tool_output><|eot|>")
++        elif role == "assistant":
++            if m.get("reasoning_content"):
++                out += "<|start|>assistant to=self<|message|>" + m["reasoning_content"] + "<|eom|>"
++            calls = m.get("tool_calls") or []
++            if calls:
++                out += render_calls(chat, calls) + ("<|eom|>" if nxt == "assistant" else "<|eot|>")
++            else:
++                out += "<|start|>assistant to=user<|message|>" + _atem_content(m.get("content")) + "<|eot|>"
++    if gen:
++        out += ATEM_GENERATION
++    return out
++
++
++def atem_render_calls(tool_calls):
++    return "".join(("<|eom|>" if j else "") + "<|start|>assistant to=" + c["function"]["name"] + "<|message|>"
++                   + atem_call(c["function"]["name"], c["function"]["arguments"]) for j, c in enumerate(tool_calls))
++
++
++def raw_from_chat(chat, message, finished, thinking=None, prompt=None):
++    """The model's raw output after the generation prompt "<|start|>assistant", rebuilt from the
++    parsed channels. Ambiguity: the model closes reasoning with "<|eom|>" before a tool call but
++    starts the to=user answer header directly (no <|eom|>), as greedy llama.cpp output shows."""
++    reasoning = message.get("reasoning_content")
++    content = message.get("content") or ""
++    calls = atem_render_calls(message.get("tool_calls") or [])
++    if chat.get("call_format") != "atem":
++        raise ValueError("raw_from_chat override is for the atem format")
++    if reasoning is None:
++        return calls[len(ATEM_GENERATION):] if calls else " to=user<|message|>" + content
++    text = " to=self<|message|>" + reasoning
++    if calls:
++        return text + "<|eom|>" + calls
++    if content or finished:
++        text += "<|start|>assistant to=user<|message|>" + content
++    return text
++
++
++def raw_alternatives(chat, message, finished, thinking=None, prompt=None):
++    """Every raw text consistent with the parsed channels: the model may or may not write <|eom|>
++    between its reasoning and the to=user answer header (both occur in greedy llama.cpp output)."""
++    raw = raw_from_chat(chat, message, finished, thinking, prompt)
++    alt = raw.replace("<|start|>assistant to=user<|message|>", "<|eom|><|start|>assistant to=user<|message|>", 1)
++    return [raw] + ([alt] if alt != raw else [])
++
++
++_generic_simulate, _generic_render_calls, _generic_verify = simulate, render_calls, verify
++
++
++def simulate(chat, messages, tools=None, gen=False, enable_thinking=None):  # noqa: F811
++    if chat.get("call_format") == "atem":
++        return atem_simulate(chat, messages, tools, gen, enable_thinking)
++    return _generic_simulate(chat, messages, tools, gen, enable_thinking)
++
++
++def render_calls(chat, tool_calls):  # noqa: F811
++    if chat.get("call_format") == "atem":
++        return atem_render_calls(tool_calls)
++    return _generic_render_calls(chat, tool_calls)
++
++
++ATEM_CONVERSATIONS = [
++    ("system + reasoning history", [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "One"},
++                                    {"role": "assistant", "content": "Two", "reasoning_content": "Think."},
++                                    {"role": "user", "content": "Three"}], None),
++    ("tool name field + content parts", [{"role": "user", "content": [{"type": "text", "text": "Hi "}, {"type": "text", "text": "there"}]},
++                                         calls_msg("", [CALL1]), {"role": "tool", "name": "get_weather", "content": "ok"}], TOOLS),
++    ("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL, CALL2], reasoning="R"),
++                         {"role": "tool", "tool_call_id": "call_0", "content": "ok"},
++                         {"role": "tool", "tool_call_id": "call_1", "content": "ok2"}], TOOLS),
++    ("namespaced tools", [{"role": "user", "content": "x"}], [
++        {"type": "function", "function": {"name": "web.search", "description": "S", "parameters": {"type": "object", "properties": {}}}},
++        {"type": "function", "function": {"name": "web.open", "description": "O", "parameters": {"type": "object", "properties": {}}}},
++        TOOLS[0]]),
++    ("full agent turn", [{"role": "system", "content": "You are an agent."}, {"role": "user", "content": "Weather in Paris?"},
++                         calls_msg("", [{"name": "get_weather", "arguments": json.dumps({"city": "Paris"})}], reasoning="Need the tool."),
++                         {"role": "tool", "tool_call_id": "call_0", "content": "{\"temp\": 18}"},
++                         {"role": "assistant", "content": "It is 18.", "reasoning_content": "Answer."},
++                         {"role": "user", "content": "Thanks"}], TOOLS),
++]
++
++
++def verify(template_text, chat, bos="", eos=""):  # noqa: F811
++    if chat.get("call_format") != "atem":
++        return _generic_verify(template_text, chat, bos, eos)
++    T = Template(template_text, bos, eos)
++    T.t.environment.globals.pop("strftime_now", None)   # no "Current date" line (deliberate)
++    results = []
++    for name, msgs, tools in CONVERSATIONS + ATEM_CONVERSATIONS:
++        try:
++            # the template wants dict arguments; Loom gets OpenAI JSON strings (simulate accepts both)
++            tm = [dict(m, tool_calls=[dict(tc, function=dict(tc["function"], arguments=json.loads(tc["function"]["arguments"])
++                   if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"])) for tc in m["tool_calls"]])
++                  if m.get("tool_calls") else m for m in msgs]
++            ref = T.render(tm, tools=tools, gen=True)
++        except ProbeError as e:
++            results.append((name, None, f"template refuses: {e}"))
++            continue
++        got = simulate(chat, msgs, tools, gen=True)
++        if got == ref:
++            results.append((name, True, "exact"))
++        else:
++            k = next((i for i, (a, b) in enumerate(zip(got, ref)) if a != b), min(len(got), len(ref)))
++            results.append((name, False, f"differs at byte {k}: loom {got[max(0, k - 40):k + 60]!r} vs template {ref[max(0, k - 40):k + 60]!r}"))
++    return results
+--- a/make_kernel_tests.py
++++ b/make_kernel_tests.py
+@@ -29,7 +29,10 @@
+ # 1. embed
+ ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
+ E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
+-x = E[ids]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
++x = E[ids]
++if cfg.get("embed_norm"): x = x / np.sqrt((x * x).mean(-1, keepdims=True) + 1e-5)  # weightless embedding RMSNorm
++if cfg.get("embed_scale"): x = x * cfg["embed_scale"]
++h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
+ tab = raw("token_embd.weight")
+ for n, a in [("e_ids", ids), ("e_tab", tab), ("e_w", w.astype(np.float32)), ("e_x", x.astype(np.float32)), ("e_h", h.astype(np.float32))]: save(n, a)
+ cases.append(f"""check.case public @embed {{
+@@ -67,6 +70,29 @@
+         kern = f"g_mv_{fmt}_k{K}" + ("_t4" if tg == 4 else "")
+         _R = pick_r(n, K, tg)   # the variant the model launches (gen_llm uses the same rule)
+         if _R != 16: kern += f"_r{_R}"
++        _lib = os.environ.get("KTEST_LLM", "pkg/program/llm.loom")
++        if os.path.exists(_lib) and ("@" + kern + "[") not in open(_lib).read() and ("@" + kern + "(") not in open(_lib).read():
++            skern = kern.replace(f"_k{K}", f"_k{K}_swiglu"); wt = ty(raw(name))
++            if nm_ := ("ffn_gate" if ".ffn_gate." in name else None):
++                upn = name.replace("ffn_gate", "ffn_up"); Wu = deq(upn)
++                g = xs @ W.T.astype(np.float64); u = xs @ Wu.T.astype(np.float64); ys = (g / (1 + np.exp(-g))) * u
++                save(tag + "_wu", raw(upn)); save(tag + "_ys", ys.astype(np.float32))
++                cases.append(f"""check.case public @mvswiglu_{tag} {{
++  %n = check.literal value({n}) : index
++  %t = check.literal value({tg}) : index
++  %acc = check.literal value(0) : i32
++  %w = check.file.read.npy path("{tag}_w.npy") : {wt}
++  %wu = check.file.read.npy path("{tag}_wu.npy") : {ty(raw(upn))}
++  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{tg}x{K}xf32>
++  %e = check.file.read.npy path("{tag}_ys.npy") : tensor<{tg}x{n}xf32>
++  %y = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
++  kernel.launch @{skern}[%n, %t](%n, %t, %acc, %x, %w, %wu, %y) : [index, index](index, index, i32, tensor<{tg}x{K}xf32>, {wt}, {ty(raw(upn))}, tensor<{tg}x{n}xf32>)
++  check.expect.close actual(%y) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{tg}x{n}xf32>
++  check.return
++}}
++""")
++                print("swiglu case:", skern); continue
++            print("skip (kernel not emitted):", kern); continue
+         wt = ty(raw(name))
+         cases.append(f"""check.case public @mv_{tag} {{
+   %n = check.literal value({n}) : index

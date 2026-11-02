@@ -68,6 +68,7 @@
  "chat": {
   "format": "gemma4",
   "call_format": "gemma4",
+  "base_call_format": "qwen_xml",
   "bos": "<bos>",
   "system_prefix": "<|turn>system\n",
   "user_prefix": "<|turn>user\n",

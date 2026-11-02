@@ -1,0 +1,1757 @@
+// ---- Gemma 4 chat format (chat/gemma4.loom, spliced into control.loom by build.py) ----
+// <|turn>role\n...<turn|>\n with the "model" role; thinking is switched on by
+// THINK_FLAG at the top of a system turn; reasoning is <|channel>thought\n...
+// \n<channel|>; tools are declared as <|tool>declaration:NAME{...}<tool|> in the
+// template's own syntax (format_parameters: dictsort, uppercase types); calls
+// are <|tool_call>call:NAME{key:<|"|>v<|"|>,n:3}<tool_call|>; results are
+// <|tool_response>response:NAME{value:<|"|>...<|"|>}<tool_response|> inside the
+// model turn. The template looks ahead (a turn's close depends on what follows,
+// results are named by the matching call id), so chat_begin renders the whole
+// conversation from the request and chat_message only validates.
+// (chat_probe.simulate_gemma4 is the Python model of this code.)
+global.rodata.def @g4_think_flag = bytes("@@HEX_CHAT:think_flag@@")
+
+global.rodata.def @g4_decl_open = bytes("@@HEX_CHAT:tool_decl_open@@")
+
+global.rodata.def @g4_decl_close = bytes("@@HEX_CHAT:tool_decl_close@@")
+
+global.rodata.def @g4_response_open = bytes("@@HEX_CHAT:tool_response_open@@")
+
+global.rodata.def @g4_value_open = bytes("@@HEX_CHAT:tool_value_open@@")
+
+global.rodata.def @g4_quote = bytes("3c7c227c3e")
+
+global.rodata.def @g4_key_text = bytes("74657874")
+
+global.rodata.def @g4_key_type = bytes("74797065")
+
+global.rodata.def @g4_key_tool_calls = bytes("746f6f6c5f63616c6c73")
+
+global.rodata.def @g4_key_id = bytes("6964")
+
+global.rodata.def @g4_key_name = bytes("6e616d65")
+
+global.rodata.def @g4_key_arguments = bytes("617267756d656e7473")
+
+global.rodata.def @g4_key_tool_call_id = bytes("746f6f6c5f63616c6c5f6964")
+
+global.rodata.def @g4_key_reasoning = bytes("726561736f6e696e67")
+
+global.rodata.def @g4_key_reasoning_content = bytes("726561736f6e696e675f636f6e74656e74")
+
+global.rodata.def @g4_unknown = bytes("756e6b6e6f776e")
+
+global.rodata.def @g4_key_description = bytes("6465736372697074696f6e")
+
+global.rodata.def @g4_key_parameters = bytes("706172616d6574657273")
+
+global.rodata.def @g4_key_properties = bytes("70726f70657274696573")
+
+global.rodata.def @g4_key_required = bytes("7265717569726564")
+
+global.rodata.def @g4_key_enum = bytes("656e756d")
+
+global.rodata.def @g4_key_items = bytes("6974656d73")
+
+global.rodata.def @g4_key_nullable = bytes("6e756c6c61626c65")
+
+global.rodata.def @g4_key_response = bytes("726573706f6e7365")
+
+global.rodata.def @g4_declaration = bytes("6465636c61726174696f6e3a")
+
+global.rodata.def @g4_description_open = bytes("7b6465736372697074696f6e3a")
+
+global.rodata.def @g4_description = bytes("6465736372697074696f6e3a")
+
+global.rodata.def @g4_parameters_open = bytes("2c706172616d65746572733a7b")
+
+global.rodata.def @g4_properties_open = bytes("70726f706572746965733a7b")
+
+global.rodata.def @g4_required_open = bytes("72657175697265643a5b")
+
+global.rodata.def @g4_type = bytes("747970653a")
+
+global.rodata.def @g4_enum = bytes("656e756d3a")
+
+global.rodata.def @g4_items_open = bytes("6974656d733a7b")
+
+global.rodata.def @g4_nullable = bytes("6e756c6c61626c653a74727565")
+
+global.rodata.def @g4_response_decl_open = bytes("2c726573706f6e73653a7b")
+
+global.rodata.def @g4_string = bytes("535452494e47")
+
+global.rodata.def @g4_array = bytes("4152524159")
+
+global.rodata.def @g4_object = bytes("4f424a454354")
+
+global.rodata.def @g4_null = bytes("6e756c6c")
+
+global.rodata.def @g4_false = bytes("66616c7365")
+
+global.rodata.def @g4_zero = bytes("30")
+
+global.rodata.def @g4_call_open = bytes("3c7c746f6f6c5f63616c6c3e63616c6c3a")
+
+global.rodata.def @g4_call_close = bytes("7d3c746f6f6c5f63616c6c7c3e")
+
+global.rodata.def @g4_call_end = bytes("3c746f6f6c5f63616c6c7c3e")
+
+global.rodata.def @g4_channel_close = bytes("3c6368616e6e656c7c3e")
+
+global.rodata.def @g4_lbrace = bytes("7b")
+
+global.rodata.def @g4_rbrace = bytes("7d")
+
+global.rodata.def @g4_lbracket = bytes("5b")
+
+global.rodata.def @g4_rbracket = bytes("5d")
+
+global.rodata.def @g4_comma = bytes("2c")
+
+global.rodata.def @g4_colon = bytes("3a")
+
+global.rodata.def @g4_brace_comma = bytes("7d2c")
+
+global.rodata.def @g4_bracket_comma = bytes("5d2c")
+
+// Decoded JSON string at text[begin, begin + length) (a string value range).
+func.def @g4_decode(%text: buffer, %begin: i64, %length: i64) -> (buffer) {
+  %value = func.call @json_key(%text, %begin, %length) : (buffer, i64, i64) -> (buffer)
+  func.return %value : buffer
+}
+
+// Decoded string member %key of the object at text[begin, begin + length) ("" if absent or not a string).
+func.def @g4_string_member(%text: buffer, %begin: i64, %length: i64, %key: buffer) -> (i1, buffer) {
+  %found, %vb, %vl, %vt = func.call @json_lookup(%text, %begin, %length, %key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+  %string_type = scalar.constant 0 : i64
+  %is_string = scalar.cmpi eq, %vt, %string_type : i64
+  %ok = scalar.andi %found, %is_string : i1
+  %value = scf.if %ok -> (buffer) {
+    %decoded = func.call @json_key(%text, %vb, %vl) : (buffer, i64, i64) -> (buffer)
+    scf.yield %decoded : buffer
+  } else {
+    %empty = global.load @empty : buffer
+    scf.yield %empty : buffer
+  }
+  func.return %ok, %value : i1, buffer
+}
+
+// Jinja truthiness of a JSON value: non-empty string/array/object, true, a number other than 0.
+func.def @g4_truthy(%text: buffer, %found: i1, %begin: i64, %length: i64, %type: i64) -> (i1) {
+  %result = scf.if %found -> (i1) {
+    %zero64 = scalar.constant 0 : i64
+    %string_type = scalar.constant 0 : i64
+    %object_type = scalar.constant 2 : i64
+    %array_type = scalar.constant 3 : i64
+    %is_string = scalar.cmpi eq, %type, %string_type : i64
+    %is_object = scalar.cmpi eq, %type, %object_type : i64
+    %is_array = scalar.cmpi eq, %type, %array_type : i64
+    %is_container = scalar.ori %is_object, %is_array : i1
+    %value = scf.if %is_string -> (i1) {
+      %nonempty = scalar.cmpi ne, %length, %zero64 : i64
+      scf.yield %nonempty : i1
+    } else {
+      %inner = scf.if %is_container -> (i1) {
+        %fields, %ftype, %count = func.call @members_range(%text, %begin, %length) : (buffer, i64, i64) -> (buffer, i32, i64)
+        %has = scalar.cmpi ne, %count, %zero64 : i64
+        scf.yield %has : i1
+      } else {
+        %raw = func.call @json_range(%text, %begin, %length) : (buffer, i64, i64) -> (buffer)
+        %null = global.load @g4_null : buffer
+        %false_text = global.load @g4_false : buffer
+        %zero_text = global.load @g4_zero : buffer
+        %is_null = func.call @equal(%raw, %null) : (buffer, buffer) -> (i1)
+        %is_false = func.call @equal(%raw, %false_text) : (buffer, buffer) -> (i1)
+        %is_zero = func.call @equal(%raw, %zero_text) : (buffer, buffer) -> (i1)
+        %a = scalar.ori %is_null, %is_false : i1
+        %b = scalar.ori %a, %is_zero : i1
+        %false = scalar.constant false : i1
+        %truthy = scalar.cmpi eq, %b, %false : i1
+        scf.yield %truthy : i1
+      }
+      scf.yield %inner : i1
+    }
+    scf.yield %value : i1
+  } else {
+    %false = scalar.constant false : i1
+    scf.yield %false : i1
+  }
+  func.return %result : i1
+}
+
+// ASCII uppercase copy.
+func.def @g4_upper(%text: buffer) -> (buffer) {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  %length = buffer.length %text
+  %output = buffer.alloca<private> align(1) %length : buffer
+  %a = scalar.constant 97 : i32
+  %z = scalar.constant 122 : i32
+  %shift = scalar.constant 32 : i32
+  %done = scf.while(%position = %c0 : offset) -> (offset) {
+    %more = index.cmp ult, %position, %length : offset
+    scf.condition %more, %position : i1, offset
+  } do(%position: offset) {
+    %byte = buffer.load.i8.u %text[%position]
+    %ge = scalar.cmpi uge, %byte, %a : i32
+    %le = scalar.cmpi ule, %byte, %z : i32
+    %lower = scalar.andi %ge, %le : i1
+    %upper = scalar.subi %byte, %shift : i32
+    %value = scf.select %lower, %upper, %byte : i32
+    buffer.store.i8 %value, %output[%position]
+    %next = index.add %position, %c1 : offset
+    scf.yield %next : offset
+  }
+  func.return %output : buffer
+}
+
+// ASCII lowercase of a byte.
+func.def inline @g4_lower_byte(%byte: i32) -> (i32) {
+  %A = scalar.constant 65 : i32
+  %Z = scalar.constant 90 : i32
+  %shift = scalar.constant 32 : i32
+  %ge = scalar.cmpi uge, %byte, %A : i32
+  %le = scalar.cmpi ule, %byte, %Z : i32
+  %upper = scalar.andi %ge, %le : i1
+  %lower = scalar.addi %byte, %shift : i32
+  %value = scf.select %upper, %lower, %byte : i32
+  func.return %value : i32
+}
+
+// Case-insensitive a < b (Jinja dictsort), on decoded keys.
+func.def @g4_key_less(%a: buffer, %b: buffer) -> (i1) {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  %a_length = buffer.length %a
+  %b_length = buffer.length %b
+  %a_shorter = index.cmp ult, %a_length, %b_length : offset
+  %common = scf.select %a_shorter, %a_length, %b_length : offset
+  %stop, %less = scf.while(%position = %c0 : offset, %result = %a_shorter : i1) -> (offset, i1) {
+    %inside = index.cmp ult, %position, %common : offset
+    %continue = scf.if %inside -> (i1) {
+      %x = buffer.load.i8.u %a[%position]
+      %y = buffer.load.i8.u %b[%position]
+      %lx = func.call @g4_lower_byte(%x) : (i32) -> (i32)
+      %ly = func.call @g4_lower_byte(%y) : (i32) -> (i32)
+      %same = scalar.cmpi eq, %lx, %ly : i32
+      scf.yield %same : i1
+    } else {
+      %false = scalar.constant false : i1
+      scf.yield %false : i1
+    }
+    %value = scf.if %inside -> (i1) {
+      %x = buffer.load.i8.u %a[%position]
+      %y = buffer.load.i8.u %b[%position]
+      %lx = func.call @g4_lower_byte(%x) : (i32) -> (i32)
+      %ly = func.call @g4_lower_byte(%y) : (i32) -> (i32)
+      %lt = scalar.cmpi ult, %lx, %ly : i32
+      scf.yield %lt : i1
+    } else {
+      scf.yield %a_shorter : i1
+    }
+    scf.condition %continue, %position, %value : i1, offset, i1
+  } do(%position: offset, %result: i1) {
+    %next = index.add %position, %c1 : offset
+    scf.yield %next, %result : offset, i1
+  }
+  func.return %less : i1
+}
+
+// Member order of the object at text[begin, begin + length) sorted like Jinja dictsort
+// (case-insensitive keys, stable). Returns (members records, count, order[count] as i64).
+func.def @g4_sorted(%text: buffer, %begin: i64, %length: i64) -> (buffer, i64, buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %zero64 = scalar.constant 0 : i64
+  %fields, %type, %raw_count = func.call @members_range(%text, %begin, %length) : (buffer, i64, i64) -> (buffer, i32, i64)
+  %object = scalar.constant 2 : i32
+  %is_object = scalar.cmpi eq, %type, %object : i32
+  %count = scf.select %is_object, %raw_count, %zero64 : i64
+  %bounded = scalar.assume %count [range(%count, 0, 65536)] : i64
+  %n = index.cast %bounded : i64 to index
+  %records = buffer.view %fields[%origin] : buffer -> view<[%n]x5xi64>
+  %eight = index.constant 8 : offset
+  %order_bytes = index.scale %n, %eight : index, offset -> offset
+  %padded = index.add %order_bytes, %eight : offset
+  %order = buffer.alloca<private> align(8) %padded : buffer
+  %used = buffer.alloca<private> align(8) %padded : buffer
+  %c0_i32 = scalar.constant 0 : i32
+  buffer.fill %c0_i32, %used[%origin], %padded : i32
+  %order_view = buffer.view %order[%origin] : buffer -> view<[%n]xi64>
+  %used_view = buffer.view %used[%origin] : buffer -> view<[%n]xi64>
+  %minus = scalar.constant -1 : i64
+  %one64 = scalar.constant 1 : i64
+  scf.for %r = [%c0 to %n step %c1] {
+    %best = scf.for %i = [%c0 to %n step %c1](%current = %minus : i64) -> (i64) {
+      %taken = view.load %used_view[%i] : view<[%n]xi64> -> i64
+      %free = scalar.cmpi eq, %taken, %zero64 : i64
+      %next = scf.if %free -> (i64) {
+        %index64 = index.cast %i : index to i64
+        %none = scalar.cmpi slt, %current, %zero64 : i64
+        %pick = scf.if %none -> (i64) {
+          scf.yield %index64 : i64
+        } else {
+          %bounded_current = scalar.assume %current [range(%current, 0, 65535)] : i64
+          %ci = index.cast %bounded_current : i64 to index
+          %cj = index.assume %ci [lt(%ci, %n)] : index
+          %kb = view.load %records[%i, 0] : view<[%n]x5xi64> -> i64
+          %kl = view.load %records[%i, 1] : view<[%n]x5xi64> -> i64
+          %cb = view.load %records[%cj, 0] : view<[%n]x5xi64> -> i64
+          %cl = view.load %records[%cj, 1] : view<[%n]x5xi64> -> i64
+          %key = func.call @json_key(%text, %kb, %kl) : (buffer, i64, i64) -> (buffer)
+          %other = func.call @json_key(%text, %cb, %cl) : (buffer, i64, i64) -> (buffer)
+          %less = func.call @g4_key_less(%key, %other) : (buffer, buffer) -> (i1)
+          %chosen = scf.select %less, %index64, %current : i64
+          scf.yield %chosen : i64
+        }
+        scf.yield %pick : i64
+      } else {
+        scf.yield %current : i64
+      }
+      scf.yield %next : i64
+    }
+    %bounded_best = scalar.assume %best [range(%best, 0, 65535)] : i64
+    %bi = index.cast %bounded_best : i64 to index
+    %bj = index.assume %bi [lt(%bi, %n)] : index
+    view.store %one64, %used_view[%bj] : i64, view<[%n]xi64>
+    view.store %best, %order_view[%r] : i64, view<[%n]xi64>
+  }
+  func.return %fields, %count, %order : buffer, i64, buffer
+}
+
+// format_argument: string -> <|"|>s<|"|>, object -> {k:v,...} (dictsort; keys quoted when
+// %escape_keys), array -> [a,b], other scalars as written (true/false/null/numbers).
+func.def @g4_value(%text: buffer, %begin: i64, %length: i64, %type: i64, %escape_keys: i1) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %empty = global.load @empty : buffer
+  %quote = global.load @g4_quote : buffer
+  %comma = global.load @g4_comma : buffer
+  %colon = global.load @g4_colon : buffer
+  %string_type = scalar.constant 0 : i64
+  %object_type = scalar.constant 2 : i64
+  %array_type = scalar.constant 3 : i64
+  %is_string = scalar.cmpi eq, %type, %string_type : i64
+  %is_object = scalar.cmpi eq, %type, %object_type : i64
+  %is_array = scalar.cmpi eq, %type, %array_type : i64
+  %result = scf.if %is_string -> (buffer) {
+    %decoded = func.call @json_key(%text, %begin, %length) : (buffer, i64, i64) -> (buffer)
+    %value = func.call @join4(%quote, %decoded, %quote, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+    scf.yield %value : buffer
+  } else {
+    %other = scf.if %is_object -> (buffer) {
+      %fields, %count, %order = func.call @g4_sorted(%text, %begin, %length) : (buffer, i64, i64) -> (buffer, i64, buffer)
+      %bounded = scalar.assume %count [range(%count, 0, 65536)] : i64
+      %n = index.cast %bounded : i64 to index
+      %records = buffer.view %fields[%origin] : buffer -> view<[%n]x5xi64>
+      %order_view = buffer.view %order[%origin] : buffer -> view<[%n]xi64>
+      %open = global.load @g4_lbrace : buffer
+      %close = global.load @g4_rbrace : buffer
+      %body = scf.for %r = [%c0 to %n step %c1](%acc = %open : buffer) -> (buffer) {
+        %k64 = view.load %order_view[%r] : view<[%n]xi64> -> i64
+        %kb64 = scalar.assume %k64 [range(%k64, 0, 65535)] : i64
+        %ki = index.cast %kb64 : i64 to index
+        %k = index.assume %ki [lt(%ki, %n)] : index
+        %kb = view.load %records[%k, 0] : view<[%n]x5xi64> -> i64
+        %kl = view.load %records[%k, 1] : view<[%n]x5xi64> -> i64
+        %vb = view.load %records[%k, 2] : view<[%n]x5xi64> -> i64
+        %vl = view.load %records[%k, 3] : view<[%n]x5xi64> -> i64
+        %vt = view.load %records[%k, 4] : view<[%n]x5xi64> -> i64
+        %key = func.call @json_key(%text, %kb, %kl) : (buffer, i64, i64) -> (buffer)
+        %key_quote = scf.select %escape_keys, %quote, %empty : buffer
+        %first = index.cmp eq, %r, %c0 : index
+        %lead = scf.select %first, %empty, %comma : buffer
+        %value = func.call @g4_value(%text, %vb, %vl, %vt, %escape_keys) : (buffer, i64, i64, i64, i1) -> (buffer)
+        %head = func.call @join4(%acc, %lead, %key_quote, %key) : (buffer, buffer, buffer, buffer) -> (buffer)
+        %next = func.call @join4(%head, %key_quote, %colon, %value) : (buffer, buffer, buffer, buffer) -> (buffer)
+        scf.yield %next : buffer
+      }
+      %closed = func.call @join(%body, %close) : (buffer, buffer) -> (buffer)
+      scf.yield %closed : buffer
+    } else {
+      %listed = scf.if %is_array -> (buffer) {
+        %elements, %etype, %ecount = func.call @members_range(%text, %begin, %length) : (buffer, i64, i64) -> (buffer, i32, i64)
+        %bounded = scalar.assume %ecount [range(%ecount, 0, 65536)] : i64
+        %n = index.cast %bounded : i64 to index
+        %records = buffer.view %elements[%origin] : buffer -> view<[%n]x5xi64>
+        %open = global.load @g4_lbracket : buffer
+        %close = global.load @g4_rbracket : buffer
+        %body = scf.for %i = [%c0 to %n step %c1](%acc = %open : buffer) -> (buffer) {
+          %vb = view.load %records[%i, 2] : view<[%n]x5xi64> -> i64
+          %vl = view.load %records[%i, 3] : view<[%n]x5xi64> -> i64
+          %vt = view.load %records[%i, 4] : view<[%n]x5xi64> -> i64
+          %first = index.cmp eq, %i, %c0 : index
+          %lead = scf.select %first, %empty, %comma : buffer
+          %value = func.call @g4_value(%text, %vb, %vl, %vt, %escape_keys) : (buffer, i64, i64, i64, i1) -> (buffer)
+          %next = func.call @join4(%acc, %lead, %value, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+          scf.yield %next : buffer
+        }
+        %closed = func.call @join(%body, %close) : (buffer, buffer) -> (buffer)
+        scf.yield %closed : buffer
+      } else {
+        %raw = func.call @json_range(%text, %begin, %length) : (buffer, i64, i64) -> (buffer)
+        scf.yield %raw : buffer
+      }
+      scf.yield %listed : buffer
+    }
+    scf.yield %other : buffer
+  }
+  func.return %result : buffer
+}
+
+// <|"|>a<|"|>,<|"|>b<|"|> for the array at text[begin, begin + length) (string items decoded).
+func.def @g4_quoted_list(%text: buffer, %begin: i64, %length: i64) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %empty = global.load @empty : buffer
+  %quote = global.load @g4_quote : buffer
+  %comma = global.load @g4_comma : buffer
+  %elements, %etype, %ecount = func.call @members_range(%text, %begin, %length) : (buffer, i64, i64) -> (buffer, i32, i64)
+  %array = scalar.constant 3 : i32
+  %is_array = scalar.cmpi eq, %etype, %array : i32
+  %zero64 = scalar.constant 0 : i64
+  %usable = scf.select %is_array, %ecount, %zero64 : i64
+  %bounded = scalar.assume %usable [range(%usable, 0, 65536)] : i64
+  %n = index.cast %bounded : i64 to index
+  %records = buffer.view %elements[%origin] : buffer -> view<[%n]x5xi64>
+  %string_type = scalar.constant 0 : i64
+  %body = scf.for %i = [%c0 to %n step %c1](%acc = %empty : buffer) -> (buffer) {
+    %vb = view.load %records[%i, 2] : view<[%n]x5xi64> -> i64
+    %vl = view.load %records[%i, 3] : view<[%n]x5xi64> -> i64
+    %vt = view.load %records[%i, 4] : view<[%n]x5xi64> -> i64
+    %is_string = scalar.cmpi eq, %vt, %string_type : i64
+    %item = scf.if %is_string -> (buffer) {
+      %decoded = func.call @json_key(%text, %vb, %vl) : (buffer, i64, i64) -> (buffer)
+      scf.yield %decoded : buffer
+    } else {
+      %raw = func.call @json_range(%text, %vb, %vl) : (buffer, i64, i64) -> (buffer)
+      scf.yield %raw : buffer
+    }
+    %first = index.cmp eq, %i, %c0 : index
+    %lead = scf.select %first, %empty, %comma : buffer
+    %head = func.call @join4(%acc, %lead, %quote, %item) : (buffer, buffer, buffer, buffer) -> (buffer)
+    %next = func.call @join(%head, %quote) : (buffer, buffer) -> (buffer)
+    scf.yield %next : buffer
+  }
+  func.return %body : buffer
+}
+
+// "," when %comma is set (add_comma in format_parameters).
+func.def inline @g4_sep(%comma: i1) -> (buffer) {
+  %empty = global.load @empty : buffer
+  %text = global.load @g4_comma : buffer
+  %result = scf.select %comma, %text, %empty : buffer
+  func.return %result : buffer
+}
+
+// Uppercased string member "type" ("" if absent or not a string).
+func.def @g4_type_of(%text: buffer, %begin: i64, %length: i64) -> (buffer) {
+  %key = global.load @g4_key_type : buffer
+  %found, %value = func.call @g4_string_member(%text, %begin, %length, %key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+  %upper = func.call @g4_upper(%value) : (buffer) -> (buffer)
+  func.return %upper : buffer
+}
+
+// items:{...} body of an ARRAY property (the template's items branch).
+func.def @g4_items(%text: buffer, %begin: i64, %length: i64) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %empty = global.load @empty : buffer
+  %quote = global.load @g4_quote : buffer
+  %comma = global.load @g4_comma : buffer
+  %colon = global.load @g4_colon : buffer
+  %null = global.load @g4_null : buffer
+  %properties_key = global.load @g4_key_properties : buffer
+  %required_key = global.load @g4_key_required : buffer
+  %type_key = global.load @g4_key_type : buffer
+  %required_open = global.load @g4_required_open : buffer
+  %properties_open = global.load @g4_properties_open : buffer
+  %type_text = global.load @g4_type : buffer
+  %rbrace = global.load @g4_rbrace : buffer
+  %rbracket = global.load @g4_rbracket : buffer
+  %lbracket = global.load @g4_lbracket : buffer
+  %string_type = scalar.constant 0 : i64
+  %object_type = scalar.constant 2 : i64
+  %array_type = scalar.constant 3 : i64
+  %fields, %count, %order = func.call @g4_sorted(%text, %begin, %length) : (buffer, i64, i64) -> (buffer, i64, buffer)
+  %bounded = scalar.assume %count [range(%count, 0, 65536)] : i64
+  %n = index.cast %bounded : i64 to index
+  %records = buffer.view %fields[%origin] : buffer -> view<[%n]x5xi64>
+  %order_view = buffer.view %order[%origin] : buffer -> view<[%n]xi64>
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %body, %any = scf.for %r = [%c0 to %n step %c1](%acc = %empty : buffer, %found_first = %false : i1) -> (buffer, i1) {
+    %k64 = view.load %order_view[%r] : view<[%n]xi64> -> i64
+    %kb64 = scalar.assume %k64 [range(%k64, 0, 65535)] : i64
+    %ki = index.cast %kb64 : i64 to index
+    %k = index.assume %ki [lt(%ki, %n)] : index
+    %kb = view.load %records[%k, 0] : view<[%n]x5xi64> -> i64
+    %kl = view.load %records[%k, 1] : view<[%n]x5xi64> -> i64
+    %vb = view.load %records[%k, 2] : view<[%n]x5xi64> -> i64
+    %vl = view.load %records[%k, 3] : view<[%n]x5xi64> -> i64
+    %vt = view.load %records[%k, 4] : view<[%n]x5xi64> -> i64
+    %key = func.call @json_key(%text, %kb, %kl) : (buffer, i64, i64) -> (buffer)
+    %raw = func.call @json_range(%text, %vb, %vl) : (buffer, i64, i64) -> (buffer)
+    %is_null = func.call @equal(%raw, %null) : (buffer, buffer) -> (i1)
+    %present = scalar.cmpi eq, %is_null, %false : i1
+    %out, %flag = scf.if %present -> (buffer, i1) {
+      %lead = scf.select %found_first, %comma, %empty : buffer
+      %is_properties = func.call @equal(%key, %properties_key) : (buffer, buffer) -> (i1)
+      %is_required = func.call @equal(%key, %required_key) : (buffer, buffer) -> (i1)
+      %is_type = func.call @equal(%key, %type_key) : (buffer, buffer) -> (i1)
+      %item = scf.if %is_properties -> (buffer) {
+        %is_mapping = scalar.cmpi eq, %vt, %object_type : i64
+        %inner = scf.if %is_mapping -> (buffer) {
+          %value = func.call @g4_params(%text, %vb, %vl, %false) : (buffer, i64, i64, i1) -> (buffer)
+          scf.yield %value : buffer
+        } else {
+          scf.yield %empty : buffer
+        }
+        %value = func.call @join4(%properties_open, %inner, %rbrace, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+        scf.yield %value : buffer
+      } else {
+        %item2 = scf.if %is_required -> (buffer) {
+          %list = func.call @g4_quoted_list(%text, %vb, %vl) : (buffer, i64, i64) -> (buffer)
+          %value = func.call @join4(%required_open, %list, %rbracket, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+          scf.yield %value : buffer
+        } else {
+          %item3 = scf.if %is_type -> (buffer) {
+            %is_string = scalar.cmpi eq, %vt, %string_type : i64
+            %typed = scf.if %is_string -> (buffer) {
+              %decoded = func.call @json_key(%text, %vb, %vl) : (buffer, i64, i64) -> (buffer)
+              %upper = func.call @g4_upper(%decoded) : (buffer) -> (buffer)
+              %value = func.call @join4(%type_text, %quote, %upper, %quote) : (buffer, buffer, buffer, buffer) -> (buffer)
+              scf.yield %value : buffer
+            } else {
+              %list = func.call @g4_quoted_list(%text, %vb, %vl) : (buffer, i64, i64) -> (buffer)
+              %upper = func.call @g4_upper(%list) : (buffer) -> (buffer)
+              %value = func.call @join4(%type_text, %lbracket, %upper, %rbracket) : (buffer, buffer, buffer, buffer) -> (buffer)
+              scf.yield %value : buffer
+            }
+            scf.yield %typed : buffer
+          } else {
+            %value = func.call @g4_value(%text, %vb, %vl, %vt, %true) : (buffer, i64, i64, i64, i1) -> (buffer)
+            %entry = func.call @join4(%key, %colon, %value, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+            scf.yield %entry : buffer
+          }
+          scf.yield %item3 : buffer
+        }
+        scf.yield %item2 : buffer
+      }
+      %next = func.call @join4(%acc, %lead, %item, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+      scf.yield %next, %true : buffer, i1
+    } else {
+      scf.yield %acc, %found_first : buffer, i1
+    }
+    scf.yield %out, %flag : buffer, i1
+  }
+  func.return %body : buffer
+}
+
+// format_parameters(properties, _, filter_keys) for the object at text[begin, begin + length).
+func.def @g4_params(%text: buffer, %begin: i64, %length: i64, %filter_keys: i1) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %empty = global.load @empty : buffer
+  %quote = global.load @g4_quote : buffer
+  %comma = global.load @g4_comma : buffer
+  %colon = global.load @g4_colon : buffer
+  %lbrace = global.load @g4_lbrace : buffer
+  %rbrace = global.load @g4_rbrace : buffer
+  %rbracket = global.load @g4_rbracket : buffer
+  %description_key = global.load @g4_key_description : buffer
+  %type_key = global.load @g4_key_type : buffer
+  %properties_key = global.load @g4_key_properties : buffer
+  %required_key = global.load @g4_key_required : buffer
+  %nullable_key = global.load @g4_key_nullable : buffer
+  %enum_key = global.load @g4_key_enum : buffer
+  %items_key = global.load @g4_key_items : buffer
+  %description_text = global.load @g4_description : buffer
+  %enum_text = global.load @g4_enum : buffer
+  %items_open = global.load @g4_items_open : buffer
+  %nullable_text = global.load @g4_nullable : buffer
+  %properties_open = global.load @g4_properties_open : buffer
+  %required_open = global.load @g4_required_open : buffer
+  %type_text = global.load @g4_type : buffer
+  %string_name = global.load @g4_string : buffer
+  %array_name = global.load @g4_array : buffer
+  %object_name = global.load @g4_object : buffer
+  %object_type = scalar.constant 2 : i64
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %fields, %count, %order = func.call @g4_sorted(%text, %begin, %length) : (buffer, i64, i64) -> (buffer, i64, buffer)
+  %bounded = scalar.assume %count [range(%count, 0, 65536)] : i64
+  %n = index.cast %bounded : i64 to index
+  %records = buffer.view %fields[%origin] : buffer -> view<[%n]x5xi64>
+  %order_view = buffer.view %order[%origin] : buffer -> view<[%n]xi64>
+  %body, %any = scf.for %r = [%c0 to %n step %c1](%acc = %empty : buffer, %found_first = %false : i1) -> (buffer, i1) {
+    %k64 = view.load %order_view[%r] : view<[%n]xi64> -> i64
+    %kb64 = scalar.assume %k64 [range(%k64, 0, 65535)] : i64
+    %ki = index.cast %kb64 : i64 to index
+    %k = index.assume %ki [lt(%ki, %n)] : index
+    %kb = view.load %records[%k, 0] : view<[%n]x5xi64> -> i64
+    %kl = view.load %records[%k, 1] : view<[%n]x5xi64> -> i64
+    %vb = view.load %records[%k, 2] : view<[%n]x5xi64> -> i64
+    %vl = view.load %records[%k, 3] : view<[%n]x5xi64> -> i64
+    %key = func.call @json_key(%text, %kb, %kl) : (buffer, i64, i64) -> (buffer)
+    %s1 = func.call @equal(%key, %description_key) : (buffer, buffer) -> (i1)
+    %s2 = func.call @equal(%key, %type_key) : (buffer, buffer) -> (i1)
+    %s3 = func.call @equal(%key, %properties_key) : (buffer, buffer) -> (i1)
+    %s4 = func.call @equal(%key, %required_key) : (buffer, buffer) -> (i1)
+    %s5 = func.call @equal(%key, %nullable_key) : (buffer, buffer) -> (i1)
+    %s12 = scalar.ori %s1, %s2 : i1
+    %s34 = scalar.ori %s3, %s4 : i1
+    %s1234 = scalar.ori %s12, %s34 : i1
+    %standard = scalar.ori %s1234, %s5 : i1
+    %skip = scalar.andi %filter_keys, %standard : i1
+    %keep = scalar.cmpi eq, %skip, %false : i1
+    %out, %flag = scf.if %keep -> (buffer, i1) {
+      %lead = scf.select %found_first, %comma, %empty : buffer
+      %open = func.call @join4(%acc, %lead, %key, %colon) : (buffer, buffer, buffer, buffer) -> (buffer)
+      %opened = func.call @join(%open, %lbrace) : (buffer, buffer) -> (buffer)
+      // description
+      %df, %db, %dl, %dt = func.call @json_lookup(%text, %vb, %vl, %description_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+      %has_description = func.call @g4_truthy(%text, %df, %db, %dl, %dt) : (buffer, i1, i64, i64, i64) -> (i1)
+      %part1 = scf.if %has_description -> (buffer) {
+        %value = func.call @g4_quoted_scalar(%text, %db, %dl, %dt) : (buffer, i64, i64, i64) -> (buffer)
+        %entry = func.call @join(%description_text, %value) : (buffer, buffer) -> (buffer)
+        scf.yield %entry : buffer
+      } else {
+        scf.yield %empty : buffer
+      }
+      %type_name = func.call @g4_type_of(%text, %vb, %vl) : (buffer, i64, i64) -> (buffer)
+      %is_string = func.call @equal(%type_name, %string_name) : (buffer, buffer) -> (i1)
+      %is_array = func.call @equal(%type_name, %array_name) : (buffer, buffer) -> (i1)
+      %is_object = func.call @equal(%type_name, %object_name) : (buffer, buffer) -> (i1)
+      // enum (STRING) or items (ARRAY)
+      %part2, %comma2 = scf.if %is_string -> (buffer, i1) {
+        %ef, %eb, %el, %et = func.call @json_lookup(%text, %vb, %vl, %enum_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+        %has_enum = func.call @g4_truthy(%text, %ef, %eb, %el, %et) : (buffer, i1, i64, i64, i64) -> (i1)
+        %entry, %c = scf.if %has_enum -> (buffer, i1) {
+          %sep = func.call @g4_sep(%has_description) : (i1) -> (buffer)
+          %value = func.call @g4_value(%text, %eb, %el, %et, %true) : (buffer, i64, i64, i64, i1) -> (buffer)
+          %joined = func.call @join4(%sep, %enum_text, %value, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+          scf.yield %joined, %true : buffer, i1
+        } else {
+          scf.yield %empty, %has_description : buffer, i1
+        }
+        scf.yield %entry, %c : buffer, i1
+      } else {
+        %entry, %c = scf.if %is_array -> (buffer, i1) {
+          %if_, %ib, %il, %it = func.call @json_lookup(%text, %vb, %vl, %items_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+          %items_object = scalar.cmpi eq, %it, %object_type : i64
+          %items_found = scalar.andi %if_, %items_object : i1
+          %items_nonempty = func.call @g4_truthy(%text, %items_found, %ib, %il, %it) : (buffer, i1, i64, i64, i64) -> (i1)
+          %e2, %c2 = scf.if %items_nonempty -> (buffer, i1) {
+            %sep = func.call @g4_sep(%has_description) : (i1) -> (buffer)
+            %inner = func.call @g4_items(%text, %ib, %il) : (buffer, i64, i64) -> (buffer)
+            %joined = func.call @join4(%sep, %items_open, %inner, %rbrace) : (buffer, buffer, buffer, buffer) -> (buffer)
+            scf.yield %joined, %true : buffer, i1
+          } else {
+            scf.yield %empty, %has_description : buffer, i1
+          }
+          scf.yield %e2, %c2 : buffer, i1
+        } else {
+          scf.yield %empty, %has_description : buffer, i1
+        }
+        scf.yield %entry, %c : buffer, i1
+      }
+      // nullable
+      %nf, %nb, %nl, %nt = func.call @json_lookup(%text, %vb, %vl, %nullable_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+      %nullable = func.call @g4_truthy(%text, %nf, %nb, %nl, %nt) : (buffer, i1, i64, i64, i64) -> (i1)
+      %sep3 = func.call @g4_sep(%comma2) : (i1) -> (buffer)
+      %nullable_entry = func.call @join(%sep3, %nullable_text) : (buffer, buffer) -> (buffer)
+      %part3 = scf.select %nullable, %nullable_entry, %empty : buffer
+      %comma3 = scalar.ori %comma2, %nullable : i1
+      // OBJECT: properties (or the value's own non-standard keys) and required
+      %part4, %comma4 = scf.if %is_object -> (buffer, i1) {
+        %pf, %pb, %pl, %pt = func.call @json_lookup(%text, %vb, %vl, %properties_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+        %props_object = scalar.cmpi eq, %pt, %object_type : i64
+        %has_props = scalar.andi %pf, %props_object : i1
+        %inner = scf.if %has_props -> (buffer) {
+          %value = func.call @g4_params(%text, %pb, %pl, %false) : (buffer, i64, i64, i1) -> (buffer)
+          scf.yield %value : buffer
+        } else {
+          %value = func.call @g4_params(%text, %vb, %vl, %true) : (buffer, i64, i64, i1) -> (buffer)
+          scf.yield %value : buffer
+        }
+        %sep = func.call @g4_sep(%comma3) : (i1) -> (buffer)
+        %props = func.call @join4(%sep, %properties_open, %inner, %rbrace) : (buffer, buffer, buffer, buffer) -> (buffer)
+        %rf, %rb, %rl, %rt = func.call @json_lookup(%text, %vb, %vl, %required_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+        %has_required = func.call @g4_truthy(%text, %rf, %rb, %rl, %rt) : (buffer, i1, i64, i64, i64) -> (i1)
+        %req = scf.if %has_required -> (buffer) {
+          %list = func.call @g4_quoted_list(%text, %rb, %rl) : (buffer, i64, i64) -> (buffer)
+          %value = func.call @join4(%comma, %required_open, %list, %rbracket) : (buffer, buffer, buffer, buffer) -> (buffer)
+          scf.yield %value : buffer
+        } else {
+          scf.yield %empty : buffer
+        }
+        %both = func.call @join(%props, %req) : (buffer, buffer) -> (buffer)
+        scf.yield %both, %true : buffer, i1
+      } else {
+        scf.yield %empty, %comma3 : buffer, i1
+      }
+      %sep5 = func.call @g4_sep(%comma4) : (i1) -> (buffer)
+      %type_entry = func.call @join4(%sep5, %type_text, %quote, %type_name) : (buffer, buffer, buffer, buffer) -> (buffer)
+      %closing = func.call @join(%quote, %rbrace) : (buffer, buffer) -> (buffer)
+      %a = func.call @join4(%opened, %part1, %part2, %part3) : (buffer, buffer, buffer, buffer) -> (buffer)
+      %b = func.call @join4(%a, %part4, %type_entry, %closing) : (buffer, buffer, buffer, buffer) -> (buffer)
+      scf.yield %b, %true : buffer, i1
+    } else {
+      scf.yield %acc, %found_first : buffer, i1
+    }
+    scf.yield %out, %flag : buffer, i1
+  }
+  func.return %body : buffer
+}
+
+// <|"|>value<|"|> for a string (decoded) or another scalar (as written).
+func.def @g4_quoted_scalar(%text: buffer, %begin: i64, %length: i64, %type: i64) -> (buffer) {
+  %empty = global.load @empty : buffer
+  %quote = global.load @g4_quote : buffer
+  %string_type = scalar.constant 0 : i64
+  %is_string = scalar.cmpi eq, %type, %string_type : i64
+  %inner = scf.if %is_string -> (buffer) {
+    %decoded = func.call @json_key(%text, %begin, %length) : (buffer, i64, i64) -> (buffer)
+    scf.yield %decoded : buffer
+  } else {
+    %raw = func.call @json_range(%text, %begin, %length) : (buffer, i64, i64) -> (buffer)
+    scf.yield %raw : buffer
+  }
+  %value = func.call @join4(%quote, %inner, %quote, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+  func.return %value : buffer
+}
+
+// format_function_declaration(tool) | trim, wrapped in <|tool>...<tool|>.
+func.def @g4_declaration_of(%tool: buffer) -> (buffer) {
+  %zero64 = scalar.constant 0 : i64
+  %empty = global.load @empty : buffer
+  %quote = global.load @g4_quote : buffer
+  %comma = global.load @g4_comma : buffer
+  %rbrace = global.load @g4_rbrace : buffer
+  %function_key = global.load @function_key : buffer
+  %name_key = global.load @g4_key_name : buffer
+  %description_key = global.load @g4_key_description : buffer
+  %parameters_key = global.load @g4_key_parameters : buffer
+  %properties_key = global.load @g4_key_properties : buffer
+  %required_key = global.load @g4_key_required : buffer
+  %type_key = global.load @g4_key_type : buffer
+  %response_key = global.load @g4_key_response : buffer
+  %object_name = global.load @g4_object : buffer
+  %false = scalar.constant false : i1
+  %length_offset = buffer.length %tool
+  %length = index.cast %length_offset : offset to i64
+  %ff, %fb, %fl, %ft = func.call @json_lookup(%tool, %zero64, %length, %function_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+  %nf, %name = func.call @g4_string_member(%tool, %fb, %fl, %name_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+  %df, %description = func.call @g4_string_member(%tool, %fb, %fl, %description_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+  %declaration = global.load @g4_declaration : buffer
+  %description_open = global.load @g4_description_open : buffer
+  %head = func.call @join4(%declaration, %name, %description_open, %quote) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %described = func.call @join4(%head, %description, %quote, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %pf, %pb, %pl, %pt = func.call @json_lookup(%tool, %fb, %fl, %parameters_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+  %has_params = func.call @g4_truthy(%tool, %pf, %pb, %pl, %pt) : (buffer, i1, i64, i64, i64) -> (i1)
+  %params = scf.if %has_params -> (buffer) {
+    %open = global.load @g4_parameters_open : buffer
+    %qf, %qb, %ql, %qt = func.call @json_lookup(%tool, %pb, %pl, %properties_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+    %has_props = func.call @g4_truthy(%tool, %qf, %qb, %ql, %qt) : (buffer, i1, i64, i64, i64) -> (i1)
+    %props = scf.if %has_props -> (buffer) {
+      %properties_open = global.load @g4_properties_open : buffer
+      %inner = func.call @g4_params(%tool, %qb, %ql, %false) : (buffer, i64, i64, i1) -> (buffer)
+      %close = global.load @g4_brace_comma : buffer
+      %value = func.call @join4(%properties_open, %inner, %close, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+      scf.yield %value : buffer
+    } else {
+      scf.yield %empty : buffer
+    }
+    %rf, %rb, %rl, %rt = func.call @json_lookup(%tool, %pb, %pl, %required_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+    %has_required = func.call @g4_truthy(%tool, %rf, %rb, %rl, %rt) : (buffer, i1, i64, i64, i64) -> (i1)
+    %required = scf.if %has_required -> (buffer) {
+      %required_open = global.load @g4_required_open : buffer
+      %list = func.call @g4_quoted_list(%tool, %rb, %rl) : (buffer, i64, i64) -> (buffer)
+      %close = global.load @g4_bracket_comma : buffer
+      %value = func.call @join4(%required_open, %list, %close, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+      scf.yield %value : buffer
+    } else {
+      scf.yield %empty : buffer
+    }
+    %tf, %tb, %tl, %tt = func.call @json_lookup(%tool, %pb, %pl, %type_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+    %has_type = func.call @g4_truthy(%tool, %tf, %tb, %tl, %tt) : (buffer, i1, i64, i64, i64) -> (i1)
+    %typed = scf.if %has_type -> (buffer) {
+      %type_name = func.call @g4_type_of(%tool, %pb, %pl) : (buffer, i64, i64) -> (buffer)
+      %type_text = global.load @g4_type : buffer
+      %head2 = func.call @join4(%type_text, %quote, %type_name, %quote) : (buffer, buffer, buffer, buffer) -> (buffer)
+      %value = func.call @join(%head2, %rbrace) : (buffer, buffer) -> (buffer)
+      scf.yield %value : buffer
+    } else {
+      scf.yield %empty : buffer
+    }
+    %value = func.call @join4(%open, %props, %required, %typed) : (buffer, buffer, buffer, buffer) -> (buffer)
+    scf.yield %value : buffer
+  } else {
+    scf.yield %empty : buffer
+  }
+  %sf, %sb, %sl, %st = func.call @json_lookup(%tool, %fb, %fl, %response_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+  %response = scf.if %sf -> (buffer) {
+    %open = global.load @g4_response_decl_open : buffer
+    %ef, %eb, %el, %et = func.call @json_lookup(%tool, %sb, %sl, %description_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+    %has_description = func.call @g4_truthy(%tool, %ef, %eb, %el, %et) : (buffer, i1, i64, i64, i64) -> (i1)
+    %described2 = scf.if %has_description -> (buffer) {
+      %description_text = global.load @g4_description : buffer
+      %value = func.call @g4_quoted_scalar(%tool, %eb, %el, %et) : (buffer, i64, i64, i64) -> (buffer)
+      %entry = func.call @join4(%description_text, %value, %comma, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+      scf.yield %entry : buffer
+    } else {
+      scf.yield %empty : buffer
+    }
+    %type_name = func.call @g4_type_of(%tool, %sb, %sl) : (buffer, i64, i64) -> (buffer)
+    %is_object = func.call @equal(%type_name, %object_name) : (buffer, buffer) -> (i1)
+    %typed = scf.if %is_object -> (buffer) {
+      %type_text = global.load @g4_type : buffer
+      %head2 = func.call @join4(%type_text, %quote, %type_name, %quote) : (buffer, buffer, buffer, buffer) -> (buffer)
+      %value = func.call @join(%head2, %rbrace) : (buffer, buffer) -> (buffer)
+      scf.yield %value : buffer
+    } else {
+      scf.yield %empty : buffer
+    }
+    %value = func.call @join4(%open, %described2, %typed, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+    scf.yield %value : buffer
+  } else {
+    scf.yield %empty : buffer
+  }
+  %all = func.call @join4(%described, %params, %response, %rbrace) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %trimmed = func.call @trim(%all) : (buffer) -> (buffer)
+  %open_tag = global.load @g4_decl_open : buffer
+  %close_tag = global.load @g4_decl_close : buffer
+  %wrapped = func.call @join4(%open_tag, %trimmed, %close_tag, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+  func.return %wrapped : buffer
+}
+
+// <|tool_call>call:NAME{k:v,...}<tool_call|> from a JSON arguments object (keys sorted,
+// values in format_argument syntax without key quotes).
+func.def @g4_call(%name: buffer, %arguments: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %zero64 = scalar.constant 0 : i64
+  %false = scalar.constant false : i1
+  %empty = global.load @empty : buffer
+  %comma = global.load @g4_comma : buffer
+  %colon = global.load @g4_colon : buffer
+  %lbrace = global.load @g4_lbrace : buffer
+  %open = global.load @g4_call_open : buffer
+  %close = global.load @g4_call_close : buffer
+  %length_offset = buffer.length %arguments
+  %length = index.cast %length_offset : offset to i64
+  %fields, %count, %order = func.call @g4_sorted(%arguments, %zero64, %length) : (buffer, i64, i64) -> (buffer, i64, buffer)
+  %bounded = scalar.assume %count [range(%count, 0, 65536)] : i64
+  %n = index.cast %bounded : i64 to index
+  %records = buffer.view %fields[%origin] : buffer -> view<[%n]x5xi64>
+  %order_view = buffer.view %order[%origin] : buffer -> view<[%n]xi64>
+  %head = func.call @join4(%open, %name, %lbrace, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %body = scf.for %r = [%c0 to %n step %c1](%acc = %head : buffer) -> (buffer) {
+    %k64 = view.load %order_view[%r] : view<[%n]xi64> -> i64
+    %kb64 = scalar.assume %k64 [range(%k64, 0, 65535)] : i64
+    %ki = index.cast %kb64 : i64 to index
+    %k = index.assume %ki [lt(%ki, %n)] : index
+    %kb = view.load %records[%k, 0] : view<[%n]x5xi64> -> i64
+    %kl = view.load %records[%k, 1] : view<[%n]x5xi64> -> i64
+    %vb = view.load %records[%k, 2] : view<[%n]x5xi64> -> i64
+    %vl = view.load %records[%k, 3] : view<[%n]x5xi64> -> i64
+    %vt = view.load %records[%k, 4] : view<[%n]x5xi64> -> i64
+    %key = func.call @json_key(%arguments, %kb, %kl) : (buffer, i64, i64) -> (buffer)
+    %value = func.call @g4_value(%arguments, %vb, %vl, %vt, %false) : (buffer, i64, i64, i64, i1) -> (buffer)
+    %first = index.cmp eq, %r, %c0 : index
+    %lead = scf.select %first, %empty, %comma : buffer
+    %a = func.call @join4(%acc, %lead, %key, %colon) : (buffer, buffer, buffer, buffer) -> (buffer)
+    %b = func.call @join(%a, %value) : (buffer, buffer) -> (buffer)
+    scf.yield %b : buffer
+  }
+  %result = func.call @join(%body, %close) : (buffer, buffer) -> (buffer)
+  func.return %result : buffer
+}
+
+// Message text: a string, or the text parts of a content array joined (each trimmed when
+// %trim_parts). Strings are trimmed when %trim_string.
+func.def @g4_content(%text: buffer, %found: i1, %begin: i64, %length: i64, %type: i64, %trim_string: i1, %trim_parts: i1) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %empty = global.load @empty : buffer
+  %string_type = scalar.constant 0 : i64
+  %array_type = scalar.constant 3 : i64
+  %object_type = scalar.constant 2 : i64
+  %is_string_type = scalar.cmpi eq, %type, %string_type : i64
+  %is_array_type = scalar.cmpi eq, %type, %array_type : i64
+  %is_string = scalar.andi %found, %is_string_type : i1
+  %is_array = scalar.andi %found, %is_array_type : i1
+  %result = scf.if %is_string -> (buffer) {
+    %decoded = func.call @json_key(%text, %begin, %length) : (buffer, i64, i64) -> (buffer)
+    %value = scf.if %trim_string -> (buffer) {
+      %t = func.call @trim(%decoded) : (buffer) -> (buffer)
+      scf.yield %t : buffer
+    } else {
+      scf.yield %decoded : buffer
+    }
+    scf.yield %value : buffer
+  } else {
+    %joined = scf.if %is_array -> (buffer) {
+      %elements, %etype, %ecount = func.call @members_range(%text, %begin, %length) : (buffer, i64, i64) -> (buffer, i32, i64)
+      %bounded = scalar.assume %ecount [range(%ecount, 0, 65536)] : i64
+      %n = index.cast %bounded : i64 to index
+      %records = buffer.view %elements[%origin] : buffer -> view<[%n]x5xi64>
+      %type_key = global.load @g4_key_type : buffer
+      %text_key = global.load @g4_key_text : buffer
+      %body = scf.for %i = [%c0 to %n step %c1](%acc = %empty : buffer) -> (buffer) {
+        %vb = view.load %records[%i, 2] : view<[%n]x5xi64> -> i64
+        %vl = view.load %records[%i, 3] : view<[%n]x5xi64> -> i64
+        %vt = view.load %records[%i, 4] : view<[%n]x5xi64> -> i64
+        %is_object = scalar.cmpi eq, %vt, %object_type : i64
+        %next = scf.if %is_object -> (buffer) {
+          %tf, %part_type = func.call @g4_string_member(%text, %vb, %vl, %type_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+          %is_text = func.call @equal(%part_type, %text_key) : (buffer, buffer) -> (i1)
+          %piece = scf.if %is_text -> (buffer) {
+            %xf, %raw = func.call @g4_string_member(%text, %vb, %vl, %text_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+            %value = scf.if %trim_parts -> (buffer) {
+              %t = func.call @trim(%raw) : (buffer) -> (buffer)
+              scf.yield %t : buffer
+            } else {
+              scf.yield %raw : buffer
+            }
+            scf.yield %value : buffer
+          } else {
+            scf.yield %empty : buffer
+          }
+          %appended = func.call @join(%acc, %piece) : (buffer, buffer) -> (buffer)
+          scf.yield %appended : buffer
+        } else {
+          scf.yield %acc : buffer
+        }
+        scf.yield %next : buffer
+      }
+      scf.yield %body : buffer
+    } else {
+      scf.yield %empty : buffer
+    }
+    scf.yield %joined : buffer
+  }
+  func.return %result : buffer
+}
+
+// How an assistant turn is closed once the next non-tool role is known.
+// flags: 1 pending, 2 calls, 4 responses, 8 content.
+func.def @g4_close(%flags: i64, %next_assistant: i1, %at_end: i1) -> (buffer) {
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %two64 = scalar.constant 2 : i64
+  %four64 = scalar.constant 4 : i64
+  %eight64 = scalar.constant 8 : i64
+  %false = scalar.constant false : i1
+  %empty = global.load @empty : buffer
+  %suffix = global.load @message_suffix : buffer
+  %response_open = global.load @g4_response_open : buffer
+  %pending_bit = scalar.andi %flags, %one64 : i64
+  %calls_bit = scalar.andi %flags, %two64 : i64
+  %responses_bit = scalar.andi %flags, %four64 : i64
+  %content_bit = scalar.andi %flags, %eight64 : i64
+  %pending = scalar.cmpi ne, %pending_bit, %zero64 : i64
+  %calls = scalar.cmpi ne, %calls_bit, %zero64 : i64
+  %responses = scalar.cmpi ne, %responses_bit, %zero64 : i64
+  %content = scalar.cmpi ne, %content_bit, %zero64 : i64
+  %no_responses = scalar.cmpi eq, %responses, %false : i1
+  %no_content = scalar.cmpi eq, %content, %false : i1
+  %open_call = scalar.andi %calls, %no_responses : i1
+  %answered = scalar.andi %responses, %no_content : i1
+  %left_open = scalar.andi %answered, %at_end : i1
+  %silent = scalar.ori %next_assistant, %left_open : i1
+  %plain = scf.select %silent, %empty, %suffix : buffer
+  %closing = scf.select %open_call, %response_open, %plain : buffer
+  %result = scf.select %pending, %closing, %empty : buffer
+  func.return %result : buffer
+}
+
+// Name of the call (in the request's tool_calls array at [begin, begin + length)) whose id is %id.
+func.def @g4_call_name(%request: buffer, %begin: i64, %length: i64, %id: buffer, %fallback: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %zero64 = scalar.constant 0 : i64
+  %elements, %etype, %ecount = func.call @members_range(%request, %begin, %length) : (buffer, i64, i64) -> (buffer, i32, i64)
+  %array = scalar.constant 3 : i32
+  %is_array = scalar.cmpi eq, %etype, %array : i32
+  %usable = scf.select %is_array, %ecount, %zero64 : i64
+  %bounded = scalar.assume %usable [range(%usable, 0, 65536)] : i64
+  %n = index.cast %bounded : i64 to index
+  %records = buffer.view %elements[%origin] : buffer -> view<[%n]x5xi64>
+  %id_key = global.load @g4_key_id : buffer
+  %name_key = global.load @g4_key_name : buffer
+  %function_key = global.load @function_key : buffer
+  %object_type = scalar.constant 2 : i64
+  %result = scf.for %i = [%c0 to %n step %c1](%current = %fallback : buffer) -> (buffer) {
+    %vb = view.load %records[%i, 2] : view<[%n]x5xi64> -> i64
+    %vl = view.load %records[%i, 3] : view<[%n]x5xi64> -> i64
+    %vt = view.load %records[%i, 4] : view<[%n]x5xi64> -> i64
+    %is_object = scalar.cmpi eq, %vt, %object_type : i64
+    %next = scf.if %is_object -> (buffer) {
+      %found_id, %call_id = func.call @g4_string_member(%request, %vb, %vl, %id_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+      %same = func.call @equal(%call_id, %id) : (buffer, buffer) -> (i1)
+      %match = scalar.andi %found_id, %same : i1
+      %named = scf.if %match -> (buffer) {
+        %ff, %fb, %fl, %ft = func.call @json_lookup(%request, %vb, %vl, %function_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+        %nf, %name = func.call @g4_string_member(%request, %fb, %fl, %name_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+        scf.yield %name : buffer
+      } else {
+        scf.yield %current : buffer
+      }
+      scf.yield %named : buffer
+    } else {
+      scf.yield %current : buffer
+    }
+    scf.yield %next : buffer
+  }
+  func.return %result : buffer
+}
+
+// The assistant's tool calls rendered from the request (arguments: a JSON string or object).
+func.def @g4_calls_text(%request: buffer, %begin: i64, %length: i64) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %zero64 = scalar.constant 0 : i64
+  %empty = global.load @empty : buffer
+  %elements, %etype, %ecount = func.call @members_range(%request, %begin, %length) : (buffer, i64, i64) -> (buffer, i32, i64)
+  %array = scalar.constant 3 : i32
+  %is_array = scalar.cmpi eq, %etype, %array : i32
+  %usable = scf.select %is_array, %ecount, %zero64 : i64
+  %bounded = scalar.assume %usable [range(%usable, 0, 65536)] : i64
+  %n = index.cast %bounded : i64 to index
+  %records = buffer.view %elements[%origin] : buffer -> view<[%n]x5xi64>
+  %name_key = global.load @g4_key_name : buffer
+  %arguments_key = global.load @g4_key_arguments : buffer
+  %function_key = global.load @function_key : buffer
+  %object_type = scalar.constant 2 : i64
+  %string_type = scalar.constant 0 : i64
+  %lbrace = global.load @g4_lbrace : buffer
+  %rbrace = global.load @g4_rbrace : buffer
+  %no_arguments = func.call @join(%lbrace, %rbrace) : (buffer, buffer) -> (buffer)
+  %result = scf.for %i = [%c0 to %n step %c1](%acc = %empty : buffer) -> (buffer) {
+    %vb = view.load %records[%i, 2] : view<[%n]x5xi64> -> i64
+    %vl = view.load %records[%i, 3] : view<[%n]x5xi64> -> i64
+    %ff, %fb, %fl, %ft = func.call @json_lookup(%request, %vb, %vl, %function_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+    %nf, %name = func.call @g4_string_member(%request, %fb, %fl, %name_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+    %af, %ab, %al, %at = func.call @json_lookup(%request, %fb, %fl, %arguments_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+    %is_string_type = scalar.cmpi eq, %at, %string_type : i64
+    %is_object_type = scalar.cmpi eq, %at, %object_type : i64
+    %is_string = scalar.andi %af, %is_string_type : i1
+    %is_object = scalar.andi %af, %is_object_type : i1
+    %arguments = scf.if %is_string -> (buffer) {
+      %decoded = func.call @json_key(%request, %ab, %al) : (buffer, i64, i64) -> (buffer)
+      scf.yield %decoded : buffer
+    } else {
+      %raw = scf.if %is_object -> (buffer) {
+        %value = func.call @json_range(%request, %ab, %al) : (buffer, i64, i64) -> (buffer)
+        scf.yield %value : buffer
+      } else {
+        scf.yield %no_arguments : buffer
+      }
+      scf.yield %raw : buffer
+    }
+    %call = func.call @g4_call(%name, %arguments) : (buffer, buffer) -> (buffer)
+    %next = func.call @join(%acc, %call) : (buffer, buffer) -> (buffer)
+    scf.yield %next : buffer
+  }
+  func.return %result : buffer
+}
+
+// The whole prompt (without the generation prompt) and the chat state:
+// bit 4 (16) thinking; bits 0-1 what the conversation ends with (0 a closed turn,
+// 1 calls without results, 2 tool results).
+func.def @g4_render(%request: buffer, %tools: buffer, %thinking: i1) -> (buffer, i64) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %two64 = scalar.constant 2 : i64
+  %four64 = scalar.constant 4 : i64
+  %eight64 = scalar.constant 8 : i64
+  %sixteen64 = scalar.constant 16 : i64
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %empty = global.load @empty : buffer
+  %string_type = scalar.constant 0 : i64
+  %object_type = scalar.constant 2 : i64
+  %array_type = scalar.constant 3 : i64
+  %request_bytes = buffer.length %request
+  %request_length = index.cast %request_bytes : offset to i64
+  %messages_key = global.load @messages_key : buffer
+  %role_key = global.load @role_key : buffer
+  %content_key = global.load @content_key : buffer
+  %system_role = global.load @system : buffer
+  %user_role = global.load @user : buffer
+  %assistant_role = global.load @assistant : buffer
+  %tool_role = global.load @tool_role : buffer
+  %system_prefix = global.load @system_prefix : buffer
+  %user_prefix = global.load @user_prefix : buffer
+  %assistant_prefix = global.load @assistant_prefix : buffer
+  %suffix = global.load @message_suffix : buffer
+  %fm, %bm, %lm, %tm = func.call @json_lookup(%request, %zero64, %request_length, %messages_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+  %is_array = scalar.cmpi eq, %tm, %array_type : i64
+  %has_messages = scalar.andi %fm, %is_array : i1
+  %mb = scf.select %has_messages, %bm, %zero64 : i64
+  %ml = scf.select %has_messages, %lm, %zero64 : i64
+  %elements, %etype, %raw_count = func.call @members_range(%request, %mb, %ml) : (buffer, i64, i64) -> (buffer, i32, i64)
+  %count = scf.select %has_messages, %raw_count, %zero64 : i64
+  %bounded = scalar.assume %count [range(%count, 0, 1048576)] : i64
+  %n = index.cast %bounded : i64 to index
+  %records = buffer.view %elements[%origin] : buffer -> view<[%n]x5xi64>
+  %last_query = scf.if %has_messages -> (i64) {
+    %value = func.call @last_user(%request, %mb, %ml) : (buffer, i64, i64) -> (i64)
+    scf.yield %value : i64
+  } else {
+    scf.yield %zero64 : i64
+  }
+  // System turn: thinking flag, the first system message, tool declarations.
+  %nonempty = scalar.cmpi ne, %count, %zero64 : i64
+  %first_system, %system_text = scf.if %nonempty -> (i1, buffer) {
+    %first = buffer.view %elements[%origin] : buffer -> view<1x5xi64>
+    %b0 = view.load %first[0, 2] : view<1x5xi64> -> i64
+    %l0 = view.load %first[0, 3] : view<1x5xi64> -> i64
+    %rf, %role = func.call @g4_string_member(%request, %b0, %l0, %role_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+    %is_system = func.call @equal(%role, %system_role) : (buffer, buffer) -> (i1)
+    %cf, %cb, %cl, %ct = func.call @json_lookup(%request, %b0, %l0, %content_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+    %text = func.call @g4_content(%request, %cf, %cb, %cl, %ct, %true, %true) : (buffer, i1, i64, i64, i64, i1, i1) -> (buffer)
+    scf.yield %is_system, %text : i1, buffer
+  } else {
+    scf.yield %false, %empty : i1, buffer
+  }
+  %tool_fields, %tool_type, %tool_count = func.call @members(%tools) : (buffer) -> (buffer, i32, i64)
+  %tools_array = scalar.constant 3 : i32
+  %tools_is_array = scalar.cmpi eq, %tool_type, %tools_array : i32
+  %usable_tools = scf.select %tools_is_array, %tool_count, %zero64 : i64
+  %has_tools = scalar.cmpi ne, %usable_tools, %zero64 : i64
+  %bounded_tools = scalar.assume %usable_tools [range(%usable_tools, 0, 4096)] : i64
+  %tn = index.cast %bounded_tools : i64 to index
+  %tool_records = buffer.view %tool_fields[%origin] : buffer -> view<[%tn]x5xi64>
+  %declarations = scf.for %i = [%c0 to %tn step %c1](%acc = %empty : buffer) -> (buffer) {
+    %vb = view.load %tool_records[%i, 2] : view<[%tn]x5xi64> -> i64
+    %vl = view.load %tool_records[%i, 3] : view<[%tn]x5xi64> -> i64
+    %tool = func.call @json_range(%tools, %vb, %vl) : (buffer, i64, i64) -> (buffer)
+    %declaration = func.call @g4_declaration_of(%tool) : (buffer) -> (buffer)
+    %next = func.call @join(%acc, %declaration) : (buffer, buffer) -> (buffer)
+    scf.yield %next : buffer
+  }
+  %think_or_tools = scalar.ori %thinking, %has_tools : i1
+  %open_system = scalar.ori %think_or_tools, %first_system : i1
+  %think_flag = global.load @g4_think_flag : buffer
+  %flag_text = scf.select %thinking, %think_flag, %empty : buffer
+  %own_system = scf.select %first_system, %system_text, %empty : buffer
+  %system_head = func.call @join4(%system_prefix, %flag_text, %own_system, %declarations) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %system_block = func.call @join(%system_head, %suffix) : (buffer, buffer) -> (buffer)
+  %opening = scf.select %open_system, %system_block, %empty : buffer
+  %bos = global.load @bos : buffer
+  %start = func.call @join(%bos, %opening) : (buffer, buffer) -> (buffer)
+  %skip_first = scf.select %first_system, %one64, %zero64 : i64
+  %reasoning_key = global.load @g4_key_reasoning : buffer
+  %reasoning_content_key = global.load @g4_key_reasoning_content : buffer
+  %tool_calls_key = global.load @g4_key_tool_calls : buffer
+  %tool_call_id_key = global.load @g4_key_tool_call_id : buffer
+  %name_key = global.load @g4_key_name : buffer
+  %unknown = global.load @g4_unknown : buffer
+  %think_open = global.load @think_open : buffer
+  %think_close = global.load @think_close : buffer
+  %item_prefix = global.load @tool_item_prefix : buffer
+  %value_open = global.load @g4_value_open : buffer
+  %item_suffix = global.load @tool_item_suffix : buffer
+  %quote = global.load @g4_quote : buffer
+  // Loop state: rendered text, flags (1 pending assistant, 2 its calls, 4 results, 8 content,
+  // 16 previous non-tool role was assistant), the pending assistant's tool_calls range.
+  %text, %flags, %calls_begin, %calls_length = scf.for %i = [%c0 to %n step %c1](%acc = %start : buffer, %state = %zero64 : i64, %cb = %zero64 : i64, %cl = %zero64 : i64) -> (buffer, i64, i64, i64) {
+    %index64 = index.cast %i : index to i64
+    %in_range = scalar.cmpi uge, %index64, %skip_first : i64
+    %vb = view.load %records[%i, 2] : view<[%n]x5xi64> -> i64
+    %vl = view.load %records[%i, 3] : view<[%n]x5xi64> -> i64
+    %vt = view.load %records[%i, 4] : view<[%n]x5xi64> -> i64
+    %is_object = scalar.cmpi eq, %vt, %object_type : i64
+    %live = scalar.andi %in_range, %is_object : i1
+    %r_text, %r_state, %r_cb, %r_cl = scf.if %live -> (buffer, i64, i64, i64) {
+      %rf, %role = func.call @g4_string_member(%request, %vb, %vl, %role_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+      %is_tool = func.call @equal(%role, %tool_role) : (buffer, buffer) -> (i1)
+      %is_assistant = func.call @equal(%role, %assistant_role) : (buffer, buffer) -> (i1)
+      %is_user = func.call @equal(%role, %user_role) : (buffer, buffer) -> (i1)
+      %cf, %cbg, %clg, %ct = func.call @json_lookup(%request, %vb, %vl, %content_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+      %calls_bit = scalar.andi %state, %two64 : i64
+      %pending_calls = scalar.cmpi ne, %calls_bit, %zero64 : i64
+      %o_text, %o_state, %o_cb, %o_cl = scf.if %is_tool -> (buffer, i64, i64, i64) {
+        // A tool result belongs to the pending assistant's calls (others are not rendered).
+        %t_text, %t_state = scf.if %pending_calls -> (buffer, i64) {
+          %nf, %own_name = func.call @g4_string_member(%request, %vb, %vl, %name_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+          %own_length = buffer.length %own_name
+          %has_own = index.cmp ne, %own_length, %origin : offset
+          %fallback = scf.select %has_own, %own_name, %unknown : buffer
+          %idf, %call_id = func.call @g4_string_member(%request, %vb, %vl, %tool_call_id_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+          %name = func.call @g4_call_name(%request, %cb, %cl, %call_id, %fallback) : (buffer, i64, i64, buffer, buffer) -> (buffer)
+          %body = func.call @g4_content(%request, %cf, %cbg, %clg, %ct, %false, %false) : (buffer, i1, i64, i64, i64, i1, i1) -> (buffer)
+          %head = func.call @join4(%item_prefix, %name, %value_open, %quote) : (buffer, buffer, buffer, buffer) -> (buffer)
+          %item = func.call @join4(%head, %body, %quote, %item_suffix) : (buffer, buffer, buffer, buffer) -> (buffer)
+          %appended = func.call @join(%acc, %item) : (buffer, buffer) -> (buffer)
+          %answered = scalar.ori %state, %four64 : i64
+          scf.yield %appended, %answered : buffer, i64
+        } else {
+          scf.yield %acc, %state : buffer, i64
+        }
+        scf.yield %t_text, %t_state, %cb, %cl : buffer, i64, i64, i64
+      } else {
+        %close = func.call @g4_close(%state, %is_assistant, %false) : (i64, i1, i1) -> (buffer)
+        %prior_bit = scalar.andi %state, %sixteen64 : i64
+        %prior_assistant = scalar.cmpi ne, %prior_bit, %zero64 : i64
+        %a_text, %a_state, %a_cb, %a_cl = scf.if %is_assistant -> (buffer, i64, i64, i64) {
+          %prefix = scf.select %prior_assistant, %empty, %assistant_prefix : buffer
+          %gf, %reasoning_a = func.call @g4_string_member(%request, %vb, %vl, %reasoning_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+          %hf, %reasoning_b = func.call @g4_string_member(%request, %vb, %vl, %reasoning_content_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+          %a_length = buffer.length %reasoning_a
+          %has_a = index.cmp ne, %a_length, %origin : offset
+          %reasoning = scf.select %has_a, %reasoning_a, %reasoning_b : buffer
+          %reasoning_length = buffer.length %reasoning
+          %has_reasoning = index.cmp ne, %reasoning_length, %origin : offset
+          %after_query = scalar.cmpi sge, %index64, %last_query : i64
+          %show = scalar.andi %has_reasoning, %after_query : i1
+          %thought_block = func.call @join4(%think_open, %reasoning, %think_close, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+          %thought = scf.select %show, %thought_block, %empty : buffer
+          %content = func.call @g4_content(%request, %cf, %cbg, %clg, %ct, %true, %true) : (buffer, i1, i64, i64, i64, i1, i1) -> (buffer)
+          %kf, %kb, %kl, %kt = func.call @json_lookup(%request, %vb, %vl, %tool_calls_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+          %calls_array = scalar.cmpi eq, %kt, %array_type : i64
+          %calls_found = scalar.andi %kf, %calls_array : i1
+          %ncb = scf.select %calls_found, %kb, %zero64 : i64
+          %ncl = scf.select %calls_found, %kl, %zero64 : i64
+          %calls = scf.if %calls_found -> (buffer) {
+            %value = func.call @g4_calls_text(%request, %kb, %kl) : (buffer, i64, i64) -> (buffer)
+            scf.yield %value : buffer
+          } else {
+            scf.yield %empty : buffer
+          }
+          %calls_size = buffer.length %calls
+          %has_calls = index.cmp ne, %calls_size, %origin : offset
+          %content_size = buffer.length %content
+          %has_content = index.cmp ne, %content_size, %origin : offset
+          %calls_flag = scf.select %has_calls, %two64, %zero64 : i64
+          %content_flag = scf.select %has_content, %eight64, %zero64 : i64
+          %f1 = scalar.ori %one64, %sixteen64 : i64
+          %f2 = scalar.ori %f1, %calls_flag : i64
+          %f3 = scalar.ori %f2, %content_flag : i64
+          %head = func.call @join4(%acc, %close, %prefix, %thought) : (buffer, buffer, buffer, buffer) -> (buffer)
+          %message = func.call @join4(%head, %content, %calls, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+          scf.yield %message, %f3, %ncb, %ncl : buffer, i64, i64, i64
+        } else {
+          %prefix = scf.select %is_user, %user_prefix, %system_prefix : buffer
+          %content = func.call @g4_content(%request, %cf, %cbg, %clg, %ct, %true, %true) : (buffer, i1, i64, i64, i64, i1, i1) -> (buffer)
+          %head = func.call @join4(%acc, %close, %prefix, %content) : (buffer, buffer, buffer, buffer) -> (buffer)
+          %message = func.call @join(%head, %suffix) : (buffer, buffer) -> (buffer)
+          scf.yield %message, %zero64, %zero64, %zero64 : buffer, i64, i64, i64
+        }
+        scf.yield %a_text, %a_state, %a_cb, %a_cl : buffer, i64, i64, i64
+      }
+      scf.yield %o_text, %o_state, %o_cb, %o_cl : buffer, i64, i64, i64
+    } else {
+      scf.yield %acc, %state, %cb, %cl : buffer, i64, i64, i64
+    }
+    scf.yield %r_text, %r_state, %r_cb, %r_cl : buffer, i64, i64, i64
+  }
+  %final_close = func.call @g4_close(%flags, %false, %true) : (i64, i1, i1) -> (buffer)
+  %rendered = func.call @join(%text, %final_close) : (buffer, buffer) -> (buffer)
+  %pending_bit = scalar.andi %flags, %one64 : i64
+  %calls_bit = scalar.andi %flags, %two64 : i64
+  %responses_bit = scalar.andi %flags, %four64 : i64
+  %pending = scalar.cmpi ne, %pending_bit, %zero64 : i64
+  %calls = scalar.cmpi ne, %calls_bit, %zero64 : i64
+  %responses = scalar.cmpi ne, %responses_bit, %zero64 : i64
+  %open_calls = scalar.andi %pending, %calls : i1
+  %kind_calls = scf.select %responses, %two64, %one64 : i64
+  %ending = scf.select %open_calls, %kind_calls, %zero64 : i64
+  %thinking_bit = scf.select %thinking, %sixteen64, %zero64 : i64
+  %state = scalar.ori %ending, %thinking_bit : i64
+  func.return %rendered, %state : buffer, i64
+}
+
+// Generation prompt: a model turn after a closed turn; after tool results nothing
+// (the model turn is still open) or, with thinking, the open thought channel.
+// Output state 1 = inside reasoning, 3 = start (the model may open the thought channel).
+func.def @g4_chat_end(%state: i64) -> (buffer, i64) {
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %two64 = scalar.constant 2 : i64
+  %three64 = scalar.constant 3 : i64
+  %sixteen64 = scalar.constant 16 : i64
+  %empty = global.load @empty : buffer
+  %ending = scalar.andi %state, %three64 : i64
+  %thinking_bit = scalar.andi %state, %sixteen64 : i64
+  %thinking = scalar.cmpi ne, %thinking_bit, %zero64 : i64
+  %closed = scalar.cmpi eq, %ending, %zero64 : i64
+  %after_results = scalar.cmpi eq, %ending, %two64 : i64
+  %reasoning = scalar.andi %after_results, %thinking : i1
+  %turn = global.load @generation_think : buffer
+  %think_open = global.load @think_open : buffer
+  %resume = scf.select %reasoning, %think_open, %empty : buffer
+  %prompt = scf.select %closed, %turn, %resume : buffer
+  %output_state = scf.select %reasoning, %one64, %three64 : i64
+  func.return %prompt, %output_state : buffer, i64
+}
+
+// Output channels. States: 0 answer (until the call marker), 1 reasoning (until
+// [\n]<channel|>), 2 skip the whitespace after reasoning, 3 start of the response
+// (the model may open <|channel>thought\n itself).
+func.def @g4_output_next(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {
+  %c0_i64 = scalar.constant 0 : i64
+  %c1_i64 = scalar.constant 1 : i64
+  %c2_i64 = scalar.constant 2 : i64
+  %c3_i64 = scalar.constant 3 : i64
+  %zero32 = scalar.constant 0 : i32
+  %newline = scalar.constant 10 : i32
+  %step = index.constant 1 : offset
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %streaming = scalar.cmpi eq, %phase, %zero32 : i32
+  %start_value = scalar.assume %previous [range(%previous, 0, 9223372036854775807)] : i64
+  %start = index.cast %start_value : i64 to offset
+  %length = buffer.length %response
+  %length64 = index.cast %length : offset to i64
+  %tool_marker = global.load @text_tool_marker : buffer
+  %reasoning = scalar.cmpi eq, %state, %c1_i64 : i64
+  %kind, %begin, %end, %next = scf.if %reasoning -> (i64, i64, i64, i64) {
+    %close = global.load @g4_channel_close : buffer
+    %think_close = global.load @think_close : buffer
+    // The model closes reasoning with a bare <channel|> (llama.cpp reference); the reasoning
+    // channel keeps every byte before it so the raw output can be rebuilt exactly.
+    %at_long = scalar.constant false : i1
+    %at_short = func.call @starts_at(%response, %start, %close) : (buffer, offset, buffer) -> (i1)
+    %at_close = scalar.ori %at_long, %at_short : i1
+    %r_kind, %r_begin, %r_end, %r_next = scf.if %at_close -> (i64, i64, i64, i64) {
+      %long_size = buffer.length %think_close
+      %short_size = buffer.length %close
+      %size = scf.select %at_long, %long_size, %short_size : offset
+      %size64 = index.cast %size : offset to i64
+      %after = scalar.addi %previous, %size64 : i64
+      scf.yield %c0_i64, %previous, %after, %c2_i64 : i64, i64, i64, i64
+    } else {
+      %stop = func.call @text_until(%response, %close, %previous, %phase) : (buffer, buffer, i64, i32) -> (i64)
+      // Hold back a newline that may belong to "\n<channel|>".
+      %has_text = scalar.cmpi ugt, %stop, %previous : i64
+      %last = scalar.subi %stop, %c1_i64 : i64
+      %last_value = scf.select %has_text, %last, %previous : i64
+      %last_bounded = scalar.assume %last_value [range(%last_value, 0, 9223372036854775807)] : i64
+      %last_offset = index.cast %last_bounded : i64 to offset
+      %inside = index.cmp ult, %last_offset, %length : offset
+      %readable = scalar.andi %has_text, %inside : i1
+      %is_newline = scf.if %readable -> (i1) {
+        %byte = buffer.load.i8.u %response[%last_offset]
+        %nl = scalar.cmpi eq, %byte, %newline : i32
+        scf.yield %nl : i1
+      } else {
+        scf.yield %false : i1
+      }
+      %marker_follows = scalar.cmpi ult, %stop, %length64 : i64
+      %may_close = scalar.ori %marker_follows, %streaming : i1
+      %hold_wanted = scalar.andi %is_newline, %may_close : i1
+      %hold = scalar.andi %hold_wanted, %false : i1
+      %held = scf.select %hold, %last, %stop : i64
+      scf.yield %c2_i64, %previous, %held, %c1_i64 : i64, i64, i64, i64
+    }
+    scf.yield %r_kind, %r_begin, %r_end, %r_next : i64, i64, i64, i64
+  } else {
+    %opening = scalar.cmpi eq, %state, %c3_i64 : i64
+    %spacing = scalar.cmpi eq, %state, %c2_i64 : i64
+    // State 3: a complete opener is consumed; a partial one is held while streaming.
+    %open = global.load @think_open : buffer
+    %open_size = buffer.length %open
+    %open_size64 = index.cast %open_size : offset to i64
+    %remaining_offset = index.sub %length, %start : offset
+    %short = index.cmp ult, %remaining_offset, %open_size : offset
+    %count = scf.select %short, %remaining_offset, %open_size : offset
+    %c0_offset = index.constant 0 : offset
+    %comparison = buffer.compare %response[%start], %open[%c0_offset], %count
+    %prefix_match = scalar.cmpi eq, %comparison, %zero32 : i32
+    %complete = scalar.cmpi eq, %short, %false : i1
+    %opened = scalar.andi %prefix_match, %complete : i1
+    %partial_a = scalar.andi %prefix_match, %short : i1
+    %partial = scalar.andi %partial_a, %streaming : i1
+    %consume = scalar.andi %opening, %opened : i1
+    %wait = scalar.andi %opening, %partial : i1
+    // Answer text (states 0, 2, 3): skip leading whitespace after reasoning, stop at the call marker.
+    %text_start = scf.if %spacing -> (i64) {
+      %stop = scf.while(%position = %start : offset) -> (offset) {
+        %available = index.cmp ult, %position, %length : offset
+        %space = scf.if %available -> (i1) {
+          %value = func.call @text_is_space(%response, %position) : (buffer, offset) -> (i1)
+          scf.yield %value : i1
+        } else {
+          scf.yield %false : i1
+        }
+        scf.condition %space, %position : i1, offset
+      } do(%position: offset) {
+        %following = index.add %position, %step : offset
+        scf.yield %following : offset
+      }
+      %value = index.cast %stop : offset to i64
+      scf.yield %value : i64
+    } else {
+      scf.yield %previous : i64
+    }
+    %answer_end = func.call @text_until(%response, %tool_marker, %text_start, %phase) : (buffer, buffer, i64, i32) -> (i64)
+    %has_answer = scalar.cmpi ne, %answer_end, %text_start : i64
+    // An empty span must not change the state (the host rejects it): stay until text arrives.
+    %answer_next = scf.select %has_answer, %c0_i64, %state : i64
+    %after_open = scalar.addi %previous, %open_size64 : i64
+    %k1 = scf.select %consume, %c0_i64, %c1_i64 : i64
+    %b1 = scf.select %consume, %previous, %text_start : i64
+    %e1 = scf.select %consume, %after_open, %answer_end : i64
+    %n1 = scf.select %consume, %c1_i64, %answer_next : i64
+    %k2 = scf.select %wait, %c1_i64, %k1 : i64
+    %b2 = scf.select %wait, %previous, %b1 : i64
+    %e2 = scf.select %wait, %previous, %e1 : i64
+    %n2 = scf.select %wait, %c3_i64, %n1 : i64
+    scf.yield %k2, %b2, %e2, %n2 : i64, i64, i64, i64
+  }
+  func.return %kind, %begin, %end, %next : i64, i64, i64, i64
+}
+
+// Gemma call arguments -> JSON: bare keys are quoted, <|"|>...<|"|> strings become JSON
+// strings, numbers/true/false/null and nesting are kept. Malformed text is converted as is.
+func.def @g4_arguments_json(%text: buffer, %begin: offset, %end: offset) -> (buffer) {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  %c16 = index.constant 16 : offset
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %quote_byte = scalar.constant 34 : i32
+  %lbrace = scalar.constant 123 : i32
+  %rbrace = scalar.constant 125 : i32
+  %lbracket = scalar.constant 91 : i32
+  %rbracket = scalar.constant 93 : i32
+  %comma = scalar.constant 44 : i32
+  %colon = scalar.constant 58 : i32
+  %quote = global.load @g4_quote : buffer
+  %quote_size = buffer.length %quote
+  %span = index.sub %end, %begin : offset
+  %twice = index.add %span, %span : offset
+  %thrice = index.add %twice, %span : offset
+  %capacity = index.add %thrice, %c16 : offset
+  %output = buffer.alloca<private> align(1) %capacity : buffer
+  // Loop: position, output position, object/array stack (1 bit per level, 1 = object), expecting a key.
+  %final, %written, %stack, %key = scf.while(%position = %begin : offset, %out = %c0 : offset, %levels = %zero64 : i64, %expect = %false : i1) -> (offset, offset, i64, i1) {
+    %more = index.cmp ult, %position, %end : offset
+    scf.condition %more, %position, %out, %levels, %expect : i1, offset, offset, i64, i1
+  } do(%position: offset, %out: offset, %levels: i64, %expect: i1) {
+    %is_string = func.call @starts_at(%text, %position, %quote) : (buffer, offset, buffer) -> (i1)
+    %np, %no, %nl, %ne = scf.if %is_string -> (offset, offset, i64, i1) {
+      %content = index.add %position, %quote_size : offset
+      %found = func.call @find(%text, %content, %end, %quote) : (buffer, offset, offset, buffer) -> (offset)
+      %closed = index.cmp ult, %found, %end : offset
+      %stop = scf.select %closed, %found, %end : offset
+      buffer.store.i8 %quote_byte, %output[%out]
+      %o1 = index.add %out, %c1 : offset
+      %o2 = func.call @json_escape(%text, %content, %stop, %output, %o1) : (buffer, offset, offset, buffer, offset) -> (offset)
+      buffer.store.i8 %quote_byte, %output[%o2]
+      %o3 = index.add %o2, %c1 : offset
+      %after_quote = index.add %stop, %quote_size : offset
+      %after = scf.select %closed, %after_quote, %end : offset
+      scf.yield %after, %o3, %levels, %false : offset, offset, i64, i1
+    } else {
+      %byte = buffer.load.i8.u %text[%position]
+      %next_position = index.add %position, %c1 : offset
+      %is_lbrace = scalar.cmpi eq, %byte, %lbrace : i32
+      %is_lbracket = scalar.cmpi eq, %byte, %lbracket : i32
+      %is_rbrace = scalar.cmpi eq, %byte, %rbrace : i32
+      %is_rbracket = scalar.cmpi eq, %byte, %rbracket : i32
+      %is_comma = scalar.cmpi eq, %byte, %comma : i32
+      %is_colon = scalar.cmpi eq, %byte, %colon : i32
+      %is_space = func.call @text_is_space(%text, %position) : (buffer, offset) -> (i1)
+      %opens = scalar.ori %is_lbrace, %is_lbracket : i1
+      %closes = scalar.ori %is_rbrace, %is_rbracket : i1
+      %punct_a = scalar.ori %opens, %closes : i1
+      %punct_b = scalar.ori %is_comma, %is_colon : i1
+      %punct = scalar.ori %punct_a, %punct_b : i1
+      %r_p, %r_o, %r_l, %r_e = scf.if %punct -> (offset, offset, i64, i1) {
+        buffer.store.i8 %byte, %output[%out]
+        %o1 = index.add %out, %c1 : offset
+        %shifted = scalar.shli %levels, %one64 : i64
+        %object_bit = scf.select %is_lbrace, %one64, %zero64 : i64
+        %pushed = scalar.ori %shifted, %object_bit : i64
+        %popped = scalar.shrui %levels, %one64 : i64
+        %l1 = scf.select %opens, %pushed, %levels : i64
+        %l2 = scf.select %closes, %popped, %l1 : i64
+        %top = scalar.andi %l2, %one64 : i64
+        %in_object = scalar.cmpi ne, %top, %zero64 : i64
+        // A key follows "{" or "," inside an object.
+        %after_comma = scalar.andi %is_comma, %in_object : i1
+        %expect_key = scalar.ori %is_lbrace, %after_comma : i1
+        scf.yield %next_position, %o1, %l2, %expect_key : offset, offset, i64, i1
+      } else {
+        %s_p, %s_o, %s_l, %s_e = scf.if %is_space -> (offset, offset, i64, i1) {
+          scf.yield %next_position, %out, %levels, %expect : offset, offset, i64, i1
+        } else {
+          // A bare token: up to punctuation, whitespace or a string quote.
+          %token_end = scf.while(%t = %position : offset) -> (offset) {
+            %inside = index.cmp ult, %t, %end : offset
+            %continue = scf.if %inside -> (i1) {
+              %b = buffer.load.i8.u %text[%t]
+              %q = func.call @starts_at(%text, %t, %quote) : (buffer, offset, buffer) -> (i1)
+              %w = func.call @text_is_space(%text, %t) : (buffer, offset) -> (i1)
+              %d1 = scalar.cmpi eq, %b, %lbrace : i32
+              %d2 = scalar.cmpi eq, %b, %rbrace : i32
+              %d3 = scalar.cmpi eq, %b, %lbracket : i32
+              %d4 = scalar.cmpi eq, %b, %rbracket : i32
+              %d5 = scalar.cmpi eq, %b, %comma : i32
+              %d6 = scalar.cmpi eq, %b, %colon : i32
+              %e1 = scalar.ori %d1, %d2 : i1
+              %e2 = scalar.ori %d3, %d4 : i1
+              %e3 = scalar.ori %d5, %d6 : i1
+              %e4 = scalar.ori %e1, %e2 : i1
+              %e5 = scalar.ori %e3, %e4 : i1
+              %e6 = scalar.ori %e5, %q : i1
+              %e7 = scalar.ori %e6, %w : i1
+              %go = scalar.cmpi eq, %e7, %false : i1
+              scf.yield %go : i1
+            } else {
+              scf.yield %false : i1
+            }
+            scf.condition %continue, %t : i1, offset
+          } do(%t: offset) {
+            %t1 = index.add %t, %c1 : offset
+            scf.yield %t1 : offset
+          }
+          %t_o = scf.if %expect -> (offset) {
+            buffer.store.i8 %quote_byte, %output[%out]
+            %o1 = index.add %out, %c1 : offset
+            %o2 = func.call @json_escape(%text, %position, %token_end, %output, %o1) : (buffer, offset, offset, buffer, offset) -> (offset)
+            buffer.store.i8 %quote_byte, %output[%o2]
+            %o3 = index.add %o2, %c1 : offset
+            scf.yield %o3 : offset
+          } else {
+            %size = index.sub %token_end, %position : offset
+            buffer.copy %text[%position], %output[%out], %size
+            %o1 = index.add %out, %size : offset
+            scf.yield %o1 : offset
+          }
+          scf.yield %token_end, %t_o, %levels, %false : offset, offset, i64, i1
+        }
+        scf.yield %s_p, %s_o, %s_l, %s_e : offset, offset, i64, i1
+      }
+      scf.yield %r_p, %r_o, %r_l, %r_e : offset, offset, i64, i1
+    }
+    scf.yield %np, %no, %nl, %ne : offset, offset, i64, i1
+  }
+  %result = func.call @slice(%output, %c0, %written) : (buffer, offset, offset) -> (buffer)
+  func.return %result : buffer
+}
+
+// <|tool_call>call:NAME{...}<tool_call|> frames -> OpenAI tool_calls records. Unfinished
+// frames are dropped; arguments go back as converted (possibly invalid JSON).
+func.def @g4_parse_calls(%response: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  %c64 = index.constant 64 : offset
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %lbrace_byte = scalar.constant 123 : i32
+  %rbrace_byte = scalar.constant 125 : i32
+  %open_bracket = scalar.constant 91 : i32
+  %close_bracket = scalar.constant 93 : i32
+  %comma = scalar.constant 44 : i32
+  %length = buffer.length %response
+  %twice = index.add %length, %length : offset
+  %scaled = index.add %twice, %twice : offset
+  %more_scaled = index.add %scaled, %twice : offset
+  %capacity = index.add %more_scaled, %c64 : offset
+  %output = buffer.alloca<private> align(1) %capacity : buffer
+  buffer.store.i8 %open_bracket, %output[%origin]
+  %call_open = global.load @g4_call_open : buffer
+  %call_end = global.load @g4_call_end : buffer
+  %lbrace = global.load @g4_lbrace : buffer
+  %open_length = buffer.length %call_open
+  %end_length = buffer.length %call_end
+  %record_open = global.load @record_open : buffer
+  %record_middle = global.load @record_middle : buffer
+  %record_close = global.load @record_close : buffer
+  %final_position, %final_out, %final_first = scf.while(%position = %origin : offset, %out = %c1 : offset, %first = %true : i1) -> (offset, offset, i1) {
+    %start = func.call @find(%response, %position, %length, %call_open) : (buffer, offset, offset, buffer) -> (offset)
+    %has_start = index.cmp ult, %start, %length : offset
+    %body_begin = index.add %start, %open_length : offset
+    %body_from = scf.select %has_start, %body_begin, %length : offset
+    %stop = func.call @find(%response, %body_from, %length, %call_end) : (buffer, offset, offset, buffer) -> (offset)
+    %has_stop = index.cmp ult, %stop, %length : offset
+    %complete = scalar.andi %has_start, %has_stop : i1
+    scf.condition %complete, %position, %out, %first : i1, offset, offset, i1
+  } do(%position: offset, %out: offset, %first: i1) {
+    %start = func.call @find(%response, %position, %length, %call_open) : (buffer, offset, offset, buffer) -> (offset)
+    %body_begin = index.add %start, %open_length : offset
+    %stop = func.call @find(%response, %body_begin, %length, %call_end) : (buffer, offset, offset, buffer) -> (offset)
+    %brace = func.call @find(%response, %body_begin, %stop, %lbrace) : (buffer, offset, offset, buffer) -> (offset)
+    %name_begin = func.call @skip_space(%response, %body_begin, %brace) : (buffer, offset, offset) -> (offset)
+    %name_end = func.call @trim_end(%response, %name_begin, %brace) : (buffer, offset, offset) -> (offset)
+    %has_name = index.cmp ult, %name_begin, %name_end : offset
+    %args_end = func.call @trim_end(%response, %brace, %stop) : (buffer, offset, offset) -> (offset)
+    %has_args = index.cmp ult, %brace, %args_end : offset
+    %ok = scalar.andi %has_name, %has_args : i1
+    %written, %next_first = scf.if %ok -> (offset, i1) {
+      %separated = scf.if %first -> (offset) {
+        scf.yield %out : offset
+      } else {
+        buffer.store.i8 %comma, %output[%out]
+        %after = index.add %out, %c1 : offset
+        scf.yield %after : offset
+      }
+      %after_open = func.call @tool_append(%output, %separated, %record_open) : (buffer, offset, buffer) -> (offset)
+      %after_name = func.call @json_escape(%response, %name_begin, %name_end, %output, %after_open) : (buffer, offset, offset, buffer, offset) -> (offset)
+      %after_middle = func.call @tool_append(%output, %after_name, %record_middle) : (buffer, offset, buffer) -> (offset)
+      %arguments = func.call @g4_arguments_json(%response, %brace, %args_end) : (buffer, offset, offset) -> (buffer)
+      %arguments_length = buffer.length %arguments
+      %after_value = func.call @json_escape(%arguments, %origin, %arguments_length, %output, %after_middle) : (buffer, offset, offset, buffer, offset) -> (offset)
+      %after_record = func.call @tool_append(%output, %after_value, %record_close) : (buffer, offset, buffer) -> (offset)
+      scf.yield %after_record, %false : offset, i1
+    } else {
+      scf.yield %out, %first : offset, i1
+    }
+    %next_position = index.add %stop, %end_length : offset
+    scf.yield %next_position, %written, %next_first : offset, offset, i1
+  }
+  buffer.store.i8 %close_bracket, %output[%final_out]
+  %used = index.add %final_out, %c1 : offset
+  %result = func.call @slice(%output, %origin, %used) : (buffer, offset, offset) -> (buffer)
+  func.return %result : buffer
+}
+
+// Retained history of this turn: the prompt + the response exactly as generated + the
+// close the next render prints after it (<|tool_response> after calls, else <turn|>\n).
+// The template re-renders a turn differently from what the model wrote (reasoning gets
+// "\n<channel|>", content is trimmed, call keys sorted, reasoning dropped after a new
+// query), so returning the raw text lets the host reuse up to the first changed byte
+// instead of nothing. Reusable unless the response ended inside reasoning.
+func.def @g4_complete_text(%prompt: buffer, %response: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
+  %c0 = index.constant 0 : offset
+  %c1_i64 = scalar.constant 1 : i64
+  %empty = global.load @empty : buffer
+  %tools_length = buffer.length %tools
+  %has_calls = index.cmp ne, %tools_length, %c0 : offset
+  %response_open = global.load @g4_response_open : buffer
+  %suffix = global.load @message_suffix : buffer
+  %close = scf.select %has_calls, %response_open, %suffix : buffer
+  %result = func.call @join4(%prompt, %response, %close, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %closed = scalar.cmpi ne, %final_state, %c1_i64 : i64
+  %reusable = scalar.extui %closed : i1 to i32
+  func.return %result, %reusable : buffer, i32
+}
+
+// ---- Public chat functions: Gemma 4 over the generic ones (@generic_*, see build.py) ----
+func.def inline @is_gemma4() -> (i1) {
+  %gemma = scalar.constant true : i1
+  func.return %gemma : i1
+}
+
+func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
+  %text, %state = func.call @generic_chat_begin(%request, %tools) : (buffer, buffer) -> (buffer, i64)
+  %gemma = func.call @is_gemma4() : () -> (i1)
+  %result, %next = scf.if %gemma -> (buffer, i64) {
+    %zero64 = scalar.constant 0 : i64
+    %sixteen64 = scalar.constant 16 : i64
+    %bit = scalar.andi %state, %sixteen64 : i64
+    %thinking = scalar.cmpi ne, %bit, %zero64 : i64
+    %rendered, %g_state = func.call @g4_render(%request, %tools, %thinking) : (buffer, buffer, i1) -> (buffer, i64)
+    scf.yield %rendered, %g_state : buffer, i64
+  } else {
+    scf.yield %text, %state : buffer, i64
+  }
+  func.return %result, %next : buffer, i64
+}
+
+func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %parts: buffer, %frames: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64, %part_count: i64) -> (buffer, i64, buffer, i64) {
+  // The generic renderer also validates roles and content parts (text only).
+  %fragment, %next, %media, %projections = func.call @generic_chat_message(%raw, %role, %content, %parts, %frames, %reasoning, %calls, %state, %ordinal, %fields, %part_count) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, i64, i64, i64, i64) -> (buffer, i64, buffer, i64)
+  %gemma = func.call @is_gemma4() : () -> (i1)
+  %empty = global.load @empty : buffer
+  %out = scf.select %gemma, %empty, %fragment : buffer
+  %out_state = scf.select %gemma, %state, %next : i64
+  func.return %out, %out_state, %media, %projections : buffer, i64, buffer, i64
+}
+
+func.def public @chat_end(%state: i64) -> (buffer, i64) {
+  %gemma = func.call @is_gemma4() : () -> (i1)
+  %prompt, %output_state = scf.if %gemma -> (buffer, i64) {
+    %p, %s = func.call @g4_chat_end(%state) : (i64) -> (buffer, i64)
+    scf.yield %p, %s : buffer, i64
+  } else {
+    %p, %s = func.call @generic_chat_end(%state) : (i64) -> (buffer, i64)
+    scf.yield %p, %s : buffer, i64
+  }
+  func.return %prompt, %output_state : buffer, i64
+}
+
+func.def public @render_tool(%name: buffer, %arguments: buffer, %ordinal: i64) -> (buffer, i64) {
+  %gemma = func.call @is_gemma4() : () -> (i1)
+  %text, %length = scf.if %gemma -> (buffer, i64) {
+    %compacted = func.call @compact(%arguments) : (buffer) -> (buffer)
+    %call = func.call @g4_call(%name, %compacted) : (buffer, buffer) -> (buffer)
+    %size = buffer.length %call
+    %size64 = index.cast %size : offset to i64
+    scf.yield %call, %size64 : buffer, i64
+  } else {
+    %t, %l = func.call @generic_render_tool(%name, %arguments, %ordinal) : (buffer, buffer, i64) -> (buffer, i64)
+    scf.yield %t, %l : buffer, i64
+  }
+  func.return %text, %length : buffer, i64
+}
+
+func.def public @parse_tools(%schemas: buffer, %response: buffer, %truncated: i64) -> (buffer) {
+  %gemma = func.call @is_gemma4() : () -> (i1)
+  %calls = scf.if %gemma -> (buffer) {
+    %c0 = index.constant 0 : offset
+    %zero64 = scalar.constant 0 : i64
+    %length = buffer.length %response
+    %has_text = index.cmp ne, %length, %c0 : offset
+    %schema_fields, %schema_type, %schema_count = func.call @members(%schemas) : (buffer) -> (buffer, i32, i64)
+    %has_tools = scalar.cmpi ne, %schema_count, %zero64 : i64
+    %parse = scalar.andi %has_text, %has_tools : i1
+    %records = scf.if %parse -> (buffer) {
+      %value = func.call @g4_parse_calls(%response) : (buffer) -> (buffer)
+      scf.yield %value : buffer
+    } else {
+      %none = global.load @no_tools : buffer
+      scf.yield %none : buffer
+    }
+    scf.yield %records : buffer
+  } else {
+    %records = func.call @generic_parse_tools(%schemas, %response, %truncated) : (buffer, buffer, i64) -> (buffer)
+    scf.yield %records : buffer
+  }
+  func.return %calls : buffer
+}
+
+func.def public @output_next(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {
+  %gemma = func.call @is_gemma4() : () -> (i1)
+  %kind, %begin, %end, %next = scf.if %gemma -> (i64, i64, i64, i64) {
+    %k, %b, %e, %n = func.call @g4_output_next(%response, %previous, %state, %phase) : (buffer, i64, i64, i32) -> (i64, i64, i64, i64)
+    scf.yield %k, %b, %e, %n : i64, i64, i64, i64
+  } else {
+    %k, %b, %e, %n = func.call @generic_output_next(%response, %previous, %state, %phase) : (buffer, i64, i64, i32) -> (i64, i64, i64, i64)
+    scf.yield %k, %b, %e, %n : i64, i64, i64, i64
+  }
+  func.return %kind, %begin, %end, %next : i64, i64, i64, i64
+}
+
+func.def public @complete_text(%prompt: buffer, %response: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
+  %gemma = func.call @is_gemma4() : () -> (i1)
+  %text, %reusable = scf.if %gemma -> (buffer, i32) {
+    %t, %r = func.call @g4_complete_text(%prompt, %response, %content, %reasoning, %tools, %initial_state, %final_state) : (buffer, buffer, buffer, buffer, buffer, i64, i64) -> (buffer, i32)
+    scf.yield %t, %r : buffer, i32
+  } else {
+    %t, %r = func.call @generic_complete_text(%prompt, %response, %content, %reasoning, %tools, %initial_state, %final_state) : (buffer, buffer, buffer, buffer, buffer, i64, i64) -> (buffer, i32)
+    scf.yield %t, %r : buffer, i32
+  }
+  func.return %text, %reusable : buffer, i32
+}

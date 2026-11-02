@@ -3,8 +3,8 @@
 Numbers come from the Flint (40B MoE) and Muse Glimmer (30B dense) ports on Strix
 Halo, measured against llama.cpp ROCm (lemonade-sdk/llamacpp-rocm b1355) on the
 same GGUF. The kernels named here are in `loom-port-llm/starter/gen_llm.py` unless a
-lever says otherwise
-(dense) or `flint-moe-example/` (MoE).
+lever says otherwise (MoE: `loom-port-llm/reference/{lfm2moe,flint}-example/gen_moe*.py`, and the
+bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 
 ## Decode
 
@@ -128,7 +128,7 @@ lever says otherwise
   version.
 
 ### Fusions
-- RMSNorm + f16 row scale in one pass (Flint `fused.loom`).
+- RMSNorm + f16 row scale in one pass (`g_row_scale_f16`).
 - Residual add + next RMSNorm (`g_post_add_norm`), with optional Gemma-style post
   norms.
 
@@ -150,22 +150,4 @@ lever says otherwise
 - **About 128 keys per decode-attention split.** Fewer splits under-filled the GPU
   at short context (−4 %).
 
-## Results achieved
-
-| Model / metric | Loom | llama.cpp ROCm |
-|---|---|---|
-| Flint int4 decode | 99–104 tok/s | 62 |
-| Flint int4 decode at 32k | 63 | 48 |
-| Flint int4 4 streams | 181 | 152 |
-| Flint int4 prefill 2k | ~2650 | 1509 |
-| Flint int4 prefill 32k | 1976 | 1047 |
-| Glimmer 30B decode | 13.1 | 12.4 |
-| Glimmer 30B prefill 2k | ~430 | 355 |
-| Glimmer 30B prefill 32k | 420 | 359 |
-| Qwen3-0.6B decode (starter, no tuning) | 252 | 253 |
-| Qwen3-0.6B prefill 2k | 13.0k | 10.5k |
-| Qwen3-0.6B decode at 2k | 179 | 193 |
-| Qwen3-0.6B 4-stream steady | 690 | 578 |
-| Nemotron-3.5-Bolt-E4B decode | 61.1 | 52.7 |
-| Nemotron-3.5-Bolt-E4B prefill 1k / 2k | 1830 / 1801 | 1593 / 1678 |
-| Nemotron-3.5-Bolt-E4B 4-stream steady | 165 | ~157 |
+Results per model (with ceilings and efficiency): `loom-roofline/reference/calibration.md`.
