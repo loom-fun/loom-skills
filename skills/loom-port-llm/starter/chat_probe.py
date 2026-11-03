@@ -2,7 +2,8 @@
 
 The template is rendered on probe conversations and the pieces the control
 program needs are cut out of the output: role prefixes/suffix, generation
-prompts with thinking on/off, the default system prompt, the tools block and
+prompts with thinking on/off, the default system prompt, per-reasoning_effort
+instructions that open the system block with thinking on (Qwen3.8), the tools block and
 its order relative to the system message, the tool-call format and separators,
 tool-response framing, how reasoning appears in history, and content trimming.
 `verify()` then re-renders a set of conversations the way control.loom will
@@ -100,19 +101,106 @@ def between(text, a, b, start=0):
     return text[i:text.index(b, i)]
 
 
+# loom-serve's reasoning effort levels (chat_reasoning's efforts bitmap bit / default value).
+EFFORT_LEVELS = {"none": 0, "minimal": 1, "low": 2, "medium": 3, "high": 4, "xhigh": 5, "max": 6}
+
+
+def reasoning_heads(T):
+    """The text before the first user message for each reasoning_effort the template accepts (thinking on),
+    plus the default ("") and thinking off; None when the template ignores reasoning_effort."""
+    user1 = [{"role": "user", "content": "USERPROBE1"}]
+    head = lambda **kw: (lambda r: r[:r.index("USERPROBE1")])(T.render(user1, **kw))
+    heads = {}
+    for e in EFFORT_LEVELS:
+        try:
+            heads[e] = head(enable_thinking=True, reasoning_effort=e)
+        except ProbeError:   # Qwen3.8 raises on efforts it does not support
+            pass
+    if len(set(heads.values())) < 2:
+        return None
+    heads[""], heads["off"] = head(enable_thinking=True), head(enable_thinking=False)
+    return heads
+
+
+def reasoning_instructions(T, chat, heads, notes):
+    """Cuts the per-effort instruction prefix out of the system block. Model (control.loom @chat_begin):
+    with thinking on, the system block's body (tools text and/or system message, or the default system
+    prompt) becomes INSTRUCTIONS + reasoning_separator + body; INSTRUCTIONS alone when the body is empty;
+    no instructions (and no change) with thinking off or an effort whose text is empty."""
+    bos, prefix, suffix, user_prefix = chat["bos"], chat["system_prefix"], chat["suffix"], chat["user_prefix"]
+
+    def body(h):
+        h = h[len(bos):] if bos and h.startswith(bos) else h
+        if not h.endswith(user_prefix):
+            raise ProbeError(f"reasoning instructions: unexpected head {h!r}")
+        h = h[:len(h) - len(user_prefix)]
+        if not h:
+            return ""
+        if not (h.startswith(prefix) and h.endswith(suffix)):
+            raise ProbeError(f"reasoning instructions are not rendered in a system block: {h!r}")
+        return h[len(prefix):len(h) - len(suffix)]
+
+    default = chat["default_system"]
+    if body(heads["off"]) != default:
+        raise ProbeError(f"thinking off leaves the system block as {body(heads['off'])!r}, not {default!r}")
+    bodies = {e: body(h) for e, h in heads.items() if e not in ("", "off", "none")}
+    if "none" in heads and body(heads["none"]) != default:
+        notes.append("template accepts reasoning_effort=none with thinking on; Loom turns thinking off for it")
+    # Separator: from a system message after the instructions of an effort that has some.
+    effort = next((e for e, b in bodies.items() if b != default), None)
+    if effort is None:
+        raise ProbeError("reasoning_effort changes the prompt outside the system block (not modeled)")
+    r = T.render([{"role": "system", "content": "SYSPROBE"}, {"role": "user", "content": "USERPROBE1"}],
+                 enable_thinking=True, reasoning_effort=effort)
+    lead = r[:r.index("SYSPROBE")]
+    lead = lead[len(bos):] if bos and lead.startswith(bos) else lead
+    if not lead.startswith(prefix):
+        raise ProbeError(f"reasoning instructions and the system message are not one system block: {lead!r}")
+    lead = lead[len(prefix):]
+    instr = bodies[effort] if not default else lead.rstrip()
+    if not lead.startswith(instr):
+        raise ProbeError(f"reasoning instructions differ when a system message follows: {lead!r}")
+    separator = lead[len(instr):]
+    join = lambda i, b: i + separator + b if i and b else i or b
+    table = {}
+    for e, b in bodies.items():
+        if b == default:
+            table[e] = ""
+        elif default and b.endswith(separator + default):
+            table[e] = b[:len(b) - len(separator + default)]
+        elif not default:
+            table[e] = b
+        else:
+            raise ProbeError(f"reasoning instructions for {e!r} do not prefix the default system prompt: {b!r}")
+        if join(table[e], default) != b:
+            raise ProbeError(f"reasoning instructions for {e!r} do not compose as modeled: {b!r}")
+    matches = [e for e in table if heads[e] == heads[""]]
+    if not matches:
+        raise ProbeError("the default reasoning effort is none of " + ", ".join(table))
+    chat["reasoning_instructions"] = table
+    chat["reasoning_effort_default"] = max(matches, key=EFFORT_LEVELS.get)
+    chat["reasoning_separator"] = separator
+    notes.append(f"template prepends reasoning instructions per reasoning_effort ({', '.join(table)}; default "
+                 f"{chat['reasoning_effort_default']}) to the system block with thinking on")
+
+
 def derive(template_text, bos="", eos=""):
     T = Template(template_text, bos, eos)
     notes = []
     chat = {}
     # BOS: emitted by the control program at the very start when the template prints it.
     chat["bos"] = bos if bos and T.render([{"role": "user", "content": "USERPROBE1"}]).startswith(bos) else ""
+    # Reasoning instructions (Qwen3.8: "Reasoning effort is set to xhigh. ..." per reasoning_effort, only
+    # with thinking on): the system-block probes below render with thinking off (kw0), where they vanish.
+    efforts = reasoning_heads(T)
+    kw0 = {"enable_thinking": False} if efforts else {}
     # Prefixes and suffix: an assistant turn before the last user query renders plainly.
     r = T.render([{"role": "system", "content": "SYSPROBE"}, {"role": "user", "content": "USERPROBE1"},
-                  {"role": "assistant", "content": "ASSTPROBE1"}, {"role": "user", "content": "USERPROBE2"}])
+                  {"role": "assistant", "content": "ASSTPROBE1"}, {"role": "user", "content": "USERPROBE2"}], **kw0)
     if r.startswith(bos) and bos:
         r = r[len(bos):]
     chat["system_prefix"] = r[:r.index("SYSPROBE")]
-    single = T.render([{"role": "user", "content": "USERPROBE1"}])
+    single = T.render([{"role": "user", "content": "USERPROBE1"}], **kw0)
     chat["suffix"] = single[single.index("USERPROBE1") + len("USERPROBE1"):]
     gap = between(r, "SYSPROBE", "USERPROBE1")
     if not gap.startswith(chat["suffix"]):
@@ -131,17 +219,30 @@ def derive(template_text, bos="", eos=""):
         notes.append(f"template inserts a default system prompt: {chat['default_system'][:60]!r}...")
     else:
         chat["default_system"] = ""
-    trimmed = T.render([{"role": "user", "content": "  USERPROBE1 \n"}])
+    if efforts:
+        reasoning_instructions(T, chat, efforts, notes)
+    trimmed = T.render([{"role": "user", "content": "  USERPROBE1 \n"}], **kw0)
     chat["trim_content"] = "  USERPROBE1" not in trimmed
-    # Generation prompts and thinking.
-    base = T.render([{"role": "user", "content": "USERPROBE1"}])
-    gen = lambda **kw: T.render([{"role": "user", "content": "USERPROBE1"}], gen=True, **kw)[len(base):]
+    # Generation prompts and thinking (each relative to the same render without the prompt: with
+    # reasoning instructions the system block depends on enable_thinking too).
+    user1 = [{"role": "user", "content": "USERPROBE1"}]
+    gen = lambda **kw: T.render(user1, gen=True, **kw)[len(T.render(user1, **kw)):]
     g_default, g_on, g_off = gen(), gen(enable_thinking=True), gen(enable_thinking=False)
     # Reasoning in history (agent loop: assistant after the last user query, followed by a tool result).
     agent = lambda m: T.render([{"role": "user", "content": "USERPROBE1"}, m,
                                 {"role": "tool", "tool_call_id": "call_0", "content": "TOOLPROBE1"}], tools=TOOLS)
     with_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"))
     without_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning=""))
+    # Templates that keep reasoning in every assistant turn (preserve_thinking: Qwen3.6, Qwen3.8) render
+    # an empty think block in the plain turn above, which then is not part of the assistant prefix.
+    guess = chat["user_prefix"].replace("user", "assistant")
+    if guess != chat["user_prefix"] and chat["assistant_prefix"].startswith(guess) and chat["assistant_prefix"] != guess:
+        rest, mid_r, lead = chat["assistant_prefix"][len(guess):], between(with_r, "USERPROBE1", "ASSTPROBE1"), chat["suffix"] + guess
+        if "REASONPROBE" in mid_r and mid_r.startswith(lead):
+            opened, closed = mid_r[len(lead):mid_r.index("REASONPROBE")], mid_r[mid_r.index("REASONPROBE") + len("REASONPROBE"):]
+            if opened + closed == rest:
+                chat["assistant_prefix"] = guess
+                notes.append(f"every assistant turn renders its (possibly empty) think block: assistant prefix {guess!r}")
     mid_r = between(with_r, "USERPROBE1", "ASSTPROBE1")
     if "REASONPROBE" in mid_r:
         pre = mid_r[:mid_r.index("REASONPROBE")]
@@ -179,8 +280,8 @@ def derive(template_text, bos="", eos=""):
     chat["starts_in_reasoning"] = bool(thinks)
     chat["think_end"] = chat["think_close"].strip() or "</think>"
     # Tools block.
-    t_plain = T.render([{"role": "user", "content": "USERPROBE1"}], tools=TOOLS)
-    t_sys = T.render([{"role": "system", "content": "SYSPROBE"}, {"role": "user", "content": "USERPROBE1"}], tools=TOOLS)
+    t_plain = T.render([{"role": "user", "content": "USERPROBE1"}], tools=TOOLS, **kw0)
+    t_sys = T.render([{"role": "system", "content": "SYSPROBE"}, {"role": "user", "content": "USERPROBE1"}], tools=TOOLS, **kw0)
     printed = None
     for only in (False, True):
         for seps in ((", ", ": "), (",", ":")):
@@ -297,7 +398,7 @@ def derive(template_text, bos="", eos=""):
     return chat, notes
 
 
-def simulate(chat, messages, tools=None, gen=False, enable_thinking=None):
+def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reasoning_effort=None):
     """Python model of control.loom's rendering (chat_begin + chat_message + chat_end)."""
     trim = (lambda s: s.strip()) if chat["trim_content"] else (lambda s: s)
     out = chat.get("bos", "")
@@ -305,6 +406,15 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None):
     sys_text = trim(messages[0]["content"]) if first_system else ""
     use_default = not first_system and chat["default_system"]
     body = chat["default_system"] if use_default else sys_text
+    # Thinking: the default, then enable_thinking, then reasoning_effort ("none" turns it off).
+    toggle = chat["thinking"] == "toggle"
+    on = chat["thinking_default"] if enable_thinking is None or not toggle else enable_thinking
+    on = reasoning_effort != "none" if toggle and reasoning_effort is not None else on
+    # Reasoning instructions (Qwen3.8) open the system block with thinking on; the block then also takes
+    # the first system message when there are no tools.
+    table = chat.get("reasoning_instructions") or {}
+    instr = table.get(reasoning_effort, table.get(chat.get("reasoning_effort_default"), "")) if on else ""
+    instructed = lambda b: instr + chat["reasoning_separator"] + b if instr and b else instr or b
     if tools:
         printed = chat.get("tool_separator", "").join(
             chat["tool_line_prefix"] + json.dumps(t["function"] if chat["tools_function_only"] else t, ensure_ascii=False)
@@ -312,7 +422,9 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None):
         tb = chat["tools_prefix"] + printed + chat["tools_suffix"]
         sep = chat["tools_system_separator"] if body else ""
         merged = body + sep + tb if chat["tools_after_system"] else tb + sep + body
-        out += chat["system_prefix"] + merged + chat["suffix"]
+        out += chat["system_prefix"] + instructed(merged) + chat["suffix"]
+    elif instr:
+        out += chat["system_prefix"] + instructed(body) + chat["suffix"]
     elif use_default:
         out += chat["system_prefix"] + chat["default_system"] + chat["suffix"]
     prior = None
@@ -321,7 +433,7 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None):
         role, text = m["role"], trim(m.get("content") or "")
         if prior == "tool" and role != "tool":
             out += chat["tool_turn_suffix"]
-        if role == "system" and i == 0 and tools and first_system:
+        if role == "system" and i == 0 and (tools or instr) and first_system:
             pass
         elif role == "tool":
             out += ("" if prior == "tool" else chat["tool_turn_prefix"]) + chat["tool_item_prefix"] + text + chat["tool_item_suffix"]
@@ -338,7 +450,6 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None):
     if gen:
         if prior == "tool":
             out += chat["tool_turn_suffix"]
-        on = chat["thinking_default"] if enable_thinking is None or chat["thinking"] != "toggle" else enable_thinking
         out += chat["generation_prompt"] if on else chat["generation_prompt_plain"]
     elif prior == "tool":
         out += chat["tool_turn_suffix"]
@@ -409,21 +520,32 @@ def verify(template_text, chat, bos="", eos=""):
         for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
             label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")
             try:
-                ref = T.render(msgs, tools=tools, gen=True, **kw)
+                results.append(compare(T, chat, label, msgs, tools, kw))
             except ProbeError as e:
                 results.append((label, None, f"template refuses: {e}"))
-                continue
-            got = simulate(chat, msgs, tools, gen=True, enable_thinking=kw.get("enable_thinking"))
-            # The thinking prompt may deliberately append think_open.
-            if got != ref and chat["thinking"] != "never" and got.endswith(chat["think_open"]) and got[:-len(chat["think_open"])] == ref:
-                results.append((label, True, "exact except the deliberate think_open in the generation prompt"))
-                continue
-            if got == ref:
-                results.append((label, True, "exact"))
-            else:
-                k = next((i for i, (a, b) in enumerate(zip(got, ref)) if a != b), min(len(got), len(ref)))
-                results.append((label, False, f"differs at byte {k}: loom {got[max(0, k - 40):k + 60]!r} vs template {ref[max(0, k - 40):k + 60]!r}"))
+        # Every other reasoning effort the template's instructions support (the default is covered above).
+        table = chat.get("reasoning_instructions") or {}
+        for effort in [e for e in table if e != chat.get("reasoning_effort_default")]:
+            label = f"{name} (reasoning_effort={effort})"
+            try:
+                results.append(compare(T, chat, label, msgs, tools, {"reasoning_effort": effort}))
+            except ProbeError as e:
+                results.append((label, None, f"template refuses: {e}"))
     return results
+
+
+def compare(T, chat, label, msgs, tools, kw):
+    """(label, ok, detail): the template's render with kw vs simulate()."""
+    ref = T.render(msgs, tools=tools, gen=True, **kw)
+    effort = {"reasoning_effort": kw["reasoning_effort"]} if "reasoning_effort" in kw else {}   # kits may wrap simulate()
+    got = simulate(chat, msgs, tools, gen=True, enable_thinking=kw.get("enable_thinking"), **effort)
+    # The thinking prompt may deliberately append think_open.
+    if got != ref and chat["thinking"] != "never" and got.endswith(chat["think_open"]) and got[:-len(chat["think_open"])] == ref:
+        return label, True, "exact except the deliberate think_open in the generation prompt"
+    if got == ref:
+        return label, True, "exact"
+    k = next((i for i, (a, b) in enumerate(zip(got, ref)) if a != b), min(len(got), len(ref)))
+    return label, False, f"differs at byte {k}: loom {got[max(0, k - 40):k + 60]!r} vs template {ref[max(0, k - 40):k + 60]!r}"
 
 
 def main():

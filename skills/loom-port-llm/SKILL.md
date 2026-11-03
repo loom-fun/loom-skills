@@ -225,6 +225,9 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   - `call_format`: `hermes` (Qwen2.5/Qwen3), `qwen_xml` (Qwen3.5/Qwen3-Coder), `glm`, `pythonic`
     (LFM2: `<|tool_call_start|>[f(a='x', n=3)]<|tool_call_end|>`, parsed in control.loom);
   - `default_system` (Qwen2.5 inserts "You are Qwen, created by Alibaba Cloud…").
+  - `reasoning_instructions` (Qwen3.8: "Reasoning effort is set to xhigh. …" per `reasoning_effort`, only
+    with thinking on, `reasoning_separator` before the tools text / system message): build.py advertises
+    those efforts (plus none = thinking off) and `chat_begin` renders the request effort's text.
 
   **History reuse depends on the canonical rendering.** `complete_text` must store the turn as the
   template re-renders it, not as the model generated it. Two trials failed `reuse_ok` here: a model
