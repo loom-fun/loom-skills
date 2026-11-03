@@ -24,6 +24,21 @@ loom_down   # one model at a time: the picker and the llama.cpp baseline run wit
 MMPROJ=$("$T" -c "import json; print((json.load(open('$pkg/llm_config.json')).get('vision') or {}).get('mmproj', ''))" 2>/dev/null); export MMPROJ
 trap '"$S/llamacpp_server.sh" --stop "$lport"; loom_up' EXIT   # whatever happens, Loom serves again at the end
 
+# Speculative decoding: which drafter (none, the GGUF's MTP block, a DFlash drafter) and how deep is decided
+# by measured decode speed (loom-port-llm/starter/draft/tune.py rebuilds PKG with the winner). Loom is down;
+# the candidates are served alone on Loom's port. SPEC=off / SPEC_TUNE=0 skip it.
+work=$(dirname "$pkg"); kit=${LOOM_KIT:-$S/../../loom-port-llm/starter}
+if [ "${SPEC_TUNE:-1}" = 1 ] && [ -f "$work/cfg.json" ] && [ ! -s draft_tune.json ] && [ ${#loom_argv[@]} -gt 0 ]; then
+  step "0/5 speculative decoding: method and depth by measured decode speed"
+  mb=$(printf '%s\n' "${loom_argv[@]}" | grep -o -- '--memory_bytes=[0-9]*' | cut -d= -f2)
+  VENV=${VENV:-$root/.venv} LOOM_SERVE_STATE=${LOOM_SERVE_STATE:-$work/state} "$T" "$kit/draft/tune.py" "$work" "$loom_port" "$(( (mb + 1073741823) / 1073741824 ))" "$model" 2>&1 | tee draft_tune.log | grep "^tune:\|^TUNE_RESULT"
+  grep "^TUNE_RESULT" draft_tune.log | tail -1 | cut -d' ' -f2- > draft_tune.json
+  newmb=$("$T" -c "import json; print(json.load(open('draft_tune.json')).get('memory_bytes', ''))" 2>/dev/null)
+  if [ -n "$newmb" ]; then   # the restart serves the tuned package with its own memory budget
+    for i in "${!loom_argv[@]}"; do case "${loom_argv[$i]}" in --memory_bytes=*) loom_argv[$i]="--memory_bytes=$newmb";; esac; done
+  fi
+fi
+
 step "1/5 pick the llama.cpp ROCm baseline build"
 if [ ! -s llamacpp_pick.json ]; then
   # The latest lemonade-sdk/llamacpp-rocm release always competes (pre-approved download, ~25 s):

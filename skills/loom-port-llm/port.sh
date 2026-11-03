@@ -93,6 +93,16 @@ if [ "${VISION:-1}" != 0 ] && ! "$T" -c "import json,sys; sys.exit(0 if json.loa
   HF=$hf "$T" "$K/vision/add_vision.py" cfg.json "$repo" ${MMPROJ:-} | tee vision.log | grep -v "^$"
 fi
 
+# Speculative decoding is on by default: an MTP/NextN block in the GGUF (inspect records cfg["mtp"]) or a DFlash
+# drafter published for the base model (found and validated here) is used; draft/tune.py later keeps whichever
+# decodes fastest, or none. SPEC=off disables it; DRAFTER_REPO=org/name[:file] picks a drafter.
+spec_off=$(echo "${SPEC:-on}" | tr 'A-Z' 'a-z')
+if [ "$spec_off" != off ] && [ "$spec_off" != 0 ] && ! "$T" -c "import json,sys; sys.exit(0 if json.load(open('cfg.json')).get('drafter') else 1)"; then
+  step "2c drafter"
+  "$T" "$K/draft/find_drafter.py" cfg.json "$repo" --download ${DRAFTER_REPO:+--repo "$DRAFTER_REPO"} > drafter.log 2>&1 || true
+  grep "^DRAFTER_RESULT" drafter.log
+fi
+
 step "3/6 build"
 "$T" "$K/build.py" cfg.json pkg --tokenizer tok/tokenizer.json --model-id "$model_id" --memory-gib "$mem_gib" | tee build.log
 [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: build.py failed (build.log)"; exit 4; }
@@ -148,4 +158,19 @@ n = requests.post(url + "/v1/chat/completions/input_tokens", json={"model": mode
 print("input_tokens:", n)
 sys.exit(0 if ok else 1)
 EOF
-echo "PORT_RESULT $(printf '{"package": "%s", "model_id": "%s", "context": %s, "memory_bytes": %s, "port": %s, "gguf": "%s"}' "$work/pkg" "$model_id" "${ctx:-0}" "$mem" "$port" "$gguf")"
+# Speculative decoding must not change a single token: the same package with drafting off is the reference
+# (loom-benchmark/scripts/spec_check.py). One model is loaded at a time.
+draft=$("$T" -c "import json; print(json.load(open('pkg/llm_config.json')).get('draft') or {})" 2>/dev/null)
+if [ "$draft" != "{}" ] && [ -n "$draft" ]; then
+  SC=$here/../loom-benchmark/scripts/spec_check.py
+  "$T" "$SC" record "http://127.0.0.1:$port" "$model_id" spec_draft.jsonl && "$T" "$SC" card pkg >/dev/null || exit 6
+  curl -s "http://127.0.0.1:$port/metrics" > spec_metrics.txt
+  "$S/stop.sh" port >/dev/null 2>&1
+  VENV=$venv "$S/serve.sh" port "$port" amdgpu "$mem" pkg/model_target.json >/dev/null || exit 4
+  "$T" "$SC" record "http://127.0.0.1:$port" "$model_id" spec_target.jsonl || exit 6
+  "$S/stop.sh" port >/dev/null 2>&1
+  VENV=$venv "$S/serve.sh" port "$port" amdgpu "$mem" pkg/model.json >/dev/null || exit 4
+  "$T" "$SC" compare spec_target.jsonl spec_draft.jsonl | tail -3
+  [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: drafting changed the output (spec_check); see starter/draft/README.md"; exit 6; }
+fi
+echo "PORT_RESULT $(printf '{"package": "%s", "model_id": "%s", "context": %s, "memory_bytes": %s, "port": %s, "gguf": "%s", "draft": %s}' "$work/pkg" "$model_id" "${ctx:-0}" "$mem" "$port" "$gguf" "$("$T" -c "import json; print(json.dumps(json.load(open('pkg/llm_config.json')).get('draft')))")")"

@@ -38,7 +38,7 @@ ap.add_argument("--drafter", default=os.environ.get("DRAFTER"), help="DFlash/DFl
 ap.add_argument("--draft", default=os.environ.get("DRAFT", "auto"), choices=["auto", "mtp", "dflash", "none"],
                 help="speculative decoding drafter. auto (default): the GGUF's MTP/NextN block when it has one; none: "
                      "ordinary decoding (also SPEC=off). Draft settings are tuned by loom-optimize (draft/README.md)")
-ap.add_argument("--draft-depth", type=int, default=int(os.environ.get("DRAFT_DEPTH", "3")),
+ap.add_argument("--draft-depth", type=int, default=int(os.environ.get("DRAFT_DEPTH", "0")) or None,
                 help="proposed tokens per verification step (1-7)")
 ap.add_argument("--model-id", default=None, help="model id clients send (visible ASCII, no spaces); default: slug of cfg name")
 a = ap.parse_args()
@@ -61,14 +61,16 @@ if a.draft == "mtp" and not cfg.get("mtp"):
     sys.exit("--draft mtp: this GGUF has no NextN/MTP block (cfg.json has no 'mtp')")
 if a.draft == "dflash" and not a.drafter:
     sys.exit("--draft dflash needs the drafter GGUF (--drafter PATH or cfg.json drafter.gguf)")
-DRAFT = {"kind": a.draft, "depth": max(1, min(7, a.draft_depth))} if a.draft != "none" else None
+_tuned = cfg.get("drafter") or {}
+_depth = a.draft_depth or (_tuned.get("depth") if _tuned.get("kind") == a.draft else None) or 3   # draft/tune.py's choice
+DRAFT = {"kind": a.draft, "depth": max(1, min(7, _depth))} if a.draft != "none" else None
 if DRAFT and DRAFT["kind"] == "dflash":
     sys.path.insert(0, os.path.join(HERE, "draft"))
     import gen_dflash  # noqa: E402
     _d = gen_dflash.config(a.drafter)
     DRAFT.update(gguf=os.path.abspath(a.drafter), layers=_d["layers"], kv_heads=_d["kv_heads"], head_dim=_d["head_dim"],
                  taps=len(_d["target_layers"]), block_size=_d["block_size"])
-    if "--draft-depth" not in sys.argv and "DRAFT_DEPTH" not in os.environ:
+    if not a.draft_depth and not (_tuned.get("kind") == "dflash" and _tuned.get("depth")):
         DRAFT["depth"] = min(7, _d["block_size"] - 1)
 pos_bytes = cfg["kv_heads"] * cfg["head_dim"] * 2
 kv_layers = cfg.get("kv_layers", cfg["layers"])
