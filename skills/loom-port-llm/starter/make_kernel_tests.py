@@ -28,6 +28,21 @@ def save(n, a): np.save(os.path.join(out, n + ".npy"), a)
 def ty(a): return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int8": "i8", "int32": "i32", "float16": "f16"}[str(a.dtype)] + ">"
 # 1. embed
 ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
+# M-RoPE (cfg "mrope"): the rope kernel also reads the epoch metadata (one span, offset 0: rotary position =
+# KV position, as in a text-only epoch) and the input buffer (unused without media)
+MR = bool(cfg.get("mrope"))
+if MR:
+    save("mr_meta", np.array([1] + [0] * 15, np.int32))
+def mr_decl(t):
+    return (f"  %mr_meta = check.file.read.npy path(\"mr_meta.npy\") : tensor<16xi32>\n  %mr_ids = check.generate.fill value(0) : tensor<{t * 8}xi32>\n" if MR else "")
+MR_ARGS = ", %mr_meta, %mr_ids" if MR else ""
+def mr_types(t):
+    return f", tensor<16xi32>, tensor<{t * 8}xi32>" if MR else ""
+# image input (cfg "vision"): g_embed also takes the epoch metadata and token info; plain epochs have metadata word 2 = 0
+VIS = bool(cfg.get("vision"))
+VMETA = (f"\n  %meta = check.generate.fill value(0) : tensor<4xi32>\n  %tinfo = check.generate.fill value(0) : tensor<{t}x4xi32>" if VIS else "")
+VARGS = ", %meta, %tinfo" if VIS else ""
+VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
 E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
 x = E[ids]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
 tab = raw("token_embd.weight")
@@ -40,8 +55,34 @@ cases.append(f"""check.case public @embed {{
   %ex = check.file.read.npy path("e_x.npy") : tensor<{t}x{H}xf32>
   %eh = check.file.read.npy path("e_h.npy") : tensor<{t}x{H}xf32>
   %x = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
+  %h = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>{VMETA}
+  kernel.launch @g_embed[%t](%t, %ids{VARGS}, %tab, %w, %x, %h) : [index](index, {ty(ids)}{VTYPES}, {ty(tab)}, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
+  check.expect.close actual(%x) expected(%ex) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.return
+}}
+""")
+if VIS:   # a media epoch: 8-word records, token 1 carries a feature row (copied unscaled), all inputs live
+    rng = np.random.default_rng(0); feat = rng.standard_normal(H).astype(np.float32)
+    recs = np.zeros((t, 8), np.int32); recs[:, 0] = ids; recs[1, 1] = t * 32
+    packet = np.concatenate([recs.reshape(-1), feat.view(np.int32)])
+    meta = np.array([t, 0, 1, 0], np.int32); tinfo = np.zeros((t, 4), np.int32); tinfo[:, 2] = 1
+    xm = x.astype(np.float32).copy()
+    xm[1] = feat / np.sqrt((feat * feat).mean() + 1e-5) if cfg.get("embed_norm") else feat   # the weightless embedding norm applies to features too
+    hm = xm / np.sqrt((xm * xm).mean(-1, keepdims=True) + eps) * w
+    for n, a in [("m_pk", packet), ("m_meta", meta), ("m_info", tinfo), ("m_x", xm.astype(np.float32)), ("m_h", hm.astype(np.float32))]: save(n, a)
+    cases.append(f"""check.case public @embed_media {{
+  %t = check.literal value({t}) : index
+  %pk = check.file.read.npy path("m_pk.npy") : {ty(packet)}
+  %meta = check.file.read.npy path("m_meta.npy") : tensor<4xi32>
+  %tinfo = check.file.read.npy path("m_info.npy") : tensor<{t}x4xi32>
+  %tab = check.file.read.npy path("e_tab.npy") : {ty(tab)}
+  %w = check.file.read.npy path("e_w.npy") : tensor<{H}xf32>
+  %ex = check.file.read.npy path("m_x.npy") : tensor<{t}x{H}xf32>
+  %eh = check.file.read.npy path("m_h.npy") : tensor<{t}x{H}xf32>
+  %x = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
   %h = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
-  kernel.launch @g_embed[%t](%t, %ids, %tab, %w, %x, %h) : [index](index, {ty(ids)}, {ty(tab)}, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
+  kernel.launch @g_embed[%t](%t, %pk, %meta, %tinfo, %tab, %w, %x, %h) : [index](index, {ty(packet)}, tensor<4xi32>, tensor<{t}x4xi32>, {ty(tab)}, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
   check.expect.close actual(%x) expected(%ex) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
   check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
   check.return
@@ -51,7 +92,7 @@ cases.append(f"""check.case public @embed {{
 seen = set(); todo = []
 VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
 for li in range(cfg["layers"]):
-    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"]), ("attn_output", QH * D), ("ffn_gate", H),
+    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", QH * D), ("ffn_gate", H),
                    ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD)]:
         name = f"blk.{li}.{nm_}.weight"
         if name not in T:
@@ -113,7 +154,7 @@ cases.append(f"""check.case public @qk_rope {{
   %orig = check.file.read.npy path("r_orig.npy") : tensor<64xi32>
   %qe = check.file.read.npy path("r_qe.npy") : tensor<{t}x{QH * D}xf32>
   %arena = check.generate.fill value(0.0) : tensor<1024xf16>
-  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena) : [index](index, index, i32, index, index, tensor<{t}x{QH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<64xi32>, tensor<1024xf16>)
+{mr_decl(t)}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena{MR_ARGS}) : [index](index, index, i32, index, index, tensor<{t}x{QH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<64xi32>, tensor<1024xf16>{mr_types(t)})
   check.expect.close actual(%q) expected(%qe) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{t}x{QH * D}xf32>
   check.return
 }}
@@ -194,7 +235,7 @@ cases.append(f"""check.case public @attention_chain {{
   %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
   %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
   %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
-{split_text}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>)
+{split_text}{mr_decl(t)}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena{MR_ARGS}) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>{mr_types(t)})
   kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
   kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {"%g" if gate_kind else "%q"}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>)
   check.expect.close actual(%o) expected(%eo) atol(3.0e-3) rtol(3.0e-3) nan(different) : tensor<{t}x{QD}xf32>

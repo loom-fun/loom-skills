@@ -585,9 +585,9 @@
        %{out}_block = index.div %w_col, %c32 : index
 --- a/gen_llm.py
 +++ b/gen_llm.py
-@@ -21,10 +21,26 @@
- QH, KVH, D = CFG["heads"], CFG["kv_heads"], CFG["head_dim"]
- FF, V, L = CFG["ffn"], CFG["vocab"], CFG["layers"]
+@@ -28,10 +28,26 @@
+     """index SSA of layer i's FFN width."""
+     return "%nFF" if FF_UNIFORM else f"%nFF{FFL[i]}"
  G = QH // KVH                             # query heads per KV head (waves per attention workgroup)
 -assert D in (128, 256), "attention kernels support head_dim 128 or 256 (lane l owns dims l, l+32, ...)"
 +assert D in (128, 256, 512), "attention kernels support head_dim 128, 256 or 512 (lane l owns dims l, l+32, ...)"
@@ -613,19 +613,19 @@
  assert QH % KVH == 0 and G <= 16, "need heads % kv_heads == 0 and at most 16 query heads per KV head"
  assert HG <= 256 and H % 32 == 0, "hidden must be a multiple of 32 and at most 8192"
  UNROLL = 16
-@@ -55,9 +71,9 @@
+@@ -62,9 +78,9 @@
  TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
  
  FMT = {  # bytes per superblock of SB[fmt] values
--    "q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34,
-+    "q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "bf16": 64,
+-    "q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "f32": 128,
++    "q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "bf16": 64, "f32": 128,
  }
--SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32}
-+SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "bf16": 32}
+-SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "f32": 32}
++SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "bf16": 32, "f32": 32}
  
  
  def row_bytes(fmt, k):
-@@ -75,6 +91,8 @@
+@@ -82,6 +98,8 @@
          n *= d
      if t["type"] == "f32":
          return n * 4
@@ -634,7 +634,7 @@
      return n // SB[t["type"]] * FMT[t["type"]]
  
  
-@@ -389,6 +407,14 @@
+@@ -396,6 +414,14 @@
  }
  
  // Q5_K group as values (for heads/embeddings) is g_q5_k_values; Q4_K is g_q4_k_values.
@@ -648,8 +648,8 @@
 +}
  """
  
- 
-@@ -527,7 +553,10 @@
+ # emitted only when an F32 matrix is used (see main)
+@@ -544,7 +570,10 @@
          scf.yield %nx : f32
        }}""")
      if swiglu:
@@ -661,7 +661,7 @@
        %value = scalar.mulf %silu, %t1 : f32""")
      else:
          L.append("      %value = scalar.addf %t0, %zero_f : f32")
-@@ -792,6 +821,21 @@
+@@ -870,6 +899,21 @@
  """
  
  
@@ -683,7 +683,7 @@
  ROW_SCALE = r"""
  
  // Per-row power-of-two scale (as g_row_scale) plus the scaled row as F16, the
-@@ -882,11 +926,11 @@
+@@ -1049,11 +1093,11 @@
      yt = ", ".join(["f32"] * n)
      xs = ", ".join(f"%x{i}" for i in range(n))
      t = [f"""
@@ -692,12 +692,12 @@
    %c1 = index.constant 1 : index
    %c256 = index.constant 256 : index
    kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
--}} launch(%tokens_arg: index, %layer_arg: index, %rope: i32, %context_arg: index, %pool_arg: index, %q: buffer, %k: buffer, %v: buffer, %q_norm: buffer, %k_norm: buffer, %info: buffer, %origins: buffer, %arena: buffer) {{
+-}} launch(%tokens_arg: index, %layer_arg: index, %rope: i32, %context_arg: index, %pool_arg: index, %q: buffer, %k: buffer, %v: buffer, %q_norm: buffer, %k_norm: buffer, %info: buffer, %origins: buffer, %arena: buffer{", %meta: buffer, %ids: buffer" if MROPE else ""}) {{
 +}} launch(%tokens_arg: index, %layer_arg: index, %rope: i32, %store_kv: i32, %context_arg: index, %pool_arg: index, %q: buffer, %k: buffer, %v: buffer, %q_norm: buffer, %k_norm: buffer, %info: buffer, %origins: buffer, %arena: buffer) {{
    %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
    %layer = index.assume %layer_arg [range(%layer_arg, 0, {L - 1})] : index
    %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-@@ -906,8 +950,10 @@
+@@ -1073,8 +1117,10 @@
    %c15 = index.constant 15 : index
    %c16 = index.constant 16 : index
    %cqh = index.constant {QH} : index
@@ -709,10 +709,12 @@
    %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
    %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
    %position32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
-@@ -925,6 +971,10 @@
+@@ -1092,8 +1138,10 @@
    %zero_f = scalar.constant 0.0 : f32
  """]
      for j, idx in enumerate(freq_idx):
+-        if MROPE:
+-            mrope_pick(j, idx); t.append("\n".join(MRP)); MRP.clear()
 +        if ROPE_CUT is not None and 32 * j >= ROPE_CUT:   # rope_freqs 1e30: this pair does not rotate
 +            t.append(f"  %cos{j} = scalar.addf %one_f, %zero_f : f32\n  %sin{j} = scalar.addf %zero_f, %zero_f : f32")
 +            continue
@@ -720,7 +722,7 @@
          t.append(f"""  // angle = position * theta^(-2i/RD) = position * exp(-i * 2 ln(theta) / RD)
    %li{j} = index.cast {idx} : index to i32
    %lf{j} = scalar.sitofp %li{j} : i32 to f32
-@@ -1017,8 +1067,22 @@
+@@ -1186,8 +1234,22 @@
      for i in range(n):
          t.append(f"""        %h{i} = scalar.fptrunc %r{i} : f32 to f16
          view.store %h{i}, %k_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>
@@ -745,7 +747,7 @@
          view.store %vh{i}, %v_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>""")
      t.append("""      }
      }
-@@ -1029,6 +1093,18 @@
+@@ -1198,6 +1260,18 @@
      return "\n".join(t)
  
  
@@ -764,7 +766,7 @@
  def listed(text, name, grid_rest):
      """Variant of a per-token kernel dispatched over the tokens in `list`
      (count read from a device buffer for indirect dispatch)."""
-@@ -1195,7 +1271,7 @@
+@@ -1364,7 +1438,7 @@
      %stop = index.min %stop_raw, %visible : index
      %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
      %q_raw = vector.load %q_view[%token, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
@@ -773,7 +775,7 @@
      %scale_v = vector.splat %scale : vector<4xf32>
      %q4 = vector.mulf %q_raw, %scale_v : vector<4xf32>
      %zero4 = vector.splat %zero_f : vector<4xf32>
-@@ -1309,12 +1385,139 @@
+@@ -1478,12 +1552,138 @@
  
  
  def attention():
@@ -828,7 +830,7 @@
 +  %c32 = index.constant 32 : index
 +  %cl = index.constant {NL} : index
 +  kernel.launch.config workgroups(%tokens, %cl, %c1) workgroup_size(%c32, %c1, %c1) : index
-+}} launch(%tokens_arg: index, %ids: buffer, %table: buffer, %pp: buffer, %w: buffer, %ple: buffer) {{
++}} launch(%tokens_arg: index, %ids: buffer{", %meta: buffer" if VISION else ""}, %table: buffer, %pp: buffer, %w: buffer, %ple: buffer) {{
 +  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
 +  %token_id = kernel.workgroup.id<x> : index
 +  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
@@ -843,8 +845,7 @@
 +  %zero_f = scalar.constant 0.0 : f32
 +  %zero32 = vector.constant 0.0 : vector<32xf32>
 +  %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
-+  %raw = view.load %ids_view[%token] : view<[%tokens]xi32> -> i32
-+  %c0_i32 = scalar.constant 0 : i32
++{ids_prelude()}{ids_load("%raw", "%token")}  %c0_i32 = scalar.constant 0 : i32
 +  %vocab_last = scalar.constant {V - 1} : i32
 +  %low = scalar.maxsi %raw, %c0_i32 : i32
 +  %clamped = scalar.minsi %low, %vocab_last : i32
@@ -919,7 +920,7 @@
  
  
  FALLBACK = r"""
-@@ -1492,9 +1695,22 @@
+@@ -1661,9 +1861,22 @@
            %is_best = scalar.cmpf oeq, %lv, %best : f32
            %cand_id = scf.select %is_best, %li, %big : i32
            %winner = kernel.workgroup.reduce<minsi> %cand_id : i32
@@ -943,7 +944,7 @@
              view.store %winner, %cand_i[%rr] : i32, view<64xi32>
            }}
            scf.yield %best, %winner : f32, i32
-@@ -1604,7 +1820,13 @@
+@@ -1773,7 +1986,13 @@
          args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
          types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
          mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
@@ -958,18 +959,18 @@
      args = args.replace(f", {x}, {s},", f", {x16}, {s},")
      return f"""scf.if %gemm {{
        scf.if %big {{
-@@ -1784,7 +2006,9 @@
+@@ -1953,7 +2172,9 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
--NVAL = {"%nH": H, "%nFF": FF, "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D}
-+NVAL = {"%nH": H, "%nFF": FF, "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D, "%nKVs": KVH * DSWA, "%nQs": QH * DSWA}
+-NVAL = {"%nH": H, "%nFF": FF, **({} if FF_UNIFORM else {f"%nFF{w}": w for w in set(FFL)}), "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D}
++NVAL = {"%nH": H, "%nFF": FF, **({} if FF_UNIFORM else {f"%nFF{w}": w for w in set(FFL)}), "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D, "%nKVs": KVH * DSWA, "%nQs": QH * DSWA}
 +if PLE:
 +    NVAL.update({"%nP": PLE["dim"], "%nPP": L * PLE["dim"]})
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -1934,7 +2158,20 @@
+@@ -2103,7 +2324,20 @@
    %h16 = buffer.alloca<global> align(256) %h16_size : buffer
    %o16 = buffer.alloca<global> align(256) %o16_size : buffer
    %f16 = buffer.alloca<global> align(256) %f16_size : buffer
@@ -990,8 +991,8 @@
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if FUSED_Q:
-@@ -1964,77 +2201,90 @@
-   kernel.launch @g_embed[%t](%t, %tokens, %embedding, %first_norm, %x, %h) : [index](index, buffer, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
+@@ -2133,77 +2367,90 @@
+   kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
 -    gate = "%gate" if GATE else "%q"
@@ -1007,7 +1008,7 @@
 +  }}
 +  {lin(fmt_of("per_layer_model_proj.weight"), "%x", "%s_h", "%ple_proj", ps, "%pp", "%nH", "%nPP", H) if os.environ.get("PLE_GEMM", "1") != "0" else lin_mv(fmt_of("per_layer_model_proj.weight"), "%x", "%ple_proj", ps, "%pp", "%nPP", H)}
 +  %nlayers = index.constant {L} : index
-+  kernel.launch @g_ple_prep[%t](%t, %tokens, %ple_table, %pp, %ple_norm, %ple) : [index](index, buffer, view<{ts}xi8>, buffer, view<{PLE["dim"]}xf32>, buffer)
++  kernel.launch @g_ple_prep[%t](%t, %tokens{", %metadata" if VISION else ""}, %ple_table, %pp, %ple_norm, %ple) : [index](index, buffer{", buffer" if VISION else ""}, view<{ts}xi8>, buffer, view<{PLE["dim"]}xf32>, buffer)
 +""")
 +    assert not RECUR and not GATE, "this kit copy is specialised for the Gemma-4 layer"
 +    attn_ordinal = {i: i for i in range(L)}
@@ -1056,7 +1057,7 @@
 -        qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
 -        nty = f"view<{D}xf32>" if QK_NORM else "buffer"
 -        if i not in RECUR:
--          T.append(f"""  kernel.launch @g_qk_rope_store[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer)
+-          T.append(f"""  kernel.launch @g_qk_rope_store[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""})
 +              par("ffn_norm", FFN_NORM, f"view<{H}xf32>"), par("wq", "attn_q"), par("wo", "attn_output"),
 +              par("q_norm", "attn_q_norm", f"view<{d}xf32>"), par("k_norm", "attn_k_norm", f"view<{d}xf32>"),
 +              par("post_attn", "post_attention_norm", f"view<{H}xf32>"), par("post_ffn", "post_ffw_norm", f"view<{H}xf32>")]
@@ -1109,9 +1110,9 @@
          fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
 -        assert fg == fu, f"layer {i}: ffn_gate {fg} != ffn_up {fu} (split the swiglu linear)"
 +        assert fg == fu
-         T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", "%nFF", H, mode="swiglu") + "\n")
-         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nFF, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
-         T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", "%nFF", "%nH", FF) + "\n")
+         T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", nff(i), H, mode="swiglu") + "\n")
+         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {nff(i)}, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
+         T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", nff(i), "%nH", FFL[i]) + "\n")
 -        pf = f"%post_ffn_{i}" if POST_NORM else f"%ffn_norm_{i}"
          if i == L - 1:
              nn = "%output_norm"
@@ -1130,7 +1131,7 @@
          L_.append("".join(T).replace("\n    %", "\n  %").replace("\n      ", "\n    "))
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
-@@ -2063,7 +2313,9 @@
+@@ -2234,7 +2481,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1141,7 +1142,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if RECUR:
-@@ -2071,12 +2323,27 @@
+@@ -2242,12 +2491,27 @@
      env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
      # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
@@ -1174,7 +1175,7 @@
      open(out, "w", newline="\n").write("\n".join(parts))
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -26,10 +26,12 @@
+@@ -26,6 +26,8 @@
  cases = []
  def save(n, a): np.save(os.path.join(out, n + ".npy"), a)
  def ty(a): return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int8": "i8", "int32": "i32", "float16": "f16"}[str(a.dtype)] + ">"
@@ -1182,19 +1183,23 @@
 +def ldim(li): return D if li in GLOBAL else DSWA
  # 1. embed
  ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
+ # M-RoPE (cfg "mrope"): the rope kernel also reads the epoch metadata (one span, offset 0: rotary position =
+@@ -44,7 +46,7 @@
+ VARGS = ", %meta, %tinfo" if VIS else ""
+ VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
  E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
 -x = E[ids]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
 +x = E[ids] * (cfg.get("embed_scale") or 1.0); h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
  tab = raw("token_embd.weight")
  for n, a in [("e_ids", ids), ("e_tab", tab), ("e_w", w.astype(np.float32)), ("e_x", x.astype(np.float32)), ("e_h", h.astype(np.float32))]: save(n, a)
  cases.append(f"""check.case public @embed {{
-@@ -51,13 +53,17 @@
+@@ -92,13 +94,17 @@
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
  for li in range(cfg["layers"]):
--    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"]), ("attn_output", QH * D), ("ffn_gate", H),
+-    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", QH * D), ("ffn_gate", H),
 -                   ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD)]:
-+    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"]), ("attn_output", QH * ldim(li)), ("ffn_gate", H),
++    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", QH * ldim(li)), ("ffn_gate", H),
 +                   ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD), ("inp_gate", H), ("proj", 256)]:
          name = f"blk.{li}.{nm_}.weight"
          if name not in T:
@@ -1208,7 +1213,7 @@
  for name, K in todo:
      fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
      for tg in (1, 4):
-@@ -81,43 +87,49 @@
+@@ -122,43 +128,49 @@
    check.return
  }}
  """)
@@ -1244,7 +1249,7 @@
 -  %orig = check.file.read.npy path("r_orig.npy") : tensor<64xi32>
 -  %qe = check.file.read.npy path("r_qe.npy") : tensor<{t}x{QH * D}xf32>
 -  %arena = check.generate.fill value(0.0) : tensor<1024xf16>
--  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena) : [index](index, index, i32, index, index, tensor<{t}x{QH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<64xi32>, tensor<1024xf16>)
+-{mr_decl(t)}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena{MR_ARGS}) : [index](index, index, i32, index, index, tensor<{t}x{QH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<64xi32>, tensor<1024xf16>{mr_types(t)})
 -  check.expect.close actual(%q) expected(%qe) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{t}x{QH * D}xf32>
 -  check.return
 -}}
@@ -1295,7 +1300,7 @@
  # 3a. output head (argmax over the vocabulary) for one selected span of 3 tokens
  t = 3
  head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
-@@ -148,56 +160,89 @@
+@@ -189,56 +201,89 @@
    check.return
  }}
  """)
@@ -1419,7 +1424,7 @@
 -  %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
 -  %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
 -  %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
--{split_text}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>)
+-{split_text}{mr_decl(t)}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena{MR_ARGS}) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>{mr_types(t)})
 -  kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
 -  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {"%g" if gate_kind else "%q"}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>)
 -  check.expect.close actual(%o) expected(%eo) atol(3.0e-3) rtol(3.0e-3) nan(different) : tensor<{t}x{QD}xf32>
@@ -1428,8 +1433,8 @@
 +  %pp = check.file.read.npy path("p_pp.npy") : tensor<{t}x{NL * 256}xf32>
 +  %w = check.file.read.npy path("p_w.npy") : tensor<256xf32>
 +  %e = check.file.read.npy path("p_e.npy") : tensor<{t}x{NL * 256}xf32>
-+  %o = check.generate.fill value(0.0) : tensor<{t}x{NL * 256}xf32>
-+  kernel.launch @g_ple_prep[%t](%t, %ids, %tab, %pp, %w, %o) : [index](index, tensor<{t}xi32>, {ty(raw(tabn))}, tensor<{t}x{NL * 256}xf32>, tensor<256xf32>, tensor<{t}x{NL * 256}xf32>)
++  %o = check.generate.fill value(0.0) : tensor<{t}x{NL * 256}xf32>{"\n  %meta = check.generate.fill value(0) : tensor<4xi32>" if VIS else ""}
++  kernel.launch @g_ple_prep[%t](%t, %ids{", %meta" if VIS else ""}, %tab, %pp, %w, %o) : [index](index, tensor<{t}xi32>{", tensor<4xi32>" if VIS else ""}, {ty(raw(tabn))}, tensor<{t}x{NL * 256}xf32>, tensor<256xf32>, tensor<{t}x{NL * 256}xf32>)
 +  check.expect.close actual(%o) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{t}x{NL * 256}xf32>
    check.return
  }}

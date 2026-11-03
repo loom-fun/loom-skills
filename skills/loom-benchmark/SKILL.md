@@ -51,10 +51,16 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
 
 | LEVEL | When | Gates | Cost |
 |---|---|---|---|
-| `fast` | after each kept optimization | goldens (cached) + compare, consistency | 1–3 min |
+| `fast` | after each kept optimization | goldens (cached) + compare, consistency (+ vision, for a package with image input) | 1–3 min |
 | `quick` | after the port (`qualify.sh` runs it) | fast + agent tool loop, sampling, needle at half the context (≤ 60k) vs llama.cpp | 5–15 min the first time |
 | `full` | once, on the final build (`finalize.sh` runs it) | quick + one Loom-only probe at the full context | + one full-context prefill |
 
+- **Vision gate** (packages with image input, every level): `vision_golden.py` sends six built-in images
+  (shapes + text, chart, document, photo-like, tall, wide; `--images` adds files) to Loom as chat
+  requests and to llama-server `--mmproj` (gates.sh sets `MMPROJ` from the package, so the lazily
+  started server loads it) as the package's own rendering + image. Prompt token counts must be equal
+  (resize rule, token limits, image markers, the image request's chat rendering); replies must match
+  token by token up to a near-tie. Verified: Bolt-E4B, Gemma-4-E2B, Qwen3.5-0.8B, Muse-Glimmer-30B.
 - **One model at a time** (GPU memory is system RAM): the gates run with only Loom loaded; every
   llama.cpp reference missing from the cache is deferred, then gates.sh stops Loom (remembering its
   command line), lets `llama_fill.py` answer them with only llama.cpp loaded, restarts Loom and re-runs

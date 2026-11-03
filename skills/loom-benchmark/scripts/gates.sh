@@ -25,6 +25,8 @@ long=$("$T" -c "print(','.join(str(n) for n in (1000, 2000, 16000, 32000) if n +
 slot=$("$T" -c "print(min($ctx, 65536) + 1024)")
 cd "$bench"
 defer=0
+# A package with image input: llama-server also loads its projector (MMPROJ), for the vision gate.
+MMPROJ=${MMPROJ:-$("$T" -c "import json; print((json.load(open('$pkg/llm_config.json')).get('vision') or {}).get('mmproj', ''))" 2>/dev/null)}; export MMPROJ
 if [ "${NO_LLAMA:-0}" = 1 ]; then
   L=""   # Loom-only: no golden/compare; agent, sampling and needle run their reference-free checks
 elif [ -n "${LLAMA_URL:-}" ]; then
@@ -32,14 +34,14 @@ elif [ -n "${LLAMA_URL:-}" ]; then
 else
   L=http://127.0.0.1:$lport
   : "${LLAMACPP_DIR:?set LLAMACPP_DIR to the llama.cpp ROCm build (or LLAMA_URL to a running llama-server)}"
-  export LLAMA_START="'$S/llamacpp_server.sh' '$gguf' $lport 1 $slot"
+  export LLAMA_START="'$S/llamacpp_server.sh' '$gguf' $lport 1 $slot"   # loads the projector too when MMPROJ is set
   defer=1   # one model at a time: references missing from the cache are filled with Loom stopped
 fi
 declare -A result secs done
 order=()
 # A gate that already PASSED on this exact build (same model.json + program/*.loom) is not re-run:
 # the inputs are identical (llama.cpp references are cached too). FORCE=1 re-runs everything.
-pkg_hash=$(cat "$pkg/model.json" "$pkg"/program/*.loom 2>/dev/null | sha256sum | cut -c1-12)
+pkg_hash=$(cat "$pkg/model.json" "$pkg"/program/*.loom 2>/dev/null | sha256sum | cut -c1-12)   # includes the vision programs
 passed_before() {  # passed_before NAME [NEEDLE_SIZE]
   [ "${FORCE:-0}" = 1 ] && return 1
   [ -f gates_runs.jsonl ] || return 1
@@ -81,6 +83,8 @@ all_gates() {
       [ -n "${done[compare]:-}" ] && { grep -q '"verdict": "PASS"' gates_compare.log || result[compare]=1; }
     fi
   fi
+  # Image input: prompt tokens + replies vs llama-server --mmproj (MMPROJ above) on vision_golden.py's images
+  [ -n "$MMPROJ" ] && [ -n "$L" ] && run vision "$T" "$S/vision_golden.py" "$pkg" --url "$url" --llama "$L"
   run consistency "$T" "$S/consistency.py" "$url" --model "$model" --pkg "$pkg" "${LL[@]}"
   [ -n "${done[consistency]:-}" ] && { grep -q "^PASS$" gates_consistency.log || result[consistency]=1; }
   if [ "$level" != fast ]; then

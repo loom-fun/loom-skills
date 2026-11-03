@@ -210,9 +210,9 @@
      main()
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -29,7 +29,10 @@
- # 1. embed
- ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
+@@ -44,7 +44,10 @@
+ VARGS = ", %meta, %tinfo" if VIS else ""
+ VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
  E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
 -x = E[ids]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
 +x = E[ids]
@@ -222,7 +222,7 @@
  tab = raw("token_embd.weight")
  for n, a in [("e_ids", ids), ("e_tab", tab), ("e_w", w.astype(np.float32)), ("e_x", x.astype(np.float32)), ("e_h", h.astype(np.float32))]: save(n, a)
  cases.append(f"""check.case public @embed {{
-@@ -67,6 +70,29 @@
+@@ -108,6 +111,29 @@
          kern = f"g_mv_{fmt}_k{K}" + ("_t4" if tg == 4 else "")
          _R = pick_r(n, K, tg)   # the variant the model launches (gen_llm uses the same rule)
          if _R != 16: kern += f"_r{_R}"

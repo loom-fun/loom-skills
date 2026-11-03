@@ -20,6 +20,8 @@ set -u
 export LOOM_NO_AUDIT=1 LLAMA_CACHE=$bench/llama_cache
 cd "$bench"
 loom_down   # one model at a time: the picker and the llama.cpp baseline run with Loom stopped
+# A package with image input: the shared llama-server also loads the projector (the vision gate uses it).
+MMPROJ=$("$T" -c "import json; print((json.load(open('$pkg/llm_config.json')).get('vision') or {}).get('mmproj', ''))" 2>/dev/null); export MMPROJ
 trap '"$S/llamacpp_server.sh" --stop "$lport"; loom_up' EXIT   # whatever happens, Loom serves again at the end
 
 step "1/5 pick the llama.cpp ROCm baseline build"

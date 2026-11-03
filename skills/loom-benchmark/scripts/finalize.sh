@@ -20,6 +20,8 @@ step "1/4 final perf: llama.cpp (Loom stopped), then Loom"
 # the median of its runs (audit: final label; roofline baselines refreshed the same way). Nothing else
 # may use the GPU meanwhile. SKIP_LLAMA_PERF=1 measures Loom only.
 loom_perf() { "$T" "$S/perf.py" "$url" final --model "$model" --log perf_log.jsonl "$@" | grep "^{" | tail -1; }
+# A package with image input: the shared llama-server also loads the projector (the vision gate uses it).
+MMPROJ=$("$T" -c "import json; print((json.load(open('$pkg/llm_config.json')).get('vision') or {}).get('mmproj', ''))" 2>/dev/null); export MMPROJ
 trap '"$S/llamacpp_server.sh" --stop "$lport"; loom_up' EXIT   # Loom serves again whatever happens
 started=0
 if [ -n "${LLAMACPP_DIR:-}" ] && [ "${SKIP_LLAMA_PERF:-0}" != 1 ]; then
