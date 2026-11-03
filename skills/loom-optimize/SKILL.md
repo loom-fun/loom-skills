@@ -124,6 +124,16 @@ tokens are in flight (Qwen3.5-0.8B decode +18 %, identical output; `GDN_CB=1` re
 
 **Tried and did not help** (don't repeat without a new reason): see the catalog's "Did not help".
 
+**Speculative decoding** (on by default when the GGUF has an MTP block or a DFlash drafter exists;
+`loom-port-llm/starter/draft/README.md`). `qualify.sh` already chose the method and depth by measurement
+(`bench/draft_tune.json`); re-run `draft/tune.py WORKDIR PORT MEMORY_GIB MODEL_ID` after a change that moves
+the decode/verify balance (it rebuilds `pkg`). On a bandwidth-bound model it is the biggest decode lever
+(Qwen3.8-27B Q8_0: 7.9 -> 14.6 tok/s with MTP depth 3); on small launch-bound models it loses (Qwen3.5-0.8B:
+262 -> 208) and tune.py keeps it off. Levers inside it: verify cost for more than 4 tokens per epoch (the
+4-token matvec re-reads weights per 4 tokens: a 16-row WMMA GEMM is the fix; streamed / f16 8-token matvecs
+were slower), the head over verify and draft rows (per 4 rows), drafter catch-up cost at prefill. Every change
+here must keep the `spec` gate exact.
+
 ## Where the remaining gap usually is
 
 - **Prefill GEMM efficiency.** We got 25–31 TFLOP/s of ~59 peak. The next steps are

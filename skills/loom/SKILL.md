@@ -84,7 +84,9 @@ $K/loom-benchmark/scripts/finalize.sh $W/pkg http://127.0.0.1:8160 $G $W/bench  
    (3: the chat template, or an architecture the starter doesn't cover). Then follow
    `loom-port-llm` for that stage only, and continue with step 2 once the package
    serves and its kernel tests pass.
-2. **Qualify.** `qualify.sh` picks the fastest llama.cpp ROCm build on the machine, measures
+2. **Qualify.** `qualify.sh` first picks the speculative-decoding method and depth by measured decode
+   speed (stage 0, `draft/tune.py`: none, the GGUF's MTP block, or a DFlash drafter `port.sh` found; it
+   rebuilds the package with the winner), then picks the fastest llama.cpp ROCm build on the machine, measures
    its baseline with Loom stopped, runs the gates (`LEVEL=quick`; llama.cpp references are filled
    with Loom stopped), measures the Loom baseline, runs the roofline (targets + budget) and prints
    `QUALIFY_RESULT`. A failing gate doesn't stop the measurements, but fix it before finalize.

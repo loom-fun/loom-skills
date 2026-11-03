@@ -157,8 +157,10 @@ global.rodata.def @draft_scope = bytes("{hx("draft")}")
   }}
   %smaller = scalar.cmpi ult, %maximum, %prefill : i64
 """)
+    decl = "func.decl @llm_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)"
+    text = _sub(text, decl, decl.replace("%pins: i64)", "%pins: i64, %drafting: i64)"))
     text = _sub(text, "  %allocations, %views, %origins, %draft, %geometry = func.call @llm_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)\n  %terminal = global.load @terminal : buffer\n  func.return %effective, %stage_count32, %state, %terminal, %allocations, %views, %origins, %empty, %geometry",
-                "  %allocations, %views, %origins, %draft, %geometry = func.call @llm_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)\n  %terminal = global.load @terminal : buffer\n  func.return %effective, %stage_count32, %state, %terminal, %allocations, %views, %origins, %draft, %geometry")
+                "  %drafting64 = scalar.extui %drafting : i1 to i64\n  %allocations, %views, %origins, %draft, %geometry = func.call @llm_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins, %drafting64) : (i64, i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)\n  %terminal = global.load @terminal : buffer\n  func.return %effective, %stage_count32, %state, %terminal, %allocations, %views, %origins, %draft, %geometry")
     return text
 
 
@@ -170,6 +172,10 @@ def patch_storage(text, cfg, draft):
         pos_bytes, planes, rows_per_token, carry_stride = cfg["kv_heads"] * cfg["head_dim"] * 2, 2 * len(cfg["mtp"]["layers"]), 1, 4 * H
     else:   # DFlash: features of every tap per token, no carry, two planes per draft layer
         pos_bytes, planes, rows_per_token, carry_stride = draft["kv_heads"] * draft["head_dim"] * 2, 2 * draft["layers"], draft["taps"], 0
+    sig_old = "func.def public @llm_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer) {\n"
+    text = _sub(text, sig_old, sig_old.replace("%pins: i64)", "%pins: i64, %drafting: i64)") +
+                "  // drafting = 0 (draft_depth 0 at serve time): no drafter allocations, one cache region, no draft table.\n"
+                "  %zero_flag = scalar.constant 0 : i64\n  %on = scalar.cmpi ne, %drafting, %zero_flag : i64\n")
     text = _sub(text, "  %residual_bytes = scalar.muli %span_capacity, %c4_i64 : i64\n",
                 f"""  // Final normalized hidden rows (the drafter's catch-up input) live in the residual allocation.
   %hidden_row = scalar.constant {4 * H * rows_per_token} : i64
@@ -201,29 +207,46 @@ def patch_storage(text, cfg, draft):
   %draft_pos_bytes = scalar.constant {pos_bytes} : i64
   %draft_plane_bytes = scalar.muli %pool, %draft_pos_bytes : i64
   %draft_bytes = scalar.muli %draft_plane_bytes, %draft_planes : i64
-  func.call @allocation(%allocations, %c6, %carry_bytes, %carry_bytes) : (buffer, index, i64, i64)
-  func.call @allocation(%allocations, %c7, %committed_bytes, %c0_i64) : (buffer, index, i64, i64)
-  func.call @allocation(%allocations, %c8, %results_bytes, %c0_i64) : (buffer, index, i64, i64)
-  func.call @allocation(%allocations, %c9, %draft_bytes, %c0_i64) : (buffer, index, i64, i64)
-  func.call @allocation(%allocations, %c10, %table_bytes, %c0_i64) : (buffer, index, i64, i64)
+  %carry_on = scf.select %on, %carry_bytes, %c0_i64 : i64
+  %committed_on = scf.select %on, %committed_bytes, %c0_i64 : i64
+  %results_on = scf.select %on, %results_bytes, %c0_i64 : i64
+  %draft_on = scf.select %on, %draft_bytes, %c0_i64 : i64
+  %table_on = scf.select %on, %table_bytes, %c0_i64 : i64
+  %carry_stride_on = scf.select %on, %carry_stride, %c0_i64 : i64
+  %split_on = scf.select %on, %feedback_split, %c4_i64 : i64
+  func.call @allocation(%allocations, %c6, %carry_on, %carry_on) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c7, %committed_on, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c8, %results_on, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c9, %draft_on, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c10, %table_on, %c0_i64) : (buffer, index, i64, i64)
 """)
-    text = _sub(text, "  %geometry_bytes = index.constant 104 : offset\n  %geometry = buffer.alloca<private> align(8) %geometry_bytes : buffer\n  %geometry_view = buffer.view %geometry[%origin] : buffer -> view<13xi64>\n",
-                "  %geometry_bytes = index.constant 144 : offset\n  %geometry = buffer.alloca<private> align(8) %geometry_bytes : buffer\n  %geometry_view = buffer.view %geometry[%origin] : buffer -> view<18xi64>\n")
-    text = re.sub(r"view<13xi64>", "view<18xi64>", text)
-    text = _sub(text, "  view.store %c0_i64, %geometry_view[2] : i64, view<18xi64>\n  view.store %c4_i64, %geometry_view[3] : i64, view<18xi64>\n",
-                "  view.store %carry_stride, %geometry_view[2] : i64, view<18xi64>\n  view.store %feedback_split, %geometry_view[3] : i64, view<18xi64>\n")
-    text = _sub(text, "  view.store %block_bytes, %geometry_view[12] : i64, view<18xi64>\n",
-                f"""  view.store %block_bytes, %geometry_view[12] : i64, view<18xi64>
-  %c9_i64 = scalar.constant 9 : i64
-  %draft_block_bytes = scalar.constant {16 * pos_bytes} : i64
-  view.store %c9_i64, %geometry_view[13] : i64, view<18xi64>
-  view.store %c0_i64, %geometry_view[14] : i64, view<18xi64>
-  view.store %draft_planes, %geometry_view[15] : i64, view<18xi64>
-  view.store %draft_plane_bytes, %geometry_view[16] : i64, view<18xi64>
-  view.store %draft_block_bytes, %geometry_view[17] : i64, view<18xi64>
-  // The draft page table starts as a copy of the target's (page maps at the same offsets).
-  %draft_origins = buffer.alloca<private> align(8) %origin_bytes : buffer
-  buffer.copy %origins[%origin], %draft_origins[%origin], %origin_bytes
+    text = _sub(text, "  %geometry_bytes = index.constant 104 : offset\n",
+                "  %geometry_one = index.constant 104 : offset\n  %geometry_two = index.constant 144 : offset\n"
+                "  %geometry_bytes = scf.select %on, %geometry_two, %geometry_one : offset\n")
+    text = _sub(text, "  view.store %c0_i64, %geometry_view[2] : i64, view<13xi64>\n  view.store %c4_i64, %geometry_view[3] : i64, view<13xi64>\n",
+                "  view.store %carry_stride_on, %geometry_view[2] : i64, view<13xi64>\n  view.store %split_on, %geometry_view[3] : i64, view<13xi64>\n")
+    text = _sub(text, "  view.store %block_bytes, %geometry_view[12] : i64, view<13xi64>\n",
+                f"""  view.store %block_bytes, %geometry_view[12] : i64, view<13xi64>
+  // second cache region: the drafter's K/V planes (allocation 9), same page geometry
+  %draft_origins = scf.if %on -> (buffer) {{
+    %region_at = index.constant 104 : offset
+    %region = buffer.view %geometry[%region_at] : buffer -> view<5xi64>
+    %c9_i64 = scalar.constant 9 : i64
+    %draft_block_bytes = scalar.constant {16 * pos_bytes} : i64
+    view.store %c9_i64, %region[0] : i64, view<5xi64>
+    view.store %c0_i64, %region[1] : i64, view<5xi64>
+    view.store %draft_planes, %region[2] : i64, view<5xi64>
+    view.store %draft_plane_bytes, %region[3] : i64, view<5xi64>
+    view.store %draft_block_bytes, %region[4] : i64, view<5xi64>
+    // the draft page table starts as a copy of the target's (page maps at the same offsets)
+    %copy = buffer.alloca<private> align(8) %origin_bytes : buffer
+    buffer.copy %origins[%origin], %copy[%origin], %origin_bytes
+    scf.yield %copy : buffer
+  }} else {{
+    %none_bytes = index.constant 0 : offset
+    %none = buffer.alloca<private> align(1) %none_bytes : buffer
+    scf.yield %none : buffer
+  }}
 """)
     text = _sub(text, "  func.call @allocation(%allocations, %c0, %residual_bytes, %c0_i64) : (buffer, index, i64, i64)\n",
                 "  func.call @allocation(%allocations, %c0, %feedback_bytes, %c0_i64) : (buffer, index, i64, i64)\n")
@@ -241,6 +264,17 @@ def patch_control(text, cfg, draft):
     n = text.count("index.constant 640 : offset")
     assert n == 3, n
     text = text.replace("index.constant 640 : offset", f"index.constant {SAMPLING} : offset")
+    decl = "func.decl @llm_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)"
+    text = _sub(text, decl, decl.replace("%pins: i64)", "%pins: i64, %drafting: i64)"))
+    text = _sub(text, "  %allocations, %views, %origins, %draft, %geometry = func.call @llm_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)\n  func.return %state,",
+                f"""  %kind_at = index.constant {DRAFT_KIND} : offset
+  %kind_view = buffer.view %state[%kind_at] : buffer -> view<1xi32>
+  %kind_word = view.load %kind_view[0] : view<1xi32> -> i32
+  %kind_zero = scalar.constant 0 : i32
+  %drafting_on = scalar.cmpi ne, %kind_word, %kind_zero : i32
+  %drafting64 = scalar.extui %drafting_on : i1 to i64
+  %allocations, %views, %origins, %draft, %geometry = func.call @llm_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins, %drafting64) : (i64, i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
+  func.return %state,""")
     text = _sub(text, "func.def public @encode_epoch(", "func.def @plain_encode_epoch(")
     text = _sub(text, "func.def public @publish_epoch(", "func.def @plain_publish_epoch(")
     text = _sub(text, "func.def public @epoch(", "func.def @plain_epoch(")
