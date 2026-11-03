@@ -1,6 +1,6 @@
 ---
 name: loom-port-llm
-description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve package — generate Loom IR kernels + command program from the GGUF's metadata, derive the chat/tool-calling glue from the model's own chat template, build model.json at the model's native context length, bring it up, unit-test kernels, and validate token-by-token against llama.cpp (short prompts, agent tool loops, full context). Includes a config-driven starter kit for dense transformers (Llama/Qwen2/Qwen3/Mistral-style, GQA, QK-norm, sliding window, output gates, post-norms, head_dim 128/256, partial RoPE) and Qwen3.5/Qwen3-Next-style hybrids (gated delta-net layers with recurrent state), with fast decode and WMMA prefill. Adds image input automatically when the repo ships a vision projector (mmproj) of a supported family (Gemma 4, Qwen3-VL/Qwen3.5+, Muse-Glimmer), and documents how to add a family. Use for "port model X to Loom", "get X working on loom-serve", custom/unsupported models.
+description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve package — generate Loom IR kernels + command program from the GGUF's metadata, derive the chat/tool-calling glue from the model's own chat template, build model.json at the model's native context length, bring it up, unit-test kernels, and validate token-by-token against llama.cpp (short prompts, agent tool loops, full context). Includes a config-driven starter kit for dense transformers (Llama/Qwen2/Qwen3/Mistral-style, GQA, QK-norm, sliding window, output gates, post-norms, head_dim 128/256, partial RoPE) and Qwen3.5/Qwen3-Next-style hybrids (gated delta-net layers with recurrent state), with fast decode and WMMA prefill. Speculative decoding is on by default (the GGUF's MTP block or a DFlash/DFlash2 drafter, chosen by measured decode speed, output identical to the target). Adds image input automatically when the repo ships a vision projector (mmproj) of a supported family (Gemma 4, Qwen3-VL/Qwen3.5+, Muse-Glimmer), and documents how to add a family. Use for "port model X to Loom", "get X working on loom-serve", custom/unsupported models.
 ---
 
 # Port an LLM to Loom
@@ -47,7 +47,12 @@ LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmark/scripts/
   an encoder plan (`gemma4v`, `qwen3vl_merger`, `muse-glimmer`), adds the image component and tests it
   (stage 5: vision kernels vs NumPy, the whole encoder vs a reference checked against llama.cpp;
   stage 6: one image). `VISION=0` skips it, `MMPROJ=file` picks the projector. An unsupported family
-  leaves a text-only port; `reference/vision.md` says how to add one.
+  leaves a text-only port; `reference/vision.md` says how to add one. (A recognized family can still fail
+  to build an encoder: Qwen3.8-27B's projector has head_dim 72; `VISION=0` gives a text-only port.)
+- **speculative decoding, by default**: an MTP/NextN block in the GGUF, or a DFlash drafter found for the base
+  model (stage 2c, `starter/draft/find_drafter.py`), is built in; the smoke stage proves drafting changes no
+  token (`spec_check.py`). `qualify.sh` later keeps whichever drafter and depth decode fastest, or none
+  (`starter/draft/README.md`). `SPEC=off` opts out.
 
 Its exit code says where it stopped (2 download, 3 chat template or uncovered architecture,
 4 build/serve, 5 kernel tests, 6 smoke); only then do you need the manual steps below for that
@@ -139,6 +144,19 @@ server does not reload the package (`serve.sh` stops a server whose registration
 divergences, `agent_golden.py` passes (exact rendering, reuse inside tool loops,
 valid calls), and `needle.py` passes up to the context capacity with a clean 400 above it.
 
+## Speculative decoding (automatic)
+
+Nothing to configure; read `starter/draft/README.md` only to debug it.
+- Kinds: `mtp` (the GGUF's NextN block; Qwen3.5/3.6/3.8, unsloth `*-MTP-GGUF` repos), `dflash` (z-lab DFlash and
+  DFlash2 drafter GGUFs, a separate `draft` parameter scope). `build.py --draft auto|mtp|dflash|none`
+  `[--drafter GGUF] [--draft-depth N]`; auto takes `cfg["drafter"]` (tune.py's measured choice), else MTP, else DFlash.
+- Output is exactly the target's: verification, device acceptance and gated delta-net replay commit only target
+  tokens, and seeded sampling draws at the true position. The `spec` gate compares with the same package at
+  `draft_depth 0` (`pkg/model_target.json`); a difference is a bug, not a near-tie.
+- Drafting works to the full context and with history reuse and checkpoints: the draft K/V shares the pool's pages.
+- Depth is a `model.json` setting (`execution.draft_depth`, 1-7); the method needs a rebuild.
+- Small models (< ~2B) decode faster without it (launch-bound); `tune.py` measures and decides.
+
 ## What the starter generates
 
 | File | Role |
@@ -154,6 +172,7 @@ valid calls), and `needle.py` passes up to the context capacity with a clean 400
 | `build.py` | Fills the templates from `cfg.json["chat"]`, sizes context/pool/memory, then writes `model.json`, `tokenizer.json`, the GGUF symlink and `llm_config.json` (read by the benchmark scripts). |
 | `pick_gguf.py` | Chooses the GGUF in a repo from the headers only (HTTP range read): quant preference, tensor formats the kit supports, and the memory rule (the file must fit twice: a conservative margin, kept until quant choice accounts for the KV pool at full context). |
 | `llama_trace.py` | llama.cpp's intermediate tensors and compute graph for a prompt (`llama-eval-callback`): the spec and the node-by-node reference for a new architecture. |
+| `draft/` | Speculative decoding: `gen_draft.py` (verify stage, device acceptance, GDN capture/replay, MTP drafter), `gen_dflash.py` (DFlash/DFlash2 drafters), `build_draft.py` (prepare/storage/control glue), `find_drafter.py`, `tune.py`; see its README. |
 | `make_kernel_tests.py`, `run_kernel_tests.sh` | `check.case` unit tests with numpy references (gguf dequantize) on the real tensor shapes: embed, matvecs (every format/K in use), QK-norm + RoPE, the attention chain (q/gate split → RoPE + paged KV store → split-K attention → gated combine), the output head argmax, and the gated delta-net chain on a span that continues a stored state. |
 
 Kernel inventory:
@@ -168,7 +187,9 @@ Kernel inventory:
 - **Shared:** a per-token QK-norm + RoPE + F16 KV store kernel, and fused add + RMSNorm.
 
 **Fixed assumptions:**
-- head_dim 128 or 256 (attention); gated delta-net head dims multiples of 32;
+- head_dim 128 or 256 (attention); gated delta-net head dims multiples of 32; query-head groups that are not a
+  power of two (Qwen3.8: 6) use flash prefill with staging sized for the power of two below (`gen_flash2.py`);
+  `NO_FLASH2=1` forces the listed split-K path for every prefill token (diagnostics; quadratic at long prompts);
 - K-quant / Q8_0 weights (add dequant helpers for other formats); f32 norms and conv weights;
 - hidden ≤ 8192; context ≤ 262,144 (kernel bounds; raise the `range(..., 262144)` facts for 1M-context models);
 - **sampling**: `temperature`, `top_p`, `top_k` and `seed` per request. Temperature 0 (the default

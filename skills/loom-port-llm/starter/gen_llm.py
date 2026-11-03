@@ -38,7 +38,7 @@ def nff(i):
 G = QH // KVH                             # query heads per KV head (waves per attention workgroup)
 # Prefill flash attention (gen_flash2.py) tiles head_dim over 32*G lanes: it needs a power-of-two group.
 # Otherwise (Qwen3.8: 6) every prefill token takes the listed split-K path (correct, slower prefill).
-NO_FLASH = bool(G & (G - 1)) or os.environ.get("NO_FLASH2") == "1"
+NO_FLASH = os.environ.get("NO_FLASH2") == "1"
 assert D in (128, 256), "attention kernels support head_dim 128 or 256 (lane l owns dims l, l+32, ...)"
 DL = D // 32                              # head dims per lane in the attention kernels
 RD = CFG.get("rope_dims") or D            # rotary dims (partial RoPE rotates the first RD dims)
@@ -2252,7 +2252,7 @@ if __name__ == "__main__":
         gfacts = dict(H=H, HG=HG, EPS=EPS, D=D, KD=KVH * D, QK_NORM=QK_NORM, VISION=bool(VISION), MROPE=bool(MROPE),
                       GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
                       head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
-                      prologue=MODEL_PARTS["prologue"], layer_text=MODEL_PARTS["layer_text"], lin=lin,
+                      prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin,
                       fmt=fmt_of, size=tensor_bytes, mtp_layer=MTP_LAYER)
         if gen_draft.DRAFT["kind"] == "dflash":
             import gen_dflash
