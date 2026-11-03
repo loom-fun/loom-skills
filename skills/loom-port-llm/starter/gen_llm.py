@@ -955,7 +955,8 @@ def mrope_positions():
   %mr_last = scalar.subi %mr_cb, %mr_one : i32
   %mr_sc = scalar.minsi %mr_sl, %mr_last : i32
   %mr_sb = scalar.assume %mr_sc [range(%mr_sc, 0, 8191)] : i32
-  %mr_span = index.cast %mr_sb : i32 to index
+  %mr_span0 = index.cast %mr_sb : i32 to index
+  %mr_span = index.assume %mr_span0 [lt(%mr_span0, %mr_count)] : index
   %mr_c36 = index.constant 36 : offset
   %mr_c16 = index.constant 16 : offset
   %mr_plan = index.scale %mr_count, %mr_c36 : index, offset -> offset

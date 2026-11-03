@@ -34,10 +34,10 @@ needs (section 3, step 5). Each model stresses something different; don't tune t
 
 | Model (HF repo) | Role | What it stresses |
 |---|---|---|
-| `unsloth/Qwen3.5-0.8B-GGUF` | cheapest trial (~20 min); the only starter-path model | starter path end to end, gated delta-net hybrid, 262k context (the full-context probe is the slow step) |
-| `unsloth/NVIDIA-Nemotron-3.5-Bolt-E4B-GGUF` | challenge | gemma4: PLE, KV sharing, head_dim 256/512, bf16, Gemma-4 tool/channel chat format (has `reference/gemma4-example`) |
+| `unsloth/Qwen3.5-0.8B-GGUF` | cheapest trial (~20 min); the only starter-path model | starter path end to end, gated delta-net hybrid, 262k context (the full-context probe is the slow step); vision: `qwen3vl_merger` + M-RoPE source positions |
+| `unsloth/NVIDIA-Nemotron-3.5-Bolt-E4B-GGUF` | challenge | gemma4: PLE, KV sharing, head_dim 256/512, bf16, Gemma-4 tool/channel chat format (has `reference/gemma4-example`); vision: `gemma4v` (clamped linears, unscaled rows, PLE token 0), whole-conversation chat kit -> generic image rendering |
 | `LiquidAI/LFM2.5-24B-A2B-GGUF` | challenge | lfm2moe: short-conv + MoE, head_dim 64, pythonic tool calls, `{% generation %}` template |
-| `unsloth/Muse-Glimmer-30B-GGUF` | challenge | 30B dense at ~9 tok/s: gate cost on big models, channel (ATEM) chat format, norm RoPE, NoPE/SWA layers |
+| `unsloth/Muse-Glimmer-30B-GGUF` | challenge | 30B dense at ~9 tok/s: gate cost on big models, channel (ATEM) chat format, norm RoPE, NoPE/SWA layers; vision: `muse-glimmer` (50-layer encoder, windowed attention, Lanczos resize, rows through the embedding norm) |
 | `unsloth/flint-GGUF` | challenge | 40B MoE with sinks + sliding window, arch newer than installed llama.cpp builds, GGUF picking under memory limits |
 
 Add a model when a user hits a failure none of these reproduce (a new architecture family, chat

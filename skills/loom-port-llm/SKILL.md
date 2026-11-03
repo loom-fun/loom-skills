@@ -1,6 +1,6 @@
 ---
 name: loom-port-llm
-description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve package — generate Loom IR kernels + command program from the GGUF's metadata, derive the chat/tool-calling glue from the model's own chat template, build model.json at the model's native context length, bring it up, unit-test kernels, and validate token-by-token against llama.cpp (short prompts, agent tool loops, full context). Includes a config-driven starter kit for dense transformers (Llama/Qwen2/Qwen3/Mistral-style, GQA, QK-norm, sliding window, output gates, post-norms, head_dim 128/256, partial RoPE) and Qwen3.5/Qwen3-Next-style hybrids (gated delta-net layers with recurrent state), with fast decode and WMMA prefill. Use for "port model X to Loom", "get X working on loom-serve", custom/unsupported models.
+description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve package — generate Loom IR kernels + command program from the GGUF's metadata, derive the chat/tool-calling glue from the model's own chat template, build model.json at the model's native context length, bring it up, unit-test kernels, and validate token-by-token against llama.cpp (short prompts, agent tool loops, full context). Includes a config-driven starter kit for dense transformers (Llama/Qwen2/Qwen3/Mistral-style, GQA, QK-norm, sliding window, output gates, post-norms, head_dim 128/256, partial RoPE) and Qwen3.5/Qwen3-Next-style hybrids (gated delta-net layers with recurrent state), with fast decode and WMMA prefill. Adds image input automatically when the repo ships a vision projector (mmproj) of a supported family (Gemma 4, Qwen3-VL/Qwen3.5+, Muse-Glimmer), and documents how to add a family. Use for "port model X to Loom", "get X working on loom-serve", custom/unsupported models.
 ---
 
 # Port an LLM to Loom
@@ -42,7 +42,12 @@ LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmark/scripts/
 - inspects, stops if the chat block isn't verified, builds at the native context, serves (state
   in `WORKDIR/state`), runs the kernel tests and a smoke test (chat + a tool call), and prints
   `PORT_RESULT {...}`;
-- starts the end-to-end clock (`WORKDIR/.e2e_start`).
+- starts the end-to-end clock (`WORKDIR/.e2e_start`);
+- **image input** (stage 2b): when the repo ships a vision projector (`mmproj-*.gguf`) whose family has
+  an encoder plan (`gemma4v`, `qwen3vl_merger`, `muse-glimmer`), adds the image component and tests it
+  (stage 5: vision kernels vs NumPy, the whole encoder vs a reference checked against llama.cpp;
+  stage 6: one image). `VISION=0` skips it, `MMPROJ=file` picks the projector. An unsupported family
+  leaves a text-only port; `reference/vision.md` says how to add one.
 
 Its exit code says where it stopped (2 download, 3 chat template or uncovered architecture,
 4 build/serve, 5 kernel tests, 6 smoke); only then do you need the manual steps below for that
@@ -302,6 +307,9 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
 ## Reference
 
 - `reference/loom-ir-cookbook.md`: IR idioms, proof facts, and compile-error fixes.
+- `reference/vision.md`: image input: what port.sh adds, how it works (image component, chat markers,
+  media input records, M-RoPE), and **how to add a projector family** (llama.cpp graph -> NumPy
+  reference vs `llama-mtmd-debug` -> kernels -> plan -> gate). Code: `starter/vision/`.
 - `reference/porting-notes.md`: how the text service drives the program (epochs,
   spans, metadata packets, KV paging), and what each glue file does.
 - `reference/*-example/`: worked ports (table in step 3), applied with `apply_example.sh`.

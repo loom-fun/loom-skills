@@ -18,7 +18,7 @@ and exposes OpenAI-style HTTP endpoints.
 |---|---|
 | Install the SDK + library, fetch a catalog model, start/stop `loom-serve`, NPU serving | `loom-setup` |
 | Browser playground (chat / ASR / TTS / image / embeddings) over running servers | `loom-demo-ui` |
-| Make an arbitrary GGUF LLM servable by loom-serve (write the program) | `loom-port-llm` |
+| Make an arbitrary GGUF LLM servable by loom-serve (write the program; image input too when the repo ships a supported vision projector) | `loom-port-llm` |
 | What is possible for this model? Pick optimization targets (roofline vs llama.cpp) | `loom-roofline` (`${CLAUDE_SKILL_DIR}/../loom-roofline/SKILL.md`) |
 | Make a ported model faster without breaking correctness | `loom-optimize` |
 | Correctness gate vs llama.cpp, throughput methodology, reporting | `loom-benchmark` |

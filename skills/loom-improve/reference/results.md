@@ -55,6 +55,22 @@ never edit old ones. Wall clock is install -> done; the target is the model's ro
 - A trial agent sat idle for 16 h waiting on its own background loop while the orchestrator waited for
   a completion message: `scripts/watch_trial.sh` exists because of it.
 
+## Image input (vision branch, 2026-11-03)
+
+`port.sh` with stage 2b (no hand-work after the kit, as for text), then the vision gate
+(`vision_golden.py`: 6 images, prompt tokens + replies vs llama.cpp b1362 `--mmproj`, one model at a time).
+Encoder: whole-encoder per-row cosine vs `ref_vit.py` (which matches `llama-mtmd-debug`).
+
+| Model | Projector | Port (stages 3-6) | Encoder cos | Vision gate | Text gates on the vision package |
+|---|---|---|---|---|---|
+| Qwen3.5-0.8B | qwen3vl_merger (F16) + M-RoPE | 1 min | 0.99999 | PASS: 3 identical, 3 near-tie (max gap 0.13) | fast PASS (24 goldens up to 33k, max gap 0.36; consistency) |
+| Bolt-E4B | gemma4v (BF16) | 1.5 min | 0.9999996 | PASS: 5 identical, 1 near-tie (0.01) | smoke (chat, tool call) |
+| Gemma-4-E2B | gemma4v (F16) | dev package | 0.999998 | PASS: 5 identical, 1 near-tie (0.36) | smoke |
+| Muse-Glimmer-30B | muse-glimmer (BF16) | 2 min | 0.99998 | PASS: 4 identical, 2 near-tie (0.31) | smoke |
+
+Text-only programs of the starter (Qwen3.5) and of every example (Bolt, LFM2.5, flint, Glimmer configs)
+are byte-identical to main's. LFM2.5 and flint ship no projector.
+
 ## Quiet-GPU evaluations (`scripts/eval.sh`), the only perf numbers to compare across revisions
 
 Measured 2026-11-01 with `GATES=0 scripts/eval.sh` (perf only; the trials' own full gates are in the
