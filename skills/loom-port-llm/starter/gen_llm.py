@@ -681,7 +681,8 @@ FEATURE_PICK = ("""    %vv = scf.if %is_feat -> (vector<32xf32>) {
     }
 """.replace("%HGM1%", str(HG - 1)).replace("%HG%", str(HG)).replace("%one_byte", "%feat_one_byte") if VISION else "")
 if VISION:
-    assert not EMBED_NORM, "vision input with an embedding norm: decide whether features bypass it (llama.cpp: they do)"
+    # An embedding norm (Muse-Glimmer) applies to every input row, projected features included (llama.cpp
+    # norms the selected embeddings); only the token embedding scale (Gemma) skips features (scale_rows).
     EMBED_PRE = EMBED_PRE.replace("vector.splat %escale_s :", "vector.splat %escale_eff :")
     if _ES:
         EMBED_PRE = EMBED_PRE.replace("  %escale = vector.splat", "  %escale_one = scalar.constant 1.0 : f32\n  %escale_eff = scf.select %is_feat, %escale_one, %escale_s : f32\n  %escale = vector.splat", 1)
@@ -935,6 +936,94 @@ kernel.def export("g_row_scale_f16") @g_row_scale_f16(%rows: index) {
 """
 
 
+MROPE = CFG.get("mrope")   # {"sections": [t, h, w, e], "interleaved": bool}: Qwen-VL multi-axis RoPE (image input)
+
+
+def mrope_positions():
+    """Per-token (t, h, w) rotary positions. Media epochs (metadata word 2) carry them in input-record
+    words 4..6 (control.loom's vision encode); ordinary epochs use the KV position plus the span's
+    source-position offset (a table after the plan in the metadata, written by encode_epoch)."""
+    return """  %mr_meta = buffer.view %meta[%zero] : buffer -> view<4xi32>
+  %mr_count32 = view.load %mr_meta[0] : view<4xi32> -> i32
+  %mr_flag = view.load %mr_meta[2] : view<4xi32> -> i32
+  %mr_mixed = scalar.cmpi ne, %mr_flag, %c0_i32 : i32
+  %mr_span32 = view.load %info_view[%token, 3] : view<[%tokens]x4xi32> -> i32
+  %mr_cb = scalar.assume %mr_count32 [range(%mr_count32, 1, 8192)] : i32
+  %mr_count = index.cast %mr_cb : i32 to index
+  %mr_sl = scalar.maxsi %mr_span32, %c0_i32 : i32
+  %mr_one = scalar.constant 1 : i32
+  %mr_last = scalar.subi %mr_cb, %mr_one : i32
+  %mr_sc = scalar.minsi %mr_sl, %mr_last : i32
+  %mr_sb = scalar.assume %mr_sc [range(%mr_sc, 0, 8191)] : i32
+  %mr_span = index.cast %mr_sb : i32 to index
+  %mr_c36 = index.constant 36 : offset
+  %mr_c16 = index.constant 16 : offset
+  %mr_plan = index.scale %mr_count, %mr_c36 : index, offset -> offset
+  %mr_table = index.add %mr_c16, %mr_plan : offset
+  %mr_tv = buffer.view %meta[%mr_table] : buffer -> view<[%mr_count]xi32>
+  %mr_delta = view.load %mr_tv[%mr_span] : view<[%mr_count]xi32> -> i32
+  %mr_linear = scalar.addi %position_low, %mr_delta : i32
+  %mr_t32, %mr_h32, %mr_w32 = scf.if %mr_mixed -> (i32, i32, i32) {
+    %mr_c8 = index.constant 8 : index
+    %mr_n = index.mul %tokens, %mr_c8 : index
+    %mr_rec = buffer.view %ids[%zero] : buffer -> view<[%mr_n]xi32>
+    %mr_base = index.mul %token, %mr_c8 : index
+    %mr_e4 = index.add %mr_base, %c4 : index
+    %mr_c5 = index.constant 5 : index
+    %mr_c6 = index.constant 6 : index
+    %mr_e5 = index.add %mr_base, %mr_c5 : index
+    %mr_e6 = index.add %mr_base, %mr_c6 : index
+    %mr_b4 = index.assume %mr_e4 [lt(%mr_e4, %mr_n)] : index
+    %mr_b5 = index.assume %mr_e5 [lt(%mr_e5, %mr_n)] : index
+    %mr_b6 = index.assume %mr_e6 [lt(%mr_e6, %mr_n)] : index
+    %mr_pt = view.load %mr_rec[%mr_b4] : view<[%mr_n]xi32> -> i32
+    %mr_ph = view.load %mr_rec[%mr_b5] : view<[%mr_n]xi32> -> i32
+    %mr_pw = view.load %mr_rec[%mr_b6] : view<[%mr_n]xi32> -> i32
+    scf.yield %mr_pt, %mr_ph, %mr_pw : i32, i32, i32
+  } else {
+    scf.yield %mr_linear, %mr_linear, %mr_linear : i32, i32, i32
+  }
+  %mr_tf = scalar.sitofp %mr_t32 : i32 to f32
+  %mr_hf = scalar.sitofp %mr_h32 : i32 to f32
+  %mr_wf = scalar.sitofp %mr_w32 : i32 to f32
+"""
+
+
+def mrope_pick(j, idx):
+    """SSA of the rotary position of frequency pair idx (an index SSA): llama.cpp's (i)mrope sections."""
+    s0, s1, s2 = MROPE["sections"][:3]
+    sect = sum(MROPE["sections"])
+    MRP.append(f"""  %mr_ns{j} = index.constant {sect} : index
+  %mr_sec{j} = index.rem {idx}, %mr_ns{j} : index""")
+    if MROPE.get("interleaved", True):   # qwen3vl: h if i%3==1, w if i%3==2, t if i%3==0 (within 3x the section)
+        MRP.append(f"""  %mr_m3c{j} = index.constant 3 : index
+  %mr_m3{j} = index.rem %mr_sec{j}, %mr_m3c{j} : index
+  %mr_one{j} = index.constant 1 : index
+  %mr_two{j} = index.constant 2 : index
+  %mr_lh{j} = index.constant {3 * s1} : index
+  %mr_lw{j} = index.constant {3 * s2} : index
+  %mr_ish0{j} = index.cmp eq, %mr_m3{j}, %mr_one{j} : index
+  %mr_ish1{j} = index.cmp ult, %mr_sec{j}, %mr_lh{j} : index
+  %mr_ish{j} = scalar.andi %mr_ish0{j}, %mr_ish1{j} : i1
+  %mr_isw0{j} = index.cmp eq, %mr_m3{j}, %mr_two{j} : index
+  %mr_isw1{j} = index.cmp ult, %mr_sec{j}, %mr_lw{j} : index
+  %mr_isw{j} = scalar.andi %mr_isw0{j}, %mr_isw1{j} : i1""")
+    else:                                  # qwen2vl: contiguous sections t | h | w
+        MRP.append(f"""  %mr_lt{j} = index.constant {s0} : index
+  %mr_lh{j} = index.constant {s0 + s1} : index
+  %mr_lw{j} = index.constant {s0 + s1 + s2} : index
+  %mr_ish0{j} = index.cmp uge, %mr_sec{j}, %mr_lt{j} : index
+  %mr_ish1{j} = index.cmp ult, %mr_sec{j}, %mr_lh{j} : index
+  %mr_ish{j} = scalar.andi %mr_ish0{j}, %mr_ish1{j} : i1
+  %mr_isw0{j} = index.cmp uge, %mr_sec{j}, %mr_lh{j} : index
+  %mr_isw1{j} = index.cmp ult, %mr_sec{j}, %mr_lw{j} : index
+  %mr_isw{j} = scalar.andi %mr_isw0{j}, %mr_isw1{j} : i1""")
+    MRP.append(f"""  %mr_pw{j} = scf.select %mr_isw{j}, %mr_wf, %mr_tf : f32
+  %mr_p{j} = scf.select %mr_ish{j}, %mr_hf, %mr_pw{j} : f32""")
+    return f"%mr_p{j}"
+MRP = []   # selection lines emitted before each pair's angle
+
+
 def qk_rope():
     """Per-head (optional) RMSNorm + RoPE for QH query and KVH key heads, with
     keys/values stored to the paged F16 KV planes: one 256-lane workgroup per
@@ -963,7 +1052,7 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
   kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
-}} launch(%tokens_arg: index, %layer_arg: index, %rope: i32, %context_arg: index, %pool_arg: index, %q: buffer, %k: buffer, %v: buffer, %q_norm: buffer, %k_norm: buffer, %info: buffer, %origins: buffer, %arena: buffer) {{
+}} launch(%tokens_arg: index, %layer_arg: index, %rope: i32, %context_arg: index, %pool_arg: index, %q: buffer, %k: buffer, %v: buffer, %q_norm: buffer, %k_norm: buffer, %info: buffer, %origins: buffer, %arena: buffer{", %meta: buffer, %ids: buffer" if MROPE else ""}) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {L - 1})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
@@ -993,7 +1082,7 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %position_low = scalar.maxsi %position32, %c0_i32 : i32
 {dim_defs}  %apply_rope = scalar.cmpi ne, %rope, %c0_i32 : i32
   %position_f = scalar.sitofp %position_low : i32 to f32
-  %ln_scale = scalar.constant {ln_scale!r} : f32
+{mrope_positions() if MROPE else ""}  %ln_scale = scalar.constant {ln_scale!r} : f32
   %neg = scalar.constant -1.0 : f32
   %inv_two_pi = scalar.constant 0.15915494309189535 : f32
   %two_pi = scalar.constant 6.283185307179586 : f32
@@ -1002,13 +1091,15 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %zero_f = scalar.constant 0.0 : f32
 """]
     for j, idx in enumerate(freq_idx):
+        if MROPE:
+            mrope_pick(j, idx); t.append("\n".join(MRP)); MRP.clear()
         t.append(f"""  // angle = position * theta^(-2i/RD) = position * exp(-i * 2 ln(theta) / RD)
   %li{j} = index.cast {idx} : index to i32
   %lf{j} = scalar.sitofp %li{j} : i32 to f32
   %ex{j}a = scalar.mulf %lf{j}, %ln_scale : f32
   %ex{j}b = scalar.mulf %ex{j}a, %neg : f32
   %if{j} = scalar.expf<afn> %ex{j}b : f32
-  %ra{j} = scalar.mulf %position_f, %if{j} : f32
+  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j} : f32
   %tr{j} = scalar.mulf %ra{j}, %inv_two_pi : f32
   %ts{j} = scalar.addf %tr{j}, %half : f32
   %ti{j} = scalar.fptosi %ts{j} : f32 to i32
@@ -2082,7 +2173,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
         nty = f"view<{D}xf32>" if QK_NORM else "buffer"
         if i not in RECUR:
-          T.append(f"""  kernel.launch @g_qk_rope_store[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer)
+          T.append(f"""  kernel.launch @g_qk_rope_store[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""})
   scf.if %gemm {{
     kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
     kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)

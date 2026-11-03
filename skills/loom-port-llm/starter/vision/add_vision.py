@@ -19,6 +19,8 @@ MARKERS = {
 # the generation prompt and the output parser's first state come from (generic state -> kit state map) or
 # from the kit's own chat_end ("format").
 END_STATES = {"gemma4": [3, 1], "atem": "format"}
+# Families whose text model uses multi-axis RoPE for image tokens (llama.cpp MTMD_POS_TYPE_MROPE).
+MROPE_FAMILIES = ("qwen3vl_merger",)
 PREFERENCE = ("F16", "BF16", "F32", "Q8_0")
 
 
@@ -56,10 +58,17 @@ def main():
         print(e); print("VISION_RESULT " + json.dumps({"vision": False, "mmproj": path, "reason": "unsupported projector family"}))
         return 3
     fam = vc["family"]
-    if fam == "qwen3vl_merger" and not cfg.get("rope_sections"):
-        print("NOTE: Qwen-VL images need M-RoPE positions in the text model; cfg has no rope_sections")
     beg, end = MARKERS[fam]
     block = {"mmproj": path, "family": fam, "img_begin": beg, "img_end": end}
+    if fam in MROPE_FAMILIES:   # the text model rotates image tokens by (t, h, w): rope.dimension_sections
+        import gguf
+        r = gguf.GGUFReader(cfg["gguf"]); arch = cfg.get("arch", "")
+        f = r.fields.get(f"{arch}.rope.dimension_sections")
+        if f is None:
+            sys.exit(f"STOP: {fam} images need M-RoPE but {arch}.rope.dimension_sections is missing from the GGUF")
+        sections = [int(f.parts[i][0]) for i in f.data]
+        cfg["mrope"] = {"sections": sections, "interleaved": not arch.startswith("qwen2")}
+        block["mrope"] = True
     fmt = (cfg.get("chat") or {}).get("call_format")
     if fmt in END_STATES:
         block["end_states"] = END_STATES[fmt]

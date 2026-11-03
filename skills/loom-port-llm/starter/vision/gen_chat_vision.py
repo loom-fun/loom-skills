@@ -21,7 +21,17 @@ def geometry(fam, P, m, tmin, tmax, half_even):
   %area = scalar.mulf %nph0, %npw0 : f64
   %over = scalar.cmpf ogt, %area, %maxd : f64
   %q = scalar.divf %maxd, %ratio : f64
-  %nph1 = scalar.sqrtf %q : f64
+  // sqrt in F64 (the VM has F32 sqrt only): an F32 estimate, two Newton steps
+  %q32 = scalar.fptrunc %q : f64 to f32
+  %r32 = scalar.sqrtf %q32 : f32
+  %r0 = scalar.extf %r32 : f32 to f64
+  %halfd = scalar.constant 0.5 : f64
+  %qd0 = scalar.divf %q, %r0 : f64
+  %s0 = scalar.addf %r0, %qd0 : f64
+  %r1 = scalar.mulf %s0, %halfd : f64
+  %qd1 = scalar.divf %q, %r1 : f64
+  %s1 = scalar.addf %r1, %qd1 : f64
+  %nph1 = scalar.mulf %s1, %halfd : f64
   %npw1 = scalar.mulf %nph1, %ratio : f64
   %nph = scf.select %over, %nph1, %nph0 : f64
   %npw = scf.select %over, %npw1, %npw0 : f64

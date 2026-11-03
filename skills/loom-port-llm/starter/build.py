@@ -154,6 +154,10 @@ for name in ("prepare", "control", "storage", "service"):
             text += "\n" + __import__(os.path.basename(rodata_py)[:-3]).rodata()
         text += "\n" + open(custom_chat, encoding="utf-8").read()
         text = re.sub(r"@@HEX_CHAT:(\w+)@@", lambda m: hx(chat.get(m.group(1), "")), text)
+    if name == "storage" and (cfg.get("vision") or {}).get("mrope"):   # M-RoPE span offsets after the plan
+        sys.path.insert(0, os.path.join(HERE, "vision"))
+        import build_vision
+        text = build_vision.mrope_storage(text)
     if name == "control" and cfg.get("vision"):   # image input (vision/README.md)
         sys.path.insert(0, os.path.join(HERE, "vision"))
         import build_vision, encoder as vision_encoder

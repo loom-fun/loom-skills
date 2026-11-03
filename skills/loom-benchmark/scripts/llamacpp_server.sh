@@ -46,7 +46,7 @@ $exe --list-devices 2>&1 | grep -q ROCm || { echo "$dir/llama-server sees no ROC
 ctxarg=(-c $((np * per))); [ "$mode" = unified ] && ctxarg=(-c $per -kvu)
 # -cram 0: no host-RAM prompt cache. Every reference request is independent (cache_prompt false), and
 # an old build (b10820, a sliding-window model) answered the PREVIOUS prompt from that cache.
-mm=(); [ -n "${MMPROJ:-}" ] && mm=(--mmproj "$MMPROJ")
+mm=(); [ -n "${MMPROJ:-}" ] && { mm=(--mmproj "$MMPROJ"); export LLAMA_MEDIA_MARKER='<__media__>'; }   # vision_golden.py's marker
 nohup $exe -m "$gguf" -ngl 99 -cram 0 "${mm[@]}" "${ctxarg[@]}" -np $np --port $port --host 127.0.0.1 > $state/llamacpp-$port.log 2>&1 &
 echo $! > $state/llamacpp-$port.pid
 for i in $(seq 300); do

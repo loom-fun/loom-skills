@@ -120,9 +120,10 @@ import sys; sys.path.insert(0, sys.argv[1])
 import requests, vision_golden as V
 im, _ = V.builtin_images()["shapes"]
 model = requests.get(sys.argv[2] + "/v1/models", timeout=30).json()["data"][0]["id"]
-r = V.request(sys.argv[2], model, V.data_url(im), "What shapes and colors are in this image?", 64, False)
-ok = "error" not in r and any(w in r["content"].lower() for w in ("red", "blue", "green", "circle", "square", "triangle"))
-print("image:", "OK" if ok else "FAIL", repr(r.get("content", r.get("error")))[:150], "prompt tokens", r.get("prompt_tokens"))
+r = V.request(sys.argv[2], model, V.data_url(im), "What shapes and colors are in this image?", 256, False)
+said = (r.get("reasoning", "") + " " + r.get("content", "")).lower()
+ok = "error" not in r and any(w in said for w in ("red", "blue", "green", "circle", "square", "triangle"))
+print("image:", "OK" if ok else "FAIL", repr(r.get("content") or r.get("reasoning") or r.get("error"))[:150], "prompt tokens", r.get("prompt_tokens"))
 sys.exit(0 if ok else 1)
 EOF
 fi

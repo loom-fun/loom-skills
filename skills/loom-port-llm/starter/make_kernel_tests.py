@@ -57,7 +57,9 @@ if VIS:   # a media epoch: 8-word records, token 1 carries a feature row (copied
     recs = np.zeros((t, 8), np.int32); recs[:, 0] = ids; recs[1, 1] = t * 32
     packet = np.concatenate([recs.reshape(-1), feat.view(np.int32)])
     meta = np.array([t, 0, 1, 0], np.int32); tinfo = np.zeros((t, 4), np.int32); tinfo[:, 2] = 1
-    xm = x.astype(np.float32).copy(); xm[1] = feat; hm = xm / np.sqrt((xm * xm).mean(-1, keepdims=True) + eps) * w
+    xm = x.astype(np.float32).copy()
+    xm[1] = feat / np.sqrt((feat * feat).mean() + 1e-5) if cfg.get("embed_norm") else feat   # the weightless embedding norm applies to features too
+    hm = xm / np.sqrt((xm * xm).mean(-1, keepdims=True) + eps) * w
     for n, a in [("m_pk", packet), ("m_meta", meta), ("m_info", tinfo), ("m_x", xm.astype(np.float32)), ("m_h", hm.astype(np.float32))]: save(n, a)
     cases.append(f"""check.case public @embed_media {{
   %t = check.literal value({t}) : index
