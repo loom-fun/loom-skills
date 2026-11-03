@@ -722,17 +722,42 @@ def _split_head(program):
     return program[:i + 1], program[i + 1:]
 
 
-def advance_program(program):
-    """Ordinary epochs: the final normalized hidden rows stay in the `residual` allocation."""
+def first_binding():
+    """Name of the trunk's first launch buffer (the `residual` allocation): the final normalized hidden rows
+    for MTP's catch-up, the captured target features for DFlash's."""
+    return "%features" if DRAFT and DRAFT.get("kind") == "dflash" else "%h"
+
+
+def _with_taps(program, g):
+    """DFlash: capture the residual stream after each target layer the drafter reads."""
+    import re as _re
+    taps = g["dflash_taps"]
+    for k, i in enumerate(taps):
+        launch = (f"  %tap_slot_{k} = index.constant {k} : index\n"
+                  f"  kernel.launch @g_dfl_tap[%t](%t, %tap_slot_{k}, %x, %features) : [index](index, index, buffer, buffer)\n")
+        m = _re.search(rf"\n  // ---- layer {i + 1}[ \n]", program)
+        at = m.start() + 1 if m else program.index("\n  %head = command.parameter %weights") + 1
+        assert i + 1 < g["L"] or not m
+        program = program[:at] + launch + program[at:]
+    return program
+
+
+def advance_program(program, g=None):
+    """Ordinary epochs. MTP: the final normalized hidden rows stay in the `residual` allocation. DFlash: the
+    trunk keeps its own hidden rows and captures the drafter's feature taps into that allocation."""
     assert ADVANCE_SIG in program and H_ALLOCA in program
+    if first_binding() == "%features":
+        return _with_taps(program.replace(ADVANCE_SIG, ADVANCE_SIG.replace("%residual: buffer", "%features: buffer")), g)
     return program.replace(ADVANCE_SIG, ADVANCE_SIG.replace("%residual: buffer", "%h: buffer")).replace(H_ALLOCA, "", 1)
 
 
 def verify_program(program, g):
-    body, _ = _split_head(advance_program(program))
+    body, _ = _split_head(advance_program(program, g))
     body = body[body.index("command.program.def public @llm_advance()"):]   # config decls are emitted once (advance)
-    body = body.replace("command.program.def public @llm_advance() launch(%weights: buffer, %h: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {",
-                        "command.program.def public @llm_verify() launch(%weights: buffer, %h: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %committed: buffer, %results: buffer) {", 1)
+    fb = first_binding()
+    body = body.replace(f"command.program.def public @llm_advance() launch(%weights: buffer, {fb}: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {{",
+                        f"command.program.def public @llm_verify() launch(%weights: buffer, {fb}: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %committed: buffer, %results: buffer) {{", 1)
+    assert "@llm_verify()" in body
     GDN = g["GDN"]
     if GDN:
         W = GDN["C"] + 2 * GDN["HV"]
@@ -896,8 +921,13 @@ command.program.def public @llm_mtp_warm() launch(%w_embed: buffer, %weights: bu
     layer = g["layer_text"](M, ordinal=0, last_norm="%head_norm", kind_note=" (MTP NextN block)")
     # Proposals are one token per span: attention always takes the decode (split-K) path, whatever the
     # cohort size, and the split buffers are sized for it.
-    assert "  scf.if %gemm {\n    kernel.launch @g_attention_flash2" in layer
-    layer = layer.replace("  scf.if %gemm {\n    kernel.launch @g_attention_flash2", "  scf.if %attn_tiles {\n    kernel.launch @g_attention_flash2")
+    for k in ("@g_attention_flash2", "@g16_attention_split_listed"):   # flash2 is absent for non-power-of-two groups
+        a = f"  scf.if %gemm {{\n    kernel.launch {k}"
+        if a in layer:
+            layer = layer.replace(a, f"  scf.if %attn_tiles {{\n    kernel.launch {k}")
+            break
+    else:
+        raise AssertionError("attention block not found in the MTP layer text")
     Pp = P.replace("%prefill_shape = index.cmp uge, %t, %c64 : index", "%prefill_shape = index.cmp uge, %t, %c_never : index", 1)
     assert Pp != P
     Pp += "  %attn_tiles = index.cmp uge, %t, %c_never : index\n"

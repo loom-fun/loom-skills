@@ -29,23 +29,30 @@ def _sub(text, old, new, count=1):
 
 
 # ---------------------------------------------------------------------------------------------------
-def warm_roots(cfg, draft):
-    """Catch-up stage roots: the embedding plus one per drafter tensor it reads (draft/gen_draft.py)."""
-    return 1 + 6 + (2 if cfg.get("qk_norm") else 0)
+def root_sources(cfg, draft):
+    """Parameter-root sources of the (propose, warm) stages: "model" (the target checkpoint) or "draft" (a
+    separate drafter checkpoint). Tensors the target already places (embedding, head) get roots of their own
+    so they share its storage; a root either matches an existing placement exactly or is entirely new.
+    MTP: propose = [embedding, (head), NextN block]; warm = [embedding, one root per block tensor it reads].
+    DFlash: propose = [embedding, (head), drafter, drafter context projections]; warm = [fc + norm, context]."""
+    head = [] if cfg.get("tied_embeddings") else ["model"]
+    if draft["kind"] == "mtp":
+        return ["model"] + head + ["model"], ["model"] * (1 + 6 + (2 if cfg.get("qk_norm") else 0))
+    return ["model"] + head + ["draft", "draft"], ["draft", "draft"]
 
 
-def drafter_roots(cfg, draft):
-    """Parameter roots of the drafter stages: tensors the target already places (embedding, head) each get
-    their own root so they share the target's storage; the drafter's own tensors form the last root."""
-    return 2 if cfg.get("tied_embeddings") else 3
+def _bind(stage, sources):
+    return "".join(f"      %{stage}_b{i} = scalar.constant {i} : i32\n"
+                   f"      func.call @parameter(%{stage}, %{stage}_b{i}, %c0_source, {'%checkpoint' if src == 'model' else '%draft_source'}, %policy) : (i32, i32, i32, i32, buffer)\n"
+                   for i, src in enumerate(sources))
 
 
 def patch_prepare(text, draft, cfg):
     kind = draft["kind"]
-    roots = drafter_roots(cfg, draft)
-    wroots = warm_roots(cfg, draft)
-    warm_root = {"mtp": "llm_mtp_warm"}[kind]
-    propose_root = {"mtp": "llm_mtp_propose"}[kind]
+    psrc, wsrc = root_sources(cfg, draft)
+    warm_root = {"mtp": "llm_mtp_warm", "dflash": "llm_dflash_warm"}[kind]
+    propose_root = {"mtp": "llm_mtp_propose", "dflash": "llm_dflash_propose"}[kind]
+    block = draft.get("block_size", 1) if kind == "dflash" else 1
     text = _sub(text, '''// "weights.loom"''', f'''// "llm_verify", "{warm_root}", "{propose_root}", "llm.width", "llm.epoch_spans", "llm.epoch_tokens"
 global.rodata.def @verify_root = bytes("{hx("llm_verify")}")
 
@@ -58,6 +65,9 @@ global.rodata.def @width_key = bytes("{hx("llm.width")}")
 global.rodata.def @epoch_spans_key = bytes("{hx("llm.epoch_spans")}")
 
 global.rodata.def @epoch_tokens_key = bytes("{hx("llm.epoch_tokens")}")
+
+// "draft"
+global.rodata.def @draft_scope = bytes("{hx("draft")}")
 
 // "weights.loom"''')
     # draft depth 1..7 is supported (0 = ordinary decoding)
@@ -80,11 +90,11 @@ global.rodata.def @epoch_tokens_key = bytes("{hx("llm.epoch_tokens")}")
   %warm_root = global.load @warm_root : buffer
   %width_key = global.load @width_key : buffer
 """)
+    draft_source = ("  // the drafter checkpoint (card parameter scope \"draft\")\n  %draft_scope = global.load @draft_scope : buffer\n"
+                    "  %draft_source = func.call @source_scope(%draft_scope) : (buffer) -> (i32)\n") if "draft" in psrc + wsrc else ""
     text = _sub(text, "  %smaller = scalar.cmpi ult, %maximum, %prefill : i64\n", f"""  // Verify and catch-up stages per shape, declared after every advance stage (the first shape_count
   // stages are the shared target stages), then proposal stages for cohorts of 1, 2, 4, ... spans.
-  %draft_roots = index.constant {roots} : index
-  %warm_roots = index.constant {wroots} : index
-  scf.if %drafting {{
+{draft_source}  scf.if %drafting {{
     %propose_root = global.load @propose_root : buffer
     %epoch_spans_key = global.load @epoch_spans_key : buffer
     %epoch_tokens_key = global.load @epoch_tokens_key : buffer
@@ -94,7 +104,9 @@ global.rodata.def @epoch_tokens_key = bytes("{hx("llm.epoch_tokens")}")
     %below = scalar.subi %span32, %one32 : i32
     %leading = scalar.ctlzi %below : i32
     %last_level = scalar.subi %bits32, %leading : i32
-    %levels32 = scalar.addi %last_level, %one32 : i32
+    %levels_all = scalar.addi %last_level, %one32 : i32
+    %level_cap = scalar.constant {(8192 // block).bit_length()} : i32
+    %levels32 = scalar.minui %levels_all, %level_cap : i32
     %levels_b = scalar.assume %levels32 [range(%levels32, 1, 14)] : i32
     %levels = index.cast %levels_b : i32 to index
     %c1_64 = scalar.constant 1 : i64
@@ -104,15 +116,14 @@ global.rodata.def @epoch_tokens_key = bytes("{hx("llm.epoch_tokens")}")
       %pstage = func.call @stage(%propose_root, %shift) : (buffer, i64) -> (i32)
       func.call @config_i64(%pstage, %context_key, %context) : (i32, buffer, i64)
       func.call @config_i64(%pstage, %pool_key, %pool) : (i32, buffer, i64)
-      func.call @config_i64(%pstage, %tokens_key, %cap) : (i32, buffer, i64)
+      %block_tokens = scalar.constant {block} : i64
+      %cap_tokens = scalar.muli %cap, %block_tokens : i64
+      func.call @config_i64(%pstage, %tokens_key, %cap_tokens) : (i32, buffer, i64)
       func.call @config_i64(%pstage, %spans_key, %cap) : (i32, buffer, i64)
       func.call @config_i64(%pstage, %width_key, %width) : (i32, buffer, i64)
       func.call @config_i64(%pstage, %epoch_spans_key, %span_capacity) : (i32, buffer, i64)
       func.call @config_i64(%pstage, %epoch_tokens_key, %maximum) : (i32, buffer, i64)
-      scf.for %root = [%c0 to %draft_roots step %c1] {{
-        %binding = index.cast %root : index to i32
-        func.call @parameter(%pstage, %binding, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
-      }}
+{_bind("pstage", psrc)}
       %initial = index.cmp eq, %level, %c0 : index
       %next_first = scf.select %initial, %pstage, %first : i32
       scf.yield %next_first : i32
@@ -134,17 +145,15 @@ global.rodata.def @epoch_tokens_key = bytes("{hx("llm.epoch_tokens")}")
       func.call @config_i64(%wstage, %pool_key, %pool) : (i32, buffer, i64)
       func.call @config_i64(%wstage, %tokens_key, %tokens) : (i32, buffer, i64)
       func.call @config_i64(%wstage, %spans_key, %spans) : (i32, buffer, i64)
-      scf.for %root = [%c0 to %warm_roots step %c1] {{
-        %binding = index.cast %root : index to i32
-        func.call @parameter(%wstage, %binding, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
-      }}
+{_bind("wstage", wsrc)}
       view.store %wstage, %warm_view[%i] : i32, view<[%count]xi32>
     }}
     %draft_at = index.constant {PROPOSE_FIRST} : offset
     %draft_view = buffer.view %state[%draft_at] : buffer -> view<3xi32>
     view.store %first_propose, %draft_view[0] : i32, view<3xi32>
     view.store %levels32, %draft_view[1] : i32, view<3xi32>
-    view.store %one32, %draft_view[2] : i32, view<3xi32>
+    %kind32 = scalar.constant {1 if kind == "mtp" else 2} : i32
+    view.store %kind32, %draft_view[2] : i32, view<3xi32>
   }}
   %smaller = scalar.cmpi ult, %maximum, %prefill : i64
 """)
@@ -157,11 +166,14 @@ global.rodata.def @epoch_tokens_key = bytes("{hx("llm.epoch_tokens")}")
 def patch_storage(text, cfg, draft):
     """Draft allocations 6..10, the draft cache region and the draft page table."""
     H = cfg["hidden"]
-    pos_bytes = cfg["kv_heads"] * cfg["head_dim"] * 2
-    planes = {"mtp": 2 * len(cfg["mtp"]["layers"])}[draft["kind"]]
+    if draft["kind"] == "mtp":
+        pos_bytes, planes, rows_per_token, carry_stride = cfg["kv_heads"] * cfg["head_dim"] * 2, 2 * len(cfg["mtp"]["layers"]), 1, 4 * H
+    else:   # DFlash: features of every tap per token, no carry, two planes per draft layer
+        pos_bytes, planes, rows_per_token, carry_stride = draft["kv_heads"] * draft["head_dim"] * 2, 2 * draft["layers"], draft["taps"], 0
     text = _sub(text, "  %residual_bytes = scalar.muli %span_capacity, %c4_i64 : i64\n",
                 f"""  // Final normalized hidden rows (the drafter's catch-up input) live in the residual allocation.
-  %hidden_row = scalar.constant {4 * H} : i64
+  %hidden_row = scalar.constant {4 * H * rows_per_token} : i64
+  %carry_stride = scalar.constant {carry_stride} : i64
   %residual_bytes = scalar.muli %maximum, %hidden_row : i64
   %span_floor = scalar.muli %span_capacity, %c4_i64 : i64
   %feedback_bytes = scalar.maxui %residual_bytes, %span_floor : i64
@@ -177,7 +189,7 @@ def patch_storage(text, cfg, draft):
   %c9 = index.constant 9 : index
   %c10 = index.constant 10 : index
   %owners = scalar.addi %rows, %pins : i64
-  %carry_bytes = scalar.muli %owners, %hidden_row : i64
+  %carry_bytes = scalar.muli %owners, %carry_stride : i64
   %committed_stride = scalar.constant 40 : i64
   %committed_records = scalar.muli %span_capacity, %committed_stride : i64
   %committed_bytes = scalar.addi %committed_records, %header_bytes : i64
@@ -199,7 +211,7 @@ def patch_storage(text, cfg, draft):
                 "  %geometry_bytes = index.constant 144 : offset\n  %geometry = buffer.alloca<private> align(8) %geometry_bytes : buffer\n  %geometry_view = buffer.view %geometry[%origin] : buffer -> view<18xi64>\n")
     text = re.sub(r"view<13xi64>", "view<18xi64>", text)
     text = _sub(text, "  view.store %c0_i64, %geometry_view[2] : i64, view<18xi64>\n  view.store %c4_i64, %geometry_view[3] : i64, view<18xi64>\n",
-                "  view.store %hidden_row, %geometry_view[2] : i64, view<18xi64>\n  view.store %feedback_split, %geometry_view[3] : i64, view<18xi64>\n")
+                "  view.store %carry_stride, %geometry_view[2] : i64, view<18xi64>\n  view.store %feedback_split, %geometry_view[3] : i64, view<18xi64>\n")
     text = _sub(text, "  view.store %block_bytes, %geometry_view[12] : i64, view<18xi64>\n",
                 f"""  view.store %block_bytes, %geometry_view[12] : i64, view<18xi64>
   %c9_i64 = scalar.constant 9 : i64
@@ -222,6 +234,7 @@ def patch_storage(text, cfg, draft):
 
 # ---------------------------------------------------------------------------------------------------
 def patch_control(text, cfg, draft):
+    dflash = draft["kind"] == "dflash"
     mrope = bool((cfg.get("vision") or {}).get("mrope"))
     source_step = 1 if mrope else 2   # text-only ports advance the opaque source position by 2 per input
     # sampling records move behind the larger control header
@@ -234,6 +247,8 @@ def patch_control(text, cfg, draft):
     text = _sub(text, "func.decl import(\"runner\") @execute_6(", """func.decl import("runner") @execute_5(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer) -> (i64)
 
 func.decl import("runner") @execute_7(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer, %b5: hal.buffer, %b6: hal.buffer) -> (i64)
+
+func.decl import("runner") @execute_4(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer) -> (i64)
 
 func.decl import("runner") @execute_6(""")
     text += f"""
@@ -446,7 +461,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
     %last = scalar.subi %levels, %c1 : i32
     %chosen = scalar.minui %level, %last : i32
     %pstage = scalar.addi %propose_first, %chosen : i32
-    %proposal = func.call @execute_5(%pstage, %metadata, %tokens, %draft_origins, %draft_cache, %carry) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+{"    %proposal = func.call @execute_4(%pstage, %metadata, %tokens, %draft_origins, %draft_cache) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)" if dflash else "    %proposal = func.call @execute_5(%pstage, %metadata, %tokens, %draft_origins, %draft_cache, %carry) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)"}
   }}
   %target = scf.if %verify -> (i64) {{
     %vstage = view.load %verify_view[%shape_index] : view<128xi32> -> i32
@@ -472,7 +487,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
       scf.yield %metadata : hal.buffer
     }}
     %wstage = view.load %warm_view[%shape_index] : view<128xi32> -> i32
-    %warm = func.call @execute_6(%wstage, %residual, %accepted, %draft_origins, %draft_cache, %carry, %tokens) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+{"    %warm = func.call @execute_5(%wstage, %residual, %accepted, %draft_origins, %draft_cache, %tokens) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)" if dflash else "    %warm = func.call @execute_6(%wstage, %residual, %accepted, %draft_origins, %draft_cache, %carry, %tokens) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)"}
     scf.yield %warm : i64
   }} else {{
     scf.yield %target : i64
@@ -488,3 +503,21 @@ def card_execution(execution, draft):
     execution = dict(execution)
     execution["draft_depth"] = int(draft.get("depth", 3))
     return execution
+
+
+def card_drafter(card, pkg, draft):
+    """DFlash: the drafter checkpoint is a second parameter scope ("draft") of the chat variant."""
+    import os
+    if draft["kind"] != "dflash":
+        return card
+    name = os.path.basename(draft["gguf"])
+    link = os.path.join(pkg, "parameter", name)
+    if os.path.lexists(link):
+        os.remove(link)
+    try:
+        os.symlink(os.path.abspath(draft["gguf"]), link)
+    except OSError:
+        os.link(os.path.realpath(draft["gguf"]), link)
+    params = card["variants"]["gguf"]["services"]["chat"]["parameters"]
+    params["draft"] = {"files": [{"path": f"parameter/{name}", "format": "gguf"}]}
+    return card

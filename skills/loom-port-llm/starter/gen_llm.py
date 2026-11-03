@@ -36,6 +36,9 @@ def nff(i):
     """index SSA of layer i's FFN width."""
     return "%nFF" if FF_UNIFORM else f"%nFF{FFL[i]}"
 G = QH // KVH                             # query heads per KV head (waves per attention workgroup)
+# Prefill flash attention (gen_flash2.py) tiles head_dim over 32*G lanes: it needs a power-of-two group.
+# Otherwise (Qwen3.8: 6) every prefill token takes the listed split-K path (correct, slower prefill).
+NO_FLASH = bool(G & (G - 1)) or os.environ.get("NO_FLASH2") == "1"
 assert D in (128, 256), "attention kernels support head_dim 128 or 256 (lane l owns dims l, l+32, ...)"
 DL = D // 32                              # head dims per lane in the attention kernels
 RD = CFG.get("rope_dims") or D            # rotary dims (partial RoPE rotates the first RD dims)
@@ -1781,7 +1784,7 @@ def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
         args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
         types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
         mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
-    x16 = {"%h": "%h16", "%o": "%o16", "%f": "%f16", "%cat": "%cat16"}[x]
+    x16 = {"%h": "%h16", "%o": "%o16", "%f": "%f16"}.get(x, x + "16")   # f16 copy of the activation (GEMM input)
     args = args.replace(f", {x}, {s},", f", {x16}, {s},")
     return f"""scf.if %gemm {{
       scf.if %big {{
@@ -2189,8 +2192,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         if i not in RECUR:
           T.append(f"""  kernel.launch @g_qk_rope_store[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""})
   scf.if %gemm {{
-    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
-    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
+{"" if NO_FLASH else f"    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)" + chr(10)}    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
     kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
   }} else {{
     kernel.launch @g_attention_split[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
@@ -2252,11 +2254,28 @@ if __name__ == "__main__":
                       head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
                       prologue=MODEL_PARTS["prologue"], layer_text=MODEL_PARTS["layer_text"], lin=lin,
                       fmt=fmt_of, size=tensor_bytes, mtp_layer=MTP_LAYER)
-        spec = [gen_draft.advance_program(program), gen_draft.verify_program(program, gfacts)]
+        if gen_draft.DRAFT["kind"] == "dflash":
+            import gen_dflash
+            dcfg = gen_dflash.config(gen_draft.DRAFT["gguf"])
+            assert dcfg["hidden"] == H, f"drafter hidden {dcfg['hidden']} != target {H}"
+            DT = dcfg["tensors"]
+            def dsize(name):
+                t = DT[name]
+                n = 1
+                for d in t["shape"]:
+                    n *= d
+                return n * 4 if t["type"] == "f32" else n // SB[t["type"]] * FMT[t["type"]]
+            gfacts.update(dflash=dcfg, dflash_taps=[t - 1 for t in dcfg["target_layers"]], L=L, CHUNKS=CHUNKS, V=V,
+                          row_bytes=row_bytes, FMT=FMT, SB=SB, dfmt=lambda n: DT[n]["type"], dsize=dsize)
+        spec = [gen_draft.advance_program(program, gfacts), gen_draft.verify_program(program, gfacts)]
         if MTP_LAYER is not None:
             spec.append(gen_draft.mtp_programs(gfacts))
+        if gen_draft.DRAFT["kind"] == "dflash":
+            spec.append(gen_dflash.programs(gfacts))
         program = "\n".join(spec)
         spec_kernels = gen_draft.kernels(gfacts)
+        if gen_draft.DRAFT["kind"] == "dflash":
+            spec_kernels += gen_dflash.kernels(gfacts)
     if any(f == "f32" for f, *_ in USED_MV | USED_MV_R) or "f32" in USED_GEMM:
         COMMON += F32_VALUES
     parts = [f"// Generated by gen_llm.py from {os.environ.get('LLM_CONFIG') or sys.argv[1]}.\n", COMMON.replace("%c8_q6", "%c8q6").replace(
@@ -2266,7 +2285,8 @@ if __name__ == "__main__":
             parts.append(mv(fmt, K, TG=TG, swiglu=sw))
     for fmt, K, sw, R, TG in sorted(USED_MV_R):
         parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
-    parts += [NORMS, ROW_SCALE, qk_rope(), attention(), head(), head_mv(1, head_fmt), head_mv(4, head_fmt)]
+    parts += [NORMS, ROW_SCALE, qk_rope(), attention().replace("%not_uniform = scalar.xori %uniform, %true : i1", "%not_uniform = scalar.ori %uniform, %true : i1") if NO_FLASH else attention(),
+              head(), head_mv(1, head_fmt), head_mv(4, head_fmt)]
     if FUSED_Q:
         parts.append(split_qgate(QH, D))
     if RECUR:
@@ -2278,10 +2298,11 @@ if __name__ == "__main__":
     env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
     parts.append(subprocess.run([sys.executable, os.path.join(here, "gen_gemm.py")], capture_output=True, text=True, check=True, env=env).stdout)
     parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
-    flash2 = os.path.join(out_dir, "flash2.loom")
-    subprocess.run([sys.executable, os.path.join(here, "gen_flash2.py")], check=True,
-                   env=dict(os.environ, FLASH2_TARGET="llm", FLASH2_OUT=flash2, LLM_CONFIG=os.environ.get("LLM_CONFIG") or sys.argv[1]))
-    parts.append(open(flash2).read())
+    if not NO_FLASH:
+        flash2 = os.path.join(out_dir, "flash2.loom")
+        subprocess.run([sys.executable, os.path.join(here, "gen_flash2.py")], check=True,
+                       env=dict(os.environ, FLASH2_TARGET="llm", FLASH2_OUT=flash2, LLM_CONFIG=os.environ.get("LLM_CONFIG") or sys.argv[1]))
+        parts.append(open(flash2).read())
     parts.append(program)
     out = os.path.join(out_dir, "model.loom")
     open(out, "w", newline="\n").write("\n".join(parts))

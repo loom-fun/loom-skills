@@ -34,7 +34,8 @@ ap.add_argument("--max-tokens", type=int, default=4096, help="default completion
 ap.add_argument("--temperature", type=float, default=0.0, help="default sampling temperature when a request sets none (0 = greedy)")
 ap.add_argument("--top-p", type=float, default=1.0, help="default top_p when a request sets none")
 ap.add_argument("--top-k", type=int, default=0, help="default top_k when a request sets none (0 = up to 64 candidates)")
-ap.add_argument("--draft", default=os.environ.get("DRAFT", "auto"), choices=["auto", "mtp", "none"],
+ap.add_argument("--drafter", default=os.environ.get("DRAFTER"), help="DFlash/DFlash2 drafter GGUF (arch dflash) for --draft dflash/auto")
+ap.add_argument("--draft", default=os.environ.get("DRAFT", "auto"), choices=["auto", "mtp", "dflash", "none"],
                 help="speculative decoding drafter. auto (default): the GGUF's MTP/NextN block when it has one; none: "
                      "ordinary decoding (also SPEC=off). Draft settings are tuned by loom-optimize (draft/README.md)")
 ap.add_argument("--draft-depth", type=int, default=int(os.environ.get("DRAFT_DEPTH", "3")),
@@ -53,17 +54,32 @@ KERNEL_CONTEXT, KERNEL_POOL = 262144, 1048576
 # Speculative decoding is on by default when the checkpoint carries a drafter (draft/README.md).
 if os.environ.get("SPEC", "").lower() in ("0", "off", "no", "false", "none"):
     a.draft = "none"
-if a.draft == "auto":
-    a.draft = "mtp" if cfg.get("mtp") else "none"
+a.drafter = a.drafter or (cfg.get("drafter") or {}).get("gguf")
+if a.draft == "auto":   # the optimizer's measured choice (cfg["drafter"]["kind"]) wins; else MTP, else DFlash
+    a.draft = (cfg.get("drafter") or {}).get("kind") or ("mtp" if cfg.get("mtp") else ("dflash" if a.drafter else "none"))
 if a.draft == "mtp" and not cfg.get("mtp"):
     sys.exit("--draft mtp: this GGUF has no NextN/MTP block (cfg.json has no 'mtp')")
+if a.draft == "dflash" and not a.drafter:
+    sys.exit("--draft dflash needs the drafter GGUF (--drafter PATH or cfg.json drafter.gguf)")
 DRAFT = {"kind": a.draft, "depth": max(1, min(7, a.draft_depth))} if a.draft != "none" else None
+if DRAFT and DRAFT["kind"] == "dflash":
+    sys.path.insert(0, os.path.join(HERE, "draft"))
+    import gen_dflash  # noqa: E402
+    _d = gen_dflash.config(a.drafter)
+    DRAFT.update(gguf=os.path.abspath(a.drafter), layers=_d["layers"], kv_heads=_d["kv_heads"], head_dim=_d["head_dim"],
+                 taps=len(_d["target_layers"]), block_size=_d["block_size"])
+    if "--draft-depth" not in sys.argv and "DRAFT_DEPTH" not in os.environ:
+        DRAFT["depth"] = min(7, _d["block_size"] - 1)
 pos_bytes = cfg["kv_heads"] * cfg["head_dim"] * 2
 kv_layers = cfg.get("kv_layers", cfg["layers"])
 kv_per_position = pos_bytes * 2 * kv_layers
 if DRAFT and DRAFT["kind"] == "mtp":   # the MTP block's K/V shares the pool's pages
     kv_per_position += pos_bytes * 2 * len(cfg["mtp"]["layers"])
+if DRAFT and DRAFT["kind"] == "dflash":   # so does the drafter's context K/V
+    kv_per_position += DRAFT["kv_heads"] * DRAFT["head_dim"] * 2 * 2 * DRAFT["layers"]
 weights_bytes = os.path.getsize(os.path.abspath(cfg["gguf"]))
+if DRAFT and DRAFT["kind"] == "dflash":
+    weights_bytes += os.path.getsize(DRAFT["gguf"])
 # Hybrid models keep one recurrent slot (all gated delta-net layer states) per resident row, x2 for forks.
 sys.path.insert(0, HERE)
 from gen_gdn import gdn_geometry  # noqa: E402
@@ -230,6 +246,7 @@ card = {
 if DRAFT:
     ex = card["presets"]["chat"]["execution"]
     card["presets"]["chat"]["execution"] = build_draft.card_execution(ex, DRAFT)
+    card = build_draft.card_drafter(card, pkg, DRAFT)
 if cfg.get("vision"):
     card = build_vision.write_component(pkg, card, cfg["vision"], vision_cfg)
 json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
