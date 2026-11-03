@@ -34,6 +34,11 @@ ap.add_argument("--max-tokens", type=int, default=4096, help="default completion
 ap.add_argument("--temperature", type=float, default=0.0, help="default sampling temperature when a request sets none (0 = greedy)")
 ap.add_argument("--top-p", type=float, default=1.0, help="default top_p when a request sets none")
 ap.add_argument("--top-k", type=int, default=0, help="default top_k when a request sets none (0 = up to 64 candidates)")
+ap.add_argument("--draft", default=os.environ.get("DRAFT", "auto"), choices=["auto", "mtp", "none"],
+                help="speculative decoding drafter. auto (default): the GGUF's MTP/NextN block when it has one; none: "
+                     "ordinary decoding (also SPEC=off). Draft settings are tuned by loom-optimize (draft/README.md)")
+ap.add_argument("--draft-depth", type=int, default=int(os.environ.get("DRAFT_DEPTH", "3")),
+                help="proposed tokens per verification step (1-7)")
 ap.add_argument("--model-id", default=None, help="model id clients send (visible ASCII, no spaces); default: slug of cfg name")
 a = ap.parse_args()
 
@@ -45,9 +50,19 @@ missing = [k for k in ("generation_prompt_plain", "call_format", "tool_item_pref
 if missing:
     sys.exit(f"chat block lacks {missing}: regenerate it with inspect_gguf.py / chat_probe.py")
 KERNEL_CONTEXT, KERNEL_POOL = 262144, 1048576
+# Speculative decoding is on by default when the checkpoint carries a drafter (draft/README.md).
+if os.environ.get("SPEC", "").lower() in ("0", "off", "no", "false", "none"):
+    a.draft = "none"
+if a.draft == "auto":
+    a.draft = "mtp" if cfg.get("mtp") else "none"
+if a.draft == "mtp" and not cfg.get("mtp"):
+    sys.exit("--draft mtp: this GGUF has no NextN/MTP block (cfg.json has no 'mtp')")
+DRAFT = {"kind": a.draft, "depth": max(1, min(7, a.draft_depth))} if a.draft != "none" else None
 pos_bytes = cfg["kv_heads"] * cfg["head_dim"] * 2
 kv_layers = cfg.get("kv_layers", cfg["layers"])
 kv_per_position = pos_bytes * 2 * kv_layers
+if DRAFT and DRAFT["kind"] == "mtp":   # the MTP block's K/V shares the pool's pages
+    kv_per_position += pos_bytes * 2 * len(cfg["mtp"]["layers"])
 weights_bytes = os.path.getsize(os.path.abspath(cfg["gguf"]))
 # Hybrid models keep one recurrent slot (all gated delta-net layer states) per resident row, x2 for forks.
 sys.path.insert(0, HERE)
@@ -92,7 +107,10 @@ os.makedirs(os.path.join(pkg, "parameter"), exist_ok=True)
 
 # 1. Kernel library + command program.
 gen = os.path.join(pkg, "gen")
-env = dict(os.environ, LLM_CONFIG=os.path.abspath(a.config), LLM_OUT=gen, LLM_TOKENIZER=os.path.abspath(a.tokenizer))
+env = dict(os.environ, LLM_CONFIG=os.path.abspath(a.config), LLM_OUT=gen, LLM_TOKENIZER=os.path.abspath(a.tokenizer),
+           LLM_DRAFT=json.dumps(DRAFT))
+sys.path.insert(0, os.path.join(HERE, "draft"))
+import build_draft  # noqa: E402
 subprocess.run([sys.executable, os.path.join(HERE, "gen_llm.py"), os.path.abspath(a.config)], check=True, env=env, stdout=subprocess.DEVNULL)
 os.replace(os.path.join(gen, "model.loom"), os.path.join(pkg, "program", "llm.loom"))
 
@@ -163,6 +181,9 @@ for name in ("prepare", "control", "storage", "service"):
         import build_vision, encoder as vision_encoder
         vision_cfg = vision_encoder.config(cfg["vision"]["mmproj"])
         text = build_vision.patch_control(text, custom_chat, cfg["vision"], vision_cfg)
+    if DRAFT:   # speculative decoding glue (draft/build_draft.py)
+        text = {"prepare": lambda t: build_draft.patch_prepare(t, DRAFT, cfg), "storage": lambda t: build_draft.patch_storage(t, cfg, DRAFT),
+                "control": lambda t: build_draft.patch_control(t, cfg, DRAFT)}.get(name, lambda t: t)(text)
     for k, v in subs.items():
         text = text.replace(k, v)
     assert "@@" not in text, (name, [l for l in text.splitlines() if "@@" in l])
@@ -206,16 +227,21 @@ card = {
         "rows": a.rows, "context_capacity": a.context, "pool_capacity": a.pool,
         "prefill_capacity": a.prefill, "max_tokens": a.max_tokens}}},
 }
+if DRAFT:
+    ex = card["presets"]["chat"]["execution"]
+    card["presets"]["chat"]["execution"] = build_draft.card_execution(ex, DRAFT)
 if cfg.get("vision"):
     card = build_vision.write_component(pkg, card, cfg["vision"], vision_cfg)
 json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
 # The benchmark scripts read the chat format and model id from here.
 bench = {k: v for k, v in cfg.items() if k != "tensors"}
 bench["model_id"] = card["model"]["id"]
+bench["draft"] = DRAFT
 json.dump(bench, open(os.path.join(pkg, "llm_config.json"), "w"), indent=1)
 kv = a.pool * kv_per_position
 need = weights_bytes + kv + 3 * 2**30 + 2 * a.rows * recurrent_bytes
 print("package:", os.path.join(pkg, "model.json"), f"(model id {model_id!r})")
+print("speculative decoding:", f"{DRAFT['kind']} drafter, depth {DRAFT['depth']}" if DRAFT else "off")
 print(f"context {a.context} tokens (native {native}), KV pool {a.pool} positions = {kv / 2**30:.1f} GiB, weights {weights_bytes / 2**30:.1f} GiB"
       + (f", recurrent state {recurrent_bytes / 2**20:.1f} MiB per row" if recurrent_bytes else ""))
 print(f"serve with --memory_bytes={need // 10**9 + 1}000000000"

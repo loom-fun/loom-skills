@@ -58,6 +58,19 @@ func.def inline @g_gdn_slots(%origins: buffer, %row: index, %start32: i32, %laye
   func.return %reader, %writer, %fresh : offset, offset, i1
 }
 
+// Whether span `span` publishes its state (speculative verification spans carry flag bit 4 and do not).
+func.def inline @g_gdn_publish(%metadata: buffer, %spans: index, %span: index) -> (i1) {
+  %c16 = index.constant 16 : offset
+  %bounded_span = index.assume %span [lt(%span, %spans)] : index
+  %packets = buffer.view %metadata[%c16] : buffer -> view<[%spans]x9xi32>
+  %flags = view.load %packets[%bounded_span, 6] : view<[%spans]x9xi32> -> i32
+  %four = scalar.constant 4 : i32
+  %bit = scalar.andi %flags, %four : i32
+  %zero32 = scalar.constant 0 : i32
+  %publish = scalar.cmpi eq, %bit, %zero32 : i32
+  func.return %publish : i1
+}
+
 // Span `span` of the epoch: (active, length, start position, row, first input slot).
 func.def inline @g_gdn_span(%metadata: buffer, %spans: index, %span: index) -> (i1, index, i32, index, index) {
   %zero = index.constant 0 : offset
@@ -95,7 +108,13 @@ def gdn_kernels(cfg, eps):
     SB, LB = G["state_bytes"], G["layer_bytes"]
     RK, RV = DK // 32, DV // 32
     assert DK % 32 == 0 and DV % 32 == 0 and DV % 4 == 0 and HV % HK == 0
-    T = [SLOT]
+    # Speculative decoding: verification spans must not publish (draft/gen_draft.py replays them).
+    spec = bool(os.environ.get("LLM_DRAFT")) and os.environ.get("LLM_DRAFT") != "null"
+    a, b = SLOT.index("// Whether span `span` publishes"), SLOT.index("// Span `span` of the epoch")
+    T = [SLOT if spec else SLOT[:a] + SLOT[b:]]
+    guard_open = ("    %publish = func.call @g_gdn_publish(%metadata, %spans, %span) : (buffer, index, index) -> (i1)\n"
+                  "    scf.if %publish {\n") if spec else ""
+    guard_close = "\n    }" if spec else ""
     # ---- conv1d + SiLU over the span's inputs and the stored history
     taps = []
     for j in range(K):
@@ -244,7 +263,7 @@ kernel.def export("g_gdn_conv_commit") @g_gdn_conv_commit(%spans: index) {{
     scf.for %c = [%cstart to %cC step %cstride] {{
       %ch = index.assume %c [range(%c, 0, {C - 1})] : index
 {chr(10).join(reads)}
-{chr(10).join(writes)}
+{guard_open}{chr(10).join(writes)}{guard_close}
     }}
   }}
   kernel.return
@@ -434,7 +453,7 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
     }}
     scf.yield {", ".join(f"%new{m}" for m in range(RK))} : {v4}
   }}
-{scatters}
+{guard_open}{scatters}{guard_close}
   }}
   kernel.return
 }}

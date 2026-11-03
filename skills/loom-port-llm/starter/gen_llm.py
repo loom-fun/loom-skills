@@ -24,6 +24,14 @@ V, L = CFG["vocab"], CFG["layers"]
 FFL = CFG["ffn"] if isinstance(CFG["ffn"], list) else [CFG["ffn"]] * L
 FF = max(FFL)
 FF_UNIFORM = len(set(FFL)) == 1
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "draft"))
+import gen_draft  # noqa: E402  speculative decoding (LLM_DRAFT, set by build.py): verify + drafter programs
+MTP_LAYER = None
+if gen_draft.enabled() and gen_draft.DRAFT["kind"] == "mtp":
+    MTP_LAYER = CFG["mtp"]["layers"][0]
+    _w = CFG["tensors"][f"blk.{MTP_LAYER}.ffn_gate.weight"]["shape"][1]
+    assert _w in FFL, f"MTP block FFN width {_w} differs from the trunk's {sorted(set(FFL))}"
+    FFL = FFL + [_w] * (MTP_LAYER + 1 - len(FFL))   # layer_text(MTP_LAYER) reads FFL[MTP_LAYER]
 def nff(i):
     """index SSA of layer i's FFN width."""
     return "%nFF" if FF_UNIFORM else f"%nFF{FFL[i]}"
@@ -1773,7 +1781,7 @@ def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
         args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
         types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
         mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
-    x16 = {"%h": "%h16", "%o": "%o16", "%f": "%f16"}[x]
+    x16 = {"%h": "%h16", "%o": "%o16", "%f": "%f16", "%cat": "%cat16"}[x]
     args = args.replace(f", {x}, {s},", f", {x16}, {s},")
     return f"""scf.if %gemm {{
       scf.if %big {{
@@ -2013,6 +2021,9 @@ def gdn_layer(i, b, nm, sz, par):
     return "".join(T)
 
 
+MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
+
+
 def model():
     """Command program: embed, then a statically unrolled layer loop (each
     layer's tensor formats come from the GGUF), then the argmax head."""
@@ -2136,14 +2147,16 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
     gate = "%gate" if GATE else "%q"
     attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in RECUR)}
     gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
-    for i in range(L):
+    def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
+        """Text of trunk layer i (tensors blk.i.*). ordinal overrides its attention KV-plane ordinal and
+        last_norm names the norm applied to its output (default: next layer's attn_norm / output_norm)."""
         b = f"blk.{i}."
         nm = lambda n: b + n + ".weight"
         sz = lambda n: tensor_bytes(nm(n))
         par = lambda var, n, ty=None: f'    %{var}_{i} = command.parameter %weights, "{nm(n)}" : {ty or f"view<{sz(n)}xi8>"}\n'
-        kind = " (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else "")
+        kind = kind_note or (" (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else ""))
         T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
-             f"  %layer_{i} = index.constant {attn_ordinal.get(i, gdn_ordinal.get(i))} : index\n  %sliding_{i} = scalar.constant {1 if i in sliding else 0} : i32\n  %rope_{i} = scalar.constant {0 if i in nope else 1} : i32\n"]
+             f"  %layer_{i} = index.constant {attn_ordinal.get(i, gdn_ordinal.get(i)) if ordinal is None else ordinal} : index\n  %sliding_{i} = scalar.constant {1 if i in sliding else 0} : i32\n  %rope_{i} = scalar.constant {0 if i in nope else 1} : i32\n"]
         T += [par("w_gate", "ffn_gate"), par("w_up", "ffn_up"), par("w_down", "ffn_down"),
               par("ffn_norm", FFN_NORM, f"view<{H}xf32>")]
         if i in RECUR:
@@ -2198,13 +2211,19 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {nff(i)}, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
         T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", nff(i), "%nH", FFL[i]) + "\n")
         pf = f"%post_ffn_{i}" if POST_NORM else f"%ffn_norm_{i}"
-        if i == L - 1:
+        if last_norm:
+            nn = last_norm
+        elif i == L - 1:
             nn = "%output_norm"
         else:
             T.append(f'  %next_norm_{i} = command.parameter %weights, "blk.{i + 1}.attn_norm.weight" : view<{H}xf32>\n')
             nn = f"%next_norm_{i}"
         T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, {pf}, %x, {nn}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
-        L_.append("".join(T).replace("\n    %", "\n  %").replace("\n      ", "\n    "))
+        return "".join(T).replace("\n    %", "\n  %").replace("\n      ", "\n    ")
+
+    MODEL_PARTS.update(layer_text=layer_text, prologue="".join(L_[:-1]), attn_ordinal=attn_ordinal)  # [-1]: token info + embed
+    for i in range(L):
+        L_.append(layer_text(i))
     L_.append(f"""
   %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
   %one_span = index.cmp eq, %spans, %c1 : index
@@ -2225,6 +2244,19 @@ if __name__ == "__main__":
     out_dir = os.environ.get("LLM_OUT") or os.path.join(here, "out")
     os.makedirs(out_dir, exist_ok=True)
     program, head_fmt = model()  # first: records the mv / GEMM variants it launches
+    spec_kernels = ""
+    if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too
+        head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
+        gfacts = dict(H=H, HG=HG, EPS=EPS, D=D, KD=KVH * D, QK_NORM=QK_NORM, VISION=bool(VISION), MROPE=bool(MROPE),
+                      GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
+                      head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
+                      prologue=MODEL_PARTS["prologue"], layer_text=MODEL_PARTS["layer_text"], lin=lin,
+                      fmt=fmt_of, size=tensor_bytes, mtp_layer=MTP_LAYER)
+        spec = [gen_draft.advance_program(program), gen_draft.verify_program(program, gfacts)]
+        if MTP_LAYER is not None:
+            spec.append(gen_draft.mtp_programs(gfacts))
+        program = "\n".join(spec)
+        spec_kernels = gen_draft.kernels(gfacts)
     if any(f == "f32" for f, *_ in USED_MV | USED_MV_R) or "f32" in USED_GEMM:
         COMMON += F32_VALUES
     parts = [f"// Generated by gen_llm.py from {os.environ.get('LLM_CONFIG') or sys.argv[1]}.\n", COMMON.replace("%c8_q6", "%c8q6").replace(
@@ -2239,6 +2271,8 @@ if __name__ == "__main__":
         parts.append(split_qgate(QH, D))
     if RECUR:
         parts.append(gdn_kernels(CFG, EPS))
+    if spec_kernels:
+        parts.append(spec_kernels)
     env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
     # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
     env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
