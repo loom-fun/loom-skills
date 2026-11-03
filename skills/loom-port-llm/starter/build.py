@@ -154,6 +154,11 @@ for name in ("prepare", "control", "storage", "service"):
             text += "\n" + __import__(os.path.basename(rodata_py)[:-3]).rodata()
         text += "\n" + open(custom_chat, encoding="utf-8").read()
         text = re.sub(r"@@HEX_CHAT:(\w+)@@", lambda m: hx(chat.get(m.group(1), "")), text)
+    if name == "control" and cfg.get("vision"):   # image input (vision/README.md)
+        sys.path.insert(0, os.path.join(HERE, "vision"))
+        import build_vision, encoder as vision_encoder
+        vision_cfg = vision_encoder.config(cfg["vision"]["mmproj"])
+        text = build_vision.patch_control(text, custom_chat, cfg["vision"], vision_cfg)
     for k, v in subs.items():
         text = text.replace(k, v)
     assert "@@" not in text, (name, [l for l in text.splitlines() if "@@" in l])
@@ -197,6 +202,8 @@ card = {
         "rows": a.rows, "context_capacity": a.context, "pool_capacity": a.pool,
         "prefill_capacity": a.prefill, "max_tokens": a.max_tokens}}},
 }
+if cfg.get("vision"):
+    card = build_vision.write_component(pkg, card, cfg["vision"], vision_cfg)
 json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
 # The benchmark scripts read the chat format and model id from here.
 bench = {k: v for k, v in cfg.items() if k != "tensors"}

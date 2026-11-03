@@ -19,7 +19,14 @@ from gen_gdn import gdn_geometry, gdn_kernels, split_qgate  # noqa: E402
 CFG = json.load(open(os.environ.get("LLM_CONFIG") or sys.argv[1]))
 H = CFG["hidden"]; HG = H // 32          # hidden size, 32-value groups per hidden row
 QH, KVH, D = CFG["heads"], CFG["kv_heads"], CFG["head_dim"]
-FF, V, L = CFG["ffn"], CFG["vocab"], CFG["layers"]
+V, L = CFG["vocab"], CFG["layers"]
+# Per-layer FFN width (Gemma-4 E2B: 6144 then 12288); buffers are sized for the widest.
+FFL = CFG["ffn"] if isinstance(CFG["ffn"], list) else [CFG["ffn"]] * L
+FF = max(FFL)
+FF_UNIFORM = len(set(FFL)) == 1
+def nff(i):
+    """index SSA of layer i's FFN width."""
+    return "%nFF" if FF_UNIFORM else f"%nFF{FFL[i]}"
 G = QH // KVH                             # query heads per KV head (waves per attention workgroup)
 assert D in (128, 256), "attention kernels support head_dim 128 or 256 (lane l owns dims l, l+32, ...)"
 DL = D // 32                              # head dims per lane in the attention kernels
@@ -55,9 +62,9 @@ THETA = CFG["rope_theta"]
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
 
 FMT = {  # bytes per superblock of SB[fmt] values
-    "q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34,
+    "q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "f32": 128,
 }
-SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32}
+SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "f32": 32}
 
 
 def row_bytes(fmt, k):
@@ -391,6 +398,16 @@ func.def inline @g_q8_0_values(%w: buffer, %origin: offset, %group: index) -> (v
 // Q5_K group as values (for heads/embeddings) is g_q5_k_values; Q4_K is g_q4_k_values.
 """
 
+# emitted only when an F32 matrix is used (see main)
+F32_VALUES = r"""
+// F32: 32 values (128 bytes) of a row (small projections some GGUFs keep unquantized).
+func.def inline @g_f32_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
+  %view = buffer.view %w[%origin] : buffer -> view<32xf32>
+  %values = vector.load %view[0] : view<32xf32> -> vector<32xf32>
+  func.return %values : vector<32xf32>
+}
+"""
+
 
 def mv(fmt, K, R=16, TG=1, swiglu=False, suffix=""):
     """Decode matrix-vector: a workgroup covers one K row with one lane per
@@ -587,10 +604,33 @@ def stop_restore():
 
 
 STOP_RESTORE = stop_restore()
-EMBED_RAW = "  %raw = view.load %ids_view[%token] : view<[%tokens]xi32> -> i32\n"
+VISION = CFG.get("vision")    # image input: epochs with media carry 8-word input records (token, feature byte offset, ...)
+def ids_prelude(ind="  "):
+    """Defines %ids_flat / %id_stride: token i is %ids_flat[i * stride]; with media (metadata word 2 set by
+    control.loom's encode_epoch) the input is the host's packet of 8-word records followed by feature rows."""
+    if not VISION:
+        return ""
+    return (f"{ind}%meta_view = buffer.view %meta[%zero] : buffer -> view<4xi32>\n"
+            f"{ind}%mixed_word = view.load %meta_view[2] : view<4xi32> -> i32\n"
+            f"{ind}%mixed_zero = scalar.constant 0 : i32\n"
+            f"{ind}%mixed = scalar.cmpi ne, %mixed_word, %mixed_zero : i32\n"
+            f"{ind}%stride_one = index.constant 1 : index\n"
+            f"{ind}%stride_eight = index.constant 8 : index\n"
+            f"{ind}%id_stride = scf.select %mixed, %stride_eight, %stride_one : index\n"
+            f"{ind}%n_ids = index.mul %tokens, %id_stride : index\n"
+            f"{ind}%ids_flat = buffer.view %ids[%zero] : buffer -> view<[%n_ids]xi32>\n")
+def ids_load(dst, tok, ind="  "):
+    """%dst = token id of input %tok."""
+    if not VISION:
+        return f"{ind}{dst} = view.load %ids_view[{tok}] : view<[%tokens]xi32> -> i32\n"
+    return (f"{ind}{dst}_e0 = index.mul {tok}, %id_stride : index\n"
+            f"{ind}{dst}_e = index.assume {dst}_e0 [lt({dst}_e0, %n_ids)] : index\n"
+            f"{ind}{dst} = view.load %ids_flat[{dst}_e] : view<[%n_ids]xi32> -> i32\n")
+
+EMBED_RAW = ids_load("%raw", "%token")
 if STOP_RESTORE:
     _e, _sc, _fo, _sa = STOP_RESTORE
-    EMBED_RAW = f"""  %raw_in = view.load %ids_view[%token] : view<[%tokens]xi32> -> i32
+    EMBED_RAW = ids_load("%raw_in", "%token") + f"""
   // A fed service terminal is the previous turn's stop token: restore the real one (see stop_restore).
   %term_id = scalar.constant {_e} : i32
   %stop_calls_id = scalar.constant {_sc} : i32
@@ -601,13 +641,50 @@ if STOP_RESTORE:
   %has_next = index.cmp ult, %next_value, %tokens : index
   %next_sel = scf.select %has_next, %next_value, %token : index
   %next_token = index.assume %next_sel [lt(%next_sel, %tokens)] : index
-  %next_raw = view.load %ids_view[%next_token] : view<[%tokens]xi32> -> i32
+{ids_load("%next_raw", "%next_token")}
   %opens_result = scalar.cmpi eq, %next_raw, %stop_follow_id : i32
   %after_calls = scalar.andi %opens_result, %has_next : i1
   %stop_id = scf.select %after_calls, %stop_calls_id, %stop_answer_id : i32
   %is_term = scalar.cmpi eq, %raw_in, %term_id : i32
   %raw = scf.select %is_term, %stop_id, %raw_in : i32
 """
+# Image features: a record whose word 1 (feature byte offset in the packet) is nonzero carries a projected
+# row (F32, H wide) that replaces the token embedding as is: no embedding scale or norm (llama.cpp feeds
+# raw embeddings unscaled).
+FEATURE_FLAG = ("""  %feat_word = scf.if %mixed -> (i32) {{
+    %fw_e0 = index.mul %token, %id_stride : index
+    %fw_e1 = index.add %fw_e0, %stride_one : index
+    %fw_e = index.assume %fw_e1 [lt(%fw_e1, %n_ids)] : index
+    %fw = view.load %ids_flat[%fw_e] : view<[%n_ids]xi32> -> i32
+    scf.yield %fw : i32
+  }} else {{
+    scf.yield %mixed_zero : i32
+  }}
+  // padding tokens of the epoch shape read stale records: only live inputs carry features
+  %tinfo_view = buffer.view %tinfo[%zero] : buffer -> view<[%tokens]x4xi32>
+  %live_word = view.load %tinfo_view[%token, 2] : view<[%tokens]x4xi32> -> i32
+  %is_live = scalar.cmpi ne, %live_word, %mixed_zero : i32
+  %has_feat = scalar.cmpi ne, %feat_word, %mixed_zero : i32
+  %is_feat = scalar.andi %has_feat, %is_live : i1
+  %feat_one_byte = index.constant 1 : offset
+""".replace("{{", "{").replace("}}", "}") if VISION else "")
+FEATURE_PICK = ("""    %vv = scf.if %is_feat -> (vector<32xf32>) {
+      %fb_lane = index.assume %lane [range(%lane, 0, %HGM1%)] : index
+      %fo_u = scalar.maxsi %feat_word, %mixed_zero : i32
+      %fo_i = index.cast %fo_u : i32 to index
+      %fo = index.scale %fo_i, %one_byte : index, offset -> offset
+      %fview = buffer.view %ids[%fo] : buffer -> view<%HG%x32xf32>
+      %fv = vector.load %fview[%fb_lane, %c0] : view<%HG%x32xf32> -> vector<32xf32>
+      scf.yield %fv : vector<32xf32>
+    } else {
+      scf.yield %v : vector<32xf32>
+    }
+""".replace("%HGM1%", str(HG - 1)).replace("%HG%", str(HG)).replace("%one_byte", "%feat_one_byte") if VISION else "")
+if VISION:
+    assert not EMBED_NORM, "vision input with an embedding norm: decide whether features bypass it (llama.cpp: they do)"
+    EMBED_PRE = EMBED_PRE.replace("vector.splat %escale_s :", "vector.splat %escale_eff :")
+    if _ES:
+        EMBED_PRE = EMBED_PRE.replace("  %escale = vector.splat", "  %escale_one = scalar.constant 1.0 : f32\n  %escale_eff = scf.select %is_feat, %escale_one, %escale_s : f32\n  %escale = vector.splat", 1)
 EMBED_PRE += "  %count = scalar.constant " + str(float(H)) + " : f32\n  %eps = scalar.constant " + str(EPS) + " : f32\n"
 
 NORMS = f"""
@@ -667,7 +744,7 @@ kernel.def export("g_embed") @g_embed(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
   kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
-}} launch(%tokens_arg: index, %ids: buffer, %table: buffer, %w: buffer, %x: buffer, %h: buffer) {{
+}} launch(%tokens_arg: index, %ids: buffer{", %meta: buffer, %tinfo: buffer" if VISION else ""}, %table: buffer, %w: buffer, %x: buffer, %h: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %token_id = kernel.workgroup.id<x> : index
   %token = index.assume %token_id [lt(%token_id, %tokens)] : index
@@ -679,7 +756,7 @@ kernel.def export("g_embed") @g_embed(%tokens: index) {{
   %groups = index.constant {HG} : index
   %zero_f = scalar.constant 0.0 : f32
   %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
-{EMBED_RAW}  %c0_i32 = scalar.constant 0 : i32
+{ids_prelude()}{EMBED_RAW}{FEATURE_FLAG}  %c0_i32 = scalar.constant 0 : i32
   %vocab_last = scalar.constant {V - 1} : i32
   %low = scalar.maxsi %raw, %c0_i32 : i32
   %clamped = scalar.minsi %low, %vocab_last : i32
@@ -696,7 +773,7 @@ kernel.def export("g_embed") @g_embed(%tokens: index) {{
     %block_add = index.scale %block, %block_bytes : index, offset -> offset
     %origin = index.add %row_origin, %block_add : offset
     %v = func.call @g_{EFMT}_values(%table, %origin, %within) : (buffer, offset, index) -> (vector<32xf32>)
-    scf.yield %v : vector<32xf32>
+{FEATURE_PICK}    scf.yield {"%vv" if VISION else "%v"} : vector<32xf32>
   }} else {{
     scf.yield %zero32 : vector<32xf32>
   }}
@@ -1784,7 +1861,7 @@ kernel.def export("{name}") @{name}(%spans: index) {{
 
 USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
 USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
-NVAL = {"%nH": H, "%nFF": FF, "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D}
+NVAL = {"%nH": H, "%nFF": FF, **({} if FF_UNIFORM else {f"%nFF{w}": w for w in set(FFL)}), "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D}
 if GDN:
     NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
 from mv_rows import pick_r  # noqa: E402  (shared with make_kernel_tests.py)
@@ -1872,7 +1949,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %c1 = index.constant 1 : index
   %nH = index.constant {H} : index
   %nFF = index.constant {FF} : index
-  %nQ = index.constant {QD} : index
+""" + ("" if FF_UNIFORM else "".join(f"  %nFF{w} = index.constant {w} : index\n" for w in sorted(set(FFL)))) + f"""  %nQ = index.constant {QD} : index
   %nKV = index.constant {KD} : index
   %zero_i32 = scalar.constant 0 : i32
   %one_i32 = scalar.constant 1 : i32
@@ -1961,7 +2038,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   }}
   %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
   %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
-  kernel.launch @g_embed[%t](%t, %tokens, %embedding, %first_norm, %x, %h) : [index](index, buffer, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
+  kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
   %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
 """)
     gate = "%gate" if GATE else "%q"
@@ -2025,9 +2102,9 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
         fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
         assert fg == fu, f"layer {i}: ffn_gate {fg} != ffn_up {fu} (split the swiglu linear)"
-        T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", "%nFF", H, mode="swiglu") + "\n")
-        T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nFF, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
-        T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", "%nFF", "%nH", FF) + "\n")
+        T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", nff(i), H, mode="swiglu") + "\n")
+        T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {nff(i)}, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
+        T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", nff(i), "%nH", FFL[i]) + "\n")
         pf = f"%post_ffn_{i}" if POST_NORM else f"%ffn_norm_{i}"
         if i == L - 1:
             nn = "%output_norm"
@@ -2056,6 +2133,8 @@ if __name__ == "__main__":
     out_dir = os.environ.get("LLM_OUT") or os.path.join(here, "out")
     os.makedirs(out_dir, exist_ok=True)
     program, head_fmt = model()  # first: records the mv / GEMM variants it launches
+    if any(f == "f32" for f, *_ in USED_MV | USED_MV_R) or "f32" in USED_GEMM:
+        COMMON += F32_VALUES
     parts = [f"// Generated by gen_llm.py from {os.environ.get('LLM_CONFIG') or sys.argv[1]}.\n", COMMON.replace("%c8_q6", "%c8q6").replace(
         "  %c64 = index.constant 64 : index\n  %qh_base", "  %c64 = index.constant 64 : index\n  %c8q6 = index.constant 8 : index\n  %qh_base")]
     for TG in (1, 4):

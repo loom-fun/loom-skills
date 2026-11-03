@@ -54,5 +54,5 @@ else
 fi
 # Tools venv for ports/benchmarks/UI (kept separate from the SDK venv).
 [ -d .tools ] || $py -m venv .tools
-.tools/$bin/pip install -q gguf numpy tokenizers requests jinja2 fastapi uvicorn httpx
+.tools/$bin/pip install -q gguf numpy tokenizers requests jinja2 fastapi uvicorn httpx pillow
 $venv/$bin/loom-serve --help >/dev/null && echo "OK: hrx-loom $($venv/$bin/python -c 'import importlib.metadata as m;print(m.version("hrx-loom"))') in $root/$venv/$bin; tools venv $root/.tools"
