@@ -36,7 +36,11 @@ H = A("embedding_length")
 heads = A("attention.head_count")
 kv = A("attention.head_count_kv")
 head_dim = A("attention.key_length") or H // heads
-L = A("block_count")
+BLOCKS = A("block_count")
+# Multi-token-prediction (NextN/MTP) blocks follow the trunk: blk.L.. carry nextn.* tensors.
+# They are not trunk layers; cfg["mtp"] lists them for the speculative-decoding drafter.
+_nextn = sorted({int(t.name.split(".")[1]) for t in r.tensors if ".nextn." in t.name})
+L = BLOCKS - len(_nextn) if _nextn and _nextn[0] == BLOCKS - len(_nextn) else BLOCKS
 vocab = tensors["token_embd.weight"]["shape"][1]
 template = field("tokenizer.chat_template", "") or ""
 eos = field("tokenizer.ggml.eos_token_id")
@@ -81,7 +85,8 @@ if _g & (_g - 1):
           "tiles head_dim over 32*G lanes and needs G to be a power of two: generalize it first (new kernel work)")
 # Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style).
 pat = A("attention.sliding_window_pattern")
-if cfg["sliding_window"] and isinstance(pat, list) and len(pat) == L:
+if cfg["sliding_window"] and isinstance(pat, list) and len(pat) in (L, BLOCKS):
+    pat = pat[:L]
     cfg["sliding_layers"] = [i for i, sl in enumerate(pat) if sl]
 elif cfg["sliding_window"]:
     print(f"WARNING: sliding_window {cfg['sliding_window']} but no per-layer pattern in the GGUF: fill "
@@ -107,6 +112,9 @@ if A("ssm.inner_size"):
         cfg["post_norms"] = False
         cfg["ffn_norm_tensor"] = "post_attention_norm"
     print(f"hybrid: {len(cfg['recurrent_layers'])} gated delta-net layers + {cfg['kv_layers']} attention layers;", cfg["gdn"])
+if _nextn and L != BLOCKS:
+    cfg["mtp"] = {"layers": _nextn}
+    print(f"MTP: {len(_nextn)} NextN block(s) {_nextn} after the {L}-layer trunk: speculative decoding (MTP) is available")
 def generation_block(tpl):
     """Text the template emits for add_generation_prompt (what decides thinking mode)."""
     i = tpl.rfind("add_generation_prompt")
