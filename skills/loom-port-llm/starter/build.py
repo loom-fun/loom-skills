@@ -134,6 +134,124 @@ os.replace(os.path.join(gen, "model.loom"), os.path.join(pkg, "program", "llm.lo
 hx = lambda s: s.encode().hex()
 thinking = chat.get("thinking", "toggle" if chat.get("starts_in_reasoning") else "never")
 reasoning = {"toggle": (1, 1 | 16, 4 if chat.get("thinking_default", True) else 0), "always": (1, 0, 0), "never": (0, 0, 0)}[thinking]
+# Reasoning instructions per effort (chat.reasoning_instructions, Qwen3.8): advertise the template's efforts
+# (loom-serve levels: none=0 minimal=1 low=2 medium=3 high=4 xhigh=5 max=6; none = thinking off).
+EFFORT_LEVELS = {"none": 0, "minimal": 1, "low": 2, "medium": 3, "high": 4, "xhigh": 5, "max": 6}
+instructions = chat.get("reasoning_instructions") if thinking != "never" else None
+if instructions:
+    efforts = (1 if thinking == "toggle" else 0) | sum(1 << EFFORT_LEVELS[e] for e in instructions if e in EFFORT_LEVELS)
+    default_effort = EFFORT_LEVELS.get(chat.get("reasoning_effort_default"), 4) if chat.get("thinking_default", True) else 0
+    reasoning = (1, efforts, default_effort)
+
+
+def patch_reasoning_instructions(text):
+    """control.loom with the reasoning-instruction prefix (chat_probe.reasoning_instructions): chat_begin opens
+    the system block with the request effort's instructions when thinking is on, merging the first system
+    message into that block. Without chat.reasoning_instructions control.loom is unchanged."""
+    def sub(t, old, new):
+        assert t.count(old) == 1, (old[:120], t.count(old))
+        return t.replace(old, new)
+    names = list(instructions)
+    rodata = "".join(f'global.rodata.def @reasoning_name_{i} = bytes("{hx(e)}")\n\n'
+                     f'global.rodata.def @reasoning_text_{i} = bytes("{hx(instructions[e])}")\n\n' for i, e in enumerate(names))
+    select = "".join(f"""    %name_{i} = global.load @reasoning_name_{i} : buffer
+    %match_{i} = func.call @equal(%name, %name_{i}) : (buffer, buffer) -> (i1)
+    %text_{i} = global.load @reasoning_text_{i} : buffer
+    %selected_{i} = scf.select %match_{i}, %text_{i}, %selected_{i - 1 if i else 'default'} : buffer
+""" for i in range(len(names)))
+    code = f"""
+// Reasoning instructions (the template's text per reasoning_effort): selected by the request's
+// reasoning_effort, else chat_template_kwargs.reasoning_effort, else the template's default effort.
+global.rodata.def @reasoning_separator = bytes("{hx(chat["reasoning_separator"])}")
+
+global.rodata.def @reasoning_default = bytes("{hx(instructions[chat["reasoning_effort_default"]])}")
+
+{rodata}func.def @reasoning_instructions(%request: buffer, %thinking: i1) -> (buffer) {{
+  %empty = global.load @empty : buffer
+  %result = scf.if %thinking -> (buffer) {{
+    %zero64 = scalar.constant 0 : i64
+    %false = scalar.constant false : i1
+    %string_type = scalar.constant 0 : i64
+    %request_bytes = buffer.length %request
+    %request_length = index.cast %request_bytes : offset to i64
+    %effort_key = global.load @effort_key : buffer
+    %kwargs_key = global.load @kwargs_key : buffer
+    %fk, %bk, %lk, %tk = func.call @json_lookup(%request, %zero64, %request_length, %kwargs_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+    %f1, %b1, %l1, %t1 = scf.if %fk -> (i1, i64, i64, i64) {{
+      %f, %b, %l, %t = func.call @json_lookup(%request, %bk, %lk, %effort_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+      scf.yield %f, %b, %l, %t : i1, i64, i64, i64
+    }} else {{
+      scf.yield %false, %zero64, %zero64, %zero64 : i1, i64, i64, i64
+    }}
+    %kwargs_string = scalar.cmpi eq, %t1, %string_type : i64
+    %use_kwargs = scalar.andi %f1, %kwargs_string : i1
+    %f2, %b2, %l2, %t2 = func.call @json_lookup(%request, %zero64, %request_length, %effort_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+    %top_string = scalar.cmpi eq, %t2, %string_type : i64
+    %use_top = scalar.andi %f2, %top_string : i1
+    %found = scalar.ori %use_top, %use_kwargs : i1
+    %begin = scf.select %use_top, %b2, %b1 : i64
+    %length = scf.select %use_top, %l2, %l1 : i64
+    %name = scf.if %found -> (buffer) {{
+      %value = func.call @json_key(%request, %begin, %length) : (buffer, i64, i64) -> (buffer)
+      scf.yield %value : buffer
+    }} else {{
+      scf.yield %empty : buffer
+    }}
+    %selected_default = global.load @reasoning_default : buffer
+{select}    scf.yield %selected_{len(names) - 1} : buffer
+  }} else {{
+    scf.yield %empty : buffer
+  }}
+  func.return %result : buffer
+}}
+
+// INSTRUCTIONS + separator + BODY, or whichever of the two is not empty.
+func.def @with_instructions(%instructions: buffer, %body: buffer) -> (buffer) {{
+  %origin = index.constant 0 : offset
+  %empty = global.load @empty : buffer
+  %instructions_length = buffer.length %instructions
+  %body_length = buffer.length %body
+  %has_instructions = index.cmp ne, %instructions_length, %origin : offset
+  %has_body = index.cmp ne, %body_length, %origin : offset
+  %both = scalar.andi %has_instructions, %has_body : i1
+  %separator_value = global.load @reasoning_separator : buffer
+  %separator = scf.select %both, %separator_value, %empty : buffer
+  %value = func.call @join4(%instructions, %separator, %body, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+  func.return %value : buffer
+}}
+
+"""
+    anchor = "// State bits carried through chat_message (opaque to the host):\n"
+    text = sub(text, anchor, code.lstrip("\n") + anchor)
+    text = sub(text, "  %thinking = scf.select %toggle, %think3, %think_default : i1\n",
+               """  %thinking = scf.select %toggle, %think3, %think_default : i1
+  %instructions = func.call @reasoning_instructions(%request, %thinking) : (buffer, i1) -> (buffer)
+  %instructions_length = buffer.length %instructions
+  %has_instructions = index.cmp ne, %instructions_length, %origin : offset
+""")
+    text = sub(text, "    %block = func.call @join4(%system_prefix, %merged, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+               """    %instructed = func.call @with_instructions(%instructions, %merged) : (buffer, buffer) -> (buffer)
+    %block = func.call @join4(%system_prefix, %instructed, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+""")
+    text = sub(text, """    %block = scf.if %use_default -> (buffer) {
+      %value = func.call @join4(%system_prefix, %default_system, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+      scf.yield %value : buffer
+    } else {
+""", """    // With instructions the block also takes the first system message (chat_message then skips it).
+    %plain_body = scf.select %use_default, %default_system, %empty : buffer
+    %rest = scf.select %has_instructions, %system_body, %plain_body : buffer
+    %instructed = func.call @with_instructions(%instructions, %rest) : (buffer, buffer) -> (buffer)
+    %instructed_length = buffer.length %instructed
+    %has_block = index.cmp ne, %instructed_length, %origin : offset
+    %block = scf.if %has_block -> (buffer) {
+      %value = func.call @join4(%system_prefix, %instructed, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+      scf.yield %value : buffer
+    } else {
+""")
+    return sub(text, "  %consumed = scalar.andi %has_tools, %first_system : i1\n",
+               """  %merges_system = scalar.ori %has_tools, %has_instructions : i1
+  %consumed = scalar.andi %merges_system, %first_system : i1
+""")
 B = lambda v: "true" if v else "false"
 CALL_FORMATS = {"hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4}
 # A chat format the generic control functions can't express (Glimmer's ATEM channels, Gemma 4): the kit
@@ -179,6 +297,8 @@ subs = {
 }
 for name in ("prepare", "control", "storage", "service"):
     text = open(os.path.join(HERE, "templates", name + ".loom"), encoding="utf-8").read()
+    if name == "control" and instructions:
+        text = patch_reasoning_instructions(text)
     if name == "control" and custom_chat:
         for fn in ("chat_begin", "chat_message", "chat_end", "render_tool", "parse_tools", "output_next", "complete_text"):
             text = text.replace(f"func.def public @{fn}(", f"func.def @generic_{fn}(")

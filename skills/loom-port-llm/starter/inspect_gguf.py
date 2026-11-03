@@ -133,6 +133,9 @@ if template:
         cfg["chat"] = chat
         print(f"chat: thinking={chat['thinking']} (default {'on' if chat['thinking_default'] else 'off'}), "
               f"tool calls={chat['call_format']}; generation prompt {chat['generation_prompt']!r}")
+        if chat.get("reasoning_instructions"):
+            print(f"chat: reasoning efforts {'/'.join(chat['reasoning_instructions'])} (default {chat['reasoning_effort_default']}) "
+                  "select the system block's reasoning instructions; none = thinking off")
         if any(ok is False for _, ok, _ in results):
             print("WARNING: the derived chat block does not reproduce the template (FAIL above); fix it by hand")
     except (chat_probe.ProbeError, ValueError, KeyError) as e:
