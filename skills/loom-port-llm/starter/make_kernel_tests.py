@@ -28,6 +28,11 @@ def save(n, a): np.save(os.path.join(out, n + ".npy"), a)
 def ty(a): return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int8": "i8", "int32": "i32", "float16": "f16"}[str(a.dtype)] + ">"
 # 1. embed
 ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
+# image input (cfg "vision"): g_embed also takes the epoch metadata and token info; plain epochs have metadata word 2 = 0
+VIS = bool(cfg.get("vision"))
+VMETA = (f"\n  %meta = check.generate.fill value(0) : tensor<4xi32>\n  %tinfo = check.generate.fill value(0) : tensor<{t}x4xi32>" if VIS else "")
+VARGS = ", %meta, %tinfo" if VIS else ""
+VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
 E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
 x = E[ids]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
 tab = raw("token_embd.weight")
@@ -40,8 +45,32 @@ cases.append(f"""check.case public @embed {{
   %ex = check.file.read.npy path("e_x.npy") : tensor<{t}x{H}xf32>
   %eh = check.file.read.npy path("e_h.npy") : tensor<{t}x{H}xf32>
   %x = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
+  %h = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>{VMETA}
+  kernel.launch @g_embed[%t](%t, %ids{VARGS}, %tab, %w, %x, %h) : [index](index, {ty(ids)}{VTYPES}, {ty(tab)}, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
+  check.expect.close actual(%x) expected(%ex) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.return
+}}
+""")
+if VIS:   # a media epoch: 8-word records, token 1 carries a feature row (copied unscaled), all inputs live
+    rng = np.random.default_rng(0); feat = rng.standard_normal(H).astype(np.float32)
+    recs = np.zeros((t, 8), np.int32); recs[:, 0] = ids; recs[1, 1] = t * 32
+    packet = np.concatenate([recs.reshape(-1), feat.view(np.int32)])
+    meta = np.array([t, 0, 1, 0], np.int32); tinfo = np.zeros((t, 4), np.int32); tinfo[:, 2] = 1
+    xm = x.astype(np.float32).copy(); xm[1] = feat; hm = xm / np.sqrt((xm * xm).mean(-1, keepdims=True) + eps) * w
+    for n, a in [("m_pk", packet), ("m_meta", meta), ("m_info", tinfo), ("m_x", xm.astype(np.float32)), ("m_h", hm.astype(np.float32))]: save(n, a)
+    cases.append(f"""check.case public @embed_media {{
+  %t = check.literal value({t}) : index
+  %pk = check.file.read.npy path("m_pk.npy") : {ty(packet)}
+  %meta = check.file.read.npy path("m_meta.npy") : tensor<4xi32>
+  %tinfo = check.file.read.npy path("m_info.npy") : tensor<{t}x4xi32>
+  %tab = check.file.read.npy path("e_tab.npy") : {ty(tab)}
+  %w = check.file.read.npy path("e_w.npy") : tensor<{H}xf32>
+  %ex = check.file.read.npy path("m_x.npy") : tensor<{t}x{H}xf32>
+  %eh = check.file.read.npy path("m_h.npy") : tensor<{t}x{H}xf32>
+  %x = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
   %h = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
-  kernel.launch @g_embed[%t](%t, %ids, %tab, %w, %x, %h) : [index](index, {ty(ids)}, {ty(tab)}, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
+  kernel.launch @g_embed[%t](%t, %pk, %meta, %tinfo, %tab, %w, %x, %h) : [index](index, {ty(packet)}, tensor<4xi32>, tensor<{t}x4xi32>, {ty(tab)}, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
   check.expect.close actual(%x) expected(%ex) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
   check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
   check.return

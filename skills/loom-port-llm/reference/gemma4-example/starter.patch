@@ -1173,7 +1173,7 @@
      open(out, "w", newline="\n").write("\n".join(parts))
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -26,10 +26,12 @@
+@@ -26,6 +26,8 @@
  cases = []
  def save(n, a): np.save(os.path.join(out, n + ".npy"), a)
  def ty(a): return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int8": "i8", "int32": "i32", "float16": "f16"}[str(a.dtype)] + ">"
@@ -1181,13 +1181,17 @@
 +def ldim(li): return D if li in GLOBAL else DSWA
  # 1. embed
  ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
+ # image input (cfg "vision"): g_embed also takes the epoch metadata and token info; plain epochs have metadata word 2 = 0
+@@ -34,7 +36,7 @@
+ VARGS = ", %meta, %tinfo" if VIS else ""
+ VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
  E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
 -x = E[ids]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
 +x = E[ids] * (cfg.get("embed_scale") or 1.0); h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
  tab = raw("token_embd.weight")
  for n, a in [("e_ids", ids), ("e_tab", tab), ("e_w", w.astype(np.float32)), ("e_x", x.astype(np.float32)), ("e_h", h.astype(np.float32))]: save(n, a)
  cases.append(f"""check.case public @embed {{
-@@ -51,13 +53,17 @@
+@@ -80,13 +82,17 @@
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
  for li in range(cfg["layers"]):
@@ -1207,7 +1211,7 @@
  for name, K in todo:
      fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
      for tg in (1, 4):
-@@ -81,43 +87,49 @@
+@@ -110,43 +116,49 @@
    check.return
  }}
  """)
@@ -1294,7 +1298,7 @@
  # 3a. output head (argmax over the vocabulary) for one selected span of 3 tokens
  t = 3
  head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
-@@ -148,56 +160,89 @@
+@@ -177,56 +189,89 @@
    check.return
  }}
  """)
@@ -1427,8 +1431,8 @@
 +  %pp = check.file.read.npy path("p_pp.npy") : tensor<{t}x{NL * 256}xf32>
 +  %w = check.file.read.npy path("p_w.npy") : tensor<256xf32>
 +  %e = check.file.read.npy path("p_e.npy") : tensor<{t}x{NL * 256}xf32>
-+  %o = check.generate.fill value(0.0) : tensor<{t}x{NL * 256}xf32>
-+  kernel.launch @g_ple_prep[%t](%t, %ids, %tab, %pp, %w, %o) : [index](index, tensor<{t}xi32>, {ty(raw(tabn))}, tensor<{t}x{NL * 256}xf32>, tensor<256xf32>, tensor<{t}x{NL * 256}xf32>)
++  %o = check.generate.fill value(0.0) : tensor<{t}x{NL * 256}xf32>{"\n  %meta = check.generate.fill value(0) : tensor<4xi32>" if VIS else ""}
++  kernel.launch @g_ple_prep[%t](%t, %ids{", %meta" if VIS else ""}, %tab, %pp, %w, %o) : [index](index, tensor<{t}xi32>{", tensor<4xi32>" if VIS else ""}, {ty(raw(tabn))}, tensor<{t}x{NL * 256}xf32>, tensor<256xf32>, tensor<{t}x{NL * 256}xf32>)
 +  check.expect.close actual(%o) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{t}x{NL * 256}xf32>
    check.return
  }}

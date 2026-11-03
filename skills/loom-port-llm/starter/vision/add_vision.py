@@ -24,9 +24,9 @@ PREFERENCE = ("F16", "BF16", "F32", "Q8_0")
 
 def pick(files):
     mm = [f for f in files if re.search(r"mmproj", f, re.I) and f.endswith(".gguf")]
-    for p in PREFERENCE:
+    for p in PREFERENCE:      # whole token: "F16" must not match "BF16"
         for f in mm:
-            if p.lower() in f.lower():
+            if re.search(rf"(^|[-_.]){p}([-_.]|$)", os.path.basename(f), re.I):
                 return f
     return mm[0] if mm else None
 
@@ -38,12 +38,17 @@ def main():
     if given and os.path.exists(given):
         path = given
     else:
-        from huggingface_hub import HfApi, hf_hub_download
-        name = given or pick([s.rfilename for s in HfApi().model_info(repo).siblings])
+        import urllib.request
+        files = [x["rfilename"] for x in json.load(urllib.request.urlopen(f"https://huggingface.co/api/models/{repo}", timeout=30)).get("siblings", [])]
+        name = given or pick(files)
         if not name:
             print("VISION_RESULT " + json.dumps({"vision": False, "reason": "no mmproj in the repo"}))
             return 0
-        path = hf_hub_download(repo, name)
+        hf = os.environ.get("HF", "hf")   # the SDK venv's hf CLI (port.sh passes it)
+        out = subprocess.run([hf, "download", repo, name], capture_output=True, text=True)
+        path = (out.stdout.strip().splitlines() or [""])[-1].replace("path=", "")
+        if out.returncode or not os.path.exists(path):
+            sys.exit(f"STOP: downloading {repo}/{name} failed: {out.stderr[-500:]}")
     import encoder
     try:
         vc = encoder.config(path)

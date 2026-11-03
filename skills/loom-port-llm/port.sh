@@ -84,6 +84,15 @@ fi
 
 fi  # FROM=build
 
+# Image input: when the repo ships a vision projector (mmproj GGUF) of a family starter/vision has an
+# encoder plan for, cfg.json gets a "vision" block and the package an image component. VISION=0 skips it;
+# MMPROJ=file picks a projector. An unsupported family prints the reason and the port stays text-only
+# (reference/vision.md: adding a family).
+if [ "${VISION:-1}" != 0 ] && ! "$T" -c "import json,sys; sys.exit(0 if json.load(open('cfg.json')).get('vision') else 1)"; then
+  step "2b vision"
+  HF=$hf "$T" "$K/vision/add_vision.py" cfg.json "$repo" ${MMPROJ:-} | tee vision.log | grep -v "^$"
+fi
+
 step "3/6 build"
 "$T" "$K/build.py" cfg.json pkg --tokenizer tok/tokenizer.json --model-id "$model_id" --memory-gib "$mem_gib" | tee build.log
 [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: build.py failed (build.log)"; exit 4; }
@@ -97,8 +106,26 @@ VENV=$venv "$S/serve.sh" port "$port" amdgpu "$mem" pkg/model.json || exit 4
 step "5/6 kernel unit tests"
 "$T" -I "$K/make_kernel_tests.py" cfg.json ktest >/dev/null && VENV=$venv "$K/run_kernel_tests.sh" pkg ktest | tee ktest.log | tail -3
 grep -q "^FAIL\|Traceback" ktest.log && { echo "STOP: kernel tests failed (ktest.log); see the bring-up debugging order in SKILL.md"; exit 5; }
+vmm=$("$T" -c "import json; print((json.load(open('cfg.json')).get('vision') or {}).get('mmproj', ''))")
+if [ -n "$vmm" ]; then   # vision kernels vs NumPy, then the whole encoder vs ref_vit.py at a small size
+  side=$("$T" -c "import sys; sys.path.insert(0, '$K/vision'); import encoder, preprocess as P; c = encoder.config('$vmm'); print(4 * c['patch'] * P.FAMILY[c['family']]['merge'])")
+  VENV=$venv "$K/vision/tests/run_tests.sh" "$vmm" "$side" "$side" > vtest.log 2>&1; rc=$?; grep -c "^PASS" vtest.log | sed 's/^/vision kernel tests passed: /'; tail -1 vtest.log
+  [ $rc = 0 ] || { echo "STOP: vision tests failed (vtest.log); see reference/vision.md"; exit 5; }
+fi
 
 step "6/6 smoke test"
+if [ -n "$vmm" ]; then   # one image: the component compiles, rows reach the text model, the answer is sane
+  "$T" - "$here/../loom-benchmark/scripts" "http://127.0.0.1:$port" <<'EOF' || exit 6
+import sys; sys.path.insert(0, sys.argv[1])
+import requests, vision_golden as V
+im, _ = V.builtin_images()["shapes"]
+model = requests.get(sys.argv[2] + "/v1/models", timeout=30).json()["data"][0]["id"]
+r = V.request(sys.argv[2], model, V.data_url(im), "What shapes and colors are in this image?", 64, False)
+ok = "error" not in r and any(w in r["content"].lower() for w in ("red", "blue", "green", "circle", "square", "triangle"))
+print("image:", "OK" if ok else "FAIL", repr(r.get("content", r.get("error")))[:150], "prompt tokens", r.get("prompt_tokens"))
+sys.exit(0 if ok else 1)
+EOF
+fi
 "$T" - "$work/pkg" "http://127.0.0.1:$port" <<'EOF' || exit 6
 import json, sys, requests
 pkg, url = sys.argv[1], sys.argv[2]
