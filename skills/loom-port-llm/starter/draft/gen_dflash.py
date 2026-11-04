@@ -135,6 +135,79 @@ kernel.def export("g_dfl_embed") @g_dfl_embed(%tokens: index) {{
 """
 
 
+def rope_info_kernel():
+    return """
+// M-RoPE targets: rinfo = info with the temporal rotary position in column 1 (what llama.cpp gives a DFlash drafter:
+// degenerate sections). Media epochs carry (t, h, w) in input-record words 4..6; otherwise KV position + the span's
+// offset from the table after the records (records = 0: after the header count; else after `records` capacity).
+kernel.def export("g_dfl_rope_info") @g_dfl_rope_info(%tokens: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%tokens_arg: index, %spans_arg: index, %records_arg: index, %meta: buffer, %ids: buffer, %info: buffer, %rinfo: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %records_cap = index.assume %records_arg [range(%records_arg, 0, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [range(%token_id, 0, 2147483646), lt(%token_id, %tokens)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %out = buffer.view %rinfo[%zero] : buffer -> view<[%tokens]x4xi32>
+  %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
+  %pos32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
+  %live32 = view.load %info_view[%token, 2] : view<[%tokens]x4xi32> -> i32
+  %span32 = view.load %info_view[%token, 3] : view<[%tokens]x4xi32> -> i32
+  %live = scalar.cmpi ne, %live32, %c0_i32 : i32
+  %header = buffer.view %meta[%zero] : buffer -> view<4xi32>
+  %count32 = view.load %header[0] : view<4xi32> -> i32
+  %flag = view.load %header[2] : view<4xi32> -> i32
+  %mixed = scalar.cmpi ne, %flag, %c0_i32 : i32
+  %rope = scf.if %live -> (i32) {
+    %t = scf.if %mixed -> (i32) {
+      %c8 = index.constant 8 : index
+      %n = index.mul %tokens, %c8 : index
+      %rec = buffer.view %ids[%zero] : buffer -> view<[%n]xi32>
+      %base = index.mul %token, %c8 : index
+      %e4 = index.add %base, %c4 : index
+      %b4 = index.assume %e4 [lt(%e4, %n)] : index
+      %pt = view.load %rec[%b4] : view<[%n]xi32> -> i32
+      scf.yield %pt : i32
+    } else {
+      %count_b = scalar.assume %count32 [range(%count32, 1, 8192)] : i32
+      %count = index.cast %count_b : i32 to index
+      %use_header = index.cmp eq, %records_cap, %c0 : index
+      %records = scf.select %use_header, %count, %records_cap : index
+      %sl = scalar.maxsi %span32, %c0_i32 : i32
+      %sb = scalar.assume %sl [range(%sl, 0, 8191)] : i32
+      %span0 = index.cast %sb : i32 to index
+      %last = index.sub %records, %c1 : index
+      %span1 = index.min %span0, %last : index
+      %span = index.assume %span1 [lt(%span1, %records)] : index
+      %c36 = index.constant 36 : offset
+      %c16 = index.constant 16 : offset
+      %plan = index.scale %records, %c36 : index, offset -> offset
+      %table = index.add %c16, %plan : offset
+      %tv = buffer.view %meta[%table] : buffer -> view<[%records]xi32>
+      %delta = view.load %tv[%span] : view<[%records]xi32> -> i32
+      %linear = scalar.addi %pos32, %delta : i32
+      scf.yield %linear : i32
+    }
+    scf.yield %t : i32
+  } else {
+    scf.yield %pos32 : i32
+  }
+  view.store %row32, %out[%token, 0] : i32, view<[%tokens]x4xi32>
+  view.store %rope, %out[%token, 1] : i32, view<[%tokens]x4xi32>
+  view.store %live32, %out[%token, 2] : i32, view<[%tokens]x4xi32>
+  view.store %span32, %out[%token, 3] : i32, view<[%tokens]x4xi32>
+  kernel.return
+}
+"""
+
+
 def kernels(g):
     F = g["dflash"]
     H, HG = g["H"], g["HG"]
@@ -146,7 +219,10 @@ def kernels(g):
     LN = 2.0 * math.log(F["rope_theta"]) / D
     POSB = KVH * D * 2
     W = F["window"] or 0
+    MR = g["MROPE"]
     T = [embed_kernel(g)] if own_embed(g) else []
+    if MR:
+        T.append(rope_info_kernel())
     # ---- feature taps
     T.append(f"""
 // feat[t][slot] = x[t] (the residual stream after a target layer listed in dflash.target_layers).
@@ -264,7 +340,7 @@ kernel.def export("g_dfl_kv_store") @g_dfl_kv_store(%tokens: index) {{
   %lanes = index.constant {HALF} : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%tokens, %ckv, %c1) workgroup_size(%lanes, %c1, %c1) : index
-}} launch(%tokens_arg: index, %layer_arg: index, %context_arg: index, %pool_arg: index, %k: buffer, %v: buffer, %w: buffer, %info: buffer, %origins: buffer, %cache: buffer) {{
+}} launch(%tokens_arg: index, %layer_arg: index, %context_arg: index, %pool_arg: index, %k: buffer, %v: buffer, %w: buffer, %info: buffer, %origins: buffer, %cache: buffer{", %rinfo: buffer" if MR else ""}) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {F["layers"] - 1})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
@@ -272,7 +348,7 @@ kernel.def export("g_dfl_kv_store") @g_dfl_kv_store(%tokens: index) {{
 {head_prelude}  %kh = index.assume %head_id [range(%head_id, 0, {KVH - 1})] : index
   %k_view = buffer.view %k[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
   %v_view = buffer.view %v[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
-""" + norm_rope("%k_view", "%kh", "%position32").replace("%NH", str(KVH)) + f"""  scf.if %live {{
+{"  %rinfo_view = buffer.view %rinfo[%zero] : buffer -> view<[%tokens]x4xi32>" + chr(10) + "  %rope32 = view.load %rinfo_view[%token, 1] : view<[%tokens]x4xi32> -> i32" + chr(10) if MR else ""}""" + norm_rope("%k_view", "%kh", "%rope32" if MR else "%position32").replace("%NH", str(KVH)) + f"""  scf.if %live {{
     %c15 = index.constant 15 : index
     %c16 = index.constant 16 : index
     %c2 = index.constant 2 : index
@@ -696,7 +772,16 @@ kernel.def export("g_dfl_prepare") @g_dfl_prepare() {{
       %anchor = view.load %ids_flat[%ae] : view<[%n_ids]xi32> -> i32
       %bb = index.assume %base [range(%base, 0, 8191), lt(%base, %dt)] : index
       view.store %anchor, %dids[%bb] : i32, view<[%dt]xi32>
-      view.store %cursor32, %slot_v[%kb] : i32, view<[%blocks]xi32>
+      view.store %cursor32, %slot_v[%kb] : i32, view<[%blocks]xi32>{"" if not MR else chr(10) + """      %sc = index.assume %s [range(%s, 0, 8191), lt(%s, %count)] : index
+      %c36m = index.constant 36 : offset
+      %m_plan = index.scale %count, %c36m : index, offset -> offset
+      %m_table = index.add %c16, %m_plan : offset
+      %m_tv = buffer.view %metadata[%m_table] : buffer -> view<[%count]xi32>
+      %delta = view.load %m_tv[%sc] : view<[%count]xi32> -> i32
+      %d_plan = index.scale %blocks, %c36m : index, offset -> offset
+      %d_table = index.add %c16, %d_plan : offset
+      %d_tv = buffer.view %draft[%d_table] : buffer -> view<[%blocks]xi32>
+      view.store %delta, %d_tv[%kb] : i32, view<[%blocks]xi32>"""}
       scf.for %j = [%c0 to %depth step %c1i] {{
         %r0 = index.mul %kb, %depth : index
         %r1 = index.add %r0, %j : index
@@ -1073,6 +1158,15 @@ def programs(g):
     QD, KD, FFd = F["heads"] * F["head_dim"], F["kv_heads"] * F["head_dim"], F["ffn"]
     lin, dfmt, dsize = g["lin"], g["dfmt"], g["dsize"]
     tensors = F["tensors"]
+    MR = g["MROPE"]
+    rpos = "%rinfo" if MR else "%info"
+
+    def rinfo(records):
+        """M-RoPE targets: the drafter rotates at the target's temporal position (llama.cpp's degenerate sections)."""
+        if not MR:
+            return ""
+        return ("  %rinfo = buffer.alloca<global> align(256) %info_size : buffer\n"
+                f"  kernel.launch @g_dfl_rope_info[%t](%t, %spans, {records}, %metadata, %tokens, %info, %rinfo) : [index](index, index, index, buffer, buffer, buffer, buffer)\n")
     common = f"""  %t = config.get @llm.tokens : index
   %spans = config.get @llm.spans : index
   %context = config.get @llm.context : index
@@ -1122,7 +1216,7 @@ command.program.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buf
   %info_size = index.scale %t, %info_bytes : index, offset -> offset
   %info = buffer.alloca<global> align(256) %info_size : buffer
   kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
-  %w_fc = {_w("%w_enc", "fc.weight", g)}
+{rinfo("%c0")}  %w_fc = {_w("%w_enc", "fc.weight", g)}
   %w_encn = {_w("%w_enc", "enc.output_norm.weight", g)}
 {scaled("features", "%nFEAT")}{L("fc.weight", "features", "%w_fc", "x", "%nFEAT", "%nH", NT * H)}  kernel.launch @g_spec_rmsnorm[%t](%t, %x, %w_encn, %h) : [index](index, buffer, view<{H}xf32>, buffer)
 {scaled("h", "%nH")}"""]
@@ -1130,7 +1224,7 @@ command.program.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buf
         warm.append(L(f"blk.{l}.attn_k.weight", "h", f"%dk_{l}", "k", "%nH", "%nDKV", H)
                     + L(f"blk.{l}.attn_v.weight", "h", f"%dv_{l}", "v", "%nH", "%nDKV", H)
                     + f"  %dl_{l} = index.constant {l} : index\n"
-                    f"  kernel.launch @g_dfl_kv_store[%t](%t, %dl_{l}, %context, %pool, %k, %v, %dkn_{l}, %info, %origins, %arena) : [index](index, index, index, index, buffer, buffer, view<{F['head_dim']}xf32>, buffer, buffer, buffer)\n")
+                    f"  kernel.launch @g_dfl_kv_store[%t](%t, %dl_{l}, %context, %pool, %k, %v, %dkn_{l}, %info, %origins, %arena{', %rinfo' if MR else ''}) : [index](index, index, index, index, buffer, buffer, view<{F['head_dim']}xf32>, buffer, buffer, buffer{', buffer' if MR else ''})\n")
     warm.append("  command.return\n}\n")
     warm = "".join(warm)
 
@@ -1178,7 +1272,7 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
   %head = command.parameter {head_ref}, "{head_name}" : view<{hsize}xi8>
   kernel.launch @g_dfl_prepare(%epoch_spans, %spans, %epoch_tokens, %depth, %epoch, %target_tokens, %metadata, %tokens, %slots, %rows_meta) : (index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
-  %first_norm = {_w("%w_draft", "blk.0.attn_norm.weight", g)}
+{rinfo("%spans")}  %first_norm = {_w("%w_draft", "blk.0.attn_norm.weight", g)}
 {embed_launch}"""]
     if conv:
         NGR = H // conv["group"]
@@ -1202,8 +1296,8 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
                  + L(b + "attn_k.weight", src, f"%dk_{l}", "k", "%nH", "%nDKV", H)
                  + L(b + "attn_v.weight", src, f"%dv_{l}", "v", "%nH", "%nDKV", H)
                  + f"""  %dl_{l} = index.constant {l} : index
-  kernel.launch @g_dfl_q_prep[%t](%t, %q, %dqn_{l}, %info) : [index](index, buffer, view<{F['head_dim']}xf32>, buffer)
-  kernel.launch @g_dfl_block_kv[%t](%t, %k, %dkn_{l}, %info) : [index](index, buffer, view<{F['head_dim']}xf32>, buffer)
+  kernel.launch @g_dfl_q_prep[%t](%t, %q, %dqn_{l}, {rpos}) : [index](index, buffer, view<{F['head_dim']}xf32>, buffer)
+  kernel.launch @g_dfl_block_kv[%t](%t, %k, %dkn_{l}, {rpos}) : [index](index, buffer, view<{F['head_dim']}xf32>, buffer)
   kernel.launch @g_dfl_attention[%t](%t, %spans, %dl_{l}, %context, %pool, %metadata, %info, %q, %k, %v, %origins, %arena, %o) : [index](index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
 """ + scaled("o", "%nDQ") + L(b + "attn_output.weight", "o", f"%do_{l}", "y", "%nDQ", "%nH", QD))
         if conv:
