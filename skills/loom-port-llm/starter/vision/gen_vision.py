@@ -256,8 +256,89 @@ def _dequant16(fmt, w, view_name, out):
     return _base_dequant16(fmt, w, view_name, out)
 _gg.dequant16 = _dequant16
 
+def gemm_any(fmt, K, N):
+    """Y[rows, N] = inverse_scale[row] * X16[rows, K] . W[N, K]^T for shapes the WMMA GEMM cannot tile
+    (K or N not a multiple of 64; Qwen3-VL/Qwen3.8 encoder FFN: 1152 x 4304). A workgroup computes 16 rows x 64
+    columns (one lane per column, 16 row accumulators), reading 8 f16 values of a weight row per step and reusing
+    them for the 16 rows; the encoder runs once per image, so this only has to be reasonable, not peak."""
+    assert fmt in ("f16", "bf16") and K % 8 == 0, (fmt, K)
+    name = f"v_gemm_any_{fmt}_{K}x{N}"
+    R = 16
+    accs = ", ".join(f"%a{r} = %zf : f32" for r in range(R))
+    types = ", ".join(["f32"] * R)
+    L = [T('''kernel.def export("$NAME") @$NAME(%rows: index, %n: index) {
+  %c1 = index.constant 1 : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %rp = index.add %rows, %c15 : index
+  %row_tiles = index.div %rp, %c16 : index
+  %ncst = index.constant $N : index
+  %np = index.add %ncst, %c63 : index
+  %col_tiles = index.div %np, %c64 : index
+  kernel.launch.config workgroups(%row_tiles, %col_tiles, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%rows_arg: index, %k_arg: index, %n_arg: index, %x: buffer, %scales: buffer, %w: buffer, %y: buffer) {
+  %rows = index.assume %rows_arg [range(%rows_arg, 1, $MAXROWS)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c64 = index.constant 64 : index
+  %ck = index.constant $K : index
+  %cn = index.constant $N : index
+  %zf = scalar.constant 0.0 : f32
+  %rt_id = kernel.workgroup.id<x> : index
+  %ct_id = kernel.workgroup.id<y> : index
+  %lid = kernel.workitem.id<x> : index
+  %lane = index.assume %lid [range(%lid, 0, 63)] : index
+  %col0 = index.mul %ct_id, %c64 : index
+  %col = index.add %col0, %lane : index
+  %col_live = index.cmp ult, %col, %cn : index
+  %nlast = index.constant $NM1 : index
+  %colc = index.min %col, %nlast : index
+  %wcol = index.assume %colc [range(%colc, 0, $NM1)] : index
+  %row0 = index.mul %rt_id, %c16 : index
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%rows]x$Kxf16>
+  %w_view = buffer.view %w[%zero] : buffer -> view<$Nx$Kx$FMT>
+  %s_view = buffer.view %scales[%zero] : buffer -> view<[%rows]x2xf32>
+  %rlast = index.sub %rows, %c1 : index''', NAME=name, N=N, K=K, NM1=N - 1, MAXROWS=MAXROWS, FMT=fmt)]
+    L.append(f"  {', '.join(f'%r{r}' for r in range(R))} = scf.for %kk = [%c0 to %ck step %c8]({accs}) -> ({types}) {{")
+    L.append(T('''    %bk = index.assume %kk [range(%kk, 0, $KM8), multiple_of(%kk, 8)] : index
+    %wh = vector.load %w_view[%wcol, %bk] : view<$Nx$Kx$FMT> -> vector<8x$FMT>
+    %wv = vector.extf %wh : vector<8x$FMT> to vector<8xf32>''', KM8=K - 8, N=N, K=K, FMT=fmt))
+    for r in range(R):
+        L.append(T('''    %ri$r = index.constant $r : index
+    %rr$r = index.add %row0, %ri$r : index
+    %rc$r = index.min %rr$r, %rlast : index
+    %rb$r = index.assume %rc$r [lt(%rc$r, %rows)] : index
+    %xh$r = vector.load %x_view[%rb$r, %bk] : view<[%rows]x$Kxf16> -> vector<8xf16>
+    %xv$r = vector.extf %xh$r : vector<8xf16> to vector<8xf32>
+    %d$r = vector.dotf<reassoc|contract> %wv, %xv$r, %zf : vector<8xf32>, vector<8xf32>, f32
+    %n$r = scalar.addf %a$r, %d$r : f32''', r=r, K=K))
+    L.append(f"    scf.yield {', '.join(f'%n{r}' for r in range(R))} : {types}\n  }}")
+    L.append("  %y_view = buffer.view %y[%zero] : buffer -> view<[%rows]x" + str(N) + "xf32>")
+    for r in range(R):
+        L.append(T('''  %ro$r = index.constant $r : index
+  %orow$r = index.add %row0, %ro$r : index
+  %olive$r = index.cmp ult, %orow$r, %rows : index
+  %ok$r = scalar.andi %olive$r, %col_live : i1
+  scf.if %ok$r {
+    %ob$r = index.assume %orow$r [lt(%orow$r, %rows)] : index
+    %inv$r = view.load %s_view[%ob$r, %c1] : view<[%rows]x2xf32> -> f32
+    %val$r = scalar.mulf %r$r, %inv$r : f32
+    view.store %val$r, %y_view[%ob$r, %wcol] : f32, view<[%rows]x$Nxf32>
+  }''', r=r, N=N))
+    L.append("  kernel.return\n}\n")
+    return name, "\n".join(L)
+
+
 def gemm(fmt, K, N, mode="store"):
-    """Shape-specialized GEMM: Y[rows, N] (+)= X16[rows, K] . W[N, K]^T; rows a multiple of 64."""
+    """Shape-specialized GEMM: Y[rows, N] (+)= X16[rows, K] . W[N, K]^T; rows a multiple of 64.
+    Shapes the WMMA tiles cannot cover (K or N not a multiple of 64) take gemm_any (same launch signature)."""
+    if (K % 64 or N % 64) and mode == "store":
+        return gemm_any(fmt, K, N)
     assert K % 64 == 0 and N % 64 == 0, (K, N)
     base = f"{_gg.PREFIX}_gemm_{fmt}_{mode}"; name = f"v_gemm_{fmt}_{mode}_{K}x{N}"
     s = _gg.gemm(fmt, mode).replace(base, name)
@@ -270,7 +351,7 @@ def gemm(fmt, K, N, mode="store"):
 
 def row_scale():
     name = "v_row_scale_f16"
-    src = ROW_SCALE.replace("g_row_scale_f16", name).replace("[range(%k_arg, 256, 65536), multiple_of(%k_arg, 256)]", "[range(%k_arg, 64, 65536), multiple_of(%k_arg, 64)]")
+    src = ROW_SCALE.replace("g_row_scale_f16", name).replace("[range(%k_arg, 256, 65536), multiple_of(%k_arg, 256)]", "[range(%k_arg, 8, 65536), multiple_of(%k_arg, 8)]")
     return name, src
 
 ROW_SCALE = open(_os.path.join(_HERE, "row_scale.loom")).read()
@@ -703,8 +784,10 @@ $PAIR
 # ---- attention: one 32-lane wave per (query, head); online softmax over all (or same-window) keys ----
 def attention(D, NH, S, OQ, OK, OV, scale, window=0, order="raster"):
     """o[t, h*D:(h+1)*D] = softmax(q_t . k_j * scale) v_j over keys j (window > 0: same window x window patch block)."""
-    assert D % 32 == 0
-    G = D // 32
+    # q/k/v rows are read in VW-wide chunks: 32 when the head size allows, else 8 (Qwen3-VL/Qwen3.8 encoders: D = 72)
+    VW = 32 if D % 32 == 0 else 8
+    assert D % VW == 0, f"vision head_dim {D} must be a multiple of 8"
+    G = D // VW
     name = f"v_attn_{D}x{NH}_s{S}_{OQ}_{OK}_{OV}" + (f"_w{window}" if window else "") + ("_" + order if window else "")
     L = [T('''kernel.def export("$NAME") @$NAME(%tokens: index) {
   %c1 = index.constant 1 : index
@@ -743,7 +826,7 @@ def attention(D, NH, S, OQ, OK, OV, scale, window=0, order="raster"):
   %qc$g = index.assume %qc$g1 [range(%qc$g1, 0, $SM32)] : index
   %qr$g = vector.load %qv[%t, %qc$g] : view<[%tokens]x$Sxf32> -> vector<32xf32>
   %scv$g = vector.splat %scale : vector<32xf32>
-  %q$g = vector.mulf %qr$g, %scv$g : vector<32xf32>''', g=g, GO=32 * g, SM32=S - 32, S=S))
+  %q$g = vector.mulf %qr$g, %scv$g : vector<32xf32>''', g=g, GO=VW * g, SM32=S - VW, S=S))
     if window:
         L.append(order_code(order, t="%t") .replace("%py", "%qy").replace("%px", "%qx").replace("%c2o", "%c2q").replace("%c4o", "%c4q").replace("%bw", "%bwq").replace("%blk", "%blkq").replace("%sub", "%subq").replace("%ty", "%tyq").replace("%tx", "%txq").replace("%dy", "%dyq").replace("%dx", "%dxq"))
         L.append(T('''  %cwin = index.constant $WIN : index
@@ -773,7 +856,7 @@ def attention(D, NH, S, OQ, OK, OV, scale, window=0, order="raster"):
       %vc$g = index.assume %vc$g1 [range(%vc$g1, 0, $SM32)] : index
       %vr$g = vector.load %vv[%bj, %vc$g] : view<[%tokens]x$Sxf32> -> vector<32xf32>
       %pd$g = vector.mulf %q$g, %kr$g : vector<32xf32>
-      %ps$g = vector.reduce<addf> %pd$g, %zf : vector<32xf32>, f32''', g=g, GO=32 * g, SM32=S - 32, S=S))
+      %ps$g = vector.reduce<addf> %pd$g, %zf : vector<32xf32>, f32''', g=g, GO=VW * g, SM32=S - VW, S=S))
     ssum = "%ps0"
     for g in range(1, G):
         L.append(f"      %ss{g} = scalar.addf {ssum}, %ps{g} : f32"); ssum = f"%ss{g}"
@@ -807,7 +890,7 @@ def attention(D, NH, S, OQ, OK, OV, scale, window=0, order="raster"):
     for g in range(G):
         L.append(T('''  %aw$g = vector.mulf %acc$g_l, %clv : vector<32xf32>
   %sc$g = index.constant $GO : index
-  vector.store %aw$g, %st[%lane, %sc$g] : vector<32xf32>, view<32x$Dxf32>''', g=g, GO=32 * g, D=D))
+  vector.store %aw$g, %st[%lane, %sc$g] : vector<32xf32>, view<32x$Dxf32>''', g=g, GO=VW * g, D=D))
     L.append(T('''  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %ov = buffer.view %o[%zero] : buffer -> view<[%tokens]x$Exf32>
   %ocol0 = index.mul %h, %cD : index
@@ -827,7 +910,7 @@ def attention(D, NH, S, OQ, OK, OV, scale, window=0, order="raster"):
   kernel.return
 }
 ''', D=D, E=D * NH))
-    return name, "\n".join(L)
+    return name, "\n".join(L).replace("vector<32xf32>", f"vector<{VW}xf32>")
 
 # ---- merges ----
 def avgpool(E, k, scale):

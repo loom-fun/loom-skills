@@ -3,7 +3,8 @@
 Drafting only changes how many tokens one target pass verifies; every committed token is the target's own
 choice (greedy, or the same counter-based draw at the same position with a fixed seed). So the gate compares the
 package as built (drafting on) with the same package and the same compiled program with drafting off (a copy of
-model.json whose execution has draft_depth 0) on identical requests.
+model.json whose execution has draft_depth 0) on identical requests; a package with image input (/v1/models lists
+"image") adds image questions (greedy and seeded sampling), since M-RoPE positions flow through verify and drafting.
 
 usage:
   spec_check.py card PKG                 -> writes PKG/model_target.json (draft_depth 0, one epoch per turn)
@@ -41,7 +42,29 @@ def post(url, body):
     return json.load(urllib.request.urlopen(req, timeout=3600))
 
 
-def requests_set(model):
+def image_requests(model):
+    """Packages with image input: drafting must not change image answers either (M-RoPE positions in verify/draft)."""
+    from vision_golden import builtin_images, data_url
+    ims = builtin_images()
+    out = []
+    for name, samp in (("shapes", {"temperature": 0}), ("wide", {"temperature": 0}),
+                       ("shapes", {"temperature": 0.7, "top_p": 0.9, "top_k": 20, "seed": 7})):
+        im, q = ims[name]
+        out.append({"model": model, "messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": data_url(im)}},
+                                                                             {"type": "text", "text": q + " Answer in detail."}]}],
+                    "max_tokens": 200, "chat_template_kwargs": {"enable_thinking": False}, **samp})
+    return out
+
+
+def has_images(url):
+    try:
+        d = json.load(urllib.request.urlopen(url + "/v1/models", timeout=30))
+        return any("image" in (m.get("input_modalities") or []) for m in d.get("data", []))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def requests_set(model, images=False):
     out = []
     for i, p in enumerate(PROMPTS):
         for samp in ({"temperature": 0}, {"temperature": 0.7, "top_p": 0.9, "top_k": 20, "seed": 1000 + i}):
@@ -53,12 +76,12 @@ def requests_set(model):
                 "max_tokens": 200, "temperature": 0, "chat_template_kwargs": {"enable_thinking": False}})
     out.append({"model": model, "messages": [{"role": "user", "content": "Think step by step: what is 17 * 23?"}],
                 "max_tokens": 300, "temperature": 0})
-    return out
+    return out + (image_requests(model) if images else [])
 
 
 def record(url, model, path):
     with open(path, "w") as f:
-        for i, body in enumerate(requests_set(model)):
+        for i, body in enumerate(requests_set(model, has_images(url))):
             r = post(url, body)
             c = r["choices"][0]
             m = c["message"]
@@ -107,6 +130,7 @@ def compare(a_path, b_path, metrics=None, pkg=None, llama=None):
         req = x.get("request") or {}
         key = json.dumps(req.get("messages"))
         greedy = not req.get("temperature")
+        image = any(isinstance(m.get("content"), list) for m in req.get("messages") or [])   # judged exact (no llama.cpp near-tie)
         if same:
             greedy_ok.setdefault(key, True)
             continue
@@ -114,11 +138,11 @@ def compare(a_path, b_path, metrics=None, pkg=None, llama=None):
         k = next((j for j, (c1, c2) in enumerate(zip(s1, s2)) if c1 != c2), min(len(s1), len(s2)))
         print(f"DIFF request {x['i']} at char {k}: target {s1[max(0, k - 40):k + 40]!r} | draft {s2[max(0, k - 40):k + 40]!r}")
         ok = False
-        if pkg and llama and greedy and "message" in x:
+        if pkg and llama and greedy and "message" in x and not image:
             ok, why = near_tie_divergence(x, y, pkg, llama)
             print(f"   {'near-tie' if ok else 'NOT a near-tie'}: {why}")
             greedy_ok[key] = ok
-        elif pkg and llama and not greedy:
+        elif pkg and llama and not greedy and not image:
             ok = greedy_ok.get(key, False)
             print(f"   sampled: {'accepted (its greedy pair is identical or a near-tie)' if ok else 'not accepted'}")
         ties += ok
