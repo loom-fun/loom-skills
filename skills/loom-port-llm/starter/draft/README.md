@@ -184,7 +184,9 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   7: 16/16 exact), but re-reads the weights per 4 tokens: Bolt-E4B with 4 drafting streams at depth 3 took 146 ms per
   epoch vs 69 (drafted c4 throughput 55 vs 116 tok/s), worse than not drafting, so it is not the default. tune.py's
   equivalence check rejects any depth whose single-request output changes; depth 3 (4 tokens, exact) won on every
-  model measured. With SPEC_EXACT every depth tested is exact: Glimmer depth 7 16/16, Flint depth 4 and 7 13/13
+  model measured. Moving the GEMM threshold to 9 tokens (exact single requests at every depth, GEMM only for several
+  streams) cost 22 % with two drafting streams on Bolt-E4B (76.0 vs 59.5 ms per epoch), so the default stays at 5.
+  With SPEC_EXACT every depth tested is exact: Glimmer depth 7 16/16, Flint depth 4 and 7 13/13
   (without it Flint depth 7 flips 7 of 13: MoE routing amplifies the GEMM's rounding). Always compare against
   draft_depth 0 of the SAME package (spec_check.py card): a reference recorded from an earlier build differs on its own
   (a stale Flint reference made the trunk look non-invariant above 4 tokens; it is not). Concurrent epochs that mix a
