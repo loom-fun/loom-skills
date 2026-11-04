@@ -4,10 +4,14 @@ usage: pick_gguf.py ORG/REPO [--gtt-gib N] [--file FILE]
   -> prints "FILE<TAB>CACHED_PATH" on stdout (CACHED_PATH empty when the file must be downloaded), reasons on stderr
 
 Quant tier: Q4 by default (Q4_K_M, UD-Q4_K_XL, Q4_K_S, ...: what Loom ports are built and benchmarked with on Strix
-Halo); QUANT_TIER=Q5|Q6|Q8 asks for a bigger one. The picker never leaves the tier on its own: a heavier quant decodes
+Halo; Q4_K_M itself is the default, the others are only for repos without one); QUANT_TIER=Q5|Q6|Q8 asks for a
+bigger one. The picker never leaves the tier on its own: a heavier quant decodes
 proportionally slower on this bandwidth-bound machine and doubles the download (an earlier run silently fell back to
 Q8_0 because every Q4 file used formats the kit lacked). Within the tier:
-  1. files already in the HF cache (any revision; a ported model is never downloaded twice), then
+  1. the preference order (Q4_K_M first: a cached UD-Q4_K_XL never beats Q4_K_M; another run took that detour), then
+     the HF cache (any revision; a ported model is never downloaded twice). When the chosen file would have to be
+     downloaded but the same quant of the same model is cached under another repo (bartowski/ next to unsloth/),
+     STOP and name that repo: port it instead of downloading. Then
   2. files whose tensor formats the starter decodes (F32 + Q4_K/Q5_K/Q6_K/Q8_0/Q4_0/IQ4_NL/IQ4_XS/Q3_K/IQ3_S; read
      from the local file, or from the header by HTTP range request), then the preference order;
   and the file must FIT: 2 x file + 8 GiB <= min(GTT, 60 % of RAM) (the loom skill's hard rules).
@@ -136,8 +140,13 @@ def main():
     cands = [(p, s) for p, s in files.items() if quant_of(p) in TIERS[tier]]
     if not cands:
         sys.exit(f"no single-file {tier} GGUF ({', '.join(TIERS[tier])}) in {a.repo}: set QUANT_TIER or pass REPO:FILE")
-    cands.sort(key=lambda c: (c[0] not in cached, TIERS[tier].index(quant_of(c[0]))))
+    cands.sort(key=lambda c: (TIERS[tier].index(quant_of(c[0])), c[0] not in cached))
     others = other_cached(a.repo, tier)
+    best = cands[0][0]
+    same = [o for o in others if quant_of(os.path.basename(o.split(":")[-1])) == quant_of(best)]
+    if best not in cached and same:
+        sys.exit(f"STOP: {best} is not cached for {a.repo}, but the same quant is cached at {', '.join(same)}: "
+                 "port that repo (no download), or pass REPO:FILE to choose explicitly")
     if others and not any(c[0] in cached for c in cands):
         print(f"NOTE: not cached for {a.repo}, but cached elsewhere at {tier}: {', '.join(others)} "
               "(port that repo to reuse it)", file=sys.stderr)

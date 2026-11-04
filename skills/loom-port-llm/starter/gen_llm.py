@@ -35,6 +35,9 @@ if gen_draft.enabled() and gen_draft.DRAFT["kind"] == "mtp":
 def nff(i):
     """index SSA of layer i's FFN width."""
     return "%nFF" if FF_UNIFORM else f"%nFF{FFL[i]}"
+# Layers whose ffn_gate and ffn_up use different formats (unsloth UD quants) run two projections + g_silu_mul.
+MIXED_FFN = any(n.endswith("ffn_gate.weight") and CFG["tensors"].get(n.replace("ffn_gate", "ffn_up"), {}).get("type") not in (None, t["type"])
+                for n, t in CFG["tensors"].items())
 G = QH // KVH                             # query heads per KV head (waves per attention workgroup)
 # Prefill flash attention (gen_flash2.py) tiles head_dim over 32*G lanes: it needs a power-of-two group.
 # Otherwise (Qwen3.8: 6) every prefill token takes the listed split-K path (correct, slower prefill).
@@ -2028,6 +2031,37 @@ def gdn_layer(i, b, nm, sz, par):
     return "".join(T)
 
 
+SILU_MUL = r"""
+// f[t, c] = silu(f[t, c]) * u[t, c] for the first n channels of each token (gate/up in different formats).
+kernel.def export("g_silu_mul") @g_silu_mul(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%tokens_arg: index, %n_arg: index, %f: buffer, %u: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %n = index.assume %n_arg [range(%n_arg, 4, 65536), multiple_of(%n_arg, 4)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c4 = index.constant 4 : index
+  %c1024 = index.constant 1024 : index
+  %f_view = buffer.view %f[%zero] : buffer -> view<[%tokens]x[%n]xf32>
+  %u_view = buffer.view %u[%zero] : buffer -> view<[%tokens]x[%n]xf32>
+  %first = index.mul %lane, %c4 : index
+  scf.for %c0v = [%first to %n step %c1024] {
+    %c = index.assume %c0v [range(%c0v, 0, 65532), multiple_of(%c0v, 4), lt(%c0v, %n)] : index
+    %g = vector.load %f_view[%token, %c] : view<[%tokens]x[%n]xf32> -> vector<4xf32>
+    %v = vector.load %u_view[%token, %c] : view<[%tokens]x[%n]xf32> -> vector<4xf32>
+    %sg = vector.logisticf<afn> %g : vector<4xf32>
+    %s = vector.mulf %g, %sg : vector<4xf32>
+    %o = vector.mulf %s, %v : vector<4xf32>
+    vector.store %o, %f_view[%token, %c] : vector<4xf32>, view<[%tokens]x[%n]xf32>
+  }
+  kernel.return
+}
+"""
 MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
 
 
@@ -2087,7 +2121,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %v = buffer.alloca<global> align(256) %kv_size : buffer
   %info = buffer.alloca<global> align(256) %info_size : buffer
   %f = buffer.alloca<global> align(256) %ffn_size : buffer
-  %partials = buffer.alloca<global> align(256) %partial_size : buffer
+{"  %fu = buffer.alloca<global> align(256) %ffn_size : buffer" + chr(10) if MIXED_FFN else ""}  %partials = buffer.alloca<global> align(256) %partial_size : buffer
   // 64 splits per head for decode, 16 for the prefill fallback.
   %c64 = index.constant 64 : index
   // NO_GEMM=1 (diagnostic build): %c_never keeps every epoch on the decode kernels.
@@ -2212,8 +2246,12 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, {pa}, %x, %ffn_norm_{i}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
         fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
-        assert fg == fu, f"layer {i}: ffn_gate {fg} != ffn_up {fu} (split the swiglu linear)"
-        T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", nff(i), H, mode="swiglu") + "\n")
+        if fg == fu:
+            T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", nff(i), H, mode="swiglu") + "\n")
+        else:   # gate and up in different formats (unsloth UD mixes): two projections, then silu(gate) * up
+            T.append("  " + lin(fg, "%h", "%s_h", f"%w_gate_{i}", sz("ffn_gate"), "%f", "%nH", nff(i), H) + "\n")
+            T.append("  " + lin(fu, "%h", "%s_h", f"%w_up_{i}", sz("ffn_up"), "%fu", "%nH", nff(i), H) + "\n")
+            T.append(f"  kernel.launch @g_silu_mul[%t](%t, {nff(i)}, %f, %fu) : [index](index, index, buffer, buffer)\n")
         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {nff(i)}, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
         T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", nff(i), "%nH", FFL[i]) + "\n")
         pf = f"%post_ffn_{i}" if POST_NORM else f"%ffn_norm_{i}"
@@ -2299,6 +2337,8 @@ if __name__ == "__main__":
         parts.append(gdn_kernels(CFG, EPS))
     if spec_kernels:
         parts.append(spec_kernels)
+    if MIXED_FFN:
+        parts.append(SILU_MUL)
     env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
     # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
     env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")

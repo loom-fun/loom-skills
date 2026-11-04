@@ -4,7 +4,7 @@
 #   positional: PORT (default 8160), MEMORY_GIB (default auto, see build.py --memory-gib), e.g. port.sh org/repo ~/work/m 8260 40
 #   0. starts the end-to-end clock (WORKDIR/.e2e_start, unless it exists): qualify.sh sizes the
 #      optimization budget from it
-#   1. the GGUF (FILE, else pick_gguf.py: the Q4 tier by default, a file already in the HF cache first, formats the starter decodes
+#   1. the GGUF (FILE, else pick_gguf.py: Q4_K_M by default, from the HF cache (or the repo that has it cached), formats the starter decodes
 #      and that fits twice in GPU memory; header-only probe) and the base model's tokenizer.json
 #   2. inspect_gguf.py: config + chat block derived from the template and verified (stops on any FAIL)
 #   3. build.py at the native context, fitted to MEMORY_GIB

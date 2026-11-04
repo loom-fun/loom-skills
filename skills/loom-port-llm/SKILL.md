@@ -35,8 +35,8 @@ LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmark/scripts/
   ~/work/mymodel/pkg http://127.0.0.1:8160 ~/work/mymodel/gguf/<file.gguf> ~/work/mymodel/bench [LLAMA_PORT=8130]
 ```
 `port.sh` runs steps 1–6 below deterministically:
-- picks the GGUF (`starter/pick_gguf.py`): the **Q4 tier** (Q4_K_M / UD-Q4_K_XL / Q4_K_S; a bigger tier only
-  with `QUANT_TIER=Q5|Q6|Q8`), a file **already in the HF cache** first (any revision: nothing is downloaded
+- picks the GGUF (`starter/pick_gguf.py`): **Q4_K_M** (then UD-Q4_K_XL / Q4_K_S only when the repo has no Q4_K_M; a bigger
+  tier only with `QUANT_TIER=Q5|Q6|Q8`), then a file **already in the HF cache** (any revision: nothing is downloaded
   twice), formats the starter decodes (incl. unsloth UD's IQ4_XS/IQ4_NL/Q3_K/IQ3_S and Q4_0), and a file that
   fits twice in GPU memory. It never leaves the tier on its own: with no supported Q4 file it stops and names
   the missing formats. Only an uncached file is downloaded (into the HF cache); it is symlinked as
