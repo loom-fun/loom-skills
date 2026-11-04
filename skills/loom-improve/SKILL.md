@@ -34,11 +34,11 @@ needs (section 3, step 5). Each model stresses something different; don't tune t
 
 | Model (HF repo) | Role | What it stresses |
 |---|---|---|
-| `unsloth/Qwen3.5-0.8B-GGUF` | cheapest trial (~20 min); the only starter-path model | starter path end to end, gated delta-net hybrid, 262k context (the full-context probe is the slow step); vision: `qwen3vl_merger` + M-RoPE source positions |
-| `unsloth/NVIDIA-Nemotron-3.5-Bolt-E4B-GGUF` | challenge | gemma4: PLE, KV sharing, head_dim 256/512, bf16, Gemma-4 tool/channel chat format (has `reference/gemma4-example`); vision: `gemma4v` (clamped linears, unscaled rows, PLE token 0), whole-conversation chat kit -> generic image rendering |
-| `LiquidAI/LFM2.5-24B-A2B-GGUF` | challenge | lfm2moe: short-conv + MoE, head_dim 64, pythonic tool calls, `{% generation %}` template |
-| `unsloth/Muse-Glimmer-30B-GGUF` | challenge | 30B dense at ~9 tok/s: gate cost on big models, channel (ATEM) chat format, norm RoPE, NoPE/SWA layers; vision: `muse-glimmer` (50-layer encoder, windowed attention, Lanczos resize, rows through the embedding norm) |
-| `unsloth/flint-GGUF` | challenge | 40B MoE with sinks + sliding window, arch newer than installed llama.cpp builds, GGUF picking under memory limits |
+| `unsloth/Qwen3.5-0.8B-GGUF` | cheapest trial (~20 min); the only starter-path model | starter path end to end, gated delta-net hybrid, 262k context (the full-context probe is the slow step); vision: `qwen3vl_merger` + M-RoPE source positions; drafting: MTP (`*-MTP-GGUF`) and n-gram with GDN replay (launch-bound: tune.py keeps none) |
+| `unsloth/NVIDIA-Nemotron-3.5-Bolt-E4B-GGUF` | challenge | gemma4: PLE, KV sharing, head_dim 256/512, bf16, Gemma-4 tool/channel chat format (has `reference/gemma4-example`); vision: `gemma4v` (clamped linears, unscaled rows, PLE token 0), whole-conversation chat kit -> generic image rendering; drafting: NVIDIA's BF16-only DFlash drafter (vendor repo search, Q8_0 requantization, `embedding_scale`) |
+| `LiquidAI/LFM2.5-24B-A2B-GGUF` | challenge | lfm2moe: short-conv + MoE, head_dim 64, pythonic tool calls, `{% generation %}` template; drafting: no drafter exists, so n-gram only, with the short-conv state replay |
+| `unsloth/Muse-Glimmer-30B-GGUF` | challenge | 30B dense at ~9 tok/s: gate cost on big models, channel (ATEM) chat format, norm RoPE, NoPE/SWA layers; vision: `muse-glimmer` (50-layer encoder, windowed attention, Lanczos resize, rows through the embedding norm); drafting: z-lab DFlash2 with a 33280-wide feature projection (`mv_wide`) and the drafter's own block embedding (the target norms its embedding) |
+| `unsloth/flint-GGUF` | challenge | 40B MoE with sinks + sliding window, arch newer than installed llama.cpp builds, GGUF picking under memory limits; drafting: incoai DFlash2 (block 8), MoE verify near-ties at depth > 3 |
 
 Add a model when a user hits a failure none of these reproduce (a new architecture family, chat
 format, quant mix). Before trusting a new eval model, confirm a passing run is possible at all.

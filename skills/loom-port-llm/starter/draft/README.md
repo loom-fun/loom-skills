@@ -111,13 +111,22 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   12.0). The 4-token matvec streams weights once for 2-4 tokens, so look elsewhere first (GDN recurrence/conv
   per span, decode attention, head per 4 rows, the stage chosen for the shape). rocprofv3 sees no kernels
   (Loom's AMD driver bypasses HSA): ablate with NO_GEMM-style build switches and per-stage timing.
-- **DFlash on elastic backing crashes under concurrency** (`driver_failure DATA_LOSS gpu.event_wait`, no kernel
-  page fault logged): two ~300-token prompts 0.5 s apart, or four at once, with DFlash2 drafting, on
-  `--pool_backing=elastic` (the default). The same package passes consistency on `--pool_backing=fixed`, with
-  and without ASan (no out-of-bounds access), and MTP passes on elastic. Suspect an access to a
-  demand-committed page the runtime has not committed (e.g. a draft page-map entry for a newly admitted row):
-  correctness gates cannot see a drafter reading a wrong page, since a bad proposal is just rejected. Until it is
-  found, tune.py's concurrency check rejects DFlash on such packages.
+  Same on other families: Nemotron-3.5-Bolt-E4B (gemma4), no drafting, 1/2/4 streams: 21.5 / 26.2 / 35.0 ms per
+  step; an n-gram depth-3 epoch (verify 4 tokens, negligible drafter) 33.7 ms, a DFlash depth-3 epoch 39.6 ms, while
+  llama.cpp's whole DFlash n-max-3 step is ~31.6 ms at the same tokens per step (2.9). Doubling ablation
+  (loom-optimize `ablate.py`): the 4-token matvecs cost ~25 ms of the 4-stream step vs ~16 ms for the 1-token
+  matvecs of a 1-stream step; attention, norms and head add < 3 ms. A separate 4-token R (`MV_WG4=16` or 128) gains
+  only ~5 % (73.6 -> 77.9 tok/s DFlash) and may break the exactness the shared R guarantees. The lever is the 4-token
+  matvec itself (each lane holds 4 x 32 f32 activations: register pressure, occupancy), for every family.
+- **Intermittent `driver_failure DATA_LOSS gpu.event_wait` under concurrency with DFlash2 on elastic backing**
+  (the default). Qwen3.8-27B and Muse-Glimmer-30B (DFlash2, block 16): four concurrent requests crashed 4 of 4
+  times in one 20-minute window, then 0 of 8 with byte-identical packages on a quiet GPU (shared machine: other
+  processes' GPU work is a suspect). It tracks rows: with `rows: 8` four concurrent passed and six crashed in the
+  bad window; sequential requests past the initial rows never crashed. Not isolated by disabling the selector,
+  the conv modulation or the propose GEMM; DFlash v1 (Nemotron, 8 concurrent) and MTP never crashed. The runtime
+  commits, compacts and trims every cache region including the draft cache (hrx-system state.c), so a
+  draft-region commit gap is unlikely. tune.py's concurrency check stays the guard: it rejects a drafter that
+  crashes (re-run tune.py on a quiet GPU before concluding a model cannot draft).
 - Verification of more than 4 tokens per epoch (DFlash depth > 3, several streams) uses the 4-token matvec once
   per 4 tokens, so weights stream more than once per step. A small-M WMMA GEMM (16-row tiles) is the next lever;
   an f16 8-token matvec and an activation-streaming 16-token matvec were tried and were slower (register
@@ -125,4 +134,15 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
 - The head runs per 4 rows for verify and draft rows (the vocabulary matrix is re-read per 4 predictions).
 - Two-epoch continuation (`continuation_epochs: 2`) is not implemented (one device epoch per host turn).
 - DFlash v1 drafters with full-context attention read the whole context per proposal (DFlash2 windows it).
-- DFlash RoPE uses KV positions; a vision (M-RoPE) port with a DFlash drafter is untested.
+- DFlash RoPE uses KV positions; llama.cpp gives M-RoPE targets' drafters the temporal position (degenerate
+  sections). Text after an image then proposes with shifted positions: lower acceptance, never wrong output.
+  Gemma-4 (gemma4v) and Muse-Glimmer vision ports draft with DFlash and pass the image questions of the spec gate.
+- **Depth > 3 is not bit-exact on every model.** Verifying 6-8 tokens per span takes the f16 WMMA GEMM; 1-token
+  decode the f32 matvec. Muse-Glimmer DFlash2 depth 7 changed 2 of 16 spec-gate completions (a word choice ~900
+  characters in), Flint depth 7 changed 7 of 13 (MoE routing amplifies rounding); both are exact at depth 3. Hence
+  the untuned default depth 3; tune.py may pick 5/7 by speed, and gates.sh's spec gate then judges divergences
+  with llama.cpp's near-tie rule.
+- **n-gram pays for every miss.** loom-serve 0.1.0 verifies a fixed width per speculative span, so a miss costs a
+  4-token step (Nemotron: 33.7 vs 21.3 ms) where llama.cpp's ngram-simple/ngram-mod draft only after a long match
+  and cost nothing on new text. Prompt lookup therefore wins on edit/quote-heavy output (Qwen3.5-0.8B code edit:
+  72 % accepted, 212 vs ~140 tok/s) and loses on the standard mix; tune.py decides per model.
