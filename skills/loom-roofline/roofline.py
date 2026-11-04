@@ -208,9 +208,13 @@ def main():
     rows = []
     gain = 1.0
     if a.draft_tune and os.path.exists(a.draft_tune):
-        t = json.load(open(a.draft_tune))
-        if t.get("kind", "none") != "none" and t.get("baseline_tps"):
-            gain = max(1.0, t["decode_tps"] / t["baseline_tps"])
+        # the better of the two measured drafting gains: Loom's (draft_tune.json) and llama.cpp's own
+        # (llamacpp_spec.json, same directory): either shows what drafting gets on this model and text
+        for f in (a.draft_tune, os.path.join(os.path.dirname(a.draft_tune) or ".", "llamacpp_spec.json")):
+            if os.path.exists(f):
+                t = json.load(open(f))
+                if t.get("kind", "none") != "none" and t.get("baseline_tps"):
+                    gain = max(gain, t["decode_tps"] / t["baseline_tps"])
     dec = a.bw / wb * gain
     key = "decode_moe" if geo["n_exp"] else "decode"
     ed, sd = EFF[key], STRETCH[key]

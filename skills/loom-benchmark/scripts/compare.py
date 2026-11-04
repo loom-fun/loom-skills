@@ -39,9 +39,9 @@ THINK_END = pkg.tok.token_to_id(pkg.chat.get("think_end", "</think>"))
 
 
 def strip_ws_after_think(g):
-    """Loom's control program drops whitespace after </think> (it is not part of either
-    channel), so raw_from_chat cannot reproduce it: drop a whitespace-only golden token
-    right after </think> (and its top-5 entry) before matching."""
+    """Whitespace after </think> belongs to neither channel: depending on the chat format Loom's control program
+    drops it or raw_from_chat re-adds it from think_close, so it is dropped on both sides (the golden's token and
+    its top-5 entry here; Loom's reconstructed ids at the call site) before matching."""
     ids, top = list(g["ids"]), list(g["top"])
     for i in range(len(ids) - 1):
         if ids[i] == THINK_END and pkg.tok.decode([ids[i + 1]]).strip() == "":
@@ -81,7 +81,9 @@ for g in json.load(open(a.golden)):
         continue
     ch = r["choices"][0]
     text = pkg.raw_from_chat(ch["message"], ch["finish_reason"] == "stop")
-    got = pkg.ids(text)
+    # Same rule on Loom's side: raw_from_chat re-adds think_close's trailing whitespace (Qwen: "\n</think>\n\n"),
+    # which the golden no longer has, so every reasoning answer would diverge right after </think>.
+    got = strip_ws_after_think({"ids": pkg.ids(text), "top": []})["ids"]
     n, gap, near = match(got, g)
     # llama.cpp can emit a non-canonical split (e.g. '[' 'A' where the HF tokenizer gives '[A');
     # identical text is a match, whatever the token boundaries.
