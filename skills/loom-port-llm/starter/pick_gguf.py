@@ -47,7 +47,11 @@ def gtt_bytes():
     except (ValueError, OSError, AttributeError):
         pass
     # LOOM_RESERVED_GIB: memory another resident server already holds (weaver's agent model).
-    return gtt - int(float(os.environ.get("LOOM_RESERVED_GIB") or 0) * 2**30)
+    try:
+        reserved = float(os.environ.get("LOOM_RESERVED_GIB") or 0)
+    except ValueError:
+        sys.exit(f"LOOM_RESERVED_GIB={os.environ['LOOM_RESERVED_GIB']!r} is not a number (GiB)")
+    return gtt - int(reserved * 2**30)
 
 
 def quant_of(name):
