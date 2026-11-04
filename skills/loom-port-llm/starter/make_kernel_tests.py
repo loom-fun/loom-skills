@@ -368,6 +368,14 @@ if cfg.get("recurrent_layers"):
 }}
 """)
 import re
+# Drafting packages decode with the WMMA split kernel (gen_flashd.py, F16 Q and P): each attention-chain case is
+# repeated with it (looser tolerance; run_kernel_tests.sh skips the copy when the package has no _mma kernel).
+for c in list(cases):
+    m = re.search(r"check\.case public @(attention_chain\w*) \{", c)
+    if m and re.search(r"kernel\.launch @(g|gd\d+)_attention_split\[", c):
+        cases.append(re.sub(r"kernel\.launch @(g|gd\d+)_attention_split\[", r"kernel.launch @\1_attention_split_mma[", c)
+                     .replace(f"@{m.group(1)} {{", f"@{m.group(1)}_mma {{", 1)
+                     .replace("atol(3.0e-3) rtol(3.0e-3)", "atol(2.0e-2) rtol(2.0e-2)"))
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
 open(os.path.join(out, "cases.loom-test"), "w", newline="\n").write(text)
