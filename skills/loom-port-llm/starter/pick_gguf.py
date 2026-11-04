@@ -14,7 +14,7 @@ Q8_0 because every Q4 file used formats the kit lacked). Within the tier:
      STOP and name that repo: port it instead of downloading. Then
   2. files whose tensor formats the starter decodes (F32 + Q4_K/Q5_K/Q6_K/Q8_0/Q4_0/IQ4_NL/IQ4_XS/Q3_K/IQ3_S; read
      from the local file, or from the header by HTTP range request), then the preference order;
-  and the file must FIT: 2 x file + 8 GiB <= min(GTT, 60 % of RAM) (the loom skill's hard rules).
+  and the file must FIT: 2 x file + 8 GiB <= min(GTT, 60 % of RAM) - LOOM_RESERVED_GIB (the loom skill's hard rules).
 No supported file in the tier: STOP (exit 1) naming the missing formats (add them: loom-port-llm 'New quant format').
 Same-tier files of this model cached under other repos (e.g. bartowski/ next to unsloth/) are listed as a NOTE.
 --file FILE: only resolve FILE (cache lookup), no ranking.
@@ -46,7 +46,8 @@ def gtt_bytes():
         gtt = min(gtt, int(0.6 * ram))
     except (ValueError, OSError, AttributeError):
         pass
-    return gtt
+    # LOOM_RESERVED_GIB: memory another resident server already holds (weaver's agent model).
+    return gtt - int(float(os.environ.get("LOOM_RESERVED_GIB") or 0) * 2**30)
 
 
 def quant_of(name):
