@@ -3,9 +3,10 @@
 usage: tune.py WORKDIR PORT MEMORY_GIB MODEL_ID (MEMORY_GIB is ignored: build.py sizes each candidate)   (WORKDIR holds cfg.json, tok/tokenizer.json and pkg/; Loom must not be
                                                  serving another model: one model is loaded at a time)
 Candidates: no drafting; MTP (the GGUF's NextN block) at depths 1-4; DFlash (cfg["drafter"], found by find_drafter.py)
-at depths 3, 5, 7 (capped by its block). Each method is built once; a depth is only a model.json setting (the
-width-specialized stages compile on first use). Every candidate is served alone and timed on decode-heavy requests
-(short essay, code, a tool-call turn, a reasoning answer; greedy, client-side tokens/s). The fastest candidate
+at depths 3, 5, 7 (capped by its block); n-gram prompt lookup (any model, no weights) at depths 2, 3, 5. Each method
+is built once; a depth is only a model.json setting (the width-specialized stages compile on first use). Every
+candidate is served alone and timed on decode-heavy requests (short essay, code, a tool-call turn, a reasoning answer,
+a code edit that returns most of its input as agents' file edits do; greedy, client-side tokens/s). The fastest candidate
 wins if it beats no drafting by at least 3 %; its kind/depth go to cfg["drafter"] and pkg/ is rebuilt with it
 (build.py --draft auto reads them). Prints TUNE_RESULT {...} with the full table (the report shows it).
 SPEC=off skips tuning and builds without drafting.
@@ -35,6 +36,14 @@ WORK = [
     ([{"role": "user", "content": "Write a Python class implementing an LRU cache with get and put, with type hints and docstrings."}], {}),
     ([{"role": "user", "content": "Find recent news about fusion energy and summarize it. Use the search tool first."}], {"tools": TOOLS}),
     ([{"role": "user", "content": "Explain step by step why the sum of the first n odd numbers is n squared."}], {}),
+    ([{"role": "user", "content": "Add a docstring to each method of this class and return the whole class, otherwise unchanged:\n\n"
+       "class Inventory:\n    def __init__(self):\n        self.items = {}\n\n    def add(self, name, count=1):\n"
+       "        self.items[name] = self.items.get(name, 0) + count\n        return self.items[name]\n\n"
+       "    def remove(self, name, count=1):\n        if self.items.get(name, 0) < count:\n"
+       "            raise ValueError(f'not enough {name}')\n        self.items[name] -= count\n"
+       "        if self.items[name] == 0:\n            del self.items[name]\n\n    def total(self):\n"
+       "        return sum(self.items.values())\n\n    def report(self):\n"
+       "        return '\\n'.join(f'{k}: {v}' for k, v in sorted(self.items.items()))\n"}], {}),
 ]
 
 
@@ -99,6 +108,7 @@ def main():
             kinds.append(("mtp", [1, 2, 3, 4]))
         if (cfg.get("drafter") or {}).get("gguf"):
             kinds.append(("dflash", [3, 5, 7]))
+        kinds.append(("ngram", [2, 3, 5]))   # every model: prompt lookup needs no drafter
     table, best, cand_mem, chats = [], ("none", 0, 0.0), {}, {}
     build = [T, os.path.join(STARTER, "build.py"), cfg_path]
     # No --memory-gib: each candidate (and the final package) sizes its own budget for the full native context

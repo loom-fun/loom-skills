@@ -5,7 +5,9 @@ Candidates, each served alone (llamacpp_server.sh, 4 slots, unified KV of CTX) a
 requests Loom's tune.py uses (loom-port-llm/starter/draft/tune.py WORK; greedy, client-side tokens/s; thinking off
 when the package's chat toggles it, as tune.py does, so both sides decode the same kind of text):
   none; --spec-type draft-mtp at --spec-draft-n-max 1-4 when the GGUF has a NextN/MTP block (cfg["mtp"]);
-  --spec-type draft-dflash with the DFlash drafter Loom found (cfg["drafter"]["gguf"]) at n-max 3, 5, 7.
+  --spec-type draft-dflash with the DFlash drafter Loom found (cfg["drafter"]["gguf"]) at n-max 3, 5, 7;
+  n-gram drafting for every model (Loom's tune.py always tries its prompt-lookup drafter): --spec-type ngram-simple and
+  ngram-mod at llama.cpp's defaults (they draft only after a long match, so they cost little on new text).
 A candidate the build rejects (old build, unsupported arch) is reported and skipped. The fastest wins if it beats
 no drafting by at least 3 % (the rule tune.py applies to Loom). OUT = {"args": "...", "kind", "n_max", "decode_tps",
 "baseline_tps", "build", "table"}; qualify.sh / finalize.sh export its args as LLAMA_SPEC, which llamacpp_server.sh
@@ -48,6 +50,7 @@ def main():
         if d and os.path.exists(d):
             cands += [("dflash", n, f"--spec-type draft-dflash --spec-draft-model {d} --spec-draft-n-max {n} -ngld 99")
                       for n in (3, 5, 7)]
+        cands += [("ngram-simple", 0, "--spec-type ngram-simple"), ("ngram-mod", 0, "--spec-type ngram-mod")]
     else:
         cands = []
     table, base, best = [], 0.0, ("none", 0, "", 0.0)

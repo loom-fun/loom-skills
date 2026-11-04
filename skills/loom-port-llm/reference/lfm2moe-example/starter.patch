@@ -21,7 +21,7 @@
  FFN_NORM = CFG.get("ffn_norm_tensor", "ffn_norm")
  POST_NORM = CFG.get("post_norms", False)
  POST_EPS = CFG.get("post_norm_eps", 1e-8)
-@@ -1971,7 +1976,7 @@
+@@ -2105,7 +2110,7 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -30,7 +30,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -2063,6 +2068,52 @@
+@@ -2197,6 +2202,55 @@
  }
  """
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
@@ -41,6 +41,9 @@
 +def sconv_layer(i, b, nm, sz, par):
 +    """LFM2 short-conv token mixer: h -> in_proj (B|C|X) -> C * conv(B*X) -> o, then o16 for out_proj."""
 +    K = CFG["shortconv"]["l_cache"]
++    if not any(r["name"] == "sconv" for r in MODEL_PARTS.setdefault("replay", [])):   # speculative verification
++        from gen_sconv import replay_spec
++        MODEL_PARTS["replay"].append(replay_spec(CFG))
 +    P = [par("win", "shortconv.in_proj"), par("wout", "shortconv.out_proj"),
 +         f'    %conv_{i} = command.parameter %weights, "{b}shortconv.conv.weight" : view<{H * K}xf32>\n']
 +    return "".join(P + [
@@ -83,7 +86,7 @@
  
  
  def model():
-@@ -2138,7 +2189,8 @@
+@@ -2272,7 +2326,8 @@
    %pml_size = index.scale %t, %pml_bytes : index, offset -> offset
    %pacc = buffer.alloca<global> align(256) %pacc_size : buffer
    %pml = buffer.alloca<global> align(256) %pml_size : buffer
@@ -93,7 +96,7 @@
    %single = index.cmp eq, %t, %c1 : index
    %big = index.cmp uge, %t, %c128 : index
    %scale_entry = index.constant 8 : offset
-@@ -2170,6 +2222,49 @@
+@@ -2304,6 +2359,49 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -143,7 +146,7 @@
      L_.append(f"""
    kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
    %list_entry = index.constant 4 : offset
-@@ -2183,10 +2278,11 @@
+@@ -2317,10 +2415,11 @@
    %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
    %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
@@ -157,7 +160,7 @@
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
      def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
          """Text of trunk layer i (tensors blk.i.*). ordinal overrides its attention KV-plane ordinal and
-@@ -2197,38 +2293,41 @@
+@@ -2331,38 +2430,41 @@
          par = lambda var, n, ty=None: f'    %{var}_{i} = command.parameter %weights, "{nm(n)}" : {ty or f"view<{sz(n)}xi8>"}\n'
          kind = kind_note or (" (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else ""))
          T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
@@ -210,7 +213,7 @@
    scf.if %gemm {{
  {"" if NO_FLASH else f"    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)" + chr(10)}    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
      kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
-@@ -2240,20 +2339,23 @@
+@@ -2374,20 +2476,23 @@
      kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
    }}
  """)
@@ -244,7 +247,7 @@
          pf = f"%post_ffn_{i}" if POST_NORM else f"%ffn_norm_{i}"
          if last_norm:
              nn = last_norm
-@@ -2339,6 +2441,28 @@
+@@ -2479,6 +2584,28 @@
          parts.append(spec_kernels)
      if MIXED_FFN:
          parts.append(SILU_MUL)

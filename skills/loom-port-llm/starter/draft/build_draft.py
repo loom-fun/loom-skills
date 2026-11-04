@@ -38,6 +38,8 @@ def root_sources(cfg, draft):
     head = [] if cfg.get("tied_embeddings") else ["model"]
     if draft["kind"] == "mtp":
         return ["model"] + head + ["model"], ["model"] * (1 + 6 + (2 if cfg.get("qk_norm") else 0))
+    if draft["kind"] == "ngram":   # prompt lookup reads no weights
+        return [], []
     return ["model"] + head + ["draft", "draft"], ["draft", "draft"]
 
 
@@ -50,8 +52,8 @@ def _bind(stage, sources):
 def patch_prepare(text, draft, cfg):
     kind = draft["kind"]
     psrc, wsrc = root_sources(cfg, draft)
-    warm_root = {"mtp": "llm_mtp_warm", "dflash": "llm_dflash_warm"}[kind]
-    propose_root = {"mtp": "llm_mtp_propose", "dflash": "llm_dflash_propose"}[kind]
+    warm_root = {"mtp": "llm_mtp_warm", "dflash": "llm_dflash_warm", "ngram": "llm_ngram_warm"}[kind]
+    propose_root = {"mtp": "llm_mtp_propose", "dflash": "llm_dflash_propose", "ngram": "llm_ngram_propose"}[kind]
     block = draft.get("block_size", 1) if kind == "dflash" else 1
     text = _sub(text, '''// "weights.loom"''', f'''// "llm_verify", "{warm_root}", "{propose_root}", "llm.width", "llm.epoch_spans", "llm.epoch_tokens"
 global.rodata.def @verify_root = bytes("{hx("llm_verify")}")
@@ -152,7 +154,7 @@ global.rodata.def @draft_scope = bytes("{hx("draft")}")
     %draft_view = buffer.view %state[%draft_at] : buffer -> view<3xi32>
     view.store %first_propose, %draft_view[0] : i32, view<3xi32>
     view.store %levels32, %draft_view[1] : i32, view<3xi32>
-    %kind32 = scalar.constant {1 if kind == "mtp" else 2} : i32
+    %kind32 = scalar.constant {dict(mtp=1, dflash=2, ngram=3)[kind]} : i32
     view.store %kind32, %draft_view[2] : i32, view<3xi32>
   }}
   %smaller = scalar.cmpi ult, %maximum, %prefill : i64
@@ -170,6 +172,8 @@ def patch_storage(text, cfg, draft):
     H = cfg["hidden"]
     if draft["kind"] == "mtp":
         pos_bytes, planes, rows_per_token, carry_stride = cfg["kv_heads"] * cfg["head_dim"] * 2, 2 * len(cfg["mtp"]["layers"]), 1, 4 * H
+    elif draft["kind"] == "ngram":   # token history: one i32 per position, no carry
+        pos_bytes, planes, rows_per_token, carry_stride = 4, 1, 1, 0
     else:   # DFlash: features of every tap per token, no carry, two planes per draft layer
         pos_bytes, planes, rows_per_token, carry_stride = draft["kv_heads"] * draft["head_dim"] * 2, 2 * draft["layers"], draft["taps"], 0
     sig_old = "func.def public @llm_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer) {\n"
@@ -257,7 +261,7 @@ def patch_storage(text, cfg, draft):
 
 # ---------------------------------------------------------------------------------------------------
 def patch_control(text, cfg, draft):
-    dflash = draft["kind"] == "dflash"
+    dflash = draft["kind"] in ("dflash", "ngram")   # stage signatures: no MTP carry
     mrope = bool((cfg.get("vision") or {}).get("mrope"))
     source_step = 1 if mrope else 2   # text-only ports advance the opaque source position by 2 per input
     # sampling records move behind the larger control header

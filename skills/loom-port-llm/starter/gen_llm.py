@@ -435,6 +435,8 @@ def mv(fmt, K, R=16, TG=1, swiglu=False, suffix=""):
     token group and activations once per workgroup. Waves reduce with shuffles;
     one barrier folds the wave partials."""
     groups = K // 32
+    if groups > 1024:
+        return mv_wide(fmt, K, R, TG, swiglu, suffix)
     lanes = (groups + 31) // 32 * 32
     waves = lanes // 32
     rb = row_bytes(fmt, K)
@@ -545,6 +547,138 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %outputs = index.constant {R * TG} : index
   %lanes_step = index.constant {lanes} : index
   // R*TG outputs may exceed the lane count (one-wave rows): lanes stride over them.
+  scf.for %wr0 = [%workitem to %outputs step %lanes_step] {{
+    %wr = index.assume %wr0 [range(%wr0, 0, {R * TG - 1})] : index
+    %rr_v = index.div %wr, %tg : index
+    %rr = index.assume %rr_v [range(%rr_v, 0, {R - 1})] : index
+    %jj_v = index.rem %wr, %tg : index
+    %jj = index.assume %jj_v [range(%jj_v, 0, {TG - 1})] : index
+    %tok_raw = index.add %token0, %jj : index
+    %tok_live = index.cmp ult, %tok_raw, %tokens : index
+    scf.if %tok_live {{""")
+    for wi in range(nw):
+        L.append(f"""      %t{wi} = scf.for %ww = [%c0 to %cW step %c1](%acc = %zero_f : f32) -> (f32) {{
+        %bw = index.assume %ww [range(%ww, 0, {waves - 1})] : index
+        %p = view.load %pv[{wi}, %bw, %rr, %jj] : view<{nw}x{waves}x{R}x{TG}xf32> -> f32
+        %nx = scalar.addf %acc, %p : f32
+        scf.yield %nx : f32
+      }}""")
+    if swiglu:
+        L.append("""      %silu = scalar.siluf<afn> %t0 : f32
+      %value = scalar.mulf %silu, %t1 : f32""")
+    else:
+        L.append("      %value = scalar.addf %t0, %zero_f : f32")
+    L.append("""      %out_row = index.add %row_base, %rr : index
+      func.call @g_store_row(%y, %tokens, %n, %tok_raw, %out_row, %value, %accumulate) : (buffer, index, index, index, index, f32, i32)
+    }
+  }
+  kernel.return
+}
+""")
+    return "\n".join(L)
+
+
+def mv_wide(fmt, K, R=16, TG=1, swiglu=False, suffix=""):
+    """mv() for K > 32768 (more 32-value groups than a 1024-lane workgroup has lanes; e.g. a DFlash drafter's
+    feature projection over 5 taps of a 6656-wide model). Same name, launch shape and arguments as mv(); each
+    lane accumulates GPL groups strided by 1024 per row and token, the waves reduce as in mv()."""
+    groups = K // 32
+    lanes, waves = 1024, 32
+    GPL = (groups + lanes - 1) // lanes
+    rb = row_bytes(fmt, K)
+    nw = 2 if swiglu else 1
+    name = f"g_mv_{fmt}_k{K}" + ("_swiglu" if swiglu else "") + (f"_t{TG}" if TG > 1 else "") + suffix
+    wargs = "%w: buffer, %w2: buffer" if swiglu else "%w: buffer"
+    L = [f"""
+kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
+  %c1 = index.constant 1 : index
+  %lanes = index.constant {lanes} : index
+  %rows_per = index.constant {R} : index
+  %tg = index.constant {TG} : index
+  %tg_less = index.constant {TG - 1} : index
+  %row_groups = index.div %n, %rows_per : index
+  %tg_pad = index.add %tokens, %tg_less : index
+  %token_groups = index.div %tg_pad, %tg : index
+  kernel.launch.config workgroups(%token_groups, %row_groups, %c1) workgroup_size(%lanes, %c1, %c1) : index
+}} launch(%n_arg: index, %tokens_arg: index, %accumulate: i32, %x: buffer, {wargs}, %y: buffer) {{
+  %n = index.assume %n_arg [range(%n_arg, {R}, 262144), multiple_of(%n_arg, {R})] : index
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %group_id = kernel.workgroup.id<y> : index
+  %tgroup_id = kernel.workgroup.id<x> : index
+  %workitem_id = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem_id [range(%workitem_id, 0, {lanes - 1})] : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, {waves - 1})] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %rows_per = index.constant {R} : index
+  %tg = index.constant {TG} : index
+  %cW = index.constant {waves} : index
+  %groups = index.constant {groups} : index
+  %row_bytes = index.constant {rb} : offset
+  %block_bytes = index.constant {FMT[fmt]} : offset
+  %zero_f = scalar.constant 0.0 : f32
+  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{groups}x32xf32>
+  %row_base = index.mul %group_id, %rows_per : index
+  %token0 = index.mul %tgroup_id, %tg : index
+  %g_last = index.constant {groups - 1} : index
+  %cgpb = index.constant {SB[fmt] // 32} : index
+  %part_bytes = index.constant {waves * R * TG * nw * 4} : offset
+  %parts = buffer.alloca<workgroup> align(16) %part_bytes : buffer
+  %pv = buffer.view %parts[%zero] : buffer -> view<{nw}x{waves}x{R}x{TG}xf32>
+  %first = index.cmp eq, %lane, %c0 : index"""]
+    for p in range(GPL):
+        L.append(f"""  %gs{p} = index.constant {p * lanes} : index
+  %gi{p} = index.add %workitem, %gs{p} : index
+  %ok{p} = index.cmp ult, %gi{p}, %groups : index
+  %gc{p} = index.min %gi{p}, %g_last : index
+  %g{p} = index.assume %gc{p} [range(%gc{p}, 0, {groups - 1})] : index
+  %blk{p} = index.div %g{p}, %cgpb : index
+  %within{p} = index.rem %g{p}, %cgpb : index
+  %ba{p} = index.scale %blk{p}, %block_bytes : index, offset -> offset""")
+    L.append(f"""  scf.for %r = [%c0 to %rows_per step %c1] {{
+    %row_value = index.add %row_base, %r : index
+    %row = index.assume %row_value [lt(%row_value, %n)] : index
+    %ro = index.scale %row, %row_bytes : index, offset -> offset
+    %rb = index.assume %r [range(%r, 0, {R - 1})] : index""")
+    for wi, w in enumerate(["w", "w2"] if swiglu else ["w"]):
+        for p in range(GPL):
+            L.append(f"""    %o{wi}_{p} = index.add %ro, %ba{p} : offset
+    %wv{wi}_{p} = scf.if %ok{p} -> (vector<32xf32>) {{
+      %v = func.call @g_{fmt}_values(%{w}, %o{wi}_{p}, %within{p}) : (buffer, offset, index) -> (vector<32xf32>)
+      scf.yield %v : vector<32xf32>
+    }} else {{
+      scf.yield %zero32 : vector<32xf32>
+    }}""")
+        for j in range(TG):
+            prev = "%zero_f"
+            for p in range(GPL):
+                # activations are re-read per row (L1/L2): caching GPL x TG groups in registers does not fit 1024 lanes
+                L.append(f"""    %tj{wi}_{j}_{p} = index.constant {j} : index
+    %tok{wi}_{j}_{p} = index.add %token0, %tj{wi}_{j}_{p} : index
+    %live{wi}_{j}_{p} = index.cmp ult, %tok{wi}_{j}_{p}, %tokens : index
+    %use{wi}_{j}_{p} = scalar.andi %live{wi}_{j}_{p}, %ok{p} : i1
+    %pa{wi}_{j}_{p} = scf.if %use{wi}_{j}_{p} -> (f32) {{
+      %tk = index.assume %tok{wi}_{j}_{p} [lt(%tok{wi}_{j}_{p}, %tokens)] : index
+      %xv = vector.load %x_view[%tk, %g{p}, %c0] : view<[%tokens]x{groups}x32xf32> -> vector<32xf32>
+      %d = vector.dotf<reassoc|contract> %wv{wi}_{p}, %xv, {prev} : vector<32xf32>, vector<32xf32>, f32
+      scf.yield %d : f32
+    }} else {{
+      scf.yield {prev} : f32
+    }}""")
+                prev = f"%pa{wi}_{j}_{p}"
+            L.append(f"""    %s{wi}_{j} = kernel.subgroup.reduce<addf> {prev} : f32
+    scf.if %first {{
+      view.store %s{wi}_{j}, %pv[{wi}, %wave, %rb, {j}] : f32, view<{nw}x{waves}x{R}x{TG}xf32>
+    }}""")
+    L.append("  }")
+    L.append(f"""  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %outputs = index.constant {R * TG} : index
+  %lanes_step = index.constant {lanes} : index
   scf.for %wr0 = [%workitem to %outputs step %lanes_step] {{
     %wr = index.assume %wr0 [range(%wr0, 0, {R * TG - 1})] : index
     %rr_v = index.div %wr, %tg : index
@@ -2295,7 +2429,7 @@ if __name__ == "__main__":
                       GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
                       head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
                       prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin,
-                      fmt=fmt_of, size=tensor_bytes, mtp_layer=MTP_LAYER)
+                      fmt=fmt_of, size=tensor_bytes, mtp_layer=MTP_LAYER, replay=MODEL_PARTS.get("replay", []))
         if gen_draft.DRAFT["kind"] == "dflash":
             import gen_dflash
             dcfg = gen_dflash.config(gen_draft.DRAFT["gguf"])
@@ -2308,16 +2442,22 @@ if __name__ == "__main__":
                     n *= d
                 return n * 4 if t["type"] == "f32" else n // SB[t["type"]] * FMT[t["type"]]
             gfacts.update(dflash=dcfg, dflash_taps=[t - 1 for t in dcfg["target_layers"]], L=L, CHUNKS=CHUNKS, V=V,
-                          row_bytes=row_bytes, FMT=FMT, SB=SB, dfmt=lambda n: DT[n]["type"], dsize=dsize)
+                          row_bytes=row_bytes, FMT=FMT, SB=SB, dfmt=lambda n: DT[n]["type"], dsize=dsize,
+                          EFMT=EFMT, embed_plain=not EMBED_NORM and not _ES)
         spec = [gen_draft.advance_program(program, gfacts), gen_draft.verify_program(program, gfacts)]
         if MTP_LAYER is not None:
             spec.append(gen_draft.mtp_programs(gfacts))
         if gen_draft.DRAFT["kind"] == "dflash":
             spec.append(gen_dflash.programs(gfacts))
+        if gen_draft.DRAFT["kind"] == "ngram":
+            import gen_ngram
+            spec.append(gen_ngram.programs(gfacts))
         program = gen_draft.small_gemm("\n".join(spec))
         spec_kernels = gen_draft.kernels(gfacts)
         if gen_draft.DRAFT["kind"] == "dflash":
             spec_kernels += gen_dflash.kernels(gfacts)
+        if gen_draft.DRAFT["kind"] == "ngram":
+            spec_kernels += gen_ngram.kernels(gfacts)
     if any(f == "f32" for f, *_ in USED_MV | USED_MV_R) or "f32" in USED_GEMM:
         COMMON += F32_VALUES
     if {f for f, *_ in USED_MV | USED_MV_R} & LOWBIT or set(USED_GEMM) & LOWBIT or any(t["type"] in LOWBIT for t in TENS.values()):

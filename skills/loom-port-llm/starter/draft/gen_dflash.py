@@ -44,7 +44,7 @@ def config(path):
         "kv_heads": kv, "head_dim": d, "ffn": A("feed_forward_length"), "rms_eps": A("attention.layer_norm_rms_epsilon", 1e-6),
         "rope_theta": A("rope.freq_base", 10000.0), "block_size": A("block_size", 16), "target_layers": list(A("target_layers")),
         "window": A("attention.sliding_window") or 0, "conv": conv, "selector": sel,
-        "logit_scale": A("logit_scale"), "softcap": A("final_logit_softcapping"),
+        "logit_scale": A("logit_scale"), "softcap": A("final_logit_softcapping"), "embed_scale": A("embedding_scale"),
         "mask_id": f("tokenizer.ggml.mask_token_id"), "tensors": tensors,
     }
 
@@ -52,6 +52,87 @@ def config(path):
 def tap_layers(cfg):
     """Trunk layer index after which each feature is captured (HF hidden_states[t] = output of layer t - 1)."""
     return [t - 1 for t in cfg["dflash"]["target_layers"]]
+
+
+def own_embed(g):
+    """The drafter embeds its block itself (llama.cpp dflash.cpp): the target's raw token embedding row times the
+    drafter's embedding_scale (Gemma-family drafters carry sqrt(hidden)), then its first attn_norm with its own eps.
+    The trunk's g_embed does exactly that only when the target applies no embedding norm/scale of its own and the
+    drafter neither scales nor uses another eps (Qwen): then propose keeps g_embed and the package is unchanged."""
+    F = g["dflash"]
+    return not (g.get("embed_plain", True) and not F.get("embed_scale") and float(F["rms_eps"]) == float(g["EPS"]))
+
+
+def embed_kernel(g):
+    F = g["dflash"]
+    H, HG, V, EF = g["H"], g["HG"], g["V"], g["EFMT"]
+    scale = float(F.get("embed_scale") or 1.0)
+    return f"""
+// Draft block embedding (own_embed): x[t] = embedding[id] * {scale!r}, h[t] = rmsnorm(x[t]) * w (drafter eps).
+kernel.def export("g_dfl_embed") @g_dfl_embed(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %ids: buffer, %table: buffer, %w: buffer, %x: buffer, %h: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %cgpb = index.constant {g["SB"][EF] // 32} : index
+  %groups = index.constant {HG} : index
+  %zero_f = scalar.constant 0.0 : f32
+  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
+  %raw = view.load %ids_view[%token] : view<[%tokens]xi32> -> i32
+  %c0_i32 = scalar.constant 0 : i32
+  %vocab_last = scalar.constant {V - 1} : i32
+  %low = scalar.maxsi %raw, %c0_i32 : i32
+  %clamped = scalar.minsi %low, %vocab_last : i32
+  %bounded = scalar.assume %clamped [range(%clamped, 0, {V - 1})] : i32
+  %id = index.cast %bounded : i32 to index
+  %row_bytes = index.constant {g["row_bytes"](EF, H)} : offset
+  %block_bytes = index.constant {g["FMT"][EF]} : offset
+  %row_origin = index.scale %id, %row_bytes : index, offset -> offset
+  %active = index.cmp ult, %lane, %groups : index
+  %values = scf.if %active -> (vector<32xf32>) {{
+    %block = index.div %lane, %cgpb : index
+    %within = index.rem %lane, %cgpb : index
+    %block_add = index.scale %block, %block_bytes : index, offset -> offset
+    %origin = index.add %row_origin, %block_add : offset
+    %v = func.call @g_{EF}_values(%table, %origin, %within) : (buffer, offset, index) -> (vector<32xf32>)
+    scf.yield %v : vector<32xf32>
+  }} else {{
+    scf.yield %zero32 : vector<32xf32>
+  }}
+  %scale_s = scalar.constant {scale!r} : f32
+  %scales = vector.splat %scale_s : vector<32xf32>
+  %scaled = vector.mulf %values, %scales : vector<32xf32>
+  %squares = vector.mulf %scaled, %scaled : vector<32xf32>
+  %local = vector.reduce<addf> %squares, %zero_f : vector<32xf32>, f32
+  %sum = kernel.workgroup.reduce<addf> %local : f32
+  %count = scalar.constant {float(H)!r} : f32
+  %mean = scalar.divf %sum, %count : f32
+  %eps = scalar.constant {float(F["rms_eps"])!r} : f32
+  %stable = scalar.addf %mean, %eps : f32
+  %inverse = scalar.rsqrtf %stable : f32
+  %inverses = vector.splat %inverse : vector<32xf32>
+  scf.if %active {{
+    %bl = index.assume %lane [range(%lane, 0, {HG - 1})] : index
+    %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
+    %h_view = buffer.view %h[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
+    %w_view = buffer.view %w[%zero] : buffer -> view<{HG}x32xf32>
+    vector.store %scaled, %x_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{HG}x32xf32>
+    %weights = vector.load %w_view[%bl, %c0] : view<{HG}x32xf32> -> vector<32xf32>
+    %n = vector.mulf %scaled, %inverses : vector<32xf32>
+    %hv = vector.mulf %n, %weights : vector<32xf32>
+    vector.store %hv, %h_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{HG}x32xf32>
+  }}
+  kernel.return
+}}
+"""
 
 
 def kernels(g):
@@ -65,7 +146,7 @@ def kernels(g):
     LN = 2.0 * math.log(F["rope_theta"]) / D
     POSB = KVH * D * 2
     W = F["window"] or 0
-    T = []
+    T = [embed_kernel(g)] if own_embed(g) else []
     # ---- feature taps
     T.append(f"""
 // feat[t][slot] = x[t] (the residual stream after a target layer listed in dflash.target_layers).
@@ -1053,6 +1134,9 @@ command.program.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buf
     vis = ", %metadata, %info" if g["VISION"] else ""
     vty = ", buffer, buffer" if g["VISION"] else ""
     conv = F["conv"]
+    embed_launch = (f"  kernel.launch @g_dfl_embed[%t](%t, %tokens, %embedding, %first_norm, %x, %h) : [index](index, buffer, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)\n"
+                    if own_embed(g) else
+                    f"  kernel.launch @g_embed[%t](%t, %tokens{vis}, %embedding, %first_norm, %x, %h) : [index](index, buffer{vty}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)\n")
     P = [f"""
 // DFlash proposals: the drafter runs [anchor, <mask> x {BS - 1}] blocks for the PROPOSE spans and publishes
 // draft_depth tokens per block into the verifier's input slots.
@@ -1088,8 +1172,7 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
   kernel.launch @g_dfl_prepare(%epoch_spans, %spans, %epoch_tokens, %depth, %epoch, %target_tokens, %metadata, %tokens, %slots, %rows_meta) : (index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
   %first_norm = {_w("%w_draft", "blk.0.attn_norm.weight", g)}
-  kernel.launch @g_embed[%t](%t, %tokens{vis}, %embedding, %first_norm, %x, %h) : [index](index, buffer{vty}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
-"""]
+{embed_launch}"""]
     if conv:
         NGR = H // conv["group"]
         CW = 2 * conv["taps"] * NGR

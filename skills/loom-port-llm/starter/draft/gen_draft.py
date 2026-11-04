@@ -32,7 +32,7 @@ DRAFT = json.loads(os.environ.get("LLM_DRAFT") or "null")
 
 
 def enabled():
-    return bool(DRAFT) and DRAFT.get("kind") in ("mtp", "dflash")
+    return bool(DRAFT) and DRAFT.get("kind") in ("mtp", "dflash", "ngram")
 
 
 def _ids(view, idx, stride_mixed, dst):
@@ -380,9 +380,47 @@ kernel.def export("{name}") @{name}(%tokens: index) {{
   kernel.return
 }}
 """)
+    for W in sorted({w for r in g.get("replay", []) for _, w in r["buffers"]}):
+        T.append(replay_kernels(W))
     if DRAFT and DRAFT.get("kind") == "mtp":
         T.append(mtp_kernels(g))
     return "\n".join(T)
+
+
+def replay_kernels(W):
+    """Capture / restore of W-wide f32 token rows ([slot][token][W]) for the generic recurrent replay (verify_program)."""
+    out = []
+    for name, save in (("save", True), ("load", False)):
+        ld, st = ("%src_v[%token, %c]", "%cap_v[%token, %c]") if save else ("%cap_v[%token, %c]", "%src_v[%token, %c]")
+        out.append(f"""
+kernel.def export("g_spec_{name}_w{W}") @g_spec_{name}_w{W}(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %slot_arg: index, %src: buffer, %capture: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %slot = index.assume %slot_arg [range(%slot_arg, 0, 1023)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [range(%token_id, 0, 2147483646), lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %c256 = index.constant 256 : index
+  %row_bytes = index.constant {W * 4} : offset
+  %plane = index.scale %tokens, %row_bytes : index, offset -> offset
+  %at = index.scale %slot, %plane : index, offset -> offset
+  %zero = index.constant 0 : offset
+  %src_v = buffer.view %src[%zero] : buffer -> view<[%tokens]x{W}xf32>
+  %cap_v = buffer.view %capture[%at] : buffer -> view<[%tokens]x{W}xf32>
+  %width = index.constant {W} : index
+  scf.for %c0v = [%lane to %width step %c256] {{
+    %c = index.assume %c0v [range(%c0v, 0, {W - 1})] : index
+    %v = view.load {ld} : view<[%tokens]x{W}xf32> -> f32
+    view.store %v, {st} : f32, view<[%tokens]x{W}xf32>
+  }}
+  kernel.return
+}}
+""")
+    return "".join(out)
 
 
 def mtp_kernels(g):
@@ -792,6 +830,34 @@ def verify_program(program, g):
                 out.append(f"  kernel.launch @g_gdn_capture[%t](%t, %layer_{layer}, %gq, %galpha, %gbeta, %capture) : [index](index, index, buffer, buffer, buffer, buffer)")
             out.append(line)
         body = "\n".join(out)
+    # Generic recurrent replay (kits register it in gen_llm.MODEL_PARTS["replay"]; e.g. LFM2 short-conv,
+    # reference/lfm2moe-example/gen_sconv.py): {"name", "match": prefix of the trunk launch that reads the
+    # span's inputs, "buffers": [(ssa, f32 width per token)], "replay": f(layer) -> text}. The buffers are
+    # captured before every matching launch; after acceptance they are restored and replay(layer) re-runs the
+    # state update over the accepted inputs (the %replay packet). The kit's state commit must skip speculative
+    # spans (flag bit 4) itself, as gen_gdn.py's does.
+    replays = []
+    for spec in g.get("replay", []):
+        hits = [line for line in body.split("\n") if line.startswith(spec["match"])]
+        if not hits:
+            continue
+        layers = [line.split("%layer_")[1].split(",")[0] for line in hits]
+        allocs = "".join(f"  %rc_{spec['name']}_{bi}_bytes = index.constant {w * 4 * len(hits)} : offset\n"
+                         f"  %rc_{spec['name']}_{bi}_size = index.scale %t, %rc_{spec['name']}_{bi}_bytes : index, offset -> offset\n"
+                         f"  %rc_{spec['name']}_{bi} = buffer.alloca<global> align(256) %rc_{spec['name']}_{bi}_size : buffer\n"
+                         for bi, (_, w) in enumerate(spec["buffers"]))
+        anchor = "  kernel.launch @g_token_info[%t]"
+        body = body.replace(anchor, allocs + anchor, 1)
+        out, k = [], 0
+        for line in body.split("\n"):
+            if line.startswith(spec["match"]):
+                for bi, (buf, w) in enumerate(spec["buffers"]):
+                    out.append(f"  %rs_{spec['name']}_{k}_{bi} = index.constant {k} : index\n"
+                               f"  kernel.launch @g_spec_save_w{w}[%t](%t, %rs_{spec['name']}_{k}_{bi}, {buf}, %rc_{spec['name']}_{bi}) : [index](index, index, buffer, buffer)")
+                k += 1
+            out.append(line)
+        body = "\n".join(out)
+        replays.append((spec, layers))
     head_name, hsize = g["head_name"], g["head_size"]
     tail = f"""  %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
   %width = config.get @llm.width : index
@@ -835,6 +901,13 @@ def verify_program(program, g):
   kernel.launch @g_gdn_qk_norm[%t](%t, %gs, %ginv) : [index](index, buffer, buffer)
   kernel.launch @g_gdn_recurrence[%spans](%t, %spans, %layer_{i}, %replay, %origins, %arena, %gs, %ginv, %galpha, %gbeta, %ssm_a_{i}, %dt_bias_{i}, %graw) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, view<{HV}xf32>, view<{HV}xf32>, buffer)
 """
+    for spec, layers in replays:
+        tail += f"  // ---- {spec['name']} replay over the accepted speculative inputs, published\n"
+        for k, layer in enumerate(layers):
+            for bi, (buf, w) in enumerate(spec["buffers"]):
+                tail += (f"  %rl_{spec['name']}_{k}_{bi} = index.constant {k} : index\n"
+                         f"  kernel.launch @g_spec_load_w{w}[%t](%t, %rl_{spec['name']}_{k}_{bi}, {buf}, %rc_{spec['name']}_{bi}) : [index](index, index, buffer, buffer)\n")
+            tail += spec["replay"](layer)
     tail += "  command.return\n}\n"
     return "config.decl @llm.width : %value: index where [range(%value, 2, 8)]\n\n" + body + tail
 

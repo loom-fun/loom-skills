@@ -35,9 +35,10 @@ ap.add_argument("--temperature", type=float, default=0.0, help="default sampling
 ap.add_argument("--top-p", type=float, default=1.0, help="default top_p when a request sets none")
 ap.add_argument("--top-k", type=int, default=0, help="default top_k when a request sets none (0 = up to 64 candidates)")
 ap.add_argument("--drafter", default=os.environ.get("DRAFTER"), help="DFlash/DFlash2 drafter GGUF (arch dflash) for --draft dflash/auto")
-ap.add_argument("--draft", default=os.environ.get("DRAFT", "auto"), choices=["auto", "mtp", "dflash", "none"],
-                help="speculative decoding drafter. auto (default): the GGUF's MTP/NextN block when it has one; none: "
-                     "ordinary decoding (also SPEC=off). Draft settings are tuned by loom-optimize (draft/README.md)")
+ap.add_argument("--draft", default=os.environ.get("DRAFT", "auto"), choices=["auto", "mtp", "dflash", "ngram", "none"],
+                help="speculative decoding drafter. auto (default): draft/tune.py's measured choice, else the GGUF's MTP/NextN "
+                     "block, else a DFlash drafter; ngram: prompt lookup in the row's own history (any model, no drafter "
+                     "weights); none: ordinary decoding (also SPEC=off). Draft settings are tuned by draft/tune.py (draft/README.md)")
 ap.add_argument("--draft-depth", type=int, default=int(os.environ.get("DRAFT_DEPTH", "0")) or None,
                 help="proposed tokens per verification step (1-7)")
 ap.add_argument("--model-id", default=None, help="model id clients send (visible ASCII, no spaces); default: slug of cfg name")
@@ -70,8 +71,11 @@ if DRAFT and DRAFT["kind"] == "dflash":
     _d = gen_dflash.config(a.drafter)
     DRAFT.update(gguf=os.path.abspath(a.drafter), layers=_d["layers"], kv_heads=_d["kv_heads"], head_dim=_d["head_dim"],
                  taps=len(_d["target_layers"]), block_size=_d["block_size"])
+    # Untuned: depth 3 (at most block - 1). Verifying up to 4 tokens per span keeps the 4-token matvec, the same
+    # summation as 1-token decode, so port.sh's spec smoke gate is exact; deeper verification takes the f16 WMMA
+    # GEMM, whose rounding can flip near-ties (MoE routing amplifies them). draft/tune.py tries 3, 5 and 7.
     if not a.draft_depth and not (_tuned.get("kind") == "dflash" and _tuned.get("depth")):
-        DRAFT["depth"] = min(7, _d["block_size"] - 1)
+        DRAFT["depth"] = min(3, _d["block_size"] - 1)
 pos_bytes = cfg["kv_heads"] * cfg["head_dim"] * 2
 kv_layers = cfg.get("kv_layers", cfg["layers"])
 kv_per_position = pos_bytes * 2 * kv_layers
@@ -79,6 +83,8 @@ if DRAFT and DRAFT["kind"] == "mtp":   # the MTP block's K/V shares the pool's p
     kv_per_position += pos_bytes * 2 * len(cfg["mtp"]["layers"])
 if DRAFT and DRAFT["kind"] == "dflash":   # so does the drafter's context K/V
     kv_per_position += DRAFT["kv_heads"] * DRAFT["head_dim"] * 2 * 2 * DRAFT["layers"]
+if DRAFT and DRAFT["kind"] == "ngram":    # and the n-gram drafter's token history (one i32 per position)
+    kv_per_position += 4
 weights_bytes = os.path.getsize(os.path.abspath(cfg["gguf"]))
 if DRAFT and DRAFT["kind"] == "dflash":
     weights_bytes += os.path.getsize(DRAFT["gguf"])
