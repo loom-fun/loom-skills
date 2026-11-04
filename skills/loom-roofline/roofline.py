@@ -212,7 +212,10 @@ def main():
         # (llamacpp_spec.json, same directory): either shows what drafting gets on this model and text
         for f in (a.draft_tune, os.path.join(os.path.dirname(a.draft_tune) or ".", "llamacpp_spec.json")):
             if os.path.exists(f):
-                t = json.load(open(f))
+                try:
+                    t = json.load(open(f))
+                except ValueError:   # empty or partial: that tuning step failed; no drafting gain from it
+                    continue
                 if t.get("kind", "none") != "none" and t.get("baseline_tps"):
                     gain = max(gain, t["decode_tps"] / t["baseline_tps"])
     dec = a.bw / wb * gain
