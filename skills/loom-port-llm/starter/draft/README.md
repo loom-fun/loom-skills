@@ -102,27 +102,26 @@ drafting. Measured on Strix Halo (greedy decode; tune.py requests, thinking off)
 
 | Model | No drafting | MTP | DFlash2 | llama.cpp b1355 (same drafters) |
 |---|---|---|---|---|
-| Qwen3.8-27B Q4_K_M (bartowski), 262k context | 12.9 tok/s | **depth 3: 21.3 tok/s** (74 % of proposals accepted in the spec gate) | depth 3: 21.9 tok/s, but fails the concurrency check (see Limits) | none 12.0, MTP n-max 3 26.0, **DFlash2 n-max 3 28.1** |
+| Qwen3.8-27B Q4_K_M (bartowski), 262k context, vision | 12.9 tok/s | depth 3: 33.2 tok/s | **depth 7: 42.9 tok/s** (spec gate 16/16 incl. images) | none 12.0, MTP n-max 3 26.0, **DFlash2 n-max 3 28.1** |
 | Qwen3.8-27B Q8_0, 262k context | 7.9 tok/s | **14.6 tok/s** (49 % acceptance; 84 % in tool loops) | DFlash2 depth 7: 13.0 tok/s (53 %, 4.7 tokens/step) | - |
 | Qwen3.5-0.8B Q4_K_M | **262 tok/s** | 208 tok/s | - |
 | Qwen3-4B Q4_K_M | - | - | DFlash depth 7: 39 % acceptance, 3.7 tokens/step |
 
-Other families (Nov 2026, this skill tree; tune.py and llama_spec_tune.py on the same requests, llama.cpp b1364;
-acceptance from the spec gate's prompts at depth 3; every package below is token-exact at depth 3):
+Other families (Nov 2026, this skill tree with int8 activations (`ACT_Q8`, "Limits"); tune.py and llama_spec_tune.py
+on the same requests, llama.cpp b1364; every Loom setting below passed tune.py's equivalence check against
+draft_depth 0 of the same package and its concurrency check):
 
-| Model (arch, quant) | Drafter | Loom: none -> best | llama.cpp: none -> best |
-|---|---|---|---|
-| Nemotron-3.5-Bolt-E4B (gemma4, UD-Q5_K_XL) | NVIDIA DFlash, BF16 requantized to Q8_0, 49 % accepted | 46.7 -> **73.4** (DFlash depth 3, x1.57) | 45.3 -> **99.7** (DFlash n-max 7, x2.20) |
-| same | Gemma-4 E4B assistant (AtomicChat, Q8_0), 57 % accepted at depth 3 (llama.cpp: 57 %) | 46.9 -> **72.7** (assist depth 3, x1.55; ties DFlash) | 45.8 -> **98.8** (assist n-max 3, x2.16) |
-| Qwen3.5-4B (qwen35 hybrid, UD-Q4_K_XL, vision with M-RoPE, F16 tensors) | AtomicChat DFlash, 68 % accepted, spec gate 16/16 incl. images | 62.9 -> **80.2** (DFlash depth 3, x1.28) | 57.2 -> **105.0** (DFlash n-max 7, x1.84) |
-| Muse-Glimmer-30B (muse-glimmer, UD-Q5_K_M) | z-lab DFlash2, 71 % accepted (61 % with the target's normed embedding) | 12.2 -> **20.5** (DFlash2 depth 3, x1.68) | 11.6 -> **25.4** (DFlash2 n-max 3, x2.18) |
-| Flint (flint MoE, Q4_K_M) | incoai DFlash2, 65 % accepted | 65.6 -> **90.5** (DFlash2 depth 3, x1.38) | 53.5 -> **86.0** (DFlash2 n-max 3, x1.61) |
-| LFM2.5-24B-A2B (lfm2moe, Q4_K_M) | none exists: n-gram only (short-conv replay; 13/13 exact) | **102.7** (n-gram 65.3: none kept) | **94.7** (ngram-simple 90.1, ngram-mod 93.6) |
+| Model (arch, quant) | Drafter | Loom: none -> best | llama.cpp: none -> best | Loom before int8 activations |
+|---|---|---|---|---|
+| Nemotron-3.5-Bolt-E4B (gemma4, UD-Q5_K_XL) | NVIDIA DFlash, BF16 requantized to Q8_0 | 47.8 -> **110.9** (DFlash depth 7, x2.32; assistant depth 3: 107.5) | 45.3 -> 99.7 (DFlash n-max 7, x2.20) | 46.7 -> 73.4 |
+| Qwen3.5-4B (qwen35 hybrid, UD-Q4_K_XL, vision with M-RoPE, F16 tensors) | AtomicChat DFlash | 62.9 -> **111.9** (DFlash depth 7, x1.78) | 57.2 -> 105.0 (DFlash n-max 7, x1.84) | 62.9 -> 80.2 |
+| Muse-Glimmer-30B (muse-glimmer, UD-Q5_K_M) | z-lab DFlash2 | 12.3 -> **32.3** (DFlash2 depth 7, x2.62) | 11.6 -> 25.4 (DFlash2 n-max 3, x2.18) | 12.2 -> 20.5 |
+| Flint (flint MoE, Q4_K_M) | incoai DFlash2 | 63.1 -> **101.3** (DFlash2 depth 3, x1.61) | 53.5 -> 86.0 (DFlash2 n-max 3, x1.61) | 65.6 -> 90.5 |
+| LFM2.5-24B-A2B (lfm2moe, Q4_K_M) | none exists: n-gram only (short-conv replay; 13/13 exact) | **102.7** (n-gram 65.3: none kept) | **94.7** (ngram-simple 90.1, ngram-mod 93.6) | - |
 
-Drafting now works on every family; Loom's relative gain trails llama.cpp's because its multi-token target step
-costs more (Limits), while its absolute drafted speed already leads on Flint. tune.py chooses the bold Loom
-setting on each and its concurrency check passes (Glimmer 20.4 vs 12.3, Flint 90.4 vs 64.7 after the DFlash2 conv
-fix in Limits; before it, both were rejected for a crash).
+Drafting works on every family, and with the int8-activation verify step Loom's drafted decode now leads llama.cpp's
+on every model measured (the multi-token step was the gap: "Limits"). Depth 7 wins where the drafter accepts long
+runs: up to 8 tokens verify in one weight pass and round like 1-token decode.
 
 Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary decoding.
 
