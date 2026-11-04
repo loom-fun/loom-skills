@@ -26,7 +26,11 @@ loom_up() {
   local state=${LOOM_SERVE_STATE:-$HOME/.cache/loom-serve} name=gates-$loom_port pid st
   local f; f=$(grep -lx "$loom_port" "$state"/*.port 2>/dev/null | head -1); [ -n "$f" ] && name=$(basename "$f" .port)
   mkdir -p "$state"
-  (cd "$loom_cwd" && nohup "${loom_argv[@]}" >> "$state/$name.log" 2>&1 & echo $! > "$state/$name.pid")
+  # exec: the background subshell becomes loom-serve, so no shell is left holding the caller's stdout
+  # (`qualify.sh ... | tail` otherwise never ends: the subshell kept the pipe open while it waited) and $! is
+  # the server's own PID.
+  (cd "$loom_cwd" || exit 1; exec nohup "${loom_argv[@]}" >> "$state/$name.log" 2>&1 < /dev/null) &
+  echo $! > "$state/$name.pid"
   echo "$loom_port" > "$state/$name.port"; pid=$(cat "$state/$name.pid")
   for _ in $(seq 1800); do
     kill -0 "$pid" 2>/dev/null || { echo "loom-serve died on restart (see $state/$name.log)"; return 1; }

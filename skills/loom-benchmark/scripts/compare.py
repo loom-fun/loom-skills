@@ -65,6 +65,18 @@ def match(got, g):
             top = dict((int(i), lp) for i, lp in g["top"][n])
             gap = (top[gold[n]] - top[got[n]]) if got[n] in top else "not in golden top-5"
             near = near_tie(top, gold[n], got[n], a.max_gap)
+            # A split divergence: Loom's token spans llama.cpp's token plus more text ('[A' vs '[' then 'a').
+            # The choice was made at the next position, so compare there: the rest of Loom's token against
+            # llama.cpp's next token (Qwen3.5-0.8B under weaver: '[A-Za-z' vs '[a-zA-Z', gap 0.043, was
+            # reported as "not in golden top-5").
+            if got[n] not in top and n + 1 < min(len(gold), len(g["top"])):
+                lt, gt = pkg.tok.decode([got[n]]), pkg.tok.decode([gold[n]])
+                if len(lt) > len(gt) and lt.startswith(gt):
+                    top1 = dict((int(i), lp) for i, lp in g["top"][n + 1])
+                    rest = next((i for i in top1 if pkg.tok.decode([i]) == lt[len(gt):]), None)
+                    if rest is not None and rest != gold[n + 1]:
+                        gap = top1[gold[n + 1]] - top1[rest] if gold[n + 1] in top1 else gap
+                        near = near_tie(top1, gold[n + 1], rest, a.max_gap)
     return n, gap, near
 
 

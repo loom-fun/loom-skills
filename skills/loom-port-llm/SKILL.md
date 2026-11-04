@@ -108,7 +108,8 @@ The expensive path. Keep it short:
 9. **Work in parallel when you can spawn agents.** The kernels (steps 1–6) and the chat block
    (step 8: `chat_probe.py` + `control.loom`, verified against the Jinja template) are
    independent until `build.py`. Give the chat work to a subagent on its own copy of the kit and
-   its own port; merge when both pass.
+   its own port; merge when both pass. Without subagents (other harnesses, e.g. Pi under weaver), do the
+   kernels first and the chat block second.
 
 ## Workflow, step by step (what port.sh does; use it to debug a stage)
 

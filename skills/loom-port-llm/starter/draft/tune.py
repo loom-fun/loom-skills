@@ -20,8 +20,11 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STARTER = os.path.dirname(HERE)
-SETUP = os.path.join(STARTER, "..", "..", "loom-setup", "scripts")
-BENCH = os.path.join(STARTER, "..", "..", "loom-benchmark", "scripts")
+# The skills root: LOOM_SKILLS (qualify.sh exports it), else relative to the starter. A kit copied into
+# WORKDIR/kit (an applied reference example) is not inside the skills tree, so the relative path fails there.
+SKILLS = os.environ.get("LOOM_SKILLS") or os.path.join(STARTER, "..", "..")
+SETUP = os.path.join(SKILLS, "loom-setup", "scripts")
+BENCH = os.path.join(SKILLS, "loom-benchmark", "scripts")
 sys.path.insert(0, BENCH)
 from bench_common import stream  # noqa: E402
 

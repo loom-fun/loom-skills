@@ -94,15 +94,24 @@ if native > KERNEL_CONTEXT and not a.context:
     print(f"NOTE: native context {native} exceeds the kernels' {KERNEL_CONTEXT}; using {KERNEL_CONTEXT}")
 context = a.context or min(native, KERNEL_CONTEXT)
 if a.memory_gib == "auto":
+    # LOOM_RESERVED_GIB: memory another resident server already holds (weaver's agent model). Parsed outside the
+    # try below: a typo there would read as "RAM unknown" and fall back to 56 GiB, more than the cap without it.
     try:
-        cap = 0.6 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        reserved = float(os.environ.get("LOOM_RESERVED_GIB") or 0)
+    except ValueError:
+        sys.exit(f"LOOM_RESERVED_GIB={os.environ['LOOM_RESERVED_GIB']!r} is not a number (GiB)")
+    try:
+        cap = 0.6 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") - reserved * 2**30
     except (AttributeError, ValueError, OSError):
         cap = None
+    if cap is not None and cap <= 0:
+        sys.exit(f"LOOM_RESERVED_GIB={reserved:g} leaves no memory under the 60%-of-RAM cap")
     want_pool = context + max(65536, context // 4)
     need = weights_bytes + 4 * 2**30 + 2 * a.rows * recurrent_bytes + want_pool * kv_per_position
     a.memory_gib = round(min(need, cap) / 2**30, 1) if cap else 56.0
     print(f"memory budget {a.memory_gib} GiB (a {want_pool}-position pool needs {need / 2**30:.0f} GiB"
-          + (f"; cap 60% of RAM = {cap / 2**30:.0f} GiB)" if cap else "; RAM unknown)"))
+          + (f"; cap 60% of RAM{f' minus LOOM_RESERVED_GIB {reserved:g}' if reserved else ''} = {cap / 2**30:.0f} GiB)"
+             if cap else "; RAM unknown)"))
 a.memory_gib = float(a.memory_gib)
 budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
 if context * kv_per_position > budget:

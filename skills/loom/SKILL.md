@@ -29,7 +29,10 @@ tools venv `~/loom/.tools`). Substitute your own root consistently. The scripts 
 `LOOM_ROOT=` (install root for port.sh, gates.sh, pick_llamacpp.sh), `VENV=` (serve.sh,
 run_kernel_tests.sh), `PY=` (pick_llamacpp.sh's python), `UI_VENV=` or the 2nd argument
 (start_ui.sh), `LOOM_SERVE_STATE=` (serve.sh PID/log dir) and `LLAMACPP_STATE=`
-(llamacpp_server.sh PID/log dir). On a shared machine set the state dirs inside your work
+(llamacpp_server.sh PID/log dir). `LOOM_RESERVED_GIB=` is memory another resident server already holds
+(e.g. a local agent model): `pick_gguf.py` and `build.py` subtract it from the 60 %-of-RAM cap.
+`PY=` is the python fetch_llamacpp.sh uses (default `python3`). Under a harness other than Claude Code,
+`${CLAUDE_SKILL_DIR}` in these skills means the directory of the SKILL.md being read. On a shared machine set the state dirs inside your work
 dir and give `pick_llamacpp.sh` a SEARCH_ROOT (3rd argument) so it only sees builds the
 user approved.
 
