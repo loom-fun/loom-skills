@@ -35,9 +35,9 @@ ap.add_argument("--temperature", type=float, default=0.0, help="default sampling
 ap.add_argument("--top-p", type=float, default=1.0, help="default top_p when a request sets none")
 ap.add_argument("--top-k", type=int, default=0, help="default top_k when a request sets none (0 = up to 64 candidates)")
 ap.add_argument("--drafter", default=os.environ.get("DRAFTER"), help="DFlash/DFlash2 drafter GGUF (arch dflash) for --draft dflash/auto")
-ap.add_argument("--draft", default=os.environ.get("DRAFT", "auto"), choices=["auto", "mtp", "dflash", "ngram", "none"],
+ap.add_argument("--draft", default=os.environ.get("DRAFT", "auto"), choices=["auto", "mtp", "dflash", "ngram", "assist", "none"],
                 help="speculative decoding drafter. auto (default): draft/tune.py's measured choice, else the GGUF's MTP/NextN "
-                     "block, else a DFlash drafter; ngram: prompt lookup in the row's own history (any model, no drafter "
+                     "block, else a DFlash drafter, else a Gemma-4 assistant; assist: Gemma-4 assistant GGUF (cfg assistant); ngram: prompt lookup in the row's own history (any model, no drafter "
                      "weights); none: ordinary decoding (also SPEC=off). Draft settings are tuned by draft/tune.py (draft/README.md)")
 ap.add_argument("--draft-depth", type=int, default=int(os.environ.get("DRAFT_DEPTH", "0")) or None,
                 help="proposed tokens per verification step (1-7)")
@@ -57,7 +57,8 @@ if os.environ.get("SPEC", "").lower() in ("0", "off", "no", "false", "none"):
     a.draft = "none"
 a.drafter = a.drafter or (cfg.get("drafter") or {}).get("gguf")
 if a.draft == "auto":   # the optimizer's measured choice (cfg["drafter"]["kind"]) wins; else MTP, else DFlash
-    a.draft = (cfg.get("drafter") or {}).get("kind") or ("mtp" if cfg.get("mtp") else ("dflash" if a.drafter else "none"))
+    a.draft = (cfg.get("drafter") or {}).get("kind") or ("mtp" if cfg.get("mtp") else ("dflash" if a.drafter else
+                                                        ("assist" if (cfg.get("assistant") or {}).get("gguf") else "none")))
 if a.draft == "mtp" and not cfg.get("mtp"):
     sys.exit("--draft mtp: this GGUF has no NextN/MTP block (cfg.json has no 'mtp')")
 if a.draft == "dflash" and not a.drafter:
@@ -85,8 +86,13 @@ if DRAFT and DRAFT["kind"] == "dflash":   # so does the drafter's context K/V
     kv_per_position += DRAFT["kv_heads"] * DRAFT["head_dim"] * 2 * 2 * DRAFT["layers"]
 if DRAFT and DRAFT["kind"] == "ngram":    # and the n-gram drafter's token history (one i32 per position)
     kv_per_position += 4
+if DRAFT and DRAFT["kind"] == "assist":   # the Gemma-4 assistant reads the target's K/V (a 4-byte placeholder plane)
+    if not (cfg.get("assistant") or {}).get("gguf"):
+        sys.exit("--draft assist needs cfg.json assistant.gguf (find_drafter.py records it for gemma4 targets)")
+    DRAFT["gguf"] = os.path.abspath(cfg["assistant"]["gguf"])
+    kv_per_position += 4
 weights_bytes = os.path.getsize(os.path.abspath(cfg["gguf"]))
-if DRAFT and DRAFT["kind"] == "dflash":
+if DRAFT and DRAFT["kind"] in ("dflash", "assist"):
     weights_bytes += os.path.getsize(DRAFT["gguf"])
 # Hybrid models keep one recurrent slot (all gated delta-net layer states) per resident row, x2 for forks.
 sys.path.insert(0, HERE)

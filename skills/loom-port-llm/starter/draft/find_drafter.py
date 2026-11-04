@@ -14,6 +14,12 @@ preferred quant is Q4_K_M, then Q5_K_M, Q6_K, Q8_0, BF16/F16. Repos are searched
 without -GGUF, its general.name, the name without an -Instruct suffix) and ranked: same model name first, z-lab (the DFlash
 authors) next, then downloads. Whether the drafter is worth using is decided later by measurement (draft/tune.py): a
 drafter that does not speed decoding up is not selected.
+
+Gemma-4 family targets (cfg arch gemma4) also get a Gemma-4 "assistant" (GGUF arch gemma4-assistant, Gemma 4's own
+multi-token-prediction head, draft/gen_assist.py): repos named "<model>-assistant" are searched by the base name and,
+since assistants are published for the Google base models, by "gemma-4 assistant"; one is accepted when its header
+matches the target (output width = hidden size, vocabulary, KV heads, head dims) and recorded as cfg["assistant"].
+Prints ASSISTANT_RESULT {...} too.
 """
 import argparse
 import json
@@ -195,6 +201,64 @@ def requantize(src, dst):
     return dst
 
 
+def check_assistant(cfg, kv, tensors):
+    a = lambda k, d=None: kv.get(f"gemma4-assistant.{k}", d)
+    if kv.get("general.architecture") != "gemma4-assistant":
+        return "not arch gemma4-assistant"
+    want = {"embedding_length_out": cfg["hidden"], "attention.head_count_kv": cfg["kv_heads"],
+            "attention.key_length": cfg["head_dim"], "attention.key_length_swa": cfg.get("head_dim_swa") or cfg["head_dim"]}
+    for k, v in want.items():
+        if a(k) != v:
+            return f"{k} {a(k)} != target {v}"
+    emb = tensors.get("token_embd.weight")
+    if not emb or emb[1][-1] != cfg["vocab"]:
+        return f"vocabulary {emb[1][-1] if emb else None} != target {cfg['vocab']}"
+    bad = sorted({t for t, _ in tensors.values()} - SUPPORTED)
+    if bad:
+        return f"tensor formats {bad} not supported"
+    if any(n.startswith(("masked_embd", "blk.0.attn_k.")) for n in tensors):
+        return "masked-embedding head or own K/V (not implemented by draft/gen_assist.py)"
+    return None
+
+
+def find_assistant(cfg, target_repo, api, download, tried):
+    """A Gemma-4 assistant for a gemma4-family target, or None (and the reason)."""
+    if cfg.get("arch") != "gemma4":
+        return None, "target is not a gemma4-family model"
+    base = base_name(cfg, target_repo)
+    seen, found = set(), []
+    for q in dict.fromkeys([f"{base}-assistant", base.split("-Instruct")[0] + "-assistant", "gemma-4 assistant", "gemma-4-assistant"]):
+        try:
+            for m in api.list_models(search=q, limit=100, sort="downloads"):
+                if m.id not in seen and "assistant" in m.id.lower() and "gguf" in m.id.lower():
+                    seen.add(m.id); found.append(m)
+        except Exception:  # noqa: BLE001
+            pass
+    want = _norm(base)
+    found.sort(key=lambda m: (0 if want and want in _norm(m.id) else 1, -(m.downloads or 0)))
+    for m in found[:12]:
+        try:
+            files = [x.rfilename for x in api.model_info(m.id).siblings if x.rfilename.endswith(".gguf")]
+        except Exception as e:  # noqa: BLE001
+            tried.append(f"{m.id}: {e}"); continue
+        have = cached(m.id)
+        files.sort(key=lambda f: (f not in have, 0 if "Q8_0" in f.upper() else 1))   # tiny: keep the drafter accurate
+        for f in files[:2]:
+            try:
+                kv, tensors = header(m.id, f)
+            except Exception as e:  # noqa: BLE001
+                tried.append(f"{m.id}/{f}: header {e}"); continue
+            why = check_assistant(cfg, kv, tensors)
+            if why:
+                tried.append(f"{m.id}/{f}: {why}"); continue
+            out = {"repo": m.id, "file": f, "gguf": None}
+            if download:
+                from huggingface_hub import hf_hub_download
+                out["gguf"] = have.get(f) or hf_hub_download(m.id, f)
+            return out, "ok"
+    return None, "no compatible Gemma-4 assistant found"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cfg")
@@ -246,9 +310,15 @@ def main():
             result["gguf"] = out
         cfg["drafter"] = {"gguf": result["gguf"], "repo": result["repo"], "file": result["file"]}
         json.dump(cfg, open(a.cfg, "w"), indent=1)
+    assistant, why = find_assistant(cfg, a.target_repo, api, a.download, tried)
+    if assistant and a.download:
+        cfg = json.load(open(a.cfg))
+        cfg["assistant"] = assistant
+        json.dump(cfg, open(a.cfg, "w"), indent=1)
     for t in tried:
         print("skip", t)
     print("DRAFTER_RESULT", json.dumps(result))
+    print("ASSISTANT_RESULT", json.dumps(assistant or {"reason": why}))
 
 
 if __name__ == "__main__":

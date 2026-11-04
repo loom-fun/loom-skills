@@ -2458,6 +2458,20 @@ if __name__ == "__main__":
             gfacts.update(dflash=dcfg, dflash_taps=[t - 1 for t in dcfg["target_layers"]], L=L, CHUNKS=CHUNKS, V=V,
                           row_bytes=row_bytes, FMT=FMT, SB=SB, dfmt=lambda n: DT[n]["type"], dsize=dsize,
                           EFMT=EFMT, embed_plain=not EMBED_NORM and not _ES)
+        if gen_draft.DRAFT["kind"] == "assist":
+            import gen_assist
+            acfg = gen_assist.config(gen_draft.DRAFT["gguf"])
+            assert acfg["H"] == H and acfg["vocab"] == V, f"assistant out {acfg['H']} / vocab {acfg['vocab']} != target {H} / {V}"
+            AT = acfg["tensors"]
+            def asize(name):
+                t = AT[name]
+                n = 1
+                for d in t["shape"]:
+                    n *= d
+                return n * 4 if t["type"] == "f32" else n // SB[t["type"]] * FMT[t["type"]]
+            gfacts.update(assist=acfg, QH=QH, KVH=KVH, V=V, EFMT=EFMT, row_bytes=row_bytes, FMT=FMT, SB=SB,
+                          afmt=lambda n: AT[n]["type"], asize=asize,
+                          assist_attention=gen_assist.target_attention(program, L, L - 2, L - 1))
         spec = [gen_draft.advance_program(program, gfacts), gen_draft.verify_program(program, gfacts)]
         if MTP_LAYER is not None:
             spec.append(gen_draft.mtp_programs(gfacts))
@@ -2466,6 +2480,8 @@ if __name__ == "__main__":
         if gen_draft.DRAFT["kind"] == "ngram":
             import gen_ngram
             spec.append(gen_ngram.programs(gfacts))
+        if gen_draft.DRAFT["kind"] == "assist":
+            spec.append(gen_assist.programs(gfacts))
         # 5-63-token epochs (depth > 3, or several drafting streams) take the f16 WMMA GEMM: one weight pass per step
         # (4 drafting streams at depth 3: 69 vs 146 ms per epoch on Bolt-E4B), at the price of rare near-tie flips vs
         # 1-token decode. SPEC_EXACT=1 keeps the 4-token matvec (decode's rounding) at every width instead.
@@ -2475,6 +2491,8 @@ if __name__ == "__main__":
             spec_kernels += gen_dflash.kernels(gfacts)
         if gen_draft.DRAFT["kind"] == "ngram":
             spec_kernels += gen_ngram.kernels(gfacts)
+        if gen_draft.DRAFT["kind"] == "assist":
+            spec_kernels += gen_draft.mtp_kernels(gfacts) + gen_assist.kernels(gfacts)
     if any(f == "f32" for f, *_ in USED_MV | USED_MV_R) or "f32" in USED_GEMM:
         COMMON += F32_VALUES
     if any(f == "f16" for f, *_ in USED_MV | USED_MV_R) or "f16" in USED_GEMM:

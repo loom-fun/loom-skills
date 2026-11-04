@@ -32,7 +32,7 @@ DRAFT = json.loads(os.environ.get("LLM_DRAFT") or "null")
 
 
 def enabled():
-    return bool(DRAFT) and DRAFT.get("kind") in ("mtp", "dflash", "ngram")
+    return bool(DRAFT) and DRAFT.get("kind") in ("mtp", "dflash", "ngram", "assist")
 
 
 def _ids(view, idx, stride_mixed, dst):

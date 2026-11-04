@@ -1,4 +1,4 @@
-# Speculative decoding in starter ports (MTP, DFlash, DFlash2, n-gram)
+# Speculative decoding in starter ports (MTP, Gemma-4 assistant, DFlash, DFlash2, n-gram)
 
 Ports draft by default whenever their GGUF supports it, and stay token-for-token identical to the target. Nothing
 needs configuring: `port.sh` enables a drafter, `qualify.sh` measures which drafter and depth actually decode
@@ -15,6 +15,7 @@ drafter as a candidate.
 | `mtp` | the GGUF carries NextN/MTP blocks (`blk.L.nextn.*`; Qwen3.5/3.6/3.8, unsloth `*-MTP-GGUF`; `inspect_gguf.py` records `cfg["mtp"]`) | the model's own NextN block, `draft_depth` autoregressive rounds |
 | `dflash` | a DFlash (v1) drafter GGUF exists for the base model (`find_drafter.py`) | a small non-causal block-diffusion transformer over the target's hidden features; one pass proposes a whole block |
 | `dflash` (v2 / DFlash2) | as above, drafter with `attn_conv_proj` / `selector_*` tensors | DFlash plus 2-tap conv modulation, a 2048-key context window and a low-rank candidate selector |
+| `assist` | a gemma4-family target and a Gemma-4 "assistant" GGUF (arch `gemma4-assistant`, e.g. `AtomicChat/gemma-4-E4B-it-assistant-GGUF`; `find_drafter.py` records `cfg["assistant"]`) | Gemma 4's own MTP head as a separate ~100 MB model (`gen_assist.py`): `draft_depth` autoregressive rounds of 4 small layers that attend the target's own K/V (sliding layers: target layer L-2's cache, full: L-1's), fed by the target's embedding and post-norm hidden like MTP |
 | `ngram` | always (`gen_ngram.py`; tune.py tries it for every model) | prompt lookup: the newest longest suffix match of the anchor in the row's own token history proposes what followed it. No weights; wins where output quotes context (code edits, tool arguments, JSON) |
 
 `find_drafter.py` (port.sh stage 2c) searches HF by the base model's name (repo without -GGUF, `general.name`,
@@ -46,7 +47,7 @@ Safetensors-only drafters are not converted.
    reuse and checkpoints with no extra state.
 
 Files: `gen_draft.py` (verify, acceptance, GDN capture/replay, the generic replay hook, MTP), `gen_dflash.py`
-(DFlash/DFlash2), `gen_ngram.py` (prompt lookup), `build_draft.py` (prepare/storage/control patches; ports without
+(DFlash/DFlash2), `gen_assist.py` (Gemma-4 assistant), `gen_ngram.py` (prompt lookup), `build_draft.py` (prepare/storage/control patches; ports without
 a drafter are byte-identical to before), `find_drafter.py`, `tune.py`.
 
 ## Recurrent layers other than gated delta-net (kits)
@@ -60,6 +61,19 @@ state commit over the `%replay` packet (the accepted inputs, original cursors). 
 speculative spans (`@g_gdn_publish`, flag bit 4) when `LLM_DRAFT` is set. Example: LFM2 short-conv
 (`reference/lfm2moe-example/gen_sconv.py` `replay_spec`, registered in its `sconv_layer`). A new stateful layer
 without a replay corrupts its state on the first rejected draft; the `spec` gate catches it.
+
+## Gemma-4 assistant (`gen_assist.py`)
+
+llama.cpp src/models/gemma4-assistant.cpp, mapped onto gen_draft.py's MTP machinery (per-row carry of the target's
+final normalized hidden, `g_mtp_prepare` / `g_mtp_gather` / `g_mtp_advance`). Each round: target embedding *
+sqrt(H) concatenated with the hidden -> `nextn.pre_projection` -> 4 layers (query-only attention, GELU FFN, post
+norms, `layer_output_scale`) -> the assistant's tied head (argmax) and `nextn.post_projection` (the next round's
+hidden). The attention reuses the trunk's own decode kernels for the two target layers (parsed from the program text,
+`target_attention`): the assistant's QA heads are placed in the target's QH-head layout so head a reads KV head
+a // (QA/KVH), and `g_as_visible` clamps every round's queries to the anchor's context (positions < P). The propose
+stage therefore binds the target's origins table and arena (build_draft.py); warm only saves the carry.
+Nemotron-3.5-Bolt-E4B with the E4B assistant: acceptance equals llama.cpp's (depth 1: 75 % vs 77 %, depth 3: 57 % vs
+57 %), spec gate 16/16 exact including images, 46.9 -> 72.7 tok/s at depth 3.
 
 ## Target-specific details DFlash handles
 
