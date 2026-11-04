@@ -3,7 +3,8 @@
 # usage: [LOOM_ROOT=~/loom] [LEVEL=fast|quick|full] LLAMACPP_DIR=DIR gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
 #   LEVEL=fast  (inner optimization loop, after each kept change, ~1-3 min): golden + compare
 #               (20 short prompts + 1k-32k documents) and consistency (concurrent == sequential).
-#   LEVEL=quick (after the port): fast + agent tool loop, sampling, needle at half the context
+#   LEVEL=quick (after the port): fast + speculative-decoding equivalence (spec_check.py, when the package
+#               drafts), agent tool loop, sampling, needle at half the context
 #               (at most 60k) compared with llama.cpp by the near-tie rule.
 #   NO_LLAMA=1  no llama.cpp runs this model: reference-free checks only (consistency, agent rendering/
 #               reuse/calls, sampling semantics, needle retrieval); report correctness as unverified.
@@ -34,7 +35,7 @@ elif [ -n "${LLAMA_URL:-}" ]; then
 else
   L=http://127.0.0.1:$lport
   : "${LLAMACPP_DIR:?set LLAMACPP_DIR to the llama.cpp ROCm build (or LLAMA_URL to a running llama-server)}"
-  export LLAMA_START="'$S/llamacpp_server.sh' '$gguf' $lport 1 $slot"   # loads the projector too when MMPROJ is set
+  export LLAMA_START="LLAMA_SPEC= '$S/llamacpp_server.sh' '$gguf' $lport 1 $slot"   # loads the projector too when MMPROJ is set
   defer=1   # one model at a time: references missing from the cache are filled with Loom stopped
 fi
 declare -A result secs done
@@ -70,6 +71,19 @@ run() {  # run NAME CMD...: a gate whose llama.cpp references were all cached ge
   fi
   tail -4 "gates_$name.log"; result[$name]=$rc; order+=("$name"); done[$name]=1
 }
+# Speculative decoding must not change a token: record on the drafting server, then serve the same package with
+# drafting off (model_target.json, draft_depth 0) on Loom's port, record again, restore, compare (spec_check.py).
+spec_gate() {
+  "$T" "$S/spec_check.py" record "$url" "$model" spec_draft.jsonl || return 1
+  "$T" "$S/spec_check.py" card "$pkg" >/dev/null || return 1
+  curl -s "$url/metrics" > spec_metrics.txt
+  loom_down; local orig=("${loom_argv[@]}") rc
+  loom_argv=("${orig[@]/model.json/model_target.json}"); loom_up || return 1
+  "$T" "$S/spec_check.py" record "$url" "$model" spec_target.jsonl; rc=$?
+  loom_down; loom_argv=("${orig[@]}"); loom_up || return 1
+  [ $rc = 0 ] && "$T" "$S/spec_check.py" compare spec_target.jsonl spec_draft.jsonl --metrics-file spec_metrics.txt --pkg "$pkg" ${L:+--llama "$L"}
+}
+drafting=$("$T" -c "import json; print(1 if json.load(open('$pkg/llm_config.json')).get('draft') else '')" 2>/dev/null)
 t_start=$(date +%s)
 LL=(); [ -n "$L" ] && LL=(--llama "$L")
 cmp=$(( ctx / 2 < 61440 ? ctx / 2 : 61440 ))
@@ -88,6 +102,7 @@ all_gates() {
   run consistency "$T" "$S/consistency.py" "$url" --model "$model" --pkg "$pkg" "${LL[@]}"
   [ -n "${done[consistency]:-}" ] && { grep -q "^PASS$" gates_consistency.log || result[consistency]=1; }
   if [ "$level" != fast ]; then
+    [ -n "$drafting" ] && run spec spec_gate
     run agent "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --out agent_golden.json
     run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" "${LL[@]}"
     # Needle: compared with llama.cpp (near-tie rule) up to the llama.cpp slot; the full-context

@@ -4,7 +4,7 @@
 #   positional: PORT (default 8160), MEMORY_GIB (default auto, see build.py --memory-gib), e.g. port.sh org/repo ~/work/m 8260 40
 #   0. starts the end-to-end clock (WORKDIR/.e2e_start, unless it exists): qualify.sh sizes the
 #      optimization budget from it
-#   1. download the GGUF (FILE, else pick_gguf.py: the best quant whose formats the starter supports
+#   1. the GGUF (FILE, else pick_gguf.py: Q4_K_M by default, from the HF cache (or the repo that has it cached), formats the starter decodes
 #      and that fits twice in GPU memory; header-only probe) and the base model's tokenizer.json
 #   2. inspect_gguf.py: config + chat block derived from the template and verified (stops on any FAIL)
 #   3. build.py at the native context, fitted to MEMORY_GIB
@@ -33,11 +33,15 @@ if [ "${FROM:-}" = build ]; then
   [ -n "$model_id" ] || { echo "FROM=build: pass MODEL_ID (5th argument)"; exit 2; }
 else
 step "1/6 download"
-if [ -z "$file" ]; then
-  file=$("$T" -I "$K/pick_gguf.py" "$repo") || { echo "STOP: no usable GGUF in $repo (see above); pass ORG/REPO:FILE.gguf"; exit 2; }
+# A file already in the HF cache (any revision) is used as is; otherwise it is downloaded into the cache.
+pick=$("$T" -I "$K/pick_gguf.py" "$repo" ${file:+--file "$file"}) || { echo "STOP: no usable GGUF in $repo (see above); pass ORG/REPO:FILE.gguf"; exit 2; }
+file=$(printf '%s' "$pick" | cut -f1); cached=$(printf '%s' "$pick" | cut -f2)
+if [ -n "$cached" ]; then
+  echo "using the cached $file ($cached)"
+else
+  # Into the shared HF cache (reused by later runs and by llama.cpp tools), symlinked into WORKDIR/gguf.
+  cached=$("$hf" download "$repo" "$file" 2>/dev/null | tail -1 | sed "s/^path=//")
 fi
-# Into the shared HF cache (reused by later runs and by llama.cpp tools), symlinked into WORKDIR/gguf.
-cached=$("$hf" download "$repo" "$file" 2>/dev/null | tail -1 | sed "s/^path=//")
 [ -f "$cached" ] || { echo "download of $repo/$file failed"; exit 2; }
 mkdir -p gguf && ln -sf "$cached" "gguf/$(basename "$file")"
 gguf=$work/gguf/$(basename "$file")
@@ -91,6 +95,16 @@ fi  # FROM=build
 if [ "${VISION:-1}" != 0 ] && ! "$T" -c "import json,sys; sys.exit(0 if json.load(open('cfg.json')).get('vision') else 1)"; then
   step "2b vision"
   HF=$hf "$T" "$K/vision/add_vision.py" cfg.json "$repo" ${MMPROJ:-} | tee vision.log | grep -v "^$"
+fi
+
+# Speculative decoding is on by default: an MTP/NextN block in the GGUF (inspect records cfg["mtp"]) or a DFlash
+# drafter published for the base model (found and validated here) is used; draft/tune.py later keeps whichever
+# decodes fastest, or none. SPEC=off disables it; DRAFTER_REPO=org/name[:file] picks a drafter.
+spec_off=$(echo "${SPEC:-on}" | tr 'A-Z' 'a-z')
+if [ "$spec_off" != off ] && [ "$spec_off" != 0 ] && ! "$T" -c "import json,sys; sys.exit(0 if json.load(open('cfg.json')).get('drafter') else 1)"; then
+  step "2c drafter"
+  "$T" "$K/draft/find_drafter.py" cfg.json "$repo" --download ${DRAFTER_REPO:+--repo "$DRAFTER_REPO"} > drafter.log 2>&1 || true
+  grep "^DRAFTER_RESULT" drafter.log
 fi
 
 step "3/6 build"
@@ -148,4 +162,19 @@ n = requests.post(url + "/v1/chat/completions/input_tokens", json={"model": mode
 print("input_tokens:", n)
 sys.exit(0 if ok else 1)
 EOF
-echo "PORT_RESULT $(printf '{"package": "%s", "model_id": "%s", "context": %s, "memory_bytes": %s, "port": %s, "gguf": "%s"}' "$work/pkg" "$model_id" "${ctx:-0}" "$mem" "$port" "$gguf")"
+# Speculative decoding must not change a single token: the same package with drafting off is the reference
+# (loom-benchmark/scripts/spec_check.py). One model is loaded at a time.
+draft=$("$T" -c "import json; print(json.load(open('pkg/llm_config.json')).get('draft') or {})" 2>/dev/null)
+if [ "$draft" != "{}" ] && [ -n "$draft" ]; then
+  SC=$here/../loom-benchmark/scripts/spec_check.py
+  "$T" "$SC" record "http://127.0.0.1:$port" "$model_id" spec_draft.jsonl && "$T" "$SC" card pkg >/dev/null || exit 6
+  curl -s "http://127.0.0.1:$port/metrics" > spec_metrics.txt
+  "$S/stop.sh" port >/dev/null 2>&1
+  VENV=$venv "$S/serve.sh" port "$port" amdgpu "$mem" pkg/model_target.json >/dev/null || exit 4
+  "$T" "$SC" record "http://127.0.0.1:$port" "$model_id" spec_target.jsonl || exit 6
+  "$S/stop.sh" port >/dev/null 2>&1
+  VENV=$venv "$S/serve.sh" port "$port" amdgpu "$mem" pkg/model.json >/dev/null || exit 4
+  "$T" "$SC" compare spec_target.jsonl spec_draft.jsonl | tail -3
+  [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: drafting changed the output (spec_check); see starter/draft/README.md"; exit 6; }
+fi
+echo "PORT_RESULT $(printf '{"package": "%s", "model_id": "%s", "context": %s, "memory_bytes": %s, "port": %s, "gguf": "%s", "draft": %s}' "$work/pkg" "$model_id" "${ctx:-0}" "$mem" "$port" "$gguf" "$("$T" -c "import json; print(json.dumps(json.load(open('pkg/llm_config.json')).get('draft')))")")"

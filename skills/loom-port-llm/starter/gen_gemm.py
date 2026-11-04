@@ -19,10 +19,35 @@ FMT = {
     "q4_k": dict(block_bytes=144, block_values=256),
     "q5_k": dict(block_bytes=176, block_values=256),
     "q6_k": dict(block_bytes=210, block_values=256),
+    # dequantized through gen_llm.py's @g_<fmt>_values helpers (quant_values.loom)
+    "q4_0": dict(block_bytes=18, block_values=32),
+    "iq4_nl": dict(block_bytes=18, block_values=32),
+    "iq4_xs": dict(block_bytes=136, block_values=256),
+    "q3_k": dict(block_bytes=110, block_values=256),
+    "iq3_s": dict(block_bytes=110, block_values=256),
 }
+HELPER = {"q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s"}
 
 def dequant16(fmt, w, view_name, out):
     """Loom snippet: dequantize 16 consecutive weights of row %w_row at column %w_col into F16 vector %{out}."""
+    if fmt in HELPER:   # 16 consecutive weights = one half of a 32-value group from the shared value helper
+        bv = FMT[fmt]["block_values"]
+        return f'''
+      %{out}_bv = index.constant {bv} : index
+      %{out}_block = index.div %w_col, %{out}_bv : index
+      %{out}_within = index.rem %w_col, %{out}_bv : index
+      %{out}_group_value = index.div %{out}_within, %c32 : index
+      %{out}_group = index.assume %{out}_group_value [range(%{out}_group_value, 0, {bv // 32 - 1})] : index
+      %{out}_in_group = index.rem %{out}_within, %c32 : index
+      %{out}_half = index.div %{out}_in_group, %c16 : index
+      %{out}_block_add = index.scale %{out}_block, %block_bytes : index, offset -> offset
+      %{out}_block_origin = index.add %w_row_origin, %{out}_block_add : offset
+      %{out}_all = func.call @g_{fmt}_values(%{w}, %{out}_block_origin, %{out}_group) : (buffer, offset, index) -> (vector<32xf32>)
+      %{out}_lo = vector.slice %{out}_all[0] : vector<32xf32> -> vector<16xf32>
+      %{out}_hi = vector.slice %{out}_all[16] : vector<32xf32> -> vector<16xf32>
+      %{out}_upper = index.cmp ne, %{out}_half, %c0 : index
+      %{out}_part = scf.select %{out}_upper, %{out}_hi, %{out}_lo : vector<16xf32>
+      %{out} = vector.fptrunc %{out}_part : vector<16xf32> to vector<16xf16>'''
     if fmt == "q4_1":
         return f'''
       %{out}_block = index.div %w_col, %c32 : index
@@ -234,7 +259,7 @@ def gemm(fmt, mode):
     wargs = "%w: buffer, %w2: buffer" if two_w else "%w: buffer"
     accs = ["g0", "g1", "u0", "u1"] if two_w else ["a0", "a1"]
     stages = ["w_stage", "w2_stage"] if two_w else ["w_stage"]
-    k_min = 256 if fmt in ("q4_k", "q5_k", "q6_k") else 64
+    k_min = 256 if FMT[fmt]["block_values"] == 256 else 64
     lines = []
     lines.append(f'''kernel.def export("{name}") @{name}(%rows: index, %n: index) {{
   %c1 = index.constant 1 : index
@@ -392,7 +417,7 @@ def gemm_big(fmt, mode, tn=None, suffix=""):
     cfr = wave_cols // 16
     name = f"{PREFIX}_gemm_{fmt}_{mode}_m128" + suffix
     weights = ["w", "w2"] if two_w else ["w"]
-    k_min = 256 if fmt in ("q4_k", "q5_k", "q6_k") else 64
+    k_min = 256 if FMT[fmt]["block_values"] == 256 else 64
     L = []
     L.append(f'''kernel.def export("{name}") @{name}(%rows: index, %n: index) {{
   %c1 = index.constant 1 : index
@@ -625,5 +650,9 @@ if __name__ == "__main__":
         fmt, modes = item.split(":")
         for mode in modes.split("+"):
             out.append(post(gemm(fmt, mode)))
-            out.append(post(gemm_big(fmt, mode)))
+            if fmt in HELPER:   # the 64-row tile kernel under the 128-row name (its dequant has no prefetchable load)
+                name = f"{PREFIX}_gemm_{fmt}_{mode}"
+                out.append(post(gemm(fmt, mode)).replace(f'export("{name}") @{name}(', f'export("{name}_m128") @{name}_m128('))
+            else:
+                out.append(post(gemm_big(fmt, mode)))
     sys.stdout.write("\n".join(out))

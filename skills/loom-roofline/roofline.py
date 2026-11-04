@@ -182,6 +182,10 @@ def main():
     ap.add_argument("--reserve-min", type=float, default=10,
                     help="minutes kept back at the end of the budget for the final gates + report "
                          "(qualify.sh passes 0: its budget already excludes them)")
+    ap.add_argument("--draft-tune", default=None,
+                    help="bench/draft_tune.json: with a drafter chosen, the decode and c4 ceilings are multiplied by its "
+                         "measured gain (tok/s with drafting / without, same requests): one weight pass then commits "
+                         "several tokens, so the 1-token bandwidth ceiling no longer bounds decode")
     ap.add_argument("--goal", action="append", default=[],
                     help="user target, METRIC=TOK_S (e.g. decode_tps=70); replaces target/stretch for it")
     a = ap.parse_args()
@@ -202,7 +206,16 @@ def main():
     ctxs = [int(x) for x in a.ctx.split(",")]
 
     rows = []
-    dec = a.bw / wb
+    gain = 1.0
+    if a.draft_tune and os.path.exists(a.draft_tune):
+        # the better of the two measured drafting gains: Loom's (draft_tune.json) and llama.cpp's own
+        # (llamacpp_spec.json, same directory): either shows what drafting gets on this model and text
+        for f in (a.draft_tune, os.path.join(os.path.dirname(a.draft_tune) or ".", "llamacpp_spec.json")):
+            if os.path.exists(f):
+                t = json.load(open(f))
+                if t.get("kind", "none") != "none" and t.get("baseline_tps"):
+                    gain = max(gain, t["decode_tps"] / t["baseline_tps"])
+    dec = a.bw / wb * gain
     key = "decode_moe" if geo["n_exp"] else "decode"
     ed, sd = EFF[key], STRETCH[key]
     floor_ms = geo["L"] * LAYER_US / 1000
@@ -212,7 +225,7 @@ def main():
     rows.append(pick_target("decode_tps", base.get("decode_tps"), dec, dec_eff(dec, ed), dec_eff(dec, sd)))
     for c in ctxs:
         k = f"decode_tps_{c // 1000}k"
-        r = a.bw / (wb + kv_read_bytes(geo, c))
+        r = a.bw / (wb + kv_read_bytes(geo, c)) * gain
         rows.append(pick_target(k, base.get(k), r, dec_eff(r, ed), dec_eff(r, sd)))
     for P in ctxs:
         k = f"prefill_{P}"
@@ -225,7 +238,7 @@ def main():
     if exp:   # 4 tokens route independently: ~min(n_exp, 4*k) distinct experts per layer
         n, k = geo["n_exp"], geo["n_used"]
         exp4 = exp * n * (1 - (1 - k / n) ** 4) / k            # expected distinct experts
-    c4 = 4 * a.bw / (wb - exp + (exp4 if exp else 0) + 4 * kv_read_bytes(geo, 600))
+    c4 = 4 * a.bw / (wb - exp + (exp4 if exp else 0) + 4 * kv_read_bytes(geo, 600)) * gain
     ck = "c4_moe" if geo["n_exp"] else "c4"
     rows.append(pick_target("c4_steady", base.get("c4_steady"), c4, EFF[ck], STRETCH[ck]))
 
@@ -234,14 +247,15 @@ def main():
                weight_bytes_per_token=round(wb), head_bytes=head,
                bytes_by_kind={k: round(v) for k, v in detail.items()},
                matmul_params=round(params), efficiency_assumed=EFF, stretch_assumed=STRETCH,
-               bw=a.bw, flops=a.flops, metrics=rows,
+               bw=a.bw, flops=a.flops, draft_gain=round(gain, 3), metrics=rows,
                campaign=dict(budget_h=a.budget_h, reserve_min=a.reserve_min,
                              goals={g.split("=")[0]: float(g.split("=")[1]) for g in a.goal}))
     if a.out:
         json.dump(out, open(a.out, "w"), indent=1)
     print(f"weights read / decode token: {wb/1e9:.3f} GB  (head {head/1e9:.3f} GB)  "
           + "  ".join(f"{k} {v/1e9:.2f}" for k, v in detail.items()))
-    print(f"matmul params: {params/1e9:.2f} B    BW {a.bw/1e9:.0f} GB/s   peak {a.flops/1e12:.0f} TFLOP/s")
+    print(f"matmul params: {params/1e9:.2f} B    BW {a.bw/1e9:.0f} GB/s   peak {a.flops/1e12:.0f} TFLOP/s"
+          + (f"   decode/c4 ceilings x{gain:.2f} (measured drafting gain, --draft-tune)" if gain > 1 else ""))
     hdr = (f"{'metric':16} {'ceiling':>9} {'llama.cpp':>9} {'eff':>5} "
            f"{'TARGET':>9} {'margin':>8} {'stretch':>9} {'margin':>8}")
     print(hdr)

@@ -31,8 +31,15 @@ NF = D // 16                     # 16-dim MMA fragments per head
 DP8 = D + 8                      # padded K-tile row (f16 elements)
 QH = KVH * G
 LANES = 32 * G
-DPT = D * 32 // LANES            # staged dims per thread per key tile
+# K/V staging tiles head_dim over 32*GP slots (GP: G rounded up to a power of two). With a power-of-two group
+# every lane stages one slot; otherwise (Qwen3.8: 6 heads per KV head, 192 lanes) staging is sized for the power
+# of two below G and the extra lanes skip it, so the workgroup still has exactly G waves.
+POW2 = G & (G - 1) == 0
+GP = G if POW2 else 1 << (G.bit_length() - 1)   # non-power-of-two: stage like the power of two below G
+DPT = D * 32 // (32 * GP)        # staged dims per thread per key tile
 TPK = D // DPT                   # threads per key
+SLOTS = 32 * TPK
+PASSES = -(-SLOTS // LANES)      # 1: lanes beyond SLOTS skip staging
 assert D in (64, 128, 256) and DPT >= 1 and TPK * DPT == D, (
     f"flash2 needs head_dim 64/128/256 and a power-of-two query heads per KV head (got D={D}, G={G}): "
     "generalize the staging (32*G lanes tile head_dim) before porting this model")
@@ -161,11 +168,7 @@ A('''  %zero8 = vector.constant 0.0 : vector<8xf32>
   // Staging: thread t loads key t/{TPK}, dims (t%{TPK})*{DPT}.
   %ctpk = index.constant {TPK} : index
   %cdpt = index.constant {DPT} : index
-  %st_key_value = index.div %workitem, %ctpk : index
-  %st_key = index.assume %st_key_value [range(%st_key_value, 0, 31)] : index
-  %st_seg = index.rem %workitem, %ctpk : index
-  %st_dim_value = index.mul %st_seg, %cdpt : index
-  %st_dim = index.assume %st_dim_value [range(%st_dim_value, 0, {D - DPT})] : index
+@@STAGING_SLOTS@@
   %kz = vector.constant 0.0 : vector<{DPT}xf16>
 ''')
 acc = ", ".join(f"%a{d} = %init : vector<8xf32>" for d in range(NF))
@@ -207,10 +210,38 @@ STAGE = f"""    %key_pos = index.add %tile_first, %st_key : index
       view.store %vj, %vt_view[%vt_row, %st_key] : f16, view<{D}x{VTC}xf16>
     }}
 """
+def staging_slots():
+    if POW2:
+        return f'''  %st_key_value = index.div %workitem, %ctpk : index
+  %st_key = index.assume %st_key_value [range(%st_key_value, 0, 31)] : index
+  %st_seg = index.rem %workitem, %ctpk : index
+  %st_dim_value = index.mul %st_seg, %cdpt : index
+  %st_dim = index.assume %st_dim_value [range(%st_dim_value, 0, {D - DPT})] : index'''
+    out = [f"  %c_slots = index.constant {SLOTS} : index\n  %c_slots_less = index.constant {SLOTS - 1} : index"]
+    for p in range(PASSES):
+        out.append(f'''  %st_add_p{p} = index.constant {p * LANES} : index
+  %st_slot_p{p} = index.add %workitem, %st_add_p{p} : index
+  %st_live_p{p} = index.cmp ult, %st_slot_p{p}, %c_slots : index
+  %st_slot_cl_p{p} = index.min %st_slot_p{p}, %c_slots_less : index
+  %st_key_value_p{p} = index.div %st_slot_cl_p{p}, %ctpk : index
+  %st_key_p{p} = index.assume %st_key_value_p{p} [range(%st_key_value_p{p}, 0, 31)] : index
+  %st_seg_p{p} = index.rem %st_slot_cl_p{p}, %ctpk : index
+  %st_dim_value_p{p} = index.mul %st_seg_p{p}, %cdpt : index
+  %st_dim_p{p} = index.assume %st_dim_value_p{p} [range(%st_dim_value_p{p}, 0, {D - DPT})] : index''')
+    return "\n".join(out)
+
+
 A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NF))} = scf.for %kt = [%c0 to %key_tiles step %c1](%m = {M_INIT} : f32, %l = {L_INIT} : f32, {acc}) -> (f32, f32, {", ".join(["vector<8xf32>"] * NF)}) {{
     %tile_first = index.madd %kt, %ckt, %key_low : index
 ''')
-for sp in range(KT // 32):
+assert POW2 or KT == 32, "guarded staging is generated for 32-key tiles"
+for p in range(0 if POW2 else PASSES):   # non-power-of-two group: guarded staging passes
+    t = STAGE.replace("%st_key", f"%st_key_p{p}").replace("%st_dim", f"%st_dim_p{p}")
+    for name in ("%key_pos", "%key_valid", "%kvals", "%vvals", "%k_offset", "%v_offset", "%k_cache", "%v_cache", "%kh", "%vh", "%kf", "%vf", "%vj", "%vt_row"):
+        t = t.replace(name, f"{name}_p{p}")
+    t = t.replace("%kp ", f"%kp_p{p} ").replace("%kp,", f"%kp_p{p},").replace("%j ", f"%j_p{p} ").replace("%j]", f"%j_p{p}]").replace("%j :", f"%j_p{p} :")
+    A(f"    scf.if %st_live_p{p} {{\n" + t.replace("\n    ", "\n      ") + "    }")
+for sp in range(KT // 32 if POW2 else 0):
     A(f'''    %spo{sp} = index.constant {sp * 32} : index
     %st_key{sp} = index.add %st_key, %spo{sp} : index
 ''' + STAGE.replace("%st_key", f"%st_key{sp}").replace("%key_pos", f"%key_pos{sp}").replace("%key_valid", f"%key_valid{sp}").replace("%kvals", f"%kvals{sp}").replace("%vvals", f"%vvals{sp}").replace("%kp ", f"%kp{sp} ").replace("%kp,", f"%kp{sp},").replace("%k_offset", f"%k_offset{sp}").replace("%v_offset", f"%v_offset{sp}").replace("%k_cache", f"%k_cache{sp}").replace("%v_cache", f"%v_cache{sp}").replace("%kh", f"%kh{sp}").replace("%vh", f"%vh{sp}").replace("%kf", f"%kf{sp}").replace("%vf", f"%vf{sp}").replace("%vj", f"%vj{sp}").replace("%vt_row", f"%vt_row{sp}").replace("%j ", f"%j{sp} ").replace("%j]", f"%j{sp}]").replace("%j :", f"%j{sp} :"))
@@ -297,7 +328,7 @@ for d in range(NF):
     A(f'''  %ou{d} = vector.mulf %o{d}, %inv_v : vector<8xf32>{gate_txt}
   vector.fragment.store<result> %of{d}, %out_view[{r}, %c0] shape [%c16, %c16] : vector<8xf32>, view<{D}x16xf32, %out_layout>''')
 A("  }\n  kernel.return\n}\n")
-text = "\n".join(U)
+text = "\n".join(U).replace("@@STAGING_SLOTS@@", staging_slots(), 1)
 # constants used above
 consts = "".join(f"  %d{c} = index.constant {c * 16} : index\n" for c in range(NF))
 consts += "".join(f"  %d{d * 16 if d else 0}r = index.constant {d * 16} : index\n" for d in range(NF))

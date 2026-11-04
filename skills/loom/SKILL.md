@@ -84,7 +84,10 @@ $K/loom-benchmark/scripts/finalize.sh $W/pkg http://127.0.0.1:8160 $G $W/bench  
    (3: the chat template, or an architecture the starter doesn't cover). Then follow
    `loom-port-llm` for that stage only, and continue with step 2 once the package
    serves and its kernel tests pass.
-2. **Qualify.** `qualify.sh` picks the fastest llama.cpp ROCm build on the machine, measures
+2. **Qualify.** `qualify.sh` first picks the speculative-decoding method and depth by measured decode
+   speed (stage 0, `draft/tune.py`: none, the GGUF's MTP block, or a DFlash drafter `port.sh` found; it
+   rebuilds the package with the winner), then picks the fastest llama.cpp ROCm build on the machine, gives it
+   its own best speculative decoding the same way (`llama_spec_tune.py`: drafting vs drafting), measures
    its baseline with Loom stopped, runs the gates (`LEVEL=quick`; llama.cpp references are filled
    with Loom stopped), measures the Loom baseline, runs the roofline (targets + budget) and prints
    `QUALIFY_RESULT`. A failing gate doesn't stop the measurements, but fix it before finalize.
@@ -115,6 +118,10 @@ llama.cpp references (qualify 41 instead of ~30 min) and got A/B numbers too noi
 Stop to ask only for what the hard rules require: a gated-license click, or approval of a
 binary from a source other than PyPI and lemonade-sdk/llamacpp-rocm. Avoid both where possible:
 - **Reuse what is installed.** Check `~/loom/.venv/bin/loom-serve` (Windows: `.venv/Scripts/loom-serve.exe`) and the HF cache.
+- **Quant: Q4_K_M (other Q4-tier files only when the repo has none), from the HF cache when it is there.**
+  `pick_gguf.py` does both (a cached UD-Q4_K_XL never beats Q4_K_M; the same quant cached under another repo, e.g.
+  bartowski/, stops the pick so you port that repo instead of downloading); don't override it with a bigger quant or download another copy. A Q8_0 27B decodes at half the
+  speed and needs ~28 GB; if the Q4 files use formats the starter lacks, add the formats instead.
 - **Baseline = the fastest llama.cpp ROCm build** (latest lemonade release or an installed one):
   `qualify.sh` fetches the latest and picks the fastest (`loom-benchmark` section 0).
 

@@ -52,9 +52,15 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
 | LEVEL | When | Gates | Cost |
 |---|---|---|---|
 | `fast` | after each kept optimization | goldens (cached) + compare, consistency (+ vision, for a package with image input) | 1–3 min |
-| `quick` | after the port (`qualify.sh` runs it) | fast + agent tool loop, sampling, needle at half the context (≤ 60k) vs llama.cpp | 5–15 min the first time |
+| `quick` | after the port (`qualify.sh` runs it) | fast + speculative-decoding equivalence (`spec`, drafting packages), agent tool loop, sampling, needle at half the context (≤ 60k) vs llama.cpp | 5–15 min the first time |
 | `full` | once, on the final build (`finalize.sh` runs it) | quick + one Loom-only probe at the full context | + one full-context prefill |
 
+- **Speculative-decoding gate `spec`** (packages that draft; `spec_check.py`): the package must produce exactly
+  what the same package produces with `draft_depth 0` (`PKG/model_target.json`, same compiled program): greedy
+  and seeded-sampling chat, a 1k-token prompt, a tool call, a reasoning answer. Any difference fails (drafting
+  is lossless by construction: a difference is a verification, acceptance or state-replay bug). The log also
+  prints the acceptance rate. The agent and needle gates run with drafting on, so they cover multi-turn reuse
+  and the full context with speculation.
 - **Vision gate** (packages with image input, every level): `vision_golden.py` sends six built-in images
   (shapes + text, chart, document, photo-like, tall, wide; `--images` adds files) to Loom as chat
   requests and to llama-server `--mmproj` (gates.sh sets `MMPROJ` from the package, so the lazily
@@ -197,6 +203,19 @@ Rules:
   them.
 
 ## 3. Reporting
+
+**Speculative decoding in reports.** Say which drafter the package uses (`llm_config.json` `draft`), show the
+tuning table (`bench/draft_tune.json`: decode tok/s per method and depth, including no drafting) and the
+acceptance rate from the `spec` gate log. Decode numbers with drafting depend on the text: report them on the
+standard workloads and say so.
+
+**The baseline drafts too (drafting vs drafting).** `qualify.sh` runs `scripts/llama_spec_tune.py` before the
+llama.cpp baseline: the same drafters Loom has (`--spec-type draft-mtp` for a GGUF with an MTP block,
+`--spec-type draft-dflash --spec-draft-model DRAFTER` for the DFlash drafter `find_drafter.py` found) at
+`--spec-draft-n-max` 1-4 / 3, 5, 7, plus none, each timed on the same requests as Loom's `tune.py`; the fastest
+(>= 3 % over none) goes to `bench/llamacpp_spec.json`, and `llamacpp_server.sh` adds it (`LLAMA_SPEC`) to every
+llama.cpp performance run in qualify and finalize. References (goldens, gates) never draft. A build that rejects
+a method is recorded as failed in the table and that method is skipped; the report shows the table.
 
 **Run the audit first** (from `bench/`):
 ```bash

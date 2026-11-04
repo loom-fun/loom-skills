@@ -15,6 +15,11 @@ What happens (all generated, nothing per model):
 - `build.py` adds the image component: `program/vision_{prepare,control,stages,encoder}.loom`, the
   `vision` parameter scope (the mmproj) and `components.image` in `model.json`. Text-only builds are
   byte-identical to builds without this code.
+- Odd encoder geometry is generated, not hand-fixed: attention reads head rows in 32-wide chunks, or 8-wide when
+  the head size is not a multiple of 32 (the Qwen3.8-27B projector: 16 heads x 72), and a linear the WMMA GEMM
+  cannot tile (K or N not a multiple of 64: that projector's 1152 x 4304 FFN) takes `gen_vision.gemm_any`.
+- Speculative decoding stays on for image models: `spec_check.py` adds image questions when `/v1/models` lists
+  image input (M-RoPE positions flow through the verify and draft stages), so port.sh and the `spec` gate check it.
 - Stage 5 runs `vision/tests/run_tests.sh`: every encoder kernel vs NumPy, then the whole encoder on the
   real weights vs `vision/ref_vit.py` (per-row cosine >= 0.999). Stage 6 asks about a test image.
 - `loom-benchmark/scripts/gates.sh` adds the **vision** gate (`vision_golden.py`): same request to

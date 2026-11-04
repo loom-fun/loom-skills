@@ -36,7 +36,11 @@ H = A("embedding_length")
 heads = A("attention.head_count")
 kv = A("attention.head_count_kv")
 head_dim = A("attention.key_length") or H // heads
-L = A("block_count")
+BLOCKS = A("block_count")
+# Multi-token-prediction (NextN/MTP) blocks follow the trunk: blk.L.. carry nextn.* tensors.
+# They are not trunk layers; cfg["mtp"] lists them for the speculative-decoding drafter.
+_nextn = sorted({int(t.name.split(".")[1]) for t in r.tensors if ".nextn." in t.name})
+L = BLOCKS - len(_nextn) if _nextn and _nextn[0] == BLOCKS - len(_nextn) else BLOCKS
 vocab = tensors["token_embd.weight"]["shape"][1]
 template = field("tokenizer.chat_template", "") or ""
 eos = field("tokenizer.ggml.eos_token_id")
@@ -77,11 +81,12 @@ if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen
           "before trusting a golden FAIL or PASS")
 _g = cfg["heads"] // max(cfg["kv_heads"], 1)
 if _g & (_g - 1):
-    print(f"WARNING: head_dim {head_dim}: {_g} query heads per KV head; the prefill flash attention (gen_flash2.py) "
-          "tiles head_dim over 32*G lanes and needs G to be a power of two: generalize it first (new kernel work)")
+    print(f"NOTE: {_g} query heads per KV head (not a power of two): flash prefill stages K/V for the power of two "
+          "below it and the extra waves skip staging (gen_flash2.py); check the long goldens")
 # Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style).
 pat = A("attention.sliding_window_pattern")
-if cfg["sliding_window"] and isinstance(pat, list) and len(pat) == L:
+if cfg["sliding_window"] and isinstance(pat, list) and len(pat) in (L, BLOCKS):
+    pat = pat[:L]
     cfg["sliding_layers"] = [i for i, sl in enumerate(pat) if sl]
 elif cfg["sliding_window"]:
     print(f"WARNING: sliding_window {cfg['sliding_window']} but no per-layer pattern in the GGUF: fill "
@@ -107,6 +112,9 @@ if A("ssm.inner_size"):
         cfg["post_norms"] = False
         cfg["ffn_norm_tensor"] = "post_attention_norm"
     print(f"hybrid: {len(cfg['recurrent_layers'])} gated delta-net layers + {cfg['kv_layers']} attention layers;", cfg["gdn"])
+if _nextn and L != BLOCKS:
+    cfg["mtp"] = {"layers": _nextn}
+    print(f"MTP: {len(_nextn)} NextN block(s) {_nextn} after the {L}-layer trunk: speculative decoding (MTP) is available")
 def generation_block(tpl):
     """Text the template emits for add_generation_prompt (what decides thinking mode)."""
     i = tpl.rfind("add_generation_prompt")
@@ -125,13 +133,16 @@ if template:
         cfg["chat"] = chat
         print(f"chat: thinking={chat['thinking']} (default {'on' if chat['thinking_default'] else 'off'}), "
               f"tool calls={chat['call_format']}; generation prompt {chat['generation_prompt']!r}")
+        if chat.get("reasoning_instructions"):
+            print(f"chat: reasoning efforts {'/'.join(chat['reasoning_instructions'])} (default {chat['reasoning_effort_default']}) "
+                  "select the system block's reasoning instructions; none = thinking off")
         if any(ok is False for _, ok, _ in results):
             print("WARNING: the derived chat block does not reproduce the template (FAIL above); fix it by hand")
     except (chat_probe.ProbeError, ValueError, KeyError) as e:
         print("WARNING: chat template not derivable automatically:", e)
 fmts = sorted({v["type"] for k, v in tensors.items() if k.endswith(".weight") and len(v["shape"]) == 2})
 print(f"{cfg['name']}: arch={arch} L={L} H={H} heads={heads}/{cfg['kv_heads']} d={head_dim} ffn={cfg['ffn']} vocab={vocab} formats={fmts}")
-unsupported = [f for f in fmts if f not in ("q4_k", "q5_k", "q6_k", "q8_0")
+unsupported = [f for f in fmts if f not in ("q4_k", "q5_k", "q6_k", "q8_0", "q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s")
                and not (f == "f32" and cfg.get("gdn"))]  # f32 conv1d weights are read directly by the GDN kernels
 if unsupported:
     print("WARNING: no kernels for", unsupported, "- add dequant helpers (see reference/porting-notes.md)")

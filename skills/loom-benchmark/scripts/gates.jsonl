@@ -1,0 +1,5 @@
+{"ts": "2026-11-03T21:09:27", "gate": "consistency", "verdict": "PASS", "commit": "fa64788", "identical": [true, true, true, true], "near_tie_only": false}
+{"ts": "2026-11-03T21:09:59", "gate": "consistency", "verdict": "PASS", "commit": "fa64788", "identical": [true, true, true, true], "near_tie_only": false}
+{"ts": "2026-11-03T21:11:40", "gate": "consistency", "verdict": "PASS", "commit": "fa64788", "identical": [true, true, true, true], "near_tie_only": false}
+{"ts": "2026-11-03T21:13:48", "gate": "consistency", "verdict": "PASS", "commit": "fa64788", "identical": [true, true, true, true], "near_tie_only": false}
+{"ts": "2026-11-03T21:14:23", "gate": "consistency", "verdict": "PASS", "commit": "fa64788", "identical": [true, true, true, true], "near_tie_only": false}

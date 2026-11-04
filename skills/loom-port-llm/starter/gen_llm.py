@@ -24,10 +24,24 @@ V, L = CFG["vocab"], CFG["layers"]
 FFL = CFG["ffn"] if isinstance(CFG["ffn"], list) else [CFG["ffn"]] * L
 FF = max(FFL)
 FF_UNIFORM = len(set(FFL)) == 1
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "draft"))
+import gen_draft  # noqa: E402  speculative decoding (LLM_DRAFT, set by build.py): verify + drafter programs
+MTP_LAYER = None
+if gen_draft.enabled() and gen_draft.DRAFT["kind"] == "mtp":
+    MTP_LAYER = CFG["mtp"]["layers"][0]
+    _w = CFG["tensors"][f"blk.{MTP_LAYER}.ffn_gate.weight"]["shape"][1]
+    assert _w in FFL, f"MTP block FFN width {_w} differs from the trunk's {sorted(set(FFL))}"
+    FFL = FFL + [_w] * (MTP_LAYER + 1 - len(FFL))   # layer_text(MTP_LAYER) reads FFL[MTP_LAYER]
 def nff(i):
     """index SSA of layer i's FFN width."""
     return "%nFF" if FF_UNIFORM else f"%nFF{FFL[i]}"
+# Layers whose ffn_gate and ffn_up use different formats (unsloth UD quants) run two projections + g_silu_mul.
+MIXED_FFN = any(n.endswith("ffn_gate.weight") and CFG["tensors"].get(n.replace("ffn_gate", "ffn_up"), {}).get("type") not in (None, t["type"])
+                for n, t in CFG["tensors"].items())
 G = QH // KVH                             # query heads per KV head (waves per attention workgroup)
+# Prefill flash attention (gen_flash2.py) tiles head_dim over 32*G lanes: it needs a power-of-two group.
+# Otherwise (Qwen3.8: 6) every prefill token takes the listed split-K path (correct, slower prefill).
+NO_FLASH = os.environ.get("NO_FLASH2") == "1"
 assert D in (128, 256), "attention kernels support head_dim 128 or 256 (lane l owns dims l, l+32, ...)"
 DL = D // 32                              # head dims per lane in the attention kernels
 RD = CFG.get("rope_dims") or D            # rotary dims (partial RoPE rotates the first RD dims)
@@ -63,8 +77,12 @@ TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape"
 
 FMT = {  # bytes per superblock of SB[fmt] values
     "q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "f32": 128,
+    # low-bit formats of unsloth UD / bartowski quants (helpers in quant_values.loom, appended when used)
+    "q4_0": 18, "iq4_nl": 18, "iq4_xs": 136, "q3_k": 110, "iq3_s": 110,
 }
-SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "f32": 32}
+SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "f32": 32,
+      "q4_0": 32, "iq4_nl": 32, "iq4_xs": 256, "q3_k": 256, "iq3_s": 256}
+LOWBIT = {"q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s"}
 
 
 def row_bytes(fmt, k):
@@ -1773,7 +1791,7 @@ def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
         args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
         types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
         mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
-    x16 = {"%h": "%h16", "%o": "%o16", "%f": "%f16"}[x]
+    x16 = {"%h": "%h16", "%o": "%o16", "%f": "%f16"}.get(x, x + "16")   # f16 copy of the activation (GEMM input)
     args = args.replace(f", {x}, {s},", f", {x16}, {s},")
     return f"""scf.if %gemm {{
       scf.if %big {{
@@ -2013,6 +2031,40 @@ def gdn_layer(i, b, nm, sz, par):
     return "".join(T)
 
 
+SILU_MUL = r"""
+// f[t, c] = silu(f[t, c]) * u[t, c] for the first n channels of each token (gate/up in different formats).
+kernel.def export("g_silu_mul") @g_silu_mul(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%tokens_arg: index, %n_arg: index, %f: buffer, %u: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %n = index.assume %n_arg [range(%n_arg, 4, 65536), multiple_of(%n_arg, 4)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c4 = index.constant 4 : index
+  %c1024 = index.constant 1024 : index
+  %f_view = buffer.view %f[%zero] : buffer -> view<[%tokens]x[%n]xf32>
+  %u_view = buffer.view %u[%zero] : buffer -> view<[%tokens]x[%n]xf32>
+  %first = index.mul %lane, %c4 : index
+  scf.for %c0v = [%first to %n step %c1024] {
+    %c = index.assume %c0v [range(%c0v, 0, 65532), multiple_of(%c0v, 4), lt(%c0v, %n)] : index
+    %g = vector.load %f_view[%token, %c] : view<[%tokens]x[%n]xf32> -> vector<4xf32>
+    %v = vector.load %u_view[%token, %c] : view<[%tokens]x[%n]xf32> -> vector<4xf32>
+    %sg = vector.logisticf<afn> %g : vector<4xf32>
+    %s = vector.mulf %g, %sg : vector<4xf32>
+    %o = vector.mulf %s, %v : vector<4xf32>
+    vector.store %o, %f_view[%token, %c] : vector<4xf32>, view<[%tokens]x[%n]xf32>
+  }
+  kernel.return
+}
+"""
+MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
+
+
 def model():
     """Command program: embed, then a statically unrolled layer loop (each
     layer's tensor formats come from the GGUF), then the argmax head."""
@@ -2069,7 +2121,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %v = buffer.alloca<global> align(256) %kv_size : buffer
   %info = buffer.alloca<global> align(256) %info_size : buffer
   %f = buffer.alloca<global> align(256) %ffn_size : buffer
-  %partials = buffer.alloca<global> align(256) %partial_size : buffer
+{"  %fu = buffer.alloca<global> align(256) %ffn_size : buffer" + chr(10) if MIXED_FFN else ""}  %partials = buffer.alloca<global> align(256) %partial_size : buffer
   // 64 splits per head for decode, 16 for the prefill fallback.
   %c64 = index.constant 64 : index
   // NO_GEMM=1 (diagnostic build): %c_never keeps every epoch on the decode kernels.
@@ -2136,14 +2188,16 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
     gate = "%gate" if GATE else "%q"
     attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in RECUR)}
     gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
-    for i in range(L):
+    def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
+        """Text of trunk layer i (tensors blk.i.*). ordinal overrides its attention KV-plane ordinal and
+        last_norm names the norm applied to its output (default: next layer's attn_norm / output_norm)."""
         b = f"blk.{i}."
         nm = lambda n: b + n + ".weight"
         sz = lambda n: tensor_bytes(nm(n))
         par = lambda var, n, ty=None: f'    %{var}_{i} = command.parameter %weights, "{nm(n)}" : {ty or f"view<{sz(n)}xi8>"}\n'
-        kind = " (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else "")
+        kind = kind_note or (" (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else ""))
         T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
-             f"  %layer_{i} = index.constant {attn_ordinal.get(i, gdn_ordinal.get(i))} : index\n  %sliding_{i} = scalar.constant {1 if i in sliding else 0} : i32\n  %rope_{i} = scalar.constant {0 if i in nope else 1} : i32\n"]
+             f"  %layer_{i} = index.constant {attn_ordinal.get(i, gdn_ordinal.get(i)) if ordinal is None else ordinal} : index\n  %sliding_{i} = scalar.constant {1 if i in sliding else 0} : i32\n  %rope_{i} = scalar.constant {0 if i in nope else 1} : i32\n"]
         T += [par("w_gate", "ffn_gate"), par("w_up", "ffn_up"), par("w_down", "ffn_down"),
               par("ffn_norm", FFN_NORM, f"view<{H}xf32>")]
         if i in RECUR:
@@ -2176,8 +2230,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         if i not in RECUR:
           T.append(f"""  kernel.launch @g_qk_rope_store[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""})
   scf.if %gemm {{
-    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
-    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
+{"" if NO_FLASH else f"    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)" + chr(10)}    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
     kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
   }} else {{
     kernel.launch @g_attention_split[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
@@ -2193,18 +2246,28 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, {pa}, %x, %ffn_norm_{i}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
         fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
-        assert fg == fu, f"layer {i}: ffn_gate {fg} != ffn_up {fu} (split the swiglu linear)"
-        T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", nff(i), H, mode="swiglu") + "\n")
+        if fg == fu:
+            T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", nff(i), H, mode="swiglu") + "\n")
+        else:   # gate and up in different formats (unsloth UD mixes): two projections, then silu(gate) * up
+            T.append("  " + lin(fg, "%h", "%s_h", f"%w_gate_{i}", sz("ffn_gate"), "%f", "%nH", nff(i), H) + "\n")
+            T.append("  " + lin(fu, "%h", "%s_h", f"%w_up_{i}", sz("ffn_up"), "%fu", "%nH", nff(i), H) + "\n")
+            T.append(f"  kernel.launch @g_silu_mul[%t](%t, {nff(i)}, %f, %fu) : [index](index, index, buffer, buffer)\n")
         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {nff(i)}, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
         T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", nff(i), "%nH", FFL[i]) + "\n")
         pf = f"%post_ffn_{i}" if POST_NORM else f"%ffn_norm_{i}"
-        if i == L - 1:
+        if last_norm:
+            nn = last_norm
+        elif i == L - 1:
             nn = "%output_norm"
         else:
             T.append(f'  %next_norm_{i} = command.parameter %weights, "blk.{i + 1}.attn_norm.weight" : view<{H}xf32>\n')
             nn = f"%next_norm_{i}"
         T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, {pf}, %x, {nn}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
-        L_.append("".join(T).replace("\n    %", "\n  %").replace("\n      ", "\n    "))
+        return "".join(T).replace("\n    %", "\n  %").replace("\n      ", "\n    ")
+
+    MODEL_PARTS.update(layer_text=layer_text, prologue="".join(L_[:-1]), attn_ordinal=attn_ordinal)  # [-1]: token info + embed
+    for i in range(L):
+        L_.append(layer_text(i))
     L_.append(f"""
   %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
   %one_span = index.cmp eq, %spans, %c1 : index
@@ -2225,8 +2288,40 @@ if __name__ == "__main__":
     out_dir = os.environ.get("LLM_OUT") or os.path.join(here, "out")
     os.makedirs(out_dir, exist_ok=True)
     program, head_fmt = model()  # first: records the mv / GEMM variants it launches
+    spec_kernels = ""
+    if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too
+        head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
+        gfacts = dict(H=H, HG=HG, EPS=EPS, D=D, KD=KVH * D, QK_NORM=QK_NORM, VISION=bool(VISION), MROPE=bool(MROPE),
+                      GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
+                      head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
+                      prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin,
+                      fmt=fmt_of, size=tensor_bytes, mtp_layer=MTP_LAYER)
+        if gen_draft.DRAFT["kind"] == "dflash":
+            import gen_dflash
+            dcfg = gen_dflash.config(gen_draft.DRAFT["gguf"])
+            assert dcfg["hidden"] == H, f"drafter hidden {dcfg['hidden']} != target {H}"
+            DT = dcfg["tensors"]
+            def dsize(name):
+                t = DT[name]
+                n = 1
+                for d in t["shape"]:
+                    n *= d
+                return n * 4 if t["type"] == "f32" else n // SB[t["type"]] * FMT[t["type"]]
+            gfacts.update(dflash=dcfg, dflash_taps=[t - 1 for t in dcfg["target_layers"]], L=L, CHUNKS=CHUNKS, V=V,
+                          row_bytes=row_bytes, FMT=FMT, SB=SB, dfmt=lambda n: DT[n]["type"], dsize=dsize)
+        spec = [gen_draft.advance_program(program, gfacts), gen_draft.verify_program(program, gfacts)]
+        if MTP_LAYER is not None:
+            spec.append(gen_draft.mtp_programs(gfacts))
+        if gen_draft.DRAFT["kind"] == "dflash":
+            spec.append(gen_dflash.programs(gfacts))
+        program = gen_draft.small_gemm("\n".join(spec))
+        spec_kernels = gen_draft.kernels(gfacts)
+        if gen_draft.DRAFT["kind"] == "dflash":
+            spec_kernels += gen_dflash.kernels(gfacts)
     if any(f == "f32" for f, *_ in USED_MV | USED_MV_R) or "f32" in USED_GEMM:
         COMMON += F32_VALUES
+    if {f for f, *_ in USED_MV | USED_MV_R} & LOWBIT or set(USED_GEMM) & LOWBIT or any(t["type"] in LOWBIT for t in TENS.values()):
+        COMMON += "\n" + open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "quant_values.loom")).read()
     parts = [f"// Generated by gen_llm.py from {os.environ.get('LLM_CONFIG') or sys.argv[1]}.\n", COMMON.replace("%c8_q6", "%c8q6").replace(
         "  %c64 = index.constant 64 : index\n  %qh_base", "  %c64 = index.constant 64 : index\n  %c8q6 = index.constant 8 : index\n  %qh_base")]
     for TG in (1, 4):
@@ -2234,20 +2329,26 @@ if __name__ == "__main__":
             parts.append(mv(fmt, K, TG=TG, swiglu=sw))
     for fmt, K, sw, R, TG in sorted(USED_MV_R):
         parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
-    parts += [NORMS, ROW_SCALE, qk_rope(), attention(), head(), head_mv(1, head_fmt), head_mv(4, head_fmt)]
+    parts += [NORMS, ROW_SCALE, qk_rope(), attention().replace("%not_uniform = scalar.xori %uniform, %true : i1", "%not_uniform = scalar.ori %uniform, %true : i1") if NO_FLASH else attention(),
+              head(), head_mv(1, head_fmt), head_mv(4, head_fmt)]
     if FUSED_Q:
         parts.append(split_qgate(QH, D))
     if RECUR:
         parts.append(gdn_kernels(CFG, EPS))
+    if spec_kernels:
+        parts.append(spec_kernels)
+    if MIXED_FFN:
+        parts.append(SILU_MUL)
     env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
     # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
     env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
     parts.append(subprocess.run([sys.executable, os.path.join(here, "gen_gemm.py")], capture_output=True, text=True, check=True, env=env).stdout)
     parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
-    flash2 = os.path.join(out_dir, "flash2.loom")
-    subprocess.run([sys.executable, os.path.join(here, "gen_flash2.py")], check=True,
-                   env=dict(os.environ, FLASH2_TARGET="llm", FLASH2_OUT=flash2, LLM_CONFIG=os.environ.get("LLM_CONFIG") or sys.argv[1]))
-    parts.append(open(flash2).read())
+    if not NO_FLASH:
+        flash2 = os.path.join(out_dir, "flash2.loom")
+        subprocess.run([sys.executable, os.path.join(here, "gen_flash2.py")], check=True,
+                       env=dict(os.environ, FLASH2_TARGET="llm", FLASH2_OUT=flash2, LLM_CONFIG=os.environ.get("LLM_CONFIG") or sys.argv[1]))
+        parts.append(open(flash2).read())
     parts.append(program)
     out = os.path.join(out_dir, "model.loom")
     open(out, "w", newline="\n").write("\n".join(parts))
