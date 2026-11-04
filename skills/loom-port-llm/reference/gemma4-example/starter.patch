@@ -606,7 +606,7 @@
      "q4_k": dict(block_bytes=144, block_values=256),
      "q5_k": dict(block_bytes=176, block_values=256),
      "q6_k": dict(block_bytes=210, block_values=256),
-@@ -47,6 +48,14 @@
+@@ -72,6 +73,14 @@
        %{out}_ds = vector.splat %{out}_d : vector<16xf16>
        %{out}_ms = vector.splat %{out}_m : vector<16xf16>
        %{out} = vector.fmaf %{out}_codes, %{out}_ds, %{out}_ms : vector<16xf16>'''
@@ -623,7 +623,7 @@
        %{out}_block = index.div %w_col, %c32 : index
 --- a/gen_llm.py
 +++ b/gen_llm.py
-@@ -39,10 +39,26 @@
+@@ -42,10 +42,26 @@
  # Prefill flash attention (gen_flash2.py) tiles head_dim over 32*G lanes: it needs a power-of-two group.
  # Otherwise (Qwen3.8: 6) every prefill token takes the listed split-K path (correct, slower prefill).
  NO_FLASH = os.environ.get("NO_FLASH2") == "1"
@@ -651,19 +651,21 @@
  assert QH % KVH == 0 and G <= 16, "need heads % kv_heads == 0 and at most 16 query heads per KV head"
  assert HG <= 256 and H % 32 == 0, "hidden must be a multiple of 32 and at most 8192"
  UNROLL = 16
-@@ -73,9 +89,9 @@
+@@ -76,11 +92,11 @@
  TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
  
  FMT = {  # bytes per superblock of SB[fmt] values
 -    "q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "f32": 128,
 +    "q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "bf16": 64, "f32": 128,
+     # low-bit formats of unsloth UD / bartowski quants (helpers in quant_values.loom, appended when used)
+     "q4_0": 18, "iq4_nl": 18, "iq4_xs": 136, "q3_k": 110, "iq3_s": 110,
  }
--SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "f32": 32}
-+SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "bf16": 32, "f32": 32}
+-SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "f32": 32,
++SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "bf16": 32, "f32": 32,
+       "q4_0": 32, "iq4_nl": 32, "iq4_xs": 256, "q3_k": 256, "iq3_s": 256}
+ LOWBIT = {"q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s"}
  
- 
- def row_bytes(fmt, k):
-@@ -93,6 +109,8 @@
+@@ -100,6 +116,8 @@
          n *= d
      if t["type"] == "f32":
          return n * 4
@@ -672,7 +674,7 @@
      return n // SB[t["type"]] * FMT[t["type"]]
  
  
-@@ -407,6 +425,14 @@
+@@ -414,6 +432,14 @@
  }
  
  // Q5_K group as values (for heads/embeddings) is g_q5_k_values; Q4_K is g_q4_k_values.
@@ -687,7 +689,7 @@
  """
  
  # emitted only when an F32 matrix is used (see main)
-@@ -555,7 +581,10 @@
+@@ -562,7 +588,10 @@
          scf.yield %nx : f32
        }}""")
      if swiglu:
@@ -699,7 +701,7 @@
        %value = scalar.mulf %silu, %t1 : f32""")
      else:
          L.append("      %value = scalar.addf %t0, %zero_f : f32")
-@@ -881,6 +910,21 @@
+@@ -888,6 +917,21 @@
  """
  
  
@@ -721,7 +723,7 @@
  ROW_SCALE = r"""
  
  // Per-row power-of-two scale (as g_row_scale) plus the scaled row as F16, the
-@@ -1060,11 +1104,11 @@
+@@ -1067,11 +1111,11 @@
      yt = ", ".join(["f32"] * n)
      xs = ", ".join(f"%x{i}" for i in range(n))
      t = [f"""
@@ -735,7 +737,7 @@
    %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
    %layer = index.assume %layer_arg [range(%layer_arg, 0, {L - 1})] : index
    %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-@@ -1084,8 +1128,10 @@
+@@ -1091,8 +1135,10 @@
    %c15 = index.constant 15 : index
    %c16 = index.constant 16 : index
    %cqh = index.constant {QH} : index
@@ -747,7 +749,7 @@
    %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
    %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
    %position32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
-@@ -1103,8 +1149,10 @@
+@@ -1110,8 +1156,10 @@
    %zero_f = scalar.constant 0.0 : f32
  """]
      for j, idx in enumerate(freq_idx):
@@ -760,7 +762,7 @@
          t.append(f"""  // angle = position * theta^(-2i/RD) = position * exp(-i * 2 ln(theta) / RD)
    %li{j} = index.cast {idx} : index to i32
    %lf{j} = scalar.sitofp %li{j} : i32 to f32
-@@ -1197,8 +1245,22 @@
+@@ -1204,8 +1252,22 @@
      for i in range(n):
          t.append(f"""        %h{i} = scalar.fptrunc %r{i} : f32 to f16
          view.store %h{i}, %k_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>
@@ -785,7 +787,7 @@
          view.store %vh{i}, %v_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>""")
      t.append("""      }
      }
-@@ -1209,6 +1271,18 @@
+@@ -1216,6 +1278,18 @@
      return "\n".join(t)
  
  
@@ -804,7 +806,7 @@
  def listed(text, name, grid_rest):
      """Variant of a per-token kernel dispatched over the tokens in `list`
      (count read from a device buffer for indirect dispatch)."""
-@@ -1375,7 +1449,7 @@
+@@ -1382,7 +1456,7 @@
      %stop = index.min %stop_raw, %visible : index
      %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
      %q_raw = vector.load %q_view[%token, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
@@ -813,7 +815,7 @@
      %scale_v = vector.splat %scale : vector<4xf32>
      %q4 = vector.mulf %q_raw, %scale_v : vector<4xf32>
      %zero4 = vector.splat %zero_f : vector<4xf32>
-@@ -1489,12 +1563,138 @@
+@@ -1496,12 +1570,138 @@
  
  
  def attention():
@@ -958,7 +960,7 @@
  
  
  FALLBACK = r"""
-@@ -1672,9 +1872,22 @@
+@@ -1679,9 +1879,22 @@
            %is_best = scalar.cmpf oeq, %lv, %best : f32
            %cand_id = scf.select %is_best, %li, %big : i32
            %winner = kernel.workgroup.reduce<minsi> %cand_id : i32
@@ -982,7 +984,7 @@
              view.store %winner, %cand_i[%rr] : i32, view<64xi32>
            }}
            scf.yield %best, %winner : f32, i32
-@@ -1784,7 +1997,13 @@
+@@ -1791,7 +2004,13 @@
          args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
          types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
          mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
@@ -997,7 +999,7 @@
      args = args.replace(f", {x}, {s},", f", {x16}, {s},")
      return f"""scf.if %gemm {{
        scf.if %big {{
-@@ -1964,7 +2183,9 @@
+@@ -1971,7 +2190,9 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -1008,7 +1010,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -2117,7 +2338,20 @@
+@@ -2155,7 +2376,20 @@
    %h16 = buffer.alloca<global> align(256) %h16_size : buffer
    %o16 = buffer.alloca<global> align(256) %o16_size : buffer
    %f16 = buffer.alloca<global> align(256) %f16_size : buffer
@@ -1029,7 +1031,7 @@
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if FUSED_Q:
-@@ -2147,85 +2381,91 @@
+@@ -2185,65 +2419,71 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1148,9 +1150,9 @@
 +        T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, %post_attn_{i}, %x, %ffn_norm_{i}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
          T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
          fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
--        assert fg == fu, f"layer {i}: ffn_gate {fg} != ffn_up {fu} (split the swiglu linear)"
-+        assert fg == fu
-         T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", nff(i), H, mode="swiglu") + "\n")
+         if fg == fu:
+@@ -2254,20 +2494,20 @@
+             T.append(f"  kernel.launch @g_silu_mul[%t](%t, {nff(i)}, %f, %fu) : [index](index, index, buffer, buffer)\n")
          T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {nff(i)}, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
          T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", nff(i), "%nH", FFL[i]) + "\n")
 -        pf = f"%post_ffn_{i}" if POST_NORM else f"%ffn_norm_{i}"
@@ -1180,7 +1182,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -2285,8 +2525,9 @@
+@@ -2329,8 +2569,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1192,7 +1194,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if RECUR:
-@@ -2296,13 +2537,27 @@
+@@ -2342,13 +2583,27 @@
      env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
      # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
