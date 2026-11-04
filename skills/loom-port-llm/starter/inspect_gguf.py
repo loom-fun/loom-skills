@@ -142,7 +142,7 @@ if template:
         print("WARNING: chat template not derivable automatically:", e)
 fmts = sorted({v["type"] for k, v in tensors.items() if k.endswith(".weight") and len(v["shape"]) == 2})
 print(f"{cfg['name']}: arch={arch} L={L} H={H} heads={heads}/{cfg['kv_heads']} d={head_dim} ffn={cfg['ffn']} vocab={vocab} formats={fmts}")
-unsupported = [f for f in fmts if f not in ("q4_k", "q5_k", "q6_k", "q8_0")
+unsupported = [f for f in fmts if f not in ("q4_k", "q5_k", "q6_k", "q8_0", "q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s")
                and not (f == "f32" and cfg.get("gdn"))]  # f32 conv1d weights are read directly by the GDN kernels
 if unsupported:
     print("WARNING: no kernels for", unsupported, "- add dequant helpers (see reference/porting-notes.md)")

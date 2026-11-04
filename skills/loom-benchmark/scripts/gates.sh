@@ -81,7 +81,7 @@ spec_gate() {
   loom_argv=("${orig[@]/model.json/model_target.json}"); loom_up || return 1
   "$T" "$S/spec_check.py" record "$url" "$model" spec_target.jsonl; rc=$?
   loom_down; loom_argv=("${orig[@]}"); loom_up || return 1
-  [ $rc = 0 ] && "$T" "$S/spec_check.py" compare spec_target.jsonl spec_draft.jsonl --metrics-file spec_metrics.txt
+  [ $rc = 0 ] && "$T" "$S/spec_check.py" compare spec_target.jsonl spec_draft.jsonl --metrics-file spec_metrics.txt --pkg "$pkg" ${L:+--llama "$L"}
 }
 drafting=$("$T" -c "import json; print(1 if json.load(open('$pkg/llm_config.json')).get('draft') else '')" 2>/dev/null)
 t_start=$(date +%s)
