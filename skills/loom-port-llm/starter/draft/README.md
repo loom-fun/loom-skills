@@ -114,7 +114,7 @@ acceptance from the spec gate's prompts at depth 3; every package below is token
 |---|---|---|---|
 | Nemotron-3.5-Bolt-E4B (gemma4, UD-Q5_K_XL) | NVIDIA DFlash, BF16 requantized to Q8_0, 49 % accepted | 46.7 -> **73.4** (DFlash depth 3, x1.57) | 45.3 -> **99.7** (DFlash n-max 7, x2.20) |
 | same | Gemma-4 E4B assistant (AtomicChat, Q8_0), 57 % accepted at depth 3 (llama.cpp: 57 %) | 46.9 -> **72.7** (assist depth 3, x1.55; ties DFlash) | 45.8 -> **98.8** (assist n-max 3, x2.16) |
-| Qwen3.5-4B (qwen35 hybrid, UD-Q4_K_XL, vision with M-RoPE, F16 tensors) | AtomicChat DFlash, 68 % accepted | port.sh end to end, spec gate 16/16 incl. images | - |
+| Qwen3.5-4B (qwen35 hybrid, UD-Q4_K_XL, vision with M-RoPE, F16 tensors) | AtomicChat DFlash, 68 % accepted, spec gate 16/16 incl. images | 62.9 -> **80.2** (DFlash depth 3, x1.28) | 57.2 -> **105.0** (DFlash n-max 7, x1.84) |
 | Muse-Glimmer-30B (muse-glimmer, UD-Q5_K_M) | z-lab DFlash2, 71 % accepted (61 % with the target's normed embedding) | 12.2 -> **20.5** (DFlash2 depth 3, x1.68) | 11.6 -> **25.4** (DFlash2 n-max 3, x2.18) |
 | Flint (flint MoE, Q4_K_M) | incoai DFlash2, 65 % accepted | 65.6 -> **90.5** (DFlash2 depth 3, x1.38) | 53.5 -> **86.0** (DFlash2 n-max 3, x1.61) |
 | LFM2.5-24B-A2B (lfm2moe, Q4_K_M) | none exists: n-gram only (short-conv replay; 13/13 exact) | **102.7** (n-gram 65.3: none kept) | **94.7** (ngram-simple 90.1, ngram-mod 93.6) |
@@ -153,7 +153,11 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   With the Gemma-4 assistant the gap is the same at equal acceptance: llama.cpp's epoch at ~2.7 tokens per step is
   ~27 ms (+5 ms over its 1-token step), Loom's 37.6 ms (+16 ms). Tried: a 4-token matvec that reloads each token's
   activations per row instead of holding them in registers (`mv_wide`-style): slower (42.9 ms) and not bit-identical
-  to 1-token decode, so dropped.
+  to 1-token decode, so dropped.  Forcing the WMMA GEMM already at 2-4 tokens (one weight pass, rows padded to 64): 50.0 ms, slower still.
+  llama.cpp's small-batch path (mmvq) quantizes the activations to Q8_1 and uses integer dot products, so 2-8 tokens
+  cost about one; Loom keeps f32 activations, and matching that speed exactly would mean moving 1-token decode to
+  quantized activations as well (the spec gate requires verify and decode to round alike): a change to every
+  port's numerics, for loom-optimize with full gates, not part of drafting.
 - Fixed: **DFlash2 crashed under concurrency on elastic backing** (`driver_failure DATA_LOSS gpu.event_wait`;
   Qwen3.8-27B, Muse-Glimmer-30B, Flint). A propose stage holds a power-of-two cohort of blocks; when fewer spans
   propose (one request still prefilling while others draft: tune.py's "two requests 0.5 s apart"), the trailing
@@ -180,11 +184,12 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   7: 16/16 exact), but re-reads the weights per 4 tokens: Bolt-E4B with 4 drafting streams at depth 3 took 146 ms per
   epoch vs 69 (drafted c4 throughput 55 vs 116 tok/s), worse than not drafting, so it is not the default. tune.py's
   equivalence check rejects any depth whose single-request output changes; depth 3 (4 tokens, exact) won on every
-  model measured. Flint additionally changes 7 of 13 at depth 7 even with SPEC_EXACT: its kit is not invariant above
-  4 tokens per epoch on its own (single stream), an example-specific issue still to find. Concurrent epochs that mix a
-  64+-token prefill with other rows' decode take the GEMM for the whole epoch, drafting or not (8 identical greedy
-  prompts at once, no drafting: Glimmer 6/8 equal to the solo run, Flint 0/8): the mixed-epoch effect consistency.py
-  documents, not a drafting property.
+  model measured. With SPEC_EXACT every depth tested is exact: Glimmer depth 7 16/16, Flint depth 4 and 7 13/13
+  (without it Flint depth 7 flips 7 of 13: MoE routing amplifies the GEMM's rounding). Always compare against
+  draft_depth 0 of the SAME package (spec_check.py card): a reference recorded from an earlier build differs on its own
+  (a stale Flint reference made the trunk look non-invariant above 4 tokens; it is not). Concurrent epochs that mix a
+  64+-token prefill with other rows' decode take the GEMM for the whole epoch, drafting or not: the mixed-epoch effect
+  consistency.py documents, not a drafting property.
 - **n-gram pays for every miss.** loom-serve 0.1.0 verifies a fixed width per speculative span, so a miss costs a
   4-token step (Nemotron: 33.7 vs 21.3 ms) where llama.cpp's ngram-simple/ngram-mod draft only after a long match
   and cost nothing on new text. Prompt lookup therefore wins on edit/quote-heavy output (Qwen3.5-0.8B code edit:
