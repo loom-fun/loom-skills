@@ -1698,11 +1698,10 @@ def listed(text, name, grid_rest):
     return header + body[:end]
 
 
-def attn_block(U, members, lo_all, kmax, act=False):
+def attn_block(U, members, lo_all, kmax):
     """One U-key block of the split attention loop (absolute key positions j..j+U-1, U-aligned) for each member
     (suffix, lo, hi): keys outside [lo, hi) contribute exactly nothing (p = 0, alpha = 1 when the max is unchanged),
-    so a member's result does not depend on the block range around it. The per-token kernel and the grouped
-    (several same-row tokens per workgroup) kernel share this text, so verify rounds like 1-token decode."""
+    so a member's result does not depend on the block range around it."""
     body = []
     for i in range(U):
         body.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
@@ -1718,7 +1717,6 @@ def attn_block(U, members, lo_all, kmax, act=False):
       %v{i} = vector.extf %vh{i} : vector<4xf16> to vector<4xf32>""")
     yields, types = [], []
     for sfx, lo, hi in members:
-        mstart = len(body)
         for i in range(U):
             body.append(f"""      %okl{i}{sfx} = index.cmp uge, %key{i}_raw, {lo} : index
       %okh{i}{sfx} = index.cmp ult, %key{i}_raw, {hi} : index
@@ -1745,16 +1743,6 @@ def attn_block(U, members, lo_all, kmax, act=False):
       %la{i}{sfx} = scalar.addf {pl}, %p{i}{sfx} : f32
       %pv{i}{sfx} = vector.splat %p{i}{sfx} : vector<4xf32>
       %aa{i}{sfx} = vector.fmaf %pv{i}{sfx}, %v{i}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}{sfx}", f"%aa{i}{sfx}"
-        if act:   # a group member without keys in this split skips the block (uniform branch)
-            inner = "\n".join(body[mstart:]).replace("\n      ", "\n        ")
-            del body[mstart:]
-            body.append(f"""      %mn{sfx}, %ln{sfx}, %an{sfx} = scf.if %act{sfx} -> (f32, f32, vector<4xf32>) {{
-  {inner}
-        scf.yield {prev}, {pl}, {pa} : f32, f32, vector<4xf32>
-      }} else {{
-        scf.yield %m{sfx}, %l{sfx}, %acc{sfx} : f32, f32, vector<4xf32>
-      }}""")
-            prev, pl, pa = f"%mn{sfx}", f"%ln{sfx}", f"%an{sfx}"
         yields += [prev, pl, pa]; types += ["f32", "f32", "vector<4xf32>"]
     body.append(f"      scf.yield {', '.join(yields)} : {', '.join(types)}")
     return body
