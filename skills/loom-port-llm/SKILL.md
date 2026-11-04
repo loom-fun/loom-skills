@@ -35,10 +35,12 @@ LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmark/scripts/
   ~/work/mymodel/pkg http://127.0.0.1:8160 ~/work/mymodel/gguf/<file.gguf> ~/work/mymodel/bench [LLAMA_PORT=8130]
 ```
 `port.sh` runs steps 1–6 below deterministically:
-- picks the GGUF (`starter/pick_gguf.py`: reads only the headers; the best quant whose tensor
-  formats the starter supports and that fits twice in GPU memory; it names the formats that need
-  a dequant helper when no file is fully supported), downloads it into the HF cache (symlinked as
-  `WORKDIR/gguf/`), and fetches the base model's tokenizer;
+- picks the GGUF (`starter/pick_gguf.py`): the **Q4 tier** (Q4_K_M / UD-Q4_K_XL / Q4_K_S; a bigger tier only
+  with `QUANT_TIER=Q5|Q6|Q8`), a file **already in the HF cache** first (any revision: nothing is downloaded
+  twice), formats the starter decodes (incl. unsloth UD's IQ4_XS/IQ4_NL/Q3_K/IQ3_S and Q4_0), and a file that
+  fits twice in GPU memory. It never leaves the tier on its own: with no supported Q4 file it stops and names
+  the missing formats. Only an uncached file is downloaded (into the HF cache); it is symlinked as
+  `WORKDIR/gguf/`, and the base model's tokenizer is fetched;
 - inspects, stops if the chat block isn't verified, builds at the native context, serves (state
   in `WORKDIR/state`), runs the kernel tests and a smoke test (chat + a tool call), and prints
   `PORT_RESULT {...}`;
@@ -122,8 +124,8 @@ $T -I $K/inspect_gguf.py /path/model-Q4_K_M.gguf cfg.json
 # 2. REVIEW cfg.json against llama.cpp's src/models/<arch>.cpp - see the checklist below
 # 3. Tokenizer: the HF tokenizer.json of the *same* model (base repo; GGUF repos often lack it)
 ~/loom/.venv/bin/hf download <org>/<base-model> tokenizer.json --local-dir tok
-# 4. Build: context defaults to the model's native context, the KV pool to 2x that, both fitted to
-#    --memory-gib (default auto: a KV pool of 2x the context, capped at 60% of RAM; one model is loaded at a time). Prints the model id and --memory_bytes.
+# 4. Build: context defaults to the model's native context, the KV pool to context + max(64k, context/4), both fitted
+#    to --memory-gib (default auto: that pool, capped at 60% of RAM; one model is loaded at a time). Prints the model id and --memory_bytes.
 $T $K/build.py cfg.json pkg --tokenizer tok/tokenizer.json --model-id <org>/<name-without-spaces>
 # 5. Serve + smoke test
 VENV=~/loom/.venv ${CLAUDE_SKILL_DIR}/../loom-setup/scripts/serve.sh mine 8160 amdgpu <memory_bytes> pkg/model.json
@@ -190,7 +192,8 @@ Kernel inventory:
 - head_dim 128 or 256 (attention); gated delta-net head dims multiples of 32; query-head groups that are not a
   power of two (Qwen3.8: 6) use flash prefill with staging sized for the power of two below (`gen_flash2.py`);
   `NO_FLASH2=1` forces the listed split-K path for every prefill token (diagnostics; quadratic at long prompts);
-- K-quant / Q8_0 weights (add dequant helpers for other formats); f32 norms and conv weights;
+- K-quant / Q8_0 / Q4_0 / IQ4_NL / IQ4_XS / Q3_K / IQ3_S weights (`starter/quant_values.loom`; add dequant helpers
+  for other formats); f32 norms and conv weights;
 - hidden ≤ 8192; context ≤ 262,144 (kernel bounds; raise the `range(..., 262144)` facts for 1M-context models);
 - **sampling**: `temperature`, `top_p`, `top_k` and `seed` per request. Temperature 0 (the default
   unless `build.py --temperature/--top-p/--top-k` set other defaults) is exact greedy. Otherwise the

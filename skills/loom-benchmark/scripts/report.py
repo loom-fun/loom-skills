@@ -123,6 +123,21 @@ for l in samp:
 for l in cons:
     lines.append(f"- consistency: {l}")
 lines.append("")
+tune = load("draft_tune.json", {})
+spec_log = tail("gates_spec.log", 1)
+if tune or cfg.get("draft"):
+    lines.append("## Speculative decoding\n")
+    d = cfg.get("draft")
+    lines.append(f"- package drafter: {d['kind'] + ', depth ' + str(d['depth']) if d else 'none (measured slower, or SPEC=off)'}")
+    if tune.get("table"):
+        lines.append(f"- chosen by measured decode speed (draft/tune.py; decode-heavy requests, client-side tok/s):\n")
+        lines.append("| method | depth | decode tok/s |\n|---|---|---|")
+        for r in tune["table"]:
+            lines.append(f"| {r['kind']} | {r['depth']} | {r['decode_tps']:.2f} |")
+        lines.append("")
+    for l in spec_log:
+        lines.append(f"- equivalence gate (drafting vs draft_depth 0, same program): {l}")
+    lines.append("")
 lines.append("## Setup\n")
 top = (pick.get("ranked") or [{}])[0]
 lines.append(f"- GGUF: `{roof.get('gguf', cfg.get('gguf', '?'))}`")

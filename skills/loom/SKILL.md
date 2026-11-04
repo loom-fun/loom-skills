@@ -117,6 +117,9 @@ llama.cpp references (qualify 41 instead of ~30 min) and got A/B numbers too noi
 Stop to ask only for what the hard rules require: a gated-license click, or approval of a
 binary from a source other than PyPI and lemonade-sdk/llamacpp-rocm. Avoid both where possible:
 - **Reuse what is installed.** Check `~/loom/.venv/bin/loom-serve` (Windows: `.venv/Scripts/loom-serve.exe`) and the HF cache.
+- **Quant: the Q4 tier (Q4_K_M or the repo's UD-Q4_K_XL), from the HF cache when it is there.** `pick_gguf.py`
+  does both; don't override it with a bigger quant or download another copy. A Q8_0 27B decodes at half the
+  speed and needs ~28 GB; if the Q4 files use formats the starter lacks, add the formats instead.
 - **Baseline = the fastest llama.cpp ROCm build** (latest lemonade release or an installed one):
   `qualify.sh` fetches the latest and picks the fastest (`loom-benchmark` section 0).
 

@@ -1,0 +1,408 @@
+// Value helpers for the low-bit GGUF formats unsloth's dynamic (UD) quants mix in: IQ4_NL, IQ4_XS, Q3_K, IQ3_S.
+// @g_<fmt>_values(weights, block origin, 32-value group) -> 32 f32 values, as the other formats' helpers in gen_llm.py.
+// gen_llm.py appends this when the GGUF uses one of them; gen_gemm.py's generic dequant16 reuses the helpers.
+// From the loom-fun/unsloth-Qwen3.8-27B-loom port (layouts: ggml-common.h block_iq4_nl/iq4_xs/q3_K/iq3_s).
+// IQ3_S codebook (ggml iq3s_grid): 512 little-endian words of four odd magnitudes.
+global.rodata.def @g_iq3s_grid_data = align(64) bytes("0101010103010101050101010b0101010f010101010301010303010105030101090301010d03010101050101030501010b0501010707010101090101050901010b0901010f090101030b0101070b0101010d0101050d0101030f0101090f01010f0f01010101030103010301050103010901030101030301030303010b03030101050301070503010f050301030703010b07030109090301030d03010b0d0301050f030101010501030105010b0105010f01050101030501070305010d030501030505010b0505010107050109070501050905010b0905010f090501030b0501070b0501010f0501070f050107010701030307010b030701010507010505070103070701070707010d07070109090701010b0701050b07010f0d0701030f07010b0f070101010901070309010f0309010305090109050901050709010109090107090901030b0901010f090105010b0109010b0101050b0105050b010d050b0107070b0103090b010b090b010f090b010d0d0b01070f0b010d010d0103030d0107030d0103070d01050b0d01030f0d0101010f0105010f0109010f0101050f0105050f010d050f0107070f01010b0f01090b0f01010101030301010305010103090101030103010303030103070301030b0301030f030103010501030505010303070103090701030d070103090b01030d0b0103030d0103050f01030101030303010303070103030d010303010303030903030303050303010703030707030303090303010b0303050b0303010f03030d0f030301010503050305030b0305030f03050301050503090505030507050301090503070905030b0b0503010d0503050f050303010703090107030f0107030103070307030703030507030f050703010707030907070303090703050d0703010f0703070109030b01090305030903090309030307090307070903050909030d090903010b0903090b090303010b0301030b0307030b0303050b0301070b0305070b03030b0b0301050d0309050d030f050d0309090d030d090d0303010f0307010f0301030f0305030f0303050f030b070f0303090f03050d0f03010f0f030101010503010105070101050b0101050f0101050103010505030105090301050d03010503050105070501050f050105010701050507010503090105070901050b090105010b0105050b01050f0d0105010f0105070f01050b0f0105010103050501030501030305070303050f030305050503050b050305030703050907030505090305030b030503010505090105050f0105050305050507050505010705050f07050503090505070b05050f0b0505030f0505090f050501010705050107050b010705030307050505070509050705030707050707070505090705010b07050d0d0705030109050f0109050105090507050905050709050b07090503090905050f09050b0f090509010b0503030b0505050b050f070b0501090b05070b0b05010f0b0501010d0505010d050f010d0503050d050b0b0d05030d0d050b010f0503030f050d050f0501070f0507090f05010b0f050501010703030107070301070b0301070f0301070505010703070107070701070b07010705090107090901070f090107030b0107070d0107030f010703010307070103070b01030709030307030503070705030701090307010d0307050f03070d0f03070101050705030507010505070507050709070507010b050703010707010307070903070703050707070507070f0507070107070703090707070907070f0907070b0b0707070f070707010907030309070d0309070505090703070907050b0907010d0907090d090703010b0701030b0705030b070b050b0705070b0709090b070d0b0b07070f0b070d030d0703090d0703010f0707010f0701050f0705050f070b070f0701010109090101090503010901050109090501090f0501090507010903090109010b0109010f0109050103090f010309030303090703030905050309010703090b07030907090309030b03090b0b03090301050907010509010305090b0305090305050907070509010905090f0b0509050d0509010f05090901070903030709070307090105070905050709030707090b0707090101090905010909090509090f07090901090909030f09090b010b090f010b0903050b09050d0b0907030d0909070d09010d0d0901030f090b030f0901070f0907090f09030b0f090501010b0103010b0903010b0505010b0109010b0909010b0f09010b050b010b0d0d010b090f010b0301030b0701030b0b01030b0503030b0305030b0507030b050f030b0101050b0303050b0705050b0107050b0d07050b070b050b0501070b0f01070b0103070b0f05070b0909070b030b070b0b0d070b070f070b0301090b0901090b0105090b0507090b0d09090b05030b0b0d050b0b030b0b0b070b0b0b05090d0b05010f0b09010f0b05050f0b0303010d0703010d0b03010d0307010d0707010d010d010d0101030d0105030d0f05030d090d030d0503050d0907050d0509050d0b0b050d050d050d010f050d0101070d0903070d0305070d0109070d0b05090d0709090d050d090d01010b0d07010b0d09070b0d010d0b0d0b010d0d01090d0d03030f0d07030f0d0101010f0901010f0f01010f0105010f0505010f0d07010f0109010f090b010f050d010f0501030f0303030f0905030f0709030f0b09030f0301050f0901050f0103050f0d03050f0305050f0107050f030b050f0501070f0507070f0b07070f070b070f0301090f0b01090f0703090f0105090f010b090f05050b0f05090b0f05010d0f03070d0f01010f0f")
+
+func.def inline @g_iq3s_grid(%index: i32) -> (i32) {
+  %data = global.load @g_iq3s_grid_data : buffer
+  %zero = index.constant 0 : offset
+  %view = buffer.view %data[%zero] : buffer -> view<512xi32>
+  %bounded = scalar.assume %index [range(%index, 0, 511)] : i32
+  %i = index.cast %bounded : i32 to index
+  %value = view.load %view[%i] : view<512xi32> -> i32
+  func.return %value : i32
+}
+
+// kvalues_iq4nl lookup of 16 nibble indices.
+func.def inline @g_iq4_lookup16(%indices: vector<16xi8>) -> (vector<16xf32>) {
+  %k0 = scalar.constant -127 : i8
+  %k1 = scalar.constant -104 : i8
+  %k2 = scalar.constant -83 : i8
+  %k3 = scalar.constant -65 : i8
+  %k4 = scalar.constant -49 : i8
+  %k5 = scalar.constant -35 : i8
+  %k6 = scalar.constant -22 : i8
+  %k7 = scalar.constant -10 : i8
+  %k8 = scalar.constant 1 : i8
+  %k9 = scalar.constant 13 : i8
+  %k10 = scalar.constant 25 : i8
+  %k11 = scalar.constant 38 : i8
+  %k12 = scalar.constant 53 : i8
+  %k13 = scalar.constant 69 : i8
+  %k14 = scalar.constant 89 : i8
+  %k15 = scalar.constant 113 : i8
+  %codebook = vector.from_elements %k0, %k1, %k2, %k3, %k4, %k5, %k6, %k7, %k8, %k9, %k10, %k11, %k12, %k13, %k14, %k15 : vector<16xi8>
+  %codes = vector.table.lookup %codebook[%indices] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+  %values = vector.sitofp %codes : vector<16xi8> to vector<16xf32>
+  func.return %values : vector<16xf32>
+}
+
+// kvalues_iq4nl codes (int8) of 16 nibble indices.
+func.def inline @g_iq4_codes16(%indices: vector<16xi8>) -> (vector<16xi8>) {
+  %k0 = scalar.constant -127 : i8
+  %k1 = scalar.constant -104 : i8
+  %k2 = scalar.constant -83 : i8
+  %k3 = scalar.constant -65 : i8
+  %k4 = scalar.constant -49 : i8
+  %k5 = scalar.constant -35 : i8
+  %k6 = scalar.constant -22 : i8
+  %k7 = scalar.constant -10 : i8
+  %k8 = scalar.constant 1 : i8
+  %k9 = scalar.constant 13 : i8
+  %k10 = scalar.constant 25 : i8
+  %k11 = scalar.constant 38 : i8
+  %k12 = scalar.constant 53 : i8
+  %k13 = scalar.constant 69 : i8
+  %k14 = scalar.constant 89 : i8
+  %k15 = scalar.constant 113 : i8
+  %codebook = vector.from_elements %k0, %k1, %k2, %k3, %k4, %k5, %k6, %k7, %k8, %k9, %k10, %k11, %k12, %k13, %k14, %k15 : vector<16xi8>
+  %codes = vector.table.lookup %codebook[%indices] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+  func.return %codes : vector<16xi8>
+}
+
+// 16 packed bytes -> 32 codebook values (low nibbles first, then high nibbles).
+func.def inline @g_iq4_values32(%payload: vector<16xi8>) -> (vector<32xf32>) {
+  %mask = vector.constant 15 : vector<16xi8>
+  %four = vector.constant 4 : vector<16xi8>
+  %lower = vector.andi %payload, %mask : vector<16xi8>
+  %shifted = vector.shrui %payload, %four : vector<16xi8>
+  %upper = vector.andi %shifted, %mask : vector<16xi8>
+  %lo = func.call @g_iq4_lookup16(%lower) : (vector<16xi8>) -> (vector<16xf32>)
+  %hi = func.call @g_iq4_lookup16(%upper) : (vector<16xi8>) -> (vector<16xf32>)
+  %values = vector.concat<0> %lo, %hi : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  func.return %values : vector<32xf32>
+}
+
+// IQ4_NL block (18 bytes): F16 d, 16 bytes of nibbles; value = d * kvalues[q].
+func.def inline @g_iq4_nl_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
+  %two = index.constant 2 : offset
+  %scale_view = buffer.view %w[%origin] : buffer -> view<1xf16>
+  %code_origin = index.add %origin, %two : offset
+  %code_view = buffer.view %w[%code_origin] : buffer -> view<16xi8>
+  %d_half = view.load %scale_view[0] : view<1xf16> -> f16
+  %d = scalar.extf %d_half : f16 to f32
+  %payload = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+  %codes = func.call @g_iq4_values32(%payload) : (vector<16xi8>) -> (vector<32xf32>)
+  %ds = vector.splat %d : vector<32xf32>
+  %values = vector.mulf %codes, %ds : vector<32xf32>
+  func.return %values : vector<32xf32>
+}
+
+// IQ4_XS superblock (136 bytes): F16 d, u16 scales_h, 4 bytes scales_l, 128 bytes nibbles.
+// Group ib: ls = ((scales_l >> 4ib) & 15) | (((scales_h >> 2ib) & 3) << 4); value = d (ls - 32) kvalues[q].
+func.def inline @g_iq4_xs_scale(%w: buffer, %origin: offset, %group: index) -> (f32) {
+  %header_view = buffer.view %w[%origin] : buffer -> view<2xi32>
+  %header = vector.load %header_view[0] : view<2xi32> -> vector<2xi32>
+  %halves = vector.bitcast %header : vector<2xi32> to vector<4xf16>
+  %d_half = vector.extract %halves[0] : vector<4xf16> -> f16
+  %d = scalar.extf %d_half : f16 to f32
+  %word0 = vector.extract %header[0] : vector<2xi32> -> i32
+  %word1 = vector.extract %header[1] : vector<2xi32> -> i32
+  %c16 = scalar.constant 16 : i32
+  %c15 = scalar.constant 15 : i32
+  %c3 = scalar.constant 3 : i32
+  %c4 = scalar.constant 4 : i32
+  %c2 = scalar.constant 2 : i32
+  %c32 = scalar.constant 32 : i32
+  %g32 = index.cast %group : index to i32
+  %scales_h = scalar.shrui %word0, %c16 : i32
+  %lo_shift = scalar.muli %g32, %c4 : i32
+  %hi_shift = scalar.muli %g32, %c2 : i32
+  %lo_s = scalar.shrui %word1, %lo_shift : i32
+  %lo = scalar.andi %lo_s, %c15 : i32
+  %hi_s = scalar.shrui %scales_h, %hi_shift : i32
+  %hi_m = scalar.andi %hi_s, %c3 : i32
+  %hi = scalar.shli %hi_m, %c4 : i32
+  %ls = scalar.ori %lo, %hi : i32
+  %centered = scalar.subi %ls, %c32 : i32
+  %lf = scalar.sitofp %centered : i32 to f32
+  %dl = scalar.mulf %d, %lf : f32
+  func.return %dl : f32
+}
+
+func.def inline @g_iq4_xs_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
+  %g = index.assume %group [range(%group, 0, 7)] : index
+  %dl = func.call @g_iq4_xs_scale(%w, %origin, %g) : (buffer, offset, index) -> (f32)
+  %qs_base = index.constant 8 : offset
+  %sixteen = index.constant 16 : offset
+  %qs_add = index.scale %g, %sixteen : index, offset -> offset
+  %qs0 = index.add %origin, %qs_base : offset
+  %qs_origin = index.add %qs0, %qs_add : offset
+  %code_view = buffer.view %w[%qs_origin] : buffer -> view<16xi8>
+  %payload = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+  %codes = func.call @g_iq4_values32(%payload) : (vector<16xi8>) -> (vector<32xf32>)
+  %ds = vector.splat %dl : vector<32xf32>
+  %values = vector.mulf %codes, %ds : vector<32xf32>
+  func.return %values : vector<32xf32>
+}
+
+// Q3_K superblock (110 bytes): hmask[32], qs[64], scales[12] (16 x 6-bit), F16 d.
+// Scale s (16 values each): low4 = s<8 ? sc[s]&15 : sc[s-8]>>4; high2 = (sc[8+s%4] >> 2(s/4)) & 3.
+func.def inline @g_q3_k_scale(%w: buffer, %origin: offset, %s_value: index) -> (f32) {
+  %s = index.assume %s_value [range(%s_value, 0, 15)] : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c2 = index.constant 2 : index
+  %sc_base = index.constant 96 : index
+  %lo_idx = index.rem %s, %c8 : index
+  %nib = index.div %s, %c8 : index
+  %hi_idx0 = index.rem %s, %c4 : index
+  %hi_idx = index.add %hi_idx0, %c8 : index
+  %hi_sh = index.div %s, %c4 : index
+  %lo_pos = index.add %sc_base, %lo_idx : index
+  %hi_pos = index.add %sc_base, %hi_idx : index
+  %lo_off = index.cast %lo_pos : index to offset
+  %hi_off = index.cast %hi_pos : index to offset
+  %lo_o = index.add %origin, %lo_off : offset
+  %hi_o = index.add %origin, %hi_off : offset
+  %lo_view = buffer.view %w[%lo_o] : buffer -> view<1xi8>
+  %hi_view = buffer.view %w[%hi_o] : buffer -> view<1xi8>
+  %lo_b = view.load %lo_view[0] : view<1xi8> -> i8
+  %hi_b = view.load %hi_view[0] : view<1xi8> -> i8
+  %lo32 = scalar.extui %lo_b : i8 to i32
+  %hi32 = scalar.extui %hi_b : i8 to i32
+  %nib32 = index.cast %nib : index to i32
+  %hsh32 = index.cast %hi_sh : index to i32
+  %c4_i32 = scalar.constant 4 : i32
+  %c2_i32 = scalar.constant 2 : i32
+  %c15 = scalar.constant 15 : i32
+  %c3 = scalar.constant 3 : i32
+  %c32 = scalar.constant 32 : i32
+  %lsh = scalar.muli %nib32, %c4_i32 : i32
+  %hsh = scalar.muli %hsh32, %c2_i32 : i32
+  %lo_s = scalar.shrui %lo32, %lsh : i32
+  %lo = scalar.andi %lo_s, %c15 : i32
+  %hi_s = scalar.shrui %hi32, %hsh : i32
+  %hi_m = scalar.andi %hi_s, %c3 : i32
+  %hi = scalar.shli %hi_m, %c4_i32 : i32
+  %sc = scalar.ori %lo, %hi : i32
+  %centered = scalar.subi %sc, %c32 : i32
+  %scf = scalar.sitofp %centered : i32 to f32
+  %d_bytes = index.constant 108 : offset
+  %d_o = index.add %origin, %d_bytes : offset
+  %d_view = buffer.view %w[%d_o] : buffer -> view<1xf16>
+  %d_half = view.load %d_view[0] : view<1xf16> -> f16
+  %d = scalar.extf %d_half : f16 to f32
+  %dl = scalar.mulf %d, %scf : f32
+  func.return %dl : f32
+}
+
+// Group g (32 values) of a Q3_K superblock: half n = g/4, shift j = g%4;
+// q = ((qs[32 n + l] >> 2j) & 3) - (hmask[l] bit g ? 0 : 4); scales 2g (l < 16) and 2g+1.
+func.def inline @g_q3_k_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
+  %g = index.assume %group [range(%group, 0, 7)] : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  %n = index.div %g, %c4 : index
+  %j = index.rem %g, %c4 : index
+  %n32 = index.mul %n, %c32 : index
+  %qs_pos = index.add %c32, %n32 : index
+  %qs_off = index.cast %qs_pos : index to offset
+  %qs_origin = index.add %origin, %qs_off : offset
+  %hm_view = buffer.view %w[%origin] : buffer -> view<32xi8>
+  %qs_view = buffer.view %w[%qs_origin] : buffer -> view<32xi8>
+  %hm = vector.load %hm_view[0] : view<32xi8> -> vector<32xi8>
+  %qs = vector.load %qs_view[0] : view<32xi8> -> vector<32xi8>
+  %jq = index.mul %j, %c2 : index
+  %jq32 = index.cast %jq : index to i32
+  %jq8 = scalar.trunci %jq32 : i32 to i8
+  %shift_q = vector.splat %jq8 : vector<32xi8>
+  %g32 = index.cast %g : index to i32
+  %g8 = scalar.trunci %g32 : i32 to i8
+  %shift_h = vector.splat %g8 : vector<32xi8>
+  %three = vector.constant 3 : vector<32xi8>
+  %one = vector.constant 1 : vector<32xi8>
+  %two8 = vector.constant 2 : vector<32xi8>
+  %qsh = vector.shrui %qs, %shift_q : vector<32xi8>
+  %low = vector.andi %qsh, %three : vector<32xi8>
+  %hsh = vector.shrui %hm, %shift_h : vector<32xi8>
+  %hbit = vector.andi %hsh, %one : vector<32xi8>
+  %hb2 = vector.shli %hbit, %two8 : vector<32xi8>
+  %code = vector.ori %low, %hb2 : vector<32xi8>
+  %codef = vector.uitofp %code : vector<32xi8> to vector<32xf32>
+  %four_f = vector.constant 4.0 : vector<32xf32>
+  %centered = vector.subf %codef, %four_f : vector<32xf32>
+  %s0 = index.mul %g, %c2 : index
+  %s1 = index.add %s0, %c1 : index
+  %dl0 = func.call @g_q3_k_scale(%w, %origin, %s0) : (buffer, offset, index) -> (f32)
+  %dl1 = func.call @g_q3_k_scale(%w, %origin, %s1) : (buffer, offset, index) -> (f32)
+  %v0 = vector.splat %dl0 : vector<16xf32>
+  %v1 = vector.splat %dl1 : vector<16xf32>
+  %scale_v = vector.concat<0> %v0, %v1 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %values = vector.mulf %centered, %scale_v : vector<32xf32>
+  func.return %values : vector<32xf32>
+}
+
+// IQ3_S superblock (110 bytes): F16 d, qs[64], qh[8], signs[32], scales[4].
+// Sub-block ib (32 values): scale d (1 + 2 ((scales[ib/2] >> 4(ib%2)) & 15));
+// grid entry e (values 4e..4e+3) = qs[8 ib + e] | ((qh[ib] >> e) & 1) << 8; sign of value v = bit v of signs[4 ib..].
+func.def inline @g_iq3_s_scale(%w: buffer, %origin: offset, %group: index) -> (f32) {
+  %c2 = index.constant 2 : index
+  %d_view = buffer.view %w[%origin] : buffer -> view<1xf16>
+  %d_half = view.load %d_view[0] : view<1xf16> -> f16
+  %d = scalar.extf %d_half : f16 to f32
+  %sb = index.constant 106 : index
+  %half = index.div %group, %c2 : index
+  %nib = index.rem %group, %c2 : index
+  %sp = index.add %sb, %half : index
+  %so = index.cast %sp : index to offset
+  %s_o = index.add %origin, %so : offset
+  %s_view = buffer.view %w[%s_o] : buffer -> view<1xi8>
+  %sbyte = view.load %s_view[0] : view<1xi8> -> i8
+  %s32 = scalar.extui %sbyte : i8 to i32
+  %nib32 = index.cast %nib : index to i32
+  %c4 = scalar.constant 4 : i32
+  %c15 = scalar.constant 15 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2_i32 = scalar.constant 2 : i32
+  %sh = scalar.muli %nib32, %c4 : i32
+  %ss = scalar.shrui %s32, %sh : i32
+  %sv = scalar.andi %ss, %c15 : i32
+  %sv2 = scalar.muli %sv, %c2_i32 : i32
+  %odd = scalar.addi %sv2, %c1 : i32
+  %of = scalar.sitofp %odd : i32 to f32
+  %db = scalar.mulf %d, %of : f32
+  func.return %db : f32
+}
+
+func.def inline @g_iq3_s_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
+  %g = index.assume %group [range(%group, 0, 7)] : index
+  %c8 = index.constant 8 : index
+  %c4 = index.constant 4 : index
+  %qs_base = index.constant 2 : index
+  %qh_base = index.constant 66 : index
+  %sg_base = index.constant 74 : index
+  %g8 = index.mul %g, %c8 : index
+  %g4 = index.mul %g, %c4 : index
+  %qs_p = index.add %qs_base, %g8 : index
+  %qh_p = index.add %qh_base, %g : index
+  %sg_p = index.add %sg_base, %g4 : index
+  %qs_off = index.cast %qs_p : index to offset
+  %qh_off = index.cast %qh_p : index to offset
+  %sg_off = index.cast %sg_p : index to offset
+  %qs_o = index.add %origin, %qs_off : offset
+  %qh_o = index.add %origin, %qh_off : offset
+  %sg_o = index.add %origin, %sg_off : offset
+  %qs_view = buffer.view %w[%qs_o] : buffer -> view<8xi8>
+  %qh_view = buffer.view %w[%qh_o] : buffer -> view<1xi8>
+  %sg_view = buffer.view %w[%sg_o] : buffer -> view<4xi8>
+  %qs = vector.load %qs_view[0] : view<8xi8> -> vector<8xi8>
+  %qh8 = view.load %qh_view[0] : view<1xi8> -> i8
+  %sg = vector.load %sg_view[0] : view<4xi8> -> vector<4xi8>
+  %qh = scalar.extui %qh8 : i8 to i32
+  %one = scalar.constant 1 : i32
+  %c8_i32 = scalar.constant 8 : i32
+  %q0b = vector.extract %qs[0] : vector<8xi8> -> i8
+  %q0 = scalar.extui %q0b : i8 to i32
+  %hs0 = scalar.constant 0 : i32
+  %hb0s = scalar.shrui %qh, %hs0 : i32
+  %hb0 = scalar.andi %hb0s, %one : i32
+  %hh0 = scalar.shli %hb0, %c8_i32 : i32
+  %ix0 = scalar.ori %q0, %hh0 : i32
+  %e0 = func.call @g_iq3s_grid(%ix0) : (i32) -> (i32)
+  %q1b = vector.extract %qs[1] : vector<8xi8> -> i8
+  %q1 = scalar.extui %q1b : i8 to i32
+  %hs1 = scalar.constant 1 : i32
+  %hb1s = scalar.shrui %qh, %hs1 : i32
+  %hb1 = scalar.andi %hb1s, %one : i32
+  %hh1 = scalar.shli %hb1, %c8_i32 : i32
+  %ix1 = scalar.ori %q1, %hh1 : i32
+  %e1 = func.call @g_iq3s_grid(%ix1) : (i32) -> (i32)
+  %q2b = vector.extract %qs[2] : vector<8xi8> -> i8
+  %q2 = scalar.extui %q2b : i8 to i32
+  %hs2 = scalar.constant 2 : i32
+  %hb2s = scalar.shrui %qh, %hs2 : i32
+  %hb2 = scalar.andi %hb2s, %one : i32
+  %hh2 = scalar.shli %hb2, %c8_i32 : i32
+  %ix2 = scalar.ori %q2, %hh2 : i32
+  %e2 = func.call @g_iq3s_grid(%ix2) : (i32) -> (i32)
+  %q3b = vector.extract %qs[3] : vector<8xi8> -> i8
+  %q3 = scalar.extui %q3b : i8 to i32
+  %hs3 = scalar.constant 3 : i32
+  %hb3s = scalar.shrui %qh, %hs3 : i32
+  %hb3 = scalar.andi %hb3s, %one : i32
+  %hh3 = scalar.shli %hb3, %c8_i32 : i32
+  %ix3 = scalar.ori %q3, %hh3 : i32
+  %e3 = func.call @g_iq3s_grid(%ix3) : (i32) -> (i32)
+  %q4b = vector.extract %qs[4] : vector<8xi8> -> i8
+  %q4 = scalar.extui %q4b : i8 to i32
+  %hs4 = scalar.constant 4 : i32
+  %hb4s = scalar.shrui %qh, %hs4 : i32
+  %hb4 = scalar.andi %hb4s, %one : i32
+  %hh4 = scalar.shli %hb4, %c8_i32 : i32
+  %ix4 = scalar.ori %q4, %hh4 : i32
+  %e4 = func.call @g_iq3s_grid(%ix4) : (i32) -> (i32)
+  %q5b = vector.extract %qs[5] : vector<8xi8> -> i8
+  %q5 = scalar.extui %q5b : i8 to i32
+  %hs5 = scalar.constant 5 : i32
+  %hb5s = scalar.shrui %qh, %hs5 : i32
+  %hb5 = scalar.andi %hb5s, %one : i32
+  %hh5 = scalar.shli %hb5, %c8_i32 : i32
+  %ix5 = scalar.ori %q5, %hh5 : i32
+  %e5 = func.call @g_iq3s_grid(%ix5) : (i32) -> (i32)
+  %q6b = vector.extract %qs[6] : vector<8xi8> -> i8
+  %q6 = scalar.extui %q6b : i8 to i32
+  %hs6 = scalar.constant 6 : i32
+  %hb6s = scalar.shrui %qh, %hs6 : i32
+  %hb6 = scalar.andi %hb6s, %one : i32
+  %hh6 = scalar.shli %hb6, %c8_i32 : i32
+  %ix6 = scalar.ori %q6, %hh6 : i32
+  %e6 = func.call @g_iq3s_grid(%ix6) : (i32) -> (i32)
+  %q7b = vector.extract %qs[7] : vector<8xi8> -> i8
+  %q7 = scalar.extui %q7b : i8 to i32
+  %hs7 = scalar.constant 7 : i32
+  %hb7s = scalar.shrui %qh, %hs7 : i32
+  %hb7 = scalar.andi %hb7s, %one : i32
+  %hh7 = scalar.shli %hb7, %c8_i32 : i32
+  %ix7 = scalar.ori %q7, %hh7 : i32
+  %e7 = func.call @g_iq3s_grid(%ix7) : (i32) -> (i32)
+  %words = vector.from_elements %e0, %e1, %e2, %e3, %e4, %e5, %e6, %e7 : vector<8xi32>
+  %bytes = vector.bitcast %words : vector<8xi32> to vector<32xi8>
+  %mag = vector.uitofp %bytes : vector<32xi8> to vector<32xf32>
+  %sw = vector.bitcast %sg : vector<4xi8> to vector<1xi32>
+  %sword = vector.extract %sw[0] : vector<1xi32> -> i32
+  %sv = vector.splat %sword : vector<32xi32>
+  %zero_i = scalar.constant 0 : i32
+  %step_i = scalar.constant 1 : i32
+  %iota = vector.iota %zero_i step %step_i : vector<32xi32>
+  %shifted = vector.shrui %sv, %iota : vector<32xi32>
+  %ones = vector.constant 1 : vector<32xi32>
+  %bits = vector.andi %shifted, %ones : vector<32xi32>
+  %bitf = vector.uitofp %bits : vector<32xi32> to vector<32xf32>
+  %twos = vector.constant -2.0 : vector<32xf32>
+  %onef = vector.constant 1.0 : vector<32xf32>
+  %sign = vector.fmaf %bitf, %twos, %onef : vector<32xf32>
+  %signed = vector.mulf %mag, %sign : vector<32xf32>
+  %db = func.call @g_iq3_s_scale(%w, %origin, %g) : (buffer, offset, index) -> (f32)
+  %dbv = vector.splat %db : vector<32xf32>
+  %values = vector.mulf %signed, %dbv : vector<32xf32>
+  func.return %values : vector<32xf32>
+}
+
+// Q4_0 block (18 bytes): F16 d, 16 bytes of nibbles; value j = d * ((j < 16 ? qs[j] & 15 : qs[j - 16] >> 4) - 8).
+func.def inline @g_q4_0_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
+  %two = index.constant 2 : offset
+  %scale_view = buffer.view %w[%origin] : buffer -> view<1xf16>
+  %code_origin = index.add %origin, %two : offset
+  %code_view = buffer.view %w[%code_origin] : buffer -> view<16xi8>
+  %d_half = view.load %scale_view[0] : view<1xf16> -> f16
+  %d = scalar.extf %d_half : f16 to f32
+  %payload = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+  %mask = vector.constant 15 : vector<16xi8>
+  %four = vector.constant 4 : vector<16xi8>
+  %lower = vector.andi %payload, %mask : vector<16xi8>
+  %shifted = vector.shrui %payload, %four : vector<16xi8>
+  %upper = vector.andi %shifted, %mask : vector<16xi8>
+  %lo = vector.uitofp %lower : vector<16xi8> to vector<16xf32>
+  %hi = vector.uitofp %upper : vector<16xi8> to vector<16xf32>
+  %codes = vector.concat<0> %lo, %hi : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %eight = vector.constant 8.0 : vector<32xf32>
+  %centered = vector.subf %codes, %eight : vector<32xf32>
+  %ds = vector.splat %d : vector<32xf32>
+  %values = vector.mulf %centered, %ds : vector<32xf32>
+  func.return %values : vector<32xf32>
+}

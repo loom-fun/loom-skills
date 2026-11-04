@@ -7,8 +7,8 @@ cfg["drafter"] = {"gguf", "repo", "file"} in CFG.json.
 Candidates are HF repos named after the target's base model with "DFlash" in the name and GGUF files (z-lab, the
 DFlash authors, first; then by downloads). A candidate is accepted only when its header (HTTP range read; nothing
 large is downloaded until one passes) says: arch dflash, the target's hidden size, tap layers inside the target's
-trunk, the target's vocabulary size, a mask token, and tensor formats the starter's kernels support. Preferred
-quant: Q8_0, Q6_K, Q5_K_M, Q4_K_M. Whether the drafter is worth using is decided later by measurement
+trunk, the target's vocabulary size, a mask token, and tensor formats the starter's kernels support. A drafter already in the HF
+cache is used as is (any revision); otherwise the preferred quant is Q4_K_M, then Q5_K_M, Q6_K, Q8_0. Whether the drafter is worth using is decided later by measurement
 (draft/tune.py): a drafter that does not speed decoding up is not selected.
 """
 import argparse
@@ -20,7 +20,7 @@ import sys
 import urllib.request
 
 SUPPORTED = {"F32", "Q4_K", "Q5_K", "Q6_K", "Q8_0"}
-QUANT_ORDER = ["Q8_0", "Q6_K", "Q5_K_M", "Q5_K", "Q4_K_M", "Q4_K"]
+QUANT_ORDER = ["Q4_K_M", "Q4_K", "Q5_K_M", "Q5_K", "Q6_K", "Q8_0"]   # the drafter is read on every proposal: lighter first
 TYPES = {0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 6: "Q5_0", 7: "Q5_1", 8: "Q8_0", 9: "Q8_1", 10: "Q2_K", 11: "Q3_K", 12: "Q4_K",
          13: "Q5_K", 14: "Q6_K", 15: "Q8_K", 16: "IQ2_XXS", 17: "IQ2_XS", 18: "IQ3_XXS", 19: "IQ1_S", 20: "IQ4_NL", 21: "IQ3_S",
          22: "IQ2_S", 23: "IQ4_XS", 24: "I8", 25: "I16", 26: "I32", 27: "I64", 28: "F64", 29: "IQ1_M", 30: "BF16"}
@@ -81,8 +81,17 @@ def candidates(base):
     return sorted(out, key=key)
 
 
+def cached(repo):
+    """{file: path} of this repo's GGUFs in the HF cache (any revision), as pick_gguf.py."""
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from pick_gguf import cached_files
+    return cached_files(repo)
+
+
 def pick_file(api, repo):
+    have = cached(repo)
     files = [s.rfilename for s in api.model_info(repo).siblings if s.rfilename.endswith(".gguf") and not re.search(r"-of-\d", s.rfilename)]
+    files += [f for f in have if f not in files]
     def rank(f):
         u = f.upper()
         for i, q in enumerate(QUANT_ORDER):
@@ -90,7 +99,7 @@ def pick_file(api, repo):
                 return i
         return len(QUANT_ORDER)
     files = [f for f in files if rank(f) < len(QUANT_ORDER)]
-    return sorted(files, key=rank)
+    return sorted(files, key=lambda f: (f not in have, rank(f)))
 
 
 def check(cfg, kv, tensors):
@@ -154,7 +163,7 @@ def main():
         if result["repo"]:
             break
     if result["repo"] and a.download:
-        result["gguf"] = hf_hub_download(result["repo"], result["file"])
+        result["gguf"] = cached(result["repo"]).get(result["file"]) or hf_hub_download(result["repo"], result["file"])
         cfg["drafter"] = {"gguf": result["gguf"], "repo": result["repo"], "file": result["file"]}
         json.dump(cfg, open(a.cfg, "w"), indent=1)
     for t in tried:

@@ -4,7 +4,7 @@ usage: python build.py CONFIG.json PACKAGE_DIR --tokenizer TOKENIZER.json
            [--context N] [--pool N] [--memory-gib auto] [--prefill 1024] [--rows 4] [--max-tokens 4096] [--model-id ID]
 
 --context defaults to the model's native context (cfg context_length, up to the kernels' 262144) and
---pool (KV positions shared by all rows) to twice that, both reduced to fit --memory-gib.
+--pool (KV positions shared by all rows) to context + max(64k, context/4), both reduced to fit --memory-gib.
 
 Writes PACKAGE_DIR/{model.json, weights.loom, tokenizer.json, program/*.loom,
 parameter/<gguf> (symlink)}. Serve it with
@@ -23,10 +23,10 @@ ap.add_argument("config")
 ap.add_argument("package")
 ap.add_argument("--tokenizer", required=True, help="HF tokenizer.json of the same model (download from the base repo)")
 ap.add_argument("--context", type=int, default=None, help="max tokens per sequence (default: the model's native context)")
-ap.add_argument("--pool", type=int, default=None, help="KV positions shared by all rows and the prefix cache (default: 2x context)")
+ap.add_argument("--pool", type=int, default=None, help="KV positions shared by all rows and the prefix cache (default: context + max(64k, context/4): one full-context request plus headroom for other rows' history)")
 ap.add_argument("--memory-gib", default="auto",
                 help="device memory budget for weights + KV pool + workspace. auto (default): enough for a KV pool of "
-                     "2x the context, capped at 60%% of physical RAM (GPU memory is system RAM on Strix Halo; the "
+                     "the default pool, capped at 60%% of physical RAM (GPU memory is system RAM on Strix Halo; the "
                      "benchmarks load one model at a time); 56 when RAM can't be read")
 ap.add_argument("--prefill", type=int, default=1024, help="prefill chunk (prefill_capacity); 1024-4096")
 ap.add_argument("--rows", type=int, default=4, help="initial resident rows (grows on demand); c4 benchmarks need >= 4")
@@ -98,9 +98,10 @@ if a.memory_gib == "auto":
         cap = 0.6 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
     except (AttributeError, ValueError, OSError):
         cap = None
-    need = weights_bytes + 4 * 2**30 + 2 * a.rows * recurrent_bytes + 2 * context * kv_per_position
+    want_pool = context + max(65536, context // 4)
+    need = weights_bytes + 4 * 2**30 + 2 * a.rows * recurrent_bytes + want_pool * kv_per_position
     a.memory_gib = round(min(need, cap) / 2**30, 1) if cap else 56.0
-    print(f"memory budget {a.memory_gib} GiB (pool 2x context needs {need / 2**30:.0f} GiB"
+    print(f"memory budget {a.memory_gib} GiB (a {want_pool}-position pool needs {need / 2**30:.0f} GiB"
           + (f"; cap 60% of RAM = {cap / 2**30:.0f} GiB)" if cap else "; RAM unknown)"))
 a.memory_gib = float(a.memory_gib)
 budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
@@ -108,15 +109,17 @@ if context * kv_per_position > budget:
     fit = max(4096, (budget // kv_per_position) // 1024 * 1024)
     print(f"WARNING: context {context} needs {context * kv_per_position / 2**30:.1f} GiB of KV; {a.memory_gib} GiB budget fits {fit}")
     context = fit
-pool = a.pool or min(KERNEL_POOL, max(context, min(2 * context, budget // kv_per_position)))
+# One full-context request plus headroom for other rows' retained history (2x for short contexts, 1.25x at 262k:
+# a 2x pool at 262k was ~40 GiB of KV for a 27B, more than most single-user machines should reserve).
+pool = a.pool or min(KERNEL_POOL, max(context, min(context + max(65536, context // 4), budget // kv_per_position)))
 pool = max(pool, context)
 # loom-serve rejects a pool its paged cache geometry can't represent ("source cache geometry cannot
 # represent this pool", e.g. 43352): keep it a multiple of 1024 positions.
 pool = max(pool // 1024 * 1024, -(-context // 1024) * 1024)
-if pool < 1.5 * context:
+if pool < min(1.25 * context, context + 65536):
     print(f"WARNING: KV pool {pool} < 1.5x context {context}: a full-context request can fail with 503 while other rows "
-          f"retain history (the full-context gate did on flint). Raise --memory-gib (pool 2x context needs "
-          f"~{(weights_bytes + 2 * context * kv_per_position) / 2**30 + 6:.0f} GiB) or lower --context.")
+          f"retain history (the full-context gate did on flint). Raise --memory-gib (a pool of context + 64k needs "
+          f"~{(weights_bytes + (context + 65536) * kv_per_position) / 2**30 + 6:.0f} GiB) or lower --context.")
 a.context, a.pool = context, pool
 model_id = a.model_id or re.sub(r"[^A-Za-z0-9._/-]+", "-", cfg.get("name", "llm")).strip("-")
 pkg = os.path.abspath(a.package)

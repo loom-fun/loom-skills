@@ -4,7 +4,7 @@
 #   positional: PORT (default 8160), MEMORY_GIB (default auto, see build.py --memory-gib), e.g. port.sh org/repo ~/work/m 8260 40
 #   0. starts the end-to-end clock (WORKDIR/.e2e_start, unless it exists): qualify.sh sizes the
 #      optimization budget from it
-#   1. download the GGUF (FILE, else pick_gguf.py: the best quant whose formats the starter supports
+#   1. the GGUF (FILE, else pick_gguf.py: the Q4 tier by default, a file already in the HF cache first, formats the starter decodes
 #      and that fits twice in GPU memory; header-only probe) and the base model's tokenizer.json
 #   2. inspect_gguf.py: config + chat block derived from the template and verified (stops on any FAIL)
 #   3. build.py at the native context, fitted to MEMORY_GIB
@@ -33,11 +33,15 @@ if [ "${FROM:-}" = build ]; then
   [ -n "$model_id" ] || { echo "FROM=build: pass MODEL_ID (5th argument)"; exit 2; }
 else
 step "1/6 download"
-if [ -z "$file" ]; then
-  file=$("$T" -I "$K/pick_gguf.py" "$repo") || { echo "STOP: no usable GGUF in $repo (see above); pass ORG/REPO:FILE.gguf"; exit 2; }
+# A file already in the HF cache (any revision) is used as is; otherwise it is downloaded into the cache.
+pick=$("$T" -I "$K/pick_gguf.py" "$repo" ${file:+--file "$file"}) || { echo "STOP: no usable GGUF in $repo (see above); pass ORG/REPO:FILE.gguf"; exit 2; }
+file=$(printf '%s' "$pick" | cut -f1); cached=$(printf '%s' "$pick" | cut -f2)
+if [ -n "$cached" ]; then
+  echo "using the cached $file ($cached)"
+else
+  # Into the shared HF cache (reused by later runs and by llama.cpp tools), symlinked into WORKDIR/gguf.
+  cached=$("$hf" download "$repo" "$file" 2>/dev/null | tail -1 | sed "s/^path=//")
 fi
-# Into the shared HF cache (reused by later runs and by llama.cpp tools), symlinked into WORKDIR/gguf.
-cached=$("$hf" download "$repo" "$file" 2>/dev/null | tail -1 | sed "s/^path=//")
 [ -f "$cached" ] || { echo "download of $repo/$file failed"; exit 2; }
 mkdir -p gguf && ln -sf "$cached" "gguf/$(basename "$file")"
 gguf=$work/gguf/$(basename "$file")
