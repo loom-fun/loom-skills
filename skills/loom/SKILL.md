@@ -88,7 +88,8 @@ $K/loom-benchmark/scripts/finalize.sh $W/pkg http://127.0.0.1:8160 $G $W/bench  
    `loom-port-llm` for that stage only, and continue with step 2 once the package
    serves and its kernel tests pass.
 2. **Qualify.** `qualify.sh` first picks the speculative-decoding method and depth by measured decode
-   speed (stage 0, `draft/tune.py`: none, the GGUF's MTP block, or a DFlash drafter `port.sh` found; it
+   speed (stage 0, `draft/tune.py`: none, the GGUF's MTP block, a DFlash drafter `port.sh` found, or n-gram
+   prompt lookup; it
    rebuilds the package with the winner), then picks the fastest llama.cpp ROCm build on the machine, gives it
    its own best speculative decoding the same way (`llama_spec_tune.py`: drafting vs drafting), measures
    its baseline with Loom stopped, runs the gates (`LEVEL=quick`; llama.cpp references are filled

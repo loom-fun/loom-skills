@@ -124,8 +124,8 @@ tokens are in flight (Qwen3.5-0.8B decode +18 %, identical output; `GDN_CB=1` re
 
 **Tried and did not help** (don't repeat without a new reason): see the catalog's "Did not help".
 
-**Speculative decoding** (on by default when the GGUF has an MTP block or a DFlash drafter exists;
-`loom-port-llm/starter/draft/README.md`). `qualify.sh` already chose the method and depth by measurement
+**Speculative decoding** (on by default when the GGUF has an MTP block or a DFlash drafter exists, and n-gram
+prompt lookup is a candidate for every model; `loom-port-llm/starter/draft/README.md`). `qualify.sh` already chose the method and depth by measurement
 (`bench/draft_tune.json`) and gave the llama.cpp baseline its own best drafting
 (`bench/llamacpp_spec.json`), so decode targets are drafting vs drafting; re-run `draft/tune.py WORKDIR PORT MEMORY_GIB MODEL_ID` after a change that moves
 the decode/verify balance (it rebuilds `pkg`). On a bandwidth-bound model it is the biggest decode lever

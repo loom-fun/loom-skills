@@ -973,6 +973,8 @@ def warm_root_count(g):
 
 def mtp_programs(g):
     """@llm_mtp_warm (catch-up K/V + carry) and @llm_mtp_propose (draft_depth rounds)."""
+    assert g["prologue"] and g["layer_text"], ("MTP drafting reuses the trunk's layer text: this kit's model() does not record "
+                                               "MODEL_PARTS (prologue, layer_text, attn_ordinal); add the update there, or build with --draft dflash/ngram/none")
     P = _prologue_allocs(g["prologue"])
     H, M, lin, fmt, size = g["H"], g["mtp_layer"], g["lin"], g["fmt"], g["size"]
     D, KD = g["D"], g["KD"]
