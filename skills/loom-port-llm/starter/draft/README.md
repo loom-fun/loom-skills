@@ -40,14 +40,20 @@ credit in bits 8-15; plan word 4 holds the packed cursor (`encode_epoch`).
 
 ## Choosing the drafter and depth (`tune.py`, qualify.sh stage 0)
 
-Builds each available kind once, serves each depth (a `model.json` setting) alone, times decode-heavy requests
-(essay, code, a tool call, a reasoning answer) and keeps the fastest if it beats no drafting by 3 %. The choice
-and the whole table go to `cfg["drafter"]` and `bench/draft_tune.json` (put the table in the report).
-Measured on Strix Halo (greedy decode, 300-token essay):
+Builds each available kind once at the full native context (build.py sizes each candidate's memory; a drafter adds
+KV per position), serves each depth (a `model.json` setting; DFlash up to the drafter's block - 1) alone, times
+decode-heavy requests (essay, code, a tool call, a reasoning answer; thinking off) and ranks candidates that beat
+no drafting by 3 %. The fastest that also passes a concurrency check (consistency.py-style ~300-token prompts, two
+0.5 s apart and four at once, twice each: agentic serving overlaps requests) wins; one that fails is recorded with
+the failure and the next is checked. The choice and the whole table go to `cfg["drafter"]` and
+`bench/draft_tune.json` (put the table in the report). The llama.cpp baseline gets the same treatment over its own
+`--spec-type draft-mtp` / `draft-dflash` (loom-benchmark `llama_spec_tune.py`), so reports compare drafting with
+drafting. Measured on Strix Halo (greedy decode; tune.py requests, thinking off):
 
-| Model | No drafting | MTP (depth 3) | DFlash |
-|---|---|---|---|
-| Qwen3.8-27B Q8_0, 262k context | 7.9 tok/s | **14.6 tok/s** (49 % acceptance; 84 % in tool loops) | DFlash2 depth 7: 13.0 tok/s (53 %, 4.7 tokens/step) |
+| Model | No drafting | MTP | DFlash2 | llama.cpp b1355 (same drafters) |
+|---|---|---|---|---|
+| Qwen3.8-27B Q4_K_M (bartowski), 262k context | 12.9 tok/s | **depth 3: 21.3 tok/s** (74 % of proposals accepted in the spec gate) | depth 3: 21.9 tok/s, but fails the concurrency check (see Limits) | none 12.0, MTP n-max 3 26.0, **DFlash2 n-max 3 28.1** |
+| Qwen3.8-27B Q8_0, 262k context | 7.9 tok/s | **14.6 tok/s** (49 % acceptance; 84 % in tool loops) | DFlash2 depth 7: 13.0 tok/s (53 %, 4.7 tokens/step) | - |
 | Qwen3.5-0.8B Q4_K_M | **262 tok/s** | 208 tok/s | - |
 | Qwen3-4B Q4_K_M | - | - | DFlash depth 7: 39 % acceptance, 3.7 tokens/step |
 
@@ -62,6 +68,21 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
 
 ## Limits / next levers
 
+- **The multi-token target step is the drafting bottleneck.** Qwen3.8-27B Q4_K_M, no drafting, n concurrent
+  streams: 78.6 ms per step (1 row), 90.8 (2), 130.1 (3), 131.9 (4). Drafting rounds follow it: 78 ms (depth 0),
+  98 (1), 143 (2), 150 (3), 220 (4: width 5 takes the WMMA path). A proposal step costs ~6 ms; verifying 3-4
+  tokens costs ~40 ms more than 2. That jump (not the drafter) is why Loom's drafted decode trails llama.cpp's
+  with the same drafter and depth (21.3 vs 26.0 tok/s MTP) although its 1-token decode is faster (12.9 vs
+  12.0). The 4-token matvec streams weights once for 2-4 tokens, so look elsewhere first (GDN recurrence/conv
+  per span, decode attention, head per 4 rows, the stage chosen for the shape). rocprofv3 sees no kernels
+  (Loom's AMD driver bypasses HSA): ablate with NO_GEMM-style build switches and per-stage timing.
+- **DFlash on elastic backing crashes under concurrency** (`driver_failure DATA_LOSS gpu.event_wait`, no kernel
+  page fault logged): two ~300-token prompts 0.5 s apart, or four at once, with DFlash2 drafting, on
+  `--pool_backing=elastic` (the default). The same package passes consistency on `--pool_backing=fixed`, with
+  and without ASan (no out-of-bounds access), and MTP passes on elastic. Suspect an access to a
+  demand-committed page the runtime has not committed (e.g. a draft page-map entry for a newly admitted row):
+  correctness gates cannot see a drafter reading a wrong page, since a bad proposal is just rejected. Until it is
+  found, tune.py's concurrency check rejects DFlash on such packages.
 - Verification of more than 4 tokens per epoch (DFlash depth > 3, several streams) uses the 4-token matvec once
   per 4 tokens, so weights stream more than once per step. A small-M WMMA GEMM (16-row tiles) is the next lever;
   an f16 8-token matvec and an activation-streaming 16-token matvec were tried and were slower (register
