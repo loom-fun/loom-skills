@@ -564,7 +564,13 @@ kernel.def export("g_dfl_conv") @g_dfl_conv(%tokens: index) {{
   %c0_i32 = scalar.constant 0 : i32
   %adds = scalar.cmpi ne, %add, %c0_i32 : i32
   %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
-  %span32 = view.load %info_view[%token, 3] : view<[%tokens]x4xi32> -> i32
+  // Tokens past the proposing blocks (a cohort stage holds a power of two of blocks; fewer may propose) are not
+  // live: their span is -1. They read span 0 and convolve nothing, so every access stays in bounds (an
+  // unguarded span -1 read the metadata far out of range: DATA_LOSS on elastic backing under concurrency).
+  %live32 = view.load %info_view[%token, 2] : view<[%tokens]x4xi32> -> i32
+  %live = scalar.cmpi ne, %live32, %c0_i32 : i32
+  %span_raw = view.load %info_view[%token, 3] : view<[%tokens]x4xi32> -> i32
+  %span32 = scf.select %live, %span_raw, %c0_i32 : i32
   %span_b = scalar.assume %span32 [range(%span32, 0, 8191)] : i32
   %span_v = index.cast %span_b : i32 to index
   %span = index.assume %span_v [range(%span_v, 0, 8191), lt(%span_v, %spans)] : index
@@ -575,7 +581,8 @@ kernel.def export("g_dfl_conv") @g_dfl_conv(%tokens: index) {{
   %rel = index.sub %token, %cursor : index
   %reach = index.add %rel, %c1i : index
   %taps_c = index.constant {K} : index
-  %taps = index.min %reach, %taps_c : index
+  %taps_all = index.min %reach, %taps_c : index
+  %taps = scf.select %live, %taps_all, %c0 : index
   %x_view = buffer.view %input[%zero] : buffer -> view<[%tokens]x{H}xf32>
   %d_view = buffer.view %dyn[%zero] : buffer -> view<[%tokens]x2x{K}x{NGR}xf32>
   %b_view = buffer.view %base[%zero] : buffer -> view<2x{K}x{H}xf32>

@@ -92,6 +92,20 @@ drafting. Measured on Strix Halo (greedy decode; tune.py requests, thinking off)
 | Qwen3.5-0.8B Q4_K_M | **262 tok/s** | 208 tok/s | - |
 | Qwen3-4B Q4_K_M | - | - | DFlash depth 7: 39 % acceptance, 3.7 tokens/step |
 
+Other families (Nov 2026, this skill tree; tune.py and llama_spec_tune.py on the same requests, llama.cpp b1364;
+acceptance from the spec gate's prompts at depth 3; every package below is token-exact at depth 3):
+
+| Model (arch, quant) | Drafter | Loom: none -> best | llama.cpp: none -> best |
+|---|---|---|---|
+| Nemotron-3.5-Bolt-E4B (gemma4, UD-Q5_K_XL) | NVIDIA DFlash, BF16 requantized to Q8_0, 49 % accepted | 46.7 -> **73.4** (DFlash depth 3, x1.57) | 45.3 -> **99.7** (DFlash n-max 7, x2.20) |
+| Muse-Glimmer-30B (muse-glimmer, UD-Q5_K_M) | z-lab DFlash2, 71 % accepted (61 % with the target's normed embedding) | 12.2 -> **20.5** (DFlash2 depth 3, x1.68) | 11.6 -> **25.4** (DFlash2 n-max 3, x2.18) |
+| Flint (flint MoE, Q4_K_M) | incoai DFlash2, 65 % accepted | 65.6 -> **90.5** (DFlash2 depth 3, x1.38) | 53.5 -> **86.0** (DFlash2 n-max 3, x1.61) |
+| LFM2.5-24B-A2B (lfm2moe, Q4_K_M) | none exists: n-gram only (short-conv replay; 13/13 exact) | **102.7** (n-gram 65.3: none kept) | **94.7** (ngram-simple 90.1, ngram-mod 93.6) |
+
+Drafting now works on every family; Loom's relative gain trails llama.cpp's because its multi-token target step
+costs more (Limits), while its absolute drafted speed already leads on Flint. (The Glimmer and Flint DFlash rows
+were measured before the conv fix below; tune.py then rejected them on the concurrency check, which they now pass.)
+
 Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary decoding.
 
 ## Gates
@@ -118,15 +132,15 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   matvecs of a 1-stream step; attention, norms and head add < 3 ms. A separate 4-token R (`MV_WG4=16` or 128) gains
   only ~5 % (73.6 -> 77.9 tok/s DFlash) and may break the exactness the shared R guarantees. The lever is the 4-token
   matvec itself (each lane holds 4 x 32 f32 activations: register pressure, occupancy), for every family.
-- **Intermittent `driver_failure DATA_LOSS gpu.event_wait` under concurrency with DFlash2 on elastic backing**
-  (the default). Qwen3.8-27B and Muse-Glimmer-30B (DFlash2, block 16): four concurrent requests crashed 4 of 4
-  times in one 20-minute window, then 0 of 8 with byte-identical packages on a quiet GPU (shared machine: other
-  processes' GPU work is a suspect). It tracks rows: with `rows: 8` four concurrent passed and six crashed in the
-  bad window; sequential requests past the initial rows never crashed. Not isolated by disabling the selector,
-  the conv modulation or the propose GEMM; DFlash v1 (Nemotron, 8 concurrent) and MTP never crashed. The runtime
-  commits, compacts and trims every cache region including the draft cache (hrx-system state.c), so a
-  draft-region commit gap is unlikely. tune.py's concurrency check stays the guard: it rejects a drafter that
-  crashes (re-run tune.py on a quiet GPU before concluding a model cannot draft).
+- Fixed: **DFlash2 crashed under concurrency on elastic backing** (`driver_failure DATA_LOSS gpu.event_wait`;
+  Qwen3.8-27B, Muse-Glimmer-30B, Flint). A propose stage holds a power-of-two cohort of blocks; when fewer spans
+  propose (one request still prefilling while others draft: tune.py's "two requests 0.5 s apart"), the trailing
+  block tokens are not live and `g_token_info` gives them span -1. `g_dfl_conv` (DFlash2's conv modulation) read
+  `records[span]` without checking liveness and ran far outside the metadata buffer: garbage on fixed backing,
+  a fault on elastic. It now treats dead tokens as span 0 with no taps. Found by bisecting on Flint (selector off:
+  still crashed; conv off: passed); after the fix the full DFlash2 passes tune.py's concurrency check 3 of 3.
+  Kernels that index per-token metadata must check `info[t][2]` (live) first: cohort stages always carry dead
+  tokens.
 - Verification of more than 4 tokens per epoch (DFlash depth > 3, several streams) uses the 4-token matvec once
   per 4 tokens, so weights stream more than once per step. A small-M WMMA GEMM (16-row tiles) is the next lever;
   an f16 8-token matvec and an activation-streaming 16-token matvec were tried and were slower (register
