@@ -113,6 +113,8 @@ acceptance from the spec gate's prompts at depth 3; every package below is token
 | Model (arch, quant) | Drafter | Loom: none -> best | llama.cpp: none -> best |
 |---|---|---|---|
 | Nemotron-3.5-Bolt-E4B (gemma4, UD-Q5_K_XL) | NVIDIA DFlash, BF16 requantized to Q8_0, 49 % accepted | 46.7 -> **73.4** (DFlash depth 3, x1.57) | 45.3 -> **99.7** (DFlash n-max 7, x2.20) |
+| same | Gemma-4 E4B assistant (AtomicChat, Q8_0), 57 % accepted at depth 3 (llama.cpp: 57 %) | 46.9 -> **72.7** (assist depth 3, x1.55; ties DFlash) | 45.8 -> **98.8** (assist n-max 3, x2.16) |
+| Qwen3.5-4B (qwen35 hybrid, UD-Q4_K_XL, vision with M-RoPE, F16 tensors) | AtomicChat DFlash, 68 % accepted | port.sh end to end, spec gate 16/16 incl. images | - |
 | Muse-Glimmer-30B (muse-glimmer, UD-Q5_K_M) | z-lab DFlash2, 71 % accepted (61 % with the target's normed embedding) | 12.2 -> **20.5** (DFlash2 depth 3, x1.68) | 11.6 -> **25.4** (DFlash2 n-max 3, x2.18) |
 | Flint (flint MoE, Q4_K_M) | incoai DFlash2, 65 % accepted | 65.6 -> **90.5** (DFlash2 depth 3, x1.38) | 53.5 -> **86.0** (DFlash2 n-max 3, x1.61) |
 | LFM2.5-24B-A2B (lfm2moe, Q4_K_M) | none exists: n-gram only (short-conv replay; 13/13 exact) | **102.7** (n-gram 65.3: none kept) | **94.7** (ngram-simple 90.1, ngram-mod 93.6) |
@@ -148,6 +150,10 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   matvecs of a 1-stream step; attention, norms and head add < 3 ms. A separate 4-token R (`MV_WG4=16` or 128) gains
   only ~5 % (73.6 -> 77.9 tok/s DFlash) and may break the exactness the shared R guarantees. The lever is the 4-token
   matvec itself (each lane holds 4 x 32 f32 activations: register pressure, occupancy), for every family.
+  With the Gemma-4 assistant the gap is the same at equal acceptance: llama.cpp's epoch at ~2.7 tokens per step is
+  ~27 ms (+5 ms over its 1-token step), Loom's 37.6 ms (+16 ms). Tried: a 4-token matvec that reloads each token's
+  activations per row instead of holding them in registers (`mv_wide`-style): slower (42.9 ms) and not bit-identical
+  to 1-token decode, so dropped.
 - Fixed: **DFlash2 crashed under concurrency on elastic backing** (`driver_failure DATA_LOSS gpu.event_wait`;
   Qwen3.8-27B, Muse-Glimmer-30B, Flint). A propose stage holds a power-of-two cohort of blocks; when fewer spans
   propose (one request still prefilling while others draft: tune.py's "two requests 0.5 s apart"), the trailing
