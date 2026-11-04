@@ -51,16 +51,20 @@ def measure(url, model, chat):
 
 
 def concurrent_ok(url, model, chat):
-    """Agentic serving runs several requests at once: two requests 0.5 s apart (both draft right after nearly
-    simultaneous prefills) and four together must all complete. A candidate that fails is not chosen."""
+    """Agentic serving runs several requests at once: ~300-token prompts two at a time 0.5 s apart (both draft right
+    after nearly simultaneous prefills) and four together (consistency.py's prompts), twice each, must all complete.
+    A candidate that fails is not chosen."""
     import threading
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
-    for n, gap in ((2, 0.5), (4, 0.0)):
+    from bench_common import doc
+    body = doc(1000)
+    prompts = [f"Question {i}: summarize part {i} of this text.\n\n" + body[i * 700:(i * 700) + 700 + 157 * i] for i in range(4)]
+    for n, gap in ((2, 0.5), (4, 0.0), (4, 0.0), (2, 0.5)):
         res = {}
         def run(i):
             time.sleep(i * gap)
             try:
-                r = stream(url, model, [{"role": "user", "content": f"Count from {i} to 100, separated by spaces."}], 80, extra=off, timeout=600)
+                r = stream(url, model, [{"role": "user", "content": prompts[i]}], 60, extra=off, timeout=600)
                 res[i] = 200 if r.get("tokens") else (r.get("status") or "no tokens")
             except Exception as e:  # noqa: BLE001  (the server died: connection reset)
                 res[i] = type(e).__name__
@@ -104,7 +108,12 @@ def main():
         mem = [l for l in out.split() if l.startswith("--memory_bytes=")][-1].split("=")[1]
         cand_mem[kind] = mem
         card = json.load(open(os.path.join(pkg, "model.json")))
-        block = (card["presets"]["chat"]["execution"].get("draft_depth") or 7) if kind == "dflash" else 7
+        # DFlash depth is bounded by the drafter's block (block_size - 1 proposals), not the card's current depth
+        block = 7
+        if kind == "dflash":
+            sys.path.insert(0, HERE)
+            import gen_dflash
+            block = gen_dflash.config(cfg["drafter"]["gguf"])["block_size"] - 1
         chat = chats[kind] = json.load(open(os.path.join(pkg, "llm_config.json")))["chat"]
         for depth in ([0] if base is None else []) + [d for d in depths if d <= block]:
             card["presets"]["chat"]["execution"]["draft_depth"] = depth

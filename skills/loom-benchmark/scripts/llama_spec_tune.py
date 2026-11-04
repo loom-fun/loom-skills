@@ -29,7 +29,7 @@ from tune import WORK  # noqa: E402
 def measure(url, off):
     stream(url, None, WORK[0][0], 16, extra=off)
     tps = [r["decode_tps"] for r in (stream(url, None, m, 256, extra={**off, **e}) for m, e in WORK) if r.get("decode_tps")]
-    return statistics.mean(tps) if len(tps) == len(WORK) else 0.0
+    return statistics.mean(tps) if tps else 0.0   # as tune.py: a tool-call-only reply streams no text, so no rate
 
 
 def main():
