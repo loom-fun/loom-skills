@@ -135,29 +135,22 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
 
 ## Limits / next levers
 
-- **The multi-token target step is the drafting bottleneck.** Qwen3.8-27B Q4_K_M, no drafting, n concurrent
-  streams: 78.6 ms per step (1 row), 90.8 (2), 130.1 (3), 131.9 (4). Drafting rounds follow it: 78 ms (depth 0),
-  98 (1), 143 (2), 150 (3), 220 (4: width 5 takes the WMMA path). A proposal step costs ~6 ms; verifying 3-4
-  tokens costs ~40 ms more than 2. That jump (not the drafter) is why Loom's drafted decode trails llama.cpp's
-  with the same drafter and depth (21.3 vs 26.0 tok/s MTP) although its 1-token decode is faster (12.9 vs
-  12.0). The 4-token matvec streams weights once for 2-4 tokens, so look elsewhere first (GDN recurrence/conv
-  per span, decode attention, head per 4 rows, the stage chosen for the shape). rocprofv3 sees no kernels
-  (Loom's AMD driver bypasses HSA): ablate with NO_GEMM-style build switches and per-stage timing.
-  Same on other families: Nemotron-3.5-Bolt-E4B (gemma4), no drafting, 1/2/4 streams: 21.5 / 26.2 / 35.0 ms per
-  step; an n-gram depth-3 epoch (verify 4 tokens, negligible drafter) 33.7 ms, a DFlash depth-3 epoch 39.6 ms, while
-  llama.cpp's whole DFlash n-max-3 step is ~31.6 ms at the same tokens per step (2.9). Doubling ablation
-  (loom-optimize `ablate.py`): the 4-token matvecs cost ~25 ms of the 4-stream step vs ~16 ms for the 1-token
-  matvecs of a 1-stream step; attention, norms and head add < 3 ms. A separate 4-token R (`MV_WG4=16` or 128) gains
-  only ~5 % (73.6 -> 77.9 tok/s DFlash) and may break the exactness the shared R guarantees. The lever is the 4-token
-  matvec itself (each lane holds 4 x 32 f32 activations: register pressure, occupancy), for every family.
-  With the Gemma-4 assistant the gap is the same at equal acceptance: llama.cpp's epoch at ~2.7 tokens per step is
-  ~27 ms (+5 ms over its 1-token step), Loom's 37.6 ms (+16 ms). Tried: a 4-token matvec that reloads each token's
-  activations per row instead of holding them in registers (`mv_wide`-style): slower (42.9 ms) and not bit-identical
-  to 1-token decode, so dropped.  Forcing the WMMA GEMM already at 2-4 tokens (one weight pass, rows padded to 64): 50.0 ms, slower still.
-  llama.cpp's small-batch path (mmvq) quantizes the activations to Q8_1 and uses integer dot products, so 2-8 tokens
-  cost about one; Loom keeps f32 activations, and matching that speed exactly would mean moving 1-token decode to
-  quantized activations as well (the spec gate requires verify and decode to round alike): a change to every
-  port's numerics, for loom-optimize with full gates, not part of drafting.
+- **Fixed: the multi-token target step was the drafting bottleneck** (issue #21). Decode-shaped linears and the
+  head kept f32 activations, so each lane of the 4-token matvec held 4 x 32 f32 values (192+ VGPRs, low occupancy)
+  and decoded every weight group to f32: Nemotron-3.5-Bolt-E4B, no drafting, 1/2/4 streams took 21.5 / 26.2 / 35.0 ms
+  per step (llama.cpp verifies 3-4 tokens for ~+5 ms), Qwen3.8-27B 78.6 / 90.8 / 131.9 ms. The starter now does what
+  llama.cpp's `mul_mat_vec_q` does (`ACT_Q8=1`, the default): `g_quant_q8` quantizes each activation once per
+  32-value group (`d = amax/127` rounded to F16, `q = round(x/d)`, llama.cpp's `quantize_q8_1` numerics), launched in
+  the decode branch beside the GEMM's `g_row_scale_f16`; the `_q8` matvecs keep the starter's layout (one lane per
+  group, R rows, TG tokens) but contract the raw weight codes with `vector.dot4i` (Q8_0, Q4_K, Q5_K, Q6_K; other
+  formats keep the f32 kernel) and come in 1-, 4- and 8-token variants; the head (`g_head_mv*_q8`) likewise. A token's
+  result is an exact integer dot followed by the same F32 scaling in every variant, so verification of up to 8
+  tokens rounds exactly like 1-token decode, and verify epochs take the WMMA GEMM only from 9 tokens
+  (`SPEC_MM_FROM`, was 5). Nemotron 1/2/4 streams: 21.4 / 22.5 / 24.6 ms per step; drafted results in the tables
+  above. Kernel microbenchmark (`loom-benchmark` dispatch time, Q6_K 2560 x 40960): f32 1/4 tokens 438 / 643 us,
+  int8 427 / 521 us. Quantizing inside the matvec instead (no separate launch) was slower: with the adaptive rows
+  per workgroup (R = 1-4) every workgroup re-quantizes the whole activation (Q8_0 4 tokens at R=1: 1343 vs 735 us).
+  `ACT_Q8=0` restores the f32 path (numerics of earlier packages).
 - Fixed: **DFlash2 crashed under concurrency on elastic backing** (`driver_failure DATA_LOSS gpu.event_wait`;
   Qwen3.8-27B, Muse-Glimmer-30B, Flint). A propose stage holds a power-of-two cohort of blocks; when fewer spans
   propose (one request still prefilling while others draft: tune.py's "two requests 0.5 s apart"), the trailing
@@ -167,31 +160,23 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   still crashed; conv off: passed); after the fix the full DFlash2 passes tune.py's concurrency check 3 of 3.
   Kernels that index per-token metadata must check `info[t][2]` (live) first: cohort stages always carry dead
   tokens.
-- Verification of more than 4 tokens per epoch (DFlash depth > 3, several streams) uses the 4-token matvec once
-  per 4 tokens, so weights stream more than once per step. A small-M WMMA GEMM (16-row tiles) is the next lever;
-  an f16 8-token matvec and an activation-streaming 16-token matvec were tried and were slower (register
-  pressure / L2 traffic) and reduced Q4_K drafter acceptance.
-- The head runs per 4 rows for verify and draft rows (the vocabulary matrix is re-read per 4 predictions).
+- Verification of more than 8 tokens per epoch (several drafting streams at depth 3+) takes the WMMA GEMM (rows
+  padded to 64); the int8 matvec would stream the weights once per 8 tokens instead.
 - Two-epoch continuation (`continuation_epochs: 2`) is not implemented (one device epoch per host turn).
 - DFlash v1 drafters with full-context attention read the whole context per proposal (DFlash2 windows it).
 - DFlash RoPE uses KV positions; llama.cpp gives M-RoPE targets' drafters the temporal position (degenerate
   sections). Text after an image then proposes with shifted positions: lower acceptance, never wrong output.
   Gemma-4 (gemma4v) and Muse-Glimmer vision ports draft with DFlash and pass the image questions of the spec gate.
-- **Wide verification trades exactness for speed.** Epochs of 5-63 tokens (depth > 3, or depth 3 with two or more
-  drafting streams) take the f16 WMMA GEMM, one weight pass per step; 1-token decode the f32 matvec. Near-ties can
-  flip: Muse-Glimmer depth 7 changed 2 of 16 spec-gate completions (llama.cpp gap 1.07 at the flip, just past the
-  near-tie rule). `SPEC_EXACT=1` (build env) keeps the 4-token matvec at every width, decode's rounding (Glimmer depth
-  7: 16/16 exact), but re-reads the weights per 4 tokens: Bolt-E4B with 4 drafting streams at depth 3 took 146 ms per
-  epoch vs 69 (drafted c4 throughput 55 vs 116 tok/s), worse than not drafting, so it is not the default. tune.py's
-  equivalence check rejects any depth whose single-request output changes; depth 3 (4 tokens, exact) won on every
-  model measured. Moving the GEMM threshold to 9 tokens (exact single requests at every depth, GEMM only for several
-  streams) cost 22 % with two drafting streams on Bolt-E4B (76.0 vs 59.5 ms per epoch), so the default stays at 5.
-  With SPEC_EXACT every depth tested is exact: Glimmer depth 7 16/16, Flint depth 4 and 7 13/13
-  (without it Flint depth 7 flips 7 of 13: MoE routing amplifies the GEMM's rounding). Always compare against
-  draft_depth 0 of the SAME package (spec_check.py card): a reference recorded from an earlier build differs on its own
-  (a stale Flint reference made the trunk look non-invariant above 4 tokens; it is not). Concurrent epochs that mix a
-  64+-token prefill with other rows' decode take the GEMM for the whole epoch, drafting or not: the mixed-epoch effect
-  consistency.py documents, not a drafting property.
+- **Wide verification trades exactness for speed.** Epochs of 9-63 tokens (several drafting streams) take the f16
+  WMMA GEMM, one weight pass per step, while decode uses the int8 matvec. Near-ties can flip there (before the int8
+  path the GEMM started at 5 tokens: Muse-Glimmer depth 7 changed 2 of 16 spec-gate completions; Flint depth 7 7 of 13,
+  MoE routing amplifying the rounding). Single requests at every depth (up to 8 tokens) are exact by construction.
+  `SPEC_EXACT=1` (build env) keeps the matvec at every width (decode's rounding), re-reading weights per 8 tokens;
+  `SPEC_MM_FROM=N` moves the GEMM threshold. Always compare against draft_depth 0 of the SAME package
+  (spec_check.py card): a reference recorded from an earlier build differs on its own (a stale Flint reference made the
+  trunk look non-invariant above 4 tokens; it is not). Concurrent epochs that mix a 64+-token prefill with other rows'
+  decode take the GEMM for the whole epoch, drafting or not: the mixed-epoch effect consistency.py documents, not a
+  drafting property.
 - **n-gram pays for every miss.** loom-serve 0.1.0 verifies a fixed width per speculative span, so a miss costs a
   4-token step (Nemotron: 33.7 vs 21.3 ms) where llama.cpp's ngram-simple/ngram-mod draft only after a long match
   and cost nothing on new text. Prompt lookup therefore wins on edit/quote-heavy output (Qwen3.5-0.8B code edit:

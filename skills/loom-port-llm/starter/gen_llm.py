@@ -2245,7 +2245,7 @@ def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
         mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
     x16 = {"%h": "%h16", "%o": "%o16", "%f": "%f16"}.get(x, x + "16")   # f16 copy of the activation (GEMM input)
     args = args.replace(f", {x}, {s},", f", {x16}, {s},")
-    iq = ACT_Q8 and fmt in IQ_FMTS
+    iq = ACT_Q8 and fmt in IQ_FMTS and kval // 32 <= 1024   # wider K (mv_wide: DFlash feature projections) stays f32
     if iq:   # int8 copy (g_quant_q8, launched beside the g_row_scale_f16 that makes x16): see quant_wiring()
         mv_args = mv_args.replace(f", %zero_i32, {x},", f", %zero_i32, {x16}q,")
     return f"""scf.if %gemm {{
@@ -2507,12 +2507,16 @@ def quant_wiring(program):
     freshness invariant covers them."""
     import re as _re
     pat = _re.compile(r"(scf\.if (%\w+) \{\s*kernel\.launch @g_row_scale_f16\[[^\]]*\]\((%\w+), (%\w+), (%\w+), (%\w+), (%\w+)\) : \[index\]\(index, index, buffer, buffer, buffer\)\s*\})")
+    read = set(_re.findall(r"kernel\.launch @g_mv_\w*_q8\w*\[[^\]]*\]\([^,]+, [^,]+, [^,]+, (%\w+),", program))
     def sub(m):
         rows, width, x, x16 = m.group(3), m.group(4), m.group(5), m.group(7)
+        if x16 + "q" not in read:   # only f32 consumers (e.g. a DFlash feature projection wider than 32768)
+            return m.group(1)
         return (m.group(1) + f" else {{\n    kernel.launch @g_quant_q8[{rows}, {width}]({rows}, {width}, {x}, {x16}q) : [index, index](index, index, buffer, buffer)\n  }}")
     program = pat.sub(sub, program)
     program = _re.sub(r"(?m)^(\s*)(%\w+16) = buffer\.alloca<global> align\(256\) (%\w+) : buffer$",
-                      lambda m: f"{m.group(0)}\n{m.group(1)}{m.group(2)}q = buffer.alloca<global> align(256) {m.group(3)} : buffer", program)
+                      lambda m: f"{m.group(0)}\n{m.group(1)}{m.group(2)}q = buffer.alloca<global> align(256) {m.group(3)} : buffer"
+                      if m.group(2) + "q" in read else m.group(0), program)
     read = set(_re.findall(r"kernel\.launch @g_mv_\w*_q8\w*\[[^\]]*\]\([^,]+, [^,]+, [^,]+, (%\w+),", program))
     made = set(_re.findall(r"kernel\.launch @g_quant_q8\[[^\]]*\]\([^,]+, [^,]+, [^,]+, (%\w+)\)", program))
     assert read <= made, f"ACT_Q8: int8 activations read but never quantized: {sorted(read - made)} (set ACT_Q8=0)"
