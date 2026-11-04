@@ -27,12 +27,12 @@ def kernel(P, S, D, KVH, G, scale, window, segment, pos_bytes):
     QH = KVH * G
     LANES = 32 * G
     DP8, VTC = D + 8, KT + 8
-    POW2 = G & (G - 1) == 0
-    GP = G if POW2 else 1 << (G.bit_length() - 1)
-    DPT = D * 32 // (32 * GP)
+    GP = G if G & (G - 1) == 0 else 1 << (G.bit_length() - 1)
+    DPT = min(D * 32 // (32 * GP), 32)   # staged dims per thread: <= 32 keeps the staging registers small
     TPK = D // DPT
     SLOTS = 32 * TPK
     PASSES = -(-SLOTS // LANES)
+    POW2 = SLOTS == LANES                # one unguarded pass; otherwise guarded passes over the slots
     W = window or 262144
     Q_IN_LOOP = D > 128
     L = []

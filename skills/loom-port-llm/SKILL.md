@@ -181,6 +181,7 @@ Nothing to configure; read `starter/draft/README.md` only to debug it.
 | `gen_gdn.py` | Gated delta-net kernels (conv1d + SiLU, history commit, q/k L2 norms, register recurrence, gated RMSNorm) and the fused q/gate split, for hybrids. Recurrent state lives in the runtime's recurrent slots (see porting-notes). |
 | `gen_gemm.py` | WMMA prefill GEMMs per (format, mode). Formats: q4_k, q5_k, q6_k, q8_0. Modes: store, acc, swiglu. |
 | `gen_flash2.py` | Prefill flash attention (transposed, K/V staged once per KV head), head_dim 128 or 256. |
+| `gen_flashd.py` | Drafting packages' decode attention: WMMA split-K over segments of up to 16 same-row tokens (a speculative span's verify tokens as MMA columns), the per-token kernel's partial layout and combine; same bits alone or in a span. |
 | `tile_uniform.loom` | Helper that classifies 16-token tiles for flash2. |
 | `templates/*.loom` | Serving glue for the hrx-loom 0.1.0 text ABI (`text_*_v1` exports). `prepare` stages one program per packing shape. `storage` sets the KV geometry (2 planes per attention layer, F16) and the recurrent slot size. `control` is the chat policy: rendering, tools, reasoning, thinking switch, tokenization, output channels, tool-call parsing, canonical history for reuse. `service` maps the ABI exports. `weights.loom` is the parameter policy. |
 | `build.py` | Fills the templates from `cfg.json["chat"]`, sizes context/pool/memory, then writes `model.json`, `tokenizer.json`, the GGUF symlink and `llm_config.json` (read by the benchmark scripts). |
