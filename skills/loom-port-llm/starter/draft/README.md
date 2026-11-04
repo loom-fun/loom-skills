@@ -103,8 +103,9 @@ acceptance from the spec gate's prompts at depth 3; every package below is token
 | LFM2.5-24B-A2B (lfm2moe, Q4_K_M) | none exists: n-gram only (short-conv replay; 13/13 exact) | **102.7** (n-gram 65.3: none kept) | **94.7** (ngram-simple 90.1, ngram-mod 93.6) |
 
 Drafting now works on every family; Loom's relative gain trails llama.cpp's because its multi-token target step
-costs more (Limits), while its absolute drafted speed already leads on Flint. (The Glimmer and Flint DFlash rows
-were measured before the conv fix below; tune.py then rejected them on the concurrency check, which they now pass.)
+costs more (Limits), while its absolute drafted speed already leads on Flint. tune.py chooses the bold Loom
+setting on each and its concurrency check passes (Glimmer 20.4 vs 12.3, Flint 90.4 vs 64.7 after the DFlash2 conv
+fix in Limits; before it, both were rejected for a crash).
 
 Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary decoding.
 
