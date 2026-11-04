@@ -35,7 +35,7 @@ elif [ -n "${LLAMA_URL:-}" ]; then
 else
   L=http://127.0.0.1:$lport
   : "${LLAMACPP_DIR:?set LLAMACPP_DIR to the llama.cpp ROCm build (or LLAMA_URL to a running llama-server)}"
-  export LLAMA_START="'$S/llamacpp_server.sh' '$gguf' $lport 1 $slot"   # loads the projector too when MMPROJ is set
+  export LLAMA_START="LLAMA_SPEC= '$S/llamacpp_server.sh' '$gguf' $lport 1 $slot"   # loads the projector too when MMPROJ is set
   defer=1   # one model at a time: references missing from the cache are filled with Loom stopped
 fi
 declare -A result secs done

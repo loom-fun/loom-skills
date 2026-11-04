@@ -207,7 +207,15 @@ Rules:
 **Speculative decoding in reports.** Say which drafter the package uses (`llm_config.json` `draft`), show the
 tuning table (`bench/draft_tune.json`: decode tok/s per method and depth, including no drafting) and the
 acceptance rate from the `spec` gate log. Decode numbers with drafting depend on the text: report them on the
-standard workloads and say so; never compare drafted Loom decode with non-drafted llama.cpp without saying it.
+standard workloads and say so.
+
+**The baseline drafts too (drafting vs drafting).** `qualify.sh` runs `scripts/llama_spec_tune.py` before the
+llama.cpp baseline: the same drafters Loom has (`--spec-type draft-mtp` for a GGUF with an MTP block,
+`--spec-type draft-dflash --spec-draft-model DRAFTER` for the DFlash drafter `find_drafter.py` found) at
+`--spec-draft-n-max` 1-4 / 3, 5, 7, plus none, each timed on the same requests as Loom's `tune.py`; the fastest
+(>= 3 % over none) goes to `bench/llamacpp_spec.json`, and `llamacpp_server.sh` adds it (`LLAMA_SPEC`) to every
+llama.cpp performance run in qualify and finalize. References (goldens, gates) never draft. A build that rejects
+a method is recorded as failed in the table and that method is skipped; the report shows the table.
 
 **Run the audit first** (from `bench/`):
 ```bash

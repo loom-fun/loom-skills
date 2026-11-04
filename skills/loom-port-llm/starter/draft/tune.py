@@ -1,6 +1,6 @@
 """Chooses the speculative-decoding method and depth for a port by measuring decode speed (qualify.sh runs it).
 
-usage: tune.py WORKDIR PORT MEMORY_GIB MODEL_ID   (WORKDIR holds cfg.json, tok/tokenizer.json and pkg/; Loom must not be
+usage: tune.py WORKDIR PORT MEMORY_GIB MODEL_ID (MEMORY_GIB is ignored: build.py sizes each candidate)   (WORKDIR holds cfg.json, tok/tokenizer.json and pkg/; Loom must not be
                                                  serving another model: one model is loaded at a time)
 Candidates: no drafting; MTP (the GGUF's NextN block) at depths 1-4; DFlash (cfg["drafter"], found by find_drafter.py)
 at depths 3, 5, 7 (capped by its block). Each method is built once; a depth is only a model.json setting (the
@@ -50,6 +50,28 @@ def measure(url, model, chat):
     return statistics.mean(tps) if tps else 0.0
 
 
+def concurrent_ok(url, model, chat):
+    """Agentic serving runs several requests at once: two requests 0.5 s apart (both draft right after nearly
+    simultaneous prefills) and four together must all complete. A candidate that fails is not chosen."""
+    import threading
+    off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
+    for n, gap in ((2, 0.5), (4, 0.0)):
+        res = {}
+        def run(i):
+            time.sleep(i * gap)
+            try:
+                r = stream(url, model, [{"role": "user", "content": f"Count from {i} to 100, separated by spaces."}], 80, extra=off, timeout=600)
+                res[i] = 200 if r.get("tokens") else (r.get("status") or "no tokens")
+            except Exception as e:  # noqa: BLE001  (the server died: connection reset)
+                res[i] = type(e).__name__
+        ts = [threading.Thread(target=run, args=(i,)) for i in range(n)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        if any(v != 200 for v in res.values()) or len(res) < n:
+            return False, f"{n} concurrent requests ({gap} s apart): {res}"
+    return True, ""
+
+
 def serve(name, port, mem, card, env):
     subprocess.run([os.path.join(SETUP, "stop.sh"), name], env=env, capture_output=True)
     r = subprocess.run([os.path.join(SETUP, "serve.sh"), name, str(port), "amdgpu", str(mem), card], env=env, capture_output=True, text=True)
@@ -70,17 +92,20 @@ def main():
             kinds.append(("mtp", [1, 2, 3, 4]))
         if (cfg.get("drafter") or {}).get("gguf"):
             kinds.append(("dflash", [3, 5, 7]))
-    table, best = [], ("none", 0, 0.0)
+    table, best, cand_mem, chats = [], ("none", 0, 0.0), {}, {}
     build = [T, os.path.join(STARTER, "build.py"), cfg_path]
-    common = ["--tokenizer", os.path.join(work, "tok", "tokenizer.json"), "--model-id", model_id, "--memory-gib", mem_gib]
+    # No --memory-gib: each candidate (and the final package) sizes its own budget for the full native context
+    # (a drafter adds KV per position; passing the old budget shrank DFlash packages' context to fit).
+    common = ["--tokenizer", os.path.join(work, "tok", "tokenizer.json"), "--model-id", model_id]
     base = None
     for kind, depths in kinds:
         pkg = os.path.join(work, f"pkg_tune_{kind}")
         out = sh(*build, pkg, *common, "--draft", kind).stdout
         mem = [l for l in out.split() if l.startswith("--memory_bytes=")][-1].split("=")[1]
+        cand_mem[kind] = mem
         card = json.load(open(os.path.join(pkg, "model.json")))
         block = (card["presets"]["chat"]["execution"].get("draft_depth") or 7) if kind == "dflash" else 7
-        chat = json.load(open(os.path.join(pkg, "llm_config.json")))["chat"]
+        chat = chats[kind] = json.load(open(os.path.join(pkg, "llm_config.json")))["chat"]
         for depth in ([0] if base is None else []) + [d for d in depths if d <= block]:
             card["presets"]["chat"]["execution"]["draft_depth"] = depth
             path = os.path.join(pkg, f"model_d{depth}.json")
@@ -102,7 +127,24 @@ def main():
                 best = (kind, depth, tps)
     if base is None:
         base = 0.0
-    choice = best if best[0] != "none" and best[2] >= 1.03 * base else ("none", 0, base)
+    # Fastest first, each checked under concurrent load; one that fails is reported and skipped.
+    ranked = sorted([r for r in table if r["kind"] != "none" and r["decode_tps"] >= 1.03 * base], key=lambda r: -r["decode_tps"])
+    choice = ("none", 0, base)
+    for r in ranked:
+        kind, depth = r["kind"], r["depth"]
+        pkg = os.path.join(work, f"pkg_tune_{kind}")
+        mem = cand_mem[kind]
+        try:
+            serve("tune", port, mem, os.path.join(pkg, f"model_d{depth}.json"), env)
+            ok, why = concurrent_ok(f"http://127.0.0.1:{port}", model_id, chats[kind])
+        except Exception as e:  # noqa: BLE001
+            ok, why = False, str(e)[-300:]
+        subprocess.run([os.path.join(SETUP, "stop.sh"), "tune"], env=env, capture_output=True)
+        r["concurrent"] = "ok" if ok else f"FAILED: {why}"
+        print("tune:", json.dumps({"kind": kind, "depth": depth, "concurrent": r["concurrent"]}), flush=True)
+        if ok:
+            choice = (kind, depth, r["decode_tps"])
+            break
     cfg = json.load(open(cfg_path))
     cfg.setdefault("drafter", {})
     cfg["drafter"].update(kind=choice[0], depth=choice[1], tuned=table)

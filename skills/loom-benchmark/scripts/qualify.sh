@@ -64,13 +64,20 @@ fi
 export LLAMACPP_DIR
 echo "baseline build: $LLAMACPP_DIR"
 
-step "2/5 llama.cpp baseline (Loom stopped)"
+step "2/5 llama.cpp baseline (Loom stopped), with llama.cpp's own best speculative decoding"
 L=http://127.0.0.1:$lport
-"$S/llamacpp_server.sh" "$gguf" "$lport" 4 "$(( (ctx < 34000 ? ctx : 34000) + 1024 ))" unified || exit 1
+lctx=$(( (ctx < 34000 ? ctx : 34000) + 1024 ))
+# Drafting vs drafting: llama.cpp gets the same drafters Loom had (the GGUF's MTP block, the DFlash drafter),
+# at its fastest measured setting (llama_spec_tune.py -> llamacpp_spec.json; none when nothing beats plain decode).
+[ -s llamacpp_spec.json ] || "$T" "$S/llama_spec_tune.py" "$gguf" "$lport" "$lctx" llamacpp_spec.json --cfg "$work/cfg.json" --pkg "$pkg" | grep "^llama_spec:\|^LLAMA_SPEC_RESULT"
+export LLAMA_SPEC=$("$T" -c "import json; print(json.load(open('llamacpp_spec.json'))['args'])" 2>/dev/null)
+echo "llama.cpp speculative decoding: ${LLAMA_SPEC:-none}"
+"$S/llamacpp_server.sh" "$gguf" "$lport" 4 "$lctx" unified || exit 1
 "$T" "$S/perf.py" "$L" llama-rocm --kind llama --log perf_log.jsonl | tail -1
 "$T" "$S/perf.py" "$L" llama-rocm --kind llama --long --log perf_log.jsonl | tail -1
 "$T" "$S/c4_steady.py" "$L" 4 --label llama-rocm --log perf_log.jsonl | tail -1
 "$S/llamacpp_server.sh" --stop "$lport"
+unset LLAMA_SPEC
 loom_up || exit 1
 
 step "3/5 gates (LEVEL=quick)"
@@ -102,7 +109,7 @@ sys.stderr.write(f"budget: end-to-end {total:.0f} min (this model's roofline bud
 EOF
 )}
 longctx=1000,2000,16000; [ "$ctx" -ge 34000 ] && longctx=1000,2000,16000,32000
-"$T" "$R/roofline.py" "$gguf" --cfg "$pkg/llm_config.json" --baseline perf_log.jsonl --ctx $longctx \
+"$T" "$R/roofline.py" "$gguf" --cfg "$pkg/llm_config.json" --baseline perf_log.jsonl --ctx $longctx --draft-tune draft_tune.json \
   --out roofline.json --budget-h "$budget" --reserve-min 0 | tee roofline.txt
 
 step "5/5 Loom baseline"

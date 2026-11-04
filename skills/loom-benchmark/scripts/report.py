@@ -125,7 +125,7 @@ for l in cons:
 lines.append("")
 tune = load("draft_tune.json", {})
 spec_log = tail("gates_spec.log", 1)
-if tune or cfg.get("draft"):
+if tune or cfg.get("draft") or os.path.exists(B("llamacpp_spec.json")):
     lines.append("## Speculative decoding\n")
     d = cfg.get("draft")
     lines.append(f"- package drafter: {d['kind'] + ', depth ' + str(d['depth']) if d else 'none (measured slower, or SPEC=off)'}")
@@ -137,6 +137,14 @@ if tune or cfg.get("draft"):
         lines.append("")
     for l in spec_log:
         lines.append(f"- equivalence gate (drafting vs draft_depth 0, same program): {l}")
+    lspec = load("llamacpp_spec.json", {})
+    if lspec:
+        lines.append(f"- llama.cpp baseline drafting (llama_spec_tune.py, same requests): "
+                     f"**{lspec.get('args') or 'none'}** ({lspec.get('decode_tps')} tok/s vs {lspec.get('baseline_tps')} without); "
+                     "every llama.cpp performance number above uses it, so the comparison is drafting vs drafting\n")
+        lines.append("| llama.cpp method | n-max | decode tok/s |\n|---|---|---|")
+        for r in lspec.get("table", []):
+            lines.append(f"| {r['kind']} | {r['n_max']} | {r['decode_tps']:.2f}{' (failed)' if r.get('error') else ''} |")
     lines.append("")
 lines.append("## Setup\n")
 top = (pick.get("ranked") or [{}])[0]
