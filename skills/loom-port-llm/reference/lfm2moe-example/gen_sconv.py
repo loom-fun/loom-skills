@@ -4,6 +4,8 @@ in_proj gives bcx[t] = [B | C | X] (3 x H). bx = B * X is the conv input; the de
 conv (kernel K = l_cache) runs over the stored history (the last K-1 bx rows of the span's
 reader slot) and the span's own rows; out = C * conv. The commit kernel publishes the last K-1
 bx rows of each span to its writer slot. Same slot protocol as gen_gdn.py (g_gdn_slots/g_gdn_span).
+Speculative decoding (LLM_DRAFT): verification spans (flag bit 4) do not commit; replay_spec() registers the
+capture of bcx and a commit over the accepted inputs with draft/gen_draft.py's generic recurrent replay.
 """
 import os
 from gen_gdn import SLOT
@@ -13,6 +15,15 @@ def sconv_geometry(cfg):
     H, K = cfg["hidden"], cfg["shortconv"]["l_cache"]
     layer_bytes = ((K - 1) * H * 4 + 255) // 256 * 256
     return dict(H=H, K=K, layer_bytes=layer_bytes, slot_bytes=layer_bytes * len(cfg["shortconv_layers"]))
+
+
+def replay_spec(cfg):
+    """gen_draft.verify_program's recurrent replay: capture bcx (3H f32 per token) before each short-conv layer's
+    conv, then commit the accepted inputs' history (the %replay packet) after acceptance."""
+    W = 3 * cfg["hidden"]
+    return {"name": "sconv", "match": "  kernel.launch @g_sc_conv[%t](%t, %spans, %layer_", "buffers": [("%bcx", W)],
+            "replay": lambda layer: (f"  kernel.launch @g_sc_commit[%spans](%t, %spans, %layer_{layer}, %replay, %origins, %arena, %bcx)"
+                                     " : [index](index, index, index, buffer, buffer, buffer, buffer)\n")}
 
 
 def sconv_kernels(cfg, with_slot=True):
@@ -128,6 +139,10 @@ kernel.def export("g_sc_conv") @g_sc_conv(%tokens: index) {{
         scf.yield %o{k} : f32
       }}""")
         writes.append(f"      view.store %val{k}, %new_view[{k}, %ch] : f32, view<{K - 1}x{C}xf32>")
+    spec = bool(os.environ.get("LLM_DRAFT")) and os.environ.get("LLM_DRAFT") != "null"
+    guard = ("\n  %publish = func.call @g_gdn_publish(%metadata, %spans, %span) : (buffer, index, index) -> (i1)"
+             "\n  %go_live = scalar.andi %go, %publish : i1") if spec else ""
+    go = "%go_live" if spec else "%go"
     T.append(f"""
 kernel.def export("g_sc_commit") @g_sc_commit(%spans: index) {{
   %c1 = index.constant 1 : index
@@ -151,8 +166,8 @@ kernel.def export("g_sc_commit") @g_sc_commit(%spans: index) {{
   %cblk_off = index.mul %cblk_id, %c256 : index
   %c_raw = index.add %thread, %cblk_off : index
   %in_c = index.cmp ult, %c_raw, %cC : index
-  %go = scalar.andi %active, %in_c : i1
-  scf.if %go {{
+  %go = scalar.andi %active, %in_c : i1{guard}
+  scf.if {go} {{
     %ch = index.assume %c_raw [range(%c_raw, 0, {C - 1})] : index
     %layer_stride = index.constant {LB} : offset
     %layer_bytes = index.scale %layer, %layer_stride : index, offset -> offset

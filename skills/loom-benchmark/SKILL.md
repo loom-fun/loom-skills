@@ -212,7 +212,8 @@ standard workloads and say so.
 **The baseline drafts too (drafting vs drafting).** `qualify.sh` runs `scripts/llama_spec_tune.py` before the
 llama.cpp baseline: the same drafters Loom has (`--spec-type draft-mtp` for a GGUF with an MTP block,
 `--spec-type draft-dflash --spec-draft-model DRAFTER` for the DFlash drafter `find_drafter.py` found) at
-`--spec-draft-n-max` 1-4 / 3, 5, 7, plus none, each timed on the same requests as Loom's `tune.py`; the fastest
+`--spec-draft-n-max` 1-4 / 3, 5, 7, its n-gram drafters (`ngram-simple`, `ngram-mod`) for every model, plus none,
+each timed on the same requests as Loom's `tune.py`; the fastest
 (>= 3 % over none) goes to `bench/llamacpp_spec.json`, and `llamacpp_server.sh` adds it (`LLAMA_SPEC`) to every
 llama.cpp performance run in qualify and finalize. References (goldens, gates) never draft. A build that rejects
 a method is recorded as failed in the table and that method is skipped; the report shows the table.

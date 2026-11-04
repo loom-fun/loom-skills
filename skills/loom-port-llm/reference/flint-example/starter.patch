@@ -11,7 +11,7 @@
  POST_NORM = CFG.get("post_norms", False)
  POST_EPS = CFG.get("post_norm_eps", 1e-8)
  EMBED_NORM = CFG.get("embed_norm", False)
-@@ -1292,6 +1296,17 @@
+@@ -1440,6 +1444,17 @@
      %g = vector.load %gate_view[%token, %head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
      %sig = vector.logisticf<afn> %g : vector<4xf32>
      %result = vector.mulf %attended, %sig : vector<4xf32>""".replace("{QH}", str(QH)) if GATE else "    %result = vector.addf %attended, %zero4 : vector<4xf32>"
@@ -29,7 +29,7 @@
      text = f"""
  // Splits for `visible` keys: about 32 keys each, at most {S}.
  func.def inline @{P}_split_count(%visible: index) -> (index) {{
-@@ -1447,13 +1462,13 @@
+@@ -1595,13 +1610,13 @@
      %s_eff = func.call @{P}_split_count(%visible) : (index) -> (index)
      %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>
      %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
@@ -45,7 +45,7 @@
        %bs = index.assume %s [range(%s, 0, {S - 1})] : index
        %ms = view.load %ml_view[%token, %head, %bs, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
        %ls = view.load %ml_view[%token, %head, %bs, 1] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
-@@ -1971,7 +1986,7 @@
+@@ -2119,7 +2134,7 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -54,7 +54,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -2004,6 +2019,51 @@
+@@ -2152,6 +2167,51 @@
    }}"""
  
  
@@ -106,7 +106,7 @@
  def gdn_layer(i, b, nm, sz, par):
      """Gated delta-net token mixer of layer i: h -> o (VD wide), then o16 for the output GEMM."""
      g = GDN
-@@ -2170,8 +2230,51 @@
+@@ -2318,8 +2378,51 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -159,7 +159,7 @@
    %list_entry = index.constant 4 : offset
    %list_size = index.scale %t, %list_entry : index, offset -> offset
    %count_size = index.constant 256 : offset
-@@ -2185,7 +2288,7 @@
+@@ -2333,7 +2436,7 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -168,7 +168,7 @@
      attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in RECUR)}
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
      def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
-@@ -2198,8 +2301,11 @@
+@@ -2346,8 +2449,11 @@
          kind = kind_note or (" (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else ""))
          T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
               f"  %layer_{i} = index.constant {attn_ordinal.get(i, gdn_ordinal.get(i)) if ordinal is None else ordinal} : index\n  %sliding_{i} = scalar.constant {1 if i in sliding else 0} : i32\n  %rope_{i} = scalar.constant {0 if i in nope else 1} : i32\n"]
@@ -182,7 +182,7 @@
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
          else:
-@@ -2226,15 +2332,17 @@
+@@ -2374,15 +2480,17 @@
          if GATE and not FUSED_Q and i not in RECUR:
              T.append("  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wg_{i}", sz("attn_gate"), "%gate", "%nH", "%nQ", H) + "\n")
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
@@ -203,7 +203,7 @@
    }}
    scf.if %gemm {{
      kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
-@@ -2245,15 +2353,18 @@
+@@ -2393,15 +2501,18 @@
          pa = f"%post_attn_{i}" if POST_NORM else f"%ffn_norm_{i}"
          T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, {pa}, %x, %ffn_norm_{i}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
          T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
@@ -231,7 +231,7 @@
          pf = f"%post_ffn_{i}" if POST_NORM else f"%ffn_norm_{i}"
          if last_norm:
              nn = last_norm
-@@ -2339,6 +2450,20 @@
+@@ -2498,6 +2609,20 @@
          parts.append(spec_kernels)
      if MIXED_FFN:
          parts.append(SILU_MUL)
@@ -301,7 +301,7 @@
 +    cfg["chat"]["terminal"] = tokens[eos]
  fmts = sorted({v["type"] for k, v in tensors.items() if k.endswith(".weight") and len(v["shape"]) == 2})
  print(f"{cfg['name']}: arch={arch} L={L} H={H} heads={heads}/{cfg['kv_heads']} d={head_dim} ffn={cfg['ffn']} vocab={vocab} formats={fmts}")
- unsupported = [f for f in fmts if f not in ("q4_k", "q5_k", "q6_k", "q8_0", "q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s")
+ unsupported = [f for f in fmts if f not in ("q4_k", "q5_k", "q6_k", "q8_0", "q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16")
 -               and not (f == "f32" and cfg.get("gdn"))]  # f32 conv1d weights are read directly by the GDN kernels
 +               and not (f == "f32" and cfg.get("gdn"))
 +               and not (f in ("bf16", "f32") and cfg.get("moe"))]  # MoE router weights are read directly by g_moe_route  # f32 conv1d weights are read directly by the GDN kernels
