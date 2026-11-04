@@ -78,9 +78,10 @@ credit in bits 8-15; plan word 4 holds the packed cursor (`encode_epoch`).
 Builds each available kind once at the full native context (build.py sizes each candidate's memory; a drafter adds
 KV per position), serves each depth (a `model.json` setting; DFlash up to the drafter's block - 1) alone, times
 decode-heavy requests (essay, code, a tool call, a reasoning answer; thinking off) and ranks candidates that beat
-no drafting by 3 %. The fastest that also passes a concurrency check (consistency.py-style ~300-token prompts, two
-0.5 s apart and four at once, twice each: agentic serving overlaps requests) wins; one that fails is recorded with
-the failure and the next is checked. The choice and the whole table go to `cfg["drafter"]` and
+no drafting by 3 %. The fastest that also passes the spec gate's equivalence check (spec_check.py's requests at the
+candidate depth vs draft_depth 0 of the same package: identical) and a concurrency check (consistency.py-style
+~300-token prompts, two 0.5 s apart and four at once, twice each: agentic serving overlaps requests) wins; one that
+fails is recorded with the reason (`checked` in the table) and the next is checked. The choice and the whole table go to `cfg["drafter"]` and
 `bench/draft_tune.json` (put the table in the report). The llama.cpp baseline gets the same treatment over its own
 `--spec-type draft-mtp` / `draft-dflash` (loom-benchmark `llama_spec_tune.py`), so reports compare drafting with
 drafting. Measured on Strix Halo (greedy decode; tune.py requests, thinking off):
@@ -152,11 +153,18 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
 - DFlash RoPE uses KV positions; llama.cpp gives M-RoPE targets' drafters the temporal position (degenerate
   sections). Text after an image then proposes with shifted positions: lower acceptance, never wrong output.
   Gemma-4 (gemma4v) and Muse-Glimmer vision ports draft with DFlash and pass the image questions of the spec gate.
-- **Depth > 3 is not bit-exact on every model.** Verifying 6-8 tokens per span takes the f16 WMMA GEMM; 1-token
-  decode the f32 matvec. Muse-Glimmer DFlash2 depth 7 changed 2 of 16 spec-gate completions (a word choice ~900
-  characters in), Flint depth 7 changed 7 of 13 (MoE routing amplifies rounding); both are exact at depth 3. Hence
-  the untuned default depth 3; tune.py may pick 5/7 by speed, and gates.sh's spec gate then judges divergences
-  with llama.cpp's near-tie rule.
+- **Wide verification trades exactness for speed.** Epochs of 5-63 tokens (depth > 3, or depth 3 with two or more
+  drafting streams) take the f16 WMMA GEMM, one weight pass per step; 1-token decode the f32 matvec. Near-ties can
+  flip: Muse-Glimmer depth 7 changed 2 of 16 spec-gate completions (llama.cpp gap 1.07 at the flip, just past the
+  near-tie rule). `SPEC_EXACT=1` (build env) keeps the 4-token matvec at every width, decode's rounding (Glimmer depth
+  7: 16/16 exact), but re-reads the weights per 4 tokens: Bolt-E4B with 4 drafting streams at depth 3 took 146 ms per
+  epoch vs 69 (drafted c4 throughput 55 vs 116 tok/s), worse than not drafting, so it is not the default. tune.py's
+  equivalence check rejects any depth whose single-request output changes; depth 3 (4 tokens, exact) won on every
+  model measured. Flint additionally changes 7 of 13 at depth 7 even with SPEC_EXACT: its kit is not invariant above
+  4 tokens per epoch on its own (single stream), an example-specific issue still to find. Concurrent epochs that mix a
+  64+-token prefill with other rows' decode take the GEMM for the whole epoch, drafting or not (8 identical greedy
+  prompts at once, no drafting: Glimmer 6/8 equal to the solo run, Flint 0/8): the mixed-epoch effect consistency.py
+  documents, not a drafting property.
 - **n-gram pays for every miss.** loom-serve 0.1.0 verifies a fixed width per speculative span, so a miss costs a
   4-token step (Nemotron: 33.7 vs 21.3 ms) where llama.cpp's ngram-simple/ngram-mod draft only after a long match
   and cost nothing on new text. Prompt lookup therefore wins on edit/quote-heavy output (Qwen3.5-0.8B code edit:

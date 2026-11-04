@@ -2452,7 +2452,10 @@ if __name__ == "__main__":
         if gen_draft.DRAFT["kind"] == "ngram":
             import gen_ngram
             spec.append(gen_ngram.programs(gfacts))
-        program = gen_draft.small_gemm("\n".join(spec))
+        # 5-63-token epochs (depth > 3, or several drafting streams) take the f16 WMMA GEMM: one weight pass per step
+        # (4 drafting streams at depth 3: 69 vs 146 ms per epoch on Bolt-E4B), at the price of rare near-tie flips vs
+        # 1-token decode. SPEC_EXACT=1 keeps the 4-token matvec (decode's rounding) at every width instead.
+        program = "\n".join(spec) if os.environ.get("SPEC_EXACT") == "1" else gen_draft.small_gemm("\n".join(spec))
         spec_kernels = gen_draft.kernels(gfacts)
         if gen_draft.DRAFT["kind"] == "dflash":
             spec_kernels += gen_dflash.kernels(gfacts)

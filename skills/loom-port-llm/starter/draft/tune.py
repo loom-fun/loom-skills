@@ -8,7 +8,10 @@ is built once; a depth is only a model.json setting (the width-specialized stage
 candidate is served alone and timed on decode-heavy requests (short essay, code, a tool-call turn, a reasoning answer,
 a code edit that returns most of its input as agents' file edits do; greedy, client-side tokens/s). The fastest candidate
 wins if it beats no drafting by at least 3 %; its kind/depth go to cfg["drafter"] and pkg/ is rebuilt with it
-(build.py --draft auto reads them). Prints TUNE_RESULT {...} with the full table (the report shows it).
+(build.py --draft auto reads them). Before it is kept, the fastest candidate must pass a concurrency check and the
+spec gate's equivalence check (loom-benchmark spec_check.py: the same requests at the candidate depth and at
+draft_depth 0 of the same package, identical); a candidate that fails either is recorded with the reason and the
+next one is checked. Prints TUNE_RESULT {...} with the full table (the report shows it).
 SPEC=off skips tuning and builds without drafting.
 """
 import json
@@ -149,7 +152,26 @@ def main():
                 best = (kind, depth, tps)
     if base is None:
         base = 0.0
-    # Fastest first, each checked under concurrent load; one that fails is reported and skipped.
+    # Fastest first, each checked for exact output (vs draft_depth 0 of its own package) and under concurrent load;
+    # one that fails is reported and skipped.
+    import spec_check
+    refs = {}
+
+    def exact(kind, depth, pkg, mem):
+        url = f"http://127.0.0.1:{port}"
+        if kind not in refs:
+            card0 = json.load(open(os.path.join(pkg, f"model_d{depth}.json")))
+            card0["presets"]["chat"]["execution"]["draft_depth"] = 0
+            p0 = os.path.join(pkg, "model_d0.json")
+            json.dump(card0, open(p0, "w"), indent=1)
+            serve("tune", port, mem, p0, env)
+            refs[kind] = os.path.join(pkg, "spec_ref.jsonl")
+            spec_check.record(url, model_id, refs[kind])
+            subprocess.run([os.path.join(SETUP, "stop.sh"), "tune"], env=env, capture_output=True)
+        out = os.path.join(pkg, f"spec_d{depth}.jsonl")
+        serve("tune", port, mem, os.path.join(pkg, f"model_d{depth}.json"), env)
+        spec_check.record(url, model_id, out)
+        return spec_check.compare(refs[kind], out) == 0
     ranked = sorted([r for r in table if r["kind"] != "none" and r["decode_tps"] >= 1.03 * base], key=lambda r: -r["decode_tps"])
     choice = ("none", 0, base)
     for r in ranked:
@@ -157,13 +179,14 @@ def main():
         pkg = os.path.join(work, f"pkg_tune_{kind}")
         mem = cand_mem[kind]
         try:
-            serve("tune", port, mem, os.path.join(pkg, f"model_d{depth}.json"), env)
-            ok, why = concurrent_ok(f"http://127.0.0.1:{port}", model_id, chats[kind])
+            ok, why = (True, "") if exact(kind, depth, pkg, mem) else (False, "drafting changed the output (spec_check)")
+            if ok:   # the server exact() left running serves the candidate
+                ok, why = concurrent_ok(f"http://127.0.0.1:{port}", model_id, chats[kind])
         except Exception as e:  # noqa: BLE001
             ok, why = False, str(e)[-300:]
         subprocess.run([os.path.join(SETUP, "stop.sh"), "tune"], env=env, capture_output=True)
-        r["concurrent"] = "ok" if ok else f"FAILED: {why}"
-        print("tune:", json.dumps({"kind": kind, "depth": depth, "concurrent": r["concurrent"]}), flush=True)
+        r["checked"] = "ok (exact, concurrent)" if ok else f"FAILED: {why}"
+        print("tune:", json.dumps({"kind": kind, "depth": depth, "checked": r["checked"]}), flush=True)
         if ok:
             choice = (kind, depth, r["decode_tps"])
             break

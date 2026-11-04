@@ -161,9 +161,10 @@ Nothing to configure; read `starter/draft/README.md` only to debug it.
   (`starter/draft/README.md` "Recurrent layers"); without one the `spec` gate fails on the first rejected draft.
 - Output is exactly the target's: verification, device acceptance and gated delta-net replay commit only target
   tokens, and seeded sampling draws at the true position. The `spec` gate compares with the same package at
-  `draft_depth 0` (`pkg/model_target.json`); at depth <= 3 (the untuned default) a difference is a bug, not a
-  near-tie. Depth 5-7 verifies 6-8 tokens through the f16 WMMA GEMM (decode uses the f32 matvec): rare near-tie
-  flips there (more on MoE, whose routing amplifies them) need gates.sh's llama.cpp near-tie check.
+  `draft_depth 0` (`pkg/model_target.json`); at depth <= 3 a difference is a bug, not a near-tie. Wider
+  verification (depth 5-7, or several drafting streams) takes the f16 WMMA GEMM for speed and can flip near-ties
+  (`SPEC_EXACT=1` builds trade that speed for decode's rounding); tune.py runs the equivalence check before it keeps
+  a drafter and depth, so a depth that changes a request's output is never chosen.
 - Drafting works to the full context and with history reuse and checkpoints: the draft K/V shares the pool's pages.
 - Depth is a `model.json` setting (`execution.draft_depth`, 1-7); the method needs a rebuild.
 - Small models (< ~2B) decode faster without it (launch-bound); `tune.py` measures and decides.
