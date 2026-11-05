@@ -113,15 +113,17 @@ draft_depth 0 of the same package and its concurrency check):
 
 | Model (arch, quant) | Drafter | Loom: none -> best | llama.cpp: none -> best | Loom before int8 activations |
 |---|---|---|---|---|
-| Nemotron-3.5-Bolt-E4B (gemma4, UD-Q5_K_XL) | NVIDIA DFlash, BF16 requantized to Q8_0 | 47.8 -> **110.9** (DFlash depth 7, x2.32; assistant depth 3: 107.5) | 45.3 -> 99.7 (DFlash n-max 7, x2.20) | 46.7 -> 73.4 |
-| Qwen3.5-4B (qwen35 hybrid, UD-Q4_K_XL, vision with M-RoPE, F16 tensors) | AtomicChat DFlash | 62.9 -> **111.9** (DFlash depth 7, x1.78) | 57.2 -> 105.0 (DFlash n-max 7, x1.84) | 62.9 -> 80.2 |
-| Muse-Glimmer-30B (muse-glimmer, UD-Q5_K_M) | z-lab DFlash2 | 12.3 -> **32.3** (DFlash2 depth 7, x2.62) | 11.6 -> 25.4 (DFlash2 n-max 3, x2.18) | 12.2 -> 20.5 |
-| Flint (flint MoE, Q4_K_M) | incoai DFlash2 | 63.1 -> **101.3** (DFlash2 depth 3, x1.61) | 53.5 -> 86.0 (DFlash2 n-max 3, x1.61) | 65.6 -> 90.5 |
-| LFM2.5-24B-A2B (lfm2moe, Q4_K_M) | none exists: n-gram only (short-conv replay; 13/13 exact) | **102.7** (n-gram 65.3: none kept) | **94.7** (ngram-simple 90.1, ngram-mod 93.6) | - |
+| Nemotron-3.5-Bolt-E4B (gemma4, UD-Q5_K_XL) | NVIDIA DFlash, BF16 requantized to Q8_0 | 47.1 -> **114.3** (DFlash depth 7, x2.43; assistant depth 3: 107.2) | 45.3 -> 99.7 (DFlash n-max 7, x2.20) | 46.7 -> 73.4 |
+| Qwen3.5-4B (qwen35 hybrid, UD-Q4_K_XL, vision with M-RoPE, F16 tensors) | AtomicChat DFlash | 62.9 -> **117.1** (DFlash depth 7, x1.86) | 57.2 -> 105.0 (DFlash n-max 7, x1.84) | 62.9 -> 80.2 |
+| Muse-Glimmer-30B (muse-glimmer, UD-Q5_K_M) | z-lab DFlash2 | 12.3 -> **33.9** (DFlash2 depth 7, x2.75) | 11.6 -> 25.4 (DFlash2 n-max 3, x2.18) | 12.2 -> 20.5 |
+| Flint (flint MoE, Q4_K_M) | incoai DFlash2 | 63.8 -> **102.1** (DFlash2 depth 3, x1.60) | 53.5 -> 86.0 (DFlash2 n-max 3, x1.61) | 65.6 -> 90.5 |
+| LFM2.5-24B-A2B (lfm2moe, Q4_K_M) | none exists: n-gram only (short-conv replay) | **99.7** (n-gram 68.7: none kept) | **94.7** (ngram-simple 90.1, ngram-mod 93.6) | 102.7 |
 
 Drafting works on every family, and with the int8-activation verify step Loom's drafted decode now leads llama.cpp's
-on every model measured (the multi-token step was the gap: "Limits"). Depth 7 wins where the drafter accepts long
-runs: up to 8 tokens verify in one weight pass and round like 1-token decode.
+on every model measured, in absolute speed and (but for Flint's tie) in speedup over no drafting; the multi-token step
+was the gap ("Limits"). Depth 7 wins on these short requests where the drafter accepts long runs: up to 16 tokens
+verify in one weight pass and round like 1-token decode. At long context each verified token still pays its own decode
+attention, so pick a lower depth for long-context use (Qwen3.8-27B above: depth 3 for its package).
 
 Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary decoding.
 
@@ -152,7 +154,10 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   above. Kernel microbenchmark (`loom-benchmark` dispatch time, Q6_K 2560 x 40960): f32 1/4 tokens 438 / 643 us,
   int8 427 / 521 us. Quantizing inside the matvec instead (no separate launch) was slower: with the adaptive rows
   per workgroup (R = 1-4) every workgroup re-quantizes the whole activation (Q8_0 4 tokens at R=1: 1343 vs 735 us).
-  `ACT_Q8=0` restores the f32 path (numerics of earlier packages).
+  `ACT_Q8=0` restores the f32 path (numerics of earlier packages). The quantize launches cost a fast model a little:
+  LFM2.5-24B-A2B (10 ms steps, no drafting) 10.15 vs 9.75 ms per 1-stream step, but 20.3 vs 21.9 ms with 4 streams;
+  big models do not notice (Qwen3.8-27B 1-stream decode 12.9 either way). A loom-optimize lever for small models:
+  fuse the quantization into the producing norm / attention-combine kernels.
 - Fixed: **DFlash2 crashed under concurrency on elastic backing** (`driver_failure DATA_LOSS gpu.event_wait`;
   Qwen3.8-27B, Muse-Glimmer-30B, Flint). A propose stage holds a power-of-two cohort of blocks; when fewer spans
   propose (one request still prefilling while others draft: tune.py's "two requests 0.5 s apart"), the trailing
