@@ -161,17 +161,18 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   tokens.
 - Verification of more than 8 tokens per epoch (several drafting streams at depth 3+) takes the WMMA GEMM (rows
   padded to 64); the int8 matvec would stream the weights once per 8 tokens instead.
-- **Long-context verify: decode attention per token** (fixed for drafting packages). The per-token split-K kernel
-  costs the same per verified token as per decoded token: Qwen3.8-27B, 8-token epochs, 134 ms at 2k vs 210 ms at 32k
-  (+76 ms; 1-token decode +10 ms), so depth 7 fell to 19 tok/s at 32k (llama.cpp 22.6). The cost is per-(key, head,
-  token) arithmetic, not KV bandwidth: kernels that shared the key loads between a span's tokens (one workgroup for 2-8
-  tokens, serially or as parallel waves on one compute unit) gained under 6 %. Drafting packages therefore decode with
-  `gen_flashd.py`'s WMMA split kernel: one workgroup per (segment of up to 16 same-row tokens, KV head, split) with the
-  tokens as MMA columns, F16 inputs and F32 accumulation like the prefill flash kernel; a token's split range, the
-  32-aligned tiles and exact no-op masked tiles make its result the same alone or in a span (decode = verify). 27B
-  depth 7 at 32k: 164.8 ms per epoch (+33 ms over 2k). For a lone token it is slower than the per-token kernel (27B,
-  32k: +25 ms vs +10), so packages without drafting keep the per-token kernel (`ATTN_MMA=1/0` forces it). Prefetching
-  the next tile's K/V into registers does not fit the 256-VGPR budget at head_dim 256.
+- **Long-context verify pays decode attention per token** (open). The per-token split-K kernel costs the same per
+  verified token as per decoded token: Qwen3.8-27B, 8-token epochs (depth 7) 134 ms at 2k vs 210 ms at 32k (+76 ms;
+  1-token decode +10 ms; depth 3: 101 vs 135 ms), so at 32k depth 3 (22.5 tok/s) beats depth 7 (19 tok/s) and ties
+  llama.cpp (22.6). The cost is per-(key, head, token) arithmetic (the cross-lane reduction per key), not KV
+  bandwidth: kernels that shared a span's key loads (one workgroup for 2-8 tokens, serially or as parallel waves on
+  one compute unit) gained under 6 %. A WMMA split kernel with the span's tokens as MMA columns (prefill-flash style)
+  cut the 32k epoch to 165 ms but is not exact: RDNA3.5's WMMA result for a column changes with the V rows of keys
+  that column masks to P = 0 (1-ulp differences; verified bit-for-bit in isolation: zeroing those V rows makes the
+  grouped and solo results equal), so a token's attention depends on the other tokens of its span and the spec gate
+  fails (Qwen3.8-27B depth 7: 15/16). An exact design would run the 16-aligned key range shared by a segment on
+  WMMA and each token's ragged ends (<= 31 keys) on the per-token path, with split ranges that depend only on the
+  aligned block; not done. Meanwhile pick the depth with long contexts in mind (the 27B package uses depth 3).
 - Two-epoch continuation (`continuation_epochs: 2`) is not implemented (one device epoch per host turn).
 - DFlash v1 drafters with full-context attention read the whole context per proposal (DFlash2 windows it).
 - DFlash RoPE uses KV positions; llama.cpp gives M-RoPE targets' drafters the temporal position (degenerate

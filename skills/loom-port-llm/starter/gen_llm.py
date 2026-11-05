@@ -1698,15 +1698,18 @@ def listed(text, name, grid_rest):
     return header + body[:end]
 
 
-def attn_block(U, members, lo_all, kmax):
-    """One U-key block of the split attention loop (absolute key positions j..j+U-1, U-aligned) for each member
-    (suffix, lo, hi): keys outside [lo, hi) contribute exactly nothing (p = 0, alpha = 1 when the max is unchanged),
-    so a member's result does not depend on the block range around it."""
+def attention_text(S, P):
+    """Split-K causal GQA attention: workgroup (token, KV head, split) of 16
+    waves, wave w = query head 16*kv + w, lane l = dims 4l..4l+3. Sliding
+    layers see the last 2048 positions (including the current one). The
+    combine kernel folds the splits and applies the sigmoid output gate."""
+    U = UNROLL
     body = []
     for i in range(U):
         body.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
-      %kl{i} = index.max %key{i}_raw, {lo_all} : index
-      %kp{i} = index.min %kl{i}, {kmax} : index
+      %ok{i} = index.cmp ult, %key{i}_raw, %stop : index
+      %key{i}_c = scf.select %ok{i}, %key{i}_raw, %j : index
+      %kp{i} = index.add %window_low, %key{i}_c : index
       %ko{i} = func.call @g_kv_offset(%origins, %row, %kp{i}, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
       %kc{i} = buffer.view %arena[%ko{i}] : buffer -> view<{KVH}x32x4xf16>
       %kh{i} = vector.load %kc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
@@ -1715,119 +1718,27 @@ def attn_block(U, members, lo_all, kmax):
       %vc{i} = buffer.view %arena[%vo{i}] : buffer -> view<{KVH}x32x4xf16>
       %vh{i} = vector.load %vc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
       %v{i} = vector.extf %vh{i} : vector<4xf16> to vector<4xf32>""")
-    yields, types = [], []
-    for sfx, lo, hi in members:
-        for i in range(U):
-            body.append(f"""      %okl{i}{sfx} = index.cmp uge, %key{i}_raw, {lo} : index
-      %okh{i}{sfx} = index.cmp ult, %key{i}_raw, {hi} : index
-      %ok{i}{sfx} = scalar.andi %okl{i}{sfx}, %okh{i}{sfx} : i1
-      %prod{i}{sfx} = vector.mulf %q4{sfx}, %k{i} : vector<4xf32>
-      %part{i}{sfx} = vector.reduce<addf> %prod{i}{sfx}, %zero_f : vector<4xf32>, f32
-      %sr{i}{sfx} = kernel.subgroup.reduce<addf> %part{i}{sfx} : f32
-      %s{i}{sfx} = scf.select %ok{i}{sfx}, %sr{i}{sfx}, %neg_big : f32""")
-        prev = f"%m{sfx}"
-        for i in range(U):
-            body.append(f"      %mx{i}{sfx} = scalar.maxnumf {prev}, %s{i}{sfx} : f32"); prev = f"%mx{i}{sfx}"
-        body.append(f"""      %m_shift{sfx} = scalar.subf %m{sfx}, {prev} : f32
-      %alpha_e{sfx} = scalar.expf<afn> %m_shift{sfx} : f32
-      %same{sfx} = scalar.cmpf oeq, %m_shift{sfx}, %zero_f : f32
-      %alpha{sfx} = scf.select %same{sfx}, %one_f, %alpha_e{sfx} : f32
-      %l_scaled{sfx} = scalar.mulf %l{sfx}, %alpha{sfx} : f32
-      %alpha_v{sfx} = vector.splat %alpha{sfx} : vector<4xf32>
-      %acc_s{sfx} = vector.mulf %acc{sfx}, %alpha_v{sfx} : vector<4xf32>""")
-        pl, pa = f"%l_scaled{sfx}", f"%acc_s{sfx}"
-        for i in range(U):
-            body.append(f"""      %d{i}{sfx} = scalar.subf %s{i}{sfx}, {prev} : f32
-      %pe{i}{sfx} = scalar.expf<afn> %d{i}{sfx} : f32
-      %p{i}{sfx} = scf.select %ok{i}{sfx}, %pe{i}{sfx}, %zero_f : f32
-      %la{i}{sfx} = scalar.addf {pl}, %p{i}{sfx} : f32
-      %pv{i}{sfx} = vector.splat %p{i}{sfx} : vector<4xf32>
-      %aa{i}{sfx} = vector.fmaf %pv{i}{sfx}, %v{i}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}{sfx}", f"%aa{i}{sfx}"
-        yields += [prev, pl, pa]; types += ["f32", "f32", "vector<4xf32>"]
-    body.append(f"      scf.yield {', '.join(yields)} : {', '.join(types)}")
-    return body
-
-
-
-
-def attn_segment(TT, tok0, info, tokens, ind="  "):
-    """Grouped decode attention: tokens split into segments (a new segment starts at a token whose predecessor is
-    dead, of another row or at a non-consecutive position, and at every position that is a multiple of TT), so a
-    segment is <= TT consecutive positions of one row. The workgroup of token tok0 runs only if tok0 starts a
-    segment (%seg_head) and covers its members %mem{j} = tok0 + j. Defines %tk{j}, %mem{j}, %seg_head, %row32_0."""
-    t = [f"""{ind}%ctt_m = index.constant {TT} : index
-{ind}%ctt32 = scalar.constant {TT} : i32
-{ind}%c1_i32_m = scalar.constant 1 : i32
-{ind}%tokens_last_g = index.sub {tokens}, %c1 : index
-{ind}%has_prev = index.cmp ugt, {tok0}, %c0 : index
-{ind}%prev_raw = index.sub {tok0}, %c1 : index
-{ind}%prev_c = scf.select %has_prev, %prev_raw, %c0 : index
-{ind}%tkp = index.assume %prev_c [lt(%prev_c, {tokens})] : index
-{ind}%rowp = view.load {info}[%tkp, 0] : view<[{tokens}]x4xi32> -> i32
-{ind}%posp = view.load {info}[%tkp, 1] : view<[{tokens}]x4xi32> -> i32
-{ind}%livep32 = view.load {info}[%tkp, 2] : view<[{tokens}]x4xi32> -> i32
-{ind}%livep_v = scalar.cmpi ne, %livep32, %c0_i32 : i32
-{ind}%livep = scalar.andi %livep_v, %has_prev : i1"""]
-    pr, pp, pl = "%rowp", "%posp", "%livep"
-    for j in range(TT):
-        t.append(f"""{ind}%tj{j}_c = index.constant {j} : index
-{ind}%tr{j} = index.add {tok0}, %tj{j}_c : index
-{ind}%in{j} = index.cmp ult, %tr{j}, {tokens} : index
-{ind}%tcl{j} = index.min %tr{j}, %tokens_last_g : index
-{ind}%tk{j} = index.assume %tcl{j} [lt(%tcl{j}, {tokens})] : index
-{ind}%row32_{j} = view.load {info}[%tk{j}, 0] : view<[{tokens}]x4xi32> -> i32
-{ind}%pos32_{j} = view.load {info}[%tk{j}, 1] : view<[{tokens}]x4xi32> -> i32
-{ind}%live32_{j} = view.load {info}[%tk{j}, 2] : view<[{tokens}]x4xi32> -> i32
-{ind}%lv{j} = scalar.cmpi ne, %live32_{j}, %c0_i32 : i32
-{ind}%live{j} = scalar.andi %lv{j}, %in{j} : i1
-{ind}%same_r{j} = scalar.cmpi eq, %row32_{j}, {pr} : i32
-{ind}%next_p{j} = scalar.addi {pp}, %c1_i32_m : i32
-{ind}%cons{j} = scalar.cmpi eq, %pos32_{j}, %next_p{j} : i32
-{ind}%prem{j} = scalar.remui %pos32_{j}, %ctt32 : i32
-{ind}%unal{j} = scalar.cmpi ne, %prem{j}, %c0_i32 : i32
-{ind}%c_a{j} = scalar.andi {pl}, %same_r{j} : i1
-{ind}%c_b{j} = scalar.andi %c_a{j}, %cons{j} : i1
-{ind}%joins{j} = scalar.andi %c_b{j}, %unal{j} : i1""")
-        if j == 0:
-            t.append(f"""{ind}%true_m = scalar.constant true : i1
-{ind}%nj0 = scalar.xori %joins0, %true_m : i1
-{ind}%seg_head = scalar.andi %nj0, %live0 : i1
-{ind}%mem0 = scalar.andi %seg_head, %true_m : i1""")
-        else:
-            t.append(f"""{ind}%mj{j} = scalar.andi %joins{j}, %live{j} : i1
-{ind}%mem{j} = scalar.andi %mj{j}, %mem{j - 1} : i1""")
-        pr, pp, pl = f"%row32_{j}", f"%pos32_{j}", f"%live{j}"
-    return "\n".join(t)
-
-
-def attn_mma(P):
-    """Decode-path split kernels (P = g / gd<d>) take the WMMA segment kernel when the package drafts and the head
-    fits gen_flashd.py (head_dim <= 256). A drafting epoch verifies 1 + depth tokens per row: the segment kernel
-    costs about one token's worth for all of them (Qwen3.8-27B, 8 tokens at 32k: +33 ms over 2k vs +76 ms with the
-    per-token kernel), while for a lone token it is slower (+25 vs +10 ms at 32k), so packages without drafting keep
-    the per-token kernel. ATTN_MMA=1 / 0 forces it on / off."""
-    import re as _re
-    mode = os.environ.get("ATTN_MMA", "auto")
-    if mode == "0" or not _re.fullmatch(r"g|gd\d+", P) or (mode == "auto" and not gen_draft.enabled()):
-        return False
-    return (int(P[2:]) if P.startswith("gd") else D) in (64, 128, 256)
-
-
-def attn_wiring(program):
-    """ATTN_MMA: each decode split-attention launch `@{P}_attention_split[...]` (P = g / gd<d>) becomes the WMMA
-    segment kernel (same arguments and grid; one workgroup per segment head)."""
-    import re as _re
-    return _re.sub(r"kernel\.launch @(g|gd\d+)_attention_split\[",
-                   lambda m: f"kernel.launch @{m.group(1)}_attention_split{'_mma' if attn_mma(m.group(1)) else ''}[", program)
-
-
-def attention_text(S, P):
-    """Split-K causal GQA attention: workgroup (token, KV head, split) of 16
-    waves, wave w = query head 16*kv + w, lane l = dims 4l..4l+3. Sliding
-    layers see the last 2048 positions (including the current one). The
-    combine kernel folds the splits and applies the sigmoid output gate."""
-    U = UNROLL
-    body = attn_block(U, [("", "%lo", "%hi")], "%lo", "%kmax")
+    for i in range(U):
+        body.append(f"""      %prod{i} = vector.mulf %q4, %k{i} : vector<4xf32>
+      %part{i} = vector.reduce<addf> %prod{i}, %zero_f : vector<4xf32>, f32
+      %sr{i} = kernel.subgroup.reduce<addf> %part{i} : f32
+      %s{i} = scf.select %ok{i}, %sr{i}, %neg_big : f32""")
+    prev = "%m"
+    for i in range(U):
+        body.append(f"      %mx{i} = scalar.maxnumf {prev}, %s{i} : f32"); prev = f"%mx{i}"
+    body.append(f"""      %m_shift = scalar.subf %m, {prev} : f32
+      %alpha = scalar.expf<afn> %m_shift : f32
+      %l_scaled = scalar.mulf %l, %alpha : f32
+      %alpha_v = vector.splat %alpha : vector<4xf32>
+      %acc_s = vector.mulf %acc, %alpha_v : vector<4xf32>""")
+    pl, pa = "%l_scaled", "%acc_s"
+    for i in range(U):
+        body.append(f"""      %d{i} = scalar.subf %s{i}, {prev} : f32
+      %p{i} = scalar.expf<afn> %d{i} : f32
+      %la{i} = scalar.addf {pl}, %p{i} : f32
+      %pv{i} = vector.splat %p{i} : vector<4xf32>
+      %aa{i} = vector.fmaf %pv{i}, %v{i}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}", f"%aa{i}"
+    body.append(f"      scf.yield {prev}, {pl}, {pa} : f32, f32, vector<4xf32>")
     consts = "".join(f"  %c{i}u = index.constant {i} : index\n" for i in range(U))
     GATE_TEXT = """    %gate_view = buffer.view %gate[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
     %g = vector.load %gate_view[%token, %head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
@@ -1880,7 +1791,6 @@ kernel.def export("{P}_attention_split") @{P}_attention_split(%tokens: index) {{
   %c0_i32 = scalar.constant 0 : i32
   %cU = index.constant {U} : index
 {consts}  %zero_f = scalar.constant 0.0 : f32
-  %one_f = scalar.constant 1.0 : f32
   %neg_big = scalar.constant -3.0e38 : f32
   %cg = index.constant {G} : index
   %head = index.madd %kv_head, %cg, %wave : index
@@ -1928,12 +1838,7 @@ kernel.def export("{P}_attention_split") @{P}_attention_split(%tokens: index) {{
     %scale_v = vector.splat %scale : vector<4xf32>
     %q4 = vector.mulf %q_raw, %scale_v : vector<4xf32>
     %zero4 = vector.splat %zero_f : vector<4xf32>
-    %lo = index.add %window_low, %start : index
-    %hi = index.add %window_low, %stop : index
-    %kmax = index.sub %hi, %c1 : index
-    %b0_q = index.div %lo, %cU : index
-    %b0 = index.mul %b0_q, %cU : index
-    %m_final, %l_final, %acc_final = scf.for %j = [%b0 to %hi step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>) -> (f32, f32, vector<4xf32>) {{
+    %m_final, %l_final, %acc_final = scf.for %j = [%start to %stop step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>) -> (f32, f32, vector<4xf32>) {{
 {chr(10).join(body)}
     }}
     %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
@@ -2030,10 +1935,6 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
         text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
                 .replace("x32x4xf32", f"x32x{DL}xf32").replace("vector<4xf32>", f"vector<{DL}xf32>")
                 .replace("0.08838834764831845", repr(D ** -0.5)))
-    if attn_mma(P):   # WMMA split kernel for decode / verify segments (gen_flashd.py)
-        import re as _re, gen_flashd
-        sc = _re.search(r"%scale = scalar.constant (\S+) : f32", text[text.index(f'export("{P}_attention_split")'):]).group(1)
-        text += gen_flashd.kernel(P, S, D, KVH, G, sc, WINDOW, attn_segment, POS_BYTES)
     split_l = listed(text, f"{P}_attention_split", f"""  %c1 = index.constant 1 : index
   %ckvh = index.constant {KVH} : index
   %cS = index.constant {S} : index
@@ -2980,7 +2881,6 @@ if __name__ == "__main__":
             spec_kernels += gen_ngram.kernels(gfacts)
         if gen_draft.DRAFT["kind"] == "assist":
             spec_kernels += gen_draft.mtp_kernels(gfacts) + gen_assist.kernels(gfacts)
-    program = attn_wiring(program)   # decode attention: WMMA segment kernel where it applies
     if USED_MVQ:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
         COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                    for fmt, K, sw, R, TG in sorted(USED_MVQ))
