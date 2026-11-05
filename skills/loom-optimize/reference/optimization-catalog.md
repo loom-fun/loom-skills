@@ -115,6 +115,39 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - It only handles *uniform* tiles: all 16 tokens live, one row, consecutive
   positions (`g_tile_uniform`). Every other token goes to the listed fallback.
 
+### flash2 at head_dim 256 (`gen_flash2s.py`)
+- At head_dim 256, 256 dims of Q (as f16 fragments) plus 256 dims of output accumulators exceed 256 VGPRs, so
+  gen_flash2.py reloads all of Q from global memory (f32, converted each time) every 32-key tile: ~6x the K/V
+  tile's bytes. gen_flash2s.py gives each query head TWO waves of 128 dims: a wave holds its Q half in
+  registers for the whole key loop, computes S^T over its dims, publishes it to LDS and adds its partner's
+  (commutative add: both waves hold bit-identical S, softmax and P), then accumulates its 128 output dims.
+- Staging: lane = key, workitem/32 = dim segment, so a wave's V^T writes hit 32 consecutive columns
+  (conflict-free) and each lane does one paged-KV lookup per tile (V = K offset + one plane).
+- Qwen3.8-27B (G = 6, 12 waves, 61 KB LDS): a 1024-token chunk at 32k depth runs 16.9 TFLOP/s; prefill
+  2k/8k/32k 401.6/368.6/262.5 -> 429.1/426.7/378.1 tok/s. Attention had been 1.42 ms of 3.8 ms per token at 32k.
+- Test it standalone with real shapes: a flash2 harness (paged arena filled directly, float64 reference with
+  the gate) plus a broken variant (partner sum dropped) as the negative control.
+
+### Q5_K / Q8_0 dequant (`gen_gemm.py`)
+- Q5_K: the fifth bit from the qh words (`(qh >> g) & 0x01010101`, shifted to bit 4) instead of byte vectors;
+  Q8_0: int8 -> f16 and one f16 multiply (q * d is exact in f32, so the f16 result is bit-identical). Both
+  ~+8 % in isolation on real weights (26.6 -> 28.8 / 28.7 TFLOP/s). Bolt-E4B (89 % Q6_K in the UD-Q5_K_XL
+  file) prefill +18/+11/+6.5 % at 2k/8k/32k from the Q6_K change.
+
+### Q6_K dequant (`gen_gemm.py`)
+- Do the bit work on 32-bit words (masks 0x0F0F0F0F / 0x03030303; a byte's bits shifted in from its
+  neighbour are masked off) and finish with one f16 FMA `codes * s + (-32 s)`; byte vectors plus f32 math
+  ran 22 TFLOP/s, this 26-28 (Q4_K: ~35 on the same constant-data benchmark).
+
+### Last-layer output rows (`LAST_OUT`, llama.cpp `inp_out_ids`)
+- A prefill epoch only needs the last layer's post-attention rows that feed the head (one per span). gen_llm.py
+  rewrites the last layer: gather those rows of the attention output and residual (`g_rows_gather`), run the
+  output projection, residual, FFN and final norm on them (the decode matvecs, with their own int8
+  activations), scatter the final rows back (`g_rows_scatter`). K/V are still written for every token.
+- Off for drafters that read the trunk's final hidden rows (MTP, Gemma-4 assistant) or a DFlash tap after the
+  last layer; the verify program switches it off. Qwen3.8-27B: greedy outputs identical; prefill +1 % (the last
+  layer is ~1.5 % of the GEMM work).
+
 ### Listed fallback
 - `g_attention_fallback_list` compacts the tokens of non-uniform tiles that are
   live into a list, using an atomic counter. The split-K attention then runs over
@@ -133,8 +166,17 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   norms.
 
 ### Chunk size
-- `prefill_capacity` 4096 helped MoE prefill, because larger expert buckets mean
-  fuller GEMM tiles. Dense models gain little beyond 1024–2048.
+- `prefill_capacity` 4096 helps MoE prefill: larger expert buckets mean fuller GEMM tiles. build.py now
+  defaults MoE configs (`cfg["moe"]`) to 4096. Flint (256 experts, top-6: ~24 tokens per expert in a 1024
+  chunk, 64-row tiles ~37 % full; the expert GEMMs were 85 % of prefill): 2k/8k/32k +22/+38/+28 % vs 1024
+  (2048: +25/+27/+22 %). The price is short prompts: a ~1k-token prompt prefills 29 % slower at 4096 (22 % at
+  2048) than at 1024, a fixed per-epoch cost not yet attributed. Dense models gain little beyond 1024–2048.
+
+### Tile order per port (`cfg["gemm_n_fastest"]`)
+- Columns fastest (the default) reuses each activation tile; rows fastest reuses each weight tile across
+  the chunk's row tiles (gufo's activation-panel grouping is the same idea). It is shape dependent, so the
+  reviewed cfg carries the winner: Muse-Glimmer-30B rows fastest +4 to +12 % (three server sessions: two wins,
+  one tie; never a loss); Qwen3.8-27B and Bolt tie; Flint -4 % at 8k. Repeat the A/B across sessions.
 
 ## Did not help
 - **64-key flash tiles.** Register pressure; occupancy dropped.

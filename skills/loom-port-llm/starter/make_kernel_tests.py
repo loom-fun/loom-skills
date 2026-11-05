@@ -369,6 +369,102 @@ if cfg.get("recurrent_layers"):
   check.return
 }}
 """)
+# Prefill GEMMs (gen_gemm.py): y = (x16 . W^T) * inv per row, x16 the f16 row-scaled activations and inv the
+# row's inverse scale (g_row_scale_f16's contract); swiglu: silu(gate) * up. One tensor per (format, K) the
+# model's prefill uses, both the 64-row kernel and the 128-row one (_m128), two row tiles each.
+def gemm_cases():
+    seen_g = set()
+    for li in range(cfg["layers"]):
+        for nm_ in ("ffn_gate", "ffn_up", "ffn_down", "attn_qkv", "attn_gate", "attn_q", "attn_k", "attn_output", "ssm_out"):
+            name = f"blk.{li}.{nm_}.weight"
+            if name not in T:
+                continue
+            fmt = T[name].tensor_type.name.lower()
+            up = f"blk.{li}.ffn_up.weight"
+            sw = nm_ == "ffn_gate" and up in T and T[up].tensor_type == T[name].tensor_type
+            if fmt not in ("q4_k", "q5_k", "q6_k", "q8_0") or (fmt, sw) in seen_g:
+                continue
+            seen_g.add((fmt, sw))
+            yield name, fmt, sw
+if os.environ.get("GEMM_TESTS", "1") == "1":
+    for name, fmt, swiglu in gemm_cases():
+        W = deq(name); n, K = W.shape
+        n_use = min(n, 1024)                          # a slice of output rows keeps the reference cheap
+        Wr = raw(name).reshape(n, -1)[:n_use].reshape(-1)
+        Ws = W[:n_use].astype(np.float64)
+        if swiglu:
+            up = name.replace("ffn_gate", "ffn_up"); U = deq(up)[:n_use].astype(np.float64); Ur = raw(up).reshape(n, -1)[:n_use].reshape(-1)
+        for rows, kern in ((128, f"g_gemm_{fmt}_{'swiglu' if swiglu else 'store'}"), (256, f"g_gemm_{fmt}_{'swiglu' if swiglu else 'store'}_m128")):
+            x16 = rng.standard_normal((rows, K)).astype(np.float16)
+            inv = rng.uniform(0.25, 2.0, rows).astype(np.float32)
+            sc = np.stack([np.ones(rows, np.float32), inv], 1)
+            g = (x16.astype(np.float64) @ Ws.T) * inv[:, None]
+            if swiglu:
+                u = (x16.astype(np.float64) @ U.T) * inv[:, None]
+                yv = g / (1 + np.exp(-g)) * u
+            else:
+                yv = g
+            tag = f"gm_{fmt}_{'sw' if swiglu else 'st'}_{rows}"
+            save(tag + "_x", x16); save(tag + "_s", sc); save(tag + "_y", yv.astype(np.float32)); save(tag + "_w", Wr)
+            wdecl = f'  %w = check.file.read.npy path("{tag}_w.npy") : {ty(Wr)}\n'
+            wargs, wtys = "%w", ty(Wr)
+            if swiglu:
+                save(tag + "_u", Ur); wdecl += f'  %u = check.file.read.npy path("{tag}_u.npy") : {ty(Ur)}\n'; wargs += ", %u"; wtys += ", " + ty(Ur)
+            tol = 3.0e-2 * float(np.abs(yv).std() + 1e-6)
+            cases.append(f"""check.case public @{tag} {{
+  %rows = check.literal value({rows}) : index
+  %k = check.literal value({K}) : index
+  %n = check.literal value({n_use}) : index
+  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{rows}x{K}xf16>
+  %s = check.file.read.npy path("{tag}_s.npy") : tensor<{rows}x2xf32>
+{wdecl}  %e = check.file.read.npy path("{tag}_y.npy") : tensor<{rows}x{n_use}xf32>
+  %y = check.generate.fill value(0.0) : tensor<{rows}x{n_use}xf32>
+  kernel.launch @{kern}[%rows, %n](%rows, %k, %n, %x, %s, {wargs}, %y) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {wtys}, tensor<{rows}x{n_use}xf32>)
+  check.expect.close actual(%y) expected(%e) atol({tol:.3e}) rtol(1.0e-2) nan(different) : tensor<{rows}x{n_use}xf32>
+  check.return
+}}
+""")
+# Prefill flash attention (gen_flash2.py / gen_flash2s.py): 64 uniform tokens at the end of a 1024-key context,
+# paged arena filled directly (identity page map), layer 0, causal; q scaled so attention is sharp (a kernel that
+# drops part of the score sum fails). Reference in float64 from f16 Q/K/V, times sigmoid(gate) when gated.
+if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and cfg.get("sliding_window") in (None, 0):
+    t, ctx = 64, 1024
+    P0 = ctx - t; blocks = ctx // 16; pool = ctx
+    kk = rng.standard_normal((ctx, KVH, D)).astype(np.float16); vv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
+    arena = np.zeros((2, pool, KVH, D), np.float16); arena[0], arena[1] = kk, vv
+    qq = (rng.standard_normal((t, QH, D)) * 2.5).astype(np.float32); gg = rng.standard_normal((t, QH, D)).astype(np.float32)
+    orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
+    info = np.zeros((t, 4), np.int32); info[:, 1] = P0 + np.arange(t); info[:, 2] = 1
+    o = np.zeros((t, QH, D)); qd = qq.astype(np.float16).astype(np.float64)
+    for hh in range(QH):
+        kv = hh // (QH // KVH); sc = qd[:, hh] @ kk[:, kv].astype(np.float64).T / np.sqrt(D)
+        sc[np.arange(ctx)[None, :] > (P0 + np.arange(t))[:, None]] = -1e30
+        pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); o[:, hh] = pr @ vv[:, kv].astype(np.float64)
+    if cfg.get("attn_gate"):
+        o = o / (1 + np.exp(-gg))
+    QD = QH * D
+    for n, a in [("f_arena", arena.reshape(-1)), ("f_q", qq.reshape(t, QD)), ("f_g", gg.reshape(t, QD)), ("f_orig", orig),
+                 ("f_info", info), ("f_o", o.reshape(t, QD).astype(np.float32))]:
+        save(n, a)
+    AT = f"tensor<{2 * pool * KVH * D}xf16>"
+    cases.append(f"""check.case public @flash_prefill {{
+  %t = check.literal value({t}) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value(0) : i32
+  %ctx = check.literal value({ctx}) : index
+  %pool = check.literal value({pool}) : index
+  %q = check.file.read.npy path("f_q.npy") : tensor<{t}x{QD}xf32>
+  %g = check.file.read.npy path("f_g.npy") : tensor<{t}x{QD}xf32>
+  %info = check.file.read.npy path("f_info.npy") : tensor<{t}x4xi32>
+  %orig = check.file.read.npy path("f_orig.npy") : tensor<{10 + blocks}xi32>
+  %arena = check.file.read.npy path("f_arena.npy") : {AT}
+  %e = check.file.read.npy path("f_o.npy") : tensor<{t}x{QD}xf32>
+  %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
+  kernel.launch @g_attention_flash2[%t](%t, %layer, %sliding, %ctx, %pool, %q, %g, %info, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AT}, tensor<{t}x{QD}xf32>)
+  check.expect.close actual(%o) expected(%e) atol(4.0e-3) rtol(4.0e-3) nan(different) : tensor<{t}x{QD}xf32>
+  check.return
+}}
+""")
 import re
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)

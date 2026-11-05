@@ -180,14 +180,15 @@ Nothing to configure; read `starter/draft/README.md` only to debug it.
 | `gen_llm.py` | `cfg.json` → `llm.loom`: all kernels plus the `@llm_advance` command program. The command program is a **static per-layer unroll**, so each layer's kind (attention or gated delta-net) and tensor formats come from the GGUF (Q4_K_M mixes Q4_K/Q5_K/Q6_K/Q8_0 per tensor). Decode-shaped linears (< 64 tokens) and the head use int8 activations (`g_quant_q8` + `_q8` matvecs with integer dot4, llama.cpp's Q8_1 numerics; 1-, 4-, 8- and 16-token variants that round alike) for Q8_0/Q4_K/Q5_K/Q6_K weights; `ACT_Q8=0` keeps f32 activations. |
 | `gen_gdn.py` | Gated delta-net kernels (conv1d + SiLU, history commit, q/k L2 norms, register recurrence, gated RMSNorm) and the fused q/gate split, for hybrids. Recurrent state lives in the runtime's recurrent slots (see porting-notes). |
 | `gen_gemm.py` | WMMA prefill GEMMs per (format, mode). Formats: q4_k, q5_k, q6_k, q8_0. Modes: store, acc, swiglu. |
-| `gen_flash2.py` | Prefill flash attention (transposed, K/V staged once per KV head), head_dim 128 or 256. |
+| `gen_flash2.py` | Prefill flash attention (transposed, K/V staged once per KV head), head_dim 128 (and 256 with `FLASH2_SPLIT=0`). |
+| `gen_flash2s.py` | Prefill flash attention for head_dim 256 (used automatically): two waves per query head own 128 dims each, so Q stays in registers for the whole key loop; the pair sums S partials through workgroup memory. |
 | `tile_uniform.loom` | Helper that classifies 16-token tiles for flash2. |
 | `templates/*.loom` | Serving glue for the hrx-loom 0.1.0 text ABI (`text_*_v1` exports). `prepare` stages one program per packing shape. `storage` sets the KV geometry (2 planes per attention layer, F16) and the recurrent slot size. `control` is the chat policy: rendering, tools, reasoning, thinking switch, tokenization, output channels, tool-call parsing, canonical history for reuse. `service` maps the ABI exports. `weights.loom` is the parameter policy. |
 | `build.py` | Fills the templates from `cfg.json["chat"]`, sizes context/pool/memory, then writes `model.json`, `tokenizer.json`, the GGUF symlink and `llm_config.json` (read by the benchmark scripts). |
 | `pick_gguf.py` | Chooses the GGUF in a repo from the headers only (HTTP range read): quant preference, tensor formats the kit supports, and the memory rule (the file must fit twice: a conservative margin, kept until quant choice accounts for the KV pool at full context). |
 | `llama_trace.py` | llama.cpp's intermediate tensors and compute graph for a prompt (`llama-eval-callback`): the spec and the node-by-node reference for a new architecture. |
 | `draft/` | Speculative decoding: `gen_draft.py` (verify stage, device acceptance, GDN capture/replay and the generic replay hook, MTP drafter), `gen_dflash.py` (DFlash/DFlash2 drafters), `gen_assist.py` (Gemma-4 assistant), `gen_ngram.py` (prompt lookup), `build_draft.py` (prepare/storage/control glue), `find_drafter.py`, `tune.py`; see its README. |
-| `make_kernel_tests.py`, `run_kernel_tests.sh` | `check.case` unit tests with numpy references (gguf dequantize) on the real tensor shapes: embed, matvecs (every format/K in use), QK-norm + RoPE, the attention chain (q/gate split → RoPE + paged KV store → split-K attention → gated combine), the output head argmax, and the gated delta-net chain on a span that continues a stored state. |
+| `make_kernel_tests.py`, `run_kernel_tests.sh` | `check.case` unit tests with numpy references (gguf dequantize) on the real tensor shapes: embed, matvecs (every format/K in use), QK-norm + RoPE, the prefill GEMMs (every format/mode in use, 64- and 128-row kernels), the attention chain (q/gate split → RoPE + paged KV store → split-K attention → gated combine), the output head argmax, and the gated delta-net chain on a span that continues a stored state. |
 
 Kernel inventory:
 - **Decode:**
@@ -305,8 +306,8 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
 5. **503 "insufficient completion capacity".** `--memory_bytes` is too small for
    the KV pool (pool × 2·kv_layers × kv_heads·head_dim·2 bytes) plus recurrent state.
 6. **Registration fails with a VGPR spill (`spill-traffic-register-exhausted`).** A
-   kernel holds too much in registers for this model's shape. Reload operands per
-   iteration instead of keeping them live (flash2 does this for head_dim 256).
+   kernel holds too much in registers for this model's shape. Split the work over more waves
+   (`gen_flash2s.py`: two waves per head at head_dim 256) or reload operands per iteration.
 7. **Coherent but wrong from the first token, kernel tests pass.** A wiring or
    config bug. Compare against `starter/llama_trace.py` (llama.cpp's intermediate tensors,
    node by node) with a numpy forward of layers 0–1; then read the generated command program for one layer of each kind

@@ -2791,6 +2791,203 @@ kernel.def export("g_silu_mul") @g_silu_mul(%tokens: index) {
   kernel.return
 }
 """
+# LAST_OUT=1 (opt-in, A/B it per port): the last layer's post-attention work runs only on the rows the head reads
+# (llama.cpp's inp_out_ids). Measured: Qwen3.8-27B prefill +1 % (within noise), Muse-Glimmer-30B -3.5 %. Off for drafters that read the trunk's final hidden rows (MTP, Gemma-4 assistant) or a DFlash tap
+# after the last layer.
+LAST_OUT = os.environ.get("LAST_OUT", "0") == "1" and not (gen_draft.enabled() and gen_draft.DRAFT["kind"] in ("mtp", "assist"))
+if LAST_OUT and gen_draft.enabled() and gen_draft.DRAFT["kind"] == "dflash":
+    import gen_dflash as _gd
+    LAST_OUT = CFG["layers"] not in _gd.config(gen_draft.DRAFT["gguf"])["target_layers"]   # a tap after the last layer
+
+# llama.cpp's output-row selection (inp_out_ids / ggml_get_rows before the last layer's output projection and
+# FFN): a prefill epoch only needs the last layer's post-attention rows that feed the head, one per span.
+ROWS_SELECT = r"""
+// dst[s] = src[row of span s's output token] (zeros for an unselected or absent span); one workgroup per span.
+kernel.def export("g_rows_gather") @g_rows_gather(%spans: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%spans_arg: index, %tokens_arg: index, %width_arg: index, %metadata: buffer, %src: buffer, %dst: buffer) {
+  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %width = index.assume %width_arg [range(%width_arg, 4, 65536), multiple_of(%width_arg, 4)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c4 = index.constant 4 : index
+  %c256 = index.constant 256 : index
+  %c1_i32 = scalar.constant 1 : i32
+  %c0_i32 = scalar.constant 0 : i32
+  %span_id = kernel.workgroup.id<x> : index
+  %span = index.assume %span_id [lt(%span_id, %spans)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %row, %live = func.call @g_span_output_row(%metadata, %spans, %span, %tokens) : (buffer, index, index, index) -> (index, i1)
+  %quads = index.div %width, %c4 : index
+  %src_view = buffer.view %src[%zero] : buffer -> view<[%tokens]x[%quads]x4xf32>
+  %dst_view = buffer.view %dst[%zero] : buffer -> view<[%spans]x[%quads]x4xf32>
+  %z4 = vector.constant 0.0 : vector<4xf32>
+  scf.for %q = [%lane to %quads step %c256] {
+    %qb = index.assume %q [lt(%q, %quads)] : index
+    %v = scf.if %live -> (vector<4xf32>) {
+      %vv = vector.load %src_view[%row, %qb, %c0] : view<[%tokens]x[%quads]x4xf32> -> vector<4xf32>
+      scf.yield %vv : vector<4xf32>
+    } else {
+      scf.yield %z4 : vector<4xf32>
+    }
+    vector.store %v, %dst_view[%span, %qb, %c0] : vector<4xf32>, view<[%spans]x[%quads]x4xf32>
+  }
+  kernel.return
+}
+
+// dst[row of span s's output token] = src[s] for every selected span.
+kernel.def export("g_rows_scatter") @g_rows_scatter(%spans: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%spans_arg: index, %tokens_arg: index, %width_arg: index, %metadata: buffer, %src: buffer, %dst: buffer) {
+  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %width = index.assume %width_arg [range(%width_arg, 4, 65536), multiple_of(%width_arg, 4)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c4 = index.constant 4 : index
+  %c256 = index.constant 256 : index
+  %span_id = kernel.workgroup.id<x> : index
+  %span = index.assume %span_id [lt(%span_id, %spans)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %row, %live = func.call @g_span_output_row(%metadata, %spans, %span, %tokens) : (buffer, index, index, index) -> (index, i1)
+  scf.if %live {
+    %quads = index.div %width, %c4 : index
+    %src_view = buffer.view %src[%zero] : buffer -> view<[%spans]x[%quads]x4xf32>
+    %dst_view = buffer.view %dst[%zero] : buffer -> view<[%tokens]x[%quads]x4xf32>
+    scf.for %q = [%lane to %quads step %c256] {
+      %qb = index.assume %q [lt(%q, %quads)] : index
+      %v = vector.load %src_view[%span, %qb, %c0] : view<[%spans]x[%quads]x4xf32> -> vector<4xf32>
+      vector.store %v, %dst_view[%row, %qb, %c0] : vector<4xf32>, view<[%tokens]x[%quads]x4xf32>
+    }
+  }
+  kernel.return
+}
+
+// The epoch row of span `span`'s last token (the one the head reads) and whether the span is selected.
+func.def inline @g_span_output_row(%metadata: buffer, %spans: index, %span: index, %tokens: index) -> (index, i1) {
+  %zero = index.constant 0 : offset
+  %c16o = index.constant 16 : offset
+  %c0 = index.constant 0 : index
+  %c1_i32 = scalar.constant 1 : i32
+  %c0_i32 = scalar.constant 0 : i32
+  %header = buffer.view %metadata[%zero] : buffer -> view<4xi32>
+  %count32 = view.load %header[0] : view<4xi32> -> i32
+  %count_bound = scalar.assume %count32 [range(%count32, 0, 8192)] : i32
+  %count = index.cast %count_bound : i32 to index
+  %in_count = index.cmp ult, %span, %count : index
+  %packets = buffer.view %metadata[%c16o] : buffer -> view<[%spans]x9xi32>
+  %bspan = index.assume %span [lt(%span, %spans)] : index
+  %flags = view.load %packets[%bspan, 6] : view<[%spans]x9xi32> -> i32
+  %bits = scalar.andi %flags, %c1_i32 : i32
+  %selected = scalar.cmpi ne, %bits, %c0_i32 : i32
+  %length32 = view.load %packets[%bspan, 0] : view<[%spans]x9xi32> -> i32
+  %input32 = view.load %packets[%bspan, 4] : view<[%spans]x9xi32> -> i32
+  %last32 = scalar.addi %input32, %length32 : i32
+  %tok32 = scalar.subi %last32, %c1_i32 : i32
+  %tok_ok = scalar.cmpi sge, %tok32, %c0_i32 : i32
+  %tok_bound = scalar.assume %tok32 [range(%tok32, -1, 8191)] : i32
+  %tok_value = index.cast %tok_bound : i32 to index
+  %in_range = index.cmp ult, %tok_value, %tokens : index
+  %a = scalar.andi %in_count, %selected : i1
+  %b = scalar.andi %a, %tok_ok : i1
+  %live = scalar.andi %b, %in_range : i1
+  %row_value = scf.select %live, %tok_value, %c0 : index
+  %row = index.assume %row_value [lt(%row_value, %tokens)] : index
+  func.return %row, %live : index, i1
+}
+"""
+
+# Prefill GEMM tile order per port (A/B it: rows fastest reuses each weight tile across a chunk's row tiles, columns
+# fastest reuses each activation tile): cfg["gemm_n_fastest"] false = rows fastest. Muse-Glimmer-30B +4/+7/+6 % at
+# 2k/8k/32k; Qwen3.8-27B and Bolt tie; Flint -4 % at 8k. An explicit GEMM_N_FASTEST still wins.
+if "gemm_n_fastest" in CFG:
+    os.environ.setdefault("GEMM_N_FASTEST", "1" if CFG["gemm_n_fastest"] else "0")
+LAST_OUT_SAFE = r"g_row_scale_f16|g_gemm_\w+|g_mv_\w+|g_post_add_norm|g_silu_mul"   # row-local post-attention kernels
+ANCHOR_POST_ATTN = "  scf.if %gemm {\n    kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16)"
+
+
+def last_out_select_program(program):
+    """Apply last_out_select to the last trunk layer of the generated @llm_advance program (the text between the
+    last `// ---- layer` marker and the head) and append the gather/scatter kernels."""
+    end = program.find("\n  %head = command.parameter %weights") + 1
+    start = program.rfind("  // ---- layer ", 0, end) if end else -1
+    if start < 0 or ANCHOR_POST_ATTN not in program[start:end] or program[start:end].count(ANCHOR_POST_ATTN) != 1:
+        return program   # a kit whose last layer is not the starter's attention layer: unchanged
+    import re as _re
+    tail = program[start:end].split(ANCHOR_POST_ATTN, 1)[1]
+    other = {k for k in _re.findall(r"kernel\.launch @(\w+)", tail) if not _re.fullmatch(LAST_OUT_SAFE, k)}
+    if other:   # kernels that may index other per-token state (MoE routing, per-layer embeddings): unchanged
+        return program
+    return program[:start] + last_out_select(program[start:end]) + program[end:] + "\n" + ROWS_SELECT
+
+
+def last_out_select(text):
+    """llama.cpp's output-row selection for the last layer: on prefill-shaped epochs (%gemm) its attention output
+    projection, residual, FFN and final norm run on one row per span (the row the head reads) instead of every
+    token: gather those rows of %o / %x, run a renamed copy of the post-attention text on them, scatter the final
+    %h rows back. K/V of the last layer are still written for every token. The verify program (every drafted
+    token feeds the head) sets %outsel_on false."""
+    import re as _re
+    anchor = ANCHOR_POST_ATTN
+    head, tail = text.split(anchor, 1)
+    tail = anchor + tail
+    defs = set(_re.findall(r"(?m)^\s*((?:%\w+(?:, )?)+) = ", tail))
+    names = set()
+    for d in defs:
+        names.update(n.strip() for n in d.split(","))
+    ren = {n: n + "_os" for n in names}
+    ren.update({"%o": "%os", "%o16": "%os16", "%s_o": "%s_os", "%x": "%xs", "%y": "%ys", "%h": "%hs", "%h16": "%hs16",
+                "%s_h": "%s_hs", "%f": "%fs", "%f16": "%fs16", "%s_f": "%s_fs", "%fu": "%fus",
+                "%o16q": "%os16q", "%h16q": "%hs16q", "%f16q": "%fs16q",
+                "%t": "%ts", "%gemm": "%gemm_os", "%single": "%single_os", "%big": "%big_os"})
+    comp = _re.sub(r"%\w+", lambda m: ren.get(m.group(0), m.group(0)), tail)
+    sizes = (f"""  %outsel_on = scalar.constant true : i1
+  %outsel = scalar.andi %gemm, %outsel_on : i1
+  %ts = index.add %spans, %c0 : index
+  %c64_os = index.constant 64 : index
+  %c128_os = index.constant 128 : index
+  %gemm_os = index.cmp uge, %ts, %c64_os : index
+  %single_os = index.cmp eq, %ts, %c1 : index
+  %big_os = index.cmp uge, %ts, %c128_os : index
+  %xs_size = index.scale %ts, %row_bytes : index, offset -> offset
+  %os_size = index.scale %ts, %wide_bytes : index, offset -> offset
+  %fs_size = index.scale %ts, %ffn_bytes : index, offset -> offset
+  %ss_bytes = index.constant 8 : offset
+  %ss_size = index.scale %ts, %ss_bytes : index, offset -> offset
+  %h16s_bytes = index.constant {H * 2} : offset
+  %o16s_bytes = index.constant {QH * D * 2} : offset
+  %f16s_bytes = index.constant {FF * 2} : offset
+  %hs16_size = index.scale %ts, %h16s_bytes : index, offset -> offset
+  %os16_size = index.scale %ts, %o16s_bytes : index, offset -> offset
+  %fs16_size = index.scale %ts, %f16s_bytes : index, offset -> offset
+  %xs = buffer.alloca<global> align(256) %xs_size : buffer
+  %ys = buffer.alloca<global> align(256) %xs_size : buffer
+  %hs = buffer.alloca<global> align(256) %xs_size : buffer
+  %os = buffer.alloca<global> align(256) %os_size : buffer
+  %fs = buffer.alloca<global> align(256) %fs_size : buffer
+""" + ("  %fus = buffer.alloca<global> align(256) %fs_size : buffer\n" if MIXED_FFN else "") + """  %s_hs = buffer.alloca<global> align(256) %ss_size : buffer
+  %s_os = buffer.alloca<global> align(256) %ss_size : buffer
+  %s_fs = buffer.alloca<global> align(256) %ss_size : buffer
+  %hs16 = buffer.alloca<global> align(256) %hs16_size : buffer
+  %os16 = buffer.alloca<global> align(256) %os16_size : buffer
+  %fs16 = buffer.alloca<global> align(256) %fs16_size : buffer
+""")
+    gather = (f"""  %nQ_os = index.constant {QH * D} : index
+  %nH_os = index.constant {H} : index
+  kernel.launch @g_rows_gather[%spans](%spans, %t, %nQ_os, %metadata, %o, %os) : [index](index, index, index, buffer, buffer, buffer)
+  kernel.launch @g_rows_gather[%spans](%spans, %t, %nH_os, %metadata, %x, %xs) : [index](index, index, index, buffer, buffer, buffer)
+""")
+    scatter = "  kernel.launch @g_rows_scatter[%spans](%spans, %t, %nH_os, %metadata, %hs, %h) : [index](index, index, index, buffer, buffer, buffer)\n"
+    return (head + sizes + "  scf.if %outsel {\n" + gather + comp + scatter + "  } else {\n" + tail + "  }\n")
+
+
 MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
 
 
@@ -3017,6 +3214,7 @@ if __name__ == "__main__":
     out_dir = os.environ.get("LLM_OUT") or os.path.join(here, "out")
     os.makedirs(out_dir, exist_ok=True)
     program, head_fmt = model()  # first: records the mv / GEMM variants it launches
+    program = last_out_select_program(program) if LAST_OUT else program
     spec_kernels = ""
     if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too
         head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"

@@ -85,12 +85,11 @@ def dequant16(fmt, w, view_name, out):
       %{out}_scale_view = buffer.view %{w}[%{out}_block_origin] : buffer -> view<1xf16>
       %{out}_code_view = buffer.view %{w}[%{out}_code_origin] : buffer -> view<16xi8>
       %{out}_scale_half = view.load %{out}_scale_view[0] : view<1xf16> -> f16
-      %{out}_scale = scalar.extf %{out}_scale_half : f16 to f32
       %{out}_codes = vector.load %{out}_code_view[0] : view<16xi8> -> vector<16xi8>
-      %{out}_values = vector.sitofp %{out}_codes : vector<16xi8> to vector<16xf32>
-      %{out}_scales = vector.splat %{out}_scale : vector<16xf32>
-      %{out}_scaled = vector.mulf %{out}_values, %{out}_scales : vector<16xf32>
-      %{out} = vector.fptrunc %{out}_scaled : vector<16xf32> to vector<16xf16>'''
+      // q (8 bits) * d (f16) is exact in f32, so one f16 multiply rounds to the same value as f32 math + fptrunc.
+      %{out}_values = vector.sitofp %{out}_codes : vector<16xi8> to vector<16xf16>
+      %{out}_scales = vector.splat %{out}_scale_half : vector<16xf16>
+      %{out} = vector.mulf %{out}_values, %{out}_scales : vector<16xf16>'''
     if fmt == "q6_k":
         # Q6_K: value c of a superblock: half = c/128, j = (c%128)/32, l = c%32;
         # q = ((ql[half*64 + (j%2)*32 + l] >> 4*(j/2)) & 15) | (((qh[half*32 + l] >> 2j) & 3) << 4);
@@ -131,40 +130,42 @@ def dequant16(fmt, w, view_name, out):
       %{out}_qh_o = index.add %{out}_block_origin, %{out}_qh_off : offset
       %{out}_sc_o = index.add %{out}_block_origin, %{out}_sc_off : offset
       %{out}_d_o = index.add %{out}_block_origin, %{out}_d_bytes : offset
-      %{out}_ql_v = buffer.view %{w}[%{out}_ql_o] : buffer -> view<16xi8>
-      %{out}_qh_v = buffer.view %{w}[%{out}_qh_o] : buffer -> view<16xi8>
+      %{out}_ql_v = buffer.view %{w}[%{out}_ql_o] : buffer -> view<4xi32>
+      %{out}_qh_v = buffer.view %{w}[%{out}_qh_o] : buffer -> view<4xi32>
       %{out}_sc_v = buffer.view %{w}[%{out}_sc_o] : buffer -> view<1xi8>
       %{out}_d_v = buffer.view %{w}[%{out}_d_o] : buffer -> view<1xf16>
-      %{out}_ql = vector.load %{out}_ql_v[0] : view<16xi8> -> vector<16xi8>
-      %{out}_qh = vector.load %{out}_qh_v[0] : view<16xi8> -> vector<16xi8>
+      %{out}_ql = vector.load %{out}_ql_v[0] : view<4xi32> -> vector<4xi32>
+      %{out}_qh = vector.load %{out}_qh_v[0] : view<4xi32> -> vector<4xi32>
       %{out}_sc8 = view.load %{out}_sc_v[0] : view<1xi8> -> i8
       %{out}_dh = view.load %{out}_d_v[0] : view<1xf16> -> f16
       %{out}_s1 = index.mul %{out}_jh, %c4 : index
       %{out}_s2 = index.mul %{out}_j, %c2 : index
       %{out}_s1_32 = index.cast %{out}_s1 : index to i32
       %{out}_s2_32 = index.cast %{out}_s2 : index to i32
-      %{out}_s1_8 = scalar.trunci %{out}_s1_32 : i32 to i8
-      %{out}_s2_8 = scalar.trunci %{out}_s2_32 : i32 to i8
-      %{out}_s1_v = vector.splat %{out}_s1_8 : vector<16xi8>
-      %{out}_s2_v = vector.splat %{out}_s2_8 : vector<16xi8>
-      %{out}_m15 = vector.constant 15 : vector<16xi8>
-      %{out}_m3 = vector.constant 3 : vector<16xi8>
-      %{out}_f4 = vector.constant 4 : vector<16xi8>
-      %{out}_lo_s = vector.shrui %{out}_ql, %{out}_s1_v : vector<16xi8>
-      %{out}_lo = vector.andi %{out}_lo_s, %{out}_m15 : vector<16xi8>
-      %{out}_hi_s = vector.shrui %{out}_qh, %{out}_s2_v : vector<16xi8>
-      %{out}_hi_m = vector.andi %{out}_hi_s, %{out}_m3 : vector<16xi8>
-      %{out}_hi = vector.shli %{out}_hi_m, %{out}_f4 : vector<16xi8>
-      %{out}_q = vector.ori %{out}_lo, %{out}_hi : vector<16xi8>
-      %{out}_codes = vector.uitofp %{out}_q : vector<16xi8> to vector<16xf32>
-      %{out}_bias = vector.constant 32.0 : vector<16xf32>
-      %{out}_centered = vector.subf %{out}_codes, %{out}_bias : vector<16xf32>
+      %{out}_s1_v = vector.splat %{out}_s1_32 : vector<4xi32>
+      %{out}_s2_v = vector.splat %{out}_s2_32 : vector<4xi32>
+      %{out}_m15 = vector.constant 252645135 : vector<4xi32>
+      %{out}_m3 = vector.constant 50529027 : vector<4xi32>
+      %{out}_f4 = vector.constant 4 : vector<4xi32>
+      // Word-wide bit work (4 codes per i32): a byte's bits shifted in from its neighbour are masked off.
+      %{out}_lo_s = vector.shrui %{out}_ql, %{out}_s1_v : vector<4xi32>
+      %{out}_lo = vector.andi %{out}_lo_s, %{out}_m15 : vector<4xi32>
+      %{out}_hi_s = vector.shrui %{out}_qh, %{out}_s2_v : vector<4xi32>
+      %{out}_hi_m = vector.andi %{out}_hi_s, %{out}_m3 : vector<4xi32>
+      %{out}_hi = vector.shli %{out}_hi_m, %{out}_f4 : vector<4xi32>
+      %{out}_qw = vector.ori %{out}_lo, %{out}_hi : vector<4xi32>
+      %{out}_q = vector.bitcast %{out}_qw : vector<4xi32> to vector<16xi8>
+      %{out}_codes = vector.uitofp %{out}_q : vector<16xi8> to vector<16xf16>
       %{out}_d = scalar.extf %{out}_dh : f16 to f32
       %{out}_scf = scalar.sitofp %{out}_sc8 : i8 to f32
       %{out}_scale = scalar.mulf %{out}_d, %{out}_scf : f32
-      %{out}_scales = vector.splat %{out}_scale : vector<16xf32>
-      %{out}_scaled = vector.mulf %{out}_centered, %{out}_scales : vector<16xf32>
-      %{out} = vector.fptrunc %{out}_scaled : vector<16xf32> to vector<16xf16>'''
+      %{out}_bias32 = scalar.constant -32.0 : f32
+      %{out}_offset = scalar.mulf %{out}_scale, %{out}_bias32 : f32
+      %{out}_scale_h = scalar.fptrunc %{out}_scale : f32 to f16
+      %{out}_offset_h = scalar.fptrunc %{out}_offset : f32 to f16
+      %{out}_scales = vector.splat %{out}_scale_h : vector<16xf16>
+      %{out}_offsets = vector.splat %{out}_offset_h : vector<16xf16>
+      %{out} = vector.fmaf %{out}_codes, %{out}_scales, %{out}_offsets : vector<16xf16>'''
     if fmt == "q5_k":
         # Q5_K: 176-byte superblocks = Q4_K's 16-byte header (d, dmin, 6-bit scales/mins),
         # qh[32] (bit g of qh[l] is value l of group g's fifth bit), then qs[128] as in Q4_K.
@@ -199,17 +200,19 @@ def dequant16(fmt, w, view_name, out):
       %{out}_qh_half_bytes = index.cast %{out}_qh_half : index to offset
       %{out}_qh_origin = index.add %{out}_block_origin, %sixteen : offset
       %{out}_qh_at = index.add %{out}_qh_origin, %{out}_qh_half_bytes : offset
-      %{out}_qh_view = buffer.view %{w}[%{out}_qh_at] : buffer -> view<16xi8>
-      %{out}_qh = vector.load %{out}_qh_view[0] : view<16xi8> -> vector<16xi8>
+      %{out}_qh_view = buffer.view %{w}[%{out}_qh_at] : buffer -> view<4xi32>
+      %{out}_qh = vector.load %{out}_qh_view[0] : view<4xi32> -> vector<4xi32>
       %{out}_g32 = index.cast %{out}_group : index to i32
-      %{out}_g8 = scalar.trunci %{out}_g32 : i32 to i8
-      %{out}_gv = vector.splat %{out}_g8 : vector<16xi8>
-      %{out}_one = vector.constant 1 : vector<16xi8>
-      %{out}_four = vector.constant 4 : vector<16xi8>
-      %{out}_hb_s = vector.shrui %{out}_qh, %{out}_gv : vector<16xi8>
-      %{out}_hb = vector.andi %{out}_hb_s, %{out}_one : vector<16xi8>
-      %{out}_hi = vector.shli %{out}_hb, %{out}_four : vector<16xi8>
-      %{out}_bytes = vector.ori %{out}_low, %{out}_hi : vector<16xi8>
+      %{out}_gv = vector.splat %{out}_g32 : vector<4xi32>
+      %{out}_one = vector.constant 16843009 : vector<4xi32>
+      %{out}_four = vector.constant 4 : vector<4xi32>
+      // Word-wide: bit g of every qh byte (0x01010101 mask after the shift), moved to bit 4 of the code byte.
+      %{out}_hb_s = vector.shrui %{out}_qh, %{out}_gv : vector<4xi32>
+      %{out}_hb = vector.andi %{out}_hb_s, %{out}_one : vector<4xi32>
+      %{out}_hi = vector.shli %{out}_hb, %{out}_four : vector<4xi32>
+      %{out}_lw = vector.bitcast %{out}_low : vector<16xi8> to vector<4xi32>
+      %{out}_bw = vector.ori %{out}_lw, %{out}_hi : vector<4xi32>
+      %{out}_bytes = vector.bitcast %{out}_bw : vector<4xi32> to vector<16xi8>
       %{out}_codes = vector.uitofp %{out}_bytes : vector<16xi8> to vector<16xf16>
       %{out}_scale_h = scalar.fptrunc %{out}_scale : f32 to f16
       %{out}_neg_min = scalar.negf %{out}_minimum : f32
@@ -617,6 +620,277 @@ def gemm_big(fmt, mode, tn=None, suffix=""):
     L.append("  kernel.return\n}\n")
     return "\n".join(L)
 
+
+
+def gemm_q8(fmt, mode):
+    """llama.cpp-style int8 prefill GEMM (mmq): Q8_1 activations (g_quant_q8: int8 codes per 32 values, then a
+    (d, sum q) table) times Q4_K weight codes on int8 WMMA, f32 per 32-value block:
+        y += (sum_j qw_j qx_j) * dx * (d sc) - (dx sum_j qx_j) * (dmin m)      (llama.cpp vec_dot_q4_K_q8_1)
+    128-row tiles (rows multiple of 128); store: 128 x 128 outputs, swiglu: 128 x 64 of each of gate and up.
+    A 64-wide K step is one 32-byte page of a Q4_K superblock: its low nibbles are group 2p, high nibbles 2p+1.
+    Waves: 4 (32 rows) x 2 (half the output columns); a lane's result column is lane % 16, its 8 elements rows
+    2i + lane / 16 (the RDNA3 wave32 result layout), so the per-row activation scales are an 8-wide gather.
+    No row scale: the activations are quantized from the f32 input itself."""
+    assert fmt == "q4_k"
+    two_w = mode == "swiglu"
+    TN = 64 if two_w else 128
+    WC = TN // 2                    # output columns per wave (per weight)
+    CF = WC // 16                   # 16-column fragments per wave per weight
+    weights = ["w", "w2"] if two_w else ["w"]
+    name = f"{PREFIX}_gemm_{fmt}_{mode}_q8"
+    XS = 80                         # padded LDS row (bytes) for 64 int8 codes
+    wargs = ", ".join(f"%{w}: buffer" for w in weights)
+    L = []
+    A = L.append
+    A(f"""kernel.def export("{name}") @{name}(%rows: index, %n: index) {{
+  %c1 = index.constant 1 : index
+  %c128 = index.constant 128 : index
+  %tn = index.constant {TN} : index
+  %c256 = index.constant 256 : index
+  %row_tiles = index.div %rows, %c128 : index
+  %out_tiles = index.div %n, %tn : index
+  kernel.launch.config workgroups(%out_tiles, %row_tiles, %c1) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%rows_arg: index, %k_arg: index, %n_arg: index, %xq: buffer, {wargs}, %y: buffer) {{
+  %rows = index.assume %rows_arg [range(%rows_arg, 128, 8192), multiple_of(%rows_arg, 128)] : index
+  %k = index.assume %k_arg [range(%k_arg, 512, 65536), multiple_of(%k_arg, 512)] : index
+  %n = index.assume %n_arg [range(%n_arg, {TN}, 262144), multiple_of(%n_arg, {TN})] : index
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c7 = index.constant 7 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %c256 = index.constant 256 : index
+  %tn = index.constant {TN} : index
+  %row_tile_count = index.div %rows, %c128 : index
+  %out_tile_count = index.div %n, %tn : index
+  %out_group_id = kernel.workgroup.id<x> : index
+  %row_group_id = kernel.workgroup.id<y> : index
+  %row_group = index.assume %row_group_id [lt(%row_group_id, %row_tile_count)] : index
+  %out_group = index.assume %out_group_id [lt(%out_group_id, %out_tile_count)] : index
+  %workitem_id = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem_id [range(%workitem_id, 0, 255)] : index
+  %subgroup = kernel.subgroup.id : index
+  %sg = index.assume %subgroup [range(%subgroup, 0, 7)] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %lane_col = index.rem %lane, %c16 : index
+  %lane_half = index.div %lane, %c16 : index
+  %wave_row_group = index.div %sg, %c2 : index
+  %wave_col_group = index.rem %sg, %c2 : index
+  %wave_row_value = index.mul %wave_row_group, %c32 : index
+  %wave_row = index.assume %wave_row_value [range(%wave_row_value, 0, 96)] : index
+  %cwc = index.constant {WC} : index
+  %wave_col_value = index.mul %wave_col_group, %cwc : index
+  %wave_col = index.assume %wave_col_value [range(%wave_col_value, 0, {TN - WC})] : index
+  %row_origin = index.mul %row_group, %c128 : index
+  %out_origin = index.mul %out_group, %tn : index
+  %groups = index.div %k, %c32 : index
+  %blocks = index.div %k, %c256 : index
+  %block_bytes = index.constant 144 : offset
+  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
+  // Activations: codes [rows][groups][32] i8, then at byte rows*k: [rows][groups] x (d, sum q) f32.
+  %xc_view = buffer.view %xq[%origin] : buffer -> view<[%rows]x[%groups]x8xi32>
+  %k_bytes = index.cast %k : index to offset
+  %xm_off = index.scale %rows, %k_bytes : index, offset -> offset
+  %xm_view = buffer.view %xq[%xm_off] : buffer -> view<[%rows]x[%groups]x2xf32>
+  // LDS: X codes [128][80 B], W codes per weight [{TN}][80 B], dx/sx [2 blocks][128], W (scale, min) [2][{TN}][2].
+  %xs_bytes = index.constant {128 * XS} : offset
+  %xs = buffer.alloca<workgroup> align(16) %xs_bytes : buffer
+  %xs_view = buffer.view %xs[%origin] : buffer -> view<128x{XS // 4}xi32>
+  %xs8 = buffer.view %xs[%origin] : buffer -> view<128x{XS}xi8>
+  %xd_bytes = index.constant 1024 : offset
+  %xd = buffer.alloca<workgroup> align(16) %xd_bytes : buffer
+  %xd_view = buffer.view %xd[%origin] : buffer -> view<2x128xf32>
+  %xsum = buffer.alloca<workgroup> align(16) %xd_bytes : buffer
+  %xsum_view = buffer.view %xsum[%origin] : buffer -> view<2x128xf32>
+  %xd0 = buffer.view %xd[%origin] : buffer -> view<128xf32>
+  %xs0 = buffer.view %xsum[%origin] : buffer -> view<128xf32>
+  %half_kb = index.constant 512 : offset
+  %xd1 = buffer.view %xd[%half_kb] : buffer -> view<128xf32>
+  %xs1 = buffer.view %xsum[%half_kb] : buffer -> view<128xf32>
+  // Min term (dmin m)(dx sum qx) folded with one f16 WMMA per tile every 16 blocks: ring buffers, f16.
+  %sxr_bytes = index.constant {128 * 48} : offset
+  %sxr = buffer.alloca<workgroup> align(16) %sxr_bytes : buffer
+  %sxr_view = buffer.view %sxr[%origin] : buffer -> view<128x24xf16>
+  %mnr_bytes = index.constant {TN * 48} : offset
+  %ws_bytes = index.constant {TN * XS} : offset
+  %wm_bytes = index.constant {TN * 16} : offset""")
+    for w in weights:
+        A(f"""  %{w}_s = buffer.alloca<workgroup> align(16) %ws_bytes : buffer
+  %{w}_sv = buffer.view %{w}_s[%origin] : buffer -> view<{TN}x{XS // 4}xi32>
+  %{w}_s8 = buffer.view %{w}_s[%origin] : buffer -> view<{TN}x{XS}xi8>
+  %{w}_m = buffer.alloca<workgroup> align(16) %wm_bytes : buffer
+  %{w}_mv = buffer.view %{w}_m[%origin] : buffer -> view<{TN}x2x2xf32>
+  %{w}_mr = buffer.alloca<workgroup> align(16) %mnr_bytes : buffer
+  %{w}_mrv = buffer.view %{w}_mr[%origin] : buffer -> view<{TN}x24xf16>""")
+    # staging assignment: X: thread t -> row t/2, half t%2 (32 codes + one (d, s)).
+    # W: store: thread t -> row t/2, nibble half t%2; swiglu: threads 0-127 gate, 128-255 up, row (t%128)/2.
+    A(f"""  %x_srow = index.div %workitem, %c2 : index
+  %x_half = index.rem %workitem, %c2 : index
+  %x_grow_value = index.add %row_origin, %x_srow : index
+  %x_grow = index.assume %x_grow_value [lt(%x_grow_value, %rows)] : index
+  %x_col_words = index.mul %x_half, %c8 : index
+  %w_t = index.rem %workitem, %c_wt : index
+  %w_srow_value = index.div %w_t, %c2 : index
+  %w_srow = index.assume %w_srow_value [range(%w_srow_value, 0, {TN - 1})] : index
+  %w_half = index.rem %w_t, %c2 : index
+  %w_grow_value = index.add %out_origin, %w_srow : index
+  %w_grow = index.assume %w_grow_value [lt(%w_grow_value, %n)] : index
+  %w_row_origin = index.scale %w_grow, %row_bytes : index, offset -> offset
+  %w_shift_bits = index.mul %w_half, %c4 : index
+  %w_shift_i = index.cast %w_shift_bits : index to i32
+  %w_shift = vector.splat %w_shift_i : vector<8xi32>
+  %nib = vector.constant 252645135 : vector<8xi32>
+  %w_col_words = index.mul %w_half, %c8 : index""")
+    if two_w:
+        A("  %c128i = index.constant 128 : index\n  %is_up = index.cmp uge, %workitem, %c128i : index")
+    A(f"""  %schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %zf = vector.constant 0.0 : vector<8xf32>
+  %finit = vector.fragment<init> %zf shape [%c16, %c16] : vector<8xf32>
+  %zi = vector.constant 0 : vector<8xi32>
+  %iinit = vector.fragment<init> %zi shape [%c16, %c16] : vector<8xi32>
+  %two_i = scalar.constant 2 : i32
+  %k_steps = index.div %k, %c64 : index""")
+    accs = [f"a{wi}r{r}c{c}" for wi in range(len(weights)) for r in range(2) for c in range(CF)]
+    V8 = "vector<8xf32>"
+    A("  " + ", ".join(f"%o{a}" for a in accs) + " = scf.for %step = [%c0 to %k_steps step %c1](" +
+      ", ".join(f"%i{a} = %finit : {V8}" for a in accs) + ") -> (" + ", ".join(V8 for _ in accs) + ") {")
+    # ---- stage X
+    A(f"""    %g0 = index.mul %step, %c2 : index
+    %xg_value = index.add %g0, %x_half : index
+    %xg = index.assume %xg_value [lt(%xg_value, %groups)] : index
+    %xcodes = vector.load %xc_view[%x_grow, %xg, %c0] : view<[%rows]x[%groups]x8xi32> -> vector<8xi32>
+    vector.store %xcodes, %xs_view[%x_srow, %x_col_words] : vector<8xi32>, view<128x{XS // 4}xi32>
+    %xmeta = vector.load %xm_view[%x_grow, %xg, %c0] : view<[%rows]x[%groups]x2xf32> -> vector<2xf32>
+    %xdv = vector.extract %xmeta[0] : vector<2xf32> -> f32
+    %xqs = vector.extract %xmeta[1] : vector<2xf32> -> f32
+    %xsv = scalar.mulf %xdv, %xqs : f32
+    %xsr = index.assume %x_srow [range(%x_srow, 0, 127)] : index
+    view.store %xdv, %xd_view[%x_half, %xsr] : f32, view<2x128xf32>
+    %ring_a = index.mul %step, %c2 : index
+    %ring_b = index.add %ring_a, %x_half : index
+    %ring_x = index.rem %ring_b, %c16 : index
+    %xsvh = scalar.fptrunc %xsv : f32 to f16
+    view.store %xsvh, %sxr_view[%xsr, %ring_x] : f16, view<128x24xf16>
+    // ---- stage W (Q4_K page p = step % 4 of superblock step / 4)
+    %super = index.div %step, %c4 : index
+    %page = index.rem %step, %c4 : index
+    %super_bytes = index.scale %super, %block_bytes : index, offset -> offset
+    %page_words_a = index.mul %page, %c8 : index
+    %group_a = index.mul %page, %c2 : index
+    %group_value = index.add %group_a, %w_half : index
+    %group = index.assume %group_value [range(%group_value, 0, 7)] : index""")
+    def stage_w(w):
+        return f"""      %{w}_bo = index.add %w_row_origin, %super_bytes : offset
+      %{w}_hv = buffer.view %{w}[%{w}_bo] : buffer -> view<4xi32>
+      %{w}_hdr = vector.load %{w}_hv[0] : view<4xi32> -> vector<4xi32>
+      %{w}_sc, %{w}_mn = func.call {META}(%{w}_hdr, %group) : (vector<4xi32>, index) -> (f32, f32)
+      %{w}_po = index.add %{w}_bo, %sixteen : offset
+      %{w}_pv = buffer.view %{w}[%{w}_po] : buffer -> view<32xi32>
+      %{w}_pk = vector.load %{w}_pv[%page_words_a] : view<32xi32> -> vector<8xi32>
+      %{w}_sh = vector.shrui %{w}_pk, %w_shift : vector<8xi32>
+      %{w}_cd = vector.andi %{w}_sh, %nib : vector<8xi32>
+      vector.store %{w}_cd, %{w}_sv[%w_srow, %w_col_words] : vector<8xi32>, view<{TN}x{XS // 4}xi32>
+      %{w}_meta = vector.from_elements %{w}_sc, %{w}_mn : vector<2xf32>
+      vector.store %{w}_meta, %{w}_mv[%w_srow, %w_half, %c0] : vector<2xf32>, view<{TN}x2x2xf32>
+      %{w}_nmn = scalar.negf %{w}_mn : f32
+      %{w}_nmnh = scalar.fptrunc %{w}_nmn : f32 to f16
+      %{w}_ra = index.mul %step, %c2 : index
+      %{w}_rb = index.add %{w}_ra, %w_half : index
+      %{w}_rc = index.rem %{w}_rb, %c16 : index
+      view.store %{w}_nmnh, %{w}_mrv[%w_srow, %{w}_rc] : f16, view<{TN}x24xf16>"""
+    if two_w:
+        A("    scf.if %is_up {\n" + stage_w("w2") + "\n    } else {\n" + stage_w("w") + "\n    }")
+    else:
+        A("    scf.if %true_c {\n" + stage_w("w") + "\n    }")
+    A("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
+    cur = {a: f"%i{a}" for a in accs}
+    for b in range(2):     # 32-value block within the step
+        xdv, xsv = ("%xd0", "%xs0") if b == 0 else ("%xd1", "%xs1")
+        A("".join(f"    %lc{b}{kk} = index.constant {b * 32 + kk * 16} : index\n" for kk in range(2)).rstrip("\n"))
+        for r in range(2):
+            A(f"""    %rb{b}{r}_a = index.constant {r * 16} : index
+    %rb{b}{r}_b = index.add %wave_row, %rb{b}{r}_a : index
+    %rb{b}{r}_c = index.add %rb{b}{r}_b, %lane_half : index
+    %rb{b}{r} = index.assume %rb{b}{r}_c [range(%rb{b}{r}_c, 0, 113)] : index
+    %dx{b}{r} = vector.gather {xdv}[%rb{b}{r}][%gather_off] : view<128xf32>, vector<8xindex> -> vector<8xf32>""")
+            for kk in range(2):
+                col = b * 32 + kk * 16
+                A(f"""    %lr{b}{r}{kk}_a = index.add %wave_row, %rb{b}{r}_a : index
+    %lr{b}{r}{kk} = index.add %lr{b}{r}{kk}_a, %lane_col : index
+    %lb{b}{r}{kk} = vector.load %xs8[%lr{b}{r}{kk}, %lc{b}{kk}] : view<128x{XS}xi8> -> vector<16xi8>
+    %lp{b}{r}{kk} = vector.bitcast %lb{b}{r}{kk} : vector<16xi8> to vector<4xi32>
+    %lf{b}{r}{kk} = vector.fragment<lhs> %lp{b}{r}{kk} shape [%c16, %c16] using {{schema = %schema : encoding<schema>}} : vector<4xi32>""")
+        for wi, w in enumerate(weights):
+            for c in range(CF):
+                A(f"""    %wc{b}{wi}{c}_a = index.constant {c * 16} : index
+    %wc{b}{wi}{c}_b = index.add %wave_col, %wc{b}{wi}{c}_a : index
+    %wc{b}{wi}{c} = index.add %wc{b}{wi}{c}_b, %lane_col : index
+    %wcb{b}{wi}{c} = index.assume %wc{b}{wi}{c} [range(%wc{b}{wi}{c}, 0, {TN - 1})] : index
+    %wsc{b}{wi}{c} = view.load %{w}_mv[%wcb{b}{wi}{c}, %c{b}_idx, %c0] : view<{TN}x2x2xf32> -> f32
+    %wscv{b}{wi}{c} = vector.splat %wsc{b}{wi}{c} : vector<8xf32>""")
+                for kk in range(2):
+                    col = b * 32 + kk * 16
+                    A(f"""    %rb{b}{wi}{c}{kk} = vector.load %{w}_s8[%wcb{b}{wi}{c}, %lc{b}{kk}] : view<{TN}x{XS}xi8> -> vector<16xi8>
+    %rp{b}{wi}{c}{kk} = vector.bitcast %rb{b}{wi}{c}{kk} : vector<16xi8> to vector<4xi32>
+    %rf{b}{wi}{c}{kk} = vector.fragment<rhs> %rp{b}{wi}{c}{kk} shape [%c16, %c16] using {{schema = %schema : encoding<schema>}} : vector<4xi32>""")
+                for r in range(2):
+                    a = f"a{wi}r{r}c{c}"
+                    A(f"""    %im{b}{a}0 = vector.mma %lf{b}{r}0, %rf{b}{wi}{c}0, %iinit : vector<4xi32>, vector<4xi32>, vector<8xi32>
+    %im{b}{a}1 = vector.mma %lf{b}{r}1, %rf{b}{wi}{c}1, %im{b}{a}0 : vector<4xi32>, vector<4xi32>, vector<8xi32>
+    %fm{b}{a} = vector.sitofp %im{b}{a}1 : vector<8xi32> to vector<8xf32>
+    %fx{b}{a} = vector.mulf %fm{b}{a}, %dx{b}{r} : vector<8xf32>
+    %f1{b}{a} = vector.fmaf %fx{b}{a}, %wscv{b}{wi}{c}, {cur[a]} : vector<8xf32>""")
+                    cur[a] = f"%f1{b}{a}"
+    A("    %step_in8 = index.rem %step, %c8 : index\n    %fold = index.cmp eq, %step_in8, %c7 : index")
+    A("    " + ", ".join(f"%mf{a}" for a in accs) + " = scf.if %fold -> (" + ", ".join(V8 for _ in accs) + ") {")
+    for r in range(2):
+        A(f"""      %mr{r}_a = index.constant {r * 16} : index
+      %mr{r} = index.add %wave_row, %mr{r}_a : index
+      %ml{r} = vector.fragment.load<lhs> %sxr_view[%mr{r}, %c0] shape [%c16, %c16] : view<128x24xf16> -> vector<16xf16>""")
+    for wi, w in enumerate(weights):
+        for c in range(CF):
+            A(f"""      %mc{wi}{c}_a = index.constant {c * 16} : index
+      %mc{wi}{c}_b = index.add %wave_col, %mc{wi}{c}_a : index
+      %mc{wi}{c} = index.add %mc{wi}{c}_b, %lane_col : index
+      %mcv{wi}{c} = vector.load %{w}_mrv[%mc{wi}{c}, %c0] : view<{TN}x24xf16> -> vector<16xf16>
+      %mcf{wi}{c} = vector.fragment<rhs> %mcv{wi}{c} shape [%c16, %c16] : vector<16xf16>""")
+            for r in range(2):
+                a = f"a{wi}r{r}c{c}"
+                A(f"      %mm{a} = vector.mma %ml{r}, %mcf{wi}{c}, {cur[a]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
+    A("      scf.yield " + ", ".join(f"%mm{a}" for a in accs) + " : " + ", ".join(V8 for _ in accs))
+    A("    } else {\n      scf.yield " + ", ".join(cur[a] for a in accs) + " : " + ", ".join(V8 for _ in accs) + "\n    }")
+    A("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
+    A("    scf.yield " + ", ".join(f"%mf{a}" for a in accs) + " : " + ", ".join(V8 for _ in accs) + "\n  }")
+    A(f"""  %c4o = index.constant 4 : offset
+  %y_layout = encoding.layout.strided [%n, %c1] : encoding<layout>
+  %tile_first = index.madd %row_origin, %n, %out_origin : index
+  %tile_offset = index.scale %tile_first, %c4o : index, offset -> offset
+  %y_view = buffer.view %y[%tile_offset] : buffer -> view<128x{TN}xf32, %y_layout>""")
+    for r in range(2):
+        for c in range(CF):
+            A(f"""  %yr{r}{c}_a = index.constant {r * 16} : index
+  %yr{r}{c} = index.add %wave_row, %yr{r}{c}_a : index
+  %yc{r}{c}_a = index.constant {c * 16} : index
+  %yc{r}{c} = index.add %wave_col, %yc{r}{c}_a : index""")
+            if two_w:
+                A(f"""  %sg{r}{c} = vector.siluf<afn> %oa0r{r}c{c} : vector<8xf32>
+  %v{r}{c} = vector.mulf %sg{r}{c}, %oa1r{r}c{c} : vector<8xf32>""")
+            else:
+                A(f"  %v{r}{c} = vector.addf %oa0r{r}c{c}, %zf : vector<8xf32>")
+            A(f"  vector.fragment.store<result> %v{r}{c}, %y_view[%yr{r}{c}, %yc{r}{c}] shape [%c16, %c16] : vector<8xf32>, view<128x{TN}xf32, %y_layout>")
+    A("  kernel.return\n}\n")
+    t = "\n".join(L)
+    consts = ("  %sixteen = index.constant 16 : offset\n  %true_c = scalar.constant true : i1\n  %c0_idx = index.constant 0 : index\n"
+              "  %c1_idx = index.constant 1 : index\n  %c_wt = index.constant " + str(2 * TN) + " : index\n"
+              "  %gather_off = vector.iota %c0 step %c2 : vector<8xindex>\n")
+    return t.replace("  %tn = index.constant " + str(TN) + " : index\n  %row_tile_count", consts + "  %tn = index.constant " + str(TN) + " : index\n  %row_tile_count", 1)
 
 if __name__ == "__main__":
     out = [f"// Generated by gen_gemm.py: {PREFIX} prefill WMMA GEMMs over GGUF weights.\n"]
