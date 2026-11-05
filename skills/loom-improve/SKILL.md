@@ -143,7 +143,9 @@ skill (hardware speed, model size, upstream SDK/llama.cpp bugs): report it with 
 numbers, gates, friction list, deliverables), the tools and sources allowed, and the boundaries. A
 vague brief produced duplicated work and contaminated results.
 - Fresh general-purpose agent, skills from a frozen snapshot, its own install root, work dir, ports
-  and state dirs. Isolated trials: no shared caches beyond the HF and pip caches.
+  and state dirs. Isolated trials: no shared caches beyond the HF and pip caches. TRIAL dirs live on
+  disk (e.g. `~/lt/trials/NAME`), never under `/tmp` (tmpfs), and launch inside a memory-capped
+  `systemd-run --user --scope`.
 - **Contamination:** forbid reading the skills repo, other trials and old work dirs, and require the
   same of any subagent it spawns (a trial's chat subagent once read the working branch).
 - Instrumentation: `phases.log` with epoch timestamps per phase and `#` friction notes.
@@ -181,6 +183,9 @@ the prompt is near-deterministic for that model, or llama.cpp disagreeing with i
 
 ## 6. Pitfalls that cost real time (don't repeat them)
 
+- Big files in `/tmp` (tmpfs: RAM) and model jobs without a memory-capped scope (`loom` hard rules):
+  leftover kernel-test dumps plus a 27B tune got systemd-oomd to kill the editor and every session in
+  it. Trial work dirs go on disk; clean dumps and ablation packages as you go.
 - Editing a script while a trial executes it (use snapshots). `pkill -f`/`pgrep -f` matching your own
   shell (kill by PID file). Waiting on notifications instead of watching liveness.
 - Running perf or A/B while another measurement runs (qualify stages 4/6, finalize stage 1).

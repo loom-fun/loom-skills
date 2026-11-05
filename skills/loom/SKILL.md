@@ -147,6 +147,17 @@ Read it from there if it isn't in your skill list.
   `MemAvailable` in /proc/meminfo exceeds that model's weights + KV + 16 GiB: a second flint
   llama-server next to a 79 GB Loom server ran the machine out of RAM and the OOM killer took the
   desktop session.
+- **/tmp is RAM too.** `findmnt -no FSTYPE /tmp` prints `tmpfs` on these boxes, and Claude's scratchpad
+  lives under `/tmp/claude-*`: every file there is held in memory, charged to the session that wrote
+  it. Keep packages, GGUF copies, kernel-test dumps (`make_kernel_tests.py` writes ~1.7 GiB of
+  embedding/head tables per 27B test dir) and anything over ~100 MB in a work dir on disk, not the
+  scratchpad. Delete a test dir's `.npy` dumps once its tests pass and an ablation package once its number
+  is recorded. Before serving, check `du -sh` of the scratchpad as well as `MemAvailable`.
+- **Run long tunes, gate runs and servers in their own memory-capped scope:**
+  `systemd-run --user --scope -p MemoryMax=<weights+KV+8G> CMD`. When RAM runs out, systemd-oomd
+  kills the biggest cgroup: without a scope that is the editor/terminal holding every Claude session.
+  A Qwen3.8-27B `tune.py` (52 GB server) on top of a 21 GB scratchpad of kernel-test dumps got the
+  whole VS Code scope (92 GB, all sessions) killed; rerun in its own scope, it finished.
 - **Always pass `--memory_bytes`** to `loom-serve` (weights + KV pool + ~2 GiB
   workspace). Too small → HTTP 503 "retained state leaves insufficient completion
   capacity". Several models can share one budget with `--parameter_idle_ms=60000`.

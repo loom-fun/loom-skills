@@ -18,7 +18,9 @@ spawn the same restriction.
 
 ENVIRONMENT CONSTRAINTS:
 - Install root: LOOM_ROOT={TRIAL}/root . Create it fresh with the loom-setup install script. Do not use ~/loom.
-- Work dir: {TRIAL}/work . Put LOOM_SERVE_STATE and LLAMACPP_STATE inside it.
+- Work dir: {TRIAL}/work . Put LOOM_SERVE_STATE and LLAMACPP_STATE inside it. Write packages, test
+  dumps and any file over ~100 MB there, not to /tmp or your scratchpad (tmpfs: it uses RAM the GPU
+  shares). Delete kernel-test `.npy` dumps once their tests pass.
 - Ports: Loom {LOOM_PORT} (and the next 9 for variants), llama.cpp {LLAMA_PORT} (and the next 9).
   Check they are free. Other trials may be running on other ports: leave their processes alone.
 - llama.cpp: the skills download the latest lemonade-sdk/llamacpp-rocm release themselves (pre-approved);
