@@ -169,13 +169,14 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - `prefill_capacity` 4096 helps MoE prefill: larger expert buckets mean fuller GEMM tiles. build.py now
   defaults MoE configs (`cfg["moe"]`) to 4096. Flint (256 experts, top-6: ~24 tokens per expert in a 1024
   chunk, 64-row tiles ~37 % full; the expert GEMMs were 85 % of prefill): 2k/8k/32k +22/+38/+28 % vs 1024
-  (2048: +25/+27/+22 %). Dense models gain little beyond 1024–2048.
+  (2048: +25/+27/+22 %). The price is short prompts: a ~1k-token prompt prefills 29 % slower at 4096 (22 % at
+  2048) than at 1024, a fixed per-epoch cost not yet attributed. Dense models gain little beyond 1024–2048.
 
 ### Tile order per port (`cfg["gemm_n_fastest"]`)
 - Columns fastest (the default) reuses each activation tile; rows fastest reuses each weight tile across
   the chunk's row tiles (gufo's activation-panel grouping is the same idea). It is shape dependent, so the
-  reviewed cfg carries the winner: Muse-Glimmer-30B rows fastest +4/+7/+6 % at 2k/8k/32k; Qwen3.8-27B and
-  Bolt tie; Flint -4 % at 8k.
+  reviewed cfg carries the winner: Muse-Glimmer-30B rows fastest +4 to +12 % (three server sessions: two wins,
+  one tie; never a loss); Qwen3.8-27B and Bolt tie; Flint -4 % at 8k. Repeat the A/B across sessions.
 
 ## Did not help
 - **64-key flash tiles.** Register pressure; occupancy dropped.
