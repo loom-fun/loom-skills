@@ -48,7 +48,7 @@ RD = CFG.get("rope_dims") or D            # rotary dims (partial RoPE rotates th
 assert RD % 64 == 0 and RD <= D, "rope_dims must be a multiple of 64"
 assert QH % KVH == 0 and G <= 16, "need heads % kv_heads == 0 and at most 16 query heads per KV head"
 assert HG <= 256 and H % 32 == 0, "hidden must be a multiple of 32 and at most 8192"
-UNROLL = 16
+UNROLL = int(os.environ.get("ATTN_UNROLL", "16"))   # keys per decode-attention block
 POS_BYTES = KVH * D * 2                   # F16 K (or V) bytes per position
 WINDOW = CFG.get("sliding_window") or 0   # keys kept by sliding layers (0: none)
 GATE = CFG.get("attn_gate", False)       # True: separate attn_gate tensor; "fused_q": attn_q packs [q | gate] per head
@@ -667,26 +667,32 @@ def iq_decode(fmt, wi, w, ok, o, within):
       scf.yield %v, %a""" + (", %b" if two else "") + f""" : {rt}
     }} else {{
       scf.yield %zero32i8, %zero_f""" + (", %zero_f" if two else "") + f""" : {rt}
-    }}""")
+    }}""" + "".join(f"\n    %wk{wi}_{k} = vector.slice %wq{wi}[{4 * k}] : vector<32xi8> -> vector<4xi8>" for k in range(8)))
 
 
 def iq_dot(fmt, wi, j, out):
     """ACT_Q8: this lane's contribution of weight group %wq{wi} to token j (int8 codes %q{j}, scale %da{j},
-    code sum %xs{j}), as llama.cpp's vec_dot_*_q8_1: an exact integer dot, then F32 scaling."""
-    t = [f"""    %dv{wi}_{j} = vector.dot4i<s8s8> %wq{wi}, %q{j}, %zero8i : vector<32xi8>, vector<32xi8>, vector<8xi32>"""]
+    code sum %xs{j}), as llama.cpp's vec_dot_*_q8_1: an exact integer dot (eight accumulating dot4 steps), then
+    F32 scaling."""
+    def chain(k0, k1, name):
+        t, acc = [], "%zero1i"
+        for k in range(k0, k1):
+            t.append(f"""    %qk{j}_{k}_{wi}{name} = vector.slice %q{j}[{4 * k}] : vector<32xi8> -> vector<4xi8>
+    %ac{j}_{k}_{wi}{name} = vector.dot4i<s8s8> %wk{wi}_{k}, %qk{j}_{k}_{wi}{name}, {acc} : vector<4xi8>, vector<4xi8>, vector<1xi32>""")
+            acc = f"%ac{j}_{k}_{wi}{name}"
+        t.append(f"    %ie{wi}_{j}{name} = vector.extract {acc}[0] : vector<1xi32> -> i32")
+        return t, f"%ie{wi}_{j}{name}"
     if fmt == "q6_k":
-        t.append(f"""    %dlo{wi}_{j} = vector.slice %dv{wi}_{j}[0] : vector<8xi32> -> vector<4xi32>
-    %dhi{wi}_{j} = vector.slice %dv{wi}_{j}[4] : vector<8xi32> -> vector<4xi32>
-    %ilo{wi}_{j} = vector.reduce<addi> %dlo{wi}_{j}, %zero_i : vector<4xi32>, i32
-    %ihi{wi}_{j} = vector.reduce<addi> %dhi{wi}_{j}, %zero_i : vector<4xi32>, i32
-    %flo{wi}_{j} = scalar.sitofp %ilo{wi}_{j} : i32 to f32
-    %fhi{wi}_{j} = scalar.sitofp %ihi{wi}_{j} : i32 to f32
+        t0, ilo = chain(0, 4, "l"); t1, ihi = chain(4, 8, "h")
+        t = t0 + t1
+        t.append(f"""    %flo{wi}_{j} = scalar.sitofp {ilo} : i32 to f32
+    %fhi{wi}_{j} = scalar.sitofp {ihi} : i32 to f32
     %plo{wi}_{j} = scalar.mulf %flo{wi}_{j}, %sc{wi} : f32
     %pq{wi}_{j} = scalar.fmaf %fhi{wi}_{j}, %mn{wi}, %plo{wi}_{j} : f32
     {out} = scalar.mulf %pq{wi}_{j}, %da{j} : f32""")
         return "\n".join(t)
-    t.append(f"""    %di{wi}_{j} = vector.reduce<addi> %dv{wi}_{j}, %zero_i : vector<8xi32>, i32
-    %df{wi}_{j} = scalar.sitofp %di{wi}_{j} : i32 to f32""")
+    t, di = chain(0, 8, "")
+    t.append(f"    %df{wi}_{j} = scalar.sitofp {di} : i32 to f32")
     if fmt == "q8_0":
         t.append(f"""    %wd{wi}_{j} = scalar.mulf %sc{wi}, %da{j} : f32
     {out} = scalar.mulf %wd{wi}_{j}, %df{wi}_{j} : f32""")
@@ -787,6 +793,11 @@ def mv(fmt, K, R=16, TG=1, swiglu=False, suffix="", iq=False):
     rb = row_bytes(fmt, K)
     nw = 2 if swiglu else 1
     name = f"g_mv_{fmt}_k{K}" + ("_swiglu" if swiglu else "") + (f"_t{TG}" if TG > 1 else "") + ("_q8" if iq else "") + suffix
+    # int8 variants above MV_CHUNK tokens run the token chunks one after another in the workgroup: registers stay at
+    # the chunk's level and later chunks re-read this workgroup's weight rows from cache, not DRAM.
+    CHK = min(TG, int(os.environ.get("MV_CHUNK", "16"))) if iq else TG   # chunks of 8 measured no faster
+    NCH = TG // CHK
+    assert NCH * CHK == TG
     wargs = "%w: buffer, %w2: buffer" if swiglu else "%w: buffer"
     L = [f"""
 kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
@@ -840,10 +851,24 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %ba = index.scale %blk, %block_bytes : index, offset -> offset""" + ("""
   %zero_i = scalar.constant 0 : i32
   %zero8i = vector.constant 0 : vector<8xi32>
-  %zero32i8 = vector.constant 0 : vector<32xi8>""" + bfly_setup(TG) if iq else "")]
-    for j in range(TG):
+  %zero32i8 = vector.constant 0 : vector<32xi8>
+  %zero1i = vector.constant 0 : vector<1xi32>""" + bfly_setup(CHK) if iq else "")]
+    PV = f"""  %part_bytes = index.constant {waves * R * TG * nw * 4} : offset
+  %parts = buffer.alloca<workgroup> align(16) %part_bytes : buffer
+  %pv = buffer.view %parts[%zero] : buffer -> view<{nw}x{waves}x{R}x{TG}xf32>
+  %first = index.cmp eq, %lane, %c0 : index"""
+    if NCH > 1:
+        L.append(PV + f"""
+  %nch = index.constant {NCH} : index
+  %chk = index.constant {CHK} : index
+  scf.for %ch = [%c0 to %nch step %c1] {{
+  %chb = index.mul %ch, %chk : index
+  %chbase = index.add %token0, %chb : index""")
+    else:
+        L.append("  %chb = index.constant 0 : index\n  %chbase = index.add %token0, %chb : index")
+    for j in range(CHK):
         L.append((f"""  %tj{j}_off = index.constant {j} : index
-  %tok{j}_raw = index.add %token0, %tj{j}_off : index
+  %tok{j}_raw = index.add %chbase, %tj{j}_off : index
   %live{j} = index.cmp ult, %tok{j}_raw, %tokens : index
   %use{j} = scalar.andi %live{j}, %ok : i1
   %x{j} = scf.if %use{j} -> (vector<32xf32>) {{
@@ -868,11 +893,9 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   }} else {{
     scf.yield %zero32i8, %zero_f, %zero_f : vector<32xi8>, f32, f32
   }}"""))
-    L.append(f"""  %part_bytes = index.constant {waves * R * TG * nw * 4} : offset
-  %parts = buffer.alloca<workgroup> align(16) %part_bytes : buffer
-  %pv = buffer.view %parts[%zero] : buffer -> view<{nw}x{waves}x{R}x{TG}xf32>
-  %first = index.cmp eq, %lane, %c0 : index
-  scf.for %r = [%c0 to %rows_per step %c1] {{
+    L.append(("" if NCH > 1 else PV + "\n") + (f"""  %bt_sv = index.add %bt_idx, %chb : index
+  %bt_store = index.assume %bt_sv [range(%bt_sv, 0, {TG - 1})] : index
+""" if iq else "") + f"""  scf.for %r = [%c0 to %rows_per step %c1] {{
     %row_value = index.add %row_base, %r : index
     %row = index.assume %row_value [lt(%row_value, %n)] : index
     %ro = index.scale %row, %row_bytes : index, offset -> offset
@@ -882,10 +905,10 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
         if iq:
             # integer codes once per row; per token one dot4 contraction against the int8 activations
             L.append(iq_decode(fmt, wi, w, "%ok", "%o", "%within"))
-            for j in range(TG):
+            for j in range(CHK):
                 L.append(iq_dot(fmt, wi, j, f"%pa{wi}_{j}"))
-            L.append(bfly_store([f"%pa{wi}_{j}" for j in range(TG)], f"b{wi}",
-                                lambda v: f"view.store {v}, %pv[{wi}, %wave, %rb, %bt_idx] : f32, view<{nw}x{waves}x{R}x{TG}xf32>"))
+            L.append(bfly_store([f"%pa{wi}_{j}" for j in range(CHK)], f"b{wi}",
+                                lambda v: f"view.store {v}, %pv[{wi}, %wave, %rb, %bt_store] : f32, view<{nw}x{waves}x{R}x{TG}xf32>"))
             continue
         if fmt == "q4_k":
             # codes once per row; per token scale * dot(codes, x) - minimum * sum(x)
@@ -917,7 +940,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
     scf.if %first {{
       view.store %s{wi}_{j}, %pv[{wi}, %wave, %rb, {j}] : f32, view<{nw}x{waves}x{R}x{TG}xf32>
     }}""")
-    L.append("  }")
+    L.append("  }" + ("\n  }" if NCH > 1 else ""))
     L.append(f"""  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %outputs = index.constant {R * TG} : index
   %lanes_step = index.constant {lanes} : index
@@ -1755,6 +1778,55 @@ def listed(text, name, grid_rest):
     return header + body[:end]
 
 
+ATTN_BFLY = os.environ.get("ATTN_BFLY", "1") == "1"   # decode attention: a block's key scores in one butterfly all-reduce
+ATTN_PAGED = os.environ.get("ATTN_PAGED", "1") == "1"   # decode attention: 16-aligned key blocks, one page lookup each
+ATTN_ILP = int(os.environ.get("ATTN_ILP", "1"))   # independent softmax chains per block (2, 4: no gain on Qwen3.8-27B at 32k)
+ALLRED_SETUP = "".join(f"""  %ad{d} = scalar.constant {d} : i32
+  %adi{d} = index.constant {d} : index
+  %aq{d} = index.div %lane, %adi{d} : index
+  %ar{d}_2 = index.constant 2 : index
+  %arm{d} = index.rem %aq{d}, %ar{d}_2 : index
+  %ab{d} = index.cmp ne, %arm{d}, %c0 : index
+""" for d in (16, 8, 4, 2, 1)) + "  %aw32 = scalar.constant 32 : i32\n"
+
+
+def allreduce(vals, p, outs):
+    """Wave sums of the U lane-partials `vals`, all of them in every lane (named `outs`): recursive halving (each
+    step a lane keeps half and adds its xor-partner's half), plain xor steps once one value is left, then the
+    all-gather that reverses the halving."""
+    t, T, steps = [], len(vals), []
+    for d in (16, 8, 4, 2, 1):
+        if T > 1:
+            h = T // 2
+            nv = []
+            for i in range(h):
+                q = f"%{p}{d}_{i}"
+                t.append(f"""      {q}s = scf.select %ab{d}, {vals[i]}, {vals[i + h]} : f32
+      {q}k = scf.select %ab{d}, {vals[i + h]}, {vals[i]} : f32
+      {q}r, {q}u = kernel.subgroup.shuffle<xor> {q}s, %ad{d}, %aw32 : f32, i32, i32
+      {q} = scalar.addf {q}k, {q}r : f32""")
+                nv.append(q)
+            vals, T = nv, h
+            steps.append(d)
+        else:
+            q = f"%{p}{d}p"
+            t.append(f"""      {q}r, {q}u = kernel.subgroup.shuffle<xor> {vals[0]}, %ad{d}, %aw32 : f32, i32, i32
+      {q} = scalar.addf {vals[0]}, {q}r : f32""")
+            vals = [q]
+    for d in reversed(steps):   # gather: the partner holds the other half of the next-larger block
+        lo, hi = [], []
+        for i, v in enumerate(vals):
+            q = f"%{p}g{d}_{i}"
+            t.append(f"""      {q}r, {q}u = kernel.subgroup.shuffle<xor> {v}, %ad{d}, %aw32 : f32, i32, i32
+      {q}l = scf.select %ab{d}, {q}r, {v} : f32
+      {q}h = scf.select %ab{d}, {v}, {q}r : f32""")
+            lo.append(f"{q}l"); hi.append(f"{q}h")
+        vals = lo + hi
+    for o, v in zip(outs, vals):
+        t.append(f"      {o} = scalar.addf {v}, %zero_f : f32")
+    return "\n".join(t)
+
+
 def attention_text(S, P):
     """Split-K causal GQA attention: workgroup (token, KV head, split) of 16
     waves, wave w = query head 16*kv + w, lane l = dims 4l..4l+3. Sliding
@@ -1762,12 +1834,20 @@ def attention_text(S, P):
     combine kernel folds the splits and applies the sigmoid output gate."""
     U = UNROLL
     body = []
+    pa = ATTN_PAGED and 16 % U == 0
+    if pa:   # absolute U-aligned key blocks lie in one 16-position KV page: one page lookup per block
+        body.append(f"""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
     for i in range(U):
-        body.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
+        body.append((f"""      %key{i}_raw = index.add %j, %c{i}u : index
+      %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
+      %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
+      %ok{i} = scalar.andi %okl{i}, %okh{i} : i1
+      %kd{i} = index.constant {i * POS_BYTES} : offset
+      %ko{i} = index.add %kb_off, %kd{i} : offset""" if pa else f"""      %key{i}_raw = index.add %j, %c{i}u : index
       %ok{i} = index.cmp ult, %key{i}_raw, %stop : index
       %key{i}_c = scf.select %ok{i}, %key{i}_raw, %j : index
       %kp{i} = index.add %window_low, %key{i}_c : index
-      %ko{i} = func.call @g_kv_offset(%origins, %row, %kp{i}, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
+      %ko{i} = func.call @g_kv_offset(%origins, %row, %kp{i}, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""") + f"""
       %kc{i} = buffer.view %arena[%ko{i}] : buffer -> view<{KVH}x32x4xf16>
       %kh{i} = vector.load %kc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
       %k{i} = vector.extf %kh{i} : vector<4xf16> to vector<4xf32>
@@ -1775,27 +1855,67 @@ def attention_text(S, P):
       %vc{i} = buffer.view %arena[%vo{i}] : buffer -> view<{KVH}x32x4xf16>
       %vh{i} = vector.load %vc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
       %v{i} = vector.extf %vh{i} : vector<4xf16> to vector<4xf32>""")
+    ab = ATTN_BFLY and U & (U - 1) == 0 and 2 <= U <= 32
     for i in range(U):
         body.append(f"""      %prod{i} = vector.mulf %q4, %k{i} : vector<4xf32>
-      %part{i} = vector.reduce<addf> %prod{i}, %zero_f : vector<4xf32>, f32
-      %sr{i} = kernel.subgroup.reduce<addf> %part{i} : f32
-      %s{i} = scf.select %ok{i}, %sr{i}, %neg_big : f32""")
-    prev = "%m"
+      %part{i} = vector.reduce<addf> %prod{i}, %zero_f : vector<4xf32>, f32""" + ("" if ab else f"""
+      %sr{i} = kernel.subgroup.reduce<addf> %part{i} : f32"""))
+    if ab:   # all U key scores of the block in one butterfly all-reduce (~2U shuffles instead of 5U)
+        body.append(allreduce([f"%part{i}" for i in range(U)], "ar", [f"%sr{i}" for i in range(U)]))
     for i in range(U):
-        body.append(f"      %mx{i} = scalar.maxnumf {prev}, %s{i} : f32"); prev = f"%mx{i}"
-    body.append(f"""      %m_shift = scalar.subf %m, {prev} : f32
-      %alpha = scalar.expf<afn> %m_shift : f32
-      %l_scaled = scalar.mulf %l, %alpha : f32
-      %alpha_v = vector.splat %alpha : vector<4xf32>
-      %acc_s = vector.mulf %acc, %alpha_v : vector<4xf32>""")
-    pl, pa = "%l_scaled", "%acc_s"
-    for i in range(U):
-        body.append(f"""      %d{i} = scalar.subf %s{i}, {prev} : f32
+        body.append(f"""      %s{i} = scf.select %ok{i}, %sr{i}, %neg_big : f32""")
+    # ATTN_ILP independent online-softmax chains per block (keys interleaved by halves), merged after the loop:
+    # shorter dependent chains, more overlap in a latency-bound loop.
+    ILP = ATTN_ILP if U % ATTN_ILP == 0 else 1
+    yields = []
+    for c in range(ILP):
+        sx = "" if c == 0 else str(c + 1)
+        keys = list(range(c * U // ILP, (c + 1) * U // ILP))
+        prev = f"%m{sx}"
+        for i in keys:
+            body.append(f"      %mx{i} = scalar.maxnumf {prev}, %s{i} : f32"); prev = f"%mx{i}"
+        body.append(f"""      %m_shift{sx} = scalar.subf %m{sx}, {prev} : f32
+      %alpha{sx} = scalar.expf<afn> %m_shift{sx} : f32
+      %l_scaled{sx} = scalar.mulf %l{sx}, %alpha{sx} : f32
+      %alpha_v{sx} = vector.splat %alpha{sx} : vector<4xf32>
+      %acc_s{sx} = vector.mulf %acc{sx}, %alpha_v{sx} : vector<4xf32>""")
+        pl, pa = f"%l_scaled{sx}", f"%acc_s{sx}"
+        for i in keys:
+            body.append(f"""      %d{i} = scalar.subf %s{i}, {prev} : f32
       %p{i} = scalar.expf<afn> %d{i} : f32
       %la{i} = scalar.addf {pl}, %p{i} : f32
       %pv{i} = vector.splat %p{i} : vector<4xf32>
       %aa{i} = vector.fmaf %pv{i}, %v{i}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}", f"%aa{i}"
-    body.append(f"      scf.yield {prev}, {pl}, {pa} : f32, f32, vector<4xf32>")
+        yields += [prev, pl, pa]
+    body.append(f"      scf.yield {', '.join(yields)} : " + ", ".join(["f32, f32, vector<4xf32>"] * ILP))
+    ILP_ARGS = "".join(f", %m{c + 1} = %neg_big : f32, %l{c + 1} = %zero_f : f32, %acc{c + 1} = %zero4 : vector<4xf32>" for c in range(1, ILP))
+    ILP_TYPES = ", f32, f32, vector<4xf32>" * (ILP - 1)
+    ILP_OUTS = "".join(f", %mf{c + 1}, %lf{c + 1}, %af{c + 1}" for c in range(1, ILP))
+    ILP_MERGE = ""
+    FIN = ("%m_final0, %l_final0, %acc_final0" + ILP_OUTS) if ILP > 1 else "%m_final, %l_final, %acc_final"
+    if ILP > 1:
+        mm = "%m_r"
+        ILP_MERGE = "    %m_r = scalar.addf %m_final0, %zero_f : f32\n" + "".join(f"    %mm{c} = scalar.maxnumf {'%m_r' if c == 1 else f'%mm{c - 1}'}, %mf{c + 1} : f32\n" for c in range(1, ILP))
+        top = f"%mm{ILP - 1}"
+        ILP_MERGE += f"""    %w0s = scalar.subf %m_final0, {top} : f32
+    %w0 = scalar.expf<afn> %w0s : f32
+    %wl0 = scalar.mulf %l_final0, %w0 : f32
+    %w0v = vector.splat %w0 : vector<4xf32>
+    %wa0 = vector.mulf %acc_final0, %w0v : vector<4xf32>
+"""
+        pl, pa = "%wl0", "%wa0"
+        for c in range(1, ILP):
+            ILP_MERGE += f"""    %w{c}s = scalar.subf %mf{c + 1}, {top} : f32
+    %w{c} = scalar.expf<afn> %w{c}s : f32
+    %wl{c} = scalar.fmaf %lf{c + 1}, %w{c}, {pl} : f32
+    %w{c}v = vector.splat %w{c} : vector<4xf32>
+    %wa{c} = vector.fmaf %af{c + 1}, %w{c}v, {pa} : vector<4xf32>
+"""
+            pl, pa = f"%wl{c}", f"%wa{c}"
+        ILP_MERGE += f"""    %m_final = scalar.addf {top}, %zero_f : f32
+    %l_final = scalar.addf {pl}, %zero_f : f32
+    %acc_final = vector.addf {pa}, %zero4 : vector<4xf32>
+"""
     consts = "".join(f"  %c{i}u = index.constant {i} : index\n" for i in range(U))
     GATE_TEXT = """    %gate_view = buffer.view %gate[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
     %g = vector.load %gate_view[%token, %head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
@@ -1847,7 +1967,7 @@ kernel.def export("{P}_attention_split") @{P}_attention_split(%tokens: index) {{
   %window_less = index.constant {(WINDOW or 262144) - 1} : index
   %c0_i32 = scalar.constant 0 : i32
   %cU = index.constant {U} : index
-{consts}  %zero_f = scalar.constant 0.0 : f32
+{consts}{ALLRED_SETUP}  %zero_f = scalar.constant 0.0 : f32
   %neg_big = scalar.constant -3.0e38 : f32
   %cg = index.constant {G} : index
   %head = index.madd %kv_head, %cg, %wave : index
@@ -1895,9 +2015,14 @@ kernel.def export("{P}_attention_split") @{P}_attention_split(%tokens: index) {{
     %scale_v = vector.splat %scale : vector<4xf32>
     %q4 = vector.mulf %q_raw, %scale_v : vector<4xf32>
     %zero4 = vector.splat %zero_f : vector<4xf32>
-    %m_final, %l_final, %acc_final = scf.for %j = [%start to %stop step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>) -> (f32, f32, vector<4xf32>) {{
+""" + ("""    %lo_abs = index.add %window_low, %start : index
+    %hi_abs = index.add %window_low, %stop : index
+    %lo_q = index.div %lo_abs, %cU : index
+    %lo_al = index.mul %lo_q, %cU : index
+    """ + FIN + """ = scf.for %j = [%lo_al to %hi_abs step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""" if ATTN_PAGED and 16 % U == 0 else """    """ + FIN + """ = scf.for %j = [%start to %stop step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""") + f"""
 {chr(10).join(body)}
     }}
+{ILP_MERGE}
     %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
     vector.store %acc_final, %acc_view[%token, %bounded_head, %split, %lane, %c0] : vector<4xf32>, view<[%tokens]x{QH}x{S}x32x4xf32>
     %first = index.cmp eq, %lane, %c0 : index
@@ -2406,7 +2531,8 @@ kernel.def export("{name}") @{name}(%spans: index) {{
   %xm_view = buffer.view %h[%xm_off] : buffer -> view<[%tokens]x{groups}x2xf32>
   %zero_i = scalar.constant 0 : i32
   %zero8i = vector.constant 0 : vector<8xi32>
-  %zero32i8 = vector.constant 0 : vector<32xi8>""") + f"""
+  %zero32i8 = vector.constant 0 : vector<32xi8>
+  %zero1i = vector.constant 0 : vector<1xi32>""") + f"""
   %span0 = index.mul %sgroup, %tgc : index
   %ok = index.cmp ult, %workitem, %groups : index
   %g_last = index.constant {groups - 1} : index
@@ -2527,6 +2653,10 @@ def mv_name(fmt, kval, sw, n, TG, iq=False):
     R = pick_r(nv, kval, TG)
     base = f"g_mv_{fmt}_k{kval}" + ("_swiglu" if sw else "") + (f"_t{TG}" if TG > 1 else "")
     if iq:
+        # int8 variants: a row's arithmetic does not depend on R (explicit ops, explicit butterfly), so the 8/16-token
+        # kernels take 16 rows per workgroup (fewer activation reloads; Qwen3.8-27B 17408x5120 t16: 395 -> 368 us)
+        if TG >= 8 and nv and nv % 16 == 0 and os.environ.get("MV_Q8_R16", "1") == "1":
+            R = 16
         USED_MVQ.add((fmt, kval, sw, R, TG))
         return base + "_q8" + (f"_r{R}" if R != 16 else "")
     if R == 16:

@@ -3,7 +3,7 @@
 usage: python make_kernel_tests.py CONFIG.json OUTDIR      (tools venv: gguf, numpy)
        run_kernel_tests.sh PACKAGE OUTDIR                  (loom-test on the GPU)
 Covers g_embed, the decode matvecs (1- and 4-token variants; with ACT_Q8, the default, g_quant_q8 + the
-int8-activation 1-/4-/8-token variants for Q8_0/Q4_K/Q5_K/Q6_K) for one tensor of each (format, K), the QK-norm + RoPE kernel (incl. head_dim 256 / partial
+int8-activation 1-/4-/8-/16-token variants for Q8_0/Q4_K/Q5_K/Q6_K) for one tensor of each (format, K), the QK-norm + RoPE kernel (incl. head_dim 256 / partial
 RoPE), and for hybrid models the whole gated delta-net chain on a span that
 continues a stored recurrent state (conv, history commit, q/k norms,
 recurrence, gated norm, published state). Extend it
@@ -139,11 +139,13 @@ for name, K in todo:
 }}
 """)
     if ACT_Q8 and fmt in IQ_FMTS:   # g_quant_q8 then the int8 matvec, at the 1-, 4- and 8-token variants
-        for tg in (1, 4, 8):
+        for tg in (1, 4, 8, 16):
             xs = rng.standard_normal((tg, K)).astype(np.float32); y = q8_ref(xs).astype(np.float64) @ W.T.astype(np.float64)
             tag = name.replace(".", "_") + f"_q8_t{tg}"
             save(tag + "_w", raw(name)); save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
             _R = pick_r(n, K, tg)
+            if tg >= 8 and n % 16 == 0 and os.environ.get("MV_Q8_R16", "1") == "1":   # gen_llm.py mv_name's rule
+                _R = 16
             kern = f"g_mv_{fmt}_k{K}" + (f"_t{tg}" if tg > 1 else "") + "_q8" + (f"_r{_R}" if _R != 16 else "")
             wt = ty(raw(name))
             cases.append(f"""check.case public @mv_{tag} {{
