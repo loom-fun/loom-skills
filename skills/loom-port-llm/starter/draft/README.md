@@ -142,10 +142,13 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   32-value group (`d = amax/127` rounded to F16, `q = round(x/d)`, llama.cpp's `quantize_q8_1` numerics), launched in
   the decode branch beside the GEMM's `g_row_scale_f16`; the `_q8` matvecs keep the starter's layout (one lane per
   group, R rows, TG tokens) but contract the raw weight codes with `vector.dot4i` (Q8_0, Q4_K, Q5_K, Q6_K; other
-  formats keep the f32 kernel) and come in 1-, 4- and 8-token variants; the head (`g_head_mv*_q8`) likewise. A token's
-  result is an exact integer dot followed by the same F32 scaling in every variant, so verification of up to 8
-  tokens rounds exactly like 1-token decode, and verify epochs take the WMMA GEMM only from 9 tokens
-  (`SPEC_MM_FROM`, was 5). Nemotron 1/2/4 streams: 21.4 / 22.5 / 24.6 ms per step; drafted results in the tables
+  formats keep the f32 kernel) and come in 1-, 4-, 8- and 16-token variants; the head (`g_head_mv*_q8`) in 1-, 4- and
+  8-span variants (a 16-span head was slower). A token's result is an exact integer dot followed by the same F32
+  scaling, and its wave sum is an explicit xor-16/8/4/2/1 butterfly that the multi-token variants run by recursive
+  halving (TG + 5 shuffles instead of 5 TG; Qwen3.8-27B with 4 drafting streams: 254 -> 230 ms per epoch) on the same
+  pairing tree, so verification of up to 16 tokens rounds exactly like 1-token decode and verify epochs take the WMMA
+  GEMM only from 17 tokens (`SPEC_MM_FROM`, was 5). The 16-token variant holds ~215 VGPRs and costs ~1.7x a 1-token
+  pass (8 tokens: ~1.05x), which is what keeps 4 drafting streams of a 27B model near (not above) llama.cpp. Nemotron 1/2/4 streams: 21.4 / 22.5 / 24.6 ms per step; drafted results in the tables
   above. Kernel microbenchmark (`loom-benchmark` dispatch time, Q6_K 2560 x 40960): f32 1/4 tokens 438 / 643 us,
   int8 427 / 521 us. Quantizing inside the matvec instead (no separate launch) was slower: with the adaptive rows
   per workgroup (R = 1-4) every workgroup re-quantizes the whole activation (Q8_0 4 tokens at R=1: 1343 vs 735 us).
@@ -159,8 +162,8 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   still crashed; conv off: passed); after the fix the full DFlash2 passes tune.py's concurrency check 3 of 3.
   Kernels that index per-token metadata must check `info[t][2]` (live) first: cohort stages always carry dead
   tokens.
-- Verification of more than 8 tokens per epoch (several drafting streams at depth 3+) takes the WMMA GEMM (rows
-  padded to 64); the int8 matvec would stream the weights once per 8 tokens instead.
+- Verification of more than 16 tokens per epoch (several drafting streams at depth 5+) takes the WMMA GEMM (rows
+  padded to 64).
 - **Long-context verify pays decode attention per token** (open). The per-token split-K kernel costs the same per
   verified token as per decoded token: Qwen3.8-27B, 8-token epochs (depth 7) 134 ms at 2k vs 210 ms at 32k (+76 ms;
   1-token decode +10 ms; depth 3: 101 vs 135 ms), so at 32k depth 3 (22.5 tok/s) beats depth 7 (19 tok/s) and ties
