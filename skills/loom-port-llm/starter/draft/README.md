@@ -102,7 +102,7 @@ drafting. Measured on Strix Halo (greedy decode; tune.py requests, thinking off)
 
 | Model | No drafting | MTP | DFlash2 | llama.cpp b1355 (same drafters) |
 |---|---|---|---|---|
-| Qwen3.8-27B Q4_K_M (bartowski), 262k context, vision | 12.9 tok/s | depth 3: 33.2 tok/s | **depth 7: 42.9 tok/s** (spec gate 16/16 incl. images) | none 12.0, MTP n-max 3 26.0, **DFlash2 n-max 3 28.1** |
+| Qwen3.8-27B Q4_K_M (bartowski), 262k context, vision | 12.9 tok/s | depth 3: 33.0 tok/s | **depth 7: 45.4 tok/s**; depth 3: 36.5 (the published package's setting: at 32k depth 3 keeps 22.9 tok/s, depth 7 18.7; spec gate 16/16 incl. images) | none 12.0, MTP n-max 3 26.0, **DFlash2 n-max 3 28.1** |
 | Qwen3.8-27B Q8_0, 262k context | 7.9 tok/s | **14.6 tok/s** (49 % acceptance; 84 % in tool loops) | DFlash2 depth 7: 13.0 tok/s (53 %, 4.7 tokens/step) | - |
 | Qwen3.5-0.8B Q4_K_M | **262 tok/s** | 208 tok/s | - |
 | Qwen3-4B Q4_K_M | - | - | DFlash depth 7: 39 % acceptance, 3.7 tokens/step |
