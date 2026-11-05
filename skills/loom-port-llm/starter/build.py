@@ -28,7 +28,9 @@ ap.add_argument("--memory-gib", default="auto",
                 help="device memory budget for weights + KV pool + workspace. auto (default): enough for a KV pool of "
                      "the default pool, capped at 60%% of physical RAM (GPU memory is system RAM on Strix Halo; the "
                      "benchmarks load one model at a time); 56 when RAM can't be read")
-ap.add_argument("--prefill", type=int, default=1024, help="prefill chunk (prefill_capacity); 1024-4096")
+ap.add_argument("--prefill", type=int, default=None,
+                help="prefill chunk (prefill_capacity), 1024-4096; default cfg['prefill_capacity'], else 4096 for MoE "
+                     "(fuller expert tiles: Flint 2k/8k/32k +22/+38/+28 %% vs 1024), else 1024")
 ap.add_argument("--rows", type=int, default=4, help="initial resident rows (grows on demand); c4 benchmarks need >= 4")
 ap.add_argument("--max-tokens", type=int, default=4096, help="default completion length when a request sets none")
 ap.add_argument("--temperature", type=float, default=0.0, help="default sampling temperature when a request sets none (0 = greedy)")
@@ -45,6 +47,8 @@ ap.add_argument("--model-id", default=None, help="model id clients send (visible
 a = ap.parse_args()
 
 cfg = json.load(open(a.config))
+if a.prefill is None:
+    a.prefill = cfg.get("prefill_capacity") or (4096 if cfg.get("moe") else 1024)
 chat = cfg.get("chat")
 if not chat:
     sys.exit("config has no 'chat' block: fill it from the model's chat template first (chat_probe.py)")

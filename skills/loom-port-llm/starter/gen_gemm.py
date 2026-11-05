@@ -85,12 +85,11 @@ def dequant16(fmt, w, view_name, out):
       %{out}_scale_view = buffer.view %{w}[%{out}_block_origin] : buffer -> view<1xf16>
       %{out}_code_view = buffer.view %{w}[%{out}_code_origin] : buffer -> view<16xi8>
       %{out}_scale_half = view.load %{out}_scale_view[0] : view<1xf16> -> f16
-      %{out}_scale = scalar.extf %{out}_scale_half : f16 to f32
       %{out}_codes = vector.load %{out}_code_view[0] : view<16xi8> -> vector<16xi8>
-      %{out}_values = vector.sitofp %{out}_codes : vector<16xi8> to vector<16xf32>
-      %{out}_scales = vector.splat %{out}_scale : vector<16xf32>
-      %{out}_scaled = vector.mulf %{out}_values, %{out}_scales : vector<16xf32>
-      %{out} = vector.fptrunc %{out}_scaled : vector<16xf32> to vector<16xf16>'''
+      // q (8 bits) * d (f16) is exact in f32, so one f16 multiply rounds to the same value as f32 math + fptrunc.
+      %{out}_values = vector.sitofp %{out}_codes : vector<16xi8> to vector<16xf16>
+      %{out}_scales = vector.splat %{out}_scale_half : vector<16xf16>
+      %{out} = vector.mulf %{out}_values, %{out}_scales : vector<16xf16>'''
     if fmt == "q6_k":
         # Q6_K: value c of a superblock: half = c/128, j = (c%128)/32, l = c%32;
         # q = ((ql[half*64 + (j%2)*32 + l] >> 4*(j/2)) & 15) | (((qh[half*32 + l] >> 2j) & 3) << 4);
@@ -201,17 +200,19 @@ def dequant16(fmt, w, view_name, out):
       %{out}_qh_half_bytes = index.cast %{out}_qh_half : index to offset
       %{out}_qh_origin = index.add %{out}_block_origin, %sixteen : offset
       %{out}_qh_at = index.add %{out}_qh_origin, %{out}_qh_half_bytes : offset
-      %{out}_qh_view = buffer.view %{w}[%{out}_qh_at] : buffer -> view<16xi8>
-      %{out}_qh = vector.load %{out}_qh_view[0] : view<16xi8> -> vector<16xi8>
+      %{out}_qh_view = buffer.view %{w}[%{out}_qh_at] : buffer -> view<4xi32>
+      %{out}_qh = vector.load %{out}_qh_view[0] : view<4xi32> -> vector<4xi32>
       %{out}_g32 = index.cast %{out}_group : index to i32
-      %{out}_g8 = scalar.trunci %{out}_g32 : i32 to i8
-      %{out}_gv = vector.splat %{out}_g8 : vector<16xi8>
-      %{out}_one = vector.constant 1 : vector<16xi8>
-      %{out}_four = vector.constant 4 : vector<16xi8>
-      %{out}_hb_s = vector.shrui %{out}_qh, %{out}_gv : vector<16xi8>
-      %{out}_hb = vector.andi %{out}_hb_s, %{out}_one : vector<16xi8>
-      %{out}_hi = vector.shli %{out}_hb, %{out}_four : vector<16xi8>
-      %{out}_bytes = vector.ori %{out}_low, %{out}_hi : vector<16xi8>
+      %{out}_gv = vector.splat %{out}_g32 : vector<4xi32>
+      %{out}_one = vector.constant 16843009 : vector<4xi32>
+      %{out}_four = vector.constant 4 : vector<4xi32>
+      // Word-wide: bit g of every qh byte (0x01010101 mask after the shift), moved to bit 4 of the code byte.
+      %{out}_hb_s = vector.shrui %{out}_qh, %{out}_gv : vector<4xi32>
+      %{out}_hb = vector.andi %{out}_hb_s, %{out}_one : vector<4xi32>
+      %{out}_hi = vector.shli %{out}_hb, %{out}_four : vector<4xi32>
+      %{out}_lw = vector.bitcast %{out}_low : vector<16xi8> to vector<4xi32>
+      %{out}_bw = vector.ori %{out}_lw, %{out}_hi : vector<4xi32>
+      %{out}_bytes = vector.bitcast %{out}_bw : vector<4xi32> to vector<16xi8>
       %{out}_codes = vector.uitofp %{out}_bytes : vector<16xi8> to vector<16xf16>
       %{out}_scale_h = scalar.fptrunc %{out}_scale : f32 to f16
       %{out}_neg_min = scalar.negf %{out}_minimum : f32

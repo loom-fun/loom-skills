@@ -2791,10 +2791,10 @@ kernel.def export("g_silu_mul") @g_silu_mul(%tokens: index) {
   kernel.return
 }
 """
-# LAST_OUT (default on): the last layer's post-attention work runs only on the rows the head reads (llama.cpp's
-# inp_out_ids). Off for drafters that read the trunk's final hidden rows (MTP, Gemma-4 assistant) or a DFlash tap
-# after the last layer; LAST_OUT=0 turns it off.
-LAST_OUT = os.environ.get("LAST_OUT", "1") != "0" and not (gen_draft.enabled() and gen_draft.DRAFT["kind"] in ("mtp", "assist"))
+# LAST_OUT=1 (opt-in, A/B it per port): the last layer's post-attention work runs only on the rows the head reads
+# (llama.cpp's inp_out_ids). Measured: Qwen3.8-27B prefill +1 % (within noise), Muse-Glimmer-30B -3.5 %. Off for drafters that read the trunk's final hidden rows (MTP, Gemma-4 assistant) or a DFlash tap
+# after the last layer.
+LAST_OUT = os.environ.get("LAST_OUT", "0") == "1" and not (gen_draft.enabled() and gen_draft.DRAFT["kind"] in ("mtp", "assist"))
 if LAST_OUT and gen_draft.enabled() and gen_draft.DRAFT["kind"] == "dflash":
     import gen_dflash as _gd
     LAST_OUT = CFG["layers"] not in _gd.config(gen_draft.DRAFT["gguf"])["target_layers"]   # a tap after the last layer
@@ -2904,6 +2904,12 @@ func.def inline @g_span_output_row(%metadata: buffer, %spans: index, %span: inde
 }
 """
 
+# Prefill GEMM tile order per port (A/B it: rows fastest reuses each weight tile across a chunk's row tiles, columns
+# fastest reuses each activation tile): cfg["gemm_n_fastest"] false = rows fastest. Muse-Glimmer-30B +4/+7/+6 % at
+# 2k/8k/32k; Qwen3.8-27B and Bolt tie; Flint -4 % at 8k. An explicit GEMM_N_FASTEST still wins.
+if "gemm_n_fastest" in CFG:
+    os.environ.setdefault("GEMM_N_FASTEST", "1" if CFG["gemm_n_fastest"] else "0")
+LAST_OUT_SAFE = r"g_row_scale_f16|g_gemm_\w+|g_mv_\w+|g_post_add_norm|g_silu_mul"   # row-local post-attention kernels
 ANCHOR_POST_ATTN = "  scf.if %gemm {\n    kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16)"
 
 
@@ -2914,6 +2920,11 @@ def last_out_select_program(program):
     start = program.rfind("  // ---- layer ", 0, end) if end else -1
     if start < 0 or ANCHOR_POST_ATTN not in program[start:end] or program[start:end].count(ANCHOR_POST_ATTN) != 1:
         return program   # a kit whose last layer is not the starter's attention layer: unchanged
+    import re as _re
+    tail = program[start:end].split(ANCHOR_POST_ATTN, 1)[1]
+    other = {k for k in _re.findall(r"kernel\.launch @(\w+)", tail) if not _re.fullmatch(LAST_OUT_SAFE, k)}
+    if other:   # kernels that may index other per-token state (MoE routing, per-layer embeddings): unchanged
+        return program
     return program[:start] + last_out_select(program[start:end]) + program[end:] + "\n" + ROWS_SELECT
 
 

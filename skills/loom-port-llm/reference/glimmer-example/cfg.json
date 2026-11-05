@@ -123,5 +123,6 @@
  },
  "post_norm_eps": 9.999999747378752e-06,
  "logit_scale": 0.1961161345243454,
- "logit_softcap": 20.0
+ "logit_softcap": 20.0,
+ "gemm_n_fastest": false
 }
