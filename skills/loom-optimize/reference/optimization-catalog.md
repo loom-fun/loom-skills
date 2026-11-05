@@ -133,6 +133,15 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   neighbour are masked off) and finish with one f16 FMA `codes * s + (-32 s)`; byte vectors plus f32 math
   ran 22 TFLOP/s, this 26-28 (Q4_K: ~35 on the same constant-data benchmark).
 
+### Last-layer output rows (`LAST_OUT`, llama.cpp `inp_out_ids`)
+- A prefill epoch only needs the last layer's post-attention rows that feed the head (one per span). gen_llm.py
+  rewrites the last layer: gather those rows of the attention output and residual (`g_rows_gather`), run the
+  output projection, residual, FFN and final norm on them (the decode matvecs, with their own int8
+  activations), scatter the final rows back (`g_rows_scatter`). K/V are still written for every token.
+- Off for drafters that read the trunk's final hidden rows (MTP, Gemma-4 assistant) or a DFlash tap after the
+  last layer; the verify program switches it off. Qwen3.8-27B: greedy outputs identical; prefill +1 % (the last
+  layer is ~1.5 % of the GEMM work).
+
 ### Listed fallback
 - `g_attention_fallback_list` compacts the tokens of non-uniform tiles that are
   live into a list, using an atomic counter. The split-K attention then runs over
