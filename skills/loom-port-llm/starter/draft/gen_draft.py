@@ -815,6 +815,8 @@ def verify_program(program, g):
     body = body.replace(f"command.program.def public @llm_advance() launch(%weights: buffer, {fb}: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {{",
                         f"command.program.def public @llm_verify() launch(%weights: buffer, {fb}: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %committed: buffer, %results: buffer) {{", 1)
     assert "@llm_verify()" in body
+    # every drafted token feeds the head: no last-layer output-row selection (gen_llm.last_out_select)
+    body = body.replace("%outsel_on = scalar.constant true : i1", "%outsel_on = scalar.constant false : i1")
     GDN = g["GDN"]
     if GDN:
         W = GDN["C"] + 2 * GDN["HV"]
