@@ -102,7 +102,11 @@ drafting. Measured on Strix Halo (greedy decode; tune.py requests, thinking off)
 
 | Model | No drafting | MTP | DFlash2 | llama.cpp b1355 (same drafters) |
 |---|---|---|---|---|
-| Qwen3.8-27B Q4_K_M (bartowski), 262k context, vision | 12.9 tok/s | depth 3: 33.0 tok/s | **depth 7: 45.4 tok/s**; depth 3: 36.5 (the published package's setting: at 32k depth 3 keeps 22.9 tok/s, depth 7 18.7; spec gate 16/16 incl. images) | none 12.0, MTP n-max 3 26.0, **DFlash2 n-max 3 28.1** |
+| Qwen3.8-27B Q4_K_M (bartowski), 262k context, vision | 12.9 tok/s | depth 3: 33.0 tok/s | **depth 7: 45.4 tok/s**; depth 3: 36.5 (the published package's setting, better at long context; spec gate 16/16 incl. images) | none 12.0, MTP n-max 3 26.0, **DFlash2 n-max 3 28.1** |
+
+Published Qwen3.8-27B package (DFlash2 depth 3) vs llama.cpp b1355 with its best drafting, same session, three runs
+each (perf.py; c4_steady two runs): decode 26.9 vs 21.9 tok/s, @2k 27.9 vs 20.1, @32k 23.2 vs 21.2, prefill 1k-33k
+372/393/365/324/264 vs 311/311/321/299/249, four streams 50.9 vs 48.3.
 | Qwen3.8-27B Q8_0, 262k context | 7.9 tok/s | **14.6 tok/s** (49 % acceptance; 84 % in tool loops) | DFlash2 depth 7: 13.0 tok/s (53 %, 4.7 tokens/step) | - |
 | Qwen3.5-0.8B Q4_K_M | **262 tok/s** | 208 tok/s | - |
 | Qwen3-4B Q4_K_M | - | - | DFlash depth 7: 39 % acceptance, 3.7 tokens/step |
@@ -149,9 +153,12 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   scaling, and its wave sum is an explicit xor-16/8/4/2/1 butterfly that the multi-token variants run by recursive
   halving (TG + 5 shuffles instead of 5 TG; Qwen3.8-27B with 4 drafting streams: 254 -> 230 ms per epoch) on the same
   pairing tree, so verification of up to 16 tokens rounds exactly like 1-token decode and verify epochs take the WMMA
-  GEMM only from 17 tokens (`SPEC_MM_FROM`, was 5). The 16-token variant holds ~215 VGPRs and costs ~1.7x a 1-token
-  pass (8 tokens: ~1.05x), which is what keeps 4 drafting streams of a 27B model near (not above) llama.cpp. Nemotron 1/2/4 streams: 21.4 / 22.5 / 24.6 ms per step; drafted results in the tables
-  above. Kernel microbenchmark (`loom-benchmark` dispatch time, Q6_K 2560 x 40960): f32 1/4 tokens 438 / 643 us,
+  GEMM only from 17 tokens (`SPEC_MM_FROM`, was 5). Each token's integer dot is eight accumulating `dot4` steps
+  (no vector reduce), and the 8/16-token variants take 16 rows per workgroup (a row's arithmetic does not depend on R:
+  explicit ops and butterfly), which cuts the activation reloads: Qwen3.8-27B with 4 drafting streams at depth 3 went
+  254 -> 230 (butterfly) -> 177 ms per epoch (chained dots, R = 16), steady c4 37 -> 51 tok/s, above llama.cpp's own
+  drafting (48). Running a 16-token variant as two 8-token chunks in one workgroup was no faster. Nemotron 1/2/4
+  streams: 21.4 / 22.5 / 24.6 ms per step; drafted results in the tables above. Kernel microbenchmark (`loom-benchmark` dispatch time, Q6_K 2560 x 40960): f32 1/4 tokens 438 / 643 us,
   int8 427 / 521 us. Quantizing inside the matvec instead (no separate launch) was slower: with the adaptive rows
   per workgroup (R = 1-4) every workgroup re-quantizes the whole activation (Q8_0 4 tokens at R=1: 1343 vs 735 us).
   `ACT_Q8=0` restores the f32 path (numerics of earlier packages). The quantize launches cost a fast model a little:
@@ -169,18 +176,19 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   tokens.
 - Verification of more than 16 tokens per epoch (several drafting streams at depth 5+) takes the WMMA GEMM (rows
   padded to 64).
-- **Long-context verify pays decode attention per token** (open). The per-token split-K kernel costs the same per
-  verified token as per decoded token: Qwen3.8-27B, 8-token epochs (depth 7) 134 ms at 2k vs 210 ms at 32k (+76 ms;
-  1-token decode +10 ms; depth 3: 101 vs 135 ms), so at 32k depth 3 (22.5 tok/s) beats depth 7 (19 tok/s) and ties
-  llama.cpp (22.6). The cost is per-(key, head, token) arithmetic (the cross-lane reduction per key), not KV
-  bandwidth: kernels that shared a span's key loads (one workgroup for 2-8 tokens, serially or as parallel waves on
-  one compute unit) gained under 6 %. A WMMA split kernel with the span's tokens as MMA columns (prefill-flash style)
-  cut the 32k epoch to 165 ms but is not exact: RDNA3.5's WMMA result for a column changes with the V rows of keys
-  that column masks to P = 0 (1-ulp differences; verified bit-for-bit in isolation: zeroing those V rows makes the
-  grouped and solo results equal), so a token's attention depends on the other tokens of its span and the spec gate
-  fails (Qwen3.8-27B depth 7: 15/16). An exact design would run the 16-aligned key range shared by a segment on
-  WMMA and each token's ragged ends (<= 31 keys) on the per-token path, with split ranges that depend only on the
-  aligned block; not done. Meanwhile pick the depth with long contexts in mind (the 27B package uses depth 3).
+- **Long-context verify pays decode attention per token.** The per-token split-K kernel costs the same per verified
+  token as per decoded token (it streams the KV once per token: Qwen3.8-27B at 32k, 671 us per layer for 1 token,
+  2058 us for 4, `loom-benchmark` dispatch time), so depth 7 falls behind depth 3 at long context and the 27B package
+  uses depth 3. Two cheap fixes are in: a block's 16 key scores are reduced by one butterfly all-reduce (~31 shuffles
+  instead of 16 subgroup reductions) and the 16-key blocks are absolute-aligned, so a block is one KV page and needs one
+  page lookup (32k depth-3 epoch 135 -> 129 ms; at 32k the package now decodes 23.2 vs llama.cpp's 21.2 tok/s, three
+  runs each). Tried and dropped: two or four independent softmax chains per block (no change); a workgroup per segment
+  of same-row tokens staging each key block once in workgroup memory, double-buffered (exact; 4 tokens 1746 vs
+  2058 us per layer in isolation, but slower in the model); and a WMMA split kernel with the span's tokens as MMA
+  columns (32k epoch 210 -> 165 ms at depth 7) that is not exact: RDNA3.5's WMMA result for a column changes with the
+  V rows of keys the column masks to P = 0 (1-ulp; verified in isolation by zeroing those rows), so a token's
+  attention depended on its span and the spec gate failed (15/16). An exact design would run the 16-aligned key range
+  a segment shares on WMMA and each token's ragged ends on the per-token path.
 - Two-epoch continuation (`continuation_epochs: 2`) is not implemented (one device epoch per host turn).
 - DFlash v1 drafters with full-context attention read the whole context per proposal (DFlash2 windows it).
 - DFlash RoPE uses KV positions; llama.cpp gives M-RoPE targets' drafters the temporal position (degenerate

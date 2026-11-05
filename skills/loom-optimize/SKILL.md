@@ -132,9 +132,9 @@ the decode/verify balance (it rebuilds `pkg`). On a bandwidth-bound model it is 
 (Qwen3.8-27B Q4_K_M: 12.8 -> 21.0 tok/s with MTP depth 3); on small launch-bound models it loses (Qwen3.5-0.8B:
 262 -> 208) and tune.py keeps it off. The multi-token target step that used to cap it (issue #21: f32 activations
 in the 4-token matvec, 192+ VGPRs per lane) is fixed in the starter: decode-shaped linears and the head use int8
-activations with integer dot4 contractions (`ACT_Q8`, llama.cpp's mul_mat_vec_q numerics), with 1-/4-/8-token
+activations with integer dot4 contractions (`ACT_Q8`, llama.cpp's mul_mat_vec_q numerics), with 1-/4-/8-/16-token
 variants that round each token like 1-token decode (`draft/README.md` "Limits"). Remaining levers: verify epochs
-of 9+ tokens (several drafting streams) take the WMMA GEMM, drafter catch-up cost at prefill, and the MoE expert
+of 17+ tokens (many drafting streams) take the WMMA GEMM; long-context verify pays decode attention per token (draft/README.md), drafter catch-up cost at prefill, and the MoE expert
 matvecs of the flint/lfm2moe kits, which still use f32 activations. Every change
 here must keep the `spec` gate exact.
 
