@@ -1,4 +1,5 @@
-"""Prefill flash attention for head_dim 256 (gen_llm.py uses it instead of gen_flash2.py when D == 256).
+"""Prefill flash attention for head_dim 256 (gen_flash2.py hands this case over: head_dim 256, no sinks, >= 4
+query heads per KV head, no FLASH2_SCALE/NAME/DO/KT customization; FLASH2_SPLIT=0 keeps the generic kernel).
 
 Same contract and transposed form as gen_flash2.py (S^T = K Q^T: each lane's result column is one query,
 its 8 elements keys 2i + lane/16; softmax is in-lane plus one xor-16 shuffle; O^T += V^T P^T), but each

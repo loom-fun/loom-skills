@@ -3113,10 +3113,7 @@ if __name__ == "__main__":
     parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
     if not NO_FLASH:
         flash2 = os.path.join(out_dir, "flash2.loom")
-        # head_dim 256 without sinks: the split-dims kernel (Q held in registers, two waves per head);
-        # FLASH2_SPLIT=0 keeps gen_flash2.py (which reloads Q every key tile at head_dim 256).
-        split = D == 256 and not CFG.get("attn_sinks") and G >= 4 and os.environ.get("FLASH2_SPLIT", "1") != "0"
-        subprocess.run([sys.executable, os.path.join(here, "gen_flash2s.py" if split else "gen_flash2.py")], check=True,
+        subprocess.run([sys.executable, os.path.join(here, "gen_flash2.py")], check=True,
                        env=dict(os.environ, FLASH2_TARGET="llm", FLASH2_OUT=flash2, LLM_CONFIG=os.environ.get("LLM_CONFIG") or sys.argv[1]))
         parts.append(open(flash2).read())
     parts.append(program)
