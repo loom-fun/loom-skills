@@ -102,7 +102,7 @@ drafting. Measured on Strix Halo (greedy decode; tune.py requests, thinking off)
 
 | Model | No drafting | MTP | DFlash2 | llama.cpp b1355 (same drafters) |
 |---|---|---|---|---|
-| Qwen3.8-27B Q4_K_M (bartowski), 262k context, vision | 12.9 tok/s | depth 3: 33.0 tok/s | **depth 7: 45.4 tok/s**; depth 3: 36.5 (the published package's setting, better at long context; spec gate 16/16 incl. images) | none 12.0, MTP n-max 3 26.0, **DFlash2 n-max 3 28.1** |
+| Qwen3.8-27B Q4_K_M (bartowski), 262k context, vision | 12.6 tok/s | depth 3: 32.4 tok/s (depth 4: 32.6) | **depth 7: 47.7 tok/s**; depth 3: 35.4 (the published package's setting, better at long context; spec gate 16/16 incl. images) | none 12.0, MTP n-max 3 26.0, **DFlash2 n-max 3 28.1** |
 
 Published Qwen3.8-27B package (DFlash2 depth 3) vs llama.cpp b1355 with its best drafting, same session, three runs
 each (perf.py; c4_steady two runs): decode 26.9 vs 21.9 tok/s, @2k 27.9 vs 20.1, @32k 23.2 vs 21.2, prefill 1k-33k
@@ -111,17 +111,17 @@ each (perf.py; c4_steady two runs): decode 26.9 vs 21.9 tok/s, @2k 27.9 vs 20.1,
 | Qwen3.5-0.8B Q4_K_M | **262 tok/s** | 208 tok/s | - |
 | Qwen3-4B Q4_K_M | - | - | DFlash depth 7: 39 % acceptance, 3.7 tokens/step |
 
-Other families (Nov 2026, this skill tree with int8 activations (`ACT_Q8`, "Limits"); tune.py and llama_spec_tune.py
+Other families (Nov 2026, this skill tree with int8 activations (`ACT_Q8`, "Limits"), re-tuned with the final kernels; tune.py and llama_spec_tune.py
 on the same requests, llama.cpp b1364; every Loom setting below passed tune.py's equivalence check against
 draft_depth 0 of the same package and its concurrency check):
 
 | Model (arch, quant) | Drafter | Loom: none -> best | llama.cpp: none -> best | Loom before int8 activations |
 |---|---|---|---|---|
-| Nemotron-3.5-Bolt-E4B (gemma4, UD-Q5_K_XL) | NVIDIA DFlash, BF16 requantized to Q8_0 | 47.1 -> **114.3** (DFlash depth 7, x2.43; assistant depth 3: 107.2) | 45.3 -> 99.7 (DFlash n-max 7, x2.20) | 46.7 -> 73.4 |
-| Qwen3.5-4B (qwen35 hybrid, UD-Q4_K_XL, vision with M-RoPE, F16 tensors) | AtomicChat DFlash | 62.9 -> **117.1** (DFlash depth 7, x1.86) | 57.2 -> 105.0 (DFlash n-max 7, x1.84) | 62.9 -> 80.2 |
-| Muse-Glimmer-30B (muse-glimmer, UD-Q5_K_M) | z-lab DFlash2 | 12.3 -> **33.9** (DFlash2 depth 7, x2.75) | 11.6 -> 25.4 (DFlash2 n-max 3, x2.18) | 12.2 -> 20.5 |
-| Flint (flint MoE, Q4_K_M) | incoai DFlash2 | 63.8 -> **102.1** (DFlash2 depth 3, x1.60) | 53.5 -> 86.0 (DFlash2 n-max 3, x1.61) | 65.6 -> 90.5 |
-| LFM2.5-24B-A2B (lfm2moe, Q4_K_M) | none exists: n-gram only (short-conv replay) | **99.7** (n-gram 68.7: none kept) | **94.7** (ngram-simple 90.1, ngram-mod 93.6) | 102.7 |
+| Nemotron-3.5-Bolt-E4B (gemma4, UD-Q5_K_XL) | NVIDIA DFlash, BF16 requantized to Q8_0 | 47.4 -> **115.9** (DFlash depth 7, x2.45; assistant depth 3: 108.8) | 45.3 -> 99.7 (DFlash n-max 7, x2.20) | 46.7 -> 73.4 |
+| Qwen3.5-4B (qwen35 hybrid, UD-Q4_K_XL, vision with M-RoPE, F16 tensors) | AtomicChat DFlash | 62.8 -> **121.9** (DFlash depth 7, x1.94) | 57.2 -> 105.0 (DFlash n-max 7, x1.84) | 62.9 -> 80.2 |
+| Muse-Glimmer-30B (muse-glimmer, UD-Q5_K_M) | z-lab DFlash2 | 12.4 -> **37.1** (DFlash2 depth 7, x3.00) | 11.6 -> 25.4 (DFlash2 n-max 3, x2.18) | 12.2 -> 20.5 |
+| Flint (flint MoE, Q4_K_M) | incoai DFlash2 | 63.7 -> **102.6** (DFlash2 depth 3, x1.61) | 53.5 -> 86.0 (DFlash2 n-max 3, x1.61) | 65.6 -> 90.5 |
+| LFM2.5-24B-A2B (lfm2moe, Q4_K_M) | none exists: n-gram only (short-conv replay) | **99.7** (n-gram 71.1: none kept) | **94.7** (ngram-simple 90.1, ngram-mod 93.6) | 102.7 |
 
 Drafting works on every family, and with the int8-activation verify step Loom's drafted decode now leads llama.cpp's
 on every model measured, in absolute speed and (but for Flint's tie) in speedup over no drafting; the multi-token step
