@@ -713,6 +713,65 @@ def iq_load(j, ok, tok, groups, tokens="%tokens"):
   }}"""
 
 
+BFLY = (16, 8, 4, 2, 1)
+
+
+def bfly_setup(TG):
+    """Lane constants of bfly_store: bit d of the lane, the token whose wave sum this lane ends up holding (%bt_idx)
+    and whether it stores it (%bt_st)."""
+    t = ["", "  %bw32 = scalar.constant 32 : i32", "  %bc2 = index.constant 2 : index"]
+    T, idx, st = TG, [], []
+    for d in BFLY:
+        t.append(f"""  %bd{d} = scalar.constant {d} : i32
+  %bdi{d} = index.constant {d} : index
+  %bq{d} = index.div %lane, %bdi{d} : index
+  %br{d} = index.rem %bq{d}, %bc2 : index
+  %bb{d} = index.cmp ne, %br{d}, %c0 : index""")
+        if T > 1:
+            T //= 2
+            t.append(f"  %bh{d} = index.constant {T} : index\n  %bo{d} = scf.select %bb{d}, %bh{d}, %c0 : index")
+            idx.append(f"%bo{d}")
+        else:
+            st.append(f"%bb{d}")
+    acc = "%c0"
+    for k, v in enumerate(idx):
+        t.append(f"  %bi{k} = index.add {acc}, {v} : index"); acc = f"%bi{k}"
+    t.append(f"  %bt_idx_v = index.add {acc}, %c0 : index\n  %bt_idx = index.assume %bt_idx_v [range(%bt_idx_v, 0, {TG - 1})] : index")
+    t.append("  %bt_true = scalar.constant true : i1")
+    acc = "%bt_true"
+    for k, b in enumerate(st):
+        t.append(f"  %bn{k} = scalar.xori {b}, %bt_true : i1\n  %bs{k} = scalar.andi {acc}, %bn{k} : i1"); acc = f"%bs{k}"
+    t.append(f"  %bt_st = scalar.andi {acc}, %bt_true : i1")
+    return "\n".join(t)
+
+
+def bfly_store(vals, p, store):
+    """Wave sums of the lanes' per-token partials `vals` (TG of them), stored by store(value): a recursive-halving
+    butterfly (each step a lane keeps half of its tokens and adds its xor-partner's half) while several tokens remain,
+    then plain xor steps. Every token's sum is the same xor-16/8/4/2/1 pairing tree for any TG (and for TG = 1), so
+    multi-token variants round exactly like the 1-token kernel, with ~TG + 5 shuffles instead of 5 TG."""
+    t, T = [], len(vals)
+    for d in BFLY:
+        if T > 1:
+            h = T // 2
+            nv = []
+            for i in range(h):
+                lo, hi, q = vals[i], vals[i + h], f"%{p}_{d}_{i}"
+                t.append(f"""    {q}s = scf.select %bb{d}, {lo}, {hi} : f32
+    {q}k = scf.select %bb{d}, {hi}, {lo} : f32
+    {q}r, {q}u = kernel.subgroup.shuffle<xor> {q}s, %bd{d}, %bw32 : f32, i32, i32
+    {q} = scalar.addf {q}k, {q}r : f32""")
+                nv.append(q)
+            vals, T = nv, h
+        else:
+            q = f"%{p}_{d}"
+            t.append(f"""    {q}r, {q}u = kernel.subgroup.shuffle<xor> {vals[0]}, %bd{d}, %bw32 : f32, i32, i32
+    {q} = scalar.addf {vals[0]}, {q}r : f32""")
+            vals = [q]
+    t.append(f"    scf.if %bt_st {{\n      {store(vals[0])}\n    }}")
+    return "\n".join(t)
+
+
 def mv(fmt, K, R=16, TG=1, swiglu=False, suffix="", iq=False):
     """Decode matrix-vector: a workgroup covers one K row with one lane per
     32-value group (lanes = groups rounded up to a wave), R output rows and TG
@@ -781,7 +840,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %ba = index.scale %blk, %block_bytes : index, offset -> offset""" + ("""
   %zero_i = scalar.constant 0 : i32
   %zero8i = vector.constant 0 : vector<8xi32>
-  %zero32i8 = vector.constant 0 : vector<32xi8>""" if iq else "")]
+  %zero32i8 = vector.constant 0 : vector<32xi8>""" + bfly_setup(TG) if iq else "")]
     for j in range(TG):
         L.append((f"""  %tj{j}_off = index.constant {j} : index
   %tok{j}_raw = index.add %token0, %tj{j}_off : index
@@ -824,11 +883,9 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
             # integer codes once per row; per token one dot4 contraction against the int8 activations
             L.append(iq_decode(fmt, wi, w, "%ok", "%o", "%within"))
             for j in range(TG):
-                L.append(iq_dot(fmt, wi, j, f"%pa{wi}_{j}") + f"""
-    %s{wi}_{j} = kernel.subgroup.reduce<addf> %pa{wi}_{j} : f32
-    scf.if %first {{
-      view.store %s{wi}_{j}, %pv[{wi}, %wave, %rb, {j}] : f32, view<{nw}x{waves}x{R}x{TG}xf32>
-    }}""")
+                L.append(iq_dot(fmt, wi, j, f"%pa{wi}_{j}"))
+            L.append(bfly_store([f"%pa{wi}_{j}" for j in range(TG)], f"b{wi}",
+                                lambda v: f"view.store {v}, %pv[{wi}, %wave, %rb, %bt_idx] : f32, view<{nw}x{waves}x{R}x{TG}xf32>"))
             continue
         if fmt == "q4_k":
             # codes once per row; per token scale * dot(codes, x) - minimum * sum(x)
@@ -2268,16 +2325,23 @@ _LIN = [0]
 
 
 def mv_wide_tokens(fmt, kval, sw, n, mv_args):
-    """int8-activation matvec for 2+ tokens: the 4-token kernel up to 4 tokens, else the 8-token one (one weight
-    pass per 8 tokens). Every variant rounds each token exactly as the 1-token kernel does."""
+    """int8-activation matvec for 2+ tokens: the 4-token kernel up to 4 tokens, the 8-token one up to 8, else the
+    16-token one (one weight pass per 16 tokens: 4 drafting streams at depth 3). Every variant rounds each token
+    exactly as the 1-token kernel does."""
     _LIN[0] += 1
     k = _LIN[0]
     return (f"""%c4_l{k} = index.constant 4 : index
         %le4_l{k} = index.cmp ule, %t, %c4_l{k} : index
+        %c8_l{k} = index.constant 8 : index
+        %le8_l{k} = index.cmp ule, %t, %c8_l{k} : index
         scf.if %le4_l{k} {{
           kernel.launch @{mv_name(fmt, kval, sw, n, 4, True)}[{n}, %t]{mv_args}
         }} else {{
-          kernel.launch @{mv_name(fmt, kval, sw, n, 8, True)}[{n}, %t]{mv_args}
+          scf.if %le8_l{k} {{
+            kernel.launch @{mv_name(fmt, kval, sw, n, 8, True)}[{n}, %t]{mv_args}
+          }} else {{
+            kernel.launch @{mv_name(fmt, kval, sw, n, 16, True)}[{n}, %t]{mv_args}
+          }}
         }}""")
 
 def head_mv(TG, fmt, iq=False):
@@ -2477,7 +2541,8 @@ USED_MVQ = set()     # (fmt, K, swiglu, R, TG) of the int8-activation matvecs (A
 def head_wiring(program):
     """ACT_Q8 with an integer-format head: every `%c = cmp eq spans, 1; scf.if %c { g_head_mv } else { g_head_mv_t4 }`
     dispatch quantizes its hidden rows once (g_quant_q8) and launches the int8 head for 1, 2-4 or 5+ spans (one head
-    pass per 8 spans; every variant rounds each span as the 1-span kernel does, so verify matches decode)."""
+    pass per 8 spans; a 16-span variant was slower: 4-stream c4 36.9 vs 40.9 tok/s on Qwen3.8-27B; every variant
+    rounds each span as the 1-span kernel does, so verify matches decode)."""
     import re as _re
     pat = _re.compile(r"(?P<i>[ ]*)(?P<c>%\w+) = index\.cmp eq, (?P<sp>%\w+), %c1 : index\n"
                       r"\s*scf\.if (?P=c) \{\n\s*kernel\.launch @g_head_mv\[(?P=sp)\]\((?P=sp), (?P<t>%\w+), (?P<m>%\w+), (?P<h>%\w+), (?P<r>[^)]*)\) : (?P<ty>[^\n]*)\n"
@@ -2871,8 +2936,8 @@ if __name__ == "__main__":
         # 5-63-token epochs (depth > 3, or several drafting streams) take the f16 WMMA GEMM: one weight pass per step
         # (4 drafting streams at depth 3: 69 vs 146 ms per epoch on Bolt-E4B), at the price of rare near-tie flips vs
         # 1-token decode. SPEC_EXACT=1 keeps the 4-token matvec (decode's rounding) at every width instead.
-        # ACT_Q8: the int8 matvec streams weights once per 8 tokens, so the GEMM takes over later (SPEC_MM_FROM).
-        mm_from = int(os.environ.get("SPEC_MM_FROM", "9" if USED_MVQ else "5"))
+        # ACT_Q8: the int8 matvec streams weights once per 16 tokens, so the GEMM takes over later (SPEC_MM_FROM).
+        mm_from = int(os.environ.get("SPEC_MM_FROM", "17" if USED_MVQ else "5"))
         program = "\n".join(spec) if os.environ.get("SPEC_EXACT") == "1" else gen_draft.small_gemm("\n".join(spec), mm_from)
         spec_kernels = gen_draft.kernels(gfacts)
         if gen_draft.DRAFT["kind"] == "dflash":
