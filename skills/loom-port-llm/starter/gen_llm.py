@@ -419,10 +419,10 @@ func.def inline @g_q8_0_values(%w: buffer, %origin: offset, %group: index) -> (v
 // Q5_K group as values (for heads/embeddings) is g_q5_k_values; Q4_K is g_q4_k_values.
 """
 
-# ACT_Q8=1: decode-shaped projections (t < 64) quantize each lane's 32-value activation group to int8 in
-# registers (llama.cpp's Q8_1 activations: d = amax/127 rounded to F16, q = round(x/d)) and contract
-# weight codes with integer dot4 products, as llama.cpp's mul_mat_vec_q does. Decode and the 2-4-token verify
-# share the kernel body, so they round identically.
+# ACT_Q8=1 (default): decode-shaped projections (t < 64) and the head read int8 activations (g_quant_q8, once per
+# activation: llama.cpp's Q8_1 rule, d = amax/127 rounded to F16, q = round(x/d)) and contract the weight codes with
+# integer dot4 products, as llama.cpp's mul_mat_vec_q does. The 1/4/8/16-token variants share the per-token
+# arithmetic and the wave-sum tree (bfly_store), so decode and verify round identically. ACT_Q8=0: f32 activations.
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"
 IQ_FMTS = {"q8_0", "q4_k", "q5_k", "q6_k"}
 ICODES = r"""
