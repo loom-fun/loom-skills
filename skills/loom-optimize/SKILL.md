@@ -97,6 +97,11 @@ bench/llama_cache/` (a trial staged 5 GB of ktest/ and llama.cpp builds and `git
 - **Microbenchmarks lie through the 32 MB MALL.** A kernel benchmark whose weights
   or KV fit in 32 MB shows 2–5× the DRAM bandwidth. Use full-size tensors (all
   layers) or end-to-end numbers.
+- **...and through constant data.** Strix Halo's GPU is power-limited: WMMA on constant operands runs
+  52–57 TOPS, on random operands ~40 (wave32) / ~43 (wave64), for f16 and int8 alike. A prefill GEMM fed
+  `check.generate.fill` constants read 36 TFLOP/s; with the GGUF's real weights and random activations
+  30 (the model measured 28). Feed compute-bound benchmarks real weights (`check.file.read.npy`) and
+  random activations before trusting a kernel A/B.
 - **Prefix caching.** Start every timed prompt with a nonce, as `perf.py` does.
 - Lazy weight load, stale servers on the port, server- vs client-side timing and near-tie
   noise: see the `loom` hard rules and `loom-benchmark`.
@@ -140,9 +145,14 @@ here must keep the `spec` gate exact.
 
 ## Where the remaining gap usually is
 
-- **Prefill GEMM efficiency.** We got 25–31 TFLOP/s of ~59 peak. The next steps are
-  a double-buffered LDS pipeline for B (weights) and dequantizing Q4_K straight
-  into WMMA fragments.
+- **Prefill GEMM efficiency.** Q4_K GEMMs run ~28 TFLOP/s in the model (~30 on real data in isolation), ~70 %
+  of the real-data WMMA ceiling (~40–43 TOPS, see above); gufo (an engine tuned for this chip) reaches ~80 %
+  with int8 (W8A8 / K-quant×Q8_1) wave64 GEMMs, which halve LDS and activation traffic, and fused
+  norm/SwiGLU→Q8_1 epilogues. int8 WMMA is not faster per instruction here (same ~40 TOPS on real data), so
+  the gain is energy: fewer bytes moved per MAC. A wave64 port of the f16 GEMM that reads W through a
+  transposed fragment view was slower (27.6 vs 30.5 TFLOP/s); a native int8 K-quant GEMM is the untried lever.
+- **Gated delta-net prefill** (hybrids): the register recurrence steps through the chunk token by token
+  (Qwen3.8-27B: 0.14 ms/token of 2.3, all GDN kernels 0.27); a chunked (WY / parallel-scan) form is the lever.
 - **Small models** (≤ 1B), for example Qwen3-0.6B: decode at 2k context ran 179
   vs 193 tok/s for llama.cpp. There, the attention and launch overhead per layer
   dominates rather than weight bandwidth. Fewer, fused launches per layer, and

@@ -115,6 +115,24 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - It only handles *uniform* tiles: all 16 tokens live, one row, consecutive
   positions (`g_tile_uniform`). Every other token goes to the listed fallback.
 
+### flash2 at head_dim 256 (`gen_flash2s.py`)
+- At head_dim 256, 256 dims of Q (as f16 fragments) plus 256 dims of output accumulators exceed 256 VGPRs, so
+  gen_flash2.py reloads all of Q from global memory (f32, converted each time) every 32-key tile: ~6x the K/V
+  tile's bytes. gen_flash2s.py gives each query head TWO waves of 128 dims: a wave holds its Q half in
+  registers for the whole key loop, computes S^T over its dims, publishes it to LDS and adds its partner's
+  (commutative add: both waves hold bit-identical S, softmax and P), then accumulates its 128 output dims.
+- Staging: lane = key, workitem/32 = dim segment, so a wave's V^T writes hit 32 consecutive columns
+  (conflict-free) and each lane does one paged-KV lookup per tile (V = K offset + one plane).
+- Qwen3.8-27B (G = 6, 12 waves, 61 KB LDS): a 1024-token chunk at 32k depth runs 16.9 TFLOP/s; prefill
+  2k/8k/32k 401.6/368.6/262.5 -> 429.1/426.7/378.1 tok/s. Attention had been 1.42 ms of 3.8 ms per token at 32k.
+- Test it standalone with real shapes: a flash2 harness (paged arena filled directly, float64 reference with
+  the gate) plus a broken variant (partner sum dropped) as the negative control.
+
+### Q6_K dequant (`gen_gemm.py`)
+- Do the bit work on 32-bit words (masks 0x0F0F0F0F / 0x03030303; a byte's bits shifted in from its
+  neighbour are masked off) and finish with one f16 FMA `codes * s + (-32 s)`; byte vectors plus f32 math
+  ran 22 TFLOP/s, this 26-28 (Q4_K: ~35 on the same constant-data benchmark).
+
 ### Listed fallback
 - `g_attention_fallback_list` compacts the tokens of non-uniform tiles that are
   live into a list, using an atomic counter. The split-K attention then runs over
