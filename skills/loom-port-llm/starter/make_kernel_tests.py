@@ -424,6 +424,47 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   check.return
 }}
 """)
+# Prefill flash attention (gen_flash2.py / gen_flash2s.py): 64 uniform tokens at the end of a 1024-key context,
+# paged arena filled directly (identity page map), layer 0, causal; q scaled so attention is sharp (a kernel that
+# drops part of the score sum fails). Reference in float64 from f16 Q/K/V, times sigmoid(gate) when gated.
+if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and cfg.get("sliding_window") in (None, 0):
+    t, ctx = 64, 1024
+    P0 = ctx - t; blocks = ctx // 16; pool = ctx
+    kk = rng.standard_normal((ctx, KVH, D)).astype(np.float16); vv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
+    arena = np.zeros((2, pool, KVH, D), np.float16); arena[0], arena[1] = kk, vv
+    qq = (rng.standard_normal((t, QH, D)) * 2.5).astype(np.float32); gg = rng.standard_normal((t, QH, D)).astype(np.float32)
+    orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
+    info = np.zeros((t, 4), np.int32); info[:, 1] = P0 + np.arange(t); info[:, 2] = 1
+    o = np.zeros((t, QH, D)); qd = qq.astype(np.float16).astype(np.float64)
+    for hh in range(QH):
+        kv = hh // (QH // KVH); sc = qd[:, hh] @ kk[:, kv].astype(np.float64).T / np.sqrt(D)
+        sc[np.arange(ctx)[None, :] > (P0 + np.arange(t))[:, None]] = -1e30
+        pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); o[:, hh] = pr @ vv[:, kv].astype(np.float64)
+    if cfg.get("attn_gate"):
+        o = o / (1 + np.exp(-gg))
+    QD = QH * D
+    for n, a in [("f_arena", arena.reshape(-1)), ("f_q", qq.reshape(t, QD)), ("f_g", gg.reshape(t, QD)), ("f_orig", orig),
+                 ("f_info", info), ("f_o", o.reshape(t, QD).astype(np.float32))]:
+        save(n, a)
+    AT = f"tensor<{2 * pool * KVH * D}xf16>"
+    cases.append(f"""check.case public @flash_prefill {{
+  %t = check.literal value({t}) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value(0) : i32
+  %ctx = check.literal value({ctx}) : index
+  %pool = check.literal value({pool}) : index
+  %q = check.file.read.npy path("f_q.npy") : tensor<{t}x{QD}xf32>
+  %g = check.file.read.npy path("f_g.npy") : tensor<{t}x{QD}xf32>
+  %info = check.file.read.npy path("f_info.npy") : tensor<{t}x4xi32>
+  %orig = check.file.read.npy path("f_orig.npy") : tensor<{10 + blocks}xi32>
+  %arena = check.file.read.npy path("f_arena.npy") : {AT}
+  %e = check.file.read.npy path("f_o.npy") : tensor<{t}x{QD}xf32>
+  %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
+  kernel.launch @g_attention_flash2[%t](%t, %layer, %sliding, %ctx, %pool, %q, %g, %info, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AT}, tensor<{t}x{QD}xf32>)
+  check.expect.close actual(%o) expected(%e) atol(4.0e-3) rtol(4.0e-3) nan(different) : tensor<{t}x{QD}xf32>
+  check.return
+}}
+""")
 import re
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
