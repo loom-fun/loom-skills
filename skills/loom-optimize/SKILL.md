@@ -130,11 +130,12 @@ prompt lookup is a candidate for every model; `loom-port-llm/starter/draft/READM
 (`bench/llamacpp_spec.json`), so decode targets are drafting vs drafting; re-run `draft/tune.py WORKDIR PORT MEMORY_GIB MODEL_ID` after a change that moves
 the decode/verify balance (it rebuilds `pkg`). On a bandwidth-bound model it is the biggest decode lever
 (Qwen3.8-27B Q4_K_M: 12.8 -> 21.0 tok/s with MTP depth 3); on small launch-bound models it loses (Qwen3.5-0.8B:
-262 -> 208) and tune.py keeps it off. Biggest open lever (Qwen3.8-27B Q4_K_M): the target step for 3-4 tokens
-costs 130 ms vs 91 for 2 and 79 for 1, so drafted decode trails llama.cpp with the same drafter (21.3 vs 26.0
-tok/s) while 1-token decode leads; measurements in `draft/README.md` "Limits". Other levers inside it: verify cost for more than 4 tokens per epoch (the
-4-token matvec re-reads weights per 4 tokens: a 16-row WMMA GEMM is the fix; streamed / f16 8-token matvecs
-were slower), the head over verify and draft rows (per 4 rows), drafter catch-up cost at prefill. Every change
+262 -> 208) and tune.py keeps it off. The multi-token target step that used to cap it (issue #21: f32 activations
+in the 4-token matvec, 192+ VGPRs per lane) is fixed in the starter: decode-shaped linears and the head use int8
+activations with integer dot4 contractions (`ACT_Q8`, llama.cpp's mul_mat_vec_q numerics), with 1-/4-/8-/16-token
+variants that round each token like 1-token decode (`draft/README.md` "Limits"). Remaining levers: verify epochs
+of 17+ tokens (many drafting streams) take the WMMA GEMM; long-context verify pays decode attention per token (draft/README.md), drafter catch-up cost at prefill, and the MoE expert
+matvecs of the flint/lfm2moe kits, which still use f32 activations. Every change
 here must keep the `spec` gate exact.
 
 ## Where the remaining gap usually is

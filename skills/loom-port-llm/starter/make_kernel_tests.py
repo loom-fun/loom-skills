@@ -2,8 +2,8 @@
 
 usage: python make_kernel_tests.py CONFIG.json OUTDIR      (tools venv: gguf, numpy)
        run_kernel_tests.sh PACKAGE OUTDIR                  (loom-test on the GPU)
-Covers g_embed, the decode matvecs (1- and 4-token variants) for one tensor of
-each (format, K), the QK-norm + RoPE kernel (incl. head_dim 256 / partial
+Covers g_embed, the decode matvecs (1- and 4-token variants; with ACT_Q8, the default, g_quant_q8 + the
+int8-activation 1-/4-/8-/16-token variants for Q8_0/Q4_K/Q5_K/Q6_K) for one tensor of each (format, K), the QK-norm + RoPE kernel (incl. head_dim 256 / partial
 RoPE), and for hybrid models the whole gated delta-net chain on a span that
 continues a stored recurrent state (conv, history commit, q/k norms,
 recurrence, gated norm, published state). Extend it
@@ -16,6 +16,20 @@ from gguf import GGUFReader
 from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mv_rows import pick_r  # noqa: E402
+ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
+IQ_FMTS = {"q8_0", "q4_k", "q5_k", "q6_k"}
+
+
+def q8_ref(xs):
+    """llama.cpp quantize_q8_1 per 32-value group (d = amax/127 rounded to F16, q = round(x/d)): the dequantized
+    activations the _q8 kernels contract with."""
+    g = xs.reshape(xs.shape[0], -1, 32).astype(np.float32)
+    d = np.abs(g).max(-1, keepdims=True) / np.float32(127)
+    v = np.divide(g, d, out=np.zeros_like(g), where=d > 0)
+    q = np.sign(v) * np.floor(np.abs(v) + 0.5)
+    return (q * d.astype(np.float16).astype(np.float32)).reshape(xs.shape)
+
+
 cfg = json.load(open(sys.argv[1])); out = sys.argv[2]; os.makedirs(out, exist_ok=True)
 r = GGUFReader(cfg["gguf"]); T = {t.name: t for t in r.tensors}
 def raw(name): return np.asarray(T[name].data).view(np.int8).reshape(-1)
@@ -102,6 +116,8 @@ for li in range(cfg["layers"]):
 for name, K in todo:
     fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
     for tg in (1, 4):
+        if ACT_Q8 and fmt in IQ_FMTS:
+            break
         xs = rng.standard_normal((tg, K)).astype(np.float32); y = xs @ W.T.astype(np.float64)
         tag = name.replace(".", "_") + f"_t{tg}"
         save(tag + "_w", raw(name)); save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
@@ -118,6 +134,32 @@ for name, K in todo:
   %e = check.file.read.npy path("{tag}_y.npy") : tensor<{tg}x{n}xf32>
   %y = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
   kernel.launch @{kern}[%n, %t](%n, %t, %acc, %x, %w, %y) : [index, index](index, index, i32, tensor<{tg}x{K}xf32>, {wt}, tensor<{tg}x{n}xf32>)
+  check.expect.close actual(%y) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{tg}x{n}xf32>
+  check.return
+}}
+""")
+    if ACT_Q8 and fmt in IQ_FMTS:   # g_quant_q8 then the int8 matvec, at the 1-, 4- and 8-token variants
+        for tg in (1, 4, 8, 16):
+            xs = rng.standard_normal((tg, K)).astype(np.float32); y = q8_ref(xs).astype(np.float64) @ W.T.astype(np.float64)
+            tag = name.replace(".", "_") + f"_q8_t{tg}"
+            save(tag + "_w", raw(name)); save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
+            _R = pick_r(n, K, tg)
+            if tg >= 8 and n % 16 == 0 and os.environ.get("MV_Q8_R16", "1") == "1":   # gen_llm.py mv_name's rule
+                _R = 16
+            kern = f"g_mv_{fmt}_k{K}" + (f"_t{tg}" if tg > 1 else "") + "_q8" + (f"_r{_R}" if _R != 16 else "")
+            wt = ty(raw(name))
+            cases.append(f"""check.case public @mv_{tag} {{
+  %n = check.literal value({n}) : index
+  %t = check.literal value({tg}) : index
+  %k = check.literal value({K}) : index
+  %acc = check.literal value(0) : i32
+  %w = check.file.read.npy path("{tag}_w.npy") : {wt}
+  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{tg}x{K}xf32>
+  %e = check.file.read.npy path("{tag}_y.npy") : tensor<{tg}x{n}xf32>
+  %xq = check.generate.fill value(0) : tensor<{tg}x{2 * K}xi8>
+  %y = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  kernel.launch @g_quant_q8[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<{tg}x{K}xf32>, tensor<{tg}x{2 * K}xi8>)
+  kernel.launch @{kern}[%n, %t](%n, %t, %acc, %xq, %w, %y) : [index, index](index, index, i32, tensor<{tg}x{2 * K}xi8>, {wt}, tensor<{tg}x{n}xf32>)
   check.expect.close actual(%y) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{tg}x{n}xf32>
   check.return
 }}
@@ -164,7 +206,8 @@ t = 3
 head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
 Wh = deq(head_name).astype(np.float64)
 hs = rng.standard_normal((t, H)).astype(np.float32)
-logits = Wh @ hs[-1].astype(np.float64)
+HEAD_Q8 = ACT_Q8 and T[head_name].tensor_type.name.lower() in IQ_FMTS
+logits = Wh @ (q8_ref(hs[-1:])[0] if HEAD_Q8 else hs[-1]).astype(np.float64)
 meta = np.zeros(4 + 9, np.int32); meta[0] = 1; meta[4 + 0] = t; meta[4 + 6] = 1
 order = np.argsort(-logits)
 for n, a in [("hd_meta", meta), ("hd_h", hs), ("hd_w", raw(head_name)), ("hd_out", np.array([order[0]], np.int32))]:
@@ -183,7 +226,11 @@ cases.append(f"""check.case public @head_argmax {{
   %partials = check.generate.fill value(0) : tensor<{CH * 2}xi32>
   %logits = check.generate.fill value(0.0) : tensor<{CH * 128}xf32>
   %out = check.generate.fill value(0) : tensor<1xi32>
-  kernel.launch @g_head_mv[%spans](%spans, %t, %meta, %h, %w, %partials, %logits) : [index](index, index, tensor<13xi32>, tensor<{t}x{H}xf32>, {hwt}, tensor<{CH * 2}xi32>, tensor<{CH * 128}xf32>)
+""" + (f"""  %hk = check.literal value({H}) : index
+  %hq = check.generate.fill value(0) : tensor<{t}x{2 * H}xi8>
+  kernel.launch @g_quant_q8[%t, %hk](%t, %hk, %h, %hq) : [index, index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x{2 * H}xi8>)
+  kernel.launch @g_head_mv_q8[%spans](%spans, %t, %meta, %hq, %w, %partials, %logits) : [index](index, index, tensor<13xi32>, tensor<{t}x{2 * H}xi8>, {hwt}, tensor<{CH * 2}xi32>, tensor<{CH * 128}xf32>)""" if HEAD_Q8 else
+      f"""  kernel.launch @g_head_mv[%spans](%spans, %t, %meta, %h, %w, %partials, %logits) : [index](index, index, tensor<13xi32>, tensor<{t}x{H}xf32>, {hwt}, tensor<{CH * 2}xi32>, tensor<{CH * 128}xf32>)""") + f"""
   kernel.launch @g_head_select[%spans](%spans, %meta, %partials, %logits, %out) : [index](index, tensor<13xi32>, tensor<{CH * 2}xi32>, tensor<{CH * 128}xf32>, tensor<1xi32>)
   check.expect.equal actual(%out) expected(%expect) : tensor<1xi32>
   check.return

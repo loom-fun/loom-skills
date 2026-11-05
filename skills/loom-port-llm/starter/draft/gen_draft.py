@@ -760,7 +760,7 @@ def _split_head(program):
     return program[:i + 1], program[i + 1:]
 
 
-def small_gemm(program):
+def small_gemm(program, start=5):
     """Verification epochs carry width x spans tokens (e.g. 4 streams x 4 = 16). The 4-token matvec streams the
     weights once per 4 tokens, so their linears take the WMMA GEMM from 5 tokens on, over the token count padded
     to 64 rows (one weight pass per step); GEMM rows are independent, so the padded rows are never read.
@@ -768,7 +768,7 @@ def small_gemm(program):
     import re as _re
     t_def = "  %t = config.get @llm.tokens : index\n"
     assert t_def in program
-    program = program.replace(t_def, t_def + "  %c5_mm = index.constant 5 : index\n  %c63_tp = index.constant 63 : index\n"
+    program = program.replace(t_def, t_def + f"  %c5_mm = index.constant {start} : index\n  %c63_tp = index.constant 63 : index\n"
                               "  %c64_tp = index.constant 64 : index\n  %tp_a = index.add %t, %c63_tp : index\n"
                               "  %tp_b = index.div %tp_a, %c64_tp : index\n  %tp = index.mul %tp_b, %c64_tp : index\n"
                               "  %mm = index.cmp uge, %t, %c5_mm : index\n")

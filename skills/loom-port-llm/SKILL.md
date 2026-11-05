@@ -162,10 +162,11 @@ Nothing to configure; read `starter/draft/README.md` only to debug it.
   (`starter/draft/README.md` "Recurrent layers"); without one the `spec` gate fails on the first rejected draft.
 - Output is exactly the target's: verification, device acceptance and gated delta-net replay commit only target
   tokens, and seeded sampling draws at the true position. The `spec` gate compares with the same package at
-  `draft_depth 0` (`pkg/model_target.json`); at depth <= 3 a difference is a bug, not a near-tie. Wider
-  verification (depth 5-7, or several drafting streams) takes the f16 WMMA GEMM for speed and can flip near-ties
-  (`SPEC_EXACT=1` builds trade that speed for decode's rounding); tune.py runs the equivalence check before it keeps
-  a drafter and depth, so a depth that changes a request's output is never chosen.
+  `draft_depth 0` (`pkg/model_target.json`); for a single request (up to 16 verified tokens: the int8 matvecs'
+  1-/4-/8-/16-token variants round like 1-token decode) a difference is a bug, not a near-tie. Wider verification
+  (many drafting streams, 17+ tokens) takes the f16 WMMA GEMM for speed and can flip near-ties (`SPEC_EXACT=1`
+  builds trade that speed for decode's rounding); tune.py runs the equivalence check before it keeps a drafter and
+  depth, so a depth that changes a request's output is never chosen.
 - Drafting works to the full context and with history reuse and checkpoints: the draft K/V shares the pool's pages.
 - Depth is a `model.json` setting (`execution.draft_depth`, 1-7); the method needs a rebuild.
 - Small models (< ~2B) decode faster without it (launch-bound); `tune.py` measures and decides.
@@ -176,7 +177,7 @@ Nothing to configure; read `starter/draft/README.md` only to debug it.
 |---|---|
 | `inspect_gguf.py` | GGUF metadata → `cfg.json`: hidden, layers, heads/kv_heads, head_dim, ffn, vocab, **context_length**, rms_eps, rope_theta/type, **rope_dims** (partial RoPE), qk_norm, attn_gate (`true`: separate tensor; `"fused_q"`: packed in attn_q), post_norms, sliding window/layers, NoPE layers, tied embeddings, eos ids, **recurrent_layers / gdn** (hybrids), the chat block (via `chat_probe.py`), and every tensor's format and shape. |
 | `chat_probe.py` | Renders the model's Jinja chat template on probe conversations and cuts out what the control program needs: role prefixes/suffix, BOS, default system prompt, generation prompts with thinking on/off, the tools block and its order relative to the system message, the tool-call format (`hermes` JSON, `qwen_xml`, `glm`, `pythonic`) and separators, tool-response framing, reasoning-in-history policy, trimming. `verify()` re-renders a dozen conversations exactly as `control.loom` will (`simulate()`) and diffs them against the template. `simulate()` is also what the benchmark scripts use to build golden prompts. |
-| `gen_llm.py` | `cfg.json` → `llm.loom`: all kernels plus the `@llm_advance` command program. The command program is a **static per-layer unroll**, so each layer's kind (attention or gated delta-net) and tensor formats come from the GGUF (Q4_K_M mixes Q4_K/Q5_K/Q6_K/Q8_0 per tensor). |
+| `gen_llm.py` | `cfg.json` → `llm.loom`: all kernels plus the `@llm_advance` command program. The command program is a **static per-layer unroll**, so each layer's kind (attention or gated delta-net) and tensor formats come from the GGUF (Q4_K_M mixes Q4_K/Q5_K/Q6_K/Q8_0 per tensor). Decode-shaped linears (< 64 tokens) and the head use int8 activations (`g_quant_q8` + `_q8` matvecs with integer dot4, llama.cpp's Q8_1 numerics; 1-, 4-, 8- and 16-token variants that round alike) for Q8_0/Q4_K/Q5_K/Q6_K weights; `ACT_Q8=0` keeps f32 activations. |
 | `gen_gdn.py` | Gated delta-net kernels (conv1d + SiLU, history commit, q/k L2 norms, register recurrence, gated RMSNorm) and the fused q/gate split, for hybrids. Recurrent state lives in the runtime's recurrent slots (see porting-notes). |
 | `gen_gemm.py` | WMMA prefill GEMMs per (format, mode). Formats: q4_k, q5_k, q6_k, q8_0. Modes: store, acc, swiglu. |
 | `gen_flash2.py` | Prefill flash attention (transposed, K/V staged once per KV head), head_dim 128 or 256. |
