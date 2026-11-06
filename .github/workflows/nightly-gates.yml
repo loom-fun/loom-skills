@@ -4,7 +4,8 @@ name: nightly-gates
 # cards, one AMD DevLab Dispatch Strix Halo runner per card, in parallel. Deterministic: no LLM agent, no
 # skill run; each job fetches the card with loom-fetch, serves it and runs .github/scripts/nightly_gates.sh.
 # The development loop runs the lean LEVEL=dev gates instead (loom-benchmark SKILL.md, "Which level when").
-# A pull request labeled `nightly-gates` runs the same matrix on its branch (validates gate or workflow changes).
+# A pull request labeled `nightly-gates` runs the matrix on its branch at LEVEL=dev and LEVEL=full (validates gate
+# or workflow changes, and measures the dev level's wall time on every card without using a developer's GPU).
 on:
   pull_request:
     types: [labeled, synchronize]
@@ -21,7 +22,7 @@ on:
         required: false
         default: full
         type: choice
-        options: [full, quick, dev, fast]
+        options: [full, quick, dev, dev+full, fast]
       perf:
         description: "Report-only perf (Loom vs the card's published numbers)"
         required: false
@@ -51,6 +52,7 @@ jobs:
       - id: pick
         env:
           ONLY: ${{ inputs.models }}
+          LEVELS: ${{ github.event_name == 'pull_request' && 'dev+full' || inputs.level || 'full' }}
         run: |
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import json, os
@@ -60,7 +62,9 @@ jobs:
           if unknown:
               raise SystemExit(f"not in .github/nightly-models.json: {unknown}")
           ms = [m for m in ms if not only or m["repo"] in only]
-          print("matrix=" + json.dumps({"include": [{"repo": m["repo"], "slug": m["slug"], "llamacpp": m["llamacpp"]} for m in ms]}))
+          levels = os.environ["LEVELS"].split("+")
+          print("matrix=" + json.dumps({"include": [{"repo": m["repo"], "slug": m["slug"], "llamacpp": m["llamacpp"], "level": lv}
+                                                    for lv in levels for m in ms]}))
           print("repos=" + ",".join(m["repo"] for m in ms))
           EOF
 
@@ -69,7 +73,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.models.outputs.matrix) }}
-    name: gates (${{ matrix.slug }})
+    name: gates (${{ matrix.slug }}, ${{ matrix.level }})
     # AMD DevLab's pool: `devlab-dispatch` opts in to the pool and `strix-halo` narrows it to gfx1151.
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
     # LEVEL=full on a 27-30B card: ~1 h for the full-context needle alone, plus the half-context needle and
@@ -78,8 +82,8 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       GH_TOKEN: ${{ github.token }}   # fetch_llamacpp.sh: GitHub API without rate limits
-      LEVEL: ${{ inputs.level || 'full' }}
-      PERF: ${{ (github.event_name != 'workflow_dispatch' || inputs.perf) && '1' || '0' }}
+      LEVEL: ${{ matrix.level }}
+      PERF: ${{ matrix.level != 'dev' && (github.event_name != 'workflow_dispatch' || inputs.perf) && '1' || '0' }}
       WORK: ${{ github.workspace }}/../nightly-work
       CLEAN: "1"   # shared runners: delete the fetched GGUFs at the end
     steps:
@@ -96,7 +100,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK }}/${{ matrix.slug }}/bench/llama_cache
-          key: llama-${{ matrix.slug }}-${{ matrix.llamacpp }}-${{ steps.card.outputs.lock }}-${{ hashFiles('skills/loom-benchmark/scripts/*.py') }}-${{ github.run_id }}
+          key: llama-${{ matrix.slug }}-${{ matrix.llamacpp }}-${{ steps.card.outputs.lock }}-${{ hashFiles('skills/loom-benchmark/scripts/*.py') }}-${{ matrix.level }}-${{ github.run_id }}
           restore-keys: |
             llama-${{ matrix.slug }}-${{ matrix.llamacpp }}-${{ steps.card.outputs.lock }}-${{ hashFiles('skills/loom-benchmark/scripts/*.py') }}-
             llama-${{ matrix.slug }}-${{ matrix.llamacpp }}-${{ steps.card.outputs.lock }}-
@@ -109,12 +113,12 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.WORK }}/${{ matrix.slug }}/bench/llama_cache
-          key: llama-${{ matrix.slug }}-${{ matrix.llamacpp }}-${{ steps.card.outputs.lock }}-${{ hashFiles('skills/loom-benchmark/scripts/*.py') }}-${{ github.run_id }}
+          key: llama-${{ matrix.slug }}-${{ matrix.llamacpp }}-${{ steps.card.outputs.lock }}-${{ hashFiles('skills/loom-benchmark/scripts/*.py') }}-${{ matrix.level }}-${{ github.run_id }}
       - name: upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-${{ matrix.slug }}
+          name: nightly-${{ matrix.slug }}-${{ matrix.level }}
           path: ${{ env.WORK }}/${{ matrix.slug }}/out
           retention-days: 30
       - name: clean up

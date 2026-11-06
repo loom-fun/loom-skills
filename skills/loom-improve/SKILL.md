@@ -123,6 +123,12 @@ seeing results, and don't shrink the plan afterwards. Cheapest evidence first:
   stale `build.py` broke the chat placeholders at run time. Chat glue: both Qwen chat blocks still derive
   12/12 and pass `agent_golden.py`. A fallback you add must be tested on a model that takes it (a split-K
   prefill fallback once produced garbage).
+- **Where checks run.** The dev machine's GPU is scarce and sequential; AMD DevLab Dispatch is a large
+  elastic pool. The dev machine runs only what the inner loop needs (kernel tests, `chat_probe --verify`,
+  `LEVEL=dev` on the package you just changed). Long or deep checks, and anything that runs against the
+  published cards (`quick`/`full`, gate-script or workflow changes, timing a gate level across models),
+  run in DevLab CI: label the PR `nightly-gates` (runs `dev` and `full` on every card against the PR branch)
+  or dispatch `nightly-gates.yml`.
 - An agent trial only where the change can alter what the agent does: instructions, workflow, hints, the
   interface or output of a script the agent reads. Use the cheapest model that takes the changed path;
   add another only for a different path (starter vs example) or a risk specific to a model (memory and

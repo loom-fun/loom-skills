@@ -66,6 +66,8 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
   --verify` when the chat glue changes (seconds, CPU; it caught the template derivation errors), and
   `LEVEL=dev` after each kept change. `dev` keeps the gates that found bugs at full strength and touches every
   other feature lightly, so a feature that breaks outright still fails in minutes.
+- **Where it runs:** the dev machine's GPU is scarce and sequential, DevLab Dispatch is a large elastic pool.
+  Locally: only what the inner loop needs. Long or deep checks and anything against published cards: DevLab CI.
 - `quick` and `full` run **nightly** on the published cards (`.github/workflows/nightly-gates.yml`, below), and
   by hand only once on a new port that has no card yet (qualify.sh / finalize.sh).
 - A `dev` pass is never reused by `quick`/`full` (gates.sh only skips a gate that passed at the same or a

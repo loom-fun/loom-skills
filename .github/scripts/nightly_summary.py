@@ -21,34 +21,37 @@ runs = {}
 for f in glob.glob(os.path.join(a.artifacts, "**", "summary.json"), recursive=True):
     s = json.load(open(f))
     s["_dir"] = os.path.dirname(f)
-    runs[s["repo"]] = s
+    runs[(s["repo"], s["level"])] = s
 listed = [m["repo"] for m in json.load(open(a.models))["models"]]
-want = [r for r in listed if not a.only or r in a.only.split(",")] + [r for r in runs if r not in listed]
+want = [r for r in listed if not a.only or r in a.only.split(",")] + sorted({r for r, _ in runs} - set(listed))
+order = {"dev": 0, "fast": 1, "quick": 2, "full": 3}
 gates = []
 for s in runs.values():
     gates += [g for g in s["gates"] if g not in gates]
 
 print("## Nightly gates on the published loom-fun cards\n")
-print("| card | level | verdict | time | " + " | ".join(gates) + " |")
-print("|---|---|---|---|" + "---|" * len(gates))
+print("| card | level | verdict | job time | gates time | " + " | ".join(gates) + " |")
+print("|---|---|---|---|---|" + "---|" * len(gates))
 ok = True
 for r in want:
-    s = runs.get(r)
-    if s is None:
+    mine = sorted((k for k in runs if k[0] == r), key=lambda k: order.get(k[1], 9))
+    if not mine:
         ok = False
-        print(f"| {r} | | **MISSING** | | " + " | ".join("" for _ in gates) + " |")
+        print(f"| {r} | | **MISSING** | | | " + " | ".join("" for _ in gates) + " |")
         continue
-    ok &= s["verdict"] == "PASS"
-    cells = []
-    for g in gates:
-        x = s["gates"].get(g)
-        cells.append("" if x is None else f"{'PASS' if x['pass'] else '**FAIL**'} ({x['seconds']} s)")
-    v = s["verdict"] if s["verdict"] == "PASS" else f"**{s['verdict']}**"
-    print(f"| {r} | {s['level']} | {v} | {s['seconds'] // 60} min | " + " | ".join(cells) + " |")
-for r in want:
-    p = os.path.join(runs[r]["_dir"], "perf.md") if r in runs else ""
-    if p and os.path.exists(p):
-        print(f"\n### {r}: performance (report only)\n")
+    for k in mine:
+        s = runs[k]
+        ok &= s["verdict"] == "PASS"
+        cells = []
+        for g in gates:
+            x = s["gates"].get(g)
+            cells.append("" if x is None else f"{'PASS' if x['pass'] else '**FAIL**'} ({x['seconds']} s)")
+        v = s["verdict"] if s["verdict"] == "PASS" else f"**{s['verdict']}**"
+        print(f"| {r} | {s['level']} | {v} | {s['seconds'] / 60:.1f} min | {s.get('gates_seconds') or 0} s | " + " | ".join(cells) + " |")
+for k in sorted(runs, key=lambda k: (want.index(k[0]) if k[0] in want else 99, order.get(k[1], 9))):
+    p = os.path.join(runs[k]["_dir"], "perf.md")
+    if os.path.exists(p):
+        print(f"\n### {k[0]} ({k[1]}): performance (report only)\n")
         print(open(p).read())
 print("\nLogs: the `nightly-<card>` artifacts (gates.out, gates_*.log, serve logs).")
 sys.exit(0 if ok else 1)
