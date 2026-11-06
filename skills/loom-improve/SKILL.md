@@ -106,9 +106,16 @@ today); a doc only by trials that read it (past trial transcripts show which: on
 `porting-notes.md` and `loom-ir-cookbook.md`). The maker of a change wants it to pass: plan before
 seeing results, and don't shrink the plan afterwards. Cheapest evidence first:
 - Syntax: `bash -n`, `python3 -m py_compile`.
-- Benchmark, gate or perf scripts: replay `qualify.sh` + `finalize.sh` (or `eval.sh`) on finished trial
-  packages of every model the change can reach. No agent needed (the one-model-at-a-time change was
-  validated this way on all five).
+- Benchmark, gate or perf scripts: replay the changed script (or `LEVEL=dev gates.sh`, or `eval.sh`) on
+  finished trial packages of every model the change can reach; `qualify.sh` + `finalize.sh` only when the
+  change is in those wrappers. No agent needed (the one-model-at-a-time change was validated this way on
+  all five).
+- Kernels, generators, the starter: kernel tests for every new or changed kernel, `chat_probe --verify`
+  when the chat glue changes, then `LEVEL=dev gates.sh` on each affected model's rebuilt package after each
+  kept change. Not `quick`/`full`: they run nightly on the published cards (`nightly-gates.yml`). In the
+  issue #26–#29 sessions, 24+ `quick` runs (6.6 GPU-hours) caught 0 bugs; every real bug was caught by
+  consistency (3), agent (3–4) or compare at first bring-up (2), which `dev` keeps (`loom-benchmark`,
+  "Which level when").
 - Starter or a reference example: rebuild every affected model's package (`apply_example.sh` + `port.sh`,
   or `port.sh` alone on the starter path), diff it against the last trial's package, and run that
   example's own checks (`chat_probe --verify`, kernel tests, gates). An identical package is not enough:
@@ -204,7 +211,8 @@ the prompt is near-deterministic for that model, or llama.cpp disagreeing with i
 - `trial_prompt.md`: the brief for a trial agent (fill the placeholders).
 - `scripts/kpi.py`: trial KPIs (`summarize`) and regression check between two trials (`compare`).
 - `scripts/watch_trial.sh`: trial watchdog (DONE / STALLED / TIMEOUT).
-- `scripts/eval.sh`: fixed quiet-GPU evaluation of a package (frozen gates + perf, one model at a time).
+- `scripts/eval.sh`: fixed quiet-GPU evaluation of a package (frozen gates + perf, one model at a time);
+  `LEVEL=dev` re-checks in minutes when the trial's own finalize already ran `full`.
 - `reference/results.md`: every trial so far: the baselines to beat, and the lessons behind each rule.
 
 ## Sources

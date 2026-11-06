@@ -30,8 +30,9 @@ Prerequisites:
 LOOM_ROOT=~/loom ${CLAUDE_SKILL_DIR}/port.sh <org>/<repo-GGUF>[:file.gguf] ~/work/mymodel [PORT] [MEMORY_GIB] [MODEL_ID]
 #   PORT, MEMORY_GIB, MODEL_ID are positional (defaults 8160, 56, derived): e.g. ... ~/work/m 8260 40
 # then, in an end-to-end job, loom-benchmark/scripts/qualify.sh (gates + baselines + roofline);
-# or just the gates:
-LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmark/scripts/gates.sh \
+# or, while fixing the port, the lean gates (a few minutes once the llama.cpp references are cached;
+# LEVEL=quick/full run once before the first card via qualify.sh/finalize.sh, then nightly in CI):
+LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmark/scripts/gates.sh \
   ~/work/mymodel/pkg http://127.0.0.1:8160 ~/work/mymodel/gguf/<file.gguf> ~/work/mymodel/bench [LLAMA_PORT=8130]
 ```
 `port.sh` runs steps 1–6 below deterministically:
@@ -97,7 +98,8 @@ The expensive path. Keep it short:
    when a turn reuses history the model decoded itself (flint: sinks differed between flash2 and split-K).
 5. **Check numerically, node by node.** A short numpy forward of layers 0–1 on the trace's tokens
    (gguf `dequantize` for weights) compared with the trace's sums and edge values names the first
-   misunderstood op in minutes. Then the Loom kernels against numpy (kernel tests), then the gates.
+   misunderstood op in minutes. Then the Loom kernels against numpy (kernel tests), `chat_probe --verify`
+   for the chat glue, then the gates (`LEVEL=dev` while iterating).
 6. **Resume the scripted path** once the kit builds: `FROM=build KIT=W/kit port.sh ORG/REPO W PORT
    MEMORY_GIB MODEL_ID` (all three positionals) reruns build, serve, kernel tests and the smoke test from your `cfg.json`
    (no need to replay those stages by hand), then go on with `qualify.sh`.

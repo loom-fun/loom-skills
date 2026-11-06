@@ -6,6 +6,7 @@ budget). It also checks that a prompt over the capacity is refused cleanly (HTTP
 and that the server is still healthy afterwards.
 
 usage: needle.py PKG LOOM_URL [--sizes N ...] [--probes 2] [--llama URL] [--llama-max 65536] [--max-tokens 1024] [--out FILE]
+                 [--no-over-capacity]   (skip the over-capacity refusal check: gates.sh LEVEL=dev)
   default sizes: 50 % (2 probes) and 100 % (1 probe, --top-probes) of context_capacity; a full-context
   prefill can take many minutes (a 261k prompt: ~11 min for a 0.8B hybrid on a busy Strix Halo)
   --llama also runs the identical prompt ids through llama.cpp /completion for comparison
@@ -70,6 +71,7 @@ def main():
     ap.add_argument("--top-probes", type=int, default=1, help="probes at the largest size (a full-context prefill is the slow part)")
     ap.add_argument("--llama-max", type=int, default=65536, help="compare with llama.cpp only up to this many tokens")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--no-over-capacity", action="store_true")
     a = ap.parse_args()
     P = Package(a.pkg)
     card = json.load(open(os.path.join(a.pkg, "model.json")))
@@ -80,7 +82,14 @@ def main():
     overhead = len(P.ids(P.render_messages([{"role": "user", "content": QUESTIONS[1]}], None, thinking)))
     top = context - a.max_tokens - overhead - 64
     sizes = a.sizes or [top // 2, top]
-    ids = P.ids(corpus())
+    text = corpus()
+    if a.no_over_capacity and max(sizes) * 8 < len(text):
+        # Small sizes only (LEVEL=dev): tokenize a prefix of the corpus (the whole one takes ~8 s); the
+        # first max(sizes) tokens are the same as the whole corpus's, so prompts and cached references match.
+        ids = P.ids(text[:max(sizes) * 8])
+        top = min(top, max(sizes))
+    else:
+        ids = P.ids(text)
     while len(ids) < top:
         ids = ids + ids  # small stdlib: repeat (needles stay unique)
     print(f"context {context}; haystack sizes {sizes}", flush=True)
@@ -117,6 +126,10 @@ def main():
             print(("OK  " if ok else "FAIL"), json.dumps({k: v for k, v in rec.items() if "answer" not in k}), flush=True)
             results.append(rec)
     print(f"needles found (informational): Loom {loom_total}/{probes_total}")
+    if a.no_over_capacity:
+        if a.out:
+            json.dump({"context": context, "results": results}, open(a.out, "w"), indent=1)
+        sys.exit(1 if failures else 0)
     # Over the capacity: a clean refusal, then the server still answers.
     prompt, _ = haystack(P, ids * 2, context + 1000, 1)
     r = requests.post(a.url + "/v1/chat/completions", timeout=600, json={

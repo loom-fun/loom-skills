@@ -1,9 +1,19 @@
 #!/bin/bash
 # Correctness gates for a served package, one verdict file.
-# usage: [LOOM_ROOT=~/loom] [LEVEL=fast|quick|full] LLAMACPP_DIR=DIR gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
-#   LEVEL=fast  (inner optimization loop, after each kept change, ~1-3 min): golden + compare
-#               (20 short prompts + 1k-32k documents) and consistency (concurrent == sequential).
-#   LEVEL=quick (after the port): fast + speculative-decoding equivalence (spec_check.py, when the package
+# usage: [LOOM_ROOT=~/loom] [LEVEL=dev|fast|quick|full] LLAMACPP_DIR=DIR gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
+#   LEVEL=dev   (the development loop: after each kept change in loom-optimize / loom-improve, a few minutes
+#               once the llama.cpp references are cached): the gates that caught real bugs, at full
+#               strength, plus a light touch of every other feature the package has:
+#                 consistency (concurrent == alone, run-to-run determinism), agent tool loop (thinking on,
+#                 and off when the template toggles it), golden + compare (12 short prompts + 1k/2k documents),
+#                 vision (2 images, with a projector), spec (5-6 short requests drafted vs undrafted, when the
+#                 package drafts), sampling (temperature 0 == greedy, seed reproduces; no 200-draw
+#                 distribution), needle at 16k (compared with llama.cpp, no over-capacity probe).
+#               Audit of the 26-29 sessions: consistency 3 real bugs, agent 3-4, compare 2 (first bring-up),
+#               needle_full 1 class, spec 0-1; vision, sampling and half-context needle 0. quick/full run nightly
+#               on the published cards (.github/workflows/nightly-gates.yml).
+#   LEVEL=fast  golden + compare (20 short prompts + 1k-32k documents) and consistency (concurrent == sequential).
+#   LEVEL=quick (nightly CI; once before a new port's first card): fast + speculative-decoding equivalence (spec_check.py, when the package
 #               drafts), agent tool loop, sampling, needle at half the context
 #               (at most 60k) compared with llama.cpp by the near-tie rule.
 #   NO_LLAMA=1  no llama.cpp runs this model: reference-free checks only (consistency, agent rendering/
@@ -19,11 +29,14 @@
 set -u
 . "$(dirname "$0")/_lib.sh"
 level=${LEVEL:-full}; [ "${QUICK:-0}" = 1 ] && level=quick
-case $level in fast|quick|full) ;; *) echo "LEVEL must be fast, quick or full"; exit 2;; esac
+case $level in dev|fast|quick|full) ;; *) echo "LEVEL must be dev, fast, quick or full"; exit 2;; esac
 export LOOM_NO_AUDIT=1 LLAMA_CACHE=$bench/llama_cache
 # Long goldens that fit the context; the llama.cpp slot covers them (and needle sizes up to 64k).
 long=$("$T" -c "print(','.join(str(n) for n in (1000, 2000, 16000, 32000) if n + 2000 <= $ctx))")
 slot=$("$T" -c "print(min($ctx, 65536) + 1024)")
+# LEVEL=dev: the needle size (16k, or half a smaller context) and a llama.cpp slot just large enough for it.
+dev_needle=$(( ctx / 2 < 16384 ? ctx / 2 : 16384 ))
+[ "$level" = dev ] && slot=$(( dev_needle + 4096 ))
 cd "$bench"
 defer=0
 # A package with image input: llama-server also loads its projector (MMPROJ), for the vision gate.
@@ -42,14 +55,16 @@ declare -A result secs done
 order=()
 # A gate that already PASSED on this exact build (same model.json + program/*.loom) is not re-run:
 # the inputs are identical (llama.cpp references are cached too). FORCE=1 re-runs everything.
+# A LEVEL=dev pass counts only for LEVEL=dev (its gates are lighter versions under the same names).
 pkg_hash=$(cat "$pkg/model.json" "$pkg"/program/*.loom 2>/dev/null | sha256sum | cut -c1-12)   # includes the vision programs
 passed_before() {  # passed_before NAME [NEEDLE_SIZE]
   [ "${FORCE:-0}" = 1 ] && return 1
   [ -f gates_runs.jsonl ] || return 1
-  "$T" - "$pkg_hash" "$1" <<'PY'
+  "$T" - "$pkg_hash" "$1" "$level" <<'PY'
 import json, sys
-h, name = sys.argv[1], sys.argv[2]
-ok = any(r.get("pkg_hash") == h and r.get("gates", {}).get(name, {}).get("pass") for r in map(json.loads, open("gates_runs.jsonl")))
+h, name, level = sys.argv[1], sys.argv[2], sys.argv[3]
+ok = any(r.get("pkg_hash") == h and r.get("gates", {}).get(name, {}).get("pass") and (level == "dev" or r.get("level") != "dev")
+         for r in map(json.loads, open("gates_runs.jsonl")))
 sys.exit(0 if ok else 1)
 PY
 }
@@ -74,20 +89,48 @@ run() {  # run NAME CMD...: a gate whose llama.cpp references were all cached ge
 # Speculative decoding must not change a token: record on the drafting server, then serve the same package with
 # drafting off (model_target.json, draft_depth 0) on Loom's port, record again, restore, compare (spec_check.py).
 spec_gate() {
-  "$T" "$S/spec_check.py" record "$url" "$model" spec_draft.jsonl || return 1
+  local lean=(); [ "$level" = dev ] && lean=(--lean)
+  "$T" "$S/spec_check.py" record "$url" "$model" spec_draft.jsonl "${lean[@]}" || return 1
   "$T" "$S/spec_check.py" card "$pkg" >/dev/null || return 1
   curl -s "$url/metrics" > spec_metrics.txt
   loom_down; local orig=("${loom_argv[@]}") rc
   loom_argv=("${orig[@]/model.json/model_target.json}"); loom_up || return 1
-  "$T" "$S/spec_check.py" record "$url" "$model" spec_target.jsonl; rc=$?
+  "$T" "$S/spec_check.py" record "$url" "$model" spec_target.jsonl "${lean[@]}"; rc=$?
   loom_down; loom_argv=("${orig[@]}"); loom_up || return 1
   [ $rc = 0 ] && "$T" "$S/spec_check.py" compare spec_target.jsonl spec_draft.jsonl --metrics-file spec_metrics.txt --pkg "$pkg" ${L:+--llama "$L"}
 }
 drafting=$("$T" -c "import json; print(1 if json.load(open('$pkg/llm_config.json')).get('draft') else '')" 2>/dev/null)
+toggle=$("$T" -c "import json; print(1 if json.load(open('$pkg/llm_config.json')).get('chat', {}).get('thinking') == 'toggle' else '')" 2>/dev/null)
 t_start=$(date +%s)
 LL=(); [ -n "$L" ] && LL=(--llama "$L")
 cmp=$(( ctx / 2 < 61440 ? ctx / 2 : 61440 ))
+# LEVEL=dev: the strongest gates in full, every other feature lightly; cheapest and strongest first.
+dev_gates() {
+  run consistency "$T" "$S/consistency.py" "$url" --model "$model" --pkg "$pkg" "${LL[@]}"
+  [ -n "${done[consistency]:-}" ] && { grep -q "^PASS$" gates_consistency.log || result[consistency]=1; }
+  # Tool calling + history reuse; reasoning on, and off when the template toggles it.
+  if [ -n "$toggle" ]; then
+    run agent "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --thinking on --out agent_golden.json
+    run agent_think_off "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --thinking off --out agent_think_off.json
+  else
+    run agent "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --out agent_golden.json
+  fi
+  if [ -n "$L" ]; then
+    run golden "$T" "$S/golden.py" "$pkg" golden_dev.json --llama "$L" --short 12 --long "$("$T" -c "print(','.join(str(n) for n in (1000, 2000) if n + 2000 <= $ctx))")"
+    if [ -n "${done[golden]:-}" ]; then
+      run compare "$T" "$S/compare.py" "$pkg" golden_dev.json --llama "$L" --url "$url" --out compare_dev.json
+      [ -n "${done[compare]:-}" ] && { grep -q '"verdict": "PASS"' gates_compare.log || result[compare]=1; }
+    fi
+    [ -n "$MMPROJ" ] && run vision "$T" "$S/vision_golden.py" "$pkg" --url "$url" --llama "$L" --cases shapes,wide
+  fi
+  run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" "${LL[@]}" --draws 0
+  run needle "$T" "$S/needle.py" "$pkg" "$url" "${LL[@]}" --llama-max $(( slot - 1024 )) --out needle_dev.json \
+    --sizes $dev_needle --probes 1 --no-over-capacity
+  # Last: it restarts Loom twice (drafting off, then on again).
+  [ -n "$drafting" ] && run spec spec_gate
+}
 all_gates() {
+  [ "$level" = dev ] && { dev_gates; return; }
   if [ -n "$L" ]; then
     run golden "$T" "$S/golden.py" "$pkg" golden.json --llama "$L" --long "$long"
     # A prompt that would fail against the golden is re-recorded once by compare.py (llama.cpp's own
