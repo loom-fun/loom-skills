@@ -78,7 +78,7 @@ if [ -n "$build" ] && [ -s "$bench/perf_log.jsonl" ]; then
   "$T" -c "import json; [print(r['c4_steady']) for r in map(json.loads, open('$bench/perf_log.jsonl')) if r.get('label') == 'llama-final' and r.get('c4_steady')]" > "$out/c4_llama.txt"
   "$T" -c "import json; [print(r['value']) for r in map(json.loads, open('$bench/targets.jsonl')) if r.get('metric') == 'c4_steady' and r.get('label') == 'final']" > "$out/c4_loom.txt" 2>/dev/null
   c4=(); [ -s "$out/c4_loom.txt" ] && c4+=(--c4-loom "$out/c4_loom.txt"); [ -s "$out/c4_llama.txt" ] && c4+=(--c4-llama "$out/c4_llama.txt")
-  args=$(cat "$bench/llamacpp_args.txt" 2>/dev/null)
+  args=$(sed "s|$HOME|~|g" "$bench/llamacpp_args.txt" 2>/dev/null)   # no home directory on a published card
   "$T" "$B/card/make_info.py" perf --perf-log "$bench/perf_log.jsonl" --baseline-version "llamacpp-rocm/$build" \
     ${args:+--baseline-args "$args"} "${c4[@]}" "${src[@]}" -o "$out/ev_perf.json" || echo "WARNING: no perf evidence"
 fi
