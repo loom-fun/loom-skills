@@ -1439,13 +1439,17 @@ kernel.def export("g_row_scale_f16") @g_row_scale_f16(%rows: index) {
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
   %zero_f = scalar.constant 0.0 : f32
-  %x_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k]xf32>
-  %h_view = buffer.view %x16[%zero] : buffer -> view<[%rows]x[%k]xf16>
-  %local = scf.for %c = [%lane to %k step %c256](%m = %zero_f : f32) -> (f32) {
-    %bc = index.assume %c [lt(%c, %k)] : index
-    %v = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32
-    %a = scalar.absf %v : f32
-    %n = scalar.maxnumf %m, %a : f32
+  // vector<4> steps (k is a multiple of 256): each step of a scalar loop waits for its load (and in pass 2
+  // for the previous step's store), so 4x fewer steps is ~4x less exposed latency.
+  %c4 = index.constant 4 : index
+  %k4 = index.div %k, %c4 : index
+  %x4_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k4]x4xf32>
+  %h4_view = buffer.view %x16[%zero] : buffer -> view<[%rows]x[%k4]x4xf16>
+  %local = scf.for %c = [%lane to %k4 step %c256](%m = %zero_f : f32) -> (f32) {
+    %bc = index.assume %c [lt(%c, %k4)] : index
+    %v = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>
+    %a = vector.absf %v : vector<4xf32>
+    %n = vector.reduce<maxnumf> %a, %m : vector<4xf32>, f32
     scf.yield %n : f32
   }
   %maximum = kernel.workgroup.reduce<maxnumf> %local : f32
@@ -1468,12 +1472,13 @@ kernel.def export("g_row_scale_f16") @g_row_scale_f16(%rows: index) {
   %inverse_bits = scalar.shli %inverse_exp, %c23 : i32
   %scale = scalar.bitcast %scale_bits : i32 to f32
   %inverse = scalar.bitcast %inverse_bits : i32 to f32
-  scf.for %c = [%lane to %k step %c256] {
-    %bc = index.assume %c [lt(%c, %k)] : index
-    %v = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32
-    %sv = scalar.mulf %v, %scale : f32
-    %hv = scalar.fptrunc %sv : f32 to f16
-    view.store %hv, %h_view[%row, %bc] : f16, view<[%rows]x[%k]xf16>
+  %scale4 = vector.splat %scale : vector<4xf32>
+  scf.for %c = [%lane to %k4 step %c256] {
+    %bc = index.assume %c [lt(%c, %k4)] : index
+    %v = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>
+    %sv = vector.mulf %v, %scale4 : vector<4xf32>
+    %hv = vector.fptrunc %sv : vector<4xf32> to vector<4xf16>
+    vector.store %hv, %h4_view[%row, %bc, %c0] : vector<4xf16>, view<[%rows]x[%k4]x4xf16>
   }
   %first = index.cmp eq, %lane, %c0 : index
   scf.if %first {

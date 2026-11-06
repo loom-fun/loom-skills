@@ -289,8 +289,7 @@ cases.append(f"""check.case public @attention_chain {{
   check.return
 }}
 """)
-# 4. gated delta-net chain on one 40-token span at position 3 that continues the reader slot (over 32 tokens:
-# the recurrence stores its outputs in 32-step batches)
+# 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
 if cfg.get("recurrent_layers"):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from gen_gdn import gdn_geometry
@@ -298,7 +297,7 @@ if cfg.get("recurrent_layers"):
     li = cfg["recurrent_layers"][0]; b = f"blk.{li}."
     conv_w = deq(b + "ssm_conv1d.weight").reshape(C, K).astype(np.float32)
     a_log = deq(b + "ssm_a").astype(np.float32); dt = deq(b + "ssm_dt.bias").astype(np.float32); nw = deq(b + "ssm_norm.weight").astype(np.float32)
-    t, p0 = 40, 3
+    t, p0 = 40, 3   # over 32 tokens: the recurrence stores its outputs in 32-step batches
     qkv = rng.standard_normal((t, C)).astype(np.float32); hist0 = rng.standard_normal((K - 1, C)).astype(np.float32)
     S0 = (0.1 * rng.standard_normal((HV, DV, DK))).astype(np.float32)  # [head][b][a]
     alpha = rng.standard_normal((t, HV)).astype(np.float32); beta = rng.standard_normal((t, HV)).astype(np.float32)
@@ -367,6 +366,28 @@ if cfg.get("recurrent_layers"):
   check.expect.close actual(%raw) expected(%eraw) atol(1.0e-4) rtol(2.0e-3) nan(different) : tensor<{t}x{VD}xf32>
   check.expect.close actual(%o) expected(%eo) atol(1.0e-3) rtol(2.0e-3) nan(different) : tensor<{t}x{VD}xf32>
   check.expect.close actual(%arena) expected(%expect) atol(1.0e-4) rtol(1.0e-3) nan(different) : {AT}
+  check.return
+}}
+""")
+# g_row_scale_f16 (the GEMM A operand): per-row power-of-two scale 2^-e, e = clamp(floor(log2 max|x|) - 13, 0, 100),
+# x16 = f16(x * scale); rows of very different magnitude, width = the FFN width (the widest the model uses).
+if os.environ.get("GEMM_TESTS", "1") == "1":
+    rs_k = cfg["ffn"] if isinstance(cfg.get("ffn"), int) else H
+    rs_x = (rng.standard_normal((3, rs_k)) * np.array([[1e-3], [1.0], [3e5]])).astype(np.float32)
+    rs_e = np.clip(np.frexp(np.abs(rs_x).max(1))[1] - 1 - 13, 0, 100)
+    rs_s = np.stack([2.0 ** -rs_e, 2.0 ** rs_e], 1).astype(np.float32)
+    save("rs_x", rs_x); save("rs_s", rs_s); save("rs_h", (rs_x * rs_s[:, :1]).astype(np.float16))
+    cases.append(f"""check.case public @row_scale_f16 {{
+  %rows = check.literal value(3) : index
+  %k = check.literal value({rs_k}) : index
+  %x = check.file.read.npy path("rs_x.npy") : tensor<3x{rs_k}xf32>
+  %es = check.file.read.npy path("rs_s.npy") : tensor<3x2xf32>
+  %eh = check.file.read.npy path("rs_h.npy") : tensor<3x{rs_k}xf16>
+  %s = check.generate.fill value(0.0) : tensor<3x2xf32>
+  %h = check.generate.fill value(0.0) : tensor<3x{rs_k}xf16>
+  kernel.launch @g_row_scale_f16[%rows](%rows, %k, %x, %s, %h) : [index](index, index, tensor<3x{rs_k}xf32>, tensor<3x2xf32>, tensor<3x{rs_k}xf16>)
+  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<3x2xf32>
+  check.expect.close actual(%h) expected(%eh) atol(0.0) rtol(1.0e-3) nan(different) : tensor<3x{rs_k}xf16>
   check.return
 }}
 """)
