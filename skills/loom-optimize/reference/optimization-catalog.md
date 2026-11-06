@@ -225,6 +225,24 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   - Tried: gufo's column form (a lane pair owns one value column, a shuffle-xor instead of 32-lane reductions,
     per-token scalars once per token, chunks of 4 tokens staged in LDS): correct (kernel test) but -2.5 %
     (-18 % before batching stores): per-chunk load/store waits (above) and 240-256 VGPRs. Not kept.
+- **Row-split recurrence** (`_recurrence_rows`, default; `GDN_ROW_LANES=0` restores the 32-lane form): a 32-lane
+  workgroup owns 16 value columns of one head; a group of RL = 8 lanes owns 4 columns and lane r of it the
+  key rows [16r, 16r + 16) (64 state values in registers, 384 workgroups instead of 1536). S^T k and S^T q are
+  per-lane `vector.dotf` over the lane's 16 rows plus a 3-step xor-shuffle inside the group (the 32-lane form
+  ran two 32-lane reductions per 4 columns); the q/k L2 norms and the decay fold into per-column scalars
+  (decay * S^T k = (S_old^T k) * decay), so each state element costs 4 VALU ops (dot, decay mul, fma
+  update, dot); decay/beta/softplus once per 16 columns. Inputs loaded one step ahead, outputs stored in
+  8-step batches (lane r keeps step r's 4 outputs). Same arithmetic, different summation order (kernel tests
+  vs float64 pass at the old tolerances; new multi-span case `gdn_recurrence_spans`).
+  Qwen3.8-27B same-server A/B vs r3 (5 rounds): prefill 1k/2k/8k +2.7/+2.8/+2.8 % (2k 496.9 -> 510.7 tok/s),
+  32k +2.4 % (3 rounds), decode +1.8 % (tie). Doubling the recurrence at 2k: 0.124 -> 0.079 ms/token
+  (6.1 -> 4.0 % of 2k prefill).
+  - Variants (2k, 3 rounds each, vs the same baseline): RL 4 (32 rows/lane) -1.6 %, RL 16 +1.0 %, RL 8 with
+    8 columns per lane (`GDN_COLS=8`) +2.6 %, RL 16 with 8 columns +1.7 %; RL 8 x 4 columns +2.9 % kept.
+  - Not tried (time-box): the chunked WY / "chunked delta rule" form (llama.cpp `build_delta_net_chunking`,
+    C = 64). In f32 it does about as many FLOPs per token as the recurrence (~3 DK*DV per token for S^T k,
+    Q S and the state update, plus C*DK terms), so it only pays with f16/bf16 WMMA for the intra-chunk
+    products, which changes precision of the state contribution; the recurrence is now 4 % of 2k prefill.
 - `g_row_scale_f16`: vector<4> steps instead of scalar ones (each scalar step waited on its load): +0.5 %.
 - Tiny projections in prefill (Qwen3.5-style `ssm_alpha`/`ssm_beta`, 48 rows, F32, through `lin_mv`): the
   4-token matvec with the decode-tuned R=1 re-read each 4-token activation block once per output row
