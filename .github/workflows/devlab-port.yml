@@ -3,24 +3,19 @@ name: devlab-port
 # .github/scripts/port_e2e.sh (port.sh -> qualify.sh -> finalize.sh, the card evidence and the publishable package)
 # with this branch's skills, or another ref's ("skills_ref": from-scratch baselines with main). The artifact holds
 # out/ (gates, perf, evidence, publish/ without weights, phases.log); publishing to Hugging Face is a separate,
-# manual step (loom-benchmark SKILL.md, "Hugging Face model card"). Runs on a pull request labeled `devlab-port`
-# (every push re-runs it).
+# manual step (loom-benchmark SKILL.md, "Hugging Face model card"). Runs when a pull request gets the `devlab-port`
+# label (remove and re-add it for the next wave): a push does not restart hours-long ports.
 on:
   pull_request:
-    types: [labeled, synchronize]
+    types: [labeled]
 
 permissions:
   contents: read
 
-concurrency:
-  group: devlab-port-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   jobs:
     if: >-
-      contains(github.event.pull_request.labels.*.name, 'devlab-port') &&
-      (github.event.action != 'labeled' || github.event.label.name == 'devlab-port')
+      github.event.label.name == 'devlab-port'
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
