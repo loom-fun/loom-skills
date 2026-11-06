@@ -1,5 +1,5 @@
 {
- "_comment": "Bolt-E4B drafted decode vs llama.cpp b1368 with matched thinking settings (perf.py --thinking sent to both engines), n-max 7 and 3.",
+ "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
  "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
  "memory_bytes": 34000000000,
  "kit": "gemma4",
@@ -7,35 +7,20 @@
  "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
  "jobs": [
   {
-   "name": "think-off",
+   "name": "tm-off",
    "thinking": "off",
    "variants": [
     {
      "name": "new",
      "build": {}
-    },
-    {
-     "name": "main",
-     "ref": "origin/main",
-     "build": {}
     }
    ],
    "steps": [
-    "textmatch:new",
-    "perf:new:4",
-    "perf:new:1:long",
-    "c4:new",
-    "llama:4:-:7",
-    "llama:4:-:3",
-    "llama:1:long:7",
-    "llama:1:long:3",
-    "llamac4:7",
-    "llamac4:3",
-    "perf:main:2"
+    "textmatch:new"
    ]
   },
   {
-   "name": "think-on",
+   "name": "tm-on",
    "thinking": "on",
    "variants": [
     {
@@ -44,16 +29,7 @@
     }
    ],
    "steps": [
-    "textmatch:new",
-    "perf:new:4",
-    "perf:new:1:long",
-    "c4:new",
-    "llama:4:-:7",
-    "llama:4:-:3",
-    "llama:1:long:7",
-    "llama:1:long:3",
-    "llamac4:7",
-    "llamac4:3"
+    "textmatch:new"
    ]
   }
  ]
