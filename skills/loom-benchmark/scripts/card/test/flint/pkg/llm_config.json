@@ -1,0 +1,15 @@
+{
+ "model_id": "flint",
+ "chat": {
+  "thinking": "always",
+  "thinking_default": true,
+  "starts_in_reasoning": true,
+  "call_format": "glm",
+  "tools_prefix": "<tools>"
+ },
+ "draft": {
+  "kind": "dflash",
+  "depth": 3,
+  "gguf": "Flint-DFlash2-Q4_K_M.gguf"
+ }
+}

@@ -1,0 +1,66 @@
+{
+ "source": "LiquidAI/d1-2B-GGUF",
+ "quant": "Q4_K_M",
+ "files": [
+  "d1-2B-Q4_K_M.gguf"
+ ],
+ "run": "https://github.com/loom-fun/loom-skills/actions/runs/40842422037",
+ "metrics": {
+  "llama_cpp_build": "b1357 (lemonade llamacpp-rocm, ROCm)",
+  "workload": "SystemOne decisions via /v1/systemone (decision model, no text generation)",
+  "decode_tps": {
+   "loom": 43.94,
+   "llama_cpp": 39.81,
+   "margin": 0.104,
+   "target": 169.7,
+   "met": false
+  },
+  "prefill_1000": {
+   "loom": 7041.3,
+   "llama_cpp": 5926.4,
+   "margin": 0.188,
+   "target": 6560.0,
+   "met": true
+  },
+  "prefill_2000": {
+   "loom": 7138.1,
+   "llama_cpp": 5684.0,
+   "margin": 0.256,
+   "target": 6506.2,
+   "met": true
+  },
+  "prefill_8000": {
+   "loom": 5488.4,
+   "llama_cpp": 4204.3,
+   "margin": 0.305,
+   "target": 6200.6,
+   "met": false
+  },
+  "prefill_16000": {
+   "loom": 4637.4,
+   "llama_cpp": 3128.7,
+   "margin": 0.482,
+   "target": 5835.3,
+   "met": false
+  },
+  "c4_steady": {
+   "loom": 47.2,
+   "llama_cpp": 41.7,
+   "margin": 0.132,
+   "target": 534.6,
+   "met": false
+  },
+  "correctness": {
+   "verdict": "PASS",
+   "prompts": 15,
+   "questions": 32,
+   "full_match": 32,
+   "tokens_exact": 15,
+   "max_dp": 0.0184,
+   "mean_dp": 0.0036
+  },
+  "consistency": "PASS",
+  "audit": "PASS"
+ },
+ "report": "Concurrent requests give bitwise identical results (consistency PASS)."
+}

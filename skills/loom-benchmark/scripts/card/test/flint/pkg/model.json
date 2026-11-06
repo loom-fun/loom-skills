@@ -1,0 +1,95 @@
+{
+ "schema_version": 1,
+ "model": {
+  "id": "flint",
+  "name": "Flint Preview (Loom port, GGUF)"
+ },
+ "programs": {
+  "source": {
+   "inputs": [
+    {
+     "path": "program/prepare.loom",
+     "data": [
+      "weights.loom"
+     ]
+    },
+    "program/control.loom",
+    "program/storage.loom",
+    "program/service.loom"
+   ],
+   "libraries": [
+    "program/llm.loom"
+   ]
+  }
+ },
+ "services": {
+  "chat": {
+   "kind": "text",
+   "version": 1
+  }
+ },
+ "variants": {
+  "gguf": {
+   "services": {
+    "chat": {
+     "programs": [
+      "source"
+     ],
+     "config": {
+      "llm.card": true
+     },
+     "parameters": {
+      "model": {
+       "files": [
+        {
+         "path": "parameter/Flint-Q4_K_M.gguf",
+         "format": "gguf",
+         "origin": "@checkpoint/Flint-Q4_K_M.gguf"
+        }
+       ]
+      },
+      "draft": {
+       "files": [
+        {
+         "path": "parameter/Flint-DFlash2-Q4_K_M.gguf",
+         "format": "gguf",
+         "origin": "@drafter/Flint-DFlash2-Q4_K_M.gguf"
+        }
+       ]
+      }
+     },
+     "tokenizers": {
+      "text": "tokenizer.json"
+     }
+    }
+   }
+  }
+ },
+ "presets": {
+  "chat": {
+   "service": "chat",
+   "variant": "gguf",
+   "programs": "source",
+   "execution": {
+    "rows": 4,
+    "context_capacity": 262144,
+    "pool_capacity": 327680,
+    "prefill_capacity": 4096,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   }
+  }
+ },
+ "origins": {
+  "checkpoint": {
+   "kind": "hf",
+   "repository": "ggml-org/Flint-GGUF",
+   "revision": "468307a1b38259e9e4c9d4fe53d4e3b76386572c"
+  },
+  "drafter": {
+   "kind": "hf",
+   "repository": "incoai/Flint-DFlash2-GGUF",
+   "revision": "74e6ac0c538cfd393d97bd93694e5c4c6b6aa8c3"
+  }
+ }
+}

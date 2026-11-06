@@ -1,0 +1,44 @@
+{
+ "verdict": "PASS",
+ "level": "quick",
+ "pkg_hash": "6b479f0aec9e",
+ "seconds": 536,
+ "ts": "2026-11-06T07:39:40",
+ "gates": {
+  "spec": {
+   "pass": true,
+   "log": "gates_spec.log",
+   "seconds": 70
+  },
+  "golden": {
+   "pass": true,
+   "log": "gates_golden.log",
+   "seconds": 0
+  },
+  "compare": {
+   "pass": true,
+   "log": "gates_compare.log",
+   "seconds": 58
+  },
+  "consistency": {
+   "pass": true,
+   "log": "gates_consistency.log",
+   "seconds": 31
+  },
+  "agent": {
+   "pass": true,
+   "log": "gates_agent.log",
+   "seconds": 15
+  },
+  "sampling": {
+   "pass": true,
+   "log": "gates_sampling.log",
+   "seconds": 27
+  },
+  "needle": {
+   "pass": true,
+   "log": "gates_needle.log",
+   "seconds": 153
+  }
+ }
+}

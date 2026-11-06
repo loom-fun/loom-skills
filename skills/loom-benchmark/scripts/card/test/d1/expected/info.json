@@ -1,0 +1,267 @@
+{
+ "checkpoint": {
+  "file": "d1-2B-Q4_K_M.gguf",
+  "quant": "Q4_K_M",
+  "repo": "LiquidAI/d1-2B-GGUF",
+  "revision": "e968f6575f0d4fad928312d7af15cad90fd365c0",
+  "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+  "size": 1099629888
+ },
+ "context": {
+  "max_tokens": null,
+  "pending_requests": 64,
+  "pool": null,
+  "rows": null,
+  "tokens": null
+ },
+ "drafter": null,
+ "features": {
+  "api": {
+   "status": "yes",
+   "value": {
+    "endpoint": "/v1/systemone",
+    "style": "systemone"
+   }
+  },
+  "audio": {
+   "status": "no",
+   "value": null
+  },
+  "concurrency": {
+   "status": "yes",
+   "value": {
+    "pending_requests": 64,
+    "rows": null
+   }
+  },
+  "context": {
+   "status": "unknown",
+   "value": null
+  },
+  "image_input": {
+   "status": "n/a",
+   "value": null
+  },
+  "max_output_tokens": {
+   "status": "n/a",
+   "value": null
+  },
+  "reasoning_effort": {
+   "status": "n/a",
+   "value": null
+  },
+  "sampling": {
+   "status": "n/a",
+   "value": null
+  },
+  "speculative_decoding": {
+   "status": "n/a",
+   "value": null
+  },
+  "thinking": {
+   "status": "n/a",
+   "value": null
+  },
+  "tool_calling": {
+   "status": "n/a",
+   "value": null
+  }
+ },
+ "gates": [
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "kernel_tests",
+   "source": null,
+   "status": "unknown"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "golden",
+   "source": null,
+   "status": "n/a"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "compare",
+   "source": null,
+   "status": "n/a"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "vision",
+   "source": null,
+   "status": "n/a"
+  },
+  {
+   "date": "2026-10-29",
+   "detail": null,
+   "level": null,
+   "name": "consistency",
+   "source": {
+    "kind": "factory",
+    "run": "40842422037",
+    "url": "https://github.com/loom-fun/loom-skills/actions/runs/40842422037"
+   },
+   "status": "pass"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "spec",
+   "source": null,
+   "status": "n/a"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "agent",
+   "source": null,
+   "status": "n/a"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "agent_think_off",
+   "source": null,
+   "status": "n/a"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "sampling",
+   "source": null,
+   "status": "n/a"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "needle",
+   "source": null,
+   "status": "n/a"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "needle_full",
+   "source": null,
+   "status": "n/a"
+  },
+  {
+   "date": "2026-10-29",
+   "detail": null,
+   "level": null,
+   "name": "decision",
+   "source": {
+    "kind": "factory",
+    "run": "40842422037",
+    "url": "https://github.com/loom-fun/loom-skills/actions/runs/40842422037"
+   },
+   "status": "pass"
+  }
+ ],
+ "license": "other",
+ "name": "d1-2B",
+ "performance": {
+  "date": "2026-10-29",
+  "drafting": {
+   "llamacpp": null,
+   "loom": null
+  },
+  "llamacpp_build": "b1357",
+  "metrics": {
+   "decode": {
+    "llamacpp": null,
+    "loom": null,
+    "loom_source": null
+   },
+   "decode_2k": {
+    "llamacpp": null,
+    "loom": null,
+    "loom_source": null
+   },
+   "decode_32k": {
+    "llamacpp": null,
+    "loom": null,
+    "loom_source": null
+   },
+   "prefill_16k": {
+    "llamacpp": 3128.7,
+    "loom": 4637.4,
+    "loom_source": null
+   },
+   "prefill_1k": {
+    "llamacpp": 5926.4,
+    "loom": 7041.3,
+    "loom_source": null
+   },
+   "prefill_2k": {
+    "llamacpp": 5684.0,
+    "loom": 7138.1,
+    "loom_source": null
+   },
+   "prefill_32k": {
+    "llamacpp": null,
+    "loom": null,
+    "loom_source": null
+   },
+   "prefill_8k": {
+    "llamacpp": 4204.3,
+    "loom": 5488.4,
+    "loom_source": null
+   },
+   "streams4": {
+    "llamacpp": null,
+    "loom": null,
+    "loom_source": null
+   }
+  },
+  "not_applicable": [
+   "decode",
+   "decode_2k",
+   "decode_32k",
+   "streams4"
+  ],
+  "runs": {
+   "decode_prefill": null,
+   "streams4": null
+  },
+  "source": {
+   "kind": "factory",
+   "run": "40842422037",
+   "url": "https://github.com/loom-fun/loom-skills/actions/runs/40842422037"
+  }
+ },
+ "projector": null,
+ "repo": "loom-fun/LiquidAI-d1-2B-loom",
+ "schema": "loom-card/1",
+ "serve": {
+  "device": "amdgpu",
+  "memory_bytes": null,
+  "output": "d1-2B-GGUF",
+  "preset": null
+ },
+ "service": {
+  "endpoint": "/v1/systemone",
+  "kind": "decision"
+ },
+ "tags": [
+  "loom",
+  "loom-serve",
+  "gguf",
+  "strix-halo"
+ ]
+}

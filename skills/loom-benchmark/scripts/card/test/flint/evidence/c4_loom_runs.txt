@@ -1,0 +1,3 @@
+{"streams": 4, "window_s": 11.66, "agg_tps": 131.9, "per_stream_events": [190, 183, 179, 183], "per_stream_tokens": [400, 400, 400, 400]}
+{"streams": 4, "window_s": 10.67, "agg_tps": 140.9, "per_stream_events": [182, 171, 182, 185], "per_stream_tokens": [400, 400, 400, 400]}
+{"streams": 4, "window_s": 11.44, "agg_tps": 134.2, "per_stream_events": [179, 186, 181, 191], "per_stream_tokens": [400, 400, 400, 400]}
