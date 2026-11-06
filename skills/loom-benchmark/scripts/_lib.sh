@@ -18,6 +18,10 @@ loom_down() {
   local pid; pid=$(ss -ltnpH "sport = :$loom_port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
   { [ -n "$pid" ] && [ "$(cat /proc/$pid/comm 2>/dev/null)" = loom-serve ]; } || return 0
   loom_cwd=$(readlink /proc/$pid/cwd); mapfile -d '' -t loom_argv < /proc/$pid/cmdline
+  # the serve.sh name whose pid file holds this pid, so loom_up restarts under the same name (a stale
+  # NAME.port from an earlier session on the same port would otherwise get it, and stop.sh NAME would miss it)
+  local f; loom_name=; for f in "${LOOM_SERVE_STATE:-$HOME/.cache/loom-serve}"/*.pid; do
+    [ "$(cat "$f" 2>/dev/null)" = "$pid" ] && { loom_name=$(basename "$f" .pid); break; }; done
   echo "[one model at a time] stopping loom-serve pid $pid on :$loom_port"
   kill "$pid"; for _ in $(seq 120); do kill -0 "$pid" 2>/dev/null || return 0; sleep 0.5; done; kill -9 "$pid" 2>/dev/null
 }
@@ -25,6 +29,7 @@ loom_up() {
   [ ${#loom_argv[@]} -gt 0 ] || return 0
   local state=${LOOM_SERVE_STATE:-$HOME/.cache/loom-serve} name=gates-$loom_port pid st
   local f; f=$(grep -lx "$loom_port" "$state"/*.port 2>/dev/null | head -1); [ -n "$f" ] && name=$(basename "$f" .port)
+  [ -n "${loom_name:-}" ] && name=$loom_name
   mkdir -p "$state"
   # exec: the background subshell becomes loom-serve, so no shell is left holding the caller's stdout
   # (`qualify.sh ... | tail` otherwise never ends: the subshell kept the pipe open while it waited) and $! is

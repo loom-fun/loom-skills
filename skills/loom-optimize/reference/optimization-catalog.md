@@ -169,6 +169,19 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   Decode and verification keep their kernels (same summation order as before).
 - `prefill_capacity` for the dense 27B, vs 1024 at 1k/2k/8k: 512 ties (-1 %), 2048 loses -41/-9/-8 % (the
   1k prompt is a little over 1024 tokens and pads to one 2048-row epoch). Keep 1024 for dense models.
+- Qwen3.8-27B 2k prefill ablation after m256 + live row scale (doubling, same server): GEMMs ~79 % (q4_k store
+  35, swiglu 27, q6_k store 12, q8_0 store 4.5; all ~31 TFLOP/s, so the weight format barely matters),
+  post-add norm + row scale 2.8, row scale (o, f) 1.9, gdn_conv 1.8, flash2 1.6, silu_mul 0.8 %.
+- `g_post_add_norm_rs[_live]` (gen_llm `fuse_post_add_row_scale`): the residual add + next norm also writes the
+  next GEMM's f16 row and scale (one more workgroup max-reduce over values already in registers), replacing
+  the separate `g_row_scale_f16` launch and its two re-reads of h. `g_gdn_conv`: 4 channels per loop step with
+  every load before any store; `g_gdn_norm_gate`: stores after all loads (the store -> load ordering above).
+  Together +0.6/+0.8/+0.6 % at 1k/2k/8k: tie band, so **not kept** (branch `issue-29b`, commit bdcf3cd, if a
+  later GEMM speedup makes these few percent matter). What is left at 2k is the GEMM inner loop (~31 of ~59 TFLOP/s).
+  - Tried: one 256-row swiglu kernel for layers whose gate and up formats differ (Q4_K gate + Q6_K up: waves
+    0-7 dequant the gate format, waves 8-15 the up format, an scf.if on a wave-uniform condition; replaces two
+    GEMMs + `g_silu_mul`). Correct (kernel test) but -1.1/-1.5 % at 2k/8k vs the two GEMMs: carrying both
+    formats' prefetch registers costs more than `g_silu_mul` (0.8 %) and the %fu round trip save. Not kept.
 
 ### flash2 (`gen_flash2.py`)
 - The workgroup is one 16-token tile × one KV head, with G waves (one per query
