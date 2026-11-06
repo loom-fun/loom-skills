@@ -1,0 +1,313 @@
+{
+ "checkpoint": {
+  "file": "Flint-Q4_K_M.gguf",
+  "quant": "Q4_K_M",
+  "repo": "ggml-org/Flint-GGUF",
+  "revision": "468307a1b38259e9e4c9d4fe53d4e3b76386572c",
+  "sha256": "c3c4d93f9db92627a2fc47ea8fe8c64a094cabd3549db544bcdd2c00e9a9a347",
+  "size": 23387911136
+ },
+ "context": {
+  "max_tokens": 4096,
+  "pending_requests": null,
+  "pool": 327680,
+  "rows": 4,
+  "tokens": 262144
+ },
+ "drafter": {
+  "file": "Flint-DFlash2-Q4_K_M.gguf",
+  "quant": "Q4_K_M",
+  "repo": "incoai/Flint-DFlash2-GGUF",
+  "revision": "74e6ac0c538cfd393d97bd93694e5c4c6b6aa8c3",
+  "sha256": "c14e92d3f666e0bb58e6afa76b1f44994272b2ca0b4c4b92b6b09af57de7f4b9",
+  "size": 239808192
+ },
+ "features": {
+  "api": {
+   "status": "yes",
+   "value": {
+    "endpoint": "/v1/chat/completions",
+    "style": "openai"
+   }
+  },
+  "audio": {
+   "status": "no",
+   "value": null
+  },
+  "concurrency": {
+   "status": "yes",
+   "value": {
+    "pending_requests": null,
+    "rows": 4
+   }
+  },
+  "context": {
+   "status": "yes",
+   "value": {
+    "tokens": 262144
+   }
+  },
+  "image_input": {
+   "status": "no",
+   "value": null
+  },
+  "max_output_tokens": {
+   "status": "yes",
+   "value": {
+    "max_tokens": 4096
+   }
+  },
+  "reasoning_effort": {
+   "status": "no",
+   "value": null
+  },
+  "sampling": {
+   "status": "yes",
+   "value": null
+  },
+  "speculative_decoding": {
+   "status": "yes",
+   "value": {
+    "depth": 3,
+    "drafter": "incoai/Flint-DFlash2-GGUF",
+    "method": "dflash"
+   }
+  },
+  "thinking": {
+   "status": "yes",
+   "value": {
+    "default": true,
+    "mode": "always"
+   }
+  },
+  "tool_calling": {
+   "status": "yes",
+   "value": null
+  }
+ },
+ "gates": [
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "kernel_tests",
+   "source": null,
+   "status": "unknown"
+  },
+  {
+   "date": "2026-11-06",
+   "detail": null,
+   "level": "quick",
+   "name": "golden",
+   "source": {
+    "kind": "local",
+    "run": null,
+    "url": null
+   },
+   "status": "pass"
+  },
+  {
+   "date": "2026-11-06",
+   "detail": null,
+   "level": "quick",
+   "name": "compare",
+   "source": {
+    "kind": "local",
+    "run": null,
+    "url": null
+   },
+   "status": "pass"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "vision",
+   "source": null,
+   "status": "n/a"
+  },
+  {
+   "date": "2026-11-06",
+   "detail": null,
+   "level": "quick",
+   "name": "consistency",
+   "source": {
+    "kind": "local",
+    "run": null,
+    "url": null
+   },
+   "status": "pass"
+  },
+  {
+   "date": "2026-11-06",
+   "detail": null,
+   "level": "quick",
+   "name": "spec",
+   "source": {
+    "kind": "local",
+    "run": null,
+    "url": null
+   },
+   "status": "pass"
+  },
+  {
+   "date": "2026-11-06",
+   "detail": null,
+   "level": "quick",
+   "name": "agent",
+   "source": {
+    "kind": "local",
+    "run": null,
+    "url": null
+   },
+   "status": "pass"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "agent_think_off",
+   "source": null,
+   "status": "n/a"
+  },
+  {
+   "date": "2026-11-06",
+   "detail": null,
+   "level": "quick",
+   "name": "sampling",
+   "source": {
+    "kind": "local",
+    "run": null,
+    "url": null
+   },
+   "status": "pass"
+  },
+  {
+   "date": "2026-11-06",
+   "detail": null,
+   "level": "quick",
+   "name": "needle",
+   "source": {
+    "kind": "local",
+    "run": null,
+    "url": null
+   },
+   "status": "pass"
+  },
+  {
+   "date": "2026-11-06",
+   "detail": null,
+   "level": "full",
+   "name": "needle_full",
+   "source": {
+    "kind": "devlab",
+    "run": "1000",
+    "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"
+   },
+   "status": "pass"
+  },
+  {
+   "date": null,
+   "detail": null,
+   "level": null,
+   "name": "decision",
+   "source": null,
+   "status": "n/a"
+  }
+ ],
+ "license": null,
+ "name": "Flint",
+ "performance": {
+  "date": "2026-11-06",
+  "drafting": {
+   "llamacpp": "draft-dflash, n-max 3",
+   "loom": "DFlash, depth 3"
+  },
+  "llamacpp_build": "b1355",
+  "metrics": {
+   "decode": {
+    "llamacpp": 67.3,
+    "loom": 96.9,
+    "loom_source": null
+   },
+   "decode_2k": {
+    "llamacpp": 54.7,
+    "loom": 76.3,
+    "loom_source": null
+   },
+   "decode_32k": {
+    "llamacpp": 49.5,
+    "loom": 47.8,
+    "loom_source": null
+   },
+   "prefill_16k": {
+    "llamacpp": 929.3,
+    "loom": 1359.0,
+    "loom_source": null
+   },
+   "prefill_1k": {
+    "llamacpp": 1081.8,
+    "loom": 900.0,
+    "loom_source": {
+     "date": "2026-11-06",
+     "source": {
+      "kind": "devlab",
+      "run": "1000",
+      "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"
+     }
+    }
+   },
+   "prefill_2k": {
+    "llamacpp": 1079.0,
+    "loom": 1316.4,
+    "loom_source": null
+   },
+   "prefill_32k": {
+    "llamacpp": 667.6,
+    "loom": 1193.9,
+    "loom_source": null
+   },
+   "prefill_8k": {
+    "llamacpp": 1094.1,
+    "loom": 1424.7,
+    "loom_source": null
+   },
+   "streams4": {
+    "llamacpp": 124.2,
+    "loom": 134.2,
+    "loom_source": null
+   }
+  },
+  "not_applicable": [],
+  "runs": {
+   "decode_prefill": 2,
+   "streams4": 3
+  },
+  "source": {
+   "kind": "local",
+   "run": null,
+   "url": null
+  }
+ },
+ "projector": null,
+ "repo": "loom-fun/ggml-org-Flint-loom",
+ "schema": "loom-card/1",
+ "serve": {
+  "device": "amdgpu",
+  "memory_bytes": 67000000000,
+  "output": "flint",
+  "preset": null
+ },
+ "service": {
+  "endpoint": "/v1/chat/completions",
+  "kind": "chat"
+ },
+ "tags": [
+  "loom",
+  "loom-serve",
+  "gguf",
+  "strix-halo",
+  "speculative-decoding",
+  "dflash"
+ ]
+}

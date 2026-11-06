@@ -108,7 +108,9 @@ $K/loom-benchmark/scripts/finalize.sh $W/pkg http://127.0.0.1:8160 $G $W/bench  
    (with the full-context probe), the final perf, `audit.py` (must print
    `AUDIT PASS`) and writes `bench/report.html` + `report.md` from the logs. Add a
    short notes file (what was optimized, what was skipped and why) with
-   `report.py --notes`, then publish `report.html`.
+   `report.py --notes`, then publish `report.html`. A Hugging Face card (`README.md`, `info.json`) is generated
+   from the same logs with `loom-benchmark/scripts/card/` (loom-benchmark "Hugging Face model card"); never
+   write card prose by hand.
 
 The budget is real: keep tool calls short, don't re-run a passing step, and don't
 re-read files you already read. Long steps (`qualify.sh`, `finalize.sh`) print a

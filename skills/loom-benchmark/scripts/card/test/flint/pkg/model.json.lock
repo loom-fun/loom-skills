@@ -1,0 +1,43 @@
+{
+ "schema_version": 2,
+ "scope": "assets",
+ "origins": {
+  "checkpoint": {
+   "requested": {
+    "kind": "hf",
+    "repository": "ggml-org/Flint-GGUF",
+    "revision": "468307a1b38259e9e4c9d4fe53d4e3b76386572c"
+   },
+   "resolved": {
+    "revision": "468307a1b38259e9e4c9d4fe53d4e3b76386572c"
+   }
+  },
+  "drafter": {
+   "requested": {
+    "kind": "hf",
+    "repository": "incoai/Flint-DFlash2-GGUF",
+    "revision": "74e6ac0c538cfd393d97bd93694e5c4c6b6aa8c3"
+   },
+   "resolved": {
+    "revision": "74e6ac0c538cfd393d97bd93694e5c4c6b6aa8c3"
+   }
+  }
+ },
+ "files": [
+  {
+   "origin": "@checkpoint/Flint-Q4_K_M.gguf",
+   "size": 23387911136,
+   "sha256": "c3c4d93f9db92627a2fc47ea8fe8c64a094cabd3549db544bcdd2c00e9a9a347"
+  },
+  {
+   "origin": "@drafter/Flint-DFlash2-Q4_K_M.gguf",
+   "size": 239808192,
+   "sha256": "c14e92d3f666e0bb58e6afa76b1f44994272b2ca0b4c4b92b6b09af57de7f4b9"
+  },
+  {
+   "origin": "tokenizer.json",
+   "size": 5478957,
+   "sha256": "860c699bdc78beb3bb24bcfb7addc1fd02fe49a9993081bbf295d4249d9f56c8"
+  }
+ ]
+}

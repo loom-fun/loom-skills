@@ -1,0 +1,24 @@
+name: check-cards
+
+# loom-fun model cards are generated (skills/loom-benchmark/scripts/card): info.json by make_info.py, README.md
+# by render_card.py from info.json alone. Keep both deterministic and the template stable: fixture inputs must
+# reproduce the golden files byte for byte.
+on:
+  pull_request:
+    paths: ["skills/loom-benchmark/scripts/card/**", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
+  push:
+    branches: [main]
+    paths: ["skills/loom-benchmark/scripts/card/**", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Card generator matches the golden cards
+        run: |
+          python3 -m py_compile skills/loom-benchmark/scripts/card/*.py .github/scripts/loom_factory.py
+          skills/loom-benchmark/scripts/card/test/check.sh

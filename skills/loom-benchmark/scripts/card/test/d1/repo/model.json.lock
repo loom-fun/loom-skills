@@ -1,0 +1,28 @@
+{
+ "schema_version": 2,
+ "scope": "assets",
+ "origins": {
+  "checkpoint": {
+   "requested": {
+    "kind": "hf",
+    "repository": "LiquidAI/d1-2B-GGUF",
+    "revision": "e968f6575f0d4fad928312d7af15cad90fd365c0"
+   },
+   "resolved": {
+    "revision": "e968f6575f0d4fad928312d7af15cad90fd365c0"
+   }
+  }
+ },
+ "files": [
+  {
+   "origin": "@checkpoint/d1-2B-Q4_K_M.gguf",
+   "size": 1099629888,
+   "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b"
+  },
+  {
+   "origin": "tokenizer.json",
+   "size": 17908258,
+   "sha256": "a39eed58008cbcbc09e5b629b81338a654269c64cd13348aaa6090f4db75c7e7"
+  }
+ ]
+}

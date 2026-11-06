@@ -1,0 +1,154 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://github.com/loom-fun/loom-skills/skills/loom-benchmark/scripts/card/info_schema.json",
+ "title": "Loom model card data (info.json), schema loom-card/1",
+ "description": "Everything a loom-fun Hugging Face card shows. make_info.py writes it from the package and the measurement evidence; render_card.py renders README.md from it alone. Unknown values are null (rendered as not measured / no evidence), never guessed.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": ["schema", "repo", "name", "license", "tags", "checkpoint", "drafter", "projector", "service",
+              "serve", "context", "performance", "features", "gates"],
+ "properties": {
+  "schema": {"const": "loom-card/1"},
+  "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "description": "The Hugging Face repo of this card"},
+  "name": {"type": "string", "description": "Display name: the checkpoint repo name without a -GGUF suffix"},
+  "license": {"type": ["string", "null"], "description": "The checkpoint's license tag, or null"},
+  "tags": {"type": "array", "items": {"type": "string"}, "description": "YAML front matter tags, in order"},
+  "checkpoint": {"$ref": "#/$defs/source"},
+  "drafter": {"oneOf": [{"$ref": "#/$defs/source"}, {"type": "null"}]},
+  "projector": {"oneOf": [{"$ref": "#/$defs/source"}, {"type": "null"}]},
+  "service": {
+   "type": "object", "additionalProperties": false, "required": ["kind", "endpoint"],
+   "properties": {
+    "kind": {"enum": ["chat", "decision"], "description": "chat: OpenAI-style chat completions; decision: SystemOne decisions"},
+    "endpoint": {"type": "string"}
+   }
+  },
+  "serve": {
+   "type": "object", "additionalProperties": false, "required": ["output", "memory_bytes", "device", "preset"],
+   "properties": {
+    "output": {"type": "string", "description": "loom-fetch --output directory name"},
+    "memory_bytes": {"type": ["integer", "null"], "description": "loom-serve --memory_bytes the card was validated with; null: flag omitted"},
+    "device": {"type": "string"},
+    "preset": {"type": ["string", "null"], "description": "loom-fetch --preset, only when model.json has several"}
+   }
+  },
+  "context": {
+   "type": "object", "additionalProperties": false, "required": ["tokens", "rows", "pool", "max_tokens", "pending_requests"],
+   "properties": {
+    "tokens": {"type": ["integer", "null"], "description": "context_capacity per request"},
+    "rows": {"type": ["integer", "null"], "description": "concurrent requests (rows)"},
+    "pool": {"type": ["integer", "null"], "description": "KV pool positions shared by the rows"},
+    "max_tokens": {"type": ["integer", "null"], "description": "the preset's max_tokens"},
+    "pending_requests": {"type": ["integer", "null"]}
+   }
+  },
+  "performance": {
+   "type": "object", "additionalProperties": false,
+   "required": ["llamacpp_build", "drafting", "date", "source", "runs", "metrics", "not_applicable"],
+   "properties": {
+    "llamacpp_build": {"type": ["string", "null"], "pattern": "^b[0-9]+$", "description": "lemonade-sdk/llamacpp-rocm release tag"},
+    "drafting": {
+     "type": "object", "additionalProperties": false, "required": ["loom", "llamacpp"],
+     "properties": {
+      "loom": {"type": ["string", "null"], "description": "Loom's speculative setting while measured (e.g. dflash, depth 3); null: off"},
+      "llamacpp": {"type": ["string", "null"], "description": "llama.cpp's speculative setting (e.g. draft-dflash, n-max 3); null: off"}
+     }
+    },
+    "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "source": {"oneOf": [{"$ref": "#/$defs/evidence_source"}, {"type": "null"}]},
+    "runs": {
+     "type": "object", "additionalProperties": false, "required": ["decode_prefill", "streams4"],
+     "properties": {
+      "decode_prefill": {"type": ["integer", "null"], "description": "runs averaged (mean) per decode/prefill value"},
+      "streams4": {"type": ["integer", "null"], "description": "runs per 4-stream value (median)"}
+     }
+    },
+    "metrics": {
+     "type": "object", "additionalProperties": false,
+     "required": ["decode", "decode_2k", "decode_32k", "prefill_1k", "prefill_2k", "prefill_8k", "prefill_16k",
+                  "prefill_32k", "streams4"],
+     "properties": {
+      "decode": {"$ref": "#/$defs/metric"}, "decode_2k": {"$ref": "#/$defs/metric"},
+      "decode_32k": {"$ref": "#/$defs/metric"}, "prefill_1k": {"$ref": "#/$defs/metric"},
+      "prefill_2k": {"$ref": "#/$defs/metric"}, "prefill_8k": {"$ref": "#/$defs/metric"},
+      "prefill_16k": {"$ref": "#/$defs/metric"}, "prefill_32k": {"$ref": "#/$defs/metric"},
+      "streams4": {"$ref": "#/$defs/metric"}
+     }
+    },
+    "not_applicable": {"type": "array", "items": {"type": "string"}, "description": "metrics that do not apply to this service"}
+   }
+  },
+  "features": {
+   "type": "object", "additionalProperties": false,
+   "required": ["api", "tool_calling", "thinking", "reasoning_effort", "speculative_decoding", "image_input",
+                "audio", "sampling", "context", "concurrency", "max_output_tokens"],
+   "properties": {
+    "api": {"$ref": "#/$defs/feature"}, "tool_calling": {"$ref": "#/$defs/feature"},
+    "thinking": {"$ref": "#/$defs/feature"}, "reasoning_effort": {"$ref": "#/$defs/feature"},
+    "speculative_decoding": {"$ref": "#/$defs/feature"}, "image_input": {"$ref": "#/$defs/feature"},
+    "audio": {"$ref": "#/$defs/feature"}, "sampling": {"$ref": "#/$defs/feature"},
+    "context": {"$ref": "#/$defs/feature"}, "concurrency": {"$ref": "#/$defs/feature"},
+    "max_output_tokens": {"$ref": "#/$defs/feature"}
+   }
+  },
+  "gates": {
+   "type": "array",
+   "items": {
+    "type": "object", "additionalProperties": false, "required": ["name", "status", "level", "date", "source", "detail"],
+    "properties": {
+     "name": {"enum": ["kernel_tests", "golden", "compare", "vision", "consistency", "spec", "agent",
+                      "agent_think_off", "sampling", "needle", "needle_full", "decision"]},
+     "status": {"enum": ["pass", "fail", "unknown", "n/a"]},
+     "level": {"type": ["string", "null"], "description": "gates.sh LEVEL the evidence ran at"},
+     "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+     "source": {"oneOf": [{"$ref": "#/$defs/evidence_source"}, {"type": "null"}]},
+     "detail": {"type": ["string", "null"], "description": "a count from the gate's own output (e.g. 66/66), or null"}
+    }
+   }
+  }
+ },
+ "$defs": {
+  "source": {
+   "type": "object", "additionalProperties": false, "required": ["repo", "revision", "file", "quant", "sha256", "size"],
+   "properties": {
+    "repo": {"type": "string"},
+    "revision": {"type": ["string", "null"]},
+    "file": {"type": "string"},
+    "quant": {"type": ["string", "null"]},
+    "sha256": {"type": ["string", "null"]},
+    "size": {"type": ["integer", "null"]}
+   }
+  },
+  "metric": {
+   "type": "object", "additionalProperties": false, "required": ["loom", "llamacpp", "loom_source"],
+   "properties": {
+    "loom": {"type": ["number", "null"]},
+    "llamacpp": {"type": ["number", "null"]},
+    "loom_source": {"oneOf": [{"$ref": "#/$defs/override"}, {"type": "null"}],
+                    "description": "set when the Loom value comes from another run than the table's source"}
+   }
+  },
+  "override": {
+   "type": "object", "additionalProperties": false, "required": ["date", "source"],
+   "properties": {
+    "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "source": {"$ref": "#/$defs/evidence_source"}
+   }
+  },
+  "evidence_source": {
+   "type": "object", "additionalProperties": false, "required": ["kind", "run", "url"],
+   "properties": {
+    "kind": {"enum": ["local", "devlab", "factory"], "description": "local: a run on a developer's Strix Halo; devlab: the nightly-gates workflow on AMD DevLab Dispatch; factory: the loom-factory workflow"},
+    "run": {"type": ["string", "null"], "description": "GitHub Actions run id"},
+    "url": {"type": ["string", "null"]}
+   }
+  },
+  "feature": {
+   "type": "object", "additionalProperties": false, "required": ["status", "value"],
+   "properties": {
+    "status": {"enum": ["yes", "no", "unknown", "n/a"]},
+    "value": {"description": "structured detail the renderer formats (string, number, object or null)"}
+   }
+  }
+ }
+}
