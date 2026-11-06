@@ -1554,6 +1554,91 @@ def live_row_scale(program):
                                r"kernel.launch @g_row_scale_f16_live[%t](%t, %info, \1) : [index](index, buffer, index, buffer, buffer, buffer)", p)
     return "".join(parts)
 
+# g_post_add_norm_rs[_live]: g_post_add_norm followed by g_row_scale_f16[_live] of its output row in one kernel
+# (prefill: the post-attention / post-FFN residual add, the next norm and the next GEMM's f16 operand). Each lane
+# already holds its 32 normalized values, so the row's max |h| is one more workgroup reduce: no second launch and
+# no re-read of h (twice) from memory. Same values as the two kernels (h f32 is still written: the 4-token matvecs
+# and the decode-shaped paths read it). Derived from NORMS' g_post_add_norm and ROW_SCALE's exponent code, so a
+# kit's POST_NORM / eps settings carry over.
+def post_add_norm_rs(live):
+    a = NORMS.index('kernel.def export("g_post_add_norm")')
+    t = NORMS[a:]
+    t = t[:t.index("\n}\n") + 3]
+    name = "g_post_add_norm_rs_live" if live else "g_post_add_norm_rs"
+    t = t.replace('export("g_post_add_norm") @g_post_add_norm(', f'export("{name}") @{name}(')
+    t = t.replace("launch(%tokens_arg: index, %y: buffer,", "launch(%tokens_arg: index, " + ("%info: buffer, " if live else "") + "%y: buffer,")
+    t = t.replace("%w_next: buffer, %h: buffer)", "%w_next: buffer, %h: buffer, %scales: buffer, %h16: buffer)")
+    old_tail = t[t.rindex("  scf.if %active {"):]
+    assert "vector.store %hv, %h_view" in old_tail and old_tail.rstrip().endswith("kernel.return\n}"), old_tail
+    body = old_tail[:old_tail.index("  }\n  kernel.return")]
+    body = body.replace("  scf.if %active {", "  %hfin = scf.if %active -> (vector<32xf32>) {", 1) + "    scf.yield %hv : vector<32xf32>\n  } else {\n    scf.yield %zero32 : vector<32xf32>\n  }\n"
+    rs = ROW_SCALE
+    expo = rs[rs.index("  %bits = scalar.bitcast %maximum"):rs.index("  %scale4 = vector.splat")]
+    live_code = ""
+    if live:
+        live_code = """  %live_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %live_word = view.load %live_view[%token, 2] : view<[%tokens]x4xi32> -> i32
+  %dead_zero = scalar.constant 0 : i32
+  %row_live = scalar.cmpi ne, %live_word, %dead_zero : i32
+"""
+        expo = expo.replace("  %scale = scalar.bitcast %scale_bits : i32 to f32\n  %inverse = scalar.bitcast %inverse_bits : i32 to f32\n",
+                            "  %scale_l = scalar.bitcast %scale_bits : i32 to f32\n  %inverse_l = scalar.bitcast %inverse_bits : i32 to f32\n"
+                            "  %scale = scf.select %row_live, %scale_l, %zero_f : f32\n  %inverse = scf.select %row_live, %inverse_l, %zero_f : f32\n")
+        assert "%scale_l" in expo
+    hval = "%hfin"
+    if live:
+        live_code += "  %hsel = scf.select %row_live, %hfin, %zero32 : vector<32xf32>\n"
+        hval = "%hsel"
+    new_tail = body + live_code + f"""  %habs = vector.absf {hval} : vector<32xf32>
+  %hlocal = vector.reduce<maxnumf> %habs, %zero_f : vector<32xf32>, f32
+  %maximum = kernel.workgroup.reduce<maxnumf> %hlocal : f32
+""" + expo + f"""  %scale32 = vector.splat %scale : vector<32xf32>
+  scf.if %active {{
+    %bl16 = index.assume %lane [range(%lane, 0, {HG - 1})] : index
+    %hsv = vector.mulf {hval}, %scale32 : vector<32xf32>
+    %h16v = vector.fptrunc %hsv : vector<32xf32> to vector<32xf16>
+    %h16_view = buffer.view %h16[%zero] : buffer -> view<[%tokens]x{HG}x32xf16>
+    vector.store %h16v, %h16_view[%token, %bl16, %c0] : vector<32xf16>, view<[%tokens]x{HG}x32xf16>
+  }}
+  %first = index.cmp eq, %lane, %c0 : index
+  scf.if %first {{
+    %c1s = index.constant 1 : index
+    %s_view = buffer.view %scales[%zero] : buffer -> view<[%tokens]x2xf32>
+    view.store %scale, %s_view[%token, %c0] : f32, view<[%tokens]x2xf32>
+    view.store %inverse, %s_view[%token, %c1s] : f32, view<[%tokens]x2xf32>
+  }}
+  kernel.return
+}}
+"""
+    return "\n" + t[:t.rindex("  scf.if %active {")] + new_tail
+
+
+def fuse_post_add_row_scale(program):
+    """g_post_add_norm immediately followed (an optional `// ---- layer` comment between) by a row-scale launch of
+    its output (`scf.if C { g_row_scale_f16[_live](same rows, H wide, %h ...) } [else { ... }]`) becomes
+    `scf.if C { g_post_add_norm_rs[_live] } else { g_post_add_norm; ... }`. Returns (program, used kernel texts)."""
+    import re as _re
+    pat = _re.compile(
+        r"(?P<ind>[ ]*)kernel\.launch @g_post_add_norm\[(?P<n>%\w+)\]\((?P=n), (?P<args>%\w+, %\w+, %\w+, %\w+), (?P<h>%\w+)\) : \[index\]\(index, (?P<ty>buffer, view<\d+xf32>, buffer, view<\d+xf32>), buffer\)\n"
+        r"(?P<cmt>(?:[ ]*//[^\n]*\n)?)"
+        r"(?P<ind2>[ ]*)scf\.if (?P<c>%\w+) \{\n"
+        r"[ ]*kernel\.launch @g_row_scale_f16(?P<live>_live)?\[(?P=n)\]\((?P=n), (?P<info>%info, )?%nH, (?P=h), (?P<s>%\w+), (?P<h16>%\w+)\) : \[index\]\([^\n]*\)\n"
+        r"(?P=ind2)\}(?P<els> else \{\n(?P<eb>(?:[^\n]*\n)*?)(?P=ind2)\})?\n")
+    used = set()
+    def rep(m):
+        live = bool(m.group("live"))
+        used.add(live)
+        i2 = m.group("ind2")
+        name = "g_post_add_norm_rs_live" if live else "g_post_add_norm_rs"
+        orig = f"{i2}  kernel.launch @g_post_add_norm[{m.group('n')}]({m.group('n')}, {m.group('args')}, {m.group('h')}) : [index](index, {m.group('ty')}, buffer)\n"
+        fused = (f"{i2}  kernel.launch @{name}[{m.group('n')}]({m.group('n')}, {'%info, ' if live else ''}{m.group('args')}, {m.group('h')}, {m.group('s')}, {m.group('h16')})"
+                 f" : [index](index, {'buffer, ' if live else ''}{m.group('ty')}, buffer, buffer, buffer)\n")
+        return (m.group("cmt") + f"{i2}scf.if {m.group('c')} {{\n" + fused + f"{i2}}} else {{\n" + orig
+                + (m.group("eb") or "") + f"{i2}}}\n")
+    program = pat.sub(rep, program)
+    return program, "".join(post_add_norm_rs(lv) for lv in sorted(used))
+
+
 MROPE = CFG.get("mrope")   # {"sections": [t, h, w, e], "interleaved": bool}: Qwen-VL multi-axis RoPE (image input)
 
 
@@ -3520,6 +3605,9 @@ if __name__ == "__main__":
     if os.environ.get("ROW_SCALE_LIVE", "1") != "0":   # after quant_wiring (it matches g_row_scale_f16); =0 A/B it off
         program = live_row_scale(program)
         COMMON += ROW_SCALE_LIVE
+    if os.environ.get("POST_ADD_ROW_SCALE", "1") != "0":   # after live_row_scale; =0 A/B it off
+        program, _fused = fuse_post_add_row_scale(program)
+        COMMON += _fused
     if any(f == "f32" for f, *_ in USED_MV | USED_MV_R) or "f32" in USED_GEMM:
         COMMON += F32_VALUES
     if any(f == "f16" for f, *_ in USED_MV | USED_MV_R) or "f16" in USED_GEMM:
