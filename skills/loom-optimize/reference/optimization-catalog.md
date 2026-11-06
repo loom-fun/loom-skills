@@ -135,6 +135,9 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
     prefill unchanged (their kernels are byte-identical).
   - Only models with a separate `attn_gate` of the q format pair (Muse-Glimmer). Qwen3.8-27B (fused q+gate),
     Flint and Bolt generate byte-identical programs.
+  - Same session, c4_steady x 4 each (medians, min-max): Loom before 68.1 (67.0-69.7), after 69.7 (68.2-70.7),
+    llama.cpp b1355 69.4 (68.2-70.7) tok/s. Level with llama.cpp, not ahead in every run: the per-run spread (+-2 %)
+    is larger than the remaining step-time difference.
 - **Tokens per step: llama.cpp's DFlash2 proposal matches Loom's at temperature 0** (code comparison, llama.cpp
   `common/speculative.cpp`): same tapped residuals (`target_layers` t = input of layer t), anchor without its own
   feature, block = n_max + 1 at positions P..P+3, mask token, non-causal attention, conv taps, logit scale and softcap,
