@@ -404,6 +404,10 @@ json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
 bench = {k: v for k, v in cfg.items() if k != "tensors"}
 bench["model_id"] = card["model"]["id"]
 bench["draft"] = DRAFT
+# What generated the programs (kit_source.py): the loom-skills commit of this kit and the Loom SDK. The model card
+# shows them; a kit made by apply_example.sh carries the commit in KIT_SOURCE.
+from kit_source import generator_stamp  # noqa: E402
+bench["generator"] = generator_stamp()
 json.dump(bench, open(os.path.join(pkg, "llm_config.json"), "w"), indent=1)
 kv = a.pool * kv_per_position
 need = weights_bytes + kv + 3 * 2**30 + 2 * a.rows * recurrent_bytes

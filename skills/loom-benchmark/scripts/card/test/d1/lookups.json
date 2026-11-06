@@ -1,0 +1,12 @@
+{
+ "api repos/ROCm/hrx-system/actions/artifacts/12763223321": {
+  "workflow_run": {
+   "head_branch": "users/benvanik/loom/agent-client-compat",
+   "head_sha": "dd5ad00f3b68fa1855a234eaf25f62cfb193f2ab"
+  }
+ },
+ "run view 40842422037 -R loom-fun/loom-skills --json createdAt,headSha": {
+  "createdAt": "2026-10-29T08:28:51Z",
+  "headSha": "b0f589799787822ee5491b38960debf54808ae93"
+ }
+}

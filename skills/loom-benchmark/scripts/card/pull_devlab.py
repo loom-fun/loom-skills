@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """DevLab Dispatch nightly-gates results for one card -> a make_info.py evidence file.
 
-usage: pull_devlab.py loom-fun/CARD_REPO [--run ID] [--download-dir DIR] -o devlab.json
+usage: pull_devlab.py loom-fun/CARD_REPO [--run ID] [--download-dir DIR] [--hrx-loom FILE.json] -o devlab.json
 
 Finds the latest nightly-gates.yml run (or --run ID) of loom-fun/loom-skills with a finished job for the card,
 downloads that run's artifacts (gh run download; nightly_gates.sh writes summary.json and gates.json per card
@@ -10,6 +10,9 @@ and time, the job's URL as the evidence.
 Gates only: the full job's report-only perf.jsonl is not card data. DevLab runners measure differently from a
 local same-session run (Flint, run 42259576436: 1k prefill 515 vs 848 tok/s on the same build), so their
 numbers are not comparable with the llama.cpp column.
+Each source records the runner's device and Loom SDK when summary.json carries them ("device" from
+machine_info.py detect_device(), "hrx_loom" from its hrx_loom_identity()); otherwise they stay null (not
+recorded). --hrx-loom FILE.json supplies an SDK identity established otherwise (e.g. from the job logs).
 A job that was cancelled or did not write gates.json is skipped. Needs `gh` authenticated for loom-fun/loom-skills.
 """
 import argparse
@@ -20,7 +23,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import EVIDENCE_ID, write_json  # noqa: E402
+from card_lib import EVIDENCE_ID, load_json, write_json  # noqa: E402
 
 GH_REPO = "loom-fun/loom-skills"
 WORKFLOW = "nightly-gates.yml"
@@ -54,6 +57,7 @@ def main(argv=None):
     ap.add_argument("repo")
     ap.add_argument("--run", help="this nightly-gates run instead of the latest one with a finished job for the card")
     ap.add_argument("--download-dir")
+    ap.add_argument("--hrx-loom", help="SDK identity JSON for jobs whose summary.json records none")
     ap.add_argument("-o", required=True)
     a = ap.parse_args(argv)
     candidates = [{"databaseId": int(a.run)}] if a.run else runs()
@@ -83,10 +87,11 @@ def main(argv=None):
 
     gates = []
     for s, g, d, url in sorted(found, key=lambda x: x[1].get("ts") or ""):
-        src = {"kind": "devlab", "run": str(rid), "url": url}
+        src = {"kind": "devlab", "run": str(rid), "url": url, "device": s.get("device"),
+               "hrx_loom": s.get("hrx_loom") or (load_json(a.hrx_loom) if a.hrx_loom else None)}
         for name, x in sorted(g.get("gates", {}).items()):
             gates.append({"name": name, "status": "pass" if x.get("pass") else "fail", "level": g.get("level"),
-                          "time": g.get("ts"), "source": src, "detail": None})
+                          "time": g.get("ts"), "source": src, "detail": None, "programs_sha256": s.get("programs_sha256")})
     write_json(a.o, {"evidence": EVIDENCE_ID, "gates": gates})
     print(f"wrote {a.o}: run {rid}, " + ", ".join(f"{x['level']}:{x['name']}={x['status']}" for x in gates),
           file=sys.stderr)

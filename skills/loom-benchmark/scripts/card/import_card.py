@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""One-time importer: a card published before loom-card/1 -> a make_info.py evidence file.
+"""One-time importer: a card published before loom-card/1 -> a make_info.py evidence file (loom-card-evidence/2).
 
-usage: import_card.py REPO_DIR [--run-date YYYY-MM-DD] -o evidence.json
-  REPO_DIR holds the card's current README.md and info.json (downloaded from Hugging Face, never the weights).
+usage: import_card.py REPO_DIR [--run-date YYYY-MM-DD] [--report-out REPORT.md] [--card-only] -o evidence.json
+  REPO_DIR holds the card's pre-loom-card/1 README.md and info.json (from the repo's history on Hugging Face,
+  never the weights).
 
 It maps what the old ad-hoc formats recorded and nothing else; a value they did not record stays unknown
 (rendered as not measured / no evidence):
@@ -11,9 +12,17 @@ It maps what the old ad-hoc formats recorded and nothing else; a value they did 
     prefill_1000-style names) -> performance, with the llama.cpp build and the run they came from;
   - the gate verdicts the old formats stored (golden_gate / correctness / consistency fields, the factory
     REPORT.md's own PASS lines, or a "GATES PASS level=... {...}" summary) -> gates;
-  - a factory REPORT.md stating greedy-only decoding -> sampling: not supported.
-Factory runs (info.json "run") are loom-fun/loom-skills Actions runs; their date comes from `gh run view`
-unless --run-date is given.
+  - a factory REPORT.md stating greedy-only decoding -> sampling: not supported;
+  - the report's own "llama.cpp flags" line -> the baseline's args, as stated;
+  - versions (recovered, marked "recovered": true with the basis): the loom-skills commit is the head commit of
+    the loom-factory run info.json names; the Loom SDK is the hrx-system CI artifact the report names (its
+    commit and branch from the artifact's workflow run), with the version the report states.
+--report-out writes the old info.json "report" (the narrative) to REPORT.md verbatim; pass make_info.py build
+--report attached. --card-only keeps only the card block (license, tags, --output, --memory_bytes) for a card
+whose measurements come from their raw logs instead.
+Factory runs (info.json "run") are loom-fun/loom-skills Actions runs; their date and head commit come from
+`gh run view` (--run-date overrides the date); artifacts from `gh api`. --lookups answers those calls from a
+file instead (keys: the gh arguments joined by spaces).
 """
 import argparse
 import ast
@@ -24,7 +33,9 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import EVIDENCE_ID, METRIC_KEYS, build_tag, load_json, write_json  # noqa: E402
+from card_lib import EVIDENCE_ID, build_tag, load_json, write_json  # noqa: E402
+
+GH_REPO = "loom-fun/loom-skills"
 
 # old metric name -> loom-card/1 metric
 ALIASES = {
@@ -60,13 +71,35 @@ def front_matter(readme):
     return (lic.group(1) if lic else None), tag_list
 
 
-def run_date(run_url, given):
-    if given:
-        return given
+LOOKUPS = {}   # --lookups: recorded answers instead of gh calls (tests, offline use)
+
+
+def gh_json(*args):
+    key = " ".join(args)
+    if LOOKUPS:
+        if key not in LOOKUPS:
+            sys.exit(f"--lookups has no answer for: gh {key}")
+        return LOOKUPS[key]
+    return json.loads(subprocess.run(["gh", *args], capture_output=True, text=True, check=True).stdout)
+
+
+def run_info(run_url):
     rid = run_url.rstrip("/").split("/")[-1]
-    out = subprocess.run(["gh", "run", "view", rid, "-R", "loom-fun/loom-skills", "--json", "createdAt", "-q", ".createdAt"],
-                         capture_output=True, text=True, check=True).stdout.strip()
-    return out[:10]
+    return gh_json("run", "view", rid, "-R", GH_REPO, "--json", "createdAt,headSha")
+
+
+def sdk_from_report(report, readme):
+    """The Loom SDK a report names: an hrx-system CI wheel artifact (and the version, if stated), recovered."""
+    text = report + "\n" + readme
+    art = re.search(r"(?:CI artifact|wheel-)`?\s*(?:wheel-)?(\d{9,})", text)
+    ver = re.search(r"hrx-loom`?\s+(\d+\.\d+\.\d+)", text)
+    if not art:
+        return "unknown"
+    a = gh_json("api", f"repos/ROCm/hrx-system/actions/artifacts/{art.group(1)}")
+    return {"hrx_loom": ver.group(1) if ver else None, "source": "ci", "artifact_id": int(art.group(1)),
+            "hrx_system_sha": a["workflow_run"]["head_sha"], "branch": a["workflow_run"]["head_branch"],
+            "wheel_sha256": None, "recovered": True,
+            "basis": f"the card's report names hrx-system CI artifact {art.group(1)}; commit and branch from its workflow run"}
 
 
 def verdict(text):
@@ -78,8 +111,13 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("repo_dir")
     ap.add_argument("--run-date")
+    ap.add_argument("--report-out")
+    ap.add_argument("--card-only", action="store_true")
+    ap.add_argument("--lookups", help='JSON {"<gh arguments>": answer} used instead of calling gh')
     ap.add_argument("-o", required=True)
     a = ap.parse_args(argv)
+    if a.lookups:
+        LOOKUPS.update(load_json(a.lookups))
     readme = open(os.path.join(a.repo_dir, "README.md"), encoding="utf-8").read()
     info = load_json(os.path.join(a.repo_dir, "info.json"))
     if info.get("schema"):
@@ -93,48 +131,63 @@ def main(argv=None):
     ev = {"evidence": EVIDENCE_ID,
           "card": {"license": lic, "tags": tags, "output": out_dir.group(1) if out_dir else None,
                    "memory_bytes": int(mem.group(1)) if mem else None}}
+    if a.report_out and report:
+        with open(a.report_out, "w", encoding="utf-8", newline="") as f:
+            f.write(report)
+    if a.card_only:
+        write_json(a.o, ev)
+        print(f"wrote {a.o}: card only", file=sys.stderr)
+        return
 
     # where the old numbers came from: a loom-factory run, or (current cards) a local measurement
     run = info.get("run")
+    sdk = sdk_from_report(report, readme)
     if run:
-        src = {"kind": "factory", "run": run.rstrip("/").split("/")[-1], "url": run}
-        date = run_date(run, a.run_date)
+        ri = run_info(run)
+        rid = run.rstrip("/").split("/")[-1]
+        src = {"kind": "factory", "run": rid, "url": run, "device": None,
+               "hrx_loom": sdk if isinstance(sdk, dict) else None}
+        date = a.run_date or ri["createdAt"][:10]
+        ev["versions"] = {"package": {
+            "skills_commit": {"commit": ri["headSha"], "recovered": True,
+                              "basis": f"head commit of the loom-factory run {rid} that info.json names"},
+            "hrx_loom": sdk}}
     else:
-        src = {"kind": "local", "run": None, "url": None}
+        src = {"kind": "local", "run": None, "url": None, "device": None, "hrx_loom": sdk if isinstance(sdk, dict) else None}
         date = (re.search(r"\b(20\d\d-\d\d-\d\d)\b", json.dumps(m)) or [None, None])[1] or a.run_date
     build_text = " ".join(str(x) for x in (m.get("llama_cpp_build"), m.get("llamacpp_build"), m.get("measured"),
                                          info.get("measurement")) if x)
     build_text = build_text or (re.search(r"llama\.cpp[^\n]*?\bb1\d{3}\b", report + readme) or [""])[0]
-    metrics, na = {}, []
-    for key in METRIC_KEYS:
-        loom, llama = metric_pair(m, ALIASES[key])
-        metrics[key] = {"loom": loom, "llamacpp": llama}
+    metrics = {}
     decision = "decision model" in (m.get("workload") or "") or "/v1/systemone" in readme
-    if decision:
+    for key in ALIASES:
         # d1-style: decode / c4 were measured in decisions per second, not tokens; they are not this table's rows
-        for key in ("decode", "decode_2k", "decode_32k", "streams4"):
-            metrics[key] = {"loom": None, "llamacpp": None}
-            na.append(key)
-    drafting_llama = None
-    if src["kind"] == "local":
-        dm = re.search(r"(draft-\w+)[ ,]*(n-max \d+)?", build_text)
-        drafting_llama = ", ".join(x for x in dm.groups() if x) if dm else None
-    ev["performance"] = {"llamacpp_build": build_tag(build_text), "date": date, "source": src,
-                         "drafting": {"llamacpp": drafting_llama},
-                         "runs": {"decode_prefill": None, "streams4": None}, "metrics": metrics, "not_applicable": na}
+        if decision and key in ("decode", "decode_2k", "decode_32k", "streams4"):
+            continue
+        loom, llama = metric_pair(m, ALIASES[key])
+        if loom is not None or llama is not None:
+            metrics[key] = {"loom": loom, "baseline": llama}
+    flags = re.search(r"llama\.cpp flags \| (.+?) \|\s*$", report, re.M)
+    tag = build_tag(build_text)
+    ev["performance"] = {
+        "baseline": {"name": "llama.cpp", "version": f"llamacpp-rocm/{tag}" if tag else None,
+                     "args": flags.group(1).replace("`", "") if flags else None},
+        "session": {"date": date, "source": src, "runs": {"decode_prefill": None, "streams4": None}, "commands": [],
+                    "programs_sha256": None, "metrics": metrics}}
 
     gates = []
 
     def gate(name, status):
         if status:
-            gates.append({"name": name, "status": status, "level": None, "time": date, "source": src, "detail": None})
+            gates.append({"name": name, "status": status, "level": None, "time": date, "source": src, "detail": None,
+                          "programs_sha256": None})
 
     g = info.get("gates") if isinstance(info.get("gates"), str) else ""
     sm = re.search(r"GATES (?:PASS|FAIL) level=(\w+) \d+s (\{.*\})", g)
     if sm:
         for n, v in ast.literal_eval(sm.group(2)).items():
             gates.append({"name": n, "status": "pass" if v == "PASS" else "fail", "level": sm.group(1),
-                          "time": date, "source": src, "detail": None})
+                          "time": date, "source": src, "detail": None, "programs_sha256": None})
     if decision:
         gate("decision", (m.get("correctness") or {}).get("verdict") and verdict(m["correctness"]["verdict"]))
     else:
@@ -155,11 +208,11 @@ def main(argv=None):
         gate("consistency", st)
     ev["gates"] = gates
     if not decision and re.search(r"(?i)greedy (decoding )?only|sampling (fields|parameters) (are )?(accepted but )?ignored", report):
-        ev["features"] = {"sampling": {"status": "no", "value": None}}
+        ev["card"]["features"] = {"sampling": {"status": "no", "value": None}}
     write_json(a.o, ev)
-    print(f"wrote {a.o}: perf {build_tag(build_text)} {date}, gates "
+    print(f"wrote {a.o}: perf {tag} {date}, gates "
           + ", ".join(f"{x['name']}={x['status']}" for x in gates)
-          + (", sampling=no" if "features" in ev else ""), file=sys.stderr)
+          + (", sampling=no" if "features" in ev["card"] else ""), file=sys.stderr)
 
 
 if __name__ == "__main__":

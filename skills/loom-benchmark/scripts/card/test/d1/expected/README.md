@@ -35,11 +35,12 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 | prefill tok/s, 16k document | 3128.7 | 4637.4 | +48 % |
 | prefill tok/s, 32k document | — | — | — |
 | 4 streams, aggregate decode tok/s | n/a | n/a | n/a |
+| speculative decoding, drafted tokens accepted | n/a | n/a | n/a |
 
-- llama.cpp: ROCm build b1357 (lemonade-sdk/llamacpp-rocm), speculative decoding off.
+- llama.cpp: build `llamacpp-rocm/b1357`, server arguments `-ngl 99 -np 4 -c 48000`.
 - Loom: speculative decoding off.
 - Same GGUF on both engines, tokens per second. Loom: client-side timing; llama.cpp: server-side timings. Runs per value: decode and prefill not recorded (mean), 4 streams not recorded (median).
-- Measured 2026-10-29; source: [loom-factory run 40842422037](https://github.com/loom-fun/loom-skills/actions/runs/40842422037).
+- Measured 2026-10-29; device not recorded; hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered); source: [loom-factory run 40842422037](https://github.com/loom-fun/loom-skills/actions/runs/40842422037).
 - — not measured; n/a not applicable.
 
 ## Features
@@ -75,7 +76,7 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 | `needle_full` | Needle-in-a-haystack prompt at the full context is served | — not applicable |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | ✅ pass ¹ |
 
-- ¹ [loom-factory run 40842422037](https://github.com/loom-fun/loom-skills/actions/runs/40842422037), 2026-10-29.
+- ¹ [loom-factory run 40842422037](https://github.com/loom-fun/loom-skills/actions/runs/40842422037), 2026-10-29; device not recorded; hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered).
 - Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.
 
 ## Files
@@ -84,7 +85,10 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 - `program/*.loom`, `weights.loom`: the generated Loom programs.
 - `tokenizer.json`: the tokenizer.
 - `llm_config.json`: the configuration the programs were generated from.
-- `info.json`: the data this card is rendered from (schema `loom-card/1`).
+- `info.json`: the measurements, gate evidence and versions this card shows; everything else comes from the files above.
+- `REPORT.md`: the report written when this package was made.
+
+Versions: card schema `loom-card/2`; loom-skills `b0f5897` (recovered); hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered); card generator `0123456`.
 
 Source files, fetched by `loom-fetch` from their own repositories:
 
