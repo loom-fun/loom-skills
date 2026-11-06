@@ -7,14 +7,21 @@ For each model repo in the org, reads its model.json, model.json.lock, llm_confi
   category  A = card made by the current skill: schema loom-card/2 and "report": "generated"
             B = card exists but came from an older skill (e.g. "report": "attached", imported by import_card.py)
                 or an older schema; never use a B repo as a reference
-  missing   gates and metrics the card should have (card_lib.gate_applies / metric_applies) but has no evidence for
+  missing   gates and metrics the card should have (card_lib.gate_applies / metric_applies) but has no evidence for,
+            the roofline, and DevLab sweep values of the applicable metrics (devlab:METRIC)
   failing   gates whose latest evidence is not a pass
+  perf      the performance guardrails (card_lib.perf_flags): far = metrics whose Loom value is below FAR_FRACTION x
+            the efficiency Loom ports have demonstrated (roofline); disagree = metrics where the latest DevLab sweep
+            and the card's Loom value differ by more than DEVLAB_TOLERANCE; rounds = DevLab sweeps in a row that
+            disagree
   quant     the checkpoint's quant (card_lib.quant_of); anything but plain Q4_K_M is flagged
 With --targets (rank_models.py output), matches repos to target models by the checkpoint's base model and assigns
 each target one action:
   create  no repo for the model                         -> loop step 1 (port + optimize, publish)
   update  only a category B repo, or one not built from plain Q4_K_M -> loop step 1, from the best A reference
   fix     category A with a failing gate                -> loop step 4 (fix the skill, regenerate)
+  investigate  category A, a performance guardrail flag -> loop step 5 (local GPU worker, loom-optimize; a deep
+               debugging session once DEEP_DEBUG_ROUNDS sweeps in a row disagree: "deep_debug": true)
   sweep   category A, gates or metrics missing          -> loop step 3 (DevLab sweep)
   done    category A, every applicable gate passes and every applicable metric is measured
 Repos that duplicate a target's better repo, or match no target, are listed under "extra" (retire or keep: ask the
@@ -31,14 +38,14 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "..", "loom-benchmark", "scripts", "card"))
-from card_lib import (GATE_NAMES, METRIC_KEYS, SCHEMA_ID, gate_applies, load_package, metric_applies,  # noqa: E402
-                      package_facts, quant_of)
+from card_lib import (DEEP_DEBUG_ROUNDS, GATE_NAMES, METRIC_KEYS, ROOFLINE_METRIC, SCHEMA_ID,  # noqa: E402
+                      devlab_latest, gate_applies, load_package, metric_applies, package_facts, perf_flags, quant_of)
 
 from hub import HF, get_json  # noqa: E402
 from hub import fetch as fetch_bytes  # noqa: E402
 FILES = ("model.json", "model.json.lock", "llm_config.json", "info.json")
 VARIANT = re.compile(r"(-gguf|-bf16|-fp16|-qat.*|-mobile.*|-unquantized)$", re.I)
-ORDER = {"fix": 0, "update": 1, "create": 2, "sweep": 3, "done": 4}
+ORDER = {"fix": 0, "investigate": 1, "update": 2, "create": 3, "sweep": 4, "done": 5}
 
 
 
@@ -94,6 +101,13 @@ def assess(repo, d):
         measured |= {k for k, m in s.get("metrics", {}).items() if (m or {}).get("loom") is not None}
     out["missing"] += [f"metric:{k}" for k in METRIC_KEYS
                        if metric_applies(k, facts["kind"], facts["features"]) and k not in measured]
+    if out["category"] == "A":
+        if not info.get("roofline"):
+            out["missing"].append("roofline")
+        sweep = (devlab_latest(info) or {}).get("metrics") or {}
+        out["missing"] += [f"devlab:{k}" for k in ROOFLINE_METRIC
+                           if metric_applies(k, facts["kind"], facts["features"]) and k not in sweep]
+        out["perf"] = perf_flags(info, facts["kind"], facts["features"])
     if out["quant"] != "Q4_K_M" or re.search(r"UD-", ck["file"]):
         out["notes"].append(f"checkpoint is {ck['file']}, not plain Q4_K_M")
     return out
@@ -122,12 +136,24 @@ def main():
         r["base"] = base_model(r["checkpoint"]) if r.get("checkpoint") else None
         return r
 
+    def flagged(r):
+        p = r.get("perf") or {}
+        return bool(p.get("far") or p.get("disagree"))
+
+    def flag_text(p):
+        out = [f"far {k} {v[0]:.0%} of roofline (demonstrated {v[1]:.0%})" for k, v in p["far"].items()]
+        out += [f"DevLab {k} {v:+.0%}" for k, v in p["disagree"].items()]
+        if p["rounds"]:
+            out.append(f"{p['rounds']} sweep(s) in a row disagree" + (" -> deep debug" if p["rounds"] >= DEEP_DEBUG_ROUNDS else ""))
+        return "; ".join(out)
+
     with cf.ThreadPoolExecutor(8) as ex:
         status = sorted(ex.map(one, repos), key=lambda r: r["repo"])
     for r in status:
         print(f"{r['category']}  {r['repo'][:58]:58} {(r.get('file') or '?')[:40]:40} "
               f"failing={','.join(r['failing']) or '-'} missing={len(r['missing'])}"
-              + (f"  [{'; '.join(r['notes'])}]" if r["notes"] else ""))
+              + (f"  [{'; '.join(r['notes'])}]" if r["notes"] else "")
+              + (f"  perf: {flag_text(r['perf'])}" if flagged(r) else ""))
     result = {"org": a.org, "repos": status}
 
     if a.targets:
@@ -148,6 +174,8 @@ def main():
                 action = "update"   # older skill, or not the target's plain Q4_K_M
             elif primary["failing"]:
                 action = "fix"
+            elif flagged(primary):
+                action = "investigate"   # a performance guardrail: back to a local GPU worker
             elif primary["missing"]:
                 action = "sweep"
             else:
@@ -157,13 +185,16 @@ def main():
                          "duplicates": [r["repo"] for r in best[1:]],
                          "missing": primary["missing"] if primary else [],
                          "failing": primary["failing"] if primary else [],
-                         "notes": primary["notes"] if primary else []})
+                         "notes": primary["notes"] if primary else [],
+                         "perf": primary.get("perf") if primary else None,
+                         "deep_debug": bool(primary and (primary.get("perf") or {}).get("rounds", 0) >= DEEP_DEBUG_ROUNDS)})
         extra = [r["repo"] for r in status if r["repo"] not in used]
         counts = {k: sum(w["action"] == k for w in work) for k in ORDER}
         print("\n" + "  ".join(f"{k}={v}" for k, v in counts.items()))
         for w in sorted(work, key=lambda w: (ORDER[w["action"]], w["rank"] or 0)):
-            print(f"{w['action']:6} #{w['rank']:<3} {w['model'][:50]:50} {w['repo'] or ''}"
-                  + (f"  dup: {', '.join(w['duplicates'])}" if w["duplicates"] else ""))
+            print(f"{w['action']:11} #{w['rank']:<3} {w['model'][:50]:50} {w['repo'] or ''}"
+                  + (f"  dup: {', '.join(w['duplicates'])}" if w["duplicates"] else "")
+                  + (f"  [{flag_text(w['perf'])}]" if w["action"] == "investigate" else ""))
         if extra:
             print("\nnot a target (keep or retire: ask the user): " + ", ".join(extra))
         result.update(work=work, extra=extra, counts=counts)

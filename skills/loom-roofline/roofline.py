@@ -29,6 +29,14 @@ EFF = {
     "c4": 0.70,          # dense. Bolt 0.65-0.66
     "c4_moe": 0.85,      # Flint 0.74, LFM2.5-24B-A2B 0.91
 }
+# The same for speculative decoding, against drafted_ceiling() (tokens per verify pass = 1 + acceptance x depth,
+# drafter cost not counted, so these sit below EFF). Measured on the published loom-fun cards, DFlash depth 3.
+EFF_DRAFTED = {
+    "decode": 0.69,      # dense. Qwen3.8-27B 29.2 / 42.4 (Muse-Glimmer-30B 0.68, Bolt-E4B 0.48)
+    "decode_moe": 0.52,  # Flint 92.4 / 177.8 (the only drafted MoE port so far)
+    "c4": 0.45,          # dense, 4 streams. Muse-Glimmer-30B 68.8 / 151.4 (Qwen3.8-27B 0.37, Bolt-E4B 0.29)
+    "c4_moe": 0.44,      # Flint 134.2 / 301.8
+}
 # Stretch: plausible with known-but-unbuilt levers (not yet demonstrated end to end).
 STRETCH = {
     "decode": 0.95,      # small-op fusion + attention at the bandwidth limit
@@ -146,6 +154,75 @@ def attn_flops_per_token(geo, P):
     return tot
 
 
+# Strix Halo (AMD Ryzen AI Max+ 395, gfx1151): the memory bandwidth a streaming kernel reaches (LPDDR5X-8000) and
+# the peak f16 WMMA rate. The CLI's --bw / --flops override them.
+DEVICE = 'AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151)'
+BW, FLOPS = 216e9, 59e12
+
+
+def shape_of(meta, tensors, cfg=None):
+    """What the ceilings need from a GGUF's metadata and tensors (plus the port's cfg.json): geometry, the weight
+    bytes one decode token reads (by kind), the matmul params and the head's params."""
+    geo = geometry(meta, cfg or {})
+    geo["attn"] = attn_layers(tensors, geo["L"])
+    wb, params, head, detail = weight_bytes(tensors, geo)
+    hb = tensors.get("output.weight", tensors.get("token_embd.weight"))[1]
+    return dict(geo=geo, wb=wb, params=params, head=head, detail=detail, head_params=hb[0] * hb[1])
+
+
+def model_shape(gguf_path, cfg=None):
+    meta, tensors = load(gguf_path)
+    return shape_of(meta, tensors, cfg)
+
+
+def pass_bytes(m, tokens=1, ctx=0, streams=1):
+    """Bytes one forward pass reads when it decodes `tokens` tokens at once (one per stream, or a verify pass):
+    the weights once (MoE: the expected distinct experts those tokens route to) plus each stream's KV at ctx."""
+    w, exp = m["wb"], m["detail"].get("experts (active)", 0)
+    if exp and tokens > 1:   # tokens route independently: ~min(n_exp, tokens*k) distinct experts per layer
+        n, k = m["geo"]["n_exp"], m["geo"]["n_used"]
+        w = w - exp + exp * n * (1 - (1 - k / n) ** tokens) / k
+    return w + streams * kv_read_bytes(m["geo"], ctx)
+
+
+def ceilings(m, bw=BW, flops=FLOPS, ctxs=(1000, 2000, 16000, 32000), gain=1.0):
+    """Hardware ceilings in tok/s by roofline.json metric name: decode_tps (no context), decode_tps_<c//1000>k and
+    prefill_<P> for each size in ctxs, c4_steady (4 streams, KV at ~600 tokens). gain multiplies decode and c4 (a
+    measured drafting gain, --draft-tune)."""
+    out = {"decode_tps": bw / pass_bytes(m) * gain}
+    for c in ctxs:
+        out[f"decode_tps_{c // 1000}k"] = bw / pass_bytes(m, ctx=c) * gain
+    for P in ctxs:   # 2 flops per matmul param per token, the head on the last token only, causal attention
+        out[f"prefill_{P}"] = flops / (2 * (m["params"] - m["head_params"]) + attn_flops_per_token(m["geo"], P))
+    out["c4_steady"] = 4 * bw / pass_bytes(m, tokens=4, ctx=600, streams=4) * gain
+    return out
+
+
+def drafted_ceiling(m, depth, acceptance, bw=BW, ctx=0, streams=1):
+    """Decode ceiling with speculative decoding at `depth` drafted tokens and `acceptance` (accepted / proposed draft
+    tokens, the spec gate's count): each verify pass checks depth+1 positions per stream and commits on average
+    1 + acceptance*depth tokens per stream, for one read of the weights (MoE: the distinct experts of all those
+    positions) and of each stream's KV. The drafter's own passes are not counted: an upper bound."""
+    return streams * (1 + acceptance * depth) * bw / pass_bytes(m, tokens=streams * (depth + 1), ctx=ctx, streams=streams)
+
+
+def efficiency(m, metric, ceiling, table=None, tokens_per_pass=None):
+    """The fraction of `ceiling` Loom ports have demonstrated for this kind of metric (table EFF, or STRETCH):
+    prefill, c4 (dense / MoE) or decode (dense / MoE), decode capped by the fixed per-layer cost (LAYER_US).
+    tokens_per_pass: a drafted_ceiling() (speculative decoding): EFF_DRAFTED, the per-layer cost paid once per pass."""
+    table = table or (EFF_DRAFTED if tokens_per_pass else EFF)
+    moe = bool(m["geo"]["n_exp"])
+    if metric.startswith("prefill"):
+        return table["prefill"]
+    if metric.startswith("c4"):
+        return table["c4_moe" if moe else "c4"]
+    floor_ms = m["geo"]["L"] * LAYER_US / 1000
+    if tokens_per_pass:
+        t = tokens_per_pass * 1000
+        return min(table["decode_moe" if moe else "decode"], (t / (t / ceiling + floor_ms)) / ceiling)
+    return min(table["decode_moe" if moe else "decode"], (1000 / (1000 / ceiling + floor_ms)) / ceiling)
+
+
 def pick_target(name, base, ceiling, eff, stretch):
     """target = ceiling x demonstrated efficiency; stretch = ceiling x STRETCH.
 
@@ -174,8 +251,8 @@ def main():
     ap.add_argument("--cfg")
     ap.add_argument("--baseline")
     ap.add_argument("--out")
-    ap.add_argument("--bw", type=float, default=216e9)
-    ap.add_argument("--flops", type=float, default=59e12)
+    ap.add_argument("--bw", type=float, default=BW)
+    ap.add_argument("--flops", type=float, default=FLOPS)
     ap.add_argument("--ctx", default="1000,2000,16000,32000")
     ap.add_argument("--budget-h", type=float, default=0.5,
                     help="the user's time budget for optimization (default 0.5 h; qualify.sh computes it for end-to-end jobs); saved for progress.py")
@@ -190,10 +267,8 @@ def main():
                     help="user target, METRIC=TOK_S (e.g. decode_tps=70); replaces target/stretch for it")
     a = ap.parse_args()
     cfg = json.load(open(a.cfg)) if a.cfg else {}
-    meta, tensors = load(a.gguf)
-    geo = geometry(meta, cfg)
-    geo["attn"] = attn_layers(tensors, geo["L"])
-    wb, params, head, detail = weight_bytes(tensors, geo)
+    m = model_shape(a.gguf, cfg)
+    geo, wb, params, head, detail = m["geo"], m["wb"], m["params"], m["head"], m["detail"]
     base = {}
     if a.baseline and a.baseline.endswith(".jsonl"):   # perf_log.jsonl: latest llama.cpp rows
         for l in open(a.baseline):
@@ -205,7 +280,6 @@ def main():
         base = json.load(open(a.baseline))
     ctxs = [int(x) for x in a.ctx.split(",")]
 
-    rows = []
     gain = 1.0
     if a.draft_tune and os.path.exists(a.draft_tune):
         # the better of the two measured drafting gains: Loom's (draft_tune.json) and llama.cpp's own
@@ -218,32 +292,8 @@ def main():
                     continue
                 if t.get("kind", "none") != "none" and t.get("baseline_tps"):
                     gain = max(gain, t["decode_tps"] / t["baseline_tps"])
-    dec = a.bw / wb * gain
-    key = "decode_moe" if geo["n_exp"] else "decode"
-    ed, sd = EFF[key], STRETCH[key]
-    floor_ms = geo["L"] * LAYER_US / 1000
-
-    def dec_eff(ceil, e):  # efficiency vs the bandwidth ceiling, capped by the per-layer floor
-        return min(e, (1000 / (1000 / ceil + floor_ms)) / ceil)
-    rows.append(pick_target("decode_tps", base.get("decode_tps"), dec, dec_eff(dec, ed), dec_eff(dec, sd)))
-    for c in ctxs:
-        k = f"decode_tps_{c // 1000}k"
-        r = a.bw / (wb + kv_read_bytes(geo, c)) * gain
-        rows.append(pick_target(k, base.get(k), r, dec_eff(r, ed), dec_eff(r, sd)))
-    for P in ctxs:
-        k = f"prefill_{P}"
-        hb = tensors.get("output.weight", tensors.get("token_embd.weight"))[1]
-        f = 2 * (params - hb[0] * hb[1]) + attn_flops_per_token(geo, P)   # head: last token only
-        r = a.flops / f
-        rows.append(pick_target(k, base.get(k), r, EFF["prefill"], STRETCH["prefill"]))
-    # 4 streams: one weight pass serves 4 tokens; KV at ~short context
-    exp = detail.get("experts (active)", 0)
-    if exp:   # 4 tokens route independently: ~min(n_exp, 4*k) distinct experts per layer
-        n, k = geo["n_exp"], geo["n_used"]
-        exp4 = exp * n * (1 - (1 - k / n) ** 4) / k            # expected distinct experts
-    c4 = 4 * a.bw / (wb - exp + (exp4 if exp else 0) + 4 * kv_read_bytes(geo, 600)) * gain
-    ck = "c4_moe" if geo["n_exp"] else "c4"
-    rows.append(pick_target("c4_steady", base.get("c4_steady"), c4, EFF[ck], STRETCH[ck]))
+    rows = [pick_target(k, base.get(k), c, efficiency(m, k, c), efficiency(m, k, c, STRETCH))
+            for k, c in ceilings(m, a.bw, a.flops, ctxs, gain).items()]
 
     out = dict(gguf=a.gguf, geometry={k: (sorted(v) if isinstance(v, set) else v)
                                       for k, v in geo.items()},

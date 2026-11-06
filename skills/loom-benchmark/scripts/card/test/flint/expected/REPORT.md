@@ -17,6 +17,8 @@ How the values on this repository's model card were measured. Generated from `in
 - One engine runs at a time on the same machine, with the same GGUF. Loom rates are timed by the client; llama.cpp rates come from its server-side `timings`.
 - Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.
 - Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD DevLab Dispatch.
+- Roofline: per metric, the rate at the hardware limit computed from the GGUF's tensors by loom-roofline `roofline.py`: decode is memory bandwidth / bytes read per token (weights, active experts, KV cache), prefill is peak FLOP/s / flops per token, 4 streams reads the weights once for 4 tokens. With speculative decoding, decode and 4 streams are verify passes per second x (1 + acceptance x depth) tokens per pass.
+- DevLab: Loom alone, measured with the same scripts by the nightly sweep on an AMD DevLab Dispatch runner (the same Strix Halo hardware). It checks the local numbers on another machine; it is never compared with the llama.cpp column, which is measured in the same session as the Loom column.
 
 ## Session 1: local run, 2026-11-06
 
@@ -72,6 +74,50 @@ perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign
 | decode tok/s, short prompt | llama.cpp | 70.2, 71.0 | 70.6 |
 | prefill tok/s, 1k document | Loom | 950.2, 963.6 | 956.9 |
 | prefill tok/s, 1k document | llama.cpp | 1031.0, 1045.0 | 1038.0 |
+
+## Roofline
+
+- Device: AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151), 216 GB/s, 59 TFLOP/s.
+- Tool: `skills/loom-roofline/roofline.py` sha256 `915576a9df574f4d5565c8b61151e622a737104f63b2cfc2d047617da1f863b7`, loom-skills `0123456789abcdef0123456789abcdef01234567`.
+- Checkpoint: `Flint-Q4_K_M.gguf`.
+- Speculative decoding: DFlash, depth 3, acceptance 68 %, 3.04 tokens per verify pass.
+
+| metric | ceiling | without drafting | demonstrated efficiency |
+|---|---|---|---|
+| decode tok/s, short prompt | 177.8 | 95.4 | 52 % |
+| decode tok/s, 2k context | 173.4 | 91.6 | 52 % |
+| decode tok/s, 32k context | 141.3 | 67.1 | 52 % |
+| prefill tok/s, 1k document | 12248.4 | — | 33 % |
+| prefill tok/s, 2k document | 11945.5 | — | 33 % |
+| prefill tok/s, 8k document | 10484.7 | — | 33 % |
+| prefill tok/s, 16k document | 9014.9 | — | 33 % |
+| prefill tok/s, 32k document | 7040.8 | — | 33 % |
+| 4 streams, aggregate decode tok/s | 301.8 | 221.1 | 44 % |
+
+## DevLab sweep: [DevLab Dispatch run 1001](https://github.com/loom-fun/loom-skills/actions/runs/1001/job/2002), 2026-11-06
+
+- Runner: X2-LA03-S03-D07; device not recorded; hrx-loom unknown.
+- Programs measured: not recorded.
+
+| metric | runs | value |
+|---|---|---|
+| decode tok/s, short prompt | 92.18 | 92.2 |
+| decode tok/s, 2k context | 60.18 | 60.2 |
+| prefill tok/s, 1k document | 607.6 | 607.6 |
+| prefill tok/s, 2k document | 690.8 | 690.8 |
+| 4 streams, aggregate decode tok/s | 112.8 | 112.8 |
+
+## DevLab sweep: [DevLab Dispatch run 1002](https://github.com/loom-fun/loom-skills/actions/runs/1002/job/2003), 2026-11-07
+
+- Runner: X2-LA03-S04-D07; device not recorded; hrx-loom unknown.
+- Programs measured: not recorded.
+
+| metric | runs | value |
+|---|---|---|
+| decode tok/s, short prompt | 92.18 | 92.2 |
+| decode tok/s, 2k context | 60.18 | 60.2 |
+| prefill tok/s, 1k document | 607.6 | 607.6 |
+| prefill tok/s, 2k document | 690.8 | 690.8 |
 
 ## Gate evidence
 

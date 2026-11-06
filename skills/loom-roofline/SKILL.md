@@ -227,6 +227,12 @@ Rules that override the rate:
 
 ## 6. Report and recalibrate
 
+The same ceilings go on every loom-fun model card: `roofline.py`'s `model_shape()`, `ceilings()`,
+`drafted_ceiling()` and `efficiency()` are what `loom-benchmark`'s `card/make_info.py roofline` calls, so a card's
+roofline column and this script never disagree. `EFF_DRAFTED` is `EFF` for speculative decoding (against
+`drafted_ceiling()`); `loom-org` flags a card whose metric falls below half of either.
+
+
 Run `audit.py` from `bench/` before writing the report. It is the definition of
 done; see `loom-benchmark`. It must print `AUDIT PASS`. Use its headline table
 (llama.cpp, Loom, margin, % of ceiling, target, met) in the report.
@@ -234,7 +240,7 @@ done; see `loom-benchmark`. It must print `AUDIT PASS`. Use its headline table
 - Report each headline metric as: target, stretch, achieved, % of ceiling, margin
   vs llama.cpp, and met / short (with the reason). Include the approach curve (gap
   vs elapsed time, from `targets.jsonl`) and the stop or pivot decisions.
-- If a port reached a higher efficiency than `EFF`, update `EFF` in `roofline.py`
+- If a port reached a higher efficiency than `EFF` (or `EFF_DRAFTED` with drafting), update it in `roofline.py`
   and add the row to `reference/calibration.md`. Do the same for `STRETCH` if a
   port beat it. This is how the targets get more ambitious over time.
 - If a target was missed, also add the row. A metric type (decode, prefill, c4) that keeps landing short means

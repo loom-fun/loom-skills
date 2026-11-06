@@ -1,6 +1,6 @@
 ---
 name: loom-org
-description: Populate and maintain a Hugging Face org of Loom models (loom-fun) end to end - pick the top models that fit Strix Halo, classify what the org already has (category A current / B older skill / missing), then loop - port and optimize each model with a subagent on the local GPU starting from the best category A reference, publish the package and generated card, sweep the expensive gates and missing fields on DevLab Dispatch, fix bugs on the skill side and regenerate affected models, merge the fixes - until every model is correct and fully assessed. Use for "populate the loom-fun org", "polish the HF org", "which models still need cards", "port the top N models", or any multi-model campaign.
+description: Populate and maintain a Hugging Face org of Loom models (loom-fun) end to end - pick the top models that fit Strix Halo, classify what the org already has (category A current / B older skill / missing), then loop - port and optimize each model with a subagent on the local GPU starting from the best category A reference, publish the package and generated card, sweep the expensive gates, missing fields and DevLab performance on DevLab Dispatch, fix bugs on the skill side and regenerate affected models, send models far from their roofline or disagreeing with DevLab back to a local GPU worker, merge the fixes - until every model is correct, fully assessed and near its roofline. Use for "populate the loom-fun org", "polish the HF org", "which models still need cards", "port the top N models", or any multi-model campaign.
 ---
 
 # Populate a Loom HF org
@@ -56,8 +56,9 @@ references. For each target it assigns one action, and lists repos that duplicat
 | `create` | no repo | step 1 |
 | `update` | only a B repo, or one not built from plain Q4_K_M | step 1, from the best A reference; republish to the same repo if its checkpoint is the target's plain Q4_K_M, else a new repo |
 | `fix` | A, a gate fails | step 4 |
-| `sweep` | A, applicable gates or metrics have no evidence | step 3 |
-| `done` | A, every applicable gate passes, every applicable metric measured | nothing |
+| `investigate` | A, a performance guardrail flag (far from roofline, or local vs DevLab disagree) | step 5 |
+| `sweep` | A, applicable gates, metrics, the roofline or DevLab values have no evidence | step 3 |
+| `done` | A, every applicable gate passes, every applicable metric measured locally and on DevLab, no flag | nothing |
 
 "Applicable" is the card generator's own rule (`card_lib.gate_applies` / `metric_applies`): vision only with a
 projector, spec only with drafting, and so on. Never delete or retire a repo yourself: list duplicates and
@@ -70,12 +71,17 @@ reference first (usually the smallest, so its loop is fastest), publish it as ca
 from it: Qwen3.5-4B, then 9B, 2B and 0.8B; Qwen3.6-35B-A3B, then Ornith-1.5-35B-A3B and 122B (same `qwen35moe`
 shape). Adjacent families reuse building blocks (hybrid attention, MoE routing, vision tower, chat format,
 drafter), so after every publish, re-run the reference lookup for the queue. Within that order, go by action
-(`fix`, then `update` and `create` by rank, then `sweep`). New architectures with no reference (`org_status` and
+(`fix`, `investigate`, then `update` and `create` by rank, then `sweep`). New architectures with no reference (`org_status` and
 the lookup both say so) are the most expensive; start them early so they run in parallel with derived ports.
 
 ## The loop
 
 Repeat until `org_status.py` says `done` for every target.
+
+**Local and DevLab work are decoupled on purpose.** The local GPU never sits idle waiting for DevLab: when a model
+is handed to DevLab (step 3), the local GPU moves on to the next item in the queue (a port, a fix, an
+investigation). DevLab results come back as evidence on the card and as an action in `org_status.py`; they are
+picked up on a later pass of the loop, not awaited.
 
 ### 1. Port and optimize (worker subagent, local GPU)
 
@@ -101,18 +107,27 @@ The worker publishes the package and its generated card (`loom-benchmark` "Huggi
 hand-written). Gates not yet run render as "no evidence"; that's expected and honest. The repo is now category A
 and `org_status` shows it as `sweep` until step 3 fills it.
 
-### 3. Sweep the missing fields on DevLab Dispatch
+### 3. Sweep on DevLab Dispatch: missing gates, the DevLab performance column, the roofline
 
-DevLab is an elastic pool of Strix Halo runners; sweep many cards at once there, never on the local GPU.
+DevLab is an elastic pool of Strix Halo runners; sweep many cards at once there, never on the local GPU. Hand the
+card over and move the local GPU on to the next item.
 
-- **Gates:** add the card to `.github/nightly-models.json` (card, memory, kit, llama.cpp build) and run
-  `nightly-gates.yml` (it runs on schedule, or `gh workflow run nightly-gates.yml -f models=loom-fun/REPO,... -f level=full`, or label a PR
-  `nightly-gates`). Then per card: `card/pull_devlab.py loom-fun/REPO -o ev_devlab.json`, `make_info.py build` with
-  the card's earlier evidence plus `ev_devlab.json`, `render_card.py`, and upload only README.md, info.json and
-  REPORT.md.
-- **Metrics:** measure every missing metric in one session with both engines on the same runner: one DevLab job
-  (`devlab-perf`), recorded with `make_info.py perf --source-kind devlab`, or one quiet local session. Never put
-  DevLab Loom numbers beside a local llama.cpp baseline, and never use the nightly job's report-only perf.
+1. Add the card to `.github/nightly-models.json` (card, memory, kit, llama.cpp build) and run `nightly-gates.yml`
+   (it runs on schedule, or `gh workflow run nightly-gates.yml -f models=loom-fun/REPO,... -f level=full`, or label a PR `nightly-gates`). Its
+   quick and full jobs also measure Loom alone (`PERF=1`: every card row, the long ones included).
+2. When it finishes, per card, in a directory holding the repo's current `model.json`, `model.json.lock`,
+   `llm_config.json` and `info.json` (re-read `info.json` from the Hub right before; another worker may have
+   published since):
+   - `card/pull_devlab.py loom-fun/REPO --package DIR -o ev_devlab.json`: the gates, and the sweep's Loom numbers
+     with the run, job URL, runner and date (skips jobs that measured an older revision of the package);
+   - `card/make_info.py roofline --package DIR -o ev_roofline.json` (tools venv, CPU only: reads the GGUF), once
+     per card or after its acceptance changed;
+   - `card/make_info.py build DIR --from-info DIR/info.json --evidence ev_devlab.json ev_roofline.json ...`,
+     `render_card.py DIR`, and upload only README.md, info.json and REPORT.md.
+3. The DevLab numbers fill the card's own DevLab column, next to the roofline. They never replace the Loom column
+   and are never compared with the llama.cpp column: that comparison stays one session, one machine.
+4. Missing local metrics: measure them in one session with both engines on the same machine (a quiet local
+   session, or one `devlab-perf` job recorded with `make_info.py perf --source-kind devlab`).
 
 ### 4. Fix what the sweep found
 
@@ -123,16 +138,54 @@ every published model the fix touches is regenerated **with the skill** by a wor
 the affected gates, regenerate the card); hand-patching a published package is never allowed. Merge the PR once
 the regenerated models pass. Re-run `org_status.py`: anything still red goes round again.
 
-### 5. Repeat
+### 5. Investigate performance flags (local GPU worker)
+
+`org_status.py` flags a category A card (action `investigate`, details under `perf`) when:
+
+- **far from roofline:** a metric's Loom value is below half the efficiency Loom ports have demonstrated for that
+  kind of metric on this hardware (`card_lib.FAR_FRACTION` x the card's `roofline.metrics.*.efficiency`, which is
+  `roofline.py`'s `EFF`, or `EFF_DRAFTED` for drafted rows); or
+- **local vs DevLab disagree:** the latest DevLab sweep differs from the card's Loom value by more than
+  `card_lib.DEVLAB_TOLERANCE` (20 %) on some metric. `perf.rounds` counts the sweeps in a row that disagreed.
+
+Then:
+
+1. Dispatch a local GPU worker with `loom-optimize` on the flagged metrics: a far-from-roofline metric is a
+   performance problem to find and fix (ablate, compare with the roofline's gap budget, apply the lever); a
+   disagreement is a performance problem too until shown otherwise (a setting that only helps on the dev machine,
+   a cache or warm-up effect, a race with the measurement).
+2. The worker republishes the card with a fresh local session (step 2), and the next sweep (step 3) re-measures on
+   DevLab. Move the local GPU to the next item meanwhile.
+3. **Deep debugging session** when local and DevLab still disagree after that (`perf.rounds` >=
+   `card_lib.DEEP_DEBUG_ROUNDS`, 2; `org_status.py` sets `deep_debug`): the worker stops tuning and finds out *why*
+   the machines differ, rather than accepting the gap:
+   - a same-runner A/B (one `devlab-experiment` job: Loom builds, settings or SDKs back to back on one runner);
+   - the machine settings (power profile, clocks, kernel and firmware, GPU memory split, other load);
+   - profiling the flagged metric on both machines (per-kernel times) and diffing them.
+   Record the cause and the fix (or a skill fix under step 4) in the PR; a gap that turns out to be the machine,
+   not Loom, goes into the card's evidence through a re-measured local session, never by hand.
+
+### 6. Repeat
 
 Re-rank occasionally (new releases arrive weekly). Stop when every target is `done`, then hand the user the
 duplicate and non-target lists to keep or retire.
+
+### Performance guardrails: how the thresholds were set
+
+- `FAR_FRACTION` 0.5: the category A cards that are healthy (Qwen3.8-27B, Muse-Glimmer-30B, Bolt-E4B) sit at
+  0.51 or more of the demonstrated efficiency on every metric (the lowest is Bolt-E4B's 32k prefill, 0.17 of the
+  roofline against 0.33 demonstrated); Flint's 1k-16k prefill sits at 0.24-0.46 of it and is flagged.
+- `DEVLAB_TOLERANCE` 0.20: across four nightly-gates runs on different DevLab runners (same package), most metrics
+  vary by 1-7 % (max-min over the mean), the noisy ones (decode at 2k, prefill at 1k) by up to 14-19 %; the
+  healthy cards' largest local vs DevLab gap is 17 % (Qwen3.8-27B 32k prefill); Flint's prefill gaps are 36-49 %.
+- Recalibrate both when a port moves `EFF` / `EFF_DRAFTED` (`loom-roofline`) or the runner spread changes.
 
 ## Done
 
 A model is done when its repo is category A, built from the target's plain Q4_K_M, every applicable gate passes
 (including needle and full-context, from the sweep), every applicable metric is measured in a single-runner
-session, and the card was regenerated after the last skill fix that touched it. The org is done when every
+session and on DevLab, the card carries its roofline, no performance guardrail is flagged, and the card was
+regenerated after the last skill fix that touched it. The org is done when every
 target is done and the user has decided on the rest.
 
 ## Scripts
@@ -140,5 +193,5 @@ target is done and the user has decided on the rest.
 | Script | Does |
 |---|---|
 | `scripts/rank_models.py` | draft target list: per-model daily GGUF downloads, fits `--max-gb`, plain Q4_K_M source |
-| `scripts/org_status.py` | category A/B per org repo, missing and failing gates and metrics, one action per target |
+| `scripts/org_status.py` | category A/B per org repo, missing and failing gates and metrics, performance guardrails (`card_lib.perf_flags`), one action per target |
 | `scripts/hub.py` | Hub reads with the user's token and rate-limit retries (used by both) |

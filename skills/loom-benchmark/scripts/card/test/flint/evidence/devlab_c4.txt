@@ -1,0 +1,1 @@
+{"streams": 4, "window_s": 13.77, "agg_tps": 112.8, "per_stream_events": [177, 176, 184, 182], "per_stream_tokens": [400, 400, 400, 400]}
