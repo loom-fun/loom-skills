@@ -424,7 +424,9 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
             g = (x16.astype(np.float64) @ Ws.T) * inv[:, None]
             if swiglu:
                 u = (x16.astype(np.float64) @ U.T) * inv[:, None]
-                yv = g / (1 + np.exp(-g)) * u
+                act = (0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3))) if cfg.get("ffn_act") == "gelu"
+                       else g / (1 + np.exp(-g)))   # GEGLU ports (gemma4) swap the GEMM's silu for gelu-tanh
+                yv = act * u
             else:
                 yv = g
             tag = f"gm_{fmt}_{'sw' if swiglu else 'st'}_{rows}"
