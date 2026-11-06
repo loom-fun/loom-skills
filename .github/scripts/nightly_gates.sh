@@ -136,7 +136,14 @@ if [ "${PERF:-0}" = 1 ]; then
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
 from bench_common import perf_metrics
-card = json.load(open(sys.argv[2])).get("metrics", {}) if os.path.exists(sys.argv[2]) else {}
+info = json.load(open(sys.argv[2])) if os.path.exists(sys.argv[2]) else {}
+card = info.get("metrics", {})
+if "performance" in info:  # loom-card/1: performance.metrics.<key>.{loom,llamacpp}
+    keys = {"decode": "decode_tps", "decode_2k": "decode_tps_2k", "decode_32k": "decode_tps_32k", "streams4": "c4_steady_tps"}
+    card = {}
+    for k, v in (info["performance"].get("metrics") or {}).items():
+        card[keys.get(k, k)] = v.get("loom")
+        card[keys.get(k, k) + "_llamacpp"] = v.get("llamacpp")
 now = {}
 for line in open("perf.jsonl"):
     now.update(perf_metrics(json.loads(line)))
