@@ -91,6 +91,16 @@ def concurrent_ok(url, model, chat):
     return True, ""
 
 
+def prior_depths(prior, kind, allowed):
+    """Depths to measure first for this method, from a reference's tuned table: its best depth's neighbourhood."""
+    rows = [r for r in prior or [] if r.get("kind") == kind and r.get("depth") and r.get("decode_tps")]
+    if not rows or not allowed:
+        return None
+    best = max(rows, key=lambda r: r["decode_tps"])["depth"]
+    i = min(range(len(allowed)), key=lambda j: abs(allowed[j] - best))
+    return [allowed[j] for j in (i - 1, i, i + 1) if 0 <= j < len(allowed)]
+
+
 def serve(name, port, mem, card, env):
     subprocess.run([os.path.join(SETUP, "stop.sh"), name], env=env, capture_output=True)
     r = subprocess.run([os.path.join(SETUP, "serve.sh"), name, str(port), "amdgpu", str(mem), card], env=env, capture_output=True, text=True)
@@ -115,6 +125,13 @@ def main():
             kinds.append(("assist", [1, 2, 3, 4]))   # Gemma-4 assistant (gemma4 family)
         kinds.append(("ngram", [2, 3, 5]))   # every model: prompt lookup needs no drafter
     table, best, cand_mem, chats = [], ("none", 0, 0.0), {}, {}
+    # A category A reference (find_reference.py apply: cfg["reference"]) measured its own drafting table: start each
+    # method at the reference's best depth and its neighbours instead of every depth. Every method is still measured
+    # (a method the reference ruled out gets its best depth), and the search climbs past the neighbourhood when the
+    # best depth sits on its edge. TUNE_PRIOR=0 measures every depth.
+    prior = (((cfg.get("reference") or {}).get("prior") or {}).get("drafter") or {}).get("tuned") \
+        if os.environ.get("TUNE_PRIOR", "1") != "0" else None
+    skipped = {}
     build = [T, os.path.join(STARTER, "build.py"), cfg_path]
     # No --memory-gib: each candidate (and the final package) sizes its own budget for the full native context
     # (a drafter adds KV per position; passing the old budget shrank DFlash packages' context to fit).
@@ -133,7 +150,12 @@ def main():
             import gen_dflash
             block = gen_dflash.config(cfg["drafter"]["gguf"])["block_size"] - 1
         chat = chats[kind] = json.load(open(os.path.join(pkg, "llm_config.json")))["chat"]
-        for depth in ([0] if base is None else []) + [d for d in depths if d <= block]:
+        allowed = [d for d in depths if d <= block]
+        first = prior_depths(prior, kind, allowed)
+        measured = {}
+        queue = ([0] if base is None else []) + (first or allowed)
+        while queue:
+            depth = queue.pop(0)
             card["presets"]["chat"]["execution"]["draft_depth"] = depth
             path = os.path.join(pkg, f"model_d{depth}.json")
             json.dump(card, open(path, "w"), indent=1)
@@ -152,6 +174,13 @@ def main():
                 base = tps
             elif tps > best[2]:
                 best = (kind, depth, tps)
+            if depth:
+                measured[depth] = tps
+            if not queue and first:   # the prior is a starting point: climb while the best depth's neighbours are unmeasured
+                i = allowed.index(max(measured, key=measured.get))
+                queue = [allowed[j] for j in (i - 1, i + 1) if 0 <= j < len(allowed) and allowed[j] not in measured]
+        if first:
+            skipped[kind] = [d for d in allowed if d not in measured]
     if base is None:
         base = 0.0
     # Fastest first, each checked for exact output (vs draft_depth 0 of its own package) and under concurrent load;
@@ -202,7 +231,8 @@ def main():
     for kind, _ in kinds:
         shutil.rmtree(os.path.join(work, f"pkg_tune_{kind}"), ignore_errors=True)
     print("TUNE_RESULT", json.dumps({"kind": choice[0], "depth": choice[1], "decode_tps": round(choice[2], 2),
-                                     "baseline_tps": round(base, 2), "memory_bytes": int(final_mem), "table": table}))
+                                     "baseline_tps": round(base, 2), "memory_bytes": int(final_mem), "table": table,
+                                     **({"prior": (cfg.get("reference") or {}).get("repo"), "not_measured": skipped} if prior else {})}))
 
 
 if __name__ == "__main__":
