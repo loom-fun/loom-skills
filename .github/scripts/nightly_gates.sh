@@ -91,6 +91,9 @@ print("model", c["model_id"], "gguf", c["gguf"], "vision", bool(c.get("vision"))
       "thinking", c["chat"].get("thinking"))
 EOF
 gguf=$(python3 -c "import json; print(json.load(open('$pkg/llm_config.json'))['gguf'])")
+# The card's README states the --memory_bytes it was validated with; a republished card may change it.
+readme_mem=$(curl -fsSL --retry 3 "$base/README.md" 2>/dev/null | grep -o -- '--memory_bytes=[0-9]*' | head -1 | cut -d= -f2)
+[ -n "$readme_mem" ] && [ "$readme_mem" != "$mem" ] && { echo "memory_bytes: $readme_mem from the card's README (nightly-models.json: $mem)"; mem=$readme_mem; }
 [ -f "$gguf" ] || { echo "FAIL: $gguf missing after loom-fetch"; exit 1; }
 
 # 3. The reference example's kit: its chat_probe renders and parses this card's chat format for the gates
