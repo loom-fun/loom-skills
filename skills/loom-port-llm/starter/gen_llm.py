@@ -2412,6 +2412,10 @@ kernel.def export("g_head_select") @g_head_select(%spans: index) {{
 """
 
 
+from gen_gemm import HELPER as GEMM_HELPER   # noqa: E402  formats without a 128/256-row kernel of their own
+GEMM_M256 = os.environ.get("GEMM_M256", "1") not in ("", "0", "false", "no")
+
+
 def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
     """Projection y = x W^T: WMMA GEMM for 64+ tokens (128-row tiles from 128),
     else the decode matrix-vector kernel (1-token or 4-token variant)."""
@@ -2430,9 +2434,16 @@ def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
     iq = ACT_Q8 and fmt in IQ_FMTS and kval // 32 <= 1024   # wider K (mv_wide: DFlash feature projections) stays f32
     if iq:   # int8 copy (g_quant_q8, launched beside the g_row_scale_f16 that makes x16): see quant_wiring()
         mv_args = mv_args.replace(f", %zero_i32, {x},", f", %zero_i32, {x16}q,")
+    m128 = f"kernel.launch @g_gemm_{fmt}_{mode}_m128[%t, {n}]({args}) : [index, index]({types})"
+    if GEMM_M256 and fmt not in GEMM_HELPER:   # 256-row tiles: half the weight dequant per MMA (gen_gemm.gemm_big256)
+        m128 = f"""scf.if %huge {{
+          kernel.launch @g_gemm_{fmt}_{mode}_m256[%t, {n}]({args}) : [index, index]({types})
+        }} else {{
+          {m128}
+        }}"""
     return f"""scf.if %gemm {{
       scf.if %big {{
-        kernel.launch @g_gemm_{fmt}_{mode}_m128[%t, {n}]({args}) : [index, index]({types})
+        {m128}
       }} else {{
         kernel.launch @g_gemm_{fmt}_{mode}[%t, {n}]({args}) : [index, index]({types})
       }}
@@ -2946,7 +2957,7 @@ def last_out_select(text):
     ren.update({"%o": "%os", "%o16": "%os16", "%s_o": "%s_os", "%x": "%xs", "%y": "%ys", "%h": "%hs", "%h16": "%hs16",
                 "%s_h": "%s_hs", "%f": "%fs", "%f16": "%fs16", "%s_f": "%s_fs", "%fu": "%fus",
                 "%o16q": "%os16q", "%h16q": "%hs16q", "%f16q": "%fs16q",
-                "%t": "%ts", "%gemm": "%gemm_os", "%single": "%single_os", "%big": "%big_os"})
+                "%t": "%ts", "%gemm": "%gemm_os", "%single": "%single_os", "%big": "%big_os", "%huge": "%huge_os"})
     comp = _re.sub(r"%\w+", lambda m: ren.get(m.group(0), m.group(0)), tail)
     sizes = (f"""  %outsel_on = scalar.constant true : i1
   %outsel = scalar.andi %gemm, %outsel_on : i1
@@ -2956,6 +2967,12 @@ def last_out_select(text):
   %gemm_os = index.cmp uge, %ts, %c64_os : index
   %single_os = index.cmp eq, %ts, %c1 : index
   %big_os = index.cmp uge, %ts, %c128_os : index
+  %c256_os = index.constant 256 : index
+  %ts_rem256 = index.rem %ts, %c256_os : index
+  %c0_os256 = index.constant 0 : index
+  %ts_full256 = index.cmp eq, %ts_rem256, %c0_os256 : index
+  %ts_ge256 = index.cmp uge, %ts, %c256_os : index
+  %huge_os = scalar.andi %ts_full256, %ts_ge256 : i1
   %xs_size = index.scale %ts, %row_bytes : index, offset -> offset
   %os_size = index.scale %ts, %wide_bytes : index, offset -> offset
   %fs_size = index.scale %ts, %ffn_bytes : index, offset -> offset
@@ -3078,6 +3095,12 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %h16_size = index.scale %t, %half_row : index, offset -> offset
   %o16_size = index.scale %t, %half_wide : index, offset -> offset
   %f16_size = index.scale %t, %half_ffn : index, offset -> offset
+  // 256-row GEMM tiles (_m256) when the epoch's rows are a multiple of 256.
+  %c256_rows = index.constant 256 : index
+  %t_rem256 = index.rem %t, %c256_rows : index
+  %t_full256 = index.cmp eq, %t_rem256, %c0 : index
+  %t_ge256 = index.cmp uge, %t, %c256_rows : index
+  %huge = scalar.andi %t_full256, %t_ge256 : i1
   %h16 = buffer.alloca<global> align(256) %h16_size : buffer
   %o16 = buffer.alloca<global> align(256) %o16_size : buffer
   %f16 = buffer.alloca<global> align(256) %f16_size : buffer

@@ -1180,6 +1180,12 @@ def programs(g):
   %gemm = index.cmp uge, %t, %c64 : index
   %single = index.cmp eq, %t, %c1 : index
   %big = index.cmp uge, %t, %c128 : index
+  %c256_rows = index.constant 256 : index
+  %t_rem256 = index.rem %t, %c256_rows : index
+  %c0_rows = index.constant 0 : index
+  %t_full256 = index.cmp eq, %t_rem256, %c0_rows : index
+  %t_ge256 = index.cmp uge, %t, %c256_rows : index
+  %huge = scalar.andi %t_full256, %t_ge256 : i1
   %nH = index.constant {H} : index
   %nDQ = index.constant {QD} : index
   %nDKV = index.constant {KD} : index

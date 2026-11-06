@@ -371,7 +371,7 @@ if cfg.get("recurrent_layers"):
 """)
 # Prefill GEMMs (gen_gemm.py): y = (x16 . W^T) * inv per row, x16 the f16 row-scaled activations and inv the
 # row's inverse scale (g_row_scale_f16's contract); swiglu: silu(gate) * up. One tensor per (format, K) the
-# model's prefill uses, both the 64-row kernel and the 128-row one (_m128), two row tiles each.
+# model's prefill uses: the 64-, 128- (_m128) and 256-row (_m256) kernels, two row tiles each.
 def gemm_cases():
     seen_g = set()
     for li in range(cfg["layers"]):
@@ -394,7 +394,8 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
         Ws = W[:n_use].astype(np.float64)
         if swiglu:
             up = name.replace("ffn_gate", "ffn_up"); U = deq(up)[:n_use].astype(np.float64); Ur = raw(up).reshape(n, -1)[:n_use].reshape(-1)
-        for rows, kern in ((128, f"g_gemm_{fmt}_{'swiglu' if swiglu else 'store'}"), (256, f"g_gemm_{fmt}_{'swiglu' if swiglu else 'store'}_m128")):
+        base_k = f"g_gemm_{fmt}_{'swiglu' if swiglu else 'store'}"
+        for rows, kern in ((128, base_k), (256, base_k + "_m128"), (512, base_k + "_m256")):
             x16 = rng.standard_normal((rows, K)).astype(np.float16)
             inv = rng.uniform(0.25, 2.0, rows).astype(np.float32)
             sc = np.stack([np.ones(rows, np.float32), inv], 1)
