@@ -118,6 +118,21 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   (seen at 1k and 16k on Qwen3-4B). That is why there are two recordings: `--alt`
   scores each prompt against whichever recording Loom follows further. Before
   declaring FAIL on a single prompt, re-record it; a gap that disappears was noise.
+  - A plain re-run of a *text* prompt at `-np 1` is often bit-identical, so it proves little.
+    The informative check is llama.cpp's sensitivity to its own summation order. Re-record the
+    one prompt with the server started under other legitimate numerics: `LLAMA_SPEC="-ub 128"`,
+    `"-ub 2048 -b 2048"` and `"-fa off"` (llamacpp_server.sh appends LLAMA_SPEC). Then compare
+    the top-5 at the divergence.
+  - If llama.cpp's own top-1 changes across these settings, or Loom's token falls within the
+    1.0 gap under one of them, the FAIL is a near-tie. Document it with the per-setting top-5;
+    don't change the kernels to chase it. Example, Flint 15.5k summary at token 15: llama.cpp
+    picked ` across` (default), ` combine` (`-ub 128`, `-ub 2048`) and ` summarize` (`-fa off`).
+    Loom's ` final` had gap 1.39, 0.69, 1.06 and 0.72 under those settings.
+  - If llama.cpp stays on one token under every setting and Loom's gap stays above 1.0, it is
+    *not* proven noise. Report it as an open WARN with the spread. Example, Bolt Q4_K_M vision
+    `photo` at token 7: 17 llama.cpp recordings (image-encoder jitter, `-fa off`,
+    `-ub 128`, CPU encoder `--no-mmproj-offload`) all chose ` grid`, with gap 1.02–1.54 to
+    Loom's `,`.
 - Golden ids come from llama.cpp's `tokens`. `completion_probabilities` omits
   byte-fallback tokens (emoji, partial UTF-8), so top-5 lists are kept only while
   they line up.
