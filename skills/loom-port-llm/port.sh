@@ -101,10 +101,12 @@ fi
 step "2/6 inspect (chat block derived from the template and verified)"
 "$T" -I "$K/inspect_gguf.py" "$gguf" cfg.json 2>&1 | tee inspect.log | grep -v "^chat OK"
 irc=${PIPESTATUS[0]}
+# The starter's head_dim check: an example kit (e.g. gemma4: head_dim 512) brings its own attention kernels.
+hd="\\|WARNING: head_dim"; [ "$K" = "$here/starter" ] || hd=""
 # The template's chat block could not be derived: a same-architecture reference's block, verified against THIS
 # model's template (chat_probe.py --verify), replaces the hand-written block when every probe matches.
 if [ "$irc" = 0 ] && [ "$ref" != off ] && [ -s reference.json ] && [ -f cfg.json ] && grep -q "^chat FAIL\|not derivable\|WARNING: no chat block" inspect.log \
-   && ! grep -q "WARNING: no kernels\|WARNING: head_dim\|Traceback" inspect.log; then
+   && ! grep -q "WARNING: no kernels$hd\|Traceback" inspect.log; then
   "$T" -I "$here/find_reference.py" apply cfg.json reference.json ${refpick:+--pick "$refpick"} --chat-failed | tee -a reference.log
   if "$T" -I "$K/chat_probe.py" "$gguf" --verify cfg.json > chat_verify.log 2>&1; then
     echo "chat block from the reference: verified against this template ($(grep -c '^OK' chat_verify.log) probes OK)"
@@ -113,7 +115,7 @@ if [ "$irc" = 0 ] && [ "$ref" != off ] && [ -s reference.json ] && [ -f cfg.json
     echo "the reference's chat block does not match this template (chat_verify.log)"
   fi
 fi
-if [ "$irc" != 0 ] || grep -q "^chat FAIL\|not derivable\|WARNING: no chat block\|WARNING: no kernels\|WARNING: head_dim\|Traceback" inspect.log; then
+if [ "$irc" != 0 ] || grep -q "^chat FAIL\|not derivable\|WARNING: no chat block\|WARNING: no kernels$hd\|Traceback" inspect.log; then
   arch=$("$T" -c "import json;print(json.load(open('cfg.json')).get('arch',''))" 2>/dev/null)
   for ex in $("$T" -c "import json; print(' '.join(k for k, v in json.load(open('$here/reference/examples.json')).items() if isinstance(v, dict) and v.get('arch') == '$arch'))" 2>/dev/null); do
     echo "HINT: reference/$ex-example is a working port of arch '$arch': $here/reference/apply_example.sh $ex kit cfg.json (merges the reviewed config too), then FROM=build KIT=kit $0 $spec $work $port $mem_gib $model_id"
