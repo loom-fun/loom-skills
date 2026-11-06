@@ -704,8 +704,8 @@ if (HEAD_Q8 and HEAD_FMT in ("q8_0", "bf16", "f16") and H % 32 == 0 and (cfg.get
 # Drafter matrices without an int8 path (a vendor BF16/F16 DFlash drafter used as-is, cfg["drafter"]["gguf"]):
 # the f32-activation matvecs (1 and 4 tokens; gate/up pair) and the GEMMs (64-, 128- and 256-row tiles) the drafter's
 # propose / warm programs launch, one tensor per (format, K), vs float64 numpy on the dequantized weights. Rows per
-# workgroup as gen_llm.py picks them: mv_rows.pick_r / iq_r of the output width (gen_llm's NVAL holds the drafter's
-# own widths %nDQ/%nDKV/%nDF too, gen_dflash.widths; DRAFT_NVAL=0: 16 for those).
+# workgroup as gen_llm.py picks them: mv_rows.pick_r / iq_r for outputs of the trunk's hidden width (gen_dflash's %nH:
+# fc, attn_output, ffn_down), 16 for the drafter's own widths (%nDQ/%nDKV/%nDF are not in gen_llm's NVAL).
 PREP = os.environ.get("DRAFTER_PREP", "1") != "0"   # gen_dflash.py: BF16/F16 drafter matrices become Q8_0 at load
 
 
@@ -733,13 +733,14 @@ def prep_cases(nm, up, fmt, K, n, W, U, tag0, seen_mv):
         wq_args.append(f"%{v}q"); wq_tys.append(f"tensor<{B * 34}xi8>")
     sw = "_swiglu" if up else ""
     sig = lambda tg: (f"[index, index](index, index, i32, tensor<{tg}x{2 * K}xi8>, {', '.join(wq_tys)}, tensor<{tg}x{n}xf32>)")
-    R1 = iq_r(n, K, 1, bool(up))
+    nr = n if n == H else None   # the drafter's own widths take R = 16 (not in gen_llm's NVAL)
+    R1 = iq_r(nr, K, 1, bool(up))
     k1 = f"g_mv_q8_0_k{K}{sw}_q8" + (f"_r{R1}" if R1 != 16 else "")
     for tg in (1, 4, 8, 16):
         xs = rng.standard_normal((tg, K)).astype(np.float32); xr = q8_ref(xs).astype(np.float64)
         y = act(xr @ Wq.T) * (xr @ Uq.T) if up else xr @ Wq.T
         tag = f"{tag0}_prep_t{tg}"; save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
-        Rt = iq_r(n, K, tg, bool(up))
+        Rt = iq_r(nr, K, tg, bool(up))
         kt = f"g_mv_q8_0_k{K}{sw}" + (f"_t{tg}" if tg > 1 else "") + "_q8" + (f"_r{Rt}" if Rt != 16 else "")
         same = (f"""  %y1 = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
   kernel.launch @{k1}[%n, %t](%n, %t, %acc, %xq, {", ".join(wq_args)}, %y1) : {sig(tg)}
@@ -805,7 +806,7 @@ def drafter_cases():
                 xs = rng.standard_normal((tg, K)).astype(np.float32)
                 y = act(xs @ W.T) * (xs @ U.T) if sw else xs @ W.T
                 tag = f"{tag0}_t{tg}"; save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
-                _R = pick_r(n, K, tg) if n == H or os.environ.get("DRAFT_NVAL", "1") == "1" else 16   # gen_llm NVAL
+                _R = pick_r(n, K, tg) if n == H else 16
                 kern = f"g_mv_{fmt}_k{K}" + ("_swiglu" if sw else "") + ("_t4" if tg == 4 else "") + (f"_r{_R}" if _R != 16 else "")
                 cases.append(f"""check.case public @mv_{tag} {{
   %n = check.literal value({n}) : index

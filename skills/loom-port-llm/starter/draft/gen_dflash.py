@@ -50,11 +50,6 @@ def config(path):
     }
 
 
-def widths(F):
-    """Output widths of the drafter's projections by the SSA names programs() gives them (gen_llm NVAL)."""
-    return {"%nDQ": F["heads"] * F["head_dim"], "%nDKV": F["kv_heads"] * F["head_dim"], "%nDF": F["ffn"]}
-
-
 def tap_layers(cfg):
     """Trunk layer index after which each feature is captured (HF hidden_states[t] = output of layer t - 1)."""
     return [t - 1 for t in cfg["dflash"]["target_layers"]]

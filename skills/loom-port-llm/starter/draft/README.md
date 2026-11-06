@@ -24,9 +24,12 @@ name matches, then z-lab, then downloads, checks each candidate's header before 
 size, tap layers inside the trunk, vocabulary, mask token, tensor formats, and no drafter feature `gen_dflash.py`
 lacks: reduced draft vocabulary, own embedding/head, shared K/V, sinks, causal block, DSpark hyper-connections) and
 records `cfg["drafter"]`. A BF16/F16-only drafter (NVIDIA publishes Nemotron's that way) is used as published:
-the starter's BF16/F16 kernels (f32-activation 1/4-token matvecs, WMMA GEMM with the weights rounded to F16;
-kernel tests `mv_dr_*` / `dr_*_gm*` in make_kernel_tests.py) read the vendor's file, so the package's model.json
-references it and a published card resolves it to the vendor repo (no converted weights to host). `--requantize`
+the package's model.json references the vendor's file and a published card resolves it to the vendor repo (no
+converted weights to host). loom-serve converts its matrices to Q8_0 once at load (`prep_weights.py`: the drafter
+root's weight policy `draft_weights.loom` stages each BF16/F16 matrix and runs `llm_prep_<src>_q8_0`), so the drafter
+runs the int8-activation matvecs at half the bytes (kernel tests `mv_dr_*_prep_t*`). `DRAFTER_PREP=0` keeps the
+starter's BF16/F16 kernels (f32-activation 1/4-token matvecs, WMMA GEMM with the weights rounded to F16;
+kernel tests `mv_dr_*` / `dr_*_gm*`). `--requantize`
 (`DRAFTER_REQUANT=1`) writes a local Q8_0 copy instead (`drafter/*-Q8_0.gguf`, ~0.4 % max relative error; half the
 bytes per proposal: Bolt-E4B depth 7 ~9 % faster, see below, but only for local use). `DRAFTER_REPO=org/name[:file]`
 forces one.

@@ -3732,9 +3732,6 @@ if __name__ == "__main__":
             import prep_weights
             DPREP = gen_dflash.prep_tensors(dcfg["tensors"])
             DT = dcfg["tensors"] = gen_dflash.apply_prep(dcfg["tensors"], DPREP)
-            # the drafter's own widths, so its matvecs pick rows per workgroup like the trunk's (mv_rows)
-            if os.environ.get("DRAFT_NVAL", "1") == "1":
-                NVAL.update(gen_dflash.widths(dcfg))
             if DPREP:
                 open(os.path.join(out_dir, "draft_weights.loom"), "w", newline="\n").write(prep_weights.policy(DPREP, "the drafter"))
             # The proposals' head pass reads a load-time Q4_0 copy of the target's head (PROPOSE_HEAD=off: the head)
