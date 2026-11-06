@@ -1,5 +1,6 @@
 """llama.cpp (mtmd) image preprocessing, per projector family: target size + Pillow-compatible resample.
-Reference for the Loom image programs."""
+Reference for the Loom image programs. gemma4v: plain resize to the target size, no letterbox padding, as in
+upstream llama.cpp 7bd18083 (lemonade b1368); older builds (b1355) letterbox, so compare against b1368 or newer."""
 import math, numpy as np
 
 # family -> (align = patch * merge, min_tokens, max_tokens, filter, round_half_even)

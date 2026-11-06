@@ -1,12 +1,14 @@
 """MoE FFN kernels (LFM2-MoE style): sigmoid router with selection bias, normalized top-k
 weights, per-assignment expert matvecs (assignment a = token * KU + slot), weighted combine.
 
-g_moe_route        h[t] -> ids[t, KU] (i32), wts[t, KU] (f32)
+g_moe_route        h[t] -> ids[t, KU] (i32), wts[t, KU] (f32)   (g_moe_route_tr: the same for prefill epochs)
 g_moe_gu_<fmt>     act[a, FE] = silu(Wg[e] h[t]) * (Wu[e] h[t])     (e = ids[a], t = a / KU)
 g_moe_dn_<fmt>     ys[a, H]  = Wd[e] act[a]
 g_moe_combine      y[t, H]   = sum_k wts[t, k] ys[t*KU + k, :]
 """
+import re
 FMT = {"q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34}
+ROUTE_TR = int(__import__("os").environ.get("ROUTE_TR", "0"))   # router tokens per workgroup (0: largest of 1/2/4/8 whose LDS fits 48 KiB)
 SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32}
 
 
@@ -14,9 +16,10 @@ def row_bytes(fmt, k):
     return k // SB[fmt] * FMT[fmt]
 
 
-def route(H, E, KU, gating, norm, bias, wty="f32"):
-    """Router logits (f32 or bf16 weights) into LDS, then a parallel top-k: one thread per expert,
-    KU rounds of workgroup max/min-index reductions (flint_router_topk pattern)."""
+def route_decode(H, E, KU, gating, norm, bias, wty="f32"):
+    """Decode-shaped epochs (t < 64): one workgroup per token. Router logits (f32 or bf16 weights) into LDS, then a
+    parallel top-k: one thread per expert, KU rounds of workgroup max/min-index reductions (flint_router_topk pattern).
+    Each lane reads 32-value chunks: few, wide loads in flight, which suits one latency-bound workgroup."""
     HG = H // 32
     assert E % 8 == 0 and E <= 256 and KU <= 8
     EPW = E // 8
@@ -130,6 +133,247 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   kernel.return
 }}
 """
+
+
+def route_prefill(H, E, KU, gating, norm, bias, wty="f32"):
+    """g_moe_route_tr, for prefill epochs (t >= 64; decode keeps g_moe_route: one token per workgroup, wide loads in
+    flight, was 34 % faster per decode step). Router logits (f32 or bf16 weights) into LDS, then the top-k per token.
+    Logits: TR tokens per workgroup, their h rows staged in LDS; lane l reads the 4-value chunks l, l+32, ... of each
+    128-value block, so a wave's weight load is 512 contiguous bytes and its LDS reads are conflict-free (the earlier
+    32-value chunk per lane cost 4.4 ms per 2048-token layer on Flint, now 0.96 ms).
+    Top-k: wave r takes token r, lane l holds experts l, l+32, ...: KU rounds of subgroup max / min-index reductions
+    (ties: lowest index), no workgroup barriers. The winners' weights stay in registers (see README: a global
+    write/read-back of them raced)."""
+    HG = H // 32
+    assert E % 8 == 0 and E <= 256 and KU <= 8 and H % 128 == 0
+    EPW = E // 8
+    TR = ROUTE_TR or max(t for t in (1, 2, 4, 8) if t * (H + E) * 4 <= 48 * 1024)
+    prob = "scalar.logisticf<afn> %lgt : f32" if gating == 2 else "scalar.addf %lgt, %zero_f : f32"
+    score = "scalar.addf %prob_v, %bias_v : f32" if bias else "scalar.addf %prob_v, %zero_f : f32"
+    bias_load = f"""    %b_view = buffer.view %b[%zero] : buffer -> view<{E}xf32>
+    %bias_v = view.load %b_view[%be] : view<{E}xf32> -> f32
+""" if bias else ""
+    norm_text = f"""    %min_sum = scalar.constant 6.103515625e-05 : f32
+    %wsum = scalar.maxnumf %total, %min_sum : f32""" if norm else "    %wsum = scalar.constant 1.0 : f32"
+    acc_in = ", ".join(f"%a{r} = %zero_f : f32" for r in range(TR))
+    acc_ty = ", ".join(["f32"] * TR)
+    acc_out = ", ".join(f"%p{r}" for r in range(TR))
+    HB = H // 128
+    wl = (f"""      %wraw = vector.load %w4_view[%e, %bb, %lane, %c0] : view<{E}x{HB}x32x4xbf16> -> vector<4xbf16>
+      %wv = vector.extf %wraw : vector<4xbf16> to vector<4xf32>""" if wty == "bf16" else
+          f"""      %wv = vector.load %w4_view[%e, %bb, %lane, %c0] : view<{E}x{HB}x32x4xf32> -> vector<4xf32>""")
+    dots = "".join(f"""      %xv{r} = vector.load %xs4_view[{r}, %bb, %lane, %c0] : view<{TR}x{HB}x32x4xf32> -> vector<4xf32>
+      %d{r} = vector.dotf<reassoc|contract> %wv, %xv{r}, %zero_f : vector<4xf32>, vector<4xf32>, f32
+      %n{r} = scalar.addf %a{r}, %d{r} : f32
+""" for r in range(TR))
+    nxt = ", ".join(f"%n{r}" for r in range(TR))
+    stores = "".join(f"""    %logit{r} = kernel.subgroup.reduce<addf> %p{r} : f32
+    scf.if %first {{
+      view.store %logit{r}, %lg_view[{r}, %e] : f32, view<{TR}x{E}xf32>
+    }}
+""" for r in range(TR))
+
+    # Phase 2: wave r (< TR) takes token r; lane l holds experts l, l+32, ...: KU rounds of subgroup
+    # reductions (max score, then the lowest expert id at that score) instead of workgroup reductions.
+    EPL = (E + 31) // 32
+    T2 = [f"""  %c0_i32r = scalar.constant 0 : i32
+  %removed = scalar.constant -3.0e38 : f32
+  %big_id = scalar.constant 1000000 : i32
+  %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]x{KU}xi32>
+  %wts_view = buffer.view %wts[%zero] : buffer -> view<[%tokens]x{KU}xf32>
+  %wave_tok = index.cmp ult, %wave, %cTR : index
+  scf.if %wave_tok {{
+    %r = index.assume %wave [range(%wave, 0, {TR - 1})] : index
+    %tok_value = index.add %token0, %r : index
+    %tok_live = index.cmp ult, %tok_value, %tokens : index
+    %tok_c = scf.select %tok_live, %tok_value, %c0 : index
+    %token = index.assume %tok_c [lt(%tok_c, %tokens)] : index
+    %store_lane = scalar.andi %first, %tok_live : i1
+"""]
+    for i in range(EPL):
+        T2.append(f"""    %ce{i} = index.constant {32 * i} : index
+    %e{i}_v = index.add %lane, %ce{i} : index
+    %e{i}_in = index.cmp ult, %e{i}_v, %cE : index
+    %e{i}_c = scf.select %e{i}_in, %e{i}_v, %c0 : index
+    %be{i} = index.assume %e{i}_c [range(%e{i}_c, 0, {E - 1})] : index
+    %id{i} = index.cast %e{i}_v : index to i32
+    %lgt{i} = view.load %lg_view[%r, %be{i}] : view<{TR}x{E}xf32> -> f32
+    %pr{i} = {prob.replace('%lgt', f'%lgt{i}')}
+""" + (f"""    %b_view{i} = buffer.view %b[%zero] : buffer -> view<{E}xf32>
+    %bias{i} = view.load %b_view{i}[%be{i}] : view<{E}xf32> -> f32
+    %sv{i} = scalar.addf %pr{i}, %bias{i} : f32
+""" if bias else f"""    %sv{i} = scalar.addf %pr{i}, %zero_f : f32
+""") + f"""    %s{i}_0 = scf.select %e{i}_in, %sv{i}, %removed : f32
+""")
+    T2.append("    %sum_0 = scalar.addf %zero_f, %zero_f : f32\n")
+    for k in range(KU):
+        T2.append(f"    %lb{k}_0 = scalar.addf %s0_{k}, %zero_f : f32\n    %li{k}_0 = scalar.addi %id0, %c0_i32r : i32\n")
+        for i in range(1, EPL):
+            T2.append(f"""    %gt{k}_{i} = scalar.cmpf ogt, %s{i}_{k}, %lb{k}_{i - 1} : f32
+    %lb{k}_{i} = scf.select %gt{k}_{i}, %s{i}_{k}, %lb{k}_{i - 1} : f32
+    %li{k}_{i} = scf.select %gt{k}_{i}, %id{i}, %li{k}_{i - 1} : i32
+""")
+        L = EPL - 1
+        T2.append(f"""    %best{k} = kernel.subgroup.reduce<maxnumf> %lb{k}_{L} : f32
+    %isb{k} = scalar.cmpf oeq, %lb{k}_{L}, %best{k} : f32
+    %cand{k} = scf.select %isb{k}, %li{k}_{L}, %big_id : i32
+    %win{k} = kernel.subgroup.reduce<minsi> %cand{k} : i32
+    %m{k}_0 = scalar.addf %zero_f, %zero_f : f32
+""")
+        for i in range(EPL):
+            T2.append(f"""    %w{k}_{i} = scalar.cmpi eq, %id{i}, %win{k} : i32
+    %m{k}_{i + 1} = scf.select %w{k}_{i}, %pr{i}, %m{k}_{i} : f32
+    %s{i}_{k + 1} = scf.select %w{k}_{i}, %removed, %s{i}_{k} : f32
+""")
+        T2.append(f"""    %wp{k} = kernel.subgroup.reduce<addf> %m{k}_{EPL} : f32
+    %sum_{k + 1} = scalar.addf %sum_{k}, %wp{k} : f32
+    scf.if %store_lane {{
+      view.store %win{k}, %ids_view[%token, {k}] : i32, view<[%tokens]x{KU}xi32>
+    }}
+""")
+    T2.append(f"    %total = scalar.addf %sum_{KU}, %zero_f : f32\n" + norm_text.replace("    %", "    %") + "\n")
+    T2.append(f"""    scf.if %store_lane {{
+""" + "".join(f"""      %wn{k} = scalar.divf %wp{k}, %wsum : f32
+      view.store %wn{k}, %wts_view[%token, {k}] : f32, view<[%tokens]x{KU}xf32>
+""" for k in range(KU)) + """    }
+  }
+""")
+    topk = "".join(T2)
+    return f"""
+// Router: TR={TR} tokens per workgroup, their h rows staged in LDS; wave w scores experts w*{EPW}.. for
+// all {TR} tokens (one weight load serves {TR} tokens); then per token, thread e holds expert e and {KU}
+// rounds of workgroup reductions pick the top {KU} (ties: lowest index) of sigmoid(logit){' + bias' if bias else ''}.
+kernel.def export("g_moe_route_tr") @g_moe_route_tr(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  %cTRm1 = index.constant {TR - 1} : index
+  %cTR = index.constant {TR} : index
+  %padded = index.add %tokens, %cTRm1 : index
+  %groups = index.div %padded, %cTR : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %x: buffer, %w: buffer, %b: buffer, %ids: buffer, %wts: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %group_id = kernel.workgroup.id<x> : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, 7)] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  %c256 = index.constant 256 : index
+  %cHG = index.constant {HG} : index
+  %cE = index.constant {E} : index
+  %cTR = index.constant {TR} : index
+  %zero_f = scalar.constant 0.0 : f32
+  %token0 = index.mul %group_id, %cTR : index
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
+  %xs_bytes = index.constant {TR * H * 4} : offset
+  %xs = buffer.alloca<workgroup> align(16) %xs_bytes : buffer
+  %xs_view = buffer.view %xs[%zero] : buffer -> view<{TR}x{HG}x32xf32>
+  %xs4_view = buffer.view %xs[%zero] : buffer -> view<{TR}x{HB}x32x4xf32>
+  %w4_view = buffer.view %w[%zero] : buffer -> view<{E}x{HB}x32x4x{wty}>
+  %cHB = index.constant {HB} : index
+  %lg_bytes = index.constant {TR * E * 4} : offset
+  %lg = buffer.alloca<workgroup> align(16) %lg_bytes : buffer
+  %lg_view = buffer.view %lg[%zero] : buffer -> view<{TR}x{E}xf32>
+  %tid0 = kernel.workitem.id<x> : index
+  %tid = index.assume %tid0 [range(%tid0, 0, 255)] : index
+  %cvec = index.constant {TR * HG} : index
+  %zero32 = vector.constant 0.0 : vector<32xf32>
+  scf.for %v = [%tid to %cvec step %c256] {{
+    %r_value = index.div %v, %cHG : index
+    %r = index.assume %r_value [range(%r_value, 0, {TR - 1})] : index
+    %g_value = index.rem %v, %cHG : index
+    %g = index.assume %g_value [range(%g_value, 0, {HG - 1})] : index
+    %tok_value = index.add %token0, %r : index
+    %tok_in = index.cmp ult, %tok_value, %tokens : index
+    %tok_c = scf.select %tok_in, %tok_value, %c0 : index
+    %tok = index.assume %tok_c [lt(%tok_c, %tokens)] : index
+    %xg = vector.load %x_view[%tok, %g, %c0] : view<[%tokens]x{HG}x32xf32> -> vector<32xf32>
+    %xsel = scf.select %tok_in, %xg, %zero32 : vector<32xf32>
+    vector.store %xsel, %xs_view[%r, %g, %c0] : vector<32xf32>, view<{TR}x{HG}x32xf32>
+  }}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %first = index.cmp eq, %lane, %c0 : index
+  %cEPW = index.constant {EPW} : index
+  %e0 = index.mul %wave, %cEPW : index
+  scf.for %j = [%c0 to %cEPW step %c1] {{
+    %e_raw = index.add %e0, %j : index
+    %e = index.assume %e_raw [range(%e_raw, 0, {E - 1})] : index
+    {acc_out} = scf.for %bq = [%c0 to %cHB step %c1]({acc_in}) -> ({acc_ty}) {{
+      %bb = index.assume %bq [range(%bq, 0, {HB - 1})] : index
+{wl}
+{dots}      scf.yield {nxt} : {acc_ty}
+    }}
+{stores}  }}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+{topk}  kernel.return
+}}
+"""
+
+
+def route_prefill_live(H, E, KU, gating, norm, bias, wty="f32"):
+    """g_moe_route_tr_live: g_moe_route_tr given the epoch's %info; a workgroup whose tokens are all padding (info
+    word 2 = 0; a 1026-token prompt at chunk 4096 runs as a 2048-row epoch) does nothing. g_moe_bucket takes live
+    tokens only, so their ids / weights are never read."""
+    text = route_prefill(H, E, KU, gating, norm, bias, wty)
+    text = text[text.index('kernel.def export("g_moe_route_tr")'):]
+    TR = int(re.search(r"%cTR = index.constant (\d+) : index", text).group(1))
+    def rep(a, b):
+        nonlocal text
+        assert text.count(a) == 1, a
+        text = text.replace(a, b)
+    rep('export("g_moe_route_tr") @g_moe_route_tr(', 'export("g_moe_route_tr_live") @g_moe_route_tr_live(')
+    rep("%ids: buffer, %wts: buffer) {", "%ids: buffer, %wts: buffer, %info: buffer) {")
+    live = ["  %gl_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>\n  %gl_dead = scalar.constant 0 : i32\n"]
+    for r in range(TR):
+        live.append(f"""  %gl_c{r} = index.constant {r} : index
+  %gl_t{r}v = index.add %token0, %gl_c{r} : index
+  %gl_in{r} = index.cmp ult, %gl_t{r}v, %tokens : index
+  %gl_t{r}c = scf.select %gl_in{r}, %gl_t{r}v, %c0 : index
+  %gl_t{r} = index.assume %gl_t{r}c [lt(%gl_t{r}c, %tokens)] : index
+  %gl_w{r} = view.load %gl_view[%gl_t{r}, 2] : view<[%tokens]x4xi32> -> i32
+  %gl_l{r} = scalar.cmpi ne, %gl_w{r}, %gl_dead : i32
+  %gl_a{r} = scalar.andi %gl_in{r}, %gl_l{r} : i1
+""" + (f"  %gl_any{r} = scalar.ori %gl_any{r - 1}, %gl_a{r} : i1\n" if r else "  %gl_any0 = scalar.andi %gl_a0, %gl_a0 : i1\n"))
+    live.append(f"  scf.if %gl_any{TR - 1} {{\n")
+    rep("  %token0 = index.mul %group_id, %cTR : index\n", "  %token0 = index.mul %group_id, %cTR : index\n" + "".join(live))
+    rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
+    return "\n" + text
+
+
+def row_scale_tiles(row_scale):
+    """g_row_scale_f16_tiles: the starter's g_row_scale_f16 over the bucketed expert rows (max_tiles x 64), skipping
+    the rows of unused tiles (tile_info expert < 0; g_moe_gdn skips those tiles). max_tiles is sized for the worst
+    case (t*KU/64 + E tiles), so most of them are unused."""
+    text = row_scale[row_scale.index('kernel.def export("g_row_scale_f16")'):]
+    def rep(a, b):
+        nonlocal text
+        assert text.count(a) == 1, a
+        text = text.replace(a, b)
+    rep('export("g_row_scale_f16") @g_row_scale_f16(', 'export("g_row_scale_f16_tiles") @g_row_scale_f16_tiles(')
+    rep("%scales: buffer, %x16: buffer) {", "%scales: buffer, %x16: buffer, %tile_info: buffer) {")
+    rep("  %row = index.assume %row_id [lt(%row_id, %rows)] : index\n", f"""  %row = index.assume %row_id [lt(%row_id, %rows)] : index
+  %rt_zero = index.constant 0 : offset
+  %rt_c64 = index.constant {TILE} : index
+  %rt_tiles = index.div %rows, %rt_c64 : index
+  %rt_tile_v = index.div %row, %rt_c64 : index
+  %rt_tile = index.assume %rt_tile_v [lt(%rt_tile_v, %rt_tiles)] : index
+  %rt_view = buffer.view %tile_info[%rt_zero] : buffer -> view<[%rt_tiles]x2xi32>
+  %rt_expert = view.load %rt_view[%rt_tile, 0] : view<[%rt_tiles]x2xi32> -> i32
+  %rt_none = scalar.constant 0 : i32
+  %rt_used = scalar.cmpi sge, %rt_expert, %rt_none : i32
+  scf.if %rt_used {{
+""")
+    rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
+    return "\n" + text
+
+
+def route(H, E, KU, gating, norm, bias, wty="f32"):
+    """Both routers: g_moe_route (decode epochs) and g_moe_route_tr (prefill epochs); same outputs."""
+    return route_decode(H, E, KU, gating, norm, bias, wty) + route_prefill(H, E, KU, gating, norm, bias, wty)
 
 
 def expert_mv(fmt, K, N, E, KU, R, mode):

@@ -118,6 +118,31 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   (seen at 1k and 16k on Qwen3-4B). That is why there are two recordings: `--alt`
   scores each prompt against whichever recording Loom follows further. Before
   declaring FAIL on a single prompt, re-record it; a gap that disappears was noise.
+  - A plain re-run of a *text* prompt at `-np 1` is often bit-identical, so it proves little.
+    The informative check is llama.cpp's sensitivity to its own summation order. Re-record the
+    one prompt with the server started under other legitimate numerics: `LLAMA_SPEC="-ub 128"`,
+    `"-ub 2048 -b 2048"` and `"-fa off"` (llamacpp_server.sh appends LLAMA_SPEC). Then compare
+    the top-5 at the divergence.
+  - If llama.cpp's own top-1 changes across these settings, or Loom's token falls within the
+    1.0 gap under one of them, the FAIL is a near-tie. Document it with the per-setting top-5;
+    don't change the kernels to chase it. Example, Flint 15.5k summary at token 15: llama.cpp
+    picked ` across` (default), ` combine` (`-ub 128`, `-ub 2048`) and ` summarize` (`-fa off`).
+    Loom's ` final` had gap 1.39 (default), 1.37 (`-ub 128`), 1.06 (`-ub 2048`) and 0.72 (`-fa off`).
+  - If llama.cpp stays on one token under every setting and Loom's gap stays above 1.0, it is
+    *not* proven noise. Before changing kernels, check that both sides compute the same model:
+    - Near-exact reference: dequantize the GGUF to F32 (`llama-quantize --allow-requantize IN OUT F32`)
+      and run it on the CPU (`LLAMA_SPEC="-ngl 0 --no-op-offload -nkvo --no-mmproj-offload -fa off
+      -ctk f32 -ctv f32"`). If it agrees with llama.cpp's GPU run, Loom is the outlier.
+    - Vision: dump llama.cpp's image embeddings (`MTMD_DEBUG_EMBEDDINGS=out.bin llama-mtmd-cli ...
+      --image X --jinja`: int32 rows, int32 width, then f32 data) and compare them with Loom's
+      encoder. Row cosines far below 0.999 are a preprocessing or encoder difference, not numerics.
+      Feeding llama.cpp the image already resized to the processed size isolates the resize.
+    - Example, Bolt Q4_K_M vision `photo` (1024x768) at token 7: 17 recordings with llama.cpp b1355
+      all chose ` grid` (gap 1.02–1.54 to Loom's `,`), and the F32 CPU run agreed (gap 1.40). Loom's
+      kernels were not the cause: f32 activations, matvec-only prefill and attention variants all
+      gave the same reply. b1355 letterboxed Gemma 4 images (row cosine to Loom's embeddings 0.32 at
+      worst); upstream llama.cpp 7bd18083 (lemonade b1368) resizes without padding, as Loom does.
+      Against b1368 all six images, `photo` included, match token by token (57 tokens).
 - Golden ids come from llama.cpp's `tokens`. `completion_probabilities` omits
   byte-fallback tokens (emoji, partial UTF-8), so top-5 lists are kept only while
   they line up.

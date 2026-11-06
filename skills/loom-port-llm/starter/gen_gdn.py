@@ -17,7 +17,9 @@ origins record names a reader slot (state at the fork position, e.g. a reused pr
 writer slot (the row's private state) and the fork position: a span starting at the fork
 reads the reader slot, otherwise the writer; a span at position 0 starts from zeros. Every
 span publishes its final state to the writer. The register recurrence is adapted from
-hrx-loom-library model/Qwen/Qwen3.8-27B/program/kernel/gdn_prefill.loom.
+hrx-loom-library model/Qwen/Qwen3.8-27B/program/kernel/gdn_prefill.loom; by default it is replaced by
+the row-split form (_recurrence_rows: 8 lanes per value column, per-lane dot products + an 8-lane
+shuffle sum), GDN_ROW_LANES=0 keeps the original 32-lane form.
 """
 import os
 
@@ -140,6 +142,34 @@ def gdn_kernels(cfg, eps):
         scf.yield %h{j} : f32
       }}
       %acc{j} = scalar.fmaf %w{j}, %x{j}, {"%zero_f" if j == 0 else f"%acc{j - 1}"} : f32""")
+    # CU channels per loop step (c, c + stride, ...), every load before any store: Loom orders a global load
+    # after earlier global stores, so one channel per step paid a store -> load round trip per channel.
+    CU = int(os.environ.get("GDN_CONV_UNROLL", "4"))
+    tap_text = chr(10).join(taps) + f"""
+      %sig = scalar.logisticf<afn> %acc{K - 1} : f32
+      %silu = scalar.mulf %acc{K - 1}, %sig : f32"""
+    import re as _re
+    defined = set(_re.findall(r"(%\w+) = ", tap_text))
+    cu_parts, cu_stores = [], []
+    for u in range(CU):
+        body = _re.sub(r"%\w+", lambda m: m.group(0) + f"_u{u}" if m.group(0) in defined or m.group(0) == "%ch" else m.group(0), tap_text)
+        body = "\n".join("  " + l for l in body.split("\n"))
+        cu_parts.append(f"""      %cu{u}_k = index.constant {u} : index
+      %cu{u}_o = index.mul %cu{u}_k, %cstride : index
+      %cu{u}_c = index.add %c, %cu{u}_o : index
+      %cu{u}_in = index.cmp ult, %cu{u}_c, %cC : index
+      %val_u{u} = scf.if %cu{u}_in -> (f32) {{
+        %ch_u{u} = index.assume %cu{u}_c [range(%cu{u}_c, 0, {C - 1})] : index
+{body}
+        scf.yield %silu_u{u} : f32
+      }} else {{
+        scf.yield %zero_f : f32
+      }}""")
+        cu_stores.append(f"""      scf.if %cu{u}_in {{
+        %cs{u} = index.assume %cu{u}_c [range(%cu{u}_c, 0, {C - 1})] : index
+        view.store %val_u{u}, %out_view[%token, %cs{u}] : f32, view<[%tokens]x{C}xf32>
+      }}""")
+    conv_unrolled = "\n".join(cu_parts + cu_stores)
     T.append(f"""
 // out[t, c] = silu(sum_j w[c, j] x[t - (K-1) + j, c]); inputs before the span come from the history.
 kernel.def export("g_gdn_conv") @g_gdn_conv(%tokens: index) {{
@@ -192,12 +222,10 @@ kernel.def export("g_gdn_conv") @g_gdn_conv(%tokens: index) {{
     %cone = index.constant 1 : index
     %cbn = scf.select %few_b, %cbk, %cone : index
     %cstride = index.mul %cbn, %c256 : index
-    scf.for %c = [%cstart to %cC step %cstride] {{
-      %ch = index.assume %c [range(%c, 0, {C - 1})] : index
-{chr(10).join(taps)}
-      %sig = scalar.logisticf<afn> %acc{K - 1} : f32
-      %silu = scalar.mulf %acc{K - 1}, %sig : f32
-      view.store %silu, %out_view[%token, %ch] : f32, view<[%tokens]x{C}xf32>
+    %cunroll = index.constant {CU} : index
+    %cstride_u = index.mul %cstride, %cunroll : index
+    scf.for %c = [%cstart to %cC step %cstride_u] {{
+{conv_unrolled}
     }}
   }}
   kernel.return
@@ -458,6 +486,9 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
   kernel.return
 }}
 """)
+    RL = _row_lanes(DK, DV)
+    if RL:
+        T[-1] = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close)
     # ---- gated RMSNorm per value head: out = rmsnorm(o) * w * silu(z); padding tokens get zeros
     nl = "\n".join(f"""    %ni{m}c = index.constant {32 * m} : index
     %nd{m} = index.add %lane, %ni{m}c : index
@@ -472,8 +503,9 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
     %n{m}a = scalar.mulf %r{m}, %inv : f32
     %n{m}b = scalar.mulf %n{m}a, %wd{m} : f32
     %n{m} = scalar.mulf %n{m}b, %zg{m} : f32
-    %res{m} = scf.select %live, %n{m}, %zero_f : f32
-    view.store %res{m}, %o_view[%token, %nc{m}] : f32, view<[%tokens]x{VD}xf32>""" for m in range(RV))
+    %res{m} = scf.select %live, %n{m}, %zero_f : f32""" for m in range(RV))
+    # stores after every load: Loom orders each global load after earlier stores (a round trip per store/load pair)
+    nw += "\n" + "\n".join(f"    view.store %res{m}, %o_view[%token, %nc{m}] : f32, view<[%tokens]x{VD}xf32>" for m in range(RV))
     T.append(f"""
 kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
   %c1 = index.constant 1 : index
@@ -511,7 +543,282 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
   kernel.return
 }}
 """)
-    return "\n".join(T)
+    text = "\n".join(T)
+    if not RL and os.environ.get("GDN_PREFETCH", "1") not in ("", "0"):
+        text = _prefetch_recurrence(text, RK)
+    return text
+
+
+def _row_lanes(DK, DV):
+    """Lanes per value column in the row-split recurrence (0: the original 32-lane form). GDN_ROW_LANES overrides."""
+    RL = int(os.environ.get("GDN_ROW_LANES", "8"))
+    CW = int(os.environ.get("GDN_COLS", "4"))
+    ok = RL in (1, 2, 4, 8, 16, 32) and CW in (2, 4, 8) and DK % RL == 0 and (DK // RL) % 4 == 0 and DV % (CW * 32 // RL) == 0
+    return (RL, CW) if ok else 0
+
+
+def _recurrence_rows(G, NG, LB, RL, CW, guard_open, guard_close):
+    """g_gdn_recurrence, row-split form: a 32-lane workgroup owns CW * (32 / RL) value columns of one head; each
+    group of RL lanes owns CW columns and lane r of the group the key rows [r * DK / RL, (r + 1) * DK / RL) of
+    them (DK / RL * CW state values in registers). S^T k and S^T q are per-lane dot products over the lane's
+    rows plus a log2(RL)-step xor-shuffle sum inside the group, instead of two 32-lane reductions per 4 columns;
+    the key/query L2 norms and the decay fold into the per-column scalars (no per-element normalization), and
+    the token's decay/beta are computed once per workgroup. The step's inputs are loaded one step ahead and the
+    outputs stored in RL-step batches (lane r keeps step r's CW outputs), so no global store sits between the
+    loop's loads. Same arithmetic per state element as the 32-lane form; the sums are ordered differently.
+    GDN_ROW_LANES (default 8) / GDN_COLS (default 4) pick RL / CW."""
+    HK, HV, DK, DV, C, VD = G["HK"], G["HV"], G["DK"], G["DV"], G["C"], G["VD"]
+    RPL, CPW = DK // RL, CW * (32 // RL)
+    VC = f"vector<{CW}xf32>"
+    VR = f"vector<{RPL}xf32>"
+    NS = HV * DV * DK
+    ld = [("qv", VR, f"vector.load %x_view[@T@, %q_row] : view<[%tokens]x{C}xf32> -> {VR}"),
+          ("kv", VR, f"vector.load %x_view[@T@, %k_row] : view<[%tokens]x{C}xf32> -> {VR}"),
+          ("vv", VC, f"vector.load %x_view[@T@, %v_channel] : view<[%tokens]x{C}xf32> -> {VC}"),
+          ("qi", "f32", f"view.load %inv_view[@T@, %q_norm_index] : view<[%tokens]x{2 * HK}xf32> -> f32"),
+          ("ki", "f32", f"view.load %inv_view[@T@, %k_norm_index] : view<[%tokens]x{2 * HK}xf32> -> f32"),
+          ("al", "f32", f"view.load %alpha_view[@T@, %vh] : view<[%tokens]x{HV}xf32> -> f32"),
+          ("be", "f32", f"view.load %beta_view[@T@, %vh] : view<[%tokens]x{HV}xf32> -> f32")]
+    xs = [1 << i for i in range(RL.bit_length() - 1)]
+    nl = "\n"
+    J = range(CW)
+
+    def group_sum(name):
+        out, cur = [], name
+        for d in xs:
+            out.append(f"    {cur}_x{d}, {cur}_u{d} = kernel.subgroup.shuffle<xor> {cur}, %x{d}, %w32 : f32, i32, i32\n"
+                       f"    {name}_s{d} = scalar.addf {cur}, {cur}_x{d} : f32")
+            cur = f"{name}_s{d}"
+        return nl.join(out), cur
+    body = []
+    for j in J:
+        red, pj = group_sum(f"%p{j}")
+        body.append(f"    %p{j} = vector.dotf<reassoc|contract> %s{j}, %kv, %zero_f : {VR}, {VR}, f32\n{red}\n"
+                    f"    %v{j} = vector.extract %vv[{j}] : {VC} -> f32\n"
+                    f"    %pred{j} = scalar.mulf {pj}, %kdecay : f32\n"
+                    f"    %res{j} = scalar.subf %v{j}, %pred{j} : f32\n"
+                    f"    %del{j} = scalar.mulf %res{j}, %beta_value : f32\n"
+                    f"    %dk{j} = scalar.mulf %del{j}, %ki : f32\n"
+                    f"    %dkv{j} = vector.splat %dk{j} : {VR}\n"
+                    f"    %sd{j} = vector.mulf %s{j}, %decay_vector : {VR}\n"
+                    f"    %n{j} = vector.fmaf %kv, %dkv{j}, %sd{j} : {VR}")
+    for j in J:
+        red, oj = group_sum(f"%o{j}")
+        body.append(f"    %o{j} = vector.dotf<reassoc|contract> %n{j}, %qv, %zero_f : {VR}, {VR}, f32\n{red}\n"
+                    f"    %out{j} = scalar.mulf {oj}, %qscale : f32")
+    V4 = ", ".join([VR] * CW)
+    fin = ", ".join(f"%final{j}" for j in J)
+    lt = ", ".join(t for _, t, _ in ld)
+    sidx = nl.join(f"  %sc{j}c = index.constant {j} : index\n  %sc{j} = index.add %out_channel, %sc{j}c : index\n"
+                   f"  %sb{j} = index.mul %sc{j}, %cdk : index\n  %si{j}_value = index.add %sb{j}, %row_off : index\n"
+                   f"  %si{j} = index.assume %si{j}_value [range(%si{j}_value, 0, {NS - RPL})] : index" for j in J)
+    gl = nl.join(f"    %g{j} = vector.load %state_view[%si{j}] : view<{NS}xf32> -> {VR}" for j in J)
+    pf = nl.join(f"  %pf_{n} = {rhs.replace('@T@', '%pf_first')}" for n, _, rhs in ld)
+    nx = nl.join(f"    %nx_{n} = {rhs.replace('@T@', '%nx_tabs')}" for n, _, rhs in ld)
+    iters = (", ".join(f"%s{j} = %init{j} : {VR}" for j in J) + ", " +
+             ", ".join(f"%{n} = %pf_{n} : {t}" for n, t, _ in ld) + f", %ob = %zero4 : {VC}")
+    stores = nl.join(f"    vector.store %final{j}, %next_view[%si{j}] : {VR}, view<{NS}xf32>" for j in J)
+    shuf = nl.join(f"  %x{d} = scalar.constant {d} : i32" for d in xs)
+    return f"""
+kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
+  %c1 = index.constant 1 : index
+  %heads = index.constant {HV} : index
+  %tiles = index.constant {DV // CPW} : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%heads, %tiles, %spans) workgroup_size(%c32, %c1, %c1) : index
+}} launch(%tokens_arg: index, %spans_arg: index, %layer_arg: index, %metadata: buffer, %origins: buffer, %arena: buffer, %x: buffer, %inverse: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %out: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %layer = index.assume %layer_arg [range(%layer_arg, 0, {NG - 1})] : index
+  %head_id = kernel.workgroup.id<x> : index
+  %vh = index.assume %head_id [range(%head_id, 0, {HV - 1})] : index
+  %tile_id = kernel.workgroup.id<y> : index
+  %tile = index.assume %tile_id [range(%tile_id, 0, {DV // CPW - 1})] : index
+  %span_id = kernel.workgroup.id<z> : index
+  %span = index.assume %span_id [lt(%span_id, %spans)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1i = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %zero_f = scalar.constant 0.0 : f32
+  %w32 = scalar.constant 32 : i32
+{shuf}
+  %active, %length, %start32, %row, %first = func.call @g_gdn_span(%metadata, %spans, %span) : (buffer, index, index) -> (i1, index, i32, index, index)
+  scf.if %active {{
+  %layer_stride = index.constant {LB} : offset
+  %layer_bytes = index.scale %layer, %layer_stride : index, offset -> offset
+  %reader, %writer, %fresh = func.call @g_gdn_slots(%origins, %row, %start32, %layer_bytes) : (buffer, index, i32, offset) -> (offset, offset, i1)
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{C}xf32>
+  %inv_view = buffer.view %inverse[%zero] : buffer -> view<[%tokens]x{2 * HK}xf32>
+  %alpha_view = buffer.view %alpha[%zero] : buffer -> view<[%tokens]x{HV}xf32>
+  %beta_view = buffer.view %beta[%zero] : buffer -> view<[%tokens]x{HV}xf32>
+  %a_view = buffer.view %ssm_a[%zero] : buffer -> view<{HV}xf32>
+  %bias_view = buffer.view %dt_bias[%zero] : buffer -> view<{HV}xf32>
+  %out_view = buffer.view %out[%zero] : buffer -> view<[%tokens]x{VD}xf32>
+  %state_view = buffer.view %arena[%reader] : buffer -> view<{NS}xf32>
+  %next_view = buffer.view %arena[%writer] : buffer -> view<{NS}xf32>
+  %cdk = index.constant {DK} : index
+  %cdv = index.constant {DV} : index
+  %chk = index.constant {HK} : index
+  %crl = index.constant {RL} : index
+  %crpl = index.constant {RPL} : index
+  %ccpw = index.constant {CPW} : index
+  %ccw = index.constant {CW} : index
+  %r_value = index.rem %lane, %crl : index
+  %r = index.assume %r_value [range(%r_value, 0, {RL - 1})] : index
+  %cg_value = index.div %lane, %crl : index
+  %cg = index.assume %cg_value [range(%cg_value, 0, {32 // RL - 1})] : index
+  %row_off = index.mul %r, %crpl : index
+  %kh = index.rem %vh, %chk : index
+  %kh_base = index.mul %kh, %cdk : index
+  %q_row_value = index.add %kh_base, %row_off : index
+  %q_row = index.assume %q_row_value [range(%q_row_value, 0, {HK * DK - RPL})] : index
+  %k_skip = index.constant {HK * DK} : index
+  %k_row_value = index.add %q_row, %k_skip : index
+  %k_row = index.assume %k_row_value [range(%k_row_value, {HK * DK}, {2 * HK * DK - RPL})] : index
+  %q_norm_index = index.mul %kh, %c2 : index
+  %k_norm_index = index.add %q_norm_index, %c1i : index
+  %tile_col = index.mul %tile, %ccpw : index
+  %grp_col = index.mul %cg, %ccw : index
+  %col0 = index.add %tile_col, %grp_col : index
+  %head_columns = index.mul %vh, %cdv : index
+  %out_channel_value = index.add %head_columns, %col0 : index
+  %out_channel = index.assume %out_channel_value [range(%out_channel_value, 0, {VD - CW})] : index
+  %v_skip = index.constant {2 * HK * DK} : index
+  %v_channel_value = index.add %v_skip, %out_channel : index
+  %v_channel = index.assume %v_channel_value [range(%v_channel_value, {2 * HK * DK}, {C - CW})] : index
+{sidx}
+  %zero_r = vector.splat %zero_f : {VR}
+  {", ".join(f"%init{j}" for j in J)} = scf.if %fresh -> ({V4}) {{
+    scf.yield {", ".join(["%zero_r"] * CW)} : {V4}
+  }} else {{
+{gl}
+    scf.yield {", ".join(f"%g{j}" for j in J)} : {V4}
+  }}
+  %a = view.load %a_view[%vh] : view<{HV}xf32> -> f32
+  %dt_bias_value = view.load %bias_view[%vh] : view<{HV}xf32> -> f32
+  %scale = scalar.constant {DK ** -0.5!r} : f32
+  %zero4 = vector.splat %zero_f : {VC}
+  %last_step = index.sub %length, %c1i : index
+  %pf_first = index.assume %first [lt(%first, %tokens)] : index
+{pf}
+  {fin}, {", ".join(f"%pf_unused_{n}" for n, _, _ in ld)}, %ob_unused = scf.for %step = [%c0 to %length step %c1i]({iters}) -> ({V4}, {lt}, {VC}) {{
+    %nx_step_raw = index.add %step, %c1i : index
+    %nx_step = index.min %nx_step_raw, %last_step : index
+    %nx_tabs_value = index.add %first, %nx_step : index
+    %nx_tabs = index.assume %nx_tabs_value [lt(%nx_tabs_value, %tokens)] : index
+{nx}
+    %alpha_biased = scalar.addf %al, %dt_bias_value : f32
+    %alpha_positive = scalar.softplusf<afn> %alpha_biased : f32
+    %gate = scalar.mulf %alpha_positive, %a : f32
+    %decay = scalar.expf<afn> %gate : f32
+    %decay_vector = vector.splat %decay : {VR}
+    %kdecay = scalar.mulf %ki, %decay : f32
+    %beta_value = scalar.logisticf<afn> %be : f32
+    %qscale = scalar.mulf %qi, %scale : f32
+{nl.join(body)}
+    %outv = vector.from_elements {", ".join(f"%out{j}" for j in J)} : {VC}
+    %ob_slot = index.rem %step, %crl : index
+    %ob_mine = index.cmp eq, %r, %ob_slot : index
+    %ob_next = scf.select %ob_mine, %outv, %ob : {VC}
+    %ob_cl = index.constant {RL - 1} : index
+    %ob_full = index.cmp eq, %ob_slot, %ob_cl : index
+    %ob_last = index.cmp eq, %step, %last_step : index
+    %ob_flush = scalar.ori %ob_full, %ob_last : i1
+    scf.if %ob_flush {{
+      %ob_live = index.cmp ule, %r, %ob_slot : index
+      scf.if %ob_live {{
+        %ob_group = index.div %step, %crl : index
+        %ob_step0 = index.mul %ob_group, %crl : index
+        %ob_base = index.add %first, %ob_step0 : index
+        %ob_row_value = index.add %ob_base, %r : index
+        %ob_row = index.assume %ob_row_value [lt(%ob_row_value, %tokens)] : index
+        vector.store %ob_next, %out_view[%ob_row, %out_channel] : {VC}, view<[%tokens]x{VD}xf32>
+      }}
+    }}
+    scf.yield {", ".join(f"%n{j}" for j in J)}, {", ".join(f"%nx_{n}" for n, _, _ in ld)}, %ob_next : {V4}, {lt}, {VC}
+  }}
+{guard_open}{stores}{guard_close}
+  }}
+  kernel.return
+}}
+"""
+
+def _prefetch_recurrence(text, RK):
+    """Software-pipeline g_gdn_recurrence: the step's inputs (q, k, v, the norms, alpha, beta) don't depend on
+    the state, so step s+1's loads are issued during step s and carried in the loop. A step was otherwise one
+    global-load latency plus the two reductions (the recurrence is a serial chain per workgroup)."""
+    import re
+    a = text.index('kernel.def export("g_gdn_recurrence")')
+    b = text.index("kernel.def export", a + 10)
+    k = text[a:b]
+    loads = []   # (name, type, rhs with @T@ for the token index)
+    for line in k.split("\n"):
+        m = re.match(r"\s*(%(?:q_inverse|k_inverse|alpha_raw|beta_raw|value|[qk]\d+_raw)) = ((?:view|vector)\.load %\w+\[)%tabs(, .*-> (\S+))$", line)
+        if m:
+            loads.append((m.group(1), m.group(4), m.group(2) + "@T@" + m.group(3)))
+    assert len(loads) == 5 + 2 * RK, loads
+    names = {n for n, _, _ in loads}
+    body = [l for l in k.split("\n") if not (re.match(r"\s*(%\S+) = ", l) and re.match(r"\s*(%\S+) = ", l).group(1) in names)]
+    k = "\n".join(body)
+    # Row indices of q/k (loop-invariant) move before the loop.
+    rows = [l for l in k.split("\n") if re.match(r"\s*%(qr\d+c|qr\d+|kr\d+) = ", l)]
+    k = "\n".join(l for l in k.split("\n") if l not in rows)
+    fl = re.search(r"\n(  (%final\S*(?:, %final\S*)*) = scf\.for %step = \[%c0 to %length step %c1i\]\((.*)\) -> \((.*)\) \{)\n", k)
+    head, finals, iters, types = fl.group(1), fl.group(2), fl.group(3), fl.group(4)
+    pro = ["  " + l.strip() for l in rows]
+    pro += ["  %last_step = index.sub %length, %c1i : index",
+            "  %pf_first = index.assume %first [lt(%first, %tokens)] : index"]
+    pro += [f"  %pf_{n[1:]} = {rhs.replace('@T@', '%pf_first')}" for n, _, rhs in loads]
+    new_head = (f"  {finals}, " + ", ".join(f"%pf_unused_{i}" for i in range(len(loads))) +
+                f" = scf.for %step = [%c0 to %length step %c1i]({iters}, " +
+                ", ".join(f"{n} = %pf_{n[1:]} : {t}" for n, t, _ in loads) + f") -> ({types}, " + ", ".join(t for _, t, _ in loads) + ") {")
+    k = k.replace(head, "\n".join(pro) + "\n" + new_head, 1)
+    tabs = "    %tabs = index.assume %tabs_value [lt(%tabs_value, %tokens)] : index\n"
+    assert tabs in k
+    nxt = ["    %nx_step_raw = index.add %step, %c1i : index",
+           "    %nx_step = index.min %nx_step_raw, %last_step : index",
+           "    %nx_tabs_value = index.add %first, %nx_step : index",
+           "    %nx_tabs = index.assume %nx_tabs_value [lt(%nx_tabs_value, %tokens)] : index"]
+    nxt += [f"    %nx_{n[1:]} = {rhs.replace('@T@', '%nx_tabs')}" for n, _, rhs in loads]
+    k = k.replace(tabs, tabs + "\n".join(nxt) + "\n", 1)
+    # Output stores in batches of 32 steps: lane j keeps step j's output and the wave stores them together.
+    # A store each step made every following global load wait for the store to complete (the compiler
+    # cannot tell the output from the inputs), a memory round trip per step on the serial chain.
+    st = re.search(r"    %leader = index\.cmp eq, %lane, %c0 : index\n    scf\.if %leader \{\n      %scaled = vector\.mulf %output, %scale_v : (vector<\d+xf32>)\n"
+                   r"      vector\.store %scaled, %out_view\[%tabs, %out_channel\] : vector<\d+xf32>, (view<[^>]*>)\n    \}\n", k)
+    vt, ot = st.group(1), st.group(2)
+    k = k.replace(st.group(0), f"""    %scaled = vector.mulf %output, %scale_v : {vt}
+    %ob_c32 = index.constant 32 : index
+    %ob_slot = index.rem %step, %ob_c32 : index
+    %ob_mine = index.cmp eq, %lane, %ob_slot : index
+    %ob_next = scf.select %ob_mine, %scaled, %ob : {vt}
+    %ob_c31 = index.constant 31 : index
+    %ob_full = index.cmp eq, %ob_slot, %ob_c31 : index
+    %ob_last = index.cmp eq, %step, %last_step : index
+    %ob_flush = scalar.ori %ob_full, %ob_last : i1
+    scf.if %ob_flush {{
+      %ob_live = index.cmp ule, %lane, %ob_slot : index
+      scf.if %ob_live {{
+        %ob_group = index.div %step, %ob_c32 : index
+        %ob_step0 = index.mul %ob_group, %ob_c32 : index
+        %ob_base = index.add %first, %ob_step0 : index
+        %ob_row_value = index.add %ob_base, %lane : index
+        %ob_row = index.assume %ob_row_value [lt(%ob_row_value, %tokens)] : index
+        vector.store %ob_next, %out_view[%ob_row, %out_channel] : {vt}, {ot}
+      }}
+    }}
+""", 1)
+    assert new_head.endswith(") {")
+    k = k.replace(new_head, new_head[:-3].replace(") -> (", f", %ob = %zero4 : {vt}) -> (", 1).replace(
+        " = scf.for %step", ", %ob_unused = scf.for %step", 1) + f", {vt}) {{", 1)
+    y = re.search(r"\n    scf\.yield ((?:%new\d+(?:, )?)+) : (.*)\n  \}\n", k)
+    k = k.replace(y.group(0), f"\n    scf.yield {y.group(1)}, " + ", ".join(f"%nx_{n[1:]}" for n, _, _ in loads) +
+                  f", %ob_next : {y.group(2)}, " + ", ".join(t for _, t, _ in loads) + f", {vt}\n  }}\n", 1)
+    return text[:a] + k + text[b:]
 
 
 SPLIT_QG = r"""

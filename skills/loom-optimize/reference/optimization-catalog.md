@@ -69,6 +69,83 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - No logits buffer is ever written, which saves V × 4 bytes per token plus a pass.
 - This is only valid for greedy decoding. For sampling you'd need top-k partials.
 
+### Many-stream drafted decode (4 streams x DFlash depth 3)
+- **Attribute the epoch, not the token.** Under drafting, a streamed event is one epoch. Measure ms per event and
+  tokens per event separately, so a doubled kernel that changes the drafts can't pass for a slower one.
+  Doubling every launch of one kernel group in a copy of the package gave Muse-Glimmer-30B's 204 ms 4-stream epoch as:
+  - 16-token trunk matvecs: +113 ms (one memory-bound 1-token pass is ~75 ms).
+  - Proposals: +56 ms.
+  - Head: +44 ms.
+  - Warm/catch-up: +12 ms.
+  - Decode attention: +5 ms.
+- **The int8 head held one or two workgroups per CU.** Each 128-row chunk kept waves x 128 x TG F32 partials in
+  LDS (28 KB at 8 spans, 57 KB at 16), so 8 spans took 11.7 ms against 5.2 ms for 1 span.
+  - 16 verify rows ran as two 8-span groups (22 ms), and the 12 proposal rows took 18 ms, all per epoch.
+  - Fix (`head_iq_body()`): the chunk runs in sub-blocks of 512/TG rows (partials ~14 KB at any TG). Lane j carries
+    span j's running (max, argmax) across sub-blocks. Partials go through the matvecs' shared-tree butterfly.
+  - Result: 8 spans 5.9 ms; a new 16-span variant does 16 spans in 8.7 ms and 12 in 8.6 ms.
+  - Every variant rounds and breaks ties like the 1-span kernel (kernel tests `head_spans16` / `head_spans12`).
+  - Muse-Glimmer 4 streams: 193 -> 160 ms per epoch.
+  - The earlier "16-span head was slower" finding (Qwen3.8-27B) was this LDS limit.
+- **DFlash block = depth + 1 tokens** (llama.cpp's `n_max + 1`), capped at the trained block size, instead of the
+  full 16-token block. At depth 3, 4 streams propose 16 tokens (int8 matvec, one weight pass) instead of 64 (GEMM),
+  and 1 stream proposes 4 instead of 16.
+  - Muse-Glimmer: 4 streams -10 ms per epoch, 1 stream 109.6 -> 100.8 ms (+6.6 % decode).
+  - Acceptance is unchanged within noise (2.6-2.7 tokens per step).
+- **The drafter's catch-up (warm) program takes the GEMM from 5 tokens** (`DRAFT_MM_FROM`). It only feeds proposals,
+  so rounding there never reaches the output. DFlash's 33280-wide fc ran on the f32 4-token matvec (K > 32768),
+  which re-read 124 MB per 4 tokens: 4 streams 161.5 -> 157.6 ms per epoch.
+  - The proposal program keeps the int8 matvec: the GEMM from 5 tokens there cost +12 ms per epoch.
+- **What still separates the 16-token step from one weight pass** is VGPRs. 16 tokens of int8 activations per lane
+  put the Q5_K gate/up kernel at 233 VGPRs (6 waves per SIMD), against 48 VGPRs and 15 waves for 1 token.
+  - Measured: 1144 vs 817 us (gate/up 6656 x 19968), 588 vs 424 us (down 19968 x 6656).
+  - See "Did not help" for what was tried.
+- **Re-attributed after those changes** (Muse-Glimmer, 156 ms epoch, doubling in package copies, c4ep):
+  - 16-token trunk matvecs: +114.5 ms.
+  - Proposal program: +20.3 ms (its matvecs +11.8, its 12-row head +7.9).
+  - Verify head: +9.6 ms. Warm: +5.0 ms. Decode attention: +4.5 ms.
+  - The 16-token kernel is instruction-bound: its row loop is ~770 instructions per wave and row (gate/up, both
+    weights), of which 256 are `v_dot4`. The rest is Q5_K decode (~125), F32 scaling (~150, needed to round like the
+    1-token kernel) and the butterfly. Loads issued a row ahead (software prefetch) did not help (see "Did not help").
+- **32 rows per workgroup at 16 tokens** for gate/up and for K >= 8192 (`mv_rows.iq_r`). Each workgroup loads its
+  16 tokens' int8 activations for the whole K once, and 32 rows halve that load per weight row. The int8 kernels'
+  arithmetic does not depend on R.
+  - Interleaved microbenchmarks: down 19968 x 6656 -3.7 %, gate/up -1.8 % (-5.5 % with the permuted slots below).
+  - K = 4096 / 6656 single-weight projections: flat or +4 %, so they keep 16 rows.
+- **Butterfly without selects** (`BFLY_PERM`, gate/up at 8+ tokens and the 16-span head). Lane L holds token
+  j ^ bt_idx(L) in slot j, where bt_idx is the token the lane ends the butterfly with. Every step then keeps slots
+  [0, h) and sends slots [h, 2h), so the two selects per pair go away. The pairing tree per token is unchanged, so
+  the results are bit-identical; kernel tests `mvsw_same_t8` / `mvsw_same_t16` and the `mv_*_q8_t*` cases now check
+  the multi-token kernels against the 1-token kernel with zero tolerance.
+  - Gate/up t16: -3.5 % at 16 rows, -5.5 % at 32. Head, 12 and 16 spans: 9.0 -> 8.5 ms. Head at 8 spans: flat.
+  - Single-weight projections keep plain slots: the permuted activation loads are uncoalesced (down t16 +9 %).
+  - Muse-Glimmer 4 streams, same server: 157.4 -> 152.8 ms per epoch, 67.2 -> 68.1 tok/s. Prefill and 1-stream
+    decode kernels are unchanged (byte-identical).
+- **Against llama.cpp at 4 streams the step time is now level; acceptance decides the throughput.** Same session
+  (c4_steady x 3, medians): Loom 67.6 -> 67.7 tok/s, llama.cpp b1355 70.1 tok/s. Per step: Loom ~145 ms at 2.57
+  tokens per stream, llama.cpp ~146 ms at 2.64 (its log's "mean len"). In an earlier session Loom 67.6 vs llama.cpp
+  67.5. Tokens per step vary +-3 % between runs on both sides, so one c4 run cannot separate them; compare
+  c4ep's ms per epoch for kernel changes.
+- **Attention q + gate in one dual-weight launch at 8 and 16 tokens** (`PAIR_PROJ`, `lin2()`): two projections of
+  the same input with the same format and shape share the activation load, the butterfly setup and the select-free
+  butterfly, as gate/up do. Each output rounds exactly as the 1-token single-weight kernel (kernel tests
+  `mvpair_attn_q_t8/t16`, zero tolerance). Prefill, 1-token decode and the 4-token variant keep separate launches.
+  - Real-weight microbenchmark, Muse-Glimmer Q4_K 6656 x 4096 t16: 282 -> 251 us per layer (two launches vs one).
+  - 4 streams, same server: -1 to -2 ms per ~153 ms epoch (paired rounds all faster). Single-stream decode and
+    prefill unchanged (their kernels are byte-identical).
+  - Only models with a separate `attn_gate` of the q format pair (Muse-Glimmer). Qwen3.8-27B (fused q+gate),
+    Flint and Bolt generate byte-identical programs.
+  - Same session, c4_steady x 4 each (medians, min-max): Loom before 68.1 (67.0-69.7), after 69.7 (68.2-70.7),
+    llama.cpp b1355 69.4 (68.2-70.7) tok/s. Level with llama.cpp, not ahead in every run: the per-run spread (+-2 %)
+    is larger than the remaining step-time difference.
+- **Tokens per step: llama.cpp's DFlash2 proposal matches Loom's at temperature 0** (code comparison, llama.cpp
+  `common/speculative.cpp`): same tapped residuals (`target_layers` t = input of layer t), anchor without its own
+  feature, block = n_max + 1 at positions P..P+3, mask token, non-causal attention, conv taps, logit scale and softcap,
+  top-16 selector with the rank-256 transition walked greedily from the anchor (the mt19937 path is only for
+  temperature > 0), always 3 drafts (n_min = p_min = 0). Remaining differences are tie-breaking and precision.
+  The 2.57 vs 2.64 tokens per step is run-to-run text variance: c4ep's tokens per event ranges 2.50-2.69 between
+  rounds of the same Loom package, because 4-stream batching timing changes the text.
+
 ### Split-K decode attention (`attention_text()`)
 - The grid is (token, KV head, split), with G = heads/kv_heads waves per
   workgroup, one per query head. Each wave covers that head's 128 dims across 32
@@ -91,17 +168,112 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - **Row-scaled f16 inputs.** `g_row_scale_f16` writes x/scale as f16 together with
   the per-row scale. The GEMM dequantizes weights to f16 fragments and accumulates
   in f32. The output is multiplied by the row scale (store, acc or swiglu modes).
-- **Tiles.** 64 or 128 rows × N tile; the m128 variant is used from 128 tokens.
+- **Tiles.** 64, 128 or 256 rows × N tile: m128 from 128 tokens, m256 (`gemm_big256`) when the epoch's rows
+  are a multiple of 256 (`GEMM_M256=0` turns it off).
+- **m256: dequant per MMA halved.** On RDNA3 WMMA runs on the SIMD's VALU, so the weight dequant
+  serializes with it: m128 spends ~190 VALU instructions per 32 WMMAs. m256 is the m128 layout with twice the
+  rows (512 threads, 256 × 128 tile; swiglu interleaves 64 gate + 64 up rows in one weight stage, picking the
+  buffer per wave with `scf.select` on `buffer`), so each dequantized weight slice feeds 256 rows (~115 VALU per
+  32 WMMAs). 55 KB LDS (padded rows), 2 workgroups per WGP. Real-data microbenchmark (interleaved
+  `loom-benchmark --compare`), Qwen3.8-27B shapes at 1024 rows: down +9.5 %, gate +5.4 %, gate/up swiglu
+  +4.5 %; prefill 1k/2k/8k +5.8/+5.0/+6.0 % (this includes the GDN input prefetch below; the recurrence
+  ablation puts that share near zero).
+  - Tried: gufo's 256 × 256 tile with 1024 threads. LDS can't hold both padded operands (73 KB), so the
+    stages were K-slice-major unpadded (`[4 x 256 rows] x 16`): 22.8 TFLOP/s vs 30.8 (one workgroup per WGP,
+    2-way LDS read conflicts). A half-swap swizzle to remove the conflicts made the compiler keep one address
+    register per fragment half (VGPR 184 → >192, did not fit 1024 threads; the 512-thread swizzled form ran
+    256 VGPRs and 19-22 TFLOP/s). Moving m128's 8 KB inverse-scale tile into the activation stage (3 instead
+    of 2 workgroups per WGP) was mixed: down -4 %, swiglu/gate +1.5/+2 %; not kept.
+  - Tile order (`GEMM_N_FASTEST`) makes no difference for m256 on the 27B shapes.
+- **m256 with 64 × 64 waves.** `gemm_big256` now runs 256 threads (8 waves, 4 × 2) of 64 rows × 64 columns
+  instead of 16 waves of 32 × 64: each A fragment feeds 4 B fragments and each B fragment 4 A fragments (0.5
+  LDS fragment reads per MMA instead of 0.75), VALU per WMMA 4.5 → 3.0 (store loop), 232-248 VGPRs (two
+  workgroups per WGP still fit). Each thread stages two activation rows and one 32-value K group of a weight
+  row. Real-data microbenchmark, 27B shapes at 1024 rows (REPS=7 interleaved): swiglu/gate/down
+  +2.5/+2.1/+4.3 %. Qwen3.8-27B same-server A/B (two sessions): prefill 2k +2.0/+1.7 % (484.5 → 494.2,
+  482.7 → 490.9), 1k +1.3 %, 8k +1.9 %; Bolt (gemma4 kit) 1k/2k +1.3/+1.1 %. All inside the noise band, but
+  the sign held in every run.
+  - Where the m256 time goes (store kernel, 27B shapes, same session): full kernel 32 TFLOP/s; no LDS
+    fragment reads (fragments held in registers) 36; no staging (no global loads, dequant, barriers) 37-38;
+    neither (WMMA from registers only) 40-41. Single ablations were each small: no dequant +6-8 %, no global
+    loads +4.5 %, no barriers 0-5 %, 1 of 4 B fragments +1-3 %. The overheads are latency, not bandwidth.
+  - Tried: loads of fragment step kk+1 placed before step kk's MMAs: the compiler reschedules anyway (tie).
+    Forcing that order with `scf.schedule.fence`: 200-208 VGPRs, -15 %. Fences around each step's loads and
+    MMAs: +2 % once, -6/-10 % on reruns (noise). The 64 × 64 layout with fences: swiglu -8/-10 %. A per-wave
+    `buffer.view` at the B-fragment row so all B reads use immediate offsets (swiglu VGPR 208 → 160): tie,
+    so occupancy is not the limit either. Sharing one Q4_K scale/min decode between a thread's two 16-value
+    slices: tie (not kept). Load-time weight repack: capped at the dequant ablation's 6-8 %; not tried.
 - **Register prefetch** of the next K-step, guarded by `scf.if step+1 < k_steps`
   (without the guard the prover rejects the access).
 - `GEMM_N_FASTEST=1` puts output tiles on grid x, so consecutive workgroups reuse
   the same A rows from L2. This is model dependent. It won on Flint and Glimmer
   (large N, many experts), but on dense Qwen3-4B turning it off was 4–12 % faster
   at 8k–16k prefill. A/B it per port; `GEMM_N_FASTEST=0` disables it.
-- `GEMM_SKIP_PADDING=1`: padding rows get scale 0, and a tile whose first row has
-  scale 0 exits. Packed epochs have up to 50 % padding at odd lengths.
-- **Ceiling.** We reached 25–31 TFLOP/s of a ~59 peak. Unexplored: LDS double
+- `GEMM_SKIP_PADDING=1`: padding rows get scale 0 (`g_row_scale_f16_live`), and a tile whose
+  rows all have scale 0 exits. Packed epochs have up to 50 % padding at odd lengths.
+- **Ceiling.** We reached 25–33 TFLOP/s of a ~59 peak (~40 from registers with real data). Unexplored: LDS double
   buffering of B, and direct Q4_K→fragment dequant.
+
+### Gated delta-net recurrence (`gen_gdn.py`) and the f16 row scale
+- **Loom's backend orders every global load after earlier global stores** (`s_waitcnt_vscnt 0` before the
+  load), and waits for in-flight loads when it reuses their address registers. A loop that loads and stores
+  every step pays a memory round trip per step. `buffer.assume.noalias` did not change the generated code.
+  Batch the stores (or keep them out of the loop) and load ahead.
+- Recurrence (Qwen3.8-27B: ~6.5 % of 2k prefill, 0.14 ms/token, VALU-bound: 1536 one-wave workgroups each
+  recompute the token's decay/beta/norms for 4 columns): inputs loaded one step ahead (GDN_PREFETCH) and
+  outputs stored in 32-step batches: +1 % (tie band).
+  - Tried: gufo's column form (a lane pair owns one value column, a shuffle-xor instead of 32-lane reductions,
+    per-token scalars once per token, chunks of 4 tokens staged in LDS): correct (kernel test) but -2.5 %
+    (-18 % before batching stores): per-chunk load/store waits (above) and 240-256 VGPRs. Not kept.
+- **Row-split recurrence** (`_recurrence_rows`, default; `GDN_ROW_LANES=0` restores the 32-lane form): a 32-lane
+  workgroup owns 16 value columns of one head; a group of RL = 8 lanes owns 4 columns and lane r of it the
+  key rows [16r, 16r + 16) (64 state values in registers, 384 workgroups instead of 1536). S^T k and S^T q are
+  per-lane `vector.dotf` over the lane's 16 rows plus a 3-step xor-shuffle inside the group (the 32-lane form
+  ran two 32-lane reductions per 4 columns); the q/k L2 norms and the decay fold into per-column scalars
+  (decay * S^T k = (S_old^T k) * decay), so each state element costs 4 VALU ops (dot, decay mul, fma
+  update, dot); decay/beta/softplus once per 16 columns. Inputs loaded one step ahead, outputs stored in
+  8-step batches (lane r keeps step r's 4 outputs). Same arithmetic, different summation order (kernel tests
+  vs float64 pass at the old tolerances; new multi-span case `gdn_recurrence_spans`).
+  Qwen3.8-27B same-server A/B vs r3 (5 rounds): prefill 1k/2k/8k +2.7/+2.8/+2.8 % (2k 496.9 -> 510.7 tok/s),
+  32k +2.4 % (3 rounds), decode +1.8 % (tie). Doubling the recurrence at 2k: 0.124 -> 0.079 ms/token
+  (6.1 -> 4.0 % of 2k prefill).
+  - Variants (2k, 3 rounds each, vs the same baseline): RL 4 (32 rows/lane) -1.6 %, RL 16 +1.0 %, RL 8 with
+    8 columns per lane (`GDN_COLS=8`) +2.6 %, RL 16 with 8 columns +1.7 %; RL 8 x 4 columns +2.9 % kept.
+  - Not tried (time-box): the chunked WY / "chunked delta rule" form (llama.cpp `build_delta_net_chunking`,
+    C = 64). In f32 it does about as many FLOPs per token as the recurrence (~3 DK*DV per token for S^T k,
+    Q S and the state update, plus C*DK terms), so it only pays with f16/bf16 WMMA for the intra-chunk
+    products, which changes precision of the state contribution; the recurrence is now 4 % of 2k prefill.
+- `g_row_scale_f16`: vector<4> steps instead of scalar ones (each scalar step waited on its load): +0.5 %.
+- Tiny projections in prefill (Qwen3.5-style `ssm_alpha`/`ssm_beta`, 48 rows, F32, through `lin_mv`): the
+  4-token matvec with the decode-tuned R=1 re-read each 4-token activation block once per output row
+  (doubling them cost 5 % of 2k prefill). Prefill epochs now launch a 16-row variant: +2.4/+2.9 % at 2k/8k.
+  Decode and verification keep their kernels (same summation order as before).
+- `prefill_capacity` for the dense 27B, vs 1024 at 1k/2k/8k: 512 ties (-1 %), 2048 loses -41/-9/-8 % (the
+  1k prompt is a little over 1024 tokens and pads to one 2048-row epoch). Keep 1024 for dense models.
+  - Re-measured after #26's live row scale + `GEMM_SKIP_PADDING` and the 64x64-per-wave m256 GEMM (same
+    server, 5 rounds; 32k 3 rounds). 2048: -7.1/-1.0/-1.1 % at 1k/2k/8k, decode tie: padding is now cheap
+    (-41 -> -7 % at 1k) but a bigger chunk gains nothing. 4096: -7.0/-12.4/-10.3/-7.7 % at 1k/2k/8k/32k.
+    Doubling every GEMM at 8k: GEMM time is the same at both chunks (1.557 vs 1.549 ms/token; the m256 GEMM
+    is already at its compute ceiling at 1024 rows, and the 17 GB of weights per 1024-token epoch is ~4 % of
+    the bandwidth), while the rest grows 0.50 -> 0.67 ms/token. Doubling by family: flash2 0.095 vs 0.101
+    ms/token (same), the `g_gdn_*` kernels 0.23 -> 0.44 ms/token: the whole loss is in the GDN layers (not
+    split further: which GDN kernel grows, and why, is the next thing to measure if a dense hybrid ever needs
+    bigger chunks). MoE models gain from 4096 (fuller expert buckets); dense models
+    keep build.py's 1024 default. A dense non-hybrid model may behave differently (untested).
+- Qwen3.8-27B 2k prefill ablation after m256 + live row scale (doubling, same server): GEMMs ~79 % (q4_k store
+  35, swiglu 27, q6_k store 12, q8_0 store 4.5; all ~31 TFLOP/s, so the weight format barely matters),
+  post-add norm + row scale 2.8, row scale (o, f) 1.9, gdn_conv 1.8, flash2 1.6, silu_mul 0.8 %.
+- `g_post_add_norm_rs[_live]` (gen_llm `fuse_post_add_row_scale`): the residual add + next norm also writes the
+  next GEMM's f16 row and scale (one more workgroup max-reduce over values already in registers), replacing
+  the separate `g_row_scale_f16` launch and its two re-reads of h. `g_gdn_conv`: 4 channels per loop step with
+  every load before any store; `g_gdn_norm_gate`: stores after all loads (the store -> load ordering above).
+  Together +0.6/+0.8/+0.6 % at 1k/2k/8k (tie band; same values as before, kernel tests). Re-measured on top of
+  the 64x64-per-wave m256 GEMM (7 rounds, same server): +0.3/+1.0/+0.6/+0.6 % at 1k/2k/8k/32k, decode tie;
+  positive in both measurements, so kept (27B 2k 492.3 -> 497.1 tok/s).
+  - Tried: one 256-row swiglu kernel for layers whose gate and up formats differ (Q4_K gate + Q6_K up: waves
+    0-7 dequant the gate format, waves 8-15 the up format, an scf.if on a wave-uniform condition; replaces two
+    GEMMs + `g_silu_mul`). Correct (kernel test) but -1.1/-1.5 % at 2k/8k vs the two GEMMs: carrying both
+    formats' prefetch registers costs more than `g_silu_mul` (0.8 %) and the %fu round trip save. Not kept.
 
 ### flash2 (`gen_flash2.py`)
 - The workgroup is one 16-token tile × one KV head, with G waves (one per query
@@ -169,8 +341,36 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - `prefill_capacity` 4096 helps MoE prefill: larger expert buckets mean fuller GEMM tiles. build.py now
   defaults MoE configs (`cfg["moe"]`) to 4096. Flint (256 experts, top-6: ~24 tokens per expert in a 1024
   chunk, 64-row tiles ~37 % full; the expert GEMMs were 85 % of prefill): 2k/8k/32k +22/+38/+28 % vs 1024
-  (2048: +25/+27/+22 %). The price is short prompts: a ~1k-token prompt prefills 29 % slower at 4096 (22 % at
-  2048) than at 1024, a fixed per-epoch cost not yet attributed. Dense models gain little beyond 1024–2048.
+  (2048: +25/+27/+22 %). Dense models gain little beyond 1024–2048.
+- **Padding is the price of a big chunk.** An epoch runs at the next power-of-two shape: a 1026-token prompt
+  at chunk 4096 is one 2048-token epoch, half padding (at chunk 1024 it is 1024 + 2). Flint at 1k was 29 %
+  slower at 4096 than at 1024. Doubling launches attributed it (seconds per 1k prompt, 2048-shape vs
+  1024-shape epoch): router +0.05 (and 0.16 s even at 1024), dense GEMMs +0.07, elementwise kernels +0.07,
+  grouped expert GEMMs +0.03; `g_moe_bucket` is free and already skips padding. Fixes (issue #26):
+  - Router: the lane-per-32-value-chunk dot (strided loads, 32-way LDS bank conflicts) took 4.4 ms per
+    2048-token layer; a coalesced layout (lane l takes 4-value chunk l of each 128-value block) takes 0.96 ms
+    (`g_moe_route_tr`, prefill only). Per-wave top-k (subgroup reductions) replaces the workgroup ones.
+    Several tokens per workgroup (weight reuse) did not matter. Decode keeps the old one-token-per-workgroup
+    router: the new one is latency bound at t = 1 (decode -34 %).
+  - Dense GEMMs: `GEMM_SKIP_PADDING` never fired, because the row-scale scale is a power of two and never
+    0. `g_row_scale_f16_live` (the token-row scales in `@llm_advance`, given `%info`) writes scale 0 and
+    zero rows for padding, and a GEMM row tile is skipped when all its scales are 0 (+9 % at 1k).
+  - Result, Flint chunk 4096 vs the PR #25 build, one server, interleaved: 1k/2k/8k/32k +27/+15/+17/+13 %,
+    decode tie; 1k now matches the 1024-chunk build (918 vs ~905 tok/s).
+  - Padding rows in the per-row kernels (round 2): gen_llm `live_row_skip` gives every per-token-row kernel launched
+    over `[%t]` in a prefill branch of `@llm_advance` a `_lv` copy that does nothing on a padding row (info word 2 = 0)
+    except write the zero row scale the GEMM tile skip needs (residual add + norm, row scales, QK-norm + RoPE, MoE
+    combine; any kit kernel with the one-workgroup-per-row pattern). Flint also: `g_moe_route_tr_live` skips
+    all-padding router workgroups; `g_row_scale_f16_tiles` skips the unused tiles of the bucketed expert rows
+    (max_tiles is sized for the worst case). Flint (DFlash d3), one server, interleaved, vs the final2 build:
+    1k 870 -> 940 tok/s (+8 %; +9 % and +14 % in two other sessions, 947 and 963 tok/s), 2k/8k/32k and decode tie.
+    Qwen3.8-27B (dense, chunk 1024: no padding at 1k): tie at 1k/2k/decode. `LIVE_ROW_SKIP=0` turns it off.
+  - What is left at 1k is not padding: doubling attributes Flint's 1.09 s per 1k prompt to the expert grouped GEMMs
+    0.80 s, per-row kernels 0.13 s, dense GEMMs 0.10 s, attention 0.03 s. With ~24 rows per expert, each expert's
+    weights are dequantized once per (mostly single) row tile, so the expert GEMM cost barely depends on the token
+    count (2k adds only 0.52 s). Skipping the WMMA of all-padding 16-row waves in the expert tiles: tie (1k +2 %,
+    2k -2 %), so the MMA is not the limit; the per-k-step dequant/stage/barrier is. Faster 1k needs a cheaper
+    expert weight path (e.g. int8/int4 WMMA on the codes), not less padding.
 
 ### Tile order per port (`cfg["gemm_n_fastest"]`)
 - Columns fastest (the default) reuses each activation tile; rows fastest reuses each weight tile across
@@ -189,6 +389,30 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   launch saved (Bolt: slower). Launches are nearly free under graph replay.
 - **Unrolling the matvec row loop**, or head chunk sizes other than 128 rows.
   Neither was measurably different.
+- **Cheaper 16-token int8 matvecs** (Muse-Glimmer Q5_K gate/up 6656 x 19968 at 1144 us, down 19968 x 6656 at
+  588 us), each tried and measured:
+  - Fewer rows per workgroup (R 4 / 8): 1352 / 642 us.
+  - The 8-token kernel over 16 tokens: two token-group workgroups share no weight reads (1307 / 649 us).
+  - A workgroup of two 8-token halves over the same weight groups: 120 VGPRs and 12 waves, but 1302 us.
+  - Two rows per iteration, so both rows' loads issue first: 8-token down 579 -> 459 us in isolation, but
+    4-stream epochs +4 ms and 2-stream epochs flat.
+- **More on the 16-token int8 matvec** (Muse-Glimmer, interleaved `loom-benchmark --compare`):
+  - Software prefetch: row r+1's weight loads issued before row r's dot products (codes split into load and
+    decode functions, carried in the row loop). VGPRs 203 -> 240 (7 -> 6 waves). Gate/up 1105 -> 1142 us, down
+    577 -> 598 us, q 117 -> 114 us: no gain.
+  - 64 rows per workgroup: q 6656 x 4096 +20 %, o 4096 x 6656 +9 % (down does not fit: 80 KB of LDS).
+  - Fewer rows for the small K/V projections (6656 x 256): R 8 is 18.0 vs 22.2 us, ~0.4 ms per epoch. Not
+    adopted.
+- **Pairing attention k + v (6656 x 256) into one launch** (`PAIR_PROJ=kv`): -16 us per layer in isolation
+  (R 8; R 32 was +52 %), but with q + gate also paired the 4-stream epoch was +1.5 ms (interleaved, 3 rounds). The
+  small separate k and v launches presumably overlap their neighbours. Opt-in only.
+- **Hoisting the int8 matvec's per-token F32 scaling out of the row loop.** The ~150 F32 instructions per row are
+  (sitofp, x scale, minimum x code sum, subtract, x activation scale) per token and weight. Every product mixes a
+  per-row with a per-token factor, so nothing is shared across rows without reassociating (which changes rounding
+  in every int8 kernel, the 1-token decode included).
+- **Muse-Glimmer post-norm eps 1e-8** (HF `post_norm_eps` and llama.cpp; the reviewed cfg uses 1e-5): tokens per
+  step unchanged within noise (1 stream 2.57 vs 2.53, 4 streams 2.63 vs 2.60). Not changed here: it changes the trunk's
+  numerics, so it needs its own gate run.
 - **About 128 keys per decode-attention split.** Fewer splits under-filled the GPU
   at short context (−4 %).
 

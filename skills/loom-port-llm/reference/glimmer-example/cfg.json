@@ -121,7 +121,7 @@
   "_note": "ATEM channel format: control.loom renders the whole conversation in chat_begin (atem_* functions); the generic fields below are informational. No 'Current date' line (deliberate).",
   "call_marker": "<|start|>assistant to="
  },
- "post_norm_eps": 9.999999747378752e-06,
+ "post_norm_eps": 1e-08,
  "logit_scale": 0.1961161345243454,
  "logit_softcap": 20.0,
  "gemm_n_fastest": false
