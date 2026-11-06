@@ -89,12 +89,14 @@ def run_info(run_url):
 
 
 def sdk_from_report(report, readme):
-    """The Loom SDK a report names: an hrx-system CI wheel artifact (and the version, if stated), recovered."""
+    """The Loom SDK a report names: an hrx-system CI wheel artifact (and the version, if stated), or only the
+    version it states; recovered."""
     text = report + "\n" + readme
     art = re.search(r"(?:CI artifact|wheel-)`?\s*(?:wheel-)?(\d{9,})", text)
     ver = re.search(r"hrx-loom`?\s+(\d+\.\d+\.\d+)", text)
     if not art:
-        return "unknown"
+        return ({"hrx_loom": ver.group(1), "recovered": True,
+                 "basis": f"the card's report states hrx-loom {ver.group(1)} and names no build"} if ver else "unknown")
     a = gh_json("api", f"repos/ROCm/hrx-system/actions/artifacts/{art.group(1)}")
     return {"hrx_loom": ver.group(1) if ver else None, "source": "ci", "artifact_id": int(art.group(1)),
             "hrx_system_sha": a["workflow_run"]["head_sha"], "branch": a["workflow_run"]["head_branch"],
