@@ -2,7 +2,8 @@
 
   select   rank the trending GGUF chat LLMs from the approved publishers that fit a
            Strix Halo, and pick the first one that has no Loom package on the target org yet
-  publish  upload a finished Loom package to the target org
+  publish  upload a finished Loom package to the target org, with its card (README.md, info.json:
+           skills/loom-benchmark/scripts/card, schema loom-card/2) and the run's REPORT.md
 
 Only `publish` needs huggingface_hub; `select` uses the HTTP API with the standard library.
 """
@@ -287,9 +288,10 @@ def cmd_publish(a):
 
     api.create_repo(a.target, repo_type="model", private=a.private, exist_ok=True)
     write_card(a, pkg, install, license_)
+    # REPORT.md (the run's narrative and methodology) is uploaded as its own file; the card links to it.
     api.upload_folder(repo_id=a.target, folder_path=pkg,
                       ignore_patterns=["parameter/*", "*.gguf", ".loom-fetch.lock", ".cache/*"],
-                      delete_patterns=["REPORT.md", "bench/**"],
+                      delete_patterns=["bench/**"],
                       commit_message=f"Loom package for {a.source} ({a.quant})")
     print(f"published {HF}/{a.target}")
     # Run the card's commands on the published copy, unmodified apart from paths and the port.
@@ -305,16 +307,21 @@ def cmd_publish(a):
 
 
 def write_card(a, pkg, install, license_):
-    """README.md and info.json from the run's measurements (skills/loom-benchmark/scripts/card): make_info.py
-    collects the data (package, bench/gates.json, bench/perf_log.jsonl), render_card.py
-    renders the card from info.json alone. A measurement the run did not produce shows as not measured."""
+    """README.md, info.json and REPORT.md (skills/loom-benchmark/scripts/card). make_info.py collects the
+    measurements (bench/gates.json, bench/perf_log.jsonl, the spec gate's acceptance) with this machine's
+    device and Loom SDK; render_card.py renders the card from them and the package's own files. The run's
+    REPORT.md is attached as written. A measurement the run did not produce shows as not measured."""
     py = sys.executable
     bench, ev_dir = os.path.join(a.work, "bench"), os.path.join(a.work, "card-evidence")
     os.makedirs(ev_dir, exist_ok=True)
+    skills = os.path.normpath(os.path.join(CARD, "..", "..", "..", ".."))
+    head = subprocess.run(["git", "-C", skills, "rev-parse", "HEAD"], capture_output=True, text=True)
+    generator = head.stdout.strip() if head.returncode == 0 else "unknown"
+    stamp_generator(pkg, generator)
     run = os.environ.get("GITHUB_RUN_ID")
-    src = ["--source-kind", "factory"] + (["--run", run, "--url", f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
-                                          f"{os.environ.get('GITHUB_REPOSITORY', 'loom-fun/loom-skills')}/actions/runs/{run}"]
-                                         if run else [])
+    src = ["--source-kind", "factory", "--package", pkg] + (
+        ["--run", run, "--url", f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
+         f"{os.environ.get('GITHUB_REPOSITORY', 'loom-fun/loom-skills')}/actions/runs/{run}"] if run else [])
     evidence = []
 
     def jload(path):
@@ -328,25 +335,47 @@ def write_card(a, pkg, install, license_):
     pick = jload(os.path.join(bench, "llamacpp_pick.json")).get("ranked") or [{}]
     build = re.search(r"b1[0-9]{3,}", pick[0].get("dir") or "")
     if os.path.isfile(log) and build:
-        spec = jload(os.path.join(bench, "llamacpp_spec.json"))
-        drafting = (["--llamacpp-drafting", f"draft-{spec['kind']}, n-max {spec['n_max']}"]
-                    if spec.get("kind") not in (None, "none") and spec.get("n_max") else [])
+        args_file = os.path.join(bench, "llamacpp_args.txt")   # finalize.sh: the llama-server's exact arguments
+        args = open(args_file, encoding="utf-8").read().strip() if os.path.isfile(args_file) else None
         out = os.path.join(ev_dir, "perf.json")
         if subprocess.run([py, os.path.join(CARD, "make_info.py"), "perf", "--perf-log", log,
-                           "--llamacpp-build", build.group(0), *drafting, *src, "-o", out]).returncode == 0:
+                           "--baseline-version", f"llamacpp-rocm/{build.group(0)}",
+                           *(["--baseline-args", args] if args else []), *src, "-o", out]).returncode == 0:
             evidence.append(out)
     if os.path.isfile(os.path.join(bench, "gates.json")):
         out = os.path.join(ev_dir, "gates.json")
         if subprocess.run([py, os.path.join(CARD, "make_info.py"), "gates", os.path.join(bench, "gates.json"), *src,
                            "-o", out]).returncode == 0:
             evidence.append(out)
+    report = os.path.join(a.work, "REPORT.md")
+    if os.path.isfile(report):
+        shutil.copyfile(report, os.path.join(pkg, "REPORT.md"))
     build_args = [py, os.path.join(CARD, "make_info.py"), "build", pkg, "--repo", a.target, "--output", install,
-                  *(["--license", license_] if license_ else []), "-o", os.path.join(pkg, "info.json")]
+                  "--generator-commit", generator, *(["--license", license_] if license_ else []),
+                  *(["--report", "attached"] if os.path.isfile(report) else []), "-o", os.path.join(pkg, "info.json")]
     if evidence:
         build_args += ["--evidence", *evidence]
     subprocess.run(build_args, check=True)
-    subprocess.run([py, os.path.join(CARD, "render_card.py"), os.path.join(pkg, "info.json"),
-                    "-o", os.path.join(pkg, "README.md")], check=True)
+    subprocess.run([py, os.path.join(CARD, "render_card.py"), pkg], check=True)
+
+
+def stamp_generator(pkg, skills_commit):
+    """llm_config.json "generator" for a package whose build.py predates the stamp (or a kit copied without
+    apply_example.sh): this checkout's commit, marked as stamped at publish time (the agent's kit edits, if any,
+    are not known), and the Loom SDK under $LOOM_ROOT."""
+    path = os.path.join(pkg, "llm_config.json")
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    if cfg.get("generator"):
+        return
+    sys.path.insert(0, os.path.dirname(CARD))
+    from machine_info import hrx_loom_identity
+    cfg["generator"] = {"skills_commit": skills_commit, "dirty": None, "stamped_by": "loom_factory.py publish",
+                        "hrx_loom": hrx_loom_identity() or "unknown"}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=1)
 
 
 def serve_check(a, card, serve_args):
@@ -408,7 +437,7 @@ s.add_argument("--attempts-file", help="artifact names of previous attempts, one
 s.add_argument("--checkpoint", help="convert this org/repo[:file.gguf] instead of ranking")
 s.add_argument("--out", default="selection.json")
 p = sub.add_parser("publish")
-p.add_argument("--work", required=True, help="directory with pkg/, attempt.json, result.json and REPORT.md")
+p.add_argument("--work", required=True, help="directory with pkg/, bench/, attempt.json, result.json and REPORT.md")
 p.add_argument("--source", required=True)
 p.add_argument("--target", required=True)
 p.add_argument("--quant", required=True)

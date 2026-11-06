@@ -72,7 +72,9 @@ The expensive path. Keep it short:
 2. **Diff it against what the starter does** for a dense layer (Qwen3: `attn_norm → Qcur/Kcur/Vcur
    (+ q/k norm, RoPE) → attention → attn_output → ffn_inp → ffn_norm → gate/up → swiglu → down →
    l_out`). Every extra node or different op is a feature to add; write the list down first.
-3. **Copy the starter into the work dir** (`cp -r ${CLAUDE_SKILL_DIR}/starter W/kit`) and extend
+3. **Copy the starter into the work dir** (`${CLAUDE_SKILL_DIR}/reference/apply_example.sh starter W/kit`,
+   which also records the loom-skills commit in `W/kit/KIT_SOURCE`: `build.py` stamps it and the Loom SDK's
+   identity into `llm_config.json` `"generator"`, and the model card shows them) and extend
    the copy: a cfg flag per feature in `inspect_gguf.py`, the op in `gen_llm.py` (decode first:
    matvec path, prefill later), and a kernel test case in `make_kernel_tests.py`. If you change
    `chat_probe.py` (a chat format it can't model), `export LOOM_KIT=W/kit`: the benchmark

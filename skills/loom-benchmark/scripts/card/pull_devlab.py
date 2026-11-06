@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
 """DevLab Dispatch nightly-gates results for one card -> a make_info.py evidence file.
 
-usage: pull_devlab.py loom-fun/CARD_REPO [--run ID] [--perf METRIC ...] [--download-dir DIR] -o devlab.json
+usage: pull_devlab.py loom-fun/CARD_REPO [--run ID] [--download-dir DIR] [--hrx-loom FILE.json] -o devlab.json
 
 Finds the latest nightly-gates.yml run (or --run ID) of loom-fun/loom-skills with a finished job for the card,
-downloads that run's artifacts (gh run download; nightly_gates.sh writes summary.json, gates.json and, at
-LEVEL=full with PERF=1, perf.jsonl per card and level) and writes:
-  - gates: every gate of every finished level job (dev, quick, full) with its verdict, level and time, the
-    job's URL as the evidence;
-  - performance_overrides: with --perf, the named metrics (e.g. prefill_1k) from the full job's report-only
-    Loom perf run, each with the job URL and date. The llama.cpp column stays the card's same-session value.
+downloads that run's artifacts (gh run download; nightly_gates.sh writes summary.json and gates.json per card
+and level) and writes gates: every gate of every finished level job (dev, quick, full) with its verdict, level
+and time, the job's URL as the evidence.
+Gates only: the full job's report-only perf.jsonl is not card data. DevLab runners measure differently from a
+local same-session run (Flint, run 42259576436: 1k prefill 515 vs 848 tok/s on the same build), so their
+numbers are not comparable with the llama.cpp column.
+Each source records the runner's device and Loom SDK when summary.json carries them ("device" from
+machine_info.py detect_device(), "hrx_loom" from its hrx_loom_identity()); otherwise they stay null (not
+recorded). --hrx-loom FILE.json supplies an SDK identity established otherwise (e.g. from the job logs).
 A job that was cancelled or did not write gates.json is skipped. Needs `gh` authenticated for loom-fun/loom-skills.
 """
 import argparse
 import json
 import os
-import statistics
 import subprocess
 import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import EVIDENCE_ID, METRIC_KEYS, write_json  # noqa: E402
-from make_info import metric_samples  # noqa: E402
+from card_lib import EVIDENCE_ID, load_json, write_json  # noqa: E402
 
 GH_REPO = "loom-fun/loom-skills"
 WORKFLOW = "nightly-gates.yml"
@@ -55,8 +56,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("repo")
     ap.add_argument("--run", help="this nightly-gates run instead of the latest one with a finished job for the card")
-    ap.add_argument("--perf", nargs="*", default=[], choices=METRIC_KEYS)
     ap.add_argument("--download-dir")
+    ap.add_argument("--hrx-loom", help="SDK identity JSON for jobs whose summary.json records none")
     ap.add_argument("-o", required=True)
     a = ap.parse_args(argv)
     candidates = [{"databaseId": int(a.run)}] if a.run else runs()
@@ -84,28 +85,16 @@ def main(argv=None):
     else:
         sys.exit(f"no finished nightly-gates job for {a.repo}" + (f" in run {a.run}" if a.run else ""))
 
-    gates, overrides = [], []
+    gates = []
     for s, g, d, url in sorted(found, key=lambda x: x[1].get("ts") or ""):
-        src = {"kind": "devlab", "run": str(rid), "url": url}
+        src = {"kind": "devlab", "run": str(rid), "url": url, "device": s.get("device"),
+               "hrx_loom": s.get("hrx_loom") or (load_json(a.hrx_loom) if a.hrx_loom else None)}
         for name, x in sorted(g.get("gates", {}).items()):
             gates.append({"name": name, "status": "pass" if x.get("pass") else "fail", "level": g.get("level"),
-                          "time": g.get("ts"), "source": src, "detail": None})
-        perf = os.path.join(d, "perf.jsonl")
-        if a.perf and s.get("level") == "full" and os.path.exists(perf):
-            rows = [json.loads(l) for l in open(perf) if l.strip().startswith("{")]
-            samples = metric_samples(rows)
-            for m in a.perf:
-                if samples.get(m):
-                    overrides.append({"metric": m, "value": round(statistics.mean(samples[m]), 1),
-                                      "date": (g.get("ts") or "")[:10], "source": src})
-    missing = [m for m in a.perf if m not in [o["metric"] for o in overrides]]
-    ev = {"evidence": EVIDENCE_ID, "gates": gates}
-    if overrides:
-        ev["performance_overrides"] = overrides
-    write_json(a.o, ev)
-    print(f"wrote {a.o}: run {rid}, " + ", ".join(f"{x['level']}:{x['name']}={x['status']}" for x in gates)
-          + "".join(f", {o['metric']}={o['value']}" for o in overrides)
-          + (f"; no full-job perf for {missing}" if missing else ""), file=sys.stderr)
+                          "time": g.get("ts"), "source": src, "detail": None, "programs_sha256": s.get("programs_sha256")})
+    write_json(a.o, {"evidence": EVIDENCE_ID, "gates": gates})
+    print(f"wrote {a.o}: run {rid}, " + ", ".join(f"{x['level']}:{x['name']}={x['status']}" for x in gates),
+          file=sys.stderr)
 
 
 if __name__ == "__main__":

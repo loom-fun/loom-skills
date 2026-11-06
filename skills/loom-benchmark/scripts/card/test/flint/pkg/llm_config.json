@@ -11,5 +11,21 @@
   "kind": "dflash",
   "depth": 3,
   "gguf": "Flint-DFlash2-Q4_K_M.gguf"
+ },
+ "generator": {
+  "dirty": false,
+  "hrx_loom": {
+   "artifact_id": null,
+   "branch": "v0.1.0",
+   "hrx_loom": "0.1.0",
+   "hrx_system_sha": "d01d1c18b154189fd073777329052d23f6071f14",
+   "source": "pypi",
+   "wheel_sha256": "4d3897b83cc0857723593487a4372a31d203944a1637e5e3143cad1d0583b98b"
+  },
+  "kit": {
+   "example": "flint",
+   "modified": false
+  },
+  "skills_commit": "af9f2a0cbe2c0ad0042cf8599b9314f23a102974"
  }
 }

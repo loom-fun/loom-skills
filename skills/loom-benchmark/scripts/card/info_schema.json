@@ -1,150 +1,147 @@
 {
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://github.com/loom-fun/loom-skills/skills/loom-benchmark/scripts/card/info_schema.json",
- "title": "Loom model card data (info.json), schema loom-card/1",
- "description": "Everything a loom-fun Hugging Face card shows. make_info.py writes it from the package and the measurement evidence; render_card.py renders README.md from it alone. Unknown values are null (rendered as not measured / no evidence), never guessed.",
+ "title": "Loom model card measurements (info.json), schema loom-card/2",
+ "description": "The data of a loom-fun card that has no other home: measurements, gate evidence, the device and Loom SDK that measured, the baseline, dates and versions. What the package is comes from its own files and is never repeated here: sources, revisions, files, sha256 and sizes from model.json.lock; services, context, rows, max_tokens and drafting depth from model.json; chat features, the drafter and the generating loom-skills commit and SDK from llm_config.json. render_card.py renders README.md from all four. Unknown values are null or absent (rendered as not measured / no evidence / unknown), never guessed.",
+ "$comment": "Compatibility: the schema string changes only on a breaking change. Readers ignore metric names, gate names and object keys they don't know, so adding a metric, a gate, an optional key or a new enum value of source.kind keeps loom-card/2. Removing or renaming a key, changing a key's type or meaning, or making a key required is breaking and bumps the schema to loom-card/3.",
  "type": "object",
- "additionalProperties": false,
- "required": ["schema", "repo", "name", "license", "tags", "checkpoint", "drafter", "projector", "service",
-              "serve", "context", "performance", "features", "gates"],
+ "required": ["schema", "repo", "card", "versions", "sources", "gates"],
  "properties": {
-  "schema": {"const": "loom-card/1"},
+  "schema": {"const": "loom-card/2"},
   "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "description": "The Hugging Face repo of this card"},
-  "name": {"type": "string", "description": "Display name: the checkpoint repo name without a -GGUF suffix"},
-  "license": {"type": ["string", "null"], "description": "The checkpoint's license tag, or null"},
-  "tags": {"type": "array", "items": {"type": "string"}, "description": "YAML front matter tags, in order"},
-  "checkpoint": {"$ref": "#/$defs/source"},
-  "drafter": {"oneOf": [{"$ref": "#/$defs/source"}, {"type": "null"}]},
-  "projector": {"oneOf": [{"$ref": "#/$defs/source"}, {"type": "null"}]},
-  "service": {
-   "type": "object", "additionalProperties": false, "required": ["kind", "endpoint"],
+  "card": {
+   "type": "object",
+   "description": "Choices about the card itself that no package file records",
    "properties": {
-    "kind": {"enum": ["chat", "decision"], "description": "chat: OpenAI-style chat completions; decision: SystemOne decisions"},
-    "endpoint": {"type": "string"}
+    "license": {"type": ["string", "null"], "description": "The checkpoint's license tag (from its Hugging Face card at publish time)"},
+    "tags": {"type": "array", "items": {"type": "string"}, "description": "Front matter tags after the ones the package implies"},
+    "output": {"type": "string", "description": "loom-fetch --output directory, when not model.json's model id"},
+    "memory_bytes": {"type": "integer", "description": "loom-serve --memory_bytes the card was validated with, when model.json carries none"},
+    "features": {"type": "object", "additionalProperties": {"$ref": "#/$defs/feature"},
+                 "description": "A feature status that evidence (not the package) established, e.g. an old report stating greedy-only decoding"}
    }
   },
-  "serve": {
-   "type": "object", "additionalProperties": false, "required": ["output", "memory_bytes", "device", "preset"],
+  "versions": {
+   "type": "object", "required": ["card_generator"],
    "properties": {
-    "output": {"type": "string", "description": "loom-fetch --output directory name"},
-    "memory_bytes": {"type": ["integer", "null"], "description": "loom-serve --memory_bytes the card was validated with; null: flag omitted"},
-    "device": {"type": "string"},
-    "preset": {"type": ["string", "null"], "description": "loom-fetch --preset, only when model.json has several"}
+    "card_generator": {"type": "string", "description": "loom-skills commit of the card scripts that wrote this info.json and its README ('unknown' if not a git checkout); passed in, never read by the renderer from the environment"},
+    "package": {
+     "type": "object",
+     "description": "Only for a package built before build.py stamped llm_config.json 'generator': what generated its programs, as recovered afterwards. Ignored when llm_config.json has the stamp.",
+     "properties": {
+      "skills_commit": {"oneOf": [{"$ref": "#/$defs/recovered_commit"}, {"const": "unknown"}]},
+      "hrx_loom": {"oneOf": [{"$ref": "#/$defs/hrx_loom"}, {"const": "unknown"}]}
+     }
+    }
    }
   },
-  "context": {
-   "type": "object", "additionalProperties": false, "required": ["tokens", "rows", "pool", "max_tokens", "pending_requests"],
-   "properties": {
-    "tokens": {"type": ["integer", "null"], "description": "context_capacity per request"},
-    "rows": {"type": ["integer", "null"], "description": "concurrent requests (rows)"},
-    "pool": {"type": ["integer", "null"], "description": "KV pool positions shared by the rows"},
-    "max_tokens": {"type": ["integer", "null"], "description": "the preset's max_tokens"},
-    "pending_requests": {"type": ["integer", "null"]}
-   }
+  "sources": {
+   "type": "object", "additionalProperties": {"$ref": "#/$defs/source"},
+   "description": "Where evidence came from, by id (referenced by performance sessions and gates)"
   },
   "performance": {
-   "type": "object", "additionalProperties": false,
-   "required": ["llamacpp_build", "drafting", "date", "source", "runs", "metrics", "not_applicable"],
+   "type": "object", "required": ["baseline", "sessions"],
    "properties": {
-    "llamacpp_build": {"type": ["string", "null"], "pattern": "^b[0-9]+$", "description": "lemonade-sdk/llamacpp-rocm release tag"},
-    "drafting": {
-     "type": "object", "additionalProperties": false, "required": ["loom", "llamacpp"],
+    "baseline": {
+     "type": "object", "required": ["name", "version", "args"],
      "properties": {
-      "loom": {"type": ["string", "null"], "description": "Loom's speculative setting while measured (e.g. dflash, depth 3); null: off"},
-      "llamacpp": {"type": ["string", "null"], "description": "llama.cpp's speculative setting (e.g. draft-dflash, n-max 3); null: off"}
+      "name": {"type": "string", "description": "The engine compared with, e.g. llama.cpp"},
+      "version": {"type": ["string", "null"], "description": "Its build, e.g. llamacpp-rocm/b1355"},
+      "args": {"type": ["string", "null"], "description": "The exact server arguments (model path, host and port left out)"}
      }
     },
+    "sessions": {
+     "type": "array", "items": {"$ref": "#/$defs/session"},
+     "description": "Measurement sessions in evidence order. Per metric the last session that measured it is the card's value."
+    }
+   }
+  },
+  "gates": {
+   "type": "object", "additionalProperties": {"$ref": "#/$defs/gate"},
+   "description": "Per gate name the most recent evidence. Gates the package's features make applicable but that have no entry render as no evidence."
+  },
+  "report": {"enum": ["generated", "attached"],
+             "description": "REPORT.md in the repo: generated by render_card.py from this file, or attached as written (an older card's narrative report, a factory run's REPORT.md)"}
+ },
+ "$defs": {
+  "source": {
+   "type": "object", "required": ["kind", "run", "url", "device", "hrx_loom"],
+   "properties": {
+    "kind": {"enum": ["local", "devlab", "factory"], "description": "local: a developer's machine; devlab: the nightly-gates workflow on AMD DevLab Dispatch; factory: the loom-factory workflow"},
+    "run": {"type": ["string", "null"], "description": "GitHub Actions run id"},
+    "url": {"type": ["string", "null"]},
+    "device": {"oneOf": [{"$ref": "#/$defs/device"}, {"type": "null"}]},
+    "hrx_loom": {"oneOf": [{"$ref": "#/$defs/hrx_loom"}, {"type": "null"}], "description": "The Loom SDK that served the model"}
+   }
+  },
+  "device": {
+   "type": "object", "required": ["cpu", "os"],
+   "description": "machine_info.py detect_device(): values from the hardware and the OS release only",
+   "properties": {"cpu": {"type": "string"}, "gpu": {"type": "string"}, "os": {"type": "string"}}
+  },
+  "hrx_loom": {
+   "type": "object", "required": ["hrx_loom"],
+   "description": "A Loom SDK identity: install_loom.sh's loom-install.json, or version + dist-info RECORD fingerprint",
+   "properties": {
+    "hrx_loom": {"type": ["string", "null"], "description": "The package version (every build says 0.1.0 today)"},
+    "source": {"type": ["string", "null"], "description": "pypi or ci"},
+    "hrx_system_sha": {"type": ["string", "null"], "description": "Full ROCm/hrx-system commit"},
+    "artifact_id": {"type": ["integer", "null"]},
+    "branch": {"type": ["string", "null"]},
+    "wheel_sha256": {"type": ["string", "null"]},
+    "fingerprint": {"type": "string", "description": "First 16 hex of sha256(dist-info RECORD) when nothing better is known"},
+    "verified": {"type": "boolean"},
+    "recovered": {"type": "boolean", "description": "Established after the fact rather than recorded at the time"},
+    "basis": {"type": "string", "description": "How a recovered value was established"}
+   }
+  },
+  "recovered_commit": {
+   "type": "object", "required": ["commit", "recovered", "basis"],
+   "properties": {
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "recovered": {"const": true},
+    "basis": {"type": "string"}
+   }
+  },
+  "session": {
+   "type": "object", "required": ["date", "source", "runs", "metrics"],
+   "properties": {
     "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
-    "source": {"oneOf": [{"$ref": "#/$defs/evidence_source"}, {"type": "null"}]},
+    "source": {"type": "string"},
     "runs": {
-     "type": "object", "additionalProperties": false, "required": ["decode_prefill", "streams4"],
+     "type": "object", "required": ["decode_prefill", "streams4"],
      "properties": {
       "decode_prefill": {"type": ["integer", "null"], "description": "runs averaged (mean) per decode/prefill value"},
       "streams4": {"type": ["integer", "null"], "description": "runs per 4-stream value (median)"}
      }
     },
-    "metrics": {
-     "type": "object", "additionalProperties": false,
-     "required": ["decode", "decode_2k", "decode_32k", "prefill_1k", "prefill_2k", "prefill_8k", "prefill_16k",
-                  "prefill_32k", "streams4"],
-     "properties": {
-      "decode": {"$ref": "#/$defs/metric"}, "decode_2k": {"$ref": "#/$defs/metric"},
-      "decode_32k": {"$ref": "#/$defs/metric"}, "prefill_1k": {"$ref": "#/$defs/metric"},
-      "prefill_2k": {"$ref": "#/$defs/metric"}, "prefill_8k": {"$ref": "#/$defs/metric"},
-      "prefill_16k": {"$ref": "#/$defs/metric"}, "prefill_32k": {"$ref": "#/$defs/metric"},
-      "streams4": {"$ref": "#/$defs/metric"}
-     }
-    },
-    "not_applicable": {"type": "array", "items": {"type": "string"}, "description": "metrics that do not apply to this service"}
-   }
-  },
-  "features": {
-   "type": "object", "additionalProperties": false,
-   "required": ["api", "tool_calling", "thinking", "reasoning_effort", "speculative_decoding", "image_input",
-                "audio", "sampling", "context", "concurrency", "max_output_tokens"],
-   "properties": {
-    "api": {"$ref": "#/$defs/feature"}, "tool_calling": {"$ref": "#/$defs/feature"},
-    "thinking": {"$ref": "#/$defs/feature"}, "reasoning_effort": {"$ref": "#/$defs/feature"},
-    "speculative_decoding": {"$ref": "#/$defs/feature"}, "image_input": {"$ref": "#/$defs/feature"},
-    "audio": {"$ref": "#/$defs/feature"}, "sampling": {"$ref": "#/$defs/feature"},
-    "context": {"$ref": "#/$defs/feature"}, "concurrency": {"$ref": "#/$defs/feature"},
-    "max_output_tokens": {"$ref": "#/$defs/feature"}
-   }
-  },
-  "gates": {
-   "type": "array",
-   "items": {
-    "type": "object", "additionalProperties": false, "required": ["name", "status", "level", "date", "source", "detail"],
-    "properties": {
-     "name": {"enum": ["kernel_tests", "golden", "compare", "vision", "consistency", "spec", "agent",
-                      "agent_think_off", "sampling", "needle", "needle_full", "decision"]},
-     "status": {"enum": ["pass", "fail", "unknown", "n/a"]},
-     "level": {"type": ["string", "null"], "description": "gates.sh LEVEL the evidence ran at"},
-     "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
-     "source": {"oneOf": [{"$ref": "#/$defs/evidence_source"}, {"type": "null"}]},
-     "detail": {"type": ["string", "null"], "description": "a count from the gate's own output (e.g. 66/66), or null"}
-    }
-   }
-  }
- },
- "$defs": {
-  "source": {
-   "type": "object", "additionalProperties": false, "required": ["repo", "revision", "file", "quant", "sha256", "size"],
-   "properties": {
-    "repo": {"type": "string"},
-    "revision": {"type": ["string", "null"]},
-    "file": {"type": "string"},
-    "quant": {"type": ["string", "null"]},
-    "sha256": {"type": ["string", "null"]},
-    "size": {"type": ["integer", "null"]}
+    "commands": {"type": "array", "items": {"type": "string"}, "description": "The measuring commands, for REPORT.md"},
+    "programs_sha256": {"type": ["string", "null"], "description": "card_lib.programs_sha256 of the package measured"},
+    "metrics": {"type": "object", "additionalProperties": {"$ref": "#/$defs/metric"}}
    }
   },
   "metric": {
-   "type": "object", "additionalProperties": false, "required": ["loom", "llamacpp", "loom_source"],
+   "type": "object", "required": ["loom"],
    "properties": {
     "loom": {"type": ["number", "null"]},
-    "llamacpp": {"type": ["number", "null"]},
-    "loom_source": {"oneOf": [{"$ref": "#/$defs/override"}, {"type": "null"}],
-                    "description": "set when the Loom value comes from another run than the table's source"}
+    "baseline": {"type": ["number", "null"]},
+    "loom_runs": {"type": "array", "items": {"type": "number"}, "description": "per-run values the card value summarizes"},
+    "baseline_runs": {"type": "array", "items": {"type": "number"}}
    }
   },
-  "override": {
-   "type": "object", "additionalProperties": false, "required": ["date", "source"],
+  "gate": {
+   "type": "object", "required": ["status", "level", "date", "source", "detail"],
    "properties": {
-    "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
-    "source": {"$ref": "#/$defs/evidence_source"}
-   }
-  },
-  "evidence_source": {
-   "type": "object", "additionalProperties": false, "required": ["kind", "run", "url"],
-   "properties": {
-    "kind": {"enum": ["local", "devlab", "factory"], "description": "local: a run on a developer's Strix Halo; devlab: the nightly-gates workflow on AMD DevLab Dispatch; factory: the loom-factory workflow"},
-    "run": {"type": ["string", "null"], "description": "GitHub Actions run id"},
-    "url": {"type": ["string", "null"]}
+    "status": {"enum": ["pass", "fail"]},
+    "level": {"type": ["string", "null"], "description": "gates.sh LEVEL the evidence ran at"},
+    "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "source": {"type": "string"},
+    "detail": {"type": ["string", "null"], "description": "a count from the gate's own output (e.g. 66/66), or null"},
+    "programs_sha256": {"type": ["string", "null"]}
    }
   },
   "feature": {
-   "type": "object", "additionalProperties": false, "required": ["status", "value"],
+   "type": "object", "required": ["status", "value"],
    "properties": {
     "status": {"enum": ["yes", "no", "unknown", "n/a"]},
     "value": {"description": "structured detail the renderer formats (string, number, object or null)"}
