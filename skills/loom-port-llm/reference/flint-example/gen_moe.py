@@ -6,6 +6,7 @@ g_moe_gu_<fmt>     act[a, FE] = silu(Wg[e] h[t]) * (Wu[e] h[t])     (e = ids[a],
 g_moe_dn_<fmt>     ys[a, H]  = Wd[e] act[a]
 g_moe_combine      y[t, H]   = sum_k wts[t, k] ys[t*KU + k, :]
 """
+import re
 FMT = {"q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34}
 ROUTE_TR = int(__import__("os").environ.get("ROUTE_TR", "0"))   # router tokens per workgroup (0: largest of 1/2/4/8 whose LDS fits 48 KiB)
 SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32}
@@ -311,6 +312,63 @@ kernel.def export("g_moe_route_tr") @g_moe_route_tr(%tokens: index) {{
 {topk}  kernel.return
 }}
 """
+
+
+def route_prefill_live(H, E, KU, gating, norm, bias, wty="f32"):
+    """g_moe_route_tr_live: g_moe_route_tr given the epoch's %info; a workgroup whose tokens are all padding (info
+    word 2 = 0; a 1026-token prompt at chunk 4096 runs as a 2048-row epoch) does nothing. g_moe_bucket takes live
+    tokens only, so their ids / weights are never read."""
+    text = route_prefill(H, E, KU, gating, norm, bias, wty)
+    text = text[text.index('kernel.def export("g_moe_route_tr")'):]
+    TR = int(re.search(r"%cTR = index.constant (\d+) : index", text).group(1))
+    def rep(a, b):
+        nonlocal text
+        assert text.count(a) == 1, a
+        text = text.replace(a, b)
+    rep('export("g_moe_route_tr") @g_moe_route_tr(', 'export("g_moe_route_tr_live") @g_moe_route_tr_live(')
+    rep("%ids: buffer, %wts: buffer) {", "%ids: buffer, %wts: buffer, %info: buffer) {")
+    live = ["  %gl_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>\n  %gl_dead = scalar.constant 0 : i32\n"]
+    for r in range(TR):
+        live.append(f"""  %gl_c{r} = index.constant {r} : index
+  %gl_t{r}v = index.add %token0, %gl_c{r} : index
+  %gl_in{r} = index.cmp ult, %gl_t{r}v, %tokens : index
+  %gl_t{r}c = scf.select %gl_in{r}, %gl_t{r}v, %c0 : index
+  %gl_t{r} = index.assume %gl_t{r}c [lt(%gl_t{r}c, %tokens)] : index
+  %gl_w{r} = view.load %gl_view[%gl_t{r}, 2] : view<[%tokens]x4xi32> -> i32
+  %gl_l{r} = scalar.cmpi ne, %gl_w{r}, %gl_dead : i32
+  %gl_a{r} = scalar.andi %gl_in{r}, %gl_l{r} : i1
+""" + (f"  %gl_any{r} = scalar.ori %gl_any{r - 1}, %gl_a{r} : i1\n" if r else "  %gl_any0 = scalar.andi %gl_a0, %gl_a0 : i1\n"))
+    live.append(f"  scf.if %gl_any{TR - 1} {{\n")
+    rep("  %token0 = index.mul %group_id, %cTR : index\n", "  %token0 = index.mul %group_id, %cTR : index\n" + "".join(live))
+    rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
+    return "\n" + text
+
+
+def row_scale_tiles(row_scale):
+    """g_row_scale_f16_tiles: the starter's g_row_scale_f16 over the bucketed expert rows (max_tiles x 64), skipping
+    the rows of unused tiles (tile_info expert < 0; g_moe_gdn skips those tiles). max_tiles is sized for the worst
+    case (t*KU/64 + E tiles), so most of them are unused."""
+    text = row_scale[row_scale.index('kernel.def export("g_row_scale_f16")'):]
+    def rep(a, b):
+        nonlocal text
+        assert text.count(a) == 1, a
+        text = text.replace(a, b)
+    rep('export("g_row_scale_f16") @g_row_scale_f16(', 'export("g_row_scale_f16_tiles") @g_row_scale_f16_tiles(')
+    rep("%scales: buffer, %x16: buffer) {", "%scales: buffer, %x16: buffer, %tile_info: buffer) {")
+    rep("  %row = index.assume %row_id [lt(%row_id, %rows)] : index\n", f"""  %row = index.assume %row_id [lt(%row_id, %rows)] : index
+  %rt_zero = index.constant 0 : offset
+  %rt_c64 = index.constant {TILE} : index
+  %rt_tiles = index.div %rows, %rt_c64 : index
+  %rt_tile_v = index.div %row, %rt_c64 : index
+  %rt_tile = index.assume %rt_tile_v [lt(%rt_tile_v, %rt_tiles)] : index
+  %rt_view = buffer.view %tile_info[%rt_zero] : buffer -> view<[%rt_tiles]x2xi32>
+  %rt_expert = view.load %rt_view[%rt_tile, 0] : view<[%rt_tiles]x2xi32> -> i32
+  %rt_none = scalar.constant 0 : i32
+  %rt_used = scalar.cmpi sge, %rt_expert, %rt_none : i32
+  scf.if %rt_used {{
+""")
+    rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
+    return "\n" + text
 
 
 def route(H, E, KU, gating, norm, bias, wty="f32"):

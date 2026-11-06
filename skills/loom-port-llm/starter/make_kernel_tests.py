@@ -550,7 +550,7 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 """)
 # g_post_add_norm_rs[_live] (gen_llm fuse_post_add_row_scale): x += (rmsnorm(y) * w_post if post norms else y);
 # h = rmsnorm(x) * w_next; then g_row_scale_f16's scale / f16 row of h. _live: a row with info word 2 = 0 gets scale 0
-# and a zero f16 row (x and h are still updated).
+# and a zero f16 row (x and h are still updated). _live_lv (gen_llm live_row_skip): a padding row only gets scale 0.
 if os.environ.get("GEMM_TESTS", "1") == "1":
     pa_y = (rng.standard_normal((3, H)) * np.array([[1e-2], [1.0], [30.0]])).astype(np.float32)
     pa_x = (rng.standard_normal((3, H)) * np.array([[1.0], [1e2], [1e-3]])).astype(np.float32)
@@ -563,13 +563,14 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
     pa_e = np.clip(np.frexp(np.abs(pa_h).max(1))[1] - 1 - 13, 0, 100)
     pa_live = np.array([1, 0, 1])
     pa_info = np.zeros((3, 4), np.int32); pa_info[:, 2] = pa_live
-    for live in (0, 1):
+    for live in (0, 1, 2):
         sc = np.stack([2.0 ** -pa_e, 2.0 ** pa_e], 1).astype(np.float32)
         if live:
             sc = sc * pa_live[:, None]
         h16 = (pa_h * sc[:, :1]).astype(np.float16)
-        sfx = "_live" if live else ""
-        for n, a in [("pa_y", pa_y), ("pa_x", pa_x), ("pa_wp", pa_wp), ("pa_wn", pa_wn), ("pa_xe", pa_xe), ("pa_he", pa_h),
+        sfx, xs = ["", "_live", "_live_lv"][live], "_lv" if live == 2 else ""
+        dead = pa_live[:, None] == 0 if live == 2 else np.zeros((3, 1), bool)
+        for n, a in [("pa_y", pa_y), ("pa_x", pa_x), ("pa_wp", pa_wp), ("pa_wn", pa_wn), ("pa_xe" + xs, np.where(dead, pa_x, pa_xe)), ("pa_he" + xs, np.where(dead, 0, pa_h).astype(np.float32)),
                      ("pa_info", pa_info), ("pa_s" + sfx, sc.astype(np.float32)), ("pa_h16" + sfx, h16)]:
             save(n, a)
         info_decl = '  %info = check.file.read.npy path("pa_info.npy") : tensor<3x4xi32>\n' if live else ""
@@ -579,8 +580,8 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   %x = check.file.read.npy path("pa_x.npy") : tensor<3x{H}xf32>
   %wp = check.file.read.npy path("pa_wp.npy") : tensor<{H}xf32>
   %wn = check.file.read.npy path("pa_wn.npy") : tensor<{H}xf32>
-  %ex = check.file.read.npy path("pa_xe.npy") : tensor<3x{H}xf32>
-  %eh = check.file.read.npy path("pa_he.npy") : tensor<3x{H}xf32>
+  %ex = check.file.read.npy path("pa_xe{xs}.npy") : tensor<3x{H}xf32>
+  %eh = check.file.read.npy path("pa_he{xs}.npy") : tensor<3x{H}xf32>
   %es = check.file.read.npy path("pa_s{sfx}.npy") : tensor<3x2xf32>
   %eh16 = check.file.read.npy path("pa_h16{sfx}.npy") : tensor<3x{H}xf16>
 {info_decl}  %h = check.generate.fill value(0.0) : tensor<3x{H}xf32>

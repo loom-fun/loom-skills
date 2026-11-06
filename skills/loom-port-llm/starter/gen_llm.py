@@ -1561,6 +1561,96 @@ def live_row_scale(program):
                                r"kernel.launch @g_row_scale_f16_live[%t](%t, %info, \1) : [index](index, buffer, index, buffer, buffer, buffer)", p)
     return "".join(parts)
 
+# Live-row skip (prefill padding). An epoch runs at its power-of-two shape, so a 1026-token prompt at prefill chunk
+# 4096 is a 2048-row epoch, half padding. live_row_scale already gives padding rows scale 0 (the prefill GEMMs skip
+# their tiles); live_row_skip makes the per-row kernels free on them too. Every kernel launched over the epoch's rows
+# ([%t], one workgroup per token row: `%r = kernel.workgroup.id<x>` then `index.assume %r [lt(%r, %tokens)]`) in a
+# prefill branch of @llm_advance gets a `_lv` copy wrapped in `scf.if` row live (%info word 2 != 0); a padding row
+# does nothing, except that a kernel with a `%scales` row-scale output still writes scale 0 for it. Rows are
+# independent in these kernels, and nothing reads a padding row's results (attention keys are stored per live
+# row, the MoE buckets and the head take live rows only). Launches shared with decode-shaped epochs become
+# `scf.if %gemm { _lv } else { original }`. Not changed: attention (its own padding handling), g_token_info,
+# g_embed, decode-shaped branches, and launches writing the epoch's interface buffers (%features, %outputs, ...).
+import re  # noqa: E402
+_TOKEN_ROW = re.compile(r"  %(\w+) = kernel\.workgroup\.id<x> : index\n  %(\w+) = index\.assume %\1 \[(?:range\(%\1, [^)]*\), )?lt\(%\1, %(\w+)\)\] : index\n")
+
+
+def live_skip_kernel(text, name):
+    m = _TOKEN_ROW.search(text)
+    head, rest = text.split(" launch(", 1)
+    params, body = rest.split(") {\n", 1)
+    has_info = re.search(r"(^|, )%info: buffer", params) is not None
+    info = "%info" if has_info else "%lv_info"
+    if not has_info:
+        params += ", %lv_info: buffer"
+    assert body.count("kernel.return") == 1, name
+    tok, rows = m.group(2), m.group(3)
+    cut = body.index(m.group(0)) + len(m.group(0))
+    guard = f"""  %lv_zero = index.constant 0 : offset
+  %lv_view = buffer.view {info}[%lv_zero] : buffer -> view<[%{rows}]x4xi32>
+  %lv_word = view.load %lv_view[%{tok}, 2] : view<[%{rows}]x4xi32> -> i32
+  %lv_dead = scalar.constant 0 : i32
+  %lv_live = scalar.cmpi ne, %lv_word, %lv_dead : i32
+  scf.if %lv_live {{
+"""
+    els = ""
+    if re.search(r"(^|, )%scales: buffer", params):
+        els = f"""  }} else {{
+    %lv_lane = kernel.workitem.id<x> : index
+    %lv_c0 = index.constant 0 : index
+    %lv_c1 = index.constant 1 : index
+    %lv_first = index.cmp eq, %lv_lane, %lv_c0 : index
+    scf.if %lv_first {{
+      %lv_zf = scalar.constant 0.0 : f32
+      %lv_s = buffer.view %scales[%lv_zero] : buffer -> view<[%{rows}]x2xf32>
+      view.store %lv_zf, %lv_s[%{tok}, %lv_c0] : f32, view<[%{rows}]x2xf32>
+      view.store %lv_zf, %lv_s[%{tok}, %lv_c1] : f32, view<[%{rows}]x2xf32>
+    }}
+"""
+    end = body.rindex("  kernel.return\n}")
+    body = body[:cut] + guard + body[cut:end] + els + "  }\n" + body[end:]
+    head = head.replace(f'export("{name}") @{name}(', f'export("{name}_lv") @{name}_lv(')
+    assert f"@{name}_lv(" in head, name
+    return head + " launch(" + params + ") {\n" + body, has_info
+
+
+def live_row_skip(text, prefill_conds=("%mm", "%gemm", "%big", "%huge"), skip_names=r"attention|token_info|embed"):
+    """`text`: the whole model.loom. Returns it with the per-row prefill launches of @llm_advance on `_lv` kernels."""
+    defs = {}
+    for d in re.split(r"(?m)^(?=kernel\.def )", text):
+        m = re.match(r'kernel\.def export\("(\w+)"\)', d)
+        if m and "  kernel.return\n}\n" in d:
+            defs[m.group(1)] = d[:d.index("  kernel.return\n}\n") + len("  kernel.return\n}\n")]
+    a = text.index("command.program.def public @llm_advance(")
+    b = text.find("\ncommand.program.def ", a + 10)
+    b = len(text) if b < 0 else b + 1
+    new, out, stack = {}, [], []
+    for line in text[a:b].split("\n"):
+        s = line.strip()
+        mi = re.match(r"scf\.if (%\w+) \{$", s)
+        if mi:
+            stack.append([mi.group(1), "then"])
+        elif s == "} else {" and stack:
+            stack[-1][1] = "else"
+        elif s == "}" and stack:
+            stack.pop()
+        ml = re.match(r"(\s*)kernel\.launch @(\w+)\[%t\]\(%t(, .*)?\) : \[index\]\(index(, .*)?\)$", line)
+        if (ml and ml.group(2) in defs and not re.search(skip_names, ml.group(2)) and _TOKEN_ROW.search(defs[ml.group(2)])
+                and not any(c in prefill_conds and br == "else" for c, br in stack)
+                and not re.search(r"%(features|outputs|tokens|metadata)\b", ml.group(3) or "")):
+            ind, k, args, tys = ml.group(1), ml.group(2), ml.group(3) or "", ml.group(4) or ""
+            if k not in new:
+                new[k] = live_skip_kernel(defs[k], k)
+            has_info = new[k][1]
+            lv = f"{ind}kernel.launch @{k}_lv[%t](%t{args}{'' if has_info else ', %info'}) : [index](index{tys}{'' if has_info else ', buffer'})"
+            if any(c in prefill_conds and br == "then" for c, br in stack):
+                out.append(lv)
+            else:
+                out += [f"{ind}scf.if %gemm {{", "  " + lv, f"{ind}}} else {{", "  " + line, f"{ind}}}"]
+            continue
+        out.append(line)
+    return text[:a] + "\n".join(out) + text[b:] + "".join("\n" + t for t, _ in new.values())
+
 # g_post_add_norm_rs[_live]: g_post_add_norm followed by g_row_scale_f16[_live] of its output row in one kernel
 # (prefill: the post-attention / post-FFN residual add, the next norm and the next GEMM's f16 operand). Each lane
 # already holds its 32 normalized values, so the row's max |h| is one more workgroup reduce: no second launch and
@@ -3708,6 +3798,9 @@ if __name__ == "__main__":
                        env=dict(os.environ, FLASH2_TARGET="llm", FLASH2_OUT=flash2, LLM_CONFIG=os.environ.get("LLM_CONFIG") or sys.argv[1]))
         parts.append(open(flash2).read())
     parts.append(program)
+    text = "\n".join(parts)
+    if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
+        text = live_row_skip(text)
     out = os.path.join(out_dir, "model.loom")
-    open(out, "w", newline="\n").write("\n".join(parts))
+    open(out, "w", newline="\n").write(text)
     print("wrote", out)
