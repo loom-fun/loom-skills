@@ -1,0 +1,73 @@
+{
+ "schema_version": 1,
+ "model": {
+  "id": "LiquidAI/d1-2B-GGUF",
+  "name": "LiquidAI d1 2B (Loom port, GGUF Q4_K_M)",
+  "description": "SystemOne decision model (choice / score / noul) on the LFM3 hybrid short-conv + attention backbone."
+ },
+ "programs": {
+  "source": {
+   "inputs": [
+    {
+     "path": "program/prepare.loom",
+     "data": [
+      "weights.loom"
+     ]
+    },
+    "program/control.loom",
+    "program/service.loom"
+   ],
+   "libraries": [
+    "program/d1.loom"
+   ]
+  }
+ },
+ "services": {
+  "decide": {
+   "kind": "decision",
+   "version": 1
+  }
+ },
+ "variants": {
+  "gguf": {
+   "services": {
+    "decide": {
+     "programs": [
+      "source"
+     ],
+     "parameters": {
+      "model": {
+       "files": [
+        {
+         "path": "parameter/d1-2B-Q4_K_M.gguf",
+         "format": "gguf",
+         "origin": "@checkpoint/d1-2B-Q4_K_M.gguf"
+        }
+       ]
+      }
+     },
+     "tokenizers": {
+      "text": "tokenizer.json"
+     }
+    }
+   }
+  }
+ },
+ "presets": {
+  "decide": {
+   "service": "decide",
+   "variant": "gguf",
+   "programs": "source",
+   "execution": {
+    "pending_requests": 64
+   }
+  }
+ },
+ "origins": {
+  "checkpoint": {
+   "kind": "hf",
+   "repository": "LiquidAI/d1-2B-GGUF",
+   "revision": "e968f6575f0d4fad928312d7af15cad90fd365c0"
+  }
+ }
+}

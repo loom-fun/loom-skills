@@ -1,0 +1,13 @@
+{
+ "evidence": "loom-card-evidence/1",
+ "gates": [
+  {"name": "needle_full", "status": "pass", "level": "full", "time": "2026-11-06T19:00:00", "detail": null,
+   "source": {"kind": "devlab", "run": "1000", "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"}},
+  {"name": "agent", "status": "fail", "level": "dev", "time": "2026-11-06T06:00:00", "detail": null,
+   "source": {"kind": "devlab", "run": "1000", "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2001"}}
+ ],
+ "performance_overrides": [
+  {"metric": "prefill_1k", "value": 900.0, "date": "2026-11-06",
+   "source": {"kind": "devlab", "run": "1000", "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"}}
+ ]
+}

@@ -29,9 +29,8 @@ PUBLISHERS = [
     "ibm-granite", "Intel", "tencent", "LiquidAI", "allenai", "HuggingFaceTB", "tiiuae", "CohereLabs",
     "LGAI-EXAONE", "zai-org", "openbmb", "internlm", "JetBrains",
 ]
-# The first command on every card. loom-fetch needs the hf extra to read from Hugging Face.
-PIP = 'pip install "hrx-loom[hf]"'
-FETCH_NOTE = "`loom-fetch` (from the Loom SDK, installed with its `hf` extra by the first command)"
+# The card generator (README.md and info.json are rendered from data, never written by hand).
+CARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "skills", "loom-benchmark", "scripts", "card")
 
 
 def get(url, token=None):
@@ -235,7 +234,7 @@ def report(a, top, skipped, pick, title):
 
 
 def cmd_publish(a):
-    from huggingface_hub import HfApi, ModelCard
+    from huggingface_hub import HfApi
 
     api = HfApi(token=os.environ["HF_TOKEN"])
     pkg = os.path.join(a.work, "pkg")
@@ -254,10 +253,6 @@ def cmd_publish(a):
             return None
         with open(p, encoding="utf-8") as f:
             return json.load(f) if parse else f.read()
-
-    attempt, result = read("attempt.json", True) or {}, read("result.json", True) or {}
-    info = {"source": a.source, "quant": a.quant, "files": files, "run": attempt.get("run"),
-            "metrics": result.get("metrics"), "report": read("REPORT.md")}
 
     # loom-fetch takes the GGUF from the source repo at the revision the port was validated on.
     revision = (read("source.json", True) or {}).get("revision") or src.sha
@@ -290,37 +285,8 @@ def cmd_publish(a):
     fetch = " ".join(["loom-fetch", *fetch_args, f"--output={install}"])
     serve = " ".join(["loom-serve", f"--model={install}/model.json", *serve_args])
 
-    card = ModelCard(f"""---
-base_model: {a.source}
-{f"license: {license_}" if license_ else ""}
-tags: [loom, loom-serve, gguf, strix-halo]
----
-
-# {a.source.split('/')[1]} for AMD Loom
-
-A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `model.json` card) for the
-unmodified GGUF checkpoint [{a.source}]({HF}/{a.source}) (`{a.quant}`), generated on an AMD Ryzen AI Max+ 395
-"Strix Halo" by the [loom-skills](https://github.com/{os.environ.get('GITHUB_REPOSITORY', 'loom-fun/loom-skills')})
-factory workflow.
-
-The weights are not included. {FETCH_NOTE} installs the programs
-from this repository and the GGUF from [{a.source}]({HF}/{a.source}), checked against `model.json.lock`:
-
-```bash
-{PIP}
-{fetch}
-{serve}
-```
-
-The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
-""")
     api.create_repo(a.target, repo_type="model", private=a.private, exist_ok=True)
-    with open(os.path.join(pkg, "README.md"), "w", encoding="utf-8") as f:
-        f.write(str(card))
-    # Performance numbers are not claims yet: they live only here, and the card must not mention them.
-    with open(os.path.join(pkg, "info.json"), "w", encoding="utf-8") as f:
-        json.dump(info, f, indent=2)
-        f.write("\n")
+    write_card(a, pkg, install, license_)
     api.upload_folder(repo_id=a.target, folder_path=pkg,
                       ignore_patterns=["parameter/*", "*.gguf", ".loom-fetch.lock", ".cache/*"],
                       delete_patterns=["REPORT.md", "bench/**"],
@@ -336,6 +302,51 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
         print(f"verified: {serve}")
     finally:
         shutil.rmtree(check, ignore_errors=True)
+
+
+def write_card(a, pkg, install, license_):
+    """README.md and info.json from the run's measurements (skills/loom-benchmark/scripts/card): make_info.py
+    collects the data (package, bench/gates.json, bench/perf_log.jsonl), render_card.py
+    renders the card from info.json alone. A measurement the run did not produce shows as not measured."""
+    py = sys.executable
+    bench, ev_dir = os.path.join(a.work, "bench"), os.path.join(a.work, "card-evidence")
+    os.makedirs(ev_dir, exist_ok=True)
+    run = os.environ.get("GITHUB_RUN_ID")
+    src = ["--source-kind", "factory"] + (["--run", run, "--url", f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
+                                          f"{os.environ.get('GITHUB_REPOSITORY', 'loom-fun/loom-skills')}/actions/runs/{run}"]
+                                         if run else [])
+    evidence = []
+
+    def jload(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    log = os.path.join(bench, "perf_log.jsonl")
+    pick = jload(os.path.join(bench, "llamacpp_pick.json")).get("ranked") or [{}]
+    build = re.search(r"b1[0-9]{3,}", pick[0].get("dir") or "")
+    if os.path.isfile(log) and build:
+        spec = jload(os.path.join(bench, "llamacpp_spec.json"))
+        drafting = (["--llamacpp-drafting", f"draft-{spec['kind']}, n-max {spec['n_max']}"]
+                    if spec.get("kind") not in (None, "none") and spec.get("n_max") else [])
+        out = os.path.join(ev_dir, "perf.json")
+        if subprocess.run([py, os.path.join(CARD, "make_info.py"), "perf", "--perf-log", log,
+                           "--llamacpp-build", build.group(0), *drafting, *src, "-o", out]).returncode == 0:
+            evidence.append(out)
+    if os.path.isfile(os.path.join(bench, "gates.json")):
+        out = os.path.join(ev_dir, "gates.json")
+        if subprocess.run([py, os.path.join(CARD, "make_info.py"), "gates", os.path.join(bench, "gates.json"), *src,
+                           "-o", out]).returncode == 0:
+            evidence.append(out)
+    build_args = [py, os.path.join(CARD, "make_info.py"), "build", pkg, "--repo", a.target, "--output", install,
+                  *(["--license", license_] if license_ else []), "-o", os.path.join(pkg, "info.json")]
+    if evidence:
+        build_args += ["--evidence", *evidence]
+    subprocess.run(build_args, check=True)
+    subprocess.run([py, os.path.join(CARD, "render_card.py"), os.path.join(pkg, "info.json"),
+                    "-o", os.path.join(pkg, "README.md")], check=True)
 
 
 def serve_check(a, card, serve_args):

@@ -26,6 +26,8 @@ FMT = {
     "q3_k": dict(block_bytes=110, block_values=256),
     "iq3_s": dict(block_bytes=110, block_values=256),
     "f16": dict(block_bytes=64, block_values=32),
+    # BF16 (vendor drafters published only in BF16, used as-is): 16 values load directly, rounded to F16 for the MMA
+    "bf16": dict(block_bytes=64, block_values=32),
 }
 HELPER = {"q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16"}
 
@@ -73,6 +75,14 @@ def dequant16(fmt, w, view_name, out):
       %{out}_ds = vector.splat %{out}_d : vector<16xf16>
       %{out}_ms = vector.splat %{out}_m : vector<16xf16>
       %{out} = vector.fmaf %{out}_codes, %{out}_ds, %{out}_ms : vector<16xf16>'''
+    if fmt == "bf16":
+        return f'''
+      %{out}_col_bytes = index.scale %w_col, %two : index, offset -> offset
+      %{out}_origin = index.add %w_row_origin, %{out}_col_bytes : offset
+      %{out}_view = buffer.view %{w}[%{out}_origin] : buffer -> view<16xbf16>
+      %{out}_raw = vector.load %{out}_view[0] : view<16xbf16> -> vector<16xbf16>
+      %{out}_wide = vector.extf %{out}_raw : vector<16xbf16> to vector<16xf32>
+      %{out} = vector.fptrunc %{out}_wide : vector<16xf32> to vector<16xf16>'''
     if fmt == "q8_0":
         return f'''
       %{out}_block = index.div %w_col, %c32 : index

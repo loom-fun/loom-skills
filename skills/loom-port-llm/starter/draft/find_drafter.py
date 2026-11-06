@@ -7,9 +7,12 @@ cfg["drafter"] = {"gguf", "repo", "file"} in CFG.json.
 Candidates are HF repos named after the target's base model with "DFlash" in the name and GGUF files (z-lab, the
 DFlash authors, first; then by downloads). A candidate is accepted only when its header (HTTP range read; nothing
 large is downloaded until one passes) says: arch dflash, the target's hidden size, tap layers inside the target's
-trunk, the target's vocabulary size, a mask token, tensor formats the starter's kernels support (or BF16/F16, requantized
-to Q8_0 next to CFG.json on download: some vendors publish only a BF16 drafter), and no drafter feature the kernels lack
-(reduced draft vocabulary, shared K/V, ...). A drafter already in the HF cache is used as is (any revision); otherwise the
+trunk, the target's vocabulary size, a mask token, tensor formats the starter's kernels support (Q4_K/Q5_K/Q6_K/Q8_0,
+F32, and BF16/F16 as published: some vendors publish only a BF16 drafter), and no drafter feature the kernels lack
+(reduced draft vocabulary, shared K/V, ...). A BF16/F16 drafter is used as-is by default, so the package's model.json
+references the vendor's own file (loom-fetch resolves it to the vendor repo; no converted weights to host).
+--requantize (or DRAFTER_REQUANT=1) instead writes a Q8_0 copy next to CFG.json (half the bytes per proposal, but a
+local file a published card cannot reference). A drafter already in the HF cache is used as is (any revision); otherwise the
 preferred quant is Q4_K_M, then Q5_K_M, Q6_K, Q8_0, BF16/F16. Repos are searched by the base model's name (the GGUF repo
 without -GGUF, its general.name, the name without an -Instruct suffix) and ranked: same model name first, z-lab (the DFlash
 authors) next, then downloads. Whether the drafter is worth using is decided later by measurement (draft/tune.py): a
@@ -29,8 +32,9 @@ import struct
 import sys
 import urllib.request
 
-SUPPORTED = {"F32", "Q4_K", "Q5_K", "Q6_K", "Q8_0"}
-REQUANT = {"BF16", "F16"}       # accepted, converted to Q8_0 on download (requantize())
+SUPPORTED = {"F32", "Q4_K", "Q5_K", "Q6_K", "Q8_0", "BF16", "F16"}   # DFlash drafters (BF16/F16: f32-activation matvec, f16 GEMM)
+ASSIST_SUPPORTED = {"F32", "Q4_K", "Q5_K", "Q6_K", "Q8_0"}           # Gemma-4 assistants (gen_assist.py)
+REQUANT = {"BF16", "F16"}       # converted to Q8_0 on download only with --requantize (requantize())
 QUANT_ORDER = ["Q4_K_M", "Q4_K", "Q5_K_M", "Q5_K", "Q6_K", "Q8_0", "BF16", "F16"]   # read on every proposal: lighter first
 TYPES = {0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 6: "Q5_0", 7: "Q5_1", 8: "Q8_0", 9: "Q8_1", 10: "Q2_K", 11: "Q3_K", 12: "Q4_K",
          13: "Q5_K", 14: "Q6_K", 15: "Q8_K", 16: "IQ2_XXS", 17: "IQ2_XS", 18: "IQ3_XXS", 19: "IQ1_S", 20: "IQ4_NL", 21: "IQ3_S",
@@ -159,7 +163,7 @@ def check(cfg, kv, tensors):
     n = toks.get("len") if isinstance(toks, dict) else (len(toks) if toks else None)
     if n is not None and abs(n - cfg["vocab"]) > 0 and n > cfg["vocab"]:
         return f"vocabulary {n} > target {cfg['vocab']}"
-    bad = sorted({t for t, _ in tensors.values()} - SUPPORTED - REQUANT)
+    bad = sorted({t for t, _ in tensors.values()} - SUPPORTED)
     if bad:
         return f"tensor formats {bad} not supported"
     if (a("attention.key_length") or 0) not in (64, 128, 256):
@@ -213,7 +217,7 @@ def check_assistant(cfg, kv, tensors):
     emb = tensors.get("token_embd.weight")
     if not emb or emb[1][-1] != cfg["vocab"]:
         return f"vocabulary {emb[1][-1] if emb else None} != target {cfg['vocab']}"
-    bad = sorted({t for t, _ in tensors.values()} - SUPPORTED)
+    bad = sorted({t for t, _ in tensors.values()} - ASSIST_SUPPORTED)
     if bad:
         return f"tensor formats {bad} not supported"
     if any(n.startswith(("masked_embd", "blk.0.attn_k.")) for n in tensors):
@@ -265,6 +269,9 @@ def main():
     ap.add_argument("target_repo")
     ap.add_argument("--download", action="store_true")
     ap.add_argument("--repo", default=None, help="use this drafter repo[:file] instead of searching")
+    ap.add_argument("--requantize", action="store_true", default=os.environ.get("DRAFTER_REQUANT", "") not in ("", "0"),
+                    help="convert a BF16/F16 drafter to a local Q8_0 copy (default: use the published file as-is, "
+                         "which a published package can reference)")
     a = ap.parse_args()
     cfg = json.load(open(a.cfg))
     from huggingface_hub import HfApi, hf_hub_download
@@ -294,7 +301,7 @@ def main():
             result = {"gguf": None, "repo": repo, "file": f, "reason": "ok",
                       "kind": "dflash2" if "blk.0.attn_conv_proj.weight" in tensors else "dflash",
                       "block_size": kv.get("dflash.block_size"),
-                      "requantize": sorted({t for t, _ in tensors.values()} & REQUANT) or None}
+                      "requantize": (sorted({t for t, _ in tensors.values()} & REQUANT) or None) if a.requantize else None}
             break
         if result["repo"]:
             break
