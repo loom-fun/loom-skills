@@ -1,19 +1,27 @@
 #!/usr/bin/env python3
-"""Render a loom-fun card's README.md from its info.json (schema loom-card/1) alone.
+"""Render a loom-fun card's README.md (and a generated REPORT.md) from the files of its repository (schema loom-card/2).
 
-usage: render_card.py info.json [-o README.md]      (-o - prints to stdout; default: README.md next to info.json)
-       render_card.py --check info.json README.md    exit 1 unless README.md is exactly what info.json renders to
+usage: render_card.py DIR [-o README.md]           (-o - prints to stdout; default: DIR/README.md)
+       render_card.py --check DIR README.md        exit 1 unless README.md is exactly what DIR renders to
 
-A pure function: the same info.json always gives the same bytes. Every sentence is part of this template;
-only the filled-in values differ between cards. Never edit a rendered README by hand: change the data
-(make_info.py) or this template, and re-render.
+DIR holds model.json, model.json.lock, llm_config.json and info.json (a package, or those files downloaded from
+the card's repo). Sources, revisions and files come from model.json.lock; context, rows, presets and drafting from
+model.json; features, the drafter and the generating commit and SDK from llm_config.json; measurements, gate
+evidence, device, baseline and dates from info.json. With info.json "report": "generated" it also writes
+DIR/REPORT.md (methodology, commands, per-run numbers); with "attached", DIR/REPORT.md must already exist.
+
+A pure function of those files (and DIR/program/*.loom, whose hash REPORT.md compares with the measured one):
+no clock, no environment. Every sentence is part of this template; only the filled-in values differ between
+cards. Never edit a rendered README by hand: change the data (make_info.py) or this template, and re-render.
 """
 import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import FEATURES, GATES, HF, LOOM_URL, METHOD, METRICS, SCHEMA_ID, SKILLS_URL, load_json, require_valid  # noqa: E402
+from card_lib import (FEATURES, GATE_NAMES, GATES, HF, LOOM_URL, METHOD, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
+                      derived_tags, gate_applies, load_json, load_package, metric_applies, package_facts,
+                      programs_sha256, require_valid)
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
 SUP = "¹²³⁴⁵⁶⁷⁸⁹"
@@ -23,8 +31,10 @@ def mark(i):
     return SUP[i - 1] if i <= len(SUP) else f"[{i}]"
 
 
-def num(v):
-    return MISSING if v is None else f"{v:.1f}"
+def num(key, v):
+    if v is None:
+        return MISSING
+    return f"{round(v * 100)} %" if key == "spec_acceptance" else f"{v:.1f}"
 
 
 def count(v):
@@ -39,27 +49,73 @@ def hf(repo):
     return f"[{repo}]({HF}/{repo})"
 
 
+def short(sha):
+    return f"`{sha[:7]}`"
+
+
 def src_text(s):
     if not s:
         return "not recorded"
-    name = {"local": "local run", "devlab": "DevLab Dispatch run", "factory": "loom-factory run"}[s["kind"]]
+    name = {"local": "local run", "devlab": "DevLab Dispatch run", "factory": "loom-factory run"}.get(s["kind"], f"{s['kind']} run")
     if s["kind"] == "local":
         return name
     label = f"{name} {s['run']}" if s.get("run") else name
     return f"[{label}]({s['url']})" if s.get("url") else label
 
 
-def margin(loom, llama):
-    if loom is None or llama is None or not llama:
+def device_text(d):
+    return ", ".join(d[k] for k in ("cpu", "gpu", "os") if d.get(k)) if d else "not recorded"
+
+
+def sdk_text(x):
+    """An hrx-loom identity (loom-install.json or a recovered one) in one neutral phrase."""
+    if not isinstance(x, dict):
+        return "unknown"
+    v = f"`{x['hrx_loom']}`" if x.get("hrx_loom") else "version unknown"
+    detail = []
+    if x.get("hrx_system_sha"):
+        detail.append(f"hrx-system {short(x['hrx_system_sha'])}")
+    elif x.get("fingerprint"):
+        detail.append(f"install fingerprint `{x['fingerprint']}`")
+    else:
+        detail.append("hrx-system commit unknown")
+    if x.get("recovered"):
+        detail.append("recovered")
+    return f"{v} ({', '.join(detail)})"
+
+
+def skills_text(gen, versions):
+    """The loom-skills commit that generated the programs: llm_config.json's build stamp, else the recovered one."""
+    if gen and gen.get("skills_commit") and gen["skills_commit"] != "unknown":
+        out = short(gen["skills_commit"])
+        if gen.get("dirty"):
+            out += " (with local changes)"
+        if (gen.get("kit") or {}).get("modified"):
+            out += " (kit edited after copying)"
+        return out
+    if gen:
+        return "unknown"
+    rec = (versions.get("package") or {}).get("skills_commit")
+    return f"{short(rec['commit'])} (recovered)" if isinstance(rec, dict) else "unknown"
+
+
+def package_sdk(gen, versions):
+    if gen:
+        return sdk_text(gen.get("hrx_loom"))
+    return sdk_text((versions.get("package") or {}).get("hrx_loom"))
+
+
+def margin(loom, base):
+    if loom is None or base is None or not base:
         return MISSING
-    return f"{round((loom / llama - 1) * 100):+d} %"
+    return f"{round((loom / base - 1) * 100):+d} %"
 
 
-def drafting(setting):
-    return f"on ({setting})" if setting else "off"
+def drafting(spec):
+    return f"on ({METHOD.get(spec[0], spec[0])}, depth {spec[1]})" if spec else "off"
 
 
-def feature_detail(key, f, info):
+def feature_detail(key, f):
     st, v = f["status"], f["value"] or {}
     if st == "no":
         return {"sampling": "greedy decoding only"}.get(key, "not supported")
@@ -102,119 +158,291 @@ def feature_detail(key, f, info):
     return "supported"
 
 
-def render(info):
+def load(d):
+    info = load_json(os.path.join(d, "info.json"))
     require_valid(info)
-    c, p, s = info["checkpoint"], info["performance"], info["serve"]
+    facts = package_facts(load_package(d))
+    feats = {k: dict(v) for k, v in facts["features"].items()}
+    if facts["kind"] == "chat":
+        sg = info["gates"].get("sampling")
+        if sg:
+            feats["sampling"] = {"status": "yes" if sg["status"] == "pass" else "no", "value": None}
+    for k, v in (info["card"].get("features") or {}).items():
+        if k in feats:
+            feats[k] = {"status": v["status"], "value": v.get("value")}
+    return info, facts, feats
+
+
+def card_metrics(info):
+    """{metric: (metric entry, session index)}: per metric the last session that measured it."""
+    out = {}
+    for i, s in enumerate((info.get("performance") or {}).get("sessions", [])):
+        for k, m in s["metrics"].items():
+            out[k] = (m, i)
+    return out
+
+
+def render(d):
+    info, facts, feats = load(d)
+    c, card, kind = facts["checkpoint"], info["card"], facts["kind"]
+    sources, versions = info["sources"], info["versions"]
+    perf = info.get("performance") or {"baseline": {"name": "llama.cpp", "version": None, "args": None}, "sessions": []}
+    base, sessions = perf["baseline"], perf["sessions"]
+    output = card.get("output") or facts["output"] or facts["name"]
+    memory = facts["memory_bytes"] or card.get("memory_bytes")
+
     L = ["---", f"base_model: {c['repo']}"]
-    if info["license"]:
-        L.append(f"license: {info['license']}")
-    L += ["tags:", *[f"- {t}" for t in info["tags"]], "---", ""]
+    if card.get("license"):
+        L.append(f"license: {card['license']}")
+    tags = derived_tags(feats) + [t for t in card.get("tags") or [] if t not in derived_tags(feats)]
+    L += ["tags:", *[f"- {t}" for t in tags], "---", ""]
 
     quant = f" ({c['quant']})" if c["quant"] else ""
-    L += [f"# {info['name']}{quant} for AMD Loom", "",
+    L += [f"# {facts['name']}{quant} for AMD Loom", "",
           f"A [Loom]({LOOM_URL}) package (`.loom` programs and a `model.json` card) for the unmodified GGUF checkpoint "
           f"{hf(c['repo'])} (`{c['file']}`), generated on an AMD Ryzen AI Max+ 395 \"Strix Halo\" with the "
           f"[loom-skills]({SKILLS_URL}) workflow.", ""]
 
     fetch = ["loom-fetch", f"{HF}/{info['repo']}/resolve/main/model.json"]
-    if s["preset"]:
-        fetch.append(f"--preset={s['preset']}")
-    fetch += ["--materialize=copy", f"--output={s['output']}"]
-    serve = ["loom-serve", f"--model={s['output']}/model.json", f"--device={s['device']}"]
-    if s["memory_bytes"]:
-        serve.append(f"--memory_bytes={s['memory_bytes']}")
-    api = ("answers OpenAI-style `/v1/chat/completions` requests" if info["service"]["kind"] == "chat"
-           else f"answers SystemOne decision requests at `{info['service']['endpoint']}`")
+    if facts["preset"]:
+        fetch.append(f"--preset={facts['preset']}")
+    fetch += ["--materialize=copy", f"--output={output}"]
+    serve = ["loom-serve", f"--model={output}/model.json", "--device=amdgpu"]
+    if memory:
+        serve.append(f"--memory_bytes={memory}")
+    api = ("answers OpenAI-style `/v1/chat/completions` requests" if kind == "chat"
+           else f"answers SystemOne decision requests at `{feats['api']['value']['endpoint']}`")
     L += ["## Quick start", "", "```bash", 'pip install "hrx-loom[hf]"', " ".join(fetch), " ".join(serve), "```", "",
           f"The server listens on `127.0.0.1:8080` and {api}.", ""]
 
-    L += ["## Performance vs llama.cpp", "", "| metric | llama.cpp | Loom | margin |", "|---|---|---|---|"]
+    # ---- performance
+    bname = base["name"]
+    shown = card_metrics(info)
+    rows = {k: shown[k] for k, _ in METRICS if k in shown and metric_applies(k, kind, feats)}
+    counts = {}
+    for k, (_, i) in rows.items():
+        counts[i] = counts.get(i, 0) + 1
+    primary = min(counts, key=lambda i: (-counts[i], i)) if counts else None
+    pkey = (sessions[primary]["source"], sessions[primary]["date"]) if primary is not None else None
     notes = []
+    L += [f"## Performance vs {bname}", "", f"| metric | {bname} | Loom | margin |", "|---|---|---|---|"]
     for key, label in METRICS:
-        m = p["metrics"][key]
-        if key in p["not_applicable"]:
+        if not metric_applies(key, kind, feats):
             L.append(f"| {label} | n/a | n/a | n/a |")
             continue
-        loom = num(m["loom"])
-        if m["loom_source"]:
-            notes.append(m["loom_source"])
-            loom += f" {mark(len(notes))}"
-        L.append(f"| {label} | {num(m['llamacpp'])} | {loom} | {margin(m['loom'], m['llamacpp'])} |")
-    r = p["runs"]
-    runs = (f"decode and prefill {text(r['decode_prefill'])} (mean), 4 streams {text(r['streams4'])} (median)")
-    build = f"ROCm build {p['llamacpp_build']}" if p["llamacpp_build"] else "ROCm build not recorded"
-    L += ["", f"- llama.cpp: {build} (lemonade-sdk/llamacpp-rocm), speculative decoding "
-              f"{drafting(p['drafting']['llamacpp'])}.",
-          f"- Loom: speculative decoding {drafting(p['drafting']['loom'])}.",
-          "- Same GGUF on both engines, tokens per second. Loom: client-side timing; llama.cpp: server-side timings. "
-          f"Runs per value: {runs}.",
-          f"- Measured {text(p['date'])}; source: {src_text(p['source'])}."]
-    for i, n in enumerate(notes, 1):
-        L.append(f"- {mark(i)} Loom value from {src_text(n['source'])}, {n['date']}.")
+        m, i = shown.get(key, ({"loom": None, "baseline": None}, None))
+        loom = num(key, m.get("loom"))
+        if i is not None and (sessions[i]["source"], sessions[i]["date"]) != pkey:
+            nk = (sessions[i]["source"], sessions[i]["date"])
+            if nk not in notes:
+                notes.append(nk)
+            loom += f" {mark(notes.index(nk) + 1)}"
+        L.append(f"| {label} | {num(key, m.get('baseline'))} | {loom} | "
+                 f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), m.get('baseline'))} |")
+
+    def runs_of(keys, med):
+        vals = set()
+        for k in keys:
+            if k in rows:
+                m, i = rows[k]
+                n = len(m.get("loom_runs") or []) or sessions[i]["runs"]["streams4" if med else "decode_prefill"]
+                if n:
+                    vals.add(n)
+        return "–".join(str(v) for v in sorted(vals)) if vals else "not recorded"
+    tps_keys = [k for k, _ in METRICS if k not in ("streams4", "spec_acceptance")]
+    psrc = sources[sessions[primary]["source"]] if primary is not None else None
+    L += ["", f"- {bname}: build {('`' + base['version'] + '`') if base['version'] else 'not recorded'}, server arguments "
+              + (f"`{base['args']}`." if base["args"] else "not recorded."),
+          f"- Loom: speculative decoding {drafting(facts['spec'])}.",
+          "- Same GGUF on both engines, tokens per second. Loom: client-side timing; "
+          f"{bname}: server-side timings. Runs per value: decode and prefill {runs_of(tps_keys, False)} (mean), "
+          f"4 streams {runs_of(['streams4'], True)} (median).",
+          f"- Measured {text(sessions[primary]['date'] if primary is not None else None)}; device "
+          f"{device_text(psrc['device'] if psrc else None)}; hrx-loom {sdk_text(psrc['hrx_loom'] if psrc else None)}; "
+          f"source: {src_text(psrc)}."]
+    for i, (sid, date) in enumerate(notes, 1):
+        s = sources[sid]
+        L.append(f"- {mark(i)} Measured {text(date)}; device {device_text(s['device'])}; hrx-loom {sdk_text(s['hrx_loom'])}; "
+                 f"source: {src_text(s)}.")
+    if metric_applies("spec_acceptance", kind, feats):
+        L.append("- Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the "
+                 "`spec` gate's requests.")
     L += [f"- {MISSING} not measured; n/a not applicable.", ""]
 
+    # ---- features
     L += ["## Features", "", "| feature | status | detail |", "|---|---|---|"]
     for key, label in FEATURES:
-        f = info["features"][key]
+        f = feats[key]
         st = {"yes": YES, "no": NO, "unknown": NO, "n/a": NA}[f["status"]]
-        L.append(f"| {label} | {st} | {feature_detail(key, f, info)} |")
+        L.append(f"| {label} | {st} | {feature_detail(key, f)} |")
     L.append("")
 
+    # ---- correctness
     L += ["## Correctness", "", "| gate | description | result |", "|---|---|---|"]
-    desc = dict(GATES)
     ev = []
-    for g in info["gates"]:
-        if g["status"] == "n/a":
-            res = f"{NA} not applicable"
-        elif g["status"] == "unknown":
-            res = f"{NO} no evidence"
+    for name, desc in GATES:
+        g = info["gates"].get(name)
+        if g is None:
+            res = f"{NO} no evidence" if gate_applies(name, kind, feats) else f"{NA} not applicable"
         else:
-            key = (src_text(g["source"]), g["level"], g["date"])
+            key = (g["source"], g["level"], g["date"])
             if key not in ev:
                 ev.append(key)
             res = (f"{YES} pass" if g["status"] == "pass" else f"{NO} fail")
             res += (f" ({g['detail']})" if g["detail"] else "") + f" {mark(ev.index(key) + 1)}"
-        L.append(f"| `{g['name']}` | {desc[g['name']]} | {res} |")
+        L.append(f"| `{name}` | {desc} | {res} |")
     L.append("")
-    for i, (src, level, date) in enumerate(ev, 1):
+    for i, (sid, level, date) in enumerate(ev, 1):
+        s = sources[sid]
         lv = f", LEVEL={level}" if level else ""
-        L.append(f"- {mark(i)} {src}{lv}, {text(date)}.")
+        L.append(f"- {mark(i)} {src_text(s)}{lv}, {text(date)}; device {device_text(s['device'])}; "
+                 f"hrx-loom {sdk_text(s['hrx_loom'])}.")
     L += ["- Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.", ""]
 
+    # ---- files
     L += ["## Files", "",
           "- `model.json` / `model.json.lock`: the card and the pinned source files (sha256 checked by `loom-fetch`).",
           "- `program/*.loom`, `weights.loom`: the generated Loom programs.",
           "- `tokenizer.json`: the tokenizer.",
           "- `llm_config.json`: the configuration the programs were generated from.",
-          f"- `info.json`: the data this card is rendered from (schema `{SCHEMA_ID}`).", "",
+          "- `info.json`: the measurements, gate evidence and versions this card shows; everything else comes from the "
+          "files above."]
+    if info.get("report") == "generated":
+        L.append("- `REPORT.md`: how the values above were measured: setup, commands and the value of every run.")
+    elif info.get("report") == "attached":
+        L.append("- `REPORT.md`: the report written when this package was made.")
+    L += ["", f"Versions: card schema `{SCHEMA_ID}`; loom-skills {skills_text(facts['generator'], versions)}; "
+              f"hrx-loom {package_sdk(facts['generator'], versions)}; card generator "
+              f"{short(versions['card_generator']) if versions['card_generator'] != 'unknown' else 'unknown'}.", "",
           "Source files, fetched by `loom-fetch` from their own repositories:", ""]
-    for role, x in (("checkpoint", c), ("drafter", info["drafter"]), ("projector", info["projector"])):
+    for role, x in (("checkpoint", c), ("drafter", facts["drafter"]), ("projector", facts["projector"])):
         if x:
             rev = f" @ `{x['revision'][:7]}`" if x["revision"] else ""
             L.append(f"- {role}: {hf(x['repo'])}{rev}, `{x['file']}`")
     return "\n".join(L) + "\n"
 
 
+METHOD_TEXT = [
+    "- `perf.py` (loom-benchmark) sends real-text requests: a short prompt for decode, decode after 2k and 32k tokens "
+    "of context, and prefill of documents of about 1k, 2k, 8k, 16k and 32k tokens. Each run gives one value per "
+    "metric; the card shows the mean of the runs.",
+    "- `c4_steady.py` runs 4 concurrent streams and reports the aggregate decode rate over the window in which all "
+    "4 are decoding; the card shows the median of the runs.",
+    "- One engine runs at a time on the same machine, with the same GGUF. Loom rates are timed by the client; "
+    "llama.cpp rates come from its server-side `timings`.",
+    "- Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.",
+    "- Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD "
+    "DevLab Dispatch.",
+]
+
+
+def render_report(d):
+    info, facts, feats = load(d)
+    sources, versions = info["sources"], info["versions"]
+    perf = info.get("performance") or {"baseline": {"name": "llama.cpp", "version": None, "args": None}, "sessions": []}
+    base, c = perf["baseline"], facts["checkpoint"]
+    here = programs_sha256(d)
+
+    def prog(sha):
+        if not sha:
+            return "not recorded"
+        rel = "" if here is None else (", the same as this repository's programs" if sha == here
+                                       else ", not the same as this repository's programs")
+        return f"sha256 `{sha}`{rel}"
+    L = [f"# {facts['name']} for AMD Loom: measurement report", "",
+         f"How the values on this repository's model card were measured. Generated from `info.json` (schema "
+         f"`{SCHEMA_ID}`) by the loom-skills card generator; the card's README.md is rendered from the same data.", "",
+         "## Setup", "",
+         f"- Package: this repository. Programs generated by loom-skills {skills_text(facts['generator'], versions)} with "
+         f"hrx-loom {package_sdk(facts['generator'], versions)}.",
+         f"- Checkpoint: {hf(c['repo'])}" + (f" @ `{c['revision']}`" if c["revision"] else "") + f", `{c['file']}`"
+         + (f", sha256 `{c['sha256']}`" if c["sha256"] else "") + "."]
+    if facts["drafter"]:
+        x = facts["drafter"]
+        L.append(f"- Drafter: {hf(x['repo'])}" + (f" @ `{x['revision']}`" if x["revision"] else "") + f", `{x['file']}`; "
+                 f"Loom speculative decoding {drafting(facts['spec'])}.")
+    L += [f"- Baseline: {base['name']} " + (f"`{base['version']}`" if base["version"] else "(build not recorded)")
+          + ", server arguments " + (f"`{base['args']}`" if base["args"] else "not recorded")
+          + " (model path, host and port left out).",
+          "- Programs measured: the sha256 below is card_lib.programs_sha256, over `program/*.loom` without each file's "
+          "first-line generator comment.", "",
+          "## Method", "", *METHOD_TEXT, ""]
+    labels = dict(METRICS)
+    for i, s in enumerate(perf["sessions"], 1):
+        src = sources[s["source"]]
+        L += [f"## Session {i}: {src_text(src)}, {text(s['date'])}", "",
+              f"- Device: {device_text(src['device'])}.",
+              f"- Loom SDK: hrx-loom {sdk_text(src['hrx_loom'])}.",
+              f"- Programs measured: {prog(s.get('programs_sha256'))}."]
+        if s.get("commands"):
+            L += ["- Commands:", "", "```bash", *s["commands"], "```"]
+        L += ["", "| metric | engine | runs | value |", "|---|---|---|---|"]
+        order = [x for x, _ in METRICS]
+        for k, m in sorted(s["metrics"].items(), key=lambda kv: (order.index(kv[0]) if kv[0] in labels else len(order), kv[0])):
+            for eng, v, runs in (("Loom", m.get("loom"), m.get("loom_runs")), (base["name"], m.get("baseline"), m.get("baseline_runs"))):
+                if v is None and not runs:
+                    continue
+                r = ", ".join(str(x) for x in runs) if runs else MISSING
+                L.append(f"| {labels.get(k, k)} | {eng} | {r} | {num(k, v)} |")
+        L.append("")
+    L += ["## Gate evidence", ""]
+    groups = []
+    for name in GATE_NAMES + sorted(set(info["gates"]) - set(GATE_NAMES)):
+        g = info["gates"].get(name)
+        if not g:
+            continue
+        key = (g["source"], g["level"], g["date"], g.get("programs_sha256"))
+        if key not in [k for k, _ in groups]:
+            groups.append((key, []))
+        dict(groups)[key].append(f"`{name}` {g['status']}" + (f" ({g['detail']})" if g["detail"] else ""))
+    for (sid, level, date, sha), names in groups:
+        s = sources[sid]
+        L += [f"### {src_text(s)}" + (f", LEVEL={level}" if level else "") + f", {text(date)}", "",
+              f"- Gates: {', '.join(names)}.",
+              f"- Device: {device_text(s['device'])}.",
+              f"- Loom SDK: hrx-loom {sdk_text(s['hrx_loom'])}.",
+              f"- Programs: {prog(sha)}.", ""]
+    if not groups:
+        L += ["No gate evidence is recorded.", ""]
+    while L[-1] == "":
+        L.pop()
+    return "\n".join(L) + "\n"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("info")
+    ap.add_argument("dir")
     ap.add_argument("readme", nargs="?", help="with --check: the README to compare")
     ap.add_argument("-o")
     ap.add_argument("--check", action="store_true")
     a = ap.parse_args(argv)
-    out = render(load_json(a.info))
+    out = render(a.dir)
+    info = load_json(os.path.join(a.dir, "info.json"))
     if a.check:
-        with open(a.readme, encoding="utf-8", newline="") as f:
-            same = f.read() == out
-        print(("OK   " if same else "DIFF ") + a.readme)
-        sys.exit(0 if same else 1)
-    dest = a.o or os.path.join(os.path.dirname(os.path.abspath(a.info)), "README.md")
+        checks = [(a.readme, out)]
+        if info.get("report") == "generated":
+            checks.append((os.path.join(os.path.dirname(os.path.abspath(a.readme)), "REPORT.md"), render_report(a.dir)))
+        bad = 0
+        for path, want in checks:
+            with open(path, encoding="utf-8", newline="") as f:
+                same = f.read() == want
+            print(("OK   " if same else "DIFF ") + path)
+            bad |= not same
+        sys.exit(bad)
+    if info.get("report") == "attached" and not os.path.isfile(os.path.join(a.dir, "REPORT.md")):
+        sys.exit(f"info.json says REPORT.md is attached, but {a.dir}/REPORT.md is missing")
+    dest = a.o or os.path.join(a.dir, "README.md")
     if dest == "-":
         sys.stdout.write(out)
     else:
         with open(dest, "w", encoding="utf-8", newline="\n") as f:
             f.write(out)
         print(f"wrote {dest}", file=sys.stderr)
+    if info.get("report") == "generated":
+        rp = os.path.join(a.dir, "REPORT.md") if dest == "-" else os.path.join(os.path.dirname(os.path.abspath(dest)), "REPORT.md")
+        with open(rp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(render_report(a.dir))
+        print(f"wrote {rp}", file=sys.stderr)
 
 
 if __name__ == "__main__":

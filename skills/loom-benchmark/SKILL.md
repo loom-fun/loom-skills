@@ -295,27 +295,48 @@ source for the report's numbers.
 
 ### Hugging Face model card (loom-fun repos)
 
-A published card's `README.md` and `info.json` are **generated, never hand-written**: the skill supplies
-data, `scripts/card/` turns it into the card. Every loom-fun card has the same sections, rows and footnotes
-(lead-in, quick start, performance vs llama.cpp, features, correctness gates, files); only the values differ.
-No prose of your own on a card: no "what's new", no explanations, no caveats. A value without evidence
-renders as not measured / no evidence; never fill one in by hand.
+A published card's `README.md`, `info.json` and `REPORT.md` are **generated, never hand-written**: the skill
+supplies data, `scripts/card/` turns it into the card. Every loom-fun card has the same sections, rows and
+footnotes (lead-in, quick start, performance vs llama.cpp, features, correctness gates, files); only the values
+differ. No prose of your own on a card: no "what's new", no explanations, no caveats. A value without evidence
+renders as not measured / no evidence / unknown; never fill one in by hand.
 
-1. Evidence files (`loom-card-evidence/1`) from the run's own outputs:
-   - `card/make_info.py perf --perf-log bench/perf_log.jsonl --llamacpp-build bNNNN [--llamacpp-drafting
-     "draft-dflash, n-max 3"] -o ev_perf.json` (finalize.sh's `final` / `llama-final` rows; or
-     `--loom-jsonl`/`--llama-jsonl` + `--c4-loom`/`--c4-llama` for separate same-session logs);
-   - `card/make_info.py gates bench/gates.json [ktest.out --time ...] -o ev_gates.json`;
-   - `card/pull_devlab.py loom-fun/REPO [--perf prefill_1k] -o ev_devlab.json`: the latest nightly-gates run on
-     AMD DevLab Dispatch (gates of every finished level, job URL as evidence; `--perf` takes those Loom
-     values from the full job's report-only perf run).
-2. `card/make_info.py build PKG --repo loom-fun/REPO --memory-bytes N --output DIR --evidence ev_*.json -o
-   PKG/info.json` (schema `card/info_schema.json`, `"schema": "loom-card/1"`; checkpoint, drafter, projector,
-   context and features come from `model.json`, `model.json.lock` and `llm_config.json`). Per gate the latest
-   evidence wins, so a later failing run shows as a failure.
-3. `card/render_card.py PKG/info.json -o PKG/README.md` (from info.json alone), and upload only those two files
-   when republishing a card: `hf upload REPO DIR . --include README.md info.json`.
+`info.json` (schema `card/info_schema.json`, `"schema": "loom-card/2"`) holds only what no package file
+records: measurement sessions (per-run values, commands, the baseline's version and exact server arguments),
+the spec gate's acceptance, gate evidence, the device and Loom SDK of each source, dates and versions. The card
+reads everything else from the repo's own files: sources, revisions, sha256 and sizes from `model.json.lock`;
+context, rows, presets and drafting depth from `model.json`; features, the drafter and the generating
+loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `build.py`).
 
+1. Evidence files (`loom-card-evidence/2`) from the run's own outputs, made **on the machine that measured**
+   (each records `scripts/machine_info.py`'s detected device and the SDK under `$LOOM_ROOT`):
+   - `card/make_info.py perf --perf-log bench/perf_log.jsonl --baseline-version llamacpp-rocm/bNNNN
+     --baseline-args "$(cat bench/llamacpp_args.txt)" --package PKG -o ev_perf.json` (finalize.sh's `final` /
+     `llama-final` rows and the llama-server arguments it recorded; or `--loom-jsonl`/`--llama-jsonl` +
+     `--c4-loom`/`--c4-llama` for separate same-session logs, `--command` for each measuring command, and
+     `--metrics` for a later session that re-measured some rows);
+   - `card/make_info.py gates bench/gates.json [ktest.out --time ...] --package PKG -o ev_gates.json` (also the
+     spec gate's `acceptance N% of M proposals` from `gates_spec.log`);
+   - `card/pull_devlab.py loom-fun/REPO -o ev_devlab.json`: the latest nightly-gates run on AMD DevLab
+     Dispatch (gates of every finished level, job URL as evidence). Gates only: DevLab perf numbers are not
+     comparable with a local same-session llama.cpp run and never go on a card.
+2. `card/make_info.py build DIR --repo loom-fun/REPO --generator-commit "$(git rev-parse HEAD)" --memory-bytes N
+   --output OUT --report generated --evidence ev_*.json -o DIR/info.json`. DIR holds the repo's `model.json`,
+   `model.json.lock`, `llm_config.json` (and `program/`). Per gate the latest evidence wins, so a later failing
+   run shows as a failure; per metric the last session that measured it. `--report attached` instead keeps a
+   REPORT.md written by the run (the factory's) or an older card's narrative, as is.
+3. `card/render_card.py DIR` writes `DIR/README.md` (and `DIR/REPORT.md` for `--report generated`: setup,
+   commands, every run's value, gate evidence). When republishing a card, upload only those three files:
+   `hf upload REPO DIR . --include README.md --include info.json --include REPORT.md`. Never re-upload a repo's
+   programs, `model.json`, lock or weights for a card change.
+
+The card's Versions line shows the schema, the loom-skills commit and hrx-loom build that generated the
+programs, and the card generator commit. `loom-setup/scripts/install_loom.sh` writes `$LOOM_ROOT/loom-install.json`
+(version, hrx-system commit, CI artifact or PyPI release, wheel sha256), which `build.py` stamps into the package
+and the evidence records for every measurement. A schema change that only adds keys, metrics or gates keeps
+`loom-card/2` (readers ignore unknown names); renaming, removing or retyping a key bumps it.
 To change what every card says, change `render_card.py` (and `card/test/check.sh`'s golden files with
 `UPDATE=1`, CI `check-cards`), then re-render all cards. `card/import_card.py` maps cards published before
-loom-card/1 to evidence (one time). The loom-factory workflow's publish step runs steps 1-3 itself.
+loom-card/1 to evidence (one time; their versions are recovered from the factory run and the report they
+name, and their narrative report becomes REPORT.md verbatim). The loom-factory workflow's publish step runs
+steps 1-3 itself and uploads the run's REPORT.md.

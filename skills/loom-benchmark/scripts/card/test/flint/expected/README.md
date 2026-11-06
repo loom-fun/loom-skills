@@ -27,21 +27,23 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 
 | metric | llama.cpp | Loom | margin |
 |---|---|---|---|
-| decode tok/s, short prompt | 67.3 | 96.9 | +44 % |
+| decode tok/s, short prompt | 70.6 | 92.4 ¹ | +31 % |
 | decode tok/s, 2k context | 54.7 | 76.3 | +39 % |
 | decode tok/s, 32k context | 49.5 | 47.8 | -3 % |
-| prefill tok/s, 1k document | 1081.8 | 900.0 ¹ | -17 % |
+| prefill tok/s, 1k document | 1038.0 | 956.9 ¹ | -8 % |
 | prefill tok/s, 2k document | 1079.0 | 1316.4 | +22 % |
 | prefill tok/s, 8k document | 1094.1 | 1424.7 | +30 % |
 | prefill tok/s, 16k document | 929.3 | 1359.0 | +46 % |
 | prefill tok/s, 32k document | 667.6 | 1193.9 | +79 % |
 | 4 streams, aggregate decode tok/s | 124.2 | 134.2 | +8 % |
+| speculative decoding, drafted tokens accepted | — | 68 % | — |
 
-- llama.cpp: ROCm build b1355 (lemonade-sdk/llamacpp-rocm), speculative decoding on (draft-dflash, n-max 3).
+- llama.cpp: build `llamacpp-rocm/b1355`, server arguments `-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model ~/drafter.gguf --spec-draft-n-max 3 -ngld 99 -c 65536 -kvu -np 4`.
 - Loom: speculative decoding on (DFlash, depth 3).
 - Same GGUF on both engines, tokens per second. Loom: client-side timing; llama.cpp: server-side timings. Runs per value: decode and prefill 2 (mean), 4 streams 3 (median).
-- Measured 2026-11-06; source: local run.
-- ¹ Loom value from [DevLab Dispatch run 1000](https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000), 2026-11-06.
+- Measured 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: local run.
+- ¹ Measured 2026-11-07; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: local run.
+- Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the `spec` gate's requests.
 - — not measured; n/a not applicable.
 
 ## Features
@@ -77,8 +79,8 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 | `needle_full` | Needle-in-a-haystack prompt at the full context is served | ✅ pass ² |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | — not applicable |
 
-- ¹ local run, LEVEL=quick, 2026-11-06.
-- ² [DevLab Dispatch run 1000](https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000), LEVEL=full, 2026-11-06.
+- ¹ local run, LEVEL=quick, 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`).
+- ² [DevLab Dispatch run 1000](https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000), LEVEL=full, 2026-11-06; device not recorded; hrx-loom `0.1.0` (hrx-system `d01d1c1`, recovered).
 - Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.
 
 ## Files
@@ -87,7 +89,10 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 - `program/*.loom`, `weights.loom`: the generated Loom programs.
 - `tokenizer.json`: the tokenizer.
 - `llm_config.json`: the configuration the programs were generated from.
-- `info.json`: the data this card is rendered from (schema `loom-card/1`).
+- `info.json`: the measurements, gate evidence and versions this card shows; everything else comes from the files above.
+- `REPORT.md`: how the values above were measured: setup, commands and the value of every run.
+
+Versions: card schema `loom-card/2`; loom-skills `af9f2a0`; hrx-loom `0.1.0` (hrx-system `d01d1c1`); card generator `0123456`.
 
 Source files, fetched by `loom-fetch` from their own repositories:
 

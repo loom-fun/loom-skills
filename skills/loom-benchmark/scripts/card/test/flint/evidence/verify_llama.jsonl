@@ -1,0 +1,2 @@
+{"label": "llama", "kind": "llama", "time": "2026-11-07 10:10:00", "decode_tps": 70.2, "prefill": [{"prompt_tokens": 1032, "prefill_tps": 1031.0, "min": 1020.0, "max": 1040.0, "n": 5}]}
+{"label": "llama", "kind": "llama", "time": "2026-11-07 10:12:00", "decode_tps": 71.0, "prefill": [{"prompt_tokens": 1032, "prefill_tps": 1045.0, "min": 1030.0, "max": 1050.0, "n": 5}]}

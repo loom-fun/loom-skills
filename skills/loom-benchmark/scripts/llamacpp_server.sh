@@ -7,6 +7,7 @@
 #   LLAMA_SPEC="--spec-type draft-mtp --spec-draft-n-max 3" (llama_spec_tune.py's choice) adds speculative
 #   decoding: the performance runs use it, so Loom is compared drafting vs drafting; references never do.
 #   stop: llamacpp_server.sh --stop PORT   (LLAMACPP_STATE: pid/log dir, default /tmp)
+#   LLAMACPP_ARGS_FILE=F writes the exact server arguments to F (finalize.sh: llamacpp_args.txt, the card's baseline)
 # Refuses a build that does not see a ROCm device: on Windows, builds missing their HIP/BLAS DLLs
 # silently fall back to CPU.
 set -e
@@ -50,7 +51,10 @@ ctxarg=(-c $((np * per))); [ "$mode" = unified ] && ctxarg=(-c $per -kvu)
 # an old build (b10820, a sliding-window model) answered the PREVIOUS prompt from that cache.
 mm=(); [ -n "${MMPROJ:-}" ] && { mm=(--mmproj "$MMPROJ"); export LLAMA_MEDIA_MARKER='<__media__>'; }   # vision_golden.py's marker
 spec=(); [ -n "${LLAMA_SPEC:-}" ] && read -r -a spec <<< "$LLAMA_SPEC"
-nohup $exe -m "$gguf" -ngl 99 -cram 0 "${mm[@]}" "${spec[@]}" "${ctxarg[@]}" -np $np --port $port --host 127.0.0.1 > $state/llamacpp-$port.log 2>&1 &
+args=(-ngl 99 -cram 0 "${mm[@]}" "${spec[@]}" "${ctxarg[@]}" -np $np)
+# LLAMACPP_ARGS_FILE: record the server's exact arguments (model path, host and port left out), the card's baseline args
+if [ -n "${LLAMACPP_ARGS_FILE:-}" ]; then echo "${args[*]}" > "$LLAMACPP_ARGS_FILE"; fi
+nohup $exe -m "$gguf" "${args[@]}" --port $port --host 127.0.0.1 > $state/llamacpp-$port.log 2>&1 &
 echo $! > $state/llamacpp-$port.pid
 for i in $(seq 300); do
   curl -s localhost:$port/health | grep -q ok && { echo "READY llama.cpp $($exe --version 2>&1 | grep -m1 version) on :$port (pid $(cat $state/llamacpp-$port.pid))"; exit 0; }

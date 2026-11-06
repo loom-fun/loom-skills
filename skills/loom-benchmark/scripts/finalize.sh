@@ -29,7 +29,7 @@ if [ -n "${LLAMACPP_DIR:-}" ] && [ "${SKIP_LLAMA_PERF:-0}" != 1 ]; then
   kv=$(( (ctx < 34000 ? ctx : 34000) + 1024 ))
   # drafting vs drafting: llama.cpp's speculative setting chosen at qualify (llamacpp_spec.json)
   LLAMA_SPEC=$("$T" -c "import json; print(json.load(open('llamacpp_spec.json'))['args'])" 2>/dev/null) \
-    "$S/llamacpp_server.sh" "$gguf" "$lport" 4 "$kv" unified && started=1 || echo "WARNING: could not start llama-server; the report uses the qualify baseline"
+    LLAMACPP_ARGS_FILE=llamacpp_args.txt "$S/llamacpp_server.sh" "$gguf" "$lport" 4 "$kv" unified && started=1 || echo "WARNING: could not start llama-server; the report uses the qualify baseline"
 fi
 L=http://127.0.0.1:$lport
 llama_perf() { "$T" "$S/perf.py" "$L" llama-final --kind llama --log perf_log.jsonl "$@" | grep "^{" | tail -1; }

@@ -1,13 +1,53 @@
 {
- "evidence": "loom-card-evidence/1",
+ "evidence": "loom-card-evidence/2",
  "gates": [
-  {"name": "needle_full", "status": "pass", "level": "full", "time": "2026-11-06T19:00:00", "detail": null,
-   "source": {"kind": "devlab", "run": "1000", "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"}},
-  {"name": "agent", "status": "fail", "level": "dev", "time": "2026-11-06T06:00:00", "detail": null,
-   "source": {"kind": "devlab", "run": "1000", "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2001"}}
- ],
- "performance_overrides": [
-  {"metric": "prefill_1k", "value": 900.0, "date": "2026-11-06",
-   "source": {"kind": "devlab", "run": "1000", "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"}}
+  {
+   "detail": null,
+   "level": "full",
+   "name": "needle_full",
+   "programs_sha256": null,
+   "source": {
+    "device": null,
+    "hrx_loom": {
+     "artifact_id": null,
+     "basis": "job log: install_loom.sh installed hrx-loom 0.1.0 from PyPI",
+     "branch": "v0.1.0",
+     "hrx_loom": "0.1.0",
+     "hrx_system_sha": "d01d1c18b154189fd073777329052d23f6071f14",
+     "recovered": true,
+     "source": "pypi",
+     "wheel_sha256": "4d3897b83cc0857723593487a4372a31d203944a1637e5e3143cad1d0583b98b"
+    },
+    "kind": "devlab",
+    "run": "1000",
+    "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"
+   },
+   "status": "pass",
+   "time": "2026-11-06T19:00:00"
+  },
+  {
+   "detail": null,
+   "level": "dev",
+   "name": "agent",
+   "programs_sha256": null,
+   "source": {
+    "device": null,
+    "hrx_loom": {
+     "artifact_id": null,
+     "basis": "job log: install_loom.sh installed hrx-loom 0.1.0 from PyPI",
+     "branch": "v0.1.0",
+     "hrx_loom": "0.1.0",
+     "hrx_system_sha": "d01d1c18b154189fd073777329052d23f6071f14",
+     "recovered": true,
+     "source": "pypi",
+     "wheel_sha256": "4d3897b83cc0857723593487a4372a31d203944a1637e5e3143cad1d0583b98b"
+    },
+    "kind": "devlab",
+    "run": "1000",
+    "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2001"
+   },
+   "status": "fail",
+   "time": "2026-11-06T06:00:00"
+  }
  ]
 }
