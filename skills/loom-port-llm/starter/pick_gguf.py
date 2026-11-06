@@ -13,7 +13,8 @@ Q8_0 because every Q4 file used formats the kit lacked). Within the tier:
      downloaded but the same quant of the same model is cached under another repo (bartowski/ next to unsloth/),
      STOP and name that repo: port it instead of downloading. Then
   2. files whose tensor formats the starter decodes (F32 + Q4_K/Q5_K/Q6_K/Q8_0/Q4_0/IQ4_NL/IQ4_XS/Q3_K/IQ3_S; read
-     from the local file, or from the header by HTTP range request), then the preference order;
+     from the local file, or from the header by HTTP range request), plus what a reference example for the file's
+     architecture decodes (reference/*/formats.json, e.g. gemma4: BF16), then the preference order;
   and the file must FIT: 2 x file + 8 GiB <= min(GTT, 60 % of RAM) - LOOM_RESERVED_GIB (the loom skill's hard rules).
 No supported file in the tier: STOP (exit 1) naming the missing formats (add them: loom-port-llm 'New quant format').
 Same-tier files of this model cached under other repos (e.g. bartowski/ next to unsloth/) are listed as a NOTE.
@@ -62,8 +63,33 @@ def quant_of(name):
     return None
 
 
+def _arch(reader):
+    try:
+        f = reader.fields["general.architecture"]
+        return bytes(f.parts[f.data[0]]).decode()
+    except Exception:
+        return None
+
+
+def example_formats():
+    """{arch: {"decodes", "lacks", "hint"}} from reference/*/formats.json: a model with a reference example is
+    ported with that example's kit, which decodes some formats the starter doesn't (gemma4: BF16) and lacks some
+    in its own kernels (gemma4: IQ4_NL per-layer embeddings)."""
+    out = {}
+    ref = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "reference")
+    for f in glob.glob(os.path.join(ref, "*", "formats.json")):
+        try:
+            d = json.load(open(f))
+            out[d["arch"]] = {"decodes": set(d.get("decodes", [])), "lacks": set(d.get("lacks", [])),
+                              "hint": d.get("hint", "")}
+        except (OSError, ValueError, KeyError):
+            pass
+    return out
+
+
 def header_formats(repo, path, size):
-    """Tensor formats from the GGUF header: fetch the first bytes into a sparse file of the full size."""
+    """Tensor formats (+ "arch:<architecture>") from the GGUF header: fetch the first bytes into a sparse file
+    of the full size."""
     from gguf import GGUFReader
     url = f"https://huggingface.co/{repo}/resolve/main/{path}"
     with tempfile.NamedTemporaryFile(suffix=".gguf") as f:
@@ -73,7 +99,7 @@ def header_formats(repo, path, size):
             f.seek(0); f.write(data); f.truncate(size); f.flush()
             try:
                 r = GGUFReader(f.name)
-                return {t.tensor_type.name for t in r.tensors}
+                return {t.tensor_type.name for t in r.tensors} | {f"arch:{_arch(r)}"}
             except Exception:  # header longer than n bytes (huge vocab): try a bigger range
                 continue
     return None
@@ -117,7 +143,8 @@ def other_cached(repo, tier):
 def local_formats(path):
     from gguf import GGUFReader
     try:
-        return {t.tensor_type.name for t in GGUFReader(path).tensors}
+        r = GGUFReader(path)
+        return {t.tensor_type.name for t in r.tensors} | {f"arch:{_arch(r)}"}
     except Exception:
         return None
 
@@ -156,21 +183,31 @@ def main():
         print(f"NOTE: not cached for {a.repo}, but cached elsewhere at {tier}: {', '.join(others)} "
               "(port that repo to reuse it)", file=sys.stderr)
     missing = {}
+    extra = example_formats()   # e.g. gemma4: + BF16, - IQ4_NL (what its reference example's kernels decode)
+    hints = set()
     for p, s in cands:
         if 2 * s + (8 << 30) > gtt:
             print(f"skip {p}: {s / 2**30:.1f} GiB does not fit twice in the {gtt / 2**30:.0f} GiB budget", file=sys.stderr)
             continue
-        fmts = local_formats(cached[p]) if p in cached else header_formats(a.repo, p, s)
-        print(f"{p}: {s / 2**30:.1f} GiB, {'cached' if p in cached else 'to download'}, formats {sorted(fmts) if fmts else '?'}", file=sys.stderr)
-        if fmts and fmts <= SUPPORTED:
+        found = local_formats(cached[p]) if p in cached else header_formats(a.repo, p, s)
+        arch = next((x[5:] for x in found or () if x.startswith("arch:")), None)
+        fmts = {x for x in found or () if not x.startswith("arch:")}
+        ex = extra.get(arch, {})
+        ok = (SUPPORTED | ex.get("decodes", set())) - ex.get("lacks", set())
+        if ex.get("hint"):
+            hints.add(ex["hint"])
+        print(f"{p}: {s / 2**30:.1f} GiB, {'cached' if p in cached else 'to download'}, arch {arch}, "
+              f"formats {sorted(fmts) if fmts else '?'}", file=sys.stderr)
+        if fmts and fmts <= ok:
             print(f"{p}\t{cached.get(p, '')}")
             return
-        missing[p] = sorted((fmts or {"?"}) - SUPPORTED)
+        missing[p] = sorted((fmts or {"?"}) - ok)
     if not missing:
         sys.exit(f"no {tier} GGUF in {a.repo} fits the GPU memory budget twice")
     sys.exit(f"STOP: no {tier} GGUF in {a.repo} uses only formats the starter decodes: "
              + "; ".join(f"{p} needs {m}" for p, m in missing.items())
-             + ". Add the formats (loom-port-llm 'New quant format'); a bigger tier is only by request (QUANT_TIER).")
+             + ". Add the formats (loom-port-llm 'New quant format'); a bigger tier is only by request (QUANT_TIER)."
+             + "".join(f" Note: {h}." for h in sorted(hints)))
 
 
 if __name__ == "__main__":
