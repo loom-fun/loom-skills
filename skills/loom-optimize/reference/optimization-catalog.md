@@ -357,7 +357,20 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
     zero rows for padding, and a GEMM row tile is skipped when all its scales are 0 (+9 % at 1k).
   - Result, Flint chunk 4096 vs the PR #25 build, one server, interleaved: 1k/2k/8k/32k +27/+15/+17/+13 %,
     decode tie; 1k now matches the 1024-chunk build (918 vs ~905 tok/s).
-  - Not done: padding rows still run the elementwise kernels (norms, RoPE, combine; ~0.07 s at 1k).
+  - Padding rows in the per-row kernels (round 2): gen_llm `live_row_skip` gives every per-token-row kernel launched
+    over `[%t]` in a prefill branch of `@llm_advance` a `_lv` copy that does nothing on a padding row (info word 2 = 0)
+    except write the zero row scale the GEMM tile skip needs (residual add + norm, row scales, QK-norm + RoPE, MoE
+    combine; any kit kernel with the one-workgroup-per-row pattern). Flint also: `g_moe_route_tr_live` skips
+    all-padding router workgroups; `g_row_scale_f16_tiles` skips the unused tiles of the bucketed expert rows
+    (max_tiles is sized for the worst case). Flint (DFlash d3), one server, interleaved, vs the final2 build:
+    1k 870 -> 940 tok/s (+8 %; +9 % and +14 % in two other sessions, 947 and 963 tok/s), 2k/8k/32k and decode tie.
+    Qwen3.8-27B (dense, chunk 1024: no padding at 1k): tie at 1k/2k/decode. `LIVE_ROW_SKIP=0` turns it off.
+  - What is left at 1k is not padding: doubling attributes Flint's 1.09 s per 1k prompt to the expert grouped GEMMs
+    0.80 s, per-row kernels 0.13 s, dense GEMMs 0.10 s, attention 0.03 s. With ~24 rows per expert, each expert's
+    weights are dequantized once per (mostly single) row tile, so the expert GEMM cost barely depends on the token
+    count (2k adds only 0.52 s). Skipping the WMMA of all-padding 16-row waves in the expert tiles: tie (1k +2 %,
+    2k -2 %), so the MMA is not the limit; the per-k-step dequant/stage/barrier is. Faster 1k needs a cheaper
+    expert weight path (e.g. int8/int4 WMMA on the codes), not less padding.
 
 ### Tile order per port (`cfg["gemm_n_fastest"]`)
 - Columns fastest (the default) reuses each activation tile; rows fastest reuses each weight tile across

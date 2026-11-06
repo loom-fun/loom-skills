@@ -15,7 +15,7 @@ stop marker is the end-of-text token, so put the GGUF's end-of-generation ids in
 the starter.
 
 Notes: the tokenizer is in `RecursiveSI/flint` (the GGUF doesn't name its base model; port.sh searches
-the Hub). Prefill chunk 4096 (the MoE default) is +15-27 % at 1k-32k over the PR #25 build since the coalesced prefill router `g_moe_route_tr` and padding-free GEMMs (loom-optimize catalog, "Chunk size"); A/B the 1k size too. Build with
+the Hub). Prefill chunk 4096 (the MoE default) is +15-27 % at 1k-32k over the PR #25 build since the coalesced prefill router `g_moe_route_tr` and padding-free GEMMs and per-row kernels (loom-optimize catalog, "Chunk size"); A/B the 1k size too. Build with
 `--memory-gib` large enough for a pool of >= 1.5x the context, or the full-context gate gets a 503 (`auto`,
 the default, gives ~73 GiB on a 128 GB Strix Halo: pool ~450k for the 262k context).
 
