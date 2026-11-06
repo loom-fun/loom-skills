@@ -1,0 +1,29 @@
+name: nightly-gates
+# Placeholder so workflow_dispatch can target branches (GitHub lists dispatchable workflows from the
+# default branch). The real workflow (DevLab Dispatch matrix over the published loom-fun cards) lands
+# with PR #32; run it from a branch with: gh workflow run nightly-gates.yml --ref BRANCH -f level=dev
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "Card repos to run, comma-separated (empty = every card in .github/nightly-models.json)"
+        required: false
+        default: ""
+      level:
+        description: "gates.sh level"
+        required: false
+        default: full
+        type: choice
+        options: [full, quick, dev, dev+full, fast]
+      perf:
+        description: "Report-only perf (Loom vs the card's published numbers)"
+        required: false
+        default: true
+        type: boolean
+permissions:
+  contents: read
+jobs:
+  placeholder:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "nightly-gates placeholder on the default branch; dispatch it with --ref <branch> to run the real workflow"
