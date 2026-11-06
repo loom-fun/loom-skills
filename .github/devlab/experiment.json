@@ -1,14 +1,14 @@
 {
- "_comment": "Issue #39 verification: path-aware consistency.py (gate verdict with llama.cpp) 20x on Bolt with drafting, Bolt quick gates, kernel tests on the rebuilt Bolt package, and another card's consistency.",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
+ "_comment": "Why is Flint 1k/2k prefill ~40% slower on DevLab than on the dev machine (same package, SDK, llama.cpp, GGUF) while llama.cpp is faster there and dense cards match? Hypotheses: (1) CPU power policy (dev machine: power-profiles-daemon performance, governor/EPP performance) slows Loom's many MoE expert-bucket launches; (2) GPU-addressable memory (Flint has the largest budget, 67 GB). Each Flint variant: settings, Loom at 67/45 GB, llama.cpp, then the performance profile and Loom again on the same runner. Glimmer (dense, matches today) is the control.",
+ "card": "loom-fun/ggml-org-Flint-loom",
+ "memory_bytes": 67000000000,
+ "kit": null,
+ "llamacpp": "b1355",
+ "steps": ["sysinfo:before", "perf:3:67000000000", "perf:3:45000000000", "llamaperf:2", "powerprofile:performance", "sysinfo:after", "perf:2:67000000000", "llamaperf:1"],
  "variants": [
-  {"name": "card", "steps": ["consistency:20:llama", "determinism:1:12", "gates:quick"]},
-  {"name": "rebuilt-ktest", "build": {}, "steps": ["ktest", "consistency:20:llama"]},
-  {"name": "nodraft", "build": {"SPEC": "off"}, "steps": ["consistency:20:llama"]},
-  {"name": "qwen3.8-27b", "card": "loom-fun/bartowski-Qwen3.8-27B-loom", "memory_bytes": 52000000000, "kit": null,
-   "llamacpp": "b1355", "steps": ["consistency:10:llama", "determinism:1:6"]}
+  {"name": "flint-a"},
+  {"name": "flint-b"},
+  {"name": "glimmer", "card": "loom-fun/unsloth-Muse-Glimmer-30B-loom", "memory_bytes": 39000000000,
+   "steps": ["sysinfo:before", "perf:3", "powerprofile:performance", "sysinfo:after", "perf:2"]}
  ]
 }
