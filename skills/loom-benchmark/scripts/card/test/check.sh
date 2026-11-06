@@ -1,38 +1,54 @@
 #!/bin/bash
 # usage: check.sh [UPDATE=1]   - the card generator is deterministic and its output matches the golden files (CI)
 # Builds info.json from fixture packages and evidence (make_info.py perf/gates/build, import_card.py), renders
-# README.md (render_card.py) and diffs both against test/*/expected/. UPDATE=1 rewrites the expected files
-# after an intended template change; review the diff before committing it.
+# README.md and REPORT.md (render_card.py) from fixture copies of every file a card repo holds (model.json,
+# model.json.lock, llm_config.json, program/, info.json) and diffs them against test/*/expected/. UPDATE=1
+# rewrites the expected files after an intended template change; review the diff before committing it.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd); C=$here/..; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 py() { python3 -I "$@"; }
 F=$here/flint; D=$here/d1
-# a current card: drafting, local perf + gates, a later DevLab result (an older failing agent run that the
-# local pass supersedes, a full-context needle) and a Loom value from another run
+GEN=0123456789abcdef0123456789abcdef01234567   # the card generator commit is an input, never read by the renderer
+SRC=(--device "$F/evidence/device.json" --hrx-loom "$F/evidence/hrx_loom.json" --package "$F/pkg")
+# a current card: a stamped package (llm_config.json "generator"), drafting, a local perf session, a second
+# session that re-measured two rows a day later, local gates with the spec gate's acceptance, and DevLab gates
+# (an older failing agent run that the local pass supersedes, a full-context needle); REPORT.md generated
 py "$C/make_info.py" perf --loom-jsonl "$F/evidence/loom.jsonl" --llama-jsonl "$F/evidence/llama.jsonl" \
-  --c4-loom "$F/evidence/c4_loom_runs.txt" --c4-llama "$F/evidence/c4_llama_runs.txt" --llamacpp-build b1355 \
-  --llamacpp-drafting "draft-dflash, n-max 3" --date 2026-11-06 -o "$tmp/perf.json" 2>/dev/null
-py "$C/make_info.py" gates "$F/evidence/gates.json" -o "$tmp/gates.json" 2>/dev/null
-py "$C/make_info.py" build "$F/pkg" --repo loom-fun/ggml-org-Flint-loom --memory-bytes 67000000000 --output flint \
-  --evidence "$tmp/perf.json" "$tmp/gates.json" "$F/evidence/devlab.json" -o "$tmp/flint_info.json" 2>/dev/null
-# a pre-loom-card/1 decision-model card through the one-time importer
-py "$C/import_card.py" "$D/repo" --run-date 2026-10-29 -o "$tmp/d1_ev.json" 2>/dev/null
-py "$C/make_info.py" build "$D/repo" --repo loom-fun/LiquidAI-d1-2B-loom --evidence "$tmp/d1_ev.json" \
-  -o "$tmp/d1_info.json" 2>/dev/null
+  --c4-loom "$F/evidence/c4_loom_runs.txt" --c4-llama "$F/evidence/c4_llama_runs.txt" --baseline-version b1355 \
+  --baseline-args "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model ~/drafter.gguf --spec-draft-n-max 3 -ngld 99 -c 65536 -kvu -np 4" \
+  --command "perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign" \
+  --date 2026-11-06 "${SRC[@]}" -o "$tmp/perf.json" 2>/dev/null
+py "$C/make_info.py" perf --loom-jsonl "$F/evidence/verify_loom.jsonl" --llama-jsonl "$F/evidence/verify_llama.jsonl" \
+  --metrics decode,prefill_1k "${SRC[@]}" -o "$tmp/perf2.json" 2>/dev/null
+py "$C/make_info.py" gates "$F/evidence/gates.json" "${SRC[@]}" -o "$tmp/gates.json" 2>/dev/null
+mkdir -p "$tmp/flint" "$tmp/d1"
+cp -r "$F/pkg/." "$tmp/flint/"
+py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --memory-bytes 67000000000 \
+  --output flint --report generated --evidence "$tmp/perf.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
+  -o "$tmp/flint/info.json" 2>/dev/null
+# a pre-loom-card/1 decision-model card through the one-time importer: an unstamped package (versions
+# recovered from the factory run and the report), its narrative report attached as REPORT.md
+cp "$D/repo/model.json" "$D/repo/model.json.lock" "$tmp/d1/"
+py "$C/import_card.py" "$D/repo" --lookups "$D/lookups.json" --report-out "$tmp/d1/REPORT.md" -o "$tmp/d1_ev.json" 2>/dev/null
+py "$C/make_info.py" build "$tmp/d1" --repo loom-fun/LiquidAI-d1-2B-loom --generator-commit $GEN --report attached \
+  --evidence "$tmp/d1_ev.json" -o "$tmp/d1/info.json" 2>/dev/null
 bad=0
 for n in flint d1; do
-  py "$C/render_card.py" "$tmp/${n}_info.json" -o "$tmp/${n}_README.md" 2>/dev/null
-  py "$C/render_card.py" "$tmp/${n}_info.json" -o "$tmp/${n}_README2.md" 2>/dev/null
-  cmp -s "$tmp/${n}_README.md" "$tmp/${n}_README2.md" || { echo "FAIL $n: two renders differ"; bad=1; }
+  py "$C/render_card.py" "$tmp/$n" 2>/dev/null
+  py "$C/render_card.py" "$tmp/$n" -o "$tmp/${n}_README2.md" 2>/dev/null
+  cmp -s "$tmp/$n/README.md" "$tmp/${n}_README2.md" || { echo "FAIL $n: two renders differ"; bad=1; }
   if [ "${UPDATE:-0}" = 1 ]; then
     mkdir -p "$here/$n/expected"
-    cp "$tmp/${n}_info.json" "$here/$n/expected/info.json"; cp "$tmp/${n}_README.md" "$here/$n/expected/README.md"
+    for f in info.json README.md REPORT.md; do cp "$tmp/$n/$f" "$here/$n/expected/$f"; done
     echo "updated $n/expected"; continue
   fi
-  for f in info.json README.md; do
-    if diff -u "$here/$n/expected/$f" "$tmp/${n}_$f"; then echo "OK   $n/$f"; else echo "FAIL $n/$f differs from the golden file"; bad=1; fi
+  for f in info.json README.md REPORT.md; do
+    if diff -u "$here/$n/expected/$f" "$tmp/$n/$f"; then echo "OK   $n/$f"; else echo "FAIL $n/$f differs from the golden file"; bad=1; fi
   done
-  py "$C/render_card.py" --check "$here/$n/expected/info.json" "$here/$n/expected/README.md" >/dev/null \
+  # the golden README (and generated REPORT) must be exactly what the golden info.json renders to with the package files
+  cp "$here/$n/expected/info.json" "$tmp/$n/info.json"; cp "$here/$n/expected/README.md" "$tmp/$n/README.md"
+  [ "$n" = d1 ] && cp "$here/$n/expected/REPORT.md" "$tmp/$n/REPORT.md"
+  py "$C/render_card.py" --check "$tmp/$n" "$tmp/$n/README.md" >/dev/null \
     || { echo "FAIL $n: expected/README.md is not the render of expected/info.json"; bad=1; }
 done
 exit $bad
