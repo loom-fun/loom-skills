@@ -653,6 +653,88 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   check.return
 }}
 """)
+# Drafter matrices without an int8 path (a vendor BF16/F16 DFlash drafter used as-is, cfg["drafter"]["gguf"]):
+# the f32-activation matvecs (1 and 4 tokens; gate/up pair) and the GEMMs (64-, 128- and 256-row tiles) the drafter's
+# propose / warm programs launch, one tensor per (format, K), vs float64 numpy on the dequantized weights. Rows per
+# workgroup as gen_llm.py picks them: mv_rows.pick_r for outputs of the trunk's hidden width (gen_dflash's %nH: fc,
+# attn_output, ffn_down), 16 for the drafter's own widths (%nDQ/%nDKV/%nDF are not in gen_llm's NVAL).
+def drafter_cases():
+    dg = (cfg.get("drafter") or {}).get("gguf")
+    if not dg or not os.path.exists(dg) or os.environ.get("DRAFTER_TESTS", "1") != "1":
+        return
+    DT = {t_.name: t_ for t_ in GGUFReader(dg).tensors}
+    fmt_of = lambda nm: DT[nm].tensor_type.name.lower()
+    if not any(n_.startswith("blk.0.") and fmt_of(n_) not in IQ_FMTS | {"f32"} for n_ in DT):
+        return
+    draw = lambda nm: np.asarray(DT[nm].data).view(np.int8).reshape(-1)
+    ddeq = lambda nm: dequantize(np.asarray(DT[nm].data), DT[nm].tensor_type).reshape(int(DT[nm].shape[1]), int(DT[nm].shape[0]))
+    gelu = cfg.get("ffn_act") == "gelu"   # kits with a GEGLU target (gemma4) emit every gate/up kernel with gelu-tanh
+    act = (lambda g: 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))) if gelu else (lambda g: g / (1 + np.exp(-g)))
+    names = ["fc.weight"] + [f"blk.0.{s}.weight" for s in ("attn_q", "attn_k", "attn_output", "ffn_gate", "ffn_down")]
+    seen_mv, seen_gm = set(), set()
+    for nm in names:
+        if nm not in DT or len(DT[nm].shape) != 2:
+            continue
+        fmt = fmt_of(nm)
+        if fmt in IQ_FMTS | {"f32"}:
+            continue
+        K, n = int(DT[nm].shape[0]), int(DT[nm].shape[1])
+        up = nm.replace("ffn_gate", "ffn_up")
+        sw = nm != up and up in DT and fmt_of(up) == fmt
+        W = ddeq(nm).astype(np.float64); U = ddeq(up).astype(np.float64) if sw else None
+        tag0 = "dr_" + nm.replace(".weight", "").replace(".", "_")
+        save(tag0 + "_w", draw(nm)); wt = ty(draw(nm))
+        wdecl = f'  %w = check.file.read.npy path("{tag0}_w.npy") : {wt}\n'; wargs, wtys = "%w", wt
+        if sw:
+            save(tag0 + "_u", draw(up)); wdecl += f'  %u = check.file.read.npy path("{tag0}_u.npy") : {ty(draw(up))}\n'
+            wargs += ", %u"; wtys += ", " + ty(draw(up))
+        if K // 32 <= 1024 and (fmt, K, sw) not in seen_mv:   # wider K runs mv_wide (not covered here)
+            seen_mv.add((fmt, K, sw))
+            for tg in (1, 4):
+                xs = rng.standard_normal((tg, K)).astype(np.float32)
+                y = act(xs @ W.T) * (xs @ U.T) if sw else xs @ W.T
+                tag = f"{tag0}_t{tg}"; save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
+                _R = pick_r(n, K, tg) if n == H else 16
+                kern = f"g_mv_{fmt}_k{K}" + ("_swiglu" if sw else "") + ("_t4" if tg == 4 else "") + (f"_r{_R}" if _R != 16 else "")
+                cases.append(f"""check.case public @mv_{tag} {{
+  %n = check.literal value({n}) : index
+  %t = check.literal value({tg}) : index
+  %acc = check.literal value(0) : i32
+{wdecl}  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{tg}x{K}xf32>
+  %e = check.file.read.npy path("{tag}_y.npy") : tensor<{tg}x{n}xf32>
+  %y = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  kernel.launch @{kern}[%n, %t](%n, %t, %acc, %x, {wargs}, %y) : [index, index](index, index, i32, tensor<{tg}x{K}xf32>, {wtys}, tensor<{tg}x{n}xf32>)
+  check.expect.close actual(%y) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{tg}x{n}xf32>
+  check.return
+}}
+""")
+        if (fmt, sw) in seen_gm or os.environ.get("GEMM_TESTS", "1") != "1":
+            continue
+        seen_gm.add((fmt, sw))
+        base_k = f"g_gemm_{fmt}_{'swiglu' if sw else 'store'}"
+        for rows, kern in ((128, base_k), (256, base_k + "_m128"), (512, base_k + "_m256")):
+            x16 = rng.standard_normal((rows, K)).astype(np.float16)
+            inv = rng.uniform(0.25, 2.0, rows).astype(np.float32)
+            sc = np.stack([np.ones(rows, np.float32), inv], 1)
+            g = (x16.astype(np.float64) @ W.T) * inv[:, None]
+            yv = act(g) * ((x16.astype(np.float64) @ U.T) * inv[:, None]) if sw else g
+            tag = f"{tag0}_gm{rows}"
+            save(tag + "_x", x16); save(tag + "_s", sc); save(tag + "_y", yv.astype(np.float32))
+            tol = 3.0e-2 * float(np.abs(yv).std() + 1e-6)
+            cases.append(f"""check.case public @{tag} {{
+  %rows = check.literal value({rows}) : index
+  %k = check.literal value({K}) : index
+  %n = check.literal value({n}) : index
+  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{rows}x{K}xf16>
+  %s = check.file.read.npy path("{tag}_s.npy") : tensor<{rows}x2xf32>
+{wdecl}  %e = check.file.read.npy path("{tag}_y.npy") : tensor<{rows}x{n}xf32>
+  %y = check.generate.fill value(0.0) : tensor<{rows}x{n}xf32>
+  kernel.launch @{kern}[%rows, %n](%rows, %k, %n, %x, %s, {wargs}, %y) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {wtys}, tensor<{rows}x{n}xf32>)
+  check.expect.close actual(%y) expected(%e) atol({tol:.3e}) rtol(1.0e-2) nan(different) : tensor<{rows}x{n}xf32>
+  check.return
+}}
+""")
+drafter_cases()
 # Prefill flash attention (gen_flash2.py / gen_flash2s.py): 64 uniform tokens at the end of a 1024-key context,
 # paged arena filled directly (identity page map), layer 0, causal; q scaled so attention is sharp (a kernel that
 # drops part of the score sum fails). Reference in float64 from f16 Q/K/V, times sigmoid(gate) when gated.
