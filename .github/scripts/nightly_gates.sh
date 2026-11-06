@@ -17,7 +17,8 @@
 #   MATERIALIZE   loom-fetch --materialize (default copy; share avoids a second copy of the GGUFs)
 #   FETCH_CACHE   loom-fetch --cache (default: loom-fetch's own)
 #   LOOM_PORT / LLAMA_PORT   default 8160 / 8130
-#   PERF=1        after the gates: Loom perf.py + c4_steady.py, reported next to the card's published numbers
+#   PERF=1        after the gates: Loom alone, perf.py --long (every card row) + 3 c4_steady.py runs, for the
+#                 card's DevLab column (card/pull_devlab.py) and next to the card's numbers and roofline (perf.md)
 #   CLEAN=1       delete the fetched package (the GGUF copies) and FETCH_CACHE at exit
 # Writes WORK/<slug>/out: gates.json, gates.out, gates_*.log, summary.json, serve.log, perf.jsonl, perf.md.
 # Every server this script or gates.sh starts is stopped at exit (state dirs under WORK/<slug>).
@@ -124,50 +125,51 @@ rc=$?
 grep -h "^GATES" "$out/gates.out" || tail -20 "$out/gates.out"
 cp "$bench"/gates.json "$bench"/gates_*.log "$out/" 2>/dev/null
 
-# 7. Report-only perf: Loom now vs the numbers the card publishes (info.json); never changes the verdict
+# 7. Perf, Loom alone: the card's DevLab column (pull_devlab.py), never compared with llama.cpp; never changes the verdict
 if [ "${PERF:-0}" = 1 ]; then
-  step "perf (report only)"
+  step "perf (DevLab column)"
   curl -sf "$url/v1/models" >/dev/null || "$SV/serve.sh" "nightly-$slug" "$LOOM_PORT" amdgpu "$mem" "$pkg/model.json" | tail -1
   model=$("$T" -c "import json; print(json.load(open('$pkg/llm_config.json'))['model_id'])")
   (cd "$out" && rm -f perf.jsonl c4.jsonl
-   "$T" "$B/perf.py" "$url" nightly --model "$model" --no-campaign --log perf.jsonl | tail -1
-   "$T" "$B/c4_steady.py" "$url" 4 --model "$model" --log c4.jsonl | tail -1 > c4_steady.txt
-   "$T" - "$B" "$pkg/info.json" <<'EOF' | tee perf.md
+   "$T" "$B/perf.py" "$url" nightly --model "$model" --no-campaign --long --log perf.jsonl | tail -1
+   for i in 1 2 3; do "$T" "$B/c4_steady.py" "$url" 4 --model "$model" --log c4.jsonl | tail -1; done > c4_steady.txt
+   "$T" - "$B/card" "$pkg/info.json" <<'EOF' | tee perf.md
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
-from bench_common import perf_metrics
+from card_lib import METRICS, card_metrics
+from make_info import c4_samples, devlab_sweep, perf_rows
 info = json.load(open(sys.argv[2])) if os.path.exists(sys.argv[2]) else {}
-card = info.get("metrics", {})
-if "performance" in info:  # loom-card/1: performance.metrics.<key>.{loom,llamacpp}
-    keys = {"decode": "decode_tps", "decode_2k": "decode_tps_2k", "decode_32k": "decode_tps_32k", "streams4": "c4_steady_tps"}
-    card = {}
-    for k, v in (info["performance"].get("metrics") or {}).items():
-        card[keys.get(k, k)] = v.get("loom")
-        card[keys.get(k, k) + "_llamacpp"] = v.get("llamacpp")
-now = {}
-for line in open("perf.jsonl"):
-    now.update(perf_metrics(json.loads(line)))
-try:
-    now["c4_steady_tps"] = json.loads(open("c4_steady.txt").read())["agg_tps"]
-except Exception:  # noqa: BLE001
-    pass
-name = lambda m: m.replace("000", "k") if m.startswith("prefill_") else m
-print("| metric | Loom tonight | Loom on the card | llama.cpp on the card |\n|---|---|---|---|")
-for m, v in sorted(now.items()):
-    c, l = card.get(name(m)), card.get(name(m) + "_llamacpp")
-    c, l = (c[0] if isinstance(c, list) else c), (l[0] if isinstance(l, list) else l)
-    print(f"| {name(m)} | {v:.1f} | {c if c is not None else '-'} | {l if l is not None else '-'} |")
+card = {k: m.get("loom") for k, (m, _) in card_metrics(info).items()}
+roof = (info.get("roofline") or {}).get("metrics") or {}
+now = devlab_sweep(perf_rows("perf.jsonl", "loom"), c4_samples("c4_steady.txt"), None)["metrics"]
+f = lambda v: "-" if v is None else f"{v:.1f}"
+print("| metric | Loom tonight | Loom on the card | tonight / card | roofline |\n|---|---|---|---|---|")
+for k, label in METRICS:
+    v, c, r = (now.get(k) or {}).get("loom"), card.get(k), (roof.get(k) or {}).get("ceiling")
+    if v is not None:
+        print(f"| {label} | {f(v)} | {f(c)} | {f'{v / c - 1:+.0%}' if c else '-'} | {f(r)} |")
 EOF
   )
 fi
 
 # 8. One summary for the workflow's table
-python3 - "$repo" "$slug" "$level" "$rc" $(( $(date +%s) - t0 )) "$out" <<'EOF'
-import json, os, sys
-repo, slug, level, rc, secs, out = sys.argv[1:]
+# (runner, device, SDK and programs measured: the evidence pull_devlab.py records for the gates and the DevLab column)
+python3 - "$repo" "$slug" "$level" "$rc" $(( $(date +%s) - t0 )) "$out" "$B" "$pkg" <<'EOF'
+import json, os, re, sys
+repo, slug, level, rc, secs, out, B, pkg = sys.argv[1:]
 g = json.load(open(os.path.join(out, "gates.json"))) if os.path.exists(os.path.join(out, "gates.json")) else {}
 s = {"repo": repo, "slug": slug, "level": level, "verdict": g.get("verdict", "ERROR"), "seconds": int(secs),
      "gates_seconds": g.get("seconds"), "gates": {n: {"pass": x["pass"], "seconds": x["seconds"]} for n, x in g.get("gates", {}).items()}}
+m = re.match(r"ephemeral-devlab-(.+?)-\d+$", os.environ.get("RUNNER_NAME", ""))
+s["runner"] = m.group(1).upper() if m else os.environ.get("RUNNER_NAME") or os.uname().nodename
+sys.path[:0] = [B, os.path.join(B, "card")]
+try:
+    from machine_info import detect_device, hrx_loom_identity
+    s["device"], s["hrx_loom"] = detect_device(), hrx_loom_identity()
+    from card_lib import programs_sha256
+    s["programs_sha256"] = programs_sha256(pkg)
+except Exception as e:  # noqa: BLE001  (evidence only: never fail the summary)
+    print(f"summary: no device/SDK/programs evidence: {e}")
 json.dump(s, open(os.path.join(out, "summary.json"), "w"), indent=1)
 print("NIGHTLY", s["verdict"], slug, f"level={level} {secs}s", {n: "PASS" if x["pass"] else "FAIL" for n, x in s["gates"].items()})
 EOF

@@ -77,7 +77,7 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
 per card in `.github/nightly-models.json`, in parallel, runs `.github/scripts/nightly_gates.sh CARD_REPO`:
 install hrx-loom, `loom-fetch` the latest card from huggingface.co/loom-fun, build the reference example's kit
 when the card's chat format needs it (`LOOM_KIT`), fetch the card's llama.cpp release, serve, `LEVEL=full`
-gates, and a report-only perf run against the card's published numbers. No LLM and no skill run: a FAIL is a
+gates, and a Loom-only perf run (every card row) for the card's DevLab column. No LLM and no skill run: a FAIL is a
 regression of the published package (or of the gate scripts). llama.cpp references are cached between nights
 (`actions/cache`). Run it on demand from the Actions tab (pick cards and a level), or on a pull request by adding
 the `nightly-gates` label (the PR branch's scripts run). The same script runs by hand on any Strix Halo:

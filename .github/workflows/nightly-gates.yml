@@ -24,7 +24,7 @@ on:
         type: choice
         options: [full, quick, dev, dev+full, fast]
       perf:
-        description: "Report-only perf (Loom vs the card's published numbers)"
+        description: "Perf, Loom alone (the cards' DevLab column; every row incl. long context)"
         required: false
         default: true
         type: boolean
