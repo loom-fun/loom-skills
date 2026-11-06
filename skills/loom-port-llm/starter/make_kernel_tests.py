@@ -431,6 +431,60 @@ if cfg.get("recurrent_layers"):
   check.return
 }}
 """)
+# 4b. g_gdn_recurrence alone on one launch of two spans: a fresh 37-token span (position 0) and a 5-token span that
+# continues its reader slot (odd lengths: partial output batches; each span's own reader/writer slots).
+if cfg.get("recurrent_layers"):
+    spans_ = [(37, 0, False), (5, 10, True)]; t = sum(L for L, _, _ in spans_); ns = len(spans_)
+    x = rng.standard_normal((t, C)).astype(np.float32)
+    qs, ks, vs = x[:, :HK * DK].reshape(t, HK, DK), x[:, HK * DK:2 * HK * DK].reshape(t, HK, DK), x[:, 2 * HK * DK:].reshape(t, HV, DV)
+    qinv = 1 / np.sqrt((qs.astype(np.float64) ** 2).sum(-1) + eps); kinv = 1 / np.sqrt((ks.astype(np.float64) ** 2).sum(-1) + eps)
+    inv = np.stack([qinv, kinv], -1).reshape(t, 2 * HK).astype(np.float32)
+    alpha = rng.standard_normal((t, HV)).astype(np.float32); beta = rng.standard_normal((t, HV)).astype(np.float32)
+    arena = np.zeros(2 * ns * LB // 4, np.float32); meta = np.zeros(4 + 9 * ns, np.int32); meta[0] = ns
+    origins = np.zeros((ns, 5), np.int64); raw_o = np.zeros((t, HV, DV)); first = 0; finals = []
+    for si, (L, p0, cont) in enumerate(spans_):
+        rd, wr = 2 * si * LB, (2 * si + 1) * LB
+        origins[si] = [rd, wr, 0, p0, 0]; meta[4 + 9 * si:4 + 9 * si + 5] = [L, p0, 0, si, first]
+        S = np.zeros((HV, DV, DK))
+        if cont:
+            S0 = (0.3 * rng.standard_normal((HV, DV, DK))).astype(np.float32)
+            arena[rd // 4:rd // 4 + SB // 4] = S0.reshape(-1); S = S0.astype(np.float64)
+        for i in range(first, first + L):
+            for h in range(HV):
+                kh = h % HK; q = qs[i, kh] * qinv[i, kh] / np.sqrt(DK); k = ks[i, kh] * kinv[i, kh]
+                St = S[h] * np.exp(np.log1p(np.exp(float(alpha[i, h]) + dt[h])) * a_log[h])
+                d = (vs[i, h] - St @ k) / (1 + np.exp(-float(beta[i, h])))
+                S[h] = St + np.outer(d, k); raw_o[i, h] = S[h] @ q
+        finals.append((wr, S)); first += L
+    expect = arena.copy()
+    for wr, S in finals:
+        expect[wr // 4:wr // 4 + SB // 4] = S.astype(np.float32).reshape(-1)
+    for n, a in [("gr_meta", meta), ("gr_orig", origins.reshape(-1).view(np.int32)), ("gr_arena", arena), ("gr_expect", expect),
+                 ("gr_x", x), ("gr_inv", inv), ("gr_alpha", alpha), ("gr_beta", beta), ("gr_raw", raw_o.reshape(t, VD).astype(np.float32))]:
+        save(n, a)
+    AT = f"tensor<{2 * ns * LB // 4}xf32>"; MT = f"tensor<{4 + 9 * ns}xi32>"; OT = f"tensor<{10 * ns}xi32>"
+    cases.append(f"""check.case public @gdn_recurrence_spans {{
+  %t = check.literal value({t}) : index
+  %spans = check.literal value({ns}) : index
+  %layer = check.literal value(0) : index
+  %meta = check.file.read.npy path("gr_meta.npy") : {MT}
+  %orig = check.file.read.npy path("gr_orig.npy") : {OT}
+  %arena = check.file.read.npy path("gr_arena.npy") : {AT}
+  %expect = check.file.read.npy path("gr_expect.npy") : {AT}
+  %x = check.file.read.npy path("gr_x.npy") : tensor<{t}x{C}xf32>
+  %inv = check.file.read.npy path("gr_inv.npy") : tensor<{t}x{2 * HK}xf32>
+  %alpha = check.file.read.npy path("gr_alpha.npy") : tensor<{t}x{HV}xf32>
+  %beta = check.file.read.npy path("gr_beta.npy") : tensor<{t}x{HV}xf32>
+  %a = check.file.read.npy path("g_a.npy") : tensor<{HV}xf32>
+  %dt = check.file.read.npy path("g_dt.npy") : tensor<{HV}xf32>
+  %eraw = check.file.read.npy path("gr_raw.npy") : tensor<{t}x{VD}xf32>
+  %raw = check.generate.fill value(0.0) : tensor<{t}x{VD}xf32>
+  kernel.launch @g_gdn_recurrence[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x, %inv, %alpha, %beta, %a, %dt, %raw) : [index](index, index, index, {MT}, {OT}, {AT}, tensor<{t}x{C}xf32>, tensor<{t}x{2 * HK}xf32>, tensor<{t}x{HV}xf32>, tensor<{t}x{HV}xf32>, tensor<{HV}xf32>, tensor<{HV}xf32>, tensor<{t}x{VD}xf32>)
+  check.expect.close actual(%raw) expected(%eraw) atol(1.0e-4) rtol(2.0e-3) nan(different) : tensor<{t}x{VD}xf32>
+  check.expect.close actual(%arena) expected(%expect) atol(1.0e-4) rtol(1.0e-3) nan(different) : {AT}
+  check.return
+}}
+""")
 # g_row_scale_f16 (the GEMM A operand): per-row power-of-two scale 2^-e, e = clamp(floor(log2 max|x|) - 13, 0, 100),
 # x16 = f16(x * scale); rows of very different magnitude, width = the FFN width (the widest the model uses).
 if os.environ.get("GEMM_TESTS", "1") == "1":
