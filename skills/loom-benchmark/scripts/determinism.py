@@ -3,19 +3,20 @@ sent REPS times (alone, one at a time, or CONC at once), every output compared w
 Records prompt_tokens_details.cached_tokens per request, so a divergence can be told apart by path
 (full prefill vs prefix-cache hit) from a race (same path, different output).
 
-usage: python determinism.py URL --model ID [--n 4] [--reps 10] [--conc 1] [--max-tokens 64] [--log FILE.jsonl]
+usage: python determinism.py URL --model ID [--n 4] [--reps 10] [--conc 1] [--pairs] [--max-tokens 64] [--log FILE.jsonl]
 Prints one line per prompt and DETERMINISTIC / NOT DETERMINISTIC; exit 1 when any output differs.
+Race hunting: --conc 1 (each prompt alone) must give one output per path (equal cached tokens) on any correct
+build: a difference there is a race; --pairs shows whether a prefix-cache hit rounds differently from a miss;
+--conc 4 mixes prefill and decode tokens in shared epochs (path-dependent rounding, near-ties may flip).
 """
 import argparse
 import concurrent.futures as cf
 import json
-import os
 import sys
 
 import requests
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "skills", "loom-benchmark", "scripts"))
-from bench_common import doc  # noqa: E402
+from bench_common import doc
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -51,7 +52,7 @@ if a.log:
     with open(a.log, "a") as f:
         for r in res:
             f.write(json.dumps(r) + "\n")
-bad = 0
+bad = race = 0
 for i in range(a.n):
     rs = [r for r in res if r["prompt"] == i]
     ref = rs[0]["text"]
@@ -67,9 +68,13 @@ for i in range(a.n):
         by.setdefault(r["cached"], set()).add(r["text"])
     paths = ", ".join(f"cached {c}: {len(rs_)} distinct" for c, rs_ in sorted(by.items()))
     same_path = all(len(x) == 1 for x in by.values())
+    race += not same_path and a.conc == 1
     print(f"prompt {i} [{paths}; {'each path deterministic' if same_path else 'a path gave two outputs'}"
           f"{'; paths differ' if len({t for x in by.values() for t in x}) > 1 and same_path else ''}]")
     print(f"prompt {i} ({rs[0]['prompt_tokens']} tokens): {len(rs) - len(diff)}/{len(rs)} identical to rep 0, "
           f"{len({r['text'] for r in rs})} distinct outputs, cached tokens {[r['cached'] for r in rs]}{first}")
-print(("NOT DETERMINISTIC" if bad else "DETERMINISTIC") + f": {bad}/{a.n} prompts gave more than one output over {a.reps} reps (conc {a.conc})")
-sys.exit(1 if bad else 0)
+print(("DETERMINISTIC" if not bad else "PATH-DEPENDENT" if a.conc == 1 and not race else "NOT DETERMINISTIC") + f": {bad}/{a.n} prompts gave more than one output over {a.reps} reps (conc {a.conc})"
+      + (f"; RACE: {race} prompts gave two outputs alone on the same path" if race else
+         "; alone, every path deterministic (differences are hit-vs-miss rounding)" if bad and a.conc == 1 else
+         "; concurrent: shared-epoch composition varies run to run" if bad else ""))
+sys.exit(1 if race or (bad and a.conc > 1) else 0)

@@ -153,10 +153,16 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
 - Long goldens (16k/32k) are what catch KV paging, prefill chunking and attention
   masking bugs.
 - `consistency.py` catches mixed-sequence epoch bugs (padding, tile uniformity, fallback lists) and
-  races (each prompt also runs alone twice and must be identical). A concurrent-vs-alone difference
-  passes only when every prompt is deterministic alone and every divergence is a near-tie by the
+  races (each prompt also runs alone twice and must be identical on the same path). A concurrent-vs-alone
+  difference passes only when every prompt is deterministic alone and every divergence is a near-tie by the
   compare rule (gap ≤ 1 nat, measured with `--pkg/--llama`): decode tokens that share an epoch with a
   prefill go through the f16 GEMM path instead of the f32 matvec path. Anything else is a bug.
+  "Same path" means equal `cached_tokens`: a repeat that hits the prefix cache (its history retained from
+  the concurrent phase) recomputes only the uncached tail with the decode-shaped kernels, so it can flip a
+  near-tie against the first, uncached run without any race (issue #39); such a prompt runs alone again
+  until two runs share a path, and the hit-vs-miss difference takes the near-tie rule. To hunt a suspected
+  race, `determinism.py URL --model ID --conc 1 --reps 20` (alone, never a cache hit: any difference is a
+  race), `--pairs` (cache miss vs hit) and `--conc 4` (mixed epochs) separate the three causes.
 - 503 errors on long prompts mean `--memory_bytes` is too small for the KV pool,
   not a model bug.
 - **agent_golden.py** runs three tool-using tasks (weather lookups, a calculator)

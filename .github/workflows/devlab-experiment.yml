@@ -72,7 +72,7 @@ jobs:
           retention-days: 14
       - name: clean up
         if: always()
-        run: rm -rf "$WORK/_card" "$WORK/${{ matrix.variant }}"
+        run: rm -rf "$WORK"/_card_* "$WORK/${{ matrix.variant }}"
 
   summary:
     needs: [variants, run]

@@ -6,7 +6,7 @@
 #   [WORK=~/devlab-exp] devlab_experiment.sh EXPERIMENT.json VARIANT_NAME
 #
 # EXPERIMENT.json:
-#   {"card": "loom-fun/<repo>", "memory_bytes": N, "kit": "gemma4" | null,
+#   {"card": "loom-fun/<repo>", "memory_bytes": N, "kit": "gemma4" | null, "llamacpp": "b1368",   (a variant may override these)
 #    "steps": ["consistency:20", "determinism:1:10", "determinism:4:5", "ktest"],     (default for every variant)
 #    "variants": [{"name": "card"},                                   (the card's own programs, as published)
 #                 {"name": "x", "build": {"ENV": "value", ...},       (rebuild: build.py with these env vars;
@@ -14,6 +14,8 @@
 #                  "execution": {"draft_depth": 0},                    (model.json preset overrides)
 #                  "steps": [...]}]}
 # Steps: consistency:N   consistency.py N times (counts runs that are not deterministic / not consistent)
+#        consistency:N:llama  the same with --pkg/--llama (the card's llama.cpp build): the gate's own verdict
+#        pairs:R         determinism.py --pairs: each prompt twice in a row (prefix-cache miss, then hit), R reps
 #        determinism:C:R determinism.py, R reps of each prompt with C requests in flight
 #        ktest           the starter's kernel tests (make_kernel_tests.py + run_kernel_tests.sh) on the package
 #        gates:LEVEL     gates.sh at LEVEL against the card's llama.cpp build ("llamacpp" in EXPERIMENT.json)
@@ -28,8 +30,9 @@ export LOOM_SERVE_STATE=$D/state LLAMACPP_STATE=$D/llstate PYTHONDONTWRITEBYTECO
 PORT=${LOOM_PORT:-8161}; LLAMA_PORT=${LLAMA_PORT:-8131}; url=http://127.0.0.1:$PORT
 t0=$(date +%s); step() { echo "== $* ($(date +%T), +$(( $(date +%s) - t0 ))s)"; }
 q() { python3 -c "import json,sys; e=json.load(open('$exp')); v=next(v for v in e['variants'] if v['name']=='$name'); $1"; }
-repo=$(q "print(e['card'])"); mem=$(q "print(e['memory_bytes'])"); kit=$(q "print(e.get('kit') or '-')")
-tag=$(q "print(e.get('llamacpp') or '-')")
+# card, memory_bytes, kit and llamacpp: the variant's own, else the experiment's
+f() { q "print(v.get('$1', e.get('$1')) or '-')"; }
+repo=$(f card); mem=$(f memory_bytes); kit=$(f kit); tag=$(f llamacpp)
 steps=$(q "print(' '.join(v.get('steps') or e.get('steps') or ['consistency:20']))")
 echo "variant $name: $(q "print(json.dumps(v))")"
 
@@ -49,7 +52,7 @@ fi
 export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 
 # 2. The card (shared by the variants of one runner: fetched once into WORK/card)
-card=$WORK/_card; base=https://huggingface.co/$repo/resolve/main
+card=$WORK/_card_$(echo "$repo" | tr "/" "_"); base=https://huggingface.co/$repo/resolve/main
 if [ ! -f "$card/.fetched" ]; then
   step "fetch $repo"; rm -rf "$card"
   "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" || { echo "FAIL: loom-fetch"; exit 1; }
@@ -136,6 +139,12 @@ EOF
 cp "$pkg/model.json" "$out/model.json"; sha256sum "$pkg"/program/*.loom > "$out/programs.sha256"
 model=$("$T" -c "import json; print(json.load(open('$pkg/model.json'))['model']['id'])")
 
+llama_up() {   # the card's llama.cpp build on the card's GGUF (reference for near-tie diagnosis)
+  [ "$tag" != - ] || { echo "EXPERIMENT.json has no llamacpp tag"; return 1; }
+  curl -sf "http://127.0.0.1:$LLAMA_PORT/health" >/dev/null && return 0
+  LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag
+  "$B/llamacpp_server.sh" "$("$T" -c "import json; print(json.load(open('$pkg/llm_config.json'))['gguf'])")" "$LLAMA_PORT" 1 8192 | tail -1
+}
 serve() { "$SV/serve.sh" "exp-$name" "$PORT" amdgpu "$mem" "$pkg/model.json" | tail -2; curl -sf "$url/v1/models" >/dev/null; }
 declare -A res
 for s in $steps; do
@@ -150,28 +159,35 @@ for s in $steps; do
       res[$s]=$([ $rc = 0 ] && echo PASS || echo FAIL);;
     consistency)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
-      step "consistency x $p1"; nd=0; nc=0
+      LLA=()
+      if [ "$p2" = llama ]; then   # with --pkg/--llama: the gate's own verdict (near-tie rule for concurrent divergences)
+        llama_up || { res[$s]=ERROR; continue; }; LLA=(--pkg "$pkg" --llama "http://127.0.0.1:$LLAMA_PORT")
+      fi
+      step "consistency x $p1 ${p2:-}"; nd=0; nc=0; np=0
       for i in $(seq 1 "$p1"); do
-        "$T" "$B/consistency.py" "$url" --model "$model" > "$out/consistency_$i.log" 2>&1
+        "$T" "$B/consistency.py" "$url" --model "$model" "${LLA[@]}" > "$out/consistency_$i.log" 2>&1
+        grep -q "^PASS$" "$out/consistency_$i.log" && np=$((np + 1))
         grep -q "NOT DETERMINISTIC" "$out/consistency_$i.log" && nd=$((nd + 1))
         grep -q "identical when concurrent: \[.*False" "$out/consistency_$i.log" && nc=$((nc + 1))
         echo "  $i: $(head -1 "$out/consistency_$i.log" | cut -c40-400)"
       done
-      res[$s]="nondeterministic $nd/$p1, concurrent-mismatch $nc/$p1";;
+      res[$s]="gate PASS $np/$p1, nondeterministic $nd/$p1, concurrent-mismatch $nc/$p1"
+      grep -h "first divergence\|near-tie" "$out"/consistency_*.log | sort | uniq -c | sort -rn | head -8;;
     determinism)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       step "determinism conc $p1 reps $p2"
-      "$T" "$here/.github/scripts/determinism.py" "$url" --model "$model" --conc "$p1" --reps "$p2" --log "$out/determinism_c$p1.jsonl" \
+      "$T" "$B/determinism.py" "$url" --model "$model" --conc "$p1" --reps "$p2" --log "$out/determinism_c$p1.jsonl" \
         > "$out/determinism_c$p1.log" 2>&1
       cut -c1-400 "$out/determinism_c$p1.log"; res[$s]=$(tail -1 "$out/determinism_c$p1.log" | cut -c1-120);;
     pairs)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       step "prefix-cache pairs reps $p1"
-      "$T" "$here/.github/scripts/determinism.py" "$url" --model "$model" --pairs --reps "$p1" --log "$out/pairs.jsonl" > "$out/pairs.log" 2>&1
+      "$T" "$B/determinism.py" "$url" --model "$model" --pairs --reps "$p1" --log "$out/pairs.jsonl" > "$out/pairs.log" 2>&1
       cut -c1-400 "$out/pairs.log"; res[$s]=$(grep -c "a path gave two outputs" "$out/pairs.log")" prompts with a nondeterministic path, "$(grep -c "paths differ" "$out/pairs.log")" with hit != miss";;
     gates)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       [ "$tag" != - ] || { echo "gates: EXPERIMENT.json has no llamacpp tag"; res[$s]=ERROR; continue; }
+      "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
       LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag
       step "gates LEVEL=$p1"
       gguf=$("$T" -c "import json; print(json.load(open('$pkg/llm_config.json'))['gguf'])")

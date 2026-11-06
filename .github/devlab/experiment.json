@@ -1,14 +1,14 @@
 {
- "_comment": "Issue #39 round 2: consistency failures vs prefix-cache path (cached tokens per run), alone determinism, drafting verify width.",
+ "_comment": "Issue #39 verification: path-aware consistency.py (gate verdict with llama.cpp) 20x on Bolt with drafting, Bolt quick gates, kernel tests on the rebuilt Bolt package, and another card's consistency.",
  "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
  "memory_bytes": 34000000000,
  "kit": "gemma4",
  "llamacpp": "b1368",
- "steps": ["consistency:20", "pairs:3", "determinism:1:12", "determinism:4:6"],
  "variants": [
-  {"name": "card"},
-  {"name": "nodraft", "build": {"SPEC": "off"}},
-  {"name": "spec-exact", "build": {"SPEC_EXACT": "1"}},
-  {"name": "spec-mm-from-64", "build": {"SPEC_MM_FROM": "64"}}
+  {"name": "card", "steps": ["consistency:20:llama", "determinism:1:12", "gates:quick"]},
+  {"name": "rebuilt-ktest", "build": {}, "steps": ["ktest", "consistency:20:llama"]},
+  {"name": "nodraft", "build": {"SPEC": "off"}, "steps": ["consistency:20:llama"]},
+  {"name": "qwen3.8-27b", "card": "loom-fun/bartowski-Qwen3.8-27B-loom", "memory_bytes": 52000000000, "kit": null,
+   "llamacpp": "b1355", "steps": ["consistency:10:llama", "determinism:1:6"]}
  ]
 }
