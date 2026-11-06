@@ -26,7 +26,7 @@ The first served model of each kind is used, and missing kinds show "(none)".
 2. Start the UI. The tools venv needs fastapi, uvicorn and httpx:
    ```bash
    LOOM_UI_UPSTREAMS="gpu=http://127.0.0.1:8100,npu=http://127.0.0.1:8101" \
-     bash ${CLAUDE_SKILL_DIR}/start_ui.sh 8090 ~/loom/.tools
+     bash <skill-dir>/start_ui.sh 8090 ~/loom/.tools
    ```
    It prints `UI: http://127.0.0.1:8090`. The log is `/tmp/loom-ui-8090.log`; to stop it,
    run `kill $(cat /tmp/loom-ui-8090.pid)`.

@@ -57,7 +57,7 @@ In every case:
 ## 2. Run
 
 ```bash
-T=~/loom/.tools/bin/python; R=${CLAUDE_SKILL_DIR}
+T=~/loom/.tools/bin/python; R=<skill-dir>
 # qualify.sh runs this for you, with the budget from section 0. By hand:
 $T $R/roofline.py MODEL.gguf --cfg cfg.json --baseline bench/perf_log.jsonl --ctx 1000,2000,16000 --out bench/roofline.json \
    --budget-h 0.5          # the user's budget (section 0); add --goal decode_tps=70 for a user target

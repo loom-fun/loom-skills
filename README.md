@@ -1,6 +1,6 @@
-# Loom skills for Claude Code
+# Loom agent skills
 
-[Claude Code](https://claude.com/claude-code) skills that let a fresh session use
+Agent skills that let a fresh session use
 [AMD Loom](https://github.com/ROCm/hrx-system) (the `hrx-loom` compiler, runtime and
 `loom-serve` model server) from a cold start:
 
@@ -16,32 +16,17 @@ The skills were developed and verified on an AMD Ryzen AI Max+ 395 "Strix Halo"
 
 ## Install
 
-**As a Claude Code plugin (recommended).** Run these inside Claude Code:
-
-```
-/plugin marketplace add loom-fun/loom-skills
-/plugin install loom@loom
-```
-
-Or from a shell:
+You can install loom-skills on any agent that supports skills (Claude Code, Cursor, Codex, ...):
 
 ```bash
-claude plugin marketplace add loom-fun/loom-skills
-claude plugin install loom@loom
+npx skills add loom-fun/loom-skills
 ```
 
-Then start a new session. To update later, run
-`claude plugin marketplace update loom && claude plugin update loom@loom`.
+If you don't have Node installed, [`install.sh`](install.sh) is a reference script that copies the
+skills into `~/.agents/skills` and links them into `~/.claude/skills`, so Claude Code, Cursor, Codex
+and most other agents pick them up.
 
-> While this repo is private, you need read access to it and working git credentials
-> for github.com, because Claude Code clones it with your existing git setup:
-> `gh auth login && gh auth setup-git`, or an SSH key loaded in ssh-agent.
-
-**Or as plain user skills**, by copying them into `~/.claude/skills`:
-
-```bash
-git clone https://github.com/loom-fun/loom-skills && ./loom-skills/install.sh      # ./install.sh --uninstall to remove
-```
+We recommend Claude Code: the skills were developed with it, and the trial results below come from it.
 
 ## Use
 
@@ -51,7 +36,7 @@ git clone https://github.com/loom-fun/loom-skills && ./loom-skills/install.sh   
 /loom get <hf-org>/<model> working on loom-serve, optimize it, and report the performance relative to llamacpp rocm
 ```
 
-Claude runs the whole pipeline without stopping, within the model's roofline time budget (about
+The agent runs the whole pipeline without stopping, within the model's roofline time budget (about
 25 min for a 0.8B to 70 min for a 30B dense model in recent trials), as four scripted steps
 with the agent's judgment only where it is needed:
 1. `loom-port-llm/port.sh`: pick the GGUF (header-only probe: supported formats, fits in GPU
@@ -74,7 +59,7 @@ Jinja chat template and verified against it. Dense transformers and Qwen3.5-styl
 gated delta-net hybrids are covered by the starter kit. The llama.cpp reference
 outputs are cached, so re-running the gates on an optimized build only costs the Loom side.
 
-**Recent fresh-agent trials (hrx-loom 0.1.0, Strix Halo, November 2026)**, one prompt each, full
+**Recent fresh-agent trials (Claude Code, hrx-loom 0.1.0, Strix Halo, November 2026)**, one prompt each, full
 gates and audit PASS, against the fastest llama.cpp ROCm build on the same GGUF: Qwen3.5-0.8B in 24 min
 (decode +27 %, prefill 1k/2k +22/+28 %), Bolt-E4B (Gemma 4) in 52 min (prefill 1k/2k +44/+58 %),
 flint (40B MoE) in 58 min (decode +25 %), Muse-Glimmer-30B in 71 min. Every trial and its lessons:
@@ -96,19 +81,19 @@ Ask in plain language, for example:
 - "optimize this model" (roofline → targets → about 30 min of optimization → report);
 - "what's the roofline for this model?" or "is +50 % decode achievable?".
 
-The skill descriptions make Claude pick the right one. You can also invoke a skill by
+The skill descriptions make the agent pick the right one. You can also invoke a skill by
 name:
 
-| Plugin install | Copy install | What it does |
-|---|---|---|
-| `/loom:loom` | `/loom` | Start here: overview, hard safety rules, which skill to use |
-| `/loom:loom-setup` | `/loom-setup` | Install the SDK (`hrx-loom` from PyPI) and the matching model library, `loom-fetch`, start/stop/inspect `loom-serve` (GPU and NPU) |
-| `/loom:loom-demo-ui` | `/loom-demo-ui` | Web playground: chat, transcribe, speak, image, embed. It finds models from the servers' `/v1/status` |
-| `/loom:loom-port-llm` | `/loom-port-llm` | Config-driven starter kit that turns a GGUF LLM (dense, or a Qwen3.5-style gated delta-net hybrid) into a Loom package at its native context length, with tool calling, reasoning and history reuse derived from the model's own chat template: inspect → generate kernels → build → kernel unit tests → golden, agent and full-context gates |
-| `/loom:loom-roofline` | `/loom-roofline` | Roofline for decode/prefill/c4 from the GGUF, calibrated against achieved Loom efficiency; picks per-metric targets vs llama.cpp and a time budget; a rate-of-approach controller decides continue / pivot / stop |
-| `/loom:loom-optimize` | `/loom-optimize` | The measure / ablate / change / verify loop, a kernel A/B helper, and a catalog of optimizations that worked (and that didn't) |
-| `/loom:loom-benchmark` | `/loom-benchmark` | Token-by-token golden comparison against llama.cpp ROCm, a multi-turn tool-calling gate, a full-context needle gate, a batching-consistency check, throughput workloads, reporting rules |
-| `/loom:loom-improve` | `/loom-improve` | Improve the skills themselves: the KPIs (wall clock, agentic correctness vs llama.cpp, speed), fresh-agent trials on a reference model suite, a stall watchdog, a KPI regression check and a fixed quiet-GPU evaluator. Prompt: "your goal is to improve the loom skill at X" |
+| Skill | What it does |
+|---|---|
+| `loom` | Start here: overview, hard safety rules, which skill to use |
+| `loom-setup` | Install the SDK (`hrx-loom` from PyPI) and the matching model library, `loom-fetch`, start/stop/inspect `loom-serve` (GPU and NPU) |
+| `loom-demo-ui` | Web playground: chat, transcribe, speak, image, embed. It finds models from the servers' `/v1/status` |
+| `loom-port-llm` | Config-driven starter kit that turns a GGUF LLM (dense, or a Qwen3.5-style gated delta-net hybrid) into a Loom package at its native context length, with tool calling, reasoning and history reuse derived from the model's own chat template: inspect → generate kernels → build → kernel unit tests → golden, agent and full-context gates |
+| `loom-roofline` | Roofline for decode/prefill/c4 from the GGUF, calibrated against achieved Loom efficiency; picks per-metric targets vs llama.cpp and a time budget; a rate-of-approach controller decides continue / pivot / stop |
+| `loom-optimize` | The measure / ablate / change / verify loop, a kernel A/B helper, and a catalog of optimizations that worked (and that didn't) |
+| `loom-benchmark` | Token-by-token golden comparison against llama.cpp ROCm, a multi-turn tool-calling gate, a full-context needle gate, a batching-consistency check, throughput workloads, reporting rules |
+| `loom-improve` | Improve the skills themselves: the KPIs (wall clock, agentic correctness vs llama.cpp, speed), fresh-agent trials on a reference model suite, a stall watchdog, a KPI regression check and a fixed quiet-GPU evaluator. Prompt: "your goal is to improve the loom skill at X" |
 
 A starter-covered model goes from prompt to report within its roofline budget (port ≈1 min,
 qualify ≈10 min, then optimization and finalize). An architecture the starter doesn't
@@ -142,20 +127,17 @@ optimization budget shrinks to fit.
 ## Repository layout
 
 ```
-.claude-plugin/{plugin.json,marketplace.json}   # plugin + single-plugin marketplace
+.claude-plugin/{plugin.json,marketplace.json}   # Claude Code plugin manifests (used by the CI factory)
 skills/<skill>/SKILL.md                          # the eight skills, with their scripts and references
-install.sh                                       # copy-install alternative
+install.sh                                       # install without Node
 LICENSE                                          # MIT
 THIRD_PARTY_NOTICES.md
 ```
 
-Skills refer to their bundled files through `${CLAUDE_SKILL_DIR}`, so the same tree
-works both as a plugin and when copied to `~/.claude/skills`.
-
 ## Contributing
 
-To try local changes without installing, run `claude --plugin-dir /path/to/loom-skills`, and
-check the manifests with `claude plugin validate .`. When you fix a skill, rerun a
+To try local changes, install them from your checkout with `npx skills add /path/to/loom-skills`.
+When you fix a skill, rerun a
 cold-start test: a fresh subagent follows the skills literally in a new install root
 and reports every wrong or missing instruction. That is how these skills were
 debugged.

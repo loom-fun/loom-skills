@@ -5,7 +5,7 @@ description: Correctness and performance methodology for Loom models vs llama.cp
 
 # Benchmark and verify Loom models
 
-Scripts are in `${CLAUDE_SKILL_DIR}/scripts/`; run them with the tools
+Scripts are in `<skill-dir>/scripts/`; run them with the tools
 venv (`~/loom/.tools/bin/python`). Workload documents: `bench_common.doc(n)` for n in 1000, 2000, 8000, 16000, 32000 (stored as `data/doc_2000.txt` and `doc_32000.txt`; the others are byte prefixes).
 They are real text (Loom's own markdown docs) and their sizes are approximate token counts.
 Scripts that take `PACKAGE` read `llm_config.json`, `tokenizer.json` and the model
@@ -16,7 +16,7 @@ id from a package built by `loom-port-llm/starter/build.py`.
 **Get the latest lemonade build, then pick the fastest of it and what is installed** (`qualify.sh`
 does both):
 ```bash
-S=${CLAUDE_SKILL_DIR}/scripts
+S=<skill-dir>/scripts
 $S/fetch_llamacpp.sh                 # latest lemonade-sdk/llamacpp-rocm for this GPU -> ~/llamacpp-rocm/<tag> (pre-approved, ~25 s)
 $S/pick_llamacpp.sh MODEL.gguf 8139 "$HOME"   # every llama-server with libggml-hip.so, benchmarked and ranked
 ```
@@ -84,7 +84,7 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
   only proves the size is served: run it once, on the final build.
 
 ```bash
-S=${CLAUDE_SKILL_DIR}/scripts; P=~/work/mymodel/pkg; T=~/loom/.tools/bin/python; mkdir -p ~/work/mymodel/bench && cd ~/work/mymodel/bench   # outputs land here, not in the skill
+S=<skill-dir>/scripts; P=~/work/mymodel/pkg; T=~/loom/.tools/bin/python; mkdir -p ~/work/mymodel/bench && cd ~/work/mymodel/bench   # outputs land here, not in the skill
 $T $S/golden.py $P golden.json --llama http://127.0.0.1:8130 --long 1000,2000,16000,32000    # once per model/GGUF
 $T $S/golden.py $P golden2.json --llama http://127.0.0.1:8130 --long 1000,2000,16000,32000   # 2nd recording: llama.cpp is not run-to-run deterministic
 $T $S/compare.py $P golden.json --alt golden2.json --url http://127.0.0.1:8160   # -> per-prompt lines + {"verdict": "PASS"|"FAIL", ...}
