@@ -221,7 +221,7 @@ jobs:
           - Start loom-serve only through the loom-setup serve.sh script (LOOM_SERVE_STATE is set), and stop
             every server you started before you finish.
           - Run the loom-benchmark scripts (qualify.sh, finalize.sh) with $WORK/bench as BENCH_DIR. The published
-            info.json is generated from their logs there (audit.json, perf_log.jsonl, gates.json, compare.json),
+            info.json is generated from their logs there (audit.json, perf_log.jsonl, gates.json, llamacpp_pick.json),
             so don't copy numbers anywhere by hand.
           - Finish by writing $WORK/result.json:
             {"status": "ok" or "failed", "reason": "<one line>"}

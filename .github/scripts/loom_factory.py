@@ -7,10 +7,31 @@
 
 Only `publish` needs huggingface_hub; `select` and `info` use the standard library.
 
-info.json has one fixed format (INFO_TEMPLATE, version INFO_VERSION): every key is always present, and a
-value that was not measured is null. It is generated from the files the loom-benchmark scripts write in
-WORK/bench (audit.json, perf_log.jsonl, gates.json, compare.json, llamacpp_pick.json, llamacpp_spec.json,
-gates_spec.log) and WORK/pkg/llm_config.json, never from numbers the agent types.
+info.json says how fast a package is, against what, on which device, and which gates it passed. What the
+package is lives elsewhere: the checkpoint and its files in model.json.lock, the drafter in llm_config.json,
+the narrative in REPORT.md. The format (schema "loom-info/1"):
+
+  {
+    "schema": "loom-info/1",                       required
+    "device": "AMD Ryzen AI Max+ 395 ...",         required
+    "measured": "2026-11-06",                      date of the last measurement
+    "baseline": {"name": "llama.cpp", "version": "llamacpp-rocm/b1357", "args": "--spec-type ..."},
+    "metrics": {"decode_tps": {"loom": 40.07, "baseline": 36.83}, ...},
+    "gates": {"golden": "PASS", "consistency": "PASS", ...},
+    "provenance": "https://..."                    the run, PR or anything else that produced the package
+  }
+
+A key that wasn't measured is left out, never null. Readers ignore metric and gate names they don't know,
+so adding one doesn't change the schema; only a breaking change does. Metric names (tok/s unless noted):
+
+  decode_tps, decode_tps_1k, decode_tps_2k, decode_tps_32k   single-stream decode, after a 0/1k/2k/32k prompt
+  prefill_1000 ... prefill_32000                             prefill of a ~N-token document
+  c4_steady                                                  aggregate decode of 4 concurrent streams
+  spec_acceptance                                            fraction of drafted tokens accepted (0-1)
+
+The factory generates info.json from the files the loom-benchmark scripts write in WORK/bench (audit.json,
+perf_log.jsonl, gates.json, llamacpp_pick.json, llamacpp_spec.json, gates_spec.log), never from numbers
+the agent types.
 """
 import argparse
 import json
@@ -39,28 +60,8 @@ PUBLISHERS = [
 PIP = 'pip install "hrx-loom[hf]"'
 FETCH_NOTE = "`loom-fetch` (from the Loom SDK, installed with its `hf` extra by the first command)"
 
-# info.json. Metric names are roofline.json's (tok/s); each metric's margin is loom / llama_cpp - 1.
-# drafter.kind is null when the package doesn't draft; a gate result is null when that gate didn't run.
-INFO_VERSION = 1
-METRICS = ["decode_tps", "decode_tps_2k", "decode_tps_32k", "prefill_1000", "prefill_2000", "prefill_8000",
-           "prefill_16000", "prefill_32000", "c4_steady"]
-GATES = ["golden", "compare", "consistency", "vision", "spec", "agent", "sampling", "needle", "needle_full"]
-INFO_TEMPLATE = {
-    "version": int,
-    "source": str,
-    "quant": str,
-    "files": [str],
-    "run": str,
-    "loom_skills_commit": str,
-    "drafter": {"kind": str, "depth": int, "file": str, "acceptance": float},
-    "llama_cpp": {"build": str, "speculative": str},
-    "metrics": {m: {"loom": float, "llama_cpp": float, "margin": float, "target": float, "met": bool} for m in METRICS},
-    "gates": {"verdict": str, "level": str, "results": {g: str for g in GATES}},
-    "golden": {"prompts": int, "full_match": int, "median_matched": int, "max_gap": float, "bad": int, "verdict": str},
-    "audit": str,
-    "report": str,
-}
-INFO_REQUIRED = ("version", "source", "quant", "files")
+INFO_SCHEMA = "loom-info/1"
+DEVICE = 'AMD Ryzen AI Max+ 395 "Strix Halo"'
 DOC_SIZES = (1000, 2000, 8000, 16000, 32000)
 
 
@@ -264,33 +265,35 @@ def report(a, top, skipped, pick, title):
                         f"quant={pick['quant']}\nfiles={json.dumps(pick['files'])}\ngib={pick['gib']}\n")
 
 
-def check_info(v, t=INFO_TEMPLATE, path="info"):
-    """Exit unless `v` has exactly the keys and value types of INFO_TEMPLATE. Objects and lists are always
-    present; any other value may be null (not measured), except the top-level INFO_REQUIRED keys."""
-    if v is None:
-        if isinstance(t, (dict, list)) or path.count(".") == 1 and path.split(".")[1] in INFO_REQUIRED:
-            sys.exit(f"info.json: {path} must not be null")
-        return
-    if isinstance(t, dict):
-        if not isinstance(v, dict) or set(v) != set(t):
-            got = sorted(v) if isinstance(v, dict) else type(v).__name__
-            sys.exit(f"info.json: {path} has keys {got}, expected {sorted(t)}")
-        for k, sub in t.items():
-            check_info(v[k], sub, f"{path}.{k}")
-    elif isinstance(t, list):
-        if not isinstance(v, list):
-            sys.exit(f"info.json: {path} must be a list")
-        for i, x in enumerate(v):
-            check_info(x, t[0], f"{path}[{i}]")
-    elif t is float:
-        if isinstance(v, bool) or not isinstance(v, (int, float)):
-            sys.exit(f"info.json: {path} must be a number, got {v!r}")
-    elif isinstance(v, bool) != (t is bool) or not isinstance(v, t):
-        sys.exit(f"info.json: {path} must be {t.__name__}, got {v!r}")
+def check_info(info):
+    """Exit unless `info` is in the INFO_SCHEMA format (see the module docstring)."""
+    def need(ok, what):
+        if not ok:
+            sys.exit(f"info.json: {what}")
+
+    def num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    keys = {"schema", "device", "measured", "baseline", "metrics", "gates", "provenance"}
+    need(set(info) <= keys, f"unknown keys {sorted(set(info) - keys)}")
+    need(info.get("schema") == INFO_SCHEMA, f"schema must be {INFO_SCHEMA!r}")
+    need(isinstance(info.get("device"), str) and info["device"], "device is required")
+    for k in ("measured", "provenance"):
+        need(isinstance(info.get(k, ""), str), f"{k} must be a string")
+    base = info.get("baseline", {"name": ""})
+    need(isinstance(base, dict) and "name" in base and set(base) <= {"name", "version", "args"}
+         and all(isinstance(v, str) for v in base.values()), "baseline must be {name, version?, args?} strings")
+    metrics, gates = info.get("metrics", {}), info.get("gates", {})
+    need(isinstance(metrics, dict) and isinstance(gates, dict), "metrics and gates must be objects")
+    for m, v in metrics.items():
+        need(isinstance(v, dict) and set(v) <= {"loom", "baseline"} and num(v.get("loom"))
+             and num(v.get("baseline", 0)), f"metrics.{m} must be {{loom: number, baseline?: number}}")
+    for g, v in gates.items():
+        need(v in ("PASS", "FAIL"), f"gates.{g} must be PASS or FAIL, got {v!r}")
 
 
-def build_info(work, source, quant, files):
-    """info.json for the work directory, in the INFO_TEMPLATE format."""
+def build_info(work, device=DEVICE):
+    """info.json for the work directory, in the INFO_SCHEMA format."""
     bench, pkg = os.path.join(work, "bench"), os.path.join(work, "pkg")
 
     def load(*p):
@@ -321,7 +324,8 @@ def build_info(work, source, quant, files):
         for r in rows:
             if r.get("label") != rows[-1].get("label"):
                 continue
-            vals = {k: r[k] for k in ("decode_tps", "decode_tps_2k", "decode_tps_32k", "c4_steady") if r.get(k) is not None}
+            vals = {k: r[k] for k in ("decode_tps", "decode_tps_1k", "decode_tps_2k", "decode_tps_32k", "c4_steady")
+                    if r.get(k) is not None}
             for p in r.get("prefill", []) + r.get("prefill_long", []):
                 vals[f"prefill_{min(DOC_SIZES, key=lambda x: abs(x - p['prompt_tokens']))}"] = p["prefill_tps"]
             for k, v in vals.items():
@@ -332,60 +336,50 @@ def build_info(work, source, quant, files):
     audit = load(bench, "audit.json")
     headline = {r["metric"]: r for r in (audit or {}).get("headline", [])}
     loom_perf, llama_perf = final_medians("loom"), final_medians("llama")
+    order = ["decode_tps", "decode_tps_1k", "decode_tps_2k", "decode_tps_32k",
+             *(f"prefill_{n}" for n in DOC_SIZES), "c4_steady"]
     metrics = {}
-    for m in METRICS:
+    for m in sorted({*headline, *loom_perf}, key=lambda m: (order.index(m) if m in order else len(order), m)):
         h = headline.get(m, {})
         lv = h["loom"] if h.get("loom") is not None else loom_perf.get(m)
         bv = h["llama_cpp"] if h.get("llama_cpp") is not None else llama_perf.get(m)
-        metrics[m] = {"loom": lv, "llama_cpp": bv, "margin": round(lv / bv - 1, 3) if lv and bv else None,
-                      "target": h.get("target"), "met": h.get("met")}
-
-    g = load(bench, "gates.json") or {}
-    ran = g.get("gates") or {}
-    gates = {"verdict": g.get("verdict"), "level": g.get("level"),
-             "results": {n: ("PASS" if ran[n]["pass"] else "FAIL") if n in ran else None for n in GATES}}
-
-    rows = load(bench, "compare.json") or []
-    golden = dict.fromkeys(INFO_TEMPLATE["golden"])
-    if rows:
-        gaps = [r["divergence_gap"] for r in rows if isinstance(r.get("divergence_gap"), float)]
-        golden.update(prompts=len(rows), full_match=sum(bool(r.get("full_match")) for r in rows),
-                      median_matched=sorted(r.get("matched") or 0 for r in rows)[len(rows) // 2],
-                      max_gap=round(max(gaps), 3) if gaps else 0.0, bad=sum(bool(r.get("bad")) for r in rows))
-        golden["verdict"] = "PASS" if golden["bad"] == 0 else "FAIL"
-
-    draft, drafter = (load(pkg, "llm_config.json") or {}).get("draft"), dict.fromkeys(INFO_TEMPLATE["drafter"])
-    if draft:
+        if lv is not None:
+            metrics[m] = {"loom": round(lv, 2), **({"baseline": round(bv, 2)} if bv is not None else {})}
+    if (load(pkg, "llm_config.json") or {}).get("draft"):
         acc = re.findall(r"acceptance (\d+(?:\.\d+)?)%", text(bench, "gates_spec.log") or "")
-        drafter = {"kind": draft.get("kind"), "depth": draft.get("depth"),
-                   "file": os.path.basename(draft["gguf"]) if draft.get("gguf") else None,
-                   "acceptance": round(float(acc[-1]) / 100, 3) if acc else None}
+        if acc:
+            metrics["spec_acceptance"] = {"loom": round(float(acc[-1]) / 100, 3)}
+
+    gates = {n: "PASS" if g["pass"] else "FAIL" for n, g in ((load(bench, "gates.json") or {}).get("gates") or {}).items()}
+    if audit is not None:
+        gates["audit"] = "FAIL" if any(c.get("result") == "FAIL" for c in audit.get("checks", [])) else "PASS"
 
     top = ((load(bench, "llamacpp_pick.json") or {}).get("ranked") or [{}])[0]
-    spec = load(bench, "llamacpp_spec.json") or {}
+    baseline = {}
+    if top.get("dir"):
+        # The build's install directory, without the machine-specific prefix (e.g. llamacpp-rocm/b1357).
+        baseline = {"name": "llama.cpp", "version": "/".join(top["dir"].rstrip("/").split("/")[-2:])}
+        args = (load(bench, "llamacpp_spec.json") or {}).get("args")
+        if args:
+            baseline["args"] = args
+
+    times = [r["time"] for r in perf if r.get("time")]
     info = {
-        "version": INFO_VERSION,
-        "source": source,
-        "quant": quant,
-        "files": files,
-        "run": (load(work, "attempt.json") or {}).get("run"),
-        "loom_skills_commit": os.environ.get("GITHUB_SHA"),
-        "drafter": drafter,
-        "llama_cpp": {"build": os.path.basename(top["dir"].rstrip("/")) if top.get("dir") else None,
-                      "speculative": spec.get("args") or None},
-        "metrics": metrics,
-        "gates": gates,
-        "golden": golden,
-        "audit": None if audit is None else
-        ("FAIL" if any(c.get("result") == "FAIL" for c in audit.get("checks", [])) else "PASS"),
-        "report": text(work, "REPORT.md"),
+        "schema": INFO_SCHEMA,
+        "device": device,
+        "measured": max(times)[:10] if times else None,
+        "baseline": baseline or None,
+        "metrics": metrics or None,
+        "gates": gates or None,
+        "provenance": (load(work, "attempt.json") or {}).get("run"),
     }
+    info = {k: v for k, v in info.items() if v is not None}
     check_info(info)
     return info
 
 
 def cmd_info(a):
-    info = build_info(a.work, a.source, a.quant, json.loads(a.files))
+    info = build_info(a.work, a.device)
     json.dump(info, sys.stdout, indent=2)
     sys.stdout.write("\n")
 
@@ -411,7 +405,7 @@ def cmd_publish(a):
         with open(p, encoding="utf-8") as f:
             return json.load(f) if parse else f.read()
 
-    info = build_info(a.work, a.source, a.quant, files)
+    info = build_info(a.work, a.device)
 
     # loom-fetch takes the GGUF from the source repo at the revision the port was validated on.
     revision = (read("source.json", True) or {}).get("revision") or src.sha
@@ -471,13 +465,18 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
     api.create_repo(a.target, repo_type="model", private=a.private, exist_ok=True)
     with open(os.path.join(pkg, "README.md"), "w", encoding="utf-8") as f:
         f.write(str(card))
-    # Performance numbers are not claims yet: they live only here, and the card must not mention them.
+    # Performance numbers are not claims yet: they live only in info.json and REPORT.md, and the card must
+    # not mention them.
     with open(os.path.join(pkg, "info.json"), "w", encoding="utf-8") as f:
         json.dump(info, f, indent=2)
         f.write("\n")
+    report = read("REPORT.md")
+    if report is not None:
+        with open(os.path.join(pkg, "REPORT.md"), "w", encoding="utf-8") as f:
+            f.write(report)
     api.upload_folder(repo_id=a.target, folder_path=pkg,
                       ignore_patterns=["parameter/*", "*.gguf", ".loom-fetch.lock", ".cache/*"],
-                      delete_patterns=["REPORT.md", "bench/**"],
+                      delete_patterns=["bench/**"],
                       commit_message=f"Loom package for {a.source} ({a.quant})")
     print(f"published {HF}/{a.target}")
     # Run the card's commands on the published copy, unmodified apart from paths and the port.
@@ -558,10 +557,9 @@ p.add_argument("--quant", required=True)
 p.add_argument("--files", required=True, help="JSON list of the GGUF file paths in the source repo")
 p.add_argument("--private", action="store_true")
 p.add_argument("--loom-fetch", default="loom-fetch", help="loom-fetch executable that writes model.json.lock; loom-serve is taken from the same directory")
+p.add_argument("--device", default=DEVICE, help="the machine the package was measured on, for info.json")
 i = sub.add_parser("info")
-i.add_argument("--work", required=True, help="directory with pkg/, bench/, attempt.json and REPORT.md")
-i.add_argument("--source", required=True)
-i.add_argument("--quant", required=True)
-i.add_argument("--files", required=True, help="JSON list of the GGUF file paths in the source repo")
+i.add_argument("--work", required=True, help="directory with pkg/, bench/ and attempt.json")
+i.add_argument("--device", default=DEVICE, help="the machine the package was measured on")
 a = ap.parse_args()
 {"select": cmd_select, "publish": cmd_publish, "info": cmd_info}[a.cmd](a)
