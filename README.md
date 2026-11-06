@@ -22,6 +22,10 @@ You can install loom-skills on any agent that supports skills (Claude Code, Curs
 npx skills add loom-fun/loom-skills
 ```
 
+If you don't have Node installed, [`install.sh`](install.sh) is a reference script that copies the
+skills into `~/.agents/skills` and links them into `~/.claude/skills`, so Claude Code, Cursor, Codex
+and most other agents pick them up.
+
 We recommend using Claude Code.
 
 ## Use
@@ -32,7 +36,6 @@ We recommend using Claude Code.
 /loom get <hf-org>/<model> working on loom-serve, optimize it, and report the performance relative to llamacpp rocm
 ```
 
-In agents without slash commands, start the prompt with "Use the loom skill to …" instead.
 The agent runs the whole pipeline without stopping, within the model's roofline time budget (about
 25 min for a 0.8B to 70 min for a 30B dense model in recent trials), as four scripted steps
 with the agent's judgment only where it is needed:
