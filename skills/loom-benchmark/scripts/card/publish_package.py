@@ -29,12 +29,17 @@ CARD = ("README.md", "info.json", "REPORT.md")
 
 def hf_origin(path):
     """(repo, revision, snapshot dir, file) of a file inside the Hugging Face cache, else None."""
-    real = os.path.realpath(path)
-    m = re.search(r"/models--([^/]+)--([^/]+)/snapshots/([0-9a-f]{40})/(.+)$", real)
-    if not m:
-        return None
-    snap = real[:m.start(4)].rstrip("/")
-    return f"{m.group(1)}/{m.group(2)}", m.group(3), snap, m.group(4)
+    # Follow the link chain (package -> work dir -> snapshots/REV/file -> blobs/SHA) and stop at the snapshot entry:
+    # realpath would land in blobs/, which names no file.
+    p = os.path.abspath(path)
+    for _ in range(40):
+        m = re.search(r"/models--([^/]+)--([^/]+)/snapshots/([0-9a-f]{40})/(.+)$", p)
+        if m:
+            return f"{m.group(1)}/{m.group(2)}", m.group(3), p[:m.start(4)].rstrip("/"), m.group(4)
+        if not os.path.islink(p):
+            return None
+        p = os.path.normpath(os.path.join(os.path.dirname(p), os.readlink(p)))
+    return None
 
 
 def cmd_prepare(a):
