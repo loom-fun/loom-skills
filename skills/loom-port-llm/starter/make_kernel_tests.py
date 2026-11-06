@@ -201,6 +201,47 @@ if ACT_Q8 and _g is not None:
   check.return
 }}
 """)
+# 2c. int8 pair matvecs (gen_llm PAIR_PROJ: attention q + gate, k + v of one format and shape): at 8 and 16 tokens
+# each output equals the 1-token single-weight kernel on that weight bit for bit
+_a = next((li for li in range(cfg["layers"]) if f"blk.{li}.attn_q.weight" in T), None)
+for pa, pb in (("attn_q", "attn_gate"), ("attn_k", "attn_v")):
+    if not ACT_Q8 or _a is None:
+        break
+    an, bn = f"blk.{_a}.{pa}.weight", f"blk.{_a}.{pb}.weight"
+    if bn not in T or T[an].tensor_type != T[bn].tensor_type or tuple(T[an].shape) != tuple(T[bn].shape):
+        continue
+    fmt = T[an].tensor_type.name.lower(); n = int(T[an].shape[1])
+    if fmt not in IQ_FMTS or H // 32 > 1024:
+        continue
+    save(f"pr_{pa}_a", raw(an)); save(f"pr_{pa}_b", raw(bn)); at, bt = ty(raw(an)), ty(raw(bn))
+    for tg in (8, 16):
+        save(f"pr_{pa}_x{tg}", rng.standard_normal((tg, H)).astype(np.float32))
+        R1, Rt = iq_r(n, H, 1), iq_r(n, H, tg, 2)
+        k1 = f"g_mv_{fmt}_k{H}_q8" + (f"_r{R1}" if R1 != 16 else "")
+        kt = f"g_mv_{fmt}_k{H}_pair_t{tg}_q8" + (f"_r{Rt}" if Rt != 16 else "")
+        s1 = f"[index, index](index, index, i32, tensor<{tg}x{2 * H}xi8>, {at}, tensor<{tg}x{n}xf32>)"
+        cases.append(f"""check.case public @mvpair_{pa}_t{tg} {{
+  %n = check.literal value({n}) : index
+  %t = check.literal value({tg}) : index
+  %k = check.literal value({H}) : index
+  %acc = check.literal value(0) : i32
+  %wa = check.file.read.npy path("pr_{pa}_a.npy") : {at}
+  %wb = check.file.read.npy path("pr_{pa}_b.npy") : {bt}
+  %x = check.file.read.npy path("pr_{pa}_x{tg}.npy") : tensor<{tg}x{H}xf32>
+  %xq = check.generate.fill value(0) : tensor<{tg}x{2 * H}xi8>
+  %ya = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  %yb = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  %ea = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  %eb = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  kernel.launch @g_quant_q8[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<{tg}x{H}xf32>, tensor<{tg}x{2 * H}xi8>)
+  kernel.launch @{kt}[%n, %t](%n, %t, %acc, %xq, %wa, %wb, %ya, %yb) : [index, index](index, index, i32, tensor<{tg}x{2 * H}xi8>, {at}, {bt}, tensor<{tg}x{n}xf32>, tensor<{tg}x{n}xf32>)
+  kernel.launch @{k1}[%n, %t](%n, %t, %acc, %xq, %wa, %ea) : {s1}
+  kernel.launch @{k1}[%n, %t](%n, %t, %acc, %xq, %wb, %eb) : {s1}
+  check.expect.close actual(%ya) expected(%ea) atol(0.0) rtol(0.0) nan(different) : tensor<{tg}x{n}xf32>
+  check.expect.close actual(%yb) expected(%eb) atol(0.0) rtol(0.0) nan(different) : tensor<{tg}x{n}xf32>
+  check.return
+}}
+""")
 # 3. qk norm + rope on q (live = 0: no KV store)
 t = 4; pos = np.array([0, 1, 7, 300])
 A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", [])))

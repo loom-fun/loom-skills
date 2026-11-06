@@ -805,28 +805,32 @@ def bfly_store(vals, p, store, presorted=False):
     return "\n".join(t)
 
 
-def mv(fmt, K, R=16, TG=1, swiglu=False, suffix="", iq=False):
+def mv(fmt, K, R=16, TG=1, swiglu=False, suffix="", iq=False, pair=False):
     """Decode matrix-vector: a workgroup covers one K row with one lane per
     32-value group (lanes = groups rounded up to a wave), R output rows and TG
     tokens. Each lane keeps its x group for the TG tokens in registers and
     decodes each weight group once for all of them, so weights stream once per
     token group and activations once per workgroup. Waves reduce with shuffles;
-    one barrier folds the wave partials."""
+    one barrier folds the wave partials.
+    pair (int8 only): two same-shape weights of one input (attention q + gate, k + v) in one launch, y = x W^T and
+    y2 = x W2^T, each row rounded exactly as the single-weight kernel rounds it (see PAIR_PROJ)."""
     groups = K // 32
+    assert not pair or (iq and not swiglu and groups <= 1024)
     if groups > 1024:
         return mv_wide(fmt, K, R, TG, swiglu, suffix)
     lanes = (groups + 31) // 32 * 32
     waves = lanes // 32
     rb = row_bytes(fmt, K)
-    nw = 2 if swiglu else 1
-    name = f"g_mv_{fmt}_k{K}" + ("_swiglu" if swiglu else "") + (f"_t{TG}" if TG > 1 else "") + ("_q8" if iq else "") + suffix
+    nw = 2 if swiglu or pair else 1
+    name = f"g_mv_{fmt}_k{K}" + ("_swiglu" if swiglu else "_pair" if pair else "") + (f"_t{TG}" if TG > 1 else "") + ("_q8" if iq else "") + suffix
     # int8 variants above MV_CHUNK tokens run the token chunks one after another in the workgroup: registers stay at
     # the chunk's level and later chunks re-read this workgroup's weight rows from cache, not DRAM.
     CHK = min(TG, int(os.environ.get("MV_CHUNK", "16"))) if iq else TG   # chunks of 8 measured no faster
     NCH = TG // CHK
     assert NCH * CHK == TG
-    PERM = iq and swiglu and BFLY_PERM and CHK >= 8
-    wargs = "%w: buffer, %w2: buffer" if swiglu else "%w: buffer"
+    PERM = iq and nw == 2 and BFLY_PERM and CHK >= 8
+    wargs = "%w: buffer, %w2: buffer" if nw == 2 else "%w: buffer"
+    yargs = "%y: buffer, %y2: buffer" if pair else "%y: buffer"
     L = [f"""
 kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %c1 = index.constant 1 : index
@@ -838,7 +842,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %tg_pad = index.add %tokens, %tg_less : index
   %token_groups = index.div %tg_pad, %tg : index
   kernel.launch.config workgroups(%token_groups, %row_groups, %c1) workgroup_size(%lanes, %c1, %c1) : index
-}} launch(%n_arg: index, %tokens_arg: index, %accumulate: i32, %x: buffer, {wargs}, %y: buffer) {{
+}} launch(%n_arg: index, %tokens_arg: index, %accumulate: i32, %x: buffer, {wargs}, {yargs}) {{
   %n = index.assume %n_arg [range(%n_arg, {R}, 262144), multiple_of(%n_arg, {R})] : index
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %group_id = kernel.workgroup.id<y> : index
@@ -928,7 +932,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
     %ro = index.scale %row, %row_bytes : index, offset -> offset
     %rb = index.assume %r [range(%r, 0, {R - 1})] : index
     %o = index.add %ro, %ba : offset""")
-    for wi, w in enumerate(["w", "w2"] if swiglu else ["w"]):
+    for wi, w in enumerate(["w", "w2"] if nw == 2 else ["w"]):
         if iq:
             # integer codes once per row; per token one dot4 contraction against the int8 activations
             L.append(iq_decode(fmt, wi, w, "%ok", "%o", "%within"))
@@ -994,8 +998,11 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
     else:
         L.append("      %value = scalar.addf %t0, %zero_f : f32")
     L.append("""      %out_row = index.add %row_base, %rr : index
-      func.call @g_store_row(%y, %tokens, %n, %tok_raw, %out_row, %value, %accumulate) : (buffer, index, index, index, index, f32, i32)
-    }
+      func.call @g_store_row(%y, %tokens, %n, %tok_raw, %out_row, %value, %accumulate) : (buffer, index, index, index, index, f32, i32)""")
+    if pair:
+        L.append("""      %value2 = scalar.addf %t1, %zero_f : f32
+      func.call @g_store_row(%y2, %tokens, %n, %tok_raw, %out_row, %value2, %accumulate) : (buffer, index, index, index, index, f32, i32)""")
+    L.append("""    }
   }
   kernel.return
 }
@@ -2569,7 +2576,7 @@ from gen_gemm import HELPER as GEMM_HELPER   # noqa: E402  formats without a 128
 GEMM_M256 = os.environ.get("GEMM_M256", "1") not in ("", "0", "false", "no")
 
 
-def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
+def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store", gemm_only=False):
     """Projection y = x W^T: WMMA GEMM for 64+ tokens (128-row tiles from 128),
     else the decode matrix-vector kernel (1-token or 4-token variant)."""
     base = f"g_mv_{fmt}_k{kval}" + ("_swiglu" if mode == "swiglu" else "")
@@ -2594,12 +2601,15 @@ def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
         }} else {{
           {m128}
         }}"""
-    return f"""scf.if %gemm {{
-      scf.if %big {{
+    gemm = f"""scf.if %big {{
         {m128}
       }} else {{
         kernel.launch @g_gemm_{fmt}_{mode}[%t, {n}]({args}) : [index, index]({types})
-      }}
+      }}"""
+    if gemm_only:
+        return gemm
+    return f"""scf.if %gemm {{
+      {gemm}
     }} else {{
       scf.if %single {{
         kernel.launch @{mv_name(fmt, kval, mode == "swiglu", n, 1, iq)}[{n}, %t]{mv_args}
@@ -2939,7 +2949,7 @@ from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.p
 def mv_name(fmt, kval, sw, n, TG, iq=False):
     nv = NVAL.get(n, None) if isinstance(n, str) else n
     R = pick_r(nv, kval, TG)
-    base = f"g_mv_{fmt}_k{kval}" + ("_swiglu" if sw else "") + (f"_t{TG}" if TG > 1 else "")
+    base = f"g_mv_{fmt}_k{kval}" + {1: "_swiglu", 2: "_pair"}.get(int(sw), "") + (f"_t{TG}" if TG > 1 else "")
     if iq:
         # int8 variants: a row's arithmetic does not depend on R (explicit ops, explicit butterfly), so the 8/16-token
         # kernels take more rows per workgroup (fewer activation reloads; mv_rows.iq_r)
@@ -2952,7 +2962,7 @@ def mv_name(fmt, kval, sw, n, TG, iq=False):
     USED_MV_R.add((fmt, kval, sw, R, TG))
     return base + f"_r{R}"
 USED_GEMM = {}       # fmt -> set of GEMM modes
-USED_MVQ = set()     # (fmt, K, swiglu, R, TG) of the int8-activation matvecs (ACT_Q8)
+USED_MVQ = set()     # (fmt, K, swiglu, R, TG) of the int8-activation matvecs (ACT_Q8); swiglu 2 = pair (PAIR_PROJ)
 
 
 def head_wiring(program):
@@ -3010,6 +3020,56 @@ def quant_wiring(program):
 def lin(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
     USED_GEMM.setdefault(fmt, set()).add(mode)
     return linear(fmt, x, s, w, wsize, y, k, n, kval, mode)
+
+
+# PAIR_PROJ: two projections of the same input with the same format and shape (attention q + gate, k + v) take one
+# dual-weight int8 launch at 8 and 16 tokens (verify steps of 2-4 drafting streams), as gate/up already do: one
+# activation load and butterfly setup for both weights, and the select-free butterfly (BFLY_PERM). Each weight's rows
+# round exactly as in the single-weight kernel (kernel tests mvpair_*). Prefill (GEMM), 1-token decode and the 4-token
+# variant keep separate launches. Muse-Glimmer 4 streams (c4ep, same server): q + gate -1 to -2 ms per 153 ms epoch.
+# k + v (6656 x 256) measured -16 us per layer in isolation but no faster end to end (+1.5 ms per epoch with both pairs;
+# the small separate k and v launches presumably overlap neighbouring launches), so it is opt-in (PAIR_PROJ=1 or kv,
+# which also pairs the DFlash drafter's k + v).
+PAIR_PROJ = os.environ.get("PAIR_PROJ", "qg")   # qg (default): q + gate only; kv: k + v only; 1: both; 0: off
+
+
+def lin2(fmt, x, s, wa, wb, wsize, ya, yb, k, n, kval):
+    """Projections ya = x Wa^T and yb = x Wb^T (same format and size): two lin() calls, except that with PAIR_PROJ the
+    int8 8/16-token matvecs take one dual-weight (pair) launch."""
+    iq = ACT_Q8 and fmt in IQ_FMTS and kval // 32 <= 1024
+    if not (PAIR_PROJ != "0" and iq):
+        return lin(fmt, x, s, wa, wsize, ya, k, n, kval) + "\n  " + lin(fmt, x, s, wb, wsize, yb, k, n, kval)
+    x16 = {"%h": "%h16", "%o": "%o16", "%f": "%f16"}.get(x, x + "16")
+    a1 = lambda w, y: f"({n}, %t, %zero_i32, {x16}q, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
+    a2 = f"({n}, %t, %zero_i32, {x16}q, {wa}, {wb}, {ya}, {yb}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, view<{wsize}xi8>, buffer, buffer)"
+    gemm = lambda w, y: linear(fmt, x, s, w, wsize, y, k, n, kval, gemm_only=True)
+    USED_GEMM.setdefault(fmt, set()).add("store")
+    _LIN[0] += 1
+    c = _LIN[0]
+    return f"""scf.if %gemm {{
+      {gemm(wa, ya)}
+      {gemm(wb, yb)}
+    }} else {{
+      %c4_p{c} = index.constant 4 : index
+      %le4_p{c} = index.cmp ule, %t, %c4_p{c} : index
+      scf.if %le4_p{c} {{
+        scf.if %single {{
+          kernel.launch @{mv_name(fmt, kval, False, n, 1, True)}[{n}, %t]{a1(wa, ya)}
+          kernel.launch @{mv_name(fmt, kval, False, n, 1, True)}[{n}, %t]{a1(wb, yb)}
+        }} else {{
+          kernel.launch @{mv_name(fmt, kval, False, n, 4, True)}[{n}, %t]{a1(wa, ya)}
+          kernel.launch @{mv_name(fmt, kval, False, n, 4, True)}[{n}, %t]{a1(wb, yb)}
+        }}
+      }} else {{
+        %c8_p{c} = index.constant 8 : index
+        %le8_p{c} = index.cmp ule, %t, %c8_p{c} : index
+        scf.if %le8_p{c} {{
+          kernel.launch @{mv_name(fmt, kval, 2, n, 8, True)}[{n}, %t]{a2}
+        }} else {{
+          kernel.launch @{mv_name(fmt, kval, 2, n, 16, True)}[{n}, %t]{a2}
+        }}
+      }}
+    }}"""
 
 
 def lin_mv(fmt, x, w, wsize, y, n, kval):
@@ -3450,18 +3510,24 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
             T += [par("q_norm", "attn_q_norm", f"view<{D}xf32>"), par("k_norm", "attn_k_norm", f"view<{D}xf32>")]
         if POST_NORM:
             T += [par("post_attn", "post_attention_norm", f"view<{H}xf32>"), par("post_ffn", "post_ffw_norm", f"view<{H}xf32>")]
-        if i in RECUR:
-            pass
-        elif FUSED_Q:
+        if FUSED_Q and i not in RECUR:
             T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%qg", "%nH", "%nQ2", H) + "\n")
             T.append("  kernel.launch @g_split_qgate[%t](%t, %qg, %q, %gate) : [index](index, buffer, buffer, buffer)\n")
+        # same format and size: one dual-weight launch at 8/16 tokens (PAIR_PROJ)
+        same = lambda a, b: fmt_of(nm(a)) == fmt_of(nm(b)) and sz(a) == sz(b)
+        qg = GATE and not FUSED_Q and i not in RECUR and same("attn_q", "attn_gate") and PAIR_PROJ in ("1", "qg")
+        if i in RECUR or FUSED_Q:
+            pass
+        elif qg:
+            T.append("  " + lin2(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", f"%wg_{i}", sz("attn_q"), "%q", "%gate", "%nH", "%nQ", H) + "\n")
         else:
             T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", "%nQ", H) + "\n")
-        if i not in RECUR:
+        if i not in RECUR and same("attn_k", "attn_v") and PAIR_PROJ in ("1", "kv"):
+          T.append("  " + lin2(fmt_of(nm("attn_k")), "%h", "%s_h", f"%wk_{i}", f"%wv_{i}", sz("attn_k"), "%k", "%v", "%nH", "%nKV", H) + "\n")
+        elif i not in RECUR:
           T.append("  " + lin(fmt_of(nm("attn_k")), "%h", "%s_h", f"%wk_{i}", sz("attn_k"), "%k", "%nH", "%nKV", H) + "\n")
-        if i not in RECUR:
           T.append("  " + lin(fmt_of(nm("attn_v")), "%h", "%s_h", f"%wv_{i}", sz("attn_v"), "%v", "%nH", "%nKV", H) + "\n")
-        if GATE and not FUSED_Q and i not in RECUR:
+        if GATE and not FUSED_Q and i not in RECUR and not qg:
             T.append("  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wg_{i}", sz("attn_gate"), "%gate", "%nH", "%nQ", H) + "\n")
         qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
         nty = f"view<{D}xf32>" if QK_NORM else "buffer"
@@ -3533,7 +3599,7 @@ if __name__ == "__main__":
         gfacts = dict(H=H, HG=HG, EPS=EPS, D=D, KD=KVH * D, QK_NORM=QK_NORM, VISION=bool(VISION), MROPE=bool(MROPE),
                       GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
                       head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
-                      prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin,
+                      prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin, lin2=lin2, pair_kv=PAIR_PROJ in ("1", "kv"),
                       fmt=fmt_of, size=tensor_bytes, mtp_layer=MTP_LAYER, replay=MODEL_PARTS.get("replay", []))
         if gen_draft.DRAFT["kind"] == "dflash":
             import gen_dflash
@@ -3596,7 +3662,7 @@ if __name__ == "__main__":
         if gen_draft.DRAFT["kind"] == "assist":
             spec_kernels += gen_draft.mtp_kernels(gfacts) + gen_assist.kernels(gfacts)
     if USED_MVQ:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
-        COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}" if R != 16 else "", iq=True)
+        COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                    for fmt, K, sw, R, TG in sorted(USED_MVQ))
         program = quant_wiring(program)
         if head_fmt in IQ_FMTS:

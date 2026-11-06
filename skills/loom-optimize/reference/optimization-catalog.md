@@ -126,6 +126,25 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   tokens per stream, llama.cpp ~146 ms at 2.64 (its log's "mean len"). In an earlier session Loom 67.6 vs llama.cpp
   67.5. Tokens per step vary +-3 % between runs on both sides, so one c4 run cannot separate them; compare
   c4ep's ms per epoch for kernel changes.
+- **Attention q + gate in one dual-weight launch at 8 and 16 tokens** (`PAIR_PROJ`, `lin2()`): two projections of
+  the same input with the same format and shape share the activation load, the butterfly setup and the select-free
+  butterfly, as gate/up do. Each output rounds exactly as the 1-token single-weight kernel (kernel tests
+  `mvpair_attn_q_t8/t16`, zero tolerance). Prefill, 1-token decode and the 4-token variant keep separate launches.
+  - Real-weight microbenchmark, Muse-Glimmer Q4_K 6656 x 4096 t16: 282 -> 251 us per layer (two launches vs one).
+  - 4 streams, same server: -1 to -2 ms per ~153 ms epoch (paired rounds all faster). Single-stream decode and
+    prefill unchanged (their kernels are byte-identical).
+  - Only models with a separate `attn_gate` of the q format pair (Muse-Glimmer). Qwen3.8-27B (fused q+gate),
+    Flint and Bolt generate byte-identical programs.
+  - Same session, c4_steady x 4 each (medians, min-max): Loom before 68.1 (67.0-69.7), after 69.7 (68.2-70.7),
+    llama.cpp b1355 69.4 (68.2-70.7) tok/s. Level with llama.cpp, not ahead in every run: the per-run spread (+-2 %)
+    is larger than the remaining step-time difference.
+- **Tokens per step: llama.cpp's DFlash2 proposal matches Loom's at temperature 0** (code comparison, llama.cpp
+  `common/speculative.cpp`): same tapped residuals (`target_layers` t = input of layer t), anchor without its own
+  feature, block = n_max + 1 at positions P..P+3, mask token, non-causal attention, conv taps, logit scale and softcap,
+  top-16 selector with the rank-256 transition walked greedily from the anchor (the mt19937 path is only for
+  temperature > 0), always 3 drafts (n_min = p_min = 0). Remaining differences are tie-breaking and precision.
+  The 2.57 vs 2.64 tokens per step is run-to-run text variance: c4ep's tokens per event ranges 2.50-2.69 between
+  rounds of the same Loom package, because 4-stream batching timing changes the text.
 
 ### Split-K decode attention (`attention_text()`)
 - The grid is (token, KV head, split), with G = heads/kv_heads waves per
@@ -353,6 +372,16 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   - 64 rows per workgroup: q 6656 x 4096 +20 %, o 4096 x 6656 +9 % (down does not fit: 80 KB of LDS).
   - Fewer rows for the small K/V projections (6656 x 256): R 8 is 18.0 vs 22.2 us, ~0.4 ms per epoch. Not
     adopted.
+- **Pairing attention k + v (6656 x 256) into one launch** (`PAIR_PROJ=kv`): -16 us per layer in isolation
+  (R 8; R 32 was +52 %), but with q + gate also paired the 4-stream epoch was +1.5 ms (interleaved, 3 rounds). The
+  small separate k and v launches presumably overlap their neighbours. Opt-in only.
+- **Hoisting the int8 matvec's per-token F32 scaling out of the row loop.** The ~150 F32 instructions per row are
+  (sitofp, x scale, minimum x code sum, subtract, x activation scale) per token and weight. Every product mixes a
+  per-row with a per-token factor, so nothing is shared across rows without reassociating (which changes rounding
+  in every int8 kernel, the 1-token decode included).
+- **Muse-Glimmer post-norm eps 1e-8** (HF `post_norm_eps` and llama.cpp; the reviewed cfg uses 1e-5): tokens per
+  step unchanged within noise (1 stream 2.57 vs 2.53, 4 streams 2.63 vs 2.60). Not changed here: it changes the trunk's
+  numerics, so it needs its own gate run.
 - **About 128 keys per decode-attention split.** Fewer splits under-filled the GPU
   at short context (−4 %).
 
