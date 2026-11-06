@@ -289,7 +289,8 @@ cases.append(f"""check.case public @attention_chain {{
   check.return
 }}
 """)
-# 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
+# 4. gated delta-net chain on one 40-token span at position 3 that continues the reader slot (over 32 tokens:
+# the recurrence stores its outputs in 32-step batches)
 if cfg.get("recurrent_layers"):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from gen_gdn import gdn_geometry
@@ -297,7 +298,7 @@ if cfg.get("recurrent_layers"):
     li = cfg["recurrent_layers"][0]; b = f"blk.{li}."
     conv_w = deq(b + "ssm_conv1d.weight").reshape(C, K).astype(np.float32)
     a_log = deq(b + "ssm_a").astype(np.float32); dt = deq(b + "ssm_dt.bias").astype(np.float32); nw = deq(b + "ssm_norm.weight").astype(np.float32)
-    t, p0 = 5, 3
+    t, p0 = 40, 3
     qkv = rng.standard_normal((t, C)).astype(np.float32); hist0 = rng.standard_normal((K - 1, C)).astype(np.float32)
     S0 = (0.1 * rng.standard_normal((HV, DV, DK))).astype(np.float32)  # [head][b][a]
     alpha = rng.standard_normal((t, HV)).astype(np.float32); beta = rng.standard_normal((t, HV)).astype(np.float32)

@@ -555,9 +555,39 @@ def _prefetch_recurrence(text, RK):
            "    %nx_tabs = index.assume %nx_tabs_value [lt(%nx_tabs_value, %tokens)] : index"]
     nxt += [f"    %nx_{n[1:]} = {rhs.replace('@T@', '%nx_tabs')}" for n, _, rhs in loads]
     k = k.replace(tabs, tabs + "\n".join(nxt) + "\n", 1)
+    # Output stores in batches of 32 steps: lane j keeps step j's output and the wave stores them together.
+    # A store each step made every following global load wait for the store to complete (the compiler
+    # cannot tell the output from the inputs), a memory round trip per step on the serial chain.
+    st = re.search(r"    %leader = index\.cmp eq, %lane, %c0 : index\n    scf\.if %leader \{\n      %scaled = vector\.mulf %output, %scale_v : (vector<\d+xf32>)\n"
+                   r"      vector\.store %scaled, %out_view\[%tabs, %out_channel\] : vector<\d+xf32>, (view<[^>]*>)\n    \}\n", k)
+    vt, ot = st.group(1), st.group(2)
+    k = k.replace(st.group(0), f"""    %scaled = vector.mulf %output, %scale_v : {vt}
+    %ob_c32 = index.constant 32 : index
+    %ob_slot = index.rem %step, %ob_c32 : index
+    %ob_mine = index.cmp eq, %lane, %ob_slot : index
+    %ob_next = scf.select %ob_mine, %scaled, %ob : {vt}
+    %ob_c31 = index.constant 31 : index
+    %ob_full = index.cmp eq, %ob_slot, %ob_c31 : index
+    %ob_last = index.cmp eq, %step, %last_step : index
+    %ob_flush = scalar.ori %ob_full, %ob_last : i1
+    scf.if %ob_flush {{
+      %ob_live = index.cmp ule, %lane, %ob_slot : index
+      scf.if %ob_live {{
+        %ob_group = index.div %step, %ob_c32 : index
+        %ob_step0 = index.mul %ob_group, %ob_c32 : index
+        %ob_base = index.add %first, %ob_step0 : index
+        %ob_row_value = index.add %ob_base, %lane : index
+        %ob_row = index.assume %ob_row_value [lt(%ob_row_value, %tokens)] : index
+        vector.store %ob_next, %out_view[%ob_row, %out_channel] : {vt}, {ot}
+      }}
+    }}
+""", 1)
+    assert new_head.endswith(") {")
+    k = k.replace(new_head, new_head[:-3].replace(") -> (", f", %ob = %zero4 : {vt}) -> (", 1).replace(
+        " = scf.for %step", ", %ob_unused = scf.for %step", 1) + f", {vt}) {{", 1)
     y = re.search(r"\n    scf\.yield ((?:%new\d+(?:, )?)+) : (.*)\n  \}\n", k)
     k = k.replace(y.group(0), f"\n    scf.yield {y.group(1)}, " + ", ".join(f"%nx_{n[1:]}" for n, _, _ in loads) +
-                  f" : {y.group(2)}, " + ", ".join(t for _, t, _ in loads) + "\n  }\n", 1)
+                  f", %ob_next : {y.group(2)}, " + ", ".join(t for _, t, _ in loads) + f", {vt}\n  }}\n", 1)
     return text[:a] + k + text[b:]
 
 
