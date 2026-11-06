@@ -77,7 +77,8 @@ install hrx-loom, `loom-fetch` the latest card from huggingface.co/loom-fun, bui
 when the card's chat format needs it (`LOOM_KIT`), fetch the card's llama.cpp release, serve, `LEVEL=full`
 gates, and a report-only perf run against the card's published numbers. No LLM and no skill run: a FAIL is a
 regression of the published package (or of the gate scripts). llama.cpp references are cached between nights
-(`actions/cache`). The same script runs by hand on any Strix Halo:
+(`actions/cache`). Run it on demand from the Actions tab (pick cards and a level), or on a pull request by adding
+the `nightly-gates` label (the PR branch's scripts run). The same script runs by hand on any Strix Halo:
 ```bash
 LEVEL=quick WORK=~/loom-nightly LOOM_PORT=8160 LLAMA_PORT=8130 MATERIALIZE=share \
   .github/scripts/nightly_gates.sh loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom   # -> WORK/<slug>/out/
