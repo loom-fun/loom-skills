@@ -180,7 +180,11 @@ c4_steady three runs; llama.cpp b1368 drafting from the same BF16 GGUF):
   tokens); plus the Q4_0 proposal head 22.1 ms and 2.16 tokens. llama.cpp takes ~48 ms per step for 3.5-3.9 tokens
   (it decodes a different text: llama-server turns thinking on by default, the package follows the template's
   default off). llama.cpp's own decode is bimodal across runs on DevLab (~97 on the first request of a fresh
-  server, 73-81 after), so compare means of several runs.
+  server, 73-81 after), so compare means of several runs. The table above used each engine's default thinking.
+  With perf.py's `--thinking` (now default off, the same `enable_thinking` sent to both engines; text_match.py
+  shows the same text up to near-ties), one runner each, llama.cpp at its best n-max (3):
+  thinking off 97.6 vs 61.4 tok/s (+59 %; n-max 7: 50.1), @32k 63.4 vs 49.6, c4 219 vs 165;
+  thinking on 113.1 vs 83.5 (+35 %; n-max 7: 82.5), @32k 72.9 vs 51.9, c4 270 vs 198.
 - Tried (Bolt, DevLab, no gain): depth 7 (93-94 tok/s short, but @2k 62-70 vs 81: 8-token verification costs ~4.5 ms
   more per step than 4 for +0.4 accepted tokens on this essay); fewer rows per workgroup for the 8/16-token int8
   matvecs on small outputs (MV_WG8 128-1024: flat to -5 %); the drafter's own widths in the R picker (flat); a Q4_0
