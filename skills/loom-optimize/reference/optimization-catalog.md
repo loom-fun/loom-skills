@@ -98,8 +98,8 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   the same A rows from L2. This is model dependent. It won on Flint and Glimmer
   (large N, many experts), but on dense Qwen3-4B turning it off was 4–12 % faster
   at 8k–16k prefill. A/B it per port; `GEMM_N_FASTEST=0` disables it.
-- `GEMM_SKIP_PADDING=1`: padding rows get scale 0, and a tile whose first row has
-  scale 0 exits. Packed epochs have up to 50 % padding at odd lengths.
+- `GEMM_SKIP_PADDING=1`: padding rows get scale 0 (`g_row_scale_f16_live`), and a tile whose
+  rows all have scale 0 exits. Packed epochs have up to 50 % padding at odd lengths.
 - **Ceiling.** We reached 25–31 TFLOP/s of a ~59 peak. Unexplored: LDS double
   buffering of B, and direct Q4_K→fragment dequant.
 
@@ -169,8 +169,23 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - `prefill_capacity` 4096 helps MoE prefill: larger expert buckets mean fuller GEMM tiles. build.py now
   defaults MoE configs (`cfg["moe"]`) to 4096. Flint (256 experts, top-6: ~24 tokens per expert in a 1024
   chunk, 64-row tiles ~37 % full; the expert GEMMs were 85 % of prefill): 2k/8k/32k +22/+38/+28 % vs 1024
-  (2048: +25/+27/+22 %). The price is short prompts: a ~1k-token prompt prefills 29 % slower at 4096 (22 % at
-  2048) than at 1024, a fixed per-epoch cost not yet attributed. Dense models gain little beyond 1024–2048.
+  (2048: +25/+27/+22 %). Dense models gain little beyond 1024–2048.
+- **Padding is the price of a big chunk.** An epoch runs at the next power-of-two shape: a 1026-token prompt
+  at chunk 4096 is one 2048-token epoch, half padding (at chunk 1024 it is 1024 + 2). Flint at 1k was 29 %
+  slower at 4096 than at 1024. Doubling launches attributed it (seconds per 1k prompt, 2048-shape vs
+  1024-shape epoch): router +0.05 (and 0.16 s even at 1024), dense GEMMs +0.07, elementwise kernels +0.07,
+  grouped expert GEMMs +0.03; `g_moe_bucket` is free and already skips padding. Fixes (issue #26):
+  - Router: the lane-per-32-value-chunk dot (strided loads, 32-way LDS bank conflicts) took 4.4 ms per
+    2048-token layer; a coalesced layout (lane l takes 4-value chunk l of each 128-value block) takes 0.96 ms
+    (`g_moe_route_tr`, prefill only). Per-wave top-k (subgroup reductions) replaces the workgroup ones.
+    Several tokens per workgroup (weight reuse) did not matter. Decode keeps the old one-token-per-workgroup
+    router: the new one is latency bound at t = 1 (decode -34 %).
+  - Dense GEMMs: `GEMM_SKIP_PADDING` never fired, because the row-scale scale is a power of two and never
+    0. `g_row_scale_f16_live` (the token-row scales in `@llm_advance`, given `%info`) writes scale 0 and
+    zero rows for padding, and a GEMM row tile is skipped when all its scales are 0 (+9 % at 1k).
+  - Result, Flint chunk 4096 vs the PR #25 build, one server, interleaved: 1k/2k/8k/32k +27/+15/+17/+13 %,
+    decode tie; 1k now matches the 1024-chunk build (918 vs ~905 tok/s).
+  - Not done: padding rows still run the elementwise kernels (norms, RoPE, combine; ~0.07 s at 1k).
 
 ### Tile order per port (`cfg["gemm_n_fastest"]`)
 - Columns fastest (the default) reuses each activation tile; rows fastest reuses each weight tile across

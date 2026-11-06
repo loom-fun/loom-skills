@@ -1486,6 +1486,41 @@ kernel.def export("g_row_scale_f16") @g_row_scale_f16(%rows: index) {
 """
 
 
+
+# g_row_scale_f16_live: g_row_scale_f16 for the epoch's token rows, given %info. A padding row (info live = 0)
+# gets scale 0 and zero f16 values without reading its x row, and the prefill GEMMs skip a row tile whose
+# scales are all 0 (gen_gemm GEMM_SKIP_PADDING). An epoch is padded up to its power-of-two shape (a 1026-token
+# prompt at prefill chunk 4096 runs as a 2048-token epoch), so this sizes the GEMM work by the live tokens.
+ROW_SCALE_LIVE = (ROW_SCALE
+    .replace('export("g_row_scale_f16") @g_row_scale_f16(', 'export("g_row_scale_f16_live") @g_row_scale_f16_live(')
+    .replace("launch(%rows_arg: index, %k_arg: index, %x: buffer,", "launch(%rows_arg: index, %info: buffer, %k_arg: index, %x: buffer,")
+    .replace("  %x_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k]xf32>\n", """  %x_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k]xf32>
+  %live_view = buffer.view %info[%zero] : buffer -> view<[%rows]x4xi32>
+  %live_word = view.load %live_view[%row, 2] : view<[%rows]x4xi32> -> i32
+  %dead_zero = scalar.constant 0 : i32
+  %row_live = scalar.cmpi ne, %live_word, %dead_zero : i32
+""")
+    .replace("    %v = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32\n    %a = scalar.absf %v : f32",
+             "    %v_raw = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32\n    %v_m = scf.select %row_live, %v_raw, %zero_f : f32\n    %a = scalar.absf %v_m : f32")
+    .replace("  %scale = scalar.bitcast %scale_bits : i32 to f32\n  %inverse = scalar.bitcast %inverse_bits : i32 to f32\n",
+             "  %scale_l = scalar.bitcast %scale_bits : i32 to f32\n  %inverse_l = scalar.bitcast %inverse_bits : i32 to f32\n"
+             "  %scale = scf.select %row_live, %scale_l, %zero_f : f32\n  %inverse = scf.select %row_live, %inverse_l, %zero_f : f32\n")
+    .replace("    %v = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32\n    %sv = scalar.mulf %v, %scale : f32",
+             "    %v_raw2 = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32\n    %v = scf.select %row_live, %v_raw2, %zero_f : f32\n    %sv = scalar.mulf %v, %scale : f32"))
+assert ROW_SCALE_LIVE.count("%row_live") == 5, ROW_SCALE_LIVE.count("%row_live")
+
+
+def live_row_scale(program):
+    """In @llm_advance (prefill; the drafting programs keep g_row_scale_f16: their draft-block rows are not live but
+    are computed), the epoch's token-row scales (g_row_scale_f16[%t]) take %info, so padding rows get scale 0."""
+    import re as _re
+    parts = _re.split(r"(?m)^(?=command\.program\.def )", program)
+    for n, p in enumerate(parts):
+        if p.startswith("command.program.def public @llm_advance("):
+            parts[n] = _re.sub(r"kernel\.launch @g_row_scale_f16\[%t\]\(%t, (.*?)\) : \[index\]\(index, index, buffer, buffer, buffer\)",
+                               r"kernel.launch @g_row_scale_f16_live[%t](%t, %info, \1) : [index](index, buffer, index, buffer, buffer, buffer)", p)
+    return "".join(parts)
+
 MROPE = CFG.get("mrope")   # {"sections": [t, h, w, e], "interleaved": bool}: Qwen-VL multi-axis RoPE (image input)
 
 
@@ -3281,6 +3316,9 @@ if __name__ == "__main__":
         if head_fmt in IQ_FMTS:
             COMMON += "".join(head_mv(tg, head_fmt, iq=True) for tg in (1, 4, 8))
             program = head_wiring(program)
+    if os.environ.get("ROW_SCALE_LIVE", "1") != "0":   # after quant_wiring (it matches g_row_scale_f16); =0 A/B it off
+        program = live_row_scale(program)
+        COMMON += ROW_SCALE_LIVE
     if any(f == "f32" for f, *_ in USED_MV | USED_MV_R) or "f32" in USED_GEMM:
         COMMON += F32_VALUES
     if any(f == "f16" for f, *_ in USED_MV | USED_MV_R) or "f16" in USED_GEMM:

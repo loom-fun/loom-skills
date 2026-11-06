@@ -11,7 +11,7 @@
  POST_NORM = CFG.get("post_norms", False)
  POST_EPS = CFG.get("post_norm_eps", 1e-8)
  EMBED_NORM = CFG.get("embed_norm", False)
-@@ -1440,6 +1444,17 @@
+@@ -1956,6 +1960,17 @@
      %g = vector.load %gate_view[%token, %head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
      %sig = vector.logisticf<afn> %g : vector<4xf32>
      %result = vector.mulf %attended, %sig : vector<4xf32>""".replace("{QH}", str(QH)) if GATE else "    %result = vector.addf %attended, %zero4 : vector<4xf32>"
@@ -29,7 +29,7 @@
      text = f"""
  // Splits for `visible` keys: about 32 keys each, at most {S}.
  func.def inline @{P}_split_count(%visible: index) -> (index) {{
-@@ -1595,13 +1610,13 @@
+@@ -2116,13 +2131,13 @@
      %s_eff = func.call @{P}_split_count(%visible) : (index) -> (index)
      %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>
      %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
@@ -45,7 +45,7 @@
        %bs = index.assume %s [range(%s, 0, {S - 1})] : index
        %ms = view.load %ml_view[%token, %head, %bs, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
        %ls = view.load %ml_view[%token, %head, %bs, 1] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
-@@ -2119,7 +2134,7 @@
+@@ -2677,7 +2692,7 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -54,7 +54,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -2152,6 +2167,51 @@
+@@ -2768,6 +2783,52 @@
    }}"""
  
  
@@ -87,14 +87,15 @@
 +""" if MOE["probs_bias"] else "") + f"""  %wge_{i} = command.parameter %weights, "{b}ffn_gate_exps.weight" : view<{sg}xi8>
 +  %wue_{i} = command.parameter %weights, "{b}ffn_up_exps.weight" : view<{sg}xi8>
 +  %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
-+  kernel.launch @g_moe_route[%t](%t, %h, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
 +  scf.if %gemm {{
++    kernel.launch @g_moe_route_tr[%t](%t, %h, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
 +    kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
 +    kernel.launch @g_moe_ggu_{fg}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, %wue_{i}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{sg}xi8>, buffer)
 +    kernel.launch @g_row_scale_f16[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16) : [index](index, index, buffer, buffer, buffer)
 +    kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>, buffer)
 +    kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, %y) : [index](index, index, buffer, buffer, buffer, buffer)
 +  }} else {{
++    kernel.launch @g_moe_route[%t](%t, %h, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
 +    kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wge_{i}, %wue_{i}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{sg}xi8>, buffer)
 +    kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wde_{i}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>, buffer)
 +    kernel.launch @g_moe_combine[%t](%t, %ys, %wts, %y) : [index](index, buffer, buffer, buffer)
@@ -106,7 +107,7 @@
  def gdn_layer(i, b, nm, sz, par):
      """Gated delta-net token mixer of layer i: h -> o (VD wide), then o16 for the output GEMM."""
      g = GDN
-@@ -2318,8 +2378,51 @@
+@@ -3131,8 +3192,51 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -159,7 +160,7 @@
    %list_entry = index.constant 4 : offset
    %list_size = index.scale %t, %list_entry : index, offset -> offset
    %count_size = index.constant 256 : offset
-@@ -2333,7 +2436,7 @@
+@@ -3146,7 +3250,7 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -168,7 +169,7 @@
      attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in RECUR)}
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
      def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
-@@ -2346,8 +2449,11 @@
+@@ -3159,8 +3263,11 @@
          kind = kind_note or (" (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else ""))
          T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
               f"  %layer_{i} = index.constant {attn_ordinal.get(i, gdn_ordinal.get(i)) if ordinal is None else ordinal} : index\n  %sliding_{i} = scalar.constant {1 if i in sliding else 0} : i32\n  %rope_{i} = scalar.constant {0 if i in nope else 1} : i32\n"]
@@ -182,7 +183,7 @@
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
          else:
-@@ -2374,15 +2480,17 @@
+@@ -3187,15 +3294,17 @@
          if GATE and not FUSED_Q and i not in RECUR:
              T.append("  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wg_{i}", sz("attn_gate"), "%gate", "%nH", "%nQ", H) + "\n")
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
@@ -203,7 +204,7 @@
    }}
    scf.if %gemm {{
      kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
-@@ -2393,15 +2501,18 @@
+@@ -3206,15 +3315,18 @@
          pa = f"%post_attn_{i}" if POST_NORM else f"%ffn_norm_{i}"
          T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, {pa}, %x, %ffn_norm_{i}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
          T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
@@ -231,7 +232,7 @@
          pf = f"%post_ffn_{i}" if POST_NORM else f"%ffn_norm_{i}"
          if last_norm:
              nn = last_norm
-@@ -2498,6 +2609,20 @@
+@@ -3342,6 +3454,20 @@
          parts.append(spec_kernels)
      if MIXED_FFN:
          parts.append(SILU_MUL)
@@ -310,7 +311,7 @@
  if head_dim not in (128, 256):
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -88,6 +88,34 @@
+@@ -102,6 +102,34 @@
    check.return
  }}
  """)
@@ -345,7 +346,7 @@
  # 2. matvec per (tensor) for t=1 and t=4 variants
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
-@@ -197,9 +225,14 @@
+@@ -244,9 +272,14 @@
  v = rng.standard_normal((t, KVH, D)).astype(np.float32); gate = rng.standard_normal((t, QH, D)).astype(np.float32)
  qr = rope(norm(q, qn) if cfg["qk_norm"] else q); kr = rope(norm(k, kn) if cfg["qk_norm"] else k)
  att = np.zeros((t, QH, D))
@@ -361,7 +362,7 @@
  if gate_kind:
      att = att / (1 + np.exp(-gate))
  blocks = (ctx + 15) // 16
-@@ -207,7 +240,7 @@
+@@ -254,7 +287,7 @@
  info = np.zeros((t, 4), np.int32); info[:, 1] = pos; info[:, 2] = 1
  S = 64
  for n, a in [("a_q", q.reshape(t, -1)), ("a_k", k.reshape(t, -1)), ("a_v", v.reshape(t, -1)), ("a_g", gate.reshape(t, -1)),
@@ -370,7 +371,7 @@
      save(n, a)
  QD = QH * D
  split_text = ""
-@@ -231,17 +264,115 @@
+@@ -278,17 +311,115 @@
    %info = check.file.read.npy path("a_info.npy") : tensor<{t}x4xi32>
    %orig = check.file.read.npy path("a_orig.npy") : tensor<{10 + blocks}xi32>
    %eo = check.file.read.npy path("a_o.npy") : tensor<{t}x{QD}xf32>
@@ -487,7 +488,7 @@
  # 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
  if cfg.get("recurrent_layers"):
      sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-@@ -322,6 +453,67 @@
+@@ -465,6 +596,72 @@
    check.return
  }}
  """)
@@ -501,7 +502,7 @@
 +        b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower(); fg = T[b + "ffn_gate_exps.weight"].tensor_type.name.lower()
 +        if fd in done: continue
 +        done.add(fd)
-+        t = 3
++        t = 6   # > the router's tokens per workgroup: a full group plus a partial one
 +        hx = rng.standard_normal((t, H)).astype(np.float32)
 +        tr = T[b + "ffn_gate_inp.weight"]; rbf = tr.tensor_type.name == "BF16"
 +        Wr = ((np.asarray(tr.data).view(np.uint16).astype(np.uint32) << 16).view(np.float32) if rbf else np.asarray(tr.data, np.float32)).reshape(E_, H)
@@ -543,10 +544,15 @@
 +  %ys = check.generate.fill value(0.0) : tensor<{t * KU}x{H}xf32>
 +  %y = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
 +  kernel.launch @g_moe_route[%t](%t, %h, %wr, %b, %ids, %wts) : [index](index, tensor<{t}x{H}xf32>, {ty(wr_raw)}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>)
++  %ids_tr = check.generate.fill value(0) : tensor<{t}x{KU}xi32>
++  %wts_tr = check.generate.fill value(0.0) : tensor<{t}x{KU}xf32>
++  kernel.launch @g_moe_route_tr[%t](%t, %h, %wr, %b, %ids_tr, %wts_tr) : [index](index, tensor<{t}x{H}xf32>, {ty(wr_raw)}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>)
 +  kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {gt}, tensor<{t * KU}x{FE}xf32>)
 +  kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wd, %ys) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t * KU}x{FE}xf32>, {dt_}, tensor<{t * KU}x{H}xf32>)
 +  kernel.launch @g_moe_combine[%t](%t, %ys, %wts, %y) : [index](index, tensor<{t * KU}x{H}xf32>, tensor<{t}x{KU}xf32>, tensor<{t}x{H}xf32>)
 +  check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
++  check.expect.equal actual(%ids_tr) expected(%eids) : tensor<{t}x{KU}xi32>
++  check.expect.close actual(%wts_tr) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
 +  check.expect.close actual(%wts) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
 +  check.expect.close actual(%y) expected(%ey) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{t}x{H}xf32>
 +  check.return
