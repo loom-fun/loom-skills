@@ -187,6 +187,16 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   Decode and verification keep their kernels (same summation order as before).
 - `prefill_capacity` for the dense 27B, vs 1024 at 1k/2k/8k: 512 ties (-1 %), 2048 loses -41/-9/-8 % (the
   1k prompt is a little over 1024 tokens and pads to one 2048-row epoch). Keep 1024 for dense models.
+  - Re-measured after #26's live row scale + `GEMM_SKIP_PADDING` and the 64x64-per-wave m256 GEMM (same
+    server, 5 rounds; 32k 3 rounds). 2048: -7.1/-1.0/-1.1 % at 1k/2k/8k, decode tie: padding is now cheap
+    (-41 -> -7 % at 1k) but a bigger chunk gains nothing. 4096: -7.0/-12.4/-10.3/-7.7 % at 1k/2k/8k/32k.
+    Doubling every GEMM at 8k: GEMM time is the same at both chunks (1.557 vs 1.549 ms/token; the m256 GEMM
+    is already at its compute ceiling at 1024 rows, and the 17 GB of weights per 1024-token epoch is ~4 % of
+    the bandwidth), while the rest grows 0.50 -> 0.67 ms/token. Doubling by family: flash2 0.095 vs 0.101
+    ms/token (same), the `g_gdn_*` kernels 0.23 -> 0.44 ms/token: the whole loss is in the GDN layers (not
+    split further: which GDN kernel grows, and why, is the next thing to measure if a dense hybrid ever needs
+    bigger chunks). MoE models gain from 4096 (fuller expert buckets); dense models
+    keep build.py's 1024 default. A dense non-hybrid model may behave differently (untested).
 - Qwen3.8-27B 2k prefill ablation after m256 + live row scale (doubling, same server): GEMMs ~79 % (q4_k store
   35, swiglu 27, q6_k store 12, q8_0 store 4.5; all ~31 TFLOP/s, so the weight format barely matters),
   post-add norm + row scale 2.8, row scale (o, f) 1.9, gdn_conv 1.8, flash2 1.6, silu_mul 0.8 %.
