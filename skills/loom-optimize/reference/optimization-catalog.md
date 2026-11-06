@@ -194,8 +194,9 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   next GEMM's f16 row and scale (one more workgroup max-reduce over values already in registers), replacing
   the separate `g_row_scale_f16` launch and its two re-reads of h. `g_gdn_conv`: 4 channels per loop step with
   every load before any store; `g_gdn_norm_gate`: stores after all loads (the store -> load ordering above).
-  Together +0.6/+0.8/+0.6 % at 1k/2k/8k: tie band, so **not kept** (branch `issue-29b`, commit bdcf3cd, if a
-  later GEMM speedup makes these few percent matter). What is left at 2k is the GEMM inner loop (~31 of ~59 TFLOP/s).
+  Together +0.6/+0.8/+0.6 % at 1k/2k/8k (tie band; same values as before, kernel tests). Re-measured on top of
+  the 64x64-per-wave m256 GEMM (7 rounds, same server): +0.3/+1.0/+0.6/+0.6 % at 1k/2k/8k/32k, decode tie;
+  positive in both measurements, so kept (27B 2k 492.3 -> 497.1 tok/s).
   - Tried: one 256-row swiglu kernel for layers whose gate and up formats differ (Q4_K gate + Q6_K up: waves
     0-7 dequant the gate format, waves 8-15 the up format, an scf.if on a wave-uniform condition; replaces two
     GEMMs + `g_silu_mul`). Correct (kernel test) but -1.1/-1.5 % at 2k/8k vs the two GEMMs: carrying both

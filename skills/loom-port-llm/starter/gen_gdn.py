@@ -140,6 +140,34 @@ def gdn_kernels(cfg, eps):
         scf.yield %h{j} : f32
       }}
       %acc{j} = scalar.fmaf %w{j}, %x{j}, {"%zero_f" if j == 0 else f"%acc{j - 1}"} : f32""")
+    # CU channels per loop step (c, c + stride, ...), every load before any store: Loom orders a global load
+    # after earlier global stores, so one channel per step paid a store -> load round trip per channel.
+    CU = int(os.environ.get("GDN_CONV_UNROLL", "4"))
+    tap_text = chr(10).join(taps) + f"""
+      %sig = scalar.logisticf<afn> %acc{K - 1} : f32
+      %silu = scalar.mulf %acc{K - 1}, %sig : f32"""
+    import re as _re
+    defined = set(_re.findall(r"(%\w+) = ", tap_text))
+    cu_parts, cu_stores = [], []
+    for u in range(CU):
+        body = _re.sub(r"%\w+", lambda m: m.group(0) + f"_u{u}" if m.group(0) in defined or m.group(0) == "%ch" else m.group(0), tap_text)
+        body = "\n".join("  " + l for l in body.split("\n"))
+        cu_parts.append(f"""      %cu{u}_k = index.constant {u} : index
+      %cu{u}_o = index.mul %cu{u}_k, %cstride : index
+      %cu{u}_c = index.add %c, %cu{u}_o : index
+      %cu{u}_in = index.cmp ult, %cu{u}_c, %cC : index
+      %val_u{u} = scf.if %cu{u}_in -> (f32) {{
+        %ch_u{u} = index.assume %cu{u}_c [range(%cu{u}_c, 0, {C - 1})] : index
+{body}
+        scf.yield %silu_u{u} : f32
+      }} else {{
+        scf.yield %zero_f : f32
+      }}""")
+        cu_stores.append(f"""      scf.if %cu{u}_in {{
+        %cs{u} = index.assume %cu{u}_c [range(%cu{u}_c, 0, {C - 1})] : index
+        view.store %val_u{u}, %out_view[%token, %cs{u}] : f32, view<[%tokens]x{C}xf32>
+      }}""")
+    conv_unrolled = "\n".join(cu_parts + cu_stores)
     T.append(f"""
 // out[t, c] = silu(sum_j w[c, j] x[t - (K-1) + j, c]); inputs before the span come from the history.
 kernel.def export("g_gdn_conv") @g_gdn_conv(%tokens: index) {{
@@ -192,12 +220,10 @@ kernel.def export("g_gdn_conv") @g_gdn_conv(%tokens: index) {{
     %cone = index.constant 1 : index
     %cbn = scf.select %few_b, %cbk, %cone : index
     %cstride = index.mul %cbn, %c256 : index
-    scf.for %c = [%cstart to %cC step %cstride] {{
-      %ch = index.assume %c [range(%c, 0, {C - 1})] : index
-{chr(10).join(taps)}
-      %sig = scalar.logisticf<afn> %acc{K - 1} : f32
-      %silu = scalar.mulf %acc{K - 1}, %sig : f32
-      view.store %silu, %out_view[%token, %ch] : f32, view<[%tokens]x{C}xf32>
+    %cunroll = index.constant {CU} : index
+    %cstride_u = index.mul %cstride, %cunroll : index
+    scf.for %c = [%cstart to %cC step %cstride_u] {{
+{conv_unrolled}
     }}
   }}
   kernel.return
@@ -472,8 +498,9 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
     %n{m}a = scalar.mulf %r{m}, %inv : f32
     %n{m}b = scalar.mulf %n{m}a, %wd{m} : f32
     %n{m} = scalar.mulf %n{m}b, %zg{m} : f32
-    %res{m} = scf.select %live, %n{m}, %zero_f : f32
-    view.store %res{m}, %o_view[%token, %nc{m}] : f32, view<[%tokens]x{VD}xf32>""" for m in range(RV))
+    %res{m} = scf.select %live, %n{m}, %zero_f : f32""" for m in range(RV))
+    # stores after every load: Loom orders each global load after earlier stores (a round trip per store/load pair)
+    nw += "\n" + "\n".join(f"    view.store %res{m}, %o_view[%token, %nc{m}] : f32, view<[%tokens]x{VD}xf32>" for m in range(RV))
     T.append(f"""
 kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
   %c1 = index.constant 1 : index

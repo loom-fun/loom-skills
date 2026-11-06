@@ -416,6 +416,52 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   check.return
 }}
 """)
+# g_post_add_norm_rs[_live] (gen_llm fuse_post_add_row_scale): x += (rmsnorm(y) * w_post if post norms else y);
+# h = rmsnorm(x) * w_next; then g_row_scale_f16's scale / f16 row of h. _live: a row with info word 2 = 0 gets scale 0
+# and a zero f16 row (x and h are still updated).
+if os.environ.get("GEMM_TESTS", "1") == "1":
+    pa_y = (rng.standard_normal((3, H)) * np.array([[1e-2], [1.0], [30.0]])).astype(np.float32)
+    pa_x = (rng.standard_normal((3, H)) * np.array([[1.0], [1e2], [1e-3]])).astype(np.float32)
+    pa_wp = (1 + 0.1 * rng.standard_normal(H)).astype(np.float32)
+    pa_wn = (rng.standard_normal(H) * np.array([3e3])).astype(np.float32)
+    def _rms(v, e): return v / np.sqrt((v.astype(np.float64) ** 2).mean(-1, keepdims=True) + e)
+    pa_r = (_rms(pa_y, cfg.get("post_norm_eps", 1e-8)) * pa_wp) if cfg.get("post_norms") else pa_y
+    pa_xe = (pa_x + pa_r).astype(np.float32)
+    pa_h = (_rms(pa_xe, eps) * pa_wn).astype(np.float32)
+    pa_e = np.clip(np.frexp(np.abs(pa_h).max(1))[1] - 1 - 13, 0, 100)
+    pa_live = np.array([1, 0, 1])
+    pa_info = np.zeros((3, 4), np.int32); pa_info[:, 2] = pa_live
+    for live in (0, 1):
+        sc = np.stack([2.0 ** -pa_e, 2.0 ** pa_e], 1).astype(np.float32)
+        if live:
+            sc = sc * pa_live[:, None]
+        h16 = (pa_h * sc[:, :1]).astype(np.float16)
+        sfx = "_live" if live else ""
+        for n, a in [("pa_y", pa_y), ("pa_x", pa_x), ("pa_wp", pa_wp), ("pa_wn", pa_wn), ("pa_xe", pa_xe), ("pa_he", pa_h),
+                     ("pa_info", pa_info), ("pa_s" + sfx, sc.astype(np.float32)), ("pa_h16" + sfx, h16)]:
+            save(n, a)
+        info_decl = '  %info = check.file.read.npy path("pa_info.npy") : tensor<3x4xi32>\n' if live else ""
+        cases.append(f"""check.case public @post_add_norm_rs{sfx} {{
+  %rows = check.literal value(3) : index
+  %y = check.file.read.npy path("pa_y.npy") : tensor<3x{H}xf32>
+  %x = check.file.read.npy path("pa_x.npy") : tensor<3x{H}xf32>
+  %wp = check.file.read.npy path("pa_wp.npy") : tensor<{H}xf32>
+  %wn = check.file.read.npy path("pa_wn.npy") : tensor<{H}xf32>
+  %ex = check.file.read.npy path("pa_xe.npy") : tensor<3x{H}xf32>
+  %eh = check.file.read.npy path("pa_he.npy") : tensor<3x{H}xf32>
+  %es = check.file.read.npy path("pa_s{sfx}.npy") : tensor<3x2xf32>
+  %eh16 = check.file.read.npy path("pa_h16{sfx}.npy") : tensor<3x{H}xf16>
+{info_decl}  %h = check.generate.fill value(0.0) : tensor<3x{H}xf32>
+  %s = check.generate.fill value(0.0) : tensor<3x2xf32>
+  %h16 = check.generate.fill value(0.0) : tensor<3x{H}xf16>
+  kernel.launch @g_post_add_norm_rs{sfx}[%rows](%rows, {"%info, " if live else ""}%y, %wp, %x, %wn, %h, %s, %h16) : [index](index, {"tensor<3x4xi32>, " if live else ""}tensor<3x{H}xf32>, tensor<{H}xf32>, tensor<3x{H}xf32>, tensor<{H}xf32>, tensor<3x{H}xf32>, tensor<3x2xf32>, tensor<3x{H}xf16>)
+  check.expect.close actual(%x) expected(%ex) atol(1.0e-5) rtol(1.0e-5) nan(different) : tensor<3x{H}xf32>
+  check.expect.close actual(%h) expected(%eh) atol(1.0e-2) rtol(1.0e-4) nan(different) : tensor<3x{H}xf32>
+  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<3x2xf32>
+  check.expect.close actual(%h16) expected(%eh16) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<3x{H}xf16>
+  check.return
+}}
+""")
 # Prefill GEMMs (gen_gemm.py): y = (x16 . W^T) * inv per row, x16 the f16 row-scaled activations and inv the
 # row's inverse scale (g_row_scale_f16's contract); swiglu: silu(gate) * up. One tensor per (format, K) the
 # model's prefill uses: the 64-, 128- (_m128) and 256-row (_m256) kernels, two row tiles each.
