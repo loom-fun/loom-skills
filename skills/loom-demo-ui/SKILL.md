@@ -4,6 +4,7 @@ description: Start and use the Loom Playground web UI (chat with streaming reaso
 ---
 
 # Loom Playground UI
+
 A small FastAPI proxy (`ui/server.py`) + one static page (`ui/index.html`). The page
 polls each upstream's `/v1/status`, groups ready models by `loom.kind`, and wires
 the tabs:

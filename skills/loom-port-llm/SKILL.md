@@ -4,6 +4,7 @@ description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve packag
 ---
 
 # Port an LLM to Loom
+
 The goal is a package directory that `loom-serve --model=PKG/model.json` serves as a
 complete chat model:
 - greedy output that matches llama.cpp up to near-ties;

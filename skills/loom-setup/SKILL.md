@@ -4,6 +4,7 @@ description: Install AMD Loom (hrx-loom from PyPI, or a ROCm/hrx-system CI wheel
 ---
 
 # Loom setup: install → fetch → serve
+
 Read the `loom` umbrella skill's hard rules first (memory limits, `--memory_bytes`,
 binary approval).
 

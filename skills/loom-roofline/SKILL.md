@@ -4,6 +4,7 @@ description: Roofline analysis for a Loom LLM port on Strix Halo — compute the
 ---
 
 # Roofline → targets
+
 The point is to decide **once, up front, with numbers**, what the port should reach,
 so the optimization loop (`loom-optimize`) has a finish line, and so a stopping
 decision is a measurement rather than a debate.

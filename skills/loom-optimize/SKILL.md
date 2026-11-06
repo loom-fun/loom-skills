@@ -4,6 +4,7 @@ description: Make a Loom LLM port faster (decode, prefill, long context, concurr
 ---
 
 # Optimize a Loom port without breaking it
+
 Before you start you need:
 - a package that passes the golden gate (`loom-port-llm` + `loom-benchmark`);
 - a baseline row in `perf_log.jsonl`;
