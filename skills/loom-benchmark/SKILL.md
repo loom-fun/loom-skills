@@ -45,15 +45,48 @@ big Loom model at the same time if together they exceed GPU memory.
 pick, llama.cpp + Loom baselines, `LEVEL=quick` gates, roofline and budget)
 and `finalize.sh` (on the final build: final perf, `LEVEL=full` gates, audit, `report.html`).
 
-**One command for the gates:** `[LEVEL=fast|quick|full] gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT]`
+**One command for the gates:** `[LEVEL=dev|fast|quick|full] gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT]`
 (needs `LLAMACPP_DIR`, or `LLAMA_URL` for a running llama-server) runs the gates below in order
 and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `gates_*.log`).
 
 | LEVEL | When | Gates | Cost |
 |---|---|---|---|
-| `fast` | after each kept optimization | goldens (cached) + compare, consistency (+ vision, for a package with image input) | 1–3 min |
-| `quick` | after the port (`qualify.sh` runs it) | fast + speculative-decoding equivalence (`spec`, drafting packages), agent tool loop, sampling, needle at half the context (≤ 60k) vs llama.cpp | 5–15 min the first time |
-| `full` | once, on the final build (`finalize.sh` runs it) | quick + one Loom-only probe at the full context | + one full-context prefill |
+| `dev` | **after each kept change** (loom-optimize, loom-improve) | consistency; agent tool loop (thinking on, and off when the template toggles it); goldens (cached) + compare on 12 short prompts + 1k/2k documents; vision on 2 images (with a projector); `spec` on 5–6 short requests (drafting packages); sampling (temperature 0 = greedy, seed reproduces); needle at 16k vs llama.cpp | Qwen3.8-27B (drafting, vision): 3.3 min cached, 5.5 min with the first reference fill; Bolt-E4B: 1.1 / 2.2 min |
+| `fast` | (kept for scripts that call it) | goldens + compare (20 short prompts + 1k–32k documents), consistency, vision on all 6 images | 1–3 min |
+| `quick` | nightly CI; a new port's first qualification (`qualify.sh`) | fast + `spec` (full request set), agent tool loop, 200-draw sampling, needle at half the context (≤ 60k) vs llama.cpp | median 11 min, up to 42 min (audit) |
+| `full` | nightly CI; once on a new port's final build before its first card (`finalize.sh`) | quick + one Loom-only probe at the full context | + one full-context prefill (up to 1 h on a 27B) |
+
+**Which level when** (from an audit of every gate run in the issue #26–#29 sessions):
+- Real Loom bugs caught: consistency 3 (an MoE router race, batch-variant matvec rows, a DFlash hang under
+  concurrency), agent 3–4 (stop tokens, a missing `<eos>`, history reuse), compare 2 (both at first bring-up),
+  needle_full 1 class (a KV pool < 1.5x the context; `build.py` now warns statically), spec 0–1. Vision,
+  sampling and the half-context needle: 0 (every failure was the reference or the harness). About 85 % of
+  compare failures were noise or harness. One `LEVEL=quick` loop of 24+ runs cost 6.6 GPU-hours and found 0 bugs.
+- So the development loop runs: kernel tests for new or changed kernels (`run_kernel_tests.sh`), `chat_probe
+  --verify` when the chat glue changes (seconds, CPU; it caught the template derivation errors), and
+  `LEVEL=dev` after each kept change. `dev` keeps the gates that found bugs at full strength and touches every
+  other feature lightly, so a feature that breaks outright still fails in minutes.
+- **Where it runs:** the dev machine's GPU is scarce and sequential, DevLab Dispatch is a large elastic pool.
+  Locally: only what the inner loop needs. Long or deep checks and anything against published cards: DevLab CI.
+- `quick` and `full` run **nightly** on the published cards (`.github/workflows/nightly-gates.yml`, below), and
+  by hand only once on a new port that has no card yet (qualify.sh / finalize.sh).
+- A `dev` pass is never reused by `quick`/`full` (gates.sh only skips a gate that passed at the same or a
+  stronger level on the same package hash).
+
+**Nightly CI** (`.github/workflows/nightly-gates.yml`): every night, one AMD DevLab Dispatch Strix Halo runner
+per card in `.github/nightly-models.json`, in parallel, runs `.github/scripts/nightly_gates.sh CARD_REPO`:
+install hrx-loom, `loom-fetch` the latest card from huggingface.co/loom-fun, build the reference example's kit
+when the card's chat format needs it (`LOOM_KIT`), fetch the card's llama.cpp release, serve, `LEVEL=full`
+gates, and a report-only perf run against the card's published numbers. No LLM and no skill run: a FAIL is a
+regression of the published package (or of the gate scripts). llama.cpp references are cached between nights
+(`actions/cache`). Run it on demand from the Actions tab (pick cards and a level), or on a pull request by adding
+the `nightly-gates` label (the PR branch's scripts run). The same script runs by hand on any Strix Halo:
+```bash
+LEVEL=quick WORK=~/loom-nightly LOOM_PORT=8160 LLAMA_PORT=8130 MATERIALIZE=share \
+  .github/scripts/nightly_gates.sh loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom   # -> WORK/<slug>/out/
+```
+Adding a card: an entry in `nightly-models.json` (its `--memory_bytes`, the reference example its chat
+format needs or null, the llama.cpp release it was measured against).
 
 `NEEDLE_FULL=0` (gates.sh, finalize.sh) runs `full` without the full-context probe and records it as deferred:
 the audit WARNs instead of failing. Across the #26–#29 sessions it caught one class of bug (a KV pool smaller than
@@ -66,7 +99,7 @@ separately: `LEVEL=full gates.sh` on the same build re-uses every gate that pass
   is lossless by construction: a difference is a verification, acceptance or state-replay bug). The log also
   prints the acceptance rate. The agent and needle gates run with drafting on, so they cover multi-turn reuse
   and the full context with speculation.
-- **Vision gate** (packages with image input, every level): `vision_golden.py` sends six built-in images
+- **Vision gate** (packages with image input, every level; `dev` sends 2 of them): `vision_golden.py` sends six built-in images
   (shapes + text, chart, document, photo-like, tall, wide; `--images` adds files) to Loom as chat
   requests and to llama-server `--mmproj` (gates.sh sets `MMPROJ` from the package, so the lazily
   started server loads it) as the package's own rendering + image. Prompt token counts must be equal
@@ -81,12 +114,12 @@ separately: `LEVEL=full gates.sh` on the same build re-uses every gate that pass
 - **The llama.cpp side is cached** (`BENCH_DIR/llama_cache`, keyed on the GGUF, the build and the
   request): it never depends on the Loom build, so only the first run pays for it. Re-running the
   gates on an optimized build costs Loom time only.
-- `fast` is enough inside the loop because the kernel paths an optimization touches are what the
-  goldens exercise (short prompts, 1k–32k documents: prefill, KV paging, attention) and consistency
-  covers mixed batches. Run `quick` instead when you changed the chat glue (`control.loom`), the
-  storage/recurrent state, or the sampling head.
-- The full-context probe is the most expensive step (a 261k prompt: ~8 min for a 0.8B hybrid) and
-  only proves the size is served: run it once, on the final build.
+- `dev` is enough inside the loop: consistency and agent are the gates that found real bugs; compare keeps
+  the short prompts and the 1k/2k documents (prefill, KV paging, attention); the 16k needle covers long
+  context; the rest catch a feature that breaks outright. When you change the chat glue (`control.loom`), run
+  `chat_probe --verify` first; `dev` then checks rendering, reuse and both thinking modes in the agent gate.
+- The full-context probe is the most expensive step (a 261k prompt: ~8 min for a 0.8B hybrid, up to an hour on
+  a 27B) and only proves the size is served: nightly, and once on a new port's final build.
 
 ```bash
 S=${CLAUDE_SKILL_DIR}/scripts; P=~/work/mymodel/pkg; T=~/loom/.tools/bin/python; mkdir -p ~/work/mymodel/bench && cd ~/work/mymodel/bench   # outputs land here, not in the skill

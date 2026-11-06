@@ -1,0 +1,139 @@
+name: nightly-gates
+# The long correctness gates (gates.sh LEVEL=full: goldens up to 32k, every vision image, the full spec
+# request set, agent, 200-draw sampling, needle at half and full context) on the LATEST published loom-fun
+# cards, one AMD DevLab Dispatch Strix Halo runner per card, in parallel. Deterministic: no LLM agent, no
+# skill run; each job fetches the card with loom-fetch, serves it and runs .github/scripts/nightly_gates.sh.
+# The development loop runs the lean LEVEL=dev gates instead (loom-benchmark SKILL.md, "Which level when").
+# A pull request labeled `nightly-gates` runs the matrix on its branch at LEVEL=dev and LEVEL=full (validates gate
+# or workflow changes, and measures the dev level's wall time on every card without using a developer's GPU).
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  schedule:
+    - cron: "17 7 * * *"   # 07:17 UTC (late evening in the US)
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "Card repos to run, comma-separated (empty = every card in .github/nightly-models.json)"
+        required: false
+        default: ""
+      level:
+        description: "gates.sh level"
+        required: false
+        default: full
+        type: choice
+        options: [full, quick, dev, dev+full, fast]
+      perf:
+        description: "Report-only perf (Loom vs the card's published numbers)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-gates-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  models:
+    # Pull requests: only with the `nightly-gates` label (and not when some other label is added).
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'nightly-gates') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'nightly-gates'))
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+      repos: ${{ steps.pick.outputs.repos }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        env:
+          ONLY: ${{ inputs.models }}
+          LEVELS: ${{ github.event_name == 'pull_request' && 'dev+full' || inputs.level || 'full' }}
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, os
+          ms = json.load(open(".github/nightly-models.json"))["models"]
+          only = [x.strip() for x in os.environ.get("ONLY", "").split(",") if x.strip()]
+          unknown = [x for x in only if x not in [m["repo"] for m in ms]]
+          if unknown:
+              raise SystemExit(f"not in .github/nightly-models.json: {unknown}")
+          ms = [m for m in ms if not only or m["repo"] in only]
+          levels = os.environ["LEVELS"].split("+")
+          print("matrix=" + json.dumps({"include": [{"repo": m["repo"], "slug": m["slug"], "llamacpp": m["llamacpp"], "level": lv}
+                                                    for lv in levels for m in ms]}))
+          print("repos=" + ",".join(m["repo"] for m in ms))
+          EOF
+
+  gates:
+    needs: models
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.models.outputs.matrix) }}
+    name: gates (${{ matrix.slug }}, ${{ matrix.level }})
+    # AMD DevLab's pool: `devlab-dispatch` opts in to the pool and `strix-halo` narrows it to gfx1151.
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    # LEVEL=full on a 27-30B card: ~1 h for the full-context needle alone, plus the half-context needle and
+    # (on a cold reference cache) the llama.cpp recordings.
+    timeout-minutes: 330
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      GH_TOKEN: ${{ github.token }}   # fetch_llamacpp.sh: GitHub API without rate limits
+      LEVEL: ${{ matrix.level }}
+      PERF: ${{ matrix.level != 'dev' && (github.event_name != 'workflow_dispatch' || inputs.perf) && '1' || '0' }}
+      WORK: ${{ github.workspace }}/../nightly-work
+      CLEAN: "1"   # shared runners: delete the fetched GGUFs at the end
+    steps:
+      - uses: actions/checkout@v4
+      - name: card revision
+        id: card
+        run: |
+          # The reference cache depends on the GGUF (pinned by model.json.lock), the llama.cpp build and the
+          # gate requests (the benchmark scripts); entries are keyed by request, so an older cache is a safe start.
+          lock=$(curl -fsSL --retry 3 "https://huggingface.co/${{ matrix.repo }}/resolve/main/model.json.lock" | sha256sum | cut -c1-16)
+          echo "lock=$lock" >> "$GITHUB_OUTPUT"
+          mkdir -p "$WORK"; echo "WORK=$(cd "$WORK" && pwd)" >> "$GITHUB_ENV"
+      - name: restore llama.cpp references
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.WORK }}/${{ matrix.slug }}/bench/llama_cache
+          key: llama-${{ matrix.slug }}-${{ matrix.llamacpp }}-${{ steps.card.outputs.lock }}-${{ hashFiles('skills/loom-benchmark/scripts/*.py') }}-${{ matrix.level }}-${{ github.run_id }}
+          restore-keys: |
+            llama-${{ matrix.slug }}-${{ matrix.llamacpp }}-${{ steps.card.outputs.lock }}-${{ hashFiles('skills/loom-benchmark/scripts/*.py') }}-
+            llama-${{ matrix.slug }}-${{ matrix.llamacpp }}-${{ steps.card.outputs.lock }}-
+      - name: "gates LEVEL=${{ env.LEVEL }}: ${{ matrix.repo }}"
+        run: |
+          export FETCH_CACHE=$WORK/${{ matrix.slug }}/fetch-cache
+          bash .github/scripts/nightly_gates.sh "${{ matrix.repo }}"
+      - name: save llama.cpp references
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WORK }}/${{ matrix.slug }}/bench/llama_cache
+          key: llama-${{ matrix.slug }}-${{ matrix.llamacpp }}-${{ steps.card.outputs.lock }}-${{ hashFiles('skills/loom-benchmark/scripts/*.py') }}-${{ matrix.level }}-${{ github.run_id }}
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-${{ matrix.slug }}-${{ matrix.level }}
+          path: ${{ env.WORK }}/${{ matrix.slug }}/out
+          retention-days: 30
+      - name: clean up
+        if: always()
+        run: rm -rf "$WORK/${{ matrix.slug }}/pkg" "$WORK/${{ matrix.slug }}/fetch-cache" "$WORK/${{ matrix.slug }}/kit"
+
+  summary:
+    needs: [models, gates]
+    if: always() && needs.models.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-*
+          path: results
+      - name: pass/fail per card and gate
+        run: python3 .github/scripts/nightly_summary.py results --only "${{ needs.models.outputs.repos }}" >> "$GITHUB_STEP_SUMMARY"

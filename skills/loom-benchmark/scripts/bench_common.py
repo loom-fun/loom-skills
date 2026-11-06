@@ -140,6 +140,8 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
     never on the Loom build, so every gate run after the first reuses it: re-running the gates
     on an optimized build costs Loom time only. Cache: $LLAMA_CACHE or ./llama_cache (bench/).
     `salt` separates deliberate re-recordings (golden2: llama.cpp is not run-to-run deterministic).
+    The key names the llama.cpp build by $LLAMACPP_DIR; $LLAMA_CACHE_BUILD (e.g. "b1355") replaces that path
+    where it differs between machines (nightly CI restores the cache on whichever runner it lands on).
     On a miss with $LLAMA_DEFER set (gates.sh: one model at a time), the request is appended to that
     file and a placeholder without tokens is returned; llama_fill.py answers the pending requests with
     only llama.cpp loaded, and the gate re-runs from the cache. Otherwise, when nothing answers at
@@ -148,7 +150,7 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
     gguf = pkg.cfg.get("gguf") if pkg is not None else os.environ.get("LLAMA_GGUF")
     if gguf not in _FP:
         _FP[gguf] = _gguf_fingerprint(gguf)
-    key = hashlib.sha256(json.dumps({"gguf": _FP[gguf], "build": os.environ.get("LLAMACPP_DIR", ""),
+    key = hashlib.sha256(json.dumps({"gguf": _FP[gguf], "build": os.environ.get("LLAMA_CACHE_BUILD") or os.environ.get("LLAMACPP_DIR", ""),
                                      "body": body, "salt": salt}, sort_keys=True).encode()).hexdigest()
     d = os.environ.get("LLAMA_CACHE", "llama_cache")
     path = os.path.join(d, key[:2], key + ".json")

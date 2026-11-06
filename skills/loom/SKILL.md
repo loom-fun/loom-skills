@@ -102,7 +102,9 @@ $K/loom-benchmark/scripts/finalize.sh $W/pkg http://127.0.0.1:8160 $G $W/bench  
    required in the report; this step creates both.
 3. **Optimize** (`loom-optimize`), under the rate controller, for the budget printed
    by qualify. After each kept change: rebuild, restart, `perf.py`, and
-   `LEVEL=fast gates.sh` (≈1–3 min: the llama.cpp references are cached).
+   `LEVEL=dev gates.sh` (a few minutes: the llama.cpp references are cached), plus kernel tests for
+   changed kernels. The long gates (`quick`/`full`) run here only in qualify/finalize, and nightly in CI
+   on published cards (`loom-benchmark`, "Which level when").
    Stop at BUDGET even if a lever is half done: revert to the last kept build.
 4. **Finalize.** Serve the best build, run `finalize.sh`. It runs the full gates
    (with the full-context probe), the final perf, `audit.py` (must print

@@ -84,7 +84,7 @@ def main():
     thinking = None if a.thinking == "default" else a.thinking == "on"
     extra = {} if thinking is None else {"chat_template_kwargs": {"enable_thinking": thinking}}
     msgs = [{"role": "system", "content": "You are a helpful assistant. Use the tools when they help."}]
-    turns, failures, prev_total = [], 0, 0
+    turns, failures, prev_total, prev_text = [], 0, 0, ""
     for task in TASKS:
         msgs.append({"role": "user", "content": task})
         for step in range(6):
@@ -101,7 +101,16 @@ def main():
             rec["render_ok"] = rec["prompt_tokens"] == rec["rendered_tokens"]
             # Inside a tool loop the previous turn's prompt + output is retained and must be reused.
             # (A new user query may legitimately re-render earlier turns: Qwen templates drop old reasoning.)
-            rec["reuse_ok"] = step == 0 or rec["cached"] >= 0.8 * prev_total
+            # A template that rewrites the retained history (e.g. drops the previous turn's reasoning when
+            # thinking is on) leaves nothing verbatim to reuse: require reuse only when the previous prompt +
+            # output is a prefix of this prompt.
+            if step:
+                pids = P.ids(prev_text)
+                common = next((i for i, (x, y) in enumerate(zip(pids, ids)) if x != y), min(len(pids), len(ids)))
+                rec["history_verbatim"] = common >= 0.8 * len(pids)
+            else:
+                rec["history_verbatim"] = True
+            rec["reuse_ok"] = step == 0 or not rec["history_verbatim"] or rec["cached"] >= 0.8 * prev_total
             calls_ok = True
             for c in m.get("tool_calls") or []:
                 try:
@@ -161,6 +170,7 @@ def main():
                       " small thinking models do this - compare llama.cpp's choice at that point, not a Loom bug by itself")
             turns.append(rec)
             prev_total = u["prompt_tokens"] + u["completion_tokens"]
+            prev_text = prompt + P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
             # loom-serve rejects "reasoning_content": null, so only send it when present.
             msgs.append({"role": "assistant", "content": m.get("content") or "",
                          **({"reasoning_content": m["reasoning_content"]} if m.get("reasoning_content") else {}),

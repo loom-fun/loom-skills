@@ -1,7 +1,7 @@
 """Golden reference: greedy llama.cpp generations (token ids + top-5 log-probs)
 for the short prompt set and (optionally) long real-text prompts.
 
-usage: python golden.py PACKAGE OUT.json [--llama http://127.0.0.1:8130] [--tokens 64] [--long 1000,2000,16000,32000]
+usage: python golden.py PACKAGE OUT.json [--llama http://127.0.0.1:8130] [--tokens 64] [--long 1000,2000,16000,32000] [--short N]
 
 llama.cpp gets the *rendered prompt as raw token ids* (/completion), so it sees
 exactly the tokens Loom's control program produces. Run llama-server with the
@@ -20,10 +20,11 @@ ap.add_argument("out")
 ap.add_argument("--llama", default="http://127.0.0.1:8130")
 ap.add_argument("--tokens", type=int, default=64)
 ap.add_argument("--long", default="", help="comma-separated doc sizes for long-context goldens (64 tokens each)")
+ap.add_argument("--short", type=int, default=None, help="only the first N short prompts (gates.sh LEVEL=dev: 12)")
 ap.add_argument("--salt", default="", help="cache salt: a 2nd recording (golden2) needs its own (llama.cpp is not run-to-run deterministic)")
 a = ap.parse_args()
 pkg = Package(a.package)
-items = [(p, a.tokens) for p in PROMPTS]
+items = [(p, a.tokens) for p in PROMPTS[:a.short]]
 # One question per document (alternating the two kinds across sizes): each long prefill is the
 # expensive part on both engines, and a second question on the same document tested the same path.
 QS = ("Summarize this documentation in one sentence.", "What is the main command shown in this documentation?")

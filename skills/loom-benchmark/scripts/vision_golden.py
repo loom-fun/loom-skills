@@ -1,6 +1,7 @@
 """Image-input gate: Loom vs llama.cpp (llama-server --mmproj) on the same images and questions.
 
 usage: python vision_golden.py PACKAGE --url http://127.0.0.1:8160 --llama http://127.0.0.1:8130 [--images a.png,b.jpg] [--tokens 96]
+                                [--cases shapes,wide]   (a subset of the built-in images: gates.sh LEVEL=dev)
 
 Like golden.py, llama.cpp gets the package's own rendering of the conversation (render_messages, with
 llama.cpp's media marker where the image goes) plus the image through /completion: both engines see the
@@ -153,10 +154,17 @@ def main():
     ap.add_argument("--llama", default="http://127.0.0.1:8130")
     ap.add_argument("--images", default="")
     ap.add_argument("--tokens", type=int, default=96)
+    ap.add_argument("--cases", default="", help="comma-separated built-in image names to run (default: all)")
     a = ap.parse_args()
     from bench_common import Package
     pkg = Package(a.package)
     items = cases(a.images); refs = {}
+    if a.cases:
+        want = a.cases.split(",")
+        unknown = [c for c in want if c not in items]
+        if unknown:
+            raise SystemExit(f"unknown --cases {unknown}; have {sorted(items)}")
+        items = {k: items[k] for k in want}
     for name, (durl, q, size) in items.items():   # all references first: with LLAMA_DEFER they are queued
         refs[name] = reference(pkg, a.llama, durl, q, a.tokens)
     if any(r.get("_pending") for r in refs.values()):

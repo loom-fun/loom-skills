@@ -1,0 +1,13 @@
+{
+  "_comment": "Published loom-fun cards the nightly gates run on (.github/workflows/nightly-gates.yml). memory_bytes is the card's own loom-serve --memory_bytes (nightly_gates.sh prefers the value in the card's README, so a republished card that changes it still serves); kit is the reference example whose chat_probe the gates need (LOOM_KIT), or null for the starter's; llamacpp is the lemonade-sdk/llamacpp-rocm release the card was measured against (b1355 letterboxes Gemma 4 images: gemma4 needs b1368 or newer). features is what the card's model.json and llm_config.json declare.",
+  "models": [
+    {"repo": "loom-fun/bartowski-Qwen3.8-27B-loom", "slug": "qwen3.8-27b", "memory_bytes": 52000000000,
+     "kit": null, "llamacpp": "b1355", "features": ["vision", "draft", "thinking-toggle"]},
+    {"repo": "loom-fun/unsloth-Muse-Glimmer-30B-loom", "slug": "muse-glimmer-30b", "memory_bytes": 39000000000,
+     "kit": "glimmer", "llamacpp": "b1355", "features": ["vision", "draft", "thinking-always"]},
+    {"repo": "loom-fun/ggml-org-Flint-loom", "slug": "flint", "memory_bytes": 67000000000,
+     "kit": null, "llamacpp": "b1355", "features": ["draft", "thinking-always"]},
+    {"repo": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom", "slug": "nemotron-3.5-bolt-e4b", "memory_bytes": 34000000000,
+     "kit": "gemma4", "llamacpp": "b1368", "features": ["vision", "draft", "thinking-toggle"]}
+  ]
+}

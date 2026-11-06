@@ -15,7 +15,7 @@ fi
 os=ubuntu; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) os=windows;; esac
 api=https://api.github.com/repos/lemonade-sdk/llamacpp-rocm/releases/$([ "$tag" = latest ] && echo latest || echo "tags/$tag")
 auth=(); [ -n "${GH_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $GH_TOKEN")   # avoids API rate limits on CI
-meta=$(curl -fsSL "${auth[@]}" "$api") || { echo "cannot reach the GitHub API for lemonade-sdk/llamacpp-rocm" >&2; exit 1; }
+meta=$(curl -fsSL --retry 3 "${auth[@]}" "$api") || { echo "cannot reach the GitHub API for lemonade-sdk/llamacpp-rocm" >&2; exit 1; }
 py=${PY:-python3}   # PY: an interpreter of your own (weaver passes its bundled one)
 read -r rtag url < <("$py" -c '
 import json, sys

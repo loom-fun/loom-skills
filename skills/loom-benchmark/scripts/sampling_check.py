@@ -7,6 +7,8 @@ Checks, on one short prompt with thinking off when the template allows it:
      llama.cpp's probabilities for the same prompt ids (total-variation distance), when --llama is given.
 
 usage: sampling_check.py PKG LOOM_URL [--llama URL] [--draws 200]
+  --draws 0: checks 1-2 only (gates.sh LEVEL=dev); --llama then only decides whether check 2's
+  "different seeds vary" applies (one cached 1-token reference)
 """
 import argparse
 import collections
@@ -61,7 +63,7 @@ def main():
     for name, ok in checks:
         fails += not ok
         print(("OK  " if ok else "FAIL"), name)
-    if a.llama:
+    if a.llama and a.draws > 0:
         first = collections.Counter()
         for s in range(a.draws):
             t1 = P.ids(ask(max_tokens=1, temperature=1.0, top_p=1.0, top_k=0, seed=1000 + s))

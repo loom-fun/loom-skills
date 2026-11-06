@@ -53,16 +53,23 @@ Before you start you need:
    --xfail=@ab_negative_control=EXPECT/003`; the skeleton in ab_kernel.py shows it. Use the real shapes, including edge counts
    (t=1, t=4, t=63/64, a partial last tile, mixed-sequence tiles, the full context).
    Run it with `loom-test` (see the cookbook in `loom-port-llm/reference/`).
-5. **End-to-end gates.** `LEVEL=fast gates.sh PKG URL GGUF BENCH_DIR` (`loom-benchmark`):
-   - `compare.py` on short prompts and the 1k/2k/16k/32k goldens. Every divergence
-     must be a near-tie (the compare rule, `bench_common.near_tie`). A new
-     divergence with a large gap is a bug even if the text "looks fine".
-   - `consistency.py`: concurrent outputs must equal sequential outputs. This
-     catches mixed-tile and padding bugs that single requests never hit.
-   The llama.cpp goldens come from the cache `qualify.sh` filled, so this costs only the
-   Loom side (≈1–3 min). Use `LEVEL=quick` if the change touched the chat glue, the
-   recurrent state or the sampling head. Run the gates only on a build you intend to keep
-   (it won on perf): a reverted build needs no gates.
+5. **End-to-end gates.** `LEVEL=dev gates.sh PKG URL GGUF BENCH_DIR` (`loom-benchmark`):
+   - `consistency.py`: concurrent outputs must equal sequential outputs, and a prompt repeated
+     alone must repeat exactly. This catches mixed-tile, padding and race bugs that single
+     requests never hit (3 of the 8 real bugs the gates ever caught).
+   - `agent_golden.py`: the multi-turn tool loop (rendering, history reuse, stop tokens; thinking
+     on and off). 3–4 of the 8.
+   - `compare.py` on 12 short prompts and the 1k/2k goldens. Every divergence must be a near-tie
+     (the compare rule, `bench_common.near_tie`). A new divergence with a large gap is a bug even
+     if the text "looks fine".
+   - a light touch of the rest: 2 images, 5–6 short drafted-vs-undrafted requests, sampling
+     semantics, a 16k needle.
+   The llama.cpp goldens come from the cache `qualify.sh` filled, so this costs only the Loom
+   side (a few minutes; `loom-benchmark` has the measured times). Kernel tests (step 4) for every new or changed
+   kernel and `chat_probe --verify` for a chat-glue change come first: they are cheaper and
+   more specific. Run the gates only on a build you intend to keep (it won on perf): a reverted
+   build needs no gates. Don't run `LEVEL=quick`/`full` in the loop: they run nightly on the
+   published cards (a 24-run `quick` loop cost 6.6 GPU-hours and caught nothing `dev` misses).
 6. **Measure again** on the same workloads. Run `perf.py` from `bench/` with a
    label for the build (add `--reverted` if you discard it). It logs the result
    and prints the controller verdict by itself. Keep the change only if it wins on the

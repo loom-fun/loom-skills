@@ -8,7 +8,10 @@ model.json whose execution has draft_depth 0) on identical requests; a package w
 
 usage:
   spec_check.py card PKG                 -> writes PKG/model_target.json (draft_depth 0, one epoch per turn)
-  spec_check.py record URL MODEL OUT     -> completions of the fixed request set (greedy + seeded sampling) as JSON lines
+  spec_check.py record URL MODEL OUT [--lean]
+                                         -> completions of the fixed request set (greedy + seeded sampling) as JSON lines;
+                                            --lean (gates.sh LEVEL=dev): 5 requests (6 with images) of at most 128 tokens (greedy, seeded,
+                                            tool call, thinking, one image when the package takes images)
   spec_check.py compare TARGET.jsonl DRAFT.jsonl [--metrics URL | --metrics-file FILE] [--pkg PKG --llama URL]
                                          -> exit 1 unless every completion is identical or (with --llama) every
                                             greedy divergence is a near-tie; prints acceptance if --metrics
@@ -79,9 +82,18 @@ def requests_set(model, images=False):
     return out + (image_requests(model) if images else [])
 
 
-def record(url, model, path):
+def lean_set(model, images=False):
+    """A few requests that still cross every drafting path: greedy, seeded sampling, a tool call, a thinking turn
+    and (with image input) one image; 128 tokens each (several verify epochs at depth 3)."""
+    full = requests_set(model, images)
+    k = 3 * images   # the image requests come last
+    pick = [full[0], full[2], full[3], full[-2 - k], full[-1 - k]] + full[-3:-2] * images
+    return [dict(b, max_tokens=min(b["max_tokens"], 128)) for b in pick]
+
+
+def record(url, model, path, lean=False):
     with open(path, "w") as f:
-        for i, body in enumerate(requests_set(model, has_images(url))):
+        for i, body in enumerate((lean_set if lean else requests_set)(model, has_images(url))):
             r = post(url, body)
             c = r["choices"][0]
             m = c["message"]
@@ -170,7 +182,7 @@ if __name__ == "__main__":
     if cmd == "card":
         card(sys.argv[2])
     elif cmd == "record":
-        record(sys.argv[2], sys.argv[3], sys.argv[4])
+        record(sys.argv[2], sys.argv[3], sys.argv[4], "--lean" in sys.argv[5:])
     elif cmd == "compare":
         flag = "--metrics" if "--metrics" in sys.argv else ("--metrics-file" if "--metrics-file" in sys.argv else None)
         m = sys.argv[sys.argv.index(flag) + 1] if flag else None

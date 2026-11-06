@@ -8,7 +8,7 @@
 #        eval.sh OUT_DIR PKG GGUF [PORT=8460] [LLAMA_PORT=8430] [MEMORY_BYTES from the package]
 #   1. serves PKG alone on PORT
 #   2. LEVEL=full gates (FORCE=1: nothing reused from earlier runs) -> OUT_DIR/gates/gates.json
-#      (GATES=0: perf only, when the trial's own full gates are trusted)
+#      (LEVEL=dev: the lean gates, minutes; GATES=0: perf only, when the trial's own full gates are trusted)
 #   3. perf: llama.cpp (Loom stopped), then Loom: 3 rounds of the short set + 1 long set each
 #      (perf.py --no-campaign) -> OUT_DIR/perf.jsonl, medians in OUT_DIR/eval.json
 set -u
@@ -35,8 +35,8 @@ trap '"$SV/stop.sh" eval >/dev/null 2>&1' EXIT
 # Same reference for every evaluation: the given build, else the latest lemonade release.
 LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" | tail -1)}; export LLAMACPP_DIR
 if [ "${GATES:-1}" = 1 ]; then
-  echo "== gates (LEVEL=full, FORCE=1)"
-  FORCE=1 LEVEL=full LOOM_ROOT=$root "$B/gates.sh" "$pkg" "http://127.0.0.1:$port" "$gguf" "$out/gates" "$lport" > "$out/gates.out" 2>&1
+  echo "== gates (LEVEL=${LEVEL:-full}, FORCE=1)"
+  FORCE=1 LEVEL=${LEVEL:-full} LOOM_ROOT=$root "$B/gates.sh" "$pkg" "http://127.0.0.1:$port" "$gguf" "$out/gates" "$lport" > "$out/gates.out" 2>&1
   tail -1 "$out/gates.out"
 fi
 echo "== perf (llama.cpp with Loom stopped, then Loom: one model at a time)"
