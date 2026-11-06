@@ -106,7 +106,7 @@ and `org_status` shows it as `sweep` until step 3 fills it.
 DevLab is an elastic pool of Strix Halo runners; sweep many cards at once there, never on the local GPU.
 
 - **Gates:** add the card to `.github/nightly-models.json` (card, memory, kit, llama.cpp build) and run
-  `nightly-gates.yml` (it runs on schedule, or `gh workflow run nightly-gates.yml -f cards=...`, or label a PR
+  `nightly-gates.yml` (it runs on schedule, or `gh workflow run nightly-gates.yml -f models=loom-fun/REPO,... -f level=full`, or label a PR
   `nightly-gates`). Then per card: `card/pull_devlab.py loom-fun/REPO -o ev_devlab.json`, `make_info.py build` with
   the card's earlier evidence plus `ev_devlab.json`, `render_card.py`, and upload only README.md, info.json and
   REPORT.md.
