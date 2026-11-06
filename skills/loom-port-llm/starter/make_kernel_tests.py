@@ -322,7 +322,7 @@ if cfg.get("recurrent_layers"):
     li = cfg["recurrent_layers"][0]; b = f"blk.{li}."
     conv_w = deq(b + "ssm_conv1d.weight").reshape(C, K).astype(np.float32)
     a_log = deq(b + "ssm_a").astype(np.float32); dt = deq(b + "ssm_dt.bias").astype(np.float32); nw = deq(b + "ssm_norm.weight").astype(np.float32)
-    t, p0 = 5, 3
+    t, p0 = 40, 3   # over 32 tokens: the recurrence stores its outputs in 32-step batches
     qkv = rng.standard_normal((t, C)).astype(np.float32); hist0 = rng.standard_normal((K - 1, C)).astype(np.float32)
     S0 = (0.1 * rng.standard_normal((HV, DV, DK))).astype(np.float32)  # [head][b][a]
     alpha = rng.standard_normal((t, HV)).astype(np.float32); beta = rng.standard_normal((t, HV)).astype(np.float32)
@@ -394,9 +394,31 @@ if cfg.get("recurrent_layers"):
   check.return
 }}
 """)
+# g_row_scale_f16 (the GEMM A operand): per-row power-of-two scale 2^-e, e = clamp(floor(log2 max|x|) - 13, 0, 100),
+# x16 = f16(x * scale); rows of very different magnitude, width = the FFN width (the widest the model uses).
+if os.environ.get("GEMM_TESTS", "1") == "1":
+    rs_k = cfg["ffn"] if isinstance(cfg.get("ffn"), int) else H
+    rs_x = (rng.standard_normal((3, rs_k)) * np.array([[1e-3], [1.0], [3e5]])).astype(np.float32)
+    rs_e = np.clip(np.frexp(np.abs(rs_x).max(1))[1] - 1 - 13, 0, 100)
+    rs_s = np.stack([2.0 ** -rs_e, 2.0 ** rs_e], 1).astype(np.float32)
+    save("rs_x", rs_x); save("rs_s", rs_s); save("rs_h", (rs_x * rs_s[:, :1]).astype(np.float16))
+    cases.append(f"""check.case public @row_scale_f16 {{
+  %rows = check.literal value(3) : index
+  %k = check.literal value({rs_k}) : index
+  %x = check.file.read.npy path("rs_x.npy") : tensor<3x{rs_k}xf32>
+  %es = check.file.read.npy path("rs_s.npy") : tensor<3x2xf32>
+  %eh = check.file.read.npy path("rs_h.npy") : tensor<3x{rs_k}xf16>
+  %s = check.generate.fill value(0.0) : tensor<3x2xf32>
+  %h = check.generate.fill value(0.0) : tensor<3x{rs_k}xf16>
+  kernel.launch @g_row_scale_f16[%rows](%rows, %k, %x, %s, %h) : [index](index, index, tensor<3x{rs_k}xf32>, tensor<3x2xf32>, tensor<3x{rs_k}xf16>)
+  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<3x2xf32>
+  check.expect.close actual(%h) expected(%eh) atol(0.0) rtol(1.0e-3) nan(different) : tensor<3x{rs_k}xf16>
+  check.return
+}}
+""")
 # Prefill GEMMs (gen_gemm.py): y = (x16 . W^T) * inv per row, x16 the f16 row-scaled activations and inv the
 # row's inverse scale (g_row_scale_f16's contract); swiglu: silu(gate) * up. One tensor per (format, K) the
-# model's prefill uses, both the 64-row kernel and the 128-row one (_m128), two row tiles each.
+# model's prefill uses: the 64-, 128- (_m128) and 256-row (_m256) kernels, two row tiles each.
 def gemm_cases():
     seen_g = set()
     for li in range(cfg["layers"]):
@@ -419,14 +441,17 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
         Ws = W[:n_use].astype(np.float64)
         if swiglu:
             up = name.replace("ffn_gate", "ffn_up"); U = deq(up)[:n_use].astype(np.float64); Ur = raw(up).reshape(n, -1)[:n_use].reshape(-1)
-        for rows, kern in ((128, f"g_gemm_{fmt}_{'swiglu' if swiglu else 'store'}"), (256, f"g_gemm_{fmt}_{'swiglu' if swiglu else 'store'}_m128")):
+        base_k = f"g_gemm_{fmt}_{'swiglu' if swiglu else 'store'}"
+        for rows, kern in ((128, base_k), (256, base_k + "_m128"), (512, base_k + "_m256")):
             x16 = rng.standard_normal((rows, K)).astype(np.float16)
             inv = rng.uniform(0.25, 2.0, rows).astype(np.float32)
             sc = np.stack([np.ones(rows, np.float32), inv], 1)
             g = (x16.astype(np.float64) @ Ws.T) * inv[:, None]
             if swiglu:
                 u = (x16.astype(np.float64) @ U.T) * inv[:, None]
-                yv = g / (1 + np.exp(-g)) * u
+                act = (0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3))) if cfg.get("ffn_act") == "gelu"
+                       else g / (1 + np.exp(-g)))   # GEGLU ports (gemma4) swap the GEMM's silu for gelu-tanh
+                yv = act * u
             else:
                 yv = g
             tag = f"gm_{fmt}_{'sw' if swiglu else 'st'}_{rows}"

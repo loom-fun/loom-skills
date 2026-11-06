@@ -511,7 +511,84 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
   kernel.return
 }}
 """)
-    return "\n".join(T)
+    text = "\n".join(T)
+    if os.environ.get("GDN_PREFETCH", "1") not in ("", "0"):
+        text = _prefetch_recurrence(text, RK)
+    return text
+
+
+def _prefetch_recurrence(text, RK):
+    """Software-pipeline g_gdn_recurrence: the step's inputs (q, k, v, the norms, alpha, beta) don't depend on
+    the state, so step s+1's loads are issued during step s and carried in the loop. A step was otherwise one
+    global-load latency plus the two reductions (the recurrence is a serial chain per workgroup)."""
+    import re
+    a = text.index('kernel.def export("g_gdn_recurrence")')
+    b = text.index("kernel.def export", a + 10)
+    k = text[a:b]
+    loads = []   # (name, type, rhs with @T@ for the token index)
+    for line in k.split("\n"):
+        m = re.match(r"\s*(%(?:q_inverse|k_inverse|alpha_raw|beta_raw|value|[qk]\d+_raw)) = ((?:view|vector)\.load %\w+\[)%tabs(, .*-> (\S+))$", line)
+        if m:
+            loads.append((m.group(1), m.group(4), m.group(2) + "@T@" + m.group(3)))
+    assert len(loads) == 5 + 2 * RK, loads
+    names = {n for n, _, _ in loads}
+    body = [l for l in k.split("\n") if not (re.match(r"\s*(%\S+) = ", l) and re.match(r"\s*(%\S+) = ", l).group(1) in names)]
+    k = "\n".join(body)
+    # Row indices of q/k (loop-invariant) move before the loop.
+    rows = [l for l in k.split("\n") if re.match(r"\s*%(qr\d+c|qr\d+|kr\d+) = ", l)]
+    k = "\n".join(l for l in k.split("\n") if l not in rows)
+    fl = re.search(r"\n(  (%final\S*(?:, %final\S*)*) = scf\.for %step = \[%c0 to %length step %c1i\]\((.*)\) -> \((.*)\) \{)\n", k)
+    head, finals, iters, types = fl.group(1), fl.group(2), fl.group(3), fl.group(4)
+    pro = ["  " + l.strip() for l in rows]
+    pro += ["  %last_step = index.sub %length, %c1i : index",
+            "  %pf_first = index.assume %first [lt(%first, %tokens)] : index"]
+    pro += [f"  %pf_{n[1:]} = {rhs.replace('@T@', '%pf_first')}" for n, _, rhs in loads]
+    new_head = (f"  {finals}, " + ", ".join(f"%pf_unused_{i}" for i in range(len(loads))) +
+                f" = scf.for %step = [%c0 to %length step %c1i]({iters}, " +
+                ", ".join(f"{n} = %pf_{n[1:]} : {t}" for n, t, _ in loads) + f") -> ({types}, " + ", ".join(t for _, t, _ in loads) + ") {")
+    k = k.replace(head, "\n".join(pro) + "\n" + new_head, 1)
+    tabs = "    %tabs = index.assume %tabs_value [lt(%tabs_value, %tokens)] : index\n"
+    assert tabs in k
+    nxt = ["    %nx_step_raw = index.add %step, %c1i : index",
+           "    %nx_step = index.min %nx_step_raw, %last_step : index",
+           "    %nx_tabs_value = index.add %first, %nx_step : index",
+           "    %nx_tabs = index.assume %nx_tabs_value [lt(%nx_tabs_value, %tokens)] : index"]
+    nxt += [f"    %nx_{n[1:]} = {rhs.replace('@T@', '%nx_tabs')}" for n, _, rhs in loads]
+    k = k.replace(tabs, tabs + "\n".join(nxt) + "\n", 1)
+    # Output stores in batches of 32 steps: lane j keeps step j's output and the wave stores them together.
+    # A store each step made every following global load wait for the store to complete (the compiler
+    # cannot tell the output from the inputs), a memory round trip per step on the serial chain.
+    st = re.search(r"    %leader = index\.cmp eq, %lane, %c0 : index\n    scf\.if %leader \{\n      %scaled = vector\.mulf %output, %scale_v : (vector<\d+xf32>)\n"
+                   r"      vector\.store %scaled, %out_view\[%tabs, %out_channel\] : vector<\d+xf32>, (view<[^>]*>)\n    \}\n", k)
+    vt, ot = st.group(1), st.group(2)
+    k = k.replace(st.group(0), f"""    %scaled = vector.mulf %output, %scale_v : {vt}
+    %ob_c32 = index.constant 32 : index
+    %ob_slot = index.rem %step, %ob_c32 : index
+    %ob_mine = index.cmp eq, %lane, %ob_slot : index
+    %ob_next = scf.select %ob_mine, %scaled, %ob : {vt}
+    %ob_c31 = index.constant 31 : index
+    %ob_full = index.cmp eq, %ob_slot, %ob_c31 : index
+    %ob_last = index.cmp eq, %step, %last_step : index
+    %ob_flush = scalar.ori %ob_full, %ob_last : i1
+    scf.if %ob_flush {{
+      %ob_live = index.cmp ule, %lane, %ob_slot : index
+      scf.if %ob_live {{
+        %ob_group = index.div %step, %ob_c32 : index
+        %ob_step0 = index.mul %ob_group, %ob_c32 : index
+        %ob_base = index.add %first, %ob_step0 : index
+        %ob_row_value = index.add %ob_base, %lane : index
+        %ob_row = index.assume %ob_row_value [lt(%ob_row_value, %tokens)] : index
+        vector.store %ob_next, %out_view[%ob_row, %out_channel] : {vt}, {ot}
+      }}
+    }}
+""", 1)
+    assert new_head.endswith(") {")
+    k = k.replace(new_head, new_head[:-3].replace(") -> (", f", %ob = %zero4 : {vt}) -> (", 1).replace(
+        " = scf.for %step", ", %ob_unused = scf.for %step", 1) + f", {vt}) {{", 1)
+    y = re.search(r"\n    scf\.yield ((?:%new\d+(?:, )?)+) : (.*)\n  \}\n", k)
+    k = k.replace(y.group(0), f"\n    scf.yield {y.group(1)}, " + ", ".join(f"%nx_{n[1:]}" for n, _, _ in loads) +
+                  f", %ob_next : {y.group(2)}, " + ", ".join(t for _, t, _ in loads) + f", {vt}\n  }}\n", 1)
+    return text[:a] + k + text[b:]
 
 
 SPLIT_QG = r"""

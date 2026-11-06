@@ -123,7 +123,23 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - **Row-scaled f16 inputs.** `g_row_scale_f16` writes x/scale as f16 together with
   the per-row scale. The GEMM dequantizes weights to f16 fragments and accumulates
   in f32. The output is multiplied by the row scale (store, acc or swiglu modes).
-- **Tiles.** 64 or 128 rows × N tile; the m128 variant is used from 128 tokens.
+- **Tiles.** 64, 128 or 256 rows × N tile: m128 from 128 tokens, m256 (`gemm_big256`) when the epoch's rows
+  are a multiple of 256 (`GEMM_M256=0` turns it off).
+- **m256: dequant per MMA halved.** On RDNA3 WMMA runs on the SIMD's VALU, so the weight dequant
+  serializes with it: m128 spends ~190 VALU instructions per 32 WMMAs. m256 is the m128 layout with twice the
+  rows (512 threads, 256 × 128 tile; swiglu interleaves 64 gate + 64 up rows in one weight stage, picking the
+  buffer per wave with `scf.select` on `buffer`), so each dequantized weight slice feeds 256 rows (~115 VALU per
+  32 WMMAs). 55 KB LDS (padded rows), 2 workgroups per WGP. Real-data microbenchmark (interleaved
+  `loom-benchmark --compare`), Qwen3.8-27B shapes at 1024 rows: down +9.5 %, gate +5.4 %, gate/up swiglu
+  +4.5 %; prefill 1k/2k/8k +5.8/+5.0/+6.0 % (this includes the GDN input prefetch below; the recurrence
+  ablation puts that share near zero).
+  - Tried: gufo's 256 × 256 tile with 1024 threads. LDS can't hold both padded operands (73 KB), so the
+    stages were K-slice-major unpadded (`[4 x 256 rows] x 16`): 22.8 TFLOP/s vs 30.8 (one workgroup per WGP,
+    2-way LDS read conflicts). A half-swap swizzle to remove the conflicts made the compiler keep one address
+    register per fragment half (VGPR 184 → >192, did not fit 1024 threads; the 512-thread swizzled form ran
+    256 VGPRs and 19-22 TFLOP/s). Moving m128's 8 KB inverse-scale tile into the activation stage (3 instead
+    of 2 workgroups per WGP) was mixed: down -4 %, swiglu/gate +1.5/+2 %; not kept.
+  - Tile order (`GEMM_N_FASTEST`) makes no difference for m256 on the 27B shapes.
 - **Register prefetch** of the next K-step, guarded by `scf.if step+1 < k_steps`
   (without the guard the prover rejects the access).
 - `GEMM_N_FASTEST=1` puts output tiles on grid x, so consecutive workgroups reuse
@@ -134,6 +150,25 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   rows all have scale 0 exits. Packed epochs have up to 50 % padding at odd lengths.
 - **Ceiling.** We reached 25–31 TFLOP/s of a ~59 peak. Unexplored: LDS double
   buffering of B, and direct Q4_K→fragment dequant.
+
+### Gated delta-net recurrence (`gen_gdn.py`) and the f16 row scale
+- **Loom's backend orders every global load after earlier global stores** (`s_waitcnt_vscnt 0` before the
+  load), and waits for in-flight loads when it reuses their address registers. A loop that loads and stores
+  every step pays a memory round trip per step. `buffer.assume.noalias` did not change the generated code.
+  Batch the stores (or keep them out of the loop) and load ahead.
+- Recurrence (Qwen3.8-27B: ~6.5 % of 2k prefill, 0.14 ms/token, VALU-bound: 1536 one-wave workgroups each
+  recompute the token's decay/beta/norms for 4 columns): inputs loaded one step ahead (GDN_PREFETCH) and
+  outputs stored in 32-step batches: +1 % (tie band).
+  - Tried: gufo's column form (a lane pair owns one value column, a shuffle-xor instead of 32-lane reductions,
+    per-token scalars once per token, chunks of 4 tokens staged in LDS): correct (kernel test) but -2.5 %
+    (-18 % before batching stores): per-chunk load/store waits (above) and 240-256 VGPRs. Not kept.
+- `g_row_scale_f16`: vector<4> steps instead of scalar ones (each scalar step waited on its load): +0.5 %.
+- Tiny projections in prefill (Qwen3.5-style `ssm_alpha`/`ssm_beta`, 48 rows, F32, through `lin_mv`): the
+  4-token matvec with the decode-tuned R=1 re-read each 4-token activation block once per output row
+  (doubling them cost 5 % of 2k prefill). Prefill epochs now launch a 16-row variant: +2.4/+2.9 % at 2k/8k.
+  Decode and verification keep their kernels (same summation order as before).
+- `prefill_capacity` for the dense 27B, vs 1024 at 1k/2k/8k: 512 ties (-1 %), 2048 loses -41/-9/-8 % (the
+  1k prompt is a little over 1024 tokens and pads to one 2048-row epoch). Keep 1024 for dense models.
 
 ### flash2 (`gen_flash2.py`)
 - The workgroup is one 16-token tile × one KV head, with G waves (one per query
