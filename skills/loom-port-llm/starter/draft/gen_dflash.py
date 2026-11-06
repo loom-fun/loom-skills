@@ -1253,6 +1253,9 @@ command.program.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buf
     head_name, hsize, esize = g["head_name"], g["head_size"], g["esize"]
     head_root = "" if head_name == "token_embd.weight" else "%w_head: buffer, "
     head_ref = "%w_embed" if head_name == "token_embd.weight" else "%w_head"
+    phead_root = ""
+    if g.get("phead"):   # the proposals read a load-time Q4_0 copy of the head (prep_weights.py, last parameter root)
+        head_ref, hsize, phead_root = "%w_phead", g["phead"], ", %w_phead: buffer"
     vis = ", %metadata, %info" if g["VISION"] else ""
     vty = ", buffer, buffer" if g["VISION"] else ""
     conv = F["conv"]
@@ -1262,7 +1265,7 @@ command.program.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buf
     P = [f"""
 // DFlash proposals: the drafter runs [anchor, <mask> x {BS - 1}] blocks for the PROPOSE spans and publishes
 // draft_depth tokens per block into the verifier's input slots.
-command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_root}%w_draft: buffer, %w_ctx: buffer, %epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer) {{
+command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_root}%w_draft: buffer, %w_ctx: buffer{phead_root}, %epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer) {{
 {common}{context_params(g)}  %epoch_spans = config.get @llm.epoch_spans : index
   %epoch_tokens = config.get @llm.epoch_tokens : index
   %width = config.get @llm.width : index
@@ -1372,175 +1375,26 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
 
 
 # ---------------------------------------------------------------------------------------------------
-# Load-time Q8_0 preparation of BF16/F16 drafters (DRAFTER_PREP, default on).
+# Load-time Q8_0 preparation of BF16/F16 drafters (DRAFTER_PREP, default on; prep_weights.py).
 # A vendor drafter published in BF16 (NVIDIA's Nemotron DFlash) costs twice the bytes per proposal of Q8_0 and
-# runs on the f32-activation BF16 matvecs. The package keeps referencing the published file; the drafter's weight
-# policy (draft_weights.loom, a `data` input of prepare.loom bound to the "draft" parameter scope) has loom-serve
-# stage each BF16/F16 matrix and run llm_dfl_prep_q8_<src> once at load, which writes it as Q8_0 (llama.cpp's
-# quantize_row_q8_0: d = amax / 127 stored as F16, q = round(x / d)). The drafter programs then read Q8_0 and take
-# the int8-activation matvecs (1/4/8/16 tokens). Proposals only feed verification, so the rounding never reaches
-# the output (the spec gate checks it).
+# runs on the f32-activation BF16 matvecs (4 tokens per weight pass: a block of 8 reads every weight twice). The
+# package keeps referencing the published file; the drafter's weight policy (draft_weights.loom) has loom-serve
+# convert each BF16/F16 matrix to Q8_0 once at load, and the drafter programs take the int8-activation matvecs
+# (1/4/8/16 tokens). Proposals only feed verification, so the rounding never reaches the output.
 PREP_SRC = ("bf16", "f16")
 
 
 def prep_tensors(tensors):
-    """{name: (source type, Q8_0 blocks)} for the drafter matrices that load-time preparation converts."""
+    """{name: (source type, "q8_0", Q8_0 blocks)} for the drafter matrices load-time preparation converts."""
     if os.environ.get("DRAFTER_PREP", "1") == "0":
         return {}
     out = {}
     for n, t in tensors.items():
         if t["type"] in PREP_SRC and len(t["shape"]) == 2 and t["shape"][0] % 32 == 0:
-            out[n] = (t["type"], t["shape"][0] * t["shape"][1] // 32)
+            out[n] = (t["type"], "q8_0", t["shape"][0] * t["shape"][1] // 32)
     return out
 
 
 def apply_prep(tensors, prep):
     """The drafter tensor table as the programs see it after preparation (Q8_0)."""
-    return {n: (dict(t, type="q8_0", source=t["type"]) if n in prep else t) for n, t in tensors.items()}
-
-
-def prep_library(prep):
-    """Kernels + stage programs (llm.loom library) that convert one staged BF16/F16 tensor to Q8_0."""
-    if not prep:
-        return ""
-    out = ["config.decl @llm.prep_blocks : i64\n\nconfig.decl @llm.prep_input : i64\n"]
-    for src in sorted({s for s, _ in prep.values()}):
-        out.append(f"""
-// One lane per 32-value group: staged {src.upper()} (input + llm.prep_input) -> Q8_0 block (F16 d, 32 x i8) in output.
-kernel.def export("g_dfl_prep_q8_{src}") @g_dfl_prep_q8_{src}(%blocks: index) {{
-  %c1 = index.constant 1 : index
-  %c63 = index.constant 63 : index
-  %c64 = index.constant 64 : index
-  %rounded = index.add %blocks, %c63 : index
-  %groups = index.div %rounded, %c64 : index
-  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
-}} launch(%blocks_arg: index, %in64: i64, %output: buffer, %input: buffer) {{
-  %blocks = index.assume %blocks_arg [range(%blocks_arg, 1, 1073741824)] : index
-  %in_bound = scalar.assume %in64 [range(%in64, 0, 9223372036854775807)] : i64
-  %in_origin = index.cast %in_bound : i64 to offset
-  %c64 = index.constant 64 : index
-  %wg = kernel.workgroup.id<x> : index
-  %lane = kernel.workitem.id<x> : index
-  %base = index.mul %wg, %c64 : index
-  %g = index.add %base, %lane : index
-  %live = index.cmp ult, %g, %blocks : index
-  scf.if %live {{
-    %in_bytes = index.constant 64 : offset
-    %out_bytes = index.constant 34 : offset
-    %two = index.constant 2 : offset
-    %zero_f = scalar.constant 0.0 : f32
-    %c127 = scalar.constant 127.0 : f32
-    %zero32 = vector.constant 0.0 : vector<32xf32>
-    %io = index.scale %g, %in_bytes : index, offset -> offset
-    %ia = index.add %in_origin, %io : offset
-    %src_view = buffer.view %input[%ia] : buffer -> view<32x{src}>
-    %raw = vector.load %src_view[0] : view<32x{src}> -> vector<32x{src}>
-    %v = vector.extf %raw : vector<32x{src}> to vector<32xf32>
-    %a = vector.absf %v : vector<32xf32>
-    %amax = vector.reduce<maxnumf> %a, %zero_f : vector<32xf32>, f32
-    %d = scalar.divf %amax, %c127 : f32
-    %nz = scalar.cmpf one, %amax, %zero_f : f32
-    %dv = vector.splat %d : vector<32xf32>
-    %sc = vector.divf %v, %dv : vector<32xf32>
-    %rd = vector.roundf %sc : vector<32xf32>
-    %nzv = vector.splat %nz : vector<32xi1>
-    %rs = vector.select %nzv, %rd, %zero32 : vector<32xf32>
-    %q = vector.fptosi %rs : vector<32xf32> to vector<32xi8>
-    %dh = scalar.fptrunc %d : f32 to f16
-    %oo = index.scale %g, %out_bytes : index, offset -> offset
-    %d_view = buffer.view %output[%oo] : buffer -> view<1xf16>
-    view.store %dh, %d_view[0] : f16, view<1xf16>
-    %qo = index.add %oo, %two : offset
-    %q_view = buffer.view %output[%qo] : buffer -> view<32xi8>
-    vector.store %q, %q_view[0] : vector<32xi8>, view<32xi8>
-  }}
-  kernel.return
-}}
-
-command.program.def public @llm_dfl_prep_q8_{src}() launch(%output: buffer, %input: buffer) {{
-  %b64 = config.get @llm.prep_blocks : i64
-  %blocks = index.cast %b64 : i64 to index
-  %in64 = config.get @llm.prep_input : i64
-  kernel.launch @g_dfl_prep_q8_{src}[%blocks](%blocks, %in64, %output, %input) : [index](index, i64, buffer, buffer)
-  command.return
-}}
-""")
-    return "".join(out)
-
-
-def prep_policy(prep):
-    """draft_weights.loom: the drafter scope's weight policy (prepared bytes per key; 0 = keep the file's bytes)."""
-    hx = lambda s: s.encode().hex()
-    srcs = sorted({s for s, _ in prep.values()})
-    names = sorted(prep)
-    rod = "".join(f'global.rodata.def @root_{s} = bytes("{hx("llm_dfl_prep_q8_" + s)}")\n\n' for s in srcs)
-    rod += f'global.rodata.def @blocks_key = bytes("{hx("llm.prep_blocks")}")\n\nglobal.rodata.def @input_key = bytes("{hx("llm.prep_input")}")\n\n'
-    rod += "".join(f'// "{n}"\nglobal.rodata.def @k{i} = bytes("{hx(n)}")\n\n' for i, n in enumerate(names))
-    body = ["  %zero = scalar.constant 0 : i64\n  %blocks_0 = scalar.constant 0 : i64\n  %kind_0 = scalar.constant 0 : i64\n"]
-    for i, n in enumerate(names):
-        s, b = prep[n]
-        body.append(f"  %name{i} = global.load @k{i} : buffer\n"
-                    f"  %is{i} = func.call @same(%key, %name{i}) : (buffer, buffer) -> (i1)\n"
-                    f"  %nb{i} = scalar.constant {b} : i64\n  %nk{i} = scalar.constant {srcs.index(s)} : i64\n"
-                    f"  %blocks_{i + 1} = scf.select %is{i}, %nb{i}, %blocks_{i} : i64\n"
-                    f"  %kind_{i + 1} = scf.select %is{i}, %nk{i}, %kind_{i} : i64\n")
-    N = len(names)
-    stage = []
-    for j, s in enumerate(srcs):
-        stage.append(f"""    %want{j} = scalar.constant {j} : i64
-    %this{j} = scalar.cmpi eq, %kind_{N}, %want{j} : i64
-    scf.if %this{j} {{
-      %root{j} = global.load @root_{s} : buffer
-      %stage{j} = func.call @stage(%root{j}, %zero) : (buffer, i64) -> (i32)
-      %bk{j} = global.load @blocks_key : buffer
-      %ik{j} = global.load @input_key : buffer
-      func.call @config_i64(%stage{j}, %bk{j}, %blocks_{N}) : (i32, buffer, i64)
-      func.call @config_i64(%stage{j}, %ik{j}, %first) : (i32, buffer, i64)
-    }}
-""")
-    return f"""// Drafter weight policy (gen_dflash.prep_policy, DRAFTER_PREP=1): the BF16/F16 matrices of the published
-// drafter file are staged and converted to Q8_0 at load by llm_dfl_prep_q8_<type> (llm.loom); every other
-// tensor keeps its file bytes. No converted checkpoint is written or published.
-
-func.decl import("weights") @input(%source: i32, %key: buffer, %offset: i64, %length: i64, %alignment: i64) -> (i64)
-
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
-
-func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
-
-{rod}func.def @same(%key: buffer, %name: buffer) -> (i1) {{
-  %a = buffer.length %key
-  %b = buffer.length %name
-  %sized = index.cmp eq, %a, %b : offset
-  %result = scf.if %sized -> (i1) {{
-    %o = index.constant 0 : offset
-    %order = buffer.compare %key[%o], %name[%o], %b
-    %z = scalar.constant 0 : i32
-    %same = scalar.cmpi eq, %order, %z : i32
-    scf.yield %same : i1
-  }} else {{
-    %no = scalar.constant false : i1
-    scf.yield %no : i1
-  }}
-  func.return %result : i1
-}}
-
-func.def public @prepare_weight(%key: buffer) -> (i64) {{
-{"".join(body)}  %found = scalar.cmpi ne, %blocks_{N}, %zero : i64
-  %bytes = scf.if %found -> (i64) {{
-    %source = scalar.constant 0 : i32
-    %c32 = scalar.constant 32 : i64
-    %c34 = scalar.constant 34 : i64
-    %c2 = scalar.constant 2 : i64
-    %align = scalar.constant 256 : i64
-    %values = scalar.muli %blocks_{N}, %c32 : i64
-    %length = scalar.muli %values, %c2 : i64
-    %first = func.call @input(%source, %key, %zero, %length, %align) : (i32, buffer, i64, i64, i64) -> (i64)
-{"".join(stage)}    %prepared = scalar.muli %blocks_{N}, %c34 : i64
-    scf.yield %prepared : i64
-  }} else {{
-    scf.yield %zero : i64
-  }}
-  func.return %bytes : i64
-}}
-"""
+    return {n: (dict(t, type=prep[n][1], source=t["type"]) if n in prep else t) for n, t in tensors.items()}

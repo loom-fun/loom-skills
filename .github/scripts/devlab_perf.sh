@@ -187,10 +187,10 @@ for s in $steps; do
       ms=(); ids=(); for v in $variants; do ms+=("$D/$v/pkg/model_ab.json"); ids+=("$cardid-$v"); done
       nv=${#ms[@]}; abmem=$(( 11000000000 * nv + 4000000000 ))
       step "ab: one loom-serve with $nv packages ($abmem bytes)"
-      "$SV/serve.sh" ab "$PORT" amdgpu "$abmem" "${ms[@]}" | tail -2
+      "$SV/serve.sh" abserve "$PORT" amdgpu "$abmem" "${ms[@]}" | tail -2
       "$T" "$here/.github/scripts/ab_decode.py" "$url" "${ids[@]}" --rounds "$p1" ${p2:+--think "$p2"} --log "$out/ab.jsonl" 2>&1 | tee "$out/ab${p2:+_$p2}.log"
       res[$s]=$(grep -c SUMMARY "$out/ab${p2:+_$p2}.log")" variants measured"
-      "$SV/stop.sh" ab >/dev/null 2>&1;;
+      "$SV/stop.sh" abserve >/dev/null 2>&1;;
     perf)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "perf $p1 x $p2 ${p3:-}"
