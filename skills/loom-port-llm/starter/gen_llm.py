@@ -2742,10 +2742,21 @@ def lin(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
 def lin_mv(fmt, x, w, wsize, y, n, kval):
     """Always the matrix-vector kernels (any token count): for tiny projections (n = 16)."""
     a = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
+    few = f"kernel.launch @{mv_name(fmt, kval, False, n, 4)}[{n}, %t]{a}"
+    nv = NVAL.get(n, None) if isinstance(n, str) else n
+    if nv and nv % 16 == 0 and mv_name(fmt, kval, False, n, 4).endswith(("_r1", "_r2", "_r4", "_r8")):
+        # Prefill: 16 rows per workgroup. The decode-tuned R (as few as 1 row) re-reads each 4-token activation
+        # block once per row: Qwen3.8-27B's 48-row ssm_alpha/beta were ~5 % of 2k prefill at R=1.
+        USED_MV.add((fmt, kval, False, 4))
+        few = f"""scf.if %gemm {{
+      kernel.launch @g_mv_{fmt}_k{kval}_t4[{n}, %t]{a}
+    }} else {{
+      {few}
+    }}"""
     return f"""scf.if %single {{
     kernel.launch @{mv_name(fmt, kval, False, n, 1)}[{n}, %t]{a}
   }} else {{
-    kernel.launch @{mv_name(fmt, kval, False, n, 4)}[{n}, %t]{a}
+    {few}
   }}"""
 
 
