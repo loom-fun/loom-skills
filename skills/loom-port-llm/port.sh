@@ -45,7 +45,8 @@ if [ -n "$cached" ]; then
   echo "using the cached $file ($cached)"
 else
   # Into the shared HF cache (reused by later runs and by llama.cpp tools), symlinked into WORKDIR/gguf.
-  cached=$("$hf" download "$repo" "$file" 2>download.log | tail -1 | sed "s/^path=//")
+  "$hf" download "$repo" "$file" > download.log 2>&1; echo "hf exit $?" >> download.log
+  cached=$(grep -v '^hf exit' download.log | grep -o '/[^ ]*'"$(basename "$file")" | tail -1)
 fi
 [ -f "$cached" ] || { echo "download of $repo/$file failed (download.log):"; tail -5 download.log 2>/dev/null; exit 2; }
 mkdir -p gguf && ln -sf "$cached" "gguf/$(basename "$file")"
