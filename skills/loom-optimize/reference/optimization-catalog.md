@@ -121,6 +121,11 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   - Single-weight projections keep plain slots: the permuted activation loads are uncoalesced (down t16 +9 %).
   - Muse-Glimmer 4 streams, same server: 157.4 -> 152.8 ms per epoch, 67.2 -> 68.1 tok/s. Prefill and 1-stream
     decode kernels are unchanged (byte-identical).
+- **Against llama.cpp at 4 streams the step time is now level; acceptance decides the throughput.** Same session
+  (c4_steady x 3, medians): Loom 67.6 -> 67.7 tok/s, llama.cpp b1355 70.1 tok/s. Per step: Loom ~145 ms at 2.57
+  tokens per stream, llama.cpp ~146 ms at 2.64 (its log's "mean len"). In an earlier session Loom 67.6 vs llama.cpp
+  67.5. Tokens per step vary +-3 % between runs on both sides, so one c4 run cannot separate them; compare
+  c4ep's ms per epoch for kernel changes.
 
 ### Split-K decode attention (`attention_text()`)
 - The grid is (token, KV head, split), with G = heads/kv_heads waves per
