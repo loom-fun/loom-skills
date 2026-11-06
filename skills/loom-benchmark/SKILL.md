@@ -127,7 +127,7 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     1.0 gap under one of them, the FAIL is a near-tie. Document it with the per-setting top-5;
     don't change the kernels to chase it. Example, Flint 15.5k summary at token 15: llama.cpp
     picked ` across` (default), ` combine` (`-ub 128`, `-ub 2048`) and ` summarize` (`-fa off`).
-    Loom's ` final` had gap 1.39, 0.69, 1.06 and 0.72 under those settings.
+    Loom's ` final` had gap 1.39 (default), 1.37 (`-ub 128`), 1.06 (`-ub 2048`) and 0.72 (`-fa off`).
   - If llama.cpp stays on one token under every setting and Loom's gap stays above 1.0, it is
     *not* proven noise. Report it as an open WARN with the spread. Example, Bolt Q4_K_M vision
     `photo` at token 7: 17 llama.cpp recordings (image-encoder jitter, `-fa off`,
