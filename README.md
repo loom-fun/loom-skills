@@ -1,6 +1,6 @@
 # Loom agent skills
 
-[Agent Skills](https://agentskills.io) that let a fresh coding-agent session use
+Agent skills that let a fresh session use
 [AMD Loom](https://github.com/ROCm/hrx-system) (the `hrx-loom` compiler, runtime and
 `loom-serve` model server) from a cold start:
 
@@ -16,16 +16,13 @@ The skills were developed and verified on an AMD Ryzen AI Max+ 395 "Strix Halo"
 
 ## Install
 
-With [skills.sh](https://skills.sh), for any agent that supports skills (Claude Code, Cursor, Codex, ...):
+You can install loom-skills on any agent that supports skills (Claude Code, Cursor, Codex, ...):
 
 ```bash
-npx skills add loom-fun/loom-skills -g --skill '*'
+npx skills add loom-fun/loom-skills
 ```
 
-Then start a new session. Update with `npx skills update`.
-
-> While this repo is private, you need read access to it and working git credentials
-> for github.com: `gh auth login && gh auth setup-git`, or an SSH key loaded in ssh-agent.
+We recommend using Claude Code.
 
 ## Use
 
