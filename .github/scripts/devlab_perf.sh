@@ -234,10 +234,10 @@ print('llamacpp', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[
       done
       res[$s]="nondeterministic $nd/$p2, concurrent-mismatch $nc/$p2";;
     determinism)
-      [ -f "$here/.github/scripts/determinism.py" ] || { res[$s]="no determinism.py"; continue; }
+      [ -f "$B/determinism.py" ] || { res[$s]="no determinism.py"; continue; }
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "determinism $p1 conc $p2 reps $p3"
-      "$T" "$here/.github/scripts/determinism.py" "$url" --model "$cardid" --conc "$p2" --reps "$p3" --log "$out/determinism_${p1}_c$p2.jsonl" \
+      "$T" "$B/determinism.py" "$url" --model "$cardid" --conc "$p2" --reps "$p3" --log "$out/determinism_${p1}_c$p2.jsonl" \
         > "$out/determinism_${p1}_c$p2.log" 2>&1
       tail -3 "$out/determinism_${p1}_c$p2.log"; res[$s]=$(tail -1 "$out/determinism_${p1}_c$p2.log" | cut -c1-120);;
     ktest)
