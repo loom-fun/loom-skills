@@ -236,6 +236,31 @@ cases.append(f"""check.case public @head_argmax {{
   check.return
 }}
 """)
+# 3a'. multi-span int8 head: the 4/8/16-span kernels must give every span's logits and argmax partials bit-identical to
+# the 1-span kernel (verification rounds like decode); 16 and 12 live spans (a partial span group)
+if HEAD_Q8:
+    for S in (16, 12):
+        hm = np.zeros(4 + 9 * S, np.int32); hm[0] = S
+        for j in range(S):
+            hm[4 + 9 * j + 0] = 1; hm[4 + 9 * j + 4] = j; hm[4 + 9 * j + 6] = 1
+        save(f"hdm_meta{S}", hm); save(f"hdm_h{S}", rng.standard_normal((S, H)).astype(np.float32))
+        mt, ht = f"tensor<{hm.size}xi32>", f"tensor<{S}x{H}xf32>"
+        def hl(k, tag):
+            return (f"  %p{tag} = check.generate.fill value(0) : tensor<{S * CH * 2}xi32>\n  %l{tag} = check.generate.fill value(0.0) : tensor<{S * CH * 128}xf32>\n"
+                    f"  kernel.launch @{k}[%spans](%spans, %t, %meta, %hq, %w, %p{tag}, %l{tag}) : [index](index, index, {mt}, tensor<{S}x{2 * H}xi8>, {hwt}, tensor<{S * CH * 2}xi32>, tensor<{S * CH * 128}xf32>)\n")
+        variants = [("g_head_mv_t4_q8", "4"), ("g_head_mv_t8_q8", "8"), ("g_head_mv_t16_q8", "16")]
+        cases.append(f"""check.case public @head_spans{S} {{
+  %spans = check.literal value({S}) : index
+  %t = check.literal value({S}) : index
+  %meta = check.file.read.npy path("hdm_meta{S}.npy") : {mt}
+  %h = check.file.read.npy path("hdm_h{S}.npy") : {ht}
+  %w = check.file.read.npy path("hd_w.npy") : {hwt}
+  %hk = check.literal value({H}) : index
+  %hq = check.generate.fill value(0) : tensor<{S}x{2 * H}xi8>
+  kernel.launch @g_quant_q8[%t, %hk](%t, %hk, %h, %hq) : [index, index](index, index, {ht}, tensor<{S}x{2 * H}xi8>)
+""" + hl("g_head_mv_q8", "1") + "".join(hl(k, tag) for k, tag in variants) + "".join(
+            f"  check.expect.close actual(%l{tag}) expected(%l1) atol(0.0) rtol(0.0) nan(different) : tensor<{S * CH * 128}xf32>\n"
+            f"  check.expect.equal actual(%p{tag}) expected(%p1) : tensor<{S * CH * 2}xi32>\n" for _, tag in variants) + "  check.return\n}\n")
 # 3b. attention chain: [q/gate split] -> qk norm + rope + paged KV store -> split-K attention -> combine (gate)
 t, ctx = 4, 64
 pos = np.arange(t)

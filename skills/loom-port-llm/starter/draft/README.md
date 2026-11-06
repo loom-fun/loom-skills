@@ -148,8 +148,8 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   32-value group (`d = amax/127` rounded to F16, `q = round(x/d)`, llama.cpp's `quantize_q8_1` numerics), launched in
   the decode branch beside the GEMM's `g_row_scale_f16`; the `_q8` matvecs keep the starter's layout (one lane per
   group, R rows, TG tokens) but contract the raw weight codes with `vector.dot4i` (Q8_0, Q4_K, Q5_K, Q6_K; other
-  formats keep the f32 kernel) and come in 1-, 4-, 8- and 16-token variants; the head (`g_head_mv*_q8`) in 1-, 4- and
-  8-span variants (a 16-span head was slower). A token's result is an exact integer dot followed by the same F32
+  formats keep the f32 kernel) and come in 1-, 4-, 8- and 16-token variants; the head (`g_head_mv*_q8`) in 1-, 4-, 8- and
+  16-span variants (each 128-row chunk in sub-blocks of 512/TG rows: see below). A token's result is an exact integer dot followed by the same F32
   scaling, and its wave sum is an explicit xor-16/8/4/2/1 butterfly that the multi-token variants run by recursive
   halving (TG + 5 shuffles instead of 5 TG; Qwen3.8-27B with 4 drafting streams: 254 -> 230 ms per epoch) on the same
   pairing tree, so verification of up to 16 tokens rounds exactly like 1-token decode and verify epochs take the WMMA
@@ -174,6 +174,22 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
   still crashed; conv off: passed); after the fix the full DFlash2 passes tune.py's concurrency check 3 of 3.
   Kernels that index per-token metadata must check `info[t][2]` (live) first: cohort stages always carry dead
   tokens.
+- **Fixed: 4 drafting streams trailed llama.cpp on Muse-Glimmer-30B** (issue #28: 51 vs 68 tok/s, depth 3).
+  - Attribution by doubling kernel groups (ms per epoch, 204 ms total): 16-token trunk matvecs +113, proposals +56,
+    head +44, warm +12, attention +5.
+  - Three changes:
+    - The int8 head kept waves x 128 x TG partials in LDS (57 KB at 16 spans), so it held one or two workgroups per
+      CU: 16 verify rows took 22 ms and 12 proposal rows 18 ms. It now runs each chunk in sub-blocks of 512/TG rows,
+      with a 16-span variant: 8.7 / 8.6 ms.
+    - A DFlash block is depth + 1 tokens (llama.cpp's n_max + 1), not the trained 16: 4 streams propose 16 tokens
+      on the int8 matvec instead of 64 on the GEMM.
+    - The catch-up (warm) program takes the GEMM from 5 tokens. It only feeds proposals, and DFlash's 33280-wide fc
+      was on the f32 4-token matvec.
+  - Epoch 204 -> 158-165 ms (sessions vary). Same server: c4 +19 % (ab_perf), decode +6 %, prefill unchanged.
+  - c4_steady, same session: 52.7 -> 63.5 tok/s, against llama.cpp's 69.7 (its own DFlash2, n-max 3).
+  - Single-stream decode +6-7 % from the shorter block.
+  - The remaining gap to one weight pass is the 16-token trunk matvec (233 VGPRs on Q5_K gate/up: 1144 vs 817 us
+    for 1 token). The optimization catalog lists what was tried.
 - Verification of more than 16 tokens per epoch (several drafting streams at depth 5+) takes the WMMA GEMM (rows
   padded to 64).
 - **Long-context verify pays decode attention per token.** The per-token split-K kernel costs the same per verified

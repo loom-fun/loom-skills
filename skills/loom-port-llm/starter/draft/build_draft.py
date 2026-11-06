@@ -121,7 +121,10 @@ global.rodata.def @draft_scope = bytes("{hx("draft")}")
       %pstage = func.call @stage(%propose_root, %shift) : (buffer, i64) -> (i32)
       func.call @config_i64(%pstage, %context_key, %context) : (i32, buffer, i64)
       func.call @config_i64(%pstage, %pool_key, %pool) : (i32, buffer, i64)
-      %block_tokens = scalar.constant {block} : i64
+      // A DFlash block is [anchor, <mask> x depth] (llama.cpp's n_max + 1 tokens), capped at the trained block size:
+      // 4 streams at depth 3 propose 16 tokens (one int8 matvec pass per drafter weight) instead of 64 (GEMM).
+      %block_full = scalar.constant {block} : i64
+      %block_tokens = scalar.minui %block_full, %width : i64
       %cap_tokens = scalar.muli %cap, %block_tokens : i64
       func.call @config_i64(%pstage, %tokens_key, %cap_tokens) : (i32, buffer, i64)
       func.call @config_i64(%pstage, %spans_key, %cap) : (i32, buffer, i64)

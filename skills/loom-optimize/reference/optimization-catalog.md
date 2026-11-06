@@ -69,6 +69,38 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - No logits buffer is ever written, which saves V × 4 bytes per token plus a pass.
 - This is only valid for greedy decoding. For sampling you'd need top-k partials.
 
+### Many-stream drafted decode (4 streams x DFlash depth 3)
+- **Attribute the epoch, not the token.** Under drafting, a streamed event is one epoch. Measure ms per event and
+  tokens per event separately, so a doubled kernel that changes the drafts can't pass for a slower one.
+  Doubling every launch of one kernel group in a copy of the package gave Muse-Glimmer-30B's 204 ms 4-stream epoch as:
+  - 16-token trunk matvecs: +113 ms (one memory-bound 1-token pass is ~75 ms).
+  - Proposals: +56 ms.
+  - Head: +44 ms.
+  - Warm/catch-up: +12 ms.
+  - Decode attention: +5 ms.
+- **The int8 head held one or two workgroups per CU.** Each 128-row chunk kept waves x 128 x TG F32 partials in
+  LDS (28 KB at 8 spans, 57 KB at 16), so 8 spans took 11.7 ms against 5.2 ms for 1 span.
+  - 16 verify rows ran as two 8-span groups (22 ms), and the 12 proposal rows took 18 ms, all per epoch.
+  - Fix (`head_iq_body()`): the chunk runs in sub-blocks of 512/TG rows (partials ~14 KB at any TG). Lane j carries
+    span j's running (max, argmax) across sub-blocks. Partials go through the matvecs' shared-tree butterfly.
+  - Result: 8 spans 5.9 ms; a new 16-span variant does 16 spans in 8.7 ms and 12 in 8.6 ms.
+  - Every variant rounds and breaks ties like the 1-span kernel (kernel tests `head_spans16` / `head_spans12`).
+  - Muse-Glimmer 4 streams: 193 -> 160 ms per epoch.
+  - The earlier "16-span head was slower" finding (Qwen3.8-27B) was this LDS limit.
+- **DFlash block = depth + 1 tokens** (llama.cpp's `n_max + 1`), capped at the trained block size, instead of the
+  full 16-token block. At depth 3, 4 streams propose 16 tokens (int8 matvec, one weight pass) instead of 64 (GEMM),
+  and 1 stream proposes 4 instead of 16.
+  - Muse-Glimmer: 4 streams -10 ms per epoch, 1 stream 109.6 -> 100.8 ms (+6.6 % decode).
+  - Acceptance is unchanged within noise (2.6-2.7 tokens per step).
+- **The drafter's catch-up (warm) program takes the GEMM from 5 tokens** (`DRAFT_MM_FROM`). It only feeds proposals,
+  so rounding there never reaches the output. DFlash's 33280-wide fc ran on the f32 4-token matvec (K > 32768),
+  which re-read 124 MB per 4 tokens: 4 streams 161.5 -> 157.6 ms per epoch.
+  - The proposal program keeps the int8 matvec: the GEMM from 5 tokens there cost +12 ms per epoch.
+- **What still separates the 16-token step from one weight pass** is VGPRs. 16 tokens of int8 activations per lane
+  put the Q5_K gate/up kernel at 233 VGPRs (6 waves per SIMD), against 48 VGPRs and 15 waves for 1 token.
+  - Measured: 1144 vs 817 us (gate/up 6656 x 19968), 588 vs 424 us (down 19968 x 6656).
+  - See "Did not help" for what was tried.
+
 ### Split-K decode attention (`attention_text()`)
 - The grid is (token, KV head, split), with G = heads/kv_heads waves per
   workgroup, one per query head. Each wave covers that head's 128 dims across 32
@@ -204,6 +236,13 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   launch saved (Bolt: slower). Launches are nearly free under graph replay.
 - **Unrolling the matvec row loop**, or head chunk sizes other than 128 rows.
   Neither was measurably different.
+- **Cheaper 16-token int8 matvecs** (Muse-Glimmer Q5_K gate/up 6656 x 19968 at 1144 us, down 19968 x 6656 at
+  588 us), each tried and measured:
+  - Fewer rows per workgroup (R 4 / 8): 1352 / 642 us.
+  - The 8-token kernel over 16 tokens: two token-group workgroups share no weight reads (1307 / 649 us).
+  - A workgroup of two 8-token halves over the same weight groups: 120 VGPRs and 12 waves, but 1302 us.
+  - Two rows per iteration, so both rows' loads issue first: 8-token down 579 -> 459 us in isolation, but
+    4-stream epochs +4 ms and 2-stream epochs flat.
 - **About 128 keys per decode-attention split.** Fewer splits under-filled the GPU
   at short context (−4 %).
 
