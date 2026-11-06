@@ -93,11 +93,6 @@ the audit WARNs instead of failing. Across the #26–#29 sessions it caught one 
 the context, which build.py now warns about) at a median of ~8 min and up to an hour per run. A harness can run it
 separately: `LEVEL=full gates.sh` on the same build re-uses every gate that passed and runs only the probe.
 
-`NEEDLE=0` (quick/full; finalize.sh with `FINAL_LEVEL=quick`) defers the long-context gates (needle at half the
-context, the full-context probe) to an offline run such as the nightly DevLab job, when they are off the critical
-path: only the cheap over-capacity refusal runs (gate `over_capacity`), gates.json says `needle_deferred`, the audit
-warns instead of failing, and the card shows the needle gates as no evidence until the offline run supplies it.
-
 - **Speculative-decoding gate `spec`** (packages that draft; `spec_check.py`): the package must produce exactly
   what the same package produces with `draft_depth 0` (`PKG/model_target.json`, same compiled program): greedy
   and seeded-sampling chat, a 1k-token prompt, a tool call, a reasoning answer. Any difference fails (drafting
