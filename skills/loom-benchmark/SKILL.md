@@ -55,6 +55,11 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
 | `quick` | after the port (`qualify.sh` runs it) | fast + speculative-decoding equivalence (`spec`, drafting packages), agent tool loop, sampling, needle at half the context (≤ 60k) vs llama.cpp | 5–15 min the first time |
 | `full` | once, on the final build (`finalize.sh` runs it) | quick + one Loom-only probe at the full context | + one full-context prefill |
 
+`NEEDLE_FULL=0` (gates.sh, finalize.sh) runs `full` without the full-context probe and records it as deferred:
+the audit WARNs instead of failing. Across the #26–#29 sessions it caught one class of bug (a KV pool smaller than
+the context, which build.py now warns about) at a median of ~8 min and up to an hour per run. A harness can run it
+separately: `LEVEL=full gates.sh` on the same build re-uses every gate that passed and runs only the probe.
+
 - **Speculative-decoding gate `spec`** (packages that draft; `spec_check.py`): the package must produce exactly
   what the same package produces with `draft_depth 0` (`PKG/model_target.json`, same compiled program): greedy
   and seeded-sampling chat, a 1k-token prompt, a tool call, a reasoning answer. Any difference fails (drafting
