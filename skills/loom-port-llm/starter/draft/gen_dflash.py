@@ -716,11 +716,14 @@ kernel.def export("g_dfl_prepare") @g_dfl_prepare() {{
   %c1i = index.constant 1 : index
   %c8 = index.constant 8 : index
   %c9 = index.constant 9 : index
-  %bs = index.constant {BS} : index
+  // block length: anchor + depth masks, at most the trained block size (llama.cpp's n_max + 1)
+  %bs_full = index.constant {BS} : index
+  %width_b = index.add %depth, %c1i : index
+  %bs = index.min %bs_full, %width_b : index
   %c0_i32 = scalar.constant 0 : i32
   %c1_i32 = scalar.constant 1 : i32
   %c2_i32 = scalar.constant 2 : i32
-  %bs_i32 = scalar.constant {BS} : i32
+  %bs_i32 = index.cast %bs : index to i32
   %mask = scalar.constant {F["mask_id"]} : i32
   %header = buffer.view %metadata[%zero] : buffer -> view<4xi32>
   %count32 = view.load %header[0] : view<4xi32> -> i32
@@ -1246,7 +1249,8 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
   %epoch_tokens = config.get @llm.epoch_tokens : index
   %width = config.get @llm.width : index
   %depth = index.sub %width, %c1 : index
-  %bsz = index.constant {BS} : index
+  %bsz_full = index.constant {BS} : index
+  %bsz = index.min %bsz_full, %width : index
   %meta_bytes = index.constant {16 + 40 * 1024} : offset
   %metadata = buffer.alloca<global> align(256) %meta_bytes : buffer
   %rows_meta_bytes = index.constant {16 + 36 * 8192} : offset
