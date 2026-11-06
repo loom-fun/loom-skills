@@ -15,7 +15,7 @@ import json, sys, os, numpy as np
 from gguf import GGUFReader
 from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mv_rows import pick_r  # noqa: E402
+from mv_rows import pick_r, iq_r  # noqa: E402
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
 IQ_FMTS = {"q8_0", "q4_k", "q5_k", "q6_k"}
 
@@ -143,10 +143,16 @@ for name, K in todo:
             xs = rng.standard_normal((tg, K)).astype(np.float32); y = q8_ref(xs).astype(np.float64) @ W.T.astype(np.float64)
             tag = name.replace(".", "_") + f"_q8_t{tg}"
             save(tag + "_w", raw(name)); save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
-            _R = pick_r(n, K, tg)
-            if tg >= 8 and n % 16 == 0 and os.environ.get("MV_Q8_R16", "1") == "1":   # gen_llm.py mv_name's rule
-                _R = 16
+            _R = iq_r(n, K, tg)   # gen_llm.py mv_name's rule
             kern = f"g_mv_{fmt}_k{K}" + (f"_t{tg}" if tg > 1 else "") + "_q8" + (f"_r{_R}" if _R != 16 else "")
+            _R1 = iq_r(n, K, 1)
+            k1 = f"g_mv_{fmt}_k{K}_q8" + (f"_r{_R1}" if _R1 != 16 else "")
+            # verify == decode: the multi-token variant must round every token exactly as the 1-token kernel
+            # (run here over the same tg tokens) does
+            same = (f"""  %y1 = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  kernel.launch @{k1}[%n, %t](%n, %t, %acc, %xq, %w, %y1) : [index, index](index, index, i32, tensor<{tg}x{2 * K}xi8>, {ty(raw(name))}, tensor<{tg}x{n}xf32>)
+  check.expect.close actual(%y) expected(%y1) atol(0.0) rtol(0.0) nan(different) : tensor<{tg}x{n}xf32>
+""" if tg > 1 else "")
             wt = ty(raw(name))
             cases.append(f"""check.case public @mv_{tag} {{
   %n = check.literal value({n}) : index
@@ -161,6 +167,37 @@ for name, K in todo:
   kernel.launch @g_quant_q8[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<{tg}x{K}xf32>, tensor<{tg}x{2 * K}xi8>)
   kernel.launch @{kern}[%n, %t](%n, %t, %acc, %xq, %w, %y) : [index, index](index, index, i32, tensor<{tg}x{2 * K}xi8>, {wt}, tensor<{tg}x{n}xf32>)
   check.expect.close actual(%y) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{tg}x{n}xf32>
+{same}  check.return
+}}
+""")
+# 2b. int8 gate/up (swiglu) matvec: the 8/16-token variants (BFLY_PERM, 32 rows) equal the 1-token kernel bit for bit
+_g = next((li for li in range(cfg["layers"]) if f"blk.{li}.ffn_gate.weight" in T and f"blk.{li}.ffn_up.weight" in T), None)
+if ACT_Q8 and _g is not None:
+    gn, un = f"blk.{_g}.ffn_gate.weight", f"blk.{_g}.ffn_up.weight"
+    fmt = T[gn].tensor_type.name.lower(); n = int(T[gn].shape[1])
+    if fmt in IQ_FMTS and T[un].tensor_type.name.lower() == fmt:
+        save("sw_g", raw(gn)); save("sw_u", raw(un)); gt, ut = ty(raw(gn)), ty(raw(un))
+        for tg in (8, 16):
+            save(f"sw_x{tg}", rng.standard_normal((tg, H)).astype(np.float32))
+            R1, Rt = iq_r(n, H, 1, True), iq_r(n, H, tg, True)
+            k1 = f"g_mv_{fmt}_k{H}_swiglu_q8" + (f"_r{R1}" if R1 != 16 else "")
+            kt = f"g_mv_{fmt}_k{H}_swiglu_t{tg}_q8" + (f"_r{Rt}" if Rt != 16 else "")
+            sig = f"[index, index](index, index, i32, tensor<{tg}x{2 * H}xi8>, {gt}, {ut}, tensor<{tg}x{n}xf32>)"
+            cases.append(f"""check.case public @mvsw_same_t{tg} {{
+  %n = check.literal value({n}) : index
+  %t = check.literal value({tg}) : index
+  %k = check.literal value({H}) : index
+  %acc = check.literal value(0) : i32
+  %w = check.file.read.npy path("sw_g.npy") : {gt}
+  %wu = check.file.read.npy path("sw_u.npy") : {ut}
+  %x = check.file.read.npy path("sw_x{tg}.npy") : tensor<{tg}x{H}xf32>
+  %xq = check.generate.fill value(0) : tensor<{tg}x{2 * H}xi8>
+  %y = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  %y1 = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  kernel.launch @g_quant_q8[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<{tg}x{H}xf32>, tensor<{tg}x{2 * H}xi8>)
+  kernel.launch @{kt}[%n, %t](%n, %t, %acc, %xq, %w, %wu, %y) : {sig}
+  kernel.launch @{k1}[%n, %t](%n, %t, %acc, %xq, %w, %wu, %y1) : {sig}
+  check.expect.close actual(%y) expected(%y1) atol(0.0) rtol(0.0) nan(different) : tensor<{tg}x{n}xf32>
   check.return
 }}
 """)

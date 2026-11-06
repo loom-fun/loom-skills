@@ -100,6 +100,27 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   put the Q5_K gate/up kernel at 233 VGPRs (6 waves per SIMD), against 48 VGPRs and 15 waves for 1 token.
   - Measured: 1144 vs 817 us (gate/up 6656 x 19968), 588 vs 424 us (down 19968 x 6656).
   - See "Did not help" for what was tried.
+- **Re-attributed after those changes** (Muse-Glimmer, 156 ms epoch, doubling in package copies, c4ep):
+  - 16-token trunk matvecs: +114.5 ms.
+  - Proposal program: +20.3 ms (its matvecs +11.8, its 12-row head +7.9).
+  - Verify head: +9.6 ms. Warm: +5.0 ms. Decode attention: +4.5 ms.
+  - The 16-token kernel is instruction-bound: its row loop is ~770 instructions per wave and row (gate/up, both
+    weights), of which 256 are `v_dot4`. The rest is Q5_K decode (~125), F32 scaling (~150, needed to round like the
+    1-token kernel) and the butterfly. Loads issued a row ahead (software prefetch) did not help (see "Did not help").
+- **32 rows per workgroup at 16 tokens** for gate/up and for K >= 8192 (`mv_rows.iq_r`). Each workgroup loads its
+  16 tokens' int8 activations for the whole K once, and 32 rows halve that load per weight row. The int8 kernels'
+  arithmetic does not depend on R.
+  - Interleaved microbenchmarks: down 19968 x 6656 -3.7 %, gate/up -1.8 % (-5.5 % with the permuted slots below).
+  - K = 4096 / 6656 single-weight projections: flat or +4 %, so they keep 16 rows.
+- **Butterfly without selects** (`BFLY_PERM`, gate/up at 8+ tokens and the 16-span head). Lane L holds token
+  j ^ bt_idx(L) in slot j, where bt_idx is the token the lane ends the butterfly with. Every step then keeps slots
+  [0, h) and sends slots [h, 2h), so the two selects per pair go away. The pairing tree per token is unchanged, so
+  the results are bit-identical; kernel tests `mvsw_same_t8` / `mvsw_same_t16` and the `mv_*_q8_t*` cases now check
+  the multi-token kernels against the 1-token kernel with zero tolerance.
+  - Gate/up t16: -3.5 % at 16 rows, -5.5 % at 32. Head, 12 and 16 spans: 9.0 -> 8.5 ms. Head at 8 spans: flat.
+  - Single-weight projections keep plain slots: the permuted activation loads are uncoalesced (down t16 +9 %).
+  - Muse-Glimmer 4 streams, same server: 157.4 -> 152.8 ms per epoch, 67.2 -> 68.1 tok/s. Prefill and 1-stream
+    decode kernels are unchanged (byte-identical).
 
 ### Split-K decode attention (`attention_text()`)
 - The grid is (token, KV head, split), with G = heads/kv_heads waves per
@@ -291,6 +312,13 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   - A workgroup of two 8-token halves over the same weight groups: 120 VGPRs and 12 waves, but 1302 us.
   - Two rows per iteration, so both rows' loads issue first: 8-token down 579 -> 459 us in isolation, but
     4-stream epochs +4 ms and 2-stream epochs flat.
+- **More on the 16-token int8 matvec** (Muse-Glimmer, interleaved `loom-benchmark --compare`):
+  - Software prefetch: row r+1's weight loads issued before row r's dot products (codes split into load and
+    decode functions, carried in the row loop). VGPRs 203 -> 240 (7 -> 6 waves). Gate/up 1105 -> 1142 us, down
+    577 -> 598 us, q 117 -> 114 us: no gain.
+  - 64 rows per workgroup: q 6656 x 4096 +20 %, o 4096 x 6656 +9 % (down does not fit: 80 KB of LDS).
+  - Fewer rows for the small K/V projections (6656 x 256): R 8 is 18.0 vs 22.2 us, ~0.4 ms per epoch. Not
+    adopted.
 - **About 128 keys per decode-attention split.** Fewer splits under-filled the GPU
   at short context (−4 %).
 
