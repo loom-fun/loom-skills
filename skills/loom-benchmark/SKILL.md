@@ -93,6 +93,11 @@ the audit WARNs instead of failing. Across the #26–#29 sessions it caught one 
 the context, which build.py now warns about) at a median of ~8 min and up to an hour per run. A harness can run it
 separately: `LEVEL=full gates.sh` on the same build re-uses every gate that passed and runs only the probe.
 
+`NEEDLE=0` (quick/full; finalize.sh with `FINAL_LEVEL=quick`) defers the long-context gates (needle at half the
+context, the full-context probe) to an offline run such as the nightly DevLab job, when they are off the critical
+path: only the cheap over-capacity refusal runs (gate `over_capacity`), gates.json says `needle_deferred`, the audit
+warns instead of failing, and the card shows the needle gates as no evidence until the offline run supplies it.
+
 - **Speculative-decoding gate `spec`** (packages that draft; `spec_check.py`): the package must produce exactly
   what the same package produces with `draft_depth 0` (`PKG/model_target.json`, same compiled program): greedy
   and seeded-sampling chat, a 1k-token prompt, a tool call, a reasoning answer. Any difference fails (drafting
@@ -371,12 +376,16 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
    `model.json.lock`, `llm_config.json` (and `program/`). Per gate the latest evidence wins, so a later failing
    run shows as a failure; per metric the last session that measured it. `--report attached` instead keeps a
    REPORT.md written by the run (the factory's) or an older card's narrative, as is.
+   A new or replaced package: `card/publish_package.py prepare PKG DIR --source ORG/GGUF-REPO` first, on the machine
+   that holds the GGUFs (copies the package without weights, pins each file's origin at the revision it was validated
+   on, writes `model.json.lock` with `loom-fetch --update-lock`), then `make_info.py build DIR ...` on that DIR.
 3. `card/render_card.py DIR` writes `DIR/README.md` (and `DIR/REPORT.md` for `--report generated`: setup,
    commands, every run's value, the roofline, every DevLab sweep, gate evidence). The performance table shows per
    metric llama.cpp, Loom, the margin, the roofline, Loom as % of it, and Loom on DevLab with its % of the
    roofline; a footnote says what the roofline and the DevLab column are. When republishing a card, upload only those three files:
-   `hf upload REPO DIR . --include README.md --include info.json --include REPORT.md`. Never re-upload a repo's
-   programs, `model.json`, lock or weights for a card change.
+   `hf upload REPO DIR . --include README.md --include info.json --include REPORT.md` (or `publish_package.py upload
+   DIR --repo REPO --card-only`). Never re-upload a repo's programs, `model.json`, lock or weights for a card change.
+   A whole package: `publish_package.py upload DIR --repo REPO` (removes files an in-place update leaves stale).
 
 **Performance guardrails** (`card_lib.perf_flags`, applied by `loom-org`'s `org_status.py`): a metric whose Loom
 value is below half the efficiency Loom ports have demonstrated (far from roofline), or whose latest DevLab value

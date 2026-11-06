@@ -8,4 +8,12 @@ for ex in "$here"/*-example; do
     echo "OK   $n"
   else echo "FAIL $n: $out"; bad=1; fi
 done
+# An example without cfg.json takes its reviewed config from a category A loom-fun package (examples.json): it must
+# still be category A, of the example's architecture, at the pinned revision (needs network).
+for ex in "$here"/*-example; do
+  n=$(basename "$ex" -example)
+  [ -f "$ex/cfg.json" ] && continue
+  if out=$(python3 "$here/../find_reference.py" example-cfg "$n" -o "$tmp/$n.cfg.json" 2>&1); then echo "OK   $n config: $out"
+  else echo "FAIL $n config: $out"; bad=1; fi
+done
 exit $bad
