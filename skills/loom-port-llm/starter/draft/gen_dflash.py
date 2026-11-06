@@ -1210,6 +1210,13 @@ def programs(g):
     def L(fmt_name, x, w, y, k_ssa, n_ssa, kval, mode="store", w2=None):
         return "  " + lin(dfmt(fmt_name), f"%{x}", f"%s_{x}", (w, w2) if mode == "swiglu" else w, dsize(fmt_name), f"%{y}", k_ssa, n_ssa, kval, mode) + "\n"
 
+    def KV(b, x, l):
+        """attn_k and attn_v of draft layer l: one pair launch (gen_llm PAIR_PROJ) when their format and size match."""
+        ka, va = b + "attn_k.weight", b + "attn_v.weight"
+        if "lin2" in g and g.get("pair_kv") and dfmt(ka) == dfmt(va) and dsize(ka) == dsize(va):
+            return "  " + g["lin2"](dfmt(ka), f"%{x}", f"%s_{x}", f"%dk_{l}", f"%dv_{l}", dsize(ka), "%k", "%v", "%nH", "%nDKV", H) + "\n"
+        return L(ka, x, f"%dk_{l}", "k", "%nH", "%nDKV", H) + L(va, x, f"%dv_{l}", "v", "%nH", "%nDKV", H)
+
     # ---- warm
     warm = [f"""
 // DFlash catch-up: context K/V of every draft layer at each committed position, from the captured target
@@ -1230,8 +1237,7 @@ command.program.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buf
 {scaled("features", "%nFEAT")}{L("fc.weight", "features", "%w_fc", "x", "%nFEAT", "%nH", NT * H)}  kernel.launch @g_spec_rmsnorm[%t](%t, %x, %w_encn, %h) : [index](index, buffer, view<{H}xf32>, buffer)
 {scaled("h", "%nH")}"""]
     for l in range(NB):
-        warm.append(L(f"blk.{l}.attn_k.weight", "h", f"%dk_{l}", "k", "%nH", "%nDKV", H)
-                    + L(f"blk.{l}.attn_v.weight", "h", f"%dv_{l}", "v", "%nH", "%nDKV", H)
+        warm.append(KV(f"blk.{l}.", "h", l)
                     + f"  %dl_{l} = index.constant {l} : index\n"
                     f"  kernel.launch @g_dfl_kv_store[%t](%t, %dl_{l}, %context, %pool, %k, %v, %dkn_{l}, %info, %origins, %arena{', %rinfo' if MR else ''}) : [index](index, index, index, index, buffer, buffer, view<{F['head_dim']}xf32>, buffer, buffer, buffer{', buffer' if MR else ''})\n")
     warm.append("  command.return\n}\n")
@@ -1303,8 +1309,7 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
             src = "hc"
         T.append(scaled(src, "%nH")
                  + L(b + "attn_q.weight", src, f"%dq_{l}", "q", "%nH", "%nDQ", H)
-                 + L(b + "attn_k.weight", src, f"%dk_{l}", "k", "%nH", "%nDKV", H)
-                 + L(b + "attn_v.weight", src, f"%dv_{l}", "v", "%nH", "%nDKV", H)
+                 + KV(b, src, l)
                  + f"""  %dl_{l} = index.constant {l} : index
   kernel.launch @g_dfl_q_prep[%t](%t, %q, %dqn_{l}, {rpos}) : [index](index, buffer, view<{F['head_dim']}xf32>, buffer)
   kernel.launch @g_dfl_block_kv[%t](%t, %k, %dkn_{l}, {rpos}) : [index](index, buffer, view<{F['head_dim']}xf32>, buffer)
