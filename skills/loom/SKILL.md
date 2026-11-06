@@ -23,6 +23,7 @@ and exposes OpenAI-style HTTP endpoints.
 | Make a ported model faster without breaking correctness | `loom-optimize` |
 | Correctness gate vs llama.cpp, throughput methodology, reporting | `loom-benchmark` |
 | Improve these skills themselves (faster end-to-end runs, fewer failures) without regressing KPIs | `loom-improve` (`${CLAUDE_SKILL_DIR}/../loom-improve/SKILL.md`) |
+| Populate a Hugging Face org with many models (pick the top models, port and publish each, sweep gates on DevLab, fix and regenerate) | `loom-org` (`${CLAUDE_SKILL_DIR}/../loom-org/SKILL.md`) |
 
 All paths in these skills assume the install root `~/loom` (SDK venv `~/loom/.venv`,
 tools venv `~/loom/.tools`). Substitute your own root consistently. The scripts take overrides:
