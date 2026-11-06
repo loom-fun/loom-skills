@@ -13,7 +13,8 @@ the narrative in REPORT.md. The format (schema "loom-info/1"):
 
   {
     "schema": "loom-info/1",                       required
-    "device": "AMD Ryzen AI Max+ 395 ...",         required
+    "device": {"cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S", "gpu": "AMD Radeon 8060S Graphics",
+               "os": "Ubuntu 24.04"},              required, see detect_device()
     "measured": "2026-11-06",                      date of the last measurement
     "baseline": {"name": "llama.cpp", "version": "llamacpp-rocm/b1357", "args": "--spec-type ..."},
     "metrics": {"decode_tps": {"loom": 40.07, "baseline": 36.83}, ...},
@@ -34,8 +35,10 @@ perf_log.jsonl, gates.json, llamacpp_pick.json, llamacpp_spec.json, gates_spec.l
 the agent types.
 """
 import argparse
+import glob
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -61,8 +64,105 @@ PIP = 'pip install "hrx-loom[hf]"'
 FETCH_NOTE = "`loom-fetch` (from the Loom SDK, installed with its `hf` extra by the first command)"
 
 INFO_SCHEMA = "loom-info/1"
-DEVICE = 'AMD Ryzen AI Max+ 395 "Strix Halo"'
 DOC_SIZES = (1000, 2000, 8000, 16000, 32000)
+AMD_PCI_VENDOR = "1002"
+# libdrm's PCI id -> marketing name table; the distribution's copy first, then AMD's driver packages.
+AMDGPU_IDS = ["/usr/share/libdrm/amdgpu.ids", "/opt/amdgpu/share/libdrm/amdgpu.ids"]
+
+
+def _clean(name):
+    """Hardware names without trademark marks or padding: 'AMD Radeon(TM) 8060S  ' -> 'AMD Radeon 8060S'."""
+    return " ".join(re.sub(r"\((?:TM|R|C)\)", "", name, flags=re.I).split())
+
+
+def _linux_gpus():
+    names = set()
+    for dev in glob.glob("/sys/bus/pci/devices/*"):
+        def attr(k):
+            try:
+                with open(os.path.join(dev, k)) as f:
+                    return f.read().strip().lower().removeprefix("0x")
+            except OSError:
+                return ""
+        if attr("vendor") != AMD_PCI_VENDOR or not attr("class").startswith("03"):  # 03xxxx: display controller
+            continue
+        did, rev, name = attr("device"), attr("revision"), None
+        for path in AMDGPU_IDS:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    rows = [l.split(",", 2) for l in f if not l.startswith("#") and l.count(",") >= 2]
+            except OSError:
+                continue
+            rows = [(d.strip().lower(), r.strip().lower(), n.strip()) for d, r, n in rows]
+            # One device id covers several products (1586 is the 8060S, 8050S or 8040S by revision).
+            name = next((n for d, r, n in rows if d == did and r == rev), None)
+            if name:
+                break
+        names.add(name or f"AMD GPU [{AMD_PCI_VENDOR}:{did}:{rev}]")
+    return names
+
+
+def _windows_gpus():
+    import winreg
+    names = set()
+    cls = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"  # display adapters
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, cls) as root:
+        for i in range(winreg.QueryInfoKey(root)[0]):
+            try:
+                with winreg.OpenKey(root, winreg.EnumKey(root, i)) as k:
+                    if f"ven_{AMD_PCI_VENDOR}" in winreg.QueryValueEx(k, "MatchingDeviceId")[0].lower():
+                        names.add(winreg.QueryValueEx(k, "DriverDesc")[0])
+            except OSError:
+                continue
+    return names
+
+
+def detect_device():
+    """{cpu, gpu, os} of this machine. Every value comes from the hardware or the OS release, never from
+    driver, kernel or patch versions, so everyone on the same device and OS release gets the same strings:
+      cpu  the CPUID brand string (/proc/cpuinfo or the Windows registry report the same one)
+      gpu  the marketing name of each AMD display adapter, by PCI id and revision (libdrm amdgpu.ids on
+           Linux, the driver's DriverDesc on Windows), as 'AMD ...', sorted and joined with ' + '
+      os   Linux: os-release NAME and VERSION_ID ('Ubuntu 24.04', not the 24.04.3 point release);
+           Windows: 'Windows 10' or 'Windows 11' by build, plus the feature update ('Windows 11 25H2'),
+           not the edition or the monthly update"""
+    cpu, gpus, os_name = "", set(), f"{platform.system()} {platform.release()}"
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/cpuinfo", encoding="utf-8") as f:
+                cpu = next((l.split(":", 1)[1] for l in f if l.startswith("model name")), "")
+        except OSError:
+            pass
+        rel = {}
+        for path in ("/etc/os-release", "/usr/lib/os-release"):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    rel = dict(l.rstrip("\n").split("=", 1) for l in f if "=" in l)
+                break
+            except OSError:
+                continue
+        rel = {k: v.strip('"') for k, v in rel.items()}
+        if rel.get("NAME"):
+            os_name = " ".join(filter(None, (rel["NAME"], rel.get("VERSION_ID"))))
+        gpus = _linux_gpus()
+    elif sys.platform == "win32":
+        import winreg
+        hk = winreg.HKEY_LOCAL_MACHINE
+        with winreg.OpenKey(hk, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as k:
+            cpu = winreg.QueryValueEx(k, "ProcessorNameString")[0]
+        # ProductName says "Windows 10" on Windows 11 too; the build number tells them apart.
+        with winreg.OpenKey(hk, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") as k:
+            build = int(winreg.QueryValueEx(k, "CurrentBuildNumber")[0])
+            try:
+                feature = winreg.QueryValueEx(k, "DisplayVersion")[0]
+            except OSError:
+                feature = str(build)
+        os_name = f"Windows {11 if build >= 22000 else 10} {feature}"
+        gpus = _windows_gpus()
+    # libdrm says "Radeon 8060S Graphics" where the Windows driver says "AMD Radeon(TM) 8060S Graphics".
+    gpus = {g if g.startswith("AMD ") else f"AMD {g}" for g in map(_clean, gpus)}
+    device = {"cpu": _clean(cpu or platform.processor()), "gpu": " + ".join(sorted(gpus)), "os": os_name}
+    return {k: v for k, v in device.items() if v}
 
 
 def get(url, token=None):
@@ -277,7 +377,9 @@ def check_info(info):
     keys = {"schema", "device", "measured", "baseline", "metrics", "gates", "provenance"}
     need(set(info) <= keys, f"unknown keys {sorted(set(info) - keys)}")
     need(info.get("schema") == INFO_SCHEMA, f"schema must be {INFO_SCHEMA!r}")
-    need(isinstance(info.get("device"), str) and info["device"], "device is required")
+    dev = info.get("device")
+    need(isinstance(dev, dict) and set(dev) <= {"cpu", "gpu", "os"} and {"cpu", "os"} <= set(dev)
+         and all(isinstance(v, str) and v for v in dev.values()), "device must be {cpu, gpu?, os} strings")
     for k in ("measured", "provenance"):
         need(isinstance(info.get(k, ""), str), f"{k} must be a string")
     base = info.get("baseline", {"name": ""})
@@ -292,8 +394,8 @@ def check_info(info):
         need(v in ("PASS", "FAIL"), f"gates.{g} must be PASS or FAIL, got {v!r}")
 
 
-def build_info(work, device=DEVICE):
-    """info.json for the work directory, in the INFO_SCHEMA format."""
+def build_info(work):
+    """info.json for the work directory, in the INFO_SCHEMA format. Run it on the machine that measured."""
     bench, pkg = os.path.join(work, "bench"), os.path.join(work, "pkg")
 
     def load(*p):
@@ -366,7 +468,7 @@ def build_info(work, device=DEVICE):
     times = [r["time"] for r in perf if r.get("time")]
     info = {
         "schema": INFO_SCHEMA,
-        "device": device,
+        "device": detect_device(),
         "measured": max(times)[:10] if times else None,
         "baseline": baseline or None,
         "metrics": metrics or None,
@@ -379,7 +481,7 @@ def build_info(work, device=DEVICE):
 
 
 def cmd_info(a):
-    info = build_info(a.work, a.device)
+    info = build_info(a.work)
     json.dump(info, sys.stdout, indent=2)
     sys.stdout.write("\n")
 
@@ -405,7 +507,7 @@ def cmd_publish(a):
         with open(p, encoding="utf-8") as f:
             return json.load(f) if parse else f.read()
 
-    info = build_info(a.work, a.device)
+    info = build_info(a.work)
 
     # loom-fetch takes the GGUF from the source repo at the revision the port was validated on.
     revision = (read("source.json", True) or {}).get("revision") or src.sha
@@ -557,9 +659,7 @@ p.add_argument("--quant", required=True)
 p.add_argument("--files", required=True, help="JSON list of the GGUF file paths in the source repo")
 p.add_argument("--private", action="store_true")
 p.add_argument("--loom-fetch", default="loom-fetch", help="loom-fetch executable that writes model.json.lock; loom-serve is taken from the same directory")
-p.add_argument("--device", default=DEVICE, help="the machine the package was measured on, for info.json")
 i = sub.add_parser("info")
 i.add_argument("--work", required=True, help="directory with pkg/, bench/ and attempt.json")
-i.add_argument("--device", default=DEVICE, help="the machine the package was measured on")
 a = ap.parse_args()
 {"select": cmd_select, "publish": cmd_publish, "info": cmd_info}[a.cmd](a)
