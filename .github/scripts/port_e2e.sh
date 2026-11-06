@@ -18,6 +18,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd); SK=${SK:-$here/skills}
 B=$SK/loom-benchmark/scripts; SV=$SK/loom-setup/scripts; P=$SK/loom-port-llm
 W=$D/work; out=$D/out; mkdir -p "$W" "$out"
 export LOOM_SERVE_STATE=$W/state LLAMACPP_STATE=$W/llstate PYTHONDONTWRITEBYTECODE=1
+[ -n "${HF_TOKEN:-}" ] || unset HF_TOKEN   # an empty token (a CI secret this repo lacks) fails every hf download
 url=http://127.0.0.1:$port
 ph() { echo "$(date +%s) $*" >> "$D/phases.log"; echo "== $* ($(date +%T))"; }
 lock() { if [ -n "${GPU_LOCK:-}" ]; then flock "$GPU_LOCK" "$@"; else "$@"; fi; }
