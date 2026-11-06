@@ -234,6 +234,13 @@ def ensure_llama(url):
         raise SystemExit(f"could not start llama-server: {cmd}")
 
 
+def thinking_extra(mode):
+    """Request fields that select thinking identically on Loom and llama.cpp: on / off send
+    chat_template_kwargs.enable_thinking; template sends nothing (each engine's own default, and they differ:
+    llama-server turns thinking on, a Loom package follows the chat template, off for e.g. Nemotron-3.5-Bolt)."""
+    return {} if mode == "template" else {"chat_template_kwargs": {"enable_thinking": mode == "on"}}
+
+
 def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=None):
     """Streams one chat completion (greedy unless `extra` says otherwise). Returns client-side TTFT,
     decode tok/s, usage, the text (reasoning + content), the finish reason and the HTTP status;

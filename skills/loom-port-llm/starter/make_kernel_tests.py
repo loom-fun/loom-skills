@@ -653,15 +653,124 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   check.return
 }}
 """)
+# 3a''. DFlash proposals' head (draft/prep_weights.py, PROPOSE_HEAD=q4_0): g_prep_<fmt>_q4_0 converts the head at load,
+# then the int8 head runs over the Q4_0 copy. Logits vs numpy on llama.cpp's quantize_row_q4_0 of the same values (a
+# code at a rounding boundary may differ: tolerance), and the 4/8/16-span variants bit-identical to 1 span.
+HEAD_FMT = T[head_name].tensor_type.name.lower()
+if (HEAD_Q8 and HEAD_FMT in ("q8_0", "bf16", "f16") and H % 32 == 0 and (cfg.get("drafter") or {}).get("gguf")
+        and os.environ.get("PROPOSE_HEAD", "q4_0") == "q4_0"):
+    blk = Wh.astype(np.float32).reshape(-1, 32)
+    m = blk[np.arange(len(blk)), np.abs(blk).argmax(1)]
+    d4 = m / np.float32(-8)
+    id4 = np.divide(np.float32(1), d4, out=np.zeros_like(d4), where=d4 != 0)
+    c4 = np.minimum(np.float32(15), np.floor(blk * id4[:, None] + np.float32(8.5)))
+    W4 = ((c4 - 8) * d4.astype(np.float16).astype(np.float32)[:, None]).reshape(Wh.shape)
+    del blk, c4
+    S, nb = 8, Wh.size // 32
+    hm = np.zeros(4 + 9 * S, np.int32); hm[0] = S
+    for j in range(S):
+        hm[4 + 9 * j + 0] = 1; hm[4 + 9 * j + 4] = j; hm[4 + 9 * j + 6] = 1
+    hp = rng.standard_normal((S, H)).astype(np.float32)
+    lp = (q8_ref(hp) @ W4.T).astype(np.float32)   # S x V
+    del W4
+    CHP = CH * 128
+    lpad = np.full((S, CHP), -3.0e38, np.float32); lpad[:, :cfg["vocab"]] = lp
+    save("ph_meta", hm); save("ph_h", hp); save("ph_l", lpad.reshape(-1))
+    mt, ht, w4t = f"tensor<{hm.size}xi32>", f"tensor<{S}x{H}xf32>", f"tensor<{nb * 18}xi8>"
+    # a code at a rounding boundary (the GPU's reciprocal / fma vs numpy) moves a logit by ~d x |activation|; a
+    # layout or nibble-order error moves it by the logit's own scale
+    tol = 3.0e-2 * float(np.abs(lp).max())
+    def phl(k, tag):
+        return (f"  %p{tag} = check.generate.fill value(0) : tensor<{S * CH * 2}xi32>\n  %l{tag} = check.generate.fill value(0.0) : tensor<{S * CHP}xf32>\n"
+                f"  kernel.launch @{k}[%spans](%spans, %t, %meta, %hq, %w4, %p{tag}, %l{tag}) : [index](index, index, {mt}, tensor<{S}x{2 * H}xi8>, {w4t}, tensor<{S * CH * 2}xi32>, tensor<{S * CHP}xf32>)\n")
+    pv = [("g_head_mv_t4_q8_p40", "4"), ("g_head_mv_t8_q8_p40", "8"), ("g_head_mv_t16_q8_p40", "16")]
+    cases.append(f"""check.case public @propose_head_q4 {{
+  %spans = check.literal value({S}) : index
+  %t = check.literal value({S}) : index
+  %b = check.literal value({nb}) : index
+  %o = check.literal value(0) : i64
+  %meta = check.file.read.npy path("ph_meta.npy") : {mt}
+  %h = check.file.read.npy path("ph_h.npy") : {ht}
+  %w = check.file.read.npy path("hd_w.npy") : {hwt}
+  %le = check.file.read.npy path("ph_l.npy") : tensor<{S * CHP}xf32>
+  %w4 = check.generate.fill value(0) : {w4t}
+  kernel.launch @g_prep_{HEAD_FMT}_q4_0[%b](%b, %o, %w4, %w) : [index](index, i64, {w4t}, {hwt})
+  %hk = check.literal value({H}) : index
+  %hq = check.generate.fill value(0) : tensor<{S}x{2 * H}xi8>
+  kernel.launch @g_quant_q8[%t, %hk](%t, %hk, %h, %hq) : [index, index](index, index, {ht}, tensor<{S}x{2 * H}xi8>)
+""" + phl("g_head_mv_q8_p40", "1") + "".join(phl(k, tag) for k, tag in pv) + f"""  check.expect.close actual(%l1) expected(%le) atol({tol:.3e}) rtol(0.0) nan(different) : tensor<{S * CHP}xf32>
+""" + "".join(f"  check.expect.close actual(%l{tag}) expected(%l1) atol(0.0) rtol(0.0) nan(different) : tensor<{S * CHP}xf32>\n"
+              f"  check.expect.equal actual(%p{tag}) expected(%p1) : tensor<{S * CH * 2}xi32>\n" for _, tag in pv) + "  check.return\n}\n")
 # Drafter matrices without an int8 path (a vendor BF16/F16 DFlash drafter used as-is, cfg["drafter"]["gguf"]):
 # the f32-activation matvecs (1 and 4 tokens; gate/up pair) and the GEMMs (64-, 128- and 256-row tiles) the drafter's
 # propose / warm programs launch, one tensor per (format, K), vs float64 numpy on the dequantized weights. Rows per
-# workgroup as gen_llm.py picks them: mv_rows.pick_r for outputs of the trunk's hidden width (gen_dflash's %nH: fc,
-# attn_output, ffn_down), 16 for the drafter's own widths (%nDQ/%nDKV/%nDF are not in gen_llm's NVAL).
+# workgroup as gen_llm.py picks them: mv_rows.pick_r / iq_r for outputs of the trunk's hidden width (gen_dflash's %nH:
+# fc, attn_output, ffn_down), 16 for the drafter's own widths (%nDQ/%nDKV/%nDF are not in gen_llm's NVAL).
+PREP = os.environ.get("DRAFTER_PREP", "1") != "0"   # gen_dflash.py: BF16/F16 drafter matrices become Q8_0 at load
+
+
+def prep_cases(nm, up, fmt, K, n, W, U, tag0, seen_mv):
+    """Load-time drafter preparation (draft/prep_weights.py): g_prep_<fmt>_q8_0 converts the file's BF16/F16
+    bytes to Q8_0, then the drafter's int8 matvecs (1/4/8/16 tokens; gate/up as one swiglu launch) run on it.
+    Reference: llama.cpp's Q8_0 rounding of the weights (q8_ref per row) times q8_ref(x). The 4/8/16-token variants
+    must equal the 1-token kernel bit for bit (zero tolerance)."""
+    if (fmt, K, bool(up)) in seen_mv or K // 32 > 1024:
+        return
+    seen_mv.add((fmt, K, bool(up)))
+    gelu = cfg.get("ffn_act") == "gelu"
+    act = (lambda g: 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))) if gelu else (lambda g: g / (1 + np.exp(-g)))
+    B = n * K // 32
+    Wq = q8_ref(W.astype(np.float32)).astype(np.float64); Uq = q8_ref(U.astype(np.float32)).astype(np.float64) if up else None
+    names = [("w", nm)] + ([("u", up)] if up else [])
+    decl, preps, wq_args, wq_tys = "", "", [], []
+    for v, name in names:
+        rw = np.asarray(DT[name].data).view(np.int8).reshape(-1)
+        save(f"{tag0}_p{v}", rw)
+        decl += (f'  %{v} = check.file.read.npy path("{tag0}_p{v}.npy") : tensor<{rw.size}xi8>\n'
+                 f"  %{v}q = check.generate.fill value(0) : tensor<{B * 34}xi8>\n")
+        preps += (f"  kernel.launch @g_prep_{fmt}_q8_0[%b](%b, %o, %{v}q, %{v}) : [index](index, i64, tensor<{B * 34}xi8>, "
+                  f"tensor<{rw.size}xi8>)\n")
+        wq_args.append(f"%{v}q"); wq_tys.append(f"tensor<{B * 34}xi8>")
+    sw = "_swiglu" if up else ""
+    sig = lambda tg: (f"[index, index](index, index, i32, tensor<{tg}x{2 * K}xi8>, {', '.join(wq_tys)}, tensor<{tg}x{n}xf32>)")
+    nr = n if n == H else None   # the drafter's own widths take R = 16 (not in gen_llm's NVAL)
+    R1 = iq_r(nr, K, 1, bool(up))
+    k1 = f"g_mv_q8_0_k{K}{sw}_q8" + (f"_r{R1}" if R1 != 16 else "")
+    for tg in (1, 4, 8, 16):
+        xs = rng.standard_normal((tg, K)).astype(np.float32); xr = q8_ref(xs).astype(np.float64)
+        y = act(xr @ Wq.T) * (xr @ Uq.T) if up else xr @ Wq.T
+        tag = f"{tag0}_prep_t{tg}"; save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
+        Rt = iq_r(nr, K, tg, bool(up))
+        kt = f"g_mv_q8_0_k{K}{sw}" + (f"_t{tg}" if tg > 1 else "") + "_q8" + (f"_r{Rt}" if Rt != 16 else "")
+        same = (f"""  %y1 = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  kernel.launch @{k1}[%n, %t](%n, %t, %acc, %xq, {", ".join(wq_args)}, %y1) : {sig(tg)}
+  check.expect.close actual(%y) expected(%y1) atol(0.0) rtol(0.0) nan(different) : tensor<{tg}x{n}xf32>
+""" if tg > 1 else "")
+        tol = 2.0e-3 * max(1.0, float(np.abs(y).std()))
+        cases.append(f"""check.case public @mv_{tag} {{
+  %n = check.literal value({n}) : index
+  %t = check.literal value({tg}) : index
+  %k = check.literal value({K}) : index
+  %b = check.literal value({B}) : index
+  %o = check.literal value(0) : i64
+  %acc = check.literal value(0) : i32
+{decl}  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{tg}x{K}xf32>
+  %e = check.file.read.npy path("{tag}_y.npy") : tensor<{tg}x{n}xf32>
+  %xq = check.generate.fill value(0) : tensor<{tg}x{2 * K}xi8>
+  %y = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+{preps}  kernel.launch @g_quant_q8[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<{tg}x{K}xf32>, tensor<{tg}x{2 * K}xi8>)
+  kernel.launch @{kt}[%n, %t](%n, %t, %acc, %xq, {", ".join(wq_args)}, %y) : {sig(tg)}
+  check.expect.close actual(%y) expected(%e) atol({tol:.3e}) rtol(2.0e-3) nan(different) : tensor<{tg}x{n}xf32>
+{same}  check.return
+}}
+""")
+
+
 def drafter_cases():
     dg = (cfg.get("drafter") or {}).get("gguf")
     if not dg or not os.path.exists(dg) or os.environ.get("DRAFTER_TESTS", "1") != "1":
         return
+    global DT
     DT = {t_.name: t_ for t_ in GGUFReader(dg).tensors}
     fmt_of = lambda nm: DT[nm].tensor_type.name.lower()
     if not any(n_.startswith("blk.0.") and fmt_of(n_) not in IQ_FMTS | {"f32"} for n_ in DT):
@@ -683,6 +792,9 @@ def drafter_cases():
         sw = nm != up and up in DT and fmt_of(up) == fmt
         W = ddeq(nm).astype(np.float64); U = ddeq(up).astype(np.float64) if sw else None
         tag0 = "dr_" + nm.replace(".weight", "").replace(".", "_")
+        if PREP and fmt in ("bf16", "f16") and K % 32 == 0:
+            prep_cases(nm, up if sw else None, fmt, K, n, W, U, tag0, seen_mv)
+            continue
         save(tag0 + "_w", draw(nm)); wt = ty(draw(nm))
         wdecl = f'  %w = check.file.read.npy path("{tag0}_w.npy") : {wt}\n'; wargs, wtys = "%w", wt
         if sw:

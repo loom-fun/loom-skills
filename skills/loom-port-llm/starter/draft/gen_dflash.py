@@ -21,6 +21,7 @@ Adapted from hrx-loom-library model/Qwen/Qwen3.8-27B/program/{dflash,dflash_cont
 kernel/dflash_*.loom, motif/tensor/grouped_convolution.loom (Apache-2.0).
 """
 import math
+import os
 
 
 def config(path):
@@ -1247,6 +1248,9 @@ command.program.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buf
     head_name, hsize, esize = g["head_name"], g["head_size"], g["esize"]
     head_root = "" if head_name == "token_embd.weight" else "%w_head: buffer, "
     head_ref = "%w_embed" if head_name == "token_embd.weight" else "%w_head"
+    phead_root = ""
+    if g.get("phead"):   # the proposals read a load-time Q4_0 copy of the head (prep_weights.py, last parameter root)
+        head_ref, hsize, phead_root = "%w_phead", g["phead"], ", %w_phead: buffer"
     vis = ", %metadata, %info" if g["VISION"] else ""
     vty = ", buffer, buffer" if g["VISION"] else ""
     conv = F["conv"]
@@ -1256,7 +1260,7 @@ command.program.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buf
     P = [f"""
 // DFlash proposals: the drafter runs [anchor, <mask> x {BS - 1}] blocks for the PROPOSE spans and publishes
 // draft_depth tokens per block into the verifier's input slots.
-command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_root}%w_draft: buffer, %w_ctx: buffer, %epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer) {{
+command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_root}%w_draft: buffer, %w_ctx: buffer{phead_root}, %epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer) {{
 {common}{context_params(g)}  %epoch_spans = config.get @llm.epoch_spans : index
   %epoch_tokens = config.get @llm.epoch_tokens : index
   %width = config.get @llm.width : index
@@ -1363,3 +1367,29 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
     decls = ("config.decl @llm.epoch_spans : %value: index where [range(%value, 1, 8192)]\n\n"
              "config.decl @llm.epoch_tokens : %value: index where [range(%value, 1, 8192)]\n")
     return decls + warm + "".join(P)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Load-time Q8_0 preparation of BF16/F16 drafters (DRAFTER_PREP, default on; prep_weights.py).
+# A vendor drafter published in BF16 (NVIDIA's Nemotron DFlash) costs twice the bytes per proposal of Q8_0 and
+# runs on the f32-activation BF16 matvecs (4 tokens per weight pass: a block of 8 reads every weight twice). The
+# package keeps referencing the published file; the drafter's weight policy (draft_weights.loom) has loom-serve
+# convert each BF16/F16 matrix to Q8_0 once at load, and the drafter programs take the int8-activation matvecs
+# (1/4/8/16 tokens). Proposals only feed verification, so the rounding never reaches the output.
+PREP_SRC = ("bf16", "f16")
+
+
+def prep_tensors(tensors):
+    """{name: (source type, "q8_0", Q8_0 blocks)} for the drafter matrices load-time preparation converts."""
+    if os.environ.get("DRAFTER_PREP", "1") == "0":
+        return {}
+    out = {}
+    for n, t in tensors.items():
+        if t["type"] in PREP_SRC and len(t["shape"]) == 2 and t["shape"][0] % 32 == 0:
+            out[n] = (t["type"], "q8_0", t["shape"][0] * t["shape"][1] // 32)
+    return out
+
+
+def apply_prep(tensors, prep):
+    """The drafter tensor table as the programs see it after preparation (Q8_0)."""
+    return {n: (dict(t, type=prep[n][1], source=t["type"]) if n in prep else t) for n, t in tensors.items()}

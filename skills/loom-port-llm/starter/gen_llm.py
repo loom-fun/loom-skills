@@ -439,6 +439,26 @@ func.def inline @g_q8_0_icodes(%w: buffer, %origin: offset, %group: index) -> (v
   func.return %codes, %scale : vector<32xi8>, f32
 }
 
+// Q4_0 (the load-time proposal head copy, draft/prep_weights.py): codes 0..15 with minimum 8 d, so the int8 dot
+// subtracts 8 x (activation code sum) like a K-quant minimum.
+func.def inline @g_q4_0_icodes(%w: buffer, %origin: offset, %group: index) -> (vector<32xi8>, f32, f32) {
+  %two = index.constant 2 : offset
+  %scale_view = buffer.view %w[%origin] : buffer -> view<1xf16>
+  %code_origin = index.add %origin, %two : offset
+  %code_view = buffer.view %w[%code_origin] : buffer -> view<16xi8>
+  %scale_half = view.load %scale_view[0] : view<1xf16> -> f16
+  %scale = scalar.extf %scale_half : f16 to f32
+  %packed = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+  %nibble_mask = vector.constant 15 : vector<16xi8>
+  %four = vector.constant 4 : vector<16xi8>
+  %low = vector.andi %packed, %nibble_mask : vector<16xi8>
+  %high = vector.shrui %packed, %four : vector<16xi8>
+  %codes = vector.concat<0> %low, %high : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %eight = scalar.constant 8.0 : f32
+  %minimum = scalar.mulf %scale, %eight : f32
+  func.return %codes, %scale, %minimum : vector<32xi8>, f32, f32
+}
+
 func.def inline @g_q4_k_icodes(%w: buffer, %origin: offset, %group: index) -> (vector<32xi8>, f32, f32) {
   %c2 = index.constant 2 : index
   %c4 = index.constant 4 : index
@@ -2745,16 +2765,17 @@ def mv_wide_tokens(fmt, kval, sw, n, mv_args):
           }}
         }}""")
 
-def head_mv(TG, fmt, iq=False):
+def head_mv(TG, fmt, iq=False, suffix=""):
     """Output head argmax: workgroup = 128 vocabulary rows x TG spans,
     one lane per 32-value group of the 6656-wide row with each span's
-    activations in registers; weights stream once per group of TG spans."""
+    activations in registers; weights stream once per group of TG spans.
+    suffix names a variant over another format (the Q4_0 proposal head, PROPOSE_HEAD)."""
     R = 128
     groups = HG
     lanes = (groups + 31) // 32 * 32
     waves = lanes // 32
     rb = row_bytes(fmt, H)
-    name = "g_head_mv" + (f"_t{TG}" if TG > 1 else "") + ("_q8" if iq else "")
+    name = "g_head_mv" + (f"_t{TG}" if TG > 1 else "") + ("_q8" if iq else "") + suffix
     L = [f"""
 kernel.def export("{name}") @{name}(%spans: index) {{
   %c1 = index.constant 1 : index
@@ -3707,7 +3728,18 @@ if __name__ == "__main__":
             import gen_dflash
             dcfg = gen_dflash.config(gen_draft.DRAFT["gguf"])
             assert dcfg["hidden"] == H, f"drafter hidden {dcfg['hidden']} != target {H}"
-            DT = dcfg["tensors"]
+            # BF16/F16 drafter matrices are converted to Q8_0 at load (gen_dflash.prep_*, DRAFTER_PREP=0 keeps them)
+            import prep_weights
+            DPREP = gen_dflash.prep_tensors(dcfg["tensors"])
+            DT = dcfg["tensors"] = gen_dflash.apply_prep(dcfg["tensors"], DPREP)
+            if DPREP:
+                open(os.path.join(out_dir, "draft_weights.loom"), "w", newline="\n").write(prep_weights.policy(DPREP, "the drafter"))
+            # The proposals' head pass reads a load-time Q4_0 copy of the target's head (PROPOSE_HEAD=off: the head)
+            HPREP = {}
+            if os.environ.get("PROPOSE_HEAD", "q4_0") == "q4_0" and fmt_of(head_name) in prep_weights.SRC and ACT_Q8 and H % 32 == 0:
+                HPREP = {head_name: (fmt_of(head_name), "q4_0", V * H // 32)}
+                open(os.path.join(out_dir, "head_weights.loom"), "w", newline="\n").write(prep_weights.policy(HPREP, "the proposal head"))
+                gfacts["phead"] = prep_weights.dst_bytes("q4_0", V * H // 32)
             def dsize(name):
                 t = DT[name]
                 n = 1
@@ -3758,7 +3790,7 @@ if __name__ == "__main__":
                       + os.environ.get("DRAFT_MM_FROM", "5") + " : index", _wm.group(0), count=1) + program[_wm.end():]
         spec_kernels = gen_draft.kernels(gfacts)
         if gen_draft.DRAFT["kind"] == "dflash":
-            spec_kernels += gen_dflash.kernels(gfacts)
+            spec_kernels += gen_dflash.kernels(gfacts) + prep_weights.library({(a, b) for a, b, _ in list(DPREP.values()) + list(HPREP.values())})
         if gen_draft.DRAFT["kind"] == "ngram":
             spec_kernels += gen_ngram.kernels(gfacts)
         if gen_draft.DRAFT["kind"] == "assist":
@@ -3770,6 +3802,10 @@ if __name__ == "__main__":
         if head_fmt in IQ_FMTS:
             COMMON += "".join(head_mv(tg, head_fmt, iq=True) for tg in (1, 4, 8, 16))
             program = head_wiring(program)
+            if spec_kernels and "phead" in gfacts:   # the DFlash proposals' head: the Q4_0 copy's variants
+                COMMON += "".join(head_mv(tg, "q4_0", iq=True, suffix="_p40") for tg in (1, 4, 8, 16))
+                _pm = _re.search(r"command\.program\.def public @llm_dflash_propose\(\).*?\n\}\n", program, _re.S)
+                program = program[:_pm.start()] + _re.sub(r"@(g_head_mv\w*_q8)\[", r"@\1_p40[", _pm.group(0)) + program[_pm.end():]
     if os.environ.get("ROW_SCALE_LIVE", "1") != "0":   # after quant_wiring (it matches g_row_scale_f16); =0 A/B it off
         program = live_row_scale(program)
         COMMON += ROW_SCALE_LIVE

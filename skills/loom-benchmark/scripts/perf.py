@@ -12,6 +12,11 @@ prefix cache can help):
 Loom numbers are client-side (streaming TTFT and token arrival). llama.cpp
 numbers come from its server-side `timings` (excludes HTTP and tokenization),
 which slightly favours llama.cpp.
+--thinking off|on|template (default off): every request sends the same chat_template_kwargs.enable_thinking to
+both engines, so they decode the same kind of text. llama-server turns thinking on by default while a Loom
+package follows its chat template (off for Nemotron-3.5-Bolt): with nothing sent, the two engines decoded
+different texts (a reasoning trace vs the answer) and drafting accepted very different amounts. `template` sends
+nothing (each engine's default: the behaviour before this flag). The setting is recorded in every log row.
 """
 import argparse
 import json
@@ -20,7 +25,7 @@ import time
 
 import requests
 
-from bench_common import doc, perf_metrics, stream
+from bench_common import doc, perf_metrics, stream, thinking_extra
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -33,7 +38,10 @@ ap.add_argument("--reverted", action="store_true", help="this build is not kept 
 ap.add_argument("--no-campaign", action="store_true",
                 help="ad-hoc/ablation measurement: skip the roofline/baseline requirement and don't log it")
 ap.add_argument("--repeats", type=int, default=5, help="samples per short-prefill size (median reported)")
+ap.add_argument("--thinking", default="off", choices=["off", "on", "template"],
+                help="chat_template_kwargs.enable_thinking sent to BOTH engines (template: send nothing)")
 a = ap.parse_args()
+TH = thinking_extra(a.thinking)
 U, M = a.url, a.model
 if not a.no_campaign:  # required steps fail loudly instead of warning (warnings get ignored)
     from campaign import require
@@ -45,15 +53,15 @@ def run(content, max_tokens):
     """-> (prompt_tokens, prefill_tps, decode_tps, completion_tokens)"""
     msgs = [{"role": "user", "content": content}]
     if a.kind == "loom":
-        s = stream(U, M, msgs, max_tokens)
+        s = stream(U, M, msgs, max_tokens, extra=TH)
         return s["prompt_tokens"], s["prompt_tokens"] / s["ttft"], s["decode_tps"], s["tokens"]
-    d = requests.post(U + "/v1/chat/completions", headers=H, json={"messages": msgs, "max_tokens": max_tokens, "temperature": 0, "cache_prompt": False}).json()
+    d = requests.post(U + "/v1/chat/completions", headers=H, json={"messages": msgs, "max_tokens": max_tokens, "temperature": 0, "cache_prompt": False, **TH}).json()
     t = d["timings"]
     return t["prompt_n"], t["prompt_per_second"], t["predicted_per_second"], d["usage"]["completion_tokens"]
 
 
 run("Say hi.", 8)  # warm-up: the first request after a restart loads weights lazily
-out = {"label": a.label, "kind": a.kind, "time": time.strftime("%Y-%m-%d %H:%M:%S")}
+out = {"label": a.label, "kind": a.kind, "time": time.strftime("%Y-%m-%d %H:%M:%S"), "thinking": a.thinking}
 nonce = str(time.time())
 if a.long:
     out["prefill_long"] = []
