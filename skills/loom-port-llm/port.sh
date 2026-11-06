@@ -114,9 +114,8 @@ if [ "$irc" = 0 ] && [ "$ref" != off ] && [ -s reference.json ] && [ -f cfg.json
 fi
 if [ "$irc" != 0 ] || grep -q "^chat FAIL\|not derivable\|WARNING: no chat block\|WARNING: no kernels\|WARNING: head_dim\|Traceback" inspect.log; then
   arch=$("$T" -c "import json;print(json.load(open('cfg.json')).get('arch',''))" 2>/dev/null)
-  for ex in "$here"/reference/*-example; do
-    [ -f "$ex/cfg.json" ] && [ "$("$T" -c "import json;print(json.load(open('$ex/cfg.json')).get('arch',''))" 2>/dev/null)" = "$arch" ] && \
-      echo "HINT: reference/$(basename "$ex") is a working port of arch '$arch': $here/reference/apply_example.sh $(basename "$ex") kit cfg.json (merges the reviewed config too), then FROM=build KIT=kit $0 $spec $work $port $mem_gib $model_id"
+  for ex in $("$T" -c "import json; print(' '.join(k for k, v in json.load(open('$here/reference/examples.json')).items() if isinstance(v, dict) and v.get('arch') == '$arch'))" 2>/dev/null); do
+    echo "HINT: reference/$ex-example is a working port of arch '$arch': $here/reference/apply_example.sh $ex kit cfg.json (merges the reviewed config too), then FROM=build KIT=kit $0 $spec $work $port $mem_gib $model_id"
   done
   echo "STOP: see inspect.log; fix cfg.json (chat block / formats) by hand as loom-port-llm/SKILL.md describes, then rerun build.py"; exit 3
 fi

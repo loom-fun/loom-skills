@@ -83,7 +83,9 @@ $K/loom-benchmark/scripts/qualify.sh $W/pkg http://127.0.0.1:8160 $G $W/bench   
 #                                                               # 3. optimize (loom-optimize) for the budget qualify printed
 $K/loom-benchmark/scripts/finalize.sh $W/pkg http://127.0.0.1:8160 $G $W/bench  # 4. final perf, full gates, audit, report.html
 ```
-1. **Port.** `port.sh` stops with an exit code naming the stage that needs hand-work
+1. **Port.** `port.sh` first looks up the closest **category A** loom-fun package (card made by the current
+   skill) and starts from it (`loom-port-llm`, "Start from a reference"); `REFERENCE=off` ports from scratch.
+   `port.sh` stops with an exit code naming the stage that needs hand-work
    (3: the chat template, or an architecture the starter doesn't cover). Then follow
    `loom-port-llm` for that stage only, and continue with step 2 once the package
    serves and its kernel tests pass.

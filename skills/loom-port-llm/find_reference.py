@@ -24,6 +24,9 @@ starter and their numbers were not re-measured.
   find_reference.py fetch ORG/REPO DIR
       The reference's package without weights (model.json, lock, llm_config.json, info.json, README/REPORT,
       program/, *.loom policies, kit/ if published) into DIR, to read or diff (e.g. a program against your build).
+  find_reference.py example-cfg EXAMPLE [-o FILE]
+      A reference example's reviewed config (reference/examples.json): its category A package's llm_config.json at
+      the pinned revision, without the package's own keys (EXCLUDE below); reference/apply_example.sh merges it.
   find_reference.py show reference.json|ORG/REPO
       What an optimization should start from: the reference's drafting choice and measured table, execution
       settings (prefill chunk, pool), its llama.cpp baseline arguments, per-metric margins and gate verdicts.
@@ -45,6 +48,12 @@ OWN = {"name", "gguf", "tensors", "model_id", "draft", "drafter", "assistant", "
        "mtp", "hidden", "layers", "heads", "kv_heads", "head_dim", "ffn", "vocab", "context_length", "rms_eps",
        "rope_theta", "eos_id", "extra_eos_ids", "bos_id", "recurrent_layers", "kv_layers", "gdn", "moe",
        "sliding_layers", "nope_layers", "global_layers", "nextn_layers", "mrope"}
+
+
+# What apply_example.sh never copies from an example's config into a port's: the port's own GGUF, tensor table and
+# name, and what names one package's files (model id, drafter, vision projector, build stamps).
+EXCLUDE = {"gguf", "tensors", "name", "model_id", "draft", "drafter", "assistant", "vision", "generator", "reference"}
+EXAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reference", "examples.json")
 
 
 def get(url, timeout=30):
@@ -262,7 +271,8 @@ def cmd_rank(a):
                        "name": rp.get("name"), "category": "A",
                        "generator": {"skills_commit": gen.get("skills_commit"), "kit": gen.get("kit"),
                                      "hrx_loom": (gen.get("hrx_loom") or {}).get("hrx_loom") if isinstance(gen.get("hrx_loom"), dict) else gen.get("hrx_loom")},
-                       "kit_example": ((gen.get("kit") or {}).get("example")) or None,
+                       "kit_example": ((gen.get("kit") or {}).get("example"))
+                       or next((k for k, e in examples().items() if e.get("card") == r["repo"]), None),
                        "kit_published": any(f.startswith("kit/") for f in r["files"]),
                        "drafter": {k: (r["cfg"].get("drafter") or {}).get(k) for k in ("kind", "depth")},
                        "quality": gate_summary(r["info"])})
@@ -341,6 +351,39 @@ def cmd_fetch(a):
     print(f"fetched {a.repo}@{sha[:9]}: {len(names)} files into {a.dir}")
 
 
+def examples():
+    return {k: v for k, v in json.load(open(EXAMPLES, encoding="utf-8")).items() if not k.startswith("_")}
+
+
+def example_cfg(name):
+    """(config, card) of a reference example: its cfg.json, else its category A package's llm_config.json."""
+    name = name[:-len("-example")] if name.endswith("-example") else name
+    local = os.path.join(os.path.dirname(EXAMPLES), f"{name}-example", "cfg.json")
+    if os.path.isfile(local):
+        return json.load(open(local, encoding="utf-8")), None
+    e = examples().get(name) or {}
+    if not e.get("card"):
+        sys.exit(f"example {name}: no cfg.json and no category A package in {EXAMPLES}")
+    info = jfile(e["card"], e["revision"], "info.json") or {}
+    if info.get("schema") != SCHEMA or info.get("report") != "generated":
+        sys.exit(f"{e['card']}@{e['revision'][:9]} is not category A (schema {info.get('schema')}, report {info.get('report')})")
+    cfg = jfile(e["card"], e["revision"], "llm_config.json")
+    if not cfg or cfg.get("arch") != e["arch"]:
+        sys.exit(f"{e['card']}@{e['revision'][:9]}: llm_config.json missing or not arch {e['arch']}")
+    return cfg, f"{e['card']}@{e['revision'][:9]}"
+
+
+def cmd_example_cfg(a):
+    cfg, card = example_cfg(a.example)
+    out = {k: v for k, v in cfg.items() if k not in EXCLUDE}
+    text = json.dumps(out, indent=1, ensure_ascii=False)
+    if a.o:
+        open(a.o, "w", encoding="utf-8").write(text)
+        print(f"{a.example}: reviewed config from {card or 'the example cfg.json'} ({len(out)} keys)", file=sys.stderr)
+    else:
+        print(text)
+
+
 def cmd_show(a):
     if os.path.exists(a.what):
         x = pick(json.load(open(a.what, encoding="utf-8")))
@@ -379,10 +422,12 @@ def main(argv=None):
     p.add_argument("--chat-failed", action="store_true", help="the port's own chat derivation failed: take the reference's")
     f = sub.add_parser("fetch")
     f.add_argument("repo"); f.add_argument("dir")
+    e = sub.add_parser("example-cfg")
+    e.add_argument("example"); e.add_argument("-o")
     s = sub.add_parser("show")
     s.add_argument("what")
     a = ap.parse_args(argv)
-    {"rank": cmd_rank, "apply": cmd_apply, "fetch": cmd_fetch, "show": cmd_show}[a.cmd](a)
+    {"rank": cmd_rank, "apply": cmd_apply, "fetch": cmd_fetch, "show": cmd_show, "example-cfg": cmd_example_cfg}[a.cmd](a)
 
 
 if __name__ == "__main__":
