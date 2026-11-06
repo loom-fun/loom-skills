@@ -23,8 +23,13 @@ without -Instruct; a bare-name search also finds vendor variants such as `nvidia
 name matches, then z-lab, then downloads, checks each candidate's header before downloading (arch `dflash`, hidden
 size, tap layers inside the trunk, vocabulary, mask token, tensor formats, and no drafter feature `gen_dflash.py`
 lacks: reduced draft vocabulary, own embedding/head, shared K/V, sinks, causal block, DSpark hyper-connections) and
-records `cfg["drafter"]`. A BF16/F16-only drafter (NVIDIA publishes Nemotron's that way) is requantized to Q8_0
-next to cfg.json (`drafter/*-Q8_0.gguf`, ~0.4 % max relative error). `DRAFTER_REPO=org/name[:file]` forces one.
+records `cfg["drafter"]`. A BF16/F16-only drafter (NVIDIA publishes Nemotron's that way) is used as published:
+the starter's BF16/F16 kernels (f32-activation 1/4-token matvecs, WMMA GEMM with the weights rounded to F16;
+kernel tests `mv_dr_*` / `dr_*_gm*` in make_kernel_tests.py) read the vendor's file, so the package's model.json
+references it and a published card resolves it to the vendor repo (no converted weights to host). `--requantize`
+(`DRAFTER_REQUANT=1`) writes a local Q8_0 copy instead (`drafter/*-Q8_0.gguf`, ~0.4 % max relative error; half the
+bytes per proposal: Bolt-E4B depth 7 ~9 % faster, see below, but only for local use). `DRAFTER_REPO=org/name[:file]`
+forces one.
 Safetensors-only drafters are not converted.
 
 ## How a step runs (native contract: hrx-loom 0.1.0 text service, `draft_depth` 1-7)
@@ -118,6 +123,7 @@ draft_depth 0 of the same package and its concurrency check):
 | Model (arch, quant) | Drafter | Loom: none -> best | llama.cpp: none -> best | Loom before int8 activations |
 |---|---|---|---|---|
 | Nemotron-3.5-Bolt-E4B (gemma4, UD-Q5_K_XL) | NVIDIA DFlash, BF16 requantized to Q8_0 | 47.4 -> **115.9** (DFlash depth 7, x2.45; assistant depth 3: 108.8) | 45.3 -> 99.7 (DFlash n-max 7, x2.20) | 46.7 -> 73.4 |
+| Nemotron-3.5-Bolt-E4B (gemma4, NVIDIA Q4_K_M; llama.cpp b1368) | NVIDIA DFlash **BF16 as published** (issue #31) | 57.6 -> **147.7** (depth 7, x2.56; depth 5 129.4, depth 3 116.2); the Q8_0 requantized copy: 161.8 | 51.9 -> 93.6 (same BF16 file, DFlash n-max 7; n-max 3/5: 89.6 / 93.4) | - |
 | Qwen3.5-4B (qwen35 hybrid, UD-Q4_K_XL, vision with M-RoPE, F16 tensors) | AtomicChat DFlash | 62.8 -> **121.9** (DFlash depth 7, x1.94) | 57.2 -> 105.0 (DFlash n-max 7, x1.84) | 62.9 -> 80.2 |
 | Muse-Glimmer-30B (muse-glimmer, UD-Q5_K_M) | z-lab DFlash2 | 12.4 -> **37.1** (DFlash2 depth 7, x3.00) | 11.6 -> 25.4 (DFlash2 n-max 3, x2.18) | 12.2 -> 20.5 |
 | Flint (flint MoE, Q4_K_M) | incoai DFlash2 | 63.7 -> **102.6** (DFlash2 depth 3, x1.61) | 53.5 -> 86.0 (DFlash2 n-max 3, x1.61) | 65.6 -> 90.5 |
@@ -130,6 +136,27 @@ verify in one weight pass and round like 1-token decode. At long context each ve
 attention, so pick a lower depth for long-context use (Qwen3.8-27B above: depth 3 for its package).
 
 Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary decoding.
+
+BF16 drafters as published (Nemotron-3.5-Bolt-E4B Q4_K_M, NVIDIA's BF16 DFlash, same-session perf.py, two runs each,
+c4_steady three runs; llama.cpp b1368 drafting from the same BF16 GGUF):
+
+| | decode | @2k | @32k | prefill 1k / 8k / 32k | c4 (median) |
+|---|---|---|---|---|---|
+| Loom, BF16 drafter, depth 3 (package choice) | 81.9 | 70.6 | 51.3 | 2223 / 1835 / 929 | 197.4 |
+| Loom, BF16 drafter, depth 7 | 81.8 | 61.0 | 45.1 | 2179 / 1811 / 907 | 154.1 |
+| Loom, Q8_0 requantized drafter, depth 7 | 90.1 | 65.3 | 45.9 | 2208 / 1830 / 928 | 164.9 |
+| Loom, no drafting | 58.7 | 56.2 | 44.9 | 2314 / 1872 / 937 | 211.3 |
+| llama.cpp, DFlash n-max 7 (BF16) | 89.3 | 58.4 | 37.2 | 1312 / 1291 / 732 | 169.0 |
+| llama.cpp, no drafting | 51.9 | 44.5 | 33.2 | 1350 / 1304 / 739 | 155.9 |
+
+- The BF16 drafter costs ~9 % of drafted single-stream speed against the Q8_0 copy (twice the bytes per proposal on
+  the f32-activation 4-token matvec); the copy cannot be referenced by a published card.
+- Depth 3 is the package setting: same short decode as depth 7 on perf.py's essay, better with KV in use and with 4
+  streams (verification of 4 x 8 tokens takes the GEMM). Four drafting streams still trail no drafting (197 vs 211):
+  a 4 ms model step leaves little to win at 39 % acceptance.
+- Tried: proposals of 5+ tokens on the BF16 WMMA GEMM instead of the 4-token matvec (one weight pass): depth 7
+  146.3 -> 137.2 tok/s, slower (64-row padded tiles for 8 tokens). Drafter FFN with SiLU instead of the gemma4 kit's
+  GELU (llama.cpp's dflash graph uses SiLU unless `hidden_act` says otherwise): no change (145.0 vs 145.7).
 
 ## Gates
 
