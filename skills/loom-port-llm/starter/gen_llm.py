@@ -1499,19 +1499,20 @@ kernel.def export("g_row_scale_f16") @g_row_scale_f16(%rows: index) {
 ROW_SCALE_LIVE = (ROW_SCALE
     .replace('export("g_row_scale_f16") @g_row_scale_f16(', 'export("g_row_scale_f16_live") @g_row_scale_f16_live(')
     .replace("launch(%rows_arg: index, %k_arg: index, %x: buffer,", "launch(%rows_arg: index, %info: buffer, %k_arg: index, %x: buffer,")
-    .replace("  %x_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k]xf32>\n", """  %x_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k]xf32>
+    .replace("  %x4_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k4]x4xf32>\n", """  %x4_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k4]x4xf32>
   %live_view = buffer.view %info[%zero] : buffer -> view<[%rows]x4xi32>
   %live_word = view.load %live_view[%row, 2] : view<[%rows]x4xi32> -> i32
   %dead_zero = scalar.constant 0 : i32
   %row_live = scalar.cmpi ne, %live_word, %dead_zero : i32
+  %zero4 = vector.splat %zero_f : vector<4xf32>
 """)
-    .replace("    %v = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32\n    %a = scalar.absf %v : f32",
-             "    %v_raw = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32\n    %v_m = scf.select %row_live, %v_raw, %zero_f : f32\n    %a = scalar.absf %v_m : f32")
+    .replace("    %v = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>\n    %a = vector.absf %v : vector<4xf32>",
+             "    %v_raw = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>\n    %v = scf.select %row_live, %v_raw, %zero4 : vector<4xf32>\n    %a = vector.absf %v : vector<4xf32>")
     .replace("  %scale = scalar.bitcast %scale_bits : i32 to f32\n  %inverse = scalar.bitcast %inverse_bits : i32 to f32\n",
              "  %scale_l = scalar.bitcast %scale_bits : i32 to f32\n  %inverse_l = scalar.bitcast %inverse_bits : i32 to f32\n"
              "  %scale = scf.select %row_live, %scale_l, %zero_f : f32\n  %inverse = scf.select %row_live, %inverse_l, %zero_f : f32\n")
-    .replace("    %v = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32\n    %sv = scalar.mulf %v, %scale : f32",
-             "    %v_raw2 = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32\n    %v = scf.select %row_live, %v_raw2, %zero_f : f32\n    %sv = scalar.mulf %v, %scale : f32"))
+    .replace("    %v = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>\n    %sv = vector.mulf %v, %scale4 : vector<4xf32>",
+             "    %v_raw2 = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>\n    %v = scf.select %row_live, %v_raw2, %zero4 : vector<4xf32>\n    %sv = vector.mulf %v, %scale4 : vector<4xf32>"))
 assert ROW_SCALE_LIVE.count("%row_live") == 5, ROW_SCALE_LIVE.count("%row_live")
 
 
