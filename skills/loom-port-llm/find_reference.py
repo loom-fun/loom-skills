@@ -251,6 +251,11 @@ def candidates(org):
     return rows, skipped
 
 
+def plain_q4km(name):
+    n = os.path.basename(name or "").upper()
+    return "Q4_K_M" in n and "UD-" not in n
+
+
 def gate_summary(info):
     g = info.get("gates") or {}
     bad = sorted(k for k, v in g.items() if (v or {}).get("status") != "pass")
@@ -275,7 +280,9 @@ def cmd_rank(a):
                        or next((k for k, e in examples().items() if e.get("card") == r["repo"]), None),
                        "kit_published": any(f.startswith("kit/") for f in r["files"]),
                        "drafter": {k: (r["cfg"].get("drafter") or {}).get(k) for k in ("kind", "depth")},
-                       "quality": gate_summary(r["info"])})
+                       "quality": gate_summary(r["info"]),
+                       # still a reference, but loom-org's rule says the repo itself needs an update (plain Q4_K_M only)
+                       "plain_q4_k_m": plain_q4km(r["cfg"].get("gguf"))})
     ranked.sort(key=lambda x: -x["score"])
     out = {"target": t, "org": a.org, "rule": "category A only: info.json schema loom-card/2 and report generated",
            "ranked": ranked[:a.top], "skipped": skipped}
@@ -285,7 +292,7 @@ def cmd_rank(a):
           f"hybrid={t.get('hybrid')} experts={t.get('experts')} mtp={t.get('mtp')} calls={t.get('call_format')})")
     for x in ranked[:a.top]:
         q = x["quality"]
-        print(f"  {x['score']:6.1f}  {x['repo']}  [{'; '.join(x['reasons'])}]  generator {str(x['generator']['skills_commit'])[:9]}"
+        print(f"  {x['score']:6.1f}  {x['repo']}  [{'; '.join(x['reasons'])}]{'' if x['plain_q4_k_m'] else '  (not plain Q4_K_M)'}  generator {str(x['generator']['skills_commit'])[:9]}"
               f"{' kit ' + x['kit_example'] if x['kit_example'] else ''}; gates {q['gates']} ({'all pass' if not q['failing'] else 'failing: ' + ','.join(q['failing'])})")
     print(f"  ({len(skipped)} repos skipped: not category A)")
     best = next((x for x in ranked if x["arch"] == t.get("arch")), None)

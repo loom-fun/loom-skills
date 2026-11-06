@@ -92,13 +92,18 @@ def concurrent_ok(url, model, chat):
 
 
 def prior_depths(prior, kind, allowed):
-    """Depths to measure first for this method, from a reference's tuned table: its best depth's neighbourhood."""
+    """(depths to measure first, climb) for this method from a reference's tuned table: its best depth's neighbourhood;
+    a method that lost clearly there (under 75 % of the reference's winner) gets one probe at its best depth, and
+    climbs only if it does better here (tune() checks)."""
     rows = [r for r in prior or [] if r.get("kind") == kind and r.get("depth") and r.get("decode_tps")]
     if not rows or not allowed:
-        return None
-    best = max(rows, key=lambda r: r["decode_tps"])["depth"]
-    i = min(range(len(allowed)), key=lambda j: abs(allowed[j] - best))
-    return [allowed[j] for j in (i - 1, i, i + 1) if 0 <= j < len(allowed)]
+        return None, True
+    top = max(rows, key=lambda r: r["decode_tps"])
+    winner = max((r["decode_tps"] for r in prior if r.get("depth") and r.get("decode_tps")), default=0)
+    i = min(range(len(allowed)), key=lambda j: abs(allowed[j] - top["depth"]))
+    if top["decode_tps"] < 0.75 * winner:
+        return [allowed[i]], False
+    return [allowed[j] for j in (i - 1, i, i + 1) if 0 <= j < len(allowed)], True
 
 
 def serve(name, port, mem, card, env):
@@ -151,7 +156,7 @@ def main():
             block = gen_dflash.config(cfg["drafter"]["gguf"])["block_size"] - 1
         chat = chats[kind] = json.load(open(os.path.join(pkg, "llm_config.json")))["chat"]
         allowed = [d for d in depths if d <= block]
-        first = prior_depths(prior, kind, allowed)
+        first, climb = prior_depths(prior, kind, allowed)
         measured = {}
         queue = ([0] if base is None else []) + (first or allowed)
         while queue:
@@ -176,7 +181,9 @@ def main():
                 best = (kind, depth, tps)
             if depth:
                 measured[depth] = tps
-            if not queue and first:   # the prior is a starting point: climb while the best depth's neighbours are unmeasured
+            # the prior is a starting point: climb while the best depth's neighbours are unmeasured (a method the
+            # reference ruled out climbs only when it comes within 10 % of the best candidate so far)
+            if not queue and first and measured and (climb or max(measured.values()) >= 0.9 * best[2]):
                 i = allowed.index(max(measured, key=measured.get))
                 queue = [allowed[j] for j in (i - 1, i + 1) if 0 <= j < len(allowed) and allowed[j] not in measured]
         if first:
