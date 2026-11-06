@@ -39,7 +39,9 @@ def iq_r(n, K, TG, sw=False):
     R = pick_r(n, K, TG)
     if TG >= 8 and n and n % 16 == 0 and os.environ.get("MV_Q8_R16", "1") == "1":
         R = 16
-    if (TG >= 16 and n and n % 32 == 0 and (sw or K >= 8192) and K // 32 <= 1024
+    waves = (K // 32 + 31) // 32
+    lds = waves * 32 * TG * (2 if sw else 1) * 4   # the workgroup's F32 partials (waves x R x TG per weight)
+    if (TG >= 16 and n and n % 32 == 0 and (sw or K >= 8192) and K // 32 <= 1024 and lds <= 48 * 1024
             and os.environ.get("MV_Q8_R32", "1") == "1"):
         R = 32
     return R
