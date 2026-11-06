@@ -10,6 +10,11 @@
 #               reuse/calls, sampling semantics, needle retrieval); report correctness as unverified.
 #   LEVEL=full  (default; the final build, once): quick + one Loom-only probe at the full context
 #               (proves the whole context is served). QUICK=1 is an alias for LEVEL=quick.
+#   NEEDLE_FULL=0 LEVEL=full without that probe: it is deferred (gates.json "deferred": ["needle_full"],
+#               an audit WARN, not a FAIL). It has caught one class of bug (a KV pool under the context,
+#               which build.py now warns about) at a median of ~8 min and up to an hour per run, so a
+#               harness may run it separately: a later LEVEL=full run on the same build re-uses every
+#               other gate and runs only the probe.
 # llama.cpp references are cached in BENCH_DIR/llama_cache (they depend on the GGUF and the request,
 # not on the Loom build), so only the first run pays for them. llama-server starts lazily, on the
 # first cache miss: a later run that is fully cached never loads it. LLAMA_URL=http://... uses an
@@ -107,7 +112,8 @@ all_gates() {
     run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" "${LL[@]}"
     # Needle: compared with llama.cpp (near-tie rule) up to the llama.cpp slot; the full-context
     # probe (LEVEL=full) proves the size is served.
-    if [ "$level" = quick ]; then
+    if [ "$level" = quick ] || [ "${NEEDLE_FULL:-1}" = 0 ]; then
+      # quick, or full with the probe deferred: the compared half-context needle only
       run needle "$T" "$S/needle.py" "$pkg" "$url" "${LL[@]}" --llama-max $(( slot - 1024 )) --out needle.json --sizes $cmp --probes 1
     else
       # The compared half-context probe passed on this build already (qualify): only the full-context probe is new.
@@ -134,16 +140,20 @@ for p in "${pending[@]}"; do result[$p]=1; order+=("$p"); echo "== $p: reference
 args=()
 for n in "${order[@]}"; do args+=("$n" "${result[$n]}" "${secs[$n]}"); done
 "$T" - "$level" "$pkg_hash" $(( $(date +%s) - t_start )) "${args[@]}" <<'EOF'
-import json, sys, time
+import json, os, sys, time
 level, pkg_hash, total, rest = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4:]
+deferred = ["needle_full"] if level == "full" and os.environ.get("NEEDLE_FULL", "1") == "0" else []
 gates = {rest[i]: {"pass": rest[i + 1] == "0", "log": f"gates_{rest[i]}.log", "seconds": int(rest[i + 2])}
          for i in range(0, len(rest), 3)}
 verdict = "PASS" if all(g["pass"] for g in gates.values()) else "FAIL"
 out = {"verdict": verdict, "level": level, "pkg_hash": pkg_hash, "seconds": total,
        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "gates": gates}
+if deferred:
+    out["deferred"] = deferred
 json.dump(out, open("gates.json", "w"), indent=1)
 with open("gates_runs.jsonl", "a") as f:
     f.write(json.dumps(out) + "\n")
-print("GATES", verdict, f"level={level} {total}s", {n: ("PASS" if g["pass"] else "FAIL") for n, g in gates.items()})
+print("GATES", verdict, f"level={level} {total}s", {n: ("PASS" if g["pass"] else "FAIL") for n, g in gates.items()},
+      *([f"deferred: {', '.join(deferred)}"] if deferred else []))
 sys.exit(0 if verdict == "PASS" else 1)
 EOF

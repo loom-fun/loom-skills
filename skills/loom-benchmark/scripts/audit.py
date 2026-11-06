@@ -119,6 +119,9 @@ failing = [n for n, g in (gj or {}).get("gates", {}).items() if not g["pass"]]
 documented = failing == ["consistency"] and note   # a near-tie with its cause in consistency_note.md
 check("gates: full run PASS", gj is not None and (gj.get("verdict") == "PASS" or documented) and gj.get("level", "full") == "full",
       f"gates.json: {gj and {k: gj.get(k) for k in ('verdict', 'level')}}: run finalize.sh (LEVEL=full gates) on the final build")
+if gj and "needle_full" in (gj.get("deferred") or []):
+    check("gates: full-context probe", False, "deferred (NEEDLE_FULL=0): this build was not probed at its full "
+          "context length; LEVEL=full gates.sh on it runs only that probe", level="WARN")
 kept = [r for r in targets if r.get("kept", True) and r.get("commit", "-") != "-"]
 if kept and c and c.get("commit", "-") != "-" and not (gj and gj.get("pkg_hash") and gj.get("level") == "full"):
     # (gates.json from a LEVEL=full run carries the package hash it ran on: that, not git HEAD, names the build)
