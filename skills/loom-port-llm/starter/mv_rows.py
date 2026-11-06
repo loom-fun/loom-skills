@@ -13,6 +13,7 @@ import os
 ADAPT = os.environ.get("MV_ADAPT", "1") not in ("", "0")
 WG1 = int(os.environ.get("MV_WG1", "4096")); WG4 = int(os.environ.get("MV_WG4", "128"))
 WG_LONG = int(os.environ.get("MV_WG_LONG", "640"))
+WG8 = int(os.environ.get("MV_WG8", "256"))   # int8 8/16-token matvecs: smallest grid before R is halved (iq_r)
 SAME_R = "MV_WG4" not in os.environ
 
 
@@ -31,17 +32,22 @@ def pick_r(n, K, TG):
 def iq_r(n, K, TG, sw=False):
     """Rows per workgroup of the int8-activation (ACT_Q8) matvecs. A row's arithmetic does not depend on R (explicit
     ops, explicit butterfly), so R is free per variant without changing any result:
-    - 8+ tokens: 16 rows (fewer activation reloads; Qwen3.8-27B 17408x5120 t16: 395 -> 368 us).
+    - 8+ tokens: 16 rows (fewer activation reloads; Qwen3.8-27B 17408x5120 t16: 395 -> 368 us), halved while the
+      grid would hold fewer than MV_WG8 workgroups (small projections; MV_WG8=0 keeps 16).
     - 16 tokens, gate/up (swiglu) or K >= 8192: 32 rows. Each workgroup loads its 16 tokens' int8 activations for the
       whole K once; 32 rows halve that per weight row. Muse-Glimmer t16 (interleaved): gate/up 6656x19968 -5.5 %
       (with BFLY_PERM), down 19968x6656 -3.7 %; K = 4096 / 6656 single-weight projections measured flat or +4 %.
-      MV_Q8_R32=0 turns it off.
+      MV_Q8_R32=0 turns it off; not below WG8 / 2 workgroups (Bolt-E4B 10240x2560 down: 80).
     - Pair kernels (sw == 2: attention q + gate, k + v in one launch): 16 rows, halved (down to 4) while fewer than
       32 row groups would remain. Muse-Glimmer t16 (interleaved, vs two single launches): q + gate 6656x4096
       R16 -9 % (R32 -1 %), k + v 6656x256 R8 -36 % (R16 -16 %, R32 +52 %)."""
     R = pick_r(n, K, TG)
     if TG >= 8 and n and n % 16 == 0 and os.environ.get("MV_Q8_R16", "1") == "1":
         R = 16
+        # ... but not for small outputs: while the grid would hold fewer than MV_WG8 workgroups, halve R (each
+        # workgroup walks its R rows one after another, so 16 rows of a 512-row projection leave most of the GPU idle)
+        while R > 1 and n // R < WG8 and n % (R // 2) == 0:
+            R //= 2
     if sw == 2 and n:
         R = 16
         while R > 4 and n // R < 32 and n % (R // 2) == 0:
@@ -49,7 +55,7 @@ def iq_r(n, K, TG, sw=False):
         return R
     waves = (K // 32 + 31) // 32
     lds = waves * 32 * TG * (2 if sw else 1) * 4   # the workgroup's F32 partials (waves x R x TG per weight)
-    if (TG >= 16 and n and n % 32 == 0 and (sw or K >= 8192) and K // 32 <= 1024 and lds <= 48 * 1024
+    if (TG >= 16 and n and n % 32 == 0 and n // 32 >= WG8 // 2 and (sw or K >= 8192) and K // 32 <= 1024 and lds <= 48 * 1024
             and os.environ.get("MV_Q8_R32", "1") == "1"):
         R = 32
     return R

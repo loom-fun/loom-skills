@@ -1,0 +1,45 @@
+{
+ "_comment": "Bolt-E4B drafted short-prompt decode vs llama.cpp b1368 (same BF16 DFlash drafter). Round 1: baseline, R sweep, attribution.",
+ "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+ "memory_bytes": 34000000000,
+ "kit": "gemma4",
+ "llamacpp": "b1368",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "jobs": [
+  {"name": "base",
+   "variants": [
+    {"name": "card"},
+    {"name": "main7", "ref": "origin/main", "build": {}, "build_args": ["--draft-depth", "7"]},
+    {"name": "new3", "build": {}, "build_args": ["--draft-depth", "3"]},
+    {"name": "new7", "build": {}, "build_args": ["--draft-depth", "7"]}
+   ],
+   "steps": ["ab:3", "llama:2", "perf:card:2", "perf:new7:2", "perf:new3:2", "llama:2"]},
+  {"name": "rsweep",
+   "variants": [
+    {"name": "wg0", "build": {"MV_WG8": "0", "DRAFT_NVAL": "0"}, "build_args": ["--draft-depth", "7"]},
+    {"name": "wg128", "build": {"MV_WG8": "128"}, "build_args": ["--draft-depth", "7"]},
+    {"name": "wg256", "build": {"MV_WG8": "256"}, "build_args": ["--draft-depth", "7"]},
+    {"name": "wg512", "build": {"MV_WG8": "512"}, "build_args": ["--draft-depth", "7"]},
+    {"name": "wg1024", "build": {"MV_WG8": "1024"}, "build_args": ["--draft-depth", "7"]}
+   ],
+   "steps": ["ab:3", "llama:2"]},
+  {"name": "attr7",
+   "variants": [
+    {"name": "d7", "build": {}, "build_args": ["--draft-depth", "7"]},
+    {"name": "vhead", "build": {}, "build_args": ["--draft-depth", "7"], "double": ["llm_verify:g_head_mv"]},
+    {"name": "phead", "build": {}, "build_args": ["--draft-depth", "7"], "double": ["llm_dflash_propose:g_head_mv"]},
+    {"name": "dmv", "build": {}, "build_args": ["--draft-depth", "7"], "double": ["llm_dflash_propose:g_mv_"]},
+    {"name": "warm", "build": {}, "build_args": ["--draft-depth", "7"], "double": ["llm_dflash_warm:."]}
+   ],
+   "steps": ["ab:3"]},
+  {"name": "attr7v",
+   "variants": [
+    {"name": "d7", "build": {}, "build_args": ["--draft-depth", "7"]},
+    {"name": "vmv", "build": {}, "build_args": ["--draft-depth", "7"], "double": ["llm_verify:g_mv_q[0-9]"]},
+    {"name": "vattn", "build": {}, "build_args": ["--draft-depth", "7"], "double": ["llm_verify:attention_split|attention_combine|attention_flash"]},
+    {"name": "vbf16", "build": {}, "build_args": ["--draft-depth", "7"], "double": ["llm_verify:g_mv_bf16"]},
+    {"name": "d0", "build": {}, "build_args": ["--draft-depth", "7"], "execution": {"draft_depth": 0}}
+   ],
+   "steps": ["ab:3"]}
+ ]
+}

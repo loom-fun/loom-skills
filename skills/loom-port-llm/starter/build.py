@@ -159,6 +159,13 @@ sys.path.insert(0, os.path.join(HERE, "draft"))
 import build_draft  # noqa: E402
 subprocess.run([sys.executable, os.path.join(HERE, "gen_llm.py"), os.path.abspath(a.config)], check=True, env=env, stdout=subprocess.DEVNULL)
 os.replace(os.path.join(gen, "model.loom"), os.path.join(pkg, "program", "llm.loom"))
+# A BF16/F16 drafter's weight policy (load-time Q8_0 preparation, draft/gen_dflash.py prep_policy).
+DRAFT_POLICY = os.path.exists(os.path.join(gen, "draft_weights.loom"))
+if os.path.exists(os.path.join(pkg, "draft_weights.loom")):
+    os.remove(os.path.join(pkg, "draft_weights.loom"))
+if DRAFT_POLICY:
+    os.replace(os.path.join(gen, "draft_weights.loom"), os.path.join(pkg, "draft_weights.loom"))
+    DRAFT["policy"] = "draft_weights.loom"
 
 # 2. Serving glue from templates.
 hx = lambda s: s.encode().hex()
@@ -382,7 +389,8 @@ card = {
     "schema_version": 1,
     "model": {"id": model_id, "name": f"{cfg.get('name', 'llm')} (Loom port, GGUF)"},
     "programs": {"source": {
-        "inputs": [{"path": "program/prepare.loom", "data": ["weights.loom"]}, "program/control.loom", "program/storage.loom", "program/service.loom"],
+        "inputs": [{"path": "program/prepare.loom", "data": ["weights.loom"] + (["draft_weights.loom"] if DRAFT_POLICY else [])},
+                   "program/control.loom", "program/storage.loom", "program/service.loom"],
         "libraries": ["program/llm.loom"]}},
     "services": {"chat": {"kind": "text", "version": 1}},
     "variants": {"gguf": {"services": {"chat": {

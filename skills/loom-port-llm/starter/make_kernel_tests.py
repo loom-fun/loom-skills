@@ -656,12 +656,72 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 # Drafter matrices without an int8 path (a vendor BF16/F16 DFlash drafter used as-is, cfg["drafter"]["gguf"]):
 # the f32-activation matvecs (1 and 4 tokens; gate/up pair) and the GEMMs (64-, 128- and 256-row tiles) the drafter's
 # propose / warm programs launch, one tensor per (format, K), vs float64 numpy on the dequantized weights. Rows per
-# workgroup as gen_llm.py picks them: mv_rows.pick_r for outputs of the trunk's hidden width (gen_dflash's %nH: fc,
-# attn_output, ffn_down), 16 for the drafter's own widths (%nDQ/%nDKV/%nDF are not in gen_llm's NVAL).
+# workgroup as gen_llm.py picks them: mv_rows.pick_r / iq_r of the output width (gen_llm's NVAL holds the drafter's
+# own widths %nDQ/%nDKV/%nDF too, gen_dflash.widths; DRAFT_NVAL=0: 16 for those).
+PREP = os.environ.get("DRAFTER_PREP", "1") != "0"   # gen_dflash.py: BF16/F16 drafter matrices become Q8_0 at load
+
+
+def prep_cases(nm, up, fmt, K, n, W, U, tag0, seen_mv):
+    """Load-time drafter preparation (gen_dflash.prep_library): g_dfl_prep_q8_<fmt> converts the file's BF16/F16
+    bytes to Q8_0, then the drafter's int8 matvecs (1/4/8/16 tokens; gate/up as one swiglu launch) run on it.
+    Reference: llama.cpp's Q8_0 rounding of the weights (q8_ref per row) times q8_ref(x). The 4/8/16-token variants
+    must equal the 1-token kernel bit for bit (zero tolerance)."""
+    if (fmt, K, bool(up)) in seen_mv or K // 32 > 1024:
+        return
+    seen_mv.add((fmt, K, bool(up)))
+    gelu = cfg.get("ffn_act") == "gelu"
+    act = (lambda g: 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))) if gelu else (lambda g: g / (1 + np.exp(-g)))
+    B = n * K // 32
+    Wq = q8_ref(W.astype(np.float32)).astype(np.float64); Uq = q8_ref(U.astype(np.float32)).astype(np.float64) if up else None
+    names = [("w", nm)] + ([("u", up)] if up else [])
+    decl, preps, wq_args, wq_tys = "", "", [], []
+    for v, name in names:
+        rw = np.asarray(DT[name].data).view(np.int8).reshape(-1)
+        save(f"{tag0}_p{v}", rw)
+        decl += (f'  %{v} = check.file.read.npy path("{tag0}_p{v}.npy") : tensor<{rw.size}xi8>\n'
+                 f"  %{v}q = check.generate.fill value(0) : tensor<{B * 34}xi8>\n")
+        preps += (f"  kernel.launch @g_dfl_prep_q8_{fmt}[%b](%b, %o, %{v}q, %{v}) : [index](index, i64, tensor<{B * 34}xi8>, "
+                  f"tensor<{rw.size}xi8>)\n")
+        wq_args.append(f"%{v}q"); wq_tys.append(f"tensor<{B * 34}xi8>")
+    sw = "_swiglu" if up else ""
+    sig = lambda tg: (f"[index, index](index, index, i32, tensor<{tg}x{2 * K}xi8>, {', '.join(wq_tys)}, tensor<{tg}x{n}xf32>)")
+    R1 = iq_r(n, K, 1, bool(up))
+    k1 = f"g_mv_q8_0_k{K}{sw}_q8" + (f"_r{R1}" if R1 != 16 else "")
+    for tg in (1, 4, 8, 16):
+        xs = rng.standard_normal((tg, K)).astype(np.float32); xr = q8_ref(xs).astype(np.float64)
+        y = act(xr @ Wq.T) * (xr @ Uq.T) if up else xr @ Wq.T
+        tag = f"{tag0}_prep_t{tg}"; save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
+        Rt = iq_r(n, K, tg, bool(up))
+        kt = f"g_mv_q8_0_k{K}{sw}" + (f"_t{tg}" if tg > 1 else "") + "_q8" + (f"_r{Rt}" if Rt != 16 else "")
+        same = (f"""  %y1 = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  kernel.launch @{k1}[%n, %t](%n, %t, %acc, %xq, {", ".join(wq_args)}, %y1) : {sig(tg)}
+  check.expect.close actual(%y) expected(%y1) atol(0.0) rtol(0.0) nan(different) : tensor<{tg}x{n}xf32>
+""" if tg > 1 else "")
+        tol = 2.0e-3 * max(1.0, float(np.abs(y).std()))
+        cases.append(f"""check.case public @mv_{tag} {{
+  %n = check.literal value({n}) : index
+  %t = check.literal value({tg}) : index
+  %k = check.literal value({K}) : index
+  %b = check.literal value({B}) : index
+  %o = check.literal value(0) : i64
+  %acc = check.literal value(0) : i32
+{decl}  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{tg}x{K}xf32>
+  %e = check.file.read.npy path("{tag}_y.npy") : tensor<{tg}x{n}xf32>
+  %xq = check.generate.fill value(0) : tensor<{tg}x{2 * K}xi8>
+  %y = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+{preps}  kernel.launch @g_quant_q8[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<{tg}x{K}xf32>, tensor<{tg}x{2 * K}xi8>)
+  kernel.launch @{kt}[%n, %t](%n, %t, %acc, %xq, {", ".join(wq_args)}, %y) : {sig(tg)}
+  check.expect.close actual(%y) expected(%e) atol({tol:.3e}) rtol(2.0e-3) nan(different) : tensor<{tg}x{n}xf32>
+{same}  check.return
+}}
+""")
+
+
 def drafter_cases():
     dg = (cfg.get("drafter") or {}).get("gguf")
     if not dg or not os.path.exists(dg) or os.environ.get("DRAFTER_TESTS", "1") != "1":
         return
+    global DT
     DT = {t_.name: t_ for t_ in GGUFReader(dg).tensors}
     fmt_of = lambda nm: DT[nm].tensor_type.name.lower()
     if not any(n_.startswith("blk.0.") and fmt_of(n_) not in IQ_FMTS | {"f32"} for n_ in DT):
@@ -683,6 +743,9 @@ def drafter_cases():
         sw = nm != up and up in DT and fmt_of(up) == fmt
         W = ddeq(nm).astype(np.float64); U = ddeq(up).astype(np.float64) if sw else None
         tag0 = "dr_" + nm.replace(".weight", "").replace(".", "_")
+        if PREP and fmt in ("bf16", "f16") and K % 32 == 0:
+            prep_cases(nm, up if sw else None, fmt, K, n, W, U, tag0, seen_mv)
+            continue
         save(tag0 + "_w", draw(nm)); wt = ty(draw(nm))
         wdecl = f'  %w = check.file.read.npy path("{tag0}_w.npy") : {wt}\n'; wargs, wtys = "%w", wt
         if sw:
@@ -694,7 +757,7 @@ def drafter_cases():
                 xs = rng.standard_normal((tg, K)).astype(np.float32)
                 y = act(xs @ W.T) * (xs @ U.T) if sw else xs @ W.T
                 tag = f"{tag0}_t{tg}"; save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
-                _R = pick_r(n, K, tg) if n == H else 16
+                _R = pick_r(n, K, tg) if n == H or os.environ.get("DRAFT_NVAL", "1") == "1" else 16   # gen_llm NVAL
                 kern = f"g_mv_{fmt}_k{K}" + ("_swiglu" if sw else "") + ("_t4" if tg == 4 else "") + (f"_r{_R}" if _R != 16 else "")
                 cases.append(f"""check.case public @mv_{tag} {{
   %n = check.literal value({n}) : index

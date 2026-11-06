@@ -3707,7 +3707,14 @@ if __name__ == "__main__":
             import gen_dflash
             dcfg = gen_dflash.config(gen_draft.DRAFT["gguf"])
             assert dcfg["hidden"] == H, f"drafter hidden {dcfg['hidden']} != target {H}"
-            DT = dcfg["tensors"]
+            # BF16/F16 drafter matrices are converted to Q8_0 at load (gen_dflash.prep_*, DRAFTER_PREP=0 keeps them)
+            DPREP = gen_dflash.prep_tensors(dcfg["tensors"])
+            DT = dcfg["tensors"] = gen_dflash.apply_prep(dcfg["tensors"], DPREP)
+            # the drafter's own widths, so its matvecs pick rows per workgroup like the trunk's (mv_rows)
+            if os.environ.get("DRAFT_NVAL", "1") == "1":
+                NVAL.update(gen_dflash.widths(dcfg))
+            if DPREP:
+                open(os.path.join(out_dir, "draft_weights.loom"), "w", newline="\n").write(gen_dflash.prep_policy(DPREP))
             def dsize(name):
                 t = DT[name]
                 n = 1
@@ -3758,7 +3765,7 @@ if __name__ == "__main__":
                       + os.environ.get("DRAFT_MM_FROM", "5") + " : index", _wm.group(0), count=1) + program[_wm.end():]
         spec_kernels = gen_draft.kernels(gfacts)
         if gen_draft.DRAFT["kind"] == "dflash":
-            spec_kernels += gen_dflash.kernels(gfacts)
+            spec_kernels += gen_dflash.kernels(gfacts) + gen_dflash.prep_library(DPREP)
         if gen_draft.DRAFT["kind"] == "ngram":
             spec_kernels += gen_ngram.kernels(gfacts)
         if gen_draft.DRAFT["kind"] == "assist":

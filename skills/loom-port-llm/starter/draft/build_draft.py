@@ -45,9 +45,11 @@ def root_sources(cfg, draft):
     return ["model"] + head + ["draft", "draft"], ["draft", "draft"]
 
 
-def _bind(stage, sources):
+def _bind(stage, sources, draft_policy=False):
+    """Bind each parameter root; the drafter's roots use its own weight policy (draft_weights.loom) when it has one."""
+    pol = lambda src: "%draft_policy" if src != "model" and draft_policy else "%policy"
     return "".join(f"      %{stage}_b{i} = scalar.constant {i} : i32\n"
-                   f"      func.call @parameter(%{stage}, %{stage}_b{i}, %c0_source, {'%checkpoint' if src == 'model' else '%draft_source'}, %policy) : (i32, i32, i32, i32, buffer)\n"
+                   f"      func.call @parameter(%{stage}, %{stage}_b{i}, %c0_source, {'%checkpoint' if src == 'model' else '%draft_source'}, {pol(src)}) : (i32, i32, i32, i32, buffer)\n"
                    for i, src in enumerate(sources))
 
 
@@ -73,7 +75,7 @@ global.rodata.def @epoch_tokens_key = bytes("{hx("llm.epoch_tokens")}")
 
 // "draft"
 global.rodata.def @draft_scope = bytes("{hx("draft")}")
-
+{f'{chr(10)}// "{draft["policy"]}"{chr(10)}global.rodata.def @draft_policy_name = bytes("{hx(draft["policy"])}"){chr(10)}' if draft.get("policy") else ""}
 // "weights.loom"''')
     # draft depth 1..7 is supported (0 = ordinary decoding)
     text = _sub(text, "  %mode_ok = scalar.andi %has_epochs, %no_draft : i1\n",
@@ -96,7 +98,8 @@ global.rodata.def @draft_scope = bytes("{hx("draft")}")
   %width_key = global.load @width_key : buffer
 """)
     draft_source = ("  // the drafter checkpoint (card parameter scope \"draft\")\n  %draft_scope = global.load @draft_scope : buffer\n"
-                    "  %draft_source = func.call @source_scope(%draft_scope) : (buffer) -> (i32)\n") if "draft" in psrc + wsrc else ""
+                    "  %draft_source = func.call @source_scope(%draft_scope) : (buffer) -> (i32)\n"
+                    + ("  %draft_policy = global.load @draft_policy_name : buffer\n" if draft.get("policy") else "")) if "draft" in psrc + wsrc else ""
     text = _sub(text, "  %smaller = scalar.cmpi ult, %maximum, %prefill : i64\n", f"""  // Verify and catch-up stages per shape, declared after every advance stage (the first shape_count
   // stages are the shared target stages), then proposal stages for cohorts of 1, 2, 4, ... spans.
 {draft_source}  scf.if %drafting {{
@@ -131,7 +134,7 @@ global.rodata.def @draft_scope = bytes("{hx("draft")}")
       func.call @config_i64(%pstage, %width_key, %width) : (i32, buffer, i64)
       func.call @config_i64(%pstage, %epoch_spans_key, %span_capacity) : (i32, buffer, i64)
       func.call @config_i64(%pstage, %epoch_tokens_key, %maximum) : (i32, buffer, i64)
-{_bind("pstage", psrc)}
+{_bind("pstage", psrc, bool(draft.get("policy")))}
       %initial = index.cmp eq, %level, %c0 : index
       %next_first = scf.select %initial, %pstage, %first : i32
       scf.yield %next_first : i32
@@ -153,7 +156,7 @@ global.rodata.def @draft_scope = bytes("{hx("draft")}")
       func.call @config_i64(%wstage, %pool_key, %pool) : (i32, buffer, i64)
       func.call @config_i64(%wstage, %tokens_key, %tokens) : (i32, buffer, i64)
       func.call @config_i64(%wstage, %spans_key, %spans) : (i32, buffer, i64)
-{_bind("wstage", wsrc)}
+{_bind("wstage", wsrc, bool(draft.get("policy")))}
       view.store %wstage, %warm_view[%i] : i32, view<[%count]xi32>
     }}
     %draft_at = index.constant {PROPOSE_FIRST} : offset
