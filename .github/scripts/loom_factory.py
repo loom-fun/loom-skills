@@ -3,8 +3,14 @@
   select   rank the trending GGUF chat LLMs from the approved publishers that fit a
            Strix Halo, and pick the first one that has no Loom package on the target org yet
   publish  upload a finished Loom package to the target org
+  info     print the info.json that `publish` would upload for a work directory
 
-Only `publish` needs huggingface_hub; `select` uses the HTTP API with the standard library.
+Only `publish` needs huggingface_hub; `select` and `info` use the standard library.
+
+info.json has one fixed format (INFO_TEMPLATE, version INFO_VERSION): every key is always present, and a
+value that was not measured is null. It is generated from the files the loom-benchmark scripts write in
+WORK/bench (audit.json, perf_log.jsonl, gates.json, compare.json, llamacpp_pick.json, llamacpp_spec.json,
+gates_spec.log) and WORK/pkg/llm_config.json, never from numbers the agent types.
 """
 import argparse
 import json
@@ -32,6 +38,30 @@ PUBLISHERS = [
 # The first command on every card. loom-fetch needs the hf extra to read from Hugging Face.
 PIP = 'pip install "hrx-loom[hf]"'
 FETCH_NOTE = "`loom-fetch` (from the Loom SDK, installed with its `hf` extra by the first command)"
+
+# info.json. Metric names are roofline.json's (tok/s); each metric's margin is loom / llama_cpp - 1.
+# drafter.kind is null when the package doesn't draft; a gate result is null when that gate didn't run.
+INFO_VERSION = 1
+METRICS = ["decode_tps", "decode_tps_2k", "decode_tps_32k", "prefill_1000", "prefill_2000", "prefill_8000",
+           "prefill_16000", "prefill_32000", "c4_steady"]
+GATES = ["golden", "compare", "consistency", "vision", "spec", "agent", "sampling", "needle", "needle_full"]
+INFO_TEMPLATE = {
+    "version": int,
+    "source": str,
+    "quant": str,
+    "files": [str],
+    "run": str,
+    "loom_skills_commit": str,
+    "drafter": {"kind": str, "depth": int, "file": str, "acceptance": float},
+    "llama_cpp": {"build": str, "speculative": str},
+    "metrics": {m: {"loom": float, "llama_cpp": float, "margin": float, "target": float, "met": bool} for m in METRICS},
+    "gates": {"verdict": str, "level": str, "results": {g: str for g in GATES}},
+    "golden": {"prompts": int, "full_match": int, "median_matched": int, "max_gap": float, "bad": int, "verdict": str},
+    "audit": str,
+    "report": str,
+}
+INFO_REQUIRED = ("version", "source", "quant", "files")
+DOC_SIZES = (1000, 2000, 8000, 16000, 32000)
 
 
 def get(url, token=None):
@@ -234,6 +264,132 @@ def report(a, top, skipped, pick, title):
                         f"quant={pick['quant']}\nfiles={json.dumps(pick['files'])}\ngib={pick['gib']}\n")
 
 
+def check_info(v, t=INFO_TEMPLATE, path="info"):
+    """Exit unless `v` has exactly the keys and value types of INFO_TEMPLATE. Objects and lists are always
+    present; any other value may be null (not measured), except the top-level INFO_REQUIRED keys."""
+    if v is None:
+        if isinstance(t, (dict, list)) or path.count(".") == 1 and path.split(".")[1] in INFO_REQUIRED:
+            sys.exit(f"info.json: {path} must not be null")
+        return
+    if isinstance(t, dict):
+        if not isinstance(v, dict) or set(v) != set(t):
+            got = sorted(v) if isinstance(v, dict) else type(v).__name__
+            sys.exit(f"info.json: {path} has keys {got}, expected {sorted(t)}")
+        for k, sub in t.items():
+            check_info(v[k], sub, f"{path}.{k}")
+    elif isinstance(t, list):
+        if not isinstance(v, list):
+            sys.exit(f"info.json: {path} must be a list")
+        for i, x in enumerate(v):
+            check_info(x, t[0], f"{path}[{i}]")
+    elif t is float:
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            sys.exit(f"info.json: {path} must be a number, got {v!r}")
+    elif isinstance(v, bool) != (t is bool) or not isinstance(v, t):
+        sys.exit(f"info.json: {path} must be {t.__name__}, got {v!r}")
+
+
+def build_info(work, source, quant, files):
+    """info.json for the work directory, in the INFO_TEMPLATE format."""
+    bench, pkg = os.path.join(work, "bench"), os.path.join(work, "pkg")
+
+    def load(*p):
+        try:
+            with open(os.path.join(*p), encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def text(*p):
+        try:
+            with open(os.path.join(*p), encoding="utf-8", errors="replace") as f:
+                return f.read()
+        except OSError:
+            return None
+
+    perf = []
+    for line in (text(bench, "perf_log.jsonl") or "").splitlines():
+        try:
+            perf.append(json.loads(line))
+        except ValueError:
+            pass
+
+    def final_medians(kind):
+        """{metric: median} over the perf_log.jsonl rows of `kind` that carry its last label (the final build)."""
+        rows = [r for r in perf if r.get("kind") == kind]
+        runs = {}
+        for r in rows:
+            if r.get("label") != rows[-1].get("label"):
+                continue
+            vals = {k: r[k] for k in ("decode_tps", "decode_tps_2k", "decode_tps_32k", "c4_steady") if r.get(k) is not None}
+            for p in r.get("prefill", []) + r.get("prefill_long", []):
+                vals[f"prefill_{min(DOC_SIZES, key=lambda x: abs(x - p['prompt_tokens']))}"] = p["prefill_tps"]
+            for k, v in vals.items():
+                runs.setdefault(k, []).append(v)
+        return {k: sorted(v)[len(v) // 2] for k, v in runs.items()}
+
+    # audit.json's headline is what the report shows; perf_log.jsonl covers metrics the roofline doesn't track.
+    audit = load(bench, "audit.json")
+    headline = {r["metric"]: r for r in (audit or {}).get("headline", [])}
+    loom_perf, llama_perf = final_medians("loom"), final_medians("llama")
+    metrics = {}
+    for m in METRICS:
+        h = headline.get(m, {})
+        lv = h["loom"] if h.get("loom") is not None else loom_perf.get(m)
+        bv = h["llama_cpp"] if h.get("llama_cpp") is not None else llama_perf.get(m)
+        metrics[m] = {"loom": lv, "llama_cpp": bv, "margin": round(lv / bv - 1, 3) if lv and bv else None,
+                      "target": h.get("target"), "met": h.get("met")}
+
+    g = load(bench, "gates.json") or {}
+    ran = g.get("gates") or {}
+    gates = {"verdict": g.get("verdict"), "level": g.get("level"),
+             "results": {n: ("PASS" if ran[n]["pass"] else "FAIL") if n in ran else None for n in GATES}}
+
+    rows = load(bench, "compare.json") or []
+    golden = dict.fromkeys(INFO_TEMPLATE["golden"])
+    if rows:
+        gaps = [r["divergence_gap"] for r in rows if isinstance(r.get("divergence_gap"), float)]
+        golden.update(prompts=len(rows), full_match=sum(bool(r.get("full_match")) for r in rows),
+                      median_matched=sorted(r.get("matched") or 0 for r in rows)[len(rows) // 2],
+                      max_gap=round(max(gaps), 3) if gaps else 0.0, bad=sum(bool(r.get("bad")) for r in rows))
+        golden["verdict"] = "PASS" if golden["bad"] == 0 else "FAIL"
+
+    draft, drafter = (load(pkg, "llm_config.json") or {}).get("draft"), dict.fromkeys(INFO_TEMPLATE["drafter"])
+    if draft:
+        acc = re.findall(r"acceptance (\d+(?:\.\d+)?)%", text(bench, "gates_spec.log") or "")
+        drafter = {"kind": draft.get("kind"), "depth": draft.get("depth"),
+                   "file": os.path.basename(draft["gguf"]) if draft.get("gguf") else None,
+                   "acceptance": round(float(acc[-1]) / 100, 3) if acc else None}
+
+    top = ((load(bench, "llamacpp_pick.json") or {}).get("ranked") or [{}])[0]
+    spec = load(bench, "llamacpp_spec.json") or {}
+    info = {
+        "version": INFO_VERSION,
+        "source": source,
+        "quant": quant,
+        "files": files,
+        "run": (load(work, "attempt.json") or {}).get("run"),
+        "loom_skills_commit": os.environ.get("GITHUB_SHA"),
+        "drafter": drafter,
+        "llama_cpp": {"build": os.path.basename(top["dir"].rstrip("/")) if top.get("dir") else None,
+                      "speculative": spec.get("args") or None},
+        "metrics": metrics,
+        "gates": gates,
+        "golden": golden,
+        "audit": None if audit is None else
+        ("FAIL" if any(c.get("result") == "FAIL" for c in audit.get("checks", [])) else "PASS"),
+        "report": text(work, "REPORT.md"),
+    }
+    check_info(info)
+    return info
+
+
+def cmd_info(a):
+    info = build_info(a.work, a.source, a.quant, json.loads(a.files))
+    json.dump(info, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+
+
 def cmd_publish(a):
     from huggingface_hub import HfApi, ModelCard
 
@@ -255,9 +411,7 @@ def cmd_publish(a):
         with open(p, encoding="utf-8") as f:
             return json.load(f) if parse else f.read()
 
-    attempt, result = read("attempt.json", True) or {}, read("result.json", True) or {}
-    info = {"source": a.source, "quant": a.quant, "files": files, "run": attempt.get("run"),
-            "metrics": result.get("metrics"), "report": read("REPORT.md")}
+    info = build_info(a.work, a.source, a.quant, files)
 
     # loom-fetch takes the GGUF from the source repo at the revision the port was validated on.
     revision = (read("source.json", True) or {}).get("revision") or src.sha
@@ -397,12 +551,17 @@ s.add_argument("--attempts-file", help="artifact names of previous attempts, one
 s.add_argument("--checkpoint", help="convert this org/repo[:file.gguf] instead of ranking")
 s.add_argument("--out", default="selection.json")
 p = sub.add_parser("publish")
-p.add_argument("--work", required=True, help="directory with pkg/, attempt.json, result.json and REPORT.md")
+p.add_argument("--work", required=True, help="directory with pkg/, bench/, attempt.json and REPORT.md")
 p.add_argument("--source", required=True)
 p.add_argument("--target", required=True)
 p.add_argument("--quant", required=True)
 p.add_argument("--files", required=True, help="JSON list of the GGUF file paths in the source repo")
 p.add_argument("--private", action="store_true")
 p.add_argument("--loom-fetch", default="loom-fetch", help="loom-fetch executable that writes model.json.lock; loom-serve is taken from the same directory")
+i = sub.add_parser("info")
+i.add_argument("--work", required=True, help="directory with pkg/, bench/, attempt.json and REPORT.md")
+i.add_argument("--source", required=True)
+i.add_argument("--quant", required=True)
+i.add_argument("--files", required=True, help="JSON list of the GGUF file paths in the source repo")
 a = ap.parse_args()
-{"select": cmd_select, "publish": cmd_publish}[a.cmd](a)
+{"select": cmd_select, "publish": cmd_publish, "info": cmd_info}[a.cmd](a)
