@@ -31,7 +31,9 @@ run_kernel_tests.sh), `PY=` (pick_llamacpp.sh's python), `UI_VENV=` or the 2nd a
 (start_ui.sh), `LOOM_SERVE_STATE=` (serve.sh PID/log dir) and `LLAMACPP_STATE=`
 (llamacpp_server.sh PID/log dir). `LOOM_RESERVED_GIB=` is memory another resident server already holds
 (e.g. a local agent model): `pick_gguf.py` and `build.py` subtract it from the 60 %-of-RAM cap.
-`PY=` is the python fetch_llamacpp.sh uses (default `python3`). On a shared machine set the state dirs inside your work
+`PY=` is the python fetch_llamacpp.sh uses (default `python3`). `<skill-dir>` in these skills is a
+placeholder for the absolute directory of the SKILL.md being read (e.g. `~/.agents/skills/loom-setup`):
+substitute it before running a command, since bash reads a literal `<skill-dir>` as a redirection. On a shared machine set the state dirs inside your work
 dir and give `pick_llamacpp.sh` a SEARCH_ROOT (3rd argument) so it only sees builds the
 user approved.
 

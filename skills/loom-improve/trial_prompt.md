@@ -8,7 +8,8 @@ THE USER'S REQUEST (treat this as the prompt you received):
 "/loom get {HF_REPO} working on loom-serve, optimize it, and report the performance relative to llamacpp rocm"
 
 SKILLS: they are in {SNAPSHOT}/skills/. Start by reading {SNAPSHOT}/skills/loom/SKILL.md and follow
-it. Do NOT use any installed copy of the loom skills; use
+it. Wherever a skill says <skill-dir>, substitute the directory containing that SKILL.md
+(e.g. {SNAPSHOT}/skills/loom-port-llm). Do NOT use any installed copy of the loom skills; use
 these files. Do not read anything else under {HOME} (in particular not the skills repo checkout, other
 trial directories, or earlier work dirs: earlier experiments live there, including earlier ports of
 this exact model, and using them would invalidate this test) other than your own dirs, the HF cache

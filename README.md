@@ -26,7 +26,7 @@ If you don't have Node installed, [`install.sh`](install.sh) is a reference scri
 skills into `~/.agents/skills` and links them into `~/.claude/skills`, so Claude Code, Cursor, Codex
 and most other agents pick them up.
 
-We recommend using Claude Code.
+We recommend Claude Code: the skills were developed with it, and the trial results below come from it.
 
 ## Use
 
@@ -129,9 +129,11 @@ optimization budget shrinks to fit.
 ```
 .claude-plugin/{plugin.json,marketplace.json}   # Claude Code plugin manifests (used by the CI factory)
 skills/<skill>/SKILL.md                          # the eight skills, with their scripts and references
+install.sh                                       # install without Node
 LICENSE                                          # MIT
 THIRD_PARTY_NOTICES.md
 ```
+
 ## Contributing
 
 To try local changes, install them from your checkout with `npx skills add /path/to/loom-skills`.

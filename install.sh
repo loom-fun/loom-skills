@@ -12,7 +12,9 @@ if [ "${1:-}" = "--uninstall" ]; then
   for s in "${skills[@]}"; do rm -rf "$dest/$s" "$claude/$s"; done; echo "removed ${skills[*]} from $dest and $claude"; exit 0
 fi
 mkdir -p "$dest" "$claude"
+same=$([ "$(cd "$dest" && pwd -P)" = "$(cd "$claude" && pwd -P)" ] && echo 1 || true)
 for s in "${skills[@]}"; do
-  rm -rf "$dest/$s" "$claude/$s"; cp -a "$here/skills/$s" "$dest/$s"; ln -s "$dest/$s" "$claude/$s"
+  rm -rf "$dest/$s" "$claude/$s"; cp -a "$here/skills/$s" "$dest/$s"
+  [ -n "$same" ] || ln -s "$dest/$s" "$claude/$s"
 done
 echo "installed ${#skills[@]} skills into $dest (linked from $claude) - start a new agent session and run /loom"
