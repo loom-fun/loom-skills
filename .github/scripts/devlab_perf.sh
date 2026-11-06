@@ -225,14 +225,19 @@ print('llamacpp', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[
       res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_llamacpp.txt')))");;
     consistency)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
-      step "consistency $p1 x $p2"; nd=0; nc=0
+      # as gates.sh runs it: --pkg and a llama.cpp reference (no drafting) to judge any divergence as a near-tie
+      LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR
+      ( unset LLAMA_SPEC; "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 1 8192 | tail -1 )
+      step "consistency $p1 x $p2"; nd=0; np=0; nc=0
       for i in $(seq 1 "$p2"); do
-        "$T" "$B/consistency.py" "$url" --model "$cardid" > "$out/consistency_${p1}_$i.log" 2>&1
+        "$T" "$B/consistency.py" "$url" --model "$cardid" --pkg "$D/$p1/pkg" --llama "$lurl" > "$out/consistency_${p1}_$i.log" 2>&1
         grep -q "NOT DETERMINISTIC" "$out/consistency_${p1}_$i.log" && nd=$((nd + 1))
+        grep -q "^PASS$" "$out/consistency_${p1}_$i.log" && np=$((np + 1))
         grep -q "identical when concurrent: \[.*False" "$out/consistency_${p1}_$i.log" && nc=$((nc + 1))
-        echo "  $i: $(head -1 "$out/consistency_${p1}_$i.log" | cut -c1-300)"
+        echo "  $i: $(grep -E "^(PASS|FAIL)$" "$out/consistency_${p1}_$i.log") $(head -1 "$out/consistency_${p1}_$i.log" | cut -c1-200)"
       done
-      res[$s]="nondeterministic $nd/$p2, concurrent-mismatch $nc/$p2";;
+      "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
+      res[$s]="PASS $np/$p2, nondeterministic $nd/$p2, concurrent near-tie divergences $nc/$p2";;
     determinism)
       [ -f "$B/determinism.py" ] || { res[$s]="no determinism.py"; continue; }
       serve_alone "$p1" || { res[$s]=ERROR; continue; }

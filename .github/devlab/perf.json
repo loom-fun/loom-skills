@@ -1,5 +1,5 @@
 {
- "_comment": "Bolt-E4B drafted short-prompt decode vs llama.cpp b1368 (same BF16 DFlash drafter). Round 3: final table, verification, NVAL A/B, Qwen3.8-27B generality.",
+ "_comment": "Bolt-E4B drafted short-prompt decode vs llama.cpp b1368 (same BF16 DFlash drafter): final build (load-time Q8_0 drafter + Q4_0 proposal head, depth 3) vs main vs llama.cpp on one runner, plus verification.",
  "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
  "memory_bytes": 34000000000,
  "kit": "gemma4",
@@ -33,46 +33,7 @@
    ]
   },
   {
-   "name": "verify",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:new",
-    "consistency:new:10",
-    "determinism:new:1:10",
-    "gates:new:quick"
-   ]
-  },
-  {
-   "name": "nval",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    },
-    {
-     "name": "n0",
-     "build": {
-      "DRAFT_NVAL": "0"
-     }
-    }
-   ],
-   "steps": [
-    "ab:3",
-    "perf:new:2",
-    "perf:n0:2"
-   ]
-  },
-  {
-   "name": "q27",
-   "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
-   "kit": null,
-   "memory_bytes": 52000000000,
-   "llamacpp": "b1355",
+   "name": "final-b",
    "variants": [
     {
      "name": "new",
@@ -85,9 +46,24 @@
     }
    ],
    "steps": [
-    "ktest:new",
+    "perf:new:4",
     "perf:main:2",
-    "perf:new:2"
+    "llama:4"
+   ]
+  },
+  {
+   "name": "verify",
+   "variants": [
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new",
+    "consistency:new:10",
+    "determinism:new:1:10",
+    "gates:new:quick"
    ]
   }
  ]
