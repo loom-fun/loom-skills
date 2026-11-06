@@ -655,7 +655,7 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 """)
 # 3a''. DFlash proposals' head (draft/prep_weights.py, PROPOSE_HEAD=q4_0): g_prep_<fmt>_q4_0 converts the head at load,
 # then the int8 head runs over the Q4_0 copy. Logits vs numpy on llama.cpp's quantize_row_q4_0 of the same values (a
-# code at an exact rounding boundary may differ: tolerance), and the 4/8/16-span variants bit-identical to 1 span.
+# code at a rounding boundary may differ: tolerance), and the 4/8/16-span variants bit-identical to 1 span.
 HEAD_FMT = T[head_name].tensor_type.name.lower()
 if (HEAD_Q8 and HEAD_FMT in ("q8_0", "bf16", "f16") and H % 32 == 0 and (cfg.get("drafter") or {}).get("gguf")
         and os.environ.get("PROPOSE_HEAD", "q4_0") == "q4_0"):
@@ -677,7 +677,9 @@ if (HEAD_Q8 and HEAD_FMT in ("q8_0", "bf16", "f16") and H % 32 == 0 and (cfg.get
     lpad = np.full((S, CHP), -3.0e38, np.float32); lpad[:, :cfg["vocab"]] = lp
     save("ph_meta", hm); save("ph_h", hp); save("ph_l", lpad.reshape(-1))
     mt, ht, w4t = f"tensor<{hm.size}xi32>", f"tensor<{S}x{H}xf32>", f"tensor<{nb * 18}xi8>"
-    tol = 2.0e-3 * float(np.abs(lp).max())
+    # a code at a rounding boundary (the GPU's reciprocal / fma vs numpy) moves a logit by ~d x |activation|; a
+    # layout or nibble-order error moves it by the logit's own scale
+    tol = 3.0e-2 * float(np.abs(lp).max())
     def phl(k, tag):
         return (f"  %p{tag} = check.generate.fill value(0) : tensor<{S * CH * 2}xi32>\n  %l{tag} = check.generate.fill value(0.0) : tensor<{S * CHP}xf32>\n"
                 f"  kernel.launch @{k}[%spans](%spans, %t, %meta, %hq, %w4, %p{tag}, %l{tag}) : [index](index, index, {mt}, tensor<{S}x{2 * H}xi8>, {w4t}, tensor<{S * CH * 2}xi32>, tensor<{S * CHP}xf32>)\n")

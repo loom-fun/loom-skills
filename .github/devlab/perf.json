@@ -1,5 +1,5 @@
 {
- "_comment": "Bolt-E4B drafted short-prompt decode vs llama.cpp b1368 (same BF16 DFlash drafter). Round 2: Q4_0 proposal head, Q4_0 drafter.",
+ "_comment": "Bolt-E4B drafted short-prompt decode vs llama.cpp b1368 (same BF16 DFlash drafter). Round 3: final table, verification, NVAL A/B, Qwen3.8-27B generality.",
  "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
  "memory_bytes": 34000000000,
  "kit": "gemma4",
@@ -7,97 +7,87 @@
  "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
  "jobs": [
   {
-   "name": "q4h",
+   "name": "final",
    "variants": [
     {
-     "name": "q8h3",
-     "build": {
-      "PROPOSE_HEAD": "off"
-     },
-     "build_args": [
-      "--draft-depth",
-      "3"
-     ]
+     "name": "new",
+     "build": {}
     },
     {
-     "name": "q4h3",
-     "build": {},
-     "build_args": [
-      "--draft-depth",
-      "3"
-     ]
-    },
-    {
-     "name": "q4h7",
-     "build": {},
-     "build_args": [
-      "--draft-depth",
-      "7"
-     ]
+     "name": "main",
+     "ref": "origin/main",
+     "build": {}
     }
    ],
    "steps": [
     "ab:2",
-    "perf:q8h3:2",
-    "perf:q4h3:2",
-    "perf:q4h7:2",
-    "llama:2"
+    "perf:new:4",
+    "perf:main:4",
+    "llama:4",
+    "perf:new:1:long",
+    "perf:main:1:long",
+    "llama:1:long",
+    "c4:new",
+    "c4:main",
+    "llamac4"
    ]
   },
   {
-   "name": "q4d",
+   "name": "verify",
    "variants": [
     {
-     "name": "q4h3",
-     "build": {},
-     "build_args": [
-      "--draft-depth",
-      "3"
-     ]
-    },
-    {
-     "name": "q4d3",
-     "build": {
-      "DRAFTER_FMT": "q4_0"
-     },
-     "build_args": [
-      "--draft-depth",
-      "3"
-     ]
-    },
-    {
-     "name": "q4d7",
-     "build": {
-      "DRAFTER_FMT": "q4_0"
-     },
-     "build_args": [
-      "--draft-depth",
-      "7"
-     ]
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "ab:2",
-    "perf:q4d3:2",
-    "perf:q4h3:2",
-    "perf:q4d7:2",
-    "llama:2"
+    "ktest:new",
+    "consistency:new:10",
+    "determinism:new:1:10",
+    "gates:new:quick"
    ]
   },
   {
-   "name": "ktest",
+   "name": "nval",
    "variants": [
     {
-     "name": "q4h3",
-     "build": {},
-     "build_args": [
-      "--draft-depth",
-      "3"
-     ]
+     "name": "new",
+     "build": {}
+    },
+    {
+     "name": "n0",
+     "build": {
+      "DRAFT_NVAL": "0"
+     }
     }
    ],
    "steps": [
-    "ktest:q4h3"
+    "ab:3",
+    "perf:new:2",
+    "perf:n0:2"
+   ]
+  },
+  {
+   "name": "q27",
+   "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
+   "kit": null,
+   "memory_bytes": 52000000000,
+   "llamacpp": "b1355",
+   "variants": [
+    {
+     "name": "new",
+     "build": {}
+    },
+    {
+     "name": "main",
+     "ref": "origin/main",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new",
+    "perf:main:2",
+    "perf:new:2"
    ]
   }
  ]
