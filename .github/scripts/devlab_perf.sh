@@ -14,11 +14,13 @@
 #             "execution": {"draft_depth": 3}, "double": ["llm_verify:g_head_mv", "*:g_mv_q8_0"]}
 #            build: build.py with these env vars (and extra flags); ref: build with that commit's starter;
 #            execution: model.json overrides; double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
+# Job "thinking": off (default) | on: chat_template_kwargs.enable_thinking sent to BOTH engines in every step.
 # Steps S: ab:R[:on|off]        every variant in ONE loom-serve (small context), ab_decode.py R interleaved rounds
 #          perf:V:N[:long]      V served alone with its own settings: perf.py N times (+ --long)
 #          c4:V                 c4_steady.py 4 streams on V
-#          llama:N[:long]       llama.cpp (card build + llama_spec) perf.py N times, llama_decode.py tokens/step, (+ --long)
-#          llamac4              c4_steady.py on llama.cpp
+#          llama:N[:long|-][:M] llama.cpp (card build + llama_spec, n-max M) perf.py N times, llama_decode.py tokens/step
+#          llamac4[:M]          c4_steady.py on llama.cpp
+#          textmatch:V          text_match.py: first 50 tokens of perf.py's prompts on V, then on llama.cpp
 #          consistency:V:N      consistency.py N times (NOT DETERMINISTIC / concurrent mismatch counts)
 #          determinism:V:C:R    determinism.py (issue #39's script, when present)
 #          ktest:V              make_kernel_tests.py + run_kernel_tests.sh with V's kit
@@ -169,17 +171,24 @@ serve_alone() { # serve_alone VARIANT
   step "serve $1"; "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" | tail -2
   curl -sf "$url/v1/models" >/dev/null
 }
-llama_up() {
+LSPEC=""
+llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n-max overridden), restarted on change
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
-  curl -sf "$lurl/health" >/dev/null 2>&1 && return 0
+  local spec; spec=$(q "print((e.get('llama_spec') or '').replace('{drafter}', '$drafter'))")
+  [ -n "${1:-}" ] && spec=$(echo "$spec" | sed -E "s/--spec-draft-n-max [0-9]+/--spec-draft-n-max $1/")
+  [ "$spec" = "$LSPEC" ] && curl -sf "$lurl/health" >/dev/null 2>&1 && return 0
+  "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
   LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag
-  export LLAMA_SPEC=$(q "print((e.get('llama_spec') or '').replace('{drafter}', '$drafter'))")
+  export LLAMA_SPEC=$spec; LSPEC=$spec
   step "llama.cpp $tag: $LLAMA_SPEC"
   "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 4 65536 unified | tail -1
 }
+TH=$(q "print(j.get('thinking') or 'off')")   # chat_template_kwargs.enable_thinking sent to both engines
+echo "thinking: $TH (sent to both engines)"
 declare -A res
 for s in $steps; do
   IFS=: read -r kind p1 p2 p3 <<< "$s"
+  [ "${p2:-}" = - ] && p2=""
   case $kind in
     ab)
       for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
@@ -188,41 +197,49 @@ for s in $steps; do
       nv=${#ms[@]}; abmem=$(( 11000000000 * nv + 4000000000 ))
       step "ab: one loom-serve with $nv packages ($abmem bytes)"
       "$SV/serve.sh" abserve "$PORT" amdgpu "$abmem" "${ms[@]}" | tail -2
-      "$T" "$here/.github/scripts/ab_decode.py" "$url" "${ids[@]}" --rounds "$p1" ${p2:+--think "$p2"} --log "$out/ab.jsonl" 2>&1 | tee "$out/ab${p2:+_$p2}.log"
-      res[$s]=$(grep -c SUMMARY "$out/ab${p2:+_$p2}.log")" variants measured"
+      "$T" "$here/.github/scripts/ab_decode.py" "$url" "${ids[@]}" --rounds "$p1" --think "${p2:-$TH}" --log "$out/ab.jsonl" 2>&1 | tee "$out/ab.log"
+      res[$s]=$(grep -c SUMMARY "$out/ab.log")" variants measured"
       "$SV/stop.sh" abserve >/dev/null 2>&1;;
     perf)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
-      step "perf $p1 x $p2 ${p3:-}"
+      step "perf $p1 x $p2 ${p3:-} (thinking $TH)"
       for i in $(seq 1 "$p2"); do
-        (cd "$out" && "$T" "$B/perf.py" "$url" "$p1" --model "$cardid" --no-campaign --log "perf_$p1.jsonl" ${p3:+--long} | tail -1)
+        (cd "$out" && "$T" "$B/perf.py" "$url" "$p1" --model "$cardid" --no-campaign --thinking "$TH" --log "perf_$p1.jsonl" ${p3:+--long} | tail -1)
       done
-      "$T" "$here/.github/scripts/ab_decode.py" "$url" "$cardid" --rounds 2 --log "$out/tps_$p1.jsonl" | grep SUMMARY
+      "$T" "$here/.github/scripts/ab_decode.py" "$url" "$cardid" --rounds 2 --think "$TH" --log "$out/tps_$p1.jsonl" | grep SUMMARY
       res[$s]=$("$T" -c "
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
-print('$p1', k, [x.get(k) for x in r], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
+print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "c4 $p1"
-      for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$url" 4 --model "$cardid" | tail -1 | tee -a "c4_$p1.txt"); done
+      for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$url" 4 --model "$cardid" --thinking "$TH" | tail -1 | tee -a "c4_$p1.txt"); done
       res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_$p1.txt')))");;
-    llama)
-      llama_up || { res[$s]=ERROR; continue; }
-      step "llama.cpp perf x $p1 ${p2:-}"
+    llama)   # llama:N[:long|-][:N_MAX]
+      llama_up "${p3:-}" || { res[$s]=ERROR; continue; }
+      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); lf=perf_llamacpp_n$nm.jsonl
+      step "llama.cpp n-max $nm perf x $p1 ${p2:-} (thinking $TH)"
       for i in $(seq 1 "$p1"); do
-        (cd "$out" && "$T" "$B/perf.py" "$lurl" llamacpp --kind llama --no-campaign --log perf_llamacpp.jsonl ${p2:+--long} | tail -1)
+        (cd "$out" && "$T" "$B/perf.py" "$lurl" "llamacpp-n$nm" --kind llama --no-campaign --thinking "$TH" --log "$lf" ${p2:+--long} | tail -1)
       done
-      "$T" "$here/.github/scripts/llama_decode.py" "$lurl" 2 --log "$out/tps_llamacpp.jsonl"
+      [ -z "${p2:-}" ] && "$T" "$here/.github/scripts/llama_decode.py" "$lurl" 2 --think "$TH" --log "$out/tps_llamacpp_n$nm.jsonl"
       res[$s]=$("$T" -c "
-import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_llamacpp.jsonl')]
+import json,statistics as st; r=[json.loads(l) for l in open('$out/$lf')]
 k='decode_tps_32k' if '${p2:-}' else 'decode_tps'
-print('llamacpp', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
-    llamac4)
+print('llamacpp n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
+    llamac4)   # llamac4[:N_MAX]
+      llama_up "${p1:-}" || { res[$s]=ERROR; continue; }
+      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+")
+      step "llama.cpp n-max $nm c4"
+      for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$lurl" 4 --thinking "$TH" | tail -1 | tee -a "c4_llamacpp_n$nm.txt"); done
+      res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp n-max $nm c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_llamacpp_n$nm.txt')))");;
+    textmatch)   # textmatch:V: first 50 generated tokens of perf.py's prompts, Loom V then llama.cpp (one at a time)
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      "$T" "$B/text_match.py" save "$url" "$out/text_$p1.json" --model "$cardid" --tokenizer "$card/tokenizer.json" --thinking "$TH" | tail -1
       llama_up || { res[$s]=ERROR; continue; }
-      step "llama.cpp c4"
-      for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$lurl" 4 | tail -1 | tee -a c4_llamacpp.txt); done
-      res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_llamacpp.txt')))");;
+      "$T" "$B/text_match.py" compare "$lurl" "$out/text_$p1.json" --tokenizer "$card/tokenizer.json" --thinking "$TH" | tee "$out/textmatch_$p1.log"
+      res[$s]=$(grep TEXT_MATCH "$out/textmatch_$p1.log" | cut -c1-200);;
     consistency)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       # as gates.sh runs it: --pkg and a llama.cpp reference (no drafting) to judge any divergence as a near-tie

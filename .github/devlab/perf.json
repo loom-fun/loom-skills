@@ -1,5 +1,5 @@
 {
- "_comment": "Bolt-E4B drafted short-prompt decode vs llama.cpp b1368 (same BF16 DFlash drafter): final build (load-time Q8_0 drafter + Q4_0 proposal head, depth 3) vs main vs llama.cpp on one runner, plus verification.",
+ "_comment": "Bolt-E4B drafted decode vs llama.cpp b1368 with matched thinking settings (perf.py --thinking sent to both engines), n-max 7 and 3.",
  "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
  "memory_bytes": 34000000000,
  "kit": "gemma4",
@@ -7,7 +7,8 @@
  "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
  "jobs": [
   {
-   "name": "final",
+   "name": "think-off",
+   "thinking": "off",
    "variants": [
     {
      "name": "new",
@@ -20,50 +21,39 @@
     }
    ],
    "steps": [
-    "ab:2",
+    "textmatch:new",
     "perf:new:4",
-    "perf:main:4",
-    "llama:4",
     "perf:new:1:long",
-    "perf:main:1:long",
-    "llama:1:long",
     "c4:new",
-    "c4:main",
-    "llamac4"
+    "llama:4:-:7",
+    "llama:4:-:3",
+    "llama:1:long:7",
+    "llama:1:long:3",
+    "llamac4:7",
+    "llamac4:3",
+    "perf:main:2"
    ]
   },
   {
-   "name": "final-b",
+   "name": "think-on",
+   "thinking": "on",
    "variants": [
     {
      "name": "new",
      "build": {}
-    },
-    {
-     "name": "main",
-     "ref": "origin/main",
-     "build": {}
     }
    ],
    "steps": [
+    "textmatch:new",
     "perf:new:4",
-    "perf:main:2",
-    "llama:4"
-   ]
-  },
-  {
-   "name": "verify",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:new",
-    "consistency:new:10",
-    "determinism:new:1:10",
-    "gates:new:quick"
+    "perf:new:1:long",
+    "c4:new",
+    "llama:4:-:7",
+    "llama:4:-:3",
+    "llama:1:long:7",
+    "llama:1:long:3",
+    "llamac4:7",
+    "llamac4:3"
    ]
   }
  ]
