@@ -26,3 +26,22 @@ def pick_r(n, K, TG):
     while R > 1 and n // R < target and n % (R // 2) == 0:
         R //= 2
     return R
+
+
+def iq_r(n, K, TG, sw=False):
+    """Rows per workgroup of the int8-activation (ACT_Q8) matvecs. A row's arithmetic does not depend on R (explicit
+    ops, explicit butterfly), so R is free per variant without changing any result:
+    - 8+ tokens: 16 rows (fewer activation reloads; Qwen3.8-27B 17408x5120 t16: 395 -> 368 us).
+    - 16 tokens, gate/up (swiglu) or K >= 8192: 32 rows. Each workgroup loads its 16 tokens' int8 activations for the
+      whole K once; 32 rows halve that per weight row. Muse-Glimmer t16 (interleaved): gate/up 6656x19968 -5.5 %
+      (with BFLY_PERM), down 19968x6656 -3.7 %; K = 4096 / 6656 single-weight projections measured flat or +4 %.
+      MV_Q8_R32=0 turns it off."""
+    R = pick_r(n, K, TG)
+    if TG >= 8 and n and n % 16 == 0 and os.environ.get("MV_Q8_R16", "1") == "1":
+        R = 16
+    waves = (K // 32 + 31) // 32
+    lds = waves * 32 * TG * (2 if sw else 1) * 4   # the workgroup's F32 partials (waves x R x TG per weight)
+    if (TG >= 16 and n and n % 32 == 0 and (sw or K >= 8192) and K // 32 <= 1024 and lds <= 48 * 1024
+            and os.environ.get("MV_Q8_R32", "1") == "1"):
+        R = 32
+    return R

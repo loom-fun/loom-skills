@@ -751,14 +751,41 @@ def bfly_setup(TG):
     return "\n".join(t)
 
 
-def bfly_store(vals, p, store):
+# BFLY_PERM: an int8 gate/up (swiglu) matvec of 8+ tokens has each lane hold token j ^ %bt_idx in slot j (bfly_slot),
+# so every butterfly step keeps slots [0, h) and sends slots [h, 2h) without the two selects per pair (two weights
+# per row: 60 of ~880 instructions per row at 16 tokens). The per-token pairing tree is unchanged, so results are
+# bit-identical. Muse-Glimmer gate/up 6656x19968 t16: -3.5 % at 16 rows, -5.5 % with 32 (iq_r). Single-weight
+# projections keep plain slots: the permuted activation loads are uncoalesced, and that cost more than the selects
+# (down 19968x6656 t16 +9 %). MV_BFLY_PERM=0 turns it off.
+BFLY_PERM = os.environ.get("MV_BFLY_PERM", "1") == "1"
+
+
+def bfly_slot(j, TG, base, name, perm):
+    """IR for %{name}: token index base + j, or base + (j ^ %bt_idx) with perm (BFLY_PERM)."""
+    if not perm or TG == 1:
+        return f"  %tj{j}_off = index.constant {j} : index\n  %{name} = index.add {base}, %tj{j}_off : index"
+    return (("  %bt_i32 = index.cast %bt_idx : index to i32\n" if j == 0 else "")
+            + f"  %{name}_c = scalar.constant {j} : i32\n  %{name}_x = scalar.xori %{name}_c, %bt_i32 : i32\n"
+            f"  %{name}_o = index.cast %{name}_x : i32 to index\n  %{name} = index.add {base}, %{name}_o : index")
+
+
+def bfly_store(vals, p, store, presorted=False):
     """Wave sums of the lanes' per-token partials `vals` (TG of them), stored by store(value): a recursive-halving
     butterfly (each step a lane keeps half of its tokens and adds its xor-partner's half) while several tokens remain,
     then plain xor steps. Every token's sum is the same xor-16/8/4/2/1 pairing tree for any TG (and for TG = 1), so
     multi-token variants round exactly like the 1-token kernel, with ~TG + 5 shuffles instead of 5 TG."""
     t, T = [], len(vals)
     for d in BFLY:
-        if T > 1:
+        if T > 1 and presorted:
+            h = T // 2
+            nv = []
+            for i in range(h):
+                q = f"%{p}_{d}_{i}"
+                t.append(f"""    {q}r, {q}u = kernel.subgroup.shuffle<xor> {vals[i + h]}, %bd{d}, %bw32 : f32, i32, i32
+    {q} = scalar.addf {vals[i]}, {q}r : f32""")
+                nv.append(q)
+            vals, T = nv, h
+        elif T > 1:
             h = T // 2
             nv = []
             for i in range(h):
@@ -798,6 +825,7 @@ def mv(fmt, K, R=16, TG=1, swiglu=False, suffix="", iq=False):
     CHK = min(TG, int(os.environ.get("MV_CHUNK", "16"))) if iq else TG   # chunks of 8 measured no faster
     NCH = TG // CHK
     assert NCH * CHK == TG
+    PERM = iq and swiglu and BFLY_PERM and CHK >= 8
     wargs = "%w: buffer, %w2: buffer" if swiglu else "%w: buffer"
     L = [f"""
 kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
@@ -878,8 +906,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   }} else {{
     scf.yield %zero32 : vector<32xf32>
   }}
-  %xs{j} = vector.reduce<addf> %x{j}, %zero_f : vector<32xf32>, f32""" if not iq else f"""  %tj{j}_off = index.constant {j} : index
-  %tok{j}_raw = index.add %token0, %tj{j}_off : index
+  %xs{j} = vector.reduce<addf> %x{j}, %zero_f : vector<32xf32>, f32""" if not iq else bfly_slot(j, CHK, "%token0", f"tok{j}_raw", PERM) + f"""
   %live{j} = index.cmp ult, %tok{j}_raw, %tokens : index
   %use{j} = scalar.andi %live{j}, %ok : i1
   %q{j}, %da{j}, %xs{j} = scf.if %use{j} -> (vector<32xi8>, f32, f32) {{
@@ -908,7 +935,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
             for j in range(CHK):
                 L.append(iq_dot(fmt, wi, j, f"%pa{wi}_{j}"))
             L.append(bfly_store([f"%pa{wi}_{j}" for j in range(CHK)], f"b{wi}",
-                                lambda v: f"view.store {v}, %pv[{wi}, %wave, %rb, %bt_store] : f32, view<{nw}x{waves}x{R}x{TG}xf32>"))
+                                lambda v: f"view.store {v}, %pv[{wi}, %wave, %rb, %bt_store] : f32, view<{nw}x{waves}x{R}x{TG}xf32>", presorted=PERM))
             continue
         if fmt == "q4_k":
             # codes once per row; per token scale * dot(codes, x) - minimum * sum(x)
@@ -2595,6 +2622,38 @@ kernel.def export("{name}") @{name}(%spans: index) {{
   %within = index.rem %g, %cgpb : index
   %ba = index.scale %blk, %block_bytes : index, offset -> offset
   %first_row = index.mul %chunk, %rows : index"""]
+    # BFLY_PERM for the 16-span int8 head: slot j holds span j ^ %bt_idx (its token and liveness looked up per lane,
+    # once per workgroup), so the butterfly needs no selects (see bfly_slot); the tree is unchanged. Muse-Glimmer
+    # 202048 x 6656 Q6_K, 12 and 16 spans: 9.0 -> 8.5 ms; 8 spans flat. HEAD_BFLY_PERM=0 turns it off.
+    HP = iq and BFLY_PERM and TG >= 16 and os.environ.get("HEAD_BFLY_PERM", "1") == "1"
+    if HP:
+        L.append(bfly_setup(TG))
+
+    def head_perm_span(j):
+        return "\n" + bfly_slot(j, TG, "%span0", f"spanp{j}", True) + f"""
+  %in_sp{j} = index.cmp ult, %spanp{j}, %spans : index
+  %in_cp{j} = index.cmp ult, %spanp{j}, %count : index
+  %inp{j} = scalar.andi %in_sp{j}, %in_cp{j} : i1
+  %livep{j}, %tokenp{j} = scf.if %inp{j} -> (i1, index) {{
+    %sp = index.assume %spanp{j} [lt(%spanp{j}, %spans)] : index
+    %flags = view.load %packets[%sp, 6] : view<[%spans]x9xi32> -> i32
+    %bits = scalar.andi %flags, %c1_i32 : i32
+    %selected = scalar.cmpi ne, %bits, %c0_i32 : i32
+    %length32 = view.load %packets[%sp, 0] : view<[%spans]x9xi32> -> i32
+    %input32 = view.load %packets[%sp, 4] : view<[%spans]x9xi32> -> i32
+    %last32 = scalar.addi %input32, %length32 : i32
+    %tok32 = scalar.subi %last32, %c1_i32 : i32
+    %tok_low = scalar.maxsi %tok32, %c0_i32 : i32
+    %tok_bound = scalar.assume %tok_low [range(%tok_low, 0, 8191)] : i32
+    %tok_value = index.cast %tok_bound : i32 to index
+    %one_l = index.constant 1 : index
+    %tokens_last = index.sub %tokens, %one_l : index
+    %tok_safe = index.min %tok_value, %tokens_last : index
+    scf.yield %selected, %tok_safe : i1, index
+  }} else {{
+    scf.yield %false, %c0 : i1, index
+  }}
+  %usep{j} = scalar.andi %livep{j}, %ok : i1"""
     for j in range(TG):
         L.append(f"""  %sj{j} = index.constant {j} : index
   %span{j}_raw = index.add %span0, %sj{j} : index
@@ -2620,16 +2679,16 @@ kernel.def export("{name}") @{name}(%spans: index) {{
   }} else {{
     scf.yield %false, %c0 : i1, index
   }}
-  %use{j} = scalar.andi %live{j}, %ok : i1""" + (f"""
+  %use{j} = scalar.andi %live{j}, %ok : i1""" + (head_perm_span(j) if HP else "") + (f"""
   %x{j} = scf.if %use{j} -> (vector<32xf32>) {{
     %tk = index.assume %token{j} [lt(%token{j}, %tokens)] : index
     %v = vector.load %x_view[%tk, %g, %c0] : view<[%tokens]x{groups}x32xf32> -> vector<32xf32>
     scf.yield %v : vector<32xf32>
   }} else {{
     scf.yield %zero32 : vector<32xf32>
-  }}""" if not iq else "\n" + iq_load(j, f"%use{j}", f"%token{j}", groups)))
+  }}""" if not iq else "\n" + (iq_load(j, f"%usep{j}", f"%tokenp{j}", groups) if HP else iq_load(j, f"%use{j}", f"%token{j}", groups))))
     if iq:
-        L.append(head_iq_body(TG, fmt, R, waves, rb))
+        L.append(head_iq_body(TG, fmt, R, waves, rb, HP))
         return "\n".join(L)
     L.append(f"""  %part_bytes = index.constant {waves * R * TG * 4} : offset
   %parts = buffer.alloca<workgroup> align(16) %part_bytes : buffer
@@ -2696,7 +2755,7 @@ kernel.def export("{name}") @{name}(%spans: index) {{
 
 
 
-def head_iq_body(TG, fmt, R, waves, rb):
+def head_iq_body(TG, fmt, R, waves, rb, perm=False):
     """Row loop and argmax of the int8 head (ACT_Q8): the 128-row chunk runs in sub-blocks of RB rows so the
     workgroup's partials (waves x RB x TG F32) stay ~14 KB at any TG (a 128 x 8-span buffer, 28 KB, held one or two
     workgroups per CU: Muse-Glimmer 202048 x 6656 Q6_K, 8 spans 10.9 ms vs 5.1 for 1 span). Lane j < TG carries span
@@ -2707,7 +2766,7 @@ def head_iq_body(TG, fmt, R, waves, rb):
     NSB = R // RB
     assert NSB * RB == R
     sel_live, sel_span = "%false", "%c0"
-    t = [bfly_setup(TG), f"""  %part_bytes = index.constant {waves * RB * TG * 4} : offset
+    t = ["" if perm else bfly_setup(TG), f"""  %part_bytes = index.constant {waves * RB * TG * 4} : offset
   %parts = buffer.alloca<workgroup> align(16) %part_bytes : buffer
   %pv = buffer.view %parts[%zero] : buffer -> view<{waves}x{RB}x{TG}xf32>
   %rbk = index.constant {RB} : index
@@ -2740,7 +2799,7 @@ def head_iq_body(TG, fmt, R, waves, rb):
 """ + iq_decode(fmt, 0, "w", "%load", "%o", "%within"))
     t.append("\n".join(iq_dot(fmt, 0, j, f"%pa{j}") for j in range(TG)))
     t.append(bfly_store([f"%pa{j}" for j in range(TG)], "hb",
-                        lambda v: f"view.store {v}, %pv[%wave, %rb, %bt_idx] : f32, view<{waves}x{RB}x{TG}xf32>"))
+                        lambda v: f"view.store {v}, %pv[%wave, %rb, %bt_idx] : f32, view<{waves}x{RB}x{TG}xf32>", presorted=perm))
     t.append(f"""  }}
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %nbv, %nbi = scf.if %my_live -> (f32, i32) {{
@@ -2789,7 +2848,7 @@ USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
 NVAL = {"%nH": H, "%nFF": FF, **({} if FF_UNIFORM else {f"%nFF{w}": w for w in set(FFL)}), "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D}
 if GDN:
     NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
-from mv_rows import pick_r  # noqa: E402  (shared with make_kernel_tests.py)
+from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
 
 
 def mv_name(fmt, kval, sw, n, TG, iq=False):
@@ -2798,9 +2857,8 @@ def mv_name(fmt, kval, sw, n, TG, iq=False):
     base = f"g_mv_{fmt}_k{kval}" + ("_swiglu" if sw else "") + (f"_t{TG}" if TG > 1 else "")
     if iq:
         # int8 variants: a row's arithmetic does not depend on R (explicit ops, explicit butterfly), so the 8/16-token
-        # kernels take 16 rows per workgroup (fewer activation reloads; Qwen3.8-27B 17408x5120 t16: 395 -> 368 us)
-        if TG >= 8 and nv and nv % 16 == 0 and os.environ.get("MV_Q8_R16", "1") == "1":
-            R = 16
+        # kernels take more rows per workgroup (fewer activation reloads; mv_rows.iq_r)
+        R = iq_r(nv, kval, TG, sw)
         USED_MVQ.add((fmt, kval, sw, R, TG))
         return base + "_q8" + (f"_r{R}" if R != 16 else "")
     if R == 16:
