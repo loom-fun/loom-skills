@@ -69,6 +69,17 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - No logits buffer is ever written, which saves V × 4 bytes per token plus a pass.
 - This is only valid for greedy decoding. For sampling you'd need top-k partials.
 
+### Drafter bytes per step: load-time preparation (single-stream DFlash)
+
+- **Count the drafting step's bytes beyond the trunk**: the drafter's weights and a second full head pass for the
+  proposals (Bolt-E4B: 0.71 GB head of ~4.4 GB per step). Doubling the head launches attributes them exactly
+  (+2.5-2.7 ms each); doubling small drafter matvecs measures nothing (they re-read from the 32 MB cache).
+- **Weight policies convert at load, the card keeps the published files** (`starter/draft/prep_weights.py`): a BF16
+  drafter becomes Q8_0 (int8-activation matvecs, half the bytes) and the proposals read a Q4_0 copy of the head
+  (verification keeps the exact head, so outputs cannot change). Bolt-E4B depth 3 on DevLab: 82.6 -> 89.5 (Q8_0
+  drafter) -> 98.0 tok/s (Q4_0 proposal head), +23 % over llama.cpp b1368's own drafting (79.9).
+- A multi-model loom-serve is fine for A/B ratios but not absolute numbers (~2.5 ms more per step than served alone).
+
 ### Many-stream drafted decode (4 streams x DFlash depth 3)
 - **Attribute the epoch, not the token.** Under drafting, a streamed event is one epoch. Measure ms per event and
   tokens per event separately, so a doubled kernel that changes the drafts can't pass for a slower one.

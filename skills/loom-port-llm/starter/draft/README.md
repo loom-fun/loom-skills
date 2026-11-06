@@ -54,8 +54,17 @@ Safetensors-only drafters are not converted.
    4 bytes). The draft cache shares the target pool's page ids, so drafting covers the whole context, history
    reuse and checkpoints with no extra state.
 
+**DFlash proposals read a Q4_0 copy of the head.** Proposing runs the target's head over every proposed position:
+a second full head pass per step (Nemotron-3.5-Bolt-E4B: 262144 x 2560 Q8_0, 0.71 GB, ~2.5 ms of a ~25 ms step).
+When the head is Q8_0/BF16/F16 and int8 activations are on, `prep_weights.py` gives the propose stage one more
+parameter root, the target checkpoint through `head_weights.loom`, which converts the head to Q4_0 once at load
+(llama.cpp's quantize_row_q4_0; +0.38 GB) for `g_head_mv*_q8_p40`. Verification still runs the target's own head, so
+the output does not change; only which drafts are proposed can (Bolt-E4B: acceptance 36 % -> 39 %, step 23.5 -> 22.1 ms
+on DevLab). `PROPOSE_HEAD=off` keeps the target's head. Kernel test `propose_head_q4`.
+
 Files: `gen_draft.py` (verify, acceptance, GDN capture/replay, the generic replay hook, MTP), `gen_dflash.py`
-(DFlash/DFlash2), `gen_assist.py` (Gemma-4 assistant), `gen_ngram.py` (prompt lookup), `build_draft.py` (prepare/storage/control patches; ports without
+(DFlash/DFlash2), `gen_assist.py` (Gemma-4 assistant), `gen_ngram.py` (prompt lookup), `prep_weights.py` (load-time weight
+preparation: Q8_0 drafter, Q4_0 proposal head), `build_draft.py` (prepare/storage/control patches; ports without
 a drafter are byte-identical to before), `find_drafter.py`, `tune.py`.
 
 ## Recurrent layers other than gated delta-net (kits)
@@ -157,6 +166,25 @@ c4_steady three runs; llama.cpp b1368 drafting from the same BF16 GGUF):
 - Depth 3 is the package setting: same short decode as depth 7 on perf.py's essay, better with KV in use and with 4
   streams (verification of 4 x 8 tokens takes the GEMM). Four drafting streams still trail no drafting (197 vs 211):
   a 4 ms model step leaves little to win at 39 % acceptance.
+- **Now (PR #42): the BF16 drafter is converted to Q8_0 at load and the proposals read a Q4_0 head copy** (both through
+  weight policies, `prep_weights.py`; the card still references NVIDIA's BF16 file). DevLab Strix Halo, one runner,
+  perf.py means of 4 runs, c4 median of 3, llama.cpp b1368 with the same BF16 drafter at n-max 7:
+
+  | | decode | @2k | @32k | prefill 1k / 2k / 8k / 32k | c4 |
+  |---|---|---|---|---|---|
+  | Loom, depth 3 (this package) | **98.0** | **81.4** | **63.6** | 2310 / 2430 / 2073 / 1017 | **223.9** |
+  | Loom main (BF16 drafter as published), depth 3 | 82.6 | 70.6 | 53.4 | 2289 / 2416 / 2078 / 1013 | 189.5 |
+  | llama.cpp, DFlash n-max 7 | 79.9 | 60.4 | 37.7 | 1407 / 1400 / 1625 / 782 | 186.6 |
+
+  Per step on the essay (perf.py's decode request): main 25.1 ms and 2.09 tokens; Q8_0 drafter 23.5 ms (same
+  tokens); plus the Q4_0 proposal head 22.1 ms and 2.16 tokens. llama.cpp takes ~48 ms per step for 3.5-3.9 tokens
+  (it decodes a different text: llama-server turns thinking on by default, the package follows the template's
+  default off). llama.cpp's own decode is bimodal across runs on DevLab (~97 on the first request of a fresh
+  server, 73-81 after), so compare means of several runs.
+- Tried (Bolt, DevLab, no gain): depth 7 (93-94 tok/s short, but @2k 62-70 vs 81: 8-token verification costs ~4.5 ms
+  more per step than 4 for +0.4 accepted tokens on this essay); fewer rows per workgroup for the 8/16-token int8
+  matvecs on small outputs (MV_WG8 128-1024: flat to -5 %); the drafter's own widths in the R picker (flat); a Q4_0
+  drafter (+0.5 %, not worth its own kernel path).
 - Tried: proposals of 5+ tokens on the BF16 WMMA GEMM instead of the 4-token matvec (one weight pass): depth 7
   146.3 -> 137.2 tok/s, slower (64-row padded tiles for 8 tokens). Drafter FFN with SiLU instead of the gemma4 kit's
   GELU (llama.cpp's dflash graph uses SiLU unless `hidden_act` says otherwise): no change (145.0 vs 145.7).
