@@ -8,7 +8,7 @@
 # EXPERIMENT.json:
 #   {"card": "loom-fun/<repo>", "memory_bytes": N, "kit": "gemma4" | null, "llamacpp": "b1368",
 #    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF)
-#    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
+#    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}   (a job may override card/kit/memory_bytes/llamacpp)
 # Variant V: {"name": "card"}                                    the card's own programs, as published
 #            {"name": "x", "build": {"ENV": "1"}, "build_args": [...], "ref": "origin/main",
 #             "execution": {"draft_depth": 3}, "double": ["llm_verify:g_head_mv", "*:g_mv_q8_0"]}
@@ -35,8 +35,8 @@ PORT=${LOOM_PORT:-8161}; LLAMA_PORT=${LLAMA_PORT:-8131}; url=http://127.0.0.1:$P
 t0=$(date +%s); step() { echo "== $* ($(date +%T), +$(( $(date +%s) - t0 ))s)"; }
 q() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); $1"; }
 qv() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); v=next(v for v in j['variants'] if v['name']=='$1'); $2"; }
-repo=$(q "print(e['card'])"); mem=$(q "print(j.get('memory_bytes') or e['memory_bytes'])"); kit=$(q "print(e.get('kit') or '-')")
-tag=$(q "print(e.get('llamacpp') or '-')"); variants=$(q "print(' '.join(v['name'] for v in j['variants']))")
+repo=$(q "print(j.get('card') or e['card'])"); mem=$(q "print(j.get('memory_bytes') or e['memory_bytes'])")
+kit=$(q "print((j['kit'] if 'kit' in j else e.get('kit')) or '-')"); tag=$(q "print(j.get('llamacpp') or e.get('llamacpp') or '-')"); variants=$(q "print(' '.join(v['name'] for v in j['variants']))")
 steps=$(q "print(' '.join(j['steps']))")
 echo "job $job: variants $variants; steps $steps; runner $(hostname)"
 hostname > "$out/runner.txt"

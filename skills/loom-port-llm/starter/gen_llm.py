@@ -3732,6 +3732,8 @@ if __name__ == "__main__":
             import prep_weights
             DPREP = gen_dflash.prep_tensors(dcfg["tensors"])
             DT = dcfg["tensors"] = gen_dflash.apply_prep(dcfg["tensors"], DPREP)
+            if any(d == "q4_0" for _, d, _ in DPREP.values()):   # DRAFTER_FMT=q4_0: its int8-activation matvecs
+                IQ_FMTS.add("q4_0")
             # the drafter's own widths, so its matvecs pick rows per workgroup like the trunk's (mv_rows)
             if os.environ.get("DRAFT_NVAL", "1") == "1":
                 NVAL.update(gen_dflash.widths(dcfg))

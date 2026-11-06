@@ -1391,7 +1391,7 @@ def prep_tensors(tensors):
     out = {}
     for n, t in tensors.items():
         if t["type"] in PREP_SRC and len(t["shape"]) == 2 and t["shape"][0] % 32 == 0:
-            out[n] = (t["type"], "q8_0", t["shape"][0] * t["shape"][1] // 32)
+            out[n] = (t["type"], os.environ.get("DRAFTER_FMT", "q8_0"), t["shape"][0] * t["shape"][1] // 32)
     return out
 
 

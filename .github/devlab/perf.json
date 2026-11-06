@@ -1,27 +1,104 @@
 {
- "_comment": "Bolt-E4B drafted short-prompt decode vs llama.cpp b1368 (same BF16 DFlash drafter). Round 2: Q4_0 proposal head.",
+ "_comment": "Bolt-E4B drafted short-prompt decode vs llama.cpp b1368 (same BF16 DFlash drafter). Round 2: Q4_0 proposal head, Q4_0 drafter.",
  "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
  "memory_bytes": 34000000000,
  "kit": "gemma4",
  "llamacpp": "b1368",
  "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
  "jobs": [
-  {"name": "q4h",
+  {
+   "name": "q4h",
    "variants": [
-    {"name": "q8h3", "build": {"PROPOSE_HEAD": "off"}, "build_args": ["--draft-depth", "3"]},
-    {"name": "q4h3", "build": {}, "build_args": ["--draft-depth", "3"]},
-    {"name": "q4h7", "build": {}, "build_args": ["--draft-depth", "7"]}
+    {
+     "name": "q8h3",
+     "build": {
+      "PROPOSE_HEAD": "off"
+     },
+     "build_args": [
+      "--draft-depth",
+      "3"
+     ]
+    },
+    {
+     "name": "q4h3",
+     "build": {},
+     "build_args": [
+      "--draft-depth",
+      "3"
+     ]
+    },
+    {
+     "name": "q4h7",
+     "build": {},
+     "build_args": [
+      "--draft-depth",
+      "7"
+     ]
+    }
    ],
-   "steps": ["ab:2", "perf:q8h3:2", "perf:q4h3:2", "perf:q4h7:2", "llama:2"]},
-  {"name": "q4h-b",
+   "steps": [
+    "ab:2",
+    "perf:q8h3:2",
+    "perf:q4h3:2",
+    "perf:q4h7:2",
+    "llama:2"
+   ]
+  },
+  {
+   "name": "q4d",
    "variants": [
-    {"name": "q8h3", "build": {"PROPOSE_HEAD": "off"}, "build_args": ["--draft-depth", "3"]},
-    {"name": "q4h3", "build": {}, "build_args": ["--draft-depth", "3"]},
-    {"name": "q4h3n0", "build": {"DRAFT_NVAL": "0"}, "build_args": ["--draft-depth", "3"]}
+    {
+     "name": "q4h3",
+     "build": {},
+     "build_args": [
+      "--draft-depth",
+      "3"
+     ]
+    },
+    {
+     "name": "q4d3",
+     "build": {
+      "DRAFTER_FMT": "q4_0"
+     },
+     "build_args": [
+      "--draft-depth",
+      "3"
+     ]
+    },
+    {
+     "name": "q4d7",
+     "build": {
+      "DRAFTER_FMT": "q4_0"
+     },
+     "build_args": [
+      "--draft-depth",
+      "7"
+     ]
+    }
    ],
-   "steps": ["ab:3", "perf:q4h3:2", "perf:q4h3n0:2", "perf:q8h3:2", "llama:2"]},
-  {"name": "ktest",
-   "variants": [{"name": "q4h3", "build": {}, "build_args": ["--draft-depth", "3"]}],
-   "steps": ["ktest:q4h3"]}
+   "steps": [
+    "ab:2",
+    "perf:q4d3:2",
+    "perf:q4h3:2",
+    "perf:q4d7:2",
+    "llama:2"
+   ]
+  },
+  {
+   "name": "ktest",
+   "variants": [
+    {
+     "name": "q4h3",
+     "build": {},
+     "build_args": [
+      "--draft-depth",
+      "3"
+     ]
+    }
+   ],
+   "steps": [
+    "ktest:q4h3"
+   ]
+  }
  ]
 }

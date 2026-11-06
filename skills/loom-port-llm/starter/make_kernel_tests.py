@@ -339,52 +339,6 @@ if HEAD_Q8:
 """ + hl("g_head_mv_q8", "1") + "".join(hl(k, tag) for k, tag in variants) + "".join(
             f"  check.expect.close actual(%l{tag}) expected(%l1) atol(0.0) rtol(0.0) nan(different) : tensor<{S * CH * 128}xf32>\n"
             f"  check.expect.equal actual(%p{tag}) expected(%p1) : tensor<{S * CH * 2}xi32>\n" for _, tag in variants) + "  check.return\n}\n")
-# 3a''. DFlash proposals' head (draft/prep_weights.py, PROPOSE_HEAD=q4_0): g_prep_<fmt>_q4_0 converts the head at load,
-# then the int8 head runs over the Q4_0 copy. Logits vs numpy on llama.cpp's quantize_row_q4_0 of the same values (a
-# code at an exact rounding boundary may differ: tolerance), and the 4/8/16-span variants bit-identical to 1 span.
-HEAD_FMT = T[head_name].tensor_type.name.lower()
-if (HEAD_Q8 and HEAD_FMT in ("q8_0", "bf16", "f16") and H % 32 == 0 and (cfg.get("drafter") or {}).get("gguf")
-        and os.environ.get("PROPOSE_HEAD", "q4_0") == "q4_0"):
-    blk = Wh.astype(np.float32).reshape(-1, 32)
-    m = blk[np.arange(len(blk)), np.abs(blk).argmax(1)]
-    d4 = m / np.float32(-8)
-    id4 = np.divide(np.float32(1), d4, out=np.zeros_like(d4), where=d4 != 0)
-    c4 = np.minimum(np.float32(15), np.floor(blk * id4[:, None] + np.float32(8.5)))
-    W4 = ((c4 - 8) * d4.astype(np.float16).astype(np.float32)[:, None]).reshape(Wh.shape)
-    del blk, c4
-    S, nb = 8, Wh.size // 32
-    hm = np.zeros(4 + 9 * S, np.int32); hm[0] = S
-    for j in range(S):
-        hm[4 + 9 * j + 0] = 1; hm[4 + 9 * j + 4] = j; hm[4 + 9 * j + 6] = 1
-    hp = rng.standard_normal((S, H)).astype(np.float32)
-    lp = (q8_ref(hp) @ W4.T).astype(np.float32)   # S x V
-    del W4
-    CHP = CH * 128
-    lpad = np.full((S, CHP), -3.0e38, np.float32); lpad[:, :cfg["vocab"]] = lp
-    save("ph_meta", hm); save("ph_h", hp); save("ph_l", lpad.reshape(-1))
-    mt, ht, w4t = f"tensor<{hm.size}xi32>", f"tensor<{S}x{H}xf32>", f"tensor<{nb * 18}xi8>"
-    tol = 2.0e-3 * float(np.abs(lp).max())
-    def phl(k, tag):
-        return (f"  %p{tag} = check.generate.fill value(0) : tensor<{S * CH * 2}xi32>\n  %l{tag} = check.generate.fill value(0.0) : tensor<{S * CHP}xf32>\n"
-                f"  kernel.launch @{k}[%spans](%spans, %t, %meta, %hq, %w4, %p{tag}, %l{tag}) : [index](index, index, {mt}, tensor<{S}x{2 * H}xi8>, {w4t}, tensor<{S * CH * 2}xi32>, tensor<{S * CHP}xf32>)\n")
-    pv = [("g_head_mv_t4_q8_p40", "4"), ("g_head_mv_t8_q8_p40", "8"), ("g_head_mv_t16_q8_p40", "16")]
-    cases.append(f"""check.case public @propose_head_q4 {{
-  %spans = check.literal value({S}) : index
-  %t = check.literal value({S}) : index
-  %b = check.literal value({nb}) : index
-  %o = check.literal value(0) : i64
-  %meta = check.file.read.npy path("ph_meta.npy") : {mt}
-  %h = check.file.read.npy path("ph_h.npy") : {ht}
-  %w = check.file.read.npy path("hd_w.npy") : {hwt}
-  %le = check.file.read.npy path("ph_l.npy") : tensor<{S * CHP}xf32>
-  %w4 = check.generate.fill value(0) : {w4t}
-  kernel.launch @g_prep_{HEAD_FMT}_q4_0[%b](%b, %o, %w4, %w) : [index](index, i64, {w4t}, {hwt})
-  %hk = check.literal value({H}) : index
-  %hq = check.generate.fill value(0) : tensor<{S}x{2 * H}xi8>
-  kernel.launch @g_quant_q8[%t, %hk](%t, %hk, %h, %hq) : [index, index](index, index, {ht}, tensor<{S}x{2 * H}xi8>)
-""" + phl("g_head_mv_q8_p40", "1") + "".join(phl(k, tag) for k, tag in pv) + f"""  check.expect.close actual(%l1) expected(%le) atol({tol:.3e}) rtol(0.0) nan(different) : tensor<{S * CHP}xf32>
-""" + "".join(f"  check.expect.close actual(%l{tag}) expected(%l1) atol(0.0) rtol(0.0) nan(different) : tensor<{S * CHP}xf32>\n"
-              f"  check.expect.equal actual(%p{tag}) expected(%p1) : tensor<{S * CH * 2}xi32>\n" for _, tag in pv) + "  check.return\n}\n")
 # 3b. attention chain: [q/gate split] -> qk norm + rope + paged KV store -> split-K attention -> combine (gate)
 t, ctx = 4, 64
 pos = np.arange(t)
@@ -699,6 +653,52 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   check.return
 }}
 """)
+# 3a''. DFlash proposals' head (draft/prep_weights.py, PROPOSE_HEAD=q4_0): g_prep_<fmt>_q4_0 converts the head at load,
+# then the int8 head runs over the Q4_0 copy. Logits vs numpy on llama.cpp's quantize_row_q4_0 of the same values (a
+# code at an exact rounding boundary may differ: tolerance), and the 4/8/16-span variants bit-identical to 1 span.
+HEAD_FMT = T[head_name].tensor_type.name.lower()
+if (HEAD_Q8 and HEAD_FMT in ("q8_0", "bf16", "f16") and H % 32 == 0 and (cfg.get("drafter") or {}).get("gguf")
+        and os.environ.get("PROPOSE_HEAD", "q4_0") == "q4_0"):
+    blk = Wh.astype(np.float32).reshape(-1, 32)
+    m = blk[np.arange(len(blk)), np.abs(blk).argmax(1)]
+    d4 = m / np.float32(-8)
+    id4 = np.divide(np.float32(1), d4, out=np.zeros_like(d4), where=d4 != 0)
+    c4 = np.minimum(np.float32(15), np.floor(blk * id4[:, None] + np.float32(8.5)))
+    W4 = ((c4 - 8) * d4.astype(np.float16).astype(np.float32)[:, None]).reshape(Wh.shape)
+    del blk, c4
+    S, nb = 8, Wh.size // 32
+    hm = np.zeros(4 + 9 * S, np.int32); hm[0] = S
+    for j in range(S):
+        hm[4 + 9 * j + 0] = 1; hm[4 + 9 * j + 4] = j; hm[4 + 9 * j + 6] = 1
+    hp = rng.standard_normal((S, H)).astype(np.float32)
+    lp = (q8_ref(hp) @ W4.T).astype(np.float32)   # S x V
+    del W4
+    CHP = CH * 128
+    lpad = np.full((S, CHP), -3.0e38, np.float32); lpad[:, :cfg["vocab"]] = lp
+    save("ph_meta", hm); save("ph_h", hp); save("ph_l", lpad.reshape(-1))
+    mt, ht, w4t = f"tensor<{hm.size}xi32>", f"tensor<{S}x{H}xf32>", f"tensor<{nb * 18}xi8>"
+    tol = 2.0e-3 * float(np.abs(lp).max())
+    def phl(k, tag):
+        return (f"  %p{tag} = check.generate.fill value(0) : tensor<{S * CH * 2}xi32>\n  %l{tag} = check.generate.fill value(0.0) : tensor<{S * CHP}xf32>\n"
+                f"  kernel.launch @{k}[%spans](%spans, %t, %meta, %hq, %w4, %p{tag}, %l{tag}) : [index](index, index, {mt}, tensor<{S}x{2 * H}xi8>, {w4t}, tensor<{S * CH * 2}xi32>, tensor<{S * CHP}xf32>)\n")
+    pv = [("g_head_mv_t4_q8_p40", "4"), ("g_head_mv_t8_q8_p40", "8"), ("g_head_mv_t16_q8_p40", "16")]
+    cases.append(f"""check.case public @propose_head_q4 {{
+  %spans = check.literal value({S}) : index
+  %t = check.literal value({S}) : index
+  %b = check.literal value({nb}) : index
+  %o = check.literal value(0) : i64
+  %meta = check.file.read.npy path("ph_meta.npy") : {mt}
+  %h = check.file.read.npy path("ph_h.npy") : {ht}
+  %w = check.file.read.npy path("hd_w.npy") : {hwt}
+  %le = check.file.read.npy path("ph_l.npy") : tensor<{S * CHP}xf32>
+  %w4 = check.generate.fill value(0) : {w4t}
+  kernel.launch @g_prep_{HEAD_FMT}_q4_0[%b](%b, %o, %w4, %w) : [index](index, i64, {w4t}, {hwt})
+  %hk = check.literal value({H}) : index
+  %hq = check.generate.fill value(0) : tensor<{S}x{2 * H}xi8>
+  kernel.launch @g_quant_q8[%t, %hk](%t, %hk, %h, %hq) : [index, index](index, index, {ht}, tensor<{S}x{2 * H}xi8>)
+""" + phl("g_head_mv_q8_p40", "1") + "".join(phl(k, tag) for k, tag in pv) + f"""  check.expect.close actual(%l1) expected(%le) atol({tol:.3e}) rtol(0.0) nan(different) : tensor<{S * CHP}xf32>
+""" + "".join(f"  check.expect.close actual(%l{tag}) expected(%l1) atol(0.0) rtol(0.0) nan(different) : tensor<{S * CHP}xf32>\n"
+              f"  check.expect.equal actual(%p{tag}) expected(%p1) : tensor<{S * CH * 2}xi32>\n" for _, tag in pv) + "  check.return\n}\n")
 # Drafter matrices without an int8 path (a vendor BF16/F16 DFlash drafter used as-is, cfg["drafter"]["gguf"]):
 # the f32-activation matvecs (1 and 4 tokens; gate/up pair) and the GEMMs (64-, 128- and 256-row tiles) the drafter's
 # propose / warm programs launch, one tensor per (format, K), vs float64 numpy on the dequantized weights. Rows per
