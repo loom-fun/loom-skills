@@ -194,6 +194,47 @@ for s in $steps; do
       FORCE=1 LEVEL=$p1 "$B/gates.sh" "$pkg" "$url" "$gguf" "$D/bench" "$LLAMA_PORT" > "$out/gates.out" 2>&1; rc=$?
       cp "$D"/bench/gates.json "$D"/bench/gates_*.log "$out/" 2>/dev/null
       res[$s]=$(grep -h "^GATES" "$out/gates.out" | tail -1 | cut -c1-300); [ -n "${res[$s]}" ] || res[$s]="rc=$rc";;
+    sysinfo)   # the machine's GPU/CPU/memory/power settings (sysinfo.sh), p1 = a tag for the file name
+      step "sysinfo ${p1:-}"; bash "$here/.github/scripts/sysinfo.sh" > "$out/sysinfo${p1:+_$p1}.txt"; cat "$out/sysinfo${p1:+_$p1}.txt"
+      res[$s]=$(grep -E '^(product|cpu_governor|cpu_epp|platform_profile|gtt_total_mib|power_cap_uw):' "$out/sysinfo${p1:+_$p1}.txt" | tr '\n' ';' | cut -c1-300);;
+    powerprofile)   # try to set the power profile (p1: performance|balanced|power-saver), then record what took effect
+      step "power profile $p1"
+      powerprofilesctl set "$p1" 2>&1 | tail -1
+      if [ "$p1" = performance ]; then g=performance; else g=powersave; fi
+      for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo "$g" | sudo -n tee "$f" >/dev/null 2>&1; done
+      [ "$p1" = performance ] && e=performance || e=balance_performance
+      for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo "$e" | sudo -n tee "$f" >/dev/null 2>&1; done
+      res[$s]="profile=$(powerprofilesctl get 2>/dev/null || echo n/a) governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor) epp=$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null)";;
+    perf)   # perf.py p1 times (decode + 1k/2k prefill); p2 = memory_bytes for this measurement (restarts the server)
+      want=${p2:-$mem}
+      if [ "$want" != "$mem" ] || ! curl -sf "$url/v1/models" >/dev/null; then
+        "$SV/stop.sh" "exp-$name" >/dev/null 2>&1; mem=$want; step "serve with memory_bytes $mem"; serve || { res[$s]=ERROR; continue; }
+      fi
+      tag=perf_${mem}_$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)
+      step "perf x $p1 ($tag)"
+      for i in $(seq 1 "$p1"); do "$T" "$B/perf.py" "$url" loom --model "$model" --log "$out/$tag.jsonl" --no-campaign | tail -1 | cut -c1-220; done
+      res[$s]=$("$T" - "$out/$tag.jsonl" <<'EOF'
+import json, statistics as st, sys
+rows = [json.loads(l) for l in open(sys.argv[1])]
+pf = {}
+for r in rows:
+    for p in r["prefill"]:
+        pf.setdefault(round(p["prompt_tokens"], -3), []).append(p["prefill_tps"])
+print(f"decode {st.mean(r['decode_tps'] for r in rows):.1f} " + " ".join(f"prefill_{k // 1000}k {st.mean(v):.0f}" for k, v in sorted(pf.items())))
+EOF
+);;
+    llamaperf)   # llama.cpp (the card's build, no drafting, 1 slot) on the same GGUF: perf.py p1 times
+      "$SV/stop.sh" "exp-$name" >/dev/null 2>&1   # one model on the GPU at a time
+      llama_up || { res[$s]=ERROR; continue; }
+      tag=llamaperf_$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)
+      step "llama.cpp perf x $p1 ($tag)"
+      for i in $(seq 1 "$p1"); do "$T" "$B/perf.py" "http://127.0.0.1:$LLAMA_PORT" llama --kind llama --log "$out/$tag.jsonl" --no-campaign | tail -1 | cut -c1-220; done
+      "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
+      res[$s]=$(python3 -c "
+import json,statistics as st
+rows=[json.loads(l) for l in open('$out/$tag.jsonl')]; pf={}
+[pf.setdefault(round(p['prompt_tokens'],-3),[]).append(p['prefill_tps']) for r in rows for p in r['prefill']]
+print(f\"decode {st.mean(r['decode_tps'] for r in rows):.1f} \"+' '.join(f'prefill_{k//1000}k {st.mean(v):.0f}' for k,v in sorted(pf.items())))");;
     *) echo "unknown step $s"; res[$s]=ERROR;;
   esac
   echo "RESULT $name $s: ${res[$s]}"
