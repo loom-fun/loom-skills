@@ -1,35 +1,97 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
+ "_comment": "Matched 4-model Loom vs llama.cpp b1368 benchmark (published card programs, thinking off on both engines, llama.cpp DFlash n-max 3 and 7 plus a no-drafting reference). Measurement only.",
+ "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
+ "memory_bytes": 52000000000,
+ "kit": null,
  "llamacpp": "b1368",
  "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
  "jobs": [
   {
-   "name": "tm-off",
+   "name": "qwen38-27b",
+   "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
+   "memory_bytes": 52000000000,
+   "kit": null,
    "thinking": "off",
    "variants": [
     {
-     "name": "new",
-     "build": {}
+     "name": "card"
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:3:long",
+    "c4:card",
+    "llama:3:long:3",
+    "llama:3:long:7",
+    "llama:1:-:0",
+    "llamac4:3",
+    "llamac4:7",
+    "textmatch:card"
    ]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "glimmer-30b",
+   "card": "loom-fun/unsloth-Muse-Glimmer-30B-loom",
+   "memory_bytes": 39000000000,
+   "kit": "glimmer",
+   "thinking": "off",
    "variants": [
     {
-     "name": "new",
-     "build": {}
+     "name": "card"
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:3:long",
+    "c4:card",
+    "llama:3:long:3",
+    "llama:3:long:7",
+    "llama:1:-:0",
+    "llamac4:3",
+    "llamac4:7",
+    "textmatch:card"
+   ]
+  },
+  {
+   "name": "flint",
+   "card": "loom-fun/ggml-org-Flint-loom",
+   "memory_bytes": 67000000000,
+   "kit": "flint",
+   "thinking": "off",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:3:long",
+    "c4:card",
+    "llama:3:long:3",
+    "llama:3:long:7",
+    "llama:1:-:0",
+    "llamac4:3",
+    "llamac4:7",
+    "textmatch:card"
+   ]
+  },
+  {
+   "name": "bolt-e4b",
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "memory_bytes": 34000000000,
+   "kit": "gemma4",
+   "thinking": "off",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:3:long",
+    "c4:card",
+    "llama:3:long:3",
+    "llama:3:long:7",
+    "llama:1:-:0",
+    "llamac4:3",
+    "llamac4:7",
+    "textmatch:card"
    ]
   }
  ]

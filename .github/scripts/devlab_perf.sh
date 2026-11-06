@@ -18,7 +18,7 @@
 # Steps S: ab:R[:on|off]        every variant in ONE loom-serve (small context), ab_decode.py R interleaved rounds
 #          perf:V:N[:long]      V served alone with its own settings: perf.py N times (+ --long)
 #          c4:V                 c4_steady.py 4 streams on V
-#          llama:N[:long|-][:M] llama.cpp (card build + llama_spec, n-max M) perf.py N times, llama_decode.py tokens/step
+#          llama:N[:long|-][:M] llama.cpp (card build + llama_spec, n-max M; M=0: no drafting) perf.py N times, llama_decode.py tokens/step
 #          llamac4[:M]          c4_steady.py on llama.cpp
 #          textmatch:V          text_match.py: first 50 tokens of perf.py's prompts on V, then on llama.cpp
 #          consistency:V:N      consistency.py N times (NOT DETERMINISTIC / concurrent mismatch counts)
@@ -60,11 +60,11 @@ export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 
 # 2. The card (fetched once per runner)
 card=$WORK/_card; base=https://huggingface.co/$repo/resolve/main
-if [ ! -f "$card/.fetched" ]; then
+if [ "$(cat "$card/.fetched" 2>/dev/null)" != "$repo" ]; then   # a stale card from another job is refetched
   step "fetch $repo"; rm -rf "$card"
   "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch"; exit 1; }
   curl -fsSL --retry 3 "$base/llm_config.json" -o "$card/llm_config.json" || exit 1
-  rm -rf "$WORK/fetch-cache"; touch "$card/.fetched"
+  rm -rf "$WORK/fetch-cache"; echo "$repo" > "$card/.fetched"
 fi
 # build.py's config: the card's llm_config.json with its GGUFs pointed at the fetched files, plus the tensor table
 "$T" - "$card" "$D/cfg.json" <<'EOF' || exit 1
@@ -165,6 +165,9 @@ EOF
   cp "$pkg/model.json" "$out/model_$v.json"; sha256sum "$pkg"/program/*.loom > "$out/programs_$v.sha256"
 done
 
+# the benchmark scripts' chat hooks (bench_common.py: chat_probe) come from the job's kit
+[ "$kit" != - ] && export LOOM_KIT=${KIT[${variants%% *}]}
+
 serve_alone() { # serve_alone VARIANT
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
@@ -176,12 +179,14 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   local spec; spec=$(q "print((e.get('llama_spec') or '').replace('{drafter}', '$drafter'))")
   [ -n "${1:-}" ] && spec=$(echo "$spec" | sed -E "s/--spec-draft-n-max [0-9]+/--spec-draft-n-max $1/")
+  [ "${1:-}" = 0 ] && spec=""   # n-max 0: no drafting (reference)
   [ "$spec" = "$LSPEC" ] && curl -sf "$lurl/health" >/dev/null 2>&1 && return 0
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
   LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag
   export LLAMA_SPEC=$spec; LSPEC=$spec
   step "llama.cpp $tag: $LLAMA_SPEC"
-  "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 4 65536 unified | tail -1
+  local n; n=$(echo "$spec" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+")
+  LLAMACPP_ARGS_FILE=$out/llamacpp_args_n${n:-0}.txt "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 4 65536 unified | tail -1
 }
 TH=$(q "print(j.get('thinking') or 'off')")   # chat_template_kwargs.enable_thinking sent to both engines
 echo "thinking: $TH (sent to both engines)"
@@ -218,19 +223,19 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] fo
       res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_$p1.txt')))");;
     llama)   # llama:N[:long|-][:N_MAX]
       llama_up "${p3:-}" || { res[$s]=ERROR; continue; }
-      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); lf=perf_llamacpp_n$nm.jsonl
+      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}; lf=perf_llamacpp_n$nm.jsonl
       step "llama.cpp n-max $nm perf x $p1 ${p2:-} (thinking $TH)"
       for i in $(seq 1 "$p1"); do
         (cd "$out" && "$T" "$B/perf.py" "$lurl" "llamacpp-n$nm" --kind llama --no-campaign --thinking "$TH" --log "$lf" ${p2:+--long} | tail -1)
       done
-      [ -z "${p2:-}" ] && "$T" "$here/.github/scripts/llama_decode.py" "$lurl" 2 --think "$TH" --log "$out/tps_llamacpp_n$nm.jsonl"
+      "$T" "$here/.github/scripts/llama_decode.py" "$lurl" 2 --think "$TH" --log "$out/tps_llamacpp_n$nm.jsonl"
       res[$s]=$("$T" -c "
 import json,statistics as st; r=[json.loads(l) for l in open('$out/$lf')]
 k='decode_tps_32k' if '${p2:-}' else 'decode_tps'
 print('llamacpp n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
     llamac4)   # llamac4[:N_MAX]
       llama_up "${p1:-}" || { res[$s]=ERROR; continue; }
-      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+")
+      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}
       step "llama.cpp n-max $nm c4"
       for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$lurl" 4 --thinking "$TH" | tail -1 | tee -a "c4_llamacpp_n$nm.txt"); done
       res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp n-max $nm c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_llamacpp_n$nm.txt')))");;
