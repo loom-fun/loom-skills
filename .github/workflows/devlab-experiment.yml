@@ -1,0 +1,95 @@
+name: devlab-experiment
+# Ad-hoc GPU experiments on AMD DevLab Dispatch Strix Halo runners, one matrix job per variant of
+# .github/devlab/experiment.json (a published card, optionally rebuilt from this branch's starter with build
+# switches, served and measured: consistency / determinism loops, kernel tests, gates). See
+# .github/scripts/devlab_experiment.sh for the file format. Runs on a pull request labeled `devlab-debug` (every
+# push re-runs it), or by hand (workflow_dispatch) once this file is on the default branch.
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  workflow_dispatch:
+    inputs:
+      experiment:
+        description: "Experiment file"
+        required: false
+        default: .github/devlab/experiment.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devlab-experiment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  variants:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'devlab-debug') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'devlab-debug'))
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+      file: ${{ steps.pick.outputs.file }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        env:
+          EXP: ${{ inputs.experiment || '.github/devlab/experiment.json' }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          e = json.load(open(os.environ["EXP"]))
+          print("matrix=" + json.dumps({"variant": [v["name"] for v in e["variants"]]}))
+          print("file=" + os.environ["EXP"])
+          PY
+
+  run:
+    needs: variants
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.variants.outputs.matrix) }}
+    name: ${{ matrix.variant }}
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 240
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # variants may build with another commit's starter ("ref")
+      - name: work dir
+        run: mkdir -p "$GITHUB_WORKSPACE/../devlab-exp" && echo "WORK=$(cd "$GITHUB_WORKSPACE/../devlab-exp" && pwd)" >> "$GITHUB_ENV"
+      - name: "experiment: ${{ matrix.variant }}"
+        run: bash .github/scripts/devlab_experiment.sh "${{ needs.variants.outputs.file }}" "${{ matrix.variant }}"
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devlab-${{ matrix.variant }}
+          path: ${{ env.WORK }}/${{ matrix.variant }}/out
+          retention-days: 14
+      - name: clean up
+        if: always()
+        run: rm -rf "$WORK"/_card_* "$WORK/${{ matrix.variant }}"
+
+  summary:
+    needs: [variants, run]
+    if: always() && needs.variants.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: devlab-*
+          path: results
+      - name: results per variant
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import glob, json, os
+          print("| variant | step | result |\n|---|---|---|")
+          for f in sorted(glob.glob("results/*/summary.json")):
+              s = json.load(open(f))
+              for k, v in s["results"].items():
+                  print(f"| {s['variant']} | {k} | {v} |")
+          PY

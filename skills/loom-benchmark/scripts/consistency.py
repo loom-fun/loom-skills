@@ -29,37 +29,59 @@ def run(p):
     r = requests.post(a.url + "/v1/chat/completions", headers={"Content-Type": "application/json"},
                       json={"model": a.model, "messages": [{"role": "user", "content": p}], "max_tokens": 40, "temperature": 0}).json()
     m = r["choices"][0]["message"]
-    run.raw[p] = run.raw.get(p, []) + [(m, r["choices"][0]["finish_reason"])]
-    return (m.get("reasoning_content") or "") + "|" + (m.get("content") or ""), r["usage"]["prompt_tokens"]
-
-
-run.raw = {}
-run.gaps = []
+    return {"text": (m.get("reasoning_content") or "") + "|" + (m.get("content") or ""), "prompt_tokens": r["usage"]["prompt_tokens"],
+            "cached": (r["usage"].get("prompt_tokens_details") or {}).get("cached_tokens", 0), "message": m,
+            "stop": r["choices"][0]["finish_reason"] == "stop"}
 
 
 alone = [run(p) for p in prompts]
 with cf.ThreadPoolExecutor(a.n) as ex:
     together = list(ex.map(run, prompts))
 # Run-to-run determinism alone (a kernel race, e.g. a router reading back its own writes across a
-# barrier, shows up here before it shows up anywhere else).
+# barrier, shows up here before it shows up anywhere else). Only runs that took the same path are
+# compared: a prefix-cache hit (cached_tokens > 0, e.g. this prompt's history retained from the
+# concurrent phase) recomputes just the uncached tail, through the decode-shaped kernels (int8 matvec,
+# decode attention) instead of the prefill GEMM, so a hit and a miss round differently and may flip a
+# near-tie, deterministically (Bolt-E4B, issue #39: alone miss vs again hit on 357 of 361 tokens, gap
+# 0.141). A prompt whose two alone runs took different paths runs alone again (up to twice) until two
+# runs share a path; a hit-vs-miss difference is then judged like a concurrent one (near-tie rule).
 again = [run(p) for p in prompts]
-repeat = [x[0] == y[0] for x, y in zip(alone, again)]
-same = [x[0] == y[0] and r for x, y, r in zip(alone, together, repeat)]
-print("prompt tokens", [x[1] for x in alone], "identical when concurrent:", [x[0] == y[0] for x, y in zip(alone, together)],
-      "identical when repeated alone:", repeat)
+solo = [[x, y] for x, y in zip(alone, again)]
+for i, p in enumerate(prompts):
+    while len({r["cached"] for r in solo[i]}) == len(solo[i]) and len(solo[i]) < 4:
+        solo[i].append(run(p))
+paths = [{} for _ in prompts]
+for i, rs in enumerate(solo):
+    for r in rs:
+        paths[i].setdefault(r["cached"], []).append(r)
+paired = [any(len(g) > 1 for g in ps.values()) for ps in paths]
+repeat = [all(len({r["text"] for r in g}) == 1 for g in ps.values()) for ps in paths]
+concurrent_same = [x["text"] == y["text"] for x, y in zip(alone, together)]
+# divergences that must be near-ties: concurrent vs alone, and an alone run on another path vs the first alone run
+pairs = [(i, "concurrent", together[i]) for i in range(a.n) if not concurrent_same[i]]
+pairs += [(i, f"alone with {r['cached']} cached tokens", r) for i in range(a.n) for r in solo[i][1:]
+          if r["cached"] != alone[i]["cached"] and r["text"] != alone[i]["text"] and repeat[i]]
+pairs = list({(i, r["text"]): (i, what, r) for i, what, r in pairs}.values())
+same = [concurrent_same[i] and repeat[i] and not any(j == i for j, *_ in pairs) for i in range(a.n)]
+print("prompt tokens", [x["prompt_tokens"] for x in alone], "identical when concurrent:", concurrent_same,
+      "identical when repeated alone (same path):", repeat,
+      "cached tokens (alone, concurrent, again...):", [[alone[i]["cached"], together[i]["cached"]] + [r["cached"] for r in solo[i][1:]] for i in range(a.n)])
 if not all(repeat):
-    print("NOT DETERMINISTIC: the same prompt alone gave different greedy output (a race in a kernel, not a near-tie)")
-if a.pkg and not all(same):
+    print("NOT DETERMINISTIC: the same prompt alone, on the same path (equal cached tokens), gave different greedy output "
+          "(a race in a kernel, not a near-tie)")
+if not all(paired):
+    print("note: prompts", [i for i, ok in enumerate(paired) if not ok], "never ran twice alone on the same path (determinism unchecked)")
+gaps = []
+if a.pkg and pairs:
     from bench_common import Package, llama_greedy
     P = Package(a.pkg)
-    for i, ok in enumerate(same):
-        if ok:
-            continue
-        (m1, f1), (m2, f2) = run.raw[prompts[i]][:2]
-        t1, t2 = P.ids(P.raw_from_chat(m1, f1 == "stop")), P.ids(P.raw_from_chat(m2, f2 == "stop"))
+    for i, what, r in pairs:
+        ref = alone[i]
+        t1, t2 = P.ids(P.raw_from_chat(ref["message"], ref["stop"])), P.ids(P.raw_from_chat(r["message"], r["stop"]))
         k = next((j for j, (x, y) in enumerate(zip(t1, t2)) if x != y), min(len(t1), len(t2)))
         gap_val = None
-        msg = f"prompt {i}: first divergence at generated token {k}: alone {P.tok.decode(t1[k:k + 1])!r} vs concurrent {P.tok.decode(t2[k:k + 1])!r}"
+        msg = (f"prompt {i}: first divergence at generated token {k}: alone ({ref['cached']} cached) {P.tok.decode(t1[k:k + 1])!r} "
+               f"vs {what} {P.tok.decode(t2[k:k + 1])!r}")
         if a.llama and k < min(len(t1), len(t2)):
             ids = P.ids(P.render(prompts[i])) + t1[:k]
             g = llama_greedy(a.llama, ids, 1, P, n_probs=10)[0]
@@ -70,14 +92,14 @@ if a.pkg and not all(same):
             else:
                 msg += "; one of them is outside llama.cpp's top-10 (not a near-tie)"
         print(msg)
-        run.gaps.append(gap_val)
-# A concurrent-vs-alone difference passes when every prompt is deterministic alone and every
-# divergence is a near-tie by the compare.py rule (gap <= 1 nat, both tokens in llama.cpp's top-k):
-# decode tokens sharing an epoch with a prefill take the f16 GEMM path instead of the f32 matvec
-# path, which flips near-ties (the identified cause; LFM2.5: gap 0.085).
-near = all(repeat) and run.gaps and all(g is not None and g <= 1.0 for g in run.gaps) and len(run.gaps) == same.count(False)
+        gaps.append(gap_val)
+# A concurrent-vs-alone (or prefix-hit-vs-miss) difference passes when every prompt is deterministic
+# alone on its path and every divergence is a near-tie by the compare.py rule (gap <= 1 nat, both
+# tokens in llama.cpp's top-k): decode tokens sharing an epoch with a prefill take the f16 GEMM path
+# instead of the f32 matvec path, which flips near-ties (the identified cause; LFM2.5: gap 0.085).
+near = all(repeat) and bool(gaps) and all(g is not None and g <= 1.0 for g in gaps) and len(gaps) == len(pairs)
 if not all(same) and near:
-    print("near-tie divergences only (mixed-epoch f16 path), deterministic alone")
+    print("near-tie divergences only (mixed-epoch f16 path / prefix-cache tail), deterministic alone")
 print("PASS" if all(same) or near else "FAIL")
 from campaign import log_gate, run_audit
 log_gate("consistency", "PASS" if all(same) or near else "FAIL", identical=same, near_tie_only=bool(near and not all(same)))
