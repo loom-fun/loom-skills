@@ -185,7 +185,9 @@ Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary
       on the int8 matvec instead of 64 on the GEMM.
     - The catch-up (warm) program takes the GEMM from 5 tokens. It only feeds proposals, and DFlash's 33280-wide fc
       was on the f32 4-token matvec.
-  - Epoch 204 -> ~158 ms. Single-stream decode +6-7 % from the shorter block.
+  - Epoch 204 -> 158-165 ms (sessions vary). Same server: c4 +19 % (ab_perf), decode +6 %, prefill unchanged.
+  - c4_steady, same session: 52.7 -> 63.5 tok/s, against llama.cpp's 69.7 (its own DFlash2, n-max 3).
+  - Single-stream decode +6-7 % from the shorter block.
   - The remaining gap to one weight pass is the 16-token trunk matvec (233 VGPRs on Q5_K gate/up: 1144 vs 817 us
     for 1 token). The optimization catalog lists what was tried.
 - Verification of more than 16 tokens per epoch (several drafting streams at depth 5+) takes the WMMA GEMM (rows
