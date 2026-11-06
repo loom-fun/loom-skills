@@ -300,15 +300,15 @@ renders as not measured / no evidence; never fill one in by hand.
      "draft-dflash, n-max 3"] -o ev_perf.json` (finalize.sh's `final` / `llama-final` rows; or
      `--loom-jsonl`/`--llama-jsonl` + `--c4-loom`/`--c4-llama` for separate same-session logs);
    - `card/make_info.py gates bench/gates.json [ktest.out --time ...] -o ev_gates.json`;
-   - `card/pull_devlab.py loom-fun/REPO [--perf prefill_1k] -o ev_devlab.json`: the latest nightly-gates run on
-     AMD DevLab Dispatch (gates of every finished level, job URL as evidence; `--perf` takes those Loom
-     values from the full job's report-only perf run).
+   - `card/pull_devlab.py loom-fun/REPO -o ev_devlab.json`: the latest nightly-gates run on AMD DevLab
+     Dispatch (gates of every finished level, job URL as evidence). Gates only: DevLab perf numbers are not
+     comparable with a local same-session llama.cpp run and never go on a card.
 2. `card/make_info.py build PKG --repo loom-fun/REPO --memory-bytes N --output DIR --evidence ev_*.json -o
    PKG/info.json` (schema `card/info_schema.json`, `"schema": "loom-card/1"`; checkpoint, drafter, projector,
    context and features come from `model.json`, `model.json.lock` and `llm_config.json`). Per gate the latest
    evidence wins, so a later failing run shows as a failure.
 3. `card/render_card.py PKG/info.json -o PKG/README.md` (from info.json alone), and upload only those two files
-   when republishing a card: `hf upload REPO DIR . --include README.md info.json`.
+   when republishing a card: `hf upload REPO DIR . --include README.md --include info.json`.
 
 To change what every card says, change `render_card.py` (and `card/test/check.sh`'s golden files with
 `UPDATE=1`, CI `check-cards`), then re-render all cards. `card/import_card.py` maps cards published before
