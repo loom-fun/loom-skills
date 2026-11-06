@@ -5,8 +5,10 @@
 # then the example's own files (everything but README.md, cfg.json and starter.patch), then applies
 # starter.patch (the example's changes to starter files). A hunk that doesn't apply stops with the patch
 # error: merge that hunk by hand (the example's README says what it does).
-# CFG (the port's cfg.json from inspect_gguf.py): every field of the example's reviewed cfg.json except
-# gguf is copied into it (the tensor table and the path stay the port's own).
+# CFG (the port's cfg.json from inspect_gguf.py): every field of the example's reviewed config is copied into it
+# except the port's own (gguf, tensors, name, and the keys naming one package's files). The reviewed config is the
+# example's cfg.json, or, for an example whose port is published as a CATEGORY A loom-fun package
+# (examples.json), that package's llm_config.json at the pinned revision (../find_reference.py example-cfg).
 # Writes KIT/KIT_SOURCE (starter/kit_source.py): the loom-skills commit the kit came from, which build.py stamps
 # into every package it builds (llm_config.json "generator"), and a hash that tells a later build whether the
 # kit was edited since.
@@ -27,13 +29,15 @@ done
 [ ! -s "$ex/starter.patch" ] || patch -p1 --forward --no-backup-if-mismatch -s -d "$kit" < "$ex/starter.patch"
 python3 "$kit/kit_source.py" write "$kit" --example "$name" --skills-dir "$here/.."
 if [ -n "${3:-}" ]; then
-  python3 - "$ex/cfg.json" "$3" <<'PY'
+  rev=$(mktemp); python3 "$here/../find_reference.py" example-cfg "$name" -o "$rev" || { rm -f "$rev"; exit 1; }
+  python3 - "$rev" "$3" <<'PY'
 import json, sys
 rev, cfg = json.load(open(sys.argv[1], encoding="utf-8")), json.load(open(sys.argv[2], encoding="utf-8"))
-cfg.update({k: v for k, v in rev.items() if k not in ("gguf", "tensors")})
+cfg.update(rev)
 json.dump(cfg, open(sys.argv[2], "w", encoding="utf-8"), indent=1, ensure_ascii=False)
 PY
-  echo "OK: $kit = starter + $(basename "$ex"); reviewed fields of $ex/cfg.json merged into $3"
+  rm -f "$rev"
+  echo "OK: $kit = starter + $(basename "$ex"); the example's reviewed config merged into $3"
 else
-  echo "OK: $kit = starter + $(basename "$ex") (merge the reviewed $ex/cfg.json: rerun with CFG as 3rd argument)"
+  echo "OK: $kit = starter + $(basename "$ex") (merge the reviewed config: rerun with CFG as 3rd argument)"
 fi

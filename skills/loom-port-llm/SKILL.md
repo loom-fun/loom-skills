@@ -36,6 +36,9 @@ LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmar
   ~/work/mymodel/pkg http://127.0.0.1:8160 ~/work/mymodel/gguf/<file.gguf> ~/work/mymodel/bench [LLAMA_PORT=8130]
 ```
 `port.sh` runs steps 1–6 below deterministically:
+- **starts from a published reference** (stage 1b, `find_reference.py`; `REFERENCE=off` skips it,
+  `REFERENCE=loom-fun/REPO` picks one): ranks the loom-fun org's **category A** packages for this GGUF and starts
+  from the best one (section "Start from a reference" below);
 - picks the GGUF (`starter/pick_gguf.py`): **Q4_K_M** (then UD-Q4_K_XL / Q4_K_S only when the repo has no Q4_K_M; a bigger
   tier only with `QUANT_TIER=Q5|Q6|Q8`), then a file **already in the HF cache** (any revision: nothing is downloaded
   twice), formats the starter decodes (incl. unsloth UD's IQ4_XS/IQ4_NL/Q3_K/IQ3_S and Q4_0), and a file that
@@ -62,6 +65,27 @@ Its exit code says where it stopped (2 download, 3 chat template or uncovered ar
 4 build/serve, 5 kernel tests, 6 smoke); only then do you need the manual steps below for that
 stage. Verified on Qwen3-0.6B (Q8_0/Q4_K_M) and Qwen3.5-0.8B (Q4_K_M).
 
+## Start from a reference (loom-fun, category A only)
+
+Every port and every optimization starts by looking for a published package that already solved most of it
+(port.sh does this itself; by hand: `find_reference.py rank GGUF --repo ORG/REPO -o W/reference.json`).
+- **Only category A counts**: a card made by the current skill, `info.json` with `"schema": "loom-card/2"` and
+  `"report": "generated"`. Imported cards (`"report": "attached"`, old factory runs) are listed as skipped, never used.
+- **Ranking:** same architecture and family (GGUF name, base-model chain), then same architecture, then shared
+  building blocks (gated delta-net hybrid, MoE routing, vision tower, tool-call format, thinking switch, drafter
+  type), then nearest size. The `generator` stamp of its `llm_config.json` says how stale it is.
+- **What is taken:** the reference's example kit (when it was built from one: `reference/examples.json` maps the
+  packages to `*-example` kits); the cfg keys `inspect_gguf.py` left open (geometry, formats and eos ids always stay
+  this GGUF's); its chat block when this template's derivation fails, accepted only if `chat_probe.py --verify`
+  passes on THIS template; and its measured drafting table, from which `draft/tune.py` starts each method at the
+  reference's best depth and climbs from there (`TUNE_PRIOR=0` measures all). The llama.cpp baseline's own tuning
+  never takes a prior.
+- **What is recorded:** `cfg["reference"]` (repo, revision, score, reasons, what was taken, what differs), which
+  `build.py` copies into the package's `llm_config.json`.
+- A reference saves time; it never lowers the bar: the derived port runs the same kernel tests and gates.
+- `find_reference.py fetch REPO DIR` gets its package (no weights) to read or diff; `show` prints what an
+  optimization should start from.
+
 ## New architecture (port.sh exit 3 with "no kernels", or a model the starter doesn't cover)
 
 The expensive path. Keep it short:
@@ -83,7 +107,9 @@ The expensive path. Keep it short:
    default doesn't cover). No need to copy the skills tree. Reuse before
    writing: **check `reference/` for the architecture family first** and make the kit with
    `${CLAUDE_SKILL_DIR}/reference/apply_example.sh EXAMPLE W/kit W/cfg.json` (the starter + the example's
-   files + its `starter.patch`, and its reviewed `cfg.json` fields merged into yours):
+   files + its `starter.patch`, and its reviewed config merged into yours: the example's category A loom-fun
+   package's `llm_config.json`, pinned in `reference/examples.json`, or the example's own `cfg.json` when none is
+   published):
 
    | Family | Example |
    |---|---|
@@ -356,6 +382,7 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   reference vs `llama-mtmd-debug` -> kernels -> plan -> gate). Code: `starter/vision/`.
 - `reference/porting-notes.md`: how the text service drives the program (epochs,
   spans, metadata packets, KV paging), and what each glue file does.
-- `reference/*-example/`: worked ports (table in step 3), applied with `apply_example.sh`.
+- `reference/*-example/`: worked ports (table in step 3), applied with `apply_example.sh`; `examples.json` names
+  each one's category A loom-fun package (its reviewed config). `find_reference.py`: the reference lookup.
   Maintainers: after changing the starter, `reference/rebase_examples.sh OLD_STARTER` rebuilds the
   examples' patches and `check_examples.sh` must pass.
