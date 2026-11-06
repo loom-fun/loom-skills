@@ -42,6 +42,10 @@ if [ ! -x "$root/.venv/bin/loom-serve" ] || [ ! -x "$root/.tools/bin/python" ]; 
   "$SV/install_loom.sh" "$root" ${LOOM_VERSION:+"$LOOM_VERSION"} > "$out/install.log" 2>&1 || { tail "$out/install.log"; result failed install 1; exit 1; }
 fi
 export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
+# build.py stamps the loom-skills commit (kit_source.py): git when SK is a checkout, else LOOM_SKILLS_COMMIT (an
+# exported snapshot such as devlab-port's skills_ref)
+[ -n "${LOOM_SKILLS_COMMIT:-}" ] || LOOM_SKILLS_COMMIT=$(git -C "$SK" rev-parse HEAD 2>/dev/null) || true
+export LOOM_SKILLS_COMMIT
 # llama.cpp builds: only the ones this run fetched (qualify.sh fetches the latest lemonade release)
 export LLAMACPP_HOME=${LLAMACPP_HOME:-$D/llamacpp} SEARCH_ROOT=${SEARCH_ROOT:-${LLAMACPP_HOME:-$D/llamacpp}}
 mkdir -p "$LLAMACPP_HOME"
@@ -70,8 +74,13 @@ build=$("$T" -c "import json,re;r=json.load(open('$bench/llamacpp_pick.json'))['
 src=(--package "$W/pkg")
 [ -n "${GITHUB_RUN_ID:-}" ] && src+=(--source-kind devlab --run "$GITHUB_RUN_ID" --url "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-loom-fun/loom-skills}/actions/runs/$GITHUB_RUN_ID")
 if [ -n "$build" ] && [ -s "$bench/perf_log.jsonl" ]; then
+  # 4 streams: llama.cpp's c4_steady rows (perf_log.jsonl) and Loom's (targets.jsonl), the final session's only
+  "$T" -c "import json; [print(r['c4_steady']) for r in map(json.loads, open('$bench/perf_log.jsonl')) if r.get('label') == 'llama-final' and r.get('c4_steady')]" > "$out/c4_llama.txt"
+  "$T" -c "import json; [print(r['value']) for r in map(json.loads, open('$bench/targets.jsonl')) if r.get('metric') == 'c4_steady' and r.get('label') == 'final']" > "$out/c4_loom.txt" 2>/dev/null
+  c4=(); [ -s "$out/c4_loom.txt" ] && c4+=(--c4-loom "$out/c4_loom.txt"); [ -s "$out/c4_llama.txt" ] && c4+=(--c4-llama "$out/c4_llama.txt")
+  args=$(cat "$bench/llamacpp_args.txt" 2>/dev/null)
   "$T" "$B/card/make_info.py" perf --perf-log "$bench/perf_log.jsonl" --baseline-version "llamacpp-rocm/$build" \
-    --baseline-args "$(cat "$bench/llamacpp_args.txt" 2>/dev/null)" "${src[@]}" -o "$out/ev_perf.json" || echo "WARNING: no perf evidence"
+    ${args:+--baseline-args "$args"} "${c4[@]}" "${src[@]}" -o "$out/ev_perf.json" || echo "WARNING: no perf evidence"
 fi
 "$T" "$B/card/make_info.py" gates "$bench/gates.json" "$W/ktest.log" --time "$(date -u -r "$W/ktest.log" +%FT%T)" "${src[@]}" -o "$out/ev_gates.json" || echo "WARNING: no gate evidence"
 source_repo=${spec%%:*}
