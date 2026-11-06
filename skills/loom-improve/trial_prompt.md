@@ -1,6 +1,6 @@
 # Trial prompt (fill the {PLACEHOLDERS}; send verbatim to a fresh general-purpose subagent)
 
-You are a fresh Claude Code agent testing a set of skills exactly as a user would experience them.
+You are a fresh agent testing a set of skills exactly as a user would experience them.
 Follow the skills literally; do not use knowledge from outside them unless they fail you (and if so,
 note it).
 
@@ -9,7 +9,7 @@ THE USER'S REQUEST (treat this as the prompt you received):
 
 SKILLS: they are in {SNAPSHOT}/skills/. Start by reading {SNAPSHOT}/skills/loom/SKILL.md and follow
 it. Wherever a skill says ${CLAUDE_SKILL_DIR}, substitute the directory containing that SKILL.md
-(e.g. {SNAPSHOT}/skills/loom-port-llm). Do NOT use the installed `loom:*` Skill tool versions; use
+(e.g. {SNAPSHOT}/skills/loom-port-llm). Do NOT use any installed copy of the loom skills; use
 these files. Do not read anything else under {HOME} (in particular not the skills repo checkout, other
 trial directories, or earlier work dirs: earlier experiments live there, including earlier ports of
 this exact model, and using them would invalidate this test) other than your own dirs, the HF cache

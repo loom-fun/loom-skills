@@ -5,6 +5,8 @@ description: Install AMD Loom (hrx-loom from PyPI, or a ROCm/hrx-system CI wheel
 
 # Loom setup: install → fetch → serve
 
+`${CLAUDE_SKILL_DIR}` is this SKILL.md's directory; substitute it yourself if your agent leaves it unexpanded.
+
 Read the `loom` umbrella skill's hard rules first (memory limits, `--memory_bytes`,
 binary approval).
 

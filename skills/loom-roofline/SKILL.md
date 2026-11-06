@@ -5,6 +5,8 @@ description: Roofline analysis for a Loom LLM port on Strix Halo — compute the
 
 # Roofline → targets
 
+`${CLAUDE_SKILL_DIR}` is this SKILL.md's directory; substitute it yourself if your agent leaves it unexpanded.
+
 The point is to decide **once, up front, with numbers**, what the port should reach,
 so the optimization loop (`loom-optimize`) has a finish line, and so a stopping
 decision is a measurement rather than a debate.

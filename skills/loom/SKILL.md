@@ -31,8 +31,8 @@ run_kernel_tests.sh), `PY=` (pick_llamacpp.sh's python), `UI_VENV=` or the 2nd a
 (start_ui.sh), `LOOM_SERVE_STATE=` (serve.sh PID/log dir) and `LLAMACPP_STATE=`
 (llamacpp_server.sh PID/log dir). `LOOM_RESERVED_GIB=` is memory another resident server already holds
 (e.g. a local agent model): `pick_gguf.py` and `build.py` subtract it from the 60 %-of-RAM cap.
-`PY=` is the python fetch_llamacpp.sh uses (default `python3`). Under a harness other than Claude Code,
-`${CLAUDE_SKILL_DIR}` in these skills means the directory of the SKILL.md being read. On a shared machine set the state dirs inside your work
+`PY=` is the python fetch_llamacpp.sh uses (default `python3`). `${CLAUDE_SKILL_DIR}` in these skills
+means the directory of the SKILL.md being read; substitute it yourself if your agent leaves it unexpanded. On a shared machine set the state dirs inside your work
 dir and give `pick_llamacpp.sh` a SEARCH_ROOT (3rd argument) so it only sees builds the
 user approved.
 
@@ -149,15 +149,15 @@ Read it from there if it isn't in your skill list.
   `MemAvailable` in /proc/meminfo exceeds that model's weights + KV + 16 GiB: a second flint
   llama-server next to a 79 GB Loom server ran the machine out of RAM and the OOM killer took the
   desktop session.
-- **/tmp is RAM too.** `findmnt -no FSTYPE /tmp` prints `tmpfs` on these boxes, and Claude's scratchpad
-  lives under `/tmp/claude-*`: every file there is held in memory, charged to the session that wrote
+- **/tmp is RAM too.** `findmnt -no FSTYPE /tmp` prints `tmpfs` on these boxes, and agent scratchpads
+  often live there (e.g. `/tmp/claude-*`): every file there is held in memory, charged to the session that wrote
   it. Keep packages, GGUF copies, kernel-test dumps (`make_kernel_tests.py` writes ~1.7 GiB of
   embedding/head tables per 27B test dir) and anything over ~100 MB in a work dir on disk, not the
   scratchpad. Delete a test dir's `.npy` dumps once its tests pass and an ablation package once its number
   is recorded. Before serving, check `du -sh` of the scratchpad as well as `MemAvailable`.
 - **Run long tunes, gate runs and servers in their own memory-capped scope:**
   `systemd-run --user --scope -p MemoryMax=<weights+KV+8G> CMD`. When RAM runs out, systemd-oomd
-  kills the biggest cgroup: without a scope that is the editor/terminal holding every Claude session.
+  kills the biggest cgroup: without a scope that is the editor/terminal holding every agent session.
   A Qwen3.8-27B `tune.py` (52 GB server) on top of a 21 GB scratchpad of kernel-test dumps got the
   whole VS Code scope (92 GB, all sessions) killed; rerun in its own scope, it finished.
 - **Always pass `--memory_bytes`** to `loom-serve` (weights + KV pool + ~2 GiB

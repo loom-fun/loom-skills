@@ -5,6 +5,8 @@ description: Correctness and performance methodology for Loom models vs llama.cp
 
 # Benchmark and verify Loom models
 
+`${CLAUDE_SKILL_DIR}` is this SKILL.md's directory; substitute it yourself if your agent leaves it unexpanded.
+
 Scripts are in `${CLAUDE_SKILL_DIR}/scripts/`; run them with the tools
 venv (`~/loom/.tools/bin/python`). Workload documents: `bench_common.doc(n)` for n in 1000, 2000, 8000, 16000, 32000 (stored as `data/doc_2000.txt` and `doc_32000.txt`; the others are byte prefixes).
 They are real text (Loom's own markdown docs) and their sizes are approximate token counts.
