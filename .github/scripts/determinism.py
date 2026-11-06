@@ -24,6 +24,8 @@ ap.add_argument("--n", type=int, default=4)
 ap.add_argument("--reps", type=int, default=10)
 ap.add_argument("--conc", type=int, default=1, help="requests in flight (1: each prompt alone)")
 ap.add_argument("--max-tokens", type=int, default=64)
+ap.add_argument("--pairs", action="store_true", help="alone, each prompt twice in a row (the second finds the first's retained "
+                "history: a prefix-cache hit); outputs are grouped by cached token count")
 ap.add_argument("--log", default=None)
 a = ap.parse_args()
 body = doc(1000)
@@ -40,6 +42,9 @@ def run(job):
 
 
 jobs = [(rep, i) for rep in range(a.reps) for i in range(a.n)]
+if a.pairs:
+    a.conc = 1
+    jobs = [(2 * rep + k, i) for rep in range(a.reps) for i in range(a.n) for k in (0, 1)]
 with cf.ThreadPoolExecutor(a.conc) as ex:
     res = list(ex.map(run, jobs))
 if a.log:
@@ -57,6 +62,13 @@ for i in range(a.n):
         d = diff[0]["text"]
         k = next((j for j, (x, y) in enumerate(zip(ref, d)) if x != y), min(len(ref), len(d)))
         first = f" first differing rep {diff[0]['rep']} at char {k}: {ref[max(0, k - 20):k + 20]!r} vs {d[max(0, k - 20):k + 20]!r}"
+    by = {}
+    for r in rs:
+        by.setdefault(r["cached"], set()).add(r["text"])
+    paths = ", ".join(f"cached {c}: {len(rs_)} distinct" for c, rs_ in sorted(by.items()))
+    same_path = all(len(x) == 1 for x in by.values())
+    print(f"prompt {i} [{paths}; {'each path deterministic' if same_path else 'a path gave two outputs'}"
+          f"{'; paths differ' if len({t for x in by.values() for t in x}) > 1 and same_path else ''}]")
     print(f"prompt {i} ({rs[0]['prompt_tokens']} tokens): {len(rs) - len(diff)}/{len(rs)} identical to rep 0, "
           f"{len({r['text'] for r in rs})} distinct outputs, cached tokens {[r['cached'] for r in rs]}{first}")
 print(("NOT DETERMINISTIC" if bad else "DETERMINISTIC") + f": {bad}/{a.n} prompts gave more than one output over {a.reps} reps (conc {a.conc})")

@@ -55,9 +55,12 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       GH_TOKEN: ${{ github.token }}
-      WORK: ${{ github.workspace }}/../devlab-exp
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # variants may build with another commit's starter ("ref")
+      - name: work dir
+        run: mkdir -p "$GITHUB_WORKSPACE/../devlab-exp" && echo "WORK=$(cd "$GITHUB_WORKSPACE/../devlab-exp" && pwd)" >> "$GITHUB_ENV"
       - name: "experiment: ${{ matrix.variant }}"
         run: bash .github/scripts/devlab_experiment.sh "${{ needs.variants.outputs.file }}" "${{ matrix.variant }}"
       - name: upload results

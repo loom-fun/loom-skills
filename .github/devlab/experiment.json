@@ -1,20 +1,14 @@
 {
- "_comment": "Issue #39: Bolt-E4B with BF16 DFlash drafting is nondeterministic. Round 1: reproduce on the published card and bisect drafting and the #30 prefill switches.",
+ "_comment": "Issue #39 round 2: consistency failures vs prefix-cache path (cached tokens per run), alone determinism, drafting verify width.",
  "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
  "memory_bytes": 34000000000,
  "kit": "gemma4",
  "llamacpp": "b1368",
- "steps": ["determinism:1:8", "consistency:20", "determinism:4:6"],
+ "steps": ["consistency:20", "pairs:3", "determinism:1:12", "determinism:4:6"],
  "variants": [
   {"name": "card"},
-  {"name": "card-depth0", "execution": {"draft_depth": 0}},
-  {"name": "card-depth1", "execution": {"draft_depth": 1}},
   {"name": "nodraft", "build": {"SPEC": "off"}},
-  {"name": "live-row-skip-0", "build": {"LIVE_ROW_SKIP": "0"}},
-  {"name": "gemm-m256-0", "build": {"GEMM_M256": "0"}},
-  {"name": "post-add-row-scale-0", "build": {"POST_ADD_ROW_SCALE": "0"}},
-  {"name": "pair-proj-0", "build": {"PAIR_PROJ": "0"}},
-  {"name": "gemm-skip-padding-0", "build": {"GEMM_SKIP_PADDING": "0"}},
-  {"name": "row-scale-live-0", "build": {"ROW_SCALE_LIVE": "0"}}
+  {"name": "spec-exact", "build": {"SPEC_EXACT": "1"}},
+  {"name": "spec-mm-from-64", "build": {"SPEC_MM_FROM": "64"}}
  ]
 }

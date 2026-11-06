@@ -81,11 +81,19 @@ EOF
 # 3. The package: the card's own programs, or a rebuild from this checkout
 pkg=$D/pkg
 if [ "$(q "print('build' in v)")" = True ]; then
+  # "ref": build with the starter/examples of another commit (bisecting a generator change)
+  PL=$SK/loom-port-llm; ref=$(q "print(v.get('ref') or '')")
+  if [ -n "$ref" ]; then
+    git -C "$here" fetch -q origin "$ref" 2>/dev/null || git -C "$here" fetch -q --unshallow 2>/dev/null
+    rm -rf "$D/src"; mkdir -p "$D/src"
+    git -C "$here" archive "$ref" skills/loom-port-llm | tar -x -C "$D/src" || { echo "FAIL: no $ref"; exit 1; }
+    PL=$D/src/skills/loom-port-llm; echo "starter from $ref ($(git -C "$here" log -1 --format=%h:%s "$ref" | cut -c1-80))"
+  fi
   if [ "$kit" != - ]; then
-    step "kit: starter + $kit example"; rm -rf "$D/kit"; "$SK/loom-port-llm/reference/apply_example.sh" "$kit" "$D/kit" | tail -1 || exit 1
+    step "kit: starter + $kit example"; rm -rf "$D/kit"; "$PL/reference/apply_example.sh" "$kit" "$D/kit" | tail -1 || exit 1
     K=$D/kit
   else
-    K=$ST
+    K=$PL/starter
   fi
   export LOOM_KIT=$K
   # the card's own build settings (model id, depth, context, pool) unless the variant overrides them
@@ -147,7 +155,7 @@ for s in $steps; do
         "$T" "$B/consistency.py" "$url" --model "$model" > "$out/consistency_$i.log" 2>&1
         grep -q "NOT DETERMINISTIC" "$out/consistency_$i.log" && nd=$((nd + 1))
         grep -q "identical when concurrent: \[.*False" "$out/consistency_$i.log" && nc=$((nc + 1))
-        echo "  $i: $(head -1 "$out/consistency_$i.log" | cut -c1-200)"
+        echo "  $i: $(head -1 "$out/consistency_$i.log" | cut -c40-400)"
       done
       res[$s]="nondeterministic $nd/$p1, concurrent-mismatch $nc/$p1";;
     determinism)
@@ -156,6 +164,11 @@ for s in $steps; do
       "$T" "$here/.github/scripts/determinism.py" "$url" --model "$model" --conc "$p1" --reps "$p2" --log "$out/determinism_c$p1.jsonl" \
         > "$out/determinism_c$p1.log" 2>&1
       cut -c1-400 "$out/determinism_c$p1.log"; res[$s]=$(tail -1 "$out/determinism_c$p1.log" | cut -c1-120);;
+    pairs)
+      curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
+      step "prefix-cache pairs reps $p1"
+      "$T" "$here/.github/scripts/determinism.py" "$url" --model "$model" --pairs --reps "$p1" --log "$out/pairs.jsonl" > "$out/pairs.log" 2>&1
+      cut -c1-400 "$out/pairs.log"; res[$s]=$(grep -c "a path gave two outputs" "$out/pairs.log")" prompts with a nondeterministic path, "$(grep -c "paths differ" "$out/pairs.log")" with hit != miss";;
     gates)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       [ "$tag" != - ] || { echo "gates: EXPERIMENT.json has no llamacpp tag"; res[$s]=ERROR; continue; }

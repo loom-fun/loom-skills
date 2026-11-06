@@ -30,10 +30,12 @@ def run(p):
                       json={"model": a.model, "messages": [{"role": "user", "content": p}], "max_tokens": 40, "temperature": 0}).json()
     m = r["choices"][0]["message"]
     run.raw[p] = run.raw.get(p, []) + [(m, r["choices"][0]["finish_reason"])]
+    run.cached[p] = run.cached.get(p, []) + [(r["usage"].get("prompt_tokens_details") or {}).get("cached_tokens", 0)]
     return (m.get("reasoning_content") or "") + "|" + (m.get("content") or ""), r["usage"]["prompt_tokens"]
 
 
 run.raw = {}
+run.cached = {}
 run.gaps = []
 
 
@@ -46,7 +48,7 @@ again = [run(p) for p in prompts]
 repeat = [x[0] == y[0] for x, y in zip(alone, again)]
 same = [x[0] == y[0] and r for x, y, r in zip(alone, together, repeat)]
 print("prompt tokens", [x[1] for x in alone], "identical when concurrent:", [x[0] == y[0] for x, y in zip(alone, together)],
-      "identical when repeated alone:", repeat)
+      "identical when repeated alone:", repeat, "cached tokens (alone, concurrent, again):", [run.cached[p] for p in prompts])
 if not all(repeat):
     print("NOT DETERMINISTIC: the same prompt alone gave different greedy output (a race in a kernel, not a near-tie)")
 if a.pkg and not all(same):
