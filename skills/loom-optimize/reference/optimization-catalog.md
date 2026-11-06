@@ -140,6 +140,24 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
     256 VGPRs and 19-22 TFLOP/s). Moving m128's 8 KB inverse-scale tile into the activation stage (3 instead
     of 2 workgroups per WGP) was mixed: down -4 %, swiglu/gate +1.5/+2 %; not kept.
   - Tile order (`GEMM_N_FASTEST`) makes no difference for m256 on the 27B shapes.
+- **m256 with 64 × 64 waves.** `gemm_big256` now runs 256 threads (8 waves, 4 × 2) of 64 rows × 64 columns
+  instead of 16 waves of 32 × 64: each A fragment feeds 4 B fragments and each B fragment 4 A fragments (0.5
+  LDS fragment reads per MMA instead of 0.75), VALU per WMMA 4.5 → 3.0 (store loop), 232-248 VGPRs (two
+  workgroups per WGP still fit). Each thread stages two activation rows and one 32-value K group of a weight
+  row. Real-data microbenchmark, 27B shapes at 1024 rows (REPS=7 interleaved): swiglu/gate/down
+  +2.5/+2.1/+4.3 %. Qwen3.8-27B same-server A/B (two sessions): prefill 2k +2.0/+1.7 % (484.5 → 494.2,
+  482.7 → 490.9), 1k +1.3 %, 8k +1.9 %; Bolt (gemma4 kit) 1k/2k +1.3/+1.1 %. All inside the noise band, but
+  the sign held in every run.
+  - Where the m256 time goes (store kernel, 27B shapes, same session): full kernel 32 TFLOP/s; no LDS
+    fragment reads (fragments held in registers) 36; no staging (no global loads, dequant, barriers) 37-38;
+    neither (WMMA from registers only) 40-41. Single ablations were each small: no dequant +6-8 %, no global
+    loads +4.5 %, no barriers 0-5 %, 1 of 4 B fragments +1-3 %. The overheads are latency, not bandwidth.
+  - Tried: loads of fragment step kk+1 placed before step kk's MMAs: the compiler reschedules anyway (tie).
+    Forcing that order with `scf.schedule.fence`: 200-208 VGPRs, -15 %. Fences around each step's loads and
+    MMAs: +2 % once, -6/-10 % on reruns (noise). The 64 × 64 layout with fences: swiglu -8/-10 %. A per-wave
+    `buffer.view` at the B-fragment row so all B reads use immediate offsets (swiglu VGPR 208 → 160): tie,
+    so occupancy is not the limit either. Sharing one Q4_K scale/min decode between a thread's two 16-value
+    slices: tie (not kept). Load-time weight repack: capped at the dequant ablation's 6-8 %; not tried.
 - **Register prefetch** of the next K-step, guarded by `scf.if step+1 < k_steps`
   (without the guard the prover rejects the access).
 - `GEMM_N_FASTEST=1` puts output tiles on grid x, so consecutive workgroups reuse
@@ -148,7 +166,7 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   at 8k–16k prefill. A/B it per port; `GEMM_N_FASTEST=0` disables it.
 - `GEMM_SKIP_PADDING=1`: padding rows get scale 0 (`g_row_scale_f16_live`), and a tile whose
   rows all have scale 0 exits. Packed epochs have up to 50 % padding at odd lengths.
-- **Ceiling.** We reached 25–31 TFLOP/s of a ~59 peak. Unexplored: LDS double
+- **Ceiling.** We reached 25–33 TFLOP/s of a ~59 peak (~40 from registers with real data). Unexplored: LDS double
   buffering of B, and direct Q4_K→fragment dequant.
 
 ### Gated delta-net recurrence (`gen_gdn.py`) and the f16 row scale

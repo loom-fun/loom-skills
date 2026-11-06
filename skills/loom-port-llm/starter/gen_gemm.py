@@ -9,7 +9,7 @@ Variants:
   store / acc   single weight, Y = XW^T or Y += XW^T
   swiglu        two weights (gate, up), Y = silu(X Wg^T) * (X Wu^T)
 """
-import os, sys
+import os, re as _re, sys
 PREFIX = os.environ.get("GEMM_PREFIX", "g")
 META = os.environ.get("GEMM_KMETA", "@g_k_metadata")
 
@@ -622,23 +622,33 @@ def gemm_big(fmt, mode, tn=None, suffix=""):
 
 
 
+def _split_dequant(fmt, wsrc, out, col):
+    full = dequant16(fmt, wsrc, None, out).replace("%w_col,", f"{col},").replace("%w_col :", f"{col} :")
+    lines = [l for l in full.strip("\n").split("\n") if l.strip()]
+    last = max(i for i, l in enumerate(lines) if ".load " in l)
+    addr = lines[: last + 1]
+    loads = [(_re.match(r"\s*(%\S+) = ", l).group(1), l.split("-> ")[-1].strip()) for l in addr if ".load " in l]
+    return lines, addr, loads
+
 def gemm_big256(fmt, mode):
-    """256-row WMMA GEMM: the 128-row kernel's layout with twice the rows. 512 threads (16 waves, 8 x 2, each
-    32 rows x 64 columns as in _m128); store/acc: 256 x 128 tiles, swiglu: 256 rows x 64 outputs of each of
-    gate and up. Each staged weight value now feeds 256 rows instead of 128, so the dequant (VALU work that
-    serializes with WMMA on RDNA3) per MMA halves. LDS: activations 256 x 72 f16 (padded rows, 36 KB) +
-    weights 128 x 72 (18 KB): two workgroups per WGP. Thread t stages activation row t/2 (32 values) and one
-    16-value slice (row t/4, K slice t%4) of the gate/up-interleaved weight tile."""
+    """256-row WMMA GEMM: 256 threads (8 waves in a 4 x 2 grid), each wave 64 rows x 64 columns (4 x 4
+    16 x 16 accumulators). store/acc: 256 x 128 tiles, swiglu: 256 rows x 64 outputs of each of gate and up.
+    Each staged weight value feeds 256 rows, and each wave reuses an A fragment across 4 B fragments and a
+    B fragment across 4 A fragments (0.5 LDS fragment reads per MMA; 32 x 64 waves need 0.75).
+    LDS: activations 256 x 72 f16 (padded rows, 36 KB) + weights 128 x 72 (18 KB): two workgroups per WGP.
+    Thread t stages activation rows t/2 and t/2 + 128 (32 values each) and a 32-value K group of weight
+    row t/2 (two 16-value slices) of the gate/up-interleaved weight tile."""
     f = FMT[fmt]
     two_w = mode == "swiglu"
-    NT, TW = 512, 128                   # threads; staged weight rows (one 16-value slice per thread)
-    TN = TW // 2 if two_w else TW       # outputs per weight
-    cfr = 2 if two_w else 4             # 16-column fragments per wave per weight
+    NT, TW = 256, 128
+    TN = TW // 2 if two_w else TW
+    cfr = 2 if two_w else 4
+    RF = 4                               # 16-row A fragments per wave
     wave_cols = 16 * cfr
+    WVR = TW - (TN - wave_cols) - 15
     name = f"{PREFIX}_gemm_{fmt}_{mode}_m256"
     weights = ["w", "w2"] if two_w else ["w"]
-    k_min = 256 if FMT[fmt]["block_values"] == 256 else 64
-    import re as _re
+    k_min = 256 if f["block_values"] == 256 else 64
     L = []
     L.append(f'''kernel.def export("{name}") @{name}(%rows: index, %n: index) {{
   %c1 = index.constant 1 : index
@@ -668,6 +678,7 @@ def gemm_big256(fmt, mode):
   %c128 = index.constant 128 : index
   %c256 = index.constant 256 : index
   %tn = index.constant {TN} : index
+  %c144_off = index.constant 144 : offset
   %nibble_mask = vector.constant 252645135 : vector<4xi32>
   %row_tile_count = index.div %rows, %c256 : index
   %out_tile_count = index.div %n, %tn : index
@@ -683,10 +694,11 @@ def gemm_big256(fmt, mode):
   %lane_row = index.rem %lane, %c16 : index
   %wave_row_group = index.div %bounded_subgroup, %c2 : index
   %wave_col_group = index.rem %bounded_subgroup, %c2 : index
-  %wave_row_value = index.mul %wave_row_group, %c32 : index
-  %wave_row = index.assume %wave_row_value [range(%wave_row_value, 0, 224)] : index
-  %wave_row1 = index.add %wave_row, %c16 : index
-  %wave_cols = index.constant {wave_cols} : index
+  %wave_row_value = index.mul %wave_row_group, %c64 : index
+  %wave_row = index.assume %wave_row_value [range(%wave_row_value, 0, 192)] : index''')
+    for r in range(1, RF):
+        L.append(f"  %wave_row{r}_c = index.constant {16 * r} : index\n  %wave_row{r} = index.add %wave_row, %wave_row{r}_c : index")
+    L.append(f'''  %wave_cols = index.constant {wave_cols} : index
   %wave_col_value = index.mul %wave_col_group, %wave_cols : index
   %wave_col = index.assume %wave_col_value [range(%wave_col_value, 0, {TN - wave_cols})] : index
   %row_origin = index.mul %row_group, %c256 : index
@@ -702,13 +714,17 @@ def gemm_big256(fmt, mode):
   %w_stage = buffer.alloca<workgroup> align(16) %w_bytes : buffer
   %w_stage_view = buffer.view %w_stage[%origin] : buffer -> view<{TW}x72xf16>
   %x_stage_row = index.div %workitem, %c2 : index
+  %x_stage_row1 = index.add %x_stage_row, %c128 : index
   %x_half = index.rem %workitem, %c2 : index
   %x_stage_col = index.mul %x_half, %c32 : index
   %x_row_value = index.add %row_origin, %x_stage_row : index
   %x_row = index.assume %x_row_value [lt(%x_row_value, %rows)] : index
-  %stage_row = index.div %workitem, %c4 : index
-  %stage_ks = index.rem %workitem, %c4 : index
-  %stage_col = index.mul %stage_ks, %c16 : index''')
+  %x_row1_value = index.add %x_row, %c128 : index
+  %x_row1 = index.assume %x_row1_value [lt(%x_row1_value, %rows)] : index
+  %stage_row = index.div %workitem, %c2 : index
+  %stage_ks = index.rem %workitem, %c2 : index
+  %stage_col = index.mul %stage_ks, %c32 : index
+  %stage_col1 = index.add %stage_col, %c16 : index''')
     if two_w:
         L.append(f'''  %half_tw = index.constant {TN} : index
   %w_is_up = index.cmp uge, %stage_row, %half_tw : index
@@ -718,96 +734,102 @@ def gemm_big256(fmt, mode):
   %wsel = scf.select %w_is_up, %w2, %w : buffer''')
     else:
         L.append("  %w_out_row_value = index.add %out_origin, %stage_row : index")
-    L.append('''  %w_out_row = index.assume %w_out_row_value [lt(%w_out_row_value, %n)] : index
+    L.append(f'''  %w_out_row = index.assume %w_out_row_value [lt(%w_out_row_value, %n)] : index
   %w_row_origin = index.scale %w_out_row, %row_bytes : index, offset -> offset
   %zero8 = vector.constant 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
-  %k_steps = index.div %k, %c64 : index''')
+  %k_steps = index.div %k, %c64 : index
+  %wb_row = index.add %wave_col, %lane_row : index
+  %wb_off = index.scale %wb_row, %c144_off : index, offset -> offset
+  %w_wave_view = buffer.view %w_stage[%wb_off] : buffer -> view<{WVR}x72xf16>''')
     wsrc = "wsel" if two_w else "w"
-    out = "dq"
-    full = dequant16(fmt, wsrc, None, out).replace("%w_col,", "%wcol,").replace("%w_col :", "%wcol :")
-    lines = [l for l in full.strip("\n").split("\n") if l.strip()]
-    last = max(i for i, l in enumerate(lines) if ".load " in l)
-    addr = lines[: last + 1]
-    loads = [(_re.match(r"\s*(%\S+) = ", l).group(1), l.split("-> ")[-1].strip()) for l in addr if ".load " in l]
+    slices = [("dqa", "%wcola", "%stage_col"), ("dqb", "%wcolb", "%stage_col1")]
+    parts = [(out, col, sc) + _split_dequant(fmt, wsrc, out, col) for out, col, sc in slices]
     def addr_text(sfx, kvar):
-        t = [f"    %wcol{sfx} = index.add {kvar}, %stage_col : index"]
-        body = "\n".join(addr).replace("%wcol", f"%wcol{sfx}")
-        body = _re.sub(rf"%{out}_", f"%{out}{sfx}_", body)
-        t.append(body)
+        t = []
+        for out, col, sc, lines, addr, loads in parts:
+            c2 = col + sfx
+            t.append(f"    {c2} = index.add {kvar}, {sc} : index")
+            body = "\n".join(addr).replace(col + " ", c2 + " ").replace(col + ",", c2 + ",")
+            body = _re.sub(rf"%{out}_", f"%{out}{sfx}_", body)
+            t.append(body)
         if sfx == "p":
-            t.append(f"    %x_colp = index.add {kvar}, %x_stage_col : index\n    %x_rawp = vector.load %x_view[%x_row, %x_colp] : view<[%rows]x[%k]xf16> -> vector<32xf16>")
+            t.append(f"""    %x_colp = index.add {kvar}, %x_stage_col : index
+    %x_rawp = vector.load %x_view[%x_row, %x_colp] : view<[%rows]x[%k]xf16> -> vector<32xf16>
+    %x_rawp1 = vector.load %x_view[%x_row1, %x_colp] : view<[%rows]x[%k]xf16> -> vector<32xf16>""")
         else:
             t.append(f"""    %x_more = index.cmp ult, %x_next_step, %k_steps : index
-    %x_rawn = scf.if %x_more -> (vector<32xf16>) {{
+    %x_rawn, %x_rawn1 = scf.if %x_more -> (vector<32xf16>, vector<32xf16>) {{
       %x_ns = index.assume %x_next_step [lt(%x_next_step, %k_steps)] : index
       %x_ko = index.mul %x_ns, %c64 : index
       %x_coln = index.add %x_ko, %x_stage_col : index
       %xv = vector.load %x_view[%x_row, %x_coln] : view<[%rows]x[%k]xf16> -> vector<32xf16>
-      scf.yield %xv : vector<32xf16>
+      %xv1 = vector.load %x_view[%x_row1, %x_coln] : view<[%rows]x[%k]xf16> -> vector<32xf16>
+      scf.yield %xv, %xv1 : vector<32xf16>, vector<32xf16>
     }} else {{
-      scf.yield %cr_x : vector<32xf16>
+      scf.yield %cr_x, %cr_x1 : vector<32xf16>, vector<32xf16>
     }}""")
         return "\n".join(t)
     carried = []
-    for nm, ty in loads:
-        base = nm[1:]
-        carried.append((f"%cr_{base}", f"%{base.replace(out + '_', out + 'p_', 1)}", f"%{base.replace(out + '_', out + 'n_', 1)}", ty))
+    for out, col, sc, lines, addr, loads in parts:
+        for nm, ty in loads:
+            base = nm[1:]
+            carried.append((f"%cr_{base}", f"%{base.replace(out + '_', out + 'p_', 1)}", f"%{base.replace(out + '_', out + 'n_', 1)}", ty))
     carried.append(("%cr_x", "%x_rawp", "%x_rawn", "vector<32xf16>"))
-    accs = [f"{wi}r{r}c{c}" for wi in range(len(weights)) for r in range(2) for c in range(cfr)]
+    carried.append(("%cr_x1", "%x_rawp1", "%x_rawn1", "vector<32xf16>"))
+    accs = [f"{wi}r{r}c{c}" for wi in range(len(weights)) for r in range(RF) for c in range(cfr)]
     L.append(addr_text("p", "%c0").replace("    ", "  ", 1))
     L.append("  " + ", ".join(f"%o{a}" for a in accs) + ", " + ", ".join(f"%unused_{i}" for i in range(len(carried))) + " = scf.for %step = [%c0 to %k_steps step %c1](" +
              ", ".join(f"%i{a} = %init : vector<8xf32>" for a in accs) + ", " + ", ".join(f"{c[0]} = {c[1]} : {c[3]}" for c in carried) + ") -> (" +
              ", ".join("vector<8xf32>" for _ in accs) + ", " + ", ".join(c[3] for c in carried) + ") {")
-    L.append("    %k_origin = index.mul %step, %c64 : index\n    vector.store %cr_x, %x_stage_view[%x_stage_row, %x_stage_col] : vector<32xf16>, view<256x72xf16>")
-    L.append("    %wcol = index.add %k_origin, %stage_col : index")
-    text = "\n".join(l for l in lines if ".load " not in l)
-    for nm, ty in loads:
-        text = _re.sub(_re.escape(nm) + r"\b", f"%cr_{nm[1:]}", text)
-    L.append(text)
-    L.append(f"    vector.store %{out}, %w_stage_view[%stage_row, %stage_col] : vector<16xf16>, view<{TW}x72xf16>")
+    L.append("""    %k_origin = index.mul %step, %c64 : index
+    vector.store %cr_x, %x_stage_view[%x_stage_row, %x_stage_col] : vector<32xf16>, view<256x72xf16>
+    vector.store %cr_x1, %x_stage_view[%x_stage_row1, %x_stage_col] : vector<32xf16>, view<256x72xf16>""")
+    for out, col, sc, lines, addr, loads in parts:
+        L.append(f"    {col} = index.add %k_origin, {sc} : index")
+        text = "\n".join(l for l in lines if ".load " not in l)
+        for nm, ty in loads:
+            text = _re.sub(_re.escape(nm) + r"\b", f"%cr_{nm[1:]}", text)
+        L.append(text)
+        L.append(f"    vector.store %{out}, %w_stage_view[%stage_row, {sc}] : vector<16xf16>, view<{TW}x72xf16>")
     L.append("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
     L.append("    %k_next_raw = index.add %k_origin, %c64 : index\n    %k_limit = index.sub %k, %c64 : index\n    %k_next = index.min %k_next_raw, %k_limit : index\n    %x_next_step = index.add %step, %c1 : index")
     L.append(addr_text("n", "%k_next"))
     cur = {a: f"%i{a}" for a in accs}
+    rowv = ["%wave_row"] + [f"%wave_row{r}" for r in range(1, RF)]
     for kk in range(4):
-        L.append(f'''    %fk{kk} = index.constant {kk * 16} : index
-    %l0_{kk} = vector.fragment.load<lhs> %x_stage_view[%wave_row, %fk{kk}] shape [%c16, %c16] : view<256x72xf16> -> vector<16xf16>
-    %l1_{kk} = vector.fragment.load<lhs> %x_stage_view[%wave_row1, %fk{kk}] shape [%c16, %c16] : view<256x72xf16> -> vector<16xf16>''')
-        for wi, w in enumerate(weights):
+        L.append(f"    %fk{kk} = index.constant {kk * 16} : index")
+        for r in range(RF):
+            L.append(f"    %l{r}_{kk} = vector.fragment.load<lhs> %x_stage_view[{rowv[r]}, %fk{kk}] shape [%c16, %c16] : view<256x72xf16> -> vector<16xf16>")
+        for wi in range(len(weights)):
             for c in range(cfr):
-                L.append(f'''    %wr{wi}{c}_{kk}_c = index.constant {wi * TN + c * 16} : index
-    %wr{wi}{c}_{kk}_b = index.add %wave_col, %wr{wi}{c}_{kk}_c : index
-    %wr{wi}{c}_{kk} = index.add %wr{wi}{c}_{kk}_b, %lane_row : index
-    %rv{wi}{c}_{kk} = vector.load %w_stage_view[%wr{wi}{c}_{kk}, %fk{kk}] : view<{TW}x72xf16> -> vector<16xf16>
+                L.append(f'''    %wr{wi}{c}_{kk} = index.constant {wi * TN + c * 16} : index
+    %rv{wi}{c}_{kk} = vector.load %w_wave_view[%wr{wi}{c}_{kk}, %fk{kk}] : view<{WVR}x72xf16> -> vector<16xf16>
     %rf{wi}{c}_{kk} = vector.fragment<rhs> %rv{wi}{c}_{kk} shape [%c16, %c16] : vector<16xf16>''')
-                for r in range(2):
+        for wi in range(len(weights)):
+            for c in range(cfr):
+                for r in range(RF):
                     a = f"{wi}r{r}c{c}"
                     L.append(f"    %m{a}_{kk} = vector.mma %l{r}_{kk}, %rf{wi}{c}_{kk}, {cur[a]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
                     cur[a] = f"%m{a}_{kk}"
     L.append("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
     L.append("    scf.yield " + ", ".join(cur[a] for a in accs) + ", " + ", ".join(c[2] for c in carried) + " : " + ", ".join("vector<8xf32>" for _ in accs) + ", " + ", ".join(c[3] for c in carried) + "\n  }")
-    # Row inverse scales through LDS (the activation stage is free after the loop's last barrier).
     L.append(f'''  %inv_view = buffer.view %x_stage[%origin] : buffer -> view<256x16xf32>
-  %writer = index.cmp ult, %workitem, %c256 : index
-  scf.if %writer {{
-    %bw = index.assume %workitem [range(%workitem, 0, 255)] : index
-    %inv_row_value = index.add %row_origin, %bw : index
-    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index
-    %inverse = view.load %s_view[%inv_row, %c1] : view<[%rows]x2xf32> -> f32
-    %inverse16 = vector.splat %inverse : vector<16xf32>
-    vector.store %inverse16, %inv_view[%bw, %c0] : vector<16xf32>, view<256x16xf32>
-  }}
-  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %inv0 = vector.fragment.load<result> %inv_view[%wave_row, %c0] shape [%c16, %c16] : view<256x16xf32> -> vector<8xf32>
-  %inv1 = vector.fragment.load<result> %inv_view[%wave_row1, %c0] shape [%c16, %c16] : view<256x16xf32> -> vector<8xf32>
-  %y_layout = encoding.layout.strided [%n, %c1] : encoding<layout>
+  %inv_row_value = index.add %row_origin, %workitem : index
+  %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index
+  %inverse = view.load %s_view[%inv_row, %c1] : view<[%rows]x2xf32> -> f32
+  %inverse16 = vector.splat %inverse : vector<16xf32>
+  vector.store %inverse16, %inv_view[%workitem, %c0] : vector<16xf32>, view<256x16xf32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)''')
+    for r in range(RF):
+        L.append(f"  %inv{r} = vector.fragment.load<result> %inv_view[{rowv[r]}, %c0] shape [%c16, %c16] : view<256x16xf32> -> vector<8xf32>")
+    L.append(f'''  %y_layout = encoding.layout.strided [%n, %c1] : encoding<layout>
   %tile_first = index.madd %row_origin, %n, %out_origin : index
   %tile_offset = index.scale %tile_first, %four : index, offset -> offset
   %y_view = buffer.view %y[%tile_offset] : buffer -> view<256x{TN}xf32, %y_layout>''')
-    for r in range(2):
+    for r in range(RF):
         for c in range(cfr):
-            row = "%wave_row" if r == 0 else "%wave_row1"
+            row = rowv[r]
             L.append(f"  %oc{r}{c}_c = index.constant {c * 16} : index\n  %oc{r}{c} = index.add %wave_col, %oc{r}{c}_c : index")
             if two_w:
                 L.append(f'''  %g{r}{c} = vector.mulf %o0r{r}c{c}, %inv{r} : vector<8xf32>
@@ -823,7 +845,6 @@ def gemm_big256(fmt, mode):
             L.append(f"  vector.fragment.store<result> %v{r}{c}, %y_view[{row}, %oc{r}{c}] shape [%c16, %c16] : vector<8xf32>, view<256x{TN}xf32, %y_layout>")
     L.append("  kernel.return\n}\n")
     return "\n".join(L)
-
 
 
 def gemm_q8(fmt, mode):
