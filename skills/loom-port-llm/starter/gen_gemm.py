@@ -1105,10 +1105,10 @@ if __name__ == "__main__":
         # can sit between live rows, so the first row alone does not decide the tile.
         anchor = "  %s_view = buffer.view %scales[%origin] : buffer -> view<[%rows]x2xf32>\n"
         assert anchor in text
-        tm = 128 if "%row_origin = index.mul %row_group, %c128 : index" in text else 64
+        tm = next(m for m in (256, 128, 64) if f"%row_origin = index.mul %row_group, %c{m} : index" in text)
         assert f"%row_origin = index.mul %row_group, %c{tm} : index" in text
         check = anchor + f"""  %skip_tid0 = kernel.workitem.id<x> : index
-  %skip_tid = index.assume %skip_tid0 [range(%skip_tid0, 0, 255)] : index
+  %skip_tid = index.assume %skip_tid0 [range(%skip_tid0, 0, 511)] : index
   %skip_tm = index.constant {tm} : index
   %skip_in = index.cmp ult, %skip_tid, %skip_tm : index
   %skip_row = index.add %row_origin, %skip_tid : index
