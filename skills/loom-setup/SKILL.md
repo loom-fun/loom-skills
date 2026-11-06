@@ -4,18 +4,15 @@ description: Install AMD Loom (hrx-loom from PyPI, or a ROCm/hrx-system CI wheel
 ---
 
 # Loom setup: install → fetch → serve
-
-`${CLAUDE_SKILL_DIR}` is this SKILL.md's directory; substitute it yourself if your agent leaves it unexpanded.
-
 Read the `loom` umbrella skill's hard rules first (memory limits, `--memory_bytes`,
 binary approval).
 
 ## 1. Install (≈30 s with a warm pip cache, a few minutes cold)
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/install_loom.sh ~/loom            # hrx-loom 0.1.0 from PyPI (what the port templates target)
-bash ${CLAUDE_SKILL_DIR}/scripts/install_loom.sh ~/loom latest     # newest PyPI release
-bash ${CLAUDE_SKILL_DIR}/scripts/install_loom.sh ~/loom ci-latest  # newest main CI wheel (needs gh)
+bash <skill-dir>/scripts/install_loom.sh ~/loom            # hrx-loom 0.1.0 from PyPI (what the port templates target)
+bash <skill-dir>/scripts/install_loom.sh ~/loom latest     # newest PyPI release
+bash <skill-dir>/scripts/install_loom.sh ~/loom ci-latest  # newest main CI wheel (needs gh)
 ```
 The script:
 - creates `~/loom/.venv` with `pip install 'hrx-loom[hf]==0.1.0'`, which provides loom-serve,
@@ -74,7 +71,7 @@ Notes:
 ## 3. Serve
 
 ```bash
-S=${CLAUDE_SKILL_DIR}/scripts
+S=<skill-dir>/scripts
 VENV=~/loom/.venv $S/serve.sh asr 8100 amdgpu 16000000000 ~/loom/models/moonshine/model.json
 VENV=~/loom/.venv $S/serve.sh gpu 8100 amdgpu 53687091200 models/a/model.json models/b/model.json -- --parameter_idle_ms=60000
 VENV=~/loom/.venv-npu $S/serve.sh npu 8101 'xdna://0?columns=8' 4000000000 models/qwen3-embedding/model.json -- --pool_backing=fixed

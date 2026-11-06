@@ -4,9 +4,6 @@ description: Roofline analysis for a Loom LLM port on Strix Halo — compute the
 ---
 
 # Roofline → targets
-
-`${CLAUDE_SKILL_DIR}` is this SKILL.md's directory; substitute it yourself if your agent leaves it unexpanded.
-
 The point is to decide **once, up front, with numbers**, what the port should reach,
 so the optimization loop (`loom-optimize`) has a finish line, and so a stopping
 decision is a measurement rather than a debate.
@@ -59,7 +56,7 @@ In every case:
 ## 2. Run
 
 ```bash
-T=~/loom/.tools/bin/python; R=${CLAUDE_SKILL_DIR}
+T=~/loom/.tools/bin/python; R=<skill-dir>
 # qualify.sh runs this for you, with the budget from section 0. By hand:
 $T $R/roofline.py MODEL.gguf --cfg cfg.json --baseline bench/perf_log.jsonl --ctx 1000,2000,16000 --out bench/roofline.json \
    --budget-h 0.5          # the user's budget (section 0); add --goal decode_tps=70 for a user target

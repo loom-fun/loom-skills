@@ -4,9 +4,6 @@ description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve packag
 ---
 
 # Port an LLM to Loom
-
-`${CLAUDE_SKILL_DIR}` is this SKILL.md's directory; substitute it yourself if your agent leaves it unexpanded.
-
 The goal is a package directory that `loom-serve --model=PKG/model.json` serves as a
 complete chat model:
 - greedy output that matches llama.cpp up to near-ties;
@@ -29,11 +26,11 @@ Prerequisites:
 ## Fast path: one command (≈1 min for a 0.6–0.8B model)
 
 ```bash
-LOOM_ROOT=~/loom ${CLAUDE_SKILL_DIR}/port.sh <org>/<repo-GGUF>[:file.gguf] ~/work/mymodel [PORT] [MEMORY_GIB] [MODEL_ID]
+LOOM_ROOT=~/loom <skill-dir>/port.sh <org>/<repo-GGUF>[:file.gguf] ~/work/mymodel [PORT] [MEMORY_GIB] [MODEL_ID]
 #   PORT, MEMORY_GIB, MODEL_ID are positional (defaults 8160, 56, derived): e.g. ... ~/work/m 8260 40
 # then, in an end-to-end job, loom-benchmark/scripts/qualify.sh (gates + baselines + roofline);
 # or just the gates:
-LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmark/scripts/gates.sh \
+LLAMACPP_DIR=<llama.cpp ROCm dir> <skill-dir>/../loom-benchmark/scripts/gates.sh \
   ~/work/mymodel/pkg http://127.0.0.1:8160 ~/work/mymodel/gguf/<file.gguf> ~/work/mymodel/bench [LLAMA_PORT=8130]
 ```
 `port.sh` runs steps 1–6 below deterministically:
@@ -73,7 +70,7 @@ The expensive path. Keep it short:
 2. **Diff it against what the starter does** for a dense layer (Qwen3: `attn_norm → Qcur/Kcur/Vcur
    (+ q/k norm, RoPE) → attention → attn_output → ffn_inp → ffn_norm → gate/up → swiglu → down →
    l_out`). Every extra node or different op is a feature to add; write the list down first.
-3. **Copy the starter into the work dir** (`cp -r ${CLAUDE_SKILL_DIR}/starter W/kit`) and extend
+3. **Copy the starter into the work dir** (`cp -r <skill-dir>/starter W/kit`) and extend
    the copy: a cfg flag per feature in `inspect_gguf.py`, the op in `gen_llm.py` (decode first:
    matvec path, prefill later), and a kernel test case in `make_kernel_tests.py`. If you change
    `chat_probe.py` (a chat format it can't model), `export LOOM_KIT=W/kit`: the benchmark
@@ -81,7 +78,7 @@ The expensive path. Keep it short:
    thinking)` if you define one (how a reply's channels map back to raw text, for a format the
    default doesn't cover). No need to copy the skills tree. Reuse before
    writing: **check `reference/` for the architecture family first** and make the kit with
-   `${CLAUDE_SKILL_DIR}/reference/apply_example.sh EXAMPLE W/kit W/cfg.json` (the starter + the example's
+   `<skill-dir>/reference/apply_example.sh EXAMPLE W/kit W/cfg.json` (the starter + the example's
    files + its `starter.patch`, and its reviewed `cfg.json` fields merged into yours):
 
    | Family | Example |
@@ -117,7 +114,7 @@ The expensive path. Keep it short:
 ## Workflow, step by step (what port.sh does; use it to debug a stage)
 
 ```bash
-K=${CLAUDE_SKILL_DIR}/starter; T=~/loom/.tools/bin/python
+K=<skill-dir>/starter; T=~/loom/.tools/bin/python
 W=~/work/mymodel && mkdir -p $W && cd $W
 # 1. Inspect the GGUF: geometry, tensor formats, eos ids, native context, hybrid layers, and the
 #    chat block DERIVED from the GGUF's Jinja chat template (chat_probe.py) and VERIFIED against it:
@@ -132,7 +129,7 @@ $T -I $K/inspect_gguf.py /path/model-Q4_K_M.gguf cfg.json
 #    to --memory-gib (default auto: that pool, capped at 60% of RAM; one model is loaded at a time). Prints the model id and --memory_bytes.
 $T $K/build.py cfg.json pkg --tokenizer tok/tokenizer.json --model-id <org>/<name-without-spaces>
 # 5. Serve + smoke test
-VENV=~/loom/.venv ${CLAUDE_SKILL_DIR}/../loom-setup/scripts/serve.sh mine 8160 amdgpu <memory_bytes> pkg/model.json
+VENV=~/loom/.venv <skill-dir>/../loom-setup/scripts/serve.sh mine 8160 amdgpu <memory_bytes> pkg/model.json
 curl -s localhost:8160/v1/chat/completions -H 'Content-Type: application/json' \
   -d '{"model":"<model id>","messages":[{"role":"user","content":"What is the capital of France?"}],"max_tokens":400}'
 #    thinking models spend 100-400 tokens reasoning: check finish_reason and that content is non-empty;

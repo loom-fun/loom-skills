@@ -132,10 +132,6 @@ skills/<skill>/SKILL.md                          # the eight skills, with their 
 LICENSE                                          # MIT
 THIRD_PARTY_NOTICES.md
 ```
-
-Skills refer to their bundled files through `${CLAUDE_SKILL_DIR}`. Claude Code expands it; other
-agents are told to read it as the directory of the SKILL.md.
-
 ## Contributing
 
 To try local changes, install them from your checkout with `npx skills add /path/to/loom-skills`.
