@@ -82,6 +82,7 @@ QKV_BIAS = [p for p in ("q", "k", "v") if p in (CFG.get("attn_bias") or [])]
 assert not (QKV_BIAS and FUSED_Q), "attn_q bias with a fused [q | gate] projection: split the bias too"
 ROPE = CFG.get("rope_type", "neox")       # "neox": pairs (d, d+64); "norm": pairs (2d, 2d+1)
 THETA = CFG["rope_theta"]
+FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs)
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
 
 from formats import FMT, SB, LOWBIT, ICODES as IQ_FMTS  # noqa: E402  bytes / values per block of each decoded format
@@ -1928,6 +1929,22 @@ def mrope_pick(j, idx):
 MRP = []   # selection lines emitted before each pair's angle
 
 
+def freq_factor(j):
+    """llama3 rope_freqs (FREQ_FACTORS): divide pair j's frequency by its factor, picked from the runs of equal
+    factors by the pair index %li{j} (Llama 3.x: eight runs). Empty without factors."""
+    if not FREQ_FACTORS:
+        return ""
+    runs = [(i, f) for i, f in enumerate(FREQ_FACTORS) if i == 0 or f != FREQ_FACTORS[i - 1]]
+    t = [f"\n  %ff{j}_0 = scalar.constant {float(runs[0][1])!r} : f32"]
+    for r, (start, f) in enumerate(runs[1:], 1):
+        t.append(f"""  %ffs{j}_{r} = scalar.constant {start} : i32
+  %ffc{j}_{r} = scalar.cmpi sge, %li{j}, %ffs{j}_{r} : i32
+  %ffv{j}_{r} = scalar.constant {float(f)!r} : f32
+  %ff{j}_{r} = scf.select %ffc{j}_{r}, %ffv{j}_{r}, %ff{j}_{r - 1} : f32""")
+    t.append(f"  %if{j}f = scalar.divf %if{j}, %ff{j}_{len(runs) - 1} : f32")
+    return "\n".join(t)
+
+
 def qk_rope():
     """Per-head (optional) RMSNorm + RoPE for QH query and KVH key heads, with
     keys/values stored to the paged F16 KV planes: one 256-lane workgroup per
@@ -2002,8 +2019,8 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %lf{j} = scalar.sitofp %li{j} : i32 to f32
   %ex{j}a = scalar.mulf %lf{j}, %ln_scale : f32
   %ex{j}b = scalar.mulf %ex{j}a, %neg : f32
-  %if{j} = scalar.expf<afn> %ex{j}b : f32
-  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j} : f32
+  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j)}
+  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if FREQ_FACTORS else ""} : f32
   %tr{j} = scalar.mulf %ra{j}, %inv_two_pi : f32
   %ts{j} = scalar.addf %tr{j}, %half : f32
   %ti{j} = scalar.fptosi %ts{j} : f32 to i32
@@ -3309,9 +3326,12 @@ def moe_layer(i, b, nm, sz, par):
     E, KU, FE = MOE["experts"], MOE["used"], MOE["ffn"]
     assert MOE.get("scale", 1.0) == 1.0, "expert_weights_scale != 1: scale the combine weights"
     fg, fu, fd = fmt_of(b + "ffn_gate_exps.weight"), fmt_of(b + "ffn_up_exps.weight"), fmt_of(b + "ffn_down_exps.weight")
-    assert fg == fu
     sg, sd = tensor_bytes(b + "ffn_gate_exps.weight"), tensor_bytes(b + "ffn_down_exps.weight")
-    USED_MOE.add((fg, H, FE, "gu")); USED_MOE.add((fd, FE, H, "dn"))
+    su = tensor_bytes(b + "ffn_up_exps.weight")
+    # Gate and up in different formats (MiniCPM-V-4.7's Q4_K_M: Q4_K gate, Q6_K up): kernels "GATE+UP" (gen_moe.py)
+    gu = fg if fg == fu else f"{fg}+{fu}"
+    gun = gu.replace("+", "_")
+    USED_MOE.add((gu, H, FE, "gu")); USED_MOE.add((fd, FE, H, "dn"))
     R = MOE_R
     rty = TENS[b + "ffn_gate_inp.weight"]["type"]
     T = []
@@ -3334,18 +3354,18 @@ def moe_layer(i, b, nm, sz, par):
     T.append(f"""  %router_{i} = command.parameter %weights, "{b}ffn_gate_inp.weight" : view<{E * H}x{rty}>
 """ + (f"""  %ebias_{i} = command.parameter %weights, "{b}exp_probs_b.bias" : view<{E}xf32>
 """ if MOE["probs_bias"] else "") + f"""  %wge_{i} = command.parameter %weights, "{b}ffn_gate_exps.weight" : view<{sg}xi8>
-  %wue_{i} = command.parameter %weights, "{b}ffn_up_exps.weight" : view<{sg}xi8>
+  %wue_{i} = command.parameter %weights, "{b}ffn_up_exps.weight" : view<{su}xi8>
   %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
   scf.if %gemm {{
     kernel.launch @g_moe_route_tr_live[%t](%t, %h, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
     kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
-    kernel.launch @g_moe_ggu_{fg}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, %wue_{i}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{sg}xi8>, buffer)
+    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, %wue_{i}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>, buffer)
     kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
     kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>, buffer)
     kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}%y) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
   }} else {{
     kernel.launch @g_moe_route[%t](%t, %h, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
-    kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wge_{i}, %wue_{i}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{sg}xi8>, buffer)
+    kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wge_{i}, %wue_{i}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>, buffer)
     kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wde_{i}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>, buffer)
     kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {sgarg}%y) : [index](index, buffer, buffer, {sgty}buffer)
   }}
