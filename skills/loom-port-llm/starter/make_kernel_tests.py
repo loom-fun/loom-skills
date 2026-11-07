@@ -525,6 +525,7 @@ if cfg.get("attn_sinks") and os.environ.get("PREFILL_CONT", "1") != "0":
         prefill_cont_case(_li, _p0, 48, 0, f"pc_full_{_li}")     # 3 uniform tiles: flash2 only
         prefill_cont_case(_li, _p0, 48, 7, f"pc_part_{_li}")     # last tile partly padding: listed fallback
         prefill_cont_case(_li, _p0, 48, 0, f"pc_small_{_li}", 0.1)  # small scores: the sink dominates the softmax
+        prefill_cont_case(_li, 64, 64, 60, f"pc_reuse_{_li}")    # a reused 64-token prefix, 4 new tokens in a 64-row epoch
 # 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
 if cfg.get("recurrent_layers"):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
