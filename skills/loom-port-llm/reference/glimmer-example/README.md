@@ -8,7 +8,7 @@ in the sampling logits are starter features driven by the config.
 
 | File | Adds |
 |---|---|
-| `chat/atem.loom`, `chat/atem_rodata.py` | the ATEM channel format (`<|start|>assistant to=self<|message|>...` reasoning, `to=user` answers, tool headers `to=functions.NAME`) and its tool-call parsing in `output_next` (a zero-length span must not change state). `build.py` splices `chat/<call_format>.loom` over the generic chat functions |
+| `chat/atem.loom`, `chat/atem_rodata.py` | the ATEM channel format (`<|start|>assistant to=self<|message|>...` reasoning, `to=user` answers, tool headers `to=functions.NAME`) on `starter/templates/control_channels.loom` (shared with harmony: `output_next`, `parse_tools`, helpers; the kit's `@ch_header_state` maps a header to a state and its calls become XML for the generic parser; a zero-length span must not change state). `build.py` splices `chat/<call_format>.loom` over the generic chat functions |
 | `starter.patch` | `chat_probe.py`: the ATEM model (`simulate()` verified against the Jinja template, `raw_from_chat()` / `raw_alternatives()` for the benchmark); `make_kernel_tests.py`: mixed-format matvec tests |
 | reviewed config | the published package's `llm_config.json` ([loom-fun/unsloth-Muse-Glimmer-30B-loom](https://huggingface.co/loom-fun/unsloth-Muse-Glimmer-30B-loom), category A, pinned in `../examples.json`; merged by `apply_example.sh glimmer KIT CFG`) |
 

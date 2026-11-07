@@ -603,6 +603,8 @@ CALL_FORMATS = {"none": 0, "hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4, 
 # string constants). In it, @@HEX_CHAT:<key>@@ is the hex of chat[<key>]; chat.base_call_format (default
 # hermes) is the tool-call format the generic functions use underneath. See reference/glimmer-example.
 # Its lines may hold variants for what the derived chat block says (chat_variants: // @@IF_CHAT:KEY@@ markers).
+# A channel format (Glimmer's ATEM, harmony) builds on templates/control_channels.loom (output_next, parse_tools and
+# helpers over the kit's @ch_ hooks), appended when the kit uses it.
 custom_chat = os.path.join(HERE, "chat", chat["call_format"] + ".loom")
 custom_chat = custom_chat if chat["call_format"] not in CALL_FORMATS and os.path.exists(custom_chat) else None
 subs = {
@@ -668,7 +670,10 @@ for name in ("prepare", "control", "storage", "service"):
         if os.path.exists(rodata_py):
             sys.path.insert(0, os.path.dirname(rodata_py))
             text += "\n" + __import__(os.path.basename(rodata_py)[:-3]).rodata()
-        text += "\n" + chat_variants(open(custom_chat, encoding="utf-8").read())
+        kit_chat = open(custom_chat, encoding="utf-8").read()
+        if "@ch_" in kit_chat:   # a channel format (<|start|>HEADER<|message|>TEXT): templates/control_channels.loom
+            text += "\n" + open(os.path.join(HERE, "templates", "control_channels.loom"), encoding="utf-8").read()
+        text += "\n" + chat_variants(kit_chat)
         text = re.sub(r"@@HEX_CHAT:(\w+)@@", lambda m: hx(chat.get(m.group(1), "")), text)
     if name == "storage" and (cfg.get("vision") or {}).get("mrope"):   # M-RoPE span offsets after the plan
         sys.path.insert(0, os.path.join(HERE, "vision"))

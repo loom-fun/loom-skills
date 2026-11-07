@@ -69,6 +69,7 @@ MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) | ({MTP_LAYER} if M
 FS = (MOE or {}).get("shared_ffn", 0)     # shared-expert FFN width (0: none)
 SHGATE = (MOE or {}).get("shared_gate", False)   # Qwen-style sigmoid gate on the shared experts (ffn_gate_inp_shexp)
 SINKS = CFG.get("attn_sinks", False)      # learned per-head softmax sink logits (attn_sinks)
+assert not (SINKS and GATE), "attention sinks ride in the output gate's argument of the attention kernels: not both"
 POST_NORM = CFG.get("post_norms", False)
 POST_EPS = CFG.get("post_norm_eps", 1e-8)
 EMBED_NORM = CFG.get("embed_norm", False)
@@ -3011,9 +3012,10 @@ from gen_gemm import HELPER as GEMM_HELPER   # noqa: E402  formats without a 128
 GEMM_M256 = os.environ.get("GEMM_M256", "1") not in ("", "0", "false", "no")
 
 
-def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store", gemm_only=False):
+def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store", gemm_only=False, width=None):
     """Projection y = x W^T: WMMA GEMM for 64+ tokens (128-row tiles from 128),
-    else the decode matrix-vector kernel (1-token or 4-token variant)."""
+    else the decode matrix-vector kernel (1-token or 4-token variant). n: the output width, a literal or an NVAL
+    symbol; a symbol another generator defines (the drafters' %nDQ, %nE, ...) comes with its value as width."""
     base = f"g_mv_{fmt}_k{kval}" + ("_swiglu" if mode == "swiglu" else "")
     if mode == "swiglu":
         wa, wb = w
@@ -3043,7 +3045,8 @@ def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store", gemm_only=False):
       }}"""
     # The 128/256-row kernels tile the outputs by 128 (swiglu: 64 of each weight) and compute only whole tiles: an
     # output width they do not divide (gpt-oss: 2880) keeps the 64-row kernel, or the last columns are never written.
-    nv = NVAL.get(n, int(n) if str(n).isdigit() else 0)
+    nv = width if width is not None else int(n) if str(n).isdigit() else NVAL.get(n)
+    assert nv, f"linear(): output width {n} is neither a literal nor an NVAL symbol: pass width="
     if nv % (64 if mode == "swiglu" else 128):
         gemm = f"kernel.launch @g_gemm_{fmt}_{mode}[%t, {n}]({args}) : [index, index]({types})"
     if gemm_only:
@@ -3458,9 +3461,9 @@ def quant_wiring(program):
     return program
 
 
-def lin(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
+def lin(fmt, x, s, w, wsize, y, k, n, kval, mode="store", width=None):
     USED_GEMM.setdefault(fmt, set()).add(mode)
-    return linear(fmt, x, s, w, wsize, y, k, n, kval, mode)
+    return linear(fmt, x, s, w, wsize, y, k, n, kval, mode, width=width)
 
 
 # PAIR_PROJ: two projections of the same input with the same format and shape (attention q + gate, k + v) take one
@@ -3474,16 +3477,16 @@ def lin(fmt, x, s, w, wsize, y, k, n, kval, mode="store"):
 PAIR_PROJ = os.environ.get("PAIR_PROJ", "qg")   # qg (default): q + gate only; kv: k + v only; 1: both; 0: off
 
 
-def lin2(fmt, x, s, wa, wb, wsize, ya, yb, k, n, kval):
+def lin2(fmt, x, s, wa, wb, wsize, ya, yb, k, n, kval, width=None):
     """Projections ya = x Wa^T and yb = x Wb^T (same format and size): two lin() calls, except that with PAIR_PROJ the
     int8 8/16-token matvecs take one dual-weight (pair) launch."""
     iq = ACT_Q8 and fmt in IQ_FMTS and kval // 32 <= 1024
     if not (PAIR_PROJ != "0" and iq):
-        return lin(fmt, x, s, wa, wsize, ya, k, n, kval) + "\n  " + lin(fmt, x, s, wb, wsize, yb, k, n, kval)
+        return lin(fmt, x, s, wa, wsize, ya, k, n, kval, width=width) + "\n  " + lin(fmt, x, s, wb, wsize, yb, k, n, kval, width=width)
     x16 = {"%h": "%h16", "%o": "%o16", "%f": "%f16"}.get(x, x + "16")
     a1 = lambda w, y: f"({n}, %t, %zero_i32, {x16}q, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
     a2 = f"({n}, %t, %zero_i32, {x16}q, {wa}, {wb}, {ya}, {yb}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, view<{wsize}xi8>, buffer, buffer)"
-    gemm = lambda w, y: linear(fmt, x, s, w, wsize, y, k, n, kval, gemm_only=True)
+    gemm = lambda w, y: linear(fmt, x, s, w, wsize, y, k, n, kval, gemm_only=True, width=width)
     USED_GEMM.setdefault(fmt, set()).add("store")
     _LIN[0] += 1
     c = _LIN[0]

@@ -73,7 +73,7 @@ def _rep1(text, a, b):
     return text.replace(a, b)
 
 
-def _softmax_weight_decode(text, bias):
+def _softmax_weight_decode(text):
     """g_moe_route for gating 3 from the sigmoid router's text: the score is the logit (+ the router bias), and the
     winners' weights are a softmax over their scores (workgroup max and sum after the top-k rounds)."""
     text = _rep1(text, "%prob_v = scalar.logisticf<afn> %lgt : f32", "%prob_v = scalar.addf %lgt, %zero_f : f32")
@@ -124,7 +124,7 @@ def route_decode(H, E, KU, gating, norm, bias, wty="f32"):
     bias_load = f"""    %b_view = buffer.view %b[%zero] : buffer -> view<{E}xf32>
     %bias_v = view.load %b_view[%be] : view<{E}xf32> -> f32""" if bias else ""
     if gating == 3:   # the biased logit is both the selection score and the weight's logit
-        return _softmax_weight_decode(route_decode(H, E, KU, 2, False, bias, wty), bias)
+        return _softmax_weight_decode(route_decode(H, E, KU, 2, False, bias, wty))
     norm_text = f"""  %min_sum = scalar.constant 6.103515625e-05 : f32
   %wsum = scalar.maxnumf %total, %min_sum : f32""" if norm else "  %wsum = scalar.constant 1.0 : f32"
     # softmax: thread e holds logit e (out of range: -3e38); probabilities over all E experts (workgroup max and

@@ -369,11 +369,12 @@ def yarn(inv, y=cfg.get("rope_scaling"), rd=RD, theta=cfg["rope_theta"]):
     low, high = max(0.0, np.floor(dim(y.get("beta_fast", 32.0)))), min(rd - 1.0, np.ceil(dim(y.get("beta_slow", 1.0))))
     ramp = np.clip((np.arange(len(inv)) - low) / max(0.001, high - low), 0, 1)
     return inv * (1 - (1 - 1 / f) * ramp), y.get("attn_factor", 1.0) * (1 + 0.1 * np.log(f))
-def rope(a, RD=RD, theta=cfg["rope_theta"], factors=cfg.get("rope_freq_factors"), y=cfg.get("rope_scaling")):
+def rope(a, RD=RD, theta=cfg["rope_theta"], factors=cfg.get("rope_freq_factors"), y=cfg.get("rope_scaling"), at=None):
+    """RoPE of a (tokens x heads x D) at positions `at` (default: the global pos)."""
     inv = theta ** (-np.arange(0, RD // 2) * 2.0 / RD)
     if factors:   # llama3 rope_freqs: each pair's frequency divided by its factor
         inv = inv / np.asarray(factors[:RD // 2], np.float64)
-    inv, msc = yarn(inv, y, RD, theta); ang = pos[:, None] * inv[None]
+    inv, msc = yarn(inv, y, RD, theta); ang = (pos if at is None else at)[:, None] * inv[None]
     c, s = np.cos(ang)[:, None] * msc, np.sin(ang)[:, None] * msc
     if cfg["rope_type"] == "neox":
         a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
@@ -567,14 +568,8 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
     allpos = np.arange(n)
     qa = (rng.standard_normal((n, QH, D)) * (1.0 if cfg["qk_norm"] else qscale)).astype(np.float32); ka = rng.standard_normal((n, KVH, D)).astype(np.float32)
     va = rng.standard_normal((n, KVH, D)).astype(np.float32)
-    def rope_p(a, p):
-        inv, msc = yarn(cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD)); ang = p[:, None] * inv[None]
-        c, s = np.cos(ang)[:, None] * msc, np.sin(ang)[:, None] * msc
-        if cfg["rope_type"] == "neox":
-            a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
-        a1, a2 = a[..., 0::2], a[..., 1::2]; o = np.empty_like(a); o[..., 0::2] = a1 * c - a2 * s; o[..., 1::2] = a2 * c + a1 * s; return o
     qr_ = norm(qa, qn_) if cfg["qk_norm"] else qa; kr_ = norm(ka, kn_) if cfg["qk_norm"] else ka
-    if rp: qr_, kr_ = rope_p(qr_, allpos), rope_p(kr_, allpos)
+    if rp: qr_, kr_ = rope(qr_, at=allpos), rope(kr_, at=allpos)
     kf = kr_.astype(np.float16).astype(np.float64); vf = va.astype(np.float16).astype(np.float64)
     live = np.ones(t, bool); live[t - pad:] = False
     att = np.zeros((t, QH, D))

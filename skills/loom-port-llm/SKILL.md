@@ -148,7 +148,8 @@ The expensive path. Keep it short:
    correct but slow: get the gates passing first, then add GEMM prefill as the first optimization.
 8. **The chat block** for templates `chat_probe.py` can't model (channels, role tags without a
    suffix, tools inside a message): see the checklist below and
-   `reference/glimmer-example` (a channel format end to end: `chat/atem.loom` + its `chat_probe.py`).
+   `reference/glimmer-example` (a channel format end to end: `chat/atem.loom` + its `chat_probe.py`; another
+   channel format reuses `starter/templates/control_channels.loom`, as `reference/gpt-oss-example` does).
 9. **Work in parallel when you can spawn agents.** The kernels (steps 1–6) and the chat block
    (step 8: `chat_probe.py` + `control.loom`, verified against the Jinja template) are
    independent until `build.py`. Give the chat work to a subagent on its own copy of the kit and

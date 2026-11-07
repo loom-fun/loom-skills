@@ -5,13 +5,13 @@ import chat_probe as c
 _head, _tail = c.HARMONY_SYSTEM.split("{effort}")
 S = {
  "h_system_open": "<|start|>system<|message|>" + _head, "h_system_tail": _tail, "h_tools_note": c.HARMONY_TOOLS_NOTE,
- "h_end": "<|end|>", "h_start": "<|start|>", "h_message": "<|message|>", "h_call": "<|call|>",
+ "ch_close": "<|end|>", "ch_start": "<|start|>", "ch_message": "<|message|>", "h_call": "<|call|>",
  "h_developer_open": "<|start|>developer<|message|>", "h_instructions": "# Instructions\n\n", "h_tools_head": "# Tools\n\n",
  "h_blank": "\n\n", "h_user_open": "<|start|>user<|message|>",
  "h_analysis_open": "<|start|>assistant<|channel|>analysis<|message|>", "h_final_open": "<|start|>assistant<|channel|>final<|message|>",
  "h_call_open": "<|start|>assistant to=functions.", "h_call_mid": "<|channel|>commentary json<|message|>",
  "h_result_open": "<|start|>functions.", "h_result_mid": " to=assistant<|channel|>commentary<|message|>",
- "h_generation": c.HARMONY_GENERATION,
+ "ch_generation": c.HARMONY_GENERATION,
  "h_ns_open": "## functions\n\nnamespace functions {\n\n", "h_ns_close": "} // namespace functions",
  "h_comment": "// ", "h_nl": "\n", "h_type_kw": "type ", "h_type_eq": " = ", "h_params_open": "(_: {\n",
  "h_params_close": "}) => any;\n\n", "h_no_params": "() => any;\n\n", "h_optional": "?", "h_colon": ": ", "h_comma_nl": ",\n",

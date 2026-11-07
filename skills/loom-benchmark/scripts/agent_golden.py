@@ -229,7 +229,7 @@ def main():
                 elif rec["golden_match"] and u["completion_tokens"] > len(loom_ids) + 4:
                     # Generated tokens the parsed channels do not hold (and not a dropped second call): an empty or
                     # short reply is a prefix of any golden, so it is not a match.
-                    rec["golden_match"], rec["unpublished"] = False, [len(loom_ids), u["completion_tokens"]]
+                    rec["golden_match"], rec["near_tie"], rec["unpublished"] = False, False, [len(loom_ids), u["completion_tokens"]]
             golden_ok = rec.get("golden_match", True) or rec.get("near_tie", False)
             ok = rec["render_ok"] and rec["reuse_ok"] and rec["calls_ok"] and golden_ok
             failures += not ok
