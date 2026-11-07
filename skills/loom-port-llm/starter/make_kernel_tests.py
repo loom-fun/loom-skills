@@ -39,7 +39,10 @@ def deq(name):
 H, D, QH, KVH, eps = cfg["hidden"], cfg["head_dim"], cfg["heads"], cfg["kv_heads"], cfg["rms_eps"]
 rng = np.random.default_rng(0)
 cases = []
-def save(n, a): np.save(os.path.join(out, n + ".npy"), a)
+KS = os.environ.get("KTEST_HEADS_SFX", "")   # a child run for a narrower query-head count (see the end): _h<heads>
+def save(n, a): np.save(os.path.join(out, n + KS + ".npy"), a)
+# The output gate as llama.cpp applies it (cfg attn_gate_act): sigmoid, or softplus (laguna)
+def gate_act(g): return np.log1p(np.exp(g)) if cfg.get("attn_gate_act") == "softplus" else 1 / (1 + np.exp(-g))
 def ty(a): return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int8": "i8", "int32": "i32", "float16": "f16"}[str(a.dtype)] + ">"
 # 1. embed
 ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
@@ -107,7 +110,7 @@ if VIS:   # a media epoch: 8-word records, token 1 carries a feature row (copied
 seen = set(); todo = []
 VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
 for li in range(cfg["layers"]):
-    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", QH * D), ("ffn_gate", H),
+    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", (cfg.get("layer_heads") or [QH] * cfg["layers"])[li] * D), ("ffn_gate", H),
                    ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD),
                    ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0))]:
         name = f"blk.{li}.{nm_}.weight"
@@ -322,9 +325,16 @@ qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.fl
 kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
 q = rng.standard_normal((t, QH, D)).astype(np.float32); k = rng.standard_normal((t, KVH, D)).astype(np.float32); v = rng.standard_normal((t, KVH, D)).astype(np.float32)
 def norm(a, w): return a / np.sqrt((a * a).mean(-1, keepdims=True) + eps) * w
-def rope(a, RD=RD, theta=cfg["rope_theta"]):
-    inv = theta ** (-np.arange(0, RD // 2) * 2.0 / RD); ang = pos[:, None] * inv[None]
-    c, s = np.cos(ang)[:, None], np.sin(ang)[:, None]
+YARN = cfg.get("rope_scaling") if (cfg.get("rope_scaling") or {}).get("type") == "yarn" else None
+def rope(a, RD=RD, theta=cfg["rope_theta"], yarn=YARN):
+    inv = theta ** (-np.arange(0, RD // 2) * 2.0 / RD); m = 1.0
+    if yarn:   # ggml rope_yarn, ext_factor 1: interpolate the low frequencies, scale cos/sin by mscale
+        f = yarn["factor"]; cd = lambda r: RD * np.log(yarn["orig_ctx"] / (r * 2 * np.pi)) / (2 * np.log(theta))
+        lo, hi = max(0.0, np.floor(cd(yarn["beta_fast"]))), min(RD - 1.0, np.ceil(cd(yarn["beta_slow"])))
+        mix = 1 - np.clip((np.arange(RD // 2) - lo) / max(0.001, hi - lo), 0, 1)
+        inv = inv / f * (1 - mix) + inv * mix; m = yarn["attn_factor"] * (1 + 0.1 * np.log(f))
+    ang = pos[:, None] * inv[None]
+    c, s = m * np.cos(ang)[:, None], m * np.sin(ang)[:, None]
     if cfg["rope_type"] == "neox":
         a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
     a1, a2 = a[..., 0::2], a[..., 1::2]; o = np.empty_like(a); o[..., 0::2] = a1 * c - a2 * s; o[..., 1::2] = a2 * c + a1 * s; return o
@@ -364,7 +374,7 @@ cases.append(f"""check.case public @qk_rope {{
 # 3'. sliding layers with their own rotary dims / base at the same head_dim (gen_llm SWA_ROPE): g_qk_rope_store_swa
 RD_SWA, TH_SWA = cfg.get("rope_dims_swa") or RD, cfg.get("rope_theta_swa") or cfg["rope_theta"]
 if cfg.get("sliding_layers") and (cfg.get("head_dim_swa") or D) == D and (RD_SWA, TH_SWA) != (RD, cfg["rope_theta"]):
-    qs = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq, RD_SWA, TH_SWA)
+    qs = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq, RD_SWA, TH_SWA, None)
     save("r_qs", qs.reshape(t, -1).astype(np.float32))
     cases.append(cases[-1].replace("@qk_rope {", "@qk_rope_swa {").replace("@g_qk_rope_store[", "@g_qk_rope_store_swa[")
                  .replace('path("r_qe.npy")', 'path("r_qs.npy")'))
@@ -445,7 +455,7 @@ gh = rng.standard_normal((t, QH)).astype(np.float32)   # per-head gate logits (a
 if gate_kind == "per_head":
     gate = np.repeat(gh[:, :, None], D, 2)
 if gate_kind:
-    att = att / (1 + np.exp(-gate))
+    att = att * gate_act(gate)
 blocks = (ctx + 15) // 16
 orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)  # record: map origin 40; identity page map
 info = np.zeros((t, 4), np.int32); info[:, 1] = pos; info[:, 2] = 1
@@ -968,7 +978,7 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
         sc[np.arange(ctx)[None, :] > (P0 + np.arange(t))[:, None]] = -1e30
         pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); o[:, hh] = pr @ vv[:, kv].astype(np.float64)
     if cfg.get("attn_gate"):
-        o = o / (1 + np.exp(-gg))
+        o = o * gate_act(gg)
     QD = QH * D
     ow = None
     if WIN:   # sliding layers: key j visible from position p when p - WIN < j <= p (llama.cpp LLAMA_SWA_TYPE_STANDARD)
@@ -979,7 +989,7 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
             sc[(j_ > p_) | (j_ <= p_ - WIN)] = -1e30
             pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); ow[:, hh] = pr @ vv[:, kv].astype(np.float64)
         if cfg.get("attn_gate"):
-            ow = ow / (1 + np.exp(-gg))
+            ow = ow * gate_act(gg)
         save("f_ow", ow.reshape(t, QD).astype(np.float32))
     for n, a in [("f_arena", arena.reshape(-1)), ("f_q", qq.reshape(t, QD)), ("f_g", gg.reshape(t, QD)), ("f_orig", orig),
                  ("f_info", info), ("f_o", o.reshape(t, QD).astype(np.float32))]:
@@ -1010,7 +1020,7 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
 # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
 # bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
 # both with the shared experts' output already in y (scaled by the Qwen shared-expert gate when the model has one).
-if cfg.get("moe"):
+if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
     M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ.get("MOE_R", "8"))
     SHG, ACC = bool(M.get("shared_gate")), bool(M.get("shared_ffn"))
     def deq3(name):
@@ -1030,6 +1040,7 @@ if cfg.get("moe"):
         wts = np.take_along_axis(prob, ids, -1)
         if M["norm_weights"]:
             wts = wts / np.maximum(wts.sum(-1, keepdims=True), 6.103515625e-05)
+        wts = wts * M.get("scale", 1.0)
         ss = np.sort(sel, -1)[:, ::-1]
         rel = (ss[:, KU - 1] - ss[:, KU]) / np.maximum(np.abs(ss[:, KU - 1]), 1e-30)   # k-th vs (k+1)-th, relative
         return ids, wts, rel
@@ -1185,7 +1196,20 @@ if cfg.get("moe"):
 }}
 """)
 import re
+# Layers with fewer query heads (cfg layer_heads) run gen_llm.py's _h<heads> attention kernels: this script's attention
+# chain and flash cases at that head count, from a child run whose kernels, cases and files take the suffix.
+if KS:
+    cases = [re.sub(r"check\.case public @(\w+) \{", rf"check.case public @\1{KS} {{", re.sub(
+        r"@(g_qk_rope_store|g_attention_split|g_attention_combine|g_gate_heads|g_attention_flash2)\[", rf"@\1{KS}[", c))
+        .replace('.npy")', f'{KS}.npy")') for c in cases if re.match(r"\s*check\.case public @(attention_chain|flash_prefill)", c)]
+for h in sorted(set(cfg.get("layer_heads") or []) - {QH}):
+    hc = os.path.join(out, f"cfg_h{h}.json"); json.dump(dict(cfg, heads=h, layer_heads=None), open(hc, "w"))
+    import subprocess
+    subprocess.run([sys.executable, os.path.abspath(__file__), hc, out], check=True,
+                   env=dict(os.environ, KTEST_HEADS_SFX=f"_h{h}", GEMM_TESTS="0", DRAFTER_TESTS="0", MOE_TESTS="0"))
+    cases.append(open(os.path.join(out, f"cases_h{h}.loom-test")).read())
+    os.remove(hc); os.remove(os.path.join(out, f"cases_h{h}.loom-test"))
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
-open(os.path.join(out, "cases.loom-test"), "w", newline="\n").write(text)
+open(os.path.join(out, f"cases{KS}.loom-test"), "w", newline="\n").write(text)
 print("wrote", len(cases), "cases")

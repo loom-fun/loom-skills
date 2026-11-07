@@ -96,6 +96,29 @@ RD_SWA, THETA_SWA = CFG.get("rope_dims_swa") or RD, CFG.get("rope_theta_swa") or
 SWA_ROPE = bool(CFG.get("sliding_layers")) and (CFG.get("head_dim_swa") or D) == D and (RD_SWA, THETA_SWA) != (RD, THETA)
 assert not SWA_ROPE or (RD_SWA % 64 == 0 and RD_SWA <= D), "rope_dims_swa must be a multiple of 64"
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
+# Gate activation (cfg attn_gate_act): sigmoid (default), or softplus (laguna) on a per-head gate, which g_gate_heads
+# applies to the head's logit so the attention kernels multiply by the stored value.
+GATE_ACT = CFG.get("attn_gate_act", "sigmoid")
+assert GATE_ACT == "sigmoid" or (HEAD_GATE and GATE_ACT == "softplus"), f"attn_gate_act {GATE_ACT}: per-head softplus or sigmoid"
+# Query heads per layer (cfg layer_heads; laguna: 48 on full-attention layers, 64 on sliding ones). QH is the widest
+# (buffers); the attention kernels of a narrower layer are generated again for its head count (suffix _h<heads>).
+LH = CFG.get("layer_heads") or [QH] * L
+NARROW = sorted(set(LH) - {QH})
+assert all(h % KVH == 0 and h // KVH <= 16 for h in NARROW), "layer_heads: multiples of kv_heads, at most 16 per KV head"
+# YaRN RoPE scaling (cfg rope_scaling, inspect_gguf.py; llama.cpp ggml rope_yarn with ext_factor 1): pair i's
+# frequency theta^(-2i/RD) times 1 - (1 - 1/factor) * ramp(i), ramp = clamp((i - low) / (high - low), 0, 1), and the
+# rotated values times mscale. Sliding layers with their own RoPE (SWA_ROPE) rotate without it.
+YARN = CFG.get("rope_scaling") if (CFG.get("rope_scaling") or {}).get("type") == "yarn" else None
+
+
+def yarn_constants():
+    """(low, 1 / max(0.001, high - low), 1 - 1/factor, mscale) of llama.cpp's YaRN for this RoPE (ggml_rope_yarn_corr_dims)."""
+    y = YARN
+    f, n0 = float(y["factor"]), float(y["orig_ctx"])
+    dim = lambda rot: RD * math.log(n0 / (rot * 2 * math.pi)) / (2 * math.log(THETA))
+    low, high = max(0.0, float(math.floor(dim(y.get("beta_fast", 32.0))))), min(RD - 1.0, float(math.ceil(dim(y.get("beta_slow", 1.0)))))
+    mscale = y.get("attn_factor", 1.0) * (1.0 + 0.1 * math.log(f))
+    return low, 1.0 / max(0.001, high - low), 1.0 - 1.0 / f, mscale
 
 from formats import FMT, SB, LOWBIT, ICODES as IQ_FMTS  # noqa: E402  bytes / values per block of each decoded format
 
@@ -1947,6 +1970,34 @@ def mrope_pick(j, idx):
 MRP = []   # selection lines emitted before each pair's angle
 
 
+def yarn_freq(j):
+    """YaRN: lines turning pair j's frequency %if{j} (pair index %lf{j}) into %if{j}y (empty without YaRN)."""
+    if not YARN:
+        return ""
+    low, inv, mix, _ = yarn_constants()
+    return f"""
+  %yl{j} = scalar.constant {low!r} : f32
+  %yi{j} = scalar.constant {inv!r} : f32
+  %ym{j} = scalar.constant {mix!r} : f32
+  %yd{j} = scalar.subf %lf{j}, %yl{j} : f32
+  %yr{j} = scalar.mulf %yd{j}, %yi{j} : f32
+  %yc{j}a = scalar.maxnumf %yr{j}, %zero_f : f32
+  %yc{j} = scalar.minnumf %yc{j}a, %one_f : f32
+  %ys{j} = scalar.mulf %yc{j}, %ym{j} : f32
+  %yf{j} = scalar.subf %one_f, %ys{j} : f32
+  %if{j}y = scalar.mulf %if{j}, %yf{j} : f32"""
+
+
+def yarn_scale(j):
+    """YaRN: %cr{j}m / %sr{j}m = cos / sin times mscale (empty without YaRN)."""
+    if not YARN:
+        return ""
+    return f"""
+  %ymsc{j} = scalar.constant {yarn_constants()[3]!r} : f32
+  %cr{j}m = scalar.mulf %cr{j}, %ymsc{j} : f32
+  %sr{j}m = scalar.mulf %sr{j}, %ymsc{j} : f32"""
+
+
 def qk_rope():
     """Per-head (optional) RMSNorm + RoPE for QH query and KVH key heads, with
     keys/values stored to the paged F16 KV planes: one 256-lane workgroup per
@@ -2021,8 +2072,8 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %lf{j} = scalar.sitofp %li{j} : i32 to f32
   %ex{j}a = scalar.mulf %lf{j}, %ln_scale : f32
   %ex{j}b = scalar.mulf %ex{j}a, %neg : f32
-  %if{j} = scalar.expf<afn> %ex{j}b : f32
-  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j} : f32
+  %if{j} = scalar.expf<afn> %ex{j}b : f32{yarn_freq(j)}
+  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"y" if YARN else ""} : f32
   %tr{j} = scalar.mulf %ra{j}, %inv_two_pi : f32
   %ts{j} = scalar.addf %tr{j}, %half : f32
   %ti{j} = scalar.fptosi %ts{j} : f32 to i32
@@ -2030,9 +2081,9 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %wr{j} = scalar.mulf %tf{j}, %two_pi : f32
   %an{j} = scalar.subf %ra{j}, %wr{j} : f32
   %cr{j} = scalar.cosf<afn> %an{j} : f32
-  %sr{j} = scalar.sinf<afn> %an{j} : f32
-  %cos{j} = scf.select %apply_rope, %cr{j}, %one_f : f32
-  %sin{j} = scf.select %apply_rope, %sr{j}, %zero_f : f32""")
+  %sr{j} = scalar.sinf<afn> %an{j} : f32{yarn_scale(j)}
+  %cos{j} = scf.select %apply_rope, %cr{j}{"m" if YARN else ""}, %one_f : f32
+  %sin{j} = scf.select %apply_rope, %sr{j}{"m" if YARN else ""}, %zero_f : f32""")
     t.append(f"""  %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>
   %k_view = buffer.view %k[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
   %v_view = buffer.view %v[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
@@ -2303,7 +2354,8 @@ def attention_text(S, P):
     GATE_TEXT = """    %gate_view = buffer.view %gate[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
     %g = vector.load %gate_view[%token, %head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
     %sig = vector.logisticf<afn> %g : vector<4xf32>
-    %result = vector.mulf %attended, %sig : vector<4xf32>""".replace("{QH}", str(QH)) if GATE else "    %result = vector.addf %attended, %zero4 : vector<4xf32>"
+    %result = vector.mulf %attended, %sig : vector<4xf32>""".replace("{QH}", str(QH)).replace(
+        "vector.logisticf<afn> %g", "vector.addf %g, %zero4" if GATE_ACT != "sigmoid" else "vector.logisticf<afn> %g") if GATE else "    %result = vector.addf %attended, %zero4 : vector<4xf32>"
     text = f"""
 // Splits for `visible` keys: about 32 keys each, at most {S}.
 func.def inline @{P}_split_count(%visible: index) -> (index) {{
@@ -3165,6 +3217,7 @@ def head_iq_body(TG, fmt, R, waves, rb, perm=False):
 USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
 USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
 NVAL = {"%nQH": QH, "%nQKV": (QH + 2 * KVH) * D, "%nH": H, "%nFF": FF, **({} if FF_UNIFORM else {f"%nFF{w}": w for w in set(FFL)}), "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D, "%nFS": FS}
+NVAL.update({f"%nQ{h}": h * D for h in NARROW} | {f"%nQH{h}": h for h in NARROW})   # narrower layer_heads layers
 if GDN:
     NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
 from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
@@ -3326,7 +3379,6 @@ def moe_layer(i, b, nm, sz, par):
     sigmoid(h . ffn_gate_inp_shexp) inside the combine), then the routed experts:
     router -> per-assignment gate/up (swiglu) and down -> weighted combine added into y."""
     E, KU, FE = MOE["experts"], MOE["used"], MOE["ffn"]
-    assert MOE.get("scale", 1.0) == 1.0, "expert_weights_scale != 1: scale the combine weights"
     fg, fu, fd = fmt_of(b + "ffn_gate_exps.weight"), fmt_of(b + "ffn_up_exps.weight"), fmt_of(b + "ffn_down_exps.weight")
     assert fg == fu
     sg, sd = tensor_bytes(b + "ffn_gate_exps.weight"), tensor_bytes(b + "ffn_down_exps.weight")
@@ -3423,7 +3475,7 @@ def moe_kernels(row_scale, gemm_fn):
     import gen_moe as GM
     rty = TENS[f"blk.{MOE['leading_dense']}.ffn_gate_inp.weight"]["type"]
     a = (H, MOE["experts"], MOE["used"], MOE["gating"], MOE["norm_weights"], MOE["probs_bias"], rty)
-    parts = [GM.route(*a), GM.route_prefill_live(*a), GM.row_scale_tiles(row_scale)]
+    parts = [GM.route(*a, scale=MOE.get("scale", 1.0)), GM.route_prefill_live(*a, scale=MOE.get("scale", 1.0)), GM.row_scale_tiles(row_scale)]
     for fmt, K, N, mode in sorted(USED_MOE):
         parts.append(GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode))
     comb, comb_s = GM.combine(H, MOE["used"], acc=bool(FS)), GM.combine_sorted(H, MOE["used"], acc=bool(FS))
@@ -3545,7 +3597,8 @@ def gate_heads():
     """g_gate_heads: a per-head gate logit (HEAD_GATE) broadcast over the head's D dims."""
     return f"""
 // Per-head attention gate (cfg attn_gate "per_head", spark2_5): gate[t, h, d] = gh[t, h], the head's pre-sigmoid logit;
-// the attention combine / flash kernels then scale o[t, h, d] by sigmoid(gate[t, h, d]) as for an elementwise gate.
+// the attention combine / flash kernels then scale o[t, h, d] by sigmoid(gate[t, h, d]) as for an elementwise gate
+// (attn_gate_act softplus, laguna: gate[t, h, d] = softplus(gh[t, h]), which they multiply by as it is).
 kernel.def export("g_gate_heads") @g_gate_heads(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
@@ -3568,8 +3621,9 @@ kernel.def export("g_gate_heads") @g_gate_heads(%tokens: index) {{
     %h = index.assume %h_value [range(%h_value, 0, {QH - 1})] : index
     %d_value = index.rem %bi, %cd : index
     %d = index.assume %d_value [range(%d_value, 0, {D - 1})] : index
-    %x = view.load %gh_view[%token, %h] : view<[%tokens]x{QH}xf32> -> f32
-    view.store %x, %g_view[%token, %h, %d] : f32, view<[%tokens]x{QH}x{D}xf32>
+    %x = view.load %gh_view[%token, %h] : view<[%tokens]x{QH}xf32> -> f32{"""
+    %xs = scalar.softplusf<afn> %x : f32""" if GATE_ACT == "softplus" else ""}
+    view.store %x{"s" if GATE_ACT == "softplus" else ""}, %g_view[%token, %h, %d] : f32, view<[%tokens]x{QH}x{D}xf32>
   }}
   kernel.return
 }}
@@ -3596,15 +3650,33 @@ def geglu_mul():
     return t
 
 
+def with_heads(h, gen):
+    """gen() with the query-head count h (a layer_heads layer narrower than QH), its kernels and functions renamed
+    with the suffix _h<h>."""
+    import re
+    global QH, G
+    saved = QH, G
+    QH, G = h, h // KVH
+    try:
+        text = gen()
+    finally:
+        QH, G = saved
+    names = set(re.findall(r"(?:kernel|func)\.def (?:export\(\"\w+\"\) |inline )?@(\w+)\(", text))
+    return re.sub(r'(@|export\(")(' + "|".join(sorted(names, key=len, reverse=True)) + r')\b', rf"\1\2_h{h}", text)
+
+
+NARROW_KERNELS = r"@(g_qk_rope_store(?:_swa)?|g_attention_flash2|g16_attention_split_listed|g16_attention_combine_listed|g_attention_split|g_attention_combine|g_gate_heads)\["
+
+
 def qk_rope_swa():
     """g_qk_rope_store_swa: g_qk_rope_store with the sliding layers' rotary dims and base (SWA_ROPE)."""
-    global RD, THETA
-    saved = RD, THETA
-    RD, THETA = RD_SWA, THETA_SWA
+    global RD, THETA, YARN
+    saved = RD, THETA, YARN
+    RD, THETA, YARN = RD_SWA, THETA_SWA, None
     try:
         text = qk_rope()
     finally:
-        RD, THETA = saved
+        RD, THETA, YARN = saved
     assert text.count('"g_qk_rope_store"') == 1 and text.count("@g_qk_rope_store(") == 1
     return text.replace('"g_qk_rope_store"', '"g_qk_rope_store_swa"').replace("@g_qk_rope_store(", "@g_qk_rope_store_swa(")
 
@@ -3859,6 +3931,8 @@ def model():
     layer's tensor formats come from the GGUF), then the argmax head."""
     QD, KD = QH * D, KVH * D
     sliding = set(CFG.get("sliding_layers", []))
+    global NARROW_ROPE
+    NARROW_ROPE = {(LH[i], i in sliding) for i in range(L) if LH[i] != QH and i not in RECUR}
     nope = set(CFG.get("nope_layers", []))
     head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
     head_fmt = fmt_of(head_name)
@@ -3882,7 +3956,9 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %c1 = index.constant 1 : index
   %nH = index.constant {H} : index
   %nFF = index.constant {FF} : index
-""" + ("" if FF_UNIFORM else "".join(f"  %nFF{w} = index.constant {w} : index\n" for w in sorted(set(FFL)))) + f"""  %nQ = index.constant {QD} : index
+""" + ("" if FF_UNIFORM else "".join(f"  %nFF{w} = index.constant {w} : index\n" for w in sorted(set(FFL)))) + "".join(
+        f"  %nQ{h} = index.constant {h * D} : index\n" + (f"  %nQH{h} = index.constant {h} : index\n" if HEAD_GATE else "")
+        for h in NARROW) + f"""  %nQ = index.constant {QD} : index
   %nKV = index.constant {KD} : index
   %zero_i32 = scalar.constant 0 : i32
   %one_i32 = scalar.constant 1 : i32
@@ -3996,6 +4072,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         nm = lambda n: b + n + ".weight"
         sz = lambda n: tensor_bytes(nm(n))
         par = lambda var, n, ty=None: f'    %{var}_{i} = command.parameter %weights, "{nm(n)}" : {ty or f"view<{sz(n)}xi8>"}\n'
+        nq, nqh, qd = ("%nQ", "%nQH", QD) if LH[i] == QH else (f"%nQ{LH[i]}", f"%nQH{LH[i]}", LH[i] * D)
         kind = kind_note or (" (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else ""))
         T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
              f"  %layer_{i} = index.constant {attn_ordinal.get(i, gdn_ordinal.get(i)) if ordinal is None else ordinal} : index\n  %sliding_{i} = scalar.constant {1 if i in sliding else 0} : i32\n  %rope_{i} = scalar.constant {0 if i in nope else 1} : i32\n"]
@@ -4032,7 +4109,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         elif qg:
             T.append("  " + lin2(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", f"%wg_{i}", sz("attn_q"), "%q", "%gate", "%nH", "%nQ", H) + "\n")
         else:
-            T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", "%nQ", H) + "\n")
+            T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", nq, H) + "\n")
         if i in RECUR or QKV_FUSED:
           pass
         elif same("attn_k", "attn_v") and PAIR_PROJ in ("1", "kv"):
@@ -4041,7 +4118,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
           T.append("  " + lin(fmt_of(nm("attn_k")), "%h", "%s_h", f"%wk_{i}", sz("attn_k"), "%k", "%nH", "%nKV", H) + "\n")
           T.append("  " + lin(fmt_of(nm("attn_v")), "%h", "%s_h", f"%wv_{i}", sz("attn_v"), "%v", "%nH", "%nKV", H) + "\n")
         if HEAD_GATE and i not in RECUR:   # one logit per query head (n = QH: always the matvec kernels)
-            T.append("  " + lin_mv(fmt_of(nm("attn_gate")), "%h", f"%wg_{i}", sz("attn_gate"), "%gh", "%nQH", H) + "\n")
+            T.append("  " + lin_mv(fmt_of(nm("attn_gate")), "%h", f"%wg_{i}", sz("attn_gate"), "%gh", nqh, H) + "\n")
             T.append("  kernel.launch @g_gate_heads[%t](%t, %gh, %gate) : [index](index, buffer, buffer)\n")
         elif GATE and not FUSED_Q and i not in RECUR and not qg:
             T.append("  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wg_{i}", sz("attn_gate"), "%gate", "%nH", "%nQ", H) + "\n")
@@ -4058,11 +4135,12 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
     kernel.launch @g_attention_combine[%t](%t, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [index](index, i32, buffer, buffer, buffer, buffer, buffer)
   }}
   scf.if %gemm {{
-    kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
+    kernel.launch @g_row_scale_f16[%t](%t, {nq}, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
   }}
 """)
+
         if i not in RECUR:
-          T.append("  " + lin(fmt_of(nm("attn_output")), "%o", "%s_o", f"%wo_{i}", sz("attn_output"), "%y", "%nQ", "%nH", QD) + "\n")
+          T.append("  " + lin(fmt_of(nm("attn_output")), "%o", "%s_o", f"%wo_{i}", sz("attn_output"), "%y", nq, "%nH", qd) + "\n")
         pa = f"%post_attn_{i}" if POST_NORM else f"%ffn_norm_{i}"
         T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, {pa}, %x, %ffn_norm_{i}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
@@ -4087,7 +4165,11 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
             T.append(f'  %next_norm_{i} = command.parameter %weights, "blk.{i + 1}.attn_norm.weight" : view<{H}xf32>\n')
             nn = f"%next_norm_{i}"
         T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, {pf}, %x, {nn}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
-        return "".join(T).replace("\n    %", "\n  %").replace("\n      ", "\n    ")
+        text = "".join(T).replace("\n    %", "\n  %").replace("\n      ", "\n    ")
+        if LH[i] != QH:   # this layer's attention kernels: the variants for its head count
+            import re
+            text = re.sub(NARROW_KERNELS, rf"@\1_h{LH[i]}[", text)
+        return text
 
     MODEL_PARTS.update(layer_text=layer_text, prologue="".join(L_[:-1]), attn_ordinal=attn_ordinal)  # [-1]: token info + embed
     for i in range(L):
@@ -4236,6 +4318,9 @@ if __name__ == "__main__":
         parts.append(split_qkv())
     if HEAD_GATE:
         parts.append(gate_heads())
+    for h in NARROW:
+        parts.append(with_heads(h, lambda: "".join(qk_rope_swa() if swa and SWA_ROPE else qk_rope() for hh, swa in sorted(NARROW_ROPE) if hh == h)
+                                + attention()[:-len(FALLBACK)] + (gate_heads() if HEAD_GATE else "")))
     if RECUR:
         parts.append(gdn_kernels(CFG, EPS))
     if spec_kernels:
@@ -4258,6 +4343,13 @@ if __name__ == "__main__":
         subprocess.run([sys.executable, os.path.join(here, "gen_flash2.py")], check=True,
                        env=dict(os.environ, FLASH2_TARGET="llm", FLASH2_OUT=flash2, LLM_CONFIG=os.environ.get("LLM_CONFIG") or sys.argv[1]))
         parts.append(open(flash2).read())
+        for h in NARROW:   # narrower layers' flash prefill: the same generator at their head count
+            hcfg, hout = (os.path.join(out_dir, f"flash2_h{h}.{x}") for x in ("json", "loom"))
+            json.dump(dict(CFG, heads=h), open(hcfg, "w"))
+            subprocess.run([sys.executable, os.path.join(here, "gen_flash2.py")], check=True,
+                           env=dict(os.environ, FLASH2_TARGET="llm", FLASH2_OUT=hout, LLM_CONFIG=hcfg))
+            parts.append(with_heads(h, lambda: open(hout).read()))
+            os.remove(hcfg)
     parts.append(program)
     text = "\n".join(parts)
     if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
