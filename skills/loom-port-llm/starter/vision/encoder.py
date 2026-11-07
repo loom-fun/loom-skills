@@ -3,7 +3,8 @@ Backends render the plan into a loom-test check.case (whole-encoder test) or a c
 import math, gguf, numpy as np
 import gen_vision as G
 
-FAMILIES = ("gemma4v", "qwen3vl_merger", "muse-glimmer")
+FAMILIES = ("gemma4v", "qwen3vl_merger", "qwen2.5vl_merger", "muse-glimmer")
+QWEN_VL = ("qwen3vl_merger", "qwen2.5vl_merger")   # 2x2-block token order, vision M-RoPE, 2x2 merge MLP
 
 def _kv(r, k, default=None):
     f = r.fields.get(k)
@@ -26,12 +27,30 @@ def config(path):
              ffn=_kv(r, "clip.vision.feed_forward_length"), layers=_kv(r, "clip.vision.block_count"),
              eps=_kv(r, "clip.vision.attention.layer_norm_epsilon", 1e-6), out=_kv(r, "clip.vision.projection_dim"),
              mean=_kv(r, "clip.vision.image_mean"), std=_kv(r, "clip.vision.image_std"), tensors=tens)
-    c["merge"] = {"gemma4v": 3, "qwen3vl_merger": 2, "muse-glimmer": 2}[fam]
+    c["merge"] = 3 if fam == "gemma4v" else 2
     c["merge"] = _kv(r, "clip.vision.spatial_merge_size", c["merge"]) if fam != "gemma4v" else _kv(r, "clip.vision.projector.scale_factor", 3)
     c["fmt"] = GGML_FMT[tens["v.blk.0.ffn_up.weight"]["type"]]
-    c["pos_n"] = tens["v.position_embd.weight"]["shape"][1]
-    if fam != "gemma4v": c["pos_n"] = int(round(math.sqrt(c["pos_n"])))
-    c["out"] = tens[{"gemma4v": "mm.input_projection.weight", "qwen3vl_merger": "mm.2.weight", "muse-glimmer": "mm.2.weight"}[fam]]["shape"][1]
+    if "v.position_embd.weight" in tens:   # learned positions (Qwen2.5-VL has none: rotary only)
+        c["pos_n"] = tens["v.position_embd.weight"]["shape"][1]
+        if fam != "gemma4v": c["pos_n"] = int(round(math.sqrt(c["pos_n"])))
+    c["out"] = tens["mm.input_projection.weight" if fam == "gemma4v" else "mm.2.weight"]["shape"][1]
+    # Window attention: full attention in every wa_pattern-th layer, the others within window x window patches
+    # (Muse-Glimmer: 4 and its position grid, plus the last layer; Qwen2.5-VL: n_wa_pattern and 112 pixels)
+    if fam == "muse-glimmer":
+        c["wa_pattern"], c["window"] = 4, c["pos_n"]
+    elif _kv(r, "clip.vision.n_wa_pattern", 0):
+        c["wa_pattern"] = _kv(r, "clip.vision.n_wa_pattern")
+        c["window"] = 112 // c["patch"]   # llama.cpp: 112 pixels (attn_window_size unset for this family)
+    c["act"] = "silu" if _kv(r, "clip.use_silu") else "gelu_tanh"   # ViT FFN (llama.cpp clip.use_silu / use_gelu)
+    # DeepStack (Qwen3-VL): ViT layers whose merged output goes through its own merger (v.deepstack.N.*); each
+    # output row is the main projection followed by one projection per such layer (llama.cpp concatenates them
+    # along the feature dimension), and the text model adds slice k+1 to its hidden state after layer k.
+    flags = _kv(r, "clip.vision.is_deepstack_layers")
+    c["deepstack"] = [i for i, f in enumerate(flags if isinstance(flags, list) else [flags] if flags is not None else []) if f]
+    missing = [i for i in c["deepstack"] if f"v.deepstack.{i}.fc2.weight" not in tens]
+    if missing:
+        raise SystemExit(f"STOP: deepstack layers {missing} have no v.deepstack.N.* tensors")
+    c["out_row"] = c["out"] * (1 + len(c["deepstack"]))
     return c
 
 def fmt_of(c, name):
@@ -58,7 +77,7 @@ def build(c):
         src = xbuf
         if clamp_pref and (clamp_pref + ".input_min") in c["tensors"]:
             cl = p.k(G.clamp()); p.launch(cl, [S(f"{rows}*{K}")], [S(f"{rows}*{K}"), B(xbuf), W(clamp_pref + ".input_min"), W(clamp_pref + ".input_max"), B("xs")]); src = "xs"
-        p.launch(rs, [S(rows + "p")], [S(rows + "p"), S(str(K)), B(src), B("sc"), B("x16")])
+        p.launch(rs if K % 8 == 0 else p.k(G.row_scale(K)), [S(rows + "p")], [S(rows + "p"), S(str(K)), B(src), B("sc"), B("x16")])
         gm = p.k(G.gemm(fmt_of(c, wname), K, N))
         p.launch(gm, [S(rows + "p"), S(str(N))], [S(rows + "p"), S(str(K)), S(str(N)), B("x16"), B("sc"), W(wname), B(ybuf)])
         if bias is not None and bias in c["tensors"]:
@@ -70,10 +89,14 @@ def build(c):
     def norm(xbuf, ybuf, rows, width, mode, w=None, b=None):
         nk = p.k(G.norm(width, mode, c["eps"]))
         p.launch(nk, [S(rows)], [S(rows), B(xbuf)] + ([W(w)] if w else []) + ([W(b)] if b else []) + [B(ybuf)])
+    def place(xbuf, rows, k):   # [rows, out] -> slice k of the [rows, out_row] output
+        pk_ = p.k(G.place_cols(c["out"], c["out_row"], k * c["out"])); p.launch(pk_, [S(rows)], [S(rows), B(xbuf), B("out")])
     def add(xbuf, ybuf, rows, width):
         ak = p.k(G.ew("add")); p.launch(ak, [S(f"{rows}*{width}")], [S(f"{rows}*{width}"), B(xbuf), B(ybuf), B(xbuf)])
     # --- pixels + patch embedding + positions ---
-    order = "block2" if fam == "qwen3vl_merger" else "raster"
+    order = "block2" if fam in QWEN_VL else "raster"
+    def nmode(w):   # LayerNorm when the norm has a bias, else RMSNorm with weight (Qwen2.5-VL)
+        return ("ln", w + ".weight", w + ".bias") if w + ".bias" in c["tensors"] else ("rmsw", w + ".weight", None)
     pk = p.k(G.pixels(c["mean"], c["std"], scale2=(fam == "gemma4v")))
     p.launch(pk, [S("n_pix")], [S("n_pix"), B("pix"), B("pixf")])
     dual = "v.patch_embd.weight.1" in c["tensors"]; bias = "v.patch_embd.bias" in c["tensors"]
@@ -81,8 +104,8 @@ def build(c):
     p.launch(pe, [S("T")], [S("T"), S("gw"), S("img_w"), B("pixf"), W("v.patch_embd.weight")] + ([W("v.patch_embd.weight.1")] if dual else []) + ([W("v.patch_embd.bias")] if bias else []) + [B("h")])
     if fam == "gemma4v":
         pk2 = p.k(G.pos_xy(E, c["pos_n"])); p.launch(pk2, [S("T")], [S("T"), S("gw"), W("v.position_embd.weight"), B("h")])
-    else:
-        pk2 = p.k(G.pos_interp(E, c["pos_n"], order, align_corners=(fam == "qwen3vl_merger")))
+    elif "v.position_embd.weight" in c["tensors"]:
+        pk2 = p.k(G.pos_interp(E, c["pos_n"], order, align_corners=(fam in QWEN_VL)))
         p.launch(pk2, [S("T")], [S("T"), S("gw"), S("gh"), W("v.position_embd.weight"), B("h")])
     if "v.pre_ln.weight" in c["tensors"]:
         norm("h", "h", "T", E, "ln", "v.pre_ln.weight", "v.pre_ln.bias")
@@ -107,8 +130,8 @@ def build(c):
             lin("f", FF, E, b + "ffn_down.weight", "a", "T", clamp_pref=b + "ffn_down")
             norm("a", "a", "T", E, "rmsw", b + "ffn_post_norm.weight"); add("h", "a", "T", E)
         else:
-            norm("h", "x", "T", E, "ln", b + "ln1.weight", b + "ln1.bias")
-            if fam == "qwen3vl_merger":
+            norm("h", "x", "T", E, *nmode(b + "ln1"))
+            if b + "attn_qkv.weight" in c["tensors"]:
                 lin("x", E, 3 * E, b + "attn_qkv.weight", "q", "T", bias=b + "attn_qkv.bias")
                 for off in (0, E):
                     rk = p.k(G.rope("qwen_vision", D, NH, 3 * E, off, order)); p.launch(rk, [S("T")], [S("T"), S("gw"), B("q")])
@@ -117,15 +140,25 @@ def build(c):
                 for nm, buf in (("attn_q", "q"), ("attn_k", "k"), ("attn_v", "v")):
                     lin("x", E, E, b + nm + ".weight", buf, "T", bias=b + nm + ".bias")
                 for buf in ("q", "k"):
-                    rk = p.k(G.rope("normal_halves", D, NH, E, 0, order)); p.launch(rk, [S("T")], [S("T"), S("gw"), B(buf)])
-                glob = (i == c["layers"] - 1) or ((i + 1) % 4 == 0)
-                ak = p.k(G.attention(D, NH, E, 0, 0, 0, scale, window=0 if glob else c["pos_n"]))
+                    rk = p.k(G.rope("qwen_vision" if fam in QWEN_VL else "normal_halves", D, NH, E, 0, order)); p.launch(rk, [S("T")], [S("T"), S("gw"), B(buf)])
+                glob = "window" not in c or (i + 1) % c["wa_pattern"] == 0 or (fam == "muse-glimmer" and i == c["layers"] - 1)
+                ak = p.k(G.attention(D, NH, E, 0, 0, 0, scale, window=0 if glob else c["window"], order=order))
                 p.launch(ak, [S("T")], [S("T"), S("gw"), B("q"), B("k"), B("v"), B("o")])
             lin("o", E, E, b + "attn_out.weight", "a", "T", bias=b + "attn_out.bias"); add("h", "a", "T", E)
-            norm("h", "x", "T", E, "ln", b + "ln2.weight", b + "ln2.bias")
-            act = "gelu_tanh" if fam == "qwen3vl_merger" else "gelu_erf"
-            lin("x", E, FF, b + "ffn_up.weight", "f", "T", act=act, bias=b + "ffn_up.bias")
+            norm("h", "x", "T", E, *nmode(b + "ln2"))
+            if b + "ffn_gate.weight" in c["tensors"]:   # gated FFN (Qwen2.5-VL: SiLU): act(gate) * up
+                lin("x", E, FF, b + "ffn_gate.weight", "g", "T", bias=b + "ffn_gate.bias")
+                lin("x", E, FF, b + "ffn_up.weight", "f", "T", bias=b + "ffn_up.bias")
+                gk = p.k(G.ew("gate_" + c["act"])); p.launch(gk, [S(f"T*{FF}")], [S(f"T*{FF}"), B("g"), B("f"), B("f")])
+            else:
+                lin("x", E, FF, b + "ffn_up.weight", "f", "T", act="gelu_erf" if fam == "muse-glimmer" else c["act"], bias=b + "ffn_up.bias")
             lin("f", FF, E, b + "ffn_down.weight", "a", "T", bias=b + "ffn_down.bias"); add("h", "a", "T", E)
+        if i in c["deepstack"]:   # this layer's merged output through its own merger, into output slice k + 1
+            d = f"v.deepstack.{i}."; k = c["deepstack"].index(i) + 1; wm = E * c["merge"] ** 2
+            norm("h", "x", "M", wm, "ln", d + "norm.weight", d + "norm.bias")
+            lin("x", wm, c["tensors"][d + "fc1.weight"]["shape"][1], d + "fc1.weight", "m1", "M", act="gelu_tanh", bias=d + "fc1.bias")
+            lin("m1", c["tensors"][d + "fc1.weight"]["shape"][1], c["out"], d + "fc2.weight", "dso", "M", bias=d + "fc2.bias")
+            place("dso", "M", k)
     # --- merge + projector ---
     m = c["merge"]
     if fam == "gemma4v":
@@ -134,11 +167,14 @@ def build(c):
             raise SystemExit("STOP: gemma4v std_bias/std_scale not implemented yet")
         norm("m_in", "m_in", "M", E, "rms")
         lin("m_in", E, c["out"], "mm.input_projection.weight", "out", "M", clamp_pref="mm.input_projection")
-    elif fam == "qwen3vl_merger":
-        norm("h", "x", "T", E, "ln", "v.post_ln.weight", "v.post_ln.bias")
+    elif fam in QWEN_VL:
+        norm("h", "x", "T", E, *nmode("v.post_ln"))
         hid = c["tensors"]["mm.0.weight"]["shape"][1]
         lin("x", 4 * E, hid, "mm.0.weight", "m1", "M", act="gelu_tanh", bias="mm.0.bias")
-        lin("m1", hid, c["out"], "mm.2.weight", "out", "M", bias="mm.2.bias")
+        if c["deepstack"]:
+            lin("m1", hid, c["out"], "mm.2.weight", "dso", "M", bias="mm.2.bias"); place("dso", "M", 0)
+        else:
+            lin("m1", hid, c["out"], "mm.2.weight", "out", "M", bias="mm.2.bias")
     else:
         norm("h", "x", "T", E, "ln", "v.post_ln.weight", "v.post_ln.bias")
         sk = p.k(G.shuffle(E, m)); p.launch(sk, [S("M")], [S("M"), S("gw"), S("T"), B("x"), B("m_in")])
@@ -150,18 +186,19 @@ def build(c):
 
 def buffers(c, T, M):
     """Element counts (f32 unless noted) per buffer for T tokens / M merged tokens (rows padded)."""
-    E, FF = c["E"], c["ffn"]; Tp = -(-T // 256) * 256; Mp = -(-M // 64) * 64
-    hid = max([c["tensors"][n]["shape"][1] for n in ("mm.0.weight", "mm.1.weight") if n in c["tensors"]] + [1])
-    wide = max(FF, 3 * E, E * c["merge"] ** 2, hid, c["out"])
-    return dict(h=Tp * E, x=Tp * max(E, 4 * E if c["family"] == "qwen3vl_merger" else E), q=Tp * 3 * E, k=Tp * E, v=Tp * E, o=Tp * E, a=Tp * E,
-                f=Tp * FF, g=Tp * FF, xs=Tp * wide, x16=Tp * wide, sc=Tp * 2, m_in=Mp * E * c["merge"] ** 2, m1=Mp * hid, m2=Mp * hid, out=Mp * c["out"])
+    Tp = -(-T // 256) * 256; Mp = -(-M // 64) * 64
+    return {n: (Tp if r == "Tp" else Mp) * w for n, (r, w, _) in buffer_exprs(c).items()}
 
 def buffer_exprs(c):
     """name -> (rows variable 'Tp' | 'Mp', width in elements, bytes per element) for the command program."""
     E, FF = c["E"], c["ffn"]
-    hid = max([c["tensors"][n]["shape"][1] for n in ("mm.0.weight", "mm.1.weight") if n in c["tensors"]] + [1])
+    mats = ["mm.0.weight", "mm.1.weight"] + [f"v.deepstack.{i}.fc1.weight" for i in c.get("deepstack", [])]
+    hid = max([c["tensors"][n]["shape"][1] for n in mats if n in c["tensors"]] + [1])
     wide = max(FF, 3 * E, E * c["merge"] ** 2, hid, c["out"])
-    xw = 4 * E if c["family"] == "qwen3vl_merger" else E
-    return dict(h=("Tp", E, 4), x=("Tp", xw, 4), q=("Tp", 3 * E, 4), k=("Tp", E, 4), v=("Tp", E, 4), o=("Tp", E, 4), a=("Tp", E, 4),
-                f=("Tp", FF, 4), g=("Tp", FF, 4), xs=("Tp", wide, 4), x16=("Tp", wide, 2), sc=("Tp", 2, 4),
-                m_in=("Mp", E * c["merge"] ** 2, 4), m1=("Mp", hid, 4), m2=("Mp", hid, 4), out=("Mp", c["out"], 4))
+    xw = 4 * E if c["family"] in QWEN_VL else E
+    b = dict(h=("Tp", E, 4), x=("Tp", xw, 4), q=("Tp", 3 * E, 4), k=("Tp", E, 4), v=("Tp", E, 4), o=("Tp", E, 4), a=("Tp", E, 4),
+             f=("Tp", FF, 4), g=("Tp", FF, 4), xs=("Tp", wide, 4), x16=("Tp", wide, 2), sc=("Tp", 2, 4),
+             m_in=("Mp", E * c["merge"] ** 2, 4), m1=("Mp", hid, 4), m2=("Mp", hid, 4), out=("Mp", c.get("out_row", c["out"]), 4))
+    if c.get("deepstack"):   # one projection's rows before they are placed in the wide output row
+        b["dso"] = ("Mp", c["out"], 4)
+    return b

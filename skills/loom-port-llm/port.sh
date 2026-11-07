@@ -122,7 +122,7 @@ import json, sys; r = json.load(open('reference.json')); p = '$refpick'
 x = next((x for x in r['ranked'] if (p and x['repo'] == p) or (not p and x['arch'] == r['target'].get('arch'))), None)
 # No category A package of this architecture: an example kit of it still is a gate-passing port (examples.json)
 ex = (x or {}).get('kit_example') or ('' if x or p else next((k for k, e in json.load(open('$here/reference/examples.json')).items()
-                                                               if isinstance(e, dict) and e.get('arch') == r['target'].get('arch')), ''))
+                                                               if isinstance(e, dict) and r['target'].get('arch') in [e.get('arch')] + e.get('archs', [])), ''))
 print(ex)" 2>/dev/null)
   if [ -z "${KIT:-}" ] && [ -n "$ex" ] && [ -d "$here/reference/$ex-example" ]; then
     rm -rf kit; "$here/reference/apply_example.sh" "$ex" "$work/kit" | tail -1 && K=$work/kit && export LOOM_KIT=$K
@@ -153,7 +153,7 @@ fi
 # ("not derivable automatically": the sed above marks a verified reference block between those words)
 if [ "$irc" != 0 ] || grep -q "^chat FAIL\|not derivable automatically\|WARNING: no chat block$hd\|WARNING: unsupported layout\|Traceback" inspect.log; then
   arch=$("$T" -c "import json;print(json.load(open('cfg.json')).get('arch',''))" 2>/dev/null)
-  for ex in $("$T" -c "import json; print(' '.join(k for k, v in json.load(open('$here/reference/examples.json')).items() if isinstance(v, dict) and v.get('arch') == '$arch'))" 2>/dev/null); do
+  for ex in $("$T" -c "import json; print(' '.join(k for k, v in json.load(open('$here/reference/examples.json')).items() if isinstance(v, dict) and '$arch' in [v.get('arch')] + v.get('archs', [])))" 2>/dev/null); do
     echo "HINT: reference/$ex-example is a working port of arch '$arch': $here/reference/apply_example.sh $ex kit cfg.json (merges the reviewed config too), then FROM=build KIT=kit $0 $spec $work $port $mem_gib $model_id"
   done
   echo "STOP: see inspect.log; fix cfg.json (chat block / formats) by hand as loom-port-llm/SKILL.md describes, then rerun build.py"; exit 3
@@ -209,7 +209,8 @@ step "4/6 serve"
 VENV=$venv "$S/serve.sh" port "$port" amdgpu "$mem" pkg/model.json || exit 4
 
 step "5/6 kernel unit tests"
-"$T" -I "$K/make_kernel_tests.py" cfg.json ktest >/dev/null && VENV=$venv "$K/run_kernel_tests.sh" pkg ktest | tee ktest.log | tail -3
+"$T" -I "$K/make_kernel_tests.py" cfg.json ktest > ktest.log 2>&1 || { tail -5 ktest.log; echo "STOP: make_kernel_tests.py failed (ktest.log)"; exit 5; }
+VENV=$venv "$K/run_kernel_tests.sh" pkg ktest | tee ktest.log | tail -3
 grep -q "^FAIL\|Traceback" ktest.log && { echo "STOP: kernel tests failed (ktest.log); see the bring-up debugging order in SKILL.md"; exit 5; }
 vmm=$("$T" -c "import json; print((json.load(open('cfg.json')).get('vision') or {}).get('mmproj', ''))")
 if [ -n "$vmm" ]; then   # vision kernels vs NumPy, then the whole encoder vs ref_vit.py at a small size

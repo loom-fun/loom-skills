@@ -54,6 +54,8 @@ eos = field("tokenizer.ggml.eos_token_id")
 tokens = field("tokenizer.ggml.tokens") or []
 im_end = tokens.index("<|im_end|>") if "<|im_end|>" in tokens else None
 endoftext = tokens.index("<|endoftext|>") if "<|endoftext|>" in tokens else None
+# Llama 3: llama.cpp also ends generation at <|eom_id|> (ipython turns) and <|end_of_text|> (end-of-generation tokens)
+llama3_eog = [tokens.index(t) for t in ("<|eot_id|>", "<|eom_id|>", "<|end_of_text|>") if t in tokens]
 
 cfg = {
     "name": field("general.name", arch),
@@ -79,13 +81,13 @@ cfg = {
     "eos_id": eos,
     # head_select stops on any of these; keep <|endoftext|> for ChatML models.
     # (and the GGUF's end-of-turn token, e.g. <|eot|> of llama4-style templates)
-    "extra_eos_ids": sorted({i for i in (im_end, endoftext, field("tokenizer.ggml.eot_token_id")) if i is not None and i != eos}),
+    "extra_eos_ids": sorted({i for i in (im_end, endoftext, field("tokenizer.ggml.eot_token_id"), *llama3_eog) if i is not None and i != eos}),
     "bos_id": field("tokenizer.ggml.bos_token_id") if field("tokenizer.ggml.add_bos_token", False) else None,
     "chat": None,
     "tensors": tensors,
 }
 if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3",
-                "qwen3moe", "qwen35moe"):
+                "qwen3moe", "qwen35moe", "spark2_5"):
     print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
           "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
           "before trusting a golden FAIL or PASS")
@@ -114,6 +116,12 @@ if arch == "muse-glimmer" and cfg["sliding_layers"]:
 rope_dims = A("rope.dimension_count")
 if rope_dims and rope_dims != head_dim:
     cfg["rope_dims"] = rope_dims
+# Llama-3-style RoPE frequency factors (rope_freqs.weight, one per rotary pair: llama.cpp divides that pair's
+# frequency by it; Llama 3.1/3.2: 1 for high frequencies, up to 32 for low ones). Gemma 4's 1e30 cut is its kit's.
+if arch != "gemma4":
+    freqs = next((t.data for t in r.tensors if t.name == "rope_freqs.weight"), None)
+    if freqs is not None and any(float(f) != 1.0 for f in freqs):
+        cfg["rope_freq_factors"] = [float(f) for f in freqs]
 # Gemma 3n/4 geometry (reference/gemma4-example's gen_llm.py keys), from this GGUF: a reference package of another size
 # (find_reference.py apply fills keys inspect leaves out) has other KV-sharing, per-layer-embedding and rope values.
 if arch == "gemma4":
@@ -146,6 +154,15 @@ if arch == "gemma4":
         print(f"WARNING: unsupported layout: per-layer KV heads {sorted(set(kv)) if isinstance(kv, list) else kv}"
               f"{f', no attn_v (V = K) on layers {no_v[:4]}...' if no_v else ''}: gemma4-example's attention assumes "
               "one KV-head count and an attn_v on every KV-owning layer; extend gen_llm.py (agent port)")
+# Sliding layers with their own RoPE at the same head_dim (spark2_5: freq_base_swa 1e4 + full rotary dims on the sliding
+# layers, 5e6 + 64 of 256 dims on the global ones; llama.cpp defaults each to the global value when the key is absent).
+if arch != "gemma4" and cfg["sliding_layers"] and (A("rope.freq_base_swa") or A("rope.dimension_count_swa")):
+    cfg["rope_theta_swa"] = A("rope.freq_base_swa") or cfg["rope_theta"]
+    cfg["rope_dims_swa"] = A("rope.dimension_count_swa") or rope_dims or head_dim
+# FFN activations llama.cpp hard-codes per architecture (build_ffn's LLM_FFN_GELU: GEGLU, gelu-tanh); default SwiGLU.
+FFN_ACT = {"spark2_5": "gelu"}
+if arch in FFN_ACT:
+    cfg["ffn_act"] = FFN_ACT[arch]
 # Hybrid models: gated delta-net (linear attention) layers carry recurrent state
 # instead of KV (llama.cpp qwen35/qwen3next: layer i is recurrent unless (i+1) % interval == 0).
 if A("ssm.inner_size"):
@@ -166,6 +183,18 @@ if A("ssm.inner_size"):
 if _nextn and L != BLOCKS:
     cfg["mtp"] = {"layers": _nextn}
     print(f"MTP: {len(_nextn)} NextN block(s) {_nextn} after the {L}-layer trunk: speculative decoding (MTP) is available")
+# Attention layers with one fused q | k | v projection (spark2_5: attn_qkv; hybrids' gated delta-net layers have their own
+# attn_qkv, which this does not look at), and an attn_gate with one row per query head (sigmoid per head, spark2_5;
+# LFM3, whose first attention layer comes after short-conv layers).
+_attn0 = next((i for i in range(L) if i not in cfg.get("recurrent_layers", [])
+               and any(f"blk.{i}.attn_{p}.weight" in tensors for p in ("q", "qkv"))), None)
+if _attn0 is not None and f"blk.{_attn0}.attn_qkv.weight" in tensors and f"blk.{_attn0}.attn_q.weight" not in tensors:
+    if tensors[f"blk.{_attn0}.attn_qkv.weight"]["shape"][1] != (heads + 2 * cfg["kv_heads"]) * head_dim:
+        print("WARNING: unsupported layout: attn_qkv is not [q | k | v] of heads + 2 kv_heads rows of head_dim (agent port)")
+    cfg["attn_qkv"] = True
+_gate0 = tensors.get(f"blk.{_attn0}.attn_gate.weight")
+if _gate0 and cfg["attn_gate"] in (True, False) and _gate0["shape"][1] == heads:
+    cfg["attn_gate"] = "per_head"
 # Attention projection biases (qwen2: q/k/v, added right after the projection, llama.cpp build_qkv): g_qk_rope_store
 # adds those in cfg["attn_bias"] (gen_llm.py QKV_BIAS), with the same set on every attention layer. A fused-qkv or
 # output bias, or a mixed set, has no kernel: a port would serve garbage while its kernel tests pass, so stop.
@@ -227,6 +256,12 @@ if template:
         for name, ok, detail in results:
             print("chat", "OK  " if ok else "SKIP" if ok is None else "FAIL", name, "-", detail)
         cfg["chat"] = chat
+        if chat["call_format"] == "json" and "<|python_tag|>" in tokens:
+            # Llama 3.1 opens a call with <|python_tag|> (the template never prints it). Kept in the decoded text
+            # (nonspecial) so complete_text stores the turn as generated: the KV row then matches the canonical
+            # history, and content ends before it (control_json.loom's output_next).
+            chat["call_prefix_token"] = "<|python_tag|>"
+            chat["nonspecial_tokens"] = sorted(set(chat.get("nonspecial_tokens", [])) | {"<|python_tag|>"})
         print(f"chat: thinking={chat['thinking']} (default {'on' if chat['thinking_default'] else 'off'}), "
               f"tool calls={chat['call_format']}; generation prompt {chat['generation_prompt']!r}")
         if chat.get("reasoning_instructions"):

@@ -102,7 +102,7 @@ def copy_kernel():
 '''
 
 
-FILTER = {"gemma4v": "bicubic", "qwen3vl_merger": "bicubic", "muse-glimmer": "lanczos"}
+FILTER = {"gemma4v": "bicubic", "qwen3vl_merger": "bicubic", "qwen2.5vl_merger": "bicubic", "muse-glimmer": "lanczos"}
 
 
 def encoder_program(c, max_side=4096):
@@ -203,7 +203,7 @@ command.program.def public @vision_encode() launch(%weights: buffer, %input: buf
             else:
                 av.append(wdecl[n]); at.append(f'view<{c["tensors"][n]["bytes"]}xi8>')
         L.append(f"  kernel.launch @{kern}[{', '.join(g)}]({', '.join(av)}) : [{', '.join('index' for _ in g)}]({', '.join(at)})")
-    L.append(f'''  %out_rows = index.constant {c["out"]} : index
+    L.append(f'''  %out_rows = index.constant {c["out_row"]} : index
   %final_n = index.mul %M, %out_rows : index
   kernel.launch @v_copy[%final_n](%final_n, %out, %output) : [index](index, buffer, buffer)
   command.return

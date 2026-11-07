@@ -28,28 +28,22 @@ def arg(a):
 for kern, grid, args in p.ops:
     cs.launch(kern, [arg(g) for g in grid], [arg(a) for a in args])
 pre = img.astype(np.float32) / 255.0
-ref = R.ENCODERS[c["family"]].__wrapped__(None) if False else None
 W_, KV = R.load(path)
-fn = {"gemma4v": lambda: R.gemma4v(W_, KV, pre), "qwen3vl_merger": lambda: R.qwen3vl(W_, KV, pre), "muse-glimmer": lambda: R.muse_glimmer(W_, KV, pre)}[c["family"]]
-ref = fn().astype(np.float32)
-out_rows = np.zeros((vals["Mp"], c["out"]), np.float32); out_rows[:M] = ref
-# compare only the first M rows: write expected padded with actual-agnostic tolerance -> compare a view instead
-cs.lines.append(f"  %outv = check.view {bufs['out'][0]} : {bufs['out'][1]}") if False else None
-e = cs.arr(np.ascontiguousarray(out_rows.reshape(-1)[: M * c["out"]]))
-cs.lines.append(f"  %got = check.slice {bufs['out'][0]} [0] [{M * c['out']}] : {bufs['out'][1]} -> tensor<{M * c['out']}xf32>") if False else None
+ref = {"gemma4v": R.gemma4v, "muse-glimmer": R.muse_glimmer}.get(c["family"], R.qwen_vl)(W_, KV, pre).astype(np.float32)
 np.save(os.path.join(d, "ref.npy"), ref)
 atol = float(sys.argv[4]) if len(sys.argv) > 4 else 0.05
 RTOL = sys.argv[5] if len(sys.argv) > 5 else "5.0e-2"
 print("kernels:", len(p.kernels), "launches:", len(p.ops), "T", T, "M", M, "ref |max|", np.abs(ref).max())
-# expectation over the full padded buffer: rows >= M are don't-care, so copy them from... use a mask trick: expected = ref padded with 0 and compare
-# only possible if padded rows are 0: they are (merged rows beyond M are never written: buffers start at 0)
-full = np.zeros(EN.buffers(c, T, M)["out"], np.float32); full[: M * c["out"]] = ref.reshape(-1)
+# expectation over the full padded buffer: rows >= M are never written (buffers start at 0), so expect zeros there
+full = np.zeros(EN.buffers(c, T, M)["out"], np.float32); full[: M * c["out_row"]] = ref.reshape(-1)
 ea = cs.arr(full)
 cs.lines.append(f'  check.file.write.npy value({bufs["out"][0]}) path("got.npy") mode(always) : {bufs["out"][1]}')
 cs.lines.append(f"  check.expect.approximate actual({bufs['out'][0]}) expected({ea[0]}) atol({atol:e}) rtol({RTOL}) nan(different) : {bufs['out'][1]}, {ea[1]}")
 ok = V.run("\n".join(p.kernels.values()), [cs], d)
 
-got = np.load(os.path.join(d, "got.npy"))[: M * c["out"]].reshape(M, c["out"])
+got = np.load(os.path.join(d, "got.npy"))[: M * c["out_row"]].reshape(M, c["out_row"])
 err = np.abs(got - ref); rel = err / (np.abs(ref) + 1e-3)
 print("max abs err", err.max(), "mean abs err", err.mean(), "ref mean |x|", np.abs(ref).mean(), "frac(err>0.1)", (err > 0.1).mean(),
-      "row-cos min", min(float(np.dot(got[i], ref[i]) / np.linalg.norm(got[i]) / np.linalg.norm(ref[i])) for i in range(M)))
+      # per row and per output slice (main projection, then each deepstack projection)
+      "row-cos min", min(float(np.dot(g, r) / np.linalg.norm(g) / np.linalg.norm(r)) for i in range(M)
+                         for g, r in zip(np.split(got[i], c["out_row"] // c["out"]), np.split(ref[i], c["out_row"] // c["out"]))))

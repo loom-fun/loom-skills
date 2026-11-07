@@ -323,6 +323,8 @@ func.def @with_instructions(%instructions: buffer, %body: buffer) -> (buffer) {{
   %instructions_length = buffer.length %instructions
   %has_instructions = index.cmp ne, %instructions_length, %origin : offset
 """)
+    if chat.get("reasoning_after_lead"):   # appended to the system lead (patch_system_lead)
+        return text
     text = sub(text, "    %block = func.call @join4(%system_prefix, %merged, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
                """    %instructed = func.call @with_instructions(%instructions, %merged) : (buffer, buffer) -> (buffer)
     %block = func.call @join4(%system_prefix, %instructed, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
@@ -346,6 +348,57 @@ func.def @with_instructions(%instructions: buffer, %body: buffer) -> (buffer) {{
                """  %merges_system = scalar.ori %has_tools, %has_instructions : i1
   %consumed = scalar.andi %merges_system, %first_system : i1
 """)
+
+
+def patch_system_lead(text):
+    """control.loom for a template whose first system block always opens with its default system prompt
+    (chat_probe.system_lead, Spark-X2.5): chat_begin renders system_prefix + lead [+ reasoning instructions] + [tools
+    block + tools_system_separator + system message | system_lead_separator + system message] + suffix for every
+    request, and the first system message always merges into it. Other packages' control.loom is unchanged."""
+    assert not chat["tools_after_system"] and not chat.get("default_system"), "system_lead: tools before the system message only"
+    text = sub(text, 'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n',
+               'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n\n'
+               f'global.rodata.def @system_lead = bytes("{hx(chat["system_lead"])}")\n\n'
+               f'global.rodata.def @system_lead_separator = bytes("{hx(chat["system_lead_separator"])}")\n')
+    lead = ("  %lead_base = global.load @system_lead : buffer\n" +
+            ("  %lead = func.call @join(%lead_base, %instructions) : (buffer, buffer) -> (buffer)\n" if instructions else
+             "  %lead = func.call @join(%lead_base, %empty) : (buffer, buffer) -> (buffer)\n"))
+    text = sub(text, "  %rendered = scf.if %has_tools -> (buffer) {\n", lead + "  %rendered = scf.if %has_tools -> (buffer) {\n")
+    text = sub(text, "    %block = func.call @join4(%system_prefix, %merged, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+               "    %block = func.call @join4(%system_prefix, %lead, %merged, %suffix) : (buffer, buffer, buffer, buffer) -> (buffer)\n")
+    text = sub(text, """    %block = scf.if %use_default -> (buffer) {
+      %value = func.call @join4(%system_prefix, %default_system, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+      scf.yield %value : buffer
+    } else {
+      scf.yield %empty : buffer
+    }
+""", """    %lead_body_length = buffer.length %system_body
+    %lead_has_body = index.cmp ne, %lead_body_length, %origin : offset
+    %lead_separator_value = global.load @system_lead_separator : buffer
+    %lead_separator = scf.select %lead_has_body, %lead_separator_value, %empty : buffer
+    %lead_text = func.call @join(%lead, %lead_separator) : (buffer, buffer) -> (buffer)
+    %block = func.call @join4(%system_prefix, %lead_text, %system_body, %suffix) : (buffer, buffer, buffer, buffer) -> (buffer)
+""")
+    return sub(text, "  %consumed = scalar.andi %has_tools, %first_system : i1\n", "  %consumed = scalar.ori %first_system, %false : i1\n")
+
+
+def patch_history_close(text):
+    """control.loom for templates that render an assistant turn without reasoning as think_close alone (history_think
+    "close", Spark-X2.5: '<|Bot|></think>answer'). Other packages' control.loom is unchanged."""
+    text = sub(text, "        %wanted = scalar.ori %always, %has_thought : i1\n", "        %wanted = scalar.constant true : i1\n")
+    return sub(text, "          %open = global.load @think_open : buffer\n",
+               "          %open_value = global.load @think_open : buffer\n          %open = scf.select %has_thought, %open_value, %empty : buffer\n")
+
+
+def patch_tools_compact(text):
+    """control.loom for templates that print each tool definition as compact JSON (tojson with separators ',' ':';
+    chat.tools_compact): tool_printed compacts it with the host json codec. Without the field control.loom is unchanged."""
+    assert not chat.get("tools_indent"), "tools_compact with tools_indent"
+    return sub(text, "  func.return %result : buffer\n}\n\nfunc.def @tools_body(", """  %compacted = func.call @compact(%result) : (buffer) -> (buffer)
+  func.return %compacted : buffer
+}
+
+func.def @tools_body(""")
 
 
 def patch_default_system_tools(text):
@@ -380,6 +433,118 @@ def patch_history_think_before(text):
     return sub(text, "func.call @join4(%open, %thought, %close, %empty)", "func.call @join4(%open, %kept_thought, %close, %empty)")
 
 
+JSON_CHAT_KEYS = ("system_preamble", "tools_in_user", "tools_indent", "tool_content_json", "calls_drop_content")
+
+
+def patch_json_chat(text):
+    """control.loom for Llama-3-style templates (chat_probe: system_preamble, tools_in_user, tools_indent,
+    tool_content_json, calls_drop_content, call_format "json"): the always-printed system block with its preamble,
+    the tools opening the first user message (re-indented like tojson(indent=N)), tool results as JSON strings,
+    no content beside calls, and bare JSON calls (templates/control_json.loom). Each piece only when its field is
+    present; without them control.loom is unchanged."""
+    preamble, in_user = "system_preamble" in chat, chat.get("tools_in_user", False)
+    assert in_user <= preamble, "tools_in_user needs the always-printed system block (system_preamble)"
+    assert not (preamble and instructions), "system_preamble with reasoning instructions is not modeled"
+    if preamble:
+        assert in_user or chat["call_format"] == "none", "a preamble with tools in the system block is not modeled"
+        text = sub(text, 'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n',
+                   'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n\n'
+                   f'global.rodata.def @system_preamble = bytes("{hx(chat["system_preamble"])}")\n\n'
+                   f'global.rodata.def @system_preamble_tools = bytes("{hx(chat.get("system_preamble_tools", chat["system_preamble"]))}")\n')
+        begin = text.index("  %rendered = scf.if %has_tools -> (buffer) {\n")
+        end = text.index("  %bos = global.load @bos : buffer\n", begin)
+        text = text[:begin] + f"""  // The system block is always printed, opening with the template's preamble (chat.system_preamble; with tools
+  // chat.system_preamble_tools), then the first system message's text.
+  %preamble_plain = global.load @system_preamble : buffer
+  %preamble_tools = global.load @system_preamble_tools : buffer
+  %preamble = scf.select %has_tools, %preamble_tools, %preamble_plain : buffer
+  %system_block = func.call @join4(%system_prefix, %preamble, %system_body, %suffix) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %tools_in_user = scalar.constant {B(in_user)} : i1
+  %open_user = scalar.andi %has_tools, %tools_in_user : i1
+  %rendered = scf.if %open_user -> (buffer) {{
+    // The tools open the first user message (chat.tools_in_user); chat_message completes it (state bit 32).
+    %tools_text = func.call @tools_body(%tools, %tool_fields, %tool_count) : (buffer, buffer, i64) -> (buffer)
+    %user_prefix = global.load @user_prefix : buffer
+    %value = func.call @join4(%system_block, %user_prefix, %tools_text, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+    scf.yield %value : buffer
+  }} else {{
+    scf.yield %system_block : buffer
+  }}
+""" + text[end:]
+        text = sub(text, "  %consumed = scalar.andi %has_tools, %first_system : i1\n", "  %consumed = scalar.ori %first_system, %false : i1\n")
+        text = sub(text, "  %flags = scalar.ori %consumed_bit, %thinking_bit : i64\n", """  %pending_value = scalar.constant 32 : i64
+  %pending_bit = scf.select %open_user, %pending_value, %zero64 : i64
+  %flags_base = scalar.ori %consumed_bit, %thinking_bit : i64
+  %flags = scalar.ori %flags_base, %pending_bit : i64
+""")
+    if in_user:   # chat_message: the first message after the system block completes the user turn chat_begin opened
+        text = sub(text, "  %fragment = func.call @join(%before, %body) : (buffer, buffer) -> (buffer)\n", """  %pending_value = scalar.constant 32 : i64
+  %pending_bit = scalar.andi %state, %pending_value : i64
+  %pending = scalar.cmpi ne, %pending_bit, %zero64 : i64
+  %not_skipped = scalar.cmpi eq, %skip, %false : i1
+  %completes = scalar.andi %pending, %not_skipped : i1
+  %completion = func.call @join(%text, %suffix) : (buffer, buffer) -> (buffer)
+  %shown_body = scf.select %completes, %completion, %body : buffer
+  %fragment = func.call @join(%before, %shown_body) : (buffer, buffer) -> (buffer)
+""")
+        text = sub(text, "  %kept = scalar.andi %state, %keep_mask : i64\n", """  %pending_mask = scalar.constant -36 : i64
+  %mask = scf.select %completes, %pending_mask, %keep_mask : i64
+  %kept = scalar.andi %state, %mask : i64
+""")
+    if chat.get("tools_indent"):   # tools printed like tojson(indent=N): compacted, then re-indented
+        text = sub(text, "  func.return %result : buffer\n}\n\nfunc.def @tools_body(", """  %compacted = func.call @compact(%result) : (buffer) -> (buffer)
+  %indented = func.call @json_indent(%compacted) : (buffer) -> (buffer)
+  func.return %indented : buffer
+}
+
+func.def @tools_body(""")
+    if chat.get("tool_content_json"):   # tool results printed as JSON strings (tojson), untrimmed
+        text = sub(text, "      %value = func.call @join4(%open, %item_prefix, %text, %item_suffix) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+                   """      %tool_json = func.call @json_quote(%raw_text) : (buffer) -> (buffer)
+      %value = func.call @join4(%open, %item_prefix, %tool_json, %item_suffix) : (buffer, buffer, buffer, buffer) -> (buffer)
+""")
+    if chat.get("calls_drop_content"):
+        # An assistant turn with calls renders no content in history (chat_message). complete_text still stores the
+        # turn as generated (content kept), so the retained row matches it; the next prompt, which drops the content,
+        # reuses that row up to the first changed byte.
+        text = sub(text, "        %head = func.call @join4(%prefix, %think, %text, %separator) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+                   """        %shown_text = scf.select %has_calls, %empty, %text : buffer
+        %head = func.call @join4(%prefix, %think, %shown_text, %separator) : (buffer, buffer, buffer, buffer) -> (buffer)
+""")
+    if chat["call_format"] == "json":
+        # control_json.loom's render_tool / parse_tools / output_next replace the generic ones. complete_text keeps the
+        # call-prefix token (Llama 3.1's <|python_tag|>) the model wrote before its call, so the retained row matches.
+        assert thinking == "never", "call_format json with reasoning is not modeled (control_json.loom's output_next)"
+        for fn in ("render_tool", "parse_tools", "output_next"):
+            text = sub(text, f"func.def public @{fn}(", f"func.def @generic_{fn}(")
+        text = sub(text, "  %head = func.call @join4(%prefix, %content, %separator, %tools) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+                   """  %call_prefix = global.load @json_call_prefix : buffer
+  %call_scan_end = buffer.length %response
+  %prefix_at = func.call @find(%response, %c0, %call_scan_end, %call_prefix) : (buffer, offset, offset, buffer) -> (offset)
+  %prefix_written = index.cmp ult, %prefix_at, %call_scan_end : offset
+  %prefix_used = scalar.andi %prefix_written, %has_calls : i1
+  %prefix_text = scf.select %prefix_used, %call_prefix, %empty : buffer
+  %prefixed_tools = func.call @join(%prefix_text, %tools) : (buffer, buffer) -> (buffer)
+  %head = func.call @join4(%prefix, %content, %separator, %prefixed_tools) : (buffer, buffer, buffer, buffer) -> (buffer)
+""")
+    return text + chat_variants(open(os.path.join(HERE, "templates", "control_json.loom"), encoding="utf-8").read()) \
+        .replace("@@HEX_JSON_CALL_PREFIX@@", hx(chat.get("call_prefix_token", ""))) \
+        .replace("@@TOOLS_INDENT@@", str(chat.get("tools_indent") or 4)) \
+        .replace("@@HEX_JSON_CALL_MIDDLE@@", hx('", "' + chat.get("call_arguments_key", "arguments") + '": ')) \
+        .replace("@@HEX_JSON_ARGUMENTS_FIELD@@", hx('"' + chat.get("call_arguments_key", "arguments") + '"'))
+
+
+def patch_tools_xml(text):
+    """control.loom for a template that declares tools as XML elements (chat.tools_format "xml"; Qwen3-Coder):
+    tools_body prints each tool with @xml_tool (templates/control_xml.loom, the IR twin of chat_probe.xml_tool).
+    Without the field control.loom is unchanged."""
+    text = sub(text, "    %printed = func.call @tool_printed(%value) : (buffer) -> (buffer)\n",
+               """    %selected = func.call @tool_printed(%value) : (buffer) -> (buffer)
+    %printed = func.call @xml_tool(%selected) : (buffer) -> (buffer)
+""")
+    return text + open(os.path.join(HERE, "templates", "control_xml.loom"), encoding="utf-8").read()
+
+
 def patch_no_tools(text):
     """control.loom for a chat-only block (chat_probe.CHAT_ONLY, call_format "none": the template ignores tools):
     chat_begin renders a request's tools as the template does (not at all) and parse_tools never parses a call.
@@ -411,7 +576,7 @@ def chat_variants(text):
 
 
 B = lambda v: "true" if v else "false"
-CALL_FORMATS = {"none": 0, "hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4}   # none: chat-only (patch_no_tools)
+CALL_FORMATS = {"none": 0, "hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4, "json": 5}   # none: chat-only (patch_no_tools); json: patch_json_chat
 # A chat format the generic control functions can't express (Glimmer's ATEM channels, Gemma 4): the kit
 # ships chat/<call_format>.loom, whose public chat functions replace the generic ones (renamed
 # @generic_<fn>, still callable), and optionally chat/<call_format>_rodata.py (a rodata() returning its
@@ -458,10 +623,20 @@ for name in ("prepare", "control", "storage", "service"):
     text = open(os.path.join(HERE, "templates", name + ".loom"), encoding="utf-8").read()
     if name == "control" and instructions:
         text = patch_reasoning_instructions(text)
+    if name == "control" and chat.get("system_lead"):
+        text = patch_system_lead(text)
+    if name == "control" and chat.get("history_think") == "close":
+        text = patch_history_close(text)
+    if name == "control" and chat.get("tools_compact"):
+        text = patch_tools_compact(text)
     if name == "control" and chat.get("history_think_before") == "empty":
         text = patch_history_think_before(text)
     if name == "control" and "default_system_tools" in chat:
         text = patch_default_system_tools(text)
+    if name == "control" and chat.get("tools_format") == "xml":
+        text = patch_tools_xml(text)
+    if name == "control" and (chat["call_format"] == "json" or any(k in chat for k in JSON_CHAT_KEYS)):
+        text = patch_json_chat(text)
     if name == "control" and chat["call_format"] == "none":
         text = patch_no_tools(text)
     if name == "control" and custom_chat:
@@ -499,6 +674,32 @@ keep = set(chat.get("nonspecial_tokens", []))
 for t in tok.get("added_tokens", []):
     if t["content"] in keep:
         t["special"] = False
+# loom-serve's tokenizer (hrx-loom 0.1.0) emits garbage after 64 pieces when a later pre-tokenizer Sequence stage splits
+# them further (Spark-X: Split \p{N}{1,3}, Splits, Digits, ByteLevel). When stage 0 isolates numeric runs and only
+# Splits come before the one Digits stage, splitting each numeric char at stage 0 instead gives the same pieces (the
+# Splits in between only see numeric runs whole, and Digits still runs on raw text, before ByteLevel).
+pre = tok.get("pre_tokenizer") or {}
+stages = pre.get("pretokenizers") or []
+digits = [i for i, p in enumerate(stages) if p.get("type") == "Digits"]
+if pre.get("type") == "Sequence" and len(digits) == 1 and stages[digits[0]].get("individual_digits") and \
+        all(p.get("type") == "Split" for p in stages[:digits[0]]) and stages[0].get("behavior") == "Isolated" and \
+        not stages[0].get("invert") and re.fullmatch(r"\\p\{N\}(\{1,\d+\}|\+)?", stages[0].get("pattern", {}).get("Regex", "")):
+    folded = json.loads(json.dumps(tok))
+    fs = folded["pre_tokenizer"]["pretokenizers"]
+    fs[0] = dict(fs[0], pattern={"Regex": "\\p{N}"})
+    del fs[digits[0]]
+    try:
+        from tokenizers import Tokenizer
+    except ImportError:
+        Tokenizer = None
+    if Tokenizer:   # the fold must not change a single token
+        probe = ("Prices: 12345 and 7.5%, x\u00b2 + \u0663\u0664 = \u2167; \u4ef7\u683c\u662f42\u5143 \u3072\u3089\u304c\u306a "
+                 "\u043f\u0440\u0438\u0432\u0435\u0442 \u4e32 123\n"
+                 'def f(x):\n    return x**2  # 0x1F\n{"a": [1, 22, 333], "b": {"c": "d4e5"}}  \t\n')
+        enc = lambda t: Tokenizer.from_str(json.dumps(t)).encode(probe, add_special_tokens=False).ids
+        assert enc(tok) == enc(folded), "Digits fold changed the tokenization"
+    tok = folded
+    print("tokenizer: Digits pre-tokenizer folded into the leading numeric Split (same tokens; loom-serve tokenizer)")
 json.dump(tok, open(os.path.join(pkg, "tokenizer.json"), "w", encoding="utf-8"), ensure_ascii=False)
 
 # 4. Weights (symlink; hard link on Windows without Developer Mode) and the package card.

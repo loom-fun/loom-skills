@@ -49,13 +49,15 @@ DRAFTED_ROWS = {"decode": (0, 1), "decode_2k": (2000, 1), "decode_32k": (32000, 
 # roofline: how the threshold was set"): Loom below FAR_FRACTION x the efficiency tuned Loom ports have demonstrated
 # for the metric kind
 FAR_FRACTION = 0.5
-# Every card performance value comes from a local session (Loom and llama.cpp, one quiet Strix Halo): DevLab runners
-# measure Loom up to ~50 % slower than a local session on the same programs (loom-org SKILL.md, "DevLab measures
-# correctness"). A card value whose session ran on DevLab (source kind "devlab": a scripted DevLab port) is flagged
-# for a local re-measure. info.json "devlab" (Loom-only sweeps written before that decision) is still read and
-# validated, never rendered or judged. spec_acceptance (the spec gate's drafted-token acceptance) is a drafting
-# statistic of model, drafter and text, not a timing: it counts from any source, DevLab's nightly spec gate included
-# (pull_devlab.py), and its session's programs_sha256 decides whether it is stale like any other card value.
+# A card keeps both kinds of performance session, each labeled by its source: local sessions (Loom and llama.cpp on
+# one quiet Strix Halo: the headline values, judged against the roofline) and DevLab sessions (source kind "devlab":
+# a scripted DevLab port, or a devlab-perf job on the published programs), shown next to them with the local / DevLab
+# ratio. The two may differ a lot (loom-org SKILL.md, "Local and DevLab performance"): the ratio is data, never
+# judged. spec_acceptance (the spec gate's drafted-token acceptance) is a drafting statistic of model, drafter and
+# text, not a timing: it is a headline value from any source, DevLab's nightly spec gate included (pull_devlab.py),
+# and its session's programs_sha256 decides whether it is stale like any other card value. info.json "devlab"
+# (Loom-only sweeps older cards recorded) is still read and validated, never rendered or judged.
+TIMED = set(ROOFLINE_METRIC)
 
 # (key, label): the features table's rows.
 FEATURES = [
@@ -298,24 +300,36 @@ def metric_applies(key, kind, feats):
     return True
 
 
-def card_metrics(info):
-    """{metric: (metric entry, session index)}: per metric the last session that measured it (the card's value)."""
+def is_devlab(info, session):
+    """Whether a performance session ran on DevLab (its source kind is "devlab"). The source is an id into
+    info["sources"], or the source itself in an evidence file's session (make_info.py roofline reads those)."""
+    src = session.get("source")
+    src = src if isinstance(src, dict) else (info.get("sources") or {}).get(src)
+    return (src or {}).get("kind") == "devlab"
+
+
+def card_metrics(info, devlab=False):
+    """{metric: (metric entry, session index)}: per metric the last session that measured it, among the local sessions
+    (the card's headline value; spec_acceptance from any session) or, with devlab=True, among the DevLab sessions
+    (timed metrics only: the card's DevLab columns)."""
     out = {}
     for i, s in enumerate((info.get("performance") or {}).get("sessions", [])):
+        dl = is_devlab(info, s)
         for k, m in s["metrics"].items():
-            out[k] = (m, i)
+            if (dl and k in TIMED) if devlab else (not dl or k not in TIMED):
+                out[k] = (m, i)
     return out
 
 
-def stale_metrics(info, programs, kind=None, feats=None):
-    """{metric: programs_sha256 measured} for the card values whose session (the latest that measured the metric)
-    recorded programs other than `programs` (card_lib.programs_sha256 of the published package): that value describes
-    another build. {} when `programs` is unknown; a session that recorded no programs is not flagged."""
+def stale_metrics(info, programs, kind=None, feats=None, devlab=False):
+    """{metric: programs_sha256 measured} for the card values (card_metrics(info, devlab)) whose session recorded
+    programs other than `programs` (card_lib.programs_sha256 of the published package): that value describes another
+    build. {} when `programs` is unknown; a session that recorded no programs is not flagged."""
     if not programs:
         return {}
     sessions = (info.get("performance") or {}).get("sessions", [])
     out = {}
-    for k, (_, i) in card_metrics(info).items():
+    for k, (_, i) in card_metrics(info, devlab).items():
         sha = sessions[i].get("programs_sha256")
         if sha and sha != programs and (kind is None or metric_applies(k, kind, feats)):
             out[k] = sha
@@ -323,29 +337,31 @@ def stale_metrics(info, programs, kind=None, feats=None):
 
 
 def devlab_metrics(info, kind=None, feats=None):
-    """{metric: source id} for the card's timed values (metrics with a roofline row) whose session (the latest that
-    measured the metric) ran on DevLab (source kind "devlab"): a scripted DevLab port's session, to be replaced by a
-    local one. spec_acceptance is a token count, not a timing, and is not flagged."""
-    sessions = (info.get("performance") or {}).get("sessions", [])
-    sources = info.get("sources") or {}
-    out = {}
-    for k, (_, i) in card_metrics(info).items():
-        sid = sessions[i].get("source")
-        if (k in ROOFLINE_METRIC and (sources.get(sid) or {}).get("kind") == "devlab"
-                and (kind is None or metric_applies(k, kind, feats))):
-            out[k] = sid
-    return out
+    """{metric: source id} for the timed metrics only DevLab measured: the headline value needs a local session."""
+    local, sessions = card_metrics(info), (info.get("performance") or {}).get("sessions", [])
+    return {k: sessions[i]["source"] for k, (_, i) in card_metrics(info, devlab=True).items()
+            if k not in local and (kind is None or metric_applies(k, kind, feats))}
+
+
+def devlab_perf_metrics(info, kind=None, feats=None, programs=None):
+    """{metric: "missing" | programs measured} for the timed metrics with a local value but no DevLab value on the
+    package's programs (`programs`, when known): a DevLab perf session fills the card's DevLab columns."""
+    have, stale = card_metrics(info, devlab=True), stale_metrics(info, programs, kind, feats, devlab=True)
+    return {k: stale.get(k, "missing") for k in card_metrics(info)
+            if k in TIMED and (k not in have or k in stale) and (kind is None or metric_applies(k, kind, feats))}
 
 
 def perf_flags(info, kind=None, feats=None, programs=None):
-    """The performance guardrails of one card (loom-org org_status.py):
-    far       {metric: [Loom / roofline, demonstrated efficiency]} where Loom (the card's value) is below
-              FAR_FRACTION x the efficiency Loom ports have demonstrated for that kind of metric (info.json roofline)
-    devlab    {metric: source id} where the card's value was measured on DevLab (devlab_metrics): performance numbers
-              come from local sessions only, so a local session replaces it (org_status: remeasure, devlab-primary)
-    stale     {metric: programs measured} where the card's value was measured on programs other than `programs`, the
-              package's own (stale_metrics; only with `programs`): the local column compares another build, and far
-              is judged on it, so a fresh local session comes first"""
+    """The performance guardrails of one card (loom-org org_status.py). The local / DevLab ratio is never a flag.
+    far          {metric: [Loom / roofline, demonstrated efficiency]} where Loom's local value is below FAR_FRACTION x
+                 the efficiency Loom ports have demonstrated for that kind of metric (info.json roofline)
+    devlab       {metric: source id} where only DevLab measured the metric (devlab_metrics): a local session gives the
+                 headline value (org_status: remeasure, devlab-primary)
+    devlab_perf  {metric: "missing" | programs measured} where the DevLab columns lack the value or have it on other
+                 programs (devlab_perf_metrics; org_status: missing devlab-perf, low priority)
+    stale        {metric: programs measured} where the local value was measured on programs other than `programs`,
+                 the package's own (stale_metrics; only with `programs`): it describes another build, and far is
+                 judged on it, so a fresh local session comes first"""
     loom = {k: m.get("loom") for k, (m, _) in card_metrics(info).items()}
     if kind is not None:
         loom = {k: v for k, v in loom.items() if metric_applies(k, kind, feats)}
@@ -355,7 +371,8 @@ def perf_flags(info, kind=None, feats=None, programs=None):
             frac = loom[k] / r["ceiling"]
             if frac < FAR_FRACTION * r["efficiency"]:
                 far[k] = [round(frac, 3), r["efficiency"]]
-    out = {"far": far, "devlab": devlab_metrics(info, kind, feats)}
+    out = {"far": far, "devlab": devlab_metrics(info, kind, feats),
+           "devlab_perf": devlab_perf_metrics(info, kind, feats, programs)}
     if programs is not None:
         out["stale"] = stale_metrics(info, programs, kind, feats)
     return out
@@ -363,7 +380,7 @@ def perf_flags(info, kind=None, feats=None, programs=None):
 
 def remeasure_reasons(flags):
     """Why a card needs a fresh local session before any performance judgement (org_status's remeasure action):
-    "stale" (a value measured on other programs), "devlab-primary" (a value measured on DevLab)."""
+    "stale" (a local value measured on other programs), "devlab-primary" (a metric only DevLab measured)."""
     return [r for r, k in (("stale", "stale"), ("devlab-primary", "devlab")) if (flags or {}).get(k)]
 
 

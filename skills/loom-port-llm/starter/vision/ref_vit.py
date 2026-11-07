@@ -120,17 +120,20 @@ def bilinear_ac(grid, oh, ow):
     g = grid
     return ((g[y0][:, x0] * (1 - fx) + g[y0][:, x1] * fx) * (1 - fy) + (g[y1][:, x0] * (1 - fx) + g[y1][:, x1] * fx) * fy).astype(np.float32)
 
-def qwen3vl(W, KV, img, normalized=False):
-    """img: float32 [H, W, 3]; normalized=False applies (x - mean) / std as the preprocessor does."""
+def qwen_vl(W, KV, img, normalized=False):
+    """Qwen3-VL / Qwen3.5 / Qwen2.5-VL ViT. img: float32 [H, W, 3]; normalized=False applies (x - mean) / std as the
+    preprocessor does. From the tensors and metadata: fused or separate qkv, LayerNorm or RMSNorm, learned position grid
+    or none, gated (SiLU) or plain FFN, window attention (n_wa_pattern), DeepStack mergers."""
     P = KV["clip.vision.patch_size"]; E = KV["clip.vision.embedding_length"]; NH = KV["clip.vision.attention.head_count"]
     eps = KV.get("clip.vision.attention.layer_norm_epsilon", 1e-6); D = E // NH; m = KV.get("clip.vision.spatial_merge_size", 2)
     x = img if normalized else (img - np.array(KV["clip.vision.image_mean"], np.float32)) / np.array(KV["clip.vision.image_std"], np.float32)
     Hh, Ww = x.shape[0] // P, x.shape[1] // P
     patches = x.reshape(Hh, P, Ww, P, 3).transpose(0, 2, 4, 1, 3).reshape(Hh, Ww, 3 * P * P)
     pw = W["v.patch_embd.weight"].reshape(E, -1) + W["v.patch_embd.weight.1"].reshape(E, -1)
-    h = patches @ pw.T + W["v.patch_embd.bias"]                       # [Hh, Ww, E]
-    n = int(round(math.sqrt(W["v.position_embd.weight"].shape[0])))
-    h = h + bilinear_ac(W["v.position_embd.weight"].reshape(n, n, E), Hh, Ww)
+    h = patches @ pw.T + W.get("v.patch_embd.bias", 0)                # [Hh, Ww, E]
+    if "v.position_embd.weight" in W:
+        n = int(round(math.sqrt(W["v.position_embd.weight"].shape[0])))
+        h = h + bilinear_ac(W["v.position_embd.weight"].reshape(n, n, E), Hh, Ww)
     # block order: (ty, tx, dy, dx)
     order = [(ty * m + dy, tx * m + dx) for ty in range(Hh // m) for tx in range(Ww // m) for dy in range(m) for dx in range(m)]
     ys = np.array([o[0] for o in order]); xs = np.array([o[1] for o in order])
@@ -142,19 +145,34 @@ def qwen3vl(W, KV, img, normalized=False):
     def rope(t):  # t [NH, n, D]; pairs (j, j + D/2)
         a, b = t[..., :D // 2], t[..., D // 2:]
         return np.concatenate([a * c - b * s_, a * s_ + b * c], -1)
-    nb = len({k.split(".")[2] for k in W if k.startswith("v.blk.")})
+    def norm(t, name):
+        return ln(t, W[name + ".weight"], W[name + ".bias"], eps) if name + ".bias" in W else rms(t, W[name + ".weight"], eps)
+    wa = KV.get("clip.vision.n_wa_pattern", 0); win = 112 // P
+    wid = (ys // win) * 100000 + xs // win; same = wid[:, None] == wid[None, :]
+    act = (lambda t: t / (1 + np.exp(-t))) if KV.get("clip.use_silu") else gelu_tanh
+    nb = len({k.split(".")[2] for k in W if k.startswith("v.blk.")}); deep = []
     for i in range(nb):
         p = f"v.blk.{i}."
-        cur = ln(h, W[p + "ln1.weight"], W[p + "ln1.bias"], eps)
-        qkv = Lin(W, p + "attn_qkv")(cur)
-        q, k, v = (qkv[:, j * E:(j + 1) * E].reshape(-1, NH, D).transpose(1, 0, 2) for j in range(3))
+        cur = norm(h, p + "ln1")
+        if p + "attn_qkv.weight" in W:
+            qkv = Lin(W, p + "attn_qkv")(cur)
+            q, k, v = (qkv[:, j * E:(j + 1) * E].reshape(-1, NH, D).transpose(1, 0, 2) for j in range(3))
+        else:
+            q, k, v = (Lin(W, p + nm)(cur).reshape(-1, NH, D).transpose(1, 0, 2) for nm in ("attn_q", "attn_k", "attn_v"))
         q, k = rope(q), rope(k)
-        sc = q @ k.transpose(0, 2, 1) / math.sqrt(D); sc -= sc.max(-1, keepdims=True); a = np.exp(sc); a /= a.sum(-1, keepdims=True)
+        sc = q @ k.transpose(0, 2, 1) / math.sqrt(D)
+        if wa and (i + 1) % wa: sc = np.where(same[None], sc, -np.inf)
+        sc -= sc.max(-1, keepdims=True); a = np.exp(sc); a /= a.sum(-1, keepdims=True)
         h = h + Lin(W, p + "attn_out")((a @ v).transpose(1, 0, 2).reshape(-1, E))
-        cur = ln(h, W[p + "ln2.weight"], W[p + "ln2.bias"], eps)
-        h = h + Lin(W, p + "ffn_down")(gelu_tanh(Lin(W, p + "ffn_up")(cur)))
-    h = ln(h, W["v.post_ln.weight"], W["v.post_ln.bias"], eps).reshape(-1, E * m * m)
-    return Lin(W, "mm.2")(gelu_tanh(Lin(W, "mm.0")(h)))
+        cur = norm(h, p + "ln2")
+        f = act(Lin(W, p + "ffn_gate")(cur)) * Lin(W, p + "ffn_up")(cur) if p + "ffn_gate.weight" in W else act(Lin(W, p + "ffn_up")(cur))
+        h = tr(f"layer_out-{i}", h + Lin(W, p + "ffn_down")(f))
+        d = f"v.deepstack.{i}."
+        if d + "fc1.weight" in W:   # DeepStack: this layer's merged rows through their own merger
+            g = ln(h.reshape(-1, E * m * m), W[d + "norm.weight"], W[d + "norm.bias"], eps)
+            deep.append(Lin(W, d + "fc2")(gelu_tanh(Lin(W, d + "fc1")(g))))
+    h = norm(h, "v.post_ln").reshape(-1, E * m * m)
+    return np.concatenate([Lin(W, "mm.2")(gelu_tanh(Lin(W, "mm.0")(h)))] + deep, -1)   # [rows, out * (1 + deepstack)]
 
 def muse_glimmer(W, KV, img, normalized=False):
     P = KV["clip.vision.patch_size"]; E = KV["clip.vision.embedding_length"]; NH = KV["clip.vision.attention.head_count"]
@@ -204,7 +222,8 @@ def bilinear_hp(grid, oh, ow):
     fy = (ys - y0)[:, None, None]; fx = (xs - x0)[None, :, None]; g = grid
     return ((g[y0][:, x0] * (1 - fx) + g[y0][:, x1] * fx) * (1 - fy) + (g[y1][:, x0] * (1 - fx) + g[y1][:, x1] * fx) * fy).astype(np.float32)
 
-ENCODERS = {"muse-glimmer": lambda W, KV, img: muse_glimmer(W, KV, img, normalized=True), "gemma4v": gemma4v, "qwen3vl_merger": lambda W, KV, img: qwen3vl(W, KV, img, normalized=True)}
+ENCODERS = {"muse-glimmer": lambda W, KV, img: muse_glimmer(W, KV, img, normalized=True), "gemma4v": gemma4v, "qwen3vl_merger": lambda W, KV, img: qwen_vl(W, KV, img, normalized=True)}
+ENCODERS["qwen2.5vl_merger"] = ENCODERS["qwen3vl_merger"]
 
 if __name__ == "__main__":
     W, KV = load(sys.argv[1]); pt = KV.get("clip.vision.projector_type") or KV.get("clip.projector_type")
