@@ -291,16 +291,23 @@ def llama_views(url, ids, pkg):
 
 
 def view_gaps(tops, gold_id, loom_id):
-    """logp(gold) - logp(loom) in each of llama.cpp's views of one position that lists gold -> (exact gaps,
-    every gap): a view without Loom's token gives a lower bound (its last listed log-prob)."""
-    gaps = [(v[gold_id] - v.get(loom_id, min(v.values())), loom_id in v) for v in tops if gold_id in v]
-    return [g for g, exact in gaps if exact], [g for g, _ in gaps]
+    """logp(gold) - logp(loom) in each of llama.cpp's views of one position -> (upper, lower): the values the
+    gap is at most / at least in some view. A view listing both gives the gap itself; one without Loom's token
+    bounds it from below, one without gold from above (by its last listed log-prob)."""
+    upper, lower = [], []
+    for v in tops:
+        g = v.get(gold_id, min(v.values())) - v.get(loom_id, min(v.values()))
+        if loom_id in v:
+            upper.append(g)
+        if gold_id in v:
+            lower.append(g)
+    return upper, lower
 
 
 def gap_spread(tops, gold_id, loom_id):
     """How far the gap moves across llama.cpp's views of one position, at least (0 without two views)."""
-    exact, every = view_gaps(tops, gold_id, loom_id)
-    return max(every) - min(exact) if exact else 0.0
+    upper, lower = view_gaps(tops, gold_id, loom_id)
+    return max(0.0, max(lower) - min(upper)) if upper and lower else 0.0
 
 
 def near_tie(top, gold_id, loom_id, max_gap=1.0, views=()):
@@ -310,11 +317,13 @@ def near_tie(top, gold_id, loom_id, max_gap=1.0, views=()):
     1.03, while llama.cpp's own re-recording of the same prompt sat at gap 1.05). A token llama.cpp is
     confident against, or ranks lower, is a bug. With `views` (llama_views: llama.cpp's own other numerics
     there), yes when the smallest gap among them is <= max_gap plus their spread: the exact gap lies within
-    llama.cpp's spread of its views, and Loom, rounding as coarsely, within as much again."""
+    llama.cpp's spread of its views, and Loom, rounding as coarsely, within as much again. A view that ranks
+    Loom's token above gold (gold unlisted: gemma-4-26B, `_` at p 1.0 token by token, unlisted batched) is
+    llama.cpp's own choice of it."""
     if gold_id not in top:
         return False
-    exact, _ = view_gaps((top, *views), gold_id, loom_id)
-    if exact and min(exact) <= max_gap + gap_spread((top, *views), gold_id, loom_id):
+    upper, _ = view_gaps((top, *views), gold_id, loom_id)
+    if upper and min(upper) <= max_gap + gap_spread((top, *views), gold_id, loom_id):
         return True
     ranked = sorted(top, key=top.get, reverse=True)
     return ranked[:2] == [gold_id, loom_id] and math.exp(top[gold_id]) < 0.5

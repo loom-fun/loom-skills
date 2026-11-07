@@ -158,7 +158,9 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     llama.cpp's own noise there. The divergence passes when the smallest of these gaps is ≤ 1.0 + the
     spread (`near_tie(..., views)`): the exact gap lies within llama.cpp's spread of its views, and Loom,
     rounding as coarsely, within as much again (at most 1.0 + twice the spread from the golden). Loom's
-    token must appear in at least one view; a view that does not list it bounds its gap from below.
+    token must appear in at least one view; a view that does not list it bounds its gap from below, one
+    that does not list the golden's token from above (llama.cpp itself prefers Loom's token there:
+    gemma-4-26B, `_` at p 1.0 token by token is unlisted batched, where `/` is at −1.24).
     Why: both engines round activations to 8 bits at every matmul, so a single rounding-level change
     (f16 vs f32 KV, MMVQ vs MMQ, ties-to-even vs away) can move a gap by about 1 nat where the model is
     truly tied (gemma-3-1b, first token: an f64 forward puts the two candidates 0.004 apart, the golden
