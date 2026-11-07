@@ -15,20 +15,12 @@ Make a kit with `../apply_example.sh lfm2moe W/kit`.
 | `cfg.json` | the reviewed config without the tensor table |
 
 **LFM3 (arch `lfm3`, LFM3-1.7B / LFM3-Omni-2B text) uses this kit too** (`examples.json` `archs`: port.sh applies it
-to an `lfm3` GGUF; the LFM2.5 reviewed config is never merged into one). What lfm3 adds over lfm2
-(llama.cpp `src/models/lfm3.cpp`), each behind a cfg key that `inspect_gguf.py` sets only for lfm3, so lfm2moe programs
-are byte-identical:
-
-| cfg key | What it is | Where |
-|---|---|---|
-| `shortconv.l_cache` 7 | a kernel-7 short conv (LFM2: 3) | `gen_sconv.py` is generic in K |
-| `post_norms`, `post_norm_eps` | sandwich norms (post_attention_norm, post_ffw_norm) at the model's rms eps | starter `g_post_add_norm` |
-| `attn_gate: "head"` | `attn_gate.weight` f32 [hidden, heads]: sigmoid(W h) scales each head's output | `g_head_gate` writes the logit over the head's dims; the combine / flash kernels apply the sigmoid as for a per-dim gate |
-| `sliding_layers`, `rope_theta_swa` | window-256 layers with their own rope base (`rope.freq_base_swa`) and no frequency factors | `g_qk_rope_store`'s `%rope` flag is 2 on sliding layers |
-| `rope_freq_factors` (starter) | full-attention layers: `rope_freqs.weight` 1 / 1e30, i.e. only the first 32 of 64 rotary pairs rotate | starter `freq_factor` |
-
-Kernel tests: `qk_rope` (global, with the factors), `qk_rope_swa` (sliding base) and `head_gate`. The chat side (an
-empty `<think></think>` before the last user message) is the starter's `history_think_before`.
+to an `lfm3` GGUF; the LFM2.5 reviewed config is never merged into one). Over lfm2 (llama.cpp `src/models/lfm3.cpp`)
+the kit adds only a kernel-7 short conv (`shortconv.l_cache`; `gen_sconv.py` is generic in K) and sandwich norms at the
+model's rms eps (`post_norm_eps`). The rest is the starter's: the per-head output gate (`attn_gate: "per_head"`), the
+sliding layers' rope base (`rope_theta_swa`, `g_qk_rope_store_swa`) and the global layers' `rope_freqs` factors
+(`rope_freq_factors`: 1 / 1e30, only the first 32 of 64 rotary pairs rotate), and the empty `<think></think>` before
+the last user message (`history_think_before`).
 
 The chat side is in the starter: `chat_probe.py` derives LFM2's template (`{% generation %}` tags, a
 JSON-list tools block, pythonic tool calls `<|tool_call_start|>[f(a='x')]<|tool_call_end|>`), and
