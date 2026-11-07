@@ -184,6 +184,16 @@ def reasoning_instructions(T, chat, heads, notes):
                  f"{chat['reasoning_effort_default']}) to the system block with thinking on")
 
 
+# A template that ignores tools: no tool declarations, calls or results (call_format "none"; build.py makes
+# control.loom ignore a request's tools and never parse calls). call_marker keeps build.py's default: output_next
+# ends content at the marker, and an empty one would end it at once.
+CHAT_ONLY = {"tools_prefix": "", "tools_suffix": "", "tool_line_prefix": "", "tool_separator": "",
+             "tools_system_separator": "", "tools_after_system": True, "tools_function_only": True,
+             "call_format": "none", "calls_open": "", "calls_close": "", "call_end": "", "call_marker": "<tool_call>",
+             "content_call_separator": "", "call_separator": "", "tool_turn_prefix": "", "tool_item_prefix": "",
+             "tool_item_suffix": "", "tool_turn_suffix": ""}
+
+
 def derive(template_text, bos="", eos=""):
     T = Template(template_text, bos, eos)
     notes = []
@@ -281,6 +291,14 @@ def derive(template_text, bos="", eos=""):
     chat["think_end"] = chat["think_close"].strip() or "</think>"
     # Tools block.
     t_plain = T.render([{"role": "user", "content": "USERPROBE1"}], tools=TOOLS, **kw0)
+    if t_plain == single and T.render([{"role": "system", "content": "SYSPROBE"}, {"role": "user", "content": "USERPROBE1"}], tools=TOOLS, **kw0) \
+            == T.render([{"role": "system", "content": "SYSPROBE"}, {"role": "user", "content": "USERPROBE1"}], **kw0):
+        # The template ignores tools (a plain chat model, e.g. bare ChatML): a chat-only block. Requests' tools are
+        # ignored as the template does, no call is parsed, and the card says tool calling "no" (agent gate n/a).
+        chat.update(CHAT_ONLY)
+        chat["terminal"] = chat["suffix"].strip() or chat["suffix"]
+        notes.append("template ignores tools: chat-only block, tool calling unsupported (call_format none)")
+        return chat, notes
     t_sys = T.render([{"role": "system", "content": "SYSPROBE"}, {"role": "user", "content": "USERPROBE1"}], tools=TOOLS, **kw0)
     printed = None
     for only in (False, True):
@@ -400,6 +418,7 @@ def derive(template_text, bos="", eos=""):
 
 def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reasoning_effort=None):
     """Python model of control.loom's rendering (chat_begin + chat_message + chat_end)."""
+    tools = None if chat.get("call_format") == "none" else tools   # a chat-only block ignores tools, as its template does
     trim = (lambda s: s.strip()) if chat["trim_content"] else (lambda s: s)
     out = chat.get("bos", "")
     first_system = messages and messages[0]["role"] == "system" and isinstance(messages[0]["content"], str)
@@ -536,6 +555,8 @@ def verify(template_text, chat, bos="", eos=""):
 
 def compare(T, chat, label, msgs, tools, kw):
     """(label, ok, detail): the template's render with kw vs simulate()."""
+    if chat.get("call_format") == "none" and any(m["role"] == "tool" or m.get("tool_calls") for m in msgs):
+        return label, None, "tool calling unsupported (the template ignores tools): not modeled"
     ref = T.render(msgs, tools=tools, gen=True, **kw)
     effort = {"reasoning_effort": kw["reasoning_effort"]} if "reasoning_effort" in kw else {}   # kits may wrap simulate()
     got = simulate(chat, msgs, tools, gen=True, enable_thinking=kw.get("enable_thinking"), **effort)

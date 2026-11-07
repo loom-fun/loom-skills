@@ -291,13 +291,47 @@ func.def @with_instructions(%instructions: buffer, %body: buffer) -> (buffer) {{
                """  %merges_system = scalar.ori %has_tools, %has_instructions : i1
   %consumed = scalar.andi %merges_system, %first_system : i1
 """)
+def patch_no_tools(text):
+    """control.loom for a chat-only block (chat_probe.CHAT_ONLY, call_format "none": the template ignores tools):
+    chat_begin renders a request's tools as the template does (not at all) and parse_tools never parses a call.
+    Other packages' control.loom is unchanged."""
+    off = "scalar.constant false : i1"
+    for old in ("  %has_tools = scalar.cmpi ne, %tool_count, %zero64 : i64\n",
+                "  %has_tools = scalar.cmpi ne, %schema_count, %zero64 : i64\n"):
+        assert text.count(old) == 1, (old, text.count(old))
+        text = text.replace(old, f"  %has_tools = {off}\n")
+    return text
+
+
+def chat_variants(text):
+    """A custom chat file's variants for what the template's derived chat block says: the lines between
+    '// @@IF_CHAT:KEY@@' and '// @@END_CHAT@@' (or '// @@ELSE_CHAT@@', which starts the other branch) are kept
+    when chat[KEY] is true, or with '// @@IF_CHAT:KEY!=OTHER@@' when the two fields differ. The marker lines go,
+    so a block that needs no variant compiles to the same program as before the variant was added."""
+    out, keep = [], [True]
+    for line in text.splitlines(keepends=True):
+        m = re.match(r"\s*// @@(IF_CHAT:([\w!=]+)|ELSE_CHAT|END_CHAT)@@\s*$", line)
+        if not m:
+            out += [line] if all(keep) else []
+        elif m.group(2):
+            a, _, b = m.group(2).partition("!=")
+            keep.append(chat.get(a) != chat.get(b) if b else bool(chat.get(a)))
+        elif m.group(1) == "ELSE_CHAT":
+            keep[-1] = not keep[-1]
+        else:
+            keep.pop()
+    assert len(keep) == 1, "unbalanced // @@IF_CHAT@@ markers"
+    return "".join(out)
+
+
 B = lambda v: "true" if v else "false"
-CALL_FORMATS = {"hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4}
+CALL_FORMATS = {"none": 0, "hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4}   # none: chat-only (patch_no_tools)
 # A chat format the generic control functions can't express (Glimmer's ATEM channels, Gemma 4): the kit
 # ships chat/<call_format>.loom, whose public chat functions replace the generic ones (renamed
 # @generic_<fn>, still callable), and optionally chat/<call_format>_rodata.py (a rodata() returning its
 # string constants). In it, @@HEX_CHAT:<key>@@ is the hex of chat[<key>]; chat.base_call_format (default
 # hermes) is the tool-call format the generic functions use underneath. See reference/glimmer-example.
+# Its lines may hold variants for what the derived chat block says (chat_variants: // @@IF_CHAT:KEY@@ markers).
 custom_chat = os.path.join(HERE, "chat", chat["call_format"] + ".loom")
 custom_chat = custom_chat if chat["call_format"] not in CALL_FORMATS and os.path.exists(custom_chat) else None
 subs = {
@@ -338,6 +372,8 @@ for name in ("prepare", "control", "storage", "service"):
     text = open(os.path.join(HERE, "templates", name + ".loom"), encoding="utf-8").read()
     if name == "control" and instructions:
         text = patch_reasoning_instructions(text)
+    if name == "control" and chat["call_format"] == "none":
+        text = patch_no_tools(text)
     if name == "control" and custom_chat:
         for fn in ("chat_begin", "chat_message", "chat_end", "render_tool", "parse_tools", "output_next", "complete_text"):
             text = text.replace(f"func.def public @{fn}(", f"func.def @generic_{fn}(")
@@ -345,7 +381,7 @@ for name in ("prepare", "control", "storage", "service"):
         if os.path.exists(rodata_py):
             sys.path.insert(0, os.path.dirname(rodata_py))
             text += "\n" + __import__(os.path.basename(rodata_py)[:-3]).rodata()
-        text += "\n" + open(custom_chat, encoding="utf-8").read()
+        text += "\n" + chat_variants(open(custom_chat, encoding="utf-8").read())
         text = re.sub(r"@@HEX_CHAT:(\w+)@@", lambda m: hx(chat.get(m.group(1), "")), text)
     if name == "storage" and (cfg.get("vision") or {}).get("mrope"):   # M-RoPE span offsets after the plan
         sys.path.insert(0, os.path.join(HERE, "vision"))

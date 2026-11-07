@@ -207,6 +207,13 @@ def package_facts(pkg_files):
             "features": derive_features(model, cfg, kind, execution, srcs, spec)}
 
 
+def tool_calling(chat):
+    """Whether a package's chat block serves tool calls: the starter's tool-call glue, a call format (parser) and the
+    tool declaration block (renderer). call_format "none" is a chat-only block (a template that ignores tools).
+    gates.sh skips the agent gates on the same test, so the card shows them as not applicable."""
+    return chat.get("call_format") not in (None, "none") or bool(chat.get("tools_prefix"))
+
+
 def derive_features(model, cfg, kind, execution, srcs, spec):
     chat = cfg.get("chat") or {}
     na = {"status": "n/a", "value": None}
@@ -218,9 +225,7 @@ def derive_features(model, cfg, kind, execution, srcs, spec):
             f[k] = dict(na)
     else:
         f["api"] = {"status": "yes", "value": {"endpoint": "/v1/chat/completions", "style": "openai"}}
-        # the starter's tool-call glue: a call format (parser) and the tool declaration block (renderer)
-        tools = "call_format" in chat or bool(chat.get("tools_prefix"))
-        f["tool_calling"] = {"status": "yes" if tools else "no", "value": None}
+        f["tool_calling"] = {"status": "yes" if tool_calling(chat) else "no", "value": None}
         mode = chat.get("thinking")
         if mode not in ("always", "toggle"):
             mode = "always" if chat.get("starts_in_reasoning") else None
