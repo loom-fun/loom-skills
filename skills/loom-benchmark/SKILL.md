@@ -154,18 +154,17 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     rejects is judged again: llama.cpp re-scores the same position (prompt + its own tokens before it)
     under two numerics it uses itself, the context in one batch (MMQ matmuls) and in micro-batches of 8
     (MMVQ: another q8_1 dot-product formula and summation order, and the decode path a reused history
-    took; `bench_common.llama_views`). The spread of the gap across the golden and these views is
-    llama.cpp's own noise there. The divergence passes when the smallest of these gaps is ≤ 1.0 + the
-    spread (`near_tie(..., views)`): the exact gap lies within llama.cpp's spread of its views, and Loom,
-    rounding as coarsely, within as much again (at most 1.0 + twice the spread from the golden). Loom's
-    token must appear in at least one view; a view that does not list it bounds its gap from below, one
-    that does not list the golden's token from above (llama.cpp itself prefers Loom's token there:
-    gemma-4-26B, `_` at p 1.0 token by token is unlisted batched, where `/` is at −1.24).
+    took; `bench_common.llama_views`). The noise is how far the gap moves across the golden and the
+    views that list both tokens, capped at 0.5. The divergence passes when the smallest of those gaps is
+    ≤ 1.0 + the noise, or when a view ranks Loom's token and not the golden's (llama.cpp itself prefers
+    it: gemma-4-26B, `_` at p 1.0 token by token is unlisted batched, where `/` is top-1). A view without
+    Loom's token never widens the bar (`test_near_tie.py`).
     Why: both engines round activations to 8 bits at every matmul, so a single rounding-level change
     (f16 vs f32 KV, MMVQ vs MMQ, ties-to-even vs away) can move a gap by about 1 nat where the model is
     truly tied (gemma-3-1b, first token: an f64 forward puts the two candidates 0.004 apart, the golden
-    gap is 1.36; MoE routing flips move more). A fixed larger constant would let real bugs through
-    everywhere; the measured noise widens the bar only where llama.cpp disagrees with itself.
+    gap is 1.36, the views 1.28 and 1.06). A fixed larger constant would let real bugs through everywhere.
+    Limit: a mild long-context RoPE error (base 5e5 vs 1e6) is below this bar's resolution, since
+    llama.cpp's own views disagree that much there (16k: 1.24 golden, 0.98 and 1.44 views).
     Only the first divergence of a prompt (turn, probe) is judged, as before. compare.py, agent_golden.py,
     needle.py and spec_check.py use it (`near_tie_at`); vision_golden.py (image prompts) does not. No
     micro-batch view where llama.cpp cannot extend its cache in small steps (recurrent state).

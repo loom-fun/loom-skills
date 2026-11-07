@@ -240,10 +240,10 @@ def _micro_batched(url, req, mb, timeout):
     """Answer /completion `req` with its prompt evaluated in micro-batches of at most mb tokens, each request
     extending the slot's cache (the first starts afresh). A server that rolls back to a context checkpoint
     before extending (SWA layers) re-evaluates a fixed few tokens more per request, so the step shrinks by
-    that and the prompt starts over; when no step keeps every batch within mb (recurrent state: the whole
-    prefix each time), the answer is an empty view."""
+    that and the prompt starts over; when no step of 2 or more keeps every batch within mb (recurrent state: the
+    whole prefix each time; at most len/2 requests), the answer is an empty view."""
     p, step = req["prompt"], mb
-    while step >= 1:
+    while step >= 2:
         m = 0
         while m < len(p):
             m2 = min(m + step if m else mb, len(p))
@@ -264,11 +264,11 @@ def _micro_batched(url, req, mb, timeout):
 GREEDY = {"temperature": 0, "cache_prompt": False, "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}
 
 
-def llama_greedy(url, ids, n_predict, pkg, salt="", n_probs=5):
+def llama_greedy(url, ids, n_predict, pkg, salt="", n_probs=5, **extra):
     """Greedy llama.cpp continuation of prompt ids -> (response, generated ids, aligned top lists).
     completion_probabilities omits byte-fallback tokens (emoji, partial UTF-8), so the ids come from
-    `tokens` and the top-n lists are trusted only while they line up with them."""
-    r = llama_completion(url, dict(GREEDY, prompt=ids, n_predict=n_predict, n_probs=n_probs, return_tokens=True), pkg, salt)
+    `tokens` and the top-n lists are trusted only while they line up with them. `extra`: more request fields."""
+    r = llama_completion(url, dict(GREEDY, prompt=ids, n_predict=n_predict, n_probs=n_probs, return_tokens=True, **extra), pkg, salt)
     cp = r.get("completion_probabilities", [])
     gen = r.get("tokens") or [x["id"] for x in cp]
     k = next((i for i, x in enumerate(cp) if i >= len(gen) or x["id"] != gen[i]), len(cp))
@@ -279,36 +279,27 @@ def llama_views(url, ids, pkg):
     """llama.cpp's own top-10 log-probs for the token after `ids` under two numerics it uses itself: `ids` in one
     batch (its prefill kernels: MMQ matmuls) and in micro-batches of 8 through the slot's cache (its decode
     kernels: MMVQ, another q8_1 dot-product formula and summation order). A view llama.cpp could not compute
-    (pending under LLAMA_DEFER, or no cache reuse: SWA or recurrent state) is left out."""
+    (pending under LLAMA_DEFER, or no cache reuse: recurrent state) is left out."""
     views = []
-    for chunk in (None, 8):
-        body = dict(GREEDY, prompt=list(ids), n_predict=1, n_probs=10)
-        if chunk:
-            body.update(_micro_batch=chunk, id_slot=0)
-        cp = llama_completion(url, body, pkg).get("completion_probabilities")
+    for extra in ({}, {"_micro_batch": 8, "id_slot": 0}):
+        _, _, cp = llama_greedy(url, list(ids), 1, pkg, n_probs=10, **extra)
         if cp:
-            views.append({t["id"]: t["logprob"] for t in cp[0]["top_logprobs"]})
+            views.append(top_logprobs(cp, 0))
     return views
 
 
-def view_gaps(tops, gold_id, loom_id):
-    """logp(gold) - logp(loom) in each of llama.cpp's views of one position -> (upper, lower): the values the
-    gap is at most / at least in some view. A view listing both gives the gap itself; one without Loom's token
-    bounds it from below, one without gold from above (by its last listed log-prob)."""
-    upper, lower = [], []
-    for v in tops:
-        g = v.get(gold_id, min(v.values())) - v.get(loom_id, min(v.values()))
-        if loom_id in v:
-            upper.append(g)
-        if gold_id in v:
-            lower.append(g)
-    return upper, lower
+NOISE_CAP = 0.5   # nats: the most llama.cpp's own spread may widen the bar
 
 
-def gap_spread(tops, gold_id, loom_id):
-    """How far the gap moves across llama.cpp's views of one position, at least (0 without two views)."""
-    upper, lower = view_gaps(tops, gold_id, loom_id)
-    return max(0.0, max(lower) - min(upper)) if upper and lower else 0.0
+def exact_gaps(tops, gold_id, loom_id):
+    """logp(gold) - logp(loom) in each of llama.cpp's views of one position that lists both tokens."""
+    return [v[gold_id] - v[loom_id] for v in tops if gold_id in v and loom_id in v]
+
+
+def gap_noise(tops, gold_id, loom_id):
+    """llama.cpp's own noise at one position: how far the exact gap moves across its views, capped at NOISE_CAP."""
+    exact = exact_gaps(tops, gold_id, loom_id)
+    return min(max(exact) - min(exact), NOISE_CAP) if exact else 0.0
 
 
 def near_tie(top, gold_id, loom_id, max_gap=1.0, views=()):
@@ -316,15 +307,17 @@ def near_tie(top, gold_id, loom_id, max_gap=1.0, views=()):
     llama.cpp at that position. Yes when the log-prob gap is <= max_gap, or when llama.cpp itself is unsure
     there: Loom picked its second choice and its first has probability < 0.5 (flint: p 0.38 vs 0.13, gap
     1.03, while llama.cpp's own re-recording of the same prompt sat at gap 1.05). A token llama.cpp is
-    confident against, or ranks lower, is a bug. With `views` (llama_views: llama.cpp's own other numerics
-    there), yes when the smallest gap among them is <= max_gap plus their spread: the exact gap lies within
-    llama.cpp's spread of its views, and Loom, rounding as coarsely, within as much again. A view that ranks
-    Loom's token above gold (gold unlisted: gemma-4-26B, `_` at p 1.0 token by token, unlisted batched) is
-    llama.cpp's own choice of it."""
+    confident against, or ranks lower, is a bug.
+    With `views` (llama_views: llama.cpp's own other numerics there): yes when the smallest gap among top and
+    the views is <= max_gap plus their spread (max - min), capped at NOISE_CAP. Only views listing both
+    tokens count: one without Loom's token never widens the bar. One without gold that lists Loom's token is
+    llama.cpp itself ranking Loom's token higher, which passes (gemma-4-26B: `_` at p 1.0 token by token,
+    unlisted batched, where `/` is top-1)."""
     if gold_id not in top:
         return False
-    upper, _ = view_gaps((top, *views), gold_id, loom_id)
-    if upper and min(upper) <= max_gap + gap_spread((top, *views), gold_id, loom_id):
+    tops = (top, *views)
+    exact = exact_gaps(tops, gold_id, loom_id)
+    if any(loom_id in v and gold_id not in v for v in tops) or exact and min(exact) <= max_gap + gap_noise(tops, gold_id, loom_id):
         return True
     ranked = sorted(top, key=top.get, reverse=True)
     return ranked[:2] == [gold_id, loom_id] and math.exp(top[gold_id]) < 0.5
