@@ -5,6 +5,7 @@ A *package* is a directory with model.json + tokenizer.json + llm_config.json
 the single source of truth for prompt rendering, so llama.cpp (golden, fed raw
 token ids) and Loom (fed chat messages) see byte-identical prompts.
 """
+import glob
 import hashlib
 import json
 import math
@@ -290,6 +291,30 @@ def text_divergence(tok, loom_ids, gids):
             loom_id = (tok.encode(text[done:], add_special_tokens=False).ids or [None])[0]
             return at, loom_id, text[done:]
     return None
+
+
+def loom_runs_key(pkg, model, prompts):
+    """Identity of a set of Loom runs a gate keeps across gates.sh's deferred-reference rounds (consistency.py): the
+    model id, the prompts, the package as gates.sh's pkg_hash sees it (model.json, llm_config.json, program/*.loom)
+    and the installed Loom SDK (machine_info.hrx_loom_identity: version and build)."""
+    from machine_info import hrx_loom_identity
+    files = [os.path.join(pkg, "model.json"), os.path.join(pkg, "llm_config.json")] + sorted(glob.glob(os.path.join(pkg, "program", "*.loom")))
+    h = hashlib.sha256(json.dumps([model, prompts, hrx_loom_identity()], sort_keys=True).encode())
+    for f in files:
+        h.update(f.encode())
+        if os.path.isfile(f):
+            with open(f, "rb") as fh:
+                h.update(fh.read())
+    return h.hexdigest()
+
+
+def kept_runs(state, key):
+    """The runs kept in STATE (a JSON file) when they were made under KEY (loom_runs_key), else None."""
+    try:
+        kept = json.load(open(state)) if state and os.path.exists(state) else {}
+    except ValueError:
+        return None
+    return kept if kept.get("key") == key else None
 
 
 def top_logprobs(tops, k):

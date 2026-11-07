@@ -397,6 +397,18 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "slug": "gemma-4-e2b-it",
+   "memory_bytes": 16000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1369",
+   "features": [
+    "vision",
+    "draft",
+    "thinking-toggle"
+   ]
   }
  ]
 }

@@ -175,6 +175,8 @@ all_gates() {
     fi
   fi
 }
+# Loom runs a gate kept across one invocation's deferred-reference rounds (consistency.py) never outlive it
+rm -f "$bench"/pending_*.jsonl.loom.json
 for round in 1 2 3 4 5; do
   pending=()
   all_gates
