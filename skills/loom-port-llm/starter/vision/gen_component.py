@@ -102,7 +102,7 @@ def copy_kernel():
 '''
 
 
-FILTER = {"gemma4v": "bicubic", "qwen3vl_merger": "bicubic", "muse-glimmer": "lanczos"}
+FILTER = {"gemma4v": "bicubic", "qwen3vl_merger": "bicubic", "qwen2.5vl_merger": "bicubic", "muse-glimmer": "lanczos"}
 
 
 def encoder_program(c, max_side=4096):
