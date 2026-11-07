@@ -164,7 +164,8 @@ $T -I $K/inspect_gguf.py /path/model-Q4_K_M.gguf cfg.json
 # 3. Tokenizer: the HF tokenizer.json of the *same* model (base repo; GGUF repos often lack it)
 ~/loom/.venv/bin/hf download <org>/<base-model> tokenizer.json --local-dir tok
 # 4. Build: context defaults to the model's native context, the KV pool to context + max(64k, context/4), both fitted
-#    to --memory-gib (default auto: that pool, capped at 60% of RAM; one model is loaded at a time). Prints the model id and --memory_bytes.
+#    to --memory-gib (default auto: that pool, capped at 60% of RAM; one model is loaded at a time). Prints the model id and --memory_bytes
+#    (weights + KV pool + the largest program's prefill scratch + 3 GiB + recurrent state: a full-context request must fit).
 $T $K/build.py cfg.json pkg --tokenizer tok/tokenizer.json --model-id <org>/<name-without-spaces>
 # 5. Serve + smoke test
 VENV=~/loom/.venv ${CLAUDE_SKILL_DIR}/../loom-setup/scripts/serve.sh mine 8160 amdgpu <memory_bytes> pkg/model.json
@@ -341,8 +342,12 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
    against short goldens, and run `consistency.py` for mixed batches.
 4. **Correct but stops early or never stops.** Check the EOS ids and the chat
    `terminal`.
-5. **503 "insufficient completion capacity".** `--memory_bytes` is too small for
-   the KV pool (pool × 2·kv_layers × kv_heads·head_dim·2 bytes) plus recurrent state.
+5. **503 "insufficient completion capacity".** `--memory_bytes` is too small. The message blames retained
+   state, but it also comes on a fresh server: every admission charges the weights, the request's KV pages and
+   the largest command program's scratch at a prefill-sized invocation (a drafting hybrid's `@llm_verify` keeps
+   every token's gated delta-net inputs: 7 GB at a 4096-token prefill of a 30-layer MoE). build.py's printed
+   value covers the weights (projector included), the KV pool (pool × 2·kv_layers × kv_heads·head_dim·2 bytes),
+   that scratch + 3 GiB, and the recurrent state.
 6. **Registration fails with a VGPR spill (`spill-traffic-register-exhausted`).** A
    kernel holds too much in registers for this model's shape. Split the work over more waves
    (`gen_flash2s.py`: two waves per head at head_dim 256) or reload operands per iteration.
