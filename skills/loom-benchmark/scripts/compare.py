@@ -123,8 +123,8 @@ for g in json.load(open(a.golden)):
             if n2 > n or (n2 == n and (better_gap or near2)):
                 g, n, gap, near = g2, n2, gap2, near2
     gold = g["ids"]
-    if not published:   # the generated tokens never reached the reply: no match, whatever prefix the reply is
-        n, gap, near = min(n, len(got)), "unpublished", False
+    if not published and n >= len(got):   # the reply is a prefix of the golden only because generated tokens never
+        n, gap, near = len(got), "unpublished", False   # reached it (a divergence inside the reply decides by itself)
     full = n >= min(len(gold), len(got)) and abs(len(got) - len(gold)) <= 1
     bad = not near
     rows.append({"prompt": g["prompt"][:80], "prompt_tokens": g.get("prompt_tokens"), "golden_tokens": len(gold), "matched": n,
