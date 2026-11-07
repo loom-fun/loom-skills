@@ -697,6 +697,8 @@ keep = set(chat.get("nonspecial_tokens", []))
 for t in tok.get("added_tokens", []):
     if t["content"] in keep:
         t["special"] = False
+    elif t["content"] == chat.get("terminal"):   # the stop token is stripped like <|im_end|> (Laguna's </assistant> is a
+        t["special"] = True                      # plain added token in tokenizer.json, a control token in the GGUF)
 from runtime_tokenizer import rewrite_tokenizer  # noqa: E402  forms the runtime loads, same tokenization
 rewrite_tokenizer(tok)
 json.dump(tok, open(os.path.join(pkg, "tokenizer.json"), "w", encoding="utf-8"), ensure_ascii=False)
