@@ -18,7 +18,7 @@ The kernels are the starter's, driven by the config `inspect_gguf.py` writes:
 |---|---|
 | `chat/harmony.loom`, `chat/harmony_rodata.py` | OpenAI's harmony channel format: `chat_begin` renders the whole conversation (system block with the reasoning effort, the developer block with the first system message and the tools as a TypeScript namespace, analysis / final / commentary turns, tool results framed with the last call's name), `output_next` parses the channels (analysis -> reasoning, final and commentary preambles -> content, a `to=functions.NAME` header -> the call), `parse_tools` turns the call into hermes text for the generic `@hermes_calls` |
 | `starter.patch` | `chat_probe.py`: the harmony model (`harmony_simulate`, `raw_from_chat`, `raw_alternatives`, `derive` and `verify` for harmony templates); `inspect_gguf.py`: `<|call|>` as an end-of-generation id |
-| `cfg.json` | the reviewed chat block (`chat_probe.harmony_chat()`); geometry comes from the port's GGUF |
+| (card) | the reviewed config: `loom-fun/unsloth-gpt-oss-20b-loom`'s `llm_config.json` (`examples.json`) |
 
 Chat notes:
 - `reasoning_content` plays the template's `thinking` (llama.cpp's gpt-oss handler copies it there and drops a call
