@@ -3,7 +3,7 @@
 Numbers come from the Flint (40B MoE) and Muse Glimmer (30B dense) ports on Strix
 Halo, measured against llama.cpp ROCm (lemonade-sdk/llamacpp-rocm b1355) on the
 same GGUF. The kernels named here are in `loom-port-llm/starter/gen_llm.py` unless a
-lever says otherwise (MoE: `loom-port-llm/reference/{lfm2moe,flint}-example/gen_moe*.py`, and the
+lever says otherwise (MoE: `loom-port-llm/starter/gen_moe.py`, `reference/lfm2moe-example/gen_moe_lfm.py`, and the
 bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 
 ## Decode

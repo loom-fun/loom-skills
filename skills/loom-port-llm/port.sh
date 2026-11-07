@@ -16,6 +16,8 @@
 # Prints PORT_RESULT {...} with the package, model id, context and memory_bytes; the server keeps
 # running (stop: LOOM_SERVE_STATE=WORKDIR/state stop.sh port). Exit codes: 2 download, 3 chat
 # template needs a hand-written block, 4 build/serve, 5 kernel tests, 6 smoke test.
+# DRY_RUN=1: stages 1-2 only, CPU, no weights (an uncached GGUF is a header-only sparse stub): which reference and kit a
+# port would start from and whether inspect passes; prints DRY_RUN_RESULT {...}.
 # Then run loom-benchmark/scripts/qualify.sh (or gates.sh). After hand-fixing cfg.json (exit 3), resume
 # with FROM=build port.sh ORG/REPO WORKDIR [PORT] [MEMORY_GIB] [MODEL_ID] (stages 3-6; KIT=DIR uses your kit copy).
 set -u
@@ -43,13 +45,18 @@ pick=$("$T" -I "$K/pick_gguf.py" "$repo" ${file:+--file "$file"}) || { echo "STO
 file=$(printf '%s' "$pick" | cut -f1); cached=$(printf '%s' "$pick" | cut -f2)
 if [ -n "$cached" ]; then
   echo "using the cached $file ($cached)"
+elif [ "${DRY_RUN:-0}" = 1 ]; then
+  # Plan only (no GPU, no weights): a header-only sparse stub stands in for the GGUF in stages 1b-2.
+  mkdir -p gguf && rm -f "gguf/$(basename "$file")"
+  "$T" -I "$K/pick_gguf.py" "$repo" --file "$file" --stub "gguf/$(basename "$file")" || exit 2
+  cached=$work/gguf/$(basename "$file")
 else
   # Into the shared HF cache (reused by later runs and by llama.cpp tools), symlinked into WORKDIR/gguf.
   "$hf" download "$repo" "$file" > download.log 2>&1; echo "hf exit $?" >> download.log
   cached=$(grep -v '^hf exit' download.log | grep -o '/[^ ]*'"$(basename "$file")" | tail -1)
 fi
 [ -f "$cached" ] || { echo "download of $repo/$file failed (download.log):"; tail -5 download.log 2>/dev/null; exit 2; }
-mkdir -p gguf && ln -sf "$cached" "gguf/$(basename "$file")"
+mkdir -p gguf && [ "$cached" -ef "gguf/$(basename "$file")" ] || ln -sf "$cached" "gguf/$(basename "$file")"
 gguf=$work/gguf/$(basename "$file")
 # Tokenizer: the base model named in the GGUF, else the repo name without -GGUF.
 tokrepos=$("$T" - "$gguf" "$repo" <<'EOF'
@@ -60,6 +67,13 @@ for k, f in r.fields.items():
     if re.fullmatch(r"general\.base_model\.\d+\.repo_url", k):
         out.append(f.contents().split("huggingface.co/")[-1].strip("/"))
 repo = sys.argv[2]; base = re.sub(r"[-_.]gguf$", "", repo, flags=re.I)
+# The GGUF repo's model card names its base model (ggml-org/X-GGUF -> Qwen/X) when the GGUF itself doesn't.
+try:
+    import json, urllib.request
+    bm = (json.load(urllib.request.urlopen(f"https://huggingface.co/api/models/{repo}", timeout=20)).get("cardData") or {}).get("base_model")
+    out += [bm] if isinstance(bm, str) else list(bm or [])
+except Exception:
+    pass
 out += [base, repo]
 org, name = base.split("/", 1)
 out += [f"Qwen/{name}", f"{org}/{name}-Instruct"]
@@ -129,6 +143,20 @@ if [ "$irc" != 0 ] || grep -q "^chat FAIL\|not derivable automatically\|WARNING:
     echo "HINT: reference/$ex-example is a working port of arch '$arch': $here/reference/apply_example.sh $ex kit cfg.json (merges the reviewed config too), then FROM=build KIT=kit $0 $spec $work $port $mem_gib $model_id"
   done
   echo "STOP: see inspect.log; fix cfg.json (chat block / formats) by hand as loom-port-llm/SKILL.md describes, then rerun build.py"; exit 3
+fi
+if [ "${DRY_RUN:-0}" = 1 ]; then   # plan only: what the reference gives this port, then stop before vision, drafter and build
+  [ "$ref" != off ] && [ -s reference.json ] && "$T" -I "$here/find_reference.py" apply cfg.json reference.json ${refpick:+--pick "$refpick"} | tee -a reference.log
+  echo "DRY_RUN_RESULT $("$T" - "$K" "$model_id" <<'EOF'
+import json, os, sys
+c = json.load(open("cfg.json")); r = json.load(open("reference.json")) if os.path.exists("reference.json") else {}
+best = next((x for x in r.get("ranked", []) if x.get("arch") == c.get("arch")), None)
+print(json.dumps({"arch": c.get("arch"), "model_id": sys.argv[2], "kit": sys.argv[1], "reference": best and best["repo"], "reference_score": best and best["score"],
+                  "inspect": "ok", "chat": (c.get("chat") or {}).get("call_format"), "moe": bool(c.get("moe")),
+                  "hybrid": bool(c.get("recurrent_layers")), "mtp": bool(c.get("mtp")),
+                  "taken_from_reference": (c.get("reference") or {}).get("taken")}))
+EOF
+)"
+  exit 0
 fi
 
 fi  # FROM=build

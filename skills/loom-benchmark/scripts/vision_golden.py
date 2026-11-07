@@ -154,7 +154,17 @@ def judge(pkg, ref, got):
         if best is None or kk > best[0]:
             best = (kk, ids)
     k, mine = best
-    if k == len(gold) or k == len(mine):
+    # Loom's ids are its text re-tokenized, which can merge what it generated as two tokens ("GB" + "P" -> "GBP"): the
+    # divergence is the first llama.cpp token whose text Loom's text does not continue with; Loom's token there is its
+    # remaining text's first token.
+    text = pkg.tok.decode(mine)
+    if k < len(gold) and k < len(mine) and text.startswith(pkg.tok.decode(gold[:k + 1])):
+        j = k
+        while j < len(gold) and text.startswith(pkg.tok.decode(gold[:j + 1])):
+            j += 1
+        rest = pkg.ids(text[len(pkg.tok.decode(gold[:j])):])
+        k, mine = j, list(gold[:j]) + rest
+    if k >= len(gold) or k >= len(mine):
         return "PASS", f"identical ({k} tokens)" if len(gold) == len(mine) else f"identical for {k} tokens (one stopped)"
     top = {x["id"]: x["logprob"] for x in cp[k]["top_logprobs"]} if k < len(cp) else {}
     nt = near_tie(top, gold[k], mine[k])

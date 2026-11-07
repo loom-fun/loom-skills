@@ -13,8 +13,9 @@ complete chat model:
 - **tool calling** in the model's own format, tool results, reasoning in history,
   the thinking on/off switch, and **history reuse** between agent turns.
 
-The starter kit (`starter/`) gets a dense GGUF LLM, or a Qwen3.5-style hybrid, there
-in minutes. Other architectures (MoE, MLA, other recurrent layers) need new kernels;
+The starter kit (`starter/`) gets a dense GGUF LLM, a Qwen3.5-style hybrid, or either with a
+MoE FFN (Qwen3 / Qwen3.5 / Qwen3.6 MoE: softmax router, shared experts with a sigmoid gate) there
+in minutes. Other architectures (MLA, other recurrent layers) need new kernels;
 see "Beyond the starter" below.
 
 Prerequisites:
@@ -60,6 +61,9 @@ LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmar
   the smoke stage proves drafting changes no token (`spec_check.py`). `qualify.sh` later keeps whichever drafter
   (n-gram prompt lookup is a candidate for every model) and depth decode fastest, or none
   (`starter/draft/README.md`). `SPEC=off` opts out.
+
+`DRY_RUN=1 port.sh ...` plans a port on the CPU in under a minute: stages 1-2 only, an uncached GGUF read as a
+header-only sparse stub (nothing downloaded), then `DRY_RUN_RESULT {...}` (architecture, kit, reference, inspect).
 
 Its exit code says where it stopped (2 download, 3 chat template or uncovered architecture,
 4 build/serve, 5 kernel tests, 6 smoke); only then do you need the manual steps below for that
@@ -117,8 +121,8 @@ The expensive path. Keep it short:
    | Family | Example |
    |---|---|
    | Gemma-3n / Gemma-4 (PLE, KV sharing, head_dim 512, Gemma chat format) | `gemma4` |
-   | MoE; LFM2 short-conv hybrids | `lfm2moe` (top-k router, expert matvecs, grouped WMMA prefill) |
-   | MoE + attention sinks, SWA, NoPE, shared experts | `flint` (built on lfm2moe in ~12 min) |
+   | LFM2 short-conv hybrids (+ its own MoE kernels) | `lfm2moe` (top-k router, expert matvecs, grouped WMMA prefill) |
+   | attention sinks, SWA, NoPE (MoE from the starter) | `flint` (built on lfm2moe in ~12 min; its MoE is now `starter/gen_moe.py`) |
    | channel chat formats (ATEM), norm RoPE, NoPE | `glimmer` |
 
    `../loom-optimize/reference/flint-moe-example/` holds one more MoE idea (bucketed grouped GEMM), not
@@ -211,6 +215,7 @@ Nothing to configure; read `starter/draft/README.md` only to debug it.
 | `inspect_gguf.py` | GGUF metadata → `cfg.json`: hidden, layers, heads/kv_heads, head_dim, ffn, vocab, **context_length**, rms_eps, rope_theta/type, **rope_dims** (partial RoPE), qk_norm, attn_gate (`true`: separate tensor; `"fused_q"`: packed in attn_q), post_norms, sliding window/layers, NoPE layers, tied embeddings, eos ids, **recurrent_layers / gdn** (hybrids), the chat block (via `chat_probe.py`), and every tensor's format and shape. |
 | `chat_probe.py` | Renders the model's Jinja chat template on probe conversations and cuts out what the control program needs: role prefixes/suffix, BOS, default system prompt, generation prompts with thinking on/off, the tools block and its order relative to the system message, the tool-call format (`hermes` JSON, `qwen_xml`, `glm`, `pythonic`) and separators, tool-response framing, reasoning-in-history policy, trimming. A template that ignores `tools` (plain ChatML chat models) gives a chat-only block (`call_format` `none`): a request's tools are ignored as the template does, no call is parsed, the card says tool calling "no" and gates.sh skips the agent gates (not applicable); probes with tool calls or results print SKIP. `verify()` re-renders a dozen conversations exactly as `control.loom` will (`simulate()`) and diffs them against the template. `simulate()` is also what the benchmark scripts use to build golden prompts. |
 | `gen_llm.py` | `cfg.json` → `llm.loom`: all kernels plus the `@llm_advance` command program. The command program is a **static per-layer unroll**, so each layer's kind (attention or gated delta-net) and tensor formats come from the GGUF (Q4_K_M mixes Q4_K/Q5_K/Q6_K/Q8_0 per tensor). Decode-shaped linears (< 64 tokens) and the head use int8 activations (`g_quant_q8` + `_q8` matvecs with integer dot4, llama.cpp's Q8_1 numerics; 1-, 4-, 8- and 16-token variants that round alike) for Q8_0/Q4_K/Q5_K/Q6_K weights; `ACT_Q8=0` keeps f32 activations. |
+| `gen_moe.py` | MoE FFN kernels (router + top-k, expert matvecs, shared-expert gate, combine; bucketing + grouped WMMA GEMMs for prefill), for `cfg["moe"]` models. |
 | `gen_gdn.py` | Gated delta-net kernels (conv1d + SiLU, history commit, q/k L2 norms, register recurrence, gated RMSNorm) and the fused q/gate split, for hybrids. Recurrent state lives in the runtime's recurrent slots (see porting-notes). |
 | `gen_gemm.py` | WMMA prefill GEMMs per (format, mode). Formats: q4_k, q5_k, q6_k, q8_0. Modes: store, acc, swiglu. |
 | `gen_flash2.py` | Prefill flash attention (transposed, K/V staged once per KV head), head_dim 128 (and 256 with `FLASH2_SPLIT=0`). |
@@ -352,9 +357,15 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
 
 ## Beyond the starter (MoE, other formats, new ops)
 
-- **MoE.** Start from `reference/lfm2moe-example` or `flint-example` (table in step 3). The pattern:
-  router top-k (weights kept in registers), bucket tokens by expert, grouped expert GEMMs over the
-  buckets, combine.
+- **MoE** is in the starter (`gen_moe.py`, wired by `gen_llm.py` from `cfg["moe"]`): router top-k (softmax or
+  sigmoid + selection bias, weights kept in registers), per-assignment expert matvecs for decode, tokens bucketed
+  by expert and grouped WMMA GEMMs for prefill, shared experts (with the Qwen sigmoid gate), combine; MoE layers
+  after `leading_dense` dense ones (an MoE MTP block generates too; not yet validated on the GPU). `inspect_gguf.py` fills `cfg["moe"]` from the GGUF;
+  routing choices llama.cpp hard-codes per architecture instead of writing them (`expert_gating_func`,
+  `expert_weights_norm`) come from `MOE_DEFAULTS`: add a row for a new MoE architecture from its
+  `src/models/<arch>.cpp` (`build_moe_ffn` arguments). Expert formats: Q4_K/Q5_K/Q6_K/Q8_0 (`gen_moe.FMT`; an MTP
+  block in another format is left out). Kernel tests cover the decode and prefill chains on the real tensors.
+  Ported this way: Qwen3.6-35B-A3B (`qwen35moe`, hybrid + MoE, 256 experts top-8).
 - **Gemma-3n / Gemma-4 family (arch `gemma3n`, `gemma4`).** `apply_example.sh gemma4`: a complete,
   gate-passing port whose README lists every feature the starter lacks (PLE, KV sharing, mixed
   head_dim 256/512, proportional partial RoPE, V norm without weights, GEGLU, softcap, bf16); each

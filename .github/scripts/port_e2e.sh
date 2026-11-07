@@ -24,7 +24,7 @@ export LOOM_SERVE_STATE=$W/state LLAMACPP_STATE=$W/llstate PYTHONDONTWRITEBYTECO
 [ -n "${HF_TOKEN:-}" ] || unset HF_TOKEN   # an empty token (a CI secret this repo lacks) fails every hf download
 url=http://127.0.0.1:$port
 ph() { echo "$(date +%s) $*" >> "$D/phases.log"; echo "== $* ($(date +%T))"; }
-lock() { if [ -n "${GPU_LOCK:-}" ]; then flock "$GPU_LOCK" "$@"; else "$@"; fi; }
+lock() { if [ -n "${GPU_LOCK:-}" ]; then flock -o "$GPU_LOCK" "$@"; else "$@"; fi; }   # -o: servers do not inherit the lock
 cleanup() {
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   for f in "$LLAMACPP_STATE"/*.pid "$W"/bench/llamacpp-state/*.pid; do

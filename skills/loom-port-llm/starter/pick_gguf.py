@@ -90,22 +90,27 @@ def example_formats():
     return out
 
 
-def header_formats(repo, path, size):
-    """Tensor formats (+ "arch:<architecture>") from the GGUF header: fetch the first bytes into a sparse file
-    of the full size."""
+def header_stub(repo, path, size, f):
+    """Write the GGUF's header into open file f, sparse to the full size (metadata and tensor infos read like the real
+    file; tensor data reads as zeros and takes no disk). Returns its GGUFReader, or None."""
     from gguf import GGUFReader
     url = f"https://huggingface.co/{repo}/resolve/main/{path}"
-    with tempfile.NamedTemporaryFile(suffix=".gguf") as f:
-        for n in (16 << 20, 64 << 20):
-            req = urllib.request.Request(url, headers={"Range": f"bytes=0-{n - 1}"})
-            data = urllib.request.urlopen(req, timeout=120).read()
-            f.seek(0); f.write(data); f.truncate(size); f.flush()
-            try:
-                r = GGUFReader(f.name)
-                return {t.tensor_type.name for t in r.tensors} | {f"arch:{_arch(r)}"}
-            except Exception:  # header longer than n bytes (huge vocab): try a bigger range
-                continue
+    for n in (16 << 20, 64 << 20):
+        req = urllib.request.Request(url, headers={"Range": f"bytes=0-{n - 1}"})
+        data = urllib.request.urlopen(req, timeout=120).read()
+        f.seek(0); f.write(data); f.truncate(size); f.flush()
+        try:
+            return GGUFReader(f.name)
+        except Exception:  # header longer than n bytes (huge vocab): try a bigger range
+            continue
     return None
+
+
+def header_formats(repo, path, size):
+    """Tensor formats (+ "arch:<architecture>") from the GGUF header (header_stub in a temporary file)."""
+    with tempfile.NamedTemporaryFile(suffix=".gguf") as f:
+        r = header_stub(repo, path, size, f)
+        return {t.tensor_type.name for t in r.tensors} | {f"arch:{_arch(r)}"} if r else None
 
 
 TIERS = {"Q4": ["Q4_K_M", "UD-Q4_K_XL", "Q4_K_S", "UD-Q4_K_M"], "Q5": ["Q5_K_M", "UD-Q5_K_XL", "Q5_K_S"],
@@ -157,8 +162,18 @@ def main():
     ap.add_argument("repo")
     ap.add_argument("--gtt-gib", type=float)
     ap.add_argument("--file", default=None)
+    ap.add_argument("--stub", default=None, help="with --file: write the file's header-only sparse stub here (port.sh DRY_RUN)")
     a = ap.parse_args()
     cached = cached_files(a.repo)
+    if a.file and a.stub:
+        tree = json.load(urllib.request.urlopen(f"https://huggingface.co/api/models/{a.repo}/tree/main?recursive=true", timeout=60))
+        size = next((f.get("size", 0) for f in tree if f["path"] == a.file), 0)
+        with open(a.stub, "wb") as f:
+            ok = size and header_stub(a.repo, a.file, size, f)
+        if not ok:
+            sys.exit(f"could not read the header of {a.repo}/{a.file}")
+        print(f"header-only stub of {a.file} ({size / 2**30:.1f} GiB, nothing downloaded) -> {a.stub}", file=sys.stderr)
+        return
     if a.file:
         print(f"{a.file}\t{cached.get(a.file, '')}")
         return

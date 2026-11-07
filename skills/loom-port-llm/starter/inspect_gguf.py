@@ -78,7 +78,8 @@ cfg = {
     "chat": None,
     "tensors": tensors,
 }
-if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3"):
+if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3",
+                "qwen3moe", "qwen35moe"):
     print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
           "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
           "before trusting a golden FAIL or PASS")
@@ -159,6 +160,38 @@ if A("ssm.inner_size"):
 if _nextn and L != BLOCKS:
     cfg["mtp"] = {"layers": _nextn}
     print(f"MTP: {len(_nextn)} NextN block(s) {_nextn} after the {L}-layer trunk: speculative decoding (MTP) is available")
+# MoE FFN (gen_moe.py) after the leading dense layers: router (f32/bf16), top-k, optional selection bias, shared
+# experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
+# instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
+MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
+                "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False}}
+if A("expert_count"):
+    d = MOE_DEFAULTS.get(arch, {})
+    cfg["moe"] = {"experts": A("expert_count"), "used": A("expert_used_count"), "ffn": A("expert_feed_forward_length"),
+                  "leading_dense": A("leading_dense_block_count", 0), "gating": A("expert_gating_func", d.get("gating", 1)),
+                  "norm_weights": bool(A("expert_weights_norm", d.get("norm_weights", False))),
+                  "scale": A("expert_weights_scale", 1.0) or 1.0,
+                  "probs_bias": any(k.endswith("exp_probs_b.bias") for k in tensors)}
+    sh = next((v for k, v in tensors.items() if k.endswith("ffn_gate_shexp.weight")), None)
+    if sh:
+        cfg["moe"]["shared_ffn"] = sh["shape"][1]
+        if any(k.endswith("ffn_gate_inp_shexp.weight") for k in tensors):
+            cfg["moe"]["shared_gate"] = True
+    if any(k.endswith("ffn_gate_up_exps.weight") for k in tensors):
+        print("WARNING: fused ffn_gate_up_exps tensors: the MoE kernels expect separate ffn_gate_exps / ffn_up_exps")
+    if cfg["ffn"] is None:   # no dense FFN layer: the FFN buffers hold the shared experts (or one expert row)
+        cfg["ffn"] = cfg["moe"].get("shared_ffn") or cfg["moe"]["ffn"]
+    print("moe:", cfg["moe"])
+    import gen_moe   # the expert kernels' formats (gen_moe.FMT)
+    exps = lambda layers: {tensors[f"blk.{i}.ffn_{p}_exps.weight"]["type"] for i in layers for p in ("gate", "up", "down")
+                           if f"blk.{i}.ffn_{p}_exps.weight" in tensors}
+    bad = exps(range(cfg["moe"]["leading_dense"], L)) - set(gen_moe.FMT)
+    if bad:
+        print("WARNING: no kernels for", sorted(bad), "- the MoE expert kernels (gen_moe.py) decode", sorted(gen_moe.FMT))
+    if cfg.get("mtp") and exps(cfg["mtp"]["layers"]) - set(gen_moe.FMT):
+        print(f"NOTE: the MTP block's experts are {sorted(exps(cfg['mtp']['layers']))}, which the MoE expert kernels don't decode: "
+              "MTP drafting is left out (DFlash and n-gram drafting are still candidates)")
+        del cfg["mtp"]
 def generation_block(tpl):
     """Text the template emits for add_generation_prompt (what decides thinking mode)."""
     i = tpl.rfind("add_generation_prompt")

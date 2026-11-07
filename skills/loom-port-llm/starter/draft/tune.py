@@ -211,6 +211,12 @@ def main():
         spec_check.record(url, model_id, out)
         return spec_check.compare(refs[kind], out) == 0
     ranked = sorted([r for r in table if r["kind"] != "none" and r["decode_tps"] >= 1.03 * base], key=lambda r: -r["decode_tps"])
+    # Within 5 % of the fastest (measurement noise on these short requests), the shallower depth first: every drafted
+    # token is verified with decode attention over the whole context, so a deep draft costs at long context
+    # (Qwen3.6-35B-A3B DFlash: depth 7 vs 3 was 109 vs 105 tok/s short, 31 vs 48 tok/s at 32k).
+    if ranked:
+        top = ranked[0]["decode_tps"]
+        ranked.sort(key=lambda r: (r["decode_tps"] < 0.95 * top, r["depth"] if r["decode_tps"] >= 0.95 * top else 0, -r["decode_tps"]))
     choice = ("none", 0, base)
     for r in ranked:
         kind, depth = r["kind"], r["depth"]

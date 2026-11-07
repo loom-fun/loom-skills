@@ -6,8 +6,8 @@ latest run 58 min end to end, full gates and audit PASS, agent loop 6/6). Built 
 
 | File | Adds |
 |---|---|
-| `gen_moe.py` | 256-expert top-6 router (bf16 router weights), shared experts, expert decode matvecs, grouped WMMA prefill GEMM. **The routing keeps the top-k weights in registers**: writing them to global memory and reading them back after a barrier made prefill nondeterministic (neighbouring tokens' workgroups share cache lines) |
-| `starter.patch` | `gen_llm.py`: attention sinks (a learned per-head logit added to the softmax denominator) in decode split-K, sliding-window (513) and NoPE layers per the GGUF pattern, MoE wiring. `inspect_gguf.py`: flint config extraction. `make_kernel_tests.py`: MoE + sinks cases, incl. flash2 with sinks on a span continuing stored KV, and the stop-token restore |
+| (starter) `gen_moe.py` | written for this port, now the starter's MoE: 256-expert top-6 router (bf16 router weights), shared experts, expert decode matvecs, grouped WMMA prefill GEMM. **The routing keeps the top-k weights in registers**: writing them to global memory and reading them back after a barrier made prefill nondeterministic (neighbouring tokens' workgroups share cache lines) |
+| `starter.patch` | `gen_llm.py`: attention sinks (a learned per-head logit added to the softmax denominator) in decode split-K and flash2. `inspect_gguf.py`: NoPE layers from the GGUF's RoPE pattern, sinks, end-of-generation ids, the EOS terminal. `make_kernel_tests.py`: sinks cases, incl. flash2 with sinks on a span continuing stored KV, and the stop-token restore |
 | reviewed config | the published package's `llm_config.json` ([loom-fun/ggml-org-Flint-loom](https://huggingface.co/loom-fun/ggml-org-Flint-loom), category A, pinned in `../examples.json`; merged by `apply_example.sh flint KIT CFG`) |
 
 Flash2 sinks and the chat template (the tools block in its own system message, no message suffix: the

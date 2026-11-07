@@ -1,15 +1,21 @@
-"""MoE FFN kernels (LFM2-MoE style): sigmoid router with selection bias, normalized top-k
-weights, per-assignment expert matvecs (assignment a = token * KU + slot), weighted combine.
+"""MoE FFN kernels, wired by gen_llm.py from cfg["moe"] (inspect_gguf.py): a router (gating 1: softmax, Qwen3 /
+Qwen3.5 MoE; gating 2: sigmoid with an optional selection bias, flint / LFM2-MoE), top-k weights (normalized or not),
+per-assignment expert matvecs (assignment a = token * KU + slot), weighted combine, and the prefill path (tokens
+bucketed by expert into 64-row tiles, grouped WMMA GEMMs). Shared experts are the starter's dense FFN (gen_llm.py);
+a Qwen-style shared-expert gate (sigmoid(h . w) per token) scales them inside the combine.
 
 g_moe_route        h[t] -> ids[t, KU] (i32), wts[t, KU] (f32)   (g_moe_route_tr: the same for prefill epochs)
 g_moe_gu_<fmt>     act[a, FE] = silu(Wg[e] h[t]) * (Wu[e] h[t])     (e = ids[a], t = a / KU)
 g_moe_dn_<fmt>     ys[a, H]  = Wd[e] act[a]
-g_moe_combine      y[t, H]   = sum_k wts[t, k] ys[t*KU + k, :]
+g_moe_shared_gate  sg[t]     = sigmoid(h[t] . w)                    (Qwen shared-expert gate; optional)
+g_moe_combine      y[t, H]   = sg[t] * y[t, :] + sum_k wts[t, k] ys[t*KU + k, :]   (y: the shared experts' output)
 """
+import os
 import re
 FMT = {"q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34}
 ROUTE_TR = int(__import__("os").environ.get("ROUTE_TR", "0"))   # router tokens per workgroup (0: largest of 1/2/4/8 whose LDS fits 48 KiB)
 SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32}
+GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)"}   # llama.cpp's expert_gating_func values
 
 
 def row_bytes(fmt, k):
@@ -26,15 +32,27 @@ def route_decode(H, E, KU, gating, norm, bias, wty="f32"):
     load = (f"""      %wraw = vector.load %w_view[%e, %bg, %c0] : view<{E}x{HG}x32xbf16> -> vector<32xbf16>
       %wv = vector.extf %wraw : vector<32xbf16> to vector<32xf32>""" if wty == "bf16" else
             f"""      %wv = vector.load %w_view[%e, %bg, %c0] : view<{E}x{HG}x32xf32> -> vector<32xf32>""")
+    assert gating in (1, 2) and not (gating == 1 and bias), f"expert gating {gating} (bias {bias}): 1 softmax, 2 sigmoid"
     prob = "scalar.logisticf<afn> %lgt : f32" if gating == 2 else "scalar.addf %lgt, %zero_f : f32"
     score = "scalar.addf %prob, %bias_v : f32" if bias else "scalar.addf %prob, %zero_f : f32"
     bias_load = f"""    %b_view = buffer.view %b[%zero] : buffer -> view<{E}xf32>
     %bias_v = view.load %b_view[%be] : view<{E}xf32> -> f32""" if bias else ""
     norm_text = f"""  %min_sum = scalar.constant 6.103515625e-05 : f32
   %wsum = scalar.maxnumf %total, %min_sum : f32""" if norm else "  %wsum = scalar.constant 1.0 : f32"
+    # softmax: thread e holds logit e (out of range: -3e38); probabilities over all E experts (workgroup max and
+    # sum), and the top-k picks on them, as llama.cpp does
+    pn, sn = ("%prob", "%score0") if gating == 2 else ("%prob_r", "%raw")
+    softmax = "" if gating == 2 else """  %lmax = kernel.workgroup.reduce<maxnumf> %raw : f32
+  %lsh = scalar.subf %raw, %lmax : f32
+  %lex = scalar.expf<afn> %lsh : f32
+  %lex_in = scf.select %in_range, %lex, %zero_f : f32
+  %lden = kernel.workgroup.reduce<addf> %lex_in : f32
+  %prob = scalar.divf %lex_in, %lden : f32
+  %score0 = scf.select %in_range, %prob, %removed : f32
+"""
     return f"""
 // Router: wave w scores experts w*{EPW}..; then thread e holds expert e and {KU} rounds of
-// workgroup reductions pick the top {KU} (ties: lowest index) of sigmoid(logit){' + bias' if bias else ''}.
+// workgroup reductions pick the top {KU} (ties: lowest index) of {GATE_NAME[gating]}{' + bias' if bias else ''}.
 kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
@@ -83,7 +101,7 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   %tb = index.assume %t0 [range(%t0, 0, 255)] : index
   %in_range = index.cmp ult, %tb, %cE : index
   %removed = scalar.constant -3.0e38 : f32
-  %prob, %score0 = scf.if %in_range -> (f32, f32) {{
+  {pn}, {sn} = scf.if %in_range -> (f32, f32) {{
     %be = index.assume %tb [range(%tb, 0, {E - 1})] : index
     %lgt = view.load %lg_view[%be] : view<{E}xf32> -> f32
     %prob_v = {prob.replace('%lgt', '%lgt')}
@@ -93,7 +111,7 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   }} else {{
     scf.yield %zero_f, %removed : f32, f32
   }}
-  %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]x{KU}xi32>
+{softmax}  %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]x{KU}xi32>
   %wts_view = buffer.view %wts[%zero] : buffer -> view<[%tokens]x{KU}xf32>
   %t32 = index.cast %tb : index to i32
   %big_id = scalar.constant 1000000 : i32
@@ -146,6 +164,7 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32"):
     write/read-back of them raced)."""
     HG = H // 32
     assert E % 8 == 0 and E <= 256 and KU <= 8 and H % 128 == 0
+    assert gating in (1, 2) and not (gating == 1 and bias), f"expert gating {gating} (bias {bias}): 1 softmax, 2 sigmoid"
     EPW = E // 8
     TR = ROUTE_TR or max(t for t in (1, 2, 4, 8) if t * (H + E) * 4 <= 48 * 1024)
     prob = "scalar.logisticf<afn> %lgt : f32" if gating == 2 else "scalar.addf %lgt, %zero_f : f32"
@@ -190,15 +209,31 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32"):
     %token = index.assume %tok_c [lt(%tok_c, %tokens)] : index
     %store_lane = scalar.andi %first, %tok_live : i1
 """]
-    for i in range(EPL):
-        T2.append(f"""    %ce{i} = index.constant {32 * i} : index
+    load_lines = lambda i: f"""    %ce{i} = index.constant {32 * i} : index
     %e{i}_v = index.add %lane, %ce{i} : index
     %e{i}_in = index.cmp ult, %e{i}_v, %cE : index
     %e{i}_c = scf.select %e{i}_in, %e{i}_v, %c0 : index
     %be{i} = index.assume %e{i}_c [range(%e{i}_c, 0, {E - 1})] : index
     %id{i} = index.cast %e{i}_v : index to i32
     %lgt{i} = view.load %lg_view[%r, %be{i}] : view<{TR}x{E}xf32> -> f32
-    %pr{i} = {prob.replace('%lgt', f'%lgt{i}')}
+"""
+    if gating == 1:   # softmax over the token's E logits (subgroup max and sum; lane l holds experts l, l+32, ...)
+        for i in range(EPL):
+            T2.append(load_lines(i) + f"    %lm{i} = scf.select %e{i}_in, %lgt{i}, %removed : f32\n"
+                      + (f"    %lmx{i} = scalar.maxnumf %lmx{i - 1}, %lm{i} : f32\n" if i else "    %lmx0 = scalar.addf %lm0, %zero_f : f32\n"))
+        T2.append(f"    %smax = kernel.subgroup.reduce<maxnumf> %lmx{EPL - 1} : f32\n")
+        for i in range(EPL):
+            T2.append(f"""    %lsh{i} = scalar.subf %lm{i}, %smax : f32
+    %lex{i} = scalar.expf<afn> %lsh{i} : f32
+    %lexm{i} = scf.select %e{i}_in, %lex{i}, %zero_f : f32
+""" + (f"    %lsum{i} = scalar.addf %lsum{i - 1}, %lexm{i} : f32\n" if i else "    %lsum0 = scalar.addf %lexm0, %zero_f : f32\n"))
+        T2.append(f"    %sden = kernel.subgroup.reduce<addf> %lsum{EPL - 1} : f32\n")
+        for i in range(EPL):
+            T2.append(f"""    %pr{i} = scalar.divf %lexm{i}, %sden : f32
+    %s{i}_0 = scf.select %e{i}_in, %pr{i}, %removed : f32
+""")
+    for i in range(EPL if gating == 2 else 0):
+        T2.append(load_lines(i) + f"""    %pr{i} = {prob.replace('%lgt', f'%lgt{i}')}
 """ + (f"""    %b_view{i} = buffer.view %b[%zero] : buffer -> view<{E}xf32>
     %bias{i} = view.load %b_view{i}[%be{i}] : view<{E}xf32> -> f32
     %sv{i} = scalar.addf %pr{i}, %bias{i} : f32
@@ -242,7 +277,7 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32"):
     return f"""
 // Router: TR={TR} tokens per workgroup, their h rows staged in LDS; wave w scores experts w*{EPW}.. for
 // all {TR} tokens (one weight load serves {TR} tokens); then per token, thread e holds expert e and {KU}
-// rounds of workgroup reductions pick the top {KU} (ties: lowest index) of sigmoid(logit){' + bias' if bias else ''}.
+// rounds of workgroup reductions pick the top {KU} (ties: lowest index) of {GATE_NAME[gating]}{' + bias' if bias else ''}.
 kernel.def export("g_moe_route_tr") @g_moe_route_tr(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
@@ -556,6 +591,66 @@ kernel.def export("g_moe_combine") @g_moe_combine(%tokens: index) {{
 """
 
 
+def shared_gated(text):
+    """A combine kernel (combine / combine_sorted with acc=True) that scales the shared experts' output already in y
+    by the token's gate sg[t] (g_moe_shared_gate) before adding the routed experts: y = sg * y + sum_k w_k ys_k."""
+    def rep(a, b):
+        nonlocal text
+        assert text.count(a) == 1, a
+        text = text.replace(a, b)
+    rep("%wts: buffer, %y: buffer) {", "%wts: buffer, %sg: buffer, %y: buffer) {")
+    rep("    %y_old = view.load %y_view[%token, %ch]", """    %sg_view = buffer.view %sg[%zero] : buffer -> view<[%tokens]xf32>
+    %sg_t = view.load %sg_view[%token] : view<[%tokens]xf32> -> f32
+    %y_sh = view.load %y_view[%token, %ch]""")
+    rep(" -> f32\n    %w0 = ", " -> f32\n    %y_old = scalar.mulf %y_sh, %sg_t : f32\n    %w0 = ")
+    return text
+
+
+def shared_gate(H, wty="f32"):
+    """g_moe_shared_gate: sg[t] = sigmoid(h[t] . w) (Qwen2/3/3.5-MoE ffn_gate_inp_shexp: one output per token, f32 or
+    bf16), one 256-thread workgroup per token, f32 accumulation."""
+    HG = H // 32
+    load = (f"""    %wraw = vector.load %w_view[%bg, %c0] : view<{HG}x32xbf16> -> vector<32xbf16>
+    %wv = vector.extf %wraw : vector<32xbf16> to vector<32xf32>""" if wty == "bf16" else
+            f"""    %wv = vector.load %w_view[%bg, %c0] : view<{HG}x32xf32> -> vector<32xf32>""")
+    return f"""
+kernel.def export("g_moe_shared_gate") @g_moe_shared_gate(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %x: buffer, %w: buffer, %sg: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %t0 = kernel.workitem.id<x> : index
+  %tid = index.assume %t0 [range(%t0, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c256 = index.constant 256 : index
+  %cHG = index.constant {HG} : index
+  %zero_f = scalar.constant 0.0 : f32
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
+  %w_view = buffer.view %w[%zero] : buffer -> view<{HG}x32x{wty}>
+  %part = scf.for %g = [%tid to %cHG step %c256](%acc = %zero_f : f32) -> (f32) {{
+    %bg = index.assume %g [range(%g, 0, {HG - 1})] : index
+    %xv = vector.load %x_view[%token, %bg, %c0] : view<[%tokens]x{HG}x32xf32> -> vector<32xf32>
+{load}
+    %d = vector.dotf<reassoc|contract> %wv, %xv, %zero_f : vector<32xf32>, vector<32xf32>, f32
+    %nx = scalar.addf %acc, %d : f32
+    scf.yield %nx : f32
+  }}
+  %dot = kernel.workgroup.reduce<addf> %part : f32
+  %first = index.cmp eq, %tid, %c0 : index
+  scf.if %first {{
+    %gate = scalar.logisticf<afn> %dot : f32
+    %sg_view = buffer.view %sg[%zero] : buffer -> view<[%tokens]xf32>
+    view.store %gate, %sg_view[%token] : f32, view<[%tokens]xf32>
+  }}
+  kernel.return
+}}
+"""
+
+
 # ---------------------------------------------------------------- prefill: grouped expert GEMMs
 TILE = 64
 
@@ -705,7 +800,11 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
     rep(f'export("{base}") @{base}(', f'export("{name}") @{name}(')
     rep("launch(%rows_arg: index, %k_arg: index, %n_arg: index, %x: buffer, %scales: buffer,",
         "launch(%rows_arg: index, %k_arg: index, %n_arg: index, %xrows_arg: index, %tile_info: buffer, %rowmap: buffer, %x: buffer, %scales: buffer,")
-    rep("[range(%rows_arg, 64, 8192), multiple_of(%rows_arg, 64)]", "[range(%rows_arg, 64, 1048576), multiple_of(%rows_arg, 64)]")
+    # rows = max_tiles * 64 <= 8192 tokens * KU + 64 * E; n is this kernel's N. Tight bounds keep the output tile's
+    # dynamic-stride extent (rows * n * 4 bytes) inside what the AMDGPU fragment store accepts (rows 2^20 x n 2^18 failed).
+    max_rows = 8192 * KU + TILE * E
+    rep("[range(%rows_arg, 64, 8192), multiple_of(%rows_arg, 64)]", f"[range(%rows_arg, 64, {max_rows}), multiple_of(%rows_arg, 64)]")
+    rep("[range(%n_arg, 64, 262144), multiple_of(%n_arg, 64)]", f"[range(%n_arg, 64, {N}), multiple_of(%n_arg, 64)]")
     rep("  %origin = index.constant 0 : offset\n", "  %origin = index.constant 0 : offset\n  %xrows = index.assume %xrows_arg [range(%xrows_arg, 1, 1048576)] : index\n")
     # skip tiles of no expert; expert weight offset
     rep("  %workitem_id = kernel.workitem.id<x> : index\n", f"""  %ti_view = buffer.view %tile_info[%origin] : buffer -> view<[%row_tile_count]x2xi32>
@@ -753,6 +852,13 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
         rep("  %bounded_x_row = index.assume %x_row [lt(%x_row, %rows)] : index", "  %bounded_x_row = index.assume %x_row [lt(%x_row, %xrows)] : index")
         rep("    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index", "    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %xrows)] : index")
     rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
+    if mode in os.environ.get("MOE_N_FASTEST", "swiglu,store").split(","):
+        # output-column tiles fastest, on by default (MOE_N_FASTEST=0 off): consecutive workgroups share one expert row
+        # tile, so A and that expert's weights stay in L2. Prefill +74 % at 1k on Qwen3.6-35B-A3B (lfm2moe: +24-30 %);
+        # the same tiles in another order, so the same results
+        rep("workgroups(%row_tiles, %out_tiles, %c1)", "workgroups(%out_tiles, %row_tiles, %c1)")
+        rep("  %row_group_id = kernel.workgroup.id<x> : index\n  %out_group_id = kernel.workgroup.id<y> : index",
+            "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
     return text
 
 

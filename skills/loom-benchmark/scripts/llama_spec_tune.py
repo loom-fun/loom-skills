@@ -6,6 +6,7 @@ requests Loom's tune.py uses (loom-port-llm/starter/draft/tune.py WORK; greedy, 
 when the package's chat toggles it, as tune.py does, so both sides decode the same kind of text):
   none; --spec-type draft-mtp at --spec-draft-n-max 1-4 when the GGUF has a NextN/MTP block (cfg["mtp"]);
   --spec-type draft-dflash with the DFlash drafter Loom found (cfg["drafter"]["gguf"]) at n-max 3, 5, 7;
+  the same with a DFlash drafter cached next to the target GGUF (its repo's own dflash-*.gguf, llama.cpp's layout);
   --spec-type draft-mtp with the Gemma-4 assistant Loom found (cfg["assistant"]["gguf"]) at n-max 1-4;
   n-gram drafting for every model (Loom's tune.py always tries its prompt-lookup drafter): --spec-type ngram-simple and
   ngram-mod at llama.cpp's defaults (they draft only after a long match, so they cost little on new text).
@@ -15,6 +16,7 @@ no drafting by at least 3 % (the rule tune.py applies to Loom). OUT = {"args": "
 appends for the performance runs. Gates and goldens never use it (references are plain greedy log-probs).
 SPEC=off: OUT says {"args": ""} without measuring.
 """
+import glob
 import json
 import os
 import statistics
@@ -51,6 +53,14 @@ def main():
         if d and os.path.exists(d):
             cands += [("dflash", n, f"--spec-type draft-dflash --spec-draft-model {d} --spec-draft-n-max {n} -ngld 99")
                       for n in (3, 5, 7)]
+        # A DFlash drafter the target's own GGUF repo ships (ggml-org publishes dflash-*.gguf next to the model, in the
+        # layout its llama.cpp reads; a third-party conversion Loom uses may carry keys the build rejects): cached
+        # copies next to the target GGUF are candidates too, so llama.cpp drafts with the same drafter's weights.
+        snap = os.path.dirname(os.readlink(gguf) if os.path.islink(gguf) else gguf)
+        for own in sorted(glob.glob(os.path.join(snap, "*dflash*.gguf")))[:1]:
+            if not (d and os.path.samefile(own, d)):
+                cands += [("dflash-repo", n, f"--spec-type draft-dflash --spec-draft-model {own} --spec-draft-n-max {n} -ngld 99")
+                          for n in (3, 5, 7)]
         asst = (cfg.get("assistant") or {}).get("gguf")
         if asst and os.path.exists(asst):   # Gemma-4 assistants run as llama.cpp's MTP drafter
             cands += [("assist", n, f"--spec-type draft-mtp --spec-draft-model {asst} --spec-draft-n-max {n} -ngld 99") for n in (1, 2, 3, 4)]
