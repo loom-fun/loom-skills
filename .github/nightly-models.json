@@ -302,6 +302,28 @@
    ]
   },
   {
+   "repo": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom",
+   "slug": "qwen3-vl-8b-instruct",
+   "memory_bytes": 59000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "vision",
+    "draft"
+   ]
+  },
+  {
+   "repo": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom",
+   "slug": "qwen3-vl-4b-instruct",
+   "memory_bytes": 56000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "vision",
+    "draft"
+   ]
+  },
+  {
    "repo": "loom-fun/ggml-org-Qwen3-4B-loom",
    "slug": "qwen3-4b",
    "memory_bytes": 25000000000,

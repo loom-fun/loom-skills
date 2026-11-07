@@ -268,11 +268,13 @@ def text_divergence(tok, loom_ids, gids):
     reply re-tokenized, and the model may pick a split the tokenizer would not ('.\\n' '\\n' '\\n' where the
     tokenizer merges '.\\n\\n\\n'): the same text split differently is no divergence. From the first differing
     id the rest is compared as text; a golden token that ends inside a UTF-8 character is judged with the
-    tokens that complete it. Without a split difference this is the first differing id, as before."""
+    tokens that complete it. When the texts part inside Loom's first differing token (Loom ' Monday', llama.cpp
+    ' Mon' ','), the divergence is that token's position. Without a split difference this is the first differing id."""
     k = next((i for i, (x, y) in enumerate(zip(loom_ids, gids)) if x != y), None)
     if k is None:
         return None
     text = tok.decode(loom_ids[k:], skip_special_tokens=False)
+    first = len(tok.decode(loom_ids[k:k + 1], skip_special_tokens=False))
     at, done = k, 0
     for j in range(k, len(gids)):
         s = tok.decode(gids[k:j + 1], skip_special_tokens=False)
@@ -282,8 +284,10 @@ def text_divergence(tok, loom_ids, gids):
             at, done = j + 1, len(s)
         elif s.startswith(text):
             return None
+        elif done < first:   # the texts part inside Loom's token (' Monday' vs ' Mon' ','): Loom chose it at k
+            return k, loom_ids[k], text
         else:
-            loom_id = loom_ids[k] if done == 0 else (tok.encode(text[done:], add_special_tokens=False).ids or [None])[0]
+            loom_id = (tok.encode(text[done:], add_special_tokens=False).ids or [None])[0]
             return at, loom_id, text[done:]
     return None
 
