@@ -371,12 +371,16 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
    `model.json.lock`, `llm_config.json` (and `program/`). Per gate the latest evidence wins, so a later failing
    run shows as a failure; per metric the last session that measured it. `--report attached` instead keeps a
    REPORT.md written by the run (the factory's) or an older card's narrative, as is.
+   A new or replaced package: `card/publish_package.py prepare PKG DIR --source ORG/GGUF-REPO` first, on the machine
+   that holds the GGUFs (copies the package without weights, pins each file's origin at the revision it was validated
+   on, writes `model.json.lock` with `loom-fetch --update-lock`), then `make_info.py build DIR ...` on that DIR.
 3. `card/render_card.py DIR` writes `DIR/README.md` (and `DIR/REPORT.md` for `--report generated`: setup,
    commands, every run's value, the roofline, every DevLab sweep, gate evidence). The performance table shows per
    metric llama.cpp, Loom, the margin, the roofline, Loom as % of it, and Loom on DevLab with its % of the
    roofline; a footnote says what the roofline and the DevLab column are. When republishing a card, upload only those three files:
-   `hf upload REPO DIR . --include README.md --include info.json --include REPORT.md`. Never re-upload a repo's
-   programs, `model.json`, lock or weights for a card change.
+   `hf upload REPO DIR . --include README.md --include info.json --include REPORT.md` (or `publish_package.py upload
+   DIR --repo REPO --card-only`). Never re-upload a repo's programs, `model.json`, lock or weights for a card change.
+   A whole package: `publish_package.py upload DIR --repo REPO` (removes files an in-place update leaves stale).
 
 **Performance guardrails** (`card_lib.perf_flags`, applied by `loom-org`'s `org_status.py`): a metric whose Loom
 value is below half the efficiency Loom ports have demonstrated (far from roofline), or whose latest DevLab value

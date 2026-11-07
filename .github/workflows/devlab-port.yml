@@ -1,0 +1,75 @@
+name: devlab-port
+# End-to-end ports on AMD DevLab Dispatch Strix Halo runners, one matrix job per entry of .github/devlab/port.json:
+# .github/scripts/port_e2e.sh (port.sh -> qualify.sh -> finalize.sh, the card evidence and the publishable package)
+# with this branch's skills, or another ref's ("skills_ref": from-scratch baselines with main). The artifact holds
+# out/ (gates, perf, evidence, publish/ without weights, phases.log); publishing to Hugging Face is a separate,
+# manual step (loom-benchmark SKILL.md, "Hugging Face model card"). Runs when a pull request gets the `devlab-port`
+# label (remove and re-add it for the next wave): a push does not restart hours-long ports.
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  jobs:
+    if: >-
+      github.event.label.name == 'devlab-port'
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          e = json.load(open(".github/devlab/port.json"))
+          print("matrix=" + json.dumps({"job": [j["name"] for j in e["jobs"]]}))
+          PY
+
+  run:
+    needs: jobs
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.jobs.outputs.matrix) }}
+    name: ${{ matrix.job }}
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 330
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # skills_ref: a job may port with another commit's skills
+      - name: work dir
+        run: |
+          mkdir -p "$RUNNER_TEMP/../devlab-port" && W=$(cd "$RUNNER_TEMP/../devlab-port" && pwd)
+          # this job's own HF cache: everything it downloads is deleted at the end (shared runners)
+          echo "WORK=$W" >> "$GITHUB_ENV"; echo "HF_HOME=$W/hf-${{ matrix.job }}" >> "$GITHUB_ENV"
+      - name: "port: ${{ matrix.job }}"
+        run: |
+          set -uo pipefail
+          read -r spec ref sref mid < <(python3 -c "
+          import json; j = next(j for j in json.load(open('.github/devlab/port.json'))['jobs'] if j['name'] == '${{ matrix.job }}')
+          print(j['spec'], j.get('reference') or 'auto', j.get('skills_ref') or '-', j.get('model_id') or '')")
+          D=$WORK/${{ matrix.job }}; rm -rf "$D"; mkdir -p "$D"
+          SK=$GITHUB_WORKSPACE/skills
+          if [ "$sref" != - ]; then
+            mkdir -p "$D/skills-src"; git archive "$sref" skills | tar -x -C "$D/skills-src"; SK=$D/skills-src/skills
+            echo "skills from $sref ($(git log -1 --format=%h "$sref"))"
+          fi
+          echo "branch $(git rev-parse --short HEAD), skills ${sref}, reference=$ref" | tee "$D/job.txt"
+          SK=$SK REFERENCE=$ref LOOM_ROOT=$WORK/loom bash .github/scripts/port_e2e.sh "$spec" "$D" 8160 8130 $mid
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devlab-port-${{ matrix.job }}
+          path: ${{ env.WORK }}/${{ matrix.job }}/out
+          retention-days: 30
+      - name: clean up
+        if: always()
+        run: rm -rf "$WORK/${{ matrix.job }}" "$HF_HOME"

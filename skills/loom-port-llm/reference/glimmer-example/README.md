@@ -4,13 +4,13 @@ A port of `unsloth/Muse-Glimmer-30B-GGUF` (UD-Q5_K_M, 30B dense) written by fres
 skills (Oct-Nov 2026; latest run 71 min end to end, full gates and audit PASS, agent loop 7/7). Make a
 kit with `../apply_example.sh glimmer W/kit`. The kernels need no changes: `norm` (interleaved) RoPE,
 weightless embedding norm, NoPE on global layers (i % 4 == 3) and SWA elsewhere, and the logit softcap
-in the sampling logits are starter features driven by `cfg.json`.
+in the sampling logits are starter features driven by the config.
 
 | File | Adds |
 |---|---|
 | `chat/atem.loom`, `chat/atem_rodata.py` | the ATEM channel format (`<|start|>assistant to=self<|message|>...` reasoning, `to=user` answers, tool headers `to=functions.NAME`) and its tool-call parsing in `output_next` (a zero-length span must not change state). `build.py` splices `chat/<call_format>.loom` over the generic chat functions |
 | `starter.patch` | `chat_probe.py`: the ATEM model (`simulate()` verified against the Jinja template, `raw_from_chat()` / `raw_alternatives()` for the benchmark); `make_kernel_tests.py`: mixed-format matvec tests |
-| `cfg.json` | the reviewed config without the tensor table |
+| reviewed config | the published package's `llm_config.json` ([loom-fun/unsloth-Muse-Glimmer-30B-loom](https://huggingface.co/loom-fun/unsloth-Muse-Glimmer-30B-loom), category A, pinned in `../examples.json`; merged by `apply_example.sh glimmer KIT CFG`) |
 
 Its `make_kernel_tests.py` reads the kernels to test from `KTEST_LLM` (default `pkg/program/llm.loom`):
 for a variant package, set it and the same env switches (`MV_WG4=...`) the variant was built with, or
