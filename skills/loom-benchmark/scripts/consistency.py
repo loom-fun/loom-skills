@@ -89,7 +89,7 @@ if not all(paired):
     print("note: prompts", [i for i, ok in enumerate(paired) if not ok], "never ran twice alone on the same path (determinism unchecked)")
 gaps, pending = [], False
 if a.pkg and pairs:
-    from bench_common import Package, llama_greedy, top_logprobs
+    from bench_common import Package, exact_gaps, llama_greedy, llama_views, top_logprobs
     P = Package(a.pkg)
     for i, what, r in pairs:
         ref = alone[i]
@@ -114,6 +114,9 @@ if a.pkg and pairs:
             elif t1[k] in top and t2[k] in top:
                 gap_val = abs(top[t1[k]] - top[t2[k]])
                 msg += f"; llama.cpp log-prob gap between them {gap_val:.3f}"
+                # llama.cpp's own spread there (its batched and micro-batched views), for the near-tie evidence
+                views = [abs(g) for g in exact_gaps(llama_views(a.llama, ids, P), t1[k], t2[k])]
+                msg += f" (llama.cpp's other views: {', '.join(f'{v:.3f}' for v in views) or 'none'})"
             else:
                 msg += "; one of them is outside llama.cpp's top-10 (not a near-tie)"
         print(msg)

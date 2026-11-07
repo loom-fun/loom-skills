@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  actions: read   # "card": "run:..." downloads a devlab-port job's artifact
 
 concurrency:
   group: devlab-experiment-${{ github.ref }}

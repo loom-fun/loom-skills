@@ -6,7 +6,7 @@
 #   [WORK=~/devlab-exp] devlab_experiment.sh EXPERIMENT.json VARIANT_NAME
 #
 # EXPERIMENT.json:
-#   {"card": "loom-fun/<repo>", "memory_bytes": N, "kit": "gemma4" | null, "llamacpp": "b1368",   (a variant may override these)
+#   {"card": "loom-fun/<repo>" (or "run:RUN_ID/JOB": a devlab-port job's unpublished package), "memory_bytes": N, "kit": "gemma4" | null, "llamacpp": "b1368",   (a variant may override these)
 #    "steps": ["consistency:20", "determinism:1:10", "determinism:4:5", "ktest"],     (default for every variant)
 #    "variants": [{"name": "card"},                                   (the card's own programs, as published)
 #                 {"name": "x", "build": {"ENV": "value", ...},       (rebuild: build.py with these env vars;
@@ -55,11 +55,18 @@ fi
 export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 
 # 2. The card (shared by the variants of one runner: fetched once into WORK/card)
-card=$WORK/_card_$(echo "$repo" | tr "/" "_"); base=https://huggingface.co/$repo/resolve/main
+# "card": "run:RUN_ID/JOB" takes an unpublished package instead: the publish/ dir of a devlab-port job's artifact.
+card=$WORK/_card_$(echo "$repo" | tr "/:" "__"); base=https://huggingface.co/$repo/resolve/main
 if [ ! -f "$card/.fetched" ]; then
   step "fetch $repo"; rm -rf "$card"
+  if [ "${repo#run:}" != "$repo" ]; then
+    run=${repo#run:}; base=$WORK/_art_${run%%/*}_${run#*/}; rm -rf "$base"
+    gh run download "${run%%/*}" -R "$GITHUB_REPOSITORY" -n "devlab-port-${run#*/}" -D "$base" || { echo "FAIL: artifact $run"; exit 1; }
+    base=$base/publish
+  fi
   "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" || { echo "FAIL: loom-fetch"; exit 1; }
-  curl -fsSL --retry 3 "$base/llm_config.json" -o "$card/llm_config.json" || exit 1
+  if [ -f "$base/llm_config.json" ]; then cp "$base/llm_config.json" "$card/"
+  else curl -fsSL --retry 3 "$base/llm_config.json" -o "$card/llm_config.json" || exit 1; fi
   rm -rf "$WORK/fetch-cache"; touch "$card/.fetched"
 fi
 
