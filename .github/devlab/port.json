@@ -1,6 +1,6 @@
 {
- "_comment": "TEMPORARY (removed before review): DeepStack vision validation, scripted port of the reference model.",
+ "_comment": "TEMPORARY (removed before review): DeepStack vision validation, scripted port derived from the reference model's card.",
  "jobs": [
-  {"name": "qwen3-vl-8b-instruct", "spec": "unsloth/Qwen3-VL-8B-Instruct-GGUF:Qwen3-VL-8B-Instruct-Q4_K_M.gguf", "reference": "auto", "model_id": "Qwen/Qwen3-VL-8B-Instruct"}
+  {"name": "qwen3-vl-4b-instruct", "spec": "unsloth/Qwen3-VL-4B-Instruct-GGUF:Qwen3-VL-4B-Instruct-Q4_K_M.gguf", "reference": "auto", "model_id": "Qwen/Qwen3-VL-4B-Instruct"}
  ]
 }

@@ -300,6 +300,17 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom",
+   "slug": "qwen3-vl-8b-instruct",
+   "memory_bytes": 59000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "vision",
+    "draft"
+   ]
   }
  ]
 }
