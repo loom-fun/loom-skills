@@ -352,6 +352,17 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+   "slug": "qwen2.5-vl-7b-instruct",
+   "memory_bytes": 21000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "vision",
+    "draft"
+   ]
   }
  ]
 }
