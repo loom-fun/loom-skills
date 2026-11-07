@@ -415,8 +415,10 @@ def programs(g):
     def scaled(name, width_ssa):
         return f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {width_ssa}, %{name}, %s_{name}, %{name}16) : [index](index, index, buffer, buffer, buffer)\n  }}\n"
 
+    WD = {"%nH": H, "%nH2": 2 * H, "%nE": E, "%nF": F, "%nV": V}   # output widths of the program's symbols (lin width=)
+
     def L(tname, x, w, y, k_ssa, n_ssa, kval, mode="store", w2=None):
-        return "  " + lin(dfmt(tname), f"%{x}", f"%s_{x}", (w, w2) if mode == "swiglu" else w, dsize(tname), f"%{y}", k_ssa, n_ssa, kval, mode) + "\n"
+        return "  " + lin(dfmt(tname), f"%{x}", f"%s_{x}", (w, w2) if mode == "swiglu" else w, dsize(tname), f"%{y}", k_ssa, n_ssa, kval, mode, width=WD[n_ssa]) + "\n"
 
     def W(name, root="%w_as"):
         t = A["tensors"][name]
@@ -485,6 +487,7 @@ command.program.def public @llm_as_propose() launch(%w_embed: buffer, %w_as: buf
     for l in range(A["layers"]):
         swa = A["swa"][l]
         D = A["D_swa"] if swa else A["D"]
+        WD[f"%nQ_{l}"] = QA * D
         kind = "swa" if swa else "full"
         b = f"blk.{l}."
         lt = att[kind]["layer"]
