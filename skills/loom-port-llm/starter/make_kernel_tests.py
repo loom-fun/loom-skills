@@ -1058,8 +1058,15 @@ if cfg.get("moe"):
         assert len(keep) == t, f"only {len(keep)} of {40 * t} random rows have a clear top-{KU}"
         return hx[keep]
     EB = bool(M.get("expert_bias")); OAI = M.get("act") == "swiglu_oai"
-    def experts_ref(hx, ids, wts, Wg, Wu, Wd, bg=None, bu=None, bd=None):
+    def f16_rows(x):   # g_row_scale_f16: each row scaled by a power of two into F16 range, rounded to F16, scaled back
+        e = np.clip(np.frexp(np.abs(x).max(-1, keepdims=True))[1] - 1 - 13, 0, 100).astype(np.float64)
+        return (x * 2.0 ** -e).astype(np.float16).astype(np.float64) * 2.0 ** e
+    def experts_ref(hx, ids, wts, Wg, Wu, Wd, bg=None, bu=None, bd=None, f16=False):
+        """f16: the prefill GEMMs' activation precision (hidden rows and expert activations rounded to F16 by the row
+        scale kernels), so the reference differs from the kernels only by summation order, not by the rounding the
+        design chooses (a cancelling sum of large expert outputs otherwise shows that rounding as an error)."""
         y = np.zeros((len(hx), H))
+        if f16: hx = f16_rows(hx.astype(np.float64))
         for i in range(len(hx)):
             for k in range(KU):
                 e = ids[i, k]; g = Wg[e] @ hx[i]; u = Wu[e] @ hx[i]
@@ -1069,6 +1076,7 @@ if cfg.get("moe"):
                     xg = np.minimum(g, lim); a = xg / (1 + np.exp(-al * xg)) * (np.clip(u, -lim, lim) + 1)
                 else:
                     a = g / (1 + np.exp(-g)) * u
+                if f16: a = f16_rows(a)
                 y[i] += wts[i, k] * (Wd[e] @ a + (bd[e] if EB else 0))
         return y
     done = set()
@@ -1094,7 +1102,7 @@ if cfg.get("moe"):
             ids, wts, rel = route_ref(hx, Wr, bias)
             y0 = (rng.standard_normal((t, H)) * 0.1).astype(np.float32) if ACC else np.zeros((t, H), np.float32)
             sgv = 1 / (1 + np.exp(-(hx.astype(np.float64) @ Wsg.astype(np.float64)))) if SHG else np.ones(t)
-            yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts, Wg, Wu, Wd, ebias.get("gate"), ebias.get("up"), ebias.get("down"))
+            yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts, Wg, Wu, Wd, ebias.get("gate"), ebias.get("up"), ebias.get("down"), f16=sfx == "_p")
             for n, a in [("_h", hx), ("_y0", y0), ("_ids", ids), ("_wts", wts.astype(np.float32)), ("_y", yref.astype(np.float32)),
                          ("_sg", sgv.astype(np.float32))]:
                 save(tag + sfx + n, a)
