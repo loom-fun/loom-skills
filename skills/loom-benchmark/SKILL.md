@@ -215,7 +215,10 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     divergence must be a near-tie (the compare rule). Loom's turn is its parsed reply re-tokenized, so
     the comparison is on text: the same text split into other tokens (the model's `.\n` `\n` `\n` where
     the tokenizer merges `.\n\n\n`) is no divergence (`bench_common.text_divergence`; it once read as
-    "llama.cpp ends at `<tool_call>`" because the 12-token windows end at different text). A turn that would fail is re-recorded on
+    "llama.cpp ends at `<tool_call>`" because the 12-token windows end at different text). What the parsed
+    reply cannot tell is taken from the golden: a reply with nothing after its reasoning is also rebuilt
+    unclosed (EOS inside the reasoning), and whitespace between or after tool calls (the rebuild prints
+    `call_separator`) follows the golden's. A turn that would fail is re-recorded on
     llama.cpp (up to twice) and scored against the recording Loom follows further (llama.cpp's
     run-to-run nondeterminism, above).
   "The model ended inside its reasoning" notes are a greedy-decoding behavior of

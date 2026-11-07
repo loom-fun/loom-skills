@@ -70,6 +70,30 @@ def gap_at(ids, tops, loom_id, k):
     return top[ids[k]] - top[loom_id] if loom_id in top else None
 
 
+def call_whitespace(P, raw, gids, d):
+    """Parsed tool calls do not keep the whitespace the model wrote between or after them (the rebuild
+    prints call_separator), so any whitespace there is consistent with Loom's reply. At a divergence inside
+    the calls that is whitespace on either side, take the golden's whitespace and compare on (only while
+    that moves the divergence later). -> (raw, divergence)"""
+    marker = P.chat.get("call_marker") or ""
+    start = raw.find(marker) if marker else -1
+    for _ in range(16):
+        if d is None or start < 0 or not raw.endswith(d[2]):
+            break
+        k, _, rest = d
+        pos = len(raw) - len(rest)
+        gold = P.tok.decode(gids[k:], skip_special_tokens=False)
+        gws, lws = gold[:len(gold) - len(gold.lstrip())], rest[:len(rest) - len(rest.lstrip())]
+        if pos < start or not (gws or lws):
+            break
+        alt = raw[:pos] + gws + rest[len(lws):]
+        da = text_divergence(P.tok, P.ids(alt), gids)
+        if da is not None and da[0] <= k:
+            break
+        raw, d = alt, da
+    return raw, d
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pkg")
@@ -126,17 +150,28 @@ def main():
                 # The same text split into other tokens is no divergence (bench_common.text_divergence).
                 d = text_divergence(P.tok, loom_ids, gids)
                 import chat_probe as _cp
-                if d is not None and hasattr(_cp, "raw_alternatives"):
+                finished = ch["finish_reason"] in ("stop", "tool_calls")
+                alts = []
+                if hasattr(_cp, "raw_alternatives"):
                     # A kit whose channel format is ambiguous in the parsed message (Glimmer: an optional
-                    # <|eom|> before the answer header) lists every raw text consistent with it: use the
-                    # one that agrees longest with the golden.
-                    for alt in _cp.raw_alternatives(P.chat, m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)[1:]:
+                    # <|eom|> before the answer header) lists every raw text consistent with it.
+                    alts = _cp.raw_alternatives(P.chat, m, finished, thinking, prompt)[1:]
+                if finished and not (m.get("content") or m.get("tool_calls")):
+                    # Nothing after the reasoning: the model either closed it and stopped, or stopped inside it
+                    # (EOS before the think close; small thinking models do under greedy). The parsed message
+                    # can't tell, so the unclosed rebuild is an alternative too.
+                    alts.append(P.raw_from_chat(m, False, thinking, prompt))
+                if d is not None:
+                    # Use the rebuild that agrees longest with the golden.
+                    for alt in alts:
                         aids = P.ids(alt)
                         da = text_divergence(P.tok, aids, gids)
                         if da is None or da[0] > d[0]:
-                            loom_ids, d = aids, da
+                            raw, loom_ids, d = alt, aids, da
                             if d is None:
                                 break
+                raw, d = call_whitespace(P, raw, gids, d)
+                loom_ids = P.ids(raw)
                 rec["golden_match"] = d is None
                 if d is not None:
                     k, loom_id, loom_rest = d
