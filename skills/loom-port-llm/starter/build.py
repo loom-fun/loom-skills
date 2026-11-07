@@ -318,6 +318,8 @@ func.def @with_instructions(%instructions: buffer, %body: buffer) -> (buffer) {{
   %instructions_length = buffer.length %instructions
   %has_instructions = index.cmp ne, %instructions_length, %origin : offset
 """)
+    if chat.get("reasoning_after_lead"):   # appended to the system lead (patch_system_lead)
+        return text
     text = sub(text, "    %block = func.call @join4(%system_prefix, %merged, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
                """    %instructed = func.call @with_instructions(%instructions, %merged) : (buffer, buffer) -> (buffer)
     %block = func.call @join4(%system_prefix, %instructed, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
@@ -341,6 +343,59 @@ func.def @with_instructions(%instructions: buffer, %body: buffer) -> (buffer) {{
                """  %merges_system = scalar.ori %has_tools, %has_instructions : i1
   %consumed = scalar.andi %merges_system, %first_system : i1
 """)
+def patch_system_lead(text):
+    """control.loom for a template whose first system block always opens with its default system prompt
+    (chat_probe.system_lead, Spark-X2.5): chat_begin renders system_prefix + lead [+ reasoning instructions] + [tools
+    block + tools_system_separator + system message | system_lead_separator + system message] + suffix for every
+    request, and the first system message always merges into it. Other packages' control.loom is unchanged."""
+    def sub(t, old, new):
+        assert t.count(old) == 1, (old[:120], t.count(old))
+        return t.replace(old, new)
+    assert not chat["tools_after_system"] and not chat.get("default_system"), "system_lead: tools before the system message only"
+    text = sub(text, 'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n',
+               'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n\n'
+               f'global.rodata.def @system_lead = bytes("{hx(chat["system_lead"])}")\n\n'
+               f'global.rodata.def @system_lead_separator = bytes("{hx(chat["system_lead_separator"])}")\n')
+    lead = ("  %lead_base = global.load @system_lead : buffer\n" +
+            ("  %lead = func.call @join(%lead_base, %instructions) : (buffer, buffer) -> (buffer)\n" if instructions else
+             "  %lead = func.call @join(%lead_base, %empty) : (buffer, buffer) -> (buffer)\n"))
+    text = sub(text, "  %rendered = scf.if %has_tools -> (buffer) {\n", lead + "  %rendered = scf.if %has_tools -> (buffer) {\n")
+    text = sub(text, "    %block = func.call @join4(%system_prefix, %merged, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+               "    %block = func.call @join4(%system_prefix, %lead, %merged, %suffix) : (buffer, buffer, buffer, buffer) -> (buffer)\n")
+    text = sub(text, """    %block = scf.if %use_default -> (buffer) {
+      %value = func.call @join4(%system_prefix, %default_system, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+      scf.yield %value : buffer
+    } else {
+      scf.yield %empty : buffer
+    }
+""", """    %lead_body_length = buffer.length %system_body
+    %lead_has_body = index.cmp ne, %lead_body_length, %origin : offset
+    %lead_separator_value = global.load @system_lead_separator : buffer
+    %lead_separator = scf.select %lead_has_body, %lead_separator_value, %empty : buffer
+    %lead_text = func.call @join(%lead, %lead_separator) : (buffer, buffer) -> (buffer)
+    %block = func.call @join4(%system_prefix, %lead_text, %system_body, %suffix) : (buffer, buffer, buffer, buffer) -> (buffer)
+""")
+    return sub(text, "  %consumed = scalar.andi %has_tools, %first_system : i1\n", "  %consumed = scalar.ori %first_system, %false : i1\n")
+
+
+def patch_history_close(text):
+    """control.loom for templates that render an assistant turn without reasoning as think_close alone (history_think
+    "close", Spark-X2.5: '<|Bot|></think>answer'). Other packages' control.loom is unchanged."""
+    def sub(t, old, new):
+        assert t.count(old) == 1, (old[:120], t.count(old))
+        return t.replace(old, new)
+    text = sub(text, "        %wanted = scalar.ori %always, %has_thought : i1\n", "        %wanted = scalar.constant true : i1\n")
+    return sub(text, "          %open = global.load @think_open : buffer\n",
+               "          %open_value = global.load @think_open : buffer\n          %open = scf.select %has_thought, %open_value, %empty : buffer\n")
+
+
+def patch_tools_compact(text):
+    """control.loom for templates that print each tool definition as compact JSON (tojson with separators ',' ':';
+    chat.tools_compact, Spark-X2.6): the host json codec compacts the request's tool JSON. Other packages unchanged."""
+    old = "    %printed = func.call @tool_printed(%value) : (buffer) -> (buffer)\n"
+    assert text.count(old) == 1
+    return text.replace(old, "    %printed_raw = func.call @tool_printed(%value) : (buffer) -> (buffer)\n"
+                              "    %printed = func.call @compact(%printed_raw) : (buffer) -> (buffer)\n")
 
 
 def patch_default_system_tools(text):
@@ -485,6 +540,38 @@ def patch_no_tools(text):
     return text
 
 
+def patch_system_in_user(text):
+    """control.loom for a template with no system turn that prints the first system message at the start of the first
+    user turn (chat_probe.system_in_user, Gemma 3: user_prefix + system + '\\n\\n' + user text + suffix): the system
+    message renders user_prefix + its text + separator and sets state bit 8, so the next (user) message renders without
+    its prefix. Other packages' control.loom is unchanged."""
+    assert not chat.get("default_system") and chat["call_format"] == "none" and not instructions and not chat.get("system_lead"), \
+        "system_in_user: modeled for chat-only templates without a default system prompt"
+    text = sub(text, 'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n',
+               'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n\n'
+               f'global.rodata.def @system_in_user = bytes("{hx(chat["system_in_user"])}")\n')
+    text = sub(text, """        %prefix = scf.select %user, %user_prefix, %system_prefix : buffer
+        %message = func.call @join4(%prefix, %text, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+""", f"""        %role_prefix = scf.select %user, %user_prefix, %system_prefix : buffer
+        %eight = scalar.constant 8 : i64
+        %open_bit = scalar.andi %state, %eight : i64
+        %opened = scalar.cmpi ne, %open_bit, %zero64 : i64
+        %prefix = scf.select %opened, %empty, %role_prefix : buffer
+        %fold_separator = global.load @system_in_user : buffer
+        %fold_trim = scalar.constant {B(chat.get("system_in_user_trim"))} : i1
+        %fold_text = scf.select %fold_trim, %text, %raw_text : buffer
+        %folded = func.call @join4(%user_prefix, %fold_text, %fold_separator, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+        %turn = func.call @join4(%prefix, %text, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+        %message = scf.select %first_system, %folded, %turn : buffer
+""")
+    return sub(text, "  %kept = scalar.andi %state, %keep_mask : i64\n",
+               "  %open_mask = scalar.constant -12 : i64\n"
+               "  %fold_bit = scalar.constant 8 : i64\n"
+               "  %unopened = scalar.andi %state, %open_mask : i64\n"
+               "  %open_next = scf.select %first_system, %fold_bit, %zero64 : i64\n"
+               "  %kept = scalar.ori %unopened, %open_next : i64\n")
+
+
 def chat_variants(text):
     """A custom chat file's variants for what the template's derived chat block says: the lines between
     '// @@IF_CHAT:KEY@@' and '// @@END_CHAT@@' (or '// @@ELSE_CHAT@@', which starts the other branch) are kept
@@ -554,6 +641,14 @@ for name in ("prepare", "control", "storage", "service"):
     text = open(os.path.join(HERE, "templates", name + ".loom"), encoding="utf-8").read()
     if name == "control" and instructions:
         text = patch_reasoning_instructions(text)
+    if name == "control" and chat.get("system_lead"):
+        text = patch_system_lead(text)
+    if name == "control" and chat.get("history_think") == "close":
+        text = patch_history_close(text)
+    if name == "control" and chat.get("tools_compact"):
+        text = patch_tools_compact(text)
+    if name == "control" and chat.get("system_in_user"):
+        text = patch_system_in_user(text)
     if name == "control" and chat.get("history_think_before") == "empty":
         text = patch_history_think_before(text)
     if name == "control" and "default_system_tools" in chat:
