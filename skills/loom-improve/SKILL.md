@@ -32,6 +32,12 @@ that carries weight: a gate may only be removed if another gate provably covers 
 No model runs by default and there is no full-suite run before a PR: each change gets the checks it
 needs (section 3, step 5). Each model stresses something different; don't tune to one.
 
+Every trial row belongs to the device it ran on. Wall clock, decode and prefill are not
+comparable across devices (a Strix Point port runs ~3x slower than the same Halo port, and
+the 30B and 40B rows do not fit in a 61 GB box at all), so compare a trial against rows from
+the same GPU - `device.py` prints which one a run used - and against `reference/results.md`
+rows labelled with it.
+
 | Model (HF repo) | Role | What it stresses |
 |---|---|---|
 | `unsloth/Qwen3.5-0.8B-GGUF` | cheapest trial (~20 min); the only starter-path model | starter path end to end, gated delta-net hybrid, 262k context (the full-context probe is the slow step); vision: `qwen3vl_merger` + M-RoPE source positions; drafting: MTP (`*-MTP-GGUF`) and n-gram with GDN replay (launch-bound: tune.py keeps none) |

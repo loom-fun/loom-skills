@@ -12,7 +12,16 @@
 - benchmark it against llama.cpp ROCm.
 
 The skills were developed and verified on an AMD Ryzen AI Max+ 395 "Strix Halo"
-(gfx1151 GPU + XDNA NPU, 128 GB).
+(gfx1151 GPU + XDNA NPU, 128 GB), and end to end (install, port, kernel and vision tests,
+golden gates, serve, benchmark) on a Strix Point laptop - Radeon 890M, gfx1150, 16 CU,
+2x DDR5-5600, 61 GB - where the whole `port.sh` pipeline passes.
+
+Every roofline number is per device: `skills/loom-roofline/devices.json` holds them and
+`device.py` picks one from the sysfs PCI id (or `LOOM_GFX`). This matters because the two
+parts above are 3.1x apart in memory bandwidth and 2.5x in compute while sharing an ISA,
+so a ceiling copied between them turns every target it feeds into an unreachable one. To
+support another GPU, measure it with `skills/loom-roofline/calibrate_device.py` (one served
+model, one context sweep) and add a row; nothing else in the skills is device-specific.
 
 ## Install
 
@@ -119,7 +128,9 @@ optimization budget shrinks to fit.
 
 ## Requirements
 
-- Linux or Windows 11 (Git Bash), and an AMD GPU (ROCm-class; developed on gfx1151).
+- Linux or Windows 11 (Git Bash), and an AMD GPU (ROCm-class; verified on gfx1151 and
+  gfx1150). No ROCm install is needed: the `hrx-loom` wheel bundles its own compiler and
+  runtime, so `rocminfo` is absent on a Loom-only machine and nothing may depend on it.
   Windows was verified end to end on Strix Halo with Qwen3-0.6B; see the `loom` skill's
   Windows section. The NPU path needs an
   XDNA device.
