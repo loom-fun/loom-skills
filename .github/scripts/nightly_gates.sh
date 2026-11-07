@@ -17,7 +17,7 @@
 #   MATERIALIZE   loom-fetch --materialize (default copy; share avoids a second copy of the GGUFs)
 #   FETCH_CACHE   loom-fetch --cache (default: loom-fetch's own)
 #   LOOM_PORT / LLAMA_PORT   default 8160 / 8130
-#   PERF=1        after the gates: Loom alone, perf.py --long (every card row) + 3 c4_steady.py runs, for the
+#   PERF=1        after the gates: Loom alone, perf.py and perf.py --long (every card row) + 3 c4_steady.py runs, for the
 #                 card's DevLab column (card/pull_devlab.py) and next to the card's numbers and roofline (perf.md)
 #   CLEAN=1       delete the fetched package (the GGUF copies) and FETCH_CACHE at exit
 # Writes WORK/<slug>/out: gates.json, gates.out, gates_*.log, summary.json, serve.log, perf.jsonl, perf.md.
@@ -131,6 +131,8 @@ if [ "${PERF:-0}" = 1 ]; then
   curl -sf "$url/v1/models" >/dev/null || "$SV/serve.sh" "nightly-$slug" "$LOOM_PORT" amdgpu "$mem" "$pkg/model.json" | tail -1
   model=$("$T" -c "import json; print(json.load(open('$pkg/llm_config.json'))['model_id'])")
   (cd "$out" && rm -f perf.jsonl c4.jsonl
+   # two runs: perf.py measures the short rows, or with --long the long ones (8k-32k prefill, 32k decode)
+   "$T" "$B/perf.py" "$url" nightly --model "$model" --no-campaign --log perf.jsonl | tail -1
    "$T" "$B/perf.py" "$url" nightly --model "$model" --no-campaign --long --log perf.jsonl | tail -1
    for i in 1 2 3; do "$T" "$B/c4_steady.py" "$url" 4 --model "$model" --log c4.jsonl | tail -1; done > c4_steady.txt
    "$T" - "$B/card" "$pkg/info.json" <<'EOF' | tee perf.md
