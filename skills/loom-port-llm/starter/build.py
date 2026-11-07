@@ -697,7 +697,7 @@ keep = set(chat.get("nonspecial_tokens", []))
 for t in tok.get("added_tokens", []):
     if t["content"] in keep:
         t["special"] = False
-from runtime_regex import rewrite_tokenizer  # noqa: E402  pre-tokenizer regexes the runtime's engine parses
+from runtime_tokenizer import rewrite_tokenizer  # noqa: E402  forms the runtime loads, same tokenization
 rewrite_tokenizer(tok)
 json.dump(tok, open(os.path.join(pkg, "tokenizer.json"), "w", encoding="utf-8"), ensure_ascii=False)
 
