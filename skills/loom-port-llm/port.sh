@@ -58,6 +58,20 @@ fi
 [ -f "$cached" ] || { echo "download of $repo/$file failed (download.log):"; tail -5 download.log 2>/dev/null; exit 2; }
 mkdir -p gguf && [ "$cached" -ef "gguf/$(basename "$file")" ] || ln -sf "$cached" "gguf/$(basename "$file")"
 gguf=$work/gguf/$(basename "$file")
+# A split GGUF (NAME-00001-of-0000N.gguf): every part, from the same repo directory, next to the first one.
+if [[ "$file" =~ -00001-of-([0-9]{5})\.gguf$ ]]; then
+  for ((i = 2; i <= 10#${BASH_REMATCH[1]}; i++)); do
+    pf=${file%-00001-of-*}-$(printf %05d $i)-of-${BASH_REMATCH[1]}.gguf; pc=$(dirname "$cached")/$(basename "$pf")
+    if [ ! -f "$pc" ] && [ "${DRY_RUN:-0}" = 1 ]; then
+      "$T" -I "$K/pick_gguf.py" "$repo" --file "$pf" --stub "gguf/$(basename "$pf")" || exit 2; continue
+    elif [ ! -f "$pc" ]; then
+      "$hf" download "$repo" "$pf" >> download.log 2>&1
+      pc=$(grep -o '/[^ ]*'"$(basename "$pf")" download.log | tail -1)
+    fi
+    [ -f "$pc" ] || { echo "download of $repo/$pf failed (download.log)"; exit 2; }
+    [ "$pc" -ef "gguf/$(basename "$pf")" ] || ln -sf "$pc" "gguf/$(basename "$pf")"
+  done
+fi
 # Tokenizer: the base model named in the GGUF, else the repo name without -GGUF.
 tokrepos=$("$T" - "$gguf" "$repo" <<'EOF'
 import re, sys
@@ -224,7 +238,11 @@ pkg, url = sys.argv[1], sys.argv[2]
 sys.path.insert(0, sys.argv[3]); import card_lib   # tool_calling(): the test gates.sh and the card use
 cfg = json.load(open(pkg + "/llm_config.json")); model = cfg["model_id"]; chat = cfg["chat"]
 off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
-post = lambda body: requests.post(url + "/v1/chat/completions", json={"model": model, **body}, timeout=600).json()
+def post(body):
+    r = requests.post(url + "/v1/chat/completions", json={"model": model, **body}, timeout=600).json()
+    if "choices" not in r:   # the server's error, for the log (a failing request has no choices)
+        sys.exit(f"smoke: the server answered {json.dumps(r)[:600]}")
+    return r
 ok = True
 r = post({"messages": [{"role": "user", "content": "What is the capital of France? Answer in one word."}], "max_tokens": 600, "temperature": 0})
 m = r["choices"][0]["message"]; good = "paris" in ((m.get("content") or "") + (m.get("reasoning_content") or "")).lower()
