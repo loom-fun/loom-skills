@@ -14,6 +14,7 @@ usage: agent_golden.py PKG LOOM_URL [--llama URL] [--thinking on|off|default] [-
 Exit status 1 if a rendering, reuse or tool-call check fails or a divergence is not a near-tie.
 """
 import argparse
+import difflib
 import json
 import sys
 
@@ -70,6 +71,17 @@ def gap_at(ids, tops, loom_id, k):
     return top[ids[k]] - top[loom_id] if loom_id in top else None
 
 
+def history_edits(P, prev, prompt):
+    """The template's edits of the retained history: the non-equal spans of PREV (the previous prompt + output)
+    against the start of PROMPT, each as (prev text, prompt text, the token of PREV after it), so that one
+    rewrite reads the same wherever it is (e.g. ("", "\n", "<channel|>")). The tail PROMPT adds after the
+    history is not an edit."""
+    sm = difflib.SequenceMatcher(None, prev, prompt[:len(prev) + 256], autojunk=False)
+    nxt = lambda i: P.tok.decode(P.ids(prev[i:i + 64])[:1], skip_special_tokens=False)
+    return [(prev[i1:i2], prompt[j1:j2], nxt(i2)) for tag, i1, i2, j1, j2 in sm.get_opcodes()
+            if tag != "equal" and not (tag == "insert" and i1 == len(prev))]
+
+
 def call_whitespace(P, raw, gids, d):
     """Parsed tool calls do not keep the whitespace the model wrote between or after them (the rebuild
     prints call_separator), so any whitespace there is consistent with Loom's reply. At a divergence inside
@@ -109,6 +121,7 @@ def main():
     extra = {} if thinking is None else {"chat_template_kwargs": {"enable_thinking": thinking}}
     msgs = [{"role": "system", "content": "You are a helpful assistant. Use the tools when they help."}]
     turns, failures, prev_total, prev_text = [], 0, 0, ""
+    prev_gold = ""   # the previous turn's golden reply text (llama.cpp's greedy output on the same prompt)
     for task in TASKS:
         msgs.append({"role": "user", "content": task})
         for step in range(6):
@@ -131,13 +144,17 @@ def main():
             # extends its history exactly (it cannot cut a row back to a common prefix), so when the template
             # re-renders bytes the model verifiably generated (the previous turn matched the golden), nothing
             # is reusable however late the change (Gemma 4 with thinking: a "\n" before <channel|> 15 tokens
-            # from the end). Unverified output (no golden, or it diverged) keeps the 80 % rule: a wrong
-            # rebuild of the output must not hide a reuse bug.
+            # from the end). Unverified output (no golden, or it diverged at a near-tie) keeps the 80 % rule,
+            # since a wrong rebuild of the output must not hide a reuse bug, unless the golden attests every edit:
+            # the model's own reply writes the replaced text before that token and never the replacement
+            # (thinking on: "<channel|>" with no "\n" before it), so the edit is the template's, not the rebuild's.
             if step:
                 pids = P.ids(prev_text)
                 common = next((i for i, (x, y) in enumerate(zip(pids, ids)) if x != y), min(len(pids), len(ids)))
                 exact = prompt.startswith(prev_text)
-                rewritten = not exact and turns[-1].get("golden_match") is True   # previous output verified
+                edits = [] if exact else history_edits(P, prev_text, prompt)
+                attested = bool(edits) and all(a_ + nt in prev_gold and b_ + nt not in prev_gold for a_, b_, nt in edits)
+                rewritten = not exact and (turns[-1].get("golden_match") is True or attested)   # previous output verified
                 rec["history_verbatim"] = exact or (common >= 0.8 * len(pids) and not rewritten)
                 if exact and turns[-1].get("output_dropped"):
                     # The previous reply's parse dropped a second call (output_dropped below): the retained history
@@ -179,6 +196,13 @@ def main():
                     # (EOS before the think close; small thinking models do under greedy). The parsed message
                     # can't tell, so the unclosed rebuild is an alternative too.
                     alts.append(P.raw_from_chat(m, False, thinking, prompt))
+                gp, plain = P.chat.get("generation_prompt", ""), P.chat.get("generation_prompt_plain", "")
+                on = P.chat.get("thinking_default") if thinking is None else thinking
+                if not on and plain.startswith(gp) and plain != gp and not prompt.endswith(plain) and not m.get("reasoning_content"):
+                    # Thinking off with a generation prompt that adds an empty reasoning block (Gemma 4 12B/26B/31B):
+                    # where the prompt does not end with it (the turn continues after tool results), the model may
+                    # write that block itself, which the parsed reply can't show.
+                    alts += [plain[len(gp):] + r for r in [raw] + alts]
                 if d is not None:
                     # Use the rebuild that agrees longest with the golden.
                     for alt in alts:
@@ -239,6 +263,7 @@ def main():
             turns.append(rec)
             prev_total = u["prompt_tokens"] + u["completion_tokens"]
             prev_text = prompt + out_text
+            prev_gold = P.tok.decode(gids, skip_special_tokens=False) if a.llama else ""
             # loom-serve rejects "reasoning_content": null, so only send it when present.
             msgs.append({"role": "assistant", "content": m.get("content") or "",
                          **({"reasoning_content": m["reasoning_content"]} if m.get("reasoning_content") else {}),
