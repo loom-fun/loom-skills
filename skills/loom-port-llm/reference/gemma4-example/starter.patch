@@ -1009,7 +1009,7 @@
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if FUSED_Q:
-@@ -3817,101 +4048,99 @@
+@@ -3817,101 +4048,102 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1177,7 +1177,10 @@
 -    MODEL_PARTS.update(layer_text=layer_text, prologue="".join(L_[:-1]), attn_ordinal=attn_ordinal)  # [-1]: token info + embed
 -    for i in range(L):
 -        L_.append(layer_text(i))
-+        T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, %post_ffn_{i}, %x, {nn}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
++        if LOUT_SCALE and not PLE:   # no per-layer embedding to add first: the FFN residual add takes the layer scale
++            T.append(f"  kernel.launch @g_post_add_norm_s[%t](%t, %y, %post_ffn_{i}, %x, {nn}, %h, %lscale_{i}) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer, view<1xf32>)\n")
++        else:
++            T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, %post_ffn_{i}, %x, {nn}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
 +        if PLE:
 +            T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %x, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
 +            T.append("  " + lin(fmt_of(nm("inp_gate")), "%x", "%s_h", f"%w_pgate_{i}", sz("inp_gate"), "%pg", "%nH", "%nP", H) + "\n")
@@ -1189,7 +1192,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -3936,7 +4165,7 @@
+@@ -3936,7 +4168,7 @@
      spec_kernels = ""
      if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too
          head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
@@ -1198,7 +1201,7 @@
                        GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
                        head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
                        prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin, lin2=lin2, pair_kv=PAIR_PROJ in ("1", "kv"),
-@@ -4046,8 +4275,9 @@
+@@ -4046,8 +4278,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1210,7 +1213,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if RECUR:
-@@ -4064,13 +4294,27 @@
+@@ -4064,13 +4297,27 @@
      env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
      # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
@@ -1278,7 +1281,7 @@
          name = f"blk.{li}.{nm_}.weight"
          if name not in T:
              continue
-+        if li >= cfg.get("kv_shared_from", 10**9) and nm_ in ("attn_k", "attn_v"):
++        if li >= (cfg.get("kv_shared_from") or 10**9) and nm_ in ("attn_k", "attn_v"):
 +            continue
          key = (T[name].tensor_type.name.lower(), K)
          if key not in seen: seen.add(key); todo.append((name, K))
