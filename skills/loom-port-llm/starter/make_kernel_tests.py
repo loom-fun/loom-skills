@@ -217,8 +217,8 @@ for name, K in todo:
 # 2a. per-head attention gate (cfg attn_gate "per_head"): n = heads rows, run by gen_llm.lin_mv on f32 activations at
 # every token count: the 1-token and 4-token kernels at the decode R, and the 4-token R=16 kernel prefill takes
 if cfg.get("attn_gate") == "per_head":
-    A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", [])))
-    name = f"blk.{A0}.attn_gate.weight"; fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
+    name = next(f"blk.{i}.attn_gate.weight" for i in range(cfg["layers"]) if f"blk.{i}.attn_gate.weight" in T)
+    fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
     R1 = pick_r(n, H, 1)
     variants = [(1, R1), (4, R1)] + ([(4, 16)] if R1 != 16 and n % 16 == 0 else [])
     save("hg_w", raw(name)); wt = ty(raw(name))
@@ -361,10 +361,10 @@ kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.fl
 q = rng.standard_normal((t, QH, D)).astype(np.float32); k = rng.standard_normal((t, KVH, D)).astype(np.float32); v = rng.standard_normal((t, KVH, D)).astype(np.float32)
 def norm(a, w): return a / np.sqrt((a * a).mean(-1, keepdims=True) + eps) * w
 YARN = cfg.get("rope_scaling") if (cfg.get("rope_scaling") or {}).get("type") == "yarn" else None
-def rope(a, RD=RD, theta=cfg["rope_theta"], yarn=YARN):
+def rope(a, RD=RD, theta=cfg["rope_theta"], factors=cfg.get("rope_freq_factors"), yarn=YARN):
     inv = theta ** (-np.arange(0, RD // 2) * 2.0 / RD); m = 1.0
-    if cfg.get("rope_freq_factors"):   # llama3 rope_freqs: each pair's frequency divided by its factor
-        inv = inv / np.asarray(cfg["rope_freq_factors"][:RD // 2], np.float64)
+    if factors:   # llama3 rope_freqs: each pair's frequency divided by its factor
+        inv = inv / np.asarray(factors[:RD // 2], np.float64)
     if yarn:   # ggml rope_yarn, ext_factor 1: interpolate the low frequencies, scale cos/sin by mscale
         f = yarn["factor"]; cd = lambda r: RD * np.log(yarn["orig_ctx"] / (r * 2 * np.pi)) / (2 * np.log(theta))
         lo, hi = max(0.0, np.floor(cd(yarn["beta_fast"]))), min(RD - 1.0, np.ceil(cd(yarn["beta_slow"])))
@@ -411,7 +411,7 @@ cases.append(f"""check.case public @qk_rope {{
 # 3'. sliding layers with their own rotary dims / base at the same head_dim (gen_llm SWA_ROPE): g_qk_rope_store_swa
 RD_SWA, TH_SWA = cfg.get("rope_dims_swa") or RD, cfg.get("rope_theta_swa") or cfg["rope_theta"]
 if cfg.get("sliding_layers") and (cfg.get("head_dim_swa") or D) == D and (RD_SWA, TH_SWA) != (RD, cfg["rope_theta"]):
-    qs = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq, RD_SWA, TH_SWA, None)
+    qs = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq, RD_SWA, TH_SWA, None, None)   # no frequency factors, no YaRN
     save("r_qs", qs.reshape(t, -1).astype(np.float32))
     cases.append(cases[-1].replace("@qk_rope {", "@qk_rope_swa {").replace("@g_qk_rope_store[", "@g_qk_rope_store_swa[")
                  .replace('path("r_qe.npy")', 'path("r_qs.npy")'))

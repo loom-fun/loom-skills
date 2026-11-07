@@ -95,8 +95,7 @@ THETA = CFG["rope_theta"]
 RD_SWA, THETA_SWA = CFG.get("rope_dims_swa") or RD, CFG.get("rope_theta_swa") or THETA
 SWA_ROPE = bool(CFG.get("sliding_layers")) and (CFG.get("head_dim_swa") or D) == D and (RD_SWA, THETA_SWA) != (RD, THETA)
 assert not SWA_ROPE or (RD_SWA % 64 == 0 and RD_SWA <= D), "rope_dims_swa must be a multiple of 64"
-FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs)
-assert not (SWA_ROPE and FREQ_FACTORS), "rope_freq_factors with a sliding-layer RoPE: not modeled"
+FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs; global layers only)
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
 # Gate activation (cfg attn_gate_act): sigmoid (default), or softplus (laguna) on a per-head gate, which g_gate_heads
 # applies to the head's logit so the attention kernels multiply by the stored value.
@@ -2050,12 +2049,12 @@ def mrope_pick(j, idx):
 MRP = []   # selection lines emitted before each pair's angle
 
 
-def freq_factor(j):
+def freq_factor(j, factors):
     """llama3 rope_freqs (FREQ_FACTORS): divide pair j's frequency by its factor, picked from the runs of equal
     factors by the pair index %li{j} (Llama 3.x: eight runs). Empty without factors."""
-    if not FREQ_FACTORS:
+    if not factors:
         return ""
-    runs = [(i, f) for i, f in enumerate(FREQ_FACTORS) if i == 0 or f != FREQ_FACTORS[i - 1]]
+    runs = [(i, f) for i, f in enumerate(factors) if i == 0 or f != factors[i - 1]]
     t = [f"\n  %ff{j}_0 = scalar.constant {float(runs[0][1])!r} : f32"]
     for r, (start, f) in enumerate(runs[1:], 1):
         t.append(f"""  %ffs{j}_{r} = scalar.constant {start} : i32
@@ -2066,10 +2065,8 @@ def freq_factor(j):
     return "\n".join(t)
 
 
-def yarn_freq(j):
-    """YaRN: lines turning pair j's frequency %if{j} (pair index %lf{j}) into %if{j}y (empty without YaRN)."""
-    if not YARN:
-        return ""
+def yarn_freq(j, factors):
+    """YaRN: lines turning pair j's frequency %if{j} (pair index %lf{j}) into %if{j}y."""
     low, inv, mix, _ = yarn_constants()
     return f"""
   %yl{j} = scalar.constant {low!r} : f32
@@ -2081,29 +2078,26 @@ def yarn_freq(j):
   %yc{j} = scalar.minnumf %yc{j}a, %one_f : f32
   %ys{j} = scalar.mulf %yc{j}, %ym{j} : f32
   %yf{j} = scalar.subf %one_f, %ys{j} : f32
-  %if{j}y = scalar.mulf %if{j}{"f" if FREQ_FACTORS else ""}, %yf{j} : f32"""
+  %if{j}y = scalar.mulf %if{j}{"f" if factors else ""}, %yf{j} : f32"""
 
 
 def yarn_scale(j):
-    """YaRN: %cr{j}m / %sr{j}m = cos / sin times mscale (empty without YaRN)."""
-    if not YARN:
-        return ""
+    """YaRN: %cr{j}m / %sr{j}m = cos / sin times mscale."""
     return f"""
   %ymsc{j} = scalar.constant {yarn_constants()[3]!r} : f32
   %cr{j}m = scalar.mulf %cr{j}, %ymsc{j} : f32
   %sr{j}m = scalar.mulf %sr{j}, %ymsc{j} : f32"""
 
 
-def qk_rope(rd=None, theta=None, name="g_qk_rope_store"):
+def qk_rope(rd=None, theta=None, name="g_qk_rope_store", factors=FREQ_FACTORS, yarn=YARN):
     """Per-head (optional) RMSNorm + RoPE for QH query and KVH key heads, with
     keys/values stored to the paged F16 KV planes: one 256-lane workgroup per
     token. Lane l of a wave owns D/32 of a head's dims: NeoX: l, l+32, ...
     with rotary pairs (d, d + RD/2) over the first RD (rope_dims) dims and the
     rest passed through; interleaved ("norm", D = 128 only): 4l..4l+3 with
-    pairs (0,1),(2,3). Each pair's angle is computed once for every head. rd / theta / name: another rotary
-    width, base and kernel name (sliding layers, qk_rope_swa)."""
+    pairs (0,1),(2,3). Each pair's angle is computed once for every head. rd / theta / name / factors / yarn: another
+    rotary width, base, kernel name, frequency factors and YaRN (sliding layers, qk_rope_swa)."""
     rd, theta = rd or RD, theta or THETA
-    yarn = YARN if (rd, theta) == (RD, THETA) else None   # YaRN on the default RoPE only (laguna's sliding layers: plain)
     n = DL
     if ROPE == "neox":
         dims = ["%lane"] + [f"%d{j}" for j in range(1, n)]
@@ -2171,8 +2165,8 @@ kernel.def export("{name}") @{name}(%tokens: index) {{
   %lf{j} = scalar.sitofp %li{j} : i32 to f32
   %ex{j}a = scalar.mulf %lf{j}, %ln_scale : f32
   %ex{j}b = scalar.mulf %ex{j}a, %neg : f32
-  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j)}{yarn_freq(j) if yarn else ""}
-  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if FREQ_FACTORS else ""}{"y" if yarn else ""} : f32
+  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j, factors)}{yarn_freq(j, factors) if yarn else ""}
+  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if factors else ""}{"y" if yarn else ""} : f32
   %tr{j} = scalar.mulf %ra{j}, %inv_two_pi : f32
   %ts{j} = scalar.addf %tr{j}, %half : f32
   %ti{j} = scalar.fptosi %ts{j} : f32 to i32
@@ -3771,8 +3765,9 @@ NARROW_KERNELS = r"@(g_qk_rope_store(?:_swa)?|g_attention_flash2|g16_attention_s
 
 
 def qk_rope_swa():
-    """g_qk_rope_store_swa: g_qk_rope_store with the sliding layers' rotary dims and base (SWA_ROPE)."""
-    return qk_rope(RD_SWA, THETA_SWA, "g_qk_rope_store_swa")
+    """g_qk_rope_store_swa: g_qk_rope_store with the sliding layers' rotary dims and base (SWA_ROPE), without the
+    frequency factors (llama.cpp lfm3: rope_freqs belongs to the global layers)."""
+    return qk_rope(RD_SWA, THETA_SWA, "g_qk_rope_store_swa", None, None)   # plain RoPE (laguna: no YaRN there)
 
 
 SILU_MUL = r"""
