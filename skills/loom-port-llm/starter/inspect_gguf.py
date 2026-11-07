@@ -59,7 +59,8 @@ cfg = {
     "rms_eps": A("attention.layer_norm_rms_epsilon", 1e-6),
     "rope_theta": A("rope.freq_base", 10000.0),
     # neox: rotary pairs (d, d + head_dim/2) -- qwen2/qwen3/gemma/...; norm: (2d, 2d+1) -- llama
-    "rope_type": "norm" if arch in ("llama", "mistral", "granite") else "neox",
+    # muse-glimmer: llama4-style interleaved rope
+    "rope_type": "norm" if arch in ("llama", "mistral", "granite", "muse-glimmer") else "neox",
     "qk_norm": any(k.endswith(".attn_q_norm.weight") for k in tensors),
     "attn_gate": "blk.0.attn_gate.weight" in tensors,
     "post_norms": "blk.0.post_attention_norm.weight" in tensors,
@@ -71,7 +72,8 @@ cfg = {
     "tied_embeddings": "output.weight" not in tensors,
     "eos_id": eos,
     # head_select stops on any of these; keep <|endoftext|> for ChatML models.
-    "extra_eos_ids": sorted({i for i in (im_end, endoftext) if i is not None and i != eos}),
+    # (and the GGUF's end-of-turn token, e.g. <|eot|> of llama4-style templates)
+    "extra_eos_ids": sorted({i for i in (im_end, endoftext, field("tokenizer.ggml.eot_token_id")) if i is not None and i != eos}),
     "bos_id": field("tokenizer.ggml.bos_token_id") if field("tokenizer.ggml.add_bos_token", False) else None,
     "chat": None,
     "tensors": tensors,
@@ -89,9 +91,18 @@ pat = A("attention.sliding_window_pattern")
 if cfg["sliding_window"] and isinstance(pat, list) and len(pat) in (L, BLOCKS):
     pat = pat[:L]
     cfg["sliding_layers"] = [i for i, sl in enumerate(pat) if sl]
+elif cfg["sliding_window"] and isinstance(pat, int) and pat > 1:
+    # a period instead of a list (llama.cpp set_swa_pattern(n)): every n-th layer is full attention
+    cfg["sliding_layers"] = [i for i in range(L) if i % pat < pat - 1]
 elif cfg["sliding_window"]:
     print(f"WARNING: sliding_window {cfg['sliding_window']} but no per-layer pattern in the GGUF: fill "
           "sliding_layers (and nope_layers) by hand from llama.cpp's src/models/<arch>.cpp or llama_trace.py")
+# muse-glimmer (reference/glimmer-example): a weightless RMS norm on the token embeddings, and the full-attention
+# layers (every 4th, from the sliding pattern) use no rope.
+if arch == "muse-glimmer" and cfg["sliding_layers"]:
+    cfg["embed_norm"] = True
+    cfg["logit_scale"], cfg["logit_softcap"] = A("logit_scale"), A("final_logit_softcapping")
+    cfg["nope_layers"] = [i for i in range(L) if i not in cfg["sliding_layers"]]
 # Partial rotary embedding (e.g. qwen35: 64 of 256 dims).
 rope_dims = A("rope.dimension_count")
 if rope_dims and rope_dims != head_dim:
