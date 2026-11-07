@@ -1,5 +1,14 @@
 {
  "devlab": {},
+ "devlab_perf": {
+  "decode_2k": "missing",
+  "decode_32k": "missing",
+  "prefill_16k": "missing",
+  "prefill_2k": "missing",
+  "prefill_32k": "missing",
+  "prefill_8k": "missing",
+  "streams4": "missing"
+ },
  "far": {
   "prefill_16k": [
    0.151,

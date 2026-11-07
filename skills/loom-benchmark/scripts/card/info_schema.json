@@ -52,7 +52,7 @@
     },
     "sessions": {
      "type": "array", "items": {"$ref": "#/$defs/session"},
-     "description": "Measurement sessions in evidence order. Per metric the last session that measured it is the card's value."
+     "description": "Measurement sessions in evidence order. Per metric the last local session that measured it is the card's headline value, and the last DevLab session (source kind devlab) its DevLab value (card_lib.card_metrics)."
     }
    }
   },
@@ -101,7 +101,7 @@
   },
   "devlab": {
    "type": "object", "required": ["sweeps"],
-   "description": "Loom measured alone on AMD DevLab Dispatch runners by the nightly sweep, oldest first. No longer written or rendered: DevLab runners measured Loom well below a local session on the same programs, so every card performance number comes from a local session and DevLab measures correctness only. Kept (optional key, loom-card/2) so cards that recorded sweeps stay valid; make_info.py build --from-info carries them over unchanged.",
+   "description": "Loom measured alone on AMD DevLab Dispatch runners by the nightly sweep, oldest first. No longer written or rendered: a card's DevLab numbers are performance sessions (Loom and llama.cpp) with a devlab source. Kept (optional key, loom-card/2) so cards that recorded sweeps stay valid; make_info.py build --from-info carries them over unchanged.",
    "properties": {
     "sweeps": {"type": "array", "items": {"$ref": "#/$defs/sweep"}}
    }
@@ -111,7 +111,7 @@
   "source": {
    "type": "object", "required": ["kind", "run", "url", "device", "hrx_loom"],
    "properties": {
-    "kind": {"enum": ["local", "devlab", "factory"], "description": "local: a developer's machine; devlab: a workflow on AMD DevLab Dispatch (nightly-gates, devlab-port: a performance session from one is flagged for a local re-measure); factory: the loom-factory workflow"},
+    "kind": {"enum": ["local", "devlab", "factory"], "description": "local: a developer's machine; devlab: a workflow on AMD DevLab Dispatch (nightly-gates, devlab-port, devlab-perf: a performance session from one fills the card's DevLab columns); factory: the loom-factory workflow"},
     "run": {"type": ["string", "null"], "description": "GitHub Actions run id"},
     "url": {"type": ["string", "null"]},
     "device": {"oneOf": [{"$ref": "#/$defs/device"}, {"type": "null"}]},
