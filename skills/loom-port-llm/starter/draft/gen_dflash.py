@@ -1208,14 +1208,16 @@ def programs(g):
     def scaled(name, width_ssa):
         return f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {width_ssa}, %{name}, %s_{name}, %{name}16) : [index](index, index, buffer, buffer, buffer)\n  }}\n"
 
+    WD = {"%nH": H, "%nDQ": QD, "%nDKV": KD, "%nDF": FFd}   # the output widths of the symbols defined above (lin width=)
+
     def L(fmt_name, x, w, y, k_ssa, n_ssa, kval, mode="store", w2=None):
-        return "  " + lin(dfmt(fmt_name), f"%{x}", f"%s_{x}", (w, w2) if mode == "swiglu" else w, dsize(fmt_name), f"%{y}", k_ssa, n_ssa, kval, mode) + "\n"
+        return "  " + lin(dfmt(fmt_name), f"%{x}", f"%s_{x}", (w, w2) if mode == "swiglu" else w, dsize(fmt_name), f"%{y}", k_ssa, n_ssa, kval, mode, width=WD[n_ssa]) + "\n"
 
     def KV(b, x, l):
         """attn_k and attn_v of draft layer l: one pair launch (gen_llm PAIR_PROJ) when their format and size match."""
         ka, va = b + "attn_k.weight", b + "attn_v.weight"
         if "lin2" in g and g.get("pair_kv") and dfmt(ka) == dfmt(va) and dsize(ka) == dsize(va):
-            return "  " + g["lin2"](dfmt(ka), f"%{x}", f"%s_{x}", f"%dk_{l}", f"%dv_{l}", dsize(ka), "%k", "%v", "%nH", "%nDKV", H) + "\n"
+            return "  " + g["lin2"](dfmt(ka), f"%{x}", f"%s_{x}", f"%dk_{l}", f"%dv_{l}", dsize(ka), "%k", "%v", "%nH", "%nDKV", H, width=KD) + "\n"
         return L(ka, x, f"%dk_{l}", "k", "%nH", "%nDKV", H) + L(va, x, f"%dv_{l}", "v", "%nH", "%nDKV", H)
 
     # ---- warm
@@ -1300,6 +1302,7 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
     if conv:
         NGR = H // conv["group"]
         CW = 2 * conv["taps"] * NGR
+        WD["%nDC"] = CW
         P.append(buf("dyn", CW) + buf("hc", H, True) + f"  %nDC = index.constant {CW} : index\n  %branch0 = index.constant 0 : index\n  %branch1 = index.constant 1 : index\n")
     for l in range(NB):
         b = f"blk.{l}."
@@ -1353,6 +1356,7 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
     sel = F["selector"]
     if sel:
         R = sel["rank"]
+        WD["%nSR"] = R
         P.append(f"""  %cand_bytes = index.constant 64 : offset
   %cand_size = index.scale %row_cap, %cand_bytes : index, offset -> offset
   %cand_ids = buffer.alloca<global> align(256) %cand_size : buffer
