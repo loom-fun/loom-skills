@@ -135,7 +135,7 @@ def cases(images_arg):
 
 def judge(pkg, ref, got):
     """-> (status, detail)."""
-    from bench_common import near_tie
+    from bench_common import near_tie, text_divergence, top_logprobs
     if got.get("error"):
         return "FAIL", got["error"]
     n_ref = ref.get("tokens_evaluated") or (ref.get("timings") or {}).get("prompt_n")
@@ -147,30 +147,25 @@ def judge(pkg, ref, got):
     import chat_probe as _cp
     if hasattr(_cp, "raw_alternatives"):   # a channel format ambiguous in the parsed message (Glimmer's optional <|eom|>)
         raws += _cp.raw_alternatives(pkg.chat, got["message"], finished, False)[1:]
+    # Loom's ids are its text re-tokenized: compared on text (bench_common.text_divergence), with the raw text
+    # consistent with the parsed reply that agrees longest with llama.cpp
     best = None
-    for raw in raws:   # the raw text consistent with the parsed reply that agrees longest with llama.cpp
-        ids = pkg.ids(raw)
-        kk = next((i for i, (a, b) in enumerate(zip(gold, ids)) if a != b), min(len(gold), len(ids)))
-        if best is None or kk > best[0]:
-            best = (kk, ids)
-    k, mine = best
-    # Loom's ids are its text re-tokenized, which can merge what it generated as two tokens ("GB" + "P" -> "GBP"): the
-    # divergence is the first llama.cpp token whose text Loom's text does not continue with; Loom's token there is its
-    # remaining text's first token.
-    text = pkg.tok.decode(mine)
-    if k < len(gold) and k < len(mine) and text.startswith(pkg.tok.decode(gold[:k + 1])):
-        j = k
-        while j < len(gold) and text.startswith(pkg.tok.decode(gold[:j + 1])):
-            j += 1
-        rest = pkg.ids(text[len(pkg.tok.decode(gold[:j])):])
-        k, mine = j, list(gold[:j]) + rest
-    if k >= len(gold) or k >= len(mine):
-        return "PASS", f"identical ({k} tokens)" if len(gold) == len(mine) else f"identical for {k} tokens (one stopped)"
-    top = {x["id"]: x["logprob"] for x in cp[k]["top_logprobs"]} if k < len(cp) else {}
-    nt = near_tie(top, gold[k], mine[k])
-    gap = top.get(gold[k], 0) - top.get(mine[k], float("-inf"))
+    for raw in raws:
+        ids = pkg.ids(raw); d = text_divergence(pkg.tok, ids, gold)
+        if best is None or d is None or (best[1] is not None and d[0] > best[1][0]):
+            best = (ids, d)
+        if d is None:
+            break
+    ids, d = best
+    if d is None:
+        n = min(len(gold), len(ids))
+        return "PASS", f"identical ({n} tokens)" if len(gold) == len(ids) else f"identical for {n} tokens (one stopped)"
+    k, mine, _ = d
+    top = top_logprobs(cp, k)
+    nt = near_tie(top, gold[k], mine)
+    gap = top.get(gold[k], 0) - top.get(mine, float("-inf"))
     return ("PASS" if nt else "FAIL"), (f"diverged at token {k}: llama.cpp {pkg.tok.decode([gold[k]])!r} vs Loom "
-                                        f"{pkg.tok.decode([mine[k]])!r} (gap {gap:.2f}{', near-tie' if nt else ''})")
+                                        f"{pkg.tok.decode([mine])!r} (gap {gap:.2f}{', near-tie' if nt else ''})")
 
 
 def main():
