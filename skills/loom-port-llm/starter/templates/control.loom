@@ -984,12 +984,6 @@ func.def public @render_tool(%name: buffer, %arguments: buffer, %ordinal: i64) -
     %paren_close = global.load @py_close_paren : buffer
     %equals = global.load @py_equals : buffer
     %comma_space = global.load @py_comma_space : buffer
-    %json_true = global.load @json_true : buffer
-    %json_false = global.load @json_false : buffer
-    %json_null = global.load @json_null : buffer
-    %py_true = global.load @py_true : buffer
-    %py_false = global.load @py_false : buffer
-    %py_none = global.load @py_none : buffer
     %object_type = scalar.constant 2 : i64
     %array_type = scalar.constant 3 : i64
     %py_head = func.call @join4(%opener, %name, %paren_open, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
@@ -1014,13 +1008,8 @@ func.def public @render_tool(%name: buffer, %arguments: buffer, %ordinal: i64) -
           %spaced = func.call @json_spaced(%raw) : (buffer) -> (buffer)
           scf.yield %spaced : buffer
         } else {
-          %is_true = func.call @equal(%raw, %json_true) : (buffer, buffer) -> (i1)
-          %is_false = func.call @equal(%raw, %json_false) : (buffer, buffer) -> (i1)
-          %is_null = func.call @equal(%raw, %json_null) : (buffer, buffer) -> (i1)
-          %v1 = scf.select %is_true, %py_true, %raw : buffer
-          %v2 = scf.select %is_false, %py_false, %v1 : buffer
-          %v3 = scf.select %is_null, %py_none, %v2 : buffer
-          scf.yield %v3 : buffer
+          %literal = func.call @py_literal(%raw) : (buffer) -> (buffer)
+          scf.yield %literal : buffer
         }
         scf.yield %printed : buffer
       }
@@ -1464,6 +1453,23 @@ global.rodata.def @py_true = bytes("54727565")
 global.rodata.def @py_false = bytes("46616c7365")
 
 global.rodata.def @py_none = bytes("4e6f6e65")
+
+// A JSON scalar's text as Python's str() prints it: true/false/null as True/False/None, anything else unchanged.
+func.def @py_literal(%raw: buffer) -> (buffer) {
+  %json_true = global.load @json_true : buffer
+  %json_false = global.load @json_false : buffer
+  %json_null = global.load @json_null : buffer
+  %py_true = global.load @py_true : buffer
+  %py_false = global.load @py_false : buffer
+  %py_none = global.load @py_none : buffer
+  %is_true = func.call @equal(%raw, %json_true) : (buffer, buffer) -> (i1)
+  %is_false = func.call @equal(%raw, %json_false) : (buffer, buffer) -> (i1)
+  %is_null = func.call @equal(%raw, %json_null) : (buffer, buffer) -> (i1)
+  %v1 = scf.select %is_true, %py_true, %raw : buffer
+  %v2 = scf.select %is_false, %py_false, %v1 : buffer
+  %v3 = scf.select %is_null, %py_none, %v2 : buffer
+  func.return %v3 : buffer
+}
 
 // '": '
 global.rodata.def @key_value_gap = bytes("223a20")
