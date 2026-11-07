@@ -122,7 +122,11 @@ if A("rope.scaling.type") == "yarn" and (A("rope.scaling.factor") or 1.0) > 1.0:
     cfg["rope_scaling"] = {"type": "yarn", "factor": _f, "orig_ctx": A("rope.scaling.original_context_length"),
                            "beta_fast": float(A("rope.scaling.yarn_beta_fast", 32.0) or 32.0),
                            "beta_slow": float(A("rope.scaling.yarn_beta_slow", 1.0) or 1.0), "attn_factor": _af}
-    print("rope scaling:", cfg["rope_scaling"])
+    # architectures whose sliding layers rotate without it (llama.cpp src/models/<arch>.cpp get_rope_params: ext_factor 0,
+    # attn_factor 1 there): gen_llm.py's g_qk_rope_store_swa
+    if arch in ("mellum",) and cfg["sliding_layers"]:
+        cfg["rope_scaling_swa"] = "none"
+    print("rope scaling:", cfg["rope_scaling"], "(not on the sliding layers)" if cfg.get("rope_scaling_swa") else "")
 # The FFN's pre-norm stored as post_attention_norm (gpt-oss: attn_post_norm normalizes ffn_inp; no ffn_norm and no
 # Gemma-style post_ffw_norm): it is the FFN norm, not a post-attention norm.
 if ("blk.0.ffn_norm.weight" not in tensors and "blk.0.post_attention_norm.weight" in tensors
@@ -242,6 +246,7 @@ cfg["attn_sinks"] = "blk.0.attn_sinks.weight" in tensors
 # experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
 # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
 MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
+                "mellum": {"gating": 1, "norm_weights": True},
                 "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False},
                 # gpt-oss: SOFTMAX_WEIGHT (top-k of the biased logits, softmax over the k), LLM_FFN_SWIGLU_OAI_MOE
                 "gpt-oss": {"gating": 3, "norm_weights": False, "act": "swiglu_oai", "swiglu_alpha": 1.702, "swiglu_limit": 7.0}}

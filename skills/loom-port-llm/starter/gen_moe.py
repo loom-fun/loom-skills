@@ -14,9 +14,9 @@ g_moe_combine      y[t, H]   = sg[t] * y[t, :] + sum_k wts[t, k] ys[t*KU + k, :]
 """
 import os
 import re
-FMT = {"q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "mxfp4": 17}
+FMT = {"q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "mxfp4": 17, "q5_0": 22}
 ROUTE_TR = int(__import__("os").environ.get("ROUTE_TR", "0"))   # router tokens per workgroup (0: largest of 1/2/4/8 whose LDS fits 48 KiB)
-SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "mxfp4": 32}
+SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "mxfp4": 32, "q5_0": 32}
 GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)", 3: "logit"}   # llama.cpp's expert_gating_func values
 # gating 3 (SOFTMAX_WEIGHT): `bias` is the router's own bias (ffn_gate_inp.bias, added to the logits before the top-k)
 # and the k weights are a softmax over the k picked logits.
