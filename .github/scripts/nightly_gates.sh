@@ -131,7 +131,9 @@ if [ "${PERF:-0}" = 1 ]; then
   curl -sf "$url/v1/models" >/dev/null || "$SV/serve.sh" "nightly-$slug" "$LOOM_PORT" amdgpu "$mem" "$pkg/model.json" | tail -1
   model=$("$T" -c "import json; print(json.load(open('$pkg/llm_config.json'))['model_id'])")
   (cd "$out" && rm -f perf.jsonl c4.jsonl
-   # two runs: perf.py measures the short rows, or with --long the long ones (8k-32k prefill, 32k decode)
+   # two runs: perf.py measures the short rows, or with --long the long ones (8k-32k prefill, 32k decode). Each first
+   # sends an untimed warm-up of its first timed request's shape (perf.py, as in a local session: both sides measure
+   # alike) and records each decode row's drafted-token acceptance, as c4_steady.py does for 4 streams (the roofline's)
    "$T" "$B/perf.py" "$url" nightly --model "$model" --no-campaign --log perf.jsonl | tail -1
    "$T" "$B/perf.py" "$url" nightly --model "$model" --no-campaign --long --log perf.jsonl | tail -1
    for i in 1 2 3; do "$T" "$B/c4_steady.py" "$url" 4 --model "$model" --log c4.jsonl | tail -1; done > c4_steady.txt

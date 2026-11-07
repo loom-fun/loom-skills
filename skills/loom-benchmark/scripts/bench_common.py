@@ -49,6 +49,34 @@ PROMPTS = [
 
 
 DOC_SIZES = (1000, 2000, 8000, 16000, 32000)
+DRAFT_COUNTERS = ("draft_proposed_tokens", "draft_accepted_inputs")
+
+
+def draft_counters(text):
+    """loom-serve's cumulative speculative decoding counters {draft_proposed_tokens, draft_accepted_inputs} from its
+    /metrics text ({} when it has none: no drafting, or llama-server)."""
+    vals = {}
+    for line in (text or "").splitlines():
+        for k in DRAFT_COUNTERS:
+            if f'field="{k}"' in line:
+                vals[k] = float(line.split()[-1])
+    return vals
+
+
+def server_draft_counters(url):
+    """draft_counters() of a running server's /metrics, or {} when it serves none."""
+    try:
+        r = requests.get(url + "/metrics", timeout=30)
+        return draft_counters(r.text) if r.status_code == 200 else {}
+    except requests.RequestException:
+        return {}
+
+
+def acceptance_between(before, after):
+    """Accepted / proposed drafted tokens between two draft_counters() snapshots, or None (nothing proposed)."""
+    prop = after.get("draft_proposed_tokens", 0) - before.get("draft_proposed_tokens", 0)
+    acc = after.get("draft_accepted_inputs", 0) - before.get("draft_accepted_inputs", 0)
+    return round(acc / prop, 3) if prop > 0 else None
 
 
 def perf_metrics(row):

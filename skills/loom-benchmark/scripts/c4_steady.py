@@ -1,6 +1,8 @@
 """Steady-state aggregate decode throughput with N concurrent streams: tokens
 produced by all streams inside the window where every stream is decoding
 (excludes ramp-up and tail). Tokens, not streamed events: with speculative decoding one event can carry several.
+With a drafting Loom server the JSON line also gives "acceptance": accepted / proposed drafted tokens over the N
+streams (loom-serve's /metrics counters around them), the roofline's acceptance for the 4-stream row.
 
 usage: python c4_steady.py URL [N=4] [--model MODEL_ID]   (omit --model for llama.cpp)
 Loom needs execution.rows >= N in the package preset; llama-server needs -np N.
@@ -10,7 +12,7 @@ import json
 import threading
 import time
 
-from bench_common import stream, thinking_extra
+from bench_common import acceptance_between, server_draft_counters, stream, thinking_extra
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -35,16 +37,19 @@ def run(i):
 
 
 stream(a.url, a.model, [{"role": "user", "content": "Say hi."}], 8)  # warm-up
+before = server_draft_counters(a.url) if a.model else {}
 ts = [threading.Thread(target=run, args=(i,)) for i in range(a.n)]
 [t.start() for t in ts]
 [t.join() for t in ts]
+acc = acceptance_between(before, server_draft_counters(a.url)) if before else None
 start = max(e[0] for e in events)
 end = min(e[-1] for e in events)
 # A streamed event can carry several tokens (a drafting server commits up to depth + 1 per step): count tokens, each
 # stream's events weighted by its tokens per event (usage.completion_tokens / events), not events.
 count = sum(sum(1 for x in e if start <= x <= end) * (tokens[i] / max(1, len(e))) for i, e in enumerate(events))
 print(json.dumps({"streams": a.n, "thinking": a.thinking, "window_s": round(end - start, 2), "agg_tps": round(count / (end - start), 1),
-                  "per_stream_events": [len(e) for e in events], "per_stream_tokens": tokens}))
+                  "per_stream_events": [len(e) for e in events], "per_stream_tokens": tokens,
+                  **({"acceptance": acc} if acc is not None else {})}))
 if a.label and a.model:  # Loom run: track it in the optimization campaign
     from campaign import log_metrics
     log_metrics({"c4_steady": round(count / (end - start), 1)}, a.label, a.reverted)

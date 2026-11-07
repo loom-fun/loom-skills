@@ -9,6 +9,14 @@ prefix cache can help):
                     median (and min/max) of --repeats runs; single samples vary up to 2x
   decode_tps_2k     256-token generation after a 2k document (decode with KV in use)
   --long: prefill 8k/16k/32k documents and decode_tps_32k (128 tokens after 32k)
+  acceptance        Loom with speculative decoding: per decode metric, accepted / proposed drafted tokens of that
+                    very request (loom-serve's /metrics counters before and after it), so the roofline of a drafted
+                    row uses the acceptance of the text it decoded (make_info.py roofline), not the spec gate's
+Warm-up (untimed, logged as warmup_decode_tps): the timed decode request itself with another nonce, so every path
+the first timed request takes (prefill, decode, drafting, lazily loaded weights, first-use kernels) has run once.
+A trivial "Say hi." left the short-prompt decode paying first-use costs (DevLab sweeps measured it 51-60 % below
+the local session while decode at 2k agreed). Both engines and every caller (qualify, finalize, nightly, devlab_perf)
+get the same warm-up.
 Loom numbers are client-side (streaming TTFT and token arrival). llama.cpp
 numbers come from its server-side `timings` (excludes HTTP and tokenization),
 which slightly favours llama.cpp.
@@ -25,7 +33,7 @@ import time
 
 import requests
 
-from bench_common import doc, perf_metrics, stream, thinking_extra
+from bench_common import acceptance_between, doc, perf_metrics, server_draft_counters, stream, thinking_extra
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -60,26 +68,41 @@ def run(content, max_tokens):
     return t["prompt_n"], t["prompt_per_second"], t["predicted_per_second"], d["usage"]["completion_tokens"]
 
 
-run("Say hi.", 8)  # warm-up: the first request after a restart loads weights lazily
+ESSAY = "Write a detailed 300-word essay about the history of the printing press."
 out = {"label": a.label, "kind": a.kind, "time": time.strftime("%Y-%m-%d %H:%M:%S"), "thinking": a.thinking}
 nonce = str(time.time())
+# warm-up (untimed): the first timed request's own shape, another nonce (no prefix-cache hit on the timed prompt)
+out["warmup_decode_tps"] = round(run(f"[warm-up {nonce}] " + ESSAY, 300)[2], 2)
+
+
+def decode(key, content, max_tokens):
+    """A timed decode request -> its decode tok/s; out["acceptance"][key]: its drafted-token acceptance (Loom)."""
+    before = server_draft_counters(U) if a.kind == "loom" else {}
+    _, _, dtps, _ = run(content, max_tokens)
+    if before:
+        acc = acceptance_between(before, server_draft_counters(U))
+        if acc is not None:
+            out.setdefault("acceptance", {})[key] = acc
+    return dtps
+
+
 if a.long:
     out["prefill_long"] = []
     for n in (8000, 16000, 32000):
         pt, pps, _, _ = run(f"[{nonce} {n}] Summarize this documentation in one sentence.\n\n" + doc(n), 4)
         out["prefill_long"].append({"prompt_tokens": pt, "prefill_tps": round(pps, 1)})
         print(out["prefill_long"][-1], flush=True)
-    _, _, dtps, _ = run(f"[{nonce} ctx32] Write a long, detailed essay discussing this documentation.\n\n" + doc(32000), 128)
+    dtps = decode("decode_tps_32k", f"[{nonce} ctx32] Write a long, detailed essay discussing this documentation.\n\n" + doc(32000), 128)
     out["decode_tps_32k"] = round(dtps, 2)
 else:
-    _, _, out["decode_tps"], _ = run("Write a detailed 300-word essay about the history of the printing press.", 300)
+    out["decode_tps"] = decode("decode_tps", ESSAY, 300)
     out["prefill"] = []
     for n in (1000, 2000):  # short prefills are noisy (scheduling, clocks): median of a.repeats fresh-nonce runs
         samples = [run(f"[{nonce} {i} {random.random()}] Summarize this documentation in one sentence.\n\n" + doc(n), 4) for i in range(a.repeats)]
         pps = sorted(x[1] for x in samples)
         out["prefill"].append({"prompt_tokens": samples[0][0], "prefill_tps": round(pps[len(pps) // 2], 1),
                                "min": round(pps[0], 1), "max": round(pps[-1], 1), "n": len(pps)})
-    _, _, out["decode_tps_2k"], _ = run(f"[{nonce} ctx] Write a long, detailed essay discussing this documentation.\n\n" + doc(2000), 256)
+    out["decode_tps_2k"] = decode("decode_tps_2k", f"[{nonce} ctx] Write a long, detailed essay discussing this documentation.\n\n" + doc(2000), 256)
 for k, v in list(out.items()):
     if isinstance(v, float):
         out[k] = round(v, 2)
