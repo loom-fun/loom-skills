@@ -1,15 +1,14 @@
 {
- "_comment": "Near-tie bar with llama.cpp's own noise: published cards as is, and one rebuilt with injected bugs; the compare gate must still FAIL on each bug.",
- "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
- "memory_bytes": 5000000000,
+ "_comment": "build.py's memory_bytes counts the largest program's prefill scratch: the three hybrid MoE cards rebuilt from this branch, a full-context request on a fresh server at the value build.py now prints and at the card's published one (full gates passed on the first card at 48e9 in run 42343748198).",
+ "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
+ "memory_bytes": 48000000000,
  "kit": null,
  "llamacpp": "b1369",
  "variants": [
-  {"name": "q05-rebuilt", "build": {}, "steps": ["gates:fast"]},
-  {"name": "q05-bug-rope-base", "build": {}, "config": {"rope_theta": 10000.0}, "steps": ["gates:fast"]},
-  {"name": "q05-bug-rope-base-half", "build": {}, "config": {"rope_theta": 500000.0}, "steps": ["gates:fast"]},
-  {"name": "q05-bug-no-v-bias", "build": {}, "config": {"attn_bias": ["q", "k"]}, "steps": ["gates:fast"]},
-  {"name": "q05-bug-no-q-bias", "build": {}, "config": {"attn_bias": ["k", "v"]}, "steps": ["gates:fast"]},
-  {"name": "e4b-card", "card": "loom-fun/unsloth-gemma-4-E4B-it-loom", "memory_bytes": 31000000000, "kit": "gemma4", "steps": ["gates:fast"]}
+  {"name": "q36-rebuilt-admit", "build": {}, "steps": ["admit:260096"]},
+  {"name": "q35-rebuilt-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 49000000000, "build": {}, "steps": ["admit:260096"]},
+  {"name": "q35-card-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 42000000000, "steps": ["admit:260096"]},
+  {"name": "orn-rebuilt-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 36000000000, "build": {}, "steps": ["admit:260096"]},
+  {"name": "orn-card-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 33000000000, "steps": ["admit:260096"]}
  ]
 }
