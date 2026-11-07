@@ -909,6 +909,10 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and c
 if cfg.get("moe"):
     M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ.get("MOE_R", "8"))
     SHG, ACC = bool(M.get("shared_gate")), bool(M.get("shared_ffn"))
+    # Gemma 4: gate and up fused in one tensor (each expert's gate rows, then its up rows), GEGLU, and a per-expert
+    # output scale folded into the combine weights (g_moe_wscale, gemma4 example)
+    FUSED, DSC, GELU_ = bool(M.get("gate_up_fused")), bool(M.get("down_scale")), cfg.get("ffn_act") == "gelu"
+    GU = "ffn_gate_up_exps.weight" if FUSED else "ffn_gate_exps.weight"
     def deq3(name):
         tt = T[name]; return dequantize(np.asarray(tt.data), tt.tensor_type).reshape(E_, int(tt.shape[1]), int(tt.shape[0]))
     def f32w(name):   # f32 or bf16 tensor -> (f32 values, the raw array the kernel reads)
@@ -941,22 +945,29 @@ if cfg.get("moe"):
         y = np.zeros((len(hx), H))
         for i in range(len(hx)):
             for k in range(KU):
-                e = ids[i, k]; g = Wg[e] @ hx[i]; u = Wu[e] @ hx[i]; a = g / (1 + np.exp(-g)) * u
+                e = ids[i, k]; g = Wg[e] @ hx[i]; u = Wu[e] @ hx[i]
+                a = (g / (1 + np.exp(-1.5957691216057308 * (g + 0.044715 * g ** 3))) if GELU_ else g / (1 + np.exp(-g))) * u
                 y[i] += wts[i, k] * (Wd[e] @ a)
         return y
     done = set()
     for li in range(M["leading_dense"], cfg["layers"]):
-        b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower(); fg = T[b + "ffn_gate_exps.weight"].tensor_type.name.lower()
+        b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower(); fg = T[b + GU].tensor_type.name.lower()
         if fd in done: continue
         done.add(fd)
         Wr, wr_raw = f32w(b + "ffn_gate_inp.weight"); Wr = Wr.reshape(E_, H)
         bias = np.asarray(T[b + "exp_probs_b.bias"].data, np.float32) if M["probs_bias"] else np.zeros(E_, np.float32)
-        Wg, Wu, Wd = deq3(b + "ffn_gate_exps.weight"), deq3(b + "ffn_up_exps.weight"), deq3(b + "ffn_down_exps.weight")
+        if FUSED:
+            Wgu = deq3(b + GU); Wg, Wu = Wgu[:, :FE], Wgu[:, FE:]
+        else:
+            Wg, Wu = deq3(b + "ffn_gate_exps.weight"), deq3(b + "ffn_up_exps.weight")
+        Wd = deq3(b + "ffn_down_exps.weight")
+        dsc = np.asarray(T[b + "ffn_down_exps.scale"].data, np.float32).reshape(-1) if DSC else np.ones(E_, np.float32)
+        gsfx = "_fused" if FUSED else ""
         if SHG:
             Wsg, wsg_raw = f32w(b + "ffn_gate_inp_shexp.weight"); sty = T[b + "ffn_gate_inp_shexp.weight"].tensor_type.name.lower()
         tag = f"m{li}"
-        for n, a in [(tag + "_wr", wr_raw), (tag + "_b", bias), (tag + "_wg", raw(b + "ffn_gate_exps.weight")),
-                     (tag + "_wu", raw(b + "ffn_up_exps.weight")), (tag + "_wd", raw(b + "ffn_down_exps.weight"))] + ([(tag + "_wsg", wsg_raw)] if SHG else []):
+        for n, a in [(tag + "_wr", wr_raw), (tag + "_b", bias), (tag + "_wg", raw(b + GU)), (tag + "_dsc", dsc),
+                     (tag + "_wu", raw(b + ("ffn_gate_up_exps.weight" if FUSED else "ffn_up_exps.weight"))), (tag + "_wd", raw(b + "ffn_down_exps.weight"))] + ([(tag + "_wsg", wsg_raw)] if SHG else []):
             save(n, a)
         def chain(t, sfx):
             """Inputs + reference of a t-token chain: h, y0 (shared output in y), ids/wts, the expected y."""
@@ -964,14 +975,16 @@ if cfg.get("moe"):
             ids, wts, rel = route_ref(hx, Wr, bias)
             y0 = (rng.standard_normal((t, H)) * 0.1).astype(np.float32) if ACC else np.zeros((t, H), np.float32)
             sgv = 1 / (1 + np.exp(-(hx.astype(np.float64) @ Wsg.astype(np.float64)))) if SHG else np.ones(t)
-            yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts, Wg, Wu, Wd)
+            wts_s = wts * dsc[ids]   # the combine weights after g_moe_wscale (DSC)
+            yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts_s, Wg, Wu, Wd)
             for n, a in [("_h", hx), ("_y0", y0), ("_ids", ids), ("_wts", wts.astype(np.float32)), ("_y", yref.astype(np.float32)),
+                         ("_wts_s", wts_s.astype(np.float32)),
                          ("_sg", sgv.astype(np.float32))]:
                 save(tag + sfx + n, a)
             print(f"moe test layer {li}{sfx}: t={t} ids[0] {ids[0].tolist()} min relative score gap k/k+1 {rel.min():.3g}")
             return ids, wts
         wr_t, wsg_t = ty(wr_raw), (ty(wsg_raw) if SHG else "")
-        gt, dt_ = ty(raw(b + "ffn_gate_exps.weight")), ty(raw(b + "ffn_down_exps.weight"))
+        gt, dt_ = ty(raw(b + GU)), ty(raw(b + "ffn_down_exps.weight"))
         def common(t, sfx):
             return f"""  %t = check.literal value({t}) : index
   %ta = check.literal value({t * KU}) : index
@@ -982,6 +995,8 @@ if cfg.get("moe"):
   %b = check.file.read.npy path("{tag}_b.npy") : tensor<{E_}xf32>
   %eids = check.file.read.npy path("{tag}{sfx}_ids.npy") : tensor<{t}x{KU}xi32>
   %ewts = check.file.read.npy path("{tag}{sfx}_wts.npy") : tensor<{t}x{KU}xf32>
+  %ewts_s = check.file.read.npy path("{tag}{sfx}_wts_s.npy") : tensor<{t}x{KU}xf32>
+  %dsc = check.file.read.npy path("{tag}_dsc.npy") : tensor<{E_}xf32>
   %wg = check.file.read.npy path("{tag}_wg.npy") : {gt}
   %wu = check.file.read.npy path("{tag}_wu.npy") : {gt}
   %wd = check.file.read.npy path("{tag}_wd.npy") : {dt_}
@@ -1017,13 +1032,14 @@ if cfg.get("moe"):
   kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids_l, %wts_l, %info_l) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
   check.expect.equal actual(%ids_l) expected(%eids_l) : tensor<{t}x{KU}xi32>
   check.expect.close actual(%wts_l) expected(%ewts_l) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
-  kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {gt}, tensor<{t * KU}x{FE}xf32>)
+""" + (f"""  kernel.launch @g_moe_wscale[%t](%t, %ids, %wts, %dsc) : [index](index, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{E_}xf32>)
+""" if DSC else "") + f"""  kernel.launch @g_moe_gu_{fg}{gsfx}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {gt}, tensor<{t * KU}x{FE}xf32>)
   kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wd, %ys) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t * KU}x{FE}xf32>, {dt_}, tensor<{t * KU}x{H}xf32>)
   kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {SGA}%y) : [index](index, tensor<{t * KU}x{H}xf32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
   check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
   check.expect.equal actual(%ids_tr) expected(%eids) : tensor<{t}x{KU}xi32>
   check.expect.close actual(%wts_tr) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
-  check.expect.close actual(%wts) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
+  check.expect.close actual(%wts) expected(%ewts_s) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
   check.expect.close actual(%y) expected(%ey) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{t}x{H}xf32>
   check.return
 }}
@@ -1048,13 +1064,14 @@ if cfg.get("moe"):
   %ys_sorted = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
   kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x2xf32>, tensor<{t}x{H}xf16>)
   kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids, %wts, %info) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
-  kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, tensor<{t}x4xi32>, tensor<{t}x{KU}xi32>, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{ta}xi32>)
-  kernel.launch @g_moe_ggu_{fg}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wg, %wu, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {gt}, tensor<{mr}x{FE}xf32>)
+""" + (f"""  kernel.launch @g_moe_wscale[%t](%t, %ids, %wts, %dsc) : [index](index, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{E_}xf32>)
+""" if DSC else "") + f"""  kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, tensor<{t}x4xi32>, tensor<{t}x{KU}xi32>, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{ta}xi32>)
+  kernel.launch @g_moe_ggu_{fg}{gsfx}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wg, %wu, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {gt}, tensor<{mr}x{FE}xf32>)
   kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, tensor<{mr}x{FE}xf32>, tensor<{mr}x2xf32>, tensor<{mr}x{FE}xf16>, tensor<{mt}x2xi32>)
   kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wd, %ys_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE}xf16>, tensor<{mr}x2xf32>, {dt_}, tensor<{mr}x{H}xf32>)
   kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {SGA}%y) : [index](index, index, tensor<{mr}x{H}xf32>, tensor<{ta}xi32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
   check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
-  check.expect.close actual(%wts) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
+  check.expect.close actual(%wts) expected(%ewts_s) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
   check.expect.close actual(%y) expected(%ey) atol(1.0e-2) rtol(2.0e-2) nan(different) : tensor<{t}x{H}xf32>
   check.return
 }}

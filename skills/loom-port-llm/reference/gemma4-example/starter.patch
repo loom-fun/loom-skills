@@ -970,7 +970,188 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -3694,7 +3912,7 @@
+@@ -3405,8 +3623,9 @@
+     rty = TENS[f"blk.{MOE['leading_dense']}.ffn_gate_inp.weight"]["type"]
+     a = (H, MOE["experts"], MOE["used"], MOE["gating"], MOE["norm_weights"], MOE["probs_bias"], rty)
+     parts = [GM.route(*a), GM.route_prefill_live(*a), GM.row_scale_tiles(row_scale)]
++    act = (lambda t: t.replace("    %silu = scalar.siluf<afn> %t0 : f32\n", gelu_scalar("silu", "t0", "    ") + "\n")) if GELU else (lambda t: t)
+     for fmt, K, N, mode in sorted(USED_MOE):
+-        parts.append(GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode))
++        parts.append(act(GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode, fused=MOE_FUSED and mode == "gu")))
+     comb, comb_s = GM.combine(H, MOE["used"], acc=bool(FS)), GM.combine_sorted(H, MOE["used"], acc=bool(FS))
+     if SHGATE:
+         comb, comb_s = GM.shared_gated(comb), GM.shared_gated(comb_s)
+@@ -3415,10 +3634,168 @@
+                          .replace('export("g_moe_shared_gate")', f'export("g_moe_shared_gate_{sty}")'))
+     parts += [comb, GM.bucket(MOE["experts"], MOE["used"]), comb_s]
+     for fmt, K, N, mode in sorted(USED_MOE):
+-        parts.append(GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn))
++        gg = GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn,
++                             fused=MOE_FUSED and mode == "gu")
++        parts.append(gelu_vectors(gg) if GELU else gg)
++    if MOE_GEMMA:
++        parts.append(gemma_moe_kernels())
+     return "".join(parts)
+ 
+ 
++# Gemma 4 MoE layers (26B-A4B; llama.cpp gemma4.cpp): the dense FFN (ffn_norm -> GEGLU -> post_ffw_norm_1) runs beside
++# 128 experts (pre_ffw_norm_2 -> top-8 GEGLU experts, ffn_gate_up_exps fused, per-expert ffn_down_exps.scale ->
++# post_ffw_norm_2); the router reads rmsnorm(x) * ffn_gate_inp.scale / sqrt(hidden), x the post-attention residual;
++# the two branches' sum takes post_ffw_norm and the layer scale.
++MOE_FUSED = bool((MOE or {}).get("gate_up_fused"))
++MOE_GEMMA = bool(MOE) and CFG.get("arch") == "gemma4"
++MOE_DSCALE = bool((MOE or {}).get("down_scale"))
++
++
++def gemma_moe_kernels():
++    """g_moe_inputs: h2 = rmsnorm(x) * w_pre2, hr = rmsnorm(x) * w_router / sqrt(H) (one reduction);
++    g_moe_wscale: wts[t, k] *= scale[ids[t, k]];  g_add_two_norms: y = rmsnorm(y) * w1 + rmsnorm(ym) * w2."""
++    KU, E = MOE["used"], MOE["experts"]
++    head = lambda name, args: f"""
++kernel.def export("{name}") @{name}(%tokens: index) {{
++  %c1 = index.constant 1 : index
++  %c256 = index.constant 256 : index
++  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
++}} launch(%tokens_arg: index, {args}) {{
++  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
++  %token_id = kernel.workgroup.id<x> : index
++  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
++  %lane_id = kernel.workitem.id<x> : index
++  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
++  %zero = index.constant 0 : offset
++  %c0 = index.constant 0 : index
++  %zero_f = scalar.constant 0.0 : f32
++  %zero32 = vector.constant 0.0 : vector<32xf32>
++  %count = scalar.constant {float(H)} : f32
++  %groups = index.constant {HG} : index
++  %active = index.cmp ult, %lane, %groups : index
++"""
++    def load(buf, out):
++        return f"""  %{out}_view = buffer.view %{buf}[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
++  %{out} = scf.if %active -> (vector<32xf32>) {{
++    %bl = index.assume %lane [range(%lane, 0, {HG - 1})] : index
++    %v = vector.load %{out}_view[%token, %bl, %c0] : view<[%tokens]x{HG}x32xf32> -> vector<32xf32>
++    scf.yield %v : vector<32xf32>
++  }} else {{
++    scf.yield %zero32 : vector<32xf32>
++  }}
++"""
++    def inv(v, eps, out):
++        return f"""  %{out}_sq = vector.mulf %{v}, %{v} : vector<32xf32>
++  %{out}_local = vector.reduce<addf> %{out}_sq, %zero_f : vector<32xf32>, f32
++  %{out}_sum = kernel.workgroup.reduce<addf> %{out}_local : f32
++  %{out}_mean = scalar.divf %{out}_sum, %count : f32
++  %{out}_eps = scalar.constant {eps} : f32
++  %{out}_stable = scalar.addf %{out}_mean, %{out}_eps : f32
++  %{out}_inv = scalar.rsqrtf %{out}_stable : f32
++  %{out} = vector.splat %{out}_inv : vector<32xf32>
++"""
++    wv = lambda w: f"""    %{w}_view = buffer.view %{w}[%zero] : buffer -> view<{HG}x32xf32>
++    %{w}_v = vector.load %{w}_view[%bl, %c0] : view<{HG}x32xf32> -> vector<32xf32>
++"""
++    store = lambda val, buf: f"""    %{buf}_out = buffer.view %{buf}[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
++    vector.store %{val}, %{buf}_out[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{HG}x32xf32>
++"""
++    t = [head("g_moe_inputs", "%x: buffer, %w_pre: buffer, %w_router: buffer, %h2: buffer, %hr: buffer") + load("x", "xv")
++         + inv("xv", EPS, "xi") + f"""  scf.if %active {{
++    %bl = index.assume %lane [range(%lane, 0, {HG - 1})] : index
++""" + wv("w_pre") + wv("w_router") + f"""    %xn = vector.mulf %xv, %xi : vector<32xf32>
++    %h2v = vector.mulf %xn, %w_pre_v : vector<32xf32>
++    %rs = scalar.constant {1 / math.sqrt(H)!r} : f32
++    %rsv = vector.splat %rs : vector<32xf32>
++    %xr = vector.mulf %xn, %rsv : vector<32xf32>
++    %hrv = vector.mulf %xr, %w_router_v : vector<32xf32>
++""" + store("h2v", "h2") + store("hrv", "hr") + "  }\n  kernel.return\n}\n"]
++    t.append(head("g_add_two_norms", "%y: buffer, %w1: buffer, %ym: buffer, %w2: buffer") + load("y", "yv") + load("ym", "mv")
++             + inv("yv", POST_EPS, "yi") + inv("mv", POST_EPS, "mi") + f"""  scf.if %active {{
++    %bl = index.assume %lane [range(%lane, 0, {HG - 1})] : index
++""" + wv("w1") + wv("w2") + """    %yn = vector.mulf %yv, %yi : vector<32xf32>
++    %ya = vector.mulf %yn, %w1_v : vector<32xf32>
++    %mn = vector.mulf %mv, %mi : vector<32xf32>
++    %sum = vector.fmaf %mn, %w2_v, %ya : vector<32xf32>
++""" + store("sum", "y") + "  }\n  kernel.return\n}\n")
++    t.append(f"""
++// wts[t, k] *= scale[ids[t, k]]: the per-expert output scale (ffn_down_exps.scale) folded into the combine weights
++kernel.def export("g_moe_wscale") @g_moe_wscale(%tokens: index) {{
++  %c1 = index.constant 1 : index
++  %c32 = index.constant 32 : index
++  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
++}} launch(%tokens_arg: index, %ids: buffer, %wts: buffer, %scale: buffer) {{
++  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
++  %token_id = kernel.workgroup.id<x> : index
++  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
++  %lane_id = kernel.workitem.id<x> : index
++  %ku = index.constant {KU} : index
++  %on = index.cmp ult, %lane_id, %ku : index
++  scf.if %on {{
++    %k = index.assume %lane_id [range(%lane_id, 0, {KU - 1})] : index
++    %zero = index.constant 0 : offset
++    %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]x{KU}xi32>
++    %wts_view = buffer.view %wts[%zero] : buffer -> view<[%tokens]x{KU}xf32>
++    %s_view = buffer.view %scale[%zero] : buffer -> view<{E}xf32>
++    %e32 = view.load %ids_view[%token, %k] : view<[%tokens]x{KU}xi32> -> i32
++    %c0_i32 = scalar.constant 0 : i32
++    %cE1 = scalar.constant {E - 1} : i32
++    %elo = scalar.maxsi %e32, %c0_i32 : i32
++    %ehi = scalar.minsi %elo, %cE1 : i32
++    %eb = scalar.assume %ehi [range(%ehi, 0, {E - 1})] : i32
++    %e = index.cast %eb : i32 to index
++    %s = view.load %s_view[%e] : view<{E}xf32> -> f32
++    %w = view.load %wts_view[%token, %k] : view<[%tokens]x{KU}xf32> -> f32
++    %ws = scalar.mulf %w, %s : f32
++    view.store %ws, %wts_view[%token, %k] : f32, view<[%tokens]x{KU}xf32>
++  }}
++  kernel.return
++}}
++""")
++    return "".join(t)
++
++
++def gemma_moe_layer(i, b, nm, sz):
++    """Program text of layer i's MoE branch, after the dense FFN wrote %y; leaves the branches' normed sum in %y."""
++    E, KU, FE = MOE["experts"], MOE["used"], MOE["ffn"]
++    gu, dn = b + ("ffn_gate_up_exps.weight" if MOE_FUSED else "ffn_gate_exps.weight"), b + "ffn_down_exps.weight"
++    assert MOE_FUSED, "gemma4 MoE: separate ffn_gate_exps / ffn_up_exps are not wired (the 26B-A4B fuses them)"
++    fg, fd = fmt_of(gu), fmt_of(dn)
++    sg, sd = tensor_bytes(gu), tensor_bytes(dn)
++    USED_MOE.add((fg, H, FE, "gu")); USED_MOE.add((fd, FE, H, "dn"))
++    R, rty = MOE_R, TENS[nm("ffn_gate_inp")]["type"]
++    gk, dk = f"{fg}_fused_k{H}", f"{fd}_k{FE}"
++    hv = f"view<{H}xf32>"
++    T = [f'  %pre2_{i} = command.parameter %weights, "{nm("pre_ffw_norm_2")}" : {hv}\n'
++         f'  %gis_{i} = command.parameter %weights, "{b}ffn_gate_inp.scale" : {hv}\n'
++         f'  %pn1_{i} = command.parameter %weights, "{nm("post_ffw_norm_1")}" : {hv}\n'
++         f'  %pn2_{i} = command.parameter %weights, "{nm("post_ffw_norm_2")}" : {hv}\n'
++         f'  %router_{i} = command.parameter %weights, "{nm("ffn_gate_inp")}" : view<{E * H}x{rty}>\n'
++         f'  %wgu_{i} = command.parameter %weights, "{gu}" : view<{sg}xi8>\n'
++         f'  %wde_{i} = command.parameter %weights, "{dn}" : view<{sd}xi8>\n'
++         + (f'  %dsc_{i} = command.parameter %weights, "{b}ffn_down_exps.scale" : view<{E}xf32>\n' if MOE_DSCALE else "")
++         + f"  kernel.launch @g_moe_inputs[%t](%t, %x, %pre2_{i}, %gis_{i}, %h2, %hr) : [index](index, buffer, {hv}, {hv}, buffer, buffer)\n"]
++    wsc = (f"    kernel.launch @g_moe_wscale[%t](%t, %ids, %wts, %dsc_{i}) : [index](index, buffer, buffer, view<{E}xf32>)\n"
++           if MOE_DSCALE else "")
++    T.append(f"""  scf.if %gemm {{
++    kernel.launch @g_moe_route_tr_live[%t](%t, %hr, %router_{i}, %wts, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, buffer, buffer, buffer, buffer)
++{wsc}    kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
++    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h2, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)
++    kernel.launch @g_moe_ggu_{gk}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wgu_{i}, %wgu_{i}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{sg}xi8>, buffer)
++    kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
++    kernel.launch @g_moe_gdn_{dk}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>, buffer)
++    kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, %ym) : [index](index, index, buffer, buffer, buffer, buffer)
++  }} else {{
++    kernel.launch @g_moe_route[%t](%t, %hr, %router_{i}, %wts, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, buffer, buffer, buffer)
++{wsc}    kernel.launch @g_moe_gu_{fg}_fused_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h2, %wgu_{i}, %wgu_{i}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{sg}xi8>, buffer)
++    kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wde_{i}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>, buffer)
++    kernel.launch @g_moe_combine[%t](%t, %ys, %wts, %ym) : [index](index, buffer, buffer, buffer)
++  }}
++  kernel.launch @g_add_two_norms[%t](%t, %y, %pn1_{i}, %ym, %pn2_{i}) : [index](index, buffer, {hv}, buffer, {hv})
++""")
++    return "".join(T)
++
++
+ def gdn_layer(i, b, nm, sz, par):
+     """Gated delta-net token mixer of layer i: h -> o (VD wide), then o16 for the output GEMM."""
+     g = GDN
+@@ -3694,7 +4071,7 @@
  def model():
      """Command program: embed, then a statically unrolled layer loop (each
      layer's tensor formats come from the GGUF), then the argmax head."""
@@ -979,7 +1160,7 @@
      sliding = set(CFG.get("sliding_layers", []))
      nope = set(CFG.get("nope_layers", []))
      head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
-@@ -3720,7 +3938,7 @@
+@@ -3720,7 +4097,7 @@
    %nH = index.constant {H} : index
    %nFF = index.constant {FF} : index
  """ + ("" if FF_UNIFORM else "".join(f"  %nFF{w} = index.constant {w} : index\n" for w in sorted(set(FFL)))) + f"""  %nQ = index.constant {QD} : index
@@ -988,7 +1169,7 @@
    %zero_i32 = scalar.constant 0 : i32
    %one_i32 = scalar.constant 1 : i32
    %row_bytes = index.constant {H * 4} : offset
-@@ -3787,7 +4005,20 @@
+@@ -3787,7 +4164,23 @@
    %h16 = buffer.alloca<global> align(256) %h16_size : buffer
    %o16 = buffer.alloca<global> align(256) %o16_size : buffer
    %f16 = buffer.alloca<global> align(256) %f16_size : buffer
@@ -1006,10 +1187,13 @@
 +  %pp = buffer.alloca<global> align(256) %pp_size : buffer
 +  %ple = buffer.alloca<global> align(256) %pp_size : buffer
 +""")
++    if MOE_GEMMA:   # the experts' input, the router's input and the experts' combined output (gemma_moe_layer)
++        L_.append("  %h2 = buffer.alloca<global> align(256) %x_size : buffer\n  %hr = buffer.alloca<global> align(256) %x_size : buffer\n"
++                  "  %ym = buffer.alloca<global> align(256) %x_size : buffer\n")
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if FUSED_Q:
-@@ -3817,101 +4048,102 @@
+@@ -3817,101 +4210,104 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1166,6 +1350,8 @@
 +            T.append(f"  kernel.launch @g_silu_mul[%t](%t, {nff(i)}, %f, %fu) : [index](index, index, buffer, buffer)\n")
 +        T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {nff(i)}, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
 +        T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", nff(i), "%nH", FFL[i]) + "\n")
++        if MOE_GEMMA and i in MOE_LAYERS:   # the experts beside the dense FFN
++            T.append(gemma_moe_layer(i, b, nm, sz))
 +        if i == L - 1:
              nn = "%output_norm"
          else:
@@ -1192,7 +1378,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -3936,7 +4168,7 @@
+@@ -3936,7 +4332,7 @@
      spec_kernels = ""
      if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too
          head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
@@ -1201,7 +1387,7 @@
                        GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
                        head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
                        prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin, lin2=lin2, pair_kv=PAIR_PROJ in ("1", "kv"),
-@@ -4046,8 +4278,9 @@
+@@ -4046,8 +4442,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1213,7 +1399,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if RECUR:
-@@ -4064,13 +4297,27 @@
+@@ -4064,13 +4461,27 @@
      env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
      # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
@@ -1572,3 +1758,47 @@
    check.return
  }}
  """)
+@@ -1097,6 +1093,43 @@
+   check.return
+ }}
+ """)
++# Gemma 4 MoE layers (gen_llm.py gemma_moe_layer): the experts' and router's inputs from the residual, and the sum of
++# the normed dense and expert outputs, on a layer's real norm weights
++if cfg.get("moe") and cfg.get("arch") == "gemma4":
++    li = cfg["moe"]["leading_dense"]; b = f"blk.{li}."; t = 5
++    pe = cfg.get("post_norm_eps", eps)
++    def rms(a, e): return a / np.sqrt((a.astype(np.float64) ** 2).mean(-1, keepdims=True) + e)
++    xg = (rng.standard_normal((t, H)) * 3).astype(np.float32)
++    ya, yb = rng.standard_normal((t, H)).astype(np.float32), (rng.standard_normal((t, H)) * 0.1).astype(np.float32)
++    wp, wgs = deq(b + "pre_ffw_norm_2.weight").astype(np.float32), deq(b + "ffn_gate_inp.scale").astype(np.float32)
++    w1, w2 = deq(b + "post_ffw_norm_1.weight").astype(np.float32), deq(b + "post_ffw_norm_2.weight").astype(np.float32)
++    for n, a in [("gm_x", xg), ("gm_wp", wp), ("gm_wgs", wgs), ("gm_h2", (rms(xg, eps) * wp).astype(np.float32)),
++                 ("gm_hr", (rms(xg, eps) * wgs / np.sqrt(H)).astype(np.float32)), ("gm_ya", ya), ("gm_yb", yb), ("gm_w1", w1),
++                 ("gm_w2", w2), ("gm_sum", (rms(ya, pe) * w1 + rms(yb, pe) * w2).astype(np.float32))]:
++        save(n, a)
++    tt, hv = f"tensor<{t}x{H}xf32>", f"tensor<{H}xf32>"
++    cases.append(f"""check.case public @gemma_moe_norms {{
++  %t = check.literal value({t}) : index
++  %x = check.file.read.npy path("gm_x.npy") : {tt}
++  %wp = check.file.read.npy path("gm_wp.npy") : {hv}
++  %wgs = check.file.read.npy path("gm_wgs.npy") : {hv}
++  %eh2 = check.file.read.npy path("gm_h2.npy") : {tt}
++  %ehr = check.file.read.npy path("gm_hr.npy") : {tt}
++  %h2 = check.generate.fill value(0.0) : {tt}
++  %hr = check.generate.fill value(0.0) : {tt}
++  kernel.launch @g_moe_inputs[%t](%t, %x, %wp, %wgs, %h2, %hr) : [index](index, {tt}, {hv}, {hv}, {tt}, {tt})
++  check.expect.close actual(%h2) expected(%eh2) atol(1.0e-4) rtol(1.0e-3) nan(different) : {tt}
++  check.expect.close actual(%hr) expected(%ehr) atol(1.0e-5) rtol(1.0e-3) nan(different) : {tt}
++  %y = check.file.read.npy path("gm_ya.npy") : {tt}
++  %ym = check.file.read.npy path("gm_yb.npy") : {tt}
++  %w1 = check.file.read.npy path("gm_w1.npy") : {hv}
++  %w2 = check.file.read.npy path("gm_w2.npy") : {hv}
++  %esum = check.file.read.npy path("gm_sum.npy") : {tt}
++  kernel.launch @g_add_two_norms[%t](%t, %y, %w1, %ym, %w2) : [index](index, {tt}, {hv}, {tt}, {hv})
++  check.expect.close actual(%y) expected(%esum) atol(1.0e-4) rtol(1.0e-3) nan(different) : {tt}
++  check.return
++}}
++""")
+ import re
+ # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
+ text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)

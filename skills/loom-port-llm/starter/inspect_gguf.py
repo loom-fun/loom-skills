@@ -187,7 +187,8 @@ elif _attn and _qkv[_attn[0]]:
 # experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
 # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
 MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
-                "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False}}
+                "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False},
+                "gemma4": {"gating": 1, "norm_weights": True}}
 if A("expert_count"):
     d = MOE_DEFAULTS.get(arch, {})
     cfg["moe"] = {"experts": A("expert_count"), "used": A("expert_used_count"), "ffn": A("expert_feed_forward_length"),
@@ -201,12 +202,17 @@ if A("expert_count"):
         if any(k.endswith("ffn_gate_inp_shexp.weight") for k in tensors):
             cfg["moe"]["shared_gate"] = True
     if any(k.endswith("ffn_gate_up_exps.weight") for k in tensors):
-        print("WARNING: fused ffn_gate_up_exps tensors: the MoE kernels expect separate ffn_gate_exps / ffn_up_exps")
+        # one tensor per layer: each expert's gate rows, then its up rows (llama.cpp build_moe_ffn gate_up_exps)
+        cfg["moe"]["gate_up_fused"] = True
+        if arch != "gemma4":   # gen_moe.py takes it (fused=True); only the gemma4 example's gen_llm.py wires it so far
+            print("WARNING: fused ffn_gate_up_exps tensors: the starter's gen_llm.py wires separate ffn_gate_exps / ffn_up_exps")
+    if any(k.endswith("ffn_down_exps.scale") for k in tensors):   # per-expert output scale (build_moe_ffn down_exps_s)
+        cfg["moe"]["down_scale"] = True
     if cfg["ffn"] is None:   # no dense FFN layer: the FFN buffers hold the shared experts (or one expert row)
         cfg["ffn"] = cfg["moe"].get("shared_ffn") or cfg["moe"]["ffn"]
     print("moe:", cfg["moe"])
     import gen_moe   # the expert kernels' formats (gen_moe.FMT)
-    exps = lambda layers: {tensors[f"blk.{i}.ffn_{p}_exps.weight"]["type"] for i in layers for p in ("gate", "up", "down")
+    exps = lambda layers: {tensors[f"blk.{i}.ffn_{p}_exps.weight"]["type"] for i in layers for p in ("gate", "up", "gate_up", "down")
                            if f"blk.{i}.ffn_{p}_exps.weight" in tensors}
     bad = exps(range(cfg["moe"]["leading_dense"], L)) - set(gen_moe.FMT)
     if bad:

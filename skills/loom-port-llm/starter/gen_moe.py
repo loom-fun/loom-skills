@@ -12,9 +12,9 @@ g_moe_combine      y[t, H]   = sg[t] * y[t, :] + sum_k wts[t, k] ys[t*KU + k, :]
 """
 import os
 import re
-FMT = {"q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34}
+FMT = {"q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "q5_0": 22}
 ROUTE_TR = int(__import__("os").environ.get("ROUTE_TR", "0"))   # router tokens per workgroup (0: largest of 1/2/4/8 whose LDS fits 48 KiB)
-SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32}
+SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "q5_0": 32}
 GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)"}   # llama.cpp's expert_gating_func values
 
 
@@ -411,15 +411,16 @@ def route(H, E, KU, gating, norm, bias, wty="f32"):
     return route_decode(H, E, KU, gating, norm, bias, wty) + route_prefill(H, E, KU, gating, norm, bias, wty)
 
 
-def expert_mv(fmt, K, N, E, KU, R, mode):
-    """mode 'gu': act[a] = silu(Wg[e] x[a/KU]) * Wu[e] x[a/KU]; mode 'dn': ys[a] = Wd[e] x[a]."""
+def expert_mv(fmt, K, N, E, KU, R, mode, fused=False):
+    """mode 'gu': act[a] = silu(Wg[e] x[a/KU]) * Wu[e] x[a/KU]; mode 'dn': ys[a] = Wd[e] x[a].
+    fused ('gu'): one gate_up tensor passed as both weights, expert e's N gate rows then its N up rows."""
     groups = K // 32
     lanes = (groups + 31) // 32 * 32
     waves = lanes // 32
     rb = row_bytes(fmt, K)
     eb = rb * N
     nw = 2 if mode == "gu" else 1
-    name = f"g_moe_{mode}_{fmt}_k{K}_r{R}"
+    name = f"g_moe_{mode}_{fmt}{'_fused' if fused else ''}_k{K}_r{R}"
     wargs = "%w: buffer, %w2: buffer" if nw == 2 else "%w: buffer"
     xrows = "%xrows" if mode == "gu" else "%tokens"
     L = [f"""
@@ -448,7 +449,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %rows_per = index.constant {R} : index
   %cW = index.constant {waves} : index
   %row_bytes = index.constant {rb} : offset
-  %expert_bytes = index.constant {eb} : offset
+  %expert_bytes = index.constant {2 * eb if fused else eb} : offset
   %block_bytes = index.constant {FMT[fmt]} : offset
   %zero_f = scalar.constant 0.0 : f32
   %zero32 = vector.constant 0.0 : vector<32xf32>
@@ -495,10 +496,14 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
     %ro = index.scale %row, %row_bytes : index, offset -> offset
     %rb = index.assume %r [range(%r, 0, {R - 1})] : index
     %o0 = index.add %ro, %ba : offset
-    %o = index.add %o0, %e_off : offset""")
+    %o = index.add %o0, %e_off : offset""" + (f"""
+    %up_bytes = index.constant {eb} : offset
+    %o_up = index.add %o, %up_bytes : offset""" if fused else ""))
     import os as _os
     fold = _os.environ.get("MOE_FOLD", "1") != "0"
     for wi, w in enumerate(["w", "w2"][:nw]):
+        if wi and fused:
+            L_up = len(L)
         if fold and fmt == "q4_k":
             L.append(f"""    %wv{wi}, %sc{wi}, %mn{wi} = scf.if %ok -> (vector<32xf32>, f32, f32) {{
       %v, %sa, %sb = func.call @g_q4_k_codes(%{w}, %o, %within) : (buffer, offset, index) -> (vector<32xf32>, f32, f32)
@@ -525,6 +530,8 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
     }} else {{
       scf.yield %zero_f : f32
     }}""")
+        if wi and fused:   # the up rows' offset
+            L[L_up:] = [x.replace("(%w2, %o,", "(%w2, %o_up,") for x in L[L_up:]]
         L.append(f"""    %s{wi} = kernel.subgroup.reduce<addf> %d{wi} : f32
     scf.if %first {{
       view.store %s{wi}, %pv[{wi}, %wave, %rb] : f32, view<{nw}x{waves}x{R}xf32>
@@ -784,15 +791,16 @@ kernel.def export("g_moe_bucket") @g_moe_bucket(%tokens: index) {{
 """
 
 
-def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
+def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False):
     """64x64-tile WMMA GEMM over the bucketed rows of one expert per row tile (rows = max_tiles*64).
-    mode 'swiglu' (gate/up): A rows gathered from x16[token = rowmap/KU]; 'store' (down): A = sorted rows."""
+    mode 'swiglu' (gate/up): A rows gathered from x16[token = rowmap/KU]; 'store' (down): A = sorted rows.
+    fused (swiglu): one gate_up tensor as both weights (expert_mv's layout)."""
     import gen_gemm
     rb = N and (K // SB[fmt] * FMT[fmt])
     eb = rb * N
     text = gemm_fn(fmt, mode)
     base = f"g_gemm_{fmt}_{mode}"
-    name = f"g_moe_g{'gu' if mode == 'swiglu' else 'dn'}_{fmt}_k{K}"
+    name = f"g_moe_g{'gu' if mode == 'swiglu' else 'dn'}_{fmt}{'_fused' if fused else ''}_k{K}"
     def rep(a, b, cnt=1):
         nonlocal text
         assert text.count(a) == cnt, (name, a, text.count(a))
@@ -816,12 +824,16 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
   %e_lo = scalar.minsi %tile_expert, %cEm1g : i32
   %e_b = scalar.assume %e_lo [range(%e_lo, 0, {E - 1})] : i32
   %expert = index.cast %e_b : i32 to index
-  %expert_bytes = index.constant {eb} : offset
+  %expert_bytes = index.constant {2 * eb if fused else eb} : offset
   %expert_off = index.scale %expert, %expert_bytes : index, offset -> offset
   %workitem_id = kernel.workitem.id<x> : index
 """)
     rep("  %w_row_origin = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset\n",
-        "  %w_row_origin0 = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset\n  %w_row_origin = index.add %w_row_origin0, %expert_off : offset\n")
+        "  %w_row_origin0 = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset\n  %w_row_origin = index.add %w_row_origin0, %expert_off : offset\n"
+        + (f"  %up_bytes = index.constant {eb} : offset\n  %w2_row_origin = index.add %w_row_origin, %up_bytes : offset\n" if fused else ""))
+    if fused:   # the up weight's dequant (gen_gemm.dequant16 out "deq1") reads the up rows
+        assert mode == "swiglu" and text.count("index.add %w_row_origin, %deq1_") >= 1
+        text = text.replace("index.add %w_row_origin, %deq1_", "index.add %w2_row_origin, %deq1_")
     rep("  %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>", "  %x_view = buffer.view %x[%origin] : buffer -> view<[%xrows]x[%k]xf16>")
     rep("view<[%rows]x[%k]xf16>", "view<[%xrows]x[%k]xf16>", text.count("view<[%rows]x[%k]xf16>"))
     rep("view<[%rows]x2xf32>", "view<[%xrows]x2xf32>", text.count("view<[%rows]x2xf32>"))
