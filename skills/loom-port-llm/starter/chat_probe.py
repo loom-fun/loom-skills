@@ -184,6 +184,50 @@ def reasoning_instructions(T, chat, heads, notes):
                  f"{chat['reasoning_effort_default']}) to the system block with thinking on")
 
 
+def system_lead(T, chat, default, bos, kw0, notes):
+    """Templates whose first system block always opens with the default system prompt and append the request's first
+    system message (Spark-X2.5: '<|System|>\nyou are a helpful assistant.' + '\n\n' + SYS, the tools block in between).
+    Sets system_lead (that prompt), system_lead_separator (before the system message without tools), and
+    system_prefix from a later system message. A template that prints its BOS token before every message (the same
+    one-turn tag) gets bos "" and the token kept in the prefixes."""
+    suffix = chat["suffix"]
+    r2 = T.render([{"role": "user", "content": "USERPROBE1"}, {"role": "system", "content": "SYSPROBE2"}], **kw0)
+    later = between(r2, "USERPROBE1" + suffix, "SYSPROBE2") if "USERPROBE1" + suffix in r2 else None
+    b = bos if bos and later is not None and later.startswith(bos) and chat["user_prefix"].startswith(bos) else ""
+    blk, probe = b + default[:len(default) - len(suffix)], b + chat["system_prefix"]
+    if not (later and default.endswith(suffix) and blk.startswith(later) and probe.startswith(blk)):
+        raise ProbeError(f"default system block has an unexpected shape: {default!r}")
+    if b:
+        chat["bos"] = ""
+        notes.append(f"the template prints {bos!r} before every message: part of each role prefix (bos '')")
+    chat["system_prefix"], chat["default_system"] = later, ""
+    chat["system_lead"], chat["system_lead_separator"] = blk[len(later):], probe[len(blk):]
+    notes.append(f"every first system block opens with the default system prompt {chat['system_lead'][:60]!r}; a system "
+                 f"message follows it after {chat['system_lead_separator']!r} (system_lead)")
+
+
+def lead_instructions(chat, heads, notes):
+    """Per-effort reasoning instructions appended to the system lead with thinking on (Spark-X2.6:
+    default_system + '\n`thinking_effort` ... `thinking_effort=high`.'); chat.reasoning_after_lead."""
+    prefix, suffix, lead = chat["system_prefix"], chat["suffix"], chat["system_lead"]
+    def body(h):
+        h = h[len(chat["bos"]):] if chat["bos"] and h.startswith(chat["bos"]) else h
+        cut = suffix + chat["user_prefix"]
+        if not (h.startswith(prefix + lead) and h.endswith(cut)):
+            raise ProbeError(f"reasoning instructions: unexpected head {h!r}")
+        return h[len(prefix) + len(lead):len(h) - len(cut)]
+    if body(heads["off"]):
+        raise ProbeError(f"thinking off changes the default system prompt: {body(heads['off'])!r}")
+    table = {e: body(h) for e, h in heads.items() if e not in ("", "off", "none")}
+    matches = [e for e in table if heads[e] == heads[""]]
+    if not matches:
+        raise ProbeError("the default reasoning effort is none of " + ", ".join(table))
+    chat["reasoning_instructions"], chat["reasoning_separator"], chat["reasoning_after_lead"] = table, "", True
+    chat["reasoning_effort_default"] = max(matches, key=EFFORT_LEVELS.get)
+    notes.append(f"template appends reasoning instructions per reasoning_effort ({', '.join(table)}; default "
+                 f"{chat['reasoning_effort_default']}) to the default system prompt with thinking on")
+
+
 # A template that ignores tools: no tool declarations, calls or results (call_format "none"; build.py makes
 # control.loom ignore a request's tools and never parse calls). call_marker keeps build.py's default: output_next
 # ends content at the marker, and an empty one would end it at once.
@@ -222,14 +266,17 @@ def derive(template_text, bos="", eos=""):
     if head.startswith(bos) and bos:
         head = head[len(bos):]
     default = head[:len(head) - len(chat["user_prefix"])] if head.endswith(chat["user_prefix"]) else ""
-    if default:
-        if not (default.startswith(chat["system_prefix"]) and default.endswith(chat["suffix"])):
-            raise ProbeError(f"default system block has an unexpected shape: {default!r}")
+    if default and not (default.startswith(chat["system_prefix"]) and default.endswith(chat["suffix"])):
+        system_lead(T, chat, default, bos, kw0, notes)   # raises when it is not that shape either
+        bos = chat["bos"]
+    elif default:
         chat["default_system"] = default[len(chat["system_prefix"]):len(default) - len(chat["suffix"])]
         notes.append(f"template inserts a default system prompt: {chat['default_system'][:60]!r}...")
     else:
         chat["default_system"] = ""
-    if efforts:
+    if efforts and chat.get("system_lead"):
+        lead_instructions(chat, efforts, notes)
+    elif efforts:
         reasoning_instructions(T, chat, efforts, notes)
     trimmed = T.render([{"role": "user", "content": "  USERPROBE1 \n"}], **kw0)
     chat["trim_content"] = "  USERPROBE1" not in trimmed
@@ -254,6 +301,14 @@ def derive(template_text, bos="", eos=""):
                 chat["assistant_prefix"] = guess
                 notes.append(f"every assistant turn renders its (possibly empty) think block: assistant prefix {guess!r}")
     mid_r = between(with_r, "USERPROBE1", "ASSTPROBE1")
+    if "REASONPROBE" in mid_r and chat["assistant_prefix"] not in mid_r[:mid_r.index("REASONPROBE")]:
+        # A turn without reasoning renders a bare think close (Spark-X2.5: "<|Bot|></think>"), so the plain turn above put
+        # it in the assistant prefix: cut it back out (history_think "close" below).
+        closed = mid_r[mid_r.index("REASONPROBE") + len("REASONPROBE"):]
+        cand = chat["assistant_prefix"][:len(chat["assistant_prefix"]) - len(closed)]
+        if closed and chat["assistant_prefix"].endswith(closed) and mid_r.startswith(chat["suffix"] + cand):
+            chat["assistant_prefix"] = cand
+            notes.append(f"an assistant turn without reasoning renders only {closed!r}: assistant prefix {cand!r}")
     if "REASONPROBE" in mid_r:
         pre = mid_r[:mid_r.index("REASONPROBE")]
         cut = pre.index(chat["assistant_prefix"]) + len(chat["assistant_prefix"]) if chat["assistant_prefix"] in pre else None
@@ -263,8 +318,9 @@ def derive(template_text, bos="", eos=""):
         chat["think_close"] = mid_r[mid_r.index("REASONPROBE") + len("REASONPROBE"):]
         mid_n = between(without_r, "USERPROBE1", "ASSTPROBE1")
         empty_block = mid_n[mid_n.index(chat["assistant_prefix"]) + len(chat["assistant_prefix"]):]
-        chat["history_think"] = "always" if empty_block == chat["think_open"] + chat["think_close"] else "nonempty"
-        if empty_block not in ("", chat["think_open"] + chat["think_close"]):
+        chat["history_think"] = ("always" if empty_block == chat["think_open"] + chat["think_close"] else
+                                 "close" if empty_block and empty_block == chat["think_close"] else "nonempty")
+        if empty_block not in ("", chat["think_open"] + chat["think_close"], chat["think_close"]):
             notes.append(f"empty reasoning renders as {empty_block!r} (not modeled)")
     else:
         chat["think_open"], chat["think_close"], chat["history_think"] = "", "", "nonempty"
@@ -306,8 +362,9 @@ def derive(template_text, bos="", eos=""):
             cand = [json.dumps(t["function"] if only else t, ensure_ascii=False, separators=seps) for t in TOOLS]
             if all(c in t_plain for c in cand):
                 printed, chat["tools_function_only"] = cand, only
-                if seps != (", ", ": "):
-                    notes.append("template prints tools compactly; Loom prints the request's tool JSON as sent")
+                if seps != (", ", ": "):   # control.loom compacts each tool's JSON (host json codec)
+                    chat["tools_compact"] = True
+                    notes.append("template prints tools compactly (tools_compact)")
                 break
         if printed:
             break
@@ -320,6 +377,11 @@ def derive(template_text, bos="", eos=""):
     if not (block.startswith(chat["system_prefix"]) and block.endswith(chat["suffix"])):
         raise ProbeError(f"tools are not rendered as a system block: {block[:200]!r}")
     body = block[len(chat["system_prefix"]):len(block) - len(chat["suffix"])]
+    lead = chat.get("system_lead", "")
+    if lead:
+        if not body.startswith(lead):
+            raise ProbeError(f"tools block does not follow the default system prompt: {body[:200]!r}")
+        body = body[len(lead):]
     i0, i1 = body.index(printed[0]), body.index(printed[1])
     # Each tool is preceded by tool_line_prefix (Qwen: "\n"; GLM: "").
     line = body[i0 + len(printed[0]):i1]
@@ -334,6 +396,10 @@ def derive(template_text, bos="", eos=""):
     s_body = t_sys[:t_sys.index("USERPROBE1")]
     s_body = s_body[len(bos) if bos and s_body.startswith(bos) else 0:]
     s_body = s_body[len(chat["system_prefix"]):len(s_body) - len(chat["user_prefix"]) - len(chat["suffix"])]
+    if lead:
+        s_body = s_body[len(lead):] if s_body.startswith(lead) else s_body
+        if s_body.startswith("SYSPROBE"):
+            raise ProbeError("system message before the tools block after the default system prompt (not modeled)")
     if s_body.startswith("SYSPROBE"):
         chat["tools_after_system"] = True
         rest = s_body[len("SYSPROBE"):]
@@ -403,15 +469,17 @@ def derive(template_text, bos="", eos=""):
     mid = between(after_calls, "TOOLPROBE1", "TOOLPROBE2")
     post = after_calls[after_calls.index("TOOLPROBE2") + len("TOOLPROBE2"):after_calls.index("USERPROBE2")]
     post = post[:len(post) - len(chat["user_prefix"])]
-    for k in range(len(mid) + 1):
-        item_suffix, item_prefix = mid[:k], mid[k:]
-        if pre.endswith(item_prefix) and post.startswith(item_suffix):
-            chat["tool_turn_prefix"] = pre[:len(pre) - len(item_prefix)]
-            chat["tool_item_prefix"], chat["tool_item_suffix"] = item_prefix, item_suffix
-            chat["tool_turn_suffix"] = post[len(item_suffix):]
-            break
-    else:
+    splits = [k for k in range(len(mid) + 1) if pre.endswith(mid[k:]) and post.startswith(mid[:k])]
+    if not splits:
         raise ProbeError(f"cannot split tool-response framing: pre={pre!r} mid={mid!r} post={post!r}")
+    # The first split that cuts no <...> tag in two (Spark-X2.5: '<|Tool|>' and '</tool_response>' both end in '>'),
+    # else the first one.
+    open_tag = lambda t: t.rfind("<") > t.rfind(">")
+    k = next((k for k in splits if not open_tag(pre[:len(pre) - len(mid) + k]) and not open_tag(mid[:k])), splits[0])
+    item_suffix, item_prefix = mid[:k], mid[k:]
+    chat["tool_turn_prefix"] = pre[:len(pre) - len(item_prefix)]
+    chat["tool_item_prefix"], chat["tool_item_suffix"] = item_prefix, item_suffix
+    chat["tool_turn_suffix"] = post[len(item_suffix):]
     chat["terminal"] = chat["suffix"].strip() or chat["suffix"]
     return chat, notes
 
@@ -434,11 +502,17 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
     table = chat.get("reasoning_instructions") or {}
     instr = table.get(reasoning_effort, table.get(chat.get("reasoning_effort_default"), "")) if on else ""
     instructed = lambda b: instr + chat["reasoning_separator"] + b if instr and b else instr or b
+    seps = (",", ":") if chat.get("tools_compact") else None
+    lead = chat.get("system_lead", "")
     if tools:
         printed = chat.get("tool_separator", "").join(
-            chat["tool_line_prefix"] + json.dumps(t["function"] if chat["tools_function_only"] else t, ensure_ascii=False)
+            chat["tool_line_prefix"] + json.dumps(t["function"] if chat["tools_function_only"] else t, ensure_ascii=False, separators=seps)
             for t in tools)
         tb = chat["tools_prefix"] + printed + chat["tools_suffix"]
+    if lead:   # the default prompt (+ effort instructions), the tools block, then the first system message
+        rest = (tb if tools else "") + ((chat["tools_system_separator"] if tools else chat["system_lead_separator"]) + body if body else "")
+        out += chat["system_prefix"] + lead + instr + rest + chat["suffix"]
+    elif tools:
         sep = chat["tools_system_separator"] if body else ""
         merged = body + sep + tb if chat["tools_after_system"] else tb + sep + body
         out += chat["system_prefix"] + instructed(merged) + chat["suffix"]
@@ -452,7 +526,7 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
         role, text = m["role"], trim(m.get("content") or "")
         if prior == "tool" and role != "tool":
             out += chat["tool_turn_suffix"]
-        if role == "system" and i == 0 and (tools or instr) and first_system:
+        if role == "system" and i == 0 and (tools or instr or lead) and first_system:
             pass
         elif role == "tool":
             out += ("" if prior == "tool" else chat["tool_turn_prefix"]) + chat["tool_item_prefix"] + text + chat["tool_item_suffix"]
@@ -460,6 +534,7 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
             thought = (m.get("reasoning_content") or "").strip()
             shown = chat["history_think_scope"] == "all" or i > last_query
             think = chat["think_open"] + thought + chat["think_close"] if shown and (thought or chat["history_think"] == "always") and chat["think_open"] else ""
+            think = chat["think_close"] if shown and not thought and chat["history_think"] == "close" else think
             calls = render_calls(chat, m.get("tool_calls") or [])
             sep = chat["content_call_separator"] if text and calls else ""
             out += chat["assistant_prefix"] + think + text + sep + calls + chat["suffix"]
