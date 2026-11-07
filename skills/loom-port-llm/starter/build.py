@@ -95,7 +95,10 @@ if DRAFT and DRAFT["kind"] == "assist":   # the Gemma-4 assistant reads the targ
         sys.exit("--draft assist needs cfg.json assistant.gguf (find_drafter.py records it for gemma4 targets)")
     DRAFT["gguf"] = os.path.abspath(cfg["assistant"]["gguf"])
     kv_per_position += 4
-weights_bytes = os.path.getsize(os.path.abspath(cfg["gguf"]))
+sys.path.insert(0, HERE)
+from formats import memory_cap, split_parts  # noqa: E402
+GGUF_PARTS = split_parts(os.path.abspath(cfg["gguf"]))   # a split GGUF: every part is a parameter file
+weights_bytes = sum(os.path.getsize(p) for p in GGUF_PARTS)
 if DRAFT and DRAFT["kind"] in ("dflash", "assist"):
     weights_bytes += os.path.getsize(DRAFT["gguf"])
 if os.path.isfile((cfg.get("vision") or {}).get("mmproj") or ""):   # the image component's projector, while it encodes
@@ -178,24 +181,14 @@ if native > KERNEL_CONTEXT and not a.context:
     print(f"NOTE: native context {native} exceeds the kernels' {KERNEL_CONTEXT}; using {KERNEL_CONTEXT}")
 context = a.context or min(native, KERNEL_CONTEXT)
 if a.memory_gib == "auto":
-    # LOOM_RESERVED_GIB: memory another resident server already holds (weaver's agent model). Parsed outside the
-    # try below: a typo there would read as "RAM unknown" and fall back to 56 GiB, more than the cap without it.
-    try:
-        reserved = float(os.environ.get("LOOM_RESERVED_GIB") or 0)
-    except ValueError:
-        sys.exit(f"LOOM_RESERVED_GIB={os.environ['LOOM_RESERVED_GIB']!r} is not a number (GiB)")
-    try:
-        cap = 0.6 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") - reserved * 2**30
-    except (AttributeError, ValueError, OSError):
-        cap = None
+    cap, what, _ = memory_cap()   # 60 % of RAM or LOOM_MEMORY_CAP_GIB, minus LOOM_RESERVED_GIB (formats.py)
     if cap is not None and cap <= 0:
-        sys.exit(f"LOOM_RESERVED_GIB={reserved:g} leaves no memory under the 60%-of-RAM cap")
+        sys.exit(f"the memory cap ({what}) leaves no memory")
     want_pool = context + max(65536, context // 4)
     need = weights_bytes + workspace + 2**30 + 2 * a.rows * recurrent_bytes + want_pool * kv_per_position
     a.memory_gib = round(min(need, cap) / 2**30, 1) if cap else 56.0
     print(f"memory budget {a.memory_gib} GiB (a {want_pool}-position pool needs {need / 2**30:.0f} GiB"
-          + (f"; cap 60% of RAM{f' minus LOOM_RESERVED_GIB {reserved:g}' if reserved else ''} = {cap / 2**30:.0f} GiB)"
-             if cap else "; RAM unknown)"))
+          + (f"; cap {what} = {cap / 2**30:.0f} GiB)" if cap else "; RAM unknown)"))
 a.memory_gib = float(a.memory_gib)
 budget = int(a.memory_gib * 2**30) - weights_bytes - workspace - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
 if context * kv_per_position > budget:
@@ -698,17 +691,17 @@ if pre.get("type") == "Sequence" and len(digits) == 1 and stages[digits[0]].get(
 json.dump(tok, open(os.path.join(pkg, "tokenizer.json"), "w", encoding="utf-8"), ensure_ascii=False)
 
 # 4. Weights (symlink; hard link on Windows without Developer Mode) and the package card.
-gguf_name = os.path.basename(cfg["gguf"])
-link = os.path.join(pkg, "parameter", gguf_name)
-if os.path.lexists(link):
-    os.remove(link)
-try:
-    os.symlink(os.path.abspath(cfg["gguf"]), link)
-except OSError:  # Windows needs Developer Mode (or admin) for symlinks
+for part in GGUF_PARTS:
+    link = os.path.join(pkg, "parameter", os.path.basename(part))
+    if os.path.lexists(link):
+        os.remove(link)
     try:
-        os.link(os.path.realpath(cfg["gguf"]), link)
-    except OSError as e:
-        sys.exit(f"cannot link {cfg['gguf']} into {link} ({e}): enable Windows Developer Mode, or put the package on the GGUF's drive")
+        os.symlink(part, link)
+    except OSError:  # Windows needs Developer Mode (or admin) for symlinks
+        try:
+            os.link(os.path.realpath(part), link)
+        except OSError as e:
+            sys.exit(f"cannot link {part} into {link} ({e}): enable Windows Developer Mode, or put the package on the GGUF's drive")
 card = {
     "schema_version": 1,
     "model": {"id": model_id, "name": f"{cfg.get('name', 'llm')} (Loom port, GGUF)"},
@@ -719,7 +712,7 @@ card = {
     "services": {"chat": {"kind": "text", "version": 1}},
     "variants": {"gguf": {"services": {"chat": {
         "programs": ["source"], "config": {"llm.card": True},
-        "parameters": {"model": {"files": [{"path": f"parameter/{gguf_name}", "format": "gguf"}]}},
+        "parameters": {"model": {"files": [{"path": f"parameter/{os.path.basename(p)}", "format": "gguf"} for p in GGUF_PARTS]}},
         "tokenizers": {"text": "tokenizer.json"}}}}},
     "presets": {"chat": {"service": "chat", "variant": "gguf", "programs": "source", "execution": {
         "rows": a.rows, "context_capacity": a.context, "pool_capacity": a.pool,

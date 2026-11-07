@@ -38,6 +38,7 @@ result() { printf '{"status": "%s", "stage": "%s", "rc": %s}\n' "$1" "$2" "$3" >
 # these), then the bench files.
 save_logs() {
   cp "$D/phases.log" "$out/" 2>/dev/null
+  for f in "$W"/state/*.log; do [ -f "$f" ] && tail -c 200000 "$f" > "$out/serve_$(basename "$f")"; done   # loom-serve logs (errors)
   for f in reference.json reference.log cfg.json inspect.log chat_verify.log download.log vision.log drafter.log build.log ktest.log; do
     cp "$W/$f" "$out/" 2>/dev/null
   done
