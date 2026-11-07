@@ -358,10 +358,12 @@ gate_kind = cfg.get("attn_gate", False)
 q = rng.standard_normal((t, QH, D)).astype(np.float32); k = rng.standard_normal((t, KVH, D)).astype(np.float32)
 v = rng.standard_normal((t, KVH, D)).astype(np.float32); gate = rng.standard_normal((t, QH, D)).astype(np.float32)
 qr = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq); kr = rope(norm(k + bk, kn) if cfg["qk_norm"] else k + bk)
+# the paged KV cache holds F16 K and V: with large biases (k up to |130|) their rounding moves the output past atol
+kr, vs = (a.astype(np.float16).astype(np.float32) for a in (kr, v + bv))
 att = np.zeros((t, QH, D))
 for hh in range(QH):
     kv = hh // (QH // KVH); sc = qr[:, hh] @ kr[:, kv].T / np.sqrt(D); sc[np.triu_indices(t, 1)] = -1e30
-    pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); att[:, hh] = pr @ (v + bv)[:, kv]
+    pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); att[:, hh] = pr @ vs[:, kv]
 if gate_kind:
     att = att / (1 + np.exp(-gate))
 blocks = (ctx + 15) // 16
