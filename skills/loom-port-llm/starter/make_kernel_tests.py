@@ -32,7 +32,8 @@ def q8_ref(xs):
 
 
 cfg = json.load(open(sys.argv[1])); out = sys.argv[2]; os.makedirs(out, exist_ok=True)
-r = GGUFReader(cfg["gguf"]); T = {t.name: t for t in r.tensors}
+from formats import split_parts  # noqa: E402
+T = {t.name: t for p in split_parts(cfg["gguf"]) for t in GGUFReader(p).tensors}
 def raw(name): return np.asarray(T[name].data).view(np.int8).reshape(-1)
 def deq(name):
     t = T[name]; return dequantize(np.asarray(t.data), t.tensor_type).reshape(int(t.shape[1]), int(t.shape[0])) if len(t.shape) == 2 else np.asarray(t.data, dtype=np.float32)
