@@ -414,7 +414,8 @@ cases.append(f"""check.case public @qk_rope {{
 """)
 # 3'. sliding layers with their own rotary dims / base at the same head_dim (gen_llm SWA_ROPE): g_qk_rope_store_swa
 RD_SWA, TH_SWA = cfg.get("rope_dims_swa") or RD, cfg.get("rope_theta_swa") or cfg["rope_theta"]
-if cfg.get("sliding_layers") and (cfg.get("head_dim_swa") or D) == D and (RD_SWA, TH_SWA) != (RD, cfg["rope_theta"]):
+if cfg.get("sliding_layers") and (cfg.get("head_dim_swa") or D) == D and ((RD_SWA, TH_SWA) != (RD, cfg["rope_theta"]) or
+        bool(cfg.get("rope_scaling")) and cfg.get("rope_scaling_swa") == "none"):
     qs = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq, RD_SWA, TH_SWA, None, None)   # no frequency factors, no YaRN
     save("r_qs", qs.reshape(t, -1).astype(np.float32))
     cases.append(cases[-1].replace("@qk_rope {", "@qk_rope_swa {").replace("@g_qk_rope_store[", "@g_qk_rope_store_swa[")
