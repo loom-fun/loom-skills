@@ -476,6 +476,17 @@ func.def @tools_body(""")
         .replace("@@HEX_JSON_ARGUMENTS_FIELD@@", hx('"' + chat.get("call_arguments_key", "arguments") + '"'))
 
 
+def patch_tools_xml(text):
+    """control.loom for a template that declares tools as XML elements (chat.tools_format "xml"; Qwen3-Coder):
+    tools_body prints each tool with @xml_tool (templates/control_xml.loom, the IR twin of chat_probe.xml_tool).
+    Without the field control.loom is unchanged."""
+    text = sub(text, "    %printed = func.call @tool_printed(%value) : (buffer) -> (buffer)\n",
+               """    %selected = func.call @tool_printed(%value) : (buffer) -> (buffer)
+    %printed = func.call @xml_tool(%selected) : (buffer) -> (buffer)
+""")
+    return text + open(os.path.join(HERE, "templates", "control_xml.loom"), encoding="utf-8").read()
+
+
 def patch_no_tools(text):
     """control.loom for a chat-only block (chat_probe.CHAT_ONLY, call_format "none": the template ignores tools):
     chat_begin renders a request's tools as the template does (not at all) and parse_tools never parses a call.
@@ -558,6 +569,8 @@ for name in ("prepare", "control", "storage", "service"):
         text = patch_history_think_before(text)
     if name == "control" and "default_system_tools" in chat:
         text = patch_default_system_tools(text)
+    if name == "control" and chat.get("tools_format") == "xml":
+        text = patch_tools_xml(text)
     if name == "control" and (chat["call_format"] == "json" or any(k in chat for k in JSON_CHAT_KEYS)):
         text = patch_json_chat(text)
     if name == "control" and chat["call_format"] == "none":

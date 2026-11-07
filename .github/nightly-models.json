@@ -324,6 +324,14 @@
    ]
   },
   {
+   "repo": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+   "slug": "qwen3-30b-a3b-instruct-2507",
+   "memory_bytes": 63000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": []
+  },
+  {
    "repo": "loom-fun/unsloth-gemma-4-E2B-it-loom",
    "slug": "gemma-4-e2b-it",
    "memory_bytes": 16000000000,
