@@ -203,7 +203,8 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   until two runs share a path, and the hit-vs-miss difference takes the near-tie rule. To hunt a suspected
   race, `determinism.py URL --model ID --conc 1 --reps 20` (alone, never a cache hit: any difference is a
   race), `--pairs` (cache miss vs hit) and `--conc 4` (mixed epochs) separate the three causes.
-- 503 errors on long prompts mean `--memory_bytes` is too small for the KV pool,
+- 503 errors on long prompts mean `--memory_bytes` is too small for the KV pool plus the prefill scratch
+  (loom-port-llm troubleshooting 5; even on a fresh server, whatever the message says about retained state),
   not a model bug.
 - **agent_golden.py** runs three tool-using tasks (weather lookups, a calculator)
   with deterministic tool results, greedy, and checks every assistant turn:
