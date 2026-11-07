@@ -1,8 +1,10 @@
 """Generates flash2.loom: Glimmer prefill flash attention in transposed form.
 
-Workgroup (16-token tile, KV head) of 16 waves; wave w owns query head
-16*kv + w for the tile's 16 tokens. Each 32-key tile of K and V^T is staged
-once in workgroup memory for all 16 heads. A wave computes S^T = K Q^T, so in
+Workgroup (TS 16-token tiles, KV head) of G*TS waves; wave w owns query head
+G*kv + w % G for tile w / G. Each 32-key tile of K and V^T is staged once in
+workgroup memory for all of them: over the union of the tiles' key ranges when
+they are uniform tiles of one row, else once per tile (the other tiles' waves
+mask that pass). A wave computes S^T = K Q^T, so in
 its MMA result each lane's column is one query (lane % 16) and its 8 elements
 are keys 2i + lane/16 (the RDNA3 WMMA result layout). Softmax therefore needs
 only in-lane reductions plus one xor-16 shuffle; P^T is assembled from the
@@ -237,17 +239,16 @@ def subtiles():
   %is_sub{s} = index.cmp eq, %sub, %cs{s} : index
   %mu_{s} = scf.select %is_sub{s}, %u{s}, {mu_r} : i1
   %mp_{s} = scf.select %is_sub{s}, %spos{s}, {mp_r} : index''')
-    z = "0" if TS == 1 else f"_{TS - 1}"
-    last = (lambda a, b: a if TS == 1 else b)
-    o.append(f'''  %any_uniform = scalar.andi {last("%u0", "%any" + z)}, %true_const : i1
-  %shared = scalar.andi {last("%u0", "%shared" + z)}, %true_const : i1
-  %lo_u = index.add {last("%lo0", "%lo_u" + z)}, %c0 : index
-  %hi_u = index.add {last("%hi0", "%hi_u" + z)}, %c0 : index
-  %mine = scalar.andi {last("%u0", "%mu" + z)}, %true_const : i1
+    z = TS - 1
+    o.append(f'''  %any_uniform = scalar.andi %any_{z}, %true_const : i1
+  %shared = scalar.andi %shared_{z}, %true_const : i1
+  %lo_u = index.add %lo_u_{z}, %c0 : index
+  %hi_u = index.add %hi_u_{z}, %c0 : index
+  %mine = scalar.andi %mu_{z}, %true_const : i1
   %my_tile = index.add %tile0, %sub : index
   %my_tile_live = index.min %my_tile, %tile_last : index
   %first_token = index.mul %my_tile_live, %c16 : index
-  %pos0 = index.add {last("%spos0", "%mp" + z)}, %c0 : index''')
+  %pos0 = index.add %mp_{z}, %c0 : index''')
     return "\n".join(o)
 
 
@@ -268,7 +269,7 @@ def key_tiles():
   %kspan_ub = index.assume %kspan_u [range(%kspan_u, 0, 262143)] : index
   %kround_u = index.add %kspan_ub, %ckt : index
   %ktiles_u = index.div %kround_u, %ckt : index
-  %per = scf.select %shared, %ktiles_u, {"%ktl0" if TS == 1 else f"%ktm{TS - 1}"} : index
+  %per = scf.select %shared, %ktiles_u, %ktm{TS - 1} : index
   %npass = scf.select %shared, %c1, %cts : index
   %key_tiles = index.mul %per, %npass : index
   %per_max = index.max %per, %c1 : index
