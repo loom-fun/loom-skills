@@ -300,6 +300,28 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/bartowski-LFM3-1.7B-loom",
+   "slug": "lfm3-1.7b",
+   "memory_bytes": 13000000000,
+   "kit": "lfm2moe",
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/ggml-org-LFM3-Omni-2B-loom",
+   "slug": "lfm3-omni-2b",
+   "memory_bytes": 9000000000,
+   "kit": "lfm2moe",
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
   }
  ]
 }
