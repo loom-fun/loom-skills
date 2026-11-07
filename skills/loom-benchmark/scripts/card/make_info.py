@@ -517,13 +517,22 @@ def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acc
             "metrics": metrics}
 
 
-def drafted_acceptance(facts, sessions, override=None):
+def roofline_sessions(info, evidence):
+    """info.json's measurement sessions (with its sources) followed by each evidence file's session (whose source is
+    inline), as one info-like dict for drafted_acceptance."""
+    sessions = list((info.get("performance") or {}).get("sessions") or [])
+    sessions += [s for s in ((load_json(ev).get("performance") or {}).get("session") for ev in evidence) if s]
+    return {"sources": info.get("sources") or {}, "performance": {"sessions": sessions}}
+
+
+def drafted_acceptance(facts, info, override=None):
     """(the spec gate's acceptance, {drafted metric: acceptance measured in its own session}) for the roofline, from
-    measurement sessions combined as a build combines them (PKG/info.json's, then the new evidence's: per metric the
-    last session that measured it). override: the gate's acceptance given on the command line."""
+    the measurement sessions of info (roofline_sessions: PKG/info.json's, then the new evidence's) combined as a build
+    combines them: per metric the last local session that measured it. override: the gate's acceptance given on the
+    command line."""
     if not facts["spec"]:
         return None, {}
-    card = card_metrics({"performance": {"sessions": sessions}})
+    card = card_metrics(info)
     gate = override if override is not None else card.get("spec_acceptance", ({}, 0))[0].get("loom")
     return gate, {k: card[k][0]["acceptance"] for k in DRAFTED_ROWS if card.get(k, ({}, 0))[0].get("acceptance") is not None}
 
@@ -540,10 +549,8 @@ def cmd_roofline(a):
     cfg_p = a.cfg or os.path.join(a.package, "llm_config.json")
     cfg = load_json(cfg_p) if os.path.exists(cfg_p) else {}
     info_p = os.path.join(a.package, "info.json")
-    sessions = list(((load_json(info_p).get("performance") or {}).get("sessions") or [])
-                    if os.path.exists(info_p) else [])
-    sessions += [s for s in ((load_json(ev).get("performance") or {}).get("session") for ev in a.evidence or []) if s]
-    acc, row_acc = drafted_acceptance(facts, sessions, a.acceptance)
+    info = roofline_sessions(load_json(info_p) if os.path.exists(info_p) else {}, a.evidence or [])
+    acc, row_acc = drafted_acceptance(facts, info, a.acceptance)
     script = os.path.join(rdir, "roofline.py")
     commit, dirty = skills_checkout(script)
     with open(script, "rb") as f:

@@ -1,7 +1,8 @@
 """check.sh helper: which acceptance each drafted roofline row counts (make_info.py drafted_acceptance +
 roofline_block) and the card's note about it (render_card.drafted_note), without the GGUF or the gguf package.
 
-usage: roofline_rows.py CARD_DIR (make_info.py and render_card.py's directory) PKG INFO.json -> JSON on stdout
+usage: roofline_rows.py CARD_DIR (make_info.py and render_card.py's directory) PKG INFO.json [EVIDENCE.json ...] -> JSON on stdout
+(EVIDENCE: perf evidence files whose sessions count on top of INFO's, as `make_info.py roofline --evidence`)
 
 A stand-in roofline module makes every single-pass ceiling 100 tok/s and a drafted ceiling 100 x (1 + acceptance x
 depth), so the output shows only the acceptance chosen per row: the session's own where it recorded one (perf.py
@@ -11,7 +12,7 @@ import sys
 
 sys.path.insert(0, sys.argv[1])
 from card_lib import ROOFLINE_METRIC, dumps, load_json, load_package, package_facts  # noqa: E402
-from make_info import drafted_acceptance, roofline_block  # noqa: E402
+from make_info import drafted_acceptance, roofline_block, roofline_sessions  # noqa: E402
 from render_card import drafted_note  # noqa: E402
 
 
@@ -37,7 +38,7 @@ class StubRoofline:
 
 facts = package_facts(load_package(sys.argv[2]))
 info = load_json(sys.argv[3])
-gate, rows = drafted_acceptance(facts, info["performance"]["sessions"])
+gate, rows = drafted_acceptance(facts, roofline_sessions(info, sys.argv[4:]))
 block = roofline_block(facts, None, gate, StubRoofline, 1.0, 1.0, {}, os.path.basename(facts["checkpoint"]["file"]), rows)
 sys.stdout.write(dumps({"metrics": {k: r for k, r in block["metrics"].items() if "single_pass" in r},
                         "drafting": block["drafting"], "note": drafted_note(block["drafting"], block["metrics"])}))

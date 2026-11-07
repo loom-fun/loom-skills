@@ -76,6 +76,21 @@ py -c "import sys; sys.path.insert(0, '$C'); import card_lib as c; print(c.dumps
   > "$tmp/flint/flags.json"
 # the acceptance each drafted roofline row counts: its session's (perf.py's counters) where recorded, else the spec gate's
 py "$here/roofline_rows.py" "$C" "$F/pkg" "$tmp/flint/info.json" > "$tmp/flint/roofline_rows.json"
+# `make_info.py roofline --evidence`: a new session's evidence (its source inline, not a key of info.json's sources)
+# counts on top of info.json's: a local session's acceptance replaces the card's, a DevLab session's never does
+acc() {  # acc IN OUT ACCEPTANCE: the verify rows with another measured acceptance
+  py -c "import json, sys; rs = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+open(sys.argv[2], 'w').write(''.join(json.dumps(dict(r, acceptance={'decode_tps': float(sys.argv[3])})) + '\\n' for r in rs))" "$@"
+}
+acc "$F/evidence/verify_loom.jsonl" "$tmp/acc_local.jsonl" 0.5; acc "$F/evidence/verify_loom.jsonl" "$tmp/acc_dl.jsonl" 0.9
+py "$C/make_info.py" perf --loom-jsonl "$tmp/acc_local.jsonl" --llama-jsonl "$F/evidence/verify_llama.jsonl" --metrics decode \
+  "${SRC[@]}" -o "$tmp/ev_acc_local.json" 2>/dev/null
+py "$C/make_info.py" perf --loom-jsonl "$tmp/acc_dl.jsonl" --llama-jsonl "$F/evidence/verify_llama.jsonl" --metrics decode \
+  "${SRC[@]}" --source-kind devlab --run 3004 -o "$tmp/ev_acc_dl.json" 2>/dev/null
+dec() { py "$here/roofline_rows.py" "$C" "$F/pkg" "$tmp/flint/info.json" "$@" | py -c "import json, sys; print(json.load(sys.stdin)['metrics']['decode']['acceptance'])"; }
+[ "$(dec "$tmp/ev_acc_dl.json")" = 0.325 ] && [ "$(dec "$tmp/ev_acc_dl.json" "$tmp/ev_acc_local.json")" = 0.5 ] \
+  && echo "OK   flint: roofline --evidence counts a new local session's acceptance, never a DevLab one's" \
+  || { echo "FAIL flint: roofline --evidence sessions"; bad=1; }
 # a pre-loom-card/1 decision-model card through the one-time importer: an unstamped package (versions
 # recovered from the factory run and the report), its narrative report attached as REPORT.md
 cp "$D/repo/model.json" "$D/repo/model.json.lock" "$tmp/d1/"
