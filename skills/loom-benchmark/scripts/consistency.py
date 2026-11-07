@@ -9,15 +9,13 @@ usage: python consistency.py URL --model MODEL_ID [--n 4] [--pkg PKG --llama URL
 """
 import argparse
 import concurrent.futures as cf
-import glob
-import hashlib
 import json
 import os
 import sys
 
 import requests
 
-from bench_common import doc
+from bench_common import doc, kept_runs, loom_runs_key
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -41,15 +39,16 @@ def run(p):
 
 # gates.sh defers llama.cpp references (LLAMA_DEFER: requested with Loom stopped, then the gate re-runs). Concurrent
 # output depends on scheduling, so a re-run would diverge elsewhere and need new references every round: the Loom
-# measurements of a run whose references are pending are kept (keyed by the package's programs and the prompts) and
-# judged on the re-run, then dropped.
+# measurements of a run whose references are pending are kept (bench_common.loom_runs_key: the package, the Loom SDK
+# and the prompts) and judged on the re-run, then dropped; gates.sh clears kept runs when it starts.
 state = (os.environ.get("LLAMA_DEFER") or "") and os.environ["LLAMA_DEFER"] + ".loom.json"
-key = hashlib.sha256(json.dumps([a.model, prompts] + [open(f).read() for f in sorted(glob.glob(os.path.join(a.pkg or "-", "program", "*.loom")))]).encode()).hexdigest()
-kept = json.load(open(state)) if state and os.path.exists(state) else {}
-if kept.get("key") == key:
+key = loom_runs_key(a.pkg or "-", a.model, prompts)
+kept = kept_runs(state, key)
+if kept:
     alone, together, solo = kept["alone"], kept["together"], kept["solo"]
     print("judging the Loom runs kept from the previous round (their llama.cpp references were pending)")
 else:
+    kept = None
     alone = [run(p) for p in prompts]
     with cf.ThreadPoolExecutor(a.n) as ex:
         together = list(ex.map(run, prompts))
@@ -61,7 +60,7 @@ else:
 # near-tie, deterministically (Bolt-E4B, issue #39: alone miss vs again hit on 357 of 361 tokens, gap
 # 0.141). A prompt whose two alone runs took different paths runs alone again (up to twice) until two
 # runs share a path; a hit-vs-miss difference is then judged like a concurrent one (near-tie rule).
-if kept.get("key") != key:
+if not kept:
     again = [run(p) for p in prompts]
     solo = [[x, y] for x, y in zip(alone, again)]
     for i, p in enumerate(prompts):
@@ -107,9 +106,11 @@ if a.pkg and pairs:
                 pending = True
                 msg += "; llama.cpp reference pending"
             elif not top:
-                # llama.cpp lists no probabilities for a token that ends inside a UTF-8 character (byte fallback):
-                # no reference to judge the divergence by, so it is not a near-tie
-                msg += "; llama.cpp gave no top-k list at this position (byte-fallback token): not judged a near-tie"
+                # No reference to judge the divergence by (an error response, or no probabilities for a token that ends
+                # inside a UTF-8 character): not a near-tie
+                why = f"error {g.get('error') or g.get('_suspect')!r}" if g.get("error") or g.get("_suspect") or not g.get("tokens") \
+                    else "no top-k list for a byte-fallback token"
+                msg += f"; llama.cpp gave no reference at this position ({why}): not judged a near-tie"
             elif t1[k] in top and t2[k] in top:
                 gap_val = abs(top[t1[k]] - top[t2[k]])
                 msg += f"; llama.cpp log-prob gap between them {gap_val:.3f}"
