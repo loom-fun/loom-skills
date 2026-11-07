@@ -550,7 +550,12 @@ def cmd_roofline(a):
                 "skills_commit": a.skills_commit or commit}
     if dirty and not a.skills_commit:
         tool["dirty"] = True
-    block = roofline_block(facts, R.model_shape(gguf, cfg), acc, R, a.bw, a.flops, tool, os.path.basename(gguf), row_acc)
+    # A card states the machine its ceilings came from: default to the device this is running
+    # on (roofline.py's own default), so a card built on Strix Point does not publish Strix
+    # Halo ceilings.
+    bw = a.bw if a.bw is not None else R.BW
+    flops = a.flops if a.flops is not None else R.FLOPS
+    block = roofline_block(facts, R.model_shape(gguf, cfg), acc, R, bw, flops, tool, os.path.basename(gguf), row_acc)
     write_json(a.o, {"evidence": EVIDENCE_ID, "roofline": block})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {r['ceiling']}" for k, r in block["metrics"].items())
           + "".join(f"; {k} acceptance {r['acceptance']} ({r['acceptance_from']})" for k, r in block["metrics"].items()
@@ -615,8 +620,8 @@ def main(argv=None):
     r.add_argument("--evidence", nargs="*", help="evidence files whose sessions count on top of PKG/info.json's (perf: the "
                    "rows' acceptance; gates: spec_acceptance), e.g. a first card's, which has no info.json yet")
     r.add_argument("--skills-commit", help="record this loom-skills commit instead of the checkout's")
-    r.add_argument("--bw", type=float, default=216e9, help="memory bandwidth, bytes/s (roofline.py's default)")
-    r.add_argument("--flops", type=float, default=59e12, help="peak FLOP/s (roofline.py's default)")
+    r.add_argument("--bw", type=float, help="memory bandwidth, bytes/s (default: the resolved device, roofline.py)")
+    r.add_argument("--flops", type=float, help="peak FLOP/s (default: the resolved device, roofline.py)")
     r.add_argument("-o", required=True)
     a = ap.parse_args(argv)
     {"build": cmd_build, "perf": cmd_perf, "gates": cmd_gates, "roofline": cmd_roofline}[a.cmd](a)

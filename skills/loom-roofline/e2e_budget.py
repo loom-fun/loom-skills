@@ -41,7 +41,7 @@ def speeds(meta, tensors, cfg):
     geo = R.geometry(meta, cfg)
     geo["attn"] = R.attn_layers(tensors, geo["L"])
     wb, params, head, _ = R.weight_bytes(tensors, geo)
-    bw, fl = 216e9, 59e12
+    bw, fl = R.BW, R.FLOPS     # the resolved device; the same numbers ceilings() uses
     floor_s = geo["L"] * R.LAYER_US * 1e-6          # launches, norms, sync: per decode step, per layer
     dec = lambda c: 1 / ((wb + R.kv_read_bytes(geo, c)) / (bw * DEC_EFF) + floor_s)
     hb = tensors.get("output.weight", tensors.get("token_embd.weight"))[1]
