@@ -196,11 +196,15 @@ def main():
                 best = (kind, depth, tps)
             if depth:
                 measured[depth] = tps
-            # the prior is a starting point: climb while the best depth's neighbours are unmeasured (a method the
-            # reference ruled out climbs only when it comes within 10 % of the best candidate so far)
+            # the prior is a starting point: climb while the neighbours of the best depth, or of any depth within 5 %
+            # of it (the ranking below prefers the shallowest of those), are unmeasured (a method the reference ruled
+            # out climbs only when it comes within 10 % of the best candidate so far). Qwen3-4B with the 8B card's
+            # prior (depth 7): 5 and 7 tied, and the unmeasured 3 was fastest (short 104 vs 88, 32k 24.2 vs 14.8).
             if not queue and first and measured and (climb or max(measured.values()) >= 0.9 * best[2]):
-                i = allowed.index(max(measured, key=measured.get))
-                queue = [allowed[j] for j in (i - 1, i + 1) if 0 <= j < len(allowed) and allowed[j] not in measured]
+                top_m = max(measured.values())
+                near = sorted(allowed.index(d) for d, v in measured.items() if v >= 0.95 * top_m)
+                queue = sorted({allowed[j] for i in near for j in (i - 1, i + 1)
+                                if 0 <= j < len(allowed) and allowed[j] not in measured})
         if first:
             skipped[kind] = [d for d in allowed if d not in measured]
     if base is None:
