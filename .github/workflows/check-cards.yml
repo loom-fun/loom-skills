@@ -5,10 +5,10 @@ name: check-cards
 # Keep them deterministic and the template stable: fixture inputs must reproduce the golden files byte for byte.
 on:
   pull_request:
-    paths: ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py", "skills/loom-port-llm/starter/kit_source.py", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
+    paths: ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py", "skills/loom-port-llm/starter/kit_source.py", "skills/loom-org/scripts/**", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
   push:
     branches: [main]
-    paths: ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py", "skills/loom-port-llm/starter/kit_source.py", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
+    paths: ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py", "skills/loom-port-llm/starter/kit_source.py", "skills/loom-org/scripts/**", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
 
 permissions:
   contents: read
@@ -21,5 +21,5 @@ jobs:
       - name: Card generator matches the golden cards
         run: |
           python3 -m py_compile skills/loom-benchmark/scripts/card/*.py skills/loom-benchmark/scripts/machine_info.py \
-            skills/loom-port-llm/starter/kit_source.py .github/scripts/loom_factory.py
+            skills/loom-port-llm/starter/kit_source.py skills/loom-org/scripts/*.py .github/scripts/loom_factory.py
           skills/loom-benchmark/scripts/card/test/check.sh

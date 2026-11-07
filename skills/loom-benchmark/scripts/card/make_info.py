@@ -3,15 +3,18 @@
 
 info.json holds only what no package file records (see info_schema.json); render_card.py combines it with the
 package's model.json, model.json.lock and llm_config.json. Both scripts are pure functions of their inputs (no
-clock, no environment: the generator commit is an argument), so the same inputs give byte-identical files.
+clock, no environment: the generator commit is an input, by default the checkout's HEAD), so the same inputs give
+byte-identical files.
 
-  make_info.py build PKG --repo loom-fun/NAME --generator-commit SHA [--evidence EV.json ...]
+  make_info.py build PKG --repo loom-fun/NAME [--generator-commit SHA] [--evidence EV.json ...]
                          [--memory-bytes N] [--output DIR] [--license ID] [--report generated|attached] [-o info.json]
       PKG holds model.json (and model.json.lock, llm_config.json): card values the package already implies
       (tags, the default --output, a memory_bytes in model.json) are dropped. Evidence files apply in order.
-      --generator-commit: the loom-skills commit of these card scripts (git rev-parse HEAD, or "unknown").
+      --generator-commit: the loom-skills commit of these card scripts (default: this checkout's HEAD, or
+      "unknown" outside a git checkout).
       --from-info OLD.json: start from a published info.json (its sessions, gates, sources, roofline and DevLab
       sweeps) and apply the evidence files on top: how a card is regenerated when only new evidence arrives.
+      --repo defaults to OLD.json's repo.
 
   make_info.py perf --loom-jsonl LOOM.jsonl --llama-jsonl LLAMA.jsonl [--c4-loom F] [--c4-llama F]
                     --baseline-version llamacpp-rocm/bNNNN [--baseline-args "ARGS"] [--metrics decode,...]
@@ -19,7 +22,9 @@ clock, no environment: the generator commit is an argument), so the same inputs 
       perf.py logs (one engine per file; or --perf-log perf_log.jsonl with finalize.sh's labels final /
       llama-final) -> one measurement session: per-metric per-run values, their mean (decode, prefill) and the
       median of the c4_steady.py runs (4 streams). --metrics keeps only those metrics (a session that re-measured
-      some rows). --package records which programs were measured (card_lib.programs_sha256).
+      some rows). --package records which programs were measured (card_lib.programs_sha256). Rows that carry the
+      drafted-token acceptance of their decode requests (perf.py "acceptance", c4_steady.py JSON lines) give each
+      drafted metric its session's "acceptance" (mean of the runs).
 
   make_info.py gates FILE [FILE ...] [--time YYYY-MM-DDTHH:MM:SS] [--level L] [--spec-log F] [--package PKG]
                      [SOURCE] -o gates_evidence.json
@@ -32,9 +37,13 @@ clock, no environment: the generator commit is an argument), so the same inputs 
       The hardware ceiling of every card metric that has one (loom-roofline/roofline.py; needs the `gguf` Python
       package: run it with the tools venv). --gguf defaults to the checkpoint model.json.lock pins, in the Hugging
       Face cache; --cfg to PKG/llm_config.json. A drafting package's decode and 4-stream rows are ceilings of
-      speculative decoding: verify passes per second x (1 + acceptance x depth) tokens per pass, acceptance from
-      --acceptance, the spec_acceptance of --evidence (the run's gate evidence: a first card has no info.json yet),
-      or PKG/info.json's (none: those rows get no ceiling).
+      speculative decoding: verify passes per second x (1 + acceptance x depth) tokens per pass. Per row, the
+      acceptance measured in the same session as the card's value of that row (its "acceptance": perf.py and
+      c4_steady.py read loom-serve's counters around the timed requests), from PKG/info.json's sessions with the
+      --evidence files' sessions on top (a first card has no info.json yet); a row whose session recorded none
+      falls back to the spec gate's: --acceptance, else the card's spec_acceptance (none: no ceiling). Each row
+      records which ("acceptance_from": session | spec_gate): the gate's text can accept far more or less than the
+      row's workload, which moves that row's ceiling by the same factor.
 
   make_info.py devlab --loom-jsonl PERF.jsonl [--c4-loom F] --run ID --url JOB_URL [--runner NAME] [--date D]
                       [--package PKG] -o devlab_evidence.json
@@ -50,7 +59,8 @@ Evidence file (loom-card-evidence/2), every block optional:
    "card": {"license", "tags", "output", "memory_bytes", "features"},
    "versions": {"package": {"skills_commit", "hrx_loom"}},          # recovered, for packages built unstamped
    "performance": {"baseline": {"name", "version", "args"},
-                   "session": {"date", "source": SOURCE, "runs", "commands", "programs_sha256", "metrics"}},
+                   "session": {"date", "source": SOURCE, "runs", "commands", "programs_sha256",
+                               "metrics": {METRIC: {"loom", "baseline", "loom_runs", "baseline_runs", "acceptance"}}}},
    "gates": [{"name", "status", "level", "time", "source": SOURCE, "detail", "programs_sha256"}],
    "roofline": {"device", "tool", "checkpoint", "drafting", "metrics"},
    "devlab": {"sweep": {"date", "source": SOURCE, "runner", "commands", "programs_sha256", "metrics"}}}
@@ -138,6 +148,7 @@ def cmd_build(a):
     if a.from_info:   # a published card: its data first, then the new evidence on top
         old = load_json(a.from_info)
         require_valid(old, a.from_info)
+        a.repo = a.repo or old["repo"]
         if old["repo"] != a.repo:
             sys.exit(f"{a.from_info} is the card of {old['repo']}, not {a.repo}")
         card = json.loads(json.dumps(old["card"]))
@@ -179,6 +190,10 @@ def cmd_build(a):
             sw = dict(sw)
             sw["source"] = sources.add(sw["source"])
             sweeps = [s for s in sweeps if s["source"] != sw["source"]] + [sw]
+    if not a.repo:
+        sys.exit("make_info.py build: --repo is required without --from-info")
+    if not a.generator_commit:
+        a.generator_commit = skills_checkout(__file__)[0]
     for k, v in (("license", a.license), ("output", a.output), ("memory_bytes", a.memory_bytes)):
         if v is not None:
             card[k] = v
@@ -253,11 +268,14 @@ def perf_rows(path, kind=None, label=None):
     return rows
 
 
+DECODE = (("decode_tps", "decode"), ("decode_tps_2k", "decode_2k"), ("decode_tps_32k", "decode_32k"))
+
+
 def metric_samples(rows):
     """{metric: [values]} of perf.py rows (prefill samples bucketed by prompt tokens, as bench_common does)."""
     out = {}
     for r in rows:
-        for k, m in (("decode_tps", "decode"), ("decode_tps_2k", "decode_2k"), ("decode_tps_32k", "decode_32k")):
+        for k, m in DECODE:
             if r.get(k) is not None:
                 out.setdefault(m, []).append(r[k])
         for p in r.get("prefill", []) + r.get("prefill_long", []):
@@ -266,6 +284,28 @@ def metric_samples(rows):
         if r.get("agg_tps") is not None:
             out.setdefault("streams4", []).append(r["agg_tps"])
     return out
+
+
+def acceptance_samples(rows, c4_path=None):
+    """{metric: [drafted-token acceptance]} of perf.py rows ("acceptance" per decode request) and c4_steady.py JSON
+    lines ("acceptance" over the 4 streams): the acceptance of the text each drafted metric decoded."""
+    out = {}
+    for r in rows:
+        for k, m in DECODE:
+            if (r.get("acceptance") or {}).get(k) is not None:
+                out.setdefault(m, []).append(r["acceptance"][k])
+    for line in open(c4_path, encoding="utf-8") if c4_path else []:
+        if line.strip().startswith("{") and json.loads(line).get("acceptance") is not None:
+            out.setdefault("streams4", []).append(json.loads(line)["acceptance"])
+    return out
+
+
+def with_acceptance(metrics, acc):
+    """Adds each metric's session acceptance (mean of its runs) to metrics, in place."""
+    for k, vals in acc.items():
+        if k in metrics and vals:
+            metrics[k]["acceptance"] = round(statistics.mean(vals), 3)
+    return metrics
 
 
 def c4_samples(path):
@@ -317,6 +357,7 @@ def cmd_perf(a):
         if bs.get(k):
             m["baseline_runs"] = bs[k]
         metrics[k] = m
+    with_acceptance(metrics, acceptance_samples(loom_rows, a.c4_loom))
     dp = [len(ls[k]) for k in keep if k in ls and k != "streams4"]
     runs = {"decode_prefill": max(dp) if dp else None,
             "streams4": len(ls["streams4"]) if "streams4" in keep and ls.get("streams4") else None}
@@ -420,8 +461,9 @@ def cached_gguf(ck):
     return p if ck.get("revision") and os.path.exists(p) else None
 
 
-def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint):
-    """info.json "roofline" from roofline.py's model shape m (R: the roofline module)."""
+def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acceptance=None):
+    """info.json "roofline" from roofline.py's model shape m (R: the roofline module). A drafted row's ceiling counts
+    row_acceptance[metric] (measured in the row's own session) when given, else `acceptance` (the spec gate's)."""
     ceil = R.ceilings(m, bw, flops, (1000, 2000, 8000, 16000, 32000))
     spec = facts["spec"]
     tpp = round(1 + acceptance * spec[1], 3) if spec and acceptance is not None else None
@@ -434,9 +476,14 @@ def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint):
         if spec and key in DRAFTED_ROWS:
             ctx, streams = DRAFTED_ROWS[key]
             row = {"ceiling": None, "single_pass": round(c, 1)}
-            if tpp:
-                d = R.drafted_ceiling(m, spec[1], acceptance, bw, ctx=ctx, streams=streams)
-                row.update(ceiling=round(d, 1), efficiency=round(R.efficiency(m, rk, d, tokens_per_pass=tpp), 3))
+            acc, how = (row_acceptance or {}).get(key), "session"
+            if acc is None:
+                acc, how = acceptance, "spec_gate"
+            if acc is not None:
+                t = round(1 + acc * spec[1], 3)
+                d = R.drafted_ceiling(m, spec[1], acc, bw, ctx=ctx, streams=streams)
+                row.update(ceiling=round(d, 1), efficiency=round(R.efficiency(m, rk, d, tokens_per_pass=t), 3),
+                           acceptance=acc, acceptance_from=how, tokens_per_pass=t)
         metrics[key] = row
     return {"device": {"name": R.DEVICE if (bw, flops) == (R.BW, R.FLOPS) else f"{R.DEVICE}, overridden",
                        "bandwidth_bytes_per_s": bw, "peak_flops": flops},
@@ -444,6 +491,17 @@ def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint):
             "drafting": ({"method": spec[0], "depth": spec[1], "acceptance": acceptance, "tokens_per_pass": tpp}
                          if spec else None),
             "metrics": metrics}
+
+
+def drafted_acceptance(facts, sessions, override=None):
+    """(the spec gate's acceptance, {drafted metric: acceptance measured in its own session}) for the roofline, from
+    measurement sessions combined as a build combines them (PKG/info.json's, then the new evidence's: per metric the
+    last session that measured it). override: the gate's acceptance given on the command line."""
+    if not facts["spec"]:
+        return None, {}
+    card = card_metrics({"performance": {"sessions": sessions}})
+    gate = override if override is not None else card.get("spec_acceptance", ({}, 0))[0].get("loom")
+    return gate, {k: card[k][0]["acceptance"] for k in DRAFTED_ROWS if card.get(k, ({}, 0))[0].get("acceptance") is not None}
 
 
 def cmd_roofline(a):
@@ -457,13 +515,11 @@ def cmd_roofline(a):
         sys.exit(f"{facts['checkpoint']['file']} is not in the Hugging Face cache at the locked revision; pass --gguf")
     cfg_p = a.cfg or os.path.join(a.package, "llm_config.json")
     cfg = load_json(cfg_p) if os.path.exists(cfg_p) else {}
-    acc = a.acceptance
     info_p = os.path.join(a.package, "info.json")
-    for ev in (a.evidence or []) if acc is None and facts["spec"] else []:   # the run's gate evidence (before a first build)
-        v = (((load_json(ev).get("performance") or {}).get("session") or {}).get("metrics") or {}).get("spec_acceptance")
-        acc = (v or {}).get("loom", acc)
-    if acc is None and facts["spec"] and os.path.exists(info_p):
-        acc = (card_metrics(load_json(info_p)).get("spec_acceptance", ({}, 0))[0]).get("loom")
+    sessions = list(((load_json(info_p).get("performance") or {}).get("sessions") or [])
+                    if os.path.exists(info_p) else [])
+    sessions += [s for s in ((load_json(ev).get("performance") or {}).get("session") for ev in a.evidence or []) if s]
+    acc, row_acc = drafted_acceptance(facts, sessions, a.acceptance)
     script = os.path.join(rdir, "roofline.py")
     commit, dirty = skills_checkout(script)
     with open(script, "rb") as f:
@@ -471,21 +527,23 @@ def cmd_roofline(a):
                 "skills_commit": a.skills_commit or commit}
     if dirty and not a.skills_commit:
         tool["dirty"] = True
-    block = roofline_block(facts, R.model_shape(gguf, cfg), acc, R, a.bw, a.flops, tool, os.path.basename(gguf))
+    block = roofline_block(facts, R.model_shape(gguf, cfg), acc, R, a.bw, a.flops, tool, os.path.basename(gguf), row_acc)
     write_json(a.o, {"evidence": EVIDENCE_ID, "roofline": block})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {r['ceiling']}" for k, r in block["metrics"].items())
-          + (f"; drafting x{block['drafting']['tokens_per_pass']} tokens per pass" if block["drafting"] else ""),
+          + "".join(f"; {k} acceptance {r['acceptance']} ({r['acceptance_from']})" for k, r in block["metrics"].items()
+                    if r.get("acceptance_from")),
           file=sys.stderr)
 
 
 # ---------------------------------------------------------------- DevLab sweep -> evidence
 
-def devlab_sweep(loom_rows, c4_vals, source, runner=None, date=None, commands=None, psha=None):
+def devlab_sweep(loom_rows, c4_vals, source, runner=None, date=None, commands=None, psha=None, c4_path=None):
     """One DevLab sweep: the card's metrics from a DevLab job's perf.py rows and c4_steady.py runs (Loom only)."""
     ls = metric_samples(loom_rows)
     if c4_vals:
         ls["streams4"] = c4_vals
     metrics = {k: {"loom": summary(k, ls[k]), "loom_runs": ls[k]} for k in METRIC_KEYS if ls.get(k)}
+    with_acceptance(metrics, acceptance_samples(loom_rows, c4_path))
     date = date or max([r["time"][:10] for r in loom_rows if r.get("time")] or [None], key=lambda x: x or "")
     return {"date": date, "source": source, "runner": runner, "commands": list(commands or []),
             "programs_sha256": psha, "metrics": metrics}
@@ -494,7 +552,7 @@ def devlab_sweep(loom_rows, c4_vals, source, runner=None, date=None, commands=No
 def cmd_devlab(a):
     a.source_kind = "devlab"
     sw = devlab_sweep(perf_rows(a.loom_jsonl, "loom"), c4_samples(a.c4_loom) if a.c4_loom else [], source_arg(a),
-                      a.runner, a.date, a.command, programs_sha256(a.package) if a.package else None)
+                      a.runner, a.date, a.command, programs_sha256(a.package) if a.package else None, a.c4_loom)
     write_json(a.o, {"evidence": EVIDENCE_ID, "devlab": {"sweep": sw}})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {m['loom']}" for k, m in sw["metrics"].items()), file=sys.stderr)
 
@@ -513,8 +571,9 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build")
     b.add_argument("pkg")
-    b.add_argument("--repo", required=True)
-    b.add_argument("--generator-commit", required=True, help="loom-skills commit of the card scripts, or 'unknown'")
+    b.add_argument("--repo", help="loom-fun/NAME (default with --from-info: its repo)")
+    b.add_argument("--generator-commit", help="loom-skills commit of the card scripts, or 'unknown' (default: this "
+                   "checkout's HEAD)")
     b.add_argument("--evidence", nargs="*")
     b.add_argument("--memory-bytes", type=int)
     b.add_argument("--output")
@@ -550,9 +609,10 @@ def main(argv=None):
     r.add_argument("--package", required=True, help="the package (model.json, model.json.lock, llm_config.json)")
     r.add_argument("--gguf", help="the checkpoint (default: model.json.lock's, in the Hugging Face cache)")
     r.add_argument("--cfg", help="the port's cfg.json (default: PKG/llm_config.json)")
-    r.add_argument("--acceptance", type=float, help="speculative decoding acceptance (default: the --evidence files' "
-                   "spec_acceptance, e.g. make_info.py gates output, else PKG/info.json's)")
-    r.add_argument("--evidence", nargs="*", help="evidence files to read spec_acceptance from (a package with no info.json yet)")
+    r.add_argument("--acceptance", type=float, help="the spec gate's acceptance, the fallback for drafted rows whose "
+                   "session recorded none (default: the card's spec_acceptance, from the --evidence files or PKG/info.json)")
+    r.add_argument("--evidence", nargs="*", help="evidence files whose sessions count on top of PKG/info.json's (perf: the "
+                   "rows' acceptance; gates: spec_acceptance), e.g. a first card's, which has no info.json yet")
     r.add_argument("--skills-commit", help="record this loom-skills commit instead of the checkout's")
     r.add_argument("--bw", type=float, default=216e9, help="memory bandwidth, bytes/s (roofline.py's default)")
     r.add_argument("--flops", type=float, default=59e12, help="peak FLOP/s (roofline.py's default)")

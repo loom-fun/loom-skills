@@ -3,7 +3,8 @@
 
 usage: org_status.py [--org loom-fun] [--targets ranked.json] [--cache DIR] [-o status.json]
 
-For each model repo in the org, reads its model.json, model.json.lock, llm_config.json and info.json and reports:
+For each model repo in the org, reads its model.json, model.json.lock, llm_config.json, info.json and program/*.loom
+(downloaded again only when the Hub's git blob id changed) and reports:
   category  A = card made by the current skill: schema loom-card/2 and "report": "generated"
             B = card exists but came from an older skill (e.g. "report": "attached", imported by import_card.py)
                 or an older schema; never use a B repo as a reference
@@ -13,13 +14,19 @@ For each model repo in the org, reads its model.json, model.json.lock, llm_confi
   perf      the performance guardrails (card_lib.perf_flags): far = metrics whose Loom value is below FAR_FRACTION x
             the efficiency Loom ports have demonstrated (roofline); disagree = metrics where the latest DevLab sweep
             and the card's Loom value differ by more than DEVLAB_TOLERANCE; rounds = DevLab sweeps in a row that
-            disagree
+            disagree; stale = metrics whose card value was measured on programs other than the repo's
+            (card_lib.stale_metrics: the session's programs_sha256 vs the published program/*.loom)
+  generator the loom-skills commit that generated the programs: llm_config.json "generator".skills_commit (build.py's
+            stamp), else info.json's recovered versions.package.skills_commit; generator_source says which
   quant     the checkpoint's quant (card_lib.quant_of); anything but plain Q4_K_M is flagged
-With --targets (rank_models.py output), matches repos to target models by the checkpoint's base model and assigns
+With --targets (rank_models.py output, {"models": [...]}, or a plain list of such entries or of model ids; a
+missing rank is the entry's position, 1-based), matches repos to target models by the checkpoint's base model and assigns
 each target one action:
   create  no repo for the model                         -> loop step 1 (port + optimize, publish)
   update  only a category B repo, or one not built from plain Q4_K_M -> loop step 1, from the best A reference
   fix     category A with a failing gate                -> loop step 4 (fix the skill, regenerate)
+  remeasure  category A, a card value measured on other programs (perf.stale) -> a fresh local session (Loom and
+             llama.cpp, same programs) before any performance judgement: far and disagree are judged on that value
   investigate  category A, a performance guardrail flag -> loop step 5 (local GPU worker, loom-optimize; a deep
                debugging session once DEEP_DEBUG_ROUNDS sweeps in a row disagree: "deep_debug": true)
   sweep   category A, gates or metrics missing          -> loop step 3 (DevLab sweep)
@@ -29,6 +36,7 @@ user; never delete a repo on your own).
 """
 import argparse
 import concurrent.futures as cf
+import hashlib
 import json
 import os
 import re
@@ -39,13 +47,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "..", "loom-benchmark", "scripts", "card"))
 from card_lib import (DEEP_DEBUG_ROUNDS, GATE_NAMES, METRIC_KEYS, ROOFLINE_METRIC, SCHEMA_ID,  # noqa: E402
-                      devlab_latest, gate_applies, load_package, metric_applies, package_facts, perf_flags, quant_of)
+                      devlab_latest, gate_applies, generator_commit, load_package, metric_applies, package_facts,
+                      perf_flags, programs_sha256, quant_of)
 
 from hub import HF, get_json  # noqa: E402
 from hub import fetch as fetch_bytes  # noqa: E402
 FILES = ("model.json", "model.json.lock", "llm_config.json", "info.json")
 VARIANT = re.compile(r"(-gguf|-bf16|-fp16|-qat.*|-mobile.*|-unquantized)$", re.I)
-ORDER = {"fix": 0, "investigate": 1, "update": 2, "create": 3, "sweep": 4, "done": 5}
+ORDER = {"fix": 0, "remeasure": 1, "investigate": 2, "update": 3, "create": 4, "sweep": 5, "done": 6}
 
 
 
@@ -53,6 +62,34 @@ ORDER = {"fix": 0, "investigate": 1, "update": 2, "create": 3, "sweep": 4, "done
 def group_key(model_id):
     org, name = model_id.split("/", 1)
     return f"{org.lower()}/{VARIANT.sub('', name).lower()}"
+
+
+def git_blob_id(path):
+    """The git blob id of a local file (the Hub tree API's "oid" of a non-LFS file)."""
+    with open(path, "rb") as f:
+        data = f.read()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def fetch_programs(repo, d):
+    """The repo's program/*.loom into d/program (for card_lib.programs_sha256): only files whose blob id changed are
+    downloaded; files the repo no longer has are removed."""
+    tree = get_json(f"{HF}/api/models/{repo}/tree/main/program") or []
+    want = {os.path.basename(t["path"]): t.get("oid") for t in tree
+            if t.get("type") == "file" and t["path"].endswith(".loom")}
+    pd = os.path.join(d, "program")
+    os.makedirs(pd, exist_ok=True)
+    for n in os.listdir(pd):
+        if n not in want:
+            os.remove(os.path.join(pd, n))
+    for n, oid in want.items():
+        p = os.path.join(pd, n)
+        if oid and os.path.exists(p) and git_blob_id(p) == oid:
+            continue
+        b = fetch_bytes(f"{HF}/{repo}/resolve/main/program/{n}")
+        if b is not None:
+            with open(p, "wb") as o:
+                o.write(b)
 
 
 def fetch(repo, cache):
@@ -67,6 +104,8 @@ def fetch(repo, cache):
         else:
             with open(p, "wb") as o:
                 o.write(b)
+    if os.path.exists(os.path.join(d, "info.json")):   # a card: its sessions name the programs they measured
+        fetch_programs(repo, d)
     return d
 
 
@@ -77,13 +116,13 @@ def assess(repo, d):
         return out
     facts = package_facts(load_package(d))
     ck = facts["checkpoint"]
-    out.update(checkpoint=ck["repo"], file=ck["file"], quant=quant_of(ck["file"]),
-               generator=(facts.get("generator") or {}).get("commit"))
+    out.update(checkpoint=ck["repo"], file=ck["file"], quant=quant_of(ck["file"]))
     info_p = os.path.join(d, "info.json")
-    if not os.path.exists(info_p):
+    info = json.load(open(info_p)) if os.path.exists(info_p) else {}
+    out["generator"], out["generator_source"] = generator_commit(facts.get("generator"), info.get("versions"))
+    if not info:
         out["notes"].append("no info.json: no card")
         return out
-    info = json.load(open(info_p))
     if info.get("schema") == SCHEMA_ID and info.get("report") == "generated":
         out["category"] = "A"
     out["report"] = info.get("report")
@@ -107,7 +146,8 @@ def assess(repo, d):
         sweep = (devlab_latest(info) or {}).get("metrics") or {}
         out["missing"] += [f"devlab:{k}" for k in ROOFLINE_METRIC
                            if metric_applies(k, facts["kind"], facts["features"]) and k not in sweep]
-        out["perf"] = perf_flags(info, facts["kind"], facts["features"])
+        out["programs_sha256"] = programs_sha256(d)
+        out["perf"] = perf_flags(info, facts["kind"], facts["features"], programs=out["programs_sha256"] or "")
     if out["quant"] != "Q4_K_M" or re.search(r"UD-", ck["file"]):
         out["notes"].append(f"checkpoint is {ck['file']}, not plain Q4_K_M")
     return out
@@ -140,8 +180,12 @@ def main():
         p = r.get("perf") or {}
         return bool(p.get("far") or p.get("disagree"))
 
+    def stale(r):
+        return bool((r.get("perf") or {}).get("stale"))
+
     def flag_text(p):
-        out = [f"far {k} {v[0]:.0%} of roofline (demonstrated {v[1]:.0%})" for k, v in p["far"].items()]
+        out = [f"stale {k} (measured programs {v[:8]})" for k, v in (p.get("stale") or {}).items()]
+        out += [f"far {k} {v[0]:.0%} of roofline (demonstrated {v[1]:.0%})" for k, v in p["far"].items()]
         out += [f"DevLab {k} {v:+.0%}" for k, v in p["disagree"].items()]
         if p["rounds"]:
             out.append(f"{p['rounds']} sweep(s) in a row disagree" + (" -> deep debug" if p["rounds"] >= DEEP_DEBUG_ROUNDS else ""))
@@ -153,11 +197,15 @@ def main():
         print(f"{r['category']}  {r['repo'][:58]:58} {(r.get('file') or '?')[:40]:40} "
               f"failing={','.join(r['failing']) or '-'} missing={len(r['missing'])}"
               + (f"  [{'; '.join(r['notes'])}]" if r["notes"] else "")
-              + (f"  perf: {flag_text(r['perf'])}" if flagged(r) else ""))
+              + (f"  perf: {flag_text(r['perf'])}" if flagged(r) or stale(r) else ""))
     result = {"org": a.org, "repos": status}
 
     if a.targets:
-        targets = json.load(open(a.targets))["models"]
+        targets = json.load(open(a.targets))
+        targets = targets["models"] if isinstance(targets, dict) else targets
+        targets = [dict({"model": t} if isinstance(t, str) else t) for t in targets]
+        for i, t in enumerate(targets, 1):
+            t.setdefault("rank", i)   # a plain list: rank by order
         by_base = {}
         for r in status:
             if r.get("base"):
@@ -174,6 +222,8 @@ def main():
                 action = "update"   # older skill, or not the target's plain Q4_K_M
             elif primary["failing"]:
                 action = "fix"
+            elif stale(primary):
+                action = "remeasure"   # the card's Loom value describes other programs: a fresh local session first
             elif flagged(primary):
                 action = "investigate"   # a performance guardrail: back to a local GPU worker
             elif primary["missing"]:
@@ -194,7 +244,7 @@ def main():
         for w in sorted(work, key=lambda w: (ORDER[w["action"]], w["rank"] or 0)):
             print(f"{w['action']:11} #{w['rank']:<3} {w['model'][:50]:50} {w['repo'] or ''}"
                   + (f"  dup: {', '.join(w['duplicates'])}" if w["duplicates"] else "")
-                  + (f"  [{flag_text(w['perf'])}]" if w["action"] == "investigate" else ""))
+                  + (f"  [{flag_text(w['perf'])}]" if w["action"] in ("investigate", "remeasure") else ""))
         if extra:
             print("\nnot a target (keep or retire: ask the user): " + ", ".join(extra))
         result.update(work=work, extra=extra, counts=counts)

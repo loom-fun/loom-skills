@@ -33,6 +33,7 @@
       ]
      },
      "streams4": {
+      "acceptance": 0.52,
       "loom": 112.8,
       "loom_runs": [
        112.8
@@ -294,6 +295,7 @@
     "date": "2026-11-07",
     "metrics": {
      "decode": {
+      "acceptance": 0.325,
       "baseline": 70.6,
       "baseline_runs": [
        70.2,
@@ -318,7 +320,7 @@
       ]
      }
     },
-    "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+    "programs_sha256": "aef7c526a984ca6c1687156c3c62ada8d82e27d6945875090811806b6b690cf9",
     "runs": {
      "decode_prefill": 2,
      "streams4": null

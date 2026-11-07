@@ -56,13 +56,17 @@ references. For each target it assigns one action, and lists repos that duplicat
 | `create` | no repo | step 1 |
 | `update` | only a B repo, or one not built from plain Q4_K_M | step 1, from the best A reference; republish to the same repo if its checkpoint is the target's plain Q4_K_M, else a new repo |
 | `fix` | A, a gate fails | step 4 |
+| `remeasure` | A, a card value measured on programs other than the repo's (`perf.stale`) | a fresh local session (step 5) |
 | `investigate` | A, a performance guardrail flag (far from roofline, or local vs DevLab disagree) | step 5 |
 | `sweep` | A, applicable gates, metrics, the roofline or DevLab values have no evidence | step 3 |
 | `done` | A, every applicable gate passes, every applicable metric measured locally and on DevLab, no flag | nothing |
 
 "Applicable" is the card generator's own rule (`card_lib.gate_applies` / `metric_applies`): vision only with a
 projector, spec only with drafting, and so on. Never delete or retire a repo yourself: list duplicates and
-non-targets for the user to decide.
+non-targets for the user to decide. `--targets` takes `rank_models.py` output (`{"models": [...]}`) or a plain
+list (entries or model ids; rank by order when absent). Each repo's `generator` is the loom-skills commit that
+generated its programs: `llm_config.json` `"generator"` (build.py's stamp), else the card's recovered one
+(`generator_source` says which).
 
 ## Order: references first
 
@@ -70,8 +74,8 @@ Group the targets by GGUF architecture and family. In each group, port the model
 reference first (usually the smallest, so its loop is fastest), publish it as category A, then derive the others
 from it: Qwen3.5-4B, then 9B, 2B and 0.8B; Qwen3.6-35B-A3B, then Ornith-1.5-35B-A3B and 122B (same `qwen35moe`
 shape). Adjacent families reuse building blocks (hybrid attention, MoE routing, vision tower, chat format,
-drafter), so after every publish, re-run the reference lookup for the queue. Within that order, go by action
-(`fix`, `investigate`, then `update` and `create` by rank, then `sweep`). New architectures with no reference (`org_status` and
+drafter), so after every publish, re-run the reference lookup (`find_reference.py rank`) for the queue. Within that order, go by action
+(`fix`, `remeasure`, `investigate`, then `update` and `create` by rank, then `sweep`). New architectures with no reference (`org_status` and
 the lookup both say so) are the most expensive; start them early so they run in parallel with derived ports.
 
 ## The loop
@@ -86,7 +90,26 @@ picked up on a later pass of the loop, not awaited.
 ### 1. Port and optimize (worker subagent, local GPU)
 
 One worker per model runs `loom-port-llm` then `loom-optimize`, starting from the best category A reference
-(`loom-port-llm`'s reference lookup; never a B repo). A reference saves time; it never lowers the bar.
+(never a B repo). A reference saves time; it never lowers the bar.
+
+- **The reference lookup** is `loom-port-llm/find_reference.py`, which `port.sh` runs as stage 1b by default
+  (`REFERENCE=off` skips it, `REFERENCE=loom-fun/REPO` picks one). It queries the org live, so a package published
+  a minute ago is a reference right away; it records `llm_config.json` `"reference"` (repo, commit, reasons, what
+  was taken) and seeds `draft/tune.py` with the reference's measured drafting table. An A repo built from a quant
+  other than plain Q4_K_M is still used as a reference, flagged in the ranking (the repo itself is `update`).
+- **Scripted DevLab ports** (no agent, no local GPU): `.github/workflows/devlab-port.yml` runs on the
+  `devlab-port` label, one matrix job per entry of `.github/devlab/port.json`, each `.github/scripts/port_e2e.sh`:
+  port -> qualify -> finalize with `NEEDLE_FULL=0` -> card evidence -> `publish/` (the package without weights,
+  in the artifact). qualify still runs `LEVEL=quick`, its half-context needle included.
+- **Campaign waves** (practice): put each wave on its own branch from main with only `.github/devlab/port.json`
+  changed and a draft PR based on **main** (GitHub creates no pull_request runs while a PR has merge conflicts).
+  Start the next wave by removing and re-adding the label through the REST API; `gh pr edit` label edits fail
+  silently in this repo:
+  `gh api -X DELETE repos/loom-fun/loom-skills/issues/N/labels/devlab-port`, then
+  `gh api -X POST repos/loom-fun/loom-skills/issues/N/labels -f 'labels[]=devlab-port'`.
+- **A DevLab-ported model**: publish it from the job's evidence (`make_info.py ... --source-kind devlab`, as
+  port_e2e.sh writes it), then a short local session (Loom and llama.cpp, quiet GPU, the same programs) replaces
+  the primary session, so every card's main comparison is local.
 
 - **Local GPU: one job at a time.** One model loaded, one gate run, benchmark or kernel-test batch at any moment.
   Several workers may run their CPU phases (inspection, program generation, card rendering) in parallel, but
@@ -104,7 +127,9 @@ One worker per model runs `loom-port-llm` then `loom-optimize`, starting from th
 ### 2. Publish the initial result
 
 The worker publishes the package and its generated card (`loom-benchmark` "Hugging Face model card"; never
-hand-written). Gates not yet run render as "no evidence"; that's expected and honest. The repo is now category A
+hand-written): `card/publish_package.py prepare PKG DIR --source REPO` (the GGUF repo), then `make_info.py build`
+and `render_card.py DIR`, then `publish_package.py upload DIR --repo loom-fun/NAME` (`--card-only` for a card
+update: README.md, info.json and REPORT.md only). Gates not yet run render as "no evidence"; that's expected and honest. The repo is now category A
 and `org_status` shows it as `sweep` until step 3 fills it.
 
 ### 3. Sweep on DevLab Dispatch: missing gates, the DevLab performance column, the roofline
@@ -121,9 +146,12 @@ card over and move the local GPU on to the next item.
    - `card/pull_devlab.py loom-fun/REPO --package DIR -o ev_devlab.json`: the gates, and the sweep's Loom numbers
      with the run, job URL, runner and date (skips jobs that measured an older revision of the package);
    - `card/make_info.py roofline --package DIR -o ev_roofline.json` (tools venv, CPU only: reads the GGUF), once
-     per card or after its acceptance changed;
-   - `card/make_info.py build DIR --from-info DIR/info.json --evidence ev_devlab.json ev_roofline.json ...`,
-     `render_card.py DIR`, and upload only README.md, info.json and REPORT.md.
+     per card or after a session changed its acceptance (a first card, with no info.json yet: add
+     `--evidence ev_perf.json ev_gates.json`). A drafted row's ceiling counts the acceptance measured in the row's own
+     session (perf.py, c4_steady.py), else the spec gate's, and the card says which;
+   - `card/make_info.py build DIR --from-info DIR/info.json --evidence ev_devlab.json ev_roofline.json ...` (the
+     repo comes from info.json, the generator commit from the checkout), `render_card.py DIR`, and
+     `publish_package.py upload DIR --repo loom-fun/REPO --card-only`.
 3. The DevLab numbers fill the card's own DevLab column, next to the roofline. They never replace the Loom column
    and are never compared with the llama.cpp column: that comparison stays one session, one machine.
 4. Missing local metrics: measure them in one session with both engines on the same machine (a quiet local
@@ -140,6 +168,12 @@ the regenerated models pass. Re-run `org_status.py`: anything still red goes rou
 
 ### 5. Investigate performance flags (local GPU worker)
 
+First, **stale values** (action `remeasure`, `perf.stale`): a card value whose session measured programs other
+than the repo's (`card_lib.stale_metrics`: the session's `programs_sha256` vs the published `program/*.loom`; the
+card marks them †) describes another build, and the far and disagree flags are judged on it. A local GPU worker
+runs a fresh local session (Loom and llama.cpp, quiet GPU, the repo's programs) and republishes the card; only
+then are the flags below worth acting on.
+
 `org_status.py` flags a category A card (action `investigate`, details under `perf`) when:
 
 - **far from roofline:** a metric's Loom value is below half the efficiency Loom ports have demonstrated for that
@@ -153,7 +187,9 @@ Then:
 1. Dispatch a local GPU worker with `loom-optimize` on the flagged metrics: a far-from-roofline metric is a
    performance problem to find and fix (ablate, compare with the roofline's gap budget, apply the lever); a
    disagreement is a performance problem too until shown otherwise (a setting that only helps on the dev machine,
-   a cache or warm-up effect, a race with the measurement).
+   a cache or warm-up effect, a race with the measurement). For a small drafted model far from its decode roofline,
+   the lever is the verify pass and the drafter's cost (the ceiling does not count the drafter); the best depth
+   depends on the workload's acceptance, so judge it on the session's own acceptance, not the spec gate's.
 2. The worker republishes the card with a fresh local session (step 2), and the next sweep (step 3) re-measures on
    DevLab. Move the local GPU to the next item meanwhile.
 3. **Deep debugging session** when local and DevLab still disagree after that (`perf.rounds` >=
@@ -179,6 +215,17 @@ duplicate and non-target lists to keep or retire.
   vary by 1-7 % (max-min over the mean), the noisy ones (decode at 2k, prefill at 1k) by up to 14-19 %; the
   healthy cards' largest local vs DevLab gap is 17 % (Qwen3.8-27B 32k prefill); Flint's prefill gaps are 36-49 %.
 - Recalibrate both when a port moves `EFF` / `EFF_DRAFTED` (`loom-roofline`) or the runner spread changes.
+  `EFF_DRAFTED` was set against ceilings that counted the spec gate's acceptance; once the healthy cards'
+  sessions record their own acceptance (perf.py), recompute it from those ceilings.
+
+### Is DevLab fit for performance numbers?
+
+DevLab's numbers count only while DevLab measures like the local machine. If DevLab is consistently slower than
+local across cards **for both engines** (llama.cpp too, not just Loom), stop using it for performance: measure
+everything locally and replace the DevLab-measured numbers (primary sessions and sweeps). Check it with a matched
+run (the same cards, Loom and llama.cpp, on DevLab and locally). The last check (matched run 42300147814):
+llama.cpp was equal or faster on DevLab for all four cards and Loom's gaps were model-specific, so DevLab stays
+for sweeps and its disagreements are Loom performance problems (step 5).
 
 ## Done
 
@@ -193,5 +240,5 @@ target is done and the user has decided on the rest.
 | Script | Does |
 |---|---|
 | `scripts/rank_models.py` | draft target list: per-model daily GGUF downloads, fits `--max-gb`, plain Q4_K_M source |
-| `scripts/org_status.py` | category A/B per org repo, missing and failing gates and metrics, performance guardrails (`card_lib.perf_flags`), one action per target |
+| `scripts/org_status.py` | category A/B per org repo, missing and failing gates and metrics, performance guardrails (`card_lib.perf_flags`, stale values included), generator commit, one action per target |
 | `scripts/hub.py` | Hub reads with the user's token and rate-limit retries (used by both) |

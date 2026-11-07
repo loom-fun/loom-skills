@@ -11,15 +11,17 @@ F=$here/flint; D=$here/d1
 GEN=0123456789abcdef0123456789abcdef01234567   # the card generator commit is an input, never read by the renderer
 SRC=(--device "$F/evidence/device.json" --hrx-loom "$F/evidence/hrx_loom.json" --package "$F/pkg")
 # a current card: a stamped package (llm_config.json "generator"), drafting, a local perf session, a second
-# session that re-measured two rows a day later, local gates with the spec gate's acceptance, and DevLab gates
-# (an older failing agent run that the local pass supersedes, a full-context needle); REPORT.md generated
+# session that re-measured two rows a day later on another build of the programs (stale: the card marks those
+# rows; its decode rows carry their drafted-token acceptance), local gates with the spec gate's acceptance, and
+# DevLab gates (an older failing agent run that the local pass supersedes, a full-context needle); REPORT.md generated
 py "$C/make_info.py" perf --loom-jsonl "$F/evidence/loom.jsonl" --llama-jsonl "$F/evidence/llama.jsonl" \
   --c4-loom "$F/evidence/c4_loom_runs.txt" --c4-llama "$F/evidence/c4_llama_runs.txt" --baseline-version b1355 \
   --baseline-args "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model ~/drafter.gguf --spec-draft-n-max 3 -ngld 99 -c 65536 -kvu -np 4" \
   --command "perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign" \
   --date 2026-11-06 "${SRC[@]}" -o "$tmp/perf.json" 2>/dev/null
+mkdir -p "$tmp/rebuilt"; cp -r "$F/pkg/." "$tmp/rebuilt/"; echo "// another build" >> "$tmp/rebuilt/program/llm.loom"
 py "$C/make_info.py" perf --loom-jsonl "$F/evidence/verify_loom.jsonl" --llama-jsonl "$F/evidence/verify_llama.jsonl" \
-  --metrics decode,prefill_1k "${SRC[@]}" -o "$tmp/perf2.json" 2>/dev/null
+  --metrics decode,prefill_1k "${SRC[@]}" --package "$tmp/rebuilt" -o "$tmp/perf2.json" 2>/dev/null
 py "$C/make_info.py" gates "$F/evidence/gates.json" "${SRC[@]}" -o "$tmp/gates.json" 2>/dev/null
 # the roofline (evidence/roofline.json: `make_info.py roofline --package pkg --acceptance 0.68` on the real GGUF; CI
 # has neither the GGUF nor the gguf package) and two DevLab sweeps of Loom alone (the nightly's perf.jsonl and
@@ -37,11 +39,16 @@ py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --ge
 py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --memory-bytes 67000000000 \
   --output flint --report generated --evidence "$tmp/perf.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
   "$tmp/devlab1.json" -o "$tmp/flint_old.json" 2>/dev/null
-py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --from-info "$tmp/flint_old.json" \
+# (--repo comes from the old info.json; without --generator-commit it is this checkout's HEAD)
+py "$C/make_info.py" build "$tmp/flint" --generator-commit $GEN --from-info "$tmp/flint_old.json" \
   --evidence "$F/evidence/roofline.json" "$tmp/devlab2.json" -o "$tmp/flint_regen.json" 2>/dev/null
-# the performance guardrails loom-org's org_status.py applies (card_lib.perf_flags)
-py -c "import json, sys; sys.path.insert(0, '$C'); import card_lib as c; print(c.dumps(c.perf_flags(c.load_json('$tmp/flint/info.json'))), end='')" \
+py "$C/make_info.py" build "$tmp/flint" --from-info "$tmp/flint_old.json" -o "$tmp/flint_head.json" 2>/dev/null
+head_sha=$(git -C "$C" rev-parse HEAD 2>/dev/null || echo unknown)
+# the performance guardrails loom-org's org_status.py applies (card_lib.perf_flags, with the repo's programs: stale)
+py -c "import sys; sys.path.insert(0, '$C'); import card_lib as c; print(c.dumps(c.perf_flags(c.load_json('$tmp/flint/info.json'), programs=c.programs_sha256('$F/pkg'))), end='')" \
   > "$tmp/flint/flags.json"
+# the acceptance each drafted roofline row counts: its session's (perf.py's counters) where recorded, else the spec gate's
+py "$here/roofline_rows.py" "$C" "$F/pkg" "$tmp/flint/info.json" > "$tmp/flint/roofline_rows.json"
 # a pre-loom-card/1 decision-model card through the one-time importer: an unstamped package (versions
 # recovered from the factory run and the report), its narrative report attached as REPORT.md
 cp "$D/repo/model.json" "$D/repo/model.json.lock" "$tmp/d1/"
@@ -51,8 +58,11 @@ py "$C/make_info.py" build "$tmp/d1" --repo loom-fun/LiquidAI-d1-2B-loom --gener
 bad=0
 cmp -s "$tmp/flint/info.json" "$tmp/flint_regen.json" && echo "OK   flint: --from-info regenerates the same info.json" \
   || { echo "FAIL flint: --from-info + new evidence differs from building from all evidence"; diff "$tmp/flint/info.json" "$tmp/flint_regen.json"; bad=1; }
+py -c "import json, sys; v = json.load(open(sys.argv[1]))['versions']['card_generator']; sys.exit(v != sys.argv[2])" \
+  "$tmp/flint_head.json" "$head_sha" && echo "OK   flint: build without --generator-commit records the checkout's HEAD" \
+  || { echo "FAIL flint: build without --generator-commit did not record $head_sha"; bad=1; }
 for n in flint d1; do
-  files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json"
+  files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null
   py "$C/render_card.py" "$tmp/$n" -o "$tmp/${n}_README2.md" 2>/dev/null
   cmp -s "$tmp/$n/README.md" "$tmp/${n}_README2.md" || { echo "FAIL $n: two renders differ"; bad=1; }

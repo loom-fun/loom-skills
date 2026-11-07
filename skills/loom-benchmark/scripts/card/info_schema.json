@@ -91,7 +91,7 @@
       "properties": {
        "method": {"type": "string"},
        "depth": {"type": "integer"},
-       "acceptance": {"type": ["number", "null"], "description": "the card's spec_acceptance when computed; null: drafted rows have no ceiling"},
+       "acceptance": {"type": ["number", "null"], "description": "the spec gate's acceptance (the card's spec_acceptance) when computed: the fallback for drafted rows whose session recorded no acceptance of its own"},
        "tokens_per_pass": {"type": ["number", "null"]}
       }
      }]
@@ -170,7 +170,8 @@
     "loom": {"type": ["number", "null"]},
     "baseline": {"type": ["number", "null"]},
     "loom_runs": {"type": "array", "items": {"type": "number"}, "description": "per-run values the card value summarizes"},
-    "baseline_runs": {"type": "array", "items": {"type": "number"}}
+    "baseline_runs": {"type": "array", "items": {"type": "number"}},
+    "acceptance": {"type": "number", "minimum": 0, "maximum": 1, "description": "speculative decoding: accepted / proposed drafted tokens of this metric's own Loom requests (mean of the runs; perf.py, c4_steady.py), the acceptance its roofline ceiling counts"}
    }
   },
   "gate": {
@@ -189,7 +190,10 @@
    "properties": {
     "ceiling": {"type": ["number", "null"], "description": "tokens per second at the hardware limit (null: not computable, e.g. a drafted row without acceptance)"},
     "single_pass": {"type": "number", "description": "the ceiling without speculative decoding (drafted rows only)"},
-    "efficiency": {"type": "number", "description": "the fraction of the ceiling tuned Loom ports have demonstrated for this kind of metric (roofline.py EFF / EFF_DRAFTED); the far-from-roofline guardrail compares against it"}
+    "efficiency": {"type": "number", "description": "the fraction of the ceiling tuned Loom ports have demonstrated for this kind of metric (roofline.py EFF / EFF_DRAFTED); the far-from-roofline guardrail compares against it"},
+    "acceptance": {"type": "number", "minimum": 0, "maximum": 1, "description": "drafted rows: the acceptance this ceiling counts"},
+    "acceptance_from": {"enum": ["session", "spec_gate"], "description": "session: measured in the same session as the card's value of this row; spec_gate: the spec gate's (its text can accept more or less than the row's)"},
+    "tokens_per_pass": {"type": "number", "description": "drafted rows: 1 + acceptance x depth"}
    }
   },
   "sweep": {

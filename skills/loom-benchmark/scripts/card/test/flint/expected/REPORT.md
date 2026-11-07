@@ -17,7 +17,7 @@ How the values on this repository's model card were measured. Generated from `in
 - One engine runs at a time on the same machine, with the same GGUF. Loom rates are timed by the client; llama.cpp rates come from its server-side `timings`.
 - Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.
 - Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD DevLab Dispatch.
-- Roofline: per metric, the rate at the hardware limit computed from the GGUF's tensors by loom-roofline `roofline.py`: decode is memory bandwidth / bytes read per token (weights, active experts, KV cache), prefill is peak FLOP/s / flops per token, 4 streams reads the weights once for 4 tokens. With speculative decoding, decode and 4 streams are verify passes per second x (1 + acceptance x depth) tokens per pass.
+- Roofline: per metric, the rate at the hardware limit computed from the GGUF's tensors by loom-roofline `roofline.py`: decode is memory bandwidth / bytes read per token (weights, active experts, KV cache), prefill is peak FLOP/s / flops per token, 4 streams reads the weights once for 4 tokens. With speculative decoding, decode and 4 streams are verify passes per second x (1 + acceptance x depth) tokens per pass, with the acceptance measured in the row's own session (loom-serve's drafted-token counters around perf.py's decode request, or around c4_steady.py's streams), else the `spec` gate's.
 - DevLab: Loom alone, measured with the same scripts by the nightly sweep on an AMD DevLab Dispatch runner (the same Strix Halo hardware). It checks the local numbers on another machine; it is never compared with the llama.cpp column, which is measured in the same session as the Loom column.
 
 ## Session 1: local run, 2026-11-06
@@ -66,11 +66,11 @@ perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign
 
 - Device: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04.
 - Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).
-- Programs measured: sha256 `38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e`, the same as this repository's programs.
+- Programs measured: sha256 `aef7c526a984ca6c1687156c3c62ada8d82e27d6945875090811806b6b690cf9`, not the same as this repository's programs.
 
 | metric | engine | runs | value |
 |---|---|---|---|
-| decode tok/s, short prompt | Loom | 92.1, 92.7 | 92.4 |
+| decode tok/s, short prompt | Loom | 92.1, 92.7 | 92.4 (32 % of drafted tokens accepted) |
 | decode tok/s, short prompt | llama.cpp | 70.2, 71.0 | 70.6 |
 | prefill tok/s, 1k document | Loom | 950.2, 963.6 | 956.9 |
 | prefill tok/s, 1k document | llama.cpp | 1031.0, 1045.0 | 1038.0 |
@@ -80,19 +80,19 @@ perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign
 - Device: AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151), 216 GB/s, 59 TFLOP/s.
 - Tool: `skills/loom-roofline/roofline.py` sha256 `915576a9df574f4d5565c8b61151e622a737104f63b2cfc2d047617da1f863b7`, loom-skills `0123456789abcdef0123456789abcdef01234567`.
 - Checkpoint: `Flint-Q4_K_M.gguf`.
-- Speculative decoding: DFlash, depth 3, acceptance 68 %, 3.04 tokens per verify pass.
+- Speculative decoding: DFlash, depth 3; a drafted row's ceiling counts the acceptance measured in its own session, else the `spec` gate's (68 %, 3.04 tokens per verify pass).
 
-| metric | ceiling | without drafting | demonstrated efficiency |
-|---|---|---|---|
-| decode tok/s, short prompt | 177.8 | 95.4 | 52 % |
-| decode tok/s, 2k context | 173.4 | 91.6 | 52 % |
-| decode tok/s, 32k context | 141.3 | 67.1 | 52 % |
-| prefill tok/s, 1k document | 12248.4 | — | 33 % |
-| prefill tok/s, 2k document | 11945.5 | — | 33 % |
-| prefill tok/s, 8k document | 10484.7 | — | 33 % |
-| prefill tok/s, 16k document | 9014.9 | — | 33 % |
-| prefill tok/s, 32k document | 7040.8 | — | 33 % |
-| 4 streams, aggregate decode tok/s | 301.8 | 221.1 | 44 % |
+| metric | ceiling | without drafting | acceptance | demonstrated efficiency |
+|---|---|---|---|---|
+| decode tok/s, short prompt | 177.8 | 95.4 | 68 % (`spec` gate) | 52 % |
+| decode tok/s, 2k context | 173.4 | 91.6 | 68 % (`spec` gate) | 52 % |
+| decode tok/s, 32k context | 141.3 | 67.1 | 68 % (`spec` gate) | 52 % |
+| prefill tok/s, 1k document | 12248.4 | — | — | 33 % |
+| prefill tok/s, 2k document | 11945.5 | — | — | 33 % |
+| prefill tok/s, 8k document | 10484.7 | — | — | 33 % |
+| prefill tok/s, 16k document | 9014.9 | — | — | 33 % |
+| prefill tok/s, 32k document | 7040.8 | — | — | 33 % |
+| 4 streams, aggregate decode tok/s | 301.8 | 221.1 | 68 % (`spec` gate) | 44 % |
 
 ## DevLab sweep: [DevLab Dispatch run 1001](https://github.com/loom-fun/loom-skills/actions/runs/1001/job/2002), 2026-11-06
 
