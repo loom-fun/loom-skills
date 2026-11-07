@@ -173,15 +173,14 @@ if [ -n "$vmm" ]; then   # vision kernels vs NumPy, then the whole encoder vs re
 fi
 
 step "6/6 smoke test"
-if [ -n "$vmm" ]; then   # one image: the component compiles, rows reach the text model, the answer is sane
+if [ -n "$vmm" ]; then   # one image: the component compiles, rows reach the text model, the answer is about the image
   "$T" - "$here/../loom-benchmark/scripts" "http://127.0.0.1:$port" <<'EOF' || exit 6
 import sys; sys.path.insert(0, sys.argv[1])
 import requests, vision_golden as V
 im, _ = V.builtin_images()["shapes"]
 model = requests.get(sys.argv[2] + "/v1/models", timeout=30).json()["data"][0]["id"]
-r = V.request(sys.argv[2], model, V.data_url(im), "What shapes and colors are in this image?", 256, False)
-said = (r.get("reasoning", "") + " " + r.get("content", "")).lower()
-ok = "error" not in r and any(w in said for w in ("red", "blue", "green", "circle", "square", "triangle"))
+r = V.request(sys.argv[2], model, V.data_url(im), V.SHAPES_QUESTION, 256, False)
+ok = "error" not in r and any(V.about_shapes(r.get(k)) for k in ("content", "reasoning"))
 print("image:", "OK" if ok else "FAIL", repr(r.get("content") or r.get("reasoning") or r.get("error"))[:150], "prompt tokens", r.get("prompt_tokens"))
 sys.exit(0 if ok else 1)
 EOF

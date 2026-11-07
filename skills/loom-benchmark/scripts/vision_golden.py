@@ -19,7 +19,7 @@ Images: a built-in deterministic set (shapes + text, a chart, a dense text card,
 a tall and a wide aspect ratio: they exercise resize, both grid directions and the token limits) plus
 --images. Prints per-case lines and VISION_RESULT {"verdict": "PASS"|"FAIL", ...}.
 """
-import argparse, base64, io, json, math, os, sys
+import argparse, base64, io, json, math, os, re, sys
 
 import requests
 
@@ -65,6 +65,22 @@ def builtin_images():
     d.text((800, 130), "THE QUICK BROWN FOX 1234", fill=(120, 0, 0), font=font(90), anchor="mm")
     out["wide"] = (im, "What text is written in this image?")
     return out
+
+
+SHAPES_QUESTION = "What shapes and colors are in this image?"
+
+
+def about_shapes(reply):
+    """Whether a reply to SHAPES_QUESTION on the "shapes" image (a red circle, a blue rectangle, a green triangle on
+    white) is about that image: an English answer naming, as whole words, two of its three colors and one of its
+    shapes. A non-empty reply is not enough: a broken port answers in fluent, often multilingual, garbage, which
+    can still hold "red" inside other words. port.sh's image smoke check."""
+    text = (reply or "").lower()
+    letters = [c for c in text if c.isalpha()]
+    if not letters or sum(c.isascii() for c in letters) < 0.9 * len(letters):
+        return False
+    words = {w.rstrip("s") for w in re.findall(r"[a-z]+", text)}
+    return len(words & {"red", "blue", "green"}) >= 2 and bool(words & {"circle", "rectangle", "square", "triangle", "oval", "ellipse"})
 
 
 def data_url(im):

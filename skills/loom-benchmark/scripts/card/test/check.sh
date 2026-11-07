@@ -61,6 +61,33 @@ cmp -s "$tmp/flint/info.json" "$tmp/flint_regen.json" && echo "OK   flint: --fro
 py -c "import json, sys; v = json.load(open(sys.argv[1]))['versions']['card_generator']; sys.exit(v != sys.argv[2])" \
   "$tmp/flint_head.json" "$head_sha" && echo "OK   flint: build without --generator-commit records the checkout's HEAD" \
   || { echo "FAIL flint: build without --generator-commit did not record $head_sha"; bad=1; }
+# gate merge rules (make_info.py gate_supersedes): on the same programs a later lower-level pass keeps the higher-level
+# pass, a later failure always shows, and a pass on new programs replaces evidence on older ones; a published card's
+# date-only gate vs a timestamped job of the same day behaves the same
+gev() {  # gev OUT STATUS LEVEL TIME PROGRAMS_SHA256: one agent gate's evidence
+  py -c "import json, sys; o, st, lv, t, p = sys.argv[1:]; json.dump({'evidence': 'loom-card-evidence/2', 'gates': [{'name': 'agent',
+    'status': st, 'level': lv, 'time': t, 'source': {'kind': 'local'}, 'detail': None, 'programs_sha256': p}]}, open(o, 'w'))" "$@"
+}
+gate_case() {  # gate_case WHAT STATUS/LEVEL/SHA [--from-info F] --evidence EV...: the card's agent gate after the merge
+  local what=$1 want=$2 got; shift 2
+  py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint "$@" \
+    -o "$tmp/gc.json" 2>/dev/null
+  got=$(py -c "import json, sys; g = json.load(open(sys.argv[1]))['gates']['agent']; print(g['status'], g['level'], g.get('programs_sha256'), sep='/')" "$tmp/gc.json")
+  [ "$got" = "$want" ] && echo "OK   gates: $what" || { echo "FAIL gates: $what: $got, expected $want"; bad=1; }
+}
+gev "$tmp/g_full.json" pass full 2026-11-06T07:00:00 aaa
+gev "$tmp/g_quick.json" pass quick 2026-11-07T07:00:00 aaa
+gev "$tmp/g_qfail.json" fail quick 2026-11-07T07:00:00 aaa
+gev "$tmp/g_new.json" pass full 2026-11-07T07:00:00 bbb
+gate_case "quick pass after a full pass keeps the full pass" pass/full/aaa --evidence "$tmp/g_full.json" "$tmp/g_quick.json"
+gate_case "quick pass after a full pass, evidence in the other order" pass/full/aaa --evidence "$tmp/g_quick.json" "$tmp/g_full.json"
+gate_case "quick fail after a full pass shows the failure" fail/quick/aaa --evidence "$tmp/g_full.json" "$tmp/g_qfail.json"
+gate_case "full pass on new programs replaces the old programs' full pass" pass/full/bbb --evidence "$tmp/g_full.json" "$tmp/g_new.json"
+cp "$tmp/gc.json" "$tmp/g_pub.json"   # a published card (date-only gates): full pass on bbb on 2026-11-07
+gev "$tmp/g_sameday.json" pass quick 2026-11-07T09:00:00 bbb
+gate_case "published full pass, a same-day quick pass keeps it" pass/full/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
+gev "$tmp/g_sameday.json" fail quick 2026-11-07T09:00:00 bbb
+gate_case "published full pass, a same-day quick fail shows" fail/quick/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
 for n in flint d1; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null

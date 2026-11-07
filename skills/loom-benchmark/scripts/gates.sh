@@ -14,7 +14,7 @@
 #               on the published cards (.github/workflows/nightly-gates.yml).
 #   LEVEL=fast  golden + compare (20 short prompts + 1k-32k documents) and consistency (concurrent == sequential).
 #   LEVEL=quick (nightly CI; once before a new port's first card): fast + speculative-decoding equivalence (spec_check.py, when the package
-#               drafts), agent tool loop, sampling, needle at half the context
+#               drafts), agent tool loop (thinking on, and off when the template toggles it, as at dev), sampling, needle at half the context
 #               (at most 60k) compared with llama.cpp by the near-tie rule.
 #   NO_LLAMA=1  no llama.cpp runs this model: reference-free checks only (consistency, agent rendering/
 #               reuse/calls, sampling semantics, needle retrieval); report correctness as unverified.
@@ -113,19 +113,22 @@ tools=$("$T" -c "import json, sys; sys.path.insert(0, '$S/card'); import card_li
 t_start=$(date +%s)
 LL=(); [ -n "$L" ] && LL=(--llama "$L")
 cmp=$(( ctx / 2 < 61440 ? ctx / 2 : 61440 ))
-# LEVEL=dev: the strongest gates in full, every other feature lightly; cheapest and strongest first.
-dev_gates() {
-  run consistency "$T" "$S/consistency.py" "$url" --model "$model" --pkg "$pkg" "${LL[@]}"
-  [ -n "${done[consistency]:-}" ] && { grep -q "^PASS$" gates_consistency.log || result[consistency]=1; }
-  # Tool calling + history reuse; reasoning on, and off when the template toggles it.
-  if [ -z "$tools" ]; then
-    :
-  elif [ -n "$toggle" ]; then
+# Tool calling + history reuse (every level but fast): reasoning on, and off when the template toggles it (the card
+# lists agent_think_off for such packages, card_lib.gate_applies). Nothing without tool calling (not applicable).
+agent_gates() {
+  [ -n "$tools" ] || return 0
+  if [ -n "$toggle" ]; then
     run agent "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --thinking on --out agent_golden.json
     run agent_think_off "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --thinking off --out agent_think_off.json
   else
     run agent "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --out agent_golden.json
   fi
+}
+# LEVEL=dev: the strongest gates in full, every other feature lightly; cheapest and strongest first.
+dev_gates() {
+  run consistency "$T" "$S/consistency.py" "$url" --model "$model" --pkg "$pkg" "${LL[@]}"
+  [ -n "${done[consistency]:-}" ] && { grep -q "^PASS$" gates_consistency.log || result[consistency]=1; }
+  agent_gates
   if [ -n "$L" ]; then
     run golden "$T" "$S/golden.py" "$pkg" golden_dev.json --llama "$L" --short 12 --long "$("$T" -c "print(','.join(str(n) for n in (1000, 2000) if n + 2000 <= $ctx))")"
     if [ -n "${done[golden]:-}" ]; then
@@ -157,7 +160,7 @@ all_gates() {
   [ -n "${done[consistency]:-}" ] && { grep -q "^PASS$" gates_consistency.log || result[consistency]=1; }
   if [ "$level" != fast ]; then
     [ -n "$drafting" ] && run spec spec_gate
-    [ -n "$tools" ] && run agent "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --out agent_golden.json
+    agent_gates
     run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" "${LL[@]}"
     # Needle: compared with llama.cpp (near-tie rule) up to the llama.cpp slot; the full-context
     # probe (LEVEL=full) proves the size is served.
