@@ -3,8 +3,9 @@
 #
 # Generalized from the Muse Glimmer 30B port; end-to-end validated (llama.cpp
 # golden, 1k-32k prompts) on Qwen3-0.6B. Supported:
-#   * head_dim 128 or 256, any query/KV head counts with heads % kv_heads == 0
-#   * GGUF weight formats q4_k, q5_k, q6_k, q8_0 (mixed per tensor is fine)
+#   * head_dim 64, 128 or 256, any query/KV head counts with heads % kv_heads == 0
+#   * q/k/v projection biases (qwen2: cfg attn_bias, added by g_qk_rope_store)
+#   * GGUF weight formats in formats.py (q4_k, q5_k, q6_k, q8_0, q5_0, ...; mixed per tensor is fine)
 #   * RMSNorm, SwiGLU FFN, NeoX or interleaved ("norm") RoPE, optional per-head
 #     Q/K RMSNorm, optional per-layer sliding window, optional sigmoid attention
 #     output gate and post-attention/post-FFN norms (Glimmer), optional
@@ -42,7 +43,7 @@ G = QH // KVH                             # query heads per KV head (waves per a
 # Prefill flash attention (gen_flash2.py) tiles head_dim over 32*G lanes: it needs a power-of-two group.
 # Otherwise (Qwen3.8: 6) every prefill token takes the listed split-K path (correct, slower prefill).
 NO_FLASH = os.environ.get("NO_FLASH2") == "1"
-assert D in (128, 256), "attention kernels support head_dim 128 or 256 (lane l owns dims l, l+32, ...)"
+assert D in (64, 128, 256), "attention kernels support head_dim 64, 128 or 256 (lane l owns dims l, l+32, ...)"
 DL = D // 32                              # head dims per lane in the attention kernels
 RD = CFG.get("rope_dims") or D            # rotary dims (partial RoPE rotates the first RD dims)
 assert RD % 64 == 0 and RD <= D, "rope_dims must be a multiple of 64"
@@ -75,11 +76,15 @@ else:
     SOFTCAP_STORE = "            view.store %best, %cand_v[%rr] : f32, view<64xf32>"
 EPS = CFG["rms_eps"]
 QK_NORM = CFG.get("qk_norm", False)
+# Attention projection biases (qwen2: q, k, v; inspect_gguf.py lists them): g_qk_rope_store adds each as it reads the
+# projection, before the QK norm and RoPE, so every producer (decode matvecs, prefill GEMMs, verify) gets them.
+QKV_BIAS = [p for p in ("q", "k", "v") if p in (CFG.get("attn_bias") or [])]
+assert not (QKV_BIAS and FUSED_Q), "attn_q bias with a fused [q | gate] projection: split the bias too"
 ROPE = CFG.get("rope_type", "neox")       # "neox": pairs (d, d+64); "norm": pairs (2d, 2d+1)
 THETA = CFG["rope_theta"]
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
 
-from formats import FMT, SB, LOWBIT  # noqa: E402  bytes / values per block of each decoded format
+from formats import FMT, SB, LOWBIT, ICODES as IQ_FMTS  # noqa: E402  bytes / values per block of each decoded format
 
 
 def row_bytes(fmt, k):
@@ -420,7 +425,7 @@ func.def inline @g_q8_0_values(%w: buffer, %origin: offset, %group: index) -> (v
 # integer dot4 products, as llama.cpp's mul_mat_vec_q does. The 1/4/8/16-token variants share the per-token
 # arithmetic and the wave-sum tree (bfly_store), so decode and verify round identically. ACT_Q8=0: f32 activations.
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"
-IQ_FMTS = {"q8_0", "q4_k", "q5_k", "q6_k"}
+# IQ_FMTS (formats.ICODES): the formats with an @g_<fmt>_icodes helper (Q5_0: Q5_0 below, emitted when used)
 ICODES = r"""
 // Integer weight codes of one 32-value group for the Q8 activation matvec (ACT_Q8).
 func.def inline @g_q8_0_icodes(%w: buffer, %origin: offset, %group: index) -> (vector<32xi8>, f32) {
@@ -679,6 +684,77 @@ F32_VALUES = r"""
 func.def inline @g_f32_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
   %view = buffer.view %w[%origin] : buffer -> view<32xf32>
   %values = vector.load %view[0] : view<32xf32> -> vector<32xf32>
+  func.return %values : vector<32xf32>
+}
+"""
+
+
+# emitted only when a Q5_0 tensor is used (see main): llama.cpp's Q4_K_M keeps projections whose rows are not a multiple
+# of 256 in Q5_0 (Qwen2.5-0.5B: hidden 896). Integer codes for the int8 matvecs and head (ACT_Q8), values for the rest
+# (embedding, f32 matvecs, the GEMM's dequant16 through gen_gemm.HELPER).
+Q5_0 = r"""
+// Q5_0 block (22 bytes): F16 d, 32 high bits qh (bit j: value j), 16 bytes of nibbles (value j < 16: qs[j] & 15,
+// j >= 16: qs[j - 16] >> 4); value j = d * (code_j - 16), code_j = nibble | bit_j << 4. Codes 0..31 with minimum
+// 16 d, so the int8 dot subtracts 16 x (activation code sum) like a K-quant minimum.
+func.def inline @g_q5_0_icodes(%w: buffer, %origin: offset, %group: index) -> (vector<32xi8>, f32, f32) {
+  %two = index.constant 2 : offset
+  %six = index.constant 6 : offset
+  %scale_view = buffer.view %w[%origin] : buffer -> view<1xf16>
+  %high_origin = index.add %origin, %two : offset
+  %high_view = buffer.view %w[%high_origin] : buffer -> view<4xi8>
+  %code_origin = index.add %origin, %six : offset
+  %code_view = buffer.view %w[%code_origin] : buffer -> view<16xi8>
+  %scale_half = view.load %scale_view[0] : view<1xf16> -> f16
+  %scale = scalar.extf %scale_half : f16 to f32
+  %packed = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+  %nibble_mask = vector.constant 15 : vector<16xi8>
+  %four = vector.constant 4 : vector<16xi8>
+  %low = vector.andi %packed, %nibble_mask : vector<16xi8>
+  %high = vector.shrui %packed, %four : vector<16xi8>
+  %nibbles = vector.concat<0> %low, %high : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %nibble_words = vector.bitcast %nibbles : vector<32xi8> to vector<8xi32>
+  %high_bytes = vector.load %high_view[0] : view<4xi8> -> vector<4xi8>
+  %high_word_v = vector.bitcast %high_bytes : vector<4xi8> to vector<1xi32>
+  %high_word = vector.extract %high_word_v[0] : vector<1xi32> -> i32
+  %high_splat = vector.splat %high_word : vector<8xi32>
+  // word k holds values 4k..4k+3 (one per byte): bits 4k..4k+3 of qh, one into bit 4 of each byte
+  %zero_i = scalar.constant 0 : i32
+  %step_i = scalar.constant 4 : i32
+  %word_shift = vector.iota %zero_i step %step_i : vector<8xi32>
+  %bits = vector.shrui %high_splat, %word_shift : vector<8xi32>
+  %m1 = vector.constant 1 : vector<8xi32>
+  %m2 = vector.constant 2 : vector<8xi32>
+  %m4 = vector.constant 4 : vector<8xi32>
+  %m8 = vector.constant 8 : vector<8xi32>
+  %s4 = vector.constant 4 : vector<8xi32>
+  %s11 = vector.constant 11 : vector<8xi32>
+  %s18 = vector.constant 18 : vector<8xi32>
+  %s25 = vector.constant 25 : vector<8xi32>
+  %b0m = vector.andi %bits, %m1 : vector<8xi32>
+  %b1m = vector.andi %bits, %m2 : vector<8xi32>
+  %b2m = vector.andi %bits, %m4 : vector<8xi32>
+  %b3m = vector.andi %bits, %m8 : vector<8xi32>
+  %b0 = vector.shli %b0m, %s4 : vector<8xi32>
+  %b1 = vector.shli %b1m, %s11 : vector<8xi32>
+  %b2 = vector.shli %b2m, %s18 : vector<8xi32>
+  %b3 = vector.shli %b3m, %s25 : vector<8xi32>
+  %h01 = vector.ori %b0, %b1 : vector<8xi32>
+  %h23 = vector.ori %b2, %b3 : vector<8xi32>
+  %high_bits = vector.ori %h01, %h23 : vector<8xi32>
+  %code_words = vector.ori %nibble_words, %high_bits : vector<8xi32>
+  %codes = vector.bitcast %code_words : vector<8xi32> to vector<32xi8>
+  %sixteen = scalar.constant 16.0 : f32
+  %minimum = scalar.mulf %scale, %sixteen : f32
+  func.return %codes, %scale, %minimum : vector<32xi8>, f32, f32
+}
+
+func.def inline @g_q5_0_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
+  %codes, %scale, %minimum = func.call @g_q5_0_icodes(%w, %origin, %group) : (buffer, offset, index) -> (vector<32xi8>, f32, f32)
+  %codes_f = vector.uitofp %codes : vector<32xi8> to vector<32xf32>
+  %sixteen = vector.constant 16.0 : vector<32xf32>
+  %centered = vector.subf %codes_f, %sixteen : vector<32xf32>
+  %ds = vector.splat %scale : vector<32xf32>
+  %values = vector.mulf %centered, %ds : vector<32xf32>
   func.return %values : vector<32xf32>
 }
 """
@@ -1880,7 +1956,7 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
   kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
-}} launch(%tokens_arg: index, %layer_arg: index, %rope: i32, %context_arg: index, %pool_arg: index, %q: buffer, %k: buffer, %v: buffer, %q_norm: buffer, %k_norm: buffer, %info: buffer, %origins: buffer, %arena: buffer{", %meta: buffer, %ids: buffer" if MROPE else ""}) {{
+}} launch(%tokens_arg: index, %layer_arg: index, %rope: i32, %context_arg: index, %pool_arg: index, %q: buffer, %k: buffer, %v: buffer, %q_norm: buffer, %k_norm: buffer, %info: buffer, %origins: buffer, %arena: buffer{", %meta: buffer, %ids: buffer" if MROPE else ""}{"".join(f", %{p}_bias: buffer" for p in QKV_BIAS)}) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {L - 1})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
@@ -1943,6 +2019,17 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %v_view = buffer.view %v[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
   %qn_view = buffer.view %q_norm[%zero] : buffer -> view<{D}xf32>
   %kn_view = buffer.view %k_norm[%zero] : buffer -> view<{D}xf32>""")
+    heads = {"q": QH, "k": KVH, "v": KVH}
+    for p in QKV_BIAS:
+        t.append(f"  %{p}b_view = buffer.view %{p}_bias[%zero] : buffer -> view<{heads[p]}x{D}xf32>")
+
+    def load(dst, p, head, dim, ind):
+        """%dst = this token's projection p at (head, dim), plus its bias when the model has one."""
+        ld = f"view.load %{p}_view[%token, {head}, {dim}] : view<[%tokens]x{heads[p]}x{D}xf32> -> f32"
+        if p not in QKV_BIAS:
+            return f"{ind}%{dst} = {ld}"
+        return (f"{ind}%{dst}p = {ld}\n{ind}%{dst}b = view.load %{p}b_view[{head}, {dim}] : view<{heads[p]}x{D}xf32> -> f32\n"
+                f"{ind}%{dst} = scalar.addf %{dst}p, %{dst}b : f32")
     if QK_NORM:
         for i in range(n):
             t.append(f"  %w{i}q = view.load %qn_view[{dims[i]}] : view<{D}xf32> -> f32\n  %w{i}k = view.load %kn_view[{dims[i]}] : view<{D}xf32> -> f32")
@@ -1955,12 +2042,12 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
     {", ".join(f"%a{i}" for i in range(n))} = scf.if %is_query -> ({yt}) {{
       %qh = index.assume %bh [range(%bh, 0, {QH - 1})] : index""")
     for i in range(n):
-        t.append(f"      %x{i} = view.load %q_view[%token, %qh, {dims[i]}] : view<[%tokens]x{QH}x{D}xf32> -> f32")
+        t.append(load(f"x{i}", "q", "%qh", dims[i], "      "))
     t.append(f"""      scf.yield {xs} : {yt}
     }} else {{
       %kh = index.assume %kvh_value [range(%kvh_value, 0, {KVH - 1})] : index""")
     for i in range(n):
-        t.append(f"      %x{i} = view.load %k_view[%token, %kh, {dims[i]}] : view<[%tokens]x{KVH}x{D}xf32> -> f32")
+        t.append(load(f"x{i}", "k", "%kh", dims[i], "      "))
     t.append(f"""      scf.yield {xs} : {yt}
     }}""")
     if QK_NORM:
@@ -2013,7 +2100,7 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
     for i in range(n):
         t.append(f"""        %h{i} = scalar.fptrunc %r{i} : f32 to f16
         view.store %h{i}, %k_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>
-        %vv{i} = view.load %v_view[%token, %kh, {dims[i]}] : view<[%tokens]x{KVH}x{D}xf32> -> f32
+{load(f"vv{i}", "v", "%kh", dims[i], "        ")}
         %vh{i} = scalar.fptrunc %vv{i} : f32 to f16
         view.store %vh{i}, %v_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>""")
     t.append("""      }
@@ -3596,6 +3683,14 @@ def last_out_select(text):
 MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
 
 
+def rope_bias(block, tag, ind="  "):
+    """(parameter lines, launch args, launch types) of block's attention projection biases (QKV_BIAS), which
+    g_qk_rope_store takes after its other arguments. Empty for a model without biases."""
+    width = {"q": QH * D, "k": KVH * D, "v": KVH * D}
+    return ("".join(f'{ind}%{p}_bias_{tag} = command.parameter %weights, "{block}attn_{p}.bias" : view<{width[p]}xf32>\n' for p in QKV_BIAS),
+            "".join(f", %{p}_bias_{tag}" for p in QKV_BIAS), "".join(f", view<{width[p]}xf32>" for p in QKV_BIAS))
+
+
 def model():
     """Command program: embed, then a statically unrolled layer loop (each
     layer's tensor formats come from the GGUF), then the argmax head."""
@@ -3748,6 +3843,8 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
             T.append(par("wg", "attn_gate"))
         if QK_NORM and i not in RECUR:
             T += [par("q_norm", "attn_q_norm", f"view<{D}xf32>"), par("k_norm", "attn_k_norm", f"view<{D}xf32>")]
+        bias_par, bias_args, bias_types = rope_bias(b, i, "    ") if i not in RECUR else ("", "", "")
+        T.append(bias_par)
         if POST_NORM:
             T += [par("post_attn", "post_attention_norm", f"view<{H}xf32>"), par("post_ffn", "post_ffw_norm", f"view<{H}xf32>")]
         if FUSED_Q and i not in RECUR:
@@ -3772,7 +3869,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
         nty = f"view<{D}xf32>" if QK_NORM else "buffer"
         if i not in RECUR:
-          T.append(f"""  kernel.launch @g_qk_rope_store[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""})
+          T.append(f"""  kernel.launch @g_qk_rope_store[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
   scf.if %gemm {{
 {"" if NO_FLASH else f"    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)" + chr(10)}    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
     kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
@@ -3843,7 +3940,7 @@ if __name__ == "__main__":
                       GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
                       head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
                       prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin, lin2=lin2, pair_kv=PAIR_PROJ in ("1", "kv"),
-                      fmt=fmt_of, size=tensor_bytes, mtp_layer=MTP_LAYER, replay=MODEL_PARTS.get("replay", []))
+                      fmt=fmt_of, size=tensor_bytes, mtp_layer=MTP_LAYER, replay=MODEL_PARTS.get("replay", []), rope_bias=rope_bias)
         if gen_draft.DRAFT["kind"] == "dflash":
             import gen_dflash
             dcfg = gen_dflash.config(gen_draft.DRAFT["gguf"])
@@ -3915,6 +4012,8 @@ if __name__ == "__main__":
             spec_kernels += gen_ngram.kernels(gfacts)
         if gen_draft.DRAFT["kind"] == "assist":
             spec_kernels += gen_draft.mtp_kernels(gfacts) + gen_assist.kernels(gfacts)
+    if any(t["type"] == "q5_0" for t in TENS.values()):
+        COMMON += Q5_0
     if USED_MVQ:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
         COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                    for fmt, K, sw, R, TG in sorted(USED_MVQ))

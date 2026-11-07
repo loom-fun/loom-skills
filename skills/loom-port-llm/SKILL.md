@@ -1,6 +1,6 @@
 ---
 name: loom-port-llm
-description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve package — generate Loom IR kernels + command program from the GGUF's metadata, derive the chat/tool-calling glue from the model's own chat template, build model.json at the model's native context length, bring it up, unit-test kernels, and validate token-by-token against llama.cpp (short prompts, agent tool loops, full context). Includes a config-driven starter kit for dense transformers (Llama/Qwen2/Qwen3/Mistral-style, GQA, QK-norm, sliding window, output gates, post-norms, head_dim 128/256, partial RoPE) and Qwen3.5/Qwen3-Next-style hybrids (gated delta-net layers with recurrent state), with fast decode and WMMA prefill. Speculative decoding is on by default for every model family (the GGUF's MTP block, a Gemma-4 assistant, a DFlash/DFlash2 drafter, or weight-free n-gram prompt lookup, chosen by measured decode speed, output identical to the target). Adds image input automatically when the repo ships a vision projector (mmproj) of a supported family (Gemma 4, Qwen3-VL/Qwen3.5+, Muse-Glimmer), and documents how to add a family. Use for "port model X to Loom", "get X working on loom-serve", custom/unsupported models.
+description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve package — generate Loom IR kernels + command program from the GGUF's metadata, derive the chat/tool-calling glue from the model's own chat template, build model.json at the model's native context length, bring it up, unit-test kernels, and validate token-by-token against llama.cpp (short prompts, agent tool loops, full context). Includes a config-driven starter kit for dense transformers (Llama/Qwen2/Qwen3/Mistral-style, GQA, QK-norm, q/k/v biases, sliding window, output gates, post-norms, head_dim 64/128/256, partial RoPE) and Qwen3.5/Qwen3-Next-style hybrids (gated delta-net layers with recurrent state), with fast decode and WMMA prefill. Speculative decoding is on by default for every model family (the GGUF's MTP block, a Gemma-4 assistant, a DFlash/DFlash2 drafter, or weight-free n-gram prompt lookup, chosen by measured decode speed, output identical to the target). Adds image input automatically when the repo ships a vision projector (mmproj) of a supported family (Gemma 4, Qwen3-VL/Qwen3.5+, Muse-Glimmer), and documents how to add a family. Use for "port model X to Loom", "get X working on loom-serve", custom/unsupported models.
 ---
 
 # Port an LLM to Loom
@@ -212,13 +212,13 @@ Nothing to configure; read `starter/draft/README.md` only to debug it.
 
 | File | Role |
 |---|---|
-| `inspect_gguf.py` | GGUF metadata → `cfg.json`: hidden, layers, heads/kv_heads, head_dim, ffn, vocab, **context_length**, rms_eps, rope_theta/type, **rope_dims** (partial RoPE), qk_norm, attn_gate (`true`: separate tensor; `"fused_q"`: packed in attn_q), post_norms, sliding window/layers, NoPE layers, tied embeddings, eos ids, **recurrent_layers / gdn** (hybrids), the chat block (via `chat_probe.py`), and every tensor's format and shape. |
+| `inspect_gguf.py` | GGUF metadata → `cfg.json`: hidden, layers, heads/kv_heads, head_dim, ffn, vocab, **context_length**, rms_eps, rope_theta/type, **rope_dims** (partial RoPE), qk_norm, attn_bias (q/k/v projection biases, Qwen2; added by the QK-norm + RoPE kernel), attn_gate (`true`: separate tensor; `"fused_q"`: packed in attn_q), post_norms, sliding window/layers, NoPE layers, tied embeddings, eos ids, **recurrent_layers / gdn** (hybrids), the chat block (via `chat_probe.py`), and every tensor's format and shape. |
 | `chat_probe.py` | Renders the model's Jinja chat template on probe conversations and cuts out what the control program needs: role prefixes/suffix, BOS, default system prompt, generation prompts with thinking on/off, the tools block and its order relative to the system message, the tool-call format (`hermes` JSON, `qwen_xml`, `glm`, `pythonic`) and separators, tool-response framing, reasoning-in-history policy, trimming. A template that ignores `tools` (plain ChatML chat models) gives a chat-only block (`call_format` `none`): a request's tools are ignored as the template does, no call is parsed, the card says tool calling "no" and gates.sh skips the agent gates (not applicable); probes with tool calls or results print SKIP. `verify()` re-renders a dozen conversations exactly as `control.loom` will (`simulate()`) and diffs them against the template. `simulate()` is also what the benchmark scripts use to build golden prompts. |
-| `gen_llm.py` | `cfg.json` → `llm.loom`: all kernels plus the `@llm_advance` command program. The command program is a **static per-layer unroll**, so each layer's kind (attention or gated delta-net) and tensor formats come from the GGUF (Q4_K_M mixes Q4_K/Q5_K/Q6_K/Q8_0 per tensor). Decode-shaped linears (< 64 tokens) and the head use int8 activations (`g_quant_q8` + `_q8` matvecs with integer dot4, llama.cpp's Q8_1 numerics; 1-, 4-, 8- and 16-token variants that round alike) for Q8_0/Q4_K/Q5_K/Q6_K weights; `ACT_Q8=0` keeps f32 activations. |
+| `gen_llm.py` | `cfg.json` → `llm.loom`: all kernels plus the `@llm_advance` command program. The command program is a **static per-layer unroll**, so each layer's kind (attention or gated delta-net) and tensor formats come from the GGUF (Q4_K_M mixes Q4_K/Q5_K/Q6_K/Q8_0 per tensor). Decode-shaped linears (< 64 tokens) and the head use int8 activations (`g_quant_q8` + `_q8` matvecs with integer dot4, llama.cpp's Q8_1 numerics; 1-, 4-, 8- and 16-token variants that round alike) for Q8_0/Q4_K/Q5_K/Q6_K/Q5_0 weights (`formats.ICODES`); `ACT_Q8=0` keeps f32 activations. |
 | `gen_moe.py` | MoE FFN kernels (router + top-k, expert matvecs, shared-expert gate, combine; bucketing + grouped WMMA GEMMs for prefill), for `cfg["moe"]` models. |
 | `gen_gdn.py` | Gated delta-net kernels (conv1d + SiLU, history commit, q/k L2 norms, register recurrence, gated RMSNorm) and the fused q/gate split, for hybrids. Recurrent state lives in the runtime's recurrent slots (see porting-notes). |
-| `gen_gemm.py` | WMMA prefill GEMMs per (format, mode). Formats: q4_k, q5_k, q6_k, q8_0. Modes: store, acc, swiglu. |
-| `gen_flash2.py` | Prefill flash attention (transposed, K/V staged once per KV head), head_dim 128 (and 256 with `FLASH2_SPLIT=0`). |
+| `gen_gemm.py` | WMMA prefill GEMMs per (format, mode). Formats: q4_k, q5_k, q6_k, q8_0, and through `gen_llm.py`'s value helpers (`HELPER`) q4_0, q5_0, iq4_nl, iq4_xs, q3_k, iq3_s, f16. Modes: store, acc, swiglu. |
+| `gen_flash2.py` | Prefill flash attention (transposed, K/V staged once per KV head), head_dim 64 or 128 (and 256 with `FLASH2_SPLIT=0`). |
 | `gen_flash2s.py` | Prefill flash attention for head_dim 256 (used automatically): two waves per query head own 128 dims each, so Q stays in registers for the whole key loop; the pair sums S partials through workgroup memory. |
 | `tile_uniform.loom` | Helper that classifies 16-token tiles for flash2. |
 | `templates/*.loom` | Serving glue for the hrx-loom 0.1.0 text ABI (`text_*_v1` exports). `prepare` stages one program per packing shape. `storage` sets the KV geometry (2 planes per attention layer, F16) and the recurrent slot size. `control` is the chat policy: rendering, tools, reasoning, thinking switch, tokenization, output channels, tool-call parsing, canonical history for reuse. `service` maps the ABI exports. `weights.loom` is the parameter policy. |
@@ -240,10 +240,10 @@ Kernel inventory:
 - **Shared:** a per-token QK-norm + RoPE + F16 KV store kernel, and fused add + RMSNorm.
 
 **Fixed assumptions:**
-- head_dim 128 or 256 (attention); gated delta-net head dims multiples of 32; query-head groups that are not a
+- head_dim 64, 128 or 256 (attention); gated delta-net head dims multiples of 32; query-head groups that are not a
   power of two (Qwen3.8: 6) use flash prefill with staging sized for the power of two below (`gen_flash2.py`);
   `NO_FLASH2=1` forces the listed split-K path for every prefill token (diagnostics; quadratic at long prompts);
-- K-quant / Q8_0 / Q4_0 / IQ4_NL / IQ4_XS / Q3_K / IQ3_S weights (`starter/quant_values.loom`; add dequant helpers
+- K-quant / Q8_0 / Q4_0 / Q5_0 / IQ4_NL / IQ4_XS / Q3_K / IQ3_S weights (`starter/formats.py`, `quant_values.loom`; add dequant helpers
   for other formats); f32 norms and conv weights;
 - hidden ≤ 8192; context ≤ 262,144 (kernel bounds; raise the `range(..., 262144)` facts for 1M-context models);
 - **sampling**: `temperature`, `top_p`, `top_k` and `seed` per request. Temperature 0 (the default
@@ -374,8 +374,11 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   (a trial spent 15 min on it for no gain).
 - **New quant format.** Add a `@g_<fmt>_values` func in `COMMON` (gen_llm.py; `mv()` calls it),
   add the entries to `FMT`/`SB` in `starter/formats.py` (inspect_gguf.py's "no kernels" check and pick_gguf.py read
-  the same table), and add a `dequant16` case in `gen_gemm.py`. bf16 needs a
-  value helper (`view<32xbf16>` -> `vector.extf`). Unit-test against `gguf.quants.dequantize`.
+  the same table), and add a `dequant16` case in `gen_gemm.py` (or list it in `gen_gemm.HELPER`: the GEMM then
+  dequantizes through the value helper). For int8 decode matvecs, also an `@g_<fmt>_icodes` (integer codes, scale,
+  minimum) and the format in `formats.ICODES`; `gen_llm.Q5_0` is a worked example of both helpers. bf16 needs a
+  value helper (`view<32xbf16>` -> `vector.extf`). Unit-test against `gguf.quants.dequantize` (make_kernel_tests.py
+  does, for every format and K a model uses).
 - **Other recurrent layers (Mamba, RWKV, other delta-net variants).** Follow
   `gen_gdn.py`: per-span kernels read the reader slot at the fork position (else the
   row's writer slot), start from zeros at position 0, and publish the final state to

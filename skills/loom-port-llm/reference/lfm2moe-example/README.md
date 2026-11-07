@@ -11,7 +11,7 @@ Make a kit with `../apply_example.sh lfm2moe W/kit`.
 |---|---|
 | `gen_sconv.py` | Short-conv layers (in-proj -> B*x gate -> causal conv over the conv state -> C* gate -> out-proj), reusing the recurrent-slot protocol of `gen_gdn.py` (read the fork position's slot, publish the final state; the slot sizing is in the starter's `build.py`) |
 | `gen_moe_lfm.py` | Router + top-k (sigmoid scores, normalized; the whole wave picks the top-k: decode +3.9 %), per-expert decode matvecs (`MOE_R` rows per workgroup: 8 won), and a grouped 64x64 WMMA prefill GEMM over tokens bucketed by expert, output tiles fastest (`MOE_N_FASTEST`: prefill +24-30 %) |
-| `starter.patch` | `gen_llm.py`: wiring (layer kinds from the GGUF: `shortconv_layers`, attention layers; head_dim 64), `GEMM_MIN_TOKENS`. `inspect_gguf.py`, `make_kernel_tests.py`: config extraction for `lfm2moe`, kernel tests for the short-conv and MoE chains (13/13) |
+| `starter.patch` | `gen_llm.py`: wiring (layer kinds from the GGUF: `shortconv_layers`, attention layers), `GEMM_MIN_TOKENS` (head_dim 64 is in the starter now). `inspect_gguf.py`, `make_kernel_tests.py`: config extraction for `lfm2moe`, kernel tests for the short-conv and MoE chains (13/13) |
 | `cfg.json` | the reviewed config without the tensor table |
 
 The chat side is in the starter: `chat_probe.py` derives LFM2's template (`{% generation %}` tags, a

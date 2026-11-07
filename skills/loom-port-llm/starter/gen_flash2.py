@@ -35,7 +35,7 @@ else:
         "flint": dict(prefix="flint", kvh=4, group=8, sinks=True, window=513, kv_f32=False, gate=False, layers=48),
     }[T]
 P, KVH, G = CFG["prefix"], CFG["kvh"], CFG["group"]
-D = CFG.get("dim", 128)          # head_dim: 128 or 256
+D = CFG.get("dim", 128)          # head_dim: 64, 128 or 256
 NF = D // 16                     # 16-dim MMA fragments per head
 DP8 = D + 8                      # padded K-tile row (f16 elements)
 QH = KVH * G

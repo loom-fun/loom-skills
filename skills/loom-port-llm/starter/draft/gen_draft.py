@@ -988,6 +988,7 @@ def mtp_programs(g):
     norms = (f'  %q_norm_m = command.parameter %weights, "blk.{M}.attn_q_norm.weight" : view<{D}xf32>\n'
              f'  %k_norm_m = command.parameter %weights, "blk.{M}.attn_k_norm.weight" : view<{D}xf32>\n') if g["QK_NORM"] else ""
     kn = "%k_norm_m" if g["QK_NORM"] else "%no_norm"
+    bp, ba, bt = g["rope_bias"](f"blk.{M}.", "m") if g.get("rope_bias") else ("", "", "")   # attention biases (qwen2-style)
     warm = (f"""
 // MTP catch-up: K/V of the NextN block at every consumed position, from (embedding of token P, target
 // hidden P-1). Query, attention output and FFN have no consumer here. Also saves the per-row carry.
@@ -999,11 +1000,11 @@ command.program.def public @llm_mtp_warm() launch(%w_embed: buffer, %weights: bu
   kernel.launch @g_mtp_save[%spans](%t, %spans, %owners, %metadata, %target, %carry) : [index](index, index, index, buffer, buffer, buffer)
 """ + _mtp_input(g, "%prev") + f"""  %wk_m = command.parameter %weights, "{wk}" : view<{size(wk)}xi8>
   %wv_m = command.parameter %weights, "{wv}" : view<{size(wv)}xi8>
-{norms}  {lin(fmt(wk), "%h", "%s_h", "%wk_m", size(wk), "%k", "%nH", "%nKV", H)}
+{norms}{bp}  {lin(fmt(wk), "%h", "%s_h", "%wk_m", size(wk), "%k", "%nH", "%nKV", H)}
   {lin(fmt(wv), "%h", "%s_h", "%wv_m", size(wv), "%v", "%nH", "%nKV", H)}
   %mtp_layer = index.constant 0 : index
   %rope_on = scalar.constant 1 : i32
-  kernel.launch @g_qk_rope_store[%t](%t, %mtp_layer, %rope_on, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{mr}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{mrt})
+  kernel.launch @g_qk_rope_store[%t](%t, %mtp_layer, %rope_on, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{mr}{ba}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{mrt}{bt})
   command.return
 }}
 """)

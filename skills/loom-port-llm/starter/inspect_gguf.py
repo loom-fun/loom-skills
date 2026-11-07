@@ -140,13 +140,6 @@ if arch == "gemma4":
         print(f"WARNING: unsupported layout: per-layer KV heads {sorted(set(kv)) if isinstance(kv, list) else kv}"
               f"{f', no attn_v (V = K) on layers {no_v[:4]}...' if no_v else ''}: gemma4-example's attention assumes "
               "one KV-head count and an attn_v on every KV-owning layer; extend gen_llm.py (agent port)")
-# Attention projection biases (qwen2: q/k/v): no kernel adds them, so a port would serve garbage while its kernel
-# tests (which skip them too) pass. Stop here instead.
-_bias = sorted({t.split(".", 2)[2] for t in tensors if t.startswith("blk.") and t.split(".", 2)[2] in
-                ("attn_q.bias", "attn_k.bias", "attn_v.bias", "attn_qkv.bias", "attn_output.bias")})
-if _bias:
-    print(f"WARNING: unsupported layout: attention biases {_bias}: gen_llm.py's attention projections take no bias; "
-          "add them (agent port)")
 # Hybrid models: gated delta-net (linear attention) layers carry recurrent state
 # instead of KV (llama.cpp qwen35/qwen3next: layer i is recurrent unless (i+1) % interval == 0).
 if A("ssm.inner_size"):
@@ -167,6 +160,19 @@ if A("ssm.inner_size"):
 if _nextn and L != BLOCKS:
     cfg["mtp"] = {"layers": _nextn}
     print(f"MTP: {len(_nextn)} NextN block(s) {_nextn} after the {L}-layer trunk: speculative decoding (MTP) is available")
+# Attention projection biases (qwen2: q/k/v, added right after the projection, llama.cpp build_qkv): g_qk_rope_store
+# adds those in cfg["attn_bias"] (gen_llm.py QKV_BIAS), with the same set on every attention layer. A fused-qkv or
+# output bias, or a mixed set, has no kernel: a port would serve garbage while its kernel tests pass, so stop.
+_attn = [i for i in range(L) if i not in cfg.get("recurrent_layers", [])] + (cfg.get("mtp") or {}).get("layers", [])
+_qkv = {i: tuple(p for p in "qkv" if f"blk.{i}.attn_{p}.bias" in tensors) for i in _attn}
+_other = sorted({t.split(".", 2)[2] for t in tensors if t.startswith("blk.") and t.split(".", 2)[2] in ("attn_qkv.bias", "attn_output.bias")})
+if _other or len(set(_qkv.values())) > 1 or (any(_qkv.values()) and cfg["attn_gate"] == "fused_q"):
+    print(f"WARNING: unsupported layout: attention biases {_other or sorted(set(_qkv.values()))}"
+          f"{' with a fused [q | gate] projection' if cfg['attn_gate'] == 'fused_q' else ''}: gen_llm.py adds one q/k/v "
+          "bias set shared by every attention layer (g_qk_rope_store); extend it (agent port)")
+elif _attn and _qkv[_attn[0]]:
+    cfg["attn_bias"] = list(_qkv[_attn[0]])
+    print(f"attention biases: {cfg['attn_bias']} (added by g_qk_rope_store)")
 # MoE FFN (gen_moe.py) after the leading dense layers: router (f32/bf16), top-k, optional selection bias, shared
 # experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
 # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
@@ -229,8 +235,8 @@ print(f"{cfg['name']}: arch={arch} L={L} H={H} heads={heads}/{cfg['kv_heads']} d
 unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
 if unsupported:
     print("WARNING: no kernels for", unsupported, "- add dequant helpers (see reference/porting-notes.md)")
-if head_dim not in (128, 256):
-    print("WARNING: head_dim", head_dim, "is not 128 or 256: the attention kernels support only those")
+if head_dim not in (64, 128, 256):
+    print("WARNING: head_dim", head_dim, "is not 64, 128 or 256: the attention kernels support only those")
 if cfg["chat"] is None:
     print("WARNING: no chat block; fill it by hand from tokenizer.chat_template (fields: see chat_probe.py)")
 json.dump(cfg, open(out, "w"), indent=1)
