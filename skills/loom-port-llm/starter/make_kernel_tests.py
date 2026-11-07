@@ -253,7 +253,10 @@ kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.fl
 q = rng.standard_normal((t, QH, D)).astype(np.float32); k = rng.standard_normal((t, KVH, D)).astype(np.float32); v = rng.standard_normal((t, KVH, D)).astype(np.float32)
 def norm(a, w): return a / np.sqrt((a * a).mean(-1, keepdims=True) + eps) * w
 def rope(a):
-    inv = cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD); ang = pos[:, None] * inv[None]
+    inv = cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD)
+    if cfg.get("rope_freq_factors"):   # llama3 rope_freqs: each pair's frequency divided by its factor
+        inv = inv / np.asarray(cfg["rope_freq_factors"][:RD // 2], np.float64)
+    ang = pos[:, None] * inv[None]
     c, s = np.cos(ang)[:, None], np.sin(ang)[:, None]
     if cfg["rope_type"] == "neox":
         a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
