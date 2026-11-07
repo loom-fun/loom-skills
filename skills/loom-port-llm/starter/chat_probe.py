@@ -625,36 +625,28 @@ def render_call(chat, call):
             + "".join(f"<arg_key>{k}</arg_key><arg_value>{val(v)}</arg_value>" for k, v in args.items()) + "</tool_call>")
 
 
-def jinja_string(v):
-    """Jinja's `| string` of a JSON value as Loom prints it: strings as they are, true/false/null as Python's
-    True/False/None, numbers and containers as the request's JSON text (json.dumps defaults: Jinja's tojson)."""
-    if isinstance(v, str):
-        return v
-    if isinstance(v, bool) or v is None:
-        return str(v)
-    return json.dumps(v, ensure_ascii=False)
-
-
 def xml_tool(tool):
     """One tool declaration as Qwen3-Coder's template prints it (control.loom @xml_tool, chat.tools_format "xml"):
     the function's name, trimmed description, each parameter's name, type, trimmed description and other keys,
-    then the parameters' and the function's other keys, each as <key>value</key>. A key's value is printed with
-    jinja_string, so a list-valued parameter type prints as JSON where the template prints Python's repr."""
+    then the parameters' and the function's other keys, each as <key>value</key>. A value is printed as Jinja's
+    `| string` (Loom prints the request's JSON text for containers and numbers: py_value), so a list-valued
+    parameter type prints as JSON where the template prints Python's repr."""
+    string = lambda v: v if isinstance(v, str) else py_value(v)
     t = tool.get("function", tool)
-    extra = lambda d, handled: "".join(f"\n<{k}>{jinja_string(v)}</{k}>" for k, v in d.items() if k not in handled) \
+    extra = lambda d, handled: "".join(f"\n<{k}>{string(v)}</{k}>" for k, v in d.items() if k not in handled) \
         if isinstance(d, dict) else ""
-    out = "<function>\n<name>" + jinja_string(t["name"]) + "</name>"
+    out = "<function>\n<name>" + string(t["name"]) + "</name>"
     if "description" in t:
-        out += "\n<description>" + jinja_string(t["description"]).strip() + "</description>"
+        out += "\n<description>" + string(t["description"]).strip() + "</description>"
     out += "\n<parameters>"
     params = t.get("parameters")
     if isinstance(params, dict) and isinstance(params.get("properties"), dict):
         for name, fields in params["properties"].items():
             out += "\n<parameter>\n<name>" + name + "</name>"
             if isinstance(fields, dict) and "type" in fields:
-                out += "\n<type>" + jinja_string(fields["type"]) + "</type>"
+                out += "\n<type>" + string(fields["type"]) + "</type>"
             if isinstance(fields, dict) and "description" in fields:
-                out += "\n<description>" + jinja_string(fields["description"]).strip() + "</description>"
+                out += "\n<description>" + string(fields["description"]).strip() + "</description>"
             out += extra(fields, ("name", "type", "description")) + "\n</parameter>"
     out += extra(params, ("type", "properties")) + "\n</parameters>"
     return out + extra(t, ("type", "name", "description", "parameters")) + "\n</function>"
