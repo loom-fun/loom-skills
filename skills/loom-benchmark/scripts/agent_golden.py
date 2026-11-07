@@ -79,13 +79,26 @@ def history_edits(hist, prompt):
             if tag != "equal" and not (tag == "insert" and i1 == len(hist))]
 
 
-def template_rewrite(prev_prompt, prev_out, verified, prompt):
-    """Is PROMPT's change of the retained history (PREV_PROMPT + PREV_OUT) the template's? Only when every edit starts
+def template_rewrite(prev_prompt, prev_out, verified, prompt, continuation=None, first_token=lambda s: s[:1]):
+    """Is PROMPT's change of the retained history (PREV_PROMPT + PREV_OUT) the template's? Each edit's replaced span must lie
     inside the previous prompt (e.g. thinking off: a generation prompt's empty think block, which history drops) or
-    inside the first VERIFIED characters of the previous output, the part that matched the golden. Elsewhere the
-    gate can't tell a template rewrite from a wrong rebuild of what Loom generated."""
-    edits = history_edits(prev_prompt + prev_out, prompt)
-    return bool(edits) and all(i1 < len(prev_prompt) + verified for i1, _, _, _ in edits)
+    inside the first VERIFIED characters of the previous output, the part that matched the golden. Any other edit is
+    anchored on the reference instead: CONTINUATION(k, n) is llama.cpp's greedy text (about n characters) after the
+    previous prompt + PREV_OUT[:k]; the edit is the template's only when that text writes what the history holds
+    there (the replaced text and the token after it, FIRST_TOKEN) and not the replacement. Otherwise the gate can't
+    tell a template rewrite from a wrong rebuild of what Loom generated."""
+    hist, n = prev_prompt + prev_out, len(prev_prompt)
+    def ok(i1, i2, j1, j2):
+        if i1 < n + verified and i2 <= n + verified:   # the edit lies in the prompt or the verified output
+            return True
+        if continuation is None:
+            return False
+        ctx = first_token(hist[i2:i2 + 64])
+        mine, tmpl = hist[i1:i2] + ctx, prompt[j1:j2] + ctx
+        cont = continuation(i1 - n, max(len(mine), len(tmpl)))
+        return cont.startswith(mine) and not cont.startswith(tmpl)
+    edits = history_edits(hist, prompt)
+    return bool(edits) and all(ok(*e) for e in edits)
 
 
 def call_whitespace(P, raw, gids, d):
@@ -128,6 +141,7 @@ def main():
     msgs = [{"role": "system", "content": "You are a helpful assistant. Use the tools when they help."}]
     turns, failures, prev_total, prev_text = [], 0, 0, ""
     prev_prompt, prev_verified = "", 0   # the previous turn's prompt, and how much of its output the golden verified
+    prev_ids = []
     for task in TASKS:
         msgs.append({"role": "user", "content": task})
         for step in range(6):
@@ -150,13 +164,20 @@ def main():
             # extends its history exactly (it cannot cut a row back to a common prefix), so when the template
             # re-renders bytes the model verifiably generated (the previous turn matched the golden), nothing
             # is reusable however late the change (Gemma 4 with thinking: a "\n" before <channel|> 15 tokens
-            # from the end). An edit past the verified output (no golden, or after a near-tie divergence) keeps the
-            # 80 % rule: a wrong rebuild of the output must not hide a reuse bug (template_rewrite).
+            # from the end). An edit past the verified output (after a near-tie divergence) is the template's only
+            # where llama.cpp's own continuation at that point writes what the rebuilt history holds; otherwise (or
+            # without a golden) the 80 % rule stays: a wrong rebuild of the output must not hide a reuse bug.
             if step:
                 pids = P.ids(prev_text)
                 common = next((i for i, (x, y) in enumerate(zip(pids, ids)) if x != y), min(len(pids), len(ids)))
                 exact = prompt.startswith(prev_text)
-                rewritten = not exact and template_rewrite(prev_prompt, prev_text[len(prev_prompt):], prev_verified, prompt)
+                po = prev_text[len(prev_prompt):]
+                def continuation(k, nchars):   # llama.cpp greedy after the previous prompt + Loom's output up to k
+                    _, gen, _ = llama_greedy(a.llama, prev_ids + P.ids(po[:k]), min(nchars + 2, 64), P)
+                    return P.tok.decode(gen, skip_special_tokens=False)
+                first = lambda t: P.tok.decode(P.ids(t)[:1], skip_special_tokens=False)
+                rewritten = not exact and template_rewrite(prev_prompt, po, prev_verified, prompt,
+                                                           continuation if a.llama else None, first)
                 rec["history_verbatim"] = exact or (common >= 0.8 * len(pids) and not rewritten)
                 if exact and turns[-1].get("output_dropped"):
                     # The previous reply's parse dropped a second call (output_dropped below): the retained history
@@ -268,7 +289,7 @@ def main():
             turns.append(rec)
             prev_total = u["prompt_tokens"] + u["completion_tokens"]
             prev_text = prompt + out_text
-            prev_prompt = prompt
+            prev_prompt, prev_ids = prompt, ids
             prev_verified = len(out_text) if rec.get("golden_match") else len(out_text) - len(loom_rest) if a.llama else 0
             # loom-serve rejects "reasoning_content": null, so only send it when present.
             msgs.append({"role": "assistant", "content": m.get("content") or "",
