@@ -9,7 +9,7 @@
      notes = []
      chat = {}
      # BOS: emitted by the control program at the very start when the template prints it.
-@@ -394,10 +396,6 @@
+@@ -398,10 +400,6 @@
              rest = s_body[len("SYSPROBE"):]
              lead = rest[:rest.index(printed[0]) - len(line)]
              body_start = len(lead) - len(lead.lstrip())
@@ -20,7 +20,7 @@
              chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
          elif s_body.endswith("SYSPROBE"):
              chat["tools_after_system"] = False
-@@ -520,6 +518,8 @@
+@@ -524,6 +522,8 @@
  
  def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reasoning_effort=None):
      """Python model of control.loom's rendering (chat_begin + chat_message + chat_end)."""
@@ -29,7 +29,7 @@
      tools = None if chat.get("call_format") == "none" else tools   # a chat-only block ignores tools, as its template does
      trim = (lambda s: s.strip()) if chat["trim_content"] else (lambda s: s)
      out = chat.get("bos", "")
-@@ -603,6 +603,8 @@
+@@ -606,6 +606,8 @@
  
  
  def render_call(chat, call):
@@ -38,7 +38,7 @@
      args = call["arguments"]
      if chat["call_format"] == "hermes":
          a = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
-@@ -650,6 +652,306 @@
+@@ -703,6 +705,306 @@
  ]
  
  
@@ -345,16 +345,16 @@
  def verify(template_text, chat, bos="", eos=""):
      """Returns [(name, ok, detail)]: template render vs simulate() for each conversation."""
      T = Template(template_text, bos, eos)
-@@ -660,7 +962,7 @@
-         [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL]),
-                               {"role": "tool", "tool_call_id": "call_0", "content": 'say "hi"\n\tback\\slash é'}], TOOLS)] \
+@@ -715,7 +1017,7 @@
          if chat["call_format"] == "json" else []
+     if chat.get("tools_format") == "xml":
+         extra.append(("typed tool declarations", [{"role": "user", "content": "Edit it"}], TYPED_TOOLS))
 -    for name, msgs, tools in CONVERSATIONS + extra:
 +    for name, msgs, tools in CONVERSATIONS + extra + (GEMMA4_CONVERSATIONS if chat.get("format") == "gemma4" else []):
          for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
              label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")
              try:
-@@ -763,3 +1065,21 @@
+@@ -818,3 +1120,21 @@
  
  if __name__ == "__main__":
      main()
