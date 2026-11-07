@@ -175,8 +175,8 @@ for name, K in todo:
 # 2a. per-head attention gate (cfg attn_gate "per_head"): n = heads rows, run by gen_llm.lin_mv on f32 activations at
 # every token count: the 1-token and 4-token kernels at the decode R, and the 4-token R=16 kernel prefill takes
 if cfg.get("attn_gate") == "per_head":
-    A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", [])))
-    name = f"blk.{A0}.attn_gate.weight"; fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
+    name = next(f"blk.{i}.attn_gate.weight" for i in range(cfg["layers"]) if f"blk.{i}.attn_gate.weight" in T)
+    fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
     R1 = pick_r(n, H, 1)
     variants = [(1, R1), (4, R1)] + ([(4, 16)] if R1 != 16 and n % 16 == 0 else [])
     save("hg_w", raw(name)); wt = ty(raw(name))
