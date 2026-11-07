@@ -78,8 +78,11 @@ Every port and every optimization starts by looking for a published package that
   packages to `*-example` kits); the cfg keys `inspect_gguf.py` left open (geometry, formats and eos ids always stay
   this GGUF's); its chat block when this template's derivation fails, accepted only if `chat_probe.py --verify`
   passes on THIS template; and its measured drafting table, from which `draft/tune.py` starts each method at the
-  reference's best depth and climbs from there (`TUNE_PRIOR=0` measures all). The llama.cpp baseline's own tuning
-  never takes a prior.
+  reference's best depth and climbs from there, and gives a method the reference ruled out (under 75 % of its
+  winner) one probe (`TUNE_PRIOR=0` measures all). The llama.cpp baseline's own tuning never takes a prior.
+- **Where it pays:** an architecture the starter doesn't cover (the reference's kit is applied automatically; its
+  chat block replaces a failed derivation when it verifies). On the starter path (Qwen3.5 sizes) port.sh is already
+  automatic: the reference trims the drafting search and pre-answers the cfg review (only geometry differs).
 - **What is recorded:** `cfg["reference"]` (repo, revision, score, reasons, what was taken, what differs), which
   `build.py` copies into the package's `llm_config.json`.
 - A reference saves time; it never lowers the bar: the derived port runs the same kernel tests and gates.
