@@ -255,6 +255,10 @@ Rules:
   left DevLab's short-prompt decode 51-60 % below the local session's while 2k decode agreed), and `c4_steady.py`
   one short request. Every caller (qualify, finalize, nightly, devlab_perf) gets the same warm-up. When timing by hand:
   `curl -s URL/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"<id>","messages":[{"role":"user","content":"hi"}],"max_tokens":8}'`.
+- A decode rate counts only if its request generated at least half its max_tokens. `perf.py` logs each timed
+  decode request's `completion_tokens` (both engines); a short one is re-requested once with another nonce, then
+  logged as null. A request that stops after a few tokens reads as a fast rate (drafted tokens arrive in bursts):
+  one 32k decode read 2.6x its KV-bandwidth ceiling that way.
 - With thinking models, llama.cpp's chat endpoint renders 2 fewer prompt tokens
   (no `<think>\n`) than Loom. That is negligible for throughput, and goldens are
   unaffected.

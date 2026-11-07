@@ -12,6 +12,13 @@ prefix cache can help):
   acceptance        Loom with speculative decoding: per decode metric, accepted / proposed drafted tokens of that
                     very request (loom-serve's /metrics counters before and after it), so the roofline of a drafted
                     row uses the acceptance of the text it decoded (make_info.py roofline), not the spec gate's
+Completion tokens: every timed decode request logs the tokens it generated (out["completion_tokens"][metric]:
+                    one entry per attempt, from the usage block on both engines). A request that stopped before half its
+                    max_tokens is not a decode measurement: the rate is (n-1)/time over a few tokens, and with drafting
+                    those arrive in bursts (a 32k decode that stopped early read 164 tok/s, 2.6x its KV-bandwidth
+                    ceiling). It is re-requested once with another nonce; still short, the metric is logged as null
+                    (missing), never as the inflated rate. Half max_tokens: every decode prompt asks for a long essay,
+                    so an early stop is the anomaly, and the timed span stays >= 64 tokens even at max_tokens 128.
 Warm-up (untimed, logged as warmup_decode_tps): the timed decode request itself with another nonce, so every path
 the first timed request takes (prefill, decode, drafting, lazily loaded weights, first-use kernels) has run once.
 A trivial "Say hi." left the short-prompt decode paying first-use costs (DevLab sweeps measured it 51-60 % below
@@ -76,15 +83,24 @@ out["warmup_decode_tps"] = round(run(f"[warm-up {nonce}] " + ESSAY, 300)[2], 2)
 
 
 def decode(key, content, max_tokens):
-    """A timed decode request -> its decode tok/s; out["acceptance"][key]: its drafted-token acceptance (Loom)."""
-    before = server_draft_counters(U) if a.kind == "loom" else {}
-    _, _, dtps, _ = run(content, max_tokens)
-    if before:
-        acc = acceptance_between(before, server_draft_counters(U))
-        if acc is not None:
-            out.setdefault("acceptance", {})[key] = acc
-    return dtps
-
+    """A timed decode request -> its decode tok/s, or None when it generated fewer than max_tokens // 2 tokens twice
+    (the second time with another nonce); out["completion_tokens"][key]: the tokens of each attempt;
+    out["acceptance"][key]: the drafted-token acceptance of the request that counted (Loom)."""
+    for attempt in range(2):
+        prompt = content if attempt == 0 else f"[retry {time.time()}] " + content
+        before = server_draft_counters(U) if a.kind == "loom" else {}
+        _, _, dtps, n = run(prompt, max_tokens)
+        after = server_draft_counters(U) if before else {}
+        out.setdefault("completion_tokens", {}).setdefault(key, []).append(n)
+        print(f"{key}: {n}/{max_tokens} completion tokens, {dtps if dtps is None else round(dtps, 2)} tok/s", flush=True)
+        if dtps and n >= max_tokens // 2:
+            acc = acceptance_between(before, after) if before else None
+            if acc is not None:
+                out.setdefault("acceptance", {})[key] = acc
+            return round(dtps, 2)
+    print(f"WARNING: {key} generated {out['completion_tokens'][key]} tokens (< {max_tokens // 2}) twice: "
+          "logged as missing, not as the rate of a short request", flush=True)
+    return None
 
 if a.long:
     out["prefill_long"] = []
@@ -92,8 +108,7 @@ if a.long:
         pt, pps, _, _ = run(f"[{nonce} {n}] Summarize this documentation in one sentence.\n\n" + doc(n), 4)
         out["prefill_long"].append({"prompt_tokens": pt, "prefill_tps": round(pps, 1)})
         print(out["prefill_long"][-1], flush=True)
-    dtps = decode("decode_tps_32k", f"[{nonce} ctx32] Write a long, detailed essay discussing this documentation.\n\n" + doc(32000), 128)
-    out["decode_tps_32k"] = round(dtps, 2)
+    out["decode_tps_32k"] = decode("decode_tps_32k", f"[{nonce} ctx32] Write a long, detailed essay discussing this documentation.\n\n" + doc(32000), 128)
 else:
     out["decode_tps"] = decode("decode_tps", ESSAY, 300)
     out["prefill"] = []

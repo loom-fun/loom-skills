@@ -112,7 +112,10 @@ hd="\\|WARNING: no kernels\\|WARNING: head_dim"; [ "$K" = "$here/starter" ] || h
 if [ "$irc" = 0 ] && [ "$ref" != off ] && [ -s reference.json ] && [ -f cfg.json ] && grep -q "^chat FAIL\|not derivable\|WARNING: no chat block" inspect.log \
    && ! grep -q "Traceback$hd" inspect.log; then
   "$T" -I "$here/find_reference.py" apply cfg.json reference.json ${refpick:+--pick "$refpick"} --chat-failed | tee -a reference.log
-  if "$T" -I "$K/chat_probe.py" "$gguf" --verify cfg.json > chat_verify.log 2>&1; then
+  # No chat block in cfg.json (the reference had none to give): nothing to verify; inspect.log keeps its FAIL / STOP.
+  if ! "$T" -c "import json, sys; sys.exit(0 if json.load(open('cfg.json')).get('chat') else 1)" 2>/dev/null; then
+    echo "no chat block in cfg.json after the reference step: chat verify skipped (fill the chat block by hand)"
+  elif "$T" -I "$K/chat_probe.py" "$gguf" --verify cfg.json > chat_verify.log 2>&1; then
     echo "chat block from the reference: verified against this template ($(grep -c '^OK' chat_verify.log) probes OK)"
     sed -i 's/^chat FAIL/chat (replaced by the reference) FAIL/; s/not derivable/not derivable (reference block verified)/; s/WARNING: no chat block/no chat block (reference block verified)/' inspect.log
   else

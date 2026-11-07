@@ -274,10 +274,12 @@ def thinking_extra(mode):
 def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=None):
     """Streams one chat completion (greedy unless `extra` says otherwise). Returns client-side TTFT,
     decode tok/s, usage, the text (reasoning + content), the finish reason and the HTTP status;
+    tokens: usage.completion_tokens, or the streamed token chunks when the server sends no usage block;
     on_token(t) is called with time.perf_counter() at every streamed token."""
     t0 = time.perf_counter()
     first = finish = None
-    n = pt = 0
+    n = pt = chunks = 0
+    usage = False
     text = ""
     body = {"messages": messages, "max_tokens": max_tokens, "stream": True, "temperature": 0,
             "stream_options": {"include_usage": True}}
@@ -294,12 +296,14 @@ def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=
                 continue
             d = json.loads(line[6:])
             if d.get("usage"):
+                usage = True
                 n = d["usage"]["completion_tokens"]
                 pt = d["usage"]["prompt_tokens"]
             for ch in d.get("choices", []):
                 dl = ch.get("delta", {})
                 piece = (dl.get("reasoning_content") or "") + (dl.get("content") or "")
                 if piece:
+                    chunks += 1
                     now = time.perf_counter()
                     first = now - t0 if first is None else first
                     if on_token:
@@ -307,5 +311,6 @@ def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=
                     text += piece
                 finish = ch.get("finish_reason") or finish
     total = time.perf_counter() - t0
+    n = n if usage else chunks
     return dict(status=200, ttft=first, total=total, tokens=n, prompt_tokens=pt, text=text, finish=finish,
                 decode_tps=(n - 1) / (total - first) if n > 1 and first else None)
