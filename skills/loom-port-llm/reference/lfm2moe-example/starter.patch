@@ -1,7 +1,7 @@
 --- a/gen_llm.py
 +++ b/gen_llm.py
-@@ -63,6 +63,11 @@
- assert not (GELU and CFG.get("moe")), "GEGLU with a MoE FFN: gen_moe.py's expert kernels are SwiGLU only"
+@@ -62,6 +62,11 @@
+ GELU = CFG.get("ffn_act") == "gelu"      # GEGLU FFN (gelu-tanh, llama.cpp LLM_FFN_GELU) instead of SwiGLU
  RECUR = set(CFG.get("recurrent_layers", []))  # gated delta-net layers (hybrid models)
  GDN = gdn_geometry(CFG) if RECUR else None
 +SCONV = set(CFG.get("shortconv_layers", []))   # LFM2 short-conv layers (conv history in recurrent slots)
@@ -12,7 +12,7 @@
  FFN_NORM = CFG.get("ffn_norm_tensor", "ffn_norm")
  MOE = CFG.get("moe")                      # MoE FFN (gen_moe.py: router + top-k experts, optional shared experts)
  MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) | ({MTP_LAYER} if MTP_LAYER is not None else set()) if MOE else set()
-@@ -3261,7 +3266,7 @@
+@@ -3260,7 +3265,7 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -21,7 +21,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -3937,6 +3942,55 @@
+@@ -3951,6 +3956,55 @@
  
  
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
@@ -77,7 +77,7 @@
  
  
  def rope_bias(block, tag, ind="  "):
-@@ -4020,7 +4074,8 @@
+@@ -4034,7 +4088,8 @@
    %pml_size = index.scale %t, %pml_bytes : index, offset -> offset
    %pacc = buffer.alloca<global> align(256) %pacc_size : buffer
    %pml = buffer.alloca<global> align(256) %pml_size : buffer
@@ -87,7 +87,7 @@
    %single = index.cmp eq, %t, %c1 : index
    %big = index.cmp uge, %t, %c128 : index
    %scale_entry = index.constant 8 : offset
-@@ -4064,9 +4119,51 @@
+@@ -4078,9 +4133,51 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -142,7 +142,7 @@
    %list_entry = index.constant 4 : offset
    %list_size = index.scale %t, %list_entry : index, offset -> offset
    %count_size = index.constant 256 : offset
-@@ -4078,10 +4175,11 @@
+@@ -4092,10 +4189,11 @@
    %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
    %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
@@ -156,7 +156,7 @@
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
      def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
          """Text of trunk layer i (tensors blk.i.*). ordinal overrides its attention KV-plane ordinal and
-@@ -4092,33 +4190,37 @@
+@@ -4106,33 +4204,37 @@
          par = lambda var, n, ty=None: f'    %{var}_{i} = command.parameter %weights, "{nm(n)}" : {ty or f"view<{sz(n)}xi8>"}\n'
          kind = kind_note or (" (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else ""))
          T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
@@ -201,7 +201,7 @@
              pass
          elif QKV_FUSED:
              T.append("  " + lin(fmt_of(nm("attn_qkv")), "%h", "%s_h", f"%wqkv_{i}", sz("attn_qkv"), "%qkv", "%nH", "%nQKV", H) + "\n")
-@@ -4127,23 +4229,23 @@
+@@ -4141,23 +4243,23 @@
              T.append("  " + lin2(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", f"%wg_{i}", sz("attn_q"), "%q", "%gate", "%nH", "%nQ", H) + "\n")
          else:
              T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", "%nQ", H) + "\n")
@@ -230,7 +230,7 @@
    scf.if %gemm {{
  {"" if NO_FLASH else f"    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)" + chr(10)}    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
      kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
-@@ -4155,13 +4257,13 @@
+@@ -4169,13 +4271,13 @@
      kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
    }}
  """)
@@ -246,7 +246,7 @@
          else:
            fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
            if fg == fu:
-@@ -4337,11 +4439,28 @@
+@@ -4351,11 +4453,28 @@
          parts.append(spec_kernels)
      if MIXED_FFN:   # GEGLU: gelu(gate) * up, on 4-value groups (bounds provable without the launch: kernel-testable)
          parts.append(gelu_vectors(geglu_mul()) if GELU else SILU_MUL)
@@ -278,10 +278,13 @@
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -235,33 +235,29 @@
+@@ -244,38 +244,30 @@
+ # experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
  # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
  MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
-                 "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False}}
+-                "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False},
+-                "gemma4": {"gating": 1, "norm_weights": True}}
++                "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False}}
 +# LFM2 / LFM2-MoE: short-conv layers (head_count_kv == 0) carry a conv history instead of KV;
 +# MoE FFN (sigmoid router + expert bias, normalized top-k weights) after the leading dense layers;
 +# the final norm is token_embd_norm.
@@ -312,12 +315,15 @@
 -        if any(k.endswith("ffn_gate_inp_shexp.weight") for k in tensors):
 -            cfg["moe"]["shared_gate"] = True
 -    if any(k.endswith("ffn_gate_up_exps.weight") for k in tensors):
--        print("WARNING: fused ffn_gate_up_exps tensors: the MoE kernels expect separate ffn_gate_exps / ffn_up_exps")
+-        # one tensor per layer: each expert's gate rows, then its up rows (llama.cpp build_moe_ffn gate_up_exps)
+-        cfg["moe"]["gate_up_fused"] = True
+-    if any(k.endswith("ffn_down_exps.scale") for k in tensors):   # per-expert output scale (build_moe_ffn down_exps_s)
+-        cfg["moe"]["down_scale"] = True
 -    if cfg["ffn"] is None:   # no dense FFN layer: the FFN buffers hold the shared experts (or one expert row)
 -        cfg["ffn"] = cfg["moe"].get("shared_ffn") or cfg["moe"]["ffn"]
      print("moe:", cfg["moe"])
 -    import gen_moe   # the expert kernels' formats (gen_moe.FMT)
--    exps = lambda layers: {tensors[f"blk.{i}.ffn_{p}_exps.weight"]["type"] for i in layers for p in ("gate", "up", "down")
+-    exps = lambda layers: {tensors[f"blk.{i}.ffn_{p}_exps.weight"]["type"] for i in layers for p in ("gate", "up", "gate_up", "down")
 -                           if f"blk.{i}.ffn_{p}_exps.weight" in tensors}
 -    bad = exps(range(cfg["moe"]["leading_dense"], L)) - set(gen_moe.FMT)
 -    if bad:
@@ -354,7 +360,7 @@
  RD = cfg.get("rope_dims") or D
  qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
  kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
-@@ -1040,186 +1040,106 @@
+@@ -1040,201 +1040,106 @@
      if ow is not None:
          cases.append(cases[-1].replace("@flash_prefill {", "@flash_prefill_window {").replace("%sliding = check.literal value(0)", "%sliding = check.literal value(1)")
                       .replace('path("f_o.npy")', 'path("f_ow.npy")'))
@@ -408,6 +414,10 @@
  if cfg.get("moe"):
      M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ.get("MOE_R", "8"))
 -    SHG, ACC = bool(M.get("shared_gate")), bool(M.get("shared_ffn"))
+-    # Gemma 4: gate and up fused in one tensor (each expert's gate rows, then its up rows), GEGLU, and a per-expert
+-    # output scale folded into the combine weights (g_moe_wscale, gemma4 example)
+-    FUSED, DSC = bool(M.get("gate_up_fused")), bool(M.get("down_scale"))
+-    GN, UN = ("ffn_gate_up_exps.weight",) * 2 if FUSED else ("ffn_gate_exps.weight", "ffn_up_exps.weight")
      def deq3(name):
          tt = T[name]; return dequantize(np.asarray(tt.data), tt.tensor_type).reshape(E_, int(tt.shape[1]), int(tt.shape[0]))
 -    def f32w(name):   # f32 or bf16 tensor -> (f32 values, the raw array the kernel reads)
@@ -440,17 +450,25 @@
 -        y = np.zeros((len(hx), H))
 -        for i in range(len(hx)):
 -            for k in range(KU):
--                e = ids[i, k]; g = Wg[e] @ hx[i]; u = Wu[e] @ hx[i]; a = g / (1 + np.exp(-g)) * u
+-                e = ids[i, k]; g = Wg[e] @ hx[i]; u = Wu[e] @ hx[i]
+-                a = ffn_act(g) * u
 -                y[i] += wts[i, k] * (Wd[e] @ a)
 -        return y
      done = set()
      for li in range(M["leading_dense"], cfg["layers"]):
-         b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower(); fg = T[b + "ffn_gate_exps.weight"].tensor_type.name.lower()
--        fu = T[b + "ffn_up_exps.weight"].tensor_type.name.lower(); gun = fg if fg == fu else f"{fg}_{fu}"   # gate+up formats (gen_moe)
+-        b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower(); fg = T[b + GN].tensor_type.name.lower()
+-        fu = T[b + UN].tensor_type.name.lower(); gun = (fg if fg == fu else f"{fg}_{fu}") + ("_fused" if FUSED else "")   # gate+up formats (gen_moe)
 -        if (fd, gun) in done: continue
 -        done.add((fd, gun))
 -        Wr, wr_raw = f32w(b + "ffn_gate_inp.weight"); Wr = Wr.reshape(E_, H)
 -        bias = np.asarray(T[b + "exp_probs_b.bias"].data, np.float32) if M["probs_bias"] else np.zeros(E_, np.float32)
+-        Wg, Wu, Wd = deq3(b + GN), deq3(b + UN), deq3(b + "ffn_down_exps.weight")
+-        if FUSED:
+-            Wg, Wu = Wg[:, :FE], Wu[:, FE:]
+-        dsc = np.asarray(T[b + "ffn_down_exps.scale"].data, np.float32).reshape(-1) if DSC else np.ones(E_, np.float32)
+-        if SHG:
+-            Wsg, wsg_raw = f32w(b + "ffn_gate_inp_shexp.weight"); sty = T[b + "ffn_gate_inp_shexp.weight"].tensor_type.name.lower()
++        b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower(); fg = T[b + "ffn_gate_exps.weight"].tensor_type.name.lower()
 +        if fd in done: continue
 +        done.add(fd)
 +        t = 3
@@ -459,17 +477,15 @@
 +        logit = hx.astype(np.float64) @ Wr.T.astype(np.float64); prob = 1 / (1 + np.exp(-logit)); sel = prob + bias
 +        ids = np.argsort(-sel, -1, kind="stable")[:, :KU].astype(np.int32)
 +        wts = np.take_along_axis(prob, ids, -1); wts = wts / np.maximum(wts.sum(-1, keepdims=True), 6.103515625e-05)
-         Wg, Wu, Wd = deq3(b + "ffn_gate_exps.weight"), deq3(b + "ffn_up_exps.weight"), deq3(b + "ffn_down_exps.weight")
--        if SHG:
--            Wsg, wsg_raw = f32w(b + "ffn_gate_inp_shexp.weight"); sty = T[b + "ffn_gate_inp_shexp.weight"].tensor_type.name.lower()
++        Wg, Wu, Wd = deq3(b + "ffn_gate_exps.weight"), deq3(b + "ffn_up_exps.weight"), deq3(b + "ffn_down_exps.weight")
 +        yref = np.zeros((t, H))
 +        for i in range(t):
 +            for k in range(KU):
 +                e = ids[i, k]; g = Wg[e] @ hx[i]; u = Wu[e] @ hx[i]; a = g / (1 + np.exp(-g)) * u
 +                yref[i] += wts[i, k] * (Wd[e] @ a)
          tag = f"m{li}"
--        for n, a in [(tag + "_wr", wr_raw), (tag + "_b", bias), (tag + "_wg", raw(b + "ffn_gate_exps.weight")),
--                     (tag + "_wu", raw(b + "ffn_up_exps.weight")), (tag + "_wd", raw(b + "ffn_down_exps.weight"))] + ([(tag + "_wsg", wsg_raw)] if SHG else []):
+-        for n, a in [(tag + "_wr", wr_raw), (tag + "_b", bias), (tag + "_wg", raw(b + GN)),
+-                     (tag + "_wu", raw(b + UN)), (tag + "_wd", raw(b + "ffn_down_exps.weight"))] + ([(tag + "_wsg", wsg_raw)] if SHG else []) + ([(tag + "_dsc", dsc)] if DSC else []):
 +        for n, a in [(tag + "_h", hx), (tag + "_wr", Wr.reshape(-1)), (tag + "_b", bias), (tag + "_ids", ids), (tag + "_wts", wts.astype(np.float32)),
 +                     (tag + "_wg", raw(b + "ffn_gate_exps.weight")), (tag + "_wu", raw(b + "ffn_up_exps.weight")), (tag + "_wd", raw(b + "ffn_down_exps.weight")),
 +                     (tag + "_y", yref.astype(np.float32))]:
@@ -480,18 +496,24 @@
 -            ids, wts, rel = route_ref(hx, Wr, bias)
 -            y0 = (rng.standard_normal((t, H)) * 0.1).astype(np.float32) if ACC else np.zeros((t, H), np.float32)
 -            sgv = 1 / (1 + np.exp(-(hx.astype(np.float64) @ Wsg.astype(np.float64)))) if SHG else np.ones(t)
--            yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts, Wg, Wu, Wd)
+-            wts_s = wts * dsc[ids]   # the combine weights after g_moe_wscale (DSC)
+-            yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts_s, Wg, Wu, Wd)
 -            for n, a in [("_h", hx), ("_y0", y0), ("_ids", ids), ("_wts", wts.astype(np.float32)), ("_y", yref.astype(np.float32)),
--                         ("_sg", sgv.astype(np.float32))]:
+-                         ("_sg", sgv.astype(np.float32))] + ([("_wts_s", wts_s.astype(np.float32))] if DSC else []):
 -                save(tag + sfx + n, a)
 -            print(f"moe test layer {li}{sfx}: t={t} ids[0] {ids[0].tolist()} min relative score gap k/k+1 {rel.min():.3g}")
 -            return ids, wts
 -        wr_t, wsg_t = ty(wr_raw), (ty(wsg_raw) if SHG else "")
-+        print(f"moe test layer {li}: ids", ids.tolist(), "min score gap k/k+1", float(np.min(np.sort(sel, -1)[:, ::-1][:, KU - 1] - np.sort(sel, -1)[:, ::-1][:, KU])))
-         gt, dt_ = ty(raw(b + "ffn_gate_exps.weight")), ty(raw(b + "ffn_down_exps.weight"))
--        ut = ty(raw(b + "ffn_up_exps.weight"))
+-        gt, dt_ = ty(raw(b + GN)), ty(raw(b + "ffn_down_exps.weight"))
+-        ut = ty(raw(b + UN))
+-        EW = "%ewts_s" if DSC else "%ewts"   # the routed weights after wsc
+-        # DSC: g_moe_wscale scales the routed weights by the experts' down scales before the experts run
+-        wsc = lambda t: f"""  kernel.launch @g_moe_wscale[%t](%t, %ids, %wts, %dsc) : [index](index, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{E_}xf32>)
+-""" if DSC else ""
 -        def common(t, sfx):
 -            return f"""  %t = check.literal value({t}) : index
++        print(f"moe test layer {li}: ids", ids.tolist(), "min score gap k/k+1", float(np.min(np.sort(sel, -1)[:, ::-1][:, KU - 1] - np.sort(sel, -1)[:, ::-1][:, KU])))
++        gt, dt_ = ty(raw(b + "ffn_gate_exps.weight")), ty(raw(b + "ffn_down_exps.weight"))
 +        cases.append(f"""check.case public @moe_chain_{li} {{
 +  %t = check.literal value({t}) : index
    %ta = check.literal value({t * KU}) : index
@@ -504,10 +526,13 @@
    %b = check.file.read.npy path("{tag}_b.npy") : tensor<{E_}xf32>
 -  %eids = check.file.read.npy path("{tag}{sfx}_ids.npy") : tensor<{t}x{KU}xi32>
 -  %ewts = check.file.read.npy path("{tag}{sfx}_wts.npy") : tensor<{t}x{KU}xf32>
+-""" + (f"""  %ewts_s = check.file.read.npy path("{tag}{sfx}_wts_s.npy") : tensor<{t}x{KU}xf32>
+-  %dsc = check.file.read.npy path("{tag}_dsc.npy") : tensor<{E_}xf32>
+-""" if DSC else "") + f"""  %wg = check.file.read.npy path("{tag}_wg.npy") : {gt}
+-  %wu = check.file.read.npy path("{tag}_wu.npy") : {ut}
 +  %eids = check.file.read.npy path("{tag}_ids.npy") : tensor<{t}x{KU}xi32>
 +  %ewts = check.file.read.npy path("{tag}_wts.npy") : tensor<{t}x{KU}xf32>
-   %wg = check.file.read.npy path("{tag}_wg.npy") : {gt}
--  %wu = check.file.read.npy path("{tag}_wu.npy") : {ut}
++  %wg = check.file.read.npy path("{tag}_wg.npy") : {gt}
 +  %wu = check.file.read.npy path("{tag}_wu.npy") : {gt}
    %wd = check.file.read.npy path("{tag}_wd.npy") : {dt_}
 -  %ey = check.file.read.npy path("{tag}{sfx}_y.npy") : tensor<{t}x{H}xf32>
@@ -544,7 +569,7 @@
 -  kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids_l, %wts_l, %info_l) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
 -  check.expect.equal actual(%ids_l) expected(%eids_l) : tensor<{t}x{KU}xi32>
 -  check.expect.close actual(%wts_l) expected(%ewts_l) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
--  kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {ut}, tensor<{t * KU}x{FE}xf32>)
+-{wsc(t)}  kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {ut}, tensor<{t * KU}x{FE}xf32>)
 +  %y = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
 +  kernel.launch @g_moe_route[%t](%t, %h, %wr, %b, %ids, %wts) : [index](index, tensor<{t}x{H}xf32>, tensor<{E_ * H}xf32>, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>)
 +  kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {gt}, tensor<{t * KU}x{FE}xf32>)
@@ -554,7 +579,8 @@
    check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
 -  check.expect.equal actual(%ids_tr) expected(%eids) : tensor<{t}x{KU}xi32>
 -  check.expect.close actual(%wts_tr) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
-   check.expect.close actual(%wts) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
+-  check.expect.close actual(%wts) expected({EW}) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
++  check.expect.close actual(%wts) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
    check.expect.close actual(%y) expected(%ey) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{t}x{H}xf32>
    check.return
  }}
@@ -579,13 +605,13 @@
 -  %ys_sorted = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
 -  kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x2xf32>, tensor<{t}x{H}xf16>)
 -  kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids, %wts, %info) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
--  kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, tensor<{t}x4xi32>, tensor<{t}x{KU}xi32>, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{ta}xi32>)
+-{wsc(t)}  kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, tensor<{t}x4xi32>, tensor<{t}x{KU}xi32>, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{ta}xi32>)
 -  kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wg, %wu, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {ut}, tensor<{mr}x{FE}xf32>)
 -  kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, tensor<{mr}x{FE}xf32>, tensor<{mr}x2xf32>, tensor<{mr}x{FE}xf16>, tensor<{mt}x2xi32>)
 -  kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wd, %ys_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE}xf16>, tensor<{mr}x2xf32>, {dt_}, tensor<{mr}x{H}xf32>)
 -  kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {SGA}%y) : [index](index, index, tensor<{mr}x{H}xf32>, tensor<{ta}xi32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
 -  check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
--  check.expect.close actual(%wts) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
+-  check.expect.close actual(%wts) expected({EW}) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
 -  check.expect.close actual(%y) expected(%ey) atol(1.0e-2) rtol(2.0e-2) nan(different) : tensor<{t}x{H}xf32>
 -  check.return
 -}}

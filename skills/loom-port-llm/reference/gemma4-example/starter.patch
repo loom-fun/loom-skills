@@ -645,7 +645,7 @@
  WINDOW = CFG.get("sliding_window") or 0   # keys kept by sliding layers (0: none)
  GATE = CFG.get("attn_gate", False)       # True: separate attn_gate tensor; "fused_q": attn_q packs [q | gate] per head
  FUSED_Q = GATE == "fused_q"
-@@ -1577,6 +1596,21 @@
+@@ -1576,6 +1595,21 @@
  """
  
  
@@ -667,7 +667,7 @@
  ROW_SCALE = r"""
  
  // Per-row power-of-two scale (as g_row_scale) plus the scaled row as F16, the
-@@ -2068,11 +2102,11 @@
+@@ -2067,11 +2101,11 @@
      yt = ", ".join(["f32"] * n)
      xs = ", ".join(f"%x{i}" for i in range(n))
      t = [f"""
@@ -681,7 +681,7 @@
    %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
    %layer = index.assume %layer_arg [range(%layer_arg, 0, {L - 1})] : index
    %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-@@ -2092,8 +2126,10 @@
+@@ -2091,8 +2125,10 @@
    %c15 = index.constant 15 : index
    %c16 = index.constant 16 : index
    %cqh = index.constant {QH} : index
@@ -693,7 +693,7 @@
    %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
    %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
    %position32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
-@@ -2111,8 +2147,10 @@
+@@ -2110,8 +2146,10 @@
    %zero_f = scalar.constant 0.0 : f32
  """]
      for j, idx in enumerate(freq_idx):
@@ -706,7 +706,7 @@
          t.append(f"""  // angle = position * theta^(-2i/RD) = position * exp(-i * 2 ln(theta) / RD)
    %li{j} = index.cast {idx} : index to i32
    %lf{j} = scalar.sitofp %li{j} : i32 to f32
-@@ -2216,8 +2254,22 @@
+@@ -2215,8 +2253,22 @@
      for i in range(n):
          t.append(f"""        %h{i} = scalar.fptrunc %r{i} : f32 to f16
          view.store %h{i}, %k_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>
@@ -731,7 +731,7 @@
          view.store %vh{i}, %v_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>""")
      t.append("""      }
      }
-@@ -2228,6 +2280,19 @@
+@@ -2227,6 +2279,19 @@
      return "\n".join(t)
  
  
@@ -751,7 +751,7 @@
  def listed(text, name, grid_rest):
      """Variant of a per-token kernel dispatched over the tokens in `list`
      (count read from a device buffer for indirect dispatch)."""
-@@ -2491,7 +2556,7 @@
+@@ -2490,7 +2555,7 @@
      %stop = index.min %stop_raw, %visible : index
      %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
      %q_raw = vector.load %q_view[%token, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
@@ -760,7 +760,7 @@
      %scale_v = vector.splat %scale : vector<4xf32>
      %q4 = vector.mulf %q_raw, %scale_v : vector<4xf32>
      %zero4 = vector.splat %zero_f : vector<4xf32>
-@@ -2610,12 +2675,119 @@
+@@ -2609,12 +2674,119 @@
  
  
  def attention():
@@ -886,7 +886,7 @@
  
  
  FALLBACK = r"""
-@@ -2793,9 +2965,22 @@
+@@ -2792,9 +2964,22 @@
            %is_best = scalar.cmpf oeq, %lv, %best : f32
            %cand_id = scf.select %is_best, %li, %big : i32
            %winner = kernel.workgroup.reduce<minsi> %cand_id : i32
@@ -910,7 +910,7 @@
              view.store %winner, %cand_i[%rr] : i32, view<64xi32>
            }}
            scf.yield %best, %winner : f32, i32
-@@ -2909,7 +3094,13 @@
+@@ -2908,7 +3093,13 @@
          args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
          types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
          mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
@@ -925,7 +925,7 @@
      args = args.replace(f", {x}, {s},", f", {x16}, {s},")
      iq = ACT_Q8 and fmt in IQ_FMTS and kval // 32 <= 1024   # wider K (mv_wide: DFlash feature projections) stays f32
      if iq:   # int8 copy (g_quant_q8, launched beside the g_row_scale_f16 that makes x16): see quant_wiring()
-@@ -3261,7 +3452,9 @@
+@@ -3260,7 +3451,9 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -936,7 +936,109 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -3950,7 +4143,7 @@
+@@ -3549,9 +3742,101 @@
+         gg = GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn,
+                              fused=bool(MOE.get("gate_up_fused")) and mode == "gu")
+         parts.append(gelu_vectors(gg) if GELU else gg)
++    if MOE_GEMMA:
++        parts.append(gemma_moe_kernels())
+     return "".join(parts)
+ 
+ 
++# Gemma 4 MoE layers (26B-A4B; llama.cpp gemma4.cpp): the dense FFN (ffn_norm -> GEGLU -> post_ffw_norm_1) runs beside
++# 128 experts (pre_ffw_norm_2 -> top-8 GEGLU experts, ffn_gate_up_exps fused, per-expert ffn_down_exps.scale ->
++# post_ffw_norm_2); the router reads rmsnorm(x) * ffn_gate_inp.scale / sqrt(hidden), x the post-attention residual;
++# the two branches' sum takes post_ffw_norm and the layer scale.
++MOE_GEMMA = bool(MOE) and CFG.get("arch") == "gemma4"
++
++
++def gemma_moe_kernels():
++    """g_moe_inputs: h2 = rmsnorm(x) * w_pre2, hr = rmsnorm(x) * w_router / sqrt(H) (one reduction);
++    g_add_two_norms: y = rmsnorm(y) * w1 + rmsnorm(ym) * w2."""
++    KU, E = MOE["used"], MOE["experts"]
++    head = lambda name, args: f"""
++kernel.def export("{name}") @{name}(%tokens: index) {{
++  %c1 = index.constant 1 : index
++  %c256 = index.constant 256 : index
++  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
++}} launch(%tokens_arg: index, {args}) {{
++  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
++  %token_id = kernel.workgroup.id<x> : index
++  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
++  %lane_id = kernel.workitem.id<x> : index
++  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
++  %zero = index.constant 0 : offset
++  %c0 = index.constant 0 : index
++  %zero_f = scalar.constant 0.0 : f32
++  %zero32 = vector.constant 0.0 : vector<32xf32>
++  %count = scalar.constant {float(H)} : f32
++  %groups = index.constant {HG} : index
++  %active = index.cmp ult, %lane, %groups : index
++"""
++    def load(buf, out):
++        return f"""  %{out}_view = buffer.view %{buf}[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
++  %{out} = scf.if %active -> (vector<32xf32>) {{
++    %bl = index.assume %lane [range(%lane, 0, {HG - 1})] : index
++    %v = vector.load %{out}_view[%token, %bl, %c0] : view<[%tokens]x{HG}x32xf32> -> vector<32xf32>
++    scf.yield %v : vector<32xf32>
++  }} else {{
++    scf.yield %zero32 : vector<32xf32>
++  }}
++"""
++    def inv(v, eps, out):
++        return f"""  %{out}_sq = vector.mulf %{v}, %{v} : vector<32xf32>
++  %{out}_local = vector.reduce<addf> %{out}_sq, %zero_f : vector<32xf32>, f32
++  %{out}_sum = kernel.workgroup.reduce<addf> %{out}_local : f32
++  %{out}_mean = scalar.divf %{out}_sum, %count : f32
++  %{out}_eps = scalar.constant {eps} : f32
++  %{out}_stable = scalar.addf %{out}_mean, %{out}_eps : f32
++  %{out}_inv = scalar.rsqrtf %{out}_stable : f32
++  %{out} = vector.splat %{out}_inv : vector<32xf32>
++"""
++    wv = lambda w: f"""    %{w}_view = buffer.view %{w}[%zero] : buffer -> view<{HG}x32xf32>
++    %{w}_v = vector.load %{w}_view[%bl, %c0] : view<{HG}x32xf32> -> vector<32xf32>
++"""
++    store = lambda val, buf: f"""    %{buf}_out = buffer.view %{buf}[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
++    vector.store %{val}, %{buf}_out[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{HG}x32xf32>
++"""
++    t = [head("g_moe_inputs", "%x: buffer, %w_pre: buffer, %w_router: buffer, %h2: buffer, %hr: buffer") + load("x", "xv")
++         + inv("xv", EPS, "xi") + f"""  scf.if %active {{
++    %bl = index.assume %lane [range(%lane, 0, {HG - 1})] : index
++""" + wv("w_pre") + wv("w_router") + f"""    %xn = vector.mulf %xv, %xi : vector<32xf32>
++    %h2v = vector.mulf %xn, %w_pre_v : vector<32xf32>
++    %rs = scalar.constant {1 / math.sqrt(H)!r} : f32
++    %rsv = vector.splat %rs : vector<32xf32>
++    %xr = vector.mulf %xn, %rsv : vector<32xf32>
++    %hrv = vector.mulf %xr, %w_router_v : vector<32xf32>
++""" + store("h2v", "h2") + store("hrv", "hr") + "  }\n  kernel.return\n}\n"]
++    t.append(head("g_add_two_norms", "%y: buffer, %w1: buffer, %ym: buffer, %w2: buffer") + load("y", "yv") + load("ym", "mv")
++             + inv("yv", POST_EPS, "yi") + inv("mv", POST_EPS, "mi") + f"""  scf.if %active {{
++    %bl = index.assume %lane [range(%lane, 0, {HG - 1})] : index
++""" + wv("w1") + wv("w2") + """    %yn = vector.mulf %yv, %yi : vector<32xf32>
++    %ya = vector.mulf %yn, %w1_v : vector<32xf32>
++    %mn = vector.mulf %mv, %mi : vector<32xf32>
++    %sum = vector.fmaf %mn, %w2_v, %ya : vector<32xf32>
++""" + store("sum", "y") + "  }\n  kernel.return\n}\n")
++    return "".join(t)
++
++
++def gemma_moe_layer(i, b, nm, sz):
++    """Program text of layer i's MoE branch, after the dense FFN wrote %y: the routed experts (moe_routed) on
++    pre_ffw_norm_2(x) into %ym, routed on rmsnorm(x) * ffn_gate_inp.scale / sqrt(H); leaves the branches' normed sum in %y."""
++    hv = f"view<{H}xf32>"
++    return (f'  %pre2_{i} = command.parameter %weights, "{nm("pre_ffw_norm_2")}" : {hv}\n'
++            f'  %gis_{i} = command.parameter %weights, "{b}ffn_gate_inp.scale" : {hv}\n'
++            f'  %pn1_{i} = command.parameter %weights, "{nm("post_ffw_norm_1")}" : {hv}\n'
++            f'  %pn2_{i} = command.parameter %weights, "{nm("post_ffw_norm_2")}" : {hv}\n'
++            f"  kernel.launch @g_moe_inputs[%t](%t, %x, %pre2_{i}, %gis_{i}, %h2, %hr) : [index](index, buffer, {hv}, {hv}, buffer, buffer)\n"
++            + moe_routed(i, b, x="%h2", rx="%hr", out="%ym")
++            + f"  kernel.launch @g_add_two_norms[%t](%t, %y, %pn1_{i}, %ym, %pn2_{i}) : [index](index, buffer, {hv}, buffer, {hv})\n")
++
++
+ def gdn_layer(i, b, nm, sz, par):
+     """Gated delta-net token mixer of layer i: h -> o (VD wide), then o16 for the output GEMM."""
+     g = GDN
+@@ -3964,7 +4249,7 @@
  def model():
      """Command program: embed, then a statically unrolled layer loop (each
      layer's tensor formats come from the GGUF), then the argmax head."""
@@ -945,7 +1047,7 @@
      sliding = set(CFG.get("sliding_layers", []))
      nope = set(CFG.get("nope_layers", []))
      head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
-@@ -3976,7 +4169,7 @@
+@@ -3990,7 +4275,7 @@
    %nH = index.constant {H} : index
    %nFF = index.constant {FF} : index
  """ + ("" if FF_UNIFORM else "".join(f"  %nFF{w} = index.constant {w} : index\n" for w in sorted(set(FFL)))) + f"""  %nQ = index.constant {QD} : index
@@ -954,7 +1056,7 @@
    %zero_i32 = scalar.constant 0 : i32
    %one_i32 = scalar.constant 1 : i32
    %row_bytes = index.constant {H * 4} : offset
-@@ -4043,7 +4236,20 @@
+@@ -4057,7 +4342,23 @@
    %h16 = buffer.alloca<global> align(256) %h16_size : buffer
    %o16 = buffer.alloca<global> align(256) %o16_size : buffer
    %f16 = buffer.alloca<global> align(256) %f16_size : buffer
@@ -972,10 +1074,13 @@
 +  %pp = buffer.alloca<global> align(256) %pp_size : buffer
 +  %ple = buffer.alloca<global> align(256) %pp_size : buffer
 +""")
++    if MOE_GEMMA:   # the experts' input, the router's input and the experts' combined output (gemma_moe_layer)
++        L_.append("  %h2 = buffer.alloca<global> align(256) %x_size : buffer\n  %hr = buffer.alloca<global> align(256) %x_size : buffer\n"
++                  "  %ym = buffer.alloca<global> align(256) %x_size : buffer\n")
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if HEAD_GATE:
-@@ -4080,112 +4286,102 @@
+@@ -4094,112 +4395,104 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1143,6 +1248,8 @@
 +            T.append(f"  kernel.launch @g_silu_mul[%t](%t, {nff(i)}, %f, %fu) : [index](index, index, buffer, buffer)\n")
 +        T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {nff(i)}, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
 +        T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", nff(i), "%nH", FFL[i]) + "\n")
++        if MOE_GEMMA and i in MOE_LAYERS:   # the experts beside the dense FFN
++            T.append(gemma_moe_layer(i, b, nm, sz))
 +        if i == L - 1:
              nn = "%output_norm"
          else:
@@ -1169,7 +1276,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -4211,7 +4407,7 @@
+@@ -4225,7 +4518,7 @@
      spec_kernels = ""
      if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too
          head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
@@ -1178,7 +1285,7 @@
                        GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
                        head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
                        prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin, lin2=lin2, pair_kv=PAIR_PROJ in ("1", "kv"),
-@@ -4321,8 +4517,9 @@
+@@ -4335,8 +4628,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1190,7 +1297,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if SWA_ROPE:
-@@ -4348,11 +4545,24 @@
+@@ -4362,11 +4656,24 @@
      gemm_text = subprocess.run([sys.executable, os.path.join(here, "gen_gemm.py")], capture_output=True, text=True, check=True, env=env).stdout
      parts.append(gelu_vectors(gemm_text) if GELU else gemm_text)
      parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
@@ -1558,3 +1665,47 @@
    check.return
  }}
  """)
+@@ -1235,6 +1210,43 @@
+   check.return
+ }}
+ """)
++# Gemma 4 MoE layers (gen_llm.py gemma_moe_layer): the experts' and router's inputs from the residual, and the sum of
++# the normed dense and expert outputs, on a layer's real norm weights
++if cfg.get("moe") and cfg.get("arch") == "gemma4":
++    li = cfg["moe"]["leading_dense"]; b = f"blk.{li}."; t = 5
++    pe = cfg.get("post_norm_eps", eps)
++    def rms(a, e): return a / np.sqrt((a.astype(np.float64) ** 2).mean(-1, keepdims=True) + e)
++    xg = (rng.standard_normal((t, H)) * 3).astype(np.float32)
++    ya, yb = rng.standard_normal((t, H)).astype(np.float32), (rng.standard_normal((t, H)) * 0.1).astype(np.float32)
++    wp, wgs = deq(b + "pre_ffw_norm_2.weight").astype(np.float32), deq(b + "ffn_gate_inp.scale").astype(np.float32)
++    w1, w2 = deq(b + "post_ffw_norm_1.weight").astype(np.float32), deq(b + "post_ffw_norm_2.weight").astype(np.float32)
++    for n, a in [("gm_x", xg), ("gm_wp", wp), ("gm_wgs", wgs), ("gm_h2", (rms(xg, eps) * wp).astype(np.float32)),
++                 ("gm_hr", (rms(xg, eps) * wgs / np.sqrt(H)).astype(np.float32)), ("gm_ya", ya), ("gm_yb", yb), ("gm_w1", w1),
++                 ("gm_w2", w2), ("gm_sum", (rms(ya, pe) * w1 + rms(yb, pe) * w2).astype(np.float32))]:
++        save(n, a)
++    tt, hv = f"tensor<{t}x{H}xf32>", f"tensor<{H}xf32>"
++    cases.append(f"""check.case public @gemma_moe_norms {{
++  %t = check.literal value({t}) : index
++  %x = check.file.read.npy path("gm_x.npy") : {tt}
++  %wp = check.file.read.npy path("gm_wp.npy") : {hv}
++  %wgs = check.file.read.npy path("gm_wgs.npy") : {hv}
++  %eh2 = check.file.read.npy path("gm_h2.npy") : {tt}
++  %ehr = check.file.read.npy path("gm_hr.npy") : {tt}
++  %h2 = check.generate.fill value(0.0) : {tt}
++  %hr = check.generate.fill value(0.0) : {tt}
++  kernel.launch @g_moe_inputs[%t](%t, %x, %wp, %wgs, %h2, %hr) : [index](index, {tt}, {hv}, {hv}, {tt}, {tt})
++  check.expect.close actual(%h2) expected(%eh2) atol(1.0e-4) rtol(1.0e-3) nan(different) : {tt}
++  check.expect.close actual(%hr) expected(%ehr) atol(1.0e-5) rtol(1.0e-3) nan(different) : {tt}
++  %y = check.file.read.npy path("gm_ya.npy") : {tt}
++  %ym = check.file.read.npy path("gm_yb.npy") : {tt}
++  %w1 = check.file.read.npy path("gm_w1.npy") : {hv}
++  %w2 = check.file.read.npy path("gm_w2.npy") : {hv}
++  %esum = check.file.read.npy path("gm_sum.npy") : {tt}
++  kernel.launch @g_add_two_norms[%t](%t, %y, %w1, %ym, %w2) : [index](index, {tt}, {hv}, {tt}, {hv})
++  check.expect.close actual(%y) expected(%esum) atol(1.0e-4) rtol(1.0e-3) nan(different) : {tt}
++  check.return
++}}
++""")
+ import re
+ # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
+ text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
