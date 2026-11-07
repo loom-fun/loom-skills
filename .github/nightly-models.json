@@ -433,6 +433,16 @@
    ]
   },
   {
+   "repo": "loom-fun/unsloth-gpt-oss-20b-loom",
+   "slug": "gpt-oss-20b",
+   "memory_bytes": 28000000000,
+   "kit": "gpt-oss",
+   "llamacpp": "b1370",
+   "features": [
+    "thinking-always"
+   ]
+  },
+  {
    "repo": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
    "slug": "gemma-4-26b-a4b-it",
    "memory_bytes": 81000000000,

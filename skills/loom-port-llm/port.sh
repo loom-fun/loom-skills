@@ -264,6 +264,9 @@ if card_lib.tool_calling(chat):
     calls = r["choices"][0]["message"].get("tool_calls") or []
     good = bool(calls) and calls[0]["function"]["name"] == "get_weather" and "paris" in calls[0]["function"]["arguments"].lower()
     print("tool call:", "OK" if good else "FAIL", json.dumps(calls)[:200]); ok &= good
+    if not good:   # what the model said instead (the parse or the prompt is wrong when the model meant to call)
+        m = r["choices"][0]["message"]
+        print("  instead:", r["choices"][0].get("finish_reason"), repr(m.get("content"))[:600], repr(m.get("reasoning_content"))[:600])
 else:
     print("tool call: skipped (chat-only block: the template ignores tools)")
 n = requests.post(url + "/v1/chat/completions/input_tokens", json={"model": model, "messages": [{"role": "user", "content": "hi"}]}).json()
