@@ -126,7 +126,8 @@ The expensive path. Keep it short:
    | channel chat formats (ATEM), norm RoPE, NoPE | `glimmer` |
 
    `../loom-optimize/reference/flint-moe-example/` holds one more MoE idea (bucketed grouped GEMM), not
-   a base. The starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
+   a base. The starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls, and tool
+   declarations printed as JSON or as XML elements (Qwen3-Coder: `chat.tools_format` `"xml"`).
 4. **Test every path that implements an op.** Attention runs in three kernels (decode split-K + combine,
    prefill `flash2`, the listed fallback for mixed tiles); a feature added to one (sinks, softcap, a gate,
    a window) must be added and unit-tested in all of them. A mismatch passes the goldens and shows up only
