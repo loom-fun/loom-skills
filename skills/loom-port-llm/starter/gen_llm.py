@@ -3309,9 +3309,12 @@ def moe_layer(i, b, nm, sz, par):
     E, KU, FE = MOE["experts"], MOE["used"], MOE["ffn"]
     assert MOE.get("scale", 1.0) == 1.0, "expert_weights_scale != 1: scale the combine weights"
     fg, fu, fd = fmt_of(b + "ffn_gate_exps.weight"), fmt_of(b + "ffn_up_exps.weight"), fmt_of(b + "ffn_down_exps.weight")
-    assert fg == fu
     sg, sd = tensor_bytes(b + "ffn_gate_exps.weight"), tensor_bytes(b + "ffn_down_exps.weight")
-    USED_MOE.add((fg, H, FE, "gu")); USED_MOE.add((fd, FE, H, "dn"))
+    su = tensor_bytes(b + "ffn_up_exps.weight")
+    # Gate and up in different formats (MiniCPM-V-4.7's Q4_K_M: Q4_K gate, Q6_K up): kernels "GATE+UP" (gen_moe.py)
+    gu = fg if fg == fu else f"{fg}+{fu}"
+    gun = gu.replace("+", "_")
+    USED_MOE.add((gu, H, FE, "gu")); USED_MOE.add((fd, FE, H, "dn"))
     R = MOE_R
     rty = TENS[b + "ffn_gate_inp.weight"]["type"]
     T = []
@@ -3334,18 +3337,18 @@ def moe_layer(i, b, nm, sz, par):
     T.append(f"""  %router_{i} = command.parameter %weights, "{b}ffn_gate_inp.weight" : view<{E * H}x{rty}>
 """ + (f"""  %ebias_{i} = command.parameter %weights, "{b}exp_probs_b.bias" : view<{E}xf32>
 """ if MOE["probs_bias"] else "") + f"""  %wge_{i} = command.parameter %weights, "{b}ffn_gate_exps.weight" : view<{sg}xi8>
-  %wue_{i} = command.parameter %weights, "{b}ffn_up_exps.weight" : view<{sg}xi8>
+  %wue_{i} = command.parameter %weights, "{b}ffn_up_exps.weight" : view<{su}xi8>
   %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
   scf.if %gemm {{
     kernel.launch @g_moe_route_tr_live[%t](%t, %h, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
     kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
-    kernel.launch @g_moe_ggu_{fg}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, %wue_{i}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{sg}xi8>, buffer)
+    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, %wue_{i}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>, buffer)
     kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
     kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>, buffer)
     kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}%y) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
   }} else {{
     kernel.launch @g_moe_route[%t](%t, %h, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
-    kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wge_{i}, %wue_{i}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{sg}xi8>, buffer)
+    kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wge_{i}, %wue_{i}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>, buffer)
     kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wde_{i}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>, buffer)
     kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {sgarg}%y) : [index](index, buffer, buffer, {sgty}buffer)
   }}
