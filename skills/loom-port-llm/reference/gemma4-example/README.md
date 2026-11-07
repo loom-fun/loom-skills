@@ -19,7 +19,12 @@ Make a kit for a Gemma-3n/4-family model with `../apply_example.sh gemma4 W/kit`
 The reviewed config (geometry, sliding/KV-sharing layers, chat block) is the published package's `llm_config.json`
 ([loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom](https://huggingface.co/loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom),
 category A, pinned in `../examples.json`); `apply_example.sh gemma4 KIT CFG` merges it.
-The model-specific geometry (KV-sharing start and KV-owning layer count, global layers, embedding scale, per-layer embeddings, rope cut, SWA head_dim and theta, softcap, stop tokens) is read from each GGUF by the starter's `inspect_gguf.py`, so a Gemma 4 of another size (E2B, 12B) does not inherit this E4B port's values from the reference. Layouts these kernels don't cover (per-layer KV-head counts, global layers without `attn_v` as in the 12B/26B) stop at inspect with `WARNING: unsupported layout`.
+The model-specific geometry (KV-sharing start and KV-owning layer count, global layers, embedding scale, per-layer embeddings, rope cut, SWA head_dim and theta, softcap, stop tokens) is read from each GGUF by the starter's `inspect_gguf.py`, so a Gemma 4 of another size (E2B, 12B) does not inherit this E4B port's values from the reference. The 12B/26B/31B layouts are covered too: a KV-head count per layer kind (`kv_heads` on the sliding layers,
+`kv_heads_global` on the global ones, e.g. 8 and 1; each kind's attention, RoPE + KV-store and flash kernels are generated
+with its own count, and a KV position is as wide as the widest kind, `POS_BYTES` = build.py's `pos_bytes`), and global
+layers without `attn_v`, where V is the raw K projection (llama.cpp `Vcur = Kcur`: `g_qk_rope_store` reads V before K's
+norm and RoPE, then V-norms it). A layout with several KV-head counts within one kind still stops at inspect with
+`WARNING: unsupported layout`.
 
 Lessons the agent paid for:
 - `llama_trace.py ... --grep '-0$|-23$|-24$'` (a sliding, a global and a KV-shared layer) gave the whole
