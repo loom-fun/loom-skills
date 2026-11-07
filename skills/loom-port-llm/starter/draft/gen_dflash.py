@@ -225,52 +225,7 @@ def split_enabled(F):
     return DFL_SPLITS > 0 and not (F["window"] or 0) and not F.get("conv")
 
 
-def _allreduce(vals, p, outs):
-    """Wave sums of the lane partials `vals` (a power of two, <= 32), all of them in every lane: recursive halving,
-    then the all-gather (gen_llm.allreduce; needs ALLRED_SETUP's constants)."""
-    t, n, steps = [], len(vals), []
-    for d in (16, 8, 4, 2, 1):
-        if n > 1:
-            h = n // 2
-            nv = []
-            for i in range(h):
-                q = f"%{p}{d}_{i}"
-                t.append(f"""      {q}s = scf.select %ab{d}, {vals[i]}, {vals[i + h]} : f32
-      {q}k = scf.select %ab{d}, {vals[i + h]}, {vals[i]} : f32
-      {q}r, {q}u = kernel.subgroup.shuffle<xor> {q}s, %ad{d}, %aw32 : f32, i32, i32
-      {q} = scalar.addf {q}k, {q}r : f32""")
-                nv.append(q)
-            vals, n = nv, h
-            steps.append(d)
-        else:
-            q = f"%{p}{d}p"
-            t.append(f"""      {q}r, {q}u = kernel.subgroup.shuffle<xor> {vals[0]}, %ad{d}, %aw32 : f32, i32, i32
-      {q} = scalar.addf {vals[0]}, {q}r : f32""")
-            vals = [q]
-    for d in reversed(steps):
-        lo, hi = [], []
-        for i, v in enumerate(vals):
-            q = f"%{p}g{d}_{i}"
-            t.append(f"""      {q}r, {q}u = kernel.subgroup.shuffle<xor> {v}, %ad{d}, %aw32 : f32, i32, i32
-      {q}l = scf.select %ab{d}, {q}r, {v} : f32
-      {q}h = scf.select %ab{d}, {v}, {q}r : f32""")
-            lo.append(f"{q}l"); hi.append(f"{q}h")
-        vals = lo + hi
-    for o, v in zip(outs, vals):
-        t.append(f"      {o} = scalar.addf {v}, %zero_f : f32")
-    return "\n".join(t)
-
-
-ALLRED = "".join(f"""  %ad{d} = scalar.constant {d} : i32
-  %adi{d} = index.constant {d} : index
-  %aq{d} = index.div %lane, %adi{d} : index
-  %ar{d}_2 = index.constant 2 : index
-  %arm{d} = index.rem %aq{d}, %ar{d}_2 : index
-  %ab{d} = index.cmp ne, %arm{d}, %c0 : index
-""" for d in (16, 8, 4, 2, 1)) + "  %aw32 = scalar.constant 32 : i32\n"
-
-
-def ctx_split_kernel(F, QH, KVH, D, POSB):
+def ctx_split_kernel(F, QH, KVH, D, POSB, g):
     """g_dfl_ctx_split: the context part of the draft attention, split-K (see DFL_SPLITS)."""
     S, TQ, KU, GQ, DPL = DFL_SPLITS, DFL_TQ, DFL_KU, QH // KVH, D // 32
     t = [f"""
@@ -310,7 +265,7 @@ kernel.def export("g_dfl_ctx_split") @g_dfl_ctx_split(%tokens: index) {{
   %zero_f = scalar.constant 0.0 : f32
   %neg = scalar.constant -3.0e38 : f32
   %scale = scalar.constant {D ** -0.5!r} : f32
-{ALLRED}  %cgq = index.constant {GQ} : index
+{g['ALLRED_SETUP']}  %cgq = index.constant {GQ} : index
   %qh0 = index.madd %khb, %cgq, %wave : index
   %qh = index.assume %qh0 [range(%qh0, 0, {QH - 1})] : index
   %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
@@ -396,7 +351,7 @@ kernel.def export("g_dfl_ctx_split") @g_dfl_ctx_split(%tokens: index) {{
                 t.append(f"      %pp{j}_{u}_{i} = scalar.fmaf %qv{j}_{i}, %k{u}_{i}, %pp{j}_{u}_{i - 1} : f32\n")
             parts.append(f"%pp{j}_{u}_{DPL - 1}")
     sums = [f"%sm{j}_{u}" for j in range(TQ) for u in range(KU)]
-    t.append(_allreduce(parts, "dr", sums) + "\n")
+    t.append(g["allreduce"](parts, "dr", sums) + "\n")
     ys = []
     for j in range(TQ):
         prev = f"%m{j}"
@@ -851,7 +806,7 @@ kernel.def export("g_dfl_attention") @g_dfl_attention(%tokens: index) {{
 """).replace("  %zero_f = scalar.constant 0.0 : f32\n  %neg", "  %zero_f = scalar.constant 0.0 : f32\n  %one_f = scalar.constant 1.0 : f32\n  %neg", 1))
     if split_enabled(F):
         T[-1] = split_combine(T[-1], QH, KVH, D)
-        T.append(ctx_split_kernel(F, QH, KVH, D, POSB))
+        T.append(ctx_split_kernel(F, QH, KVH, D, POSB, g))
     # ---- residual add + rmsnorm (draft layers; no post norms)
     T.append(f"""
 // x[t] += y[t]; h[t] = rmsnorm(x[t]) * w.
@@ -1629,7 +1584,7 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
 """ + (f"""  kernel.launch @g_dfl_ctx_split[%t](%t, %spans, %dl_{l}, %context, %pool, %metadata, %info, %q, %origins, %arena, %dpacc, %dpml) : [index](index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @g_dfl_attention[%t](%t, %spans, %dl_{l}, %context, %pool, %metadata, %info, %q, %k, %v, %origins, %arena, %o, %dpacc, %dpml) : [index](index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
 """ if SPLIT else f"""  kernel.launch @g_dfl_attention[%t](%t, %spans, %dl_{l}, %context, %pool, %metadata, %info, %q, %k, %v, %origins, %arena, %o) : [index](index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
-""") + f"""""" + scaled("o", "%nDQ") + L(b + "attn_output.weight", "o", f"%do_{l}", "y", "%nDQ", "%nH", QD))
+""") + scaled("o", "%nDQ") + L(b + "attn_output.weight", "o", f"%do_{l}", "y", "%nDQ", "%nH", QD))
         if conv:
             T.append(f"  kernel.launch @g_dfl_conv[%t](%t, %spans, %branch1, %one_i32, %metadata, %info, %y, %dyn, %dacb_{l}, %x) : [index](index, index, index, i32, buffer, buffer, buffer, buffer, view<{2 * conv['taps'] * H}xf32>, buffer)\n"
                      f"  kernel.launch @g_dfl_add_norm[%t](%t, %zero_i32, %y, %x, %dfn_{l}, %h) : [index](index, i32, buffer, buffer, view<{H}xf32>, buffer)\n"

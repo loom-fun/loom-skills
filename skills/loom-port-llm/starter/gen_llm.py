@@ -2237,9 +2237,8 @@ def listed(text, name, grid_rest):
     return header + body[:end]
 
 
-ATTN_BFLY = os.environ.get("ATTN_BFLY", "1") == "1"   # decode attention: a block's key scores in one butterfly all-reduce
-ATTN_PAGED = os.environ.get("ATTN_PAGED", "1") == "1"   # decode attention: 16-aligned key blocks, one page lookup each
-ATTN_ILP = int(os.environ.get("ATTN_ILP", "1"))   # independent softmax chains per block (2, 4: no gain on Qwen3.8-27B at 32k)
+import attn_rules  # noqa: E402  (decode attention variants, shared with make_kernel_tests.py)
+from attn_rules import ATTN_MT, ATTN_MT_FROM  # noqa: E402
 ALLRED_SETUP = "".join(f"""  %ad{d} = scalar.constant {d} : i32
   %adi{d} = index.constant {d} : index
   %aq{d} = index.div %lane, %adi{d} : index
@@ -2291,10 +2290,8 @@ def allreduce(vals, p, outs):
 # the per-wave loop is latency-bound, so a depth-7 verify at 32k cost 8 decode attentions (Qwen3-8B: drafting at
 # 7.7 tok/s against 19.6 undrafted). Exact: every token keeps its own split range, key masks, block partition and
 # operation order (blocks with none of its keys leave its state untouched), so its result is bit-identical.
-ATTN_MT = int(os.environ.get("ATTN_MT", "4"))
-# ... from this position on (shorter contexts keep one token per workgroup: few keys per split, and the group's
-# serial work in one wave measured ~3 % slower drafted decode at short context on Qwen3-8B)
-ATTN_MT_FROM = int(os.environ.get("ATTN_MT_FROM", "1024"))
+# From ATTN_MT_FROM on (shorter contexts keep one token per workgroup: few keys per split, and the group's serial
+# work in one wave measured ~3 % slower drafted decode at short context on Qwen3-8B). attn_rules.multi_token decides.
 
 
 def multi_token_split(text, P, U, T):
@@ -2363,7 +2360,8 @@ def multi_token_split(text, P, U, T):
     %mt_far{j} = index.cmp uge, %mt_p{j}, %window : index
     %mt_uw{j} = scalar.andi %mt_is_sl, %mt_far{j} : i1
     %mt_ws{j} = index.sub %mt_p{j}, %window_less : index
-    %mt_wl{j} = scf.select %mt_uw{j}, %mt_ws{j}, %c0 : index
+    %mt_wls{j} = scf.select %mt_uw{j}, %mt_ws{j}, %c0 : index
+    %mt_wl{j} = index.assume %mt_wls{j} [range(%mt_wls{j}, 0, 262143)] : index
     %mt_end{j} = index.add %mt_p{j}, %c1 : index
     %mt_visv{j} = index.sub %mt_end{j}, %mt_wl{j} : index
     %mt_vis{j} = index.assume %mt_visv{j} [range(%mt_visv{j}, 1, 262144)] : index
@@ -2462,8 +2460,7 @@ def attention_text(S, P):
     combine kernel folds the splits and applies the sigmoid output gate."""
     U = UNROLL
     body = []
-    pa = ATTN_PAGED and 16 % U == 0
-    paged = pa
+    pa = attn_rules.paged(U)
     if pa:   # absolute U-aligned key blocks lie in one 16-position KV page: one page lookup per block
         body.append(f"""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
     for i in range(U):
@@ -2484,7 +2481,7 @@ def attention_text(S, P):
       %vc{i} = buffer.view %arena[%vo{i}] : buffer -> view<{KVH}x32x4xf16>
       %vh{i} = vector.load %vc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
       %v{i} = vector.extf %vh{i} : vector<4xf16> to vector<4xf32>""")
-    ab = ATTN_BFLY and U & (U - 1) == 0 and 2 <= U <= 32
+    ab = attn_rules.butterfly(U)
     for i in range(U):
         body.append(f"""      %prod{i} = vector.mulf %q4, %k{i} : vector<4xf32>
       %part{i} = vector.reduce<addf> %prod{i}, %zero_f : vector<4xf32>, f32""" + ("" if ab else f"""
@@ -2495,7 +2492,7 @@ def attention_text(S, P):
         body.append(f"""      %s{i} = scf.select %ok{i}, %sr{i}, %neg_big : f32""")
     # ATTN_ILP independent online-softmax chains per block (keys interleaved by halves), merged after the loop:
     # shorter dependent chains, more overlap in a latency-bound loop.
-    ILP = ATTN_ILP if U % ATTN_ILP == 0 else 1
+    ILP = attn_rules.ilp(U)
     yields = []
     for c in range(ILP):
         sx = "" if c == 0 else str(c + 1)
@@ -2648,7 +2645,7 @@ kernel.def export("{P}_attention_split") @{P}_attention_split(%tokens: index) {{
     %hi_abs = index.add %window_low, %stop : index
     %lo_q = index.div %lo_abs, %cU : index
     %lo_al = index.mul %lo_q, %cU : index
-    """ + FIN + """ = scf.for %j = [%lo_al to %hi_abs step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""" if ATTN_PAGED and 16 % U == 0 else """    """ + FIN + """ = scf.for %j = [%start to %stop step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""") + f"""
+    """ + FIN + """ = scf.for %j = [%lo_al to %hi_abs step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""" if pa else """    """ + FIN + """ = scf.for %j = [%start to %stop step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""") + f"""
 {chr(10).join(body)}
     }}
 {ILP_MERGE}
@@ -2742,7 +2739,7 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
   kernel.return
 }}
 """
-    if P == "g" and 1 < ATTN_MT <= U and paged and ab and ILP == 1:
+    if P == "g" and attn_rules.multi_token(U):
         text = multi_token_split(text, P, U, ATTN_MT)
     if D != 128:
         text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
@@ -4235,6 +4232,7 @@ if __name__ == "__main__":
                     n *= d
                 return n * 4 if t["type"] == "f32" else n // SB[t["type"]] * FMT[t["type"]]
             gfacts.update(dflash=dcfg, dflash_taps=[t - 1 for t in dcfg["target_layers"]], L=L, CHUNKS=CHUNKS, V=V,
+                          allreduce=allreduce, ALLRED_SETUP=ALLRED_SETUP,
                           row_bytes=row_bytes, FMT=FMT, SB=SB, dfmt=lambda n: DT[n]["type"], dsize=dsize,
                           EFMT=EFMT, embed_plain=not EMBED_NORM and not _ES)
         if gen_draft.DRAFT["kind"] == "assist":

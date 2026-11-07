@@ -19,6 +19,7 @@ from mv_rows import pick_r, iq_r  # noqa: E402
 from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402  formats with no 256-row (_m256) GEMM
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
 from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
+import attn_rules  # noqa: E402
 
 
 def q8_ref(xs):
@@ -700,54 +701,66 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   check.return
 }}
 """)
-# 3c. a verify span at long context: 4 tokens of one row at consecutive positions past gen_llm's ATTN_MT_FROM take the
-# multi-token split-K path (one K/V load per key for the span); K/V written straight into the arena (identity pages)
-# (kits with their own attention scale (gemma4) keep the per-token kernel; attention sinks change the combine)
-def attention_span_case():
-    t, ctx, p0 = 4, 1152, 1100
+# 3c. a verify span at long context: ATTN_MT tokens of one row at consecutive positions past ATTN_MT_FROM take the
+# multi-token split-K path (one K/V load per key for the span); K/V written straight into the arena (identity pages).
+# The model's attention scale and sinks are in the reference; a sliding layer (window W) gets its own case.
+def attention_span_case(tag, sliding):
+    W = cfg.get("sliding_window") or 0
+    t = attn_rules.ATTN_MT
+    p0 = max(attn_rules.ATTN_MT_FROM + 76, W + 100 if sliding else 0)
+    ctx = (p0 + t + 15) // 16 * 16 + 64
+    scale = cfg["attn_scale"] if cfg.get("attn_scale") is not None else 1 / np.sqrt(D)
+    sinks = deq(f"blk.{A0}.attn_sinks.weight").astype(np.float32) if cfg.get("attn_sinks") else None
     kvk = (0.5 * rng.standard_normal((ctx, KVH, D))).astype(np.float16); kvv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
     q = rng.standard_normal((t, QH, D)).astype(np.float32); gate = rng.standard_normal((t, QH, D)).astype(np.float32)
     att = np.zeros((t, QH, D))
     for i in range(t):
-        p = p0 + i
+        p = p0 + i; lo = p - (W - 1) if sliding else 0
         for hh in range(QH):
             kv = hh // (QH // KVH)
-            sc = kvk[:p + 1, kv].astype(np.float64) @ q[i, hh] / np.sqrt(D)
-            pr = np.exp(sc - sc.max()); pr /= pr.sum(); att[i, hh] = pr @ kvv[:p + 1, kv].astype(np.float64)
-    if gate_kind:
+            sc = kvk[lo:p + 1, kv].astype(np.float64) @ q[i, hh] * scale
+            mx = sc.max() if sinks is None else max(sc.max(), sinks[hh])
+            pr = np.exp(sc - mx); den = pr.sum() + (0.0 if sinks is None else np.exp(sinks[hh] - mx))
+            att[i, hh] = pr @ kvv[lo:p + 1, kv].astype(np.float64) / den
+    if gate_kind and sinks is None:
         att = att / (1 + np.exp(-gate))
     blocks = ctx // 16
     orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
     info = np.zeros((t, 4), np.int32); info[:, 1] = p0 + np.arange(t); info[:, 2] = 1
-    for n, a in [("s_q", q.reshape(t, -1)), ("s_g", gate.reshape(t, -1)), ("s_info", info), ("s_orig", orig),
-                 ("s_arena", np.concatenate([kvk.reshape(-1), kvv.reshape(-1)])), ("s_o", att.reshape(t, -1).astype(np.float32))]:
-        save(n, a)
+    for n, a in [("q", q.reshape(t, -1)), ("g", gate.reshape(t, -1)), ("info", info), ("orig", orig),
+                 ("sinks", sinks if sinks is not None else np.zeros(QH, np.float32)),
+                 ("arena", np.concatenate([kvk.reshape(-1), kvv.reshape(-1)])), ("o", att.reshape(t, -1).astype(np.float32))]:
+        save(f"{tag}_{n}", a)
     S = 64
-    cases.append(f"""check.case public @attention_span {{
+    gv, gt = ("%sinks", f"tensor<{QH}xf32>") if sinks is not None else ("%g" if gate_kind else "%q", f"tensor<{t}x{QD}xf32>")
+    cases.append(f"""check.case public @{tag} {{
   %t = check.literal value({t}) : index
   %layer = check.literal value(0) : index
-  %sliding = check.literal value(0) : i32
+  %sliding = check.literal value({int(sliding)}) : i32
   %ctx = check.literal value({ctx}) : index
   %pool = check.literal value({ctx}) : index
-  %q = check.file.read.npy path("s_q.npy") : tensor<{t}x{QD}xf32>
-  %g = check.file.read.npy path("s_g.npy") : tensor<{t}x{QD}xf32>
-  %info = check.file.read.npy path("s_info.npy") : tensor<{t}x4xi32>
-  %orig = check.file.read.npy path("s_orig.npy") : tensor<{10 + blocks}xi32>
-  %arena = check.file.read.npy path("s_arena.npy") : tensor<{2 * ctx * KVH * D}xf16>
-  %eo = check.file.read.npy path("s_o.npy") : tensor<{t}x{QD}xf32>
+  %q = check.file.read.npy path("{tag}_q.npy") : tensor<{t}x{QD}xf32>
+  %g = check.file.read.npy path("{tag}_g.npy") : tensor<{t}x{QD}xf32>
+  %sinks = check.file.read.npy path("{tag}_sinks.npy") : tensor<{QH}xf32>
+  %info = check.file.read.npy path("{tag}_info.npy") : tensor<{t}x4xi32>
+  %orig = check.file.read.npy path("{tag}_orig.npy") : tensor<{10 + blocks}xi32>
+  %arena = check.file.read.npy path("{tag}_arena.npy") : tensor<{2 * ctx * KVH * D}xf16>
+  %eo = check.file.read.npy path("{tag}_o.npy") : tensor<{t}x{QD}xf32>
   %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
   %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
   %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
   kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
-  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {"%g" if gate_kind else "%q"}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>)
+  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {gv}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, {gt}, tensor<{t}x{QD}xf32>)
   check.expect.close actual(%o) expected(%eo) atol(3.0e-3) rtol(3.0e-3) nan(different) : tensor<{t}x{QD}xf32>
   check.return
 }}
 """)
 
 
-if not cfg.get("attn_scale") and not cfg.get("attn_sinks"):
-    attention_span_case()
+if attn_rules.multi_token(attn_rules.UNROLL):   # the condition gen_llm.py emits the multi-token path on
+    attention_span_case("attention_span", False)
+    if cfg.get("sliding_layers") and cfg.get("sliding_window"):
+        attention_span_case("attention_span_sliding", True)
 
 # 3a''. DFlash proposals' head (draft/prep_weights.py, PROPOSE_HEAD=q4_0): g_prep_<fmt>_q4_0 converts the head at load,
 # then the int8 head runs over the Q4_0 copy. Logits vs numpy on llama.cpp's quantize_row_q4_0 of the same values (a

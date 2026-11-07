@@ -91,10 +91,11 @@ def perf_metrics(row):
 
 # The smaller documents are byte-exact prefixes of the two stored ones (prompts and reference-cache keys unchanged).
 DOC_PREFIX = {1000: (2000, 4688), 8000: (32000, 36510), 16000: (32000, 73839)}
+DOC_SIZES = (1000, 2000, 8000, 16000, 32000)   # the token counts doc() has
 
 
 def doc(n):
-    """Real-text document of ~n tokens (Loom docs markdown): 1000 2000 8000 16000 32000."""
+    """Real-text document of ~n tokens (Loom docs markdown), n in DOC_SIZES."""
     base, size = DOC_PREFIX.get(n, (n, None))
     data = open(os.path.join(DATA, f"doc_{base}.txt"), "rb").read()
     return (data if size is None else data[:size]).decode("utf-8")

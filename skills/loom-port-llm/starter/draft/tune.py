@@ -67,9 +67,9 @@ def measure(url, model, chat, context=0):
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
     stream(url, model, WORK[0][0], 16, extra=off)                       # warm-up (weights, first compiles)
     work = list(WORK)
-    n = min(LONG_CTX, context // 2)
+    from bench_common import DOC_SIZES, doc
+    n = max((d for d in DOC_SIZES if d <= min(LONG_CTX, context // 2)), default=0)   # doc() has only these sizes
     if n >= 4000:
-        from bench_common import doc
         work.append(([{"role": "user", "content": "Write a long, detailed essay discussing this documentation.\n\n" + doc(n)}], {}))
     tps = []
     for messages, extra in work:
@@ -182,7 +182,7 @@ def main():
             try:
                 serve("tune", port, mem, path, env)
                 tps = measure(f"http://127.0.0.1:{port}", model_id, chat,
-                              json.load(open(os.path.join(pkg, "llm_config.json"))).get("context_length") or 0)
+                              card["presets"]["chat"]["execution"].get("context_capacity") or 0)
             except Exception as e:  # noqa: BLE001  a failing candidate is reported and skipped
                 print(f"tune: {kind} depth {depth}: {e}", file=sys.stderr)
                 tps = 0.0

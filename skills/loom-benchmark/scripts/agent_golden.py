@@ -108,7 +108,7 @@ def main():
     thinking = None if a.thinking == "default" else a.thinking == "on"
     extra = {} if thinking is None else {"chat_template_kwargs": {"enable_thinking": thinking}}
     msgs = [{"role": "system", "content": "You are a helpful assistant. Use the tools when they help."}]
-    turns, failures, prev_total, prev_prompt_n, prev_text = [], 0, 0, 0, ""
+    turns, failures, prev_total, prev_text = [], 0, 0, ""
     for task in TASKS:
         msgs.append({"role": "user", "content": task})
         for step in range(6):
@@ -137,10 +137,7 @@ def main():
                 pids = P.ids(prev_text)
                 common = next((i for i, (x, y) in enumerate(zip(pids, ids)) if x != y), min(len(pids), len(ids)))
                 exact = prompt.startswith(prev_text)
-                # The rewrite is the template's when the previous output was verified, or when it starts inside
-                # the previous prompt (e.g. thinking off: the generation prompt's empty think block, which the
-                # history drops), before any token the model generated.
-                rewritten = not exact and (turns[-1].get("golden_match") is True or common < prev_prompt_n)
+                rewritten = not exact and turns[-1].get("golden_match") is True   # previous output verified
                 rec["history_verbatim"] = exact or (common >= 0.8 * len(pids) and not rewritten)
                 if exact and turns[-1].get("output_dropped"):
                     # The previous reply's parse dropped a second call (output_dropped below): the retained history
@@ -240,7 +237,7 @@ def main():
             # whitespace between calls, which the template may re-render), else the plain rebuild.
             out_text = raw if raw is not None else P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
             turns.append(rec)
-            prev_total, prev_prompt_n = u["prompt_tokens"] + u["completion_tokens"], len(ids)
+            prev_total = u["prompt_tokens"] + u["completion_tokens"]
             prev_text = prompt + out_text
             # loom-serve rejects "reasoning_content": null, so only send it when present.
             msgs.append({"role": "assistant", "content": m.get("content") or "",

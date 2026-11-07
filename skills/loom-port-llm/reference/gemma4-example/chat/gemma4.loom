@@ -17,6 +17,8 @@ global.rodata.def @g4_decl_close = bytes("@@HEX_CHAT:tool_decl_close@@")
 
 global.rodata.def @g4_response_open = bytes("@@HEX_CHAT:tool_response_open@@")
 
+global.rodata.def @g4_terminal = bytes("@@HEX_CHAT:terminal@@")
+
 global.rodata.def @g4_value_open = bytes("@@HEX_CHAT:tool_value_open@@")
 
 global.rodata.def @g4_quote = bytes("3c7c227c3e")
@@ -1721,7 +1723,8 @@ func.def @g4_parse_calls(%response: buffer) -> (buffer) {
 }
 
 // Retained history of this turn: the prompt + the response exactly as generated + the
-// close the next render prints after it (<|tool_response> after calls, else <turn|>\n).
+// close the next render prints after it (<|tool_response> after calls, else <turn|>\n; a closed answer
+// ends at <turn|>: loom-serve feeds the predicted stop in its place and the next input supplies the "\n").
 // The template re-renders a turn differently from what the model wrote (reasoning gets
 // "\n<channel|>", content is trimmed, call keys sorted, reasoning dropped after a new
 // query). The raw text is what the row holds: loom-serve resumes the row when the next
@@ -1736,9 +1739,11 @@ func.def @g4_complete_text(%prompt: buffer, %response: buffer, %content: buffer,
   %has_calls = index.cmp ne, %tools_length, %c0 : offset
   %response_open = global.load @g4_response_open : buffer
   %suffix = global.load @message_suffix : buffer
-  %close = scf.select %has_calls, %response_open, %suffix : buffer
-  %result = func.call @join4(%prompt, %response, %close, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
   %closed = scalar.cmpi ne, %final_state, %c1_i64 : i64
+  %terminal = global.load @g4_terminal : buffer
+  %answer_close = scf.select %closed, %terminal, %suffix : buffer
+  %close = scf.select %has_calls, %response_open, %answer_close : buffer
+  %result = func.call @join4(%prompt, %response, %close, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
   %reusable = scalar.extui %closed : i1 to i32
   func.return %result, %reusable : buffer, i32
 }
