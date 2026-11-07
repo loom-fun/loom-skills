@@ -54,6 +54,9 @@ port start -> evidence written, GGUF download subtracted. Pairs run on the same 
 | Qwen3.5-9B | DevLab | off | 26.8 | 4.8, 7 | PASS (no vision: projector download bug, fixed since) | |
 | Qwen3.5-9B | DevLab | auto -> the 4B (score 182) | 26.5 | 4.5, 6 | PASS (same set) | first prior: neighbourhood only |
 | Qwen3.5-9B | local | auto -> the 4B | 27.4 | 3.8, 4 | PASS incl. vision | ruled-out method gets one probe; published |
+| Ornith-1.5-9B | local | off | 29.0 | 5.2, 7 | PASS incl. vision | adjacent family (qwen35 fine-tune, no base model in its card) |
+| Ornith-1.5-9B | local | auto -> the 9B (score 134, by architecture + size) | 27.3 | 3.9, 4 | PASS incl. vision | -6 % wall; published |
+| Gemma-4-E2B (port.sh only) | local | off / auto -> Bolt-E4B | exit 3 / exit 3 | – | – | off: formats, head_dim 512 and the chat block all open; auto: gemma4 kit + reviewed config applied, the reference's chat block verified on this template leaves 6 of 26 probes (assistant text next to tool calls) |
 
 Plan of checks: lookup code only reached by REFERENCE=auto (starter path unchanged with REFERENCE=off: programs
 byte-identical); tune.py prior only with cfg["reference"]; example configs verified byte-for-byte against the HF
