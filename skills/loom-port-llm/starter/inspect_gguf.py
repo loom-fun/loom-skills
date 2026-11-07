@@ -140,6 +140,13 @@ if arch == "gemma4":
         print(f"WARNING: unsupported layout: per-layer KV heads {sorted(set(kv)) if isinstance(kv, list) else kv}"
               f"{f', no attn_v (V = K) on layers {no_v[:4]}...' if no_v else ''}: gemma4-example's attention assumes "
               "one KV-head count and an attn_v on every KV-owning layer; extend gen_llm.py (agent port)")
+# Attention projection biases (qwen2: q/k/v): no kernel adds them, so a port would serve garbage while its kernel
+# tests (which skip them too) pass. Stop here instead.
+_bias = sorted({t.split(".", 2)[2] for t in tensors if t.startswith("blk.") and t.split(".", 2)[2] in
+                ("attn_q.bias", "attn_k.bias", "attn_v.bias", "attn_qkv.bias", "attn_output.bias")})
+if _bias:
+    print(f"WARNING: unsupported layout: attention biases {_bias}: gen_llm.py's attention projections take no bias; "
+          "add them (agent port)")
 # Hybrid models: gated delta-net (linear attention) layers carry recurrent state
 # instead of KV (llama.cpp qwen35/qwen3next: layer i is recurrent unless (i+1) % interval == 0).
 if A("ssm.inner_size"):
