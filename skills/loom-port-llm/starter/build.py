@@ -395,6 +395,53 @@ def patch_tools_compact(text):
                               "    %printed = func.call @compact(%printed_raw) : (buffer) -> (buffer)\n")
 
 
+def patch_role_suffixes(text):
+    """control.loom for templates that close each role with its own tag (chat.system_suffix / chat.assistant_suffix,
+    Laguna: '</system>\n', '</assistant>\n'; chat.suffix closes user messages): system blocks (chat_begin and later
+    system messages) and assistant turns (chat_message, complete_text) take their own suffix. Without those fields
+    control.loom is unchanged."""
+    def sub(t, old, new):
+        assert t.count(old) == 1, (old[:120], t.count(old))
+        return t.replace(old, new)
+    text = sub(text, 'global.rodata.def @message_suffix = bytes("@@HEX_SUFFIX@@")\n',
+               'global.rodata.def @message_suffix = bytes("@@HEX_SUFFIX@@")\n\n'
+               f'global.rodata.def @system_suffix = bytes("{hx(chat.get('system_suffix', chat['suffix']))}")\n\n'
+               f'global.rodata.def @assistant_suffix = bytes("{hx(chat.get('assistant_suffix', chat['suffix']))}")\n')
+    # chat_begin: the system block
+    text = sub(text, "  %system_prefix = global.load @system_prefix : buffer\n  %suffix = global.load @message_suffix : buffer\n  %rendered",
+               "  %system_prefix = global.load @system_prefix : buffer\n  %suffix = global.load @system_suffix : buffer\n  %rendered")
+    # chat_message: assistant turns, and system vs user messages
+    text = sub(text, "        %message = func.call @join4(%head, %calls, %close, %suffix)",
+               "        %assistant_suffix = global.load @assistant_suffix : buffer\n"
+               "        %message = func.call @join4(%head, %calls, %close, %assistant_suffix)")
+    text = sub(text, "        %message = func.call @join4(%prefix, %text, %suffix, %empty)",
+               "        %system_suffix = global.load @system_suffix : buffer\n"
+               "        %role_suffix = scf.select %user, %suffix, %system_suffix : buffer\n"
+               "        %message = func.call @join4(%prefix, %text, %role_suffix, %empty)")
+    # complete_text: the generated assistant turn
+    return sub(text, "  %separator = scf.select %separate, %separator_value, %empty : buffer\n  %suffix = global.load @message_suffix : buffer\n",
+               "  %separator = scf.select %separate, %separator_value, %empty : buffer\n  %suffix = global.load @assistant_suffix : buffer\n")
+
+
+def patch_history_think_off(text):
+    """control.loom for templates that show reasoning in history only with thinking on and render every assistant turn
+    as think_close alone with it off (chat.history_think_off "close", Laguna: '<assistant></think>answer'). Without
+    the field control.loom is unchanged."""
+    def sub(t, old, new):
+        assert t.count(old) == 1, (old[:120], t.count(old))
+        return t.replace(old, new)
+    text = sub(text, "        %text_length = buffer.length %text\n",
+               """        // Thinking off (state bit 16 clear): think_close alone, the reasoning dropped (chat.history_think_off).
+        %thinking_mask = scalar.constant 16 : i64
+        %thinking_bit = scalar.andi %state, %thinking_mask : i64
+        %thinking_off = scalar.cmpi eq, %thinking_bit, %zero64 : i64
+        %close_only = global.load @think_close : buffer
+        %think_shown = scf.select %thinking_off, %close_only, %think : buffer
+        %text_length = buffer.length %text
+""")
+    return sub(text, "func.call @join4(%prefix, %think, %text, %separator)", "func.call @join4(%prefix, %think_shown, %text, %separator)")
+
+
 def patch_no_tools(text):
     """control.loom for a chat-only block (chat_probe.CHAT_ONLY, call_format "none": the template ignores tools):
     chat_begin renders a request's tools as the template does (not at all) and parse_tools never parses a call.
@@ -484,6 +531,10 @@ for name in ("prepare", "control", "storage", "service"):
         text = patch_tools_compact(text)
     if name == "control" and chat["call_format"] == "none":
         text = patch_no_tools(text)
+    if name == "control" and ("system_suffix" in chat or "assistant_suffix" in chat):
+        text = patch_role_suffixes(text)
+    if name == "control" and chat.get("history_think_off") == "close":
+        text = patch_history_think_off(text)
     if name == "control" and custom_chat:
         for fn in ("chat_begin", "chat_message", "chat_end", "render_tool", "parse_tools", "output_next", "complete_text"):
             text = text.replace(f"func.def public @{fn}(", f"func.def @generic_{fn}(")

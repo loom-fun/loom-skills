@@ -300,8 +300,10 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
 - Chat templates whose first system block always opens with the default prompt and append the request's
   system message (`system_lead`, `system_lead_separator`; reasoning instructions appended to it:
   `reasoning_after_lead`), that render a turn without reasoning as a bare think close (`history_think: "close"`)
-  or print tools as compact JSON (`tools_compact`) are derived by `chat_probe.py`; build.py patches control.loom
-  only for blocks that use them.
+  or print tools as compact JSON (`tools_compact`) are derived by `chat_probe.py`; so are templates that close each
+  role with its own tag (`system_suffix`, `assistant_suffix` beside the user's `suffix`; the terminal is the
+  assistant's) and that show reasoning in history only with thinking on, a bare think close in every turn with it off
+  (`history_think_off: "close"`). build.py patches control.loom only for blocks that use them.
   `nope_layers` are layers without RoPE.
 - `extra_eos_ids`: every id that should stop generation. For ChatML models that is
   `<|im_end|>` and `<|endoftext|>`.
