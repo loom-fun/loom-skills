@@ -1,6 +1,6 @@
 ---
 name: loom-port-llm
-description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve package — generate Loom IR kernels + command program from the GGUF's metadata, derive the chat/tool-calling glue from the model's own chat template, build model.json at the model's native context length, bring it up, unit-test kernels, and validate token-by-token against llama.cpp (short prompts, agent tool loops, full context). Includes a config-driven starter kit for dense transformers (Llama/Qwen2/Qwen3/Mistral-style, GQA, QK-norm, q/k/v biases, sliding window, output gates, post-norms, head_dim 64/128/256, partial RoPE) and Qwen3.5/Qwen3-Next-style hybrids (gated delta-net layers with recurrent state), with fast decode and WMMA prefill. Speculative decoding is on by default for every model family (the GGUF's MTP block, a Gemma-4 assistant, a DFlash/DFlash2 drafter, or weight-free n-gram prompt lookup, chosen by measured decode speed, output identical to the target). Adds image input automatically when the repo ships a vision projector (mmproj) of a supported family (Gemma 4, Qwen3-VL/Qwen3.5+, Muse-Glimmer), and documents how to add a family. Use for "port model X to Loom", "get X working on loom-serve", custom/unsupported models.
+description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve package — generate Loom IR kernels + command program from the GGUF's metadata, derive the chat/tool-calling glue from the model's own chat template, build model.json at the model's native context length, bring it up, unit-test kernels, and validate token-by-token against llama.cpp (short prompts, agent tool loops, full context). Includes a config-driven starter kit for dense transformers (Llama/Qwen2/Qwen3/Mistral-style, GQA, QK-norm, q/k/v biases, fused q|k|v projections, sliding window with its own RoPE base/dims, output gates (elementwise or per head), post-norms, SwiGLU or GEGLU, head_dim 64/128/256, partial RoPE) and Qwen3.5/Qwen3-Next-style hybrids (gated delta-net layers with recurrent state), with fast decode and WMMA prefill. Speculative decoding is on by default for every model family (the GGUF's MTP block, a Gemma-4 assistant, a DFlash/DFlash2 drafter, or weight-free n-gram prompt lookup, chosen by measured decode speed, output identical to the target). Adds image input automatically when the repo ships a vision projector (mmproj) of a supported family (Gemma 4, Qwen2.5-VL, Qwen3-VL/Qwen3.5+, Muse-Glimmer), and documents how to add a family. Use for "port model X to Loom", "get X working on loom-serve", custom/unsupported models.
 ---
 
 # Port an LLM to Loom
@@ -51,7 +51,7 @@ LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmar
   `PORT_RESULT {...}`;
 - starts the end-to-end clock (`WORKDIR/.e2e_start`);
 - **image input** (stage 2b): when the repo ships a vision projector (`mmproj-*.gguf`) whose family has
-  an encoder plan (`gemma4v`, `qwen3vl_merger`, `muse-glimmer`), adds the image component and tests it
+  an encoder plan (`gemma4v`, `qwen3vl_merger`, `qwen2.5vl_merger`, `muse-glimmer`), adds the image component and tests it
   (stage 5: vision kernels vs NumPy, the whole encoder vs a reference checked against llama.cpp;
   stage 6: one image). `VISION=0` skips it, `MMPROJ=file` picks the projector. An unsupported family
   leaves a text-only port; `reference/vision.md` says how to add one. (A recognized family can still fail
@@ -121,12 +121,13 @@ The expensive path. Keep it short:
    | Family | Example |
    |---|---|
    | Gemma-3n / Gemma-4 (PLE, KV sharing, head_dim 512, Gemma chat format) | `gemma4` |
-   | LFM2 short-conv hybrids (+ its own MoE kernels) | `lfm2moe` (top-k router, expert matvecs, grouped WMMA prefill) |
+   | LFM2 / LFM3 short-conv hybrids (+ its own MoE kernels) | `lfm2moe` (top-k router, expert matvecs, grouped WMMA prefill; lfm3: kernel-7 conv, sandwich norms; its per-head gate and SWA rope base are the starter's `per_head` and `rope_theta_swa`) |
    | attention sinks, SWA, NoPE (MoE from the starter) | `flint` (built on lfm2moe in ~12 min; its MoE is now `starter/gen_moe.py`) |
    | channel chat formats (ATEM), norm RoPE, NoPE | `glimmer` |
 
    `../loom-optimize/reference/flint-moe-example/` holds one more MoE idea (bucketed grouped GEMM), not
-   a base. The starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
+   a base. The starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls, and tool
+   declarations printed as JSON or as XML elements (Qwen3-Coder: `chat.tools_format` `"xml"`).
 4. **Test every path that implements an op.** Attention runs in three kernels (decode split-K + combine,
    prefill `flash2`, the listed fallback for mixed tiles); a feature added to one (sinks, softcap, a gate,
    a window) must be added and unit-tested in all of them. A mismatch passes the goldens and shows up only
@@ -276,6 +277,11 @@ Kernel inventory:
 - loom-serve rejects `"reasoning_content": null` in a message: omit the field instead.
 - `usage.prompt_tokens` of a turn that reuses history is one lower than `/v1/chat/completions/input_tokens`
   (the previous turn's EOS is already in the row); compare renderings with `input_tokens`.
+- `input_tokens` above `chat_probe.simulate()` while the rendered text is right (a debug `@require(0, %prefixed)`
+  in chat_begin returns it as the error message) is loom-serve's tokenizer: it differs from HF tokenizers after
+  64 pre-tokenizer pieces when a later `Sequence` stage splits them further. build.py folds the one such shape seen
+  (a trailing `Digits` after a leading `\p{N}` Split) into an equivalent pre-tokenizer; check another with HF vs
+  loom-serve counts on a long text.
 
 ## cfg.json review checklist (step 2)
 
@@ -292,6 +298,16 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   post-attention/FFN norms), `attn_gate` (sigmoid output gate), `embed_scale`
   (Gemma multiplies embeddings by √hidden), `embed_norm`.
 - Sliding-window layers: list them in `sliding_layers` and set `sliding_window`.
+  Sliding layers with their own RoPE at the same head_dim (`rope_theta_swa`, `rope_dims_swa` from
+  `rope.freq_base_swa` / `rope.dimension_count_swa`, spark2_5) get `g_qk_rope_store_swa`.
+- `attn_qkv` (one fused q|k|v projection, split by `g_split_qkv`), `attn_gate: "per_head"` (one sigmoid logit
+  per query head, broadcast by `g_gate_heads`), `ffn_act: "gelu"` (GEGLU; `inspect_gguf.FFN_ACT` lists the
+  architectures llama.cpp hard-codes it for). spark2_5 uses all three.
+- Chat templates whose first system block always opens with the default prompt and append the request's
+  system message (`system_lead`, `system_lead_separator`; reasoning instructions appended to it:
+  `reasoning_after_lead`), that render a turn without reasoning as a bare think close (`history_think: "close"`)
+  or print tools as compact JSON (`tools_compact`) are derived by `chat_probe.py`; build.py patches control.loom
+  only for blocks that use them.
   `nope_layers` are layers without RoPE.
 - `extra_eos_ids`: every id that should stop generation. For ChatML models that is
   `<|im_end|>` and `<|endoftext|>`.

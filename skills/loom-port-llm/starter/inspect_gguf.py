@@ -81,7 +81,7 @@ cfg = {
     "tensors": tensors,
 }
 if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3",
-                "qwen3moe", "qwen35moe"):
+                "qwen3moe", "qwen35moe", "spark2_5"):
     print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
           "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
           "before trusting a golden FAIL or PASS")
@@ -158,6 +158,15 @@ if arch == "gemma4":
         if cfg.get("kv_heads_global") or _v_is_k:
             print(f"gemma4 attention: {cfg['kv_heads']} KV heads on sliding layers, {cfg.get('kv_heads_global', cfg['kv_heads'])}"
                   f" on global layers{f'; V = K (no attn_v) on layers {_v_is_k}' if _v_is_k else ''}")
+# Sliding layers with their own RoPE at the same head_dim (spark2_5: freq_base_swa 1e4 + full rotary dims on the sliding
+# layers, 5e6 + 64 of 256 dims on the global ones; llama.cpp defaults each to the global value when the key is absent).
+if arch != "gemma4" and cfg["sliding_layers"] and (A("rope.freq_base_swa") or A("rope.dimension_count_swa")):
+    cfg["rope_theta_swa"] = A("rope.freq_base_swa") or cfg["rope_theta"]
+    cfg["rope_dims_swa"] = A("rope.dimension_count_swa") or rope_dims or head_dim
+# FFN activations llama.cpp hard-codes per architecture (build_ffn's LLM_FFN_GELU: GEGLU, gelu-tanh); default SwiGLU.
+FFN_ACT = {"spark2_5": "gelu"}
+if arch in FFN_ACT:
+    cfg["ffn_act"] = FFN_ACT[arch]
 # Hybrid models: gated delta-net (linear attention) layers carry recurrent state
 # instead of KV (llama.cpp qwen35/qwen3next: layer i is recurrent unless (i+1) % interval == 0).
 if A("ssm.inner_size"):
@@ -178,6 +187,18 @@ if A("ssm.inner_size"):
 if _nextn and L != BLOCKS:
     cfg["mtp"] = {"layers": _nextn}
     print(f"MTP: {len(_nextn)} NextN block(s) {_nextn} after the {L}-layer trunk: speculative decoding (MTP) is available")
+# Attention layers with one fused q | k | v projection (spark2_5: attn_qkv; hybrids' gated delta-net layers have their own
+# attn_qkv, which this does not look at), and an attn_gate with one row per query head (sigmoid per head, spark2_5;
+# LFM3, whose first attention layer comes after short-conv layers).
+_attn0 = next((i for i in range(L) if i not in cfg.get("recurrent_layers", [])
+               and any(f"blk.{i}.attn_{p}.weight" in tensors for p in ("q", "qkv"))), None)
+if _attn0 is not None and f"blk.{_attn0}.attn_qkv.weight" in tensors and f"blk.{_attn0}.attn_q.weight" not in tensors:
+    if tensors[f"blk.{_attn0}.attn_qkv.weight"]["shape"][1] != (heads + 2 * cfg["kv_heads"]) * head_dim:
+        print("WARNING: unsupported layout: attn_qkv is not [q | k | v] of heads + 2 kv_heads rows of head_dim (agent port)")
+    cfg["attn_qkv"] = True
+_gate0 = tensors.get(f"blk.{_attn0}.attn_gate.weight")
+if _gate0 and cfg["attn_gate"] in (True, False) and _gate0["shape"][1] == heads:
+    cfg["attn_gate"] = "per_head"
 # Attention projection biases (qwen2: q/k/v, added right after the projection, llama.cpp build_qkv): g_qk_rope_store
 # adds those in cfg["attn_bias"] (gen_llm.py QKV_BIAS), with the same set on every attention layer. A fused-qkv or
 # output bias, or a mixed set, has no kernel: a port would serve garbage while its kernel tests pass, so stop.

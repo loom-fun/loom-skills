@@ -13,6 +13,7 @@ sys.path.insert(0, HERE)
 MARKERS = {
     "gemma4v": ("<|image>", "<image|>"),
     "qwen3vl_merger": ("<|vision_start|>", "<|vision_end|>"),
+    "qwen2.5vl_merger": ("<|vision_start|>", "<|vision_end|>"),
     "muse-glimmer": ("<|image_start|>", "<|image_end|>"),
 }
 # Kits whose chat program renders whole conversations: image requests use the generic per-message renderer;
@@ -20,7 +21,7 @@ MARKERS = {
 # from the kit's own chat_end ("format").
 END_STATES = {"gemma4": [3, 1], "atem": "format"}
 # Families whose text model uses multi-axis RoPE for image tokens (llama.cpp MTMD_POS_TYPE_MROPE).
-MROPE_FAMILIES = ("qwen3vl_merger",)
+MROPE_FAMILIES = ("qwen3vl_merger", "qwen2.5vl_merger")
 PREFERENCE = ("F16", "BF16", "F32", "Q8_0")
 
 
@@ -71,9 +72,10 @@ def main():
     fam = vc["family"]
     beg, end = MARKERS[fam]
     block = {"mmproj": path, "family": fam, "img_begin": beg, "img_end": end}
-    if fam in MROPE_FAMILIES:   # the text model rotates image tokens by (t, h, w): rope.dimension_sections
+    if fam in MROPE_FAMILIES or vc["deepstack"]:   # text-side facts from the model's GGUF
         import gguf
         r = gguf.GGUFReader(cfg["gguf"]); arch = cfg.get("arch", "")
+    if fam in MROPE_FAMILIES:   # the text model rotates image tokens by (t, h, w): rope.dimension_sections
         f = r.fields.get(f"{arch}.rope.dimension_sections")
         if f is None:
             sys.exit(f"STOP: {fam} images need M-RoPE but {arch}.rope.dimension_sections is missing from the GGUF")
@@ -81,8 +83,6 @@ def main():
         cfg["mrope"] = {"sections": sections, "interleaved": not arch.startswith("qwen2")}
         block["mrope"] = True
     if vc["deepstack"]:   # DeepStack: the text model adds feature slice k+1 after layer k (llama.cpp qwen3vl.cpp)
-        import gguf
-        r = gguf.GGUFReader(cfg["gguf"]); arch = cfg.get("arch", "")
         f = r.fields.get(f"{arch}.n_deepstack_layers")
         n = int(f.parts[f.data[0]][0]) if f is not None else 0
         if n != len(vc["deepstack"]) or vc["out"] != cfg["hidden"]:
