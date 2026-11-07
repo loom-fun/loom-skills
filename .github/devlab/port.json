@@ -1,6 +1,6 @@
 {
- "_comment": "Temporary: this branch's DevLab port jobs (removed before review).",
+ "_comment": "Temporary: the scripted end-to-end port of this branch's new architecture kit (removed before the PR is ready).",
  "jobs": [
-  {"name": "gemma-3-1b-it", "spec": "ggml-org/gemma-3-1b-it-GGUF:gemma-3-1b-it-Q4_K_M.gguf", "reference": "auto", "model_id": "google/gemma-3-1b-it"}
+  {"name": "gptoss-20b", "spec": "unsloth/gpt-oss-20b-GGUF:gpt-oss-20b-Q4_K_M.gguf", "reference": "auto", "model_id": "openai/gpt-oss-20b"}
  ]
 }

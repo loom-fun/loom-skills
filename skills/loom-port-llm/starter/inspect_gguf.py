@@ -79,7 +79,7 @@ cfg = {
     "tensors": tensors,
 }
 if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3",
-                "qwen3moe", "qwen35moe", "spark2_5"):
+                "qwen3moe", "qwen35moe", "spark2_5", "gpt-oss", "mellum"):
     print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
           "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
           "before trusting a golden FAIL or PASS")
@@ -87,16 +87,18 @@ _g = cfg["heads"] // max(cfg["kv_heads"], 1)
 if _g & (_g - 1):
     print(f"NOTE: {_g} query heads per KV head (not a power of two): flash prefill stages K/V for the power of two "
           "below it and the extra waves skip staging (gen_flash2.py); check the long goldens")
-# Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style); without one, the period
-# llama.cpp hard-codes for the architecture (load_swa_pattern(ml, n); gemma3: 6, every 6th layer is global).
-SWA_PERIOD = {"gemma3": 6}
-pat = A("attention.sliding_window_pattern") or SWA_PERIOD.get(arch)
+# Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style).
+SWA_PERIOD = {"gpt-oss": 2, "gemma3": 6, "mellum": 4}   # src/models/<arch>.cpp load_swa_pattern(ml, n): layers with i % n < n - 1 slide
+pat = A("attention.sliding_window_pattern")
 if cfg["sliding_window"] and isinstance(pat, list) and len(pat) in (L, BLOCKS):
     pat = pat[:L]
     cfg["sliding_layers"] = [i for i, sl in enumerate(pat) if sl]
 elif cfg["sliding_window"] and isinstance(pat, int) and pat > 1:
     # a period instead of a list (llama.cpp set_swa_pattern(n)): every n-th layer is full attention
     cfg["sliding_layers"] = [i for i in range(L) if i % pat < pat - 1]
+elif cfg["sliding_window"] and arch in SWA_PERIOD:
+    # the period llama.cpp hard-codes for the architecture when the GGUF has none (load_swa_pattern(ml, n))
+    cfg["sliding_layers"] = [i for i in range(L) if i % SWA_PERIOD[arch] < SWA_PERIOD[arch] - 1]
 elif cfg["sliding_window"]:
     print(f"WARNING: sliding_window {cfg['sliding_window']} but no per-layer pattern in the GGUF: fill "
           "sliding_layers (and nope_layers) by hand from llama.cpp's src/models/<arch>.cpp or llama_trace.py")
@@ -110,6 +112,23 @@ if arch == "muse-glimmer" and cfg["sliding_layers"]:
 rope_dims = A("rope.dimension_count")
 if rope_dims and rope_dims != head_dim:
     cfg["rope_dims"] = rope_dims
+# YaRN RoPE scaling (gen_llm.py yarn_constants; llama.cpp applies it whenever the GGUF says yarn: ext_factor 1, and
+# the attention factor that leaves mscale = 1 + 0.1 ln(factor) unless rope.scaling.yarn_log_multiplier is set).
+if A("rope.scaling.type") == "yarn" and (A("rope.scaling.factor") or 1.0) > 1.0:
+    import math
+    _f, _lm = float(A("rope.scaling.factor")), float(A("rope.scaling.yarn_log_multiplier", 0.0) or 0.0)
+    _ms = lambda m: 1.0 if _f <= 1.0 else 0.1 * m * math.log(_f) + 1.0
+    _af = (_ms(1.0) / _ms(_lm) if _lm else _ms(1.0)) / (1.0 + 0.1 * math.log(_f)) * float(A("rope.scaling.attn_factor", 1.0) or 1.0)
+    cfg["rope_scaling"] = {"type": "yarn", "factor": _f, "orig_ctx": A("rope.scaling.original_context_length"),
+                           "beta_fast": float(A("rope.scaling.yarn_beta_fast", 32.0) or 32.0),
+                           "beta_slow": float(A("rope.scaling.yarn_beta_slow", 1.0) or 1.0), "attn_factor": _af}
+    print("rope scaling:", cfg["rope_scaling"])
+# The FFN's pre-norm stored as post_attention_norm (gpt-oss: attn_post_norm normalizes ffn_inp; no ffn_norm and no
+# Gemma-style post_ffw_norm): it is the FFN norm, not a post-attention norm.
+if ("blk.0.ffn_norm.weight" not in tensors and "blk.0.post_attention_norm.weight" in tensors
+        and "blk.0.post_ffw_norm.weight" not in tensors and not A("ssm.inner_size")):
+    cfg["post_norms"] = False
+    cfg["ffn_norm_tensor"] = "post_attention_norm"
 # Gemma 3n/4 geometry (reference/gemma4-example's gen_llm.py keys), from this GGUF: a reference package of another size
 # (find_reference.py apply fills keys inspect leaves out) has other KV-sharing, per-layer-embedding and rope values.
 if arch == "gemma4":
@@ -203,7 +222,13 @@ if _attn0 is not None and cfg["attn_gate"] is True and tensors[f"blk.{_attn0}.at
 # output bias, or a mixed set, has no kernel: a port would serve garbage while its kernel tests pass, so stop.
 _attn = [i for i in range(L) if i not in cfg.get("recurrent_layers", [])] + (cfg.get("mtp") or {}).get("layers", [])
 _qkv = {i: tuple(p for p in "qkv" if f"blk.{i}.attn_{p}.bias" in tensors) for i in _attn}
-_other = sorted({t.split(".", 2)[2] for t in tensors if t.startswith("blk.") and t.split(".", 2)[2] in ("attn_qkv.bias", "attn_output.bias")})
+# An output-projection bias on every attention layer (gpt-oss) is added by g_bias_add (gen_llm.py OUT_BIAS).
+_trunk_attn = [i for i in range(L) if i not in cfg.get("recurrent_layers", [])]
+if _trunk_attn and all(f"blk.{i}.attn_output.bias" in tensors for i in _trunk_attn):
+    cfg["attn_out_bias"] = True
+    print("attention output bias: added by g_bias_add")
+_other = sorted({t.split(".", 2)[2] for t in tensors if t.startswith("blk.") and t.split(".", 2)[2] in ("attn_qkv.bias", "attn_output.bias")}
+                - ({"attn_output.bias"} if cfg.get("attn_out_bias") and not (cfg.get("mtp") or {}).get("layers") else set()))
 if _other or len(set(_qkv.values())) > 1 or (any(_qkv.values()) and cfg["attn_gate"] == "fused_q"):
     print(f"WARNING: unsupported layout: attention biases {_other or sorted(set(_qkv.values()))}"
           f"{' with a fused [q | gate] projection' if cfg['attn_gate'] == 'fused_q' else ''}: gen_llm.py adds one q/k/v "
@@ -211,11 +236,15 @@ if _other or len(set(_qkv.values())) > 1 or (any(_qkv.values()) and cfg["attn_ga
 elif _attn and _qkv[_attn[0]]:
     cfg["attn_bias"] = list(_qkv[_attn[0]])
     print(f"attention biases: {cfg['attn_bias']} (added by g_qk_rope_store)")
+# Attention sinks (one learned logit per query head, added to the softmax denominator).
+cfg["attn_sinks"] = "blk.0.attn_sinks.weight" in tensors
 # MoE FFN (gen_moe.py) after the leading dense layers: router (f32/bf16), top-k, optional selection bias, shared
 # experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
 # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
 MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
-                "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False}}
+                "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False},
+                # gpt-oss: SOFTMAX_WEIGHT (top-k of the biased logits, softmax over the k), LLM_FFN_SWIGLU_OAI_MOE
+                "gpt-oss": {"gating": 3, "norm_weights": False, "act": "swiglu_oai", "swiglu_alpha": 1.702, "swiglu_limit": 7.0}}
 if A("expert_count"):
     d = MOE_DEFAULTS.get(arch, {})
     cfg["moe"] = {"experts": A("expert_count"), "used": A("expert_used_count"), "ffn": A("expert_feed_forward_length"),
@@ -223,6 +252,15 @@ if A("expert_count"):
                   "norm_weights": bool(A("expert_weights_norm", d.get("norm_weights", False))),
                   "scale": A("expert_weights_scale", 1.0) or 1.0,
                   "probs_bias": any(k.endswith("exp_probs_b.bias") for k in tensors)}
+    cfg["moe"].update({k: v for k, v in d.items() if k in ("act", "swiglu_alpha", "swiglu_limit")})
+    _ld = cfg["moe"]["leading_dense"]
+    if f"blk.{_ld}.ffn_gate_inp.bias" in tensors:   # the router's own bias, added to its logits (gen_moe gating 3)
+        cfg["moe"]["router_bias"] = True
+    if all(f"blk.{_ld}.ffn_{p}_exps.bias" in tensors for p in ("gate", "up", "down")):   # per-expert output biases
+        cfg["moe"]["expert_bias"] = True
+    if (cfg["moe"].get("router_bias") and cfg["moe"]["gating"] != 3) or (any(f"blk.{_ld}.ffn_{p}_exps.bias" in tensors for p in ("gate", "up", "down"))
+                                                                          and not cfg["moe"].get("expert_bias")):
+        print("WARNING: unsupported MoE biases: a router bias is wired for gating 3 only, expert biases need all of gate/up/down")
     sh = next((v for k, v in tensors.items() if k.endswith("ffn_gate_shexp.weight")), None)
     if sh:
         cfg["moe"]["shared_ffn"] = sh["shape"][1]

@@ -27,13 +27,14 @@ FMT = {
     "q3_k": dict(block_bytes=110, block_values=256),
     "iq3_s": dict(block_bytes=110, block_values=256),
     "f16": dict(block_bytes=64, block_values=32),
+    "mxfp4": dict(block_bytes=17, block_values=32),
     # BF16 (vendor drafters published only in BF16, used as-is): 16 values load directly, rounded to F16 for the MMA
     "bf16": dict(block_bytes=64, block_values=32),
     # F32 (small projections some quants keep unquantized, e.g. Gemma 3n/4 per-layer-input gate/proj): 16 values load
     # directly, rounded to F16 for the MMA
     "f32": dict(block_bytes=128, block_values=32),
 }
-HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16"}
+HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16", "mxfp4"}
 
 def dequant16(fmt, w, view_name, out):
     """Loom snippet: dequantize 16 consecutive weights of row %w_row at column %w_col into F16 vector %{out}."""

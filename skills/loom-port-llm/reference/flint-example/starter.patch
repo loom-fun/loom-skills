@@ -1,99 +1,15 @@
---- a/gen_llm.py
-+++ b/gen_llm.py
-@@ -68,6 +68,7 @@
- MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) | ({MTP_LAYER} if MTP_LAYER is not None else set()) if MOE else set()
- FS = (MOE or {}).get("shared_ffn", 0)     # shared-expert FFN width (0: none)
- SHGATE = (MOE or {}).get("shared_gate", False)   # Qwen-style sigmoid gate on the shared experts (ffn_gate_inp_shexp)
-+SINKS = CFG.get("attn_sinks", False)      # learned per-head softmax sink logits (attn_sinks)
- POST_NORM = CFG.get("post_norms", False)
- POST_EPS = CFG.get("post_norm_eps", 1e-8)
- EMBED_NORM = CFG.get("embed_norm", False)
-@@ -2304,6 +2305,17 @@
-     %g = vector.load %gate_view[%token, %head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
-     %sig = vector.logisticf<afn> %g : vector<4xf32>
-     %result = vector.mulf %attended, %sig : vector<4xf32>""".replace("{QH}", str(QH)) if GATE else "    %result = vector.addf %attended, %zero4 : vector<4xf32>"
-+    if SINKS:
-+        SINK_LOAD = f"""    %sinks_view = buffer.view %gate[%zero] : buffer -> view<{QH}xf32>
-+    %sink = view.load %sinks_view[%head] : view<{QH}xf32> -> f32
-+"""
-+        SINK_W = """    %sink_shift = scalar.subf %sink, %maximum : f32
-+    %sink_w = scalar.expf<afn> %sink_shift : f32
-+"""
-+        M_INIT, D_INIT = "%sink", "%sink_w"
-+    else:
-+        SINK_LOAD = SINK_W = ""
-+        M_INIT, D_INIT = "%neg_big", "%zero_f"
-     text = f"""
- // Splits for `visible` keys: about 32 keys each, at most {S}.
- func.def inline @{P}_split_count(%visible: index) -> (index) {{
-@@ -2464,13 +2476,13 @@
-     %s_eff = func.call @{P}_split_count(%visible) : (index) -> (index)
-     %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>
-     %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
--    %maximum = scf.for %s = [%c0 to %s_eff step %c1](%mx = %neg_big : f32) -> (f32) {{
-+{SINK_LOAD}    %maximum = scf.for %s = [%c0 to %s_eff step %c1](%mx = {M_INIT} : f32) -> (f32) {{
-       %bs = index.assume %s [range(%s, 0, {S - 1})] : index
-       %ms = view.load %ml_view[%token, %head, %bs, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
-       %next = scalar.maxnumf %mx, %ms : f32
-       scf.yield %next : f32
-     }}
--    %den, %total = scf.for %s = [%c0 to %s_eff step %c1](%d = %zero_f : f32, %acc = %zero4 : vector<4xf32>) -> (f32, vector<4xf32>) {{
-+{SINK_W}    %den, %total = scf.for %s = [%c0 to %s_eff step %c1](%d = {D_INIT} : f32, %acc = %zero4 : vector<4xf32>) -> (f32, vector<4xf32>) {{
-       %bs = index.assume %s [range(%s, 0, {S - 1})] : index
-       %ms = view.load %ml_view[%token, %head, %bs, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
-       %ls = view.load %ml_view[%token, %head, %bs, 1] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
-@@ -3966,7 +3978,7 @@
-   kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
-   %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
- """)
--    gate = "%gate" if GATE else "%q"
-+    gate0 = "%gate" if GATE else "%q"
-     attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in RECUR)}
-     gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
-     def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
-@@ -3982,6 +3994,8 @@
-         if i not in MOE_LAYERS:
-             T += [par("w_gate", "ffn_gate"), par("w_up", "ffn_up"), par("w_down", "ffn_down")]
-         T += [par("ffn_norm", FFN_NORM, f"view<{H}xf32>")]
-+        if SINKS:
-+            T.append(par("sinks", "attn_sinks", f"view<{QH}xf32>"))
-         if i in RECUR:
-             T.append(gdn_layer(i, b, nm, sz, par))
-         elif QKV_FUSED:
-@@ -4026,16 +4040,18 @@
-         elif GATE and not FUSED_Q and i not in RECUR and not qg:
-             T.append("  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wg_{i}", sz("attn_gate"), "%gate", "%nH", "%nQ", H) + "\n")
-         qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
-+        gate, gty = (f"%sinks_{i}", f"view<{QH}xf32>") if SINKS else (gate0, "buffer")
-         nty = f"view<{D}xf32>" if QK_NORM else "buffer"
-         if i not in RECUR:
-           rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
-           T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
-   scf.if %gemm {{
--{"" if NO_FLASH else f"    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)" + chr(10)}    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
--    kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
-+    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, {gty}, buffer, buffer, buffer, buffer)
-+    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
-+    kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, {gty}, buffer)
-   }} else {{
-     kernel.launch @g_attention_split[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
--    kernel.launch @g_attention_combine[%t](%t, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [index](index, i32, buffer, buffer, buffer, buffer, buffer)
-+    kernel.launch @g_attention_combine[%t](%t, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [index](index, i32, buffer, buffer, buffer, {gty}, buffer)
-   }}
-   scf.if %gemm {{
-     kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
 @@ -79,7 +79,7 @@
      "tensors": tensors,
  }
  if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3",
--                "qwen3moe", "qwen35moe", "spark2_5"):
-+                "qwen3moe", "qwen35moe", "spark2_5", "flint"):
+-                "qwen3moe", "qwen35moe", "gpt-oss"):
++                "qwen3moe", "qwen35moe", "gpt-oss", "flint"):
      print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
            "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
            "before trusting a golden FAIL or PASS")
-@@ -191,6 +191,12 @@
+@@ -200,6 +200,10 @@
  elif _attn and _qkv[_attn[0]]:
      cfg["attn_bias"] = list(_qkv[_attn[0]])
      print(f"attention biases: {cfg['attn_bias']} (added by g_qk_rope_store)")
@@ -101,12 +17,10 @@
 +rpat = A("attention.rope_pattern", A("rope_pattern"))
 +if isinstance(rpat, list) and len(rpat) == L:
 +    cfg["nope_layers"] = [i for i, r in enumerate(rpat) if not r]
-+# Attention sinks (one learned logit per query head, added to the softmax denominator).
-+cfg["attn_sinks"] = "blk.0.attn_sinks.weight" in tensors
+ # Attention sinks (one learned logit per query head, added to the softmax denominator).
+ cfg["attn_sinks"] = "blk.0.attn_sinks.weight" in tensors
  # MoE FFN (gen_moe.py) after the leading dense layers: router (f32/bf16), top-k, optional selection bias, shared
- # experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
- # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
-@@ -248,6 +254,13 @@
+@@ -270,6 +274,13 @@
              print("WARNING: the derived chat block does not reproduce the template (FAIL above); fix it by hand")
      except (chat_probe.ProbeError, ValueError, KeyError) as e:
          print("WARNING: chat template not derivable automatically:", e)
@@ -157,145 +71,3 @@
  # 2. matvec per (tensor) for t=1 and t=4 variants
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
-@@ -437,9 +465,14 @@
- # the paged KV cache holds F16 K and V: with large biases (k up to |130|) their rounding moves the output past atol
- kr, vs = (a.astype(np.float16).astype(np.float32) for a in (kr, v + bv))
- att = np.zeros((t, QH, D))
-+sinks = deq(f"blk.{A0}.attn_sinks.weight") if cfg.get("attn_sinks") else np.zeros(QH, np.float32)
- for hh in range(QH):
-     kv = hh // (QH // KVH); sc = qr[:, hh] @ kr[:, kv].T / np.sqrt(D); sc[np.triu_indices(t, 1)] = -1e30
--    pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); att[:, hh] = pr @ vs[:, kv]
-+    if cfg.get("attn_sinks"):
-+        mx = np.maximum(sc.max(-1, keepdims=True), sinks[hh]); pr = np.exp(sc - mx); pr /= pr.sum(-1, keepdims=True) + np.exp(sinks[hh] - mx)
-+    else:
-+        pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True)
-+    att[:, hh] = pr @ vs[:, kv]
- gh = rng.standard_normal((t, QH)).astype(np.float32)   # per-head gate logits (attn_gate "per_head")
- if gate_kind == "per_head":
-     gate = np.repeat(gh[:, :, None], D, 2)
-@@ -450,7 +483,7 @@
- info = np.zeros((t, 4), np.int32); info[:, 1] = pos; info[:, 2] = 1
- S = 64
- for n, a in [("a_q", q.reshape(t, -1)), ("a_k", k.reshape(t, -1)), ("a_v", v.reshape(t, -1)), ("a_g", gate.reshape(t, -1)),
--             ("a_qg", np.stack([q, gate], 2).reshape(t, -1)), ("a_gh", gh), ("a_qkv", np.concatenate([q, k, v], 1).reshape(t, -1)), ("a_info", info), ("a_orig", orig), ("a_o", att.reshape(t, -1).astype(np.float32))]:
-+             ("a_qg", np.stack([q, gate], 2).reshape(t, -1)), ("a_gh", gh), ("a_qkv", np.concatenate([q, k, v], 1).reshape(t, -1)), ("a_info", info), ("a_orig", orig), ("a_sinks", sinks.astype(np.float32)), ("a_o", att.reshape(t, -1).astype(np.float32))]:
-     save(n, a)
- QD = QH * D
- split_text = ""
-@@ -483,17 +516,115 @@
-   %info = check.file.read.npy path("a_info.npy") : tensor<{t}x4xi32>
-   %orig = check.file.read.npy path("a_orig.npy") : tensor<{10 + blocks}xi32>
-   %eo = check.file.read.npy path("a_o.npy") : tensor<{t}x{QD}xf32>
-+  %sinks = check.file.read.npy path("a_sinks.npy") : tensor<{QH}xf32>
-   %arena = check.generate.fill value(0.0) : tensor<{2 * ctx * KVH * D}xf16>
-   %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
-   %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
-   %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
- {split_text}{B_DECL}{mr_decl(t)}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena{MR_ARGS}{B_ARGS}) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>{mr_types(t)}{B_TYPES})
-   kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
--  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {"%g" if gate_kind else "%q"}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>)
-+  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {"%sinks" if cfg.get("attn_sinks") else "%g" if gate_kind else "%q"}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, {f"tensor<{QH}xf32>" if cfg.get("attn_sinks") else f"tensor<{t}x{QD}xf32>"}, tensor<{t}x{QD}xf32>)
-   check.expect.close actual(%o) expected(%eo) atol(3.0e-3) rtol(3.0e-3) nan(different) : tensor<{t}x{QD}xf32>
-   check.return
- }}
- """)
-+# 3c. prefill attention on a span that CONTINUES stored KV: history positions [0, p0) are written
-+# by g_qk_rope_store, then a span at p0 (t tokens, the last `pad` rows not live) runs the prefill
-+# path (g_attention_flash2 on uniform 16-token tiles + the listed split/combine fallback for the
-+# rest) and, separately, the decode path (g_attention_split + combine). Both vs numpy, on a
-+# sliding and a non-sliding layer with that layer's real norms and sinks.
-+def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
-+    sl = 1 if li in set(cfg.get("sliding_layers", [])) else 0
-+    rp = 0 if li in set(cfg.get("nope_layers", [])) else 1
-+    W = cfg.get("sliding_window") or 0
-+    qn_ = (deq(f"blk.{li}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)) * np.float32(qscale)
-+    kn_ = deq(f"blk.{li}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
-+    snk = deq(f"blk.{li}.attn_sinks.weight").astype(np.float32) if cfg.get("attn_sinks") else np.zeros(QH, np.float32)
-+    n = p0 + t; ctx = ((n + 15) // 16) * 16 + 64; blocks = ctx // 16
-+    allpos = np.arange(n)
-+    qa = (rng.standard_normal((n, QH, D)) * (1.0 if cfg["qk_norm"] else qscale)).astype(np.float32); ka = rng.standard_normal((n, KVH, D)).astype(np.float32)
-+    va = rng.standard_normal((n, KVH, D)).astype(np.float32)
-+    def rope_p(a, p):
-+        inv = cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD); ang = p[:, None] * inv[None]
-+        c, s = np.cos(ang)[:, None], np.sin(ang)[:, None]
-+        if cfg["rope_type"] == "neox":
-+            a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
-+        a1, a2 = a[..., 0::2], a[..., 1::2]; o = np.empty_like(a); o[..., 0::2] = a1 * c - a2 * s; o[..., 1::2] = a2 * c + a1 * s; return o
-+    qr_ = norm(qa, qn_) if cfg["qk_norm"] else qa; kr_ = norm(ka, kn_) if cfg["qk_norm"] else ka
-+    if rp: qr_, kr_ = rope_p(qr_, allpos), rope_p(kr_, allpos)
-+    kf = kr_.astype(np.float16).astype(np.float64); vf = va.astype(np.float16).astype(np.float64)
-+    live = np.ones(t, bool); live[t - pad:] = False
-+    att = np.zeros((t, QH, D))
-+    for i in range(t):
-+        if not live[i]: continue
-+        p = p0 + i; lo = max(0, p - (W - 1)) if (sl and W) else 0
-+        for hh in range(QH):
-+            kv = hh // (QH // KVH)
-+            sc = kf[lo:p + 1, kv] @ qr_[p, hh].astype(np.float64) / np.sqrt(D)
-+            mx = max(sc.max(), snk[hh]) if cfg.get("attn_sinks") else sc.max()
-+            pr = np.exp(sc - mx); den = pr.sum() + (np.exp(snk[hh] - mx) if cfg.get("attn_sinks") else 0.0)
-+            att[i, hh] = (pr @ vf[lo:p + 1, kv]) / den
-+    att_f = att.copy()
-+    for tl in range(t // 16):
-+        if not live[tl * 16:tl * 16 + 16].all(): att_f[tl * 16:tl * 16 + 16] = 0
-+    orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
-+    hinfo = np.zeros((p0, 4), np.int32); hinfo[:, 1] = allpos[:p0]; hinfo[:, 2] = 1
-+    sinfo = np.zeros((t, 4), np.int32); sinfo[:, 1] = allpos[p0:]; sinfo[:, 2] = live
-+    for nn, a in [("hq", qa[:p0].reshape(p0, -1)), ("hk", ka[:p0].reshape(p0, -1)), ("hv", va[:p0].reshape(p0, -1)), ("hinfo", hinfo),
-+                  ("sq", qa[p0:].reshape(t, -1)), ("sk", ka[p0:].reshape(t, -1)), ("sv", va[p0:].reshape(t, -1)), ("sinfo", sinfo),
-+                  ("orig", orig), ("qn", qn_.astype(np.float32)), ("kn", kn_.astype(np.float32)), ("sinks", snk), ("o", att.reshape(t, -1).astype(np.float32)), ("of", att_f.reshape(t, -1).astype(np.float32))]:
-+        save(f"{tag}_{nn}", a)
-+    print(f"{tag}: layer {li} sliding={sl} rope={rp} p0={p0} t={t} pad={pad} |o| max {np.abs(att).max():.4f} mean {np.abs(att).mean():.5f}")
-+    QD = QH * D; KD = KVH * D; AR = f"tensor<{2 * ctx * KD}xf16>"; OT = f"tensor<{t}x{QD}xf32>"
-+    S = 64; S16 = 16
-+    gt = f"tensor<{QH}xf32>" if cfg.get("attn_sinks") else OT
-+    gv = "%sinks" if cfg.get("attn_sinks") else "%sq"
-+    def st(tt, pre):
-+        return (f"  kernel.launch @g_qk_rope_store[%{pre}t](%{pre}t, %layer, %rope, %ctx, %pool, %{pre}q, %{pre}k, %{pre}v, %qn, %kn, %{pre}info, %orig, %arena) : "
-+                f"[index](index, index, i32, index, index, tensor<{tt}x{QD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{tt}x4xi32>, tensor<{10 + blocks}xi32>, {AR})\n")
-+    cases.append(f"""check.case public @{tag} {{
-+  %ht = check.literal value({p0}) : index
-+  %st = check.literal value({t}) : index
-+  %layer = check.literal value(0) : index
-+  %rope = check.literal value({rp}) : i32
-+  %sliding = check.literal value({sl}) : i32
-+  %ctx = check.literal value({ctx}) : index
-+  %pool = check.literal value({ctx}) : index
-+  %hq = check.file.read.npy path("{tag}_hq.npy") : tensor<{p0}x{QD}xf32>
-+  %hk = check.file.read.npy path("{tag}_hk.npy") : tensor<{p0}x{KD}xf32>
-+  %hv = check.file.read.npy path("{tag}_hv.npy") : tensor<{p0}x{KD}xf32>
-+  %hinfo = check.file.read.npy path("{tag}_hinfo.npy") : tensor<{p0}x4xi32>
-+  %sq = check.file.read.npy path("{tag}_sq.npy") : {OT}
-+  %sk = check.file.read.npy path("{tag}_sk.npy") : tensor<{t}x{KD}xf32>
-+  %sv = check.file.read.npy path("{tag}_sv.npy") : tensor<{t}x{KD}xf32>
-+  %sinfo = check.file.read.npy path("{tag}_sinfo.npy") : tensor<{t}x4xi32>
-+  %orig = check.file.read.npy path("{tag}_orig.npy") : tensor<{10 + blocks}xi32>
-+  %qn = check.file.read.npy path("{tag}_qn.npy") : tensor<{D}xf32>
-+  %kn = check.file.read.npy path("{tag}_kn.npy") : tensor<{D}xf32>
-+  %sinks = check.file.read.npy path("{tag}_sinks.npy") : tensor<{QH}xf32>
-+  %eo = check.file.read.npy path("{tag}_o.npy") : {OT}
-+  %eof = check.file.read.npy path("{tag}_of.npy") : {OT}
-+  %arena = check.generate.fill value(0.0) : {AR}
-+  %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
-+  %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
-+  %o_pre = check.generate.fill value(0.0) : {OT}
-+  %o_dec = check.generate.fill value(0.0) : {OT}
-+{st(p0, "h")}{st(t, "s")}  kernel.launch @g_attention_flash2[%st](%st, %layer, %sliding, %ctx, %pool, %sq, {gv}, %sinfo, %orig, %arena, %o_pre) : [index](index, index, i32, index, index, {OT}, {gt}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, {OT})
-+  kernel.launch @g_attention_split[%st](%st, %layer, %sliding, %ctx, %pool, %sq, %sinfo, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, {OT}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
-+  kernel.launch @g_attention_combine[%st](%st, %sliding, %sinfo, %pacc, %pml, {gv}, %o_dec) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, {gt}, {OT})
-+  check.expect.close actual(%o_dec) expected(%eo) atol(1.5e-3) rtol(3.0e-3) nan(different) : {OT}
-+  check.expect.close actual(%o_pre) expected(%eof) atol(2.5e-3) rtol(1.0e-2) nan(different) : {OT}
-+  check.return
-+}}
-+""")
-+if os.environ.get("PREFILL_CONT", "1") != "0":
-+    _sl = cfg.get("sliding_layers") or []
-+    _ns = [i for i in range(cfg["layers"]) if i not in set(_sl) and i not in set(cfg.get("recurrent_layers", []))]
-+    _p0 = max(300, (cfg.get("sliding_window") or 0) + 100)
-+    for _li in ([_sl[0]] if _sl else []) + _ns[:1]:
-+        prefill_cont_case(_li, _p0, 48, 0, f"pc_full_{_li}")     # 3 uniform tiles: flash2 only
-+        prefill_cont_case(_li, _p0, 48, 7, f"pc_part_{_li}")     # last tile partly padding: listed fallback
-+        prefill_cont_case(_li, _p0, 48, 0, f"pc_small_{_li}", 0.1)  # small scores: the sink dominates the softmax
- # 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
- if cfg.get("recurrent_layers"):
-     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
