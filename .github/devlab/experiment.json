@@ -1,13 +1,11 @@
 {
- "_comment": "Validation of #77 (agent gate: reuse required where loom-serve can give it), not for merge: gates LEVEL=dev with the published programs of the gemma4 card (thinking-on reuse failure), the qwen_xml card with the separator bug (#72 not applied: must still fail) and a passing qwen_xml card.",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
+ "_comment": "Validation of #77 (agent gate: reuse required where loom-serve can give it), not for merge. Round 2: the hermes card's published programs (its thinking-off template drops the empty think block from history). Round 1 (run 42338176335): gemma4 card, qwen_xml card with the separator bug, passing qwen_xml card.",
+ "card": "loom-fun/unsloth-Qwen3-8B-loom",
+ "memory_bytes": 28000000000,
+ "kit": null,
+ "llamacpp": "b1369",
  "steps": ["gates:dev"],
  "variants": [
-  {"name": "gemma4-card"},
-  {"name": "xml-card-unfixed", "card": "loom-fun/bartowski-Ornith-1.5-9B-loom", "memory_bytes": 30000000000, "kit": null, "llamacpp": "b1369"},
-  {"name": "xml2-card", "card": "loom-fun/unsloth-Qwen3.5-9B-loom", "memory_bytes": 30000000000, "kit": null, "llamacpp": "b1369"}
+  {"name": "hermes-card"}
  ]
 }
