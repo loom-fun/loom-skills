@@ -68,6 +68,8 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
   other feature lightly, so a feature that breaks outright still fails in minutes.
 - **Where it runs:** the dev machine's GPU is scarce and sequential, DevLab Dispatch is a large elastic pool.
   Locally: only what the inner loop needs. Long or deep checks and anything against published cards: DevLab CI.
+  Performance numbers for a card or report: locally only (DevLab runners measure Loom up to ~50 % below a local
+  session on the same programs while llama.cpp matches; `loom-org`, "DevLab measures correctness").
 - `quick` and `full` run **nightly** on the published cards (`.github/workflows/nightly-gates.yml`, below), and
   by hand only once on a new port that has no card yet (qualify.sh / finalize.sh).
 - A `dev` pass is never reused by `quick`/`full` (gates.sh only skips a gate that passed at the same or a
@@ -77,7 +79,7 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
 per card in `.github/nightly-models.json`, in parallel, runs `.github/scripts/nightly_gates.sh CARD_REPO`:
 install hrx-loom, `loom-fetch` the latest card from huggingface.co/loom-fun, build the reference example's kit
 when the card's chat format needs it (`LOOM_KIT`), fetch the card's llama.cpp release, serve, `LEVEL=full`
-gates, and a Loom-only perf run (every card row) for the card's DevLab column. No LLM and no skill run: a FAIL is a
+gates. No performance is measured there (see "Where it runs"). No LLM and no skill run: a FAIL is a
 regression of the published package (or of the gate scripts). llama.cpp references are cached between nights
 (`actions/cache`). Run it on demand from the Actions tab (pick cards and a level), or on a pull request by adding
 the `nightly-gates` label (the PR branch's scripts run). The same script runs by hand on any Strix Halo:
@@ -247,13 +249,16 @@ $T $S/c4_steady.py http://127.0.0.1:8160 4 --model <id>;  $T $S/c4_steady.py htt
 | prefill[] | 1k and 2k-token documents with max_tokens=4. prompt_tokens / TTFT, the median of 5 runs (`--repeats`); single runs varied 1.5–2.9k tok/s on one build. |
 | decode_tps_2k / _32k | Decode with that much context in the KV cache. |
 | prefill_long[] | 8k / 16k / 32k documents. |
-| c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding. Use this for "N requests at once". |
+| c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding. Use this for "N requests at once". A run in which a stream failed exits 1 and records nothing (`make_info.py` also skips a rate <= 0). |
 
 Rules:
+- Card and report numbers come from one local session: Loom and llama.cpp back to back on a quiet local GPU, the
+  programs being published. Never from DevLab (`loom-org`, "DevLab measures correctness"); a DevLab job's numbers
+  (`devlab-perf`, `devlab-experiment`) compare variants within that job only.
 - Warm up after every restart. `perf.py` first sends its first timed request's own shape, untimed (the 300-token
   essay with another nonce: prefill, decode, drafting and first-use kernels all run once; a trivial "Say hi."
   left DevLab's short-prompt decode 51-60 % below the local session's while 2k decode agreed), and `c4_steady.py`
-  one short request. Every caller (qualify, finalize, nightly, devlab_perf) gets the same warm-up. When timing by hand:
+  one short request. Every caller (qualify, finalize, devlab_perf) gets the same warm-up. When timing by hand:
   `curl -s URL/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"<id>","messages":[{"role":"user","content":"hi"}],"max_tokens":8}'`.
 - A decode rate counts only if its request generated at least half its max_tokens. `perf.py` logs each timed
   decode request's `completion_tokens` (both engines); a short one is re-requested once with another nonce, then
@@ -362,10 +367,10 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
    - `card/make_info.py gates bench/gates.json [ktest.out --time ...] --package PKG -o ev_gates.json` (also the
      spec gate's `acceptance N% of M proposals` from `gates_spec.log`);
    - `card/pull_devlab.py loom-fun/REPO --package DIR -o ev_devlab.json`: the latest nightly-gates run on AMD
-     DevLab Dispatch: gates of every finished level (job URL as evidence) and the sweep's Loom-only numbers with
-     the runner and date, for the card's **DevLab column** (`card/make_info.py devlab` records another DevLab
-     job's perf.py/c4_steady.py output the same way). They never replace the Loom column and are never compared
-     with llama.cpp, which stays a same-session comparison;
+     DevLab Dispatch: gates of every finished level (job URL as evidence). DevLab measures correctness only: no
+     DevLab performance goes on a card. A perf session recorded with `--source-kind devlab` (a scripted DevLab
+     port) is flagged for a local re-measure (`card_lib.perf_flags` `devlab`; `loom-org` `remeasure`,
+     `devlab-primary`);
    - `card/make_info.py roofline --package DIR -o ev_roofline.json` (tools venv; CPU only, reads the GGUF from the
      Hugging Face cache): the hardware ceiling of every card metric (`loom-roofline` `roofline.py`) with the
      device constants and the roofline.py sha256 and commit. Drafting packages: decode and 4-stream ceilings are
@@ -389,18 +394,18 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
    that holds the GGUFs (copies the package without weights, pins each file's origin at the revision it was validated
    on, writes `model.json.lock` with `loom-fetch --update-lock`), then `make_info.py build DIR ...` on that DIR.
 3. `card/render_card.py DIR` writes `DIR/README.md` (and `DIR/REPORT.md` for `--report generated`: setup,
-   commands, every run's value, the roofline, every DevLab sweep, gate evidence). The performance table shows per
-   metric llama.cpp, Loom, the margin, the roofline, Loom as % of it, and Loom on DevLab with its % of the
-   roofline; a footnote says what the roofline and the DevLab column are. When republishing a card, upload only those three files:
-   `hf upload REPO DIR . --include README.md --include info.json --include REPORT.md` (or `publish_package.py upload
-   DIR --repo REPO --card-only`). Never re-upload a repo's programs, `model.json`, lock or weights for a card change.
+   commands, every run's value, the roofline, gate evidence). The performance table shows per metric llama.cpp,
+   Loom, the margin, the roofline and Loom as % of it; a footnote says what the roofline is. Loom-only DevLab
+   sweeps that older cards recorded in `info.json` (`devlab`) stay valid and are carried over by `--from-info`, but
+   are not rendered. When republishing a card, upload only those three files: `publish_package.py upload DIR --repo
+   REPO --card-only --parent-commit SHA` (SHA: the repo commit whose info.json the card was built from; the upload
+   fails instead of overwriting a card another worker published since). Never re-upload a repo's programs, `model.json`, lock or weights for a card change.
    A whole package: `publish_package.py upload DIR --repo REPO` (removes files an in-place update leaves stale).
 
 **Performance guardrails** (`card_lib.perf_flags`, applied by `loom-org`'s `org_status.py`): a metric whose Loom
-value is below half the efficiency Loom ports have demonstrated (far from roofline), or whose latest DevLab value
-differs from Loom by more than 20 % (local vs DevLab disagree), sends the model back to a local GPU worker with
-`loom-optimize`; after two disagreeing sweeps in a row, to a deep debugging session on why the machines differ
-(`loom-org` step 5).
+value is below half the efficiency Loom ports have demonstrated (far from roofline) sends the model back to a local
+GPU worker with `loom-optimize`, and to a deep debugging session if it stays far after that (`loom-org` step 5). A
+card value measured on other programs (stale) or on DevLab is re-measured in a local session first.
 
 The card's Versions line shows the schema, the loom-skills commit and hrx-loom build that generated the
 programs, and the card generator commit. `loom-setup/scripts/install_loom.sh` writes `$LOOM_ROOT/loom-install.json`
