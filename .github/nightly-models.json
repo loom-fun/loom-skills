@@ -330,6 +330,28 @@
    "kit": null,
    "llamacpp": "b1370",
    "features": []
+  },
+  {
+   "repo": "loom-fun/XHToken-Spark-X2.5-4B-loom",
+   "slug": "spark-x2.5-4b",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+   "slug": "spark-x2.6-4b",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
   }
  ]
 }
