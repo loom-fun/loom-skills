@@ -8,7 +8,8 @@
 # EXPERIMENT.json:
 #   {"card": "loom-fun/<repo>", "memory_bytes": N, "kit": "gemma4" | null, "llamacpp": "b1368",
 #    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF)
-#    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}   (a job may override card/kit/memory_bytes/llamacpp)
+#    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
+#   A job may override card, kit, memory_bytes, llamacpp and llama_spec: one experiment can measure several cards.
 # Variant V: {"name": "card"}                                    the card's own programs, as published
 #            {"name": "x", "build": {"ENV": "1"}, "build_args": [...], "ref": "origin/main",
 #             "execution": {"draft_depth": 3}, "double": ["llm_verify:g_head_mv", "*:g_mv_q8_0"]}
@@ -58,8 +59,8 @@ if [ ! -x "$root/.venv/bin/loom-serve" ] || [ ! -x "$root/.tools/bin/python" ]; 
 fi
 export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 
-# 2. The card (fetched once per runner)
-card=$WORK/_card; base=https://huggingface.co/$repo/resolve/main
+# 2. The card (fetched once per runner and card)
+card=$WORK/_card/${repo//\//_}; base=https://huggingface.co/$repo/resolve/main
 if [ ! -f "$card/.fetched" ]; then
   step "fetch $repo"; rm -rf "$card"
   "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch"; exit 1; }
@@ -174,7 +175,7 @@ serve_alone() { # serve_alone VARIANT
 LSPEC=""
 llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n-max overridden), restarted on change
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
-  local spec; spec=$(q "print((e.get('llama_spec') or '').replace('{drafter}', '$drafter'))")
+  local spec; spec=$(q "print((j.get('llama_spec') or e.get('llama_spec') or '').replace('{drafter}', '$drafter'))")
   [ -n "${1:-}" ] && spec=$(echo "$spec" | sed -E "s/--spec-draft-n-max [0-9]+/--spec-draft-n-max $1/")
   [ "$spec" = "$LSPEC" ] && curl -sf "$lurl/health" >/dev/null 2>&1 && return 0
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
