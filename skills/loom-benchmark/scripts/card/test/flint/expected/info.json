@@ -2,83 +2,6 @@
  "card": {
   "memory_bytes": 67000000000
  },
- "devlab": {
-  "sweeps": [
-   {
-    "commands": [],
-    "date": "2026-11-06",
-    "metrics": {
-     "decode": {
-      "loom": 92.2,
-      "loom_runs": [
-       92.18
-      ]
-     },
-     "decode_2k": {
-      "loom": 60.2,
-      "loom_runs": [
-       60.18
-      ]
-     },
-     "prefill_1k": {
-      "loom": 607.6,
-      "loom_runs": [
-       607.6
-      ]
-     },
-     "prefill_2k": {
-      "loom": 690.8,
-      "loom_runs": [
-       690.8
-      ]
-     },
-     "streams4": {
-      "acceptance": 0.52,
-      "loom": 112.8,
-      "loom_runs": [
-       112.8
-      ]
-     }
-    },
-    "programs_sha256": null,
-    "runner": "X2-LA03-S03-D07",
-    "source": "devlab-1001-job2002"
-   },
-   {
-    "commands": [],
-    "date": "2026-11-07",
-    "metrics": {
-     "decode": {
-      "loom": 92.2,
-      "loom_runs": [
-       92.18
-      ]
-     },
-     "decode_2k": {
-      "loom": 60.2,
-      "loom_runs": [
-       60.18
-      ]
-     },
-     "prefill_1k": {
-      "loom": 607.6,
-      "loom_runs": [
-       607.6
-      ]
-     },
-     "prefill_2k": {
-      "loom": 690.8,
-      "loom_runs": [
-       690.8
-      ]
-     }
-    },
-    "programs_sha256": null,
-    "runner": "X2-LA03-S04-D07",
-    "source": "devlab-1002-job2003"
-   }
-  ]
- },
  "gates": {
   "agent": {
    "date": "2026-11-06",
@@ -409,20 +332,6 @@
    "kind": "devlab",
    "run": "1000",
    "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"
-  },
-  "devlab-1001-job2002": {
-   "device": null,
-   "hrx_loom": null,
-   "kind": "devlab",
-   "run": "1001",
-   "url": "https://github.com/loom-fun/loom-skills/actions/runs/1001/job/2002"
-  },
-  "devlab-1002-job2003": {
-   "device": null,
-   "hrx_loom": null,
-   "kind": "devlab",
-   "run": "1002",
-   "url": "https://github.com/loom-fun/loom-skills/actions/runs/1002/job/2003"
   },
   "local": {
    "device": {

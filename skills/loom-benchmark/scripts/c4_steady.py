@@ -6,9 +6,12 @@ streams (loom-serve's /metrics counters around them), the roofline's acceptance 
 
 usage: python c4_steady.py URL [N=4] [--model MODEL_ID]   (omit --model for llama.cpp)
 Loom needs execution.rows >= N in the package preset; llama-server needs -np N.
+A run in which a stream failed (an exception, an HTTP error, no tokens) or the N streams never decoded together
+measured nothing: it exits 1 with the reason on stderr, prints no JSON line and logs nothing.
 """
 import argparse
 import json
+import sys
 import threading
 import time
 
@@ -28,11 +31,18 @@ ap.add_argument("--thinking", default="off", choices=["off", "on", "template"],
 a = ap.parse_args()
 events = [[] for _ in range(a.n)]
 tokens = [0] * a.n
+errors = [None] * a.n
 
 
 def run(i):
-    r = stream(a.url, a.model, [{"role": "user", "content": f"[{time.time()} {i}] Write a very long, detailed essay about the history of lighthouses."}],
-               a.max_tokens, extra=thinking_extra(a.thinking), on_token=events[i].append)
+    try:
+        r = stream(a.url, a.model, [{"role": "user", "content": f"[{time.time()} {i}] Write a very long, detailed essay about the history of lighthouses."}],
+                   a.max_tokens, extra=thinking_extra(a.thinking), on_token=events[i].append)
+    except Exception as e:  # noqa: BLE001  (e.g. requests' ChunkedEncodingError: the stream broke)
+        errors[i] = f"{type(e).__name__}: {e}"[:300]
+        return
+    if r.get("status") not in (None, 200):
+        errors[i] = f"HTTP {r['status']}: {r.get('error')}"
     tokens[i] = r.get("tokens") or len(events[i])
 
 
@@ -42,11 +52,17 @@ ts = [threading.Thread(target=run, args=(i,)) for i in range(a.n)]
 [t.start() for t in ts]
 [t.join() for t in ts]
 acc = acceptance_between(before, server_draft_counters(a.url)) if before else None
+bad = [f"stream {i}: {err}" for i, err in enumerate(errors) if err]
+bad += [f"stream {i}: no tokens" for i in range(a.n) if not errors[i] and not (tokens[i] and events[i])]
+if bad:
+    sys.exit("c4_steady.py: no measurement (a failed run is not data): " + "; ".join(bad))
 start = max(e[0] for e in events)
 end = min(e[-1] for e in events)
 # A streamed event can carry several tokens (a drafting server commits up to depth + 1 per step): count tokens, each
 # stream's events weighted by its tokens per event (usage.completion_tokens / events), not events.
 count = sum(sum(1 for x in e if start <= x <= end) * (tokens[i] / max(1, len(e))) for i, e in enumerate(events))
+if end <= start or count <= 0:
+    sys.exit(f"c4_steady.py: no measurement: the {a.n} streams never decoded at the same time (window {end - start:.2f} s)")
 print(json.dumps({"streams": a.n, "thinking": a.thinking, "window_s": round(end - start, 2), "agg_tps": round(count / (end - start), 1),
                   "per_stream_events": [len(e) for e in events], "per_stream_tokens": tokens,
                   **({"acceptance": acc} if acc is not None else {})}))
