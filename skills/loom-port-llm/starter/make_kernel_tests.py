@@ -406,6 +406,49 @@ cases.append(f"""check.case public @attention_chain {{
   check.return
 }}
 """)
+# 3c. a verify span at long context: 4 tokens of one row at consecutive positions past gen_llm's ATTN_MT_FROM take the
+# multi-token split-K path (one K/V load per key for the span); K/V written straight into the arena (identity pages)
+t, ctx, p0 = 4, 1152, 1100
+kvk = (0.5 * rng.standard_normal((ctx, KVH, D))).astype(np.float16); kvv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
+q = rng.standard_normal((t, QH, D)).astype(np.float32); gate = rng.standard_normal((t, QH, D)).astype(np.float32)
+att = np.zeros((t, QH, D))
+for i in range(t):
+    p = p0 + i
+    for hh in range(QH):
+        kv = hh // (QH // KVH)
+        sc = kvk[:p + 1, kv].astype(np.float64) @ q[i, hh] / np.sqrt(D)
+        pr = np.exp(sc - sc.max()); pr /= pr.sum(); att[i, hh] = pr @ kvv[:p + 1, kv].astype(np.float64)
+if gate_kind:
+    att = att / (1 + np.exp(-gate))
+blocks = ctx // 16
+orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
+info = np.zeros((t, 4), np.int32); info[:, 1] = p0 + np.arange(t); info[:, 2] = 1
+for n, a in [("s_q", q.reshape(t, -1)), ("s_g", gate.reshape(t, -1)), ("s_info", info), ("s_orig", orig),
+             ("s_arena", np.concatenate([kvk.reshape(-1), kvv.reshape(-1)])), ("s_o", att.reshape(t, -1).astype(np.float32))]:
+    save(n, a)
+S = 64
+if not cfg.get("attn_scale"):   # kits with their own attention scale (gemma4) keep the per-token kernel
+    cases.append(f"""check.case public @attention_span {{
+  %t = check.literal value({t}) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value(0) : i32
+  %ctx = check.literal value({ctx}) : index
+  %pool = check.literal value({ctx}) : index
+  %q = check.file.read.npy path("s_q.npy") : tensor<{t}x{QD}xf32>
+  %g = check.file.read.npy path("s_g.npy") : tensor<{t}x{QD}xf32>
+  %info = check.file.read.npy path("s_info.npy") : tensor<{t}x4xi32>
+  %orig = check.file.read.npy path("s_orig.npy") : tensor<{10 + blocks}xi32>
+  %arena = check.file.read.npy path("s_arena.npy") : tensor<{2 * ctx * KVH * D}xf16>
+  %eo = check.file.read.npy path("s_o.npy") : tensor<{t}x{QD}xf32>
+  %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
+  %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
+  %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
+  kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
+  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {"%g" if gate_kind else "%q"}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>)
+  check.expect.close actual(%o) expected(%eo) atol(3.0e-3) rtol(3.0e-3) nan(different) : tensor<{t}x{QD}xf32>
+  check.return
+}}
+""")
 # 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
 if cfg.get("recurrent_layers"):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
