@@ -12,7 +12,7 @@
  FFN_NORM = CFG.get("ffn_norm_tensor", "ffn_norm")
  MOE = CFG.get("moe")                      # MoE FFN (gen_moe.py: router + top-k experts, optional shared experts)
  MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) | ({MTP_LAYER} if MTP_LAYER is not None else set()) if MOE else set()
-@@ -3262,7 +3267,7 @@
+@@ -3261,7 +3266,7 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -276,19 +276,25 @@
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -204,33 +204,23 @@
+@@ -207,33 +207,29 @@
  # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
  MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
                  "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False}}
 +# LFM2 / LFM2-MoE: short-conv layers (head_count_kv == 0) carry a conv history instead of KV;
 +# MoE FFN (sigmoid router + expert bias, normalized top-k weights) after the leading dense layers;
 +# the final norm is token_embd_norm.
-+if arch in ("lfm2", "lfm2moe"):
++if arch in ("lfm2", "lfm2moe", "lfm3"):
 +    cfg["shortconv_layers"] = [i for i in range(L) if isinstance(kv, list) and kv[i] == 0]
 +    cfg["shortconv"] = {"l_cache": A("shortconv.l_cache", 3)}
 +    cfg["kv_layers"] = L - len(cfg["shortconv_layers"])
-+    cfg["output_norm_tensor"] = "token_embd_norm.weight"
-+    print(f"lfm2: {len(cfg['shortconv_layers'])} short-conv layers + {cfg['kv_layers']} attention layers")
++    if "token_embd_norm.weight" in tensors:
++        cfg["output_norm_tensor"] = "token_embd_norm.weight"
++    print(f"{arch}: {len(cfg['shortconv_layers'])} short-conv layers + {cfg['kv_layers']} attention layers")
++# LFM3 (llama.cpp src/models/lfm3.cpp) over LFM2: a kernel-7 short conv (shortconv.l_cache) and sandwich norms
++# (post_attention_norm, post_ffw_norm) at the model's rms eps; its per-head gate and sliding-layer rope base are the
++# starter's (attn_gate "per_head", rope_theta_swa).
++if arch == "lfm3" and cfg["post_norms"]:
++    cfg["post_norm_eps"] = cfg["rms_eps"]
  if A("expert_count"):
 -    d = MOE_DEFAULTS.get(arch, {})
      cfg["moe"] = {"experts": A("expert_count"), "used": A("expert_used_count"), "ffn": A("expert_feed_forward_length"),

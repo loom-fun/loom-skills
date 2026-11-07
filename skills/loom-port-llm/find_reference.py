@@ -146,6 +146,7 @@ def gguf_profile(path, repo=None):
          "kv_heads": max(kv) if isinstance(kv, list) else kv, "head_dim": a("attention.key_length"),
          "experts": a("expert_count") or 0, "hybrid": bool(a("full_attention_interval") or a("ssm.state_size")
                                                             or a("shortconv.l_cache")),
+         "shortconv": bool(a("shortconv.l_cache")),
          "sliding_window": a("attention.sliding_window") or 0, "mtp": bool(a("nextn_predict_layers")),
          "call_format": call_format(tpl), "thinking": "toggle" if "enable_thinking" in tpl else None,
          "vision": None, "context_length": a("context_length")}
@@ -184,7 +185,8 @@ def cfg_profile(c, p=None):
         "arch": c.get("arch"), "name": c.get("name"), "layers": c.get("layers"), "hidden": c.get("hidden"),
         "heads": c.get("heads"), "kv_heads": c.get("kv_heads"), "head_dim": c.get("head_dim"),
         "experts": moe.get("experts") or c.get("experts") or 0,
-        "hybrid": bool(c.get("recurrent_layers") or c.get("gdn") or c.get("ssm_heads") or c.get("sconv")),
+        "hybrid": bool(c.get("recurrent_layers") or c.get("gdn") or c.get("ssm_heads") or c.get("sconv") or c.get("shortconv_layers")),
+        "shortconv": bool(c.get("shortconv_layers")),
         "sliding_window": c.get("sliding_window") or 0, "mtp": bool(c.get("mtp") or c.get("nextn_layers")),
         "call_format": chat.get("call_format"), "thinking": chat.get("thinking"),
         "context_length": c.get("context_length")}.items() if v is not None})
@@ -209,6 +211,8 @@ def score(t, r, ref_cfg):
     for k, label in blocks:
         if t.get(k) and r.get(k):
             s += 8; why.append(label)
+    if t.get("shortconv") and r.get("shortconv"):   # the same recurrent-layer kernels (LFM short conv): the kit's core
+        s += 20; why.append("LFM short-conv layers")
     if t.get("experts") and r.get("experts"):
         s += 12; why.append(f"MoE routing ({r['experts']} experts)")
     if t.get("sliding_window") and r.get("sliding_window"):

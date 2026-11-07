@@ -178,13 +178,16 @@ if _nextn and L != BLOCKS:
     cfg["mtp"] = {"layers": _nextn}
     print(f"MTP: {len(_nextn)} NextN block(s) {_nextn} after the {L}-layer trunk: speculative decoding (MTP) is available")
 # Attention layers with one fused q | k | v projection (spark2_5: attn_qkv; hybrids' gated delta-net layers have their own
-# attn_qkv, which this does not look at), and an attn_gate with one row per query head (sigmoid per head, spark2_5).
-_attn0 = next((i for i in range(L) if i not in cfg.get("recurrent_layers", [])), None)
+# attn_qkv, which this does not look at), and an attn_gate with one row per query head (sigmoid per head, spark2_5;
+# LFM3, whose first attention layer comes after short-conv layers).
+_attn0 = next((i for i in range(L) if i not in cfg.get("recurrent_layers", [])
+               and any(f"blk.{i}.attn_{p}.weight" in tensors for p in ("q", "qkv"))), None)
 if _attn0 is not None and f"blk.{_attn0}.attn_qkv.weight" in tensors and f"blk.{_attn0}.attn_q.weight" not in tensors:
     if tensors[f"blk.{_attn0}.attn_qkv.weight"]["shape"][1] != (heads + 2 * cfg["kv_heads"]) * head_dim:
         print("WARNING: unsupported layout: attn_qkv is not [q | k | v] of heads + 2 kv_heads rows of head_dim (agent port)")
     cfg["attn_qkv"] = True
-if _attn0 is not None and cfg["attn_gate"] is True and tensors[f"blk.{_attn0}.attn_gate.weight"]["shape"][1] == heads:
+_gate0 = tensors.get(f"blk.{_attn0}.attn_gate.weight")
+if _gate0 and cfg["attn_gate"] in (True, False) and _gate0["shape"][1] == heads:
     cfg["attn_gate"] = "per_head"
 # Attention projection biases (qwen2: q/k/v, added right after the projection, llama.cpp build_qkv): g_qk_rope_store
 # adds those in cfg["attn_bias"] (gen_llm.py QKV_BIAS), with the same set on every attention layer. A fused-qkv or
