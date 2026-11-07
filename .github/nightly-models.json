@@ -431,6 +431,17 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "slug": "gemma-4-26b-a4b-it",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
   }
  ]
 }
