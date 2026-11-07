@@ -122,7 +122,8 @@ The expensive path. Keep it short:
    |---|---|
    | Gemma-3n / Gemma-4 (PLE, KV sharing, head_dim 512, Gemma chat format) | `gemma4` |
    | LFM2 short-conv hybrids (+ its own MoE kernels) | `lfm2moe` (top-k router, expert matvecs, grouped WMMA prefill) |
-   | attention sinks, SWA, NoPE (MoE from the starter) | `flint` (built on lfm2moe in ~12 min; its MoE is now `starter/gen_moe.py`) |
+   | NoPE pattern, GLM-style stop tokens (sinks, SWA and MoE from the starter) | `flint` (built on lfm2moe in ~12 min; its MoE and sinks are now the starter's) |
+   | OpenAI harmony channel format, reasoning effort (sinks, SWA, YaRN, biases, MXFP4 MoE from the starter) | `gpt-oss` |
    | channel chat formats (ATEM), norm RoPE, NoPE | `glimmer` |
 
    `../loom-optimize/reference/flint-moe-example/` holds one more MoE idea (bucketed grouped GEMM), not
@@ -244,7 +245,7 @@ Kernel inventory:
 - head_dim 64, 128 or 256 (attention); gated delta-net head dims multiples of 32; query-head groups that are not a
   power of two (Qwen3.8: 6) use flash prefill with staging sized for the power of two below (`gen_flash2.py`);
   `NO_FLASH2=1` forces the listed split-K path for every prefill token (diagnostics; quadratic at long prompts);
-- K-quant / Q8_0 / Q4_0 / Q5_0 / IQ4_NL / IQ4_XS / Q3_K / IQ3_S weights (`starter/formats.py`, `quant_values.loom`; add dequant helpers
+- K-quant / Q8_0 / Q4_0 / Q5_0 / IQ4_NL / IQ4_XS / Q3_K / IQ3_S / MXFP4 (experts) weights (`starter/formats.py`, `quant_values.loom`; add dequant helpers
   for other formats); f32 norms and conv weights;
 - hidden ≤ 8192; context ≤ 262,144 (kernel bounds; raise the `range(..., 262144)` facts for 1M-context models);
 - **sampling**: `temperature`, `top_p`, `top_k` and `seed` per request. Temperature 0 (the default
@@ -286,8 +287,8 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
     `LLAMA_ROPE_TYPE_NEOX`.
   - `norm` pairs (2d, 2d+1). Used by llama/mistral; `LLAMA_ROPE_TYPE_NORM`.
   - A wrong value still gives plausible-looking text for a few tokens, then degrades.
-- `rope_theta`; rope scaling (YaRN/linear) is **not** implemented, so add it in
-  `qk_rope()` if the model uses it.
+- `rope_theta`; YaRN scaling is applied when the GGUF says `rope.scaling.type` yarn (`rope_scaling`, as llama.cpp
+  does: gpt-oss); linear scaling is **not** implemented, so add it in `qk_rope()` if the model uses it.
 - `qk_norm` (per-head RMSNorm on q/k before RoPE), `post_norms` (Gemma-style
   post-attention/FFN norms), `attn_gate` (sigmoid output gate), `embed_scale`
   (Gemma multiplies embeddings by √hidden), `embed_norm`.
@@ -367,15 +368,17 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
 
 ## Beyond the starter (MoE, other formats, new ops)
 
-- **MoE** is in the starter (`gen_moe.py`, wired by `gen_llm.py` from `cfg["moe"]`): router top-k (softmax or
-  sigmoid + selection bias, weights kept in registers), per-assignment expert matvecs for decode, tokens bucketed
+- **MoE** is in the starter (`gen_moe.py`, wired by `gen_llm.py` from `cfg["moe"]`): router top-k (softmax,
+  sigmoid + selection bias, or llama.cpp's SOFTMAX_WEIGHT with the router's own bias; weights kept in registers),
+  per-expert output biases and the gpt-oss clamped SwiGLU (`moe.expert_bias`, `moe.act`), per-assignment expert matvecs for decode, tokens bucketed
   by expert and grouped WMMA GEMMs for prefill, shared experts (with the Qwen sigmoid gate), combine; MoE layers
   after `leading_dense` dense ones (an MoE MTP block generates too; not yet validated on the GPU). `inspect_gguf.py` fills `cfg["moe"]` from the GGUF;
   routing choices llama.cpp hard-codes per architecture instead of writing them (`expert_gating_func`,
   `expert_weights_norm`) come from `MOE_DEFAULTS`: add a row for a new MoE architecture from its
-  `src/models/<arch>.cpp` (`build_moe_ffn` arguments). Expert formats: Q4_K/Q5_K/Q6_K/Q8_0 (`gen_moe.FMT`; an MTP
+  `src/models/<arch>.cpp` (`build_moe_ffn` arguments). Expert formats: Q4_K/Q5_K/Q6_K/Q8_0/MXFP4 (`gen_moe.FMT`; an MTP
   block in another format is left out). Kernel tests cover the decode and prefill chains on the real tensors.
-  Ported this way: Qwen3.6-35B-A3B (`qwen35moe`, hybrid + MoE, 256 experts top-8).
+  Ported this way: Qwen3.6-35B-A3B (`qwen35moe`, hybrid + MoE, 256 experts top-8), gpt-oss-20b (MXFP4 experts,
+  `reference/gpt-oss-example` for its chat format).
 - **Gemma-3n / Gemma-4 family (arch `gemma3n`, `gemma4`).** `apply_example.sh gemma4`: a complete,
   gate-passing port whose README lists every feature the starter lacks (PLE, KV sharing, mixed
   head_dim 256/512, proportional partial RoPE, V norm without weights, GEGLU, softcap, bf16); each

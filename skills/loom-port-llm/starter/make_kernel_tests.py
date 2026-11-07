@@ -252,9 +252,19 @@ qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.fl
 kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
 q = rng.standard_normal((t, QH, D)).astype(np.float32); k = rng.standard_normal((t, KVH, D)).astype(np.float32); v = rng.standard_normal((t, KVH, D)).astype(np.float32)
 def norm(a, w): return a / np.sqrt((a * a).mean(-1, keepdims=True) + eps) * w
+def yarn(inv):
+    """(frequencies, cos/sin scale) of llama.cpp's YaRN (cfg rope_scaling; gen_llm.yarn_constants), else unchanged."""
+    y = cfg.get("rope_scaling") or {}
+    if y.get("type") != "yarn":
+        return inv, 1.0
+    f, n0, th = float(y["factor"]), float(y["orig_ctx"]), cfg["rope_theta"]
+    dim = lambda rot: RD * np.log(n0 / (rot * 2 * np.pi)) / (2 * np.log(th))
+    low, high = max(0.0, np.floor(dim(y.get("beta_fast", 32.0)))), min(RD - 1.0, np.ceil(dim(y.get("beta_slow", 1.0))))
+    ramp = np.clip((np.arange(len(inv)) - low) / max(0.001, high - low), 0, 1)
+    return inv * (1 - (1 - 1 / f) * ramp), y.get("attn_factor", 1.0) * (1 + 0.1 * np.log(f))
 def rope(a):
-    inv = cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD); ang = pos[:, None] * inv[None]
-    c, s = np.cos(ang)[:, None], np.sin(ang)[:, None]
+    inv, msc = yarn(cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD)); ang = pos[:, None] * inv[None]
+    c, s = np.cos(ang)[:, None] * msc, np.sin(ang)[:, None] * msc
     if cfg["rope_type"] == "neox":
         a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
     a1, a2 = a[..., 0::2], a[..., 1::2]; o = np.empty_like(a); o[..., 0::2] = a1 * c - a2 * s; o[..., 1::2] = a2 * c + a1 * s; return o
@@ -361,9 +371,14 @@ qr = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq); kr = rope(norm(k + bk
 # the paged KV cache holds F16 K and V: with large biases (k up to |130|) their rounding moves the output past atol
 kr, vs = (a.astype(np.float16).astype(np.float32) for a in (kr, v + bv))
 att = np.zeros((t, QH, D))
+sinks = deq(f"blk.{A0}.attn_sinks.weight") if cfg.get("attn_sinks") else np.zeros(QH, np.float32)
 for hh in range(QH):
     kv = hh // (QH // KVH); sc = qr[:, hh] @ kr[:, kv].T / np.sqrt(D); sc[np.triu_indices(t, 1)] = -1e30
-    pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); att[:, hh] = pr @ vs[:, kv]
+    if cfg.get("attn_sinks"):
+        mx = np.maximum(sc.max(-1, keepdims=True), sinks[hh]); pr = np.exp(sc - mx); pr /= pr.sum(-1, keepdims=True) + np.exp(sinks[hh] - mx)
+    else:
+        pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True)
+    att[:, hh] = pr @ vs[:, kv]
 if gate_kind:
     att = att / (1 + np.exp(-gate))
 blocks = (ctx + 15) // 16
@@ -371,7 +386,7 @@ orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(bloc
 info = np.zeros((t, 4), np.int32); info[:, 1] = pos; info[:, 2] = 1
 S = 64
 for n, a in [("a_q", q.reshape(t, -1)), ("a_k", k.reshape(t, -1)), ("a_v", v.reshape(t, -1)), ("a_g", gate.reshape(t, -1)),
-             ("a_qg", np.stack([q, gate], 2).reshape(t, -1)), ("a_info", info), ("a_orig", orig), ("a_o", att.reshape(t, -1).astype(np.float32))]:
+             ("a_qg", np.stack([q, gate], 2).reshape(t, -1)), ("a_info", info), ("a_orig", orig), ("a_sinks", sinks.astype(np.float32)), ("a_o", att.reshape(t, -1).astype(np.float32))]:
     save(n, a)
 QD = QH * D
 split_text = ""
@@ -395,17 +410,115 @@ cases.append(f"""check.case public @attention_chain {{
   %info = check.file.read.npy path("a_info.npy") : tensor<{t}x4xi32>
   %orig = check.file.read.npy path("a_orig.npy") : tensor<{10 + blocks}xi32>
   %eo = check.file.read.npy path("a_o.npy") : tensor<{t}x{QD}xf32>
+  %sinks = check.file.read.npy path("a_sinks.npy") : tensor<{QH}xf32>
   %arena = check.generate.fill value(0.0) : tensor<{2 * ctx * KVH * D}xf16>
   %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
   %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
   %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
 {split_text}{B_DECL}{mr_decl(t)}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena{MR_ARGS}{B_ARGS}) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>{mr_types(t)}{B_TYPES})
   kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
-  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {"%g" if gate_kind else "%q"}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>)
+  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {"%sinks" if cfg.get("attn_sinks") else "%g" if gate_kind else "%q"}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, {f"tensor<{QH}xf32>" if cfg.get("attn_sinks") else f"tensor<{t}x{QD}xf32>"}, tensor<{t}x{QD}xf32>)
   check.expect.close actual(%o) expected(%eo) atol(3.0e-3) rtol(3.0e-3) nan(different) : tensor<{t}x{QD}xf32>
   check.return
 }}
 """)
+# 3c. prefill attention on a span that CONTINUES stored KV: history positions [0, p0) are written
+# by g_qk_rope_store, then a span at p0 (t tokens, the last `pad` rows not live) runs the prefill
+# path (g_attention_flash2 on uniform 16-token tiles + the listed split/combine fallback for the
+# rest) and, separately, the decode path (g_attention_split + combine). Both vs numpy, on a
+# sliding and a non-sliding layer with that layer's real norms and sinks.
+def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
+    sl = 1 if li in set(cfg.get("sliding_layers", [])) else 0
+    rp = 0 if li in set(cfg.get("nope_layers", [])) else 1
+    W = cfg.get("sliding_window") or 0
+    qn_ = (deq(f"blk.{li}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)) * np.float32(qscale)
+    kn_ = deq(f"blk.{li}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
+    snk = deq(f"blk.{li}.attn_sinks.weight").astype(np.float32) if cfg.get("attn_sinks") else np.zeros(QH, np.float32)
+    n = p0 + t; ctx = ((n + 15) // 16) * 16 + 64; blocks = ctx // 16
+    allpos = np.arange(n)
+    qa = (rng.standard_normal((n, QH, D)) * (1.0 if cfg["qk_norm"] else qscale)).astype(np.float32); ka = rng.standard_normal((n, KVH, D)).astype(np.float32)
+    va = rng.standard_normal((n, KVH, D)).astype(np.float32)
+    def rope_p(a, p):
+        inv, msc = yarn(cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD)); ang = p[:, None] * inv[None]
+        c, s = np.cos(ang)[:, None] * msc, np.sin(ang)[:, None] * msc
+        if cfg["rope_type"] == "neox":
+            a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
+        a1, a2 = a[..., 0::2], a[..., 1::2]; o = np.empty_like(a); o[..., 0::2] = a1 * c - a2 * s; o[..., 1::2] = a2 * c + a1 * s; return o
+    qr_ = norm(qa, qn_) if cfg["qk_norm"] else qa; kr_ = norm(ka, kn_) if cfg["qk_norm"] else ka
+    if rp: qr_, kr_ = rope_p(qr_, allpos), rope_p(kr_, allpos)
+    kf = kr_.astype(np.float16).astype(np.float64); vf = va.astype(np.float16).astype(np.float64)
+    live = np.ones(t, bool); live[t - pad:] = False
+    att = np.zeros((t, QH, D))
+    for i in range(t):
+        if not live[i]: continue
+        p = p0 + i; lo = max(0, p - (W - 1)) if (sl and W) else 0
+        for hh in range(QH):
+            kv = hh // (QH // KVH)
+            sc = kf[lo:p + 1, kv] @ qr_[p, hh].astype(np.float64) / np.sqrt(D)
+            mx = max(sc.max(), snk[hh]) if cfg.get("attn_sinks") else sc.max()
+            pr = np.exp(sc - mx); den = pr.sum() + (np.exp(snk[hh] - mx) if cfg.get("attn_sinks") else 0.0)
+            att[i, hh] = (pr @ vf[lo:p + 1, kv]) / den
+    att_f = att.copy()
+    for tl in range(t // 16):
+        if not live[tl * 16:tl * 16 + 16].all(): att_f[tl * 16:tl * 16 + 16] = 0
+    orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
+    hinfo = np.zeros((p0, 4), np.int32); hinfo[:, 1] = allpos[:p0]; hinfo[:, 2] = 1
+    sinfo = np.zeros((t, 4), np.int32); sinfo[:, 1] = allpos[p0:]; sinfo[:, 2] = live
+    for nn, a in [("hq", qa[:p0].reshape(p0, -1)), ("hk", ka[:p0].reshape(p0, -1)), ("hv", va[:p0].reshape(p0, -1)), ("hinfo", hinfo),
+                  ("sq", qa[p0:].reshape(t, -1)), ("sk", ka[p0:].reshape(t, -1)), ("sv", va[p0:].reshape(t, -1)), ("sinfo", sinfo),
+                  ("orig", orig), ("qn", qn_.astype(np.float32)), ("kn", kn_.astype(np.float32)), ("sinks", snk), ("o", att.reshape(t, -1).astype(np.float32)), ("of", att_f.reshape(t, -1).astype(np.float32))]:
+        save(f"{tag}_{nn}", a)
+    print(f"{tag}: layer {li} sliding={sl} rope={rp} p0={p0} t={t} pad={pad} |o| max {np.abs(att).max():.4f} mean {np.abs(att).mean():.5f}")
+    QD = QH * D; KD = KVH * D; AR = f"tensor<{2 * ctx * KD}xf16>"; OT = f"tensor<{t}x{QD}xf32>"
+    S = 64; S16 = 16
+    gt = f"tensor<{QH}xf32>" if cfg.get("attn_sinks") else OT
+    gv = "%sinks" if cfg.get("attn_sinks") else "%sq"
+    def st(tt, pre):
+        return (f"  kernel.launch @g_qk_rope_store[%{pre}t](%{pre}t, %layer, %rope, %ctx, %pool, %{pre}q, %{pre}k, %{pre}v, %qn, %kn, %{pre}info, %orig, %arena) : "
+                f"[index](index, index, i32, index, index, tensor<{tt}x{QD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{tt}x4xi32>, tensor<{10 + blocks}xi32>, {AR})\n")
+    cases.append(f"""check.case public @{tag} {{
+  %ht = check.literal value({p0}) : index
+  %st = check.literal value({t}) : index
+  %layer = check.literal value(0) : index
+  %rope = check.literal value({rp}) : i32
+  %sliding = check.literal value({sl}) : i32
+  %ctx = check.literal value({ctx}) : index
+  %pool = check.literal value({ctx}) : index
+  %hq = check.file.read.npy path("{tag}_hq.npy") : tensor<{p0}x{QD}xf32>
+  %hk = check.file.read.npy path("{tag}_hk.npy") : tensor<{p0}x{KD}xf32>
+  %hv = check.file.read.npy path("{tag}_hv.npy") : tensor<{p0}x{KD}xf32>
+  %hinfo = check.file.read.npy path("{tag}_hinfo.npy") : tensor<{p0}x4xi32>
+  %sq = check.file.read.npy path("{tag}_sq.npy") : {OT}
+  %sk = check.file.read.npy path("{tag}_sk.npy") : tensor<{t}x{KD}xf32>
+  %sv = check.file.read.npy path("{tag}_sv.npy") : tensor<{t}x{KD}xf32>
+  %sinfo = check.file.read.npy path("{tag}_sinfo.npy") : tensor<{t}x4xi32>
+  %orig = check.file.read.npy path("{tag}_orig.npy") : tensor<{10 + blocks}xi32>
+  %qn = check.file.read.npy path("{tag}_qn.npy") : tensor<{D}xf32>
+  %kn = check.file.read.npy path("{tag}_kn.npy") : tensor<{D}xf32>
+  %sinks = check.file.read.npy path("{tag}_sinks.npy") : tensor<{QH}xf32>
+  %eo = check.file.read.npy path("{tag}_o.npy") : {OT}
+  %eof = check.file.read.npy path("{tag}_of.npy") : {OT}
+  %arena = check.generate.fill value(0.0) : {AR}
+  %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
+  %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
+  %o_pre = check.generate.fill value(0.0) : {OT}
+  %o_dec = check.generate.fill value(0.0) : {OT}
+{st(p0, "h")}{st(t, "s")}  kernel.launch @g_attention_flash2[%st](%st, %layer, %sliding, %ctx, %pool, %sq, {gv}, %sinfo, %orig, %arena, %o_pre) : [index](index, index, i32, index, index, {OT}, {gt}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, {OT})
+  kernel.launch @g_attention_split[%st](%st, %layer, %sliding, %ctx, %pool, %sq, %sinfo, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, {OT}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
+  kernel.launch @g_attention_combine[%st](%st, %sliding, %sinfo, %pacc, %pml, {gv}, %o_dec) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, {gt}, {OT})
+  check.expect.close actual(%o_dec) expected(%eo) atol(1.5e-3) rtol(3.0e-3) nan(different) : {OT}
+  check.expect.close actual(%o_pre) expected(%eof) atol(2.5e-3) rtol(1.0e-2) nan(different) : {OT}
+  check.return
+}}
+""")
+if cfg.get("attn_sinks") and os.environ.get("PREFILL_CONT", "1") != "0":
+    _sl = cfg.get("sliding_layers") or []
+    _ns = [i for i in range(cfg["layers"]) if i not in set(_sl) and i not in set(cfg.get("recurrent_layers", []))]
+    _p0 = max(300, (cfg.get("sliding_window") or 0) + 100)
+    for _li in ([_sl[0]] if _sl else []) + _ns[:1]:
+        prefill_cont_case(_li, _p0, 48, 0, f"pc_full_{_li}")     # 3 uniform tiles: flash2 only
+        prefill_cont_case(_li, _p0, 48, 7, f"pc_part_{_li}")     # last tile partly padding: listed fallback
+        prefill_cont_case(_li, _p0, 48, 0, f"pc_small_{_li}", 0.1)  # small scores: the sink dominates the softmax
 # 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
 if cfg.get("recurrent_layers"):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -917,13 +1030,17 @@ if cfg.get("moe"):
         return v.reshape(-1), (np.asarray(tt.data).view(np.int8).reshape(-1) if bf else v.reshape(-1).astype(np.float32))
     def route_ref(hx, Wr, bias):
         logit = hx.astype(np.float64) @ Wr.T.astype(np.float64)
-        if M["gating"] == 2:
+        if M["gating"] == 3:   # SOFTMAX_WEIGHT: the router bias is part of the logits; weights = softmax over the k picked
+            logit = logit + bias; prob = logit
+        elif M["gating"] == 2:
             prob = 1 / (1 + np.exp(-logit))
         else:
             ex = np.exp(logit - logit.max(-1, keepdims=True)); prob = ex / ex.sum(-1, keepdims=True)
-        sel = prob + bias
+        sel = prob + (bias if M["gating"] != 3 else 0)
         ids = np.argsort(-sel, -1, kind="stable")[:, :KU].astype(np.int32)
         wts = np.take_along_axis(prob, ids, -1)
+        if M["gating"] == 3:
+            wts = np.exp(wts - wts.max(-1, keepdims=True)); wts = wts / wts.sum(-1, keepdims=True)
         if M["norm_weights"]:
             wts = wts / np.maximum(wts.sum(-1, keepdims=True), 6.103515625e-05)
         ss = np.sort(sel, -1)[:, ::-1]
@@ -937,12 +1054,19 @@ if cfg.get("moe"):
         keep = np.flatnonzero(rel > 2e-3)[:t]
         assert len(keep) == t, f"only {len(keep)} of {40 * t} random rows have a clear top-{KU}"
         return hx[keep]
-    def experts_ref(hx, ids, wts, Wg, Wu, Wd):
+    EB = bool(M.get("expert_bias")); OAI = M.get("act") == "swiglu_oai"
+    def experts_ref(hx, ids, wts, Wg, Wu, Wd, bg=None, bu=None, bd=None):
         y = np.zeros((len(hx), H))
         for i in range(len(hx)):
             for k in range(KU):
-                e = ids[i, k]; g = Wg[e] @ hx[i]; u = Wu[e] @ hx[i]; a = g / (1 + np.exp(-g)) * u
-                y[i] += wts[i, k] * (Wd[e] @ a)
+                e = ids[i, k]; g = Wg[e] @ hx[i]; u = Wu[e] @ hx[i]
+                if EB: g, u = g + bg[e], u + bu[e]
+                if OAI:   # ggml_swiglu_oai: x = min(g, limit), y = clamp(u, -limit, limit), x sigmoid(alpha x) (y + 1)
+                    lim, al = M.get("swiglu_limit", 7.0), M.get("swiglu_alpha", 1.702)
+                    xg = np.minimum(g, lim); a = xg / (1 + np.exp(-al * xg)) * (np.clip(u, -lim, lim) + 1)
+                else:
+                    a = g / (1 + np.exp(-g)) * u
+                y[i] += wts[i, k] * (Wd[e] @ a + (bd[e] if EB else 0))
         return y
     done = set()
     for li in range(M["leading_dense"], cfg["layers"]):
@@ -950,13 +1074,16 @@ if cfg.get("moe"):
         if fd in done: continue
         done.add(fd)
         Wr, wr_raw = f32w(b + "ffn_gate_inp.weight"); Wr = Wr.reshape(E_, H)
-        bias = np.asarray(T[b + "exp_probs_b.bias"].data, np.float32) if M["probs_bias"] else np.zeros(E_, np.float32)
+        bias = (np.asarray(T[b + "exp_probs_b.bias"].data, np.float32) if M["probs_bias"] else
+                np.asarray(T[b + "ffn_gate_inp.bias"].data, np.float32) if M.get("router_bias") else np.zeros(E_, np.float32))
+        ebias = {p: np.asarray(T[f"{b}ffn_{p}_exps.bias"].data, np.float32).reshape(E_, -1) for p in ("gate", "up", "down")} if EB else {}
         Wg, Wu, Wd = deq3(b + "ffn_gate_exps.weight"), deq3(b + "ffn_up_exps.weight"), deq3(b + "ffn_down_exps.weight")
         if SHG:
             Wsg, wsg_raw = f32w(b + "ffn_gate_inp_shexp.weight"); sty = T[b + "ffn_gate_inp_shexp.weight"].tensor_type.name.lower()
         tag = f"m{li}"
-        for n, a in [(tag + "_wr", wr_raw), (tag + "_b", bias), (tag + "_wg", raw(b + "ffn_gate_exps.weight")),
-                     (tag + "_wu", raw(b + "ffn_up_exps.weight")), (tag + "_wd", raw(b + "ffn_down_exps.weight"))] + ([(tag + "_wsg", wsg_raw)] if SHG else []):
+        for n, a in ([(tag + "_wr", wr_raw), (tag + "_b", bias), (tag + "_wg", raw(b + "ffn_gate_exps.weight")),
+                      (tag + "_wu", raw(b + "ffn_up_exps.weight")), (tag + "_wd", raw(b + "ffn_down_exps.weight"))] + ([(tag + "_wsg", wsg_raw)] if SHG else [])
+                     + [(f"{tag}_b{p[0]}", v.reshape(-1)) for p, v in ebias.items()]):
             save(n, a)
         def chain(t, sfx):
             """Inputs + reference of a t-token chain: h, y0 (shared output in y), ids/wts, the expected y."""
@@ -964,7 +1091,7 @@ if cfg.get("moe"):
             ids, wts, rel = route_ref(hx, Wr, bias)
             y0 = (rng.standard_normal((t, H)) * 0.1).astype(np.float32) if ACC else np.zeros((t, H), np.float32)
             sgv = 1 / (1 + np.exp(-(hx.astype(np.float64) @ Wsg.astype(np.float64)))) if SHG else np.ones(t)
-            yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts, Wg, Wu, Wd)
+            yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts, Wg, Wu, Wd, ebias.get("gate"), ebias.get("up"), ebias.get("down"))
             for n, a in [("_h", hx), ("_y0", y0), ("_ids", ids), ("_wts", wts.astype(np.float32)), ("_y", yref.astype(np.float32)),
                          ("_sg", sgv.astype(np.float32))]:
                 save(tag + sfx + n, a)
@@ -989,13 +1116,16 @@ if cfg.get("moe"):
   %y = check.file.read.npy path("{tag}{sfx}_y0.npy") : tensor<{t}x{H}xf32>
   %ids = check.generate.fill value(0) : tensor<{t}x{KU}xi32>
   %wts = check.generate.fill value(0.0) : tensor<{t}x{KU}xf32>
-""" + (f"""  %wsg = check.file.read.npy path("{tag}_wsg.npy") : {wsg_t}
+""" + "".join(f"""  %b{p} = check.file.read.npy path("{tag}_b{p}.npy") : tensor<{E_ * (H if p == "d" else FE)}xf32>
+""" for p in ("g", "u", "d") if EB) + (f"""  %wsg = check.file.read.npy path("{tag}_wsg.npy") : {wsg_t}
   %esg = check.file.read.npy path("{tag}{sfx}_sg.npy") : tensor<{t}xf32>
   %sg = check.generate.fill value(0.0) : tensor<{t}xf32>
   kernel.launch @g_moe_shared_gate_{sty}[%t](%t, %h, %wsg, %sg) : [index](index, tensor<{t}x{H}xf32>, {wsg_t}, tensor<{t}xf32>)
   check.expect.close actual(%sg) expected(%esg) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}xf32>
 """ if SHG else "")
         SGA, SGT = ("%sg, ", f"tensor<{t}xf32>, ") if SHG else ("", "")
+        GUB, GUBT = (", %bg, %bu", f", tensor<{E_ * FE}xf32>, tensor<{E_ * FE}xf32>") if EB else ("", "")
+        DNB, DNBT = (", %bd", f", tensor<{E_ * H}xf32>") if EB else ("", "")
         # decode chain: 6 tokens (> the prefill router's tokens per workgroup: a full group plus a partial one)
         t = 6; ids, wts = chain(t, "")
         SGT = f"tensor<{t}xf32>, " if SHG else ""
@@ -1017,8 +1147,8 @@ if cfg.get("moe"):
   kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids_l, %wts_l, %info_l) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
   check.expect.equal actual(%ids_l) expected(%eids_l) : tensor<{t}x{KU}xi32>
   check.expect.close actual(%wts_l) expected(%ewts_l) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
-  kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {gt}, tensor<{t * KU}x{FE}xf32>)
-  kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wd, %ys) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t * KU}x{FE}xf32>, {dt_}, tensor<{t * KU}x{H}xf32>)
+  kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu{GUB}, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {gt}{GUBT}, tensor<{t * KU}x{FE}xf32>)
+  kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wd{DNB}, %ys) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t * KU}x{FE}xf32>, {dt_}{DNBT}, tensor<{t * KU}x{H}xf32>)
   kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {SGA}%y) : [index](index, tensor<{t * KU}x{H}xf32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
   check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
   check.expect.equal actual(%ids_tr) expected(%eids) : tensor<{t}x{KU}xi32>
@@ -1049,9 +1179,9 @@ if cfg.get("moe"):
   kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x2xf32>, tensor<{t}x{H}xf16>)
   kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids, %wts, %info) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
   kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, tensor<{t}x4xi32>, tensor<{t}x{KU}xi32>, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{ta}xi32>)
-  kernel.launch @g_moe_ggu_{fg}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wg, %wu, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {gt}, tensor<{mr}x{FE}xf32>)
+  kernel.launch @g_moe_ggu_{fg}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wg, %wu{GUB}, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {gt}{GUBT}, tensor<{mr}x{FE}xf32>)
   kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, tensor<{mr}x{FE}xf32>, tensor<{mr}x2xf32>, tensor<{mr}x{FE}xf16>, tensor<{mt}x2xi32>)
-  kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wd, %ys_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE}xf16>, tensor<{mr}x2xf32>, {dt_}, tensor<{mr}x{H}xf32>)
+  kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wd{DNB}, %ys_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE}xf16>, tensor<{mr}x2xf32>, {dt_}{DNBT}, tensor<{mr}x{H}xf32>)
   kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {SGA}%y) : [index](index, index, tensor<{mr}x{H}xf32>, tensor<{ta}xi32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
   check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
   check.expect.close actual(%wts) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
