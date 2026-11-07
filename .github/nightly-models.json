@@ -51,9 +51,9 @@
   {
    "repo": "loom-fun/unsloth-Qwen3-8B-loom",
    "slug": "qwen3-8b",
-   "memory_bytes": 28000000000,
+   "memory_bytes": 29000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1368",
    "features": [
     "draft",
     "thinking-toggle"
