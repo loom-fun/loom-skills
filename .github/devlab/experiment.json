@@ -1,14 +1,11 @@
 {
- "_comment": "Issue #39 verification: path-aware consistency.py (gate verdict with llama.cpp) 20x on Bolt with drafting, Bolt quick gates, kernel tests on the rebuilt Bolt package, and another card's consistency.",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
+ "_comment": "build.py's memory_bytes counts the largest program's prefill scratch: a hybrid MoE card rebuilt from this branch, served at the value build.py now prints (48e9; the card's 41e9 refused a full-context request on a fresh server), full gates.",
+ "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
+ "memory_bytes": 48000000000,
+ "kit": null,
+ "llamacpp": "b1369",
  "variants": [
-  {"name": "card", "steps": ["consistency:20:llama", "determinism:1:12", "gates:quick"]},
-  {"name": "rebuilt-ktest", "build": {}, "steps": ["ktest", "consistency:20:llama"]},
-  {"name": "nodraft", "build": {"SPEC": "off"}, "steps": ["consistency:20:llama"]},
-  {"name": "qwen3.8-27b", "card": "loom-fun/bartowski-Qwen3.8-27B-loom", "memory_bytes": 52000000000, "kit": null,
-   "llamacpp": "b1355", "steps": ["consistency:10:llama", "determinism:1:6"]}
+  {"name": "q36-rebuilt-admit", "build": {}, "steps": ["admit:260096"]},
+  {"name": "q36-rebuilt-gates", "build": {}, "steps": ["gates:full"]}
  ]
 }
