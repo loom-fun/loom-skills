@@ -499,7 +499,9 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
     sinfo = np.zeros((t, 4), np.int32); sinfo[:, 1] = allpos[p0:]; sinfo[:, 2] = live
     for nn, a in [("hq", qa[:p0].reshape(p0, -1)), ("hk", ka[:p0].reshape(p0, -1)), ("hv", va[:p0].reshape(p0, -1)), ("hinfo", hinfo),
                   ("sq", qa[p0:].reshape(t, -1)), ("sk", ka[p0:].reshape(t, -1)), ("sv", va[p0:].reshape(t, -1)), ("sinfo", sinfo),
-                  ("orig", orig), ("qn", qn_.astype(np.float32)), ("kn", kn_.astype(np.float32)), ("sinks", snk), ("o", att.reshape(t, -1).astype(np.float32)), ("of", att_f.reshape(t, -1).astype(np.float32))]:
+                  ("orig", orig), ("qn", qn_.astype(np.float32)), ("kn", kn_.astype(np.float32)), ("sinks", snk), ("o", att.reshape(t, -1).astype(np.float32)), ("of", att_f.reshape(t, -1).astype(np.float32)),
+                  # a used KV pool: positions this sequence never wrote hold another sequence's keys and values
+                  ("arena", (rng.standard_normal(2 * ctx * KVH * D) * 4).astype(np.float16))]:
         save(f"{tag}_{nn}", a)
     print(f"{tag}: layer {li} sliding={sl} rope={rp} p0={p0} t={t} pad={pad} |o| max {np.abs(att).max():.4f} mean {np.abs(att).mean():.5f}")
     QD = QH * D; KD = KVH * D; AR = f"tensor<{2 * ctx * KD}xf16>"; OT = f"tensor<{t}x{QD}xf32>"
@@ -534,7 +536,7 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
   %sinks = check.file.read.npy path("{tag}_sinks.npy") : tensor<{QH}xf32>
   %eo = check.file.read.npy path("{tag}_o.npy") : {OT}
   %eof = check.file.read.npy path("{tag}_of.npy") : {OT}
-  %arena = check.generate.fill value(0.0) : {AR}
+  %arena = check.file.read.npy path("{tag}_arena.npy") : {AR}
   %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
   %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
   %o_pre = check.generate.fill value(0.0) : {OT}
