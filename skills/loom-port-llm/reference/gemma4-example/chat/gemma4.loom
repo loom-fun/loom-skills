@@ -1724,8 +1724,10 @@ func.def @g4_parse_calls(%response: buffer) -> (buffer) {
 // close the next render prints after it (<|tool_response> after calls, else <turn|>\n).
 // The template re-renders a turn differently from what the model wrote (reasoning gets
 // "\n<channel|>", content is trimmed, call keys sorted, reasoning dropped after a new
-// query), so returning the raw text lets the host reuse up to the first changed byte
-// instead of nothing. Reusable unless the response ended inside reasoning.
+// query). The raw text is what the row holds: loom-serve resumes the row when the next
+// prompt extends it exactly (it cannot cut a row back to a common prefix), so a turn the
+// template re-renders differently is prefilled again. Reusable unless the response ended
+// inside reasoning.
 func.def @g4_complete_text(%prompt: buffer, %response: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
   %c0 = index.constant 0 : offset
   %c1_i64 = scalar.constant 1 : i64

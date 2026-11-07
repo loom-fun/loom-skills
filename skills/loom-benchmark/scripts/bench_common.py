@@ -261,6 +261,33 @@ def near_tie(top, gold_id, loom_id, max_gap=1.0):
     return ranked[:2] == [gold_id, loom_id] and math.exp(top[gold_id]) < 0.5
 
 
+def text_divergence(tok, loom_ids, gids):
+    """First divergence of Loom's output ids from llama.cpp's greedy ids `gids`, judged on text: (k, loom_id,
+    loom_text) with k the first golden position whose token leaves Loom's text, loom_id Loom's token there and
+    loom_text Loom's text from there; None when both texts agree as far as both go. Loom's ids are its parsed
+    reply re-tokenized, and the model may pick a split the tokenizer would not ('.\\n' '\\n' '\\n' where the
+    tokenizer merges '.\\n\\n\\n'): the same text split differently is no divergence. From the first differing
+    id the rest is compared as text; a golden token that ends inside a UTF-8 character is judged with the
+    tokens that complete it. Without a split difference this is the first differing id, as before."""
+    k = next((i for i, (x, y) in enumerate(zip(loom_ids, gids)) if x != y), None)
+    if k is None:
+        return None
+    text = tok.decode(loom_ids[k:], skip_special_tokens=False)
+    at, done = k, 0
+    for j in range(k, len(gids)):
+        s = tok.decode(gids[k:j + 1], skip_special_tokens=False)
+        if s.endswith("�"):
+            continue
+        if text.startswith(s):
+            at, done = j + 1, len(s)
+        elif s.startswith(text):
+            return None
+        else:
+            loom_id = loom_ids[k] if done == 0 else (tok.encode(text[done:], add_special_tokens=False).ids or [None])[0]
+            return at, loom_id, text[done:]
+    return None
+
+
 def top_logprobs(tops, k):
     """{id: logprob} at generated position k, or {} past the aligned lists (a byte-split token)."""
     return {t["id"]: t["logprob"] for t in tops[k]["top_logprobs"]} if k < len(tops) else {}
