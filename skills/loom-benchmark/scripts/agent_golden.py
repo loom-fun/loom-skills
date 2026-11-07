@@ -84,7 +84,7 @@ def main():
     thinking = None if a.thinking == "default" else a.thinking == "on"
     extra = {} if thinking is None else {"chat_template_kwargs": {"enable_thinking": thinking}}
     msgs = [{"role": "system", "content": "You are a helpful assistant. Use the tools when they help."}]
-    turns, failures, prev_total, prev_text, prev_verified = [], 0, 0, "", False
+    turns, failures, prev_total, prev_text = [], 0, 0, ""
     for task in TASKS:
         msgs.append({"role": "user", "content": task})
         for step in range(6):
@@ -113,7 +113,7 @@ def main():
                 pids = P.ids(prev_text)
                 common = next((i for i, (x, y) in enumerate(zip(pids, ids)) if x != y), min(len(pids), len(ids)))
                 exact = prompt.startswith(prev_text)
-                rewritten = not exact and prev_verified
+                rewritten = not exact and turns[-1].get("golden_match") is True   # previous output verified
                 rec["history_verbatim"] = exact or (common >= 0.8 * len(pids) and not rewritten)
                 if rewritten and common >= 0.8 * len(pids):
                     rec["history_rewritten_at"] = [common, len(pids)]
@@ -181,7 +181,6 @@ def main():
                       " small thinking models do this - compare llama.cpp's choice at that point, not a Loom bug by itself")
             turns.append(rec)
             prev_total = u["prompt_tokens"] + u["completion_tokens"]
-            prev_verified = rec.get("golden_match") is True
             prev_text = prompt + P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
             # loom-serve rejects "reasoning_content": null, so only send it when present.
             msgs.append({"role": "assistant", "content": m.get("content") or "",
