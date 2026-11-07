@@ -656,6 +656,18 @@ keep = set(chat.get("nonspecial_tokens", []))
 for t in tok.get("added_tokens", []):
     if t["content"] in keep:
         t["special"] = False
+# A Digits(individual_digits) pre-tokenizer after a leading numeric Split (Spark-X: Split \p{N}{1,3}, ..., Digits):
+# loom-serve's tokenizer (hrx-loom 0.1.0) emits garbage after 64 segments when a later Sequence stage splits further.
+# Same pieces, split first: the leading Split becomes \p{N} and Digits goes (every numeric char is already alone).
+pre = tok.get("pre_tokenizer") or {}
+stages = pre.get("pretokenizers") or []
+digits = [i for i, p in enumerate(stages) if p.get("type") == "Digits" and p.get("individual_digits")]
+if pre.get("type") == "Sequence" and digits and stages[0].get("type") == "Split" and \
+        stages[0].get("behavior") == "Isolated" and not stages[0].get("invert") and \
+        stages[0].get("pattern", {}).get("Regex", "").startswith("\\p{N}"):
+    stages[0] = dict(stages[0], pattern={"Regex": "\\p{N}"})
+    del stages[digits[0]]
+    print("tokenizer: Digits pre-tokenizer folded into the leading numeric Split (same pieces; loom-serve tokenizer)")
 json.dump(tok, open(os.path.join(pkg, "tokenizer.json"), "w", encoding="utf-8"), ensure_ascii=False)
 
 # 4. Weights (symlink; hard link on Windows without Developer Mode) and the package card.
