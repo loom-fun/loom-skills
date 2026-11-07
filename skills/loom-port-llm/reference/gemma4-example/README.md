@@ -16,7 +16,9 @@ Make a kit for a Gemma-3n/4-family model with `../apply_example.sh gemma4 W/kit`
 | `build.py` | the `gemma4` call format and its placeholders |
 | `chat_probe.py`, `templates/control.loom` | Gemma 4's chat format, which `chat_probe.derive()` can't model: `<|turn>role` / `<turn|>` turns, the `<|channel>thought ... <channel|>` reasoning channel (closed with a bare `<channel|>`), its tool-declaration and tool-call syntax, tool responses, the thinking switch. `simulate()` mirrors control.loom and is verified against the Jinja template; `raw_from_chat()` is the benchmark hook (`export LOOM_KIT=W/kit`). Needs `extra_eos_ids` [1, 106, 50]. Two template layouts are derived: Google's own Gemma 4 templates render an assistant turn as thought, calls, their results, then the content (`chat.content_after_calls`), and the 12B/26B ones open the model turn with an empty thought channel when thinking is off (`generation_prompt_plain` differs from `generation_prompt`); this port's template puts the content before the calls and has one generation prompt. `chat/gemma4.loom` holds both as `// @@IF_CHAT:...@@` variants (build.py `chat_variants`), so this port's programs are unchanged |
 
-`cfg.json`: the reviewed config (geometry, sliding/KV-sharing layers, chat block) without the tensor table.
+The reviewed config (geometry, sliding/KV-sharing layers, chat block) is the published package's `llm_config.json`
+([loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom](https://huggingface.co/loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom),
+category A, pinned in `../examples.json`); `apply_example.sh gemma4 KIT CFG` merges it.
 
 Lessons the agent paid for:
 - `llama_trace.py ... --grep '-0$|-23$|-24$'` (a sliding, a global and a KV-shared layer) gave the whole

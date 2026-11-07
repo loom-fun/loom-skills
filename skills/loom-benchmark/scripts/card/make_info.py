@@ -27,13 +27,14 @@ clock, no environment: the generator commit is an argument), so the same inputs 
       log ending in "N/M passed" (make_kernel_tests.py) -> gate evidence. The spec gate's "acceptance N% of M
       proposals" (gates_spec.log or gates.out next to the file, or --spec-log) -> the spec_acceptance metric.
 
-  make_info.py roofline --package PKG [--gguf G] [--cfg cfg.json] [--acceptance A] [--skills-commit SHA]
+  make_info.py roofline --package PKG [--gguf G] [--cfg cfg.json] [--acceptance A | --evidence EV.json ...] [--skills-commit SHA]
                         -o roofline_evidence.json
       The hardware ceiling of every card metric that has one (loom-roofline/roofline.py; needs the `gguf` Python
       package: run it with the tools venv). --gguf defaults to the checkpoint model.json.lock pins, in the Hugging
       Face cache; --cfg to PKG/llm_config.json. A drafting package's decode and 4-stream rows are ceilings of
       speculative decoding: verify passes per second x (1 + acceptance x depth) tokens per pass, acceptance from
-      --acceptance or the spec_acceptance in PKG/info.json (none: those rows get no ceiling).
+      --acceptance, the spec_acceptance of --evidence (the run's gate evidence: a first card has no info.json yet),
+      or PKG/info.json's (none: those rows get no ceiling).
 
   make_info.py devlab --loom-jsonl PERF.jsonl [--c4-loom F] --run ID --url JOB_URL [--runner NAME] [--date D]
                       [--package PKG] -o devlab_evidence.json
@@ -458,6 +459,9 @@ def cmd_roofline(a):
     cfg = load_json(cfg_p) if os.path.exists(cfg_p) else {}
     acc = a.acceptance
     info_p = os.path.join(a.package, "info.json")
+    for ev in (a.evidence or []) if acc is None and facts["spec"] else []:   # the run's gate evidence (before a first build)
+        v = (((load_json(ev).get("performance") or {}).get("session") or {}).get("metrics") or {}).get("spec_acceptance")
+        acc = (v or {}).get("loom", acc)
     if acc is None and facts["spec"] and os.path.exists(info_p):
         acc = (card_metrics(load_json(info_p)).get("spec_acceptance", ({}, 0))[0]).get("loom")
     script = os.path.join(rdir, "roofline.py")
@@ -546,7 +550,9 @@ def main(argv=None):
     r.add_argument("--package", required=True, help="the package (model.json, model.json.lock, llm_config.json)")
     r.add_argument("--gguf", help="the checkpoint (default: model.json.lock's, in the Hugging Face cache)")
     r.add_argument("--cfg", help="the port's cfg.json (default: PKG/llm_config.json)")
-    r.add_argument("--acceptance", type=float, help="speculative decoding acceptance (default: PKG/info.json's)")
+    r.add_argument("--acceptance", type=float, help="speculative decoding acceptance (default: the --evidence files' "
+                   "spec_acceptance, e.g. make_info.py gates output, else PKG/info.json's)")
+    r.add_argument("--evidence", nargs="*", help="evidence files to read spec_acceptance from (a package with no info.json yet)")
     r.add_argument("--skills-commit", help="record this loom-skills commit instead of the checkout's")
     r.add_argument("--bw", type=float, default=216e9, help="memory bandwidth, bytes/s (roofline.py's default)")
     r.add_argument("--flops", type=float, default=59e12, help="peak FLOP/s (roofline.py's default)")

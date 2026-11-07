@@ -48,9 +48,13 @@ def main():
             return 0
         hf = os.environ.get("HF", "hf")   # the SDK venv's hf CLI (port.sh passes it)
         out = subprocess.run([hf, "download", repo, name], capture_output=True, text=True)
-        path = (out.stdout.strip().splitlines() or [""])[-1].replace("path=", "")
-        if out.returncode or not os.path.exists(path):
-            sys.exit(f"STOP: downloading {repo}/{name} failed: {out.stderr[-500:]}")
+        # The path is the last line ("path=..." or bare, by hf version); hints may follow on either stream.
+        found = [w.replace("path=", "") for w in (out.stdout + "\n" + out.stderr).split()
+                 if w.replace("path=", "").endswith(os.path.basename(name))]
+        path = next((p for p in reversed(found) if os.path.exists(p)), "")
+        if out.returncode or not path:
+            sys.exit(f"STOP: downloading {repo}/{name} failed (exit {out.returncode}): "
+                     f"stdout {out.stdout[-300:]!r} stderr {out.stderr[-300:]!r}")
     import encoder
     try:
         vc = encoder.config(path)

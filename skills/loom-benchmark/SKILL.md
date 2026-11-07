@@ -365,18 +365,24 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
      device constants and the roofline.py sha256 and commit. Drafting packages: decode and 4-stream ceilings are
      verify passes per second x (1 + acceptance x depth) tokens per pass, from the card's own spec acceptance
      and depth (the drafter's cost not counted: an upper bound); without a measured acceptance they have none.
+     A first card has no `DIR/info.json` yet: pass the run's gate evidence (`--evidence ev_gates.json`, which carries
+     the spec gate's acceptance), or build once, run roofline, and build again.
 2. `card/make_info.py build DIR --repo loom-fun/REPO --generator-commit "$(git rev-parse HEAD)" --memory-bytes N
    --output OUT --report generated --evidence ev_*.json -o DIR/info.json` (to regenerate a published card with
    only new evidence: `--from-info DIR/info.json`, re-read from the Hub right before). DIR holds the repo's `model.json`,
    `model.json.lock`, `llm_config.json` (and `program/`). Per gate the latest evidence wins, so a later failing
    run shows as a failure; per metric the last session that measured it. `--report attached` instead keeps a
    REPORT.md written by the run (the factory's) or an older card's narrative, as is.
+   A new or replaced package: `card/publish_package.py prepare PKG DIR --source ORG/GGUF-REPO` first, on the machine
+   that holds the GGUFs (copies the package without weights, pins each file's origin at the revision it was validated
+   on, writes `model.json.lock` with `loom-fetch --update-lock`), then `make_info.py build DIR ...` on that DIR.
 3. `card/render_card.py DIR` writes `DIR/README.md` (and `DIR/REPORT.md` for `--report generated`: setup,
    commands, every run's value, the roofline, every DevLab sweep, gate evidence). The performance table shows per
    metric llama.cpp, Loom, the margin, the roofline, Loom as % of it, and Loom on DevLab with its % of the
    roofline; a footnote says what the roofline and the DevLab column are. When republishing a card, upload only those three files:
-   `hf upload REPO DIR . --include README.md --include info.json --include REPORT.md`. Never re-upload a repo's
-   programs, `model.json`, lock or weights for a card change.
+   `hf upload REPO DIR . --include README.md --include info.json --include REPORT.md` (or `publish_package.py upload
+   DIR --repo REPO --card-only`). Never re-upload a repo's programs, `model.json`, lock or weights for a card change.
+   A whole package: `publish_package.py upload DIR --repo REPO` (removes files an in-place update leaves stale).
 
 **Performance guardrails** (`card_lib.perf_flags`, applied by `loom-org`'s `org_status.py`): a metric whose Loom
 value is below half the efficiency Loom ports have demonstrated (far from roofline), or whose latest DevLab value

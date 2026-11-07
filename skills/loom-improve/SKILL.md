@@ -93,7 +93,9 @@ in scripts (low freedom); leave judgment (kernel design, debugging) as guidance 
 the agent already knows how to code; tell it what it can't know (this hardware, this SDK, the gates,
 past failures). A new reference example goes under `loom-port-llm/reference/<family>-example/`: its
 new files, a `starter.patch` for the starter files it changes (`diff -u` against the current starter),
-the reviewed `cfg.json` and a README stating what it covers and what was left open. Move features that
+the reviewed `cfg.json` (or, once the port is published as a category A loom-fun package, an `examples.json`
+entry pinning that package instead: its `llm_config.json` is the reviewed config) and a README stating what it
+covers and what was left open. Don't ship what a category A package already carries. Move features that
 any model could use into the starter instead (default off, so the Qwen programs stay byte-identical).
 After any starter change, `reference/rebase_examples.sh OLD_STARTER` and `check_examples.sh`.
 
