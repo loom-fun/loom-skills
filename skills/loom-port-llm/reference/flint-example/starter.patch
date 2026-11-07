@@ -42,7 +42,7 @@
        %bs = index.assume %s [range(%s, 0, {S - 1})] : index
        %ms = view.load %ml_view[%token, %head, %bs, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
        %ls = view.load %ml_view[%token, %head, %bs, 1] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
-@@ -3986,7 +3998,7 @@
+@@ -3989,7 +4001,7 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -51,7 +51,7 @@
      attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in RECUR)}
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
      def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
-@@ -4002,6 +4014,8 @@
+@@ -4005,6 +4017,8 @@
          if i not in MOE_LAYERS:
              T += [par("w_gate", "ffn_gate"), par("w_up", "ffn_up"), par("w_down", "ffn_down")]
          T += [par("ffn_norm", FFN_NORM, f"view<{H}xf32>")]
@@ -60,7 +60,7 @@
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
          elif QKV_FUSED:
-@@ -4046,16 +4060,18 @@
+@@ -4049,16 +4063,18 @@
          elif GATE and not FUSED_Q and i not in RECUR and not qg:
              T.append("  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wg_{i}", sz("attn_gate"), "%gate", "%nH", "%nQ", H) + "\n")
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")

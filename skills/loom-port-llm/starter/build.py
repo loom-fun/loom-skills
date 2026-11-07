@@ -230,13 +230,16 @@ if instructions:
     reasoning = (1, efforts, default_effort)
 
 
+def sub(text, old, new):
+    """TEXT with its one occurrence of OLD replaced by NEW (the control.loom patches below)."""
+    assert text.count(old) == 1, (old[:120], text.count(old))
+    return text.replace(old, new)
+
+
 def patch_reasoning_instructions(text):
     """control.loom with the reasoning-instruction prefix (chat_probe.reasoning_instructions): chat_begin opens
     the system block with the request effort's instructions when thinking is on, merging the first system
     message into that block. Without chat.reasoning_instructions control.loom is unchanged."""
-    def sub(t, old, new):
-        assert t.count(old) == 1, (old[:120], t.count(old))
-        return t.replace(old, new)
     names = list(instructions)
     rodata = "".join(f'global.rodata.def @reasoning_name_{i} = bytes("{hx(e)}")\n\n'
                      f'global.rodata.def @reasoning_text_{i} = bytes("{hx(instructions[e])}")\n\n' for i, e in enumerate(names))
@@ -395,15 +398,44 @@ def patch_tools_compact(text):
                               "    %printed = func.call @compact(%printed_raw) : (buffer) -> (buffer)\n")
 
 
+def patch_default_system_tools(text):
+    """control.loom for a template that swaps its default system prompt when tools are present
+    (chat.default_system_tools, its separator included; Nanbeige): with tools and no system message, chat_begin prints
+    that text beside the tools instead of default_system + separator. Without the field control.loom is unchanged."""
+    text = sub(text, 'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n',
+               'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n\n'
+               f'global.rodata.def @default_system_tools = bytes("{hx(chat["default_system_tools"])}")\n')
+    text = sub(text, "    %separator = scf.select %has_body, %separator_value, %empty : buffer\n",
+               """    %body_separator = scf.select %has_body, %separator_value, %empty : buffer
+    // No system message: the template's tools-time default system prompt, separator included.
+    %default_tools = global.load @default_system_tools : buffer
+    %separator = scf.select %not_first_system, %empty, %body_separator : buffer
+    %tools_body = scf.select %not_first_system, %default_tools, %system_body : buffer
+""")
+    text = sub(text, "func.call @join4(%system_body, %separator, %tools_text, %empty)", "func.call @join4(%tools_body, %separator, %tools_text, %empty)")
+    return sub(text, "func.call @join4(%tools_text, %separator, %system_body, %empty)", "func.call @join4(%tools_text, %separator, %tools_body, %empty)")
+
+
+def patch_history_think_before(text):
+    """control.loom for a template that keeps an empty think block in assistant turns before the last user query
+    (chat.history_think_before "empty"; MiniCPM-V): chat_message renders THINK_OPEN + THINK_CLOSE there instead of
+    nothing. Without the field control.loom is unchanged."""
+    text = sub(text, "        %think = scf.if %show -> (buffer) {\n",
+               """        // Before the last user query: an empty think block (chat.history_think_before).
+        %early = scalar.cmpi eq, %in_scope, %false : i1
+        %show_block = scalar.ori %show, %early : i1
+        %kept_thought = scf.select %in_scope, %thought, %empty : buffer
+        %think = scf.if %show_block -> (buffer) {
+""")
+    return sub(text, "func.call @join4(%open, %thought, %close, %empty)", "func.call @join4(%open, %kept_thought, %close, %empty)")
+
+
 def patch_no_tools(text):
     """control.loom for a chat-only block (chat_probe.CHAT_ONLY, call_format "none": the template ignores tools):
     chat_begin renders a request's tools as the template does (not at all) and parse_tools never parses a call.
     Other packages' control.loom is unchanged."""
-    off = "scalar.constant false : i1"
-    for old in ("  %has_tools = scalar.cmpi ne, %tool_count, %zero64 : i64\n",
-                "  %has_tools = scalar.cmpi ne, %schema_count, %zero64 : i64\n"):
-        assert text.count(old) == 1, (old, text.count(old))
-        text = text.replace(old, f"  %has_tools = {off}\n")
+    for count in ("%tool_count", "%schema_count"):
+        text = sub(text, f"  %has_tools = scalar.cmpi ne, {count}, %zero64 : i64\n", "  %has_tools = scalar.constant false : i1\n")
     return text
 
 
@@ -412,9 +444,6 @@ def patch_system_in_user(text):
     user turn (chat_probe.system_in_user, Gemma 3: user_prefix + system + '\\n\\n' + user text + suffix): the system
     message renders user_prefix + its text + separator and sets state bit 8, so the next (user) message renders without
     its prefix. Other packages' control.loom is unchanged."""
-    def sub(t, old, new):
-        assert t.count(old) == 1, (old[:120], t.count(old))
-        return t.replace(old, new)
     assert not chat.get("default_system") and chat["call_format"] == "none" and not instructions and not chat.get("system_lead"), \
         "system_in_user: modeled for chat-only templates without a default system prompt"
     text = sub(text, 'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n',
@@ -519,6 +548,10 @@ for name in ("prepare", "control", "storage", "service"):
         text = patch_tools_compact(text)
     if name == "control" and chat.get("system_in_user"):
         text = patch_system_in_user(text)
+    if name == "control" and chat.get("history_think_before") == "empty":
+        text = patch_history_think_before(text)
+    if name == "control" and "default_system_tools" in chat:
+        text = patch_default_system_tools(text)
     if name == "control" and chat["call_format"] == "none":
         text = patch_no_tools(text)
     if name == "control" and custom_chat:

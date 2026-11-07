@@ -262,7 +262,10 @@ def derive(template_text, bos="", eos=""):
     notes = []
     chat = {}
     # BOS: emitted by the control program at the very start when the template prints it.
-    chat["bos"] = bos if bos and T.render([{"role": "user", "content": "USERPROBE1"}]).startswith(bos) else ""
+    # Decided with a sentinel: a GGUF whose bos id is the template's own role tag (MiniCPM-V: <|im_start|>) starts every
+    # render with that text although the template never prints bos_token.
+    printed = Template(template_text, "BOSPROBE", eos).render([{"role": "user", "content": "USERPROBE1"}]).startswith("BOSPROBE")
+    chat["bos"] = bos = bos if bos and printed else ""
     # Reasoning instructions (Qwen3.8: "Reasoning effort is set to xhigh. ..." per reasoning_effort, only
     # with thinking on): the system-block probes below render with thinking off (kw0), where they vanish.
     efforts = reasoning_heads(T)
@@ -353,6 +356,12 @@ def derive(template_text, bos="", eos=""):
                       {"role": "user", "content": "USERPROBE2"}])
     # Qwen-style templates drop reasoning from turns before the last user query.
     chat["history_think_scope"] = "all" if "REASONPROBE" in early else "after_last_query"
+    # ... but some keep an empty think block there (MiniCPM-V 4.6/4.7: <think>\n\n</think>\n\n). Present only then.
+    if chat["history_think_scope"] == "after_last_query" and chat["think_open"]:
+        empty = chat["assistant_prefix"] + chat["think_open"] + chat["think_close"]
+        if between(early, "USERPROBE1", "ASSTPROBE1").endswith(empty):
+            chat["history_think_before"] = "empty"
+            notes.append("turns before the last user query keep an empty think block")
     think_marker = chat["think_open"].strip() or "<think>"
     thinks = any(think_marker in g for g in (g_default, g_on)) or bool(chat["think_open"])
     plain = g_off if g_off != g_on else g_default
@@ -445,6 +454,18 @@ def derive(template_text, bos="", eos=""):
     else:
         raise ProbeError(f"system message is not merged with the tools block: {s_body[:200]!r}")
     chat["tools_suffix"] = tools_suffix
+    # Without a system message the tools block follows the default system prompt and its separator, unless the
+    # template swaps in another one when tools are present (Nanbeige: a "tool-calling expert" prompt, with no
+    # separator): default_system_tools is that text, separator included. Present only when it differs.
+    if chat["tools_after_system"]:
+        plain_lead = tools_prefix
+        default = chat["default_system"]
+        if plain_lead != (default + chat["tools_system_separator"] if default else "") + chat["tools_prefix"]:
+            if not plain_lead.endswith(chat["tools_prefix"]):
+                raise ProbeError(f"tools block without a system message has an unexpected lead: {plain_lead[:200]!r}")
+            chat["default_system_tools"] = plain_lead[:len(plain_lead) - len(chat["tools_prefix"])]
+            notes.append(f"template swaps the default system prompt when tools are present: "
+                         f"{chat['default_system_tools'][:60]!r}...")
     # Tool calls.
     two = T.render([{"role": "user", "content": "USERPROBE1"}, calls_msg("ASSTPROBE1", [CALL1, CALL2]),
                     {"role": "tool", "tool_call_id": "call_0", "content": "TOOLPROBE1"},
@@ -541,6 +562,8 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
         out += chat["system_prefix"] + lead + instr + rest + chat["suffix"]
     elif tools:
         sep = chat["tools_system_separator"] if body else ""
+        if not first_system and "default_system_tools" in chat:   # the template's tools-time default, separator included
+            body, sep = chat["default_system_tools"], ""
         merged = body + sep + tb if chat["tools_after_system"] else tb + sep + body
         out += chat["system_prefix"] + instructed(merged) + chat["suffix"]
     elif instr:
@@ -564,6 +587,8 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
             shown = chat["history_think_scope"] == "all" or i > last_query
             think = chat["think_open"] + thought + chat["think_close"] if shown and (thought or chat["history_think"] == "always") and chat["think_open"] else ""
             think = chat["think_close"] if shown and not thought and chat["history_think"] == "close" else think
+            if not shown and chat.get("history_think_before") == "empty":
+                think = chat["think_open"] + chat["think_close"]
             calls = render_calls(chat, m.get("tool_calls") or [])
             sep = chat["content_call_separator"] if text and calls else ""
             out += chat["assistant_prefix"] + think + text + sep + calls + chat["suffix"]
@@ -673,7 +698,34 @@ def compare(T, chat, label, msgs, tools, kw):
     return label, False, f"differs at byte {k}: loom {got[max(0, k - 40):k + 60]!r} vs template {ref[max(0, k - 40):k + 60]!r}"
 
 
+def thinking_never(chat):
+    """The block with thinking off, for a model whose template renders reasoning in history (so derive() reads it as
+    thinking "always") but which never reasons (Qwen3-*-Instruct-2507): its replies would otherwise land in the
+    reasoning channel. The template's own generation prompt, without the deliberate think_open. port.sh's smoke test
+    decides this from the model's behavior (a reply that ends without think_close); a template can't tell it from
+    models that do always think (Flint, Jan-v1)."""
+    chat = dict(chat)
+    prompt, think_open = chat["generation_prompt"], chat.get("think_open", "")
+    if think_open and prompt.endswith(think_open):
+        prompt = prompt[:-len(think_open)]
+    chat.update(thinking="never", thinking_default=False, starts_in_reasoning=False,
+                generation_prompt=prompt, generation_prompt_plain=prompt)
+    return chat
+
+
 def main():
+    if len(sys.argv) > 3 and sys.argv[2] == "--never":
+        # cfg.json's chat block with thinking off (thinking_never), kept only if it still verifies against the template.
+        cfg = json.load(open(sys.argv[3]))
+        chat = thinking_never(cfg["chat"])
+        results = verify(load_template(sys.argv[1]), chat, chat.get("bos", ""))
+        for name, ok, detail in results:
+            print(("OK  " if ok else "SKIP" if ok is None else "FAIL"), name, "-", detail)
+        if any(ok is False for _, ok, _ in results):
+            sys.exit(1)
+        cfg["chat"] = chat
+        json.dump(cfg, open(sys.argv[3], "w"), indent=1, ensure_ascii=False)
+        return
     text = load_template(sys.argv[1])
     bos = ""
     if sys.argv[1].endswith(".gguf"):
