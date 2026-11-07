@@ -1,0 +1,26 @@
+{
+ "disagree": {
+  "decode_2k": -0.211,
+  "prefill_1k": -0.365,
+  "prefill_2k": -0.475
+ },
+ "far": {
+  "prefill_16k": [
+   0.151,
+   0.33
+  ],
+  "prefill_1k": [
+   0.078,
+   0.33
+  ],
+  "prefill_2k": [
+   0.11,
+   0.33
+  ],
+  "prefill_8k": [
+   0.136,
+   0.33
+  ]
+ },
+ "rounds": 2
+}

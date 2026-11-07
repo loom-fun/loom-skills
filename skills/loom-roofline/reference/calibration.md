@@ -40,3 +40,22 @@ Observations:
   GEMM work (LDS double-buffering, dequant into fragments).
 - These efficiencies were fitted on the same two models, so targets for a new
   architecture are an out-of-sample prediction. Record the result here.
+
+## Speculative decoding (`EFF_DRAFTED`)
+
+Against `drafted_ceiling()`: the bandwidth ceiling of one verify pass of depth + 1 positions (MoE: their distinct
+experts) x (1 + acceptance x depth) tokens per pass, the drafter's own passes not counted. Published loom-fun
+cards, DFlash depth 3, local session of 2026-11-06:
+
+| Model | Metric | Ceiling | Loom | Eff | Acceptance |
+|---|---|---|---|---|---|
+| Qwen3.8-27B (dense, Q4_K_M) | decode | 42.4 | 29.2 | 0.69 | 0.76 |
+| 〃 | c4 steady | 168.0 | 61.7 | 0.37 | |
+| Muse-Glimmer-30B (dense, UD-Q5_K_M) | decode | 38.1 | 25.8 | 0.68 | 0.73 |
+| 〃 | c4 steady | 151.4 | 68.8 | 0.45 | |
+| Bolt-E4B (dense, Q4_K_M) | decode | 205.1 | 97.6 | 0.48 | 0.67 |
+| 〃 | c4 steady | 768.2 | 219.1 | 0.29 | |
+| Flint (MoE, Q4_K_M) | decode | 177.8 | 92.4 | 0.52 | 0.68 |
+| 〃 | c4 steady | 301.8 | 134.2 | 0.44 | |
+
+Small models sit lower: the drafter and the verify pass's fixed costs are a larger share of a short pass.

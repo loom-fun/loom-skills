@@ -77,7 +77,7 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
 per card in `.github/nightly-models.json`, in parallel, runs `.github/scripts/nightly_gates.sh CARD_REPO`:
 install hrx-loom, `loom-fetch` the latest card from huggingface.co/loom-fun, build the reference example's kit
 when the card's chat format needs it (`LOOM_KIT`), fetch the card's llama.cpp release, serve, `LEVEL=full`
-gates, and a report-only perf run against the card's published numbers. No LLM and no skill run: a FAIL is a
+gates, and a Loom-only perf run (every card row) for the card's DevLab column. No LLM and no skill run: a FAIL is a
 regression of the published package (or of the gate scripts). llama.cpp references are cached between nights
 (`actions/cache`). Run it on demand from the Actions tab (pick cards and a level), or on a pull request by adding
 the `nightly-gates` label (the PR branch's scripts run). The same script runs by hand on any Strix Halo:
@@ -355,18 +355,34 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
      `--metrics` for a later session that re-measured some rows);
    - `card/make_info.py gates bench/gates.json [ktest.out --time ...] --package PKG -o ev_gates.json` (also the
      spec gate's `acceptance N% of M proposals` from `gates_spec.log`);
-   - `card/pull_devlab.py loom-fun/REPO -o ev_devlab.json`: the latest nightly-gates run on AMD DevLab
-     Dispatch (gates of every finished level, job URL as evidence). Gates only: DevLab perf numbers are not
-     comparable with a local same-session llama.cpp run and never go on a card.
+   - `card/pull_devlab.py loom-fun/REPO --package DIR -o ev_devlab.json`: the latest nightly-gates run on AMD
+     DevLab Dispatch: gates of every finished level (job URL as evidence) and the sweep's Loom-only numbers with
+     the runner and date, for the card's **DevLab column** (`card/make_info.py devlab` records another DevLab
+     job's perf.py/c4_steady.py output the same way). They never replace the Loom column and are never compared
+     with llama.cpp, which stays a same-session comparison;
+   - `card/make_info.py roofline --package DIR -o ev_roofline.json` (tools venv; CPU only, reads the GGUF from the
+     Hugging Face cache): the hardware ceiling of every card metric (`loom-roofline` `roofline.py`) with the
+     device constants and the roofline.py sha256 and commit. Drafting packages: decode and 4-stream ceilings are
+     verify passes per second x (1 + acceptance x depth) tokens per pass, from the card's own spec acceptance
+     and depth (the drafter's cost not counted: an upper bound); without a measured acceptance they have none.
 2. `card/make_info.py build DIR --repo loom-fun/REPO --generator-commit "$(git rev-parse HEAD)" --memory-bytes N
-   --output OUT --report generated --evidence ev_*.json -o DIR/info.json`. DIR holds the repo's `model.json`,
+   --output OUT --report generated --evidence ev_*.json -o DIR/info.json` (to regenerate a published card with
+   only new evidence: `--from-info DIR/info.json`, re-read from the Hub right before). DIR holds the repo's `model.json`,
    `model.json.lock`, `llm_config.json` (and `program/`). Per gate the latest evidence wins, so a later failing
    run shows as a failure; per metric the last session that measured it. `--report attached` instead keeps a
    REPORT.md written by the run (the factory's) or an older card's narrative, as is.
 3. `card/render_card.py DIR` writes `DIR/README.md` (and `DIR/REPORT.md` for `--report generated`: setup,
-   commands, every run's value, gate evidence). When republishing a card, upload only those three files:
+   commands, every run's value, the roofline, every DevLab sweep, gate evidence). The performance table shows per
+   metric llama.cpp, Loom, the margin, the roofline, Loom as % of it, and Loom on DevLab with its % of the
+   roofline; a footnote says what the roofline and the DevLab column are. When republishing a card, upload only those three files:
    `hf upload REPO DIR . --include README.md --include info.json --include REPORT.md`. Never re-upload a repo's
    programs, `model.json`, lock or weights for a card change.
+
+**Performance guardrails** (`card_lib.perf_flags`, applied by `loom-org`'s `org_status.py`): a metric whose Loom
+value is below half the efficiency Loom ports have demonstrated (far from roofline), or whose latest DevLab value
+differs from Loom by more than 20 % (local vs DevLab disagree), sends the model back to a local GPU worker with
+`loom-optimize`; after two disagreeing sweeps in a row, to a deep debugging session on why the machines differ
+(`loom-org` step 5).
 
 The card's Versions line shows the schema, the loom-skills commit and hrx-loom build that generated the
 programs, and the card generator commit. `loom-setup/scripts/install_loom.sh` writes `$LOOM_ROOT/loom-install.json`

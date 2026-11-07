@@ -51,7 +51,7 @@ for r in want:
 for k in sorted(runs, key=lambda k: (want.index(k[0]) if k[0] in want else 99, order.get(k[1], 9))):
     p = os.path.join(runs[k]["_dir"], "perf.md")
     if os.path.exists(p):
-        print(f"\n### {k[0]} ({k[1]}): performance (report only)\n")
+        print(f"\n### {k[0]} ({k[1]}): performance (Loom alone: the card's DevLab column)\n")
         print(open(p).read())
 print("\nLogs: the `nightly-<card>` artifacts (gates.out, gates_*.log, serve logs).")
 sys.exit(0 if ok else 1)

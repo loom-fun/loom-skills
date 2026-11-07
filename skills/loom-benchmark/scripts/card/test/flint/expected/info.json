@@ -2,6 +2,82 @@
  "card": {
   "memory_bytes": 67000000000
  },
+ "devlab": {
+  "sweeps": [
+   {
+    "commands": [],
+    "date": "2026-11-06",
+    "metrics": {
+     "decode": {
+      "loom": 92.2,
+      "loom_runs": [
+       92.18
+      ]
+     },
+     "decode_2k": {
+      "loom": 60.2,
+      "loom_runs": [
+       60.18
+      ]
+     },
+     "prefill_1k": {
+      "loom": 607.6,
+      "loom_runs": [
+       607.6
+      ]
+     },
+     "prefill_2k": {
+      "loom": 690.8,
+      "loom_runs": [
+       690.8
+      ]
+     },
+     "streams4": {
+      "loom": 112.8,
+      "loom_runs": [
+       112.8
+      ]
+     }
+    },
+    "programs_sha256": null,
+    "runner": "X2-LA03-S03-D07",
+    "source": "devlab-1001-job2002"
+   },
+   {
+    "commands": [],
+    "date": "2026-11-07",
+    "metrics": {
+     "decode": {
+      "loom": 92.2,
+      "loom_runs": [
+       92.18
+      ]
+     },
+     "decode_2k": {
+      "loom": 60.2,
+      "loom_runs": [
+       60.18
+      ]
+     },
+     "prefill_1k": {
+      "loom": 607.6,
+      "loom_runs": [
+       607.6
+      ]
+     },
+     "prefill_2k": {
+      "loom": 690.8,
+      "loom_runs": [
+       690.8
+      ]
+     }
+    },
+    "programs_sha256": null,
+    "runner": "X2-LA03-S04-D07",
+    "source": "devlab-1002-job2003"
+   }
+  ]
+ },
  "gates": {
   "agent": {
    "date": "2026-11-06",
@@ -253,6 +329,67 @@
  },
  "repo": "loom-fun/ggml-org-Flint-loom",
  "report": "generated",
+ "roofline": {
+  "checkpoint": "Flint-Q4_K_M.gguf",
+  "device": {
+   "bandwidth_bytes_per_s": 216000000000.0,
+   "name": "AMD Ryzen AI Max+ 395 \"Strix Halo\" (gfx1151)",
+   "peak_flops": 59000000000000.0
+  },
+  "drafting": {
+   "acceptance": 0.68,
+   "depth": 3,
+   "method": "dflash",
+   "tokens_per_pass": 3.04
+  },
+  "metrics": {
+   "decode": {
+    "ceiling": 177.8,
+    "efficiency": 0.52,
+    "single_pass": 95.4
+   },
+   "decode_2k": {
+    "ceiling": 173.4,
+    "efficiency": 0.52,
+    "single_pass": 91.6
+   },
+   "decode_32k": {
+    "ceiling": 141.3,
+    "efficiency": 0.52,
+    "single_pass": 67.1
+   },
+   "prefill_16k": {
+    "ceiling": 9014.9,
+    "efficiency": 0.33
+   },
+   "prefill_1k": {
+    "ceiling": 12248.4,
+    "efficiency": 0.33
+   },
+   "prefill_2k": {
+    "ceiling": 11945.5,
+    "efficiency": 0.33
+   },
+   "prefill_32k": {
+    "ceiling": 7040.8,
+    "efficiency": 0.33
+   },
+   "prefill_8k": {
+    "ceiling": 10484.7,
+    "efficiency": 0.33
+   },
+   "streams4": {
+    "ceiling": 301.8,
+    "efficiency": 0.44,
+    "single_pass": 221.1
+   }
+  },
+  "tool": {
+   "script": "skills/loom-roofline/roofline.py",
+   "sha256": "915576a9df574f4d5565c8b61151e622a737104f63b2cfc2d047617da1f863b7",
+   "skills_commit": "0123456789abcdef0123456789abcdef01234567"
+  }
+ },
  "schema": "loom-card/2",
  "sources": {
   "devlab-1000-job2000": {
@@ -270,6 +407,20 @@
    "kind": "devlab",
    "run": "1000",
    "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"
+  },
+  "devlab-1001-job2002": {
+   "device": null,
+   "hrx_loom": null,
+   "kind": "devlab",
+   "run": "1001",
+   "url": "https://github.com/loom-fun/loom-skills/actions/runs/1001/job/2002"
+  },
+  "devlab-1002-job2003": {
+   "device": null,
+   "hrx_loom": null,
+   "kind": "devlab",
+   "run": "1002",
+   "url": "https://github.com/loom-fun/loom-skills/actions/runs/1002/job/2003"
   },
   "local": {
    "device": {

@@ -25,18 +25,18 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 
 ## Performance vs llama.cpp
 
-| metric | llama.cpp | Loom | margin |
-|---|---|---|---|
-| decode tok/s, short prompt | 70.6 | 92.4 ¹ | +31 % |
-| decode tok/s, 2k context | 54.7 | 76.3 | +39 % |
-| decode tok/s, 32k context | 49.5 | 47.8 | -3 % |
-| prefill tok/s, 1k document | 1038.0 | 956.9 ¹ | -8 % |
-| prefill tok/s, 2k document | 1079.0 | 1316.4 | +22 % |
-| prefill tok/s, 8k document | 1094.1 | 1424.7 | +30 % |
-| prefill tok/s, 16k document | 929.3 | 1359.0 | +46 % |
-| prefill tok/s, 32k document | 667.6 | 1193.9 | +79 % |
-| 4 streams, aggregate decode tok/s | 124.2 | 134.2 | +8 % |
-| speculative decoding, drafted tokens accepted | — | 68 % | — |
+| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline | Loom on DevLab (% of roofline) |
+|---|---|---|---|---|---|---|
+| decode tok/s, short prompt | 70.6 | 92.4 ¹ | +31 % | 177.8 | 52 % | 92.2 (52 %) |
+| decode tok/s, 2k context | 54.7 | 76.3 | +39 % | 173.4 | 44 % | 60.2 (35 %) |
+| decode tok/s, 32k context | 49.5 | 47.8 | -3 % | 141.3 | 34 % | — |
+| prefill tok/s, 1k document | 1038.0 | 956.9 ¹ | -8 % | 12248.4 | 8 % | 607.6 (5 %) |
+| prefill tok/s, 2k document | 1079.0 | 1316.4 | +22 % | 11945.5 | 11 % | 690.8 (6 %) |
+| prefill tok/s, 8k document | 1094.1 | 1424.7 | +30 % | 10484.7 | 14 % | — |
+| prefill tok/s, 16k document | 929.3 | 1359.0 | +46 % | 9014.9 | 15 % | — |
+| prefill tok/s, 32k document | 667.6 | 1193.9 | +79 % | 7040.8 | 17 % | — |
+| 4 streams, aggregate decode tok/s | 124.2 | 134.2 | +8 % | 301.8 | 44 % | — |
+| speculative decoding, drafted tokens accepted | — | 68 % | — | n/a | n/a | — |
 
 - llama.cpp: build `llamacpp-rocm/b1355`, server arguments `-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model ~/drafter.gguf --spec-draft-n-max 3 -ngld 99 -c 65536 -kvu -np 4`.
 - Loom: speculative decoding on (DFlash, depth 3).
@@ -44,6 +44,7 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 - Measured 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: local run.
 - ¹ Measured 2026-11-07; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: local run.
 - Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the `spec` gate's requests.
+- Roofline: the hardware ceiling for this GGUF on AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151) at 216 GB/s and 59 TFLOP/s, from loom-roofline `roofline.py` (loom-skills `0123456`); decode and 4 streams with speculative decoding: × 3.04 tokens per verify pass (1 + 68 % accepted × depth 3), the drafter's cost not counted. DevLab: Loom alone on an AMD DevLab Dispatch runner ([DevLab Dispatch run 1002](https://github.com/loom-fun/loom-skills/actions/runs/1002/job/2003), runner `X2-LA03-S04-D07`, 2026-11-07); compare it with the Loom column, not with llama.cpp.
 - — not measured; n/a not applicable.
 
 ## Features

@@ -20,8 +20,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (FEATURES, GATE_NAMES, GATES, HF, LOOM_URL, METHOD, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
-                      derived_tags, gate_applies, load_json, load_package, metric_applies, package_facts,
-                      programs_sha256, require_valid)
+                      card_metrics, derived_tags, devlab_latest, gate_applies, load_json, load_package,
+                      metric_applies, package_facts, programs_sha256, require_valid)
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
 SUP = "¹²³⁴⁵⁶⁷⁸⁹"
@@ -173,12 +173,34 @@ def load(d):
     return info, facts, feats
 
 
-def card_metrics(info):
-    """{metric: (metric entry, session index)}: per metric the last session that measured it."""
-    out = {}
-    for i, s in enumerate((info.get("performance") or {}).get("sessions", [])):
-        for k, m in s["metrics"].items():
-            out[k] = (m, i)
+def pct(v, ceiling):
+    return f"{round(v / ceiling * 100)} %" if v is not None and ceiling else MISSING
+
+
+def roofline_note(info):
+    """The footnote that says what the roofline and DevLab columns are."""
+    r, sw = info.get("roofline"), devlab_latest(info)
+    if r:
+        t, d, dr = r["tool"], r["device"], r.get("drafting")
+        commit = short(t["skills_commit"]) if t["skills_commit"] != "unknown" else "unknown commit"
+        out = (f"Roofline: the hardware ceiling for this GGUF on {d['name']} at {d['bandwidth_bytes_per_s'] / 1e9:.0f} GB/s "
+               f"and {d['peak_flops'] / 1e12:.0f} TFLOP/s, from loom-roofline `roofline.py` (loom-skills {commit}"
+               + (", with local changes" if t.get("dirty") else "") + ")")
+        if dr and dr.get("tokens_per_pass"):
+            out += (f"; decode and 4 streams with speculative decoding: × {dr['tokens_per_pass']:g} tokens per verify pass "
+                    f"(1 + {round(dr['acceptance'] * 100)} % accepted × depth {dr['depth']}), the drafter's cost not counted")
+        elif dr:
+            out += "; decode and 4 streams with speculative decoding have no ceiling until acceptance is measured"
+        out += ". "
+    else:
+        out = "Roofline: not computed. "
+    if sw:
+        src = info["sources"][sw["source"]]
+        out += (f"DevLab: Loom alone on an AMD DevLab Dispatch runner ({src_text(src)}"
+                + (f", runner `{sw['runner']}`" if sw.get("runner") else "") + f", {text(sw['date'])}); "
+                "compare it with the Loom column, not with " + "{bname}" + ".")
+    else:
+        out += "DevLab: no sweep recorded."
     return out
 
 
@@ -225,10 +247,14 @@ def render(d):
     primary = min(counts, key=lambda i: (-counts[i], i)) if counts else None
     pkey = (sessions[primary]["source"], sessions[primary]["date"]) if primary is not None else None
     notes = []
-    L += [f"## Performance vs {bname}", "", f"| metric | {bname} | Loom | margin |", "|---|---|---|---|"]
+    roof = (info.get("roofline") or {}).get("metrics") or {}
+    sweep = devlab_latest(info)
+    L += [f"## Performance vs {bname}", "",
+          f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline | Loom on DevLab (% of roofline) |",
+          "|---|---|---|---|---|---|---|"]
     for key, label in METRICS:
         if not metric_applies(key, kind, feats):
-            L.append(f"| {label} | n/a | n/a | n/a |")
+            L.append(f"| {label} | n/a | n/a | n/a | n/a | n/a | n/a |")
             continue
         m, i = shown.get(key, ({"loom": None, "baseline": None}, None))
         loom = num(key, m.get("loom"))
@@ -237,8 +263,15 @@ def render(d):
             if nk not in notes:
                 notes.append(nk)
             loom += f" {mark(notes.index(nk) + 1)}"
+        ceiling = (roof.get(key) or {}).get("ceiling")
+        dev = ((sweep or {}).get("metrics", {}).get(key) or {}).get("loom")
+        devcell = num(key, dev) + (f" ({pct(dev, ceiling)})" if dev is not None and ceiling else "")
+        if key == "spec_acceptance":
+            roofcells = "n/a | n/a"
+        else:
+            roofcells = f"{num(key, ceiling)} | {pct(m.get('loom'), ceiling)}"
         L.append(f"| {label} | {num(key, m.get('baseline'))} | {loom} | "
-                 f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), m.get('baseline'))} |")
+                 f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), m.get('baseline'))} | {roofcells} | {devcell} |")
 
     def runs_of(keys, med):
         vals = set()
@@ -267,6 +300,7 @@ def render(d):
     if metric_applies("spec_acceptance", kind, feats):
         L.append("- Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the "
                  "`spec` gate's requests.")
+    L.append("- " + roofline_note(info).replace("{bname}", bname))
     L += [f"- {MISSING} not measured; n/a not applicable.", ""]
 
     # ---- features
@@ -333,6 +367,13 @@ METHOD_TEXT = [
     "- Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.",
     "- Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD "
     "DevLab Dispatch.",
+    "- Roofline: per metric, the rate at the hardware limit computed from the GGUF's tensors by loom-roofline "
+    "`roofline.py`: decode is memory bandwidth / bytes read per token (weights, active experts, KV cache), prefill is "
+    "peak FLOP/s / flops per token, 4 streams reads the weights once for 4 tokens. With speculative decoding, decode "
+    "and 4 streams are verify passes per second x (1 + acceptance x depth) tokens per pass.",
+    "- DevLab: Loom alone, measured with the same scripts by the nightly sweep on an AMD DevLab Dispatch runner (the "
+    "same Strix Halo hardware). It checks the local numbers on another machine; it is never compared with the "
+    "llama.cpp column, which is measured in the same session as the Loom column.",
 ]
 
 
@@ -384,6 +425,39 @@ def render_report(d):
                     continue
                 r = ", ".join(str(x) for x in runs) if runs else MISSING
                 L.append(f"| {labels.get(k, k)} | {eng} | {r} | {num(k, v)} |")
+        L.append("")
+    r = info.get("roofline")
+    if r:
+        t, d, dr = r["tool"], r["device"], r.get("drafting")
+        L += ["## Roofline", "",
+              f"- Device: {d['name']}, {d['bandwidth_bytes_per_s'] / 1e9:.0f} GB/s, {d['peak_flops'] / 1e12:.0f} TFLOP/s.",
+              f"- Tool: `{t['script']}` sha256 `{t['sha256']}`, loom-skills "
+              + (f"`{t['skills_commit']}`" if t["skills_commit"] != "unknown" else "commit unknown")
+              + (" (with local changes)" if t.get("dirty") else "") + ".",
+              f"- Checkpoint: `{text(r.get('checkpoint'))}`."]
+        if dr:
+            L.append(f"- Speculative decoding: {METHOD.get(dr['method'], dr['method'])}, depth {dr['depth']}, acceptance "
+                     + (f"{round(dr['acceptance'] * 100)} %, {dr['tokens_per_pass']:g} tokens per verify pass."
+                        if dr.get("tokens_per_pass") else "not measured: drafted rows have no ceiling."))
+        L += ["", "| metric | ceiling | without drafting | demonstrated efficiency |", "|---|---|---|---|"]
+        for k, row in sorted(r["metrics"].items(), key=lambda kv: [x for x, _ in METRICS].index(kv[0])
+                             if kv[0] in labels else len(METRICS)):
+            if k in labels:
+                L.append(f"| {labels[k]} | {num(k, row.get('ceiling'))} | {num(k, row.get('single_pass'))} | "
+                         + (f"{round(row['efficiency'] * 100)} %" if row.get("efficiency") is not None else MISSING) + " |")
+        L.append("")
+    for s in (info.get("devlab") or {}).get("sweeps", []):
+        src = sources[s["source"]]
+        L += [f"## DevLab sweep: {src_text(src)}, {text(s['date'])}", "",
+              f"- Runner: {text(s.get('runner'))}; device {device_text(src['device'])}; hrx-loom {sdk_text(src['hrx_loom'])}.",
+              f"- Programs measured: {prog(s.get('programs_sha256'))}."]
+        if s.get("commands"):
+            L += ["- Commands:", "", "```bash", *s["commands"], "```"]
+        L += ["", "| metric | runs | value |", "|---|---|---|"]
+        order = [x for x, _ in METRICS]
+        for k, m in sorted(s["metrics"].items(), key=lambda kv: (order.index(kv[0]) if kv[0] in labels else len(order), kv[0])):
+            runs = ", ".join(str(x) for x in m.get("loom_runs") or []) or MISSING
+            L.append(f"| {labels.get(k, k)} | {runs} | {num(k, m.get('loom'))} |")
         L.append("")
     L += ["## Gate evidence", ""]
     groups = []

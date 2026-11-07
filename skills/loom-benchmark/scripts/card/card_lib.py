@@ -38,6 +38,22 @@ METRICS = [
 METRIC_KEYS = [k for k, _ in METRICS]
 # how a metric's per-run samples become the card value
 MEDIAN_METRICS = {"streams4"}
+# card metric -> loom-roofline/roofline.py metric (the hardware ceiling). spec_acceptance has none.
+ROOFLINE_METRIC = {"decode": "decode_tps", "decode_2k": "decode_tps_2k", "decode_32k": "decode_tps_32k",
+                   "prefill_1k": "prefill_1000", "prefill_2k": "prefill_2000", "prefill_8k": "prefill_8000",
+                   "prefill_16k": "prefill_16000", "prefill_32k": "prefill_32000", "streams4": "c4_steady"}
+# decode context (tokens of KV read per decoded token) and streams of the drafted rows: speculative decoding commits
+# several tokens per verify pass, so their ceiling is the pass rate x the expected tokens per pass
+DRAFTED_ROWS = {"decode": (0, 1), "decode_2k": (2000, 1), "decode_32k": (32000, 1), "streams4": (600, 4)}
+# Performance guardrails (loom-org org_status.py; calibrated in loom-org SKILL.md "Performance guardrails"):
+# far from roofline: Loom below FAR_FRACTION x the efficiency tuned Loom ports have demonstrated for the metric kind
+FAR_FRACTION = 0.5
+# local vs DevLab disagree: the latest DevLab sweep differs from the card's Loom value by more than this fraction
+DEVLAB_TOLERANCE = 0.20
+DEVLAB_SWEEPS_KEPT = 10
+# sweeps in a row that disagree with the local numbers (a loom-optimize round between them) before the local GPU
+# worker stops fixing and runs a deep debugging session on why the machines differ
+DEEP_DEBUG_ROUNDS = 2
 
 # (key, label): the features table's rows.
 FEATURES = [
@@ -275,6 +291,56 @@ def metric_applies(key, kind, feats):
     return True
 
 
+def card_metrics(info):
+    """{metric: (metric entry, session index)}: per metric the last session that measured it (the card's value)."""
+    out = {}
+    for i, s in enumerate((info.get("performance") or {}).get("sessions", [])):
+        for k, m in s["metrics"].items():
+            out[k] = (m, i)
+    return out
+
+
+def devlab_latest(info):
+    """The latest DevLab sweep (info.json "devlab"), or None."""
+    sweeps = (info.get("devlab") or {}).get("sweeps") or []
+    return sweeps[-1] if sweeps else None
+
+
+def disagreeing(loom, sweep, tol=DEVLAB_TOLERANCE):
+    """{metric: DevLab / local - 1} for the metrics where one DevLab sweep and the card's Loom values differ by > tol."""
+    out = {}
+    for k, m in (sweep.get("metrics") or {}).items():
+        lv, dv = loom.get(k), (m or {}).get("loom")
+        if k in ROOFLINE_METRIC and lv and dv is not None and abs(dv / lv - 1) > tol:
+            out[k] = round(dv / lv - 1, 3)
+    return out
+
+
+def perf_flags(info, kind=None, feats=None):
+    """The performance guardrails of one card (loom-org org_status.py):
+    far       {metric: [Loom / roofline, demonstrated efficiency]} where Loom (the card's value) is below
+              FAR_FRACTION x the efficiency Loom ports have demonstrated for that kind of metric (info.json roofline)
+    disagree  {metric: DevLab / local - 1} beyond DEVLAB_TOLERANCE in the latest DevLab sweep
+    rounds    how many DevLab sweeps in a row, newest first, disagree with the card's values (0: the latest agrees)"""
+    loom = {k: m.get("loom") for k, (m, _) in card_metrics(info).items()}
+    if kind is not None:
+        loom = {k: v for k, v in loom.items() if metric_applies(k, kind, feats)}
+    far = {}
+    for k, r in ((info.get("roofline") or {}).get("metrics") or {}).items():
+        if loom.get(k) and r.get("ceiling") and r.get("efficiency"):
+            frac = loom[k] / r["ceiling"]
+            if frac < FAR_FRACTION * r["efficiency"]:
+                far[k] = [round(frac, 3), r["efficiency"]]
+    sweeps = (info.get("devlab") or {}).get("sweeps") or []
+    disagree = disagreeing(loom, sweeps[-1]) if sweeps else {}
+    rounds = 0
+    for s in reversed(sweeps):
+        if not disagreeing(loom, s):
+            break
+        rounds += 1
+    return {"far": far, "disagree": disagree, "rounds": rounds}
+
+
 # ---- validation: the subset of JSON Schema info_schema.json uses (no third-party dependency) ----
 
 def _types(t):
@@ -342,6 +408,9 @@ def validate(info):
     for n, g in info.get("gates", {}).items():
         if g["source"] not in ids:
             errs.append(f"info.gates.{n}.source: no source {g['source']!r}")
+    for i, s in enumerate((info.get("devlab") or {}).get("sweeps", [])):
+        if s["source"] not in ids:
+            errs.append(f"info.devlab.sweeps[{i}].source: no source {s['source']!r}")
     return errs
 
 

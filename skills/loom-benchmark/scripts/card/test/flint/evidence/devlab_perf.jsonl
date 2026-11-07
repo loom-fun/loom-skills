@@ -1,0 +1,1 @@
+{"label": "nightly", "kind": "loom", "time": "2026-11-06 20:53:18", "decode_tps": 92.18, "prefill": [{"prompt_tokens": 1031, "prefill_tps": 607.6, "min": 543.6, "max": 635.8, "n": 5}, {"prompt_tokens": 2031, "prefill_tps": 690.8, "min": 636.3, "max": 741.9, "n": 5}], "decode_tps_2k": 60.18}
