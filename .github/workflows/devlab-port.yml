@@ -21,6 +21,8 @@ jobs:
       matrix: ${{ steps.pick.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}   # the job list the run step reads
       - id: pick
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
@@ -44,6 +46,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # skills_ref: a job may port with another commit's skills
+          # The PR head, not GitHub's temporary merge commit: build.py stamps the checkout's commit into the
+          # package as its generator, and only the head stays reachable (the merge commit is replaced on every push).
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: work dir
         run: |
           mkdir -p "$RUNNER_TEMP/../devlab-port" && W=$(cd "$RUNNER_TEMP/../devlab-port" && pwd)
@@ -52,9 +57,12 @@ jobs:
       - name: "port: ${{ matrix.job }}"
         run: |
           set -uo pipefail
-          read -r spec ref sref mid < <(python3 -c "
-          import json; j = next(j for j in json.load(open('.github/devlab/port.json'))['jobs'] if j['name'] == '${{ matrix.job }}')
-          print(j['spec'], j.get('reference') or 'auto', j.get('skills_ref') or '-', j.get('model_id') or '')")
+          # a job's "env" ({"NAME": "value"}): port.sh / qualify.sh switches for an A/B wave (e.g. SPEC=off)
+          IFS=$'\x1f' read -r spec ref sref mid envs < <(python3 -c "
+          import json, shlex; j = next(j for j in json.load(open('.github/devlab/port.json'))['jobs'] if j['name'] == '${{ matrix.job }}')
+          print(j['spec'], j.get('reference') or 'auto', j.get('skills_ref') or '-', j.get('model_id') or '',
+                ' '.join(f'{k}={shlex.quote(str(v))}' for k, v in (j.get('env') or {}).items()), sep=chr(31))")
+          if [ -n "$envs" ]; then echo "env: $envs"; eval "export $envs"; fi
           D=$WORK/${{ matrix.job }}; rm -rf "$D"; mkdir -p "$D"
           SK=$GITHUB_WORKSPACE/skills
           if [ "$sref" != - ]; then

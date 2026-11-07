@@ -38,12 +38,13 @@ result() { printf '{"status": "%s", "stage": "%s", "rc": %s}\n' "$1" "$2" "$3" >
 # these), then the bench files.
 save_logs() {
   cp "$D/phases.log" "$out/" 2>/dev/null
+  for f in "$W"/state/*.log; do [ -f "$f" ] && tail -c 200000 "$f" > "$out/serve_$(basename "$f")"; done   # loom-serve logs (errors)
   for f in reference.json reference.log cfg.json inspect.log chat_verify.log download.log vision.log drafter.log build.log ktest.log; do
     cp "$W/$f" "$out/" 2>/dev/null
   done
   if [ -d "$W/bench" ]; then
     for f in gates.json audit.json perf_log.jsonl draft_tune.json llamacpp_spec.json llamacpp_pick.json roofline.json \
-             targets.jsonl llamacpp_args.txt report.md gates_*.log; do cp "$W/bench"/$f "$out/" 2>/dev/null; done
+             targets.jsonl llamacpp_args.txt report.md gates_*.log golden.json compare.json; do cp "$W/bench"/$f "$out/" 2>/dev/null; done
   fi
   return 0
 }

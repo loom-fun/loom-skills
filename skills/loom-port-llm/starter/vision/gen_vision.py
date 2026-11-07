@@ -87,7 +87,14 @@ EW_OPS = {
     "gelu_tanh": ("", "GELU_TANH", False),
     "gelu_erf":  ("", "GELU_ERF", False),
     "gate_gelu_tanh": (", %b: buffer", "GATE", True),                                # y = gelu_tanh(x) * b
+    "gate_silu": (", %b: buffer", "GATE_SILU", True),                                # y = silu(x) * b
 }
+SILU_GATE = '''    %na = scalar.negf %a : f32
+    %ea = scalar.expf<afn> %na : f32
+    %one = scalar.constant 1.0 : f32
+    %den = scalar.addf %ea, %one : f32
+    %g = scalar.divf %a, %den : f32
+    %r = scalar.mulf %g, %bv : f32'''
 GELU_TANH = '''    %x3 = scalar.mulf %a, %a : f32
     %x3b = scalar.mulf %x3, %a : f32
     %k1 = scalar.constant 0.044715 : f32
@@ -146,6 +153,7 @@ def ew(op):
     name = f"v_ew_{op}"
     if body == "GELU_TANH": body = GELU_TANH
     elif body == "GELU_ERF": body = GELU_ERF
+    elif body == "GATE_SILU": body = SILU_GATE
     elif body == "GATE": body = GELU_TANH.replace("%r = scalar.divf %a, %den : f32", "%g = scalar.divf %a, %den : f32") + "\n    %r = scalar.mulf %g, %bv : f32"
     else: body = "    " + body
     src = '''kernel.def export("$NAME") @$NAME(%n: index) {
@@ -261,7 +269,8 @@ def gemm_any(fmt, K, N):
     (K or N not a multiple of 64; Qwen3-VL/Qwen3.8 encoder FFN: 1152 x 4304). A workgroup computes 16 rows x 64
     columns (one lane per column, 16 row accumulators), reading 8 f16 values of a weight row per step and reusing
     them for the 16 rows; the encoder runs once per image, so this only has to be reasonable, not peak."""
-    assert fmt in ("f16", "bf16") and K % 8 == 0, (fmt, K)
+    VK = 8 if K % 8 == 0 else 4   # values per load step (Qwen2.5-VL encoder FFN: K = 3420)
+    assert fmt in ("f16", "bf16") and K % VK == 0, (fmt, K)
     name = f"v_gemm_any_{fmt}_{K}x{N}"
     R = 16
     accs = ", ".join(f"%a{r} = %zf : f32" for r in range(R))
@@ -307,7 +316,7 @@ def gemm_any(fmt, K, N):
     L.append(f"  {', '.join(f'%r{r}' for r in range(R))} = scf.for %kk = [%c0 to %ck step %c8]({accs}) -> ({types}) {{")
     L.append(T('''    %bk = index.assume %kk [range(%kk, 0, $KM8), multiple_of(%kk, 8)] : index
     %wh = vector.load %w_view[%wcol, %bk] : view<$Nx$Kx$FMT> -> vector<8x$FMT>
-    %wv = vector.extf %wh : vector<8x$FMT> to vector<8xf32>''', KM8=K - 8, N=N, K=K, FMT=fmt))
+    %wv = vector.extf %wh : vector<8x$FMT> to vector<8xf32>''', KM8=K - VK, N=N, K=K, FMT=fmt))
     for r in range(R):
         L.append(T('''    %ri$r = index.constant $r : index
     %rr$r = index.add %row0, %ri$r : index
@@ -331,7 +340,11 @@ def gemm_any(fmt, K, N):
     view.store %val$r, %y_view[%ob$r, %wcol] : f32, view<[%rows]x$Nxf32>
   }''', r=r, N=N))
     L.append("  kernel.return\n}\n")
-    return name, "\n".join(L)
+    src = "\n".join(L)
+    if VK == 4:
+        src = (src.replace("%c8 = index.constant 8 : index", "%c8 = index.constant 4 : index").replace("multiple_of(%kk, 8)", "multiple_of(%kk, 4)")
+               .replace("vector<8x", "vector<4x"))
+    return name, src
 
 
 def gemm(fmt, K, N, mode="store"):
@@ -349,9 +362,11 @@ def gemm(fmt, K, N, mode="store"):
     s = s.replace("  %out_tiles = index.div %n, %c64 : index", f"  %n_const = index.constant {N} : index\n  %out_tiles = index.div %n_const, %c64 : index", 1)
     return name, s
 
-def row_scale():
-    name = "v_row_scale_f16"
-    src = ROW_SCALE.replace("g_row_scale_f16", name).replace("[range(%k_arg, 256, 65536), multiple_of(%k_arg, 256)]", "[range(%k_arg, 8, 65536), multiple_of(%k_arg, 8)]")
+def row_scale(K=8):
+    """Row-scaled F16 copy of rows K wide (K a multiple of 8; else a variant for multiples of 4)."""
+    m = 8 if K % 8 == 0 else 4
+    name = "v_row_scale_f16" + ("" if m == 8 else "_k4")
+    src = ROW_SCALE.replace("g_row_scale_f16", name).replace("[range(%k_arg, 256, 65536), multiple_of(%k_arg, 256)]", f"[range(%k_arg, {m}, 65536), multiple_of(%k_arg, {m})]")
     return name, src
 
 ROW_SCALE = open(_os.path.join(_HERE, "row_scale.loom")).read()
@@ -1005,6 +1020,38 @@ def shuffle(E, m):
   kernel.return
 }
 ''', NAME=name, E=E, M=m, MM=MM, EO=E * MM, MAXROWS=MAXROWS)
+
+def place_cols(N, NT, off):
+    """y[r, off + c] = x[r, c] for x [rows, N] and y [rows, NT]: one projection into its slice of a wider output row
+    (Qwen3-VL DeepStack: the main projection followed by one per deepstack layer)."""
+    assert off + N <= NT
+    name = f"v_place_{N}_{NT}_{off}"
+    return name, T('''kernel.def export("$NAME") @$NAME(%rows: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%rows_arg: index, %x: buffer, %y: buffer) {
+  %rows = index.assume %rows_arg [range(%rows_arg, 1, $MAXROWS)] : index
+  %row_id = kernel.workgroup.id<x> : index
+  %row = index.assume %row_id [lt(%row_id, %rows)] : index
+  %lid = kernel.workitem.id<x> : index
+  %lane = index.assume %lid [range(%lid, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c256 = index.constant 256 : index
+  %cN = index.constant $N : index
+  %coff = index.constant $OFF : index
+  %xv = buffer.view %x[%zero] : buffer -> view<[%rows]x$Nxf32>
+  %yv = buffer.view %y[%zero] : buffer -> view<[%rows]x$NTxf32>
+  scf.for %c = [%lane to %cN step %c256] {
+    %bc = index.assume %c [lt(%c, %cN)] : index
+    %val = view.load %xv[%row, %bc] : view<[%rows]x$Nxf32> -> f32
+    %d = index.add %bc, %coff : index
+    %bd = index.assume %d [lt(%d, $NT)] : index
+    view.store %val, %yv[%row, %bd] : f32, view<[%rows]x$NTxf32>
+  }
+  kernel.return
+}
+''', NAME=name, N=N, NT=NT, OFF=off, MAXROWS=MAXROWS)
 
 # ---- clamp with bounds from 1-element parameter tensors (Gemma4ClippableLinear) ----
 def clamp():
