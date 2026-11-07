@@ -114,6 +114,13 @@ if arch == "gemma4":
         "ple": {"dim": ple_dim, "embd_scale": math.sqrt(ple_dim), "proj_scale": 1 / math.sqrt(H),
                 "combine_scale": 1 / math.sqrt(2)} if ple_dim and "per_layer_token_embd.weight" in tensors else None,
         "layer_output_scale": "blk.0.layer_output_scale.weight" in tensors,
+        # token embeddings are scaled by sqrt(hidden) (llama.cpp gemma4: inpL * sqrt(n_embd))
+        "embed_scale": math.sqrt(H),
+        # full-attention layers (the rest slide); KV planes only for layers that own their KV
+        "global_layers": [i for i in range(L) if i not in cfg["sliding_layers"]],
+        "kv_layers": L - shared,
+        # generation ends at <eos>, at the turn close, and where a tool result would follow a call
+        "extra_eos_ids": [tokens.index(s) for s in ("<eos>", "<turn|>", "<|tool_response>") if s in tokens],
     })
     # What the example's kernels assume: one KV-head count for every layer, and a V projection on every KV-owning layer.
     no_v = [i for i in range(min(L, cfg["kv_shared_from"] or L)) if f"blk.{i}.attn_v.weight" not in tensors]
