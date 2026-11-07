@@ -9,7 +9,7 @@
      print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
            "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
            "before trusting a golden FAIL or PASS")
-@@ -237,6 +237,10 @@
+@@ -255,6 +255,10 @@
  elif _attn and _qkv[_attn[0]]:
      cfg["attn_bias"] = list(_qkv[_attn[0]])
      print(f"attention biases: {cfg['attn_bias']} (added by g_qk_rope_store)")
@@ -20,7 +20,7 @@
  # Attention sinks (one learned logit per query head, added to the softmax denominator).
  cfg["attn_sinks"] = "blk.0.attn_sinks.weight" in tensors
  # MoE FFN (gen_moe.py) after the leading dense layers: router (f32/bf16), top-k, optional selection bias, shared
-@@ -313,6 +317,13 @@
+@@ -331,6 +335,13 @@
              print("WARNING: the derived chat block does not reproduce the template (FAIL above); fix it by hand")
      except (chat_probe.ProbeError, ValueError, KeyError) as e:
          print("WARNING: chat template not derivable automatically:", e)
@@ -36,7 +36,7 @@
  unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -141,6 +141,34 @@
+@@ -144,6 +144,34 @@
    check.return
  }}
  """)

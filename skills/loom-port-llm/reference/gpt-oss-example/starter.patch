@@ -1,6 +1,6 @@
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -885,5 +885,309 @@
+@@ -914,5 +914,309 @@
          json.dump(chat, open(sys.argv[2], "w"), indent=1, ensure_ascii=False)
  
  
@@ -313,7 +313,7 @@
      main()
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -298,6 +298,9 @@
+@@ -316,6 +316,9 @@
          for name, ok, detail in results:
              print("chat", "OK  " if ok else "SKIP" if ok is None else "FAIL", name, "-", detail)
          cfg["chat"] = chat
