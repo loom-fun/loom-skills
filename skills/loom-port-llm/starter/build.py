@@ -98,6 +98,8 @@ if DRAFT and DRAFT["kind"] == "assist":   # the Gemma-4 assistant reads the targ
 weights_bytes = os.path.getsize(os.path.abspath(cfg["gguf"]))
 if DRAFT and DRAFT["kind"] in ("dflash", "assist"):
     weights_bytes += os.path.getsize(DRAFT["gguf"])
+if os.path.isfile((cfg.get("vision") or {}).get("mmproj") or ""):   # the image component's projector, while it encodes
+    weights_bytes += os.path.getsize(cfg["vision"]["mmproj"])
 # Hybrid models keep one recurrent slot (all gated delta-net layer states) per resident row, x2 for forks.
 sys.path.insert(0, HERE)
 from gen_gdn import gdn_geometry  # noqa: E402
@@ -105,21 +107,73 @@ recurrent_bytes = gdn_geometry(cfg)["slot_bytes"] if cfg.get("recurrent_layers")
 if cfg.get("shortconv_layers"):  # LFM2 short-conv history lives in the recurrent slots too (reference/lfm2moe-example)
     from gen_sconv import sconv_geometry  # noqa: E402
     recurrent_bytes += sconv_geometry(cfg)["slot_bytes"]
-def moe_workspace(cfg, tokens):
-    """Bytes of the MoE layers' scratch buffers (gen_llm.moe_alloc) for one invocation of `tokens` tokens: per-assignment
-    decode buffers plus the bucketed prefill tiles (worst case t*KU + 64*E rows). loom-serve counts them in the
-    invocation working set at registration; the fixed headroom alone was too small for Qwen3.6-35B-A3B (256 experts)."""
-    m = cfg.get("moe")
-    if not m:
-        return 0
-    H, KU, FE, E = cfg["hidden"], m["used"], m["ffn"], m["experts"]
-    rows = tokens * KU + 64 * E
-    return (tokens * KU * (4 + 4 + FE * 4 + H * 4 + 4) + (tokens * KU // 64 + E) * 8
-            + rows * (4 + FE * 4 + FE * 2 + 8 + H * 4) + tokens * 4)
+def program_scratch(path, tokens, spans):
+    """Bytes of scratch (buffer.alloca<global>) of the largest command program in an llm.loom, for an invocation of
+    `tokens` tokens in `spans` spans. loom-serve charges the largest program's workspace against --memory_bytes at
+    every admission, next to the weights and the request's KV pages. Allocations whose size this can't fold count 0."""
+    config = {"tokens": tokens, "spans": spans, "epoch_tokens": tokens, "epoch_spans": spans, "width": 8,
+              "context": KERNEL_CONTEXT, "pool": KERNEL_POOL}
+    ops = {"add": lambda x, y: x + y, "sub": lambda x, y: x - y, "mul": lambda x, y: x * y, "scale": lambda x, y: x * y,
+           "div": lambda x, y: x // y, "rem": lambda x, y: x % y, "min": min, "max": max,
+           "uge": lambda x, y: x >= y, "ugt": lambda x, y: x > y, "ult": lambda x, y: x < y, "ule": lambda x, y: x <= y,
+           "eq": lambda x, y: x == y, "ne": lambda x, y: x != y}
+    expr = re.compile(r"\s+(%\w+) = (?:config\.get @llm\.(\w+)|(?:index|scalar)\.constant (-?\d+) "
+                      r"|index\.(?:cmp )?(\w+),? (%\w+), (%\w+) |scf\.select (%\w+), (%\w+), (%\w+) "
+                      r"|buffer\.alloca<global> align\(\d+\) (%\w+) )")
+    best, total, env = 0, None, {}
+    v = env.get
+    for line in open(path):
+        if line.startswith("command.program.def"):
+            total = 0
+            env.clear()
+        elif line.startswith("}"):
+            best, total = max(best, total or 0), None
+        elif total is not None and (m := expr.match(line)):
+            ssa, key, const, op, x, y, c, xt, xf, size = m.groups()
+            if key:
+                env[ssa] = config.get(key)
+            elif const:
+                env[ssa] = int(const)
+            elif op:
+                try:
+                    env[ssa] = int(ops[op](v(x), v(y)))
+                except (KeyError, TypeError, ZeroDivisionError):
+                    env[ssa] = None
+            elif c:
+                env[ssa] = (v(xt) if v(c) else v(xf)) if v(c) is not None else max(v(xt) or 0, v(xf) or 0)
+            else:
+                total += v(size) or 0
+    return max(best, total or 0)
 
+
+pkg = os.path.abspath(a.package)
+os.makedirs(os.path.join(pkg, "program"), exist_ok=True)
+os.makedirs(os.path.join(pkg, "parameter"), exist_ok=True)
+
+# 1. Kernel library + command program (first: its scratch counts in the memory budget below).
+gen = os.path.join(pkg, "gen")
+env = dict(os.environ, LLM_CONFIG=os.path.abspath(a.config), LLM_OUT=gen, LLM_TOKENIZER=os.path.abspath(a.tokenizer),
+           LLM_DRAFT=json.dumps(DRAFT))
+sys.path.insert(0, os.path.join(HERE, "draft"))
+import build_draft  # noqa: E402
+subprocess.run([sys.executable, os.path.join(HERE, "gen_llm.py"), os.path.abspath(a.config)], check=True, env=env, stdout=subprocess.DEVNULL)
+os.replace(os.path.join(gen, "model.loom"), os.path.join(pkg, "program", "llm.loom"))
+# Load-time weight policies of drafting (draft/prep_weights.py): a BF16/F16 drafter as Q8_0, the proposals' Q4_0 head.
+POLICIES = []
+for f, k in (("draft_weights.loom", "policy"), ("head_weights.loom", "head_policy")):
+    if os.path.exists(os.path.join(pkg, f)):
+        os.remove(os.path.join(pkg, f))
+    if os.path.exists(os.path.join(gen, f)):
+        os.replace(os.path.join(gen, f), os.path.join(pkg, f))
+        DRAFT[k] = f
+        POLICIES.append(f)
+# The largest program's scratch at a prefill-sized invocation (a drafting hybrid's @llm_verify keeps every token's
+# gated delta-net inputs for the replay: 7 GB for 30 such layers at a 4096-token prefill), plus 3 GiB for the state
+# storage, slab rounding and the workspace's own rounding. A fixed 3 GiB alone refused such a card's full-context
+# request (503) at the memory_bytes printed here, on a fresh server.
+workspace = program_scratch(os.path.join(pkg, "program", "llm.loom"), a.prefill, a.rows) + 3 * 2**30
 
 native = cfg.get("context_length") or 32768
-moe_ws = moe_workspace(cfg, a.prefill)   # 0 without MoE
 if native > KERNEL_CONTEXT and not a.context:
     print(f"NOTE: native context {native} exceeds the kernels' {KERNEL_CONTEXT}; using {KERNEL_CONTEXT}")
 context = a.context or min(native, KERNEL_CONTEXT)
@@ -137,13 +191,13 @@ if a.memory_gib == "auto":
     if cap is not None and cap <= 0:
         sys.exit(f"LOOM_RESERVED_GIB={reserved:g} leaves no memory under the 60%-of-RAM cap")
     want_pool = context + max(65536, context // 4)
-    need = weights_bytes + 4 * 2**30 + moe_ws + 2 * a.rows * recurrent_bytes + want_pool * kv_per_position
+    need = weights_bytes + workspace + 2**30 + 2 * a.rows * recurrent_bytes + want_pool * kv_per_position
     a.memory_gib = round(min(need, cap) / 2**30, 1) if cap else 56.0
     print(f"memory budget {a.memory_gib} GiB (a {want_pool}-position pool needs {need / 2**30:.0f} GiB"
           + (f"; cap 60% of RAM{f' minus LOOM_RESERVED_GIB {reserved:g}' if reserved else ''} = {cap / 2**30:.0f} GiB)"
              if cap else "; RAM unknown)"))
 a.memory_gib = float(a.memory_gib)
-budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - moe_ws - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
+budget = int(a.memory_gib * 2**30) - weights_bytes - workspace - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
 if context * kv_per_position > budget:
     fit = max(4096, (budget // kv_per_position) // 1024 * 1024)
     print(f"WARNING: context {context} needs {context * kv_per_position / 2**30:.1f} GiB of KV; {a.memory_gib} GiB budget fits {fit}")
@@ -161,27 +215,6 @@ if pool < min(1.25 * context, context + 65536):
           f"~{(weights_bytes + (context + 65536) * kv_per_position) / 2**30 + 6:.0f} GiB) or lower --context.")
 a.context, a.pool = context, pool
 model_id = a.model_id or re.sub(r"[^A-Za-z0-9._/-]+", "-", cfg.get("name", "llm")).strip("-")
-pkg = os.path.abspath(a.package)
-os.makedirs(os.path.join(pkg, "program"), exist_ok=True)
-os.makedirs(os.path.join(pkg, "parameter"), exist_ok=True)
-
-# 1. Kernel library + command program.
-gen = os.path.join(pkg, "gen")
-env = dict(os.environ, LLM_CONFIG=os.path.abspath(a.config), LLM_OUT=gen, LLM_TOKENIZER=os.path.abspath(a.tokenizer),
-           LLM_DRAFT=json.dumps(DRAFT))
-sys.path.insert(0, os.path.join(HERE, "draft"))
-import build_draft  # noqa: E402
-subprocess.run([sys.executable, os.path.join(HERE, "gen_llm.py"), os.path.abspath(a.config)], check=True, env=env, stdout=subprocess.DEVNULL)
-os.replace(os.path.join(gen, "model.loom"), os.path.join(pkg, "program", "llm.loom"))
-# Load-time weight policies of drafting (draft/prep_weights.py): a BF16/F16 drafter as Q8_0, the proposals' Q4_0 head.
-POLICIES = []
-for f, k in (("draft_weights.loom", "policy"), ("head_weights.loom", "head_policy")):
-    if os.path.exists(os.path.join(pkg, f)):
-        os.remove(os.path.join(pkg, f))
-    if os.path.exists(os.path.join(gen, f)):
-        os.replace(os.path.join(gen, f), os.path.join(pkg, f))
-        DRAFT[k] = f
-        POLICIES.append(f)
 
 # 2. Serving glue from templates.
 hx = lambda s: s.encode().hex()
@@ -512,10 +545,11 @@ from kit_source import generator_stamp  # noqa: E402
 bench["generator"] = generator_stamp()
 json.dump(bench, open(os.path.join(pkg, "llm_config.json"), "w"), indent=1)
 kv = a.pool * kv_per_position
-need = weights_bytes + kv + 3 * 2**30 + moe_ws + 2 * a.rows * recurrent_bytes
+need = weights_bytes + kv + workspace + 2 * a.rows * recurrent_bytes
 print("package:", os.path.join(pkg, "model.json"), f"(model id {model_id!r})")
 print("speculative decoding:", f"{DRAFT['kind']} drafter, depth {DRAFT['depth']}" if DRAFT else "off")
 print(f"context {a.context} tokens (native {native}), KV pool {a.pool} positions = {kv / 2**30:.1f} GiB, weights {weights_bytes / 2**30:.1f} GiB"
+      f", workspace {workspace / 2**30:.1f} GiB"
       + (f", recurrent state {recurrent_bytes / 2**20:.1f} MiB per row" if recurrent_bytes else ""))
 print(f"serve with --memory_bytes={need // 10**9 + 1}000000000"
       " (too small shows up as 503 'retained state leaves insufficient completion capacity')")

@@ -203,7 +203,8 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   until two runs share a path, and the hit-vs-miss difference takes the near-tie rule. To hunt a suspected
   race, `determinism.py URL --model ID --conc 1 --reps 20` (alone, never a cache hit: any difference is a
   race), `--pairs` (cache miss vs hit) and `--conc 4` (mixed epochs) separate the three causes.
-- 503 errors on long prompts mean `--memory_bytes` is too small for the KV pool,
+- 503 errors on long prompts mean `--memory_bytes` is too small for the KV pool plus the prefill scratch
+  (loom-port-llm troubleshooting 5; even on a fresh server, whatever the message says about retained state),
   not a model bug.
 - **agent_golden.py** runs three tool-using tasks (weather lookups, a calculator)
   with deterministic tool results, greedy, and checks every assistant turn:
@@ -211,10 +212,20 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     of the template-exact rendering (`chat_probe.simulate`, verified against the
     Jinja template). A mismatch is a control-program bug.
   - `reuse_ok`: inside a tool loop, `cached_tokens` covers ≥ 80 % of the previous
-    prompt + completion (history reuse works, including recurrent state).
+    prompt + completion (history reuse works, including recurrent state). Required when the template
+    keeps that history: it is a prefix of this prompt, or (output not verified by the golden) agrees with
+    it for ≥ 80 % of its tokens. Output that matched the golden and that the template re-renders (Gemma 4
+    adds a `\n` before `<channel|>`) is not required: loom-serve reuses only exact extensions of a
+    retained history (a note prints where the template changed it).
   - `calls_ok`: tool calls name a declared function with JSON arguments.
   - golden: Loom's turn vs llama.cpp `/completion` on the same prompt ids; a
-    divergence must be a near-tie (the compare rule). A turn that would fail is re-recorded on
+    divergence must be a near-tie (the compare rule). Loom's turn is its parsed reply re-tokenized, so
+    the comparison is on text: the same text split into other tokens (the model's `.\n` `\n` `\n` where
+    the tokenizer merges `.\n\n\n`) is no divergence (`bench_common.text_divergence`; it once read as
+    "llama.cpp ends at `<tool_call>`" because the 12-token windows end at different text). What the parsed
+    reply cannot tell is taken from the golden: a reply with nothing after its reasoning is also rebuilt
+    unclosed (EOS inside the reasoning), and whitespace between or after tool calls (the rebuild prints
+    `call_separator`) follows the golden's. A turn that would fail is re-recorded on
     llama.cpp (up to twice) and scored against the recording Loom follows further (llama.cpp's
     run-to-run nondeterminism, above).
   "The model ended inside its reasoning" notes are a greedy-decoding behavior of
@@ -367,8 +378,10 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
    - `card/make_info.py gates bench/gates.json [ktest.out --time ...] --package PKG -o ev_gates.json` (also the
      spec gate's `acceptance N% of M proposals` from `gates_spec.log`);
    - `card/pull_devlab.py loom-fun/REPO --package DIR -o ev_devlab.json`: the latest nightly-gates run on AMD
-     DevLab Dispatch: gates of every finished level (job URL as evidence). DevLab measures correctness only: no
-     DevLab performance goes on a card. A perf session recorded with `--source-kind devlab` (a scripted DevLab
+     DevLab Dispatch: gates of every finished level (job URL as evidence), and the spec gate's acceptance from the
+     job's `gates_spec.log` as the card's `spec_acceptance`, stamped with the job's programs (a drafting statistic of
+     model, drafter and text, not a timing: it counts from any source). DevLab measures correctness only: no DevLab
+     speed goes on a card. A perf session recorded with `--source-kind devlab` (a scripted DevLab
      port) is flagged for a local re-measure (`card_lib.perf_flags` `devlab`; `loom-org` `remeasure`,
      `devlab-primary`);
    - `card/make_info.py roofline --package DIR -o ev_roofline.json` (tools venv; CPU only, reads the GGUF from the

@@ -144,7 +144,7 @@
   {
    "repo": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
    "slug": "qwen3.6-35b-a3b",
-   "memory_bytes": 41000000000,
+   "memory_bytes": 48000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
@@ -166,7 +166,7 @@
   {
    "repo": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
    "slug": "qwen3.5-35b-a3b",
-   "memory_bytes": 42000000000,
+   "memory_bytes": 49000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
@@ -178,7 +178,7 @@
   {
    "repo": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
    "slug": "ornith-1.0-35b",
-   "memory_bytes": 33000000000,
+   "memory_bytes": 36000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
@@ -236,6 +236,37 @@
    "llamacpp": "b1369",
    "features": [
     "draft"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+   "slug": "minicpm-v-4.7-35b-a3b",
+   "memory_bytes": 34000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+   "slug": "qwen3-4b-instruct-2507",
+   "memory_bytes": 62000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "draft"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
+   "slug": "nanbeige4.3-33b",
+   "memory_bytes": 81000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "draft",
+    "thinking-toggle"
    ]
   }
  ]

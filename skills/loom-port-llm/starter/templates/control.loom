@@ -2105,7 +2105,8 @@ func.def @text_until(%response: buffer, %marker: buffer, %previous: i64, %phase:
 }
 
 // State 1 is an open reasoning block; state 2 consumes its trailing whitespace.
-// Content (state 0) stops at the call marker: the rest goes to parse_tools.
+// Content (state 0) stops at the call marker (without the separator, @content_until):
+// the rest goes to parse_tools.
 // (Adapted from hrx-loom-library program/text/qwen3_8/chat.loom.)
 func.def public @output_next(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {
   %c0_i64 = scalar.constant 0 : i64
@@ -2134,41 +2135,102 @@ func.def public @output_next(%response: buffer, %previous: i64, %state: i64, %ph
       scf.yield %following : offset
     }
     %start_text = index.cast %stop : offset to i64
-    %marker = global.load @text_tool_marker : buffer
-    %end = func.call @text_until(%response, %marker, %start_text, %phase) : (buffer, buffer, i64, i32) -> (i64)
+    %end, %skip = func.call @content_until(%response, %start_text, %phase) : (buffer, i64, i32) -> (i64, i64)
     %has_text = scalar.cmpi ne, %end, %start_text : i64
     %next = scf.select %has_text, %c0_i64, %state : i64
     scf.yield %c1_i64, %start_text, %end, %next : i64, i64, i64, i64
   } else {
-    %think_marker = global.load @text_think_end : buffer
-    %tool_marker = global.load @text_tool_marker : buffer
-    %marker = scf.select %thinking, %think_marker, %tool_marker : buffer
-    %stop = func.call @text_until(%response, %marker, %previous, %phase) : (buffer, buffer, i64, i32) -> (i64)
-    %at_marker = scalar.cmpi eq, %stop, %previous : i64
-    %length_offset = buffer.length %response
-    %length = index.cast %length_offset : offset to i64
-    %remaining = scalar.subi %length, %stop : i64
-    %marker_length_offset = buffer.length %marker
-    %marker_length = index.cast %marker_length_offset : offset to i64
-    %complete = scalar.cmpi uge, %remaining, %marker_length : i64
-    %thinking_marker = scalar.andi %thinking, %at_marker : i1
-    %consume = scalar.andi %thinking_marker, %complete : i1
-    %after = scalar.addi %stop, %marker_length : i64
-    %end = scf.select %consume, %after, %stop : i64
-    %next = scf.select %consume, %c2_i64, %state : i64
-    %channel = scf.select %thinking, %c2_i64, %c1_i64 : i64
-    %kind = scf.select %consume, %c0_i64, %channel : i64
+    %kind, %end, %next = scf.if %thinking -> (i64, i64, i64) {
+      %marker = global.load @text_think_end : buffer
+      %stop = func.call @text_until(%response, %marker, %previous, %phase) : (buffer, buffer, i64, i32) -> (i64)
+      %at_marker = scalar.cmpi eq, %stop, %previous : i64
+      %length_offset = buffer.length %response
+      %length = index.cast %length_offset : offset to i64
+      %remaining = scalar.subi %length, %stop : i64
+      %marker_length_offset = buffer.length %marker
+      %marker_length = index.cast %marker_length_offset : offset to i64
+      %complete = scalar.cmpi uge, %remaining, %marker_length : i64
+      %consume = scalar.andi %at_marker, %complete : i1
+      %after = scalar.addi %stop, %marker_length : i64
+      %reasoning_end = scf.select %consume, %after, %stop : i64
+      %reasoning_next = scf.select %consume, %c2_i64, %state : i64
+      %reasoning_kind = scf.select %consume, %c0_i64, %c2_i64 : i64
+      scf.yield %reasoning_kind, %reasoning_end, %reasoning_next : i64, i64, i64
+    } else {
+      // The separator before a call is consumed without output (kind 0) once only it is left.
+      %emit, %skip = func.call @content_until(%response, %previous, %phase) : (buffer, i64, i32) -> (i64, i64)
+      %held = scalar.cmpi eq, %emit, %previous : i64
+      %skips = scalar.cmpi ne, %skip, %emit : i64
+      %consume = scalar.andi %held, %skips : i1
+      %content_kind = scf.select %consume, %c0_i64, %c1_i64 : i64
+      %content_end = scf.select %consume, %skip, %emit : i64
+      scf.yield %content_kind, %content_end, %state : i64, i64, i64
+    }
     scf.yield %kind, %previous, %end, %next : i64, i64, i64, i64
   }
   func.return %kind, %begin, %end, %next : i64, i64, i64, i64
 }
 
+// Content from %start: (end of the bytes to emit, end of the bytes to consume). Content stops at the
+// call marker without the content/call separator the template prints between them (it renders
+// content + separator + calls, so the separator is call framing: keeping it in the content doubled it
+// in the next turn's rendering, and canonical history never matched the output). While streaming,
+// trailing whitespace is withheld until it is known not to precede a call. No separator: unchanged.
+func.def @content_until(%response: buffer, %start: i64, %phase: i32) -> (i64, i64) {
+  %c0 = index.constant 0 : offset
+  %c0_i64 = scalar.constant 0 : i64
+  %zero32 = scalar.constant 0 : i32
+  %false = scalar.constant false : i1
+  %marker = global.load @text_tool_marker : buffer
+  %stop = func.call @text_until(%response, %marker, %start, %phase) : (buffer, buffer, i64, i32) -> (i64)
+  %separator = global.load @content_call_separator : buffer
+  %separator_length_offset = buffer.length %separator
+  %separator_length = index.cast %separator_length_offset : offset to i64
+  %has_separator = scalar.cmpi ne, %separator_length, %c0_i64 : i64
+  %length_offset = buffer.length %response
+  %length = index.cast %length_offset : offset to i64
+  %remaining = scalar.subi %length, %stop : i64
+  %marker_length_offset = buffer.length %marker
+  %marker_length = index.cast %marker_length_offset : offset to i64
+  %complete = scalar.cmpi uge, %remaining, %marker_length : i64
+  %inside = scalar.cmpi ult, %stop, %length : i64
+  %found = scalar.andi %complete, %inside : i1
+  %start_value = scalar.assume %start [range(%start, 0, 9223372036854775807)] : i64
+  %start_offset = index.cast %start_value : i64 to offset
+  %stop_value = scalar.assume %stop [range(%stop, 0, 9223372036854775807)] : i64
+  %stop_offset = index.cast %stop_value : i64 to offset
+  %run_offset = func.call @trim_end(%response, %start_offset, %stop_offset) : (buffer, offset, offset) -> (offset)
+  %run = index.cast %run_offset : offset to i64
+  %run_length = scalar.subi %stop, %run : i64
+  %fits = scalar.cmpi uge, %run_length, %separator_length : i64
+  %framed = scalar.andi %has_separator, %found : i1
+  %candidate = scalar.andi %framed, %fits : i1
+  %separator_begin = scalar.subi %stop, %separator_length : i64
+  %matches = scf.if %candidate -> (i1) {
+    %begin_value = scalar.assume %separator_begin [range(%separator_begin, 0, 9223372036854775807)] : i64
+    %begin_offset = index.cast %begin_value : i64 to offset
+    %order = buffer.compare %response[%begin_offset], %separator[%c0], %separator_length_offset
+    %equal = scalar.cmpi eq, %order, %zero32 : i32
+    scf.yield %equal : i1
+  } else {
+    scf.yield %false : i1
+  }
+  %streaming = scalar.cmpi eq, %phase, %zero32 : i32
+  %unknown = scalar.cmpi eq, %found, %false : i1
+  %pending = scalar.andi %streaming, %unknown : i1
+  %hold = scalar.andi %has_separator, %pending : i1
+  %cut = scf.select %matches, %separator_begin, %stop : i64
+  %emit = scf.select %hold, %run, %cut : i64
+  %skip = scf.select %matches, %stop, %emit : i64
+  func.return %emit, %skip : i64, i64
+}
+
 // Canonical history of this turn, as chat_message would render it: prompt +
-// [trimmed reasoning + think close] + content + [separator] + calls + suffix.
+// [trimmed reasoning + think close] + content (trimmed when the template trims it) + [separator] + calls + suffix.
 // Device state is reusable only when the generated part (without the suffix,
 // which the next input appends) is byte-identical to the actual output and the
 // response did not end inside reasoning. (Adapted from qwen3_8/chat.loom.)
-func.def public @complete_text(%prompt: buffer, %response: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
+func.def public @complete_text(%prompt: buffer, %response: buffer, %raw_content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
   %c0 = index.constant 0 : offset
   %c1_i64 = scalar.constant 1 : i64
   %empty = global.load @empty : buffer
@@ -2180,6 +2242,13 @@ func.def public @complete_text(%prompt: buffer, %response: buffer, %content: buf
     scf.yield %value : buffer
   } else {
     scf.yield %prompt : buffer
+  }
+  %trim_content = scalar.constant @@TRIM_CONTENT@@ : i1
+  %content = scf.if %trim_content -> (buffer) {
+    %value = func.call @trim(%raw_content) : (buffer) -> (buffer)
+    scf.yield %value : buffer
+  } else {
+    scf.yield %raw_content : buffer
   }
   %content_length = buffer.length %content
   %has_content = index.cmp ne, %content_length, %c0 : offset

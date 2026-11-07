@@ -153,7 +153,9 @@ Hand the card over and move the local GPU on to the next item. The sweep measure
    `sha=$(curl -s https://huggingface.co/api/models/loom-fun/REPO/revision/main | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')`,
    then `curl -L -o DIR/info.json https://huggingface.co/loom-fun/REPO/resolve/$sha/info.json`):
    - `card/pull_devlab.py loom-fun/REPO --package DIR -o ev_devlab.json`: the gates, with the run, job URL and
-     runner (skips jobs that measured an older revision of the package);
+     runner (skips jobs that measured an older revision of the package), and the spec gate's acceptance stamped with
+     the job's programs: acceptance depends on the model, drafter and text, not the machine, so a sweep on the
+     published programs replaces a stale `spec_acceptance` (speed stays local-only);
    - `card/make_info.py roofline --package DIR -o ev_roofline.json` (tools venv, CPU only: reads the GGUF), once
      per card or after a session changed its acceptance (a first card, with no info.json yet: add
      `--evidence ev_perf.json ev_gates.json`). A drafted row's ceiling counts the acceptance measured in the row's own
