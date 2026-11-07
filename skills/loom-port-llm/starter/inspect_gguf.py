@@ -48,6 +48,8 @@ eos = field("tokenizer.ggml.eos_token_id")
 tokens = field("tokenizer.ggml.tokens") or []
 im_end = tokens.index("<|im_end|>") if "<|im_end|>" in tokens else None
 endoftext = tokens.index("<|endoftext|>") if "<|endoftext|>" in tokens else None
+# Llama 3: llama.cpp also ends generation at <|eom_id|> (ipython turns) and <|end_of_text|> (end-of-generation tokens)
+llama3_eog = [tokens.index(t) for t in ("<|eot_id|>", "<|eom_id|>", "<|end_of_text|>") if t in tokens]
 
 cfg = {
     "name": field("general.name", arch),
@@ -73,7 +75,7 @@ cfg = {
     "eos_id": eos,
     # head_select stops on any of these; keep <|endoftext|> for ChatML models.
     # (and the GGUF's end-of-turn token, e.g. <|eot|> of llama4-style templates)
-    "extra_eos_ids": sorted({i for i in (im_end, endoftext, field("tokenizer.ggml.eot_token_id")) if i is not None and i != eos}),
+    "extra_eos_ids": sorted({i for i in (im_end, endoftext, field("tokenizer.ggml.eot_token_id"), *llama3_eog) if i is not None and i != eos}),
     "bos_id": field("tokenizer.ggml.bos_token_id") if field("tokenizer.ggml.add_bos_token", False) else None,
     "chat": None,
     "tensors": tensors,
@@ -108,6 +110,12 @@ if arch == "muse-glimmer" and cfg["sliding_layers"]:
 rope_dims = A("rope.dimension_count")
 if rope_dims and rope_dims != head_dim:
     cfg["rope_dims"] = rope_dims
+# Llama-3-style RoPE frequency factors (rope_freqs.weight, one per rotary pair: llama.cpp divides that pair's
+# frequency by it; Llama 3.1/3.2: 1 for high frequencies, up to 32 for low ones). Gemma 4's 1e30 cut is its kit's.
+if arch != "gemma4":
+    freqs = next((t.data for t in r.tensors if t.name == "rope_freqs.weight"), None)
+    if freqs is not None and any(float(f) != 1.0 for f in freqs):
+        cfg["rope_freq_factors"] = [float(f) for f in freqs]
 # Gemma 3n/4 geometry (reference/gemma4-example's gen_llm.py keys), from this GGUF: a reference package of another size
 # (find_reference.py apply fills keys inspect leaves out) has other KV-sharing, per-layer-embedding and rope values.
 if arch == "gemma4":
@@ -239,6 +247,12 @@ if template:
         for name, ok, detail in results:
             print("chat", "OK  " if ok else "SKIP" if ok is None else "FAIL", name, "-", detail)
         cfg["chat"] = chat
+        if chat["call_format"] == "json" and "<|python_tag|>" in tokens:
+            # Llama 3.1 opens a call with <|python_tag|> (the template never prints it). Kept in the decoded text
+            # (nonspecial) so complete_text stores the turn as generated: the KV row then matches the canonical
+            # history, and content ends before it (control_json.loom's output_next).
+            chat["call_prefix_token"] = "<|python_tag|>"
+            chat["nonspecial_tokens"] = sorted(set(chat.get("nonspecial_tokens", [])) | {"<|python_tag|>"})
         print(f"chat: thinking={chat['thinking']} (default {'on' if chat['thinking_default'] else 'off'}), "
               f"tool calls={chat['call_format']}; generation prompt {chat['generation_prompt']!r}")
         if chat.get("reasoning_instructions"):
