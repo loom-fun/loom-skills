@@ -670,7 +670,7 @@
  ROW_SCALE = r"""
  
  // Per-row power-of-two scale (as g_row_scale) plus the scaled row as F16, the
-@@ -2072,11 +2106,11 @@
+@@ -2074,11 +2108,11 @@
      yt = ", ".join(["f32"] * n)
      xs = ", ".join(f"%x{i}" for i in range(n))
      t = [f"""
@@ -684,7 +684,7 @@
    %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
    %layer = index.assume %layer_arg [range(%layer_arg, 0, {L - 1})] : index
    %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-@@ -2096,8 +2130,10 @@
+@@ -2098,8 +2132,10 @@
    %c15 = index.constant 15 : index
    %c16 = index.constant 16 : index
    %cqh = index.constant {QH} : index
@@ -696,7 +696,7 @@
    %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
    %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
    %position32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
-@@ -2115,8 +2151,10 @@
+@@ -2117,8 +2153,10 @@
    %zero_f = scalar.constant 0.0 : f32
  """]
      for j, idx in enumerate(freq_idx):
@@ -709,7 +709,7 @@
          t.append(f"""  // angle = position * theta^(-2i/RD) = position * exp(-i * 2 ln(theta) / RD)
    %li{j} = index.cast {idx} : index to i32
    %lf{j} = scalar.sitofp %li{j} : i32 to f32
-@@ -2220,8 +2258,22 @@
+@@ -2222,8 +2260,22 @@
      for i in range(n):
          t.append(f"""        %h{i} = scalar.fptrunc %r{i} : f32 to f16
          view.store %h{i}, %k_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>
@@ -734,7 +734,7 @@
          view.store %vh{i}, %v_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>""")
      t.append("""      }
      }
-@@ -2232,6 +2284,18 @@
+@@ -2234,6 +2286,18 @@
      return "\n".join(t)
  
  
@@ -753,7 +753,7 @@
  def listed(text, name, grid_rest):
      """Variant of a per-token kernel dispatched over the tokens in `list`
      (count read from a device buffer for indirect dispatch)."""
-@@ -2506,7 +2570,7 @@
+@@ -2508,7 +2572,7 @@
      %stop = index.min %stop_raw, %visible : index
      %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
      %q_raw = vector.load %q_view[%token, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
@@ -762,7 +762,7 @@
      %scale_v = vector.splat %scale : vector<4xf32>
      %q4 = vector.mulf %q_raw, %scale_v : vector<4xf32>
      %zero4 = vector.splat %zero_f : vector<4xf32>
-@@ -2625,12 +2689,140 @@
+@@ -2627,12 +2691,140 @@
  
  
  def attention():
@@ -909,7 +909,7 @@
  
  
  FALLBACK = r"""
-@@ -2808,9 +3000,22 @@
+@@ -2810,9 +3002,22 @@
            %is_best = scalar.cmpf oeq, %lv, %best : f32
            %cand_id = scf.select %is_best, %li, %big : i32
            %winner = kernel.workgroup.reduce<minsi> %cand_id : i32
@@ -933,7 +933,7 @@
              view.store %winner, %cand_i[%rr] : i32, view<64xi32>
            }}
            scf.yield %best, %winner : f32, i32
-@@ -2924,7 +3129,13 @@
+@@ -2926,7 +3131,13 @@
          args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
          types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
          mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
@@ -948,7 +948,7 @@
      args = args.replace(f", {x}, {s},", f", {x16}, {s},")
      iq = ACT_Q8 and fmt in IQ_FMTS and kval // 32 <= 1024   # wider K (mv_wide: DFlash feature projections) stays f32
      if iq:   # int8 copy (g_quant_q8, launched beside the g_row_scale_f16 that makes x16): see quant_wiring()
-@@ -3276,7 +3487,9 @@
+@@ -3278,7 +3489,9 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -959,7 +959,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -3963,7 +4176,20 @@
+@@ -3965,7 +4178,20 @@
    %h16 = buffer.alloca<global> align(256) %h16_size : buffer
    %o16 = buffer.alloca<global> align(256) %o16_size : buffer
    %f16 = buffer.alloca<global> align(256) %f16_size : buffer
@@ -980,7 +980,7 @@
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if FUSED_Q:
-@@ -3993,108 +4219,95 @@
+@@ -3995,108 +4221,95 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1163,7 +1163,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -4231,8 +4444,9 @@
+@@ -4233,8 +4446,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1175,7 +1175,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if RECUR:
-@@ -4251,13 +4465,27 @@
+@@ -4253,13 +4467,27 @@
      env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
      # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
@@ -1261,14 +1261,14 @@
 -kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
 -q = rng.standard_normal((t, QH, D)).astype(np.float32); k = rng.standard_normal((t, KVH, D)).astype(np.float32); v = rng.standard_normal((t, KVH, D)).astype(np.float32)
 -def norm(a, w): return a / np.sqrt((a * a).mean(-1, keepdims=True) + eps) * w
--def yarn(inv):
--    """(frequencies, cos/sin scale) of llama.cpp's YaRN (cfg rope_scaling; gen_llm.yarn_constants), else unchanged."""
--    y = cfg.get("rope_scaling") or {}
--    if y.get("type") != "yarn":
+-def yarn(inv, y=cfg.get("rope_scaling"), rd=RD, theta=cfg["rope_theta"]):
+-    """(frequencies, cos/sin scale) of llama.cpp's YaRN y (a rope_scaling block; gen_llm.yarn_constants) for a RoPE of
+-    rd rotated dims and base theta; unchanged without YaRN (y None or not yarn)."""
+-    if (y or {}).get("type") != "yarn":
 -        return inv, 1.0
--    f, n0, th = float(y["factor"]), float(y["orig_ctx"]), cfg["rope_theta"]
--    dim = lambda rot: RD * np.log(n0 / (rot * 2 * np.pi)) / (2 * np.log(th))
--    low, high = max(0.0, np.floor(dim(y.get("beta_fast", 32.0)))), min(RD - 1.0, np.ceil(dim(y.get("beta_slow", 1.0))))
+-    f, n0 = float(y["factor"]), float(y["orig_ctx"])
+-    dim = lambda rot: rd * np.log(n0 / (rot * 2 * np.pi)) / (2 * np.log(theta))
+-    low, high = max(0.0, np.floor(dim(y.get("beta_fast", 32.0)))), min(rd - 1.0, np.ceil(dim(y.get("beta_slow", 1.0))))
 -    ramp = np.clip((np.arange(len(inv)) - low) / max(0.001, high - low), 0, 1)
 -    return inv * (1 - (1 - 1 / f) * ramp), y.get("attn_factor", 1.0) * (1 + 0.1 * np.log(f))
 -def rope(a):

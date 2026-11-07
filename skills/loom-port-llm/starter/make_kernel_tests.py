@@ -252,14 +252,14 @@ qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.fl
 kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
 q = rng.standard_normal((t, QH, D)).astype(np.float32); k = rng.standard_normal((t, KVH, D)).astype(np.float32); v = rng.standard_normal((t, KVH, D)).astype(np.float32)
 def norm(a, w): return a / np.sqrt((a * a).mean(-1, keepdims=True) + eps) * w
-def yarn(inv):
-    """(frequencies, cos/sin scale) of llama.cpp's YaRN (cfg rope_scaling; gen_llm.yarn_constants), else unchanged."""
-    y = cfg.get("rope_scaling") or {}
-    if y.get("type") != "yarn":
+def yarn(inv, y=cfg.get("rope_scaling"), rd=RD, theta=cfg["rope_theta"]):
+    """(frequencies, cos/sin scale) of llama.cpp's YaRN y (a rope_scaling block; gen_llm.yarn_constants) for a RoPE of
+    rd rotated dims and base theta; unchanged without YaRN (y None or not yarn)."""
+    if (y or {}).get("type") != "yarn":
         return inv, 1.0
-    f, n0, th = float(y["factor"]), float(y["orig_ctx"]), cfg["rope_theta"]
-    dim = lambda rot: RD * np.log(n0 / (rot * 2 * np.pi)) / (2 * np.log(th))
-    low, high = max(0.0, np.floor(dim(y.get("beta_fast", 32.0)))), min(RD - 1.0, np.ceil(dim(y.get("beta_slow", 1.0))))
+    f, n0 = float(y["factor"]), float(y["orig_ctx"])
+    dim = lambda rot: rd * np.log(n0 / (rot * 2 * np.pi)) / (2 * np.log(theta))
+    low, high = max(0.0, np.floor(dim(y.get("beta_fast", 32.0)))), min(rd - 1.0, np.ceil(dim(y.get("beta_slow", 1.0))))
     ramp = np.clip((np.arange(len(inv)) - low) / max(0.001, high - low), 0, 1)
     return inv * (1 - (1 - 1 / f) * ramp), y.get("attn_factor", 1.0) * (1 + 0.1 * np.log(f))
 def rope(a):

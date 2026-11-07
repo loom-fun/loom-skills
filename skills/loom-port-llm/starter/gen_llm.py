@@ -92,12 +92,12 @@ OUT_BIAS = CFG.get("attn_out_bias", False)   # attn_output.bias on every attenti
 YARN = CFG.get("rope_scaling") if (CFG.get("rope_scaling") or {}).get("type") == "yarn" else None
 
 
-def yarn_constants():
-    """(low, 1 / max(0.001, high - low), 1 - 1/factor, mscale) of llama.cpp's YaRN for this RoPE (ggml_rope_yarn_corr_dims)."""
-    y = YARN
+def yarn_constants(y, rd, theta):
+    """(low, 1 / max(0.001, high - low), 1 - 1/factor, mscale) of llama.cpp's YaRN (ggml_rope_yarn_corr_dims) for a
+    RoPE of rd rotated dims and base theta; y: a cfg rope_scaling block (factor, orig_ctx, beta_fast/slow, attn_factor)."""
     f, n0 = float(y["factor"]), float(y["orig_ctx"])
-    dim = lambda rot: RD * math.log(n0 / (rot * 2 * math.pi)) / (2 * math.log(THETA))
-    low, high = max(0.0, float(math.floor(dim(y.get("beta_fast", 32.0))))), min(RD - 1.0, float(math.ceil(dim(y.get("beta_slow", 1.0)))))
+    dim = lambda rot: rd * math.log(n0 / (rot * 2 * math.pi)) / (2 * math.log(theta))
+    low, high = max(0.0, float(math.floor(dim(y.get("beta_fast", 32.0))))), min(rd - 1.0, float(math.ceil(dim(y.get("beta_slow", 1.0)))))
     mscale = y.get("attn_factor", 1.0) * (1.0 + 0.1 * math.log(f))
     return low, 1.0 / max(0.001, high - low), 1.0 - 1.0 / f, mscale
 
@@ -2018,13 +2018,13 @@ def freq_factor(j):
     return "\n".join(t)
 
 
-def yarn_freq(j):
-    """YaRN: lines turning pair j's frequency %if{j} (after freq_factor: %if{j}f; pair index %lf{j}) into that name + "y"
-    (empty without YaRN)."""
-    if not YARN:
+def yarn_freq(j, y, rd, theta):
+    """YaRN y (a rope_scaling block, None = off) of a RoPE with rd rotated dims and base theta: lines turning pair j's
+    frequency %if{j} (after freq_factor: %if{j}f; pair index %lf{j}) into that name + "y"."""
+    if not y:
         return ""
     src = f"%if{j}f" if FREQ_FACTORS else f"%if{j}"
-    low, inv, mix, _ = yarn_constants()
+    low, inv, mix, _ = yarn_constants(y, rd, theta)
     return f"""
   %yl{j} = scalar.constant {low!r} : f32
   %yi{j} = scalar.constant {inv!r} : f32
@@ -2038,12 +2038,12 @@ def yarn_freq(j):
   {src}y = scalar.mulf {src}, %yf{j} : f32"""
 
 
-def yarn_scale(j):
-    """YaRN: %cr{j}m / %sr{j}m = cos / sin times mscale (empty without YaRN)."""
-    if not YARN:
+def yarn_scale(j, y, rd, theta):
+    """YaRN y (as yarn_freq): %cr{j}m / %sr{j}m = cos / sin times mscale."""
+    if not y:
         return ""
     return f"""
-  %ymsc{j} = scalar.constant {yarn_constants()[3]!r} : f32
+  %ymsc{j} = scalar.constant {yarn_constants(y, rd, theta)[3]!r} : f32
   %cr{j}m = scalar.mulf %cr{j}, %ymsc{j} : f32
   %sr{j}m = scalar.mulf %sr{j}, %ymsc{j} : f32"""
 
@@ -2054,8 +2054,10 @@ def qk_rope():
     token. Lane l of a wave owns D/32 of a head's dims: NeoX: l, l+32, ...
     with rotary pairs (d, d + RD/2) over the first RD (rope_dims) dims and the
     rest passed through; interleaved ("norm", D = 128 only): 4l..4l+3 with
-    pairs (0,1),(2,3). Each pair's angle is computed once for every head."""
+    pairs (0,1),(2,3). Each pair's angle is computed once for every head. RoPE: RD, THETA, YARN (YaRN or None),
+    read when called (a model with another RoPE on some layers generates a second kernel with those set)."""
     n = DL
+    yarn, yarg = YARN, (YARN, RD, THETA)
     if ROPE == "neox":
         dims = ["%lane"] + [f"%d{j}" for j in range(1, n)]
         dim_defs = "".join(f"  %d{j}c = index.constant {32 * j} : index\n  %d{j} = index.add %lane, %d{j}c : index\n" for j in range(1, n))
@@ -2122,8 +2124,8 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %lf{j} = scalar.sitofp %li{j} : i32 to f32
   %ex{j}a = scalar.mulf %lf{j}, %ln_scale : f32
   %ex{j}b = scalar.mulf %ex{j}a, %neg : f32
-  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j)}{yarn_freq(j)}
-  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if FREQ_FACTORS else ""}{"y" if YARN else ""} : f32
+  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j)}{yarn_freq(j, *yarg)}
+  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if FREQ_FACTORS else ""}{"y" if yarn else ""} : f32
   %tr{j} = scalar.mulf %ra{j}, %inv_two_pi : f32
   %ts{j} = scalar.addf %tr{j}, %half : f32
   %ti{j} = scalar.fptosi %ts{j} : f32 to i32
@@ -2131,9 +2133,9 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %wr{j} = scalar.mulf %tf{j}, %two_pi : f32
   %an{j} = scalar.subf %ra{j}, %wr{j} : f32
   %cr{j} = scalar.cosf<afn> %an{j} : f32
-  %sr{j} = scalar.sinf<afn> %an{j} : f32{yarn_scale(j)}
-  %cos{j} = scf.select %apply_rope, %cr{j}{"m" if YARN else ""}, %one_f : f32
-  %sin{j} = scf.select %apply_rope, %sr{j}{"m" if YARN else ""}, %zero_f : f32""")
+  %sr{j} = scalar.sinf<afn> %an{j} : f32{yarn_scale(j, *yarg)}
+  %cos{j} = scf.select %apply_rope, %cr{j}{"m" if yarn else ""}, %one_f : f32
+  %sin{j} = scf.select %apply_rope, %sr{j}{"m" if yarn else ""}, %zero_f : f32""")
     t.append(f"""  %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>
   %k_view = buffer.view %k[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
   %v_view = buffer.view %v[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
