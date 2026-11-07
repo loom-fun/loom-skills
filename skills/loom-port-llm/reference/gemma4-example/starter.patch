@@ -9,7 +9,7 @@
      notes = []
      chat = {}
      # BOS: emitted by the control program at the very start when the template prints it.
-@@ -339,10 +341,6 @@
+@@ -348,10 +350,6 @@
          rest = s_body[len("SYSPROBE"):]
          lead = rest[:rest.index(printed[0]) - len(line)]
          body_start = len(lead) - len(lead.lstrip())
@@ -20,7 +20,7 @@
          chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
      elif s_body.endswith("SYSPROBE"):
          chat["tools_after_system"] = False
-@@ -418,6 +416,8 @@
+@@ -439,6 +437,8 @@
  
  def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reasoning_effort=None):
      """Python model of control.loom's rendering (chat_begin + chat_message + chat_end)."""
@@ -29,7 +29,7 @@
      tools = None if chat.get("call_format") == "none" else tools   # a chat-only block ignores tools, as its template does
      trim = (lambda s: s.strip()) if chat["trim_content"] else (lambda s: s)
      out = chat.get("bos", "")
-@@ -484,6 +484,8 @@
+@@ -509,6 +509,8 @@
  
  
  def render_call(chat, call):
@@ -38,7 +38,7 @@
      args = call["arguments"]
      if chat["call_format"] == "hermes":
          a = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
-@@ -528,6 +530,306 @@
+@@ -553,6 +555,306 @@
  ]
  
  
@@ -345,7 +345,7 @@
  def verify(template_text, chat, bos="", eos=""):
      """Returns [(name, ok, detail)]: template render vs simulate() for each conversation."""
      T = Template(template_text, bos, eos)
-@@ -535,7 +837,7 @@
+@@ -560,7 +862,7 @@
      extra = [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL, CALL2], reasoning="R"),
                                     {"role": "tool", "tool_call_id": "call_0", "content": "ok"}], TOOLS)] \
          if chat["call_format"] == "pythonic" else []
@@ -354,7 +354,7 @@
          for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
              label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")
              try:
-@@ -599,3 +901,21 @@
+@@ -651,3 +953,21 @@
  
  if __name__ == "__main__":
      main()
@@ -959,7 +959,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -3787,7 +4000,20 @@
+@@ -3790,7 +4003,20 @@
    %h16 = buffer.alloca<global> align(256) %h16_size : buffer
    %o16 = buffer.alloca<global> align(256) %o16_size : buffer
    %f16 = buffer.alloca<global> align(256) %f16_size : buffer
@@ -980,7 +980,7 @@
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if FUSED_Q:
-@@ -3817,101 +4043,95 @@
+@@ -3820,101 +4046,95 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1156,7 +1156,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -4046,8 +4266,9 @@
+@@ -4049,8 +4269,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1168,7 +1168,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if RECUR:
-@@ -4064,13 +4285,27 @@
+@@ -4067,13 +4288,27 @@
      env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
      # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
