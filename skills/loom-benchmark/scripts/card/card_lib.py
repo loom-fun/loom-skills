@@ -321,12 +321,30 @@ def disagreeing(loom, sweep, tol=DEVLAB_TOLERANCE):
     return out
 
 
-def perf_flags(info, kind=None, feats=None):
+def stale_metrics(info, programs, kind=None, feats=None):
+    """{metric: programs_sha256 measured} for the card values whose session (the latest that measured the metric)
+    recorded programs other than `programs` (card_lib.programs_sha256 of the published package): that value describes
+    another build. {} when `programs` is unknown; a session that recorded no programs is not flagged."""
+    if not programs:
+        return {}
+    sessions = (info.get("performance") or {}).get("sessions", [])
+    out = {}
+    for k, (_, i) in card_metrics(info).items():
+        sha = sessions[i].get("programs_sha256")
+        if sha and sha != programs and (kind is None or metric_applies(k, kind, feats)):
+            out[k] = sha
+    return out
+
+
+def perf_flags(info, kind=None, feats=None, programs=None):
     """The performance guardrails of one card (loom-org org_status.py):
     far       {metric: [Loom / roofline, demonstrated efficiency]} where Loom (the card's value) is below
               FAR_FRACTION x the efficiency Loom ports have demonstrated for that kind of metric (info.json roofline)
     disagree  {metric: DevLab / local - 1} beyond DEVLAB_TOLERANCE in the latest DevLab sweep
-    rounds    how many DevLab sweeps in a row, newest first, disagree with the card's values (0: the latest agrees)"""
+    rounds    how many DevLab sweeps in a row, newest first, disagree with the card's values (0: the latest agrees)
+    stale     {metric: programs measured} where the card's value was measured on programs other than `programs`, the
+              package's own (stale_metrics; only with `programs`): the local column compares another build, and far
+              and disagree are judged on it, so a fresh local session comes first"""
     loom = {k: m.get("loom") for k, (m, _) in card_metrics(info).items()}
     if kind is not None:
         loom = {k: v for k, v in loom.items() if metric_applies(k, kind, feats)}
@@ -343,7 +361,22 @@ def perf_flags(info, kind=None, feats=None):
         if not disagreeing(loom, s):
             break
         rounds += 1
-    return {"far": far, "disagree": disagree, "rounds": rounds}
+    out = {"far": far, "disagree": disagree, "rounds": rounds}
+    if programs is not None:
+        out["stale"] = stale_metrics(info, programs, kind, feats)
+    return out
+
+
+def generator_commit(gen, versions):
+    """(loom-skills commit that generated the programs, how it is known): llm_config.json's build stamp
+    ("generator".skills_commit, build.py's generator_stamp(); "stamp"), else info.json's recovered
+    versions.package.skills_commit ("recovered"); (None, None) when neither says."""
+    if gen and gen.get("skills_commit") and gen["skills_commit"] != "unknown":
+        return gen["skills_commit"], "stamp"
+    rec = ((versions or {}).get("package") or {}).get("skills_commit")
+    if not gen and isinstance(rec, dict):
+        return rec["commit"], "recovered"
+    return None, None
 
 
 # ---- validation: the subset of JSON Schema info_schema.json uses (no third-party dependency) ----

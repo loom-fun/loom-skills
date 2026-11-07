@@ -1,2 +1,2 @@
-{"label": "loom", "kind": "loom", "time": "2026-11-07 10:00:00", "decode_tps": 92.1, "prefill": [{"prompt_tokens": 1030, "prefill_tps": 950.2, "min": 940.1, "max": 960.0, "n": 5}]}
-{"label": "loom", "kind": "loom", "time": "2026-11-07 10:02:00", "decode_tps": 92.7, "prefill": [{"prompt_tokens": 1031, "prefill_tps": 963.6, "min": 955.0, "max": 970.2, "n": 5}]}
+{"label": "loom", "kind": "loom", "time": "2026-11-07 10:00:00", "decode_tps": 92.1, "prefill": [{"prompt_tokens": 1030, "prefill_tps": 950.2, "min": 940.1, "max": 960.0, "n": 5}], "acceptance": {"decode_tps": 0.31}}
+{"label": "loom", "kind": "loom", "time": "2026-11-07 10:02:00", "decode_tps": 92.7, "prefill": [{"prompt_tokens": 1031, "prefill_tps": 963.6, "min": 955.0, "max": 970.2, "n": 5}], "acceptance": {"decode_tps": 0.34}}

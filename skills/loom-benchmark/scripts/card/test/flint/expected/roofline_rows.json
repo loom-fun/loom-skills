@@ -1,0 +1,43 @@
+{
+ "drafting": {
+  "acceptance": 0.68,
+  "depth": 3,
+  "method": "dflash",
+  "tokens_per_pass": 3.04
+ },
+ "metrics": {
+  "decode": {
+   "acceptance": 0.325,
+   "acceptance_from": "session",
+   "ceiling": 197.5,
+   "efficiency": 0.5,
+   "single_pass": 100.0,
+   "tokens_per_pass": 1.975
+  },
+  "decode_2k": {
+   "acceptance": 0.68,
+   "acceptance_from": "spec_gate",
+   "ceiling": 304.0,
+   "efficiency": 0.5,
+   "single_pass": 100.0,
+   "tokens_per_pass": 3.04
+  },
+  "decode_32k": {
+   "acceptance": 0.68,
+   "acceptance_from": "spec_gate",
+   "ceiling": 304.0,
+   "efficiency": 0.5,
+   "single_pass": 100.0,
+   "tokens_per_pass": 3.04
+  },
+  "streams4": {
+   "acceptance": 0.68,
+   "acceptance_from": "spec_gate",
+   "ceiling": 304.0,
+   "efficiency": 0.5,
+   "single_pass": 100.0,
+   "tokens_per_pass": 3.04
+  }
+ },
+ "note": "; decode and 4 streams with speculative decoding: verify passes × (1 + acceptance × depth 3) tokens per pass, the drafter's cost not counted; acceptance measured in the row's own session: decode 32 %; for decode at 2k, decode at 32k, 4 streams, the `spec` gate's acceptance 68 % (× 3.04 tokens per pass), as the row's session recorded none: the gate's text can accept more or less than the row's"
+}

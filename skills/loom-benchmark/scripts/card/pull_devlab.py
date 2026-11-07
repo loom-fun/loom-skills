@@ -119,7 +119,7 @@ def main(argv=None):
             c4 = c4_samples(cp) if os.path.exists(cp) and os.path.getsize(cp) else []
             sweep = devlab_sweep(rows, c4, src, s.get("runner") or runner.get((s["slug"], s["level"])),
                                  commands=[f"PERF=1 LEVEL={s['level']} .github/scripts/nightly_gates.sh {a.repo}"],
-                                 psha=s.get("programs_sha256"))
+                                 psha=s.get("programs_sha256"), c4_path=cp if c4 else None)
     ev = {"evidence": EVIDENCE_ID, "gates": gates}
     if sweep:
         ev["devlab"] = {"sweep": sweep}
