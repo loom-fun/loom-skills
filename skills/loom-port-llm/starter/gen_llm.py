@@ -3576,6 +3576,26 @@ kernel.def export("g_gate_heads") @g_gate_heads(%tokens: index) {{
 """
 
 
+def geglu_mul():
+    """g_silu_mul for GEGLU models: SILU_MUL with the channels viewed as [n/4]x4 groups, so the vector footprint is
+    in bounds by the view's static extent (SILU_MUL's is proven only from the launch's constant n, so it compiles in
+    the model but not as a kernel-test root); gelu_vectors() then swaps silu for gelu-tanh."""
+    t = SILU_MUL.replace("silu(f[t, c])", "gelu(f[t, c])")
+    for old, new in (
+        ("  %c1024 = index.constant 1024 : index\n", "  %c0 = index.constant 0 : index\n  %c256 = index.constant 256 : index\n"
+         "  %n4_value = index.div %n, %c4 : index\n  %n4 = index.assume %n4_value [range(%n4_value, 1, 16384)] : index\n"),
+        ("view<[%tokens]x[%n]xf32>", "view<[%tokens]x[%n4]x4xf32>"),
+        ("  %first = index.mul %lane, %c4 : index\n  scf.for %c0v = [%first to %n step %c1024] {\n"
+         "    %c = index.assume %c0v [range(%c0v, 0, 65532), multiple_of(%c0v, 4), lt(%c0v, %n)] : index\n",
+         "  scf.for %c0v = [%lane to %n4 step %c256] {\n    %c = index.assume %c0v [range(%c0v, 0, 16383), lt(%c0v, %n4)] : index\n"),
+        ("[%token, %c]", "[%token, %c, %c0]"),
+        ("    %sg = vector.logisticf<afn> %g : vector<4xf32>\n    %s = vector.mulf %g, %sg : vector<4xf32>\n",
+         "    %s = vector.siluf<afn> %g : vector<4xf32>\n")):
+        assert old in t, old
+        t = t.replace(old, new)
+    return t
+
+
 def qk_rope_swa():
     """g_qk_rope_store_swa: g_qk_rope_store with the sliding layers' rotary dims and base (SWA_ROPE)."""
     global RD, THETA
@@ -4220,9 +4240,8 @@ if __name__ == "__main__":
         parts.append(gdn_kernels(CFG, EPS))
     if spec_kernels:
         parts.append(spec_kernels)
-    if MIXED_FFN:   # GEGLU: gelu(gate) * up
-        parts.append(gelu_vectors(SILU_MUL.replace("    %sg = vector.logisticf<afn> %g : vector<4xf32>\n    %s = vector.mulf %g, %sg : vector<4xf32>\n",
-                                                   "    %s = vector.siluf<afn> %g : vector<4xf32>\n")) if GELU else SILU_MUL)
+    if MIXED_FFN:   # GEGLU: gelu(gate) * up, on 4-value groups (bounds provable without the launch: kernel-testable)
+        parts.append(gelu_vectors(geglu_mul()) if GELU else SILU_MUL)
     if MOE:
         import importlib.util
         _spec = importlib.util.spec_from_file_location("gen_gemm_mod", os.path.join(here, "gen_gemm.py"))

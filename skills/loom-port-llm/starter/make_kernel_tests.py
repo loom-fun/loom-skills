@@ -253,8 +253,9 @@ if ACT_Q8 and _g is not None:
   check.return
 }}
 """)
-# 2b'. g_silu_mul (layers whose ffn_gate and ffn_up formats differ: two projections, then act(gate) * up in place)
-if any(f"blk.{li}.ffn_gate.weight" in T and f"blk.{li}.ffn_up.weight" in T
+# 2b'. g_silu_mul (layers whose ffn_gate and ffn_up formats differ: two projections, then act(gate) * up in place).
+# GEGLU builds only: the SwiGLU kernel's bounds are proven from the model's launch (constant n), not as a test root.
+if cfg.get("ffn_act") == "gelu" and any(f"blk.{li}.ffn_gate.weight" in T and f"blk.{li}.ffn_up.weight" in T
        and T[f"blk.{li}.ffn_gate.weight"].tensor_type != T[f"blk.{li}.ffn_up.weight"].tensor_type for li in range(cfg["layers"])):
     FFW = max(cfg["ffn"]) if isinstance(cfg["ffn"], list) else cfg["ffn"]
     act = ((lambda g: 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))) if cfg.get("ffn_act") == "gelu"
