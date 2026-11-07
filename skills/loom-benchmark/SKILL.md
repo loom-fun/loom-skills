@@ -150,6 +150,19 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     (llama.cpp itself is unsure there: on flint its own re-recording moved by gap 1.05).
     Typical healthy ports have max gap 0.1–0.6, and full matches on a quarter or
     more of the prompts.
+  - **The bar includes llama.cpp's own rounding noise at that position.** A divergence the rule above
+    rejects is judged again: llama.cpp re-scores the same position (prompt + its own tokens before it)
+    under two numerics it uses itself, the context in one batch (MMQ matmuls) and in micro-batches of 8
+    (MMVQ: another q8_1 dot-product formula and summation order; `bench_common.llama_views`). How far the
+    gap moves across the golden and these views is the noise there; the divergence passes when its gap is
+    ≤ 1.0 + that noise (`near_tie(..., views)`). Why: both engines round activations to 8 bits at every
+    matmul, so a single rounding-level change (f16 vs f32 KV, MMVQ vs MMQ, ties-to-even vs away) can move
+    a gap by about 1 nat where the model is truly tied (gemma-3-1b, first token: an f64 forward puts the
+    two candidates 0.004 apart, the golden gap is 1.36). A fixed larger constant would let real bugs
+    through everywhere; the measured noise widens the bar only where llama.cpp disagrees with itself.
+    Only the first divergence of a prompt (turn, probe) is judged, as before. compare.py, agent_golden.py,
+    needle.py and spec_check.py use it (`near_tie_at`); vision_golden.py (image prompts) does not. No
+    micro-batch view where llama.cpp cannot extend its cache (SWA past the window, recurrent state).
   - **FAIL**: a large gap, or a token outside the top-5. That is a real bug, even
     if the text reads fine.
   - Two llama.cpp builds (Vulkan vs ROCm) disagree with each other in the same
@@ -159,8 +172,9 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   scores each prompt against whichever recording Loom follows further. Before
   declaring FAIL on a single prompt, re-record it; a gap that disappears was noise.
   - A plain re-run of a *text* prompt at `-np 1` is often bit-identical, so it proves little.
-    The informative check is llama.cpp's sensitivity to its own summation order. Re-record the
-    one prompt with the server started under other legitimate numerics: `LLAMA_SPEC="-ub 128"`,
+    The informative check is llama.cpp's sensitivity to its own summation order. The gates measure
+    it at the divergence already (one batch vs micro-batches of 8, above). For a FAIL that remains,
+    re-record the one prompt with the server started under other legitimate numerics: `LLAMA_SPEC="-ub 128"`,
     `"-ub 2048 -b 2048"` and `"-fa off"` (llamacpp_server.sh appends LLAMA_SPEC). Then compare
     the top-5 at the divergence.
   - If llama.cpp's own top-1 changes across these settings, or Loom's token falls within the

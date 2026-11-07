@@ -7,7 +7,8 @@ divergence the golden log-prob gap  logp(golden token) - logp(loom token).
 Greedy decoding diverges at near-ties under any change of summation order, so
 the gate is about *where* divergences happen, not whether:
   PASS   every divergence is a near-tie (bench_common.near_tie: gap <= 1.0 with Loom's token in the golden
-         top-5, or Loom picked llama.cpp's second choice where its first has p < 0.5)
+         top-5, or Loom picked llama.cpp's second choice where its first has p < 0.5; with --llama, gap <= 1.0
+         plus llama.cpp's own rounding noise at that position, bench_common.llama_views)
   FAIL   any divergence with a large gap, or a token outside the golden top-5
 (Two llama.cpp builds disagree with each other in the same way.)
 """
