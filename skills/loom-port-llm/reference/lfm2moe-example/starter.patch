@@ -147,9 +147,8 @@
 -  %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
 +  %output_norm = command.parameter %weights, "{OUT_NORM}" : view<{H}xf32>
  """)
--    gate0 = "%gate" if GATE else "%q"
+     gate0 = "%gate" if GATE else "%q"
 -    attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in RECUR)}
-+    gate = "%gate" if GATE else "%q"
 +    attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in NONATT)}
 +    sconv_ordinal = {i: n for n, i in enumerate(sorted(SCONV))}
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
