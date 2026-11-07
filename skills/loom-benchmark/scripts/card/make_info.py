@@ -48,9 +48,9 @@ byte-identical files.
 
   SOURCE (perf and gates): --source-kind local|devlab|factory [--run ID --url URL] [--device auto|none|FILE.json]
       [--hrx-loom auto|none|FILE.json]. auto (the default) records this machine's device and the Loom SDK under
-      $LOOM_ROOT (../machine_info.py): run perf and gates on the machine that measured. A perf session with
-      --source-kind devlab (a scripted DevLab port) is recorded, and flagged for a local re-measure (card_lib
-      perf_flags "devlab"): every card performance number comes from a local session.
+      $LOOM_ROOT (../machine_info.py): run perf and gates on the machine that measured (on downloaded DevLab
+      job files: --device none --hrx-loom none). A perf session with --source-kind devlab (a scripted DevLab port, a
+      devlab-perf job) fills the card's DevLab columns; the local sessions give its headline values.
 
 Evidence file (loom-card-evidence/2), every block optional:
   {"evidence": "loom-card-evidence/2",
@@ -63,7 +63,8 @@ Evidence file (loom-card-evidence/2), every block optional:
    "roofline": {"device", "tool", "checkpoint", "drafting", "metrics"}}
   SOURCE: {"kind", "run", "url", "device", "hrx_loom"}
 Merge rules: card keys and versions: the later file wins. performance: sessions append in order and per metric
-the last session that measured it is the card's value; the baseline is the last one given. gates: per gate the
+the last local session that measured it is the card's value, the last DevLab one its DevLab value (card_lib
+card_metrics); the baseline is the last one given. gates: per gate the
 latest evidence wins (gate_supersedes: a published date-only gate is older than new evidence of that day; equal
 times: the later file), except that on the same programs_sha256 a later pass at a lower level (dev < fast < quick <
 full) does not replace a pass at a higher level; a later failure always does. roofline: the later file wins. A "devlab"
@@ -210,7 +211,7 @@ def cmd_build(a):
         if ev.get("roofline"):
             roofline = ev["roofline"]
         if ev.get("devlab"):
-            print(f"{path}: ignored its DevLab sweep (card performance numbers come from local sessions)", file=sys.stderr)
+            print(f"{path}: ignored its Loom-only DevLab sweep (a DevLab perf session is make_info.py perf --source-kind devlab)", file=sys.stderr)
     if not a.repo:
         sys.exit("make_info.py build: --repo is required without --from-info")
     if not a.generator_commit:

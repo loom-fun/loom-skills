@@ -142,7 +142,7 @@ def qwen3vl(W, KV, img, normalized=False):
     def rope(t):  # t [NH, n, D]; pairs (j, j + D/2)
         a, b = t[..., :D // 2], t[..., D // 2:]
         return np.concatenate([a * c - b * s_, a * s_ + b * c], -1)
-    nb = len({k.split(".")[2] for k in W if k.startswith("v.blk.")})
+    nb = len({k.split(".")[2] for k in W if k.startswith("v.blk.")}); deep = []
     for i in range(nb):
         p = f"v.blk.{i}."
         cur = ln(h, W[p + "ln1.weight"], W[p + "ln1.bias"], eps)
@@ -153,8 +153,12 @@ def qwen3vl(W, KV, img, normalized=False):
         h = h + Lin(W, p + "attn_out")((a @ v).transpose(1, 0, 2).reshape(-1, E))
         cur = ln(h, W[p + "ln2.weight"], W[p + "ln2.bias"], eps)
         h = h + Lin(W, p + "ffn_down")(gelu_tanh(Lin(W, p + "ffn_up")(cur)))
+        d = f"v.deepstack.{i}."
+        if d + "fc1.weight" in W:   # DeepStack: this layer's merged rows through their own merger
+            g = ln(h.reshape(-1, E * m * m), W[d + "norm.weight"], W[d + "norm.bias"], eps)
+            deep.append(Lin(W, d + "fc2")(gelu_tanh(Lin(W, d + "fc1")(g))))
     h = ln(h, W["v.post_ln.weight"], W["v.post_ln.bias"], eps).reshape(-1, E * m * m)
-    return Lin(W, "mm.2")(gelu_tanh(Lin(W, "mm.0")(h)))
+    return np.concatenate([Lin(W, "mm.2")(gelu_tanh(Lin(W, "mm.0")(h)))] + deep, -1)   # [rows, out * (1 + deepstack)]
 
 def muse_glimmer(W, KV, img, normalized=False):
     P = KV["clip.vision.patch_size"]; E = KV["clip.vision.embedding_length"]; NH = KV["clip.vision.attention.head_count"]

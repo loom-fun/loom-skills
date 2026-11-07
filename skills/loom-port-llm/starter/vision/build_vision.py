@@ -160,12 +160,12 @@ def write_component(pkg, card, vcfg, vc, max_rows=None):
     open(os.path.join(prog, "vision_encoder.loom"), "w").write(GC.encoder_program(vc))
     # default stage size (cold preparation compiles one): a square of the median token budget
     side = int(round((F["tokens"][1] ** 0.5) / 2)) * f
-    open(os.path.join(prog, "vision_prepare.loom"), "w").write(GC.prepare_program(vc, (side, side), vc["out"], max_rows))
+    open(os.path.join(prog, "vision_prepare.loom"), "w").write(GC.prepare_program(vc, (side, side), vc["out_row"], max_rows))
     open(os.path.join(prog, "vision_stages.loom"), "w").write(GC.stages_library())
     # scratch at the largest size (bytes), for the memory forecast
     T = max_rows * F["merge"] ** 2; Tp = -(-T // 256) * 256; Mp = -(-max_rows // 64) * 64
     scratch = sum((Tp if r == "Tp" else Mp) * w * b for r, w, b in EN.buffer_exprs(vc).values()) + 4096 * (f * max_rows ** 0.5 + 64) * 3 * 2
-    open(os.path.join(prog, "vision_control.loom"), "w").write(GC.control_program(vc, vc["out"], max_rows, int(scratch)))
+    open(os.path.join(prog, "vision_control.loom"), "w").write(GC.control_program(vc, vc["out_row"], max_rows, int(scratch)))
     name = os.path.basename(vcfg["mmproj"])
     link = os.path.join(pkg, "parameter", name)
     if os.path.lexists(link):
