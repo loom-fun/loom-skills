@@ -1,6 +1,7 @@
 {
- "_comment": "Temporary: the Qwen3-8B reused agent turn with the near-tie noise bar (skills: the dense-fixes branch + this branch).",
+ "_comment": "Temporary: the gemma-3-1b and Qwen3-Coder compare cases with the near-tie noise bar (skills: each port's starter branch + this branch).",
  "jobs": [
-  {"name": "q3-8b-neartie", "spec": "unsloth/Qwen3-8B-GGUF:Qwen3-8B-Q4_K_M.gguf", "reference": "auto", "model_id": "Qwen/Qwen3-8B", "skills_ref": "origin/neartie-eval-dense"}
+  {"name": "gemma-3-1b-it-neartie3", "spec": "ggml-org/gemma-3-1b-it-GGUF:gemma-3-1b-it-Q4_K_M.gguf", "reference": "auto", "model_id": "google/gemma-3-1b-it", "skills_ref": "origin/neartie-eval-gemma3"},
+  {"name": "q3moe-coder-neartie3", "spec": "ggml-org/Qwen3-Coder-30B-A3B-Instruct-GGUF:Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf", "reference": "auto", "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct", "skills_ref": "origin/neartie-eval-coder"}
  ]
 }
