@@ -1882,6 +1882,84 @@ def fuse_post_add_row_scale(program):
     return program, "".join(post_add_norm_rs(lv) for lv in sorted(used))
 
 
+# DeepStack (Qwen3-VL, cfg["vision"]["deepstack"] = n): an image row is n + 1 slices of H floats; g_embed takes slice 0,
+# and after trunk layer k < n, g_deepstack adds slice k + 1 to the residual of image inputs and renormalizes their h
+# (llama.cpp qwen3vl.cpp: deepstack_out = l_out + inp_embd[(k + 1) * n_embd ...]). Text inputs are untouched.
+DEEPSTACK = int((VISION or {}).get("deepstack") or 0)
+if DEEPSTACK:
+    NORMS += f"""
+// x[t] += feature slice %level of image input t; h[t] = rmsnorm(x[t]) * w_next (image inputs only).
+kernel.def export("g_deepstack") @g_deepstack(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %level_arg: index, %ids: buffer, %meta: buffer, %tinfo: buffer, %w: buffer, %x: buffer, %h: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %level = index.assume %level_arg [range(%level_arg, 1, {DEEPSTACK})] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %groups = index.constant {HG} : index
+  %zero_f = scalar.constant 0.0 : f32
+  %zero32 = vector.constant 0.0 : vector<32xf32>
+{ids_prelude()}{FEATURE_FLAG}  %active = index.cmp ult, %lane, %groups : index
+  %work = scalar.andi %active, %is_feat : i1
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
+  %sum_x = scf.if %work -> (vector<32xf32>) {{
+    %bl = index.assume %lane [range(%lane, 0, {HG - 1})] : index
+    %xv = vector.load %x_view[%token, %bl, %c0] : view<[%tokens]x{HG}x32xf32> -> vector<32xf32>
+    %fo_u = scalar.maxsi %feat_word, %mixed_zero : i32
+    %fo_i = index.cast %fo_u : i32 to index
+    %fo = index.scale %fo_i, %feat_one_byte : index, offset -> offset
+    %slice_bytes = index.constant {H * 4} : offset
+    %slice_at = index.scale %level, %slice_bytes : index, offset -> offset
+    %so = index.add %fo, %slice_at : offset
+    %fview = buffer.view %ids[%so] : buffer -> view<{HG}x32xf32>
+    %fv = vector.load %fview[%bl, %c0] : view<{HG}x32xf32> -> vector<32xf32>
+    %s = vector.addf %xv, %fv : vector<32xf32>
+    scf.yield %s : vector<32xf32>
+  }} else {{
+    scf.yield %zero32 : vector<32xf32>
+  }}
+  %squares = vector.mulf %sum_x, %sum_x : vector<32xf32>
+  %local = vector.reduce<addf> %squares, %zero_f : vector<32xf32>, f32
+  %sum = kernel.workgroup.reduce<addf> %local : f32
+  %count = scalar.constant {float(H)} : f32
+  %eps = scalar.constant {EPS} : f32
+  %mean = scalar.divf %sum, %count : f32
+  %stable = scalar.addf %mean, %eps : f32
+  %inverse = scalar.rsqrtf %stable : f32
+  %inverses = vector.splat %inverse : vector<32xf32>
+  scf.if %work {{
+    %bl = index.assume %lane [range(%lane, 0, {HG - 1})] : index
+    %h_view = buffer.view %h[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
+    %w_view = buffer.view %w[%zero] : buffer -> view<{HG}x32xf32>
+    vector.store %sum_x, %x_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{HG}x32xf32>
+    %weights = vector.load %w_view[%bl, %c0] : view<{HG}x32xf32> -> vector<32xf32>
+    %n2 = vector.mulf %sum_x, %inverses : vector<32xf32>
+    %hv = vector.mulf %n2, %weights : vector<32xf32>
+    vector.store %hv, %h_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{HG}x32xf32>
+  }}
+  kernel.return
+}}
+"""
+
+
+def deepstack_wiring(program):
+    """After the closing g_post_add_norm of trunk layers 0 .. DEEPSTACK-1 (it wrote x and h), launch g_deepstack."""
+    for i in range(DEEPSTACK):
+        a = re.search(rf"  // ---- layer {i}[ \n]", program).start(); b = re.search(rf"  // ---- layer {i + 1}[ \n]", program).start()
+        m = list(re.finditer(r"  kernel\.launch @g_post_add_norm\[%t\]\(%t, %y, %\w+, %x, (%\w+), %h\) : [^\n]*\n", program[a:b]))[-1]
+        at = a + m.end()
+        program = (program[:at] + f"  %ds_level_{i} = index.constant {i + 1} : index\n"
+                   f"  kernel.launch @g_deepstack[%t](%t, %ds_level_{i}, %tokens, %metadata, %info, {m.group(1)}, %x, %h) : [index](index, index, buffer, buffer, buffer, view<{H}xf32>, buffer, buffer)\n"
+                   + program[at:])
+    return program
+
+
 MROPE = CFG.get("mrope")   # {"sections": [t, h, w, e], "interleaved": bool}: Qwen-VL multi-axis RoPE (image input)
 
 
@@ -4214,6 +4292,7 @@ if __name__ == "__main__":
     out_dir = os.environ.get("LLM_OUT") or os.path.join(here, "out")
     os.makedirs(out_dir, exist_ok=True)
     program, head_fmt = model()  # first: records the mv / GEMM variants it launches
+    program = deepstack_wiring(program) if DEEPSTACK else program
     program = last_out_select_program(program) if LAST_OUT else program
     spec_kernels = ""
     if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too
