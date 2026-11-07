@@ -38,6 +38,13 @@ def deq(name):
     t = T[name]; return dequantize(np.asarray(t.data), t.tensor_type).reshape(int(t.shape[1]), int(t.shape[0])) if len(t.shape) == 2 else np.asarray(t.data, dtype=np.float32)
 H, D, QH, KVH, eps = cfg["hidden"], cfg["head_dim"], cfg["heads"], cfg["kv_heads"], cfg["rms_eps"]
 rng = np.random.default_rng(0)
+
+
+def ffn_act(g):
+    """The FFN gate activation of the reference: gelu-tanh for GEGLU (cfg ffn_act "gelu"), else SiLU (SwiGLU)."""
+    if cfg.get("ffn_act") == "gelu":
+        return 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))
+    return g / (1 + np.exp(-g))
 cases = []
 def save(n, a): np.save(os.path.join(out, n + ".npy"), a)
 def ty(a): return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int8": "i8", "int32": "i32", "float16": "f16"}[str(a.dtype)] + ">"
@@ -259,10 +266,8 @@ if ACT_Q8 and _g is not None:
 }}
 """)
         # the 1-token kernel against numpy: act(gate) * up on the int8 activations (SwiGLU, or GEGLU for ffn_act gelu)
-        act = ((lambda g: 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))) if cfg.get("ffn_act") == "gelu"
-               else (lambda g: g / (1 + np.exp(-g))))
         xs = rng.standard_normal((1, H)).astype(np.float32); xq = q8_ref(xs).astype(np.float64)
-        ysw = act(xq @ deq(gn).T.astype(np.float64)) * (xq @ deq(un).T.astype(np.float64))
+        ysw = ffn_act(xq @ deq(gn).T.astype(np.float64)) * (xq @ deq(un).T.astype(np.float64))
         save("sw_x1", xs); save("sw_y1", ysw.astype(np.float32))
         R1 = iq_r(n, H, 1, True)
         k1 = f"g_mv_{fmt}_k{H}_swiglu_q8" + (f"_r{R1}" if R1 != 16 else "")
@@ -288,10 +293,8 @@ if ACT_Q8 and _g is not None:
 if cfg.get("ffn_act") == "gelu" and any(f"blk.{li}.ffn_gate.weight" in T and f"blk.{li}.ffn_up.weight" in T
        and T[f"blk.{li}.ffn_gate.weight"].tensor_type != T[f"blk.{li}.ffn_up.weight"].tensor_type for li in range(cfg["layers"])):
     FFW = max(cfg["ffn"]) if isinstance(cfg["ffn"], list) else cfg["ffn"]
-    act = ((lambda g: 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))) if cfg.get("ffn_act") == "gelu"
-           else (lambda g: g / (1 + np.exp(-g))))
     fg = (2 * rng.standard_normal((3, FFW))).astype(np.float32); fu = rng.standard_normal((3, FFW)).astype(np.float32)
-    save("sm_f", fg); save("sm_u", fu); save("sm_y", (act(fg.astype(np.float64)) * fu).astype(np.float32))
+    save("sm_f", fg); save("sm_u", fu); save("sm_y", (ffn_act(fg.astype(np.float64)) * fu).astype(np.float32))
     cases.append(f"""check.case public @silu_mul {{
   %t = check.literal value(3) : index
   %n = check.literal value({FFW}) : index
@@ -764,9 +767,7 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
             g = (x16.astype(np.float64) @ Ws.T) * inv[:, None]
             if swiglu:
                 u = (x16.astype(np.float64) @ U.T) * inv[:, None]
-                act = (0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3))) if cfg.get("ffn_act") == "gelu"
-                       else g / (1 + np.exp(-g)))   # GEGLU ports (gemma4) swap the GEMM's silu for gelu-tanh
-                yv = act * u
+                yv = ffn_act(g) * u   # GEGLU ports (gemma4) swap the GEMM's silu for gelu-tanh
             else:
                 yv = g
             tag = f"gm_{fmt}_{'sw' if swiglu else 'st'}_{rows}"
@@ -853,8 +854,6 @@ def prep_cases(nm, up, fmt, K, n, W, U, tag0, seen_mv):
     if (fmt, K, bool(up)) in seen_mv or K // 32 > 1024:
         return
     seen_mv.add((fmt, K, bool(up)))
-    gelu = cfg.get("ffn_act") == "gelu"
-    act = (lambda g: 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))) if gelu else (lambda g: g / (1 + np.exp(-g)))
     B = n * K // 32
     Wq = q8_ref(W.astype(np.float32)).astype(np.float64); Uq = q8_ref(U.astype(np.float32)).astype(np.float64) if up else None
     names = [("w", nm)] + ([("u", up)] if up else [])
@@ -874,7 +873,7 @@ def prep_cases(nm, up, fmt, K, n, W, U, tag0, seen_mv):
     k1 = f"g_mv_q8_0_k{K}{sw}_q8" + (f"_r{R1}" if R1 != 16 else "")
     for tg in (1, 4, 8, 16):
         xs = rng.standard_normal((tg, K)).astype(np.float32); xr = q8_ref(xs).astype(np.float64)
-        y = act(xr @ Wq.T) * (xr @ Uq.T) if up else xr @ Wq.T
+        y = ffn_act(xr @ Wq.T) * (xr @ Uq.T) if up else xr @ Wq.T
         tag = f"{tag0}_prep_t{tg}"; save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
         Rt = iq_r(nr, K, tg, bool(up))
         kt = f"g_mv_q8_0_k{K}{sw}" + (f"_t{tg}" if tg > 1 else "") + "_q8" + (f"_r{Rt}" if Rt != 16 else "")
@@ -913,8 +912,6 @@ def drafter_cases():
         return
     draw = lambda nm: np.asarray(DT[nm].data).view(np.int8).reshape(-1)
     ddeq = lambda nm: dequantize(np.asarray(DT[nm].data), DT[nm].tensor_type).reshape(int(DT[nm].shape[1]), int(DT[nm].shape[0]))
-    gelu = cfg.get("ffn_act") == "gelu"   # kits with a GEGLU target (gemma4) emit every gate/up kernel with gelu-tanh
-    act = (lambda g: 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))) if gelu else (lambda g: g / (1 + np.exp(-g)))
     names = ["fc.weight"] + [f"blk.0.{s}.weight" for s in ("attn_q", "attn_k", "attn_output", "ffn_gate", "ffn_down")]
     seen_mv, seen_gm = set(), set()
     for nm in names:
@@ -940,7 +937,7 @@ def drafter_cases():
             seen_mv.add((fmt, K, sw))
             for tg in (1, 4):
                 xs = rng.standard_normal((tg, K)).astype(np.float32)
-                y = act(xs @ W.T) * (xs @ U.T) if sw else xs @ W.T
+                y = ffn_act(xs @ W.T) * (xs @ U.T) if sw else xs @ W.T
                 tag = f"{tag0}_t{tg}"; save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
                 _R = pick_r(n, K, tg) if n == H else 16
                 kern = f"g_mv_{fmt}_k{K}" + ("_swiglu" if sw else "") + ("_t4" if tg == 4 else "") + (f"_r{_R}" if _R != 16 else "")
@@ -965,7 +962,7 @@ def drafter_cases():
             inv = rng.uniform(0.25, 2.0, rows).astype(np.float32)
             sc = np.stack([np.ones(rows, np.float32), inv], 1)
             g = (x16.astype(np.float64) @ W.T) * inv[:, None]
-            yv = act(g) * ((x16.astype(np.float64) @ U.T) * inv[:, None]) if sw else g
+            yv = ffn_act(g) * ((x16.astype(np.float64) @ U.T) * inv[:, None]) if sw else g
             tag = f"{tag0}_gm{rows}"
             save(tag + "_x", x16); save(tag + "_s", sc); save(tag + "_y", yv.astype(np.float32))
             tol = 3.0e-2 * float(np.abs(yv).std() + 1e-6)
