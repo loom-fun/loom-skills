@@ -81,7 +81,10 @@ if DRAFT and DRAFT["kind"] == "dflash":
     # GEMM, whose rounding can flip near-ties (MoE routing amplifies them). draft/tune.py tries 3, 5 and 7.
     if not a.draft_depth and not (_tuned.get("kind") == "dflash" and _tuned.get("depth")):
         DRAFT["depth"] = min(3, _d["block_size"] - 1)
-pos_bytes = cfg["kv_heads"] * cfg["head_dim"] * 2
+# F16 K (or V) bytes per KV position: the widest layer kind (Gemma-4: kv_heads x head_dim_swa on sliding layers,
+# kv_heads_global x head_dim on global ones; gemma4-example gen_llm.py POS_BYTES)
+pos_bytes = 2 * max(cfg["kv_heads"] * (cfg.get("head_dim_swa") or cfg["head_dim"]),
+                    (cfg.get("kv_heads_global") or cfg["kv_heads"]) * cfg["head_dim"])
 kv_layers = cfg.get("kv_layers", cfg["layers"])
 kv_per_position = pos_bytes * 2 * kv_layers
 if DRAFT and DRAFT["kind"] == "mtp":   # the MTP block's K/V shares the pool's pages
