@@ -1,6 +1,6 @@
 {
- "_comment": "Validation of #72 + #74 + #77 (not for merge): the 0.6B dense hermes port whose agent_think_off failed in campaign wave 5 (0 cached on every follow-up turn), same spec.",
+ "_comment": "Validation of #72 + #74 + #77 (not for merge). Round 1 (run 42341602658): the 0.6B dense hermes port, PASS. Round 2: the 4B port again, with #74's history-text fix.",
  "jobs": [
-  {"name": "qwen3-0-6b", "spec": "unsloth/Qwen3-0.6B-GGUF:Qwen3-0.6B-Q4_K_M.gguf", "reference": "auto", "model_id": "Qwen/Qwen3-0.6B"}
+  {"name": "qwen3-4b", "spec": "ggml-org/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf", "reference": "auto", "model_id": "Qwen/Qwen3-4B"}
  ]
 }
