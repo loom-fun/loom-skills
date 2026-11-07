@@ -1,6 +1,6 @@
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -597,5 +597,309 @@
+@@ -761,5 +761,309 @@
          json.dump(chat, open(sys.argv[2], "w"), indent=1, ensure_ascii=False)
  
  
@@ -313,13 +313,13 @@
      main()
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -261,6 +261,9 @@
+@@ -269,6 +269,9 @@
          for name, ok, detail in results:
              print("chat", "OK  " if ok else "SKIP" if ok is None else "FAIL", name, "-", detail)
          cfg["chat"] = chat
 +        if chat["call_format"] == "harmony":   # generation also ends at <|call|> (llama.cpp's harmony EOG ids)
 +            cfg["extra_eos_ids"] = sorted(set(cfg["extra_eos_ids"]) | {tokens.index(s) for s in ("<|call|>", "<|return|>")
 +                                                                       if s in tokens and tokens.index(s) != eos})
-         print(f"chat: thinking={chat['thinking']} (default {'on' if chat['thinking_default'] else 'off'}), "
-               f"tool calls={chat['call_format']}; generation prompt {chat['generation_prompt']!r}")
-         if chat.get("reasoning_instructions"):
+         if chat["call_format"] == "json" and "<|python_tag|>" in tokens:
+             # Llama 3.1 opens a call with <|python_tag|> (the template never prints it). Kept in the decoded text
+             # (nonspecial) so complete_text stores the turn as generated: the KV row then matches the canonical

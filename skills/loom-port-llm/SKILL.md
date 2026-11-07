@@ -287,8 +287,9 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
     `LLAMA_ROPE_TYPE_NEOX`.
   - `norm` pairs (2d, 2d+1). Used by llama/mistral; `LLAMA_ROPE_TYPE_NORM`.
   - A wrong value still gives plausible-looking text for a few tokens, then degrades.
-- `rope_theta`; YaRN scaling is applied when the GGUF says `rope.scaling.type` yarn (`rope_scaling`, as llama.cpp
-  does: gpt-oss); linear scaling is **not** implemented, so add it in `qk_rope()` if the model uses it.
+- `rope_theta`; Llama-3 frequency factors (`rope_freqs.weight` -> `rope_freq_factors`) and YaRN scaling (`rope_scaling`,
+  when the GGUF says `rope.scaling.type` yarn, as llama.cpp does: gpt-oss) are applied; linear scaling is **not**
+  implemented, so add it in `qk_rope()` if the model uses it.
 - `qk_norm` (per-head RMSNorm on q/k before RoPE), `post_norms` (Gemma-style
   post-attention/FFN norms), `attn_gate` (sigmoid output gate), `embed_scale`
   (Gemma multiplies embeddings by √hidden), `embed_norm`.
@@ -306,7 +307,23 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
     (`*-Instruct-2507`); `thinking_default` (Qwen3: on; Qwen3.5 small models: **off**);
   - `call_format`: `hermes` (Qwen2.5/Qwen3), `qwen_xml` (Qwen3.5/Qwen3-Coder), `glm`, `pythonic`
     (LFM2: `<|tool_call_start|>[f(a='x', n=3)]<|tool_call_end|>`, parsed in control.loom);
-  - `default_system` (Qwen2.5 inserts "You are Qwen, created by Alibaba Cloud…").
+  - `default_system` (Qwen2.5 inserts "You are Qwen, created by Alibaba Cloud…"); `default_system_tools` when the
+    template swaps in another default when tools are present (Nanbeige: a "tool-calling expert" prompt; the text
+    beside the tools block, separator included; absent otherwise);
+  - `history_think_before: "empty"` (MiniCPM-V): turns before the last user query keep an empty think block.
+  - A template that renders reasoning in history reads as thinking `always`, also for models that never reason
+    (Qwen3-*-Instruct-2507); no template signal tells them from Flint or Jan-v1. port.sh's smoke test decides: two
+    finished replies that never leave the reasoning channel switch the block to `never` (`chat_probe.py GGUF --never
+    cfg.json`, verified against the template), rebuild and smoke again.
+  - `bos` only when the template prints `bos_token` (a GGUF whose bos id is the role tag `<|im_start|>` is not).
+  - Llama 3.x (`call_format` `json`: `{"name": ..., "parameters": ...}` without a wrapper, one call per turn):
+    `system_preamble`/`system_preamble_tools` (the always-printed system block's "Cutting Knowledge Date ... Today
+    Date ..." text, "Environment: ipython" with tools), `tools_in_user` (the tools open the first user message),
+    `tools_indent` (tojson(indent=4)), `calls_drop_content`, `tool_content_json` (results as JSON strings);
+    `templates/control_json.loom` holds their control functions. The date: `strftime_now` renders the request day in
+    llama.cpp, which a control program can't; Loom renders the templates' own no-clock date, 26 Jul 2024
+    (`chat_probe.CLOCK`), so prompts are the same every day. The architecture side is `rope_freq_factors`
+    (`rope_freqs.weight`: llama.cpp divides each rotary pair's frequency by it).
   - `reasoning_instructions` (Qwen3.8: "Reasoning effort is set to xhigh. …" per `reasoning_effort`, only
     with thinking on, `reasoning_separator` before the tools text / system message): build.py advertises
     those efforts (plus none = thinking off) and `chat_begin` renders the request effort's text.
@@ -375,7 +392,8 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   after `leading_dense` dense ones (an MoE MTP block generates too; not yet validated on the GPU). `inspect_gguf.py` fills `cfg["moe"]` from the GGUF;
   routing choices llama.cpp hard-codes per architecture instead of writing them (`expert_gating_func`,
   `expert_weights_norm`) come from `MOE_DEFAULTS`: add a row for a new MoE architecture from its
-  `src/models/<arch>.cpp` (`build_moe_ffn` arguments). Expert formats: Q4_K/Q5_K/Q6_K/Q8_0/MXFP4 (`gen_moe.FMT`; an MTP
+  `src/models/<arch>.cpp` (`build_moe_ffn` arguments). Expert formats: Q4_K/Q5_K/Q6_K/Q8_0/MXFP4, gate and up may differ
+  (`GATE+UP` kernels, e.g. bartowski's MiniCPM-V-4.7 Q4_K_M: Q4_K gate, Q6_K up) (`gen_moe.FMT`; an MTP
   block in another format is left out). Kernel tests cover the decode and prefill chains on the real tensors.
   Ported this way: Qwen3.6-35B-A3B (`qwen35moe`, hybrid + MoE, 256 experts top-8), gpt-oss-20b (MXFP4 experts,
   `reference/gpt-oss-example` for its chat format).

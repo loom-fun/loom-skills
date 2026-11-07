@@ -523,15 +523,17 @@ def route(H, E, KU, gating, norm, bias, wty="f32"):
 
 def expert_mv(fmt, K, N, E, KU, R, mode, bias=False, act=None):
     """mode 'gu': act[a] = silu(Wg[e] x[a/KU]) * Wu[e] x[a/KU]; mode 'dn': ys[a] = Wd[e] x[a].
+    fmt "GATE+UP" ('gu'): gate and up weights in different formats, each with its own strides and dequant.
     bias: per-expert output biases (gpt-oss ffn_{gate,up,down}_exps.bias, [E, N] f32) added before the activation;
     act: the gate/up activation (see act_scalar)."""
+    fmt, _, fmt2 = fmt.partition("+")
     groups = K // 32
     lanes = (groups + 31) // 32 * 32
     waves = lanes // 32
     rb = row_bytes(fmt, K)
     eb = rb * N
     nw = 2 if mode == "gu" else 1
-    name = f"g_moe_{mode}_{fmt}_k{K}_r{R}"
+    name = f"g_moe_{mode}_{fmt}{'_' + fmt2 if fmt2 else ''}_k{K}_r{R}"
     wargs = "%w: buffer, %w2: buffer" if nw == 2 else "%w: buffer"
     if bias:
         wargs += ", %bg: buffer, %bu: buffer" if nw == 2 else ", %bd: buffer"
@@ -613,9 +615,23 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
     import os as _os
     fold = _os.environ.get("MOE_FOLD", "1") != "0"
     for wi, w in enumerate(["w", "w2"][:nw]):
-        if fold and fmt == "q4_k":
+        fw, o, within = fmt, "%o", "%within"
+        if wi and fmt2:   # the up weight in its own format: its row, expert and block strides
+            fw, o, within = fmt2, "%o_u", "%within_u"
+            L.append(f"""    %row_bytes_u = index.constant {row_bytes(fmt2, K)} : offset
+    %expert_bytes_u = index.constant {row_bytes(fmt2, K) * N} : offset
+    %block_bytes_u = index.constant {FMT[fmt2]} : offset
+    %e_off_u = index.scale %e, %expert_bytes_u : index, offset -> offset
+    %cgpb_u = index.constant {SB[fmt2] // 32} : index
+    %blk_u = index.div %g, %cgpb_u : index
+    %within_u = index.rem %g, %cgpb_u : index
+    %ba_u = index.scale %blk_u, %block_bytes_u : index, offset -> offset
+    %ro_u = index.scale %row, %row_bytes_u : index, offset -> offset
+    %o0_u = index.add %ro_u, %ba_u : offset
+    %o_u = index.add %o0_u, %e_off_u : offset""")
+        if fold and fw == "q4_k":
             L.append(f"""    %wv{wi}, %sc{wi}, %mn{wi} = scf.if %ok -> (vector<32xf32>, f32, f32) {{
-      %v, %sa, %sb = func.call @g_q4_k_codes(%{w}, %o, %within) : (buffer, offset, index) -> (vector<32xf32>, f32, f32)
+      %v, %sa, %sb = func.call @g_q4_k_codes(%{w}, {o}, {within}) : (buffer, offset, index) -> (vector<32xf32>, f32, f32)
       scf.yield %v, %sa, %sb : vector<32xf32>, f32, f32
     }} else {{
       scf.yield %zero32, %zero_f, %zero_f : vector<32xf32>, f32, f32
@@ -626,7 +642,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
     %d{wi} = scalar.subf %qs{wi}, %qm{wi} : f32""")
         elif fold:
             L.append(f"""    %wv{wi} = scf.if %ok -> (vector<32xf32>) {{
-      %v = func.call @g_{fmt}_values(%{w}, %o, %within) : (buffer, offset, index) -> (vector<32xf32>)
+      %v = func.call @g_{fw}_values(%{w}, {o}, {within}) : (buffer, offset, index) -> (vector<32xf32>)
       scf.yield %v : vector<32xf32>
     }} else {{
       scf.yield %zero32 : vector<32xf32>
@@ -634,7 +650,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
     %d{wi} = vector.dotf<reassoc|contract> %wv{wi}, %xg, %zero_f : vector<32xf32>, vector<32xf32>, f32""")
         else:
           L.append(f"""    %d{wi} = scf.if %ok -> (f32) {{
-      %dv = func.call @g_{fmt}_dot(%{w}, %o, %within, %xg) : (buffer, offset, index, vector<32xf32>) -> (f32)
+      %dv = func.call @g_{fw}_dot(%{w}, {o}, {within}, %xg) : (buffer, offset, index, vector<32xf32>) -> (f32)
       scf.yield %dv : f32
     }} else {{
       scf.yield %zero_f : f32
@@ -963,13 +979,15 @@ def _gemm_bias_act(text, mode, N, E, bias, act):
 def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, bias=False, act=None):
     """64x64-tile WMMA GEMM over the bucketed rows of one expert per row tile (rows = max_tiles*64).
     mode 'swiglu' (gate/up): A rows gathered from x16[token = rowmap/KU]; 'store' (down): A = sorted rows.
+    fmt "GATE+UP" (swiglu): gate and up weights in different formats (gen_gemm.gemm's fmt2).
     bias / act: as expert_mv (per-expert output biases, the gate/up activation)."""
     import gen_gemm
+    fmt, _, fmt2 = fmt.partition("+")
     rb = N and (K // SB[fmt] * FMT[fmt])
     eb = rb * N
-    text = gemm_fn(fmt, mode)
-    base = f"g_gemm_{fmt}_{mode}"
-    name = f"g_moe_g{'gu' if mode == 'swiglu' else 'dn'}_{fmt}_k{K}"
+    text = gemm_fn(fmt, mode, fmt2) if fmt2 else gemm_fn(fmt, mode)
+    base = f"g_gemm_{fmt}_{fmt2}_{mode}" if fmt2 else f"g_gemm_{fmt}_{mode}"
+    name = f"g_moe_g{'gu' if mode == 'swiglu' else 'dn'}_{fmt}{'_' + fmt2 if fmt2 else ''}_k{K}"
     def rep(a, b, cnt=1):
         nonlocal text
         assert text.count(a) == cnt, (name, a, text.count(a))
@@ -999,6 +1017,13 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, bias=False, act=None):
 """)
     rep("  %w_row_origin = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset\n",
         "  %w_row_origin0 = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset\n  %w_row_origin = index.add %w_row_origin0, %expert_off : offset\n")
+    if fmt2:   # the up weight's own expert stride
+        rep("  %w2_row_origin = index.scale %bounded_w_out_row, %row_bytes2 : index, offset -> offset\n",
+            f"""  %w2_row_origin0 = index.scale %bounded_w_out_row, %row_bytes2 : index, offset -> offset
+  %expert_bytes2 = index.constant {K // SB[fmt2] * FMT[fmt2] * N} : offset
+  %expert_off2 = index.scale %expert, %expert_bytes2 : index, offset -> offset
+  %w2_row_origin = index.add %w2_row_origin0, %expert_off2 : offset
+""")
     rep("  %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>", "  %x_view = buffer.view %x[%origin] : buffer -> view<[%xrows]x[%k]xf16>")
     rep("view<[%rows]x[%k]xf16>", "view<[%xrows]x[%k]xf16>", text.count("view<[%rows]x[%k]xf16>"))
     rep("view<[%rows]x2xf32>", "view<[%xrows]x2xf32>", text.count("view<[%rows]x2xf32>"))

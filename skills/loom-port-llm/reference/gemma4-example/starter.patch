@@ -1,6 +1,6 @@
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -196,6 +196,8 @@
+@@ -203,6 +203,8 @@
  
  def derive(template_text, bos="", eos=""):
      T = Template(template_text, bos, eos)
@@ -9,18 +9,18 @@
      notes = []
      chat = {}
      # BOS: emitted by the control program at the very start when the template prints it.
-@@ -339,10 +341,6 @@
-         rest = s_body[len("SYSPROBE"):]
-         lead = rest[:rest.index(printed[0]) - len(line)]
-         body_start = len(lead) - len(lead.lstrip())
--        # Tools in their own system block after the system message (Flint: "<|system|>SYS<|system|>\n# Tools"):
--        # the second role tag belongs to the separator, not to the tools prefix.
--        if chat["system_prefix"] and lead.startswith(chat["system_prefix"]):
--            body_start = len(chat["system_prefix"])
-         chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
-     elif s_body.endswith("SYSPROBE"):
-         chat["tools_after_system"] = False
-@@ -418,6 +416,8 @@
+@@ -394,10 +396,6 @@
+             rest = s_body[len("SYSPROBE"):]
+             lead = rest[:rest.index(printed[0]) - len(line)]
+             body_start = len(lead) - len(lead.lstrip())
+-            # Tools in their own system block after the system message (Flint: "<|system|>SYS<|system|>\n# Tools"):
+-            # the second role tag belongs to the separator, not to the tools prefix.
+-            if chat["system_prefix"] and lead.startswith(chat["system_prefix"]):
+-                body_start = len(chat["system_prefix"])
+             chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
+         elif s_body.endswith("SYSPROBE"):
+             chat["tools_after_system"] = False
+@@ -520,6 +518,8 @@
  
  def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reasoning_effort=None):
      """Python model of control.loom's rendering (chat_begin + chat_message + chat_end)."""
@@ -29,7 +29,7 @@
      tools = None if chat.get("call_format") == "none" else tools   # a chat-only block ignores tools, as its template does
      trim = (lambda s: s.strip()) if chat["trim_content"] else (lambda s: s)
      out = chat.get("bos", "")
-@@ -484,6 +484,8 @@
+@@ -603,6 +603,8 @@
  
  
  def render_call(chat, call):
@@ -38,7 +38,7 @@
      args = call["arguments"]
      if chat["call_format"] == "hermes":
          a = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
-@@ -528,6 +530,306 @@
+@@ -650,6 +652,306 @@
  ]
  
  
@@ -345,16 +345,16 @@
  def verify(template_text, chat, bos="", eos=""):
      """Returns [(name, ok, detail)]: template render vs simulate() for each conversation."""
      T = Template(template_text, bos, eos)
-@@ -535,7 +837,7 @@
-     extra = [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL, CALL2], reasoning="R"),
-                                    {"role": "tool", "tool_call_id": "call_0", "content": "ok"}], TOOLS)] \
-         if chat["call_format"] == "pythonic" else []
+@@ -660,7 +962,7 @@
+         [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL]),
+                               {"role": "tool", "tool_call_id": "call_0", "content": 'say "hi"\n\tback\\slash é'}], TOOLS)] \
+         if chat["call_format"] == "json" else []
 -    for name, msgs, tools in CONVERSATIONS + extra:
 +    for name, msgs, tools in CONVERSATIONS + extra + (GEMMA4_CONVERSATIONS if chat.get("format") == "gemma4" else []):
          for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
              label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")
              try:
-@@ -599,3 +901,21 @@
+@@ -763,3 +1065,21 @@
  
  if __name__ == "__main__":
      main()
@@ -636,7 +636,7 @@
  assert QH % KVH == 0 and G <= 16, "need heads % kv_heads == 0 and at most 16 query heads per KV head"
  assert HG <= 256 and H % 32 == 0, "hidden must be a multiple of 32 and at most 8192"
  UNROLL = int(os.environ.get("ATTN_UNROLL", "16"))   # keys per decode-attention block
-@@ -1169,7 +1185,10 @@
+@@ -1170,7 +1186,10 @@
          scf.yield %nx : f32
        }}""")
      if swiglu:
@@ -648,7 +648,7 @@
        %value = scalar.mulf %silu, %t1 : f32""")
      else:
          L.append("      %value = scalar.addf %t0, %zero_f : f32")
-@@ -1630,6 +1649,21 @@
+@@ -1631,6 +1650,21 @@
  """
  
  
@@ -670,7 +670,7 @@
  ROW_SCALE = r"""
  
  // Per-row power-of-two scale (as g_row_scale) plus the scaled row as F16, the
-@@ -2053,11 +2087,11 @@
+@@ -2072,11 +2106,11 @@
      yt = ", ".join(["f32"] * n)
      xs = ", ".join(f"%x{i}" for i in range(n))
      t = [f"""
@@ -684,7 +684,7 @@
    %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
    %layer = index.assume %layer_arg [range(%layer_arg, 0, {L - 1})] : index
    %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-@@ -2077,8 +2111,10 @@
+@@ -2096,8 +2130,10 @@
    %c15 = index.constant 15 : index
    %c16 = index.constant 16 : index
    %cqh = index.constant {QH} : index
@@ -696,7 +696,7 @@
    %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
    %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
    %position32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
-@@ -2096,8 +2132,10 @@
+@@ -2115,8 +2151,10 @@
    %zero_f = scalar.constant 0.0 : f32
  """]
      for j, idx in enumerate(freq_idx):
@@ -709,7 +709,7 @@
          t.append(f"""  // angle = position * theta^(-2i/RD) = position * exp(-i * 2 ln(theta) / RD)
    %li{j} = index.cast {idx} : index to i32
    %lf{j} = scalar.sitofp %li{j} : i32 to f32
-@@ -2201,8 +2239,22 @@
+@@ -2220,8 +2258,22 @@
      for i in range(n):
          t.append(f"""        %h{i} = scalar.fptrunc %r{i} : f32 to f16
          view.store %h{i}, %k_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>
@@ -734,7 +734,7 @@
          view.store %vh{i}, %v_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>""")
      t.append("""      }
      }
-@@ -2213,6 +2265,18 @@
+@@ -2232,6 +2284,18 @@
      return "\n".join(t)
  
  
@@ -753,7 +753,7 @@
  def listed(text, name, grid_rest):
      """Variant of a per-token kernel dispatched over the tokens in `list`
      (count read from a device buffer for indirect dispatch)."""
-@@ -2487,7 +2551,7 @@
+@@ -2506,7 +2570,7 @@
      %stop = index.min %stop_raw, %visible : index
      %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
      %q_raw = vector.load %q_view[%token, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
@@ -762,7 +762,7 @@
      %scale_v = vector.splat %scale : vector<4xf32>
      %q4 = vector.mulf %q_raw, %scale_v : vector<4xf32>
      %zero4 = vector.splat %zero_f : vector<4xf32>
-@@ -2606,12 +2670,140 @@
+@@ -2625,12 +2689,140 @@
  
  
  def attention():
@@ -909,7 +909,7 @@
  
  
  FALLBACK = r"""
-@@ -2789,9 +2981,22 @@
+@@ -2808,9 +3000,22 @@
            %is_best = scalar.cmpf oeq, %lv, %best : f32
            %cand_id = scf.select %is_best, %li, %big : i32
            %winner = kernel.workgroup.reduce<minsi> %cand_id : i32
@@ -933,7 +933,7 @@
              view.store %winner, %cand_i[%rr] : i32, view<64xi32>
            }}
            scf.yield %best, %winner : f32, i32
-@@ -2905,7 +3110,13 @@
+@@ -2924,7 +3129,13 @@
          args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
          types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
          mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
@@ -948,7 +948,7 @@
      args = args.replace(f", {x}, {s},", f", {x16}, {s},")
      iq = ACT_Q8 and fmt in IQ_FMTS and kval // 32 <= 1024   # wider K (mv_wide: DFlash feature projections) stays f32
      if iq:   # int8 copy (g_quant_q8, launched beside the g_row_scale_f16 that makes x16): see quant_wiring()
-@@ -3257,7 +3468,9 @@
+@@ -3276,7 +3487,9 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -959,7 +959,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -3941,7 +4154,20 @@
+@@ -3963,7 +4176,20 @@
    %h16 = buffer.alloca<global> align(256) %h16_size : buffer
    %o16 = buffer.alloca<global> align(256) %o16_size : buffer
    %f16 = buffer.alloca<global> align(256) %f16_size : buffer
@@ -980,7 +980,7 @@
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if FUSED_Q:
-@@ -3971,108 +4197,95 @@
+@@ -3993,108 +4219,95 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1163,7 +1163,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -4209,8 +4422,9 @@
+@@ -4231,8 +4444,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1175,7 +1175,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if RECUR:
-@@ -4229,13 +4443,27 @@
+@@ -4251,13 +4465,27 @@
      env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
      # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
@@ -1249,51 +1249,10 @@
  for name, K in todo:
      fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
      for tg in (1, 4):
-@@ -203,104 +208,49 @@
+@@ -244,66 +249,49 @@
    check.return
  }}
  """)
--# 2c. int8 pair matvecs (gen_llm PAIR_PROJ: attention q + gate, k + v of one format and shape): at 8 and 16 tokens
--# each output equals the 1-token single-weight kernel on that weight bit for bit
--_a = next((li for li in range(cfg["layers"]) if f"blk.{li}.attn_q.weight" in T), None)
--for pa, pb in (("attn_q", "attn_gate"), ("attn_k", "attn_v")):
--    if not ACT_Q8 or _a is None:
--        break
--    an, bn = f"blk.{_a}.{pa}.weight", f"blk.{_a}.{pb}.weight"
--    if bn not in T or T[an].tensor_type != T[bn].tensor_type or tuple(T[an].shape) != tuple(T[bn].shape):
--        continue
--    fmt = T[an].tensor_type.name.lower(); n = int(T[an].shape[1])
--    if fmt not in IQ_FMTS or H // 32 > 1024:
--        continue
--    save(f"pr_{pa}_a", raw(an)); save(f"pr_{pa}_b", raw(bn)); at, bt = ty(raw(an)), ty(raw(bn))
--    for tg in (8, 16):
--        save(f"pr_{pa}_x{tg}", rng.standard_normal((tg, H)).astype(np.float32))
--        R1, Rt = iq_r(n, H, 1), iq_r(n, H, tg, 2)
--        k1 = f"g_mv_{fmt}_k{H}_q8" + (f"_r{R1}" if R1 != 16 else "")
--        kt = f"g_mv_{fmt}_k{H}_pair_t{tg}_q8" + (f"_r{Rt}" if Rt != 16 else "")
--        s1 = f"[index, index](index, index, i32, tensor<{tg}x{2 * H}xi8>, {at}, tensor<{tg}x{n}xf32>)"
--        cases.append(f"""check.case public @mvpair_{pa}_t{tg} {{
--  %n = check.literal value({n}) : index
--  %t = check.literal value({tg}) : index
--  %k = check.literal value({H}) : index
--  %acc = check.literal value(0) : i32
--  %wa = check.file.read.npy path("pr_{pa}_a.npy") : {at}
--  %wb = check.file.read.npy path("pr_{pa}_b.npy") : {bt}
--  %x = check.file.read.npy path("pr_{pa}_x{tg}.npy") : tensor<{tg}x{H}xf32>
--  %xq = check.generate.fill value(0) : tensor<{tg}x{2 * H}xi8>
--  %ya = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
--  %yb = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
--  %ea = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
--  %eb = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
--  kernel.launch @g_quant_q8[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<{tg}x{H}xf32>, tensor<{tg}x{2 * H}xi8>)
--  kernel.launch @{kt}[%n, %t](%n, %t, %acc, %xq, %wa, %wb, %ya, %yb) : [index, index](index, index, i32, tensor<{tg}x{2 * H}xi8>, {at}, {bt}, tensor<{tg}x{n}xf32>, tensor<{tg}x{n}xf32>)
--  kernel.launch @{k1}[%n, %t](%n, %t, %acc, %xq, %wa, %ea) : {s1}
--  kernel.launch @{k1}[%n, %t](%n, %t, %acc, %xq, %wb, %eb) : {s1}
--  check.expect.close actual(%ya) expected(%ea) atol(0.0) rtol(0.0) nan(different) : tensor<{tg}x{n}xf32>
--  check.expect.close actual(%yb) expected(%eb) atol(0.0) rtol(0.0) nan(different) : tensor<{tg}x{n}xf32>
--  check.return
--}}
--""")
 -# 3. qk norm + rope on q (live = 0: no KV store)
 -t = 4; pos = np.array([0, 1, 7, 300])
 -A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", [])))
@@ -1313,7 +1272,10 @@
 -    ramp = np.clip((np.arange(len(inv)) - low) / max(0.001, high - low), 0, 1)
 -    return inv * (1 - (1 - 1 / f) * ramp), y.get("attn_factor", 1.0) * (1 + 0.1 * np.log(f))
 -def rope(a):
--    inv, msc = yarn(cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD)); ang = pos[:, None] * inv[None]
+-    inv = cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD)
+-    if cfg.get("rope_freq_factors"):   # llama3 rope_freqs: each pair's frequency divided by its factor
+-        inv = inv / np.asarray(cfg["rope_freq_factors"][:RD // 2], np.float64)
+-    inv, msc = yarn(inv); ang = pos[:, None] * inv[None]
 -    c, s = np.cos(ang)[:, None] * msc, np.sin(ang)[:, None] * msc
 -    if cfg["rope_type"] == "neox":
 -        a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
@@ -1397,7 +1359,7 @@
  # 3a. output head (argmax over the vocabulary) for one selected span of 3 tokens
  t = 3
  head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
-@@ -361,64 +311,89 @@
+@@ -364,64 +352,89 @@
  """ + hl("g_head_mv_q8", "1") + "".join(hl(k, tag) for k, tag in variants) + "".join(
              f"  check.expect.close actual(%l{tag}) expected(%l1) atol(0.0) rtol(0.0) nan(different) : tensor<{S * CH * 128}xf32>\n"
              f"  check.expect.equal actual(%p{tag}) expected(%p1) : tensor<{S * CH * 2}xi32>\n" for _, tag in variants) + "  check.return\n}\n")
