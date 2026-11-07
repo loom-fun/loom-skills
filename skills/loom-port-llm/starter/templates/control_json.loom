@@ -211,6 +211,31 @@ global.rodata.def @json_call_close = bytes("7d")
 
 global.rodata.def @json_arguments_field = bytes("@@HEX_JSON_ARGUMENTS_FIELD@@")
 
+// The token a model may write before its call (chat.call_prefix_token, Llama 3.1: <|python_tag|>, kept in the
+// decoded text as nonspecial); empty when none.
+global.rodata.def @json_call_prefix = bytes("@@HEX_JSON_CALL_PREFIX@@")
+
+// Content ends at the call: the call prefix token or the call marker, whichever comes first (the rest goes to
+// parse_tools). No reasoning channel (build.py requires thinking never with JSON calls).
+func.def public @output_next(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {
+  %origin = index.constant 0 : offset
+  %one64 = scalar.constant 1 : i64
+  %marker = global.load @text_tool_marker : buffer
+  %call_prefix = global.load @json_call_prefix : buffer
+  %prefix_length = buffer.length %call_prefix
+  %has_prefix = index.cmp ne, %prefix_length, %origin : offset
+  %at_marker = func.call @text_until(%response, %marker, %previous, %phase) : (buffer, buffer, i64, i32) -> (i64)
+  %at_prefix = scf.if %has_prefix -> (i64) {
+    %value = func.call @text_until(%response, %call_prefix, %previous, %phase) : (buffer, buffer, i64, i32) -> (i64)
+    scf.yield %value : i64
+  } else {
+    scf.yield %at_marker : i64
+  }
+  %prefix_first = scalar.cmpi slt, %at_prefix, %at_marker : i64
+  %end = scf.select %prefix_first, %at_prefix, %at_marker : i64
+  func.return %one64, %previous, %end, %state : i64, i64, i64, i64
+}
+
 // End of the JSON object or array that opens at %begin (just after its closing bracket) and whether it closed
 // before %end; strings are skipped.
 func.def @json_value_end(%text: buffer, %begin: offset, %end: offset) -> (offset, i1) {

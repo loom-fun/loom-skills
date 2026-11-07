@@ -449,19 +449,32 @@ func.def @tools_body(""")
                    """      %tool_json = func.call @json_quote(%raw_text) : (buffer) -> (buffer)
       %value = func.call @join4(%open, %item_prefix, %tool_json, %item_suffix) : (buffer, buffer, buffer, buffer) -> (buffer)
 """)
-    if chat.get("calls_drop_content"):   # an assistant turn with calls renders no content (history and reuse)
+    if chat.get("calls_drop_content"):
+        # An assistant turn with calls renders no content in history (chat_message). complete_text still stores the
+        # turn as generated (content kept), so the retained row matches it; the next prompt, which drops the content,
+        # reuses that row up to the first changed byte.
         text = sub(text, "        %head = func.call @join4(%prefix, %think, %text, %separator) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
                    """        %shown_text = scf.select %has_calls, %empty, %text : buffer
         %head = func.call @join4(%prefix, %think, %shown_text, %separator) : (buffer, buffer, buffer, buffer) -> (buffer)
 """)
-        text = sub(text, "  %head = func.call @join4(%prefix, %content, %separator, %tools) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
-                   """  %shown_content = scf.select %has_calls, %empty, %content : buffer
-  %head = func.call @join4(%prefix, %shown_content, %separator, %tools) : (buffer, buffer, buffer, buffer) -> (buffer)
-""")
-    if chat["call_format"] == "json":   # control_json.loom's render_tool / parse_tools replace the generic ones
-        for fn in ("render_tool", "parse_tools"):
+    if chat["call_format"] == "json":
+        # control_json.loom's render_tool / parse_tools / output_next replace the generic ones. complete_text keeps the
+        # call-prefix token (Llama 3.1's <|python_tag|>) the model wrote before its call, so the retained row matches.
+        assert thinking == "never", "call_format json with reasoning is not modeled (control_json.loom's output_next)"
+        for fn in ("render_tool", "parse_tools", "output_next"):
             text = sub(text, f"func.def public @{fn}(", f"func.def @generic_{fn}(")
+        text = sub(text, "  %head = func.call @join4(%prefix, %content, %separator, %tools) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+                   """  %call_prefix = global.load @json_call_prefix : buffer
+  %call_scan_end = buffer.length %response
+  %prefix_at = func.call @find(%response, %c0, %call_scan_end, %call_prefix) : (buffer, offset, offset, buffer) -> (offset)
+  %prefix_written = index.cmp ult, %prefix_at, %call_scan_end : offset
+  %prefix_used = scalar.andi %prefix_written, %has_calls : i1
+  %prefix_text = scf.select %prefix_used, %call_prefix, %empty : buffer
+  %prefixed_tools = func.call @join(%prefix_text, %tools) : (buffer, buffer) -> (buffer)
+  %head = func.call @join4(%prefix, %content, %separator, %prefixed_tools) : (buffer, buffer, buffer, buffer) -> (buffer)
+""")
     return text + chat_variants(open(os.path.join(HERE, "templates", "control_json.loom"), encoding="utf-8").read()) \
+        .replace("@@HEX_JSON_CALL_PREFIX@@", hx(chat.get("call_prefix_token", ""))) \
         .replace("@@TOOLS_INDENT@@", str(chat.get("tools_indent") or 4)) \
         .replace("@@HEX_JSON_CALL_MIDDLE@@", hx('", "' + chat.get("call_arguments_key", "arguments") + '": ')) \
         .replace("@@HEX_JSON_ARGUMENTS_FIELD@@", hx('"' + chat.get("call_arguments_key", "arguments") + '"'))

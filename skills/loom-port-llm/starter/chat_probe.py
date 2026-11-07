@@ -694,6 +694,18 @@ def compare(T, chat, label, msgs, tools, kw):
     return label, False, f"differs at byte {k}: loom {got[max(0, k - 40):k + 60]!r} vs template {ref[max(0, k - 40):k + 60]!r}"
 
 
+def raw_alternatives(chat, message, finished, thinking=None, prompt=None):
+    """Benchmark hook (agent_golden.py): every raw text consistent with a parsed reply, the default first. A model
+    may write chat.call_prefix_token (Llama 3.1: <|python_tag|>) before its JSON call; the reply's channels don't
+    say whether it did, so both spellings are offered. [] when there is no such ambiguity."""
+    calls = render_calls(chat, message.get("tool_calls") or [])
+    if not (calls and chat.get("call_prefix_token")):
+        return []
+    content = message.get("content") or ""
+    base = content + (chat["content_call_separator"] if content else "") + calls
+    return [base, content + chat["call_prefix_token"] + calls]
+
+
 def thinking_never(chat):
     """The block with thinking off, for a model whose template renders reasoning in history (so derive() reads it as
     thinking "always") but which never reasons (Qwen3-*-Instruct-2507): its replies would otherwise land in the

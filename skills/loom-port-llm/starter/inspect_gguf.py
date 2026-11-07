@@ -229,6 +229,12 @@ if template:
         for name, ok, detail in results:
             print("chat", "OK  " if ok else "SKIP" if ok is None else "FAIL", name, "-", detail)
         cfg["chat"] = chat
+        if chat["call_format"] == "json" and "<|python_tag|>" in tokens:
+            # Llama 3.1 opens a call with <|python_tag|> (the template never prints it). Kept in the decoded text
+            # (nonspecial) so complete_text stores the turn as generated: the KV row then matches the canonical
+            # history, and content ends before it (control_json.loom's output_next).
+            chat["call_prefix_token"] = "<|python_tag|>"
+            chat["nonspecial_tokens"] = sorted(set(chat.get("nonspecial_tokens", [])) | {"<|python_tag|>"})
         print(f"chat: thinking={chat['thinking']} (default {'on' if chat['thinking_default'] else 'off'}), "
               f"tool calls={chat['call_format']}; generation prompt {chat['generation_prompt']!r}")
         if chat.get("reasoning_instructions"):
