@@ -98,7 +98,7 @@
   {
    "repo": "loom-fun/bartowski-Ornith-1.5-9B-loom",
    "slug": "ornith-1.5-9b",
-   "memory_bytes": 30000000000,
+   "memory_bytes": 32000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
@@ -287,6 +287,18 @@
    "llamacpp": "b1369",
    "features": [
     "draft"
+   ]
+  },
+  {
+   "repo": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "slug": "gemma-4-e4b-it",
+   "memory_bytes": 31000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1369",
+   "features": [
+    "vision",
+    "draft",
+    "thinking-toggle"
    ]
   }
  ]
