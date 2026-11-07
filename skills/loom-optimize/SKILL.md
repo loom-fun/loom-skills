@@ -15,6 +15,12 @@ Before you start you need:
   here under its rate controller. Don't ask the user to pick a number, and don't stop
   after the first win.
 
+**Start from the reference.** Before measuring anything, read what the closest category A loom-fun package already
+settled (`loom-port-llm/find_reference.py show WORK/reference.json`, written by port.sh; or `show loom-fun/REPO`):
+its drafting choice and measured table, execution settings (prefill chunk), llama.cpp baseline arguments, margins
+per metric and gates. Try its kept settings first and skip A/Bs it already decided for the same architecture; its
+choices are a starting point to re-measure on this model, never a result to copy onto the card.
+
 **Fast iteration (the budget is short).**
 - Build each variant into its own package dir with its own `--model-id`, and serve the
   baseline and the variant in ONE loom-serve (`serve.sh NAME PORT amdgpu MEM a/model.json

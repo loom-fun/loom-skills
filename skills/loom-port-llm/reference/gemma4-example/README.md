@@ -16,7 +16,9 @@ Make a kit for a Gemma-3n/4-family model with `../apply_example.sh gemma4 W/kit`
 | `build.py` | the `gemma4` call format and its placeholders |
 | `chat_probe.py`, `templates/control.loom` | Gemma 4's chat format, which `chat_probe.derive()` can't model: `<|turn>role` / `<turn|>` turns, the `<|channel>thought ... <channel|>` reasoning channel (closed with a bare `<channel|>`), its tool-declaration and tool-call syntax, tool responses, the thinking switch. `simulate()` mirrors control.loom and is verified against the Jinja template; `raw_from_chat()` is the benchmark hook (`export LOOM_KIT=W/kit`). Needs `extra_eos_ids` [1, 106, 50] |
 
-`cfg.json`: the reviewed config (geometry, sliding/KV-sharing layers, chat block) without the tensor table.
+The reviewed config (geometry, sliding/KV-sharing layers, chat block) is the published package's `llm_config.json`
+([loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom](https://huggingface.co/loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom),
+category A, pinned in `../examples.json`); `apply_example.sh gemma4 KIT CFG` merges it.
 
 Lessons the agent paid for:
 - `llama_trace.py ... --grep '-0$|-23$|-24$'` (a sliding, a global and a KV-shared layer) gave the whole

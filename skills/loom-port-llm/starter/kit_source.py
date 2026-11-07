@@ -80,6 +80,8 @@ def generator_stamp(kit=HERE):
                  "kit": {"example": ks.get("example"), "modified": kit_sha256(kit) != ks.get("kit_sha256")}}
     else:
         commit, dirty = git_commit(kit)
+        if not commit and os.environ.get("LOOM_SKILLS_COMMIT"):   # an exported snapshot (git archive) of that commit
+            commit, dirty = os.environ["LOOM_SKILLS_COMMIT"], None
         stamp = {"skills_commit": commit or "unknown", "dirty": dirty}
     stamp["hrx_loom"] = hrx_loom_identity()
     return stamp

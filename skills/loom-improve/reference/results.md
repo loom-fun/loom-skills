@@ -42,6 +42,24 @@ never edit old ones. Wall clock is install -> done; the target is the model's ro
 | 2026-11-02 | Muse-Glimmer-30B (scripts only) | one model at a time | – | – | **full PASS, AUDIT PASS** | 0.41 | – | |
 | 2026-11-02 | flint (scripts only) | one model at a time, near_tie, auto budget | – | – | **full PASS, AUDIT PASS** | 0.56 | – | full-context needle at 260k served (pool 457k, 79 GB alone); the borderline prompt is a near-tie under the new rule; a 2 s sampler never saw Loom and llama.cpp loaded together (2,700+ samples, all five models) |
 
+## Reference lookup (reference-lookup branch, 2026-11-06): scripted runs, from scratch vs derived
+
+`.github/scripts/port_e2e.sh` (port.sh -> qualify.sh -> finalize.sh, no agent; optimization = qualify's drafting
+tune), gates without the long-context needle (deferred to the nightly DevLab sweep), plain Q4_K_M. Wall clock is
+port start -> evidence written, GGUF download subtracted. Pairs run on the same machine type (DevLab or local).
+
+| Model | Where | Reference | Wall (min) | Tune (min, candidates) | Gates | Notes |
+|---|---|---|---|---|---|---|
+| Qwen3.5-4B | local | off | 20.4 | 3.5, 7 | PASS (golden, compare, vision, consistency, spec, agent, sampling, over-capacity), AUDIT PASS | published as the first reference |
+| Qwen3.5-9B | DevLab | off | 26.8 | 4.8, 7 | PASS (no vision: projector download bug, fixed since) | |
+| Qwen3.5-9B | DevLab | auto -> the 4B (score 182) | 26.5 | 4.5, 6 | PASS (same set) | first prior: neighbourhood only |
+| Qwen3.5-9B | local | auto -> the 4B | 27.4 | 3.8, 4 | PASS incl. vision | ruled-out method gets one probe; published |
+
+Plan of checks: lookup code only reached by REFERENCE=auto (starter path unchanged with REFERENCE=off: programs
+byte-identical); tune.py prior only with cfg["reference"]; example configs verified byte-for-byte against the HF
+path. Lesson: on the starter path port.sh was already automatic, so a same-family reference saves ~1 min (the
+drafting search); its value is the kit and chat block on architectures the starter doesn't cover.
+
 ## Lessons with numbers (why the skill looks the way it does)
 - The default "1 h of optimization" made every end-to-end job > 1 h by construction: the budget is now
   the whole job (the model's roofline budget, `e2e_budget.py`), sized by `qualify.sh`.
