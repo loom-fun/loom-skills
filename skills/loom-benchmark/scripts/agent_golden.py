@@ -219,6 +219,10 @@ def main():
                         print("     at the divergence: loom", repr(agreed + loom_rest[:24]),
                               "| llama", repr(agreed + P.tok.decode(gids[k:k + 4], skip_special_tokens=False)),
                               "| top", [(P.tok.id_to_token(t), round(v, 2)) for t, v in top.items()], flush=True)
+                        # TEMPORARY debug: the same request again (no retained row is a prefix of it: a fresh prefill)
+                        r2 = post(a.url, dict(model=P.model_id, messages=msgs, tools=TOOLS, max_tokens=a.max_tokens, temperature=0, **extra))
+                        print("     DEBUG same request again: cached", r2.get("usage", {}).get("prompt_tokens_details"),
+                              repr(str(r2["choices"][0]["message"].get("content"))[:60]), flush=True)
                 # Output the parser dropped (a second call where the template takes one): the reply generated
                 # more tokens than its parsed channels hold, the golden agrees with all of those, and the golden's
                 # continuation past them opens another call. Only then is the next turn's reuse not required.
