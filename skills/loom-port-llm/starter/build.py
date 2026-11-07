@@ -230,13 +230,16 @@ if instructions:
     reasoning = (1, efforts, default_effort)
 
 
+def sub(text, old, new):
+    """TEXT with its one occurrence of OLD replaced by NEW (the control.loom patches below)."""
+    assert text.count(old) == 1, (old[:120], text.count(old))
+    return text.replace(old, new)
+
+
 def patch_reasoning_instructions(text):
     """control.loom with the reasoning-instruction prefix (chat_probe.reasoning_instructions): chat_begin opens
     the system block with the request effort's instructions when thinking is on, merging the first system
     message into that block. Without chat.reasoning_instructions control.loom is unchanged."""
-    def sub(t, old, new):
-        assert t.count(old) == 1, (old[:120], t.count(old))
-        return t.replace(old, new)
     names = list(instructions)
     rodata = "".join(f'global.rodata.def @reasoning_name_{i} = bytes("{hx(e)}")\n\n'
                      f'global.rodata.def @reasoning_text_{i} = bytes("{hx(instructions[e])}")\n\n' for i, e in enumerate(names))
@@ -338,15 +341,147 @@ func.def @with_instructions(%instructions: buffer, %body: buffer) -> (buffer) {{
                """  %merges_system = scalar.ori %has_tools, %has_instructions : i1
   %consumed = scalar.andi %merges_system, %first_system : i1
 """)
+
+
+def patch_default_system_tools(text):
+    """control.loom for a template that swaps its default system prompt when tools are present
+    (chat.default_system_tools, its separator included; Nanbeige): with tools and no system message, chat_begin prints
+    that text beside the tools instead of default_system + separator. Without the field control.loom is unchanged."""
+    text = sub(text, 'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n',
+               'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n\n'
+               f'global.rodata.def @default_system_tools = bytes("{hx(chat["default_system_tools"])}")\n')
+    text = sub(text, "    %separator = scf.select %has_body, %separator_value, %empty : buffer\n",
+               """    %body_separator = scf.select %has_body, %separator_value, %empty : buffer
+    // No system message: the template's tools-time default system prompt, separator included.
+    %default_tools = global.load @default_system_tools : buffer
+    %separator = scf.select %not_first_system, %empty, %body_separator : buffer
+    %tools_body = scf.select %not_first_system, %default_tools, %system_body : buffer
+""")
+    text = sub(text, "func.call @join4(%system_body, %separator, %tools_text, %empty)", "func.call @join4(%tools_body, %separator, %tools_text, %empty)")
+    return sub(text, "func.call @join4(%tools_text, %separator, %system_body, %empty)", "func.call @join4(%tools_text, %separator, %tools_body, %empty)")
+
+
+def patch_history_think_before(text):
+    """control.loom for a template that keeps an empty think block in assistant turns before the last user query
+    (chat.history_think_before "empty"; MiniCPM-V): chat_message renders THINK_OPEN + THINK_CLOSE there instead of
+    nothing. Without the field control.loom is unchanged."""
+    text = sub(text, "        %think = scf.if %show -> (buffer) {\n",
+               """        // Before the last user query: an empty think block (chat.history_think_before).
+        %early = scalar.cmpi eq, %in_scope, %false : i1
+        %show_block = scalar.ori %show, %early : i1
+        %kept_thought = scf.select %in_scope, %thought, %empty : buffer
+        %think = scf.if %show_block -> (buffer) {
+""")
+    return sub(text, "func.call @join4(%open, %thought, %close, %empty)", "func.call @join4(%open, %kept_thought, %close, %empty)")
+
+
+JSON_CHAT_KEYS = ("system_preamble", "tools_in_user", "tools_indent", "tool_content_json", "calls_drop_content")
+
+
+def patch_json_chat(text):
+    """control.loom for Llama-3-style templates (chat_probe: system_preamble, tools_in_user, tools_indent,
+    tool_content_json, calls_drop_content, call_format "json"): the always-printed system block with its preamble,
+    the tools opening the first user message (re-indented like tojson(indent=N)), tool results as JSON strings,
+    no content beside calls, and bare JSON calls (templates/control_json.loom). Each piece only when its field is
+    present; without them control.loom is unchanged."""
+    preamble, in_user = "system_preamble" in chat, chat.get("tools_in_user", False)
+    assert in_user <= preamble, "tools_in_user needs the always-printed system block (system_preamble)"
+    assert not (preamble and instructions), "system_preamble with reasoning instructions is not modeled"
+    if preamble:
+        assert in_user or chat["call_format"] == "none", "a preamble with tools in the system block is not modeled"
+        text = sub(text, 'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n',
+                   'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n\n'
+                   f'global.rodata.def @system_preamble = bytes("{hx(chat["system_preamble"])}")\n\n'
+                   f'global.rodata.def @system_preamble_tools = bytes("{hx(chat.get("system_preamble_tools", chat["system_preamble"]))}")\n')
+        begin = text.index("  %rendered = scf.if %has_tools -> (buffer) {\n")
+        end = text.index("  %bos = global.load @bos : buffer\n", begin)
+        text = text[:begin] + f"""  // The system block is always printed, opening with the template's preamble (chat.system_preamble; with tools
+  // chat.system_preamble_tools), then the first system message's text.
+  %preamble_plain = global.load @system_preamble : buffer
+  %preamble_tools = global.load @system_preamble_tools : buffer
+  %preamble = scf.select %has_tools, %preamble_tools, %preamble_plain : buffer
+  %system_block = func.call @join4(%system_prefix, %preamble, %system_body, %suffix) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %tools_in_user = scalar.constant {B(in_user)} : i1
+  %open_user = scalar.andi %has_tools, %tools_in_user : i1
+  %rendered = scf.if %open_user -> (buffer) {{
+    // The tools open the first user message (chat.tools_in_user); chat_message completes it (state bit 32).
+    %tools_text = func.call @tools_body(%tools, %tool_fields, %tool_count) : (buffer, buffer, i64) -> (buffer)
+    %user_prefix = global.load @user_prefix : buffer
+    %value = func.call @join4(%system_block, %user_prefix, %tools_text, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+    scf.yield %value : buffer
+  }} else {{
+    scf.yield %system_block : buffer
+  }}
+""" + text[end:]
+        text = sub(text, "  %consumed = scalar.andi %has_tools, %first_system : i1\n", "  %consumed = scalar.ori %first_system, %false : i1\n")
+        text = sub(text, "  %flags = scalar.ori %consumed_bit, %thinking_bit : i64\n", """  %pending_value = scalar.constant 32 : i64
+  %pending_bit = scf.select %open_user, %pending_value, %zero64 : i64
+  %flags_base = scalar.ori %consumed_bit, %thinking_bit : i64
+  %flags = scalar.ori %flags_base, %pending_bit : i64
+""")
+    if in_user:   # chat_message: the first message after the system block completes the user turn chat_begin opened
+        text = sub(text, "  %fragment = func.call @join(%before, %body) : (buffer, buffer) -> (buffer)\n", """  %pending_value = scalar.constant 32 : i64
+  %pending_bit = scalar.andi %state, %pending_value : i64
+  %pending = scalar.cmpi ne, %pending_bit, %zero64 : i64
+  %not_skipped = scalar.cmpi eq, %skip, %false : i1
+  %completes = scalar.andi %pending, %not_skipped : i1
+  %completion = func.call @join(%text, %suffix) : (buffer, buffer) -> (buffer)
+  %shown_body = scf.select %completes, %completion, %body : buffer
+  %fragment = func.call @join(%before, %shown_body) : (buffer, buffer) -> (buffer)
+""")
+        text = sub(text, "  %kept = scalar.andi %state, %keep_mask : i64\n", """  %pending_mask = scalar.constant -36 : i64
+  %mask = scf.select %completes, %pending_mask, %keep_mask : i64
+  %kept = scalar.andi %state, %mask : i64
+""")
+    if chat.get("tools_indent"):   # tools printed like tojson(indent=N): compacted, then re-indented
+        text = sub(text, "  func.return %result : buffer\n}\n\nfunc.def @tools_body(", """  %compacted = func.call @compact(%result) : (buffer) -> (buffer)
+  %indented = func.call @json_indent(%compacted) : (buffer) -> (buffer)
+  func.return %indented : buffer
+}
+
+func.def @tools_body(""")
+    if chat.get("tool_content_json"):   # tool results printed as JSON strings (tojson), untrimmed
+        text = sub(text, "      %value = func.call @join4(%open, %item_prefix, %text, %item_suffix) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+                   """      %tool_json = func.call @json_quote(%raw_text) : (buffer) -> (buffer)
+      %value = func.call @join4(%open, %item_prefix, %tool_json, %item_suffix) : (buffer, buffer, buffer, buffer) -> (buffer)
+""")
+    if chat.get("calls_drop_content"):
+        # An assistant turn with calls renders no content in history (chat_message). complete_text still stores the
+        # turn as generated (content kept), so the retained row matches it; the next prompt, which drops the content,
+        # reuses that row up to the first changed byte.
+        text = sub(text, "        %head = func.call @join4(%prefix, %think, %text, %separator) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+                   """        %shown_text = scf.select %has_calls, %empty, %text : buffer
+        %head = func.call @join4(%prefix, %think, %shown_text, %separator) : (buffer, buffer, buffer, buffer) -> (buffer)
+""")
+    if chat["call_format"] == "json":
+        # control_json.loom's render_tool / parse_tools / output_next replace the generic ones. complete_text keeps the
+        # call-prefix token (Llama 3.1's <|python_tag|>) the model wrote before its call, so the retained row matches.
+        assert thinking == "never", "call_format json with reasoning is not modeled (control_json.loom's output_next)"
+        for fn in ("render_tool", "parse_tools", "output_next"):
+            text = sub(text, f"func.def public @{fn}(", f"func.def @generic_{fn}(")
+        text = sub(text, "  %head = func.call @join4(%prefix, %content, %separator, %tools) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+                   """  %call_prefix = global.load @json_call_prefix : buffer
+  %call_scan_end = buffer.length %response
+  %prefix_at = func.call @find(%response, %c0, %call_scan_end, %call_prefix) : (buffer, offset, offset, buffer) -> (offset)
+  %prefix_written = index.cmp ult, %prefix_at, %call_scan_end : offset
+  %prefix_used = scalar.andi %prefix_written, %has_calls : i1
+  %prefix_text = scf.select %prefix_used, %call_prefix, %empty : buffer
+  %prefixed_tools = func.call @join(%prefix_text, %tools) : (buffer, buffer) -> (buffer)
+  %head = func.call @join4(%prefix, %content, %separator, %prefixed_tools) : (buffer, buffer, buffer, buffer) -> (buffer)
+""")
+    return text + chat_variants(open(os.path.join(HERE, "templates", "control_json.loom"), encoding="utf-8").read()) \
+        .replace("@@HEX_JSON_CALL_PREFIX@@", hx(chat.get("call_prefix_token", ""))) \
+        .replace("@@TOOLS_INDENT@@", str(chat.get("tools_indent") or 4)) \
+        .replace("@@HEX_JSON_CALL_MIDDLE@@", hx('", "' + chat.get("call_arguments_key", "arguments") + '": ')) \
+        .replace("@@HEX_JSON_ARGUMENTS_FIELD@@", hx('"' + chat.get("call_arguments_key", "arguments") + '"'))
+
+
 def patch_no_tools(text):
     """control.loom for a chat-only block (chat_probe.CHAT_ONLY, call_format "none": the template ignores tools):
     chat_begin renders a request's tools as the template does (not at all) and parse_tools never parses a call.
     Other packages' control.loom is unchanged."""
-    off = "scalar.constant false : i1"
-    for old in ("  %has_tools = scalar.cmpi ne, %tool_count, %zero64 : i64\n",
-                "  %has_tools = scalar.cmpi ne, %schema_count, %zero64 : i64\n"):
-        assert text.count(old) == 1, (old, text.count(old))
-        text = text.replace(old, f"  %has_tools = {off}\n")
+    for count in ("%tool_count", "%schema_count"):
+        text = sub(text, f"  %has_tools = scalar.cmpi ne, {count}, %zero64 : i64\n", "  %has_tools = scalar.constant false : i1\n")
     return text
 
 
@@ -372,7 +507,7 @@ def chat_variants(text):
 
 
 B = lambda v: "true" if v else "false"
-CALL_FORMATS = {"none": 0, "hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4}   # none: chat-only (patch_no_tools)
+CALL_FORMATS = {"none": 0, "hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4, "json": 5}   # none: chat-only (patch_no_tools); json: patch_json_chat
 # A chat format the generic control functions can't express (Glimmer's ATEM channels, Gemma 4): the kit
 # ships chat/<call_format>.loom, whose public chat functions replace the generic ones (renamed
 # @generic_<fn>, still callable), and optionally chat/<call_format>_rodata.py (a rodata() returning its
@@ -419,6 +554,12 @@ for name in ("prepare", "control", "storage", "service"):
     text = open(os.path.join(HERE, "templates", name + ".loom"), encoding="utf-8").read()
     if name == "control" and instructions:
         text = patch_reasoning_instructions(text)
+    if name == "control" and chat.get("history_think_before") == "empty":
+        text = patch_history_think_before(text)
+    if name == "control" and "default_system_tools" in chat:
+        text = patch_default_system_tools(text)
+    if name == "control" and (chat["call_format"] == "json" or any(k in chat for k in JSON_CHAT_KEYS)):
+        text = patch_json_chat(text)
     if name == "control" and chat["call_format"] == "none":
         text = patch_no_tools(text)
     if name == "control" and custom_chat:
