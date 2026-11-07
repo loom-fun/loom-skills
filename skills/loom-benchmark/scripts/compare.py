@@ -20,7 +20,7 @@ import time
 
 import requests
 
-from bench_common import Package, exact_gaps, gap_noise, llama_greedy, llama_views, near_tie
+from bench_common import Package, exact_gaps, gap_noise, llama_greedy, llama_scores, llama_views, near_tie, trajectory_gaps
 
 ap = argparse.ArgumentParser()
 ap.add_argument("package")
@@ -130,11 +130,18 @@ for g in json.load(open(a.golden)):
         noise = round(gap_noise((top, *views), g["ids"][n], got[n]), 3)
         near = near_tie(top, g["ids"][n], got[n], a.max_gap, views)
         print(f"       llama.cpp's own views here: gaps {[round(x, 3) for x in exact_gaps((top, *views), g['ids'][n], got[n])]}, noise {noise}", flush=True)
+    traj = None
+    if a.llama:   # CALIBRATION: Loom's whole output scored by llama.cpp, teacher-forced on Loom's tokens
+        loom_ids = pkg.ids(text)[:len(g["ids"])]
+        tg = trajectory_gaps(llama_scores(a.llama, ids_p, loom_ids, pkg), loom_ids)
+        if tg:
+            traj = {"mean": round(sum(tg) / len(tg), 4), "max": round(max(tg), 3), "over1": sum(x > 1.0 for x in tg), "n": len(tg)}
+            print(f"       TRAJ {json.dumps(traj)}", flush=True)
     gold = g["ids"]
     full = n >= min(len(gold), len(got)) and abs(len(got) - len(gold)) <= 1
     bad = not near
     rows.append({"prompt": g["prompt"][:80], "prompt_tokens": g.get("prompt_tokens"), "golden_tokens": len(gold), "matched": n,
-                 "full_match": full, "divergence_gap": gap, "noise": noise, "bad": bad, "seconds": round(time.perf_counter() - t0, 2), "loom_text": text[:160]})
+                 "full_match": full, "divergence_gap": gap, "noise": noise, "trajectory": traj, "bad": bad, "seconds": round(time.perf_counter() - t0, 2), "loom_text": text[:160]})
     print(f"{g.get('prompt_tokens', 0):6d} {n:3d}/{len(gold):3d} gap={gap if not isinstance(gap, float) else round(gap, 3)} {'BAD ' if bad else ''}{g['prompt'][:50]!r}", flush=True)
 json.dump(rows, open(a.out, "w"), indent=1)
 gaps = [r["divergence_gap"] for r in rows if isinstance(r["divergence_gap"], float)]

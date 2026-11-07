@@ -213,9 +213,13 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
                 "content": "", "completion_probabilities": []}
     ensure_llama(url)
     mb = body.get("_micro_batch")   # llama_views: the prompt in micro-batches of at most mb tokens
+    start = body.get("_score_from")   # llama_scores: top lists at every position from there
     for attempt in range(2):
         if mb:
             r, ok = _micro_batched(url, {k: v for k, v in body.items() if k != "_micro_batch"}, mb, timeout), True
+            break
+        if start is not None:
+            r, ok = _scored(url, {k: v for k, v in body.items() if k != "_score_from"}, start, timeout), True
             break
         r = requests.post(url + "/completion", json=body, timeout=timeout).json()
         # llama.cpp must have evaluated the whole prompt: fewer tokens means it answered from some
@@ -259,6 +263,18 @@ def _micro_batched(url, req, mb, timeout):
     return {"completion_probabilities": [], "note": f"no micro-batch view: llama.cpp re-evaluates more than {mb} tokens per request"}
 
 
+def _scored(url, req, start, timeout):
+    """llama.cpp's top lists for the token after each prefix req["prompt"][:L], L = start .. len - 1: the first
+    request evaluates prompt[:start] afresh, each next one extends the slot's cache by one token (decode)."""
+    p, out = req["prompt"], []
+    for L in range(start, len(p)):
+        r = requests.post(url + "/completion", json=dict(req, prompt=p[:L], cache_prompt=L > start), timeout=timeout).json()
+        if not r.get("completion_probabilities"):
+            return {"completion_probabilities": [], "note": f"no top list at position {L}: {str(r)[:200]}"}
+        out.append(r["completion_probabilities"][0])
+    return {"completion_probabilities": out}
+
+
 # Every llama.cpp reference is greedy with the samplers forced off: some GGUFs set penalty_repeat
 # (LFM2.5: 1.05), which llama.cpp applies even at temperature 0, while Loom decodes greedily.
 GREEDY = {"temperature": 0, "cache_prompt": False, "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}
@@ -286,6 +302,23 @@ def llama_views(url, ids, pkg):
         if cp:
             views.append(top_logprobs(cp, 0))
     return views
+
+
+def llama_scores(url, ids, cont, pkg):
+    """llama.cpp's top-10 at each token of `cont` (Loom's output) after the prompt `ids`, teacher-forced on
+    Loom's own tokens -> [{id: logprob}] per position, or [] while pending (LLAMA_DEFER) or unavailable."""
+    if not cont:
+        return []
+    r = llama_completion(url, dict(GREEDY, prompt=list(ids) + list(cont), n_predict=1, n_probs=10, id_slot=0,
+                                   _score_from=len(ids)), pkg)
+    cp = r.get("completion_probabilities") or []
+    return [{t["id"]: t["logprob"] for t in x["top_logprobs"]} for x in cp] if len(cp) == len(cont) else []
+
+
+def trajectory_gaps(tops, cont):
+    """Per token of Loom's output: llama.cpp's top-1 log-prob minus that of Loom's token (a lower bound,
+    from the last listed log-prob, where llama.cpp does not list it). ~0 where Loom picks llama.cpp's choice."""
+    return [max(t.values()) - t.get(c, min(t.values())) for t, c in zip(tops, cont)]
 
 
 NOISE_CAP = 0.5   # nats: the most llama.cpp's own spread may widen the bar

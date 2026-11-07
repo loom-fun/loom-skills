@@ -1,14 +1,29 @@
 {
- "_comment": "build.py's memory_bytes counts the largest program's prefill scratch: the three hybrid MoE cards rebuilt from this branch, a full-context request on a fresh server at the value build.py now prints and at the card's published one (full gates passed on the first card at 48e9 in run 42343748198).",
- "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
- "memory_bytes": 48000000000,
+ "_comment": "Temporary: calibrate the compare trajectory signal (Loom's output scored by llama.cpp) on published cards, and check it on injected bugs.",
+ "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+ "memory_bytes": 5000000000,
  "kit": null,
  "llamacpp": "b1369",
+ "steps": ["gates:fast"],
  "variants": [
-  {"name": "q36-rebuilt-admit", "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-rebuilt-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 49000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-card-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 42000000000, "steps": ["admit:260096"]},
-  {"name": "orn-rebuilt-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 36000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "orn-card-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 33000000000, "steps": ["admit:260096"]}
+  {"name": "q05-card"},
+  {"name": "q05-bug-rope-5e5", "build": {}, "config": {"rope_theta": 500000.0}},
+  {"name": "q05-bug-rope-1e4", "build": {}, "config": {"rope_theta": 10000.0}},
+  {"name": "q05-bug-no-v-bias", "build": {}, "config": {"attn_bias": ["q", "k"]}},
+  {"name": "q05-bug-no-q-bias", "build": {}, "config": {"attn_bias": ["k", "v"]}},
+  {"name": "q05-bug-rms-eps", "build": {}, "config": {"rms_eps": 1e-05}},
+  {"name": "q25-7b", "card": "loom-fun/bartowski-Qwen2.5-7B-Instruct-loom", "memory_bytes": 14000000000},
+  {"name": "q35-08b", "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom", "memory_bytes": 8000000000},
+  {"name": "q35-9b", "card": "loom-fun/unsloth-Qwen3.5-9B-loom", "memory_bytes": 30000000000},
+  {"name": "q3-8b", "card": "loom-fun/unsloth-Qwen3-8B-loom", "memory_bytes": 28000000000},
+  {"name": "llama32-3b", "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom", "memory_bytes": 29000000000},
+  {"name": "gemma4-e4b", "card": "loom-fun/unsloth-gemma-4-E4B-it-loom", "memory_bytes": 31000000000, "kit": "gemma4"},
+  {"name": "gemma4-e2b", "card": "loom-fun/unsloth-gemma-4-E2B-it-loom", "memory_bytes": 16000000000, "kit": "gemma4"},
+  {"name": "lfm25-24b", "card": "loom-fun/ggml-org-LFM2.5-24B-A2B-loom", "memory_bytes": 22000000000},
+  {"name": "q36-35b", "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom", "memory_bytes": 48000000000},
+  {"name": "ornith10-9b", "card": "loom-fun/unsloth-Ornith-1.0-9B-loom", "memory_bytes": 21000000000},
+  {"name": "hyperclovax", "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom", "memory_bytes": 24000000000},
+  {"name": "lfm3-17b", "card": "loom-fun/bartowski-LFM3-1.7B-loom", "memory_bytes": 13000000000, "kit": "lfm2moe", "llamacpp": "b1370"},
+  {"name": "flint", "card": "loom-fun/ggml-org-Flint-loom", "memory_bytes": 67000000000, "llamacpp": "b1355"}
  ]
 }
