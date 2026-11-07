@@ -121,7 +121,7 @@ The expensive path. Keep it short:
    | Family | Example |
    |---|---|
    | Gemma-3n / Gemma-4 (PLE, KV sharing, head_dim 512, Gemma chat format) | `gemma4` |
-   | LFM2 short-conv hybrids (+ its own MoE kernels) | `lfm2moe` (top-k router, expert matvecs, grouped WMMA prefill) |
+   | LFM2 / LFM3 short-conv hybrids (+ its own MoE kernels) | `lfm2moe` (top-k router, expert matvecs, grouped WMMA prefill; lfm3: per-head gate, SWA rope base, sandwich norms) |
    | attention sinks, SWA, NoPE (MoE from the starter) | `flint` (built on lfm2moe in ~12 min; its MoE is now `starter/gen_moe.py`) |
    | channel chat formats (ATEM), norm RoPE, NoPE | `glimmer` |
 

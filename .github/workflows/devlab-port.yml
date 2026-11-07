@@ -56,6 +56,11 @@ jobs:
           import json; j = next(j for j in json.load(open('.github/devlab/port.json'))['jobs'] if j['name'] == '${{ matrix.job }}')
           print(j['spec'], j.get('reference') or 'auto', j.get('skills_ref') or '-', j.get('model_id') or '')")
           D=$WORK/${{ matrix.job }}; rm -rf "$D"; mkdir -p "$D"
+          # "env": {"NAME": "value"} of the job: port.sh / qualify.sh switches for an A/B wave (e.g. SPEC=off)
+          python3 -c "
+          import json, shlex; j = next(j for j in json.load(open('.github/devlab/port.json'))['jobs'] if j['name'] == '${{ matrix.job }}')
+          print(''.join(f'export {k}={shlex.quote(str(v))}' + chr(10) for k, v in (j.get('env') or {}).items()))" > "$D/job.env"
+          . "$D/job.env"; [ -s "$D/job.env" ] && cat "$D/job.env"
           SK=$GITHUB_WORKSPACE/skills
           if [ "$sref" != - ]; then
             mkdir -p "$D/skills-src"; git archive "$sref" skills | tar -x -C "$D/skills-src"; SK=$D/skills-src/skills

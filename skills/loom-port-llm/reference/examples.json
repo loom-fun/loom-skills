@@ -1,7 +1,7 @@
 {
- "_comment": "Each reference example's architecture and, when one exists, the CATEGORY A loom-fun package (card made by the current skill) that is its port: that package's llm_config.json is the example's reviewed config (apply_example.sh CFG merges it; find_reference.py maps the package back to this kit). Pinned revisions keep apply_example.sh reproducible; check_examples.sh verifies each is category A and of the example's architecture. An example without a category A package keeps its cfg.json.",
+ "_comment": "Each reference example's architecture and, when one exists, the CATEGORY A loom-fun package (card made by the current skill) that is its port: that package's llm_config.json is the example's reviewed config (apply_example.sh CFG merges it; find_reference.py maps the package back to this kit). Pinned revisions keep apply_example.sh reproducible; check_examples.sh verifies each is category A and of the example's architecture. An example without a category A package keeps its cfg.json. \"archs\": further architectures the example kit ports (port.sh applies it to a GGUF of any of them; its reviewed config is never merged into those).",
  "gemma4": {"arch": "gemma4", "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom", "revision": "924279f29276137cebaa41d76a31f0216864a663"},
  "flint": {"arch": "flint", "card": "loom-fun/ggml-org-Flint-loom", "revision": "f1805a8a20a510165e1042c72f8639af10598b24"},
  "glimmer": {"arch": "muse-glimmer", "card": "loom-fun/unsloth-Muse-Glimmer-30B-loom", "revision": "58208ef8cf0f8f56e19f6400baf876af11ae4186"},
- "lfm2moe": {"arch": "lfm2moe", "card": null}
+ "lfm2moe": {"arch": "lfm2moe", "archs": ["lfm3"], "card": null}
 }
