@@ -1,6 +1,6 @@
 ---
 name: loom-port-llm
-description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve package — generate Loom IR kernels + command program from the GGUF's metadata, derive the chat/tool-calling glue from the model's own chat template, build model.json at the model's native context length, bring it up, unit-test kernels, and validate token-by-token against llama.cpp (short prompts, agent tool loops, full context). Includes a config-driven starter kit for dense transformers (Llama/Qwen2/Qwen3/Mistral-style, GQA, QK-norm, q/k/v biases, sliding window, output gates, post-norms, head_dim 64/128/256, partial RoPE) and Qwen3.5/Qwen3-Next-style hybrids (gated delta-net layers with recurrent state), with fast decode and WMMA prefill. Speculative decoding is on by default for every model family (the GGUF's MTP block, a Gemma-4 assistant, a DFlash/DFlash2 drafter, or weight-free n-gram prompt lookup, chosen by measured decode speed, output identical to the target). Adds image input automatically when the repo ships a vision projector (mmproj) of a supported family (Gemma 4, Qwen3-VL/Qwen3.5+, Muse-Glimmer), and documents how to add a family. Use for "port model X to Loom", "get X working on loom-serve", custom/unsupported models.
+description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve package — generate Loom IR kernels + command program from the GGUF's metadata, derive the chat/tool-calling glue from the model's own chat template, build model.json at the model's native context length, bring it up, unit-test kernels, and validate token-by-token against llama.cpp (short prompts, agent tool loops, full context). Includes a config-driven starter kit for dense transformers (Llama/Qwen2/Qwen3/Mistral-style, GQA, QK-norm, q/k/v biases, fused q|k|v projections, sliding window with its own RoPE base/dims, output gates (elementwise or per head, sigmoid or softplus), per-layer query-head counts, YaRN, post-norms, SwiGLU or GEGLU, head_dim 64/128/256, partial RoPE) and Qwen3.5/Qwen3-Next-style hybrids (gated delta-net layers with recurrent state), with fast decode and WMMA prefill. Speculative decoding is on by default for every model family (the GGUF's MTP block, a Gemma-4 assistant, a DFlash/DFlash2 drafter, or weight-free n-gram prompt lookup, chosen by measured decode speed, output identical to the target). Adds image input automatically when the repo ships a vision projector (mmproj) of a supported family (Gemma 4, Qwen3-VL/Qwen3.5+, Muse-Glimmer), and documents how to add a family. Use for "port model X to Loom", "get X working on loom-serve", custom/unsupported models.
 ---
 
 # Port an LLM to Loom
@@ -286,12 +286,27 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
     `LLAMA_ROPE_TYPE_NEOX`.
   - `norm` pairs (2d, 2d+1). Used by llama/mistral; `LLAMA_ROPE_TYPE_NORM`.
   - A wrong value still gives plausible-looking text for a few tokens, then degrades.
-- `rope_theta`; Llama-3 frequency factors (`rope_freqs.weight` -> `rope_freq_factors`) are applied; other rope
-  scaling (YaRN/linear) is **not** implemented, so add it in `qk_rope()` if the model uses it.
+- `rope_theta`; Llama-3 frequency factors (`rope_freqs.weight` -> `rope_freq_factors`) and YaRN scaling
+  (`rope_scaling`, from `rope.scaling.*`; not on sliding layers with their own RoPE) are applied as llama.cpp does;
+  linear scaling is **not** implemented, so add it in `qk_rope()` if the model uses it.
 - `qk_norm` (per-head RMSNorm on q/k before RoPE), `post_norms` (Gemma-style
   post-attention/FFN norms), `attn_gate` (sigmoid output gate), `embed_scale`
   (Gemma multiplies embeddings by √hidden), `embed_norm`.
 - Sliding-window layers: list them in `sliding_layers` and set `sliding_window`.
+  Sliding layers with their own RoPE at the same head_dim (`rope_theta_swa`, `rope_dims_swa` from
+  `rope.freq_base_swa` / `rope.dimension_count_swa`, spark2_5) get `g_qk_rope_store_swa`.
+- `attn_qkv` (one fused q|k|v projection, split by `g_split_qkv`), `attn_gate: "per_head"` (one sigmoid logit
+  per query head, broadcast by `g_gate_heads`; `attn_gate_act: "softplus"` applies softplus there instead, laguna),
+  `ffn_act: "gelu"` (GEGLU; `inspect_gguf.FFN_ACT` lists the architectures llama.cpp hard-codes it for). spark2_5 uses
+  all three. A per-layer `attention.head_count` gives `layer_heads` (`heads` is the widest): the attention kernels are
+  generated again for each narrower count (`_h<heads>`) and kernel-tested at it.
+- Chat templates whose first system block always opens with the default prompt and append the request's
+  system message (`system_lead`, `system_lead_separator`; reasoning instructions appended to it:
+  `reasoning_after_lead`), that render a turn without reasoning as a bare think close (`history_think: "close"`)
+  or print tools as compact JSON (`tools_compact`) are derived by `chat_probe.py`; so are templates that close each
+  role with its own tag (`system_suffix`, `assistant_suffix` beside the user's `suffix`; the terminal is the
+  assistant's) and that show reasoning in history only with thinking on, a bare think close in every turn with it off
+  (`history_think_off: "close"`). build.py patches control.loom only for blocks that use them.
   `nope_layers` are layers without RoPE.
 - `extra_eos_ids`: every id that should stop generation. For ChatML models that is
   `<|im_end|>` and `<|endoftext|>`.
@@ -384,7 +399,7 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
 ## Beyond the starter (MoE, other formats, new ops)
 
 - **MoE** is in the starter (`gen_moe.py`, wired by `gen_llm.py` from `cfg["moe"]`): router top-k (softmax or
-  sigmoid + selection bias, weights kept in registers), per-assignment expert matvecs for decode, tokens bucketed
+  sigmoid + selection bias, weights kept in registers, times `expert_weights_scale`), per-assignment expert matvecs for decode, tokens bucketed
   by expert and grouped WMMA GEMMs for prefill, shared experts (with the Qwen sigmoid gate), combine; MoE layers
   after `leading_dense` dense ones (an MoE MTP block generates too; not yet validated on the GPU). `inspect_gguf.py` fills `cfg["moe"]` from the GGUF;
   routing choices llama.cpp hard-codes per architecture instead of writing them (`expert_gating_func`,

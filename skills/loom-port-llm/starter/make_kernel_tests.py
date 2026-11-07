@@ -39,7 +39,10 @@ def deq(name):
 H, D, QH, KVH, eps = cfg["hidden"], cfg["head_dim"], cfg["heads"], cfg["kv_heads"], cfg["rms_eps"]
 rng = np.random.default_rng(0)
 cases = []
-def save(n, a): np.save(os.path.join(out, n + ".npy"), a)
+KS = os.environ.get("KTEST_HEADS_SFX", "")   # a child run for a narrower query-head count (see the end): _h<heads>
+def save(n, a): np.save(os.path.join(out, n + KS + ".npy"), a)
+# The output gate as llama.cpp applies it (cfg attn_gate_act): sigmoid, or softplus (laguna)
+def gate_act(g): return np.log1p(np.exp(g)) if cfg.get("attn_gate_act") == "softplus" else 1 / (1 + np.exp(-g))
 def ty(a): return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int8": "i8", "int32": "i32", "float16": "f16"}[str(a.dtype)] + ">"
 # 1. embed
 ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
@@ -107,7 +110,7 @@ if VIS:   # a media epoch: 8-word records, token 1 carries a feature row (copied
 seen = set(); todo = []
 VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
 for li in range(cfg["layers"]):
-    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", QH * D), ("ffn_gate", H),
+    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", (cfg.get("layer_heads") or [QH] * cfg["layers"])[li] * D), ("ffn_gate", H),
                    ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD),
                    ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0))]:
         name = f"blk.{li}.{nm_}.weight"
@@ -172,6 +175,31 @@ for name, K in todo:
 {same}  check.return
 }}
 """)
+# 2a. per-head attention gate (cfg attn_gate "per_head"): n = heads rows, run by gen_llm.lin_mv on f32 activations at
+# every token count: the 1-token and 4-token kernels at the decode R, and the 4-token R=16 kernel prefill takes
+if cfg.get("attn_gate") == "per_head":
+    A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", [])))
+    name = f"blk.{A0}.attn_gate.weight"; fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
+    R1 = pick_r(n, H, 1)
+    variants = [(1, R1), (4, R1)] + ([(4, 16)] if R1 != 16 and n % 16 == 0 else [])
+    save("hg_w", raw(name)); wt = ty(raw(name))
+    for tg, R in variants:
+        xs = rng.standard_normal((tg, H)).astype(np.float32); y = xs @ W.T.astype(np.float64)
+        tag = f"hg_t{tg}_r{R}"; save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
+        kern = f"g_mv_{fmt}_k{H}" + (f"_t{tg}" if tg > 1 else "") + (f"_r{R}" if R != 16 else "")
+        cases.append(f"""check.case public @mv_{tag} {{
+  %n = check.literal value({n}) : index
+  %t = check.literal value({tg}) : index
+  %acc = check.literal value(0) : i32
+  %w = check.file.read.npy path("hg_w.npy") : {wt}
+  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{tg}x{H}xf32>
+  %e = check.file.read.npy path("{tag}_y.npy") : tensor<{tg}x{n}xf32>
+  %y = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
+  kernel.launch @{kern}[%n, %t](%n, %t, %acc, %x, %w, %y) : [index, index](index, index, i32, tensor<{tg}x{H}xf32>, {wt}, tensor<{tg}x{n}xf32>)
+  check.expect.close actual(%y) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{tg}x{n}xf32>
+  check.return
+}}
+""")
 # 2b. int8 gate/up (swiglu) matvec: the 8/16-token variants (BFLY_PERM, 32 rows) equal the 1-token kernel bit for bit
 _g = next((li for li in range(cfg["layers"]) if f"blk.{li}.ffn_gate.weight" in T and f"blk.{li}.ffn_up.weight" in T), None)
 if ACT_Q8 and _g is not None:
@@ -200,6 +228,51 @@ if ACT_Q8 and _g is not None:
   kernel.launch @{kt}[%n, %t](%n, %t, %acc, %xq, %w, %wu, %y) : {sig}
   kernel.launch @{k1}[%n, %t](%n, %t, %acc, %xq, %w, %wu, %y1) : {sig}
   check.expect.close actual(%y) expected(%y1) atol(0.0) rtol(0.0) nan(different) : tensor<{tg}x{n}xf32>
+  check.return
+}}
+""")
+        # the 1-token kernel against numpy: act(gate) * up on the int8 activations (SwiGLU, or GEGLU for ffn_act gelu)
+        act = ((lambda g: 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))) if cfg.get("ffn_act") == "gelu"
+               else (lambda g: g / (1 + np.exp(-g))))
+        xs = rng.standard_normal((1, H)).astype(np.float32); xq = q8_ref(xs).astype(np.float64)
+        ysw = act(xq @ deq(gn).T.astype(np.float64)) * (xq @ deq(un).T.astype(np.float64))
+        save("sw_x1", xs); save("sw_y1", ysw.astype(np.float32))
+        R1 = iq_r(n, H, 1, True)
+        k1 = f"g_mv_{fmt}_k{H}_swiglu_q8" + (f"_r{R1}" if R1 != 16 else "")
+        cases.append(f"""check.case public @mvsw_ref_t1 {{
+  %n = check.literal value({n}) : index
+  %t = check.literal value(1) : index
+  %k = check.literal value({H}) : index
+  %acc = check.literal value(0) : i32
+  %w = check.file.read.npy path("sw_g.npy") : {gt}
+  %wu = check.file.read.npy path("sw_u.npy") : {ut}
+  %x = check.file.read.npy path("sw_x1.npy") : tensor<1x{H}xf32>
+  %e = check.file.read.npy path("sw_y1.npy") : tensor<1x{n}xf32>
+  %xq = check.generate.fill value(0) : tensor<1x{2 * H}xi8>
+  %y = check.generate.fill value(0.0) : tensor<1x{n}xf32>
+  kernel.launch @g_quant_q8[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<1x{H}xf32>, tensor<1x{2 * H}xi8>)
+  kernel.launch @{k1}[%n, %t](%n, %t, %acc, %xq, %w, %wu, %y) : [index, index](index, index, i32, tensor<1x{2 * H}xi8>, {gt}, {ut}, tensor<1x{n}xf32>)
+  check.expect.close actual(%y) expected(%e) atol(3.0e-3) rtol(3.0e-3) nan(different) : tensor<1x{n}xf32>
+  check.return
+}}
+""")
+# 2b'. g_silu_mul (layers whose ffn_gate and ffn_up formats differ: two projections, then act(gate) * up in place).
+# GEGLU builds only: the SwiGLU kernel's bounds are proven from the model's launch (constant n), not as a test root.
+if cfg.get("ffn_act") == "gelu" and any(f"blk.{li}.ffn_gate.weight" in T and f"blk.{li}.ffn_up.weight" in T
+       and T[f"blk.{li}.ffn_gate.weight"].tensor_type != T[f"blk.{li}.ffn_up.weight"].tensor_type for li in range(cfg["layers"])):
+    FFW = max(cfg["ffn"]) if isinstance(cfg["ffn"], list) else cfg["ffn"]
+    act = ((lambda g: 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))) if cfg.get("ffn_act") == "gelu"
+           else (lambda g: g / (1 + np.exp(-g))))
+    fg = (2 * rng.standard_normal((3, FFW))).astype(np.float32); fu = rng.standard_normal((3, FFW)).astype(np.float32)
+    save("sm_f", fg); save("sm_u", fu); save("sm_y", (act(fg.astype(np.float64)) * fu).astype(np.float32))
+    cases.append(f"""check.case public @silu_mul {{
+  %t = check.literal value(3) : index
+  %n = check.literal value({FFW}) : index
+  %f = check.file.read.npy path("sm_f.npy") : tensor<3x{FFW}xf32>
+  %u = check.file.read.npy path("sm_u.npy") : tensor<3x{FFW}xf32>
+  %e = check.file.read.npy path("sm_y.npy") : tensor<3x{FFW}xf32>
+  kernel.launch @g_silu_mul[%t](%t, %n, %f, %u) : [index](index, index, tensor<3x{FFW}xf32>, tensor<3x{FFW}xf32>)
+  check.expect.close actual(%f) expected(%e) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<3x{FFW}xf32>
   check.return
 }}
 """)
@@ -252,12 +325,18 @@ qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.fl
 kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
 q = rng.standard_normal((t, QH, D)).astype(np.float32); k = rng.standard_normal((t, KVH, D)).astype(np.float32); v = rng.standard_normal((t, KVH, D)).astype(np.float32)
 def norm(a, w): return a / np.sqrt((a * a).mean(-1, keepdims=True) + eps) * w
-def rope(a):
-    inv = cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD)
+YARN = cfg.get("rope_scaling") if (cfg.get("rope_scaling") or {}).get("type") == "yarn" else None
+def rope(a, RD=RD, theta=cfg["rope_theta"], yarn=YARN):
+    inv = theta ** (-np.arange(0, RD // 2) * 2.0 / RD); m = 1.0
     if cfg.get("rope_freq_factors"):   # llama3 rope_freqs: each pair's frequency divided by its factor
         inv = inv / np.asarray(cfg["rope_freq_factors"][:RD // 2], np.float64)
+    if yarn:   # ggml rope_yarn, ext_factor 1: interpolate the low frequencies, scale cos/sin by mscale
+        f = yarn["factor"]; cd = lambda r: RD * np.log(yarn["orig_ctx"] / (r * 2 * np.pi)) / (2 * np.log(theta))
+        lo, hi = max(0.0, np.floor(cd(yarn["beta_fast"]))), min(RD - 1.0, np.ceil(cd(yarn["beta_slow"])))
+        mix = 1 - np.clip((np.arange(RD // 2) - lo) / max(0.001, hi - lo), 0, 1)
+        inv = inv / f * (1 - mix) + inv * mix; m = yarn["attn_factor"] * (1 + 0.1 * np.log(f))
     ang = pos[:, None] * inv[None]
-    c, s = np.cos(ang)[:, None], np.sin(ang)[:, None]
+    c, s = m * np.cos(ang)[:, None], m * np.sin(ang)[:, None]
     if cfg["rope_type"] == "neox":
         a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
     a1, a2 = a[..., 0::2], a[..., 1::2]; o = np.empty_like(a); o[..., 0::2] = a1 * c - a2 * s; o[..., 1::2] = a2 * c + a1 * s; return o
@@ -294,6 +373,13 @@ cases.append(f"""check.case public @qk_rope {{
   check.return
 }}
 """)
+# 3'. sliding layers with their own rotary dims / base at the same head_dim (gen_llm SWA_ROPE): g_qk_rope_store_swa
+RD_SWA, TH_SWA = cfg.get("rope_dims_swa") or RD, cfg.get("rope_theta_swa") or cfg["rope_theta"]
+if cfg.get("sliding_layers") and (cfg.get("head_dim_swa") or D) == D and (RD_SWA, TH_SWA) != (RD, cfg["rope_theta"]):
+    qs = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq, RD_SWA, TH_SWA, None)
+    save("r_qs", qs.reshape(t, -1).astype(np.float32))
+    cases.append(cases[-1].replace("@qk_rope {", "@qk_rope_swa {").replace("@g_qk_rope_store[", "@g_qk_rope_store_swa[")
+                 .replace('path("r_qe.npy")', 'path("r_qs.npy")'))
 # 3a. output head (argmax over the vocabulary) for one selected span of 3 tokens
 t = 3
 head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
@@ -367,20 +453,32 @@ att = np.zeros((t, QH, D))
 for hh in range(QH):
     kv = hh // (QH // KVH); sc = qr[:, hh] @ kr[:, kv].T / np.sqrt(D); sc[np.triu_indices(t, 1)] = -1e30
     pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); att[:, hh] = pr @ vs[:, kv]
+gh = rng.standard_normal((t, QH)).astype(np.float32)   # per-head gate logits (attn_gate "per_head")
+if gate_kind == "per_head":
+    gate = np.repeat(gh[:, :, None], D, 2)
 if gate_kind:
-    att = att / (1 + np.exp(-gate))
+    att = att * gate_act(gate)
 blocks = (ctx + 15) // 16
 orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)  # record: map origin 40; identity page map
 info = np.zeros((t, 4), np.int32); info[:, 1] = pos; info[:, 2] = 1
 S = 64
 for n, a in [("a_q", q.reshape(t, -1)), ("a_k", k.reshape(t, -1)), ("a_v", v.reshape(t, -1)), ("a_g", gate.reshape(t, -1)),
-             ("a_qg", np.stack([q, gate], 2).reshape(t, -1)), ("a_info", info), ("a_orig", orig), ("a_o", att.reshape(t, -1).astype(np.float32))]:
+             ("a_qg", np.stack([q, gate], 2).reshape(t, -1)), ("a_gh", gh), ("a_qkv", np.concatenate([q, k, v], 1).reshape(t, -1)), ("a_info", info), ("a_orig", orig), ("a_o", att.reshape(t, -1).astype(np.float32))]:
     save(n, a)
 QD = QH * D
 split_text = ""
 if gate_kind == "fused_q":
     split_text = f"""  %qg = check.file.read.npy path("a_qg.npy") : tensor<{t}x{2 * QD}xf32>
   kernel.launch @g_split_qgate[%t](%t, %qg, %q, %g) : [index](index, tensor<{t}x{2 * QD}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>)
+"""
+if gate_kind == "per_head":   # g_gate_heads broadcasts each head's logit over its D dims
+    split_text += f"""  %gh = check.file.read.npy path("a_gh.npy") : tensor<{t}x{QH}xf32>
+  kernel.launch @g_gate_heads[%t](%t, %gh, %g) : [index](index, tensor<{t}x{QH}xf32>, tensor<{t}x{QD}xf32>)
+"""
+QKV = cfg.get("attn_qkv", False)
+if QKV:   # one fused [q | k | v] projection row per token: g_split_qkv fills q, k and v
+    split_text += f"""  %qkv = check.file.read.npy path("a_qkv.npy") : tensor<{t}x{QD + 2 * KVH * D}xf32>
+  kernel.launch @g_split_qkv[%t](%t, %qkv, %q, %k, %v) : [index](index, tensor<{t}x{QD + 2 * KVH * D}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>)
 """
 cases.append(f"""check.case public @attention_chain {{
   %t = check.literal value({t}) : index
@@ -389,10 +487,10 @@ cases.append(f"""check.case public @attention_chain {{
   %sliding = check.literal value(0) : i32
   %ctx = check.literal value({ctx}) : index
   %pool = check.literal value({ctx}) : index
-  %q = {"check.generate.fill value(0.0)" if gate_kind == "fused_q" else 'check.file.read.npy path("a_q.npy")'} : tensor<{t}x{QD}xf32>
-  %g = {"check.generate.fill value(0.0)" if gate_kind == "fused_q" else 'check.file.read.npy path("a_g.npy")'} : tensor<{t}x{QD}xf32>
-  %k = check.file.read.npy path("a_k.npy") : tensor<{t}x{KVH * D}xf32>
-  %v = check.file.read.npy path("a_v.npy") : tensor<{t}x{KVH * D}xf32>
+  %q = {"check.generate.fill value(0.0)" if gate_kind == "fused_q" or QKV else 'check.file.read.npy path("a_q.npy")'} : tensor<{t}x{QD}xf32>
+  %g = {"check.generate.fill value(0.0)" if gate_kind in ("fused_q", "per_head") else 'check.file.read.npy path("a_g.npy")'} : tensor<{t}x{QD}xf32>
+  %k = {"check.generate.fill value(0.0)" if QKV else 'check.file.read.npy path("a_k.npy")'} : tensor<{t}x{KVH * D}xf32>
+  %v = {"check.generate.fill value(0.0)" if QKV else 'check.file.read.npy path("a_v.npy")'} : tensor<{t}x{KVH * D}xf32>
   %qn = check.file.read.npy path("r_qn.npy") : tensor<{D}xf32>
   %kn = check.file.read.npy path("r_kn.npy") : tensor<{D}xf32>
   %info = check.file.read.npy path("a_info.npy") : tensor<{t}x4xi32>
@@ -867,7 +965,8 @@ drafter_cases()
 # Prefill flash attention (gen_flash2.py / gen_flash2s.py): 64 uniform tokens at the end of a 1024-key context,
 # paged arena filled directly (identity page map), layer 0, causal; q scaled so attention is sharp (a kernel that
 # drops part of the score sum fails). Reference in float64 from f16 Q/K/V, times sigmoid(gate) when gated.
-if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and cfg.get("sliding_window") in (None, 0):
+WIN = cfg.get("sliding_window") or 0
+if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (not WIN or not cfg.get("head_dim_swa")):
     t, ctx = 64, 1024
     P0 = ctx - t; blocks = ctx // 16; pool = ctx
     kk = rng.standard_normal((ctx, KVH, D)).astype(np.float16); vv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
@@ -881,8 +980,19 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and c
         sc[np.arange(ctx)[None, :] > (P0 + np.arange(t))[:, None]] = -1e30
         pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); o[:, hh] = pr @ vv[:, kv].astype(np.float64)
     if cfg.get("attn_gate"):
-        o = o / (1 + np.exp(-gg))
+        o = o * gate_act(gg)
     QD = QH * D
+    ow = None
+    if WIN:   # sliding layers: key j visible from position p when p - WIN < j <= p (llama.cpp LLAMA_SWA_TYPE_STANDARD)
+        ow = np.zeros((t, QH, D))
+        for hh in range(QH):
+            kv = hh // (QH // KVH); sc = qd[:, hh] @ kk[:, kv].astype(np.float64).T / np.sqrt(D)
+            p_ = (P0 + np.arange(t))[:, None]; j_ = np.arange(ctx)[None, :]
+            sc[(j_ > p_) | (j_ <= p_ - WIN)] = -1e30
+            pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); ow[:, hh] = pr @ vv[:, kv].astype(np.float64)
+        if cfg.get("attn_gate"):
+            ow = ow * gate_act(gg)
+        save("f_ow", ow.reshape(t, QD).astype(np.float32))
     for n, a in [("f_arena", arena.reshape(-1)), ("f_q", qq.reshape(t, QD)), ("f_g", gg.reshape(t, QD)), ("f_orig", orig),
                  ("f_info", info), ("f_o", o.reshape(t, QD).astype(np.float32))]:
         save(n, a)
@@ -905,11 +1015,14 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and c
   check.return
 }}
 """)
+    if ow is not None:
+        cases.append(cases[-1].replace("@flash_prefill {", "@flash_prefill_window {").replace("%sliding = check.literal value(0)", "%sliding = check.literal value(1)")
+                     .replace('path("f_o.npy")', 'path("f_ow.npy")'))
 # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
 # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
 # bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
 # both with the shared experts' output already in y (scaled by the Qwen shared-expert gate when the model has one).
-if cfg.get("moe"):
+if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
     M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ.get("MOE_R", "8"))
     SHG, ACC = bool(M.get("shared_gate")), bool(M.get("shared_ffn"))
     def deq3(name):
@@ -929,6 +1042,7 @@ if cfg.get("moe"):
         wts = np.take_along_axis(prob, ids, -1)
         if M["norm_weights"]:
             wts = wts / np.maximum(wts.sum(-1, keepdims=True), 6.103515625e-05)
+        wts = wts * M.get("scale", 1.0)
         ss = np.sort(sel, -1)[:, ::-1]
         rel = (ss[:, KU - 1] - ss[:, KU]) / np.maximum(np.abs(ss[:, KU - 1]), 1e-30)   # k-th vs (k+1)-th, relative
         return ids, wts, rel
@@ -1086,7 +1200,20 @@ if cfg.get("moe"):
 }}
 """)
 import re
+# Layers with fewer query heads (cfg layer_heads) run gen_llm.py's _h<heads> attention kernels: this script's attention
+# chain and flash cases at that head count, from a child run whose kernels, cases and files take the suffix.
+if KS:
+    cases = [re.sub(r"check\.case public @(\w+) \{", rf"check.case public @\1{KS} {{", re.sub(
+        r"@(g_qk_rope_store|g_attention_split|g_attention_combine|g_gate_heads|g_attention_flash2)\[", rf"@\1{KS}[", c))
+        .replace('.npy")', f'{KS}.npy")') for c in cases if re.match(r"\s*check\.case public @(attention_chain|flash_prefill)", c)]
+for h in sorted(set(cfg.get("layer_heads") or []) - {QH}):
+    hc = os.path.join(out, f"cfg_h{h}.json"); json.dump(dict(cfg, heads=h, layer_heads=None), open(hc, "w"))
+    import subprocess
+    subprocess.run([sys.executable, os.path.abspath(__file__), hc, out], check=True,
+                   env=dict(os.environ, KTEST_HEADS_SFX=f"_h{h}", GEMM_TESTS="0", DRAFTER_TESTS="0", MOE_TESTS="0"))
+    cases.append(open(os.path.join(out, f"cases_h{h}.loom-test")).read())
+    os.remove(hc); os.remove(os.path.join(out, f"cases_h{h}.loom-test"))
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
-open(os.path.join(out, "cases.loom-test"), "w", newline="\n").write(text)
+open(os.path.join(out, f"cases{KS}.loom-test"), "w", newline="\n").write(text)
 print("wrote", len(cases), "cases")

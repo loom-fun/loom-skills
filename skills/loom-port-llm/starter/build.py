@@ -318,6 +318,8 @@ func.def @with_instructions(%instructions: buffer, %body: buffer) -> (buffer) {{
   %instructions_length = buffer.length %instructions
   %has_instructions = index.cmp ne, %instructions_length, %origin : offset
 """)
+    if chat.get("reasoning_after_lead"):   # appended to the system lead (patch_system_lead)
+        return text
     text = sub(text, "    %block = func.call @join4(%system_prefix, %merged, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
                """    %instructed = func.call @with_instructions(%instructions, %merged) : (buffer, buffer) -> (buffer)
     %block = func.call @join4(%system_prefix, %instructed, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
@@ -341,6 +343,94 @@ func.def @with_instructions(%instructions: buffer, %body: buffer) -> (buffer) {{
                """  %merges_system = scalar.ori %has_tools, %has_instructions : i1
   %consumed = scalar.andi %merges_system, %first_system : i1
 """)
+def patch_system_lead(text):
+    """control.loom for a template whose first system block always opens with its default system prompt
+    (chat_probe.system_lead, Spark-X2.5): chat_begin renders system_prefix + lead [+ reasoning instructions] + [tools
+    block + tools_system_separator + system message | system_lead_separator + system message] + suffix for every
+    request, and the first system message always merges into it. Other packages' control.loom is unchanged."""
+    assert not chat["tools_after_system"] and not chat.get("default_system"), "system_lead: tools before the system message only"
+    text = sub(text, 'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n',
+               'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n\n'
+               f'global.rodata.def @system_lead = bytes("{hx(chat["system_lead"])}")\n\n'
+               f'global.rodata.def @system_lead_separator = bytes("{hx(chat["system_lead_separator"])}")\n')
+    lead = ("  %lead_base = global.load @system_lead : buffer\n" +
+            ("  %lead = func.call @join(%lead_base, %instructions) : (buffer, buffer) -> (buffer)\n" if instructions else
+             "  %lead = func.call @join(%lead_base, %empty) : (buffer, buffer) -> (buffer)\n"))
+    text = sub(text, "  %rendered = scf.if %has_tools -> (buffer) {\n", lead + "  %rendered = scf.if %has_tools -> (buffer) {\n")
+    text = sub(text, "    %block = func.call @join4(%system_prefix, %merged, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+               "    %block = func.call @join4(%system_prefix, %lead, %merged, %suffix) : (buffer, buffer, buffer, buffer) -> (buffer)\n")
+    text = sub(text, """    %block = scf.if %use_default -> (buffer) {
+      %value = func.call @join4(%system_prefix, %default_system, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+      scf.yield %value : buffer
+    } else {
+      scf.yield %empty : buffer
+    }
+""", """    %lead_body_length = buffer.length %system_body
+    %lead_has_body = index.cmp ne, %lead_body_length, %origin : offset
+    %lead_separator_value = global.load @system_lead_separator : buffer
+    %lead_separator = scf.select %lead_has_body, %lead_separator_value, %empty : buffer
+    %lead_text = func.call @join(%lead, %lead_separator) : (buffer, buffer) -> (buffer)
+    %block = func.call @join4(%system_prefix, %lead_text, %system_body, %suffix) : (buffer, buffer, buffer, buffer) -> (buffer)
+""")
+    return sub(text, "  %consumed = scalar.andi %has_tools, %first_system : i1\n", "  %consumed = scalar.ori %first_system, %false : i1\n")
+
+
+def patch_history_close(text):
+    """control.loom for templates that render an assistant turn without reasoning as think_close alone (history_think
+    "close", Spark-X2.5: '<|Bot|></think>answer'). Other packages' control.loom is unchanged."""
+    text = sub(text, "        %wanted = scalar.ori %always, %has_thought : i1\n", "        %wanted = scalar.constant true : i1\n")
+    return sub(text, "          %open = global.load @think_open : buffer\n",
+               "          %open_value = global.load @think_open : buffer\n          %open = scf.select %has_thought, %open_value, %empty : buffer\n")
+
+
+def patch_tools_compact(text):
+    """control.loom for templates that print each tool definition as compact JSON (tojson with separators ',' ':';
+    chat.tools_compact, Spark-X2.6): the host json codec compacts the request's tool JSON. Other packages unchanged."""
+    old = "    %printed = func.call @tool_printed(%value) : (buffer) -> (buffer)\n"
+    assert text.count(old) == 1
+    return text.replace(old, "    %printed_raw = func.call @tool_printed(%value) : (buffer) -> (buffer)\n"
+                              "    %printed = func.call @compact(%printed_raw) : (buffer) -> (buffer)\n")
+
+
+def patch_role_suffixes(text):
+    """control.loom for templates that close each role with its own tag (chat.system_suffix / chat.assistant_suffix,
+    Laguna: '</system>\n', '</assistant>\n'; chat.suffix closes user messages): system blocks (chat_begin and later
+    system messages) and assistant turns (chat_message, complete_text) take their own suffix. Without those fields
+    control.loom is unchanged."""
+    text = sub(text, 'global.rodata.def @message_suffix = bytes("@@HEX_SUFFIX@@")\n',
+               'global.rodata.def @message_suffix = bytes("@@HEX_SUFFIX@@")\n\n'
+               f'global.rodata.def @system_suffix = bytes("{hx(chat.get('system_suffix', chat['suffix']))}")\n\n'
+               f'global.rodata.def @assistant_suffix = bytes("{hx(chat.get('assistant_suffix', chat['suffix']))}")\n')
+    # chat_begin: the system block
+    text = sub(text, "  %system_prefix = global.load @system_prefix : buffer\n  %suffix = global.load @message_suffix : buffer\n  %rendered",
+               "  %system_prefix = global.load @system_prefix : buffer\n  %suffix = global.load @system_suffix : buffer\n  %rendered")
+    # chat_message: assistant turns, and system vs user messages
+    text = sub(text, "        %message = func.call @join4(%head, %calls, %close, %suffix)",
+               "        %assistant_suffix = global.load @assistant_suffix : buffer\n"
+               "        %message = func.call @join4(%head, %calls, %close, %assistant_suffix)")
+    text = sub(text, "        %message = func.call @join4(%prefix, %text, %suffix, %empty)",
+               "        %system_suffix = global.load @system_suffix : buffer\n"
+               "        %role_suffix = scf.select %user, %suffix, %system_suffix : buffer\n"
+               "        %message = func.call @join4(%prefix, %text, %role_suffix, %empty)")
+    # complete_text: the generated assistant turn
+    return sub(text, "  %separator = scf.select %separate, %separator_value, %empty : buffer\n  %suffix = global.load @message_suffix : buffer\n",
+               "  %separator = scf.select %separate, %separator_value, %empty : buffer\n  %suffix = global.load @assistant_suffix : buffer\n")
+
+
+def patch_history_think_off(text):
+    """control.loom for templates that show reasoning in history only with thinking on and render every assistant turn
+    as think_close alone with it off (chat.history_think_off "close", Laguna: '<assistant></think>answer'). Without
+    the field control.loom is unchanged."""
+    text = sub(text, "        %text_length = buffer.length %text\n",
+               """        // Thinking off (state bit 16 clear): think_close alone, the reasoning dropped (chat.history_think_off).
+        %thinking_mask = scalar.constant 16 : i64
+        %thinking_bit = scalar.andi %state, %thinking_mask : i64
+        %thinking_off = scalar.cmpi eq, %thinking_bit, %zero64 : i64
+        %close_only = global.load @think_close : buffer
+        %think_shown = scf.select %thinking_off, %close_only, %think : buffer
+        %text_length = buffer.length %text
+""")
+    return sub(text, "func.call @join4(%prefix, %think, %text, %separator)", "func.call @join4(%prefix, %think_shown, %text, %separator)")
 
 
 def patch_default_system_tools(text):
@@ -554,6 +644,12 @@ for name in ("prepare", "control", "storage", "service"):
     text = open(os.path.join(HERE, "templates", name + ".loom"), encoding="utf-8").read()
     if name == "control" and instructions:
         text = patch_reasoning_instructions(text)
+    if name == "control" and chat.get("system_lead"):
+        text = patch_system_lead(text)
+    if name == "control" and chat.get("history_think") == "close":
+        text = patch_history_close(text)
+    if name == "control" and chat.get("tools_compact"):
+        text = patch_tools_compact(text)
     if name == "control" and chat.get("history_think_before") == "empty":
         text = patch_history_think_before(text)
     if name == "control" and "default_system_tools" in chat:
@@ -562,6 +658,10 @@ for name in ("prepare", "control", "storage", "service"):
         text = patch_json_chat(text)
     if name == "control" and chat["call_format"] == "none":
         text = patch_no_tools(text)
+    if name == "control" and ("system_suffix" in chat or "assistant_suffix" in chat):
+        text = patch_role_suffixes(text)
+    if name == "control" and chat.get("history_think_off") == "close":
+        text = patch_history_think_off(text)
     if name == "control" and custom_chat:
         for fn in ("chat_begin", "chat_message", "chat_end", "render_tool", "parse_tools", "output_next", "complete_text"):
             text = text.replace(f"func.def public @{fn}(", f"func.def @generic_{fn}(")
@@ -597,6 +697,8 @@ keep = set(chat.get("nonspecial_tokens", []))
 for t in tok.get("added_tokens", []):
     if t["content"] in keep:
         t["special"] = False
+from runtime_tokenizer import rewrite_tokenizer  # noqa: E402  forms the runtime loads, same tokenization
+rewrite_tokenizer(tok)
 json.dump(tok, open(os.path.join(pkg, "tokenizer.json"), "w", encoding="utf-8"), ensure_ascii=False)
 
 # 4. Weights (symlink; hard link on Windows without Developer Mode) and the package card.

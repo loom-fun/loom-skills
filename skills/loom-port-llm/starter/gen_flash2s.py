@@ -25,6 +25,7 @@ KVH, G, D = _c["kv_heads"], _c["heads"] // _c["kv_heads"], _c["head_dim"]
 QH = KVH * G
 WINDOW = _c.get("sliding_window") or 262144
 GATE = bool(_c.get("attn_gate", False))
+GATE_SIG = _c.get("attn_gate_act", "sigmoid") == "sigmoid"   # else the gate holds the activated value (softplus)
 LAYERS = _c["layers"] - 1
 assert D == 256 and not _c.get("attn_sinks"), "gen_flash2s: head_dim 256 without attention sinks"
 HALF = D // 2                     # dims per wave
@@ -301,9 +302,10 @@ A('''    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %out_view = buffer.view %out[%out_offset] : buffer -> view<{HALF}x16xf32, %out_layout>''' + (f'''
   %gate_view = buffer.view %gate[%out_offset] : buffer -> view<{HALF}x16xf32, %out_layout>''' if GATE else ""))
 for d in range(NFH):
+    act = (f"\n  %gs{d} = vector.logisticf<afn> %gf{d} : vector<8xf32>" if GATE_SIG
+           else f"\n  %gs{d} = vector.addf %gf{d}, %zero8 : vector<8xf32>")   # softplus: the gate holds the value
     gate_txt = f'''
-  %gf{d} = vector.fragment.load<result> %gate_view[%qd{d}_o, %c0] shape [%c16, %c16] : view<{HALF}x16xf32, %out_layout> -> vector<8xf32>
-  %gs{d} = vector.logisticf<afn> %gf{d} : vector<8xf32>
+  %gf{d} = vector.fragment.load<result> %gate_view[%qd{d}_o, %c0] shape [%c16, %c16] : view<{HALF}x16xf32, %out_layout> -> vector<8xf32>{act}
   %of{d} = vector.mulf %ou{d}, %gs{d} : vector<8xf32>''' if GATE else f'''
   %of{d} = vector.addf %ou{d}, %zero8 : vector<8xf32>'''
     A(f'''  %ou{d} = vector.mulf %o{d}, %inv_v : vector<8xf32>{gate_txt}

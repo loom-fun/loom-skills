@@ -28,6 +28,7 @@ if T == "llm":  # gen_llm.py: geometry from the LLM_CONFIG json (see inspect_ggu
     _c = json.load(open(os.environ["LLM_CONFIG"]))
     CFG = dict(prefix="g", kvh=_c["kv_heads"], group=_c["heads"] // _c["kv_heads"], sinks=_c.get("attn_sinks", False),
                window=_c.get("sliding_window") or 262144, kv_f32=False, gate=_c.get("attn_gate", False), layers=_c["layers"] - 1,
+               gate_act=_c.get("attn_gate_act", "sigmoid"),
                dim=_c["head_dim"])
 else:
     CFG = {
@@ -329,9 +330,10 @@ A('''    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %out_view = buffer.view %out[%out_offset] : buffer -> view<{D}x16xf32, %out_layout>''' + ("\n  %gate_view = buffer.view %gate[%out_offset] : buffer -> view<{D}x16xf32, %out_layout>" if CFG["gate"] else ""))
 for d in range(NF):
     r = f"%d{d * 16 if d else 0}r"
+    act = (f"\n  %gs{d} = vector.logisticf<afn> %gf{d} : vector<8xf32>" if CFG.get("gate_act", "sigmoid") == "sigmoid"
+           else f"\n  %gs{d} = vector.addf %gf{d}, %zero_v8 : vector<8xf32>")   # softplus: the gate holds the value
     gate_txt = f"""
-  %gf{d} = vector.fragment.load<result> %gate_view[{r}, %c0] shape [%c16, %c16] : view<{D}x16xf32, %out_layout> -> vector<8xf32>
-  %gs{d} = vector.logisticf<afn> %gf{d} : vector<8xf32>
+  %gf{d} = vector.fragment.load<result> %gate_view[{r}, %c0] shape [%c16, %c16] : view<{D}x16xf32, %out_layout> -> vector<8xf32>{act}
   %of{d} = vector.mulf %ou{d}, %gs{d} : vector<8xf32>""" if CFG["gate"] else f"""
   %of{d} = vector.addf %ou{d}, %zero_v8 : vector<8xf32>"""
     A(f'''  %ou{d} = vector.mulf %o{d}, %inv_v : vector<8xf32>{gate_txt}

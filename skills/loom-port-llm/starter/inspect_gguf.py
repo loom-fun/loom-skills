@@ -35,6 +35,10 @@ for t in r.tensors:
     tensors[t.name] = {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]}
 H = A("embedding_length")
 heads = A("attention.head_count")
+# Query heads per layer (laguna: 48 on full-attention layers, 64 on sliding ones): cfg["heads"] is the widest (buffer
+# sizes) and cfg["layer_heads"] lists each layer's (gen_llm.py generates the attention kernels per head count).
+layer_heads = heads if isinstance(heads, list) and len(set(heads)) > 1 else None
+heads = max(heads) if isinstance(heads, list) else heads
 kv = A("attention.head_count_kv")
 head_dim = A("attention.key_length") or H // heads
 BLOCKS = A("block_count")
@@ -80,16 +84,20 @@ cfg = {
     "chat": None,
     "tensors": tensors,
 }
+if layer_heads:
+    cfg["layer_heads"] = layer_heads[:L]
+    print(f"query heads per layer: {sorted(set(layer_heads))}")
 if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3",
-                "qwen3moe", "qwen35moe"):
+                "qwen3moe", "qwen35moe", "spark2_5", "laguna"):
     print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
           "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
           "before trusting a golden FAIL or PASS")
-_g = cfg["heads"] // max(cfg["kv_heads"], 1)
-if _g & (_g - 1):
+for _g in sorted(g for g in {h // max(cfg["kv_heads"], 1) for h in (layer_heads or [heads])} if g & (g - 1)):
     print(f"NOTE: {_g} query heads per KV head (not a power of two): flash prefill stages K/V for the power of two "
           "below it and the extra waves skip staging (gen_flash2.py); check the long goldens")
-# Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style).
+# Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style), else the period llama.cpp
+# hard-codes for the architecture (src/models/<arch>.cpp load_swa_pattern(ml, n, dense_first)).
+SWA_PERIOD = {"laguna": (4, True)}
 pat = A("attention.sliding_window_pattern")
 if cfg["sliding_window"] and isinstance(pat, list) and len(pat) in (L, BLOCKS):
     pat = pat[:L]
@@ -97,6 +105,9 @@ if cfg["sliding_window"] and isinstance(pat, list) and len(pat) in (L, BLOCKS):
 elif cfg["sliding_window"] and isinstance(pat, int) and pat > 1:
     # a period instead of a list (llama.cpp set_swa_pattern(n)): every n-th layer is full attention
     cfg["sliding_layers"] = [i for i in range(L) if i % pat < pat - 1]
+elif cfg["sliding_window"] and arch in SWA_PERIOD:
+    _n, _dense_first = SWA_PERIOD[arch]   # llama_hparams::set_swa_pattern
+    cfg["sliding_layers"] = [i for i in range(L) if (i % _n != 0 if _dense_first else i % _n < _n - 1)]
 elif cfg["sliding_window"]:
     print(f"WARNING: sliding_window {cfg['sliding_window']} but no per-layer pattern in the GGUF: fill "
           "sliding_layers (and nope_layers) by hand from llama.cpp's src/models/<arch>.cpp or llama_trace.py")
@@ -116,6 +127,18 @@ if arch != "gemma4":
     freqs = next((t.data for t in r.tensors if t.name == "rope_freqs.weight"), None)
     if freqs is not None and any(float(f) != 1.0 for f in freqs):
         cfg["rope_freq_factors"] = [float(f) for f in freqs]
+# YaRN RoPE scaling (gen_llm.py yarn_constants; llama.cpp applies it whenever the GGUF says yarn: ext_factor 1, and
+# the attention factor that leaves mscale = 1 + 0.1 ln(factor) unless rope.scaling.yarn_log_multiplier is set).
+# Sliding layers with their own rope base (rope_theta_swa) run plain RoPE (laguna: ext_factor 0 there).
+if A("rope.scaling.type") == "yarn" and (A("rope.scaling.factor") or 1.0) > 1.0:
+    import math
+    _f, _lm = float(A("rope.scaling.factor")), float(A("rope.scaling.yarn_log_multiplier", 0.0) or 0.0)
+    _ms = lambda m: 1.0 if _f <= 1.0 else 0.1 * m * math.log(_f) + 1.0
+    _af = (_ms(1.0) / _ms(_lm) if _lm else _ms(1.0)) / (1.0 + 0.1 * math.log(_f)) * float(A("rope.scaling.attn_factor", 1.0) or 1.0)
+    cfg["rope_scaling"] = {"type": "yarn", "factor": _f, "orig_ctx": A("rope.scaling.original_context_length"),
+                           "beta_fast": float(A("rope.scaling.yarn_beta_fast", 32.0) or 32.0),
+                           "beta_slow": float(A("rope.scaling.yarn_beta_slow", 1.0) or 1.0), "attn_factor": _af}
+    print("rope scaling:", cfg["rope_scaling"])
 # Gemma 3n/4 geometry (reference/gemma4-example's gen_llm.py keys), from this GGUF: a reference package of another size
 # (find_reference.py apply fills keys inspect leaves out) has other KV-sharing, per-layer-embedding and rope values.
 if arch == "gemma4":
@@ -148,6 +171,19 @@ if arch == "gemma4":
         print(f"WARNING: unsupported layout: per-layer KV heads {sorted(set(kv)) if isinstance(kv, list) else kv}"
               f"{f', no attn_v (V = K) on layers {no_v[:4]}...' if no_v else ''}: gemma4-example's attention assumes "
               "one KV-head count and an attn_v on every KV-owning layer; extend gen_llm.py (agent port)")
+# Sliding layers with their own RoPE at the same head_dim (spark2_5: freq_base_swa 1e4 + full rotary dims on the sliding
+# layers, 5e6 + 64 of 256 dims on the global ones; llama.cpp defaults each to the global value when the key is absent).
+if arch != "gemma4" and cfg["sliding_layers"] and (A("rope.freq_base_swa") or A("rope.dimension_count_swa")):
+    cfg["rope_theta_swa"] = A("rope.freq_base_swa") or cfg["rope_theta"]
+    cfg["rope_dims_swa"] = A("rope.dimension_count_swa") or rope_dims or head_dim
+# FFN activations llama.cpp hard-codes per architecture (build_ffn's LLM_FFN_GELU: GEGLU, gelu-tanh); default SwiGLU.
+FFN_ACT = {"spark2_5": "gelu"}
+if arch in FFN_ACT:
+    cfg["ffn_act"] = FFN_ACT[arch]
+# Attention output gate activations llama.cpp hard-codes per architecture (default sigmoid): laguna's is softplus.
+GATE_ACT = {"laguna": "softplus"}
+if arch in GATE_ACT and cfg["attn_gate"]:
+    cfg["attn_gate_act"] = GATE_ACT[arch]
 # Hybrid models: gated delta-net (linear attention) layers carry recurrent state
 # instead of KV (llama.cpp qwen35/qwen3next: layer i is recurrent unless (i+1) % interval == 0).
 if A("ssm.inner_size"):
@@ -168,6 +204,15 @@ if A("ssm.inner_size"):
 if _nextn and L != BLOCKS:
     cfg["mtp"] = {"layers": _nextn}
     print(f"MTP: {len(_nextn)} NextN block(s) {_nextn} after the {L}-layer trunk: speculative decoding (MTP) is available")
+# Attention layers with one fused q | k | v projection (spark2_5: attn_qkv; hybrids' gated delta-net layers have their own
+# attn_qkv, which this does not look at), and an attn_gate with one row per query head (sigmoid per head, spark2_5).
+_attn0 = next((i for i in range(L) if i not in cfg.get("recurrent_layers", [])), None)
+if _attn0 is not None and f"blk.{_attn0}.attn_qkv.weight" in tensors and f"blk.{_attn0}.attn_q.weight" not in tensors:
+    if tensors[f"blk.{_attn0}.attn_qkv.weight"]["shape"][1] != (heads + 2 * cfg["kv_heads"]) * head_dim:
+        print("WARNING: unsupported layout: attn_qkv is not [q | k | v] of heads + 2 kv_heads rows of head_dim (agent port)")
+    cfg["attn_qkv"] = True
+if _attn0 is not None and cfg["attn_gate"] is True and tensors[f"blk.{_attn0}.attn_gate.weight"]["shape"][1] == (layer_heads or [heads] * L)[_attn0]:
+    cfg["attn_gate"] = "per_head"
 # Attention projection biases (qwen2: q/k/v, added right after the projection, llama.cpp build_qkv): g_qk_rope_store
 # adds those in cfg["attn_bias"] (gen_llm.py QKV_BIAS), with the same set on every attention layer. A fused-qkv or
 # output bias, or a mixed set, has no kernel: a port would serve garbage while its kernel tests pass, so stop.
