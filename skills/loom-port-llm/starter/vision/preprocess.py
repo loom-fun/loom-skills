@@ -7,6 +7,7 @@ import math, numpy as np
 FAMILY = {
     "gemma4v":        dict(merge=3, tokens=(70, 1120), filt="bicubic", half_even=False),
     "qwen3vl_merger": dict(merge=2, tokens=(8, 4096),  filt="bicubic", half_even=True),
+    "qwen2.5vl_merger": dict(merge=2, tokens=(8, 4096), filt="bicubic", half_even=True),
     "muse-glimmer":   dict(merge=2, tokens=(1, 4096),  filt="lanczos", half_even=False),
 }
 

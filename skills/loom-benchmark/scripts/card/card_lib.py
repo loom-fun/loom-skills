@@ -301,8 +301,11 @@ def metric_applies(key, kind, feats):
 
 
 def is_devlab(info, session):
-    """Whether a performance session ran on DevLab (its source kind is "devlab")."""
-    return ((info.get("sources") or {}).get(session.get("source")) or {}).get("kind") == "devlab"
+    """Whether a performance session ran on DevLab (its source kind is "devlab"). The source is an id into
+    info["sources"], or the source itself in an evidence file's session (make_info.py roofline reads those)."""
+    src = session.get("source")
+    src = src if isinstance(src, dict) else (info.get("sources") or {}).get(src)
+    return (src or {}).get("kind") == "devlab"
 
 
 def card_metrics(info, devlab=False):
