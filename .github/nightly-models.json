@@ -300,6 +300,39 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/ggml-org-Qwen3-4B-loom",
+   "slug": "qwen3-4b",
+   "memory_bytes": 25000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/ggml-org-Qwen3-1.7B-loom",
+   "slug": "qwen3-1.7b",
+   "memory_bytes": 17000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "slug": "qwen3-0.6b",
+   "memory_bytes": 17000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
   }
  ]
 }
