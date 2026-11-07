@@ -324,6 +324,81 @@
    ]
   },
   {
+   "repo": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+   "slug": "qwen3-30b-a3b-instruct-2507",
+   "memory_bytes": 63000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": []
+  },
+  {
+   "repo": "loom-fun/XHToken-Spark-X2.5-4B-loom",
+   "slug": "spark-x2.5-4b",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+   "slug": "spark-x2.6-4b",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+   "slug": "qwen2.5-vl-7b-instruct",
+   "memory_bytes": 21000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "vision",
+    "draft"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-LFM3-1.7B-loom",
+   "slug": "lfm3-1.7b",
+   "memory_bytes": 13000000000,
+   "kit": "lfm2moe",
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/ggml-org-LFM3-Omni-2B-loom",
+   "slug": "lfm3-omni-2b",
+   "memory_bytes": 9000000000,
+   "kit": "lfm2moe",
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/InternScience-Sage-A1.5-loom",
+   "slug": "sage-a1.5",
+   "memory_bytes": 41000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "vision",
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
    "repo": "loom-fun/unsloth-gemma-4-E2B-it-loom",
    "slug": "gemma-4-e2b-it",
    "memory_bytes": 16000000000,

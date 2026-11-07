@@ -1,6 +1,6 @@
 --- a/gen_llm.py
 +++ b/gen_llm.py
-@@ -61,6 +61,7 @@
+@@ -68,6 +68,7 @@
  MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) | ({MTP_LAYER} if MTP_LAYER is not None else set()) if MOE else set()
  FS = (MOE or {}).get("shared_ffn", 0)     # shared-expert FFN width (0: none)
  SHGATE = (MOE or {}).get("shared_gate", False)   # Qwen-style sigmoid gate on the shared experts (ffn_gate_inp_shexp)
@@ -8,7 +8,7 @@
  POST_NORM = CFG.get("post_norms", False)
  POST_EPS = CFG.get("post_norm_eps", 1e-8)
  EMBED_NORM = CFG.get("embed_norm", False)
-@@ -2380,6 +2381,17 @@
+@@ -2401,6 +2402,17 @@
      %g = vector.load %gate_view[%token, %head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
      %sig = vector.logisticf<afn> %g : vector<4xf32>
      %result = vector.mulf %attended, %sig : vector<4xf32>""".replace("{QH}", str(QH)) if GATE else "    %result = vector.addf %attended, %zero4 : vector<4xf32>"
@@ -26,7 +26,7 @@
      text = f"""
  // Splits for `visible` keys: about 32 keys each, at most {S}.
  func.def inline @{P}_split_count(%visible: index) -> (index) {{
-@@ -2540,13 +2552,13 @@
+@@ -2561,13 +2573,13 @@
      %s_eff = func.call @{P}_split_count(%visible) : (index) -> (index)
      %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>
      %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
@@ -42,7 +42,7 @@
        %bs = index.assume %s [range(%s, 0, {S - 1})] : index
        %ms = view.load %ml_view[%token, %head, %bs, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
        %ls = view.load %ml_view[%token, %head, %bs, 1] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
-@@ -3915,7 +3927,7 @@
+@@ -4080,7 +4092,7 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -51,7 +51,7 @@
      attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in RECUR)}
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
      def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
-@@ -3931,6 +3943,8 @@
+@@ -4096,6 +4108,8 @@
          if i not in MOE_LAYERS:
              T += [par("w_gate", "ffn_gate"), par("w_up", "ffn_up"), par("w_down", "ffn_down")]
          T += [par("ffn_norm", FFN_NORM, f"view<{H}xf32>")]
@@ -59,15 +59,16 @@
 +            T.append(par("sinks", "attn_sinks", f"view<{QH}xf32>"))
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
-         else:
-@@ -3965,15 +3979,17 @@
-         if GATE and not FUSED_Q and i not in RECUR and not qg:
+         elif QKV_FUSED:
+@@ -4140,16 +4154,18 @@
+         elif GATE and not FUSED_Q and i not in RECUR and not qg:
              T.append("  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wg_{i}", sz("attn_gate"), "%gate", "%nH", "%nQ", H) + "\n")
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
 +        gate, gty = (f"%sinks_{i}", f"view<{QH}xf32>") if SINKS else (gate0, "buffer")
          nty = f"view<{D}xf32>" if QK_NORM else "buffer"
          if i not in RECUR:
-           T.append(f"""  kernel.launch @g_qk_rope_store[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
+           rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
+           T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
    scf.if %gemm {{
 -{"" if NO_FLASH else f"    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)" + chr(10)}    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
 -    kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
@@ -83,16 +84,16 @@
      kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -81,7 +81,7 @@
+@@ -87,7 +87,7 @@
      "tensors": tensors,
  }
  if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3",
--                "qwen3moe", "qwen35moe"):
-+                "qwen3moe", "qwen35moe", "flint"):
+-                "qwen3moe", "qwen35moe", "spark2_5"):
++                "qwen3moe", "qwen35moe", "spark2_5", "flint"):
      print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
            "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
            "before trusting a golden FAIL or PASS")
-@@ -181,6 +181,12 @@
+@@ -230,6 +230,12 @@
  elif _attn and _qkv[_attn[0]]:
      cfg["attn_bias"] = list(_qkv[_attn[0]])
      print(f"attention biases: {cfg['attn_bias']} (added by g_qk_rope_store)")
@@ -105,7 +106,7 @@
  # MoE FFN (gen_moe.py) after the leading dense layers: router (f32/bf16), top-k, optional selection bias, shared
  # experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
  # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
-@@ -244,6 +250,13 @@
+@@ -293,6 +299,13 @@
              print("WARNING: the derived chat block does not reproduce the template (FAIL above); fix it by hand")
      except (chat_probe.ProbeError, ValueError, KeyError) as e:
          print("WARNING: chat template not derivable automatically:", e)
@@ -121,7 +122,7 @@
  unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -133,6 +133,34 @@
+@@ -144,6 +144,34 @@
    check.return
  }}
  """)
@@ -156,7 +157,7 @@
  # 2. matvec per (tensor) for t=1 and t=4 variants
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
-@@ -394,9 +422,14 @@
+@@ -478,9 +506,14 @@
  # the paged KV cache holds F16 K and V: with large biases (k up to |130|) their rounding moves the output past atol
  kr, vs = (a.astype(np.float16).astype(np.float32) for a in (kr, v + bv))
  att = np.zeros((t, QH, D))
@@ -169,19 +170,19 @@
 +    else:
 +        pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True)
 +    att[:, hh] = pr @ vs[:, kv]
- if gate_kind:
-     att = att / (1 + np.exp(-gate))
- blocks = (ctx + 15) // 16
-@@ -404,7 +437,7 @@
+ gh = rng.standard_normal((t, QH)).astype(np.float32)   # per-head gate logits (attn_gate "per_head")
+ if gate_kind == "per_head":
+     gate = np.repeat(gh[:, :, None], D, 2)
+@@ -491,7 +524,7 @@
  info = np.zeros((t, 4), np.int32); info[:, 1] = pos; info[:, 2] = 1
  S = 64
  for n, a in [("a_q", q.reshape(t, -1)), ("a_k", k.reshape(t, -1)), ("a_v", v.reshape(t, -1)), ("a_g", gate.reshape(t, -1)),
--             ("a_qg", np.stack([q, gate], 2).reshape(t, -1)), ("a_info", info), ("a_orig", orig), ("a_o", att.reshape(t, -1).astype(np.float32))]:
-+             ("a_qg", np.stack([q, gate], 2).reshape(t, -1)), ("a_info", info), ("a_orig", orig), ("a_sinks", sinks.astype(np.float32)), ("a_o", att.reshape(t, -1).astype(np.float32))]:
+-             ("a_qg", np.stack([q, gate], 2).reshape(t, -1)), ("a_gh", gh), ("a_qkv", np.concatenate([q, k, v], 1).reshape(t, -1)), ("a_info", info), ("a_orig", orig), ("a_o", att.reshape(t, -1).astype(np.float32))]:
++             ("a_qg", np.stack([q, gate], 2).reshape(t, -1)), ("a_gh", gh), ("a_qkv", np.concatenate([q, k, v], 1).reshape(t, -1)), ("a_info", info), ("a_orig", orig), ("a_sinks", sinks.astype(np.float32)), ("a_o", att.reshape(t, -1).astype(np.float32))]:
      save(n, a)
  QD = QH * D
  split_text = ""
-@@ -428,17 +461,115 @@
+@@ -524,17 +557,115 @@
    %info = check.file.read.npy path("a_info.npy") : tensor<{t}x4xi32>
    %orig = check.file.read.npy path("a_orig.npy") : tensor<{10 + blocks}xi32>
    %eo = check.file.read.npy path("a_o.npy") : tensor<{t}x{QD}xf32>
