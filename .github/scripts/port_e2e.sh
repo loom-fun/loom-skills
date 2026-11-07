@@ -64,18 +64,19 @@ export LLAMACPP_HOME=${LLAMACPP_HOME:-$D/llamacpp} SEARCH_ROOT=${SEARCH_ROOT:-${
 mkdir -p "$LLAMACPP_HOME"
 
 ph port
-# port.sh leaves its server running for qualify.sh, so the lock is held from port to finalize as one GPU job.
+# port.sh leaves its server running for qualify.sh, so the lock is held from port to finalize as one GPU job. Each
+# stage runs with fd 9 closed (9>&-): a server it leaves running must not inherit the lock (flock -o, as in lock()).
 (
   [ -n "${GPU_LOCK:-}" ] && { exec 9>"$GPU_LOCK"; flock 9; }
-  "$P/port.sh" "$spec" "$W" "$port" auto $model_id > "$out/port.log" 2>&1; rc=$?
+  "$P/port.sh" "$spec" "$W" "$port" auto $model_id > "$out/port.log" 2>&1 9>&-; rc=$?
   tail -4 "$out/port.log"
   [ $rc = 0 ] || { echo "port.sh exit $rc"; exit $rc; }
   gguf=$(ls "$W"/gguf/*.gguf | head -1)
   echo "$(date +%s) qualify" >> "$D/phases.log"
-  "$B/qualify.sh" "$W/pkg" "$url" "$gguf" "$W/bench" "$lport" > "$out/qualify.log" 2>&1; echo "qualify exit $?"
+  "$B/qualify.sh" "$W/pkg" "$url" "$gguf" "$W/bench" "$lport" > "$out/qualify.log" 2>&1 9>&-; echo "qualify exit $?"
   grep "^QUALIFY_RESULT" "$out/qualify.log" | cut -c1-600
   echo "$(date +%s) finalize" >> "$D/phases.log"
-  "$B/finalize.sh" "$W/pkg" "$url" "$gguf" "$W/bench" "$lport" > "$out/finalize.log" 2>&1; frc=$?
+  "$B/finalize.sh" "$W/pkg" "$url" "$gguf" "$W/bench" "$lport" > "$out/finalize.log" 2>&1 9>&-; frc=$?
   echo "finalize exit $frc"; grep "^FINALIZE\|AUDIT" "$out/finalize.log" | tail -3
   exit 0
 ) ; rc=$?
@@ -85,6 +86,9 @@ ph evidence
 gguf=$(ls "$W"/gguf/*.gguf | head -1); bench=$W/bench
 build=$("$T" -c "import json,re;r=json.load(open('$bench/llamacpp_pick.json'))['ranked'];m=re.search(r'b1[0-9]{3,}', r[0]['dir']) if r else None;print(m.group(0) if m else '')" 2>/dev/null)
 src=(--package "$W/pkg")
+# On DevLab (GITHUB_RUN_ID) the evidence says so: the gates count, but a card's performance numbers come from local
+# sessions only, so a card published with this perf session is flagged for a local re-measure (card_lib.perf_flags
+# "devlab", org_status remeasure: devlab-primary) until a local session replaces it.
 [ -n "${GITHUB_RUN_ID:-}" ] && src+=(--source-kind devlab --run "$GITHUB_RUN_ID" --url "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-loom-fun/loom-skills}/actions/runs/$GITHUB_RUN_ID")
 if [ -n "$build" ] && [ -s "$bench/perf_log.jsonl" ]; then
   # 4 streams: llama.cpp's c4_steady rows (perf_log.jsonl) and Loom's (targets.jsonl), the final session's only

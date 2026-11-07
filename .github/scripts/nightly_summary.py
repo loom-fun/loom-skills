@@ -20,7 +20,6 @@ a = ap.parse_args()
 runs = {}
 for f in glob.glob(os.path.join(a.artifacts, "**", "summary.json"), recursive=True):
     s = json.load(open(f))
-    s["_dir"] = os.path.dirname(f)
     runs[(s["repo"], s["level"])] = s
 listed = [m["repo"] for m in json.load(open(a.models))["models"]]
 want = [r for r in listed if not a.only or r in a.only.split(",")] + sorted({r for r, _ in runs} - set(listed))
@@ -48,10 +47,5 @@ for r in want:
             cells.append("" if x is None else f"{'PASS' if x['pass'] else '**FAIL**'} ({x['seconds']} s)")
         v = s["verdict"] if s["verdict"] == "PASS" else f"**{s['verdict']}**"
         print(f"| {r} | {s['level']} | {v} | {s['seconds'] / 60:.1f} min | {s.get('gates_seconds') or 0} s | " + " | ".join(cells) + " |")
-for k in sorted(runs, key=lambda k: (want.index(k[0]) if k[0] in want else 99, order.get(k[1], 9))):
-    p = os.path.join(runs[k]["_dir"], "perf.md")
-    if os.path.exists(p):
-        print(f"\n### {k[0]} ({k[1]}): performance (Loom alone: the card's DevLab column)\n")
-        print(open(p).read())
 print("\nLogs: the `nightly-<card>` artifacts (gates.out, gates_*.log, serve logs).")
 sys.exit(0 if ok else 1)

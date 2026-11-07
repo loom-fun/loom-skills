@@ -1,7 +1,9 @@
 #!/bin/bash
 # Nightly correctness gates on one published loom-fun card: deterministic, no LLM agent and no skill run.
 # Fetches the latest card from Hugging Face, serves it, runs gates.sh (LEVEL=full by default) against the
-# llama.cpp reference build the card was measured with, and optionally a report-only perf run.
+# llama.cpp reference build the card was measured with. Correctness only: DevLab runners measure Loom well below a
+# local session on the same programs, so no performance is measured here (loom-org SKILL.md, "DevLab measures
+# correctness"); every card performance number comes from a local session.
 # Run by .github/workflows/nightly-gates.yml (one matrix job per card); runs by hand on any Strix Halo:
 #
 #   [LEVEL=full|quick|dev|fast] [WORK=~/loom-nightly] .github/scripts/nightly_gates.sh loom-fun/<card-repo>
@@ -17,10 +19,8 @@
 #   MATERIALIZE   loom-fetch --materialize (default copy; share avoids a second copy of the GGUFs)
 #   FETCH_CACHE   loom-fetch --cache (default: loom-fetch's own)
 #   LOOM_PORT / LLAMA_PORT   default 8160 / 8130
-#   PERF=1        after the gates: Loom alone, perf.py and perf.py --long (every card row) + 3 c4_steady.py runs, for the
-#                 card's DevLab column (card/pull_devlab.py) and next to the card's numbers and roofline (perf.md)
 #   CLEAN=1       delete the fetched package (the GGUF copies) and FETCH_CACHE at exit
-# Writes WORK/<slug>/out: gates.json, gates.out, gates_*.log, summary.json, serve.log, perf.jsonl, perf.md.
+# Writes WORK/<slug>/out: gates.json, gates.out, gates_*.log, summary.json, serve.log.
 # Every server this script or gates.sh starts is stopped at exit (state dirs under WORK/<slug>).
 set -uo pipefail
 repo=${1:?usage: nightly_gates.sh loom-fun/CARD_REPO}
@@ -62,7 +62,7 @@ if [ ! -x "$root/.venv/bin/loom-serve" ] || [ ! -x "$root/.tools/bin/python" ]; 
   step "install Loom into $root"
   "$SV/install_loom.sh" "$root" ${LOOM_VERSION:+"$LOOM_VERSION"} || exit 1
 fi
-export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
+export LOOM_ROOT=$root VENV=$root/.venv
 echo "hrx-loom $("$root/.venv/bin/python" -c 'import importlib.metadata as m; print(m.version("hrx-loom"))')"
 
 # 2. The latest card. loom-fetch installs the files model.json lists; llm_config.json (the gates' view of the
@@ -125,39 +125,8 @@ rc=$?
 grep -h "^GATES" "$out/gates.out" || tail -20 "$out/gates.out"
 cp "$bench"/gates.json "$bench"/gates_*.log "$out/" 2>/dev/null
 
-# 7. Perf, Loom alone: the card's DevLab column (pull_devlab.py), never compared with llama.cpp; never changes the verdict
-if [ "${PERF:-0}" = 1 ]; then
-  step "perf (DevLab column)"
-  curl -sf "$url/v1/models" >/dev/null || "$SV/serve.sh" "nightly-$slug" "$LOOM_PORT" amdgpu "$mem" "$pkg/model.json" | tail -1
-  model=$("$T" -c "import json; print(json.load(open('$pkg/llm_config.json'))['model_id'])")
-  (cd "$out" && rm -f perf.jsonl c4.jsonl
-   # two runs: perf.py measures the short rows, or with --long the long ones (8k-32k prefill, 32k decode). Each first
-   # sends an untimed warm-up of its first timed request's shape (perf.py, as in a local session: both sides measure
-   # alike) and records each decode row's drafted-token acceptance, as c4_steady.py does for 4 streams (the roofline's)
-   "$T" "$B/perf.py" "$url" nightly --model "$model" --no-campaign --log perf.jsonl | tail -1
-   "$T" "$B/perf.py" "$url" nightly --model "$model" --no-campaign --long --log perf.jsonl | tail -1
-   for i in 1 2 3; do "$T" "$B/c4_steady.py" "$url" 4 --model "$model" --log c4.jsonl | tail -1; done > c4_steady.txt
-   "$T" - "$B/card" "$pkg/info.json" <<'EOF' | tee perf.md
-import json, os, sys
-sys.path.insert(0, sys.argv[1])
-from card_lib import METRICS, card_metrics
-from make_info import c4_samples, devlab_sweep, perf_rows
-info = json.load(open(sys.argv[2])) if os.path.exists(sys.argv[2]) else {}
-card = {k: m.get("loom") for k, (m, _) in card_metrics(info).items()}
-roof = (info.get("roofline") or {}).get("metrics") or {}
-now = devlab_sweep(perf_rows("perf.jsonl", "loom"), c4_samples("c4_steady.txt"), None)["metrics"]
-f = lambda v: "-" if v is None else f"{v:.1f}"
-print("| metric | Loom tonight | Loom on the card | tonight / card | roofline |\n|---|---|---|---|---|")
-for k, label in METRICS:
-    v, c, r = (now.get(k) or {}).get("loom"), card.get(k), (roof.get(k) or {}).get("ceiling")
-    if v is not None:
-        print(f"| {label} | {f(v)} | {f(c)} | {f'{v / c - 1:+.0%}' if c else '-'} | {f(r)} |")
-EOF
-  )
-fi
-
-# 8. One summary for the workflow's table
-# (runner, device, SDK and programs measured: the evidence pull_devlab.py records for the gates and the DevLab column)
+# 7. One summary for the workflow's table
+# (runner, device, SDK and programs measured: the evidence pull_devlab.py records for the gates)
 python3 - "$repo" "$slug" "$level" "$rc" $(( $(date +%s) - t0 )) "$out" "$B" "$pkg" <<'EOF'
 import json, os, re, sys
 repo, slug, level, rc, secs, out, B, pkg = sys.argv[1:]

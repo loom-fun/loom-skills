@@ -1,6 +1,9 @@
 """Throughput on fixed workloads, for Loom or llama.cpp (same prompts both sides).
 
 usage: python perf.py URL LABEL [--kind loom|llama] [--model MODEL_ID] [--long] [--log perf_log.jsonl] [--reverted]
+                     [--no-campaign]
+Every run appends one row to --log (also with --no-campaign, which only skips the optimization campaign's
+requirements and tracking: make_info.py perf and devlab_perf.sh read those rows).
 
 Metrics (all greedy, real-text documents, each prompt starts with a nonce so no
 prefix cache can help):
@@ -22,7 +25,7 @@ Completion tokens: every timed decode request logs the tokens it generated (out[
 Warm-up (untimed, logged as warmup_decode_tps): the timed decode request itself with another nonce, so every path
 the first timed request takes (prefill, decode, drafting, lazily loaded weights, first-use kernels) has run once.
 A trivial "Say hi." left the short-prompt decode paying first-use costs (DevLab sweeps measured it 51-60 % below
-the local session while decode at 2k agreed). Both engines and every caller (qualify, finalize, nightly, devlab_perf)
+the local session while decode at 2k agreed). Both engines and every caller (qualify, finalize, devlab_perf)
 get the same warm-up.
 Loom numbers are client-side (streaming TTFT and token arrival). llama.cpp
 numbers come from its server-side `timings` (excludes HTTP and tokenization),
@@ -51,7 +54,8 @@ ap.add_argument("--long", action="store_true")
 ap.add_argument("--log", default="perf_log.jsonl")
 ap.add_argument("--reverted", action="store_true", help="this build is not kept (still logged: its time counts)")
 ap.add_argument("--no-campaign", action="store_true",
-                help="ad-hoc/ablation measurement: skip the roofline/baseline requirement and don't log it")
+                help="ad-hoc/ablation measurement: skip the roofline/baseline requirement and the campaign's tracking "
+                     "(targets.jsonl, rate-of-approach verdict); the row still goes to --log")
 ap.add_argument("--repeats", type=int, default=5, help="samples per short-prefill size (median reported)")
 ap.add_argument("--thinking", default="off", choices=["off", "on", "template"],
                 help="chat_template_kwargs.enable_thinking sent to BOTH engines (template: send nothing)")

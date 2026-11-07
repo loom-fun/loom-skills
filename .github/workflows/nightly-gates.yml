@@ -3,6 +3,7 @@ name: nightly-gates
 # request set, agent, 200-draw sampling, needle at half and full context) on the LATEST published loom-fun
 # cards, one AMD DevLab Dispatch Strix Halo runner per card, in parallel. Deterministic: no LLM agent, no
 # skill run; each job fetches the card with loom-fetch, serves it and runs .github/scripts/nightly_gates.sh.
+# Correctness only: no performance is measured on DevLab (every card performance number comes from a local session).
 # The development loop runs the lean LEVEL=dev gates instead (loom-benchmark SKILL.md, "Which level when").
 # A pull request labeled `nightly-gates` runs the matrix on its branch at LEVEL=dev and LEVEL=full (validates gate
 # or workflow changes, and measures the dev level's wall time on every card without using a developer's GPU).
@@ -23,11 +24,6 @@ on:
         default: full
         type: choice
         options: [full, quick, dev, dev+full, fast]
-      perf:
-        description: "Perf, Loom alone (the cards' DevLab column; every row incl. long context)"
-        required: false
-        default: true
-        type: boolean
 
 permissions:
   contents: read
@@ -83,7 +79,6 @@ jobs:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       GH_TOKEN: ${{ github.token }}   # fetch_llamacpp.sh: GitHub API without rate limits
       LEVEL: ${{ matrix.level }}
-      PERF: ${{ matrix.level != 'dev' && (github.event_name != 'workflow_dispatch' || inputs.perf) && '1' || '0' }}
       WORK: ${{ github.workspace }}/../nightly-work
       CLEAN: "1"   # shared runners: delete the fetched GGUFs at the end
     steps:

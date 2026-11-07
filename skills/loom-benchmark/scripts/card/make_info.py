@@ -12,8 +12,9 @@ byte-identical files.
       (tags, the default --output, a memory_bytes in model.json) are dropped. Evidence files apply in order.
       --generator-commit: the loom-skills commit of these card scripts (default: this checkout's HEAD, or
       "unknown" outside a git checkout).
-      --from-info OLD.json: start from a published info.json (its sessions, gates, sources, roofline and DevLab
-      sweeps) and apply the evidence files on top: how a card is regenerated when only new evidence arrives.
+      --from-info OLD.json: start from a published info.json (its sessions, gates, sources and roofline; Loom-only
+      DevLab sweeps an older card recorded are kept as they are, never rendered) and apply the evidence files on
+      top: how a card is regenerated when only new evidence arrives.
       --repo defaults to OLD.json's repo.
 
   make_info.py perf --loom-jsonl LOOM.jsonl --llama-jsonl LLAMA.jsonl [--c4-loom F] [--c4-llama F]
@@ -45,14 +46,11 @@ byte-identical files.
       records which ("acceptance_from": session | spec_gate): the gate's text can accept far more or less than the
       row's workload, which moves that row's ceiling by the same factor.
 
-  make_info.py devlab --loom-jsonl PERF.jsonl [--c4-loom F] --run ID --url JOB_URL [--runner NAME] [--date D]
-                      [--package PKG] -o devlab_evidence.json
-      One DevLab sweep's Loom numbers (perf.py rows and c4_steady.py runs of a DevLab Dispatch job) for the card's
-      DevLab column. pull_devlab.py writes the same block from a nightly-gates run.
-
   SOURCE (perf and gates): --source-kind local|devlab|factory [--run ID --url URL] [--device auto|none|FILE.json]
       [--hrx-loom auto|none|FILE.json]. auto (the default) records this machine's device and the Loom SDK under
-      $LOOM_ROOT (../machine_info.py): run perf and gates on the machine that measured.
+      $LOOM_ROOT (../machine_info.py): run perf and gates on the machine that measured. A perf session with
+      --source-kind devlab (a scripted DevLab port) is recorded, and flagged for a local re-measure (card_lib
+      perf_flags "devlab"): every card performance number comes from a local session.
 
 Evidence file (loom-card-evidence/2), every block optional:
   {"evidence": "loom-card-evidence/2",
@@ -62,16 +60,14 @@ Evidence file (loom-card-evidence/2), every block optional:
                    "session": {"date", "source": SOURCE, "runs", "commands", "programs_sha256",
                                "metrics": {METRIC: {"loom", "baseline", "loom_runs", "baseline_runs", "acceptance"}}}},
    "gates": [{"name", "status", "level", "time", "source": SOURCE, "detail", "programs_sha256"}],
-   "roofline": {"device", "tool", "checkpoint", "drafting", "metrics"},
-   "devlab": {"sweep": {"date", "source": SOURCE, "runner", "commands", "programs_sha256", "metrics"}}}
+   "roofline": {"device", "tool", "checkpoint", "drafting", "metrics"}}
   SOURCE: {"kind", "run", "url", "device", "hrx_loom"}
 Merge rules: card keys and versions: the later file wins. performance: sessions append in order and per metric
 the last session that measured it is the card's value; the baseline is the last one given. gates: per gate the
 latest evidence wins (gate_supersedes: a published date-only gate is older than new evidence of that day; equal
 times: the later file), except that on the same programs_sha256 a later pass at a lower level (dev < fast < quick <
-full) does not replace a pass at a higher level; a later failure always does. roofline: the later file wins. devlab: sweeps
-append in order (the same source replaces its earlier sweep; the last DEVLAB_SWEEPS_KEPT are kept). Unknown metric
-and gate names are kept.
+full) does not replace a pass at a higher level; a later failure always does. roofline: the later file wins. A "devlab"
+block (a DevLab Loom-only sweep, no longer recorded) is ignored. Unknown metric and gate names are kept.
 """
 import argparse
 import ast
@@ -84,7 +80,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-from card_lib import (DEVLAB_SWEEPS_KEPT, DRAFTED_ROWS, EVIDENCE_ID, MEDIAN_METRICS, METRIC_KEYS,  # noqa: E402
+from card_lib import (DRAFTED_ROWS, EVIDENCE_ID, MEDIAN_METRICS, METRIC_KEYS,  # noqa: E402
                       ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, load_json,
                       load_package, metric_applies, package_facts, programs_sha256, require_valid, write_json)
 
@@ -187,7 +183,7 @@ def cmd_build(a):
         for name, g in old["gates"].items():   # a published gate has a date, not a time: later evidence that day wins
             gates[name] = ((g.get("date") or "", -1), None, g)
         roofline = old.get("roofline")
-        sweeps = list((old.get("devlab") or {}).get("sweeps", []))
+        sweeps = (old.get("devlab") or {}).get("sweeps") or []   # pre-decision DevLab sweeps: kept as is, not rendered
         if a.report is None:
             a.report = old.get("report")
     for i, path in enumerate(a.evidence or []):
@@ -213,11 +209,8 @@ def cmd_build(a):
                 gates[g["name"]] = new
         if ev.get("roofline"):
             roofline = ev["roofline"]
-        sw = (ev.get("devlab") or {}).get("sweep")
-        if sw:
-            sw = dict(sw)
-            sw["source"] = sources.add(sw["source"])
-            sweeps = [s for s in sweeps if s["source"] != sw["source"]] + [sw]
+        if ev.get("devlab"):
+            print(f"{path}: ignored its DevLab sweep (card performance numbers come from local sessions)", file=sys.stderr)
     if not a.repo:
         sys.exit("make_info.py build: --repo is required without --from-info")
     if not a.generator_commit:
@@ -262,7 +255,7 @@ def cmd_build(a):
     if roofline:
         info["roofline"] = roofline
     if sweeps:
-        info["devlab"] = {"sweeps": sweeps[-DEVLAB_SWEEPS_KEPT:]}
+        info["devlab"] = {"sweeps": sweeps}
     used = ({s["source"] for s in sessions} | {g["source"] for g in gate_out.values()}
             | {s["source"] for s in info.get("devlab", {}).get("sweeps", [])})
     info["sources"] = {k: v for k, v in sources.by_id.items() if k in used}
@@ -337,17 +330,20 @@ def with_acceptance(metrics, acc):
 
 
 def c4_samples(path):
+    """The aggregate rates of c4_steady.py's runs (its JSON lines, or one number per line). A run that measured
+    nothing (a rate <= 0, or a window <= 0 s: every stream failed) is skipped, with a note: a crash, not data."""
     vals = []
     for line in open(path, encoding="utf-8"):
         line = line.strip()
         if not line:
             continue
-        if line.startswith("{"):
-            r = json.loads(line)
-            if r.get("agg_tps") is not None:
-                vals.append(r["agg_tps"])
-        else:
-            vals.append(float(line))
+        r = json.loads(line) if line.startswith("{") else {"agg_tps": float(line)}
+        if r.get("agg_tps") is None:
+            continue
+        if r["agg_tps"] <= 0 or r.get("window_s", 1) <= 0:
+            print(f"{path}: skipped an invalid c4_steady run: {line[:120]}", file=sys.stderr)
+            continue
+        vals.append(r["agg_tps"])
     return vals
 
 
@@ -562,28 +558,6 @@ def cmd_roofline(a):
           file=sys.stderr)
 
 
-# ---------------------------------------------------------------- DevLab sweep -> evidence
-
-def devlab_sweep(loom_rows, c4_vals, source, runner=None, date=None, commands=None, psha=None, c4_path=None):
-    """One DevLab sweep: the card's metrics from a DevLab job's perf.py rows and c4_steady.py runs (Loom only)."""
-    ls = metric_samples(loom_rows)
-    if c4_vals:
-        ls["streams4"] = c4_vals
-    metrics = {k: {"loom": summary(k, ls[k]), "loom_runs": ls[k]} for k in METRIC_KEYS if ls.get(k)}
-    with_acceptance(metrics, acceptance_samples(loom_rows, c4_path))
-    date = date or max([r["time"][:10] for r in loom_rows if r.get("time")] or [None], key=lambda x: x or "")
-    return {"date": date, "source": source, "runner": runner, "commands": list(commands or []),
-            "programs_sha256": psha, "metrics": metrics}
-
-
-def cmd_devlab(a):
-    a.source_kind = "devlab"
-    sw = devlab_sweep(perf_rows(a.loom_jsonl, "loom"), c4_samples(a.c4_loom) if a.c4_loom else [], source_arg(a),
-                      a.runner, a.date, a.command, programs_sha256(a.package) if a.package else None, a.c4_loom)
-    write_json(a.o, {"evidence": EVIDENCE_ID, "devlab": {"sweep": sw}})
-    print(f"wrote {a.o}: " + ", ".join(f"{k} {m['loom']}" for k, m in sw["metrics"].items()), file=sys.stderr)
-
-
 def add_source_args(p):
     p.add_argument("--source-kind", default="local", choices=["local", "devlab", "factory"])
     p.add_argument("--run")
@@ -644,17 +618,8 @@ def main(argv=None):
     r.add_argument("--bw", type=float, default=216e9, help="memory bandwidth, bytes/s (roofline.py's default)")
     r.add_argument("--flops", type=float, default=59e12, help="peak FLOP/s (roofline.py's default)")
     r.add_argument("-o", required=True)
-    v = sub.add_parser("devlab")
-    v.add_argument("--loom-jsonl", required=True, help="the DevLab job's perf.py log (Loom rows)")
-    v.add_argument("--c4-loom", help="its c4_steady.py runs")
-    v.add_argument("--runner", help="the DevLab runner's name")
-    v.add_argument("--date", help="YYYY-MM-DD (default: the latest row's time)")
-    v.add_argument("--command", action="append", help="a measuring command (repeat)")
-    add_source_args(v)
-    v.set_defaults(device="none", hrx_loom="none")
-    v.add_argument("-o", required=True)
     a = ap.parse_args(argv)
-    {"build": cmd_build, "perf": cmd_perf, "gates": cmd_gates, "roofline": cmd_roofline, "devlab": cmd_devlab}[a.cmd](a)
+    {"build": cmd_build, "perf": cmd_perf, "gates": cmd_gates, "roofline": cmd_roofline}[a.cmd](a)
 
 
 if __name__ == "__main__":

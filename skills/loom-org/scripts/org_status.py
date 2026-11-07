@@ -9,13 +9,13 @@ For each model repo in the org, reads its model.json, model.json.lock, llm_confi
             B = card exists but came from an older skill (e.g. "report": "attached", imported by import_card.py)
                 or an older schema; never use a B repo as a reference
   missing   gates and metrics the card should have (card_lib.gate_applies / metric_applies) but has no evidence for,
-            the roofline, and DevLab sweep values of the applicable metrics (devlab:METRIC)
+            and the roofline
   failing   gates whose latest evidence is not a pass
   perf      the performance guardrails (card_lib.perf_flags): far = metrics whose Loom value is below FAR_FRACTION x
-            the efficiency Loom ports have demonstrated (roofline); disagree = metrics where the latest DevLab sweep
-            and the card's Loom value differ by more than DEVLAB_TOLERANCE; rounds = DevLab sweeps in a row that
-            disagree; stale = metrics whose card value was measured on programs other than the repo's
-            (card_lib.stale_metrics: the session's programs_sha256 vs the published program/*.loom)
+            the efficiency Loom ports have demonstrated (roofline); stale = metrics whose card value was measured on
+            programs other than the repo's (card_lib.stale_metrics: the session's programs_sha256 vs the published
+            program/*.loom); devlab = metrics whose card value was measured on DevLab (a scripted DevLab port's
+            session): every performance number comes from a local session. DevLab measures correctness only.
   generator the loom-skills commit that generated the programs: llm_config.json "generator".skills_commit (build.py's
             stamp), else info.json's recovered versions.package.skills_commit; generator_source says which
   quant     the checkpoint's quant (card_lib.quant_of); anything but plain Q4_K_M is flagged
@@ -25,12 +25,13 @@ each target one action:
   create  no repo for the model                         -> loop step 1 (port + optimize, publish)
   update  only a category B repo, or one not built from plain Q4_K_M -> loop step 1, from the best A reference
   fix     category A with a failing gate                -> loop step 4 (fix the skill, regenerate)
-  remeasure  category A, a card value measured on other programs (perf.stale) -> a fresh local session (Loom and
-             llama.cpp, same programs) before any performance judgement: far and disagree are judged on that value
-  investigate  category A, a performance guardrail flag -> loop step 5 (local GPU worker, loom-optimize; a deep
-               debugging session once DEEP_DEBUG_ROUNDS sweeps in a row disagree: "deep_debug": true)
-  sweep   category A, gates or metrics missing          -> loop step 3 (DevLab sweep)
-  done    category A, every applicable gate passes and every applicable metric is measured
+  remeasure  category A, a card value that a fresh local session (Loom and llama.cpp, quiet GPU, the repo's programs)
+             must replace before any performance judgement; "remeasure" lists why (card_lib.remeasure_reasons):
+             stale (measured on other programs, perf.stale) or devlab-primary (measured on DevLab, perf.devlab)
+  investigate  category A, far from roofline (perf.far) -> loop step 5 (local GPU worker, loom-optimize)
+  sweep   category A, gates, metrics or the roofline missing -> loop step 3 (gates: DevLab sweep; metrics: local)
+  done    category A, every applicable gate passes, every applicable metric is measured locally, the roofline is
+          computed and no flag is raised
 Repos that duplicate a target's better repo, or match no target, are listed under "extra" (retire or keep: ask the
 user; never delete a repo on your own).
 """
@@ -46,9 +47,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "..", "loom-benchmark", "scripts", "card"))
-from card_lib import (DEEP_DEBUG_ROUNDS, GATE_NAMES, METRIC_KEYS, ROOFLINE_METRIC, SCHEMA_ID,  # noqa: E402
-                      devlab_latest, gate_applies, generator_commit, load_package, metric_applies, package_facts,
-                      perf_flags, programs_sha256, quant_of)
+from card_lib import (GATE_NAMES, METRIC_KEYS, SCHEMA_ID, gate_applies, generator_commit,  # noqa: E402
+                      load_package, metric_applies, package_facts, perf_flags, programs_sha256, quant_of,
+                      remeasure_reasons)
 
 from hub import HF, get_json  # noqa: E402
 from hub import fetch as fetch_bytes  # noqa: E402
@@ -143,9 +144,6 @@ def assess(repo, d):
     if out["category"] == "A":
         if not info.get("roofline"):
             out["missing"].append("roofline")
-        sweep = (devlab_latest(info) or {}).get("metrics") or {}
-        out["missing"] += [f"devlab:{k}" for k in ROOFLINE_METRIC
-                           if metric_applies(k, facts["kind"], facts["features"]) and k not in sweep]
         out["programs_sha256"] = programs_sha256(d)
         out["perf"] = perf_flags(info, facts["kind"], facts["features"], programs=out["programs_sha256"] or "")
     if out["quant"] != "Q4_K_M" or re.search(r"UD-", ck["file"]):
@@ -177,18 +175,16 @@ def main():
         return r
 
     def flagged(r):
-        p = r.get("perf") or {}
-        return bool(p.get("far") or p.get("disagree"))
+        return bool((r.get("perf") or {}).get("far"))
 
-    def stale(r):
-        return bool((r.get("perf") or {}).get("stale"))
+    def remeasure(r):
+        return remeasure_reasons(r.get("perf"))
 
     def flag_text(p):
         out = [f"stale {k} (measured programs {v[:8]})" for k, v in (p.get("stale") or {}).items()]
+        if p.get("devlab"):
+            out.append("devlab-primary " + ",".join(sorted(p["devlab"])) + " (measured on DevLab)")
         out += [f"far {k} {v[0]:.0%} of roofline (demonstrated {v[1]:.0%})" for k, v in p["far"].items()]
-        out += [f"DevLab {k} {v:+.0%}" for k, v in p["disagree"].items()]
-        if p["rounds"]:
-            out.append(f"{p['rounds']} sweep(s) in a row disagree" + (" -> deep debug" if p["rounds"] >= DEEP_DEBUG_ROUNDS else ""))
         return "; ".join(out)
 
     with cf.ThreadPoolExecutor(8) as ex:
@@ -197,7 +193,7 @@ def main():
         print(f"{r['category']}  {r['repo'][:58]:58} {(r.get('file') or '?')[:40]:40} "
               f"failing={','.join(r['failing']) or '-'} missing={len(r['missing'])}"
               + (f"  [{'; '.join(r['notes'])}]" if r["notes"] else "")
-              + (f"  perf: {flag_text(r['perf'])}" if flagged(r) or stale(r) else ""))
+              + (f"  perf: {flag_text(r['perf'])}" if flagged(r) or remeasure(r) else ""))
     result = {"org": a.org, "repos": status}
 
     if a.targets:
@@ -222,10 +218,10 @@ def main():
                 action = "update"   # older skill, or not the target's plain Q4_K_M
             elif primary["failing"]:
                 action = "fix"
-            elif stale(primary):
-                action = "remeasure"   # the card's Loom value describes other programs: a fresh local session first
+            elif remeasure(primary):
+                action = "remeasure"   # other programs or a DevLab session: a fresh local session first
             elif flagged(primary):
-                action = "investigate"   # a performance guardrail: back to a local GPU worker
+                action = "investigate"   # far from roofline: back to a local GPU worker
             elif primary["missing"]:
                 action = "sweep"
             else:
@@ -237,7 +233,7 @@ def main():
                          "failing": primary["failing"] if primary else [],
                          "notes": primary["notes"] if primary else [],
                          "perf": primary.get("perf") if primary else None,
-                         "deep_debug": bool(primary and (primary.get("perf") or {}).get("rounds", 0) >= DEEP_DEBUG_ROUNDS)})
+                         "remeasure": remeasure(primary) if primary else []})
         extra = [r["repo"] for r in status if r["repo"] not in used]
         counts = {k: sum(w["action"] == k for w in work) for k in ORDER}
         print("\n" + "  ".join(f"{k}={v}" for k, v in counts.items()))

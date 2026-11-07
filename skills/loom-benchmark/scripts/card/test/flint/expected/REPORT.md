@@ -18,7 +18,6 @@ How the values on this repository's model card were measured. Generated from `in
 - Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.
 - Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD DevLab Dispatch.
 - Roofline: per metric, the rate at the hardware limit computed from the GGUF's tensors by loom-roofline `roofline.py`: decode is memory bandwidth / bytes read per token (weights, active experts, KV cache), prefill is peak FLOP/s / flops per token, 4 streams reads the weights once for 4 tokens. With speculative decoding, decode and 4 streams are verify passes per second x (1 + acceptance x depth) tokens per pass, with the acceptance measured in the row's own session (loom-serve's drafted-token counters around perf.py's decode request, or around c4_steady.py's streams), else the `spec` gate's.
-- DevLab: Loom alone, measured with the same scripts by the nightly sweep on an AMD DevLab Dispatch runner (the same Strix Halo hardware). It checks the local numbers on another machine; it is never compared with the llama.cpp column, which is measured in the same session as the Loom column.
 
 ## Session 1: local run, 2026-11-06
 
@@ -93,31 +92,6 @@ perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign
 | prefill tok/s, 16k document | 9014.9 | — | — | 33 % |
 | prefill tok/s, 32k document | 7040.8 | — | — | 33 % |
 | 4 streams, aggregate decode tok/s | 301.8 | 221.1 | 68 % (`spec` gate) | 44 % |
-
-## DevLab sweep: [DevLab Dispatch run 1001](https://github.com/loom-fun/loom-skills/actions/runs/1001/job/2002), 2026-11-06
-
-- Runner: X2-LA03-S03-D07; device not recorded; hrx-loom unknown.
-- Programs measured: not recorded.
-
-| metric | runs | value |
-|---|---|---|
-| decode tok/s, short prompt | 92.18 | 92.2 |
-| decode tok/s, 2k context | 60.18 | 60.2 |
-| prefill tok/s, 1k document | 607.6 | 607.6 |
-| prefill tok/s, 2k document | 690.8 | 690.8 |
-| 4 streams, aggregate decode tok/s | 112.8 | 112.8 |
-
-## DevLab sweep: [DevLab Dispatch run 1002](https://github.com/loom-fun/loom-skills/actions/runs/1002/job/2003), 2026-11-07
-
-- Runner: X2-LA03-S04-D07; device not recorded; hrx-loom unknown.
-- Programs measured: not recorded.
-
-| metric | runs | value |
-|---|---|---|
-| decode tok/s, short prompt | 92.18 | 92.2 |
-| decode tok/s, 2k context | 60.18 | 60.2 |
-| prefill tok/s, 1k document | 607.6 | 607.6 |
-| prefill tok/s, 2k document | 690.8 | 690.8 |
 
 ## Gate evidence
 

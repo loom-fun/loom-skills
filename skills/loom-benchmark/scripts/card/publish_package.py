@@ -9,11 +9,14 @@
       HF cache path the file links to), then writes model.json.lock with
       `loom-fetch --update-lock --all-variants` (the local snapshot dirs stand in for the origins: nothing is
       downloaded). OUT is what the repo holds apart from the card.
-  publish_package.py upload OUT --repo loom-fun/NAME [--message MSG] [--card-only]
+  publish_package.py upload OUT --repo loom-fun/NAME [--message MSG] [--card-only] [--parent-commit SHA]
       Uploads OUT (with the card: README.md, info.json, REPORT.md made by make_info.py build + render_card.py)
       and deletes repo files OUT no longer has (an in-place update of an older package leaves nothing stale;
-      .gitattributes stays). --card-only uploads just README.md, info.json and REPORT.md. Needs huggingface_hub
-      and a write token (HF_TOKEN or ~/.cache/huggingface/token).
+      .gitattributes stays). --card-only uploads just README.md, info.json and REPORT.md. --parent-commit SHA: the
+      repo commit the card was built from (the revision whose info.json you re-read, e.g. `hf download` of it, or
+      the Hub API's model sha): the upload fails if the repo has moved since (another worker published), instead
+      of overwriting that card; re-read info.json and rebuild. Needs huggingface_hub and a write token (HF_TOKEN or
+      ~/.cache/huggingface/token).
 """
 import argparse
 import json
@@ -101,7 +104,7 @@ def cmd_upload(a):
         if missing:
             sys.exit(f"card files missing in {a.out}: {missing}")
         api.upload_folder(repo_id=a.repo, folder_path=a.out, allow_patterns=list(CARD),
-                          commit_message=a.message or "Card")
+                          commit_message=a.message or "Card", parent_commit=a.parent_commit)
         print(f"card uploaded to https://huggingface.co/{a.repo}")
         return
     for f in ("model.json", "model.json.lock", "llm_config.json", *CARD):
@@ -110,7 +113,7 @@ def cmd_upload(a):
     local = {os.path.relpath(os.path.join(r, f), a.out).replace(os.sep, "/") for r, _, fs in os.walk(a.out) for f in fs}
     stale = [f for f in api.list_repo_files(a.repo) if f not in local and f != ".gitattributes"]
     api.upload_folder(repo_id=a.repo, folder_path=a.out, delete_patterns=stale or None,
-                      commit_message=a.message or "Loom package and card")
+                      commit_message=a.message or "Loom package and card", parent_commit=a.parent_commit)
     print(f"uploaded https://huggingface.co/{a.repo} ({len(local)} files{'; removed ' + ', '.join(stale) if stale else ''})")
 
 
@@ -124,6 +127,8 @@ def main(argv=None):
     u = sub.add_parser("upload")
     u.add_argument("out"); u.add_argument("--repo", required=True)
     u.add_argument("--message"); u.add_argument("--card-only", action="store_true")
+    u.add_argument("--parent-commit", help="fail unless the repo's main is still this commit (the one the card was "
+                   "built from): concurrent publishes fail instead of overwriting each other")
     a = ap.parse_args(argv)
     {"prepare": cmd_prepare, "upload": cmd_upload}[a.cmd](a)
 
