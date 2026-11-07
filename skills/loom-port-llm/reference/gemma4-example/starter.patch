@@ -1,6 +1,6 @@
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -196,6 +196,8 @@
+@@ -203,6 +203,8 @@
  
  def derive(template_text, bos="", eos=""):
      T = Template(template_text, bos, eos)
@@ -9,18 +9,18 @@
      notes = []
      chat = {}
      # BOS: emitted by the control program at the very start when the template prints it.
-@@ -339,10 +341,6 @@
-         rest = s_body[len("SYSPROBE"):]
-         lead = rest[:rest.index(printed[0]) - len(line)]
-         body_start = len(lead) - len(lead.lstrip())
--        # Tools in their own system block after the system message (Flint: "<|system|>SYS<|system|>\n# Tools"):
--        # the second role tag belongs to the separator, not to the tools prefix.
--        if chat["system_prefix"] and lead.startswith(chat["system_prefix"]):
--            body_start = len(chat["system_prefix"])
-         chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
-     elif s_body.endswith("SYSPROBE"):
-         chat["tools_after_system"] = False
-@@ -418,6 +416,8 @@
+@@ -394,10 +396,6 @@
+             rest = s_body[len("SYSPROBE"):]
+             lead = rest[:rest.index(printed[0]) - len(line)]
+             body_start = len(lead) - len(lead.lstrip())
+-            # Tools in their own system block after the system message (Flint: "<|system|>SYS<|system|>\n# Tools"):
+-            # the second role tag belongs to the separator, not to the tools prefix.
+-            if chat["system_prefix"] and lead.startswith(chat["system_prefix"]):
+-                body_start = len(chat["system_prefix"])
+             chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
+         elif s_body.endswith("SYSPROBE"):
+             chat["tools_after_system"] = False
+@@ -520,6 +518,8 @@
  
  def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reasoning_effort=None):
      """Python model of control.loom's rendering (chat_begin + chat_message + chat_end)."""
@@ -29,7 +29,7 @@
      tools = None if chat.get("call_format") == "none" else tools   # a chat-only block ignores tools, as its template does
      trim = (lambda s: s.strip()) if chat["trim_content"] else (lambda s: s)
      out = chat.get("bos", "")
-@@ -484,6 +484,8 @@
+@@ -603,6 +603,8 @@
  
  
  def render_call(chat, call):
@@ -38,7 +38,7 @@
      args = call["arguments"]
      if chat["call_format"] == "hermes":
          a = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
-@@ -528,6 +530,306 @@
+@@ -650,6 +652,306 @@
  ]
  
  
@@ -345,16 +345,16 @@
  def verify(template_text, chat, bos="", eos=""):
      """Returns [(name, ok, detail)]: template render vs simulate() for each conversation."""
      T = Template(template_text, bos, eos)
-@@ -535,7 +837,7 @@
-     extra = [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL, CALL2], reasoning="R"),
-                                    {"role": "tool", "tool_call_id": "call_0", "content": "ok"}], TOOLS)] \
-         if chat["call_format"] == "pythonic" else []
+@@ -660,7 +962,7 @@
+         [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL]),
+                               {"role": "tool", "tool_call_id": "call_0", "content": 'say "hi"\n\tback\\slash é'}], TOOLS)] \
+         if chat["call_format"] == "json" else []
 -    for name, msgs, tools in CONVERSATIONS + extra:
 +    for name, msgs, tools in CONVERSATIONS + extra + (GEMMA4_CONVERSATIONS if chat.get("format") == "gemma4" else []):
          for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
              label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")
              try:
-@@ -599,3 +901,21 @@
+@@ -763,3 +1065,21 @@
  
  if __name__ == "__main__":
      main()
@@ -646,7 +646,7 @@
  WINDOW = CFG.get("sliding_window") or 0   # keys kept by sliding layers (0: none)
  GATE = CFG.get("attn_gate", False)       # True: separate attn_gate tensor; "fused_q": attn_q packs [q | gate] per head
  FUSED_Q = GATE == "fused_q"
-@@ -1096,7 +1116,10 @@
+@@ -1097,7 +1117,10 @@
          scf.yield %nx : f32
        }}""")
      if swiglu:
@@ -658,7 +658,7 @@
        %value = scalar.mulf %silu, %t1 : f32""")
      else:
          L.append("      %value = scalar.addf %t0, %zero_f : f32")
-@@ -1557,6 +1580,21 @@
+@@ -1558,6 +1581,21 @@
  """
  
  
@@ -680,7 +680,7 @@
  ROW_SCALE = r"""
  
  // Per-row power-of-two scale (as g_row_scale) plus the scaled row as F16, the
-@@ -1952,11 +1990,11 @@
+@@ -1969,11 +2007,11 @@
      yt = ", ".join(["f32"] * n)
      xs = ", ".join(f"%x{i}" for i in range(n))
      t = [f"""
@@ -694,7 +694,7 @@
    %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
    %layer = index.assume %layer_arg [range(%layer_arg, 0, {L - 1})] : index
    %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-@@ -1976,8 +2014,10 @@
+@@ -1993,8 +2031,10 @@
    %c15 = index.constant 15 : index
    %c16 = index.constant 16 : index
    %cqh = index.constant {QH} : index
@@ -706,7 +706,7 @@
    %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
    %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
    %position32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
-@@ -1995,8 +2035,10 @@
+@@ -2012,8 +2052,10 @@
    %zero_f = scalar.constant 0.0 : f32
  """]
      for j, idx in enumerate(freq_idx):
@@ -719,7 +719,7 @@
          t.append(f"""  // angle = position * theta^(-2i/RD) = position * exp(-i * 2 ln(theta) / RD)
    %li{j} = index.cast {idx} : index to i32
    %lf{j} = scalar.sitofp %li{j} : i32 to f32
-@@ -2100,8 +2142,22 @@
+@@ -2117,8 +2159,22 @@
      for i in range(n):
          t.append(f"""        %h{i} = scalar.fptrunc %r{i} : f32 to f16
          view.store %h{i}, %k_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>
@@ -744,7 +744,7 @@
          view.store %vh{i}, %v_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>""")
      t.append("""      }
      }
-@@ -2112,6 +2168,19 @@
+@@ -2129,6 +2185,19 @@
      return "\n".join(t)
  
  
@@ -764,7 +764,7 @@
  def listed(text, name, grid_rest):
      """Variant of a per-token kernel dispatched over the tokens in `list`
      (count read from a device buffer for indirect dispatch)."""
-@@ -2375,7 +2444,7 @@
+@@ -2392,7 +2461,7 @@
      %stop = index.min %stop_raw, %visible : index
      %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
      %q_raw = vector.load %q_view[%token, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
@@ -773,7 +773,7 @@
      %scale_v = vector.splat %scale : vector<4xf32>
      %q4 = vector.mulf %q_raw, %scale_v : vector<4xf32>
      %zero4 = vector.splat %zero_f : vector<4xf32>
-@@ -2494,12 +2563,140 @@
+@@ -2511,12 +2580,140 @@
  
  
  def attention():
@@ -920,7 +920,7 @@
  
  
  FALLBACK = r"""
-@@ -2677,9 +2874,22 @@
+@@ -2694,9 +2891,22 @@
            %is_best = scalar.cmpf oeq, %lv, %best : f32
            %cand_id = scf.select %is_best, %li, %big : i32
            %winner = kernel.workgroup.reduce<minsi> %cand_id : i32
@@ -944,7 +944,7 @@
              view.store %winner, %cand_i[%rr] : i32, view<64xi32>
            }}
            scf.yield %best, %winner : f32, i32
-@@ -2793,7 +3003,13 @@
+@@ -2810,7 +3020,13 @@
          args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
          types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
          mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
@@ -959,7 +959,7 @@
      args = args.replace(f", {x}, {s},", f", {x16}, {s},")
      iq = ACT_Q8 and fmt in IQ_FMTS and kval // 32 <= 1024   # wider K (mv_wide: DFlash feature projections) stays f32
      if iq:   # int8 copy (g_quant_q8, launched beside the g_row_scale_f16 that makes x16): see quant_wiring()
-@@ -3145,7 +3361,9 @@
+@@ -3162,7 +3378,9 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -970,7 +970,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -3694,7 +3912,7 @@
+@@ -3714,7 +3932,7 @@
  def model():
      """Command program: embed, then a statically unrolled layer loop (each
      layer's tensor formats come from the GGUF), then the argmax head."""
@@ -979,7 +979,7 @@
      sliding = set(CFG.get("sliding_layers", []))
      nope = set(CFG.get("nope_layers", []))
      head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
-@@ -3720,7 +3938,7 @@
+@@ -3740,7 +3958,7 @@
    %nH = index.constant {H} : index
    %nFF = index.constant {FF} : index
  """ + ("" if FF_UNIFORM else "".join(f"  %nFF{w} = index.constant {w} : index\n" for w in sorted(set(FFL)))) + f"""  %nQ = index.constant {QD} : index
@@ -988,7 +988,7 @@
    %zero_i32 = scalar.constant 0 : i32
    %one_i32 = scalar.constant 1 : i32
    %row_bytes = index.constant {H * 4} : offset
-@@ -3787,7 +4005,20 @@
+@@ -3807,7 +4025,20 @@
    %h16 = buffer.alloca<global> align(256) %h16_size : buffer
    %o16 = buffer.alloca<global> align(256) %o16_size : buffer
    %f16 = buffer.alloca<global> align(256) %f16_size : buffer
@@ -1009,7 +1009,7 @@
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if FUSED_Q:
-@@ -3817,101 +4048,102 @@
+@@ -3837,101 +4068,102 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1192,7 +1192,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -3936,7 +4168,7 @@
+@@ -3956,7 +4188,7 @@
      spec_kernels = ""
      if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too
          head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
@@ -1201,7 +1201,7 @@
                        GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
                        head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
                        prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin, lin2=lin2, pair_kv=PAIR_PROJ in ("1", "kv"),
-@@ -4046,8 +4278,9 @@
+@@ -4066,8 +4298,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1213,7 +1213,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if RECUR:
-@@ -4064,13 +4297,27 @@
+@@ -4084,13 +4317,27 @@
      env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
      # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
@@ -1291,7 +1291,7 @@
  for name, K in todo:
      fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
      for tg in (1, 4):
-@@ -203,94 +212,50 @@
+@@ -203,97 +212,50 @@
    check.return
  }}
  """)
@@ -1345,7 +1345,10 @@
 -q = rng.standard_normal((t, QH, D)).astype(np.float32); k = rng.standard_normal((t, KVH, D)).astype(np.float32); v = rng.standard_normal((t, KVH, D)).astype(np.float32)
 -def norm(a, w): return a / np.sqrt((a * a).mean(-1, keepdims=True) + eps) * w
 -def rope(a):
--    inv = cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD); ang = pos[:, None] * inv[None]
+-    inv = cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD)
+-    if cfg.get("rope_freq_factors"):   # llama3 rope_freqs: each pair's frequency divided by its factor
+-        inv = inv / np.asarray(cfg["rope_freq_factors"][:RD // 2], np.float64)
+-    ang = pos[:, None] * inv[None]
 -    c, s = np.cos(ang)[:, None], np.sin(ang)[:, None]
 -    if cfg["rope_type"] == "neox":
 -        a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
@@ -1430,7 +1433,7 @@
  # 3a. output head (argmax over the vocabulary) for one selected span of 3 tokens
  t = 3
  head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
-@@ -351,58 +316,90 @@
+@@ -354,58 +316,90 @@
  """ + hl("g_head_mv_q8", "1") + "".join(hl(k, tag) for k, tag in variants) + "".join(
              f"  check.expect.close actual(%l{tag}) expected(%l1) atol(0.0) rtol(0.0) nan(different) : tensor<{S * CH * 128}xf32>\n"
              f"  check.expect.equal actual(%p{tag}) expected(%p1) : tensor<{S * CH * 2}xi32>\n" for _, tag in variants) + "  check.return\n}\n")
