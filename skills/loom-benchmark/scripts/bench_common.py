@@ -279,10 +279,13 @@ def llama_views(url, ids, pkg):
     """llama.cpp's own top-10 log-probs for the token after `ids` under two numerics it uses itself: `ids` in one
     batch (its prefill kernels: MMQ matmuls) and in micro-batches of 8 through the slot's cache (its decode
     kernels: MMVQ, another q8_1 dot-product formula and summation order). A view llama.cpp could not compute
-    (pending under LLAMA_DEFER, or no cache reuse: recurrent state) is left out."""
+    (pending under LLAMA_DEFER, or no cache reuse: recurrent state) is left out. `ids` may instead be an image
+    prompt ({"prompt_string", "multimodal_data"}: vision_golden.py), whose text cannot be cut into token
+    micro-batches: then the batched view only."""
     views = []
-    for extra in ({}, {"_micro_batch": 8, "id_slot": 0}):
-        _, _, cp = llama_greedy(url, list(ids), 1, pkg, n_probs=10, **extra)
+    micro = [] if isinstance(ids, dict) else [{"_micro_batch": 8, "id_slot": 0}]
+    for extra in [{}] + micro:
+        _, _, cp = llama_greedy(url, ids if isinstance(ids, dict) else list(ids), 1, pkg, n_probs=10, **extra)
         if cp:
             views.append(top_logprobs(cp, 0))
     return views

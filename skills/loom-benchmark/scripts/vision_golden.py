@@ -11,8 +11,13 @@ OpenAI chat request (an image_url part + a text part, greedy, thinking off). Per
     min/max token limits), the image begin/end markers or the image request's chat rendering differ
     from the text path: a port bug, not a near-tie.
   - the reply (raw_from_chat) is compared token by token with llama.cpp's greedy ids; the first
-    divergence must be a near-tie (bench_common.near_tie) by llama.cpp's top-5 log-probs, else it is
-    re-recorded once (llama.cpp flips near-ties run to run) and judged against both.
+    divergence must be a near-tie (bench_common.near_tie) by llama.cpp's top-5 log-probs. One the plain rule
+    rejects is judged again with llama.cpp's own view of that position (bench_common.llama_views, as compare.py
+    does): the image prompt plus llama.cpp's reply before the divergence scored in one batch (its prefill
+    kernels; the recording decoded those tokens one at a time). An image prompt's text cannot be cut into
+    micro-batches through the cache, so this is the only view; it is left out when llama.cpp's reply does not
+    re-tokenize to the same ids. Still a FAIL, the case is re-recorded once (llama.cpp flips near-ties run to
+    run) and judged against both.
 References go through bench_common.llama_completion: cached in $LLAMA_CACHE, deferred with
 $LLAMA_DEFER (gates.sh fills them with only llama.cpp loaded, started with MMPROJ=).
 Images: a built-in deterministic set (shapes + text, a chart, a dense text card, a photo-like gradient,
@@ -113,15 +118,19 @@ def adds_bos(gguf_path):
     return _BOS[gguf_path]
 
 
-def reference(pkg, llama, durl, question, tokens, salt=""):
-    """llama.cpp: the package's rendering + the image, greedy, top-5 log-probs by id."""
-    from bench_common import GREEDY, llama_completion
+def image_prompt(pkg, durl, question):
+    """llama.cpp's prompt object: the package's rendering with the media marker + the image."""
     prompt = pkg.render_messages([{"role": "user", "content": MARKER + question}], enable_thinking=False)
     bos = (pkg.chat or {}).get("bos", "")
     if bos and prompt.startswith(bos) and adds_bos(pkg.cfg["gguf"]):   # llama.cpp tokenizes prompt_string with BOS
         prompt = prompt[len(bos):]
-    body = dict(GREEDY, prompt={"prompt_string": prompt, "multimodal_data": [durl.split(",", 1)[1]]},
-                n_predict=tokens, n_probs=5, return_tokens=True)
+    return {"prompt_string": prompt, "multimodal_data": [durl.split(",", 1)[1]]}
+
+
+def reference(pkg, llama, durl, question, tokens, salt=""):
+    """llama.cpp: the package's rendering + the image, greedy, top-5 log-probs by id."""
+    from bench_common import GREEDY, llama_completion
+    body = dict(GREEDY, prompt=image_prompt(pkg, durl, question), n_predict=tokens, n_probs=5, return_tokens=True)
     return llama_completion(llama, body, pkg, salt)
 
 
@@ -133,9 +142,10 @@ def cases(images_arg):
     return items
 
 
-def judge(pkg, ref, got):
-    """-> (status, detail)."""
-    from bench_common import near_tie, text_divergence, top_logprobs
+def judge(pkg, ref, got, llama=None, prompt=None):
+    """-> (status, detail). With llama (its URL) and prompt (image_prompt), a divergence the plain rule rejects is
+    judged again with llama.cpp's own view of it (bench_common.llama_views)."""
+    from bench_common import exact_gaps, gap_noise, llama_views, near_tie, text_divergence, top_logprobs
     if got.get("error"):
         return "FAIL", got["error"]
     n_ref = ref.get("tokens_evaluated") or (ref.get("timings") or {}).get("prompt_n")
@@ -164,8 +174,18 @@ def judge(pkg, ref, got):
     top = top_logprobs(cp, k)
     nt = near_tie(top, gold[k], mine)
     gap = top.get(gold[k], 0) - top.get(mine, float("-inf"))
+    seen = ""
+    if not nt and llama and prompt:
+        before = pkg.tok.decode(gold[:k], skip_special_tokens=False)
+        if pkg.tok.encode(before, add_special_tokens=False).ids == list(gold[:k]):
+            views = llama_views(llama, dict(prompt, prompt_string=prompt["prompt_string"] + before), pkg)
+            nt = near_tie(top, gold[k], mine, views=views)
+            seen = (f"; llama.cpp's batched view: gaps {[round(x, 2) for x in exact_gaps((top, *views), gold[k], mine)]}, "
+                    f"noise {gap_noise((top, *views), gold[k], mine):.2f}" if views else "; no llama.cpp view")
+        else:
+            seen = "; no llama.cpp view (its reply does not re-tokenize to its own ids)"
     return ("PASS" if nt else "FAIL"), (f"diverged at token {k}: llama.cpp {pkg.tok.decode([gold[k]])!r} vs Loom "
-                                        f"{pkg.tok.decode([mine])!r} (gap {gap:.2f}{', near-tie' if nt else ''})")
+                                        f"{pkg.tok.decode([mine])!r} (gap {gap:.2f}{', near-tie' if nt else ''}{seen})")
 
 
 def main():
@@ -195,11 +215,11 @@ def main():
     bad = []; rows = []
     for name, (durl, q, size) in items.items():
         got = request(a.url, model, durl, q, a.tokens)
-        st, detail = judge(pkg, refs[name], got)
+        st, detail = judge(pkg, refs[name], got, a.llama, image_prompt(pkg, durl, q))
         if st == "FAIL" and not got.get("error"):
             alt = reference(pkg, a.llama, durl, q, a.tokens, salt="2")
             if not alt.get("_pending"):
-                st2, d2 = judge(pkg, alt, got)
+                st2, d2 = judge(pkg, alt, got, a.llama, image_prompt(pkg, durl, q))
                 if st2 == "PASS":
                     st, detail = "PASS", d2 + " (matches llama.cpp's re-recording)"
         print(f"{st} {name} {size}: {detail}", flush=True)

@@ -166,8 +166,11 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     Limit: a mild long-context RoPE error (base 5e5 vs 1e6) is below this bar's resolution, since
     llama.cpp's own views disagree that much there (16k: 1.24 golden, 0.98 and 1.44 views).
     Only the first divergence of a prompt (turn, probe) is judged, as before. compare.py, agent_golden.py,
-    needle.py and spec_check.py use it (`near_tie_at`); vision_golden.py (image prompts) does not. No
-    micro-batch view where llama.cpp cannot extend its cache in small steps (recurrent state).
+    needle.py and spec_check.py use it (`near_tie_at`). No micro-batch view where llama.cpp cannot extend its
+    cache in small steps (recurrent state). vision_golden.py uses the batched view only: an image prompt's
+    text cannot be cut into token micro-batches, so llama.cpp re-scores the image prompt plus its reply before
+    the divergence in one batch (the recording decoded that reply token by token); the view is left out when
+    the reply does not re-tokenize to its own ids.
   - **FAIL**: a large gap, or a token outside every view's top list. That is a real bug, even
     if the text reads fine.
   - Two llama.cpp builds (Vulkan vs ROCm) disagree with each other in the same

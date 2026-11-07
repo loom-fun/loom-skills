@@ -77,7 +77,10 @@ chat request ──► control.loom (text)                       image component
    tensor's sum and edges. `vision/trace_compare.py MMPROJ LOG rainbow SIZE name...` compares sums layer by
    layer and names the first wrong op. Use a size that exercises every path (Glimmer: > 32 patches a side
    for the windows; an interpolated position grid). Deep encoders drift in the last layers where
-   activations reach 1e5 (llama.cpp rounds there too): judge by per-row cosine, not elementwise.
+   activations reach 1e5 (llama.cpp rounds there too): judge by per-row cosine, not elementwise. A few adjacent
+   rows dipping toward 0.999 while the rest stay >= 0.99999 are local F16 rounding where the test image puts them:
+   on a 256x1600 grid four rows reached 0.9990 (qwen3vl_merger), and the same grid with the image flipped
+   did not dip there. Check that a dip moves with the content before calling it an encoder bug.
 3. **Preprocessing**: a `preprocess.FAMILY` entry (merge, token limits, filter, rounding) or a custom size
    rule (Glimmer), mirrored in `gen_chat_vision.geometry()`.
 4. **Kernels**: compose `gen_vision.py` blocks (norms: ln/rmsw/rms; GEMM via the starter's row-scaled F16

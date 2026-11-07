@@ -37,9 +37,25 @@ CASES = [   # (name, golden top, views, expected)
     ("RoPE 10000 bug: 1.348 / 1.467 / 1.336", view(1.348), [view(1.467), view(1.336)], False),
     ("RoPE 10000 bug: 2.777 / 2.705 / 2.49", view(2.777), [view(2.705), view(2.49)], False),
     ("no views: the old rule", view(1.2), [], False),
+    # Image prompts (vision_golden.py): one view, the batched one (constructed numbers).
+    ("vision: 2.06, batched 1.2", view(2.06), [view(1.2)], True),
+    ("vision: 2.41, batched 2.3", view(2.41), [view(2.3)], False),
+    ("vision: 2.41, batched 1.6 (spread capped at 0.5)", view(2.41), [view(1.6)], False),
+    ("vision: Loom's token unlisted, batched unlisted", view(None), [view(None)], False),
+    ("vision: Loom's token unlisted, batched 0.9", view(None), [view(0.9)], True),
+    ("vision: batched ranks Loom's token only", view(2.75), [loom_preferred(-0.5)], True),
 ]
 
 bad = 0
+# An image prompt object gets the batched view only (its text cannot be cut into token micro-batches); token ids get both.
+import bench_common  # noqa: E402
+calls = []
+bench_common.llama_greedy = lambda url, prompt, n, pkg, n_probs=5, **extra: calls.append((prompt, extra)) or ({}, [], [])
+bench_common.llama_views("u", {"prompt_string": "p", "multimodal_data": ["x"]}, None)
+bench_common.llama_views("u", [1, 2], None)
+want_calls = [({"prompt_string": "p", "multimodal_data": ["x"]}, {}), ([1, 2], {}), ([1, 2], {"_micro_batch": 8, "id_slot": 0})]
+bad += calls != want_calls
+print(f"{'ok  ' if calls == want_calls else 'FAIL'} llama_views: image prompt batched only, ids batched + micro-batched")
 for name, top, views, want in CASES:
     got = near_tie(top, G, L, views=views)
     bad += got != want
