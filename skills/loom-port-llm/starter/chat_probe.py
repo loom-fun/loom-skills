@@ -61,8 +61,15 @@ def environment():
     env.filters["tojson"] = lambda x, ensure_ascii=False, indent=None, separators=None, sort_keys=False: json.dumps(
         x, ensure_ascii=ensure_ascii, indent=indent, separators=separators, sort_keys=sort_keys)
     env.globals["raise_exception"] = raise_exception
-    env.globals["strftime_now"] = lambda fmt: datetime.datetime.now().strftime(fmt)
+    env.globals["strftime_now"] = lambda fmt: CLOCK.strftime(fmt)
     return env
+
+
+# strftime_now's clock. llama.cpp's server renders the request's local date (Llama 3.2: "Today Date: <today>" in
+# every system block), which a control program, rendering without a clock, cannot: Loom renders this fixed date,
+# the Llama 3.x templates' own date when no clock is given ("26 Jul 2024"), so the chat block is deterministic and
+# every package prints the same prompt on every day.
+CLOCK = datetime.datetime(2024, 7, 26)
 
 
 def load_template(source):
@@ -225,11 +232,22 @@ def derive(template_text, bos="", eos=""):
     if head.startswith(bos) and bos:
         head = head[len(bos):]
     default = head[:len(head) - len(chat["user_prefix"])] if head.endswith(chat["user_prefix"]) else ""
+    # A system block the template always prints, opening with fixed text before the system message (Llama 3:
+    # "Cutting Knowledge Date: ...\nToday Date: ...\n\n"): the role prefix is the user prefix's spelling, the rest
+    # system_preamble. Present only then.
+    role_prefix = chat["user_prefix"].replace("user", "system")
+    if role_prefix != chat["user_prefix"] and chat["system_prefix"] != role_prefix and chat["system_prefix"].startswith(role_prefix) \
+            and default.startswith(chat["system_prefix"]):
+        chat["system_preamble"] = chat["system_prefix"][len(role_prefix):]
+        chat["system_prefix"] = role_prefix
+        notes.append(f"the system block is always printed and opens with {chat['system_preamble'][:60]!r}...")
     if default:
-        if not (default.startswith(chat["system_prefix"]) and default.endswith(chat["suffix"])):
+        lead = chat["system_prefix"] + chat.get("system_preamble", "")
+        if not (default.startswith(lead) and default.endswith(chat["suffix"])):
             raise ProbeError(f"default system block has an unexpected shape: {default!r}")
-        chat["default_system"] = default[len(chat["system_prefix"]):len(default) - len(chat["suffix"])]
-        notes.append(f"template inserts a default system prompt: {chat['default_system'][:60]!r}...")
+        chat["default_system"] = default[len(lead):len(default) - len(chat["suffix"])]
+        if chat["default_system"]:
+            notes.append(f"template inserts a default system prompt: {chat['default_system'][:60]!r}...")
     else:
         chat["default_system"] = ""
     if efforts:
@@ -249,14 +267,16 @@ def derive(template_text, bos="", eos=""):
     # Templates that keep reasoning in every assistant turn (preserve_thinking: Qwen3.6, Qwen3.8) render
     # an empty think block in the plain turn above, which then is not part of the assistant prefix.
     guess = chat["user_prefix"].replace("user", "assistant")
-    if guess != chat["user_prefix"] and chat["assistant_prefix"].startswith(guess) and chat["assistant_prefix"] != guess:
+    # A template that drops an assistant turn's content when it has tool calls (Llama 3) shows no reasoning here.
+    shown = "ASSTPROBE1" in with_r
+    if shown and guess != chat["user_prefix"] and chat["assistant_prefix"].startswith(guess) and chat["assistant_prefix"] != guess:
         rest, mid_r, lead = chat["assistant_prefix"][len(guess):], between(with_r, "USERPROBE1", "ASSTPROBE1"), chat["suffix"] + guess
         if "REASONPROBE" in mid_r and mid_r.startswith(lead):
             opened, closed = mid_r[len(lead):mid_r.index("REASONPROBE")], mid_r[mid_r.index("REASONPROBE") + len("REASONPROBE"):]
             if opened + closed == rest:
                 chat["assistant_prefix"] = guess
                 notes.append(f"every assistant turn renders its (possibly empty) think block: assistant prefix {guess!r}")
-    mid_r = between(with_r, "USERPROBE1", "ASSTPROBE1")
+    mid_r = between(with_r, "USERPROBE1", "ASSTPROBE1") if shown else ""
     if "REASONPROBE" in mid_r:
         pre = mid_r[:mid_r.index("REASONPROBE")]
         cut = pre.index(chat["assistant_prefix"]) + len(chat["assistant_prefix"]) if chat["assistant_prefix"] in pre else None
@@ -310,77 +330,115 @@ def derive(template_text, bos="", eos=""):
         return chat, notes
     t_sys = T.render([{"role": "system", "content": "SYSPROBE"}, {"role": "user", "content": "USERPROBE1"}], tools=TOOLS, **kw0)
     printed = None
-    for only in (False, True):
-        for seps in ((", ", ": "), (",", ":")):
-            cand = [json.dumps(t["function"] if only else t, ensure_ascii=False, separators=seps) for t in TOOLS]
-            if all(c in t_plain for c in cand):
-                printed, chat["tools_function_only"] = cand, only
-                if seps != (", ", ": "):
-                    notes.append("template prints tools compactly; Loom prints the request's tool JSON as sent")
+    for indent in (None, 4, 2):   # tojson(indent=N) (Llama 3: 4): tools_indent, present only then
+        for only in (False, True):
+            for seps in ((", ", ": "), (",", ":")) if indent is None else ((",", ": "),):
+                cand = [json.dumps(t["function"] if only else t, ensure_ascii=False, separators=seps, indent=indent) for t in TOOLS]
+                if all(c in t_plain for c in cand):
+                    printed, chat["tools_function_only"] = cand, only
+                    if indent:
+                        chat["tools_indent"] = indent
+                        notes.append(f"template prints tools with indent {indent} (Loom re-indents the request's tool JSON)")
+                    elif seps != (", ", ": "):
+                        notes.append("template prints tools compactly; Loom prints the request's tool JSON as sent")
+                    break
+            if printed:
                 break
         if printed:
             break
     if not printed:
         raise ProbeError("tool definitions are not printed as JSON objects one per line; fill tools_* by hand")
-    block = t_plain[:t_plain.index("USERPROBE1")]
-    if block.startswith(bos) and bos:
-        block = block[len(bos):]
-    block = block[:len(block) - len(chat["user_prefix"])]
-    if not (block.startswith(chat["system_prefix"]) and block.endswith(chat["suffix"])):
-        raise ProbeError(f"tools are not rendered as a system block: {block[:200]!r}")
-    body = block[len(chat["system_prefix"]):len(block) - len(chat["suffix"])]
-    i0, i1 = body.index(printed[0]), body.index(printed[1])
-    # Each tool is preceded by tool_line_prefix (Qwen: "\n"; GLM: "").
-    line = body[i0 + len(printed[0]):i1]
-    if line and body[:i0].endswith(line) and not line.strip():
-        # Every tool is preceded by tool_line_prefix (Qwen: "\n"; GLM: "").
-        chat["tool_line_prefix"], chat["tool_separator"] = line, ""
+    first_tool = t_plain.index(printed[0])
+    in_user = t_plain.rfind(chat["user_prefix"], 0, first_tool)
+    if in_user >= 0 and chat["suffix"] not in t_plain[in_user + len(chat["user_prefix"]):first_tool]:
+        # Tools open the first user message (Llama 3); the always-printed system block takes another preamble
+        # (system_preamble_tools: "Environment: ipython\n" + the preamble). tools_in_user, present only then.
+        if "system_preamble" not in chat:
+            raise ProbeError("tools in the first user message without an always-printed system block (not modeled)")
+        chat["tools_in_user"] = True
+        sys_block = t_plain[len(bos) if bos and t_plain.startswith(bos) else 0:in_user]
+        body = sys_block[len(chat["system_prefix"]):len(sys_block) - len(chat["suffix"])]
+        if not (sys_block.startswith(chat["system_prefix"]) and sys_block.endswith(chat["suffix"]) and body.endswith(chat["default_system"])):
+            raise ProbeError(f"system block with tools has an unexpected shape: {sys_block[:200]!r}")
+        chat["system_preamble_tools"] = body[:len(body) - len(chat["default_system"])]
+        user_text = t_plain[in_user + len(chat["user_prefix"]):t_plain.index("USERPROBE1")]
+        i0, i1 = user_text.index(printed[0]), user_text.index(printed[1])
+        chat["tools_prefix"], chat["tools_suffix"] = user_text[:i0], user_text[i1 + len(printed[1]):]
+        chat["tool_line_prefix"], chat["tool_separator"] = "", user_text[i0 + len(printed[0]):i1]
+        chat["tools_after_system"], chat["tools_system_separator"] = True, ""
+        notes.append("tools are printed in the first user message")
     else:
-        # Tools joined by a separator printed between them only (LFM2: ", " inside "[...]").
-        chat["tool_line_prefix"], chat["tool_separator"] = "", line
-        line = ""
-    tools_prefix, tools_suffix = body[:i0 - len(line)] if line else body[:i0], body[i1 + len(printed[1]):]
-    s_body = t_sys[:t_sys.index("USERPROBE1")]
-    s_body = s_body[len(bos) if bos and s_body.startswith(bos) else 0:]
-    s_body = s_body[len(chat["system_prefix"]):len(s_body) - len(chat["user_prefix"]) - len(chat["suffix"])]
-    if s_body.startswith("SYSPROBE"):
-        chat["tools_after_system"] = True
-        rest = s_body[len("SYSPROBE"):]
-        lead = rest[:rest.index(printed[0]) - len(line)]
-        body_start = len(lead) - len(lead.lstrip())
-        # Tools in their own system block after the system message (Flint: "<|system|>SYS<|system|>\n# Tools"):
-        # the second role tag belongs to the separator, not to the tools prefix.
-        if chat["system_prefix"] and lead.startswith(chat["system_prefix"]):
-            body_start = len(chat["system_prefix"])
-        chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
-    elif s_body.endswith("SYSPROBE"):
-        chat["tools_after_system"] = False
-        rest = s_body[:-len("SYSPROBE")]
-        chat["tools_prefix"] = rest[:rest.index(printed[0]) - len(line)]
-        after = rest[rest.index(printed[1]) + len(printed[1]):]
-        if not after.startswith(tools_suffix):
-            raise ProbeError("tools suffix differs when a system message follows")
-        chat["tools_system_separator"] = after[len(tools_suffix):]
-    else:
-        raise ProbeError(f"system message is not merged with the tools block: {s_body[:200]!r}")
-    chat["tools_suffix"] = tools_suffix
-    # Without a system message the tools block follows the default system prompt and its separator, unless the
-    # template swaps in another one when tools are present (Nanbeige: a "tool-calling expert" prompt, with no
-    # separator): default_system_tools is that text, separator included. Present only when it differs.
-    if chat["tools_after_system"]:
-        plain_lead = tools_prefix
-        default = chat["default_system"]
-        if plain_lead != (default + chat["tools_system_separator"] if default else "") + chat["tools_prefix"]:
-            if not plain_lead.endswith(chat["tools_prefix"]):
-                raise ProbeError(f"tools block without a system message has an unexpected lead: {plain_lead[:200]!r}")
-            chat["default_system_tools"] = plain_lead[:len(plain_lead) - len(chat["tools_prefix"])]
-            notes.append(f"template swaps the default system prompt when tools are present: "
-                         f"{chat['default_system_tools'][:60]!r}...")
+        block = t_plain[:t_plain.index("USERPROBE1")]
+        if block.startswith(bos) and bos:
+            block = block[len(bos):]
+        block = block[:len(block) - len(chat["user_prefix"])]
+        if not (block.startswith(chat["system_prefix"]) and block.endswith(chat["suffix"])):
+            raise ProbeError(f"tools are not rendered as a system block: {block[:200]!r}")
+        body = block[len(chat["system_prefix"]):len(block) - len(chat["suffix"])]
+        i0, i1 = body.index(printed[0]), body.index(printed[1])
+        # Each tool is preceded by tool_line_prefix (Qwen: "\n"; GLM: "").
+        line = body[i0 + len(printed[0]):i1]
+        if line and body[:i0].endswith(line) and not line.strip():
+            # Every tool is preceded by tool_line_prefix (Qwen: "\n"; GLM: "").
+            chat["tool_line_prefix"], chat["tool_separator"] = line, ""
+        else:
+            # Tools joined by a separator printed between them only (LFM2: ", " inside "[...]").
+            chat["tool_line_prefix"], chat["tool_separator"] = "", line
+            line = ""
+        tools_prefix, tools_suffix = body[:i0 - len(line)] if line else body[:i0], body[i1 + len(printed[1]):]
+        s_body = t_sys[:t_sys.index("USERPROBE1")]
+        s_body = s_body[len(bos) if bos and s_body.startswith(bos) else 0:]
+        s_body = s_body[len(chat["system_prefix"]):len(s_body) - len(chat["user_prefix"]) - len(chat["suffix"])]
+        if s_body.startswith("SYSPROBE"):
+            chat["tools_after_system"] = True
+            rest = s_body[len("SYSPROBE"):]
+            lead = rest[:rest.index(printed[0]) - len(line)]
+            body_start = len(lead) - len(lead.lstrip())
+            # Tools in their own system block after the system message (Flint: "<|system|>SYS<|system|>\n# Tools"):
+            # the second role tag belongs to the separator, not to the tools prefix.
+            if chat["system_prefix"] and lead.startswith(chat["system_prefix"]):
+                body_start = len(chat["system_prefix"])
+            chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
+        elif s_body.endswith("SYSPROBE"):
+            chat["tools_after_system"] = False
+            rest = s_body[:-len("SYSPROBE")]
+            chat["tools_prefix"] = rest[:rest.index(printed[0]) - len(line)]
+            after = rest[rest.index(printed[1]) + len(printed[1]):]
+            if not after.startswith(tools_suffix):
+                raise ProbeError("tools suffix differs when a system message follows")
+            chat["tools_system_separator"] = after[len(tools_suffix):]
+        else:
+            raise ProbeError(f"system message is not merged with the tools block: {s_body[:200]!r}")
+        chat["tools_suffix"] = tools_suffix
+        # Without a system message the tools block follows the default system prompt and its separator, unless the
+        # template swaps in another one when tools are present (Nanbeige: a "tool-calling expert" prompt, with no
+        # separator): default_system_tools is that text, separator included. Present only when it differs.
+        if chat["tools_after_system"]:
+            plain_lead = tools_prefix
+            default = chat["default_system"]
+            if plain_lead != (default + chat["tools_system_separator"] if default else "") + chat["tools_prefix"]:
+                if not plain_lead.endswith(chat["tools_prefix"]):
+                    raise ProbeError(f"tools block without a system message has an unexpected lead: {plain_lead[:200]!r}")
+                chat["default_system_tools"] = plain_lead[:len(plain_lead) - len(chat["tools_prefix"])]
+                notes.append(f"template swaps the default system prompt when tools are present: "
+                             f"{chat['default_system_tools'][:60]!r}...")
     # Tool calls.
-    two = T.render([{"role": "user", "content": "USERPROBE1"}, calls_msg("ASSTPROBE1", [CALL1, CALL2]),
-                    {"role": "tool", "tool_call_id": "call_0", "content": "TOOLPROBE1"},
-                    {"role": "tool", "tool_call_id": "call_1", "content": "TOOLPROBE2"},
-                    {"role": "user", "content": "USERPROBE2"}], tools=TOOLS)
+    calls_probe = lambda calls: T.render([{"role": "user", "content": "USERPROBE1"}, calls_msg("ASSTPROBE1", calls),
+                                          {"role": "tool", "tool_call_id": "call_0", "content": "TOOLPROBE1"},
+                                          {"role": "tool", "tool_call_id": "call_1", "content": "TOOLPROBE2"},
+                                          {"role": "user", "content": "USERPROBE2"}], tools=TOOLS)
+    try:
+        two, single_call = calls_probe([CALL1, CALL2]), False
+    except ProbeError:   # one call per turn (Llama 3 raises on parallel calls; verify's parallel probe then SKIPs)
+        two, single_call = calls_probe([CALL1]), True
+        notes.append("template accepts one tool call per assistant turn")
+    if "ASSTPROBE1" not in two:
+        # The template drops the content of an assistant turn that has calls (Llama 3): calls_drop_content, present
+        # only then. The probe's content marker is put back where the content would be, for the framing below.
+        chat["calls_drop_content"] = True
+        at = two.index(chat["assistant_prefix"], two.index("USERPROBE1")) + len(chat["assistant_prefix"])
+        two = two[:at] + "ASSTPROBE1" + two[at:]
+        notes.append("an assistant turn with tool calls renders no content")
     turn = two[two.index("ASSTPROBE1"):]
     if "get_weather(city=" in turn:
         # Pythonic calls (LFM2): <|tool_call_start|>[f(a='x', b=3), g()]<|tool_call_end|>
@@ -399,6 +457,11 @@ def derive(template_text, bos="", eos=""):
         after_calls = turn[close_at + len(chat["calls_close"]):]
         two = "ASSTPROBE1" + after_calls  # tool-response framing below
         end2 = len("ASSTPROBE1")
+    elif '{"name": "get_weather", "' in turn and "<tool_call>" not in turn:
+        # Bare JSON calls (Llama 3: {"name": NAME, "parameters": ARGS}): call_arguments_key names the arguments.
+        chat["call_format"] = "json"
+        key_at = turn.index('{"name": "get_weather", "') + len('{"name": "get_weather", "')
+        chat["call_arguments_key"] = turn[key_at:turn.index('"', key_at)]
     elif '{"name": "get_weather"' in turn:
         chat["call_format"] = "hermes"
     elif "<function=get_weather>" in turn:
@@ -407,7 +470,20 @@ def derive(template_text, bos="", eos=""):
         chat["call_format"] = "glm"
     else:
         raise ProbeError("unknown tool-call format: " + turn[:300])
-    if chat["call_format"] != "pythonic":
+    if chat["call_format"] == "json":
+        chat["calls_open"] = chat["calls_close"] = chat["call_end"] = ""
+        chat["call_marker"] = '{"name"'   # output_next ends content here
+        start1 = two.index('{"name": "get_weather"', two.index("ASSTPROBE1"))
+        chat["content_call_separator"] = two[two.index("ASSTPROBE1") + len("ASSTPROBE1"):start1]
+        end1 = start1 + len(render_call(chat, CALL1))
+        if two[start1:end1] != render_call(chat, CALL1):
+            raise ProbeError(f"JSON call printed differently: {two[start1:end1 + 20]!r}")
+        if single_call:
+            chat["call_separator"], end2 = "", end1
+        else:
+            start2 = two.index('{"name": "search"', end1)
+            chat["call_separator"], end2 = two[end1:start2], start2 + len(render_call(chat, CALL2))
+    elif chat["call_format"] != "pythonic":
         chat["calls_open"] = chat["calls_close"] = chat["call_end"] = ""
         start1 = two.index("<tool_call>", two.index("ASSTPROBE1"))
         chat["call_marker"] = "<tool_call>"
@@ -420,6 +496,11 @@ def derive(template_text, bos="", eos=""):
     if not after_calls.startswith(chat["suffix"]):
         raise ProbeError(f"assistant turn with calls is not closed by the suffix: {after_calls[:80]!r}")
     after_calls = after_calls[len(chat["suffix"]):]
+    if '"TOOLPROBE1"' in after_calls and '"TOOLPROBE2"' in after_calls:
+        # Tool results printed as JSON strings (Llama 3: content | tojson): tool_content_json, present only then.
+        chat["tool_content_json"] = True
+        after_calls = after_calls.replace('"TOOLPROBE1"', "TOOLPROBE1").replace('"TOOLPROBE2"', "TOOLPROBE2")
+        notes.append("tool results are printed as JSON strings")
     pre = after_calls[:after_calls.index("TOOLPROBE1")]
     mid = between(after_calls, "TOOLPROBE1", "TOOLPROBE2")
     post = after_calls[after_calls.index("TOOLPROBE2") + len("TOOLPROBE2"):after_calls.index("USERPROBE2")]
@@ -455,12 +536,19 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
     table = chat.get("reasoning_instructions") or {}
     instr = table.get(reasoning_effort, table.get(chat.get("reasoning_effort_default"), "")) if on else ""
     instructed = lambda b: instr + chat["reasoning_separator"] + b if instr and b else instr or b
+    preamble = "system_preamble" in chat   # Llama 3: the system block is always printed, opening with fixed text
+    in_user = bool(tools) and chat.get("tools_in_user", False)   # Llama 3: tools open the first user message
     if tools:
         printed = chat.get("tool_separator", "").join(
-            chat["tool_line_prefix"] + json.dumps(t["function"] if chat["tools_function_only"] else t, ensure_ascii=False)
+            chat["tool_line_prefix"] + json.dumps(t["function"] if chat["tools_function_only"] else t, ensure_ascii=False,
+                                                  indent=chat.get("tools_indent"))
             for t in tools)
         tb = chat["tools_prefix"] + printed + chat["tools_suffix"]
         sep = chat["tools_system_separator"] if body else ""
+    if preamble:
+        lead = chat["system_preamble_tools"] if tools else chat["system_preamble"]
+        out += chat["system_prefix"] + lead + body + chat["suffix"]
+    elif tools:
         if not first_system and "default_system_tools" in chat:   # the template's tools-time default, separator included
             body, sep = chat["default_system_tools"], ""
         merged = body + sep + tb if chat["tools_after_system"] else tb + sep + body
@@ -475,9 +563,14 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
         role, text = m["role"], trim(m.get("content") or "")
         if prior == "tool" and role != "tool":
             out += chat["tool_turn_suffix"]
-        if role == "system" and i == 0 and (tools or instr) and first_system:
+        if role == "system" and i == 0 and (tools or instr or preamble) and first_system:
             pass
+        elif in_user:   # the first message after the system block takes the tools, whatever its role (as the template)
+            out += chat["user_prefix"] + tb + text + chat["suffix"]
+            in_user = False
         elif role == "tool":
+            if chat.get("tool_content_json"):
+                text = json.dumps(m.get("content") or "", ensure_ascii=False)
             out += ("" if prior == "tool" else chat["tool_turn_prefix"]) + chat["tool_item_prefix"] + text + chat["tool_item_suffix"]
         elif role == "assistant":
             thought = (m.get("reasoning_content") or "").strip()
@@ -486,6 +579,7 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
             if not shown and chat.get("history_think_before") == "empty":
                 think = chat["think_open"] + chat["think_close"]
             calls = render_calls(chat, m.get("tool_calls") or [])
+            text = "" if calls and chat.get("calls_drop_content") else text
             sep = chat["content_call_separator"] if text and calls else ""
             out += chat["assistant_prefix"] + think + text + sep + calls + chat["suffix"]
         else:
@@ -513,6 +607,9 @@ def render_call(chat, call):
     if chat["call_format"] == "hermes":
         a = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
         return '<tool_call>\n{"name": "' + call["name"] + '", "arguments": ' + a + "}\n</tool_call>"
+    if chat["call_format"] == "json":   # the arguments as an object (llama.cpp parses a string before rendering)
+        a = json.dumps(json.loads(args) if isinstance(args, str) else args, ensure_ascii=False)
+        return '{"name": "' + call["name"] + '", "' + chat["call_arguments_key"] + '": ' + a + "}"
     args = json.loads(args) if isinstance(args, str) else args
     if chat["call_format"] == "pythonic":
         return call["name"] + "(" + ", ".join(f"{k}={py_value(v)}" for k, v in args.items()) + ")"
@@ -559,7 +656,10 @@ def verify(template_text, chat, bos="", eos=""):
     results = []
     extra = [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL, CALL2], reasoning="R"),
                                    {"role": "tool", "tool_call_id": "call_0", "content": "ok"}], TOOLS)] \
-        if chat["call_format"] == "pythonic" else []
+        if chat["call_format"] == "pythonic" else \
+        [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL]),
+                              {"role": "tool", "tool_call_id": "call_0", "content": 'say "hi"\n\tback\\slash é'}], TOOLS)] \
+        if chat["call_format"] == "json" else []
     for name, msgs, tools in CONVERSATIONS + extra:
         for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
             label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")
@@ -592,6 +692,18 @@ def compare(T, chat, label, msgs, tools, kw):
         return label, True, "exact"
     k = next((i for i, (a, b) in enumerate(zip(got, ref)) if a != b), min(len(got), len(ref)))
     return label, False, f"differs at byte {k}: loom {got[max(0, k - 40):k + 60]!r} vs template {ref[max(0, k - 40):k + 60]!r}"
+
+
+def raw_alternatives(chat, message, finished, thinking=None, prompt=None):
+    """Benchmark hook (agent_golden.py): every raw text consistent with a parsed reply, the default first. A model
+    may write chat.call_prefix_token (Llama 3.1: <|python_tag|>) before its JSON call; the reply's channels don't
+    say whether it did, so both spellings are offered. [] when there is no such ambiguity."""
+    calls = render_calls(chat, message.get("tool_calls") or [])
+    if not (calls and chat.get("call_prefix_token")):
+        return []
+    content = message.get("content") or ""
+    base = content + (chat["content_call_separator"] if content else "") + calls
+    return [base, content + chat["call_prefix_token"] + calls]
 
 
 def thinking_never(chat):
