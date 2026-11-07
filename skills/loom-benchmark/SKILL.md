@@ -53,7 +53,7 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
 |---|---|---|---|
 | `dev` | **after each kept change** (loom-optimize, loom-improve) | consistency; agent tool loop (thinking on, and off when the template toggles it); goldens (cached) + compare on 12 short prompts + 1k/2k documents; vision on 2 images (with a projector); `spec` on 5–6 short requests (drafting packages); sampling (temperature 0 = greedy, seed reproduces); needle at 16k vs llama.cpp | Qwen3.8-27B (drafting, vision): 3.3 min cached, 5.5 min with the first reference fill; Bolt-E4B: 1.1 / 2.2 min |
 | `fast` | (kept for scripts that call it) | goldens + compare (20 short prompts + 1k–32k documents), consistency, vision on all 6 images | 1–3 min |
-| `quick` | nightly CI; a new port's first qualification (`qualify.sh`) | fast + `spec` (full request set), agent tool loop, 200-draw sampling, needle at half the context (≤ 60k) vs llama.cpp | median 11 min, up to 42 min (audit) |
+| `quick` | nightly CI; a new port's first qualification (`qualify.sh`) | fast + `spec` (full request set), agent tool loop (thinking on, and off when the template toggles it), 200-draw sampling, needle at half the context (≤ 60k) vs llama.cpp | median 11 min, up to 42 min (audit) |
 | `full` | nightly CI; once on a new port's final build before its first card (`finalize.sh`) | quick + one Loom-only probe at the full context | + one full-context prefill (up to 1 h on a 27B) |
 
 **Which level when** (from an audit of every gate run in the issue #26–#29 sessions):
@@ -377,7 +377,9 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
    published card with only new evidence: `--from-info DIR/info.json`, re-read from the Hub right before, which
    also supplies `--repo`). DIR holds the repo's `model.json`,
    `model.json.lock`, `llm_config.json` (and `program/`). Per gate the latest evidence wins, so a later failing
-   run shows as a failure; per metric the last session that measured it. `--report attached` instead keeps a
+   run shows as a failure, except that on the same programs a later pass at a lower level (dev < fast < quick <
+   full) keeps the earlier higher-level pass (a published date-only gate and a same-day timestamped job: the new
+   evidence is the later); per metric the last session that measured it. `--report attached` instead keeps a
    REPORT.md written by the run (the factory's) or an older card's narrative, as is.
    A new or replaced package: `card/publish_package.py prepare PKG DIR --source ORG/GGUF-REPO` first, on the machine
    that holds the GGUFs (copies the package without weights, pins each file's origin at the revision it was validated

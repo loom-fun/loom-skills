@@ -67,7 +67,9 @@ Evidence file (loom-card-evidence/2), every block optional:
   SOURCE: {"kind", "run", "url", "device", "hrx_loom"}
 Merge rules: card keys and versions: the later file wins. performance: sessions append in order and per metric
 the last session that measured it is the card's value; the baseline is the last one given. gates: per gate the
-evidence with the latest time wins (equal times: the later file). roofline: the later file wins. devlab: sweeps
+latest evidence wins (gate_supersedes: a published date-only gate is older than new evidence of that day; equal
+times: the later file), except that on the same programs_sha256 a later pass at a lower level (dev < fast < quick <
+full) does not replace a pass at a higher level; a later failure always does. roofline: the later file wins. devlab: sweeps
 append in order (the same source replaces its earlier sweep; the last DEVLAB_SWEEPS_KEPT are kept). Unknown metric
 and gate names are kept.
 """
@@ -140,6 +142,32 @@ class Sources:
 
 # ---------------------------------------------------------------- build
 
+GATE_LEVELS = ("dev", "fast", "quick", "full")   # gates.sh LEVEL, weakest first
+
+
+def gate_supersedes(new, cur):
+    """Whether gate evidence `new` replaces `cur` on the card. Each is ((when, order), evidence, published row):
+    `when` is an evidence time (YYYY-MM-DDTHH:MM:SS) or a published row's date (YYYY-MM-DD); order is the evidence
+    file's position (-1: the published card). A later run wins, so a later failure always shows (a regression) and
+    a pass on other programs replaces evidence on older ones; but on the same programs_sha256 a later pass at a
+    lower level does not replace a pass at a higher level (a quick sweep after a full one keeps the full pass; a
+    higher-level pass replaces a lower one whatever the order the evidence arrives in).
+    Dates and times compare at the coarser precision (a published date-only gate vs a timestamped job of that day
+    is a tie, broken by file order: the new evidence), so publishing a card never reorders its evidence."""
+    def row(e):
+        return e[2] if e[2] is not None else e[1]
+    def when(e):
+        t = (e[0][0] or "").replace(" ", "T")
+        return t[:10], t[11:]
+    (nd, nt), (cd, ct) = when(new), when(cur)
+    later = (nd, nt if nt and ct else "", new[0][1]) >= (cd, ct if nt and ct else "", cur[0][1])
+    n, c = row(new), row(cur)
+    if n["status"] == c["status"] == "pass" and n.get("programs_sha256") and n.get("programs_sha256") == c.get("programs_sha256"):
+        rank = lambda r: GATE_LEVELS.index(r["level"]) if r.get("level") in GATE_LEVELS else -1
+        return rank(n) > rank(c) if rank(n) != rank(c) else later
+    return later
+
+
 def cmd_build(a):
     facts = package_facts(load_package(a.pkg))
     card, versions, baseline, sessions, gates = {}, {}, None, [], {}
@@ -180,9 +208,9 @@ def cmd_build(a):
             s["source"] = sources.add(s["source"])
             sessions.append({k: v for k, v in s.items() if v is not None or k in ("date",)})
         for g in ev.get("gates") or []:
-            key = (g.get("time") or "", i)
-            if g["name"] not in gates or key >= gates[g["name"]][0]:
-                gates[g["name"]] = (key, g, None)
+            new = ((g.get("time") or "", i), g, None)
+            if g["name"] not in gates or gate_supersedes(new, gates[g["name"]]):
+                gates[g["name"]] = new
         if ev.get("roofline"):
             roofline = ev["roofline"]
         sw = (ev.get("devlab") or {}).get("sweep")
