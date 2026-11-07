@@ -36,7 +36,7 @@
  unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -103,6 +103,34 @@
+@@ -133,6 +133,34 @@
    check.return
  }}
  """)
