@@ -1,7 +1,6 @@
 {
  "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
  "jobs": [
-  {"name": "sx25-4b", "spec": "XHToken/Spark-X2.5-4B-GGUF:Spark-X2.5-4B-Q4_K_M.gguf", "reference": "auto", "model_id": "XHToken/Spark-X2.5-4B"},
-  {"name": "sx26-4b", "spec": "bartowski/Spark-X2.6-4B-GGUF:Spark-X2.6-4B-Q4_K_M.gguf", "reference": "auto", "model_id": "XHToken/Spark-X2.6-4B"}
+  {"name": "sx26-4b", "spec": "bartowski/Spark-X2.6-4B-GGUF:Spark-X2.6-4B-Q4_K_M.gguf", "reference": "loom-fun/XHToken-Spark-X2.5-4B-loom", "model_id": "XHToken/Spark-X2.6-4B"}
  ]
 }
