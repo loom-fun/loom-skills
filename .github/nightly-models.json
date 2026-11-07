@@ -312,6 +312,28 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/unsloth-gemma-4-12B-it-loom",
+   "slug": "gemma-4-12b-it",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/unsloth-gemma-4-31B-it-loom",
+   "slug": "gemma-4-31b-it",
+   "memory_bytes": 80000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
   }
  ]
 }
