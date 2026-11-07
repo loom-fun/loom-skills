@@ -12,20 +12,19 @@
  FFN_NORM = CFG.get("ffn_norm_tensor", "ffn_norm")
  MOE = CFG.get("moe")                      # MoE FFN (gen_moe.py: router + top-k experts, optional shared experts)
  MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) | ({MTP_LAYER} if MTP_LAYER is not None else set()) if MOE else set()
-@@ -82,6 +87,12 @@
+@@ -82,6 +87,11 @@
  assert not (QKV_BIAS and FUSED_Q), "attn_q bias with a fused [q | gate] projection: split the bias too"
  ROPE = CFG.get("rope_type", "neox")       # "neox": pairs (d, d+64); "norm": pairs (2d, 2d+1)
  THETA = CFG["rope_theta"]
-+# Sliding layers with their own rope base (LFM3: rope.freq_base_swa) and global layers that rotate only the first
-+# rope_freq_cut rotary pairs (rope_freqs.weight 1 / 1e30): g_qk_rope_store's %rope flag is 2 on sliding layers.
++# Sliding layers with their own rope base (LFM3: rope.freq_base_swa; RoPE frequency factors apply to the global
++# layers only): g_qk_rope_store's %rope flag is 2 on sliding layers.
 +THETA_SWA = CFG.get("rope_theta_swa")
-+ROPE_CUT = CFG.get("rope_freq_cut")
-+SWA_ROPE = bool(THETA_SWA) or ROPE_CUT is not None
++SWA_ROPE = bool(THETA_SWA)
 +HEAD_GATE = GATE == "head"                 # LFM3: attn_gate.weight f32 [hidden, heads], one sigmoid gate per head
+ FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs)
  TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
  
- from formats import FMT, SB, LOWBIT, ICODES as IQ_FMTS  # noqa: E402  bytes / values per block of each decoded format
-@@ -1928,6 +1939,20 @@
+@@ -1929,6 +1939,14 @@
  MRP = []   # selection lines emitted before each pair's angle
  
  
@@ -37,24 +36,31 @@
 +            "  %ln_scale = scf.select %is_swa, %ln_swa, %ln_global : f32\n")
 +
 +
-+def rope_cut_text(j, idx):
-+    """%rot{j}: rotary pair idx rotates (RoPE applied, and a sliding layer or a pair below the global layers' cut)."""
-+    return (f"%cut{j}c = index.constant {ROPE_CUT} : index\n  %cut{j} = index.cmp ult, {idx}, %cut{j}c : index\n"
-+            f"  %keep{j} = scalar.ori %is_swa, %cut{j} : i1\n  %rot{j} = scalar.andi %apply_rope, %keep{j} : i1\n  ")
-+
-+
- def qk_rope():
-     """Per-head (optional) RMSNorm + RoPE for QH query and KVH key heads, with
-     keys/values stored to the paged F16 KV planes: one 256-lane workgroup per
-@@ -1944,6 +1969,7 @@
+ def freq_factor(j):
+     """llama3 rope_freqs (FREQ_FACTORS): divide pair j's frequency by its factor, picked from the runs of equal
+     factors by the pair index %li{j} (Llama 3.x: eight runs). Empty without factors."""
+@@ -1941,7 +1959,11 @@
+   %ffc{j}_{r} = scalar.cmpi sge, %li{j}, %ffs{j}_{r} : i32
+   %ffv{j}_{r} = scalar.constant {float(f)!r} : f32
+   %ff{j}_{r} = scf.select %ffc{j}_{r}, %ffv{j}_{r}, %ff{j}_{r - 1} : f32""")
+-    t.append(f"  %if{j}f = scalar.divf %if{j}, %ff{j}_{len(runs) - 1} : f32")
++    ff = f"%ff{j}_{len(runs) - 1}"
++    if SWA_ROPE:   # sliding layers: no factors
++        t.append(f"  %ff{j}_one = scalar.constant 1.0 : f32\n  %ff{j}_l = scf.select %is_swa, %ff{j}_one, {ff} : f32")
++        ff = f"%ff{j}_l"
++    t.append(f"  %if{j}f = scalar.divf %if{j}, {ff} : f32")
+     return "\n".join(t)
+ 
+ 
+@@ -1961,6 +1983,7 @@
          pairs = [(j, j + half, j) for j in range(half)]
          ln_scale = 2.0 * math.log(THETA) / RD   # angle = position * exp(-d * 2 ln(theta) / RD)
      else:
-+        assert not SWA_ROPE, "rope_theta_swa / rope_freq_cut are implemented for NeoX RoPE"
++        assert not SWA_ROPE, "rope_theta_swa is implemented for NeoX RoPE"
          assert D == 128 and RD == 128, "interleaved RoPE is implemented for head_dim 128"
          dims = ["%e0", "%e1", "%e2", "%e3"]
          dim_defs = "  %c1 = index.constant 1 : index\n  %e0 = index.mul %lane, %c4 : index\n  %e1 = index.add %e0, %c1 : index\n  %e2 = index.add %e0, %c2 : index\n  %e3 = index.add %e0, %c3 : index\n  %f0 = index.mul %lane, %c2 : index\n  %f1 = index.add %f0, %c1 : index\n"
-@@ -1986,8 +2012,7 @@
+@@ -2003,8 +2026,7 @@
    %position_low = scalar.maxsi %position32, %c0_i32 : i32
  {dim_defs}  %apply_rope = scalar.cmpi ne, %rope, %c0_i32 : i32
    %position_f = scalar.sitofp %position_low : i32 to f32
@@ -64,18 +70,7 @@
    %inv_two_pi = scalar.constant 0.15915494309189535 : f32
    %two_pi = scalar.constant 6.283185307179586 : f32
    %half = scalar.constant 0.5 : f32
-@@ -2012,8 +2037,8 @@
-   %an{j} = scalar.subf %ra{j}, %wr{j} : f32
-   %cr{j} = scalar.cosf<afn> %an{j} : f32
-   %sr{j} = scalar.sinf<afn> %an{j} : f32
--  %cos{j} = scf.select %apply_rope, %cr{j}, %one_f : f32
--  %sin{j} = scf.select %apply_rope, %sr{j}, %zero_f : f32""")
-+  {"" if ROPE_CUT is None else rope_cut_text(j, idx)}%cos{j} = scf.select {"%apply_rope" if ROPE_CUT is None else f"%rot{j}"}, %cr{j}, %one_f : f32
-+  %sin{j} = scf.select {"%apply_rope" if ROPE_CUT is None else f"%rot{j}"}, %sr{j}, %zero_f : f32""")
-     t.append(f"""  %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>
-   %k_view = buffer.view %k[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
-   %v_view = buffer.view %v[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
-@@ -3145,7 +3170,7 @@
+@@ -3162,7 +3184,7 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -84,7 +79,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -3681,6 +3706,122 @@
+@@ -3701,6 +3723,122 @@
  
  
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
@@ -207,7 +202,7 @@
  
  
  def rope_bias(block, tag, ind="  "):
-@@ -3764,7 +3905,8 @@
+@@ -3784,7 +3922,8 @@
    %pml_size = index.scale %t, %pml_bytes : index, offset -> offset
    %pacc = buffer.alloca<global> align(256) %pacc_size : buffer
    %pml = buffer.alloca<global> align(256) %pml_size : buffer
@@ -217,7 +212,7 @@
    %single = index.cmp eq, %t, %c1 : index
    %big = index.cmp uge, %t, %c128 : index
    %scale_entry = index.constant 8 : offset
-@@ -3802,8 +3944,51 @@
+@@ -3822,8 +3961,51 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -270,7 +265,7 @@
    %list_entry = index.constant 4 : offset
    %list_size = index.scale %t, %list_entry : index, offset -> offset
    %count_size = index.constant 256 : offset
-@@ -3815,10 +4000,11 @@
+@@ -3835,10 +4017,11 @@
    %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
    %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
@@ -284,7 +279,7 @@
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
      def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
          """Text of trunk layer i (tensors blk.i.*). ordinal overrides its attention KV-plane ordinal and
-@@ -3829,47 +4015,55 @@
+@@ -3849,47 +4032,55 @@
          par = lambda var, n, ty=None: f'    %{var}_{i} = command.parameter %weights, "{nm(n)}" : {ty or f"view<{sz(n)}xi8>"}\n'
          kind = kind_note or (" (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else ""))
          T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
@@ -352,7 +347,7 @@
    scf.if %gemm {{
  {"" if NO_FLASH else f"    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)" + chr(10)}    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
      kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
-@@ -3881,13 +4075,13 @@
+@@ -3901,13 +4092,13 @@
      kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
    }}
  """)
@@ -368,7 +363,7 @@
          else:
            fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
            if fg == fu:
-@@ -4056,11 +4250,30 @@
+@@ -4076,11 +4267,30 @@
          parts.append(spec_kernels)
      if MIXED_FFN:
          parts.append(SILU_MUL)
@@ -402,7 +397,7 @@
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -178,33 +178,49 @@
+@@ -186,33 +186,37 @@
  # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
  MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
                  "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False}}
@@ -419,7 +414,7 @@
 +# LFM3 (llama.cpp src/models/lfm3.cpp) over LFM2: kernel-7 short conv, sandwich norms (post_attention_norm and
 +# post_ffw_norm at the model's rms eps), a per-head sigmoid output gate (attn_gate.weight: f32 [hidden, heads],
 +# sigmoid(W h) scales each head's attention output), and sliding-window layers (window 256) with their own rope base
-+# (rope.freq_base_swa) while the full-attention layers rotate only the rotary pairs whose rope_freqs factor is finite.
++# (rope.freq_base_swa); the full-attention layers' rope_freqs factors (1 / 1e30: a rotary-pair cut) are rope_freq_factors.
 +if arch == "lfm3":
 +    if cfg["post_norms"]:
 +        cfg["post_norm_eps"] = cfg["rms_eps"]
@@ -428,19 +423,7 @@
 +        cfg["attn_gate"] = "head"
 +    if A("rope.freq_base_swa") and cfg["sliding_layers"]:
 +        cfg["rope_theta_swa"] = A("rope.freq_base_swa")
-+    freqs = next((t.data for t in r.tensors if t.name == "rope_freqs.weight"), None)
-+    if freqs is not None:
-+        import numpy as np
-+        f = np.asarray(freqs, dtype=np.float64)
-+        cut = int((f < 1e29).sum())
-+        if not f.any():
-+            print("NOTE: rope_freqs.weight reads as zeros (a header-only stub): rope_freq_cut left out")
-+        elif not (np.all(f[:cut] == 1.0) and np.all(f[cut:] >= 1e29)):
-+            print(f"WARNING: unsupported layout: rope_freqs factors other than 1 / 1e30 ({sorted(set(f.tolist()))[:4]}...): "
-+                  "only a cut of the rotary pairs is implemented (qk_rope)")
-+        elif cut < len(f):
-+            cfg["rope_freq_cut"] = cut
-+    print(f"lfm3: attn_gate={cfg['attn_gate']} rope_theta_swa={cfg.get('rope_theta_swa')} rope_freq_cut={cfg.get('rope_freq_cut')}")
++    print(f"lfm3: attn_gate={cfg['attn_gate']} rope_theta_swa={cfg.get('rope_theta_swa')}")
  if A("expert_count"):
 -    d = MOE_DEFAULTS.get(arch, {})
      cfg["moe"] = {"experts": A("expert_count"), "used": A("expert_used_count"), "ffn": A("expert_feed_forward_length"),
@@ -495,7 +478,7 @@
          if key not in seen: seen.add(key); todo.append((name, K))
  for name, K in todo:
      fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
-@@ -246,14 +248,18 @@
+@@ -246,15 +248,16 @@
  """)
  # 3. qk norm + rope on q (live = 0: no KV store)
  t = 4; pos = np.array([0, 1, 7, 300])
@@ -507,21 +490,20 @@
  q = rng.standard_normal((t, QH, D)).astype(np.float32); k = rng.standard_normal((t, KVH, D)).astype(np.float32); v = rng.standard_normal((t, KVH, D)).astype(np.float32)
  def norm(a, w): return a / np.sqrt((a * a).mean(-1, keepdims=True) + eps) * w
 -def rope(a):
--    inv = cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD); ang = pos[:, None] * inv[None]
+-    inv = cfg["rope_theta"] ** (-np.arange(0, RD // 2) * 2.0 / RD)
+-    if cfg.get("rope_freq_factors"):   # llama3 rope_freqs: each pair's frequency divided by its factor
 +def rope(a, swa=False):
-+    # sliding layers (%rope 2) use rope_theta_swa; global layers rotate only the first rope_freq_cut pairs
++    # sliding layers (%rope 2) use rope_theta_swa and no frequency factors
 +    inv = ((cfg.get("rope_theta_swa") if swa else None) or cfg["rope_theta"]) ** (-np.arange(0, RD // 2) * 2.0 / RD)
-+    if cfg.get("rope_freq_cut") is not None and not swa:
-+        inv = np.where(np.arange(RD // 2) < cfg["rope_freq_cut"], inv, 0.0)
-+    ang = pos[:, None] * inv[None]
++    if cfg.get("rope_freq_factors") and not swa:   # llama3 rope_freqs: each pair's frequency divided by its factor
+         inv = inv / np.asarray(cfg["rope_freq_factors"][:RD // 2], np.float64)
+     ang = pos[:, None] * inv[None]
      c, s = np.cos(ang)[:, None], np.sin(ang)[:, None]
-     if cfg["rope_type"] == "neox":
-         a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
-@@ -291,6 +297,28 @@
+@@ -294,6 +297,28 @@
    check.return
  }}
  """)
-+if cfg.get("rope_theta_swa") or cfg.get("rope_freq_cut") is not None:
++if cfg.get("rope_theta_swa"):
 +    save("r_qe_swa", rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq, swa=True).reshape(t, -1).astype(np.float32))
 +    cases.append(cases[-1].replace("@qk_rope {", "@qk_rope_swa {").replace("%rope = check.literal value(1) : i32", "%rope = check.literal value(2) : i32")
 +                 .replace('path("r_qe.npy")', 'path("r_qe_swa.npy")'))
@@ -546,7 +528,7 @@
  # 3a. output head (argmax over the vocabulary) for one selected span of 3 tokens
  t = 3
  head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
-@@ -902,184 +930,106 @@
+@@ -905,186 +930,106 @@
    check.return
  }}
  """)
@@ -638,10 +620,13 @@
      done = set()
      for li in range(M["leading_dense"], cfg["layers"]):
          b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower(); fg = T[b + "ffn_gate_exps.weight"].tensor_type.name.lower()
-         if fd in done: continue
-         done.add(fd)
+-        fu = T[b + "ffn_up_exps.weight"].tensor_type.name.lower(); gun = fg if fg == fu else f"{fg}_{fu}"   # gate+up formats (gen_moe)
+-        if (fd, gun) in done: continue
+-        done.add((fd, gun))
 -        Wr, wr_raw = f32w(b + "ffn_gate_inp.weight"); Wr = Wr.reshape(E_, H)
 -        bias = np.asarray(T[b + "exp_probs_b.bias"].data, np.float32) if M["probs_bias"] else np.zeros(E_, np.float32)
++        if fd in done: continue
++        done.add(fd)
 +        t = 3
 +        hx = rng.standard_normal((t, H)).astype(np.float32)
 +        Wr = np.asarray(T[b + "ffn_gate_inp.weight"].data, np.float32).reshape(E_, H); bias = np.asarray(T[b + "exp_probs_b.bias"].data, np.float32)
@@ -678,6 +663,7 @@
 -        wr_t, wsg_t = ty(wr_raw), (ty(wsg_raw) if SHG else "")
 +        print(f"moe test layer {li}: ids", ids.tolist(), "min score gap k/k+1", float(np.min(np.sort(sel, -1)[:, ::-1][:, KU - 1] - np.sort(sel, -1)[:, ::-1][:, KU])))
          gt, dt_ = ty(raw(b + "ffn_gate_exps.weight")), ty(raw(b + "ffn_down_exps.weight"))
+-        ut = ty(raw(b + "ffn_up_exps.weight"))
 -        def common(t, sfx):
 -            return f"""  %t = check.literal value({t}) : index
 +        cases.append(f"""check.case public @moe_chain_{li} {{
@@ -695,7 +681,8 @@
 +  %eids = check.file.read.npy path("{tag}_ids.npy") : tensor<{t}x{KU}xi32>
 +  %ewts = check.file.read.npy path("{tag}_wts.npy") : tensor<{t}x{KU}xf32>
    %wg = check.file.read.npy path("{tag}_wg.npy") : {gt}
-   %wu = check.file.read.npy path("{tag}_wu.npy") : {gt}
+-  %wu = check.file.read.npy path("{tag}_wu.npy") : {ut}
++  %wu = check.file.read.npy path("{tag}_wu.npy") : {gt}
    %wd = check.file.read.npy path("{tag}_wd.npy") : {dt_}
 -  %ey = check.file.read.npy path("{tag}{sfx}_y.npy") : tensor<{t}x{H}xf32>
 -  %y = check.file.read.npy path("{tag}{sfx}_y0.npy") : tensor<{t}x{H}xf32>
@@ -731,9 +718,10 @@
 -  kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids_l, %wts_l, %info_l) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
 -  check.expect.equal actual(%ids_l) expected(%eids_l) : tensor<{t}x{KU}xi32>
 -  check.expect.close actual(%wts_l) expected(%ewts_l) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
+-  kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {ut}, tensor<{t * KU}x{FE}xf32>)
 +  %y = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
 +  kernel.launch @g_moe_route[%t](%t, %h, %wr, %b, %ids, %wts) : [index](index, tensor<{t}x{H}xf32>, tensor<{E_ * H}xf32>, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>)
-   kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {gt}, tensor<{t * KU}x{FE}xf32>)
++  kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {gt}, tensor<{t * KU}x{FE}xf32>)
    kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wd, %ys) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t * KU}x{FE}xf32>, {dt_}, tensor<{t * KU}x{H}xf32>)
 -  kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {SGA}%y) : [index](index, tensor<{t * KU}x{H}xf32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
 +  kernel.launch @g_moe_combine[%t](%t, %ys, %wts, %y) : [index](index, tensor<{t * KU}x{H}xf32>, tensor<{t}x{KU}xf32>, tensor<{t}x{H}xf32>)
@@ -766,7 +754,7 @@
 -  kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x2xf32>, tensor<{t}x{H}xf16>)
 -  kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids, %wts, %info) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
 -  kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, tensor<{t}x4xi32>, tensor<{t}x{KU}xi32>, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{ta}xi32>)
--  kernel.launch @g_moe_ggu_{fg}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wg, %wu, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {gt}, tensor<{mr}x{FE}xf32>)
+-  kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wg, %wu, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {ut}, tensor<{mr}x{FE}xf32>)
 -  kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, tensor<{mr}x{FE}xf32>, tensor<{mr}x2xf32>, tensor<{mr}x{FE}xf16>, tensor<{mt}x2xi32>)
 -  kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wd, %ys_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE}xf16>, tensor<{mr}x2xf32>, {dt_}, tensor<{mr}x{H}xf32>)
 -  kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {SGA}%y) : [index](index, index, tensor<{mr}x{H}xf32>, tensor<{ta}xi32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)

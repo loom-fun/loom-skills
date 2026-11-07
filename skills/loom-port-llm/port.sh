@@ -217,7 +217,8 @@ print("image:", "OK" if ok else "FAIL", repr(r.get("content") or r.get("reasonin
 sys.exit(0 if ok else 1)
 EOF
 fi
-"$T" - "$work/pkg" "http://127.0.0.1:$port" "$here/../loom-benchmark/scripts/card" <<'EOF' || exit 6
+smoke() {
+"$T" - "$work/pkg" "http://127.0.0.1:$port" "$here/../loom-benchmark/scripts/card" <<'EOF'
 import json, sys, requests
 pkg, url = sys.argv[1], sys.argv[2]
 sys.path.insert(0, sys.argv[3]); import card_lib   # tool_calling(): the test gates.sh and the card use
@@ -228,6 +229,16 @@ ok = True
 r = post({"messages": [{"role": "user", "content": "What is the capital of France? Answer in one word."}], "max_tokens": 600, "temperature": 0})
 m = r["choices"][0]["message"]; good = "paris" in ((m.get("content") or "") + (m.get("reasoning_content") or "")).lower()
 print("chat:", "OK" if good else "FAIL", repr((m.get("content") or "")[:80])); ok &= good
+# A template that renders reasoning in history reads as thinking "always" (chat_probe), but some such models never
+# reason (Qwen3-*-Instruct-2507): their replies end inside the reasoning channel, never emitting think_close. Two
+# finished replies with no content say so (exit 7: port.sh rebuilds with thinking never, chat_probe.thinking_never).
+if chat.get("thinking") == "always":
+    r2 = post({"messages": [{"role": "user", "content": "Name the three primary colors."}], "max_tokens": 600, "temperature": 0})
+    inside = [x["finish_reason"] == "stop" and not (x["message"].get("content") or "").strip()
+              and (x["message"].get("reasoning_content") or "").strip() for x in (r["choices"][0], r2["choices"][0])]
+    if all(inside):
+        print("thinking: both replies ended inside the reasoning channel (no think_close): the model does not think")
+        sys.exit(7)
 if card_lib.tool_calling(chat):
     tools = [{"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city.",
               "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]
@@ -242,6 +253,17 @@ n = requests.post(url + "/v1/chat/completions/input_tokens", json={"model": mode
 print("input_tokens:", n)
 sys.exit(0 if ok else 1)
 EOF
+}
+smoke; rc=$?
+if [ $rc = 7 ]; then   # the model never thinks: thinking never (verified against the template), rebuild, serve, smoke again
+  "$T" -I "$K/chat_probe.py" "$gguf" --never cfg.json > chat_never.log 2>&1 || { echo "STOP: the thinking-never block does not verify (chat_never.log)"; exit 6; }
+  echo "rebuilding with thinking never ($(grep -c '^OK' chat_never.log) probes OK)"
+  "$T" "$K/build.py" cfg.json pkg --tokenizer tok/tokenizer.json --model-id "$model_id" --memory-gib "$mem_gib" > build.log 2>&1 || { echo "STOP: build.py failed (build.log)"; exit 4; }
+  "$S/stop.sh" port >/dev/null 2>&1
+  VENV=$venv "$S/serve.sh" port "$port" amdgpu "$mem" pkg/model.json || exit 4
+  smoke; rc=$?
+fi
+[ $rc = 0 ] || exit 6
 # Speculative decoding must not change a single token: the same package with drafting off is the reference
 # (loom-benchmark/scripts/spec_check.py). One model is loaded at a time.
 draft=$("$T" -c "import json; print(json.load(open('pkg/llm_config.json')).get('draft') or {})" 2>/dev/null)
