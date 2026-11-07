@@ -93,7 +93,7 @@
      print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
            "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
            "before trusting a golden FAIL or PASS")
-@@ -208,6 +208,12 @@
+@@ -230,6 +230,12 @@
  elif _attn and _qkv[_attn[0]]:
      cfg["attn_bias"] = list(_qkv[_attn[0]])
      print(f"attention biases: {cfg['attn_bias']} (added by g_qk_rope_store)")
@@ -106,7 +106,7 @@
  # MoE FFN (gen_moe.py) after the leading dense layers: router (f32/bf16), top-k, optional selection bias, shared
  # experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
  # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
-@@ -271,6 +277,13 @@
+@@ -293,6 +299,13 @@
              print("WARNING: the derived chat block does not reproduce the template (FAIL above); fix it by hand")
      except (chat_probe.ProbeError, ValueError, KeyError) as e:
          print("WARNING: chat template not derivable automatically:", e)
@@ -122,7 +122,7 @@
  unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -141,6 +141,34 @@
+@@ -144,6 +144,34 @@
    check.return
  }}
  """)
@@ -157,7 +157,7 @@
  # 2. matvec per (tensor) for t=1 and t=4 variants
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
-@@ -475,9 +503,14 @@
+@@ -478,9 +506,14 @@
  # the paged KV cache holds F16 K and V: with large biases (k up to |130|) their rounding moves the output past atol
  kr, vs = (a.astype(np.float16).astype(np.float32) for a in (kr, v + bv))
  att = np.zeros((t, QH, D))
@@ -173,7 +173,7 @@
  gh = rng.standard_normal((t, QH)).astype(np.float32)   # per-head gate logits (attn_gate "per_head")
  if gate_kind == "per_head":
      gate = np.repeat(gh[:, :, None], D, 2)
-@@ -488,7 +521,7 @@
+@@ -491,7 +524,7 @@
  info = np.zeros((t, 4), np.int32); info[:, 1] = pos; info[:, 2] = 1
  S = 64
  for n, a in [("a_q", q.reshape(t, -1)), ("a_k", k.reshape(t, -1)), ("a_v", v.reshape(t, -1)), ("a_g", gate.reshape(t, -1)),
@@ -182,7 +182,7 @@
      save(n, a)
  QD = QH * D
  split_text = ""
-@@ -521,17 +554,115 @@
+@@ -524,17 +557,115 @@
    %info = check.file.read.npy path("a_info.npy") : tensor<{t}x4xi32>
    %orig = check.file.read.npy path("a_orig.npy") : tensor<{10 + blocks}xi32>
    %eo = check.file.read.npy path("a_o.npy") : tensor<{t}x{QD}xf32>

@@ -278,7 +278,7 @@
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -213,33 +213,29 @@
+@@ -235,33 +235,29 @@
  # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
  MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
                  "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False}}
@@ -333,7 +333,7 @@
      i = tpl.rfind("add_generation_prompt")
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -145,9 +145,9 @@
+@@ -148,9 +148,9 @@
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
  for li in range(cfg["layers"]):
@@ -345,7 +345,7 @@
          name = f"blk.{li}.{nm_}.weight"
          if name not in T:
              continue
-@@ -350,7 +350,7 @@
+@@ -353,7 +353,7 @@
  """)
  # 3. qk norm + rope on q (live = 0: no KV store)
  t = 4; pos = np.array([0, 1, 7, 300])
@@ -354,7 +354,7 @@
  RD = cfg.get("rope_dims") or D
  qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
  kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
-@@ -1037,186 +1037,106 @@
+@@ -1040,186 +1040,106 @@
      if ow is not None:
          cases.append(cases[-1].replace("@flash_prefill {", "@flash_prefill_window {").replace("%sliding = check.literal value(0)", "%sliding = check.literal value(1)")
                       .replace('path("f_o.npy")', 'path("f_ow.npy")'))

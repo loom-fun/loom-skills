@@ -245,6 +245,25 @@ CHAT_ONLY = {"tools_prefix": "", "tools_suffix": "", "tool_line_prefix": "", "to
              "tool_item_suffix": "", "tool_turn_suffix": ""}
 
 
+def system_in_user(T, chat, r, gap, bos, kw0):
+    """Templates with no system turn that print the first system message inside the first user turn, before its
+    text (Gemma 3: '<start_of_turn>user\\n' + system + '\\n\\n' + user text): chat["system_in_user"] is the separator
+    after the system text, chat["system_in_user_trim"] whether that text is trimmed like other content. Returns the
+    plain conversation's rendering (no system message, BOS cut), from which derive() reads the other prefixes."""
+    plain = T.render([{"role": "user", "content": "USERPROBE1"}, {"role": "assistant", "content": "ASSTPROBE1"},
+                      {"role": "user", "content": "USERPROBE2"}], **kw0)
+    plain = plain[len(bos):] if bos and plain.startswith(bos) else plain
+    user_prefix = plain[:plain.index("USERPROBE1")]
+    if not gap or r != user_prefix + "SYSPROBE" + gap + plain[len(user_prefix):]:
+        raise ProbeError(f"system message is not closed by the user suffix {chat['suffix']!r}: {gap!r}")
+    spaced = T.render([{"role": "system", "content": " SYSPROBE \n"}, {"role": "user", "content": "USERPROBE1"}], **kw0)
+    chat["user_prefix"], chat["system_in_user"] = user_prefix, gap
+    chat["system_in_user_trim"] = " SYSPROBE \n" + gap not in spaced
+    # a later system message (no system turn to model it on): rendered as a turn of that role
+    chat["system_prefix"] = user_prefix.replace("user", "system", 1)
+    return plain
+
+
 def derive(template_text, bos="", eos=""):
     T = Template(template_text, bos, eos)
     notes = []
@@ -268,8 +287,9 @@ def derive(template_text, bos="", eos=""):
     chat["suffix"] = single[single.index("USERPROBE1") + len("USERPROBE1"):]
     gap = between(r, "SYSPROBE", "USERPROBE1")
     if not gap.startswith(chat["suffix"]):
-        raise ProbeError(f"system message is not closed by the user suffix {chat['suffix']!r}: {gap!r}")
-    chat["user_prefix"] = gap[len(chat["suffix"]):]
+        r = system_in_user(T, chat, r, gap, bos, kw0)   # raises when it is not that shape either
+    else:
+        chat["user_prefix"] = gap[len(chat["suffix"]):]
     gap = between(r, "USERPROBE1", "ASSTPROBE1")
     chat["assistant_prefix"] = gap[len(chat["suffix"]):]
     head = single[:single.index("USERPROBE1")]
@@ -312,7 +332,11 @@ def derive(template_text, bos="", eos=""):
     # Reasoning in history (agent loop: assistant after the last user query, followed by a tool result).
     agent = lambda m: T.render([{"role": "user", "content": "USERPROBE1"}, m,
                                 {"role": "tool", "tool_call_id": "call_0", "content": "TOOLPROBE1"}], tools=TOOLS)
-    with_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"))
+    try:
+        with_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"))
+    except ProbeError:   # a template that refuses tool turns (Gemma 3: roles must alternate): the assistant turn alone
+        agent = lambda m: T.render([{"role": "user", "content": "USERPROBE1"}, m], tools=TOOLS)
+        with_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"))
     without_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning=""))
     # Templates that keep reasoning in every assistant turn (preserve_thinking: Qwen3.6, Qwen3.8) render
     # an empty think block in the plain turn above, which then is not part of the assistant prefix.
@@ -600,6 +624,9 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
     out = chat.get("bos", "")
     first_system = messages and messages[0]["role"] == "system" and isinstance(messages[0]["content"], str)
     sys_text = trim(messages[0]["content"]) if first_system else ""
+    folded = first_system and bool(chat.get("system_in_user"))   # printed at the start of the first user turn
+    if folded:
+        sys_text = (trim if chat.get("system_in_user_trim") else (lambda s: s))(messages[0]["content"])
     use_default = not first_system and chat["default_system"]
     body = chat["default_system"] if use_default else sys_text
     # Thinking: the default, then enable_thinking, then reasoning_effort ("none" turns it off).
@@ -642,8 +669,10 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
         role, text = m["role"], trim(m.get("content") or "")
         if prior == "tool" and role != "tool":
             out += chat["tool_turn_suffix"]
-        if role == "system" and i == 0 and (tools or instr or preamble or system_lead) and first_system:
+        if role == "system" and i == 0 and (tools or instr or preamble or system_lead or folded) and first_system:
             pass
+        elif folded and i == 1:
+            out += chat["user_prefix"] + sys_text + chat["system_in_user"] + text + chat["suffix"]
         elif in_user:   # the first message after the system block takes the tools, whatever its role (as the template)
             out += chat["user_prefix"] + tb + text + chat["suffix"]
             in_user = False

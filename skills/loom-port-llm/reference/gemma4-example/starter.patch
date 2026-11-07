@@ -1,6 +1,6 @@
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -247,6 +247,8 @@
+@@ -266,6 +266,8 @@
  
  def derive(template_text, bos="", eos=""):
      T = Template(template_text, bos, eos)
@@ -9,7 +9,7 @@
      notes = []
      chat = {}
      # BOS: emitted by the control program at the very start when the template prints it.
-@@ -467,10 +469,6 @@
+@@ -491,10 +493,6 @@
              rest = s_body[len("SYSPROBE"):]
              lead = rest[:rest.index(printed[0]) - len(line)]
              body_start = len(lead) - len(lead.lstrip())
@@ -20,7 +20,7 @@
              chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
          elif s_body.endswith("SYSPROBE"):
              chat["tools_after_system"] = False
-@@ -595,6 +593,8 @@
+@@ -619,6 +617,8 @@
  
  def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reasoning_effort=None):
      """Python model of control.loom's rendering (chat_begin + chat_message + chat_end)."""
@@ -29,7 +29,7 @@
      tools = None if chat.get("call_format") == "none" else tools   # a chat-only block ignores tools, as its template does
      trim = (lambda s: s.strip()) if chat["trim_content"] else (lambda s: s)
      out = chat.get("bos", "")
-@@ -683,6 +683,8 @@
+@@ -712,6 +712,8 @@
  
  
  def render_call(chat, call):
@@ -38,7 +38,7 @@
      args = call["arguments"]
      if chat["call_format"] == "hermes":
          a = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
-@@ -772,6 +774,306 @@
+@@ -801,6 +803,306 @@
  ]
  
  
@@ -345,7 +345,7 @@
  def verify(template_text, chat, bos="", eos=""):
      """Returns [(name, ok, detail)]: template render vs simulate() for each conversation."""
      T = Template(template_text, bos, eos)
-@@ -784,7 +1086,7 @@
+@@ -813,7 +1115,7 @@
          if chat["call_format"] == "json" else []
      if chat.get("tools_format") == "xml":
          extra.append(("typed tool declarations", [{"role": "user", "content": "Edit it"}], TYPED_TOOLS))
@@ -354,7 +354,7 @@
          for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
              label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")
              try:
-@@ -887,3 +1189,21 @@
+@@ -916,3 +1218,21 @@
  
  if __name__ == "__main__":
      main()
@@ -1185,16 +1185,7 @@
  # 1. embed
  ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
  # M-RoPE (cfg "mrope"): the rope kernel also reads the epoch metadata (one span, offset 0: rotary position =
-@@ -67,7 +69,7 @@
- VARGS = ", %meta, %tinfo" if VIS else ""
- VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
- E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
--x = E[ids]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
-+x = E[ids] * (cfg.get("embed_scale") or 1.0); h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
- tab = raw("token_embd.weight")
- for n, a in [("e_ids", ids), ("e_tab", tab), ("e_w", w.astype(np.float32)), ("e_x", x.astype(np.float32)), ("e_h", h.astype(np.float32))]: save(n, a)
- cases.append(f"""check.case public @embed {{
-@@ -145,14 +147,17 @@
+@@ -148,14 +150,17 @@
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
  for li in range(cfg["layers"]):
@@ -1215,7 +1206,7 @@
  for name, K in todo:
      fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
      for tg in (1, 4):
-@@ -307,104 +312,49 @@
+@@ -310,104 +315,49 @@
    check.return
  }}
  """)
@@ -1363,7 +1354,7 @@
  # 3a. output head (argmax over the vocabulary) for one selected span of 3 tokens
  t = 3
  head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
-@@ -465,70 +415,89 @@
+@@ -468,70 +418,89 @@
  """ + hl("g_head_mv_q8", "1") + "".join(hl(k, tag) for k, tag in variants) + "".join(
              f"  check.expect.close actual(%l{tag}) expected(%l1) atol(0.0) rtol(0.0) nan(different) : tensor<{S * CH * 128}xf32>\n"
              f"  check.expect.equal actual(%p{tag}) expected(%p1) : tensor<{S * CH * 2}xi32>\n" for _, tag in variants) + "  check.return\n}\n")
