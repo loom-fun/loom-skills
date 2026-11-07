@@ -223,6 +223,15 @@ def main():
                         r2 = post(a.url, dict(model=P.model_id, messages=msgs, tools=TOOLS, max_tokens=a.max_tokens, temperature=0, **extra))
                         print("     DEBUG same request again: cached", r2.get("usage", {}).get("prompt_tokens_details"),
                               repr(str(r2["choices"][0]["message"].get("content"))[:60]), flush=True)
+                        # TEMPORARY debug: llama.cpp on the same ids when it reuses its cache for the first
+                        # rec["cached"] tokens (an incremental prefill, like Loom's reused turn), and with ubatch-sized steps
+                        import bench_common as _bc
+                        for cut in (rec["cached"], len(ids) - 1, len(ids) // 2):
+                            _bc.llama_completion(a.llama, dict(_bc.GREEDY, prompt=ids[:cut], n_predict=1, cache_prompt=True), P, f"dbg{cut}")
+                            rr = _bc.llama_completion(a.llama, dict(_bc.GREEDY, prompt=ids, n_predict=4, n_probs=5, cache_prompt=True), P, f"dbg{cut}")
+                            cp_ = rr.get("completion_probabilities", [])
+                            print("     DEBUG llama after a cached prefix of", cut, "tokens:", repr(rr.get("content", "")[:30]),
+                                  [(t.get("token"), round(t["logprob"], 2)) for t in (cp_[0]["top_logprobs"] if cp_ else [])], flush=True)
                 # Output the parser dropped (a second call where the template takes one): the reply generated
                 # more tokens than its parsed channels hold, the golden agrees with all of those, and the golden's
                 # continuation past them opens another call. Only then is the next turn's reuse not required.
