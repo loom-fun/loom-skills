@@ -154,6 +154,7 @@ def main():
                 except ValueError:
                     calls_ok = False
             rec["calls_ok"] = calls_ok
+            raw = None   # the rebuilt output, completed from the golden where the reply can't tell (below)
             if a.llama:
                 raw = P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
                 loom_ids = P.ids(raw)
@@ -222,7 +223,9 @@ def main():
             turns.append(rec)
             prev_total = u["prompt_tokens"] + u["completion_tokens"]
             prev_verified = rec.get("golden_match") is True
-            prev_text = prompt + P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
+            # The history this turn leaves: its output as the golden comparison settled it (e.g. the model's own
+            # whitespace between calls, which the template may re-render), else the plain rebuild.
+            prev_text = prompt + (raw if raw is not None else P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt))
             # loom-serve rejects "reasoning_content": null, so only send it when present.
             msgs.append({"role": "assistant", "content": m.get("content") or "",
                          **({"reasoning_content": m["reasoning_content"]} if m.get("reasoning_content") else {}),
