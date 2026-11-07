@@ -213,7 +213,11 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
         return {"_suspect": "deferred: answered by llama_fill.py, then the gate re-runs", "_pending": True,
                 "content": "", "completion_probabilities": []}
     ensure_llama(url)
+    mb = body.get("_micro_batch")   # llama_views: the prompt in micro-batches of at most mb tokens
     for attempt in range(2):
+        if mb:
+            r, ok = _micro_batched(url, {k: v for k, v in body.items() if k != "_micro_batch"}, mb, timeout), True
+            break
         r = requests.post(url + "/completion", json=body, timeout=timeout).json()
         # llama.cpp must have evaluated the whole prompt: fewer tokens means it answered from some
         # cached state (seen: an old build answering the previous prompt). Retry once, never cache it.
@@ -233,34 +237,97 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
     return r
 
 
+def _micro_batched(url, req, mb, timeout):
+    """Answer /completion `req` with its prompt evaluated in micro-batches of at most mb tokens, each request
+    extending the slot's cache (the first starts afresh). A server that rolls back to a context checkpoint
+    before extending (SWA layers) re-evaluates a fixed few tokens more per request, so the step shrinks by
+    that and the prompt starts over; when no step of 2 or more keeps every batch within mb (recurrent state: the
+    whole prefix each time; at most len/2 requests), the answer is an empty view."""
+    p, step = req["prompt"], mb
+    while step >= 2:
+        m = 0
+        while m < len(p):
+            m2 = min(m + step if m else mb, len(p))
+            last = {} if m2 == len(p) else {"n_probs": 0}
+            r = requests.post(url + "/completion", json=dict(req, prompt=p[:m2], cache_prompt=m > 0, **last), timeout=timeout).json()
+            e = (r.get("timings") or {}).get("prompt_n", 0)
+            if e > mb:
+                break
+            m = m2
+        else:
+            return r
+        step -= e - mb
+    return {"completion_probabilities": [], "note": f"no micro-batch view: llama.cpp re-evaluates more than {mb} tokens per request"}
+
+
 # Every llama.cpp reference is greedy with the samplers forced off: some GGUFs set penalty_repeat
 # (LFM2.5: 1.05), which llama.cpp applies even at temperature 0, while Loom decodes greedily.
 GREEDY = {"temperature": 0, "cache_prompt": False, "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}
 
 
-def llama_greedy(url, ids, n_predict, pkg, salt="", n_probs=5):
+def llama_greedy(url, ids, n_predict, pkg, salt="", n_probs=5, **extra):
     """Greedy llama.cpp continuation of prompt ids -> (response, generated ids, aligned top lists).
     completion_probabilities omits byte-fallback tokens (emoji, partial UTF-8), so the ids come from
-    `tokens` and the top-n lists are trusted only while they line up with them."""
-    r = llama_completion(url, dict(GREEDY, prompt=ids, n_predict=n_predict, n_probs=n_probs, return_tokens=True), pkg, salt)
+    `tokens` and the top-n lists are trusted only while they line up with them. `extra`: more request fields."""
+    r = llama_completion(url, dict(GREEDY, prompt=ids, n_predict=n_predict, n_probs=n_probs, return_tokens=True, **extra), pkg, salt)
     cp = r.get("completion_probabilities", [])
     gen = r.get("tokens") or [x["id"] for x in cp]
     k = next((i for i, x in enumerate(cp) if i >= len(gen) or x["id"] != gen[i]), len(cp))
     return r, gen, cp[:k]
 
 
-def near_tie(top, gold_id, loom_id, max_gap=1.0):
+def llama_views(url, ids, pkg):
+    """llama.cpp's own top-10 log-probs for the token after `ids` under two numerics it uses itself: `ids` in one
+    batch (its prefill kernels: MMQ matmuls) and in micro-batches of 8 through the slot's cache (its decode
+    kernels: MMVQ, another q8_1 dot-product formula and summation order). A view llama.cpp could not compute
+    (pending under LLAMA_DEFER, or no cache reuse: recurrent state) is left out."""
+    views = []
+    for extra in ({}, {"_micro_batch": 8, "id_slot": 0}):
+        _, _, cp = llama_greedy(url, list(ids), 1, pkg, n_probs=10, **extra)
+        if cp:
+            views.append(top_logprobs(cp, 0))
+    return views
+
+
+NOISE_CAP = 0.5   # nats: the most llama.cpp's own spread may widen the bar
+
+
+def exact_gaps(tops, gold_id, loom_id):
+    """logp(gold) - logp(loom) in each of llama.cpp's views of one position that lists both tokens."""
+    return [v[gold_id] - v[loom_id] for v in tops if gold_id in v and loom_id in v]
+
+
+def gap_noise(tops, gold_id, loom_id):
+    """llama.cpp's own noise at one position: how far the exact gap moves across its views, capped at NOISE_CAP."""
+    exact = exact_gaps(tops, gold_id, loom_id)
+    return min(max(exact) - min(exact), NOISE_CAP) if exact else 0.0
+
+
+def near_tie(top, gold_id, loom_id, max_gap=1.0, views=()):
     """Is Loom's token at a divergence a near-tie of llama.cpp's greedy token? top: {id: logprob} from
-    llama.cpp at that position. Yes when the log-prob gap is <= max_gap, or when llama.cpp itself is
-    unsure there: Loom picked its second choice and its first has probability < 0.5 (flint: p 0.38 vs
-    0.13, gap 1.03, while llama.cpp's own re-recording of the same prompt sat at gap 1.05). A token
-    llama.cpp is confident against, or ranks lower, is a bug."""
-    if gold_id not in top or loom_id not in top:
+    llama.cpp at that position. Yes when the log-prob gap is <= max_gap, or when llama.cpp itself is unsure
+    there: Loom picked its second choice and its first has probability < 0.5 (flint: p 0.38 vs 0.13, gap
+    1.03, while llama.cpp's own re-recording of the same prompt sat at gap 1.05). A token llama.cpp is
+    confident against, or ranks lower, is a bug.
+    With `views` (llama_views: llama.cpp's own other numerics there): yes when the smallest gap among top and
+    the views is <= max_gap plus their spread (max - min), capped at NOISE_CAP. Only views listing both
+    tokens count: one without Loom's token never widens the bar. One without gold that lists Loom's token is
+    llama.cpp itself ranking Loom's token higher, which passes (gemma-4-26B: `_` at p 1.0 token by token,
+    unlisted batched, where `/` is top-1)."""
+    if gold_id not in top:
         return False
-    if top[gold_id] - top[loom_id] <= max_gap:
+    tops = (top, *views)
+    exact = exact_gaps(tops, gold_id, loom_id)
+    if any(loom_id in v and gold_id not in v for v in tops) or exact and min(exact) <= max_gap + gap_noise(tops, gold_id, loom_id):
         return True
     ranked = sorted(top, key=top.get, reverse=True)
     return ranked[:2] == [gold_id, loom_id] and math.exp(top[gold_id]) < 0.5
+
+
+def near_tie_at(url, ids, top, gold_id, loom_id, pkg, max_gap=1.0):
+    """near_tie for the token after `ids` (the prompt + llama.cpp's own tokens before the divergence); when the
+    plain rule rejects it and a llama.cpp URL is given, judged again with llama.cpp's own views there (llama_views)."""
+    return near_tie(top, gold_id, loom_id, max_gap) or bool(url) and near_tie(top, gold_id, loom_id, max_gap, llama_views(url, ids, pkg))
 
 
 def text_divergence(tok, loom_ids, gids):

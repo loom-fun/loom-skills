@@ -12,6 +12,8 @@
 #                 {"name": "x", "build": {"ENV": "value", ...},       (rebuild: build.py with these env vars;
 #                  "build_args": ["--draft-depth", "3"],                 build_args are extra build.py flags)
 #                  "execution": {"draft_depth": 0},                    (model.json preset overrides)
+#                  "config": {"rope_theta": 10000},                     (generator config overrides for a rebuild:
+#                                                                         an injected bug the gates must catch)
 #                  "steps": [...]}]}
 # Steps: consistency:N   consistency.py N times (counts runs that are not deterministic / not consistent)
 #        consistency:N:llama  the same with --pkg/--llama (the card's llama.cpp build): the gate's own verdict
@@ -62,10 +64,10 @@ if [ ! -f "$card/.fetched" ]; then
 fi
 
 # build.py's / make_kernel_tests.py's config: the card's llm_config.json with its GGUFs pointed at the fetched files, plus the tensor table
-"$T" - "$card" "$D/cfg.json" <<'EOF' || exit 1
+"$T" - "$card" "$D/cfg.json" "$(q "print(json.dumps(v.get('config') or {}))")" <<'EOF' || exit 1
 import json, os, sys
 import gguf
-card, dst = sys.argv[1:]
+card, dst, over = sys.argv[1:]
 c = json.load(open(os.path.join(card, "llm_config.json")))
 par = lambda f: os.path.join(card, "parameter", os.path.basename(f))
 c["gguf"] = par(c["gguf"])
@@ -79,6 +81,7 @@ r = gguf.GGUFReader(c["gguf"])
 c["tensors"] = {t.name: {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]} for t in r.tensors}
 for k in ("model_id", "draft"):
     c.pop(k, None)
+c.update(json.loads(over))
 json.dump(c, open(dst, "w"), indent=1)
 EOF
 

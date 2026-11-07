@@ -20,7 +20,7 @@ import sys
 
 import requests
 
-from bench_common import Package, llama_greedy, near_tie, text_divergence, top_logprobs
+from bench_common import Package, llama_greedy, near_tie_at, text_divergence, top_logprobs
 
 TOOLS = [
     {"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city.",
@@ -56,10 +56,11 @@ def post(url, body, path="/v1/chat/completions"):
     return requests.post(url + path, data=data, timeout=1800, headers={"Content-Type": "application/json"}).json()
 
 
-def near_at(ids, tops, loom_id, k):
+def near_at(ids, tops, loom_id, k, llama=None, prompt=(), pkg=None):
     """The compare rule (bench_common.near_tie) at divergence k (Loom's token there: loom_id); past the
-    aligned top-5 lists (a byte-split token) it counts as a near-tie, as in compare.py."""
-    return k >= len(tops) or near_tie(top_logprobs(tops, k), ids[k], loom_id)
+    aligned top-5 lists (a byte-split token) it counts as a near-tie, as in compare.py. With llama and the
+    turn's prompt ids, with llama.cpp's own rounding noise there (bench_common.near_tie_at)."""
+    return k >= len(tops) or near_tie_at(llama, list(prompt) + ids[:k], top_logprobs(tops, k), ids[k], loom_id, pkg)
 
 
 def gap_at(ids, tops, loom_id, k):
@@ -263,7 +264,7 @@ def main():
                             top = {t["id"]: t["logprob"] for t in gtops[k]["top_logprobs"]} if k < len(gtops) else {}
                     if k is None:
                         rec["golden_match"] = True
-                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=k is None or near_at(gids, gtops, loom_id, k))
+                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=k is None or near_at(gids, gtops, loom_id, k, a.llama, ids, P))
                     if not rec["near_tie"]:
                         agreed = P.tok.decode(gids[max(0, k - 8):k], skip_special_tokens=False)
                         print("     at the divergence: loom", repr(agreed + loom_rest[:24]),
