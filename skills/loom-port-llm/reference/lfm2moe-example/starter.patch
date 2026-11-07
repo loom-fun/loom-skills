@@ -272,7 +272,7 @@
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -117,38 +117,23 @@
+@@ -160,38 +160,23 @@
  if _nextn and L != BLOCKS:
      cfg["mtp"] = {"layers": _nextn}
      print(f"MTP: {len(_nextn)} NextN block(s) {_nextn} after the {L}-layer trunk: speculative decoding (MTP) is available")
@@ -324,7 +324,7 @@
  def generation_block(tpl):
      """Text the template emits for add_generation_prompt (what decides thinking mode)."""
      i = tpl.rfind("add_generation_prompt")
-@@ -179,7 +164,7 @@
+@@ -222,7 +207,7 @@
  unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
  if unsupported:
      print("WARNING: no kernels for", unsupported, "- add dequant helpers (see reference/porting-notes.md)")
