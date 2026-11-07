@@ -805,6 +805,44 @@ kernel.def export("g_moe_bucket") @g_moe_bucket(%tokens: index) {{
 """
 
 
+def wscale(E, KU):
+    """g_moe_wscale: wts[t, k] *= scale[ids[t, k]], a per-expert output scale (llama.cpp build_moe_ffn down_exps_s,
+    ffn_down_exps.scale) folded into the combine weights."""
+    return f"""
+kernel.def export("g_moe_wscale") @g_moe_wscale(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
+}} launch(%tokens_arg: index, %ids: buffer, %wts: buffer, %scale: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %ku = index.constant {KU} : index
+  %on = index.cmp ult, %lane_id, %ku : index
+  scf.if %on {{
+    %k = index.assume %lane_id [range(%lane_id, 0, {KU - 1})] : index
+    %zero = index.constant 0 : offset
+    %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]x{KU}xi32>
+    %wts_view = buffer.view %wts[%zero] : buffer -> view<[%tokens]x{KU}xf32>
+    %s_view = buffer.view %scale[%zero] : buffer -> view<{E}xf32>
+    %e32 = view.load %ids_view[%token, %k] : view<[%tokens]x{KU}xi32> -> i32
+    %c0_i32 = scalar.constant 0 : i32
+    %cE1 = scalar.constant {E - 1} : i32
+    %elo = scalar.maxsi %e32, %c0_i32 : i32
+    %ehi = scalar.minsi %elo, %cE1 : i32
+    %eb = scalar.assume %ehi [range(%ehi, 0, {E - 1})] : i32
+    %e = index.cast %eb : i32 to index
+    %s = view.load %s_view[%e] : view<{E}xf32> -> f32
+    %w = view.load %wts_view[%token, %k] : view<[%tokens]x{KU}xf32> -> f32
+    %ws = scalar.mulf %w, %s : f32
+    view.store %ws, %wts_view[%token, %k] : f32, view<[%tokens]x{KU}xf32>
+  }}
+  kernel.return
+}}
+"""
+
+
 def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False):
     """64x64-tile WMMA GEMM over the bucketed rows of one expert per row tile (rows = max_tiles*64).
     mode 'swiglu' (gate/up): A rows gathered from x16[token = rowmap/KU]; 'store' (down): A = sorted rows.

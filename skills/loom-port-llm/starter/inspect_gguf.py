@@ -212,8 +212,6 @@ if A("expert_count"):
     if any(k.endswith("ffn_gate_up_exps.weight") for k in tensors):
         # one tensor per layer: each expert's gate rows, then its up rows (llama.cpp build_moe_ffn gate_up_exps)
         cfg["moe"]["gate_up_fused"] = True
-        if arch != "gemma4":   # gen_moe.py takes it (fused=True); only the gemma4 example's gen_llm.py wires it so far
-            print("WARNING: fused ffn_gate_up_exps tensors: the starter's gen_llm.py wires separate ffn_gate_exps / ffn_up_exps")
     if any(k.endswith("ffn_down_exps.scale") for k in tensors):   # per-expert output scale (build_moe_ffn down_exps_s)
         cfg["moe"]["down_scale"] = True
     if cfg["ffn"] is None:   # no dense FFN layer: the FFN buffers hold the shared experts (or one expert row)

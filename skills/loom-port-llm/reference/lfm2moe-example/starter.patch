@@ -21,7 +21,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -3779,6 +3784,55 @@
+@@ -3791,6 +3796,55 @@
  
  
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
@@ -77,7 +77,7 @@
  
  
  def rope_bias(block, tag, ind="  "):
-@@ -3862,7 +3916,8 @@
+@@ -3874,7 +3928,8 @@
    %pml_size = index.scale %t, %pml_bytes : index, offset -> offset
    %pacc = buffer.alloca<global> align(256) %pacc_size : buffer
    %pml = buffer.alloca<global> align(256) %pml_size : buffer
@@ -87,7 +87,7 @@
    %single = index.cmp eq, %t, %c1 : index
    %big = index.cmp uge, %t, %c128 : index
    %scale_entry = index.constant 8 : offset
-@@ -3900,8 +3955,51 @@
+@@ -3912,8 +3967,51 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -140,7 +140,7 @@
    %list_entry = index.constant 4 : offset
    %list_size = index.scale %t, %list_entry : index, offset -> offset
    %count_size = index.constant 256 : offset
-@@ -3913,10 +4011,11 @@
+@@ -3925,10 +4023,11 @@
    %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
    %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
@@ -154,7 +154,7 @@
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
      def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
          """Text of trunk layer i (tensors blk.i.*). ordinal overrides its attention KV-plane ordinal and
-@@ -3927,47 +4026,51 @@
+@@ -3939,47 +4038,51 @@
          par = lambda var, n, ty=None: f'    %{var}_{i} = command.parameter %weights, "{nm(n)}" : {ty or f"view<{sz(n)}xi8>"}\n'
          kind = kind_note or (" (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else ""))
          T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
@@ -218,7 +218,7 @@
    scf.if %gemm {{
  {"" if NO_FLASH else f"    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)" + chr(10)}    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
      kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
-@@ -3979,13 +4082,13 @@
+@@ -3991,13 +4094,13 @@
      kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
    }}
  """)
@@ -234,7 +234,7 @@
          else:
            fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
            if fg == fu:
-@@ -4155,11 +4258,28 @@
+@@ -4167,11 +4270,28 @@
          parts.append(spec_kernels)
      if MIXED_FFN:
          parts.append(SILU_MUL)
@@ -266,7 +266,7 @@
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -195,40 +195,24 @@
+@@ -195,38 +195,24 @@
  # experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
  # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
  MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
@@ -299,8 +299,6 @@
 -    if any(k.endswith("ffn_gate_up_exps.weight") for k in tensors):
 -        # one tensor per layer: each expert's gate rows, then its up rows (llama.cpp build_moe_ffn gate_up_exps)
 -        cfg["moe"]["gate_up_fused"] = True
--        if arch != "gemma4":   # gen_moe.py takes it (fused=True); only the gemma4 example's gen_llm.py wires it so far
--            print("WARNING: fused ffn_gate_up_exps tensors: the starter's gen_llm.py wires separate ffn_gate_exps / ffn_up_exps")
 -    if any(k.endswith("ffn_down_exps.scale") for k in tensors):   # per-expert output scale (build_moe_ffn down_exps_s)
 -        cfg["moe"]["down_scale"] = True
 -    if cfg["ffn"] is None:   # no dense FFN layer: the FFN buffers hold the shared experts (or one expert row)
