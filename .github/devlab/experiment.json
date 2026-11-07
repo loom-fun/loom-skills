@@ -1,14 +1,13 @@
 {
- "_comment": "Issue #39 verification: path-aware consistency.py (gate verdict with llama.cpp) 20x on Bolt with drafting, Bolt quick gates, kernel tests on the rebuilt Bolt package, and another card's consistency.",
+ "_comment": "Validation of #77 (agent gate: reuse required where loom-serve can give it), not for merge: gates LEVEL=dev with the published programs of the gemma4 card (thinking-on reuse failure), the qwen_xml card with the separator bug (#72 not applied: must still fail) and a passing qwen_xml card.",
  "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
  "memory_bytes": 34000000000,
  "kit": "gemma4",
  "llamacpp": "b1368",
+ "steps": ["gates:dev"],
  "variants": [
-  {"name": "card", "steps": ["consistency:20:llama", "determinism:1:12", "gates:quick"]},
-  {"name": "rebuilt-ktest", "build": {}, "steps": ["ktest", "consistency:20:llama"]},
-  {"name": "nodraft", "build": {"SPEC": "off"}, "steps": ["consistency:20:llama"]},
-  {"name": "qwen3.8-27b", "card": "loom-fun/bartowski-Qwen3.8-27B-loom", "memory_bytes": 52000000000, "kit": null,
-   "llamacpp": "b1355", "steps": ["consistency:10:llama", "determinism:1:6"]}
+  {"name": "gemma4-card"},
+  {"name": "xml-card-unfixed", "card": "loom-fun/bartowski-Ornith-1.5-9B-loom", "memory_bytes": 30000000000, "kit": null, "llamacpp": "b1369"},
+  {"name": "xml2-card", "card": "loom-fun/unsloth-Qwen3.5-9B-loom", "memory_bytes": 30000000000, "kit": null, "llamacpp": "b1369"}
  ]
 }
