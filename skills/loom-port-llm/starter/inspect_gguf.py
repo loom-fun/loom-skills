@@ -171,12 +171,22 @@ if arch == "gemma4":
         # generation ends at <eos>, at the turn close, and where a tool result would follow a call
         "extra_eos_ids": [tokens.index(s) for s in ("<eos>", "<turn|>", "<|tool_response>") if s in tokens],
     })
-    # What the example's kernels assume: one KV-head count for every layer, and a V projection on every KV-owning layer.
-    no_v = [i for i in range(min(L, cfg["kv_shared_from"] or L)) if f"blk.{i}.attn_v.weight" not in tensors]
-    if isinstance(kv, list) and len(set(kv)) > 1 or no_v:
-        print(f"WARNING: unsupported layout: per-layer KV heads {sorted(set(kv)) if isinstance(kv, list) else kv}"
-              f"{f', no attn_v (V = K) on layers {no_v[:4]}...' if no_v else ''}: gemma4-example's attention assumes "
-              "one KV-head count and an attn_v on every KV-owning layer; extend gen_llm.py (agent port)")
+    # KV heads per layer kind (gemma4-example's attention): one count for the sliding layers (kv_heads) and one for the
+    # global layers (kv_heads_global, only when it differs: 12B/26B/31B give them fewer). A KV-owning layer without
+    # attn_v (the same models' global layers) uses V = K, the raw K projection (llama.cpp gemma4.cpp: Vcur = Kcur).
+    _kvl = kv if isinstance(kv, list) else [kv] * L
+    _kinds = [sorted({_kvl[i] for i in range(L) if (i in cfg["global_layers"]) == g}) for g in (False, True)]
+    _v_is_k = [i for i in range(min(L, cfg["kv_shared_from"] or L)) if f"blk.{i}.attn_v.weight" not in tensors]
+    if any(len(s) > 1 for s in _kinds):
+        print(f"WARNING: unsupported layout: per-layer KV heads {_kvl} vary within a layer kind (sliding {_kinds[0]}, "
+              f"global {_kinds[1]}): gemma4-example's attention takes one KV-head count per kind; extend gen_llm.py (agent port)")
+    else:
+        cfg["kv_heads"] = (_kinds[0] or _kinds[1])[0]
+        if _kinds[1] and _kinds[1][0] != cfg["kv_heads"]:
+            cfg["kv_heads_global"] = _kinds[1][0]
+        if cfg.get("kv_heads_global") or _v_is_k:
+            print(f"gemma4 attention: {cfg['kv_heads']} KV heads on sliding layers, {cfg.get('kv_heads_global', cfg['kv_heads'])}"
+                  f" on global layers{f'; V = K (no attn_v) on layers {_v_is_k}' if _v_is_k else ''}")
 # Sliding layers with their own RoPE at the same head_dim (spark2_5: freq_base_swa 1e4 + full rotary dims on the sliding
 # layers, 5e6 + 64 of 256 dims on the global ones; llama.cpp defaults each to the global value when the key is absent).
 if arch != "gemma4" and cfg["sliding_layers"] and (A("rope.freq_base_swa") or A("rope.dimension_count_swa")):
@@ -257,7 +267,8 @@ elif _attn and _qkv[_attn[0]]:
 # experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
 # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
 MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
-                "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False}}
+                "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False},
+                "gemma4": {"gating": 1, "norm_weights": True}}
 if A("expert_count"):
     d = MOE_DEFAULTS.get(arch, {})
     cfg["moe"] = {"experts": A("expert_count"), "used": A("expert_used_count"), "ffn": A("expert_feed_forward_length"),
@@ -271,12 +282,15 @@ if A("expert_count"):
         if any(k.endswith("ffn_gate_inp_shexp.weight") for k in tensors):
             cfg["moe"]["shared_gate"] = True
     if any(k.endswith("ffn_gate_up_exps.weight") for k in tensors):
-        print("WARNING: fused ffn_gate_up_exps tensors: the MoE kernels expect separate ffn_gate_exps / ffn_up_exps")
+        # one tensor per layer: each expert's gate rows, then its up rows (llama.cpp build_moe_ffn gate_up_exps)
+        cfg["moe"]["gate_up_fused"] = True
+    if any(k.endswith("ffn_down_exps.scale") for k in tensors):   # per-expert output scale (build_moe_ffn down_exps_s)
+        cfg["moe"]["down_scale"] = True
     if cfg["ffn"] is None:   # no dense FFN layer: the FFN buffers hold the shared experts (or one expert row)
         cfg["ffn"] = cfg["moe"].get("shared_ffn") or cfg["moe"]["ffn"]
     print("moe:", cfg["moe"])
     import gen_moe   # the expert kernels' formats (gen_moe.FMT)
-    exps = lambda layers: {tensors[f"blk.{i}.ffn_{p}_exps.weight"]["type"] for i in layers for p in ("gate", "up", "down")
+    exps = lambda layers: {tensors[f"blk.{i}.ffn_{p}_exps.weight"]["type"] for i in layers for p in ("gate", "up", "gate_up", "down")
                            if f"blk.{i}.ffn_{p}_exps.weight" in tensors}
     bad = exps(range(cfg["moe"]["leading_dense"], L)) - set(gen_moe.FMT)
     if bad:

@@ -73,14 +73,6 @@ ph port
   tail -4 "$out/port.log"
   [ $rc = 0 ] || { echo "port.sh exit $rc"; exit $rc; }
   gguf=$(ls "$W"/gguf/*.gguf | head -1)
-  if [ -n "${AGENT_PROBE:-}" ]; then   # TEMPORARY debug: the LEVEL=dev gates only (agent think-off probe), then stop
-    mkdir -p "$W/bench"; cd "$W/bench"
-    newest=$("$B/fetch_llamacpp.sh" "$LLAMACPP_HOME" | tail -1)
-    "$B/pick_llamacpp.sh" "$gguf" $((lport + 9)) "$SEARCH_ROOT${newest:+:$newest}" > "$out/pick.log" 2>&1
-    export LLAMACPP_DIR=$("$T" -c "import json;r=json.load(open('llamacpp_pick.json'))['ranked'];print(r[0]['dir'] if r else '')")
-    LEVEL=dev "$B/gates.sh" "$W/pkg" "$url" "$gguf" "$W/bench" "$lport" > "$out/gates_dev.log" 2>&1 9>&-
-    cp "$W"/bench/gates_*.log "$W"/bench/gates.json "$out/" 2>/dev/null; exit 0
-  fi
   echo "$(date +%s) qualify" >> "$D/phases.log"
   "$B/qualify.sh" "$W/pkg" "$url" "$gguf" "$W/bench" "$lport" > "$out/qualify.log" 2>&1 9>&-; echo "qualify exit $?"
   grep "^QUALIFY_RESULT" "$out/qualify.log" | cut -c1-600

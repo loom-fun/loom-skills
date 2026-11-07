@@ -60,7 +60,6 @@ HEAD_GATE = GATE == "per_head"
 # Attention layers project q | k | v with one fused attn_qkv tensor (spark2_5); g_split_qkv splits the rows.
 QKV_FUSED = bool(CFG.get("attn_qkv", False))
 GELU = CFG.get("ffn_act") == "gelu"      # GEGLU FFN (gelu-tanh, llama.cpp LLM_FFN_GELU) instead of SwiGLU
-assert not (GELU and CFG.get("moe")), "GEGLU with a MoE FFN: gen_moe.py's expert kernels are SwiGLU only"
 RECUR = set(CFG.get("recurrent_layers", []))  # gated delta-net layers (hybrid models)
 GDN = gdn_geometry(CFG) if RECUR else None
 FFN_NORM = CFG.get("ffn_norm_tensor", "ffn_norm")
@@ -3469,18 +3468,7 @@ MOE_R = int(os.environ.get("MOE_R", "8"))
 
 def moe_layer(i, b, nm, sz, par):
     """Shared experts (dense swiglu FFN of width FS, stored into y; with SHGATE scaled per token by
-    sigmoid(h . ffn_gate_inp_shexp) inside the combine), then the routed experts:
-    router -> per-assignment gate/up (swiglu) and down -> weighted combine added into y."""
-    E, KU, FE = MOE["experts"], MOE["used"], MOE["ffn"]
-    fg, fu, fd = fmt_of(b + "ffn_gate_exps.weight"), fmt_of(b + "ffn_up_exps.weight"), fmt_of(b + "ffn_down_exps.weight")
-    sg, sd = tensor_bytes(b + "ffn_gate_exps.weight"), tensor_bytes(b + "ffn_down_exps.weight")
-    su = tensor_bytes(b + "ffn_up_exps.weight")
-    # Gate and up in different formats (MiniCPM-V-4.7's Q4_K_M: Q4_K gate, Q6_K up): kernels "GATE+UP" (gen_moe.py)
-    gu = fg if fg == fu else f"{fg}+{fu}"
-    gun = gu.replace("+", "_")
-    USED_MOE.add((gu, H, FE, "gu")); USED_MOE.add((fd, FE, H, "dn"))
-    R = MOE_R
-    rty = TENS[b + "ffn_gate_inp.weight"]["type"]
+    sigmoid(h . ffn_gate_inp_shexp) inside the combine), then the routed experts (moe_routed) added into y."""
     T = []
     if FS:
         T += [par("w_gsh", "ffn_gate_shexp"), par("w_ush", "ffn_up_shexp"), par("w_dsh", "ffn_down_shexp")]
@@ -3488,36 +3476,58 @@ def moe_layer(i, b, nm, sz, par):
         T.append("  " + lin(fsg, "%h", "%s_h", (f"%w_gsh_{i}", f"%w_ush_{i}"), sz("ffn_gate_shexp"), "%f", "%nH", "%nFS", H, mode="swiglu") + "\n")
         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nFS, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
         T.append("  " + lin(fmt_of(nm("ffn_down_shexp")), "%f", "%s_f", f"%w_dsh_{i}", sz("ffn_down_shexp"), "%y", "%nFS", "%nH", FS) + "\n")
-    sgarg = ""
     if SHGATE:
         sty = TENS[b + "ffn_gate_inp_shexp.weight"]["type"]
         T.append(f"""  %wsg_{i} = command.parameter %weights, "{b}ffn_gate_inp_shexp.weight" : view<{H}x{sty}>
   kernel.launch @g_moe_shared_gate_{sty}[%t](%t, %h, %wsg_{i}, %sg) : [index](index, buffer, view<{H}x{sty}>, buffer)
 """)
-        sgarg = "%sg, "
-    sgty = "buffer, " if SHGATE else ""
+    return "".join(T) + moe_routed(i, b)
+
+
+def moe_routed(i, b, x="%h", rx="%h", out="%y"):
+    """Layer i's routed experts on input buffer X (prefill: its f16 copy %h16/%s_h, made here when X is not %h), the
+    router reading RX: router -> per-assignment gate/up (swiglu) and down -> weighted combine into OUT (added to it
+    when the layer has shared experts, scaled by the shared gate with SHGATE). cfg.moe gate_up_fused: one
+    ffn_gate_up_exps tensor (each expert's gate rows, then its up rows); down_scale: ffn_down_exps.scale, a
+    per-expert output scale folded into the combine weights (g_moe_wscale)."""
+    E, KU, FE = MOE["experts"], MOE["used"], MOE["ffn"]
+    fused = MOE.get("gate_up_fused")
+    gn, un = (b + "ffn_gate_up_exps.weight",) * 2 if fused else (b + "ffn_gate_exps.weight", b + "ffn_up_exps.weight")
+    fg, fu, fd = fmt_of(gn), fmt_of(un), fmt_of(b + "ffn_down_exps.weight")
+    sg, su, sd = tensor_bytes(gn), tensor_bytes(un), tensor_bytes(b + "ffn_down_exps.weight")
+    # Gate and up in different formats (MiniCPM-V-4.7's Q4_K_M: Q4_K gate, Q6_K up): kernels "GATE+UP" (gen_moe.py)
+    gu = fg if fg == fu else f"{fg}+{fu}"
+    gun = gu.replace("+", "_") + ("_fused" if fused else "")
+    USED_MOE.add((gu, H, FE, "gu")); USED_MOE.add((fd, FE, H, "dn"))
+    R = MOE_R
+    rty = TENS[b + "ffn_gate_inp.weight"]["type"]
+    sgarg, sgty = ("%sg, ", "buffer, ") if SHGATE else ("", "")
     bias = f"%ebias_{i}" if MOE["probs_bias"] else "%wts"
     bias_ty = f"view<{E}xf32>" if MOE["probs_bias"] else "buffer"
-    T.append(f"""  %router_{i} = command.parameter %weights, "{b}ffn_gate_inp.weight" : view<{E * H}x{rty}>
+    wu = f"%wge_{i}" if fused else f"%wue_{i}"
+    wsc = (f"    kernel.launch @g_moe_wscale[%t](%t, %ids, %wts, %dsc_{i}) : [index](index, buffer, buffer, view<{E}xf32>)\n"
+           if MOE.get("down_scale") else "")
+    x16 = "" if x == "%h" else f"    kernel.launch @g_row_scale_f16[%t](%t, %nH, {x}, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n"
+    return f"""  %router_{i} = command.parameter %weights, "{b}ffn_gate_inp.weight" : view<{E * H}x{rty}>
 """ + (f"""  %ebias_{i} = command.parameter %weights, "{b}exp_probs_b.bias" : view<{E}xf32>
-""" if MOE["probs_bias"] else "") + f"""  %wge_{i} = command.parameter %weights, "{b}ffn_gate_exps.weight" : view<{sg}xi8>
-  %wue_{i} = command.parameter %weights, "{b}ffn_up_exps.weight" : view<{su}xi8>
-  %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
+""" if MOE["probs_bias"] else "") + (f"""  %dsc_{i} = command.parameter %weights, "{b}ffn_down_exps.scale" : view<{E}xf32>
+""" if MOE.get("down_scale") else "") + f"""  %wge_{i} = command.parameter %weights, "{gn}" : view<{sg}xi8>
+""" + ("" if fused else f"""  %wue_{i} = command.parameter %weights, "{un}" : view<{su}xi8>
+""") + f"""  %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
   scf.if %gemm {{
-    kernel.launch @g_moe_route_tr_live[%t](%t, %h, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
-    kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
-    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, %wue_{i}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>, buffer)
+    kernel.launch @g_moe_route_tr_live[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
+{wsc}    kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
+{x16}    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, {wu}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>, buffer)
     kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
     kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>, buffer)
-    kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}%y) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
+    kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}{out}) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
   }} else {{
-    kernel.launch @g_moe_route[%t](%t, %h, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
-    kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wge_{i}, %wue_{i}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>, buffer)
+    kernel.launch @g_moe_route[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
+{wsc}    kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, {x}, %wge_{i}, {wu}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>, buffer)
     kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wde_{i}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>, buffer)
-    kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {sgarg}%y) : [index](index, buffer, buffer, {sgty}buffer)
+    kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {sgarg}{out}) : [index](index, buffer, buffer, {sgty}buffer)
   }}
-""")
-    return "".join(T)
+"""
 
 
 def moe_alloc():
@@ -3573,16 +3583,20 @@ def moe_kernels(row_scale, gemm_fn):
     a = (H, MOE["experts"], MOE["used"], MOE["gating"], MOE["norm_weights"], MOE["probs_bias"], rty)
     parts = [GM.route(*a, scale=MOE.get("scale", 1.0)), GM.route_prefill_live(*a, scale=MOE.get("scale", 1.0)), GM.row_scale_tiles(row_scale)]
     for fmt, K, N, mode in sorted(USED_MOE):
-        parts.append(GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode))
+        mv = GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode, fused=bool(MOE.get("gate_up_fused")) and mode == "gu")
+        # GEGLU experts: the expert matvec's scalar silu, the grouped GEMM's vector silu, as gelu-tanh
+        parts.append(mv.replace("    %silu = scalar.siluf<afn> %t0 : f32\n", gelu_scalar("silu", "t0", "    ") + "\n") if GELU else mv)
     comb, comb_s = GM.combine(H, MOE["used"], acc=bool(FS)), GM.combine_sorted(H, MOE["used"], acc=bool(FS))
     if SHGATE:
         comb, comb_s = GM.shared_gated(comb), GM.shared_gated(comb_s)
         for sty in sorted({t["type"] for n, t in TENS.items() if n.endswith("ffn_gate_inp_shexp.weight")}):
             parts.append(GM.shared_gate(H, sty).replace("@g_moe_shared_gate(", f"@g_moe_shared_gate_{sty}(")
                          .replace('export("g_moe_shared_gate")', f'export("g_moe_shared_gate_{sty}")'))
-    parts += [comb, GM.bucket(MOE["experts"], MOE["used"]), comb_s]
+    parts += [comb, GM.bucket(MOE["experts"], MOE["used"]), comb_s] + ([GM.wscale(MOE["experts"], MOE["used"])] if MOE.get("down_scale") else [])
     for fmt, K, N, mode in sorted(USED_MOE):
-        parts.append(GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn))
+        gg = GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn,
+                             fused=bool(MOE.get("gate_up_fused")) and mode == "gu")
+        parts.append(gelu_vectors(gg) if GELU else gg)
     return "".join(parts)
 
 
