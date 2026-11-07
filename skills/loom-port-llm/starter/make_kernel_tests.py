@@ -3,8 +3,8 @@
 usage: python make_kernel_tests.py CONFIG.json OUTDIR      (tools venv: gguf, numpy)
        run_kernel_tests.sh PACKAGE OUTDIR                  (loom-test on the GPU)
 Covers g_embed, the decode matvecs (1- and 4-token variants; with ACT_Q8, the default, g_quant_q8 + the
-int8-activation 1-/4-/8-/16-token variants for Q8_0/Q4_K/Q5_K/Q6_K) for one tensor of each (format, K), the QK-norm + RoPE kernel (incl. head_dim 256 / partial
-RoPE), and for hybrid models the whole gated delta-net chain on a span that
+int8-activation 1-/4-/8-/16-token variants for formats.ICODES) for one tensor of each (format, K), the QK-norm + RoPE kernel (incl. head_dim 256 / partial
+RoPE, q/k/v biases), and for hybrid models the whole gated delta-net chain on a span that
 continues a stored recurrent state (conv, history commit, q/k norms,
 recurrence, gated norm, published state). Extend it
 when you add a kernel: a kernel that passes here but breaks end-to-end is
@@ -16,8 +16,9 @@ from gguf import GGUFReader
 from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mv_rows import pick_r, iq_r  # noqa: E402
+from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402  formats with no 256-row (_m256) GEMM
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
-IQ_FMTS = {"q8_0", "q4_k", "q5_k", "q6_k"}
+from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
 
 
 def q8_ref(xs):
@@ -257,7 +258,17 @@ def rope(a):
     if cfg["rope_type"] == "neox":
         a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
     a1, a2 = a[..., 0::2], a[..., 1::2]; o = np.empty_like(a); o[..., 0::2] = a1 * c - a2 * s; o[..., 1::2] = a2 * c + a1 * s; return o
-qe = rope(norm(q, qn) if cfg["qk_norm"] else q)
+# attention projection biases (cfg "attn_bias", qwen2): g_qk_rope_store adds them to q/k/v before the norm and RoPE
+BIAS = cfg.get("attn_bias") or []
+BW = {"q": QH * D, "k": KVH * D, "v": KVH * D}
+bq, bk, bv = (deq(f"blk.{A0}.attn_{p}.bias").astype(np.float32).reshape(-1, D) if p in BIAS else np.zeros((BW[p] // D, D), np.float32)
+              for p in "qkv")
+for p, b_ in zip("qkv", (bq, bk, bv)):
+    if p in BIAS: save(f"b_{p}", b_.reshape(-1))
+B_DECL = "".join(f'  %b{p} = check.file.read.npy path("b_{p}.npy") : tensor<{BW[p]}xf32>\n' for p in BIAS)
+B_ARGS = "".join(f", %b{p}" for p in BIAS)
+B_TYPES = "".join(f", tensor<{BW[p]}xf32>" for p in BIAS)
+qe = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq)
 info = np.zeros((t, 4), np.int32); info[:, 1] = pos
 for n, a in [("r_q", q.reshape(t, -1)), ("r_k", k.reshape(t, -1)), ("r_v", v.reshape(t, -1)), ("r_qn", qn.astype(np.float32)), ("r_kn", kn.astype(np.float32)), ("r_qe", qe.reshape(t, -1).astype(np.float32)), ("r_info", info), ("r_orig", np.zeros(64, np.int32))]: save(n, a)
 cases.append(f"""check.case public @qk_rope {{
@@ -275,7 +286,7 @@ cases.append(f"""check.case public @qk_rope {{
   %orig = check.file.read.npy path("r_orig.npy") : tensor<64xi32>
   %qe = check.file.read.npy path("r_qe.npy") : tensor<{t}x{QH * D}xf32>
   %arena = check.generate.fill value(0.0) : tensor<1024xf16>
-{mr_decl(t)}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena{MR_ARGS}) : [index](index, index, i32, index, index, tensor<{t}x{QH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<64xi32>, tensor<1024xf16>{mr_types(t)})
+{B_DECL}{mr_decl(t)}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena{MR_ARGS}{B_ARGS}) : [index](index, index, i32, index, index, tensor<{t}x{QH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<64xi32>, tensor<1024xf16>{mr_types(t)}{B_TYPES})
   check.expect.close actual(%q) expected(%qe) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{t}x{QH * D}xf32>
   check.return
 }}
@@ -346,11 +357,13 @@ pos = np.arange(t)
 gate_kind = cfg.get("attn_gate", False)
 q = rng.standard_normal((t, QH, D)).astype(np.float32); k = rng.standard_normal((t, KVH, D)).astype(np.float32)
 v = rng.standard_normal((t, KVH, D)).astype(np.float32); gate = rng.standard_normal((t, QH, D)).astype(np.float32)
-qr = rope(norm(q, qn) if cfg["qk_norm"] else q); kr = rope(norm(k, kn) if cfg["qk_norm"] else k)
+qr = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq); kr = rope(norm(k + bk, kn) if cfg["qk_norm"] else k + bk)
+# the paged KV cache holds F16 K and V: with large biases (k up to |130|) their rounding moves the output past atol
+kr, vs = (a.astype(np.float16).astype(np.float32) for a in (kr, v + bv))
 att = np.zeros((t, QH, D))
 for hh in range(QH):
     kv = hh // (QH // KVH); sc = qr[:, hh] @ kr[:, kv].T / np.sqrt(D); sc[np.triu_indices(t, 1)] = -1e30
-    pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); att[:, hh] = pr @ v[:, kv]
+    pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); att[:, hh] = pr @ vs[:, kv]
 if gate_kind:
     att = att / (1 + np.exp(-gate))
 blocks = (ctx + 15) // 16
@@ -386,7 +399,7 @@ cases.append(f"""check.case public @attention_chain {{
   %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
   %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
   %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
-{split_text}{mr_decl(t)}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena{MR_ARGS}) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>{mr_types(t)})
+{split_text}{B_DECL}{mr_decl(t)}  kernel.launch @g_qk_rope_store[%t](%t, %layer, %rope, %ctx, %pool, %q, %k, %v, %qn, %kn, %info, %orig, %arena{MR_ARGS}{B_ARGS}) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{t}x{KVH * D}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>{mr_types(t)}{B_TYPES})
   kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
   kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {"%g" if gate_kind else "%q"}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>)
   check.expect.close actual(%o) expected(%eo) atol(3.0e-3) rtol(3.0e-3) nan(different) : tensor<{t}x{QD}xf32>
@@ -609,7 +622,7 @@ def gemm_cases():
             fmt = T[name].tensor_type.name.lower()
             up = f"blk.{li}.ffn_up.weight"
             sw = nm_ == "ffn_gate" and up in T and T[up].tensor_type == T[name].tensor_type
-            if fmt not in ("q4_k", "q5_k", "q6_k", "q8_0") or (fmt, sw) in seen_g:
+            if fmt not in IQ_FMTS or (fmt, sw) in seen_g:   # the formats with GEMM kernel tests (formats.ICODES)
                 continue
             seen_g.add((fmt, sw))
             yield name, fmt, sw
@@ -622,7 +635,7 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
         if swiglu:
             up = name.replace("ffn_gate", "ffn_up"); U = deq(up)[:n_use].astype(np.float64); Ur = raw(up).reshape(n, -1)[:n_use].reshape(-1)
         base_k = f"g_gemm_{fmt}_{'swiglu' if swiglu else 'store'}"
-        for rows, kern in ((128, base_k), (256, base_k + "_m128"), (512, base_k + "_m256")):
+        for rows, kern in ((128, base_k), (256, base_k + "_m128")) + (() if fmt in GEMM_HELPER else ((512, base_k + "_m256"),)):
             x16 = rng.standard_normal((rows, K)).astype(np.float16)
             inv = rng.uniform(0.25, 2.0, rows).astype(np.float32)
             sc = np.stack([np.ones(rows, np.float32), inv], 1)

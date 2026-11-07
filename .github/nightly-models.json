@@ -197,6 +197,46 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+   "slug": "qwen2.5-0.5b-instruct",
+   "memory_bytes": 5000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "draft"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
+   "slug": "qwen2.5-1.5b-instruct",
+   "memory_bytes": 8000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "draft"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Qwen2.5-7B-Instruct-loom",
+   "slug": "qwen2.5-7b-instruct",
+   "memory_bytes": 14000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "draft"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
+   "slug": "qwen2.5-32b-instruct",
+   "memory_bytes": 49000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "draft"
+   ]
   }
  ]
 }

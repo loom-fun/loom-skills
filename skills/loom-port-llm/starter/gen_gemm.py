@@ -21,6 +21,7 @@ FMT = {
     "q6_k": dict(block_bytes=210, block_values=256),
     # dequantized through gen_llm.py's @g_<fmt>_values helpers (quant_values.loom)
     "q4_0": dict(block_bytes=18, block_values=32),
+    "q5_0": dict(block_bytes=22, block_values=32),
     "iq4_nl": dict(block_bytes=18, block_values=32),
     "iq4_xs": dict(block_bytes=136, block_values=256),
     "q3_k": dict(block_bytes=110, block_values=256),
@@ -32,7 +33,7 @@ FMT = {
     # directly, rounded to F16 for the MMA
     "f32": dict(block_bytes=128, block_values=32),
 }
-HELPER = {"q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16"}
+HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16"}
 
 def dequant16(fmt, w, view_name, out):
     """Loom snippet: dequantize 16 consecutive weights of row %w_row at column %w_col into F16 vector %{out}."""
