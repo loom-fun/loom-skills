@@ -45,17 +45,8 @@ def gtt_bytes():
             break
         except (OSError, ValueError):
             pass
-    try:
-        ram = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-        gtt = min(gtt, int(0.6 * ram))
-    except (ValueError, OSError, AttributeError):
-        pass
-    # LOOM_RESERVED_GIB: memory another resident server already holds (weaver's agent model).
-    try:
-        reserved = float(os.environ.get("LOOM_RESERVED_GIB") or 0)
-    except ValueError:
-        sys.exit(f"LOOM_RESERVED_GIB={os.environ['LOOM_RESERVED_GIB']!r} is not a number (GiB)")
-    return gtt - int(reserved * 2**30)
+    cap, _, reserved = formats.memory_cap()   # build.py's cap: 60 % of RAM or LOOM_MEMORY_CAP_GIB, minus reserved
+    return int(gtt - reserved if cap is None else min(gtt - reserved, cap))
 
 
 def quant_of(name):

@@ -4078,8 +4078,9 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
     if not QK_NORM:
         L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
-    L_.append(f"""
-{moe_alloc() if MOE else ""}  kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
+    if MOE:   # its own part: the MTP drafter programs reuse the prologue (all parts but the last), MoE layer included
+        L_.append("\n" + moe_alloc())
+    L_.append(f"""{"" if MOE else chr(10)}  kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
   %list_entry = index.constant 4 : offset
   %list_size = index.scale %t, %list_entry : index, offset -> offset
   %count_size = index.constant 256 : offset
