@@ -186,9 +186,10 @@ print("image:", "OK" if ok else "FAIL", repr(r.get("content") or r.get("reasonin
 sys.exit(0 if ok else 1)
 EOF
 fi
-"$T" - "$work/pkg" "http://127.0.0.1:$port" <<'EOF' || exit 6
+"$T" - "$work/pkg" "http://127.0.0.1:$port" "$here/../loom-benchmark/scripts/card" <<'EOF' || exit 6
 import json, sys, requests
 pkg, url = sys.argv[1], sys.argv[2]
+sys.path.insert(0, sys.argv[3]); import card_lib   # tool_calling(): the test gates.sh and the card use
 cfg = json.load(open(pkg + "/llm_config.json")); model = cfg["model_id"]; chat = cfg["chat"]
 off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
 post = lambda body: requests.post(url + "/v1/chat/completions", json={"model": model, **body}, timeout=600).json()
@@ -196,13 +197,16 @@ ok = True
 r = post({"messages": [{"role": "user", "content": "What is the capital of France? Answer in one word."}], "max_tokens": 600, "temperature": 0})
 m = r["choices"][0]["message"]; good = "paris" in ((m.get("content") or "") + (m.get("reasoning_content") or "")).lower()
 print("chat:", "OK" if good else "FAIL", repr((m.get("content") or "")[:80])); ok &= good
-tools = [{"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city.",
-          "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]
-r = post({"messages": [{"role": "user", "content": "What's the weather in Paris right now? Use the tool."}], "tools": tools,
-          "max_tokens": 600, "temperature": 0, **off})
-calls = r["choices"][0]["message"].get("tool_calls") or []
-good = bool(calls) and calls[0]["function"]["name"] == "get_weather" and "paris" in calls[0]["function"]["arguments"].lower()
-print("tool call:", "OK" if good else "FAIL", json.dumps(calls)[:200]); ok &= good
+if card_lib.tool_calling(chat):
+    tools = [{"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city.",
+              "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]
+    r = post({"messages": [{"role": "user", "content": "What's the weather in Paris right now? Use the tool."}], "tools": tools,
+              "max_tokens": 600, "temperature": 0, **off})
+    calls = r["choices"][0]["message"].get("tool_calls") or []
+    good = bool(calls) and calls[0]["function"]["name"] == "get_weather" and "paris" in calls[0]["function"]["arguments"].lower()
+    print("tool call:", "OK" if good else "FAIL", json.dumps(calls)[:200]); ok &= good
+else:
+    print("tool call: skipped (chat-only block: the template ignores tools)")
 n = requests.post(url + "/v1/chat/completions/input_tokens", json={"model": model, "messages": [{"role": "user", "content": "hi"}]}).json()
 print("input_tokens:", n)
 sys.exit(0 if ok else 1)
