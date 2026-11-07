@@ -1,5 +1,5 @@
 {
- "_comment": "Near-tie bar with llama.cpp's own noise: a published card rebuilt as is and with injected bugs; the compare gate must still FAIL on each bug.",
+ "_comment": "Near-tie bar with llama.cpp's own noise: published cards as is, and one rebuilt with injected bugs; the compare gate must still FAIL on each bug.",
  "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
  "memory_bytes": 5000000000,
  "kit": null,
@@ -7,7 +7,9 @@
  "variants": [
   {"name": "q05-rebuilt", "build": {}, "steps": ["gates:fast"]},
   {"name": "q05-bug-rope-base", "build": {}, "config": {"rope_theta": 10000.0}, "steps": ["gates:fast"]},
+  {"name": "q05-bug-rope-base-half", "build": {}, "config": {"rope_theta": 500000.0}, "steps": ["gates:fast"]},
   {"name": "q05-bug-no-v-bias", "build": {}, "config": {"attn_bias": ["q", "k"]}, "steps": ["gates:fast"]},
-  {"name": "q05-bug-rms-eps", "build": {}, "config": {"rms_eps": 1e-05}, "steps": ["gates:fast"]}
+  {"name": "q05-bug-no-q-bias", "build": {}, "config": {"attn_bias": ["k", "v"]}, "steps": ["gates:fast"]},
+  {"name": "e4b-card", "card": "loom-fun/unsloth-gemma-4-E4B-it-loom", "memory_bytes": 31000000000, "kit": "gemma4", "steps": ["gates:fast"]}
  ]
 }
