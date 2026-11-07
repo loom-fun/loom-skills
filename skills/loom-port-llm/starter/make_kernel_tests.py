@@ -473,9 +473,12 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
     S = 64; S16 = 16
     gt = f"tensor<{QH}xf32>" if cfg.get("attn_sinks") else OT
     gv = "%sinks" if cfg.get("attn_sinks") else "%sq"
+    # projection biases (if the model has them) are zero here: g_qk_rope_store's bias add is checked by @qk_rope
+    ZB_DECL = "".join(f"  %zb{p} = check.generate.fill value(0.0) : tensor<{BW[p]}xf32>\n" for p in BIAS)
+    ZB_ARGS = "".join(f", %zb{p}" for p in BIAS)
     def st(tt, pre):
-        return (f"  kernel.launch @g_qk_rope_store[%{pre}t](%{pre}t, %layer, %rope, %ctx, %pool, %{pre}q, %{pre}k, %{pre}v, %qn, %kn, %{pre}info, %orig, %arena) : "
-                f"[index](index, index, i32, index, index, tensor<{tt}x{QD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{tt}x4xi32>, tensor<{10 + blocks}xi32>, {AR})\n")
+        return (f"  kernel.launch @g_qk_rope_store[%{pre}t](%{pre}t, %layer, %rope, %ctx, %pool, %{pre}q, %{pre}k, %{pre}v, %qn, %kn, %{pre}info, %orig, %arena{ZB_ARGS}) : "
+                f"[index](index, index, i32, index, index, tensor<{tt}x{QD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{tt}x4xi32>, tensor<{10 + blocks}xi32>, {AR}{B_TYPES})\n")
     cases.append(f"""check.case public @{tag} {{
   %ht = check.literal value({p0}) : index
   %st = check.literal value({t}) : index
@@ -503,7 +506,7 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
   %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
   %o_pre = check.generate.fill value(0.0) : {OT}
   %o_dec = check.generate.fill value(0.0) : {OT}
-{st(p0, "h")}{st(t, "s")}  kernel.launch @g_attention_flash2[%st](%st, %layer, %sliding, %ctx, %pool, %sq, {gv}, %sinfo, %orig, %arena, %o_pre) : [index](index, index, i32, index, index, {OT}, {gt}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, {OT})
+{ZB_DECL}{st(p0, "h")}{st(t, "s")}  kernel.launch @g_attention_flash2[%st](%st, %layer, %sliding, %ctx, %pool, %sq, {gv}, %sinfo, %orig, %arena, %o_pre) : [index](index, index, i32, index, index, {OT}, {gt}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, {OT})
   kernel.launch @g_attention_split[%st](%st, %layer, %sliding, %ctx, %pool, %sq, %sinfo, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, {OT}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
   kernel.launch @g_attention_combine[%st](%st, %sliding, %sinfo, %pacc, %pml, {gv}, %o_dec) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, {gt}, {OT})
   check.expect.close actual(%o_dec) expected(%eo) atol(1.5e-3) rtol(3.0e-3) nan(different) : {OT}
