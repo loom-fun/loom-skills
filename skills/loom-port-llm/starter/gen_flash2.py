@@ -195,8 +195,8 @@ else:
       %vh = vector.load %v_cache[%kv, %st_dim] : view<{KVH}x{D}xf16> -> vector<{DPT}xf16>"""
 M_INIT, L_INIT = ("%sink", "%one_init") if CFG["sinks"] else ("%neg_big", "%zero_f")
 if CFG["sinks"]:
-    A('''  %sinks_view = buffer.view %sinks[%origin] : buffer -> view<32xf32>
-  %sink = view.load %sinks_view[%head] : view<32xf32> -> f32
+    A(f'''  %sinks_view = buffer.view %sinks[%origin] : buffer -> view<{QH}xf32>
+  %sink = view.load %sinks_view[%head] : view<{QH}xf32> -> f32
   %one_init = scalar.constant 1.0 : f32''')
 LMAX = "\n".join(["    %lmax_c0 = scalar.addf %lmax0, %zero_f : f32"] + [f"    %lmax_c{kb} = scalar.maxnumf %lmax_c{kb - 1}, %lmax{kb} : f32" for kb in range(1, KB)] + [f"    %lmax = scalar.addf %lmax_c{KB - 1}, %zero_f : f32"])
 LSUM = "\n".join(["    %lsum_c0 = scalar.addf %ls0, %zero_f : f32"] + [f"    %lsum_c{kb} = scalar.addf %lsum_c{kb - 1}, %ls{kb} : f32" for kb in range(1, KB)] + [f"    %lsum = scalar.addf %lsum_c{KB - 1}, %zero_f : f32"])

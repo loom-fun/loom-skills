@@ -431,6 +431,16 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/unsloth-gpt-oss-20b-loom",
+   "slug": "gpt-oss-20b",
+   "memory_bytes": 28000000000,
+   "kit": "gpt-oss",
+   "llamacpp": "b1370",
+   "features": [
+    "thinking-always"
+   ]
   }
  ]
 }
