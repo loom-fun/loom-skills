@@ -134,12 +134,22 @@ if arch == "gemma4":
         # generation ends at <eos>, at the turn close, and where a tool result would follow a call
         "extra_eos_ids": [tokens.index(s) for s in ("<eos>", "<turn|>", "<|tool_response>") if s in tokens],
     })
-    # What the example's kernels assume: one KV-head count for every layer, and a V projection on every KV-owning layer.
-    no_v = [i for i in range(min(L, cfg["kv_shared_from"] or L)) if f"blk.{i}.attn_v.weight" not in tensors]
-    if isinstance(kv, list) and len(set(kv)) > 1 or no_v:
-        print(f"WARNING: unsupported layout: per-layer KV heads {sorted(set(kv)) if isinstance(kv, list) else kv}"
-              f"{f', no attn_v (V = K) on layers {no_v[:4]}...' if no_v else ''}: gemma4-example's attention assumes "
-              "one KV-head count and an attn_v on every KV-owning layer; extend gen_llm.py (agent port)")
+    # KV heads per layer kind (gemma4-example's attention): one count for the sliding layers (kv_heads) and one for the
+    # global layers (kv_heads_global, only when it differs: 12B/26B/31B give them fewer). A KV-owning layer without
+    # attn_v (the same models' global layers) uses V = K, the raw K projection (llama.cpp gemma4.cpp: Vcur = Kcur).
+    _kvl = kv if isinstance(kv, list) else [kv] * L
+    _kinds = [sorted({_kvl[i] for i in range(L) if (i in cfg["global_layers"]) == g}) for g in (False, True)]
+    _v_is_k = [i for i in range(min(L, cfg["kv_shared_from"] or L)) if f"blk.{i}.attn_v.weight" not in tensors]
+    if any(len(s) > 1 for s in _kinds):
+        print(f"WARNING: unsupported layout: per-layer KV heads {_kvl} vary within a layer kind (sliding {_kinds[0]}, "
+              f"global {_kinds[1]}): gemma4-example's attention takes one KV-head count per kind; extend gen_llm.py (agent port)")
+    else:
+        cfg["kv_heads"] = (_kinds[0] or _kinds[1])[0]
+        if _kinds[1] and _kinds[1][0] != cfg["kv_heads"]:
+            cfg["kv_heads_global"] = _kinds[1][0]
+        if cfg.get("kv_heads_global") or _v_is_k:
+            print(f"gemma4 attention: {cfg['kv_heads']} KV heads on sliding layers, {cfg.get('kv_heads_global', cfg['kv_heads'])}"
+                  f" on global layers{f'; V = K (no attn_v) on layers {_v_is_k}' if _v_is_k else ''}")
 # Hybrid models: gated delta-net (linear attention) layers carry recurrent state
 # instead of KV (llama.cpp qwen35/qwen3next: layer i is recurrent unless (i+1) % interval == 0).
 if A("ssm.inner_size"):
