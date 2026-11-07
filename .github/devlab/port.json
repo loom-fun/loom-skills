@@ -1,6 +1,8 @@
 {
  "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
  "jobs": [
-  {"name": "laguna-xs", "spec": "ggml-org/Laguna-XS-2.1-GGUF:Laguna-XS-2.1-Q4_K_M.gguf", "reference": "auto", "model_id": "poolside/Laguna-XS-2.1"}
+  {"name": "laguna-probe-base", "spec": "ggml-org/Laguna-XS-2.1-GGUF:Laguna-XS-2.1-Q4_K_M.gguf", "reference": "auto", "model_id": "poolside/Laguna-XS-2.1", "env": {"AGENT_PROBE": "1"}},
+  {"name": "laguna-probe-noflash", "spec": "ggml-org/Laguna-XS-2.1-GGUF:Laguna-XS-2.1-Q4_K_M.gguf", "reference": "auto", "model_id": "poolside/Laguna-XS-2.1", "env": {"AGENT_PROBE": "1", "NO_FLASH2": "1"}},
+  {"name": "laguna-probe-nogemm", "spec": "ggml-org/Laguna-XS-2.1-GGUF:Laguna-XS-2.1-Q4_K_M.gguf", "reference": "auto", "model_id": "poolside/Laguna-XS-2.1", "env": {"AGENT_PROBE": "1", "NO_GEMM": "1"}}
  ]
 }

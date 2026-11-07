@@ -220,9 +220,9 @@ def main():
                               "| llama", repr(agreed + P.tok.decode(gids[k:k + 4], skip_special_tokens=False)),
                               "| top", [(P.tok.id_to_token(t), round(v, 2)) for t, v in top.items()], flush=True)
                         # TEMPORARY debug: the same request again (no retained row is a prefix of it: a fresh prefill)
-                        r2 = post(a.url, dict(model=P.model_id, messages=msgs, tools=TOOLS, max_tokens=a.max_tokens, temperature=0, **extra))
+                        r2 = post(a.url, dict(model=P.model_id, messages=msgs, tools=TOOLS, max_tokens=a.max_tokens, temperature=0, logprobs=True, top_logprobs=5, **extra))
                         print("     DEBUG same request again: cached", r2.get("usage", {}).get("prompt_tokens_details"),
-                              repr(str(r2["choices"][0]["message"].get("content"))[:60]), flush=True)
+                              repr(str(r2["choices"][0]["message"].get("content"))[:60]), "logprobs", str(r2["choices"][0].get("logprobs"))[:600], flush=True)
                         # TEMPORARY debug: llama.cpp on the same ids when it reuses its cache for the first
                         # rec["cached"] tokens (an incremental prefill, like Loom's reused turn), and with ubatch-sized steps
                         import bench_common as _bc
