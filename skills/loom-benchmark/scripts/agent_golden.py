@@ -121,7 +121,7 @@ def main():
     extra = {} if thinking is None else {"chat_template_kwargs": {"enable_thinking": thinking}}
     msgs = [{"role": "system", "content": "You are a helpful assistant. Use the tools when they help."}]
     turns, failures, prev_total, prev_text = [], 0, 0, ""
-    known_rewrites = set()   # the template's history edits seen after a verified output (below)
+    prev_gold = ""   # the previous turn's golden reply text (llama.cpp's greedy output on the same prompt)
     for task in TASKS:
         msgs.append({"role": "user", "content": task})
         for step in range(6):
@@ -145,17 +145,16 @@ def main():
             # re-renders bytes the model verifiably generated (the previous turn matched the golden), nothing
             # is reusable however late the change (Gemma 4 with thinking: a "\n" before <channel|> 15 tokens
             # from the end). Unverified output (no golden, or it diverged at a near-tie) keeps the 80 % rule,
-            # since a wrong rebuild of the output must not hide a reuse bug, unless every edit is one the
-            # template made after a verified output in this run (the same text replaced in the same context):
-            # that edit is the template's, wherever the model's own tokens went.
+            # since a wrong rebuild of the output must not hide a reuse bug, unless the golden attests every edit:
+            # the model's own reply writes the replaced text before that token and never the replacement
+            # (thinking on: "<channel|>" with no "\n" before it), so the edit is the template's, not the rebuild's.
             if step:
                 pids = P.ids(prev_text)
                 common = next((i for i, (x, y) in enumerate(zip(pids, ids)) if x != y), min(len(pids), len(ids)))
                 exact = prompt.startswith(prev_text)
                 edits = [] if exact else history_edits(P, prev_text, prompt)
-                if edits and turns[-1].get("golden_match") is True:   # previous output verified
-                    known_rewrites.update(edits)
-                rewritten = bool(edits) and set(edits) <= known_rewrites
+                attested = bool(edits) and all(a_ + nt in prev_gold and b_ + nt not in prev_gold for a_, b_, nt in edits)
+                rewritten = not exact and (turns[-1].get("golden_match") is True or attested)   # previous output verified
                 rec["history_verbatim"] = exact or (common >= 0.8 * len(pids) and not rewritten)
                 if exact and turns[-1].get("output_dropped"):
                     # The previous reply's parse dropped a second call (output_dropped below): the retained history
@@ -257,6 +256,7 @@ def main():
             turns.append(rec)
             prev_total = u["prompt_tokens"] + u["completion_tokens"]
             prev_text = prompt + out_text
+            prev_gold = P.tok.decode(gids, skip_special_tokens=False) if a.llama else ""
             # loom-serve rejects "reasoning_content": null, so only send it when present.
             msgs.append({"role": "assistant", "content": m.get("content") or "",
                          **({"reasoning_content": m["reasoning_content"]} if m.get("reasoning_content") else {}),
