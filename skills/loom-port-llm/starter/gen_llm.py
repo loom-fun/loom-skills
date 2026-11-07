@@ -2191,6 +2191,175 @@ def allreduce(vals, p, outs):
     return "\n".join(t)
 
 
+# Decode/verify attention: up to ATTN_MT tokens of one span per wave (1 = one token per workgroup). A verify epoch's
+# tokens are consecutive positions of one row; with one token per workgroup each streamed the whole KV again and
+# the per-wave loop is latency-bound, so a depth-7 verify at 32k cost 8 decode attentions (Qwen3-8B: drafting at
+# 7.7 tok/s against 19.6 undrafted). Exact: every token keeps its own split range, key masks, block partition and
+# operation order (blocks with none of its keys leave its state untouched), so its result is bit-identical.
+ATTN_MT = int(os.environ.get("ATTN_MT", "4"))
+# ... from this position on (shorter contexts keep one token per workgroup: few keys per split, and the group's
+# serial work in one wave measured ~3 % slower drafted decode at short context on Qwen3-8B)
+ATTN_MT_FROM = int(os.environ.get("ATTN_MT_FROM", "1024"))
+
+
+def multi_token_split(text, P, U, T):
+    """`P`_attention_split with a multi-token path: when the T epoch tokens of this token's aligned group are live,
+    of one row and at consecutive positions (a verify span), the group's first workgroup computes all T (one K/V
+    load per key for the T queries of its head) and the others exit; any other token takes the per-token path."""
+    a = text.index(f'kernel.def export("{P}_attention_split")')
+    b = text.index("  kernel.return\n}\n", a)
+    k = text[a:b]
+    S = int(re.search(r"%cS = index.constant (\d+) : index", k).group(1))
+    anchor = "  %live = scalar.andi %live_token, %needed : i1\n  scf.if %live {\n"
+    assert k.count(anchor) == 1, "multi_token_split: anchor"
+    vt, ht = "vector<4xf32>", "vector<4xf16>"
+    scale = re.search(r"%scale = scalar.constant (\S+) : f32", k).group(1)   # the per-token path's (a kit may change it)
+    det = [f"""  %live = scalar.andi %live_token, %needed : i1
+  // multi-token path: this token's aligned group of {T}
+  %sg_true = scalar.constant true : i1
+  %sg_cT = index.constant {T} : index
+  %sg_rem = index.rem %token, %sg_cT : index
+  %sg_base = index.sub %token, %sg_rem : index
+  %sg_leader = index.cmp eq, %sg_rem, %c0 : index
+  %sg_last = index.sub %tokens, %c1 : index"""]
+    for j in range(T):
+        det.append(f"""  %sg_tr{j} = index.add %sg_base, %c{j}u : index
+  %sg_in{j} = index.cmp ult, %sg_tr{j}, %tokens : index
+  %sg_tc{j} = index.min %sg_tr{j}, %sg_last : index
+  %sg_t{j} = index.assume %sg_tc{j} [range(%sg_tc{j}, 0, 8191), lt(%sg_tc{j}, %tokens)] : index
+  %sg_row{j} = view.load %info_view[%sg_t{j}, 0] : view<[%tokens]x4xi32> -> i32
+  %sg_pos{j} = view.load %info_view[%sg_t{j}, 1] : view<[%tokens]x4xi32> -> i32
+  %sg_live{j} = view.load %info_view[%sg_t{j}, 2] : view<[%tokens]x4xi32> -> i32
+  %sg_lv{j} = scalar.cmpi ne, %sg_live{j}, %c0_i32 : i32
+  %sg_rq{j} = scalar.cmpi eq, %sg_row{j}, %sg_row0 : i32
+  %sg_jc{j} = scalar.constant {j} : i32
+  %sg_pe{j} = scalar.addi %sg_pos0, %sg_jc{j} : i32
+  %sg_pq{j} = scalar.cmpi eq, %sg_pos{j}, %sg_pe{j} : i32
+  %sg_a{j} = scalar.andi %sg_in{j}, %sg_lv{j} : i1
+  %sg_b{j} = scalar.andi %sg_a{j}, %sg_rq{j} : i1
+  %sg_ok{j} = scalar.andi %sg_b{j}, %sg_pq{j} : i1""")
+        det.append(f"  %sg_u{j} = scalar.andi {'%sg_true' if j == 0 else f'%sg_u{j - 1}'}, %sg_ok{j} : i1")
+    det.append(f"""  %sg_from = scalar.constant {ATTN_MT_FROM} : i32
+  %sg_far = scalar.cmpi sge, %sg_pos0, %sg_from : i32
+  %sg_uniform = scalar.andi %sg_u{T - 1}, %sg_far : i1
+  %sg_split = scalar.xori %sg_uniform, %sg_true : i1
+  %single_live = scalar.andi %live, %sg_split : i1
+  %mt_go = scalar.andi %sg_uniform, %sg_leader : i1
+  scf.if %single_live {{
+""")
+    k = k.replace(anchor, "\n".join(det), 1)
+    m = [f"""  scf.if %mt_go {{
+    %mt_row_b = scalar.assume %sg_row0 [range(%sg_row0, 0, 2147483646)] : i32
+    %mt_row = index.cast %mt_row_b : i32 to index
+    %mt_padded = index.add %context, %c15 : index
+    %mt_blocks = index.div %mt_padded, %c16 : index
+    %mt_k_plane = index.mul %layer, %c2 : index
+    %mt_pbytes = index.constant {POS_BYTES} : offset
+    %mt_plane_stride = index.scale %pool, %mt_pbytes : index, offset -> offset
+    %mt_is_sl = scalar.cmpi ne, %sliding, %c0_i32 : i32
+    %mt_huge = index.constant 1073741824 : index
+    %mt_q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
+    %mt_scale = scalar.constant {scale} : f32
+    %mt_scale_v = vector.splat %mt_scale : {vt}
+    %mt_zero4 = vector.splat %zero_f : {vt}"""]
+    for j in range(T):
+        m.append(f"""    %mt_pb{j} = scalar.assume %sg_pos{j} [range(%sg_pos{j}, 0, 262143)] : i32
+    %mt_p{j} = index.cast %mt_pb{j} : i32 to index
+    %mt_far{j} = index.cmp uge, %mt_p{j}, %window : index
+    %mt_uw{j} = scalar.andi %mt_is_sl, %mt_far{j} : i1
+    %mt_ws{j} = index.sub %mt_p{j}, %window_less : index
+    %mt_wl{j} = scf.select %mt_uw{j}, %mt_ws{j}, %c0 : index
+    %mt_end{j} = index.add %mt_p{j}, %c1 : index
+    %mt_visv{j} = index.sub %mt_end{j}, %mt_wl{j} : index
+    %mt_vis{j} = index.assume %mt_visv{j} [range(%mt_visv{j}, 1, 262144)] : index
+    %mt_se{j} = func.call @{P}_split_count(%mt_vis{j}) : (index) -> (index)
+    %mt_act{j} = index.cmp ult, %split, %mt_se{j} : index
+    %mt_sl{j} = index.sub %mt_se{j}, %c1 : index
+    %mt_pp{j} = index.add %mt_vis{j}, %mt_sl{j} : index
+    %mt_per{j} = index.div %mt_pp{j}, %mt_se{j} : index
+    %mt_sr{j} = index.mul %split, %mt_per{j} : index
+    %mt_st{j} = index.min %mt_sr{j}, %mt_vis{j} : index
+    %mt_spr{j} = index.add %mt_sr{j}, %mt_per{j} : index
+    %mt_sp{j} = index.min %mt_spr{j}, %mt_vis{j} : index
+    %mt_lo0{j} = index.add %mt_wl{j}, %mt_st{j} : index
+    %mt_hi0{j} = index.add %mt_wl{j}, %mt_sp{j} : index
+    %mt_lo{j} = scf.select %mt_act{j}, %mt_lo0{j}, %mt_huge : index
+    %mt_hi{j} = scf.select %mt_act{j}, %mt_hi0{j}, %c0 : index
+    %mt_qr{j} = vector.load %mt_q_view[%sg_t{j}, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> {vt}
+    %mt_q{j} = vector.mulf %mt_qr{j}, %mt_scale_v : {vt}""")
+    lo, hi = "%mt_lo0", "%mt_hi0"
+    m.append("    %mt_lou0 = index.add %mt_lo0, %c0 : index\n    %mt_hiu0 = index.add %mt_hi0, %c0 : index")
+    for j in range(1, T):
+        m.append(f"    %mt_lou{j} = index.min %mt_lou{j - 1}, %mt_lo{j} : index\n    %mt_hiu{j} = index.max %mt_hiu{j - 1}, %mt_hi{j} : index")
+    iters = ", ".join(f"%mm{j} = %neg_big : f32, %ml{j} = %zero_f : f32, %ma{j} = %mt_zero4 : {vt}" for j in range(T))
+    rtypes = ", ".join(f"f32, f32, {vt}" for _ in range(T))
+    outs = ", ".join(f"%mfm{j}, %mfl{j}, %mfa{j}" for j in range(T))
+    m.append(f"""    %mt_lo_q = index.div %mt_lou{T - 1}, %cU : index
+    %mt_lo_al = index.mul %mt_lo_q, %cU : index
+    {outs} = scf.for %mj = [%mt_lo_al to %mt_hiu{T - 1} step %cU]({iters}) -> ({rtypes}) {{
+      %mkb = func.call @g_kv_offset(%origins, %mt_row, %mj, %mt_blocks, %mt_k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
+      %mjend = index.add %mj, %cU : index""")
+    for i in range(U):
+        m.append(f"""      %mkey{i} = index.add %mj, %c{i}u : index
+      %mkd{i} = index.constant {i * POS_BYTES} : offset
+      %mko{i} = index.add %mkb, %mkd{i} : offset
+      %mkc{i} = buffer.view %arena[%mko{i}] : buffer -> view<{KVH}x32x4xf16>
+      %mkh{i} = vector.load %mkc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> {ht}
+      %mk{i} = vector.extf %mkh{i} : {ht} to {vt}
+      %mvo{i} = index.add %mko{i}, %mt_plane_stride : offset
+      %mvc{i} = buffer.view %arena[%mvo{i}] : buffer -> view<{KVH}x32x4xf16>
+      %mvh{i} = vector.load %mvc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> {ht}
+      %mv{i} = vector.extf %mvh{i} : {ht} to {vt}""")
+    yields = []
+    for j in range(T):
+        for i in range(U):
+            m.append(f"""      %mokl{j}_{i} = index.cmp uge, %mkey{i}, %mt_lo{j} : index
+      %mokh{j}_{i} = index.cmp ult, %mkey{i}, %mt_hi{j} : index
+      %mok{j}_{i} = scalar.andi %mokl{j}_{i}, %mokh{j}_{i} : i1
+      %mprod{j}_{i} = vector.mulf %mt_q{j}, %mk{i} : {vt}
+      %mpart{j}_{i} = vector.reduce<addf> %mprod{j}_{i}, %zero_f : {vt}, f32""")
+        m.append(allreduce([f"%mpart{j}_{i}" for i in range(U)], f"mar{j}x", [f"%msr{j}_{i}" for i in range(U)]))
+        prev = f"%mm{j}"
+        for i in range(U):
+            m.append(f"""      %ms{j}_{i} = scf.select %mok{j}_{i}, %msr{j}_{i}, %neg_big : f32
+      %mmx{j}_{i} = scalar.maxnumf {prev}, %ms{j}_{i} : f32""")
+            prev = f"%mmx{j}_{i}"
+        m.append(f"""      %mshift{j} = scalar.subf %mm{j}, {prev} : f32
+      %malpha{j} = scalar.expf<afn> %mshift{j} : f32
+      %mls{j} = scalar.mulf %ml{j}, %malpha{j} : f32
+      %mav{j} = vector.splat %malpha{j} : {vt}
+      %macs{j} = vector.mulf %ma{j}, %mav{j} : {vt}""")
+        pl, pa = f"%mls{j}", f"%macs{j}"
+        for i in range(U):
+            m.append(f"""      %md{j}_{i} = scalar.subf %ms{j}_{i}, {prev} : f32
+      %mp{j}_{i} = scalar.expf<afn> %md{j}_{i} : f32
+      %mla{j}_{i} = scalar.addf {pl}, %mp{j}_{i} : f32
+      %mpv{j}_{i} = vector.splat %mp{j}_{i} : {vt}
+      %maa{j}_{i} = vector.fmaf %mpv{j}_{i}, %mv{i}, {pa} : {vt}""")
+            pl, pa = f"%mla{j}_{i}", f"%maa{j}_{i}"
+        m.append(f"""      %mbr1{j} = index.cmp ult, %mj, %mt_hi{j} : index
+      %mbr2{j} = index.cmp ugt, %mjend, %mt_lo{j} : index
+      %mbr{j} = scalar.andi %mbr1{j}, %mbr2{j} : i1
+      %mnm{j} = scf.select %mbr{j}, {prev}, %mm{j} : f32
+      %mnl{j} = scf.select %mbr{j}, {pl}, %ml{j} : f32
+      %mna{j} = scf.select %mbr{j}, {pa}, %ma{j} : {vt}""")
+        yields += [f"%mnm{j}", f"%mnl{j}", f"%mna{j}"]
+    m.append(f"      scf.yield {', '.join(yields)} : {rtypes}\n    }}")
+    m.append(f"""    %mt_acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
+    %mt_ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>
+    %mt_first = index.cmp eq, %lane, %c0 : index""")
+    for j in range(T):
+        m.append(f"""    scf.if %mt_act{j} {{
+      vector.store %mfa{j}, %mt_acc_view[%sg_t{j}, %bounded_head, %split, %lane, %c0] : {vt}, view<[%tokens]x{QH}x{S}x32x4xf32>
+      scf.if %mt_first {{
+        view.store %mfm{j}, %mt_ml_view[%sg_t{j}, %bounded_head, %split, 0] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+        view.store %mfl{j}, %mt_ml_view[%sg_t{j}, %bounded_head, %split, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+      }}
+    }}""")
+    m.append("  }\n")
+    return text[:a] + k + "\n".join(m) + text[b:]
+
+
 def attention_text(S, P):
     """Split-K causal GQA attention: workgroup (token, KV head, split) of 16
     waves, wave w = query head 16*kv + w, lane l = dims 4l..4l+3. Sliding
@@ -2199,6 +2368,7 @@ def attention_text(S, P):
     U = UNROLL
     body = []
     pa = ATTN_PAGED and 16 % U == 0
+    paged = pa
     if pa:   # absolute U-aligned key blocks lie in one 16-position KV page: one page lookup per block
         body.append(f"""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
     for i in range(U):
@@ -2477,6 +2647,8 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
   kernel.return
 }}
 """
+    if P == "g" and 1 < ATTN_MT <= U and paged and ab and ILP == 1:
+        text = multi_token_split(text, P, U, ATTN_MT)
     if D != 128:
         text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
                 .replace("x32x4xf32", f"x32x{DL}xf32").replace("vector<4xf32>", f"vector<{DL}xf32>")
