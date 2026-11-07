@@ -34,6 +34,19 @@ cleanup() {
 }
 trap cleanup EXIT
 result() { printf '{"status": "%s", "stage": "%s", "rc": %s}\n' "$1" "$2" "$3" > "$out/result.json"; cat "$out/result.json"; }
+# What a failed or finished port leaves in the artifact: the port stage's logs and config (a failure is debugged from
+# these), then the bench files.
+save_logs() {
+  cp "$D/phases.log" "$out/" 2>/dev/null
+  for f in reference.json reference.log cfg.json inspect.log chat_verify.log download.log vision.log drafter.log build.log ktest.log; do
+    cp "$W/$f" "$out/" 2>/dev/null
+  done
+  if [ -d "$W/bench" ]; then
+    for f in gates.json audit.json perf_log.jsonl draft_tune.json llamacpp_spec.json llamacpp_pick.json roofline.json \
+             targets.jsonl llamacpp_args.txt report.md gates_*.log; do cp "$W/bench"/$f "$out/" 2>/dev/null; done
+  fi
+  return 0
+}
 
 : > "$D/phases.log"
 ph install
@@ -66,7 +79,7 @@ ph port
   echo "finalize exit $frc"; grep "^FINALIZE\|AUDIT" "$out/finalize.log" | tail -3
   exit 0
 ) ; rc=$?
-[ $rc = 0 ] || { ph done; result failed port $rc; exit $rc; }
+[ $rc = 0 ] || { ph done; save_logs; result failed port $rc; exit $rc; }
 
 ph evidence
 gguf=$(ls "$W"/gguf/*.gguf | head -1); bench=$W/bench
@@ -78,7 +91,9 @@ if [ -n "$build" ] && [ -s "$bench/perf_log.jsonl" ]; then
   "$T" -c "import json; [print(r['c4_steady']) for r in map(json.loads, open('$bench/perf_log.jsonl')) if r.get('label') == 'llama-final' and r.get('c4_steady')]" > "$out/c4_llama.txt"
   "$T" -c "import json; [print(r['value']) for r in map(json.loads, open('$bench/targets.jsonl')) if r.get('metric') == 'c4_steady' and r.get('label') == 'final']" > "$out/c4_loom.txt" 2>/dev/null
   c4=(); [ -s "$out/c4_loom.txt" ] && c4+=(--c4-loom "$out/c4_loom.txt"); [ -s "$out/c4_llama.txt" ] && c4+=(--c4-llama "$out/c4_llama.txt")
-  args=$(sed "s|$HOME|~|g" "$bench/llamacpp_args.txt" 2>/dev/null)   # no home directory on a published card
+  # no machine paths on a published card: the HF cache as ~/.cache/huggingface, the work dir and home as ~
+  hfh=${HF_HOME:-$HOME/.cache/huggingface}
+  args=$(sed -e "s|$hfh|~/.cache/huggingface|g" -e "s|$D|~|g" -e "s|$HOME|~|g" "$bench/llamacpp_args.txt" 2>/dev/null)
   "$T" "$B/card/make_info.py" perf --perf-log "$bench/perf_log.jsonl" --baseline-version "llamacpp-rocm/$build" \
     ${args:+--baseline-args "$args"} "${c4[@]}" "${src[@]}" -o "$out/ev_perf.json" || echo "WARNING: no perf evidence"
 fi
@@ -86,12 +101,9 @@ fi
 source_repo=${spec%%:*}
 "$T" "$here/skills/loom-benchmark/scripts/card/publish_package.py" prepare "$W/pkg" "$out/publish" --source "$source_repo" \
   --loom-fetch "$root/.venv/bin/loom-fetch" > "$out/publish.log" 2>&1 || { tail "$out/publish.log"; echo "WARNING: publish prepare failed"; }
-cp "$D/phases.log" "$out/" 2>/dev/null
-for f in gates.json audit.json perf_log.jsonl draft_tune.json llamacpp_spec.json llamacpp_pick.json roofline.json targets.jsonl \
-         llamacpp_args.txt report.md gates_*.log; do cp "$bench"/$f "$out/" 2>/dev/null; done
-cp "$W"/reference.json "$W"/cfg.json "$W"/ktest.log "$W"/inspect.log "$W"/build.log "$out/" 2>/dev/null
 ph done
+save_logs
 v=$("$T" -c "import json; print(json.load(open('$bench/gates.json'))['verdict'])" 2>/dev/null)
 a=$(grep -o "AUDIT [A-Z]*" "$out/finalize.log" | tail -1)
 echo "gates: $v; audit: $a"
-[ "$v" = PASS ] && result ok done 0 || result failed gates 1
+if [ "$v" = PASS ]; then result ok done 0; else result failed gates 1; exit 1; fi   # a failed gate fails the job

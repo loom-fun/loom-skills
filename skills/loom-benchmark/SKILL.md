@@ -365,6 +365,8 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
      device constants and the roofline.py sha256 and commit. Drafting packages: decode and 4-stream ceilings are
      verify passes per second x (1 + acceptance x depth) tokens per pass, from the card's own spec acceptance
      and depth (the drafter's cost not counted: an upper bound); without a measured acceptance they have none.
+     A first card has no `DIR/info.json` yet: pass the run's gate evidence (`--evidence ev_gates.json`, which carries
+     the spec gate's acceptance), or build once, run roofline, and build again.
 2. `card/make_info.py build DIR --repo loom-fun/REPO --generator-commit "$(git rev-parse HEAD)" --memory-bytes N
    --output OUT --report generated --evidence ev_*.json -o DIR/info.json` (to regenerate a published card with
    only new evidence: `--from-info DIR/info.json`, re-read from the Hub right before). DIR holds the repo's `model.json`,

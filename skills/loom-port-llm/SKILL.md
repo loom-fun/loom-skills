@@ -75,7 +75,7 @@ Every port and every optimization starts by looking for a published package that
   building blocks (gated delta-net hybrid, MoE routing, vision tower, tool-call format, thinking switch, drafter
   type), then nearest size. The `generator` stamp of its `llm_config.json` says how stale it is.
 - **What is taken:** the reference's example kit (when it was built from one: `reference/examples.json` maps the
-  packages to `*-example` kits); the cfg keys `inspect_gguf.py` left open (geometry, formats and eos ids always stay
+  packages to `*-example` kits; with no category A package of the architecture, the example kit of that architecture alone); the cfg keys `inspect_gguf.py` left open (geometry, formats and eos ids always stay
   this GGUF's); its chat block when this template's derivation fails, accepted only if `chat_probe.py --verify`
   passes on THIS template; and its measured drafting table, from which `draft/tune.py` starts each method at the
   reference's best depth and climbs from there, and gives a method the reference ruled out (under 75 % of its

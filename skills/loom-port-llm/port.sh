@@ -92,7 +92,10 @@ if [ "$ref" != off ]; then
   ex=$("$T" -c "
 import json, sys; r = json.load(open('reference.json')); p = '$refpick'
 x = next((x for x in r['ranked'] if (p and x['repo'] == p) or (not p and x['arch'] == r['target'].get('arch'))), None)
-print((x or {}).get('kit_example') or '')" 2>/dev/null)
+# No category A package of this architecture: an example kit of it still is a gate-passing port (examples.json)
+ex = (x or {}).get('kit_example') or ('' if x or p else next((k for k, e in json.load(open('$here/reference/examples.json')).items()
+                                                               if isinstance(e, dict) and e.get('arch') == r['target'].get('arch')), ''))
+print(ex)" 2>/dev/null)
   if [ -z "${KIT:-}" ] && [ -n "$ex" ] && [ -d "$here/reference/$ex-example" ]; then
     rm -rf kit; "$here/reference/apply_example.sh" "$ex" "$work/kit" | tail -1 && K=$work/kit && export LOOM_KIT=$K
   fi
