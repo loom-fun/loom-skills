@@ -117,6 +117,41 @@ print(','.join(sorted(f['devlab'])), ','.join(c.remeasure_reasons(f)), ','.join(
   "$C" "$tmp/dl.json" "$F/pkg" "$tmp/flint/info.json")
 [ "$got" = "decode,prefill_1k/devlab-primary/stale" ] && echo "OK   flags: a DevLab-measured session asks for a local re-measure" \
   || { echo "FAIL flags: DevLab-measured session: $got, expected decode,prefill_1k/devlab-primary/stale"; bad=1; }
+# the spec gate's acceptance is a drafting statistic, not a timing: a DevLab nightly job's (pull_devlab.evidence, from
+# its gates_spec.log, stamped with the job's programs) replaces a stale spec_acceptance and is not flagged devlab-primary;
+# a job without a spec gate carries none
+py "$C/make_info.py" gates "$F/evidence/gates.json" "${SRC[@]}" --package "$tmp/rebuilt" -o "$tmp/gates_old.json" 2>/dev/null
+mkdir -p "$tmp/job/spec" "$tmp/job/nospec"
+py -c "import json, sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+p = c.programs_sha256(sys.argv[2]); d = sys.argv[3]
+for sub, gates in (('spec', {'golden': {'pass': True}, 'spec': {'pass': True}}), ('nospec', {'golden': {'pass': True}})):
+    json.dump({'repo': 'loom-fun/ggml-org-Flint-loom', 'slug': 'flint', 'level': 'quick', 'programs_sha256': p},
+              open(f'{d}/{sub}/summary.json', 'w'))
+    json.dump({'verdict': 'PASS', 'level': 'quick', 'ts': '2026-11-08T03:00:00', 'gates': gates}, open(f'{d}/{sub}/gates.json', 'w'))
+open(f'{d}/spec/gates_spec.log', 'w').write('SPEC_CHECK PASS: 13/13 completions identical, 0 near-tie, acceptance 65% of 4278 proposals\n')
+open(f'{d}/nospec/gates_spec.log', 'w').write('SPEC_CHECK PASS: 13/13 completions identical, 0 near-tie, acceptance 99% of 10 proposals\n')
+from pull_devlab import evidence
+for sub in ('spec', 'nospec'):
+    s, g = c.load_json(f'{d}/{sub}/summary.json'), c.load_json(f'{d}/{sub}/gates.json')
+    c.write_json(f'{d}/ev_{sub}.json', evidence([(s, g, f'{d}/{sub}', 'https://example.invalid/job/1')], 4004))" \
+  "$C" "$F/pkg" "$tmp/job"
+py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint \
+  --evidence "$tmp/perf.json" "$tmp/gates_old.json" -o "$tmp/acc_old.json" 2>/dev/null
+py "$C/make_info.py" build "$tmp/flint" --generator-commit $GEN --from-info "$tmp/acc_old.json" \
+  --evidence "$tmp/job/ev_spec.json" -o "$tmp/acc_new.json" 2>/dev/null
+py "$C/make_info.py" build "$tmp/flint" --generator-commit $GEN --from-info "$tmp/acc_old.json" \
+  --evidence "$tmp/job/ev_nospec.json" -o "$tmp/acc_nospec.json" 2>/dev/null
+got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+p = c.programs_sha256(sys.argv[2])
+def st(f):
+    i = c.load_json(f); fl = c.perf_flags(i, programs=p)
+    return f\"{c.card_metrics(i)['spec_acceptance'][0]['loom']}:{'stale' if 'spec_acceptance' in fl['stale'] else 'fresh'}:{'devlab' if 'spec_acceptance' in fl['devlab'] else 'local-ok'}\"
+print(st(sys.argv[3]), st(sys.argv[4]), st(sys.argv[5]), sep='/')" "$C" "$F/pkg" "$tmp/acc_old.json" "$tmp/acc_new.json" "$tmp/acc_nospec.json")
+want=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+a = c.card_metrics(c.load_json(sys.argv[2]))['spec_acceptance'][0]['loom']; print(f'{a}:stale:local-ok/0.65:fresh:local-ok/{a}:stale:local-ok')" \
+  "$C" "$tmp/acc_old.json")
+[ "$got" = "$want" ] && echo "OK   flags: a DevLab spec gate's acceptance replaces a stale spec_acceptance (gates only: none)" \
+  || { echo "FAIL flags: DevLab spec acceptance: $got, expected $want"; bad=1; }
 # c4_steady.py runs that measured nothing (every stream failed: rate -0.0, a negative window) are not samples
 printf '%s\n' '{"streams": 4, "window_s": 2.5, "agg_tps": 110.0}' '{"streams": 4, "window_s": -3.1, "agg_tps": -0.0}' 0 112.5 \
   > "$tmp/c4_bad.txt"

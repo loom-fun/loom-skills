@@ -1,8 +1,8 @@
 {
- "_comment": "Validation of the MoE fixes (not for merge). Round 3: Sage with the MTP memory budget; the 122B drafting registration error isolated (DFlash2 on, the load-time Q4_0 propose head off); the 122B long-context diagnostics.",
+ "_comment": "Validation of the MoE fixes (not for merge). Round 4, on the restacked branch (current main): Sage with the program-scratch memory budget; the 122B with drafting (DFlash propose-head root fix on main) and a CPU llama.cpp reference; Ornith-1.5-35B-A3B with the content/call separator fix on main and a CPU llama.cpp reference for its vision and thinking-off divergences.",
  "jobs": [
   {"name": "sage-a1-5", "spec": "InternScience/Sage-A1.5-Q4_K_M-GGUF:Sage-A1.5-Q4_K_M.gguf", "reference": "auto", "model_id": "InternScience/Sage-A1.5"},
-  {"name": "ornith-1-5-122b-nophead", "spec": "bartowski/Ornith-1.5-122B-GGUF:Ornith-1.5-122B-Q4_K_M/Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf", "reference": "auto", "model_id": "ornith-ai/Ornith-1.5-122B", "memory_cap_gib": 96, "env": {"PROPOSE_HEAD": "off"}},
-  {"name": "ornith-1-5-122b-diag", "spec": "bartowski/Ornith-1.5-122B-GGUF:Ornith-1.5-122B-Q4_K_M/Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf", "reference": "auto", "model_id": "ornith-ai/Ornith-1.5-122B", "memory_cap_gib": 96, "env": {"SPEC": "off", "VISION": "0"}, "post": ".github/devlab/diag_122b.sh"}
+  {"name": "ornith-1-5-122b", "spec": "bartowski/Ornith-1.5-122B-GGUF:Ornith-1.5-122B-Q4_K_M/Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf", "reference": "auto", "model_id": "ornith-ai/Ornith-1.5-122B", "memory_cap_gib": 96, "post": ".github/devlab/diag_cpuref.sh"},
+  {"name": "ornith-1-5-35b", "spec": "bartowski/Ornith-1.5-35B-A3B-GGUF:Ornith-1.5-35B-A3B-Q4_K_M.gguf", "reference": "auto", "model_id": "ornith-ai/Ornith-1.5-35B-A3B", "env": {"CPU_LIVE": "1"}, "post": ".github/devlab/diag_cpuref.sh"}
  ]
 }

@@ -17,6 +17,7 @@
 #        consistency:N:llama  the same with --pkg/--llama (the card's llama.cpp build): the gate's own verdict
 #        pairs:R         determinism.py --pairs: each prompt twice in a row (prefix-cache miss, then hit), R reps
 #        determinism:C:R determinism.py, R reps of each prompt with C requests in flight
+#        admit:N         admission only: a needle prompt of N tokens on a fresh server, admitted or refused (503), cancelled
 #        ktest           the starter's kernel tests (make_kernel_tests.py + run_kernel_tests.sh) on the package
 #        gates:LEVEL     gates.sh at LEVEL against the card's llama.cpp build ("llamacpp" in EXPERIMENT.json)
 # Writes WORK/<variant>/out: summary.json, *.log. Every server it starts is stopped at exit.
@@ -184,6 +185,38 @@ for s in $steps; do
       step "prefix-cache pairs reps $p1"
       "$T" "$B/determinism.py" "$url" --model "$model" --pairs --reps "$p1" --log "$out/pairs.jsonl" > "$out/pairs.log" 2>&1
       cut -c1-400 "$out/pairs.log"; res[$s]=$(grep -c "a path gave two outputs" "$out/pairs.log")" prompts with a nondeterministic path, "$(grep -c "paths differ" "$out/pairs.log")" with hit != miss";;
+    admit)
+      # Admission only: a needle prompt of N tokens on a fresh server; admitted (it runs) or refused (503), then cancelled
+      [ -f "$LOOM_SERVE_STATE/exp-$name.pid" ] && "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
+      step "serve (fresh)"; serve || { res[$s]=ERROR; continue; }
+      step "admit $p1"
+      res[$s]=$(cd "$B" && "$T" - "$pkg" "$url" "$model" "$p1" <<'EOF' 2> "$out/admit_$p1.err"
+import sys, threading, time
+import requests
+from bench_common import Package
+from needle import corpus, haystack
+pkg, url, model, n = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+P = Package(pkg); ids = P.ids(corpus())
+while len(ids) < n:
+    ids = ids + ids
+prompt, _ = haystack(P, ids, n, 1)
+got = {}
+def post():
+    try:
+        with requests.post(url + "/v1/chat/completions", stream=True, timeout=600, json={
+                "model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 1024, "stream": True}) as r:
+            got["status"] = r.status_code; got["body"] = r.text[:200] if r.status_code != 200 else ""
+    except Exception as e:
+        got["error"] = str(e)[:200]
+threading.Thread(target=post, daemon=True).start()
+for _ in range(120):
+    time.sleep(1)
+    st = requests.get(url + "/v1/status").json()["data"][0]["loom"]["status"]
+    if "status" in got or st["active_requests"]:
+        break
+print("admitted" if st["active_requests"] else f"refused {got}")
+EOF
+);;
     gates)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       [ "$tag" != - ] || { echo "gates: EXPERIMENT.json has no llamacpp tag"; res[$s]=ERROR; continue; }

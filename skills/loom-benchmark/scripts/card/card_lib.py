@@ -53,7 +53,9 @@ FAR_FRACTION = 0.5
 # measure Loom up to ~50 % slower than a local session on the same programs (loom-org SKILL.md, "DevLab measures
 # correctness"). A card value whose session ran on DevLab (source kind "devlab": a scripted DevLab port) is flagged
 # for a local re-measure. info.json "devlab" (Loom-only sweeps written before that decision) is still read and
-# validated, never rendered or judged.
+# validated, never rendered or judged. spec_acceptance (the spec gate's drafted-token acceptance) is a drafting
+# statistic of model, drafter and text, not a timing: it counts from any source, DevLab's nightly spec gate included
+# (pull_devlab.py), and its session's programs_sha256 decides whether it is stale like any other card value.
 
 # (key, label): the features table's rows.
 FEATURES = [

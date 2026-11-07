@@ -9,6 +9,10 @@ downloads that run's artifacts (gh run download; nightly_gates.sh writes summary
 and level) and writes the gates: every gate of every finished level job (dev, quick, full) with its verdict, level and
 time, the job's URL as the evidence. DevLab measures correctness only: a job's performance files (an older PERF=1
 run's perf.jsonl) are not read, as every card performance number comes from a local session (loom-org SKILL.md).
+The spec gate's drafted-token acceptance ("acceptance N% of M proposals" in the job's gates_spec.log or gates.out)
+is not a timing: it depends on the model, drafter and text, not the machine, so it is carried as the card's
+spec_acceptance (a session holding only that metric, stamped with the job's programs_sha256), as make_info.py gates
+records it; the latest job that reports one wins.
 Each source records the runner's device and Loom SDK when summary.json carries them ("device" from
 machine_info.py detect_device(), "hrx_loom" from its hrx_loom_identity()); otherwise they stay null (not
 recorded). --hrx-loom FILE.json supplies an SDK identity established otherwise (e.g. from the job logs).
@@ -24,6 +28,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import EVIDENCE_ID, load_json, write_json  # noqa: E402
+from make_info import acceptance  # noqa: E402
 
 GH_REPO = "loom-fun/loom-skills"
 WORKFLOW = "nightly-gates.yml"
@@ -53,6 +58,28 @@ def finished_artifacts(run_id, dest):
         if not os.path.isdir(os.path.join(dest, n)):
             gh("run", "download", str(run_id), "-R", GH_REPO, "-n", n, "-D", os.path.join(dest, n))
     return [os.path.join(dest, n) for n in sorted(names)]
+
+
+def evidence(found, rid, hrx_loom=None):
+    """The evidence file of a run's finished jobs for one card: found = [(summary.json, gates.json, job dir, job URL)].
+    Every gate of every job; the spec gate's acceptance (gates_spec.log, else gates.out) as a spec_acceptance-only
+    session stamped with the job's programs_sha256, the latest job's that reports one."""
+    gates, session = [], None
+    for s, g, d, url in sorted(found, key=lambda x: x[1].get("ts") or ""):
+        src = {"kind": "devlab", "run": str(rid), "url": url, "device": s.get("device"),
+               "hrx_loom": s.get("hrx_loom") or hrx_loom}
+        for name, x in sorted(g.get("gates", {}).items()):
+            gates.append({"name": name, "status": "pass" if x.get("pass") else "fail", "level": g.get("level"),
+                          "time": g.get("ts"), "source": src, "detail": None, "programs_sha256": s.get("programs_sha256")})
+        acc = acceptance([os.path.join(d, "gates_spec.log"), os.path.join(d, "gates.out")]) if "spec" in g.get("gates", {}) else None
+        if acc is not None:   # the latest job's (sorted by time)
+            session = {"date": (g.get("ts") or "")[:10] or None, "source": src,
+                       "runs": {"decode_prefill": None, "streams4": None}, "commands": [],
+                       "programs_sha256": s.get("programs_sha256"), "metrics": {"spec_acceptance": {"loom": acc}}}
+    ev = {"evidence": EVIDENCE_ID, "gates": gates}
+    if session:
+        ev["performance"] = {"session": session}
+    return ev
 
 
 def main(argv=None):
@@ -93,15 +120,11 @@ def main(argv=None):
     else:
         sys.exit(f"no finished nightly-gates job for {a.repo}" + (f" in run {a.run}" if a.run else ""))
 
-    gates = []
-    for s, g, d, url in sorted(found, key=lambda x: x[1].get("ts") or ""):
-        src = {"kind": "devlab", "run": str(rid), "url": url, "device": s.get("device"),
-               "hrx_loom": s.get("hrx_loom") or (load_json(a.hrx_loom) if a.hrx_loom else None)}
-        for name, x in sorted(g.get("gates", {}).items()):
-            gates.append({"name": name, "status": "pass" if x.get("pass") else "fail", "level": g.get("level"),
-                          "time": g.get("ts"), "source": src, "detail": None, "programs_sha256": s.get("programs_sha256")})
-    write_json(a.o, {"evidence": EVIDENCE_ID, "gates": gates})
-    print(f"wrote {a.o}: run {rid}, " + ", ".join(f"{x['level']}:{x['name']}={x['status']}" for x in gates), file=sys.stderr)
+    ev = evidence(found, rid, load_json(a.hrx_loom) if a.hrx_loom else None)
+    gates, session = ev["gates"], (ev.get("performance") or {}).get("session")
+    write_json(a.o, ev)
+    print(f"wrote {a.o}: run {rid}, " + ", ".join(f"{x['level']}:{x['name']}={x['status']}" for x in gates)
+          + (f", spec_acceptance={session['metrics']['spec_acceptance']['loom']}" if session else ""), file=sys.stderr)
 
 
 if __name__ == "__main__":
