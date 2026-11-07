@@ -206,6 +206,21 @@ def drafted_ceiling(m, depth, acceptance, bw=BW, ctx=0, streams=1):
     return streams * (1 + acceptance * depth) * bw / pass_bytes(m, tokens=streams * (depth + 1), ctx=ctx, streams=streams)
 
 
+# The drafted rows by roofline.json metric name: (KV context read per decoded token, streams). card_lib.DRAFTED_ROWS
+# names the same rows by card key.
+DRAFTED_ROWS = {"decode_tps": (0, 1), "decode_tps_2k": (2000, 1), "decode_tps_32k": (32000, 1), "c4_steady": (600, 4)}
+
+
+def drafted_row_ceiling(m, metric, depth, acceptance, bw=BW):
+    """A drafted row's ceiling (roofline.json metric name) at `acceptance`, ideally the one its own timed requests
+    measured (perf.py, c4_steady.py "acceptance"): drafted_ceiling() at the row's context and streams. None for a
+    row speculative decoding does not apply to. The card (make_info.py roofline) and audit.py both use this."""
+    if metric not in DRAFTED_ROWS or acceptance is None or not depth:
+        return None
+    ctx, streams = DRAFTED_ROWS[metric]
+    return drafted_ceiling(m, depth, acceptance, bw, ctx=ctx, streams=streams)
+
+
 def efficiency(m, metric, ceiling, table=None, tokens_per_pass=None):
     """The fraction of `ceiling` Loom ports have demonstrated for this kind of metric (table EFF, or STRETCH):
     prefill, c4 (dense / MoE) or decode (dense / MoE), decode capped by the fixed per-layer cost (LAYER_US).
@@ -295,7 +310,7 @@ def main():
     rows = [pick_target(k, base.get(k), c, efficiency(m, k, c), efficiency(m, k, c, STRETCH))
             for k, c in ceilings(m, a.bw, a.flops, ctxs, gain).items()]
 
-    out = dict(gguf=a.gguf, geometry={k: (sorted(v) if isinstance(v, set) else v)
+    out = dict(gguf=a.gguf, cfg=a.cfg and os.path.abspath(a.cfg), geometry={k: (sorted(v) if isinstance(v, set) else v)
                                       for k, v in geo.items()},
                weight_bytes_per_token=round(wb), head_bytes=head,
                bytes_by_kind={k: round(v) for k, v in detail.items()},
