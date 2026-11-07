@@ -1,6 +1,6 @@
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -186,6 +186,8 @@
+@@ -196,6 +196,8 @@
  
  def derive(template_text, bos="", eos=""):
      T = Template(template_text, bos, eos)
@@ -9,7 +9,7 @@
      notes = []
      chat = {}
      # BOS: emitted by the control program at the very start when the template prints it.
-@@ -321,10 +323,6 @@
+@@ -339,10 +341,6 @@
          rest = s_body[len("SYSPROBE"):]
          lead = rest[:rest.index(printed[0]) - len(line)]
          body_start = len(lead) - len(lead.lstrip())
@@ -20,16 +20,16 @@
          chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
      elif s_body.endswith("SYSPROBE"):
          chat["tools_after_system"] = False
-@@ -400,6 +398,8 @@
+@@ -418,6 +416,8 @@
  
  def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reasoning_effort=None):
      """Python model of control.loom's rendering (chat_begin + chat_message + chat_end)."""
 +    if chat.get("format") == "gemma4":
 +        return simulate_gemma4(chat, messages, tools, gen, enable_thinking)
+     tools = None if chat.get("call_format") == "none" else tools   # a chat-only block ignores tools, as its template does
      trim = (lambda s: s.strip()) if chat["trim_content"] else (lambda s: s)
      out = chat.get("bos", "")
-     first_system = messages and messages[0]["role"] == "system" and isinstance(messages[0]["content"], str)
-@@ -465,6 +465,8 @@
+@@ -484,6 +484,8 @@
  
  
  def render_call(chat, call):
@@ -38,7 +38,7 @@
      args = call["arguments"]
      if chat["call_format"] == "hermes":
          a = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
-@@ -509,6 +511,296 @@
+@@ -528,6 +530,306 @@
  ]
  
  
@@ -71,6 +71,7 @@
 +                               {"role": "tool", "tool_call_id": "zzz", "name": "search", "content": "r"},
 +                               {"role": "user", "content": "B"}], TOOLS),
 +    ("call without result", [{"role": "user", "content": "A"}, calls_msg("", [CALL1])], TOOLS),
++    ("content and call without result", [{"role": "user", "content": "A"}, calls_msg("Checking.", [CALL1], reasoning="R")], TOOLS),
 +    ("unnamed tool result", [{"role": "user", "content": "A"}, calls_msg("", [CALL1]),
 +                             {"role": "tool", "tool_call_id": "nope", "content": "r"}], TOOLS),
 +    ("content parts", [{"role": "user", "content": [{"type": "text", "text": " Hi "}, {"type": "text", "text": "there "}]},
@@ -250,7 +251,7 @@
 +                pending["responses"] = True
 +            continue
 +        if pending:
-+            out += g4_close(c, pending, role)
++            out += pending["later"] + g4_close(c, pending, role)
 +        pending = None
 +        if role == "assistant":
 +            if prior != "assistant":
@@ -260,19 +261,21 @@
 +                out += c["think_open"] + thought + c["think_close"]
 +            text = g4_text(m.get("content"), trim=True)
 +            calls = m.get("tool_calls") or []
-+            out += text + "".join(g4_call(x["function"]) for x in calls)
-+            pending = {"calls": bool(calls), "responses": False, "content": bool(text)}
++            # The content before the calls, or (content_after_calls) after the calls and their results.
++            later = text if c.get("content_after_calls") else ""
++            out += text[len(later):] + "".join(g4_call(x["function"]) for x in calls)
++            pending = {"calls": bool(calls), "responses": False, "content": bool(text), "later": later}
 +        else:
 +            out += (c["user_prefix"] if role == "user" else c["system_prefix"]) + g4_text(m.get("content"), trim=True) + c["suffix"]
 +        prior = role
 +    after = None
 +    if pending:
-+        out += g4_close(c, pending, None)
++        out += pending["later"] + g4_close(c, pending, None)
 +        if pending["calls"]:
 +            after = "response" if pending["responses"] else "call"
 +    if gen:
 +        if after is None:
-+            out += c["generation_prompt"]
++            out += c["generation_prompt"] if on else c["generation_prompt_plain"]
 +        elif after == "response" and on:
 +            out += c["think_open"]
 +    return out
@@ -293,9 +296,10 @@
 +    c["assistant_prefix"] = gap[len(c["suffix"]):]
 +    c["default_system"] = ""
 +    c["trim_content"] = True
-+    base = T.render([{"role": "user", "content": "USERPROBE1"}])
-+    c["generation_prompt"] = T.render([{"role": "user", "content": "USERPROBE1"}], gen=True)[len(base):]
-+    c["generation_prompt_plain"] = c["generation_prompt"]
++    # Generation prompts with thinking on and off (Gemma 4 12B/26B: an empty thought channel only with thinking off).
++    user1 = [{"role": "user", "content": "USERPROBE1"}]
++    gen = lambda on: T.render(user1, gen=True, enable_thinking=on)[len(T.render(user1, enable_thinking=on)):]
++    c["generation_prompt"], c["generation_prompt_plain"] = gen(True), gen(False)
 +    on = strip(T.render([{"role": "user", "content": "USERPROBE1"}], enable_thinking=True))
 +    if not on.endswith(single) or not on.startswith(c["system_prefix"]):
 +        raise ProbeError("enable_thinking does not add a system turn")
@@ -306,7 +310,12 @@
 +    mid = between(agent, "USERPROBE1", "ASSTPROBE1")
 +    pre = mid[:mid.index("REASONPROBE")]
 +    c["think_open"] = pre[pre.index(c["assistant_prefix"]) + len(c["assistant_prefix"]):]
-+    c["think_close"] = mid[mid.index("REASONPROBE") + len("REASONPROBE"):]
++    # The thought channel's close ends where the turn's content or calls start: Gemma 4's own templates render the
++    # calls and their results first and the content after them (content_after_calls), some fine-tunes' the content first.
++    c["think_close"] = mid[mid.index("REASONPROBE") + len("REASONPROBE"):].split("<|tool_call>")[0]
++    content_after = agent.index("ASSTPROBE1") > agent.index("<|tool_call>")
++    if content_after:
++        c["content_after_calls"] = True
 +    c["think_end"] = c["think_close"].strip()
 +    c["history_think"], c["history_think_scope"] = "nonempty", "after_last_query"
 +    c["starts_in_reasoning"] = False  # the model opens the thought channel itself (output state 3 detects it)
@@ -324,8 +333,9 @@
 +    c["nonspecial_tokens"] = ["<|channel>", "<channel|>", "<|tool_call>", "<tool_call|>", '<|"|>']
 +    expect = {"tool declaration": T.render([{"role": "user", "content": "U"}], tools=TOOLS[:1]),
 +              "tool call": agent}
++    answered = g4_call(CALL1) + c["tool_item_prefix"] + "get_weather{value:" + G4_Q + "TOOLPROBE1" + G4_Q + c["tool_item_suffix"]
 +    want = {"tool declaration": "<|tool>" + g4_declaration(TOOLS[0]) + "<tool|>",
-+            "tool call": g4_call(CALL1) + c["tool_item_prefix"] + "get_weather{value:" + G4_Q + "TOOLPROBE1" + G4_Q + c["tool_item_suffix"]}
++            "tool call": answered + "ASSTPROBE1" if content_after else "ASSTPROBE1" + answered}
 +    for k, v in want.items():
 +        if v not in expect[k]:
 +            raise ProbeError(f"gemma4 {k} syntax differs from the template: {v!r} not in {expect[k]!r}")
@@ -335,7 +345,7 @@
  def verify(template_text, chat, bos="", eos=""):
      """Returns [(name, ok, detail)]: template render vs simulate() for each conversation."""
      T = Template(template_text, bos, eos)
-@@ -516,7 +808,7 @@
+@@ -535,7 +837,7 @@
      extra = [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL, CALL2], reasoning="R"),
                                     {"role": "tool", "tool_call_id": "call_0", "content": "ok"}], TOOLS)] \
          if chat["call_format"] == "pythonic" else []
@@ -344,7 +354,7 @@
          for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
              label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")
              try:
-@@ -578,3 +870,21 @@
+@@ -599,3 +901,21 @@
  
  if __name__ == "__main__":
      main()
@@ -626,7 +636,7 @@
  assert QH % KVH == 0 and G <= 16, "need heads % kv_heads == 0 and at most 16 query heads per KV head"
  assert HG <= 256 and H % 32 == 0, "hidden must be a multiple of 32 and at most 8192"
  UNROLL = int(os.environ.get("ATTN_UNROLL", "16"))   # keys per decode-attention block
-@@ -1005,7 +1021,10 @@
+@@ -1016,7 +1032,10 @@
          scf.yield %nx : f32
        }}""")
      if swiglu:
@@ -638,7 +648,7 @@
        %value = scalar.mulf %silu, %t1 : f32""")
      else:
          L.append("      %value = scalar.addf %t0, %zero_f : f32")
-@@ -1466,6 +1485,21 @@
+@@ -1477,6 +1496,21 @@
  """
  
  
@@ -660,7 +670,7 @@
  ROW_SCALE = r"""
  
  // Per-row power-of-two scale (as g_row_scale) plus the scaled row as F16, the
-@@ -1861,11 +1895,11 @@
+@@ -1872,11 +1906,11 @@
      yt = ", ".join(["f32"] * n)
      xs = ", ".join(f"%x{i}" for i in range(n))
      t = [f"""
@@ -674,7 +684,7 @@
    %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
    %layer = index.assume %layer_arg [range(%layer_arg, 0, {L - 1})] : index
    %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-@@ -1885,8 +1919,10 @@
+@@ -1896,8 +1930,10 @@
    %c15 = index.constant 15 : index
    %c16 = index.constant 16 : index
    %cqh = index.constant {QH} : index
@@ -686,7 +696,7 @@
    %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
    %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
    %position32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
-@@ -1904,8 +1940,10 @@
+@@ -1915,8 +1951,10 @@
    %zero_f = scalar.constant 0.0 : f32
  """]
      for j, idx in enumerate(freq_idx):
@@ -699,7 +709,7 @@
          t.append(f"""  // angle = position * theta^(-2i/RD) = position * exp(-i * 2 ln(theta) / RD)
    %li{j} = index.cast {idx} : index to i32
    %lf{j} = scalar.sitofp %li{j} : i32 to f32
-@@ -1998,8 +2036,22 @@
+@@ -2009,8 +2047,22 @@
      for i in range(n):
          t.append(f"""        %h{i} = scalar.fptrunc %r{i} : f32 to f16
          view.store %h{i}, %k_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>
@@ -724,7 +734,7 @@
          view.store %vh{i}, %v_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>""")
      t.append("""      }
      }
-@@ -2010,6 +2062,18 @@
+@@ -2021,6 +2073,18 @@
      return "\n".join(t)
  
  
@@ -743,7 +753,7 @@
  def listed(text, name, grid_rest):
      """Variant of a per-token kernel dispatched over the tokens in `list`
      (count read from a device buffer for indirect dispatch)."""
-@@ -2273,7 +2337,7 @@
+@@ -2284,7 +2348,7 @@
      %stop = index.min %stop_raw, %visible : index
      %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
      %q_raw = vector.load %q_view[%token, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
@@ -752,7 +762,7 @@
      %scale_v = vector.splat %scale : vector<4xf32>
      %q4 = vector.mulf %q_raw, %scale_v : vector<4xf32>
      %zero4 = vector.splat %zero_f : vector<4xf32>
-@@ -2392,12 +2456,140 @@
+@@ -2403,12 +2467,140 @@
  
  
  def attention():
@@ -899,7 +909,7 @@
  
  
  FALLBACK = r"""
-@@ -2575,9 +2767,22 @@
+@@ -2586,9 +2778,22 @@
            %is_best = scalar.cmpf oeq, %lv, %best : f32
            %cand_id = scf.select %is_best, %li, %big : i32
            %winner = kernel.workgroup.reduce<minsi> %cand_id : i32
@@ -923,7 +933,7 @@
              view.store %winner, %cand_i[%rr] : i32, view<64xi32>
            }}
            scf.yield %best, %winner : f32, i32
-@@ -2691,7 +2896,13 @@
+@@ -2702,7 +2907,13 @@
          args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
          types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
          mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
@@ -938,7 +948,7 @@
      args = args.replace(f", {x}, {s},", f", {x16}, {s},")
      iq = ACT_Q8 and fmt in IQ_FMTS and kval // 32 <= 1024   # wider K (mv_wide: DFlash feature projections) stays f32
      if iq:   # int8 copy (g_quant_q8, launched beside the g_row_scale_f16 that makes x16): see quant_wiring()
-@@ -3042,7 +3253,9 @@
+@@ -3054,7 +3265,9 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -949,7 +959,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -3555,7 +3768,20 @@
+@@ -3567,7 +3780,20 @@
    %h16 = buffer.alloca<global> align(256) %h16_size : buffer
    %o16 = buffer.alloca<global> align(256) %o16_size : buffer
    %f16 = buffer.alloca<global> align(256) %f16_size : buffer
@@ -970,7 +980,7 @@
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if FUSED_Q:
-@@ -3585,71 +3811,71 @@
+@@ -3597,71 +3823,71 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1096,7 +1106,7 @@
          T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
          fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
          if fg == fu:
-@@ -3660,20 +3886,20 @@
+@@ -3672,20 +3898,20 @@
              T.append(f"  kernel.launch @g_silu_mul[%t](%t, {nff(i)}, %f, %fu) : [index](index, index, buffer, buffer)\n")
          T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {nff(i)}, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
          T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", nff(i), "%nH", FFL[i]) + "\n")
@@ -1127,7 +1137,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -3791,8 +4017,9 @@
+@@ -3818,8 +4044,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1139,7 +1149,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if RECUR:
-@@ -3804,13 +4031,27 @@
+@@ -3831,13 +4058,27 @@
      env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
      # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
      env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")

@@ -14,6 +14,7 @@ import gguf
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chat_probe  # noqa: E402
+import formats  # noqa: E402
 
 path, out = sys.argv[1], sys.argv[2]
 r = gguf.GGUFReader(path)
@@ -142,8 +143,7 @@ if template:
         print("WARNING: chat template not derivable automatically:", e)
 fmts = sorted({v["type"] for k, v in tensors.items() if k.endswith(".weight") and len(v["shape"]) == 2})
 print(f"{cfg['name']}: arch={arch} L={L} H={H} heads={heads}/{cfg['kv_heads']} d={head_dim} ffn={cfg['ffn']} vocab={vocab} formats={fmts}")
-unsupported = [f for f in fmts if f not in ("q4_k", "q5_k", "q6_k", "q8_0", "q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16")
-               and not (f == "f32" and cfg.get("gdn"))]  # f32 conv1d weights are read directly by the GDN kernels
+unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
 if unsupported:
     print("WARNING: no kernels for", unsupported, "- add dequant helpers (see reference/porting-notes.md)")
 if head_dim not in (128, 256):

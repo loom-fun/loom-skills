@@ -1068,6 +1068,72 @@ func.def @g4_calls_text(%request: buffer, %begin: i64, %length: i64) -> (buffer)
   func.return %result : buffer
 }
 
+// @@IF_CHAT:content_after_calls@@
+// Gemma 4's own templates render an assistant turn as thought, calls, their results, then the content
+// (chat.content_after_calls; build.py keeps this variant only then). The results of the calls in the
+// request's tool_calls range [cb, cb + cl): the tool messages from index %from up to the next other
+// role, as one text, and whether there were any.
+func.def @g4_responses(%request: buffer, %elements: buffer, %count: i64, %from: i64, %cb: i64, %cl: i64) -> (buffer, i1) {
+  %origin = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %false = scalar.constant false : i1
+  %object_type = scalar.constant 2 : i64
+  %empty = global.load @empty : buffer
+  %role_key = global.load @role_key : buffer
+  %content_key = global.load @content_key : buffer
+  %tool_role = global.load @tool_role : buffer
+  %tool_call_id_key = global.load @g4_key_tool_call_id : buffer
+  %name_key = global.load @g4_key_name : buffer
+  %unknown = global.load @g4_unknown : buffer
+  %item_prefix = global.load @tool_item_prefix : buffer
+  %value_open = global.load @g4_value_open : buffer
+  %item_suffix = global.load @tool_item_suffix : buffer
+  %quote = global.load @g4_quote : buffer
+  %bounded = scalar.assume %count [range(%count, 0, 1048576)] : i64
+  %n = index.cast %bounded : i64 to index
+  %bounded_from = scalar.assume %from [range(%from, 0, 1048576)] : i64
+  %start = index.cast %bounded_from : i64 to index
+  %records = buffer.view %elements[%origin] : buffer -> view<[%n]x5xi64>
+  %text, %found, %stopped = scf.for %i = [%start to %n step %c1](%acc = %empty : buffer, %any = %false : i1, %done = %false : i1) -> (buffer, i1, i1) {
+    %vb = view.load %records[%i, 2] : view<[%n]x5xi64> -> i64
+    %vl = view.load %records[%i, 3] : view<[%n]x5xi64> -> i64
+    %vt = view.load %records[%i, 4] : view<[%n]x5xi64> -> i64
+    %is_object = scalar.cmpi eq, %vt, %object_type : i64
+    %is_tool = scf.if %is_object -> (i1) {
+      %rf, %role = func.call @g4_string_member(%request, %vb, %vl, %role_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+      %same = func.call @equal(%role, %tool_role) : (buffer, buffer) -> (i1)
+      scf.yield %same : i1
+    } else {
+      scf.yield %false : i1
+    }
+    %not_done = scalar.cmpi eq, %done, %false : i1
+    %take = scalar.andi %is_tool, %not_done : i1
+    %next = scf.if %take -> (buffer) {
+      %cf, %cbg, %clg, %ct = func.call @json_lookup(%request, %vb, %vl, %content_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+      %nf, %own_name = func.call @g4_string_member(%request, %vb, %vl, %name_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+      %own_length = buffer.length %own_name
+      %has_own = index.cmp ne, %own_length, %origin : offset
+      %fallback = scf.select %has_own, %own_name, %unknown : buffer
+      %idf, %call_id = func.call @g4_string_member(%request, %vb, %vl, %tool_call_id_key) : (buffer, i64, i64, buffer) -> (i1, buffer)
+      %name = func.call @g4_call_name(%request, %cb, %cl, %call_id, %fallback) : (buffer, i64, i64, buffer, buffer) -> (buffer)
+      %body = func.call @g4_content(%request, %cf, %cbg, %clg, %ct, %false, %false) : (buffer, i1, i64, i64, i64, i1, i1) -> (buffer)
+      %head = func.call @join4(%item_prefix, %name, %value_open, %quote) : (buffer, buffer, buffer, buffer) -> (buffer)
+      %item = func.call @join4(%head, %body, %quote, %item_suffix) : (buffer, buffer, buffer, buffer) -> (buffer)
+      %appended = func.call @join(%acc, %item) : (buffer, buffer) -> (buffer)
+      scf.yield %appended : buffer
+    } else {
+      scf.yield %acc : buffer
+    }
+    %not_tool = scalar.cmpi eq, %is_tool, %false : i1
+    %other_role = scalar.andi %is_object, %not_tool : i1
+    %now_done = scalar.ori %done, %other_role : i1
+    %now_any = scalar.ori %any, %take : i1
+    scf.yield %next, %now_any, %now_done : buffer, i1, i1
+  }
+  func.return %text, %found : buffer, i1
+}
+
+// @@END_CHAT@@
 // The whole prompt (without the generation prompt) and the chat state:
 // bit 4 (16) thinking; bits 0-1 what the conversation ends with (0 a closed turn,
 // 1 calls without results, 2 tool results).
@@ -1186,7 +1252,12 @@ func.def @g4_render(%request: buffer, %tools: buffer, %thinking: i1) -> (buffer,
       %is_user = func.call @equal(%role, %user_role) : (buffer, buffer) -> (i1)
       %cf, %cbg, %clg, %ct = func.call @json_lookup(%request, %vb, %vl, %content_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
       %calls_bit = scalar.andi %state, %two64 : i64
+// @@IF_CHAT:content_after_calls@@
+      // the assistant message rendered the results with its calls (g4_responses)
+      %pending_calls = scalar.constant false : i1
+// @@ELSE_CHAT@@
       %pending_calls = scalar.cmpi ne, %calls_bit, %zero64 : i64
+// @@END_CHAT@@
       %o_text, %o_state, %o_cb, %o_cl = scf.if %is_tool -> (buffer, i64, i64, i64) {
         // A tool result belongs to the pending assistant's calls (others are not rendered).
         %t_text, %t_state = scf.if %pending_calls -> (buffer, i64) {
@@ -1245,8 +1316,23 @@ func.def @g4_render(%request: buffer, %tools: buffer, %thinking: i1) -> (buffer,
           %f2 = scalar.ori %f1, %calls_flag : i64
           %f3 = scalar.ori %f2, %content_flag : i64
           %head = func.call @join4(%acc, %close, %prefix, %thought) : (buffer, buffer, buffer, buffer) -> (buffer)
+// @@IF_CHAT:content_after_calls@@
+          // thought, calls, their results (the tool messages that follow), then the content
+          %from = scalar.addi %index64, %one64 : i64
+          %responses, %answered = scf.if %has_calls -> (buffer, i1) {
+            %r_text, %r_any = func.call @g4_responses(%request, %elements, %count, %from, %ncb, %ncl) : (buffer, buffer, i64, i64, i64, i64) -> (buffer, i1)
+            scf.yield %r_text, %r_any : buffer, i1
+          } else {
+            scf.yield %empty, %false : buffer, i1
+          }
+          %responses_flag = scf.select %answered, %four64, %zero64 : i64
+          %f4 = scalar.ori %f3, %responses_flag : i64
+          %message = func.call @join4(%head, %calls, %responses, %content) : (buffer, buffer, buffer, buffer) -> (buffer)
+          scf.yield %message, %f4, %ncb, %ncl : buffer, i64, i64, i64
+// @@ELSE_CHAT@@
           %message = func.call @join4(%head, %content, %calls, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
           scf.yield %message, %f3, %ncb, %ncl : buffer, i64, i64, i64
+// @@END_CHAT@@
         } else {
           %prefix = scf.select %is_user, %user_prefix, %system_prefix : buffer
           %content = func.call @g4_content(%request, %cf, %cbg, %clg, %ct, %true, %true) : (buffer, i1, i64, i64, i64, i1, i1) -> (buffer)
@@ -1294,7 +1380,14 @@ func.def @g4_chat_end(%state: i64) -> (buffer, i64) {
   %closed = scalar.cmpi eq, %ending, %zero64 : i64
   %after_results = scalar.cmpi eq, %ending, %two64 : i64
   %reasoning = scalar.andi %after_results, %thinking : i1
+// @@IF_CHAT:generation_prompt!=generation_prompt_plain@@
+  // thinking off opens the model turn differently (Gemma 4 12B/26B: with an empty thought channel)
+  %turn_think = global.load @generation_think : buffer
+  %turn_plain = global.load @generation_plain : buffer
+  %turn = scf.select %thinking, %turn_think, %turn_plain : buffer
+// @@ELSE_CHAT@@
   %turn = global.load @generation_think : buffer
+// @@END_CHAT@@
   %think_open = global.load @think_open : buffer
   %resume = scf.select %reasoning, %think_open, %empty : buffer
   %prompt = scf.select %closed, %turn, %resume : buffer
