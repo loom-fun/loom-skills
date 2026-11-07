@@ -9,9 +9,10 @@ FMT = {  # bytes per superblock of SB[fmt] values
     "q5_0": 22,  # projections whose rows aren't a multiple of 256 in llama.cpp Q4_K_M quants: gen_llm.Q5_0, emitted when used
     "f16": 64,   # small F16 projections of unsloth UD quants (Qwen3.5 ssm_alpha/beta): @g_f16_values, emitted when used
     "bf16": 64,  # BF16 matrices (vendor drafters published only in BF16, used as-is): @g_bf16_values, emitted when used
+    "mxfp4": 17,  # OCP MX FP4 (gpt-oss experts): E8M0 scale byte + 16 bytes of E2M1 nibbles: gen_llm.MXFP4, emitted when used
 }
 SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "f32": 32,
-      "q4_0": 32, "iq4_nl": 32, "iq4_xs": 256, "q3_k": 256, "iq3_s": 256, "q5_0": 32, "f16": 32, "bf16": 32}
+      "q4_0": 32, "iq4_nl": 32, "iq4_xs": 256, "q3_k": 256, "iq3_s": 256, "q5_0": 32, "f16": 32, "bf16": 32, "mxfp4": 32}
 LOWBIT = {"q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s"}
 # Formats whose decode matvecs and head take int8 activations (ACT_Q8): gen_llm.py has their @g_<fmt>_icodes.
 ICODES = frozenset({"q8_0", "q4_k", "q5_k", "q6_k", "q5_0"})

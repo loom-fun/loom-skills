@@ -3,7 +3,7 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import chat_probe as c
 S = {
- "a_start": "<|start|>", "a_message": "<|message|>", "a_eot": "<|eot|>", "a_eom": "<|eom|>",
+ "ch_start": "<|start|>", "ch_message": "<|message|>", "a_eot": "<|eot|>", "ch_close": "<|eom|>",
  "a_system_open": "<|start|>system<|message|>", "a_user_open": "<|start|>user<|message|>",
  "a_assistant_to": "<|start|>assistant to=", "a_self_open": "<|start|>assistant to=self<|message|>",
  "a_answer_open": "<|start|>assistant to=user<|message|>", "a_tool_open": "<|start|>tool ",
@@ -14,7 +14,7 @@ S = {
  "a_fn_open": '\n{"name": "', "a_fn_desc": '", "description": ', "a_fn_params": ', "parameters": ', "a_fn_close": "}",
  "a_quote": '"', "a_null": "null",
  "a_recipients": '\n\n# Valid recipients: "self", ', "a_recipient_close": '.*", ', "a_recipients_end": '"user".<|eot|>',
- "a_generation": c.ATEM_GENERATION,
+ "ch_generation": c.ATEM_GENERATION,
  "a_calls_open": '<atem:function_calls>\n<atem:invoke name="', "a_tag_end": '">\n', "a_param_open": '<atem:parameter name="',
  "a_param_mid": '">', "a_param_close": "</atem:parameter>\n", "a_calls_close": "</atem:invoke>\n</atem:function_calls>",
  "a_invoke": '<atem:invoke name="', "a_attr_end": '">', "a_param_end": "</atem:parameter>", "a_invoke_end": "</atem:invoke>",
