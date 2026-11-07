@@ -27,10 +27,10 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 
 | metric | llama.cpp | Loom | margin | roofline | Loom % of roofline | DevLab llama.cpp | DevLab Loom | local ÷ DevLab (llama.cpp, Loom) |
 |---|---|---|---|---|---|---|---|---|
-| decode tok/s, short prompt | 70.6 | 92.4 ¹ † | +31 % | 177.8 | 52 % | 70.6 | 92.4 ² | 1.00, 1.00 |
+| decode tok/s, short prompt | 70.6 | 92.4 ¹ † | +31 % | 177.8 | 52 % | 67.1 | 55.5 ² | 1.05, 1.66 |
 | decode tok/s, 2k context | 54.7 | 76.3 | +39 % | 173.4 | 44 % | — | — | — |
 | decode tok/s, 32k context | 49.5 | 47.8 | -3 % | 141.3 | 34 % | — | — | — |
-| prefill tok/s, 1k document | 1038.0 | 956.9 ¹ † | -8 % | 12248.4 | 8 % | 1038.0 | 956.9 ² | 1.00, 1.00 |
+| prefill tok/s, 1k document | 1038.0 | 956.9 ¹ † | -8 % | 12248.4 | 8 % | 986.1 | 574.2 ² | 1.05, 1.67 |
 | prefill tok/s, 2k document | 1079.0 | 1316.4 | +22 % | 11945.5 | 11 % | — | — | — |
 | prefill tok/s, 8k document | 1094.1 | 1424.7 | +30 % | 10484.7 | 14 % | — | — | — |
 | prefill tok/s, 16k document | 929.3 | 1359.0 | +46 % | 9014.9 | 15 % | — | — | — |

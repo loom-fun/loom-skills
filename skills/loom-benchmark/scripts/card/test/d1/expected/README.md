@@ -41,7 +41,6 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 - Loom: speculative decoding off.
 - Same GGUF on both engines, tokens per second. Loom: client-side timing; llama.cpp: server-side timings. Runs per value: decode and prefill not recorded (mean), 4 streams not recorded (median).
 - Measured 2026-10-29; device not recorded; hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered); source: [loom-factory run 40842422037](https://github.com/loom-fun/loom-skills/actions/runs/40842422037).
-- DevLab: the same measurement on an AMD DevLab Dispatch Strix Halo runner; local ÷ DevLab is the local value over the DevLab value of each engine, recorded for comparison, not a verdict.
 - Roofline: not computed.
 - — not measured; n/a not applicable.
 

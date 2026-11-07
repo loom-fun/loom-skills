@@ -24,7 +24,14 @@ py "$C/make_info.py" perf --loom-jsonl "$F/evidence/loom.jsonl" --llama-jsonl "$
 mkdir -p "$tmp/rebuilt"; cp -r "$F/pkg/." "$tmp/rebuilt/"; echo "// another build" >> "$tmp/rebuilt/program/llm.loom"
 py "$C/make_info.py" perf --loom-jsonl "$F/evidence/verify_loom.jsonl" --llama-jsonl "$F/evidence/verify_llama.jsonl" \
   --metrics decode,prefill_1k "${SRC[@]}" --package "$tmp/rebuilt" -o "$tmp/perf2.json" 2>/dev/null
-py "$C/make_info.py" perf --loom-jsonl "$F/evidence/verify_loom.jsonl" --llama-jsonl "$F/evidence/verify_llama.jsonl" \
+dlrows() {  # dlrows IN OUT FACTOR: the verify rows as a DevLab runner measured them (rates x FACTOR: a real gap)
+  py -c "import json, sys; f = float(sys.argv[3]); rs = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+for r in rs:
+    r['decode_tps'] = round(r['decode_tps'] * f, 1); r['prefill'] = [dict(p, prefill_tps=round(p['prefill_tps'] * f, 1)) for p in r['prefill']]
+open(sys.argv[2], 'w').write(''.join(json.dumps(r) + '\n' for r in rs))" "$@"
+}
+dlrows "$F/evidence/verify_loom.jsonl" "$tmp/dl_loom.jsonl" 0.6; dlrows "$F/evidence/verify_llama.jsonl" "$tmp/dl_llama.jsonl" 0.95
+py "$C/make_info.py" perf --loom-jsonl "$tmp/dl_loom.jsonl" --llama-jsonl "$tmp/dl_llama.jsonl" \
   --metrics decode,prefill_1k "${SRC[@]}" --source-kind devlab --run 3003 -o "$tmp/perf_dl.json" 2>/dev/null
 py "$C/make_info.py" gates "$F/evidence/gates.json" "${SRC[@]}" -o "$tmp/gates.json" 2>/dev/null
 # the roofline (evidence/roofline.json: `make_info.py roofline --package pkg --acceptance 0.68` on the real GGUF; CI

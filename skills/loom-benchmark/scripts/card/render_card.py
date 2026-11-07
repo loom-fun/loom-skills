@@ -328,16 +328,17 @@ def render(d):
           f"- Loom: speculative decoding {drafting(facts['spec'])}.",
           "- Same GGUF on both engines, tokens per second. Loom: client-side timing; "
           f"{bname}: server-side timings. Runs per value: decode and prefill {runs_of(tps_keys, False)} (mean), "
-          f"4 streams {runs_of(['streams4'], True)} (median).",
-          f"- Measured {text(sessions[primary]['date'] if primary is not None else None)}; device "
-          f"{device_text(psrc['device'] if psrc else None)}; hrx-loom {sdk_text(psrc['hrx_loom'] if psrc else None)}; "
-          f"source: {src_text(psrc)}."]
+          f"4 streams {runs_of(['streams4'], True)} (median)."]
+    if psrc:   # a card with no local value (DevLab-only) describes its sessions in the marked footnotes alone
+        L.append(f"- Measured {text(sessions[primary]['date'])}; device {device_text(psrc['device'])}; "
+                 f"hrx-loom {sdk_text(psrc['hrx_loom'])}; source: {src_text(psrc)}.")
     for i, (sid, date) in enumerate(notes, 1):
         s = sources[sid]
         L.append(f"- {mark(i)} Measured {text(date)}; device {device_text(s['device'])}; hrx-loom {sdk_text(s['hrx_loom'])}; "
                  f"source: {src_text(s)}.")
-    L.append("- DevLab: the same measurement on an AMD DevLab Dispatch Strix Halo runner; local ÷ DevLab is the local "
-             "value over the DevLab value of each engine, recorded for comparison, not a verdict.")
+    if any(k in dshown for k, _ in METRICS if metric_applies(k, kind, feats)):
+        L.append("- DevLab: the same measurement on an AMD DevLab Dispatch Strix Halo runner; local ÷ DevLab is the "
+                 "local value over the DevLab value of each engine, recorded for comparison, not a verdict.")
     for sha in sorted(set(stale.values()) | set(dstale.values())):
         L.append(f"- {STALE} Measured on programs other than this repository's (sha256 {short(sha)}, this repository's "
                  f"{short(here)}): the value describes another build of the package until a session re-measures it.")

@@ -60,10 +60,10 @@ perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign
 
 | metric | engine | runs | value |
 |---|---|---|---|
-| decode tok/s, short prompt | Loom | 92.1, 92.7 | 92.4 (32 % of drafted tokens accepted) |
-| decode tok/s, short prompt | llama.cpp | 70.2, 71.0 | 70.6 |
-| prefill tok/s, 1k document | Loom | 950.2, 963.6 | 956.9 |
-| prefill tok/s, 1k document | llama.cpp | 1031.0, 1045.0 | 1038.0 |
+| decode tok/s, short prompt | Loom | 55.3, 55.6 | 55.5 (32 % of drafted tokens accepted) |
+| decode tok/s, short prompt | llama.cpp | 66.7, 67.5 | 67.1 |
+| prefill tok/s, 1k document | Loom | 570.1, 578.2 | 574.2 |
+| prefill tok/s, 1k document | llama.cpp | 979.4, 992.8 | 986.1 |
 
 ## Session 3: local run, 2026-11-06
 

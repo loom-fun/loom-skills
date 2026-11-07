@@ -204,27 +204,27 @@
     "metrics": {
      "decode": {
       "acceptance": 0.325,
-      "baseline": 70.6,
+      "baseline": 67.1,
       "baseline_runs": [
-       70.2,
-       71.0
+       66.7,
+       67.5
       ],
-      "loom": 92.4,
+      "loom": 55.5,
       "loom_runs": [
-       92.1,
-       92.7
+       55.3,
+       55.6
       ]
      },
      "prefill_1k": {
-      "baseline": 1038.0,
+      "baseline": 986.1,
       "baseline_runs": [
-       1031.0,
-       1045.0
+       979.4,
+       992.8
       ],
-      "loom": 956.9,
+      "loom": 574.2,
       "loom_runs": [
-       950.2,
-       963.6
+       570.1,
+       578.2
       ]
      }
     },
