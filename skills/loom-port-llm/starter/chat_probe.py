@@ -346,8 +346,12 @@ def derive(template_text, bos="", eos=""):
                 break
         if printed:
             break
+    if not printed and all(xml_tool(t) in t_plain for t in TOOLS):
+        # Tool declarations as XML elements (Qwen3-Coder: <function><name>..</name><parameters>..): tools_format "xml".
+        printed, chat["tools_function_only"], chat["tools_format"] = [xml_tool(t) for t in TOOLS], True, "xml"
+        notes.append("template declares tools as XML elements (tools_format xml)")
     if not printed:
-        raise ProbeError("tool definitions are not printed as JSON objects one per line; fill tools_* by hand")
+        raise ProbeError("tool definitions are not printed as JSON objects or XML elements one per line; fill tools_* by hand")
     first_tool = t_plain.index(printed[0])
     in_user = t_plain.rfind(chat["user_prefix"], 0, first_tool)
     if in_user >= 0 and chat["suffix"] not in t_plain[in_user + len(chat["user_prefix"]):first_tool]:
@@ -539,10 +543,9 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
     preamble = "system_preamble" in chat   # Llama 3: the system block is always printed, opening with fixed text
     in_user = bool(tools) and chat.get("tools_in_user", False)   # Llama 3: tools open the first user message
     if tools:
-        printed = chat.get("tool_separator", "").join(
-            chat["tool_line_prefix"] + json.dumps(t["function"] if chat["tools_function_only"] else t, ensure_ascii=False,
-                                                  indent=chat.get("tools_indent"))
-            for t in tools)
+        declare = xml_tool if chat.get("tools_format") == "xml" else lambda t: json.dumps(
+            t["function"] if chat["tools_function_only"] else t, ensure_ascii=False, indent=chat.get("tools_indent"))
+        printed = chat.get("tool_separator", "").join(chat["tool_line_prefix"] + declare(t) for t in tools)
         tb = chat["tools_prefix"] + printed + chat["tools_suffix"]
         sep = chat["tools_system_separator"] if body else ""
     if preamble:
@@ -622,6 +625,48 @@ def render_call(chat, call):
             + "".join(f"<arg_key>{k}</arg_key><arg_value>{val(v)}</arg_value>" for k, v in args.items()) + "</tool_call>")
 
 
+def xml_tool(tool):
+    """One tool declaration as Qwen3-Coder's template prints it (control.loom @xml_tool, chat.tools_format "xml"):
+    the function's name, trimmed description, each parameter's name, type, trimmed description and other keys,
+    then the parameters' and the function's other keys, each as <key>value</key>. A value is printed as Jinja's
+    `| string` (Loom prints the request's JSON text for containers and numbers: py_value), so a list-valued
+    parameter type prints as JSON where the template prints Python's repr."""
+    string = lambda v: v if isinstance(v, str) else py_value(v)
+    t = tool.get("function", tool)
+    extra = lambda d, handled: "".join(f"\n<{k}>{string(v)}</{k}>" for k, v in d.items() if k not in handled) \
+        if isinstance(d, dict) else ""
+    out = "<function>\n<name>" + string(t["name"]) + "</name>"
+    if "description" in t:
+        out += "\n<description>" + string(t["description"]).strip() + "</description>"
+    out += "\n<parameters>"
+    params = t.get("parameters")
+    if isinstance(params, dict) and isinstance(params.get("properties"), dict):
+        for name, fields in params["properties"].items():
+            out += "\n<parameter>\n<name>" + name + "</name>"
+            if isinstance(fields, dict) and "type" in fields:
+                out += "\n<type>" + string(fields["type"]) + "</type>"
+            if isinstance(fields, dict) and "description" in fields:
+                out += "\n<description>" + string(fields["description"]).strip() + "</description>"
+            out += extra(fields, ("name", "type", "description")) + "\n</parameter>"
+    out += extra(params, ("type", "properties")) + "\n</parameters>"
+    return out + extra(t, ("type", "name", "description", "parameters")) + "\n</function>"
+
+
+# Declarations with every key kind xml_tool models: no description, nested and list values, numbers, booleans, null,
+# a parameter without a type, parameters without properties, and keys beside the function's own.
+TYPED_TOOLS = [
+    {"type": "function", "function": {"name": "edit_file", "description": "  Edit a file.\n", "strict": True,
+     "parameters": {"type": "object", "properties": {
+         "path": {"type": "string", "description": " Absolute path. "},
+         "mode": {"type": "string", "enum": ["append", "replace"], "default": "replace"},
+         "lines": {"type": "array", "items": {"type": "integer", "minimum": 0}, "maxItems": 100},
+         "ratio": {"type": "number", "minimum": 0.5, "exclusiveMaximum": False, "nullable": None},
+         "anything": {"description": "No type."}},
+         "required": ["path"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "ping", "parameters": {"type": "object"}}},
+]
+
+
 def py_value(v):
     """LFM2 template's format_arg_value: quoted escaped strings, tojson containers, str() otherwise."""
     if isinstance(v, str):
@@ -660,6 +705,8 @@ def verify(template_text, chat, bos="", eos=""):
         [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL]),
                               {"role": "tool", "tool_call_id": "call_0", "content": 'say "hi"\n\tback\\slash é'}], TOOLS)] \
         if chat["call_format"] == "json" else []
+    if chat.get("tools_format") == "xml":
+        extra.append(("typed tool declarations", [{"role": "user", "content": "Edit it"}], TYPED_TOOLS))
     for name, msgs, tools in CONVERSATIONS + extra:
         for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
             label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")
