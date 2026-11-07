@@ -86,6 +86,36 @@ if VIS:   # a media epoch: 8-word records, token 1 carries a feature row (copied
     xm[1] = feat / np.sqrt((feat * feat).mean() + 1e-5) if cfg.get("embed_norm") else feat   # the weightless embedding norm applies to features too
     hm = xm / np.sqrt((xm * xm).mean(-1, keepdims=True) + eps) * w
     for n, a in [("m_pk", packet), ("m_meta", meta), ("m_info", tinfo), ("m_x", xm.astype(np.float32)), ("m_h", hm.astype(np.float32))]: save(n, a)
+    # DeepStack: g_deepstack adds feature slice `level` of image inputs (tokens 1 and 3) to x and renormalizes h
+    NDS = int((cfg.get("vision") or {}).get("deepstack") or 0)
+    if NDS:
+        level = NDS; drng = np.random.default_rng(7)
+        drows = drng.standard_normal((2, (NDS + 1) * H)).astype(np.float32)
+        drecs = np.zeros((t, 8), np.int32); drecs[:, 0] = ids; drecs[1, 1] = t * 32; drecs[3, 1] = t * 32 + (NDS + 1) * H * 4
+        dpk = np.concatenate([drecs.reshape(-1), drows.reshape(-1).view(np.int32)])
+        x0 = drng.standard_normal((t, H)).astype(np.float32); h0 = drng.standard_normal((t, H)).astype(np.float32)
+        xd, hd = x0.copy(), h0.copy()
+        for j, tok in enumerate((1, 3)):
+            xd[tok] = x0[tok] + drows[j, level * H:(level + 1) * H]
+            hd[tok] = xd[tok] / np.sqrt((xd[tok] * xd[tok]).mean() + eps) * w
+        for n, a in [("d_pk", dpk), ("d_x0", x0), ("d_h0", h0), ("d_x", xd), ("d_h", hd.astype(np.float32))]: save(n, a)
+        cases.append(f"""check.case public @deepstack_media {{
+  %t = check.literal value({t}) : index
+  %level = check.literal value({level}) : index
+  %pk = check.file.read.npy path("d_pk.npy") : {ty(dpk)}
+  %meta = check.file.read.npy path("m_meta.npy") : tensor<4xi32>
+  %tinfo = check.file.read.npy path("m_info.npy") : tensor<{t}x4xi32>
+  %w = check.file.read.npy path("e_w.npy") : tensor<{H}xf32>
+  %x = check.file.read.npy path("d_x0.npy") : tensor<{t}x{H}xf32>
+  %h = check.file.read.npy path("d_h0.npy") : tensor<{t}x{H}xf32>
+  %ex = check.file.read.npy path("d_x.npy") : tensor<{t}x{H}xf32>
+  %eh = check.file.read.npy path("d_h.npy") : tensor<{t}x{H}xf32>
+  kernel.launch @g_deepstack[%t](%t, %level, %pk, %meta, %tinfo, %w, %x, %h) : [index](index, index, {ty(dpk)}, tensor<4xi32>, tensor<{t}x4xi32>, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
+  check.expect.close actual(%x) expected(%ex) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.return
+}}
+""")
     cases.append(f"""check.case public @embed_media {{
   %t = check.literal value({t}) : index
   %pk = check.file.read.npy path("m_pk.npy") : {ty(packet)}
