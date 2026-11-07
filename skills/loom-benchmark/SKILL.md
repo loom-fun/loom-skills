@@ -216,7 +216,9 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     keeps that history: it is a prefix of this prompt, or (output not verified by the golden) agrees with
     it for ≥ 80 % of its tokens. Output that matched the golden and that the template re-renders (Gemma 4
     adds a `\n` before `<channel|>`) is not required: loom-serve reuses only exact extensions of a
-    retained history (a note prints where the template changed it).
+    retained history (a note prints where the template changed it). Neither is a turn after a reply whose
+    parse dropped generated text (a second call where the template takes one: Llama 3.1): the retained history
+    holds tokens no rebuilt prompt has.
   - `calls_ok`: tool calls name a declared function with JSON arguments.
   - golden: Loom's turn vs llama.cpp `/completion` on the same prompt ids; a
     divergence must be a near-tie (the compare rule). Loom's turn is its parsed reply re-tokenized, so

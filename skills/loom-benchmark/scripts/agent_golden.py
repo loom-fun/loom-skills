@@ -139,6 +139,13 @@ def main():
                 exact = prompt.startswith(prev_text)
                 rewritten = not exact and turns[-1].get("golden_match") is True   # previous output verified
                 rec["history_verbatim"] = exact or (common >= 0.8 * len(pids) and not rewritten)
+                if exact and turns[-1].get("output_dropped"):
+                    # The previous reply's parse dropped generated text (a second call where the template takes one,
+                    # text after the last call): the retained history holds output this prompt does not, so it is no
+                    # exact extension, whatever the rebuilt text says.
+                    rec["history_verbatim"], rec["history_rewritten_at"] = False, turns[-1]["output_dropped"]
+                    print(f"     note: the previous reply generated {turns[-1]['output_dropped'][1]} tokens, its parsed channels "
+                          f"account for {turns[-1]['output_dropped'][0]}: the rest is not in this prompt, so nothing is reusable", flush=True)
                 if rewritten and common >= 0.8 * len(pids):
                     rec["history_rewritten_at"] = [common, len(pids)]
                     print(f"     note: the template re-renders the previous turn from token {common} of {len(pids)}; loom-serve reuses"
@@ -220,11 +227,17 @@ def main():
             if ch["finish_reason"] == "stop" and not (m.get("content") or m.get("tool_calls")):
                 print("     note: the model ended inside its reasoning (EOS before the think close); with greedy decoding"
                       " small thinking models do this - compare llama.cpp's choice at that point, not a Loom bug by itself")
-            turns.append(rec)
-            prev_total = u["prompt_tokens"] + u["completion_tokens"]
             # The history this turn leaves: its output as the golden comparison settled it (e.g. the model's own
             # whitespace between calls, which the template may re-render), else the plain rebuild.
-            prev_text = prompt + (raw if raw is not None else P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt))
+            out_text = raw if raw is not None else P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
+            # Generated tokens the parsed reply does not account for (beyond the stop token and a few re-tokenization
+            # splits): text the parser dropped.
+            shown = len(P.ids(out_text))
+            if u["completion_tokens"] > shown + 1 + max(3, shown // 10):
+                rec["output_dropped"] = [shown, u["completion_tokens"]]
+            turns.append(rec)
+            prev_total = u["prompt_tokens"] + u["completion_tokens"]
+            prev_text = prompt + out_text
             # loom-serve rejects "reasoning_content": null, so only send it when present.
             msgs.append({"role": "assistant", "content": m.get("content") or "",
                          **({"reasoning_content": m["reasoning_content"]} if m.get("reasoning_content") else {}),
