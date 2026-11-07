@@ -140,9 +140,8 @@ def main():
                 rewritten = not exact and turns[-1].get("golden_match") is True   # previous output verified
                 rec["history_verbatim"] = exact or (common >= 0.8 * len(pids) and not rewritten)
                 if exact and turns[-1].get("output_dropped"):
-                    # The previous reply's parse dropped generated text (a second call where the template takes one,
-                    # text after the last call): the retained history holds output this prompt does not, so it is no
-                    # exact extension, whatever the rebuilt text says.
+                    # The previous reply's parse dropped a second call (output_dropped below): the retained history
+                    # holds output this prompt does not, so it is no exact extension, whatever the rebuilt text says.
                     rec["history_verbatim"], rec["history_rewritten_at"] = False, turns[-1]["output_dropped"]
                     print(f"     note: the previous reply generated {turns[-1]['output_dropped'][1]} tokens, its parsed channels "
                           f"account for {turns[-1]['output_dropped'][0]}: the rest is not in this prompt, so nothing is reusable", flush=True)
@@ -220,6 +219,13 @@ def main():
                         print("     at the divergence: loom", repr(agreed + loom_rest[:24]),
                               "| llama", repr(agreed + P.tok.decode(gids[k:k + 4], skip_special_tokens=False)),
                               "| top", [(P.tok.id_to_token(t), round(v, 2)) for t, v in top.items()], flush=True)
+                # Output the parser dropped (a second call where the template takes one): the reply generated
+                # more tokens than its parsed channels hold, the golden agrees with all of those, and the golden's
+                # continuation past them opens another call. Only then is the next turn's reuse not required.
+                marker = P.chat.get("call_marker")
+                if rec["golden_match"] and marker and u["completion_tokens"] > len(loom_ids) + 1 \
+                        and marker in P.tok.decode(gids[len(loom_ids):], skip_special_tokens=False):
+                    rec["output_dropped"] = [len(loom_ids), u["completion_tokens"]]
             golden_ok = rec.get("golden_match", True) or rec.get("near_tie", False)
             ok = rec["render_ok"] and rec["reuse_ok"] and rec["calls_ok"] and golden_ok
             failures += not ok
@@ -230,11 +236,6 @@ def main():
             # The history this turn leaves: its output as the golden comparison settled it (e.g. the model's own
             # whitespace between calls, which the template may re-render), else the plain rebuild.
             out_text = raw if raw is not None else P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
-            # Generated tokens the parsed reply does not account for (beyond the stop token and a few re-tokenization
-            # splits): text the parser dropped.
-            shown = len(P.ids(out_text))
-            if u["completion_tokens"] > shown + 1 + max(3, shown // 10):
-                rec["output_dropped"] = [shown, u["completion_tokens"]]
             turns.append(rec)
             prev_total = u["prompt_tokens"] + u["completion_tokens"]
             prev_text = prompt + out_text

@@ -384,9 +384,6 @@ def patch_json_chat(text):
     the tools opening the first user message (re-indented like tojson(indent=N)), tool results as JSON strings,
     no content beside calls, and bare JSON calls (templates/control_json.loom). Each piece only when its field is
     present; without them control.loom is unchanged."""
-    def sub(t, old, new):
-        assert t.count(old) == 1, (old[:120], t.count(old))
-        return t.replace(old, new)
     preamble, in_user = "system_preamble" in chat, chat.get("tools_in_user", False)
     assert in_user <= preamble, "tools_in_user needs the always-printed system block (system_preamble)"
     assert not (preamble and instructions), "system_preamble with reasoning instructions is not modeled"
