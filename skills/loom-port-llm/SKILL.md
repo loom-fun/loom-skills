@@ -395,7 +395,8 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   Ported this way: Qwen3.6-35B-A3B (`qwen35moe`, hybrid + MoE, 256 experts top-8).
 - **Gemma-3n / Gemma-4 family (arch `gemma3n`, `gemma4`).** `apply_example.sh gemma4`: a complete,
   gate-passing port whose README lists every feature the starter lacks (PLE, KV sharing, mixed
-  head_dim 256/512, proportional partial RoPE, V norm without weights, GEGLU, softcap, bf16); each
+  head_dim 256/512, KV heads per layer kind and V = K on global layers without `attn_v` (12B/26B/31B), proportional
+  partial RoPE, V norm without weights, GEGLU, softcap, bf16); each
   one silently breaks output if missed. Read llama.cpp's `src/models/gemma*.cpp` for a new variant.
   Sliding layers with a small window (<= ~1k keys) don't need flash prefill: split-K is fine there
   (a trial spent 15 min on it for no gain).
