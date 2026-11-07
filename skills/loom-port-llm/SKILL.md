@@ -276,6 +276,11 @@ Kernel inventory:
 - loom-serve rejects `"reasoning_content": null` in a message: omit the field instead.
 - `usage.prompt_tokens` of a turn that reuses history is one lower than `/v1/chat/completions/input_tokens`
   (the previous turn's EOS is already in the row); compare renderings with `input_tokens`.
+- `input_tokens` above `chat_probe.simulate()` while the rendered text is right (a debug `@require(0, %prefixed)`
+  in chat_begin returns it as the error message) is loom-serve's tokenizer: it differs from HF tokenizers after
+  64 pre-tokenizer pieces when a later `Sequence` stage splits them further. build.py folds the one such shape seen
+  (a trailing `Digits` after a leading `\p{N}` Split) into an equivalent pre-tokenizer; check another with HF vs
+  loom-serve counts on a long text.
 
 ## cfg.json review checklist (step 2)
 
