@@ -21,6 +21,8 @@ jobs:
       matrix: ${{ steps.pick.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}   # the job list the run step reads
       - id: pick
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
@@ -44,6 +46,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # skills_ref: a job may port with another commit's skills
+          # The PR head, not GitHub's temporary merge commit: build.py stamps the checkout's commit into the
+          # package as its generator, and only the head stays reachable (the merge commit is replaced on every push).
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: work dir
         run: |
           mkdir -p "$RUNNER_TEMP/../devlab-port" && W=$(cd "$RUNNER_TEMP/../devlab-port" && pwd)
