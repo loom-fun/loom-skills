@@ -1,7 +1,41 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Campaign wave 3 (loom-org): LFM2.5 and HyperCLOVAX after the #45/#53 fixes, Muse-Glimmer from plain Q4_K_M, Qwen3.5 0.8B/2B from the 4B reference, Qwen3-Coder qwen3moe probe.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "lfm2-5-24b-a2b",
+   "spec": "ggml-org/LFM2.5-24B-A2B-GGUF:LFM2.5-24B-A2B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "LiquidAI/LFM2.5-24B-A2B"
+  },
+  {
+   "name": "hyperclovax-seed-text-instruct-1-5b",
+   "spec": "rippertnt/HyperCLOVAX-SEED-Text-Instruct-1.5B-Q4_K_M-GGUF:hyperclovax-seed-text-instruct-1.5b-q4_k_m.gguf",
+   "reference": "auto",
+   "model_id": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B"
+  },
+  {
+   "name": "muse-glimmer-30b",
+   "spec": "ggml-org/Muse-Glimmer-30B-GGUF:Muse-Glimmer-30B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "meta-models/Muse-Glimmer-30B"
+  },
+  {
+   "name": "qwen3-5-0-8b",
+   "spec": "unsloth/Qwen3.5-0.8B-GGUF:Qwen3.5-0.8B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "Qwen/Qwen3.5-0.8B"
+  },
+  {
+   "name": "qwen3-5-2b",
+   "spec": "unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "Qwen/Qwen3.5-2B"
+  },
+  {
+   "name": "qwen3-coder-30b-a3b-instruct",
+   "spec": "ggml-org/Qwen3-Coder-30B-A3B-Instruct-GGUF:Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct"
+  }
  ]
 }
