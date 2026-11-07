@@ -6,6 +6,17 @@
  "llamacpp": "b1369",
  "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
  "jobs": [
-  {"name": "ornith-1.5-9b", "variants": [{"name": "card"}], "steps": ["perf:card:2:long", "llama:2:long", "c4:card", "llamac4"]}
+  {
+   "name": "ornith-1.5-9b-short",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "llama:2"
+   ]
+  }
  ]
 }
