@@ -103,11 +103,22 @@ def main():
             # (A new user query may legitimately re-render earlier turns: Qwen templates drop old reasoning.)
             # A template that rewrites the retained history (e.g. drops the previous turn's reasoning when
             # thinking is on) leaves nothing verbatim to reuse: require reuse only when the previous prompt +
-            # output is a prefix of this prompt.
+            # output is a prefix of this prompt. loom-serve resumes a retained row only when this prompt
+            # extends its history exactly (it cannot cut a row back to a common prefix), so when the template
+            # re-renders bytes the model verifiably generated (the previous turn matched the golden), nothing
+            # is reusable however late the change (Gemma 4 with thinking: a "\n" before <channel|> 15 tokens
+            # from the end). Unverified output (no golden, or it diverged) keeps the 80 % rule: a wrong
+            # rebuild of the output must not hide a reuse bug.
             if step:
                 pids = P.ids(prev_text)
                 common = next((i for i, (x, y) in enumerate(zip(pids, ids)) if x != y), min(len(pids), len(ids)))
-                rec["history_verbatim"] = common >= 0.8 * len(pids)
+                exact = prompt.startswith(prev_text)
+                rewritten = not exact and turns[-1].get("golden_match") is True   # previous output verified
+                rec["history_verbatim"] = exact or (common >= 0.8 * len(pids) and not rewritten)
+                if rewritten and common >= 0.8 * len(pids):
+                    rec["history_rewritten_at"] = [common, len(pids)]
+                    print(f"     note: the template re-renders the previous turn from token {common} of {len(pids)}; loom-serve reuses"
+                          " only exact extensions of a retained history (llama.cpp would reuse the common prefix)", flush=True)
             else:
                 rec["history_verbatim"] = True
             rec["reuse_ok"] = step == 0 or not rec["history_verbatim"] or rec["cached"] >= 0.8 * prev_total

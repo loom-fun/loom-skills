@@ -268,9 +268,11 @@ Kernel inventory:
   calls, so returning it doubled it in the next turn's rendering and broke history reuse (`@content_until`;
   streaming withholds trailing whitespace until it is known not to precede a call).
 - Reasoning is rendered for assistant turns after the last user message, as the Qwen templates do.
-  A new user turn therefore re-renders earlier turns without reasoning, and history reuse resumes
-  from the first changed byte; inside a tool loop the previous turn is reused entirely
-  (`prompt_tokens_details.cached_tokens`).
+  A new user turn therefore re-renders earlier turns without reasoning; inside a tool loop the previous
+  turn is reused entirely (`prompt_tokens_details.cached_tokens`). loom-serve resumes a retained row only
+  when the new prompt extends its history (`complete_text`) exactly: it cannot cut a row back to a common
+  prefix, so a turn the template re-renders differently (dropped reasoning, an added newline) is prefilled
+  again (the prefix cache only keeps intermediate frontiers of long prefills).
 - loom-serve rejects `"reasoning_content": null` in a message: omit the field instead.
 - `usage.prompt_tokens` of a turn that reuses history is one lower than `/v1/chat/completions/input_tokens`
   (the previous turn's EOS is already in the row); compare renderings with `input_tokens`.

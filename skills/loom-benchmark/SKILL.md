@@ -212,7 +212,11 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     of the template-exact rendering (`chat_probe.simulate`, verified against the
     Jinja template). A mismatch is a control-program bug.
   - `reuse_ok`: inside a tool loop, `cached_tokens` covers ≥ 80 % of the previous
-    prompt + completion (history reuse works, including recurrent state).
+    prompt + completion (history reuse works, including recurrent state). Required when the template
+    keeps that history: it is a prefix of this prompt, or (output not verified by the golden) agrees with
+    it for ≥ 80 % of its tokens. Output that matched the golden and that the template re-renders (Gemma 4
+    adds a `\n` before `<channel|>`) is not required: loom-serve reuses only exact extensions of a
+    retained history (a note prints where the template changed it).
   - `calls_ok`: tool calls name a declared function with JSON arguments.
   - golden: Loom's turn vs llama.cpp `/completion` on the same prompt ids; a
     divergence must be a near-tie (the compare rule). A turn that would fail is re-recorded on
