@@ -1,28 +1,26 @@
 {
- "_comment": "Bisect round 2: the refusal needs the drafter on the plain Q4_K_M build (not vision). That build's head is Q8_0, which turns on the proposals' load-time Q4_0 head copy (PROPOSE_HEAD); the UD build's Q6_K head does not. Same build with that copy off, and the failing control.",
+ "_comment": "Bisect round 3: the fix (no head root next to the proposals' Q4_0 head copy) on the failing build, plus the card's rebuild and the published card as controls.",
  "card": "loom-fun/unsloth-Muse-Glimmer-30B-loom",
  "memory_bytes": 39000000000,
  "kit": "glimmer",
  "llamacpp": "b1355",
  "steps": [
-  "determinism:1:1"
+  "determinism:1:2"
  ],
  "variants": [
   {
-   "name": "q4km",
+   "name": "q4km-fixed",
    "build": {},
    "cfg": {
     "gguf": "ggml-org/Muse-Glimmer-30B-GGUF:Muse-Glimmer-30B-Q4_K_M.gguf"
    }
   },
   {
-   "name": "q4km-nophead",
-   "build": {
-    "PROPOSE_HEAD": "off"
-   },
-   "cfg": {
-    "gguf": "ggml-org/Muse-Glimmer-30B-GGUF:Muse-Glimmer-30B-Q4_K_M.gguf"
-   }
+   "name": "rebuilt",
+   "build": {}
+  },
+  {
+   "name": "card"
   }
  ]
 }
