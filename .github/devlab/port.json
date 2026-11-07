@@ -1,7 +1,6 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Re-port of a dense hybrid-attention model from its plain Q4_K_M checkpoint, derived from the category A reference of its architecture (REFERENCE=auto), with the fix for DFlash proposals over an untied Q8_0 head.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {"name": "muse-glimmer-30b", "spec": "ggml-org/Muse-Glimmer-30B-GGUF:Muse-Glimmer-30B-Q4_K_M.gguf", "reference": "auto", "model_id": "meta-models/Muse-Glimmer-30B"}
  ]
 }
