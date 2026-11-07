@@ -376,6 +376,264 @@ def patch_history_think_before(text):
     return sub(text, "func.call @join4(%open, %thought, %close, %empty)", "func.call @join4(%open, %kept_thought, %close, %empty)")
 
 
+def patch_tools_xml(text):
+    """control.loom for a template that declares tools as XML elements (chat.tools_format "xml"; Qwen3-Coder):
+    tools_body prints each tool with @xml_tool, the IR twin of chat_probe.xml_tool (function name, trimmed
+    description, each parameter's name, type, trimmed description and other keys, then the parameters' and the
+    function's other keys). Without the field control.loom is unchanged."""
+    def sub(t, old, new):
+        assert t.count(old) == 1, (old[:120], t.count(old))
+        return t.replace(old, new)
+    keys = {k: hx(k) for k in ("name", "type", "description", "properties", "parameters")}
+    code = f"""// Tool declarations as XML elements (chat.tools_format "xml"); chat_probe.xml_tool is the Python model.
+global.rodata.def @decl_name_key = bytes("{keys['name']}")
+
+global.rodata.def @decl_type_key = bytes("{keys['type']}")
+
+global.rodata.def @decl_description_key = bytes("{keys['description']}")
+
+global.rodata.def @decl_properties_key = bytes("{keys['properties']}")
+
+global.rodata.def @decl_parameters_key = bytes("{keys['parameters']}")
+
+global.rodata.def @decl_open = bytes("{hx(chr(10) + '<')}")
+
+global.rodata.def @decl_end = bytes("{hx('>')}")
+
+global.rodata.def @decl_close = bytes("{hx('</')}")
+
+global.rodata.def @decl_function_open = bytes("{hx('<function>')}")
+
+global.rodata.def @decl_function_close = bytes("{hx(chr(10) + '</function>')}")
+
+global.rodata.def @decl_parameters_open = bytes("{hx(chr(10) + '<parameters>')}")
+
+global.rodata.def @decl_parameters_close = bytes("{hx(chr(10) + '</parameters>')}")
+
+global.rodata.def @decl_parameter_open = bytes("{hx(chr(10) + '<parameter>')}")
+
+global.rodata.def @decl_parameter_close = bytes("{hx(chr(10) + '</parameter>')}")
+
+// Jinja's `| string` of the JSON value at text[begin, begin + length) of members type %type: a string decoded,
+// true/false/null as True/False/None, anything else as the request's JSON text.
+func.def @decl_string(%text: buffer, %begin: i64, %length: i64, %type: i64) -> (buffer) {{
+  %zero64 = scalar.constant 0 : i64
+  %is_string = scalar.cmpi eq, %type, %zero64 : i64
+  %result = scf.if %is_string -> (buffer) {{
+    %decoded = func.call @json_key(%text, %begin, %length) : (buffer, i64, i64) -> (buffer)
+    scf.yield %decoded : buffer
+  }} else {{
+    %raw = func.call @json_range(%text, %begin, %length) : (buffer, i64, i64) -> (buffer)
+    %json_true = global.load @json_true : buffer
+    %json_false = global.load @json_false : buffer
+    %json_null = global.load @json_null : buffer
+    %py_true = global.load @py_true : buffer
+    %py_false = global.load @py_false : buffer
+    %py_none = global.load @py_none : buffer
+    %is_true = func.call @equal(%raw, %json_true) : (buffer, buffer) -> (i1)
+    %is_false = func.call @equal(%raw, %json_false) : (buffer, buffer) -> (i1)
+    %is_null = func.call @equal(%raw, %json_null) : (buffer, buffer) -> (i1)
+    %v1 = scf.select %is_true, %py_true, %raw : buffer
+    %v2 = scf.select %is_false, %py_false, %v1 : buffer
+    %v3 = scf.select %is_null, %py_none, %v2 : buffer
+    scf.yield %v3 : buffer
+  }}
+  func.return %result : buffer
+}}
+
+// "\\n<KEY>VALUE</KEY>"
+func.def @decl_element(%key: buffer, %value: buffer) -> (buffer) {{
+  %empty = global.load @empty : buffer
+  %open = global.load @decl_open : buffer
+  %end = global.load @decl_end : buffer
+  %close = global.load @decl_close : buffer
+  %head = func.call @join4(%open, %key, %end, %value) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %tail = func.call @join4(%close, %key, %end, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %element = func.call @join(%head, %tail) : (buffer, buffer) -> (buffer)
+  func.return %element : buffer
+}}
+
+// The element of %key in the object at text[begin, begin + length), its value trimmed when %trimmed; empty when
+// the object has no such key.
+func.def @decl_optional(%text: buffer, %begin: i64, %length: i64, %key: buffer, %trimmed: i1) -> (buffer) {{
+  %found, %value_begin, %value_length, %value_type = func.call @json_lookup(%text, %begin, %length, %key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+  %result = scf.if %found -> (buffer) {{
+    %value = func.call @decl_string(%text, %value_begin, %value_length, %value_type) : (buffer, i64, i64, i64) -> (buffer)
+    %shown = scf.if %trimmed -> (buffer) {{
+      %stripped = func.call @trim(%value) : (buffer) -> (buffer)
+      scf.yield %stripped : buffer
+    }} else {{
+      scf.yield %value : buffer
+    }}
+    %element = func.call @decl_element(%key, %shown) : (buffer, buffer) -> (buffer)
+    scf.yield %element : buffer
+  }} else {{
+    %empty = global.load @empty : buffer
+    scf.yield %empty : buffer
+  }}
+  func.return %result : buffer
+}}
+
+// Bit of a key the template handles itself: name 1, type 2, description 4, properties 8, parameters 16 (0 other).
+func.def @decl_key_bit(%key: buffer) -> (i32) {{
+  %zero = scalar.constant 0 : i32
+  %name_key = global.load @decl_name_key : buffer
+  %type_key = global.load @decl_type_key : buffer
+  %description_key = global.load @decl_description_key : buffer
+  %properties_key = global.load @decl_properties_key : buffer
+  %parameters_key = global.load @decl_parameters_key : buffer
+  %is_name = func.call @equal(%key, %name_key) : (buffer, buffer) -> (i1)
+  %is_type = func.call @equal(%key, %type_key) : (buffer, buffer) -> (i1)
+  %is_description = func.call @equal(%key, %description_key) : (buffer, buffer) -> (i1)
+  %is_properties = func.call @equal(%key, %properties_key) : (buffer, buffer) -> (i1)
+  %is_parameters = func.call @equal(%key, %parameters_key) : (buffer, buffer) -> (i1)
+  %b1 = scalar.constant 1 : i32
+  %b2 = scalar.constant 2 : i32
+  %b4 = scalar.constant 4 : i32
+  %b8 = scalar.constant 8 : i32
+  %b16 = scalar.constant 16 : i32
+  %v1 = scf.select %is_name, %b1, %zero : i32
+  %v2 = scf.select %is_type, %b2, %v1 : i32
+  %v3 = scf.select %is_description, %b4, %v2 : i32
+  %v4 = scf.select %is_properties, %b8, %v3 : i32
+  %v5 = scf.select %is_parameters, %b16, %v4 : i32
+  func.return %v5 : i32
+}}
+
+// The template's render_extra_keys: an element per key of the object at text[begin, begin + length) whose bit
+// (decl_key_bit) is not in %handled.
+func.def @decl_extra(%text: buffer, %begin: i64, %length: i64, %handled: i32) -> (buffer) {{
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %zero64 = scalar.constant 0 : i64
+  %zero32 = scalar.constant 0 : i32
+  %empty = global.load @empty : buffer
+  %fields, %type, %count = func.call @members_range(%text, %begin, %length) : (buffer, i64, i64) -> (buffer, i32, i64)
+  %object = scalar.constant 2 : i32
+  %is_object = scalar.cmpi eq, %type, %object : i32
+  %usable_count = scf.select %is_object, %count, %zero64 : i64
+  %bounded_count = scalar.assume %usable_count [range(%usable_count, 0, 2147483647)] : i64
+  %extent = index.cast %bounded_count : i64 to index
+  %records = buffer.view %fields[%origin] : buffer -> view<[%extent]x5xi64>
+  %result = scf.for %i = [%c0 to %extent step %c1](%out = %empty : buffer) -> (buffer) {{
+    %key_begin = view.load %records[%i, 0] : view<[%extent]x5xi64> -> i64
+    %key_length = view.load %records[%i, 1] : view<[%extent]x5xi64> -> i64
+    %value_begin = view.load %records[%i, 2] : view<[%extent]x5xi64> -> i64
+    %value_length = view.load %records[%i, 3] : view<[%extent]x5xi64> -> i64
+    %value_type = view.load %records[%i, 4] : view<[%extent]x5xi64> -> i64
+    %key = func.call @json_key(%text, %key_begin, %key_length) : (buffer, i64, i64) -> (buffer)
+    %bit = func.call @decl_key_bit(%key) : (buffer) -> (i32)
+    %masked = scalar.andi %bit, %handled : i32
+    %keep = scalar.cmpi eq, %masked, %zero32 : i32
+    %next = scf.if %keep -> (buffer) {{
+      %value = func.call @decl_string(%text, %value_begin, %value_length, %value_type) : (buffer, i64, i64, i64) -> (buffer)
+      %element = func.call @decl_element(%key, %value) : (buffer, buffer) -> (buffer)
+      %joined = func.call @join(%out, %element) : (buffer, buffer) -> (buffer)
+      scf.yield %joined : buffer
+    }} else {{
+      scf.yield %out : buffer
+    }}
+    scf.yield %next : buffer
+  }}
+  func.return %result : buffer
+}}
+
+// One tool (its "function" object when it has one) as the template declares it.
+func.def @xml_tool(%tool: buffer) -> (buffer) {{
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %zero64 = scalar.constant 0 : i64
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  %object_type = scalar.constant 2 : i64
+  %empty = global.load @empty : buffer
+  %tool_bytes = buffer.length %tool
+  %tool_length = index.cast %tool_bytes : offset to i64
+  %name_key = global.load @decl_name_key : buffer
+  %type_key = global.load @decl_type_key : buffer
+  %description_key = global.load @decl_description_key : buffer
+  %properties_key = global.load @decl_properties_key : buffer
+  %parameters_key = global.load @decl_parameters_key : buffer
+  %fn, %bn, %ln, %tn = func.call @json_lookup(%tool, %zero64, %tool_length, %name_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+  %name = scf.if %fn -> (buffer) {{
+    %value = func.call @decl_string(%tool, %bn, %ln, %tn) : (buffer, i64, i64, i64) -> (buffer)
+    scf.yield %value : buffer
+  }} else {{
+    scf.yield %empty : buffer
+  }}
+  %function_open = global.load @decl_function_open : buffer
+  %name_element = func.call @decl_element(%name_key, %name) : (buffer, buffer) -> (buffer)
+  %description = func.call @decl_optional(%tool, %zero64, %tool_length, %description_key, %true) : (buffer, i64, i64, buffer, i1) -> (buffer)
+  %parameters_open = global.load @decl_parameters_open : buffer
+  %head = func.call @join4(%function_open, %name_element, %description, %parameters_open) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %fp, %bp, %lp, %tp = func.call @json_lookup(%tool, %zero64, %tool_length, %parameters_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+  %parameters_mapping = scalar.cmpi eq, %tp, %object_type : i64
+  %has_parameters = scalar.andi %fp, %parameters_mapping : i1
+  %body = scf.if %has_parameters -> (buffer) {{
+    %fq, %bq, %lq, %tq = func.call @json_lookup(%tool, %bp, %lp, %properties_key) : (buffer, i64, i64, buffer) -> (i1, i64, i64, i64)
+    %properties_mapping = scalar.cmpi eq, %tq, %object_type : i64
+    %has_properties = scalar.andi %fq, %properties_mapping : i1
+    %listed = scf.if %has_properties -> (buffer) {{
+      %fields, %type, %count = func.call @members_range(%tool, %bq, %lq) : (buffer, i64, i64) -> (buffer, i32, i64)
+      %bounded_count = scalar.assume %count [range(%count, 0, 2147483647)] : i64
+      %extent = index.cast %bounded_count : i64 to index
+      %records = buffer.view %fields[%origin] : buffer -> view<[%extent]x5xi64>
+      %parameter_open = global.load @decl_parameter_open : buffer
+      %parameter_close = global.load @decl_parameter_close : buffer
+      %all = scf.for %i = [%c0 to %extent step %c1](%out = %empty : buffer) -> (buffer) {{
+        %key_begin = view.load %records[%i, 0] : view<[%extent]x5xi64> -> i64
+        %key_length = view.load %records[%i, 1] : view<[%extent]x5xi64> -> i64
+        %value_begin = view.load %records[%i, 2] : view<[%extent]x5xi64> -> i64
+        %value_length = view.load %records[%i, 3] : view<[%extent]x5xi64> -> i64
+        %value_type = view.load %records[%i, 4] : view<[%extent]x5xi64> -> i64
+        %parameter = func.call @json_key(%tool, %key_begin, %key_length) : (buffer, i64, i64) -> (buffer)
+        %parameter_name = func.call @decl_element(%name_key, %parameter) : (buffer, buffer) -> (buffer)
+        %fields_mapping = scalar.cmpi eq, %value_type, %object_type : i64
+        %described = scf.if %fields_mapping -> (buffer) {{
+          %type_element = func.call @decl_optional(%tool, %value_begin, %value_length, %type_key, %false) : (buffer, i64, i64, buffer, i1) -> (buffer)
+          %description_element = func.call @decl_optional(%tool, %value_begin, %value_length, %description_key, %true) : (buffer, i64, i64, buffer, i1) -> (buffer)
+          %field_handled = scalar.constant 7 : i32
+          %field_others = func.call @decl_extra(%tool, %value_begin, %value_length, %field_handled) : (buffer, i64, i64, i32) -> (buffer)
+          %value = func.call @join4(%type_element, %description_element, %field_others, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+          scf.yield %value : buffer
+        }} else {{
+          scf.yield %empty : buffer
+        }}
+        %item = func.call @join4(%parameter_open, %parameter_name, %described, %parameter_close) : (buffer, buffer, buffer, buffer) -> (buffer)
+        %next = func.call @join(%out, %item) : (buffer, buffer) -> (buffer)
+        scf.yield %next : buffer
+      }}
+      scf.yield %all : buffer
+    }} else {{
+      scf.yield %empty : buffer
+    }}
+    %parameters_handled = scalar.constant 10 : i32
+    %parameters_others = func.call @decl_extra(%tool, %bp, %lp, %parameters_handled) : (buffer, i64, i64, i32) -> (buffer)
+    %value = func.call @join(%listed, %parameters_others) : (buffer, buffer) -> (buffer)
+    scf.yield %value : buffer
+  }} else {{
+    scf.yield %empty : buffer
+  }}
+  %parameters_close = global.load @decl_parameters_close : buffer
+  %tool_handled = scalar.constant 23 : i32
+  %tool_others = func.call @decl_extra(%tool, %zero64, %tool_length, %tool_handled) : (buffer, i64, i64, i32) -> (buffer)
+  %function_close = global.load @decl_function_close : buffer
+  %tail = func.call @join4(%body, %parameters_close, %tool_others, %function_close) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %declared = func.call @join(%head, %tail) : (buffer, buffer) -> (buffer)
+  func.return %declared : buffer
+}}
+
+"""
+    anchor = "func.def @tools_body(%tools: buffer, %tool_fields: buffer, %tool_count: i64) -> (buffer) {\n"
+    text = sub(text, anchor, code + anchor)
+    return sub(text, "    %printed = func.call @tool_printed(%value) : (buffer) -> (buffer)\n",
+               """    %selected = func.call @tool_printed(%value) : (buffer) -> (buffer)
+    %printed = func.call @xml_tool(%selected) : (buffer) -> (buffer)
+""")
+
+
 def patch_no_tools(text):
     """control.loom for a chat-only block (chat_probe.CHAT_ONLY, call_format "none": the template ignores tools):
     chat_begin renders a request's tools as the template does (not at all) and parse_tools never parses a call.
@@ -461,6 +719,8 @@ for name in ("prepare", "control", "storage", "service"):
         text = patch_history_think_before(text)
     if name == "control" and "default_system_tools" in chat:
         text = patch_default_system_tools(text)
+    if name == "control" and chat.get("tools_format") == "xml":
+        text = patch_tools_xml(text)
     if name == "control" and chat["call_format"] == "none":
         text = patch_no_tools(text)
     if name == "control" and custom_chat:
