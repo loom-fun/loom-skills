@@ -205,26 +205,29 @@ if [ -n "$vmm" ]; then   # vision kernels vs NumPy, then the whole encoder vs re
 fi
 
 step "6/6 smoke test"
-# DEBUG (temporary): which requests publish nothing, on a fresh server
-"$T" - "http://127.0.0.1:$port" <<'EOF' ; exit 7
+# DEBUG (temporary): A/B build switches on the request sequence that publishes nothing
+cat > dbg_seq.py <<'EOF'
 import json, sys, requests
-url = sys.argv[1]; model = requests.get(url + "/v1/models", timeout=30).json()["data"][0]["id"]
+url = sys.argv[1]; tag0 = sys.argv[2]; model = requests.get(url + "/v1/models", timeout=30).json()["data"][0]["id"]
 F = "What is the capital of France? Answer in one word."
 H = "Say hi."
-def post(p, mt, **kw):
+def post(p, mt):
     r = requests.post(url + "/v1/chat/completions", json={"model": model, "temperature": 0, "max_tokens": mt,
-                      "messages": [{"role": "user", "content": p}], **kw}, timeout=600).json()
+                      "messages": [{"role": "user", "content": p}]}, timeout=600).json()
     if "choices" not in r: return json.dumps(r)[:300]
     c = r["choices"][0]; m = c["message"]
-    return f'{c["finish_reason"]} p={r["usage"]["prompt_tokens"]} n={r["usage"]["completion_tokens"]} cached={r["usage"].get("prompt_tokens_details", {}).get("cached_tokens")} reasoning={(m.get("reasoning_content") or "")[:50]!r} content={(m.get("content") or "")[:30]!r}'
-for tag, p in [("H", H), ("F", F), ("H", H), ("F", F), ("F", F)] + [(f"pad{k}", H + " Please" * k) for k in range(0, 12)] + [(f"pad{k}", H + " Please" * k) for k in range(0, 12)]:
-    print("SEQ", tag, post(p, 64), flush=True)
-for path, body in [("/v1/completions", {"model": model, "prompt": "<|start|>user<|message|>Say hi.<|end|><|start|>assistant", "max_tokens": 24, "temperature": 0})]:
-    r = requests.post(url + path, json=body, timeout=600)
-    print("RAW", path, r.status_code, r.text[:1500], flush=True)
-r = requests.get(url + "/logz", timeout=30)
-print("LOGZ", r.status_code, r.text[-6000:], flush=True)
+    return f'{c["finish_reason"]} p={r["usage"]["prompt_tokens"]} n={r["usage"]["completion_tokens"]} reasoning={(m.get("reasoning_content") or "")[:40]!r} content={(m.get("content") or "")[:20]!r}'
+for tag, p in [("F", F), ("F", F), ("H", H), ("F", F), ("pad7", H + " Please" * 7), ("pad7", H + " Please" * 7), ("F", F)]:
+    print("AB", tag0, tag, post(p, 64), flush=True)
 EOF
+"$T" dbg_seq.py "http://127.0.0.1:$port" base
+for v in "LIVE_ROW_SKIP=0" "ROW_SCALE_LIVE=0 POST_ADD_ROW_SCALE=0 LIVE_ROW_SKIP=0" "NO_FLASH2=1" "NO_GEMM=1"; do
+  rm -rf pkg_ab; env $v "$T" "$K/build.py" cfg.json pkg_ab --tokenizer tok/tokenizer.json --model-id "$model_id" --memory-gib "$mem_gib" > build_ab.log 2>&1 || { echo "AB $v build failed"; tail -5 build_ab.log; continue; }
+  "$S/stop.sh" port >/dev/null 2>&1
+  VENV=$venv "$S/serve.sh" port "$port" amdgpu "$mem" pkg_ab/model.json > /dev/null || { echo "AB $v serve failed"; continue; }
+  "$T" dbg_seq.py "http://127.0.0.1:$port" "$v"
+done
+exit 7
 if [ -n "$vmm" ]; then   # one image: the component compiles, rows reach the text model, the answer is about the image
   "$T" - "$here/../loom-benchmark/scripts" "http://127.0.0.1:$port" <<'EOF' || exit 6
 import sys; sys.path.insert(0, sys.argv[1])
