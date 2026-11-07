@@ -12,7 +12,7 @@ Q8_0 because every Q4 file used formats the kit lacked). Within the tier:
      the HF cache (any revision; a ported model is never downloaded twice). When the chosen file would have to be
      downloaded but the same quant of the same model is cached under another repo (bartowski/ next to unsloth/),
      STOP and name that repo: port it instead of downloading. Then
-  2. files whose tensor formats the starter decodes (F32 + Q4_K/Q5_K/Q6_K/Q8_0/Q4_0/IQ4_NL/IQ4_XS/Q3_K/IQ3_S; read
+  2. files whose tensor formats the starter decodes (formats.py: F32/F16/BF16 + Q4_K/Q5_K/Q6_K/Q8_0/Q4_0/IQ4_NL/IQ4_XS/Q3_K/IQ3_S; read
      from the local file, or from the header by HTTP range request), plus what a reference example for the file's
      architecture decodes (reference/*/formats.json, e.g. gemma4: BF16), then the preference order;
   and the file must FIT: 2 x file + 8 GiB <= min(GTT, 60 % of RAM) - LOOM_RESERVED_GIB (the loom skill's hard rules).
@@ -29,7 +29,10 @@ import sys
 import tempfile
 import urllib.request
 
-SUPPORTED = {"F32", "Q4_K", "Q5_K", "Q6_K", "Q8_0", "Q4_0", "IQ4_NL", "IQ4_XS", "Q3_K", "IQ3_S"}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import formats  # noqa: E402
+
+SUPPORTED = {f.upper() for f in formats.DECODES}   # GGUF type names gen_llm.py decodes (formats.py)
 PREF = ["Q4_K_M", "Q4_K_S", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0",
         "UD-Q4_K_XL", "UD-Q5_K_XL", "UD-Q6_K_XL", "UD-Q8_K_XL"]
 

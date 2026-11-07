@@ -14,7 +14,7 @@ Make a kit for a Gemma-3n/4-family model with `../apply_example.sh gemma4 W/kit`
 | `gen_flash2.py` | Prefill flash attention for head_dim 512 in two 256-wide output passes (`FLASH2_DO`) with V^T staged per pass (fits the VGPR/LDS budget): 61k-token TTFT 335 s -> 131 s. Sliding layers (window 512) stay on the split-K path: flash there gave nothing |
 | `make_kernel_tests.py` | Test cases adapted to the layout (embedding scale, per-tensor K, no k/v tensors on shared-KV layers) |
 | `build.py` | the `gemma4` call format and its placeholders |
-| `chat_probe.py`, `templates/control.loom` | Gemma 4's chat format, which `chat_probe.derive()` can't model: `<|turn>role` / `<turn|>` turns, the `<|channel>thought ... <channel|>` reasoning channel (closed with a bare `<channel|>`), its tool-declaration and tool-call syntax, tool responses, the thinking switch. `simulate()` mirrors control.loom and is verified against the Jinja template; `raw_from_chat()` is the benchmark hook (`export LOOM_KIT=W/kit`). Needs `extra_eos_ids` [1, 106, 50] |
+| `chat_probe.py`, `templates/control.loom` | Gemma 4's chat format, which `chat_probe.derive()` can't model: `<|turn>role` / `<turn|>` turns, the `<|channel>thought ... <channel|>` reasoning channel (closed with a bare `<channel|>`), its tool-declaration and tool-call syntax, tool responses, the thinking switch. `simulate()` mirrors control.loom and is verified against the Jinja template; `raw_from_chat()` is the benchmark hook (`export LOOM_KIT=W/kit`). Needs `extra_eos_ids` [1, 106, 50]. Two template layouts are derived: Google's own Gemma 4 templates render an assistant turn as thought, calls, their results, then the content (`chat.content_after_calls`), and the 12B/26B ones open the model turn with an empty thought channel when thinking is off (`generation_prompt_plain` differs from `generation_prompt`); this port's template puts the content before the calls and has one generation prompt. `chat/gemma4.loom` holds both as `// @@IF_CHAT:...@@` variants (build.py `chat_variants`), so this port's programs are unchanged |
 
 `cfg.json`: the reviewed config (geometry, sliding/KV-sharing layers, chat block) without the tensor table.
 
@@ -28,3 +28,5 @@ Lessons the agent paid for:
   D/16 fragment loop.
 - Known gap: with thinking ON, history after a tool result is not reused (the template re-renders the
   reasoning with an extra newline). Not covered by the gates (they run the template default).
+  Likewise for templates whose thinking-off generation prompt adds an empty thought channel (Gemma 4
+  12B/26B): the template does not render it in history, so the next turn re-prefills from there.

@@ -106,6 +106,10 @@ spec_gate() {
 }
 drafting=$("$T" -c "import json; print(1 if json.load(open('$pkg/llm_config.json')).get('draft') else '')" 2>/dev/null)
 toggle=$("$T" -c "import json; print(1 if json.load(open('$pkg/llm_config.json')).get('chat', {}).get('thinking') == 'toggle' else '')" 2>/dev/null)
+# A chat-only block (a template that ignores tools) has no tool loop to gate: the card's test (card_lib.tool_calling)
+# decides, so the card shows the agent gates as not applicable rather than missing.
+tools=$("$T" -c "import json, sys; sys.path.insert(0, '$S/card'); import card_lib; print(1 if card_lib.tool_calling(json.load(open('$pkg/llm_config.json')).get('chat') or {}) else '')")
+[ -n "$tools" ] || echo "== agent: skipped, tool calling unsupported by the chat template (not applicable)"
 t_start=$(date +%s)
 LL=(); [ -n "$L" ] && LL=(--llama "$L")
 cmp=$(( ctx / 2 < 61440 ? ctx / 2 : 61440 ))
@@ -114,7 +118,9 @@ dev_gates() {
   run consistency "$T" "$S/consistency.py" "$url" --model "$model" --pkg "$pkg" "${LL[@]}"
   [ -n "${done[consistency]:-}" ] && { grep -q "^PASS$" gates_consistency.log || result[consistency]=1; }
   # Tool calling + history reuse; reasoning on, and off when the template toggles it.
-  if [ -n "$toggle" ]; then
+  if [ -z "$tools" ]; then
+    :
+  elif [ -n "$toggle" ]; then
     run agent "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --thinking on --out agent_golden.json
     run agent_think_off "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --thinking off --out agent_think_off.json
   else
@@ -151,7 +157,7 @@ all_gates() {
   [ -n "${done[consistency]:-}" ] && { grep -q "^PASS$" gates_consistency.log || result[consistency]=1; }
   if [ "$level" != fast ]; then
     [ -n "$drafting" ] && run spec spec_gate
-    run agent "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --out agent_golden.json
+    [ -n "$tools" ] && run agent "$T" "$S/agent_golden.py" "$pkg" "$url" "${LL[@]}" --out agent_golden.json
     run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" "${LL[@]}"
     # Needle: compared with llama.cpp (near-tie rule) up to the llama.cpp slot; the full-context
     # probe (LEVEL=full) proves the size is served.
