@@ -87,16 +87,18 @@ _g = cfg["heads"] // max(cfg["kv_heads"], 1)
 if _g & (_g - 1):
     print(f"NOTE: {_g} query heads per KV head (not a power of two): flash prefill stages K/V for the power of two "
           "below it and the extra waves skip staging (gen_flash2.py); check the long goldens")
-# Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style); without one, the period
-# llama.cpp hard-codes for the architecture (load_swa_pattern(ml, n); gemma3: 6, every 6th layer is global).
-SWA_PERIOD = {"gemma3": 6}
-pat = A("attention.sliding_window_pattern") or SWA_PERIOD.get(arch)
+# Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style).
+SWA_PERIOD = {"gemma3": 6}   # src/models/<arch>.cpp load_swa_pattern(ml, n): layers with i % n < n - 1 slide
+pat = A("attention.sliding_window_pattern")
 if cfg["sliding_window"] and isinstance(pat, list) and len(pat) in (L, BLOCKS):
     pat = pat[:L]
     cfg["sliding_layers"] = [i for i, sl in enumerate(pat) if sl]
 elif cfg["sliding_window"] and isinstance(pat, int) and pat > 1:
     # a period instead of a list (llama.cpp set_swa_pattern(n)): every n-th layer is full attention
     cfg["sliding_layers"] = [i for i in range(L) if i % pat < pat - 1]
+elif cfg["sliding_window"] and arch in SWA_PERIOD:
+    # the period llama.cpp hard-codes for the architecture when the GGUF has none (load_swa_pattern(ml, n))
+    cfg["sliding_layers"] = [i for i in range(L) if i % SWA_PERIOD[arch] < SWA_PERIOD[arch] - 1]
 elif cfg["sliding_window"]:
     print(f"WARNING: sliding_window {cfg['sliding_window']} but no per-layer pattern in the GGUF: fill "
           "sliding_layers (and nope_layers) by hand from llama.cpp's src/models/<arch>.cpp or llama_trace.py")
