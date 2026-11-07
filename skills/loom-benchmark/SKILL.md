@@ -250,8 +250,10 @@ $T $S/c4_steady.py http://127.0.0.1:8160 4 --model <id>;  $T $S/c4_steady.py htt
 | c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding. Use this for "N requests at once". |
 
 Rules:
-- Warm up after every restart. `perf.py` and `c4_steady.py` send one short request
-  first by themselves. When timing by hand:
+- Warm up after every restart. `perf.py` first sends its first timed request's own shape, untimed (the 300-token
+  essay with another nonce: prefill, decode, drafting and first-use kernels all run once; a trivial "Say hi."
+  left DevLab's short-prompt decode 51-60 % below the local session's while 2k decode agreed), and `c4_steady.py`
+  one short request. Every caller (qualify, finalize, nightly, devlab_perf) gets the same warm-up. When timing by hand:
   `curl -s URL/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"<id>","messages":[{"role":"user","content":"hi"}],"max_tokens":8}'`.
 - With thinking models, llama.cpp's chat endpoint renders 2 fewer prompt tokens
   (no `<think>\n`) than Loom. That is negligible for throughput, and goldens are
@@ -363,13 +365,17 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
    - `card/make_info.py roofline --package DIR -o ev_roofline.json` (tools venv; CPU only, reads the GGUF from the
      Hugging Face cache): the hardware ceiling of every card metric (`loom-roofline` `roofline.py`) with the
      device constants and the roofline.py sha256 and commit. Drafting packages: decode and 4-stream ceilings are
-     verify passes per second x (1 + acceptance x depth) tokens per pass, from the card's own spec acceptance
-     and depth (the drafter's cost not counted: an upper bound); without a measured acceptance they have none.
-     A first card has no `DIR/info.json` yet: pass the run's gate evidence (`--evidence ev_gates.json`, which carries
-     the spec gate's acceptance), or build once, run roofline, and build again.
-2. `card/make_info.py build DIR --repo loom-fun/REPO --generator-commit "$(git rev-parse HEAD)" --memory-bytes N
-   --output OUT --report generated --evidence ev_*.json -o DIR/info.json` (to regenerate a published card with
-   only new evidence: `--from-info DIR/info.json`, re-read from the Hub right before). DIR holds the repo's `model.json`,
+     verify passes per second x (1 + acceptance x depth) tokens per pass (the drafter's cost not counted: an upper
+     bound). Per row the acceptance is the one measured in the same session as the card's value (perf.py records
+     each decode request's, c4_steady.py its streams', from loom-serve's `/metrics` counters); a row whose session
+     recorded none falls back to the spec gate's, and the card says so (the gate's text can accept far more or
+     less than perf.py's essay: 41 % vs ~17 % on a small drafted model, a 1.8x too-high ceiling). Without either
+     they have none. A first card has no `DIR/info.json` yet: pass the run's evidence (`--evidence ev_perf.json
+     ev_gates.json`), or build once, run roofline, and build again.
+2. `card/make_info.py build DIR --repo loom-fun/REPO --memory-bytes N --output OUT --report generated
+   --evidence ev_*.json -o DIR/info.json` (`--generator-commit` defaults to this checkout's HEAD; to regenerate a
+   published card with only new evidence: `--from-info DIR/info.json`, re-read from the Hub right before, which
+   also supplies `--repo`). DIR holds the repo's `model.json`,
    `model.json.lock`, `llm_config.json` (and `program/`). Per gate the latest evidence wins, so a later failing
    run shows as a failure; per metric the last session that measured it. `--report attached` instead keeps a
    REPORT.md written by the run (the factory's) or an older card's narrative, as is.
