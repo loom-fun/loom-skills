@@ -7,7 +7,8 @@
 #
 # EXPERIMENT.json:
 #   {"card": "loom-fun/<repo>", "memory_bytes": N, "kit": "gemma4" | null, "llamacpp": "b1368",
-#    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF)
+#    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF;
+#                                                                     {hf:OWNER/REPO/FILE}: that Hub file, e.g. a drafter llama.cpp loads and the card doesn't ship)
 #    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
 #   A job may override card, kit, memory_bytes, llamacpp and llama_spec: one experiment can measure several cards.
 # Variant V: {"name": "card"}                                    the card's own programs, as published
@@ -177,6 +178,12 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   local spec; spec=$(q "print((j.get('llama_spec') or e.get('llama_spec') or '').replace('{drafter}', '$drafter'))")
   [ -n "${1:-}" ] && spec=$(echo "$spec" | sed -E "s/--spec-draft-n-max [0-9]+/--spec-draft-n-max $1/")
+  local h; for h in $(echo "$spec" | grep -oE '\{hf:[^}]+\}' | sort -u); do   # {hf:OWNER/REPO/FILE}, fetched once per runner
+    local f=${h#\{hf:}; f=${f%\}}; local dst=$WORK/hf/$f r=${f%/*}
+    [ -f "$dst" ] || { mkdir -p "${dst%/*}" && curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
+      "https://huggingface.co/${r}/resolve/main/${f##*/}" -o "$dst.part" && mv "$dst.part" "$dst"; } || { echo "FAIL: fetch $f"; return 1; }
+    spec=${spec//"$h"/$dst}
+  done
   [ "$spec" = "$LSPEC" ] && curl -sf "$lurl/health" >/dev/null 2>&1 && return 0
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
   LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag
