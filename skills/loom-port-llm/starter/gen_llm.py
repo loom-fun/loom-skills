@@ -61,6 +61,7 @@ MOE = CFG.get("moe")                      # MoE FFN (gen_moe.py: router + top-k 
 MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) | ({MTP_LAYER} if MTP_LAYER is not None else set()) if MOE else set()
 FS = (MOE or {}).get("shared_ffn", 0)     # shared-expert FFN width (0: none)
 SHGATE = (MOE or {}).get("shared_gate", False)   # Qwen-style sigmoid gate on the shared experts (ffn_gate_inp_shexp)
+SINKS = CFG.get("attn_sinks", False)      # learned per-head softmax sink logits (attn_sinks)
 POST_NORM = CFG.get("post_norms", False)
 POST_EPS = CFG.get("post_norm_eps", 1e-8)
 EMBED_NORM = CFG.get("embed_norm", False)
@@ -84,6 +85,21 @@ ROPE = CFG.get("rope_type", "neox")       # "neox": pairs (d, d+64); "norm": pai
 THETA = CFG["rope_theta"]
 FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs)
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
+OUT_BIAS = CFG.get("attn_out_bias", False)   # attn_output.bias on every attention layer (gpt-oss): g_bias_add
+# YaRN RoPE scaling (cfg rope_scaling, inspect_gguf.py; llama.cpp ggml rope_yarn with ext_factor 1): pair i's
+# frequency theta^(-2i/RD) times 1 - (1 - 1/factor) * ramp(i), ramp = clamp((i - low) / (high - low), 0, 1), and the
+# rotated values times mscale.
+YARN = CFG.get("rope_scaling") if (CFG.get("rope_scaling") or {}).get("type") == "yarn" else None
+
+
+def yarn_constants(y, rd, theta):
+    """(low, 1 / max(0.001, high - low), 1 - 1/factor, mscale) of llama.cpp's YaRN (ggml_rope_yarn_corr_dims) for a
+    RoPE of rd rotated dims and base theta; y: a cfg rope_scaling block (factor, orig_ctx, beta_fast/slow, attn_factor)."""
+    f, n0 = float(y["factor"]), float(y["orig_ctx"])
+    dim = lambda rot: rd * math.log(n0 / (rot * 2 * math.pi)) / (2 * math.log(theta))
+    low, high = max(0.0, float(math.floor(dim(y.get("beta_fast", 32.0))))), min(rd - 1.0, float(math.ceil(dim(y.get("beta_slow", 1.0)))))
+    mscale = y.get("attn_factor", 1.0) * (1.0 + 0.1 * math.log(f))
+    return low, 1.0 / max(0.001, high - low), 1.0 - 1.0 / f, mscale
 
 from formats import FMT, SB, LOWBIT, ICODES as IQ_FMTS  # noqa: E402  bytes / values per block of each decoded format
 
@@ -685,6 +701,63 @@ F32_VALUES = r"""
 func.def inline @g_f32_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
   %view = buffer.view %w[%origin] : buffer -> view<32xf32>
   %values = vector.load %view[0] : view<32xf32> -> vector<32xf32>
+  func.return %values : vector<32xf32>
+}
+"""
+
+
+# emitted only when an MXFP4 tensor is used (see main; gpt-oss keeps its experts in MXFP4 inside its "Q4_K_M" files).
+# Values for the MoE expert matvecs (f32 activations) and the grouped GEMMs' dequant16 (gen_gemm.HELPER).
+MXFP4 = r"""
+// MXFP4 block (17 bytes, ggml block_mxfp4): E8M0 exponent e, 16 bytes of E2M1 nibbles (value j < 16: qs[j] & 15,
+// j >= 16: qs[j - 16] >> 4); value j = kvalues_mxfp4[nibble] * 2^(e - 128) (ggml GGML_E8M0_TO_FP32_HALF; the
+// table holds twice the E2M1 values: 0 1 2 3 4 6 8 12, then the same negated).
+func.def inline @g_mxfp4_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
+  %one = index.constant 1 : offset
+  %e_view = buffer.view %w[%origin] : buffer -> view<1xi8>
+  %code_origin = index.add %origin, %one : offset
+  %code_view = buffer.view %w[%code_origin] : buffer -> view<16xi8>
+  %e8 = view.load %e_view[0] : view<1xi8> -> i8
+  %e = scalar.extui %e8 : i8 to i32
+  %c1_i = scalar.constant 1 : i32
+  %c2_i = scalar.constant 2 : i32
+  %c23_i = scalar.constant 23 : i32
+  %tiny_base = scalar.constant 2097152 : i32
+  %e_low = scalar.cmpi ult, %e, %c2_i : i32
+  %tiny = scalar.shli %tiny_base, %e : i32
+  %em1 = scalar.subi %e, %c1_i : i32
+  %normal = scalar.shli %em1, %c23_i : i32
+  %bits = scf.select %e_low, %tiny, %normal : i32
+  %d = scalar.bitcast %bits : i32 to f32
+  %payload = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+  %mask = vector.constant 15 : vector<16xi8>
+  %four = vector.constant 4 : vector<16xi8>
+  %lower = vector.andi %payload, %mask : vector<16xi8>
+  %shifted = vector.shrui %payload, %four : vector<16xi8>
+  %upper = vector.andi %shifted, %mask : vector<16xi8>
+  %k0 = scalar.constant 0 : i8
+  %k1 = scalar.constant 1 : i8
+  %k2 = scalar.constant 2 : i8
+  %k3 = scalar.constant 3 : i8
+  %k4 = scalar.constant 4 : i8
+  %k5 = scalar.constant 6 : i8
+  %k6 = scalar.constant 8 : i8
+  %k7 = scalar.constant 12 : i8
+  %k9 = scalar.constant -1 : i8
+  %k10 = scalar.constant -2 : i8
+  %k11 = scalar.constant -3 : i8
+  %k12 = scalar.constant -4 : i8
+  %k13 = scalar.constant -6 : i8
+  %k14 = scalar.constant -8 : i8
+  %k15 = scalar.constant -12 : i8
+  %codebook = vector.from_elements %k0, %k1, %k2, %k3, %k4, %k5, %k6, %k7, %k0, %k9, %k10, %k11, %k12, %k13, %k14, %k15 : vector<16xi8>
+  %lo_codes = vector.table.lookup %codebook[%lower] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+  %hi_codes = vector.table.lookup %codebook[%upper] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+  %lo = vector.sitofp %lo_codes : vector<16xi8> to vector<16xf32>
+  %hi = vector.sitofp %hi_codes : vector<16xi8> to vector<16xf32>
+  %codes = vector.concat<0> %lo, %hi : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %ds = vector.splat %d : vector<32xf32>
+  %values = vector.mulf %codes, %ds : vector<32xf32>
   func.return %values : vector<32xf32>
 }
 """
@@ -1945,14 +2018,46 @@ def freq_factor(j):
     return "\n".join(t)
 
 
+def yarn_freq(j, y, rd, theta):
+    """YaRN y (a rope_scaling block, None = off) of a RoPE with rd rotated dims and base theta: lines turning pair j's
+    frequency %if{j} (after freq_factor: %if{j}f; pair index %lf{j}) into that name + "y"."""
+    if not y:
+        return ""
+    src = f"%if{j}f" if FREQ_FACTORS else f"%if{j}"
+    low, inv, mix, _ = yarn_constants(y, rd, theta)
+    return f"""
+  %yl{j} = scalar.constant {low!r} : f32
+  %yi{j} = scalar.constant {inv!r} : f32
+  %ym{j} = scalar.constant {mix!r} : f32
+  %yd{j} = scalar.subf %lf{j}, %yl{j} : f32
+  %yr{j} = scalar.mulf %yd{j}, %yi{j} : f32
+  %yc{j}a = scalar.maxnumf %yr{j}, %zero_f : f32
+  %yc{j} = scalar.minnumf %yc{j}a, %one_f : f32
+  %ys{j} = scalar.mulf %yc{j}, %ym{j} : f32
+  %yf{j} = scalar.subf %one_f, %ys{j} : f32
+  {src}y = scalar.mulf {src}, %yf{j} : f32"""
+
+
+def yarn_scale(j, y, rd, theta):
+    """YaRN y (as yarn_freq): %cr{j}m / %sr{j}m = cos / sin times mscale."""
+    if not y:
+        return ""
+    return f"""
+  %ymsc{j} = scalar.constant {yarn_constants(y, rd, theta)[3]!r} : f32
+  %cr{j}m = scalar.mulf %cr{j}, %ymsc{j} : f32
+  %sr{j}m = scalar.mulf %sr{j}, %ymsc{j} : f32"""
+
+
 def qk_rope():
     """Per-head (optional) RMSNorm + RoPE for QH query and KVH key heads, with
     keys/values stored to the paged F16 KV planes: one 256-lane workgroup per
     token. Lane l of a wave owns D/32 of a head's dims: NeoX: l, l+32, ...
     with rotary pairs (d, d + RD/2) over the first RD (rope_dims) dims and the
     rest passed through; interleaved ("norm", D = 128 only): 4l..4l+3 with
-    pairs (0,1),(2,3). Each pair's angle is computed once for every head."""
+    pairs (0,1),(2,3). Each pair's angle is computed once for every head. RoPE: RD, THETA, YARN (YaRN or None),
+    read when called (a model with another RoPE on some layers generates a second kernel with those set)."""
     n = DL
+    yarn, yarg = YARN, (YARN, RD, THETA)
     if ROPE == "neox":
         dims = ["%lane"] + [f"%d{j}" for j in range(1, n)]
         dim_defs = "".join(f"  %d{j}c = index.constant {32 * j} : index\n  %d{j} = index.add %lane, %d{j}c : index\n" for j in range(1, n))
@@ -2019,8 +2124,8 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %lf{j} = scalar.sitofp %li{j} : i32 to f32
   %ex{j}a = scalar.mulf %lf{j}, %ln_scale : f32
   %ex{j}b = scalar.mulf %ex{j}a, %neg : f32
-  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j)}
-  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if FREQ_FACTORS else ""} : f32
+  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j)}{yarn_freq(j, *yarg)}
+  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if FREQ_FACTORS else ""}{"y" if yarn else ""} : f32
   %tr{j} = scalar.mulf %ra{j}, %inv_two_pi : f32
   %ts{j} = scalar.addf %tr{j}, %half : f32
   %ti{j} = scalar.fptosi %ts{j} : f32 to i32
@@ -2028,9 +2133,9 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %wr{j} = scalar.mulf %tf{j}, %two_pi : f32
   %an{j} = scalar.subf %ra{j}, %wr{j} : f32
   %cr{j} = scalar.cosf<afn> %an{j} : f32
-  %sr{j} = scalar.sinf<afn> %an{j} : f32
-  %cos{j} = scf.select %apply_rope, %cr{j}, %one_f : f32
-  %sin{j} = scf.select %apply_rope, %sr{j}, %zero_f : f32""")
+  %sr{j} = scalar.sinf<afn> %an{j} : f32{yarn_scale(j, *yarg)}
+  %cos{j} = scf.select %apply_rope, %cr{j}{"m" if yarn else ""}, %one_f : f32
+  %sin{j} = scf.select %apply_rope, %sr{j}{"m" if yarn else ""}, %zero_f : f32""")
     t.append(f"""  %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>
   %k_view = buffer.view %k[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
   %v_view = buffer.view %v[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
@@ -2302,6 +2407,17 @@ def attention_text(S, P):
     %g = vector.load %gate_view[%token, %head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
     %sig = vector.logisticf<afn> %g : vector<4xf32>
     %result = vector.mulf %attended, %sig : vector<4xf32>""".replace("{QH}", str(QH)) if GATE else "    %result = vector.addf %attended, %zero4 : vector<4xf32>"
+    if SINKS:
+        SINK_LOAD = f"""    %sinks_view = buffer.view %gate[%zero] : buffer -> view<{QH}xf32>
+    %sink = view.load %sinks_view[%head] : view<{QH}xf32> -> f32
+"""
+        SINK_W = """    %sink_shift = scalar.subf %sink, %maximum : f32
+    %sink_w = scalar.expf<afn> %sink_shift : f32
+"""
+        M_INIT, D_INIT = "%sink", "%sink_w"
+    else:
+        SINK_LOAD = SINK_W = ""
+        M_INIT, D_INIT = "%neg_big", "%zero_f"
     text = f"""
 // Splits for `visible` keys: about 32 keys each, at most {S}.
 func.def inline @{P}_split_count(%visible: index) -> (index) {{
@@ -2462,13 +2578,13 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
     %s_eff = func.call @{P}_split_count(%visible) : (index) -> (index)
     %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>
     %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
-    %maximum = scf.for %s = [%c0 to %s_eff step %c1](%mx = %neg_big : f32) -> (f32) {{
+{SINK_LOAD}    %maximum = scf.for %s = [%c0 to %s_eff step %c1](%mx = {M_INIT} : f32) -> (f32) {{
       %bs = index.assume %s [range(%s, 0, {S - 1})] : index
       %ms = view.load %ml_view[%token, %head, %bs, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
       %next = scalar.maxnumf %mx, %ms : f32
       scf.yield %next : f32
     }}
-    %den, %total = scf.for %s = [%c0 to %s_eff step %c1](%d = %zero_f : f32, %acc = %zero4 : vector<4xf32>) -> (f32, vector<4xf32>) {{
+{SINK_W}    %den, %total = scf.for %s = [%c0 to %s_eff step %c1](%d = {D_INIT} : f32, %acc = %zero4 : vector<4xf32>) -> (f32, vector<4xf32>) {{
       %bs = index.assume %s [range(%s, 0, {S - 1})] : index
       %ms = view.load %ml_view[%token, %head, %bs, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
       %ls = view.load %ml_view[%token, %head, %bs, 1] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
@@ -3351,22 +3467,32 @@ def moe_layer(i, b, nm, sz, par):
     sgty = "buffer, " if SHGATE else ""
     bias = f"%ebias_{i}" if MOE["probs_bias"] else "%wts"
     bias_ty = f"view<{E}xf32>" if MOE["probs_bias"] else "buffer"
+    rbias = ""
+    if MOE.get("router_bias"):   # gating 3: the router's own bias, added to the logits (gen_moe.route's bias)
+        assert MOE["gating"] == 3 and not MOE["probs_bias"], "a router bias is wired for gating 3 (softmax of the picked) only"
+        bias, bias_ty = f"%rbias_{i}", f"view<{E}xf32>"
+        rbias = f'  %rbias_{i} = command.parameter %weights, "{b}ffn_gate_inp.bias" : view<{E}xf32>\n'
+    # per-expert output biases (gpt-oss): after the gate/up and down weights of each expert kernel
+    eb = {p: f'  %{p}be_{i} = command.parameter %weights, "{b}ffn_{n}_exps.bias" : view<{E * (FE if p != "d" else H)}xf32>\n'
+          for p, n in (("g", "gate"), ("u", "up"), ("d", "down"))} if MOE.get("expert_bias") else {}
+    gu_b, gu_bt = (f", %gbe_{i}, %ube_{i}", f", view<{E * FE}xf32>, view<{E * FE}xf32>") if eb else ("", "")
+    dn_b, dn_bt = (f", %dbe_{i}", f", view<{E * H}xf32>") if eb else ("", "")
     T.append(f"""  %router_{i} = command.parameter %weights, "{b}ffn_gate_inp.weight" : view<{E * H}x{rty}>
 """ + (f"""  %ebias_{i} = command.parameter %weights, "{b}exp_probs_b.bias" : view<{E}xf32>
-""" if MOE["probs_bias"] else "") + f"""  %wge_{i} = command.parameter %weights, "{b}ffn_gate_exps.weight" : view<{sg}xi8>
+""" if MOE["probs_bias"] else "") + rbias + "".join(eb.values()) + f"""  %wge_{i} = command.parameter %weights, "{b}ffn_gate_exps.weight" : view<{sg}xi8>
   %wue_{i} = command.parameter %weights, "{b}ffn_up_exps.weight" : view<{su}xi8>
   %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
   scf.if %gemm {{
     kernel.launch @g_moe_route_tr_live[%t](%t, %h, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
     kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
-    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, %wue_{i}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>, buffer)
+    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, %wue_{i}{gu_b}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
     kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
-    kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>, buffer)
+    kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}{dn_b}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
     kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}%y) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
   }} else {{
     kernel.launch @g_moe_route[%t](%t, %h, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
-    kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wge_{i}, %wue_{i}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>, buffer)
-    kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wde_{i}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>, buffer)
+    kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wge_{i}, %wue_{i}{gu_b}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
+    kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wde_{i}{dn_b}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
     kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {sgarg}%y) : [index](index, buffer, buffer, {sgty}buffer)
   }}
 """)
@@ -3423,10 +3549,13 @@ def moe_kernels(row_scale, gemm_fn):
     """The MoE layers' kernels (gen_moe.py) for the formats and shapes model() used (USED_MOE)."""
     import gen_moe as GM
     rty = TENS[f"blk.{MOE['leading_dense']}.ffn_gate_inp.weight"]["type"]
-    a = (H, MOE["experts"], MOE["used"], MOE["gating"], MOE["norm_weights"], MOE["probs_bias"], rty)
+    a = (H, MOE["experts"], MOE["used"], MOE["gating"], MOE["norm_weights"], MOE["probs_bias"] or MOE.get("router_bias", False), rty)
     parts = [GM.route(*a), GM.route_prefill_live(*a), GM.row_scale_tiles(row_scale)]
+    # gate/up activation: silu (default) or gpt-oss's clamped swiglu (cfg moe.act, alpha and limit from llama.cpp)
+    act = ("swiglu_oai", MOE.get("swiglu_alpha", 1.702), MOE.get("swiglu_limit", 7.0)) if MOE.get("act") == "swiglu_oai" else None
+    xb = dict(bias=True, act=act) if MOE.get("expert_bias") else dict(act=act) if act else {}
     for fmt, K, N, mode in sorted(USED_MOE):
-        parts.append(GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode))
+        parts.append(GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode, **xb))
     comb, comb_s = GM.combine(H, MOE["used"], acc=bool(FS)), GM.combine_sorted(H, MOE["used"], acc=bool(FS))
     if SHGATE:
         comb, comb_s = GM.shared_gated(comb), GM.shared_gated(comb_s)
@@ -3435,7 +3564,7 @@ def moe_kernels(row_scale, gemm_fn):
                          .replace('export("g_moe_shared_gate")', f'export("g_moe_shared_gate_{sty}")'))
     parts += [comb, GM.bucket(MOE["experts"], MOE["used"]), comb_s]
     for fmt, K, N, mode in sorted(USED_MOE):
-        parts.append(GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn))
+        parts.append(GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn, **xb))
     return "".join(parts)
 
 
@@ -3497,6 +3626,35 @@ kernel.def export("g_silu_mul") @g_silu_mul(%tokens: index) {
   kernel.return
 }
 """
+BIAS_ADD = """
+// y[t, c] += b[c] over the hidden row of each token (the attention output projection's bias, cfg attn_out_bias).
+kernel.def export("g_bias_add") @g_bias_add(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%tokens_arg: index, %n_arg: index, %y: buffer, %b: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c4 = index.constant 4 : index
+  %c1024 = index.constant 1024 : index
+  %cH = index.constant @H@ : index
+  %y_view = buffer.view %y[%zero] : buffer -> view<[%tokens]x@H@xf32>
+  %b_view = buffer.view %b[%zero] : buffer -> view<@H@xf32>
+  %first = index.mul %lane, %c4 : index
+  scf.for %c0v = [%first to %cH step %c1024] {
+    %c = index.assume %c0v [range(%c0v, 0, @H4@), multiple_of(%c0v, 4)] : index
+    %v = vector.load %y_view[%token, %c] : view<[%tokens]x@H@xf32> -> vector<4xf32>
+    %bv = vector.load %b_view[%c] : view<@H@xf32> -> vector<4xf32>
+    %o = vector.addf %v, %bv : vector<4xf32>
+    vector.store %o, %y_view[%token, %c] : vector<4xf32>, view<[%tokens]x@H@xf32>
+  }
+  kernel.return
+}
+""".replace("@H4@", str(H - 4)).replace("@H@", str(H))
 # LAST_OUT=1 (opt-in, A/B it per port): the last layer's post-attention work runs only on the rows the head reads
 # (llama.cpp's inp_out_ids). Measured: Qwen3.8-27B prefill +1 % (within noise), Muse-Glimmer-30B -3.5 %. Off for drafters that read the trunk's final hidden rows (MTP, Gemma-4 assistant) or a DFlash tap
 # after the last layer.
@@ -3615,7 +3773,7 @@ func.def inline @g_span_output_row(%metadata: buffer, %spans: index, %span: inde
 # 2k/8k/32k; Qwen3.8-27B and Bolt tie; Flint -4 % at 8k. An explicit GEMM_N_FASTEST still wins.
 if "gemm_n_fastest" in CFG:
     os.environ.setdefault("GEMM_N_FASTEST", "1" if CFG["gemm_n_fastest"] else "0")
-LAST_OUT_SAFE = r"g_row_scale_f16|g_gemm_\w+|g_mv_\w+|g_post_add_norm|g_silu_mul"   # row-local post-attention kernels
+LAST_OUT_SAFE = r"g_row_scale_f16|g_gemm_\w+|g_mv_\w+|g_post_add_norm|g_silu_mul|g_bias_add"   # row-local post-attention kernels
 ANCHOR_POST_ATTN = "  scf.if %gemm {\n    kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16)"
 
 
@@ -3837,7 +3995,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
   %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
 """)
-    gate = "%gate" if GATE else "%q"
+    gate0 = "%gate" if GATE else "%q"
     attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in RECUR)}
     gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
     def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
@@ -3853,6 +4011,8 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         if i not in MOE_LAYERS:
             T += [par("w_gate", "ffn_gate"), par("w_up", "ffn_up"), par("w_down", "ffn_down")]
         T += [par("ffn_norm", FFN_NORM, f"view<{H}xf32>")]
+        if SINKS:
+            T.append(par("sinks", "attn_sinks", f"view<{QH}xf32>"))
         if i in RECUR:
             T.append(gdn_layer(i, b, nm, sz, par))
         else:
@@ -3887,15 +4047,17 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         if GATE and not FUSED_Q and i not in RECUR and not qg:
             T.append("  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wg_{i}", sz("attn_gate"), "%gate", "%nH", "%nQ", H) + "\n")
         qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
+        gate, gty = (f"%sinks_{i}", f"view<{QH}xf32>") if SINKS else (gate0, "buffer")
         nty = f"view<{D}xf32>" if QK_NORM else "buffer"
         if i not in RECUR:
           T.append(f"""  kernel.launch @g_qk_rope_store[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
   scf.if %gemm {{
-{"" if NO_FLASH else f"    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)" + chr(10)}    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
-    kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, {gty}, buffer, buffer, buffer, buffer)
+    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, {gty}, buffer)
   }} else {{
     kernel.launch @g_attention_split[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
-    kernel.launch @g_attention_combine[%t](%t, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [index](index, i32, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @g_attention_combine[%t](%t, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [index](index, i32, buffer, buffer, buffer, {gty}, buffer)
   }}
   scf.if %gemm {{
     kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
@@ -3903,6 +4065,9 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
 """)
         if i not in RECUR:
           T.append("  " + lin(fmt_of(nm("attn_output")), "%o", "%s_o", f"%wo_{i}", sz("attn_output"), "%y", "%nQ", "%nH", QD) + "\n")
+          if OUT_BIAS:   # attention output projection bias (gpt-oss attn_output.bias)
+            T.append(f'  %bo_{i} = command.parameter %weights, "{b}attn_output.bias" : view<{H}xf32>\n'
+                     f"  kernel.launch @g_bias_add[%t](%t, %nH, %y, %bo_{i}) : [index](index, index, buffer, view<{H}xf32>)\n")
         pa = f"%post_attn_{i}" if POST_NORM else f"%ffn_norm_{i}"
         T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, {pa}, %x, %ffn_norm_{i}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
         T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
@@ -4034,6 +4199,8 @@ if __name__ == "__main__":
             spec_kernels += gen_draft.mtp_kernels(gfacts) + gen_assist.kernels(gfacts)
     if any(t["type"] == "q5_0" for t in TENS.values()):
         COMMON += Q5_0
+    if any(t["type"] == "mxfp4" for t in TENS.values()):
+        COMMON += MXFP4
     if USED_MVQ:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
         COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                    for fmt, K, sw, R, TG in sorted(USED_MVQ))
@@ -4076,6 +4243,8 @@ if __name__ == "__main__":
         parts.append(spec_kernels)
     if MIXED_FFN:
         parts.append(SILU_MUL)
+    if OUT_BIAS:
+        parts.append(BIAS_ADD)
     if MOE:
         import importlib.util
         _spec = importlib.util.spec_from_file_location("gen_gemm_mod", os.path.join(here, "gen_gemm.py"))
