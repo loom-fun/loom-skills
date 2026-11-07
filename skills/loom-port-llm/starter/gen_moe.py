@@ -10,6 +10,7 @@ g_moe_dn_<fmt>     ys[a, H]  = Wd[e] act[a]
 g_moe_shared_gate  sg[t]     = sigmoid(h[t] . w)                    (Qwen shared-expert gate; optional)
 g_moe_combine      y[t, H]   = sg[t] * y[t, :] + sum_k wts[t, k] ys[t*KU + k, :]   (y: the shared experts' output)
 """
+import os
 import re
 FMT = {"q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34}
 ROUTE_TR = int(__import__("os").environ.get("ROUTE_TR", "0"))   # router tokens per workgroup (0: largest of 1/2/4/8 whose LDS fits 48 KiB)
@@ -851,6 +852,13 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
         rep("  %bounded_x_row = index.assume %x_row [lt(%x_row, %rows)] : index", "  %bounded_x_row = index.assume %x_row [lt(%x_row, %xrows)] : index")
         rep("    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index", "    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %xrows)] : index")
     rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
+    if mode in os.environ.get("MOE_N_FASTEST", "swiglu,store").split(","):
+        # output-column tiles fastest, on by default (MOE_N_FASTEST=0 off): consecutive workgroups share one expert row
+        # tile, so A and that expert's weights stay in L2. Prefill +74 % at 1k on Qwen3.6-35B-A3B (lfm2moe: +24-30 %);
+        # the same tiles in another order, so the same results
+        rep("workgroups(%row_tiles, %out_tiles, %c1)", "workgroups(%out_tiles, %row_tiles, %c1)")
+        rep("  %row_group_id = kernel.workgroup.id<x> : index\n  %out_group_id = kernel.workgroup.id<y> : index",
+            "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
     return text
 
 

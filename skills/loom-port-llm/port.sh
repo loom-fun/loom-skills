@@ -67,6 +67,13 @@ for k, f in r.fields.items():
     if re.fullmatch(r"general\.base_model\.\d+\.repo_url", k):
         out.append(f.contents().split("huggingface.co/")[-1].strip("/"))
 repo = sys.argv[2]; base = re.sub(r"[-_.]gguf$", "", repo, flags=re.I)
+# The GGUF repo's model card names its base model (ggml-org/X-GGUF -> Qwen/X) when the GGUF itself doesn't.
+try:
+    import json, urllib.request
+    bm = (json.load(urllib.request.urlopen(f"https://huggingface.co/api/models/{repo}", timeout=20)).get("cardData") or {}).get("base_model")
+    out += [bm] if isinstance(bm, str) else list(bm or [])
+except Exception:
+    pass
 out += [base, repo]
 org, name = base.split("/", 1)
 out += [f"Qwen/{name}", f"{org}/{name}-Instruct"]
@@ -139,11 +146,11 @@ if [ "$irc" != 0 ] || grep -q "^chat FAIL\|not derivable automatically\|WARNING:
 fi
 if [ "${DRY_RUN:-0}" = 1 ]; then   # plan only: what the reference gives this port, then stop before vision, drafter and build
   [ "$ref" != off ] && [ -s reference.json ] && "$T" -I "$here/find_reference.py" apply cfg.json reference.json ${refpick:+--pick "$refpick"} | tee -a reference.log
-  echo "DRY_RUN_RESULT $("$T" - "$K" <<'EOF'
+  echo "DRY_RUN_RESULT $("$T" - "$K" "$model_id" <<'EOF'
 import json, os, sys
 c = json.load(open("cfg.json")); r = json.load(open("reference.json")) if os.path.exists("reference.json") else {}
 best = next((x for x in r.get("ranked", []) if x.get("arch") == c.get("arch")), None)
-print(json.dumps({"arch": c.get("arch"), "kit": sys.argv[1], "reference": best and best["repo"], "reference_score": best and best["score"],
+print(json.dumps({"arch": c.get("arch"), "model_id": sys.argv[2], "kit": sys.argv[1], "reference": best and best["repo"], "reference_score": best and best["score"],
                   "inspect": "ok", "chat": (c.get("chat") or {}).get("call_format"), "moe": bool(c.get("moe")),
                   "hybrid": bool(c.get("recurrent_layers")), "mtp": bool(c.get("mtp")),
                   "taken_from_reference": (c.get("reference") or {}).get("taken")}))
