@@ -1,14 +1,14 @@
 {
- "_comment": "build.py's memory_bytes counts the largest program's prefill scratch: the three hybrid MoE cards rebuilt from this branch, a full-context request on a fresh server at the value build.py now prints and at the card's published one (full gates passed on the first card at 48e9 in run 42343748198).",
- "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
- "memory_bytes": 48000000000,
+ "_comment": "Temporary (not for merge): the vision gate with llama.cpp's batched view on published vision cards (no PASS->FAIL) and an injected vision bug (M-RoPE sections swapped for image tokens) that must still FAIL.",
+ "card": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom",
+ "memory_bytes": 59000000000,
  "kit": null,
- "llamacpp": "b1369",
+ "llamacpp": "b1370",
+ "steps": ["gates:quick"],
  "variants": [
-  {"name": "q36-rebuilt-admit", "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-rebuilt-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 49000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-card-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 42000000000, "steps": ["admit:260096"]},
-  {"name": "orn-rebuilt-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 36000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "orn-card-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 33000000000, "steps": ["admit:260096"]}
+  {"name": "vl8b-card"},
+  {"name": "vl8b-mrope-bug", "build": {}, "config": {"mrope": {"sections": [20, 24, 20, 0], "interleaved": true}}},
+  {"name": "q36-card", "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom", "memory_bytes": 48000000000, "llamacpp": "b1369"},
+  {"name": "e4b-card", "card": "loom-fun/unsloth-gemma-4-E4B-it-loom", "memory_bytes": 31000000000, "kit": "gemma4", "llamacpp": "b1369"}
  ]
 }
