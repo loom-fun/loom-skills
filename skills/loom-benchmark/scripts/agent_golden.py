@@ -104,6 +104,7 @@ def main():
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     P = Package(a.pkg)
+    import render_probe; render_probe.probe(P, a.url, TOOLS)   # TEMPORARY debug
     names = {t["function"]["name"] for t in TOOLS}
     thinking = None if a.thinking == "default" else a.thinking == "on"
     extra = {} if thinking is None else {"chat_template_kwargs": {"enable_thinking": thinking}}
