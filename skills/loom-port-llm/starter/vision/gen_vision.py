@@ -1006,6 +1006,38 @@ def shuffle(E, m):
 }
 ''', NAME=name, E=E, M=m, MM=MM, EO=E * MM, MAXROWS=MAXROWS)
 
+def place_cols(N, NT, off):
+    """y[r, off + c] = x[r, c] for x [rows, N] and y [rows, NT]: one projection into its slice of a wider output row
+    (Qwen3-VL DeepStack: the main projection followed by one per deepstack layer)."""
+    assert off + N <= NT
+    name = f"v_place_{N}_{NT}_{off}"
+    return name, T('''kernel.def export("$NAME") @$NAME(%rows: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%rows_arg: index, %x: buffer, %y: buffer) {
+  %rows = index.assume %rows_arg [range(%rows_arg, 1, $MAXROWS)] : index
+  %row_id = kernel.workgroup.id<x> : index
+  %row = index.assume %row_id [lt(%row_id, %rows)] : index
+  %lid = kernel.workitem.id<x> : index
+  %lane = index.assume %lid [range(%lid, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c256 = index.constant 256 : index
+  %cN = index.constant $N : index
+  %coff = index.constant $OFF : index
+  %xv = buffer.view %x[%zero] : buffer -> view<[%rows]x$Nxf32>
+  %yv = buffer.view %y[%zero] : buffer -> view<[%rows]x$NTxf32>
+  scf.for %c = [%lane to %cN step %c256] {
+    %bc = index.assume %c [lt(%c, %cN)] : index
+    %val = view.load %xv[%row, %bc] : view<[%rows]x$Nxf32> -> f32
+    %d = index.add %bc, %coff : index
+    %bd = index.assume %d [lt(%d, $NT)] : index
+    view.store %val, %yv[%row, %bd] : f32, view<[%rows]x$NTxf32>
+  }
+  kernel.return
+}
+''', NAME=name, N=N, NT=NT, OFF=off, MAXROWS=MAXROWS)
+
 # ---- clamp with bounds from 1-element parameter tensors (Gemma4ClippableLinear) ----
 def clamp():
     name = "v_clamp"
