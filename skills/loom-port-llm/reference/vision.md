@@ -7,6 +7,7 @@ hand-work when the projector family has an encoder plan in `starter/vision/`:
 |---|---|---|---|
 | `gemma4v` | Gemma-4-E2B, NVIDIA-Nemotron-3.5-Bolt-E4B | 16 x 768 ViT, RMSNorm, QK/V norm, 2-D NeoX RoPE (theta 100), x/y position tables, gated GELU, sandwich norms, clamped linears; 3x3 average pool, RMSNorm, linear | rows unscaled (no sqrt(H)), per-layer embedding of token 0 |
 | `qwen3vl_merger` | Qwen3-VL, Qwen3.5 / Qwen3.6 / Qwen3.8 | ViT with fused QKV + biases, LayerNorm, vision M-RoPE, interpolated (align-corners) position grid, 2x2 merge MLP; DeepStack (Qwen3-VL): a merger per `is_deepstack_layers` layer, each projection in its slice of a wide feature row | M-RoPE: image token (t, h, w) = (p, p+row, p+col); text after an image continues at p + max(rows, cols); DeepStack: slice k+1 is added to image inputs' residual after trunk layer k (`g_deepstack`) |
+| `qwen2.5vl_merger` | Qwen2.5-VL | the same Qwen-VL path, from the projector's tensors and metadata: separate q/k/v, RMSNorm, no position grid, gated SiLU FFN (`clip.use_silu`), window attention (8x8 patches, full every `n_wa_pattern`-th layer) | M-RoPE as above, with the text model's non-interleaved sections (`qwen2vl`) |
 | `muse-glimmer` | Muse-Glimmer-30B | 50 x 1536 ViT, pre/post LayerNorm, 2-D RoPE (1-indexed, adjacent pairs), 32x32-window attention in 3 of 4 layers, pixel shuffle, 3-layer erf-GELU adapter | rows go through the model's embedding RMSNorm like token rows |
 
 What happens (all generated, nothing per model):
