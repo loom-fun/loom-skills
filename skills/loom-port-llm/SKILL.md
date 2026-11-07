@@ -264,6 +264,9 @@ Kernel inventory:
   the request: its arguments go back as generated for the harness to handle. Qwen-XML and GLM
   calls go through the host `tools.parse_xml` codec (a malformed XML frame fails the request; a
   frame cut off by `max_tokens` is dropped). Text after the last complete call is dropped.
+  Content before a call ends without `content_call_separator`: the template prints it between content and
+  calls, so returning it doubled it in the next turn's rendering and broke history reuse (`@content_until`;
+  streaming withholds trailing whitespace until it is known not to precede a call).
 - Reasoning is rendered for assistant turns after the last user message, as the Qwen templates do.
   A new user turn therefore re-renders earlier turns without reasoning, and history reuse resumes
   from the first changed byte; inside a tool loop the previous turn is reused entirely
