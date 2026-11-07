@@ -1,6 +1,6 @@
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -257,6 +257,8 @@
+@@ -276,6 +276,8 @@
  
  def derive(template_text, bos="", eos=""):
      T = Template(template_text, bos, eos)
@@ -9,7 +9,7 @@
      notes = []
      chat = {}
      # BOS: emitted by the control program at the very start when the template prints it.
-@@ -513,10 +515,6 @@
+@@ -539,10 +541,6 @@
              rest = s_body[len("SYSPROBE"):]
              lead = rest[:rest.index(printed[0]) - len(line)]
              body_start = len(lead) - len(lead.lstrip())
@@ -20,7 +20,7 @@
              chat["tools_system_separator"], chat["tools_prefix"] = lead[:body_start], lead[body_start:]
          elif s_body.endswith("SYSPROBE"):
              chat["tools_after_system"] = False
-@@ -641,6 +639,8 @@
+@@ -667,6 +665,8 @@
  
  def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reasoning_effort=None):
      """Python model of control.loom's rendering (chat_begin + chat_message + chat_end)."""
@@ -29,7 +29,7 @@
      tools = None if chat.get("call_format") == "none" else tools   # a chat-only block ignores tools, as its template does
      trim = (lambda s: s.strip()) if chat["trim_content"] else (lambda s: s)
      out = chat.get("bos", "")
-@@ -733,6 +733,8 @@
+@@ -764,6 +764,8 @@
  
  
  def render_call(chat, call):
@@ -38,7 +38,7 @@
      args = call["arguments"]
      if chat["call_format"] == "hermes":
          a = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
-@@ -822,6 +824,306 @@
+@@ -853,6 +855,306 @@
  ]
  
  
@@ -345,7 +345,7 @@
  def verify(template_text, chat, bos="", eos=""):
      """Returns [(name, ok, detail)]: template render vs simulate() for each conversation."""
      T = Template(template_text, bos, eos)
-@@ -834,7 +1136,7 @@
+@@ -865,7 +1167,7 @@
          if chat["call_format"] == "json" else []
      if chat.get("tools_format") == "xml":
          extra.append(("typed tool declarations", [{"role": "user", "content": "Edit it"}], TYPED_TOOLS))
@@ -354,7 +354,7 @@
          for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
              label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")
              try:
-@@ -937,3 +1239,21 @@
+@@ -968,3 +1270,21 @@
  
  if __name__ == "__main__":
      main()
@@ -948,7 +948,7 @@
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if HEAD_GATE:
-@@ -4151,118 +4351,95 @@
+@@ -4152,118 +4352,95 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1140,7 +1140,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -4398,8 +4575,9 @@
+@@ -4399,8 +4576,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1152,7 +1152,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if SWA_ROPE:
-@@ -4428,18 +4606,24 @@
+@@ -4429,18 +4607,24 @@
      gemm_text = subprocess.run([sys.executable, os.path.join(here, "gen_gemm.py")], capture_output=True, text=True, check=True, env=env).stdout
      parts.append(gelu_vectors(gemm_text) if GELU else gemm_text)
      parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
@@ -1190,7 +1190,7 @@
      if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -53,6 +53,8 @@
+@@ -54,6 +54,8 @@
  def gate_act(g): return np.log1p(np.exp(g)) if cfg.get("attn_gate_act") == "softplus" else 1 / (1 + np.exp(-g))
  def gate_mul(g): return g if cfg.get("attn_gate_act") == "softplus" else gate_act(g)
  def ty(a): return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int8": "i8", "int32": "i32", "float16": "f16"}[str(a.dtype)] + ">"
@@ -1199,16 +1199,7 @@
  # 1. embed
  ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
  # M-RoPE (cfg "mrope"): the rope kernel also reads the epoch metadata (one span, offset 0: rotary position =
-@@ -71,7 +73,7 @@
- VARGS = ", %meta, %tinfo" if VIS else ""
- VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
- E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
--x = E[ids]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
-+x = E[ids] * (cfg.get("embed_scale") or 1.0); h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
- tab = raw("token_embd.weight")
- for n, a in [("e_ids", ids), ("e_tab", tab), ("e_w", w.astype(np.float32)), ("e_x", x.astype(np.float32)), ("e_h", h.astype(np.float32))]: save(n, a)
- cases.append(f"""check.case public @embed {{
-@@ -149,14 +151,17 @@
+@@ -153,14 +155,17 @@
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
  for li in range(cfg["layers"]):
@@ -1229,7 +1220,7 @@
  for name, K in todo:
      fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
      for tg in (1, 4):
-@@ -311,110 +316,49 @@
+@@ -315,110 +320,49 @@
    check.return
  }}
  """)
@@ -1383,7 +1374,7 @@
  # 3a. output head (argmax over the vocabulary) for one selected span of 3 tokens
  t = 3
  head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
-@@ -475,70 +419,89 @@
+@@ -479,70 +423,89 @@
  """ + hl("g_head_mv_q8", "1") + "".join(hl(k, tag) for k, tag in variants) + "".join(
              f"  check.expect.close actual(%l{tag}) expected(%l1) atol(0.0) rtol(0.0) nan(different) : tensor<{S * CH * 128}xf32>\n"
              f"  check.expect.equal actual(%p{tag}) expected(%p1) : tensor<{S * CH * 2}xi32>\n" for _, tag in variants) + "  check.return\n}\n")

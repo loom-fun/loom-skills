@@ -95,7 +95,10 @@ if DRAFT and DRAFT["kind"] == "assist":   # the Gemma-4 assistant reads the targ
         sys.exit("--draft assist needs cfg.json assistant.gguf (find_drafter.py records it for gemma4 targets)")
     DRAFT["gguf"] = os.path.abspath(cfg["assistant"]["gguf"])
     kv_per_position += 4
-weights_bytes = os.path.getsize(os.path.abspath(cfg["gguf"]))
+sys.path.insert(0, HERE)
+from formats import memory_cap, split_parts  # noqa: E402
+GGUF_PARTS = split_parts(os.path.abspath(cfg["gguf"]))   # a split GGUF: every part is a parameter file
+weights_bytes = sum(os.path.getsize(p) for p in GGUF_PARTS)
 if DRAFT and DRAFT["kind"] in ("dflash", "assist"):
     weights_bytes += os.path.getsize(DRAFT["gguf"])
 if os.path.isfile((cfg.get("vision") or {}).get("mmproj") or ""):   # the image component's projector, while it encodes
@@ -178,24 +181,14 @@ if native > KERNEL_CONTEXT and not a.context:
     print(f"NOTE: native context {native} exceeds the kernels' {KERNEL_CONTEXT}; using {KERNEL_CONTEXT}")
 context = a.context or min(native, KERNEL_CONTEXT)
 if a.memory_gib == "auto":
-    # LOOM_RESERVED_GIB: memory another resident server already holds (weaver's agent model). Parsed outside the
-    # try below: a typo there would read as "RAM unknown" and fall back to 56 GiB, more than the cap without it.
-    try:
-        reserved = float(os.environ.get("LOOM_RESERVED_GIB") or 0)
-    except ValueError:
-        sys.exit(f"LOOM_RESERVED_GIB={os.environ['LOOM_RESERVED_GIB']!r} is not a number (GiB)")
-    try:
-        cap = 0.6 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") - reserved * 2**30
-    except (AttributeError, ValueError, OSError):
-        cap = None
+    cap, what, _ = memory_cap()   # 60 % of RAM or LOOM_MEMORY_CAP_GIB, minus LOOM_RESERVED_GIB (formats.py)
     if cap is not None and cap <= 0:
-        sys.exit(f"LOOM_RESERVED_GIB={reserved:g} leaves no memory under the 60%-of-RAM cap")
+        sys.exit(f"the memory cap ({what}) leaves no memory")
     want_pool = context + max(65536, context // 4)
     need = weights_bytes + workspace + 2**30 + 2 * a.rows * recurrent_bytes + want_pool * kv_per_position
     a.memory_gib = round(min(need, cap) / 2**30, 1) if cap else 56.0
     print(f"memory budget {a.memory_gib} GiB (a {want_pool}-position pool needs {need / 2**30:.0f} GiB"
-          + (f"; cap 60% of RAM{f' minus LOOM_RESERVED_GIB {reserved:g}' if reserved else ''} = {cap / 2**30:.0f} GiB)"
-             if cap else "; RAM unknown)"))
+          + (f"; cap {what} = {cap / 2**30:.0f} GiB)" if cap else "; RAM unknown)"))
 a.memory_gib = float(a.memory_gib)
 budget = int(a.memory_gib * 2**30) - weights_bytes - workspace - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
 if context * kv_per_position > budget:
@@ -637,6 +630,38 @@ def patch_no_tools(text):
     return text
 
 
+def patch_system_in_user(text):
+    """control.loom for a template with no system turn that prints the first system message at the start of the first
+    user turn (chat_probe.system_in_user, Gemma 3: user_prefix + system + '\\n\\n' + user text + suffix): the system
+    message renders user_prefix + its text + separator and sets state bit 8, so the next (user) message renders without
+    its prefix. Other packages' control.loom is unchanged."""
+    assert not chat.get("default_system") and chat["call_format"] == "none" and not instructions and not chat.get("system_lead"), \
+        "system_in_user: modeled for chat-only templates without a default system prompt"
+    text = sub(text, 'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n',
+               'global.rodata.def @default_system = bytes("@@HEX_DEFAULT_SYSTEM@@")\n\n'
+               f'global.rodata.def @system_in_user = bytes("{hx(chat["system_in_user"])}")\n')
+    text = sub(text, """        %prefix = scf.select %user, %user_prefix, %system_prefix : buffer
+        %message = func.call @join4(%prefix, %text, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+""", f"""        %role_prefix = scf.select %user, %user_prefix, %system_prefix : buffer
+        %eight = scalar.constant 8 : i64
+        %open_bit = scalar.andi %state, %eight : i64
+        %opened = scalar.cmpi ne, %open_bit, %zero64 : i64
+        %prefix = scf.select %opened, %empty, %role_prefix : buffer
+        %fold_separator = global.load @system_in_user : buffer
+        %fold_trim = scalar.constant {B(chat.get("system_in_user_trim"))} : i1
+        %fold_text = scf.select %fold_trim, %text, %raw_text : buffer
+        %folded = func.call @join4(%user_prefix, %fold_text, %fold_separator, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+        %turn = func.call @join4(%prefix, %text, %suffix, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+        %message = scf.select %first_system, %folded, %turn : buffer
+""")
+    return sub(text, "  %kept = scalar.andi %state, %keep_mask : i64\n",
+               "  %open_mask = scalar.constant -12 : i64\n"
+               "  %fold_bit = scalar.constant 8 : i64\n"
+               "  %unopened = scalar.andi %state, %open_mask : i64\n"
+               "  %open_next = scf.select %first_system, %fold_bit, %zero64 : i64\n"
+               "  %kept = scalar.ori %unopened, %open_next : i64\n")
+
+
 def chat_variants(text):
     """A custom chat file's variants for what the template's derived chat block says: the lines between
     '// @@IF_CHAT:KEY@@' and '// @@END_CHAT@@' (or '// @@ELSE_CHAT@@', which starts the other branch) are kept
@@ -720,6 +745,8 @@ for name in ("prepare", "control", "storage", "service"):
         text = patch_tools_xml(text)
     if name == "control" and (chat["call_format"] == "json" or any(k in chat for k in JSON_CHAT_KEYS)):
         text = patch_json_chat(text)
+    if name == "control" and chat.get("system_in_user"):
+        text = patch_system_in_user(text)
     if name == "control" and chat["call_format"] == "none":
         text = patch_no_tools(text)
     if name == "control" and ("system_suffix" in chat or "assistant_suffix" in chat):
@@ -794,17 +821,17 @@ rewrite_tokenizer(tok)
 json.dump(tok, open(os.path.join(pkg, "tokenizer.json"), "w", encoding="utf-8"), ensure_ascii=False)
 
 # 4. Weights (symlink; hard link on Windows without Developer Mode) and the package card.
-gguf_name = os.path.basename(cfg["gguf"])
-link = os.path.join(pkg, "parameter", gguf_name)
-if os.path.lexists(link):
-    os.remove(link)
-try:
-    os.symlink(os.path.abspath(cfg["gguf"]), link)
-except OSError:  # Windows needs Developer Mode (or admin) for symlinks
+for part in GGUF_PARTS:
+    link = os.path.join(pkg, "parameter", os.path.basename(part))
+    if os.path.lexists(link):
+        os.remove(link)
     try:
-        os.link(os.path.realpath(cfg["gguf"]), link)
-    except OSError as e:
-        sys.exit(f"cannot link {cfg['gguf']} into {link} ({e}): enable Windows Developer Mode, or put the package on the GGUF's drive")
+        os.symlink(part, link)
+    except OSError:  # Windows needs Developer Mode (or admin) for symlinks
+        try:
+            os.link(os.path.realpath(part), link)
+        except OSError as e:
+            sys.exit(f"cannot link {part} into {link} ({e}): enable Windows Developer Mode, or put the package on the GGUF's drive")
 card = {
     "schema_version": 1,
     "model": {"id": model_id, "name": f"{cfg.get('name', 'llm')} (Loom port, GGUF)"},
@@ -815,7 +842,7 @@ card = {
     "services": {"chat": {"kind": "text", "version": 1}},
     "variants": {"gguf": {"services": {"chat": {
         "programs": ["source"], "config": {"llm.card": True},
-        "parameters": {"model": {"files": [{"path": f"parameter/{gguf_name}", "format": "gguf"}]}},
+        "parameters": {"model": {"files": [{"path": f"parameter/{os.path.basename(p)}", "format": "gguf"} for p in GGUF_PARTS]}},
         "tokenizers": {"text": "tokenizer.json"}}}}},
     "presets": {"chat": {"service": "chat", "variant": "gguf", "programs": "source", "execution": {
         "rows": a.rows, "context_capacity": a.context, "pool_capacity": a.pool,

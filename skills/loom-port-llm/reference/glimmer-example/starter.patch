@@ -1,6 +1,6 @@
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -935,5 +935,206 @@
+@@ -966,5 +966,206 @@
          json.dump(chat, open(sys.argv[2], "w"), indent=1, ensure_ascii=False)
  
  
@@ -210,19 +210,7 @@
      main()
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -71,7 +71,10 @@
- VARGS = ", %meta, %tinfo" if VIS else ""
- VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
- E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
--x = E[ids]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
-+x = E[ids]
-+if cfg.get("embed_norm"): x = x / np.sqrt((x * x).mean(-1, keepdims=True) + 1e-5)  # weightless embedding RMSNorm
-+if cfg.get("embed_scale"): x = x * cfg["embed_scale"]
-+h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
- tab = raw("token_embd.weight")
- for n, a in [("e_ids", ids), ("e_tab", tab), ("e_w", w.astype(np.float32)), ("e_x", x.astype(np.float32)), ("e_h", h.astype(np.float32))]: save(n, a)
- cases.append(f"""check.case public @embed {{
-@@ -168,6 +171,29 @@
+@@ -172,6 +172,29 @@
          kern = f"g_mv_{fmt}_k{K}" + ("_t4" if tg == 4 else "")
          _R = pick_r(n, K, tg)   # the variant the model launches (gen_llm uses the same rule)
          if _R != 16: kern += f"_r{_R}"

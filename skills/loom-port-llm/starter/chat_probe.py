@@ -255,6 +255,25 @@ def asst_suffix(chat):
     return chat.get("assistant_suffix", chat["suffix"])
 
 
+def system_in_user(T, chat, r, gap, bos, kw0):
+    """Templates with no system turn that print the first system message inside the first user turn, before its
+    text (Gemma 3: '<start_of_turn>user\\n' + system + '\\n\\n' + user text): chat["system_in_user"] is the separator
+    after the system text, chat["system_in_user_trim"] whether that text is trimmed like other content. Returns the
+    plain conversation's rendering (no system message, BOS cut), from which derive() reads the other prefixes."""
+    plain = T.render([{"role": "user", "content": "USERPROBE1"}, {"role": "assistant", "content": "ASSTPROBE1"},
+                      {"role": "user", "content": "USERPROBE2"}], **kw0)
+    plain = plain[len(bos):] if bos and plain.startswith(bos) else plain
+    user_prefix = plain[:plain.index("USERPROBE1")]
+    if not gap or r != user_prefix + "SYSPROBE" + gap + plain[len(user_prefix):]:
+        raise ProbeError(f"system message is not closed by the user suffix {chat['suffix']!r}: {gap!r}")
+    spaced = T.render([{"role": "system", "content": " SYSPROBE \n"}, {"role": "user", "content": "USERPROBE1"}], **kw0)
+    chat["user_prefix"], chat["system_in_user"] = user_prefix, gap
+    chat["system_in_user_trim"] = " SYSPROBE \n" + gap not in spaced
+    # a later system message (no system turn to model it on): rendered as a turn of that role
+    chat["system_prefix"] = user_prefix.replace("user", "system", 1)
+    return plain
+
+
 def derive(template_text, bos="", eos=""):
     T = Template(template_text, bos, eos)
     notes = []
@@ -286,11 +305,14 @@ def derive(template_text, bos="", eos=""):
         # Per-role closing tags (Laguna: '<system>..</system>\n', '<user>..</user>\n', '<assistant>..</assistant>\n'):
         # the user suffix with the role's name (system_suffix / assistant_suffix, present only when they differ).
         cand = chat["suffix"].replace("user", "system")
-        if "user" not in chat["suffix"] or not gap.startswith(cand):
-            raise ProbeError(f"system message is not closed by the user suffix {chat['suffix']!r}: {gap!r}")
-        chat["system_suffix"] = cand
-        notes.append(f"system messages close with {cand!r} (system_suffix)")
-    chat["user_prefix"] = gap[len(sys_suffix(chat)):]
+        if "user" in chat["suffix"] and gap.startswith(cand):
+            chat["system_suffix"] = cand
+            notes.append(f"system messages close with {cand!r} (system_suffix)")
+            chat["user_prefix"] = gap[len(cand):]
+        else:
+            r = system_in_user(T, chat, r, gap, bos, kw0)   # raises when it is not that shape either
+    else:
+        chat["user_prefix"] = gap[len(chat["suffix"]):]
     gap = between(r, "USERPROBE1", "ASSTPROBE1")
     chat["assistant_prefix"] = gap[len(chat["suffix"]):]
     gap = between(r, "ASSTPROBE1", "USERPROBE2")
@@ -342,7 +364,11 @@ def derive(template_text, bos="", eos=""):
     # Reasoning in history (agent loop: assistant after the last user query, followed by a tool result).
     agent = lambda m, **kw: T.render([{"role": "user", "content": "USERPROBE1"}, m,
                                       {"role": "tool", "tool_call_id": "call_0", "content": "TOOLPROBE1"}], tools=TOOLS, **kw)
-    with_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"))
+    try:
+        with_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"))
+    except ProbeError:   # a template that refuses tool turns (Gemma 3: roles must alternate): the assistant turn alone
+        agent = lambda m, **kw: T.render([{"role": "user", "content": "USERPROBE1"}, m], tools=TOOLS, **kw)
+        with_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"))
     # Templates that show reasoning in history only with thinking on (Laguna: '<think>R</think>' in every assistant
     # turn with enable_thinking, a bare '</think>' without it, and thinking off by default): read the reasoning
     # framing from the thinking-on render; history_think_off below says what a turn renders with thinking off.
@@ -646,6 +672,9 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
     out = chat.get("bos", "")
     first_system = messages and messages[0]["role"] == "system" and isinstance(messages[0]["content"], str)
     sys_text = trim(messages[0]["content"]) if first_system else ""
+    folded = first_system and bool(chat.get("system_in_user"))   # printed at the start of the first user turn
+    if folded:
+        sys_text = (trim if chat.get("system_in_user_trim") else (lambda s: s))(messages[0]["content"])
     use_default = not first_system and chat["default_system"]
     body = chat["default_system"] if use_default else sys_text
     # Thinking: the default, then enable_thinking, then reasoning_effort ("none" turns it off).
@@ -689,8 +718,10 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
         role, text = m["role"], trim(m.get("content") or "")
         if prior == "tool" and role != "tool":
             out += chat["tool_turn_suffix"]
-        if role == "system" and i == 0 and (tools or instr or preamble or system_lead) and first_system:
+        if role == "system" and i == 0 and (tools or instr or preamble or system_lead or folded) and first_system:
             pass
+        elif folded and i == 1:
+            out += chat["user_prefix"] + sys_text + chat["system_in_user"] + text + chat["suffix"]
         elif in_user:   # the first message after the system block takes the tools, whatever its role (as the template)
             out += chat["user_prefix"] + tb + text + chat["suffix"]
             in_user = False

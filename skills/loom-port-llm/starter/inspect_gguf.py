@@ -18,6 +18,12 @@ import formats  # noqa: E402
 
 path, out = sys.argv[1], sys.argv[2]
 r = gguf.GGUFReader(path)
+# A split GGUF (NAME-00001-of-0000N.gguf): metadata in the first part, tensors in every part
+_parts = formats.split_parts(path)
+_missing = [p for p in _parts if not os.path.exists(p)]
+if _missing:
+    sys.exit(f"split GGUF: missing parts next to {path}: {[os.path.basename(p) for p in _missing]}")
+ALL_TENSORS = list(r.tensors) + [t for p in _parts[1:] for t in gguf.GGUFReader(p).tensors]
 
 
 def field(key, default=None):
@@ -31,7 +37,7 @@ def field(key, default=None):
 arch = field("general.architecture")
 A = lambda k, d=None: field(f"{arch}.{k}", d)
 tensors = {}
-for t in r.tensors:
+for t in ALL_TENSORS:
     tensors[t.name] = {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]}
 H = A("embedding_length")
 heads = A("attention.head_count")
@@ -44,7 +50,7 @@ head_dim = A("attention.key_length") or H // heads
 BLOCKS = A("block_count")
 # Multi-token-prediction (NextN/MTP) blocks follow the trunk: blk.L.. carry nextn.* tensors.
 # They are not trunk layers; cfg["mtp"] lists them for the speculative-decoding drafter.
-_nextn = sorted({int(t.name.split(".")[1]) for t in r.tensors if ".nextn." in t.name})
+_nextn = sorted({int(t.name.split(".")[1]) for t in ALL_TENSORS if ".nextn." in t.name})
 L = BLOCKS - len(_nextn) if _nextn and _nextn[0] == BLOCKS - len(_nextn) else BLOCKS
 vocab = tensors["token_embd.weight"]["shape"][1]
 template = field("tokenizer.chat_template", "") or ""
@@ -97,7 +103,7 @@ for _g in sorted(g for g in {h // max(cfg["kv_heads"], 1) for h in (layer_heads 
           "below it and the extra waves skip staging (gen_flash2.py); check the long goldens")
 # Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style), else the period llama.cpp
 # hard-codes for the architecture (src/models/<arch>.cpp load_swa_pattern(ml, n, dense_first)).
-SWA_PERIOD = {"laguna": (4, True)}
+SWA_PERIOD = {"gemma3": (6, False), "laguna": (4, True)}
 pat = A("attention.sliding_window_pattern")
 if cfg["sliding_window"] and isinstance(pat, list) and len(pat) in (L, BLOCKS):
     pat = pat[:L]
@@ -144,7 +150,7 @@ if A("rope.scaling.type") == "yarn" and (A("rope.scaling.factor") or 1.0) > 1.0:
 if arch == "gemma4":
     import math
     shared = A("attention.shared_kv_layers", 0) or 0
-    freqs = next((t.data for t in r.tensors if t.name == "rope_freqs.weight"), None)
+    freqs = next((t.data for t in ALL_TENSORS if t.name == "rope_freqs.weight"), None)
     ple_dim = A("embedding_length_per_layer_input", 0) or 0
     cfg.update({
         "head_dim_swa": A("attention.key_length_swa"), "rope_theta_swa": A("rope.freq_base_swa"),
@@ -177,9 +183,27 @@ if arch != "gemma4" and cfg["sliding_layers"] and (A("rope.freq_base_swa") or A(
     cfg["rope_theta_swa"] = A("rope.freq_base_swa") or cfg["rope_theta"]
     cfg["rope_dims_swa"] = A("rope.dimension_count_swa") or rope_dims or head_dim
 # FFN activations llama.cpp hard-codes per architecture (build_ffn's LLM_FFN_GELU: GEGLU, gelu-tanh); default SwiGLU.
-FFN_ACT = {"spark2_5": "gelu"}
+FFN_ACT = {"spark2_5": "gelu", "gemma3": "gelu"}
 if arch in FFN_ACT:
     cfg["ffn_act"] = FFN_ACT[arch]
+# Gemma 3 (llama.cpp src/models/gemma3.cpp; RMS norms, QK norm and the sandwich post-norms are the starter's): token
+# embeddings times sqrt(hidden); sliding layers rotate with rope_freq_base_train_swa (10000 unless the GGUF has
+# freq_base_swa), global ones with freq_base; an optional final logit softcap; generation also ends at <end_of_turn>.
+if arch == "gemma3":
+    import math
+    cfg["embed_scale"] = math.sqrt(H)
+    if cfg["sliding_layers"]:
+        cfg["rope_theta_swa"] = A("rope.freq_base_swa") or 10000.0
+    if A("final_logit_softcapping"):
+        cfg["logit_softcap"] = A("final_logit_softcapping")
+    cfg["extra_eos_ids"] = sorted((set(cfg["extra_eos_ids"]) | {tokens.index("<end_of_turn>")} if "<end_of_turn>" in tokens
+                                   else set(cfg["extra_eos_ids"])) - {eos})
+    # Not in the starter's attention: the 27B's query scale 1/sqrt(hidden/heads) instead of 1/sqrt(head_dim), and the
+    # 4B-27B global layers' linear RoPE scaling (rope.scaling.factor 8).
+    if BLOCKS == 62 or (A("rope.scaling.type") or "none") != "none":
+        print(f"WARNING: unsupported gemma3 variant: query scale 1/sqrt({H // heads}) (27B) or RoPE scaling "
+              f"{A('rope.scaling.type')} x{A('rope.scaling.factor')}: the starter scales queries by 1/sqrt(head_dim) and "
+              "does not scale RoPE (agent port)")
 # Attention output gate activations llama.cpp hard-codes per architecture (default sigmoid): laguna's is softplus.
 GATE_ACT = {"laguna": "softplus"}
 if arch in GATE_ACT and cfg["attn_gate"]:

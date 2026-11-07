@@ -32,7 +32,8 @@ def q8_ref(xs):
 
 
 cfg = json.load(open(sys.argv[1])); out = sys.argv[2]; os.makedirs(out, exist_ok=True)
-r = GGUFReader(cfg["gguf"]); T = {t.name: t for t in r.tensors}
+from formats import split_parts  # noqa: E402
+T = {t.name: t for p in split_parts(cfg["gguf"]) for t in GGUFReader(p).tensors}
 def raw(name): return np.asarray(T[name].data).view(np.int8).reshape(-1)
 def deq(name):
     t = T[name]; return dequantize(np.asarray(t.data), t.tensor_type).reshape(int(t.shape[1]), int(t.shape[0])) if len(t.shape) == 2 else np.asarray(t.data, dtype=np.float32)
@@ -71,7 +72,10 @@ VMETA = (f"\n  %meta = check.generate.fill value(0) : tensor<4xi32>\n  %tinfo = 
 VARGS = ", %meta, %tinfo" if VIS else ""
 VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
 E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
-x = E[ids]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
+x = E[ids]
+if cfg.get("embed_norm"): x = x / np.sqrt((x * x).mean(-1, keepdims=True) + 1e-5)  # weightless embedding RMSNorm
+if cfg.get("embed_scale"): x = x * cfg["embed_scale"]
+h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
 tab = raw("token_embd.weight")
 for n, a in [("e_ids", ids), ("e_tab", tab), ("e_w", w.astype(np.float32)), ("e_x", x.astype(np.float32)), ("e_h", h.astype(np.float32))]: save(n, a)
 cases.append(f"""check.case public @embed {{
