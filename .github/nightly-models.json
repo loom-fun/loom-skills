@@ -8,6 +8,10 @@
     {"repo": "loom-fun/ggml-org-Flint-loom", "slug": "flint", "memory_bytes": 67000000000,
      "kit": null, "llamacpp": "b1355", "features": ["draft", "thinking-always"]},
     {"repo": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom", "slug": "nemotron-3.5-bolt-e4b", "memory_bytes": 34000000000,
-     "kit": "gemma4", "llamacpp": "b1368", "features": ["vision", "draft", "thinking-toggle"]}
+     "kit": "gemma4", "llamacpp": "b1368", "features": ["vision", "draft", "thinking-toggle"]},
+    {"repo": "loom-fun/unsloth-Qwen3-8B-loom", "slug": "qwen3-8b", "memory_bytes": 28000000000,
+     "kit": null, "llamacpp": "b1369", "features": ["draft", "thinking-toggle"]},
+    {"repo": "loom-fun/unsloth-Ornith-1.0-9B-loom", "slug": "ornith-1.0-9b", "memory_bytes": 21000000000,
+     "kit": null, "llamacpp": "b1369", "features": ["vision", "draft", "thinking-toggle"]}
   ]
 }
