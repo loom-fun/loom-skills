@@ -27,6 +27,10 @@ class StubRoofline:
         return 100.0 * (1 + acceptance * depth)
 
     @staticmethod
+    def drafted_row_ceiling(m, metric, depth, acceptance, bw):
+        return StubRoofline.drafted_ceiling(m, depth, acceptance, bw)
+
+    @staticmethod
     def efficiency(m, metric, ceiling, tokens_per_pass=None):
         return 0.5 if tokens_per_pass else 0.9
 

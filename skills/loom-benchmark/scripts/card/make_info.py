@@ -502,14 +502,13 @@ def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acc
         c = ceil[rk]
         row = {"ceiling": round(c, 1), "efficiency": round(R.efficiency(m, rk, c), 3)}
         if spec and key in DRAFTED_ROWS:
-            ctx, streams = DRAFTED_ROWS[key]
             row = {"ceiling": None, "single_pass": round(c, 1)}
             acc, how = (row_acceptance or {}).get(key), "session"
             if acc is None:
                 acc, how = acceptance, "spec_gate"
             if acc is not None:
                 t = round(1 + acc * spec[1], 3)
-                d = R.drafted_ceiling(m, spec[1], acc, bw, ctx=ctx, streams=streams)
+                d = R.drafted_row_ceiling(m, rk, spec[1], acc, bw)
                 row.update(ceiling=round(d, 1), efficiency=round(R.efficiency(m, rk, d, tokens_per_pass=t), 3),
                            acceptance=acc, acceptance_from=how, tokens_per_pass=t)
         metrics[key] = row

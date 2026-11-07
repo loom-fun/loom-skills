@@ -78,9 +78,38 @@ for r in targets:
 for m, rs in final.items():   # final build = last kept label; median of its runs (noise is ±5-10 %)
     vals = sorted(x["value"] for x in rs if x.get("label") == rs[-1].get("label")) or [rs[-1]["value"]]
     final[m] = vals[len(vals) // 2]
+# A drafted decode row's ceiling: roofline.json scales every decode ceiling by one drafting gain measured on short
+# replies (draft_gain). A row whose own timed requests measured their acceptance (perf.py, c4_steady.py) gets the
+# ceiling at that acceptance (roofline.drafted_row_ceiling, as the card's roofline), never a lower one: a reply that
+# copies a long document accepts far more drafted tokens than the short replies the gain came from.
+row_acc = {}
+for r in jl("perf_log.jsonl") + [x for x in targets if x.get("metric") == "c4_steady"]:
+    if r.get("kind", "loom") == "loom":
+        row_acc.update(r.get("acceptance") if isinstance(r.get("acceptance"), dict)
+                       else ({"c4_steady": r["acceptance"]} if r.get("acceptance") is not None else {}))
+tune = {}
+if os.path.exists(P("draft_tune.json")) and os.path.getsize(P("draft_tune.json")):
+    tune = json.load(open(P("draft_tune.json")))
+depth = tune.get("depth") if tune.get("kind", "none") != "none" else None
+shape = None
+if row_acc and depth and roof and os.path.exists(roof.get("gguf") or ""):
+    try:
+        sys.path.insert(0, os.path.join(here, "..", "..", "loom-roofline"))
+        import roofline
+        cfg = json.load(open(roof["cfg"])) if roof.get("cfg") and os.path.exists(roof["cfg"]) else None
+        shape = roofline.model_shape(roof["gguf"], cfg)
+    except Exception as e:   # no gguf package, unreadable GGUF: the roofline.json ceilings stand
+        print(f"audit: drafted-row ceilings at their own acceptance unavailable ({e})", file=sys.stderr)
+
+
+def ceiling(m, R):
+    c = shape and roofline.drafted_row_ceiling(shape, m, depth, row_acc.get(m), roof.get("bw") or roofline.BW)
+    return max(R["ceiling"], c or 0)
+
+
 for m, R in metrics.items():
     if m in best:
-        e = best[m] / R["ceiling"]
+        e = best[m] / ceiling(m, R)
         # 216 GB/s is a conservative measured bandwidth: dense ports reached 221-237 GB/s. Above 0.97 is a
         # WARN (check the byte count first); above 1.10 the roofline certainly undercounts.
         check(f"plausible: Loom {m}", e <= 0.97,
