@@ -84,7 +84,7 @@ def main():
     thinking = None if a.thinking == "default" else a.thinking == "on"
     extra = {} if thinking is None else {"chat_template_kwargs": {"enable_thinking": thinking}}
     msgs = [{"role": "system", "content": "You are a helpful assistant. Use the tools when they help."}]
-    turns, failures, prev_total, prev_text = [], 0, 0, ""
+    turns, failures, prev_total, prev_text, prev_verified = [], 0, 0, "", False
     for task in TASKS:
         msgs.append({"role": "user", "content": task})
         for step in range(6):
@@ -103,11 +103,22 @@ def main():
             # (A new user query may legitimately re-render earlier turns: Qwen templates drop old reasoning.)
             # A template that rewrites the retained history (e.g. drops the previous turn's reasoning when
             # thinking is on) leaves nothing verbatim to reuse: require reuse only when the previous prompt +
-            # output is a prefix of this prompt.
+            # output is a prefix of this prompt. loom-serve resumes a retained row only when this prompt
+            # extends its history exactly (it cannot cut a row back to a common prefix), so when the template
+            # re-renders bytes the model verifiably generated (the previous turn matched the golden), nothing
+            # is reusable however late the change (Gemma 4 with thinking: a "\n" before <channel|> 15 tokens
+            # from the end). Unverified output (no golden, or it diverged) keeps the 80 % rule: a wrong
+            # rebuild of the output must not hide a reuse bug.
             if step:
                 pids = P.ids(prev_text)
                 common = next((i for i, (x, y) in enumerate(zip(pids, ids)) if x != y), min(len(pids), len(ids)))
-                rec["history_verbatim"] = common >= 0.8 * len(pids)
+                exact = prompt.startswith(prev_text)
+                rewritten = not exact and prev_verified
+                rec["history_verbatim"] = exact or (common >= 0.8 * len(pids) and not rewritten)
+                if rewritten and common >= 0.8 * len(pids):
+                    rec["history_rewritten_at"] = [common, len(pids)]
+                    print(f"     note: the template re-renders the previous turn from token {common} of {len(pids)}; loom-serve reuses"
+                          " only exact extensions of a retained history (llama.cpp would reuse the common prefix)", flush=True)
             else:
                 rec["history_verbatim"] = True
             rec["reuse_ok"] = step == 0 or not rec["history_verbatim"] or rec["cached"] >= 0.8 * prev_total
@@ -175,6 +186,7 @@ def main():
                       " small thinking models do this - compare llama.cpp's choice at that point, not a Loom bug by itself")
             turns.append(rec)
             prev_total = u["prompt_tokens"] + u["completion_tokens"]
+            prev_verified = rec.get("golden_match") is True
             prev_text = prompt + P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
             # loom-serve rejects "reasoning_content": null, so only send it when present.
             msgs.append({"role": "assistant", "content": m.get("content") or "",

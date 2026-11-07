@@ -30,6 +30,12 @@ Lessons the agent paid for:
   15 min on it). head_dim > 256 needs split-K attention generalized to D/32 values per lane and flash2's
   D/16 fragment loop.
 - Known gap: with thinking ON, history after a tool result is not reused (the template re-renders the
-  reasoning with an extra newline). Not covered by the gates (they run the template default).
+  reasoning with a `\n` before `<channel|>` that the model does not generate). loom-serve resumes a retained
+  row only when the next prompt extends its history exactly (hrx-system `input.c`: the transcript must be a
+  prefix; an idle row cannot be cut back to the common prefix, and the prefix cache only captures
+  intermediate frontiers of long prefills), so neither the chat program nor storage can reuse the common
+  prefix: the turn is prefilled again (~200 tokens per tool step in the agent gate). The agent gate requires
+  reuse only where the runtime can give it (`agent_golden.py`: history the model verifiably generated and
+  the template rewrote is not required to be reused).
   Likewise for templates whose thinking-off generation prompt adds an empty thought channel (Gemma 4
   12B/26B): the template does not render it in history, so the next turn re-prefills from there.
