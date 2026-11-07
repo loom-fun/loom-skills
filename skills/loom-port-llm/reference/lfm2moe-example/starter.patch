@@ -84,7 +84,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -3681,6 +3706,105 @@
+@@ -3681,6 +3706,122 @@
  
  
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
@@ -111,11 +111,22 @@
 +        "  " + lin(fmt_of(nm("shortconv.out_proj")), "%o", "%s_o", f"%wout_{i}", sz("shortconv.out_proj"), "%y", "%nH", "%nH", H) + "\n"])
 +
 +
++def head_gate_fmt():
++    """The per-head gate tensors' format (one for every attention layer): f32 (LFM3-1.7B) or a quant (LFM3-Omni: Q4_K)."""
++    f = {fmt_of(n) for n in TENS if n.endswith(".attn_gate.weight")}
++    assert len(f) == 1, f"per-head gate tensors in several formats: {sorted(f)}"
++    return f.pop()
++
++
 +def head_gate_kernel():
-+    """LFM3 per-head output gate: gate[t, head, :] = W[head] . h[t] (f32 weights [heads, hidden]), broadcast over the
-+    head's dims; the attention combine / flash kernels apply sigmoid(gate) as for a per-dim gate."""
-+    H4 = H // 4
-+    assert H % 128 == 0
++    """LFM3 per-head output gate: gate[t, head, :] = W[head] . h[t] (W: [heads, hidden], f32 or a quant decoded by the
++    format's value helper, f32 activations), broadcast over the head's dims; the attention combine / flash kernels apply
++    sigmoid(gate) as for a per-dim gate. One wave per head, lane l owns the 32-value groups l, l+32, ..."""
++    fmt = head_gate_fmt()
++    assert H % 32 == 0 and (fmt == "f32" or fmt in SB), fmt
++    gpb = SB[fmt] // 32 if fmt != "f32" else 1          # 32-value groups per block
++    bb = FMT[fmt] if fmt != "f32" else 128              # bytes per block (f32: one 32-value group)
++    rb = row_bytes(fmt, H) if fmt != "f32" else H * 4
 +    return f"""
 +kernel.def export("g_head_gate") @g_head_gate(%tokens: index) {{
 +  %c1 = index.constant 1 : index
@@ -133,21 +144,27 @@
 +  %c0 = index.constant 0 : index
 +  %c8 = index.constant 8 : index
 +  %c32 = index.constant 32 : index
++  %cgpb = index.constant {gpb} : index
 +  %cqh = index.constant {QH} : index
-+  %ch4 = index.constant {H4} : index
++  %chg = index.constant {HG} : index
 +  %cd = index.constant {D} : index
++  %row_bytes = index.constant {rb} : offset
++  %block_bytes = index.constant {bb} : offset
 +  %zero_f = scalar.constant 0.0 : f32
-+  %h_view = buffer.view %h[%zero] : buffer -> view<[%tokens]x{H4}x4xf32>
-+  %w_view = buffer.view %w[%zero] : buffer -> view<{QH}x{H4}x4xf32>
++  %h_view = buffer.view %h[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
 +  %g_view = buffer.view %gate[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>
 +  scf.for %head = [%wave to %cqh step %c8] {{
 +    %bh = index.assume %head [range(%head, 0, {QH - 1})] : index
-+    %part = scf.for %c = [%lane to %ch4 step %c32](%acc = %zero_f : f32) -> (f32) {{
-+      %bc = index.assume %c [range(%c, 0, {H4 - 1})] : index
-+      %hv = vector.load %h_view[%token, %bc, %c0] : view<[%tokens]x{H4}x4xf32> -> vector<4xf32>
-+      %wv = vector.load %w_view[%bh, %bc, %c0] : view<{QH}x{H4}x4xf32> -> vector<4xf32>
-+      %pv = vector.mulf %hv, %wv : vector<4xf32>
-+      %sum = vector.reduce<addf> %pv, %acc : vector<4xf32>, f32
++    %row_origin = index.scale %bh, %row_bytes : index, offset -> offset
++    %part = scf.for %g = [%lane to %chg step %c32](%acc = %zero_f : f32) -> (f32) {{
++      %bg = index.assume %g [range(%g, 0, {HG - 1})] : index
++      %block = index.div %bg, %cgpb : index
++      %within = index.rem %bg, %cgpb : index
++      %block_off = index.scale %block, %block_bytes : index, offset -> offset
++      %o = index.add %row_origin, %block_off : offset
++      %wv = func.call @g_{fmt}_values(%w, %o, %within) : (buffer, offset, index) -> (vector<32xf32>)
++      %xv = vector.load %h_view[%token, %bg, %c0] : view<[%tokens]x{HG}x32xf32> -> vector<32xf32>
++      %sum = vector.dotf<reassoc|contract> %wv, %xv, %acc : vector<32xf32>, vector<32xf32>, f32
 +      scf.yield %sum : f32
 +    }}
 +    %logit = kernel.subgroup.reduce<addf> %part : f32
@@ -158,7 +175,7 @@
 +  }}
 +  kernel.return
 +}}
-+"""
++""" + (F32_VALUES if fmt == "f32" and "@g_f32_values(" not in COMMON else "")
 +
 +
 +def moe_layer(i, b, nm):
@@ -190,7 +207,7 @@
  
  
  def rope_bias(block, tag, ind="  "):
-@@ -3764,7 +3888,8 @@
+@@ -3764,7 +3905,8 @@
    %pml_size = index.scale %t, %pml_bytes : index, offset -> offset
    %pacc = buffer.alloca<global> align(256) %pacc_size : buffer
    %pml = buffer.alloca<global> align(256) %pml_size : buffer
@@ -200,7 +217,7 @@
    %single = index.cmp eq, %t, %c1 : index
    %big = index.cmp uge, %t, %c128 : index
    %scale_entry = index.constant 8 : offset
-@@ -3802,8 +3927,51 @@
+@@ -3802,8 +3944,51 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -253,7 +270,7 @@
    %list_entry = index.constant 4 : offset
    %list_size = index.scale %t, %list_entry : index, offset -> offset
    %count_size = index.constant 256 : offset
-@@ -3815,10 +3983,11 @@
+@@ -3815,10 +4000,11 @@
    %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
    %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
@@ -267,7 +284,7 @@
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
      def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
          """Text of trunk layer i (tensors blk.i.*). ordinal overrides its attention KV-plane ordinal and
-@@ -3829,47 +3998,55 @@
+@@ -3829,47 +4015,55 @@
          par = lambda var, n, ty=None: f'    %{var}_{i} = command.parameter %weights, "{nm(n)}" : {ty or f"view<{sz(n)}xi8>"}\n'
          kind = kind_note or (" (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else ""))
          T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
@@ -286,7 +303,7 @@
 +        if i in NONATT:
              pass
 +        elif HEAD_GATE:
-+            T.append(par("wg", "attn_gate", f"view<{H * QH}xf32>"))
++            T.append(par("wg", "attn_gate"))
          elif GATE and not FUSED_Q:
              T.append(par("wg", "attn_gate"))
 -        if QK_NORM and i not in RECUR:
@@ -323,7 +340,7 @@
            T.append("  " + lin(fmt_of(nm("attn_v")), "%h", "%s_h", f"%wv_{i}", sz("attn_v"), "%v", "%nH", "%nKV", H) + "\n")
 -        if GATE and not FUSED_Q and i not in RECUR and not qg:
 +        if HEAD_GATE and i not in NONATT:
-+            T.append(f"  kernel.launch @g_head_gate[%t](%t, %h, %wg_{i}, %gate) : [index](index, buffer, view<{H * QH}xf32>, buffer)\n")
++            T.append(f"  kernel.launch @g_head_gate[%t](%t, %h, %wg_{i}, %gate) : [index](index, buffer, view<{sz('attn_gate')}xi8>, buffer)\n")
 +        elif GATE and not FUSED_Q and i not in NONATT and not qg:
              T.append("  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wg_{i}", sz("attn_gate"), "%gate", "%nH", "%nQ", H) + "\n")
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
@@ -335,7 +352,7 @@
    scf.if %gemm {{
  {"" if NO_FLASH else f"    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)" + chr(10)}    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
      kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
-@@ -3881,13 +4058,13 @@
+@@ -3881,13 +4075,13 @@
      kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
    }}
  """)
@@ -351,7 +368,7 @@
          else:
            fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
            if fg == fu:
-@@ -4056,11 +4233,30 @@
+@@ -4056,11 +4250,30 @@
          parts.append(spec_kernels)
      if MIXED_FFN:
          parts.append(SILU_MUL)
@@ -473,7 +490,7 @@
          if name not in T:
              continue
          key = (T[name].tensor_type.name.lower(), K)
-+        if key[0] == "f32":   # an f32 projection (LFM3's per-head attn_gate) has its own kernel (g_head_gate, case 3c)
++        if key[0] == "f32" or (nm_ == "attn_gate" and cfg.get("attn_gate") == "head"):   # LFM3's per-head gate: g_head_gate (case 3c)
 +            continue
          if key not in seen: seen.add(key); todo.append((name, K))
  for name, K in todo:
@@ -500,7 +517,7 @@
      c, s = np.cos(ang)[:, None], np.sin(ang)[:, None]
      if cfg["rope_type"] == "neox":
          a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
-@@ -291,6 +297,27 @@
+@@ -291,6 +297,28 @@
    check.return
  }}
  """)
@@ -513,14 +530,15 @@
 +    _g = next(f"blk.{i}.attn_gate.weight" for i in range(cfg["layers"]) if f"blk.{i}.attn_gate.weight" in T)
 +    Wg = deq(_g).astype(np.float32).reshape(QH, H); xs = rng.standard_normal((4, H)).astype(np.float32)
 +    ge = np.repeat((xs.astype(np.float64) @ Wg.T.astype(np.float64))[:, :, None], D, 2).reshape(4, QH * D)
-+    save("hg_w", Wg.reshape(-1)); save("hg_x", xs); save("hg_e", ge.astype(np.float32))
++    hgw = Wg.reshape(-1) if T[_g].tensor_type.name == "F32" else raw(_g)   # the kernel reads the GGUF bytes
++    save("hg_w", hgw); save("hg_x", xs); save("hg_e", ge.astype(np.float32))
 +    cases.append(f"""check.case public @head_gate {{
 +  %t = check.literal value(4) : index
-+  %w = check.file.read.npy path("hg_w.npy") : tensor<{QH * H}xf32>
++  %w = check.file.read.npy path("hg_w.npy") : {ty(hgw)}
 +  %x = check.file.read.npy path("hg_x.npy") : tensor<4x{H}xf32>
 +  %e = check.file.read.npy path("hg_e.npy") : tensor<4x{QH * D}xf32>
 +  %g = check.generate.fill value(0.0) : tensor<4x{QH * D}xf32>
-+  kernel.launch @g_head_gate[%t](%t, %x, %w, %g) : [index](index, tensor<4x{H}xf32>, tensor<{QH * H}xf32>, tensor<4x{QH * D}xf32>)
++  kernel.launch @g_head_gate[%t](%t, %x, %w, %g) : [index](index, tensor<4x{H}xf32>, {ty(hgw)}, tensor<4x{QH * D}xf32>)
 +  check.expect.close actual(%g) expected(%e) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<4x{QH * D}xf32>
 +  check.return
 +}}
@@ -528,7 +546,7 @@
  # 3a. output head (argmax over the vocabulary) for one selected span of 3 tokens
  t = 3
  head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
-@@ -902,184 +929,106 @@
+@@ -902,184 +930,106 @@
    check.return
  }}
  """)
