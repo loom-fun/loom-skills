@@ -333,6 +333,17 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/ggml-org-Qwen3-14B-loom",
+   "slug": "qwen3-14b",
+   "memory_bytes": 31000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
   }
  ]
 }
