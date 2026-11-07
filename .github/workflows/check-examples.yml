@@ -18,3 +18,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Reference examples apply and compile
         run: skills/loom-port-llm/reference/check_examples.sh
+      - name: Tokenizer regex rewrite self-check
+        run: python3 skills/loom-port-llm/starter/runtime_regex.py
