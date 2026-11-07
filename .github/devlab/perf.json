@@ -14,7 +14,9 @@
     }
    ],
    "steps": [
+    "perf:card:2",
     "perf:card:2:long",
+    "llama:2",
     "llama:2:long",
     "c4:card",
     "llamac4"
@@ -33,7 +35,9 @@
     }
    ],
    "steps": [
+    "perf:card:2",
     "perf:card:2:long",
+    "llama:2",
     "llama:2:long",
     "c4:card",
     "llamac4"
@@ -52,7 +56,9 @@
     }
    ],
    "steps": [
+    "perf:card:2",
     "perf:card:2:long",
+    "llama:2",
     "llama:2:long",
     "c4:card",
     "llamac4"
@@ -64,14 +70,16 @@
    "memory_bytes": 48000000000,
    "kit": null,
    "llamacpp": "b1369",
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:ggml-org/Qwen3.6-35B-A3B-GGUF/dflash-Qwen3.6-35B-A3B-Q8_0.gguf} --spec-draft-n-max 7 -ngld 99",
    "variants": [
     {
      "name": "card"
     }
    ],
    "steps": [
+    "perf:card:2",
     "perf:card:2:long",
+    "llama:2",
     "llama:2:long",
     "c4:card",
     "llamac4"
@@ -90,7 +98,9 @@
     }
    ],
    "steps": [
+    "perf:card:2",
     "perf:card:2:long",
+    "llama:2",
     "llama:2:long",
     "c4:card",
     "llamac4"
@@ -109,7 +119,9 @@
     }
    ],
    "steps": [
+    "perf:card:2",
     "perf:card:2:long",
+    "llama:2",
     "llama:2:long",
     "c4:card",
     "llamac4"
@@ -128,7 +140,9 @@
     }
    ],
    "steps": [
+    "perf:card:2",
     "perf:card:2:long",
+    "llama:2",
     "llama:2:long",
     "c4:card",
     "llamac4"
