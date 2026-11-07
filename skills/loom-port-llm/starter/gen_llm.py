@@ -96,8 +96,7 @@ THETA = CFG["rope_theta"]
 RD_SWA, THETA_SWA = CFG.get("rope_dims_swa") or RD, CFG.get("rope_theta_swa") or THETA
 SWA_ROPE = bool(CFG.get("sliding_layers")) and (CFG.get("head_dim_swa") or D) == D and (RD_SWA, THETA_SWA) != (RD, THETA)
 assert not SWA_ROPE or (RD_SWA % 64 == 0 and RD_SWA <= D), "rope_dims_swa must be a multiple of 64"
-FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs)
-assert not (SWA_ROPE and FREQ_FACTORS), "rope_freq_factors with a sliding-layer RoPE: not modeled"
+FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs; global layers only)
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
 OUT_BIAS = CFG.get("attn_out_bias", False)   # attn_output.bias on every attention layer (gpt-oss): g_bias_add
 # YaRN RoPE scaling (cfg rope_scaling, inspect_gguf.py; llama.cpp ggml rope_yarn with ext_factor 1): pair i's
@@ -2100,12 +2099,12 @@ def mrope_pick(j, idx):
 MRP = []   # selection lines emitted before each pair's angle
 
 
-def freq_factor(j):
+def freq_factor(j, factors):
     """llama3 rope_freqs (FREQ_FACTORS): divide pair j's frequency by its factor, picked from the runs of equal
     factors by the pair index %li{j} (Llama 3.x: eight runs). Empty without factors."""
-    if not FREQ_FACTORS:
+    if not factors:
         return ""
-    runs = [(i, f) for i, f in enumerate(FREQ_FACTORS) if i == 0 or f != FREQ_FACTORS[i - 1]]
+    runs = [(i, f) for i, f in enumerate(factors) if i == 0 or f != factors[i - 1]]
     t = [f"\n  %ff{j}_0 = scalar.constant {float(runs[0][1])!r} : f32"]
     for r, (start, f) in enumerate(runs[1:], 1):
         t.append(f"""  %ffs{j}_{r} = scalar.constant {start} : i32
@@ -2116,12 +2115,12 @@ def freq_factor(j):
     return "\n".join(t)
 
 
-def yarn_freq(j, y, rd, theta):
+def yarn_freq(j, y, rd, theta, factors=None):
     """YaRN y (a rope_scaling block, None = off) of a RoPE with rd rotated dims and base theta: lines turning pair j's
-    frequency %if{j} (after freq_factor: %if{j}f; pair index %lf{j}) into that name + "y"."""
+    frequency %if{j} (%if{j}f after freq_factor with factors; pair index %lf{j}) into that name + "y"."""
     if not y:
         return ""
-    src = f"%if{j}f" if FREQ_FACTORS else f"%if{j}"
+    src = f"%if{j}f" if factors else f"%if{j}"
     low, inv, mix, _ = yarn_constants(y, rd, theta)
     return f"""
   %yl{j} = scalar.constant {low!r} : f32
@@ -2146,19 +2145,17 @@ def yarn_scale(j, y, rd, theta):
   %sr{j}m = scalar.mulf %sr{j}, %ymsc{j} : f32"""
 
 
-def qk_rope(rd=None, theta=None, name="g_qk_rope_store", yarn=True):
+def qk_rope(rd=None, theta=None, name="g_qk_rope_store", factors=FREQ_FACTORS, yarn=YARN):
     """Per-head (optional) RMSNorm + RoPE for QH query and KVH key heads, with
     keys/values stored to the paged F16 KV planes: one 256-lane workgroup per
     token. Lane l of a wave owns D/32 of a head's dims: NeoX: l, l+32, ...
     with rotary pairs (d, d + RD/2) over the first RD (rope_dims) dims and the
     rest passed through; interleaved ("norm", D = 128 only): 4l..4l+3 with
-    pairs (0,1),(2,3). Each pair's angle is computed once for every head. rd / theta / name: another rotary
-    width, base and kernel name (sliding layers, qk_rope_swa); yarn: True = the model's YaRN (cfg rope_scaling),
-    False = none, or a rope_scaling block (yarn_freq)."""
+    pairs (0,1),(2,3). Each pair's angle is computed once for every head. rd / theta / name / factors / yarn:
+    another rotary width, base, kernel name, frequency factors and YaRN block (cfg rope_scaling; None: none) for
+    layers with their own RoPE (sliding layers, qk_rope_swa)."""
     rd, theta = rd or RD, theta or THETA
     n = DL
-    yarn = YARN if yarn is True else (yarn or None)
-    yarg = (yarn, rd, theta)
     if ROPE == "neox":
         dims = ["%lane"] + [f"%d{j}" for j in range(1, n)]
         dim_defs = "".join(f"  %d{j}c = index.constant {32 * j} : index\n  %d{j} = index.add %lane, %d{j}c : index\n" for j in range(1, n))
@@ -2225,8 +2222,8 @@ kernel.def export("{name}") @{name}(%tokens: index) {{
   %lf{j} = scalar.sitofp %li{j} : i32 to f32
   %ex{j}a = scalar.mulf %lf{j}, %ln_scale : f32
   %ex{j}b = scalar.mulf %ex{j}a, %neg : f32
-  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j)}{yarn_freq(j, *yarg)}
-  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if FREQ_FACTORS else ""}{"y" if yarn else ""} : f32
+  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j, factors)}{yarn_freq(j, yarn, rd, theta, factors)}
+  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if factors else ""}{"y" if yarn else ""} : f32
   %tr{j} = scalar.mulf %ra{j}, %inv_two_pi : f32
   %ts{j} = scalar.addf %tr{j}, %half : f32
   %ti{j} = scalar.fptosi %ts{j} : f32 to i32
@@ -2234,7 +2231,7 @@ kernel.def export("{name}") @{name}(%tokens: index) {{
   %wr{j} = scalar.mulf %tf{j}, %two_pi : f32
   %an{j} = scalar.subf %ra{j}, %wr{j} : f32
   %cr{j} = scalar.cosf<afn> %an{j} : f32
-  %sr{j} = scalar.sinf<afn> %an{j} : f32{yarn_scale(j, *yarg)}
+  %sr{j} = scalar.sinf<afn> %an{j} : f32{yarn_scale(j, yarn, rd, theta)}
   %cos{j} = scf.select %apply_rope, %cr{j}{"m" if yarn else ""}, %one_f : f32
   %sin{j} = scf.select %apply_rope, %sr{j}{"m" if yarn else ""}, %zero_f : f32""")
     t.append(f"""  %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>
@@ -3833,9 +3830,10 @@ def geglu_mul():
 
 
 def qk_rope_swa():
-    """g_qk_rope_store_swa: g_qk_rope_store with the sliding layers' rotary dims and base (SWA_ROPE), without YaRN
-    (a sliding layer with its own RoPE is unscaled, as llama.cpp's swa rope)."""
-    return qk_rope(RD_SWA, THETA_SWA, "g_qk_rope_store_swa", yarn=False)
+    """g_qk_rope_store_swa: g_qk_rope_store with the sliding layers' rotary dims and base (SWA_ROPE), without the
+    frequency factors (llama.cpp lfm3: rope_freqs belongs to the global layers) or YaRN (llama.cpp's swa rope is
+    unscaled)."""
+    return qk_rope(RD_SWA, THETA_SWA, "g_qk_rope_store_swa", None, None)
 
 
 SILU_MUL = r"""
@@ -4229,8 +4227,9 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
     if not QK_NORM:
         L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
-    L_.append(f"""
-{moe_alloc() if MOE else ""}  kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
+    if MOE:   # its own part: the MTP drafter programs reuse the prologue (all parts but the last), MoE layer included
+        L_.append("\n" + moe_alloc())
+    L_.append(f"""{"" if MOE else chr(10)}  kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
   %list_entry = index.constant 4 : offset
   %list_size = index.scale %t, %list_entry : index, offset -> offset
   %count_size = index.constant 256 : offset

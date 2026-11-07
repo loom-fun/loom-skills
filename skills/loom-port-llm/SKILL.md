@@ -62,6 +62,10 @@ LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmar
   (n-gram prompt lookup is a candidate for every model) and depth decode fastest, or none
   (`starter/draft/README.md`). `SPEC=off` opts out.
 
+**Split GGUFs** (`NAME-00001-of-0000N.gguf`): pass the first part; port.sh fetches and links every part; inspect, build
+and the kernel tests read them all, and the package lists each as a parameter file. A model whose weights need more
+than 60 % of RAM: `LOOM_MEMORY_CAP_GIB=N` sets the memory cap (build.py, pick_gguf.py) (a DevLab port job: `"env": {"LOOM_MEMORY_CAP_GIB": N}`).
+
 `DRY_RUN=1 port.sh ...` plans a port on the CPU in under a minute: stages 1-2 only, an uncached GGUF read as a
 header-only sparse stub (nothing downloaded), then `DRY_RUN_RESULT {...}` (architecture, kit, reference, inspect).
 
@@ -121,7 +125,7 @@ The expensive path. Keep it short:
    | Family | Example |
    |---|---|
    | Gemma-3n / Gemma-4 (PLE, KV sharing, head_dim 512, Gemma chat format) | `gemma4` |
-   | LFM2 short-conv hybrids (+ its own MoE kernels) | `lfm2moe` (top-k router, expert matvecs, grouped WMMA prefill) |
+   | LFM2 / LFM3 short-conv hybrids (+ its own MoE kernels) | `lfm2moe` (top-k router, expert matvecs, grouped WMMA prefill; lfm3: kernel-7 conv, sandwich norms; its per-head gate and SWA rope base are the starter's `per_head` and `rope_theta_swa`) |
    | NoPE pattern, GLM-style stop tokens (sinks, SWA and MoE from the starter) | `flint` (built on lfm2moe in ~12 min; its MoE and sinks are now the starter's) |
    | OpenAI harmony channel format, reasoning effort (sinks, SWA, YaRN, biases, MXFP4 MoE from the starter) | `gpt-oss` |
    | channel chat formats (ATEM), norm RoPE, NoPE | `glimmer` |

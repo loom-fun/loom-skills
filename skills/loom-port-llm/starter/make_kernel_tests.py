@@ -32,7 +32,8 @@ def q8_ref(xs):
 
 
 cfg = json.load(open(sys.argv[1])); out = sys.argv[2]; os.makedirs(out, exist_ok=True)
-r = GGUFReader(cfg["gguf"]); T = {t.name: t for t in r.tensors}
+from formats import split_parts  # noqa: E402
+T = {t.name: t for p in split_parts(cfg["gguf"]) for t in GGUFReader(p).tensors}
 def raw(name): return np.asarray(T[name].data).view(np.int8).reshape(-1)
 def deq(name):
     t = T[name]; return dequantize(np.asarray(t.data), t.tensor_type).reshape(int(t.shape[1]), int(t.shape[0])) if len(t.shape) == 2 else np.asarray(t.data, dtype=np.float32)
@@ -212,8 +213,8 @@ for name, K in todo:
 # 2a. per-head attention gate (cfg attn_gate "per_head"): n = heads rows, run by gen_llm.lin_mv on f32 activations at
 # every token count: the 1-token and 4-token kernels at the decode R, and the 4-token R=16 kernel prefill takes
 if cfg.get("attn_gate") == "per_head":
-    A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", [])))
-    name = f"blk.{A0}.attn_gate.weight"; fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
+    name = next(f"blk.{i}.attn_gate.weight" for i in range(cfg["layers"]) if f"blk.{i}.attn_gate.weight" in T)
+    fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
     R1 = pick_r(n, H, 1)
     variants = [(1, R1), (4, R1)] + ([(4, 16)] if R1 != 16 and n % 16 == 0 else [])
     save("hg_w", raw(name)); wt = ty(raw(name))
@@ -365,10 +366,10 @@ def yarn(inv, y=cfg.get("rope_scaling"), rd=RD, theta=cfg["rope_theta"]):
     low, high = max(0.0, np.floor(dim(y.get("beta_fast", 32.0)))), min(rd - 1.0, np.ceil(dim(y.get("beta_slow", 1.0))))
     ramp = np.clip((np.arange(len(inv)) - low) / max(0.001, high - low), 0, 1)
     return inv * (1 - (1 - 1 / f) * ramp), y.get("attn_factor", 1.0) * (1 + 0.1 * np.log(f))
-def rope(a, RD=RD, theta=cfg["rope_theta"], y=cfg.get("rope_scaling")):
+def rope(a, RD=RD, theta=cfg["rope_theta"], factors=cfg.get("rope_freq_factors"), y=cfg.get("rope_scaling")):
     inv = theta ** (-np.arange(0, RD // 2) * 2.0 / RD)
-    if cfg.get("rope_freq_factors"):   # llama3 rope_freqs: each pair's frequency divided by its factor
-        inv = inv / np.asarray(cfg["rope_freq_factors"][:RD // 2], np.float64)
+    if factors:   # llama3 rope_freqs: each pair's frequency divided by its factor
+        inv = inv / np.asarray(factors[:RD // 2], np.float64)
     inv, msc = yarn(inv, y, RD, theta); ang = pos[:, None] * inv[None]
     c, s = np.cos(ang)[:, None] * msc, np.sin(ang)[:, None] * msc
     if cfg["rope_type"] == "neox":
@@ -410,7 +411,7 @@ cases.append(f"""check.case public @qk_rope {{
 # 3'. sliding layers with their own rotary dims / base at the same head_dim (gen_llm SWA_ROPE): g_qk_rope_store_swa
 RD_SWA, TH_SWA = cfg.get("rope_dims_swa") or RD, cfg.get("rope_theta_swa") or cfg["rope_theta"]
 if cfg.get("sliding_layers") and (cfg.get("head_dim_swa") or D) == D and (RD_SWA, TH_SWA) != (RD, cfg["rope_theta"]):
-    qs = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq, RD_SWA, TH_SWA, None)
+    qs = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq, RD_SWA, TH_SWA, None, None)   # no frequency factors, no YaRN
     save("r_qs", qs.reshape(t, -1).astype(np.float32))
     cases.append(cases[-1].replace("@qk_rope {", "@qk_rope_swa {").replace("@g_qk_rope_store[", "@g_qk_rope_store_swa[")
                  .replace('path("r_qe.npy")', 'path("r_qs.npy")'))
