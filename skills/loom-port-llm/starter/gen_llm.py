@@ -3044,6 +3044,11 @@ def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store", gemm_only=False):
       }} else {{
         kernel.launch @g_gemm_{fmt}_{mode}[%t, {n}]({args}) : [index, index]({types})
       }}"""
+    # The 128/256-row kernels tile the outputs by 128 (swiglu: 64 of each weight) and compute only whole tiles: an
+    # output width they do not divide (gpt-oss: 2880) keeps the 64-row kernel, or the last columns are never written.
+    nv = NVAL.get(n, int(n) if str(n).isdigit() else 0)
+    if nv % (64 if mode == "swiglu" else 128):
+        gemm = f"kernel.launch @g_gemm_{fmt}_{mode}[%t, {n}]({args}) : [index, index]({types})"
     if gemm_only:
         return gemm
     return f"""scf.if %gemm {{

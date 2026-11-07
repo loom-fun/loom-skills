@@ -873,13 +873,16 @@ def gemm_cases():
 if os.environ.get("GEMM_TESTS", "1") == "1":
     for name, fmt, swiglu in gemm_cases():
         W = deq(name); n, K = W.shape
-        n_use = min(n, 1024)                          # a slice of output rows keeps the reference cheap
+        n_use = min(n, 1024 + n % 128)                # a slice of output rows keeps the reference cheap (an output
+                                                      # width the 128-wide tiles do not divide keeps its remainder)
         Wr = raw(name).reshape(n, -1)[:n_use].reshape(-1)
         Ws = W[:n_use].astype(np.float64)
         if swiglu:
             up = name.replace("ffn_gate", "ffn_up"); U = deq(up)[:n_use].astype(np.float64); Ur = raw(up).reshape(n, -1)[:n_use].reshape(-1)
         base_k = f"g_gemm_{fmt}_{'swiglu' if swiglu else 'store'}"
-        for rows, kern in ((128, base_k), (256, base_k + "_m128")) + (() if fmt in GEMM_HELPER else ((512, base_k + "_m256"),)):
+        # gen_llm.linear launches the 128/256-row kernels only on output widths their 128-wide tiles divide
+        big = n_use % (64 if swiglu else 128) == 0
+        for rows, kern in ((128, base_k),) + (((256, base_k + "_m128"),) + (() if fmt in GEMM_HELPER else ((512, base_k + "_m256"),)) if big else ()):
             x16 = rng.standard_normal((rows, K)).astype(np.float16)
             inv = rng.uniform(0.25, 2.0, rows).astype(np.float32)
             sc = np.stack([np.ones(rows, np.float32), inv], 1)
