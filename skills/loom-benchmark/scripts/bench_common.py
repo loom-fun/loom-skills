@@ -100,6 +100,23 @@ def doc(n):
     return (data if size is None else data[:size]).decode("utf-8")
 
 
+def no_dummy_prefix(tok):
+    """The tokenizer without a SentencePiece-style dummy prefix (Metaspace, prepend_scheme "first": a "▁" before
+    the first word of every encoded string). The gates encode a reply on its own; with the prefix its first word
+    becomes "▁The" where the model, continuing its prompt, generated "The" (a token-0 mismatch on every reply that
+    opens with a word). A rendered prompt opens with a special token, where "first" adds nothing, so prompts encode
+    as the server encodes them. Other tokenizers are returned unchanged."""
+    from tokenizers import Tokenizer
+    spec = json.loads(tok.to_str())
+    pres = [spec.get("pre_tokenizer") or {}]
+    pres += pres[0].get("pretokenizers", []) if pres[0].get("type") == "Sequence" else []
+    changed = False
+    for p in pres:
+        if p.get("type") == "Metaspace" and p.get("prepend_scheme") == "first":
+            p["prepend_scheme"], changed = "never", True
+    return Tokenizer.from_str(json.dumps(spec)) if changed else tok
+
+
 class Package:
     def __init__(self, path):
         from tokenizers import Tokenizer
@@ -107,7 +124,7 @@ class Package:
         self.cfg = json.load(open(os.path.join(path, "llm_config.json")))
         self.chat = self.cfg["chat"]
         self.model_id = self.cfg["model_id"]
-        self.tok = Tokenizer.from_file(os.path.join(path, "tokenizer.json"))
+        self.tok = no_dummy_prefix(Tokenizer.from_file(os.path.join(path, "tokenizer.json")))
 
     def render(self, user):
         """Exactly what control.loom renders for one user message + generation prompt."""
