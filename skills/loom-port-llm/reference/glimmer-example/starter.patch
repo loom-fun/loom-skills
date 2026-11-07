@@ -1,6 +1,6 @@
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -597,5 +597,206 @@
+@@ -672,5 +672,206 @@
          json.dump(chat, open(sys.argv[2], "w"), indent=1, ensure_ascii=False)
  
  
