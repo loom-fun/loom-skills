@@ -2026,12 +2026,12 @@ def mrope_pick(j, idx):
 MRP = []   # selection lines emitted before each pair's angle
 
 
-def freq_factor(j):
+def freq_factor(j, factors):
     """llama3 rope_freqs (FREQ_FACTORS): divide pair j's frequency by its factor, picked from the runs of equal
     factors by the pair index %li{j} (Llama 3.x: eight runs). Empty without factors."""
-    if not FREQ_FACTORS:
+    if not factors:
         return ""
-    runs = [(i, f) for i, f in enumerate(FREQ_FACTORS) if i == 0 or f != FREQ_FACTORS[i - 1]]
+    runs = [(i, f) for i, f in enumerate(factors) if i == 0 or f != factors[i - 1]]
     t = [f"\n  %ff{j}_0 = scalar.constant {float(runs[0][1])!r} : f32"]
     for r, (start, f) in enumerate(runs[1:], 1):
         t.append(f"""  %ffs{j}_{r} = scalar.constant {start} : i32
@@ -2042,31 +2042,33 @@ def freq_factor(j):
     return "\n".join(t)
 
 
-def qk_rope():
+def qk_rope(rd=None, theta=None, name="g_qk_rope_store", factors=FREQ_FACTORS):
     """Per-head (optional) RMSNorm + RoPE for QH query and KVH key heads, with
     keys/values stored to the paged F16 KV planes: one 256-lane workgroup per
     token. Lane l of a wave owns D/32 of a head's dims: NeoX: l, l+32, ...
     with rotary pairs (d, d + RD/2) over the first RD (rope_dims) dims and the
     rest passed through; interleaved ("norm", D = 128 only): 4l..4l+3 with
-    pairs (0,1),(2,3). Each pair's angle is computed once for every head."""
+    pairs (0,1),(2,3). Each pair's angle is computed once for every head. rd / theta / name / factors: another
+    rotary width, base, kernel name and frequency factors (sliding layers, qk_rope_swa)."""
+    rd, theta = rd or RD, theta or THETA
     n = DL
     if ROPE == "neox":
         dims = ["%lane"] + [f"%d{j}" for j in range(1, n)]
         dim_defs = "".join(f"  %d{j}c = index.constant {32 * j} : index\n  %d{j} = index.add %lane, %d{j}c : index\n" for j in range(1, n))
-        half = RD // 64  # pair offset in lanes-of-32 units
+        half = rd // 64  # pair offset in lanes-of-32 units
         freq_idx = [dims[j] for j in range(half)]
         pairs = [(j, j + half, j) for j in range(half)]
-        ln_scale = 2.0 * math.log(THETA) / RD   # angle = position * exp(-d * 2 ln(theta) / RD)
+        ln_scale = 2.0 * math.log(theta) / rd   # angle = position * exp(-d * 2 ln(theta) / RD)
     else:
-        assert D == 128 and RD == 128, "interleaved RoPE is implemented for head_dim 128"
+        assert D == 128 and rd == 128, "interleaved RoPE is implemented for head_dim 128"
         dims = ["%e0", "%e1", "%e2", "%e3"]
         dim_defs = "  %c1 = index.constant 1 : index\n  %e0 = index.mul %lane, %c4 : index\n  %e1 = index.add %e0, %c1 : index\n  %e2 = index.add %e0, %c2 : index\n  %e3 = index.add %e0, %c3 : index\n  %f0 = index.mul %lane, %c2 : index\n  %f1 = index.add %f0, %c1 : index\n"
         freq_idx = ["%f0", "%f1"]; pairs = [(0, 1, 0), (2, 3, 1)]
-        ln_scale = math.log(THETA) / 64.0
+        ln_scale = math.log(theta) / 64.0
     yt = ", ".join(["f32"] * n)
     xs = ", ".join(f"%x{i}" for i in range(n))
     t = [f"""
-kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
+kernel.def export("{name}") @{name}(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
   kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
@@ -2116,8 +2118,8 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %lf{j} = scalar.sitofp %li{j} : i32 to f32
   %ex{j}a = scalar.mulf %lf{j}, %ln_scale : f32
   %ex{j}b = scalar.mulf %ex{j}a, %neg : f32
-  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j)}
-  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if FREQ_FACTORS else ""} : f32
+  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j, factors)}
+  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if factors else ""} : f32
   %tr{j} = scalar.mulf %ra{j}, %inv_two_pi : f32
   %ts{j} = scalar.addf %tr{j}, %half : f32
   %ti{j} = scalar.fptosi %ts{j} : f32 to i32
@@ -3697,15 +3699,7 @@ def geglu_mul():
 def qk_rope_swa():
     """g_qk_rope_store_swa: g_qk_rope_store with the sliding layers' rotary dims and base (SWA_ROPE), without the
     frequency factors (llama.cpp lfm3: rope_freqs belongs to the global layers)."""
-    global RD, THETA, FREQ_FACTORS
-    saved = RD, THETA, FREQ_FACTORS
-    RD, THETA, FREQ_FACTORS = RD_SWA, THETA_SWA, None
-    try:
-        text = qk_rope()
-    finally:
-        RD, THETA, FREQ_FACTORS = saved
-    assert text.count('"g_qk_rope_store"') == 1 and text.count("@g_qk_rope_store(") == 1
-    return text.replace('"g_qk_rope_store"', '"g_qk_rope_store_swa"').replace("@g_qk_rope_store(", "@g_qk_rope_store_swa(")
+    return qk_rope(RD_SWA, THETA_SWA, "g_qk_rope_store_swa", None)
 
 
 SILU_MUL = r"""

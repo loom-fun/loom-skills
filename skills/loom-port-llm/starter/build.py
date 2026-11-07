@@ -529,6 +529,17 @@ func.def @tools_body(""")
         .replace("@@HEX_JSON_ARGUMENTS_FIELD@@", hx('"' + chat.get("call_arguments_key", "arguments") + '"'))
 
 
+def patch_tools_xml(text):
+    """control.loom for a template that declares tools as XML elements (chat.tools_format "xml"; Qwen3-Coder):
+    tools_body prints each tool with @xml_tool (templates/control_xml.loom, the IR twin of chat_probe.xml_tool).
+    Without the field control.loom is unchanged."""
+    text = sub(text, "    %printed = func.call @tool_printed(%value) : (buffer) -> (buffer)\n",
+               """    %selected = func.call @tool_printed(%value) : (buffer) -> (buffer)
+    %printed = func.call @xml_tool(%selected) : (buffer) -> (buffer)
+""")
+    return text + open(os.path.join(HERE, "templates", "control_xml.loom"), encoding="utf-8").read()
+
+
 def patch_no_tools(text):
     """control.loom for a chat-only block (chat_probe.CHAT_ONLY, call_format "none": the template ignores tools):
     chat_begin renders a request's tools as the template does (not at all) and parse_tools never parses a call.
@@ -617,6 +628,8 @@ for name in ("prepare", "control", "storage", "service"):
         text = patch_history_think_before(text)
     if name == "control" and "default_system_tools" in chat:
         text = patch_default_system_tools(text)
+    if name == "control" and chat.get("tools_format") == "xml":
+        text = patch_tools_xml(text)
     if name == "control" and (chat["call_format"] == "json" or any(k in chat for k in JSON_CHAT_KEYS)):
         text = patch_json_chat(text)
     if name == "control" and chat["call_format"] == "none":
@@ -656,18 +669,32 @@ keep = set(chat.get("nonspecial_tokens", []))
 for t in tok.get("added_tokens", []):
     if t["content"] in keep:
         t["special"] = False
-# A Digits(individual_digits) pre-tokenizer after a leading numeric Split (Spark-X: Split \p{N}{1,3}, ..., Digits):
-# loom-serve's tokenizer (hrx-loom 0.1.0) emits garbage after 64 segments when a later Sequence stage splits further.
-# Same pieces, split first: the leading Split becomes \p{N} and Digits goes (every numeric char is already alone).
+# loom-serve's tokenizer (hrx-loom 0.1.0) emits garbage after 64 pieces when a later pre-tokenizer Sequence stage splits
+# them further (Spark-X: Split \p{N}{1,3}, Splits, Digits, ByteLevel). When stage 0 isolates numeric runs and only
+# Splits come before the one Digits stage, splitting each numeric char at stage 0 instead gives the same pieces (the
+# Splits in between only see numeric runs whole, and Digits still runs on raw text, before ByteLevel).
 pre = tok.get("pre_tokenizer") or {}
 stages = pre.get("pretokenizers") or []
-digits = [i for i, p in enumerate(stages) if p.get("type") == "Digits" and p.get("individual_digits")]
-if pre.get("type") == "Sequence" and digits and stages[0].get("type") == "Split" and \
-        stages[0].get("behavior") == "Isolated" and not stages[0].get("invert") and \
-        stages[0].get("pattern", {}).get("Regex", "").startswith("\\p{N}"):
-    stages[0] = dict(stages[0], pattern={"Regex": "\\p{N}"})
-    del stages[digits[0]]
-    print("tokenizer: Digits pre-tokenizer folded into the leading numeric Split (same pieces; loom-serve tokenizer)")
+digits = [i for i, p in enumerate(stages) if p.get("type") == "Digits"]
+if pre.get("type") == "Sequence" and len(digits) == 1 and stages[digits[0]].get("individual_digits") and \
+        all(p.get("type") == "Split" for p in stages[:digits[0]]) and stages[0].get("behavior") == "Isolated" and \
+        not stages[0].get("invert") and re.fullmatch(r"\\p\{N\}(\{1,\d+\}|\+)?", stages[0].get("pattern", {}).get("Regex", "")):
+    folded = json.loads(json.dumps(tok))
+    fs = folded["pre_tokenizer"]["pretokenizers"]
+    fs[0] = dict(fs[0], pattern={"Regex": "\\p{N}"})
+    del fs[digits[0]]
+    try:
+        from tokenizers import Tokenizer
+    except ImportError:
+        Tokenizer = None
+    if Tokenizer:   # the fold must not change a single token
+        probe = ("Prices: 12345 and 7.5%, x\u00b2 + \u0663\u0664 = \u2167; \u4ef7\u683c\u662f42\u5143 \u3072\u3089\u304c\u306a "
+                 "\u043f\u0440\u0438\u0432\u0435\u0442 \u4e32 123\n"
+                 'def f(x):\n    return x**2  # 0x1F\n{"a": [1, 22, 333], "b": {"c": "d4e5"}}  \t\n')
+        enc = lambda t: Tokenizer.from_str(json.dumps(t)).encode(probe, add_special_tokens=False).ids
+        assert enc(tok) == enc(folded), "Digits fold changed the tokenization"
+    tok = folded
+    print("tokenizer: Digits pre-tokenizer folded into the leading numeric Split (same tokens; loom-serve tokenizer)")
 json.dump(tok, open(os.path.join(pkg, "tokenizer.json"), "w", encoding="utf-8"), ensure_ascii=False)
 
 # 4. Weights (symlink; hard link on Windows without Developer Mode) and the package card.
