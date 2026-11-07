@@ -375,6 +375,22 @@ def patch_history_think_before(text):
     return sub(text, "func.call @join4(%open, %thought, %close, %empty)", "func.call @join4(%open, %kept_thought, %close, %empty)")
 
 
+def patch_history_suffix(text, stop):
+    """control.loom for a suffix that opens with the turn's stop token (ChatML: "<|im_end|>\n"): a closed turn's
+    canonical history (complete_text) ends after the stop. loom-serve feeds the predicted stop in place of the
+    suffix's first delimiter and the next input from the end of that history, so with the whole suffix there the
+    rest of it ("\n") was never fed and a reused turn saw another prompt than the same turn sent fresh. Other
+    suffixes: control.loom is unchanged."""
+    text = sub(text, 'global.rodata.def @message_suffix = bytes("@@HEX_SUFFIX@@")\n',
+               f'global.rodata.def @message_suffix = bytes("@@HEX_SUFFIX@@")\nglobal.rodata.def @history_suffix = bytes("{hx(stop)}")\n')
+    text = sub(text, "  %suffixed = func.call @join(%answer, %suffix) : (buffer, buffer) -> (buffer)\n", "")
+    return sub(text, "  %closed = scalar.cmpi ne, %final_state, %c1_i64 : i64\n", """  %closed = scalar.cmpi ne, %final_state, %c1_i64 : i64
+  %history_suffix = global.load @history_suffix : buffer
+  %turn_suffix = scf.select %closed, %history_suffix, %suffix : buffer
+  %suffixed = func.call @join(%answer, %turn_suffix) : (buffer, buffer) -> (buffer)
+""")
+
+
 JSON_CHAT_KEYS = ("system_preamble", "tools_in_user", "tools_indent", "tool_content_json", "calls_drop_content")
 
 
@@ -562,6 +578,8 @@ for name in ("prepare", "control", "storage", "service"):
         text = patch_json_chat(text)
     if name == "control" and chat["call_format"] == "none":
         text = patch_no_tools(text)
+    if name == "control" and chat["terminal"] and chat["suffix"].startswith(chat["terminal"]) and chat["suffix"] != chat["terminal"]:
+        text = patch_history_suffix(text, chat["terminal"])
     if name == "control" and custom_chat:
         for fn in ("chat_begin", "chat_message", "chat_end", "render_tool", "parse_tools", "output_next", "complete_text"):
             text = text.replace(f"func.def public @{fn}(", f"func.def @generic_{fn}(")
