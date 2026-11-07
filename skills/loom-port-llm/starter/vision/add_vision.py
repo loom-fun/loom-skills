@@ -73,6 +73,15 @@ def main():
         sections = [int(f.parts[i][0]) for i in f.data]
         cfg["mrope"] = {"sections": sections, "interleaved": not arch.startswith("qwen2")}
         block["mrope"] = True
+    if vc["deepstack"]:   # DeepStack: the text model adds feature slice k+1 after layer k (llama.cpp qwen3vl.cpp)
+        import gguf
+        r = gguf.GGUFReader(cfg["gguf"]); arch = cfg.get("arch", "")
+        f = r.fields.get(f"{arch}.n_deepstack_layers")
+        n = int(f.parts[f.data[0]][0]) if f is not None else 0
+        if n != len(vc["deepstack"]) or vc["out"] != cfg["hidden"]:
+            sys.exit(f"STOP: the projector has {len(vc['deepstack'])} deepstack layers of width {vc['out']}, "
+                     f"the text model {arch}.n_deepstack_layers = {n} and hidden {cfg['hidden']}")
+        block["deepstack"] = n
     fmt = (cfg.get("chat") or {}).get("call_format")
     if fmt in END_STATES:
         block["end_states"] = END_STATES[fmt]
