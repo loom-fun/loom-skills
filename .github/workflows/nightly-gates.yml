@@ -29,7 +29,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: nightly-gates-${{ github.ref }}
+  # a dispatch is keyed by its card list too, so independent sweeps on main queue side by side instead of a newer
+  # pending one cancelling an older pending one (one pending run per group)
+  group: nightly-gates-${{ github.ref }}-${{ github.event_name }}-${{ inputs.models || 'all' }}-${{ inputs.level || 'default' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
