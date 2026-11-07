@@ -278,14 +278,18 @@ def dequant16(fmt, w, view_name, out):
       %{out} = vector.fmaf %{out}_codes, %{out}_scales, %{out}_minima : vector<16xf16>'''
 
 
-def gemm(fmt, mode):
+def gemm(fmt, mode, fmt2=None):
+    """fmt2 (swiglu only): the up weight's format when it differs from the gate's (a Q4_K_M MoE quantizing expert
+    gate and up differently, MiniCPM-V-4.7): its own block size, row stride and dequant. None: one format (unchanged)."""
     f = FMT[fmt]
     two_w = mode == "swiglu"
-    name = f"{PREFIX}_gemm_{fmt}_{mode}"
+    fmt2 = fmt2 if two_w and fmt2 not in (None, fmt) else None
+    name = f"{PREFIX}_gemm_{fmt}_{mode}" if fmt2 is None else f"{PREFIX}_gemm_{fmt}_{fmt2}_{mode}"
+    assert fmt2 is None or FMT[fmt2]["block_values"] in (32, 256), fmt2   # %c32 / %c256 below
     wargs = "%w: buffer, %w2: buffer" if two_w else "%w: buffer"
     accs = ["g0", "g1", "u0", "u1"] if two_w else ["a0", "a1"]
     stages = ["w_stage", "w2_stage"] if two_w else ["w_stage"]
-    k_min = 256 if FMT[fmt]["block_values"] == 256 else 64
+    k_min = 256 if 256 in (FMT[fmt]["block_values"], FMT[fmt2 or fmt]["block_values"]) else 64
     lines = []
     lines.append(f'''kernel.def export("{name}") @{name}(%rows: index, %n: index) {{
   %c1 = index.constant 1 : index
@@ -337,7 +341,7 @@ def gemm(fmt, mode):
   %result_col0 = index.add %out_origin, %wave_out : index
   %result_col1 = index.add %result_col0, %c16 : index
   %blocks = index.div %k, %c{f["block_values"]} : index
-  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
+  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset{{MIXED_ROW}}
   %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>
   // 64x64 output tile with the full row stride n.
   %y_layout = encoding.layout.strided [%n, %c1] : encoding<layout>
@@ -361,7 +365,7 @@ def gemm(fmt, mode):
   %bounded_x_row = index.assume %x_row [lt(%x_row, %rows)] : index
   %w_out_row = index.add %out_origin, %stage_row : index
   %bounded_w_out_row = index.assume %w_out_row [lt(%w_out_row, %n)] : index
-  %w_row_origin = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset
+  %w_row_origin = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset{MIXED_ORIGIN}
   %zero8 = vector.constant 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.div %k, %c64 : index
@@ -377,7 +381,10 @@ def gemm(fmt, mode):
     vector.store %x_half, %x_stage_view[%stage_row, %stage_col] : vector<16xf16>, view<64x72xf16>
     %w_col = index.add %k_origin, %stage_col : index''')
     for i, (st, w) in enumerate(zip(stages, ["w", "w2"])):
-        lines.append(dequant16(fmt, w, None, f"deq{i}"))
+        if i and fmt2:   # the up weight in its own format: its block size and row origin
+            lines.append(dequant16(fmt2, w, None, f"deq{i}").replace("%w_row_origin", "%w2_row_origin").replace("%block_bytes", "%block_bytes2"))
+        else:
+            lines.append(dequant16(fmt, w, None, f"deq{i}"))
         lines.append(f"    vector.store %deq{i}, %{st}_view[%stage_row, %stage_col] : vector<16xf16>, view<64x72xf16>")
     lines.append("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
     cur = {a: f"%{a}_acc" for a in accs}
@@ -430,7 +437,15 @@ def gemm(fmt, mode):
   vector.fragment.store<result> %act0, %y_view[%bounded_wave_row, %bounded_wave_out] shape [%c16, %c16] : vector<8xf32>, view<64x64xf32, %y_layout>
   vector.fragment.store<result> %act1, %y_view[%bounded_wave_row, %wave_out1] shape [%c16, %c16] : vector<8xf32>, view<64x64xf32, %y_layout>''')
     lines.append("  kernel.return\n}\n")
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    if fmt2:
+        f2 = FMT[fmt2]
+        text = text.replace("{MIXED_ROW}", f"""
+  %block_bytes2 = index.constant {f2["block_bytes"]} : offset
+  %blocks2 = index.div %k, %c{f2["block_values"]} : index
+  %row_bytes2 = index.scale %blocks2, %block_bytes2 : index, offset -> offset""").replace("{MIXED_ORIGIN}", """
+  %w2_row_origin = index.scale %bounded_w_out_row, %row_bytes2 : index, offset -> offset""")
+    return text.replace("{MIXED_ROW}", "").replace("{MIXED_ORIGIN}", "")
 
 
 def gemm_big(fmt, mode, tn=None, suffix=""):
