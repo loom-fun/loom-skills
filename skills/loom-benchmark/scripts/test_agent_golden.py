@@ -34,6 +34,14 @@ cases = [
      True),
     # An exact extension has no edit to excuse.
     ("exact extension", P, OUT, len(OUT), P + OUT + RESP, False),
+    # An edit exactly at the divergence offset is past the verified output.
+    ("gemma close, at the divergence offset", P, OUT, at("<channel|>"), P + OUT.replace("<channel|>", "\n<channel|>") + RESP, False),
+    # Edits that start in the verified part (or the prompt) but whose replaced span runs into unverified output:
+    # "plan2" -> "pQRS9" with the output verified up to "pl" (difflib: "lan2" -> "QRS9" from the last verified char),
+    # and a dropped think block that difflib merges with Loom's first character into one replace from the prompt.
+    ("span runs past the verified part", P, OUT, at("plan2") + 2, P + OUT.replace("plan2", "pQRS9") + RESP, False),
+    ("span from the prompt into the output", QP, "Sunny.", 0,
+     "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\nFunny.<|im_end|>\n", False),
 ]
 bad = 0
 for name, prev_prompt, out, verified, prompt, want in cases:
@@ -56,6 +64,11 @@ anchored = [
     ("anchored reject: reference writes the replacement", OUT, at("plan2"), GEMMA,
      reference(OUT.replace("<channel|>", "\n<channel|>")), False),
     # An unrelated insertion (a "\n" before the call's close) where llama.cpp writes something else there entirely.
+    # The reference's text starts with both spellings (it writes "\n\n<channel|>": the template's single "\n" is
+    # a prefix of it, and so is Loom's): it doesn't tell them apart, so no excuse.
+    ("anchored reject: both spellings are prefixes", OUT.replace("<channel|>", "\n\n<channel|>"), at("plan2"),
+     P + OUT.replace("<channel|>", "\n<channel|>") + RESP,
+     reference(OUT.replace("<channel|>", "\n\n<channel|>")), False),
     ("anchored reject: unrelated insertion", OUT, at("plan2"), P + OUT.replace("<tool_call|>", "\n<tool_call|>") + RESP,
      lambda k, n: "Let me think again."[:n], False),
 ]

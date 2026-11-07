@@ -80,16 +80,16 @@ def history_edits(hist, prompt):
 
 
 def template_rewrite(prev_prompt, prev_out, verified, prompt, continuation=None, first_token=lambda s: s[:1]):
-    """Is PROMPT's change of the retained history (PREV_PROMPT + PREV_OUT) the template's? Each edit must start inside
-    the previous prompt (e.g. thinking off: a generation prompt's empty think block, which history drops) or inside
-    the first VERIFIED characters of the previous output, the part that matched the golden. An edit past that is
+    """Is PROMPT's change of the retained history (PREV_PROMPT + PREV_OUT) the template's? Each edit's replaced span must lie
+    inside the previous prompt (e.g. thinking off: a generation prompt's empty think block, which history drops) or
+    inside the first VERIFIED characters of the previous output, the part that matched the golden. Any other edit is
     anchored on the reference instead: CONTINUATION(k, n) is llama.cpp's greedy text (about n characters) after the
     previous prompt + PREV_OUT[:k]; the edit is the template's only when that text writes what the history holds
     there (the replaced text and the token after it, FIRST_TOKEN) and not the replacement. Otherwise the gate can't
     tell a template rewrite from a wrong rebuild of what Loom generated."""
     hist, n = prev_prompt + prev_out, len(prev_prompt)
     def ok(i1, i2, j1, j2):
-        if i1 < n + verified:
+        if i1 < n + verified and i2 <= n + verified:   # the edit lies in the prompt or the verified output
             return True
         if continuation is None:
             return False
