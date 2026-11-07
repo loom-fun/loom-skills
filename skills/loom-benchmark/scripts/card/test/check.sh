@@ -14,8 +14,8 @@ SRC=(--device "$F/evidence/device.json" --hrx-loom "$F/evidence/hrx_loom.json" -
 # a current card: a stamped package (llm_config.json "generator"), drafting, a local perf session, a second
 # session that re-measured two rows a day later on another build of the programs (stale: the card marks those
 # rows; its decode rows carry their drafted-token acceptance), local gates with the spec gate's acceptance, and
-# DevLab gates (an older failing agent run that the local pass supersedes, a full-context needle); REPORT.md generated.
-# DevLab measures gates only: no DevLab performance column
+# DevLab gates (an older failing agent run that the local pass supersedes, a full-context needle), a DevLab perf
+# session of two rows on the same programs (the card's DevLab columns, next to the local values); REPORT.md generated.
 py "$C/make_info.py" perf --loom-jsonl "$F/evidence/loom.jsonl" --llama-jsonl "$F/evidence/llama.jsonl" \
   --c4-loom "$F/evidence/c4_loom_runs.txt" --c4-llama "$F/evidence/c4_llama_runs.txt" --baseline-version b1355 \
   --baseline-args "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model ~/drafter.gguf --spec-draft-n-max 3 -ngld 99 -c 65536 -kvu -np 4" \
@@ -24,17 +24,19 @@ py "$C/make_info.py" perf --loom-jsonl "$F/evidence/loom.jsonl" --llama-jsonl "$
 mkdir -p "$tmp/rebuilt"; cp -r "$F/pkg/." "$tmp/rebuilt/"; echo "// another build" >> "$tmp/rebuilt/program/llm.loom"
 py "$C/make_info.py" perf --loom-jsonl "$F/evidence/verify_loom.jsonl" --llama-jsonl "$F/evidence/verify_llama.jsonl" \
   --metrics decode,prefill_1k "${SRC[@]}" --package "$tmp/rebuilt" -o "$tmp/perf2.json" 2>/dev/null
+py "$C/make_info.py" perf --loom-jsonl "$F/evidence/verify_loom.jsonl" --llama-jsonl "$F/evidence/verify_llama.jsonl" \
+  --metrics decode,prefill_1k "${SRC[@]}" --source-kind devlab --run 3003 -o "$tmp/perf_dl.json" 2>/dev/null
 py "$C/make_info.py" gates "$F/evidence/gates.json" "${SRC[@]}" -o "$tmp/gates.json" 2>/dev/null
 # the roofline (evidence/roofline.json: `make_info.py roofline --package pkg --acceptance 0.68` on the real GGUF; CI
 # has neither the GGUF nor the gguf package)
 mkdir -p "$tmp/flint" "$tmp/d1"
 cp -r "$F/pkg/." "$tmp/flint/"
 py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --memory-bytes 67000000000 \
-  --output flint --report generated --evidence "$tmp/perf.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
+  --output flint --report generated --evidence "$tmp/perf.json" "$tmp/perf_dl.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
   "$F/evidence/roofline.json" -o "$tmp/flint/info.json" 2>/dev/null
 # --from-info: regenerating a published card with only the new evidence gives the same info.json
 py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --memory-bytes 67000000000 \
-  --output flint --report generated --evidence "$tmp/perf.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
+  --output flint --report generated --evidence "$tmp/perf.json" "$tmp/perf_dl.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
   -o "$tmp/flint_old.json" 2>/dev/null
 # (--repo comes from the old info.json; without --generator-commit it is this checkout's HEAD)
 py "$C/make_info.py" build "$tmp/flint" --generator-commit $GEN --from-info "$tmp/flint_old.json" \
@@ -105,18 +107,20 @@ gev "$tmp/g_sameday.json" pass quick 2026-11-07T09:00:00 bbb
 gate_case "published full pass, a same-day quick pass keeps it" pass/full/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
 gev "$tmp/g_sameday.json" fail quick 2026-11-07T09:00:00 bbb
 gate_case "published full pass, a same-day quick fail shows" fail/quick/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
-# a session measured on DevLab (a scripted DevLab port: --source-kind devlab) is flagged for a local re-measure
-# (card_lib.perf_flags "devlab"; org_status remeasure reason devlab-primary); its spec gate's acceptance is not a timing
-py "$C/make_info.py" perf --loom-jsonl "$F/evidence/verify_loom.jsonl" --llama-jsonl "$F/evidence/verify_llama.jsonl" \
-  --metrics decode,prefill_1k "${SRC[@]}" --source-kind devlab --run 3003 -o "$tmp/perf_dl.json" 2>/dev/null
+# local and DevLab sessions both stay (card_lib.card_metrics: local headline, DevLab columns): a metric only DevLab
+# measured asks for a local session (perf_flags "devlab"; org_status remeasure reason devlab-primary); a local value
+# without a DevLab one on the same programs asks for a DevLab perf session ("devlab_perf"); the gap is never a flag
 py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint \
-  --evidence "$tmp/perf.json" "$tmp/gates.json" "$tmp/perf_dl.json" -o "$tmp/dl.json" 2>/dev/null
+  --evidence "$tmp/gates.json" "$tmp/perf_dl.json" -o "$tmp/dl.json" 2>/dev/null
 got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
-f = c.perf_flags(c.load_json(sys.argv[2]), programs=c.programs_sha256(sys.argv[3]))
-print(','.join(sorted(f['devlab'])), ','.join(c.remeasure_reasons(f)), ','.join(c.remeasure_reasons(c.perf_flags(c.load_json(sys.argv[4]), programs=c.programs_sha256(sys.argv[3])))), sep='/')" \
+p = c.programs_sha256(sys.argv[3])
+for f in sys.argv[2], sys.argv[4]:
+    fl = c.perf_flags(c.load_json(f), programs=p)
+    print(','.join(sorted(fl['devlab'])), ','.join(c.remeasure_reasons(fl)), ','.join(sorted(fl['devlab_perf'])), sep='/', end=' ')" \
   "$C" "$tmp/dl.json" "$F/pkg" "$tmp/flint/info.json")
-[ "$got" = "decode,prefill_1k/devlab-primary/stale" ] && echo "OK   flags: a DevLab-measured session asks for a local re-measure" \
-  || { echo "FAIL flags: DevLab-measured session: $got, expected decode,prefill_1k/devlab-primary/stale"; bad=1; }
+want="decode,prefill_1k/devlab-primary/ /stale/decode_2k,decode_32k,prefill_16k,prefill_2k,prefill_32k,prefill_8k,streams4 "
+[ "$got" = "$want" ] && echo "OK   flags: local and DevLab sessions both count; each one missing is flagged, the gap never" \
+  || { echo "FAIL flags: local/DevLab sessions: '$got', expected '$want'"; bad=1; }
 # the spec gate's acceptance is a drafting statistic, not a timing: a DevLab nightly job's (pull_devlab.evidence, from
 # its gates_spec.log, stamped with the job's programs) replaces a stale spec_acceptance and is not flagged devlab-primary;
 # a job without a spec gate carries none

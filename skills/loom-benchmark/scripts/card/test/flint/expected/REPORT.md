@@ -15,6 +15,7 @@ How the values on this repository's model card were measured. Generated from `in
 - `perf.py` (loom-benchmark) sends real-text requests: a short prompt for decode, decode after 2k and 32k tokens of context, and prefill of documents of about 1k, 2k, 8k, 16k and 32k tokens. Each run gives one value per metric; the card shows the mean of the runs.
 - `c4_steady.py` runs 4 concurrent streams and reports the aggregate decode rate over the window in which all 4 are decoding; the card shows the median of the runs.
 - One engine runs at a time on the same machine, with the same GGUF. Loom rates are timed by the client; llama.cpp rates come from its server-side `timings`.
+- Each session below is labeled by its source: local sessions give the card's headline values, DevLab sessions (an AMD DevLab Dispatch runner) its DevLab columns.
 - Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.
 - Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD DevLab Dispatch.
 - Roofline: per metric, the rate at the hardware limit computed from the GGUF's tensors by loom-roofline `roofline.py`: decode is memory bandwidth / bytes read per token (weights, active experts, KV cache), prefill is peak FLOP/s / flops per token, 4 streams reads the weights once for 4 tokens. With speculative decoding, decode and 4 streams are verify passes per second x (1 + acceptance x depth) tokens per pass, with the acceptance measured in the row's own session (loom-serve's drafted-token counters around perf.py's decode request, or around c4_steady.py's streams), else the `spec` gate's.
@@ -51,7 +52,20 @@ perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign
 | 4 streams, aggregate decode tok/s | Loom | 131.9, 140.9, 134.2 | 134.2 |
 | 4 streams, aggregate decode tok/s | llama.cpp | 124.4, 124.2, 123.9 | 124.2 |
 
-## Session 2: local run, 2026-11-06
+## Session 2: DevLab Dispatch run 3003, 2026-11-07
+
+- Device: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04.
+- Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).
+- Programs measured: sha256 `38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e`, the same as this repository's programs.
+
+| metric | engine | runs | value |
+|---|---|---|---|
+| decode tok/s, short prompt | Loom | 92.1, 92.7 | 92.4 (32 % of drafted tokens accepted) |
+| decode tok/s, short prompt | llama.cpp | 70.2, 71.0 | 70.6 |
+| prefill tok/s, 1k document | Loom | 950.2, 963.6 | 956.9 |
+| prefill tok/s, 1k document | llama.cpp | 1031.0, 1045.0 | 1038.0 |
+
+## Session 3: local run, 2026-11-06
 
 - Device: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04.
 - Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).
@@ -61,7 +75,7 @@ perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign
 |---|---|---|---|
 | speculative decoding, drafted tokens accepted | Loom | — | 68 % |
 
-## Session 3: local run, 2026-11-07
+## Session 4: local run, 2026-11-07
 
 - Device: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04.
 - Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).

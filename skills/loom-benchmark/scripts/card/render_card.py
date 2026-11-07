@@ -111,6 +111,10 @@ def margin(loom, base):
     return f"{round((loom / base - 1) * 100):+d} %"
 
 
+def ratio(local, devlab):
+    return f"{local / devlab:.2f}" if local and devlab else MISSING
+
+
 def drafting(spec):
     return f"on ({METHOD.get(spec[0], spec[0])}, depth {spec[1]})" if spec else "off"
 
@@ -275,29 +279,38 @@ def render(d):
     roof = (info.get("roofline") or {}).get("metrics") or {}
     here = programs_sha256(d)
     stale = stale_metrics(info, here, kind, feats)
+    dshown, dstale = card_metrics(info, devlab=True), stale_metrics(info, here, kind, feats, devlab=True)
     L += [f"## Performance vs {bname}", "",
-          f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline |",
-          "|---|---|---|---|---|---|"]
-    for key, label in METRICS:
-        if not metric_applies(key, kind, feats):
-            L.append(f"| {label} | n/a | n/a | n/a | n/a | n/a |")
-            continue
-        m, i = shown.get(key, ({"loom": None, "baseline": None}, None))
-        loom = num(key, m.get("loom"))
+          f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline | DevLab {bname} | DevLab Loom "
+          f"| local ÷ DevLab ({bname}, Loom) |",
+          "|---|---|---|---|---|---|---|---|---|"]
+
+    def marked(key, v, i, stale_keys):
+        """A value with its session's footnote mark (sessions other than the primary one) and the stale mark."""
+        out = num(key, v)
         if i is not None and (sessions[i]["source"], sessions[i]["date"]) != pkey:
             nk = (sessions[i]["source"], sessions[i]["date"])
             if nk not in notes:
                 notes.append(nk)
-            loom += f" {mark(notes.index(nk) + 1)}"
-        if key in stale:
-            loom += f" {STALE}"
+            out += f" {mark(notes.index(nk) + 1)}"
+        return out + (f" {STALE}" if key in stale_keys else "")
+    for key, label in METRICS:
+        if not metric_applies(key, kind, feats):
+            L.append(f"| {label} |" + " n/a |" * 8)
+            continue
+        m, i = shown.get(key, ({"loom": None, "baseline": None}, None))
+        loom = marked(key, m.get("loom"), i, stale)
         ceiling = (roof.get(key) or {}).get("ceiling")
         if key == "spec_acceptance":
-            roofcells = "n/a | n/a"
+            cells = "n/a | n/a | n/a | n/a | n/a"
         else:
-            roofcells = f"{num(key, ceiling)} | {pct(m.get('loom'), ceiling)}"
+            dm, di = dshown.get(key, ({}, None))
+            ratios = [ratio(m.get(e), dm.get(e)) for e in ("baseline", "loom")]
+            cells = (f"{num(key, ceiling)} | {pct(m.get('loom'), ceiling)} | {num(key, dm.get('baseline'))} | "
+                     f"{marked(key, dm.get('loom'), di, dstale)} | "
+                     + (MISSING if ratios == [MISSING] * 2 else ", ".join(ratios)))
         L.append(f"| {label} | {num(key, m.get('baseline'))} | {loom} | "
-                 f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), m.get('baseline'))} | {roofcells} |")
+                 f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), m.get('baseline'))} | {cells} |")
 
     def runs_of(keys, med):
         vals = set()
@@ -323,7 +336,9 @@ def render(d):
         s = sources[sid]
         L.append(f"- {mark(i)} Measured {text(date)}; device {device_text(s['device'])}; hrx-loom {sdk_text(s['hrx_loom'])}; "
                  f"source: {src_text(s)}.")
-    for sha in sorted(set(stale.values())):
+    L.append("- DevLab: the same measurement on an AMD DevLab Dispatch Strix Halo runner; local ÷ DevLab is the local "
+             "value over the DevLab value of each engine, recorded for comparison, not a verdict.")
+    for sha in sorted(set(stale.values()) | set(dstale.values())):
         L.append(f"- {STALE} Measured on programs other than this repository's (sha256 {short(sha)}, this repository's "
                  f"{short(here)}): the value describes another build of the package until a session re-measures it.")
     if metric_applies("spec_acceptance", kind, feats):
@@ -393,6 +408,8 @@ METHOD_TEXT = [
     "4 are decoding; the card shows the median of the runs.",
     "- One engine runs at a time on the same machine, with the same GGUF. Loom rates are timed by the client; "
     "llama.cpp rates come from its server-side `timings`.",
+    "- Each session below is labeled by its source: local sessions give the card's headline values, DevLab sessions "
+    "(an AMD DevLab Dispatch runner) its DevLab columns.",
     "- Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.",
     "- Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD "
     "DevLab Dispatch.",

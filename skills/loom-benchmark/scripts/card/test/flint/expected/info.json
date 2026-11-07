@@ -200,6 +200,43 @@
    },
    {
     "commands": [],
+    "date": "2026-11-07",
+    "metrics": {
+     "decode": {
+      "acceptance": 0.325,
+      "baseline": 70.6,
+      "baseline_runs": [
+       70.2,
+       71.0
+      ],
+      "loom": 92.4,
+      "loom_runs": [
+       92.1,
+       92.7
+      ]
+     },
+     "prefill_1k": {
+      "baseline": 1038.0,
+      "baseline_runs": [
+       1031.0,
+       1045.0
+      ],
+      "loom": 956.9,
+      "loom_runs": [
+       950.2,
+       963.6
+      ]
+     }
+    },
+    "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+    "runs": {
+     "decode_prefill": 2,
+     "streams4": null
+    },
+    "source": "devlab-3003"
+   },
+   {
+    "commands": [],
     "date": "2026-11-06",
     "metrics": {
      "spec_acceptance": {
@@ -332,6 +369,24 @@
    "kind": "devlab",
    "run": "1000",
    "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"
+  },
+  "devlab-3003": {
+   "device": {
+    "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu": "AMD Radeon 8060S Graphics",
+    "os": "Ubuntu 26.04"
+   },
+   "hrx_loom": {
+    "artifact_id": null,
+    "branch": "v0.1.0",
+    "hrx_loom": "0.1.0",
+    "hrx_system_sha": "d01d1c18b154189fd073777329052d23f6071f14",
+    "source": "pypi",
+    "wheel_sha256": "4d3897b83cc0857723593487a4372a31d203944a1637e5e3143cad1d0583b98b"
+   },
+   "kind": "devlab",
+   "run": "3003",
+   "url": null
   },
   "local": {
    "device": {
