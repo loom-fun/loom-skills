@@ -88,7 +88,9 @@ def geometry(meta, cfg):
     kv_layers = int(cfg.get("kv_layers", L))
     n_exp = int(g("expert_count", 0) or 0)
     n_used = int(g("expert_used_count", 0) or 0)
-    return dict(arch=arch, L=L, hidden=hidden, heads=heads, kvh=kvh, hd=hd, hd_swa=hd_swa,
+    # Gemma-4 12B/26B/31B: the global layers have fewer KV heads (cfg kv_heads_global; kv_heads is the sliding count)
+    kvh_l = [kvh if i in sliding else int(cfg.get("kv_heads_global") or kvh) for i in range(L)]
+    return dict(arch=arch, L=L, hidden=hidden, heads=heads, kvh=kvh, kvh_l=kvh_l, hd=hd, hd_swa=hd_swa,
                 window=window, sliding=sliding, kv_layers=kv_layers, n_exp=n_exp, n_used=n_used)
 
 
@@ -139,7 +141,7 @@ def kv_read_bytes(geo, ctx):
         sl = i in geo["sliding"]
         hd = geo["hd_swa"] if sl else geo["hd"]
         n = min(ctx, geo["window"]) if (sl and geo["window"]) else ctx
-        tot += 2 * geo["kvh"] * hd * 2 * n
+        tot += 2 * geo["kvh_l"][i] * hd * 2 * n
     return tot
 
 
