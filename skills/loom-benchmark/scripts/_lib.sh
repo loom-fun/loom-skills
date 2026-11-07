@@ -8,6 +8,10 @@ export PYTHONDONTWRITEBYTECODE=1 LLAMACPP_STATE=${LLAMACPP_STATE:-$bench/llamacp
 model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
 ctx=$("$T" -c "import json;print(next(iter(json.load(open('$pkg/model.json'))['presets'].values()))['execution']['context_capacity'])")
 step() { echo "== $* ($(date +%T))"; }
+# The gates render prompts and raw replies with the chat_probe.py the package was built with. port.sh leaves an
+# example kit it applied (gemma4, glimmer: chat formats the starter can't model) at WORKDIR/kit next to PKG;
+# without LOOM_KIT the starter's renders those prompts differently (agent gate: render_ok false on every turn).
+[ -n "${LOOM_KIT:-}" ] || [ ! -f "$(dirname "$pkg")/kit/chat_probe.py" ] || export LOOM_KIT=$(dirname "$pkg")/kit
 
 # One model at a time: GPU memory is system RAM on Strix Halo, so Loom and llama.cpp never run
 # together. loom_down stops the loom-serve listening on $url's port and remembers its exact command
