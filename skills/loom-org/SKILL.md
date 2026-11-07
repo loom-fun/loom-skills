@@ -113,7 +113,8 @@ One worker per model runs `loom-port-llm` then `loom-optimize`, starting from th
 
 - **Local GPU: one job at a time.** One model loaded, one gate run, benchmark or kernel-test batch at any moment.
   Several workers may run their CPU phases (inspection, program generation, card rendering) in parallel, but
-  every GPU command takes the lock: `flock /tmp/loom-gpu.lock CMD`. Check `pgrep -a 'loom-serve|llama-server'`
+  every GPU command takes the lock: `flock -o /tmp/loom-gpu.lock CMD` (`-o`: a server CMD leaves running, e.g.
+  port.sh's, must not inherit the lock, or the next locked command waits on it forever). Check `pgrep -a 'loom-serve|llama-server'`
   first and stop only the servers you started. Follow the user's GPU instruction for the session (some sessions
   forbid the local GPU; then the worker runs `.github/workflows/devlab-port.yml` instead).
 - **Gates in the loop: the correctness set only.** Kernel tests, golden compare vs llama.cpp (divergences are

@@ -153,7 +153,7 @@ in the 4-token matvec, 192+ VGPRs per lane) is fixed in the starter: decode-shap
 activations with integer dot4 contractions (`ACT_Q8`, llama.cpp's mul_mat_vec_q numerics), with 1-/4-/8-/16-token
 variants that round each token like 1-token decode (`draft/README.md` "Limits"). Remaining levers: verify epochs
 of 17+ tokens (many drafting streams) take the WMMA GEMM; long-context verify pays decode attention per token (draft/README.md), drafter catch-up cost at prefill, and the MoE expert
-matvecs of the flint/lfm2moe kits, which still use f32 activations. Every change
+matvecs (starter `gen_moe.py`, the lfm2moe kit), which still use f32 activations. Every change
 here must keep the `spec` gate exact.
 
 ## Where the remaining gap usually is

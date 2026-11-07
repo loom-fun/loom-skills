@@ -29,7 +29,16 @@ LAYERS = _c["layers"] - 1
 assert D == 256 and not _c.get("attn_sinks"), "gen_flash2s: head_dim 256 without attention sinks"
 HALF = D // 2                     # dims per wave
 NFH = HALF // 16                  # 16-dim fragments per wave (8)
-WAVES = 2 * G
+KT = 32
+DP8 = D + 8                       # padded K row
+VTC = KT + 8                      # padded V^T row
+# Query-head groups per KV head: one workgroup per (tile, KV head, group) when the G heads' S partials don't fit
+# next to the K and V^T tiles in 64 KiB of workgroup memory (G = 8: 70 KiB; Qwen3.5/3.6 MoE). Each group stages
+# K/V itself (the staging is repeated per group; the score/softmax/output work is not).
+NG = next(n for n in (1, 2, 4) if G % n == 0 and (KT * DP8 * 2 + D * VTC * 2 + (2 * G // n) * 2 * 16 * 16 * 4 <= 65536
+                                                  or 2 * G // n == 8))
+GW = G // NG                      # query heads per workgroup
+WAVES = 2 * GW
 LANES = 32 * WAVES
 SEGS = WAVES                      # staging: lane = key, workitem/32 = dim segment
 DPT = D // SEGS if D % SEGS == 0 else None
@@ -38,16 +47,13 @@ DPT = D // SEGS if D % SEGS == 0 else None
 SEG_N = 16 if WAVES >= 16 else 8
 SEG_W = D // SEG_N
 assert WAVES >= SEG_N, "need at least 8 waves (G >= 4)"
-KT = 32
-DP8 = D + 8                       # padded K row
-VTC = KT + 8                      # padded V^T row
 SCALE = repr(D ** -0.5)
 
 L = []
 A = L.append
 A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: index) {{
   %c1 = index.constant 1 : index
-  %ckv = index.constant {KVH} : index
+  %ckv = index.constant {KVH * NG} : index
   %c16 = index.constant 16 : index
   %clanes = index.constant {LANES} : index
   %tiles = index.div %tokens, %c16 : index
@@ -69,7 +75,10 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
   %tile_id = kernel.workgroup.id<x> : index
   %tile = index.assume %tile_id [lt(%tile_id, %tile_count)] : index
   %kv_id = kernel.workgroup.id<y> : index
-  %kv = index.assume %kv_id [range(%kv_id, 0, {KVH - 1})] : index
+''' + (f'''  %kv = index.assume %kv_id [range(%kv_id, 0, {KVH - 1})] : index''' if NG == 1 else f'''  %cng = index.constant {NG} : index
+  %kv_value = index.div %kv_id, %cng : index
+  %kv = index.assume %kv_value [range(%kv_value, 0, {KVH - 1})] : index
+  %hgroup = index.rem %kv_id, %cng : index''') + f'''
   %first_token = index.mul %tile, %c16 : index
   %uniform, %row32, %pos0_32 = func.call @{P}_tile_uniform(%info, %tokens, %first_token) : (buffer, index, index) -> (i1, i32, i32)
   scf.if %uniform {{
@@ -111,7 +120,9 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
   %key_tiles_round = index.add %key_count, %ckt_less : index
   %key_tiles = index.div %key_tiles_round, %ckt : index
   %cg = index.constant {G} : index
-  %head_value = index.madd %kv, %cg, %head_in_group : index
+''' + ("  %head_value = index.madd %kv, %cg, %head_in_group : index" if NG == 1 else f'''  %cgw = index.constant {GW} : index
+  %head_first = index.madd %kv, %cg, %head_in_group : index
+  %head_value = index.madd %hgroup, %cgw, %head_first : index''') + f'''
   %head = index.assume %head_value [range(%head_value, 0, {QH - 1})] : index
   %chalf = index.constant {HALF} : index
   %dim_base = index.mul %dim_half, %chalf : index

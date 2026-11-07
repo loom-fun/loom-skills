@@ -107,7 +107,8 @@ seen = set(); todo = []
 VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
 for li in range(cfg["layers"]):
     for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", QH * D), ("ffn_gate", H),
-                   ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD)]:
+                   ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD),
+                   ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0))]:
         name = f"blk.{li}.{nm_}.weight"
         if name not in T:
             continue
@@ -885,6 +886,184 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and c
   %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
   kernel.launch @g_attention_flash2[%t](%t, %layer, %sliding, %ctx, %pool, %q, %g, %info, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AT}, tensor<{t}x{QD}xf32>)
   check.expect.close actual(%o) expected(%e) atol(4.0e-3) rtol(4.0e-3) nan(different) : tensor<{t}x{QD}xf32>
+  check.return
+}}
+""")
+# 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
+# gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
+# bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
+# both with the shared experts' output already in y (scaled by the Qwen shared-expert gate when the model has one).
+if cfg.get("moe"):
+    M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ.get("MOE_R", "8"))
+    SHG, ACC = bool(M.get("shared_gate")), bool(M.get("shared_ffn"))
+    def deq3(name):
+        tt = T[name]; return dequantize(np.asarray(tt.data), tt.tensor_type).reshape(E_, int(tt.shape[1]), int(tt.shape[0]))
+    def f32w(name):   # f32 or bf16 tensor -> (f32 values, the raw array the kernel reads)
+        tt = T[name]; bf = tt.tensor_type.name == "BF16"
+        v = (np.asarray(tt.data).view(np.uint16).astype(np.uint32) << 16).view(np.float32) if bf else np.asarray(tt.data, np.float32)
+        return v.reshape(-1), (np.asarray(tt.data).view(np.int8).reshape(-1) if bf else v.reshape(-1).astype(np.float32))
+    def route_ref(hx, Wr, bias):
+        logit = hx.astype(np.float64) @ Wr.T.astype(np.float64)
+        if M["gating"] == 2:
+            prob = 1 / (1 + np.exp(-logit))
+        else:
+            ex = np.exp(logit - logit.max(-1, keepdims=True)); prob = ex / ex.sum(-1, keepdims=True)
+        sel = prob + bias
+        ids = np.argsort(-sel, -1, kind="stable")[:, :KU].astype(np.int32)
+        wts = np.take_along_axis(prob, ids, -1)
+        if M["norm_weights"]:
+            wts = wts / np.maximum(wts.sum(-1, keepdims=True), 6.103515625e-05)
+        ss = np.sort(sel, -1)[:, ::-1]
+        rel = (ss[:, KU - 1] - ss[:, KU]) / np.maximum(np.abs(ss[:, KU - 1]), 1e-30)   # k-th vs (k+1)-th, relative
+        return ids, wts, rel
+    def clear_tokens(t):
+        """t random rows whose k-th and (k+1)-th scores differ by > 0.2 %: f32 kernels pick the same experts as the
+        f64 reference (softmax over 256 experts leaves near-ties in many random rows)."""
+        hx = rng.standard_normal((40 * t, H)).astype(np.float32)
+        _, _, rel = route_ref(hx, Wr, bias)
+        keep = np.flatnonzero(rel > 2e-3)[:t]
+        assert len(keep) == t, f"only {len(keep)} of {40 * t} random rows have a clear top-{KU}"
+        return hx[keep]
+    def experts_ref(hx, ids, wts, Wg, Wu, Wd):
+        y = np.zeros((len(hx), H))
+        for i in range(len(hx)):
+            for k in range(KU):
+                e = ids[i, k]; g = Wg[e] @ hx[i]; u = Wu[e] @ hx[i]; a = g / (1 + np.exp(-g)) * u
+                y[i] += wts[i, k] * (Wd[e] @ a)
+        return y
+    done = set()
+    for li in range(M["leading_dense"], cfg["layers"]):
+        b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower(); fg = T[b + "ffn_gate_exps.weight"].tensor_type.name.lower()
+        if fd in done: continue
+        done.add(fd)
+        Wr, wr_raw = f32w(b + "ffn_gate_inp.weight"); Wr = Wr.reshape(E_, H)
+        bias = np.asarray(T[b + "exp_probs_b.bias"].data, np.float32) if M["probs_bias"] else np.zeros(E_, np.float32)
+        Wg, Wu, Wd = deq3(b + "ffn_gate_exps.weight"), deq3(b + "ffn_up_exps.weight"), deq3(b + "ffn_down_exps.weight")
+        if SHG:
+            Wsg, wsg_raw = f32w(b + "ffn_gate_inp_shexp.weight"); sty = T[b + "ffn_gate_inp_shexp.weight"].tensor_type.name.lower()
+        tag = f"m{li}"
+        for n, a in [(tag + "_wr", wr_raw), (tag + "_b", bias), (tag + "_wg", raw(b + "ffn_gate_exps.weight")),
+                     (tag + "_wu", raw(b + "ffn_up_exps.weight")), (tag + "_wd", raw(b + "ffn_down_exps.weight"))] + ([(tag + "_wsg", wsg_raw)] if SHG else []):
+            save(n, a)
+        def chain(t, sfx):
+            """Inputs + reference of a t-token chain: h, y0 (shared output in y), ids/wts, the expected y."""
+            hx = clear_tokens(t)
+            ids, wts, rel = route_ref(hx, Wr, bias)
+            y0 = (rng.standard_normal((t, H)) * 0.1).astype(np.float32) if ACC else np.zeros((t, H), np.float32)
+            sgv = 1 / (1 + np.exp(-(hx.astype(np.float64) @ Wsg.astype(np.float64)))) if SHG else np.ones(t)
+            yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts, Wg, Wu, Wd)
+            for n, a in [("_h", hx), ("_y0", y0), ("_ids", ids), ("_wts", wts.astype(np.float32)), ("_y", yref.astype(np.float32)),
+                         ("_sg", sgv.astype(np.float32))]:
+                save(tag + sfx + n, a)
+            print(f"moe test layer {li}{sfx}: t={t} ids[0] {ids[0].tolist()} min relative score gap k/k+1 {rel.min():.3g}")
+            return ids, wts
+        wr_t, wsg_t = ty(wr_raw), (ty(wsg_raw) if SHG else "")
+        gt, dt_ = ty(raw(b + "ffn_gate_exps.weight")), ty(raw(b + "ffn_down_exps.weight"))
+        def common(t, sfx):
+            return f"""  %t = check.literal value({t}) : index
+  %ta = check.literal value({t * KU}) : index
+  %nFE = check.literal value({FE}) : index
+  %nH = check.literal value({H}) : index
+  %h = check.file.read.npy path("{tag}{sfx}_h.npy") : tensor<{t}x{H}xf32>
+  %wr = check.file.read.npy path("{tag}_wr.npy") : {wr_t}
+  %b = check.file.read.npy path("{tag}_b.npy") : tensor<{E_}xf32>
+  %eids = check.file.read.npy path("{tag}{sfx}_ids.npy") : tensor<{t}x{KU}xi32>
+  %ewts = check.file.read.npy path("{tag}{sfx}_wts.npy") : tensor<{t}x{KU}xf32>
+  %wg = check.file.read.npy path("{tag}_wg.npy") : {gt}
+  %wu = check.file.read.npy path("{tag}_wu.npy") : {gt}
+  %wd = check.file.read.npy path("{tag}_wd.npy") : {dt_}
+  %ey = check.file.read.npy path("{tag}{sfx}_y.npy") : tensor<{t}x{H}xf32>
+  %y = check.file.read.npy path("{tag}{sfx}_y0.npy") : tensor<{t}x{H}xf32>
+  %ids = check.generate.fill value(0) : tensor<{t}x{KU}xi32>
+  %wts = check.generate.fill value(0.0) : tensor<{t}x{KU}xf32>
+""" + (f"""  %wsg = check.file.read.npy path("{tag}_wsg.npy") : {wsg_t}
+  %esg = check.file.read.npy path("{tag}{sfx}_sg.npy") : tensor<{t}xf32>
+  %sg = check.generate.fill value(0.0) : tensor<{t}xf32>
+  kernel.launch @g_moe_shared_gate_{sty}[%t](%t, %h, %wsg, %sg) : [index](index, tensor<{t}x{H}xf32>, {wsg_t}, tensor<{t}xf32>)
+  check.expect.close actual(%sg) expected(%esg) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}xf32>
+""" if SHG else "")
+        SGA, SGT = ("%sg, ", f"tensor<{t}xf32>, ") if SHG else ("", "")
+        # decode chain: 6 tokens (> the prefill router's tokens per workgroup: a full group plus a partial one)
+        t = 6; ids, wts = chain(t, "")
+        SGT = f"tensor<{t}xf32>, " if SHG else ""
+        info_l = np.zeros((t, 4), np.int32); info_l[:, 2] = 1; info_l[2, 2] = 0; info_l[4:, 2] = 0
+        save(tag + "_info", info_l); save(tag + "_ids_l", np.where(np.arange(t)[:, None] >= 4, 0, ids).astype(np.int32))
+        save(tag + "_wts_l", np.where(np.arange(t)[:, None] >= 4, 0, wts).astype(np.float32))
+        cases.append(f"""check.case public @moe_chain_{li} {{
+{common(t, "")}  %act = check.generate.fill value(0.0) : tensor<{t * KU}x{FE}xf32>
+  %ys = check.generate.fill value(0.0) : tensor<{t * KU}x{H}xf32>
+  kernel.launch @g_moe_route[%t](%t, %h, %wr, %b, %ids, %wts) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>)
+  %ids_tr = check.generate.fill value(0) : tensor<{t}x{KU}xi32>
+  %wts_tr = check.generate.fill value(0.0) : tensor<{t}x{KU}xf32>
+  kernel.launch @g_moe_route_tr[%t](%t, %h, %wr, %b, %ids_tr, %wts_tr) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>)
+  %info_l = check.file.read.npy path("{tag}_info.npy") : tensor<{t}x4xi32>
+  %eids_l = check.file.read.npy path("{tag}_ids_l.npy") : tensor<{t}x{KU}xi32>
+  %ewts_l = check.file.read.npy path("{tag}_wts_l.npy") : tensor<{t}x{KU}xf32>
+  %ids_l = check.generate.fill value(0) : tensor<{t}x{KU}xi32>
+  %wts_l = check.generate.fill value(0.0) : tensor<{t}x{KU}xf32>
+  kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids_l, %wts_l, %info_l) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
+  check.expect.equal actual(%ids_l) expected(%eids_l) : tensor<{t}x{KU}xi32>
+  check.expect.close actual(%wts_l) expected(%ewts_l) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
+  kernel.launch @g_moe_gu_{fg}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {gt}, tensor<{t * KU}x{FE}xf32>)
+  kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wd, %ys) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t * KU}x{FE}xf32>, {dt_}, tensor<{t * KU}x{H}xf32>)
+  kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {SGA}%y) : [index](index, tensor<{t * KU}x{H}xf32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
+  check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
+  check.expect.equal actual(%ids_tr) expected(%eids) : tensor<{t}x{KU}xi32>
+  check.expect.close actual(%wts_tr) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
+  check.expect.close actual(%wts) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
+  check.expect.close actual(%y) expected(%ey) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.return
+}}
+""")
+        # prefill chain: 70 live tokens (two 64-row GEMM tiles' worth of rows per busy expert, partial tiles)
+        t = 70; chain(t, "_p")
+        SGT = f"tensor<{t}xf32>, " if SHG else ""
+        ta = t * KU; mt = ta // 64 + E_; mr = mt * 64
+        save(tag + "_p_info", np.tile(np.array([0, 0, 1, 0], np.int32), (t, 1)))
+        cases.append(f"""check.case public @moe_prefill_{li} {{
+{common(t, "_p")}  %info = check.file.read.npy path("{tag}_p_info.npy") : tensor<{t}x4xi32>
+  %max_tiles = check.literal value({mt}) : index
+  %max_rows = check.literal value({mr}) : index
+  %s_h = check.generate.fill value(0.0) : tensor<{t}x2xf32>
+  %h16 = check.generate.fill value(0.0) : tensor<{t}x{H}xf16>
+  %tile_info = check.generate.fill value(0) : tensor<{mt}x2xi32>
+  %rowmap = check.generate.fill value(0) : tensor<{mr}xi32>
+  %pos = check.generate.fill value(0) : tensor<{ta}xi32>
+  %act_sorted = check.generate.fill value(0.0) : tensor<{mr}x{FE}xf32>
+  %s_rows = check.generate.fill value(0.0) : tensor<{mr}x2xf32>
+  %act16 = check.generate.fill value(0.0) : tensor<{mr}x{FE}xf16>
+  %ys_sorted = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
+  kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x2xf32>, tensor<{t}x{H}xf16>)
+  kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids, %wts, %info) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
+  kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, tensor<{t}x4xi32>, tensor<{t}x{KU}xi32>, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{ta}xi32>)
+  kernel.launch @g_moe_ggu_{fg}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wg, %wu, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {gt}, tensor<{mr}x{FE}xf32>)
+  kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, tensor<{mr}x{FE}xf32>, tensor<{mr}x2xf32>, tensor<{mr}x{FE}xf16>, tensor<{mt}x2xi32>)
+  kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wd, %ys_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE}xf16>, tensor<{mr}x2xf32>, {dt_}, tensor<{mr}x{H}xf32>)
+  kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {SGA}%y) : [index](index, index, tensor<{mr}x{H}xf32>, tensor<{ta}xi32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
+  check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
+  check.expect.close actual(%wts) expected(%ewts) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
+  check.expect.close actual(%y) expected(%ey) atol(1.0e-2) rtol(2.0e-2) nan(different) : tensor<{t}x{H}xf32>
+  check.return
+}}
+""")
+    # g_row_scale_f16_tiles: g_row_scale_f16 over bucketed expert rows; rows of an unused tile (expert -1) untouched
+    rt_x = (rng.standard_normal((128, FE)) * np.where(np.arange(128) % 3 == 0, 1e3, 1e-2)[:, None]).astype(np.float32)
+    rt_e = np.clip(np.frexp(np.abs(rt_x).max(1))[1] - 1 - 13, 0, 100)
+    rt_s = np.stack([2.0 ** -rt_e, 2.0 ** rt_e], 1).astype(np.float32); rt_s[64:] = 0
+    rt_h = (rt_x * rt_s[:, :1]).astype(np.float16)
+    save("rt_x", rt_x); save("rt_s", rt_s); save("rt_h", rt_h); save("rt_ti", np.array([[3, 64], [-1, 0]], np.int32))
+    cases.append(f"""check.case public @row_scale_f16_tiles {{
+  %rows = check.literal value(128) : index
+  %k = check.literal value({FE}) : index
+  %x = check.file.read.npy path("rt_x.npy") : tensor<128x{FE}xf32>
+  %ti = check.file.read.npy path("rt_ti.npy") : tensor<2x2xi32>
+  %es = check.file.read.npy path("rt_s.npy") : tensor<128x2xf32>
+  %eh = check.file.read.npy path("rt_h.npy") : tensor<128x{FE}xf16>
+  %s = check.generate.fill value(0.0) : tensor<128x2xf32>
+  %h = check.generate.fill value(0.0) : tensor<128x{FE}xf16>
+  kernel.launch @g_row_scale_f16_tiles[%rows](%rows, %k, %x, %s, %h, %ti) : [index](index, index, tensor<128x{FE}xf32>, tensor<128x2xf32>, tensor<128x{FE}xf16>, tensor<2x2xi32>)
+  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<128x2xf32>
+  check.expect.close actual(%h) expected(%eh) atol(0.0) rtol(1.0e-3) nan(different) : tensor<128x{FE}xf16>
   check.return
 }}
 """)

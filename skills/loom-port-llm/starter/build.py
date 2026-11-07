@@ -105,7 +105,21 @@ recurrent_bytes = gdn_geometry(cfg)["slot_bytes"] if cfg.get("recurrent_layers")
 if cfg.get("shortconv_layers"):  # LFM2 short-conv history lives in the recurrent slots too (reference/lfm2moe-example)
     from gen_sconv import sconv_geometry  # noqa: E402
     recurrent_bytes += sconv_geometry(cfg)["slot_bytes"]
+def moe_workspace(cfg, tokens):
+    """Bytes of the MoE layers' scratch buffers (gen_llm.moe_alloc) for one invocation of `tokens` tokens: per-assignment
+    decode buffers plus the bucketed prefill tiles (worst case t*KU + 64*E rows). loom-serve counts them in the
+    invocation working set at registration; the fixed headroom alone was too small for Qwen3.6-35B-A3B (256 experts)."""
+    m = cfg.get("moe")
+    if not m:
+        return 0
+    H, KU, FE, E = cfg["hidden"], m["used"], m["ffn"], m["experts"]
+    rows = tokens * KU + 64 * E
+    return (tokens * KU * (4 + 4 + FE * 4 + H * 4 + 4) + (tokens * KU // 64 + E) * 8
+            + rows * (4 + FE * 4 + FE * 2 + 8 + H * 4) + tokens * 4)
+
+
 native = cfg.get("context_length") or 32768
+moe_ws = moe_workspace(cfg, a.prefill)   # 0 without MoE
 if native > KERNEL_CONTEXT and not a.context:
     print(f"NOTE: native context {native} exceeds the kernels' {KERNEL_CONTEXT}; using {KERNEL_CONTEXT}")
 context = a.context or min(native, KERNEL_CONTEXT)
@@ -123,13 +137,13 @@ if a.memory_gib == "auto":
     if cap is not None and cap <= 0:
         sys.exit(f"LOOM_RESERVED_GIB={reserved:g} leaves no memory under the 60%-of-RAM cap")
     want_pool = context + max(65536, context // 4)
-    need = weights_bytes + 4 * 2**30 + 2 * a.rows * recurrent_bytes + want_pool * kv_per_position
+    need = weights_bytes + 4 * 2**30 + moe_ws + 2 * a.rows * recurrent_bytes + want_pool * kv_per_position
     a.memory_gib = round(min(need, cap) / 2**30, 1) if cap else 56.0
     print(f"memory budget {a.memory_gib} GiB (a {want_pool}-position pool needs {need / 2**30:.0f} GiB"
           + (f"; cap 60% of RAM{f' minus LOOM_RESERVED_GIB {reserved:g}' if reserved else ''} = {cap / 2**30:.0f} GiB)"
              if cap else "; RAM unknown)"))
 a.memory_gib = float(a.memory_gib)
-budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
+budget = int(a.memory_gib * 2**30) - weights_bytes - 3 * 2**30 - moe_ws - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
 if context * kv_per_position > budget:
     fit = max(4096, (budget // kv_per_position) // 1024 * 1024)
     print(f"WARNING: context {context} needs {context * kv_per_position / 2**30:.1f} GiB of KV; {a.memory_gib} GiB budget fits {fit}")
@@ -456,7 +470,7 @@ from kit_source import generator_stamp  # noqa: E402
 bench["generator"] = generator_stamp()
 json.dump(bench, open(os.path.join(pkg, "llm_config.json"), "w"), indent=1)
 kv = a.pool * kv_per_position
-need = weights_bytes + kv + 3 * 2**30 + 2 * a.rows * recurrent_bytes
+need = weights_bytes + kv + 3 * 2**30 + moe_ws + 2 * a.rows * recurrent_bytes
 print("package:", os.path.join(pkg, "model.json"), f"(model id {model_id!r})")
 print("speculative decoding:", f"{DRAFT['kind']} drafter, depth {DRAFT['depth']}" if DRAFT else "off")
 print(f"context {a.context} tokens (native {native}), KV pool {a.pool} positions = {kv / 2**30:.1f} GiB, weights {weights_bytes / 2**30:.1f} GiB"
