@@ -207,24 +207,23 @@ fi
 step "6/6 smoke test"
 # DEBUG (temporary): which requests publish nothing, on a fresh server
 "$T" - "http://127.0.0.1:$port" <<'EOF' ; exit 7
-import json, sys, requests, concurrent.futures as cf
+import json, sys, requests
 url = sys.argv[1]; model = requests.get(url + "/v1/models", timeout=30).json()["data"][0]["id"]
 F = "What is the capital of France? Answer in one word."
-Y = "Write a Python function that returns the n-th Fibonacci number."
+H = "Say hi."
 def post(p, mt, **kw):
     r = requests.post(url + "/v1/chat/completions", json={"model": model, "temperature": 0, "max_tokens": mt,
                       "messages": [{"role": "user", "content": p}], **kw}, timeout=600).json()
+    if "choices" not in r: return json.dumps(r)[:300]
     c = r["choices"][0]; m = c["message"]
-    return f'{c["finish_reason"]} n={r["usage"]["completion_tokens"]} cached={r["usage"].get("prompt_tokens_details", {}).get("cached_tokens")} reasoning={(m.get("reasoning_content") or "")[:60]!r} content={(m.get("content") or "")[:40]!r}'
-seq = [("F", F, 64)] * 3 + [("Y", Y, 64)] * 2 + [("F", F, 64)] + [("Y", Y, 16)] + [("F", F, 600)] * 2 + [("hi", "Say hi.", 64)] * 2
-for tag, p, mt in seq:
-    print("SEQ", tag, mt, post(p, mt), flush=True)
-with cf.ThreadPoolExecutor(4) as ex:
-    rs = list(ex.map(lambda x: post(x[1], x[2]), [("F", F, 64), ("Y", Y, 64), ("F", F, 64), ("Y", Y, 64)]))
-for r in rs:
-    print("CONC", r, flush=True)
-for tag, p, mt in [("F", F, 64)] * 4:
-    print("SEQ2", tag, mt, post(p, mt), flush=True)
+    return f'{c["finish_reason"]} p={r["usage"]["prompt_tokens"]} n={r["usage"]["completion_tokens"]} cached={r["usage"].get("prompt_tokens_details", {}).get("cached_tokens")} reasoning={(m.get("reasoning_content") or "")[:50]!r} content={(m.get("content") or "")[:30]!r}'
+for tag, p in [("H", H), ("F", F), ("H", H), ("F", F), ("F", F)] + [(f"pad{k}", H + " Please" * k) for k in range(0, 12)] + [(f"pad{k}", H + " Please" * k) for k in range(0, 12)]:
+    print("SEQ", tag, post(p, 64), flush=True)
+for path, body in [("/v1/completions", {"model": model, "prompt": "<|start|>user<|message|>Say hi.<|end|><|start|>assistant", "max_tokens": 24, "temperature": 0})]:
+    r = requests.post(url + path, json=body, timeout=600)
+    print("RAW", path, r.status_code, r.text[:1500], flush=True)
+r = requests.get(url + "/logz", timeout=30)
+print("LOGZ", r.status_code, r.text[-6000:], flush=True)
 EOF
 if [ -n "$vmm" ]; then   # one image: the component compiles, rows reach the text model, the answer is about the image
   "$T" - "$here/../loom-benchmark/scripts" "http://127.0.0.1:$port" <<'EOF' || exit 6
