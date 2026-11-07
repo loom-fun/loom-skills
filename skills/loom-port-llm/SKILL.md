@@ -286,8 +286,8 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
     `LLAMA_ROPE_TYPE_NEOX`.
   - `norm` pairs (2d, 2d+1). Used by llama/mistral; `LLAMA_ROPE_TYPE_NORM`.
   - A wrong value still gives plausible-looking text for a few tokens, then degrades.
-- `rope_theta`; rope scaling (YaRN/linear) is **not** implemented, so add it in
-  `qk_rope()` if the model uses it.
+- `rope_theta`; Llama-3 frequency factors (`rope_freqs.weight` -> `rope_freq_factors`) are applied; other rope
+  scaling (YaRN/linear) is **not** implemented, so add it in `qk_rope()` if the model uses it.
 - `qk_norm` (per-head RMSNorm on q/k before RoPE), `post_norms` (Gemma-style
   post-attention/FFN norms), `attn_gate` (sigmoid output gate), `embed_scale`
   (Gemma multiplies embeddings by √hidden), `embed_norm`.
@@ -324,6 +324,14 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
     finished replies that never leave the reasoning channel switch the block to `never` (`chat_probe.py GGUF --never
     cfg.json`, verified against the template), rebuild and smoke again.
   - `bos` only when the template prints `bos_token` (a GGUF whose bos id is the role tag `<|im_start|>` is not).
+  - Llama 3.x (`call_format` `json`: `{"name": ..., "parameters": ...}` without a wrapper, one call per turn):
+    `system_preamble`/`system_preamble_tools` (the always-printed system block's "Cutting Knowledge Date ... Today
+    Date ..." text, "Environment: ipython" with tools), `tools_in_user` (the tools open the first user message),
+    `tools_indent` (tojson(indent=4)), `calls_drop_content`, `tool_content_json` (results as JSON strings);
+    `templates/control_json.loom` holds their control functions. The date: `strftime_now` renders the request day in
+    llama.cpp, which a control program can't; Loom renders the templates' own no-clock date, 26 Jul 2024
+    (`chat_probe.CLOCK`), so prompts are the same every day. The architecture side is `rope_freq_factors`
+    (`rope_freqs.weight`: llama.cpp divides each rotary pair's frequency by it).
   - `reasoning_instructions` (Qwen3.8: "Reasoning effort is set to xhigh. …" per `reasoning_effort`, only
     with thinking on, `reasoning_separator` before the tools text / system message): build.py advertises
     those efforts (plus none = thinking off) and `chat_begin` renders the request effort's text.

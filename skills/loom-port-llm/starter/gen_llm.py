@@ -95,6 +95,7 @@ THETA = CFG["rope_theta"]
 RD_SWA, THETA_SWA = CFG.get("rope_dims_swa") or RD, CFG.get("rope_theta_swa") or THETA
 SWA_ROPE = bool(CFG.get("sliding_layers")) and (CFG.get("head_dim_swa") or D) == D and (RD_SWA, THETA_SWA) != (RD, THETA)
 assert not SWA_ROPE or (RD_SWA % 64 == 0 and RD_SWA <= D), "rope_dims_swa must be a multiple of 64"
+FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs)
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
 
 from formats import FMT, SB, LOWBIT, ICODES as IQ_FMTS  # noqa: E402  bytes / values per block of each decoded format
@@ -1947,6 +1948,22 @@ def mrope_pick(j, idx):
 MRP = []   # selection lines emitted before each pair's angle
 
 
+def freq_factor(j):
+    """llama3 rope_freqs (FREQ_FACTORS): divide pair j's frequency by its factor, picked from the runs of equal
+    factors by the pair index %li{j} (Llama 3.x: eight runs). Empty without factors."""
+    if not FREQ_FACTORS:
+        return ""
+    runs = [(i, f) for i, f in enumerate(FREQ_FACTORS) if i == 0 or f != FREQ_FACTORS[i - 1]]
+    t = [f"\n  %ff{j}_0 = scalar.constant {float(runs[0][1])!r} : f32"]
+    for r, (start, f) in enumerate(runs[1:], 1):
+        t.append(f"""  %ffs{j}_{r} = scalar.constant {start} : i32
+  %ffc{j}_{r} = scalar.cmpi sge, %li{j}, %ffs{j}_{r} : i32
+  %ffv{j}_{r} = scalar.constant {float(f)!r} : f32
+  %ff{j}_{r} = scf.select %ffc{j}_{r}, %ffv{j}_{r}, %ff{j}_{r - 1} : f32""")
+    t.append(f"  %if{j}f = scalar.divf %if{j}, %ff{j}_{len(runs) - 1} : f32")
+    return "\n".join(t)
+
+
 def qk_rope():
     """Per-head (optional) RMSNorm + RoPE for QH query and KVH key heads, with
     keys/values stored to the paged F16 KV planes: one 256-lane workgroup per
@@ -2021,8 +2038,8 @@ kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
   %lf{j} = scalar.sitofp %li{j} : i32 to f32
   %ex{j}a = scalar.mulf %lf{j}, %ln_scale : f32
   %ex{j}b = scalar.mulf %ex{j}a, %neg : f32
-  %if{j} = scalar.expf<afn> %ex{j}b : f32
-  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j} : f32
+  %if{j} = scalar.expf<afn> %ex{j}b : f32{freq_factor(j)}
+  %ra{j} = scalar.mulf {"%mr_p" + str(j) if MROPE else "%position_f"}, %if{j}{"f" if FREQ_FACTORS else ""} : f32
   %tr{j} = scalar.mulf %ra{j}, %inv_two_pi : f32
   %ts{j} = scalar.addf %tr{j}, %half : f32
   %ti{j} = scalar.fptosi %ts{j} : f32 to i32
