@@ -62,7 +62,11 @@ jobs:
             echo "skills from $sref ($(git log -1 --format=%h "$sref"))"
           fi
           echo "branch $(git rev-parse --short HEAD), skills ${sref}, reference=$ref" | tee "$D/job.txt"
-          SK=$SK REFERENCE=$ref LOOM_ROOT=$WORK/loom bash .github/scripts/port_e2e.sh "$spec" "$D" 8160 8130 $mid
+          jenv=$(python3 -c "
+          import json, shlex; j = next(j for j in json.load(open('.github/devlab/port.json'))['jobs'] if j['name'] == '${{ matrix.job }}')
+          print(' '.join(f'{k}={shlex.quote(str(v))}' for k, v in (j.get('env') or {}).items()))")
+          echo "job env: $jenv"
+          env $jenv SK=$SK REFERENCE=$ref LOOM_ROOT=$WORK/loom bash .github/scripts/port_e2e.sh "$spec" "$D" 8160 8130 $mid
       - name: upload results
         if: always()
         uses: actions/upload-artifact@v4
