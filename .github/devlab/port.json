@@ -1,7 +1,71 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Campaign wave 1 (loom-org): scripted end-to-end ports on DevLab, derived from the best category A loom-fun reference (find_reference.py, REFERENCE=auto). Artifact order, covered architectures not being ported locally. Publishing is a separate step.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "gemma-4-12b-it",
+   "spec": "unsloth/gemma-4-12B-it-GGUF:gemma-4-12b-it-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "google/gemma-4-12B-it"
+  },
+  {
+   "name": "gemma-4-e4b-it",
+   "spec": "unsloth/gemma-4-E4B-it-GGUF:gemma-4-E4B-it-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "google/gemma-4-E4B-it"
+  },
+  {
+   "name": "gemma-4-26b-a4b-it",
+   "spec": "lmstudio-community/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "google/gemma-4-26B-A4B-it"
+  },
+  {
+   "name": "ornith-1-0-9b",
+   "spec": "unsloth/Ornith-1.0-9B-GGUF:Ornith-1.0-9B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "deepreinforce-ai/Ornith-1.0-9B"
+  },
+  {
+   "name": "lfm2-5-24b-a2b",
+   "spec": "ggml-org/LFM2.5-24B-A2B-GGUF:LFM2.5-24B-A2B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "LiquidAI/LFM2.5-24B-A2B"
+  },
+  {
+   "name": "qwen3-vl-8b-instruct",
+   "spec": "unsloth/Qwen3-VL-8B-Instruct-GGUF:Qwen3-VL-8B-Instruct-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "Qwen/Qwen3-VL-8B-Instruct"
+  },
+  {
+   "name": "gemma-4-e2b-it",
+   "spec": "unsloth/gemma-4-E2B-it-GGUF:gemma-4-E2B-it-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "google/gemma-4-E2B-it"
+  },
+  {
+   "name": "qwen3-4b",
+   "spec": "ggml-org/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "Qwen/Qwen3-4B"
+  },
+  {
+   "name": "qwen3-8b",
+   "spec": "unsloth/Qwen3-8B-GGUF:Qwen3-8B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "Qwen/Qwen3-8B"
+  },
+  {
+   "name": "hyperclovax-seed-text-instruct-1-5b",
+   "spec": "rippertnt/HyperCLOVAX-SEED-Text-Instruct-1.5B-Q4_K_M-GGUF:hyperclovax-seed-text-instruct-1.5b-q4_k_m.gguf",
+   "reference": "auto",
+   "model_id": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B"
+  },
+  {
+   "name": "qwen3-vl-4b-instruct",
+   "spec": "unsloth/Qwen3-VL-4B-Instruct-GGUF:Qwen3-VL-4B-Instruct-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "Qwen/Qwen3-VL-4B-Instruct"
+  }
  ]
 }
