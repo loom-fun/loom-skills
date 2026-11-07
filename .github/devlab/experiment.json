@@ -1,14 +1,16 @@
 {
- "_comment": "Issue #39 verification: path-aware consistency.py (gate verdict with llama.cpp) 20x on Bolt with drafting, Bolt quick gates, kernel tests on the rebuilt Bolt package, and another card's consistency.",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
+ "_comment": "Bisect a package that loom-serve refuses at load (\"stage does not match the token runner bindings\"): the published card as is, its rebuild from this branch, and rebuilds on the plain Q4_K_M checkpoint with and without the image component and the drafter. One served request each.",
+ "card": "loom-fun/unsloth-Muse-Glimmer-30B-loom",
+ "memory_bytes": 39000000000,
+ "kit": "glimmer",
+ "llamacpp": "b1355",
+ "steps": ["determinism:1:1"],
  "variants": [
-  {"name": "card", "steps": ["consistency:20:llama", "determinism:1:12", "gates:quick"]},
-  {"name": "rebuilt-ktest", "build": {}, "steps": ["ktest", "consistency:20:llama"]},
-  {"name": "nodraft", "build": {"SPEC": "off"}, "steps": ["consistency:20:llama"]},
-  {"name": "qwen3.8-27b", "card": "loom-fun/bartowski-Qwen3.8-27B-loom", "memory_bytes": 52000000000, "kit": null,
-   "llamacpp": "b1355", "steps": ["consistency:10:llama", "determinism:1:6"]}
+  {"name": "card"},
+  {"name": "rebuilt", "build": {}},
+  {"name": "q4km", "build": {}, "cfg": {"gguf": "ggml-org/Muse-Glimmer-30B-GGUF:Muse-Glimmer-30B-Q4_K_M.gguf"}},
+  {"name": "q4km-novision", "build": {}, "cfg": {"gguf": "ggml-org/Muse-Glimmer-30B-GGUF:Muse-Glimmer-30B-Q4_K_M.gguf", "vision": null}},
+  {"name": "q4km-nospec", "build": {}, "build_args": ["--draft", "none"], "cfg": {"gguf": "ggml-org/Muse-Glimmer-30B-GGUF:Muse-Glimmer-30B-Q4_K_M.gguf"}},
+  {"name": "q4km-neither", "build": {}, "build_args": ["--draft", "none"], "cfg": {"gguf": "ggml-org/Muse-Glimmer-30B-GGUF:Muse-Glimmer-30B-Q4_K_M.gguf", "vision": null}}
  ]
 }

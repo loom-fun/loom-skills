@@ -61,13 +61,25 @@ if [ ! -f "$card/.fetched" ]; then
 fi
 
 # build.py's / make_kernel_tests.py's config: the card's llm_config.json with its GGUFs pointed at the fetched files, plus the tensor table
-"$T" - "$card" "$D/cfg.json" <<'EOF' || exit 1
+"$T" - "$card" "$D/cfg.json" "$(q "print(json.dumps(v.get('cfg') or {}))")" <<'EOF' || exit 1
 import json, os, sys
 import gguf
-card, dst = sys.argv[1:]
+card, dst, over = sys.argv[1:]
 c = json.load(open(os.path.join(card, "llm_config.json")))
+# The variant's "cfg": keys set to null are dropped (e.g. "vision": null builds without the image component);
+# "gguf": "ORG/REPO:FILE" builds on another checkpoint (downloaded into the HF cache), the rest is set as given.
+over = json.loads(over)
+if over.get("gguf"):
+    repo, fname = over.pop("gguf").split(":", 1)
+    from huggingface_hub import hf_hub_download
+    c["gguf_override"] = hf_hub_download(repo, fname)
+for k, val in over.items():
+    if val is None:
+        c.pop(k, None)
+    else:
+        c[k] = val
 par = lambda f: os.path.join(card, "parameter", os.path.basename(f))
-c["gguf"] = par(c["gguf"])
+c["gguf"] = c.pop("gguf_override", None) or par(c["gguf"])
 for k in ("vision",):
     if c.get(k):
         c[k]["mmproj"] = par(c[k]["mmproj"])
