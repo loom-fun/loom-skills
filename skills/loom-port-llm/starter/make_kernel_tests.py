@@ -103,6 +103,36 @@ if VIS:   # a media epoch: 8-word records, token 1 carries a feature row (copied
   check.return
 }}
 """)
+NDS = int((cfg.get("vision") or {}).get("deepstack") or 0)
+if NDS:   # DeepStack: image inputs (tokens 1 and 3) add feature slice `level` to x and renormalize h; others untouched
+    level = NDS; drng = np.random.default_rng(7)
+    rows = drng.standard_normal((2, (NDS + 1) * H)).astype(np.float32)
+    recs = np.zeros((t, 8), np.int32); recs[:, 0] = ids; recs[1, 1] = t * 32; recs[3, 1] = t * 32 + (NDS + 1) * H * 4
+    packet = np.concatenate([recs.reshape(-1), rows.reshape(-1).view(np.int32)])
+    meta = np.array([t, 0, 1, 0], np.int32); tinfo = np.zeros((t, 4), np.int32); tinfo[:, 2] = 1
+    x0 = drng.standard_normal((t, H)).astype(np.float32); h0 = drng.standard_normal((t, H)).astype(np.float32)
+    xd, hd = x0.copy(), h0.copy()
+    for j, tok in enumerate((1, 3)):
+        xd[tok] = x0[tok] + rows[j, level * H:(level + 1) * H]
+        hd[tok] = xd[tok] / np.sqrt((xd[tok] * xd[tok]).mean() + eps) * w
+    for n, a in [("d_pk", packet), ("d_meta", meta), ("d_info", tinfo), ("d_x0", x0), ("d_h0", h0), ("d_x", xd), ("d_h", hd.astype(np.float32))]: save(n, a)
+    cases.append(f"""check.case public @deepstack_media {{
+  %t = check.literal value({t}) : index
+  %level = check.literal value({level}) : index
+  %pk = check.file.read.npy path("d_pk.npy") : {ty(packet)}
+  %meta = check.file.read.npy path("d_meta.npy") : tensor<4xi32>
+  %tinfo = check.file.read.npy path("d_info.npy") : tensor<{t}x4xi32>
+  %w = check.file.read.npy path("e_w.npy") : tensor<{H}xf32>
+  %x = check.file.read.npy path("d_x0.npy") : tensor<{t}x{H}xf32>
+  %h = check.file.read.npy path("d_h0.npy") : tensor<{t}x{H}xf32>
+  %ex = check.file.read.npy path("d_x.npy") : tensor<{t}x{H}xf32>
+  %eh = check.file.read.npy path("d_h.npy") : tensor<{t}x{H}xf32>
+  kernel.launch @g_deepstack[%t](%t, %level, %pk, %meta, %tinfo, %w, %x, %h) : [index](index, index, {ty(packet)}, tensor<4xi32>, tensor<{t}x4xi32>, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
+  check.expect.close actual(%x) expected(%ex) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.return
+}}
+""")
 # 2. matvec per (tensor) for t=1 and t=4 variants
 seen = set(); todo = []
 VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
