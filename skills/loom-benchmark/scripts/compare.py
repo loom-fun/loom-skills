@@ -100,7 +100,10 @@ for g in json.load(open(a.golden)):
     # llama.cpp can emit a non-canonical split (e.g. '[' 'A' where the HF tokenizer gives '[A');
     # identical text is a match, whatever the token boundaries.
     gold_text = pkg.tok.decode(g["ids"])
-    if n < min(len(got), len(g["ids"])) and (text.startswith(gold_text) or gold_text.startswith(text)):
+    # ... but only when the parsed reply accounts for what Loom generated: a reply whose channels dropped the
+    # generated tokens (an output parser that never published them) is an empty prefix of anything.
+    published = len(got) + 4 >= (r.get("usage") or {}).get("completion_tokens", 0)
+    if n < min(len(got), len(g["ids"])) and published and (text.startswith(gold_text) or gold_text.startswith(text)):
         n, gap, near = min(len(got), len(g["ids"])), None, True
     if g["prompt"] in alt:  # llama.cpp disagreed with itself? take the recording Loom follows further
         n2, gap2, near2 = match(got, alt[g["prompt"]])

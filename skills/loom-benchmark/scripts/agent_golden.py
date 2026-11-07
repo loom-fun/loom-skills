@@ -223,9 +223,13 @@ def main():
                 # more tokens than its parsed channels hold, the golden agrees with all of those, and the golden's
                 # continuation past them opens another call. Only then is the next turn's reuse not required.
                 marker = P.chat.get("call_marker")
-                if rec["golden_match"] and marker and u["completion_tokens"] > len(loom_ids) + 1 \
+                if rec["golden_match"] and marker and m.get("tool_calls") and u["completion_tokens"] > len(loom_ids) + 1 \
                         and marker in P.tok.decode(gids[len(loom_ids):], skip_special_tokens=False):
                     rec["output_dropped"] = [len(loom_ids), u["completion_tokens"]]
+                elif rec["golden_match"] and u["completion_tokens"] > len(loom_ids) + 4:
+                    # Generated tokens the parsed channels do not hold (and not a dropped second call): an empty or
+                    # short reply is a prefix of any golden, so it is not a match.
+                    rec["golden_match"], rec["unpublished"] = False, [len(loom_ids), u["completion_tokens"]]
             golden_ok = rec.get("golden_match", True) or rec.get("near_tie", False)
             ok = rec["render_ok"] and rec["reuse_ok"] and rec["calls_ok"] and golden_ok
             failures += not ok
