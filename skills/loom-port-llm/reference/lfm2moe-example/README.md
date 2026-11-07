@@ -14,6 +14,14 @@ Make a kit with `../apply_example.sh lfm2moe W/kit`.
 | `starter.patch` | `gen_llm.py`: wiring (layer kinds from the GGUF: `shortconv_layers`, attention layers), `GEMM_MIN_TOKENS` (head_dim 64 is in the starter now). `inspect_gguf.py`, `make_kernel_tests.py`: config extraction for `lfm2moe`, kernel tests for the short-conv and MoE chains (13/13) |
 | `cfg.json` | the reviewed config without the tensor table |
 
+**LFM3 (arch `lfm3`, LFM3-1.7B / LFM3-Omni-2B text) uses this kit too** (`examples.json` `archs`: port.sh applies it
+to an `lfm3` GGUF; the LFM2.5 reviewed config is never merged into one). Over lfm2 (llama.cpp `src/models/lfm3.cpp`)
+the kit adds only a kernel-7 short conv (`shortconv.l_cache`; `gen_sconv.py` is generic in K) and sandwich norms at the
+model's rms eps (`post_norm_eps`). The rest is the starter's: the per-head output gate (`attn_gate: "per_head"`), the
+sliding layers' rope base (`rope_theta_swa`, `g_qk_rope_store_swa`) and the global layers' `rope_freqs` factors
+(`rope_freq_factors`: 1 / 1e30, only the first 32 of 64 rotary pairs rotate), and the empty `<think></think>` before
+the last user message (`history_think_before`).
+
 The chat side is in the starter: `chat_probe.py` derives LFM2's template (`{% generation %}` tags, a
 JSON-list tools block, pythonic tool calls `<|tool_call_start|>[f(a='x')]<|tool_call_end|>`), and
 `control.loom` parses those calls.
