@@ -115,7 +115,7 @@ def card(pkg):
 
 def near_tie_divergence(x, y, pkg, llama):
     """(ok, message) for a greedy divergence: llama.cpp's log-probs at the first differing token."""
-    from bench_common import Package, llama_greedy, near_tie
+    from bench_common import Package, llama_greedy, near_tie_at
     P = Package(pkg)
     req = x["request"]
     think = (req.get("chat_template_kwargs") or {}).get("enable_thinking")
@@ -127,7 +127,7 @@ def near_tie_divergence(x, y, pkg, llama):
         return False, f"one completion is a prefix of the other at token {k} (not a near-tie)"
     g = llama_greedy(llama, P.ids(prompt) + t1[:k], 1, P, n_probs=10)[0]
     top = {t["id"]: t["logprob"] for t in g["completion_probabilities"][0]["top_logprobs"]}
-    ok = near_tie(top, t1[k], t2[k])
+    ok = near_tie_at(llama, P.ids(prompt) + t1[:k], top, t1[k], t2[k], P)
     gap = abs(top[t1[k]] - top[t2[k]]) if t1[k] in top and t2[k] in top else None
     return ok, f"first divergence at token {k}: {P.tok.decode(t1[k:k + 1])!r} vs {P.tok.decode(t2[k:k + 1])!r}, llama.cpp gap {gap}"
 

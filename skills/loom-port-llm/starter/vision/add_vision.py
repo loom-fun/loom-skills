@@ -38,6 +38,13 @@ def main():
     cfg_path, repo = sys.argv[1], sys.argv[2]
     cfg = json.load(open(cfg_path, encoding="utf-8"))
     given = sys.argv[3] if len(sys.argv) > 3 else None
+    # Gemma 4 other than E2B/E4B decodes image tokens non-causally on its sliding layers (llama.cpp
+    # mtmd_decode_use_non_causal: a gemma4v projector whose width is not 1536 or 2560, i.e. the 12B/26B/31B text
+    # models). The attention kernels are causal only, so those ports stay text-only until that mask exists.
+    if cfg.get("arch") == "gemma4" and cfg.get("hidden") not in (1536, 2560):
+        print("VISION_RESULT " + json.dumps({"vision": False, "reason": "gemma4 images need bidirectional attention "
+                                             "over image tokens on sliding layers (not implemented): text-only port"}))
+        return 0
     if given and os.path.exists(given):
         path = given
     else:

@@ -45,7 +45,7 @@ CACHE = os.path.join(os.path.expanduser(os.environ.get("XDG_CACHE_HOME", "~/.cac
 SCHEMA = "loom-card/2"
 # Keys inspect_gguf.py derives from the GGUF (or that name this package's own files): never taken from a reference.
 OWN = {"name", "gguf", "tensors", "model_id", "draft", "drafter", "assistant", "vision", "generator", "reference",
-       "mtp", "hidden", "layers", "heads", "kv_heads", "head_dim", "ffn", "vocab", "context_length", "rms_eps",
+       "mtp", "hidden", "layers", "heads", "kv_heads", "kv_heads_global", "head_dim", "ffn", "vocab", "context_length", "rms_eps",
        "rope_theta", "eos_id", "extra_eos_ids", "bos_id", "recurrent_layers", "kv_layers", "gdn", "moe",
        "sliding_layers", "nope_layers", "global_layers", "nextn_layers", "mrope"}
 

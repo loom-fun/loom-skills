@@ -313,7 +313,7 @@
      main()
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -316,6 +316,9 @@
+@@ -330,6 +330,9 @@
          for name, ok, detail in results:
              print("chat", "OK  " if ok else "SKIP" if ok is None else "FAIL", name, "-", detail)
          cfg["chat"] = chat
