@@ -170,8 +170,9 @@ Hand the card over and move the local GPU on to the next item.
    `{hf:OWNER/REPO/FILE}`; variant `{"name": "card"}`, steps `perf:card:2 perf:card:2:long llama:2 llama:2:long
    c4:card llamac4`; several cards go in one experiment, one job each with its own card fields), then
    `make_info.py perf --loom-jsonl perf_card.jsonl --llama-jsonl perf_llamacpp_nN.jsonl --c4-loom c4_card.txt
-   --c4-llama c4_llamacpp_nN.txt --package DIR --source-kind devlab --run ID --url JOB_URL --device none --hrx-loom none` on the job's artifact (no `--baseline-version`: the card keeps its local
-   baseline), and rebuild the card as above. Low priority: it never blocks other work.
+   --c4-llama c4_llamacpp_nN.txt --package DIR --source-kind devlab --run ID --url JOB_URL --device none --hrx-loom
+   none` on the job's artifact (no `--baseline-version`: the card keeps its local baseline), and rebuild the card as
+   above. Low priority: it never blocks other work.
 4. Missing local metrics are not swept: a local GPU worker measures them in one quiet local session with both
    engines (step 5).
 
