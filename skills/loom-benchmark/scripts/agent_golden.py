@@ -196,6 +196,13 @@ def main():
                     # (EOS before the think close; small thinking models do under greedy). The parsed message
                     # can't tell, so the unclosed rebuild is an alternative too.
                     alts.append(P.raw_from_chat(m, False, thinking, prompt))
+                gp, plain = P.chat.get("generation_prompt", ""), P.chat.get("generation_prompt_plain", "")
+                on = P.chat.get("thinking_default") if thinking is None else thinking
+                if not on and plain.startswith(gp) and plain != gp and not prompt.endswith(plain) and not m.get("reasoning_content"):
+                    # Thinking off with a generation prompt that adds an empty reasoning block (Gemma 4 12B/26B/31B):
+                    # where the prompt does not end with it (the turn continues after tool results), the model may
+                    # write that block itself, which the parsed reply can't show.
+                    alts += [plain[len(gp):] + r for r in [raw] + alts]
                 if d is not None:
                     # Use the rebuild that agrees longest with the golden.
                     for alt in alts:
