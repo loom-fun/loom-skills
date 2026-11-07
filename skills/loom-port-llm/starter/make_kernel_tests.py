@@ -59,7 +59,10 @@ VMETA = (f"\n  %meta = check.generate.fill value(0) : tensor<4xi32>\n  %tinfo = 
 VARGS = ", %meta, %tinfo" if VIS else ""
 VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
 E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
-x = E[ids]; h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
+x = E[ids]
+if cfg.get("embed_norm"): x = x / np.sqrt((x * x).mean(-1, keepdims=True) + 1e-5)  # weightless embedding RMSNorm
+if cfg.get("embed_scale"): x = x * cfg["embed_scale"]
+h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
 tab = raw("token_embd.weight")
 for n, a in [("e_ids", ids), ("e_tab", tab), ("e_w", w.astype(np.float32)), ("e_x", x.astype(np.float32)), ("e_h", h.astype(np.float32))]: save(n, a)
 cases.append(f"""check.case public @embed {{
