@@ -237,6 +237,37 @@
    "features": [
     "draft"
    ]
+  },
+  {
+   "repo": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+   "slug": "minicpm-v-4.7-35b-a3b",
+   "memory_bytes": 36000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+   "slug": "qwen3-4b-instruct-2507",
+   "memory_bytes": 62000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "draft"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
+   "slug": "nanbeige4.3-33b",
+   "memory_bytes": 81000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
   }
  ]
 }

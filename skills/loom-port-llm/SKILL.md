@@ -305,7 +305,15 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
     (`*-Instruct-2507`); `thinking_default` (Qwen3: on; Qwen3.5 small models: **off**);
   - `call_format`: `hermes` (Qwen2.5/Qwen3), `qwen_xml` (Qwen3.5/Qwen3-Coder), `glm`, `pythonic`
     (LFM2: `<|tool_call_start|>[f(a='x', n=3)]<|tool_call_end|>`, parsed in control.loom);
-  - `default_system` (Qwen2.5 inserts "You are Qwen, created by Alibaba Cloud…").
+  - `default_system` (Qwen2.5 inserts "You are Qwen, created by Alibaba Cloud…"); `default_system_tools` when the
+    template swaps in another default when tools are present (Nanbeige: a "tool-calling expert" prompt; the text
+    beside the tools block, separator included; absent otherwise);
+  - `history_think_before: "empty"` (MiniCPM-V): turns before the last user query keep an empty think block.
+  - A template that renders reasoning in history reads as thinking `always`, also for models that never reason
+    (Qwen3-*-Instruct-2507); no template signal tells them from Flint or Jan-v1. port.sh's smoke test decides: two
+    finished replies that never leave the reasoning channel switch the block to `never` (`chat_probe.py GGUF --never
+    cfg.json`, verified against the template), rebuild and smoke again.
+  - `bos` only when the template prints `bos_token` (a GGUF whose bos id is the role tag `<|im_start|>` is not).
   - `reasoning_instructions` (Qwen3.8: "Reasoning effort is set to xhigh. …" per `reasoning_effort`, only
     with thinking on, `reasoning_separator` before the tools text / system message): build.py advertises
     those efforts (plus none = thinking off) and `chat_begin` renders the request effort's text.
@@ -373,7 +381,8 @@ recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fie
   after `leading_dense` dense ones (an MoE MTP block generates too; not yet validated on the GPU). `inspect_gguf.py` fills `cfg["moe"]` from the GGUF;
   routing choices llama.cpp hard-codes per architecture instead of writing them (`expert_gating_func`,
   `expert_weights_norm`) come from `MOE_DEFAULTS`: add a row for a new MoE architecture from its
-  `src/models/<arch>.cpp` (`build_moe_ffn` arguments). Expert formats: Q4_K/Q5_K/Q6_K/Q8_0 (`gen_moe.FMT`; an MTP
+  `src/models/<arch>.cpp` (`build_moe_ffn` arguments). Expert formats: Q4_K/Q5_K/Q6_K/Q8_0, gate and up may differ
+  (`GATE+UP` kernels, e.g. bartowski's MiniCPM-V-4.7 Q4_K_M: Q4_K gate, Q6_K up) (`gen_moe.FMT`; an MTP
   block in another format is left out). Kernel tests cover the decode and prefill chains on the real tensors.
   Ported this way: Qwen3.6-35B-A3B (`qwen35moe`, hybrid + MoE, 256 experts top-8).
 - **Gemma-3n / Gemma-4 family (arch `gemma3n`, `gemma4`).** `apply_example.sh gemma4`: a complete,
