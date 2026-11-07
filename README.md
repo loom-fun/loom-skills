@@ -109,6 +109,7 @@ name:
 | `/loom:loom-optimize` | `/loom-optimize` | The measure / ablate / change / verify loop, a kernel A/B helper, and a catalog of optimizations that worked (and that didn't) |
 | `/loom:loom-benchmark` | `/loom-benchmark` | Token-by-token golden comparison against llama.cpp ROCm, a multi-turn tool-calling gate, a full-context needle gate, a batching-consistency check, throughput workloads, reporting rules |
 | `/loom:loom-improve` | `/loom-improve` | Improve the skills themselves: the KPIs (wall clock, agentic correctness vs llama.cpp, speed), fresh-agent trials on a reference model suite, a stall watchdog, a KPI regression check and a fixed quiet-GPU evaluator. Prompt: "your goal is to improve the loom skill at X" |
+| `/loom:loom-org` | `/loom-org` | Populate an HF org (loom-fun) with the top models that fit Strix Halo: rank and pick models, classify what the org has (category A current, B older skill), then loop: port and optimize from the best category A reference, publish, sweep expensive gates on DevLab, fix bugs in the skill and regenerate, until every model is correct and fully assessed |
 
 A starter-covered model goes from prompt to report within its roofline budget (port ≈1 min,
 qualify ≈10 min, then optimization and finalize). An architecture the starter doesn't
