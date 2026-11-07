@@ -41,8 +41,10 @@ rng = np.random.default_rng(0)
 cases = []
 KS = os.environ.get("KTEST_HEADS_SFX", "")   # a child run for a narrower query-head count (see the end): _h<heads>
 def save(n, a): np.save(os.path.join(out, n + KS + ".npy"), a)
-# The output gate as llama.cpp applies it (cfg attn_gate_act): sigmoid, or softplus (laguna)
+# The output gate as llama.cpp applies it (cfg attn_gate_act): sigmoid, or softplus (laguna, applied per head by
+# g_gate_heads); gate_mul is what the combine / flash kernels apply to the gate buffer (softplus: the value as stored).
 def gate_act(g): return np.log1p(np.exp(g)) if cfg.get("attn_gate_act") == "softplus" else 1 / (1 + np.exp(-g))
+def gate_mul(g): return g if cfg.get("attn_gate_act") == "softplus" else gate_act(g)
 def ty(a): return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int8": "i8", "int32": "i32", "float16": "f16"}[str(a.dtype)] + ">"
 # 1. embed
 ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
@@ -718,7 +720,7 @@ def gemm_cases():
     for li in range(cfg["layers"]):
         for nm_ in ("ffn_gate", "ffn_up", "ffn_down", "attn_qkv", "attn_gate", "attn_q", "attn_k", "attn_output", "ssm_out"):
             name = f"blk.{li}.{nm_}.weight"
-            if name not in T:
+            if name not in T or (nm_ == "attn_gate" and cfg.get("attn_gate") == "per_head"):   # per head: matvec only
                 continue
             fmt = T[name].tensor_type.name.lower()
             up = f"blk.{li}.ffn_up.weight"
@@ -980,7 +982,7 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
         sc[np.arange(ctx)[None, :] > (P0 + np.arange(t))[:, None]] = -1e30
         pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); o[:, hh] = pr @ vv[:, kv].astype(np.float64)
     if cfg.get("attn_gate"):
-        o = o * gate_act(gg)
+        o = o * gate_mul(gg)
     QD = QH * D
     ow = None
     if WIN:   # sliding layers: key j visible from position p when p - WIN < j <= p (llama.cpp LLAMA_SWA_TYPE_STANDARD)
@@ -991,7 +993,7 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
             sc[(j_ > p_) | (j_ <= p_ - WIN)] = -1e30
             pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); ow[:, hh] = pr @ vv[:, kv].astype(np.float64)
         if cfg.get("attn_gate"):
-            ow = ow * gate_act(gg)
+            ow = ow * gate_mul(gg)
         save("f_ow", ow.reshape(t, QD).astype(np.float32))
     for n, a in [("f_arena", arena.reshape(-1)), ("f_q", qq.reshape(t, QD)), ("f_g", gg.reshape(t, QD)), ("f_orig", orig),
                  ("f_info", info), ("f_o", o.reshape(t, QD).astype(np.float32))]:
