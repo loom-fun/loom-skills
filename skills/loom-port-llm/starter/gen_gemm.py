@@ -28,6 +28,9 @@ FMT = {
     "f16": dict(block_bytes=64, block_values=32),
     # BF16 (vendor drafters published only in BF16, used as-is): 16 values load directly, rounded to F16 for the MMA
     "bf16": dict(block_bytes=64, block_values=32),
+    # F32 (small projections some quants keep unquantized, e.g. Gemma 3n/4 per-layer-input gate/proj): 16 values load
+    # directly, rounded to F16 for the MMA
+    "f32": dict(block_bytes=128, block_values=32),
 }
 HELPER = {"q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16"}
 
@@ -82,6 +85,14 @@ def dequant16(fmt, w, view_name, out):
       %{out}_view = buffer.view %{w}[%{out}_origin] : buffer -> view<16xbf16>
       %{out}_raw = vector.load %{out}_view[0] : view<16xbf16> -> vector<16xbf16>
       %{out}_wide = vector.extf %{out}_raw : vector<16xbf16> to vector<16xf32>
+      %{out} = vector.fptrunc %{out}_wide : vector<16xf32> to vector<16xf16>'''
+    if fmt == "f32":
+        return f'''
+      %{out}_four = index.constant 4 : offset
+      %{out}_col_bytes = index.scale %w_col, %{out}_four : index, offset -> offset
+      %{out}_origin = index.add %w_row_origin, %{out}_col_bytes : offset
+      %{out}_view = buffer.view %{w}[%{out}_origin] : buffer -> view<16xf32>
+      %{out}_wide = vector.load %{out}_view[0] : view<16xf32> -> vector<16xf32>
       %{out} = vector.fptrunc %{out}_wide : vector<16xf32> to vector<16xf16>'''
     if fmt == "q8_0":
         return f'''
