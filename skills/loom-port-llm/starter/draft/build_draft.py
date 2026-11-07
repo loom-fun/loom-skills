@@ -43,7 +43,10 @@ def root_sources(cfg, draft):
     if draft["kind"] == "assist":  # propose = [target embedding, assistant checkpoint]; warm reads no weights
         return ["model", "draft"], []
     # "phead": the target's head once more, through its load-time Q4_0 policy (head_weights.loom, prep_weights.py)
-    return ["model"] + head + ["draft", "draft"] + (["phead"] if draft.get("head_policy") else []), ["draft", "draft"]
+    # With "phead" the proposals never read the head root, so an untied head is not bound (gen_dflash.py: same rule).
+    if draft.get("head_policy"):
+        return ["model", "draft", "draft", "phead"], ["draft", "draft"]
+    return ["model"] + head + ["draft", "draft"], ["draft", "draft"]
 
 
 def _bind(stage, sources, draft_policy=False):

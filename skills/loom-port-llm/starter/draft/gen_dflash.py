@@ -1250,7 +1250,10 @@ command.program.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buf
     head_ref = "%w_embed" if head_name == "token_embd.weight" else "%w_head"
     phead_root = ""
     if g.get("phead"):   # the proposals read a load-time Q4_0 copy of the head (prep_weights.py, last parameter root)
-        head_ref, hsize, phead_root = "%w_phead", g["phead"], ", %w_phead: buffer"
+        # instead of the target's head, so an untied head gets no root of its own here (build_draft.root_sources
+        # drops it to match). Binding it anyway made loom-serve refuse the package: "stage does not match the token
+        # runner bindings" (untied Q8_0 head + DFlash; a tied head never had this root).
+        head_ref, hsize, phead_root, head_root = "%w_phead", g["phead"], ", %w_phead: buffer", ""
     vis = ", %metadata, %info" if g["VISION"] else ""
     vty = ", buffer, buffer" if g["VISION"] else ""
     conv = F["conv"]
