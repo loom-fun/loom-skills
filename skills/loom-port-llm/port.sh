@@ -58,20 +58,18 @@ fi
 [ -f "$cached" ] || { echo "download of $repo/$file failed (download.log):"; tail -5 download.log 2>/dev/null; exit 2; }
 mkdir -p gguf && [ "$cached" -ef "gguf/$(basename "$file")" ] || ln -sf "$cached" "gguf/$(basename "$file")"
 gguf=$work/gguf/$(basename "$file")
-# A split GGUF (NAME-00001-of-0000N.gguf): every part, from the same repo directory, next to the first one.
-if [[ "$file" =~ -00001-of-([0-9]{5})\.gguf$ ]]; then
-  for ((i = 2; i <= 10#${BASH_REMATCH[1]}; i++)); do
-    pf=${file%-00001-of-*}-$(printf %05d $i)-of-${BASH_REMATCH[1]}.gguf; pc=$(dirname "$cached")/$(basename "$pf")
-    if [ ! -f "$pc" ] && [ "${DRY_RUN:-0}" = 1 ]; then
-      "$T" -I "$K/pick_gguf.py" "$repo" --file "$pf" --stub "gguf/$(basename "$pf")" || exit 2; continue
-    elif [ ! -f "$pc" ]; then
-      "$hf" download "$repo" "$pf" >> download.log 2>&1
-      pc=$(grep -o '/[^ ]*'"$(basename "$pf")" download.log | tail -1)
-    fi
-    [ -f "$pc" ] || { echo "download of $repo/$pf failed (download.log)"; exit 2; }
-    [ "$pc" -ef "gguf/$(basename "$pf")" ] || ln -sf "$pc" "gguf/$(basename "$pf")"
-  done
-fi
+# A split GGUF (NAME-00001-of-0000N.gguf, formats.split_parts): every other part, from the same repo directory.
+for pf in $("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import formats; print(*formats.split_parts(sys.argv[2])[1:])" "$K" "$file"); do
+  pc=$(dirname "$cached")/$(basename "$pf")
+  if [ ! -f "$pc" ] && [ "${DRY_RUN:-0}" = 1 ]; then
+    "$T" -I "$K/pick_gguf.py" "$repo" --file "$pf" --stub "gguf/$(basename "$pf")" || exit 2; continue
+  elif [ ! -f "$pc" ]; then
+    "$hf" download "$repo" "$pf" >> download.log 2>&1
+    pc=$(grep -o '/[^ ]*'"$(basename "$pf")" download.log | tail -1)
+  fi
+  [ -f "$pc" ] || { echo "download of $repo/$pf failed (download.log)"; exit 2; }
+  [ "$pc" -ef "gguf/$(basename "$pf")" ] || ln -sf "$pc" "gguf/$(basename "$pf")"
+done
 # Tokenizer: the base model named in the GGUF, else the repo name without -GGUF.
 tokrepos=$("$T" - "$gguf" "$repo" <<'EOF'
 import re, sys

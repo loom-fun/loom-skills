@@ -19,6 +19,8 @@ import argparse, json, math, os, re, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "loom-benchmark", "scripts"))
 from bench_common import perf_metrics  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "loom-port-llm", "starter"))
+from formats import split_parts  # noqa: E402
 
 # Demonstrated efficiencies on Strix Halo (fraction of the roofline actually reached by
 # a tuned Loom port, end to end). Update these when a port beats them; cite the source.
@@ -64,11 +66,8 @@ def load(path):
             continue
         meta[f.name] = v
     tensors = {t.name: (int(t.n_bytes), [int(x) for x in t.shape]) for t in r.tensors}
-    # A split GGUF (NAME-00001-of-0000N.gguf, parts side by side): the tensors of every part
-    m = re.search(r"-(\d{5})-of-(\d{5})\.gguf$", path)
-    for i in range(2, int(m.group(2)) + 1) if m else ():
-        part = gguf.GGUFReader(f"{path[:m.start()]}-{i:05d}-of-{m.group(2)}.gguf")
-        tensors.update({t.name: (int(t.n_bytes), [int(x) for x in t.shape]) for t in part.tensors})
+    for part in split_parts(path)[1:]:   # a split GGUF: the tensors of every part
+        tensors.update({t.name: (int(t.n_bytes), [int(x) for x in t.shape]) for t in gguf.GGUFReader(part).tensors})
     return meta, tensors
 
 

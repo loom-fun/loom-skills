@@ -64,7 +64,7 @@ LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmar
 
 **Split GGUFs** (`NAME-00001-of-0000N.gguf`): pass the first part; port.sh fetches and links every part; inspect, build
 and the kernel tests read them all, and the package lists each as a parameter file. A model whose weights need more
-than 60 % of RAM: `LOOM_MEMORY_CAP_GIB=N` sets build.py's memory cap (a DevLab port job: `"env": {"LOOM_MEMORY_CAP_GIB": N}`).
+than 60 % of RAM: `LOOM_MEMORY_CAP_GIB=N` sets the memory cap (build.py, pick_gguf.py) (a DevLab port job: `"env": {"LOOM_MEMORY_CAP_GIB": N}`).
 
 `DRY_RUN=1 port.sh ...` plans a port on the CPU in under a minute: stages 1-2 only, an uncached GGUF read as a
 header-only sparse stub (nothing downloaded), then `DRY_RUN_RESULT {...}` (architecture, kit, reference, inspect).

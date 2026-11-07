@@ -20,7 +20,7 @@ DECODES = frozenset(FMT)
 
 
 def split_parts(path):
-    """The files of a split GGUF (llama.cpp gguf-split: NAME-00001-of-00003.gguf ...), given any one of them, in order;
+    """The files of a split GGUF (llama.cpp gguf-split: NAME-00001-of-00003.gguf ...), given the first part, in order;
     [path] for a single-file GGUF. The parts sit side by side (port.sh links them all into WORKDIR/gguf)."""
     import re
     m = re.search(r"-(\d{5})-of-(\d{5})\.gguf$", path)
@@ -28,3 +28,30 @@ def split_parts(path):
         return [path]
     n = int(m.group(2))
     return [f"{path[:m.start()]}-{i:05d}-of-{n:05d}.gguf" for i in range(1, n + 1)]
+
+
+def memory_cap():
+    """(bytes, description, reserved bytes): the GPU memory a package may plan for (build.py's budget, pick_gguf.py's
+    fit). LOOM_MEMORY_CAP_GIB when set (a runner whose GPU budget is known, e.g. DevLab's 100 GiB GTT), else 60 % of
+    RAM; minus LOOM_RESERVED_GIB (memory another resident server already holds). bytes is None when RAM is unknown.
+    A malformed value exits: read as "unknown" it would fall back to a default above the cap it meant to set."""
+    import os
+    import sys
+
+    def gib(name):
+        v = os.environ.get(name)
+        try:
+            return float(v) if v else None
+        except ValueError:
+            sys.exit(f"{name}={v!r} is not a number (GiB)")
+    reserved, override = (gib("LOOM_RESERVED_GIB") or 0) * 2**30, gib("LOOM_MEMORY_CAP_GIB")
+    if override is not None:
+        cap, what = override * 2**30, f"LOOM_MEMORY_CAP_GIB {override:g}"
+    else:
+        try:
+            cap, what = 0.6 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"), "60% of RAM"
+        except (AttributeError, ValueError, OSError):
+            return None, "RAM unknown", reserved
+    if reserved:
+        what += f" minus LOOM_RESERVED_GIB {reserved / 2**30:g}"
+    return cap - reserved, what, reserved

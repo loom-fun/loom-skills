@@ -57,13 +57,11 @@ jobs:
       - name: "port: ${{ matrix.job }}"
         run: |
           set -uo pipefail
-          # a job's "env" ({"NAME": "value"}): port.sh / qualify.sh switches for an A/B wave (e.g. SPEC=off), or
-          # LOOM_MEMORY_CAP_GIB (build.py's budget on a runner whose GPU memory is known: weights over 60 % of RAM);
-          # "post": a script (repo path) run after the port, also a failed one, for diagnostics (log in the artifact)
-          IFS=$'\x1f' read -r spec ref sref mid envs post < <(python3 -c "
+          # a job's "env" ({"NAME": "value"}): port.sh / qualify.sh switches for an A/B wave (e.g. SPEC=off)
+          IFS=$'\x1f' read -r spec ref sref mid envs < <(python3 -c "
           import json, shlex; j = next(j for j in json.load(open('.github/devlab/port.json'))['jobs'] if j['name'] == '${{ matrix.job }}')
           print(j['spec'], j.get('reference') or 'auto', j.get('skills_ref') or '-', j.get('model_id') or '',
-                ' '.join(f'{k}={shlex.quote(str(v))}' for k, v in (j.get('env') or {}).items()), j.get('post') or '-', sep=chr(31))")
+                ' '.join(f'{k}={shlex.quote(str(v))}' for k, v in (j.get('env') or {}).items()), sep=chr(31))")
           if [ -n "$envs" ]; then echo "env: $envs"; eval "export $envs"; fi
           D=$WORK/${{ matrix.job }}; rm -rf "$D"; mkdir -p "$D"
           SK=$GITHUB_WORKSPACE/skills
@@ -72,11 +70,7 @@ jobs:
             echo "skills from $sref ($(git log -1 --format=%h "$sref"))"
           fi
           echo "branch $(git rev-parse --short HEAD), skills ${sref}, reference=$ref" | tee "$D/job.txt"
-          rc=0; SK=$SK REFERENCE=$ref LOOM_ROOT=$WORK/loom bash .github/scripts/port_e2e.sh "$spec" "$D" 8160 8130 $mid || rc=$?
-          if [ "$post" != - ]; then
-            W=$D/work OUT=$D/out SK=$SK LOOM_ROOT=$WORK/loom bash "$post" > "$D/out/post.log" 2>&1 || true; tail -60 "$D/out/post.log"
-          fi
-          exit $rc
+          SK=$SK REFERENCE=$ref LOOM_ROOT=$WORK/loom bash .github/scripts/port_e2e.sh "$spec" "$D" 8160 8130 $mid
       - name: upload results
         if: always()
         uses: actions/upload-artifact@v4
