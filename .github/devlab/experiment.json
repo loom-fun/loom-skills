@@ -1,14 +1,14 @@
 {
- "_comment": "Issue #39 verification: path-aware consistency.py (gate verdict with llama.cpp) 20x on Bolt with drafting, Bolt quick gates, kernel tests on the rebuilt Bolt package, and another card's consistency.",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
+ "_comment": "Validation of #72 (content/call separator): gates LEVEL=dev (agent with thinking on and off) on the published qwen_xml card vs rebuilt from this branch, plus no-regression rebuilds of a sibling qwen_xml card and a hermes card.",
+ "card": "loom-fun/bartowski-Ornith-1.5-9B-loom",
+ "memory_bytes": 30000000000,
+ "kit": null,
+ "llamacpp": "b1369",
+ "steps": ["gates:dev"],
  "variants": [
-  {"name": "card", "steps": ["consistency:20:llama", "determinism:1:12", "gates:quick"]},
-  {"name": "rebuilt-ktest", "build": {}, "steps": ["ktest", "consistency:20:llama"]},
-  {"name": "nodraft", "build": {"SPEC": "off"}, "steps": ["consistency:20:llama"]},
-  {"name": "qwen3.8-27b", "card": "loom-fun/bartowski-Qwen3.8-27B-loom", "memory_bytes": 52000000000, "kit": null,
-   "llamacpp": "b1355", "steps": ["consistency:10:llama", "determinism:1:6"]}
+  {"name": "xml-card"},
+  {"name": "xml-fix", "build": {}},
+  {"name": "xml2-fix", "card": "loom-fun/unsloth-Qwen3.5-9B-loom", "build": {}},
+  {"name": "hermes-fix", "card": "loom-fun/unsloth-Qwen3-8B-loom", "memory_bytes": 28000000000, "build": {}}
  ]
 }
