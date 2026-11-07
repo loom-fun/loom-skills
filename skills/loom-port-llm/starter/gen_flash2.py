@@ -41,8 +41,9 @@ DP8 = D + 8                      # padded K-tile row (f16 elements)
 QH = KVH * G
 # Token subtiles per workgroup: TS 16-token tiles share each staged K/V tile (wave w: head w % G, subtile w / G).
 # Every staged key feeds 16 * TS * G queries; with one tile (TS = 1) a small group (G = 2) re-streams the whole
-# KV cache from memory for every 32 queries and long prefill becomes bandwidth-bound. Default: 16 waves.
-TS = int(os.environ.get("FLASH2_TS") or max(1, 16 // G))
+# KV cache from memory for every 32 queries and long prefill becomes bandwidth-bound. Default: 16 waves, and one
+# tile at head_dim > 128 (Q is reloaded every key tile there and the kernel has no registers left for more).
+TS = int(os.environ.get("FLASH2_TS") or (max(1, 16 // G) if D <= 128 else 1))
 W = G * TS                       # waves per workgroup
 LANES = 32 * W
 # K/V staging tiles head_dim over 32*GP slots (GP: W rounded down to a power of two). With a power-of-two wave
@@ -64,36 +65,62 @@ assert KT % 32 == 0, f"FLASH2_KT={KT}: must be a multiple of 32"
 KB = KT // 16
 VTC, KBYTES, VTBYTES, KT_LESS = KT + 8, KT * (D + 8) * 2, D * (KT + 8) * 2, KT - 1
 
-U = []
-A = U.append
-A('''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: index) {
-  %c1 = index.constant 1 : index
-  %ckv = index.constant {KVH} : index
-  %c16 = index.constant 16 : index
-  %clanes = index.constant {LANES} : index
-  %tiles = index.div %tokens, %c16 : index
+# TS = 1: the kernel as it was before token subtiles (FLASH2_TS=1 generates it byte for byte).
+OLD_LAUNCH = '''  %tiles = index.div %tokens, %c16 : index
+  kernel.launch.config workgroups(%tiles, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
+'''
+NEW_LAUNCH = '''  %tiles = index.div %tokens, %c16 : index
   %cts = index.constant {TS} : index
   %cts_less = index.constant {TS - 1} : index
   %tiles_round = index.add %tiles, %cts_less : index
   %groups = index.div %tiles_round, %cts : index
   kernel.launch.config workgroups(%groups, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
-} launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, {"%sinks" if CFG["sinks"] else "%gate"}: buffer, %info: buffer, %origins: buffer, %arena: buffer, %out: buffer) {
-  %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
-  %layer = index.assume %layer_arg [range(%layer_arg, 0, {CFG["layers"]})] : index
-  %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
-  %origin = index.constant 0 : offset
-  %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
-  %c2 = index.constant 2 : index
-  %c8 = index.constant 8 : index
-  %c15 = index.constant 15 : index
-  %c16 = index.constant 16 : index
-  %c31 = index.constant 31 : index
-  %c32 = index.constant 32 : index
-  %c128 = index.constant 128 : index
-  %c0_i32 = scalar.constant 0 : i32
-  %true_const = scalar.constant true : i1
+'''
+OLD_HEAD = '''  %tile_count = index.div %tokens, %c16 : index
+  %tile_id = kernel.workgroup.id<x> : index
+  %tile = index.assume %tile_id [lt(%tile_id, %tile_count)] : index
+  %kv_id = kernel.workgroup.id<y> : index
+  %kv = index.assume %kv_id [range(%kv_id, 0, {KVH - 1})] : index
+  %first_token = index.mul %tile, %c16 : index
+  %uniform, %row32, %pos0_32 = func.call @{P}_tile_uniform(%info, %tokens, %first_token) : (buffer, index, index) -> (i1, i32, i32)
+  scf.if %uniform {
+  %workitem_id = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem_id [range(%workitem_id, 0, {LANES - 1})] : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, {G - 1})] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %lane_col = index.rem %lane, %c16 : index
+  %lane_half = index.div %lane, %c16 : index
+  %hi_half = index.cmp ne, %lane_half, %c0 : index
+  %row_bound = scalar.assume %row32 [range(%row32, 0, 2147483646)] : i32
+  %row = index.cast %row_bound : i32 to index
+  %pos0_bound = scalar.assume %pos0_32 [range(%pos0_32, 0, 262128)] : i32
+  %pos0 = index.cast %pos0_bound : i32 to index
+  %pos_last = index.add %pos0, %c15 : index
+  %padded = index.add %context, %c15 : index
+  %blocks = index.div %padded, %c16 : index
+  %k_plane = index.mul %layer, %c2 : index
+  %v_plane = index.add %k_plane, %c1 : index
+  %is_sliding = scalar.cmpi ne, %sliding, %c0_i32 : i32
+  %window = index.constant {CFG["window"]} : index
+  %window_less = index.constant {CFG["window"] - 1} : index
+  %far = index.cmp uge, %pos0, %window : index
+  %use_window = scalar.andi %is_sliding, %far : i1
+  %window_start = index.sub %pos0, %window_less : index
+  %key_low = scf.select %use_window, %window_start, %c0 : index
+  %key_span = index.sub %pos_last, %key_low : index
+  %key_count_value = index.add %key_span, %c1 : index
+  %key_count = index.assume %key_count_value [range(%key_count_value, 1, 262144)] : index
+  %ckt_less = index.constant {KT_LESS} : index
+  %ckt = index.constant {KT} : index
+  %key_tiles_round = index.add %key_count, %ckt_less : index
+  %key_tiles = index.div %key_tiles_round, %ckt : index
+  %c16h = index.constant {G} : index
+  %head_value = index.madd %kv, %c16h, %wave : index
+  %head = index.assume %head_value [range(%head_value, 0, {QH - 1})] : index
+'''
+NEW_HEAD = '''  %true_const = scalar.constant true : i1
   %tile_count = index.div %tokens, %c16 : index
   %tile_last = index.sub %tile_count, %c1 : index
   %cts = index.constant {TS} : index
@@ -126,8 +153,33 @@ A('''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: in
   %head = index.assume %head_value [range(%head_value, 0, {QH - 1})] : index
   %ckt_less = index.constant {KT_LESS} : index
   %ckt = index.constant {KT} : index
-  %passes = scf.select %shared, %c1, %cts : index
+@@KEY_TILES@@
+'''
 
+U = []
+A = U.append
+A('''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %ckv = index.constant {KVH} : index
+  %c16 = index.constant 16 : index
+  %clanes = index.constant {LANES} : index
+@@LAUNCH@@} launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, {"%sinks" if CFG["sinks"] else "%gate"}: buffer, %info: buffer, %origins: buffer, %arena: buffer, %out: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
+  %layer = index.assume %layer_arg [range(%layer_arg, 0, {CFG["layers"]})] : index
+  %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %c31 = index.constant 31 : index
+  %c32 = index.constant 32 : index
+  %c128 = index.constant 128 : index
+  %c0_i32 = scalar.constant 0 : i32
+@@HEAD@@
   // K [32 keys x 128 dims] and V^T [128 dims x 32 keys] tiles (F16, padded rows).
   %k_bytes = index.constant {KBYTES} : offset
   %k_tile = buffer.alloca<workgroup> align(16) %k_bytes : buffer
@@ -171,7 +223,7 @@ def subtiles():
         r = "0" if s == 1 else f"_{s - 1}"
         any_r, sh_r, lo_r, hi_r = (("%u0", "%u0", "%lo0", "%hi0") if s == 1 else
                                    (f"%any{r}", f"%shared{r}", f"%lo_u{r}", f"%hi_u{r}"))
-        mu_r, mf_r, mp_r = ("%u0", "%first0", "%spos0") if s == 1 else (f"%mu{r}", f"%mf{r}", f"%mp{r}")
+        mu_r, mp_r = ("%u0", "%spos0") if s == 1 else (f"%mu{r}", f"%mp{r}")
         o.append(f'''  %any_{s} = scalar.ori {any_r}, %u{s} : i1
   %same{s} = index.cmp eq, %row{s}, %row0 : index
   %ok{s} = scalar.andi %u{s}, %same{s} : i1
@@ -184,7 +236,6 @@ def subtiles():
   %hi_u_{s} = scf.select %live{s}, %hi_m{s}, {hi_r} : index
   %is_sub{s} = index.cmp eq, %sub, %cs{s} : index
   %mu_{s} = scf.select %is_sub{s}, %u{s}, {mu_r} : i1
-  %mf_{s} = scf.select %is_sub{s}, %first{s}, {mf_r} : index
   %mp_{s} = scf.select %is_sub{s}, %spos{s}, {mp_r} : index''')
     z = "0" if TS == 1 else f"_{TS - 1}"
     last = (lambda a, b: a if TS == 1 else b)
@@ -193,37 +244,61 @@ def subtiles():
   %lo_u = index.add {last("%lo0", "%lo_u" + z)}, %c0 : index
   %hi_u = index.add {last("%hi0", "%hi_u" + z)}, %c0 : index
   %mine = scalar.andi {last("%u0", "%mu" + z)}, %true_const : i1
-  %first_token = index.add {last("%first0", "%mf" + z)}, %c0 : index
+  %my_tile = index.add %tile0, %sub : index
+  %my_tile_live = index.min %my_tile, %tile_last : index
+  %first_token = index.mul %my_tile_live, %c16 : index
   %pos0 = index.add {last("%spos0", "%mp" + z)}, %c0 : index''')
     return "\n".join(o)
 
 
-def pass_range():
-    """Staging pass %pass's row and key range: the union when %shared, else subtile %pass's own (no keys when that
-    subtile is not uniform); the waves of other subtiles mask every key of the pass (%act_v)."""
+def key_tiles():
+    """Key tiles of the flattened (staging pass, key tile) loop: one pass over the union of the subtiles' key ranges
+    when %shared, else one pass per subtile (%per tiles each: the longest subtile's)."""
     o = []
-    prev = ("%row0", "%lo0", "%hi0", "%u0")
-    for s in range(1, TS):
-        o.append(f'''    %pis{s} = index.cmp eq, %pass, %cs{s} : index
-    %prow{s} = scf.select %pis{s}, %row{s}, {prev[0]} : index
-    %plo{s} = scf.select %pis{s}, %lo{s}, {prev[1]} : index
-    %phi{s} = scf.select %pis{s}, %hi{s}, {prev[2]} : index
-    %pu{s} = scf.select %pis{s}, %u{s}, {prev[3]} : i1''')
-        prev = (f"%prow{s}", f"%plo{s}", f"%phi{s}", f"%pu{s}")
-    o.append(f'''    %row = scf.select %shared, %row0, {prev[0]} : index
-    %key_low = scf.select %shared, %lo_u, {prev[1]} : index
-    %pos_last = scf.select %shared, %hi_u, {prev[2]} : index
-    %pass_live = scf.select %shared, %true_const, {prev[3]} : i1
-    %own_pass = index.cmp eq, %sub, %pass : index
-    %active = scalar.ori %shared, %own_pass : i1
-    %act_v = vector.splat %active : vector<8xi1>
-    %key_span = index.sub %pos_last, %key_low : index
-    %key_count_all = index.add %key_span, %c1 : index
-    %key_count_value = scf.select %pass_live, %key_count_all, %c0 : index
-    %key_count = index.assume %key_count_value [range(%key_count_value, 0, 262144)] : index
-    %key_tiles_round = index.add %key_count, %ckt_less : index
-    %key_tiles = index.div %key_tiles_round, %ckt : index''')
+    for s_ in range(TS):
+        o.append(f'''  %kspan{s_} = index.sub %hi{s_}, %lo{s_} : index
+  %kspan_b{s_} = index.assume %kspan{s_} [range(%kspan{s_}, 0, 262143)] : index
+  %kround{s_} = index.add %kspan_b{s_}, %ckt : index
+  %ktiles{s_} = index.div %kround{s_}, %ckt : index
+  %ktl{s_} = scf.select %u{s_}, %ktiles{s_}, %c0 : index''')
+        if s_:
+            prev = "%ktl0" if s_ == 1 else f"%ktm{s_ - 1}"
+            o.append(f"  %ktm{s_} = index.max {prev}, %ktl{s_} : index")
+    o.append(f'''  %kspan_u = index.sub %hi_u, %lo_u : index
+  %kspan_ub = index.assume %kspan_u [range(%kspan_u, 0, 262143)] : index
+  %kround_u = index.add %kspan_ub, %ckt : index
+  %ktiles_u = index.div %kround_u, %ckt : index
+  %per = scf.select %shared, %ktiles_u, {"%ktl0" if TS == 1 else f"%ktm{TS - 1}"} : index
+  %npass = scf.select %shared, %c1, %cts : index
+  %key_tiles = index.mul %per, %npass : index
+  %per_max = index.max %per, %c1 : index
+  %per_nz = index.assume %per_max [range(%per_max, 1, 16384)] : index''')
     return "\n".join(o)
+
+
+def pass_range():
+    """Key tile %kt's staging pass: the union's row and key range when %shared, else subtile %sub_pass's own (no
+    keys when that subtile is not uniform); the waves of other subtiles mask every key of the pass (%act_v)."""
+    o = ['''    %sub_pass = index.div %kt, %per_nz : index
+    %kt_in = index.rem %kt, %per_nz : index''']
+    prev = ("%row0", "%lo0", "%hi0", "%u0")
+    for s_ in range(1, TS):
+        o.append(f'''    %pis{s_} = index.cmp eq, %sub_pass, %cs{s_} : index
+    %prow{s_} = scf.select %pis{s_}, %row{s_}, {prev[0]} : index
+    %plo{s_} = scf.select %pis{s_}, %lo{s_}, {prev[1]} : index
+    %phi{s_} = scf.select %pis{s_}, %hi{s_}, {prev[2]} : index
+    %pu{s_} = scf.select %pis{s_}, %u{s_}, {prev[3]} : i1''')
+        prev = (f"%prow{s_}", f"%plo{s_}", f"%phi{s_}", f"%pu{s_}")
+    o.append(f'''    %row = scf.select %shared, %row0, {prev[0]} : index
+    %pass_low = scf.select %shared, %lo_u, {prev[1]} : index
+    %pass_last = scf.select %shared, %hi_u, {prev[2]} : index
+    %pass_live = scf.select %shared, %true_const, {prev[3]} : i1
+    %key_low = scf.select %pass_live, %pass_low, %c1 : index
+    %pos_last = scf.select %pass_live, %pass_last, %c0 : index
+    %own_pass = index.cmp eq, %sub, %sub_pass : index
+    %active = scalar.ori %shared, %own_pass : i1
+    %act_v = vector.splat %active : vector<8xi1>''')
+    return "\n".join(o) + "\n"
 
 
 # Q^T fragments: held in registers for D = 128; for D = 256 they would not fit next to the
@@ -248,7 +323,7 @@ A('''  %zero8 = vector.constant 0.0 : vector<8xf32>
   %one_i32 = scalar.constant 1 : i32
   %two_i32 = scalar.constant 2 : i32
   %c2047_i32 = scalar.constant {CFG["window"] - 1} : i32
-  %not_sliding = scalar.xori %is_sliding, %true_const : i1
+@@TRUE_CONST@@  %not_sliding = scalar.xori %is_sliding, %true_const : i1
   %ns_v = vector.splat %not_sliding : vector<8xi1>
   // This lane's query position and its keys' row offsets within a 16-key block.
   %query_pos = index.add %pos0, %lane_col : index
@@ -265,6 +340,7 @@ A('''  %zero8 = vector.constant 0.0 : vector<8xf32>
 @@STAGING_SLOTS@@
   %kz = vector.constant 0.0 : vector<{DPT}xf16>
 ''')
+acc = ", ".join(f"%a{d} = %init : vector<8xf32>" for d in range(NF))
 if CFG["kv_f32"]:
     KV_LOAD = f"""      %k_cache = buffer.view %arena[%k_offset] : buffer -> view<{KVH}x{D}xf32>
       %v_cache = buffer.view %arena[%v_offset] : buffer -> view<{KVH}x{D}xf32>
@@ -324,11 +400,8 @@ def staging_slots():
     return "\n".join(out)
 
 
-# Staging passes: one over the union key range when the subtiles share it, else one per subtile.
-A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NF))} = scf.for %pass = [%c0 to %passes step %c1](%mp = {M_INIT} : f32, %lp = {L_INIT} : f32, {", ".join(f"%ap{d} = %init : vector<8xf32>" for d in range(NF))}) -> (f32, f32, {", ".join(["vector<8xf32>"] * NF)}) {{
-{pass_range()}
-  %m_pass, %l_pass, {", ".join(f"%op{d}" for d in range(NF))} = scf.for %kt = [%c0 to %key_tiles step %c1](%m = %mp : f32, %l = %lp : f32, {", ".join(f"%a{d} = %ap{d} : vector<8xf32>" for d in range(NF))}) -> (f32, f32, {", ".join(["vector<8xf32>"] * NF)}) {{
-    %tile_first = index.madd %kt, %ckt, %key_low : index
+A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NF))} = scf.for %kt = [%c0 to %key_tiles step %c1](%m = {M_INIT} : f32, %l = {L_INIT} : f32, {acc}) -> (f32, f32, {", ".join(["vector<8xf32>"] * NF)}) {{
+{pass_range() if TS > 1 else ""}    %tile_first = index.madd {"%kt_in" if TS > 1 else "%kt"}, %ckt, %key_low : index
 ''')
 assert POW2 or KT == 32, "guarded staging is generated for 32-key tiles"
 for p in range(0 if POW2 else PASSES):   # non-power-of-two group: guarded staging passes
@@ -345,6 +418,9 @@ A(f'''    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     %tf32 = index.cast %tile_first : index to i32''')
 if Q_IN_LOOP:
     A("\n".join("  " + line for line in QLOAD.split("\n")))
+VALID = ("    %vw{kb} = vector.andi %causal{kb}, %winok{kb} : vector<8xi1>\n"
+         "    %valid{kb} = vector.andi %vw{kb}, %act_v : vector<8xi1>") if TS > 1 else \
+    "    %valid{kb} = vector.andi %causal{kb}, %winok{kb} : vector<8xi1>"
 for kb in range(KB):
     acc_name = "%init"
     for c in range(NF):
@@ -358,8 +434,7 @@ for kb in range(KB):
     %causal{kb} = vector.cmpi sle, %kpos{kb}, %qp_v : vector<8xi32> -> vector<8xi1>
     %inwin{kb} = vector.cmpi sge, %kpos{kb}, %low_v : vector<8xi32> -> vector<8xi1>
     %winok{kb} = vector.ori %inwin{kb}, %ns_v : vector<8xi1>
-    %vw{kb} = vector.andi %causal{kb}, %winok{kb} : vector<8xi1>
-    %valid{kb} = vector.andi %vw{kb}, %act_v : vector<8xi1>
+{VALID.format(kb=kb)}
     %masked{kb} = vector.select %valid{kb}, %sc{kb}, %neg_v : vector<8xf32>
     %lmax{kb} = vector.reduce<maxnumf> %masked{kb}, %neg_big : vector<8xf32>, f32''')
 A(LMAX + '''
@@ -401,10 +476,7 @@ for d in range(NF):
 A('''    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield %m_new, %l_new, ''' + ", ".join(f"%on{d}" for d in range(NF)) + " : f32, f32, " + ", ".join(["vector<8xf32>"] * NF) + '''
   }
-  scf.yield %m_pass, %l_pass, ''' + ", ".join(f"%op{d}" for d in range(NF)) + " : f32, f32, " + ", ".join(["vector<8xf32>"] * NF) + '''
-  }
-  scf.if %mine {
-  // O^T / l (lane-uniform), gate, and store through a transposed strided view:
+@@MINE@@  // O^T / l (lane-uniform), gate, and store through a transposed strided view:
   // element (dim row, token column) -> out[first_token + col, head*128 + row].
   %one_f = scalar.constant 1.0 : f32
   %inv_l = scalar.divf %one_f, %l_final : f32
@@ -427,8 +499,14 @@ for d in range(NF):
   %of{d} = vector.addf %ou{d}, %zero_v8 : vector<8xf32>"""
     A(f'''  %ou{d} = vector.mulf %o{d}, %inv_v : vector<8xf32>{gate_txt}
   vector.fragment.store<result> %of{d}, %out_view[{r}, %c0] shape [%c16, %c16] : vector<8xf32>, view<{D}x16xf32, %out_layout>''')
-A("  }\n  }\n  kernel.return\n}\n")
-text = "\n".join(U).replace("@@STAGING_SLOTS@@", staging_slots(), 1).replace("@@SUBTILES@@", subtiles(), 1)
+A("  }\n" * (2 if TS > 1 else 1) + "  kernel.return\n}\n")
+text = "\n".join(U).replace("@@STAGING_SLOTS@@", staging_slots(), 1)
+for key, value in {"@@LAUNCH@@": OLD_LAUNCH if TS == 1 else NEW_LAUNCH, "@@HEAD@@": OLD_HEAD if TS == 1 else NEW_HEAD,
+                   "@@TRUE_CONST@@": "  %true_const = scalar.constant true : i1\n" if TS == 1 else "",
+                   "@@MINE@@": "" if TS == 1 else "  scf.if %mine {\n"}.items():
+    text = text.replace(key, value, 1)
+if TS > 1:
+    text = text.replace("@@SUBTILES@@", subtiles(), 1).replace("@@KEY_TILES@@", key_tiles(), 1)
 # constants used above
 consts = "".join(f"  %d{c} = index.constant {c * 16} : index\n" for c in range(NF))
 consts += "".join(f"  %d{d * 16 if d else 0}r = index.constant {d * 16} : index\n" for d in range(NF))
