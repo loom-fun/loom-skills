@@ -211,17 +211,28 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
         return {"_suspect": "deferred: answered by llama_fill.py, then the gate re-runs", "_pending": True,
                 "content": "", "completion_probabilities": []}
     ensure_llama(url)
+    # llama_views: the prompt in micro-batches of `chunk` tokens, each extending the slot's cache (the first starts afresh)
+    chunk = body.get("_chunk")
+    req = {k: v for k, v in body.items() if k != "_chunk"}
+    n = len(req.get("prompt") or [])
     for attempt in range(2):
-        r = requests.post(url + "/completion", json=body, timeout=timeout).json()
-        # llama.cpp must have evaluated the whole prompt: fewer tokens means it answered from some
-        # cached state (seen: an old build answering the previous prompt). Retry once, never cache it.
+        r = None
+        for m in range(chunk, n, chunk) if chunk else ():
+            t = requests.post(url + "/completion", json=dict(req, prompt=req["prompt"][:m], n_probs=0, cache_prompt=m > chunk),
+                              timeout=timeout).json()
+            if (t.get("timings") or {}).get("prompt_n", 0) > chunk + 1:   # cached as the answer: no such view here
+                r = {"completion_probabilities": [], "note": "no micro-batch view: llama.cpp re-evaluates the prefix (SWA or recurrent state)"}
+                break
+        r = r or requests.post(url + "/completion", json=dict(req, cache_prompt=n > chunk) if chunk else req, timeout=timeout).json()
+        # llama.cpp must have evaluated the whole prompt (fewer tokens means it answered from some cached state;
+        # seen: an old build answering the previous prompt), or in micro-batches the last one. Retry once, never cache it.
         n_eval = (r.get("timings") or {}).get("prompt_n")
-        ok = n_eval is None or not isinstance(body.get("prompt"), list) or n_eval == len(body["prompt"])
+        ok = n_eval is None or not isinstance(req.get("prompt"), list) or (n_eval <= chunk if chunk else n_eval == n)
         if ok:
             break
-        print(f"[llama] WARNING: evaluated {n_eval} of {len(body['prompt'])} prompt tokens; retrying", flush=True)
+        print(f"[llama] WARNING: evaluated {n_eval} of {len(req['prompt'])} prompt tokens; retrying", flush=True)
     if not ok:
-        r["_suspect"] = f"llama.cpp evaluated {n_eval} of {len(body['prompt'])} prompt tokens"
+        r["_suspect"] = f"llama.cpp evaluated {n_eval} of {len(req['prompt'])} prompt tokens"
         return r
     if "completion_probabilities" in r or "tokens" in r:  # don't cache errors
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -247,18 +258,47 @@ def llama_greedy(url, ids, n_predict, pkg, salt="", n_probs=5):
     return r, gen, cp[:k]
 
 
-def near_tie(top, gold_id, loom_id, max_gap=1.0):
+def llama_views(url, ids, pkg):
+    """llama.cpp's own top-10 log-probs for the token after `ids` under two numerics it uses itself: `ids` in one
+    batch (its prefill kernels: MMQ matmuls) and in micro-batches of 8 through the slot's cache (its decode
+    kernels: MMVQ, another q8_1 dot-product formula and summation order). A view llama.cpp could not compute
+    (pending under LLAMA_DEFER, or no cache reuse: SWA or recurrent state) is left out."""
+    views = []
+    for chunk in (None, 8):
+        body = dict(GREEDY, prompt=list(ids), n_predict=1, n_probs=10)
+        if chunk:
+            body.update(_chunk=chunk, id_slot=0)
+        cp = llama_completion(url, body, pkg).get("completion_probabilities")
+        if cp:
+            views.append({t["id"]: t["logprob"] for t in cp[0]["top_logprobs"]})
+    return views
+
+
+def gap_spread(tops, gold_id, loom_id):
+    """How far logp(gold) - logp(loom) moves across llama.cpp's log-prob views of one position (0 for one view)."""
+    gaps = [v[gold_id] - v[loom_id] for v in tops if gold_id in v and loom_id in v]
+    return max(gaps) - min(gaps) if gaps else 0.0
+
+
+def near_tie(top, gold_id, loom_id, max_gap=1.0, views=()):
     """Is Loom's token at a divergence a near-tie of llama.cpp's greedy token? top: {id: logprob} from
-    llama.cpp at that position. Yes when the log-prob gap is <= max_gap, or when llama.cpp itself is
-    unsure there: Loom picked its second choice and its first has probability < 0.5 (flint: p 0.38 vs
-    0.13, gap 1.03, while llama.cpp's own re-recording of the same prompt sat at gap 1.05). A token
-    llama.cpp is confident against, or ranks lower, is a bug."""
+    llama.cpp at that position. Yes when the log-prob gap is <= max_gap plus llama.cpp's own rounding noise
+    there (the spread of the gap across top and `views`, llama_views), or when llama.cpp itself is unsure
+    there: Loom picked its second choice and its first has probability < 0.5 (flint: p 0.38 vs 0.13, gap
+    1.03, while llama.cpp's own re-recording of the same prompt sat at gap 1.05). A token llama.cpp is
+    confident against, or ranks lower, is a bug."""
     if gold_id not in top or loom_id not in top:
         return False
-    if top[gold_id] - top[loom_id] <= max_gap:
+    if top[gold_id] - top[loom_id] <= max_gap + gap_spread((top, *views), gold_id, loom_id):
         return True
     ranked = sorted(top, key=top.get, reverse=True)
     return ranked[:2] == [gold_id, loom_id] and math.exp(top[gold_id]) < 0.5
+
+
+def near_tie_at(url, ids, top, gold_id, loom_id, pkg, max_gap=1.0):
+    """near_tie for the token after `ids` (the prompt + llama.cpp's own tokens before the divergence); when the
+    plain rule rejects it and a llama.cpp URL is given, judged again with llama.cpp's noise there (llama_views)."""
+    return near_tie(top, gold_id, loom_id, max_gap) or bool(url) and near_tie(top, gold_id, loom_id, max_gap, llama_views(url, ids, pkg))
 
 
 def text_divergence(tok, loom_ids, gids):
