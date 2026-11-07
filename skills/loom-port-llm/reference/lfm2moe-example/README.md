@@ -14,6 +14,23 @@ Make a kit with `../apply_example.sh lfm2moe W/kit`.
 | `starter.patch` | `gen_llm.py`: wiring (layer kinds from the GGUF: `shortconv_layers`, attention layers), `GEMM_MIN_TOKENS` (head_dim 64 is in the starter now). `inspect_gguf.py`, `make_kernel_tests.py`: config extraction for `lfm2moe`, kernel tests for the short-conv and MoE chains (13/13) |
 | `cfg.json` | the reviewed config without the tensor table |
 
+**LFM3 (arch `lfm3`, LFM3-1.7B / LFM3-Omni-2B text) uses this kit too** (`examples.json` `archs`: port.sh applies it
+to an `lfm3` GGUF; the LFM2.5 reviewed config is never merged into one). What lfm3 adds over lfm2
+(llama.cpp `src/models/lfm3.cpp`), each behind a cfg key that `inspect_gguf.py` sets only for lfm3, so lfm2moe programs
+are byte-identical:
+
+| cfg key | What it is | Where |
+|---|---|---|
+| `shortconv.l_cache` 7 | a kernel-7 short conv (LFM2: 3) | `gen_sconv.py` is generic in K |
+| `post_norms`, `post_norm_eps` | sandwich norms (post_attention_norm, post_ffw_norm) at the model's rms eps | starter `g_post_add_norm` |
+| `attn_gate: "head"` | `attn_gate.weight` f32 [hidden, heads]: sigmoid(W h) scales each head's output | `g_head_gate` writes the logit over the head's dims; the combine / flash kernels apply the sigmoid as for a per-dim gate |
+| `sliding_layers`, `rope_theta_swa` | window-256 layers with their own rope base (`rope.freq_base_swa`) | `g_qk_rope_store`'s `%rope` flag is 2 on sliding layers |
+| `rope_freq_cut` | full-attention layers rotate only the first 32 of 64 rotary pairs (`rope_freqs.weight` 1 / 1e30) | `g_qk_rope_store` (`%rot{j}`) |
+
+Kernel tests: `qk_rope` (global, with the cut), `qk_rope_swa` (sliding base) and `head_gate`. The chat side: the
+template renders an empty `<think></think>` in assistant turns before the last user message (`chat_probe.py`
+`history_think_early: "empty"`, `build.py` `patch_history_think_early`).
+
 The chat side is in the starter: `chat_probe.py` derives LFM2's template (`{% generation %}` tags, a
 JSON-list tools block, pythonic tool calls `<|tool_call_start|>[f(a='x')]<|tool_call_end|>`), and
 `control.loom` parses those calls.

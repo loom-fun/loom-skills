@@ -350,6 +350,23 @@ def patch_no_tools(text):
     return text
 
 
+def patch_history_think_early(text):
+    """control.loom for templates that render an empty think block in the assistant turns before the last user
+    message (chat history_think_early "empty", LFM3): chat_message shows think_open + think_close there instead of
+    nothing, and the reasoning only after it. Other packages' control.loom is unchanged."""
+    for old, new in (("        %show = scalar.andi %wanted, %in_scope : i1\n",
+                      "        %show_scoped = scalar.andi %wanted, %in_scope : i1\n"
+                      "        %early_false = scalar.constant false : i1\n"
+                      "        %early = scalar.cmpi eq, %in_scope, %early_false : i1\n"
+                      "        %show = scalar.ori %show_scoped, %early : i1\n"),
+                     ("          %block = func.call @join4(%open, %thought, %close, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)\n",
+                      "          %shown_thought = scf.select %in_scope, %thought, %empty : buffer\n"
+                      "          %block = func.call @join4(%open, %shown_thought, %close, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)\n")):
+        assert text.count(old) == 1, (old, text.count(old))
+        text = text.replace(old, new)
+    return text
+
+
 def chat_variants(text):
     """A custom chat file's variants for what the template's derived chat block says: the lines between
     '// @@IF_CHAT:KEY@@' and '// @@END_CHAT@@' (or '// @@ELSE_CHAT@@', which starts the other branch) are kept
@@ -421,6 +438,8 @@ for name in ("prepare", "control", "storage", "service"):
         text = patch_reasoning_instructions(text)
     if name == "control" and chat["call_format"] == "none":
         text = patch_no_tools(text)
+    if name == "control" and chat.get("history_think_early") == "empty":
+        text = patch_history_think_early(text)
     if name == "control" and custom_chat:
         for fn in ("chat_begin", "chat_message", "chat_end", "render_tool", "parse_tools", "output_next", "complete_text"):
             text = text.replace(f"func.def public @{fn}(", f"func.def @generic_{fn}(")

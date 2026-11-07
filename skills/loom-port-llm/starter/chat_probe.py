@@ -273,6 +273,11 @@ def derive(template_text, bos="", eos=""):
                       {"role": "user", "content": "USERPROBE2"}])
     # Qwen-style templates drop reasoning from turns before the last user query.
     chat["history_think_scope"] = "all" if "REASONPROBE" in early else "after_last_query"
+    # LFM3-style templates replace it with an empty think block there (every assistant turn carries one).
+    if chat["history_think_scope"] == "after_last_query" and chat["think_open"] and \
+            between(early, "USERPROBE1", "ASSTPROBE1") == chat["suffix"] + chat["assistant_prefix"] + chat["think_open"] + chat["think_close"]:
+        chat["history_think_early"] = "empty"
+        notes.append("assistant turns before the last user message render an empty think block")
     think_marker = chat["think_open"].strip() or "<think>"
     thinks = any(think_marker in g for g in (g_default, g_on)) or bool(chat["think_open"])
     plain = g_off if g_off != g_on else g_default
@@ -460,6 +465,8 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
             thought = (m.get("reasoning_content") or "").strip()
             shown = chat["history_think_scope"] == "all" or i > last_query
             think = chat["think_open"] + thought + chat["think_close"] if shown and (thought or chat["history_think"] == "always") and chat["think_open"] else ""
+            if not shown and chat.get("history_think_early") == "empty":
+                think = chat["think_open"] + chat["think_close"]
             calls = render_calls(chat, m.get("tool_calls") or [])
             sep = chat["content_call_separator"] if text and calls else ""
             out += chat["assistant_prefix"] + think + text + sep + calls + chat["suffix"]
