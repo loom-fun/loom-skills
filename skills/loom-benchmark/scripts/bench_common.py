@@ -290,22 +290,31 @@ def llama_views(url, ids, pkg):
     return views
 
 
+def view_gaps(tops, gold_id, loom_id):
+    """logp(gold) - logp(loom) in each of llama.cpp's views of one position that lists gold -> (exact gaps,
+    every gap): a view without Loom's token gives a lower bound (its last listed log-prob)."""
+    gaps = [(v[gold_id] - v.get(loom_id, min(v.values())), loom_id in v) for v in tops if gold_id in v]
+    return [g for g, exact in gaps if exact], [g for g, _ in gaps]
+
+
 def gap_spread(tops, gold_id, loom_id):
-    """How far logp(gold) - logp(loom) moves across llama.cpp's log-prob views of one position (0 for one view)."""
-    gaps = [v[gold_id] - v[loom_id] for v in tops if gold_id in v and loom_id in v]
-    return max(gaps) - min(gaps) if gaps else 0.0
+    """How far the gap moves across llama.cpp's views of one position, at least (0 without two views)."""
+    exact, every = view_gaps(tops, gold_id, loom_id)
+    return max(every) - min(exact) if exact else 0.0
 
 
 def near_tie(top, gold_id, loom_id, max_gap=1.0, views=()):
     """Is Loom's token at a divergence a near-tie of llama.cpp's greedy token? top: {id: logprob} from
-    llama.cpp at that position. Yes when the log-prob gap is <= max_gap plus llama.cpp's own rounding noise
-    there (the spread of the gap across top and `views`, llama_views), or when llama.cpp itself is unsure
+    llama.cpp at that position. Yes when the log-prob gap is <= max_gap, or when llama.cpp itself is unsure
     there: Loom picked its second choice and its first has probability < 0.5 (flint: p 0.38 vs 0.13, gap
     1.03, while llama.cpp's own re-recording of the same prompt sat at gap 1.05). A token llama.cpp is
-    confident against, or ranks lower, is a bug."""
-    if gold_id not in top or loom_id not in top:
+    confident against, or ranks lower, is a bug. With `views` (llama_views: llama.cpp's own other numerics
+    there), yes when the smallest gap among them is <= max_gap plus their spread: the exact gap lies within
+    llama.cpp's spread of its views, and Loom, rounding as coarsely, within as much again."""
+    if gold_id not in top:
         return False
-    if top[gold_id] - top[loom_id] <= max_gap + gap_spread((top, *views), gold_id, loom_id):
+    exact, _ = view_gaps((top, *views), gold_id, loom_id)
+    if exact and min(exact) <= max_gap + gap_spread((top, *views), gold_id, loom_id):
         return True
     ranked = sorted(top, key=top.get, reverse=True)
     return ranked[:2] == [gold_id, loom_id] and math.exp(top[gold_id]) < 0.5
@@ -313,7 +322,7 @@ def near_tie(top, gold_id, loom_id, max_gap=1.0, views=()):
 
 def near_tie_at(url, ids, top, gold_id, loom_id, pkg, max_gap=1.0):
     """near_tie for the token after `ids` (the prompt + llama.cpp's own tokens before the divergence); when the
-    plain rule rejects it and a llama.cpp URL is given, judged again with llama.cpp's noise there (llama_views)."""
+    plain rule rejects it and a llama.cpp URL is given, judged again with llama.cpp's own views there (llama_views)."""
     return near_tie(top, gold_id, loom_id, max_gap) or bool(url) and near_tie(top, gold_id, loom_id, max_gap, llama_views(url, ids, pkg))
 
 

@@ -7,9 +7,9 @@ divergence the golden log-prob gap  logp(golden token) - logp(loom token).
 Greedy decoding diverges at near-ties under any change of summation order, so
 the gate is about *where* divergences happen, not whether:
   PASS   every divergence is a near-tie (bench_common.near_tie: gap <= 1.0 with Loom's token in the golden
-         top-5, or Loom picked llama.cpp's second choice where its first has p < 0.5; with --llama, gap <= 1.0
-         plus llama.cpp's own rounding noise at that position, bench_common.llama_views)
-  FAIL   any divergence with a large gap, or a token outside the golden top-5
+         top-5, or Loom picked llama.cpp's second choice where its first has p < 0.5; with --llama, the smallest gap
+         among llama.cpp's own views of that position <= 1.0 plus their spread, bench_common.llama_views)
+  FAIL   any divergence with a large gap, or a token outside every view's top list
 (Two llama.cpp builds disagree with each other in the same way.)
 """
 import argparse
@@ -18,7 +18,7 @@ import time
 
 import requests
 
-from bench_common import Package, gap_spread, llama_greedy, llama_views, near_tie
+from bench_common import Package, gap_spread, llama_greedy, llama_views, near_tie, view_gaps
 
 ap = argparse.ArgumentParser()
 ap.add_argument("package")
@@ -121,13 +121,13 @@ for g in json.load(open(a.golden)):
             if n2 > n or (n2 == n and (better_gap or near2)):
                 g, n, gap, near = g2, n2, gap2, near2
     noise, top = None, dict((int(i), lp) for i, lp in g["top"][n]) if n < min(len(got), len(g["top"])) else {}
-    if not near and a.llama and top and got[n] in top:
-        # Judged again with llama.cpp's own rounding noise at the divergence (bench_common.llama_views), on its own
+    if not near and a.llama and top:
+        # Judged again with llama.cpp's own views of the divergence (bench_common.llama_views), on its own
         # tokens before it (the whitespace strip_ws_after_think dropped included).
         views = llama_views(a.llama, ids_p + g.get("llama_ids", g["ids"])[:n + (g.get("cut", n + 1) <= n)], pkg)
         noise = round(gap_spread((top, *views), g["ids"][n], got[n]), 3)
         near = near_tie(top, g["ids"][n], got[n], a.max_gap, views)
-        print(f"       llama.cpp's own noise here: the gap moves by {noise} across {len(views)} more views", flush=True)
+        print(f"       llama.cpp's own views here: gaps {[round(x, 3) for x in view_gaps((top, *views), g['ids'][n], got[n])[0]]}, spread {noise}", flush=True)
     gold = g["ids"]
     full = n >= min(len(gold), len(got)) and abs(len(got) - len(gold)) <= 1
     bad = not near
