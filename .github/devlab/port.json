@@ -1,7 +1,47 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Campaign wave 5 (loom-org): the qwen35moe family derived from the Qwen3.6-35B-A3B card (#66: MoE in the starter), plus Qwen3-0.6B's perf re-run after #64.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "ornith-1-5-35b-a3b",
+   "spec": "bartowski/Ornith-1.5-35B-A3B-GGUF:Ornith-1.5-35B-A3B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "ornith-ai/Ornith-1.5-35B-A3B"
+  },
+  {
+   "name": "ornith-1-5-122b",
+   "spec": "bartowski/Ornith-1.5-122B-GGUF:Ornith-1.5-122B-Q4_K_M/Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf",
+   "reference": "auto",
+   "model_id": "ornith-ai/Ornith-1.5-122B"
+  },
+  {
+   "name": "sage-a1-5",
+   "spec": "InternScience/Sage-A1.5-Q4_K_M-GGUF:Sage-A1.5-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "InternScience/Sage-A1.5"
+  },
+  {
+   "name": "ornith-1-0-35b",
+   "spec": "lmstudio-community/Ornith-1.0-35B-GGUF:Ornith-1.0-35B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "ornith-ai/Ornith-1.0-35B"
+  },
+  {
+   "name": "minicpm-v-4-7-35b-a3b",
+   "spec": "bartowski/MiniCPM-V-4.7-35B-A3B-GGUF:MiniCPM-V-4.7-35B-A3B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "openbmb/MiniCPM-V-4.7-35B-A3B"
+  },
+  {
+   "name": "qwen3-5-35b-a3b",
+   "spec": "unsloth/Qwen3.5-35B-A3B-GGUF:Qwen3.5-35B-A3B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "Qwen/Qwen3.5-35B-A3B"
+  },
+  {
+   "name": "qwen3-0-6b",
+   "spec": "unsloth/Qwen3-0.6B-GGUF:Qwen3-0.6B-Q4_K_M.gguf",
+   "reference": "auto",
+   "model_id": "Qwen/Qwen3-0.6B"
+  }
  ]
 }
