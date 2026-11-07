@@ -40,4 +40,27 @@ for name, prev_prompt, out, verified, prompt, want in cases:
     got = template_rewrite(prev_prompt, out, verified, prompt)
     bad += got != want
     print(("ok  " if got == want else "FAIL"), name, "->", got)
+
+# Edits past the verified output, anchored on llama.cpp's own continuation at the edit (mocked here: what llama.cpp
+# would write after the previous prompt + the output up to offset k). The first token of the text after an edit is
+# its context (FIRST: "<channel|>" or "<tool_call|>" as one token).
+FIRST = lambda t: next((t[:len(s)] for s in ("<channel|>", "<tool_call|>", "<|tool_call>") if t.startswith(s)), t[:1])
+reference = lambda text: (lambda k, n: text[k:k + n])   # llama.cpp writes TEXT (the same output) from offset k on
+GEMMA = P + OUT.replace("<channel|>", "\n<channel|>") + RESP
+anchored = [
+    # Diverged before the close; llama.cpp, continuing Loom's reasoning, closes it with a bare <channel|> as Loom did:
+    # the "\n" is the template's.
+    ("anchored accept: bare close", OUT, at("plan2"), GEMMA, reference(OUT), True),
+    # Loom's rebuild says bare <channel|>, but llama.cpp at that point writes "\n<channel|>" (as Loom presumably did and
+    # the rebuild stripped): not excused.
+    ("anchored reject: reference writes the replacement", OUT, at("plan2"), GEMMA,
+     reference(OUT.replace("<channel|>", "\n<channel|>")), False),
+    # An unrelated insertion (a "\n" before the call's close) where llama.cpp writes something else there entirely.
+    ("anchored reject: unrelated insertion", OUT, at("plan2"), P + OUT.replace("<tool_call|>", "\n<tool_call|>") + RESP,
+     lambda k, n: "Let me think again."[:n], False),
+]
+for name, out, verified, prompt, cont, want in anchored:
+    got = template_rewrite(P, out, verified, prompt, cont, FIRST)
+    bad += got != want
+    print(("ok  " if got == want else "FAIL"), name, "->", got)
 sys.exit(1 if bad else 0)
