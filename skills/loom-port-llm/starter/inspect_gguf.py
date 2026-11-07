@@ -18,6 +18,12 @@ import formats  # noqa: E402
 
 path, out = sys.argv[1], sys.argv[2]
 r = gguf.GGUFReader(path)
+# A split GGUF (NAME-00001-of-0000N.gguf): metadata in the first part, tensors in every part
+_parts = formats.split_parts(path)
+_missing = [p for p in _parts if not os.path.exists(p)]
+if _missing:
+    sys.exit(f"split GGUF: missing parts next to {path}: {[os.path.basename(p) for p in _missing]}")
+ALL_TENSORS = list(r.tensors) + [t for p in _parts[1:] for t in gguf.GGUFReader(p).tensors]
 
 
 def field(key, default=None):
@@ -31,7 +37,7 @@ def field(key, default=None):
 arch = field("general.architecture")
 A = lambda k, d=None: field(f"{arch}.{k}", d)
 tensors = {}
-for t in r.tensors:
+for t in ALL_TENSORS:
     tensors[t.name] = {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]}
 H = A("embedding_length")
 heads = A("attention.head_count")
@@ -40,7 +46,7 @@ head_dim = A("attention.key_length") or H // heads
 BLOCKS = A("block_count")
 # Multi-token-prediction (NextN/MTP) blocks follow the trunk: blk.L.. carry nextn.* tensors.
 # They are not trunk layers; cfg["mtp"] lists them for the speculative-decoding drafter.
-_nextn = sorted({int(t.name.split(".")[1]) for t in r.tensors if ".nextn." in t.name})
+_nextn = sorted({int(t.name.split(".")[1]) for t in ALL_TENSORS if ".nextn." in t.name})
 L = BLOCKS - len(_nextn) if _nextn and _nextn[0] == BLOCKS - len(_nextn) else BLOCKS
 vocab = tensors["token_embd.weight"]["shape"][1]
 template = field("tokenizer.chat_template", "") or ""
@@ -113,7 +119,7 @@ if rope_dims and rope_dims != head_dim:
 if arch == "gemma4":
     import math
     shared = A("attention.shared_kv_layers", 0) or 0
-    freqs = next((t.data for t in r.tensors if t.name == "rope_freqs.weight"), None)
+    freqs = next((t.data for t in ALL_TENSORS if t.name == "rope_freqs.weight"), None)
     ple_dim = A("embedding_length_per_layer_input", 0) or 0
     cfg.update({
         "head_dim_swa": A("attention.key_length_swa"), "rope_theta_swa": A("rope.freq_base_swa"),

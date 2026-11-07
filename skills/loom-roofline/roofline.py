@@ -64,6 +64,11 @@ def load(path):
             continue
         meta[f.name] = v
     tensors = {t.name: (int(t.n_bytes), [int(x) for x in t.shape]) for t in r.tensors}
+    # A split GGUF (NAME-00001-of-0000N.gguf, parts side by side): the tensors of every part
+    m = re.search(r"-(\d{5})-of-(\d{5})\.gguf$", path)
+    for i in range(2, int(m.group(2)) + 1) if m else ():
+        part = gguf.GGUFReader(f"{path[:m.start()]}-{i:05d}-of-{m.group(2)}.gguf")
+        tensors.update({t.name: (int(t.n_bytes), [int(x) for x in t.shape]) for t in part.tensors})
     return meta, tensors
 
 

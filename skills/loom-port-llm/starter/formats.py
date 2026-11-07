@@ -17,3 +17,14 @@ LOWBIT = {"q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s"}
 ICODES = frozenset({"q8_0", "q4_k", "q5_k", "q6_k", "q5_0"})
 # GGUF tensor type names (gguf.GGMLQuantizationType, lower case) the kit decodes.
 DECODES = frozenset(FMT)
+
+
+def split_parts(path):
+    """The files of a split GGUF (llama.cpp gguf-split: NAME-00001-of-00003.gguf ...), given any one of them, in order;
+    [path] for a single-file GGUF. The parts sit side by side (port.sh links them all into WORKDIR/gguf)."""
+    import re
+    m = re.search(r"-(\d{5})-of-(\d{5})\.gguf$", path)
+    if not m:
+        return [path]
+    n = int(m.group(2))
+    return [f"{path[:m.start()]}-{i:05d}-of-{n:05d}.gguf" for i in range(1, n + 1)]

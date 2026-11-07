@@ -52,9 +52,14 @@ jobs:
       - name: "port: ${{ matrix.job }}"
         run: |
           set -uo pipefail
-          read -r spec ref sref mid < <(python3 -c "
+          read -r spec ref sref mid cap post envs < <(python3 -c "
           import json; j = next(j for j in json.load(open('.github/devlab/port.json'))['jobs'] if j['name'] == '${{ matrix.job }}')
-          print(j['spec'], j.get('reference') or 'auto', j.get('skills_ref') or '-', j.get('model_id') or '')")
+          print(j['spec'], j.get('reference') or 'auto', j.get('skills_ref') or '-', j.get('model_id') or '-', j.get('memory_cap_gib') or '-', j.get('post') or '-', ','.join(f'{k}={v}' for k, v in (j.get('env') or {}).items()) or '-')")
+          [ "$mid" = - ] && mid=""
+          # memory_cap_gib: the GPU memory budget build.py may use instead of 60 % of RAM (a model whose weights need more)
+          [ "$cap" != - ] && export LOOM_MEMORY_CAP_GIB=$cap
+          # env: {"NAME": "value", ...} exported for the port (e.g. SPEC=off, VISION=0: isolate a feature)
+          if [ "$envs" != - ]; then for kv in ${envs//,/ }; do export "$kv"; echo "env $kv"; done; fi
           D=$WORK/${{ matrix.job }}; rm -rf "$D"; mkdir -p "$D"
           SK=$GITHUB_WORKSPACE/skills
           if [ "$sref" != - ]; then
@@ -62,7 +67,12 @@ jobs:
             echo "skills from $sref ($(git log -1 --format=%h "$sref"))"
           fi
           echo "branch $(git rev-parse --short HEAD), skills ${sref}, reference=$ref" | tee "$D/job.txt"
-          SK=$SK REFERENCE=$ref LOOM_ROOT=$WORK/loom bash .github/scripts/port_e2e.sh "$spec" "$D" 8160 8130 $mid
+          rc=0; SK=$SK REFERENCE=$ref LOOM_ROOT=$WORK/loom bash .github/scripts/port_e2e.sh "$spec" "$D" 8160 8130 $mid || rc=$?
+          # post: a script (repo path) run after the port in its work dir, for diagnostics; its log goes into the artifact
+          if [ "$post" != - ]; then
+            W=$D/work OUT=$D/out SK=$SK LOOM_ROOT=$WORK/loom bash "$post" > "$D/out/post.log" 2>&1 || true; tail -60 "$D/out/post.log"
+          fi
+          exit $rc
       - name: upload results
         if: always()
         uses: actions/upload-artifact@v4
