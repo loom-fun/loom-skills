@@ -212,7 +212,10 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     prompt + completion (history reuse works, including recurrent state).
   - `calls_ok`: tool calls name a declared function with JSON arguments.
   - golden: Loom's turn vs llama.cpp `/completion` on the same prompt ids; a
-    divergence must be a near-tie (the compare rule). A turn that would fail is re-recorded on
+    divergence must be a near-tie (the compare rule). Loom's turn is its parsed reply re-tokenized, so
+    the comparison is on text: the same text split into other tokens (the model's `.\n` `\n` `\n` where
+    the tokenizer merges `.\n\n\n`) is no divergence (`bench_common.text_divergence`; it once read as
+    "llama.cpp ends at `<tool_call>`" because the 12-token windows end at different text). A turn that would fail is re-recorded on
     llama.cpp (up to twice) and scored against the recording Loom follows further (llama.cpp's
     run-to-run nondeterminism, above).
   "The model ended inside its reasoning" notes are a greedy-decoding behavior of
