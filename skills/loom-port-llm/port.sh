@@ -205,6 +205,27 @@ if [ -n "$vmm" ]; then   # vision kernels vs NumPy, then the whole encoder vs re
 fi
 
 step "6/6 smoke test"
+# DEBUG (temporary): which requests publish nothing, on a fresh server
+"$T" - "http://127.0.0.1:$port" <<'EOF' ; exit 7
+import json, sys, requests, concurrent.futures as cf
+url = sys.argv[1]; model = requests.get(url + "/v1/models", timeout=30).json()["data"][0]["id"]
+F = "What is the capital of France? Answer in one word."
+Y = "Write a Python function that returns the n-th Fibonacci number."
+def post(p, mt, **kw):
+    r = requests.post(url + "/v1/chat/completions", json={"model": model, "temperature": 0, "max_tokens": mt,
+                      "messages": [{"role": "user", "content": p}], **kw}, timeout=600).json()
+    c = r["choices"][0]; m = c["message"]
+    return f'{c["finish_reason"]} n={r["usage"]["completion_tokens"]} cached={r["usage"].get("prompt_tokens_details", {}).get("cached_tokens")} reasoning={(m.get("reasoning_content") or "")[:60]!r} content={(m.get("content") or "")[:40]!r}'
+seq = [("F", F, 64)] * 3 + [("Y", Y, 64)] * 2 + [("F", F, 64)] + [("Y", Y, 16)] + [("F", F, 600)] * 2 + [("hi", "Say hi.", 64)] * 2
+for tag, p, mt in seq:
+    print("SEQ", tag, mt, post(p, mt), flush=True)
+with cf.ThreadPoolExecutor(4) as ex:
+    rs = list(ex.map(lambda x: post(x[1], x[2]), [("F", F, 64), ("Y", Y, 64), ("F", F, 64), ("Y", Y, 64)]))
+for r in rs:
+    print("CONC", r, flush=True)
+for tag, p, mt in [("F", F, 64)] * 4:
+    print("SEQ2", tag, mt, post(p, mt), flush=True)
+EOF
 if [ -n "$vmm" ]; then   # one image: the component compiles, rows reach the text model, the answer is about the image
   "$T" - "$here/../loom-benchmark/scripts" "http://127.0.0.1:$port" <<'EOF' || exit 6
 import sys; sys.path.insert(0, sys.argv[1])
@@ -267,29 +288,6 @@ if [ $rc = 7 ]; then   # the model never thinks: thinking never (verified agains
   smoke; rc=$?
 fi
 [ $rc = 0 ] || exit 6
-# DEBUG (temporary): raw responses for a prompt that publishes nothing
-"$T" - "http://127.0.0.1:$port" "$model_id" <<'EOF' ; exit 7
-import json, sys, requests, concurrent.futures as cf
-url = sys.argv[1]; model = requests.get(url + "/v1/models", timeout=30).json()["data"][0]["id"]
-P = ["Write a Python function that returns the n-th Fibonacci number.", "What is the capital of France? Answer in one word.",
-     "Why is the sky blue? Keep it short."]
-def post(body):
-    return requests.post(url + "/v1/chat/completions", json={"model": model, "temperature": 0, **body}, timeout=600).json()
-for p in P:
-    for mt in (8, 64):
-        r = post({"messages": [{"role": "user", "content": p}], "max_tokens": mt})
-        print("NONSTREAM", mt, repr(p[:30]), json.dumps(r)[:1500], flush=True)
-    r = post({"messages": [{"role": "user", "content": p}], "max_tokens": 64, "logprobs": True, "top_logprobs": 2})
-    print("LOGPROBS", json.dumps(r)[:3000], flush=True)
-    with requests.post(url + "/v1/chat/completions", json={"model": model, "temperature": 0, "stream": True, "max_tokens": 64,
-                       "messages": [{"role": "user", "content": p}]}, stream=True, timeout=600) as s:
-        lines = [l.decode() for l in s.iter_lines() if l]
-    print("STREAM", len(lines), json.dumps(lines[:40])[:3000], flush=True)
-with cf.ThreadPoolExecutor(3) as ex:
-    rs = list(ex.map(lambda p: post({"messages": [{"role": "user", "content": p}], "max_tokens": 64}), P))
-for r in rs:
-    print("CONCURRENT", json.dumps(r)[:1500], flush=True)
-EOF
 # Speculative decoding must not change a single token: the same package with drafting off is the reference
 # (loom-benchmark/scripts/spec_check.py). One model is loaded at a time.
 draft=$("$T" -c "import json; print(json.load(open('pkg/llm_config.json')).get('draft') or {})" 2>/dev/null)
