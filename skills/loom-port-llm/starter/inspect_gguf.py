@@ -96,6 +96,31 @@ elif cfg["sliding_window"]:
 rope_dims = A("rope.dimension_count")
 if rope_dims and rope_dims != head_dim:
     cfg["rope_dims"] = rope_dims
+# Gemma 3n/4 geometry (reference/gemma4-example's gen_llm.py keys), from this GGUF: a reference package of another size
+# (find_reference.py apply fills keys inspect leaves out) has other KV-sharing, per-layer-embedding and rope values.
+if arch == "gemma4":
+    import math
+    shared = A("attention.shared_kv_layers", 0) or 0
+    freqs = next((t.data for t in r.tensors if t.name == "rope_freqs.weight"), None)
+    ple_dim = A("embedding_length_per_layer_input", 0) or 0
+    cfg.update({
+        "head_dim_swa": A("attention.key_length_swa"), "rope_theta_swa": A("rope.freq_base_swa"),
+        "rope_dims": rope_dims or head_dim, "rope_dims_swa": A("rope.dimension_count_swa"),
+        # global layers: only the rotary pairs whose rope_freqs factor is finite rotate (the rest are 1e30)
+        "rope_freq_cut": int((freqs < 1e29).sum()) if freqs is not None else None,
+        "kv_shared_from": L - shared if shared else None,
+        "post_norm_eps": cfg["rms_eps"], "ffn_act": "gelu", "v_norm": True, "attn_scale": 1.0,
+        "final_softcap": A("final_logit_softcapping"),
+        "ple": {"dim": ple_dim, "embd_scale": math.sqrt(ple_dim), "proj_scale": 1 / math.sqrt(H),
+                "combine_scale": 1 / math.sqrt(2)} if ple_dim and "per_layer_token_embd.weight" in tensors else None,
+        "layer_output_scale": "blk.0.layer_output_scale.weight" in tensors,
+    })
+    # What the example's kernels assume: one KV-head count for every layer, and a V projection on every KV-owning layer.
+    no_v = [i for i in range(min(L, cfg["kv_shared_from"] or L)) if f"blk.{i}.attn_v.weight" not in tensors]
+    if isinstance(kv, list) and len(set(kv)) > 1 or no_v:
+        print(f"WARNING: unsupported layout: per-layer KV heads {sorted(set(kv)) if isinstance(kv, list) else kv}"
+              f"{f', no attn_v (V = K) on layers {no_v[:4]}...' if no_v else ''}: gemma4-example's attention assumes "
+              "one KV-head count and an attn_v on every KV-owning layer; extend gen_llm.py (agent port)")
 # Hybrid models: gated delta-net (linear attention) layers carry recurrent state
 # instead of KV (llama.cpp qwen35/qwen3next: layer i is recurrent unless (i+1) % interval == 0).
 if A("ssm.inner_size"):

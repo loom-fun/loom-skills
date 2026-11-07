@@ -19,6 +19,7 @@ Make a kit for a Gemma-3n/4-family model with `../apply_example.sh gemma4 W/kit`
 The reviewed config (geometry, sliding/KV-sharing layers, chat block) is the published package's `llm_config.json`
 ([loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom](https://huggingface.co/loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom),
 category A, pinned in `../examples.json`); `apply_example.sh gemma4 KIT CFG` merges it.
+The model-specific geometry (KV-sharing start, per-layer embeddings, rope cut, SWA head_dim and theta, softcap) is read from each GGUF by the starter's `inspect_gguf.py`, so a Gemma 4 of another size (E2B, 12B) does not inherit this E4B port's values from the reference. Layouts these kernels don't cover (per-layer KV-head counts, global layers without `attn_v` as in the 12B/26B) stop at inspect with `WARNING: unsupported layout`.
 
 Lessons the agent paid for:
 - `llama_trace.py ... --grep '-0$|-23$|-24$'` (a sliding, a global and a KV-shared layer) gave the whole
