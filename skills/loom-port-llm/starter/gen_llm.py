@@ -3696,11 +3696,11 @@ kernel.def export("g_split_qkv") @g_split_qkv(%tokens: index) {{
 
 
 def gate_heads():
-    """g_gate_heads: a per-head gate logit (HEAD_GATE) broadcast over the head's D dims."""
+    """g_gate_heads: a per-head gate logit (HEAD_GATE) broadcast over the head's D dims (attn_gate_act softplus, laguna:
+    softplus(logit), which the combine / flash kernels multiply by as it is)."""
     return f"""
 // Per-head attention gate (cfg attn_gate "per_head", spark2_5): gate[t, h, d] = gh[t, h], the head's pre-sigmoid logit;
-// the attention combine / flash kernels then scale o[t, h, d] by sigmoid(gate[t, h, d]) as for an elementwise gate
-// (attn_gate_act softplus, laguna: gate[t, h, d] = softplus(gh[t, h]), which they multiply by as it is).
+// the attention combine / flash kernels then scale o[t, h, d] by sigmoid(gate[t, h, d]) as for an elementwise gate.
 kernel.def export("g_gate_heads") @g_gate_heads(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
