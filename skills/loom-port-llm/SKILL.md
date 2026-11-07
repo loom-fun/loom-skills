@@ -126,7 +126,8 @@ The expensive path. Keep it short:
    | channel chat formats (ATEM), norm RoPE, NoPE | `glimmer` |
 
    `../loom-optimize/reference/flint-moe-example/` holds one more MoE idea (bucketed grouped GEMM), not
-   a base. The starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls.
+   a base. The starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls, and tool
+   declarations printed as JSON or as XML elements (Qwen3-Coder: `chat.tools_format` `"xml"`).
 4. **Test every path that implements an op.** Attention runs in three kernels (decode split-K + combine,
    prefill `flash2`, the listed fallback for mixed tiles); a feature added to one (sinks, softcap, a gate,
    a window) must be added and unit-tested in all of them. A mismatch passes the goldens and shows up only
@@ -276,6 +277,11 @@ Kernel inventory:
 - loom-serve rejects `"reasoning_content": null` in a message: omit the field instead.
 - `usage.prompt_tokens` of a turn that reuses history is one lower than `/v1/chat/completions/input_tokens`
   (the previous turn's EOS is already in the row); compare renderings with `input_tokens`.
+- `input_tokens` above `chat_probe.simulate()` while the rendered text is right (a debug `@require(0, %prefixed)`
+  in chat_begin returns it as the error message) is loom-serve's tokenizer: it differs from HF tokenizers after
+  64 pre-tokenizer pieces when a later `Sequence` stage splits them further. build.py folds the one such shape seen
+  (a trailing `Digits` after a leading `\p{N}` Split) into an equivalent pre-tokenizer; check another with HF vs
+  loom-serve counts on a long text.
 
 ## cfg.json review checklist (step 2)
 

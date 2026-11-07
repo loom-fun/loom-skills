@@ -305,14 +305,17 @@ def derive(template_text, bos="", eos=""):
         chat["system_preamble"] = chat["system_prefix"][len(role_prefix):]
         chat["system_prefix"] = role_prefix
         notes.append(f"the system block is always printed and opens with {chat['system_preamble'][:60]!r}...")
-    lead = chat["system_prefix"] + chat.get("system_preamble", "")
-    if default and not (default.startswith(lead) and default.endswith(chat["suffix"])):
-        system_lead(T, chat, default, bos, kw0, notes)   # raises when it is not that shape either
-        bos = chat["bos"]
-    elif default:
-        chat["default_system"] = default[len(lead):len(default) - len(chat["suffix"])]
-        if chat["default_system"]:
-            notes.append(f"template inserts a default system prompt: {chat['default_system'][:60]!r}...")
+    if default:
+        lead = chat["system_prefix"] + chat.get("system_preamble", "")
+        if not (default.startswith(lead) and default.endswith(chat["suffix"])):
+            if "system_preamble" in chat:
+                raise ProbeError(f"default system block has an unexpected shape: {default!r}")
+            system_lead(T, chat, default, bos, kw0, notes)   # raises when it is not that shape either
+            bos = chat["bos"]
+        else:
+            chat["default_system"] = default[len(lead):len(default) - len(chat["suffix"])]
+            if chat["default_system"]:
+                notes.append(f"template inserts a default system prompt: {chat['default_system'][:60]!r}...")
     else:
         chat["default_system"] = ""
     if efforts and chat.get("system_lead"):
@@ -427,8 +430,12 @@ def derive(template_text, bos="", eos=""):
                 break
         if printed:
             break
+    if not printed and all(xml_tool(t) in t_plain for t in TOOLS):
+        # Tool declarations as XML elements (Qwen3-Coder: <function><name>..</name><parameters>..): tools_format "xml".
+        printed, chat["tools_function_only"], chat["tools_format"] = [xml_tool(t) for t in TOOLS], True, "xml"
+        notes.append("template declares tools as XML elements (tools_format xml)")
     if not printed:
-        raise ProbeError("tool definitions are not printed as JSON objects one per line; fill tools_* by hand")
+        raise ProbeError("tool definitions are not printed as JSON objects or XML elements one per line; fill tools_* by hand")
     first_tool = t_plain.index(printed[0])
     in_user = t_plain.rfind(chat["user_prefix"], 0, first_tool)
     if in_user >= 0 and chat["suffix"] not in t_plain[in_user + len(chat["user_prefix"]):first_tool]:
@@ -631,24 +638,23 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
     table = chat.get("reasoning_instructions") or {}
     instr = table.get(reasoning_effort, table.get(chat.get("reasoning_effort_default"), "")) if on else ""
     instructed = lambda b: instr + chat["reasoning_separator"] + b if instr and b else instr or b
-    seps = (",", ":") if chat.get("tools_compact") else None
-    lead = chat.get("system_lead", "")
     preamble = "system_preamble" in chat   # Llama 3: the system block is always printed, opening with fixed text
     in_user = bool(tools) and chat.get("tools_in_user", False)   # Llama 3: tools open the first user message
+    system_lead = chat.get("system_lead", "")   # the default prompt that always opens the first system block
     if tools:
-        printed = chat.get("tool_separator", "").join(
-            chat["tool_line_prefix"] + json.dumps(t["function"] if chat["tools_function_only"] else t, ensure_ascii=False,
-                                                  separators=seps, indent=chat.get("tools_indent"))
-            for t in tools)
+        seps = (",", ":") if chat.get("tools_compact") else None
+        declare = xml_tool if chat.get("tools_format") == "xml" else lambda t: json.dumps(
+            t["function"] if chat["tools_function_only"] else t, ensure_ascii=False, separators=seps, indent=chat.get("tools_indent"))
+        printed = chat.get("tool_separator", "").join(chat["tool_line_prefix"] + declare(t) for t in tools)
         tb = chat["tools_prefix"] + printed + chat["tools_suffix"]
-    if lead:   # the default prompt (+ effort instructions), the tools block, then the first system message
-        rest = (tb if tools else "") + ((chat["tools_system_separator"] if tools else chat["system_lead_separator"]) + body if body else "")
-        out += chat["system_prefix"] + lead + instr + rest + chat["suffix"]
-    elif preamble:
-        opening = chat["system_preamble_tools"] if tools else chat["system_preamble"]
-        out += chat["system_prefix"] + opening + body + chat["suffix"]
-    elif tools:
         sep = chat["tools_system_separator"] if body else ""
+    if preamble:
+        lead = chat["system_preamble_tools"] if tools else chat["system_preamble"]
+        out += chat["system_prefix"] + lead + body + chat["suffix"]
+    elif system_lead:   # the default prompt (+ effort instructions), the tools block, then the first system message
+        rest = (tb if tools else "") + ((chat["tools_system_separator"] if tools else chat["system_lead_separator"]) + body if body else "")
+        out += chat["system_prefix"] + system_lead + instr + rest + chat["suffix"]
+    elif tools:
         if not first_system and "default_system_tools" in chat:   # the template's tools-time default, separator included
             body, sep = chat["default_system_tools"], ""
         merged = body + sep + tb if chat["tools_after_system"] else tb + sep + body
@@ -663,7 +669,7 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
         role, text = m["role"], trim(m.get("content") or "")
         if prior == "tool" and role != "tool":
             out += chat["tool_turn_suffix"]
-        if role == "system" and i == 0 and (tools or instr or lead or preamble or folded) and first_system:
+        if role == "system" and i == 0 and (tools or instr or preamble or system_lead or folded) and first_system:
             pass
         elif folded and i == 1:
             out += chat["user_prefix"] + sys_text + chat["system_in_user"] + text + chat["suffix"]
@@ -725,6 +731,48 @@ def render_call(chat, call):
             + "".join(f"<arg_key>{k}</arg_key><arg_value>{val(v)}</arg_value>" for k, v in args.items()) + "</tool_call>")
 
 
+def xml_tool(tool):
+    """One tool declaration as Qwen3-Coder's template prints it (control.loom @xml_tool, chat.tools_format "xml"):
+    the function's name, trimmed description, each parameter's name, type, trimmed description and other keys,
+    then the parameters' and the function's other keys, each as <key>value</key>. A value is printed as Jinja's
+    `| string` (Loom prints the request's JSON text for containers and numbers: py_value), so a list-valued
+    parameter type prints as JSON where the template prints Python's repr."""
+    string = lambda v: v if isinstance(v, str) else py_value(v)
+    t = tool.get("function", tool)
+    extra = lambda d, handled: "".join(f"\n<{k}>{string(v)}</{k}>" for k, v in d.items() if k not in handled) \
+        if isinstance(d, dict) else ""
+    out = "<function>\n<name>" + string(t["name"]) + "</name>"
+    if "description" in t:
+        out += "\n<description>" + string(t["description"]).strip() + "</description>"
+    out += "\n<parameters>"
+    params = t.get("parameters")
+    if isinstance(params, dict) and isinstance(params.get("properties"), dict):
+        for name, fields in params["properties"].items():
+            out += "\n<parameter>\n<name>" + name + "</name>"
+            if isinstance(fields, dict) and "type" in fields:
+                out += "\n<type>" + string(fields["type"]) + "</type>"
+            if isinstance(fields, dict) and "description" in fields:
+                out += "\n<description>" + string(fields["description"]).strip() + "</description>"
+            out += extra(fields, ("name", "type", "description")) + "\n</parameter>"
+    out += extra(params, ("type", "properties")) + "\n</parameters>"
+    return out + extra(t, ("type", "name", "description", "parameters")) + "\n</function>"
+
+
+# Declarations with every key kind xml_tool models: no description, nested and list values, numbers, booleans, null,
+# a parameter without a type, parameters without properties, and keys beside the function's own.
+TYPED_TOOLS = [
+    {"type": "function", "function": {"name": "edit_file", "description": "  Edit a file.\n", "strict": True,
+     "parameters": {"type": "object", "properties": {
+         "path": {"type": "string", "description": " Absolute path. "},
+         "mode": {"type": "string", "enum": ["append", "replace"], "default": "replace"},
+         "lines": {"type": "array", "items": {"type": "integer", "minimum": 0}, "maxItems": 100},
+         "ratio": {"type": "number", "minimum": 0.5, "exclusiveMaximum": False, "nullable": None},
+         "anything": {"description": "No type."}},
+         "required": ["path"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "ping", "parameters": {"type": "object"}}},
+]
+
+
 def py_value(v):
     """LFM2 template's format_arg_value: quoted escaped strings, tojson containers, str() otherwise."""
     if isinstance(v, str):
@@ -763,6 +811,8 @@ def verify(template_text, chat, bos="", eos=""):
         [("typed arguments", [{"role": "user", "content": "Typed"}, calls_msg("", [TYPED_CALL]),
                               {"role": "tool", "tool_call_id": "call_0", "content": 'say "hi"\n\tback\\slash é'}], TOOLS)] \
         if chat["call_format"] == "json" else []
+    if chat.get("tools_format") == "xml":
+        extra.append(("typed tool declarations", [{"role": "user", "content": "Edit it"}], TYPED_TOOLS))
     for name, msgs, tools in CONVERSATIONS + extra:
         for kw in ({},) if chat["thinking"] != "toggle" else ({"enable_thinking": True}, {"enable_thinking": False}):
             label = name + (f" (enable_thinking={kw['enable_thinking']})" if kw else "")

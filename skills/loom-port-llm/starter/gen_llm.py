@@ -96,6 +96,7 @@ RD_SWA, THETA_SWA = CFG.get("rope_dims_swa") or RD, CFG.get("rope_theta_swa") or
 SWA_ROPE = bool(CFG.get("sliding_layers")) and (CFG.get("head_dim_swa") or D) == D and (RD_SWA, THETA_SWA) != (RD, THETA)
 assert not SWA_ROPE or (RD_SWA % 64 == 0 and RD_SWA <= D), "rope_dims_swa must be a multiple of 64"
 FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs)
+assert not (SWA_ROPE and FREQ_FACTORS), "rope_freq_factors with a sliding-layer RoPE: not modeled"
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
 
 from formats import FMT, SB, LOWBIT, ICODES as IQ_FMTS  # noqa: E402  bytes / values per block of each decoded format
@@ -1859,6 +1860,84 @@ def fuse_post_add_row_scale(program):
     return program, "".join(post_add_norm_rs(lv) for lv in sorted(used))
 
 
+# DeepStack (Qwen3-VL, cfg["vision"]["deepstack"] = n): an image row is n + 1 slices of H floats; g_embed takes slice 0,
+# and after trunk layer k < n, g_deepstack adds slice k + 1 to the residual of image inputs and renormalizes their h
+# (llama.cpp qwen3vl.cpp: deepstack_out = l_out + inp_embd[(k + 1) * n_embd ...]). Text inputs are untouched.
+DEEPSTACK = int((VISION or {}).get("deepstack") or 0)
+if DEEPSTACK:
+    NORMS += f"""
+// x[t] += feature slice %level of image input t; h[t] = rmsnorm(x[t]) * w_next (image inputs only).
+kernel.def export("g_deepstack") @g_deepstack(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %level_arg: index, %ids: buffer, %meta: buffer, %tinfo: buffer, %w: buffer, %x: buffer, %h: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %level = index.assume %level_arg [range(%level_arg, 1, {DEEPSTACK})] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %groups = index.constant {HG} : index
+  %zero_f = scalar.constant 0.0 : f32
+  %zero32 = vector.constant 0.0 : vector<32xf32>
+{ids_prelude()}{FEATURE_FLAG}  %active = index.cmp ult, %lane, %groups : index
+  %work = scalar.andi %active, %is_feat : i1
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
+  %sum_x = scf.if %work -> (vector<32xf32>) {{
+    %bl = index.assume %lane [range(%lane, 0, {HG - 1})] : index
+    %xv = vector.load %x_view[%token, %bl, %c0] : view<[%tokens]x{HG}x32xf32> -> vector<32xf32>
+    %fo_u = scalar.maxsi %feat_word, %mixed_zero : i32
+    %fo_i = index.cast %fo_u : i32 to index
+    %fo = index.scale %fo_i, %feat_one_byte : index, offset -> offset
+    %slice_bytes = index.constant {H * 4} : offset
+    %slice_at = index.scale %level, %slice_bytes : index, offset -> offset
+    %so = index.add %fo, %slice_at : offset
+    %fview = buffer.view %ids[%so] : buffer -> view<{HG}x32xf32>
+    %fv = vector.load %fview[%bl, %c0] : view<{HG}x32xf32> -> vector<32xf32>
+    %s = vector.addf %xv, %fv : vector<32xf32>
+    scf.yield %s : vector<32xf32>
+  }} else {{
+    scf.yield %zero32 : vector<32xf32>
+  }}
+  %squares = vector.mulf %sum_x, %sum_x : vector<32xf32>
+  %local = vector.reduce<addf> %squares, %zero_f : vector<32xf32>, f32
+  %sum = kernel.workgroup.reduce<addf> %local : f32
+  %count = scalar.constant {float(H)} : f32
+  %eps = scalar.constant {EPS} : f32
+  %mean = scalar.divf %sum, %count : f32
+  %stable = scalar.addf %mean, %eps : f32
+  %inverse = scalar.rsqrtf %stable : f32
+  %inverses = vector.splat %inverse : vector<32xf32>
+  scf.if %work {{
+    %bl = index.assume %lane [range(%lane, 0, {HG - 1})] : index
+    %h_view = buffer.view %h[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
+    %w_view = buffer.view %w[%zero] : buffer -> view<{HG}x32xf32>
+    vector.store %sum_x, %x_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{HG}x32xf32>
+    %weights = vector.load %w_view[%bl, %c0] : view<{HG}x32xf32> -> vector<32xf32>
+    %n2 = vector.mulf %sum_x, %inverses : vector<32xf32>
+    %hv = vector.mulf %n2, %weights : vector<32xf32>
+    vector.store %hv, %h_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{HG}x32xf32>
+  }}
+  kernel.return
+}}
+"""
+
+
+def deepstack_wiring(program):
+    """After the closing g_post_add_norm of trunk layers 0 .. DEEPSTACK-1 (it wrote x and h), launch g_deepstack."""
+    for i in range(DEEPSTACK):
+        a = re.search(rf"  // ---- layer {i}[ \n]", program).start(); b = re.search(rf"  // ---- layer {i + 1}[ \n]", program).start()
+        m = list(re.finditer(r"  kernel\.launch @g_post_add_norm\[%t\]\(%t, %y, %\w+, %x, (%\w+), %h\) : [^\n]*\n", program[a:b]))[-1]
+        at = a + m.end()
+        program = (program[:at] + f"  %ds_level_{i} = index.constant {i + 1} : index\n"
+                   f"  kernel.launch @g_deepstack[%t](%t, %ds_level_{i}, %tokens, %metadata, %info, {m.group(1)}, %x, %h) : [index](index, index, buffer, buffer, buffer, view<{H}xf32>, buffer, buffer)\n"
+                   + program[at:])
+    return program
+
+
 MROPE = CFG.get("mrope")   # {"sections": [t, h, w, e], "interleaved": bool}: Qwen-VL multi-axis RoPE (image input)
 
 
@@ -1964,31 +2043,33 @@ def freq_factor(j):
     return "\n".join(t)
 
 
-def qk_rope():
+def qk_rope(rd=None, theta=None, name="g_qk_rope_store"):
     """Per-head (optional) RMSNorm + RoPE for QH query and KVH key heads, with
     keys/values stored to the paged F16 KV planes: one 256-lane workgroup per
     token. Lane l of a wave owns D/32 of a head's dims: NeoX: l, l+32, ...
     with rotary pairs (d, d + RD/2) over the first RD (rope_dims) dims and the
     rest passed through; interleaved ("norm", D = 128 only): 4l..4l+3 with
-    pairs (0,1),(2,3). Each pair's angle is computed once for every head."""
+    pairs (0,1),(2,3). Each pair's angle is computed once for every head. rd / theta / name: another rotary
+    width, base and kernel name (sliding layers, qk_rope_swa)."""
+    rd, theta = rd or RD, theta or THETA
     n = DL
     if ROPE == "neox":
         dims = ["%lane"] + [f"%d{j}" for j in range(1, n)]
         dim_defs = "".join(f"  %d{j}c = index.constant {32 * j} : index\n  %d{j} = index.add %lane, %d{j}c : index\n" for j in range(1, n))
-        half = RD // 64  # pair offset in lanes-of-32 units
+        half = rd // 64  # pair offset in lanes-of-32 units
         freq_idx = [dims[j] for j in range(half)]
         pairs = [(j, j + half, j) for j in range(half)]
-        ln_scale = 2.0 * math.log(THETA) / RD   # angle = position * exp(-d * 2 ln(theta) / RD)
+        ln_scale = 2.0 * math.log(theta) / rd   # angle = position * exp(-d * 2 ln(theta) / RD)
     else:
-        assert D == 128 and RD == 128, "interleaved RoPE is implemented for head_dim 128"
+        assert D == 128 and rd == 128, "interleaved RoPE is implemented for head_dim 128"
         dims = ["%e0", "%e1", "%e2", "%e3"]
         dim_defs = "  %c1 = index.constant 1 : index\n  %e0 = index.mul %lane, %c4 : index\n  %e1 = index.add %e0, %c1 : index\n  %e2 = index.add %e0, %c2 : index\n  %e3 = index.add %e0, %c3 : index\n  %f0 = index.mul %lane, %c2 : index\n  %f1 = index.add %f0, %c1 : index\n"
         freq_idx = ["%f0", "%f1"]; pairs = [(0, 1, 0), (2, 3, 1)]
-        ln_scale = math.log(THETA) / 64.0
+        ln_scale = math.log(theta) / 64.0
     yt = ", ".join(["f32"] * n)
     xs = ", ".join(f"%x{i}" for i in range(n))
     t = [f"""
-kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {{
+kernel.def export("{name}") @{name}(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
   kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
@@ -3618,15 +3699,7 @@ def geglu_mul():
 
 def qk_rope_swa():
     """g_qk_rope_store_swa: g_qk_rope_store with the sliding layers' rotary dims and base (SWA_ROPE)."""
-    global RD, THETA
-    saved = RD, THETA
-    RD, THETA = RD_SWA, THETA_SWA
-    try:
-        text = qk_rope()
-    finally:
-        RD, THETA = saved
-    assert text.count('"g_qk_rope_store"') == 1 and text.count("@g_qk_rope_store(") == 1
-    return text.replace('"g_qk_rope_store"', '"g_qk_rope_store_swa"').replace("@g_qk_rope_store(", "@g_qk_rope_store_swa(")
+    return qk_rope(RD_SWA, THETA_SWA, "g_qk_rope_store_swa")
 
 
 SILU_MUL = r"""
@@ -4132,6 +4205,7 @@ if __name__ == "__main__":
     out_dir = os.environ.get("LLM_OUT") or os.path.join(here, "out")
     os.makedirs(out_dir, exist_ok=True)
     program, head_fmt = model()  # first: records the mv / GEMM variants it launches
+    program = deepstack_wiring(program) if DEEPSTACK else program
     program = last_out_select_program(program) if LAST_OUT else program
     spec_kernels = ""
     if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too

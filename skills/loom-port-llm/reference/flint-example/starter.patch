@@ -8,7 +8,7 @@
  POST_NORM = CFG.get("post_norms", False)
  POST_EPS = CFG.get("post_norm_eps", 1e-8)
  EMBED_NORM = CFG.get("embed_norm", False)
-@@ -2321,6 +2322,17 @@
+@@ -2402,6 +2403,17 @@
      %g = vector.load %gate_view[%token, %head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
      %sig = vector.logisticf<afn> %g : vector<4xf32>
      %result = vector.mulf %attended, %sig : vector<4xf32>""".replace("{QH}", str(QH)) if GATE else "    %result = vector.addf %attended, %zero4 : vector<4xf32>"
@@ -26,7 +26,7 @@
      text = f"""
  // Splits for `visible` keys: about 32 keys each, at most {S}.
  func.def inline @{P}_split_count(%visible: index) -> (index) {{
-@@ -2481,13 +2493,13 @@
+@@ -2562,13 +2574,13 @@
      %s_eff = func.call @{P}_split_count(%visible) : (index) -> (index)
      %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>
      %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
@@ -42,7 +42,7 @@
        %bs = index.assume %s [range(%s, 0, {S - 1})] : index
        %ms = view.load %ml_view[%token, %head, %bs, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
        %ls = view.load %ml_view[%token, %head, %bs, 1] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
-@@ -4006,7 +4018,7 @@
+@@ -4079,7 +4091,7 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -51,7 +51,7 @@
      attn_ordinal = {i: n for n, i in enumerate(j for j in range(L) if j not in RECUR)}
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
      def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
-@@ -4022,6 +4034,8 @@
+@@ -4095,6 +4107,8 @@
          if i not in MOE_LAYERS:
              T += [par("w_gate", "ffn_gate"), par("w_up", "ffn_up"), par("w_down", "ffn_down")]
          T += [par("ffn_norm", FFN_NORM, f"view<{H}xf32>")]
@@ -60,7 +60,7 @@
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
          elif QKV_FUSED:
-@@ -4066,16 +4080,18 @@
+@@ -4139,16 +4153,18 @@
          elif GATE and not FUSED_Q and i not in RECUR and not qg:
              T.append("  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wg_{i}", sz("attn_gate"), "%gate", "%nH", "%nQ", H) + "\n")
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
@@ -122,7 +122,7 @@
  unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -106,6 +106,34 @@
+@@ -143,6 +143,34 @@
    check.return
  }}
  """)
@@ -157,7 +157,7 @@
  # 2. matvec per (tensor) for t=1 and t=4 variants
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
-@@ -444,9 +472,14 @@
+@@ -477,9 +505,14 @@
  # the paged KV cache holds F16 K and V: with large biases (k up to |130|) their rounding moves the output past atol
  kr, vs = (a.astype(np.float16).astype(np.float32) for a in (kr, v + bv))
  att = np.zeros((t, QH, D))
@@ -173,7 +173,7 @@
  gh = rng.standard_normal((t, QH)).astype(np.float32)   # per-head gate logits (attn_gate "per_head")
  if gate_kind == "per_head":
      gate = np.repeat(gh[:, :, None], D, 2)
-@@ -457,7 +490,7 @@
+@@ -490,7 +523,7 @@
  info = np.zeros((t, 4), np.int32); info[:, 1] = pos; info[:, 2] = 1
  S = 64
  for n, a in [("a_q", q.reshape(t, -1)), ("a_k", k.reshape(t, -1)), ("a_v", v.reshape(t, -1)), ("a_g", gate.reshape(t, -1)),
@@ -182,7 +182,7 @@
      save(n, a)
  QD = QH * D
  split_text = ""
-@@ -490,17 +523,115 @@
+@@ -523,17 +556,115 @@
    %info = check.file.read.npy path("a_info.npy") : tensor<{t}x4xi32>
    %orig = check.file.read.npy path("a_orig.npy") : tensor<{10 + blocks}xi32>
    %eo = check.file.read.npy path("a_o.npy") : tensor<{t}x{QD}xf32>

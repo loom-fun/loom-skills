@@ -1,6 +1,6 @@
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -864,5 +864,206 @@
+@@ -914,5 +914,206 @@
          json.dump(chat, open(sys.argv[2], "w"), indent=1, ensure_ascii=False)
  
  
@@ -210,7 +210,7 @@
      main()
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -129,6 +129,29 @@
+@@ -166,6 +166,29 @@
          kern = f"g_mv_{fmt}_k{K}" + ("_t4" if tg == 4 else "")
          _R = pick_r(n, K, tg)   # the variant the model launches (gen_llm uses the same rule)
          if _R != 16: kern += f"_r{_R}"
