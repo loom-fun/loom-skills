@@ -1,0 +1,20 @@
+{
+  "gfx1151": {
+    "name": "AMD Ryzen AI Max+ 395 \"Strix Halo\" (gfx1151)",
+    "cu": 40,
+    "bw": 216000000000,
+    "flops": 59000000000000,
+    "layer_us": 35,
+    "pci_ids": ["1002:1586"],
+    "provenance": "the device every skill was developed and calibrated on; bw is the rate a streaming kernel reaches on LPDDR5X-8000 (256-bit), not the 256 GB/s datasheet figure"
+  },
+  "gfx1150": {
+    "name": "AMD Radeon 890M \"Strix Point\" (gfx1150)",
+    "cu": 16,
+    "bw": 70000000000,
+    "flops": 23600000000000,
+    "layer_us": 58,
+    "pci_ids": ["1002:150e"],
+    "provenance": "bw and layer_us fitted on a Strix Point laptop (2x DDR5-5600, 61 GiB RAM) over a 6-point context sweep of Qwen3-0.6B-Q4_K_M and Qwen3.5-0.8B-Q4_K_M with calibrate_device.py (RMS 4%); weights and KV read at the same rate within 2%. flops is 16/40 of the gfx1151 rate: same RDNA3.5 CU, 16 of them. It is corroborated rather than assumed - measured prefill reaches 0.21 of it here and 0.20 of the gfx1151 figure on the same model (reference/calibration.md)."
+  }
+}

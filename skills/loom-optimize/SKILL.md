@@ -41,7 +41,7 @@ choices are a starting point to re-measure on this model, never a result to copy
    `loom-roofline` target, measured in milliseconds per token of gap, not in
    percent.
 2. **Attribute by ablation.** Hardware counters are unavailable (`loom-benchmark`
-   counters are UNIMPLEMENTED on gfx1151). Instead, launch a kernel twice (or skip it)
+   counters are UNIMPLEMENTED on gfx1151 and gfx1150). Instead, launch a kernel twice (or skip it)
    and measure end to end: `${CLAUDE_SKILL_DIR}/ablate.py PKG pkg_abl '@attn_decode'`
    writes the copy with its own model id; serve both in one loom-serve and run
    `ab_perf.py URL <id> <id>-abl-<name>`. The delta is that kernel's cost. Wrong outputs
@@ -120,6 +120,12 @@ bench/llama_cache/` (a trial staged 5 GB of ktest/ and llama.cpp builds and `git
   noise: see the `loom` hard rules and `loom-benchmark`.
 
 ## Catalog: what worked (Strix Halo gfx1151, measured end to end)
+
+Every entry below was chosen at Halo's ridge point (273 FLOP/byte). On a part with less
+bandwidth per FLOP - Strix Point is 492 - the byte-cutting levers gain and the tile and
+chunk sizes (flash2s chunks, GEMM padding) are choices to re-derive, not to copy; the
+per-layer launch floor also costs relatively more, so fusion wins sooner. Read the catalog
+for the mechanism, measure the size.
 
 `reference/optimization-catalog.md` has each lever with its rationale and numbers. Decode (bandwidth-
 bound): multi-token matvec, adaptive rows per workgroup, Q4_K scale/min folding, fused QKV and paired-row

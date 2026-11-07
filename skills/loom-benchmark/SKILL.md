@@ -29,8 +29,11 @@ A weaker baseline inflates every margin you report. Report the chosen build's pa
 lemonade-sdk/llamacpp-rocm releases are pre-approved: download them without asking. Check that
 `llama-server --list-devices` shows `ROCm0` (`llamacpp_server.sh` does), because a build missing its
 libraries falls back to CPU silently; `llamacpp_server.sh` also adds lemonade's TheRock runtime libraries
-when a build needs them. Pick the zip that matches the GPU (`gfx1151` = Strix
-Halo). Then:
+when a build needs them. Pick the zip that matches the GPU: `fetch_llamacpp.sh` resolves it
+through `loom-roofline/device.py` (sysfs PCI id, then `rocminfo`, then `GFX=`/`LOOM_GFX`), and
+stops rather than guessing, because a build for another ISA aborts on load with
+`ROCm error: device kernel image is invalid` - a machine that installed Loom from the wheel
+has no `rocminfo` to ask. Then:
 ```bash
 LLAMACPP_DIR=<dir> $S/llamacpp_server.sh MODEL.gguf 8130 1 34000   # goldens / long context (1 slot, 34k)
 LLAMACPP_DIR=<dir> $S/llamacpp_server.sh MODEL.gguf 8130 4 8192    # perf incl. 4 streams

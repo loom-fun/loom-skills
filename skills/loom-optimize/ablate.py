@@ -9,8 +9,9 @@ usage: ablate.py PKG OUT_PKG REGEX [--skip] [--name NAME]
     ab_perf.py http://127.0.0.1:PORT <id> <id>-abl-<NAME> --metrics decode,prefill_2k
   Doubling: (B time - A time) per token = that kernel's cost. Skipping gives wrong output (fine for
   timing only; never ship it). Prints how many launches matched per file.
-  Caveat: a doubled launch re-reads its weights from the 32 MB MALL when one layer's tensor fits
-  there, so doubling UNDERestimates bandwidth-bound matvecs; use --skip for those (compute- or
+  Caveat: a doubled launch re-reads its weights from the last-level cache when one layer's
+  tensor fits there (32 MB MALL on gfx1151, 24 MB L3 on gfx1150), so doubling UNDERestimates
+  bandwidth-bound matvecs; use --skip for those (compute- or
   launch-bound kernels: either works).
   --skip can leave a weight unused (e.g. decode-only expert matvecs), and registration then fails
   ('stage parameter counts differ'): double those instead.

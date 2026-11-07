@@ -2,15 +2,20 @@
 # Download the latest lemonade-sdk/llamacpp-rocm release for this GPU (pre-approved source: no need
 # to ask the user). Idempotent: a release already unpacked is reused. Prints the build dir last.
 # usage: fetch_llamacpp.sh [DEST=~/llamacpp-rocm] [TAG=latest] [GFX=auto]
-#   GFX: gfx1151 (Strix Halo), gfx1150, ...; auto reads it from llama.cpp-visible ROCm (rocminfo) or
-#   defaults to gfx1151. OS asset: ubuntu (Linux) or windows (Git Bash).
+#   GFX: gfx1151 (Strix Halo), gfx1150 (Strix Point), ...; auto resolves the local GPU
+#   through loom-roofline/device.py (sysfs PCI id, then rocminfo) and stops if it cannot,
+#   because a build for another ISA dies at load with "device kernel image is invalid".
+#   OS asset: ubuntu (Linux) or windows (Git Bash).
 # Run by qualify.sh before pick_llamacpp.sh, so the newest build always competes with the installed
 # ones (a new model architecture usually needs a recent build: no installed build knew `flint`).
 set -eu
 dest=${1:-$HOME/llamacpp-rocm}; tag=${2:-latest}; gfx=${3:-auto}
 if [ "$gfx" = auto ]; then
-  gfx=$( (rocminfo 2>/dev/null || true) | grep -o "gfx11[0-9][0-9]" | head -1)
-  gfx=${gfx:-gfx1151}
+  # A machine that installed Loom from the wheel has no ROCm and therefore no rocminfo, so
+  # this cannot depend on rocminfo alone - and guessing another part's ISA is not a
+  # fallback, it is a build that aborts on the first model.
+  gfx=$("${PY:-python3}" "$(dirname "$0")/../../loom-roofline/device.py" --strict --get target 2>/dev/null) \
+    || { echo "cannot resolve this GPU's gfx target: add it to skills/loom-roofline/devices.json or pass GFX=gfx1150 (or set LOOM_GFX)" >&2; exit 1; }
 fi
 os=ubuntu; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) os=windows;; esac
 api=https://api.github.com/repos/lemonade-sdk/llamacpp-rocm/releases/$([ "$tag" = latest ] && echo latest || echo "tags/$tag")
