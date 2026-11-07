@@ -88,12 +88,31 @@ except Exception:
 print(" ".join(dict.fromkeys(out)))
 EOF
 )
-mkdir -p tok
+# Each candidate is checked against the GGUF's own vocabulary (check_tokenizer.py): a GGUF of an instruct model can
+# name its pretraining base (Qwen3-1.7B-Base), whose tokenizer.json lacks the chat tokens (<think>, <tool_response>),
+# and Loom then diverges from llama.cpp at the first generated token. The first consistent candidate wins; when none
+# is (a GGUF with control tokens no tokenizer.json lists, e.g. Qwen3.5's audio markers), the fewest mismatches, in
+# candidate order, among the first 4 found.
+mkdir -p tok; rm -rf tok/cand; best=""; bestn=""; firstn=""; tried=0
 for tr in $tokrepos; do
-  "$hf" download "$tr" tokenizer.json --local-dir tok >/dev/null 2>&1 && { echo "tokenizer from $tr"; break; }
+  [ $tried -ge 4 ] && break
+  d=tok/cand/$tried
+  "$hf" download "$tr" tokenizer.json --local-dir "$d" >/dev/null 2>&1 && [ -f "$d/tokenizer.json" ] || continue
+  tried=$((tried + 1))
+  n=$("$T" "$K/check_tokenizer.py" "$gguf" "$d/tokenizer.json" --quiet 2>/dev/null | sed -n 's/^MISMATCH //p')
+  [ -n "$n" ] || n=999999
+  echo "tokenizer candidate $tr: $n mismatches with the GGUF vocabulary"
+  [ "$tr" = "$(echo "$tokrepos" | cut -d' ' -f1)" ] && firstn=$n
+  if [ -z "$bestn" ] || [ "$n" -lt "$bestn" ]; then best=$tr; bestn=$n; cp "$d/tokenizer.json" tok/tokenizer.json; fi
+  [ "$n" = 0 ] && break
 done
+rm -rf tok/cand
 [ -f tok/tokenizer.json ] || { echo "no tokenizer.json found in: $tokrepos (download it from the base model into $work/tok)"; exit 2; }
-[ -n "$model_id" ] || model_id=$(echo "$tokrepos" | cut -d' ' -f1)
+echo "tokenizer from $best"
+[ "$bestn" = 0 ] || echo "WARNING: tokenizer.json from $best differs from the GGUF vocabulary in $bestn tokens ($T $K/check_tokenizer.py $gguf tok/tokenizer.json lists them)"
+# The model id is the first candidate (the GGUF's base model, else the card's), unless its tokenizer was rejected
+first=$(echo "$tokrepos" | cut -d' ' -f1); [ -n "$firstn" ] && [ "$firstn" -gt "$bestn" ] && first=$best
+[ -n "$model_id" ] || model_id=$first
 
 # A published, gate-passing port of the same architecture (or one sharing building blocks) is the starting point:
 # its kit (reference example), its reviewed config, its chat block and its measured drafting choice. Category A only.
