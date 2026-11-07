@@ -1,7 +1,6 @@
 {
- "_comment": "Temporary: the Ornith MoE compare/needle/agent cases with the near-tie noise bar (skills: the MoE fixes branch + this branch's loom-benchmark).",
+ "_comment": "Temporary: the gemma-4-26B agent case with the near-tie noise bar (skills: the gemma4 MoE branch + this branch).",
  "jobs": [
-  {"name": "ornith-1-5-35b-neartie", "spec": "bartowski/Ornith-1.5-35B-A3B-GGUF:Ornith-1.5-35B-A3B-Q4_K_M.gguf", "reference": "auto", "model_id": "ornith-ai/Ornith-1.5-35B-A3B", "skills_ref": "origin/neartie-eval-moe"},
-  {"name": "ornith-1-5-122b-neartie", "spec": "bartowski/Ornith-1.5-122B-GGUF:Ornith-1.5-122B-Q4_K_M/Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf", "reference": "auto", "model_id": "ornith-ai/Ornith-1.5-122B", "skills_ref": "origin/neartie-eval-moe", "env": {"LOOM_MEMORY_CAP_GIB": "96"}}
+  {"name": "gemma-4-26b-neartie", "spec": "lmstudio-community/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-Q4_K_M.gguf", "reference": "auto", "model_id": "google/gemma-4-26B-A4B-it", "skills_ref": "origin/neartie-eval-g26"}
  ]
 }
