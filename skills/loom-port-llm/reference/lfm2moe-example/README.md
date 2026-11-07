@@ -24,12 +24,11 @@ are byte-identical:
 | `shortconv.l_cache` 7 | a kernel-7 short conv (LFM2: 3) | `gen_sconv.py` is generic in K |
 | `post_norms`, `post_norm_eps` | sandwich norms (post_attention_norm, post_ffw_norm) at the model's rms eps | starter `g_post_add_norm` |
 | `attn_gate: "head"` | `attn_gate.weight` f32 [hidden, heads]: sigmoid(W h) scales each head's output | `g_head_gate` writes the logit over the head's dims; the combine / flash kernels apply the sigmoid as for a per-dim gate |
-| `sliding_layers`, `rope_theta_swa` | window-256 layers with their own rope base (`rope.freq_base_swa`) | `g_qk_rope_store`'s `%rope` flag is 2 on sliding layers |
-| `rope_freq_cut` | full-attention layers rotate only the first 32 of 64 rotary pairs (`rope_freqs.weight` 1 / 1e30) | `g_qk_rope_store` (`%rot{j}`) |
+| `sliding_layers`, `rope_theta_swa` | window-256 layers with their own rope base (`rope.freq_base_swa`) and no frequency factors | `g_qk_rope_store`'s `%rope` flag is 2 on sliding layers |
+| `rope_freq_factors` (starter) | full-attention layers: `rope_freqs.weight` 1 / 1e30, i.e. only the first 32 of 64 rotary pairs rotate | starter `freq_factor` |
 
-Kernel tests: `qk_rope` (global, with the cut), `qk_rope_swa` (sliding base) and `head_gate`. The chat side: the
-template renders an empty `<think></think>` in assistant turns before the last user message (`chat_probe.py`
-`history_think_early: "empty"`, `build.py` `patch_history_think_early`).
+Kernel tests: `qk_rope` (global, with the factors), `qk_rope_swa` (sliding base) and `head_gate`. The chat side (an
+empty `<think></think>` before the last user message) is the starter's `history_think_before`.
 
 The chat side is in the starter: `chat_probe.py` derives LFM2's template (`{% generation %}` tags, a
 JSON-list tools block, pythonic tool calls `<|tool_call_start|>[f(a='x')]<|tool_call_end|>`), and
