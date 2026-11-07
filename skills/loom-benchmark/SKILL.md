@@ -368,8 +368,10 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
    - `card/make_info.py gates bench/gates.json [ktest.out --time ...] --package PKG -o ev_gates.json` (also the
      spec gate's `acceptance N% of M proposals` from `gates_spec.log`);
    - `card/pull_devlab.py loom-fun/REPO --package DIR -o ev_devlab.json`: the latest nightly-gates run on AMD
-     DevLab Dispatch: gates of every finished level (job URL as evidence). DevLab measures correctness only: no
-     DevLab performance goes on a card. A perf session recorded with `--source-kind devlab` (a scripted DevLab
+     DevLab Dispatch: gates of every finished level (job URL as evidence), and the spec gate's acceptance from the
+     job's `gates_spec.log` as the card's `spec_acceptance`, stamped with the job's programs (a drafting statistic of
+     model, drafter and text, not a timing: it counts from any source). DevLab measures correctness only: no DevLab
+     speed goes on a card. A perf session recorded with `--source-kind devlab` (a scripted DevLab
      port) is flagged for a local re-measure (`card_lib.perf_flags` `devlab`; `loom-org` `remeasure`,
      `devlab-primary`);
    - `card/make_info.py roofline --package DIR -o ev_roofline.json` (tools venv; CPU only, reads the GGUF from the
