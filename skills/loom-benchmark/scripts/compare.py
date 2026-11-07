@@ -7,9 +7,12 @@ divergence the golden log-prob gap  logp(golden token) - logp(loom token).
 Greedy decoding diverges at near-ties under any change of summation order, so
 the gate is about *where* divergences happen, not whether:
   PASS   every divergence is a near-tie (bench_common.near_tie: gap <= 1.0 with Loom's token in the golden
-         top-5, or Loom picked llama.cpp's second choice where its first has p < 0.5)
-  FAIL   any divergence with a large gap, or a token outside the golden top-5
-(Two llama.cpp builds disagree with each other in the same way.)
+         top-5, or Loom picked llama.cpp's second choice where its first has p < 0.5; with --llama, the smallest gap
+         among llama.cpp's own views of that position <= 1.0 plus their spread capped at 0.5, or a view that
+         ranks Loom's token and not llama.cpp's; bench_common.llama_views)
+  FAIL   any divergence with a large gap, or a token outside every view's top list
+(Two llama.cpp builds disagree with each other in the same way.) A mild long-context RoPE error (base 5e5 vs
+1e6) is below this bar's resolution: llama.cpp's own views disagree that much there.
 """
 import argparse
 import json
@@ -17,7 +20,7 @@ import time
 
 import requests
 
-from bench_common import Package, near_tie
+from bench_common import Package, exact_gaps, gap_noise, llama_greedy, llama_views, near_tie
 
 ap = argparse.ArgumentParser()
 ap.add_argument("package")
@@ -41,14 +44,15 @@ THINK_END = pkg.tok.token_to_id(pkg.chat.get("think_end", "</think>"))
 def strip_ws_after_think(g):
     """Whitespace after </think> belongs to neither channel: depending on the chat format Loom's control program
     drops it or raw_from_chat re-adds it from think_close, so it is dropped on both sides (the golden's token and
-    its top-5 entry here; Loom's reconstructed ids at the call site) before matching."""
+    its top-5 entry here; Loom's reconstructed ids at the call site) before matching. llama.cpp's own ids stay in
+    llama_ids, with the dropped position in cut."""
     ids, top = list(g["ids"]), list(g["top"])
     for i in range(len(ids) - 1):
         if ids[i] == THINK_END and pkg.tok.decode([ids[i + 1]]).strip() == "":
             del ids[i + 1]
             if i + 1 < len(top):
                 del top[i + 1]
-            break
+            return dict(g, ids=ids, top=top, llama_ids=g["ids"], cut=i + 1)
     return dict(g, ids=ids, top=top)
 
 
@@ -106,9 +110,8 @@ for g in json.load(open(a.golden)):
         n2, gap2, near2 = match(got, alt[g["prompt"]])
         if n2 > n:
             g, n, gap, near = alt[g["prompt"]], n2, gap2, near2
+    ids_p = pkg.ids(pkg.render(g["prompt"]))
     if not near and a.llama and g["prompt"] not in alt:  # on-demand second recording of this prompt only
-        from bench_common import llama_greedy
-        ids_p = pkg.ids(pkg.render(g["prompt"]))
         r2, _, cp = llama_greedy(a.llama, ids_p, len(g["ids"]), pkg, "rec2")
         if "tokens" in r2:
             g2 = strip_ws_after_think({"prompt": g["prompt"], "prompt_tokens": len(ids_p), "ids": r2["tokens"],
@@ -119,11 +122,19 @@ for g in json.load(open(a.golden)):
             better_gap = isinstance(gap2, float) and (isinstance(gap, str) or gap2 < gap)
             if n2 > n or (n2 == n and (better_gap or near2)):
                 g, n, gap, near = g2, n2, gap2, near2
+    noise, top = None, dict((int(i), lp) for i, lp in g["top"][n]) if n < min(len(got), len(g["top"])) else {}
+    if not near and a.llama and top:
+        # Judged again with llama.cpp's own views of the divergence (bench_common.llama_views), on its own
+        # tokens before it (the whitespace strip_ws_after_think dropped included).
+        views = llama_views(a.llama, ids_p + g.get("llama_ids", g["ids"])[:n + (g.get("cut", n + 1) <= n)], pkg)
+        noise = round(gap_noise((top, *views), g["ids"][n], got[n]), 3)
+        near = near_tie(top, g["ids"][n], got[n], a.max_gap, views)
+        print(f"       llama.cpp's own views here: gaps {[round(x, 3) for x in exact_gaps((top, *views), g['ids'][n], got[n])]}, noise {noise}", flush=True)
     gold = g["ids"]
     full = n >= min(len(gold), len(got)) and abs(len(got) - len(gold)) <= 1
     bad = not near
     rows.append({"prompt": g["prompt"][:80], "prompt_tokens": g.get("prompt_tokens"), "golden_tokens": len(gold), "matched": n,
-                 "full_match": full, "divergence_gap": gap, "bad": bad, "seconds": round(time.perf_counter() - t0, 2), "loom_text": text[:160]})
+                 "full_match": full, "divergence_gap": gap, "noise": noise, "bad": bad, "seconds": round(time.perf_counter() - t0, 2), "loom_text": text[:160]})
     print(f"{g.get('prompt_tokens', 0):6d} {n:3d}/{len(gold):3d} gap={gap if not isinstance(gap, float) else round(gap, 3)} {'BAD ' if bad else ''}{g['prompt'][:50]!r}", flush=True)
 json.dump(rows, open(a.out, "w"), indent=1)
 gaps = [r["divergence_gap"] for r in rows if isinstance(r["divergence_gap"], float)]
