@@ -1,6 +1,8 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Validation of the MoE fixes (not for merge). Round 3: Sage with the MTP memory budget; the 122B drafting registration error isolated (DFlash2 on, the load-time Q4_0 propose head off); the 122B long-context diagnostics.",
  "jobs": [
-  {"name": "nanbeige-33b", "spec": "bartowski/Nanbeige_Nanbeige4.3-33B-GGUF:Nanbeige_Nanbeige4.3-33B-Q4_K_M.gguf", "reference": "auto", "model_id": "Nanbeige/Nanbeige4.3-33B"}
+  {"name": "sage-a1-5", "spec": "InternScience/Sage-A1.5-Q4_K_M-GGUF:Sage-A1.5-Q4_K_M.gguf", "reference": "auto", "model_id": "InternScience/Sage-A1.5"},
+  {"name": "ornith-1-5-122b-nophead", "spec": "bartowski/Ornith-1.5-122B-GGUF:Ornith-1.5-122B-Q4_K_M/Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf", "reference": "auto", "model_id": "ornith-ai/Ornith-1.5-122B", "memory_cap_gib": 96, "env": {"PROPOSE_HEAD": "off"}},
+  {"name": "ornith-1-5-122b-diag", "spec": "bartowski/Ornith-1.5-122B-GGUF:Ornith-1.5-122B-Q4_K_M/Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf", "reference": "auto", "model_id": "ornith-ai/Ornith-1.5-122B", "memory_cap_gib": 96, "env": {"SPEC": "off", "VISION": "0"}, "post": ".github/devlab/diag_122b.sh"}
  ]
 }
