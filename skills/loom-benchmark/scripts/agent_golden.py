@@ -19,7 +19,7 @@ import sys
 
 import requests
 
-from bench_common import Package, llama_greedy, near_tie, top_logprobs
+from bench_common import Package, llama_greedy, near_tie, text_divergence, top_logprobs
 
 TOOLS = [
     {"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city.",
@@ -55,19 +55,43 @@ def post(url, body, path="/v1/chat/completions"):
     return requests.post(url + path, data=data, timeout=1800, headers={"Content-Type": "application/json"}).json()
 
 
-def near_at(ids, tops, loom_ids, k):
-    """The compare rule (bench_common.near_tie) at divergence k; past the aligned top-5 lists (a
-    byte-split token) it counts as a near-tie, as in compare.py."""
-    return k >= len(tops) or near_tie(top_logprobs(tops, k), ids[k], loom_ids[k])
+def near_at(ids, tops, loom_id, k):
+    """The compare rule (bench_common.near_tie) at divergence k (Loom's token there: loom_id); past the
+    aligned top-5 lists (a byte-split token) it counts as a near-tie, as in compare.py."""
+    return k >= len(tops) or near_tie(top_logprobs(tops, k), ids[k], loom_id)
 
 
-def gap_at(ids, tops, loom_ids, k):
+def gap_at(ids, tops, loom_id, k):
     """logp(golden) - logp(loom) at divergence k; 0.0 past the aligned top-5 lists (a byte-split token,
     counted as a near-tie as in compare.py); None when Loom's token is outside the top-5."""
     if k >= len(tops):
         return 0.0
     top = top_logprobs(tops, k)
-    return top[ids[k]] - top[loom_ids[k]] if loom_ids[k] in top else None
+    return top[ids[k]] - top[loom_id] if loom_id in top else None
+
+
+def call_whitespace(P, raw, gids, d):
+    """Parsed tool calls do not keep the whitespace the model wrote between or after them (the rebuild
+    prints call_separator), so any whitespace there is consistent with Loom's reply. At a divergence inside
+    the calls that is whitespace on either side, take the golden's whitespace and compare on (only while
+    that moves the divergence later). -> (raw, divergence)"""
+    marker = P.chat.get("call_marker") or ""
+    start = raw.find(marker) if marker else -1
+    for _ in range(16):
+        if d is None or start < 0 or not raw.endswith(d[2]):
+            break
+        k, _, rest = d
+        pos = len(raw) - len(rest)
+        gold = P.tok.decode(gids[k:], skip_special_tokens=False)
+        gws, lws = gold[:len(gold) - len(gold.lstrip())], rest[:len(rest) - len(rest.lstrip())]
+        if pos < start or not (gws or lws):
+            break
+        alt = raw[:pos] + gws + rest[len(lws):]
+        da = text_divergence(P.tok, P.ids(alt), gids)
+        if da is not None and da[0] <= k:
+            break
+        raw, d = alt, da
+    return raw, d
 
 
 def main():
@@ -130,47 +154,64 @@ def main():
                 except ValueError:
                     calls_ok = False
             rec["calls_ok"] = calls_ok
+            raw = None   # the rebuilt output, completed from the golden where the reply can't tell (below)
             if a.llama:
                 raw = P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
                 loom_ids = P.ids(raw)
                 g, gids, gtops = llama_greedy(a.llama, ids, max(1, u["completion_tokens"]), P)
-                k = next((i for i, (x, y) in enumerate(zip(loom_ids, gids)) if x != y), None)
+                # The same text split into other tokens is no divergence (bench_common.text_divergence).
+                d = text_divergence(P.tok, loom_ids, gids)
                 import chat_probe as _cp
-                if k is not None and hasattr(_cp, "raw_alternatives"):
+                finished = ch["finish_reason"] in ("stop", "tool_calls")
+                alts = []
+                if hasattr(_cp, "raw_alternatives"):
                     # A kit whose channel format is ambiguous in the parsed message (Glimmer: an optional
-                    # <|eom|> before the answer header) lists every raw text consistent with it: use the
-                    # one that agrees longest with the golden.
-                    for alt in _cp.raw_alternatives(P.chat, m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)[1:]:
+                    # <|eom|> before the answer header) lists every raw text consistent with it.
+                    alts = _cp.raw_alternatives(P.chat, m, finished, thinking, prompt)[1:]
+                if finished and not (m.get("content") or m.get("tool_calls")):
+                    # Nothing after the reasoning: the model either closed it and stopped, or stopped inside it
+                    # (EOS before the think close; small thinking models do under greedy). The parsed message
+                    # can't tell, so the unclosed rebuild is an alternative too.
+                    alts.append(P.raw_from_chat(m, False, thinking, prompt))
+                if d is not None:
+                    # Use the rebuild that agrees longest with the golden.
+                    for alt in alts:
                         aids = P.ids(alt)
-                        ka = next((i for i, (x, y) in enumerate(zip(aids, gids)) if x != y), None)
-                        if ka is None or ka > k:
-                            loom_ids, k = aids, ka
-                rec["golden_match"] = k is None
-                if k is not None:
-                    gap = gap_at(gids, gtops, loom_ids, k)
+                        da = text_divergence(P.tok, aids, gids)
+                        if da is None or da[0] > d[0]:
+                            raw, loom_ids, d = alt, aids, da
+                            if d is None:
+                                break
+                raw, d = call_whitespace(P, raw, gids, d)
+                loom_ids = P.ids(raw)
+                rec["golden_match"] = d is None
+                if d is not None:
+                    k, loom_id, loom_rest = d
+                    gap = gap_at(gids, gtops, loom_id, k)
                     top = {t["id"]: t["logprob"] for t in gtops[k]["top_logprobs"]} if k < len(gtops) else {}
                     # llama.cpp ROCm is not run-to-run deterministic on some models (flint: identical
                     # temperature-0 requests gave different greedy text): as compare.py does, re-record a
                     # turn that would fail and score against the recording Loom follows further.
                     for salt in ("rec2", "rec3"):
-                        if near_at(gids, gtops, loom_ids, k):
+                        if near_at(gids, gtops, loom_id, k):
                             break
                         _, gids2, cp2 = llama_greedy(a.llama, ids, max(1, u["completion_tokens"]), P, salt)
-                        k2 = next((i for i, (x, y) in enumerate(zip(loom_ids, gids2)) if x != y), None)
-                        rec.setdefault("rerecorded", []).append(k2)
-                        if k2 is None:
+                        d2 = text_divergence(P.tok, loom_ids, gids2)
+                        rec.setdefault("rerecorded", []).append(d2 and d2[0])
+                        if d2 is None:
                             k, gap, gids = None, None, gids2
                             break
-                        if k2 > k:
-                            k, gids, gtops = k2, gids2, cp2
-                            gap = gap_at(gids, gtops, loom_ids, k)
+                        if d2[0] > k:
+                            (k, loom_id, loom_rest), gids, gtops = d2, gids2, cp2
+                            gap = gap_at(gids, gtops, loom_id, k)
                             top = {t["id"]: t["logprob"] for t in gtops[k]["top_logprobs"]} if k < len(gtops) else {}
                     if k is None:
                         rec["golden_match"] = True
-                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=k is None or near_at(gids, gtops, loom_ids, k))
+                    rec.update(diverge_at=k, of=len(gids), gap=gap, near_tie=k is None or near_at(gids, gtops, loom_id, k))
                     if not rec["near_tie"]:
-                        print("     at the divergence: loom", repr(P.tok.decode(loom_ids[max(0, k - 8):k + 4], skip_special_tokens=False)),
-                              "| llama", repr(P.tok.decode(gids[max(0, k - 8):k + 4], skip_special_tokens=False)),
+                        agreed = P.tok.decode(gids[max(0, k - 8):k], skip_special_tokens=False)
+                        print("     at the divergence: loom", repr(agreed + loom_rest[:24]),
+                              "| llama", repr(agreed + P.tok.decode(gids[k:k + 4], skip_special_tokens=False)),
                               "| top", [(P.tok.id_to_token(t), round(v, 2)) for t, v in top.items()], flush=True)
             golden_ok = rec.get("golden_match", True) or rec.get("near_tie", False)
             ok = rec["render_ok"] and rec["reuse_ok"] and rec["calls_ok"] and golden_ok
@@ -181,7 +222,9 @@ def main():
                       " small thinking models do this - compare llama.cpp's choice at that point, not a Loom bug by itself")
             turns.append(rec)
             prev_total = u["prompt_tokens"] + u["completion_tokens"]
-            prev_text = prompt + P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
+            # The history this turn leaves: its output as the golden comparison settled it (e.g. the model's own
+            # whitespace between calls, which the template may re-render), else the plain rebuild.
+            prev_text = prompt + (raw if raw is not None else P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt))
             # loom-serve rejects "reasoning_content": null, so only send it when present.
             msgs.append({"role": "assistant", "content": m.get("content") or "",
                          **({"reasoning_content": m["reasoning_content"]} if m.get("reasoning_content") else {}),
