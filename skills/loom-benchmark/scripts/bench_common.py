@@ -211,28 +211,21 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
         return {"_suspect": "deferred: answered by llama_fill.py, then the gate re-runs", "_pending": True,
                 "content": "", "completion_probabilities": []}
     ensure_llama(url)
-    # llama_views: the prompt in micro-batches of `chunk` tokens, each extending the slot's cache (the first starts afresh)
-    chunk = body.get("_chunk")
-    req = {k: v for k, v in body.items() if k != "_chunk"}
-    n = len(req.get("prompt") or [])
+    mb = body.get("_micro_batch")   # llama_views: the prompt in micro-batches of at most mb tokens
     for attempt in range(2):
-        r = None
-        for m in range(chunk, n, chunk) if chunk else ():
-            t = requests.post(url + "/completion", json=dict(req, prompt=req["prompt"][:m], n_probs=0, cache_prompt=m > chunk),
-                              timeout=timeout).json()
-            if (t.get("timings") or {}).get("prompt_n", 0) > chunk + 1:   # cached as the answer: no such view here
-                r = {"completion_probabilities": [], "note": "no micro-batch view: llama.cpp re-evaluates the prefix (SWA or recurrent state)"}
-                break
-        r = r or requests.post(url + "/completion", json=dict(req, cache_prompt=n > chunk) if chunk else req, timeout=timeout).json()
-        # llama.cpp must have evaluated the whole prompt (fewer tokens means it answered from some cached state;
-        # seen: an old build answering the previous prompt), or in micro-batches the last one. Retry once, never cache it.
+        if mb:
+            r, ok = _micro_batched(url, {k: v for k, v in body.items() if k != "_micro_batch"}, mb, timeout), True
+            break
+        r = requests.post(url + "/completion", json=body, timeout=timeout).json()
+        # llama.cpp must have evaluated the whole prompt: fewer tokens means it answered from some
+        # cached state (seen: an old build answering the previous prompt). Retry once, never cache it.
         n_eval = (r.get("timings") or {}).get("prompt_n")
-        ok = n_eval is None or not isinstance(req.get("prompt"), list) or (n_eval <= chunk if chunk else n_eval == n)
+        ok = n_eval is None or not isinstance(body.get("prompt"), list) or n_eval == len(body["prompt"])
         if ok:
             break
-        print(f"[llama] WARNING: evaluated {n_eval} of {len(req['prompt'])} prompt tokens; retrying", flush=True)
+        print(f"[llama] WARNING: evaluated {n_eval} of {len(body['prompt'])} prompt tokens; retrying", flush=True)
     if not ok:
-        r["_suspect"] = f"llama.cpp evaluated {n_eval} of {len(req['prompt'])} prompt tokens"
+        r["_suspect"] = f"llama.cpp evaluated {n_eval} of {len(body['prompt'])} prompt tokens"
         return r
     if "completion_probabilities" in r or "tokens" in r:  # don't cache errors
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -240,6 +233,29 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
         json.dump(r, open(tmp, "w"))
         os.replace(tmp, path)
     return r
+
+
+def _micro_batched(url, req, mb, timeout):
+    """Answer /completion `req` with its prompt evaluated in micro-batches of at most mb tokens, each request
+    extending the slot's cache (the first starts afresh). A server that rolls back to a context checkpoint
+    before extending (SWA layers) re-evaluates a fixed few tokens more per request, so the step shrinks by
+    that and the prompt starts over; when no step keeps every batch within mb (recurrent state: the whole
+    prefix each time), the answer is an empty view."""
+    p, step = req["prompt"], mb
+    while step >= 1:
+        m = 0
+        while m < len(p):
+            m2 = min(m + step if m else mb, len(p))
+            last = {} if m2 == len(p) else {"n_probs": 0}
+            r = requests.post(url + "/completion", json=dict(req, prompt=p[:m2], cache_prompt=m > 0, **last), timeout=timeout).json()
+            e = (r.get("timings") or {}).get("prompt_n", 0)
+            if e > mb:
+                break
+            m = m2
+        else:
+            return r
+        step -= e - mb
+    return {"completion_probabilities": [], "note": f"no micro-batch view: llama.cpp re-evaluates more than {mb} tokens per request"}
 
 
 # Every llama.cpp reference is greedy with the samplers forced off: some GGUFs set penalty_repeat
@@ -267,7 +283,7 @@ def llama_views(url, ids, pkg):
     for chunk in (None, 8):
         body = dict(GREEDY, prompt=list(ids), n_predict=1, n_probs=10)
         if chunk:
-            body.update(_chunk=chunk, id_slot=0)
+            body.update(_micro_batch=chunk, id_slot=0)
         cp = llama_completion(url, body, pkg).get("completion_probabilities")
         if cp:
             views.append({t["id"]: t["logprob"] for t in cp[0]["top_logprobs"]})

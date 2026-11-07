@@ -162,7 +162,7 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     through everywhere; the measured noise widens the bar only where llama.cpp disagrees with itself.
     Only the first divergence of a prompt (turn, probe) is judged, as before. compare.py, agent_golden.py,
     needle.py and spec_check.py use it (`near_tie_at`); vision_golden.py (image prompts) does not. No
-    micro-batch view where llama.cpp cannot extend its cache (SWA past the window, recurrent state).
+    micro-batch view where llama.cpp cannot extend its cache in small steps (recurrent state).
   - **FAIL**: a large gap, or a token outside the top-5. That is a real bug, even
     if the text reads fine.
   - Two llama.cpp builds (Vulkan vs ROCm) disagree with each other in the same
