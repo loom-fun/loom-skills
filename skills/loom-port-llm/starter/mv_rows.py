@@ -60,11 +60,12 @@ def flash2_deep_from(cfg):
     uniform tiles of one row) for G = 3 or 4 query heads per KV head at head_dim <= 128 (one tile by default there);
     0 = never. Shared with make_kernel_tests.py (which tests both kernels the program launches). Each staged K/V tile
     then serves twice the queries: deep prefill is bandwidth-bound on the KV cache (Qwen3-4B, G = 4, a 131k prompt:
-    2152 s with one tile, 530 s with two), while shallower tiles keep one (two lost 3-16 % at 1k-32k, G = 3 / 4).
+    2152 s with one tile, 530 s with two; 64k: 320 vs 136 s; 32k: 41 vs 38 s), while shallower tiles keep one (16k:
+    11.3 vs 11.9 s; two lost 3-16 % at 1k-32k prompts at G = 3 / 4).
     FLASH2_TS_DEPTH overrides (0: off); FLASH2_TS forces one kernel."""
     v = os.environ.get("FLASH2_TS_DEPTH")
     if v:
         return int(v)
     G = cfg["heads"] // cfg["kv_heads"]
     deep = cfg["head_dim"] <= 128 and G in (3, 4) and not cfg.get("attn_sinks") and not os.environ.get("FLASH2_TS")
-    return 32768 if deep else 0
+    return 16384 if deep else 0
