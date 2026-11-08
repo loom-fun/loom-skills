@@ -1,107 +1,35 @@
 {
- "_comment": "Temporary: prefill A/B of this branch on the three hybrid MoE cards.",
- "card": "loom-fun/InternScience-Sage-A1.5-loom",
- "memory_bytes": 41000000000,
- "kit": null,
- "llamacpp": "b1369",
+ "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
+ "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+ "memory_bytes": 34000000000,
+ "kit": "gemma4",
+ "llamacpp": "b1368",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
  "jobs": [
   {
-   "name": "sage",
-   "card": "loom-fun/InternScience-Sage-A1.5-loom",
-   "memory_bytes": 41000000000,
+   "name": "tm-off",
+   "thinking": "off",
    "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
     {
      "name": "new",
      "build": {}
-    },
-    {
-     "name": "np",
-     "build": {
-      "MOE_SKIP_EMPTY": "0",
-      "MOE_PREFETCH": "0"
-     }
     }
    ],
    "steps": [
-    "perf:main:1",
-    "perf:new:1",
-    "perf:np:1",
-    "perf:main:1",
-    "perf:new:1",
-    "perf:np:1",
-    "ktest:new",
-    "gates:new:dev"
+    "textmatch:new"
    ]
   },
   {
-   "name": "ornith",
-   "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
-   "memory_bytes": 36000000000,
+   "name": "tm-on",
+   "thinking": "on",
    "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
     {
      "name": "new",
      "build": {}
-    },
-    {
-     "name": "np",
-     "build": {
-      "MOE_SKIP_EMPTY": "0",
-      "MOE_PREFETCH": "0"
-     }
     }
    ],
    "steps": [
-    "perf:main:1",
-    "perf:new:1",
-    "perf:np:1",
-    "perf:main:1",
-    "perf:new:1",
-    "perf:np:1",
-    "ktest:new",
-    "gates:new:dev"
-   ]
-  },
-  {
-   "name": "q35",
-   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
-   "memory_bytes": 49000000000,
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "new",
-     "build": {}
-    },
-    {
-     "name": "np",
-     "build": {
-      "MOE_SKIP_EMPTY": "0",
-      "MOE_PREFETCH": "0"
-     }
-    }
-   ],
-   "steps": [
-    "perf:main:1",
-    "perf:new:1",
-    "perf:np:1",
-    "perf:main:1",
-    "perf:new:1",
-    "perf:np:1",
-    "ktest:new",
-    "gates:new:dev"
+    "textmatch:new"
    ]
   }
  ]
