@@ -2914,7 +2914,7 @@ def attention():
     dec, dec_split_l, dec_combine_l = attention_text(64, "g")
     pre, split_l, combine_l = attention_text(16, "g16")
     count16 = pre[pre.index("// Splits for"):pre.index('kernel.def export("g16_attention_split")')]
-    by_slot = lambda t: t.replace("%acc_view[%token,", "%acc_view[%slot,").replace("%ml_view[%token,", "%ml_view[%slot,")
+    by_slot = lambda t: t.replace("%acc_view[%token,", "%acc_view[%bounded_slot,").replace("%ml_view[%token,", "%ml_view[%bounded_slot,")
     return (dec + "\n" + count16 + split_l + "\n" + combine_l + FALLBACK + DECODE_LIST
             + "\n// The decode kernels over a token list, their split partials by list slot.\n" + by_slot(dec_split_l) + "\n" + by_slot(dec_combine_l))
 
