@@ -24,4 +24,13 @@ del os.environ["LLAMA_FILL_VARIANT"]
 check("the answer is cached under the variant's key", bc.llama_completion("u", body).get("tokens") == [1])
 posted.clear(); r = bc.llama_completion("u", {"prompt": "p"})
 check("the default request is a different key", r.get("tokens") == [1] and len(posted) == 1)
+
+import vision_golden as vg
+class Pkg:
+    chat = {}; cfg = {"gguf": ""}
+    render_messages = staticmethod(lambda m, enable_thinking: m[0]["content"])
+seen = []
+bc.llama_completion = lambda url, body, pkg, salt: seen.append(body) or {}
+vg.reference(Pkg, "u", "data:image/png;base64,AA", "q", 8, server="cpu-encoder"); vg.reference(Pkg, "u", "data:image/png;base64,AA", "q", 8)
+check("vision_golden.reference: `_server` only when asked", seen[0].get("_server") == "cpu-encoder" and "_server" not in seen[1])
 sys.exit(0 if ok else 1)
