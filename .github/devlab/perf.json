@@ -1,35 +1,63 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "Temporary: DevLab perf sessions of the regenerated programs (not for merge).",
+ "kit": null,
+ "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "q08",
+   "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
+   "memory_bytes": 9000000000,
+   "llama_spec": "--spec-type ngram-simple",
    "variants": [
     {
-     "name": "new",
-     "build": {}
+     "name": "card"
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:2",
+    "perf:card:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:card",
+    "llamac4"
    ]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "q36",
+   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
+   "memory_bytes": 48000000000,
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:ggml-org/Qwen3.6-35B-A3B-GGUF/dflash-Qwen3.6-35B-A3B-Q8_0.gguf} --spec-draft-n-max 7 -ngld 99",
    "variants": [
     {
-     "name": "new",
-     "build": {}
+     "name": "card"
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:2",
+    "perf:card:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:card",
+    "llamac4"
+   ]
+  },
+  {
+   "name": "mcpm",
+   "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+   "memory_bytes": 36000000000,
+   "llama_spec": "--spec-type ngram-simple",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:card",
+    "llamac4"
    ]
   }
  ]
