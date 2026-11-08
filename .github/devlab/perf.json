@@ -1,35 +1,60 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "Flint regenerated from main (#161) vs the published card programs, same runner (temporary).",
+ "card": "loom-fun/ggml-org-Flint-loom",
+ "memory_bytes": 69000000000,
+ "kit": null,
+ "llamacpp": "b1355",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "flint-ab2-1",
    "variants": [
+    {
+     "name": "card"
+    },
     {
      "name": "new",
      "build": {}
+    },
+    {
+     "name": "spl0",
+     "build": {
+      "DFL_SPLITS": "0"
+     }
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:3",
+    "perf:new:3",
+    "perf:spl0:1",
+    "perf:card:3:long",
+    "perf:new:3:long",
+    "perf:spl0:3:long"
    ]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "flint-ab2-2",
    "variants": [
+    {
+     "name": "card"
+    },
     {
      "name": "new",
      "build": {}
+    },
+    {
+     "name": "spl0",
+     "build": {
+      "DFL_SPLITS": "0"
+     }
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:3",
+    "perf:new:3",
+    "perf:spl0:1",
+    "perf:card:3:long",
+    "perf:new:3:long",
+    "perf:spl0:3:long"
    ]
   }
  ]
