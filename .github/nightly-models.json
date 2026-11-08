@@ -40,7 +40,7 @@
   {
    "repo": "loom-fun/ggml-org-Flint-loom",
    "slug": "flint",
-   "memory_bytes": 67000000000,
+   "memory_bytes": 69000000000,
    "kit": null,
    "llamacpp": "b1355",
    "features": [
