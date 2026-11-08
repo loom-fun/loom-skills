@@ -194,15 +194,14 @@ if a.memory_gib == "auto":
           + (f"; cap {what} = {cap / 2**30:.0f} GiB)" if cap else "; RAM unknown)"))
 a.memory_gib = float(a.memory_gib)
 budget = int(a.memory_gib * 2**30) - weights_bytes - workspace - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
-fit = budget // kv_per_position   # KV positions the budget holds
-if context + min(context // 4, 65536) > fit and (not a.context or context > fit):
-    # A capped budget keeps the pool's headroom over the context (below), not context = pool: a full-context request
-    # then has no room for other rows' history, nor for the ~1-2 GB loom-serve charges beyond this estimate (Gemma-4
-    # 26B/31B at pool = context were refused with 503 on a fresh server; at context = pool / 1.25 they pass).
-    shrunk = max(4096, (fit - 65536 if fit >= 5 * 65536 else fit * 4 // 5) // 1024 * 1024)
-    print(f"WARNING: context {context} plus pool headroom needs {(context + min(context // 4, 65536)) * kv_per_position / 2**30:.1f}"
-          f" GiB of KV; the {a.memory_gib} GiB budget fits context {shrunk}")
-    context = shrunk
+# A full-context request is charged ~1-2 GB beyond this estimate (Gemma-4 26B/31B at a capped pool = context: refused
+# with 503 on a fresh server, admitted at +0.5/+1 GB). An uncapped pool's headroom absorbs it; a capped context keeps
+# this margin out of the KV it fits (the pool below still spans the whole budget).
+margin = 2 * 2**30 if budget < (context + min(context // 4, 65536)) * kv_per_position else 0
+if context * kv_per_position > budget - margin:
+    fit = max(4096, ((budget - margin) // kv_per_position) // 1024 * 1024)
+    print(f"WARNING: context {context} needs {context * kv_per_position / 2**30:.1f} GiB of KV; {a.memory_gib} GiB budget fits {fit}")
+    context = fit
 # One full-context request plus headroom for other rows' retained history (2x for short contexts, 1.25x at 262k:
 # a 2x pool at 262k was ~40 GiB of KV for a 27B, more than most single-user machines should reserve).
 pool = a.pool or min(KERNEL_POOL, max(context, min(context + max(65536, context // 4), budget // kv_per_position)))
