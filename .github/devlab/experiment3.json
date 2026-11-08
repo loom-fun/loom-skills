@@ -1,0 +1,49 @@
+{
+ "_comment": "rebuilt from this branch: memory-capped context keeps pool headroom (gemma4); flash2 token subtiles (dense head_dim 128)",
+ "card": "loom-fun/unsloth-gemma-4-31B-it-loom",
+ "memory_bytes": 80000000000,
+ "kit": "gemma4",
+ "llamacpp": "b1370",
+ "variants": [
+  {
+   "name": "g31-rebuilt",
+   "build": {},
+   "build_args": [
+    "--context",
+    "0",
+    "--pool",
+    "0"
+   ],
+   "steps": [
+    "gates:full"
+   ]
+  },
+  {
+   "name": "g26-rebuilt",
+   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "memory_bytes": 81000000000,
+   "build": {},
+   "build_args": [
+    "--context",
+    "0",
+    "--pool",
+    "0"
+   ],
+   "steps": [
+    "gates:full"
+   ]
+  },
+  {
+   "name": "q4i-rebuilt",
+   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+   "memory_bytes": 62000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "build": {},
+   "steps": [
+    "ktest",
+    "gates:full"
+   ]
+  }
+ ]
+}
