@@ -650,6 +650,81 @@ if cfg.get("attn_sinks") and os.environ.get("PREFILL_CONT", "1") != "0":
         prefill_cont_case(_li, _p0, 48, 7, f"pc_part_{_li}")     # last tile partly padding: listed fallback
         prefill_cont_case(_li, _p0, 48, 0, f"pc_small_{_li}", 0.1)  # small scores: the sink dominates the softmax
         prefill_cont_case(_li, 64, 64, 60, f"pc_reuse_{_li}")    # a reused 64-token prefix, 4 new tokens in a 64-row epoch
+# 3d. long-context decode over verification spans (gen_llm.py g_attention_seg: drafting builds, head_dim 64/128, at
+# most 2 KV heads): one decode epoch of three sequences, KV written straight into a paged pool (each row its own
+# pages). Row 0's 8-token span crosses SEG_MIN (the first tokens stay on g_attention_split, then a span, then tokens
+# past the span length one at a time), row 1 is one span at a position that is not block-aligned (partial first and
+# last blocks), row 2 a single token. g_seg_list lists the leaders, g_attention_seg runs over them (its _slots twin,
+# a static grid of the expected leader count: run_kernel_tests.sh derives it, loom-test has no indirect dispatch),
+# then g_attention_combine; every token vs numpy (causal, per row).
+def seg_case(li):
+    G_ = QH // KVH; SEG_MIN = int(os.environ.get("SEG_MIN", "8192"))   # gen_llm.py's
+    TS = min(cfg["draft"]["depth"] + 1, 65536 // (G_ * 4 * (D + 32)))
+    rows = [(0, SEG_MIN - 3, 8), (1, SEG_MIN + 37, TS), (2, SEG_MIN + 100, 1)]   # (row, first position, tokens)
+    ctx = ((max(p + n for _, p, n in rows) + 15) // 16) * 16 + 32; blocks = ctx // 16; R = len(rows); pool = R * ctx
+    info, toks = [], []
+    for r, p0, n in rows:
+        for i in range(n):
+            info.append([r, p0 + i, 1, 0]); toks.append((r, p0 + i))
+    info = np.array(info, np.int32); t = len(toks)
+    lead = 0
+    for r, p0, n in rows:   # g_seg_list's rule: a run starts at SEG_MIN or later; a token TS or more into it goes alone
+        run = [p for p in range(p0, p0 + n) if p >= SEG_MIN]
+        lead += sum(1 for i, _ in enumerate(run) if i == 0 or i >= TS)
+    kv = (rng.standard_normal((R, ctx, 2, KVH, D)) * 0.5).astype(np.float16)   # [row, position, K/V, head, dim]
+    # each query points at the key one position AFTER its own (scaled up): a key leaking past a token's causal end
+    # dominates its output, and an off-by-one or a span-shared range shows at once
+    q = rng.standard_normal((t, QH, D)).astype(np.float32)
+    for i, (r, p) in enumerate(toks):
+        q[i] += 3 * kv[r, p + 1, 0].astype(np.float32)[np.arange(QH) // G_]
+    orig = np.zeros(10 * R + R * blocks, np.int32)
+    arena = np.zeros((2, pool, KVH, D), np.float16)
+    for r in range(R):
+        orig[r * 10 + 8] = (10 * R + r * blocks) * 4
+        orig[10 * R + r * blocks:10 * R + (r + 1) * blocks] = np.arange(blocks) + r * blocks
+        arena[0, r * ctx:(r + 1) * ctx] = kv[r, :, 0]; arena[1, r * ctx:(r + 1) * ctx] = kv[r, :, 1]
+    att = np.zeros((t, QH, D))
+    for i, (r, p) in enumerate(toks):
+        for hh in range(QH):
+            k_, v_ = kv[r, :p + 1, 0, hh // G_].astype(np.float64), kv[r, :p + 1, 1, hh // G_].astype(np.float64)
+            sc = k_ @ q[i, hh].astype(np.float64) / np.sqrt(D); pr = np.exp(sc - sc.max())
+            att[i, hh] = pr @ v_ / pr.sum()
+    tag = f"seg_batch_{li}"
+    for nn, a in [("q", q.reshape(t, -1)), ("info", info), ("orig", orig), ("arena", arena.reshape(-1)), ("o", att.reshape(t, -1).astype(np.float32))]:
+        save(f"{tag}_{nn}", a)
+    print(f"{tag}: {t} tokens in {R} rows, {lead} segment leaders (span {TS}), positions {SEG_MIN - 3}..{SEG_MIN + 100}")
+    QD, S = QH * D, 64
+    OT, IT, RT, AR = f"tensor<{t}x{QD}xf32>", f"tensor<{t}x4xi32>", f"tensor<{len(orig)}xi32>", f"tensor<{2 * pool * KVH * D}xf16>"
+    PA, PM = f"tensor<{t * QH * S * D}xf32>", f"tensor<{t * QH * S * 2}xf32>"
+    cases.append(f"""check.case public @{tag} {{
+  %t = check.literal value({t}) : index
+  %lead = check.literal value({lead}) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value(0) : i32
+  %ctx = check.literal value({ctx}) : index
+  %pool = check.literal value({pool}) : index
+  %q = check.file.read.npy path("{tag}_q.npy") : {OT}
+  %info = check.file.read.npy path("{tag}_info.npy") : {IT}
+  %orig = check.file.read.npy path("{tag}_orig.npy") : {RT}
+  %arena = check.file.read.npy path("{tag}_arena.npy") : {AR}
+  %eo = check.file.read.npy path("{tag}_o.npy") : {OT}
+  %pacc = check.generate.fill value(0.0) : {PA}
+  %pml = check.generate.fill value(0.0) : {PM}
+  %list = check.generate.fill value(0) : tensor<{t}xi32>
+  %count = check.generate.fill value(0) : tensor<64xi32>
+  %o = check.generate.fill value(0.0) : {OT}
+  kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, {OT}, {IT}, {RT}, {AR}, {PA}, {PM})
+  kernel.launch @g_seg_list[%t](%t, %info, %list, %count) : [index](index, {IT}, tensor<{t}xi32>, tensor<64xi32>)
+  kernel.launch @g_attention_seg_slots[%lead](%t, %list, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, tensor<{t}xi32>, index, i32, index, index, {OT}, {IT}, {RT}, {AR}, {PA}, {PM})
+  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, %q, %o) : [index](index, i32, {IT}, {PA}, {PM}, {OT}, {OT})
+  check.expect.close actual(%o) expected(%eo) atol(1.5e-3) rtol(3.0e-3) nan(different) : {OT}
+  check.return
+}}
+""")
+# the drafting settings: the config's (a package's llm_config.json) or build.py's LLM_DRAFT (a pre-build cfg.json)
+cfg.setdefault("draft", json.loads(os.environ.get("LLM_DRAFT") or "null"))
+if cfg.get("draft") and not cfg.get("attn_gate") and not cfg.get("attn_sinks"):   # combine's gate input: none here
+    seg_case([i for i in range(cfg["layers"]) if i not in set(cfg.get("sliding_layers") or []) | set(cfg.get("recurrent_layers", []))][0])
 # 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
 if cfg.get("recurrent_layers"):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

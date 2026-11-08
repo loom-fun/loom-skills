@@ -284,6 +284,14 @@ c4_steady three runs; llama.cpp b1368 drafting from the same BF16 GGUF):
   V rows of keys the column masks to P = 0 (1-ulp; verified in isolation by zeroing those rows), so a token's
   attention depended on its span and the spec gate failed (15/16). An exact design would run the 16-aligned key range
   a segment shares on WMMA and each token's ragged ends on the per-token path.
+- **Long-context verify at 2 or fewer KV heads: one workgroup per span** (`g_attention_seg`, `SEG_MIN` 8192; head_dim 64
+  and 128; drafting packages). The span path above needs 8 KV heads; below that, tokens at position >= `SEG_MIN` on
+  full-attention layers go to a workgroup per (verification span, KV head, split) that reads each key block once for all
+  its tokens, keys over lanes for the scores. Exact per token (drafted == undrafted). Decode at 32k, same machine
+  with vs without (`SEG_ATTN=0`): Qwen2.5-0.5B depth 2 +37 % locally, +24 % on DevLab; Qwen2.5-1.5B +27 % locally,
+  +16 % on DevLab. It lost at 8 KV heads (Qwen3-4B DFlash, -17 % locally) and at head_dim 256 with one KV head
+  (Gemma-3-1B, 8k/16k -40 %). Tried: a span workgroup with lanes over dims (slower: 45 instructions per key and head
+  at head_dim 64 for the per-key 32-lane reductions).
 - Two-epoch continuation (`continuation_epochs: 2`) is not implemented (one device epoch per host turn).
 - DFlash v1 drafters with full-context attention read the whole context per proposal (DFlash2 windows it); split-K
   (above) makes that one pass per 8 block tokens and KV head.
