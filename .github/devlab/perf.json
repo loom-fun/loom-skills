@@ -1,35 +1,60 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "Flint prefill profile: each kernel group doubled (temporary, not for merge).",
+ "card": "loom-fun/ggml-org-Flint-loom",
+ "memory_bytes": 69000000000,
+ "kit": null,
+ "llamacpp": "b1355",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "flint-prof",
    "variants": [
     {
-     "name": "new",
+     "name": "base",
      "build": {}
+    },
+    {
+     "name": "ggu",
+     "build": {},
+     "double": [
+      "*:g_moe_ggu_"
+     ]
+    },
+    {
+     "name": "gdn",
+     "build": {},
+     "double": [
+      "*:g_moe_gdn_"
+     ]
+    },
+    {
+     "name": "moeother",
+     "build": {},
+     "double": [
+      "*:g_moe_(route_tr_live|bucket|combine_sorted)\\[|g_row_scale_f16_tiles"
+     ]
+    },
+    {
+     "name": "dense",
+     "build": {},
+     "double": [
+      "*:g_gemm_q"
+     ]
+    },
+    {
+     "name": "attn",
+     "build": {},
+     "double": [
+      "*:attention"
+     ]
     }
    ],
    "steps": [
-    "textmatch:new"
-   ]
-  },
-  {
-   "name": "tm-on",
-   "thinking": "on",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "textmatch:new"
+    "perf:base:2",
+    "perf:ggu:2",
+    "perf:gdn:2",
+    "perf:moeother:2",
+    "perf:dense:2",
+    "perf:attn:2"
    ]
   }
  ]
