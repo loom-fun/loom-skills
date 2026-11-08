@@ -3232,7 +3232,7 @@ def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store", gemm_only=False, wi
         gemm = f"kernel.launch @g_gemm_{fmt}_{mode}[%t, {n}]({args}) : [index, index]({types})"
     if gemm_only:
         return gemm
-    return f"""scf.if %gemm {{
+    return f"""scf.if {"%c_false" if "lin" in DIAG else "%gemm"} {{
       {gemm}
     }} else {{
       scf.if %single {{
@@ -3655,6 +3655,7 @@ def lin(fmt, x, s, w, wsize, y, k, n, kval, mode="store", width=None):
 # k + v (6656 x 256) measured -16 us per layer in isolation but no faster end to end (+1.5 ms per epoch with both pairs;
 # the small separate k and v launches presumably overlap neighbouring launches), so it is opt-in (PAIR_PROJ=1 or kv,
 # which also pairs the DFlash drafter's k + v).
+DIAG = set(os.environ.get("DIAG", "").split(","))   # temporary diagnostics
 PAIR_PROJ = os.environ.get("PAIR_PROJ", "qg")   # qg (default): q + gate only; kv: k + v only; 1: both; 0: off
 
 
@@ -3781,8 +3782,8 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
 """ if MOE.get("down_scale") else "") + f"""  %wge_{i} = command.parameter %weights, "{gn}" : view<{sg}xi8>
 """ + ("" if fused else f"""  %wue_{i} = command.parameter %weights, "{un}" : view<{su}xi8>
 """) + f"""  %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
-  scf.if {"%c_false" if os.environ.get("MOE_DIAG") == "decode" else "%gemm"} {{
-    {"kernel.launch @g_moe_route[%t](%t, " + rx + ", %router_" + str(i) + ", " + bias + ", %ids, %wts) : [index](index, buffer, view<" + str(E * H) + "x" + rty + ">, " + bias_ty + ", buffer, buffer)" if os.environ.get("MOE_DIAG") == "route" else "kernel.launch @g_moe_route_tr_live[%t](%t, " + rx + ", %router_" + str(i) + ", " + bias + ", %ids, %wts, %info) : [index](index, buffer, view<" + str(E * H) + "x" + rty + ">, " + bias_ty + ", buffer, buffer, buffer)"}
+  scf.if {"%c_false" if "moe" in DIAG else "%gemm"} {{
+    {"kernel.launch @g_moe_route[%t](%t, " + rx + ", %router_" + str(i) + ", " + bias + ", %ids, %wts) : [index](index, buffer, view<" + str(E * H) + "x" + rty + ">, " + bias_ty + ", buffer, buffer)" if "route" in DIAG else "kernel.launch @g_moe_route_tr_live[%t](%t, " + rx + ", %router_" + str(i) + ", " + bias + ", %ids, %wts, %info) : [index](index, buffer, view<" + str(E * H) + "x" + rty + ">, " + bias_ty + ", buffer, buffer, buffer)"}
 {wsc}    kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
 {x16}    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, {wu}{gu_b}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
     kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
@@ -4510,7 +4511,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         if i not in RECUR:
           rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
           T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
-  scf.if %gemm {{
+  scf.if {"%c_false" if "attn" in DIAG else "%gemm"} {{
     kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, {gty}, buffer, buffer, buffer, buffer)
     kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
     kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, {gty}, buffer)

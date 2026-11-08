@@ -6,37 +6,48 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "coder-rebuild",
-   "build": {},
+   "name": "c-attn",
+   "build": {
+    "DIAG": "attn"
+   },
    "steps": [
-    "consistency:5:llama"
+    "consistency:6:llama"
    ]
   },
   {
-   "name": "coder-moe-decode",
+   "name": "c-lin",
    "build": {
-    "MOE_DIAG": "decode"
+    "DIAG": "lin"
    },
    "steps": [
-    "consistency:5:llama"
+    "consistency:6:llama"
    ]
   },
   {
-   "name": "coder-moe-route",
+   "name": "c-moe-attn",
    "build": {
-    "MOE_DIAG": "route"
+    "DIAG": "moe,attn"
    },
    "steps": [
-    "consistency:5:llama"
+    "consistency:6:llama"
    ]
   },
   {
-   "name": "coder-nogemm",
+   "name": "c-moe-lin",
    "build": {
-    "NO_GEMM": "1"
+    "DIAG": "moe,lin"
    },
    "steps": [
-    "consistency:5:llama"
+    "consistency:6:llama"
+   ]
+  },
+  {
+   "name": "c-attn-lin",
+   "build": {
+    "DIAG": "attn,lin"
+   },
+   "steps": [
+    "consistency:6:llama"
    ]
   }
  ]
