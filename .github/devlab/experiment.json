@@ -1,35 +1,51 @@
 {
- "_comment": "Temporary: epoch-shape batch invariance (GEMM variants, MoE) kernel tests and stagger probes.",
+ "_comment": "Temporary coder5 diagnostics (do not merge).",
  "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
  "memory_bytes": 62000000000,
  "kit": null,
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "sp_f16",
-   "build": {
-    "FORCE16": "1"
-   },
+   "name": "base",
+   "build": {},
    "steps": [
-    "stagger:30"
+    "consistency:40:llama"
    ]
   },
   {
-   "name": "sp_lin_moe",
+   "name": "exact",
    "build": {
-    "DIAG": "lin,moe"
+    "SPEC_EXACT": "1"
    },
    "steps": [
-    "stagger:30"
+    "consistency:40:llama"
    ]
   },
   {
-   "name": "sp_noroute",
+   "name": "attn",
    "build": {
     "DIAG": "attn"
    },
    "steps": [
-    "stagger:30"
+    "consistency:40:llama"
+   ]
+  },
+  {
+   "name": "nogemm",
+   "build": {
+    "NO_GEMM": "1"
+   },
+   "steps": [
+    "consistency:40:llama"
+   ]
+  },
+  {
+   "name": "f16",
+   "build": {
+    "FORCE16": "1"
+   },
+   "steps": [
+    "consistency:40:llama"
    ]
   }
  ]
