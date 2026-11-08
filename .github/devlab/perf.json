@@ -1,14 +1,15 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "temporary",
+ "card": "loom-fun/ggml-org-Flint-loom",
+ "memory_bytes": 69000000000,
+ "kit": null,
+ "llamacpp": "b1355",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "flint-kt",
+   "card": "loom-fun/ggml-org-Flint-loom",
+   "memory_bytes": 69000000000,
+   "llamacpp": "b1355",
    "variants": [
     {
      "name": "new",
@@ -16,12 +17,14 @@
     }
    ],
    "steps": [
-    "textmatch:new"
+    "ktest:new"
    ]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "qwen3-30b-kt",
+   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+   "memory_bytes": 63000000000,
+   "llamacpp": "b1370",
    "variants": [
     {
      "name": "new",
@@ -29,7 +32,38 @@
     }
    ],
    "steps": [
-    "textmatch:new"
+    "ktest:new"
+   ]
+  },
+  {
+   "name": "gptoss-kt",
+   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
+   "memory_bytes": 28000000000,
+   "llamacpp": "b1370",
+   "variants": [
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new"
+   ],
+   "kit": "gpt-oss"
+  },
+  {
+   "name": "qwen36-kt",
+   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
+   "memory_bytes": 48000000000,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new"
    ]
   }
  ]
