@@ -530,6 +530,16 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
+   "slug": "mellum2.1-12b-a2.5b-thinking",
+   "memory_bytes": 26000000000,
+   "kit": null,
+   "llamacpp": "b1371",
+   "features": [
+    "thinking-toggle"
+   ]
   }
  ]
 }
