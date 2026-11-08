@@ -1,25 +1,57 @@
 {
- "_comment": "Temporary (do not merge): DevLab perf sessions for the regenerated Qwen3.5-4B and HyperCLOVAX cards; Qwen3.5-4B also A/B against the previous generator's programs on the same runner.",
+ "_comment": "Temporary (do not merge): Qwen3.5-4B draft-depth sweep on one runner.",
  "jobs": [
   {
-   "name": "q354",
+   "name": "q354d",
    "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
    "memory_bytes": 28000000000,
    "kit": null,
    "llamacpp": "b1369",
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 5 -ngld 99",
-   "variants": [{"name": "card"}, {"name": "old", "build": {}, "ref": "62c8af3"}],
-   "steps": ["perf:card:2", "perf:card:2:long", "perf:old:2:long", "llama:2", "llama:2:long", "c4:card", "c4:old", "llamac4"]
-  },
-  {
-   "name": "hcx",
-   "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
-   "memory_bytes": 24000000000,
-   "kit": null,
-   "llamacpp": "b1369",
-   "llama_spec": "--spec-type ngram-simple",
-   "variants": [{"name": "card"}],
-   "steps": ["perf:card:2", "perf:card:2:long", "llama:2", "llama:2:long", "c4:card", "llamac4"]
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "d1",
+     "execution": {
+      "draft_depth": 1
+     }
+    },
+    {
+     "name": "d2",
+     "execution": {
+      "draft_depth": 2
+     }
+    },
+    {
+     "name": "d3",
+     "execution": {
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "d5",
+     "execution": {
+      "draft_depth": 5
+     }
+    }
+   ],
+   "steps": [
+    "perf:card:1:long",
+    "perf:d1:1:long",
+    "perf:d2:1:long",
+    "perf:d3:1:long",
+    "perf:d5:1:long",
+    "c4:card",
+    "c4:d1",
+    "c4:d2",
+    "c4:d3",
+    "c4:d5",
+    "perf:card:1",
+    "perf:d2:1",
+    "perf:d3:1",
+    "perf:d5:1"
+   ]
   }
  ]
 }
