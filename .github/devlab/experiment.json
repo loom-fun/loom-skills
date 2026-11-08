@@ -1,18 +1,15 @@
 {
- "_comment": "Temporary: Coder stagger probe (group scenarios).",
+ "_comment": "Temporary: batch-invariance kernel tests incl. the order case.",
  "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
  "memory_bytes": 62000000000,
  "kit": null,
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "grp",
+   "name": "coder_kt",
    "build": {},
-   "execution": {
-    "draft_depth": 0
-   },
    "steps": [
-    "stagger:2"
+    "ktest"
    ]
   }
  ]

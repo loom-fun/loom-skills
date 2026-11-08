@@ -1575,8 +1575,58 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
 {text}{check}  check.return
 }}
 """
+    def order_case(sliding):
+        """Three prompts of unequal length, each from position 0 (rows 0-2), packed in every order: each prompt's output
+        must be the same in all six epochs (the situation of concurrent requests in one prefill epoch)."""
+        lens, QD = (156, 190, 287), QH * D
+        qs = [(rng.standard_normal((n, QH, D)) * 2.5).astype(np.float32) for n in lens]
+        gs = [rng.standard_normal((n, QH, D)).astype(np.float32) for n in lens]
+        import itertools
+        text = ""
+        for k, order in enumerate(itertools.permutations(range(3))):
+            info3 = epoch_info([(i, 0, lens[i]) for i in order]); t = len(info3)
+            info = np.zeros((t, 4), np.int32); info[:, :3] = info3
+            q = (rng.standard_normal((t, QH, D)) * 2.5).astype(np.float32); g = rng.standard_normal((t, QH, D)).astype(np.float32)
+            at, off = {}, 0
+            for i in order:
+                at[i] = off; q[off:off + lens[i]], g[off:off + lens[i]] = qs[i], gs[i]; off += lens[i]
+            for nm, arr in (("info", info), ("q", q.reshape(t, QD)), ("g", g.reshape(t, QD))):
+                save(f"fo_{nm}{sliding}_{k}", arr)
+            OT = f"tensor<{t}x{QD}xf32>"; IT = f"tensor<{t}x4xi32>"; PT = f"tensor<{t * QH * 64 * D}xf32>"; MT = f"tensor<{t * QH * 64 * 2}xf32>"
+            text += f"""  %t{k} = check.literal value({t}) : index
+  %q{k} = check.file.read.npy path("fo_q{sliding}_{k}.npy") : {OT}
+  %g{k} = check.file.read.npy path("fo_g{sliding}_{k}.npy") : {OT}
+  %info{k} = check.file.read.npy path("fo_info{sliding}_{k}.npy") : {IT}
+  %o{k} = check.generate.fill value(0.0) : {OT}
+  %pacc{k} = check.generate.fill value(0.0) : {PT}
+  %pml{k} = check.generate.fill value(0.0) : {MT}
+  kernel.launch @g_attention_split[%t{k}](%t{k}, %layer, %sliding, %ctx, %pool, %q{k}, %info{k}, %orig, %arena, %pacc{k}, %pml{k}) : [index](index, index, i32, index, index, {OT}, {IT}, {OA}, {AA}, {PT}, {MT})
+  kernel.launch @g_attention_combine[%t{k}](%t{k}, %sliding, %info{k}, %pacc{k}, %pml{k}, %g{k}, %o{k}) : [index](index, i32, {IT}, {PT}, {MT}, {OT}, {OT})
+{list_launch(f"%t{k}", t, f"%info{k}", k)}  kernel.launch @g_attention_flash2[%t{k}](%t{k}, %layer, %sliding, %ctx, %pool, %q{k}, %g{k}, %info{k}, %tiles{k}, %orig, %arena, %o{k}) : [index](index, index, i32, index, index, {OT}, {OT}, {IT}, tensor<{t}xi32>, {OA}, {AA}, {OT})
+"""
+            for i in range(3):
+                XT = f"tensor<{lens[i]}x{QD}xf32>"
+                text += f"""  %skip{k}_{i} = check.literal value({at[i]}) : index
+  %nx{i} = check.literal value({lens[i]}) : index
+  %x{k}_{i} = check.generate.fill value(0.0) : {XT}
+  kernel.launch @test_copy_rows[%nx{i}](%nx{i}, %wd, %skip{k}_{i}, %t{k}, %o{k}, %x{k}_{i}) : [index](index, index, index, index, {OT}, {XT})
+"""
+                if k:
+                    text += f"  check.expect.close actual(%x{k}_{i}) expected(%x0_{i}) atol(0.0) rtol(0.0) nan(different) : {XT}\n"
+        return f"""check.case public @flash_batch_invariant_order{'_window' if sliding else ''} {{
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value({sliding}) : i32
+  %ctx = check.literal value({ctx_a}) : index
+  %pool = check.literal value({pool_a}) : index
+  %wd = check.literal value({QD}) : index
+  %orig = check.file.read.npy path("f_orig_a.npy") : {OA}
+  %arena = check.file.read.npy path("f_arena_a.npy") : {AA}
+{text}  check.return
+}}
+"""
     cases.append(COPY_ROWS)
     cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
+    cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
 
 # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
 # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
