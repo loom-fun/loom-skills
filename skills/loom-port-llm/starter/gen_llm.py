@@ -2430,34 +2430,47 @@ def multi_token_split(text, P, U, T):
     assert k.count(anchor) == 1, "multi_token_split: anchor"
     vt, ht = "vector<4xf32>", "vector<4xf16>"
     scale = re.search(r"%scale = scalar.constant (\S+) : f32", k).group(1)   # the per-token path's (a kit may change it)
+    assert "%position32 = view.load %info_view[%token, 1]" in k, "multi_token_split: position"
+
+    def group(p, ind):
+        """Row, position and liveness of the group's T tokens (clamped to the last token)."""
+        return "\n".join(f"""{ind}%{p}_tr{j} = index.add %sg_base, %c{j}u : index
+{ind}%{p}_in{j} = index.cmp ult, %{p}_tr{j}, %tokens : index
+{ind}%{p}_tc{j} = index.min %{p}_tr{j}, %sg_last : index
+{ind}%{p}_t{j} = index.assume %{p}_tc{j} [range(%{p}_tc{j}, 0, 8191), lt(%{p}_tc{j}, %tokens)] : index
+{ind}%{p}_row{j} = view.load %info_view[%{p}_t{j}, 0] : view<[%tokens]x4xi32> -> i32
+{ind}%{p}_pos{j} = view.load %info_view[%{p}_t{j}, 1] : view<[%tokens]x4xi32> -> i32
+{ind}%{p}_live{j} = view.load %info_view[%{p}_t{j}, 2] : view<[%tokens]x4xi32> -> i32""" for j in range(T))
+    # Below ATTN_MT_FROM (this token's own position) the group is not read: short contexts pay one compare.
     det = [f"""  %live = scalar.andi %live_token, %needed : i1
   // multi-token path: this token's aligned group of {T}
   %sg_true = scalar.constant true : i1
+  %sg_false = scalar.constant false : i1
   %sg_cT = index.constant {T} : index
   %sg_rem = index.rem %token, %sg_cT : index
   %sg_base = index.sub %token, %sg_rem : index
   %sg_leader = index.cmp eq, %sg_rem, %c0 : index
-  %sg_last = index.sub %tokens, %c1 : index"""]
+  %sg_last = index.sub %tokens, %c1 : index
+  %sg_from = scalar.constant {ATTN_MT_FROM} : i32
+  %sg_own_far = scalar.cmpi sge, %position32, %sg_from : i32
+  %sg_uniform = scf.if %sg_own_far -> (i1) {{
+{group("sg", "    ")}"""]
     for j in range(T):
-        det.append(f"""  %sg_tr{j} = index.add %sg_base, %c{j}u : index
-  %sg_in{j} = index.cmp ult, %sg_tr{j}, %tokens : index
-  %sg_tc{j} = index.min %sg_tr{j}, %sg_last : index
-  %sg_t{j} = index.assume %sg_tc{j} [range(%sg_tc{j}, 0, 8191), lt(%sg_tc{j}, %tokens)] : index
-  %sg_row{j} = view.load %info_view[%sg_t{j}, 0] : view<[%tokens]x4xi32> -> i32
-  %sg_pos{j} = view.load %info_view[%sg_t{j}, 1] : view<[%tokens]x4xi32> -> i32
-  %sg_live{j} = view.load %info_view[%sg_t{j}, 2] : view<[%tokens]x4xi32> -> i32
-  %sg_lv{j} = scalar.cmpi ne, %sg_live{j}, %c0_i32 : i32
-  %sg_rq{j} = scalar.cmpi eq, %sg_row{j}, %sg_row0 : i32
-  %sg_jc{j} = scalar.constant {j} : i32
-  %sg_pe{j} = scalar.addi %sg_pos0, %sg_jc{j} : i32
-  %sg_pq{j} = scalar.cmpi eq, %sg_pos{j}, %sg_pe{j} : i32
-  %sg_a{j} = scalar.andi %sg_in{j}, %sg_lv{j} : i1
-  %sg_b{j} = scalar.andi %sg_a{j}, %sg_rq{j} : i1
-  %sg_ok{j} = scalar.andi %sg_b{j}, %sg_pq{j} : i1""")
-        det.append(f"  %sg_u{j} = scalar.andi {'%sg_true' if j == 0 else f'%sg_u{j - 1}'}, %sg_ok{j} : i1")
-    det.append(f"""  %sg_from = scalar.constant {ATTN_MT_FROM} : i32
-  %sg_far = scalar.cmpi sge, %sg_pos0, %sg_from : i32
-  %sg_uniform = scalar.andi %sg_u{T - 1}, %sg_far : i1
+        det.append(f"""    %sg_lv{j} = scalar.cmpi ne, %sg_live{j}, %c0_i32 : i32
+    %sg_rq{j} = scalar.cmpi eq, %sg_row{j}, %sg_row0 : i32
+    %sg_jc{j} = scalar.constant {j} : i32
+    %sg_pe{j} = scalar.addi %sg_pos0, %sg_jc{j} : i32
+    %sg_pq{j} = scalar.cmpi eq, %sg_pos{j}, %sg_pe{j} : i32
+    %sg_a{j} = scalar.andi %sg_in{j}, %sg_lv{j} : i1
+    %sg_b{j} = scalar.andi %sg_a{j}, %sg_rq{j} : i1
+    %sg_ok{j} = scalar.andi %sg_b{j}, %sg_pq{j} : i1
+    %sg_u{j} = scalar.andi {'%sg_true' if j == 0 else f'%sg_u{j - 1}'}, %sg_ok{j} : i1""")
+    det.append(f"""    %sg_far = scalar.cmpi sge, %sg_pos0, %sg_from : i32
+    %sg_all = scalar.andi %sg_u{T - 1}, %sg_far : i1
+    scf.yield %sg_all : i1
+  }} else {{
+    scf.yield %sg_false : i1
+  }}
   %sg_split = scalar.xori %sg_uniform, %sg_true : i1
   %single_live = scalar.andi %live, %sg_split : i1
   %mt_go = scalar.andi %sg_uniform, %sg_leader : i1
@@ -2465,7 +2478,8 @@ def multi_token_split(text, P, U, T):
 """)
     k = k.replace(anchor, "\n".join(det), 1)
     m = [f"""  scf.if %mt_go {{
-    %mt_row_b = scalar.assume %sg_row0 [range(%sg_row0, 0, 2147483646)] : i32
+{group("mg", "    ")}
+    %mt_row_b = scalar.assume %mg_row0 [range(%mg_row0, 0, 2147483646)] : i32
     %mt_row = index.cast %mt_row_b : i32 to index
     %mt_padded = index.add %context, %c15 : index
     %mt_blocks = index.div %mt_padded, %c16 : index
@@ -2479,7 +2493,7 @@ def multi_token_split(text, P, U, T):
     %mt_scale_v = vector.splat %mt_scale : {vt}
     %mt_zero4 = vector.splat %zero_f : {vt}"""]
     for j in range(T):
-        m.append(f"""    %mt_pb{j} = scalar.assume %sg_pos{j} [range(%sg_pos{j}, 0, 262143)] : i32
+        m.append(f"""    %mt_pb{j} = scalar.assume %mg_pos{j} [range(%mg_pos{j}, 0, 262143)] : i32
     %mt_p{j} = index.cast %mt_pb{j} : i32 to index
     %mt_far{j} = index.cmp uge, %mt_p{j}, %window : index
     %mt_uw{j} = scalar.andi %mt_is_sl, %mt_far{j} : i1
@@ -2502,7 +2516,7 @@ def multi_token_split(text, P, U, T):
     %mt_hi0{j} = index.add %mt_wl{j}, %mt_sp{j} : index
     %mt_lo{j} = scf.select %mt_act{j}, %mt_lo0{j}, %mt_huge : index
     %mt_hi{j} = scf.select %mt_act{j}, %mt_hi0{j}, %c0 : index
-    %mt_qr{j} = vector.load %mt_q_view[%sg_t{j}, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> {vt}
+    %mt_qr{j} = vector.load %mt_q_view[%mg_t{j}, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> {vt}
     %mt_q{j} = vector.mulf %mt_qr{j}, %mt_scale_v : {vt}""")
     lo, hi = "%mt_lo0", "%mt_hi0"
     m.append("    %mt_lou0 = index.add %mt_lo0, %c0 : index\n    %mt_hiu0 = index.add %mt_hi0, %c0 : index")
@@ -2567,10 +2581,10 @@ def multi_token_split(text, P, U, T):
     %mt_first = index.cmp eq, %lane, %c0 : index""")
     for j in range(T):
         m.append(f"""    scf.if %mt_act{j} {{
-      vector.store %mfa{j}, %mt_acc_view[%sg_t{j}, %bounded_head, %split, %lane, %c0] : {vt}, view<[%tokens]x{QH}x{S}x32x4xf32>
+      vector.store %mfa{j}, %mt_acc_view[%mg_t{j}, %bounded_head, %split, %lane, %c0] : {vt}, view<[%tokens]x{QH}x{S}x32x4xf32>
       scf.if %mt_first {{
-        view.store %mfm{j}, %mt_ml_view[%sg_t{j}, %bounded_head, %split, 0] : f32, view<[%tokens]x{QH}x{S}x2xf32>
-        view.store %mfl{j}, %mt_ml_view[%sg_t{j}, %bounded_head, %split, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+        view.store %mfm{j}, %mt_ml_view[%mg_t{j}, %bounded_head, %split, 0] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+        view.store %mfl{j}, %mt_ml_view[%mg_t{j}, %bounded_head, %split, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
       }}
     }}""")
     m.append("  }\n")
