@@ -79,7 +79,7 @@ VTC, KBYTES, VTBYTES, KT_LESS = KT + 8, KT * (D + 8) * 2, D * (KT + 8) * 2, KT -
 
 # One workgroup per listed tile. The epoch's tile list (g_attention_fallback_list) holds the first token of every
 # 16-token tile inside one span that starts at a position multiple of 16 (tiles[0]: their count, tiles[1 + i]: the
-# i-th); workgroups past the count do nothing. A token's attention thus depends on its span only, not on where the
+# i-th, 0 past the count); workgroups past the count do nothing. A token's attention thus depends on its span only, not on where the
 # epoch packs it.
 LAUNCH = '''  %tiles_count = index.div %tokens, %c16 : index
   kernel.launch.config workgroups(%tiles_count, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
@@ -93,8 +93,7 @@ LISTED = f'''  %tiles_view = buffer.view %tiles[%origin] : buffer -> view<[%toke
   %entry_slot = index.assume %entry_slot_value [lt(%entry_slot_value, %tokens)] : index
   %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32
   %entry = index.cast %entry32 : i32 to index
-  %anchor_value = scf.select %listed, %entry, %c0 : index
-  {ANCHOR} = index.assume %anchor_value [range(%anchor_value, 0, 8191), lt(%anchor_value, %tokens)] : index
+  {ANCHOR} = index.assume %entry [range(%entry, 0, 8191), lt(%entry, %tokens)] : index
   %info_view = buffer.view %info[%origin] : buffer -> view<[%tokens]x4xi32>
   %row32 = view.load %info_view[{ANCHOR}, %c0] : view<[%tokens]x4xi32> -> i32
   %pos0_32 = view.load %info_view[{ANCHOR}, %c1] : view<[%tokens]x4xi32> -> i32

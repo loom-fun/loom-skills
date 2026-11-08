@@ -95,8 +95,7 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
   %entry_slot = index.assume %entry_slot_value [lt(%entry_slot_value, %tokens)] : index
   %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32
   %entry = index.cast %entry32 : i32 to index
-  %first_value = scf.select %listed, %entry, %c0 : index
-  %first_token = index.assume %first_value [range(%first_value, 0, 8191), lt(%first_value, %tokens)] : index
+  %first_token = index.assume %entry [range(%entry, 0, 8191), lt(%entry, %tokens)] : index
   %info_view = buffer.view %info[%origin] : buffer -> view<[%tokens]x4xi32>
   %row32 = view.load %info_view[%first_token, %c0] : view<[%tokens]x4xi32> -> i32
   %pos0_32 = view.load %info_view[%first_token, %c1] : view<[%tokens]x4xi32> -> i32

@@ -13,7 +13,7 @@
    "build": {},
    "steps": [
     "ktest",
-    "consistency:6:llama"
+    "consistency:20:llama"
    ]
   },
   {

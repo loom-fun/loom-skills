@@ -2921,10 +2921,10 @@ def attention():
 FALLBACK = r"""
 // Prefill attention work lists, built once per epoch from the token info. A token's path depends only on its own
 // span (a run of one row's consecutive positions), never on where the epoch packs it: tiles[1 + i] is the first
-// token of the i-th (in token order, which keeps neighbouring workgroups on neighbouring keys) 16-token tile that
-// lies inside one span and starts at a position multiple of 16 (g_attention_flash2 computes those; tiles[0] is
-// their count), and list holds every other token (g16_attention_split_listed computes those; count[0] is the list
-// length for indirect dispatch).
+// token of the i-th 16-token tile that lies inside one span and starts at a position multiple of 16, in token order
+// (neighbouring workgroups then read neighbouring keys; token 0 past the count): g_attention_flash2 computes those,
+// and tiles[0] is their count. list holds every other token (g16_attention_split_listed computes those; count[0] is
+// the list length for indirect dispatch).
 kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%tokens: index) {
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
@@ -2980,6 +2980,7 @@ kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%token
       scf.yield %sum_next : i32
     }
     view.store %total, %tiles_view[%c0] : i32, view<[%tokens]xi32>
+    view.store %total, %scratch_view[%c257_slot] : i32, view<260xi32>
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %offset = view.load %scratch_view[%lane] : view<260xi32> -> i32
@@ -3002,6 +3003,18 @@ kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%token
       scf.yield %n : i32
     }
     scf.yield %next : i32
+  }
+  // The entries past the count are token 0, so a workgroup without a tile can read its entry.
+  %listed_total32 = view.load %scratch_view[%c257_slot] : view<260xi32> -> i32
+  %listed_total = index.cast %listed_total32 : i32 to index
+  %c16 = index.constant 16 : index
+  %slots = index.div %tokens, %c16 : index
+  %fill_from = index.add %listed_total, %lane : index
+  scf.for %e = [%fill_from to %slots step %c256] {
+    %e_bound = index.assume %e [range(%e, 0, 8191)] : index
+    %fill_value = index.add %e_bound, %c1 : index
+    %fill_slot = index.assume %fill_value [range(%fill_value, 1, 8192), lt(%fill_value, %tokens)] : index
+    view.store %c0_i32, %tiles_view[%fill_slot] : i32, view<[%tokens]xi32>
   }
   // Every other token: the listed fallback's (order does not matter, each is computed on its own).
   scf.for %t = [%lane to %tokens step %c256] {
