@@ -1,111 +1,28 @@
 {
- "_comment": "Temporary: 0.5B card vs main regen (not for merge).",
+ "_comment": "Temporary: DevLab perf session for the regenerated Qwen2.5-0.5B card (not for merge).",
  "card": "x",
  "memory_bytes": 1,
  "kit": null,
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "a",
+   "name": "q05",
    "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
    "memory_bytes": 5000000000,
    "variants": [
     {
      "name": "card"
-    },
-    {
-     "name": "main",
-     "build": {}
     }
    ],
    "steps": [
     "perf:card:2",
-    "perf:main:2",
-    "c4:card",
-    "c4:main",
     "perf:card:2:long",
-    "perf:main:2:long",
-    "perf:card:2",
-    "perf:main:2",
+    "llama:2",
+    "llama:2:long",
     "c4:card",
-    "c4:main",
-    "perf:card:2:long",
-    "perf:main:2:long",
-    "perf:card:2",
-    "perf:main:2",
-    "c4:card",
-    "c4:main",
-    "perf:card:2:long",
-    "perf:main:2:long"
-   ]
-  },
-  {
-   "name": "b",
-   "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
-   "memory_bytes": 5000000000,
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "main",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:main:2",
-    "c4:card",
-    "c4:main",
-    "perf:card:2:long",
-    "perf:main:2:long",
-    "perf:card:2",
-    "perf:main:2",
-    "c4:card",
-    "c4:main",
-    "perf:card:2:long",
-    "perf:main:2:long",
-    "perf:card:2",
-    "perf:main:2",
-    "c4:card",
-    "c4:main",
-    "perf:card:2:long",
-    "perf:main:2:long"
-   ]
-  },
-  {
-   "name": "c",
-   "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
-   "memory_bytes": 5000000000,
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "main",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:main:2",
-    "c4:card",
-    "c4:main",
-    "perf:card:2:long",
-    "perf:main:2:long",
-    "perf:card:2",
-    "perf:main:2",
-    "c4:card",
-    "c4:main",
-    "perf:card:2:long",
-    "perf:main:2:long",
-    "perf:card:2",
-    "perf:main:2",
-    "c4:card",
-    "c4:main",
-    "perf:card:2:long",
-    "perf:main:2:long"
+    "llamac4"
    ]
   }
- ]
+ ],
+ "llama_spec": "--spec-type ngram-simple"
 }
