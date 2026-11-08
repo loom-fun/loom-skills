@@ -110,7 +110,7 @@ def _softmax_weight_prefill(text, KU):
 
 def scaled(v, ind, scale):
     """llama.cpp's expert_weights_scale after the normalization (laguna: 2.5): %{v}s = %{v} * scale (empty at 1)."""
-    return "" if scale == 1.0 else f"\n{ind}%{v}_k = scalar.constant {float(scale)!r} : f32\n{ind}%{v}s = scalar.mulf %{v}, %{v}_k : f32"
+    return "" if True else f"\n{ind}%{v}_k = scalar.constant {float(scale)!r} : f32\n{ind}%{v}s = scalar.mulf %{v}, %{v}_k : f32"
 
 
 def route_decode(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
