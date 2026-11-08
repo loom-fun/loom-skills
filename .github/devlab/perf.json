@@ -1,30 +1,51 @@
 {
- "_comment": "depth-dispatched flash2 subtiles: decode and 1k-32k prefill, origin/main's starter vs this branch (same runner). Temporary.",
+ "_comment": "Temporary: 32k decode regression bisect (starter at each ref, same runner).",
  "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
  "memory_bytes": 62000000000,
  "kit": null,
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "q4i",
+   "name": "bisect",
    "variants": [
     {
-     "name": "base",
+     "name": "r3eef7da",
      "build": {},
-     "ref": "origin/main"
+     "ref": "3eef7da"
     },
     {
-     "name": "disp",
-     "build": {}
+     "name": "r7da0f6a",
+     "build": {},
+     "ref": "7da0f6a"
+    },
+    {
+     "name": "r8bf8edc",
+     "build": {},
+     "ref": "8bf8edc"
+    },
+    {
+     "name": "ra69adc9",
+     "build": {},
+     "ref": "a69adc9"
+    },
+    {
+     "name": "r54ba173",
+     "build": {},
+     "ref": "54ba173"
+    },
+    {
+     "name": "r0ee5e4b",
+     "build": {},
+     "ref": "0ee5e4b"
     }
    ],
    "steps": [
-    "perf:base:2",
-    "perf:disp:2",
-    "perf:base:2:long",
-    "perf:disp:2:long",
-    "perf:base:1:long",
-    "perf:disp:1:long"
+    "perf:r3eef7da:1:long",
+    "perf:r7da0f6a:1:long",
+    "perf:r8bf8edc:1:long",
+    "perf:ra69adc9:1:long",
+    "perf:r54ba173:1:long",
+    "perf:r0ee5e4b:1:long"
    ]
   }
  ]
