@@ -116,8 +116,8 @@ def adds_bos(gguf_path):
     return _BOS[gguf_path]
 
 
-def reference(pkg, llama, durl, question, tokens, salt=""):
-    """llama.cpp: the package's rendering + the image, greedy, top-5 log-probs by id."""
+def reference(pkg, llama, durl, question, tokens, salt="", server=None):
+    """llama.cpp: the package's rendering + the image, greedy, top-5 log-probs by id (server: a SERVER_VARIANTS name)."""
     from bench_common import GREEDY, llama_completion
     prompt = pkg.render_messages([{"role": "user", "content": MARKER + question}], enable_thinking=False)
     bos = (pkg.chat or {}).get("bos", "")
@@ -125,6 +125,8 @@ def reference(pkg, llama, durl, question, tokens, salt=""):
         prompt = prompt[len(bos):]
     body = dict(GREEDY, prompt={"prompt_string": prompt, "multimodal_data": [durl.split(",", 1)[1]]},
                 n_predict=tokens, n_probs=5, return_tokens=True)
+    if server:
+        body["_server"] = server
     return llama_completion(llama, body, pkg, salt)
 
 
