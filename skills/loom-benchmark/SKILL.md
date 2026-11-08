@@ -382,7 +382,8 @@ A published card's `README.md`, `info.json` and `REPORT.md` are **generated, nev
 supplies data, `scripts/card/` turns it into the card. Every loom-fun card has the same sections, rows and
 footnotes (lead-in, quick start, performance vs llama.cpp, features, correctness gates, files); only the values
 differ. No prose of your own on a card: no "what's new", no explanations, no caveats. A value without evidence
-renders as not measured / no evidence / unknown; never fill one in by hand.
+renders as not measured / no evidence / unknown; never fill one in by hand. A card with failing gates is published
+as it is (`loom-org` step 2): each renders as fail, and only new evidence changes it.
 
 `info.json` (schema `card/info_schema.json`, `"schema": "loom-card/2"`) holds only what no package file
 records: measurement sessions (per-run values, commands, the baseline's version and exact server arguments),
