@@ -144,8 +144,9 @@ draft_depth 0 of the same package and its concurrency check):
 Drafting works on every family, and with the int8-activation verify step Loom's drafted decode now leads llama.cpp's
 on every model measured, in absolute speed and (but for Flint's tie) in speedup over no drafting; the multi-token step
 was the gap ("Limits"). Depth 7 wins on these short requests where the drafter accepts long runs: up to 16 tokens
-verify in one weight pass and round like 1-token decode. At long context each verified token still pays its own decode
-attention, so pick a lower depth for long-context use (Qwen3.8-27B above: depth 3 for its package).
+verify in one weight pass and round like 1-token decode. At long context each verified token still pays decode
+attention (less since the multi-token split-K path, "Limits"), so a lower depth can win for long-context use
+(Qwen3.8-27B above: depth 3 for its package).
 
 Small models are launch-bound: drafting loses there and `tune.py` keeps ordinary decoding.
 
@@ -254,7 +255,19 @@ c4_steady three runs; llama.cpp b1368 drafting from the same BF16 GGUF):
     for 1 token). The optimization catalog lists what was tried.
 - Verification of more than 16 tokens per epoch (several drafting streams at depth 5+) takes the WMMA GEMM (rows
   padded to 64).
-- **Long-context verify pays decode attention per token.** The per-token split-K kernel costs the same per verified
+- **Long-context verify: a verify span's tokens share their KV loads** (`attn_rules.ATTN_MT`, default 4; from position
+  `ATTN_MT_FROM` 1024). When an aligned group of 4 epoch tokens is one row at consecutive positions, the group's first
+  split-K workgroup computes all 4 (one K/V load per key for the 4 queries of its head; the others exit). Each token
+  keeps its own split range, key masks, 16-key block partition and operation order, and a block holding none of its keys
+  leaves its state untouched, so results are bit-identical to the per-token path (drafted == undrafted at 32k). Qwen3-8B
+  at 32k, depth 3: verify attention 58 -> 40 ms per epoch (one token: 28). With the DFlash split-K draft attention below,
+  the depth-3 epoch went 136 -> 85 ms: 12.5 -> 20.1 tok/s (undrafted 19.5); depth 7 7.7 -> 13.7.
+- **DFlash v1 draft attention is split-K** (`gen_dflash.DFL_SPLITS`, 32; windowed DFlash2 and conv drafters keep the
+  per-token kernel). The per-token kernel (one workgroup per block token and query head, one key per step) re-read
+  the context once per block token and query head: 46 ms of the 136 ms 32k epoch above. `g_dfl_ctx_split` scores a
+  chunk of 8 block tokens per wave against each key loaded once, per (KV head, split); `g_dfl_attention` merges the
+  splits and adds the block's own keys.
+- **History: long-context verify paid decode attention per token.** The per-token split-K kernel costs the same per verified
   token as per decoded token (it streams the KV once per token: Qwen3.8-27B at 32k, 671 us per layer for 1 token,
   2058 us for 4, `loom-benchmark` dispatch time), so depth 7 falls behind depth 3 at long context and the 27B package
   uses depth 3. Two cheap fixes are in: a block's 16 key scores are reduced by one butterfly all-reduce (~31 shuffles
@@ -268,7 +281,8 @@ c4_steady three runs; llama.cpp b1368 drafting from the same BF16 GGUF):
   attention depended on its span and the spec gate failed (15/16). An exact design would run the 16-aligned key range
   a segment shares on WMMA and each token's ragged ends on the per-token path.
 - Two-epoch continuation (`continuation_epochs: 2`) is not implemented (one device epoch per host turn).
-- DFlash v1 drafters with full-context attention read the whole context per proposal (DFlash2 windows it).
+- DFlash v1 drafters with full-context attention read the whole context per proposal (DFlash2 windows it); split-K
+  (above) makes that one pass per 8 block tokens and KV head.
 - DFlash RoPE uses KV positions; llama.cpp gives M-RoPE targets' drafters the temporal position (degenerate
   sections). Text after an image then proposes with shifted positions: lower acceptance, never wrong output.
   Gemma-4 (gemma4v) and Muse-Glimmer vision ports draft with DFlash and pass the image questions of the spec gate.
