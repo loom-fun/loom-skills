@@ -1,62 +1,60 @@
 {
- "_comment": "memory_bytes at which a full-context request is admitted on a fresh server",
+ "_comment": "memory_bytes at which a full-context request is admitted on a fresh server (finer)",
  "card": "loom-fun/unsloth-gemma-4-31B-it-loom",
  "memory_bytes": 80000000000,
  "kit": "gemma4",
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "g31-m80",
-   "memory_bytes": 80000000000,
+   "name": "g31-m80.5",
+   "memory_bytes": 80500000000,
    "steps": [
-    "status",
     "admit:53248"
    ]
   },
   {
-   "name": "g31-m82",
+   "name": "g31-m81",
+   "memory_bytes": 81000000000,
+   "steps": [
+    "admit:53248"
+   ]
+  },
+  {
+   "name": "g31-m81.5",
+   "memory_bytes": 81500000000,
+   "steps": [
+    "admit:53248"
+   ]
+  },
+  {
+   "name": "g26-m82",
+   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
    "memory_bytes": 82000000000,
    "steps": [
-    "admit:53248"
+    "admit:207872"
    ]
   },
   {
-   "name": "g31-m84",
+   "name": "g26-m83",
+   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "memory_bytes": 83000000000,
+   "steps": [
+    "admit:207872"
+   ]
+  },
+  {
+   "name": "g26-m84",
+   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
    "memory_bytes": 84000000000,
    "steps": [
-    "admit:53248"
-   ]
-  },
-  {
-   "name": "g31-m88",
-   "memory_bytes": 88000000000,
-   "steps": [
-    "admit:53248"
-   ]
-  },
-  {
-   "name": "g26-m81",
-   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
-   "memory_bytes": 81000000000,
-   "steps": [
-    "status",
     "admit:207872"
    ]
   },
   {
-   "name": "g26-m85",
-   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
-   "memory_bytes": 85000000000,
-   "steps": [
-    "admit:207872"
-   ]
-  },
-  {
-   "name": "g12-m81",
+   "name": "g12-m80.4",
    "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
-   "memory_bytes": 81000000000,
+   "memory_bytes": 80400000000,
    "steps": [
-    "status",
     "admit:163840"
    ]
   }
