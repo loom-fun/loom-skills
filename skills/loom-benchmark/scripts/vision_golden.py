@@ -11,8 +11,11 @@ OpenAI chat request (an image_url part + a text part, greedy, thinking off). Per
     min/max token limits), the image begin/end markers or the image request's chat rendering differ
     from the text path: a port bug, not a near-tie.
   - the reply (raw_from_chat) is compared token by token with llama.cpp's greedy ids; the first
-    divergence must be a near-tie (bench_common.near_tie) by llama.cpp's top-5 log-probs, else it is
-    re-recorded once (llama.cpp flips near-ties run to run) and judged against both.
+    divergence must be a near-tie (bench_common.near_tie) by llama.cpp's top-5 log-probs, else Loom's reply is
+    judged the same way against two more recordings: llama.cpp's re-recording (it flips near-ties run to run) and
+    llama.cpp with its image encoder on the CPU instead of the GPU (`cpu-encoder`: the encoder's rounding moves
+    the first reply token by whole nats on some images, and both are llama.cpp's own numerics). Loom passes if
+    its first divergence from any of them is a near-tie: a vision bug diverges from all of them, early and by a wide gap.
 References go through bench_common.llama_completion: cached in $LLAMA_CACHE, deferred with
 $LLAMA_DEFER (gates.sh fills them with only llama.cpp loaded, started with MMPROJ=).
 Images: a built-in deterministic set (shapes + text, a chart, a dense text card, a photo-like gradient,
@@ -197,11 +200,14 @@ def main():
         got = request(a.url, model, durl, q, a.tokens)
         st, detail = judge(pkg, refs[name], got)
         if st == "FAIL" and not got.get("error"):
-            alt = reference(pkg, a.llama, durl, q, a.tokens, salt="2")
-            if not alt.get("_pending"):
+            for what, extra in (("re-recording", {"salt": "2"}), ("recording with its image encoder on the CPU", {"server": "cpu-encoder"})):
+                alt = reference(pkg, a.llama, durl, q, a.tokens, **extra)
+                if alt.get("_pending"):
+                    continue
                 st2, d2 = judge(pkg, alt, got)
                 if st2 == "PASS":
-                    st, detail = "PASS", d2 + " (matches llama.cpp's re-recording)"
+                    st, detail = "PASS", f"{d2} (matches llama.cpp's {what}; plain recording: {detail})"
+                    break
         print(f"{st} {name} {size}: {detail}", flush=True)
         rows.append({"case": name, "status": st, "detail": detail, "loom": got.get("reasoning", "") + got.get("content", ""),
                      "llama": refs[name].get("content", "")})
