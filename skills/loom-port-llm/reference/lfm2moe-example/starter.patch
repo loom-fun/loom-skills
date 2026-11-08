@@ -373,10 +373,10 @@
  RD = cfg.get("rope_dims") or D
  qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
  kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
-@@ -1157,225 +1157,106 @@
-     if ow is not None:
-         cases.append(cases[-1].replace("@flash_prefill {", "@flash_prefill_window {").replace("%sliding = check.literal value(0)", "%sliding = check.literal value(1)")
-                      .replace('path("f_o.npy")', 'path("f_ow.npy")'))
+@@ -1186,225 +1186,106 @@
+ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (not WIN or not cfg.get("head_dim_swa")):
+     flash_cases("g_attention_flash2", D, KVH, KVH * D, D ** -0.5, WIN)
+ 
 -# 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
 -# gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
 -# bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
