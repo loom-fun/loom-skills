@@ -1059,7 +1059,7 @@ def _prefetch_stages(text):
     bar = next(i for i in range(head, len(lines)) if lines[i].strip().startswith("kernel.barrier"))
     body = lines[head + 1:bar]
     defs = lambda ln: re.findall(r"%\w+", ln.split(" = ", 1)[0]) if " = " in ln else []
-    is_load = lambda ln: ".load " in ln or re.search(r"func\.call @\w+_values\(", ln)
+    is_load = lambda ln: ".load " in ln   # helper-decoded formats (func.call @g_<fmt>_values) keep their weight loads in place
     need, chain = set(), []
     for ln in reversed(body):   # backward slice of the loads: the lines they (transitively) depend on
         if is_load(ln) or need.intersection(defs(ln)):
@@ -1091,7 +1091,7 @@ def _prefetch_stages(text):
            + ", ".join(t for _, t in loads) + ") {")
     pre = ["  %pf_last = index.sub %k_steps, %c1 : index"] + ["  " + ln.strip() for ln in copy("_p", "%c0")]
     nxt = ["    %pf_step1 = index.add %step, %c1 : index", "    %pf_min = index.min %pf_step1, %pf_last : index",
-                 "    %pf_next = index.assume %pf_min [lt(%pf_min, %k_steps)] : index"] + \
+           "    %pf_next = index.assume %pf_min [lt(%pf_min, %k_steps)] : index"] + \
           ["    " + ln.strip() for ln in copy("_n", "%pf_next")]
     end = next(i for i in range(bar + 1, len(lines)) if lines[i].startswith("    scf.yield ") and lines[i + 1] == "  }")
     y = re.match(r"    scf\.yield (.*) : (.*)$", lines[end])
