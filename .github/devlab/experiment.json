@@ -12,6 +12,14 @@
     "ktest",
     "gates:full"
    ]
+  },
+  {
+   "name": "q4i-pr136",
+   "build": {},
+   "ref": "de19a110f720fe8260ae988fbd066112fe4cb181",
+   "steps": [
+    "gates:full"
+   ]
   }
  ]
 }
