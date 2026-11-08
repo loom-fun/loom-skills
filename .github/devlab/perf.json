@@ -1,37 +1,16 @@
 {
  "_comment": "Temporary: DevLab perf sessions on regenerated cards.",
- "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom",
- "memory_bytes": 56000000000,
+ "card": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
+ "memory_bytes": 81000000000,
  "kit": null,
- "llamacpp": "b1370",
+ "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "vl4",
-   "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom",
-   "memory_bytes": 56000000000,
+   "name": "nb",
+   "card": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
+   "memory_bytes": 81000000000,
    "kit": null,
-   "llamacpp": "b1370",
-   "llama_spec": "--spec-type ngram-simple",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "llama:2",
-    "llama:2:long",
-    "c4:card",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "vl8",
-   "card": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom",
-   "memory_bytes": 59000000000,
-   "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1369",
    "llama_spec": "--spec-type ngram-simple",
    "variants": [
     {
