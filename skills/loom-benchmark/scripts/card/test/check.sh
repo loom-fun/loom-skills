@@ -293,7 +293,15 @@ assert merged_prs('X', lambda p: []) == []   # a plain orphan commit: no PR
 def wave(files):   # an open PR (a campaign wave) that changes only the given files
     return lambda path: ([{'number': 7, 'merged_at': None}] if path.endswith('/pulls') else [{'filename': f} for f in files])
 assert merged_prs('H', wave(['.github/devlab/port.json']))[0]['merged_at']   # config only: the base generated the programs
-assert not merged_prs('H', wave(['.github/devlab/port.json', 'skills/x.py']))[0]['merged_at']" "$here/../../../../loom-org/scripts" "$tmp/flint" "$tmp/skills" \
+assert not merged_prs('H', wave(['.github/devlab/port.json', 'skills/x.py']))[0]['merged_at']
+from org_status import changed_files   # a temporary DevLab commit on top of main: config only counts as main, skills/ stays flagged
+cmp = lambda files: (lambda path: {'files': [{'filename': f} for f in files]})
+assert changed_files('T', cmp(['.github/devlab/port.json'])) == ['.github/devlab/port.json']
+r['generator'] = g('side')
+none = lambda c: []
+assert consistency_checks(r, ok, sys.argv[3], none, lambda c: ['.github/devlab/port.json', '.github/devlab/perf.json']) == []
+assert len(consistency_checks(r, ok, sys.argv[3], none, lambda c: ['.github/devlab/port.json', 'skills/x.py'])) == 1
+assert consistency_checks(r, ok, sys.argv[3], none, lambda c: None) != [] and consistency_checks(r, ok, sys.argv[3], lambda c: None, lambda c: None) == []" "$here/../../../../loom-org/scripts" "$tmp/flint" "$tmp/skills" \
   && echo "OK   org_status checks: nightly entry matches the card, generator commit is on main or in a merged PR" \
   || { echo "FAIL org_status checks: nightly/generator consistency flags are wrong"; bad=1; }
 exit $bad

@@ -25,7 +25,8 @@ For each model repo in the org, reads its model.json, model.json.lock, llm_confi
             (a commit of no merged PR: a card built from an unmerged branch silently loses features when regenerated), a card missing from
             .github/nightly-models.json, or its entry's memory_bytes / llamacpp build differs from the card's own
             (--nightly FILE, default the checkout's origin/main copy; --skills-repo DIR, default this checkout). A generator
-            commit is on main if it is an ancestor of main or belongs to a merged PR (gh api; squash merges; an Actions merge-ref commit counts as its PR head); unknown
+            commit is on main if it is an ancestor of main or belongs to a merged PR (gh api; squash merges; an Actions merge-ref commit counts as its PR head), or changes only .github/devlab/
+            config on top of main (a temporary DevLab commit); unknown
             (no network) never flags
 With --targets (rank_models.py output, {"models": [...]}, or a plain list of such entries or of model ids; a
 missing rank is the entry's position, 1-based), matches repos to target models by the checkpoint's base model and assigns
@@ -99,7 +100,13 @@ def merged_prs(commit, get=gh_json):
     return out if prs is not None else None
 
 
-def on_main(repo_dir, commit, pulls=merged_prs):
+def changed_files(commit, get=gh_json):
+    """Paths the commit changes relative to main (GitHub compare from the merge-base), or None when unknown."""
+    c = get(f"compare/main...{commit}?per_page=100")
+    return [f["filename"] for f in c["files"]] if c and c.get("files") is not None else None
+
+
+def on_main(repo_dir, commit, pulls=merged_prs, changed=changed_files):
     """Is commit on main? True when it is an ancestor of the skills repo's main (origin/main when present) or belongs
     to a merged PR (squash merges leave PR-branch commits off main's history). False when neither holds; None when
     unknown (no such ref in the checkout and the PR lookup failed): unknown never flags."""
@@ -110,18 +117,21 @@ def on_main(repo_dir, commit, pulls=merged_prs):
                 return True
             break
     prs = pulls(commit)
-    if prs is None:
-        return None
-    return any(p.get("merged_at") for p in prs)
+    if prs and any(p.get("merged_at") for p in prs):
+        return True
+    files = changed(commit)   # only .github/devlab/ config on top of main: the programs came from main's code
+    if files is not None and all(f.startswith(".github/devlab/") for f in files):
+        return True
+    return None if prs is None else False
 
 
-def consistency_checks(r, nightly, skills_repo, pulls=merged_prs):
+def consistency_checks(r, nightly, skills_repo, pulls=merged_prs, changed=changed_files):
     """Flags for repo status r (from assess): generator commit off main, nightly entry missing or not matching the
     card (memory_bytes, llama.cpp build). nightly: {repo: entry}, or None to skip; skills_repo: a git checkout or None."""
     out = []
     if r.get("category") != "A":
         return out
-    if skills_repo and r.get("generator") and on_main(skills_repo, r["generator"], pulls) is False:
+    if skills_repo and r.get("generator") and on_main(skills_repo, r["generator"], pulls, changed) is False:
         out.append(f"generator {r['generator'][:8]} is not on main")
     if nightly is not None:
         e = nightly.get(r["repo"])
