@@ -1,10 +1,11 @@
 {
- "_comment": "Temporary: full gates on Bolt-E4B regenerated from main (not for merge).",
+ "_comment": "Temporary: full gates, Bolt-E4B regenerated from main and the published Laguna card (not for merge).",
  "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
  "memory_bytes": 36000000000,
  "kit": "gemma4",
  "llamacpp": "b1368",
  "variants": [
-  {"name": "bolt-main", "build": {}, "steps": ["gates:full"]}
+  {"name": "bolt-main", "build": {}, "steps": ["gates:full"]},
+  {"name": "laguna-card", "card": "loom-fun/ggml-org-Laguna-XS-2.1-loom", "memory_bytes": 81000000000, "kit": null, "llamacpp": "b1370", "steps": ["gates:full"]}
  ]
 }
