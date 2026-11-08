@@ -6,22 +6,30 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "flashoff",
-   "build": {
-    "FLASH_OFF": "1"
-   },
+   "name": "pbase",
+   "build": {},
    "steps": [
-    "consistency:40:llama"
+    "pairs2:4"
    ]
   },
   {
-   "name": "flashoff_b",
+   "name": "pflashoff",
    "build": {
     "FLASH_OFF": "1"
    },
    "steps": [
-    "consistency:40:llama"
+    "pairs2:4"
    ]
+  },
+  {
+   "name": "pd0",
+   "build": {},
+   "steps": [
+    "pairs2:4"
+   ],
+   "execution": {
+    "draft_depth": 0
+   }
   }
  ]
 }

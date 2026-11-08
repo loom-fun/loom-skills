@@ -195,6 +195,11 @@ for s in $steps; do
       "$T" "$here/.github/scripts/stagger_probe.py" "$url" --model "$model" --reps "${p1:-6}" > "$out/stagger.log" 2>&1
       grep -c "DIFF" "$out/stagger.log" | sed 's/^/DIFF lines: /'; head -3 "$out/stagger.log"
       res[$s]="text DIFF lines $(grep -c 'text DIFF' "$out/stagger.log"), logprob-bit differences $(grep -vc 'bit difference None' "$out/stagger.log")";;
+    pairs2)
+      curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
+      step "pair probe x $p1"
+      "$T" "$here/.github/scripts/pair_probe.py" "$url" --model "$model" --reps "${p1:-4}" > "$out/pair.log" 2>&1
+      res[$s]=$(tail -1 "$out/pair.log")" ("$(grep -c differs "$out/pair.log")" schedules)";;
     admit)
       # Admission only: a needle prompt of N tokens on a fresh server; admitted (it runs) or refused (503), then cancelled
       [ -f "$LOOM_SERVE_STATE/exp-$name.pid" ] && "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
