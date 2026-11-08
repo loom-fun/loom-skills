@@ -115,11 +115,17 @@ def load_json(path):
         return json.load(f)
 
 
+_QUANT = r"(?<![A-Za-z0-9])((?:UD-)?I?Q[0-9]%s|BF16|F16|F32)(?![a-z0-9])"
+
+
 def quant_of(filename):
-    """The quantization in a GGUF file name (Q4_K_M, UD-Q5_K_M, Q8_0, BF16, ...), or None."""
+    """The quantization in a GGUF file name (Q4_K_M, UD-Q5_K_M, Q8_0, BF16, ...), or None. A name written entirely in
+    lower case (gguf-my-repo: q4_k_m) is read as upper case, its quant needing an underscore part (q4-k-m is none)."""
     stem = os.path.basename(filename)
     stem = stem[:-5] if stem.lower().endswith(".gguf") else stem
-    found = re.findall(r"(?<![A-Za-z0-9])((?:UD-)?I?Q[0-9](?:_[0-9A-Z]+)*|BF16|F16|F32)(?![a-z0-9])", stem)
+    found = re.findall(_QUANT % r"(?:_[0-9A-Z]+)*", stem)
+    if not found and stem == stem.lower():
+        found = re.findall(_QUANT % r"(?:_[0-9A-Z]+)+", stem.upper())
     return found[-1] if found else None
 
 

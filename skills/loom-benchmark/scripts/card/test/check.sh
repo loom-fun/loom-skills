@@ -253,4 +253,8 @@ for n in flint d1; do
   py "$C/render_card.py" --check "$tmp/$n" "$tmp/$n/README.md" >/dev/null \
     || { echo "FAIL $n: expected/README.md is not the render of expected/info.json"; bad=1; }
 done
+# quant_of: any-case names (gguf-my-repo writes q4_k_m) without loosening the boundary guard
+got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+print(*[c.quant_of(n) for n in ('hyperclovax-1.5b-q4_k_m.gguf', 'x-Q4_K_Mfoo', 'x-Q4_K_M_foo', 'model-q4-k-m', 'x-Q8_0-q4_0')])" "$C")
+[ "$got" = "Q4_K_M Q4_K Q4_K_M None Q8_0" ] && echo "OK   quant_of" || { echo "FAIL quant_of: $got"; bad=1; }
 exit $bad
