@@ -106,7 +106,12 @@ separately: `LEVEL=full gates.sh` on the same build re-uses every gate that pass
   requests and to llama-server `--mmproj` (gates.sh sets `MMPROJ` from the package, so the lazily
   started server loads it) as the package's own rendering + image. Prompt token counts must be equal
   (resize rule, token limits, image markers, the image request's chat rendering); replies must match
-  token by token up to a near-tie. Verified: Bolt-E4B, Gemma-4-E2B, Qwen3.5-0.8B, Muse-Glimmer-30B.
+  token by token up to a near-tie. A reply that fails is judged against two more llama.cpp recordings, the
+  re-recording and one with the image encoder on the CPU (`--no-mmproj-offload`; `llama_fill.py` restarts the
+  server for it, `bench_common.SERVER_VARIANTS`): the encoder's rounding alone moved the first token of a text
+  image by 5 nats (Ornith-1.5-35B-A3B `wide`: 'THE' by 2.4 nats on the GPU encoder, 'The' by 2.8 on the CPU one).
+  The two are llama.cpp's own numerics, so following either one passes; a vision bug diverges from both.
+  Below llama.cpp's own encoder noise a bug is invisible to this gate. Verified: Bolt-E4B, Gemma-4-E2B, Qwen3.5-0.8B, Muse-Glimmer-30B.
 - **One model at a time** (GPU memory is system RAM): the gates run with only Loom loaded; every
   llama.cpp reference missing from the cache is deferred, then gates.sh stops Loom (remembering its
   command line), lets `llama_fill.py` answer them with only llama.cpp loaded, restarts Loom and re-runs

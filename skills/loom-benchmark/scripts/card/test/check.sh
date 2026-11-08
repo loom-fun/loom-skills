@@ -253,4 +253,55 @@ for n in flint d1; do
   py "$C/render_card.py" --check "$tmp/$n" "$tmp/$n/README.md" >/dev/null \
     || { echo "FAIL $n: expected/README.md is not the render of expected/info.json"; bad=1; }
 done
+# quant_of: any-case names (gguf-my-repo writes q4_k_m) without loosening the boundary guard
+got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+print(*[c.quant_of(n) for n in ('hyperclovax-1.5b-q4_k_m.gguf', 'x-Q4_K_Mfoo', 'x-Q4_K_M_foo', 'model-q4-k-m', 'x-Q8_0-q4_0')])" "$C")
+[ "$got" = "Q4_K_M Q4_K Q4_K_M None Q8_0" ] && echo "OK   quant_of" || { echo "FAIL quant_of: $got"; bad=1; }
+# org_status consistency checks: a nightly entry that differs from the card (memory_bytes, llama.cpp build) or is missing,
+# and a generator commit that is not on main: not an ancestor of main and in no merged PR (a throwaway git repo with one
+# commit on main and one on a branch; the PR lookup is injected: merged, open, unknown)
+git init -q -b main "$tmp/skills" && git -C "$tmp/skills" -c user.name=t -c user.email=t@t commit -q --allow-empty -m m
+git -C "$tmp/skills" checkout -q -b side && git -C "$tmp/skills" -c user.name=t -c user.email=t@t commit -q --allow-empty -m s
+py -c "import json, subprocess, sys; sys.path.insert(0, sys.argv[1]); from org_status import assess, consistency_checks
+r = assess('loom-fun/ggml-org-Flint-loom', sys.argv[2])
+g = lambda ref: subprocess.check_output(['git', '-C', sys.argv[3], 'rev-parse', ref], text=True).strip()
+card = {'memory_bytes': r['memory_bytes'], 'llamacpp': r['llamacpp']}
+assert card == {'memory_bytes': 67000000000, 'llamacpp': 'b1355'}, card
+ok = {r['repo']: dict(repo=r['repo'], **card)}
+r['generator'] = g('main')
+assert consistency_checks(r, ok, sys.argv[3]) == []
+assert consistency_checks(r, None, None) == []
+assert len(consistency_checks(r, {}, None)) == 1
+assert len(consistency_checks(r, {r['repo']: dict(ok[r['repo']], memory_bytes=69000000000)}, None)) == 1
+assert len(consistency_checks(r, {r['repo']: dict(ok[r['repo']], llamacpp='b1368')}, None)) == 1
+r['generator'] = g('side')
+assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': None}])) == 1
+assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [])) == 1
+assert consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': '2026-11-08T00:00:00Z'}]) == []   # squash-merged
+assert consistency_checks(r, ok, sys.argv[3], lambda c: None) == []   # unknown never flags
+from org_status import merged_prs
+def fake(merged):   # GitHub: a refs/pull/N/merge commit is in no PR; its second parent (the PR head) is in the PR
+    def get(path):
+        if path == 'commits/M/pulls': return []
+        if path == 'commits/M': return {'commit': {'message': 'Merge H into B'}, 'parents': [{'sha': 'B'}, {'sha': 'H'}]}
+        if path == 'commits/H/pulls': return [{'merged_at': merged}]
+        return None
+    return get
+assert merged_prs('M', fake('2026-11-08')) == [{'merged_at': '2026-11-08'}]   # merge-ref of a merged PR
+assert merged_prs('M', fake(None)) == [{'merged_at': None}]   # of an open one: still flagged
+assert merged_prs('X', lambda p: []) == []   # a plain orphan commit: no PR
+def wave(files):   # an open PR (a campaign wave) that changes only the given files
+    return lambda path: ([{'number': 7, 'merged_at': None}] if path.endswith('/pulls') else [{'filename': f} for f in files])
+assert merged_prs('H', wave(['.github/devlab/port.json']))[0]['merged_at']   # config only: the base generated the programs
+assert not merged_prs('H', wave(['.github/devlab/port.json', 'skills/x.py']))[0]['merged_at']
+from org_status import changed_files   # a temporary DevLab commit on top of main: config only counts as main, skills/ stays flagged
+cmp = lambda files: (lambda path: {'files': [{'filename': f} for f in files]})
+assert changed_files('T', cmp(['.github/devlab/port.json'])) == ['.github/devlab/port.json']
+r['generator'] = g('side')
+none = lambda c: []
+assert consistency_checks(r, ok, sys.argv[3], none, lambda c: ['.github/devlab/port.json', '.github/devlab/perf.json']) == []
+assert len(consistency_checks(r, ok, sys.argv[3], none, lambda c: ['.github/devlab/port.json', 'skills/x.py'])) == 1
+assert consistency_checks(r, ok, sys.argv[3], none, lambda c: None) != [] and consistency_checks(r, ok, sys.argv[3], lambda c: None, lambda c: None) == []" "$here/../../../../loom-org/scripts" "$tmp/flint" "$tmp/skills" \
+  && echo "OK   org_status checks: nightly entry matches the card, generator commit is on main or in a merged PR" \
+  || { echo "FAIL org_status checks: nightly/generator consistency flags are wrong"; bad=1; }
 exit $bad
