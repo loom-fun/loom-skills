@@ -71,6 +71,7 @@ def main():
     ap.add_argument("--top-probes", type=int, default=1, help="probes at the largest size (a full-context prefill is the slow part)")
     ap.add_argument("--llama-max", type=int, default=65536, help="compare with llama.cpp only up to this many tokens")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--timeout", type=float, default=7200, help="seconds without a response byte before a probe fails")
     ap.add_argument("--no-over-capacity", action="store_true")
     a = ap.parse_args()
     P = Package(a.pkg)
@@ -100,7 +101,7 @@ def main():
         for probe in range(a.top_probes if n == max(sizes) and len(sizes) > 1 else a.probes):
             prompt, needles = haystack(P, ids, n, n * 31 + probe)
             rec = {"n": n, "probe": probe}
-            r = stream(a.url, P.model_id, [{"role": "user", "content": prompt}], a.max_tokens, extra, timeout=7200)
+            r = stream(a.url, P.model_id, [{"role": "user", "content": prompt}], a.max_tokens, extra, timeout=a.timeout)
             text = r["text"]
             rec.update(prompt_tokens=r["prompt_tokens"] or None, status=r["status"], ttft_s=r["ttft"],
                        finish=r.get("finish"), found=sum(v in text for v in needles.values()), error=r.get("error"),
