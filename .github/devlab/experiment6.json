@@ -1,0 +1,63 @@
+{
+ "_comment": "flash2 token subtiles at G = 4: TTFT of one prompt per size on a fresh server, 1 vs 2 tiles (main's starter)",
+ "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+ "memory_bytes": 62000000000,
+ "kit": null,
+ "llamacpp": "b1369",
+ "variants": [
+  {
+   "name": "ts1-16k",
+   "build": {
+    "FLASH2_TS": "1"
+   },
+   "steps": [
+    "needle:16384:13000"
+   ]
+  },
+  {
+   "name": "ts1-32k",
+   "build": {
+    "FLASH2_TS": "1"
+   },
+   "steps": [
+    "needle:32768:13000"
+   ]
+  },
+  {
+   "name": "ts1-64k",
+   "build": {
+    "FLASH2_TS": "1"
+   },
+   "steps": [
+    "needle:65536:13000"
+   ]
+  },
+  {
+   "name": "ts2-16k",
+   "build": {
+    "FLASH2_TS": "2"
+   },
+   "steps": [
+    "needle:16384:13000"
+   ]
+  },
+  {
+   "name": "ts2-32k",
+   "build": {
+    "FLASH2_TS": "2"
+   },
+   "steps": [
+    "needle:32768:13000"
+   ]
+  },
+  {
+   "name": "ts2-64k",
+   "build": {
+    "FLASH2_TS": "2"
+   },
+   "steps": [
+    "needle:65536:13000"
+   ]
+  }
+ ]
+}
