@@ -1,49 +1,36 @@
 {
- "_comment": "flash2 token subtiles (FLASH2_TS): prefill A/B against origin/main's starter, same runner per job.",
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "memory_bytes": 17000000000,
- "kit": null,
- "llamacpp": "b1369",
+ "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
+ "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+ "memory_bytes": 34000000000,
+ "kit": "gemma4",
+ "llamacpp": "b1368",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
  "jobs": [
   {
-   "name": "q8b",
-   "card": "loom-fun/unsloth-Qwen3-8B-loom",
-   "memory_bytes": 28000000000,
+   "name": "tm-off",
+   "thinking": "off",
    "variants": [
-    {"name": "base", "build": {}, "ref": "origin/main"},
-    {"name": "ts2", "build": {"FLASH2_TS": "2"}},
-    {"name": "ts4", "build": {"FLASH2_TS": "4"}}
+    {
+     "name": "new",
+     "build": {}
+    }
    ],
-   "steps": ["ktest:ts2", "perf:base:1:long", "perf:ts2:1:long", "perf:ts4:1:long", "perf:base:1", "perf:ts2:1", "perf:ts4:1"]
+   "steps": [
+    "textmatch:new"
+   ]
   },
   {
-   "name": "q06",
+   "name": "tm-on",
+   "thinking": "on",
    "variants": [
-    {"name": "base", "build": {}, "ref": "origin/main"},
-    {"name": "ts2", "build": {"FLASH2_TS": "2"}},
-    {"name": "ts3", "build": {"FLASH2_TS": "3"}}
+    {
+     "name": "new",
+     "build": {}
+    }
    ],
-   "steps": ["ktest:ts3", "perf:base:1", "perf:ts2:1", "perf:ts3:1", "perf:ts3:1:long", "perf:base:1", "perf:ts2:1"]
-  },
-  {
-   "name": "llama3b",
-   "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
-   "memory_bytes": 29000000000,
-   "variants": [
-    {"name": "base", "build": {}, "ref": "origin/main"},
-    {"name": "ts2", "build": {"FLASH2_TS": "2"}}
-   ],
-   "steps": ["ktest:ts2", "perf:base:1:long", "perf:ts2:1:long", "perf:base:1", "perf:ts2:1"]
-  },
-  {
-   "name": "q30moe",
-   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
-   "memory_bytes": 63000000000,
-   "variants": [
-    {"name": "base", "build": {}, "ref": "origin/main"},
-    {"name": "ts2", "build": {"FLASH2_TS": "2"}}
-   ],
-   "steps": ["ktest:ts2", "perf:base:1:long", "perf:ts2:1:long", "perf:base:1", "perf:ts2:1"]
+   "steps": [
+    "textmatch:new"
+   ]
   }
  ]
 }
