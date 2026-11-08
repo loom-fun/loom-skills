@@ -1,0 +1,39 @@
+{
+ "_comment": "capped gemma4 builds from main + 2 GiB capped workspace reserve: a full-context request on a fresh server, full gates",
+ "card": "loom-fun/unsloth-gemma-4-31B-it-loom",
+ "memory_bytes": 80000000000,
+ "kit": "gemma4",
+ "llamacpp": "b1370",
+ "variants": [
+  {
+   "name": "g31-ws",
+   "build": {},
+   "build_args": [
+    "--context",
+    "0",
+    "--pool",
+    "0"
+   ],
+   "steps": [
+    "admit:52148",
+    "gates:full"
+   ]
+  },
+  {
+   "name": "g26-ws",
+   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "memory_bytes": 81000000000,
+   "build": {},
+   "build_args": [
+    "--context",
+    "0",
+    "--pool",
+    "0"
+   ],
+   "steps": [
+    "admit:200628",
+    "gates:full"
+   ]
+  }
+ ]
+}
