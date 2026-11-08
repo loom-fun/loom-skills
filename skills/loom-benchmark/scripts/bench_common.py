@@ -194,6 +194,10 @@ def _gguf_fingerprint(path):
 _FP = {}
 
 
+# llama-server started under another numerics it ships (LLAMA_SPEC arguments), for a request with `"_server": NAME`.
+SERVER_VARIANTS = {"cpu-encoder": "--no-mmproj-offload"}   # the image encoder on the CPU, not offloaded to the GPU
+
+
 def llama_completion(url, body, pkg=None, salt="", timeout=7200):
     """llama.cpp /completion with a persistent on-disk cache.
 
@@ -226,6 +230,11 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
             f.write(json.dumps({"key": key, "gguf": gguf, "body": body, "salt": salt}) + "\n")
         return {"_suspect": "deferred: answered by llama_fill.py, then the gate re-runs", "_pending": True,
                 "content": "", "completion_probabilities": []}
+    variant = body.get("_server")   # SERVER_VARIANTS: only llama_fill.py starts such a server; a running one cannot be switched
+    if variant and os.environ.get("LLAMA_FILL_VARIANT") != variant:
+        return {"_suspect": f"needs a llama-server started as {variant!r} (llama_fill.py)", "_pending": True,
+                "content": "", "completion_probabilities": []}
+    body = {k: v for k, v in body.items() if k != "_server"}
     ensure_llama(url)
     mb = body.get("_micro_batch")   # llama_views: the prompt in micro-batches of at most mb tokens
     for attempt in range(2):

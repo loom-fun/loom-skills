@@ -7,12 +7,14 @@ gates.sh runs the gates with only Loom loaded and $LLAMA_DEFER set: every llama.
 from the cache is written to a pending file instead of being requested. With Loom stopped, this script
 starts llama-server ($LLAMA_START, on the first request), fills the cache with every pending request
 and returns; gates.sh then stops llama-server, restarts Loom and re-runs the gates from the cache.
+A request with `"_server": NAME` (bench_common.SERVER_VARIANTS) is answered last, by a llama-server restarted
+with those arguments ($LLAMA_STOP stops the first one; without it such requests are left unanswered).
 """
 import json
 import os
 import sys
 
-from bench_common import llama_completion
+from bench_common import SERVER_VARIANTS, llama_completion
 
 url, files = sys.argv[1], sys.argv[2:]
 os.environ.pop("LLAMA_DEFER", None)
@@ -22,7 +24,17 @@ for path in files:
         for line in open(path):
             r = json.loads(line)
             todo.setdefault(r["key"], r)
-for i, r in enumerate(todo.values()):
+queue = sorted(todo.values(), key=lambda r: r["body"].get("_server") or "")   # the default server's requests first
+started = None
+for i, r in enumerate(queue):
+    variant = r["body"].get("_server")
+    if variant != started and variant:
+        if not os.environ.get("LLAMA_STOP"):
+            print(f"[fill {i + 1}/{len(todo)}] left for a server started as {variant!r}: $LLAMA_STOP is not set", flush=True)
+            continue
+        os.system(os.environ["LLAMA_STOP"])
+        os.environ.update(LLAMA_FILL_VARIANT=variant, LLAMA_FILL_SPEC=SERVER_VARIANTS[variant])
+        started = variant
     os.environ["LLAMA_GGUF"] = r["gguf"] or ""
     out = llama_completion(url, r["body"], None, r["salt"])
     n = len(out.get("tokens") or out.get("completion_probabilities") or [])
