@@ -1,36 +1,25 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "Temporary (do not merge): DevLab perf sessions for the regenerated Qwen3.5-4B and HyperCLOVAX cards; Qwen3.5-4B also A/B against the previous generator's programs on the same runner.",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "textmatch:new"
-   ]
+   "name": "q354",
+   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
+   "memory_bytes": 28000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 5 -ngld 99",
+   "variants": [{"name": "card"}, {"name": "old", "build": {}, "ref": "62c8af3"}],
+   "steps": ["perf:card:2", "perf:card:2:long", "perf:old:2:long", "llama:2", "llama:2:long", "c4:card", "c4:old", "llamac4"]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "textmatch:new"
-   ]
+   "name": "hcx",
+   "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+   "memory_bytes": 24000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "llama_spec": "--spec-type ngram-simple",
+   "variants": [{"name": "card"}],
+   "steps": ["perf:card:2", "perf:card:2:long", "llama:2", "llama:2:long", "c4:card", "llamac4"]
   }
  ]
 }
