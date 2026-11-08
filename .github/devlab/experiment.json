@@ -1,5 +1,5 @@
 {
- "_comment": "Temporary: kernel tests and dev gates of the batch-invariant flash2 prefill (PR 166) across kernel variants.",
+ "_comment": "Temporary: kernel tests of PR 166 (iteration branch).",
  "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
  "memory_bytes": 62000000000,
  "kit": null,
@@ -12,8 +12,7 @@
    "llamacpp": "b1370",
    "build": {},
    "steps": [
-    "ktest",
-    "consistency:6:llama"
+    "ktest"
    ]
   },
   {
@@ -23,8 +22,7 @@
    "llamacpp": "b1370",
    "build": {},
    "steps": [
-    "ktest",
-    "gates:dev"
+    "ktest"
    ],
    "kit": "gpt-oss"
   },
@@ -35,8 +33,7 @@
    "llamacpp": "b1369",
    "build": {},
    "steps": [
-    "ktest",
-    "gates:dev"
+    "ktest"
    ],
    "kit": "gemma4"
   },
@@ -47,8 +44,7 @@
    "llamacpp": "b1369",
    "build": {},
    "steps": [
-    "ktest",
-    "gates:dev"
+    "ktest"
    ]
   },
   {
@@ -58,8 +54,7 @@
    "llamacpp": "b1369",
    "build": {},
    "steps": [
-    "ktest",
-    "gates:dev"
+    "ktest"
    ]
   },
   {
@@ -69,8 +64,7 @@
    "llamacpp": "b1368",
    "build": {},
    "steps": [
-    "ktest",
-    "gates:dev"
+    "ktest"
    ]
   },
   {
@@ -80,8 +74,7 @@
    "llamacpp": "b1370",
    "build": {},
    "steps": [
-    "ktest",
-    "gates:dev"
+    "ktest"
    ],
    "kit": "lfm2moe"
   },

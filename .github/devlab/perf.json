@@ -1,116 +1,35 @@
 {
- "_comment": "Temporary: same-runner A/B of prefill (1k-32k) and 4-stream decode, main vs the batch-invariant flash2 prefill (PR 166).",
- "card": "loom-fun/unsloth-Qwen3-8B-loom",
- "memory_bytes": 29000000000,
+ "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
+ "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+ "memory_bytes": 34000000000,
+ "kit": "gemma4",
  "llamacpp": "b1368",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
  "jobs": [
   {
-   "name": "q30",
-   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
-   "memory_bytes": 63000000000,
-   "llamacpp": "b1370",
+   "name": "tm-off",
+   "thinking": "off",
    "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
     {
      "name": "new",
      "build": {}
     }
    ],
    "steps": [
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "c4:main",
-    "c4:new",
-    "perf:new:2:long",
-    "perf:main:2:long",
-    "c4:new",
-    "c4:main"
+    "textmatch:new"
    ]
   },
   {
-   "name": "gptoss",
-   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
-   "memory_bytes": 28000000000,
-   "llamacpp": "b1370",
+   "name": "tm-on",
+   "thinking": "on",
    "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
     {
      "name": "new",
      "build": {}
     }
    ],
    "steps": [
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "c4:main",
-    "c4:new",
-    "perf:new:2:long",
-    "perf:main:2:long",
-    "c4:new",
-    "c4:main"
-   ],
-   "kit": "gpt-oss"
-  },
-  {
-   "name": "q8",
-   "card": "loom-fun/unsloth-Qwen3-8B-loom",
-   "memory_bytes": 29000000000,
-   "llamacpp": "b1368",
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "c4:main",
-    "c4:new",
-    "perf:new:2:long",
-    "perf:main:2:long",
-    "c4:new",
-    "c4:main"
-   ]
-  },
-  {
-   "name": "coder",
-   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
-   "memory_bytes": 62000000000,
-   "llamacpp": "b1370",
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "c4:main",
-    "c4:new",
-    "perf:new:2:long",
-    "perf:main:2:long",
-    "c4:new",
-    "c4:main"
+    "textmatch:new"
    ]
   }
  ]
