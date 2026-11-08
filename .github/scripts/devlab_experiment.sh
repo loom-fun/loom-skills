@@ -230,6 +230,24 @@ EOF
       FORCE=1 LEVEL=$p1 "$B/gates.sh" "$pkg" "$url" "$gguf" "$D/bench" "$LLAMA_PORT" > "$out/gates.out" 2>&1; rc=$?
       cp "$D"/bench/gates.json "$D"/bench/gates_*.log "$out/" 2>/dev/null
       res[$s]=$(grep -h "^GATES" "$out/gates.out" | tail -1 | cut -c1-300); [ -n "${res[$s]}" ] || res[$s]="rc=$rc";;
+    tokprobe)   # TEMPORARY: loom-serve's prompt token count vs the HF tokenizer's on probe texts
+      curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
+      step "tokprobe"
+      (cd "$B" && "$T" - "$pkg" "$url" <<'EOF') > "$out/tokprobe.log" 2>&1; cat "$out/tokprobe.log"; res[$s]=done;;
+import sys, requests
+from bench_common import Package
+P = Package(sys.argv[1]); url = sys.argv[2]
+words = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon".split()
+texts = {f"{k} words": " ".join(words[i % 20] for i in range(k)) for k in (30, 62, 63, 64, 65, 66, 100, 130, 200)}
+texts.update({f"{k} words, digit every 20": " ".join(words[i % 20] + (" 7" if i % 20 == 19 else "") for i in range(k)) for k in (100, 200)})
+texts["punct 100"] = ", ".join(words[i % 20] for i in range(100))
+texts["json tools-like"] = '{"type": "function", "function": {"name": "get_weather", "description": "Weather for a city.", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}} ' * 6
+for name, t in texts.items():
+    msgs = [{"role": "user", "content": t}]
+    n = requests.post(url + "/v1/chat/completions/input_tokens", json={"model": P.model_id, "messages": msgs}).json().get("input_tokens")
+    hf = len(P.ids(P.render_messages(msgs)))
+    print(f"{name:28s} loom {n} hf {hf} diff {None if n is None else n - hf}")
+EOF
     *) echo "unknown step $s"; res[$s]=ERROR;;
   esac
   echo "RESULT $name $s: ${res[$s]}"
