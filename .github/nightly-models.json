@@ -26,6 +26,18 @@
    ]
   },
   {
+   "repo": "loom-fun/ggml-org-Muse-Glimmer-30B-loom",
+   "slug": "ggml-org-muse-glimmer-30b",
+   "memory_bytes": 39000000000,
+   "kit": "glimmer",
+   "llamacpp": "b1369",
+   "features": [
+    "vision",
+    "draft",
+    "thinking-always"
+   ]
+  },
+  {
    "repo": "loom-fun/ggml-org-Flint-loom",
    "slug": "flint",
    "memory_bytes": 67000000000,
