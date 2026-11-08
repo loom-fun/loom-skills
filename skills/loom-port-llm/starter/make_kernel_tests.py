@@ -1527,9 +1527,9 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
 }
 """
 
-    def invariance_case(sliding):
+    def invariance_case(sliding, start=5):   # start: X's first position mod 16, or 'zero' (a prompt's own start)
         n, QD = 100, QH * D
-        p0 = (DEEP - 64 if DEEP else 900) + 5
+        p0 = 0 if start == 'zero' else (DEEP - 64 if DEEP else 896) + start
         x_q = (rng.standard_normal((n, QH, D)) * 2.5).astype(np.float32); x_g = rng.standard_normal((n, QH, D)).astype(np.float32)
         packings = [(0, 0), (7, 14), (19, 1), (80, 0), (37, 21)]   # tokens of other rows before / after X
         text, ref, t_0 = "", None, None
@@ -1541,15 +1541,15 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
             if k == 0:
                 ref = aliased_ref(q.astype(np.float16).astype(np.float64), info, WIN if sliding else 0)[:n]
                 ref = ref * gate_mul(x_g) if cfg.get("attn_gate") else ref
-                save(f"fi_ref{sliding}", ref.reshape(n, QD).astype(np.float32))
+                save(f"fi_ref{sliding}_{start}", ref.reshape(n, QD).astype(np.float32))
             for nm, arr in (("info", info), ("q", q.reshape(t, QD)), ("g", g.reshape(t, QD))):
-                save(f"fi_{nm}{sliding}_{k}", arr)
+                save(f"fi_{nm}{sliding}_{start}_{k}", arr)
             OT = f"tensor<{t}x{QD}xf32>"; IT = f"tensor<{t}x4xi32>"; XT = f"tensor<{n}x{QD}xf32>"; PT = f"tensor<{t * QH * 64 * D}xf32>"; MT = f"tensor<{t * QH * 64 * 2}xf32>"
             text += f"""  %t{k} = check.literal value({t}) : index
   %skip{k} = check.literal value({a}) : index
-  %q{k} = check.file.read.npy path("fi_q{sliding}_{k}.npy") : {OT}
-  %g{k} = check.file.read.npy path("fi_g{sliding}_{k}.npy") : {OT}
-  %info{k} = check.file.read.npy path("fi_info{sliding}_{k}.npy") : {IT}
+  %q{k} = check.file.read.npy path("fi_q{sliding}_{start}_{k}.npy") : {OT}
+  %g{k} = check.file.read.npy path("fi_g{sliding}_{start}_{k}.npy") : {OT}
+  %info{k} = check.file.read.npy path("fi_info{sliding}_{start}_{k}.npy") : {IT}
   %o{k} = check.generate.fill value(0.0) : {OT}
   %pacc{k} = check.generate.fill value(0.0) : {PT}
   %pml{k} = check.generate.fill value(0.0) : {MT}
@@ -1562,8 +1562,8 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
             if k:
                 text += f"  check.expect.close actual(%x{k}) expected(%x0) atol(0.0) rtol(0.0) nan(different) : {XT}\n"
         XT = f"tensor<{n}x{QD}xf32>"
-        check = f"  %ref = check.file.read.npy path(\"fi_ref{sliding}.npy\") : {XT}\n  check.expect.close actual(%x0) expected(%ref) atol(4.0e-3) rtol(4.0e-3) nan(different) : {XT}\n" if not sliding else ""
-        return f"""check.case public @flash_batch_invariant{'_window' if sliding else ''} {{
+        check = f"  %ref = check.file.read.npy path(\"fi_ref{sliding}_{start}.npy\") : {XT}\n  check.expect.close actual(%x0) expected(%ref) atol(4.0e-3) rtol(4.0e-3) nan(different) : {XT}\n" if not sliding else ""
+        return f"""check.case public @flash_batch_invariant{'_window' if sliding else ''}_s{start} {{
   %layer = check.literal value(0) : index
   %sliding = check.literal value({sliding}) : i32
   %ctx = check.literal value({ctx_a}) : index
@@ -1576,7 +1576,7 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
 }}
 """
     cases.append(COPY_ROWS)
-    cases += [invariance_case(s) for s in ((0, 1) if WIN else (0,))]
+    cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
 
 # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
 # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
