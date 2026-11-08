@@ -1,112 +1,35 @@
 {
- "_comment": "Temporary: regression check of this branch on other MoE / gated delta-net cards.",
- "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
- "memory_bytes": 63000000000,
- "kit": null,
- "llamacpp": "b1370",
+ "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
+ "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+ "memory_bytes": 34000000000,
+ "kit": "gemma4",
+ "llamacpp": "b1368",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
  "jobs": [
   {
-   "name": "q3moe",
-   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
-   "memory_bytes": 63000000000,
-   "kit": null,
-   "llamacpp": "b1370",
+   "name": "tm-off",
+   "thinking": "off",
    "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
     {
      "name": "new",
      "build": {}
     }
    ],
    "steps": [
-    "perf:main:1",
-    "perf:new:1",
-    "perf:main:1",
-    "perf:new:1",
-    "ktest:new",
-    "gates:new:dev"
+    "textmatch:new"
    ]
   },
   {
-   "name": "gptoss",
-   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
-   "memory_bytes": 28000000000,
-   "kit": "gpt-oss",
-   "llamacpp": "b1370",
+   "name": "tm-on",
+   "thinking": "on",
    "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
     {
      "name": "new",
      "build": {}
     }
    ],
    "steps": [
-    "perf:main:1",
-    "perf:new:1",
-    "perf:main:1",
-    "perf:new:1",
-    "ktest:new",
-    "gates:new:dev"
-   ]
-  },
-  {
-   "name": "g4moe",
-   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
-   "memory_bytes": 81000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1370",
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:main:1",
-    "perf:new:1",
-    "perf:main:1",
-    "perf:new:1",
-    "ktest:new",
-    "gates:new:dev"
-   ]
-  },
-  {
-   "name": "q35d",
-   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
-   "memory_bytes": 30000000000,
-   "kit": null,
-   "llamacpp": "b1369",
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:main:1",
-    "perf:new:1",
-    "perf:main:1",
-    "perf:new:1",
-    "ktest:new",
-    "gates:new:dev"
+    "textmatch:new"
    ]
   }
  ]
