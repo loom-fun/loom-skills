@@ -100,10 +100,33 @@ except Exception:
 print(" ".join(dict.fromkeys(out)))
 EOF
 )
-mkdir -p tok
+# A candidate must declare, as special tokens, the GGUF's control tokens its chat template uses: the base model named in
+# a fine-tune's GGUF can lack the chat tokens (Mellum2 base: <|im_start|>/<|im_end|> are plain text there, and loom-serve
+# then finds no terminal marker). The first candidate that does wins; else the first one found, with a warning.
+tok_ok() {
+  "$T" - "$gguf" "$1" <<'EOF'
+import json, sys
+from gguf import GGUFReader
+r = GGUFReader(sys.argv[1]); f = lambda k: r.fields[k].contents() if k in r.fields else None
+toks, types, tpl = f("tokenizer.ggml.tokens") or [], f("tokenizer.ggml.token_type") or [], f("tokenizer.chat_template") or ""
+need = {t for t, ty in zip(toks, types) if ty == 3 and t and t in tpl}
+have = {a["content"] for a in json.load(open(sys.argv[2], encoding="utf-8")).get("added_tokens", []) if a.get("special")}
+missing = sorted(need - have)
+print(f"tokenizer: {sys.argv[2]} lacks the template's special tokens {missing[:6]}" if missing else "", end="")
+sys.exit(1 if missing else 0)
+EOF
+}
+mkdir -p tok; rm -rf tok/cand; first=
 for tr in $tokrepos; do
-  "$hf" download "$tr" tokenizer.json --local-dir tok >/dev/null 2>&1 && { echo "tokenizer from $tr"; break; }
+  "$hf" download "$tr" tokenizer.json --local-dir tok/cand >/dev/null 2>&1 || continue
+  [ -n "$first" ] || { first=$tr; cp tok/cand/tokenizer.json tok/first.json; }
+  if tok_ok tok/cand/tokenizer.json; then mv tok/cand/tokenizer.json tok/tokenizer.json; echo "tokenizer from $tr"; break; fi
+  echo " ($tr)"; rm -rf tok/cand
 done
+if [ ! -f tok/tokenizer.json ] && [ -n "$first" ]; then
+  mv tok/first.json tok/tokenizer.json; echo "WARNING: no candidate declares the chat template's special tokens; tokenizer from $first"
+fi
+rm -rf tok/cand tok/first.json
 [ -f tok/tokenizer.json ] || { echo "no tokenizer.json found in: $tokrepos (download it from the base model into $work/tok)"; exit 2; }
 [ -n "$model_id" ] || model_id=$(echo "$tokrepos" | cut -d' ' -f1)
 
