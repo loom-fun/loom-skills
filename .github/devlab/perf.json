@@ -1,17 +1,38 @@
 {
  "_comment": "Temporary: DevLab perf sessions on regenerated cards.",
- "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
- "memory_bytes": 63000000000,
+ "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom",
+ "memory_bytes": 56000000000,
  "kit": null,
- "llamacpp": "b1368",
+ "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "q4i",
-   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
-   "memory_bytes": 63000000000,
+   "name": "vl4",
+   "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom",
+   "memory_bytes": 56000000000,
    "kit": null,
-   "llamacpp": "b1368",
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
+   "llamacpp": "b1370",
+   "llama_spec": "",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:card",
+    "llamac4"
+   ]
+  },
+  {
+   "name": "vl8",
+   "card": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom",
+   "memory_bytes": 59000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "llama_spec": "",
    "variants": [
     {
      "name": "card"
