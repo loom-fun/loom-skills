@@ -1,15 +1,12 @@
 {
- "_comment": "MoE small expert tile A/B against main, same runner per job (temporary, not for merge).",
+ "_comment": "Flint prefill chunk (build.py --prefill) vs the 1031-token 1k prompt (temporary, not for merge).",
  "card": "loom-fun/ggml-org-Flint-loom",
  "memory_bytes": 69000000000,
  "kit": null,
  "llamacpp": "b1355",
  "jobs": [
   {
-   "name": "flint-ab",
-   "card": "loom-fun/ggml-org-Flint-loom",
-   "memory_bytes": 69000000000,
-   "llamacpp": "b1355",
+   "name": "flint-chunk",
    "variants": [
     {
      "name": "main",
@@ -17,107 +14,31 @@
      "ref": "origin/main"
     },
     {
-     "name": "new",
-     "build": {}
-    },
-    {
-     "name": "t64",
-     "build": {
-      "MOE_TILE32_AVG": "64"
-     }
-    },
-    {
-     "name": "all32",
-     "build": {
-      "MOE_TILE32_AVG": "100000"
-     }
-    }
-   ],
-   "steps": [
-    "perf:main:3",
-    "perf:new:3",
-    "perf:t64:3",
-    "perf:all32:3",
-    "c4:main",
-    "c4:new",
-    "c4:main",
-    "c4:new"
-   ]
-  },
-  {
-   "name": "qwen3-30b-ab",
-   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
-   "memory_bytes": 63000000000,
-   "llamacpp": "b1370",
-   "variants": [
-    {
-     "name": "main",
+     "name": "p1024",
      "build": {},
-     "ref": "origin/main"
+     "ref": "origin/main",
+     "build_args": [
+      "--prefill",
+      "1024"
+     ]
     },
     {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:main:3",
-    "perf:new:3",
-    "c4:main",
-    "c4:new",
-    "c4:main",
-    "c4:new"
-   ]
-  },
-  {
-   "name": "gptoss-ab",
-   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
-   "memory_bytes": 28000000000,
-   "llamacpp": "b1370",
-   "variants": [
-    {
-     "name": "main",
+     "name": "p2048",
      "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "new",
-     "build": {}
+     "ref": "origin/main",
+     "build_args": [
+      "--prefill",
+      "2048"
+     ]
     }
    ],
    "steps": [
     "perf:main:3",
-    "perf:new:3",
-    "c4:main",
-    "c4:new",
-    "c4:main",
-    "c4:new"
-   ],
-   "kit": "gpt-oss"
-  },
-  {
-   "name": "qwen36-ab",
-   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
-   "memory_bytes": 48000000000,
-   "llamacpp": "b1369",
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:main:3",
-    "perf:new:3",
-    "c4:main",
-    "c4:new",
-    "c4:main",
-    "c4:new"
+    "perf:p1024:3",
+    "perf:p2048:3",
+    "perf:main:2:long",
+    "perf:p1024:2:long",
+    "perf:p2048:2:long"
    ]
   }
  ]
