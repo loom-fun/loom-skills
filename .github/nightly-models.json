@@ -454,6 +454,40 @@
    ]
   },
   {
+   "repo": "loom-fun/bartowski-Ornith-1.5-122B-loom",
+   "slug": "ornith-1.5-122b",
+   "memory_bytes": 104000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "vision",
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
+   "slug": "ornith-1.5-35b-a3b",
+   "memory_bytes": 49000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "vision",
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/ggml-org-gemma-3-1b-it-loom",
+   "slug": "gemma-3-1b-it",
+   "memory_bytes": 7000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "draft"
+   ]
+  },
+  {
    "repo": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
    "slug": "qwen3-coder-30b-a3b-instruct",
    "memory_bytes": 62000000000,
