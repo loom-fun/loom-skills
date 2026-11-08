@@ -16,12 +16,12 @@ Masks: causal, and on sliding layers keys > position - 2048.
 import json
 import math
 import os
-# head_dim 256 without sinks or a customized kernel: the split-dims kernel (gen_flash2s.py) keeps Q in
-# registers; this generic one reloads all of Q every key tile at head_dim 256. FLASH2_SPLIT=0 keeps this one.
+# head_dim 256 or 512 without sinks or a customized tiling: the split-dims kernel (gen_flash2s.py) keeps Q in
+# registers; this generic one reloads all of Q every key tile at head_dim > 128. FLASH2_SPLIT=0 keeps this one.
 if os.environ.get("FLASH2_TARGET", "llm") == "llm" and os.environ.get("FLASH2_SPLIT", "1") != "0" and not any(
-        os.environ.get(k) for k in ("FLASH2_SCALE", "FLASH2_NAME", "FLASH2_DO", "FLASH2_KT")):
+        os.environ.get(k) for k in ("FLASH2_DO", "FLASH2_KT")):
     _c0 = json.load(open(os.environ["LLM_CONFIG"]))
-    if _c0["head_dim"] == 256 and not _c0.get("attn_sinks") and _c0["heads"] // _c0["kv_heads"] >= 4:
+    if _c0["head_dim"] in (256, 512) and not _c0.get("attn_sinks") and _c0["head_dim"] * _c0["heads"] // _c0["kv_heads"] >= 1024:
         import runpy
         runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen_flash2s.py"))
         raise SystemExit(0)

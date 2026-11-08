@@ -1105,19 +1105,24 @@ drafter_cases()
 # paged arena filled directly (identity page map), layer 0, causal; q scaled so attention is sharp (a kernel that
 # drops part of the score sum fails). Reference in float64 from f16 Q/K/V, times sigmoid(gate) when gated.
 WIN = cfg.get("sliding_window") or 0
-if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (not WIN or not cfg.get("head_dim_swa")):
+
+
+def flash_cases(kern, D, KVH, width, scale, WIN, tag=""):
+    """Cases for flash kernel KERN (head_dim D, KVH KV heads; WIDTH K or V values per arena position, more than
+    KVH * D when a wider layer kind sets the stride; TAG names its files and cases)."""
     def flash_ref(q, kk, vv, pos, win=0):   # float64 reference: query p sees keys j <= p (and j > p - win)
         o = np.zeros(q.shape); j_ = np.arange(len(kk))[None, :]; p_ = np.asarray(pos)[:, None]
         hidden = (j_ > p_) | (j_ <= p_ - win) if win else j_ > p_
         for hh in range(QH):
-            kv = hh // (QH // KVH); sc = q[:, hh] @ kk[:, kv].astype(np.float64).T / np.sqrt(D)
+            kv = hh // (QH // KVH); sc = q[:, hh] @ kk[:, kv].astype(np.float64).T * scale
             sc[hidden] = -1e30
             pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); o[:, hh] = pr @ vv[:, kv].astype(np.float64)
         return o
     gated = (lambda o, g: o / (1 + np.exp(-g))) if cfg.get("attn_gate") else (lambda o, g: o)
 
     def flash_case(name, sfx, t, pool, norig):
-        AT = f"tensor<{2 * pool * KVH * D}xf16>"
+        sfx += tag
+        AT = f"tensor<{2 * pool * width}xf16>"
         return f"""check.case public @{name} {{
   %t = check.literal value({t}) : index
   %layer = check.literal value(0) : index
@@ -1131,7 +1136,7 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
   %arena = check.file.read.npy path("f_arena{sfx}.npy") : {AT}
   %e = check.file.read.npy path("f_o{sfx}.npy") : tensor<{t}x{QD}xf32>
   %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
-  kernel.launch @g_attention_flash2[%t](%t, %layer, %sliding, %ctx, %pool, %q, %g, %info, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{norig}xi32>, {AT}, tensor<{t}x{QD}xf32>)
+  kernel.launch @{kern}[%t](%t, %layer, %sliding, %ctx, %pool, %q, %g, %info, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{norig}xi32>, {AT}, tensor<{t}x{QD}xf32>)
   check.expect.close actual(%o) expected(%e) atol(4.0e-3) rtol(4.0e-3) nan(different) : tensor<{t}x{QD}xf32>
   check.return
 }}
@@ -1139,7 +1144,7 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
     t, ctx = 64, 1024
     P0 = ctx - t; blocks = ctx // 16; pool = ctx
     kk = rng.standard_normal((ctx, KVH, D)).astype(np.float16); vv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
-    arena = np.zeros((2, pool, KVH, D), np.float16); arena[0], arena[1] = kk, vv
+    arena = np.zeros((2, pool, width), np.float16); arena[0, :, :KVH * D], arena[1, :, :KVH * D] = kk.reshape(ctx, -1), vv.reshape(ctx, -1)
     qq = (rng.standard_normal((t, QH, D)) * 2.5).astype(np.float32); gg = rng.standard_normal((t, QH, D)).astype(np.float32)
     orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
     info = np.zeros((t, 4), np.int32); info[:, 1] = P0 + np.arange(t); info[:, 2] = 1
@@ -1149,15 +1154,15 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
     ow = None
     if WIN:   # sliding layers: key j visible from position p when p - WIN < j <= p (llama.cpp LLAMA_SWA_TYPE_STANDARD)
         ow = gated(flash_ref(qd, kk, vv, info[:, 1], WIN), gg)
-        save("f_ow", ow.reshape(t, QD).astype(np.float32))
+        save("f_ow" + tag, ow.reshape(t, QD).astype(np.float32))
     for n, a in [("f_arena", arena.reshape(-1)), ("f_q", qq.reshape(t, QD)), ("f_g", gg.reshape(t, QD)), ("f_orig", orig),
                  ("f_info", info), ("f_o", o.reshape(t, QD).astype(np.float32))]:
-        save(n, a)
+        save(n + tag, a)
     # Two rows in one prefill: row 1 at tokens 0-39, row 0 (the keys above) at tokens 40-111, so tile 2 (tokens 32-47)
     # spans both. flash2 must compute every other tile, whichever tiles share its workgroups (gen_flash2.py TS), and
     # leave that one (the listed fallback's) untouched.
     tm = 112; k2 = rng.standard_normal((2, ctx, KVH, D)).astype(np.float16)
-    arena_m = np.zeros((2, 2 * pool, KVH, D), np.float16); arena_m[:, :pool] = arena; arena_m[:, pool:] = k2
+    arena_m = np.zeros((2, 2 * pool, width), np.float16); arena_m[:, :pool] = arena; arena_m[:, pool:, :KVH * D] = k2.reshape(2, ctx, -1)
     orig_m = np.zeros(20 + 2 * blocks, np.int32); orig_m[8] = 80; orig_m[18] = 80 + 4 * blocks
     orig_m[20:] = np.arange(2 * blocks)
     row = (np.arange(tm) < 40).astype(np.int32)
@@ -1170,12 +1175,17 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
     om[32:48] = 0
     for n, a in [("f_arena_m", arena_m.reshape(-1)), ("f_q_m", qm.reshape(tm, QD)), ("f_g_m", gm.reshape(tm, QD)),
                  ("f_orig_m", orig_m), ("f_info_m", info_m), ("f_o_m", om.reshape(tm, QD).astype(np.float32))]:
-        save(n, a)
-    cases.append(flash_case("flash_prefill_rows", "_m", tm, 2 * pool, len(orig_m)))
-    cases.append(flash_case("flash_prefill", "", t, pool, len(orig)))
+        save(n + tag, a)
+    cases.append(flash_case(f"flash_prefill_rows{tag}", "_m", tm, 2 * pool, len(orig_m)))
+    cases.append(flash_case(f"flash_prefill{tag}", "", t, pool, len(orig)))
     if ow is not None:
-        cases.append(cases[-1].replace("@flash_prefill {", "@flash_prefill_window {").replace("%sliding = check.literal value(0)", "%sliding = check.literal value(1)")
-                     .replace('path("f_o.npy")', 'path("f_ow.npy")'))
+        cases.append(cases[-1].replace(f"@flash_prefill{tag} {{", f"@flash_prefill_window{tag} {{").replace("%sliding = check.literal value(0)", "%sliding = check.literal value(1)")
+                     .replace(f'path("f_o{tag}.npy")', f'path("f_ow{tag}.npy")'))
+
+
+if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (not WIN or not cfg.get("head_dim_swa")):
+    flash_cases("g_attention_flash2", D, KVH, KVH * D, D ** -0.5, WIN)
+
 # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
 # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
 # bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),

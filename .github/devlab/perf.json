@@ -1,5 +1,5 @@
 {
- "_comment": "flash2 token subtiles (default FLASH2_TS=2): prefill A/B against origin/main's starter on G = 2/3/4/8 cards, same runner per job; prefill attribution on a mixed-head_dim MoE card by ablation (doubled launches). Temporary.",
+ "_comment": "flash2 token subtiles (default FLASH2_TS=2) on G = 2/3/4/8 cards, and head_dim 512 split-dims flash on a mixed-head_dim MoE card: prefill A/B against origin/main's starter / the card, same runner per job. Temporary.",
  "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
  "memory_bytes": 17000000000,
  "kit": null,
@@ -120,7 +120,7 @@
    ]
   },
   {
-   "name": "g26abl",
+   "name": "g26",
    "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
    "memory_bytes": 81000000000,
    "kit": "gemma4",
@@ -130,29 +130,23 @@
      "name": "card"
     },
     {
+     "name": "new",
+     "build": {}
+    },
+    {
      "name": "d512x2",
      "double": [
       "*:@g_attention_flash2_d512\\["
      ]
-    },
-    {
-     "name": "swax2",
-     "double": [
-      "*:@g_attention_flash2\\["
-     ]
-    },
-    {
-     "name": "listx2",
-     "double": [
-      "*:_attention_(split|combine)_listed\\["
-     ]
     }
    ],
    "steps": [
+    "ktest:new",
     "perf:card:1:long",
+    "perf:new:1:long",
     "perf:d512x2:1:long",
-    "perf:swax2:1:long",
-    "perf:listx2:1:long"
+    "perf:card:1:long",
+    "perf:new:1:long"
    ]
   }
  ]
