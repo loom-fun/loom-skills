@@ -2733,16 +2733,17 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
 # wave max and sum per token and block); the values accumulate lanes-over-dims, each key's p read back from workgroup
 # memory. The partials keep the split kernel's layout, so g_attention_combine is unchanged. A token's blocks are
 # absolute 32-aligned and a block outside its own range is skipped, so it computes the same bits alone or in any
-# segment: drafted output equals undrafted output. Below SEG_MIN the split kernel stays faster (and at 32k
-# undrafted, one token per segment, the split kernel was 12 % faster too: the segment kernel pays off for spans).
-# head_dim 64 and 128 only: at 256 (Gemma-3-1B, one KV head) a lane's key rows filled the registers and one KV head
-# left too few workgroups (8k/16k decode -40 %). SEG_ATTN=0 keeps the split kernel everywhere.
+# segment: drafted output equals undrafted output. Below SEG_MIN the split kernel stays as fast or faster.
+# On for head_dim 128 with at most 2 KV heads, the configuration that won on both a local Strix Halo and DevLab
+# (Qwen2.5-1.5B, decode at 32k +27 % / +14 %). Measured losses elsewhere: head_dim 64 (Qwen2.5-0.5B: +19 % locally,
+# -21 % on DevLab), 8 KV heads (Qwen3-4B DFlash: -17 % locally), head_dim 256 with one KV head (Gemma-3-1B: 8k/16k
+# -40 %). SEG_ATTN=0 keeps the split kernel everywhere.
 SEG_MIN = int(os.environ.get("SEG_MIN", "8192"))
 
 
 def seg_tokens():
     """Tokens per segment (the verification span: draft depth + 1), 0 when the decode path keeps the split kernel."""
-    on = os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and D in (64, 128)
+    on = os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and D == 128 and KVH <= 2
     return gen_draft.DRAFT["depth"] + 1 if on else 0
 
 
