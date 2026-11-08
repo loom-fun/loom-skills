@@ -194,6 +194,41 @@ assert a.get('paused') is True and 'paused' not in b and a['failing'] == b['fail
   "$tmp/paused" "$tmp/failing" \
   && echo "OK   paused: next steps render last, org_status reports paused, and clearing them gives the card back" \
   || { echo "FAIL paused: a paused card's next steps do not render or clear as expected"; bad=1; }
+# a document longer than the model's native context (perf.py: the Loom server's HTTP 400, logged in over_context with
+# the prompt tokens make_info.py counts) is not applicable: org_status does not ask for it and the card shows n/a. It
+# stays required when the refused prompt fits the native context (a package built smaller), when the native context
+# is unknown, or once a session measured it.
+echo '{"label": "loom", "kind": "loom", "time": "2026-11-07 10:00:00", "nonce": "1.0", "prefill_long": [{"prompt_tokens": 8650, "prefill_tps": 5000.0}, {"prompt_tokens": 17351, "prefill_tps": 4000.0}], "over_context": ["prefill_32000", "decode_tps_32k"], "decode_tps_32k": null}' \
+  > "$tmp/oc_loom.jsonl"
+py "$C/make_info.py" perf --loom-jsonl "$tmp/oc_loom.jsonl" "${SRC[@]}" -o "$tmp/perf_oc.json" 2>/dev/null
+mkdir -p "$tmp/oc" "$tmp/oc_native"; cp -r "$F/pkg/." "$tmp/oc/"; cp -r "$F/pkg/." "$tmp/oc_native/"
+py -c "import json, sys
+c = json.load(open(sys.argv[1])); c['context_length'] = 32768; json.dump(c, open(sys.argv[1], 'w'))
+for n, f in (34937, sys.argv[3]), (30000, sys.argv[4]):
+    e = json.load(open(sys.argv[2])); e['performance']['session']['over_context'] = {'prefill_32k': n, 'decode_32k': n}
+    json.dump(e, open(f, 'w'))" "$tmp/oc_native/llm_config.json" "$tmp/perf_oc.json" "$tmp/perf_oc_long.json" "$tmp/perf_oc_fits.json"
+for e in long fits both; do
+  ev="$tmp/perf_oc_long.json"; [ $e = fits ] && ev="$tmp/perf_oc_fits.json"; [ $e = both ] && ev="$ev $tmp/perf.json"
+  py "$C/make_info.py" build "$tmp/oc_native" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint \
+    --evidence "$tmp/gates.json" $ev -o "$tmp/oc_$e.json" 2>/dev/null
+done
+py "$C/make_info.py" build "$tmp/oc" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint \
+  --evidence "$tmp/gates.json" "$tmp/perf_oc_long.json" -o "$tmp/oc/info.json" 2>/dev/null
+cp "$tmp/oc_long.json" "$tmp/oc_native/info.json"; py "$C/render_card.py" "$tmp/oc_native" 2>/dev/null
+py -c "import sys; sys.path.insert(0, sys.argv[1]); sys.path.insert(0, sys.argv[2]); import card_lib as c
+from org_status import assess
+long = {'metric:prefill_32k', 'metric:decode_32k'}
+miss = assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])['missing']
+assert not long & set(miss) and 'metric:prefill_16k' not in miss and 'metric:prefill_1k' in miss, miss
+rows = [l for l in open(sys.argv[3] + '/README.md') if l.startswith('| prefill tok/s, 32k document |' + ' n/a |' * 8)]
+assert rows and \"longer than the model's native 32768-token context\" in open(sys.argv[3] + '/README.md').read()
+assert long <= set(assess('loom-fun/ggml-org-Flint-loom', sys.argv[4])['missing']), 'native context unknown'
+facts = c.package_facts(c.load_package(sys.argv[3]))
+for f in sys.argv[5:]:   # a refusal within the native context, and a measured value: still required
+    assert c.over_context(c.load_json(f), c.native_context(facts['features'])) == set(), f" \
+  "$C" "$here/../../../../loom-org/scripts" "$tmp/oc_native" "$tmp/oc" "$tmp/oc_fits.json" "$tmp/oc_both.json" \
+  && echo "OK   over context: n/a only past the native context; required within it, without it, or once measured" \
+  || { echo "FAIL over context: a refused long document is not judged against the native context"; bad=1; }
 # c4_steady.py runs that measured nothing (every stream failed: rate -0.0, a negative window) are not samples
 printf '%s\n' '{"streams": 4, "window_s": 2.5, "agg_tps": 110.0}' '{"streams": 4, "window_s": -3.1, "agg_tps": -0.0}' 0 112.5 \
   > "$tmp/c4_bad.txt"

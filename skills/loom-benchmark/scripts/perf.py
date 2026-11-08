@@ -11,7 +11,11 @@ prefix cache can help):
   prefill[]         ~1k and ~2k-token documents, max_tokens=4: prompt_tokens / TTFT,
                     median (and min/max) of --repeats runs; single samples vary up to 2x
   decode_tps_2k     256-token generation after a 2k document (decode with KV in use)
-  --long: prefill 8k/16k/32k documents and decode_tps_32k (128 tokens after 32k)
+  --long: prefill 8k/16k/32k documents and decode_tps_32k (128 tokens after 32k). A long request the server
+                    refuses with HTTP 400 (its answer to a prompt over its context: the needle gate checks it) is
+                    skipped and logged in out["over_context"] (roofline.json metric names; out["nonce"] lets
+                    make_info.py perf re-render and count it); the other sizes are kept. A tokenizer can make the
+                    "32k" document longer than a 32768-token native context (34.9k tokens for Gemma 3).
   acceptance        Loom with speculative decoding: per decode metric, accepted / proposed drafted tokens of that
                     very request (loom-serve's /metrics counters before and after it), so the roofline of a drafted
                     row uses the acceptance of the text it decoded (make_info.py roofline), not the spec gate's
@@ -43,7 +47,7 @@ import time
 
 import requests
 
-from bench_common import acceptance_between, doc, perf_metrics, server_draft_counters, stream, thinking_extra
+from bench_common import acceptance_between, doc, long_prompt, perf_metrics, server_draft_counters, stream, thinking_extra
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -68,13 +72,26 @@ if not a.no_campaign:  # required steps fail loudly instead of warning (warnings
 H = {"Content-Type": "application/json"}
 
 
+class OverContext(Exception):
+    """The server refused the prompt with HTTP 400: longer than its context."""
+
+
 def run(content, max_tokens):
-    """-> (prompt_tokens, prefill_tps, decode_tps, completion_tokens)"""
+    """-> (prompt_tokens, prefill_tps, decode_tps, completion_tokens); raises OverContext on HTTP 400"""
     msgs = [{"role": "user", "content": content}]
     if a.kind == "loom":
         s = stream(U, M, msgs, max_tokens, extra=TH)
+        status, error = s["status"], s.get("error")
+    else:
+        r = requests.post(U + "/v1/chat/completions", headers=H, json={"messages": msgs, "max_tokens": max_tokens, "temperature": 0, "cache_prompt": False, **TH})
+        status, error = r.status_code, r.text[:300]
+    if status == 400:
+        raise OverContext(error)
+    if status != 200:
+        raise RuntimeError(f"HTTP {status}: {error}")
+    if a.kind == "loom":
         return s["prompt_tokens"], s["prompt_tokens"] / s["ttft"], s["decode_tps"], s["tokens"]
-    d = requests.post(U + "/v1/chat/completions", headers=H, json={"messages": msgs, "max_tokens": max_tokens, "temperature": 0, "cache_prompt": False, **TH}).json()
+    d = r.json()
     t = d["timings"]
     return t["prompt_n"], t["prompt_per_second"], t["predicted_per_second"], d["usage"]["completion_tokens"]
 
@@ -106,13 +123,25 @@ def decode(key, content, max_tokens):
           "logged as missing, not as the rate of a short request", flush=True)
     return None
 
+
+def long_request(key, f, *args):
+    """f(*args), or None with key logged in out["over_context"] when the server refuses the prompt as over its context."""
+    try:
+        return f(*args)
+    except OverContext as e:
+        out.setdefault("over_context", []).append(key)
+        print(f"{key}: refused as over the server's context, skipped ({e})", flush=True)
+        return None
+
+
 if a.long:
-    out["prefill_long"] = []
+    out["prefill_long"], out["nonce"] = [], nonce
     for n in (8000, 16000, 32000):
-        pt, pps, _, _ = run(f"[{nonce} {n}] Summarize this documentation in one sentence.\n\n" + doc(n), 4)
-        out["prefill_long"].append({"prompt_tokens": pt, "prefill_tps": round(pps, 1)})
-        print(out["prefill_long"][-1], flush=True)
-    out["decode_tps_32k"] = decode("decode_tps_32k", f"[{nonce} ctx32] Write a long, detailed essay discussing this documentation.\n\n" + doc(32000), 128)
+        r = long_request(f"prefill_{n}", run, long_prompt(f"prefill_{n}", nonce), 4)
+        if r:
+            out["prefill_long"].append({"prompt_tokens": r[0], "prefill_tps": round(r[1], 1)})
+            print(out["prefill_long"][-1], flush=True)
+    out["decode_tps_32k"] = long_request("decode_tps_32k", decode, "decode_tps_32k", long_prompt("decode_tps_32k", nonce), 128)
 else:
     out["decode_tps"] = decode("decode_tps", ESSAY, 300)
     out["prefill"] = []
