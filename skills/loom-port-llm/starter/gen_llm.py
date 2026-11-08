@@ -3702,9 +3702,9 @@ def mv_wide_tokens(fmt, kval, sw, n, mv_args):
     _LIN[0] += 1
     k = _LIN[0]
     return (f"""%c4_l{k} = index.constant 4 : index
-        %le4_l{k} = index.cmp ule, %t, %c4_l{k} : index
+        %le4_l{k} = index.cmp ule, %t, {"%c0" if os.environ.get("FORCE16") else f"%c4_l{k}"} : index
         %c8_l{k} = index.constant 8 : index
-        %le8_l{k} = index.cmp ule, %t, %c8_l{k} : index
+        %le8_l{k} = index.cmp ule, %t, {"%c0" if os.environ.get("FORCE16") else f"%c8_l{k}"} : index
         scf.if %le4_l{k} {{
           kernel.launch @{mv_name(fmt, kval, sw, n, 4, True)}[{n}, %t]{mv_args}
         }} else {{
@@ -4126,7 +4126,7 @@ def lin2(fmt, x, s, wa, wb, wsize, ya, yb, k, n, kval, width=None):
       {gemm(wb, yb)}
     }} else {{
       %c4_p{c} = index.constant 4 : index
-      %le4_p{c} = index.cmp ule, %t, %c4_p{c} : index
+      %le4_p{c} = index.cmp ule, %t, {"%c1" if os.environ.get("FORCE16") else f"%c4_p{c}"} : index
       scf.if %le4_p{c} {{
         scf.if %single {{
           kernel.launch @{mv_name(fmt, kval, False, n, 1, True)}[{n}, %t]{a1(wa, ya)}
@@ -4137,7 +4137,7 @@ def lin2(fmt, x, s, wa, wb, wsize, ya, yb, k, n, kval, width=None):
         }}
       }} else {{
         %c8_p{c} = index.constant 8 : index
-        %le8_p{c} = index.cmp ule, %t, %c8_p{c} : index
+        %le8_p{c} = index.cmp ule, %t, {"%c0" if os.environ.get("FORCE16") else f"%c8_p{c}"} : index
         scf.if %le8_p{c} {{
           kernel.launch @{mv_name(fmt, kval, 2, n, 8, True)}[{n}, %t]{a2}
         }} else {{

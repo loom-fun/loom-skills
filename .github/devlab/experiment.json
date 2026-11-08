@@ -6,25 +6,9 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "sp_base",
-   "build": {},
-   "steps": [
-    "stagger:30"
-   ]
-  },
-  {
-   "name": "sp_nogemm",
+   "name": "sp_f16",
    "build": {
-    "NO_GEMM": "1"
-   },
-   "steps": [
-    "stagger:30"
-   ]
-  },
-  {
-   "name": "sp_exact",
-   "build": {
-    "SPEC_EXACT": "1"
+    "FORCE16": "1"
    },
    "steps": [
     "stagger:30"
@@ -34,6 +18,15 @@
    "name": "sp_lin_moe",
    "build": {
     "DIAG": "lin,moe"
+   },
+   "steps": [
+    "stagger:30"
+   ]
+  },
+  {
+   "name": "sp_noroute",
+   "build": {
+    "DIAG": "attn"
    },
    "steps": [
     "stagger:30"
