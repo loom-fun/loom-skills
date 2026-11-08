@@ -1,5 +1,5 @@
 {
- "_comment": "Temporary probe (not for merge).",
+ "_comment": "Temporary noise-calibrated attribution (not for merge).",
  "card": "x",
  "memory_bytes": 1,
  "kit": null,
@@ -21,31 +21,71 @@
      "build": {}
     },
     {
-     "name": "nobody",
+     "name": "min1m",
      "build": {
-      "SEG_PROBE": "nobody"
+      "SEG_MIN": "1000000"
+     }
+    },
+    {
+     "name": "off2",
+     "build": {
+      "SEG_ATTN": "0"
      }
     }
    ],
    "steps": [
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
     "perf:off:2",
     "perf:on:2",
-    "perf:nobody:2",
+    "perf:min1m:2",
+    "perf:off2:2",
     "perf:off:2",
     "perf:on:2",
-    "perf:nobody:2"
+    "perf:min1m:2",
+    "perf:off2:2",
+    "perf:off:2",
+    "perf:on:2",
+    "perf:min1m:2",
+    "perf:off2:2"
    ]
   },
   {
@@ -64,37 +104,77 @@
      "build": {}
     },
     {
-     "name": "nobody",
+     "name": "min1m",
      "build": {
-      "SEG_PROBE": "nobody"
+      "SEG_MIN": "1000000"
+     }
+    },
+    {
+     "name": "off2",
+     "build": {
+      "SEG_ATTN": "0"
      }
     }
    ],
    "steps": [
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
     "perf:off:2",
     "perf:on:2",
-    "perf:nobody:2",
+    "perf:min1m:2",
+    "perf:off2:2",
     "perf:off:2",
     "perf:on:2",
-    "perf:nobody:2"
+    "perf:min1m:2",
+    "perf:off2:2",
+    "perf:off:2",
+    "perf:on:2",
+    "perf:min1m:2",
+    "perf:off2:2"
    ]
   },
   {
-   "name": "q15",
-   "card": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
-   "memory_bytes": 8000000000,
+   "name": "q05c",
+   "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+   "memory_bytes": 5000000000,
    "variants": [
     {
      "name": "off",
@@ -107,31 +187,71 @@
      "build": {}
     },
     {
-     "name": "nobody",
+     "name": "min1m",
      "build": {
-      "SEG_PROBE": "nobody"
+      "SEG_MIN": "1000000"
+     }
+    },
+    {
+     "name": "off2",
+     "build": {
+      "SEG_ATTN": "0"
      }
     }
    ],
    "steps": [
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
     "c4:off",
     "c4:on",
-    "c4:nobody",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
+    "c4:off",
+    "c4:on",
+    "c4:min1m",
+    "c4:off2",
     "perf:off:2",
     "perf:on:2",
-    "perf:nobody:2",
+    "perf:min1m:2",
+    "perf:off2:2",
     "perf:off:2",
     "perf:on:2",
-    "perf:nobody:2"
+    "perf:min1m:2",
+    "perf:off2:2",
+    "perf:off:2",
+    "perf:on:2",
+    "perf:min1m:2",
+    "perf:off2:2"
    ]
   }
  ]
