@@ -1,5 +1,5 @@
 {
- "_comment": "Temporary (not for merge): span attention A/B on one runner: main vs this branch vs SEG_ATTN=0.",
+ "_comment": "Temporary (not for merge): where the span attention loses on DevLab: kernel vs list/launch overhead.",
  "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
  "memory_bytes": 5000000000,
  "kit": null,
@@ -10,57 +10,52 @@
    "name": "q05",
    "variants": [
     {
-     "name": "main",
-     "ref": "origin/main"
+     "name": "noseg",
+     "build": {
+      "SEG_ATTN": "0"
+     }
     },
     {
      "name": "new",
      "build": {}
     },
     {
-     "name": "noseg",
+     "name": "listonly",
      "build": {
-      "SEG_ATTN": "0"
+      "SEG_MIN": "1000000"
      }
     }
    ],
    "steps": [
-    "perf:main:1:long",
-    "perf:new:1:long",
     "perf:noseg:1:long",
-    "perf:main:1:long",
     "perf:new:1:long",
-    "perf:noseg:1:long"
+    "perf:listonly:1:long",
+    "perf:noseg:1:long",
+    "perf:new:1:long",
+    "perf:listonly:1:long"
    ]
   },
   {
-   "name": "q4b-dflash",
-   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
-   "memory_bytes": 62000000000,
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
+   "name": "q15",
+   "card": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
+   "memory_bytes": 8000000000,
    "variants": [
-    {
-     "name": "main",
-     "ref": "origin/main"
-    },
-    {
-     "name": "new",
-     "build": {}
-    },
     {
      "name": "noseg",
      "build": {
       "SEG_ATTN": "0"
      }
+    },
+    {
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "perf:main:1:long",
+    "perf:noseg:1:long",
     "perf:new:1:long",
     "perf:noseg:1:long",
-    "perf:main:1:long",
-    "perf:new:1:long",
-    "perf:noseg:1:long"
+    "perf:new:1:long"
    ]
   }
  ]
