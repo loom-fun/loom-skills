@@ -194,6 +194,12 @@ if a.memory_gib == "auto":
           + (f"; cap {what} = {cap / 2**30:.0f} GiB)" if cap else "; RAM unknown)"))
 a.memory_gib = float(a.memory_gib)
 budget = int(a.memory_gib * 2**30) - weights_bytes - workspace - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
+if budget < (context + min(context // 4, 65536)) * kv_per_position:
+    # A capped budget leaves the pool no headroom over the context, and a full-context request is charged the whole
+    # pool plus ~0.5-1.7 GB more than this estimate (Gemma-4 26B/31B, capped at pool = context: refused with 503 on a
+    # fresh server at the printed --memory_bytes, admitted 0.5-1 GB above it): reserve 2 GiB more workspace.
+    workspace += 2 * 2**30
+    budget -= 2 * 2**30
 if context * kv_per_position > budget:
     fit = max(4096, (budget // kv_per_position) // 1024 * 1024)
     print(f"WARNING: context {context} needs {context * kv_per_position / 2**30:.1f} GiB of KV; {a.memory_gib} GiB budget fits {fit}")
