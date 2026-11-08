@@ -48,7 +48,12 @@ def ffn_act(g):
         return 0.5 * g * (1 + np.tanh(np.sqrt(2 / np.pi) * (g + 0.044715 * g ** 3)))
     return g / (1 + np.exp(-g))
 cases = []
-def save(n, a): np.save(os.path.join(out, n + ".npy"), a)
+KS = os.environ.get("KTEST_HEADS_SFX", "")   # a child run for a narrower query-head count (see the end): _h<heads>
+def save(n, a): np.save(os.path.join(out, n + KS + ".npy"), a)
+# The output gate as llama.cpp applies it (cfg attn_gate_act): sigmoid, or softplus (laguna, applied per head by
+# g_gate_heads); gate_mul is what the combine / flash kernels apply to the gate buffer (softplus: the value as stored).
+def gate_act(g): return np.log1p(np.exp(g)) if cfg.get("attn_gate_act") == "softplus" else 1 / (1 + np.exp(-g))
+def gate_mul(g): return g if cfg.get("attn_gate_act") == "softplus" else gate_act(g)
 def ty(a): return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int8": "i8", "int32": "i32", "float16": "f16"}[str(a.dtype)] + ">"
 # 1. embed
 ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
@@ -149,7 +154,7 @@ if VIS:   # a media epoch: 8-word records, token 1 carries a feature row (copied
 seen = set(); todo = []
 VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
 for li in range(cfg["layers"]):
-    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", QH * D), ("ffn_gate", H),
+    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", (cfg.get("layer_heads") or [QH] * cfg["layers"])[li] * D), ("ffn_gate", H),
                    ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD),
                    ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0))]:
         name = f"blk.{li}.{nm_}.weight"
@@ -503,7 +508,7 @@ gh = rng.standard_normal((t, QH)).astype(np.float32)   # per-head gate logits (a
 if gate_kind == "per_head":
     gate = np.repeat(gh[:, :, None], D, 2)
 if gate_kind:
-    att = att / (1 + np.exp(-gate))
+    att = att * gate_act(gate)
 blocks = (ctx + 15) // 16
 orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)  # record: map origin 40; identity page map
 info = np.zeros((t, 4), np.int32); info[:, 1] = pos; info[:, 2] = 1
@@ -926,7 +931,7 @@ def gemm_cases():
     for li in range(cfg["layers"]):
         for nm_ in ("ffn_gate", "ffn_up", "ffn_down", "attn_qkv", "attn_gate", "attn_q", "attn_k", "attn_output", "ssm_out"):
             name = f"blk.{li}.{nm_}.weight"
-            if name not in T:
+            if name not in T or (nm_ == "attn_gate" and cfg.get("attn_gate") == "per_head"):   # per head: matvec only
                 continue
             fmt = T[name].tensor_type.name.lower()
             up = f"blk.{li}.ffn_up.weight"
@@ -1000,7 +1005,7 @@ def attention_span_case(tag, sliding):
             pr = np.exp(sc - mx); den = pr.sum() + (0.0 if sinks is None else np.exp(sinks[hh] - mx))
             att[i, hh] = pr @ kvv[lo:p + 1, kv].astype(np.float64) / den
     if gate_kind and sinks is None:
-        att = att / (1 + np.exp(-gate))
+        att = att * gate_mul(gate)   # the combine kernel multiplies the gate buffer as stored
     blocks = ctx // 16
     orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
     info = np.zeros((t, 4), np.int32); info[:, 1] = p0 + np.arange(t); info[:, 2] = 1
@@ -1316,7 +1321,7 @@ def flash_cases(kern, D, KVH, width, scale, WIN, tag=""):
             sc[hidden] = -1e30
             pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); o[:, hh] = pr @ vv[:, kv].astype(np.float64)
         return o
-    gated = (lambda o, g: o / (1 + np.exp(-g))) if cfg.get("attn_gate") else (lambda o, g: o)
+    gated = (lambda o, g: o * gate_mul(g)) if cfg.get("attn_gate") else (lambda o, g: o)
 
     def flash_case(name, sfx, t, pool, norig):
         sfx += tag
@@ -1391,7 +1396,7 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
         # mixed); 4-5 straddle DEEP (one-tile); 6-7, 8-9 deep pairs; 10 unpaired. Pages alias the two 1024-key arenas
         # of the rows case, so key j of a row is that row's key j % 1024.
         td, ctx_d = 176, (DEEP // 1024 + 2) * 1024; blk = ctx_d // 16
-        arena_d = np.load(os.path.join(out, "f_arena_m.npy")).reshape(2, 2, 1024, -1)[:, :, :, :KVH * D].reshape(2, 2, 1024, KVH, D)
+        arena_d = np.load(os.path.join(out, f"f_arena_m{KS}.npy")).reshape(2, 2, 1024, -1)[:, :, :, :KVH * D].reshape(2, 2, 1024, KVH, D)
         row = (np.arange(td) < 40).astype(np.int32)
         pos = np.where(row == 1, DEEP + 1000 + np.arange(td), DEEP - 32 + np.arange(td) - 40)
         info_d = np.zeros((td, 4), np.int32); info_d[:, 0] = row; info_d[:, 1] = pos; info_d[:, 2] = 1
@@ -1407,7 +1412,7 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
                 w = w * ((pos[sel][:, None] - np.arange(1024)[None, :]) // 1024 + 1)
                 o_d[sel, hh] = (w / w.sum(-1, keepdims=True)) @ vr.astype(np.float64)
         if cfg.get("attn_gate"):
-            o_d = o_d / (1 + np.exp(-gd_))
+            o_d = o_d * gate_mul(gd_)
         SENT = 7.0
         tile = np.arange(td) // 16; pair_deep = np.isin(tile, (0, 1, 6, 7, 8, 9))
         for name, mask in (("both", tile != 2), ("one", (tile != 2) & ~pair_deep), ("deep", pair_deep)):
@@ -1441,7 +1446,7 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
 # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
 # bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
 # both with the shared experts' output already in y (scaled by the Qwen shared-expert gate when the model has one).
-if cfg.get("moe"):
+if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
     M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ.get("MOE_R", "8"))
     SHG, ACC = bool(M.get("shared_gate")), bool(M.get("shared_ffn"))
     # Gemma 4: gate and up fused in one tensor (each expert's gate rows, then its up rows), GEGLU, and a per-expert
@@ -1469,6 +1474,7 @@ if cfg.get("moe"):
             wts = np.exp(wts - wts.max(-1, keepdims=True)); wts = wts / wts.sum(-1, keepdims=True)
         if M["norm_weights"]:
             wts = wts / np.maximum(wts.sum(-1, keepdims=True), 6.103515625e-05)
+        wts = wts * M.get("scale", 1.0)
         ss = np.sort(sel, -1)[:, ::-1]
         rel = (ss[:, KU - 1] - ss[:, KU]) / np.maximum(np.abs(ss[:, KU - 1]), 1e-30)   # k-th vs (k+1)-th, relative
         return ids, wts, rel
@@ -1690,7 +1696,20 @@ import re
 if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
     cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
                     flags=re.M) for c in cases] + DEEP_CASES   # these launch the two kernels as they test them
+# Layers with fewer query heads (cfg layer_heads) run gen_llm.py's _h<heads> attention kernels: this script's attention
+# chain and flash cases at that head count, from a child run whose kernels, cases and files take the suffix.
+if KS:
+    cases = [re.sub(r"check\.case public @(\w+) \{", rf"check.case public @\1{KS} {{", re.sub(
+        r"@(g_qk_rope_store|g_attention_split|g_attention_combine|g_gate_heads|g_attention_flash2(?:_deep)?)\[", rf"@\1{KS}[", c))
+        .replace('.npy")', f'{KS}.npy")') for c in cases if re.match(r"\s*check\.case public @(attention_chain|attention_span|flash_prefill)", c)]
+for h in sorted(set(cfg.get("layer_heads") or []) - {QH}):
+    hc = os.path.join(out, f"cfg_h{h}.json"); json.dump(dict(cfg, heads=h, layer_heads=None), open(hc, "w"))
+    import subprocess
+    subprocess.run([sys.executable, os.path.abspath(__file__), hc, out], check=True,
+                   env=dict(os.environ, KTEST_HEADS_SFX=f"_h{h}", GEMM_TESTS="0", DRAFTER_TESTS="0", MOE_TESTS="0"))
+    cases.append(open(os.path.join(out, f"cases_h{h}.loom-test")).read())
+    os.remove(hc); os.remove(os.path.join(out, f"cases_h{h}.loom-test"))
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
-open(os.path.join(out, "cases.loom-test"), "w", newline="\n").write(text)
+open(os.path.join(out, f"cases{KS}.loom-test"), "w", newline="\n").write(text)
 print("wrote", len(cases), "cases")

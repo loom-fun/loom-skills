@@ -108,7 +108,12 @@ def _softmax_weight_prefill(text, KU):
     return text
 
 
-def route_decode(H, E, KU, gating, norm, bias, wty="f32"):
+def scaled(v, ind, scale):
+    """llama.cpp's expert_weights_scale after the normalization (laguna: 2.5): %{v}s = %{v} * scale (empty at 1)."""
+    return "" if scale == 1.0 else f"\n{ind}%{v}_k = scalar.constant {float(scale)!r} : f32\n{ind}%{v}s = scalar.mulf %{v}, %{v}_k : f32"
+
+
+def route_decode(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     """Decode-shaped epochs (t < 64): one workgroup per token. Router logits (f32 or bf16 weights) into LDS, then a
     parallel top-k: one thread per expert, KU rounds of workgroup max/min-index reductions (flint_router_topk pattern).
     Each lane reads 32-value chunks: few, wide loads in flight, which suits one latency-bound workgroup."""
@@ -233,15 +238,15 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   scf.if %writer {{
     %kb = scalar.assume %my_k [range(%my_k, 0, {KU - 1})] : i32
     %bk = index.cast %kb : i32 to index
-    %wn = scalar.divf %my_w, %wsum : f32
-    view.store %wn, %wts_view[%token, %bk] : f32, view<[%tokens]x{KU}xf32>
+    %wn = scalar.divf %my_w, %wsum : f32{scaled("wn", "    ", scale)}
+    view.store %wn{"s" if scale != 1.0 else ""}, %wts_view[%token, %bk] : f32, view<[%tokens]x{KU}xf32>
   }}
   kernel.return
 }}
 """
 
 
-def route_prefill(H, E, KU, gating, norm, bias, wty="f32"):
+def route_prefill(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     """g_moe_route_tr, for prefill epochs (t >= 64; decode keeps g_moe_route: one token per workgroup, wide loads in
     flight, was 34 % faster per decode step). Router logits (f32 or bf16 weights) into LDS, then the top-k per token.
     Logits: TR tokens per workgroup, their h rows staged in LDS; lane l reads the 4-value chunks l, l+32, ... of each
@@ -378,8 +383,8 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32"):
 """)
     T2.append(f"    %total = scalar.addf %sum_{KU}, %zero_f : f32\n" + norm_text.replace("    %", "    %") + "\n")
     T2.append(f"""    scf.if %store_lane {{
-""" + "".join(f"""      %wn{k} = scalar.divf %wp{k}, %wsum : f32
-      view.store %wn{k}, %wts_view[%token, {k}] : f32, view<[%tokens]x{KU}xf32>
+""" + "".join(f"""      %wn{k} = scalar.divf %wp{k}, %wsum : f32{scaled(f"wn{k}", "      ", scale)}
+      view.store %wn{k}{"s" if scale != 1.0 else ""}, %wts_view[%token, {k}] : f32, view<[%tokens]x{KU}xf32>
 """ for k in range(KU)) + """    }
   }
 """)
@@ -459,11 +464,11 @@ kernel.def export("g_moe_route_tr") @g_moe_route_tr(%tokens: index) {{
 """
 
 
-def route_prefill_live(H, E, KU, gating, norm, bias, wty="f32"):
+def route_prefill_live(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     """g_moe_route_tr_live: g_moe_route_tr given the epoch's %info; a workgroup whose tokens are all padding (info
     word 2 = 0; a 1026-token prompt at chunk 4096 runs as a 2048-row epoch) does nothing. g_moe_bucket takes live
     tokens only, so their ids / weights are never read."""
-    text = route_prefill(H, E, KU, gating, norm, bias, wty)
+    text = route_prefill(H, E, KU, gating, norm, bias, wty, scale)
     text = text[text.index('kernel.def export("g_moe_route_tr")'):]
     TR = int(re.search(r"%cTR = index.constant (\d+) : index", text).group(1))
     def rep(a, b):
@@ -516,9 +521,9 @@ def row_scale_tiles(row_scale):
     return "\n" + text
 
 
-def route(H, E, KU, gating, norm, bias, wty="f32"):
+def route(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     """Both routers: g_moe_route (decode epochs) and g_moe_route_tr (prefill epochs); same outputs."""
-    return route_decode(H, E, KU, gating, norm, bias, wty) + route_prefill(H, E, KU, gating, norm, bias, wty)
+    return route_decode(H, E, KU, gating, norm, bias, wty, scale) + route_prefill(H, E, KU, gating, norm, bias, wty, scale)
 
 
 def expert_mv(fmt, K, N, E, KU, R, mode, fused=False, bias=False, act=None):

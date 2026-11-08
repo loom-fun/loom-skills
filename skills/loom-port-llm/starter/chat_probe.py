@@ -134,7 +134,7 @@ def reasoning_instructions(T, chat, heads, notes):
     with thinking on, the system block's body (tools text and/or system message, or the default system
     prompt) becomes INSTRUCTIONS + reasoning_separator + body; INSTRUCTIONS alone when the body is empty;
     no instructions (and no change) with thinking off or an effort whose text is empty."""
-    bos, prefix, suffix, user_prefix = chat["bos"], chat["system_prefix"], chat["suffix"], chat["user_prefix"]
+    bos, prefix, suffix, user_prefix = chat["bos"], chat["system_prefix"], sys_suffix(chat), chat["user_prefix"]
 
     def body(h):
         h = h[len(bos):] if bos and h.startswith(bos) else h
@@ -216,7 +216,7 @@ def system_lead(T, chat, default, bos, kw0, notes):
 def lead_instructions(chat, heads, notes):
     """Per-effort reasoning instructions appended to the system lead with thinking on (Spark-X2.6:
     default_system + '\n`thinking_effort` ... `thinking_effort=high`.'); chat.reasoning_after_lead."""
-    prefix, suffix, lead = chat["system_prefix"], chat["suffix"], chat["system_lead"]
+    prefix, suffix, lead = chat["system_prefix"], sys_suffix(chat), chat["system_lead"]
     def body(h):
         h = h[len(chat["bos"]):] if chat["bos"] and h.startswith(chat["bos"]) else h
         cut = suffix + chat["user_prefix"]
@@ -245,6 +245,16 @@ CHAT_ONLY = {"tools_prefix": "", "tools_suffix": "", "tool_line_prefix": "", "to
              "tool_item_suffix": "", "tool_turn_suffix": ""}
 
 
+def sys_suffix(chat):
+    """What closes a system block (chat.system_suffix when the template closes each role with its own tag)."""
+    return chat.get("system_suffix", chat["suffix"])
+
+
+def asst_suffix(chat):
+    """What closes an assistant turn (chat.assistant_suffix when the template closes each role with its own tag)."""
+    return chat.get("assistant_suffix", chat["suffix"])
+
+
 def system_in_user(T, chat, r, gap, bos, kw0):
     """Templates with no system turn that print the first system message inside the first user turn, before its
     text (Gemma 3: '<start_of_turn>user\\n' + system + '\\n\\n' + user text): chat["system_in_user"] is the separator
@@ -271,7 +281,12 @@ def derive(template_text, bos="", eos=""):
     # BOS: emitted by the control program at the very start when the template prints it.
     # Decided with a sentinel: a GGUF whose bos id is the template's own role tag (MiniCPM-V: <|im_start|>) starts every
     # render with that text although the template never prints bos_token.
-    printed = Template(template_text, "BOSPROBE", eos).render([{"role": "user", "content": "USERPROBE1"}]).startswith("BOSPROBE")
+    sentinel = Template(template_text, "BOSPROBE", eos)
+    first = sentinel.render([{"role": "user", "content": "USERPROBE1"}])
+    # ... but a template that prints the BOS text itself, once, at the start (Laguna: '〈|EOS|〉') does print it.
+    turns = sentinel.render([{"role": "user", "content": "USERPROBE1"}, {"role": "assistant", "content": "ASSTPROBE1"},
+                             {"role": "user", "content": "USERPROBE2"}])
+    printed = first.startswith("BOSPROBE") or bool(bos) and first.startswith(bos) and turns.count(bos) == 1
     chat["bos"] = bos = bos if bos and printed else ""
     # Reasoning instructions (Qwen3.8: "Reasoning effort is set to xhigh. ..." per reasoning_effort, only
     # with thinking on): the system-block probes below render with thinking off (kw0), where they vanish.
@@ -287,11 +302,25 @@ def derive(template_text, bos="", eos=""):
     chat["suffix"] = single[single.index("USERPROBE1") + len("USERPROBE1"):]
     gap = between(r, "SYSPROBE", "USERPROBE1")
     if not gap.startswith(chat["suffix"]):
-        r = system_in_user(T, chat, r, gap, bos, kw0)   # raises when it is not that shape either
+        # Per-role closing tags (Laguna: '<system>..</system>\n', '<user>..</user>\n', '<assistant>..</assistant>\n'):
+        # the user suffix with the role's name (system_suffix / assistant_suffix, present only when they differ).
+        cand = chat["suffix"].replace("user", "system")
+        if "user" in chat["suffix"] and gap.startswith(cand):
+            chat["system_suffix"] = cand
+            notes.append(f"system messages close with {cand!r} (system_suffix)")
+            chat["user_prefix"] = gap[len(cand):]
+        else:
+            r = system_in_user(T, chat, r, gap, bos, kw0)   # raises when it is not that shape either
     else:
         chat["user_prefix"] = gap[len(chat["suffix"]):]
     gap = between(r, "USERPROBE1", "ASSTPROBE1")
     chat["assistant_prefix"] = gap[len(chat["suffix"]):]
+    gap = between(r, "ASSTPROBE1", "USERPROBE2")
+    if not gap.startswith(chat["suffix"]):
+        cand = chat["suffix"].replace("user", "assistant")
+        if "user" in chat["suffix"] and gap == cand + chat["user_prefix"]:
+            chat["assistant_suffix"] = cand
+            notes.append(f"assistant turns close with {cand!r} (assistant_suffix)")
     head = single[:single.index("USERPROBE1")]
     if head.startswith(bos) and bos:
         head = head[len(bos):]
@@ -305,15 +334,18 @@ def derive(template_text, bos="", eos=""):
         chat["system_preamble"] = chat["system_prefix"][len(role_prefix):]
         chat["system_prefix"] = role_prefix
         notes.append(f"the system block is always printed and opens with {chat['system_preamble'][:60]!r}...")
-    if default:
+    if default and "system_preamble" not in chat and not (default.startswith(chat["system_prefix"]) and default.endswith(sys_suffix(chat))):
+        system_lead(T, chat, default, bos, kw0, notes)   # raises when it is not that shape either
+        bos = chat["bos"]
+    elif default:
         lead = chat["system_prefix"] + chat.get("system_preamble", "")
-        if not (default.startswith(lead) and default.endswith(chat["suffix"])):
+        if not (default.startswith(lead) and default.endswith(sys_suffix(chat))):
             if "system_preamble" in chat:
                 raise ProbeError(f"default system block has an unexpected shape: {default!r}")
             system_lead(T, chat, default, bos, kw0, notes)   # raises when it is not that shape either
             bos = chat["bos"]
         else:
-            chat["default_system"] = default[len(lead):len(default) - len(chat["suffix"])]
+            chat["default_system"] = default[len(lead):len(default) - len(sys_suffix(chat))]
             if chat["default_system"]:
                 notes.append(f"template inserts a default system prompt: {chat['default_system'][:60]!r}...")
     else:
@@ -330,14 +362,22 @@ def derive(template_text, bos="", eos=""):
     gen = lambda **kw: T.render(user1, gen=True, **kw)[len(T.render(user1, **kw)):]
     g_default, g_on, g_off = gen(), gen(enable_thinking=True), gen(enable_thinking=False)
     # Reasoning in history (agent loop: assistant after the last user query, followed by a tool result).
-    agent = lambda m: T.render([{"role": "user", "content": "USERPROBE1"}, m,
-                                {"role": "tool", "tool_call_id": "call_0", "content": "TOOLPROBE1"}], tools=TOOLS)
+    agent = lambda m, **kw: T.render([{"role": "user", "content": "USERPROBE1"}, m,
+                                      {"role": "tool", "tool_call_id": "call_0", "content": "TOOLPROBE1"}], tools=TOOLS, **kw)
     try:
         with_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"))
     except ProbeError:   # a template that refuses tool turns (Gemma 3: roles must alternate): the assistant turn alone
-        agent = lambda m: T.render([{"role": "user", "content": "USERPROBE1"}, m], tools=TOOLS)
+        agent = lambda m, **kw: T.render([{"role": "user", "content": "USERPROBE1"}, m], tools=TOOLS, **kw)
         with_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"))
-    without_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning=""))
+    # Templates that show reasoning in history only with thinking on (Laguna: '<think>R</think>' in every assistant
+    # turn with enable_thinking, a bare '</think>' without it, and thinking off by default): read the reasoning
+    # framing from the thinking-on render; history_think_off below says what a turn renders with thinking off.
+    hist_kw = {}
+    if "REASONPROBE" not in with_r and g_on != g_off and "REASONPROBE" in agent(
+            calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"), enable_thinking=True):
+        hist_kw = {"enable_thinking": True}
+        with_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"), **hist_kw)
+    without_r = agent(calls_msg("ASSTPROBE1", [CALL1], reasoning=""), **hist_kw)
     # Templates that keep reasoning in every assistant turn (preserve_thinking: Qwen3.6, Qwen3.8) render
     # an empty think block in the plain turn above, which then is not part of the assistant prefix.
     guess = chat["user_prefix"].replace("user", "assistant")
@@ -376,9 +416,17 @@ def derive(template_text, bos="", eos=""):
         chat["think_open"], chat["think_close"], chat["history_think"] = "", "", "nonempty"
     early = T.render([{"role": "user", "content": "USERPROBE1"},
                       {"role": "assistant", "content": "ASSTPROBE1", "reasoning_content": "REASONPROBE"},
-                      {"role": "user", "content": "USERPROBE2"}])
+                      {"role": "user", "content": "USERPROBE2"}], **hist_kw)
     # Qwen-style templates drop reasoning from turns before the last user query.
     chat["history_think_scope"] = "all" if "REASONPROBE" in early else "after_last_query"
+    if hist_kw and chat["think_open"]:
+        # Thinking off: every assistant turn renders think_close alone, its reasoning dropped (history_think_off "close").
+        off = between(agent(calls_msg("ASSTPROBE1", [CALL1], reasoning="REASONPROBE"), enable_thinking=False), "USERPROBE1", "ASSTPROBE1")
+        if off != chat["suffix"] + chat["assistant_prefix"] + chat["think_close"]:
+            raise ProbeError(f"assistant turn with thinking off renders {off!r} (not modeled)")
+        chat["history_think_off"] = "close"
+        notes.append(f"reasoning shows in history only with thinking on; with it off every assistant turn renders "
+                     f"{chat['think_close']!r} alone (history_think_off)")
     # ... but some keep an empty think block there (MiniCPM-V 4.6/4.7: <think>\n\n</think>\n\n). Present only then.
     if chat["history_think_scope"] == "after_last_query" and chat["think_open"]:
         empty = chat["assistant_prefix"] + chat["think_open"] + chat["think_close"]
@@ -408,7 +456,7 @@ def derive(template_text, bos="", eos=""):
         # The template ignores tools (a plain chat model, e.g. bare ChatML): a chat-only block. Requests' tools are
         # ignored as the template does, no call is parsed, and the card says tool calling "no" (agent gate n/a).
         chat.update(CHAT_ONLY)
-        chat["terminal"] = chat["suffix"].strip() or chat["suffix"]
+        chat["terminal"] = asst_suffix(chat).strip() or asst_suffix(chat)
         notes.append("template ignores tools: chat-only block, tool calling unsupported (call_format none)")
         return chat, notes
     t_sys = T.render([{"role": "system", "content": "SYSPROBE"}, {"role": "user", "content": "USERPROBE1"}], tools=TOOLS, **kw0)
@@ -460,9 +508,9 @@ def derive(template_text, bos="", eos=""):
         if block.startswith(bos) and bos:
             block = block[len(bos):]
         block = block[:len(block) - len(chat["user_prefix"])]
-        if not (block.startswith(chat["system_prefix"]) and block.endswith(chat["suffix"])):
+        if not (block.startswith(chat["system_prefix"]) and block.endswith(sys_suffix(chat))):
             raise ProbeError(f"tools are not rendered as a system block: {block[:200]!r}")
-        body = block[len(chat["system_prefix"]):len(block) - len(chat["suffix"])]
+        body = block[len(chat["system_prefix"]):len(block) - len(sys_suffix(chat))]
         lead = chat.get("system_lead", "")
         if lead:
             if not body.startswith(lead):
@@ -481,7 +529,7 @@ def derive(template_text, bos="", eos=""):
         tools_prefix, tools_suffix = body[:i0 - len(line)] if line else body[:i0], body[i1 + len(printed[1]):]
         s_body = t_sys[:t_sys.index("USERPROBE1")]
         s_body = s_body[len(bos) if bos and s_body.startswith(bos) else 0:]
-        s_body = s_body[len(chat["system_prefix"]):len(s_body) - len(chat["user_prefix"]) - len(chat["suffix"])]
+        s_body = s_body[len(chat["system_prefix"]):len(s_body) - len(chat["user_prefix"]) - len(sys_suffix(chat))]
         if lead:
             s_body = s_body[len(lead):] if s_body.startswith(lead) else s_body
             if s_body.startswith("SYSPROBE"):
@@ -545,7 +593,7 @@ def derive(template_text, bos="", eos=""):
         end1 = turn.index(")", name0) + 1
         chat["call_separator"] = turn[end1:turn.index("search(", end1)]
         close_at = turn.index(")", turn.index("search(")) + 1
-        chat["calls_close"] = turn[close_at:turn.index(chat["suffix"], close_at)]
+        chat["calls_close"] = turn[close_at:turn.index(asst_suffix(chat), close_at)]
         chat["call_marker"] = opened.rstrip("[(")  # output_next stops content here
         chat["call_end"] = chat["calls_close"].lstrip("])")
         chat["content_call_separator"] = ""
@@ -590,9 +638,9 @@ def derive(template_text, bos="", eos=""):
         chat["call_separator"] = two[end1:start2]
         end2 = two.index("</tool_call>", start2) + len("</tool_call>")
     after_calls = two[end2:]
-    if not after_calls.startswith(chat["suffix"]):
+    if not after_calls.startswith(asst_suffix(chat)):
         raise ProbeError(f"assistant turn with calls is not closed by the suffix: {after_calls[:80]!r}")
-    after_calls = after_calls[len(chat["suffix"]):]
+    after_calls = after_calls[len(asst_suffix(chat)):]
     if '"TOOLPROBE1"' in after_calls and '"TOOLPROBE2"' in after_calls:
         # Tool results printed as JSON strings (Llama 3: content | tojson): tool_content_json, present only then.
         chat["tool_content_json"] = True
@@ -613,7 +661,7 @@ def derive(template_text, bos="", eos=""):
     chat["tool_turn_prefix"] = pre[:len(pre) - len(item_prefix)]
     chat["tool_item_prefix"], chat["tool_item_suffix"] = item_prefix, item_suffix
     chat["tool_turn_suffix"] = post[len(item_suffix):]
-    chat["terminal"] = chat["suffix"].strip() or chat["suffix"]
+    chat["terminal"] = asst_suffix(chat).strip() or asst_suffix(chat)
     return chat, notes
 
 
@@ -653,16 +701,17 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
         out += chat["system_prefix"] + lead + body + chat["suffix"]
     elif system_lead:   # the default prompt (+ effort instructions), the tools block, then the first system message
         rest = (tb if tools else "") + ((chat["tools_system_separator"] if tools else chat["system_lead_separator"]) + body if body else "")
-        out += chat["system_prefix"] + system_lead + instr + rest + chat["suffix"]
+        out += chat["system_prefix"] + system_lead + instr + rest + sys_suffix(chat)
     elif tools:
+        sep = chat["tools_system_separator"] if body else ""
         if not first_system and "default_system_tools" in chat:   # the template's tools-time default, separator included
             body, sep = chat["default_system_tools"], ""
         merged = body + sep + tb if chat["tools_after_system"] else tb + sep + body
-        out += chat["system_prefix"] + instructed(merged) + chat["suffix"]
+        out += chat["system_prefix"] + instructed(merged) + sys_suffix(chat)
     elif instr:
-        out += chat["system_prefix"] + instructed(body) + chat["suffix"]
+        out += chat["system_prefix"] + instructed(body) + sys_suffix(chat)
     elif use_default:
-        out += chat["system_prefix"] + chat["default_system"] + chat["suffix"]
+        out += chat["system_prefix"] + chat["default_system"] + sys_suffix(chat)
     prior = None
     last_query = max([i for i, m in enumerate(messages) if m["role"] == "user"], default=-1)
     for i, m in enumerate(messages):
@@ -685,14 +734,17 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
             shown = chat["history_think_scope"] == "all" or i > last_query
             think = chat["think_open"] + thought + chat["think_close"] if shown and (thought or chat["history_think"] == "always") and chat["think_open"] else ""
             think = chat["think_close"] if shown and not thought and chat["history_think"] == "close" else think
+            think = chat["think_close"] if not on and chat.get("history_think_off") == "close" else think
             if not shown and chat.get("history_think_before") == "empty":
                 think = chat["think_open"] + chat["think_close"]
             calls = render_calls(chat, m.get("tool_calls") or [])
             text = "" if calls and chat.get("calls_drop_content") else text
             sep = chat["content_call_separator"] if text and calls else ""
-            out += chat["assistant_prefix"] + think + text + sep + calls + chat["suffix"]
+            out += chat["assistant_prefix"] + think + text + sep + calls + asst_suffix(chat)
+        elif role == "user":
+            out += chat["user_prefix"] + text + chat["suffix"]
         else:
-            out += (chat["user_prefix"] if role == "user" else chat["system_prefix"]) + text + chat["suffix"]
+            out += chat["system_prefix"] + text + sys_suffix(chat)
         prior = role
     if gen:
         if prior == "tool":
