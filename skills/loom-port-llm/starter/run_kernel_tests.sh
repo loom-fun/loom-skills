@@ -10,6 +10,7 @@ import re, sys
 lib = open(sys.argv[1]).read()
 defined = set(re.findall(r'kernel\.def export\("([^"]+)"\)', lib)) | set(re.findall(r'kernel\.def[^@]*@([\w.]+)', lib))
 text = open("cases.loom-test").read()
+defined |= set(re.findall(r'kernel\.def export\("([^"]+)"\)', text))   # test helper kernels
 blocks = re.split(r'(?m)^(?=check\.case )', text)
 keep = []
 for b in blocks:

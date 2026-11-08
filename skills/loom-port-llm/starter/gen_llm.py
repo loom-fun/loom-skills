@@ -3291,57 +3291,130 @@ def attention():
 
 
 FALLBACK = r"""
-// Tokens of 16-token tiles that g_attention_flash does not cover (mixed rows,
-// non-consecutive positions or padding), listed once per epoch; count[0] is
-// the list length for indirect dispatch.
+// Prefill attention work lists, built once per epoch from the token info. A token's path depends only on its own
+// span (a run of one row's consecutive positions), never on where the epoch packs it: tiles[1 + i] is the first
+// token of the i-th 16-token tile that lies inside one span and starts at a position multiple of 16, in token order
+// (neighbouring workgroups then read neighbouring keys; token 0 past the count): g_attention_flash2 computes those,
+// and tiles[0] is their count. list holds every other token (g16_attention_split_listed computes those; count[0] is
+// the list length for indirect dispatch).
 kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%tokens: index) {
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
-} launch(%tokens_arg: index, %info: buffer, %list: buffer, %count: buffer) {
+} launch(%tokens_arg: index, %info: buffer, %tiles: buffer, %list: buffer, %count: buffer) {
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
   %lane_id = kernel.workitem.id<x> : index
   %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
   %zero = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %c16 = index.constant 16 : index
+  %c255 = index.constant 255 : index
   %c256 = index.constant 256 : index
   %c0_i32 = scalar.constant 0 : i32
-  %c16_i32 = scalar.constant 16 : i32
-  %counter_bytes = index.constant 16 : offset
-  %counter = buffer.alloca<workgroup> align(16) %counter_bytes : buffer
-  %counter_view = buffer.view %counter[%zero] : buffer -> view<4xi32>
+  %c1_i32 = scalar.constant 1 : i32
+  %c15_i32 = scalar.constant 15 : i32
+  %true = scalar.constant true : i1
+  %scratch_bytes = index.constant 1040 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<260xi32>
   %first = index.cmp eq, %lane, %c0 : index
+  %c256_slot = index.constant 256 : index
+  %c257_slot = index.constant 257 : index
   scf.if %first {
-    view.store %c0_i32, %counter_view[%c0] : i32, view<4xi32>
+    view.store %c0_i32, %scratch_view[%c256_slot] : i32, view<260xi32>
+  }
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %tiles_view = buffer.view %tiles[%zero] : buffer -> view<[%tokens]xi32>
+  %list_view = buffer.view %list[%zero] : buffer -> view<[%tokens]xi32>
+  // Tile starts, in token order: lane L takes the L-th run of `chunk` tokens, counts its tile starts, the first lane
+  // turns the counts into offsets, and every lane writes its starts after those of the lanes before it.
+  %chunk_round = index.add %tokens, %c255 : index
+  %chunk = index.div %chunk_round, %c256 : index
+  %run = index.mul %lane, %chunk : index
+  %mine = scf.for %i = [%c0 to %chunk step %c1](%n = %c0_i32 : i32) -> (i32) {
+    %token_value = index.add %run, %i : index
+    %inside = index.cmp ult, %token_value, %tokens : index
+    %token = scf.select %inside, %token_value, %c0 : index
+    %starts = func.call @g_tile_starts(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+    %counted = scalar.andi %starts, %inside : i1
+    %step = scf.select %counted, %c1_i32, %c0_i32 : i32
+    %next = scalar.addi %n, %step : i32
+    scf.yield %next : i32
+  }
+  view.store %mine, %scratch_view[%lane] : i32, view<260xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  scf.if %first {
+    %total = scf.for %l = [%c0 to %c256 step %c1](%sum = %c0_i32 : i32) -> (i32) {
+      %bounded_l = index.assume %l [range(%l, 0, 255)] : index
+      %count_l = view.load %scratch_view[%bounded_l] : view<260xi32> -> i32
+      view.store %sum, %scratch_view[%bounded_l] : i32, view<260xi32>
+      %sum_next = scalar.addi %sum, %count_l : i32
+      scf.yield %sum_next : i32
+    }
+    view.store %total, %tiles_view[%c0] : i32, view<[%tokens]xi32>
+    view.store %total, %scratch_view[%c257_slot] : i32, view<260xi32>
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %tiles = index.div %tokens, %c16 : index
-  %list_view = buffer.view %list[%zero] : buffer -> view<[%tokens]xi32>
-  scf.for %tile = [%lane to %tiles step %c256] {
-    %tile_first = index.mul %tile, %c16 : index
-    %uniform, %r_unused, %p_unused = func.call @g_tile_uniform(%info, %tokens, %tile_first) : (buffer, index, index) -> (i1, i32, i32)
-    %true = scalar.constant true : i1
-    %not_uniform = scalar.xori %uniform, %true : i1
-    scf.if %not_uniform {
-      %base32 = view.atomic.rmw<addi> %c16_i32, %counter_view[%c0] {ordering = relaxed, scope = workgroup} : i32, view<4xi32> -> i32
-      %base_bound = scalar.assume %base32 [range(%base32, 0, 8176)] : i32
-      %base = index.cast %base_bound : i32 to index
-      scf.for %i = [%c0 to %c16 step %c1] {
-        %slot_value = index.add %base, %i : index
-        %slot = index.assume %slot_value [lt(%slot_value, %tokens)] : index
-        %token_value = index.add %tile_first, %i : index
-        %token32 = index.cast %token_value : index to i32
-        view.store %token32, %list_view[%slot] : i32, view<[%tokens]xi32>
-      }
+  %offset = view.load %scratch_view[%lane] : view<260xi32> -> i32
+  %written = scf.for %i = [%c0 to %chunk step %c1](%n = %offset : i32) -> (i32) {
+    %token_value = index.add %run, %i : index
+    %inside = index.cmp ult, %token_value, %tokens : index
+    %token = scf.select %inside, %token_value, %c0 : index
+    %starts = func.call @g_tile_starts(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+    %counted = scalar.andi %starts, %inside : i1
+    %next = scf.if %counted -> (i32) {
+      %n_bound = scalar.assume %n [range(%n, 0, 511)] : i32
+      %slot_value = index.cast %n_bound : i32 to index
+      %entry_value = index.add %slot_value, %c1 : index
+      %entry = index.assume %entry_value [lt(%entry_value, %tokens)] : index
+      %token32 = index.cast %token : index to i32
+      view.store %token32, %tiles_view[%entry] : i32, view<[%tokens]xi32>
+      %n_next = scalar.addi %n, %c1_i32 : i32
+      scf.yield %n_next : i32
+    } else {
+      scf.yield %n : i32
+    }
+    scf.yield %next : i32
+  }
+  // The entries past the count are token 0, so a workgroup without a tile can read its entry.
+  %listed_total32 = view.load %scratch_view[%c257_slot] : view<260xi32> -> i32
+  %listed_total = index.cast %listed_total32 : i32 to index
+  %c16 = index.constant 16 : index
+  %slots = index.div %tokens, %c16 : index
+  %fill_from = index.add %listed_total, %lane : index
+  scf.for %e = [%fill_from to %slots step %c256] {
+    %e_bound = index.assume %e [range(%e, 0, 8191)] : index
+    %fill_value = index.add %e_bound, %c1 : index
+    %fill_slot = index.assume %fill_value [range(%fill_value, 1, 8192), lt(%fill_value, %tokens)] : index
+    view.store %c0_i32, %tiles_view[%fill_slot] : i32, view<[%tokens]xi32>
+  }
+  // Every other token: the listed fallback's (order does not matter, each is computed on its own).
+  scf.for %t = [%lane to %tokens step %c256] {
+    %token = index.assume %t [lt(%t, %tokens)] : index
+    %pos = view.load %info_view[%token, %c1] : view<[%tokens]x4xi32> -> i32
+    %skew32 = scalar.andi %pos, %c15_i32 : i32
+    %skew = index.cast %skew32 : i32 to index
+    %has_start = index.cmp ule, %skew, %token : index
+    %start_value = index.sub %token, %skew : index
+    %start_or_token = scf.select %has_start, %start_value, %token : index
+    %start = index.assume %start_or_token [lt(%start_or_token, %tokens)] : index
+    %uniform, %r_unused, %p_unused = func.call @g_tile_uniform(%info, %tokens, %start) : (buffer, index, index) -> (i1, i32, i32)
+    %covered = scalar.andi %uniform, %has_start : i1
+    %not_covered = scalar.xori %covered, %true : i1
+    scf.if %not_covered {
+      %slot32 = view.atomic.rmw<addi> %c1_i32, %scratch_view[%c256_slot] {ordering = relaxed, scope = workgroup} : i32, view<260xi32> -> i32
+      %slot_bound = scalar.assume %slot32 [range(%slot32, 0, 8191)] : i32
+      %slot_value = index.cast %slot_bound : i32 to index
+      %slot = index.assume %slot_value [lt(%slot_value, %tokens)] : index
+      %token32 = index.cast %token : index to i32
+      view.store %token32, %list_view[%slot] : i32, view<[%tokens]xi32>
     }
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   scf.if %first {
-    %total = view.load %counter_view[%c0] : view<4xi32> -> i32
+    %fallbacks = view.load %scratch_view[%c256_slot] : view<260xi32> -> i32
     %count_view = buffer.view %count[%zero] : buffer -> view<1xi32>
-    view.store %total, %count_view[0] : i32, view<1xi32>
+    view.store %fallbacks, %count_view[0] : i32, view<1xi32>
   }
   kernel.return
 }
@@ -4831,10 +4904,11 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %list_entry = index.constant 4 : offset
   %list_size = index.scale %t, %list_entry : index, offset -> offset
   %count_size = index.constant 256 : offset
+  %flash_tiles = buffer.alloca<global> align(256) %list_size : buffer
   %fallback_list = buffer.alloca<global> align(256) %list_size : buffer
   %fallback_count = buffer.alloca<global> align(256) %count_size : buffer
   scf.if %gemm {{
-    kernel.launch @g_attention_fallback_list[%t](%t, %info, %fallback_list, %fallback_count) : [index](index, buffer, buffer, buffer)
+    kernel.launch @g_attention_fallback_list[%t](%t, %info, %flash_tiles, %fallback_list, %fallback_count) : [index](index, buffer, buffer, buffer, buffer)
   }}
   %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
   %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
@@ -4910,7 +4984,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
           rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
           T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
   scf.if %gemm {{
-    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, {gty}, buffer, buffer, buffer, buffer)
+    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, {gate}, %info, %flash_tiles, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, {gty}, buffer, buffer, buffer, buffer, buffer)
     kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
     kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, {gty}, buffer)
   }} else {{
