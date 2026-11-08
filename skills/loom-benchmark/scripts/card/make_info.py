@@ -370,6 +370,28 @@ def baseline_version(text):
     return f"llamacpp-rocm/{tag}" if tag and text == tag else text
 
 
+def refused_tokens(rows, package, measured):
+    """{card metric: prompt tokens} of the long documents the Loom server refused (perf.py rows' over_context) and
+    the session did not measure: each prompt re-rendered from its row's nonce and counted with the package's
+    tokenizer (null without --package, or for a row from before perf.py logged its nonce)."""
+    from bench_common import Package, long_prompt
+    card_key = {v: k for k, v in ROOFLINE_METRIC.items()}
+    pkg = Package(package) if package and os.path.exists(os.path.join(package, "tokenizer.json")) else None
+    out = {}
+    for r in rows:
+        for k in r.get("over_context", []):
+            if card_key[k] in measured:
+                continue
+            n = None
+            if pkg and r.get("nonce"):
+                think = {"on": True, "off": False}.get(r.get("thinking"))
+                msgs = [{"role": "user", "content": long_prompt(k, r["nonce"])}]
+                n = len(pkg.ids(pkg.render_messages(msgs, None, think)))
+            prev = out.get(card_key[k])
+            out[card_key[k]] = n if prev is None else (prev if n is None else min(prev, n))
+    return out
+
+
 def cmd_perf(a):
     if a.perf_log:
         loom_rows = perf_rows(a.perf_log, "loom", a.loom_label)
@@ -403,6 +425,9 @@ def cmd_perf(a):
         commands += [line.rstrip("\n") for line in open(a.commands_file, encoding="utf-8") if line.strip()]
     session = {"date": date, "source": source_arg(a), "runs": runs, "commands": commands, "metrics": metrics,
                "programs_sha256": programs_sha256(a.package) if a.package else None}
+    over = refused_tokens(loom_rows, a.package, set(ls))
+    if over:   # perf.py: the Loom server refused these documents as over its context (card_lib.over_context)
+        session["over_context"] = over
     perf = {"session": session}
     if a.baseline_version or a.baseline_args:
         perf["baseline"] = {"name": a.baseline_name, "version": baseline_version(a.baseline_version) if a.baseline_version else None,
