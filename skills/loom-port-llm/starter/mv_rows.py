@@ -63,10 +63,14 @@ def flash2_deep_from(cfg):
     2152 s with one tile, 530 s with two; 64k: 320 vs 136 s; 32k: 41 vs 38 s), while shallower tiles keep one (16k:
     11.3 vs 11.9 s; two lost 3-16 % at 1k-32k prompts at G = 3 / 4). Dispatch vs one tile, needle TTFT: G = 5 at 36k
     92 vs 150 s, G = 7 at 32k / 64k 141 / 413 vs 213 / 1111 s, G = 8 at 64k 138 vs 183 s.
+    The depth follows head_dim, not G or the KV head count: at head_dim 128 two tiles win at 32k wherever measured
+    (Llama-3.2-3B G = 3 +3 %, Qwen3-4B G = 4 +7 %, Qwen2.5-1.5B G = 6 with 2 KV heads +3 %), while at head_dim 64
+    (Qwen2.5-0.5B, G = 7, 2 KV heads) two tiles from 16384 lost 10 % of 32k prefill (7.4k vs 8.2k tok/s) and from
+    32768 lost nothing: a key row is half the bytes, so the bandwidth-bound crossover is twice as deep.
     FLASH2_TS_DEPTH overrides (0: off); FLASH2_TS forces one kernel."""
     v = os.environ.get("FLASH2_TS_DEPTH")
     if v:
         return int(v)
     G = cfg["heads"] // cfg["kv_heads"]
     deep = cfg["head_dim"] <= 128 and 2 < G < 16 and not cfg.get("attn_sinks") and not os.environ.get("FLASH2_TS")
-    return 16384 if deep else 0
+    return (16384 if cfg["head_dim"] == 128 else 32768) if deep else 0
