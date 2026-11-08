@@ -3242,6 +3242,8 @@ def seg_attention(text):
             names.update(re.findall(r"(?:scf\.for |[(,] ?)(%\w+) = ", line))
     for n in sorted(names, key=len, reverse=True):
         body = re.sub(rf"(?<![\w%]){re.escape(n)}\b", "%sq_" + n[1:], body)
+    if os.environ.get("SEG_PROBE") == "nobody":   # TEMP probe
+        body = "      %sq_nop = index.constant 0 : index"
     wg = [l for l in body.split("\n") if re.match(r"\s*%sq_(q_bytes|p_bytes|q_tile|p_tile) = ", l)]   # workgroup tiles: kernel scope
     body = "\n".join(l for l in body.split("\n") if l not in wg)
     top = text.index("  scf.if %live {\n", a)
