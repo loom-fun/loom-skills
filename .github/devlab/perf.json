@@ -34,11 +34,12 @@
     }
    ],
    "steps": [
-    "ktest:new",
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "perf:t64:2:long",
-    "perf:all32:2:long",
+    "perf:main:3",
+    "perf:new:3",
+    "perf:t64:3",
+    "perf:all32:3",
+    "c4:main",
+    "c4:new",
     "c4:main",
     "c4:new"
    ]
@@ -60,9 +61,10 @@
     }
    ],
    "steps": [
-    "ktest:new",
-    "perf:main:2:long",
-    "perf:new:2:long",
+    "perf:main:3",
+    "perf:new:3",
+    "c4:main",
+    "c4:new",
     "c4:main",
     "c4:new"
    ]
@@ -84,9 +86,10 @@
     }
    ],
    "steps": [
-    "ktest:new",
-    "perf:main:2:long",
-    "perf:new:2:long",
+    "perf:main:3",
+    "perf:new:3",
+    "c4:main",
+    "c4:new",
     "c4:main",
     "c4:new"
    ],
@@ -109,9 +112,10 @@
     }
    ],
    "steps": [
-    "ktest:new",
-    "perf:main:2:long",
-    "perf:new:2:long",
+    "perf:main:3",
+    "perf:new:3",
+    "c4:main",
+    "c4:new",
     "c4:main",
     "c4:new"
    ]
