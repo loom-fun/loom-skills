@@ -20,6 +20,7 @@
 #        pairs:R         determinism.py --pairs: each prompt twice in a row (prefix-cache miss, then hit), R reps
 #        determinism:C:R determinism.py, R reps of each prompt with C requests in flight
 #        admit:N         admission only: a needle prompt of N tokens on a fresh server, admitted or refused (503), cancelled
+#        needle:N[:S]    one Loom-only needle probe of N tokens on the running server (read timeout S seconds): status, TTFT
 #        ktest           the starter's kernel tests (make_kernel_tests.py + run_kernel_tests.sh) on the package
 #        gates:LEVEL     gates.sh at LEVEL against the card's llama.cpp build ("llamacpp" in EXPERIMENT.json)
 # Writes WORK/<variant>/out: summary.json, *.log. Every server it starts is stopped at exit.
@@ -230,6 +231,13 @@ EOF
       FORCE=1 LEVEL=$p1 "$B/gates.sh" "$pkg" "$url" "$gguf" "$D/bench" "$LLAMA_PORT" > "$out/gates.out" 2>&1; rc=$?
       cp "$D"/bench/gates.json "$D"/bench/gates_*.log "$out/" 2>/dev/null
       res[$s]=$(grep -h "^GATES" "$out/gates.out" | tail -1 | cut -c1-300); [ -n "${res[$s]}" ] || res[$s]="rc=$rc";;
+    needle)
+      curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
+      step "needle $p1"
+      "$T" "$B/needle.py" "$pkg" "$url" --sizes "$p1" --probes 1 --no-over-capacity ${p2:+--timeout "$p2"} \
+        --out "$out/needle_$p1.json" > "$out/needle_$p1.log" 2>&1
+      res[$s]=$(grep -h "^OK\|^FAIL" "$out/needle_$p1.log" | tail -1 | cut -c1-240)
+      [ -n "${res[$s]}" ] || res[$s]=$(tail -1 "$out/needle_$p1.log" | cut -c1-240);;
     *) echo "unknown step $s"; res[$s]=ERROR;;
   esac
   echo "RESULT $name $s: ${res[$s]}"
