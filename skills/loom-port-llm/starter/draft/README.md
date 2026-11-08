@@ -254,19 +254,19 @@ c4_steady three runs; llama.cpp b1368 drafting from the same BF16 GGUF):
     for 1 token). The optimization catalog lists what was tried.
 - Verification of more than 16 tokens per epoch (several drafting streams at depth 5+) takes the WMMA GEMM (rows
   padded to 64).
-- **Long-context verify pays decode attention per token.** The per-token split-K kernel costs the same per verified
-  token as per decoded token (it streams the KV once per token: Qwen3.8-27B at 32k, 671 us per layer for 1 token,
-  2058 us for 4, `loom-benchmark` dispatch time), so depth 7 falls behind depth 3 at long context and the 27B package
-  uses depth 3. Two cheap fixes are in: a block's 16 key scores are reduced by one butterfly all-reduce (~31 shuffles
-  instead of 16 subgroup reductions) and the 16-key blocks are absolute-aligned, so a block is one KV page and needs one
-  page lookup (32k depth-3 epoch 135 -> 129 ms; at 32k the package now decodes 23.2 vs llama.cpp's 21.2 tok/s, three
-  runs each). Tried and dropped: two or four independent softmax chains per block (no change); a workgroup per segment
-  of same-row tokens staging each key block once in workgroup memory, double-buffered (exact; 4 tokens 1746 vs
-  2058 us per layer in isolation, but slower in the model); and a WMMA split kernel with the span's tokens as MMA
-  columns (32k epoch 210 -> 165 ms at depth 7) that is not exact: RDNA3.5's WMMA result for a column changes with the
-  V rows of keys the column masks to P = 0 (1-ulp; verified in isolation by zeroing those rows), so a token's
-  attention depended on its span and the spec gate failed (15/16). An exact design would run the 16-aligned key range
-  a segment shares on WMMA and each token's ragged ends on the per-token path.
+- **Long-context verify pays decode attention per token** with the split-K kernel: it streams the KV once per token
+  (Qwen3.8-27B at 32k, 671 us per layer for 1 token, 2058 us for 4, `loom-benchmark` dispatch time), so depth 7 falls
+  behind depth 3 at long context and the 27B package uses depth 3. For head_dim 64 and 128 the starter now sends tokens
+  at position >= `SEG_MIN` (8192) on full-attention layers to `g_attention_seg` (gen_llm.py): one workgroup per
+  verification span reads each key block once for all its tokens, keys over lanes for the scores, exact per token
+  (drafted == undrafted). Qwen2.5-0.5B depth 2, interleaved A/B: decode 16k +27 %, 32k +20 %; Qwen2.5-1.5B 16k
+  +24 %, 32k +27 %; short decode and 4 streams unchanged. Not at head_dim 256 (Gemma-3-1B, one KV head: 8k/16k
+  -40 %). Earlier attempts: a block's 16 key scores reduced by one butterfly all-reduce and absolute-aligned 16-key
+  blocks (kept); two or four independent softmax chains per block (no change); a span workgroup staging each key
+  block in workgroup memory with lanes over dims (exact, but slower in the model: the per-key 32-lane reductions are
+  the cost, here 45 instructions per key and head at head_dim 64); and a WMMA split kernel with the span's tokens as
+  MMA columns that is not exact (RDNA3.5's WMMA result for a column changes with the V rows of keys the column masks
+  to P = 0), so the spec gate failed (15/16).
 - Two-epoch continuation (`continuation_epochs: 2`) is not implemented (one device epoch per host turn).
 - DFlash v1 drafters with full-context attention read the whole context per proposal (DFlash2 windows it).
 - DFlash RoPE uses KV positions; llama.cpp gives M-RoPE targets' drafters the temporal position (degenerate
