@@ -1,14 +1,27 @@
 {
- "_comment": "build.py's memory_bytes counts the largest program's prefill scratch: the three hybrid MoE cards rebuilt from this branch, a full-context request on a fresh server at the value build.py now prints and at the card's published one (full gates passed on the first card at 48e9 in run 42343748198).",
- "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
- "memory_bytes": 48000000000,
+ "_comment": "Full gates (needle_full included) on the two G=2 Qwen3 cards rebuilt from the flash2-subtiles branch (PR 116).",
+ "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "memory_bytes": 17000000000,
  "kit": null,
  "llamacpp": "b1369",
  "variants": [
-  {"name": "q36-rebuilt-admit", "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-rebuilt-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 49000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-card-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 42000000000, "steps": ["admit:260096"]},
-  {"name": "orn-rebuilt-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 36000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "orn-card-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 33000000000, "steps": ["admit:260096"]}
+  {
+   "name": "q06-regen",
+   "build": {},
+   "steps": [
+    "ktest",
+    "gates:full"
+   ]
+  },
+  {
+   "name": "q17-regen",
+   "card": "loom-fun/ggml-org-Qwen3-1.7B-loom",
+   "llamacpp": "b1370",
+   "build": {},
+   "steps": [
+    "ktest",
+    "gates:full"
+   ]
+  }
  ]
 }
