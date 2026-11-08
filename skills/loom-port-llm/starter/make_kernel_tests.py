@@ -15,7 +15,7 @@ import json, sys, os, numpy as np
 from gguf import GGUFReader
 from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mv_rows import pick_r, iq_r  # noqa: E402
+from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
 from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402  formats with no 256-row (_m256) GEMM
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
 from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
@@ -1316,8 +1316,61 @@ def flash_cases(kern, D, KVH, width, scale, WIN, tag=""):
                      .replace(f'path("f_o{tag}.npy")', f'path("f_ow{tag}.npy")'))
 
 
+DEEP_CASES = []
 if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (not WIN or not cfg.get("head_dim_swa")):
     flash_cases("g_attention_flash2", D, KVH, KVH * D, D ** -0.5, WIN)
+    DEEP = flash2_deep_from(cfg)
+    if DEEP:   # depth dispatch (gen_flash2.py): which kernel computes which tile, and that the pair is exact
+        # One prefill of two rows: row 1 at tokens 0-39 (deep), row 0 at tokens 40-175 from DEEP - 32, so the 11 tiles
+        # are: 0-1 a deep pair of row 1; 2 mixed (listed fallback: no flash kernel writes it); 3 alone (its partner is
+        # mixed); 4-5 straddle DEEP (one-tile); 6-7, 8-9 deep pairs; 10 unpaired. Pages alias the two 1024-key arenas
+        # of the rows case, so key j of a row is that row's key j % 1024.
+        td, ctx_d = 176, (DEEP // 1024 + 2) * 1024; blk = ctx_d // 16
+        arena_d = np.load(os.path.join(out, "f_arena_m.npy")).reshape(2, 2, 1024, -1)[:, :, :, :KVH * D].reshape(2, 2, 1024, KVH, D)
+        row = (np.arange(td) < 40).astype(np.int32)
+        pos = np.where(row == 1, DEEP + 1000 + np.arange(td), DEEP - 32 + np.arange(td) - 40)
+        info_d = np.zeros((td, 4), np.int32); info_d[:, 0] = row; info_d[:, 1] = pos; info_d[:, 2] = 1
+        orig_d = np.zeros(20 + 2 * blk, np.int32); orig_d[8] = 80; orig_d[18] = 80 + 4 * blk
+        orig_d[20:20 + blk] = np.arange(blk) % 64; orig_d[20 + blk:] = 64 + np.arange(blk) % 64
+        qd_ = (rng.standard_normal((td, QH, D)) * 2.5).astype(np.float32); gd_ = rng.standard_normal((td, QH, D)).astype(np.float32)
+        q64 = qd_.astype(np.float16).astype(np.float64); o_d = np.zeros((td, QH, D))
+        for hh in range(QH):
+            kv = hh // (QH // KVH)
+            for r in (0, 1):   # all keys visible (no window); key k repeats (p - k) // 1024 + 1 times up to position p
+                sel = row == r; kr, vr = arena_d[0, r, :, kv], arena_d[1, r, :, kv]
+                sc = q64[sel, hh] @ kr.astype(np.float64).T * D ** -0.5; w = np.exp(sc - sc.max(-1, keepdims=True))
+                w = w * ((pos[sel][:, None] - np.arange(1024)[None, :]) // 1024 + 1)
+                o_d[sel, hh] = (w / w.sum(-1, keepdims=True)) @ vr.astype(np.float64)
+        if cfg.get("attn_gate"):
+            o_d = o_d / (1 + np.exp(-gd_))
+        SENT = 7.0
+        tile = np.arange(td) // 16; pair_deep = np.isin(tile, (0, 1, 6, 7, 8, 9))
+        for name, mask in (("both", tile != 2), ("one", (tile != 2) & ~pair_deep), ("deep", pair_deep)):
+            e = np.where(mask[:, None, None], o_d, SENT)
+            save(f"f_o_d{name}", e.reshape(td, QH * D).astype(np.float32))
+        for n_, a_ in [("f_info_d", info_d), ("f_orig_d", orig_d), ("f_q_d", qd_.reshape(td, QH * D)), ("f_g_d", gd_.reshape(td, QH * D))]:
+            save(n_, a_)
+        AT = f"tensor<{2 * 2048 * KVH * D}xf16>"; OT_ = f"tensor<{td}x{QH * D}xf32>"; IT = f"tensor<{len(orig_d)}xi32>"
+        launch = lambda k: (f"  kernel.launch @{k}[%t](%t, %layer, %sliding, %ctx, %pool, %q, %g, %info, %orig, %arena, %o) : [index](index, "
+                            f"index, i32, index, index, {OT_}, {OT_}, tensor<{td}x4xi32>, {IT}, {AT}, {OT_})\n")
+        DEEP_CASES = [f"""check.case public @flash_prefill_deep_{name} {{
+  %t = check.literal value({td}) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value(0) : i32
+  %ctx = check.literal value({ctx_d}) : index
+  %pool = check.literal value(2048) : index
+  %q = check.file.read.npy path("f_q_d.npy") : {OT_}
+  %g = check.file.read.npy path("f_g_d.npy") : {OT_}
+  %info = check.file.read.npy path("f_info_d.npy") : tensor<{td}x4xi32>
+  %orig = check.file.read.npy path("f_orig_d.npy") : {IT}
+  %arena = check.file.read.npy path("f_arena_m.npy") : {AT}
+  %e = check.file.read.npy path("f_o_d{name}.npy") : {OT_}
+  %o = check.generate.fill value({SENT}) : {OT_}
+{"".join(launch(k) for k in kerns)}  check.expect.close actual(%o) expected(%e) atol(4.0e-3) rtol(4.0e-3) nan(different) : {OT_}
+  check.return
+}}
+""" for name, kerns in (("both", ("g_attention_flash2", "g_attention_flash2_deep")), ("one", ("g_attention_flash2",)),
+                        ("deep", ("g_attention_flash2_deep",)))]
 
 # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
 # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
@@ -1563,6 +1616,9 @@ if cfg.get("moe"):
 }}
 """)
 import re
+if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
+    cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
+                    flags=re.M) for c in cases] + DEEP_CASES   # these launch the two kernels as they test them
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
 open(os.path.join(out, "cases.loom-test"), "w", newline="\n").write(text)

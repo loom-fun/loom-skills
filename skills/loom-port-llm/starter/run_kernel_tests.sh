@@ -42,4 +42,5 @@ for s in d["samples"]:
     bad += not s["passed"]
     print(("PASS " if s["passed"] else "FAIL ") + s["case"], *(x[:300] for x in issues + fails[:2]))
 print(f"{len(d['samples']) - bad}/{len(d['samples'])} passed")
+sys.exit(1 if bad else 0)
 PY
