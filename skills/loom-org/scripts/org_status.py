@@ -18,6 +18,8 @@ For each model repo in the org, reads its model.json, model.json.lock, llm_confi
             devlab_perf = see missing. The local / DevLab ratio is never a flag.
   generator the loom-skills commit that generated the programs: llm_config.json "generator".skills_commit (build.py's
             stamp), else info.json's recovered versions.package.skills_commit; generator_source says which
+  paused    true when info.json "status" is "paused" (work stopped; the card ends with its next steps); the
+            action is assigned as for any other repo
   quant     the checkpoint's quant (card_lib.quant_of); anything but plain Q4_K_M is flagged
 With --targets (rank_models.py output, {"models": [...]}, or a plain list of such entries or of model ids; a
 missing rank is the entry's position, 1-based), matches repos to target models by the checkpoint's base model and assigns
@@ -128,6 +130,8 @@ def assess(repo, d):
     if info.get("schema") == SCHEMA_ID and info.get("report") == "generated":
         out["category"] = "A"
     out["report"] = info.get("report")
+    if info.get("status") == "paused":
+        out["paused"] = True
     gates = info.get("gates") or {}
     for g in GATE_NAMES:
         if not gate_applies(g, facts["kind"], facts["features"]):
@@ -231,6 +235,7 @@ def main():
                 action = "done"
             work.append({"rank": t.get("rank"), "model": t["model"], "arch": t.get("arch"), "q4_repo": t.get("q4_repo"),
                          "action": action, "repo": primary["repo"] if primary else None,
+                         "paused": bool(primary and primary.get("paused")),
                          "duplicates": [r["repo"] for r in best[1:]],
                          "missing": primary["missing"] if primary else [],
                          "failing": primary["failing"] if primary else [],
