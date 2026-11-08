@@ -1,14 +1,12 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "DevLab perf sessions for two G=2 cards rebuilt from main (temporary).",
+ "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "memory_bytes": 17000000000,
+ "kit": null,
+ "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "q06",
    "variants": [
     {
      "name": "new",
@@ -16,12 +14,19 @@
     }
    ],
    "steps": [
-    "textmatch:new"
-   ]
+    "perf:new:2",
+    "perf:new:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:new",
+    "llamac4"
+   ],
+   "llama_spec": "--spec-type ngram-simple"
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "q17",
+   "card": "loom-fun/ggml-org-Qwen3-1.7B-loom",
+   "llamacpp": "b1370",
    "variants": [
     {
      "name": "new",
@@ -29,7 +34,12 @@
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:new:2",
+    "perf:new:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:new",
+    "llamac4"
    ]
   }
  ]
