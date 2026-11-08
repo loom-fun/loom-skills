@@ -1,35 +1,50 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
+ "_comment": "Temporary: DevLab perf sessions on the regenerated gemma-4 E4B/E2B cards.",
+ "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+ "memory_bytes": 31000000000,
  "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "e4b",
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes": 31000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1369",
+   "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:AtomicChat/gemma-4-E4B-it-assistant-GGUF/gemma-4-E4B-it-assistant.Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
    "variants": [
     {
-     "name": "new",
-     "build": {}
+     "name": "card"
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:2",
+    "perf:card:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:card",
+    "llamac4"
    ]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "e2b",
+   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "memory_bytes": 16000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1369",
+   "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:AtomicChat/gemma-4-E2B-it-assistant-GGUF/gemma-4-E2B-it-assistant.Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
    "variants": [
     {
-     "name": "new",
-     "build": {}
+     "name": "card"
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:2",
+    "perf:card:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:card",
+    "llamac4"
    ]
   }
  ]
