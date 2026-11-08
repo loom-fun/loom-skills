@@ -262,6 +262,10 @@ c4_steady three runs; llama.cpp b1368 drafting from the same BF16 GGUF):
   leaves its state untouched, so results are bit-identical to the per-token path (drafted == undrafted at 32k). Qwen3-8B
   at 32k, depth 3: verify attention 58 -> 40 ms per epoch (one token: 28). With the DFlash split-K draft attention below,
   the depth-3 epoch went 136 -> 85 ms: 12.5 -> 20.1 tok/s (undrafted 19.5); depth 7 7.7 -> 13.7.
+  Only at 8 or more KV heads (`ATTN_MT_MIN_KV`): the span path leaves 1/4 of the workgroups, which run their 4 tokens
+  serially, so a small grid loses (same-runner decode_32k, path on vs off: Llama-3.2-3B 8 KV +8 %, Qwen3-4B +21 %;
+  Qwen2.5-7B 4 KV 0 %, Flint 4 KV -15 %; Qwen2.5-1.5B 2 KV -6 %, Qwen2.5-0.5B head_dim 64 -27 %; gemma-3-1b 1 KV -17 %
+  at 2k).
 - **DFlash v1 draft attention is split-K** (`gen_dflash.DFL_SPLITS`, 32; windowed DFlash2 and conv drafters keep the
   per-token kernel). The per-token kernel (one workgroup per block token and query head, one key per step) re-read
   the context once per block token and query head: 46 ms of the 136 ms 32k epoch above. `g_dfl_ctx_split` scores a
