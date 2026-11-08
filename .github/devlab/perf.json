@@ -6,7 +6,7 @@
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "q05",
+   "name": "kt",
    "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
    "memory_bytes": 5000000000,
    "variants": [
@@ -15,12 +15,7 @@
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "llama:2",
-    "llama:2:long",
-    "c4:card",
-    "llamac4"
+    "ktest:card"
    ]
   }
  ],
