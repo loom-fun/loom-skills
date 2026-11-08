@@ -1,35 +1,65 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "Temporary (not for merge): span attention A/B (SEG_ATTN=0 vs on, same runner), kernel tests and full gates on the changed programs.",
+ "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+ "memory_bytes": 5000000000,
+ "kit": null,
+ "llamacpp": "b1369",
+ "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "q05",
    "variants": [
+    {
+     "name": "noseg",
+     "build": {
+      "SEG_ATTN": "0"
+     }
+    },
     {
      "name": "new",
      "build": {}
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:noseg:1:long",
+    "perf:new:1:long",
+    "perf:noseg:1:long",
+    "perf:new:1:long",
+    "perf:noseg:1",
+    "perf:new:1",
+    "c4:noseg",
+    "c4:new",
+    "ktest:new",
+    "gates:new:full"
    ]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "q15",
+   "card": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
+   "memory_bytes": 8000000000,
    "variants": [
+    {
+     "name": "noseg",
+     "build": {
+      "SEG_ATTN": "0"
+     }
+    },
     {
      "name": "new",
      "build": {}
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:noseg:1:long",
+    "perf:new:1:long",
+    "perf:noseg:1:long",
+    "perf:new:1:long",
+    "perf:noseg:1",
+    "perf:new:1",
+    "c4:noseg",
+    "c4:new",
+    "ktest:new",
+    "gates:new:full"
    ]
   }
  ]
