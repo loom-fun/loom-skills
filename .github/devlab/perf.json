@@ -16,21 +16,77 @@
     {
      "name": "main",
      "build": {}
+    },
+    {
+     "name": "main0",
+     "build": {
+      "SEG_ATTN": "0"
+     }
+    },
+    {
+     "name": "r161",
+     "ref": "90ccc24",
+     "build": {}
+    },
+    {
+     "name": "r136",
+     "ref": "5e9703b",
+     "build": {}
+    },
+    {
+     "name": "r131",
+     "ref": "1c7ab20",
+     "build": {}
+    },
+    {
+     "name": "r116",
+     "ref": "0ee5e4b",
+     "build": {}
     }
    ],
    "steps": [
     "perf:card:2",
-    "perf:main:2",
     "c4:card",
-    "c4:main",
     "perf:card:2:long",
+    "perf:main:2",
+    "c4:main",
     "perf:main:2:long",
+    "perf:main0:2",
+    "c4:main0",
+    "perf:main0:2:long",
+    "perf:r161:2",
+    "c4:r161",
+    "perf:r161:2:long",
+    "perf:r136:2",
+    "c4:r136",
+    "perf:r136:2:long",
+    "perf:r131:2",
+    "c4:r131",
+    "perf:r131:2:long",
+    "perf:r116:2",
+    "c4:r116",
+    "perf:r116:2:long",
     "perf:card:2",
-    "perf:main:2",
     "c4:card",
-    "c4:main",
     "perf:card:2:long",
-    "perf:main:2:long"
+    "perf:main:2",
+    "c4:main",
+    "perf:main:2:long",
+    "perf:main0:2",
+    "c4:main0",
+    "perf:main0:2:long",
+    "perf:r161:2",
+    "c4:r161",
+    "perf:r161:2:long",
+    "perf:r136:2",
+    "c4:r136",
+    "perf:r136:2:long",
+    "perf:r131:2",
+    "c4:r131",
+    "perf:r131:2:long",
+    "perf:r116:2",
+    "c4:r116",
+    "perf:r116:2:long"
    ]
   },
   {
@@ -44,21 +100,77 @@
     {
      "name": "main",
      "build": {}
+    },
+    {
+     "name": "main0",
+     "build": {
+      "SEG_ATTN": "0"
+     }
+    },
+    {
+     "name": "r161",
+     "ref": "90ccc24",
+     "build": {}
+    },
+    {
+     "name": "r136",
+     "ref": "5e9703b",
+     "build": {}
+    },
+    {
+     "name": "r131",
+     "ref": "1c7ab20",
+     "build": {}
+    },
+    {
+     "name": "r116",
+     "ref": "0ee5e4b",
+     "build": {}
     }
    ],
    "steps": [
     "perf:card:2",
-    "perf:main:2",
     "c4:card",
-    "c4:main",
     "perf:card:2:long",
+    "perf:main:2",
+    "c4:main",
     "perf:main:2:long",
+    "perf:main0:2",
+    "c4:main0",
+    "perf:main0:2:long",
+    "perf:r161:2",
+    "c4:r161",
+    "perf:r161:2:long",
+    "perf:r136:2",
+    "c4:r136",
+    "perf:r136:2:long",
+    "perf:r131:2",
+    "c4:r131",
+    "perf:r131:2:long",
+    "perf:r116:2",
+    "c4:r116",
+    "perf:r116:2:long",
     "perf:card:2",
-    "perf:main:2",
     "c4:card",
-    "c4:main",
     "perf:card:2:long",
-    "perf:main:2:long"
+    "perf:main:2",
+    "c4:main",
+    "perf:main:2:long",
+    "perf:main0:2",
+    "c4:main0",
+    "perf:main0:2:long",
+    "perf:r161:2",
+    "c4:r161",
+    "perf:r161:2:long",
+    "perf:r136:2",
+    "c4:r136",
+    "perf:r136:2:long",
+    "perf:r131:2",
+    "c4:r131",
+    "perf:r131:2:long",
+    "perf:r116:2",
+    "c4:r116",
+    "perf:r116:2:long"
    ]
   }
  ]
