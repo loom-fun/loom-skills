@@ -1,16 +1,16 @@
 {
  "_comment": "Temporary: DevLab perf sessions on regenerated cards.",
- "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
- "memory_bytes": 81000000000,
- "kit": "gemma4",
- "llamacpp": "b1370",
+ "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+ "memory_bytes": 63000000000,
+ "kit": null,
+ "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "g26",
-   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
-   "memory_bytes": 81000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1370",
+   "name": "q4i",
+   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+   "memory_bytes": 63000000000,
+   "kit": null,
+   "llamacpp": "b1369",
    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
    "variants": [
     {
