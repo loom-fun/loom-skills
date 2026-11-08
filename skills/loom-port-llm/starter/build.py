@@ -711,31 +711,38 @@ for t in tok.get("added_tokens", []):
     if t["content"] in keep:
         t["special"] = False
 # loom-serve's tokenizer (hrx-loom 0.1.0) emits garbage after 64 pieces when a later pre-tokenizer Sequence stage splits
-# them further (Spark-X: Split \p{N}{1,3}, Splits, Digits, ByteLevel). When stage 0 isolates numeric runs and only
-# Splits come before the one Digits stage, splitting each numeric char at stage 0 instead gives the same pieces (the
-# Splits in between only see numeric runs whole, and Digits still runs on raw text, before ByteLevel).
+# them further after an individual-digits `Digits` stage (Spark-X: Split \p{N}{1,3}, Splits, Digits, ByteLevel; Mellum:
+# Digits, ByteLevel). Digits(individual) is the same as an Isolated Split on \p{N}, which loom-serve handles. When stage 0
+# isolates numeric runs and only Splits come before the one Digits stage, splitting each numeric char at stage 0
+# instead gives the same pieces (the Splits in between only see numeric runs whole, and Digits still runs on raw text,
+# before ByteLevel); otherwise the Digits stage is replaced in place.
 pre = tok.get("pre_tokenizer") or {}
 stages = pre.get("pretokenizers") or []
-digits = [i for i, p in enumerate(stages) if p.get("type") == "Digits"]
-if pre.get("type") == "Sequence" and len(digits) == 1 and stages[digits[0]].get("individual_digits") and \
-        all(p.get("type") == "Split" for p in stages[:digits[0]]) and stages[0].get("behavior") == "Isolated" and \
-        not stages[0].get("invert") and re.fullmatch(r"\\p\{N\}(\{1,\d+\}|\+)?", stages[0].get("pattern", {}).get("Regex", "")):
+digits = [i for i, p in enumerate(stages) if p.get("type") == "Digits" and p.get("individual_digits")]
+if pre.get("type") == "Sequence" and digits:
     folded = json.loads(json.dumps(tok))
     fs = folded["pre_tokenizer"]["pretokenizers"]
-    fs[0] = dict(fs[0], pattern={"Regex": "\\p{N}"})
-    del fs[digits[0]]
+    isolate = {"type": "Split", "pattern": {"Regex": "\\p{N}"}, "behavior": "Isolated", "invert": False}
+    if len(digits) == 1 and all(p.get("type") == "Split" for p in stages[:digits[0]]) and \
+            stages[0].get("behavior") == "Isolated" and not stages[0].get("invert") and \
+            re.fullmatch(r"\\p\{N\}(\{1,\d+\}|\+)?", stages[0].get("pattern", {}).get("Regex", "")):
+        fs[0] = dict(fs[0], pattern=isolate["pattern"])
+        del fs[digits[0]]
+    else:
+        for i in digits:
+            fs[i] = isolate
     try:
         from tokenizers import Tokenizer
     except ImportError:
         Tokenizer = None
-    if Tokenizer:   # the fold must not change a single token
+    if Tokenizer:   # the rewrite must not change a single token
         probe = ("Prices: 12345 and 7.5%, x\u00b2 + \u0663\u0664 = \u2167; \u4ef7\u683c\u662f42\u5143 \u3072\u3089\u304c\u306a "
                  "\u043f\u0440\u0438\u0432\u0435\u0442 \u4e32 123\n"
-                 'def f(x):\n    return x**2  # 0x1F\n{"a": [1, 22, 333], "b": {"c": "d4e5"}}  \t\n')
+                 'def f(x):\n    return x**2  # 0x1F\n{"a": [1, 22, 333], "b": {"c": "d4e5"}}  \t\n  7 \n\n 8')
         enc = lambda t: Tokenizer.from_str(json.dumps(t)).encode(probe, add_special_tokens=False).ids
-        assert enc(tok) == enc(folded), "Digits fold changed the tokenization"
+        assert enc(tok) == enc(folded), "Digits rewrite changed the tokenization"
     tok = folded
-    print("tokenizer: Digits pre-tokenizer folded into the leading numeric Split (same tokens; loom-serve tokenizer)")
+    print("tokenizer: individual-digits pre-tokenizer rewritten as an Isolated \\p{N} Split (same tokens; loom-serve tokenizer)")
 json.dump(tok, open(os.path.join(pkg, "tokenizer.json"), "w", encoding="utf-8"), ensure_ascii=False)
 
 # 4. Weights (symlink; hard link on Windows without Developer Mode) and the package card.
