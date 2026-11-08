@@ -6,7 +6,7 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "c-attn",
+   "name": "d-attn",
    "build": {
     "DIAG": "attn"
    },
@@ -15,36 +15,9 @@
    ]
   },
   {
-   "name": "c-lin",
-   "build": {
-    "DIAG": "lin"
-   },
-   "steps": [
-    "consistency:6:llama"
-   ]
-  },
-  {
-   "name": "c-moe-attn",
+   "name": "d-moe-attn",
    "build": {
     "DIAG": "moe,attn"
-   },
-   "steps": [
-    "consistency:6:llama"
-   ]
-  },
-  {
-   "name": "c-moe-lin",
-   "build": {
-    "DIAG": "moe,lin"
-   },
-   "steps": [
-    "consistency:6:llama"
-   ]
-  },
-  {
-   "name": "c-attn-lin",
-   "build": {
-    "DIAG": "attn,lin"
    },
    "steps": [
     "consistency:6:llama"

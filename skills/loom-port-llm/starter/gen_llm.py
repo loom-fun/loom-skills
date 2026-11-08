@@ -4373,7 +4373,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %c_never = index.constant 1000000 : index
   %c_false = index.cmp ult, %c64, %c64 : index
   %c128 = index.constant 128 : index
-  %prefill_shape = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c64"} : index
+  %prefill_shape = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") or "attn" in DIAG else "%c64"} : index
   %pacc_dec = index.constant {QH * 64 * D * 4} : offset
   %pacc_pre = index.constant {QH * 16 * D * 4} : offset
   %pml_dec = index.constant {QH * 64 * 2 * 4} : offset
