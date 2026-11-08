@@ -278,7 +278,18 @@ r['generator'] = g('side')
 assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': None}])) == 1
 assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [])) == 1
 assert consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': '2026-11-08T00:00:00Z'}]) == []   # squash-merged
-assert consistency_checks(r, ok, sys.argv[3], lambda c: None) == []   # unknown never flags" "$here/../../../../loom-org/scripts" "$tmp/flint" "$tmp/skills" \
+assert consistency_checks(r, ok, sys.argv[3], lambda c: None) == []   # unknown never flags
+from org_status import merged_prs
+def fake(merged):   # GitHub: a refs/pull/N/merge commit is in no PR; its second parent (the PR head) is in the PR
+    def get(path):
+        if path == 'commits/M/pulls': return []
+        if path == 'commits/M': return {'commit': {'message': 'Merge H into B'}, 'parents': [{'sha': 'B'}, {'sha': 'H'}]}
+        if path == 'commits/H/pulls': return [{'merged_at': merged}]
+        return None
+    return get
+assert merged_prs('M', fake('2026-11-08')) == [{'merged_at': '2026-11-08'}]   # merge-ref of a merged PR
+assert merged_prs('M', fake(None)) == [{'merged_at': None}]   # of an open one: still flagged
+assert merged_prs('X', lambda p: []) == []   # a plain orphan commit: no PR" "$here/../../../../loom-org/scripts" "$tmp/flint" "$tmp/skills" \
   && echo "OK   org_status checks: nightly entry matches the card, generator commit is on main or in a merged PR" \
   || { echo "FAIL org_status checks: nightly/generator consistency flags are wrong"; bad=1; }
 exit $bad

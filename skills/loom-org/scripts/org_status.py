@@ -25,7 +25,7 @@ For each model repo in the org, reads its model.json, model.json.lock, llm_confi
             (a commit of no merged PR: a card built from an unmerged branch silently loses features when regenerated), a card missing from
             .github/nightly-models.json, or its entry's memory_bytes / llamacpp build differs from the card's own
             (--nightly FILE, default the checkout's origin/main copy; --skills-repo DIR, default this checkout). A generator
-            commit is on main if it is an ancestor of main or belongs to a merged PR (gh api; squash merges); unknown
+            commit is on main if it is an ancestor of main or belongs to a merged PR (gh api; squash merges; an Actions merge-ref commit counts as its PR head); unknown
             (no network) never flags
 With --targets (rank_models.py output, {"models": [...]}, or a plain list of such entries or of model ids; a
 missing rank is the entry's position, 1-based), matches repos to target models by the checkpoint's base model and assigns
@@ -70,13 +70,26 @@ ORDER = {"fix": 0, "remeasure": 1, "investigate": 2, "update": 3, "create": 4, "
 
 
 
-def merged_prs(commit):
-    """GitHub's PRs containing commit as [{"merged_at": ...}], or None when unknown (no gh, no network)."""
-    r = subprocess.run(["gh", "api", f"repos/loom-fun/loom-skills/commits/{commit}/pulls"], capture_output=True, text=True)
+def gh_json(path):
+    """gh api repos/loom-fun/loom-skills/PATH as JSON, or None when it fails (no gh, no network, unknown commit)."""
+    r = subprocess.run(["gh", "api", f"repos/loom-fun/loom-skills/{path}"], capture_output=True, text=True)
     try:
         return json.loads(r.stdout) if r.returncode == 0 else None
     except ValueError:
         return None
+
+
+def merged_prs(commit, get=gh_json):
+    """GitHub's PRs containing commit as [{"merged_at": ...}], or None when unknown. A GitHub Actions
+    refs/pull/N/merge commit ("Merge HEAD into BASE", two parents) is in no PR itself: its second parent, the PR head,
+    is looked up instead."""
+    prs = get(f"commits/{commit}/pulls")
+    if prs == []:
+        c = get(f"commits/{commit}") or {}
+        parents = c.get("parents") or []
+        if len(parents) == 2 and ((c.get("commit") or {}).get("message") or "").startswith("Merge "):
+            return get(f"commits/{parents[1]['sha']}/pulls")
+    return prs
 
 
 def on_main(repo_dir, commit, pulls=merged_prs):
