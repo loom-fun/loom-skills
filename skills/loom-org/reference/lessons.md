@@ -4,7 +4,7 @@ Detail behind the rules in SKILL.md. Rules first, reasons after.
 
 ## Memory budget
 - `make_info.py build --from-info` copies the old `card` block; only `--memory-bytes` changes it. A regenerated card
-  once kept 39e9 while build.py printed 48e9. The build now refuses a carried value when the published gates' programs
+  once kept its old budget while build.py printed a larger one. The build now refuses a carried value when the published gates' programs
   are not the package's; card-only republishes of the same programs are unaffected.
 - loom-serve charges a near-full request about the whole KV pool plus 0.5-1.7 GB beyond build.py's estimate. Uncapped
   packages absorb that in pool headroom; a capped one (pool == context) got HTTP 503 "insufficient completion capacity"

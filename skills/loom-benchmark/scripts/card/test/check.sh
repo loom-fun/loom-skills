@@ -258,7 +258,8 @@ got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 print(*[c.quant_of(n) for n in ('hyperclovax-1.5b-q4_k_m.gguf', 'x-Q4_K_Mfoo', 'x-Q4_K_M_foo', 'model-q4-k-m', 'x-Q8_0-q4_0')])" "$C")
 [ "$got" = "Q4_K_M Q4_K Q4_K_M None Q8_0" ] && echo "OK   quant_of" || { echo "FAIL quant_of: $got"; bad=1; }
 # org_status consistency checks: a nightly entry that differs from the card (memory_bytes, llama.cpp build) or is missing,
-# and a generator commit that is not on main (a throwaway git repo with one commit on main and one on a branch)
+# and a generator commit that is not on main: not an ancestor of main and in no merged PR (a throwaway git repo with one
+# commit on main and one on a branch; the PR lookup is injected: merged, open, unknown)
 git init -q -b main "$tmp/skills" && git -C "$tmp/skills" -c user.name=t -c user.email=t@t commit -q --allow-empty -m m
 git -C "$tmp/skills" checkout -q -b side && git -C "$tmp/skills" -c user.name=t -c user.email=t@t commit -q --allow-empty -m s
 py -c "import json, subprocess, sys; sys.path.insert(0, sys.argv[1]); from org_status import assess, consistency_checks
@@ -274,7 +275,10 @@ assert len(consistency_checks(r, {}, None)) == 1
 assert len(consistency_checks(r, {r['repo']: dict(ok[r['repo']], memory_bytes=69000000000)}, None)) == 1
 assert len(consistency_checks(r, {r['repo']: dict(ok[r['repo']], llamacpp='b1368')}, None)) == 1
 r['generator'] = g('side')
-assert len(consistency_checks(r, ok, sys.argv[3])) == 1" "$here/../../../../loom-org/scripts" "$tmp/flint" "$tmp/skills" \
-  && echo "OK   org_status checks: nightly entry matches the card, generator commit is on main" \
+assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': None}])) == 1
+assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [])) == 1
+assert consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': '2026-11-08T00:00:00Z'}]) == []   # squash-merged
+assert consistency_checks(r, ok, sys.argv[3], lambda c: None) == []   # unknown never flags" "$here/../../../../loom-org/scripts" "$tmp/flint" "$tmp/skills" \
+  && echo "OK   org_status checks: nightly entry matches the card, generator commit is on main or in a merged PR" \
   || { echo "FAIL org_status checks: nightly/generator consistency flags are wrong"; bad=1; }
 exit $bad

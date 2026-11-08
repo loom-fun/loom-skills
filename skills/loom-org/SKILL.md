@@ -125,8 +125,8 @@ One worker per model runs `loom-port-llm` then `loom-optimize`, starting from th
   columns); `org_status` marks the card `remeasure` (`devlab-primary`) until a short local session (Loom and
   llama.cpp, quiet GPU, the same programs) adds the headline numbers next to it.
 
-- **Local GPU: one owner, one job at a time.** The local GPU is shared and small: concurrent model servers (69 + 28
-  + 26 GB on a 122 GB machine) crashed it. Exactly one worker (the local-queue owner) runs local GPU sessions, from a
+- **Local GPU: one owner, one job at a time.** The local GPU is shared and small: concurrent model servers crashed
+  it. Exactly one worker (the local-queue owner) runs local GPU sessions, from a
   queue file (`<repo>:<memory_bytes>` per line, a done file for results), one model loaded at a time; every other
   worker, and every kernel test, A/B and gate, runs on DevLab. CPU phases (inspection, program generation, tokenizer
   probes, card rendering) are free to run anywhere. The owner takes the lock (`flock -o /tmp/loom-gpu.lock CMD`; `-o`
@@ -233,9 +233,9 @@ metric is n/a only when its prompt exceeds the model's native GGUF context (`car
 **Regeneration safety** (a regenerated package is published only if it does not regress):
 - Before publishing, A/B it against the card's own published programs on the same DevLab runner: decode, decode_32k,
   prefill 1k to 32k, streams4. Bisect main when a main build loses.
-- Check that the card's generator commit is on main (`org_status` flags it). A card built from an unmerged branch
-  silently loses that branch's features when regenerated from main (decode_32k halved this way); merge the feature
-  first or keep the card.
+- Check that the card's generator commit is on main or in a merged PR (squash merges leave PR commits off main's
+  history; `org_status` flags the rest). A card built from an unmerged branch silently loses that branch's features
+  when regenerated from main (decode_32k halved this way); merge the feature first or keep the card.
 - A kernel path that wins at some KV-head counts can lose at others: gate paths by shape and A/B across the
   org's shapes, not one card.
 

@@ -22,9 +22,11 @@ For each model repo in the org, reads its model.json, model.json.lock, llm_confi
             action is assigned as for any other repo
   quant     the checkpoint's quant (card_lib.quant_of); anything but plain Q4_K_M is flagged
   checks    cheap consistency flags (never change the action): the generator commit is not on the skills repo's main
-            (a card built from an unmerged branch silently loses features when regenerated), a card missing from
+            (a commit of no merged PR: a card built from an unmerged branch silently loses features when regenerated), a card missing from
             .github/nightly-models.json, or its entry's memory_bytes / llamacpp build differs from the card's own
-            (--nightly FILE, --skills-repo DIR; both default to the checkout this script lives in; skipped without it)
+            (--nightly FILE, default the checkout's origin/main copy; --skills-repo DIR, default this checkout). A generator
+            commit is on main if it is an ancestor of main or belongs to a merged PR (gh api; squash merges); unknown
+            (no network) never flags
 With --targets (rank_models.py output, {"models": [...]}, or a plain list of such entries or of model ids; a
 missing rank is the entry's position, 1-based), matches repos to target models by the checkpoint's base model and assigns
 each target one action:
@@ -68,22 +70,38 @@ ORDER = {"fix": 0, "remeasure": 1, "investigate": 2, "update": 3, "create": 4, "
 
 
 
-def on_main(repo_dir, commit):
-    """True/False: is commit an ancestor of the skills repo's main (origin/main when present)? None when unknown."""
+def merged_prs(commit):
+    """GitHub's PRs containing commit as [{"merged_at": ...}], or None when unknown (no gh, no network)."""
+    r = subprocess.run(["gh", "api", f"repos/loom-fun/loom-skills/commits/{commit}/pulls"], capture_output=True, text=True)
+    try:
+        return json.loads(r.stdout) if r.returncode == 0 else None
+    except ValueError:
+        return None
+
+
+def on_main(repo_dir, commit, pulls=merged_prs):
+    """Is commit on main? True when it is an ancestor of the skills repo's main (origin/main when present) or belongs
+    to a merged PR (squash merges leave PR-branch commits off main's history). False when neither holds; None when
+    unknown (no such ref in the checkout and the PR lookup failed): unknown never flags."""
     for ref in ("origin/main", "main"):
         if subprocess.run(["git", "-C", repo_dir, "rev-parse", "-q", "--verify", ref], capture_output=True).returncode == 0:
             r = subprocess.run(["git", "-C", repo_dir, "merge-base", "--is-ancestor", commit, ref], capture_output=True)
-            return r.returncode == 0 if r.returncode in (0, 1) else False
-    return None
+            if r.returncode == 0:
+                return True
+            break
+    prs = pulls(commit)
+    if prs is None:
+        return None
+    return any(p.get("merged_at") for p in prs)
 
 
-def consistency_checks(r, nightly, skills_repo):
+def consistency_checks(r, nightly, skills_repo, pulls=merged_prs):
     """Flags for repo status r (from assess): generator commit off main, nightly entry missing or not matching the
     card (memory_bytes, llama.cpp build). nightly: {repo: entry}, or None to skip; skills_repo: a git checkout or None."""
     out = []
     if r.get("category") != "A":
         return out
-    if skills_repo and r.get("generator") and on_main(skills_repo, r["generator"]) is False:
+    if skills_repo and r.get("generator") and on_main(skills_repo, r["generator"], pulls) is False:
         out.append(f"generator {r['generator'][:8]} is not on main")
     if nightly is not None:
         e = nightly.get(r["repo"])
@@ -207,7 +225,7 @@ def main():
     ap.add_argument("--org", default="loom-fun")
     ap.add_argument("--targets", help="rank_models.py output")
     ap.add_argument("--cache", help="directory for the downloaded package files (default: a temp dir)")
-    ap.add_argument("--nightly", help="nightly-models.json to check the cards against (default: this checkout's)")
+    ap.add_argument("--nightly", help="nightly-models.json to check the cards against (default: origin/main's)")
     ap.add_argument("--skills-repo", help="loom-skills checkout whose main the generator commits must be on (default: this one)")
     ap.add_argument("-o", "--output")
     a = ap.parse_args()
@@ -235,9 +253,14 @@ def main():
     with cf.ThreadPoolExecutor(8) as ex:
         status = sorted(ex.map(one, repos), key=lambda r: r["repo"])
     root = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
-    nfile = a.nightly or os.path.join(root, ".github", "nightly-models.json")
-    nightly = {m["repo"]: m for m in json.load(open(nfile))["models"]} if os.path.exists(nfile) else None
     skills_repo = a.skills_repo or (root if os.path.exists(os.path.join(root, ".git")) else None)
+    if a.nightly:
+        text = open(a.nightly).read()
+    else:   # main's copy, not the working tree's
+        g = subprocess.run(["git", "-C", skills_repo or root, "show", "origin/main:.github/nightly-models.json"],
+                           capture_output=True, text=True) if skills_repo else None
+        text = g.stdout if g is not None and g.returncode == 0 else None
+    nightly = {m["repo"]: m for m in json.loads(text)["models"]} if text else None
     for r in status:
         r["checks"] = consistency_checks(r, nightly, skills_repo)
     for r in status:
