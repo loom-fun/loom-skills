@@ -20,6 +20,7 @@ from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402  formats with no 256-ro
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
 from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
 import attn_rules  # noqa: E402
+import gen_moe as GM  # noqa: E402
 
 
 def q8_ref(xs):
@@ -1608,6 +1609,10 @@ if cfg.get("moe"):
         t = 70; chain(t, "_p")
         SGT = f"tensor<{t}xf32>, " if SHG else ""
         ta = t * KU; mt = ta // 64 + E_; mr = mt * 64
+        i8 = GM.MOE_I8 and gun == "q4_k" and not EB and not OAI   # the spike's int8 Q4_K gate/up
+        hqn = t * H * 5 // 4
+        I8Q = (f"  %hq = check.generate.fill value(0) : tensor<{hqn}xi8>\n  kernel.launch @g_quant_q8[%t, %nH](%t, %nH, %h, %hq) : [index, index](index, index, tensor<{t}x{H}xf32>, tensor<{hqn}xi8>)\n" if i8 else "")
+        I8S, I8X, I8T = ("_i8", "%hq", f"tensor<{hqn}xi8>") if i8 else ("", "%h16", f"tensor<{t}x{H}xf16>")
         save(tag + "_p_info", np.tile(np.array([0, 0, 1, 0], np.int32), (t, 1)))
         cases.append(f"""check.case public @moe_prefill_{li} {{
 {common(t, "_p")}  %info = check.file.read.npy path("{tag}_p_info.npy") : tensor<{t}x4xi32>
@@ -1625,7 +1630,7 @@ if cfg.get("moe"):
   kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x2xf32>, tensor<{t}x{H}xf16>)
   kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids, %wts, %info) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
 {wsc(t)}  kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, tensor<{t}x4xi32>, tensor<{t}x{KU}xi32>, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{ta}xi32>)
-  kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wg, %wu{GUB}, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {ut}{GUBT}, tensor<{mr}x{FE}xf32>)
+{I8Q}  kernel.launch @g_moe_ggu_{gun}_k{H}{I8S}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, {I8X}, %s_h, %wg, %wu{GUB}, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, {I8T}, tensor<{t}x2xf32>, {gt}, {ut}{GUBT}, tensor<{mr}x{FE}xf32>)
   kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, tensor<{mr}x{FE}xf32>, tensor<{mr}x2xf32>, tensor<{mr}x{FE}xf16>, tensor<{mt}x2xi32>)
   kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wd{DNB}, %ys_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE}xf16>, tensor<{mr}x2xf32>, {dt_}{DNBT}, tensor<{mr}x{H}xf32>)
   kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {SGA}%y) : [index](index, index, tensor<{mr}x{H}xf32>, tensor<{ta}xi32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)

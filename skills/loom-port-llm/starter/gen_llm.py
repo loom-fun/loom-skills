@@ -4137,6 +4137,10 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
     gu_b, gu_bt = (f", %gbe_{i}, %ube_{i}", f", view<{E * FE}xf32>, view<{E * FE}xf32>") if eb else ("", "")
     dn_b, dn_bt = (f", %dbe_{i}", f", view<{E * H}xf32>") if eb else ("", "")
     wu = f"%wge_{i}" if fused else f"%wue_{i}"
+    import gen_moe as GM
+    i8 = GM.MOE_I8 and gu == "q4_k" and not fused and not eb and not MOE.get("act")   # spike: Q4_K gate/up on int8 WMMA
+    I8Q = f"    kernel.launch @g_quant_q8[%t, %nH](%t, %nH, {x}, %hq) : [index, index](index, index, buffer, buffer)\n" if i8 else ""
+    I8S, I8X = ("_i8", "%hq") if i8 else ("", "%h16")
     wsc = (f"    kernel.launch @g_moe_wscale[%t](%t, %ids, %wts, %dsc_{i}) : [index](index, buffer, buffer, view<{E}xf32>)\n"
            if MOE.get("down_scale") else "")
     x16 = "" if x == "%h" else f"    kernel.launch @g_row_scale_f16[%t](%t, %nH, {x}, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n"
@@ -4149,7 +4153,7 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
   scf.if %gemm {{
     kernel.launch @g_moe_route_tr_live[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
 {wsc}    kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
-{x16}    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, {wu}{gu_b}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
+{x16}{I8Q}    kernel.launch @g_moe_ggu_{gun}_k{H}{I8S}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, {I8X}, %s_h, %wge_{i}, {wu}{gu_b}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
     kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
     kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}{dn_b}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
     kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}{out}) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
@@ -4203,7 +4207,10 @@ def moe_alloc():
   %s_rows = buffer.alloca<global> align(256) %sr_size : buffer
   %yss_size = index.scale %max_rows, %h4 : index, offset -> offset
   %ys_sorted = buffer.alloca<global> align(256) %yss_size : buffer
-""" + ("""  %sg_size = index.scale %t, %b4 : index, offset -> offset
+""" + (f"""  %hq_unit = index.constant {H * 5 // 4} : offset
+  %hq_size = index.scale %t, %hq_unit : index, offset -> offset
+  %hq = buffer.alloca<global> align(256) %hq_size : buffer
+""" if __import__("gen_moe").MOE_I8 else "") + ("""  %sg_size = index.scale %t, %b4 : index, offset -> offset
   %sg = buffer.alloca<global> align(256) %sg_size : buffer
 """ if SHGATE else "")
 
@@ -4221,6 +4228,8 @@ def moe_kernels(row_scale, gemm_fn):
         mv = GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode, fused=bool(MOE.get("gate_up_fused")) and mode == "gu", **xb)
         # GEGLU experts: the expert matvec's scalar silu, the grouped GEMM's vector silu, as gelu-tanh
         parts.append(mv.replace("    %silu = scalar.siluf<afn> %t0 : f32\n", gelu_scalar("silu", "t0", "    ") + "\n") if GELU else mv)
+    if GM.MOE_I8 and any(m == "gu" and f == "q4_k" for f, K, N, m in USED_MOE):
+        parts.append(GM.ggu_q4k_i8(MOE["ffn"], H, MOE["experts"], MOE["used"]))
     comb, comb_s = GM.combine(H, MOE["used"], acc=bool(FS)), GM.combine_sorted(H, MOE["used"], acc=bool(FS))
     if SHGATE:
         comb, comb_s = GM.shared_gated(comb), GM.shared_gated(comb_s)

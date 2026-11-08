@@ -1248,3 +1248,268 @@ kernel.def export("g_moe_combine_sorted") @g_moe_combine_sorted(%tokens: index) 
   kernel.return
 }}
 """
+
+
+# SPIKE (not for merge): Q4_K gate/up grouped GEMM on the weight codes with int8 WMMA and Q8_1 activations (MOE_I8=1)
+MOE_I8 = os.environ.get("MOE_I8", "1") == "1"
+
+
+
+def ggu_q4k_i8(N, K, E, KU, tile=64):
+    assert tile == 64 and K % 256 == 0
+    eb = (K // 256 * 144) * N
+    name = f"g_moe_ggu_q4_k_k{K}_i8"
+
+    def deq(i, w):
+        return f"""
+    %deq{i}_super = index.div %w_col, %c256 : index
+    %deq{i}_within = index.rem %w_col, %c256 : index
+    %deq{i}_group_value = index.div %deq{i}_within, %c32 : index
+    %deq{i}_group = index.assume %deq{i}_group_value [range(%deq{i}_group_value, 0, 7)] : index
+    %deq{i}_in_group = index.rem %deq{i}_within, %c32 : index
+    %deq{i}_half = index.div %deq{i}_in_group, %c16 : index
+    %deq{i}_block_add = index.scale %deq{i}_super, %block_bytes : index, offset -> offset
+    %deq{i}_block_origin = index.add %w_row_origin, %deq{i}_block_add : offset
+    %deq{i}_header_view = buffer.view %{w}[%deq{i}_block_origin] : buffer -> view<4xi32>
+    %deq{i}_header = vector.load %deq{i}_header_view[0] : view<4xi32> -> vector<4xi32>
+    %deq{i}_scale, %deq{i}_minimum = func.call @g_k_metadata(%deq{i}_header, %deq{i}_group) : (vector<4xi32>, index) -> (f32, f32)
+    %deq{i}_page = index.div %deq{i}_group, %c2 : index
+    %deq{i}_nibble = index.rem %deq{i}_group, %c2 : index
+    %deq{i}_word_page = index.mul %deq{i}_page, %c8 : index
+    %deq{i}_word_half = index.mul %deq{i}_half, %c4 : index
+    %deq{i}_word = index.add %deq{i}_word_page, %deq{i}_word_half : index
+    %deq{i}_payload = index.add %deq{i}_block_origin, %sixteen : offset
+    %deq{i}_words = buffer.view %{w}[%deq{i}_payload] : buffer -> view<32xi32>
+    %deq{i}_packed = vector.load %deq{i}_words[%deq{i}_word] : view<32xi32> -> vector<4xi32>
+    %deq{i}_shift_bits = index.mul %deq{i}_nibble, %c4 : index
+    %deq{i}_shift_i32 = index.cast %deq{i}_shift_bits : index to i32
+    %deq{i}_shift = vector.splat %deq{i}_shift_i32 : vector<4xi32>
+    %deq{i}_shifted = vector.shrui %deq{i}_packed, %deq{i}_shift : vector<4xi32>
+    %deq{i}_masked = vector.andi %deq{i}_shifted, %nibble_mask : vector<4xi32>
+    %deq{i}_bytes = vector.bitcast %deq{i}_masked : vector<4xi32> to vector<16xi8>
+    vector.store %deq{i}_bytes, %w{i}_stage_view[%stage_row, %stage_col] : vector<16xi8>, view<64x80xi8>
+    scf.if %meta_writer {{
+      %wm{i}_srow = index.constant {4 * i} : index
+      %wm{i}_s = index.add %wm{i}_srow, %stage_half : index
+      %wm{i}_mrow = index.constant {4 * i + 2} : index
+      %wm{i}_m = index.add %wm{i}_mrow, %stage_half : index
+      view.store %deq{i}_scale, %wmeta_view[%wm{i}_s, %stage_row] : f32, view<8x64xf32>
+      view.store %deq{i}_minimum, %wmeta_view[%wm{i}_m, %stage_row] : f32, view<8x64xf32>
+    }}"""
+
+    def group(j):
+        """Group j (0, 1) of the 64-wide K step: int dots of the 32 codes against the Q8_1 codes, then the affine
+        correction d_x * (d*sc * dot - dmin*m * sum_x), per accumulator."""
+        L = []
+        L.append(f"""      %xd{j} = vector.fragment.load<result> %xd_view[%xd_row{j}, %c0] shape [%c16, %c16] : view<128x16xf32> -> vector<8xf32>
+      %xs{j} = vector.fragment.load<result> %xs_view[%xd_row{j}, %c0] shape [%c16, %c16] : view<128x16xf32> -> vector<8xf32>
+      %xa{j} = vector.load %x_stage_view[%x_frag_row, %kc{j}_0] : view<64x80xi8> -> vector<16xi8>
+      %xap{j} = vector.bitcast %xa{j} : vector<16xi8> to vector<4xi32>
+      %lhs{j}_0 = vector.fragment<lhs> %xap{j} shape [%c16, %c16] using {{schema = %schema : encoding<schema>}} : vector<4xi32>
+      %xb{j} = vector.load %x_stage_view[%x_frag_row, %kc{j}_1] : view<64x80xi8> -> vector<16xi8>
+      %xbp{j} = vector.bitcast %xb{j} : vector<16xi8> to vector<4xi32>
+      %lhs{j}_1 = vector.fragment<lhs> %xbp{j} shape [%c16, %c16] using {{schema = %schema : encoding<schema>}} : vector<4xi32>""")
+        for wi, wname, acc in ((0, "w", "g"), (1, "w2", "u")):
+            for f in range(2):
+                a = f"{acc}{f}"
+                prev = f"%{a}_acc" if j == 0 else f"%{a}_new0"
+                ws = f"w{wi}"
+                wrow = "%w_row0" if f == 0 else "%w_row1"
+                L.append(f"""      %{a}_ra{j} = vector.load %{ws}_stage_view[{wrow}, %kc{j}_0] : view<64x80xi8> -> vector<16xi8>
+      %{a}_rap{j} = vector.bitcast %{a}_ra{j} : vector<16xi8> to vector<4xi32>
+      %{a}_rhs{j}_0 = vector.fragment<rhs> %{a}_rap{j} shape [%c16, %c16] using {{schema = %schema : encoding<schema>}} : vector<4xi32>
+      %{a}_rb{j} = vector.load %{ws}_stage_view[{wrow}, %kc{j}_1] : view<64x80xi8> -> vector<16xi8>
+      %{a}_rbp{j} = vector.bitcast %{a}_rb{j} : vector<16xi8> to vector<4xi32>
+      %{a}_rhs{j}_1 = vector.fragment<rhs> %{a}_rbp{j} shape [%c16, %c16] using {{schema = %schema : encoding<schema>}} : vector<4xi32>
+      %{a}_dot{j}_0 = vector.mma %lhs{j}_0, %{a}_rhs{j}_0, %init_i : vector<4xi32>, vector<4xi32>, vector<8xi32>
+      %{a}_dot{j}_1 = vector.mma %lhs{j}_1, %{a}_rhs{j}_1, %{a}_dot{j}_0 : vector<4xi32>, vector<4xi32>, vector<8xi32>
+      %{a}_sc{j}_row = index.constant {4 * wi + j} : index
+      %{a}_sc{j} = view.load %wmeta_view[%{a}_sc{j}_row, {wrow}] : view<8x64xf32> -> f32
+      %{a}_mn{j}_row = index.constant {4 * wi + 2 + j} : index
+      %{a}_mn{j} = view.load %wmeta_view[%{a}_mn{j}_row, {wrow}] : view<8x64xf32> -> f32
+      %{a}_scv{j} = vector.splat %{a}_sc{j} : vector<8xf32>
+      %{a}_mnv{j} = vector.splat %{a}_mn{j} : vector<8xf32>
+      %{a}_f{j} = vector.sitofp %{a}_dot{j}_1 : vector<8xi32> to vector<8xf32>
+      %{a}_t1_{j} = vector.mulf %{a}_f{j}, %{a}_scv{j} : vector<8xf32>
+      %{a}_t2_{j} = vector.mulf %xs{j}, %{a}_mnv{j} : vector<8xf32>
+      %{a}_t3_{j} = vector.subf %{a}_t1_{j}, %{a}_t2_{j} : vector<8xf32>
+      %{a}_t4_{j} = vector.mulf %{a}_t3_{j}, %xd{j} : vector<8xf32>
+      %{a}_new{j} = vector.addf {prev}, %{a}_t4_{j} : vector<8xf32>""")
+        return "\n".join(L)
+
+    return f"""
+kernel.def export("{name}") @{name}(%rows: index, %n: index) {{
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %c256 = index.constant 256 : index
+  %row_tiles = index.div %rows, %c64 : index
+  %out_tiles = index.div %n, %c64 : index
+  kernel.launch.config workgroups(%out_tiles, %row_tiles, %c1) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%rows_arg: index, %k_arg: index, %n_arg: index, %xrows_arg: index, %tile_info: buffer, %rowmap: buffer, %x: buffer, %scales: buffer, %w: buffer, %w2: buffer, %y: buffer) {{
+  %rows = index.assume %rows_arg [range(%rows_arg, 64, {8192 * KU + 64 * E}), multiple_of(%rows_arg, 64)] : index
+  %k = index.assume %k_arg [range(%k_arg, 256, 65536), multiple_of(%k_arg, 256)] : index
+  %n = index.assume %n_arg [range(%n_arg, 64, {N}), multiple_of(%n_arg, 64)] : index
+  %origin = index.constant 0 : offset
+  %xrows = index.assume %xrows_arg [range(%xrows_arg, 1, 1048576)] : index
+  %sixteen = index.constant 16 : offset
+  %block_bytes = index.constant 144 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c256 = index.constant 256 : index
+  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %row_tile_count = index.div %rows, %c64 : index
+  %out_tile_count = index.div %n, %c64 : index
+  %row_group_id = kernel.workgroup.id<y> : index
+  %out_group_id = kernel.workgroup.id<x> : index
+  %row_group = index.assume %row_group_id [lt(%row_group_id, %row_tile_count)] : index
+  %out_group = index.assume %out_group_id [lt(%out_group_id, %out_tile_count)] : index
+  %ti_view = buffer.view %tile_info[%origin] : buffer -> view<[%row_tile_count]x2xi32>
+  %tile_expert = view.load %ti_view[%row_group, 0] : view<[%row_tile_count]x2xi32> -> i32
+  %c0_i32g = scalar.constant 0 : i32
+  %tile_used = scalar.cmpi sge, %tile_expert, %c0_i32g : i32
+  scf.if %tile_used {{
+  %cEm1g = scalar.constant {E - 1} : i32
+  %e_lo = scalar.minsi %tile_expert, %cEm1g : i32
+  %e_b = scalar.assume %e_lo [range(%e_lo, 0, {E - 1})] : i32
+  %expert = index.cast %e_b : i32 to index
+  %expert_bytes = index.constant {eb} : offset
+  %expert_off = index.scale %expert, %expert_bytes : index, offset -> offset
+  %workitem_id = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem_id [range(%workitem_id, 0, 255)] : index
+  %subgroup = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %lane_row = index.rem %lane, %c16 : index
+  %bounded_subgroup = index.assume %subgroup [range(%subgroup, 0, 7)] : index
+  %wave_row_group = index.div %bounded_subgroup, %c2 : index
+  %wave_out_group = index.rem %bounded_subgroup, %c2 : index
+  %wave_row = index.mul %wave_row_group, %c16 : index
+  %wave_out = index.mul %wave_out_group, %c32 : index
+  %w_row0 = index.add %wave_out, %lane_row : index
+  %w_row1 = index.add %w_row0, %c16 : index
+  %x_frag_row = index.add %wave_row, %lane_row : index
+  %row_origin = index.mul %row_group, %c64 : index
+  %out_origin = index.mul %out_group, %c64 : index
+  %blocks = index.div %k, %c256 : index
+  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
+  %groups = index.div %k, %c32 : index
+  %xq_view = buffer.view %x[%origin] : buffer -> view<[%xrows]x[%k]xi8>
+  %k_off = index.cast %k : index to offset
+  %xm_off = index.scale %xrows, %k_off : index, offset -> offset
+  %xm_view = buffer.view %x[%xm_off] : buffer -> view<[%xrows]x[%groups]x2xf32>
+  %y_layout = encoding.layout.strided [%n, %c1] : encoding<layout>
+  %tile_first = index.madd %row_origin, %n, %out_origin : index
+  %four = index.constant 4 : offset
+  %tile_offset = index.scale %tile_first, %four : index, offset -> offset
+  %y_view = buffer.view %y[%tile_offset] : buffer -> view<64x64xf32, %y_layout>
+  %bounded_wave_row = index.assume %wave_row [range(%wave_row, 0, 48)] : index
+  %bounded_wave_out = index.assume %wave_out [range(%wave_out, 0, 32)] : index
+  %wave_out1 = index.add %bounded_wave_out, %c16 : index
+  %stage8_bytes = index.constant 5120 : offset
+  %x_stage = buffer.alloca<workgroup> align(16) %stage8_bytes : buffer
+  %x_stage_view = buffer.view %x_stage[%origin] : buffer -> view<64x80xi8>
+  %w0_stage = buffer.alloca<workgroup> align(16) %stage8_bytes : buffer
+  %w0_stage_view = buffer.view %w0_stage[%origin] : buffer -> view<64x80xi8>
+  %w1_stage = buffer.alloca<workgroup> align(16) %stage8_bytes : buffer
+  %w1_stage_view = buffer.view %w1_stage[%origin] : buffer -> view<64x80xi8>
+  %xm_bytes = index.constant 8192 : offset
+  %xd_buf = buffer.alloca<workgroup> align(16) %xm_bytes : buffer
+  %xd_view = buffer.view %xd_buf[%origin] : buffer -> view<128x16xf32>
+  %xs_buf = buffer.alloca<workgroup> align(16) %xm_bytes : buffer
+  %xs_view = buffer.view %xs_buf[%origin] : buffer -> view<128x16xf32>
+  %wm_bytes = index.constant 2048 : offset
+  %wmeta_buf = buffer.alloca<workgroup> align(16) %wm_bytes : buffer
+  %wmeta_view = buffer.view %wmeta_buf[%origin] : buffer -> view<8x64xf32>
+  // Thread t stages 16 values: row t/4, columns (t%4)*16; the quarter's 32-group is (t%4)/2.
+  %stage_row = index.div %workitem, %c4 : index
+  %stage_quarter = index.rem %workitem, %c4 : index
+  %stage_col = index.mul %stage_quarter, %c16 : index
+  %stage_half = index.div %stage_quarter, %c2 : index
+  %quarter_odd = index.rem %stage_quarter, %c2 : index
+  %meta_writer = index.cmp eq, %quarter_odd, %c0 : index
+  %gx_prow_v = index.add %row_origin, %stage_row : index
+  %gx_rm_rows = index.mul %row_tile_count, %c64 : index
+  %gx_prow = index.assume %gx_prow_v [lt(%gx_prow_v, %gx_rm_rows)] : index
+  %gx_rm_view = buffer.view %rowmap[%origin] : buffer -> view<[%gx_rm_rows]xi32>
+  %gx_a32 = view.load %gx_rm_view[%gx_prow] : view<[%gx_rm_rows]xi32> -> i32
+  %gx_valid = scalar.cmpi sge, %gx_a32, %c0_i32g : i32
+  %gx_ac = scalar.maxsi %gx_a32, %c0_i32g : i32
+  %gx_ab = scalar.assume %gx_ac [range(%gx_ac, 0, 1048575)] : i32
+  %gx_a = index.cast %gx_ab : i32 to index
+  %gx_cKU = index.constant {KU} : index
+  %gx_t = index.div %gx_a, %gx_cKU : index
+  %bounded_x_row = index.assume %gx_t [lt(%gx_t, %xrows)] : index
+  %w_out_row = index.add %out_origin, %stage_row : index
+  %bounded_w_out_row = index.assume %w_out_row [lt(%w_out_row, %n)] : index
+  %w_row_origin0 = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset
+  %w_row_origin = index.add %w_row_origin0, %expert_off : offset
+  %wave_rows32 = view.load %ti_view[%row_group, 1] : view<[%row_tile_count]x2xi32> -> i32
+  %wave_rows_b = scalar.assume %wave_rows32 [range(%wave_rows32, 0, 64)] : i32
+  %wave_rows = index.cast %wave_rows_b : i32 to index
+  %wave_live = index.cmp ult, %wave_row, %wave_rows : index
+  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
+  %zero8i = vector.constant 0 : vector<8xi32>
+  %init_i = vector.fragment<init> %zero8i shape [%c16, %c16] : vector<8xi32>
+  %schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %zero16i = vector.constant 0 : vector<16xi8>
+  %zero2f = vector.constant 0.0 : vector<2xf32>
+  %zero16f = vector.constant 0.0 : vector<16xf32>
+  %k_steps = index.div %k, %c64 : index
+  %g0_raw, %g1_raw, %u0_raw, %u1_raw = scf.for %step = [%c0 to %k_steps step %c1](%g0_acc = %init : vector<8xf32>, %g1_acc = %init : vector<8xf32>, %u0_acc = %init : vector<8xf32>, %u1_acc = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {{
+    %k_origin = index.mul %step, %c64 : index
+    %x_col = index.add %k_origin, %stage_col : index
+    %x_raw = vector.load %xq_view[%bounded_x_row, %x_col] : view<[%xrows]x[%k]xi8> -> vector<16xi8>
+    %x_codes = scf.select %gx_valid, %x_raw, %zero16i : vector<16xi8>
+    vector.store %x_codes, %x_stage_view[%stage_row, %stage_col] : vector<16xi8>, view<64x80xi8>
+    scf.if %meta_writer {{
+      %step2 = index.mul %step, %c2 : index
+      %gg_v = index.add %step2, %stage_half : index
+      %gg = index.assume %gg_v [lt(%gg_v, %groups)] : index
+      %xmeta_raw = vector.load %xm_view[%bounded_x_row, %gg, %c0] : view<[%xrows]x[%groups]x2xf32> -> vector<2xf32>
+      %xmeta = scf.select %gx_valid, %xmeta_raw, %zero2f : vector<2xf32>
+      %xd_s = vector.extract %xmeta[0] : vector<2xf32> -> f32
+      %xs_s = vector.extract %xmeta[1] : vector<2xf32> -> f32
+      %xd_v = vector.splat %xd_s : vector<16xf32>
+      %xs_v = vector.splat %xs_s : vector<16xf32>
+      %xm_row = index.madd %stage_half, %c64, %stage_row : index
+      %xm_rowb = index.assume %xm_row [range(%xm_row, 0, 127)] : index
+      vector.store %xd_v, %xd_view[%xm_rowb, %c0] : vector<16xf32>, view<128x16xf32>
+      vector.store %xs_v, %xs_view[%xm_rowb, %c0] : vector<16xf32>, view<128x16xf32>
+    }}
+    %w_col = index.add %k_origin, %stage_col : index
+{deq(0, "w")}
+{deq(1, "w2")}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %live_g0, %live_g1, %live_u0, %live_u1 = scf.if %wave_live -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {{
+      %kc0_0 = index.constant 0 : index
+      %kc0_1 = index.constant 16 : index
+      %kc1_0 = index.constant 32 : index
+      %kc1_1 = index.constant 48 : index
+      %xd_row0 = index.add %c0, %wave_row : index
+      %c64b = index.constant 64 : index
+      %xd_row1 = index.add %c64b, %wave_row : index
+{group(0)}
+{group(1)}
+      scf.yield %g0_new1, %g1_new1, %u0_new1, %u1_new1 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }} else {{
+      scf.yield %g0_acc, %g1_acc, %u0_acc, %u1_acc : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }}
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %live_g0, %live_g1, %live_u0, %live_u1 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }}
+  %sg0 = vector.siluf<afn> %g0_raw : vector<8xf32>
+  %sg1 = vector.siluf<afn> %g1_raw : vector<8xf32>
+  %act0 = vector.mulf %sg0, %u0_raw : vector<8xf32>
+  %act1 = vector.mulf %sg1, %u1_raw : vector<8xf32>
+  vector.fragment.store<result> %act0, %y_view[%bounded_wave_row, %bounded_wave_out] shape [%c16, %c16] : vector<8xf32>, view<64x64xf32, %y_layout>
+  vector.fragment.store<result> %act1, %y_view[%bounded_wave_row, %wave_out1] shape [%c16, %c16] : vector<8xf32>, view<64x64xf32, %y_layout>
+  }}
+  kernel.return
+}}
+"""
