@@ -21,12 +21,16 @@
     }
    ],
    "steps": [
+    "perf:main:2",
+    "perf:new:2",
     "perf:main:2:long",
     "perf:new:2:long",
     "c4:main",
     "c4:new",
     "perf:new:2:long",
     "perf:main:2:long",
+    "perf:new:2",
+    "perf:main:2",
     "c4:new",
     "c4:main"
    ]
@@ -48,12 +52,16 @@
     }
    ],
    "steps": [
+    "perf:main:2",
+    "perf:new:2",
     "perf:main:2:long",
     "perf:new:2:long",
     "c4:main",
     "c4:new",
     "perf:new:2:long",
     "perf:main:2:long",
+    "perf:new:2",
+    "perf:main:2",
     "c4:new",
     "c4:main"
    ],
@@ -76,12 +84,47 @@
     }
    ],
    "steps": [
+    "perf:main:2",
+    "perf:new:2",
     "perf:main:2:long",
     "perf:new:2:long",
     "c4:main",
     "c4:new",
     "perf:new:2:long",
     "perf:main:2:long",
+    "perf:new:2",
+    "perf:main:2",
+    "c4:new",
+    "c4:main"
+   ]
+  },
+  {
+   "name": "q06",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "memory_bytes": 17000000000,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "main",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "perf:main:2",
+    "perf:new:2",
+    "perf:main:2:long",
+    "perf:new:2:long",
+    "c4:main",
+    "c4:new",
+    "perf:new:2:long",
+    "perf:main:2:long",
+    "perf:new:2",
+    "perf:main:2",
     "c4:new",
     "c4:main"
    ]
@@ -103,12 +146,16 @@
     }
    ],
    "steps": [
+    "perf:main:2",
+    "perf:new:2",
     "perf:main:2:long",
     "perf:new:2:long",
     "c4:main",
     "c4:new",
     "perf:new:2:long",
     "perf:main:2:long",
+    "perf:new:2",
+    "perf:main:2",
     "c4:new",
     "c4:main"
    ]

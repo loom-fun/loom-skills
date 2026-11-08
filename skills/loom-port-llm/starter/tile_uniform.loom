@@ -64,3 +64,25 @@ func.def inline @g_tile_adjacent(%info: buffer, %tokens: index, %first: index, %
   %ok = scalar.andi %b, %next_pos : i1
   func.return %ok : i1
 }
+
+// Whether the uniform tile at TOKEN starts at a position multiple of 16 (flash2 computes those; see
+// g_attention_fallback_list).
+func.def inline @g_tile_starts(%info: buffer, %tokens: index, %token: index) -> (i1) {
+  %zero = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c15_i32 = scalar.constant 15 : i32
+  %false = scalar.constant false : i1
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %bounded = index.assume %token [range(%token, 0, 8191), lt(%token, %tokens)] : index
+  %pos = view.load %info_view[%bounded, %c1] : view<[%tokens]x4xi32> -> i32
+  %skew = scalar.andi %pos, %c15_i32 : i32
+  %aligned = scalar.cmpi eq, %skew, %c0_i32 : i32
+  %starts = scf.if %aligned -> (i1) {
+    %uniform, %row, %pos0 = func.call @g_tile_uniform(%info, %tokens, %bounded) : (buffer, index, index) -> (i1, i32, i32)
+    scf.yield %uniform : i1
+  } else {
+    scf.yield %false : i1
+  }
+  func.return %starts : i1
+}
