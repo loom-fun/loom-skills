@@ -1,41 +1,49 @@
 {
- "_comment": "flash2 depth dispatch at G = 7 (forced): needle TTFT on a fresh server",
- "card": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
- "memory_bytes": 81000000000,
+ "_comment": "flash2 depth dispatch at G = 5 and G = 8 (forced): needle TTFT on a fresh server",
+ "card": "loom-fun/ggml-org-Qwen3-14B-loom",
+ "memory_bytes": 31000000000,
  "kit": null,
- "llamacpp": "b1370",
+ "llamacpp": "b1369",
  "variants": [
   {
-   "name": "nb-ts1-32k",
+   "name": "g5-ts1",
+   "card": "loom-fun/ggml-org-Qwen3-14B-loom",
    "build": {},
    "steps": [
-    "needle:32768:13000"
-   ]
+    "needle:36864:13000"
+   ],
+   "memory_bytes": 31000000000
   },
   {
-   "name": "nb-ts1-64k",
-   "build": {},
-   "steps": [
-    "needle:65536:13000"
-   ]
-  },
-  {
-   "name": "nb-disp-32k",
+   "name": "g5-disp",
+   "card": "loom-fun/ggml-org-Qwen3-14B-loom",
    "build": {
     "FLASH2_TS_DEPTH": "16384"
    },
    "steps": [
-    "needle:32768:13000"
-   ]
+    "needle:36864:13000"
+   ],
+   "memory_bytes": 31000000000
   },
   {
-   "name": "nb-disp-64k",
+   "name": "g8-ts1",
+   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+   "build": {},
+   "steps": [
+    "needle:65536:13000"
+   ],
+   "memory_bytes": 63000000000
+  },
+  {
+   "name": "g8-disp",
+   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
    "build": {
     "FLASH2_TS_DEPTH": "16384"
    },
    "steps": [
     "needle:65536:13000"
-   ]
+   ],
+   "memory_bytes": 63000000000
   }
  ]
 }
