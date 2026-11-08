@@ -114,6 +114,20 @@ gev "$tmp/g_sameday.json" pass quick 2026-11-07T09:00:00 bbb
 gate_case "published full pass, a same-day quick pass keeps it" pass/full/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
 gev "$tmp/g_sameday.json" fail quick 2026-11-07T09:00:00 bbb
 gate_case "published full pass, a same-day quick fail shows" fail/quick/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
+# a card with a failing gate is published as is (loom-org step 2): it validates, renders the gate as a failure, and
+# org_status counts it as failing (action fix)
+mkdir -p "$tmp/failing"; cp -r "$F/pkg/." "$tmp/failing/"
+py "$C/make_info.py" build "$tmp/failing" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint --report generated \
+  --evidence "$tmp/gates.json" "$tmp/g_qfail.json" -o "$tmp/failing/info.json" 2>/dev/null
+py "$C/render_card.py" "$tmp/failing" 2>/dev/null
+py -c "import sys; sys.path.insert(0, sys.argv[1]); sys.path.insert(0, sys.argv[2]); import card_lib as c, render_card as r
+from org_status import assess
+assert c.validate(c.load_json(sys.argv[3] + '/info.json')) == [], 'not valid'
+rows = [l for l in open(sys.argv[3] + '/README.md') if l.startswith('| \x60agent\x60 |')]
+assert len(rows) == 1 and f'| {r.NO} fail' in rows[0], rows
+assert assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])['failing'] == ['agent']" "$C" "$here/../../../../loom-org/scripts" "$tmp/failing" \
+  && echo "OK   failing: a card with a failing gate validates, renders it as fail and org_status counts it failing" \
+  || { echo "FAIL failing: a card with a failing gate does not publish as failing"; bad=1; }
 # local and DevLab sessions both stay (card_lib.card_metrics: local headline, DevLab columns): a metric only DevLab
 # measured asks for a local session (perf_flags "devlab"; org_status remeasure reason devlab-primary); a local value
 # without a DevLab one on the same programs asks for a DevLab perf session ("devlab_perf"); the gap is never a flag
