@@ -4,7 +4,7 @@
   {
    "name": "glimmer-30b-q4km",
    "card": "loom-fun/ggml-org-Muse-Glimmer-30B-loom",
-   "memory_bytes": 44000000000,
+   "memory_bytes": 48000000000,
    "kit": "glimmer",
    "llamacpp": "b1369",
    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
