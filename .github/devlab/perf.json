@@ -1,115 +1,35 @@
 {
- "_comment": "Temporary: main vs this branch on the same runner; ctl = this branch with both paths off (main's programs: the noise floor).",
- "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
- "memory_bytes": 64000000000,
- "kit": null,
- "llamacpp": "b1369",
+ "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
+ "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+ "memory_bytes": 34000000000,
+ "kit": "gemma4",
+ "llamacpp": "b1368",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
  "jobs": [
   {
-   "name": "q4i",
+   "name": "tm-off",
+   "thinking": "off",
    "variants": [
     {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "pr",
+     "name": "new",
      "build": {}
-    },
-    {
-     "name": "ctl",
-     "build": {
-      "ATTN_MT": "1",
-      "DFL_SPLITS": "0"
-     }
     }
    ],
    "steps": [
-    "perf:main:2",
-    "perf:pr:2",
-    "perf:ctl:2",
-    "perf:main:1:long",
-    "perf:pr:1:long",
-    "c4:main",
-    "c4:pr",
-    "c4:ctl",
-    "c4:main",
-    "c4:pr",
-    "c4:ctl"
+    "textmatch:new"
    ]
   },
   {
-   "name": "q8",
-   "card": "loom-fun/unsloth-Qwen3-8B-loom",
-   "memory_bytes": 30000000000,
-   "llamacpp": "b1368",
+   "name": "tm-on",
+   "thinking": "on",
    "variants": [
     {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "pr",
+     "name": "new",
      "build": {}
-    },
-    {
-     "name": "ctl",
-     "build": {
-      "ATTN_MT": "1",
-      "DFL_SPLITS": "0"
-     }
     }
    ],
    "steps": [
-    "perf:main:2",
-    "perf:pr:2",
-    "perf:ctl:2",
-    "perf:main:1:long",
-    "perf:pr:1:long",
-    "c4:main",
-    "c4:pr",
-    "c4:ctl",
-    "c4:main",
-    "c4:pr",
-    "c4:ctl"
-   ]
-  },
-  {
-   "name": "llama3b",
-   "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
-   "memory_bytes": 30000000000,
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "pr",
-     "build": {}
-    },
-    {
-     "name": "ctl",
-     "build": {
-      "ATTN_MT": "1",
-      "DFL_SPLITS": "0"
-     }
-    }
-   ],
-   "steps": [
-    "perf:main:2",
-    "perf:pr:2",
-    "perf:ctl:2",
-    "perf:main:1:long",
-    "perf:pr:1:long",
-    "c4:main",
-    "c4:pr",
-    "c4:ctl",
-    "c4:main",
-    "c4:pr",
-    "c4:ctl"
+    "textmatch:new"
    ]
   }
  ]
