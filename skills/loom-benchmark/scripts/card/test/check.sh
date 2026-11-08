@@ -177,6 +177,23 @@ a = c.card_metrics(c.load_json(sys.argv[2]))['spec_acceptance'][0]['loom']; prin
   "$C" "$tmp/acc_old.json")
 [ "$got" = "$want" ] && echo "OK   flags: a DevLab spec gate's acceptance replaces a stale spec_acceptance (gates only: none)" \
   || { echo "FAIL flags: DevLab spec acceptance: $got, expected $want"; bad=1; }
+# a paused card (make_info.py build --from-info --next-steps --status paused): README.md is the same card with a final
+# "Next steps" section after everything else, org_status reports paused; without the fields nothing changes
+printf '%s\n' '- retry the agent gate on DevLab' '' 'measure `decode_32k` locally' > "$tmp/next.txt"
+mkdir -p "$tmp/paused"; cp -r "$F/pkg/." "$tmp/paused/"
+py "$C/make_info.py" build "$tmp/paused" --generator-commit $GEN --from-info "$tmp/failing/info.json" --next-steps "$tmp/next.txt" \
+  --status paused -o "$tmp/paused/info.json" 2>/dev/null
+py "$C/render_card.py" "$tmp/paused" 2>/dev/null
+py "$C/make_info.py" build "$tmp/paused" --generator-commit $GEN --from-info "$tmp/paused/info.json" --next-steps /dev/null \
+  --status active -o "$tmp/unpaused.json" 2>/dev/null
+printf '\n## Next steps\n\nWork on this model is paused.\n\n- retry the agent gate on DevLab\n- measure `decode_32k` locally\n' \
+  | cat "$tmp/failing/README.md" - | cmp -s - "$tmp/paused/README.md" && cmp -s "$tmp/failing/info.json" "$tmp/unpaused.json" \
+  && py -c "import sys; sys.path.insert(0, sys.argv[1]); from org_status import assess
+a, b = assess('loom-fun/ggml-org-Flint-loom', sys.argv[2]), assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])
+assert a.get('paused') is True and 'paused' not in b and a['failing'] == b['failing']" "$here/../../../../loom-org/scripts" \
+  "$tmp/paused" "$tmp/failing" \
+  && echo "OK   paused: next steps render last, org_status reports paused, and clearing them gives the card back" \
+  || { echo "FAIL paused: a paused card's next steps do not render or clear as expected"; bad=1; }
 # c4_steady.py runs that measured nothing (every stream failed: rate -0.0, a negative window) are not samples
 printf '%s\n' '{"streams": 4, "window_s": 2.5, "agg_tps": 110.0}' '{"streams": 4, "window_s": -3.1, "agg_tps": -0.0}' 0 112.5 \
   > "$tmp/c4_bad.txt"

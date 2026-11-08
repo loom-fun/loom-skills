@@ -146,6 +146,12 @@ dropped or loosened, and `org_status` marks the repo `fix` (step 4). Add the car
 `.github/nightly-models.json` in the same PR, and republish as gates go green. Only `done` (below) needs every gate
 passing.
 
+**Pausing a model:** list what would be done next, one step per line in a file, and republish the card only (DIR
+as in step 3.2): `make_info.py build DIR --from-info DIR/info.json --status paused --next-steps FILE`,
+`render_card.py DIR`, `publish_package.py upload DIR --repo loom-fun/REPO --card-only --parent-commit $sha`. The
+README then ends with a "Next steps" section. `org_status` keeps the repo's action and reports `paused: true`. To
+resume, rebuild with `--status active --next-steps /dev/null`.
+
 ### 3. Sweep on DevLab Dispatch: missing gates, the roofline and the DevLab perf session
 
 DevLab is an elastic pool of Strix Halo runners; sweep many cards' gates at once there, never on the local GPU.

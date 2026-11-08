@@ -7,7 +7,8 @@ clock, no environment: the generator commit is an input, by default the checkout
 byte-identical files.
 
   make_info.py build PKG --repo loom-fun/NAME [--generator-commit SHA] [--evidence EV.json ...]
-                         [--memory-bytes N] [--output DIR] [--license ID] [--report generated|attached] [-o info.json]
+                         [--memory-bytes N] [--output DIR] [--license ID] [--report generated|attached]
+                         [--from-info OLD.json] [--next-steps FILE] [--status paused|active] [-o info.json]
       PKG holds model.json (and model.json.lock, llm_config.json): card values the package already implies
       (tags, the default --output, a memory_bytes in model.json) are dropped. Evidence files apply in order.
       --generator-commit: the loom-skills commit of these card scripts (default: this checkout's HEAD, or
@@ -16,6 +17,8 @@ byte-identical files.
       DevLab sweeps an older card recorded are kept as they are, never rendered) and apply the evidence files on
       top: how a card is regenerated when only new evidence arrives.
       --repo defaults to OLD.json's repo.
+      --next-steps FILE: the card's next steps, one per line (a leading "- " is dropped; an empty FILE removes
+      them); --status paused|active (active removes the status). Both are kept from OLD.json unless given.
 
   make_info.py perf --loom-jsonl LOOM.jsonl --llama-jsonl LLAMA.jsonl [--c4-loom F] [--c4-llama F]
                     --baseline-version llamacpp-rocm/bNNNN [--baseline-args "ARGS"] [--metrics decode,...]
@@ -187,6 +190,10 @@ def cmd_build(a):
         sweeps = (old.get("devlab") or {}).get("sweeps") or []   # pre-decision DevLab sweeps: kept as is, not rendered
         if a.report is None:
             a.report = old.get("report")
+        if a.status is None:
+            a.status = old.get("status")
+        if a.next_steps is None:
+            a.next_steps = old.get("next_steps")
     for i, path in enumerate(a.evidence or []):
         ev = load_json(path)
         if ev.get("evidence") != EVIDENCE_ID:
@@ -255,6 +262,10 @@ def cmd_build(a):
         info["report"] = a.report
     if roofline:
         info["roofline"] = roofline
+    if a.status and a.status != "active":
+        info["status"] = a.status
+    if a.next_steps:
+        info["next_steps"] = a.next_steps
     if sweeps:
         info["devlab"] = {"sweeps": sweeps}
     used = ({s["source"] for s in sessions} | {g["source"] for g in gate_out.values()}
@@ -559,6 +570,11 @@ def cmd_roofline(a):
           file=sys.stderr)
 
 
+def next_steps_file(path):
+    with open(path, encoding="utf-8") as f:
+        return [re.sub(r"^[-*]\s+", "", ln.strip()) for ln in f if ln.strip()]
+
+
 def add_source_args(p):
     p.add_argument("--source-kind", default="local", choices=["local", "devlab", "factory"])
     p.add_argument("--run")
@@ -582,6 +598,8 @@ def main(argv=None):
     b.add_argument("--license")
     b.add_argument("--report", choices=["generated", "attached"])
     b.add_argument("--from-info", help="a published info.json to start from (regenerating a card with new evidence)")
+    b.add_argument("--status", choices=["paused", "active"], help="paused: work on this model has stopped (active: clears it)")
+    b.add_argument("--next-steps", type=next_steps_file, help="a file of next steps, one per line (empty: none)")
     b.add_argument("-o", default="info.json")
     p = sub.add_parser("perf")
     p.add_argument("--perf-log")
