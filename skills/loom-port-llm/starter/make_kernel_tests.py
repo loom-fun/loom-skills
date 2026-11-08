@@ -974,6 +974,72 @@ if attn_rules.multi_token(attn_rules.UNROLL):   # the condition gen_llm.py emits
     if cfg.get("sliding_layers") and cfg.get("sliding_window"):
         attention_span_case("attention_span_sliding", True)
 
+# 3d. decode rows in a prefill-shaped epoch (gen_llm.DECODE_LIST): g_attention_decode_list lists the tokens of spans
+# shorter than a tile, and the listed decode kernels (64 splits, partials by list slot in the 16-split buffers) give
+# each exactly what g_attention_split + combine give it on its own: a 56-token prefill span, four 1-token decode
+# spans at 90 / 300 / 700 / 1500 keys (1 to 47 splits; past 512 keys the 16-split fallback rounds differently) and
+# padding, in a 64-row epoch. Bitwise equal to the decode kernels run over the decode rows only.
+def decode_rows_case(tag):
+    t, npre = 64, 56
+    dpos = [90, 300, 700, 1500]
+    spans = 1 + len(dpos)
+    ctx = (max(dpos) + 1 + 15) // 16 * 16 + 64
+    kvk = (0.5 * rng.standard_normal((ctx, KVH, D))).astype(np.float16); kvv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
+    q = rng.standard_normal((t, QH, D)).astype(np.float32); gate = rng.standard_normal((t, QH, D)).astype(np.float32)
+    blocks = ctx // 16
+    orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
+    info = np.zeros((t, 4), np.int32); info[:npre, 1] = 100 + np.arange(npre); info[:npre, 2] = 1
+    for j, p in enumerate(dpos):
+        info[npre + j] = (0, p, 1, 1 + j)
+    info_dec = info.copy(); info_dec[:npre, 2] = 0
+    meta = np.zeros(4 + 9 * spans, np.int32); meta[0] = spans
+    meta[4] = npre
+    for j in range(len(dpos)):
+        meta[4 + 9 * (1 + j)] = 1
+    sinks = deq(f"blk.{A0}.attn_sinks.weight").astype(np.float32) if cfg.get("attn_sinks") else np.zeros(QH, np.float32)
+    for n, a in [("q", q.reshape(t, -1)), ("g", gate.reshape(t, -1)), ("info", info), ("infod", info_dec), ("meta", meta), ("orig", orig),
+                 ("sinks", sinks), ("arena", np.concatenate([kvk.reshape(-1), kvv.reshape(-1)]))]:
+        save(f"{tag}_{n}", a)
+    QD = QH * D; S = 64
+    gv, gt = ("%sinks", f"tensor<{QH}xf32>") if cfg.get("attn_sinks") else ("%g" if gate_kind else "%q", f"tensor<{t}x{QD}xf32>")
+    OT = f"tensor<{t}x{QD}xf32>"; AR = f"tensor<{2 * ctx * KVH * D}xf16>"; OR = f"tensor<{10 + blocks}xi32>"; IT = f"tensor<{t}x4xi32>"
+    PA, PM = f"tensor<{t * QH * S * D}xf32>", f"tensor<{t * QH * S * 2}xf32>"
+    cases.append(f"""check.case public @{tag} {{
+  %t = check.literal value({t}) : index
+  %spans = check.literal value({spans}) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value(0) : i32
+  %ctx = check.literal value({ctx}) : index
+  %pool = check.literal value({ctx}) : index
+  %q = check.file.read.npy path("{tag}_q.npy") : {OT}
+  %g = check.file.read.npy path("{tag}_g.npy") : {OT}
+  %sinks = check.file.read.npy path("{tag}_sinks.npy") : tensor<{QH}xf32>
+  %info = check.file.read.npy path("{tag}_info.npy") : {IT}
+  %infod = check.file.read.npy path("{tag}_infod.npy") : {IT}
+  %meta = check.file.read.npy path("{tag}_meta.npy") : tensor<{4 + 9 * spans}xi32>
+  %orig = check.file.read.npy path("{tag}_orig.npy") : {OR}
+  %arena = check.file.read.npy path("{tag}_arena.npy") : {AR}
+  %list = check.generate.fill value(0) : tensor<{t}xi32>
+  %count = check.generate.fill value(0) : tensor<64xi32>
+  %pacc = check.generate.fill value(0.0) : tensor<{t * QH * 16 * D}xf32>
+  %pml = check.generate.fill value(0.0) : tensor<{t * QH * 16 * 2}xf32>
+  %racc = check.generate.fill value(0.0) : {PA}
+  %rml = check.generate.fill value(0.0) : {PM}
+  %o = check.generate.fill value(0.0) : {OT}
+  %o_ref = check.generate.fill value(0.0) : {OT}
+  kernel.launch @g_attention_decode_list[%t](%t, %spans, %meta, %info, %list, %count) : [index](index, index, tensor<{4 + 9 * spans}xi32>, {IT}, tensor<{t}xi32>, tensor<64xi32>)
+  kernel.launch @g_attention_split_listed[%count](%t, %list, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [tensor<64xi32>](index, tensor<{t}xi32>, index, i32, index, index, {OT}, {IT}, {OR}, {AR}, tensor<{t * QH * 16 * D}xf32>, tensor<{t * QH * 16 * 2}xf32>)
+  kernel.launch @g_attention_combine_listed[%count](%t, %list, %sliding, %info, %pacc, %pml, {gv}, %o) : [tensor<64xi32>](index, tensor<{t}xi32>, i32, {IT}, tensor<{t * QH * 16 * D}xf32>, tensor<{t * QH * 16 * 2}xf32>, {gt}, {OT})
+  kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %infod, %orig, %arena, %racc, %rml) : [index](index, index, i32, index, index, {OT}, {IT}, {OR}, {AR}, {PA}, {PM})
+  kernel.launch @g_attention_combine[%t](%t, %sliding, %infod, %racc, %rml, {gv}, %o_ref) : [index](index, i32, {IT}, {PA}, {PM}, {gt}, {OT})
+  check.expect.equal actual(%o) expected(%o_ref) : {OT}
+  check.return
+}}
+""")
+
+
+decode_rows_case("decode_rows")
+
 # 3a''. DFlash proposals' head (draft/prep_weights.py, PROPOSE_HEAD=q4_0): g_prep_<fmt>_q4_0 converts the head at load,
 # then the int8 head runs over the Q4_0 copy. Logits vs numpy on llama.cpp's quantize_row_q4_0 of the same values (a
 # code at a rounding boundary may differ: tolerance), and the 4/8/16-span variants bit-identical to 1 span.

@@ -2888,18 +2888,20 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
   kernel.return
 }}
 """
+    plain = text   # without the multi-token path: the listed kernels run one token per workgroup
     if P == "g" and attn_rules.multi_token(U):
         text = multi_token_split(text, P, U, ATTN_MT)
     if D != 128:
-        text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
-                .replace("x32x4xf32", f"x32x{DL}xf32").replace("vector<4xf32>", f"vector<{DL}xf32>")
-                .replace("0.08838834764831845", repr(D ** -0.5)))
-    split_l = listed(text, f"{P}_attention_split", f"""  %c1 = index.constant 1 : index
+        resize = lambda t: (t.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
+                            .replace("x32x4xf32", f"x32x{DL}xf32").replace("vector<4xf32>", f"vector<{DL}xf32>")
+                            .replace("0.08838834764831845", repr(D ** -0.5)))
+        text, plain = resize(text), resize(plain)
+    split_l = listed(plain, f"{P}_attention_split", f"""  %c1 = index.constant 1 : index
   %ckvh = index.constant {KVH} : index
   %cS = index.constant {S} : index
   %clanes = index.constant {G * 32} : index
   kernel.launch.config workgroups(%count, %ckvh, %cS) workgroup_size(%clanes, %c1, %c1) : index""")
-    combine_l = listed(text, f"{P}_attention_combine", f"""  %c1 = index.constant 1 : index
+    combine_l = listed(plain, f"{P}_attention_combine", f"""  %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   %cqh = index.constant {QH} : index
   kernel.launch.config workgroups(%count, %cqh, %c1) workgroup_size(%c32, %c1, %c1) : index""")
@@ -2909,10 +2911,12 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
 def attention():
     """Decode attention with up to 64 splits; the prefill fallback (listed,
     indexed by token over up to 1024 rows) keeps 16 splits."""
-    dec, _, _ = attention_text(64, "g")
+    dec, dec_split_l, dec_combine_l = attention_text(64, "g")
     pre, split_l, combine_l = attention_text(16, "g16")
     count16 = pre[pre.index("// Splits for"):pre.index('kernel.def export("g16_attention_split")')]
-    return dec + "\n" + count16 + split_l + "\n" + combine_l + FALLBACK
+    by_slot = lambda t: t.replace("%acc_view[%token,", "%acc_view[%slot,").replace("%ml_view[%token,", "%ml_view[%slot,")
+    return (dec + "\n" + count16 + split_l + "\n" + combine_l + FALLBACK + DECODE_LIST
+            + "\n// The decode kernels over a token list, their split partials by list slot.\n" + by_slot(dec_split_l) + "\n" + by_slot(dec_combine_l))
 
 
 FALLBACK = r"""
@@ -2971,6 +2975,83 @@ kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%token
   kernel.return
 }
 """
+
+
+# Decode rows in a prefill-shaped epoch. Rows of spans shorter than a tile (a decode step, a verify span) take the
+# decode attention kernels (64 splits, the same rounding as alone) instead of flash2 or the 16-split fallback, so
+# a request's output does not depend on the prefill that shares its epoch (consistency.py; Qwen3-Coder-30B-A3B: the
+# 16-split rounding alone moved a MoE's routing by up to 1.7 nats). Their split
+# partials reuse %pacc/%pml (16-split rows, so one slot takes four): a token beyond the %tokens/4 slots keeps the
+# fallback's result. g_attention_fallback_list still lists these rows; the decode kernels run after it.
+DECODE_ROWS_MAX = 16
+DECODE_LIST = r"""
+kernel.def export("g_attention_decode_list") @g_attention_decode_list(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%tokens_arg: index, %spans_arg: index, %metadata: buffer, %info: buffer, %list: buffer, %count: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
+  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c16o = index.constant 16 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c256 = index.constant 256 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %short = scalar.constant __ROWS_MAX__ : i32
+  %counter_bytes = index.constant 16 : offset
+  %counter = buffer.alloca<workgroup> align(16) %counter_bytes : buffer
+  %counter_view = buffer.view %counter[%zero] : buffer -> view<4xi32>
+  %first = index.cmp eq, %lane, %c0 : index
+  scf.if %first {
+    view.store %c0_i32, %counter_view[%c0] : i32, view<4xi32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %slots = index.div %tokens, %c4 : index
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %packets = buffer.view %metadata[%c16o] : buffer -> view<[%spans]x9xi32>
+  %list_view = buffer.view %list[%zero] : buffer -> view<[%tokens]xi32>
+  scf.for %token = [%lane to %tokens step %c256] {
+    %bounded = index.assume %token [lt(%token, %tokens)] : index
+    %live32 = view.load %info_view[%bounded, 2] : view<[%tokens]x4xi32> -> i32
+    %span32 = view.load %info_view[%bounded, 3] : view<[%tokens]x4xi32> -> i32
+    %live = scalar.cmpi ne, %live32, %c0_i32 : i32
+    %has_span = scalar.cmpi sge, %span32, %c0_i32 : i32
+    %span_bound = scalar.assume %span32 [range(%span32, -1, 8191)] : i32
+    %span_c = scalar.maxsi %span_bound, %c0_i32 : i32
+    %span_i = index.cast %span_c : i32 to index
+    %span = index.assume %span_i [lt(%span_i, %spans)] : index
+    %length = view.load %packets[%span, 0] : view<[%spans]x9xi32> -> i32
+    %is_short = scalar.cmpi slt, %length, %short : i32
+    %a = scalar.andi %live, %has_span : i1
+    %take = scalar.andi %a, %is_short : i1
+    scf.if %take {
+      %slot32 = view.atomic.rmw<addi> %one_i32, %counter_view[%c0] {ordering = relaxed, scope = workgroup} : i32, view<4xi32> -> i32
+      %slot_bound = scalar.assume %slot32 [range(%slot32, 0, 8191)] : i32
+      %slot = index.cast %slot_bound : i32 to index
+      %fits = index.cmp ult, %slot, %slots : index
+      scf.if %fits {
+        %slot_in = index.assume %slot [lt(%slot, %tokens)] : index
+        %token32 = index.cast %bounded : index to i32
+        view.store %token32, %list_view[%slot_in] : i32, view<[%tokens]xi32>
+      }
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  scf.if %first {
+    %total = view.load %counter_view[%c0] : view<4xi32> -> i32
+    %slots32 = index.cast %slots : index to i32
+    %capped = scalar.minsi %total, %slots32 : i32
+    %count_view = buffer.view %count[%zero] : buffer -> view<1xi32>
+    view.store %capped, %count_view[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+""".replace("__ROWS_MAX__", str(DECODE_ROWS_MAX))
 
 
 CHUNKS = (V + 127) // 128
@@ -4436,8 +4517,11 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %count_size = index.constant 256 : offset
   %fallback_list = buffer.alloca<global> align(256) %list_size : buffer
   %fallback_count = buffer.alloca<global> align(256) %count_size : buffer
+  %decode_list = buffer.alloca<global> align(256) %list_size : buffer
+  %decode_count = buffer.alloca<global> align(256) %count_size : buffer
   scf.if %gemm {{
     kernel.launch @g_attention_fallback_list[%t](%t, %info, %fallback_list, %fallback_count) : [index](index, buffer, buffer, buffer)
+    kernel.launch @g_attention_decode_list[%t](%t, %spans, %metadata, %info, %decode_list, %decode_count) : [index](index, index, buffer, buffer, buffer, buffer)
   }}
   %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
   %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
@@ -4518,6 +4602,10 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   }} else {{
     kernel.launch @g_attention_split[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
     kernel.launch @g_attention_combine[%t](%t, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [index](index, i32, buffer, buffer, buffer, {gty}, buffer)
+  }}
+  scf.if %gemm {{
+    kernel.launch @g_attention_split_listed[%decode_count](%t, %decode_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @g_attention_combine_listed[%decode_count](%t, %decode_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, {gty}, buffer)
   }}
   scf.if %gemm {{
     kernel.launch @g_row_scale_f16[%t](%t, %nQ, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)

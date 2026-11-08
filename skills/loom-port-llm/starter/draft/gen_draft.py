@@ -929,8 +929,11 @@ def _token_setup(meta, tokens_buf, embed_norm, x, h, g):
   %count_size = index.constant 256 : offset
   %fallback_list = buffer.alloca<global> align(256) %list_size : buffer
   %fallback_count = buffer.alloca<global> align(256) %count_size : buffer
+  %decode_list = buffer.alloca<global> align(256) %list_size : buffer
+  %decode_count = buffer.alloca<global> align(256) %count_size : buffer
   scf.if %gemm {{
     kernel.launch @g_attention_fallback_list[%t](%t, %info, %fallback_list, %fallback_count) : [index](index, buffer, buffer, buffer)
+    kernel.launch @g_attention_decode_list[%t](%t, %spans, {meta}, %info, %decode_list, %decode_count) : [index](index, index, buffer, buffer, buffer, buffer)
   }}
   %embedding = command.parameter %w_embed, "token_embd.weight" : view<{g['esize']}xi8>
   kernel.launch @g_embed[%t](%t, {tokens_buf}{vis}, %embedding, {embed_norm}, {x}, {h}) : [index](index, buffer{vty}, view<{g['esize']}xi8>, view<{g['H']}xf32>, buffer, buffer)
@@ -1025,6 +1028,7 @@ command.program.def public @llm_mtp_warm() launch(%w_embed: buffer, %weights: bu
             break
     else:
         raise AssertionError("attention block not found in the MTP layer text")
+    layer = layer.replace("  scf.if %gemm {\n    kernel.launch @g_attention_split_listed", "  scf.if %attn_tiles {\n    kernel.launch @g_attention_split_listed")
     Pp = P.replace("%prefill_shape = index.cmp uge, %t, %c64 : index", "%prefill_shape = index.cmp uge, %t, %c_never : index", 1)
     assert Pp != P
     Pp += "  %attn_tiles = index.cmp uge, %t, %c_never : index\n"

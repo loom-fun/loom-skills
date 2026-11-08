@@ -6,21 +6,11 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "d-attn",
-   "build": {
-    "DIAG": "attn"
-   },
+   "name": "new",
+   "build": {},
    "steps": [
-    "consistency:6:llama"
-   ]
-  },
-  {
-   "name": "d-moe-attn",
-   "build": {
-    "DIAG": "moe,attn"
-   },
-   "steps": [
-    "consistency:6:llama"
+    "ktest",
+    "consistency:8:llama"
    ]
   }
  ]
