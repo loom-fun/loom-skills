@@ -289,7 +289,11 @@ def fake(merged):   # GitHub: a refs/pull/N/merge commit is in no PR; its second
     return get
 assert merged_prs('M', fake('2026-11-08')) == [{'merged_at': '2026-11-08'}]   # merge-ref of a merged PR
 assert merged_prs('M', fake(None)) == [{'merged_at': None}]   # of an open one: still flagged
-assert merged_prs('X', lambda p: []) == []   # a plain orphan commit: no PR" "$here/../../../../loom-org/scripts" "$tmp/flint" "$tmp/skills" \
+assert merged_prs('X', lambda p: []) == []   # a plain orphan commit: no PR
+def wave(files):   # an open PR (a campaign wave) that changes only the given files
+    return lambda path: ([{'number': 7, 'merged_at': None}] if path.endswith('/pulls') else [{'filename': f} for f in files])
+assert merged_prs('H', wave(['.github/devlab/port.json']))[0]['merged_at']   # config only: the base generated the programs
+assert not merged_prs('H', wave(['.github/devlab/port.json', 'skills/x.py']))[0]['merged_at']" "$here/../../../../loom-org/scripts" "$tmp/flint" "$tmp/skills" \
   && echo "OK   org_status checks: nightly entry matches the card, generator commit is on main or in a merged PR" \
   || { echo "FAIL org_status checks: nightly/generator consistency flags are wrong"; bad=1; }
 exit $bad
