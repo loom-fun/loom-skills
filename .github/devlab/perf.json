@@ -17,9 +17,9 @@
     "perf:card:2",
     "perf:card:2:long",
     "llama:2",
-    "llama:2:long",
     "c4:card",
-    "llamac4"
+    "llamac4",
+    "llama:2:long"
    ]
   }
  ]
