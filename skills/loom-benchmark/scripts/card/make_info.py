@@ -180,6 +180,10 @@ def cmd_build(a):
         if old["repo"] != a.repo:
             sys.exit(f"{a.from_info} is the card of {old['repo']}, not {a.repo}")
         card = json.loads(json.dumps(old["card"]))
+        measured = {g["programs_sha256"] for g in old["gates"].values() if g.get("programs_sha256")}
+        if card.get("memory_bytes") and a.memory_bytes is None and measured and programs_sha256(a.pkg) not in measured:
+            sys.exit(f"{a.from_info}: its gates measured other programs than {a.pkg}; its card.memory_bytes "
+                     f"({card['memory_bytes']}) is the old build's. Pass --memory-bytes (build.py prints the new one).")
         versions = {k: v for k, v in old["versions"].items() if k != "card_generator"}
         sources.by_id = dict(old["sources"])
         if old.get("performance"):
