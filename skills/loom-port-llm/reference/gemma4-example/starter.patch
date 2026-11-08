@@ -387,15 +387,15 @@
                 window=_c.get("sliding_window") or 262144, kv_f32=False, gate=_c.get("attn_gate", False), layers=_c["layers"] - 1,
                 dim=_c["head_dim"])
  else:
-@@ -40,22 +40,15 @@
- DP8 = D + 8                      # padded K-tile row (f16 elements)
- QH = KVH * G
- LANES = 32 * G
--# K/V staging tiles head_dim over 32*GP slots (GP: G rounded up to a power of two). With a power-of-two group
--# every lane stages one slot; otherwise (Qwen3.8: 6 heads per KV head, 192 lanes) staging is sized for the power
--# of two below G and the extra lanes skip it, so the workgroup still has exactly G waves.
--POW2 = G & (G - 1) == 0
--GP = G if POW2 else 1 << (G.bit_length() - 1)   # non-power-of-two: stage like the power of two below G
+@@ -46,41 +46,40 @@
+ TS = int(os.environ.get("FLASH2_TS") or (max(1, 16 // G) if D <= 128 else 1))
+ W = G * TS                       # waves per workgroup
+ LANES = 32 * W
+-# K/V staging tiles head_dim over 32*GP slots (GP: W rounded down to a power of two). With a power-of-two wave
+-# count every lane stages one slot; otherwise (Qwen3.8: 6 heads per KV head, 12 waves) staging is sized for the
+-# power of two below and the extra lanes skip it.
+-POW2 = W & (W - 1) == 0
+-GP = W if POW2 else 1 << (W.bit_length() - 1)   # non-power-of-two: stage like the power of two below W
 -DPT = D * 32 // (32 * GP)        # staged dims per thread per key tile
 -TPK = D // DPT                   # threads per key
 -SLOTS = 32 * TPK
@@ -418,17 +418,23 @@
  KB = KT // 16
  VTC, KBYTES, VTBYTES, KT_LESS = KT + 8, KT * (D + 8) * 2, D * (KT + 8) * 2, KT - 1
  
-@@ -67,7 +60,8 @@
-   %c16 = index.constant 16 : index
-   %clanes = index.constant {LANES} : index
-   %tiles = index.div %tokens, %c16 : index
+ # TS = 1: the kernel as it was before token subtiles (FLASH2_TS=1 generates it byte for byte).
+ OLD_LAUNCH = '''  %tiles = index.div %tokens, %c16 : index
 -  kernel.launch.config workgroups(%tiles, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
 +  %cpasses = index.constant {PASSES} : index
 +  kernel.launch.config workgroups(%tiles, %ckv, %cpasses) workgroup_size(%clanes, %c1, %c1) : index
- } launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, {"%sinks" if CFG["sinks"] else "%gate"}: buffer, %info: buffer, %origins: buffer, %arena: buffer, %out: buffer) {
-   %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
-   %layer = index.assume %layer_arg [range(%layer_arg, 0, {CFG["layers"]})] : index
-@@ -89,6 +83,10 @@
+ '''
+ NEW_LAUNCH = '''  %tiles = index.div %tokens, %c16 : index
+   %cts = index.constant {TS} : index
+   %cts_less = index.constant {TS - 1} : index
+   %tiles_round = index.add %tiles, %cts_less : index
+   %groups = index.div %tiles_round, %cts : index
+-  kernel.launch.config workgroups(%groups, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
++  %cpasses = index.constant {PASSES} : index
++  kernel.launch.config workgroups(%groups, %ckv, %cpasses) workgroup_size(%clanes, %c1, %c1) : index
+ '''
+ OLD_HEAD = '''  %tile_count = index.div %tokens, %c16 : index
+   %tile_id = kernel.workgroup.id<x> : index
    %tile = index.assume %tile_id [lt(%tile_id, %tile_count)] : index
    %kv_id = kernel.workgroup.id<y> : index
    %kv = index.assume %kv_id [range(%kv_id, 0, {KVH - 1})] : index
@@ -439,7 +445,18 @@
    %first_token = index.mul %tile, %c16 : index
    %uniform, %row32, %pos0_32 = func.call @{P}_tile_uniform(%info, %tokens, %first_token) : (buffer, index, index) -> (i1, i32, i32)
    scf.if %uniform {
-@@ -134,7 +132,7 @@
+@@ -127,6 +126,10 @@
+   %group = kernel.workgroup.id<x> : index
+   %kv_id = kernel.workgroup.id<y> : index
+   %kv = index.assume %kv_id [range(%kv_id, 0, {KVH - 1})] : index
++  %pass_id = kernel.workgroup.id<z> : index
++  %pass = index.assume %pass_id [range(%pass_id, 0, {PASSES - 1})] : index
++  %cdo = index.constant {DO} : index
++  %doff = index.mul %pass, %cdo : index
+   %workitem_id = kernel.workitem.id<x> : index
+   %workitem = index.assume %workitem_id [range(%workitem_id, 0, {LANES - 1})] : index
+   %wave_id = kernel.subgroup.id : index
+@@ -186,7 +189,7 @@
    %k_view = buffer.view %k_tile[%origin] : buffer -> view<{KT}x{DP8}xf16>
    %vt_bytes = index.constant {VTBYTES} : offset
    %vt_tile = buffer.alloca<workgroup> align(16) %vt_bytes : buffer
@@ -448,7 +465,7 @@
  
    // Q^T as MMA rhs: lane column = token lane%16, 16 dims per fragment.
    %q_view = buffer.view %q[%origin] : buffer -> view<[%tokens]x{QH}x{NF}x16xf32>
-@@ -177,10 +175,14 @@
+@@ -337,10 +340,14 @@
    // Staging: thread t loads key t/{TPK}, dims (t%{TPK})*{DPT}.
    %ctpk = index.constant {TPK} : index
    %cdpt = index.constant {DPT} : index
@@ -465,7 +482,7 @@
  if CFG["kv_f32"]:
      KV_LOAD = f"""      %k_cache = buffer.view %arena[%k_offset] : buffer -> view<{KVH}x{D}xf32>
        %v_cache = buffer.view %arena[%v_offset] : buffer -> view<{KVH}x{D}xf32>
-@@ -212,55 +214,38 @@
+@@ -372,58 +379,41 @@
        scf.yield %kz, %kz : vector<{DPT}xf16>, vector<{DPT}xf16>
      }}
      vector.store %kvals, %k_view[%st_key, %st_dim] : vector<{DPT}xf16>, view<{KT}x{DP8}xf16>
@@ -509,7 +526,7 @@
 -
 -A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NF))} = scf.for %kt = [%c0 to %key_tiles step %c1](%m = {M_INIT} : f32, %l = {L_INIT} : f32, {acc}) -> (f32, f32, {", ".join(["vector<8xf32>"] * NF)}) {{
 +A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NFO))} = scf.for %kt = [%c0 to %key_tiles step %c1](%m = {M_INIT} : f32, %l = {L_INIT} : f32, {acc}) -> (f32, f32, {", ".join(["vector<8xf32>"] * NFO)}) {{
-     %tile_first = index.madd %kt, %ckt, %key_low : index
+ {pass_range() if TS > 1 else ""}    %tile_first = index.madd {"%kt_in" if TS > 1 else "%kt"}, %ckt, %key_low : index
  ''')
 -assert POW2 or KT == 32, "guarded staging is generated for 32-key tiles"
 -for p in range(0 if POW2 else PASSES):   # non-power-of-two group: guarded staging passes
@@ -528,6 +545,9 @@
 -if Q_IN_LOOP:
 -    A("\n".join("  " + line for line in QLOAD.split("\n")))
 +QL = {c: "\n".join("  " + line for line in QLOAD.split("\n") if f"{c} " in line or f"{c} =" in line) for c in range(NF)}
+ VALID = ("    %vw{kb} = vector.andi %causal{kb}, %winok{kb} : vector<8xi1>\n"
+          "    %valid{kb} = vector.andi %vw{kb}, %act_v : vector<8xi1>") if TS > 1 else \
+     "    %valid{kb} = vector.andi %causal{kb}, %winok{kb} : vector<8xi1>"
  for kb in range(KB):
      acc_name = "%init"
      for c in range(NF):
@@ -539,7 +559,7 @@
          A(f'''    %kl{kb}_{c} = vector.fragment.load<lhs> %k_view[%kb{kb}_row, %d{c}] shape [%c16, %c16] : view<{KT}x{DP8}xf16> -> vector<16xf16>
      %s{kb}_{c} = vector.mma %kl{kb}_{c}, %qf{c}, {acc_name} : vector<16xf16>, vector<16xf16>, vector<8xf32>''')
          acc_name = f"%s{kb}_{c}"
-@@ -302,16 +287,17 @@
+@@ -465,16 +455,17 @@
      %l_scaled = scalar.mulf %l, %alpha : f32
      %l_new = scalar.addf %l_scaled, %tsum : f32
      %alpha_v = vector.splat %alpha : vector<8xf32>''')
@@ -558,9 +578,9 @@
 -    scf.yield %m_new, %l_new, ''' + ", ".join(f"%on{d}" for d in range(NF)) + " : f32, f32, " + ", ".join(["vector<8xf32>"] * NF) + '''
 +    scf.yield %m_new, %l_new, ''' + ", ".join(f"%on{d}" for d in range(NFO)) + " : f32, f32, " + ", ".join(["vector<8xf32>"] * NFO) + '''
    }
-   // O^T / l (lane-uniform), gate, and store through a transposed strided view:
+ @@MINE@@  // O^T / l (lane-uniform), gate, and store through a transposed strided view:
    // element (dim row, token column) -> out[first_token + col, head*128 + row].
-@@ -322,34 +308,37 @@
+@@ -485,22 +476,23 @@
    %out_layout = encoding.layout.strided [%c1, %c4096] : encoding<layout>
    %out_first_a = index.mul %first_token, %c4096 : index
    %cdim = index.constant {D} : index
@@ -584,19 +604,20 @@
      A(f'''  %ou{d} = vector.mulf %o{d}, %inv_v : vector<8xf32>{gate_txt}
 -  vector.fragment.store<result> %of{d}, %out_view[{r}, %c0] shape [%c16, %c16] : vector<8xf32>, view<{D}x16xf32, %out_layout>''')
 +  vector.fragment.store<result> %of{d}, %out_view[{r}, %c0] shape [%c16, %c16] : vector<8xf32>, view<{DO}x16xf32, %out_layout>''')
- A("  }\n  kernel.return\n}\n")
+ A("  }\n" * (2 if TS > 1 else 1) + "  kernel.return\n}\n")
 -text = "\n".join(U).replace("@@STAGING_SLOTS@@", staging_slots(), 1)
 +text = "\n".join(U)
- # constants used above
- consts = "".join(f"  %d{c} = index.constant {c * 16} : index\n" for c in range(NF))
- consts += "".join(f"  %d{d * 16 if d else 0}r = index.constant {d * 16} : index\n" for d in range(NF))
+ for key, value in {"@@LAUNCH@@": OLD_LAUNCH if TS == 1 else NEW_LAUNCH, "@@HEAD@@": OLD_HEAD if TS == 1 else NEW_HEAD,
+                    "@@TRUE_CONST@@": "  %true_const = scalar.constant true : i1\n" if TS == 1 else "",
+                    "@@MINE@@": "" if TS == 1 else "  scf.if %mine {\n"}.items():
+@@ -513,12 +505,14 @@
  consts += "".join(f"  %d{i}i = index.constant {i} : index\n" for i in range(8))
  consts += "".join(f"  %kb{kb}_row = index.constant {kb * 16} : index\n  %kbo{kb} = scalar.constant {kb * 16} : i32\n" for kb in range(KB))
  text = text.replace("  %tile_count = index.div %tokens, %c16 : index\n", consts + "  %tile_count = index.div %tokens, %c16 : index\n", 1)
 -for key, value in {"{KT_LESS}": KT - 1, "{KT}": KT, "{KBYTES}": KT * (D + 8) * 2, "{VTBYTES}": D * (KT + 8) * 2,
--                   "{DP8}": D + 8, "{D}": D, "{NF}": NF, "{D - DPT}": D - DPT, "{D - 1}": D - 1, "{QH * D}": QH * D, "{SCALE}": repr(D ** -0.5), "{VTC}": KT + 8, "{P}": P, "{KVH}": KVH, "{LANES}": LANES, "{G}": G, "{TPK}": TPK, "{DPT}": DPT,
+-                   "{DP8}": D + 8, "{D}": D, "{NF}": NF, "{D - DPT}": D - DPT, "{D - 1}": D - 1, "{QH * D}": QH * D, "{SCALE}": repr(D ** -0.5), "{VTC}": KT + 8, "{P}": P, "{KVH}": KVH, "{LANES}": LANES, "{G}": G, "{W - 1}": W - 1, "{TS}": TS, "{TS - 1}": TS - 1, "{TPK}": TPK, "{DPT}": DPT,
 +for key, value in {"{KT_LESS}": KT - 1, "{KT}": KT, "{KBYTES}": KT * (D + 8) * 2, "{VTBYTES}": DO * (KT + 8) * 2, "{DO - 1}": DO - 1,
-+                   "{DP8}": D + 8, "{DO}": DO, "{PASSES}": PASSES, "{PASSES - 1}": PASSES - 1, "{D}": D, "{NF}": NF, "{D - DPT}": D - DPT, "{D - 1}": D - 1, "{QH * D}": QH * D, "{SCALE}": os.environ.get("FLASH2_SCALE") or repr(D ** -0.5), "{VTC}": KT + 8, "{P}": P, "{KVH}": KVH, "{LANES}": LANES, "{G}": G, "{TPK}": TPK, "{DPT}": DPT,
++                   "{DP8}": D + 8, "{DO}": DO, "{PASSES}": PASSES, "{PASSES - 1}": PASSES - 1, "{D}": D, "{NF}": NF, "{D - DPT}": D - DPT, "{D - 1}": D - 1, "{QH * D}": QH * D, "{SCALE}": os.environ.get("FLASH2_SCALE") or repr(D ** -0.5), "{VTC}": KT + 8, "{P}": P, "{KVH}": KVH, "{LANES}": LANES, "{G}": G, "{W - 1}": W - 1, "{TS}": TS, "{TS - 1}": TS - 1, "{TPK}": TPK, "{DPT}": DPT,
                     '{CFG["layers"]}': CFG["layers"], '{CFG["window"]}': CFG["window"], '{CFG["window"] - 1}': CFG["window"] - 1,
                     "{G - 1}": G - 1, "{QH}": QH, "{QH - 1}": QH - 1, "{QH * 128}": QH * 128, "{KVH - 1}": KVH - 1, "{LANES - 1}": LANES - 1, "{128 - DPT}": 128 - DPT,
                     '{"%sinks" if CFG["sinks"] else "%gate"}': "%sinks" if CFG["sinks"] else "%gate"}.items():
