@@ -4856,7 +4856,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %pml = buffer.alloca<global> align(256) %pml_size : buffer
   %gemm = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c64"} : index
   %single = index.cmp eq, %t, %c1 : index
-  %big = index.cmp uge, %t, %c128 : index
+  %big = index.cmp uge, %t, {"%c_never" if os.environ.get("GEMM_ONE") else "%c128"} : index
   %scale_entry = index.constant 8 : offset
   %scale_size = index.scale %t, %scale_entry : index, offset -> offset
   %s_h = buffer.alloca<global> align(256) %scale_size : buffer
@@ -4873,7 +4873,9 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %t_rem256 = index.rem %t, %c256_rows : index
   %t_full256 = index.cmp eq, %t_rem256, %c0 : index
   %t_ge256 = index.cmp uge, %t, %c256_rows : index
-  %huge = scalar.andi %t_full256, %t_ge256 : i1
+  %t_never = index.cmp ult, %t, %c0 : index
+  %huge = scalar.andi %t_full256, {"%t_never" if os.environ.get("GEMM_ONE") else "%t_ge256"} : i1
+
   %h16 = buffer.alloca<global> align(256) %h16_size : buffer
   %o16 = buffer.alloca<global> align(256) %o16_size : buffer
   %f16 = buffer.alloca<global> align(256) %f16_size : buffer

@@ -937,6 +937,36 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   check.return
 }}
 """)
+COPY_ROWS = """
+// Test helper: dst[r] = src[skip + r] for r < rows (F32 rows of `width`).
+kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%rows_arg: index, %width_arg: index, %skip_arg: index, %src_rows_arg: index, %src: buffer, %dst: buffer) {
+  %rows = index.assume %rows_arg [range(%rows_arg, 1, 8192)] : index
+  %width = index.assume %width_arg [range(%width_arg, 1, 1048576)] : index
+  %src_rows = index.assume %src_rows_arg [range(%src_rows_arg, 1, 8192)] : index
+  %row_id = kernel.workgroup.id<x> : index
+  %row = index.assume %row_id [lt(%row_id, %rows)] : index
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %c256 = index.constant 256 : index
+  %src_view = buffer.view %src[%zero] : buffer -> view<[%src_rows]x[%width]xf32>
+  %dst_view = buffer.view %dst[%zero] : buffer -> view<[%rows]x[%width]xf32>
+  %skip = index.assume %skip_arg [range(%skip_arg, 0, 8191)] : index
+  %src_row_value = index.add %skip, %row : index
+  %src_row = index.assume %src_row_value [range(%src_row_value, 0, 8191), lt(%src_row_value, %src_rows)] : index
+  scf.for %c = [%lane to %width step %c256] {
+    %col = index.assume %c [lt(%c, %width)] : index
+    %v = view.load %src_view[%src_row, %col] : view<[%src_rows]x[%width]xf32> -> f32
+    view.store %v, %dst_view[%row, %col] : f32, view<[%rows]x[%width]xf32>
+  }
+  kernel.return
+}
+"""
+
+cases.append(COPY_ROWS)
 # Prefill GEMMs (gen_gemm.py): y = (x16 . W^T) * inv per row, x16 the f16 row-scaled activations and inv the
 # row's inverse scale (g_row_scale_f16's contract); swiglu: silu(gate) * up. One tensor per (format, K) the
 # model's prefill uses: the 64-, 128- (_m128) and 256-row (_m256) kernels, two row tiles each.
@@ -994,6 +1024,37 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   kernel.launch @{kern}[%rows, %n](%rows, %k, %n, %x, %s, {wargs}, %y) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {wtys}, tensor<{rows}x{n_use}xf32>)
   check.expect.close actual(%y) expected(%e) atol({tol:.3e}) rtol(1.0e-2) nan(different) : tensor<{rows}x{n_use}xf32>
   check.return
+}}
+""")
+        # Batch invariance: the same 128 rows (row scales included) give bit-identical outputs through the 64-row kernel
+        # (an epoch of 128 rows), the 128-row one (256 rows, at row 128) and the 256-row one (512 rows, at row 256):
+        # the kernel an epoch takes is chosen by its size, so a request's rows must not depend on it.
+        if big:
+            tag = f"gm_inv_{fmt}_{'sw' if swiglu else 'st'}"
+            x0 = rng.standard_normal((128, K)).astype(np.float16); s0 = np.stack([np.ones(128, np.float32), rng.uniform(0.25, 2.0, 128).astype(np.float32)], 1)
+            wdecl = f'  %w = check.file.read.npy path("{tag}_w.npy") : {ty(Wr)}\n'; wargs, wtys = "%w", ty(Wr); save(tag + "_w", Wr)
+            if swiglu:
+                save(tag + "_u", Ur); wdecl += f'  %u = check.file.read.npy path("{tag}_u.npy") : {ty(Ur)}\n'; wargs += ", %u"; wtys += ", " + ty(Ur)
+            text = ""
+            for rows, kern in ((128, base_k), (256, base_k + "_m128")) + (() if fmt in GEMM_HELPER else ((512, base_k + "_m256"),)):
+                at = rows - 128   # X's rows: the epoch's last 128, the others random
+                xr = rng.standard_normal((rows, K)).astype(np.float16); sr = np.stack([np.ones(rows, np.float32), rng.uniform(0.25, 2.0, rows).astype(np.float32)], 1)
+                xr[at:], sr[at:] = x0, s0
+                save(f"{tag}_x{rows}", xr); save(f"{tag}_s{rows}", sr)
+                text += f"""  %rows{rows} = check.literal value({rows}) : index
+  %x{rows} = check.file.read.npy path("{tag}_x{rows}.npy") : tensor<{rows}x{K}xf16>
+  %s{rows} = check.file.read.npy path("{tag}_s{rows}.npy") : tensor<{rows}x2xf32>
+  %y{rows} = check.generate.fill value(0.0) : tensor<{rows}x{n_use}xf32>
+  kernel.launch @{kern}[%rows{rows}, %n](%rows{rows}, %k, %n, %x{rows}, %s{rows}, {wargs}, %y{rows}) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {wtys}, tensor<{rows}x{n_use}xf32>)
+  %skip{rows} = check.literal value({at}) : index
+  %c{rows} = check.generate.fill value(0.0) : tensor<128x{n_use}xf32>
+  kernel.launch @test_copy_rows[%n128](%n128, %n, %skip{rows}, %rows{rows}, %y{rows}, %c{rows}) : [index](index, index, index, index, tensor<{rows}x{n_use}xf32>, tensor<128x{n_use}xf32>)
+""" + ("" if rows == 128 else f"  check.expect.close actual(%c{rows}) expected(%c128) atol(0.0) rtol(0.0) nan(different) : tensor<128x{n_use}xf32>\n")
+            cases.append(f"""check.case public @{tag} {{
+  %k = check.literal value({K}) : index
+  %n = check.literal value({n_use}) : index
+  %n128 = check.literal value(128) : index
+{wdecl}{text}  check.return
 }}
 """)
 # 3c. a verify span at long context: ATTN_MT tokens of one row at consecutive positions past ATTN_MT_FROM take the
@@ -1498,34 +1559,6 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
     # flash2 over the split-K result of every token, as the listed fallback leaves the tokens flash2 does not take;
     # loom-test cannot dispatch the listed kernels from a tensor count). X's positions start at 5 mod 16, and at the
     # deep boundary when there is one.
-    COPY_ROWS = """
-// Test helper: dst[r] = src[skip + r] for r < rows (F32 rows of `width`).
-kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
-  %c1 = index.constant 1 : index
-  %c256 = index.constant 256 : index
-  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
-} launch(%rows_arg: index, %width_arg: index, %skip_arg: index, %src_rows_arg: index, %src: buffer, %dst: buffer) {
-  %rows = index.assume %rows_arg [range(%rows_arg, 1, 8192)] : index
-  %width = index.assume %width_arg [range(%width_arg, 1, 1048576)] : index
-  %src_rows = index.assume %src_rows_arg [range(%src_rows_arg, 1, 8192)] : index
-  %row_id = kernel.workgroup.id<x> : index
-  %row = index.assume %row_id [lt(%row_id, %rows)] : index
-  %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %c256 = index.constant 256 : index
-  %src_view = buffer.view %src[%zero] : buffer -> view<[%src_rows]x[%width]xf32>
-  %dst_view = buffer.view %dst[%zero] : buffer -> view<[%rows]x[%width]xf32>
-  %skip = index.assume %skip_arg [range(%skip_arg, 0, 8191)] : index
-  %src_row_value = index.add %skip, %row : index
-  %src_row = index.assume %src_row_value [range(%src_row_value, 0, 8191), lt(%src_row_value, %src_rows)] : index
-  scf.for %c = [%lane to %width step %c256] {
-    %col = index.assume %c [lt(%c, %width)] : index
-    %v = view.load %src_view[%src_row, %col] : view<[%src_rows]x[%width]xf32> -> f32
-    view.store %v, %dst_view[%row, %col] : f32, view<[%rows]x[%width]xf32>
-  }
-  kernel.return
-}
-"""
 
     def invariance_case(sliding, start=5):   # start: X's first position mod 16, or 'zero' (a prompt's own start)
         n, QD = 100, QH * D
@@ -1626,7 +1659,6 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
 {text}  check.return
 }}
 """
-    cases.append(COPY_ROWS)
     cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
     cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
 
@@ -1835,6 +1867,61 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
   check.return
 }}
 """)
+        # Batch invariance: the same 70 tokens as rows 45.. of a 200-token epoch (other tokens around them: other
+        # experts' buckets, other tiles, a larger %max_tiles) give a bit-identical routed output.
+        ha = clear_tokens(70); hb = clear_tokens(130)
+        hbig = np.concatenate([hb[:45], ha, hb[45:]]); tb = len(hbig)
+        for nm, hx_ in (("a", ha), ("b", hbig)):
+            save(f"{tag}_i{nm}_h", hx_.astype(np.float32))
+        def inv_launch(t, p):
+            ta = t * KU; mt = ta // 64 + E_; mr = mt * 64
+            return f"""  %t{p} = check.literal value({t}) : index
+  %ta{p} = check.literal value({ta}) : index
+  %max_tiles{p} = check.literal value({mt}) : index
+  %max_rows{p} = check.literal value({mr}) : index
+  %h{p} = check.file.read.npy path("{tag}_i{p}_h.npy") : tensor<{t}x{H}xf32>
+  %info{p} = check.file.read.npy path("{tag}_i{p}_info.npy") : tensor<{t}x4xi32>
+  %ids{p} = check.generate.fill value(0) : tensor<{t}x{KU}xi32>
+  %wts{p} = check.generate.fill value(0.0) : tensor<{t}x{KU}xf32>
+  %y{p} = check.generate.fill value(0.0) : tensor<{t}x{H}xf32>
+  %s_h{p} = check.generate.fill value(0.0) : tensor<{t}x2xf32>
+  %h16{p} = check.generate.fill value(0.0) : tensor<{t}x{H}xf16>
+  %tile_info{p} = check.generate.fill value(0) : tensor<{mt}x2xi32>
+  %rowmap{p} = check.generate.fill value(0) : tensor<{mr}xi32>
+  %pos{p} = check.generate.fill value(0) : tensor<{ta}xi32>
+  %act_sorted{p} = check.generate.fill value(0.0) : tensor<{mr}x{FE}xf32>
+  %s_rows{p} = check.generate.fill value(0.0) : tensor<{mr}x2xf32>
+  %act16{p} = check.generate.fill value(0.0) : tensor<{mr}x{FE}xf16>
+  %ys_sorted{p} = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
+  kernel.launch @g_row_scale_f16[%t{p}](%t{p}, %nH, %h{p}, %s_h{p}, %h16{p}) : [index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x2xf32>, tensor<{t}x{H}xf16>)
+  kernel.launch @g_moe_route_tr_live[%t{p}](%t{p}, %h{p}, %wr, %b, %ids{p}, %wts{p}, %info{p}) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
+  kernel.launch @g_moe_bucket[%t{p}](%t{p}, %max_tiles{p}, %info{p}, %ids{p}, %tile_info{p}, %rowmap{p}, %pos{p}) : [index](index, index, tensor<{t}x4xi32>, tensor<{t}x{KU}xi32>, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{ta}xi32>)
+  kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows{p}, %nFE](%max_rows{p}, %nH, %nFE, %t{p}, %tile_info{p}, %rowmap{p}, %h16{p}, %s_h{p}, %wg, %wu{GUB}, %act_sorted{p}) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {ut}{GUBT}, tensor<{mr}x{FE}xf32>)
+  kernel.launch @g_row_scale_f16_tiles[%max_rows{p}](%max_rows{p}, %nFE, %act_sorted{p}, %s_rows{p}, %act16{p}, %tile_info{p}) : [index](index, index, tensor<{mr}x{FE}xf32>, tensor<{mr}x2xf32>, tensor<{mr}x{FE}xf16>, tensor<{mt}x2xi32>)
+  kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows{p}, %nH](%max_rows{p}, %nFE, %nH, %max_rows{p}, %tile_info{p}, %rowmap{p}, %act16{p}, %s_rows{p}, %wd{DNB}, %ys_sorted{p}) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE}xf16>, tensor<{mr}x2xf32>, {dt_}{DNBT}, tensor<{mr}x{H}xf32>)
+  kernel.launch @g_moe_combine_sorted[%t{p}](%t{p}, %max_rows{p}, %ys_sorted{p}, %pos{p}, %wts{p}, %y{p}) : [index](index, index, tensor<{mr}x{H}xf32>, tensor<{ta}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x{H}xf32>)
+"""
+        for nm, t_ in (("a", 70), ("b", tb)):
+            save(f"{tag}_i{nm}_info", np.tile(np.array([0, 0, 1, 0], np.int32), (t_, 1)))
+        if not SHG and not DSC and not EB:   # (the shared-expert gate, down scales and biases are not part of this chain)
+            cases.append(f"""check.case public @moe_prefill_batch_invariant_{li} {{
+  %nFE = check.literal value({FE}) : index
+  %nH = check.literal value({H}) : index
+  %wr = check.file.read.npy path("{tag}_wr.npy") : {wr_t}
+  %b = check.file.read.npy path("{tag}_b.npy") : tensor<{E_}xf32>
+  %wg = check.file.read.npy path("{tag}_wg.npy") : {gt}
+  %wu = check.file.read.npy path("{tag}_wu.npy") : {ut}
+  %wd = check.file.read.npy path("{tag}_wd.npy") : {dt_}
+{inv_launch(70, "a")}{inv_launch(tb, "b")}  %n70 = check.literal value(70) : index
+  %wid = check.literal value({H}) : index
+  %skip = check.literal value(45) : index
+  %xb = check.generate.fill value(0.0) : tensor<70x{H}xf32>
+  kernel.launch @test_copy_rows[%n70](%n70, %wid, %skip, %tb, %yb, %xb) : [index](index, index, index, index, tensor<{tb}x{H}xf32>, tensor<70x{H}xf32>)
+  check.expect.close actual(%xb) expected(%ya) atol(0.0) rtol(0.0) nan(different) : tensor<70x{H}xf32>
+  check.return
+}}
+""")
+
     # g_row_scale_f16_tiles: g_row_scale_f16 over bucketed expert rows; rows of an unused tile (expert -1) untouched
     rt_x = (rng.standard_normal((128, FE)) * np.where(np.arange(128) % 3 == 0, 1e3, 1e-2)[:, None]).astype(np.float32)
     rt_e = np.clip(np.frexp(np.abs(rt_x).max(1))[1] - 1 - 13, 0, 100)
