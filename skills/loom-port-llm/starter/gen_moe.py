@@ -830,7 +830,7 @@ kernel.def export("g_moe_bucket{sfx(tile)}") @g_moe_bucket{sfx(tile)}(%tokens: i
   %c256 = index.constant 256 : index
   %c0_i32 = scalar.constant 0 : i32
   %c1_i32 = scalar.constant 1 : i32
-  %cshift = scalar.constant {tile.bit_length() - 1} : i32
+  %cshift = scalar.constant 6 : i32
   %cTm1 = scalar.constant {tile - 1} : i32
   %minus_one = scalar.constant -1 : i32
   %cEm1 = scalar.constant {E - 1} : i32
