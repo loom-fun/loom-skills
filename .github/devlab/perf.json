@@ -1,5 +1,5 @@
 {
- "_comment": "Temporary: main vs this branch on the same runner (decode, 2k, 32k, prefill, 4 streams).",
+ "_comment": "Temporary: main vs this branch on the same runner; ctl = this branch with both paths off (main's programs: the noise floor).",
  "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
  "memory_bytes": 64000000000,
  "kit": null,
@@ -18,17 +18,25 @@
      "build": {}
     },
     {
-     "name": "card"
+     "name": "ctl",
+     "build": {
+      "ATTN_MT": "1",
+      "DFL_SPLITS": "0"
+     }
     }
    ],
    "steps": [
-    "perf:main:1:long",
-    "perf:pr:1:long",
+    "perf:main:2",
+    "perf:pr:2",
+    "perf:ctl:2",
     "perf:main:1:long",
     "perf:pr:1:long",
     "c4:main",
     "c4:pr",
-    "perf:card:1:long"
+    "c4:ctl",
+    "c4:main",
+    "c4:pr",
+    "c4:ctl"
    ]
   },
   {
@@ -45,15 +53,27 @@
     {
      "name": "pr",
      "build": {}
+    },
+    {
+     "name": "ctl",
+     "build": {
+      "ATTN_MT": "1",
+      "DFL_SPLITS": "0"
+     }
     }
    ],
    "steps": [
-    "perf:main:1:long",
-    "perf:pr:1:long",
+    "perf:main:2",
+    "perf:pr:2",
+    "perf:ctl:2",
     "perf:main:1:long",
     "perf:pr:1:long",
     "c4:main",
-    "c4:pr"
+    "c4:pr",
+    "c4:ctl",
+    "c4:main",
+    "c4:pr",
+    "c4:ctl"
    ]
   },
   {
@@ -69,15 +89,27 @@
     {
      "name": "pr",
      "build": {}
+    },
+    {
+     "name": "ctl",
+     "build": {
+      "ATTN_MT": "1",
+      "DFL_SPLITS": "0"
+     }
     }
    ],
    "steps": [
-    "perf:main:1:long",
-    "perf:pr:1:long",
+    "perf:main:2",
+    "perf:pr:2",
+    "perf:ctl:2",
     "perf:main:1:long",
     "perf:pr:1:long",
     "c4:main",
-    "c4:pr"
+    "c4:pr",
+    "c4:ctl",
+    "c4:main",
+    "c4:pr",
+    "c4:ctl"
    ]
   }
  ]

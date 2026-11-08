@@ -12,36 +12,6 @@
     "ktest",
     "gates:full"
    ]
-  },
-  {
-   "name": "q4i-pr136",
-   "build": {},
-   "ref": "d911cd1b215cd7ae495af06e2e6a202850374f37",
-   "steps": [
-    "gates:full"
-   ]
-  },
-  {
-   "name": "q8-pr",
-   "card": "loom-fun/unsloth-Qwen3-8B-loom",
-   "memory_bytes": 30000000000,
-   "llamacpp": "b1368",
-   "build": {},
-   "steps": [
-    "ktest",
-    "gates:quick"
-   ]
-  },
-  {
-   "name": "gptoss-pr",
-   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
-   "memory_bytes": 28000000000,
-   "kit": "gpt-oss",
-   "llamacpp": "b1370",
-   "build": {},
-   "steps": [
-    "ktest"
-   ]
   }
  ]
 }
