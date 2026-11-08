@@ -94,7 +94,7 @@ if layer_heads:
     cfg["layer_heads"] = layer_heads[:L]
     print(f"query heads per layer: {sorted(set(layer_heads))}")
 if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3",
-                "qwen3moe", "qwen35moe", "gpt-oss", "spark2_5", "laguna"):
+                "qwen3moe", "qwen35moe", "gpt-oss", "spark2_5", "mellum", "laguna"):
     print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
           "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
           "before trusting a golden FAIL or PASS")
@@ -104,7 +104,7 @@ for _g in sorted(g for g in {h // max(cfg["kv_heads"], 1) for h in (layer_heads 
 # Sliding-window layers from the GGUF's per-layer pattern (gemma/flint/muse-glimmer style).
 # {arch: (n, dense_first)}: the period llama.cpp's llama_hparams::set_swa_pattern(n, dense_first) hard-codes for the
 # architecture when the GGUF has none; full attention on layers i % n == n - 1 (dense_first: i % n == 0).
-SWA_PERIOD = {"gemma3": (6, False), "gpt-oss": (2, False), "laguna": (4, True)}
+SWA_PERIOD = {"gemma3": (6, False), "gpt-oss": (2, False), "mellum": (4, False), "laguna": (4, True)}
 pat = A("attention.sliding_window_pattern")
 if cfg["sliding_window"] and isinstance(pat, list) and len(pat) in (L, BLOCKS):
     pat = pat[:L]
@@ -144,7 +144,11 @@ if A("rope.scaling.type") == "yarn" and (A("rope.scaling.factor") or 1.0) > 1.0:
     cfg["rope_scaling"] = {"type": "yarn", "factor": _f, "orig_ctx": A("rope.scaling.original_context_length"),
                            "beta_fast": float(A("rope.scaling.yarn_beta_fast", 32.0) or 32.0),
                            "beta_slow": float(A("rope.scaling.yarn_beta_slow", 1.0) or 1.0), "attn_factor": _af}
-    print("rope scaling:", cfg["rope_scaling"])
+    # architectures whose sliding layers rotate without it (llama.cpp src/models/<arch>.cpp get_rope_params: ext_factor 0
+    # and attn_factor 1 there): gen_llm.py's g_qk_rope_store_swa
+    if arch in ("mellum",) and cfg["sliding_layers"]:
+        cfg["rope_scaling_swa"] = "none"
+    print("rope scaling:", cfg["rope_scaling"], "(global layers only)" if cfg.get("rope_scaling_swa") else "")
 # The FFN's pre-norm stored as post_attention_norm (gpt-oss: attn_post_norm normalizes ffn_inp; no ffn_norm and no
 # Gemma-style post_ffw_norm): it is the FFN norm, not a post-attention norm.
 if ("blk.0.ffn_norm.weight" not in tensors and "blk.0.post_attention_norm.weight" in tensors
@@ -282,7 +286,7 @@ cfg["attn_sinks"] = "blk.0.attn_sinks.weight" in tensors
 # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
 MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
                 "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False},
-                "gemma4": {"gating": 1, "norm_weights": True},
+                "gemma4": {"gating": 1, "norm_weights": True}, "mellum": {"gating": 1, "norm_weights": True},
                 # gpt-oss: SOFTMAX_WEIGHT (top-k of the biased logits, softmax over the k), LLM_FFN_SWIGLU_OAI_MOE
                 "gpt-oss": {"gating": 3, "norm_weights": False, "act": "swiglu_oai", "swiglu_alpha": 1.702, "swiglu_limit": 7.0}}
 if A("expert_count"):

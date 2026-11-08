@@ -1024,6 +1024,84 @@ kernel.def export("g_moe_wscale") @g_moe_wscale(%tokens: index) {{
 """
 
 
+def _skip_empty_waves(text):
+    """A wave whose 16 rows of the row tile hold no assignment skips its fragment loads and MMAs (it still stages
+    and meets every barrier). bucket fills a tile's rows from the top, so a tile of r rows keeps ceil(r/16) of its 4
+    row waves busy. With many experts and a short prompt most tiles are partly empty (256 experts, top-8, 1k
+    tokens: 32 rows per expert on average), and the grouped GEMMs then did twice the MMA work they needed."""
+    m = re.search(r"\n    kernel\.barrier<workgroup> scope\(workgroup\) ordering\(acq_rel\)\n(    %fc0 = .*?)"
+                  r"\n    kernel\.barrier<workgroup> scope\(workgroup\) ordering\(acq_rel\)\n    scf\.yield ([^\n]*) : ([^\n]*)\n  \}\n",
+                  text, re.S)
+    body, outs, types = m.group(1), m.group(2), m.group(3)
+    accs = re.search(r"scf\.for %step = \[%c0 to %k_steps step %c1\]\((.*?)\) -> ", text).group(1)
+    olds = ", ".join(a.split(" = ")[0] for a in accs.split(", "))
+    news = ", ".join(f"%live_{o[1:]}" for o in outs.split(", "))
+    live = """  %wave_rows32 = view.load %ti_view[%row_group, 1] : view<[%row_tile_count]x2xi32> -> i32
+  %wave_rows_b = scalar.assume %wave_rows32 [range(%wave_rows32, 0, 64)] : i32
+  %wave_rows = index.cast %wave_rows_b : i32 to index
+  %wave_live = index.cmp ult, %wave_row, %wave_rows : index
+"""
+    bar = "    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)\n"
+    new = (f"\n{bar}    {news} = scf.if %wave_live -> ({types}) {{\n" + "\n".join("  " + ln for ln in body.split("\n")) +
+           f"\n      scf.yield {outs} : {types}\n    }} else {{\n      scf.yield {olds} : {types}\n    }}\n"
+           f"{bar}    scf.yield {news} : {types}\n  }}\n")
+    text = text[:m.start()] + new + text[m.end():]
+    anchor = "  %zero8 = vector.constant 0.0 : vector<8xf32>\n"
+    assert text.count(anchor) == 1
+    return text.replace(anchor, live + anchor)
+
+
+def _prefetch_stages(text):
+    """Software-pipeline the 64x64 GEMM's K loop: the global loads of step s+1 (the A row, the weight blocks and
+    the address math they need) are issued after step s's staging barrier and carried into the next iteration, so
+    their latency hides behind the MMAs (gen_gemm.gemm_big does the same). At a short prompt a 256-expert layer
+    gives each expert about one row tile, so the grouped GEMMs stream every expert's weights once per layer and
+    were bound by the latency of those loads."""
+    lines = text.split("\n")
+    head = next(i for i, ln in enumerate(lines) if " = scf.for %step = [%c0 to %k_steps step %c1](" in ln)
+    bar = next(i for i in range(head, len(lines)) if lines[i].strip().startswith("kernel.barrier"))
+    body = lines[head + 1:bar]
+    defs = lambda ln: re.findall(r"%\w+", ln.split(" = ", 1)[0]) if " = " in ln else []
+    is_load = lambda ln: ".load " in ln   # helper-decoded formats (func.call @g_<fmt>_values) keep their weight loads in place
+    need, chain = set(), []
+    for ln in reversed(body):   # backward slice of the loads: the lines they (transitively) depend on
+        if is_load(ln) or need.intersection(defs(ln)):
+            chain.append(ln)
+            need.update(re.findall(r"%\w+", ln.split(" = ", 1)[1]))
+    chain.reverse()
+    loads = [(n, re.search(r"-> \(?([^()]+?)\)?$", ln.strip()).group(1)) for ln in chain if is_load(ln) for n in defs(ln)]
+    assert all(len(defs(ln)) == 1 for ln in chain if is_load(ln)), "one result per load"
+    mine = sorted({n for ln in chain for n in defs(ln)}, key=len, reverse=True)
+
+    def copy(sfx, step):
+        out = []
+        for ln in chain:
+            for n in mine:
+                ln = re.sub(re.escape(n) + r"\b", n + sfx, ln)
+            out.append(re.sub(r"%step\b", step, ln))
+        return out
+    kept = []
+    for ln in body:
+        if is_load(ln):
+            continue
+        for n, _ in loads:
+            ln = re.sub(re.escape(n) + r"\b", "%cr_" + n[1:], ln)
+        kept.append(ln)
+    m = re.match(r"(\s*)(.*) = scf\.for %step = \[%c0 to %k_steps step %c1\]\((.*)\) -> \((.*)\) \{$", lines[head])
+    ind, res, iters, types = m.groups()
+    hdr = (f"{ind}{res}, " + ", ".join(f"%pf_unused{i}" for i in range(len(loads))) + " = scf.for %step = [%c0 to %k_steps step %c1]("
+           + iters + ", " + ", ".join(f"%cr_{n[1:]} = {n}_p : {t}" for n, t in loads) + ") -> (" + types + ", "
+           + ", ".join(t for _, t in loads) + ") {")
+    pre = ["  %pf_last = index.sub %k_steps, %c1 : index"] + ["  " + ln.strip() for ln in copy("_p", "%c0")]
+    nxt = ["    %pf_step1 = index.add %step, %c1 : index", "    %pf_min = index.min %pf_step1, %pf_last : index",
+           "    %pf_next = index.assume %pf_min [lt(%pf_min, %k_steps)] : index"] + \
+          ["    " + ln.strip() for ln in copy("_n", "%pf_next")]
+    end = next(i for i in range(bar + 1, len(lines)) if lines[i].startswith("    scf.yield ") and lines[i + 1] == "  }")
+    y = re.match(r"    scf\.yield (.*) : (.*)$", lines[end])
+    yld = f"    scf.yield {y.group(1)}, " + ", ".join(f"{n}_n" for n, _ in loads) + f" : {y.group(2)}, " + ", ".join(t for _, t in loads)
+    return "\n".join(lines[:head] + pre + [hdr] + kept + [lines[bar]] + nxt + lines[bar + 1:end] + [yld] + lines[end + 1:])
+
+
 def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=None):
     """64x64-tile WMMA GEMM over the bucketed rows of one expert per row tile (rows = max_tiles*64).
     mode 'swiglu' (gate/up): A rows gathered from x16[token = rowmap/KU]; 'store' (down): A = sorted rows.
@@ -1109,6 +1187,10 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
         rep("  %bounded_x_row = index.assume %x_row [lt(%x_row, %rows)] : index", "  %bounded_x_row = index.assume %x_row [lt(%x_row, %xrows)] : index")
         rep("    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index", "    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %xrows)] : index")
     rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
+    if os.environ.get("MOE_SKIP_EMPTY", "1") not in ("", "0"):
+        text = _skip_empty_waves(text)
+    if os.environ.get("MOE_PREFETCH", "1") not in ("", "0"):
+        text = _prefetch_stages(text)
     if mode in os.environ.get("MOE_N_FASTEST", "swiglu,store").split(","):
         # output-column tiles fastest, on by default (MOE_N_FASTEST=0 off): consecutive workgroups share one expert row
         # tile, so A and that expert's weights stay in L2. Prefill +74 % at 1k on Qwen3.6-35B-A3B (lfm2moe: +24-30 %);
@@ -1122,20 +1204,26 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
 
 
 def combine_sorted(H, KU, acc=False):
+    """y[t] (+)= sum_k w[t, k] ys[pos[t, k]], one workgroup per token looping over 256-channel blocks, so a token's
+    KU expert rows are read whole and at once (with a workgroup per (token, block) and tokens fastest, each row was
+    fetched in H/256 pieces far apart: Qwen3.5-35B-A3B, 1k tokens, 10 % of the prefill). The row loads are
+    unconditional (a dead assignment reads row 0 and selects 0) so they are in flight together."""
     return f"""
 kernel.def export("g_moe_combine_sorted") @g_moe_combine_sorted(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
-  %cb = index.constant {(H + 255) // 256} : index
-  kernel.launch.config workgroups(%tokens, %cb, %c1) workgroup_size(%c256, %c1, %c1) : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
 }} launch(%tokens_arg: index, %rows_arg: index, %ys: buffer, %pos: buffer, %wts: buffer, %y: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %rows = index.assume %rows_arg [range(%rows_arg, 1, 1048576)] : index
   %token_id = kernel.workgroup.id<x> : index
   %token = index.assume %token_id [lt(%token_id, %tokens)] : index
   %thread_id = kernel.workitem.id<x> : index
-  %blk_id = kernel.workgroup.id<y> : index
+  %c0b = index.constant 0 : index
+  %c1b = index.constant 1 : index
+  %cb = index.constant {(H + 255) // 256} : index
   %c256 = index.constant 256 : index
+  scf.for %blk_id = [%c0b to %cb step %c1b] {{
   %boff = index.mul %blk_id, %c256 : index
   %c_raw = index.add %thread_id, %boff : index
   %cH = index.constant {H} : index
@@ -1152,17 +1240,15 @@ kernel.def export("g_moe_combine_sorted") @g_moe_combine_sorted(%tokens: index) 
 """ + (f"    %y_old = view.load %y_view[%token, %ch] : view<[%tokens]x{H}xf32> -> f32\n" if acc else "") + "\n".join(f"""    %w{k} = view.load %w_view[%token, {k}] : view<[%tokens]x{KU}xf32> -> f32
     %p{k} = view.load %pos_view[%token, {k}] : view<[%tokens]x{KU}xi32> -> i32
     %ok{k} = scalar.cmpi sge, %p{k}, %c0_i32 : i32
-    %v{k} = scf.if %ok{k} -> (f32) {{
-      %pb{k} = scalar.assume %p{k} [range(%p{k}, 0, 1048575)] : i32
-      %pi{k} = index.cast %pb{k} : i32 to index
-      %pr{k} = index.assume %pi{k} [lt(%pi{k}, %rows)] : index
-      %vv{k} = view.load %ys_view[%pr{k}, %ch] : view<[%rows]x{H}xf32> -> f32
-      scf.yield %vv{k} : f32
-    }} else {{
-      scf.yield %zero_f : f32
-    }}
+    %pc{k} = scalar.maxsi %p{k}, %c0_i32 : i32
+    %pb{k} = scalar.assume %pc{k} [range(%pc{k}, 0, 1048575)] : i32
+    %pi{k} = index.cast %pb{k} : i32 to index
+    %pr{k} = index.assume %pi{k} [lt(%pi{k}, %rows)] : index
+    %vv{k} = view.load %ys_view[%pr{k}, %ch] : view<[%rows]x{H}xf32> -> f32
+    %v{k} = scf.select %ok{k}, %vv{k}, %zero_f : f32
     %a{k} = scalar.fmaf %w{k}, %v{k}, {("%y_old" if acc else "%zero_f") if k == 0 else f"%a{k - 1}"} : f32""" for k in range(KU)) + f"""
     view.store %a{KU - 1}, %y_view[%token, %ch] : f32, view<[%tokens]x{H}xf32>
+  }}
   }}
   kernel.return
 }}

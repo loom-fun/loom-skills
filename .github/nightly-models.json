@@ -26,9 +26,21 @@
    ]
   },
   {
+   "repo": "loom-fun/ggml-org-Muse-Glimmer-30B-loom",
+   "slug": "ggml-org-muse-glimmer-30b",
+   "memory_bytes": 48000000000,
+   "kit": "glimmer",
+   "llamacpp": "b1369",
+   "features": [
+    "vision",
+    "draft",
+    "thinking-always"
+   ]
+  },
+  {
    "repo": "loom-fun/ggml-org-Flint-loom",
    "slug": "flint",
-   "memory_bytes": 67000000000,
+   "memory_bytes": 69000000000,
    "kit": null,
    "llamacpp": "b1355",
    "features": [
@@ -51,9 +63,9 @@
   {
    "repo": "loom-fun/unsloth-Qwen3-8B-loom",
    "slug": "qwen3-8b",
-   "memory_bytes": 28000000000,
+   "memory_bytes": 29000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1368",
    "features": [
     "draft",
     "thinking-toggle"
@@ -122,7 +134,7 @@
   {
    "repo": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
    "slug": "qwen3.5-0.8b",
-   "memory_bytes": 8000000000,
+   "memory_bytes": 9000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
@@ -251,7 +263,7 @@
   {
    "repo": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
    "slug": "qwen3-4b-instruct-2507",
-   "memory_bytes": 62000000000,
+   "memory_bytes": 63000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
@@ -443,12 +455,79 @@
    ]
   },
   {
-   "repo": "loom-fun/ggml-org-Laguna-XS-2.1-loom",
-   "slug": "laguna-xs-2.1",
+   "repo": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "slug": "gemma-4-26b-a4b-it",
    "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Ornith-1.5-122B-loom",
+   "slug": "ornith-1.5-122b",
+   "memory_bytes": 106000000000,
    "kit": null,
    "llamacpp": "b1370",
    "features": [
+    "vision",
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
+   "slug": "ornith-1.5-35b-a3b",
+   "memory_bytes": 49000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "vision",
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/ggml-org-gemma-3-1b-it-loom",
+   "slug": "gemma-3-1b-it",
+   "memory_bytes": 7000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "draft"
+   ]
+  },
+  {
+   "repo": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "slug": "qwen3-coder-30b-a3b-instruct",
+   "memory_bytes": 62000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "draft"
+   ]
+  },
+  {
+   "repo": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "slug": "qwen3-0.6b",
+   "memory_bytes": 17000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/ggml-org-Qwen3-1.7B-loom",
+   "slug": "qwen3-1.7b",
+   "memory_bytes": 17000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "features": [
+    "draft",
     "thinking-toggle"
    ]
   }

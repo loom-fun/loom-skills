@@ -114,6 +114,20 @@ gev "$tmp/g_sameday.json" pass quick 2026-11-07T09:00:00 bbb
 gate_case "published full pass, a same-day quick pass keeps it" pass/full/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
 gev "$tmp/g_sameday.json" fail quick 2026-11-07T09:00:00 bbb
 gate_case "published full pass, a same-day quick fail shows" fail/quick/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
+# a card with a failing gate is published as is (loom-org step 2): it validates, renders the gate as a failure, and
+# org_status counts it as failing (action fix)
+mkdir -p "$tmp/failing"; cp -r "$F/pkg/." "$tmp/failing/"
+py "$C/make_info.py" build "$tmp/failing" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint --report generated \
+  --evidence "$tmp/gates.json" "$tmp/g_qfail.json" -o "$tmp/failing/info.json" 2>/dev/null
+py "$C/render_card.py" "$tmp/failing" 2>/dev/null
+py -c "import sys; sys.path.insert(0, sys.argv[1]); sys.path.insert(0, sys.argv[2]); import card_lib as c, render_card as r
+from org_status import assess
+assert c.validate(c.load_json(sys.argv[3] + '/info.json')) == [], 'not valid'
+rows = [l for l in open(sys.argv[3] + '/README.md') if l.startswith('| \x60agent\x60 |')]
+assert len(rows) == 1 and f'| {r.NO} fail' in rows[0], rows
+assert assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])['failing'] == ['agent']" "$C" "$here/../../../../loom-org/scripts" "$tmp/failing" \
+  && echo "OK   failing: a card with a failing gate validates, renders it as fail and org_status counts it failing" \
+  || { echo "FAIL failing: a card with a failing gate does not publish as failing"; bad=1; }
 # local and DevLab sessions both stay (card_lib.card_metrics: local headline, DevLab columns): a metric only DevLab
 # measured asks for a local session (perf_flags "devlab"; org_status remeasure reason devlab-primary); a local value
 # without a DevLab one on the same programs asks for a DevLab perf session ("devlab_perf"); the gap is never a flag
@@ -163,6 +177,58 @@ a = c.card_metrics(c.load_json(sys.argv[2]))['spec_acceptance'][0]['loom']; prin
   "$C" "$tmp/acc_old.json")
 [ "$got" = "$want" ] && echo "OK   flags: a DevLab spec gate's acceptance replaces a stale spec_acceptance (gates only: none)" \
   || { echo "FAIL flags: DevLab spec acceptance: $got, expected $want"; bad=1; }
+# a paused card (make_info.py build --from-info --next-steps --status paused): README.md is the same card with a final
+# "Next steps" section after everything else, org_status reports paused; without the fields nothing changes
+printf '%s\n' '- retry the agent gate on DevLab' '' 'measure `decode_32k` locally' > "$tmp/next.txt"
+mkdir -p "$tmp/paused"; cp -r "$F/pkg/." "$tmp/paused/"
+py "$C/make_info.py" build "$tmp/paused" --generator-commit $GEN --from-info "$tmp/failing/info.json" --next-steps "$tmp/next.txt" \
+  --status paused -o "$tmp/paused/info.json" 2>/dev/null
+py "$C/render_card.py" "$tmp/paused" 2>/dev/null
+py "$C/make_info.py" build "$tmp/paused" --generator-commit $GEN --from-info "$tmp/paused/info.json" --next-steps /dev/null \
+  --status active -o "$tmp/unpaused.json" 2>/dev/null
+printf '\n## Next steps\n\nWork on this model is paused.\n\n- retry the agent gate on DevLab\n- measure `decode_32k` locally\n' \
+  | cat "$tmp/failing/README.md" - | cmp -s - "$tmp/paused/README.md" && cmp -s "$tmp/failing/info.json" "$tmp/unpaused.json" \
+  && py -c "import sys; sys.path.insert(0, sys.argv[1]); from org_status import assess
+a, b = assess('loom-fun/ggml-org-Flint-loom', sys.argv[2]), assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])
+assert a.get('paused') is True and 'paused' not in b and a['failing'] == b['failing']" "$here/../../../../loom-org/scripts" \
+  "$tmp/paused" "$tmp/failing" \
+  && echo "OK   paused: next steps render last, org_status reports paused, and clearing them gives the card back" \
+  || { echo "FAIL paused: a paused card's next steps do not render or clear as expected"; bad=1; }
+# a document longer than the model's native context (perf.py: the Loom server's HTTP 400, logged in over_context with
+# the prompt tokens make_info.py counts) is not applicable: org_status does not ask for it and the card shows n/a. It
+# stays required when the refused prompt fits the native context (a package built smaller), when the native context
+# is unknown, or once a session measured it.
+echo '{"label": "loom", "kind": "loom", "time": "2026-11-07 10:00:00", "nonce": "1.0", "prefill_long": [{"prompt_tokens": 8650, "prefill_tps": 5000.0}, {"prompt_tokens": 17351, "prefill_tps": 4000.0}], "over_context": ["prefill_32000", "decode_tps_32k"], "decode_tps_32k": null}' \
+  > "$tmp/oc_loom.jsonl"
+py "$C/make_info.py" perf --loom-jsonl "$tmp/oc_loom.jsonl" "${SRC[@]}" -o "$tmp/perf_oc.json" 2>/dev/null
+mkdir -p "$tmp/oc" "$tmp/oc_native"; cp -r "$F/pkg/." "$tmp/oc/"; cp -r "$F/pkg/." "$tmp/oc_native/"
+py -c "import json, sys
+c = json.load(open(sys.argv[1])); c['context_length'] = 32768; json.dump(c, open(sys.argv[1], 'w'))
+for n, f in (34937, sys.argv[3]), (30000, sys.argv[4]):
+    e = json.load(open(sys.argv[2])); e['performance']['session']['over_context'] = {'prefill_32k': n, 'decode_32k': n}
+    json.dump(e, open(f, 'w'))" "$tmp/oc_native/llm_config.json" "$tmp/perf_oc.json" "$tmp/perf_oc_long.json" "$tmp/perf_oc_fits.json"
+for e in long fits both; do
+  ev="$tmp/perf_oc_long.json"; [ $e = fits ] && ev="$tmp/perf_oc_fits.json"; [ $e = both ] && ev="$ev $tmp/perf.json"
+  py "$C/make_info.py" build "$tmp/oc_native" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint \
+    --evidence "$tmp/gates.json" $ev -o "$tmp/oc_$e.json" 2>/dev/null
+done
+py "$C/make_info.py" build "$tmp/oc" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint \
+  --evidence "$tmp/gates.json" "$tmp/perf_oc_long.json" -o "$tmp/oc/info.json" 2>/dev/null
+cp "$tmp/oc_long.json" "$tmp/oc_native/info.json"; py "$C/render_card.py" "$tmp/oc_native" 2>/dev/null
+py -c "import sys; sys.path.insert(0, sys.argv[1]); sys.path.insert(0, sys.argv[2]); import card_lib as c
+from org_status import assess
+long = {'metric:prefill_32k', 'metric:decode_32k'}
+miss = assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])['missing']
+assert not long & set(miss) and 'metric:prefill_16k' not in miss and 'metric:prefill_1k' in miss, miss
+rows = [l for l in open(sys.argv[3] + '/README.md') if l.startswith('| prefill tok/s, 32k document |' + ' n/a |' * 8)]
+assert rows and \"longer than the model's native 32768-token context\" in open(sys.argv[3] + '/README.md').read()
+assert long <= set(assess('loom-fun/ggml-org-Flint-loom', sys.argv[4])['missing']), 'native context unknown'
+facts = c.package_facts(c.load_package(sys.argv[3]))
+for f in sys.argv[5:]:   # a refusal within the native context, and a measured value: still required
+    assert c.over_context(c.load_json(f), c.native_context(facts['features'])) == set(), f" \
+  "$C" "$here/../../../../loom-org/scripts" "$tmp/oc_native" "$tmp/oc" "$tmp/oc_fits.json" "$tmp/oc_both.json" \
+  && echo "OK   over context: n/a only past the native context; required within it, without it, or once measured" \
+  || { echo "FAIL over context: a refused long document is not judged against the native context"; bad=1; }
 # c4_steady.py runs that measured nothing (every stream failed: rate -0.0, a negative window) are not samples
 printf '%s\n' '{"streams": 4, "window_s": 2.5, "agg_tps": 110.0}' '{"streams": 4, "window_s": -3.1, "agg_tps": -0.0}' 0 112.5 \
   > "$tmp/c4_bad.txt"

@@ -62,8 +62,9 @@ references. For each target it assigns one action, and lists repos that duplicat
 | `done` | A, every applicable gate passes, every applicable metric measured in a local and a DevLab session, the roofline computed, no flag | nothing |
 
 "Applicable" is the card generator's own rule (`card_lib.gate_applies` / `metric_applies`): vision only with a
-projector, spec only with drafting, and so on. Never delete or retire a repo yourself: list duplicates and
-non-targets for the user to decide. `--targets` takes `rank_models.py` output (`{"models": [...]}`) or a plain
+projector, spec only with drafting, a long-document metric unless the Loom server refused that document and its
+prompt is longer than the model's native context (`card_lib.over_context`; a measured value always counts), and so on. Never delete or retire a repo
+yourself: list duplicates and non-targets for the user to decide. `--targets` takes `rank_models.py` output (`{"models": [...]}`) or a plain
 list (entries or model ids; rank by order when absent). Each repo's `generator` is the loom-skills commit that
 generated its programs: `llm_config.json` `"generator"` (build.py's stamp), else the card's recovered one
 (`generator_source` says which).
@@ -112,7 +113,7 @@ One worker per model runs `loom-port-llm` then `loom-optimize`, starting from th
   `gh api -X DELETE repos/loom-fun/loom-skills/issues/N/labels/devlab-port`, then
   `gh api -X POST repos/loom-fun/loom-skills/issues/N/labels -f 'labels[]=devlab-port'`.
 - **A DevLab-ported model**: publish it from the job's evidence (`make_info.py ... --source-kind devlab`, as
-  port_e2e.sh writes it). The gates count, and the DevLab performance session stays on the card (its DevLab
+  port_e2e.sh writes it), also when the job's result is `failed gates` (step 2). The gates count, and the DevLab performance session stays on the card (its DevLab
   columns); `org_status` marks the card `remeasure` (`devlab-primary`) until a short local session (Loom and
   llama.cpp, quiet GPU, the same programs) adds the headline numbers next to it.
 
@@ -140,12 +141,24 @@ update: README.md, info.json and REPORT.md only; `--parent-commit SHA` with the 
 was built from, so a concurrent publish fails instead of being overwritten). Gates not yet run render as "no evidence"; that's expected and honest. The repo is now category A
 and `org_status` shows it as `sweep` until step 3 fills it.
 
+**Publish every port, done or not**, as soon as it has a package and gate evidence: failing gates, a failing
+audit or perf flags don't hold it back. The card is the record of progress: a failing gate renders as fail, never
+dropped or loosened, and `org_status` marks the repo `fix` (step 4). Add the card to
+`.github/nightly-models.json` in the same PR, and republish as gates go green. Only `done` (below) needs every gate
+passing.
+
+**Pausing a model:** list what would be done next, one step per line in a file, and republish the card only (DIR
+as in step 3.2): `make_info.py build DIR --from-info DIR/info.json --status paused --next-steps FILE`,
+`render_card.py DIR`, `publish_package.py upload DIR --repo loom-fun/REPO --card-only --parent-commit $sha`. The
+README then ends with a "Next steps" section. `org_status` keeps the repo's action and reports `paused: true`. To
+resume, rebuild with `--status active --next-steps /dev/null`.
+
 ### 3. Sweep on DevLab Dispatch: missing gates, the roofline and the DevLab perf session
 
 DevLab is an elastic pool of Strix Halo runners; sweep many cards' gates at once there, never on the local GPU.
 Hand the card over and move the local GPU on to the next item.
 
-1. Add the card to `.github/nightly-models.json` (card, memory, kit, llama.cpp build) and run `nightly-gates.yml`
+1. The card is in `.github/nightly-models.json` (card, memory, kit, llama.cpp build; step 2). Run `nightly-gates.yml`
    (it runs on schedule, or `gh workflow run nightly-gates.yml -f models=loom-fun/REPO,... -f level=full`, or label
    a PR `nightly-gates`).
 2. When it finishes, per card, in a directory holding the repo's current `model.json`, `model.json.lock`,

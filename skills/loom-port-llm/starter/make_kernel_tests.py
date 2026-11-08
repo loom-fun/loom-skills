@@ -15,10 +15,11 @@ import json, sys, os, numpy as np
 from gguf import GGUFReader
 from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mv_rows import pick_r, iq_r  # noqa: E402
+from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
 from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402  formats with no 256-row (_m256) GEMM
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
 from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
+import attn_rules  # noqa: E402
 
 
 def q8_ref(xs):
@@ -419,7 +420,8 @@ cases.append(f"""check.case public @qk_rope {{
 """)
 # 3'. sliding layers with their own rotary dims / base at the same head_dim (gen_llm SWA_ROPE): g_qk_rope_store_swa
 RD_SWA, TH_SWA = cfg.get("rope_dims_swa") or RD, cfg.get("rope_theta_swa") or cfg["rope_theta"]
-if cfg.get("sliding_layers") and (cfg.get("head_dim_swa") or D) == D and (RD_SWA, TH_SWA) != (RD, cfg["rope_theta"]):
+if cfg.get("sliding_layers") and (cfg.get("head_dim_swa") or D) == D and ((RD_SWA, TH_SWA) != (RD, cfg["rope_theta"]) or
+        bool(cfg.get("rope_scaling")) and cfg.get("rope_scaling_swa") == "none"):
     qs = rope(norm(q + bq, qn) if cfg["qk_norm"] else q + bq, RD_SWA, TH_SWA, None, None)   # no frequency factors, no YaRN
     save("r_qs", qs.reshape(t, -1).astype(np.float32))
     cases.append(cases[-1].replace("@qk_rope {", "@qk_rope_swa {").replace("@g_qk_rope_store[", "@g_qk_rope_store_swa[")
@@ -916,6 +918,68 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   check.return
 }}
 """)
+# 3c. a verify span at long context: ATTN_MT tokens of one row at consecutive positions past ATTN_MT_FROM take the
+# multi-token split-K path (one K/V load per key for the span); K/V written straight into the arena (identity pages).
+# The model's attention scale and sinks are in the reference; a sliding layer (window W) gets its own case.
+def attention_span_case(tag, sliding):
+    W = cfg.get("sliding_window") or 0
+    t = attn_rules.ATTN_MT
+    p0 = max(attn_rules.ATTN_MT_FROM + 76, W + 100 if sliding else 0)
+    ctx = (p0 + t + 15) // 16 * 16 + 64
+    scale = cfg["attn_scale"] if cfg.get("attn_scale") is not None else 1 / np.sqrt(D)
+    sinks = deq(f"blk.{A0}.attn_sinks.weight").astype(np.float32) if cfg.get("attn_sinks") else None
+    kvk = (0.5 * rng.standard_normal((ctx, KVH, D))).astype(np.float16); kvv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
+    kvv[p0 + 1:] *= 64   # keys after a token's own position: a causal leak (one span member's range for another) dominates
+    q = rng.standard_normal((t, QH, D)).astype(np.float32); gate = rng.standard_normal((t, QH, D)).astype(np.float32)
+    att = np.zeros((t, QH, D))
+    for i in range(t):
+        p = p0 + i; lo = p - (W - 1) if sliding else 0
+        for hh in range(QH):
+            kv = hh // (QH // KVH)
+            sc = kvk[lo:p + 1, kv].astype(np.float64) @ q[i, hh] * scale
+            mx = sc.max() if sinks is None else max(sc.max(), sinks[hh])
+            pr = np.exp(sc - mx); den = pr.sum() + (0.0 if sinks is None else np.exp(sinks[hh] - mx))
+            att[i, hh] = pr @ kvv[lo:p + 1, kv].astype(np.float64) / den
+    if gate_kind and sinks is None:
+        att = att * gate_act(gate)
+    blocks = ctx // 16
+    orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
+    info = np.zeros((t, 4), np.int32); info[:, 1] = p0 + np.arange(t); info[:, 2] = 1
+    for n, a in [("q", q.reshape(t, -1)), ("g", gate.reshape(t, -1)), ("info", info), ("orig", orig),
+                 ("sinks", sinks if sinks is not None else np.zeros(QH, np.float32)),
+                 ("arena", np.concatenate([kvk.reshape(-1), kvv.reshape(-1)])), ("o", att.reshape(t, -1).astype(np.float32))]:
+        save(f"{tag}_{n}", a)
+    S = 64
+    gv, gt = ("%sinks", f"tensor<{QH}xf32>") if sinks is not None else ("%g" if gate_kind else "%q", f"tensor<{t}x{QD}xf32>")
+    cases.append(f"""check.case public @{tag} {{
+  %t = check.literal value({t}) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value({int(sliding)}) : i32
+  %ctx = check.literal value({ctx}) : index
+  %pool = check.literal value({ctx}) : index
+  %q = check.file.read.npy path("{tag}_q.npy") : tensor<{t}x{QD}xf32>
+  %g = check.file.read.npy path("{tag}_g.npy") : tensor<{t}x{QD}xf32>
+  %sinks = check.file.read.npy path("{tag}_sinks.npy") : tensor<{QH}xf32>
+  %info = check.file.read.npy path("{tag}_info.npy") : tensor<{t}x4xi32>
+  %orig = check.file.read.npy path("{tag}_orig.npy") : tensor<{10 + blocks}xi32>
+  %arena = check.file.read.npy path("{tag}_arena.npy") : tensor<{2 * ctx * KVH * D}xf16>
+  %eo = check.file.read.npy path("{tag}_o.npy") : tensor<{t}x{QD}xf32>
+  %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
+  %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
+  %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
+  kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
+  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {gv}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, {gt}, tensor<{t}x{QD}xf32>)
+  check.expect.close actual(%o) expected(%eo) atol(3.0e-3) rtol(3.0e-3) nan(different) : tensor<{t}x{QD}xf32>
+  check.return
+}}
+""")
+
+
+if attn_rules.multi_token(attn_rules.UNROLL, KVH):   # the condition gen_llm.py emits the multi-token path on
+    attention_span_case("attention_span", False)
+    if cfg.get("sliding_layers") and cfg.get("sliding_window"):
+        attention_span_case("attention_span_sliding", True)
+
 # 3a''. DFlash proposals' head (draft/prep_weights.py, PROPOSE_HEAD=q4_0): g_prep_<fmt>_q4_0 converts the head at load,
 # then the int8 head runs over the Q4_0 copy. Logits vs numpy on llama.cpp's quantize_row_q4_0 of the same values (a
 # code at a rounding boundary may differ: tolerance), and the 4/8/16-span variants bit-identical to 1 span.
@@ -1106,62 +1170,214 @@ def drafter_cases():
 }}
 """)
 drafter_cases()
+
+
+def dflash_attention_case():
+    """DFlash v1 draft attention, split-K (draft/gen_dflash.py: g_dfl_ctx_split + g_dfl_attention): three spans of
+    three rows (context 701, 5 and 0 keys; 11, 16 and 4 block tokens, so 8-token chunks end mid-span) and a dead
+    token, on permuted pages. Every block token attends its row's context [0, P) and the whole block. Context
+    positions at or past P hold large values: a key read past the span's own context dominates the output."""
+    dg = (cfg.get("drafter") or {}).get("gguf")
+    if (cfg.get("drafter") or {}).get("kind") != "dflash" or not dg or not os.path.exists(dg):
+        return
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "draft"))
+    import gen_dflash
+    F = gen_dflash.config(dg)
+    if not gen_dflash.split_enabled(F):
+        return
+    QH, KVH, D, S = F["heads"], F["kv_heads"], F["head_dim"], gen_dflash.DFL_SPLITS
+    spans = [(701, 11), (5, 16), (0, 4)]   # (context P, block length)
+    t = sum(n for _, n in spans) + 1
+    nb = 48; pool = 16 * nb * len(spans); layer = min(1, F["layers"] - 1)
+    perm = rng.permutation(nb * len(spans)).astype(np.int32)
+    cache = rng.standard_normal((2 * layer + 2, pool, KVH, D)).astype(np.float16)
+    q = rng.standard_normal((t, QH, D)).astype(np.float32)
+    bk = rng.standard_normal((t, KVH, D)).astype(np.float32); bv = rng.standard_normal((t, KVH, D)).astype(np.float32)
+    meta = np.zeros(4 + 9 * len(spans), np.int32); info = np.zeros((t, 4), np.int32)
+    orig = np.zeros(10 * len(spans) + nb * len(spans), np.int32)
+    o = np.zeros((t, QH, D))
+    cur = 0
+    for r, (P, n) in enumerate(spans):
+        meta[4 + 9 * r:4 + 9 * r + 5] = [n, P, 0, 0, cur]
+        info[cur:cur + n] = [[r, P + j, 1, r] for j in range(n)]
+        orig[10 * r + 8] = 4 * (10 * len(spans) + nb * r)   # the row's page map (byte offset into origins)
+        orig[10 * len(spans) + nb * r:10 * len(spans) + nb * (r + 1)] = perm[nb * r:nb * (r + 1)]
+        slots = (perm[nb * r:nb * (r + 1), None] * 16 + np.arange(16)).reshape(-1)   # the row's positions -> pool slots
+        cache[2 * layer + 1, slots[P:]] *= 64
+        kc = cache[2 * layer, slots[:P]].astype(np.float64); vc = cache[2 * layer + 1, slots[:P]].astype(np.float64)
+        for j in range(cur, cur + n):
+            for h in range(QH):
+                kv = h // (QH // KVH)
+                keys = np.concatenate([kc[:, kv], bk[cur:cur + n, kv]]); vals = np.concatenate([vc[:, kv], bv[cur:cur + n, kv]])
+                sc = keys @ q[j, h] * D ** -0.5; pr = np.exp(sc - sc.max())
+                o[j, h] = pr @ vals / pr.sum()
+        cur += n
+    info[cur] = [0, 0, 0, 0]   # a dead token: no output
+    tag = "dfl_attention"
+    for nm, a in [("meta", meta), ("info", info), ("orig", orig), ("q", q.reshape(t, -1)), ("bk", bk.reshape(t, -1)),
+                  ("bv", bv.reshape(t, -1)), ("cache", cache.reshape(-1)), ("o", o.reshape(t, -1).astype(np.float32))]:
+        save(f"{tag}_{nm}", a)
+    QD, KD = QH * D, KVH * D
+    T = lambda n: f"tensor<{t}x{n}xf32>"
+    tys = {"meta": ty(meta), "info": ty(info), "orig": ty(orig), "q": T(QD), "bk": T(KD), "bv": T(KD), "cache": f"tensor<{cache.size}xf16>"}
+    PT, MT = f"tensor<{t * QH * S * D}xf32>", f"tensor<{t * QH * S * 2}xf32>"
+    cases.append(f"""check.case public @{tag} {{
+  %t = check.literal value({t}) : index
+  %spans = check.literal value({len(spans)}) : index
+  %layer = check.literal value({layer}) : index
+  %ctx = check.literal value({16 * nb}) : index
+  %pool = check.literal value({pool}) : index
+""" + "".join(f'  %{nm} = check.file.read.npy path("{tag}_{nm}.npy") : {tt}\n' for nm, tt in tys.items()) + f"""  %eo = check.file.read.npy path("{tag}_o.npy") : {T(QD)}
+  %pacc = check.generate.fill value(0.0) : {PT}
+  %pml = check.generate.fill value(0.0) : {MT}
+  %o = check.generate.fill value(0.0) : {T(QD)}
+  kernel.launch @g_dfl_ctx_split[%t](%t, %spans, %layer, %ctx, %pool, %meta, %info, %q, %orig, %cache, %pacc, %pml) : [index](index, index, index, index, index, {tys["meta"]}, {tys["info"]}, {T(QD)}, {tys["orig"]}, {tys["cache"]}, {PT}, {MT})
+  kernel.launch @g_dfl_attention[%t](%t, %spans, %layer, %ctx, %pool, %meta, %info, %q, %bk, %bv, %orig, %cache, %o, %pacc, %pml) : [index](index, index, index, index, index, {tys["meta"]}, {tys["info"]}, {T(QD)}, {T(KD)}, {T(KD)}, {tys["orig"]}, {tys["cache"]}, {T(QD)}, {PT}, {MT})
+  check.expect.close actual(%o) expected(%eo) atol(2.0e-3) rtol(3.0e-3) nan(different) : {T(QD)}
+  check.return
+}}
+""")
+
+
+dflash_attention_case()
 # Prefill flash attention (gen_flash2.py / gen_flash2s.py): 64 uniform tokens at the end of a 1024-key context,
 # paged arena filled directly (identity page map), layer 0, causal; q scaled so attention is sharp (a kernel that
 # drops part of the score sum fails). Reference in float64 from f16 Q/K/V, times sigmoid(gate) when gated.
 WIN = cfg.get("sliding_window") or 0
-if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (not WIN or not cfg.get("head_dim_swa")):
-    t, ctx = 64, 1024
-    P0 = ctx - t; blocks = ctx // 16; pool = ctx
-    kk = rng.standard_normal((ctx, KVH, D)).astype(np.float16); vv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
-    arena = np.zeros((2, pool, KVH, D), np.float16); arena[0], arena[1] = kk, vv
-    qq = (rng.standard_normal((t, QH, D)) * 2.5).astype(np.float32); gg = rng.standard_normal((t, QH, D)).astype(np.float32)
-    orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
-    info = np.zeros((t, 4), np.int32); info[:, 1] = P0 + np.arange(t); info[:, 2] = 1
-    o = np.zeros((t, QH, D)); qd = qq.astype(np.float16).astype(np.float64)
-    for hh in range(QH):
-        kv = hh // (QH // KVH); sc = qd[:, hh] @ kk[:, kv].astype(np.float64).T / np.sqrt(D)
-        sc[np.arange(ctx)[None, :] > (P0 + np.arange(t))[:, None]] = -1e30
-        pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); o[:, hh] = pr @ vv[:, kv].astype(np.float64)
-    if cfg.get("attn_gate"):
-        o = o * gate_mul(gg)
-    QD = QH * D
-    ow = None
-    if WIN:   # sliding layers: key j visible from position p when p - WIN < j <= p (llama.cpp LLAMA_SWA_TYPE_STANDARD)
-        ow = np.zeros((t, QH, D))
+
+
+def flash_cases(kern, D, KVH, width, scale, WIN, tag=""):
+    """Cases for flash kernel KERN (head_dim D, KVH KV heads; WIDTH K or V values per arena position, more than
+    KVH * D when a wider layer kind sets the stride; TAG names its files and cases)."""
+    def flash_ref(q, kk, vv, pos, win=0):   # float64 reference: query p sees keys j <= p (and j > p - win)
+        o = np.zeros(q.shape); j_ = np.arange(len(kk))[None, :]; p_ = np.asarray(pos)[:, None]
+        hidden = (j_ > p_) | (j_ <= p_ - win) if win else j_ > p_
         for hh in range(QH):
-            kv = hh // (QH // KVH); sc = qd[:, hh] @ kk[:, kv].astype(np.float64).T / np.sqrt(D)
-            p_ = (P0 + np.arange(t))[:, None]; j_ = np.arange(ctx)[None, :]
-            sc[(j_ > p_) | (j_ <= p_ - WIN)] = -1e30
-            pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); ow[:, hh] = pr @ vv[:, kv].astype(np.float64)
-        if cfg.get("attn_gate"):
-            ow = ow * gate_mul(gg)
-        save("f_ow", ow.reshape(t, QD).astype(np.float32))
-    for n, a in [("f_arena", arena.reshape(-1)), ("f_q", qq.reshape(t, QD)), ("f_g", gg.reshape(t, QD)), ("f_orig", orig),
-                 ("f_info", info), ("f_o", o.reshape(t, QD).astype(np.float32))]:
-        save(n, a)
-    AT = f"tensor<{2 * pool * KVH * D}xf16>"
-    cases.append(f"""check.case public @flash_prefill {{
+            kv = hh // (QH // KVH); sc = q[:, hh] @ kk[:, kv].astype(np.float64).T * scale
+            sc[hidden] = -1e30
+            pr = np.exp(sc - sc.max(-1, keepdims=True)); pr /= pr.sum(-1, keepdims=True); o[:, hh] = pr @ vv[:, kv].astype(np.float64)
+        return o
+    gated = (lambda o, g: o * gate_mul(g)) if cfg.get("attn_gate") else (lambda o, g: o)
+
+    def flash_case(name, sfx, t, pool, norig):
+        sfx += tag
+        AT = f"tensor<{2 * pool * width}xf16>"
+        return f"""check.case public @{name} {{
   %t = check.literal value({t}) : index
   %layer = check.literal value(0) : index
   %sliding = check.literal value(0) : i32
   %ctx = check.literal value({ctx}) : index
   %pool = check.literal value({pool}) : index
-  %q = check.file.read.npy path("f_q.npy") : tensor<{t}x{QD}xf32>
-  %g = check.file.read.npy path("f_g.npy") : tensor<{t}x{QD}xf32>
-  %info = check.file.read.npy path("f_info.npy") : tensor<{t}x4xi32>
-  %orig = check.file.read.npy path("f_orig.npy") : tensor<{10 + blocks}xi32>
-  %arena = check.file.read.npy path("f_arena.npy") : {AT}
-  %e = check.file.read.npy path("f_o.npy") : tensor<{t}x{QD}xf32>
+  %q = check.file.read.npy path("f_q{sfx}.npy") : tensor<{t}x{QD}xf32>
+  %g = check.file.read.npy path("f_g{sfx}.npy") : tensor<{t}x{QD}xf32>
+  %info = check.file.read.npy path("f_info{sfx}.npy") : tensor<{t}x4xi32>
+  %orig = check.file.read.npy path("f_orig{sfx}.npy") : tensor<{norig}xi32>
+  %arena = check.file.read.npy path("f_arena{sfx}.npy") : {AT}
+  %e = check.file.read.npy path("f_o{sfx}.npy") : tensor<{t}x{QD}xf32>
   %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
-  kernel.launch @g_attention_flash2[%t](%t, %layer, %sliding, %ctx, %pool, %q, %g, %info, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AT}, tensor<{t}x{QD}xf32>)
+  kernel.launch @{kern}[%t](%t, %layer, %sliding, %ctx, %pool, %q, %g, %info, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{norig}xi32>, {AT}, tensor<{t}x{QD}xf32>)
   check.expect.close actual(%o) expected(%e) atol(4.0e-3) rtol(4.0e-3) nan(different) : tensor<{t}x{QD}xf32>
   check.return
 }}
-""")
+"""
+    t, ctx = 64, 1024
+    P0 = ctx - t; blocks = ctx // 16; pool = ctx
+    kk = rng.standard_normal((ctx, KVH, D)).astype(np.float16); vv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
+    arena = np.zeros((2, pool, width), np.float16); arena[0, :, :KVH * D], arena[1, :, :KVH * D] = kk.reshape(ctx, -1), vv.reshape(ctx, -1)
+    qq = (rng.standard_normal((t, QH, D)) * 2.5).astype(np.float32); gg = rng.standard_normal((t, QH, D)).astype(np.float32)
+    orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
+    info = np.zeros((t, 4), np.int32); info[:, 1] = P0 + np.arange(t); info[:, 2] = 1
+    qd = qq.astype(np.float16).astype(np.float64)
+    o = gated(flash_ref(qd, kk, vv, info[:, 1]), gg)
+    QD = QH * D
+    ow = None
+    if WIN:   # sliding layers: key j visible from position p when p - WIN < j <= p (llama.cpp LLAMA_SWA_TYPE_STANDARD)
+        ow = gated(flash_ref(qd, kk, vv, info[:, 1], WIN), gg)
+        save("f_ow" + tag, ow.reshape(t, QD).astype(np.float32))
+    for n, a in [("f_arena", arena.reshape(-1)), ("f_q", qq.reshape(t, QD)), ("f_g", gg.reshape(t, QD)), ("f_orig", orig),
+                 ("f_info", info), ("f_o", o.reshape(t, QD).astype(np.float32))]:
+        save(n + tag, a)
+    # Two rows in one prefill: row 1 at tokens 0-39, row 0 (the keys above) at tokens 40-111, so tile 2 (tokens 32-47)
+    # spans both. flash2 must compute every other tile, whichever tiles share its workgroups (gen_flash2.py TS), and
+    # leave that one (the listed fallback's) untouched.
+    tm = 112; k2 = rng.standard_normal((2, ctx, KVH, D)).astype(np.float16)
+    arena_m = np.zeros((2, 2 * pool, width), np.float16); arena_m[:, :pool] = arena; arena_m[:, pool:, :KVH * D] = k2.reshape(2, ctx, -1)
+    orig_m = np.zeros(20 + 2 * blocks, np.int32); orig_m[8] = 80; orig_m[18] = 80 + 4 * blocks
+    orig_m[20:] = np.arange(2 * blocks)
+    row = (np.arange(tm) < 40).astype(np.int32)
+    pos = np.where(row == 1, ctx - 40, ctx - tm) + np.arange(tm)
+    info_m = np.zeros((tm, 4), np.int32); info_m[:, 0] = row; info_m[:, 1] = pos; info_m[:, 2] = 1
+    qm = (rng.standard_normal((tm, QH, D)) * 2.5).astype(np.float32); gm = rng.standard_normal((tm, QH, D)).astype(np.float32)
+    qmd = qm.astype(np.float16).astype(np.float64); om = np.zeros((tm, QH, D))
+    for r, kr, vr in ((0, kk, vv), (1, k2[0], k2[1])):
+        sel = row == r; om[sel] = gated(flash_ref(qmd[sel], kr, vr, pos[sel]), gm[sel])
+    om[32:48] = 0
+    for n, a in [("f_arena_m", arena_m.reshape(-1)), ("f_q_m", qm.reshape(tm, QD)), ("f_g_m", gm.reshape(tm, QD)),
+                 ("f_orig_m", orig_m), ("f_info_m", info_m), ("f_o_m", om.reshape(tm, QD).astype(np.float32))]:
+        save(n + tag, a)
+    cases.append(flash_case(f"flash_prefill_rows{tag}", "_m", tm, 2 * pool, len(orig_m)))
+    cases.append(flash_case(f"flash_prefill{tag}", "", t, pool, len(orig)))
     if ow is not None:
-        cases.append(cases[-1].replace("@flash_prefill {", "@flash_prefill_window {").replace("%sliding = check.literal value(0)", "%sliding = check.literal value(1)")
-                     .replace('path("f_o.npy")', 'path("f_ow.npy")'))
+        cases.append(cases[-1].replace(f"@flash_prefill{tag} {{", f"@flash_prefill_window{tag} {{").replace("%sliding = check.literal value(0)", "%sliding = check.literal value(1)")
+                     .replace(f'path("f_o{tag}.npy")', f'path("f_ow{tag}.npy")'))
+
+
+DEEP_CASES = []
+if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (not WIN or not cfg.get("head_dim_swa")):
+    flash_cases("g_attention_flash2", D, KVH, KVH * D, D ** -0.5, WIN)
+    DEEP = flash2_deep_from(cfg)
+    if DEEP:   # depth dispatch (gen_flash2.py): which kernel computes which tile, and that the pair is exact
+        # One prefill of two rows: row 1 at tokens 0-39 (deep), row 0 at tokens 40-175 from DEEP - 32, so the 11 tiles
+        # are: 0-1 a deep pair of row 1; 2 mixed (listed fallback: no flash kernel writes it); 3 alone (its partner is
+        # mixed); 4-5 straddle DEEP (one-tile); 6-7, 8-9 deep pairs; 10 unpaired. Pages alias the two 1024-key arenas
+        # of the rows case, so key j of a row is that row's key j % 1024.
+        td, ctx_d = 176, (DEEP // 1024 + 2) * 1024; blk = ctx_d // 16
+        arena_d = np.load(os.path.join(out, "f_arena_m.npy")).reshape(2, 2, 1024, -1)[:, :, :, :KVH * D].reshape(2, 2, 1024, KVH, D)
+        row = (np.arange(td) < 40).astype(np.int32)
+        pos = np.where(row == 1, DEEP + 1000 + np.arange(td), DEEP - 32 + np.arange(td) - 40)
+        info_d = np.zeros((td, 4), np.int32); info_d[:, 0] = row; info_d[:, 1] = pos; info_d[:, 2] = 1
+        orig_d = np.zeros(20 + 2 * blk, np.int32); orig_d[8] = 80; orig_d[18] = 80 + 4 * blk
+        orig_d[20:20 + blk] = np.arange(blk) % 64; orig_d[20 + blk:] = 64 + np.arange(blk) % 64
+        qd_ = (rng.standard_normal((td, QH, D)) * 2.5).astype(np.float32); gd_ = rng.standard_normal((td, QH, D)).astype(np.float32)
+        q64 = qd_.astype(np.float16).astype(np.float64); o_d = np.zeros((td, QH, D))
+        for hh in range(QH):
+            kv = hh // (QH // KVH)
+            for r in (0, 1):   # all keys visible (no window); key k repeats (p - k) // 1024 + 1 times up to position p
+                sel = row == r; kr, vr = arena_d[0, r, :, kv], arena_d[1, r, :, kv]
+                sc = q64[sel, hh] @ kr.astype(np.float64).T * D ** -0.5; w = np.exp(sc - sc.max(-1, keepdims=True))
+                w = w * ((pos[sel][:, None] - np.arange(1024)[None, :]) // 1024 + 1)
+                o_d[sel, hh] = (w / w.sum(-1, keepdims=True)) @ vr.astype(np.float64)
+        if cfg.get("attn_gate"):
+            o_d = o_d * gate_mul(gd_)
+        SENT = 7.0
+        tile = np.arange(td) // 16; pair_deep = np.isin(tile, (0, 1, 6, 7, 8, 9))
+        for name, mask in (("both", tile != 2), ("one", (tile != 2) & ~pair_deep), ("deep", pair_deep)):
+            e = np.where(mask[:, None, None], o_d, SENT)
+            save(f"f_o_d{name}", e.reshape(td, QH * D).astype(np.float32))
+        for n_, a_ in [("f_info_d", info_d), ("f_orig_d", orig_d), ("f_q_d", qd_.reshape(td, QH * D)), ("f_g_d", gd_.reshape(td, QH * D))]:
+            save(n_, a_)
+        AT = f"tensor<{2 * 2048 * KVH * D}xf16>"; OT_ = f"tensor<{td}x{QH * D}xf32>"; IT = f"tensor<{len(orig_d)}xi32>"
+        launch = lambda k: (f"  kernel.launch @{k}[%t](%t, %layer, %sliding, %ctx, %pool, %q, %g, %info, %orig, %arena, %o) : [index](index, "
+                            f"index, i32, index, index, {OT_}, {OT_}, tensor<{td}x4xi32>, {IT}, {AT}, {OT_})\n")
+        DEEP_CASES = [f"""check.case public @flash_prefill_deep_{name} {{
+  %t = check.literal value({td}) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value(0) : i32
+  %ctx = check.literal value({ctx_d}) : index
+  %pool = check.literal value(2048) : index
+  %q = check.file.read.npy path("f_q_d.npy") : {OT_}
+  %g = check.file.read.npy path("f_g_d.npy") : {OT_}
+  %info = check.file.read.npy path("f_info_d.npy") : tensor<{td}x4xi32>
+  %orig = check.file.read.npy path("f_orig_d.npy") : {IT}
+  %arena = check.file.read.npy path("f_arena_m.npy") : {AT}
+  %e = check.file.read.npy path("f_o_d{name}.npy") : {OT_}
+  %o = check.generate.fill value({SENT}) : {OT_}
+{"".join(launch(k) for k in kerns)}  check.expect.close actual(%o) expected(%e) atol(4.0e-3) rtol(4.0e-3) nan(different) : {OT_}
+  check.return
+}}
+""" for name, kerns in (("both", ("g_attention_flash2", "g_attention_flash2_deep")), ("one", ("g_attention_flash2",)),
+                        ("deep", ("g_attention_flash2_deep",)))]
+
 # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
 # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
 # bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
@@ -1382,12 +1598,39 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
   check.return
 }}
 """)
+    # g_moe_combine_sorted alone: padding tokens (every pos -1) and single dead assignments read no expert row
+    t, cr = 37, 512
+    c_pos = rng.permutation(cr)[:t * KU].astype(np.int32).reshape(t, KU); c_pos[[0, 9]] = -1; c_pos[12, KU - 1] = -1
+    c_w, c_sg = rng.random((t, KU)).astype(np.float32), rng.random(t).astype(np.float32)
+    c_ys, c_y0 = rng.standard_normal((cr, H)).astype(np.float32), rng.standard_normal((t, H)).astype(np.float32)
+    c_e = (c_w[..., None] * np.where(c_pos[..., None] >= 0, c_ys[np.maximum(c_pos, 0)], 0.0)).sum(1)
+    c_e += ((c_sg[:, None] if SHG else 1) * c_y0) if ACC else 0
+    for n, a in (("pos", c_pos.reshape(-1)), ("w", c_w), ("sg", c_sg), ("ys", c_ys), ("y0", c_y0), ("e", c_e.astype(np.float32))):
+        save("cs_" + n, a)
+    YT = f"tensor<{t}x{H}xf32>"
+    cases.append(f"""check.case public @moe_combine_sorted {{
+  %t = check.literal value({t}) : index
+  %rows = check.literal value({cr}) : index
+  %pos = check.file.read.npy path("cs_pos.npy") : tensor<{t * KU}xi32>
+  %wts = check.file.read.npy path("cs_w.npy") : tensor<{t}x{KU}xf32>
+  %sg = check.file.read.npy path("cs_sg.npy") : tensor<{t}xf32>
+  %ys = check.file.read.npy path("cs_ys.npy") : tensor<{cr}x{H}xf32>
+  %e = check.file.read.npy path("cs_e.npy") : {YT}
+  %y = {f'check.file.read.npy path("cs_y0.npy") : {YT}' if ACC else f"check.generate.fill value(3.0) : {YT}"}
+  kernel.launch @g_moe_combine_sorted[%t](%t, %rows, %ys, %pos, %wts, {"%sg, " if SHG else ""}%y) : [index](index, index, tensor<{cr}x{H}xf32>, tensor<{t * KU}xi32>, tensor<{t}x{KU}xf32>, {f"tensor<{t}xf32>, " if SHG else ""}{YT})
+  check.expect.close actual(%y) expected(%e) atol(1.0e-4) rtol(1.0e-4) nan(different) : {YT}
+  check.return
+}}
+""")
 import re
+if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
+    cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
+                    flags=re.M) for c in cases] + DEEP_CASES   # these launch the two kernels as they test them
 # Layers with fewer query heads (cfg layer_heads) run gen_llm.py's _h<heads> attention kernels: this script's attention
 # chain and flash cases at that head count, from a child run whose kernels, cases and files take the suffix.
 if KS:
     cases = [re.sub(r"check\.case public @(\w+) \{", rf"check.case public @\1{KS} {{", re.sub(
-        r"@(g_qk_rope_store|g_attention_split|g_attention_combine|g_gate_heads|g_attention_flash2)\[", rf"@\1{KS}[", c))
+        r"@(g_qk_rope_store|g_attention_split|g_attention_combine|g_gate_heads|g_attention_flash2(?:_deep)?)\[", rf"@\1{KS}[", c))
         .replace('.npy")', f'{KS}.npy")') for c in cases if re.match(r"\s*check\.case public @(attention_chain|flash_prefill)", c)]
 for h in sorted(set(cfg.get("layer_heads") or []) - {QH}):
     hc = os.path.join(out, f"cfg_h{h}.json"); json.dump(dict(cfg, heads=h, layer_heads=None), open(hc, "w"))
@@ -1398,5 +1641,5 @@ for h in sorted(set(cfg.get("layer_heads") or []) - {QH}):
     os.remove(hc); os.remove(os.path.join(out, f"cases_h{h}.loom-test"))
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
-open(os.path.join(out, f"cases{KS}.loom-test"), "w", newline="\n").write(text)
+open(os.path.join(out, "cases.loom-test"), "w", newline="\n").write(text)
 print("wrote", len(cases), "cases")

@@ -7,7 +7,8 @@ clock, no environment: the generator commit is an input, by default the checkout
 byte-identical files.
 
   make_info.py build PKG --repo loom-fun/NAME [--generator-commit SHA] [--evidence EV.json ...]
-                         [--memory-bytes N] [--output DIR] [--license ID] [--report generated|attached] [-o info.json]
+                         [--memory-bytes N] [--output DIR] [--license ID] [--report generated|attached]
+                         [--from-info OLD.json] [--next-steps FILE] [--status paused|active] [-o info.json]
       PKG holds model.json (and model.json.lock, llm_config.json): card values the package already implies
       (tags, the default --output, a memory_bytes in model.json) are dropped. Evidence files apply in order.
       --generator-commit: the loom-skills commit of these card scripts (default: this checkout's HEAD, or
@@ -16,6 +17,8 @@ byte-identical files.
       DevLab sweeps an older card recorded are kept as they are, never rendered) and apply the evidence files on
       top: how a card is regenerated when only new evidence arrives.
       --repo defaults to OLD.json's repo.
+      --next-steps FILE: the card's next steps, one per line (a leading "- " is dropped; an empty FILE removes
+      them); --status paused|active (active removes the status). Both are kept from OLD.json unless given.
 
   make_info.py perf --loom-jsonl LOOM.jsonl --llama-jsonl LLAMA.jsonl [--c4-loom F] [--c4-llama F]
                     --baseline-version llamacpp-rocm/bNNNN [--baseline-args "ARGS"] [--metrics decode,...]
@@ -177,6 +180,10 @@ def cmd_build(a):
         if old["repo"] != a.repo:
             sys.exit(f"{a.from_info} is the card of {old['repo']}, not {a.repo}")
         card = json.loads(json.dumps(old["card"]))
+        measured = {g["programs_sha256"] for g in old["gates"].values() if g.get("programs_sha256")}
+        if card.get("memory_bytes") and a.memory_bytes is None and measured and programs_sha256(a.pkg) not in measured:
+            sys.exit(f"{a.from_info}: its gates measured other programs than {a.pkg}; its card.memory_bytes "
+                     f"({card['memory_bytes']}) is the old build's. Pass --memory-bytes (build.py prints the new one).")
         versions = {k: v for k, v in old["versions"].items() if k != "card_generator"}
         sources.by_id = dict(old["sources"])
         if old.get("performance"):
@@ -187,6 +194,10 @@ def cmd_build(a):
         sweeps = (old.get("devlab") or {}).get("sweeps") or []   # pre-decision DevLab sweeps: kept as is, not rendered
         if a.report is None:
             a.report = old.get("report")
+        if a.status is None:
+            a.status = old.get("status")
+        if a.next_steps is None:
+            a.next_steps = old.get("next_steps")
     for i, path in enumerate(a.evidence or []):
         ev = load_json(path)
         if ev.get("evidence") != EVIDENCE_ID:
@@ -255,6 +266,10 @@ def cmd_build(a):
         info["report"] = a.report
     if roofline:
         info["roofline"] = roofline
+    if a.status and a.status != "active":
+        info["status"] = a.status
+    if a.next_steps:
+        info["next_steps"] = a.next_steps
     if sweeps:
         info["devlab"] = {"sweeps": sweeps}
     used = ({s["source"] for s in sessions} | {g["source"] for g in gate_out.values()}
@@ -359,6 +374,28 @@ def baseline_version(text):
     return f"llamacpp-rocm/{tag}" if tag and text == tag else text
 
 
+def refused_tokens(rows, package, measured):
+    """{card metric: prompt tokens} of the long documents the Loom server refused (perf.py rows' over_context) and
+    the session did not measure: each prompt re-rendered from its row's nonce and counted with the package's
+    tokenizer (null without --package, or for a row from before perf.py logged its nonce)."""
+    from bench_common import Package, long_prompt
+    card_key = {v: k for k, v in ROOFLINE_METRIC.items()}
+    pkg = Package(package) if package and os.path.exists(os.path.join(package, "tokenizer.json")) else None
+    out = {}
+    for r in rows:
+        for k in r.get("over_context", []):
+            if card_key[k] in measured:
+                continue
+            n = None
+            if pkg and r.get("nonce"):
+                think = {"on": True, "off": False}.get(r.get("thinking"))
+                msgs = [{"role": "user", "content": long_prompt(k, r["nonce"])}]
+                n = len(pkg.ids(pkg.render_messages(msgs, None, think)))
+            prev = out.get(card_key[k])
+            out[card_key[k]] = n if prev is None else (prev if n is None else min(prev, n))
+    return out
+
+
 def cmd_perf(a):
     if a.perf_log:
         loom_rows = perf_rows(a.perf_log, "loom", a.loom_label)
@@ -392,6 +429,9 @@ def cmd_perf(a):
         commands += [line.rstrip("\n") for line in open(a.commands_file, encoding="utf-8") if line.strip()]
     session = {"date": date, "source": source_arg(a), "runs": runs, "commands": commands, "metrics": metrics,
                "programs_sha256": programs_sha256(a.package) if a.package else None}
+    over = refused_tokens(loom_rows, a.package, set(ls))
+    if over:   # perf.py: the Loom server refused these documents as over its context (card_lib.over_context)
+        session["over_context"] = over
     perf = {"session": session}
     if a.baseline_version or a.baseline_args:
         perf["baseline"] = {"name": a.baseline_name, "version": baseline_version(a.baseline_version) if a.baseline_version else None,
@@ -559,6 +599,11 @@ def cmd_roofline(a):
           file=sys.stderr)
 
 
+def next_steps_file(path):
+    with open(path, encoding="utf-8") as f:
+        return [re.sub(r"^[-*]\s+", "", ln.strip()) for ln in f if ln.strip()]
+
+
 def add_source_args(p):
     p.add_argument("--source-kind", default="local", choices=["local", "devlab", "factory"])
     p.add_argument("--run")
@@ -582,6 +627,8 @@ def main(argv=None):
     b.add_argument("--license")
     b.add_argument("--report", choices=["generated", "attached"])
     b.add_argument("--from-info", help="a published info.json to start from (regenerating a card with new evidence)")
+    b.add_argument("--status", choices=["paused", "active"], help="paused: work on this model has stopped (active: clears it)")
+    b.add_argument("--next-steps", type=next_steps_file, help="a file of next steps, one per line (empty: none)")
     b.add_argument("-o", default="info.json")
     p = sub.add_parser("perf")
     p.add_argument("--perf-log")

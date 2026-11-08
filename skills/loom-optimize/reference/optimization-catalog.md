@@ -297,6 +297,10 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - Gains: 2.2× on Glimmer attention. 64-key tiles (`FLASH2_KT=64`) were *slower*.
 - It only handles *uniform* tiles: all 16 tokens live, one row, consecutive
   positions (`g_tile_uniform`). Every other token goes to the listed fallback.
+- **Token subtiles at small G** (`FLASH2_TS`): each staged key feeds 16·G queries, so at G = 2 long prefill re-streams
+  the KV cache per 32 queries and is bandwidth-bound (Qwen3-0.6B: 25 % of roofline at 1k, 13 % at 32k). Two tiles per
+  workgroup share each staged K/V tile: Qwen3-0.6B / 1.7B 32k prefill 2.6x / 2.1x, 1k tie (default at G <= 2). At
+  G = 3 / 4 it lost 3-16 %; 4 or 8 tiles lost to 2 (too few workgroups per chunk).
 
 ### flash2 at head_dim 256 (`gen_flash2s.py`)
 - At head_dim 256, 256 dims of Q (as f16 fragments) plus 256 dims of output accumulators exceed 256 VGPRs, so
@@ -308,6 +312,9 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   (conflict-free) and each lane does one paged-KV lookup per tile (V = K offset + one plane).
 - Qwen3.8-27B (G = 6, 12 waves, 61 KB LDS): a 1024-token chunk at 32k depth runs 16.9 TFLOP/s; prefill
   2k/8k/32k 401.6/368.6/262.5 -> 429.1/426.7/378.1 tok/s. Attention had been 1.42 ms of 3.8 ms per token at 32k.
+- Head_dim 512 (gemma4 global layers): four waves per head, 16-key tiles (K and V^T of 32 keys exceed 64 KiB), each
+  wave sums the head's four S partials in wave order. Over the two-pass kernel that reloaded Q per tile and
+  recomputed S per 256-dim output half: gemma-4-26B-A4B prefill 1k/8k/16k/32k 1.11/1.35/1.64/2.17x (local A/B).
 - Test it standalone with real shapes: a flash2 harness (paged arena filled directly, float64 reference with
   the gate) plus a broken variant (partner sum dropped) as the negative control.
 
@@ -382,6 +389,14 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
     count (2k adds only 0.52 s). Skipping the WMMA of all-padding 16-row waves in the expert tiles: tie (1k +2 %,
     2k -2 %), so the MMA is not the limit; the per-k-step dequant/stage/barrier is. Faster 1k needs a cheaper
     expert weight path (e.g. int8/int4 WMMA on the codes), not less padding.
+  - Hybrid MoE at 1k (qwen35moe, 256 experts, top-8; doubling on Ornith-1.0-35B, ms per token of 0.55): expert
+    GEMMs 0.19, dense GEMMs 0.11, `g_moe_combine_sorted` 0.06, `g_gdn_norm_gate` 0.04, recurrence 0.03. The two
+    small kernels were launch-shape bound: combine ran a workgroup per (token, 256 channels) with tokens fastest,
+    so each 8 KB expert row was read in 8 pieces far apart (now one workgroup per token); norm_gate ran 32-lane
+    workgroups, tokens x 32 of them per layer (now 8 heads per workgroup). The grouped GEMMs also prefetch the
+    next K step into registers and skip the MMAs of empty 16-row waves (`MOE_PREFETCH`, `MOE_SKIP_EMPTY`; together
+    +5 %, the skip alone ties as on Flint). Same outputs bit for bit. DevLab, prefill 1k: Ornith-1.0-35B 1838 ->
+    2423 tok/s, Sage-A1.5 1768 -> 2197, Qwen3.5-35B-A3B 1740 -> 2120 (+22-32 %; 2k +24-42 %), decode tie.
 
 ### Tile order per port (`cfg["gemm_n_fastest"]`)
 - Columns fastest (the default) reuses each activation tile; rows fastest reuses each weight tile across

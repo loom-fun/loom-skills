@@ -99,6 +99,9 @@
     "metrics": {"type": "object", "additionalProperties": {"$ref": "#/$defs/ceiling"}}
    }
   },
+  "status": {"enum": ["paused"], "description": "Where work on this model stands, when not active: paused (work stopped; the card shows what was reached). Optional key, loom-card/2."},
+  "next_steps": {"type": "array", "items": {"type": "string"},
+                 "description": "What would be done next if work continued, one short markdown line each; README.md ends with them under Next steps. Optional key, loom-card/2."},
   "devlab": {
    "type": "object", "required": ["sweeps"],
    "description": "Loom measured alone on AMD DevLab Dispatch runners by the nightly sweep, oldest first. No longer written or rendered: a card's DevLab numbers are performance sessions (Loom and llama.cpp) with a devlab source. Kept (optional key, loom-card/2) so cards that recorded sweeps stay valid; make_info.py build --from-info carries them over unchanged.",
@@ -161,7 +164,8 @@
     },
     "commands": {"type": "array", "items": {"type": "string"}, "description": "The measuring commands, for REPORT.md"},
     "programs_sha256": {"type": ["string", "null"], "description": "card_lib.programs_sha256 of the package measured"},
-    "metrics": {"type": "object", "additionalProperties": {"$ref": "#/$defs/metric"}}
+    "metrics": {"type": "object", "additionalProperties": {"$ref": "#/$defs/metric"}},
+    "over_context": {"type": "object", "additionalProperties": {"type": ["integer", "null"]}, "description": "metric -> prompt tokens (null: not counted) of a long document the Loom server refused as over its context (make_info.py perf; card_lib.over_context)"}
    }
   },
   "metric": {

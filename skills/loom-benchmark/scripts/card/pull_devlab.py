@@ -16,8 +16,9 @@ records it; the latest job that reports one wins.
 Each source records the runner's device and Loom SDK when summary.json carries them ("device" from
 machine_info.py detect_device(), "hrx_loom" from its hrx_loom_identity()); otherwise they stay null (not
 recorded). --hrx-loom FILE.json supplies an SDK identity established otherwise (e.g. from the job logs).
---package DIR (the card repo's current files): a job whose fetched model.json differs from DIR/model.json measured
-an earlier revision of the package and is skipped. A job that was cancelled or did not write gates.json is skipped. Needs `gh` authenticated for loom-fun/loom-skills.
+--package DIR (the card repo's current files): a job whose fetched model.json or programs (summary.json
+programs_sha256) differ from DIR's measured another revision of the package and is skipped. Programs can change with
+model.json unchanged (a regenerated package), and a job started right after a publish has fetched the old files. A job that was cancelled or did not write gates.json is skipped. Needs `gh` authenticated for loom-fun/loom-skills.
 """
 import argparse
 import json
@@ -27,7 +28,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import EVIDENCE_ID, load_json, write_json  # noqa: E402
+from card_lib import EVIDENCE_ID, load_json, programs_sha256, write_json  # noqa: E402
 from make_info import acceptance  # noqa: E402
 
 GH_REPO = "loom-fun/loom-skills"
@@ -111,7 +112,8 @@ def main(argv=None):
             if s.get("repo") != a.repo or (s.get("slug"), s.get("level")) not in job_url:
                 continue
             mj = os.path.join(d, "model.json")
-            if a.package and os.path.exists(mj) and load_json(mj) != load_json(os.path.join(a.package, "model.json")):
+            if a.package and ((os.path.exists(mj) and load_json(mj) != load_json(os.path.join(a.package, "model.json")))
+                              or s.get("programs_sha256") not in (None, programs_sha256(a.package))):
                 print(f"skipped {os.path.basename(d)}: it measured another revision of the package", file=sys.stderr)
                 continue
             found.append((s, json.load(open(gp)), d, job_url[(s["slug"], s["level"])]))
