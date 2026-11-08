@@ -1641,5 +1641,5 @@ for h in sorted(set(cfg.get("layer_heads") or []) - {QH}):
     os.remove(hc); os.remove(os.path.join(out, f"cases_h{h}.loom-test"))
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
-open(os.path.join(out, "cases.loom-test"), "w", newline="\n").write(text)
+open(os.path.join(out, f"cases{KS}.loom-test"), "w", newline="\n").write(text)
 print("wrote", len(cases), "cases")
