@@ -1,60 +1,25 @@
 {
- "_comment": "Flint regenerated from main (#161) vs the published card programs, same runner (temporary).",
+ "_comment": "Flint DevLab perf session on the published regenerated programs (temporary, not for merge).",
  "card": "loom-fun/ggml-org-Flint-loom",
  "memory_bytes": 69000000000,
  "kit": null,
  "llamacpp": "b1355",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
  "jobs": [
   {
-   "name": "flint-ab2-1",
+   "name": "flint-card",
    "variants": [
     {
      "name": "card"
-    },
-    {
-     "name": "new",
-     "build": {}
-    },
-    {
-     "name": "spl0",
-     "build": {
-      "DFL_SPLITS": "0"
-     }
     }
    ],
    "steps": [
-    "perf:card:3",
-    "perf:new:3",
-    "perf:spl0:1",
-    "perf:card:3:long",
-    "perf:new:3:long",
-    "perf:spl0:3:long"
-   ]
-  },
-  {
-   "name": "flint-ab2-2",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "new",
-     "build": {}
-    },
-    {
-     "name": "spl0",
-     "build": {
-      "DFL_SPLITS": "0"
-     }
-    }
-   ],
-   "steps": [
-    "perf:card:3",
-    "perf:new:3",
-    "perf:spl0:1",
-    "perf:card:3:long",
-    "perf:new:3:long",
-    "perf:spl0:3:long"
+    "perf:card:2",
+    "perf:card:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:card",
+    "llamac4"
    ]
   }
  ]
