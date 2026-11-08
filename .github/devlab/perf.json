@@ -6,56 +6,10 @@
  "llamacpp": "b1355",
  "jobs": [
   {
-   "name": "flint-kt",
+   "name": "flint-mut",
    "card": "loom-fun/ggml-org-Flint-loom",
    "memory_bytes": 69000000000,
    "llamacpp": "b1355",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:new"
-   ]
-  },
-  {
-   "name": "qwen3-30b-kt",
-   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
-   "memory_bytes": 63000000000,
-   "llamacpp": "b1370",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:new"
-   ]
-  },
-  {
-   "name": "gptoss-kt",
-   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
-   "memory_bytes": 28000000000,
-   "llamacpp": "b1370",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:new"
-   ],
-   "kit": "gpt-oss"
-  },
-  {
-   "name": "qwen36-kt",
-   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
-   "memory_bytes": 48000000000,
-   "llamacpp": "b1369",
    "variants": [
     {
      "name": "new",
