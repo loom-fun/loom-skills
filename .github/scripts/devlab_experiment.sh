@@ -21,6 +21,7 @@
 #        determinism:C:R determinism.py, R reps of each prompt with C requests in flight
 #        admit:N         admission only: a needle prompt of N tokens on a fresh server, admitted or refused (503), cancelled
 #        needle:N[:S]    one Loom-only needle probe of N tokens on the running server (read timeout S seconds): status, TTFT
+#        status          the server's /v1/status (memory: weights, KV storage, workspace) after a short request, to status.json
 #        ktest           the starter's kernel tests (make_kernel_tests.py + run_kernel_tests.sh) on the package
 #        gates:LEVEL     gates.sh at LEVEL against the card's llama.cpp build ("llamacpp" in EXPERIMENT.json)
 # Writes WORK/<variant>/out: summary.json, *.log. Every server it starts is stopped at exit.
@@ -231,6 +232,10 @@ EOF
       FORCE=1 LEVEL=$p1 "$B/gates.sh" "$pkg" "$url" "$gguf" "$D/bench" "$LLAMA_PORT" > "$out/gates.out" 2>&1; rc=$?
       cp "$D"/bench/gates.json "$D"/bench/gates_*.log "$out/" 2>/dev/null
       res[$s]=$(grep -h "^GATES" "$out/gates.out" | tail -1 | cut -c1-300); [ -n "${res[$s]}" ] || res[$s]="rc=$rc";;
+    status)
+      curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
+      curl -sf "$url/v1/chat/completions" -H "Content-Type: application/json" -d "{\"model\": \"$model\", \"messages\": [{\"role\": \"user\", \"content\": \"Say OK.\"}], \"max_tokens\": 8}" >/dev/null
+      curl -sf "$url/v1/status" > "$out/status.json"; res[$s]=$(head -c 1500 "$out/status.json");;
     needle)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       step "needle $p1"
