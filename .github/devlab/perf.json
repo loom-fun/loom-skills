@@ -1,35 +1,71 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "Temporary: DevLab perf sessions on the regenerated programs.",
+ "card": "loom-fun/InternScience-Sage-A1.5-loom",
+ "memory_bytes": 41000000000,
+ "kit": null,
+ "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "sage",
+   "card": "loom-fun/InternScience-Sage-A1.5-loom",
+   "memory_bytes": 41000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "llama_spec": "--spec-type draft-mtp --spec-draft-n-max 2",
    "variants": [
     {
-     "name": "new",
-     "build": {}
+     "name": "card"
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:2",
+    "perf:card:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:card",
+    "llamac4"
    ]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "ornith",
+   "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
+   "memory_bytes": 36000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "llama_spec": "--spec-type ngram-simple",
    "variants": [
     {
-     "name": "new",
-     "build": {}
+     "name": "card"
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:2",
+    "perf:card:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:card",
+    "llamac4"
+   ]
+  },
+  {
+   "name": "q35",
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
+   "memory_bytes": 49000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 5 -ngld 99",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:card",
+    "llamac4"
    ]
   }
  ]
