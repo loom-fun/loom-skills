@@ -1,36 +1,15 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "DevLab perf session on a published card's programs (loom-org step 3). Temporary: not for merge.",
+ "card": "loom-fun/ggml-org-gemma-3-1b-it-loom",
+ "memory_bytes": 7000000000,
+ "kit": null,
+ "llamacpp": "b1370",
+ "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "textmatch:new"
-   ]
-  },
-  {
-   "name": "tm-on",
-   "thinking": "on",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "textmatch:new"
-   ]
+   "name": "gemma-3-1b",
+   "variants": [{"name": "card"}],
+   "steps": ["perf:card:2", "perf:card:2:long", "llama:2", "llama:2:long", "c4:card", "llamac4"]
   }
  ]
 }
