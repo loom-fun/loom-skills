@@ -1,10 +1,10 @@
 """Generates flash2.loom: Glimmer prefill flash attention in transposed form.
 
 Workgroup (TS 16-token tiles, KV head) of G*TS waves; wave w owns query head
-G*kv + w % G for tile w / G. Each 32-key tile of K and V^T is staged once in
-workgroup memory for all of them: over the union of the tiles' key ranges when
-they are uniform tiles of one row, else once per tile (the other tiles' waves
-mask that pass). A wave computes S^T = K Q^T, so in
+G*kv + w % G for tile w / G. The tiles are listed (g_attention_fallback_list: uniform tiles of one span starting
+at a position multiple of 16); a workgroup takes a listed tile and, with TS > 1, the tiles after it that continue
+it inside one aligned group of TS. Each 32-key tile of K and V^T is staged once in
+workgroup memory for all of them, over the union of the tiles' key ranges. A wave computes S^T = K Q^T, so in
 its MMA result each lane's column is one query (lane % 16) and its 8 elements
 are keys 2i + lane/16 (the RDNA3 WMMA result layout). Softmax therefore needs
 only in-lane reductions plus one xor-16 shuffle; P^T is assembled from the
@@ -77,26 +77,50 @@ assert KT % 32 == 0, f"FLASH2_KT={KT}: must be a multiple of 32"
 KB = KT // 16
 VTC, KBYTES, VTBYTES, KT_LESS = KT + 8, KT * (D + 8) * 2, D * (KT + 8) * 2, KT - 1
 
-# TS = 1: the kernel as it was before token subtiles (FLASH2_TS=1 generates it byte for byte).
-OLD_LAUNCH = '''  %tiles = index.div %tokens, %c16 : index
-  kernel.launch.config workgroups(%tiles, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
+# One workgroup per listed tile. The epoch's tile list (g_attention_fallback_list) holds the first token of every
+# 16-token tile inside one span that starts at a position multiple of 16 (tiles[0]: their count, tiles[1 + i]: the
+# i-th); workgroups past the count do nothing. A token's attention thus depends on its span only, not on where the
+# epoch packs it.
+LAUNCH = '''  %tiles_count = index.div %tokens, %c16 : index
+  kernel.launch.config workgroups(%tiles_count, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
 '''
-NEW_LAUNCH = '''  %tiles = index.div %tokens, %c16 : index
-  %cts = index.constant {TS} : index
-  %cts_less = index.constant {TS - 1} : index
-  %tiles_round = index.add %tiles, %cts_less : index
-  %groups = index.div %tiles_round, %cts : index
-  kernel.launch.config workgroups(%groups, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
+ANCHOR = "%first_token" if TS == 1 else "%anchor"
+LISTED = f'''  %tiles_view = buffer.view %tiles[%origin] : buffer -> view<[%tokens]xi32>
+  %listed_count32 = view.load %tiles_view[%c0] : view<[%tokens]xi32> -> i32
+  %listed_count = index.cast %listed_count32 : i32 to index
+  %listed = index.cmp ult, %tile, %listed_count : index
+  %entry_slot_value = index.add %tile, %c1 : index
+  %entry_slot = index.assume %entry_slot_value [lt(%entry_slot_value, %tokens)] : index
+  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32
+  %entry = index.cast %entry32 : i32 to index
+  %anchor_value = scf.select %listed, %entry, %c0 : index
+  {ANCHOR} = index.assume %anchor_value [range(%anchor_value, 0, 8191), lt(%anchor_value, %tokens)] : index
+  %info_view = buffer.view %info[%origin] : buffer -> view<[%tokens]x4xi32>
+  %row32 = view.load %info_view[{ANCHOR}, %c0] : view<[%tokens]x4xi32> -> i32
+  %pos0_32 = view.load %info_view[{ANCHOR}, %c1] : view<[%tokens]x4xi32> -> i32
 '''
-OLD_HEAD = '''  %tile_count = index.div %tokens, %c16 : index
+# Key range [%key_low, %pos_last] -> %key_tiles tiles of KT keys.
+KEYS = '''  %key_span = index.sub %pos_last, %key_low : index
+  %key_count_value = index.add %key_span, %c1 : index
+  %key_count = index.assume %key_count_value [range(%key_count_value, 1, 262144)] : index
+  %ckt_less = index.constant {KT_LESS} : index
+  %ckt = index.constant {KT} : index
+  %key_tiles_round = index.add %key_count, %ckt_less : index
+  %key_tiles = index.div %key_tiles_round, %ckt : index
+'''
+if TS == 1:
+    OWN = (f'''  %deep_pair = func.call @{P}_pair_deep(%info, %tokens, %first_token) : (buffer, index, index) -> (i1)
+  %pair_true = scalar.constant true : i1
+  %one_tile = scalar.xori %deep_pair, %pair_true : i1
+  %own = scalar.andi %listed, %one_tile : i1
+  scf.if %own {{
+''' if DEEP else "  scf.if %listed {\n")
+    HEAD = '''  %tile_count = index.div %tokens, %c16 : index
   %tile_id = kernel.workgroup.id<x> : index
   %tile = index.assume %tile_id [lt(%tile_id, %tile_count)] : index
   %kv_id = kernel.workgroup.id<y> : index
   %kv = index.assume %kv_id [range(%kv_id, 0, {KVH - 1})] : index
-  %first_token = index.mul %tile, %c16 : index
-  %uniform, %row32, %pos0_32 = func.call @{P}_tile_uniform(%info, %tokens, %first_token) : (buffer, index, index) -> (i1, i32, i32)
-  scf.if %uniform {
-  %workitem_id = kernel.workitem.id<x> : index
+''' + LISTED + OWN + '''  %workitem_id = kernel.workitem.id<x> : index
   %workitem = index.assume %workitem_id [range(%workitem_id, 0, {LANES - 1})] : index
   %wave_id = kernel.subgroup.id : index
   %wave = index.assume %wave_id [range(%wave_id, 0, {G - 1})] : index
@@ -121,25 +145,19 @@ OLD_HEAD = '''  %tile_count = index.div %tokens, %c16 : index
   %use_window = scalar.andi %is_sliding, %far : i1
   %window_start = index.sub %pos0, %window_less : index
   %key_low = scf.select %use_window, %window_start, %c0 : index
-  %key_span = index.sub %pos_last, %key_low : index
-  %key_count_value = index.add %key_span, %c1 : index
-  %key_count = index.assume %key_count_value [range(%key_count_value, 1, 262144)] : index
-  %ckt_less = index.constant {KT_LESS} : index
-  %ckt = index.constant {KT} : index
-  %key_tiles_round = index.add %key_count, %ckt_less : index
-  %key_tiles = index.div %key_tiles_round, %ckt : index
-  %c16h = index.constant {G} : index
+''' + KEYS + '''  %c16h = index.constant {G} : index
   %head_value = index.madd %kv, %c16h, %wave : index
   %head = index.assume %head_value [range(%head_value, 0, {QH - 1})] : index
 '''
-NEW_HEAD = '''  %true_const = scalar.constant true : i1
+else:
+    HEAD = '''  %true_const = scalar.constant true : i1
   %tile_count = index.div %tokens, %c16 : index
-  %tile_last = index.sub %tile_count, %c1 : index
   %cts = index.constant {TS} : index
-  %group = kernel.workgroup.id<x> : index
+  %tile_id = kernel.workgroup.id<x> : index
+  %tile = index.assume %tile_id [lt(%tile_id, %tile_count)] : index
   %kv_id = kernel.workgroup.id<y> : index
   %kv = index.assume %kv_id [range(%kv_id, 0, {KVH - 1})] : index
-  %workitem_id = kernel.workitem.id<x> : index
+''' + LISTED + '''  %workitem_id = kernel.workitem.id<x> : index
   %workitem = index.assume %workitem_id [range(%workitem_id, 0, {LANES - 1})] : index
   %wave_id = kernel.subgroup.id : index
   %wave = index.assume %wave_id [range(%wave_id, 0, {W - 1})] : index
@@ -158,15 +176,11 @@ NEW_HEAD = '''  %true_const = scalar.constant true : i1
   %is_sliding = scalar.cmpi ne, %sliding, %c0_i32 : i32
   %window = index.constant {CFG["window"]} : index
   %window_less = index.constant {CFG["window"] - 1} : index
-  %tile0 = index.mul %group, %cts : index
 @@SUBTILES@@
   scf.if %any_uniform {
   %head_value = index.madd %kv, %c16h, %head_in_group : index
   %head = index.assume %head_value [range(%head_value, 0, {QH - 1})] : index
-  %ckt_less = index.constant {KT_LESS} : index
-  %ckt = index.constant {KT} : index
-@@KEY_TILES@@
-'''
+''' + KEYS
 
 U = []
 A = U.append
@@ -175,7 +189,7 @@ A('''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: in
   %ckv = index.constant {KVH} : index
   %c16 = index.constant 16 : index
   %clanes = index.constant {LANES} : index
-@@LAUNCH@@} launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, {"%sinks" if CFG["sinks"] else "%gate"}: buffer, %info: buffer, %origins: buffer, %arena: buffer, %out: buffer) {
+@@LAUNCH@@} launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, {"%sinks" if CFG["sinks"] else "%gate"}: buffer, %info: buffer, %tiles: buffer, %origins: buffer, %arena: buffer, %out: buffer) {
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {CFG["layers"]})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
@@ -207,111 +221,65 @@ A('''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: in
 
 
 def subtiles():
-    """Per subtile s: live, uniform, row, first position and key range [lo, hi]; this wave's subtile (%first_token,
-    %pos0, %mine); whether one staging pass serves them all (%shared: every live subtile uniform, one row) and
-    that pass's key range (the union)."""
-    o = []
+    """The workgroup's group of tiles: the listed tile %anchor and the tiles after it that continue it inside one
+    aligned group of TS tiles (position // 16 % TS). Only the lowest tile of a group starts a workgroup (%owner:
+    the previous tile does not continue it); each of the group's waves takes one tile (%sub), and the staged keys
+    are the union of the tiles' key ranges. Per subtile s: live, first token, first position, key range [lo, hi].
+    Outputs: %any_uniform (this workgroup has a group to compute), this wave's tile (%first_token, %pos0, %mine)
+    and the union range (%key_low, %pos_last)."""
+    o = ['''  %row_bound = scalar.assume %row32 [range(%row32, 0, 2147483646)] : i32
+  %row = index.cast %row_bound : i32 to index
+  %pos_bound = scalar.assume %pos0_32 [range(%pos0_32, 0, 262128)] : i32
+  %pos_a = index.cast %pos_bound : i32 to index
+  %pos_tile = index.div %pos_a, %c16 : index
+  %group_slot = index.rem %pos_tile, %cts : index
+  %first_slot = index.cmp eq, %group_slot, %c0 : index
+  %back_true = scalar.constant true : i1
+  %back_false = scalar.constant false : i1
+  %continued = func.call @''' + P + '''_tile_adjacent(%info, %tokens, %anchor, %back_true) : (buffer, index, index, i1) -> (i1)
+  %starts = scalar.xori %continued, %true_const : i1
+  %owner = scalar.ori %first_slot, %starts : i1
+  %live0 = scalar.andi %listed, %owner : i1''']
     for s in range(TS):
+        if s:
+            o.append(f'''  %adj{s} = func.call @{P}_tile_adjacent(%info, %tokens, %firstc{s - 1}, %back_false) : (buffer, index, index, i1) -> (i1)
+  %cmax{s} = index.constant {TS - 1 - s} : index
+  %in_group{s} = index.cmp ule, %group_slot, %cmax{s} : index
+  %cont{s} = scalar.andi %live{s - 1}, %adj{s} : i1
+  %live{s} = scalar.andi %cont{s}, %in_group{s} : i1''')
         o.append(f'''  %cs{s} = index.constant {s} : index
-  %t{s} = index.add %tile0, %cs{s} : index
-  %live{s} = index.cmp ult, %t{s}, %tile_count : index
-  %tc{s} = index.min %t{s}, %tile_last : index
-  %first{s} = index.mul %tc{s}, %c16 : index
-  %ua{s}, %rowa{s}, %posa{s} = func.call @{P}_tile_uniform(%info, %tokens, %first{s}) : (buffer, index, index) -> (i1, i32, i32)
-  %u{s} = scalar.andi %ua{s}, %live{s} : i1
-  %rowv{s} = scf.select %u{s}, %rowa{s}, %c0_i32 : i32
-  %posv{s} = scf.select %u{s}, %posa{s}, %c0_i32 : i32
-  %rowb{s} = scalar.assume %rowv{s} [range(%rowv{s}, 0, 2147483646)] : i32
-  %row{s} = index.cast %rowb{s} : i32 to index
-  %posb{s} = scalar.assume %posv{s} [range(%posv{s}, 0, 262128)] : i32
-  %spos{s} = index.cast %posb{s} : i32 to index
+  %off{s} = index.constant {16 * s} : index
+  %first{s} = index.add %anchor, %off{s} : index
+  %firstc{s} = scf.select %live{s}, %first{s}, %anchor : index
+  %posr{s} = index.add %pos_a, %off{s} : index
+  %spos{s} = scf.select %live{s}, %posr{s}, %pos_a : index
   %hi{s} = index.add %spos{s}, %c15 : index
   %far{s} = index.cmp uge, %spos{s}, %window : index
   %use_window{s} = scalar.andi %is_sliding, %far{s} : i1
   %window_start{s} = index.sub %spos{s}, %window_less : index
   %lo{s} = scf.select %use_window{s}, %window_start{s}, %c0 : index''')
         if s == 0:
+            o.append("  %lo_u_0 = index.add %lo0, %c0 : index\n  %hi_u_0 = index.add %hi0, %c0 : index")
             continue
-        r = "0" if s == 1 else f"_{s - 1}"
-        any_r, sh_r, lo_r, hi_r = (("%u0", "%u0", "%lo0", "%hi0") if s == 1 else
-                                   (f"%any{r}", f"%shared{r}", f"%lo_u{r}", f"%hi_u{r}"))
-        mu_r, mp_r = ("%u0", "%spos0") if s == 1 else (f"%mu{r}", f"%mp{r}")
-        o.append(f'''  %any_{s} = scalar.ori {any_r}, %u{s} : i1
-  %same{s} = index.cmp eq, %row{s}, %row0 : index
-  %ok{s} = scalar.andi %u{s}, %same{s} : i1
-  %dead{s} = scalar.xori %live{s}, %true_const : i1
-  %okl{s} = scalar.ori %ok{s}, %dead{s} : i1
-  %shared_{s} = scalar.andi {sh_r}, %okl{s} : i1
-  %lo_m{s} = index.min {lo_r}, %lo{s} : index
-  %lo_u_{s} = scf.select %live{s}, %lo_m{s}, {lo_r} : index
-  %hi_m{s} = index.max {hi_r}, %hi{s} : index
-  %hi_u_{s} = scf.select %live{s}, %hi_m{s}, {hi_r} : index
+        mu, mp, mf = ("%live0", "%spos0", "%anchor") if s == 1 else (f"%mu_{s - 1}", f"%mp_{s - 1}", f"%mf_{s - 1}")
+        o.append(f'''  %lo_m{s} = index.min %lo_u_{s - 1}, %lo{s} : index
+  %lo_u_{s} = scf.select %live{s}, %lo_m{s}, %lo_u_{s - 1} : index
+  %hi_m{s} = index.max %hi_u_{s - 1}, %hi{s} : index
+  %hi_u_{s} = scf.select %live{s}, %hi_m{s}, %hi_u_{s - 1} : index
   %is_sub{s} = index.cmp eq, %sub, %cs{s} : index
-  %mu_{s} = scf.select %is_sub{s}, %u{s}, {mu_r} : i1
-  %mp_{s} = scf.select %is_sub{s}, %spos{s}, {mp_r} : index''')
+  %mu_{s} = scf.select %is_sub{s}, %live{s}, {mu} : i1
+  %mp_{s} = scf.select %is_sub{s}, %spos{s}, {mp} : index
+  %mf_{s} = scf.select %is_sub{s}, %firstc{s}, {mf} : index''')
     z = TS - 1
-    o.append((f"  %deep_pair = func.call @{P}_pair_deep(%info, %tokens, %group) : (buffer, index, index) -> (i1)\n"
-              f"  %any_uniform = scalar.andi %any_{z}, %deep_pair : i1" if ROLE == "deep" else
-              f"  %any_uniform = scalar.andi %any_{z}, %true_const : i1") + f'''
-  %shared = scalar.andi %shared_{z}, %true_const : i1
-  %lo_u = index.add %lo_u_{z}, %c0 : index
-  %hi_u = index.add %hi_u_{z}, %c0 : index
+    o.append((f"  %deep_pair = func.call @{P}_pair_deep(%info, %tokens, %anchor) : (buffer, index, index) -> (i1)\n"
+              "  %any_uniform = scalar.andi %live0, %deep_pair : i1" if ROLE == "deep" else
+              "  %any_uniform = scalar.andi %live0, %true_const : i1") + f'''
   %mine = scalar.andi %mu_{z}, %true_const : i1
-  %my_tile = index.add %tile0, %sub : index
-  %my_tile_live = index.min %my_tile, %tile_last : index
-  %first_token = index.mul %my_tile_live, %c16 : index
-  %pos0 = index.add %mp_{z}, %c0 : index''')
+  %first_token = index.add %mf_{z}, %c0 : index
+  %pos0 = index.add %mp_{z}, %c0 : index
+  %key_low = index.add %lo_u_{z}, %c0 : index
+  %pos_last = index.add %hi_u_{z}, %c0 : index''')
     return "\n".join(o)
-
-
-def key_tiles():
-    """Key tiles of the flattened (staging pass, key tile) loop: one pass over the union of the subtiles' key ranges
-    when %shared, else one pass per subtile (%per tiles each: the longest subtile's)."""
-    o = []
-    for s_ in range(TS):
-        o.append(f'''  %kspan{s_} = index.sub %hi{s_}, %lo{s_} : index
-  %kspan_b{s_} = index.assume %kspan{s_} [range(%kspan{s_}, 0, 262143)] : index
-  %kround{s_} = index.add %kspan_b{s_}, %ckt : index
-  %ktiles{s_} = index.div %kround{s_}, %ckt : index
-  %ktl{s_} = scf.select %u{s_}, %ktiles{s_}, %c0 : index''')
-        if s_:
-            prev = "%ktl0" if s_ == 1 else f"%ktm{s_ - 1}"
-            o.append(f"  %ktm{s_} = index.max {prev}, %ktl{s_} : index")
-    o.append(f'''  %kspan_u = index.sub %hi_u, %lo_u : index
-  %kspan_ub = index.assume %kspan_u [range(%kspan_u, 0, 262143)] : index
-  %kround_u = index.add %kspan_ub, %ckt : index
-  %ktiles_u = index.div %kround_u, %ckt : index
-  %per = scf.select %shared, %ktiles_u, %ktm{TS - 1} : index
-  %npass = scf.select %shared, %c1, %cts : index
-  %key_tiles = index.mul %per, %npass : index
-  %per_max = index.max %per, %c1 : index
-  %per_nz = index.assume %per_max [range(%per_max, 1, 16384)] : index''')
-    return "\n".join(o)
-
-
-def pass_range():
-    """Key tile %kt's staging pass: the union's row and key range when %shared, else subtile %sub_pass's own (no
-    keys when that subtile is not uniform); the waves of other subtiles mask every key of the pass (%act_v)."""
-    o = ['''    %sub_pass = index.div %kt, %per_nz : index
-    %kt_in = index.rem %kt, %per_nz : index''']
-    prev = ("%row0", "%lo0", "%hi0", "%u0")
-    for s_ in range(1, TS):
-        o.append(f'''    %pis{s_} = index.cmp eq, %sub_pass, %cs{s_} : index
-    %prow{s_} = scf.select %pis{s_}, %row{s_}, {prev[0]} : index
-    %plo{s_} = scf.select %pis{s_}, %lo{s_}, {prev[1]} : index
-    %phi{s_} = scf.select %pis{s_}, %hi{s_}, {prev[2]} : index
-    %pu{s_} = scf.select %pis{s_}, %u{s_}, {prev[3]} : i1''')
-        prev = (f"%prow{s_}", f"%plo{s_}", f"%phi{s_}", f"%pu{s_}")
-    o.append(f'''    %row = scf.select %shared, %row0, {prev[0]} : index
-    %pass_low = scf.select %shared, %lo_u, {prev[1]} : index
-    %pass_last = scf.select %shared, %hi_u, {prev[2]} : index
-    %pass_live = scf.select %shared, %true_const, {prev[3]} : i1
-    %key_low = scf.select %pass_live, %pass_low, %c1 : index
-    %pos_last = scf.select %pass_live, %pass_last, %c0 : index
-    %own_pass = index.cmp eq, %sub, %sub_pass : index
-    %active = scalar.ori %shared, %own_pass : i1
-    %act_v = vector.splat %active : vector<8xi1>''')
-    return "\n".join(o) + "\n"
 
 
 # Q^T fragments: held in registers for D = 128; for D = 256 they would not fit next to the
@@ -414,7 +382,7 @@ def staging_slots():
 
 
 A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NF))} = scf.for %kt = [%c0 to %key_tiles step %c1](%m = {M_INIT} : f32, %l = {L_INIT} : f32, {acc}) -> (f32, f32, {", ".join(["vector<8xf32>"] * NF)}) {{
-{pass_range() if TS > 1 else ""}    %tile_first = index.madd {"%kt_in" if TS > 1 else "%kt"}, %ckt, %key_low : index
+    %tile_first = index.madd %kt, %ckt, %key_low : index
 ''')
 assert POW2 or KT == 32, "guarded staging is generated for 32-key tiles"
 for p in range(0 if POW2 else PASSES):   # non-power-of-two group: guarded staging passes
@@ -431,9 +399,7 @@ A(f'''    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     %tf32 = index.cast %tile_first : index to i32''')
 if Q_IN_LOOP:
     A("\n".join("  " + line for line in QLOAD.split("\n")))
-VALID = ("    %vw{kb} = vector.andi %causal{kb}, %winok{kb} : vector<8xi1>\n"
-         "    %valid{kb} = vector.andi %vw{kb}, %act_v : vector<8xi1>") if TS > 1 else \
-    "    %valid{kb} = vector.andi %causal{kb}, %winok{kb} : vector<8xi1>"
+VALID = "    %valid{kb} = vector.andi %causal{kb}, %winok{kb} : vector<8xi1>"
 for kb in range(KB):
     acc_name = "%init"
     for c in range(NF):
@@ -514,12 +480,12 @@ for d in range(NF):
   vector.fragment.store<result> %of{d}, %out_view[{r}, %c0] shape [%c16, %c16] : vector<8xf32>, view<{D}x16xf32, %out_layout>''')
 A("  }\n" * (2 if TS > 1 else 1) + "  kernel.return\n}\n")
 text = "\n".join(U).replace("@@STAGING_SLOTS@@", staging_slots(), 1)
-for key, value in {"@@LAUNCH@@": OLD_LAUNCH if TS == 1 else NEW_LAUNCH, "@@HEAD@@": OLD_HEAD if TS == 1 else NEW_HEAD,
+for key, value in {"@@LAUNCH@@": LAUNCH, "@@HEAD@@": HEAD,
                    "@@TRUE_CONST@@": "  %true_const = scalar.constant true : i1\n" if TS == 1 else "",
                    "@@MINE@@": "" if TS == 1 else "  scf.if %mine {\n"}.items():
     text = text.replace(key, value, 1)
 if TS > 1:
-    text = text.replace("@@SUBTILES@@", subtiles(), 1).replace("@@KEY_TILES@@", key_tiles(), 1)
+    text = text.replace("@@SUBTILES@@", subtiles(), 1)
 # constants used above
 consts = "".join(f"  %d{c} = index.constant {c * 16} : index\n" for c in range(NF))
 consts += "".join(f"  %d{d * 16 if d else 0}r = index.constant {d * 16} : index\n" for d in range(NF))
@@ -537,37 +503,32 @@ out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abs
 if ROLE == "deep":
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_deep") @{P}_attention_flash2_deep(', 1)
 elif DEEP:
-    text = text.replace("  scf.if %uniform {\n", f"""  %pair = index.div %tile, %c2 : index
-  %deep_pair = func.call @{P}_pair_deep(%info, %tokens, %pair) : (buffer, index, index) -> (i1)
-  %pair_true = scalar.constant true : i1
-  %one_tile = scalar.xori %deep_pair, %pair_true : i1
-  %own = scalar.andi %uniform, %one_tile : i1
-  scf.if %own {{\n""", 1)
     import subprocess
     subprocess.run([sys.executable, os.path.abspath(__file__)], check=True, env=dict(
         os.environ, FLASH2_TS="2", FLASH2_ROLE="deep", FLASH2_TS_DEPTH=str(DEEP), FLASH2_OUT=out_path + ".deep"))
     text += f"""
-// Pair PAIR of 16-token tiles (2 PAIR, 2 PAIR + 1) goes to {P}_attention_flash2_deep: both uniform, one row, the
-// first at key position >= {DEEP}.
-func.def inline @{P}_pair_deep(%info: buffer, %tokens: index, %pair: index) -> (i1) {{
-  %c16 = index.constant 16 : index
-  %c32 = index.constant 32 : index
-  %first0 = index.mul %pair, %c32 : index
-  %first1_value = index.add %first0, %c16 : index
-  %live1 = index.cmp ult, %first1_value, %tokens : index
-  %first1 = scf.select %live1, %first1_value, %first0 : index
-  %u0, %r0, %p0 = func.call @{P}_tile_uniform(%info, %tokens, %first0) : (buffer, index, index) -> (i1, i32, i32)
-  %u1, %r1, %p1 = func.call @{P}_tile_uniform(%info, %tokens, %first1) : (buffer, index, index) -> (i1, i32, i32)
-  %same = scalar.cmpi eq, %r0, %r1 : i32
-  %p0_bound = scalar.assume %p0 [range(%p0, 0, 262128)] : i32
-  %pos = index.cast %p0_bound : i32 to index
-  %from = index.constant {DEEP} : index
-  %far = index.cmp uge, %pos, %from : index
-  %a = scalar.andi %u0, %u1 : i1
-  %b = scalar.andi %a, %same : i1
-  %c = scalar.andi %b, %live1 : i1
-  %d = scalar.andi %c, %far : i1
-  func.return %d : i1
+// The tile at FIRST and its partner (the other tile of its aligned pair of positions, 2 PAIR and 2 PAIR + 1 for
+// position tiles) form a pair for {P}_attention_flash2_deep: both inside one span, the pair at key position >= {DEEP}.
+func.def inline @{P}_pair_deep(%info: buffer, %tokens: index, %first: index) -> (i1) {{
+  %c1 = index.constant 1 : index
+  %zero = index.constant 0 : offset
+  %c16_i32 = scalar.constant 16 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c4_i32 = scalar.constant 4 : i32
+  %c0_i32 = scalar.constant 0 : i32
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %bfirst = index.assume %first [range(%first, 0, 8191), lt(%first, %tokens)] : index
+  %pos = view.load %info_view[%bfirst, %c1] : view<[%tokens]x4xi32> -> i32
+  %pos_tile = scalar.shrui %pos, %c4_i32 : i32
+  %odd_bit = scalar.andi %pos_tile, %c1_i32 : i32
+  %odd = scalar.cmpi ne, %odd_bit, %c0_i32 : i32
+  %partner = func.call @{P}_tile_adjacent(%info, %tokens, %first, %odd) : (buffer, index, index, i1) -> (i1)
+  %back = scf.select %odd, %c16_i32, %c0_i32 : i32
+  %pair_pos = scalar.subi %pos, %back : i32
+  %from = scalar.constant {DEEP} : i32
+  %far = scalar.cmpi uge, %pair_pos, %from : i32
+  %both = scalar.andi %partner, %far : i1
+  func.return %both : i1
 }}
 """ + open(out_path + ".deep").read()
     os.remove(out_path + ".deep")
