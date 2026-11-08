@@ -292,12 +292,21 @@ def gate_applies(name, kind, feats):
     return True
 
 
-def metric_applies(key, kind, feats):
+def over_context(info):
+    """The metrics whose document is longer than the package's context: a performance session's Loom server refused
+    it (session "over_context", from perf.py's HTTP 400) and no session measured it. A measured value always counts:
+    a package that served the document once is never exempted."""
+    sessions = (info or {}).get("performance", {}).get("sessions", [])
+    measured = {k for s in sessions for k, m in s["metrics"].items() if m.get("loom") is not None}
+    return {k for s in sessions for k in s.get("over_context", [])} - measured
+
+
+def metric_applies(key, kind, feats, info=None):
     if kind == "decision" and key in ("decode", "decode_2k", "decode_32k", "streams4", "spec_acceptance"):
         return False   # a decision model answers in one forward pass: no decode
     if key == "spec_acceptance":
         return feats["speculative_decoding"]["status"] == "yes"
-    return True
+    return key not in over_context(info)   # with the card's info.json: a document the context can't hold
 
 
 def is_devlab(info, session):
@@ -331,7 +340,7 @@ def stale_metrics(info, programs, kind=None, feats=None, devlab=False):
     out = {}
     for k, (_, i) in card_metrics(info, devlab).items():
         sha = sessions[i].get("programs_sha256")
-        if sha and sha != programs and (kind is None or metric_applies(k, kind, feats)):
+        if sha and sha != programs and (kind is None or metric_applies(k, kind, feats, info)):
             out[k] = sha
     return out
 
@@ -340,7 +349,7 @@ def devlab_metrics(info, kind=None, feats=None):
     """{metric: source id} for the timed metrics only DevLab measured: the headline value needs a local session."""
     local, sessions = card_metrics(info), (info.get("performance") or {}).get("sessions", [])
     return {k: sessions[i]["source"] for k, (_, i) in card_metrics(info, devlab=True).items()
-            if k not in local and (kind is None or metric_applies(k, kind, feats))}
+            if k not in local and (kind is None or metric_applies(k, kind, feats, info))}
 
 
 def devlab_perf_metrics(info, kind=None, feats=None, programs=None):
@@ -348,7 +357,7 @@ def devlab_perf_metrics(info, kind=None, feats=None, programs=None):
     package's programs (`programs`, when known): a DevLab perf session fills the card's DevLab columns."""
     have, stale = card_metrics(info, devlab=True), stale_metrics(info, programs, kind, feats, devlab=True)
     return {k: stale.get(k, "missing") for k in card_metrics(info)
-            if k in TIMED and (k not in have or k in stale) and (kind is None or metric_applies(k, kind, feats))}
+            if k in TIMED and (k not in have or k in stale) and (kind is None or metric_applies(k, kind, feats, info))}
 
 
 def perf_flags(info, kind=None, feats=None, programs=None):
@@ -364,7 +373,7 @@ def perf_flags(info, kind=None, feats=None, programs=None):
                  judged on it, so a fresh local session comes first"""
     loom = {k: m.get("loom") for k, (m, _) in card_metrics(info).items()}
     if kind is not None:
-        loom = {k: v for k, v in loom.items() if metric_applies(k, kind, feats)}
+        loom = {k: v for k, v in loom.items() if metric_applies(k, kind, feats, info)}
     far = {}
     for k, r in ((info.get("roofline") or {}).get("metrics") or {}).items():
         if loom.get(k) and r.get("ceiling") and r.get("efficiency"):

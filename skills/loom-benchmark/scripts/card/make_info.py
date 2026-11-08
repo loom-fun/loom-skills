@@ -403,6 +403,10 @@ def cmd_perf(a):
         commands += [line.rstrip("\n") for line in open(a.commands_file, encoding="utf-8") if line.strip()]
     session = {"date": date, "source": source_arg(a), "runs": runs, "commands": commands, "metrics": metrics,
                "programs_sha256": programs_sha256(a.package) if a.package else None}
+    card_key = {v: k for k, v in ROOFLINE_METRIC.items()}
+    over = sorted({card_key[k] for r in loom_rows for k in r.get("over_context", [])} - set(ls))
+    if over:   # perf.py: the Loom server refused these documents as over its context (card_lib.over_context)
+        session["over_context"] = over
     perf = {"session": session}
     if a.baseline_version or a.baseline_args:
         perf["baseline"] = {"name": a.baseline_name, "version": baseline_version(a.baseline_version) if a.baseline_version else None,

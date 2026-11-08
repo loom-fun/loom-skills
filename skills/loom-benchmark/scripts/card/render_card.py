@@ -21,7 +21,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (FEATURES, GATE_NAMES, GATES, HF, LOOM_URL, METHOD, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
                       card_metrics, derived_tags, gate_applies, generator_commit, load_json,
-                      load_package, metric_applies, package_facts, programs_sha256, require_valid, stale_metrics)
+                      load_package, metric_applies, over_context, package_facts, programs_sha256, require_valid,
+                      stale_metrics)
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
 SUP = "¹²³⁴⁵⁶⁷⁸⁹"
@@ -269,7 +270,7 @@ def render(d):
     # ---- performance
     bname = base["name"]
     shown = card_metrics(info)
-    rows = {k: shown[k] for k, _ in METRICS if k in shown and metric_applies(k, kind, feats)}
+    rows = {k: shown[k] for k, _ in METRICS if k in shown and metric_applies(k, kind, feats, info)}
     counts = {}
     for k, (_, i) in rows.items():
         counts[i] = counts.get(i, 0) + 1
@@ -295,7 +296,7 @@ def render(d):
             out += f" {mark(notes.index(nk) + 1)}"
         return out + (f" {STALE}" if key in stale_keys else "")
     for key, label in METRICS:
-        if not metric_applies(key, kind, feats):
+        if not metric_applies(key, kind, feats, info):
             L.append(f"| {label} |" + " n/a |" * 8)
             continue
         m, i = shown.get(key, ({"loom": None, "baseline": None}, None))
@@ -336,7 +337,7 @@ def render(d):
         s = sources[sid]
         L.append(f"- {mark(i)} Measured {text(date)}; device {device_text(s['device'])}; hrx-loom {sdk_text(s['hrx_loom'])}; "
                  f"source: {src_text(s)}.")
-    if any(k in dshown for k, _ in METRICS if metric_applies(k, kind, feats)):
+    if any(k in dshown for k, _ in METRICS if metric_applies(k, kind, feats, info)):
         L.append("- DevLab: the same measurement on an AMD DevLab Dispatch Strix Halo runner; local ÷ DevLab is the "
                  "local value over the DevLab value of each engine, recorded for comparison, not a verdict.")
     for sha in sorted(set(stale.values()) | set(dstale.values())):
@@ -346,7 +347,9 @@ def render(d):
         L.append("- Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the "
                  "`spec` gate's requests.")
     L.append("- " + roofline_note(info))
-    L += [f"- {MISSING} not measured; n/a not applicable.", ""]
+    oc = ", ".join(sorted(over_context(info)))
+    L += [f"- {MISSING} not measured; n/a not applicable" + (f" ({oc}: the document is longer than the model's context)"
+                                                             if oc else "") + ".", ""]
 
     # ---- features
     L += ["## Features", "", "| feature | status | detail |", "|---|---|---|"]

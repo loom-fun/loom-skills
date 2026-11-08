@@ -145,7 +145,7 @@ def assess(repo, d):
     for s in (info.get("performance") or {}).get("sessions", []):
         measured |= {k for k, m in s.get("metrics", {}).items() if (m or {}).get("loom") is not None}
     out["missing"] += [f"metric:{k}" for k in METRIC_KEYS
-                       if metric_applies(k, facts["kind"], facts["features"]) and k not in measured]
+                       if metric_applies(k, facts["kind"], facts["features"], info) and k not in measured]
     if out["category"] == "A":
         if not info.get("roofline"):
             out["missing"].append("roofline")

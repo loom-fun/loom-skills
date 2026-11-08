@@ -62,8 +62,9 @@ references. For each target it assigns one action, and lists repos that duplicat
 | `done` | A, every applicable gate passes, every applicable metric measured in a local and a DevLab session, the roofline computed, no flag | nothing |
 
 "Applicable" is the card generator's own rule (`card_lib.gate_applies` / `metric_applies`): vision only with a
-projector, spec only with drafting, and so on. Never delete or retire a repo yourself: list duplicates and
-non-targets for the user to decide. `--targets` takes `rank_models.py` output (`{"models": [...]}`) or a plain
+projector, spec only with drafting, a long-document metric unless the Loom server refused that document as over
+its context (`card_lib.over_context`; a measured value always counts), and so on. Never delete or retire a repo
+yourself: list duplicates and non-targets for the user to decide. `--targets` takes `rank_models.py` output (`{"models": [...]}`) or a plain
 list (entries or model ids; rank by order when absent). Each repo's `generator` is the loom-skills commit that
 generated its programs: `llm_config.json` `"generator"` (build.py's stamp), else the card's recovered one
 (`generator_source` says which).
