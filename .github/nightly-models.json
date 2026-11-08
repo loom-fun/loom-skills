@@ -74,7 +74,7 @@
   {
    "repo": "loom-fun/unsloth-Qwen3.5-4B-loom",
    "slug": "qwen3.5-4b",
-   "memory_bytes": 26000000000,
+   "memory_bytes": 28000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
