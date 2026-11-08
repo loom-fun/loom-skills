@@ -1460,17 +1460,23 @@ if cfg.get("moe"):
                       (tag + "_wu", raw(b + UN)), (tag + "_wd", raw(b + "ffn_down_exps.weight"))] + ([(tag + "_wsg", wsg_raw)] if SHG else [])
                      + ([(tag + "_dsc", dsc)] if DSC else []) + [(f"{tag}_b{p[0]}", v.reshape(-1)) for p, v in ebias.items()]):
             save(n, a)
+        routed_scale = {}   # sfx -> mean |expected y| of the chain
         def chain(t, sfx):
             """Inputs + reference of a t-token chain: h, y0 (shared output in y), ids/wts, the expected y."""
             hx = clear_tokens(t)
             ids, wts, rel = route_ref(hx, Wr, bias)
-            y0 = (rng.standard_normal((t, H)) * 0.1).astype(np.float32) if ACC else np.zeros((t, H), np.float32)
+            # The prefill chain starts from y = 0 (the decode chain and the combine test cover the shared-expert sum): the routed
+            # experts' output alone is then the whole expected y, and the check below is relative to its size. With the
+            # shared output in y (0.1 per element) the tolerance was 100x the routed output's mean (3e-5 on Flint):
+            # a chain that dropped every expert row passed.
+            y0 = (rng.standard_normal((t, H)) * 0.1).astype(np.float32) if ACC and sfx != "_p" else np.zeros((t, H), np.float32)
             sgv = 1 / (1 + np.exp(-(hx.astype(np.float64) @ Wsg.astype(np.float64)))) if SHG else np.ones(t)
             wts_s = wts * dsc[ids]   # the combine weights after g_moe_wscale (DSC)
             yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts_s, Wg, Wu, Wd, ebias.get("gate"), ebias.get("up"), ebias.get("down"), f16=sfx == "_p")
             for n, a in [("_h", hx), ("_y0", y0), ("_ids", ids), ("_wts", wts.astype(np.float32)), ("_y", yref.astype(np.float32)),
                          ("_sg", sgv.astype(np.float32))] + ([("_wts_s", wts_s.astype(np.float32))] if DSC else []):
                 save(tag + sfx + n, a)
+            routed_scale[sfx] = float(np.abs(yref).mean())
             print(f"moe test layer {li}{sfx}: t={t} ids[0] {ids[0].tolist()} min relative score gap k/k+1 {rel.min():.3g}")
             return ids, wts
         wr_t, wsg_t = ty(wr_raw), (ty(wsg_raw) if SHG else "")
@@ -1571,7 +1577,7 @@ if cfg.get("moe"):
   kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {SGA}%y) : [index](index, index, tensor<{mr}x{H}xf32>, tensor<{ta}xi32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
   check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
   check.expect.close actual(%wts) expected({EW}) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
-  check.expect.close actual(%y) expected(%ey) atol(1.0e-2) rtol(2.0e-2) nan(different) : tensor<{t}x{H}xf32>
+  check.expect.close actual(%y) expected(%ey) atol({0.05 * routed_scale["_p"]:.3g}) rtol(5.0e-2) nan(different) : tensor<{t}x{H}xf32>
   check.return
 }}
 """
