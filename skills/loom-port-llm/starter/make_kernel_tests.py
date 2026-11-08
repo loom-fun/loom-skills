@@ -15,7 +15,7 @@ import json, sys, os, numpy as np
 from gguf import GGUFReader
 from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mv_rows import pick_r, iq_r  # noqa: E402
+from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
 from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402  formats with no 256-row (_m256) GEMM
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
 from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
@@ -1185,6 +1185,27 @@ def flash_cases(kern, D, KVH, width, scale, WIN, tag=""):
 
 if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (not WIN or not cfg.get("head_dim_swa")):
     flash_cases("g_attention_flash2", D, KVH, KVH * D, D ** -0.5, WIN)
+    DEEP = flash2_deep_from(cfg)
+    if DEEP:   # the deep pairs' kernel: the same 64 tokens DEEP keys further on, their pages aliasing the 1024 keys above
+        n_rep = DEEP // 1024 + 1; t, ctx_d = 64, (DEEP // 1024 + 1) * 1024
+        kk = np.load(os.path.join(out, "f_arena.npy")).reshape(2, 1024, -1)[:, :, :KVH * D].reshape(2, 1024, KVH, D)
+        qq = np.load(os.path.join(out, "f_q.npy")).reshape(t, QH, D); gg = np.load(os.path.join(out, "f_g.npy")).reshape(t, QH, D)
+        info_d = np.zeros((t, 4), np.int32); info_d[:, 1] = ctx_d - t + np.arange(t); info_d[:, 2] = 1
+        orig_d = np.zeros(10 + ctx_d // 16, np.int32); orig_d[8] = 40; orig_d[10:] = np.arange(ctx_d // 16) % 64
+        o_d = np.zeros((t, QH, D)); qd = qq.astype(np.float16).astype(np.float64)
+        for hh in range(QH):   # every key is visible (no window at these positions in the case), each 1024 keys n_rep times
+            kv = hh // (QH // KVH); sc = qd[:, hh] @ kk[0, :, kv].astype(np.float64).T * D ** -0.5
+            m = sc.max(-1, keepdims=True); w = np.exp(sc - m)
+            j = np.arange(1024)[None, :]; seen = (info_d[:, 1][:, None] - j) // 1024 + 1   # times key j repeats up to p
+            w = w * seen; o_d[:, hh] = (w / w.sum(-1, keepdims=True)) @ kk[1, :, kv].astype(np.float64)
+        if cfg.get("attn_gate"):
+            o_d = o_d / (1 + np.exp(-gg))
+        for n_, a_ in [("f_info_d", info_d), ("f_orig_d", orig_d), ("f_o_d", o_d.reshape(t, QH * D).astype(np.float32))]:
+            save(n_, a_)
+        cases.append(cases[-2 if WIN else -1].replace("@flash_prefill {", "@flash_prefill_deep {")
+                     .replace(f"%ctx = check.literal value(1024)", f"%ctx = check.literal value({ctx_d})")
+                     .replace('"f_info.npy"', '"f_info_d.npy"').replace('"f_orig.npy"', '"f_orig_d.npy"').replace('"f_o.npy"', '"f_o_d.npy"')
+                     .replace("tensor<74xi32>", f"tensor<{len(orig_d)}xi32>"))
 
 # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
 # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
@@ -1430,6 +1451,9 @@ if cfg.get("moe"):
 }}
 """)
 import re
+if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
+    cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
+                    flags=re.M) for c in cases]
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
 open(os.path.join(out, "cases.loom-test"), "w", newline="\n").write(text)
