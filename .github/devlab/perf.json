@@ -9,43 +9,25 @@
    "name": "bisect",
    "variants": [
     {
-     "name": "r3eef7da",
+     "name": "rbf4bdc4",
      "build": {},
-     "ref": "3eef7da"
+     "ref": "bf4bdc4"
     },
     {
-     "name": "r7da0f6a",
+     "name": "r52aaa0d",
      "build": {},
-     "ref": "7da0f6a"
+     "ref": "52aaa0d"
     },
     {
-     "name": "r8bf8edc",
+     "name": "rb79ef17",
      "build": {},
-     "ref": "8bf8edc"
-    },
-    {
-     "name": "ra69adc9",
-     "build": {},
-     "ref": "a69adc9"
-    },
-    {
-     "name": "r54ba173",
-     "build": {},
-     "ref": "54ba173"
-    },
-    {
-     "name": "r0ee5e4b",
-     "build": {},
-     "ref": "0ee5e4b"
+     "ref": "b79ef17"
     }
    ],
    "steps": [
-    "perf:r3eef7da:1:long",
-    "perf:r7da0f6a:1:long",
-    "perf:r8bf8edc:1:long",
-    "perf:ra69adc9:1:long",
-    "perf:r54ba173:1:long",
-    "perf:r0ee5e4b:1:long"
+    "perf:rbf4bdc4:1:long",
+    "perf:r52aaa0d:1:long",
+    "perf:rb79ef17:1:long"
    ]
   }
  ]
