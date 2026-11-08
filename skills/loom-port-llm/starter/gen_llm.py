@@ -4546,6 +4546,9 @@ if __name__ == "__main__":
         parts.append(open(flash2).read())
     parts.append(program)
     text = "\n".join(parts)
+    if "_attention_flash2_deep\")" in text:   # depth dispatch (gen_flash2.py): its deep pairs' kernel after each launch
+        text = re.sub(r"^( *)kernel\.launch @(\w+)_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @\2_attention_flash2_deep[\3",
+                      text, flags=re.M)
     if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
         text = live_row_skip(text)
     out = os.path.join(out_dir, "model.loom")

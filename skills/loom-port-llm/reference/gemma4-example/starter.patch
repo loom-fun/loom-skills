@@ -387,8 +387,8 @@
                 window=_c.get("sliding_window") or 262144, kv_f32=False, gate=_c.get("attn_gate", False), layers=_c["layers"] - 1,
                 dim=_c["head_dim"])
  else:
-@@ -50,41 +50,40 @@
- TS = int(os.environ.get("FLASH2_TS") or (2 if D <= 128 and G < 16 else 1))
+@@ -58,41 +58,40 @@
+ DEEP = flash2_deep_from(_c) if T == "llm" and (ROLE or TS == 1) else 0
  W = G * TS                       # waves per workgroup
  LANES = 32 * W
 -# K/V staging tiles head_dim over 32*GP slots (GP: W rounded down to a power of two). With a power-of-two wave
@@ -445,7 +445,7 @@
    %first_token = index.mul %tile, %c16 : index
    %uniform, %row32, %pos0_32 = func.call @{P}_tile_uniform(%info, %tokens, %first_token) : (buffer, index, index) -> (i1, i32, i32)
    scf.if %uniform {
-@@ -131,6 +130,10 @@
+@@ -139,6 +138,10 @@
    %group = kernel.workgroup.id<x> : index
    %kv_id = kernel.workgroup.id<y> : index
    %kv = index.assume %kv_id [range(%kv_id, 0, {KVH - 1})] : index
@@ -456,7 +456,7 @@
    %workitem_id = kernel.workitem.id<x> : index
    %workitem = index.assume %workitem_id [range(%workitem_id, 0, {LANES - 1})] : index
    %wave_id = kernel.subgroup.id : index
-@@ -190,7 +193,7 @@
+@@ -198,7 +201,7 @@
    %k_view = buffer.view %k_tile[%origin] : buffer -> view<{KT}x{DP8}xf16>
    %vt_bytes = index.constant {VTBYTES} : offset
    %vt_tile = buffer.alloca<workgroup> align(16) %vt_bytes : buffer
@@ -465,7 +465,7 @@
  
    // Q^T as MMA rhs: lane column = token lane%16, 16 dims per fragment.
    %q_view = buffer.view %q[%origin] : buffer -> view<[%tokens]x{QH}x{NF}x16xf32>
-@@ -340,10 +343,14 @@
+@@ -350,10 +353,14 @@
    // Staging: thread t loads key t/{TPK}, dims (t%{TPK})*{DPT}.
    %ctpk = index.constant {TPK} : index
    %cdpt = index.constant {DPT} : index
@@ -482,7 +482,7 @@
  if CFG["kv_f32"]:
      KV_LOAD = f"""      %k_cache = buffer.view %arena[%k_offset] : buffer -> view<{KVH}x{D}xf32>
        %v_cache = buffer.view %arena[%v_offset] : buffer -> view<{KVH}x{D}xf32>
-@@ -375,58 +382,41 @@
+@@ -385,58 +392,41 @@
        scf.yield %kz, %kz : vector<{DPT}xf16>, vector<{DPT}xf16>
      }}
      vector.store %kvals, %k_view[%st_key, %st_dim] : vector<{DPT}xf16>, view<{KT}x{DP8}xf16>
@@ -559,7 +559,7 @@
          A(f'''    %kl{kb}_{c} = vector.fragment.load<lhs> %k_view[%kb{kb}_row, %d{c}] shape [%c16, %c16] : view<{KT}x{DP8}xf16> -> vector<16xf16>
      %s{kb}_{c} = vector.mma %kl{kb}_{c}, %qf{c}, {acc_name} : vector<16xf16>, vector<16xf16>, vector<8xf32>''')
          acc_name = f"%s{kb}_{c}"
-@@ -468,16 +458,17 @@
+@@ -478,16 +468,17 @@
      %l_scaled = scalar.mulf %l, %alpha : f32
      %l_new = scalar.addf %l_scaled, %tsum : f32
      %alpha_v = vector.splat %alpha : vector<8xf32>''')
@@ -580,7 +580,7 @@
    }
  @@MINE@@  // O^T / l (lane-uniform), gate, and store through a transposed strided view:
    // element (dim row, token column) -> out[first_token + col, head*128 + row].
-@@ -488,22 +479,23 @@
+@@ -498,22 +489,23 @@
    %out_layout = encoding.layout.strided [%c1, %c4096] : encoding<layout>
    %out_first_a = index.mul %first_token, %c4096 : index
    %cdim = index.constant {D} : index
@@ -610,7 +610,7 @@
  for key, value in {"@@LAUNCH@@": OLD_LAUNCH if TS == 1 else NEW_LAUNCH, "@@HEAD@@": OLD_HEAD if TS == 1 else NEW_HEAD,
                     "@@TRUE_CONST@@": "  %true_const = scalar.constant true : i1\n" if TS == 1 else "",
                     "@@MINE@@": "" if TS == 1 else "  scf.if %mine {\n"}.items():
-@@ -516,12 +508,14 @@
+@@ -526,8 +518,8 @@
  consts += "".join(f"  %d{i}i = index.constant {i} : index\n" for i in range(8))
  consts += "".join(f"  %kb{kb}_row = index.constant {kb * 16} : index\n  %kbo{kb} = scalar.constant {kb * 16} : i32\n" for kb in range(KB))
  text = text.replace("  %tile_count = index.div %tokens, %c16 : index\n", consts + "  %tile_count = index.div %tokens, %c16 : index\n", 1)
@@ -621,9 +621,10 @@
                     '{CFG["layers"]}': CFG["layers"], '{CFG["window"]}': CFG["window"], '{CFG["window"] - 1}': CFG["window"] - 1,
                     "{G - 1}": G - 1, "{QH}": QH, "{QH - 1}": QH - 1, "{QH * 128}": QH * 128, "{KVH - 1}": KVH - 1, "{LANES - 1}": LANES - 1, "{128 - DPT}": 128 - DPT,
                     '{"%sinks" if CFG["sinks"] else "%gate"}': "%sinks" if CFG["sinks"] else "%gate"}.items():
-     text = text.replace(key, str(value))
- assert "{" not in "".join(l for l in text.split("\n") if "{P}" in l or "{KVH" in l)
- out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
+@@ -571,4 +563,6 @@
+ }}
+ """ + open(out_path + ".deep").read()
+     os.remove(out_path + ".deep")
 +if os.environ.get("FLASH2_NAME"):
 +    text = text.replace(f"{P}_attention_flash2", os.environ["FLASH2_NAME"])
  open(out_path, "w", newline="\n").write(text)
@@ -1377,7 +1378,7 @@
 +        parts.append(t5[a:])
      parts.append(program)
      text = "\n".join(parts)
-     if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
+     if "_attention_flash2_deep\")" in text:   # depth dispatch (gen_flash2.py): its deep pairs' kernel after each launch
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
 @@ -49,6 +49,12 @@
@@ -1734,16 +1735,16 @@
    check.return
  }}
  """)
-@@ -1185,6 +1143,8 @@
- 
- if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (not WIN or not cfg.get("head_dim_swa")):
-     flash_cases("g_attention_flash2", D, KVH, KVH * D, D ** -0.5, WIN)
+@@ -1238,6 +1196,8 @@
+ }}
+ """ for name, kerns in (("both", ("g_attention_flash2", "g_attention_flash2_deep")), ("one", ("g_attention_flash2",)),
+                         ("deep", ("g_attention_flash2_deep",)))]
 +if os.environ.get("FLASH_TESTS", "1") == "1" and cfg["head_dim"] == 512 and DSWA != 512:   # global layers (gen_flash2s.py)
 +    flash_cases("g_attention_flash2_d512", 512, KVG, KVW, cfg.get("attn_scale") or 512 ** -0.5, 0, "_d512")
  
  # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
  # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
-@@ -1405,6 +1365,43 @@
+@@ -1482,6 +1442,43 @@
    check.return
  }}
  """)
@@ -1785,5 +1786,5 @@
 +}}
 +""")
  import re
- # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
- text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
+ if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
+     cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
