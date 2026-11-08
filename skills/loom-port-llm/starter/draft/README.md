@@ -256,13 +256,14 @@ c4_steady three runs; llama.cpp b1368 drafting from the same BF16 GGUF):
   padded to 64).
 - **Long-context verify pays decode attention per token** with the split-K kernel: it streams the KV once per token
   (Qwen3.8-27B at 32k, 671 us per layer for 1 token, 2058 us for 4, `loom-benchmark` dispatch time), so depth 7 falls
-  behind depth 3 at long context and the 27B package uses depth 3. For head_dim 128 with at most 2 KV heads the starter now sends
-  tokens at position >= `SEG_MIN` (8192) on full-attention layers to `g_attention_seg` (gen_llm.py): one workgroup
-  per verification span reads each key block once for all its tokens, keys over lanes for the scores, exact per token
-  (drafted == undrafted). Qwen2.5-1.5B depth 2, decode at 32k: +27 % locally (interleaved A/B), +14 % on DevLab (same
-  runner); 16k +24 % locally; short decode and 4 streams unchanged. Elsewhere it lost: head_dim 64 (Qwen2.5-0.5B,
-  +19 % locally but -21 % on DevLab), 8 KV heads (Qwen3-4B DFlash, -17 % locally), head_dim 256 with one KV head
-  (Gemma-3-1B, 8k/16k -40 %). Earlier attempts: a block's 16 key scores reduced by one butterfly all-reduce and absolute-aligned 16-key
+  behind depth 3 at long context and the 27B package uses depth 3. For head_dim 64 and 128 with at most 2 KV heads the starter now
+  sends tokens at position >= `SEG_MIN` (8192) on full-attention layers to `g_attention_seg` (gen_llm.py): one
+  workgroup per verification span reads each key block once for all its tokens, keys over lanes for the scores, exact
+  per token (drafted == undrafted). Decode at 32k, same machine with vs without (`SEG_ATTN=0`): Qwen2.5-0.5B depth 2
+  +37 % locally, +24 % on DevLab; Qwen2.5-1.5B +27 % locally, +16 % on DevLab. Cost: one leader-list kernel per epoch
+  and one indirect launch per full-attention layer, measured on DevLab at -14 % (0.5B) and -6 % (1.5B) for 4 streams
+  at short context (locally within noise). Elsewhere it lost: 8 KV heads (Qwen3-4B DFlash, -17 % locally), head_dim
+  256 with one KV head (Gemma-3-1B, 8k/16k -40 %). Earlier attempts: a block's 16 key scores reduced by one butterfly all-reduce and absolute-aligned 16-key
   blocks (kept); two or four independent softmax chains per block (no change); a span workgroup staging each key
   block in workgroup memory with lanes over dims (exact, but slower in the model: the per-key 32-lane reductions are
   the cost, here 45 instructions per key and head at head_dim 64); and a WMMA split kernel with the span's tokens as

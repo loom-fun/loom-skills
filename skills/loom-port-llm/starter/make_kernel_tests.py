@@ -720,6 +720,8 @@ def seg_case(li):
   check.return
 }}
 """)
+# the drafting settings: the config's (a package's llm_config.json) or build.py's LLM_DRAFT (a pre-build cfg.json)
+cfg.setdefault("draft", json.loads(os.environ.get("LLM_DRAFT") or "null"))
 if cfg.get("draft") and not cfg.get("attn_gate") and not cfg.get("attn_sinks"):   # combine's gate input: none here
     seg_case([i for i in range(cfg["layers"]) if i not in set(cfg.get("sliding_layers") or []) | set(cfg.get("recurrent_layers", []))][0])
 # 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
