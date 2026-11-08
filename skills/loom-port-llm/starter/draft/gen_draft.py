@@ -927,10 +927,11 @@ def _token_setup(meta, tokens_buf, embed_norm, x, h, g):
   %list_entry = index.constant 4 : offset
   %list_size = index.scale %t, %list_entry : index, offset -> offset
   %count_size = index.constant 256 : offset
+  %flash_tiles = buffer.alloca<global> align(256) %list_size : buffer
   %fallback_list = buffer.alloca<global> align(256) %list_size : buffer
   %fallback_count = buffer.alloca<global> align(256) %count_size : buffer
   scf.if %gemm {{
-    kernel.launch @g_attention_fallback_list[%t](%t, %info, %fallback_list, %fallback_count) : [index](index, buffer, buffer, buffer)
+    kernel.launch @g_attention_fallback_list[%t](%t, %info, %flash_tiles, %fallback_list, %fallback_count) : [index](index, buffer, buffer, buffer, buffer)
   }}
   %embedding = command.parameter %w_embed, "token_embd.weight" : view<{g['esize']}xi8>
   kernel.launch @g_embed[%t](%t, {tokens_buf}{vis}, %embedding, {embed_norm}, {x}, {h}) : [index](index, buffer{vty}, view<{g['esize']}xi8>, view<{g['H']}xf32>, buffer, buffer)

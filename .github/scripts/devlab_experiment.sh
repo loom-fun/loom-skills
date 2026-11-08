@@ -189,6 +189,12 @@ for s in $steps; do
       step "prefix-cache pairs reps $p1"
       "$T" "$B/determinism.py" "$url" --model "$model" --pairs --reps "$p1" --log "$out/pairs.jsonl" > "$out/pairs.log" 2>&1
       cut -c1-400 "$out/pairs.log"; res[$s]=$(grep -c "a path gave two outputs" "$out/pairs.log")" prompts with a nondeterministic path, "$(grep -c "paths differ" "$out/pairs.log")" with hit != miss";;
+    stagger)
+      curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
+      step "stagger probe x $p1"
+      "$T" "$here/.github/scripts/stagger_probe.py" "$url" --model "$model" --reps "${p1:-6}" > "$out/stagger.log" 2>&1
+      grep -c "DIFF" "$out/stagger.log" | sed 's/^/DIFF lines: /'; head -3 "$out/stagger.log"
+      res[$s]="text DIFF lines $(grep -c 'text DIFF' "$out/stagger.log"), logprob-bit differences $(grep -vc 'bit difference None' "$out/stagger.log")";;
     admit)
       # Admission only: a needle prompt of N tokens on a fresh server; admitted (it runs) or refused (503), then cancelled
       [ -f "$LOOM_SERVE_STATE/exp-$name.pid" ] && "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
