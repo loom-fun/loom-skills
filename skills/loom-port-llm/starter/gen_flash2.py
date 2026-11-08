@@ -42,12 +42,13 @@ NF = D // 16                     # 16-dim MMA fragments per head
 DP8 = D + 8                      # padded K-tile row (f16 elements)
 QH = KVH * G
 # Token subtiles per workgroup: TS 16-token tiles share each staged K/V tile (wave w: head w % G, subtile w / G).
-# Every staged key feeds 16 * TS * G queries; with one tile (TS = 1) a small group (G = 2) re-streams the whole
-# KV cache from memory for every 32 queries and long prefill becomes bandwidth-bound. Default: 2 tiles (Qwen3-0.6B
-# 32k prefill on DevLab: 1 tile 1.2k, 2 tiles 3.7k, 4 tiles 2.6k, 8 tiles 2.1k tok/s: bigger workgroups leave too few
-# of them per 1024-token chunk); one tile when G >= 16 already feeds enough queries, and at head_dim > 128
-# (Q is reloaded every key tile there and the kernel has no registers left for more).
-TS = int(os.environ.get("FLASH2_TS") or (2 if D <= 128 and G < 16 else 1))
+# Every staged key feeds 16 * TS * G queries; with one tile a small group (G <= 2) re-streams the whole KV cache
+# from memory for every 32 queries and long prefill becomes bandwidth-bound. Default: 2 tiles at G <= 2 and
+# head_dim <= 128 (Qwen3-0.6B 32k prefill on DevLab: 1 tile 1.2k, 2 tiles 3.7k, 4 tiles 2.6k, 8 tiles 2.1k tok/s:
+# bigger workgroups leave too few of them per 1024-token chunk; local A/B, 2 tiles: Qwen3-0.6B / 1.7B 2.6x / 2.1x
+# at 32k, ties at 1k). One tile otherwise: at G = 3 / 4 two tiles lost 3-16 % at 1k-32k (Llama-3.2-3B, Qwen3-8B),
+# and at head_dim > 128 Q is reloaded every key tile and the kernel has no registers left for more.
+TS = int(os.environ.get("FLASH2_TS") or (2 if D <= 128 and G <= 2 else 1))
 W = G * TS                       # waves per workgroup
 LANES = 32 * W
 # K/V staging tiles head_dim over 32*GP slots (GP: W rounded down to a power of two). With a power-of-two wave

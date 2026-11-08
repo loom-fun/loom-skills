@@ -1,5 +1,5 @@
 {
- "_comment": "flash2 token subtiles (default FLASH2_TS=2) on G = 2/3/4/8 cards, and head_dim 512 split-dims flash on a mixed-head_dim MoE card: prefill A/B against origin/main's starter / the card, same runner per job. Temporary.",
+ "_comment": "flash2 token subtiles (default 2 at G <= 2) and head_dim 512 split-dims flash: prefill A/B against origin/main's starter / the card on the cards whose programs change, kernel tests and dev gates. Temporary.",
  "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
  "memory_bytes": 17000000000,
  "kit": null,
@@ -23,7 +23,8 @@
     "perf:base:1:long",
     "perf:ts2:1:long",
     "perf:base:1:long",
-    "perf:ts2:1:long"
+    "perf:ts2:1:long",
+    "gates:ts2:dev"
    ]
   },
   {
@@ -46,77 +47,8 @@
     "perf:base:1:long",
     "perf:ts2:1:long",
     "perf:base:1:long",
-    "perf:ts2:1:long"
-   ]
-  },
-  {
-   "name": "q8b",
-   "card": "loom-fun/unsloth-Qwen3-8B-loom",
-   "memory_bytes": 29000000000,
-   "variants": [
-    {
-     "name": "base",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "ts2",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:ts2",
-    "perf:base:1:long",
     "perf:ts2:1:long",
-    "perf:base:1",
-    "perf:ts2:1"
-   ]
-  },
-  {
-   "name": "llama3b",
-   "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
-   "memory_bytes": 29000000000,
-   "variants": [
-    {
-     "name": "base",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "ts2",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:ts2",
-    "perf:base:1:long",
-    "perf:ts2:1:long",
-    "perf:base:1",
-    "perf:ts2:1"
-   ]
-  },
-  {
-   "name": "q30moe",
-   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
-   "memory_bytes": 63000000000,
-   "llamacpp": "b1370",
-   "variants": [
-    {
-     "name": "base",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "ts2",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:ts2",
-    "perf:base:1:long",
-    "perf:ts2:1:long",
-    "perf:base:1",
-    "perf:ts2:1"
+    "gates:ts2:dev"
    ]
   },
   {
@@ -132,21 +64,15 @@
     {
      "name": "new",
      "build": {}
-    },
-    {
-     "name": "d512x2",
-     "double": [
-      "*:@g_attention_flash2_d512\\["
-     ]
     }
    ],
    "steps": [
     "ktest:new",
     "perf:card:1:long",
     "perf:new:1:long",
-    "perf:d512x2:1:long",
     "perf:card:1:long",
-    "perf:new:1:long"
+    "perf:new:1:long",
+    "gates:new:dev"
    ]
   }
  ]
