@@ -1,35 +1,80 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "Temporary: each card's published programs vs a rebuild from this branch (main + depth dispatch), same runner. Not for merge.",
+ "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom",
+ "memory_bytes": 56000000000,
+ "kit": null,
+ "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "vl4",
+   "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom",
+   "memory_bytes": 56000000000,
+   "kit": null,
+   "llamacpp": "b1370",
    "variants": [
+    {
+     "name": "card"
+    },
     {
      "name": "new",
      "build": {}
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:2",
+    "perf:new:2",
+    "perf:card:1:long",
+    "perf:new:1:long",
+    "c4:card",
+    "c4:new"
    ]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "vl8",
+   "card": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom",
+   "memory_bytes": 59000000000,
+   "kit": null,
+   "llamacpp": "b1370",
    "variants": [
+    {
+     "name": "card"
+    },
     {
      "name": "new",
      "build": {}
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:card:2",
+    "perf:new:2",
+    "perf:card:1:long",
+    "perf:new:1:long",
+    "c4:card",
+    "c4:new"
+   ]
+  },
+  {
+   "name": "nb",
+   "card": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
+   "memory_bytes": 81000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:new:2",
+    "perf:card:1:long",
+    "perf:new:1:long",
+    "c4:card",
+    "c4:new"
    ]
   }
  ]
