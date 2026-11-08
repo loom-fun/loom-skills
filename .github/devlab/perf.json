@@ -1,36 +1,28 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "Temporary: prefill 1k attribution on a hybrid MoE card (kernel doubling) and recurrence lane variants.",
+ "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
+ "memory_bytes": 36000000000,
+ "kit": null,
+ "llamacpp": "b1369",
  "jobs": [
-  {
-   "name": "tm-off",
-   "thinking": "off",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "textmatch:new"
-   ]
-  },
-  {
-   "name": "tm-on",
-   "thinking": "on",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "textmatch:new"
-   ]
-  }
+  {"name": "abl1",
+   "variants": [{"name": "card"}, {"name": "dmoe", "double": ["*:@g_moe_ggu_|@g_moe_gdn_"]},
+                {"name": "drec", "double": ["*:@g_gdn_recurrence\\["]}, {"name": "ddense", "double": ["*:@g_gemm_"]}],
+   "steps": ["perf:card:1", "perf:dmoe:1", "perf:drec:1", "perf:ddense:1", "perf:card:1"]},
+  {"name": "abl2",
+   "variants": [{"name": "card"},
+                {"name": "dgdn", "double": ["*:@g_gdn_conv|@g_gdn_qk_norm|@g_gdn_norm_gate|@g_mv_q4_k_k2048_t4\\["]},
+                {"name": "dmoex", "double": ["*:@g_moe_route_tr|@g_moe_bucket|@g_row_scale_f16_tiles|@g_moe_combine_sorted|@g_moe_shared_gate"]},
+                {"name": "dattn", "double": ["*:@g_attention_flash2|@g_qk_rope_store|@g_split_qgate"]},
+                {"name": "dnorm", "double": ["*:@g_post_add_norm|@g_row_scale_f16_live"]}],
+   "steps": ["perf:card:1", "perf:dgdn:1", "perf:dmoex:1", "perf:dattn:1", "perf:dnorm:1", "perf:card:1"]},
+  {"name": "rl",
+   "variants": [{"name": "main", "build": {}}, {"name": "rl4", "build": {"GDN_ROW_LANES": "4"}},
+                {"name": "rl16", "build": {"GDN_ROW_LANES": "16"}}, {"name": "rl4c8", "build": {"GDN_ROW_LANES": "4", "GDN_COLS": "8"}}],
+   "steps": ["perf:main:1", "perf:rl4:1", "perf:rl16:1", "perf:rl4c8:1", "perf:main:1"]},
+  {"name": "draft",
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 49000000000,
+   "variants": [{"name": "card"}, {"name": "nodraft", "execution": {"draft_depth": 0}}],
+   "steps": ["perf:card:1", "perf:nodraft:1", "perf:card:1", "perf:nodraft:1"]}
  ]
 }
