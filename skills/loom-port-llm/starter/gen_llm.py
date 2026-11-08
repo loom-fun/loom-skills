@@ -4377,7 +4377,7 @@ kernel.def export("g_gate_heads") @g_gate_heads(%tokens: index) {{
     %d_value = index.rem %bi, %cd : index
     %d = index.assume %d_value [range(%d_value, 0, {D - 1})] : index
     %x = view.load %gh_view[%token, %h] : view<[%tokens]x{QH}xf32> -> f32{"""
-    %xs = scalar.softplusf<afn> %x : f32""" if GATE_ACT == "softplus" else ""}
+    %xs = scalar.mulf %x, %x : f32""" if GATE_ACT == "softplus" else ""}
     view.store %x{"s" if GATE_ACT == "softplus" else ""}, %g_view[%token, %h, %d] : f32, view<[%tokens]x{QH}x{D}xf32>
   }}
   kernel.return
