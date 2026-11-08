@@ -11,7 +11,7 @@
    "memory_bytes": 56000000000,
    "kit": null,
    "llamacpp": "b1370",
-   "llama_spec": "",
+   "llama_spec": "--spec-type ngram-simple",
    "variants": [
     {
      "name": "card"
@@ -32,7 +32,7 @@
    "memory_bytes": 59000000000,
    "kit": null,
    "llamacpp": "b1370",
-   "llama_spec": "",
+   "llama_spec": "--spec-type ngram-simple",
    "variants": [
     {
      "name": "card"
