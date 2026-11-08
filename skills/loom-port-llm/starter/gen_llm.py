@@ -95,7 +95,10 @@ THETA = CFG["rope_theta"]
 # rope.dimension_count_swa; llama.cpp hparams.n_rot(il), rope_freq_base_train_swa): g_qk_rope_store_swa.
 # (A different head_dim on sliding layers, Gemma-4, is reference/gemma4-example's.)
 RD_SWA, THETA_SWA = CFG.get("rope_dims_swa") or RD, CFG.get("rope_theta_swa") or THETA
-SWA_ROPE = bool(CFG.get("sliding_layers")) and (CFG.get("head_dim_swa") or D) == D and (RD_SWA, THETA_SWA) != (RD, THETA)
+# cfg rope_scaling_swa "none": the global layers' YaRN does not apply to the sliding ones (mellum), which then take
+# g_qk_rope_store_swa even at the same base and dims.
+SWA_ROPE = bool(CFG.get("sliding_layers")) and (CFG.get("head_dim_swa") or D) == D and (
+    (RD_SWA, THETA_SWA) != (RD, THETA) or bool(CFG.get("rope_scaling")) and CFG.get("rope_scaling_swa") == "none")
 assert not SWA_ROPE or (RD_SWA % 64 == 0 and RD_SWA <= D), "rope_dims_swa must be a multiple of 64"
 FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs; global layers only)
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
