@@ -2909,9 +2909,9 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
 # Long-context decode attention over verification spans (drafting packages). The split kernel streams the whole KV
 # once per token, so a verify pass of n tokens cost n single-token passes at long context (Qwen2.5-0.5B at 32k, depth-2
 # drafting: 249 tok/s, 2.65 tokens and 10.6 ms per pass, 7 ms of it attention). On full-attention layers, tokens at
-# position >= SEG_MIN go to g_attention_seg instead: a segment (a run of up to depth + 1 consecutive same-row tokens,
-# its leader listed once per epoch by g_seg_list) is one workgroup per (KV head, split) that reads each 32-key block's
-# K and V once for all its tokens. Lane l takes key j + l for the scores (each token's q row from workgroup memory, a
+# position >= SEG_MIN take the span body inside g_attention_split instead: a segment (a run of up to depth + 1
+# consecutive same-row tokens) is run by its leader's workgroup per (KV head, split), which reads each 32-key block's
+# K and V once for all its tokens; the other tokens of the segment exit. Lane l takes key j + l for the scores (each token's q row from workgroup memory, a
 # wave max and sum per token and block); the values accumulate lanes-over-dims, each key's p read back from workgroup
 # memory. The partials keep the split kernel's layout, so g_attention_combine is unchanged. A token's blocks are
 # absolute 32-aligned and a block outside its own range is skipped, so it computes the same bits alone or in any
@@ -2963,7 +2963,7 @@ def attention_seg(split_text):
   %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x{DL}xf32>
   %cont0 = func.call @g_seg_next(%info, %tokens, %token, %seg_min) : (buffer, index, index, i32) -> (i1)
   %first = scalar.xori %cont0, %true : i1"""]
-    # the token is a segment leader (g_seg_list); members: the next tokens of its run when it starts it
+    # the token is a segment leader (g_seg_leader); members: the next tokens of its run when it starts it
     for k in range(1, TS):
         prev_m = "%first" if k == 1 else f"%member{k - 1}"
         L.append(f"""  %cb{k} = index.constant {k} : index
@@ -3147,94 +3147,41 @@ def attention_seg(split_text):
         view.store %fl{k}, %ml_view[%tok{k}, %bounded_head, %split, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
       }}
     }}""")
-    L.append("  kernel.return\n}\n")
-    text = "\n".join(L)
+    text = "\n".join(L[1:])   # the split kernel's own preamble (ids, constants) precedes it
     # names without an op of their own: token 0 is always a member; a token's range is [start, stop)
     text = re.sub(r"    %active_0 = scalar\.andi %member0, %in_split_0 : i1\n", "", text).replace("%active_0", "%in_split_0")
     text = re.sub(r"%lo_(\d+)\b", r"%start_\1", text)
     text = re.sub(r"%hi_(\d+)\b", r"%stop_\1", text)
-    text = text.replace("%lo_u", lo).replace("%hi_u", hi)
-    return SEG_NEXT + SEG_LIST.replace("{TS}", str(TS)).replace("{SEG_MIN}", str(SEG_MIN)) + listed(
-        text, "g_attention_seg", f"""  %c1 = index.constant 1 : index
-  %ckvh = index.constant {KVH} : index
-  %cS = index.constant {S} : index
-  %clanes = index.constant {G * 32} : index
-  kernel.launch.config workgroups(%count, %ckvh, %cS) workgroup_size(%clanes, %c1, %c1) : index""")
+    return text.replace("%lo_u", lo).replace("%hi_u", hi)
 
 
-SEG_LIST = """
-// The segment leaders of a decode epoch at position >= {SEG_MIN}, listed for g_attention_seg_listed (count[0]: the
-// list length). A leader starts a run of consecutive same-row tokens, or sits {TS} or more tokens into one.
-kernel.def export("g_seg_list") @g_seg_list(%tokens: index) {
-  %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
-} launch(%tokens_arg: index, %info: buffer, %list: buffer, %count: buffer) {
-  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
-  %lane_id = kernel.workitem.id<x> : index
-  %lane = index.assume %lane_id [range(%lane_id, 0, 63)] : index
-  %zero = index.constant 0 : offset
+SEG_LEAD = """
+// Does token %t (live, at position >= %min) lead a segment? It starts a run of consecutive same-row tokens, or sits
+// {TS} or more tokens into one (such tokens go alone).
+func.def inline @g_seg_leader(%info: buffer, %tokens: index, %t: index, %min: i32) -> (i1) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
-  %c0_i32 = scalar.constant 0 : i32
-  %c1_i32 = scalar.constant 1 : i32
-  %true = scalar.constant true : i1
-  %seg_min = scalar.constant {SEG_MIN} : i32
   %c_ts = index.constant {TS} : index
-  %counter_bytes = index.constant 16 : offset
-  %counter = buffer.alloca<workgroup> align(16) %counter_bytes : buffer
-  %counter_view = buffer.view %counter[%zero] : buffer -> view<4xi32>
-  %first_lane = index.cmp eq, %lane, %c0 : index
-  scf.if %first_lane {
-    view.store %c0_i32, %counter_view[%c0] : i32, view<4xi32>
-  }
-  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
-  %list_view = buffer.view %list[%zero] : buffer -> view<[%tokens]xi32>
-  scf.for %t_raw = [%lane to %tokens step %c64] {
-    %t = index.assume %t_raw [lt(%t_raw, %tokens)] : index
-    %pos = view.load %info_view[%t, 1] : view<[%tokens]x4xi32> -> i32
-    %live32 = view.load %info_view[%t, 2] : view<[%tokens]x4xi32> -> i32
-    %live = scalar.cmpi ne, %live32, %c0_i32 : i32
-    %far = scalar.cmpi uge, %pos, %seg_min : i32
-    %dom = scalar.andi %live, %far : i1
-    %run = scf.for %k = [%c0 to %c_ts step %c1](%r = %c0 : index) -> (index) {
-      %back = index.sub %t, %k : index
-      %ok = index.cmp ugt, %t, %k : index
-      %r_eq = index.cmp eq, %r, %k : index
-      %go = scalar.andi %ok, %r_eq : i1
-      %cont = scf.if %go -> (i1) {
-        %c = func.call @g_seg_next(%info, %tokens, %back, %seg_min) : (buffer, index, index, i32) -> (i1)
-        scf.yield %c : i1
-      } else {
-        %no = scalar.constant false : i1
-        scf.yield %no : i1
-      }
-      %r1 = index.add %r, %c1 : index
-      %r_next = scf.select %cont, %r1, %r : index
-      scf.yield %r_next : index
+  %run = scf.for %k = [%c0 to %c_ts step %c1](%r = %c0 : index) -> (index) {
+    %back = index.sub %t, %k : index
+    %ok = index.cmp ugt, %t, %k : index
+    %r_eq = index.cmp eq, %r, %k : index
+    %go = scalar.andi %ok, %r_eq : i1
+    %cont = scf.if %go -> (i1) {
+      %c = func.call @g_seg_next(%info, %tokens, %back, %min) : (buffer, index, index, i32) -> (i1)
+      scf.yield %c : i1
+    } else {
+      %no = scalar.constant false : i1
+      scf.yield %no : i1
     }
-    %starts = index.cmp eq, %run, %c0 : index
-    %deep = index.cmp uge, %run, %c_ts : index
-    %lead = scalar.ori %starts, %deep : i1
-    %listed = scalar.andi %lead, %dom : i1
-    scf.if %listed {
-      %slot32 = view.atomic.rmw<addi> %c1_i32, %counter_view[%c0] {ordering = relaxed, scope = workgroup} : i32, view<4xi32> -> i32
-      %slot_bound = scalar.assume %slot32 [range(%slot32, 0, 8191)] : i32
-      %slot_value = index.cast %slot_bound : i32 to index
-      %slot = index.assume %slot_value [lt(%slot_value, %tokens)] : index
-      %t32 = index.cast %t : index to i32
-      view.store %t32, %list_view[%slot] : i32, view<[%tokens]xi32>
-    }
+    %r1 = index.add %r, %c1 : index
+    %r_next = scf.select %cont, %r1, %r : index
+    scf.yield %r_next : index
   }
-  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  scf.if %first_lane {
-    %total = view.load %counter_view[%c0] : view<4xi32> -> i32
-    %count_view = buffer.view %count[%zero] : buffer -> view<1xi32>
-    view.store %total, %count_view[0] : i32, view<1xi32>
-  }
-  kernel.return
+  %starts = index.cmp eq, %run, %c0 : index
+  %deep = index.cmp uge, %run, %c_ts : index
+  %lead = scalar.ori %starts, %deep : i1
+  func.return %lead : i1
 }
 """
 SEG_NEXT = """
@@ -3278,42 +3225,47 @@ func.def inline @g_seg_next(%info: buffer, %tokens: index, %u: index, %min: i32)
 }
 """
 def seg_attention(text):
-    """The generated module with the long-context decode share moved to g_attention_seg: the split kernel leaves
-    tokens at position >= SEG_MIN on full-attention layers, each program lists the segment leaders once per epoch (next
-    to the fallback list), and every full-attention layer's decode path launches g_attention_seg_listed after
-    g_attention_split (both write the partials g_attention_combine folds)."""
+    """The generated module with the long-context decode share moved into g_attention_split: on a full-attention
+    layer a token at position >= SEG_MIN that leads a segment (g_seg_leader) runs the span body for all the
+    segment's tokens (writing their partials), the other tokens of a segment exit, and every other token takes the
+    per-token path. One launch as before: no leader list, no extra launch per layer."""
     a = text.index('kernel.def export("g_attention_split")')
     old = "    scf.if %active_split {\n"
     b = text.index(old, a)
-    text = text[:b] + f"""    %seg_min = index.constant {SEG_MIN} : index
+    body = attention_seg(text)
+    names = set()   # the span body's own SSA names, renamed so they never shadow the split kernel's
+    for line in body.split("\n"):
+        m = re.match(r"\s*((?:%\w+, )*%\w+) = ", line)
+        if m:
+            names.update(m.group(1).split(", "))
+        if "scf.for" in line:
+            names.update(re.findall(r"(?:scf\.for |[(,] ?)(%\w+) = ", line))
+    for n in sorted(names, key=len, reverse=True):
+        body = re.sub(rf"(?<![\w%]){re.escape(n)}\b", "%sq_" + n[1:], body)
+    wg = [l for l in body.split("\n") if re.match(r"\s*%sq_(q_bytes|p_bytes|q_tile|p_tile) = ", l)]   # workgroup tiles: kernel scope
+    body = "\n".join(l for l in body.split("\n") if l not in wg)
+    top = text.index("  scf.if %live {\n", a)
+    text = text[:top] + "\n".join(wg) + "\n" + text[top:b] + f"""    %seg_min = index.constant {SEG_MIN} : index
     %seg_far = index.cmp uge, %position, %seg_min : index
     %seg_full = scalar.cmpi eq, %sliding, %c0_i32 : i32
     %seg_dom = scalar.andi %seg_far, %seg_full : i1
     %seg_true = scalar.constant true : i1
     %seg_not = scalar.xori %seg_dom, %seg_true : i1
     %split_here = scalar.andi %active_split, %seg_not : i1
+    %seg_min32 = scalar.constant {SEG_MIN} : i32
+    %seg_lead = scf.if %seg_dom -> (i1) {{
+      %sl = func.call @g_seg_leader(%info, %tokens, %token, %seg_min32) : (buffer, index, index, i32) -> (i1)
+      scf.yield %sl : i1
+    }} else {{
+      %sf = scalar.constant false : i1
+      scf.yield %sf : i1
+    }}
+    scf.if %seg_lead {{
+{body}
+    }}
     scf.if %split_here {{
 """ + text[b + len(old):]
-    kernels = attention_seg(text)
-    fl = "    kernel.launch @g_attention_fallback_list[%t](%t, %info, %fallback_list, %fallback_count) : [index](index, buffer, buffer, buffer)\n  }\n"
-    assert fl in text
-    text = text.replace(fl, fl + """  %seg_list = buffer.alloca<global> align(256) %list_size : buffer
-  %seg_count = buffer.alloca<global> align(256) %count_size : buffer
-  %seg_true = scalar.constant true : i1
-  %seg_on = scalar.xori %gemm, %seg_true : i1
-  scf.if %seg_on {
-    kernel.launch @g_seg_list[%t](%t, %info, %seg_list, %seg_count) : [index](index, buffer, buffer, buffer)
-  }
-""")
-    full = {n for n, v in re.findall(r"%sliding_(\w+) = scalar\.constant (\d) : i32", text) if v == "0"}
-
-    def launch(m):   # after a full-attention layer's split launch: the same arguments, over the listed leaders
-        if m.group(3) not in full:
-            return m.group(0)
-        return m.group(0) + (f"{m.group(1)}kernel.launch @g_attention_seg_listed[%seg_count](%t, %seg_list, {m.group(2)}) : "
-                             f"[buffer](index, buffer, {m.group(4)})\n")
-    pat = r"( *)kernel\.launch @g_attention_split\[%t\]\(%t, (%layer_\w+, %sliding_(\w+), [^)]*)\) : \[index\]\(index, ([^)]*)\)\n"
-    return re.sub(pat, launch, text) + kernels
+    return text + SEG_NEXT + SEG_LEAD.replace("{TS}", str(seg_tokens()))
 
 
 def attention():

@@ -1,5 +1,5 @@
 {
- "_comment": "Temporary: attribute the span kernel's short-context cost (not for merge).",
+ "_comment": "Temporary: merged span kernel vs SEG_ATTN=0 (not for merge).",
  "card": "x",
  "memory_bytes": 1,
  "kit": null,
@@ -19,12 +19,6 @@
     {
      "name": "on",
      "build": {}
-    },
-    {
-     "name": "lst",
-     "build": {
-      "SEG_MIN": "1000000"
-     }
     }
    ],
    "steps": [
@@ -32,16 +26,17 @@
     "c4:off",
     "perf:on:2",
     "c4:on",
-    "perf:lst:2",
-    "c4:lst",
     "perf:off:2",
     "c4:off",
     "perf:on:2",
     "c4:on",
-    "perf:lst:2",
-    "c4:lst",
+    "perf:off:2",
+    "c4:off",
+    "perf:on:2",
+    "c4:on",
     "perf:off:2:long",
-    "perf:on:2:long"
+    "perf:on:2:long",
+    "ktest:on"
    ]
   },
   {
@@ -58,12 +53,6 @@
     {
      "name": "on",
      "build": {}
-    },
-    {
-     "name": "lst",
-     "build": {
-      "SEG_MIN": "1000000"
-     }
     }
    ],
    "steps": [
@@ -71,16 +60,17 @@
     "c4:off",
     "perf:on:2",
     "c4:on",
-    "perf:lst:2",
-    "c4:lst",
     "perf:off:2",
     "c4:off",
     "perf:on:2",
     "c4:on",
-    "perf:lst:2",
-    "c4:lst",
+    "perf:off:2",
+    "c4:off",
+    "perf:on:2",
+    "c4:on",
     "perf:off:2:long",
-    "perf:on:2:long"
+    "perf:on:2:long",
+    "ktest:on"
    ]
   },
   {
@@ -97,12 +87,6 @@
     {
      "name": "on",
      "build": {}
-    },
-    {
-     "name": "lst",
-     "build": {
-      "SEG_MIN": "1000000"
-     }
     }
    ],
    "steps": [
@@ -110,16 +94,17 @@
     "c4:off",
     "perf:on:2",
     "c4:on",
-    "perf:lst:2",
-    "c4:lst",
     "perf:off:2",
     "c4:off",
     "perf:on:2",
     "c4:on",
-    "perf:lst:2",
-    "c4:lst",
+    "perf:off:2",
+    "c4:off",
+    "perf:on:2",
+    "c4:on",
     "perf:off:2:long",
-    "perf:on:2:long"
+    "perf:on:2:long",
+    "ktest:on"
    ]
   }
  ]
