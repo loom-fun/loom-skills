@@ -21,8 +21,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (FEATURES, GATE_NAMES, GATES, HF, LOOM_URL, METHOD, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
                       card_metrics, derived_tags, gate_applies, generator_commit, load_json,
-                      load_package, metric_applies, over_context, package_facts, programs_sha256, require_valid,
-                      stale_metrics)
+                      load_package, metric_applies, native_context, over_context, package_facts, programs_sha256,
+                      require_valid, stale_metrics)
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
 SUP = "¹²³⁴⁵⁶⁷⁸⁹"
@@ -347,9 +347,9 @@ def render(d):
         L.append("- Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the "
                  "`spec` gate's requests.")
     L.append("- " + roofline_note(info))
-    oc = ", ".join(sorted(over_context(info)))
-    L += [f"- {MISSING} not measured; n/a not applicable" + (f" ({oc}: the document is longer than the model's context)"
-                                                             if oc else "") + ".", ""]
+    oc = ", ".join(sorted(over_context(info, native_context(feats))))
+    L += [f"- {MISSING} not measured; n/a not applicable" + (f" ({oc}: the document is longer than the model's native "
+                                                             f"{native_context(feats)}-token context)" if oc else "") + ".", ""]
 
     # ---- features
     L += ["## Features", "", "| feature | status | detail |", "|---|---|---|"]

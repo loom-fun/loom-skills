@@ -13,8 +13,9 @@ prefix cache can help):
   decode_tps_2k     256-token generation after a 2k document (decode with KV in use)
   --long: prefill 8k/16k/32k documents and decode_tps_32k (128 tokens after 32k). A long request the server
                     refuses with HTTP 400 (its answer to a prompt over its context: the needle gate checks it) is
-                    skipped and logged in out["over_context"] (roofline.json metric names); the other sizes are kept.
-                    A tokenizer can make the "32k" document longer than a 32768-token context (34.9k for Gemma 3).
+                    skipped and logged in out["over_context"] (roofline.json metric names; out["nonce"] lets
+                    make_info.py perf re-render and count it); the other sizes are kept. A tokenizer can make the
+                    "32k" document longer than a 32768-token native context (34.9k tokens for Gemma 3).
   acceptance        Loom with speculative decoding: per decode metric, accepted / proposed drafted tokens of that
                     very request (loom-serve's /metrics counters before and after it), so the roofline of a drafted
                     row uses the acceptance of the text it decoded (make_info.py roofline), not the spec gate's
@@ -46,7 +47,7 @@ import time
 
 import requests
 
-from bench_common import acceptance_between, doc, perf_metrics, server_draft_counters, stream, thinking_extra
+from bench_common import acceptance_between, doc, long_prompt, perf_metrics, server_draft_counters, stream, thinking_extra
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -134,13 +135,13 @@ def long_request(key, f, *args):
 
 
 if a.long:
-    out["prefill_long"] = []
+    out["prefill_long"], out["nonce"] = [], nonce
     for n in (8000, 16000, 32000):
-        r = long_request(f"prefill_{n}", run, f"[{nonce} {n}] Summarize this documentation in one sentence.\n\n" + doc(n), 4)
+        r = long_request(f"prefill_{n}", run, long_prompt(f"prefill_{n}", nonce), 4)
         if r:
             out["prefill_long"].append({"prompt_tokens": r[0], "prefill_tps": round(r[1], 1)})
             print(out["prefill_long"][-1], flush=True)
-    out["decode_tps_32k"] = long_request("decode_tps_32k", decode, "decode_tps_32k", f"[{nonce} ctx32] Write a long, detailed essay discussing this documentation.\n\n" + doc(32000), 128)
+    out["decode_tps_32k"] = long_request("decode_tps_32k", decode, "decode_tps_32k", long_prompt("decode_tps_32k", nonce), 128)
 else:
     out["decode_tps"] = decode("decode_tps", ESSAY, 300)
     out["prefill"] = []

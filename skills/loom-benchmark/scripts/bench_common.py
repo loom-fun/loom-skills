@@ -101,6 +101,21 @@ def doc(n):
     return (data if size is None else data[:size]).decode("utf-8")
 
 
+# perf.py --long's requests, by roofline.json metric name: (prompt prefix, document size). make_info.py perf
+# re-renders a refused one with the package's tokenizer to count its tokens (perf.py logs the row's nonce).
+LONG = {"prefill_8000": ("Summarize this documentation in one sentence.", 8000),
+        "prefill_16000": ("Summarize this documentation in one sentence.", 16000),
+        "prefill_32000": ("Summarize this documentation in one sentence.", 32000),
+        "decode_tps_32k": ("Write a long, detailed essay discussing this documentation.", 32000)}
+
+
+def long_prompt(metric, nonce):
+    """perf.py --long's prompt for `metric` (a LONG key) with the row's nonce."""
+    text, n = LONG[metric]
+    tag = "ctx32" if metric.startswith("decode") else n
+    return f"[{nonce} {tag}] {text}\n\n" + doc(n)
+
+
 def no_dummy_prefix(tok):
     """The tokenizer without a SentencePiece-style dummy prefix (Metaspace, prepend_scheme "first": a "▁" before
     the first word of every encoded string). The gates encode a reply on its own; with the prefix its first word
