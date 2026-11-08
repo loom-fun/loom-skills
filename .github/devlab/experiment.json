@@ -1,14 +1,14 @@
 {
- "_comment": "build.py's memory_bytes counts the largest program's prefill scratch: the three hybrid MoE cards rebuilt from this branch, a full-context request on a fresh server at the value build.py now prints and at the card's published one (full gates passed on the first card at 48e9 in run 42343748198).",
- "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
- "memory_bytes": 48000000000,
+ "_comment": "Temporary o122c diagnostics (do not merge): Ornith-1.5-122B card programs vs rebuild from main (#193), spec on/off, consistency gate with llama.cpp views x20.",
+ "card": "loom-fun/bartowski-Ornith-1.5-122B-loom",
+ "memory_bytes": 106000000000,
  "kit": null,
- "llamacpp": "b1369",
+ "llamacpp": "b1370",
+ "steps": ["consistency:20:llama"],
  "variants": [
-  {"name": "q36-rebuilt-admit", "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-rebuilt-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 49000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-card-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 42000000000, "steps": ["admit:260096"]},
-  {"name": "orn-rebuilt-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 36000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "orn-card-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 33000000000, "steps": ["admit:260096"]}
+  {"name": "card-on"},
+  {"name": "card-off", "execution": {"draft_depth": 0}},
+  {"name": "main-on", "build": {}, "build_args": ["--memory-gib", "98.7"]},
+  {"name": "main-off", "build": {}, "build_args": ["--memory-gib", "98.7"], "execution": {"draft_depth": 0}}
  ]
 }
