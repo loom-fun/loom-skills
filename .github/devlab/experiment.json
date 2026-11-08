@@ -6,32 +6,37 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "kt",
+   "name": "o122_main",
+   "card": "loom-fun/bartowski-Ornith-1.5-122B-loom",
+   "memory_bytes": 106000000000,
    "build": {},
    "steps": [
-    "ktest"
+    "consistency:20:llama"
    ]
   },
   {
-   "name": "base_d0",
+   "name": "o122_card",
+   "card": "loom-fun/bartowski-Ornith-1.5-122B-loom",
+   "memory_bytes": 106000000000,
+   "steps": [
+    "consistency:20:llama"
+   ]
+  },
+  {
+   "name": "coder_main",
+   "build": {},
+   "steps": [
+    "consistency:20:llama"
+   ]
+  },
+  {
+   "name": "coder_main_d0",
    "build": {},
    "execution": {
     "draft_depth": 0
    },
    "steps": [
-    "stagger:60"
-   ]
-  },
-  {
-   "name": "gemm1_d0",
-   "build": {
-    "GEMM_ONE": "1"
-   },
-   "execution": {
-    "draft_depth": 0
-   },
-   "steps": [
-    "stagger:60"
+    "consistency:20:llama"
    ]
   }
  ]
