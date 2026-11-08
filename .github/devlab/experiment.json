@@ -1,100 +1,29 @@
 {
- "_comment": "Temporary: kernel tests and dev gates of the batch-invariant flash2 prefill (PR 166) across kernel variants.",
+ "_comment": "scratch: decode rows in mixed epochs on the decode attention kernels",
  "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
  "memory_bytes": 62000000000,
  "kit": null,
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "coder",
+   "name": "dec",
    "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
    "memory_bytes": 62000000000,
    "llamacpp": "b1370",
    "build": {},
    "steps": [
-    "ktest",
     "consistency:20:llama"
    ]
   },
   {
-   "name": "gptoss",
-   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
-   "memory_bytes": 28000000000,
+   "name": "dec2",
+   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "memory_bytes": 62000000000,
    "llamacpp": "b1370",
    "build": {},
    "steps": [
-    "ktest",
-    "gates:dev"
-   ],
-   "kit": "gpt-oss"
-  },
-  {
-   "name": "gemma4",
-   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
-   "memory_bytes": 31000000000,
-   "llamacpp": "b1369",
-   "build": {},
-   "steps": [
-    "ktest",
-    "gates:dev"
-   ],
-   "kit": "gemma4"
-  },
-  {
-   "name": "qwen35",
-   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
-   "memory_bytes": 30000000000,
-   "llamacpp": "b1369",
-   "build": {},
-   "steps": [
-    "ktest",
-    "gates:dev"
+    "consistency:20:llama"
    ]
-  },
-  {
-   "name": "qwen3small",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "memory_bytes": 17000000000,
-   "llamacpp": "b1369",
-   "build": {},
-   "steps": [
-    "ktest",
-    "gates:dev"
-   ]
-  },
-  {
-   "name": "qwen3dense",
-   "card": "loom-fun/unsloth-Qwen3-8B-loom",
-   "memory_bytes": 29000000000,
-   "llamacpp": "b1368",
-   "build": {},
-   "steps": [
-    "ktest",
-    "gates:dev"
-   ]
-  },
-  {
-   "name": "lfm",
-   "card": "loom-fun/bartowski-LFM3-1.7B-loom",
-   "memory_bytes": 13000000000,
-   "llamacpp": "b1370",
-   "build": {},
-   "steps": [
-    "ktest",
-    "gates:dev"
-   ],
-   "kit": "lfm2moe"
-  },
-  {
-   "name": "glimmer",
-   "card": "loom-fun/ggml-org-Muse-Glimmer-30B-loom",
-   "memory_bytes": 48000000000,
-   "llamacpp": "b1369",
-   "build": {},
-   "steps": [
-    "ktest"
-   ],
-   "kit": "glimmer"
   }
  ]
 }
