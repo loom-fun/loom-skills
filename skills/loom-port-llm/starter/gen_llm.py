@@ -3287,7 +3287,17 @@ def attention():
     dec, _, _ = attention_text(64, "g")
     pre, split_l, combine_l = attention_text(16, "g16")
     count16 = pre[pre.index("// Splits for"):pre.index('kernel.def export("g16_attention_split")')]
-    return dec + "\n" + count16 + split_l + "\n" + combine_l + FALLBACK
+    return dec + "\n" + count16 + split_l + "\n" + combine_l + fallback_text()
+
+
+def fallback_text():
+    fb = FALLBACK
+    if os.environ.get("FLASH_OFF"):   # temporary diagnostic: every token takes the listed fallback
+        fb = fb.replace("%starts = func.call @g_tile_starts(%info, %tokens, %token) : (buffer, index, index) -> (i1)", "%starts = scalar.constant false : i1")
+        fb = fb.replace("%uniform, %r_unused, %p_unused = func.call @g_tile_uniform(%info, %tokens, %start) : (buffer, index, index) -> (i1, i32, i32)",
+                        "%uniform = scalar.constant false : i1\n    %r_unused = scalar.constant 0 : i32\n    %p_unused = scalar.constant 0 : i32")
+        assert fb != FALLBACK
+    return fb
 
 
 FALLBACK = r"""
@@ -5188,7 +5198,7 @@ if __name__ == "__main__":
         parts.append(gate_heads())
     for h in NARROW:
         parts.append(with_heads(h, lambda: "".join(qk_rope_swa() if swa and SWA_ROPE else qk_rope() for hh, swa in sorted(NARROW_ROPE) if hh == h)
-                                + attention()[:-len(FALLBACK)] + (gate_heads() if HEAD_GATE else "")))
+                                + attention()[:-len(fallback_text())] + (gate_heads() if HEAD_GATE else "")))
     if RECUR:
         parts.append(gdn_kernels(CFG, EPS))
     if spec_kernels:

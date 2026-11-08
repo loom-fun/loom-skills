@@ -6,43 +6,18 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "base",
-   "build": {},
-   "steps": [
-    "consistency:40:llama"
-   ]
-  },
-  {
-   "name": "exact",
+   "name": "flashoff",
    "build": {
-    "SPEC_EXACT": "1"
+    "FLASH_OFF": "1"
    },
    "steps": [
     "consistency:40:llama"
    ]
   },
   {
-   "name": "attn",
+   "name": "flashoff_b",
    "build": {
-    "DIAG": "attn"
-   },
-   "steps": [
-    "consistency:40:llama"
-   ]
-  },
-  {
-   "name": "nogemm",
-   "build": {
-    "NO_GEMM": "1"
-   },
-   "steps": [
-    "consistency:40:llama"
-   ]
-  },
-  {
-   "name": "f16",
-   "build": {
-    "FORCE16": "1"
+    "FLASH_OFF": "1"
    },
    "steps": [
     "consistency:40:llama"
