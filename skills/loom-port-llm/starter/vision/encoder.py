@@ -98,7 +98,8 @@ def build(c):
     order = "block2" if fam in QWEN_VL and MUT != "raster" else "raster"
     def nmode(w):   # LayerNorm when the norm has a bias, else RMSNorm with weight (Qwen2.5-VL)
         return ("ln", w + ".weight", w + ".bias") if w + ".bias" in c["tensors"] else ("rmsw", w + ".weight", None)
-    pk = p.k(G.pixels(c["mean"], c["std"], scale2=(fam == "gemma4v")))
+    mean, std = {"nonorm": ([0.0] * 3, [1.0] * 3), "blind": ([0.0] * 3, [1e12] * 3)}.get(MUT, (c["mean"], c["std"]))
+    pk = p.k(G.pixels(mean, std, scale2=(fam == "gemma4v")))
     p.launch(pk, [S("n_pix")], [S("n_pix"), B("pix"), B("pixf")])
     dual = "v.patch_embd.weight.1" in c["tensors"]; bias = "v.patch_embd.bias" in c["tensors"]
     pe = p.k(G.patch_embed(P, E, fmt_of(c, "v.patch_embd.weight"), order, dual, bias))

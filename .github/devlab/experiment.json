@@ -4,12 +4,36 @@
  "memory_bytes": 49000000000,
  "kit": null,
  "llamacpp": "b1370",
- "steps": ["gates:dev"],
+ "steps": [
+  "gates:dev"
+ ],
  "variants": [
-  {"name": "o35-card"},
-  {"name": "o35-m-raster", "build": {"VISION_MUTANT": "raster"}},
-  {"name": "o35-m-nopos", "build": {"VISION_MUTANT": "no_pos"}},
-  {"name": "o35-m-layer", "build": {"VISION_MUTANT": "layer"}},
-  {"name": "o35-m-align", "build": {"VISION_MUTANT": "align"}}
+  {
+   "name": "o35-card"
+  },
+  {
+   "name": "o35-m-raster",
+   "build": {
+    "VISION_MUTANT": "raster"
+   }
+  },
+  {
+   "name": "o35-m-layer",
+   "build": {
+    "VISION_MUTANT": "layer"
+   }
+  },
+  {
+   "name": "o35-m-nonorm",
+   "build": {
+    "VISION_MUTANT": "nonorm"
+   }
+  },
+  {
+   "name": "o35-m-blind",
+   "build": {
+    "VISION_MUTANT": "blind"
+   }
+  }
  ]
 }
