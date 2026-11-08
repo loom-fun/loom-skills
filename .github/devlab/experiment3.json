@@ -1,5 +1,5 @@
 {
- "_comment": "rebuilt from this branch: memory-capped context keeps pool headroom (gemma4); flash2 token subtiles (dense head_dim 128)",
+ "_comment": "rebuilt from this branch: memory-capped context keeps pool headroom (gemma4); flash2 token subtiles (dense head_dim 128); Qwen3-VL cards rebuilt likewise",
  "card": "loom-fun/unsloth-gemma-4-31B-it-loom",
  "memory_bytes": 80000000000,
  "kit": "gemma4",
@@ -44,6 +44,30 @@
     "ktest",
     "gates:full"
    ]
+  },
+  {
+   "name": "vl4-rebuilt",
+   "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom",
+   "memory_bytes": 56000000000,
+   "llamacpp": "b1370",
+   "build": {},
+   "steps": [
+    "ktest",
+    "gates:full"
+   ],
+   "kit": null
+  },
+  {
+   "name": "vl8-rebuilt",
+   "card": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom",
+   "memory_bytes": 59000000000,
+   "llamacpp": "b1370",
+   "build": {},
+   "steps": [
+    "ktest",
+    "gates:full"
+   ],
+   "kit": null
   }
  ]
 }
