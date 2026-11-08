@@ -969,7 +969,7 @@ def attention_span_case(tag, sliding):
 """)
 
 
-if attn_rules.multi_token(attn_rules.UNROLL):   # the condition gen_llm.py emits the multi-token path on
+if attn_rules.multi_token(attn_rules.UNROLL, KVH):   # the condition gen_llm.py emits the multi-token path on
     attention_span_case("attention_span", False)
     if cfg.get("sliding_layers") and cfg.get("sliding_window"):
         attention_span_case("attention_span_sliding", True)
