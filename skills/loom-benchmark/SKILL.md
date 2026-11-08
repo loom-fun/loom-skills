@@ -111,6 +111,12 @@ separately: `LEVEL=full gates.sh` on the same build re-uses every gate that pass
   server for it, `bench_common.SERVER_VARIANTS`): the encoder's rounding alone moved the first token of a text
   image by 5 nats (Ornith-1.5-35B-A3B `wide`: 'THE' by 2.4 nats on the GPU encoder, 'The' by 2.8 on the CPU one).
   The two are llama.cpp's own numerics, so following either one passes; a vision bug diverges from both.
+  At each of those divergences the near-tie rule also gets llama.cpp's prefill views, as the text gates do
+  (`llama_views`): the image and the reference's tokens before the divergence as one prompt, with the default encoder
+  and with the CPU encoder (`vision_golden.prefill_view`; a view whose evaluated token count is not prompt + prefix
+  does not count). Decoding one token at a time and prefilling the same context differ by whole nats (Ornith-1.5-122B
+  `chart`, 'Thu' vs 'Thursday': decode 2.75 nats for 'Thu', GPU-encoder prefill a 0.08 tie, CPU-encoder prefill 2.59 for
+  'Thursday'). Requested only after a failure.
   Below llama.cpp's own encoder noise a bug is invisible to this gate. Verified: Bolt-E4B, Gemma-4-E2B, Qwen3.5-0.8B, Muse-Glimmer-30B.
 - **One model at a time** (GPU memory is system RAM): the gates run with only Loom loaded; every
   llama.cpp reference missing from the cache is deferred, then gates.sh stops Loom (remembering its

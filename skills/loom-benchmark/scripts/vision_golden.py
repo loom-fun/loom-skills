@@ -130,6 +130,26 @@ def reference(pkg, llama, durl, question, tokens, salt="", server=None):
     return llama_completion(llama, body, pkg, salt)
 
 
+def prefill_view(pkg, llama, durl, question, prefix_ids, n_prompt, server=None):
+    """llama.cpp's own top-10 log-probs {id: logprob} for the reply token after `prefix_ids`, with the prefix and the image
+    evaluated as one prompt (its prefill kernels), as bench_common.llama_views does for text; server: a SERVER_VARIANTS name.
+    None when it cannot be had (pending) or when llama.cpp evaluated other than the n_prompt reference prompt tokens
+    plus the prefix (the prefix text did not re-tokenize to the reference ids): that view does not count."""
+    from bench_common import GREEDY, llama_completion, top_logprobs
+    prompt = pkg.render_messages([{"role": "user", "content": MARKER + question}], enable_thinking=False)
+    bos = (pkg.chat or {}).get("bos", "")
+    if bos and prompt.startswith(bos) and adds_bos(pkg.cfg["gguf"]):
+        prompt = prompt[len(bos):]
+    body = dict(GREEDY, prompt={"prompt_string": prompt + pkg.tok.decode(list(prefix_ids), skip_special_tokens=False),
+                                "multimodal_data": [durl.split(",", 1)[1]]}, n_predict=1, n_probs=10, return_tokens=True)
+    if server:
+        body["_server"] = server
+    r = llama_completion(llama, body, pkg)
+    if r.get("_pending") or not r.get("completion_probabilities") or r.get("tokens_evaluated") != n_prompt + len(prefix_ids):
+        return None
+    return top_logprobs(r["completion_probabilities"], 0)
+
+
 def cases(images_arg):
     items = {k: (data_url(im), q, im.size) for k, (im, q) in builtin_images().items()}
     for p in [x for x in (images_arg or "").split(",") if x]:
@@ -138,8 +158,9 @@ def cases(images_arg):
     return items
 
 
-def judge(pkg, ref, got):
-    """-> (status, detail)."""
+def judge(pkg, ref, got, views_at=None):
+    """-> (status, detail). views_at(prefix_ids) -> llama.cpp's other views of the token after the prefix (prefill_view),
+    asked for only at a divergence the plain rule rejects."""
     from bench_common import near_tie, text_divergence, top_logprobs
     if got.get("error"):
         return "FAIL", got["error"]
@@ -168,9 +189,15 @@ def judge(pkg, ref, got):
     k, mine, _ = d
     top = top_logprobs(cp, k)
     nt = near_tie(top, gold[k], mine)
+    views = []
+    if not nt and views_at:
+        views = views_at(gold[:k])
+        nt = near_tie(top, gold[k], mine, views=views)
     gap = top.get(gold[k], 0) - top.get(mine, float("-inf"))
+    gaps = [round(v[gold[k]] - v[mine], 2) for v in views if gold[k] in v and mine in v]
     return ("PASS" if nt else "FAIL"), (f"diverged at token {k}: llama.cpp {pkg.tok.decode([gold[k]])!r} vs Loom "
-                                        f"{pkg.tok.decode([mine])!r} (gap {gap:.2f}{', near-tie' if nt else ''})")
+                                        f"{pkg.tok.decode([mine])!r} (gap {gap:.2f}{', near-tie' if nt else ''}"
+                                        f"{f'; its prefill views {gaps}' if views else ''})")
 
 
 def main():
@@ -200,13 +227,16 @@ def main():
     bad = []; rows = []
     for name, (durl, q, size) in items.items():
         got = request(a.url, model, durl, q, a.tokens)
-        st, detail = judge(pkg, refs[name], got)
+        def views_for(ref):   # llama.cpp's prefill views (default numerics, image encoder on the CPU) after the reference's tokens
+            n = ref.get("tokens_evaluated") or (ref.get("timings") or {}).get("prompt_n")
+            return lambda prefix: [v for v in (prefill_view(pkg, a.llama, durl, q, prefix, n, srv) for srv in (None, "cpu-encoder")) if v]
+        st, detail = judge(pkg, refs[name], got, views_for(refs[name]))
         if st == "FAIL" and not got.get("error"):
             for what, extra in (("re-recording", {"salt": "2"}), ("recording with its image encoder on the CPU", {"server": "cpu-encoder"})):
                 alt = reference(pkg, a.llama, durl, q, a.tokens, **extra)
                 if alt.get("_pending"):
                     continue
-                st2, d2 = judge(pkg, alt, got)
+                st2, d2 = judge(pkg, alt, got, views_for(alt))
                 if st2 == "PASS":
                     st, detail = "PASS", f"{d2} (matches llama.cpp's {what}; plain recording: {detail})"
                     break
