@@ -1,5 +1,5 @@
 {
- "_comment": "depth-dispatched flash2 subtiles: decode and 1k-32k prefill, the card's programs vs this branch's (same runner). Temporary.",
+ "_comment": "depth-dispatched flash2 subtiles: decode and 1k-32k prefill, origin/main's starter vs this branch (same runner). Temporary.",
  "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
  "memory_bytes": 62000000000,
  "kit": null,
@@ -9,7 +9,9 @@
    "name": "q4i",
    "variants": [
     {
-     "name": "card"
+     "name": "base",
+     "build": {},
+     "ref": "origin/main"
     },
     {
      "name": "disp",
@@ -17,9 +19,11 @@
     }
    ],
    "steps": [
-    "perf:card:2:long",
+    "perf:base:2",
+    "perf:disp:2",
+    "perf:base:2:long",
     "perf:disp:2:long",
-    "perf:card:1:long",
+    "perf:base:1:long",
     "perf:disp:1:long"
    ]
   }
