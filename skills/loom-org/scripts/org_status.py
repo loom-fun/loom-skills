@@ -21,6 +21,10 @@ For each model repo in the org, reads its model.json, model.json.lock, llm_confi
   paused    true when info.json "status" is "paused" (work stopped; the card ends with its next steps); the
             action is assigned as for any other repo
   quant     the checkpoint's quant (card_lib.quant_of); anything but plain Q4_K_M is flagged
+  checks    cheap consistency flags (never change the action): the generator commit is not on the skills repo's main
+            (a card built from an unmerged branch silently loses features when regenerated), a card missing from
+            .github/nightly-models.json, or its entry's memory_bytes / llamacpp build differs from the card's own
+            (--nightly FILE, --skills-repo DIR; both default to the checkout this script lives in; skipped without it)
 With --targets (rank_models.py output, {"models": [...]}, or a plain list of such entries or of model ids; a
 missing rank is the entry's position, 1-based), matches repos to target models by the checkpoint's base model and assigns
 each target one action:
@@ -44,13 +48,14 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "..", "loom-benchmark", "scripts", "card"))
-from card_lib import (GATE_NAMES, METRIC_KEYS, SCHEMA_ID, gate_applies, generator_commit,  # noqa: E402
+from card_lib import (GATE_NAMES, build_tag, METRIC_KEYS, SCHEMA_ID, gate_applies, generator_commit,  # noqa: E402
                       load_package, metric_applies, package_facts, perf_flags, programs_sha256, quant_of,
                       remeasure_reasons)
 
@@ -61,6 +66,35 @@ VARIANT = re.compile(r"(-gguf|-bf16|-fp16|-qat.*|-mobile.*|-unquantized)$", re.I
 ORDER = {"fix": 0, "remeasure": 1, "investigate": 2, "update": 3, "create": 4, "sweep": 5, "done": 6}
 
 
+
+
+def on_main(repo_dir, commit):
+    """True/False: is commit an ancestor of the skills repo's main (origin/main when present)? None when unknown."""
+    for ref in ("origin/main", "main"):
+        if subprocess.run(["git", "-C", repo_dir, "rev-parse", "-q", "--verify", ref], capture_output=True).returncode == 0:
+            r = subprocess.run(["git", "-C", repo_dir, "merge-base", "--is-ancestor", commit, ref], capture_output=True)
+            return r.returncode == 0 if r.returncode in (0, 1) else False
+    return None
+
+
+def consistency_checks(r, nightly, skills_repo):
+    """Flags for repo status r (from assess): generator commit off main, nightly entry missing or not matching the
+    card (memory_bytes, llama.cpp build). nightly: {repo: entry}, or None to skip; skills_repo: a git checkout or None."""
+    out = []
+    if r.get("category") != "A":
+        return out
+    if skills_repo and r.get("generator") and on_main(skills_repo, r["generator"]) is False:
+        out.append(f"generator {r['generator'][:8]} is not on main")
+    if nightly is not None:
+        e = nightly.get(r["repo"])
+        if e is None:
+            out.append("no .github/nightly-models.json entry")
+        else:
+            if r.get("memory_bytes") and e.get("memory_bytes") != r["memory_bytes"]:
+                out.append(f"nightly memory_bytes {e.get('memory_bytes')} != card {r['memory_bytes']}")
+            if r.get("llamacpp") and e.get("llamacpp") != r["llamacpp"]:
+                out.append(f"nightly llamacpp {e.get('llamacpp')} != card {r['llamacpp']}")
+    return out
 
 
 def group_key(model_id):
@@ -130,6 +164,8 @@ def assess(repo, d):
     if info.get("schema") == SCHEMA_ID and info.get("report") == "generated":
         out["category"] = "A"
     out["report"] = info.get("report")
+    out["memory_bytes"] = (info.get("card") or {}).get("memory_bytes")
+    out["llamacpp"] = build_tag(((info.get("performance") or {}).get("baseline") or {}).get("version") or "")
     if info.get("status") == "paused":
         out["paused"] = True
     gates = info.get("gates") or {}
@@ -171,6 +207,8 @@ def main():
     ap.add_argument("--org", default="loom-fun")
     ap.add_argument("--targets", help="rank_models.py output")
     ap.add_argument("--cache", help="directory for the downloaded package files (default: a temp dir)")
+    ap.add_argument("--nightly", help="nightly-models.json to check the cards against (default: this checkout's)")
+    ap.add_argument("--skills-repo", help="loom-skills checkout whose main the generator commits must be on (default: this one)")
     ap.add_argument("-o", "--output")
     a = ap.parse_args()
     cache = a.cache or tempfile.mkdtemp(prefix="org_status_")
@@ -196,11 +234,18 @@ def main():
 
     with cf.ThreadPoolExecutor(8) as ex:
         status = sorted(ex.map(one, repos), key=lambda r: r["repo"])
+    root = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
+    nfile = a.nightly or os.path.join(root, ".github", "nightly-models.json")
+    nightly = {m["repo"]: m for m in json.load(open(nfile))["models"]} if os.path.exists(nfile) else None
+    skills_repo = a.skills_repo or (root if os.path.exists(os.path.join(root, ".git")) else None)
+    for r in status:
+        r["checks"] = consistency_checks(r, nightly, skills_repo)
     for r in status:
         print(f"{r['category']}  {r['repo'][:58]:58} {(r.get('file') or '?')[:40]:40} "
               f"failing={','.join(r['failing']) or '-'} missing={len(r['missing'])}"
               + (f"  [{'; '.join(r['notes'])}]" if r["notes"] else "")
-              + (f"  perf: {flag_text(r['perf'])}" if flagged(r) or remeasure(r) else ""))
+              + (f"  perf: {flag_text(r['perf'])}" if flagged(r) or remeasure(r) else "")
+              + (f"  CHECK: {'; '.join(r['checks'])}" if r["checks"] else ""))
     result = {"org": a.org, "repos": status}
 
     if a.targets:
@@ -240,6 +285,7 @@ def main():
                          "missing": primary["missing"] if primary else [],
                          "failing": primary["failing"] if primary else [],
                          "notes": primary["notes"] if primary else [],
+                         "checks": primary["checks"] if primary else [],
                          "perf": primary.get("perf") if primary else None,
                          "remeasure": remeasure(primary) if primary else []})
         extra = [r["repo"] for r in status if r["repo"] not in used]
@@ -248,7 +294,8 @@ def main():
         for w in sorted(work, key=lambda w: (ORDER[w["action"]], w["rank"] or 0)):
             print(f"{w['action']:11} #{w['rank']:<3} {w['model'][:50]:50} {w['repo'] or ''}"
                   + (f"  dup: {', '.join(w['duplicates'])}" if w["duplicates"] else "")
-                  + (f"  [{flag_text(w['perf'])}]" if w["action"] in ("investigate", "remeasure") else ""))
+                  + (f"  [{flag_text(w['perf'])}]" if w["action"] in ("investigate", "remeasure") else "")
+                  + (f"  CHECK: {'; '.join(w['checks'])}" if w["checks"] else ""))
         if extra:
             print("\nnot a target (keep or retire: ask the user): " + ", ".join(extra))
         result.update(work=work, extra=extra, counts=counts)

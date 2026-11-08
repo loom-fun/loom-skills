@@ -41,6 +41,14 @@ Qwen3.8-27B). Keep a lab's own product built on another lab's base when it adds 
 Gemma 4: drafter, vision). One plain Q4_K_M per model; never Q8_0 or UD quants unless the user asks. Show the
 list and the status counts to the user before a campaign, as a page if they'll share it.
 
+**The target list is the top N chat LLMs by download rate whose genuine plain Q4_K_M fits the machine.**
+- *Genuine* is read from the GGUF header (HTTP range read), never the filename: `general.file_type` is 15
+  (MOSTLY_Q4_K_M) and the tensors are Q4_K/Q6_K. Mislabeled or re-quantized files exist, and quantizers name files in
+  any case (`card_lib.quant_of` reads `q4_k_m`).
+- A model with no genuine Q4_K_M never qualified, and a port that proves intractable is a failed slot. For either,
+  write the reason on the model's card (publish it paused, step 2) and promote the next-ranked qualifying model, so
+  the org still holds N. Keep a short ranked list of candidates ready for this.
+
 `org_status.py` reads each org repo's own files and classifies it:
 
 | Category | Meaning | How it's detected |
@@ -117,12 +125,15 @@ One worker per model runs `loom-port-llm` then `loom-optimize`, starting from th
   columns); `org_status` marks the card `remeasure` (`devlab-primary`) until a short local session (Loom and
   llama.cpp, quiet GPU, the same programs) adds the headline numbers next to it.
 
-- **Local GPU: one job at a time.** One model loaded, one gate run, benchmark or kernel-test batch at any moment.
-  Several workers may run their CPU phases (inspection, program generation, card rendering) in parallel, but
-  every GPU command takes the lock: `flock -o /tmp/loom-gpu.lock CMD` (`-o`: a server CMD leaves running, e.g.
-  port.sh's, must not inherit the lock, or the next locked command waits on it forever). Check `pgrep -a 'loom-serve|llama-server'`
-  first and stop only the servers you started. Follow the user's GPU instruction for the session (some sessions
-  forbid the local GPU; then the worker runs `.github/workflows/devlab-port.yml` instead).
+- **Local GPU: one owner, one job at a time.** The local GPU is shared and small: concurrent model servers (69 + 28
+  + 26 GB on a 122 GB machine) crashed it. Exactly one worker (the local-queue owner) runs local GPU sessions, from a
+  queue file (`<repo>:<memory_bytes>` per line, a done file for results), one model loaded at a time; every other
+  worker, and every kernel test, A/B and gate, runs on DevLab. CPU phases (inspection, program generation, tokenizer
+  probes, card rendering) are free to run anywhere. The owner takes the lock (`flock -o /tmp/loom-gpu.lock CMD`; `-o`
+  so a server CMD that stays running doesn't hold it), runs long jobs in a memory-capped scope
+  (`systemd-run --user --scope -p MemoryMax=...`), and checks free memory and `pgrep -a 'loom-serve|llama-server'`
+  before starting a server, stopping only its own. Follow the user's GPU instruction for the session (some forbid the
+  local GPU; then use `.github/workflows/devlab-port.yml`).
 - **Gates in the loop: the correctness set only.** Kernel tests, golden compare vs llama.cpp (divergences are
   near-ties), consistency, `spec` (drafting packages), agent tool loop, sampling, vision (with a projector),
   and the over-capacity 400: `LEVEL=dev` where gates.sh has it, otherwise `LEVEL=quick` without the needle.
@@ -147,11 +158,25 @@ dropped or loosened, and `org_status` marks the repo `fix` (step 4). Add the car
 `.github/nightly-models.json` in the same PR, and republish as gates go green. Only `done` (below) needs every gate
 passing.
 
+**The nightly entry matches the card exactly**: `memory_bytes`, the llama.cpp build and `features` (why: the nightly
+gates serve with the entry's values, so a mismatch gates a different configuration than the card claims).
+`org_status` prints a `CHECK:` for a missing or differing entry. A republish that changes any of them updates the
+entry in a PR.
+
+**Memory budget** (one number for the whole card; details in `reference/lessons.md`):
+- On every regeneration pass `make_info.py build --memory-bytes N` explicitly, N being build.py's printed value for
+  the regenerated programs. It is not picked up from build.py, and a carried-over old value mislabels the card (#151
+  now refuses it when the programs changed).
+- The gates, the local session, the DevLab session and the nightly entry all use that same N.
+- A memory-capped package (budget below context plus pool headroom) keeps a measured 2 GiB margin (build.py, #130):
+  with pool equal to the context and no margin, a full-context request is refused with a 503.
+
 **Pausing a model:** list what would be done next, one step per line in a file, and republish the card only (DIR
 as in step 3.2): `make_info.py build DIR --from-info DIR/info.json --status paused --next-steps FILE`,
 `render_card.py DIR`, `publish_package.py upload DIR --repo loom-fun/REPO --card-only --parent-commit $sha`. The
 README then ends with a "Next steps" section. `org_status` keeps the repo's action and reports `paused: true`. To
-resume, rebuild with `--status active --next-steps /dev/null`.
+resume, rebuild with `--status active --next-steps /dev/null`. A paused card keeps its evidence; use it also for a
+model dropped from the target list (reason first in the steps).
 
 ### 3. Sweep on DevLab Dispatch: missing gates, the roofline and the DevLab perf session
 
@@ -161,12 +186,14 @@ Hand the card over and move the local GPU on to the next item.
 1. The card is in `.github/nightly-models.json` (card, memory, kit, llama.cpp build; step 2). Run `nightly-gates.yml`
    (it runs on schedule, or `gh workflow run nightly-gates.yml -f models=loom-fun/REPO,... -f level=full`, or label
    a PR `nightly-gates`).
+   **Wait at least 2 minutes after an upload before dispatching**: runners can still fetch the previous revision of the
+   programs. If a run measured old programs, re-dispatch it.
 2. When it finishes, per card, in a directory holding the repo's current `model.json`, `model.json.lock`,
    `llm_config.json` and `info.json` (re-read `info.json` from the Hub right before, at a known commit:
    `sha=$(curl -s https://huggingface.co/api/models/loom-fun/REPO/revision/main | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')`,
    then `curl -L -o DIR/info.json https://huggingface.co/loom-fun/REPO/resolve/$sha/info.json`):
    - `card/pull_devlab.py loom-fun/REPO --package DIR -o ev_devlab.json`: the gates, with the run, job URL and
-     runner (skips jobs that measured an older revision of the package), and the spec gate's acceptance stamped with
+     runner (skips jobs that measured an older revision of the package: it ingests only jobs whose `programs_sha256` equals the package's), and the spec gate's acceptance stamped with
      the job's programs: acceptance depends on the model, drafter and text, not the machine, so a sweep on the
      published programs replaces a stale `spec_acceptance` (speed stays local-only);
    - `card/make_info.py roofline --package DIR -o ev_roofline.json` (tools venv, CPU only: reads the GGUF), once
@@ -198,6 +225,20 @@ every published model the fix touches is regenerated **with the skill** by a wor
 the affected gates, regenerate the card); hand-patching a published package is never allowed. Merge the PR once
 the regenerated models pass. Re-run `org_status.py`: anything still red goes round again.
 
+**Gate rules:** a gate is never loosened to pass a model; the card shows the failure instead. A change to a gate rule
+must come from llama.cpp's own variation, be general, and show in its PR that mutants (a deliberately wrong
+Loom) still fail. Examples: the near-tie noise floor and the CPU-encoder vision recording (`loom-benchmark`). A long
+metric is n/a only when its prompt exceeds the model's native GGUF context (`card_lib.over_context`).
+
+**Regeneration safety** (a regenerated package is published only if it does not regress):
+- Before publishing, A/B it against the card's own published programs on the same DevLab runner: decode, decode_32k,
+  prefill 1k to 32k, streams4. Bisect main when a main build loses.
+- Check that the card's generator commit is on main (`org_status` flags it). A card built from an unmerged branch
+  silently loses that branch's features when regenerated from main (decode_32k halved this way); merge the feature
+  first or keep the card.
+- A kernel path that wins at some KV-head counts can lose at others: gate paths by shape and A/B across the
+  org's shapes, not one card.
+
 ### 5. Re-measure and investigate performance (local GPU worker)
 
 First, **re-measure** (action `remeasure`; `org_status` lists the reasons): a card value whose session measured
@@ -212,8 +253,12 @@ its roofline**: its Loom value is below half the efficiency Loom ports have demo
 this hardware (`card_lib.FAR_FRACTION` x the card's `roofline.metrics.*.efficiency`, which is `roofline.py`'s `EFF`,
 or `EFF_DRAFTED` for drafted rows). Then:
 
-1. Dispatch a local GPU worker with `loom-optimize` on the flagged metrics: a far-from-roofline metric is a
-   performance problem to find and fix (ablate, compare with the roofline's gap budget, apply the lever). For a
+1. Dispatch a worker with `loom-optimize` on the flagged metrics: a far-from-roofline metric is a
+   performance problem to find and fix (ablate, compare with the roofline's gap budget, apply the lever). Profile
+   first, and propose open-ended optimization to the orchestrator before starting it. Fix with a general generator
+   change that lifts a whole architecture family (flash subtiles, MoE/GDN prefill kernels), never a per-model hack;
+   A/B it on DevLab across the cards it touches and regenerate those through the regeneration rules above. Local
+   measurements go to the local queue. For a
    small drafted model far from its decode roofline, the lever is the verify pass and the drafter's cost (the
    ceiling does not count the drafter); the best depth depends on the workload's acceptance, so judge it on the
    session's own acceptance, not the spec gate's.
@@ -257,6 +302,19 @@ investigate. Diagnosing it is out of scope for port, optimize and campaign work;
 recorded data. The Loom-only DevLab sweeps older cards recorded stay in their `info.json` (valid loom-card/2),
 unrendered.
 
+## Orchestrating many workers
+
+Rules; the reasons and details are in `reference/lessons.md`.
+- Keep a handoff file (state, active workers, open PRs, next actions) and a status page; refresh `org_status` and the
+  page after every change. Sessions restart: everything must be resumable from disk.
+- Every PR gets an independent review before merge (DRY, general, no regression, no vendored package contents); the
+  orchestrator merges, workers don't.
+- The shared checkout stays on `main`; branches live in worktrees.
+- Big files (GGUFs, tables, logs) never go in tmpfs (`/tmp` may be RAM).
+- Workers wait on runs with background waits and end their turn, not foreground sleeps.
+- Every card passes the full gate set, not just golden: the sweep keeps finding correctness bugs golden misses
+  (tokenizer pre-tokenizer quirks, batch-dependent prefill numerics, kernel paths that depend on KV heads).
+
 ## Done
 
 A model is done when its repo is category A, built from the target's plain Q4_K_M, every applicable gate passes
@@ -271,5 +329,5 @@ done and the user has decided on the rest.
 | Script | Does |
 |---|---|
 | `scripts/rank_models.py` | draft target list: per-model daily GGUF downloads, fits `--max-gb`, plain Q4_K_M source |
-| `scripts/org_status.py` | category A/B per org repo, missing and failing gates and metrics, performance guardrails (`card_lib.perf_flags`: far from roofline; stale or DevLab-only values to re-measure locally; a missing DevLab perf session), generator commit, one action per target |
+| `scripts/org_status.py` | category A/B per org repo, missing and failing gates and metrics, performance guardrails (`card_lib.perf_flags`: far from roofline; stale or DevLab-only values to re-measure locally; a missing DevLab perf session), generator commit, `CHECK:` flags (generator off main, nightly entry missing or differing from the card), one action per target |
 | `scripts/hub.py` | Hub reads with the user's token and rate-limit retries (used by both) |
