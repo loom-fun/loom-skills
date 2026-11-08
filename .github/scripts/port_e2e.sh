@@ -110,4 +110,5 @@ save_logs
 v=$("$T" -c "import json; print(json.load(open('$bench/gates.json'))['verdict'])" 2>/dev/null)
 a=$(grep -o "AUDIT [A-Z]*" "$out/finalize.log" | tail -1)
 echo "gates: $v; audit: $a"
-if [ "$v" = PASS ]; then result ok done 0; else result failed gates 1; exit 1; fi   # a failed gate fails the job
+# a failed gate fails the job; out/ (evidence, publish/) is still complete and is published as is (loom-org step 2)
+if [ "$v" = PASS ]; then result ok done 0; else result failed gates 1; exit 1; fi
