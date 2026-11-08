@@ -1,6 +1,7 @@
 """Vision encoder plan for a GGUF mmproj: config from metadata + an ordered list of kernel launches.
 Backends render the plan into a loom-test check.case (whole-encoder test) or a command program (serving)."""
-import math, gguf, numpy as np
+import math, os, gguf, numpy as np
+MUT = os.environ.get("VISION_MUTANT", "")   # TEMPORARY: injected vision bugs the gate must catch
 import gen_vision as G
 
 FAMILIES = ("gemma4v", "qwen3vl_merger", "qwen2.5vl_merger", "muse-glimmer")
@@ -94,7 +95,7 @@ def build(c):
     def add(xbuf, ybuf, rows, width):
         ak = p.k(G.ew("add")); p.launch(ak, [S(f"{rows}*{width}")], [S(f"{rows}*{width}"), B(xbuf), B(ybuf), B(xbuf)])
     # --- pixels + patch embedding + positions ---
-    order = "block2" if fam in QWEN_VL else "raster"
+    order = "block2" if fam in QWEN_VL and MUT != "raster" else "raster"
     def nmode(w):   # LayerNorm when the norm has a bias, else RMSNorm with weight (Qwen2.5-VL)
         return ("ln", w + ".weight", w + ".bias") if w + ".bias" in c["tensors"] else ("rmsw", w + ".weight", None)
     pk = p.k(G.pixels(c["mean"], c["std"], scale2=(fam == "gemma4v")))
@@ -104,13 +105,13 @@ def build(c):
     p.launch(pe, [S("T")], [S("T"), S("gw"), S("img_w"), B("pixf"), W("v.patch_embd.weight")] + ([W("v.patch_embd.weight.1")] if dual else []) + ([W("v.patch_embd.bias")] if bias else []) + [B("h")])
     if fam == "gemma4v":
         pk2 = p.k(G.pos_xy(E, c["pos_n"])); p.launch(pk2, [S("T")], [S("T"), S("gw"), W("v.position_embd.weight"), B("h")])
-    elif "v.position_embd.weight" in c["tensors"]:
-        pk2 = p.k(G.pos_interp(E, c["pos_n"], order, align_corners=(fam in QWEN_VL)))
+    elif "v.position_embd.weight" in c["tensors"] and MUT != "no_pos":
+        pk2 = p.k(G.pos_interp(E, c["pos_n"], order, align_corners=(fam in QWEN_VL and MUT != "align")))
         p.launch(pk2, [S("T")], [S("T"), S("gw"), S("gh"), W("v.position_embd.weight"), B("h")])
     if "v.pre_ln.weight" in c["tensors"]:
         norm("h", "h", "T", E, "ln", "v.pre_ln.weight", "v.pre_ln.bias")
     scale = 1.0 if fam == "gemma4v" else D ** -0.5
-    for i in range(c["layers"]):
+    for i in range(c["layers"] - (MUT == "layer")):
         b = f"v.blk.{i}."
         if fam == "gemma4v":
             norm("h", "x", "T", E, "rmsw", b + "ln1.weight")

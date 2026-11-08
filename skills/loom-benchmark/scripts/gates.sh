@@ -136,7 +136,7 @@ dev_gates() {
       run compare "$T" "$S/compare.py" "$pkg" golden_dev.json --llama "$L" --url "$url" --out compare_dev.json
       [ -n "${done[compare]:-}" ] && { grep -q '"verdict": "PASS"' gates_compare.log || result[compare]=1; }
     fi
-    [ -n "$MMPROJ" ] && run vision "$T" "$S/vision_golden.py" "$pkg" --url "$url" --llama "$L" --cases shapes,wide
+    [ -n "$MMPROJ" ] && run vision "$T" "$S/vision_golden.py" "$pkg" --url "$url" --llama "$L" --cases shapes,wide,chart,text,photo,tall
   fi
   run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" "${LL[@]}" --draws 0
   run needle "$T" "$S/needle.py" "$pkg" "$url" "${LL[@]}" --llama-max $(( slot - 1024 )) --out needle_dev.json \

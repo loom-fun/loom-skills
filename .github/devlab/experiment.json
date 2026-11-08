@@ -1,14 +1,15 @@
 {
- "_comment": "build.py's memory_bytes counts the largest program's prefill scratch: the three hybrid MoE cards rebuilt from this branch, a full-context request on a fresh server at the value build.py now prints and at the card's published one (full gates passed on the first card at 48e9 in run 42343748198).",
- "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
- "memory_bytes": 48000000000,
+ "_comment": "Temporary (not for merge): gates:dev (vision on all six images) on the published 35B card and on rebuilds with injected vision-encoder bugs (VISION_MUTANT in encoder.py, also temporary) that must still fail vision.",
+ "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
+ "memory_bytes": 49000000000,
  "kit": null,
- "llamacpp": "b1369",
+ "llamacpp": "b1370",
+ "steps": ["gates:dev"],
  "variants": [
-  {"name": "q36-rebuilt-admit", "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-rebuilt-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 49000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-card-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 42000000000, "steps": ["admit:260096"]},
-  {"name": "orn-rebuilt-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 36000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "orn-card-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 33000000000, "steps": ["admit:260096"]}
+  {"name": "o35-card"},
+  {"name": "o35-m-raster", "build": {"VISION_MUTANT": "raster"}},
+  {"name": "o35-m-nopos", "build": {"VISION_MUTANT": "no_pos"}},
+  {"name": "o35-m-layer", "build": {"VISION_MUTANT": "layer"}},
+  {"name": "o35-m-align", "build": {"VISION_MUTANT": "align"}}
  ]
 }
