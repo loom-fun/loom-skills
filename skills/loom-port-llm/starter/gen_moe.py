@@ -1024,7 +1024,6 @@ def _skip_empty_waves(text):
     and meets every barrier). bucket fills a tile's rows from the top, so a tile of r rows keeps ceil(r/16) of its 4
     row waves busy. With many experts and a short prompt most tiles are partly empty (256 experts, top-8, 1k
     tokens: 32 rows per expert on average), and the grouped GEMMs then did twice the MMA work they needed."""
-    import re
     m = re.search(r"\n    kernel\.barrier<workgroup> scope\(workgroup\) ordering\(acq_rel\)\n(    %fc0 = .*?)"
                   r"\n    kernel\.barrier<workgroup> scope\(workgroup\) ordering\(acq_rel\)\n    scf\.yield ([^\n]*) : ([^\n]*)\n  \}\n",
                   text, re.S)
@@ -1053,7 +1052,6 @@ def _prefetch_stages(text):
     their latency hides behind the MMAs (gen_gemm.gemm_big does the same). At a short prompt a 256-expert layer
     gives each expert about one row tile, so the grouped GEMMs stream every expert's weights once per layer and
     were bound by the latency of those loads."""
-    import re
     lines = text.split("\n")
     head = next(i for i, ln in enumerate(lines) if " = scf.for %step = [%c0 to %k_steps step %c1](" in ln)
     bar = next(i for i in range(head, len(lines)) if lines[i].strip().startswith("kernel.barrier"))

@@ -1405,6 +1405,30 @@ if cfg.get("moe"):
   check.return
 }}
 """)
+    # g_moe_combine_sorted alone: padding tokens (every pos -1) and single dead assignments read no expert row
+    t, cr = 37, 512
+    c_pos = rng.permutation(cr)[:t * KU].astype(np.int32).reshape(t, KU); c_pos[[0, 9]] = -1; c_pos[12, KU - 1] = -1
+    c_w, c_sg = rng.random((t, KU)).astype(np.float32), rng.random(t).astype(np.float32)
+    c_ys, c_y0 = rng.standard_normal((cr, H)).astype(np.float32), rng.standard_normal((t, H)).astype(np.float32)
+    c_e = (c_w[..., None] * np.where(c_pos[..., None] >= 0, c_ys[np.maximum(c_pos, 0)], 0.0)).sum(1)
+    c_e += ((c_sg[:, None] if SHG else 1) * c_y0) if ACC else 0
+    for n, a in (("pos", c_pos.reshape(-1)), ("w", c_w), ("sg", c_sg), ("ys", c_ys), ("y0", c_y0), ("e", c_e.astype(np.float32))):
+        save("cs_" + n, a)
+    YT = f"tensor<{t}x{H}xf32>"
+    cases.append(f"""check.case public @moe_combine_sorted {{
+  %t = check.literal value({t}) : index
+  %rows = check.literal value({cr}) : index
+  %pos = check.file.read.npy path("cs_pos.npy") : tensor<{t * KU}xi32>
+  %wts = check.file.read.npy path("cs_w.npy") : tensor<{t}x{KU}xf32>
+  %sg = check.file.read.npy path("cs_sg.npy") : tensor<{t}xf32>
+  %ys = check.file.read.npy path("cs_ys.npy") : tensor<{cr}x{H}xf32>
+  %e = check.file.read.npy path("cs_e.npy") : {YT}
+  %y = {f'check.file.read.npy path("cs_y0.npy") : {YT}' if ACC else f"check.generate.fill value(3.0) : {YT}"}
+  kernel.launch @g_moe_combine_sorted[%t](%t, %rows, %ys, %pos, %wts, {"%sg, " if SHG else ""}%y) : [index](index, index, tensor<{cr}x{H}xf32>, tensor<{t * KU}xi32>, tensor<{t}x{KU}xf32>, {f"tensor<{t}xf32>, " if SHG else ""}{YT})
+  check.expect.close actual(%y) expected(%e) atol(1.0e-4) rtol(1.0e-4) nan(different) : {YT}
+  check.return
+}}
+""")
 import re
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
