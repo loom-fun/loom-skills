@@ -3781,8 +3781,8 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
 """ if MOE.get("down_scale") else "") + f"""  %wge_{i} = command.parameter %weights, "{gn}" : view<{sg}xi8>
 """ + ("" if fused else f"""  %wue_{i} = command.parameter %weights, "{un}" : view<{su}xi8>
 """) + f"""  %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
-  scf.if %gemm {{
-    kernel.launch @g_moe_route_tr_live[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
+  scf.if {"%c_false" if os.environ.get("MOE_DIAG") == "decode" else "%gemm"} {{
+    {"kernel.launch @g_moe_route[%t](%t, " + rx + ", %router_" + str(i) + ", " + bias + ", %ids, %wts) : [index](index, buffer, view<" + str(E * H) + "x" + rty + ">, " + bias_ty + ", buffer, buffer)" if os.environ.get("MOE_DIAG") == "route" else "kernel.launch @g_moe_route_tr_live[%t](%t, " + rx + ", %router_" + str(i) + ", " + bias + ", %ids, %wts, %info) : [index](index, buffer, view<" + str(E * H) + "x" + rty + ">, " + bias_ty + ", buffer, buffer, buffer)"}
 {wsc}    kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
 {x16}    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, {wu}{gu_b}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
     kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
@@ -4370,6 +4370,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %c64 = index.constant 64 : index
   // NO_GEMM=1 (diagnostic build): %c_never keeps every epoch on the decode kernels.
   %c_never = index.constant 1000000 : index
+  %c_false = index.cmp ult, %c64, %c64 : index
   %c128 = index.constant 128 : index
   %prefill_shape = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c64"} : index
   %pacc_dec = index.constant {QH * 64 * D * 4} : offset

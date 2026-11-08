@@ -5,10 +5,39 @@
  "kit": null,
  "llamacpp": "b1370",
  "variants": [
-  {"name": "coder-card", "steps": ["consistency:3:llama"]},
-  {"name": "coder-rebuild", "build": {}, "steps": ["consistency:3:llama"]},
-  {"name": "coder-nogemm", "build": {"NO_GEMM": "1"}, "steps": ["consistency:3:llama"]},
-  {"name": "coder-noflash2", "build": {"NO_FLASH2": "1"}, "steps": ["consistency:3:llama"]},
-  {"name": "coder-nodraft", "execution": {"draft_depth": 0}, "steps": ["consistency:3:llama"]}
+  {
+   "name": "coder-rebuild",
+   "build": {},
+   "steps": [
+    "consistency:5:llama"
+   ]
+  },
+  {
+   "name": "coder-moe-decode",
+   "build": {
+    "MOE_DIAG": "decode"
+   },
+   "steps": [
+    "consistency:5:llama"
+   ]
+  },
+  {
+   "name": "coder-moe-route",
+   "build": {
+    "MOE_DIAG": "route"
+   },
+   "steps": [
+    "consistency:5:llama"
+   ]
+  },
+  {
+   "name": "coder-nogemm",
+   "build": {
+    "NO_GEMM": "1"
+   },
+   "steps": [
+    "consistency:5:llama"
+   ]
+  }
  ]
 }
