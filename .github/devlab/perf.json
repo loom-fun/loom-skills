@@ -1,35 +1,158 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "flash2 token subtiles (default FLASH2_TS=2): prefill A/B against origin/main's starter on G = 2/3/4/8 cards, same runner per job; prefill attribution on a mixed-head_dim MoE card by ablation (doubled launches). Temporary.",
+ "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "memory_bytes": 17000000000,
+ "kit": null,
+ "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "q06",
    "variants": [
     {
-     "name": "new",
+     "name": "base",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "ts2",
      "build": {}
     }
    ],
    "steps": [
-    "textmatch:new"
+    "ktest:ts2",
+    "perf:base:1:long",
+    "perf:ts2:1:long",
+    "perf:base:1:long",
+    "perf:ts2:1:long"
    ]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "q17",
+   "card": "loom-fun/ggml-org-Qwen3-1.7B-loom",
+   "memory_bytes": 20000000000,
    "variants": [
     {
-     "name": "new",
+     "name": "base",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "ts2",
      "build": {}
     }
    ],
    "steps": [
-    "textmatch:new"
+    "ktest:ts2",
+    "perf:base:1:long",
+    "perf:ts2:1:long",
+    "perf:base:1:long",
+    "perf:ts2:1:long"
+   ]
+  },
+  {
+   "name": "q8b",
+   "card": "loom-fun/unsloth-Qwen3-8B-loom",
+   "memory_bytes": 29000000000,
+   "variants": [
+    {
+     "name": "base",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "ts2",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:ts2",
+    "perf:base:1:long",
+    "perf:ts2:1:long",
+    "perf:base:1",
+    "perf:ts2:1"
+   ]
+  },
+  {
+   "name": "llama3b",
+   "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
+   "memory_bytes": 29000000000,
+   "variants": [
+    {
+     "name": "base",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "ts2",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:ts2",
+    "perf:base:1:long",
+    "perf:ts2:1:long",
+    "perf:base:1",
+    "perf:ts2:1"
+   ]
+  },
+  {
+   "name": "q30moe",
+   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+   "memory_bytes": 63000000000,
+   "llamacpp": "b1370",
+   "variants": [
+    {
+     "name": "base",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "ts2",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:ts2",
+    "perf:base:1:long",
+    "perf:ts2:1:long",
+    "perf:base:1",
+    "perf:ts2:1"
+   ]
+  },
+  {
+   "name": "g26abl",
+   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1370",
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "d512x2",
+     "double": [
+      "*:@g_attention_flash2_d512\\["
+     ]
+    },
+    {
+     "name": "swax2",
+     "double": [
+      "*:@g_attention_flash2\\["
+     ]
+    },
+    {
+     "name": "listx2",
+     "double": [
+      "*:_attention_(split|combine)_listed\\["
+     ]
+    }
+   ],
+   "steps": [
+    "perf:card:1:long",
+    "perf:d512x2:1:long",
+    "perf:swax2:1:long",
+    "perf:listx2:1:long"
    ]
   }
  ]
