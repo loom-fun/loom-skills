@@ -398,6 +398,12 @@ def render(d):
         if x:
             rev = f" @ `{x['revision'][:7]}`" if x["revision"] else ""
             L.append(f"- {role}: {hf(x['repo'])}{rev}, `{x['file']}`")
+    paused, steps = info.get("status") == "paused", [f"- {x}" for x in info.get("next_steps") or []]
+    if paused or steps:   # last: what would be done if work continued
+        L += ["", "## Next steps", ""]
+        if paused:
+            L += ["Work on this model is paused."] + ([""] if steps else [])
+        L += steps
     return "\n".join(L) + "\n"
 
 

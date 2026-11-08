@@ -114,6 +114,20 @@ gev "$tmp/g_sameday.json" pass quick 2026-11-07T09:00:00 bbb
 gate_case "published full pass, a same-day quick pass keeps it" pass/full/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
 gev "$tmp/g_sameday.json" fail quick 2026-11-07T09:00:00 bbb
 gate_case "published full pass, a same-day quick fail shows" fail/quick/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
+# a card with a failing gate is published as is (loom-org step 2): it validates, renders the gate as a failure, and
+# org_status counts it as failing (action fix)
+mkdir -p "$tmp/failing"; cp -r "$F/pkg/." "$tmp/failing/"
+py "$C/make_info.py" build "$tmp/failing" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint --report generated \
+  --evidence "$tmp/gates.json" "$tmp/g_qfail.json" -o "$tmp/failing/info.json" 2>/dev/null
+py "$C/render_card.py" "$tmp/failing" 2>/dev/null
+py -c "import sys; sys.path.insert(0, sys.argv[1]); sys.path.insert(0, sys.argv[2]); import card_lib as c, render_card as r
+from org_status import assess
+assert c.validate(c.load_json(sys.argv[3] + '/info.json')) == [], 'not valid'
+rows = [l for l in open(sys.argv[3] + '/README.md') if l.startswith('| \x60agent\x60 |')]
+assert len(rows) == 1 and f'| {r.NO} fail' in rows[0], rows
+assert assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])['failing'] == ['agent']" "$C" "$here/../../../../loom-org/scripts" "$tmp/failing" \
+  && echo "OK   failing: a card with a failing gate validates, renders it as fail and org_status counts it failing" \
+  || { echo "FAIL failing: a card with a failing gate does not publish as failing"; bad=1; }
 # local and DevLab sessions both stay (card_lib.card_metrics: local headline, DevLab columns): a metric only DevLab
 # measured asks for a local session (perf_flags "devlab"; org_status remeasure reason devlab-primary); a local value
 # without a DevLab one on the same programs asks for a DevLab perf session ("devlab_perf"); the gap is never a flag
@@ -163,6 +177,23 @@ a = c.card_metrics(c.load_json(sys.argv[2]))['spec_acceptance'][0]['loom']; prin
   "$C" "$tmp/acc_old.json")
 [ "$got" = "$want" ] && echo "OK   flags: a DevLab spec gate's acceptance replaces a stale spec_acceptance (gates only: none)" \
   || { echo "FAIL flags: DevLab spec acceptance: $got, expected $want"; bad=1; }
+# a paused card (make_info.py build --from-info --next-steps --status paused): README.md is the same card with a final
+# "Next steps" section after everything else, org_status reports paused; without the fields nothing changes
+printf '%s\n' '- retry the agent gate on DevLab' '' 'measure `decode_32k` locally' > "$tmp/next.txt"
+mkdir -p "$tmp/paused"; cp -r "$F/pkg/." "$tmp/paused/"
+py "$C/make_info.py" build "$tmp/paused" --generator-commit $GEN --from-info "$tmp/failing/info.json" --next-steps "$tmp/next.txt" \
+  --status paused -o "$tmp/paused/info.json" 2>/dev/null
+py "$C/render_card.py" "$tmp/paused" 2>/dev/null
+py "$C/make_info.py" build "$tmp/paused" --generator-commit $GEN --from-info "$tmp/paused/info.json" --next-steps /dev/null \
+  --status active -o "$tmp/unpaused.json" 2>/dev/null
+printf '\n## Next steps\n\nWork on this model is paused.\n\n- retry the agent gate on DevLab\n- measure `decode_32k` locally\n' \
+  | cat "$tmp/failing/README.md" - | cmp -s - "$tmp/paused/README.md" && cmp -s "$tmp/failing/info.json" "$tmp/unpaused.json" \
+  && py -c "import sys; sys.path.insert(0, sys.argv[1]); from org_status import assess
+a, b = assess('loom-fun/ggml-org-Flint-loom', sys.argv[2]), assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])
+assert a.get('paused') is True and 'paused' not in b and a['failing'] == b['failing']" "$here/../../../../loom-org/scripts" \
+  "$tmp/paused" "$tmp/failing" \
+  && echo "OK   paused: next steps render last, org_status reports paused, and clearing them gives the card back" \
+  || { echo "FAIL paused: a paused card's next steps do not render or clear as expected"; bad=1; }
 # c4_steady.py runs that measured nothing (every stream failed: rate -0.0, a negative window) are not samples
 printf '%s\n' '{"streams": 4, "window_s": 2.5, "agg_tps": 110.0}' '{"streams": 4, "window_s": -3.1, "agg_tps": -0.0}' 0 112.5 \
   > "$tmp/c4_bad.txt"

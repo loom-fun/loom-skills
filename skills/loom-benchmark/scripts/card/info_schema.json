@@ -99,6 +99,9 @@
     "metrics": {"type": "object", "additionalProperties": {"$ref": "#/$defs/ceiling"}}
    }
   },
+  "status": {"enum": ["paused"], "description": "Where work on this model stands, when not active: paused (work stopped; the card shows what was reached). Optional key, loom-card/2."},
+  "next_steps": {"type": "array", "items": {"type": "string"},
+                 "description": "What would be done next if work continued, one short markdown line each; README.md ends with them under Next steps. Optional key, loom-card/2."},
   "devlab": {
    "type": "object", "required": ["sweeps"],
    "description": "Loom measured alone on AMD DevLab Dispatch runners by the nightly sweep, oldest first. No longer written or rendered: a card's DevLab numbers are performance sessions (Loom and llama.cpp) with a devlab source. Kept (optional key, loom-card/2) so cards that recorded sweeps stay valid; make_info.py build --from-info carries them over unchanged.",

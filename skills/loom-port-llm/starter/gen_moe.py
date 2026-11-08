@@ -1,5 +1,7 @@
 """MoE FFN kernels, wired by gen_llm.py from cfg["moe"] (inspect_gguf.py): a router (gating 1: softmax, Qwen3 /
-Qwen3.5 MoE; gating 2: sigmoid with an optional selection bias, flint / LFM2-MoE), top-k weights (normalized or not),
+Qwen3.5 MoE; gating 2: sigmoid with an optional selection bias, flint / LFM2-MoE; gating 3: llama.cpp's SOFTMAX_WEIGHT,
+the top-k of the logits plus the router's own bias, weighted by a softmax over the k picked logits, gpt-oss), top-k weights
+(normalized or not),
 per-assignment expert matvecs (assignment a = token * KU + slot), weighted combine, and the prefill path (tokens
 bucketed by expert into 64-row tiles, grouped WMMA GEMMs). Shared experts are the starter's dense FFN (gen_llm.py);
 a Qwen-style shared-expert gate (sigmoid(h . w) per token) scales them inside the combine.
@@ -12,14 +14,98 @@ g_moe_combine      y[t, H]   = sg[t] * y[t, :] + sum_k wts[t, k] ys[t*KU + k, :]
 """
 import os
 import re
-FMT = {"q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34}
+FMT = {"q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "q5_0": 22, "mxfp4": 17}
 ROUTE_TR = int(__import__("os").environ.get("ROUTE_TR", "0"))   # router tokens per workgroup (0: largest of 1/2/4/8 whose LDS fits 48 KiB)
-SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32}
-GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)"}   # llama.cpp's expert_gating_func values
+SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "q5_0": 32, "mxfp4": 32}
+GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)", 3: "logit"}   # llama.cpp's expert_gating_func values
+# gating 3 (SOFTMAX_WEIGHT): `bias` is the router's own bias (ffn_gate_inp.bias, added to the logits before the top-k)
+# and the k weights are a softmax over the k picked logits.
+# Expert activations (cfg moe.act): "silu" (silu(g) * u), "swiglu_oai" (gpt-oss: x = min(g, limit),
+# y = clamp(u, -limit, limit), x * sigmoid(alpha x) * (y + 1); llama.cpp ggml_swiglu_oai).
+
+
+def act_scalar(act, g, u, out, pre):
+    """Loom lines computing %out = act(%g, %u) on f32 scalars (act: None/"silu" or ("swiglu_oai", alpha, limit))."""
+    if not act or act == "silu":
+        return f"""    %{pre}silu = scalar.siluf<afn> {g} : f32
+    %{out} = scalar.mulf %{pre}silu, {u} : f32"""
+    _, alpha, limit = act
+    return f"""    %{pre}lim = scalar.constant {float(limit)!r} : f32
+    %{pre}nlim = scalar.constant {-float(limit)!r} : f32
+    %{pre}alpha = scalar.constant {float(alpha)!r} : f32
+    %{pre}one = scalar.constant 1.0 : f32
+    %{pre}x = scalar.minnumf {g}, %{pre}lim : f32
+    %{pre}y0 = scalar.minnumf {u}, %{pre}lim : f32
+    %{pre}y = scalar.maxnumf %{pre}y0, %{pre}nlim : f32
+    %{pre}ax = scalar.mulf %{pre}x, %{pre}alpha : f32
+    %{pre}sg = scalar.logisticf<afn> %{pre}ax : f32
+    %{pre}glu = scalar.mulf %{pre}x, %{pre}sg : f32
+    %{pre}y1 = scalar.addf %{pre}y, %{pre}one : f32
+    %{out} = scalar.mulf %{pre}glu, %{pre}y1 : f32"""
+
+
+def act_vector(act, g, u, out, pre, n=8):
+    """The same on vector<nxf32> values (the grouped GEMM epilogue)."""
+    if not act or act == "silu":
+        return f"""  %{pre}sg = vector.siluf<afn> {g} : vector<{n}xf32>
+  %{out} = vector.mulf %{pre}sg, {u} : vector<{n}xf32>"""
+    _, alpha, limit = act
+    return f"""  %{pre}lim = vector.constant {float(limit)!r} : vector<{n}xf32>
+  %{pre}nlim = vector.constant {-float(limit)!r} : vector<{n}xf32>
+  %{pre}alpha = vector.constant {float(alpha)!r} : vector<{n}xf32>
+  %{pre}one = vector.constant 1.0 : vector<{n}xf32>
+  %{pre}x = vector.minnumf {g}, %{pre}lim : vector<{n}xf32>
+  %{pre}y0 = vector.minnumf {u}, %{pre}lim : vector<{n}xf32>
+  %{pre}y = vector.maxnumf %{pre}y0, %{pre}nlim : vector<{n}xf32>
+  %{pre}ax = vector.mulf %{pre}x, %{pre}alpha : vector<{n}xf32>
+  %{pre}sgm = vector.logisticf<afn> %{pre}ax : vector<{n}xf32>
+  %{pre}glu = vector.mulf %{pre}x, %{pre}sgm : vector<{n}xf32>
+  %{pre}y1 = vector.addf %{pre}y, %{pre}one : vector<{n}xf32>
+  %{out} = vector.mulf %{pre}glu, %{pre}y1 : vector<{n}xf32>"""
 
 
 def row_bytes(fmt, k):
     return k // SB[fmt] * FMT[fmt]
+
+
+def _rep1(text, a, b):
+    assert text.count(a) == 1, (a, text.count(a))
+    return text.replace(a, b)
+
+
+def _softmax_weight_decode(text):
+    """g_moe_route for gating 3 from the sigmoid router's text: the score is the logit (+ the router bias), and the
+    winners' weights are a softmax over their scores (workgroup max and sum after the top-k rounds)."""
+    text = _rep1(text, "%prob_v = scalar.logisticf<afn> %lgt : f32", "%prob_v = scalar.addf %lgt, %zero_f : f32")
+    text = _rep1(text, "scf.yield %prob_v, %score_v : f32, f32", "scf.yield %score_v, %score_v : f32, f32")
+    text = _rep1(text, "of sigmoid(logit)", "of logit")
+    text = _rep1(text, "  %wsum = scalar.constant 1.0 : f32\n", """  %sel_none = scalar.constant 0 : i32
+  %sel = scalar.cmpi sge, %my_k, %sel_none : i32
+  %sel_l = scf.select %sel, %my_w, %removed : f32
+  %sel_max = kernel.workgroup.reduce<maxnumf> %sel_l : f32
+  %sel_sh = scalar.subf %my_w, %sel_max : f32
+  %sel_e0 = scalar.expf<afn> %sel_sh : f32
+  %sel_e = scf.select %sel, %sel_e0, %zero_f : f32
+  %wsum = kernel.workgroup.reduce<addf> %sel_e : f32
+""")
+    return _rep1(text, "    %wn = scalar.divf %my_w, %wsum : f32", "    %wn = scalar.divf %sel_e, %wsum : f32")
+
+
+def _softmax_weight_prefill(text, KU):
+    """g_moe_route_tr for gating 3 from the sigmoid router's text: score = logit (+ router bias), and the weights a
+    softmax over the KU picked scores (round 0 holds the largest)."""
+    text, n = re.subn(r"%pr(\d+) = scalar\.logisticf<afn> %lgt\1 : f32", r"%pr\1 = scalar.addf %lgt\1, %zero_f : f32", text)
+    assert n, "gating 3: no router probabilities found"
+    text, n = re.subn(r"(%m\d+_\d+ = scf\.select %w\d+_)(\d+), %pr\2,", r"\1\2, %sv\2,", text)
+    assert n, "gating 3: no winner weights found"
+    text = _rep1(text, "of sigmoid(logit)", "of logit")
+    soft = "".join(f"""    %wsh{k} = scalar.subf %wp{k}, %wp0 : f32
+    %wex{k} = scalar.expf<afn> %wsh{k} : f32
+""" + (f"    %wes{k} = scalar.addf %wes{k - 1}, %wex{k} : f32\n" if k else "    %wes0 = scalar.addf %wex0, %zero_f : f32\n") for k in range(KU))
+    text = _rep1(text, "    %wsum = scalar.constant 1.0 : f32\n", soft + f"    %wsum = scalar.addf %wes{KU - 1}, %zero_f : f32\n")
+    for k in range(KU):
+        text = _rep1(text, f"      %wn{k} = scalar.divf %wp{k}, %wsum : f32", f"      %wn{k} = scalar.divf %wex{k}, %wsum : f32")
+    return text
 
 
 def route_decode(H, E, KU, gating, norm, bias, wty="f32"):
@@ -32,11 +118,13 @@ def route_decode(H, E, KU, gating, norm, bias, wty="f32"):
     load = (f"""      %wraw = vector.load %w_view[%e, %bg, %c0] : view<{E}x{HG}x32xbf16> -> vector<32xbf16>
       %wv = vector.extf %wraw : vector<32xbf16> to vector<32xf32>""" if wty == "bf16" else
             f"""      %wv = vector.load %w_view[%e, %bg, %c0] : view<{E}x{HG}x32xf32> -> vector<32xf32>""")
-    assert gating in (1, 2) and not (gating == 1 and bias), f"expert gating {gating} (bias {bias}): 1 softmax, 2 sigmoid"
+    assert gating in (1, 2, 3) and not (gating == 1 and bias), f"expert gating {gating} (bias {bias}): 1 softmax, 2 sigmoid, 3 softmax of the picked"
     prob = "scalar.logisticf<afn> %lgt : f32" if gating == 2 else "scalar.addf %lgt, %zero_f : f32"
     score = "scalar.addf %prob, %bias_v : f32" if bias else "scalar.addf %prob, %zero_f : f32"
     bias_load = f"""    %b_view = buffer.view %b[%zero] : buffer -> view<{E}xf32>
     %bias_v = view.load %b_view[%be] : view<{E}xf32> -> f32""" if bias else ""
+    if gating == 3:   # the biased logit is both the selection score and the weight's logit
+        return _softmax_weight_decode(route_decode(H, E, KU, 2, False, bias, wty))
     norm_text = f"""  %min_sum = scalar.constant 6.103515625e-05 : f32
   %wsum = scalar.maxnumf %total, %min_sum : f32""" if norm else "  %wsum = scalar.constant 1.0 : f32"
     # softmax: thread e holds logit e (out of range: -3e38); probabilities over all E experts (workgroup max and
@@ -163,8 +251,10 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32"):
     (ties: lowest index), no workgroup barriers. The winners' weights stay in registers (see README: a global
     write/read-back of them raced)."""
     HG = H // 32
-    assert E % 8 == 0 and E <= 256 and KU <= 8 and H % 128 == 0
-    assert gating in (1, 2) and not (gating == 1 and bias), f"expert gating {gating} (bias {bias}): 1 softmax, 2 sigmoid"
+    assert E % 8 == 0 and E <= 256 and KU <= 8 and H % 32 == 0
+    assert gating in (1, 2, 3) and not (gating == 1 and bias), f"expert gating {gating} (bias {bias}): 1 softmax, 2 sigmoid, 3 softmax of the picked"
+    if gating == 3:
+        return _softmax_weight_prefill(route_prefill(H, E, KU, 2, False, bias, wty), KU)
     EPW = E // 8
     TR = ROUTE_TR or max(t for t in (1, 2, 4, 8) if t * (H + E) * 4 <= 48 * 1024)
     prob = "scalar.logisticf<afn> %lgt : f32" if gating == 2 else "scalar.addf %lgt, %zero_f : f32"
@@ -182,6 +272,26 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32"):
       %wv = vector.extf %wraw : vector<4xbf16> to vector<4xf32>""" if wty == "bf16" else
           f"""      %wv = vector.load %w4_view[%e, %bb, %lane, %c0] : view<{E}x{HB}x32x4xf32> -> vector<4xf32>""")
     dots = "".join(f"""      %xv{r} = vector.load %xs4_view[{r}, %bb, %lane, %c0] : view<{TR}x{HB}x32x4xf32> -> vector<4xf32>
+      %d{r} = vector.dotf<reassoc|contract> %wv, %xv{r}, %zero_f : vector<4xf32>, vector<4xf32>, f32
+      %n{r} = scalar.addf %a{r}, %d{r} : f32
+""" for r in range(TR))
+    W4 = f"view<{E}x{HB}x32x4x{wty}>"
+    X4 = f"view<{TR}x{HB}x32x4xf32>"
+    if H % 128:   # a partial last 128-value block (gpt-oss: 2880): chunk c = 32 bq + lane; lanes past the row's chunks add 0
+        HC, HB = H // 4, -(-H // 128)
+        W4, X4 = f"view<{E}x{HC}x4x{wty}>", f"view<{TR}x{HC}x4xf32>"
+        chunk = f"""      %cv = index.madd %bq, %c32, %lane : index
+      %cHC = index.constant {HC} : index
+      %c_in = index.cmp ult, %cv, %cHC : index
+      %c_c = scf.select %c_in, %cv, %c0 : index
+      %bc = index.assume %c_c [range(%c_c, 0, {HC - 1})] : index
+      %zero4w = vector.constant 0.0 : vector<4xf32>
+"""
+        wl = chunk + (f"""      %wraw = vector.load %w4_view[%e, %bc, %c0] : {W4} -> vector<4xbf16>
+      %wv0 = vector.extf %wraw : vector<4xbf16> to vector<4xf32>""" if wty == "bf16" else
+                      f"""      %wv0 = vector.load %w4_view[%e, %bc, %c0] : {W4} -> vector<4xf32>""") + """
+      %wv = scf.select %c_in, %wv0, %zero4w : vector<4xf32>"""
+        dots = "".join(f"""      %xv{r} = vector.load %xs4_view[{r}, %bc, %c0] : {X4} -> vector<4xf32>
       %d{r} = vector.dotf<reassoc|contract> %wv, %xv{r}, %zero_f : vector<4xf32>, vector<4xf32>, f32
       %n{r} = scalar.addf %a{r}, %d{r} : f32
 """ for r in range(TR))
@@ -307,8 +417,8 @@ kernel.def export("g_moe_route_tr") @g_moe_route_tr(%tokens: index) {{
   %xs_bytes = index.constant {TR * H * 4} : offset
   %xs = buffer.alloca<workgroup> align(16) %xs_bytes : buffer
   %xs_view = buffer.view %xs[%zero] : buffer -> view<{TR}x{HG}x32xf32>
-  %xs4_view = buffer.view %xs[%zero] : buffer -> view<{TR}x{HB}x32x4xf32>
-  %w4_view = buffer.view %w[%zero] : buffer -> view<{E}x{HB}x32x4x{wty}>
+  %xs4_view = buffer.view %xs[%zero] : buffer -> {X4}
+  %w4_view = buffer.view %w[%zero] : buffer -> {W4}
   %cHB = index.constant {HB} : index
   %lg_bytes = index.constant {TR * E * 4} : offset
   %lg = buffer.alloca<workgroup> align(16) %lg_bytes : buffer
@@ -411,9 +521,12 @@ def route(H, E, KU, gating, norm, bias, wty="f32"):
     return route_decode(H, E, KU, gating, norm, bias, wty) + route_prefill(H, E, KU, gating, norm, bias, wty)
 
 
-def expert_mv(fmt, K, N, E, KU, R, mode):
+def expert_mv(fmt, K, N, E, KU, R, mode, fused=False, bias=False, act=None):
     """mode 'gu': act[a] = silu(Wg[e] x[a/KU]) * Wu[e] x[a/KU]; mode 'dn': ys[a] = Wd[e] x[a].
-    fmt "GATE+UP" ('gu'): gate and up weights in different formats, each with its own strides and dequant."""
+    fmt "GATE+UP" ('gu'): gate and up weights in different formats, each with its own strides and dequant.
+    fused ('gu'): one gate_up tensor passed as both weights, expert e's N gate rows then its N up rows.
+    bias: per-expert output biases (gpt-oss ffn_{gate,up,down}_exps.bias, [E, N] f32) added before the activation;
+    act: the gate/up activation (see act_scalar)."""
     fmt, _, fmt2 = fmt.partition("+")
     groups = K // 32
     lanes = (groups + 31) // 32 * 32
@@ -421,8 +534,10 @@ def expert_mv(fmt, K, N, E, KU, R, mode):
     rb = row_bytes(fmt, K)
     eb = rb * N
     nw = 2 if mode == "gu" else 1
-    name = f"g_moe_{mode}_{fmt}{'_' + fmt2 if fmt2 else ''}_k{K}_r{R}"
+    name = f"g_moe_{mode}_{fmt}{'_' + fmt2 if fmt2 else ''}{'_fused' if fused else ''}_k{K}_r{R}"
     wargs = "%w: buffer, %w2: buffer" if nw == 2 else "%w: buffer"
+    if bias:
+        wargs += ", %bg: buffer, %bu: buffer" if nw == 2 else ", %bd: buffer"
     xrows = "%xrows" if mode == "gu" else "%tokens"
     L = [f"""
 kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
@@ -450,7 +565,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %rows_per = index.constant {R} : index
   %cW = index.constant {waves} : index
   %row_bytes = index.constant {rb} : offset
-  %expert_bytes = index.constant {eb} : offset
+  %expert_bytes = index.constant {2 * eb if fused else eb} : offset
   %block_bytes = index.constant {FMT[fmt]} : offset
   %zero_f = scalar.constant 0.0 : f32
   %zero32 = vector.constant 0.0 : vector<32xf32>
@@ -515,6 +630,10 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
     %ro_u = index.scale %row, %row_bytes_u : index, offset -> offset
     %o0_u = index.add %ro_u, %ba_u : offset
     %o_u = index.add %o0_u, %e_off_u : offset""")
+        elif wi and fused:   # the up rows follow the expert's gate rows
+            o = "%o_u"
+            L.append(f"""    %up_bytes = index.constant {eb} : offset
+    %o_u = index.add %o, %up_bytes : offset""")
         if fold and fw == "q4_k":
             L.append(f"""    %wv{wi}, %sc{wi}, %mn{wi} = scf.if %ok -> (vector<32xf32>, f32, f32) {{
       %v, %sa, %sb = func.call @g_q4_k_codes(%{w}, {o}, {within}) : (buffer, offset, index) -> (vector<32xf32>, f32, f32)
@@ -558,11 +677,21 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
       %nx = scalar.addf %acc, %p : f32
       scf.yield %nx : f32
     }}""")
-    if nw == 2:
-        L.append("""    %silu = scalar.siluf<afn> %t0 : f32
-    %value = scalar.mulf %silu, %t1 : f32""")
+    if bias:   # bias[e, row] of each weight, added to its dot product
+        L.append(f"""    %out_row_b = index.add %row_base, %rr : index
+    %brow = index.assume %out_row_b [range(%out_row_b, 0, {N - 1})] : index""")
+        for wi, bv in enumerate(["%bg", "%bu"] if nw == 2 else ["%bd"]):
+            L.append(f"""    %bview{wi} = buffer.view {bv}[%zero] : buffer -> view<{E}x{N}xf32>
+    %bval{wi} = view.load %bview{wi}[%e, %brow] : view<{E}x{N}xf32> -> f32
+    %tb{wi} = scalar.addf %t{wi}, %bval{wi} : f32""")
+    t0, t1 = ("%tb0", "%tb1") if bias else ("%t0", "%t1")
+    if nw == 2 and act and act != "silu":
+        L.append(act_scalar(act, t0, t1, "value", "oa_"))
+    elif nw == 2:
+        L.append(f"""    %silu = scalar.siluf<afn> {t0} : f32
+    %value = scalar.mulf %silu, {t1} : f32""")
     else:
-        L.append("    %value = scalar.addf %t0, %zero_f : f32")
+        L.append(f"    %value = scalar.addf {t0}, %zero_f : f32")
     L.append("""    %out_row = index.add %row_base, %rr : index
     func.call @g_store_row(%y, %tokens, %n, %a, %out_row, %value, %c0_i32) : (buffer, index, index, index, index, f32, i32)
   }
@@ -800,17 +929,109 @@ kernel.def export("g_moe_bucket") @g_moe_bucket(%tokens: index) {{
 """
 
 
-def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
+def _gemm_bias_act(text, mode, N, E, bias, act):
+    """grouped_gemm's epilogue with per-expert output biases ([E, N] f32, staged as 16 equal rows so a result
+    fragment load gives each lane its columns' bias) and the expert activation (act_vector)."""
+    names = (["bg", "bu"] if mode == "swiglu" else ["bd"]) if bias else []
+    if names:
+        text = _rep1(text, "%w2: buffer, %y: buffer) {" if mode == "swiglu" else "%w: buffer, %y: buffer) {",
+                     ("%w2: buffer, " if mode == "swiglu" else "%w: buffer, ") + ", ".join(f"%{n}: buffer" for n in names) + ", %y: buffer) {")
+        stage = [f"""  %bst_c = index.rem %workitem, %c64 : index
+  %bst_r0 = index.div %workitem, %c64 : index
+  %bst_col_v = index.add %out_origin, %bst_c : index
+  %bst_col = index.assume %bst_col_v [range(%bst_col_v, 0, {N - 1})] : index
+  %bst_bytes = index.constant 4096 : offset
+""" + "".join(f"  %bst_q{q} = index.constant {4 * q} : index\n" for q in range(4))]
+        loads = []
+        for n in names:
+            stage.append(f"""  %{n}_tile = buffer.alloca<workgroup> align(16) %bst_bytes : buffer
+  %{n}_tv = buffer.view %{n}_tile[%origin] : buffer -> view<16x64xf32>
+  %{n}_src = buffer.view %{n}[%origin] : buffer -> view<{E}x{N}xf32>
+  %{n}_val = view.load %{n}_src[%expert, %bst_col] : view<{E}x{N}xf32> -> f32
+""" + "".join(f"""  %{n}_r{q}v = index.add %bst_r0, %bst_q{q} : index
+  %{n}_r{q} = index.assume %{n}_r{q}v [range(%{n}_r{q}v, 0, 15)] : index
+  view.store %{n}_val, %{n}_tv[%{n}_r{q}, %bst_c] : f32, view<16x64xf32>
+""" for q in range(4)))
+            loads.append(f"""  %{n}_f0 = vector.fragment.load<result> %{n}_tv[%c0, %bounded_wave_out] shape [%c16, %c16] : view<16x64xf32> -> vector<8xf32>
+  %{n}_f1 = vector.fragment.load<result> %{n}_tv[%c0, %wave_out1] shape [%c16, %c16] : view<16x64xf32> -> vector<8xf32>
+""")
+        text = _rep1(text, "  %inv_bytes = index.constant 4096 : offset\n", "".join(stage) + "  %inv_bytes = index.constant 4096 : offset\n")
+        anchor = "  %inv_frag = vector.fragment.load<result> %inv_view[%wave_row, %c0] shape [%c16, %c16] : view<64x16xf32> -> vector<8xf32>\n"
+        text = _rep1(text, anchor, anchor + "".join(loads))
+    if mode == "swiglu":
+        g0, g1, u0, u1 = "%g0", "%g1", "%u0", "%u1"
+        pre = ""
+        if bias:
+            pre = """  %g0b = vector.addf %g0, %bg_f0 : vector<8xf32>
+  %g1b = vector.addf %g1, %bg_f1 : vector<8xf32>
+  %u0b = vector.addf %u0, %bu_f0 : vector<8xf32>
+  %u1b = vector.addf %u1, %bu_f1 : vector<8xf32>
+"""
+            g0, g1, u0, u1 = "%g0b", "%g1b", "%u0b", "%u1b"
+        text = _rep1(text, """  %sg0 = vector.siluf<afn> %g0 : vector<8xf32>
+  %sg1 = vector.siluf<afn> %g1 : vector<8xf32>
+  %act0 = vector.mulf %sg0, %u0 : vector<8xf32>
+  %act1 = vector.mulf %sg1, %u1 : vector<8xf32>
+""", pre + act_vector(act, g0, u0, "act0", "oa0_") + "\n" + act_vector(act, g1, u1, "act1", "oa1_") + "\n")
+    elif bias:
+        text = _rep1(text, "  vector.fragment.store<result> %a0, %y_view", """  %a0b = vector.addf %a0, %bd_f0 : vector<8xf32>
+  %a1b = vector.addf %a1, %bd_f1 : vector<8xf32>
+  vector.fragment.store<result> %a0b, %y_view""")
+        text = _rep1(text, "  vector.fragment.store<result> %a1, %y_view", "  vector.fragment.store<result> %a1b, %y_view")
+    return text
+
+
+def wscale(E, KU):
+    """g_moe_wscale: wts[t, k] *= scale[ids[t, k]], a per-expert output scale (llama.cpp build_moe_ffn down_exps_s,
+    ffn_down_exps.scale) folded into the combine weights."""
+    return f"""
+kernel.def export("g_moe_wscale") @g_moe_wscale(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
+}} launch(%tokens_arg: index, %ids: buffer, %wts: buffer, %scale: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %ku = index.constant {KU} : index
+  %on = index.cmp ult, %lane_id, %ku : index
+  scf.if %on {{
+    %k = index.assume %lane_id [range(%lane_id, 0, {KU - 1})] : index
+    %zero = index.constant 0 : offset
+    %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]x{KU}xi32>
+    %wts_view = buffer.view %wts[%zero] : buffer -> view<[%tokens]x{KU}xf32>
+    %s_view = buffer.view %scale[%zero] : buffer -> view<{E}xf32>
+    %e32 = view.load %ids_view[%token, %k] : view<[%tokens]x{KU}xi32> -> i32
+    %c0_i32 = scalar.constant 0 : i32
+    %cE1 = scalar.constant {E - 1} : i32
+    %elo = scalar.maxsi %e32, %c0_i32 : i32
+    %ehi = scalar.minsi %elo, %cE1 : i32
+    %eb = scalar.assume %ehi [range(%ehi, 0, {E - 1})] : i32
+    %e = index.cast %eb : i32 to index
+    %s = view.load %s_view[%e] : view<{E}xf32> -> f32
+    %w = view.load %wts_view[%token, %k] : view<[%tokens]x{KU}xf32> -> f32
+    %ws = scalar.mulf %w, %s : f32
+    view.store %ws, %wts_view[%token, %k] : f32, view<[%tokens]x{KU}xf32>
+  }}
+  kernel.return
+}}
+"""
+
+
+def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=None):
     """64x64-tile WMMA GEMM over the bucketed rows of one expert per row tile (rows = max_tiles*64).
     mode 'swiglu' (gate/up): A rows gathered from x16[token = rowmap/KU]; 'store' (down): A = sorted rows.
-    fmt "GATE+UP" (swiglu): gate and up weights in different formats (gen_gemm.gemm's fmt2)."""
+    fmt "GATE+UP" (swiglu): gate and up weights in different formats (gen_gemm.gemm's fmt2).
+    fused (swiglu): one gate_up tensor as both weights (expert_mv's layout).
+    bias / act: as expert_mv (per-expert output biases, the gate/up activation)."""
     import gen_gemm
     fmt, _, fmt2 = fmt.partition("+")
     rb = N and (K // SB[fmt] * FMT[fmt])
     eb = rb * N
     text = gemm_fn(fmt, mode, fmt2) if fmt2 else gemm_fn(fmt, mode)
     base = f"g_gemm_{fmt}_{fmt2}_{mode}" if fmt2 else f"g_gemm_{fmt}_{mode}"
-    name = f"g_moe_g{'gu' if mode == 'swiglu' else 'dn'}_{fmt}{'_' + fmt2 if fmt2 else ''}_k{K}"
+    name = f"g_moe_g{'gu' if mode == 'swiglu' else 'dn'}_{fmt}{'_' + fmt2 if fmt2 else ''}{'_fused' if fused else ''}_k{K}"
     def rep(a, b, cnt=1):
         nonlocal text
         assert text.count(a) == cnt, (name, a, text.count(a))
@@ -834,7 +1055,7 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
   %e_lo = scalar.minsi %tile_expert, %cEm1g : i32
   %e_b = scalar.assume %e_lo [range(%e_lo, 0, {E - 1})] : i32
   %expert = index.cast %e_b : i32 to index
-  %expert_bytes = index.constant {eb} : offset
+  %expert_bytes = index.constant {2 * eb if fused else eb} : offset
   %expert_off = index.scale %expert, %expert_bytes : index, offset -> offset
   %workitem_id = kernel.workitem.id<x> : index
 """)
@@ -847,6 +1068,12 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
   %expert_off2 = index.scale %expert, %expert_bytes2 : index, offset -> offset
   %w2_row_origin = index.add %w2_row_origin0, %expert_off2 : offset
 """)
+    elif fused:   # the up weight's dequant (gen_gemm.dequant16 out "deq1") reads the expert's up rows
+        assert mode == "swiglu" and "index.add %w_row_origin, %deq1_" in text
+        text = text.replace("  %w_row_origin = index.add %w_row_origin0, %expert_off : offset\n",
+                            f"  %w_row_origin = index.add %w_row_origin0, %expert_off : offset\n  %up_bytes = index.constant {eb} : offset\n"
+                            "  %w2_row_origin = index.add %w_row_origin, %up_bytes : offset\n")
+        text = text.replace("index.add %w_row_origin, %deq1_", "index.add %w2_row_origin, %deq1_")
     rep("  %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>", "  %x_view = buffer.view %x[%origin] : buffer -> view<[%xrows]x[%k]xf16>")
     rep("view<[%rows]x[%k]xf16>", "view<[%xrows]x[%k]xf16>", text.count("view<[%rows]x[%k]xf16>"))
     rep("view<[%rows]x2xf32>", "view<[%xrows]x2xf32>", text.count("view<[%rows]x2xf32>"))
@@ -884,6 +1111,8 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
         rep("workgroups(%row_tiles, %out_tiles, %c1)", "workgroups(%out_tiles, %row_tiles, %c1)")
         rep("  %row_group_id = kernel.workgroup.id<x> : index\n  %out_group_id = kernel.workgroup.id<y> : index",
             "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
+    if bias or (act and act != "silu"):
+        text = _gemm_bias_act(text, mode, N, E, bias, act)
     return text
 
 

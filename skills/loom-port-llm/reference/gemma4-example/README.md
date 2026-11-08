@@ -10,7 +10,7 @@ Make a kit for a Gemma-3n/4-family model with `../apply_example.sh gemma4 W/kit`
 
 | File | What it adds over the starter |
 |---|---|
-| `gen_llm.py` | Mixed head_dim 256 (sliding) / 512 (global) attention; KV sharing (layers >= `n_layer_kv_from_start` reuse the last owning layer's KV of the same kind; KV planes only for owners); V RMSNorm without weights; attention scale 1.0; proportional partial RoPE on global layers (`rope_freqs` finite pairs); GEGLU (gelu-tanh) FFN; per-layer embeddings (gathered row + projection + norm + gate + post-norm, on the starter's BF16 matvec and WMMA GEMM (prefill +11 % at 1-2k); count only the gathered row for bandwidth); `layer_output_scale`; final logit softcap applied to the sampling logits (`final_softcap`, argmax unaffected) |
+| `gen_llm.py` | Mixed head_dim 256 (sliding) / 512 (global) attention; KV sharing (layers >= `n_layer_kv_from_start` reuse the last owning layer's KV of the same kind; KV planes only for owners); V RMSNorm without weights; attention scale 1.0; proportional partial RoPE on global layers (`rope_freqs` finite pairs); GEGLU (gelu-tanh) FFN; per-layer embeddings (gathered row + projection + norm + gate + post-norm, on the starter's BF16 matvec and WMMA GEMM (prefill +11 % at 1-2k); count only the gathered row for bandwidth); `layer_output_scale`; MoE layers (26B-A4B, `gemma_moe_layer`): the starter's routed experts (`moe_routed`: fused gate_up, per-expert down scale, GEGLU) beside the dense FFN on `pre_ffw_norm_2(x)`, routed on `rmsnorm(x) * ffn_gate_inp.scale / sqrt(hidden)`, the two branches summed after `post_ffw_norm_1/2`; final logit softcap applied to the sampling logits (`final_softcap`, argmax unaffected) |
 | `gen_flash2.py` | Prefill flash attention for head_dim 512 in two 256-wide output passes (`FLASH2_DO`) with V^T staged per pass (fits the VGPR/LDS budget): 61k-token TTFT 335 s -> 131 s. Sliding layers (window 512) stay on the split-K path: flash there gave nothing |
 | `make_kernel_tests.py` | Test cases adapted to the layout (embedding scale, per-tensor K, no k/v tensors on shared-KV layers) |
 | `build.py` | the `gemma4` call format and its placeholders |
@@ -19,7 +19,12 @@ Make a kit for a Gemma-3n/4-family model with `../apply_example.sh gemma4 W/kit`
 The reviewed config (geometry, sliding/KV-sharing layers, chat block) is the published package's `llm_config.json`
 ([loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom](https://huggingface.co/loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom),
 category A, pinned in `../examples.json`); `apply_example.sh gemma4 KIT CFG` merges it.
-The model-specific geometry (KV-sharing start and KV-owning layer count, global layers, embedding scale, per-layer embeddings, rope cut, SWA head_dim and theta, softcap, stop tokens) is read from each GGUF by the starter's `inspect_gguf.py`, so a Gemma 4 of another size (E2B, 12B) does not inherit this E4B port's values from the reference. Layouts these kernels don't cover (per-layer KV-head counts, global layers without `attn_v` as in the 12B/26B) stop at inspect with `WARNING: unsupported layout`.
+The model-specific geometry (KV-sharing start and KV-owning layer count, global layers, embedding scale, per-layer embeddings, rope cut, SWA head_dim and theta, softcap, stop tokens) is read from each GGUF by the starter's `inspect_gguf.py`, so a Gemma 4 of another size (E2B, 12B) does not inherit this E4B port's values from the reference. The 12B/26B/31B layouts are covered too: a KV-head count per layer kind (`kv_heads` on the sliding layers,
+`kv_heads_global` on the global ones, e.g. 8 and 1; each kind's attention, RoPE + KV-store and flash kernels are generated
+with its own count, and a KV position is as wide as the widest kind, `POS_BYTES` = build.py's `pos_bytes`), and global
+layers without `attn_v`, where V is the raw K projection (llama.cpp `Vcur = Kcur`: `g_qk_rope_store` reads V before K's
+norm and RoPE, then V-norms it). A layout with several KV-head counts within one kind still stops at inspect with
+`WARNING: unsupported layout`.
 
 Lessons the agent paid for:
 - `llama_trace.py ... --grep '-0$|-23$|-24$'` (a sliding, a global and a KV-shared layer) gave the whole

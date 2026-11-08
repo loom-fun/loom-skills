@@ -1,0 +1,325 @@
+--- a/chat_probe.py
++++ b/chat_probe.py
+@@ -914,5 +914,309 @@
+         json.dump(chat, open(sys.argv[2], "w"), indent=1, ensure_ascii=False)
+ 
+ 
+-if __name__ == "__main__":
++# ---- OpenAI harmony channel format (call_format "harmony", gpt-oss) ----------------------------
++# Template: the gpt-oss GGUF's chat template (unsloth/ggml-org/OpenAI). control.loom renders the whole
++# conversation in chat_begin (chat/harmony.loom): the developer block holds the first system message and
++# the tools as a TypeScript namespace, an assistant turn's rendering depends on later messages (the
++# analysis before a call is dropped once a later final answer exists), and a tool result is framed with
++# the name of the last call. reasoning_content plays the template's `thinking` (llama.cpp's gpt-oss
++# handler copies it there and drops the content of call turns). This model mirrors chat/harmony.loom.
++# Deliberate deviation: the system block's "Current date: <strftime_now>" line is never rendered (the
++# control program has no clock; verify() renders the template without it).
++# Tool schemas: properties of type string (enum, nullable), number/integer, boolean, a type list, arrays of
++# those, objects of those (one level), anything else "any"; descriptions and defaults as the template
++# prints them. Deeper schemas and oneOf render here (and in control.loom) as "any" / one level only.
++HARMONY_SYSTEM = ("You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\n"
++                  "Reasoning: {effort}\n\n# Valid channels: analysis, commentary, final. Channel must be included for every message.")
++HARMONY_TOOLS_NOTE = "\nCalls to these tools must go to the commentary channel: 'functions'."
++HARMONY_GENERATION = "<|start|>assistant"
++HARMONY_EFFORTS = ("low", "medium", "high")
++HARMONY_NESTED = "\n" + " " * 16   # the template's whitespace before a nested object's member types
++
++
++def is_harmony(template_text):
++    return all(s in template_text for s in ("<|channel|>analysis<|message|>", "<|call|>", "render_tool_namespace"))
++
++
++def harmony_chat():
++    """The chat block of the harmony format: chat/harmony.loom renders and parses everything; the generic fields
++    describe it for the benchmark scripts and the card (and drive gen_llm's stop-token restore)."""
++    return {
++        "bos": "", "system_prefix": "<|start|>system<|message|>", "suffix": "<|end|>", "user_prefix": "<|start|>user<|message|>",
++        "assistant_prefix": "<|start|>assistant<|channel|>final<|message|>",
++        "default_system": HARMONY_SYSTEM.format(effort="medium"), "trim_content": False,
++        "think_open": "<|channel|>analysis<|message|>", "think_close": "<|end|>",
++        "history_think": "nonempty", "history_think_scope": "all",
++        "generation_prompt": HARMONY_GENERATION, "generation_prompt_plain": HARMONY_GENERATION,
++        "thinking": "always", "thinking_default": True, "starts_in_reasoning": False, "think_end": "<|end|>",
++        "reasoning_instructions": {e: e for e in HARMONY_EFFORTS}, "reasoning_effort_default": "medium", "reasoning_separator": "",
++        "terminal": "<|return|>",
++        "nonspecial_tokens": ["<|start|>", "<|channel|>", "<|message|>", "<|constrain|>", "<|end|>"],
++        "tools_function_only": True, "tools_prefix": "", "tools_suffix": "", "tools_after_system": True,
++        "tools_system_separator": "\n\n", "tool_line_prefix": "\n",
++        "call_format": "harmony", "base_call_format": "hermes",
++        "tool_turn_prefix": "", "tool_item_prefix": "<|call|><|start|>functions.", "tool_item_suffix": "<|end|>", "tool_turn_suffix": "",
++        "content_call_separator": "", "call_separator": "", "call_marker": " to=functions.",
++        "stop_after_calls": "<|call|>", "stop_after_answer": "<|end|>",
++        "_note": "OpenAI harmony channel format: control.loom renders the whole conversation in chat_begin (chat/harmony.loom); "
++                 "the generic fields are informational. No 'Current date' line (deliberate).",
++    }
++
++
++def _h_text(c):
++    if c is None:
++        return ""
++    if isinstance(c, str):
++        return c
++    return "".join(p.get("text", "") for p in c if isinstance(p, dict) and p.get("type") == "text")
++
++
++_H_PRIM = {"string": "string", "number": "number", "integer": "number", "boolean": "boolean"}
++
++
++def _h_prim(spec):
++    """A property type the template renders without recursion (control.loom's @h_prim)."""
++    t = spec.get("type")
++    if isinstance(t, list) and t:
++        return " | ".join(str(x) for x in t) if len(t) > 1 else str(t[0])
++    if spec.get("oneOf"):
++        return "any"
++    if t == "array":
++        it = spec.get("items")
++        if not it:
++            return "any[]" + (" | null" if spec.get("nullable") else "")
++        it_t = it.get("type") if isinstance(it, dict) else None
++        base = (_H_PRIM[it_t] + "[]") if it_t in _H_PRIM else "any[]"
++        return base + (" | null" if spec.get("nullable") else "")
++    if t == "string":
++        if spec.get("enum"):
++            return '"' + '" | "'.join(spec["enum"]) + '"'
++        return "string" + (" | null" if spec.get("nullable") else "")
++    if t in _H_PRIM:
++        return _H_PRIM[t]
++    if t == "object":
++        return "object"
++    return "any"
++
++
++def _h_type(spec):
++    """render_typescript_type for a top-level parameter (control.loom's @h_type): objects one level deep."""
++    if spec.get("type") == "object" and not isinstance(spec.get("type"), list):
++        props = spec.get("properties")
++        if not props:
++            return "object"
++        req = spec.get("required") or []
++        return "{\n" + ", ".join(n + ("" if n in req else "?") + ": " + HARMONY_NESTED + _h_prim(p) for n, p in props.items()) + "}"
++    return _h_prim(spec)
++
++
++def _h_tools(tools):
++    out = "## functions\n\nnamespace functions {\n\n"
++    for t in tools:
++        fn = t.get("function", t)
++        out += "// " + (fn.get("description") or "") + "\n" + "type " + fn["name"] + " = "
++        params = fn.get("parameters") or {}
++        props = params.get("properties") or {}
++        if props:
++            req = params.get("required") or []
++            out += "(_: {\n"
++            for n, p in props.items():
++                if p.get("description"):
++                    out += "// " + p["description"] + "\n"
++                out += n + ("" if n in req else "?") + ": " + _h_type(p)
++                if "default" in p:
++                    if p.get("enum"):
++                        out += ", // default: " + str(p["default"])
++                    elif p.get("oneOf"):
++                        out += "// default: " + str(p["default"])
++                    else:
++                        out += ", // default: " + json.dumps(p["default"], ensure_ascii=False)
++                out += ",\n"
++            out += "}) => any;\n\n"
++        else:
++            out += "() => any;\n\n"
++    return out + "} // namespace functions"
++
++
++def _h_args(args):
++    return args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
++
++
++def harmony_simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reasoning_effort=None):
++    effort = reasoning_effort if reasoning_effort in HARMONY_EFFORTS else chat.get("reasoning_effort_default", "medium")
++    out = "<|start|>system<|message|>" + HARMONY_SYSTEM.format(effort=effort) + (HARMONY_TOOLS_NOTE if tools else "") + "<|end|>"
++    loop = messages
++    dev = ""
++    if messages and messages[0]["role"] in ("system", "developer"):
++        dev, loop = _h_text(messages[0].get("content")), messages[1:]
++    if dev or tools:
++        out += "<|start|>developer<|message|>" + ("# Instructions\n\n" + dev if dev else "")
++        if tools:
++            out += ("\n\n" if dev else "") + "# Tools\n\n" + _h_tools(tools)
++        out += "<|end|>"
++    last_call = None
++    for i, m in enumerate(loop):
++        role = m["role"]
++        thinking = m.get("reasoning_content") if isinstance(m.get("reasoning_content"), str) else None
++        if role == "assistant":
++            calls = m.get("tool_calls") or []
++            if calls:
++                future_final = any(f["role"] == "assistant" and not f.get("tool_calls") for f in loop[i + 1:])
++                content = None if thinking is not None else _h_text(m.get("content"))   # llama.cpp drops it
++                if content and not future_final:
++                    out += "<|start|>assistant<|channel|>analysis<|message|>" + content + "<|end|>"
++                elif thinking and not future_final:
++                    out += "<|start|>assistant<|channel|>analysis<|message|>" + thinking + "<|end|>"
++                fn = calls[0].get("function", calls[0])
++                out += ("<|start|>assistant to=functions." + fn["name"] + "<|channel|>commentary json<|message|>"
++                        + _h_args(fn["arguments"]) + "<|call|>")
++                last_call = fn["name"]
++            elif thinking is not None:   # the template renders such a turn's content in the analysis channel
++                out += "<|start|>assistant<|channel|>analysis<|message|>" + _h_text(m.get("content")) + "<|end|>"
++                last_call = None
++            else:
++                out += "<|start|>assistant<|channel|>final<|message|>" + _h_text(m.get("content")) + "<|end|>"
++                last_call = None
++        elif role == "tool":
++            c = m.get("content")
++            out += ("<|start|>functions." + (last_call or "") + " to=assistant<|channel|>commentary<|message|>"
++                    + (c if isinstance(c, str) else json.dumps(c, ensure_ascii=False)) + "<|end|>")
++        elif role == "user":
++            out += "<|start|>user<|message|>" + _h_text(m.get("content")) + "<|end|>"
++    if gen:
++        out += HARMONY_GENERATION
++    return out
++
++
++def harmony_render_calls(tool_calls):
++    """A call turn's calls as the model writes them (after the generation prompt): the first call only, as the
++    template renders it (the model emits one call per turn and stops at <|call|>)."""
++    if not tool_calls:
++        return ""
++    fn = tool_calls[0].get("function", tool_calls[0])
++    return "<|channel|>commentary to=functions." + fn["name"] + " <|constrain|>json<|message|>" + _h_args(fn["arguments"])
++
++
++def _harmony_raw(chat, message, finished, thinking=None, prompt=None):
++    """The model's raw output after "<|start|>assistant" rebuilt from the parsed channels (greedy llama.cpp
++    output shape: analysis, then the final answer or a commentary call)."""
++    reasoning = message.get("reasoning_content")
++    content = message.get("content") or ""
++    calls = message.get("tool_calls") or []
++    text = "<|channel|>analysis<|message|>" + reasoning if reasoning is not None else ""
++    if calls:
++        return text + ("<|end|><|start|>assistant" if reasoning is not None else "") + harmony_render_calls(calls)
++    if content or finished:
++        text += ("<|end|><|start|>assistant" if reasoning is not None else "") + "<|channel|>final<|message|>" + content
++    return text
++
++
++_generic_simulate, _generic_render_calls, _generic_verify, _generic_derive = simulate, render_calls, verify, derive
++
++
++def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reasoning_effort=None):  # noqa: F811
++    if chat.get("call_format") == "harmony":
++        return harmony_simulate(chat, messages, tools, gen, enable_thinking, reasoning_effort)
++    return _generic_simulate(chat, messages, tools, gen, enable_thinking, reasoning_effort)
++
++
++def render_calls(chat, tool_calls):  # noqa: F811
++    if chat.get("call_format") == "harmony":
++        return harmony_render_calls(tool_calls)
++    return _generic_render_calls(chat, tool_calls)
++
++
++def raw_from_chat(chat, message, finished, thinking=None, prompt=None):
++    if chat.get("call_format") != "harmony":
++        raise TypeError("raw_from_chat override is for the harmony format")
++    return _harmony_raw(chat, message, finished, thinking, prompt)
++
++
++def raw_alternatives(chat, message, finished, thinking=None, prompt=None):
++    """Every raw text consistent with the parsed channels: a call header may carry the recipient before the
++    channel (the template's spelling), and without <|constrain|>."""
++    raw = _harmony_raw(chat, message, finished, thinking, prompt)
++    calls = message.get("tool_calls") or []
++    if not calls:
++        return [raw]
++    fn = calls[0].get("function", calls[0])
++    a = f"<|channel|>commentary to=functions.{fn['name']} <|constrain|>json<|message|>"
++    alts = [raw.replace(a, f" to=functions.{fn['name']}<|channel|>commentary <|constrain|>json<|message|>"),
++            raw.replace(a, f" to=functions.{fn['name']}<|channel|>commentary json<|message|>"),
++            raw.replace(a, f"<|channel|>commentary to=functions.{fn['name']}<|message|>")]
++    return [raw] + [x for x in alts if x != raw]
++
++
++def derive(template_text, bos="", eos=""):  # noqa: F811
++    if is_harmony(template_text):
++        return harmony_chat(), ["OpenAI harmony channel format: chat/harmony.loom renders the conversation (no 'Current date' line)"]
++    return _generic_derive(template_text, bos, eos)
++
++
++HARMONY_SCHEMA_TOOLS = [
++    {"type": "function", "function": {"name": "lookup", "description": "Typed parameters.", "parameters": {"type": "object", "properties": {
++        "q": {"type": "string", "description": "The query"}, "n": {"type": "integer", "default": 3},
++        "mode": {"type": "string", "enum": ["fast", "exact"], "default": "fast"}, "tags": {"type": "array", "items": {"type": "string"}},
++        "opts": {"type": "object", "properties": {"limit": {"type": "number"}, "deep": {"type": "boolean"}}, "required": ["limit"]},
++        "note": {"type": "string", "nullable": True}, "either": {"type": ["string", "number"]}, "free": {},
++        "flag": {"type": "boolean", "default": False}, "ratio": {"type": "number", "default": 0.5}}, "required": ["q"]}}},
++    {"type": "function", "function": {"name": "ping", "description": "No parameters.", "parameters": {"type": "object", "properties": {}}}},
++]
++HARMONY_CONVERSATIONS = [
++    ("system + reasoning history", [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "One"},
++                                    {"role": "assistant", "content": "Two", "reasoning_content": "Think."},
++                                    {"role": "user", "content": "Three"}], None),
++    ("content parts", [{"role": "user", "content": [{"type": "text", "text": "Hi "}, {"type": "text", "text": "there"}]}], None),
++    ("schema types", [{"role": "user", "content": "x"}], HARMONY_SCHEMA_TOOLS),
++    ("full agent turn", [{"role": "system", "content": "You are an agent."}, {"role": "user", "content": "Weather in Paris?"},
++                         calls_msg("", [{"name": "get_weather", "arguments": json.dumps({"city": "Paris"})}], reasoning="Need the tool."),
++                         {"role": "tool", "tool_call_id": "call_0", "content": "{\"temp\": 18}"},
++                         {"role": "assistant", "content": "It is 18.", "reasoning_content": "Answer."},
++                         {"role": "user", "content": "Thanks"}], TOOLS),
++    ("call with content, no reasoning", [{"role": "user", "content": "Weather?"},
++                                         calls_msg("Let me check.", [CALL1]), {"role": "tool", "tool_call_id": "call_0", "content": "ok"}], TOOLS),
++]
++
++
++def _h_template_messages(msgs):
++    """The messages as llama.cpp's gpt-oss handler hands them to the template: reasoning_content -> thinking,
++    a call turn with reasoning loses its content; text parts joined (the template concatenates strings)."""
++    out = []
++    for m in msgs:
++        m = dict(m)
++        if isinstance(m.get("content"), list):
++            m["content"] = _h_text(m["content"])
++        if isinstance(m.get("reasoning_content"), str):
++            m["thinking"] = m.pop("reasoning_content")
++            if m.get("tool_calls"):
++                m.pop("content", None)
++        out.append(m)
++    return out
++
++
++def verify(template_text, chat, bos="", eos=""):  # noqa: F811
++    if chat.get("call_format") != "harmony":
++        return _generic_verify(template_text, chat, bos, eos)
++    T = Template(template_text, bos, eos)
++    T.t.environment.globals["strftime_now"] = lambda fmt: "@@DATE@@"
++    results = []
++    for name, msgs, tools in CONVERSATIONS + HARMONY_CONVERSATIONS:
++        for effort in (None,) + tuple(e for e in HARMONY_EFFORTS if e != chat.get("reasoning_effort_default")):
++            label = name + (f" (reasoning_effort={effort})" if effort else "")
++            try:
++                kw = {"reasoning_effort": effort} if effort else {}
++                ref = T.render(_h_template_messages(msgs), tools=tools, gen=True, **kw).replace("Current date: @@DATE@@\n", "")
++            except ProbeError as e:
++                results.append((label, None, f"template refuses: {e}"))
++                continue
++            got = simulate(chat, msgs, tools, gen=True, reasoning_effort=effort)
++            if got == ref:
++                results.append((label, True, "exact (no 'Current date' line)"))
++            else:
++                k = next((i for i, (a, b) in enumerate(zip(got, ref)) if a != b), min(len(got), len(ref)))
++                results.append((label, False, f"differs at byte {k}: loom {got[max(0, k - 40):k + 60]!r} vs template {ref[max(0, k - 40):k + 60]!r}"))
++    return results
++
++
++if __name__ == "__main__":  # last: main() must see the harmony overrides above
+     main()
+--- a/inspect_gguf.py
++++ b/inspect_gguf.py
+@@ -330,6 +330,9 @@
+         for name, ok, detail in results:
+             print("chat", "OK  " if ok else "SKIP" if ok is None else "FAIL", name, "-", detail)
+         cfg["chat"] = chat
++        if chat["call_format"] == "harmony":   # generation also ends at <|call|> (llama.cpp's harmony EOG ids)
++            cfg["extra_eos_ids"] = sorted(set(cfg["extra_eos_ids"]) | {tokens.index(s) for s in ("<|call|>", "<|return|>")
++                                                                       if s in tokens and tokens.index(s) != eos})
+         if chat["call_format"] == "json" and "<|python_tag|>" in tokens:
+             # Llama 3.1 opens a call with <|python_tag|> (the template never prints it). Kept in the decoded text
+             # (nonspecial) so complete_text stores the turn as generated: the KV row then matches the canonical
