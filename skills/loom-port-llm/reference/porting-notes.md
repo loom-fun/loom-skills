@@ -109,8 +109,8 @@ stage:
   `t == 1` and the 4-token one otherwise, plus split-K attention.
 - `t ≥ 64` (prefill): f16 row-scaled WMMA GEMMs, with 128-row tiles from 128
   tokens. Attention uses flash2 on uniform 16-token tiles (one sequence,
-  consecutive positions), and the listed split-K fallback handles the tokens of
-  mixed tiles. `g_attention_fallback_list` builds that list.
+  consecutive positions, starting at a position multiple of 16), and the listed split-K fallback handles the other
+  tokens. `g_attention_fallback_list` builds both lists, so a token's path depends on its own sequence only.
 
 ## Tokenizer gotchas
 

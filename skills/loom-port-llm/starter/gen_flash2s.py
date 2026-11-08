@@ -14,7 +14,7 @@ output dims. Per key tile (32 keys; 16 at head_dim 512, where K and V^T of 32 ke
      (wave ^ 1): both waves add the same two values (a + b == b + a); at 512 every wave of the head sums the
      four partials in wave order. Either way their S, softmax and P are bit-identical;
   3. softmax, P^T, O^T += V^T[own dims] P^T.
-Workgroup: (16-token tile, KV head[, head group]), 32 * head_dim/128 lanes per query head. Masks: causal, and
+Workgroup: (listed 16-token tile, KV head[, head group]), 32 * head_dim/128 lanes per query head. Masks: causal, and
 keys > position - window on sliding layers. The output is scaled by sigmoid(gate) when the model has an
 attention output gate. FLASH2_SCALE (score scale), FLASH2_NAME (kernel name) and FLASH2_POS_BYTES (bytes per
 KV position when a wider layer kind sets the stride) customize it.
@@ -66,7 +66,7 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
   %clanes = index.constant {LANES} : index
   %tiles = index.div %tokens, %c16 : index
   kernel.launch.config workgroups(%tiles, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
-}} launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, %gate: buffer, %info: buffer, %origins: buffer, %arena: buffer, %out: buffer) {{
+}} launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, %gate: buffer, %info: buffer, %tiles: buffer, %origins: buffer, %arena: buffer, %out: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {LAYERS})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
@@ -87,9 +87,20 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
   %kv_value = index.div %kv_id, %cng : index
   %kv = index.assume %kv_value [range(%kv_value, 0, {KVH - 1})] : index
   %hgroup = index.rem %kv_id, %cng : index''') + f'''
-  %first_token = index.mul %tile, %c16 : index
-  %uniform, %row32, %pos0_32 = func.call @{P}_tile_uniform(%info, %tokens, %first_token) : (buffer, index, index) -> (i1, i32, i32)
-  scf.if %uniform {{
+  %tiles_view = buffer.view %tiles[%origin] : buffer -> view<[%tokens]xi32>
+  %listed_count32 = view.load %tiles_view[%c0] : view<[%tokens]xi32> -> i32
+  %listed_count = index.cast %listed_count32 : i32 to index
+  %listed = index.cmp ult, %tile, %listed_count : index
+  %entry_slot_value = index.add %tile, %c1 : index
+  %entry_slot = index.assume %entry_slot_value [lt(%entry_slot_value, %tokens)] : index
+  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32
+  %entry = index.cast %entry32 : i32 to index
+  %first_value = scf.select %listed, %entry, %c0 : index
+  %first_token = index.assume %first_value [range(%first_value, 0, 8191), lt(%first_value, %tokens)] : index
+  %info_view = buffer.view %info[%origin] : buffer -> view<[%tokens]x4xi32>
+  %row32 = view.load %info_view[%first_token, %c0] : view<[%tokens]x4xi32> -> i32
+  %pos0_32 = view.load %info_view[%first_token, %c1] : view<[%tokens]x4xi32> -> i32
+  scf.if %listed {{
   %workitem_id = kernel.workitem.id<x> : index
   %workitem = index.assume %workitem_id [range(%workitem_id, 0, {LANES - 1})] : index
   %wave_id = kernel.subgroup.id : index

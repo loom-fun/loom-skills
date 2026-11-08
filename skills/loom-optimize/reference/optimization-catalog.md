@@ -296,7 +296,9 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   for Q or for softmax scratch.
 - Gains: 2.2× on Glimmer attention. 64-key tiles (`FLASH2_KT=64`) were *slower*.
 - It only handles *uniform* tiles: all 16 tokens live, one row, consecutive
-  positions (`g_tile_uniform`). Every other token goes to the listed fallback.
+  positions (`g_tile_uniform`) that start at a position multiple of 16, so a tile depends on its own span, never on
+  where the epoch packs it (epoch-aligned tiles made a token's path, and its rounding, depend on its neighbours: the
+  Coder consistency failure). Every other token goes to the listed fallback.
 - **Token subtiles at small G** (`FLASH2_TS`): each staged key feeds 16·G queries, so at G = 2 long prefill re-streams
   the KV cache per 32 queries and is bandwidth-bound (Qwen3-0.6B: 25 % of roofline at 1k, 13 % at 32k). Two tiles per
   workgroup share each staged K/V tile: Qwen3-0.6B / 1.7B 32k prefill 2.6x / 2.1x, 1k tie (default at G <= 2). At
@@ -339,8 +341,8 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   layer is ~1.5 % of the GEMM work).
 
 ### Listed fallback
-- `g_attention_fallback_list` compacts the tokens of non-uniform tiles that are
-  live into a list, using an atomic counter. The split-K attention then runs over
+- `g_attention_fallback_list` lists the tiles flash2 computes (their first tokens, which its workgroups read) and
+  compacts every other token, padding included, into a list, using an atomic counter. The split-K attention then runs over
   that list with an indirect grid (`[buffer]` launch). Before compaction, padding
   tokens did full attention work.
 
