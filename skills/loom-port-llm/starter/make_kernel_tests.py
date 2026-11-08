@@ -1425,8 +1425,10 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
             DEEP_CASES.append(epoch_case(f"flash_prefill_deep_{name}", info_d, qd_, gd_, np.where(mask[:, None, None], o_d, SENT), 0, kerns))
 
     # Batch invariance: one span (X, row 0) attended alone and packed at other offsets of an epoch between other rows'
-    # spans must give bit-identical outputs, through the whole prefill path (work lists, flash2 and the listed split-K
-    # fallback for X's head and tail). X's positions start at 5 mod 16, and at the deep boundary when there is one.
+    # spans must give bit-identical outputs through the prefill path's choice of kernel per token (work lists, then
+    # flash2 over the split-K result of every token, as the listed fallback leaves the tokens flash2 does not take;
+    # loom-test cannot dispatch the listed kernels from a tensor count). X's positions start at 5 mod 16, and at the
+    # deep boundary when there is one.
     COPY_ROWS = """
 // Test helper: dst[r] = src[skip + r] for r < rows (F32 rows of `width`).
 kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
@@ -1473,7 +1475,7 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
                 save(f"fi_ref{sliding}", ref.reshape(n, QD).astype(np.float32))
             for nm, arr in (("info", info), ("q", q.reshape(t, QD)), ("g", g.reshape(t, QD))):
                 save(f"fi_{nm}{sliding}_{k}", arr)
-            OT = f"tensor<{t}x{QD}xf32>"; IT = f"tensor<{t}x4xi32>"; XT = f"tensor<{n}x{QD}xf32>"; PT = f"tensor<{t * QH * 16 * D}xf32>"; MT = f"tensor<{t * QH * 16 * 2}xf32>"
+            OT = f"tensor<{t}x{QD}xf32>"; IT = f"tensor<{t}x4xi32>"; XT = f"tensor<{n}x{QD}xf32>"; PT = f"tensor<{t * QH * 64 * D}xf32>"; MT = f"tensor<{t * QH * 64 * 2}xf32>"
             text += f"""  %t{k} = check.literal value({t}) : index
   %skip{k} = check.literal value({a}) : index
   %q{k} = check.file.read.npy path("fi_q{sliding}_{k}.npy") : {OT}
@@ -1483,9 +1485,9 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
   %pacc{k} = check.generate.fill value(0.0) : {PT}
   %pml{k} = check.generate.fill value(0.0) : {MT}
   %x{k} = check.generate.fill value(0.0) : {XT}
+  kernel.launch @g_attention_split[%t{k}](%t{k}, %layer, %sliding, %ctx, %pool, %q{k}, %info{k}, %orig, %arena, %pacc{k}, %pml{k}) : [index](index, index, i32, index, index, {OT}, {IT}, {OA}, {AA}, {PT}, {MT})
+  kernel.launch @g_attention_combine[%t{k}](%t{k}, %sliding, %info{k}, %pacc{k}, %pml{k}, %g{k}, %o{k}) : [index](index, i32, {IT}, {PT}, {MT}, {OT}, {OT})
 {list_launch(f"%t{k}", t, f"%info{k}", k)}  kernel.launch @g_attention_flash2[%t{k}](%t{k}, %layer, %sliding, %ctx, %pool, %q{k}, %g{k}, %info{k}, %tiles{k}, %orig, %arena, %o{k}) : [index](index, index, i32, index, index, {OT}, {OT}, {IT}, tensor<{t}xi32>, {OA}, {AA}, {OT})
-  kernel.launch @g16_attention_split_listed[%fcount{k}](%t{k}, %flist{k}, %layer, %sliding, %ctx, %pool, %q{k}, %info{k}, %orig, %arena, %pacc{k}, %pml{k}) : [tensor<64xi32>](index, tensor<{t}xi32>, index, i32, index, index, {OT}, {IT}, {OA}, {AA}, {PT}, {MT})
-  kernel.launch @g16_attention_combine_listed[%fcount{k}](%t{k}, %flist{k}, %sliding, %info{k}, %pacc{k}, %pml{k}, %g{k}, %o{k}) : [tensor<64xi32>](index, tensor<{t}xi32>, i32, {IT}, {PT}, {MT}, {OT}, {OT})
   kernel.launch @test_copy_rows[%nx](%nx, %wd, %skip{k}, %t{k}, %o{k}, %x{k}) : [index](index, index, index, index, {OT}, {XT})
 """
             if k:
