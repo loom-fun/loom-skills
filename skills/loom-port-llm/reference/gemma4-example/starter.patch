@@ -630,7 +630,7 @@
  open(out_path, "w", newline="\n").write(text)
 --- a/gen_llm.py
 +++ b/gen_llm.py
-@@ -43,14 +43,34 @@
+@@ -43,15 +43,35 @@
  # Prefill flash attention (gen_flash2.py) tiles head_dim over 32*G lanes: it needs a power-of-two group.
  # Otherwise (Qwen3.8: 6) every prefill token takes the listed split-K path (correct, slower prefill).
  NO_FLASH = os.environ.get("NO_FLASH2") == "1"
@@ -661,7 +661,8 @@
 +ROPE_CUT = None
 +assert all(QH % g["kvh"] == 0 and QH // g["kvh"] <= 16 for g in DIMS.values()), "need heads % kv_heads == 0 and at most 16 query heads per KV head"
  assert HG <= 256 and H % 32 == 0, "hidden must be a multiple of 32 and at most 8192"
- UNROLL = int(os.environ.get("ATTN_UNROLL", "16"))   # keys per decode-attention block
+ import attn_rules  # noqa: E402  decode attention variants (ATTN_* env), shared with make_kernel_tests.py
+ from attn_rules import UNROLL, ATTN_MT, ATTN_MT_FROM  # noqa: E402
 -POS_BYTES = KVH * D * 2                   # F16 K (or V) bytes per position
 +KV_WIDTH = max(g["kvh"] * d for d, g in DIMS.items())   # K (or V) values per position: the widest layer kind
 +POS_BYTES = KV_WIDTH * 2                  # F16 K (or V) bytes per position (build.py's pos_bytes)

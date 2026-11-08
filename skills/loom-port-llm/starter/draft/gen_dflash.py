@@ -209,6 +209,256 @@ kernel.def export("g_dfl_rope_info") @g_dfl_rope_info(%tokens: index) {
 """
 
 
+# Draft attention over the context, split-K (DFlash v1: full-context attention; DFL_SPLITS=0 keeps the per-token
+# kernel). The per-token kernel ran one workgroup per (block token, query head), each streaming its KV head's whole
+# context one key at a time: the block's tokens and the GQ query heads of a KV head re-read the same keys, and at 32k
+# its five layers took 46 ms of a 136 ms depth-3 epoch on Qwen3-8B (more than the target's verify attention).
+# g_dfl_ctx_split gives each (span chunk of DFL_TQ block tokens, KV head, split) one workgroup whose waves are the
+# GQ query heads, each wave scoring every chunk token against a key it loaded once; g_dfl_attention then merges the
+# splits, adds the block's own keys and normalizes. Proposals only: the target's output never depends on it.
+DFL_SPLITS = int(os.environ.get("DFL_SPLITS", "32"))
+DFL_TQ = 8      # block tokens per wave (a power of two; x DFL_KU keys = values per butterfly all-reduce, <= 32)
+DFL_KU = 2      # context keys per iteration
+
+
+def split_enabled(F):
+    return DFL_SPLITS > 0 and not (F["window"] or 0) and not F.get("conv")
+
+
+def ctx_split_kernel(F, QH, KVH, D, POSB, g):
+    """g_dfl_ctx_split: the context part of the draft attention, split-K (see DFL_SPLITS)."""
+    S, TQ, KU, GQ, DPL = DFL_SPLITS, DFL_TQ, DFL_KU, QH // KVH, D // 32
+    t = [f"""
+// Context part of the draft attention, split-K: workgroup (block token, KV head, split), wave = query head of the
+// KV head. The workgroup of a chunk's first token (block offset % {TQ} == 0) scores the chunk's tokens against each
+// context key of its split once; the others exit. Partial (m, l, acc) per (token, head, split).
+kernel.def export("g_dfl_ctx_split") @g_dfl_ctx_split(%tokens: index) {{
+  %ckvh = index.constant {KVH} : index
+  %cS = index.constant {S} : index
+  %clanes = index.constant {GQ * 32} : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tokens, %ckvh, %cS) workgroup_size(%clanes, %c1, %c1) : index
+}} launch(%tokens_arg: index, %spans_arg: index, %layer_arg: index, %context_arg: index, %pool_arg: index, %metadata: buffer, %info: buffer, %q: buffer, %origins: buffer, %cache: buffer, %pacc: buffer, %pml: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %layer = index.assume %layer_arg [range(%layer_arg, 0, {F["layers"] - 1})] : index
+  %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [range(%token_id, 0, 2147483646), lt(%token_id, %tokens)] : index
+  %kh_id = kernel.workgroup.id<y> : index
+  %khb = index.assume %kh_id [range(%kh_id, 0, {KVH - 1})] : index
+  %split_id = kernel.workgroup.id<z> : index
+  %split = index.assume %split_id [range(%split_id, 0, {S - 1})] : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, {GQ - 1})] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %zero = index.constant 0 : offset
+  %c16o = index.constant 16 : offset
+  %c0 = index.constant 0 : index
+  %c1i = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %zero_f = scalar.constant 0.0 : f32
+  %neg = scalar.constant -3.0e38 : f32
+  %scale = scalar.constant {D ** -0.5!r} : f32
+{g['ALLRED_SETUP']}  %cgq = index.constant {GQ} : index
+  %qh0 = index.madd %khb, %cgq, %wave : index
+  %qh = index.assume %qh0 [range(%qh0, 0, {QH - 1})] : index
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
+  %live32 = view.load %info_view[%token, 2] : view<[%tokens]x4xi32> -> i32
+  %span32 = view.load %info_view[%token, 3] : view<[%tokens]x4xi32> -> i32
+  %live = scalar.cmpi ne, %live32, %c0_i32 : i32
+  scf.if %live {{
+    %records = buffer.view %metadata[%c16o] : buffer -> view<[%spans]x9xi32>
+    %span_b = scalar.assume %span32 [range(%span32, 0, 8191)] : i32
+    %span_v = index.cast %span_b : i32 to index
+    %span = index.assume %span_v [range(%span_v, 0, 8191), lt(%span_v, %spans)] : index
+    %length32 = view.load %records[%span, 0] : view<[%spans]x9xi32> -> i32
+    %pos32 = view.load %records[%span, 1] : view<[%spans]x9xi32> -> i32
+    %cursor32 = view.load %records[%span, 4] : view<[%spans]x9xi32> -> i32
+    %len_b = scalar.assume %length32 [range(%length32, 1, 64)] : i32
+    %pos_b = scalar.assume %pos32 [range(%pos32, 0, 262143)] : i32
+    %cur_b = scalar.assume %cursor32 [range(%cursor32, 0, 8191)] : i32
+    %block_len = index.cast %len_b : i32 to index
+    %ctx_count = index.cast %pos_b : i32 to index
+    %cursor = index.cast %cur_b : i32 to index
+    %rel_raw = index.sub %token, %cursor : index
+    %rel0 = index.assume %rel_raw [range(%rel_raw, 0, 8191)] : index
+    %ctq = index.constant {TQ} : index
+    %rrem = index.rem %rel0, %ctq : index
+    %lead = index.cmp eq, %rrem, %c0 : index
+    scf.if %lead {{
+    %row_b = scalar.assume %row32 [range(%row32, 0, 2147483646)] : i32
+    %row = index.cast %row_b : i32 to index
+    %padded = index.add %context, %c15 : index
+    %blocks = index.div %padded, %c16 : index
+    %k_plane = index.mul %layer, %c2 : index
+    %pos_bytes = index.constant {POSB} : offset
+    %plane_stride = index.scale %pool, %pos_bytes : index, offset -> offset
+    %cSs = index.constant {S} : index
+    %cSl = index.constant {S - 1} : index
+    %per_p = index.add %ctx_count, %cSl : index
+    %per = index.div %per_p, %cSs : index
+    %lo_r = index.mul %split, %per : index
+    %s_lo = index.min %lo_r, %ctx_count : index
+    %hi_r = index.add %lo_r, %per : index
+    %s_hi = index.min %hi_r, %ctx_count : index
+    %s_last = index.sub %s_hi, %c1i : index
+    %ckuw = index.constant {KU} : index
+    %tok_last = index.sub %tokens, %c1i : index
+    %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>
+"""]
+    for i in range(DPL):
+        t.append(f"    %ddc{i} = index.constant {32 * i} : index\n    %dd{i} = index.add %lane, %ddc{i} : index\n")
+    for j in range(TQ):
+        t.append(f"""    %cj{j} = index.constant {j} : index
+    %rj{j} = index.add %rel0, %cj{j} : index
+    %vj{j} = index.cmp ult, %rj{j}, %block_len : index
+    %tr{j} = index.add %token, %cj{j} : index
+    %tc{j} = index.min %tr{j}, %tok_last : index
+    %t{j} = index.assume %tc{j} [range(%tc{j}, 0, 8191), lt(%tc{j}, %tokens)] : index
+""" + "".join(f"    %qv{j}_{i} = view.load %q_view[%t{j}, %qh, %dd{i}] : view<[%tokens]x{QH}x{D}xf32> -> f32\n" for i in range(DPL)))
+    st = ", ".join(f"%m{j} = %neg : f32, %l{j} = %zero_f : f32, " + ", ".join(f"%a{j}_{i} = %zero_f : f32" for i in range(DPL)) for j in range(TQ))
+    ty = ", ".join(["f32"] * (TQ * (2 + DPL)))
+    outs = ", ".join(f"%fm{j}, %fl{j}, " + ", ".join(f"%fa{j}_{i}" for i in range(DPL)) for j in range(TQ))
+    t.append(f"    {outs} = scf.for %kb = [%s_lo to %s_hi step %ckuw]({st}) -> ({ty}) {{\n")
+    for u in range(KU):
+        t.append(f"""      %cu{u} = index.constant {u} : index
+      %ky{u} = index.add %kb, %cu{u} : index
+      %kv{u} = index.cmp ult, %ky{u}, %s_hi : index
+      %kc{u} = index.min %ky{u}, %s_last : index
+      %ko{u} = func.call @g_dfl_kv_offset(%origins, %row, %kc{u}, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
+      %vo{u} = index.add %ko{u}, %plane_stride : offset
+      %kw{u} = buffer.view %cache[%ko{u}] : buffer -> view<{KVH}x{D}xf16>
+      %vw{u} = buffer.view %cache[%vo{u}] : buffer -> view<{KVH}x{D}xf16>
+""")
+        for i in range(DPL):
+            t.append(f"""      %kh{u}_{i} = view.load %kw{u}[%khb, %dd{i}] : view<{KVH}x{D}xf16> -> f16
+      %vh{u}_{i} = view.load %vw{u}[%khb, %dd{i}] : view<{KVH}x{D}xf16> -> f16
+      %k{u}_{i} = scalar.extf %kh{u}_{i} : f16 to f32
+      %v{u}_{i} = scalar.extf %vh{u}_{i} : f16 to f32
+""")
+    parts = []
+    for j in range(TQ):
+        for u in range(KU):
+            t.append(f"      %pp{j}_{u}_0 = scalar.mulf %qv{j}_0, %k{u}_0 : f32\n")
+            for i in range(1, DPL):
+                t.append(f"      %pp{j}_{u}_{i} = scalar.fmaf %qv{j}_{i}, %k{u}_{i}, %pp{j}_{u}_{i - 1} : f32\n")
+            parts.append(f"%pp{j}_{u}_{DPL - 1}")
+    sums = [f"%sm{j}_{u}" for j in range(TQ) for u in range(KU)]
+    t.append(g["allreduce"](parts, "dr", sums) + "\n")
+    ys = []
+    for j in range(TQ):
+        prev = f"%m{j}"
+        for u in range(KU):
+            t.append(f"""      %sc{j}_{u} = scalar.mulf %sm{j}_{u}, %scale : f32
+      %s{j}_{u} = scf.select %kv{u}, %sc{j}_{u}, %neg : f32
+      %mx{j}_{u} = scalar.maxnumf {prev}, %s{j}_{u} : f32
+""")
+            prev = f"%mx{j}_{u}"
+        t.append(f"""      %dm{j} = scalar.subf %m{j}, {prev} : f32
+      %co{j} = scalar.expf<afn> %dm{j} : f32
+      %lc{j} = scalar.mulf %l{j}, %co{j} : f32
+""")
+        pl = f"%lc{j}"
+        pa = []
+        for i in range(DPL):
+            t.append(f"      %ac{j}_{i} = scalar.mulf %a{j}_{i}, %co{j} : f32\n")
+            pa.append(f"%ac{j}_{i}")
+        for u in range(KU):
+            t.append(f"""      %ds{j}_{u} = scalar.subf %s{j}_{u}, {prev} : f32
+      %pe{j}_{u} = scalar.expf<afn> %ds{j}_{u} : f32
+      %pw{j}_{u} = scf.select %kv{u}, %pe{j}_{u}, %zero_f : f32
+      %ln{j}_{u} = scalar.addf {pl}, %pw{j}_{u} : f32
+""")
+            pl = f"%ln{j}_{u}"
+            for i in range(DPL):
+                t.append(f"      %an{j}_{u}_{i} = scalar.fmaf %pw{j}_{u}, %v{u}_{i}, {pa[i]} : f32\n")
+            pa = [f"%an{j}_{u}_{i}" for i in range(DPL)]
+        ys += [prev, pl] + pa
+    t.append(f"      scf.yield {', '.join(ys)} : {ty}\n    }}\n")
+    t.append(f"""    %pacc_view = buffer.view %pacc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x{D}xf32>
+    %pml_view = buffer.view %pml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>
+    %first_lane = index.cmp eq, %lane, %c0 : index
+""")
+    for j in range(TQ):
+        t.append(f"    scf.if %vj{j} {{\n" + "".join(
+            f"      view.store %fa{j}_{i}, %pacc_view[%t{j}, %qh, %split, %dd{i}] : f32, view<[%tokens]x{QH}x{S}x{D}xf32>\n" for i in range(DPL))
+            + f"""      scf.if %first_lane {{
+        view.store %fm{j}, %pml_view[%t{j}, %qh, %split, 0] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+        view.store %fl{j}, %pml_view[%t{j}, %qh, %split, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+      }}
+    }}
+""")
+    t.append("    }\n  }\n  kernel.return\n}\n")
+    return "".join(t)
+
+
+def split_combine(text, QH, KVH, D):
+    """g_dfl_attention reading the context part from g_dfl_ctx_split's partials: each wave merges splits
+    wave, wave + 8, ..., then runs the block's own keys and the cross-wave merge as before."""
+    S, DPL = DFL_SPLITS, D // 32
+    old_sig = "%cache: buffer, %out: buffer) {"
+    assert text.count(old_sig) == 1
+    text = text.replace(old_sig, "%cache: buffer, %out: buffer, %pacc: buffer, %pml: buffer) {")
+    a = text.index("    %m_f, %l_f, ")
+    b = text.index("    %first_lane = index.cmp eq, %lane, %c0 : index")
+    st = ", ".join(f"%a{i} = %zero_f : f32" for i in range(DPL))
+    st_c = ", ".join(f"%a{i} = %ca_f{i} : f32" for i in range(DPL))
+    ft = ", ".join(["f32"] * DPL)
+    L = [f"""    %pacc_view = buffer.view %pacc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x{D}xf32>
+    %pml_view = buffer.view %pml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>
+    %cSm = index.constant {S} : index
+    %cm_f, %cl_f, {", ".join(f"%ca_f{i}" for i in range(DPL))} = scf.for %sp = [%wave to %cSm step %c8](%m = %neg : f32, %l = %zero_f : f32, {st}) -> (f32, f32, {ft}) {{
+      %spb = index.assume %sp [range(%sp, 0, {S - 1})] : index
+      %ms = view.load %pml_view[%token, %qh, %spb, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
+      %ls = view.load %pml_view[%token, %qh, %spb, 1] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
+      %mn = scalar.maxnumf %m, %ms : f32
+      %dmo = scalar.subf %m, %mn : f32
+      %co = scalar.expf<afn> %dmo : f32
+      %dms = scalar.subf %ms, %mn : f32
+      %cs = scalar.expf<afn> %dms : f32
+      %lo = scalar.mulf %l, %co : f32
+      %ln = scalar.fmaf %ls, %cs, %lo : f32"""]
+    for i in range(DPL):
+        L.append(f"""      %as{i} = view.load %pacc_view[%token, %qh, %spb, %dd{i}] : view<[%tokens]x{QH}x{S}x{D}xf32> -> f32
+      %ao{i} = scalar.mulf %a{i}, %co : f32
+      %an{i} = scalar.fmaf %as{i}, %cs, %ao{i} : f32""")
+    L.append(f"""      scf.yield %mn, %ln, {", ".join(f"%an{i}" for i in range(DPL))} : f32, f32, {ft}
+    }}
+    %m_f, %l_f, {", ".join(f"%a_f{i}" for i in range(DPL))} = scf.for %bj = [%wave to %block_len step %c8](%m = %cm_f : f32, %l = %cl_f : f32, {st_c}) -> (f32, f32, {ft}) {{
+      %btok0 = index.add %cursor, %bj : index
+      %btok = index.assume %btok0 [range(%btok0, 0, 8191), lt(%btok0, %tokens)] : index""")
+    for i in range(DPL):
+        L.append(f"""      %kx{i} = view.load %bk_view[%btok, %khb, %dd{i}] : view<[%tokens]x{KVH}x{D}xf32> -> f32
+      %vx{i} = view.load %bv_view[%btok, %khb, %dd{i}] : view<[%tokens]x{KVH}x{D}xf32> -> f32
+      %p{i} = scalar.mulf %qv{i}, %kx{i} : f32""")
+    L.append("      %dot0 = scalar.addf %p0, %zero_f : f32")
+    for i in range(1, DPL):
+        L.append(f"      %dot{i} = scalar.addf %dot{i - 1}, %p{i} : f32")
+    L.append(f"""      %dsum = kernel.subgroup.reduce<addf> %dot{DPL - 1} : f32
+      %s = scalar.mulf %dsum, %scale : f32
+      %mn = scalar.maxnumf %m, %s : f32
+      %dm = scalar.subf %m, %mn : f32
+      %corr = scalar.expf<afn> %dm : f32
+      %ds = scalar.subf %s, %mn : f32
+      %pw = scalar.expf<afn> %ds : f32
+      %lc = scalar.mulf %l, %corr : f32
+      %ln = scalar.addf %lc, %pw : f32""")
+    for i in range(DPL):
+        L.append(f"""      %ac{i} = scalar.mulf %a{i}, %corr : f32
+      %an{i} = scalar.fmaf %pw, %vx{i}, %ac{i} : f32""")
+    L.append(f"""      scf.yield %mn, %ln, {", ".join(f"%an{i}" for i in range(DPL))} : f32, f32, {ft}
+    }}
+""")
+    return text[:a] + "\n".join(L) + text[b:]
+
+
 def kernels(g):
     F = g["dflash"]
     H, HG = g["H"], g["HG"]
@@ -554,6 +804,9 @@ kernel.def export("g_dfl_attention") @g_dfl_attention(%tokens: index) {{
   kernel.return
 }
 """).replace("  %zero_f = scalar.constant 0.0 : f32\n  %neg", "  %zero_f = scalar.constant 0.0 : f32\n  %one_f = scalar.constant 1.0 : f32\n  %neg", 1))
+    if split_enabled(F):
+        T[-1] = split_combine(T[-1], QH, KVH, D)
+        T.append(ctx_split_kernel(F, QH, KVH, D, POSB, g))
     # ---- residual add + rmsnorm (draft layers; no post norms)
     T.append(f"""
 // x[t] += y[t]; h[t] = rmsnorm(x[t]) * w.
@@ -1164,6 +1417,14 @@ def programs(g):
     tensors = F["tensors"]
     MR = g["MROPE"]
     rpos = "%rinfo" if MR else "%info"
+    SPLIT = split_enabled(F)
+    split_bufs = (f"""  %dpacc_bytes = index.constant {F["heads"] * DFL_SPLITS * F["head_dim"] * 4} : offset
+  %dpacc_size = index.scale %t, %dpacc_bytes : index, offset -> offset
+  %dpacc = buffer.alloca<global> align(256) %dpacc_size : buffer
+  %dpml_bytes = index.constant {F["heads"] * DFL_SPLITS * 8} : offset
+  %dpml_size = index.scale %t, %dpml_bytes : index, offset -> offset
+  %dpml = buffer.alloca<global> align(256) %dpml_size : buffer
+""" if SPLIT else "")
 
     def rinfo(records):
         """M-RoPE targets: the drafter rotates at the target's temporal position (llama.cpp's degenerate sections)."""
@@ -1286,7 +1547,7 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
 {buf("x", H)}{buf("h", H, True)}{buf("y", H)}{buf("q", QD)}{buf("k", KD)}{buf("v", KD)}{buf("o", QD, True)}{buf("f", FFd, True)}  %info_bytes = index.constant 16 : offset
   %info_size = index.scale %t, %info_bytes : index, offset -> offset
   %info = buffer.alloca<global> align(256) %info_size : buffer
-  %chunks_c = index.constant {g["CHUNKS"]} : index
+{split_bufs}  %chunks_c = index.constant {g["CHUNKS"]} : index
   %partial_bytes = index.constant {g["CHUNKS"] * 8} : offset
   %partial_size = index.scale %row_cap, %partial_bytes : index, offset -> offset
   %partials = buffer.alloca<global> align(256) %partial_size : buffer
@@ -1323,8 +1584,10 @@ command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_
                  + f"""  %dl_{l} = index.constant {l} : index
   kernel.launch @g_dfl_q_prep[%t](%t, %q, %dqn_{l}, {rpos}) : [index](index, buffer, view<{F['head_dim']}xf32>, buffer)
   kernel.launch @g_dfl_block_kv[%t](%t, %k, %dkn_{l}, {rpos}) : [index](index, buffer, view<{F['head_dim']}xf32>, buffer)
-  kernel.launch @g_dfl_attention[%t](%t, %spans, %dl_{l}, %context, %pool, %metadata, %info, %q, %k, %v, %origins, %arena, %o) : [index](index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
-""" + scaled("o", "%nDQ") + L(b + "attn_output.weight", "o", f"%do_{l}", "y", "%nDQ", "%nH", QD))
+""" + (f"""  kernel.launch @g_dfl_ctx_split[%t](%t, %spans, %dl_{l}, %context, %pool, %metadata, %info, %q, %origins, %arena, %dpacc, %dpml) : [index](index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @g_dfl_attention[%t](%t, %spans, %dl_{l}, %context, %pool, %metadata, %info, %q, %k, %v, %origins, %arena, %o, %dpacc, %dpml) : [index](index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+""" if SPLIT else f"""  kernel.launch @g_dfl_attention[%t](%t, %spans, %dl_{l}, %context, %pool, %metadata, %info, %q, %k, %v, %origins, %arena, %o) : [index](index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+""") + scaled("o", "%nDQ") + L(b + "attn_output.weight", "o", f"%do_{l}", "y", "%nDQ", "%nH", QD))
         if conv:
             T.append(f"  kernel.launch @g_dfl_conv[%t](%t, %spans, %branch1, %one_i32, %metadata, %info, %y, %dyn, %dacb_{l}, %x) : [index](index, index, index, i32, buffer, buffer, buffer, buffer, view<{2 * conv['taps'] * H}xf32>, buffer)\n"
                      f"  kernel.launch @g_dfl_add_norm[%t](%t, %zero_i32, %y, %x, %dfn_{l}, %h) : [index](index, i32, buffer, buffer, view<{H}xf32>, buffer)\n"

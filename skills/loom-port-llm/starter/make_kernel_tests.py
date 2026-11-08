@@ -19,6 +19,7 @@ from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
 from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402  formats with no 256-row (_m256) GEMM
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
 from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
+import attn_rules  # noqa: E402
 
 
 def q8_ref(xs):
@@ -911,6 +912,68 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   check.return
 }}
 """)
+# 3c. a verify span at long context: ATTN_MT tokens of one row at consecutive positions past ATTN_MT_FROM take the
+# multi-token split-K path (one K/V load per key for the span); K/V written straight into the arena (identity pages).
+# The model's attention scale and sinks are in the reference; a sliding layer (window W) gets its own case.
+def attention_span_case(tag, sliding):
+    W = cfg.get("sliding_window") or 0
+    t = attn_rules.ATTN_MT
+    p0 = max(attn_rules.ATTN_MT_FROM + 76, W + 100 if sliding else 0)
+    ctx = (p0 + t + 15) // 16 * 16 + 64
+    scale = cfg["attn_scale"] if cfg.get("attn_scale") is not None else 1 / np.sqrt(D)
+    sinks = deq(f"blk.{A0}.attn_sinks.weight").astype(np.float32) if cfg.get("attn_sinks") else None
+    kvk = (0.5 * rng.standard_normal((ctx, KVH, D))).astype(np.float16); kvv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
+    kvv[p0 + 1:] *= 64   # keys after a token's own position: a causal leak (one span member's range for another) dominates
+    q = rng.standard_normal((t, QH, D)).astype(np.float32); gate = rng.standard_normal((t, QH, D)).astype(np.float32)
+    att = np.zeros((t, QH, D))
+    for i in range(t):
+        p = p0 + i; lo = p - (W - 1) if sliding else 0
+        for hh in range(QH):
+            kv = hh // (QH // KVH)
+            sc = kvk[lo:p + 1, kv].astype(np.float64) @ q[i, hh] * scale
+            mx = sc.max() if sinks is None else max(sc.max(), sinks[hh])
+            pr = np.exp(sc - mx); den = pr.sum() + (0.0 if sinks is None else np.exp(sinks[hh] - mx))
+            att[i, hh] = pr @ kvv[lo:p + 1, kv].astype(np.float64) / den
+    if gate_kind and sinks is None:
+        att = att / (1 + np.exp(-gate))
+    blocks = ctx // 16
+    orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
+    info = np.zeros((t, 4), np.int32); info[:, 1] = p0 + np.arange(t); info[:, 2] = 1
+    for n, a in [("q", q.reshape(t, -1)), ("g", gate.reshape(t, -1)), ("info", info), ("orig", orig),
+                 ("sinks", sinks if sinks is not None else np.zeros(QH, np.float32)),
+                 ("arena", np.concatenate([kvk.reshape(-1), kvv.reshape(-1)])), ("o", att.reshape(t, -1).astype(np.float32))]:
+        save(f"{tag}_{n}", a)
+    S = 64
+    gv, gt = ("%sinks", f"tensor<{QH}xf32>") if sinks is not None else ("%g" if gate_kind else "%q", f"tensor<{t}x{QD}xf32>")
+    cases.append(f"""check.case public @{tag} {{
+  %t = check.literal value({t}) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value({int(sliding)}) : i32
+  %ctx = check.literal value({ctx}) : index
+  %pool = check.literal value({ctx}) : index
+  %q = check.file.read.npy path("{tag}_q.npy") : tensor<{t}x{QD}xf32>
+  %g = check.file.read.npy path("{tag}_g.npy") : tensor<{t}x{QD}xf32>
+  %sinks = check.file.read.npy path("{tag}_sinks.npy") : tensor<{QH}xf32>
+  %info = check.file.read.npy path("{tag}_info.npy") : tensor<{t}x4xi32>
+  %orig = check.file.read.npy path("{tag}_orig.npy") : tensor<{10 + blocks}xi32>
+  %arena = check.file.read.npy path("{tag}_arena.npy") : tensor<{2 * ctx * KVH * D}xf16>
+  %eo = check.file.read.npy path("{tag}_o.npy") : tensor<{t}x{QD}xf32>
+  %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
+  %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
+  %o = check.generate.fill value(0.0) : tensor<{t}x{QD}xf32>
+  kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, tensor<{t}x{QD}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, tensor<{2 * ctx * KVH * D}xf16>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
+  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {gv}, %o) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, {gt}, tensor<{t}x{QD}xf32>)
+  check.expect.close actual(%o) expected(%eo) atol(3.0e-3) rtol(3.0e-3) nan(different) : tensor<{t}x{QD}xf32>
+  check.return
+}}
+""")
+
+
+if attn_rules.multi_token(attn_rules.UNROLL):   # the condition gen_llm.py emits the multi-token path on
+    attention_span_case("attention_span", False)
+    if cfg.get("sliding_layers") and cfg.get("sliding_window"):
+        attention_span_case("attention_span_sliding", True)
+
 # 3a''. DFlash proposals' head (draft/prep_weights.py, PROPOSE_HEAD=q4_0): g_prep_<fmt>_q4_0 converts the head at load,
 # then the int8 head runs over the Q4_0 copy. Logits vs numpy on llama.cpp's quantize_row_q4_0 of the same values (a
 # code at a rounding boundary may differ: tolerance), and the 4/8/16-span variants bit-identical to 1 span.
@@ -1101,6 +1164,76 @@ def drafter_cases():
 }}
 """)
 drafter_cases()
+
+
+def dflash_attention_case():
+    """DFlash v1 draft attention, split-K (draft/gen_dflash.py: g_dfl_ctx_split + g_dfl_attention): three spans of
+    three rows (context 701, 5 and 0 keys; 11, 16 and 4 block tokens, so 8-token chunks end mid-span) and a dead
+    token, on permuted pages. Every block token attends its row's context [0, P) and the whole block. Context
+    positions at or past P hold large values: a key read past the span's own context dominates the output."""
+    dg = (cfg.get("drafter") or {}).get("gguf")
+    if (cfg.get("drafter") or {}).get("kind") != "dflash" or not dg or not os.path.exists(dg):
+        return
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "draft"))
+    import gen_dflash
+    F = gen_dflash.config(dg)
+    if not gen_dflash.split_enabled(F):
+        return
+    QH, KVH, D, S = F["heads"], F["kv_heads"], F["head_dim"], gen_dflash.DFL_SPLITS
+    spans = [(701, 11), (5, 16), (0, 4)]   # (context P, block length)
+    t = sum(n for _, n in spans) + 1
+    nb = 48; pool = 16 * nb * len(spans); layer = min(1, F["layers"] - 1)
+    perm = rng.permutation(nb * len(spans)).astype(np.int32)
+    cache = rng.standard_normal((2 * layer + 2, pool, KVH, D)).astype(np.float16)
+    q = rng.standard_normal((t, QH, D)).astype(np.float32)
+    bk = rng.standard_normal((t, KVH, D)).astype(np.float32); bv = rng.standard_normal((t, KVH, D)).astype(np.float32)
+    meta = np.zeros(4 + 9 * len(spans), np.int32); info = np.zeros((t, 4), np.int32)
+    orig = np.zeros(10 * len(spans) + nb * len(spans), np.int32)
+    o = np.zeros((t, QH, D))
+    cur = 0
+    for r, (P, n) in enumerate(spans):
+        meta[4 + 9 * r:4 + 9 * r + 5] = [n, P, 0, 0, cur]
+        info[cur:cur + n] = [[r, P + j, 1, r] for j in range(n)]
+        orig[10 * r + 8] = 4 * (10 * len(spans) + nb * r)   # the row's page map (byte offset into origins)
+        orig[10 * len(spans) + nb * r:10 * len(spans) + nb * (r + 1)] = perm[nb * r:nb * (r + 1)]
+        slots = (perm[nb * r:nb * (r + 1), None] * 16 + np.arange(16)).reshape(-1)   # the row's positions -> pool slots
+        cache[2 * layer + 1, slots[P:]] *= 64
+        kc = cache[2 * layer, slots[:P]].astype(np.float64); vc = cache[2 * layer + 1, slots[:P]].astype(np.float64)
+        for j in range(cur, cur + n):
+            for h in range(QH):
+                kv = h // (QH // KVH)
+                keys = np.concatenate([kc[:, kv], bk[cur:cur + n, kv]]); vals = np.concatenate([vc[:, kv], bv[cur:cur + n, kv]])
+                sc = keys @ q[j, h] * D ** -0.5; pr = np.exp(sc - sc.max())
+                o[j, h] = pr @ vals / pr.sum()
+        cur += n
+    info[cur] = [0, 0, 0, 0]   # a dead token: no output
+    tag = "dfl_attention"
+    for nm, a in [("meta", meta), ("info", info), ("orig", orig), ("q", q.reshape(t, -1)), ("bk", bk.reshape(t, -1)),
+                  ("bv", bv.reshape(t, -1)), ("cache", cache.reshape(-1)), ("o", o.reshape(t, -1).astype(np.float32))]:
+        save(f"{tag}_{nm}", a)
+    QD, KD = QH * D, KVH * D
+    T = lambda n: f"tensor<{t}x{n}xf32>"
+    tys = {"meta": ty(meta), "info": ty(info), "orig": ty(orig), "q": T(QD), "bk": T(KD), "bv": T(KD), "cache": f"tensor<{cache.size}xf16>"}
+    PT, MT = f"tensor<{t * QH * S * D}xf32>", f"tensor<{t * QH * S * 2}xf32>"
+    cases.append(f"""check.case public @{tag} {{
+  %t = check.literal value({t}) : index
+  %spans = check.literal value({len(spans)}) : index
+  %layer = check.literal value({layer}) : index
+  %ctx = check.literal value({16 * nb}) : index
+  %pool = check.literal value({pool}) : index
+""" + "".join(f'  %{nm} = check.file.read.npy path("{tag}_{nm}.npy") : {tt}\n' for nm, tt in tys.items()) + f"""  %eo = check.file.read.npy path("{tag}_o.npy") : {T(QD)}
+  %pacc = check.generate.fill value(0.0) : {PT}
+  %pml = check.generate.fill value(0.0) : {MT}
+  %o = check.generate.fill value(0.0) : {T(QD)}
+  kernel.launch @g_dfl_ctx_split[%t](%t, %spans, %layer, %ctx, %pool, %meta, %info, %q, %orig, %cache, %pacc, %pml) : [index](index, index, index, index, index, {tys["meta"]}, {tys["info"]}, {T(QD)}, {tys["orig"]}, {tys["cache"]}, {PT}, {MT})
+  kernel.launch @g_dfl_attention[%t](%t, %spans, %layer, %ctx, %pool, %meta, %info, %q, %bk, %bv, %orig, %cache, %o, %pacc, %pml) : [index](index, index, index, index, index, {tys["meta"]}, {tys["info"]}, {T(QD)}, {T(KD)}, {T(KD)}, {tys["orig"]}, {tys["cache"]}, {T(QD)}, {PT}, {MT})
+  check.expect.close actual(%o) expected(%eo) atol(2.0e-3) rtol(3.0e-3) nan(different) : {T(QD)}
+  check.return
+}}
+""")
+
+
+dflash_attention_case()
 # Prefill flash attention (gen_flash2.py / gen_flash2s.py): 64 uniform tokens at the end of a 1024-key context,
 # paged arena filled directly (identity page map), layer 0, causal; q scaled so attention is sharp (a kernel that
 # drops part of the score sum fails). Reference in float64 from f16 Q/K/V, times sigmoid(gate) when gated.
