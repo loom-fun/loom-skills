@@ -87,15 +87,15 @@ if not all(repeat):
           "(a race in a kernel, not a near-tie)")
 if not all(paired):
     print("note: prompts", [i for i, ok in enumerate(paired) if not ok], "never ran twice alone on the same path (determinism unchecked)")
-gaps, pending = [], False
+gaps, bars, pending = [], [], False
 if a.pkg and pairs:
-    from bench_common import Package, llama_greedy, top_logprobs
+    from bench_common import Package, exact_gaps, gap_noise, llama_greedy, llama_views, top_logprobs
     P = Package(a.pkg)
     for i, what, r in pairs:
         ref = alone[i]
         t1, t2 = P.ids(P.raw_from_chat(ref["message"], ref["stop"])), P.ids(P.raw_from_chat(r["message"], r["stop"]))
         k = next((j for j, (x, y) in enumerate(zip(t1, t2)) if x != y), min(len(t1), len(t2)))
-        gap_val = None
+        gap_val, bar = None, 1.0
         msg = (f"prompt {i}: first divergence at generated token {k}: alone ({ref['cached']} cached) {P.tok.decode(t1[k:k + 1])!r} "
                f"vs {what} {P.tok.decode(t2[k:k + 1])!r}")
         if a.llama and k < min(len(t1), len(t2)):
@@ -114,12 +114,21 @@ if a.pkg and pairs:
             elif t1[k] in top and t2[k] in top:
                 gap_val = abs(top[t1[k]] - top[t2[k]])
                 msg += f"; llama.cpp log-prob gap between them {gap_val:.3f}"
+                # The same bar as the text gates (near_tie): llama.cpp's own other numerics at this position (prefill batch,
+                # decode-shaped micro-batches) may rank the pair closer; its spread across them widens the 1-nat bar, capped.
+                hi, lo = (t1[k], t2[k]) if top[t1[k]] >= top[t2[k]] else (t2[k], t1[k])
+                views = llama_views(a.llama, ids, P)
+                noise = gap_noise((top, *views), hi, lo)
+                gap_val = min(exact_gaps((top, *views), hi, lo))
+                msg += f"; over llama.cpp's own views {gap_val:.3f} (noise {noise:.3f})"
+                bar = 1.0 + noise
             else:
                 msg += "; one of them is outside llama.cpp's top-10 (not a near-tie)"
         print(msg)
         gaps.append(gap_val)
+        bars.append(bar)
 # A concurrent-vs-alone (or prefix-hit-vs-miss) difference passes when every prompt is deterministic
-# alone on its path and every divergence is a near-tie by the compare.py rule (gap <= 1 nat, both
+# alone on its path and every divergence is a near-tie by the compare.py rule (gap <= 1 nat plus llama.cpp's view spread, both
 # tokens in llama.cpp's top-k): decode tokens sharing an epoch with a prefill take the f16 GEMM path
 # instead of the f32 matvec path, which flips near-ties (the identified cause; LFM2.5: gap 0.085).
 if pending:
@@ -128,7 +137,7 @@ if pending:
     sys.exit(0)
 if state and os.path.exists(state):
     os.remove(state)
-near = all(repeat) and bool(gaps) and all(g is not None and g <= 1.0 for g in gaps) and len(gaps) == len(pairs)
+near = all(repeat) and bool(gaps) and all(g is not None and g <= b for g, b in zip(gaps, bars)) and len(gaps) == len(pairs)
 if not all(same) and near:
     print("near-tie divergences only (mixed-epoch f16 path / prefix-cache tail), deterministic alone")
 print("PASS" if all(same) or near else "FAIL")
