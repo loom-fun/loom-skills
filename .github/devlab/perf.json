@@ -1,35 +1,125 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "Temporary: attribute the span kernel's short-context cost (not for merge).",
+ "card": "x",
+ "memory_bytes": 1,
+ "kit": null,
+ "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "q05",
+   "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+   "memory_bytes": 5000000000,
    "variants": [
     {
-     "name": "new",
+     "name": "off",
+     "build": {
+      "SEG_ATTN": "0"
+     }
+    },
+    {
+     "name": "on",
      "build": {}
+    },
+    {
+     "name": "lst",
+     "build": {
+      "SEG_MIN": "1000000"
+     }
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:off:2",
+    "c4:off",
+    "perf:on:2",
+    "c4:on",
+    "perf:lst:2",
+    "c4:lst",
+    "perf:off:2",
+    "c4:off",
+    "perf:on:2",
+    "c4:on",
+    "perf:lst:2",
+    "c4:lst",
+    "perf:off:2:long",
+    "perf:on:2:long"
    ]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "q05b",
+   "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+   "memory_bytes": 5000000000,
    "variants": [
     {
-     "name": "new",
+     "name": "off",
+     "build": {
+      "SEG_ATTN": "0"
+     }
+    },
+    {
+     "name": "on",
      "build": {}
+    },
+    {
+     "name": "lst",
+     "build": {
+      "SEG_MIN": "1000000"
+     }
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:off:2",
+    "c4:off",
+    "perf:on:2",
+    "c4:on",
+    "perf:lst:2",
+    "c4:lst",
+    "perf:off:2",
+    "c4:off",
+    "perf:on:2",
+    "c4:on",
+    "perf:lst:2",
+    "c4:lst",
+    "perf:off:2:long",
+    "perf:on:2:long"
+   ]
+  },
+  {
+   "name": "q15",
+   "card": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
+   "memory_bytes": 8000000000,
+   "variants": [
+    {
+     "name": "off",
+     "build": {
+      "SEG_ATTN": "0"
+     }
+    },
+    {
+     "name": "on",
+     "build": {}
+    },
+    {
+     "name": "lst",
+     "build": {
+      "SEG_MIN": "1000000"
+     }
+    }
+   ],
+   "steps": [
+    "perf:off:2",
+    "c4:off",
+    "perf:on:2",
+    "c4:on",
+    "perf:lst:2",
+    "c4:lst",
+    "perf:off:2",
+    "c4:off",
+    "perf:on:2",
+    "c4:on",
+    "perf:lst:2",
+    "c4:lst",
+    "perf:off:2:long",
+    "perf:on:2:long"
    ]
   }
  ]
