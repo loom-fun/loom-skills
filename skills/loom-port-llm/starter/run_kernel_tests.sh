@@ -10,6 +10,17 @@ import re, sys
 lib = open(sys.argv[1]).read()
 defined = set(re.findall(r'kernel\.def export\("([^"]+)"\)', lib)) | set(re.findall(r'kernel\.def[^@]*@([\w.]+)', lib))
 text = open("cases.loom-test").read()
+# A listed kernel (indirect dispatch over a device-written count, which loom-test cannot launch) gets a _slots twin
+# for the cases: the same body over a static grid of slots, the first argument the slot count.
+twins = []
+for name in sorted(set(re.findall(r'kernel\.launch @([\w.]+)_slots\[', text))):
+    a = lib.find(f'kernel.def export("{name}_listed")')
+    if a < 0:
+        continue
+    b = lib.index("} launch(", a); end = lib.index("kernel.return\n}\n", b) + len("kernel.return\n}\n")
+    grid = lib[a:b].split("%count = index.cast %bounded : i32 to index\n", 1)[1]
+    twins.append(f'kernel.def export("{name}_slots") @{name}_slots(%count: index) {{\n' + grid + lib[b:end])
+    defined.add(f"{name}_slots")
 blocks = re.split(r'(?m)^(?=check\.case )', text)
 keep = []
 for b in blocks:
@@ -18,7 +29,7 @@ for b in blocks:
         print(f"SKIP {re.search(r'@([\w.]+)', b).group(1)}: kernel(s) not in this build: {', '.join(missing)}")
         continue
     keep.append(b)
-open("cases_used.loom-test", "w").write("".join(keep))
+open("cases_used.loom-test", "w").write(keep[0] + "".join(t + "\n" for t in twins) + "".join(keep[1:]))
 PY
 cat "$pkg/program/llm.loom" cases_used.loom-test > combined.loom
 "$bin/loom-test" combined.loom --device=${DEVICE:-amdgpu} > out.json 2> err.txt

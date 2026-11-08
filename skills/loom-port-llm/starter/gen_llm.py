@@ -2734,23 +2734,29 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
 # memory. The partials keep the split kernel's layout, so g_attention_combine is unchanged. A token's blocks are
 # absolute 32-aligned and a block outside its own range is skipped, so it computes the same bits alone or in any
 # segment: drafted output equals undrafted output. Below SEG_MIN the split kernel stays as fast or faster.
-# On for head_dim 128 with at most 2 KV heads, the configuration that won on both a local Strix Halo and DevLab
-# (Qwen2.5-1.5B, decode at 32k +27 % / +14 %). Measured losses elsewhere: head_dim 64 (Qwen2.5-0.5B: +19 % locally,
-# -21 % on DevLab), 8 KV heads (Qwen3-4B DFlash: -17 % locally), head_dim 256 with one KV head (Gemma-3-1B: 8k/16k
-# -40 %). SEG_ATTN=0 keeps the split kernel everywhere.
+# On for head_dim 64 and 128 with at most 2 KV heads (few workgroups per token for the split kernel); the span length
+# is capped so the workgroup tiles fit 64 KB. Measured losses outside that: 8 KV heads (Qwen3-4B DFlash, -17 %
+# locally), head_dim 256 with one KV head (Gemma-3-1B, 8k/16k -40 %). SEG_ATTN=0 keeps the split kernel everywhere.
 SEG_MIN = int(os.environ.get("SEG_MIN", "8192"))
 
 
 def seg_tokens():
-    """Tokens per segment (the verification span: draft depth + 1), 0 when the decode path keeps the split kernel."""
-    on = os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and D == 128 and KVH <= 2
-    return gen_draft.DRAFT["depth"] + 1 if on else 0
+    """Tokens per segment: the verification span (draft depth + 1), capped so the q and p tiles fit 64 KB of
+    workgroup memory (longer runs go one token at a time); 0 when the decode path keeps the split kernel."""
+    if not (os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and D in (64, 128) and KVH <= 2):
+        return 0
+    ts = min(gen_draft.DRAFT["depth"] + 1, 65536 // (G * 4 * (D + 32)))
+    return ts if ts >= 2 else 0
 
 
 def attention_seg(split_text):
     """g_attention_seg from the decode split kernel's text (attention_text(64, "g")): same launch and partials."""
     TS, S, NC, PB = seg_tokens(), 64, D // 32, POS_BYTES
     V = f"vector<{DL}xf32>"
+    # values: VW dims per lane, so each key's V row spans LPK lanes and one load step covers KS keys
+    VW = 4 if D == 64 else DL   # head_dim 64: two keys per load step (2 dims per lane lost on DevLab: -21 %)
+    LPK, VA = D // VW, f"vector<{VW}xf32>"
+    KS = 32 // LPK
     a = split_text.index('kernel.def export("g_attention_split")')
     head = split_text[a:split_text.index("  %info_view = buffer.view", a)].replace("g_attention_split", "g_attention_seg")
     L = [head, f"""  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
@@ -2763,7 +2769,7 @@ def attention_seg(split_text):
   %far_lo = index.constant {1 << 30} : index
   %scale = scalar.constant {D ** -0.5!r} : f32
   %scale_v = vector.splat %scale : {V}
-  %zero_acc = vector.splat %zero_f : {V}
+  %zero_acc = vector.splat %zero_f : {VA}
   %one_f = scalar.constant 1.0 : f32
   %q_bytes = index.constant {TS * G * D * 4} : offset
   %p_bytes = index.constant {G * TS * 32 * 4} : offset
@@ -2774,15 +2780,14 @@ def attention_seg(split_text):
   %p_lds = buffer.view %p_tile[%zero] : buffer -> view<{G}x{TS}x32xf32>
   %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x{DL}xf32>
   %cont0 = func.call @g_seg_next(%info, %tokens, %token, %seg_min) : (buffer, index, index, i32) -> (i1)
-  %first = scalar.xori %cont0, %true : i1
-  %member0 = scalar.andi %true, %true : i1"""]
+  %first = scalar.xori %cont0, %true : i1"""]
     # the token is a segment leader (g_seg_list); members: the next tokens of its run when it starts it
     for k in range(1, TS):
+        prev_m = "%first" if k == 1 else f"%member{k - 1}"
         L.append(f"""  %cb{k} = index.constant {k} : index
   %ta{k} = index.add %token, %cb{k} : index
   %next{k} = func.call @g_seg_next(%info, %tokens, %ta{k}, %seg_min) : (buffer, index, index, i32) -> (i1)
-  %mf{k} = scalar.andi %member{k - 1}, %first : i1
-  %member{k} = scalar.andi %mf{k}, %next{k} : i1""")
+  %member{k} = scalar.andi {prev_m}, %next{k} : i1""")
     L.append("""  %row_bound = scalar.assume %row32 [range(%row32, 0, 2147483646)] : i32
   %row = index.cast %row_bound : i32 to index
   %padded = index.add %context, %c15 : index
@@ -2810,8 +2815,6 @@ def attention_seg(split_text):
     %start_{k} = index.min %start_raw_{k}, %visible_{k} : index
     %stop_raw_{k} = index.add %start_raw_{k}, %per_{k} : index
     %stop_{k} = index.min %stop_raw_{k}, %visible_{k} : index
-    %lo_{k} = index.add %start_{k}, %c0 : index
-    %hi_{k} = index.add %stop_{k}, %c0 : index
     %lo_sel_{k} = scf.select %active_{k}, %lo_{k}, %far_lo : index
     %hi_sel_{k} = scf.select %active_{k}, %hi_{k}, %c0 : index
     %lo_min_{k} = index.min {lo}, %lo_sel_{k} : index
@@ -2822,15 +2825,17 @@ def attention_seg(split_text):
       vector.store %qs{k}, %q_lds[%ck{k}, %wave, %lane, %c0] : {V}, view<{TS}x{G}x32x{DL}xf32>
     }}""")
         lo, hi = f"%lo_min_{k}", f"%hi_max_{k}"
-    L.append(f"""    %lo_u = index.add {lo}, %c0 : index
-    %hi_u = index.add {hi}, %c0 : index
-    %hi_u_less = index.sub %hi_u, %c1 : index
+    L.append(f"""    %hi_u_less = index.sub %hi_u, %c1 : index
     %lo_b = index.div %lo_u, %c32k : index
     %lo_al = index.mul %lo_b, %c32k : index
     %upper = index.cmp uge, %lane, %c16 : index
-    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)""")
-    st = ", ".join(f"%sm{k} = %neg_big : f32, %sl{k} = %zero_f : f32, %sacc{k} = %zero_acc : {V}" for k in range(TS))
-    ty = ", ".join([f"f32, f32, {V}"] * TS)
+    %clpk = index.constant {LPK} : index
+    %vsub = index.div %lane, %clpk : index
+    %vlane = index.rem %lane, %clpk : index
+    %vsub_odd = index.cmp ne, %vsub, %c0 : index
+""" + "".join(f"    %pg{g} = index.constant {4 * g} : index\n" for g in range(8)) + """    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)""")
+    st = ", ".join(f"%sm{k} = %neg_big : f32, %sl{k} = %zero_f : f32, %sacc{k} = %zero_acc : {VA}" for k in range(TS))
+    ty = ", ".join([f"f32, f32, {VA}"] * TS)
     fin = ", ".join(f"%fm{k}, %fl{k}, %fa{k}" for k in range(TS))
     L.append(f"""    {fin} = scf.for %j = [%lo_al to %hi_u step %c32k]({st}) -> ({ty}) {{
       %j16 = index.add %j, %c16 : index
@@ -2885,57 +2890,90 @@ def attention_seg(split_text):
       }} else {{
         scf.yield %sm{k}, %sl{k}, %one_f : f32, f32, f32
       }}
-      %alv{k} = vector.splat %al{k} : {V}
-      %as{k} = vector.mulf %sacc{k}, %alv{k} : {V}""")
+      %alv{k} = vector.splat %al{k} : {VA}
+      %as{k} = vector.mulf %sacc{k}, %alv{k} : {VA}""")
     # values: lanes over dims, each of the block's 32 keys read once for every token; a key outside the union (or
     # another token's) is read at a valid clamped position and weighted by p = +0, an exact no-op (acc is never -0)
     L.append(f"""      kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
       %vlo = index.add %base_lo, %plane_stride : offset
       %vhi = index.add %base_hi, %plane_stride : offset
-      %vrow_lo = buffer.view %arena[%vlo] : buffer -> view<16x{KVH}x32x{DL}xf16>
-      %vrow_hi = buffer.view %arena[%vhi] : buffer -> view<16x{KVH}x32x{DL}xf16>
+      %vrow_lo = buffer.view %arena[%vlo] : buffer -> view<16x{KVH}x{LPK}x{VW}xf16>
+      %vrow_hi = buffer.view %arena[%vhi] : buffer -> view<16x{KVH}x{LPK}x{VW}xf16>
       %pe_lo_a = index.add %j, %c15 : index
       %pe_lo = index.min %pe_lo_a, %hi_u_less : index
       %c31k = index.constant 31 : index
       %pe_hi_a = index.add %j, %c31k : index
       %pe_hi = index.min %pe_hi_a, %hi_u_less : index""")
-    for k in range(TS):
+    for k in range(TS):   # each token's 32 p values of the block, 4 per load
         for g in range(8):
-            L.append(f"""      %pg{k}_{g}c = index.constant {4 * g} : index
-      %pq{k}_{g} = vector.load %p_lds[%wave, %ck{k}, %pg{k}_{g}c] : view<{G}x{TS}x32xf32> -> vector<4xf32>""")
+            L.append(f"""      %pq{k}_{g} = vector.load %p_lds[%wave, %ck{k}, %pg{g}] : view<{G}x{TS}x32xf32> -> vector<4xf32>""")
     prev = {k: f"%as{k}" for k in range(TS)}
-    for jj in range(32):
+    for jj in range(0, 32, KS):   # keys jj .. jj + KS - 1, lane sub-group i takes key jj + i (KS <= 2)
         h = "hi" if jj >= 16 else "lo"
         L.append(f"""      %vc{jj} = index.constant {jj} : index
-      %vk{jj} = index.add %j, %vc{jj} : index
+      %vk0_{jj} = index.add %j, %vc{jj} : index
+      %vk{jj} = index.add %vk0_{jj}, %vsub : index
       %vka{jj} = index.min %vk{jj}, %pe_{h} : index
       %vkc{jj} = index.max %vka{jj}, %anc_{h} : index
       %vi{jj} = index.sub %vkc{jj}, %anc_{h} : index
       %vix{jj} = index.assume %vi{jj} [range(%vi{jj}, 0, 15)] : index
-      %vh{jj} = vector.load %vrow_{h}[%vix{jj}, %kv_head, %lane, %c0] : view<16x{KVH}x32x{DL}xf16> -> vector<{DL}xf16>
-      %vf{jj} = vector.extf %vh{jj} : vector<{DL}xf16> to {V}""")
+      %vh{jj} = vector.load %vrow_{h}[%vix{jj}, %kv_head, %vlane, %c0] : view<16x{KVH}x{LPK}x{VW}xf16> -> vector<{VW}xf16>
+      %vf{jj} = vector.extf %vh{jj} : vector<{VW}xf16> to {VA}""")
         for k in range(TS):
-            L.append(f"""      %px{jj}_{k} = vector.extract %pq{k}_{jj // 4}[{jj % 4}] : vector<4xf32> -> f32
+            pick = (f"""      %px{jj}_{k} = vector.extract %pq{k}_{jj // 4}[{jj % 4}] : vector<4xf32> -> f32""" if KS == 1 else
+                    f"""      %pxa{jj}_{k} = vector.extract %pq{k}_{jj // 4}[{jj % 4}] : vector<4xf32> -> f32
+      %pxb{jj}_{k} = vector.extract %pq{k}_{jj // 4}[{jj % 4 + 1}] : vector<4xf32> -> f32
+      %px{jj}_{k} = scf.select %vsub_odd, %pxb{jj}_{k}, %pxa{jj}_{k} : f32""")
+            L.append(pick + f"""
       %pe{jj}_{k} = scf.select %use{k}, %px{jj}_{k}, %zero_f : f32
-      %pv{jj}_{k} = vector.splat %pe{jj}_{k} : {V}
-      %va{jj}_{k} = vector.fmaf %pv{jj}_{k}, %vf{jj}, {prev[k]} : {V}""")
+      %pv{jj}_{k} = vector.splat %pe{jj}_{k} : {VA}
+      %va{jj}_{k} = vector.fmaf %pv{jj}_{k}, %vf{jj}, {prev[k]} : {VA}""")
             prev[k] = f"%va{jj}_{k}"
     L.append("      kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)")
     L.append("      scf.yield " + ", ".join(f"%nm{k}, %nl{k}, {prev[k]}" for k in range(TS)) + f" : {ty}\n    }}")
+    if KS > 1:   # each lane group summed half the keys: add the partner group's sums, then DL dims per lane
+        L.append(f"""    %fold_w = scalar.constant 32 : i32
+    %fold_d = scalar.constant {LPK} : i32
+    %acc_rows = buffer.view %q_tile[%zero] : buffer -> view<{G}x{D}xf32>
+    %acc_out = buffer.view %q_tile[%zero] : buffer -> view<{G}x32x{DL}xf32>
+    %lead_group = index.cmp eq, %vsub, %c0 : index
+    %vw_c = index.constant {VW} : index
+    %vdim = index.mul %vlane, %vw_c : index""")
+        for k in range(TS):
+            el = []
+            for e in range(VW):
+                L.append(f"""    %fe{k}_{e} = vector.extract %fa{k}[{e}] : {VA} -> f32
+    %fr{k}_{e}, %fu{k}_{e} = kernel.subgroup.shuffle<xor> %fe{k}_{e}, %fold_d, %fold_w : f32, i32, i32
+    %fs{k}_{e} = scalar.addf %fe{k}_{e}, %fr{k}_{e} : f32""")
+                el.append(f"%fs{k}_{e}")
+            L.append(f"""    %fv{k} = vector.from_elements {", ".join(el)} : {VA}
+    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+    scf.if %lead_group {{
+      vector.store %fv{k}, %acc_rows[%wave, %vdim] : {VA}, view<{G}x{D}xf32>
+    }}
+    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+    %fd{k} = vector.load %acc_out[%wave, %lane, %c0] : view<{G}x32x{DL}xf32> -> {V}""")
+    fa = {k: (f"%fd{k}" if KS > 1 else f"%fa{k}") for k in range(TS)}
     L.append(f"""    %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x{DL}xf32>
     %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>
     %first_lane = index.cmp eq, %lane, %c0 : index""")
     for k in range(TS):
         L.append(f"""    scf.if %active_{k} {{
-      vector.store %fa{k}, %acc_view[%tok{k}, %bounded_head, %split, %lane, %c0] : {V}, view<[%tokens]x{QH}x{S}x32x{DL}xf32>
+      vector.store {fa[k]}, %acc_view[%tok{k}, %bounded_head, %split, %lane, %c0] : {V}, view<[%tokens]x{QH}x{S}x32x{DL}xf32>
       scf.if %first_lane {{
         view.store %fm{k}, %ml_view[%tok{k}, %bounded_head, %split, 0] : f32, view<[%tokens]x{QH}x{S}x2xf32>
         view.store %fl{k}, %ml_view[%tok{k}, %bounded_head, %split, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
       }}
     }}""")
     L.append("  kernel.return\n}\n")
+    text = "\n".join(L)
+    # names without an op of their own: token 0 is always a member; a token's range is [start, stop)
+    text = re.sub(r"    %active_0 = scalar\.andi %member0, %in_split_0 : i1\n", "", text).replace("%active_0", "%in_split_0")
+    text = re.sub(r"%lo_(\d+)\b", r"%start_\1", text)
+    text = re.sub(r"%hi_(\d+)\b", r"%stop_\1", text)
+    text = text.replace("%lo_u", lo).replace("%hi_u", hi)
     return SEG_NEXT + SEG_LIST.replace("{TS}", str(TS)).replace("{SEG_MIN}", str(SEG_MIN)) + listed(
-        "\n".join(L), "g_attention_seg", f"""  %c1 = index.constant 1 : index
+        text, "g_attention_seg", f"""  %c1 = index.constant 1 : index
   %ckvh = index.constant {KVH} : index
   %cS = index.constant {S} : index
   %clanes = index.constant {G * 32} : index
