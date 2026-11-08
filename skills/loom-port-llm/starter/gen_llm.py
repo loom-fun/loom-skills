@@ -3006,7 +3006,7 @@ kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%token
   // Every other token: the listed fallback's (order does not matter, each is computed on its own).
   scf.for %t = [%lane to %tokens step %c256] {
     %token = index.assume %t [lt(%t, %tokens)] : index
-    %pos = view.load %info_view[%token, %c1] : view<[%tokens]x4xi32> -> i32
+    %pos = index.cast %token : index to i32
     %skew32 = scalar.andi %pos, %c15_i32 : i32
     %skew = index.cast %skew32 : i32 to index
     %has_start = index.cmp ule, %skew, %token : index

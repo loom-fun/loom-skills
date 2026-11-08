@@ -75,7 +75,7 @@ func.def inline @g_tile_starts(%info: buffer, %tokens: index, %token: index) -> 
   %false = scalar.constant false : i1
   %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
   %bounded = index.assume %token [range(%token, 0, 8191), lt(%token, %tokens)] : index
-  %pos = view.load %info_view[%bounded, %c1] : view<[%tokens]x4xi32> -> i32
+  %pos = index.cast %bounded : index to i32
   %skew = scalar.andi %pos, %c15_i32 : i32
   %aligned = scalar.cmpi eq, %skew, %c0_i32 : i32
   %starts = scf.if %aligned -> (i1) {
