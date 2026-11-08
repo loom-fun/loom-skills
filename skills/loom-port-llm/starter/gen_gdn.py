@@ -489,7 +489,10 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
     RL = _row_lanes(DK, DV)
     if RL:
         T[-1] = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close)
-    # ---- gated RMSNorm per value head: out = rmsnorm(o) * w * silu(z); padding tokens get zeros
+    # ---- gated RMSNorm per value head: out = rmsnorm(o) * w * silu(z); padding tokens get zeros. One wave per head,
+    # HPW heads per workgroup: 32-lane workgroups (tokens x HV of them) made this tiny kernel cost as much as the
+    # recurrence at prefill (Qwen3.5-35B-A3B, 1k tokens: 32k workgroups per layer).
+    HPW = max(h for h in (8, 4, 2, 1) if HV % h == 0)
     nl = "\n".join(f"""    %ni{m}c = index.constant {32 * m} : index
     %nd{m} = index.add %lane, %ni{m}c : index
     %nc{m}v = index.add %hbase, %nd{m} : index
@@ -509,16 +512,19 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
     T.append(f"""
 kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
   %c1 = index.constant 1 : index
-  %heads = index.constant {HV} : index
-  %c32 = index.constant 32 : index
-  kernel.launch.config workgroups(%tokens, %heads, %c1) workgroup_size(%c32, %c1, %c1) : index
+  %groups = index.constant {HV // HPW} : index
+  %lanes = index.constant {32 * HPW} : index
+  kernel.launch.config workgroups(%tokens, %groups, %c1) workgroup_size(%lanes, %c1, %c1) : index
 }} launch(%tokens_arg: index, %info: buffer, %raw: buffer, %weight: buffer, %z: buffer, %o: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %token_id = kernel.workgroup.id<x> : index
   %token = index.assume %token_id [lt(%token_id, %tokens)] : index
-  %head_id = kernel.workgroup.id<y> : index
+  %group_id = kernel.workgroup.id<y> : index
+  %wave_id = kernel.subgroup.id : index
+  %hpw = index.constant {HPW} : index
+  %head_id = index.madd %group_id, %hpw, %wave_id : index
   %vh = index.assume %head_id [range(%head_id, 0, {HV - 1})] : index
-  %lane_id = kernel.workitem.id<x> : index
+  %lane_id = kernel.subgroup.lane.id : index
   %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
   %zero = index.constant 0 : offset
   %c0_i32 = scalar.constant 0 : i32

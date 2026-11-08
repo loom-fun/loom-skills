@@ -373,7 +373,7 @@
  RD = cfg.get("rope_dims") or D
  qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
  kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
-@@ -1186,225 +1186,106 @@
+@@ -1186,249 +1186,106 @@
  if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (not WIN or not cfg.get("head_dim_swa")):
      flash_cases("g_attention_flash2", D, KVH, KVH * D, D ** -0.5, WIN)
  
@@ -672,6 +672,30 @@
 -  kernel.launch @g_row_scale_f16_tiles[%rows](%rows, %k, %x, %s, %h, %ti) : [index](index, index, tensor<128x{FE}xf32>, tensor<128x2xf32>, tensor<128x{FE}xf16>, tensor<2x2xi32>)
 -  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<128x2xf32>
 -  check.expect.close actual(%h) expected(%eh) atol(0.0) rtol(1.0e-3) nan(different) : tensor<128x{FE}xf16>
+-  check.return
+-}}
+-""")
+-    # g_moe_combine_sorted alone: padding tokens (every pos -1) and single dead assignments read no expert row
+-    t, cr = 37, 512
+-    c_pos = rng.permutation(cr)[:t * KU].astype(np.int32).reshape(t, KU); c_pos[[0, 9]] = -1; c_pos[12, KU - 1] = -1
+-    c_w, c_sg = rng.random((t, KU)).astype(np.float32), rng.random(t).astype(np.float32)
+-    c_ys, c_y0 = rng.standard_normal((cr, H)).astype(np.float32), rng.standard_normal((t, H)).astype(np.float32)
+-    c_e = (c_w[..., None] * np.where(c_pos[..., None] >= 0, c_ys[np.maximum(c_pos, 0)], 0.0)).sum(1)
+-    c_e += ((c_sg[:, None] if SHG else 1) * c_y0) if ACC else 0
+-    for n, a in (("pos", c_pos.reshape(-1)), ("w", c_w), ("sg", c_sg), ("ys", c_ys), ("y0", c_y0), ("e", c_e.astype(np.float32))):
+-        save("cs_" + n, a)
+-    YT = f"tensor<{t}x{H}xf32>"
+-    cases.append(f"""check.case public @moe_combine_sorted {{
+-  %t = check.literal value({t}) : index
+-  %rows = check.literal value({cr}) : index
+-  %pos = check.file.read.npy path("cs_pos.npy") : tensor<{t * KU}xi32>
+-  %wts = check.file.read.npy path("cs_w.npy") : tensor<{t}x{KU}xf32>
+-  %sg = check.file.read.npy path("cs_sg.npy") : tensor<{t}xf32>
+-  %ys = check.file.read.npy path("cs_ys.npy") : tensor<{cr}x{H}xf32>
+-  %e = check.file.read.npy path("cs_e.npy") : {YT}
+-  %y = {f'check.file.read.npy path("cs_y0.npy") : {YT}' if ACC else f"check.generate.fill value(3.0) : {YT}"}
+-  kernel.launch @g_moe_combine_sorted[%t](%t, %rows, %ys, %pos, %wts, {"%sg, " if SHG else ""}%y) : [index](index, index, tensor<{cr}x{H}xf32>, tensor<{t * KU}xi32>, tensor<{t}x{KU}xf32>, {f"tensor<{t}xf32>, " if SHG else ""}{YT})
+-  check.expect.close actual(%y) expected(%e) atol(1.0e-4) rtol(1.0e-4) nan(different) : {YT}
 -  check.return
 -}}
 -""")
