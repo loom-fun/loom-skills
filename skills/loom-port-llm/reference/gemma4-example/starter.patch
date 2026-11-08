@@ -1735,16 +1735,16 @@
    check.return
  }}
  """)
-@@ -1206,6 +1164,8 @@
-                      .replace(f"%ctx = check.literal value(1024)", f"%ctx = check.literal value({ctx_d})")
-                      .replace('"f_info.npy"', '"f_info_d.npy"').replace('"f_orig.npy"', '"f_orig_d.npy"').replace('"f_o.npy"', '"f_o_d.npy"')
-                      .replace("tensor<74xi32>", f"tensor<{len(orig_d)}xi32>"))
+@@ -1238,6 +1196,8 @@
+ }}
+ """ for name, kerns in (("both", ("g_attention_flash2", "g_attention_flash2_deep")), ("one", ("g_attention_flash2",)),
+                         ("deep", ("g_attention_flash2_deep",)))]
 +if os.environ.get("FLASH_TESTS", "1") == "1" and cfg["head_dim"] == 512 and DSWA != 512:   # global layers (gen_flash2s.py)
 +    flash_cases("g_attention_flash2_d512", 512, KVG, KVW, cfg.get("attn_scale") or 512 ** -0.5, 0, "_d512")
  
  # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
  # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
-@@ -1426,6 +1386,43 @@
+@@ -1482,6 +1442,43 @@
    check.return
  }}
  """)
