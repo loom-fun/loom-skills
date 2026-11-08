@@ -53,3 +53,18 @@ def iq_r(n, K, TG, sw=False):
             and os.environ.get("MV_Q8_R32", "1") == "1"):
         R = 32
     return R
+
+
+def flash2_deep_from(cfg):
+    """First key position at which gen_flash2.py's prefill attention runs two 16-token tiles per workgroup (pairs of
+    uniform tiles of one row) for G = 3 or 4 query heads per KV head at head_dim <= 128 (one tile by default there);
+    0 = never. Shared with make_kernel_tests.py (which tests both kernels the program launches). Each staged K/V tile
+    then serves twice the queries: deep prefill is bandwidth-bound on the KV cache (Qwen3-4B, G = 4, a 131k prompt:
+    2152 s with one tile, 530 s with two), while shallower tiles keep one (two lost 3-16 % at 1k-32k, G = 3 / 4).
+    FLASH2_TS_DEPTH overrides (0: off); FLASH2_TS forces one kernel."""
+    v = os.environ.get("FLASH2_TS_DEPTH")
+    if v:
+        return int(v)
+    G = cfg["heads"] // cfg["kv_heads"]
+    deep = cfg["head_dim"] <= 128 and G in (3, 4) and not cfg.get("attn_sinks") and not os.environ.get("FLASH2_TS")
+    return 32768 if deep else 0
