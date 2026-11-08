@@ -1607,7 +1607,6 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
             for i in range(3):
                 XT = f"tensor<{lens[i]}x{QD}xf32>"
                 text += f"""  %skip{k}_{i} = check.literal value({at[i]}) : index
-  %nx{i} = check.literal value({lens[i]}) : index
   %x{k}_{i} = check.generate.fill value(0.0) : {XT}
   kernel.launch @test_copy_rows[%nx{i}](%nx{i}, %wd, %skip{k}_{i}, %t{k}, %o{k}, %x{k}_{i}) : [index](index, index, index, index, {OT}, {XT})
 """
@@ -1619,6 +1618,9 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
   %ctx = check.literal value({ctx_a}) : index
   %pool = check.literal value({pool_a}) : index
   %wd = check.literal value({QD}) : index
+  %nx0 = check.literal value({lens[0]}) : index
+  %nx1 = check.literal value({lens[1]}) : index
+  %nx2 = check.literal value({lens[2]}) : index
   %orig = check.file.read.npy path("f_orig_a.npy") : {OA}
   %arena = check.file.read.npy path("f_arena_a.npy") : {AA}
 {text}  check.return
