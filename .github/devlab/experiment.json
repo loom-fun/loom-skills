@@ -6,37 +6,37 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "o122_main",
-   "card": "loom-fun/bartowski-Ornith-1.5-122B-loom",
-   "memory_bytes": 106000000000,
+   "name": "sp_base",
    "build": {},
    "steps": [
-    "consistency:20:llama"
+    "stagger:30"
    ]
   },
   {
-   "name": "o122_card",
-   "card": "loom-fun/bartowski-Ornith-1.5-122B-loom",
-   "memory_bytes": 106000000000,
-   "steps": [
-    "consistency:20:llama"
-   ]
-  },
-  {
-   "name": "coder_main",
-   "build": {},
-   "steps": [
-    "consistency:20:llama"
-   ]
-  },
-  {
-   "name": "coder_main_d0",
-   "build": {},
-   "execution": {
-    "draft_depth": 0
+   "name": "sp_nogemm",
+   "build": {
+    "NO_GEMM": "1"
    },
    "steps": [
-    "consistency:20:llama"
+    "stagger:30"
+   ]
+  },
+  {
+   "name": "sp_exact",
+   "build": {
+    "SPEC_EXACT": "1"
+   },
+   "steps": [
+    "stagger:30"
+   ]
+  },
+  {
+   "name": "sp_lin_moe",
+   "build": {
+    "DIAG": "lin,moe"
+   },
+   "steps": [
+    "stagger:30"
    ]
   }
  ]
