@@ -2,7 +2,9 @@
 """Roofline + target picker for a GGUF LLM on a Loom device.
 
 usage: roofline.py MODEL.gguf [--cfg cfg.json] [--baseline perf.json] [--out roofline.json]
-                   [--bw 216e9] [--flops 59e12] [--ctx 1000,2000,16000,32000]
+                   [--bw BYTES/S] [--flops FLOPS] [--ctx 1000,2000,16000,32000]
+Defaults for --bw / --flops come from the resolved device (device.py + devices.json); an
+unrecognized GPU falls back to gfx1151 and says so on stderr.
 
 Reads tensor sizes straight from the GGUF, plus (optionally) the port's cfg.json for
 geometry the GGUF does not spell out (sliding_layers, head_dim_swa, kv_layers for KV
@@ -22,7 +24,18 @@ from bench_common import perf_metrics  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "loom-port-llm", "starter"))
 from formats import split_parts  # noqa: E402
 
-# Demonstrated efficiencies on Strix Halo (fraction of the roofline actually reached by
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import device as _device  # noqa: E402
+
+# Every ceiling here belongs to one device, and the two AMD mobile parts are 3x apart in
+# bandwidth while sharing an ISA: assume the wrong one and every target you pick is
+# unreachable. The profile resolves from a sysfs PCI id (no ROCm install needed, since the
+# hrx-loom wheel bundles its own runtime), or from LOOM_GFX; devices.json records what each
+# constant is and how it was measured. --bw/--flops still override per run.
+PROFILE = _device.resolved_profile()
+DEVICE, BW, FLOPS = PROFILE["name"], PROFILE["bw"], PROFILE["flops"]
+
+# Demonstrated efficiencies (fraction of the roofline actually reached by
 # a tuned Loom port, end to end). Update these when a port beats them; cite the source.
 EFF = {
     "decode": 0.90,      # dense. Bolt-E4B 61.1 / 68.1 (reference/calibration.md)
@@ -48,9 +61,12 @@ STRETCH = {
     "c4_moe": 0.95,
 }
 # Fixed per-layer cost per decode step (launches, norms, small kernels, sync) that does
-# not shrink with model size. Best seen: Bolt-E4B 1.69 ms over 42 layers = 40 us.
-# It dominates small models (Qwen2.5-0.5B: 1.8 ms of weights, 24 layers).
-LAYER_US = 35
+# not shrink with model size. Measured per device (devices.json): a gfx1151 port reached
+# 35-40 us/layer (Bolt-E4B 1.69 ms over 42 layers); a gfx1150 measures 58 us/layer on a
+# dense model and about twice that on a gated-delta-net hybrid, whose recurrent layers
+# launch more per step. It dominates small models (Qwen2.5-0.5B: 1.8 ms of weights,
+# 24 layers; on gfx1150 the floor is a third of every step at short context).
+LAYER_US = PROFILE["layer_us"]
 GATHERED = re.compile(r"(^|\.)(token_embd|per_layer_token_embd)\.weight$")
 EXPERT = re.compile(r"_exps\.weight$")
 
@@ -158,12 +174,6 @@ def attn_flops_per_token(geo, P):
         avg = min(P / 2, geo["window"]) if (sl and geo["window"]) else P / 2
         tot += 2 * 2 * geo["heads"] * hd * avg
     return tot
-
-
-# Strix Halo (AMD Ryzen AI Max+ 395, gfx1151): the memory bandwidth a streaming kernel reaches (LPDDR5X-8000) and
-# the peak f16 WMMA rate. The CLI's --bw / --flops override them.
-DEVICE = 'AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151)'
-BW, FLOPS = 216e9, 59e12
 
 
 def shape_of(meta, tensors, cfg=None):
@@ -321,13 +331,14 @@ def main():
                weight_bytes_per_token=round(wb), head_bytes=head,
                bytes_by_kind={k: round(v) for k, v in detail.items()},
                matmul_params=round(params), efficiency_assumed=EFF, stretch_assumed=STRETCH,
-               bw=a.bw, flops=a.flops, draft_gain=round(gain, 3), metrics=rows,
+               bw=a.bw, flops=a.flops, device=DEVICE, draft_gain=round(gain, 3), metrics=rows,
                campaign=dict(budget_h=a.budget_h, reserve_min=a.reserve_min,
                              goals={g.split("=")[0]: float(g.split("=")[1]) for g in a.goal}))
     if a.out:
         json.dump(out, open(a.out, "w"), indent=1)
     print(f"weights read / decode token: {wb/1e9:.3f} GB  (head {head/1e9:.3f} GB)  "
           + "  ".join(f"{k} {v/1e9:.2f}" for k, v in detail.items()))
+    print(f"device: {DEVICE} ({PROFILE['detected_via']})")
     print(f"matmul params: {params/1e9:.2f} B    BW {a.bw/1e9:.0f} GB/s   peak {a.flops/1e12:.0f} TFLOP/s"
           + (f"   decode/c4 ceilings x{gain:.2f} (measured drafting gain, --draft-tune)" if gain > 1 else ""))
     hdr = (f"{'metric':16} {'ceiling':>9} {'llama.cpp':>9} {'eff':>5} "

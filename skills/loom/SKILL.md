@@ -142,8 +142,10 @@ Read it from there if it isn't in your skill list.
 ## Hard rules (learned the expensive way)
 
 - **Never load a model whose weights exceed the GPU's GTT/unified-memory budget.**
-  GPU memory is system RAM: keep one model's weights + KV pool within 60 % of RAM (~73 GiB on a
-  128 GB Strix Halo; build.py's default budget). Qwen3.8-Flash-Next
+  GPU memory is system RAM: keep one model's weights + KV pool within 60 % of RAM (build.py's
+  default budget, computed from *this* machine's /proc/meminfo: ~73 GiB on the 128 GB Strix
+  Halo these skills were developed on, ~37 GiB on a 61 GB Strix Point - which is also why a
+  30B model is a research project there and not a trial). Qwen3.8-Flash-Next
   (104 GiB) hard-crashed the machine during the original evaluation. Never retry it on a 128 GB box. Check
   `du -shL <weights>` against `cat /sys/class/drm/card*/device/mem_info_gtt_total`
   before serving anything big. The scripts load **one model at a time** (Loom is stopped while
@@ -192,15 +194,41 @@ Read it from there if it isn't in your skill list.
 - Golden references must be external (llama.cpp ROCm or the model's own reference
   implementation), never a numpy model you wrote yourself.
 
-## Facts about this hardware (Strix Halo, Ryzen AI Max+ 395)
+## Facts about this hardware
 
-- GPU gfx1151 (RDNA 3.5), wave32, WMMA f16→f32 (~59 TFLOP/s peak), ~216 GB/s
-  measured DRAM bandwidth, 32 MB MALL (last-level cache), ~61 GiB GTT.
+Run `python ${CLAUDE_SKILL_DIR}/../loom-roofline/device.py` before quoting a number about
+this machine: it prints the GPU the ceilings will be computed for, how it identified it, and
+the constants (streaming bandwidth, peak f16 WMMA rate, per-layer decode floor). Assuming
+another device's numbers is the most expensive mistake available here - every ceiling,
+target and time budget derives from them, and the two AMD mobile parts below are 3x apart in
+bandwidth while sharing an ISA (0x150e is one hex digit from 0x1586):
+
+| | Strix Halo (gfx1151) | Strix Point (gfx1150) |
+|---|---|---|
+| GPU | 40 CU, ~59 TFLOP/s f16 WMMA | 16 CU, ~23.6 TFLOP/s |
+| streaming bandwidth, measured | ~216 GB/s (LPDDR5X-8000) | ~70 GB/s (2x DDR5-5600) |
+| ridge point (derived) | 273 FLOP/byte | 492 FLOP/byte |
+| per-layer decode floor | 35 us/layer | 58 us/layer dense, ~126 gated-delta-net |
+| last-level cache | 32 MB MALL | 24 MB L3 |
+| RAM as tested | 128 GB | 61 GB |
+
+Both are RDNA 3.5, wave32, WMMA f16->f32, and the roofline's *shape* is the same on both:
+dense decode reaches 0.85-0.9 of the bandwidth ceiling and prefill 0.20-0.25 of peak, so the
+efficiencies in `loom-roofline/reference/calibration.md` transfer while the absolute numbers
+never do. What changes character is the ratio: bandwidth falls faster than compute, so work
+that was compute-bound on Halo is memory-bound here, and the per-layer launch floor is a
+third of a short-context decode step instead of a tenth - fusing launches and cutting bytes
+outrank kernel cleverness.
+
 - NPU: XDNA (`--device='xdna://0?columns=8' --pool_backing=fixed`). Only some
   catalog models (e.g. Qwen3-Embedding-0.6B) run there, and it needed an older
-  SDK wheel (see `loom-setup`).
-- `loom-benchmark` hardware counters are UNIMPLEMENTED on this GPU. Profile by
+  SDK wheel (see `loom-setup`). Verified on Strix Halo only.
+- `loom-benchmark` hardware counters are UNIMPLEMENTED on both GPUs. Profile by
   ablation (remove or double a kernel, measure end to end) instead.
+- A GPU the table does not list yet: measure it with
+  `${CLAUDE_SKILL_DIR}/../loom-roofline/calibrate_device.py` and add a row to
+  `loom-roofline/devices.json`. Until then the skills say they are assuming Strix Halo,
+  and every target they print is wrong by the ratio in the table above.
 
 ## Where things are documented upstream
 
