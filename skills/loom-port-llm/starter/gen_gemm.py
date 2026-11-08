@@ -279,16 +279,22 @@ def dequant16(fmt, w, view_name, out):
       %{out} = vector.fmaf %{out}_codes, %{out}_scales, %{out}_minima : vector<16xf16>'''
 
 
-def gemm(fmt, mode, fmt2=None):
-    """fmt2 (swiglu only): the up weight's format when it differs from the gate's (a Q4_K_M MoE quantizing expert
+def gemm(fmt, mode, fmt2=None, rt=64):
+    """rt: rows of the output tile, 64 (4 row waves x 2 column fragments each) or 32 (2 row waves x 1 column fragment of each
+    of 4 column waves: the grouped expert GEMMs' small tile, gen_moe.grouped_gemm). fmt2 (swiglu only): the up weight's format when it differs from the gate's (a Q4_K_M MoE quantizing expert
     gate and up differently, MiniCPM-V-4.7): its own block size, row stride and dequant. None: one format (unchanged)."""
     f = FMT[fmt]
     two_w = mode == "swiglu"
     fmt2 = fmt2 if two_w and fmt2 not in (None, fmt) else None
     name = f"{PREFIX}_gemm_{fmt}_{mode}" if fmt2 is None else f"{PREFIX}_gemm_{fmt}_{fmt2}_{mode}"
+    assert rt in (32, 64), rt
+    wide = rt == 64   # two column fragments per wave
+    C32_CFG = "" if wide else "  %c32 = index.constant 32 : index\n"
+    WAVE_OUT1 = "  %wave_out1 = index.add %bounded_wave_out, %c16 : index\n" if wide else ""
+    W_ROW1 = "  %w_row1 = index.add %w_row0, %c16 : index\n" if wide else ""
     assert fmt2 is None or FMT[fmt2]["block_values"] in (32, 256), fmt2   # %c32 / %c256 below
     wargs = "%w: buffer, %w2: buffer" if two_w else "%w: buffer"
-    accs = ["g0", "g1", "u0", "u1"] if two_w else ["a0", "a1"]
+    accs = (["g0", "g1", "u0", "u1"] if wide else ["g0", "u0"]) if two_w else (["a0", "a1"] if wide else ["a0"])
     stages = ["w_stage", "w2_stage"] if two_w else ["w_stage"]
     k_min = 256 if 256 in (FMT[fmt]["block_values"], FMT[fmt2 or fmt]["block_values"]) else 64
     lines = []
@@ -296,11 +302,11 @@ def gemm(fmt, mode, fmt2=None):
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
   %c256 = index.constant 256 : index
-  %row_tiles = index.div %rows, %c64 : index
+{C32_CFG}  %row_tiles = index.div %rows, %c{rt} : index
   %out_tiles = index.div %n, %c64 : index
   kernel.launch.config workgroups(%row_tiles, %out_tiles, %c1) workgroup_size(%c256, %c1, %c1) : index
 }} launch(%rows_arg: index, %k_arg: index, %n_arg: index, %x: buffer, %scales: buffer, {wargs}, %y: buffer) {{
-  %rows = index.assume %rows_arg [range(%rows_arg, 64, 8192), multiple_of(%rows_arg, 64)] : index
+  %rows = index.assume %rows_arg [range(%rows_arg, {rt}, 8192), multiple_of(%rows_arg, {rt})] : index
   %k = index.assume %k_arg [range(%k_arg, {k_min}, 65536), multiple_of(%k_arg, {k_min})] : index
   %n = index.assume %n_arg [range(%n_arg, 64, 262144), multiple_of(%n_arg, 64)] : index
   %origin = index.constant 0 : offset
@@ -318,7 +324,7 @@ def gemm(fmt, mode, fmt2=None):
   %c256 = index.constant 256 : index
   %nibble_mask = vector.constant 252645135 : vector<4xi32>
   %stage_bytes = index.constant 9216 : offset
-  %row_tile_count = index.div %rows, %c64 : index
+  %row_tile_count = index.div %rows, %c{rt} : index
   %out_tile_count = index.div %n, %c64 : index
   %row_group_id = kernel.workgroup.id<x> : index
   %out_group_id = kernel.workgroup.id<y> : index
@@ -330,13 +336,12 @@ def gemm(fmt, mode, fmt2=None):
   %lane = kernel.subgroup.lane.id : index
   %lane_row = index.rem %lane, %c16 : index
   %bounded_subgroup = index.assume %subgroup [range(%subgroup, 0, 7)] : index
-  %wave_row_group = index.div %bounded_subgroup, %c2 : index
-  %wave_out_group = index.rem %bounded_subgroup, %c2 : index
+  %wave_row_group = index.div %bounded_subgroup, %c{2 if wide else 4} : index
+  %wave_out_group = index.rem %bounded_subgroup, %c{2 if wide else 4} : index
   %wave_row = index.mul %wave_row_group, %c16 : index
-  %wave_out = index.mul %wave_out_group, %c32 : index
+  %wave_out = index.mul %wave_out_group, %c{32 if wide else 16} : index
   %w_row0 = index.add %wave_out, %lane_row : index
-  %w_row1 = index.add %w_row0, %c16 : index
-  %row_origin = index.mul %row_group, %c64 : index
+{W_ROW1}  %row_origin = index.mul %row_group, %c{rt} : index
   %out_origin = index.mul %out_group, %c64 : index
   %result_row = index.add %row_origin, %wave_row : index
   %result_col0 = index.add %out_origin, %wave_out : index
@@ -344,26 +349,32 @@ def gemm(fmt, mode, fmt2=None):
   %blocks = index.div %k, %c{f["block_values"]} : index
   %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset{{MIXED_ROW}}
   %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>
-  // 64x64 output tile with the full row stride n.
+  // {rt}x64 output tile with the full row stride n.
   %y_layout = encoding.layout.strided [%n, %c1] : encoding<layout>
   %tile_first = index.madd %row_origin, %n, %out_origin : index
   %four = index.constant 4 : offset
   %tile_offset = index.scale %tile_first, %four : index, offset -> offset
-  %y_view = buffer.view %y[%tile_offset] : buffer -> view<64x64xf32, %y_layout>
-  %bounded_wave_row = index.assume %wave_row [range(%wave_row, 0, 48)] : index
-  %bounded_wave_out = index.assume %wave_out [range(%wave_out, 0, 32)] : index
-  %wave_out1 = index.add %bounded_wave_out, %c16 : index
-  %x_stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
-  %x_stage_view = buffer.view %x_stage[%origin] : buffer -> view<64x72xf16>''')
+  %y_view = buffer.view %y[%tile_offset] : buffer -> view<{rt}x64xf32, %y_layout>
+  %bounded_wave_row = index.assume %wave_row [range(%wave_row, 0, {rt - 16})] : index
+  %bounded_wave_out = index.assume %wave_out [range(%wave_out, 0, {32 if wide else 48})] : index
+{WAVE_OUT1}  %x_stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+  %x_stage_view = buffer.view %x_stage[%origin] : buffer -> view<{rt}x72xf16>''')
     for st in stages:
         lines.append(f'''  %{st} = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
   %{st}_view = buffer.view %{st}[%origin] : buffer -> view<64x72xf16>''')
+    # The A tile's rows are staged by thread t/4; a 32-row tile by threads 0-127 only (the others load the same rows
+    # again and do not store). The weight tile is always 64 rows.
     lines.append('''  // Thread t stages 16 values: row t/4, columns (t%4)*16.
   %stage_row = index.div %workitem, %c4 : index
   %stage_quarter = index.rem %workitem, %c4 : index
   %stage_col = index.mul %stage_quarter, %c16 : index
-  %x_row = index.add %row_origin, %stage_row : index
-  %bounded_x_row = index.assume %x_row [lt(%x_row, %rows)] : index
+''' + ('''  %x_row = index.add %row_origin, %stage_row : index
+''' if wide else '''  %xs_row_v = index.rem %stage_row, %c32 : index
+  %xs_row = index.assume %xs_row_v [lt(%xs_row_v, %c32)] : index
+  %c128 = index.constant 128 : index
+  %x_stager = index.cmp ult, %workitem, %c128 : index
+  %x_row = index.add %row_origin, %xs_row : index
+''') + '''  %bounded_x_row = index.assume %x_row [lt(%x_row, %rows)] : index
   %w_out_row = index.add %out_origin, %stage_row : index
   %bounded_w_out_row = index.assume %w_out_row [lt(%w_out_row, %n)] : index
   %w_row_origin = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset{MIXED_ORIGIN}
@@ -375,11 +386,13 @@ def gemm(fmt, mode, fmt2=None):
   %x_scales = vector.splat %x_scale : vector<16xf32>''')
     acc_args = ", ".join(f"%{a}_acc = %init : vector<8xf32>" for a in accs)
     acc_types = ", ".join("vector<8xf32>" for _ in accs)
+    x_store = ("    vector.store %x_half, %x_stage_view[%stage_row, %stage_col] : vector<16xf16>, view<64x72xf16>" if wide else
+               "    scf.if %x_stager {\n      vector.store %x_half, %x_stage_view[%xs_row, %stage_col] : vector<16xf16>, view<32x72xf16>\n    }")
     lines.append(f'''  {", ".join("%" + a + "_raw" for a in accs)} = scf.for %step = [%c0 to %k_steps step %c1]({acc_args}) -> ({acc_types}) {{
     %k_origin = index.mul %step, %c64 : index
     %x_col = index.add %k_origin, %stage_col : index
     %x_half = vector.load %x_view[%bounded_x_row, %x_col] : view<[%rows]x[%k]xf16> -> vector<16xf16>
-    vector.store %x_half, %x_stage_view[%stage_row, %stage_col] : vector<16xf16>, view<64x72xf16>
+{x_store}
     %w_col = index.add %k_origin, %stage_col : index''')
     for i, (st, w) in enumerate(zip(stages, ["w", "w2"])):
         if i and fmt2:   # the up weight in its own format: its block size and row origin
@@ -392,10 +405,10 @@ def gemm(fmt, mode, fmt2=None):
     for kk in range(4):
         col = kk * 16
         lines.append(f'''    %fc{kk} = index.constant {col} : index
-    %lhs{kk} = vector.fragment.load<lhs> %x_stage_view[%wave_row, %fc{kk}] shape [%c16, %c16] : view<64x72xf16> -> vector<16xf16>''')
+    %lhs{kk} = vector.fragment.load<lhs> %x_stage_view[%wave_row, %fc{kk}] shape [%c16, %c16] : view<{rt}x72xf16> -> vector<16xf16>''')
         for si, st in enumerate(stages):
             pre = "g" if (two_w and si == 0) else ("u" if two_w else "a")
-            for r in range(2):
+            for r in range(2 if wide else 1):
                 wr = f"%w_row{r}"
                 lines.append(f'''    %rv{si}{r}{kk} = vector.load %{st}_view[{wr}, %fc{kk}] : view<64x72xf16> -> vector<16xf16>
     %rhs{si}{r}{kk} = vector.fragment<rhs> %rv{si}{r}{kk} shape [%c16, %c16] : vector<16xf16>
@@ -405,38 +418,35 @@ def gemm(fmt, mode, fmt2=None):
     lines.append(f"    scf.yield {', '.join(cur[a] for a in accs)} : {acc_types}\n  }}")
     lines.append('''  %inv_bytes = index.constant 4096 : offset
   %inv_tile = buffer.alloca<workgroup> align(16) %inv_bytes : buffer
-  %inv_view = buffer.view %inv_tile[%origin] : buffer -> view<64x16xf32>
-  %writer = index.cmp ult, %workitem, %c64 : index
+  %inv_view = buffer.view %inv_tile[%origin] : buffer -> view<RTx16xf32>
+  %writer = index.cmp ult, %workitem, %cRT : index
   scf.if %writer {
     %inv_row_value = index.add %row_origin, %workitem : index
     %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index
     %inverse = view.load %s_view[%inv_row, %c1] : view<[%rows]x2xf32> -> f32
     %inverse16 = vector.splat %inverse : vector<16xf32>
-    %bw = index.assume %workitem [range(%workitem, 0, 63)] : index
-    vector.store %inverse16, %inv_view[%bw, %c0] : vector<16xf32>, view<64x16xf32>
+    %bw = index.assume %workitem [range(%workitem, 0, RTM1)] : index
+    vector.store %inverse16, %inv_view[%bw, %c0] : vector<16xf32>, view<RTx16xf32>
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %inv_frag = vector.fragment.load<result> %inv_view[%wave_row, %c0] shape [%c16, %c16] : view<64x16xf32> -> vector<8xf32>''')
+  %inv_frag = vector.fragment.load<result> %inv_view[%wave_row, %c0] shape [%c16, %c16] : view<RTx16xf32> -> vector<8xf32>'''.replace("RTM1", str(rt - 1)).replace("RT", str(rt)))
     raw = {a: a + "_raw" for a in accs}
     for a in accs:
         lines.append(f"  %{a} = vector.mulf %{a}_raw, %inv_frag : vector<8xf32>")
+    Y = f"view<{rt}x64xf32, %y_layout>"
+    cols = [("%bounded_wave_out", "0")] + ([("%wave_out1", "1")] if wide else [])   # (column index, accumulator suffix)
+    def store(v, c):
+        return f"  vector.fragment.store<result> {v}, %y_view[%bounded_wave_row, {c}] shape [%c16, %c16] : vector<8xf32>, {Y}"
     if mode == "store":
-        lines.append('''  vector.fragment.store<result> %a0, %y_view[%bounded_wave_row, %bounded_wave_out] shape [%c16, %c16] : vector<8xf32>, view<64x64xf32, %y_layout>
-  vector.fragment.store<result> %a1, %y_view[%bounded_wave_row, %wave_out1] shape [%c16, %c16] : vector<8xf32>, view<64x64xf32, %y_layout>''')
+        lines += [store(f"%a{k}", c) for c, k in cols]
     elif mode == "acc":
-        lines.append('''  %old0 = vector.fragment.load<result> %y_view[%bounded_wave_row, %bounded_wave_out] shape [%c16, %c16] : view<64x64xf32, %y_layout> -> vector<8xf32>
-  %old1 = vector.fragment.load<result> %y_view[%bounded_wave_row, %wave_out1] shape [%c16, %c16] : view<64x64xf32, %y_layout> -> vector<8xf32>
-  %sum0 = vector.addf %old0, %a0 : vector<8xf32>
-  %sum1 = vector.addf %old1, %a1 : vector<8xf32>
-  vector.fragment.store<result> %sum0, %y_view[%bounded_wave_row, %bounded_wave_out] shape [%c16, %c16] : vector<8xf32>, view<64x64xf32, %y_layout>
-  vector.fragment.store<result> %sum1, %y_view[%bounded_wave_row, %wave_out1] shape [%c16, %c16] : vector<8xf32>, view<64x64xf32, %y_layout>''')
+        lines += [f"  %old{k} = vector.fragment.load<result> %y_view[%bounded_wave_row, {c}] shape [%c16, %c16] : {Y} -> vector<8xf32>" for c, k in cols]
+        lines += [f"  %sum{k} = vector.addf %old{k}, %a{k} : vector<8xf32>" for c, k in cols]
+        lines += [store(f"%sum{k}", c) for c, k in cols]
     else:
-        lines.append('''  %sg0 = vector.siluf<afn> %g0 : vector<8xf32>
-  %sg1 = vector.siluf<afn> %g1 : vector<8xf32>
-  %act0 = vector.mulf %sg0, %u0 : vector<8xf32>
-  %act1 = vector.mulf %sg1, %u1 : vector<8xf32>
-  vector.fragment.store<result> %act0, %y_view[%bounded_wave_row, %bounded_wave_out] shape [%c16, %c16] : vector<8xf32>, view<64x64xf32, %y_layout>
-  vector.fragment.store<result> %act1, %y_view[%bounded_wave_row, %wave_out1] shape [%c16, %c16] : vector<8xf32>, view<64x64xf32, %y_layout>''')
+        lines += [f"  %sg{k} = vector.siluf<afn> %g{k} : vector<8xf32>" for c, k in cols]
+        lines += [f"  %act{k} = vector.mulf %sg{k}, %u{k} : vector<8xf32>" for c, k in cols]
+        lines += [store(f"%act{k}", c) for c, k in cols]
     lines.append("  kernel.return\n}\n")
     text = "\n".join(lines)
     if fmt2:

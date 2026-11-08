@@ -3,7 +3,7 @@ Qwen3.5 MoE; gating 2: sigmoid with an optional selection bias, flint / LFM2-MoE
 the top-k of the logits plus the router's own bias, weighted by a softmax over the k picked logits, gpt-oss), top-k weights
 (normalized or not),
 per-assignment expert matvecs (assignment a = token * KU + slot), weighted combine, and the prefill path (tokens
-bucketed by expert into 64-row tiles, grouped WMMA GEMMs). Shared experts are the starter's dense FFN (gen_llm.py);
+bucketed by expert into 64-row tiles (32-row ones when the experts see few rows each: TILE32_AVG), grouped WMMA GEMMs). Shared experts are the starter's dense FFN (gen_llm.py);
 a Qwen-style shared-expert gate (sigmoid(h . w) per token) scales them inside the combine.
 
 g_moe_route        h[t] -> ids[t, KU] (i32), wts[t, KU] (f32)   (g_moe_route_tr: the same for prefill epochs)
@@ -16,6 +16,18 @@ import os
 import re
 FMT = {"q4_k": 144, "q5_k": 176, "q6_k": 210, "q8_0": 34, "q5_0": 22, "mxfp4": 17}
 ROUTE_TR = int(__import__("os").environ.get("ROUTE_TR", "0"))   # router tokens per workgroup (0: largest of 1/2/4/8 whose LDS fits 48 KiB)
+TILE = 64          # rows of a bucketed expert tile
+TILE_SMALL = 32    # the small tile: waves of 16 rows x 16 columns (gen_gemm.gemm rt=32) instead of 16 x 32
+# The small tile is used when a prefill epoch's tokens x top-k / experts (the rows an expert gets on average) is below
+# TILE32_AVG (0: never): an expert holding up to 32 rows fills one 32-row tile where a 64-row tile has half its waves idle.
+TILE32_AVG = int(os.environ.get("MOE_TILE32_AVG", str(TILE_SMALL)))
+
+
+def sfx(tile):
+    """Kernel name suffix of a tile size (the 64-row kernels keep their names)."""
+    return "" if tile == TILE else f"_t{tile}"
+
+
 SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "q5_0": 32, "mxfp4": 32}
 GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)", 3: "logit"}   # llama.cpp's expert_gating_func values
 # gating 3 (SOFTMAX_WEIGHT): `bias` is the router's own bias (ffn_gate_inp.bias, added to the logits before the top-k)
@@ -489,8 +501,8 @@ def route_prefill_live(H, E, KU, gating, norm, bias, wty="f32"):
     return "\n" + text
 
 
-def row_scale_tiles(row_scale):
-    """g_row_scale_f16_tiles: the starter's g_row_scale_f16 over the bucketed expert rows (max_tiles x 64), skipping
+def row_scale_tiles(row_scale, tile=TILE):
+    """g_row_scale_f16_tiles: the starter's g_row_scale_f16 over the bucketed expert rows (max_tiles x tile rows), skipping
     the rows of unused tiles (tile_info expert < 0; g_moe_gdn skips those tiles). max_tiles is sized for the worst
     case (t*KU/64 + E tiles), so most of them are unused."""
     text = row_scale[row_scale.index('kernel.def export("g_row_scale_f16")'):]
@@ -498,11 +510,11 @@ def row_scale_tiles(row_scale):
         nonlocal text
         assert text.count(a) == 1, a
         text = text.replace(a, b)
-    rep('export("g_row_scale_f16") @g_row_scale_f16(', 'export("g_row_scale_f16_tiles") @g_row_scale_f16_tiles(')
+    rep('export("g_row_scale_f16") @g_row_scale_f16(', f'export("g_row_scale_f16_tiles{sfx(tile)}") @g_row_scale_f16_tiles{sfx(tile)}(')
     rep("%scales: buffer, %x16: buffer) {", "%scales: buffer, %x16: buffer, %tile_info: buffer) {")
     rep("  %row = index.assume %row_id [lt(%row_id, %rows)] : index\n", f"""  %row = index.assume %row_id [lt(%row_id, %rows)] : index
   %rt_zero = index.constant 0 : offset
-  %rt_c64 = index.constant {TILE} : index
+  %rt_c64 = index.constant {tile} : index
   %rt_tiles = index.div %rows, %rt_c64 : index
   %rt_tile_v = index.div %row, %rt_c64 : index
   %rt_tile = index.assume %rt_tile_v [lt(%rt_tile_v, %rt_tiles)] : index
@@ -797,14 +809,11 @@ kernel.def export("g_moe_shared_gate") @g_moe_shared_gate(%tokens: index) {{
 
 
 # ---------------------------------------------------------------- prefill: grouped expert GEMMs
-TILE = 64
-
-
-def bucket(E, KU):
-    """Assignments a = t*KU + k bucketed by expert into 64-row tiles (flint_moe_bucket pattern)."""
-    assert E <= 256
+def bucket(E, KU, tile=TILE):
+    """Assignments a = t*KU + k bucketed by expert into tile-row tiles (flint_moe_bucket pattern)."""
+    assert E <= 256 and tile in (TILE, TILE_SMALL)
     return f"""
-kernel.def export("g_moe_bucket") @g_moe_bucket(%tokens: index) {{
+kernel.def export("g_moe_bucket{sfx(tile)}") @g_moe_bucket{sfx(tile)}(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
@@ -817,12 +826,12 @@ kernel.def export("g_moe_bucket") @g_moe_bucket(%tokens: index) {{
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %cKU = index.constant {KU} : index
-  %cT = index.constant {TILE} : index
+  %cT = index.constant {tile} : index
   %c256 = index.constant 256 : index
   %c0_i32 = scalar.constant 0 : i32
   %c1_i32 = scalar.constant 1 : i32
-  %cshift = scalar.constant 6 : i32
-  %cTm1 = scalar.constant {TILE - 1} : i32
+  %cshift = scalar.constant {tile.bit_length() - 1} : i32
+  %cTm1 = scalar.constant {tile - 1} : i32
   %minus_one = scalar.constant -1 : i32
   %cEm1 = scalar.constant {E - 1} : i32
   %cE = index.constant {E} : index
@@ -929,9 +938,11 @@ kernel.def export("g_moe_bucket") @g_moe_bucket(%tokens: index) {{
 """
 
 
-def _gemm_bias_act(text, mode, N, E, bias, act):
+def _gemm_bias_act(text, mode, N, E, bias, act, tile=TILE):
     """grouped_gemm's epilogue with per-expert output biases ([E, N] f32, staged as 16 equal rows so a result
-    fragment load gives each lane its columns' bias) and the expert activation (act_vector)."""
+    fragment load gives each lane its columns' bias) and the expert activation (act_vector). The 32-row tile's waves hold
+    one column fragment (k = 0), the 64-row tile's two."""
+    ks = [0, 1] if tile == TILE else [0]
     names = (["bg", "bu"] if mode == "swiglu" else ["bd"]) if bias else []
     if names:
         text = _rep1(text, "%w2: buffer, %y: buffer) {" if mode == "swiglu" else "%w: buffer, %y: buffer) {",
@@ -952,32 +963,23 @@ def _gemm_bias_act(text, mode, N, E, bias, act):
   %{n}_r{q} = index.assume %{n}_r{q}v [range(%{n}_r{q}v, 0, 15)] : index
   view.store %{n}_val, %{n}_tv[%{n}_r{q}, %bst_c] : f32, view<16x64xf32>
 """ for q in range(4)))
-            loads.append(f"""  %{n}_f0 = vector.fragment.load<result> %{n}_tv[%c0, %bounded_wave_out] shape [%c16, %c16] : view<16x64xf32> -> vector<8xf32>
-  %{n}_f1 = vector.fragment.load<result> %{n}_tv[%c0, %wave_out1] shape [%c16, %c16] : view<16x64xf32> -> vector<8xf32>
-""")
+            loads.append("".join(f"""  %{n}_f{k} = vector.fragment.load<result> %{n}_tv[%c0, {("%bounded_wave_out", "%wave_out1")[k]}] shape [%c16, %c16] : view<16x64xf32> -> vector<8xf32>
+""" for k in ks))
         text = _rep1(text, "  %inv_bytes = index.constant 4096 : offset\n", "".join(stage) + "  %inv_bytes = index.constant 4096 : offset\n")
-        anchor = "  %inv_frag = vector.fragment.load<result> %inv_view[%wave_row, %c0] shape [%c16, %c16] : view<64x16xf32> -> vector<8xf32>\n"
+        anchor = f"  %inv_frag = vector.fragment.load<result> %inv_view[%wave_row, %c0] shape [%c16, %c16] : view<{tile}x16xf32> -> vector<8xf32>\n"
         text = _rep1(text, anchor, anchor + "".join(loads))
     if mode == "swiglu":
-        g0, g1, u0, u1 = "%g0", "%g1", "%u0", "%u1"
-        pre = ""
-        if bias:
-            pre = """  %g0b = vector.addf %g0, %bg_f0 : vector<8xf32>
-  %g1b = vector.addf %g1, %bg_f1 : vector<8xf32>
-  %u0b = vector.addf %u0, %bu_f0 : vector<8xf32>
-  %u1b = vector.addf %u1, %bu_f1 : vector<8xf32>
-"""
-            g0, g1, u0, u1 = "%g0b", "%g1b", "%u0b", "%u1b"
-        text = _rep1(text, """  %sg0 = vector.siluf<afn> %g0 : vector<8xf32>
-  %sg1 = vector.siluf<afn> %g1 : vector<8xf32>
-  %act0 = vector.mulf %sg0, %u0 : vector<8xf32>
-  %act1 = vector.mulf %sg1, %u1 : vector<8xf32>
-""", pre + act_vector(act, g0, u0, "act0", "oa0_") + "\n" + act_vector(act, g1, u1, "act1", "oa1_") + "\n")
+        b = "b" if bias else ""   # the biased accumulators %g0b ...
+        pre = ("".join(f"  %g{k}b = vector.addf %g{k}, %bg_f{k} : vector<8xf32>\n" for k in ks) +
+               "".join(f"  %u{k}b = vector.addf %u{k}, %bu_f{k} : vector<8xf32>\n" for k in ks)) if bias else ""
+        text = _rep1(text, "".join(f"  %sg{k} = vector.siluf<afn> %g{k} : vector<8xf32>\n" for k in ks) +
+                     "".join(f"  %act{k} = vector.mulf %sg{k}, %u{k} : vector<8xf32>\n" for k in ks),
+                     pre + "\n".join(act_vector(act, f"%g{k}{b}", f"%u{k}{b}", f"act{k}", f"oa{k}_") for k in ks) + "\n")
     elif bias:
-        text = _rep1(text, "  vector.fragment.store<result> %a0, %y_view", """  %a0b = vector.addf %a0, %bd_f0 : vector<8xf32>
-  %a1b = vector.addf %a1, %bd_f1 : vector<8xf32>
-  vector.fragment.store<result> %a0b, %y_view""")
-        text = _rep1(text, "  vector.fragment.store<result> %a1, %y_view", "  vector.fragment.store<result> %a1b, %y_view")
+        text = _rep1(text, "  vector.fragment.store<result> %a0, %y_view", "".join(f"  %a{k}b = vector.addf %a{k}, %bd_f{k} : vector<8xf32>\n" for k in ks) +
+                     "  vector.fragment.store<result> %a0b, %y_view")
+        for k in ks[1:]:
+            text = _rep1(text, f"  vector.fragment.store<result> %a{k}, %y_view", f"  vector.fragment.store<result> %a{k}b, %y_view")
     return text
 
 
@@ -1019,7 +1021,7 @@ kernel.def export("g_moe_wscale") @g_moe_wscale(%tokens: index) {{
 """
 
 
-def _skip_empty_waves(text):
+def _skip_empty_waves(text, tile=TILE):
     """A wave whose 16 rows of the row tile hold no assignment skips its fragment loads and MMAs (it still stages
     and meets every barrier). bucket fills a tile's rows from the top, so a tile of r rows keeps ceil(r/16) of its 4
     row waves busy. With many experts and a short prompt most tiles are partly empty (256 experts, top-8, 1k
@@ -1032,10 +1034,10 @@ def _skip_empty_waves(text):
     olds = ", ".join(a.split(" = ")[0] for a in accs.split(", "))
     news = ", ".join(f"%live_{o[1:]}" for o in outs.split(", "))
     live = """  %wave_rows32 = view.load %ti_view[%row_group, 1] : view<[%row_tile_count]x2xi32> -> i32
-  %wave_rows_b = scalar.assume %wave_rows32 [range(%wave_rows32, 0, 64)] : i32
+  %wave_rows_b = scalar.assume %wave_rows32 [range(%wave_rows32, 0, TILE_ROWS)] : i32
   %wave_rows = index.cast %wave_rows_b : i32 to index
   %wave_live = index.cmp ult, %wave_row, %wave_rows : index
-"""
+""".replace("TILE_ROWS", str(tile))
     bar = "    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)\n"
     new = (f"\n{bar}    {news} = scf.if %wave_live -> ({types}) {{\n" + "\n".join("  " + ln for ln in body.split("\n")) +
            f"\n      scf.yield {outs} : {types}\n    }} else {{\n      scf.yield {olds} : {types}\n    }}\n"
@@ -1097,8 +1099,9 @@ def _prefetch_stages(text):
     return "\n".join(lines[:head] + pre + [hdr] + kept + [lines[bar]] + nxt + lines[bar + 1:end] + [yld] + lines[end + 1:])
 
 
-def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=None):
-    """64x64-tile WMMA GEMM over the bucketed rows of one expert per row tile (rows = max_tiles*64).
+def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=None, tile=TILE):
+    """tile x 64 WMMA GEMM (tile 64, or 32 for the small tile: gen_gemm.gemm rt) over the bucketed rows of one expert per row
+    tile (rows = max_tiles*tile).
     mode 'swiglu' (gate/up): A rows gathered from x16[token = rowmap/KU]; 'store' (down): A = sorted rows.
     fmt "GATE+UP" (swiglu): gate and up weights in different formats (gen_gemm.gemm's fmt2).
     fused (swiglu): one gate_up tensor as both weights (expert_mv's layout).
@@ -1107,9 +1110,11 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
     fmt, _, fmt2 = fmt.partition("+")
     rb = N and (K // SB[fmt] * FMT[fmt])
     eb = rb * N
-    text = gemm_fn(fmt, mode, fmt2) if fmt2 else gemm_fn(fmt, mode)
+    assert tile in (TILE, TILE_SMALL)
+    kw = {} if tile == TILE else {"rt": tile}   # the 64-row kernels as gemm_fn (also an example's own) makes them
+    text = gemm_fn(fmt, mode, fmt2, **kw) if fmt2 else gemm_fn(fmt, mode, **kw)
     base = f"g_gemm_{fmt}_{fmt2}_{mode}" if fmt2 else f"g_gemm_{fmt}_{mode}"
-    name = f"g_moe_g{'gu' if mode == 'swiglu' else 'dn'}_{fmt}{'_' + fmt2 if fmt2 else ''}{'_fused' if fused else ''}_k{K}"
+    name = f"g_moe_g{'gu' if mode == 'swiglu' else 'dn'}_{fmt}{'_' + fmt2 if fmt2 else ''}{'_fused' if fused else ''}_k{K}{sfx(tile)}"
     def rep(a, b, cnt=1):
         nonlocal text
         assert text.count(a) == cnt, (name, a, text.count(a))
@@ -1119,8 +1124,8 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
         "launch(%rows_arg: index, %k_arg: index, %n_arg: index, %xrows_arg: index, %tile_info: buffer, %rowmap: buffer, %x: buffer, %scales: buffer,")
     # rows = max_tiles * 64 <= 8192 tokens * KU + 64 * E; n is this kernel's N. Tight bounds keep the output tile's
     # dynamic-stride extent (rows * n * 4 bytes) inside what the AMDGPU fragment store accepts (rows 2^20 x n 2^18 failed).
-    max_rows = 8192 * KU + TILE * E
-    rep("[range(%rows_arg, 64, 8192), multiple_of(%rows_arg, 64)]", f"[range(%rows_arg, 64, {max_rows}), multiple_of(%rows_arg, 64)]")
+    max_rows = 8192 * KU + tile * E
+    rep(f"[range(%rows_arg, {tile}, 8192), multiple_of(%rows_arg, {tile})]", f"[range(%rows_arg, {tile}, {max_rows}), multiple_of(%rows_arg, {tile})]")
     rep("[range(%n_arg, 64, 262144), multiple_of(%n_arg, 64)]", f"[range(%n_arg, 64, {N}), multiple_of(%n_arg, 64)]")
     rep("  %origin = index.constant 0 : offset\n", "  %origin = index.constant 0 : offset\n  %xrows = index.assume %xrows_arg [range(%xrows_arg, 1, 1048576)] : index\n")
     # skip tiles of no expert; expert weight offset
@@ -1157,7 +1162,7 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
     rep("view<[%rows]x2xf32>", "view<[%xrows]x2xf32>", text.count("view<[%rows]x2xf32>"))
     if mode == "swiglu":
         gather = lambda pre, row_expr, out: f"""  %{pre}_prow_v = {row_expr}
-  %{pre}_rm_rows = index.mul %row_tile_count, %c64 : index
+  %{pre}_rm_rows = index.mul %row_tile_count, %c{tile} : index
   %{pre}_prow = index.assume %{pre}_prow_v [lt(%{pre}_prow_v, %{pre}_rm_rows)] : index
   %{pre}_rm_view = buffer.view %rowmap[%origin] : buffer -> view<[%{pre}_rm_rows]xi32>
   %{pre}_a32 = view.load %{pre}_rm_view[%{pre}_prow] : view<[%{pre}_rm_rows]xi32> -> i32
@@ -1169,8 +1174,9 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
   %{pre}_t = index.div %{pre}_a, %{pre}_cKU : index
   %{out} = index.assume %{pre}_t [lt(%{pre}_t, %xrows)] : index
 """
-        rep("  %x_row = index.add %row_origin, %stage_row : index\n  %bounded_x_row = index.assume %x_row [lt(%x_row, %rows)] : index\n",
-            gather("gx", "index.add %row_origin, %stage_row : index", "bounded_x_row"))
+        xs = "%stage_row" if tile == TILE else "%xs_row"   # the row of the A tile this thread stages
+        rep(f"  %x_row = index.add %row_origin, {xs} : index\n  %bounded_x_row = index.assume %x_row [lt(%x_row, %rows)] : index\n",
+            gather("gx", f"index.add %row_origin, {xs} : index", "bounded_x_row"))
         rep("    %x_half = vector.load %x_view[%bounded_x_row, %x_col] : view<[%xrows]x[%k]xf16> -> vector<16xf16>\n",
             """    %x_half_raw = vector.load %x_view[%bounded_x_row, %x_col] : view<[%xrows]x[%k]xf16> -> vector<16xf16>
     %zero16h = vector.constant 0.0 : vector<16xf16>
@@ -1183,7 +1189,7 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
         rep("    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index", "    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %xrows)] : index")
     rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
     if os.environ.get("MOE_SKIP_EMPTY", "1") not in ("", "0"):
-        text = _skip_empty_waves(text)
+        text = _skip_empty_waves(text, tile)
     if os.environ.get("MOE_PREFETCH", "1") not in ("", "0"):
         text = _prefetch_stages(text)
     if mode in os.environ.get("MOE_N_FASTEST", "swiglu,store").split(","):
@@ -1194,7 +1200,7 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
         rep("  %row_group_id = kernel.workgroup.id<x> : index\n  %out_group_id = kernel.workgroup.id<y> : index",
             "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
     if bias or (act and act != "silu"):
-        text = _gemm_bias_act(text, mode, N, E, bias, act)
+        text = _gemm_bias_act(text, mode, N, E, bias, act, tile)
     return text
 
 

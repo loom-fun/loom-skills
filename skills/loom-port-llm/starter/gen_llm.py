@@ -3749,6 +3749,7 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
     when the layer has shared experts, scaled by the shared gate with SHGATE). cfg.moe gate_up_fused: one
     ffn_gate_up_exps tensor (each expert's gate rows, then its up rows); down_scale: ffn_down_exps.scale, a
     per-expert output scale folded into the combine weights (g_moe_wscale)."""
+    import gen_moe as GM
     E, KU, FE = MOE["experts"], MOE["used"], MOE["ffn"]
     assert MOE.get("scale", 1.0) == 1.0, "expert_weights_scale != 1: scale the combine weights"
     fused = MOE.get("gate_up_fused")
@@ -3775,6 +3776,22 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
     gu_b, gu_bt = (f", %gbe_{i}, %ube_{i}", f", view<{E * FE}xf32>, view<{E * FE}xf32>") if eb else ("", "")
     dn_b, dn_bt = (f", %dbe_{i}", f", view<{E * H}xf32>") if eb else ("", "")
     wu = f"%wge_{i}" if fused else f"%wue_{i}"
+    def chain(tile):
+        """Bucket the assignments into tile-row tiles and run the grouped expert GEMMs and the combine over them; with the
+        small tile enabled, an epoch whose experts see few rows each (moe_alloc's %small_tile) takes the 32-row chain."""
+        sf, mt, mr = GM.sfx(tile), "%max_tiles" + GM.sfx(tile).replace("_t", ""), "%max_rows" + GM.sfx(tile).replace("_t", "")
+        body = f"""    kernel.launch @g_moe_bucket{sf}[%t](%t, {mt}, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @g_moe_ggu_{gun}_k{H}{sf}[{mr}, %nFE]({mr}, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, {wu}{gu_b}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
+    kernel.launch @g_row_scale_f16_tiles{sf}[{mr}]({mr}, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
+    kernel.launch @g_moe_gdn_{fd}_k{FE}{sf}[{mr}, %nH]({mr}, %nFE, %nH, {mr}, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}{dn_b}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
+    kernel.launch @g_moe_combine_sorted[%t](%t, {mr}, %ys_sorted, %pos, %wts, {sgarg}{out}) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
+"""
+        return body
+    def routed_chain():
+        if not GM.TILE32_AVG:
+            return chain(GM.TILE)
+        ind = lambda t: "".join("  " + ln + "\n" for ln in t.split("\n")[:-1])
+        return f"    scf.if %small_tile {{\n{ind(chain(GM.TILE_SMALL))}    }} else {{\n{ind(chain(GM.TILE))}    }}\n"
     wsc = (f"    kernel.launch @g_moe_wscale[%t](%t, %ids, %wts, %dsc_{i}) : [index](index, buffer, buffer, view<{E}xf32>)\n"
            if MOE.get("down_scale") else "")
     x16 = "" if x == "%h" else f"    kernel.launch @g_row_scale_f16[%t](%t, %nH, {x}, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n"
@@ -3786,12 +3803,7 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
 """) + f"""  %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
   scf.if %gemm {{
     kernel.launch @g_moe_route_tr_live[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
-{wsc}    kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
-{x16}    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, {wu}{gu_b}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
-    kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
-    kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}{dn_b}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
-    kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}{out}) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
-  }} else {{
+{wsc}{x16}{routed_chain()}  }} else {{
     kernel.launch @g_moe_route[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
 {wsc}    kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, {x}, %wge_{i}, {wu}{gu_b}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
     kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wde_{i}{dn_b}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
@@ -3801,8 +3813,19 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
 
 
 def moe_alloc():
-    """Scratch buffers of the MoE layers (decode: per assignment; prefill: bucketed 64-row tiles, worst case)."""
+    """Scratch buffers of the MoE layers (decode: per assignment; prefill: bucketed 64-row tiles, worst case). With the
+    small tile (gen_moe.TILE32_AVG): %small_tile, true when the epoch's experts see fewer than TILE32_AVG rows on average
+    (tokens x top-k < TILE32_AVG x experts), and the 32-row chain's %max_tiles32 / %max_rows32. The tile table is sized for
+    the 32-row chain's larger tile count, the row buffers by the 64-row chain's (the larger row count)."""
+    import gen_moe as GM
     KU, FE = MOE["used"], MOE["ffn"]
+    SMALL = f"""  %c32m = index.constant {GM.TILE_SMALL} : index
+  %ta_tiles32 = index.div %ta, %c32m : index
+  %max_tiles32 = index.add %ta_tiles32, %cEm : index
+  %max_rows32 = index.mul %max_tiles32, %c32m : index
+  %small_limit = index.constant {GM.TILE32_AVG * MOE["experts"]} : index
+  %small_tile = index.cmp ult, %ta, %small_limit : index
+""" if GM.TILE32_AVG else ""
     return f"""  %nFS = index.constant {max(FS, 32)} : index
   %cKU = index.constant {KU} : index
   %ta = index.mul %t, %cKU : index
@@ -3824,7 +3847,7 @@ def moe_alloc():
   %max_rows = index.mul %max_tiles, %c64m : index
   %b8 = index.constant 8 : offset
   %b4 = index.constant 4 : offset
-  %ti_size = index.scale %max_tiles, %b8 : index, offset -> offset
+{SMALL}  %ti_size = index.scale %{"max_tiles32" if SMALL else "max_tiles"}, %b8 : index, offset -> offset
   %tile_info = buffer.alloca<global> align(256) %ti_size : buffer
   %rm_size = index.scale %max_rows, %b4 : index, offset -> offset
   %rowmap = buffer.alloca<global> align(256) %rm_size : buffer
@@ -3851,7 +3874,8 @@ def moe_kernels(row_scale, gemm_fn):
     import gen_moe as GM
     rty = TENS[f"blk.{MOE['leading_dense']}.ffn_gate_inp.weight"]["type"]
     a = (H, MOE["experts"], MOE["used"], MOE["gating"], MOE["norm_weights"], MOE["probs_bias"] or MOE.get("router_bias", False), rty)
-    parts = [GM.route(*a), GM.route_prefill_live(*a), GM.row_scale_tiles(row_scale)]
+    tiles = (GM.TILE, GM.TILE_SMALL) if GM.TILE32_AVG else (GM.TILE,)
+    parts = [GM.route(*a), GM.route_prefill_live(*a)] + [GM.row_scale_tiles(row_scale, tile) for tile in tiles]
     # gate/up activation: silu (default) or gpt-oss's clamped swiglu (cfg moe.act, alpha and limit from llama.cpp)
     act = ("swiglu_oai", MOE.get("swiglu_alpha", 1.702), MOE.get("swiglu_limit", 7.0)) if MOE.get("act") == "swiglu_oai" else None
     xb = dict(bias=True, act=act) if MOE.get("expert_bias") else dict(act=act) if act else {}
@@ -3865,11 +3889,12 @@ def moe_kernels(row_scale, gemm_fn):
         for sty in sorted({t["type"] for n, t in TENS.items() if n.endswith("ffn_gate_inp_shexp.weight")}):
             parts.append(GM.shared_gate(H, sty).replace("@g_moe_shared_gate(", f"@g_moe_shared_gate_{sty}(")
                          .replace('export("g_moe_shared_gate")', f'export("g_moe_shared_gate_{sty}")'))
-    parts += [comb, GM.bucket(MOE["experts"], MOE["used"]), comb_s] + ([GM.wscale(MOE["experts"], MOE["used"])] if MOE.get("down_scale") else [])
-    for fmt, K, N, mode in sorted(USED_MOE):
-        gg = GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn,
-                             fused=bool(MOE.get("gate_up_fused")) and mode == "gu", **xb)
-        parts.append(gelu_vectors(gg) if GELU else gg)
+    parts += [comb] + [GM.bucket(MOE["experts"], MOE["used"], tile) for tile in tiles] + [comb_s] + ([GM.wscale(MOE["experts"], MOE["used"])] if MOE.get("down_scale") else [])
+    for tile in tiles:
+        for fmt, K, N, mode in sorted(USED_MOE):
+            gg = GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn,
+                                 fused=bool(MOE.get("gate_up_fused")) and mode == "gu", tile=tile, **xb)
+            parts.append(gelu_vectors(gg) if GELU else gg)
     return "".join(parts)
 
 
