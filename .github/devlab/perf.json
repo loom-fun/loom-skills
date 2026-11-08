@@ -1,36 +1,30 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "Temporary (not for merge): span attention A/B (published programs vs this branch) and gates on the new builds.",
+ "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+ "memory_bytes": 5000000000,
+ "kit": null,
+ "llamacpp": "b1369",
+ "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "textmatch:new"
-   ]
+   "name": "q05",
+   "variants": [{"name": "card"}, {"name": "new", "build": {}}],
+   "steps": ["perf:card:2:long", "perf:new:2:long", "perf:card:2", "perf:new:2", "c4:card", "c4:new", "gates:new:full"]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "textmatch:new"
-   ]
+   "name": "q15",
+   "card": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
+   "memory_bytes": 8000000000,
+   "variants": [{"name": "card"}, {"name": "new", "build": {}}],
+   "steps": ["perf:card:2:long", "perf:new:2:long", "gates:new:dev"]
+  },
+  {
+   "name": "q4b-dflash",
+   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+   "memory_bytes": 62000000000,
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
+   "variants": [{"name": "card"}, {"name": "new", "build": {}}],
+   "steps": ["perf:card:1:long", "perf:new:1:long", "gates:new:dev"]
   }
  ]
 }
