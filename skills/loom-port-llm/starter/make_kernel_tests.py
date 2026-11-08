@@ -941,7 +941,7 @@ def attention_span_case(tag, sliding):
             pr = np.exp(sc - mx); den = pr.sum() + (0.0 if sinks is None else np.exp(sinks[hh] - mx))
             att[i, hh] = pr @ kvv[lo:p + 1, kv].astype(np.float64) / den
     if gate_kind and sinks is None:
-        att = att * gate_act(gate)
+        att = att * gate_mul(gate)   # the combine kernel multiplies the gate buffer as stored
     blocks = ctx // 16
     orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
     info = np.zeros((t, 4), np.int32); info[:, 1] = p0 + np.arange(t); info[:, 2] = 1
@@ -1332,7 +1332,7 @@ if os.environ.get("FLASH_TESTS", "1") == "1" and not cfg.get("attn_sinks") and (
         # mixed); 4-5 straddle DEEP (one-tile); 6-7, 8-9 deep pairs; 10 unpaired. Pages alias the two 1024-key arenas
         # of the rows case, so key j of a row is that row's key j % 1024.
         td, ctx_d = 176, (DEEP // 1024 + 2) * 1024; blk = ctx_d // 16
-        arena_d = np.load(os.path.join(out, "f_arena_m.npy")).reshape(2, 2, 1024, -1)[:, :, :, :KVH * D].reshape(2, 2, 1024, KVH, D)
+        arena_d = np.load(os.path.join(out, f"f_arena_m{KS}.npy")).reshape(2, 2, 1024, -1)[:, :, :, :KVH * D].reshape(2, 2, 1024, KVH, D)
         row = (np.arange(td) < 40).astype(np.int32)
         pos = np.where(row == 1, DEEP + 1000 + np.arange(td), DEEP - 32 + np.arange(td) - 40)
         info_d = np.zeros((td, 4), np.int32); info_d[:, 0] = row; info_d[:, 1] = pos; info_d[:, 2] = 1
@@ -1631,7 +1631,7 @@ if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after e
 if KS:
     cases = [re.sub(r"check\.case public @(\w+) \{", rf"check.case public @\1{KS} {{", re.sub(
         r"@(g_qk_rope_store|g_attention_split|g_attention_combine|g_gate_heads|g_attention_flash2(?:_deep)?)\[", rf"@\1{KS}[", c))
-        .replace('.npy")', f'{KS}.npy")') for c in cases if re.match(r"\s*check\.case public @(attention_chain|flash_prefill)", c)]
+        .replace('.npy")', f'{KS}.npy")') for c in cases if re.match(r"\s*check\.case public @(attention_chain|attention_span|flash_prefill)", c)]
 for h in sorted(set(cfg.get("layer_heads") or []) - {QH}):
     hc = os.path.join(out, f"cfg_h{h}.json"); json.dump(dict(cfg, heads=h, layer_heads=None), open(hc, "w"))
     import subprocess

@@ -381,7 +381,7 @@
 -        # mixed); 4-5 straddle DEEP (one-tile); 6-7, 8-9 deep pairs; 10 unpaired. Pages alias the two 1024-key arenas
 -        # of the rows case, so key j of a row is that row's key j % 1024.
 -        td, ctx_d = 176, (DEEP // 1024 + 2) * 1024; blk = ctx_d // 16
--        arena_d = np.load(os.path.join(out, "f_arena_m.npy")).reshape(2, 2, 1024, -1)[:, :, :, :KVH * D].reshape(2, 2, 1024, KVH, D)
+-        arena_d = np.load(os.path.join(out, f"f_arena_m{KS}.npy")).reshape(2, 2, 1024, -1)[:, :, :, :KVH * D].reshape(2, 2, 1024, KVH, D)
 -        row = (np.arange(td) < 40).astype(np.int32)
 -        pos = np.where(row == 1, DEEP + 1000 + np.arange(td), DEEP - 32 + np.arange(td) - 40)
 -        info_d = np.zeros((td, 4), np.int32); info_d[:, 0] = row; info_d[:, 1] = pos; info_d[:, 2] = 1
