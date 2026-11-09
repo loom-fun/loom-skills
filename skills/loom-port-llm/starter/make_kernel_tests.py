@@ -56,9 +56,10 @@ def gate_act(g): return np.log1p(np.exp(g)) if cfg.get("attn_gate_act") == "soft
 def gate_mul(g): return g if cfg.get("attn_gate_act") == "softplus" else gate_act(g)
 def tile_starts(info):
     """First tokens of the 16-token tiles g_attention_fallback_list gives to flash2: live, one row, consecutive
-    positions, the first at a position multiple of 16. Every other token is the listed fallback's."""
+    positions, the first at a position multiple of 16 and at or past 512 (tile_uniform.loom). Every other token is the
+    listed fallback's."""
     return [s for s in range(len(info) - 15)
-            if info[s, 1] % 16 == 0 and (info[s:s + 16, 0] == info[s, 0]).all() and (info[s:s + 16, 2] != 0).all()
+            if info[s, 1] >= 512 and info[s, 1] % 16 == 0 and (info[s:s + 16, 0] == info[s, 0]).all() and (info[s:s + 16, 2] != 0).all()
             and (info[s:s + 16, 1] == info[s, 1] + np.arange(16)).all()]
 def covered_tokens(info):
     cov = np.zeros(len(info), bool)
@@ -1627,7 +1628,58 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
 }}
 """
     cases.append(COPY_ROWS)
+    def cut_case(sliding, cut):
+        """One prompt (row 1, positions 0..n-1, all below the flash floor of position 512) attended in one epoch, and as two
+        epochs cut at position CUT (the scheduler cuts a prefill wherever its budget ends): every token's result is
+        bit-identical. A cut leaves partial 16-token tiles, which only the split-K fallback can compute, so a token whose
+        position is below 512 must never be flash2's, whole tile or not."""
+        n, QD = 100, QH * D
+        x_q = (rng.standard_normal((n, QH, D)) * 2.5).astype(np.float32); x_g = rng.standard_normal((n, QH, D)).astype(np.float32)
+        text = ""
+        for k, (lo, hi) in enumerate(((0, n), (0, cut), (cut, n))):
+            info3 = epoch_info([(1, lo, hi - lo)]); t = len(info3)
+            info = np.zeros((t, 4), np.int32); info[:, :3] = info3
+            q = np.zeros((t, QH, D), np.float32); g = np.zeros((t, QH, D), np.float32)
+            q[:hi - lo], g[:hi - lo] = x_q[lo:hi], x_g[lo:hi]
+            for nm, arr in (("info", info), ("q", q.reshape(t, QD)), ("g", g.reshape(t, QD))):
+                save(f"fc_{nm}{sliding}_{cut}_{k}", arr)
+            OT = f"tensor<{t}x{QD}xf32>"; IT = f"tensor<{t}x4xi32>"; PT = f"tensor<{t * QH * 64 * D}xf32>"; MT = f"tensor<{t * QH * 64 * 2}xf32>"
+            text += f"""  %t{k} = check.literal value({t}) : index
+  %q{k} = check.file.read.npy path("fc_q{sliding}_{cut}_{k}.npy") : {OT}
+  %g{k} = check.file.read.npy path("fc_g{sliding}_{cut}_{k}.npy") : {OT}
+  %info{k} = check.file.read.npy path("fc_info{sliding}_{cut}_{k}.npy") : {IT}
+  %o{k} = check.generate.fill value(0.0) : {OT}
+  %pacc{k} = check.generate.fill value(0.0) : {PT}
+  %pml{k} = check.generate.fill value(0.0) : {MT}
+  kernel.launch @g_attention_split[%t{k}](%t{k}, %layer, %sliding, %ctx, %pool, %q{k}, %info{k}, %orig, %arena, %pacc{k}, %pml{k}) : [index](index, index, i32, index, index, {OT}, {IT}, {OA}, {AA}, {PT}, {MT})
+  kernel.launch @g_attention_combine[%t{k}](%t{k}, %sliding, %info{k}, %pacc{k}, %pml{k}, %g{k}, %o{k}) : [index](index, i32, {IT}, {PT}, {MT}, {OT}, {OT})
+{list_launch(f"%t{k}", t, f"%info{k}", k)}  kernel.launch @g_attention_flash2[%t{k}](%t{k}, %layer, %sliding, %ctx, %pool, %q{k}, %g{k}, %info{k}, %tiles{k}, %orig, %arena, %o{k}) : [index](index, index, i32, index, index, {OT}, {OT}, {IT}, tensor<{t}xi32>, {OA}, {AA}, {OT})
+"""
+        for nm, k, skip, rows in (("a", 1, 0, cut), ("b", 2, 0, n - cut)):   # the cut epochs' rows against the one epoch's
+            XT = f"tensor<{rows}x{QD}xf32>"; OT0 = f"tensor<{len(epoch_info([(1, 0, n)]))}x{QD}xf32>"
+            OTk = f"tensor<{len(epoch_info([(1, 0, cut if k == 1 else n - cut)]))}x{QD}xf32>"
+            text += f"""  %nx{nm} = check.literal value({rows}) : index
+  %skip0{nm} = check.literal value({0 if nm == 'a' else cut}) : index
+  %skipk{nm} = check.literal value(0) : index
+  %xf{nm} = check.generate.fill value(0.0) : {XT}
+  %xc{nm} = check.generate.fill value(1.0) : {XT}
+  kernel.launch @test_copy_rows[%nx{nm}](%nx{nm}, %wd, %skip0{nm}, %t0, %o0, %xf{nm}) : [index](index, index, index, index, {OT0}, {XT})
+  kernel.launch @test_copy_rows[%nx{nm}](%nx{nm}, %wd, %skipk{nm}, %t{k}, %o{k}, %xc{nm}) : [index](index, index, index, index, {OTk}, {XT})
+  check.expect.close actual(%xc{nm}) expected(%xf{nm}) atol(0.0) rtol(0.0) nan(different) : {XT}
+"""
+        return f"""check.case public @flash_cut_invariant{'_window' if sliding else ''}_c{cut} {{
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value({sliding}) : i32
+  %ctx = check.literal value({ctx_a}) : index
+  %pool = check.literal value({pool_a}) : index
+  %wd = check.literal value({QD}) : index
+  %orig = check.file.read.npy path("f_orig_a.npy") : {OA}
+  %arena = check.file.read.npy path("f_arena_a.npy") : {AA}
+{text}  check.return
+}}
+"""
     cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
+    cases += [cut_case(s, c) for s in ((0, 1) if WIN else (0,)) for c in (53, 48, 75)]   # cuts inside a tile / on a tile boundary / in a later tile
     cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
 
 # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
