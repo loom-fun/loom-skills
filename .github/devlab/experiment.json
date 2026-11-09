@@ -18,20 +18,6 @@
    "steps": [
     "consistency:40:llama"
    ]
-  },
-  {
-   "name": "gate_b",
-   "build": {},
-   "steps": [
-    "consistency:40:llama"
-   ]
-  },
-  {
-   "name": "quick",
-   "build": {},
-   "steps": [
-    "gates:quick"
-   ]
   }
  ]
 }

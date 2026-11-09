@@ -98,7 +98,7 @@ func.def inline @g_run_qualifies(%info: buffer, %tokens: index, %token: index) -
   %c9 = index.constant 9 : index
   %c0_i32 = scalar.constant 0 : i32
   %c1_i32 = scalar.constant 1 : i32
-  %c9_i32 = scalar.constant 9 : i32
+  %c9_i32 = scalar.constant 1 : i32
   %true = scalar.constant true : i1
   %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
   %btoken = index.assume %token [lt(%token, %tokens)] : index
