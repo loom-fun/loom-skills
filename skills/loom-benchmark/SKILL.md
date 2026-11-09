@@ -25,6 +25,14 @@ nightly prints `version: 1`, and the tag is usually only in the directory name.
 Builds differ up to 2× on the same GGUF (a stale build once inflated a margin from +25 % to 2.5×),
 and a new architecture can need the newest release (no installed build knew `flint`).
 
+**Vulkan, the second baseline.** Every card also carries the official ggml-org llama.cpp Vulkan build (`b12211`,
+sha256-pinned in `data/llamacpp-vulkan.sha256`) next to the ROCm one: `LLAMACPP_BACKEND=vulkan fetch_llamacpp.sh DIR
+b12211` and `llamacpp_server.sh` (same variable) run the same server arguments, drafting settings and workloads as the
+ROCm baseline. It is measured only in `devlab-perf` jobs (`llama@vulkan:N`, `llamac4@vulkan` steps, `loom-org` step 3)
+and recorded with `make_info.py perf --backend vulkan` under `performance.baselines.vulkan`; the card renders it as one
+more DevLab column. It never feeds a headline value, a guardrail or an `org_status` action. A setting Vulkan cannot run
+is recorded in `baseline.unsupported`, never swapped for another.
+
 A weaker baseline inflates every margin you report. Report the chosen build's path and tag.
 lemonade-sdk/llamacpp-rocm releases are pre-approved: download them without asking. Check that
 `llama-server --list-devices` shows `ROCm0` (`llamacpp_server.sh` does), because a build missing its

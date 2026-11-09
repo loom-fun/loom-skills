@@ -213,6 +213,16 @@ Hand the card over and move the local GPU on to the next item.
    --c4-llama c4_llamacpp_nN.txt --package DIR --source-kind devlab --run ID --url JOB_URL --device none --hrx-loom
    none` on the job's artifact (no `--baseline-version`: the card keeps its local baseline), and rebuild the card as
    above. Low priority: it never blocks other work.
+   **Vulkan baseline** (every card, one job each; the same workloads and `llama_spec` as the ROCm baseline): job fields
+   `llamacpp_vulkan: "b12211"`, variant `{"name": "card"}`, steps `llama@vulkan:2 llama@vulkan:2:long llamac4@vulkan`
+   (add the ROCm and Loom steps to the same job for a same-runner comparison); at the card's own `memory_bytes`. Ingest:
+   `make_info.py perf --backend vulkan --llama-jsonl perf_llamacpp-vulkan_nN.jsonl --c4-llama c4_llamacpp-vulkan_nN.txt
+   --baseline-version b12211 --baseline-args "$(cat llamacpp_args-vulkan.txt)" --baseline-sha256 "$(cat
+   llamacpp_release-vulkan.sha256)" --fetched-programs "$(cat programs_sha256.txt)" --unsupported "..." --package DIR
+   --source-kind devlab --run ID --url JOB_URL --device none --hrx-loom none` (refused if the job fetched other
+   programs than DIR's), then `make_info.py build --from-info` as above. Its numbers are another DevLab job's: compare
+   engines by ratios, not across runners. A setting the Vulkan server cannot run (a drafter method, `--mmproj`: the
+   workloads are text-only) is passed as `--unsupported`, never replaced. Nothing in `org_status` reads it.
 4. Missing local metrics are not swept: a local GPU worker measures them in one quiet local session with both
    engines (step 5).
 
