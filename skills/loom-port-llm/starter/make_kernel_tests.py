@@ -1703,6 +1703,51 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
 {text}  check.return
 }}
 """
+    def masked_case(p0, n, tag):
+        """One run (row 1, positions p0..p0+n-1) attended over two arenas that differ only in row 1's keys and values past its
+        last position (finite values): the outputs are bit-identical, so what a partial tile reads past the run (stale memory,
+        or the real keys of a later token that a whole tile of the uncut run reads) never reaches the result."""
+        QD = QH * D
+        last = 1024 + p0 + n   # row 1's first arena slot past the run
+        ab = arena_a.copy(); ab[:, last:2 * 1024] = (rng.standard_normal(ab[:, last:2 * 1024].shape) * 3).astype(np.float16)
+        save(f"f_arena_m{tag}", ab.reshape(-1))
+        info3 = epoch_info([(1, p0, n)]); t = len(info3)
+        info = np.zeros((t, 4), np.int32); info[:, :3] = info3
+        q = np.zeros((t, QH, D), np.float32); g = np.zeros((t, QH, D), np.float32)
+        q[:n] = (rng.standard_normal((n, QH, D)) * 2.5).astype(np.float32); g[:n] = rng.standard_normal((n, QH, D)).astype(np.float32)
+        for nm, arr in (("info", info), ("q", q.reshape(t, QD)), ("g", g.reshape(t, QD))):
+            save(f"fm_{nm}_{tag}", arr)
+        OT = f"tensor<{t}x{QD}xf32>"; IT = f"tensor<{t}x4xi32>"; PT = f"tensor<{t * QH * 64 * D}xf32>"; MT = f"tensor<{t * QH * 64 * 2}xf32>"; XT = f"tensor<{n}x{QD}xf32>"
+        text = ""
+        for k in (0, 1):
+            text += f"""  %q{k} = check.file.read.npy path("fm_q_{tag}.npy") : {OT}
+  %g{k} = check.file.read.npy path("fm_g_{tag}.npy") : {OT}
+  %info{k} = check.file.read.npy path("fm_info_{tag}.npy") : {IT}
+  %arena{k} = check.file.read.npy path("{'f_arena_a' if k == 0 else 'f_arena_m' + tag}.npy") : {AA}
+  %o{k} = check.generate.fill value(0.0) : {OT}
+  %pacc{k} = check.generate.fill value(0.0) : {PT}
+  %pml{k} = check.generate.fill value(0.0) : {MT}
+  %x{k} = check.generate.fill value({k}.0) : {XT}
+  kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q{k}, %info{k}, %orig, %arena{k}, %pacc{k}, %pml{k}) : [index](index, index, i32, index, index, {OT}, {IT}, {OA}, {AA}, {PT}, {MT})
+  kernel.launch @g_attention_combine[%t](%t, %sliding, %info{k}, %pacc{k}, %pml{k}, %g{k}, %o{k}) : [index](index, i32, {IT}, {PT}, {MT}, {OT}, {OT})
+{list_launch("%t", t, f"%info{k}", k)}  kernel.launch @g_attention_flash2[%t](%t, %layer, %sliding, %ctx, %pool, %q{k}, %g{k}, %info{k}, %tiles{k}, %orig, %arena{k}, %o{k}) : [index](index, index, i32, index, index, {OT}, {OT}, {IT}, tensor<{t}xi32>, {OA}, {AA}, {OT})
+  kernel.launch @test_copy_rows[%nx](%nx, %wd, %skip, %t, %o{k}, %x{k}) : [index](index, index, index, index, {OT}, {XT})
+"""
+        return f"""check.case public @flash_masked_keys_{tag} {{
+  %t = check.literal value({t}) : index
+  %nx = check.literal value({n}) : index
+  %skip = check.literal value(0) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value(0) : i32
+  %ctx = check.literal value({ctx_a}) : index
+  %pool = check.literal value({pool_a}) : index
+  %wd = check.literal value({QD}) : index
+  %orig = check.file.read.npy path("f_orig_a.npy") : {OA}
+{text}  check.expect.close actual(%x1) expected(%x0) atol(0.0) rtol(0.0) nan(different) : {XT}
+  check.return
+}}
+"""
+    cases += [masked_case(301, 100, "p301"), masked_case(0, 53, "p0"), masked_case(40, 47, "p40")]
     cases += [cut_case(s, c) for s in ((0, 1) if WIN else (0,)) for c in (53, 48, 75)]   # cuts inside a tile / on a tile boundary / in a later tile
     # Keys past a run's last position are not written yet: stale memory, possibly NaN. A partial tail tile must not let them
     # reach the output (0 * NaN): the run (row 1, positions 301-400) ends one token into a block, over an arena whose row-1
