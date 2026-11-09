@@ -6,7 +6,7 @@
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "plain",
+   "name": "evidence",
    "llama_spec": "",
    "variants": [
     {
@@ -14,29 +14,8 @@
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "llama:2",
-    "llama:2:long",
-    "c4:card",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "dflash",
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:Anbeeld/Qwen3-Coder-30B-A3B-DFlash-GGUF/Qwen3-Coder-30B-A3B-DFlash-Q4_K_M.gguf} --spec-draft-n-max 5 -ngld 99",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "llama:2",
-    "llama:2:long",
-    "c4:card",
-    "llamac4"
+    "ktest:card",
+    "gates:card:dev"
    ]
   }
  ]
