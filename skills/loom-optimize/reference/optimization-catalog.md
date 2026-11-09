@@ -298,7 +298,11 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
 - It only handles *uniform* tiles: all 16 tokens live, one row, consecutive
   positions (`g_tile_uniform`) that start at a position multiple of 16, so a tile depends on its own span, never on
   where the epoch packs it (epoch-aligned tiles made a token's path, and its rounding, depend on its neighbours: the
-  Coder consistency failure). Every other token goes to the listed fallback.
+  Coder consistency failure). Every other token goes to the listed fallback. Tiles below position 512 are never
+  flash2's: a scheduler cut leaves partial tiles that only the fallback can compute, so a short prompt's rounding
+  depended on where its prefill was cut (Coder consistency: 2 of 4 prompts differed alone vs concurrent, a 1.7-nat
+  flip at a router near-tie). Below 512 keys the fallback's 16 splits equal the decode kernel's, so those tokens round
+  like decode; the `flash_cut_invariant` kernel tests pin it. Past 512 a cut still changes the rounding.
 - **Token subtiles at small G** (`FLASH2_TS`): each staged key feeds 16·G queries, so at G = 2 long prefill re-streams
   the KV cache per 32 queries and is bandwidth-bound (Qwen3-0.6B: 25 % of roofline at 1k, 13 % at 32k). Two tiles per
   workgroup share each staged K/V tile: Qwen3-0.6B / 1.7B 32k prefill 2.6x / 2.1x, 1k tie (default at G <= 2). At
