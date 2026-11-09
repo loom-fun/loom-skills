@@ -6,10 +6,31 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "kt",
+   "name": "pair",
    "build": {},
    "steps": [
-    "ktest"
+    "pairs2:3:q"
+   ]
+  },
+  {
+   "name": "gate_a",
+   "build": {},
+   "steps": [
+    "consistency:40:llama"
+   ]
+  },
+  {
+   "name": "gate_b",
+   "build": {},
+   "steps": [
+    "consistency:40:llama"
+   ]
+  },
+  {
+   "name": "quick",
+   "build": {},
+   "steps": [
+    "gates:quick"
    ]
   }
  ]
