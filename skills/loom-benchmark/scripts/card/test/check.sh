@@ -322,6 +322,10 @@ print(up['vision'], up['audio'], txt['vision'], txt['audio'], gated['audio'], un
       *st(g, 'image_input', 'audio', 'tool_calling', 'speculative_decoding'), *st(old, 'tool_calling', 'thinking', 'reasoning_effort', 'audio'),
       *st(old0, 'tool_calling', 'audio'))" "$C")
 [ "$got" = "True True False False False None {'tools': True, 'thinking': True, 'reasoning_effort': False} no no n/a n/a yes False n/a n/a yes n/a no no n/a unknown unknown unknown" ] && echo "OK   features: n/a vs no vs not determined" || { echo "FAIL features: $got"; bad=1; }
+# an available but disabled drafter reads "available, disabled (METHOD)", the method from the data
+got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import render_card as r
+print(r.feature_detail('speculative_decoding', {'status': 'yes', 'value': {'method': None, 'available': ['dflash']}}))" "$C")
+[ "$got" = "available, disabled (dflash)" ] && echo "OK   unused drafter detail" || { echo "FAIL unused drafter detail: $got"; bad=1; }
 # org_status consistency checks: a nightly entry that differs from the card (memory_bytes, llama.cpp build) or is missing,
 # and a generator commit that is not on main: not an ancestor of main and in no merged PR (a throwaway git repo with one
 # commit on main and one on a branch; the PR lookup is injected: merged, open, unknown)

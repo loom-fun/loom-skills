@@ -144,7 +144,7 @@ def feature_detail(key, f):
         d = f" (default {v['default']})" if v.get("default") else ""
         return "`reasoning_effort`: " + ", ".join(v.get("levels") or []) + d
     if key == "speculative_decoding" and not v.get("method"):
-        return f"available upstream ({', '.join(v.get('available') or [])}); not enabled"
+        return f"available, disabled ({', '.join(v.get('available') or [])})"
     if key == "speculative_decoding":
         out = f"{METHOD.get(v.get('method'), v.get('method'))}, depth {v.get('depth')}, on by default"
         return out + (f"; drafter {hf(v['drafter'])}" if v.get("drafter") else "")
