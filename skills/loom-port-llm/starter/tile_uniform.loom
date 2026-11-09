@@ -86,3 +86,107 @@ func.def inline @g_tile_starts(%info: buffer, %tokens: index, %token: index) -> 
   }
   func.return %starts : i1
 }
+
+// Whether TOKEN belongs to a run of at least 9 tokens (one row, consecutive positions, live): the tokens of a prefill
+// span, however it was cut. Decode and verify spans are at most 8 tokens (draft depth <= 7) and stay on the split-K
+// fallback, so a token's attention path depends on its run, never on where the epoch or the scheduler cut it.
+func.def inline @g_run_qualifies(%info: buffer, %tokens: index, %token: index) -> (i1) {
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c9 = index.constant 9 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c9_i32 = scalar.constant 1 : i32
+  %true = scalar.constant true : i1
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %btoken = index.assume %token [lt(%token, %tokens)] : index
+  %row0 = view.load %info_view[%btoken, %c0] : view<[%tokens]x4xi32> -> i32
+  %pos0 = view.load %info_view[%btoken, %c1] : view<[%tokens]x4xi32> -> i32
+  %live0 = view.load %info_view[%btoken, %c2] : view<[%tokens]x4xi32> -> i32
+  %is_live0 = scalar.cmpi ne, %live0, %c0_i32 : i32
+  %alive_l, %left = scf.for %k = [%c1 to %c9 step %c1](%alive = %is_live0 : i1, %n = %c0_i32 : i32) -> (i1, i32) {
+    %room = index.cmp ule, %k, %token : index
+    %back = index.sub %token, %k : index
+    %at_value = scf.select %room, %back, %btoken : index
+    %at = index.assume %at_value [lt(%at_value, %tokens)] : index
+    %row = view.load %info_view[%at, %c0] : view<[%tokens]x4xi32> -> i32
+    %pos = view.load %info_view[%at, %c1] : view<[%tokens]x4xi32> -> i32
+    %live = view.load %info_view[%at, %c2] : view<[%tokens]x4xi32> -> i32
+    %k32 = index.cast %k : index to i32
+    %want = scalar.subi %pos0, %k32 : i32
+    %same_row = scalar.cmpi eq, %row, %row0 : i32
+    %at_pos = scalar.cmpi eq, %pos, %want : i32
+    %is_live = scalar.cmpi ne, %live, %c0_i32 : i32
+    %a = scalar.andi %same_row, %at_pos : i1
+    %b = scalar.andi %a, %is_live : i1
+    %c = scalar.andi %b, %room : i1
+    %next_alive = scalar.andi %alive, %c : i1
+    %step = scf.select %next_alive, %c1_i32, %c0_i32 : i32
+    %n_next = scalar.addi %n, %step : i32
+    scf.yield %next_alive, %n_next : i1, i32
+  }
+  %alive_r, %right = scf.for %k = [%c1 to %c9 step %c1](%alive = %is_live0 : i1, %n = %c0_i32 : i32) -> (i1, i32) {
+    %ahead = index.add %token, %k : index
+    %room = index.cmp ult, %ahead, %tokens : index
+    %at_value = scf.select %room, %ahead, %btoken : index
+    %at = index.assume %at_value [lt(%at_value, %tokens)] : index
+    %row = view.load %info_view[%at, %c0] : view<[%tokens]x4xi32> -> i32
+    %pos = view.load %info_view[%at, %c1] : view<[%tokens]x4xi32> -> i32
+    %live = view.load %info_view[%at, %c2] : view<[%tokens]x4xi32> -> i32
+    %k32 = index.cast %k : index to i32
+    %want = scalar.addi %pos0, %k32 : i32
+    %same_row = scalar.cmpi eq, %row, %row0 : i32
+    %at_pos = scalar.cmpi eq, %pos, %want : i32
+    %is_live = scalar.cmpi ne, %live, %c0_i32 : i32
+    %a = scalar.andi %same_row, %at_pos : i1
+    %b = scalar.andi %a, %is_live : i1
+    %c = scalar.andi %b, %room : i1
+    %next_alive = scalar.andi %alive, %c : i1
+    %step = scf.select %next_alive, %c1_i32, %c0_i32 : i32
+    %n_next = scalar.addi %n, %step : i32
+    scf.yield %next_alive, %n_next : i1, i32
+  }
+  %lr = scalar.addi %left, %right : i32
+  %run = scalar.addi %lr, %c1_i32 : i32
+  %long = scalar.cmpi sge, %run, %c9_i32 : i32
+  %ok = scalar.andi %long, %is_live0 : i1
+  func.return %ok : i1
+}
+
+// Whether TOKEN is the first token of its 16-position block within its run: its position is a multiple of 16, or the
+// token before it does not continue the run. The partial tiles (blocks the run covers only in part) are listed by it.
+func.def inline @g_block_starts(%info: buffer, %tokens: index, %token: index) -> (i1) {
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c15_i32 = scalar.constant 15 : i32
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %btoken = index.assume %token [lt(%token, %tokens)] : index
+  %row0 = view.load %info_view[%btoken, %c0] : view<[%tokens]x4xi32> -> i32
+  %pos0 = view.load %info_view[%btoken, %c1] : view<[%tokens]x4xi32> -> i32
+  %skew = scalar.andi %pos0, %c15_i32 : i32
+  %aligned = scalar.cmpi eq, %skew, %c0_i32 : i32
+  %room = index.cmp uge, %token, %c1 : index
+  %back = index.sub %token, %c1 : index
+  %at_value = scf.select %room, %back, %btoken : index
+  %at = index.assume %at_value [lt(%at_value, %tokens)] : index
+  %row = view.load %info_view[%at, %c0] : view<[%tokens]x4xi32> -> i32
+  %pos = view.load %info_view[%at, %c1] : view<[%tokens]x4xi32> -> i32
+  %live = view.load %info_view[%at, %c2] : view<[%tokens]x4xi32> -> i32
+  %want = scalar.subi %pos0, %c1_i32 : i32
+  %same_row = scalar.cmpi eq, %row, %row0 : i32
+  %at_pos = scalar.cmpi eq, %pos, %want : i32
+  %is_live = scalar.cmpi ne, %live, %c0_i32 : i32
+  %a = scalar.andi %same_row, %at_pos : i1
+  %b = scalar.andi %a, %is_live : i1
+  %continues = scalar.andi %b, %room : i1
+  %true = scalar.constant true : i1
+  %starts_run = scalar.xori %continues, %true : i1
+  %starts = scalar.ori %aligned, %starts_run : i1
+  func.return %starts : i1
+}

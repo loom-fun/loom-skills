@@ -3292,11 +3292,14 @@ def attention():
 
 FALLBACK = r"""
 // Prefill attention work lists, built once per epoch from the token info. A token's path depends only on its own
-// span (a run of one row's consecutive positions), never on where the epoch packs it: tiles[1 + i] is the first
-// token of the i-th 16-token tile that lies inside one span and starts at a position multiple of 16, in token order
-// (neighbouring workgroups then read neighbouring keys; token 0 past the count): g_attention_flash2 computes those,
-// and tiles[0] is their count. list holds every other token (g16_attention_split_listed computes those; count[0] is
-// the list length for indirect dispatch).
+// run (a run of one row's consecutive positions), never on where the epoch packs it or where the scheduler cut the
+// prefill: tiles[1 + i] is the first token of the i-th 16-token tile that lies inside one run and starts at a position
+// multiple of 16, in token order (neighbouring workgroups then read neighbouring keys; token 0 past the count):
+// g_attention_flash2 computes those, and tiles[0] is their count. The blocks a run of 9 or more tokens covers only in
+// part (its head and tail, whatever the cut) are listed from tiles[tokens / 2]: the count, then the first live token of
+// each block, for g_attention_flash2_partial (the same arithmetic with the dead columns masked). list holds every
+// other token (those of shorter runs: decode and verify; g16_attention_split_listed computes them; count[0] is the
+// list length for indirect dispatch).
 kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%tokens: index) {
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
@@ -3320,8 +3323,10 @@ kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%token
   %first = index.cmp eq, %lane, %c0 : index
   %c256_slot = index.constant 256 : index
   %c257_slot = index.constant 257 : index
+  %c258_slot = index.constant 258 : index
   scf.if %first {
     view.store %c0_i32, %scratch_view[%c256_slot] : i32, view<260xi32>
+    view.store %c0_i32, %scratch_view[%c258_slot] : i32, view<260xi32>
   }
   %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
   %tiles_view = buffer.view %tiles[%zero] : buffer -> view<[%tokens]xi32>
@@ -3388,26 +3393,36 @@ kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%token
     %fill_slot = index.assume %fill_value [range(%fill_value, 1, 8192), lt(%fill_value, %tokens)] : index
     view.store %c0_i32, %tiles_view[%fill_slot] : i32, view<[%tokens]xi32>
   }
-  // Every other token: the listed fallback's (order does not matter, each is computed on its own).
+  // Every token of a run shorter than 9 is the listed fallback's; the blocks of a longer run that flash2 does not take
+  // whole are the partial list's (order does not matter, each is computed on its own).
+  %c2 = index.constant 2 : index
+  %half = index.div %tokens, %c2 : index
+  %half_entry = index.add %half, %c1 : index
   scf.for %t = [%lane to %tokens step %c256] {
     %token = index.assume %t [lt(%t, %tokens)] : index
-    %pos = view.load %info_view[%token, %c1] : view<[%tokens]x4xi32> -> i32
-    %skew32 = scalar.andi %pos, %c15_i32 : i32
-    %skew = index.cast %skew32 : i32 to index
-    %has_start = index.cmp ule, %skew, %token : index
-    %start_value = index.sub %token, %skew : index
-    %start_or_token = scf.select %has_start, %start_value, %token : index
-    %start = index.assume %start_or_token [lt(%start_or_token, %tokens)] : index
-    %uniform, %r_unused, %p_unused = func.call @g_tile_uniform(%info, %tokens, %start) : (buffer, index, index) -> (i1, i32, i32)
-    %covered = scalar.andi %uniform, %has_start : i1
-    %not_covered = scalar.xori %covered, %true : i1
-    scf.if %not_covered {
+    %long = func.call @g_run_qualifies(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+    %short = scalar.xori %long, %true : i1
+    scf.if %short {
       %slot32 = view.atomic.rmw<addi> %c1_i32, %scratch_view[%c256_slot] {ordering = relaxed, scope = workgroup} : i32, view<260xi32> -> i32
       %slot_bound = scalar.assume %slot32 [range(%slot32, 0, 8191)] : i32
       %slot_value = index.cast %slot_bound : i32 to index
       %slot = index.assume %slot_value [lt(%slot_value, %tokens)] : index
       %token32 = index.cast %token : index to i32
       view.store %token32, %list_view[%slot] : i32, view<[%tokens]xi32>
+    } else {
+      %block_start = func.call @g_block_starts(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+      %whole = func.call @g_tile_starts(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+      %part = scalar.xori %whole, %true : i1
+      %listed_part = scalar.andi %block_start, %part : i1
+      scf.if %listed_part {
+        %pslot32 = view.atomic.rmw<addi> %c1_i32, %scratch_view[%c258_slot] {ordering = relaxed, scope = workgroup} : i32, view<260xi32> -> i32
+        %pslot_bound = scalar.assume %pslot32 [range(%pslot32, 0, 8191)] : i32
+        %pslot_value = index.cast %pslot_bound : i32 to index
+        %pentry_value = index.add %half_entry, %pslot_value : index
+        %pentry = index.assume %pentry_value [lt(%pentry_value, %tokens)] : index
+        %ptoken32 = index.cast %token : index to i32
+        view.store %ptoken32, %tiles_view[%pentry] : i32, view<[%tokens]xi32>
+      }
     }
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
@@ -3415,6 +3430,9 @@ kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%token
     %fallbacks = view.load %scratch_view[%c256_slot] : view<260xi32> -> i32
     %count_view = buffer.view %count[%zero] : buffer -> view<1xi32>
     view.store %fallbacks, %count_view[0] : i32, view<1xi32>
+    %partials = view.load %scratch_view[%c258_slot] : view<260xi32> -> i32
+    %half_bound = index.assume %half [lt(%half, %tokens)] : index
+    view.store %partials, %tiles_view[%half_bound] : i32, view<[%tokens]xi32>
   }
   kernel.return
 }
@@ -5218,6 +5236,10 @@ if __name__ == "__main__":
             os.remove(hcfg)
     parts.append(program)
     text = "\n".join(parts)
+    if "_attention_flash2_partial\")" in text:   # the blocks a run covers in part: their kernel after each launch
+        text = re.sub(r"^( *)kernel\.launch @(\w+)_attention_flash2(_h\d+)?\[(.*)$",
+                      r"\g<0>\n\1kernel.launch @\2_attention_flash2_partial\3[\4",
+                      text, flags=re.M)
     if "_attention_flash2_deep\")" in text:   # depth dispatch (gen_flash2.py): its deep pairs' kernel after each launch
         text = re.sub(r"^( *)kernel\.launch @(\w+)_attention_flash2(_h\d+)?\[(.*)$",
                       r"\g<0>\n\1kernel.launch @\2_attention_flash2_deep\3[\4",

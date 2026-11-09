@@ -21,6 +21,8 @@ KV position when a wider layer kind sets the stride) customize it.
 """
 import json
 import os
+import subprocess
+import sys
 
 _c = json.load(open(os.environ["LLM_CONFIG"]))
 P = "g"
@@ -58,6 +60,100 @@ assert LANES >= KT * SEG_N, "need at least 8 waves (head_dim * G >= 1024)"
 SCALE = os.environ.get("FLASH2_SCALE") or repr(D ** -0.5)
 POS_BYTES = int(os.environ.get("FLASH2_POS_BYTES") or KVH * D * 2)   # bytes per KV position (widest layer kind)
 
+POSHI = """  // The last live position of the block: keys past it are not written yet (stale memory, possibly NaN), so they are
+  // staged as zeros, which the causal mask already gives zero weight.
+  %hi_c16_i32 = scalar.constant 16 : i32
+  %hi_true = scalar.constant true : i1
+  %hi_one_i32 = scalar.constant 1 : i32
+  %hi_block_end = scalar.addi %pos0_32, %hi_c16_i32 : i32
+  %hi_alive, %hi_cnt = scf.for %k = [%c1 to %c16 step %c1](%alive = %hi_true : i1, %n = %c0_i32 : i32) -> (i1, i32) {
+    %ahead = index.add %first_token, %k : index
+    %room = index.cmp ult, %ahead, %tokens : index
+    %at_value = scf.select %room, %ahead, %first_token : index
+    %at = index.assume %at_value [lt(%at_value, %tokens)] : index
+    %m_row = view.load %info_view[%at, %c0] : view<[%tokens]x4xi32> -> i32
+    %m_pos = view.load %info_view[%at, %c1] : view<[%tokens]x4xi32> -> i32
+    %m_live = view.load %info_view[%at, %c2] : view<[%tokens]x4xi32> -> i32
+    %k32 = index.cast %k : index to i32
+    %m_want = scalar.addi %posf_32, %k32 : i32
+    %m_same_row = scalar.cmpi eq, %m_row, %row32 : i32
+    %m_at_pos = scalar.cmpi eq, %m_pos, %m_want : i32
+    %m_is_live = scalar.cmpi ne, %m_live, %c0_i32 : i32
+    %m_in_block = scalar.cmpi slt, %m_want, %hi_block_end : i32
+    %m_a = scalar.andi %m_same_row, %m_at_pos : i1
+    %m_b = scalar.andi %m_a, %m_is_live : i1
+    %m_c = scalar.andi %m_b, %m_in_block : i1
+    %m_d = scalar.andi %m_c, %room : i1
+    %next_alive = scalar.andi %alive, %m_d : i1
+    %step = scf.select %next_alive, %hi_one_i32, %c0_i32 : i32
+    %n_next = scalar.addi %n, %step : i32
+    scf.yield %next_alive, %n_next : i1, i32
+  }
+  %pos_hi_i32 = scalar.addi %posf_32, %hi_cnt : i32
+  %pos_hi = index.cast %pos_hi_i32 : i32 to index
+"""
+PARTIAL = os.environ.get("FLASH2_ROLE") == "partial"   # the tiles a run covers only in part (see gen_flash2.py)
+QTOKEN = """%q_token_value = index.add %first_token, %lane_col : index
+  %q_token = index.assume %q_token_value [lt(%q_token_value, %tokens)] : index"""
+if PARTIAL:   # lane column c is the token ENTRY + c - OFF when it continues the run; other columns read the entry's Q
+    QTOKEN = """%col_ge = index.cmp uge, %lane_col, %off : index
+  %col_rel = index.sub %lane_col, %off : index
+  %col_rel_c = scf.select %col_ge, %col_rel, %c0 : index
+  %q_tok_raw = index.add %first_token, %col_rel_c : index
+  %q_in = index.cmp ult, %q_tok_raw, %tokens : index
+  %q_tok_c = scf.select %q_in, %q_tok_raw, %first_token : index
+  %q_token = index.assume %q_tok_c [lt(%q_tok_c, %tokens)] : index
+  %slot_row = view.load %info_view[%q_token, %c0] : view<[%tokens]x4xi32> -> i32
+  %slot_pos = view.load %info_view[%q_token, %c1] : view<[%tokens]x4xi32> -> i32
+  %slot_live = view.load %info_view[%q_token, %c2] : view<[%tokens]x4xi32> -> i32
+  %lane_col32 = index.cast %lane_col : index to i32
+  %slot_want = scalar.addi %pos0_32, %lane_col32 : i32
+  %slot_same_row = scalar.cmpi eq, %slot_row, %row32 : i32
+  %slot_at_pos = scalar.cmpi eq, %slot_pos, %slot_want : i32
+  %slot_is_live = scalar.cmpi ne, %slot_live, %c0_i32 : i32
+  %slot_a = scalar.andi %slot_same_row, %slot_at_pos : i1
+  %slot_b = scalar.andi %slot_a, %slot_is_live : i1
+  %slot_c = scalar.andi %slot_b, %q_in : i1
+  %slot_ok = scalar.andi %slot_c, %col_ge : i1"""
+LISTED = f"""  %tiles_view = buffer.view %tiles[%origin] : buffer -> view<[%tokens]xi32>
+  %listed_count32 = view.load %tiles_view[%c0] : view<[%tokens]xi32> -> i32
+  %listed_count = index.cast %listed_count32 : i32 to index
+  %listed = index.cmp ult, %tile, %listed_count : index
+  %entry_slot_value = index.add %tile, %c1 : index
+  %entry_slot = index.assume %entry_slot_value [lt(%entry_slot_value, %tokens)] : index
+  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32
+  %entry = index.cast %entry32 : i32 to index
+  %first_token = index.assume %entry [range(%entry, 0, 8191), lt(%entry, %tokens)] : index
+  %info_view = buffer.view %info[%origin] : buffer -> view<[%tokens]x4xi32>
+  %row32 = view.load %info_view[%first_token, %c0] : view<[%tokens]x4xi32> -> i32
+  %pos0_32 = view.load %info_view[%first_token, %c1] : view<[%tokens]x4xi32> -> i32
+"""
+if PARTIAL:   # tiles[tokens / 2] counts the partial tiles, the entries follow: the first live token of each block
+    LISTED = """  %c2h = index.constant 2 : index
+  %half = index.div %tokens, %c2h : index
+  %half_bound = index.assume %half [lt(%half, %tokens)] : index
+  %tiles_view = buffer.view %tiles[%origin] : buffer -> view<[%tokens]xi32>
+  %listed_count32 = view.load %tiles_view[%half_bound] : view<[%tokens]xi32> -> i32
+  %listed_count = index.cast %listed_count32 : i32 to index
+  %listed = index.cmp ult, %tile, %listed_count : index
+  %entry_base = index.add %half, %c1 : index
+  %entry_slot_value = index.add %entry_base, %tile : index
+  %last_slot = index.sub %tokens, %c1 : index
+  %entry_slot_clamped = index.min %entry_slot_value, %last_slot : index
+  %entry_slot = index.assume %entry_slot_clamped [lt(%entry_slot_clamped, %tokens)] : index
+  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32
+  %entry_raw = index.cast %entry32 : i32 to index
+  // entries past the count are not initialized: a workgroup without a tile reads token 0
+  %entry = scf.select %listed, %entry_raw, %c0 : index
+  %first_token = index.assume %entry [range(%entry, 0, 8191), lt(%entry, %tokens)] : index
+  %info_view = buffer.view %info[%origin] : buffer -> view<[%tokens]x4xi32>
+  %row32 = view.load %info_view[%first_token, %c0] : view<[%tokens]x4xi32> -> i32
+  %posf_32 = view.load %info_view[%first_token, %c1] : view<[%tokens]x4xi32> -> i32
+  %c15_i32 = scalar.constant 15 : i32
+  %off32 = scalar.andi %posf_32, %c15_i32 : i32
+  %pos0_32 = scalar.subi %posf_32, %off32 : i32
+  %off = index.cast %off32 : i32 to index
+"""
 L = []
 A = L.append
 A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: index) {{
@@ -66,7 +162,7 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
   %c16 = index.constant 16 : index
   %clanes = index.constant {LANES} : index
   %tiles = index.div %tokens, %c16 : index
-  kernel.launch.config workgroups(%tiles, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
+{"  %c4 = index.constant 4 : index" + chr(10) + "  %tiles4 = index.mul %tiles, %c4 : index" + chr(10) if PARTIAL else ""}  kernel.launch.config workgroups({"%tiles4" if PARTIAL else "%tiles"}, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
 }} launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, %gate: buffer, %info: buffer, %tiles: buffer, %origins: buffer, %arena: buffer, %out: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {LAYERS})] : index
@@ -81,26 +177,14 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
   %c32 = index.constant 32 : index
   %c0_i32 = scalar.constant 0 : i32
   %tile_count = index.div %tokens, %c16 : index
-  %tile_id = kernel.workgroup.id<x> : index
-  %tile = index.assume %tile_id [lt(%tile_id, %tile_count)] : index
+{"  %c4t = index.constant 4 : index" + chr(10) + "  %tile_count4 = index.mul %tile_count, %c4t : index" + chr(10) if PARTIAL else ""}  %tile_id = kernel.workgroup.id<x> : index
+  %tile = index.assume %tile_id [lt(%tile_id, {"%tile_count4" if PARTIAL else "%tile_count"})] : index
   %kv_id = kernel.workgroup.id<y> : index
 ''' + (f'''  %kv = index.assume %kv_id [range(%kv_id, 0, {KVH - 1})] : index''' if NG == 1 else f'''  %cng = index.constant {NG} : index
   %kv_value = index.div %kv_id, %cng : index
   %kv = index.assume %kv_value [range(%kv_value, 0, {KVH - 1})] : index
   %hgroup = index.rem %kv_id, %cng : index''') + f'''
-  %tiles_view = buffer.view %tiles[%origin] : buffer -> view<[%tokens]xi32>
-  %listed_count32 = view.load %tiles_view[%c0] : view<[%tokens]xi32> -> i32
-  %listed_count = index.cast %listed_count32 : i32 to index
-  %listed = index.cmp ult, %tile, %listed_count : index
-  %entry_slot_value = index.add %tile, %c1 : index
-  %entry_slot = index.assume %entry_slot_value [lt(%entry_slot_value, %tokens)] : index
-  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32
-  %entry = index.cast %entry32 : i32 to index
-  %first_token = index.assume %entry [range(%entry, 0, 8191), lt(%entry, %tokens)] : index
-  %info_view = buffer.view %info[%origin] : buffer -> view<[%tokens]x4xi32>
-  %row32 = view.load %info_view[%first_token, %c0] : view<[%tokens]x4xi32> -> i32
-  %pos0_32 = view.load %info_view[%first_token, %c1] : view<[%tokens]x4xi32> -> i32
-  scf.if %listed {{
+{LISTED}  scf.if %listed {{
   %workitem_id = kernel.workitem.id<x> : index
   %workitem = index.assume %workitem_id [range(%workitem_id, 0, {LANES - 1})] : index
   %wave_id = kernel.subgroup.id : index
@@ -118,7 +202,7 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
   %pos0_bound = scalar.assume %pos0_32 [range(%pos0_32, 0, 262128)] : i32
   %pos0 = index.cast %pos0_bound : i32 to index
   %pos_last = index.add %pos0, %c15 : index
-  %padded = index.add %context, %c15 : index
+{POSHI if PARTIAL else ""}  %padded = index.add %context, %c15 : index
   %blocks = index.div %padded, %c16 : index
   %k_plane = index.mul %layer, %c2 : index
   %is_sliding = scalar.cmpi ne, %sliding, %c0_i32 : i32
@@ -159,8 +243,7 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
 
   // This wave's half of Q^T as MMA rhs, held for the whole key loop: lane column = token, 16 dims each.
   %q_view = buffer.view %q[%origin] : buffer -> view<[%tokens]x{QH}x{D}xf32>
-  %q_token_value = index.add %first_token, %lane_col : index
-  %q_token = index.assume %q_token_value [lt(%q_token_value, %tokens)] : index''')
+  {QTOKEN}''')
 for c in range(NFH):
     A(f'''  %qd{c}_o = index.constant {c * 16} : index
   %qd{c}_v = index.add %dim_base, %qd{c}_o : index
@@ -229,7 +312,7 @@ A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NFH))} = scf.for 
     %tile_first = index.madd %kt, %ckt, %key_low : index
     scf.if %st_live {{
       %key_pos = index.add %tile_first, %st_key : index
-      %key_valid = index.cmp ule, %key_pos, %pos_last : index
+      %key_valid = index.cmp ule, %key_pos, {"%pos_hi" if PARTIAL else "%pos_last"} : index
       %kvals, %vvals = scf.if %key_valid -> (vector<{SEG_W}xf16>, vector<{SEG_W}xf16>) {{
         %kp = index.assume %key_pos [range(%key_pos, 0, 262143)] : index
         %k_offset = func.call @{P}_kv_offset(%origins, %row, %kp, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
@@ -310,12 +393,55 @@ A(f'''    %lsum = scalar.addf %ls0, {'%ls1' if KB == 2 else '%zero_f'} : f32
     %l_scaled = scalar.mulf %l, %alpha : f32
     %l_new = scalar.addf %l_scaled, %tsum : f32
     %alpha_v = vector.splat %alpha : vector<8xf32>''')
+# O^T += V^T P^T per 16-key block. A weight of exactly 0 does not hide its key's V in the WMMA sum (see gen_flash2.py), so
+# a block with masked keys (the diagonal block; the window's lower edge) runs once per query column with V zeroed at that
+# column's masked keys, keeping that column's result.
 for d in range(NFH):
     A(f'''    %os{d} = vector.mulf %a{d}, %alpha_v : vector<8xf32>
     %vr{d} = index.add %dim_base, %qd{d}_o : index''')
-    for kb in range(KB):
-        A(f'''    %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>
-    %on{d}{'' if kb == KB - 1 else f'_{kb}'} = vector.mma %vl{d}_{kb}, %pt{kb}, {f'%on{d}_{kb - 1}' if kb else f'%os{d}'} : vector<16xf16>, vector<16xf16>, vector<8xf32>''')
+A('''    %pos0_i32 = index.cast %pos0 : index to i32
+    %pos15_i32 = scalar.addi %pos0_i32, %c15_i32m : i32
+    %lane_col32m = index.cast %lane_col : index to i32
+    %win_lo15 = scalar.subi %pos15_i32, %cwin_i32 : i32
+    %zero16h = vector.constant 0.0 : vector<16xf16>
+    %iota16 = vector.iota %c0_i32 step %c1_i32m : vector<16xi32>''')
+for kb in range(KB):
+    for d in range(NFH):
+        A(f"    %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>")
+    last = kb == KB - 1
+    ins = [f"%os{d}" if kb == 0 else f"%on{d}_{kb - 1}" for d in range(NFH)]
+    outs = [f"%on{d}" if last else f"%on{d}_{kb}" for d in range(NFH)]
+    vt = ", ".join(["vector<8xf32>"] * NFH)
+    A(f"""    %nb_last{kb} = scalar.addi %base{kb}, %c15_i32m : i32
+    %nb_diag{kb} = scalar.cmpi sgt, %nb_last{kb}, %pos0_i32 : i32
+    %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
+    %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
+    %need{kb} = scalar.ori %nb_diag{kb}, %nb_wins{kb} : i1
+    {", ".join(outs)} = scf.if %need{kb} -> ({vt}) {{""")
+    for d in range(NFH):
+        A(f"""      %ac{d}_{kb} = scf.for %mc_{d}_{kb} = [%c0 to %c16 step %c1](%acc{d}_{kb} = {ins[d]} : vector<8xf32>) -> (vector<8xf32>) {{
+        %mci{d}_{kb} = index.cast %mc_{d}_{kb} : index to i32
+        %qc{d}_{kb} = scalar.addi %pos0_i32, %mci{d}_{kb} : i32
+        %thr{d}_{kb} = scalar.subi %qc{d}_{kb}, %base{kb} : i32
+        %thr_v{d}_{kb} = vector.splat %thr{d}_{kb} : vector<16xi32>
+        %mhi{d}_{kb} = vector.cmpi sle, %iota16, %thr_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
+        %lo{d}_{kb} = scalar.subi %thr{d}_{kb}, %cwin_i32 : i32
+        %loe{d}_{kb} = scf.select %is_sliding, %lo{d}_{kb}, %far_below : i32
+        %lo_v{d}_{kb} = vector.splat %loe{d}_{kb} : vector<16xi32>
+        %mlo{d}_{kb} = vector.cmpi sge, %iota16, %lo_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
+        %m{d}_{kb} = vector.andi %mhi{d}_{kb}, %mlo{d}_{kb} : vector<16xi1>
+        %isc{d}_{kb} = scalar.cmpi eq, %lane_col32m, %mci{d}_{kb} : i32
+        %vs{d}_{kb} = vector.select %m{d}_{kb}, %vl{d}_{kb}, %zero16h : vector<16xf16>
+        %vm{d}_{kb} = vector.fragment<lhs> %vs{d}_{kb} shape [%c16, %c16] : vector<16xf16>
+        %rm{d}_{kb} = vector.mma %vm{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %acn{d}_{kb} = scf.select %isc{d}_{kb}, %rm{d}_{kb}, %acc{d}_{kb} : vector<8xf32>
+        scf.yield %acn{d}_{kb} : vector<8xf32>
+      }}""")
+    yv = ", ".join(f"%ac{d}_{kb}" for d in range(NFH))
+    A(f"      scf.yield {yv} : {vt}" + chr(10) + "    } else {")
+    for d in range(NFH):
+        A(f"      %pl{d}_{kb} = vector.mma %vl{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
+    A(f"      scf.yield {', '.join(f'%pl{d}_{kb}' for d in range(NFH))} : {vt}" + chr(10) + "    }")
 A('''    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield %m_new, %l_new, ''' + ", ".join(f"%on{d}" for d in range(NFH)) + " : f32, f32, " + ", ".join(["vector<8xf32>"] * NFH) + f'''
   }}
@@ -348,11 +474,49 @@ text = "\n".join(L)
 consts = "".join(f"  %e{i} = index.constant {i} : index\n" for i in range(8))
 consts += "".join(f"  %kb{kb}_row = index.constant {16 * kb} : index\n" for kb in range(KB))
 consts += "".join(f"  %kbo{kb} = scalar.constant {16 * kb} : i32\n" for kb in range(KB))
+consts += "  %c15_i32m = scalar.constant 15 : i32\n  %c1_i32m = scalar.constant 1 : i32\n  %far_below = scalar.constant -1000000 : i32\n"
 if WPH != 2:
     consts += f"  %c{WPH} = index.constant {WPH} : index\n"
 text = text.replace("  %tile_count = index.div %tokens, %c16 : index\n", consts + "  %tile_count = index.div %tokens, %c16 : index\n", 1)
 text = text.replace("  %partner = scalar.xori_index_placeholder\n", "")
+if PARTIAL:
+    i0 = text.index("  // O^T / l, gate, store through"); i1 = text.rindex("  }\n  kernel.return")
+    E = [f"""  // Partial tile: O^T / l, gate, and a store per live column (a fragment store would write the dead columns' tokens).
+  %one_f = scalar.constant 1.0 : f32
+  %inv_l = scalar.divf %one_f, %l_final : f32
+  %inv_v = vector.splat %inv_l : vector<8xf32>
+  %cqd = index.constant {QH * D} : index
+  %out_flat = buffer.view %out[%origin] : buffer -> view<[%tokens]x{QH * D}xf32>
+""" + (f"  %gate_flat = buffer.view %gate[%origin] : buffer -> view<[%tokens]x{QH * D}xf32>\n" if GATE else "") + f"""  %cdim = index.constant {D} : index
+  %head_col = index.mul %head, %cdim : index
+  %head_half = index.add %head_col, %dim_base : index
+  %col_base = index.add %head_half, %lane_half : index
+  scf.if %slot_ok {{"""]
+    for d in range(NFH):
+        E.append(f"    %ou{d} = vector.mulf %o{d}, %inv_v : vector<8xf32>")
+        if GATE:
+            for i in range(8):
+                E.append(f"    %dc{d}_{i} = index.constant {d * 16 + 2 * i} : index\n    %dm{d}_{i} = index.add %col_base, %dc{d}_{i} : index\n"
+                         f"    %dn{d}_{i} = index.assume %dm{d}_{i} [lt(%dm{d}_{i}, %cqd)] : index\n"
+                         f"    %gl{d}_{i} = view.load %gate_flat[%q_token, %dn{d}_{i}] : view<[%tokens]x{QH * D}xf32> -> f32")
+            E.append(f"    %gf{d} = vector.from_elements {', '.join(f'%gl{d}_{i}' for i in range(8))} : vector<8xf32>")
+            E.append(f"    %gs{d} = vector.logisticf<afn> %gf{d} : vector<8xf32>" if GATE_SIG else f"    %gs{d} = vector.addf %gf{d}, %zero8 : vector<8xf32>")
+            E.append(f"    %of{d} = vector.mulf %ou{d}, %gs{d} : vector<8xf32>")
+        else:
+            E.append(f"    %of{d} = vector.addf %ou{d}, %zero8 : vector<8xf32>")
+        for i in range(8):
+            E.append(f"    %ov{d}_{i} = vector.extract %of{d}[%e{i}] : vector<8xf32> -> f32\n"
+                     + ("" if GATE else f"    %dc{d}_{i} = index.constant {d * 16 + 2 * i} : index\n    %dm{d}_{i} = index.add %col_base, %dc{d}_{i} : index\n    %dn{d}_{i} = index.assume %dm{d}_{i} [lt(%dm{d}_{i}, %cqd)] : index\n")
+                     + f"    view.store %ov{d}_{i}, %out_flat[%q_token, %dn{d}_{i}] : f32, view<[%tokens]x{QH * D}xf32>")
+    E.append("  }\n")
+    text = text[:i0] + "\n".join(E) + text[i1:]
+    text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_partial") @{P}_attention_flash2_partial(', 1)
+out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
+if not PARTIAL:
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen_flash2s.py")], check=True,
+                   env=dict(os.environ, FLASH2_ROLE="partial", FLASH2_OUT=out_path + ".partial"))
+    text += "\n" + open(out_path + ".partial").read()
+    os.remove(out_path + ".partial")
 if os.environ.get("FLASH2_NAME"):
     text = text.replace(f"{P}_attention_flash2", os.environ["FLASH2_NAME"])
-out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
 open(out_path, "w", newline="\n").write(text)
