@@ -65,10 +65,12 @@ if [ ! -f "$card/.fetched" ]; then
 fi
 
 # build.py's / make_kernel_tests.py's config: the card's llm_config.json with its GGUFs pointed at the fetched files, plus the tensor table
-"$T" - "$card" "$D/cfg.json" "$(q "print(json.dumps(v.get('config') or {}))")" <<'EOF' || exit 1
+"$T" - "$card" "$D/cfg.json" "$(q "print(json.dumps(v.get('config') or {}))")" "$ST" <<'EOF' || exit 1
 import json, os, sys
 import gguf
-card, dst, over = sys.argv[1:]
+card, dst, over, starter = sys.argv[1:]
+sys.path.insert(0, starter)
+from formats import split_parts
 c = json.load(open(os.path.join(card, "llm_config.json")))
 par = lambda f: os.path.join(card, "parameter", os.path.basename(f))
 c["gguf"] = par(c["gguf"])
@@ -78,8 +80,8 @@ for k in ("vision",):
 for k in ("drafter", "assistant"):
     if c.get(k) and c[k].get("gguf"):
         c[k]["gguf"] = par(c[k]["gguf"]) if os.path.exists(par(c[k]["gguf"])) else None
-r = gguf.GGUFReader(c["gguf"])
-c["tensors"] = {t.name: {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]} for t in r.tensors}
+# every part of a split GGUF (the later layers' tensors are in the later parts)
+c["tensors"] = {t.name: {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]} for p in split_parts(c["gguf"]) for t in gguf.GGUFReader(p).tensors}
 for k in ("model_id", "draft"):
     c.pop(k, None)
 c.update(json.loads(over))
