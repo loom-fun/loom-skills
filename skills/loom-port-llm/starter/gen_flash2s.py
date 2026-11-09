@@ -393,12 +393,55 @@ A(f'''    %lsum = scalar.addf %ls0, {'%ls1' if KB == 2 else '%zero_f'} : f32
     %l_scaled = scalar.mulf %l, %alpha : f32
     %l_new = scalar.addf %l_scaled, %tsum : f32
     %alpha_v = vector.splat %alpha : vector<8xf32>''')
+# O^T += V^T P^T per 16-key block. A weight of exactly 0 does not hide its key's V in the WMMA sum (see gen_flash2.py), so
+# a block with masked keys (the diagonal block; the window's lower edge) runs once per query column with V zeroed at that
+# column's masked keys, keeping that column's result.
 for d in range(NFH):
     A(f'''    %os{d} = vector.mulf %a{d}, %alpha_v : vector<8xf32>
     %vr{d} = index.add %dim_base, %qd{d}_o : index''')
-    for kb in range(KB):
-        A(f'''    %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>
-    %on{d}{'' if kb == KB - 1 else f'_{kb}'} = vector.mma %vl{d}_{kb}, %pt{kb}, {f'%on{d}_{kb - 1}' if kb else f'%os{d}'} : vector<16xf16>, vector<16xf16>, vector<8xf32>''')
+A('''    %pos0_i32 = index.cast %pos0 : index to i32
+    %pos15_i32 = scalar.addi %pos0_i32, %c15_i32m : i32
+    %lane_col32m = index.cast %lane_col : index to i32
+    %win_lo15 = scalar.subi %pos15_i32, %cwin_i32 : i32
+    %zero16h = vector.constant 0.0 : vector<16xf16>
+    %iota16 = vector.iota %c0_i32 step %c1_i32m : vector<16xi32>''')
+for kb in range(KB):
+    for d in range(NFH):
+        A(f"    %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>")
+    last = kb == KB - 1
+    ins = [f"%os{d}" if kb == 0 else f"%on{d}_{kb - 1}" for d in range(NFH)]
+    outs = [f"%on{d}" if last else f"%on{d}_{kb}" for d in range(NFH)]
+    vt = ", ".join(["vector<8xf32>"] * NFH)
+    A(f"""    %nb_last{kb} = scalar.addi %base{kb}, %c15_i32m : i32
+    %nb_diag{kb} = scalar.cmpi sgt, %nb_last{kb}, %pos0_i32 : i32
+    %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
+    %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
+    %need{kb} = scalar.ori %nb_diag{kb}, %nb_wins{kb} : i1
+    {", ".join(outs)} = scf.if %need{kb} -> ({vt}) {{""")
+    for d in range(NFH):
+        A(f"""      %ac{d}_{kb} = scf.for %mc_{d}_{kb} = [%c0 to %c16 step %c1](%acc{d}_{kb} = {ins[d]} : vector<8xf32>) -> (vector<8xf32>) {{
+        %mci{d}_{kb} = index.cast %mc_{d}_{kb} : index to i32
+        %qc{d}_{kb} = scalar.addi %pos0_i32, %mci{d}_{kb} : i32
+        %thr{d}_{kb} = scalar.subi %qc{d}_{kb}, %base{kb} : i32
+        %thr_v{d}_{kb} = vector.splat %thr{d}_{kb} : vector<16xi32>
+        %mhi{d}_{kb} = vector.cmpi sle, %iota16, %thr_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
+        %lo{d}_{kb} = scalar.subi %thr{d}_{kb}, %cwin_i32 : i32
+        %loe{d}_{kb} = scf.select %is_sliding, %lo{d}_{kb}, %far_below : i32
+        %lo_v{d}_{kb} = vector.splat %loe{d}_{kb} : vector<16xi32>
+        %mlo{d}_{kb} = vector.cmpi sge, %iota16, %lo_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
+        %m{d}_{kb} = vector.andi %mhi{d}_{kb}, %mlo{d}_{kb} : vector<16xi1>
+        %isc{d}_{kb} = scalar.cmpi eq, %lane_col32m, %mci{d}_{kb} : i32
+        %vs{d}_{kb} = vector.select %m{d}_{kb}, %vl{d}_{kb}, %zero16h : vector<16xf16>
+        %vm{d}_{kb} = vector.fragment<lhs> %vs{d}_{kb} shape [%c16, %c16] : vector<16xf16>
+        %rm{d}_{kb} = vector.mma %vm{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %acn{d}_{kb} = scf.select %isc{d}_{kb}, %rm{d}_{kb}, %acc{d}_{kb} : vector<8xf32>
+        scf.yield %acn{d}_{kb} : vector<8xf32>
+      }}""")
+    yv = ", ".join(f"%ac{d}_{kb}" for d in range(NFH))
+    A(f"      scf.yield {yv} : {vt}" + chr(10) + "    } else {")
+    for d in range(NFH):
+        A(f"      %pl{d}_{kb} = vector.mma %vl{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
+    A(f"      scf.yield {', '.join(f'%pl{d}_{kb}' for d in range(NFH))} : {vt}" + chr(10) + "    }")
 A('''    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield %m_new, %l_new, ''' + ", ".join(f"%on{d}" for d in range(NFH)) + " : f32, f32, " + ", ".join(["vector<8xf32>"] * NFH) + f'''
   }}
@@ -431,6 +474,7 @@ text = "\n".join(L)
 consts = "".join(f"  %e{i} = index.constant {i} : index\n" for i in range(8))
 consts += "".join(f"  %kb{kb}_row = index.constant {16 * kb} : index\n" for kb in range(KB))
 consts += "".join(f"  %kbo{kb} = scalar.constant {16 * kb} : i32\n" for kb in range(KB))
+consts += "  %c15_i32m = scalar.constant 15 : i32\n  %c1_i32m = scalar.constant 1 : i32\n  %far_below = scalar.constant -1000000 : i32\n"
 if WPH != 2:
     consts += f"  %c{WPH} = index.constant {WPH} : index\n"
 text = text.replace("  %tile_count = index.div %tokens, %c16 : index\n", consts + "  %tile_count = index.div %tokens, %c16 : index\n", 1)
