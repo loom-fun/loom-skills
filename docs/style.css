@@ -54,3 +54,15 @@ body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui,
 .aggchart { position:relative; }
 .aggchart svg { display:block; max-width:100%; color:var(--fg); }
 @media (max-width:420px) { .m { grid-template-columns:54px 1fr 48px; } .brag b { font-size:28px; } }
+.intro { max-width:72ch; margin:0 0 16px; line-height:1.5; }
+.intro a { color:var(--pd-dark); }
+.meth { margin-top:32px; padding-top:8px; border-top:1px solid var(--line); max-width:90ch; }
+.meth h2 { font-family:Georgia,"Times New Roman",serif; font-weight:400; font-size:24px; margin:12px 0; }
+.meth h3 { font-size:16px; font-weight:600; margin:20px 0 6px; }
+.meth p, .meth dd { line-height:1.5; overflow-wrap:anywhere; }
+.meth a { color:var(--pd-dark); }
+.meth code { font-size:12px; background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:0 4px; overflow-wrap:anywhere; }
+.defs { margin:0; display:grid; grid-template-columns:max-content 1fr; gap:6px 16px; }
+.defs dt { font-weight:600; }
+.defs dd { margin:0; }
+@media (max-width:600px) { .defs { grid-template-columns:1fr; gap:0; } .defs dd { margin-bottom:8px; } }
