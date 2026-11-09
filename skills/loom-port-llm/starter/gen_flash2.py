@@ -414,7 +414,7 @@ if CFG["sinks"]:
   %one_init = scalar.constant 1.0 : f32''')
 LMAX = "\n".join(["    %lmax_c0 = scalar.addf %lmax0, %zero_f : f32"] + [f"    %lmax_c{kb} = scalar.maxnumf %lmax_c{kb - 1}, %lmax{kb} : f32" for kb in range(1, KB)] + [f"    %lmax = scalar.addf %lmax_c{KB - 1}, %zero_f : f32"])
 LSUM = "\n".join(["    %lsum_c0 = scalar.addf %ls0, %zero_f : f32"] + [f"    %lsum_c{kb} = scalar.addf %lsum_c{kb - 1}, %ls{kb} : f32" for kb in range(1, KB)] + [f"    %lsum = scalar.addf %lsum_c{KB - 1}, %zero_f : f32"])
-KEYMAX = "%pos_hi" if PARTIAL else "%pos_last"   # a partial tile stages no key past its last live position
+KEYMAX = "%pos_hi" if PARTIAL and not os.environ.get("FLASH2_STALE_REAL") else "%pos_last"   # a partial tile stages no key past its last live position
 STAGE = f"""    %key_pos = index.add %tile_first, %st_key : index
     %key_valid = index.cmp ule, %key_pos, {KEYMAX} : index
     %kvals, %vvals = scf.if %key_valid -> (vector<{DPT}xf16>, vector<{DPT}xf16>) {{
