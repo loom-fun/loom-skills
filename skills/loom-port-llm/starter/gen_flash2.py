@@ -687,9 +687,7 @@ else:
         {k: v for k, v in os.environ.items() if k != "FLASH2_NAME"}, FLASH2_TS="1", FLASH2_ROLE="partial", FLASH2_OUT=out_path + ".partial"))   # renamed below with the rest
     text += "\n" + open(out_path + ".partial").read()
     os.remove(out_path + ".partial")
-if ROLE or PARTIAL:
-    pass
-elif DEEP:
+if DEEP and not ROLE:   # the main kernel's run adds the deep pairs' kernel (PARTIAL implies DEEP == 0)
     import subprocess
     subprocess.run([sys.executable, os.path.abspath(__file__)], check=True, env=dict(
         os.environ, FLASH2_TS="2", FLASH2_ROLE="deep", FLASH2_TS_DEPTH=str(DEEP), FLASH2_OUT=out_path + ".deep"))
