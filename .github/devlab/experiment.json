@@ -1,14 +1,18 @@
 {
- "_comment": "build.py's memory_bytes counts the largest program's prefill scratch: the three hybrid MoE cards rebuilt from this branch, a full-context request on a fresh server at the value build.py now prints and at the card's published one (full gates passed on the first card at 48e9 in run 42343748198).",
- "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
- "memory_bytes": 48000000000,
+ "_comment": "Re-measure Loom (only) on DevLab today, on the published programs, for the cards with the largest recorded DevLab-vs-local prefill gaps: is the gap the machine, or how the recorded DevLab session measured? lfm3omni-48g: the local session's memory budget.",
+ "card": "loom-fun/unsloth-Qwen3.5-2B-loom",
+ "memory_bytes": 9000000000,
  "kit": null,
- "llamacpp": "b1369",
+ "llamacpp": "b1370",
+ "steps": ["lperf:2"],
  "variants": [
-  {"name": "q36-rebuilt-admit", "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-rebuilt-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 49000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "q35-card-admit", "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom", "memory_bytes": 42000000000, "steps": ["admit:260096"]},
-  {"name": "orn-rebuilt-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 36000000000, "build": {}, "steps": ["admit:260096"]},
-  {"name": "orn-card-admit", "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom", "memory_bytes": 33000000000, "steps": ["admit:260096"]}
+  {"name": "q35-2b"},
+  {"name": "q3-14b", "card": "loom-fun/ggml-org-Qwen3-14B-loom", "memory_bytes": 31000000000},
+  {"name": "q25-32b", "card": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom", "memory_bytes": 49000000000},
+  {"name": "lfm3omni", "card": "loom-fun/ggml-org-LFM3-Omni-2B-loom", "memory_bytes": 9000000000},
+  {"name": "lfm3omni-48g", "card": "loom-fun/ggml-org-LFM3-Omni-2B-loom", "memory_bytes": 48000000000},
+  {"name": "laguna", "card": "loom-fun/ggml-org-Laguna-XS-2.1-loom", "memory_bytes": 81000000000},
+  {"name": "bolt-e4b", "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom", "memory_bytes": 36000000000},
+  {"name": "g4-e4b", "card": "loom-fun/unsloth-gemma-4-E4B-it-loom", "memory_bytes": 31000000000}
  ]
 }
