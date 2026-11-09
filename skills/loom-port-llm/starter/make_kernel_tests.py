@@ -1654,10 +1654,9 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
     cases.append(epoch_case("flash_prefill_runs", info_r, q_r, g_r, np.where(flash_covered(info_r4)[:, None, None], o_r, SENT), 0,
                             ("g_attention_flash2", "g_attention_flash2_partial")))
     def cut_case(sliding, cut):
-        """One prompt (row 1, positions 0..n-1, all below the flash floor of position 512) attended in one epoch, and as two
-        epochs cut at position CUT (the scheduler cuts a prefill wherever its budget ends): every token's result is
-        bit-identical. A cut leaves partial 16-token tiles, which only the split-K fallback can compute, so a token whose
-        position is below 512 must never be flash2's, whole tile or not."""
+        """One prompt (row 1, positions 0..n-1) attended in one epoch, and as two epochs cut at position CUT (the scheduler cuts
+        a prefill wherever its budget ends): every token's result is bit-identical. A cut leaves partial 16-token tiles,
+        which the partial kernel computes with the bits of the whole tile (a run of 9 or more tokens is cut-invariant)."""
         n, QD = 100, QH * D
         x_q = (rng.standard_normal((n, QH, D)) * 2.5).astype(np.float32); x_g = rng.standard_normal((n, QH, D)).astype(np.float32)
         text = ""

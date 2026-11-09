@@ -137,6 +137,9 @@ The expensive path. Keep it short:
    prefill `flash2`, the listed fallback for mixed tiles); a feature added to one (sinks, softcap, a gate,
    a window) must be added and unit-tested in all of them. A mismatch passes the goldens and shows up only
    when a turn reuses history the model decoded itself (flint: sinks differed between flash2 and split-K).
+   Prefill output must not depend on where the scheduler cuts a request: runs of 9 or more tokens go through flash2
+   (whole 16-position tiles) or its partial kernel (head and tail blocks), the same bits either way; runs of 1 to 8 tokens
+   (decode, verify) use split-K and are not cut-invariant.
 5. **Check numerically, node by node.** A short numpy forward of layers 0–1 on the trace's tokens
    (gguf `dequantize` for weights) compared with the trace's sums and edge values names the first
    misunderstood op in minutes. Then the Loom kernels against numpy (kernel tests), `chat_probe --verify`
