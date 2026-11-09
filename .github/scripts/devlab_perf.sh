@@ -10,12 +10,16 @@
 #    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF;
 #                                                                     {hf:OWNER/REPO/FILE}: that Hub file, e.g. a drafter llama.cpp loads and the card doesn't ship)
 #    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
-#   A job may override card, kit, memory_bytes, llamacpp, llamacpp_vulkan and llama_spec: one experiment can measure several cards.
+#   A job may override card, kit, memory_bytes, llamacpp, llamacpp_vulkan, vulkan_kv and llama_spec: one experiment can
+#   measure several cards.
 #   "llamacpp_vulkan": "b12211": the official ggml-org Vulkan release (sha256-pinned in skills/loom-benchmark/data) that the
 #   steps llama@vulkan, llamac4@vulkan and the other llama.cpp steps with @vulkan run, with the SAME llama_spec and workloads as
 #   the ROCm "llamacpp" build (fetch_llamacpp.sh / llamacpp_server.sh LLAMACPP_BACKEND=vulkan). A server that cannot run a
-#   setting fails its step (RESULT ... ERROR, llamacpp-*.log): recorded as unsupported, never replaced by another setting.
-#   out/ also holds llamacpp_args_<backend>.txt (the exact server arguments), llamacpp_release_vulkan.sha256 and
+#   setting fails its step (RESULT ... ERROR, llamacpp_start-vulkan.log): recorded as a difference, never replaced silently.
+#   "vulkan_kv": "unified" (default: 4 slots share one 65536-token pool, -kvu, as the ROCm baseline) or "per-slot" (4 slots of
+#   36864 tokens, no -kvu: b12211's Vulkan backend has no fused flash attention over K/V rows, so with -kvu it attends the
+#   whole pool with a dense mask; every server argument is recorded, ingest it with make_info.py perf --differs).
+#   out/ also holds llamacpp_args-vulkan.txt (the exact server arguments), llamacpp_release-vulkan.sha256 and
 #   programs_sha256.txt (the card's programs this job fetched: make_info.py perf --fetched-programs).
 # Variant V: {"name": "card"}                                    the card's own programs, as published
 #            {"name": "x", "build": {"ENV": "1"}, "build_args": [...], "ref": "origin/main",
@@ -50,6 +54,7 @@ repo=$(q "print(j.get('card') or e['card'])"); mem=$(q "print(j.get('memory_byte
 kit=$(q "print((j['kit'] if 'kit' in j else e.get('kit')) or '-')"); tag=$(q "print(j.get('llamacpp') or e.get('llamacpp') or '-')"); variants=$(q "print(' '.join(v['name'] for v in j['variants']))")
 steps=$(q "print(' '.join(j['steps']))")
 vtag=$(q "print(j.get('llamacpp_vulkan') or e.get('llamacpp_vulkan') or '-')")
+vkv=$(q "print(j.get('vulkan_kv') or e.get('vulkan_kv') or 'unified')")
 BK=rocm; bkt=-   # the llama.cpp backend of the step running (set by the "@vulkan" suffix) and its file-name infix
 echo "job $job: variants $variants; steps $steps; runner $(hostname)"
 hostname > "$out/runner.txt"
@@ -209,7 +214,9 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   fi
   export LLAMA_SPEC=${spec#*|}; LSPEC=$spec
   step "llama.cpp $BK ${dir##*/}: $LLAMA_SPEC"
-  LLAMACPP_BACKEND=$BK LLAMACPP_DIR=$dir LLAMACPP_ARGS_FILE=$out/llamacpp_args$bkt.txt "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 4 65536 unified | tail -1
+  local kv=(65536 unified)   # one KV pool shared by 4 slots (-kvu), as the ROCm baseline
+  [ "$BK" = vulkan ] && [ "$vkv" = per-slot ] && kv=(36864)   # 4 slots of 36864 tokens each, no -kvu (see "vulkan_kv")
+  LLAMACPP_BACKEND=$BK LLAMACPP_DIR=$dir LLAMACPP_ARGS_FILE=$out/llamacpp_args$bkt.txt "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 4 "${kv[@]}" | tail -1
   sed -i -e "s#$WORK/hf/#hf:#g" -e "s#$card/#card:#g" "$out/llamacpp_args$bkt.txt" 2>/dev/null   # runner paths out of the recorded arguments
   [ "${PIPESTATUS[0]}" = 0 ] || { cp "$LLAMACPP_STATE/llamacpp-$LLAMA_PORT.log" "$out/llamacpp_start$bkt.log" 2>/dev/null; return 1; }
 }

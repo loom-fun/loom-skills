@@ -63,7 +63,7 @@
          "version": {"type": ["string", "null"], "description": "e.g. llamacpp-vulkan/b12211"},
          "args": {"type": ["string", "null"], "description": "The exact server arguments (model path, host and port left out)"},
          "sha256": {"type": ["string", "null"], "description": "sha256 of the release archive the measurement ran"},
-         "unsupported": {"type": "array", "items": {"type": "string"}, "description": "Settings of the main baseline this backend could not run, one line each (never silently changed)"}
+         "differs": {"type": "array", "items": {"type": "string"}, "description": "Server settings that differ from the main baseline's or that this backend could not run, with the reason, one line each (never silently changed)"}
         }
        },
        "session": {

@@ -460,8 +460,8 @@ def cmd_perf(a):
         perf["baseline"] = dict(perf.get("baseline") or {"name": a.baseline_name, "version": None, "args": None})
         if a.baseline_sha256:
             perf["baseline"]["sha256"] = a.baseline_sha256
-        if a.unsupported:
-            perf["baseline"]["unsupported"] = a.unsupported
+        if a.differs:
+            perf["baseline"]["differs"] = a.differs
     write_json(a.o, {"evidence": EVIDENCE_ID, "performance": perf})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {m.get('loom')}/{m['baseline']}" for k, m in metrics.items()), file=sys.stderr)
 
@@ -669,7 +669,7 @@ def main(argv=None):
     p.add_argument("--backend", default="rocm", help="the llama.cpp backend measured: rocm (the card's baseline, with Loom) "
                    "or another (vulkan): a baseline-only session recorded under performance.baselines.BACKEND")
     p.add_argument("--baseline-sha256", help="sha256 of the baseline release archive (--backend other than rocm)")
-    p.add_argument("--unsupported", action="append", help="a setting of the main baseline this backend could not run, one line (repeat)")
+    p.add_argument("--differs", action="append", help="a server setting that differs from the main baseline's or that this backend could not run, with the reason, one line (repeat)")
     p.add_argument("--fetched-programs", help="programs_sha256 the DevLab job fetched (its programs_sha256.txt): refused if "
                    "it differs from --package's, i.e. the card was republished after the run fetched it")
     p.add_argument("--baseline-args", help="the baseline server's exact arguments, model path, host and port left out")

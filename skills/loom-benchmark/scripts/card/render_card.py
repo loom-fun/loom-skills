@@ -352,7 +352,7 @@ def render(d):
                  + f"; same GGUF, prompts and settings as {bname}; measured {text(xs['date'])} in its own DevLab job "
                  f"(a different runner than the other DevLab columns: compare the engines through ratios, not across jobs); "
                  f"source: {src_text(sources[xs['source']])}."
-                 + "".join(f" Not run: {u}." for u in xb.get("unsupported") or []))
+                 + "".join(f" Differs from {bname}: {u}." for u in xb.get("differs") or []))
     for sha in sorted(set(stale.values()) | set(dstale.values())):
         L.append(f"- {STALE} Measured on programs other than this repository's (sha256 {short(sha)}, this repository's "
                  f"{short(here)}): the value describes another build of the package until a session re-measures it.")
@@ -503,7 +503,7 @@ def render_report(d):
               f"- Build: {('`' + xb['version'] + '`') if xb['version'] else 'not recorded'}; server arguments "
               + (f"`{xb['args']}`" if xb["args"] else "not recorded") + ".",
               f"- Device: {device_text(src['device'])}."]
-        L += [f"- Not run: {u}." for u in xb.get("unsupported") or []]
+        L += [f"- Differs from {base['name']}: {u}." for u in xb.get("differs") or []]
         L += ["", "| metric | runs | value |", "|---|---|---|"]
         order = [k for k, _ in METRICS]
         for k, m in sorted(xs["metrics"].items(), key=lambda kv: (order.index(kv[0]) if kv[0] in labels else len(order), kv[0])):

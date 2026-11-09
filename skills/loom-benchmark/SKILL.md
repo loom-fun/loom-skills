@@ -31,7 +31,7 @@ b12211` and `llamacpp_server.sh` (same variable) run the same server arguments, 
 ROCm baseline. It is measured only in `devlab-perf` jobs (`llama@vulkan:N`, `llamac4@vulkan` steps, `loom-org` step 3)
 and recorded with `make_info.py perf --backend vulkan` under `performance.baselines.vulkan`; the card renders it as one
 more DevLab column. It never feeds a headline value, a guardrail or an `org_status` action. A setting Vulkan cannot run
-is recorded in `baseline.unsupported`, never swapped for another.
+is recorded in `baseline.differs` (with the reason, rendered on the card), never swapped silently.
 
 A weaker baseline inflates every margin you report. Report the chosen build's path and tag.
 lemonade-sdk/llamacpp-rocm releases are pre-approved: download them without asking. Check that
