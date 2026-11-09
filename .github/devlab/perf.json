@@ -14,31 +14,24 @@
      "ref": "cfb8312"
     },
     {
-     "name": "patch",
-     "build": {},
-     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
-    },
-    {
      "name": "v2",
      "build": {},
      "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
     },
     {
-     "name": "mut",
+     "name": "v3",
      "build": {},
-     "ref": "2ea9f93bf8d5413a9e48176524c053e3be92c673"
+     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
     }
    ],
    "steps": [
-    "ktest:v2",
+    "ktest:v3",
     "perf:main:3",
-    "perf:patch:3",
     "perf:v2:3",
-    "perf:mut:3",
+    "perf:v3:3",
     "perf:main:3:long",
-    "perf:patch:3:long",
     "perf:v2:3:long",
-    "perf:mut:3:long"
+    "perf:v3:3:long"
    ]
   },
   {
@@ -54,31 +47,24 @@
      "ref": "cfb8312"
     },
     {
-     "name": "patch",
-     "build": {},
-     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
-    },
-    {
      "name": "v2",
      "build": {},
      "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
     },
     {
-     "name": "mut",
+     "name": "v3",
      "build": {},
-     "ref": "2ea9f93bf8d5413a9e48176524c053e3be92c673"
+     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
     }
    ],
    "steps": [
-    "ktest:v2",
+    "ktest:v3",
     "perf:main:3",
-    "perf:patch:3",
     "perf:v2:3",
-    "perf:mut:3",
+    "perf:v3:3",
     "perf:main:3:long",
-    "perf:patch:3:long",
     "perf:v2:3:long",
-    "perf:mut:3:long"
+    "perf:v3:3:long"
    ]
   },
   {
@@ -94,31 +80,24 @@
      "ref": "cfb8312"
     },
     {
-     "name": "patch",
-     "build": {},
-     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
-    },
-    {
      "name": "v2",
      "build": {},
      "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
     },
     {
-     "name": "mut",
+     "name": "v3",
      "build": {},
-     "ref": "2ea9f93bf8d5413a9e48176524c053e3be92c673"
+     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
     }
    ],
    "steps": [
-    "ktest:v2",
+    "ktest:v3",
     "perf:main:3",
-    "perf:patch:3",
     "perf:v2:3",
-    "perf:mut:3",
+    "perf:v3:3",
     "perf:main:3:long",
-    "perf:patch:3:long",
     "perf:v2:3:long",
-    "perf:mut:3:long"
+    "perf:v3:3:long"
    ]
   },
   {
@@ -134,31 +113,24 @@
      "ref": "cfb8312"
     },
     {
-     "name": "patch",
-     "build": {},
-     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
-    },
-    {
      "name": "v2",
      "build": {},
      "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
     },
     {
-     "name": "mut",
+     "name": "v3",
      "build": {},
-     "ref": "2ea9f93bf8d5413a9e48176524c053e3be92c673"
+     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
     }
    ],
    "steps": [
-    "ktest:v2",
+    "ktest:v3",
     "perf:main:3",
-    "perf:patch:3",
     "perf:v2:3",
-    "perf:mut:3",
+    "perf:v3:3",
     "perf:main:3:long",
-    "perf:patch:3:long",
     "perf:v2:3:long",
-    "perf:mut:3:long"
+    "perf:v3:3:long"
    ]
   },
   {
@@ -174,31 +146,24 @@
      "ref": "cfb8312"
     },
     {
-     "name": "patch",
-     "build": {},
-     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
-    },
-    {
      "name": "v2",
      "build": {},
      "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
     },
     {
-     "name": "mut",
+     "name": "v3",
      "build": {},
-     "ref": "2ea9f93bf8d5413a9e48176524c053e3be92c673"
+     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
     }
    ],
    "steps": [
-    "ktest:v2",
+    "ktest:v3",
     "perf:main:3",
-    "perf:patch:3",
     "perf:v2:3",
-    "perf:mut:3",
+    "perf:v3:3",
     "perf:main:3:long",
-    "perf:patch:3:long",
     "perf:v2:3:long",
-    "perf:mut:3:long"
+    "perf:v3:3:long"
    ]
   },
   {
@@ -214,31 +179,24 @@
      "ref": "cfb8312"
     },
     {
-     "name": "patch",
-     "build": {},
-     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
-    },
-    {
      "name": "v2",
      "build": {},
      "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
     },
     {
-     "name": "mut",
+     "name": "v3",
      "build": {},
-     "ref": "2ea9f93bf8d5413a9e48176524c053e3be92c673"
+     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
     }
    ],
    "steps": [
-    "ktest:v2",
+    "ktest:v3",
     "perf:main:3",
-    "perf:patch:3",
     "perf:v2:3",
-    "perf:mut:3",
+    "perf:v3:3",
     "perf:main:3:long",
-    "perf:patch:3:long",
     "perf:v2:3:long",
-    "perf:mut:3:long"
+    "perf:v3:3:long"
    ]
   }
  ]
