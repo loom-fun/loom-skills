@@ -189,6 +189,11 @@ for s in $steps; do
       step "prefix-cache pairs reps $p1"
       "$T" "$B/determinism.py" "$url" --model "$model" --pairs --reps "$p1" --log "$out/pairs.jsonl" > "$out/pairs.log" 2>&1
       cut -c1-400 "$out/pairs.log"; res[$s]=$(grep -c "a path gave two outputs" "$out/pairs.log")" prompts with a nondeterministic path, "$(grep -c "paths differ" "$out/pairs.log")" with hit != miss";;
+    pairs2)
+      curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
+      step "pair probe x $p1"
+      "$T" "$here/.github/scripts/pair_probe.py" "$url" --model "$model" --reps "${p1:-4}" ${p2:+--quick} > "$out/pair.log" 2>&1
+      res[$s]=$(tail -1 "$out/pair.log")" ("$(grep -c differs "$out/pair.log")" schedules)";;
     admit)
       # Admission only: a needle prompt of N tokens on a fresh server; admitted (it runs) or refused (503), then cancelled
       [ -f "$LOOM_SERVE_STATE/exp-$name.pid" ] && "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
