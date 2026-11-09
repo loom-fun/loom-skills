@@ -43,7 +43,7 @@ dir=$dest/$rtag
 if [ ! -x "$dir/llama-server" ] && [ ! -f "$dir/llama-server.exe" ]; then
   mkdir -p "$dir"
   echo "downloading $url" >&2
-  curl -fsSL --retry 3 -o "$dir/release.zip" "$url" >&2
+  curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 -o "$dir/release.zip" "$url" >&2   # GitHub's release CDN answers 504 for minutes at times
   if [ "$backend" = vulkan ]; then   # pinned archive: refuse any other bytes
     got=$(sha256sum "$dir/release.zip" | cut -d' ' -f1); asset=${url##*/}
     pin=$(grep -h " $asset\$" "$(dirname "$0")/../data/llamacpp-vulkan.sha256" | cut -d' ' -f1)
