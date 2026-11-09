@@ -64,6 +64,21 @@ def covered_tokens(info):
     cov = np.zeros(len(info), bool)
     for s in tile_starts(info): cov[s:s + 16] = True
     return cov
+def partial_tokens(info):
+    """Tokens g_attention_flash2_partial computes: those of a run of 9 or more tokens (one row, consecutive positions, live)
+    that no whole tile covers (the run's head and tail blocks, or all of it when it never fills a block)."""
+    cov = covered_tokens(info); out = np.zeros(len(info), bool); i = 0
+    while i < len(info):
+        j = i
+        while info[j, 2] != 0 and j + 1 < len(info) and info[j + 1, 2] != 0 and info[j + 1, 0] == info[i, 0] and info[j + 1, 1] == info[j, 1] + 1:
+            j += 1
+        if info[i, 2] != 0 and j - i + 1 >= 9:
+            out[i:j + 1] = ~cov[i:j + 1]
+        i = j + 1
+    return out
+def flash_covered(info):
+    """Tokens the flash kernels (whole tiles and partial tiles) compute; every other token is the listed fallback's."""
+    return covered_tokens(info) | partial_tokens(info)
 def list_launch(tv, t, info, sfx=""):
     """Build the epoch's work lists from INFO (%tiles, %flist, %fcount, each + SFX); TV: the token count's SSA value."""
     return (f"  %tiles{sfx} = check.generate.fill value(0) : tensor<{t}xi32>\n  %flist{sfx} = check.generate.fill value(0) : tensor<{t}xi32>\n"
@@ -608,7 +623,7 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
     orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
     hinfo = np.zeros((p0, 4), np.int32); hinfo[:, 1] = allpos[:p0]; hinfo[:, 2] = 1
     sinfo = np.zeros((t, 4), np.int32); sinfo[:, 1] = allpos[p0:]; sinfo[:, 2] = live
-    att_f = np.where(covered_tokens(sinfo)[:, None, None], att, 0.0)   # flash2 writes the listed tiles only
+    att_f = np.where(flash_covered(sinfo)[:, None, None], att, 0.0)   # flash2 and its partial kernel write the listed tiles only
     for nn, a in [("hq", qa[:p0].reshape(p0, -1)), ("hk", ka[:p0].reshape(p0, -1)), ("hv", va[:p0].reshape(p0, -1)), ("hinfo", hinfo),
                   ("sq", qa[p0:].reshape(t, -1)), ("sk", ka[p0:].reshape(t, -1)), ("sv", va[p0:].reshape(t, -1)), ("sinfo", sinfo),
                   ("orig", orig), ("qn", qn_.astype(np.float32)), ("kn", kn_.astype(np.float32)), ("sinks", snk), ("o", att.reshape(t, -1).astype(np.float32)), ("of", att_f.reshape(t, -1).astype(np.float32)),
@@ -1627,6 +1642,68 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
 }}
 """
     cases.append(COPY_ROWS)
+    # Which runs reach the flash kernels: a 100-token run at an unaligned position (partial head and tail blocks), a 9-token
+    # run (the shortest that qualifies) and an 8-token one (a verify span at most: stays on the split-K fallback), over
+    # padding. The flash and partial kernels fill exactly the tokens of runs of 9 or more.
+    info_r = epoch_info([(1, 301, 100), (2, 77, 8), (0, 1013, 9), (2, 400, 8), (None, 0, 11)])
+    q_r = (rng.standard_normal((len(info_r), QH, D)) * 2.5).astype(np.float32); g_r = rng.standard_normal(q_r.shape).astype(np.float32)
+    o_r = aliased_ref(q_r.astype(np.float16).astype(np.float64), info_r)
+    if cfg.get("attn_gate"):
+        o_r = o_r * gate_mul(g_r)
+    info_r4 = np.zeros((len(info_r), 4), np.int32); info_r4[:, :3] = info_r
+    cases.append(epoch_case("flash_prefill_runs", info_r, q_r, g_r, np.where(flash_covered(info_r4)[:, None, None], o_r, SENT), 0,
+                            ("g_attention_flash2", "g_attention_flash2_partial")))
+    def cut_case(sliding, cut):
+        """One prompt (row 1, positions 0..n-1, all below the flash floor of position 512) attended in one epoch, and as two
+        epochs cut at position CUT (the scheduler cuts a prefill wherever its budget ends): every token's result is
+        bit-identical. A cut leaves partial 16-token tiles, which only the split-K fallback can compute, so a token whose
+        position is below 512 must never be flash2's, whole tile or not."""
+        n, QD = 100, QH * D
+        x_q = (rng.standard_normal((n, QH, D)) * 2.5).astype(np.float32); x_g = rng.standard_normal((n, QH, D)).astype(np.float32)
+        text = ""
+        for k, (lo, hi) in enumerate(((0, n), (0, cut), (cut, n))):
+            info3 = epoch_info([(1, lo, hi - lo)]); t = len(info3)
+            info = np.zeros((t, 4), np.int32); info[:, :3] = info3
+            q = np.zeros((t, QH, D), np.float32); g = np.zeros((t, QH, D), np.float32)
+            q[:hi - lo], g[:hi - lo] = x_q[lo:hi], x_g[lo:hi]
+            for nm, arr in (("info", info), ("q", q.reshape(t, QD)), ("g", g.reshape(t, QD))):
+                save(f"fc_{nm}{sliding}_{cut}_{k}", arr)
+            OT = f"tensor<{t}x{QD}xf32>"; IT = f"tensor<{t}x4xi32>"; PT = f"tensor<{t * QH * 64 * D}xf32>"; MT = f"tensor<{t * QH * 64 * 2}xf32>"
+            text += f"""  %t{k} = check.literal value({t}) : index
+  %q{k} = check.file.read.npy path("fc_q{sliding}_{cut}_{k}.npy") : {OT}
+  %g{k} = check.file.read.npy path("fc_g{sliding}_{cut}_{k}.npy") : {OT}
+  %info{k} = check.file.read.npy path("fc_info{sliding}_{cut}_{k}.npy") : {IT}
+  %o{k} = check.generate.fill value(0.0) : {OT}
+  %pacc{k} = check.generate.fill value(0.0) : {PT}
+  %pml{k} = check.generate.fill value(0.0) : {MT}
+  kernel.launch @g_attention_split[%t{k}](%t{k}, %layer, %sliding, %ctx, %pool, %q{k}, %info{k}, %orig, %arena, %pacc{k}, %pml{k}) : [index](index, index, i32, index, index, {OT}, {IT}, {OA}, {AA}, {PT}, {MT})
+  kernel.launch @g_attention_combine[%t{k}](%t{k}, %sliding, %info{k}, %pacc{k}, %pml{k}, %g{k}, %o{k}) : [index](index, i32, {IT}, {PT}, {MT}, {OT}, {OT})
+{list_launch(f"%t{k}", t, f"%info{k}", k)}  kernel.launch @g_attention_flash2[%t{k}](%t{k}, %layer, %sliding, %ctx, %pool, %q{k}, %g{k}, %info{k}, %tiles{k}, %orig, %arena, %o{k}) : [index](index, index, i32, index, index, {OT}, {OT}, {IT}, tensor<{t}xi32>, {OA}, {AA}, {OT})
+"""
+        for nm, k, skip, rows in (("a", 1, 0, cut), ("b", 2, 0, n - cut)):   # the cut epochs' rows against the one epoch's
+            XT = f"tensor<{rows}x{QD}xf32>"; OT0 = f"tensor<{len(epoch_info([(1, 0, n)]))}x{QD}xf32>"
+            OTk = f"tensor<{len(epoch_info([(1, 0, cut if k == 1 else n - cut)]))}x{QD}xf32>"
+            text += f"""  %nx{nm} = check.literal value({rows}) : index
+  %skip0{nm} = check.literal value({0 if nm == 'a' else cut}) : index
+  %skipk{nm} = check.literal value(0) : index
+  %xf{nm} = check.generate.fill value(0.0) : {XT}
+  %xc{nm} = check.generate.fill value(1.0) : {XT}
+  kernel.launch @test_copy_rows[%nx{nm}](%nx{nm}, %wd, %skip0{nm}, %t0, %o0, %xf{nm}) : [index](index, index, index, index, {OT0}, {XT})
+  kernel.launch @test_copy_rows[%nx{nm}](%nx{nm}, %wd, %skipk{nm}, %t{k}, %o{k}, %xc{nm}) : [index](index, index, index, index, {OTk}, {XT})
+  check.expect.close actual(%xc{nm}) expected(%xf{nm}) atol(0.0) rtol(0.0) nan(different) : {XT}
+"""
+        return f"""check.case public @flash_cut_invariant{'_window' if sliding else ''}_c{cut} {{
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value({sliding}) : i32
+  %ctx = check.literal value({ctx_a}) : index
+  %pool = check.literal value({pool_a}) : index
+  %wd = check.literal value({QD}) : index
+  %orig = check.file.read.npy path("f_orig_a.npy") : {OA}
+  %arena = check.file.read.npy path("f_arena_a.npy") : {AA}
+{text}  check.return
+}}
+"""
+    cases += [cut_case(s, c) for s in ((0, 1) if WIN else (0,)) for c in (53, 48, 75)]   # cuts inside a tile / on a tile boundary / in a later tile
     cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
     cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
 
@@ -1881,6 +1958,11 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
 }}
 """)
 import re
+def add_partial(c):   # gen_llm.py launches the partial tiles' kernel after every flash launch (the flash_prefill* cases pick their kernels)
+    if re.match(r"\s*check\.case public @flash_prefill", c):
+        return c
+    return re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_partial[\2", c, flags=re.M)
+cases = [add_partial(c) for c in cases]
 if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
     cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
                     flags=re.M) for c in cases] + DEEP_CASES   # these launch the two kernels as they test them
@@ -1888,7 +1970,7 @@ if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after e
 # chain and flash cases at that head count, from a child run whose kernels, cases and files take the suffix.
 if KS:
     cases = [re.sub(r"check\.case public @(\w+) \{", rf"check.case public @\1{KS} {{", re.sub(
-        r"@(g_qk_rope_store|g_attention_split|g_attention_combine|g_gate_heads|g_attention_flash2(?:_deep)?)\[", rf"@\1{KS}[", c))
+        r"@(g_qk_rope_store|g_attention_split|g_attention_combine|g_gate_heads|g_attention_flash2(?:_deep|_partial)?)\[", rf"@\1{KS}[", c))
         .replace('.npy")', f'{KS}.npy")') for c in cases if re.match(r"\s*check\.case public @(attention_chain|attention_span|flash_prefill)", c)]
 for h in sorted(set(cfg.get("layer_heads") or []) - {QH}):
     hc = os.path.join(out, f"cfg_h{h}.json"); json.dump(dict(cfg, heads=h, layer_heads=None), open(hc, "w"))
