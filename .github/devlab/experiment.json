@@ -6,16 +6,18 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "kt",
-   "build": {},
+   "name": "kt_k",
+   "build": {
+    "FLASH2_STALE_MODE": "k"
+   },
    "steps": [
     "ktest"
    ]
   },
   {
-   "name": "kt_real",
+   "name": "kt_v",
    "build": {
-    "FLASH2_STALE_REAL": "1"
+    "FLASH2_STALE_MODE": "v"
    },
    "steps": [
     "ktest"
