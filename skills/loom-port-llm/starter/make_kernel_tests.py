@@ -1540,6 +1540,72 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
   }
   kernel.return
 }
+
+// Test helper: out[col][d] = sum_k a[d][k] * p[col][k] on one 16x16x16 WMMA (a: F16 V^T tile, p: F32 weights rounded to F16).
+kernel.def export("test_wmma_zero") @test_wmma_zero(%n: index) {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
+} launch(%n_arg: index, %a: buffer, %p: buffer, %out: buffer) {
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c16 = index.constant 16 : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %col = index.rem %lane, %c16 : index
+  %half = index.div %lane, %c16 : index
+  %a_view = buffer.view %a[%zero] : buffer -> view<16x16xf16>
+  %p_view = buffer.view %p[%zero] : buffer -> view<16x16xf32>
+  %out_view = buffer.view %out[%zero] : buffer -> view<16x16xf32>
+  %pf = vector.load %p_view[%col, %c0] : view<16x16xf32> -> vector<16xf32>
+  %ph = vector.fptrunc %pf : vector<16xf32> to vector<16xf16>
+  %pb = vector.fragment<rhs> %ph shape [%c16, %c16] : vector<16xf16>
+  %al = vector.fragment.load<lhs> %a_view[%c0, %c0] shape [%c16, %c16] : view<16x16xf16> -> vector<16xf16>
+  %z8 = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %z8 shape [%c16, %c16] : vector<8xf32>
+  %r = vector.mma %al, %pb, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  %e0 = index.constant 0 : index
+  %d0_b = index.constant 0 : index
+  %d0 = index.add %d0_b, %half : index
+  %v0 = vector.extract %r[%e0] : vector<8xf32> -> f32
+  view.store %v0, %out_view[%col, %d0] : f32, view<16x16xf32>
+  %e1 = index.constant 1 : index
+  %d1_b = index.constant 2 : index
+  %d1 = index.add %d1_b, %half : index
+  %v1 = vector.extract %r[%e1] : vector<8xf32> -> f32
+  view.store %v1, %out_view[%col, %d1] : f32, view<16x16xf32>
+  %e2 = index.constant 2 : index
+  %d2_b = index.constant 4 : index
+  %d2 = index.add %d2_b, %half : index
+  %v2 = vector.extract %r[%e2] : vector<8xf32> -> f32
+  view.store %v2, %out_view[%col, %d2] : f32, view<16x16xf32>
+  %e3 = index.constant 3 : index
+  %d3_b = index.constant 6 : index
+  %d3 = index.add %d3_b, %half : index
+  %v3 = vector.extract %r[%e3] : vector<8xf32> -> f32
+  view.store %v3, %out_view[%col, %d3] : f32, view<16x16xf32>
+  %e4 = index.constant 4 : index
+  %d4_b = index.constant 8 : index
+  %d4 = index.add %d4_b, %half : index
+  %v4 = vector.extract %r[%e4] : vector<8xf32> -> f32
+  view.store %v4, %out_view[%col, %d4] : f32, view<16x16xf32>
+  %e5 = index.constant 5 : index
+  %d5_b = index.constant 10 : index
+  %d5 = index.add %d5_b, %half : index
+  %v5 = vector.extract %r[%e5] : vector<8xf32> -> f32
+  view.store %v5, %out_view[%col, %d5] : f32, view<16x16xf32>
+  %e6 = index.constant 6 : index
+  %d6_b = index.constant 12 : index
+  %d6 = index.add %d6_b, %half : index
+  %v6 = vector.extract %r[%e6] : vector<8xf32> -> f32
+  view.store %v6, %out_view[%col, %d6] : f32, view<16x16xf32>
+  %e7 = index.constant 7 : index
+  %d7_b = index.constant 14 : index
+  %d7 = index.add %d7_b, %half : index
+  %v7 = vector.extract %r[%e7] : vector<8xf32> -> f32
+  view.store %v7, %out_view[%col, %d7] : f32, view<16x16xf32>
+  kernel.return
+}
 """
 
     def invariance_case(sliding, start=5):   # start: X's first position mod 16, or 'zero' (a prompt's own start)
@@ -1751,6 +1817,37 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
     cases += [masked_case(301, 100, "p301"), masked_case(0, 53, "p0"), masked_case(40, 47, "p40"),
               # inside a whole tile: token 304 (the tile's first) must not see the V of tokens 305-335
               masked_case(304, 32, "whole", compare=1, diff_from=305)]
+    # Does a weight of exactly 0 on a key hide that key's V in the 16x16x16 WMMA? (flash2 sums P^T V^T this way)
+    wa = (rng.standard_normal((16, 16)) * 3).astype(np.float16); wb = wa.copy(); wb[:, 15] = (rng.standard_normal(16) * 7).astype(np.float16)
+    wp = rng.random((16, 16)).astype(np.float32); wp[:, 15] = 0.0
+    wa2 = wa.copy(); wb2 = wa.copy(); wb2[:, 1:] = (rng.standard_normal((16, 15)) * 7).astype(np.float16)
+    wp2 = np.triu(rng.random((16, 16)).astype(np.float32).T).T   # column c: weights on keys <= c
+    wp2 = np.where(np.arange(16)[None, :] <= np.arange(16)[:, None], rng.random((16, 16)), 0.0).astype(np.float32)
+    for nm_, arr_ in (("wa", wa), ("wb", wb), ("wp", wp), ("wa2", wa2), ("wb2", wb2), ("wp2", wp2)):
+        save("w_" + nm_, arr_)
+    def wmma_case(name, a1, a2, pp, rows):
+        return f"""check.case public @{name} {{
+  %n = check.literal value(1) : index
+  %rows = check.literal value({rows}) : index
+  %w = check.literal value(16) : index
+  %zero_i = check.literal value(0) : index
+  %a1 = check.file.read.npy path("w_{a1}.npy") : tensor<16x16xf16>
+  %a2 = check.file.read.npy path("w_{a2}.npy") : tensor<16x16xf16>
+  %p = check.file.read.npy path("w_{pp}.npy") : tensor<16x16xf32>
+  %o1 = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %o2 = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %x1 = check.generate.fill value(0.0) : tensor<{rows}x16xf32>
+  %x2 = check.generate.fill value(1.0) : tensor<{rows}x16xf32>
+  kernel.launch @test_wmma_zero[%n](%n, %a1, %p, %o1) : [index](index, tensor<16x16xf16>, tensor<16x16xf32>, tensor<16x16xf32>)
+  kernel.launch @test_wmma_zero[%n](%n, %a2, %p, %o2) : [index](index, tensor<16x16xf16>, tensor<16x16xf32>, tensor<16x16xf32>)
+  %sixteen = check.literal value(16) : index
+  kernel.launch @test_copy_rows[%rows](%rows, %w, %zero_i, %sixteen, %o1, %x1) : [index](index, index, index, index, tensor<16x16xf32>, tensor<{rows}x16xf32>)
+  kernel.launch @test_copy_rows[%rows](%rows, %w, %zero_i, %sixteen, %o2, %x2) : [index](index, index, index, index, tensor<16x16xf32>, tensor<{rows}x16xf32>)
+  check.expect.close actual(%x2) expected(%x1) atol(0.0) rtol(0.0) nan(different) : tensor<{rows}x16xf32>
+  check.return
+}}
+"""
+    cases += [wmma_case("wmma_zero_weight_key15", "wa", "wb", "wp", 16), wmma_case("wmma_zero_weight_causal_col0", "wa2", "wb2", "wp2", 1)]
     cases += [cut_case(s, c) for s in ((0, 1) if WIN else (0,)) for c in (53, 48, 75)]   # cuts inside a tile / on a tile boundary / in a later tile
     # Keys past a run's last position are not written yet: stale memory, possibly NaN. A partial tail tile must not let them
     # reach the output (0 * NaN): the run (row 1, positions 301-400) ends one token into a block, over an arena whose row-1
