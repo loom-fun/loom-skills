@@ -6,7 +6,8 @@ Candidates: no drafting; MTP (the GGUF's NextN block) at depths 1-4; DFlash (cfg
 at depths 3, 5, 7 (capped by its block); a Gemma-4 assistant (cfg["assistant"]) at depths 1-4; n-gram prompt lookup (any model, no weights) at depths 2, 3, 5. Each method
 is built once; a depth is only a model.json setting (the width-specialized stages compile on first use). Every
 candidate is served alone and timed on decode-heavy requests (short essay, code, a tool-call turn, a reasoning answer,
-a code edit that returns most of its input as agents' file edits do; greedy, client-side tokens/s). The fastest candidate
+a code edit that returns most of its input as agents' file edits do, and one decode after a 16k-token document, at most
+half the context; greedy, client-side tokens/s, harmonic mean: the long-context row counts as much as it costs). The fastest candidate
 wins if it beats no drafting by at least 3 %; its kind/depth go to cfg["drafter"] and pkg/ is rebuilt with it
 (build.py --draft auto reads them). Before it is kept, the fastest candidate must pass a concurrency check and the
 spec gate's equivalence check (loom-benchmark spec_check.py: the same requests at the candidate depth and at
@@ -30,7 +31,7 @@ SKILLS = os.environ.get("LOOM_SKILLS") or os.path.join(STARTER, "..", "..")
 SETUP = os.path.join(SKILLS, "loom-setup", "scripts")
 BENCH = os.path.join(SKILLS, "loom-benchmark", "scripts")
 sys.path.insert(0, BENCH)
-from bench_common import stream  # noqa: E402
+from bench_common import DOC_SIZES, doc, stream  # noqa: E402
 
 TOOLS = [{"type": "function", "function": {"name": "search", "description": "Search the web.",
           "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}]
@@ -54,15 +55,26 @@ def sh(*cmd, **kw):
     return subprocess.run([str(c) for c in cmd], check=True, text=True, capture_output=True, **kw)
 
 
-def measure(url, model, chat):
+# One decode request after a long document (TUNE_LONG tokens, at most half the context): each verified token pays its
+# decode attention over the whole KV and a drafter attends the context too, so the depth that wins on short text can
+# lose at long context (Qwen3-8B DFlash at 32k: depth 7 13.7 tok/s, depth 3 20.1, none 19.5). TUNE_LONG=0 leaves it out.
+LONG_CTX = int(os.environ.get("TUNE_LONG", "16000"))
+
+
+def measure(url, model, chat, context=0):
+    """Harmonic mean of the workload's decode tok/s (the rate of generating the same number of tokens in each)."""
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
     stream(url, model, WORK[0][0], 16, extra=off)                       # warm-up (weights, first compiles)
+    work = list(WORK)
+    n = max((d for d in DOC_SIZES if d <= min(LONG_CTX, context // 2)), default=0)
+    if n >= 4000:
+        work.append(([{"role": "user", "content": "Write a long, detailed essay discussing this documentation.\n\n" + doc(n)}], {}))
     tps = []
-    for messages, extra in WORK:
-        r = stream(url, model, messages, 256, extra={**off, **extra})
+    for messages, extra in work:
+        r = stream(url, model, messages, 256, extra={**off, **extra}, timeout=900)
         if r.get("decode_tps"):
             tps.append(r["decode_tps"])
-    return statistics.mean(tps) if tps else 0.0
+    return statistics.harmonic_mean(tps) if tps else 0.0
 
 
 def concurrent_ok(url, model, chat):
@@ -71,7 +83,6 @@ def concurrent_ok(url, model, chat):
     A candidate that fails is not chosen."""
     import threading
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
-    from bench_common import doc
     body = doc(1000)
     prompts = [f"Question {i}: summarize part {i} of this text.\n\n" + body[i * 700:(i * 700) + 700 + 157 * i] for i in range(4)]
     for n, gap in ((2, 0.5), (4, 0.0), (4, 0.0), (2, 0.5)):
@@ -167,7 +178,8 @@ def main():
             t0 = time.time()
             try:
                 serve("tune", port, mem, path, env)
-                tps = measure(f"http://127.0.0.1:{port}", model_id, chat)
+                tps = measure(f"http://127.0.0.1:{port}", model_id, chat,
+                              card["presets"]["chat"]["execution"].get("context_capacity") or 0)
             except Exception as e:  # noqa: BLE001  a failing candidate is reported and skipped
                 print(f"tune: {kind} depth {depth}: {e}", file=sys.stderr)
                 tps = 0.0

@@ -108,7 +108,7 @@ credit in bits 8-15; plan word 4 holds the packed cursor (`encode_epoch`).
 
 Builds each available kind once at the full native context (build.py sizes each candidate's memory; a drafter adds
 KV per position), serves each depth (a `model.json` setting; DFlash up to the drafter's block - 1) alone, times
-decode-heavy requests (essay, code, a tool call, a reasoning answer; thinking off) and ranks candidates that beat
+decode-heavy requests (essay, code, a tool call, a reasoning answer; thinking off) plus one decode after a 16k document (`TUNE_LONG`, harmonic mean) and ranks candidates that beat
 no drafting by 3 %. The fastest that also passes the spec gate's equivalence check (spec_check.py's requests at the
 candidate depth vs draft_depth 0 of the same package: identical) and a concurrency check (consistency.py-style
 ~300-token prompts, two 0.5 s apart and four at once, twice each: agentic serving overlaps requests) wins; one that
