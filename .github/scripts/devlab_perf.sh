@@ -35,7 +35,9 @@
 #          c4:V                 c4_steady.py 4 streams on V
 #          llama:N[:long|-][:M] llama.cpp (card build + llama_spec, n-max M) perf.py N times, llama_decode.py tokens/step
 #          llamac4[:M]          c4_steady.py on llama.cpp
-#          (llama[@vulkan], llamac4[@vulkan], textmatch@vulkan: the same with the Vulkan build; files perf_llamacpp-vulkan_nN.jsonl)
+#          (llama[@vulkan], llamac4[@vulkan]: the same with the Vulkan build; files perf_llamacpp-vulkan_nN.jsonl. Modifiers after
+#          @vulkan pick its server configuration, e.g. llama@vulkan.np1.nospec:2 : .np1 one slot of 36864 tokens (no 4-stream
+#          step), .perslot 4 slots of 36864, .nospec no drafting; files perf_llamacpp-vulkan.np1.nospec_nN.jsonl)
 #          textmatch:V          text_match.py: first 50 tokens of perf.py's prompts on V, then on llama.cpp
 #          consistency:V:N      consistency.py N times (NOT DETERMINISTIC / concurrent mismatch counts)
 #          determinism:V:C:R    determinism.py (issue #39's script, when present)
@@ -199,13 +201,14 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   local spec; spec=$(q "print((j.get('llama_spec') or e.get('llama_spec') or '').replace('{drafter}', '$drafter'))")
   [ -n "${1:-}" ] && spec=$(echo "$spec" | sed -E "s/--spec-draft-n-max [0-9]+/--spec-draft-n-max $1/")
+  [[ $MODS == *nospec* ]] && spec=""   # @vulkan.nospec: no drafting
   local h; for h in $(echo "$spec" | grep -oE '\{hf:[^}]+\}' | sort -u); do   # {hf:OWNER/REPO/FILE}, fetched once per runner
     local f=${h#\{hf:}; f=${f%\}}; local dst=$WORK/hf/$f r=${f%/*}
     [ -f "$dst" ] || { mkdir -p "${dst%/*}" && curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
       "https://huggingface.co/${r}/resolve/main/${f##*/}" -o "$dst.part" && mv "$dst.part" "$dst"; } || { echo "FAIL: fetch $f"; return 1; }
     spec=${spec//"$h"/$dst}
   done
-  spec="$BK|$spec"   # the backend is part of what runs
+  spec="$BK$MODS|$spec"   # the backend and its modifiers are part of what runs
   [ "$spec" = "$LSPEC" ] && curl -sf "$lurl/health" >/dev/null 2>&1 && return 0
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
   local dir
@@ -217,10 +220,14 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   fi
   export LLAMA_SPEC=${spec#*|}; LSPEC=$spec
   step "llama.cpp $BK ${dir##*/}: $LLAMA_SPEC"
-  local kv=(65536 unified)   # one KV pool shared by 4 slots (-kvu), as the ROCm baseline
-  # auto: per-slot unless the server drafts with DFlash (b12211 aborts a DFlash server with 4 concurrent streams on per-slot caches)
-  [ "$BK" = vulkan ] && { [ "$vkv" = per-slot ] || { [ "$vkv" = auto ] && [[ "$LLAMA_SPEC" != *draft-dflash* ]]; }; } && kv=(36864)
-  LLAMACPP_BACKEND=$BK LLAMACPP_DIR=$dir LLAMACPP_ARGS_FILE=$out/llamacpp_args$bkt.txt "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 4 "${kv[@]}" | tail -1
+  local np=4 kv=(65536 unified)   # one KV pool shared by 4 slots (-kvu), as the ROCm baseline
+  if [ "$BK" = vulkan ]; then   # modifiers: .np1 (one slot of 36864 tokens), .perslot (4 slots of 36864); else vulkan_kv
+    if [[ $MODS == *np1* ]]; then np=1; kv=(36864)
+    elif [[ $MODS == *perslot* ]]; then kv=(36864)
+    # auto: per-slot unless the server drafts with DFlash (b12211 aborts a DFlash server with 4 concurrent streams on per-slot caches)
+    elif [ "$vkv" = per-slot ] || { [ "$vkv" = auto ] && [[ "$LLAMA_SPEC" != *draft-dflash* ]]; }; then kv=(36864); fi
+  fi
+  LLAMACPP_BACKEND=$BK LLAMACPP_DIR=$dir LLAMACPP_ARGS_FILE=$out/llamacpp_args$bkt.txt "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" $np "${kv[@]}" | tail -1
   sed -i -e "s#$WORK/hf/#hf:#g" -e "s#$card/#card:#g" "$out/llamacpp_args$bkt.txt" 2>/dev/null   # runner paths out of the recorded arguments
   [ "${PIPESTATUS[0]}" = 0 ] || { cp "$LLAMACPP_STATE/llamacpp-$LLAMA_PORT.log" "$out/llamacpp_start$bkt.log" 2>/dev/null; return 1; }
 }
@@ -229,7 +236,7 @@ echo "thinking: $TH (sent to both engines)"
 declare -A res
 for s in $steps; do
   IFS=: read -r kind p1 p2 p3 <<< "$s"
-  BK=rocm; bkt=; case $kind in *@*) BK=${kind#*@}; bkt=-$BK; kind=${kind%@*};; esac   # llama@vulkan: the other backend's build
+  BK=rocm; bkt=; MODS=; case $kind in *@*) bkt=-${kind#*@}; BK=${kind#*@}; MODS=${BK#"${BK%%.*}"}; BK=${BK%%.*}; kind=${kind%@*};; esac   # llama@vulkan: the other backend's build
   [ "$BK" = rocm ] || [ "$vtag" != - ] || { echo "$s: set llamacpp_vulkan"; res[$s]=ERROR; continue; }
   [ "${p2:-}" = - ] && p2=""
   case $kind in
