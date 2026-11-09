@@ -1703,21 +1703,22 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
 {text}  check.return
 }}
 """
-    def masked_case(p0, n, tag):
+    def masked_case(p0, n, tag, compare=None, diff_from=None):
         """One run (row 1, positions p0..p0+n-1) attended over two arenas that differ only in row 1's keys and values past its
         last position (finite values): the outputs are bit-identical, so what a partial tile reads past the run (stale memory,
         or the real keys of a later token that a whole tile of the uncut run reads) never reaches the result."""
         QD = QH * D
-        last = 1024 + p0 + n   # row 1's first arena slot past the run
+        last = 1024 + (diff_from if diff_from is not None else p0 + n)   # row 1's first arena slot that differs
         ab = arena_a.copy(); ab[:, last:2 * 1024] = (rng.standard_normal(ab[:, last:2 * 1024].shape) * 3).astype(np.float16)
         save(f"f_arena_m{tag}", ab.reshape(-1))
         info3 = epoch_info([(1, p0, n)]); t = len(info3)
+        cmp_n = compare or n   # rows compared: the first CMP_N tokens
         info = np.zeros((t, 4), np.int32); info[:, :3] = info3
         q = np.zeros((t, QH, D), np.float32); g = np.zeros((t, QH, D), np.float32)
         q[:n] = (rng.standard_normal((n, QH, D)) * 2.5).astype(np.float32); g[:n] = rng.standard_normal((n, QH, D)).astype(np.float32)
         for nm, arr in (("info", info), ("q", q.reshape(t, QD)), ("g", g.reshape(t, QD))):
             save(f"fm_{nm}_{tag}", arr)
-        OT = f"tensor<{t}x{QD}xf32>"; IT = f"tensor<{t}x4xi32>"; PT = f"tensor<{t * QH * 64 * D}xf32>"; MT = f"tensor<{t * QH * 64 * 2}xf32>"; XT = f"tensor<{n}x{QD}xf32>"
+        OT = f"tensor<{t}x{QD}xf32>"; IT = f"tensor<{t}x4xi32>"; PT = f"tensor<{t * QH * 64 * D}xf32>"; MT = f"tensor<{t * QH * 64 * 2}xf32>"; XT = f"tensor<{cmp_n}x{QD}xf32>"
         text = ""
         for k in (0, 1):
             text += f"""  %q{k} = check.file.read.npy path("fm_q_{tag}.npy") : {OT}
@@ -1735,7 +1736,7 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
 """
         return f"""check.case public @flash_masked_keys_{tag} {{
   %t = check.literal value({t}) : index
-  %nx = check.literal value({n}) : index
+  %nx = check.literal value({cmp_n}) : index
   %skip = check.literal value(0) : index
   %layer = check.literal value(0) : index
   %sliding = check.literal value(0) : i32
@@ -1747,7 +1748,9 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
   check.return
 }}
 """
-    cases += [masked_case(301, 100, "p301"), masked_case(0, 53, "p0"), masked_case(40, 47, "p40")]
+    cases += [masked_case(301, 100, "p301"), masked_case(0, 53, "p0"), masked_case(40, 47, "p40"),
+              # inside a whole tile: token 304 (the tile's first) must not see the V of tokens 305-335
+              masked_case(304, 32, "whole", compare=1, diff_from=305)]
     cases += [cut_case(s, c) for s in ((0, 1) if WIN else (0,)) for c in (53, 48, 75)]   # cuts inside a tile / on a tile boundary / in a later tile
     # Keys past a run's last position are not written yet: stale memory, possibly NaN. A partial tail tile must not let them
     # reach the output (0 * NaN): the run (row 1, positions 301-400) ends one token into a block, over an arena whose row-1
