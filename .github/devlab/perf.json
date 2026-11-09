@@ -2,7 +2,7 @@
  "_comment": "Vulkan baseline jobs.",
  "jobs": [
   {
-   "name": "c4-perslot-a",
+   "name": "unsloth-Qwen3-4B-Instruct-2507",
    "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
    "memory_bytes": 63000000000,
    "kit": null,
@@ -15,67 +15,66 @@
     }
    ],
    "steps": [
-    "llamac4@vulkan",
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long",
     "llamac4@vulkan"
-   ],
-   "vulkan_kv": "per-slot"
+   ]
   },
   {
-   "name": "c4-perslot-b",
-   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
-   "memory_bytes": 63000000000,
+   "name": "unsloth-Llama-3.2-3B-Instruct",
+   "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
+   "memory_bytes": 29000000000,
    "kit": null,
-   "llamacpp": "b1368",
+   "llamacpp": "b1369",
    "llamacpp_vulkan": "b12211",
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
+   "llama_spec": "",
    "variants": [
     {
      "name": "card"
     }
    ],
    "steps": [
-    "llamac4@vulkan",
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long",
     "llamac4@vulkan"
-   ],
-   "vulkan_kv": "per-slot"
+   ]
   },
   {
-   "name": "c4-unified-a",
-   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
-   "memory_bytes": 63000000000,
-   "kit": null,
-   "llamacpp": "b1368",
+   "name": "unsloth-gemma-4-E4B-it",
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes": 31000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1369",
    "llamacpp_vulkan": "b12211",
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
+   "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:AtomicChat/gemma-4-E4B-it-assistant-GGUF/gemma-4-E4B-it-assistant.Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
    "variants": [
     {
      "name": "card"
     }
    ],
    "steps": [
-    "llamac4@vulkan",
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long",
     "llamac4@vulkan"
-   ],
-   "vulkan_kv": "unified"
-  },
-  {
-   "name": "c4-unified-b",
-   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
-   "memory_bytes": 63000000000,
-   "kit": null,
-   "llamacpp": "b1368",
-   "llamacpp_vulkan": "b12211",
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "llamac4@vulkan",
-    "llamac4@vulkan"
-   ],
-   "vulkan_kv": "unified"
+   ]
   }
  ]
 }

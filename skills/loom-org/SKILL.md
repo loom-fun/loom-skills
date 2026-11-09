@@ -221,7 +221,7 @@ Hand the card over and move the local GPU on to the next item.
    llamacpp_release-vulkan.sha256)" --fetched-programs "$(cat programs_sha256.txt)" --differs "..." --package DIR
    --source-kind devlab --run ID --url JOB_URL --device none --hrx-loom none` (refused if the job fetched other
    programs than DIR's), then `make_info.py build --from-info` as above. Its numbers are another DevLab job's: compare
-   engines by ratios, not across runners. Every server argument that differs from the ROCm baseline, or that the Vulkan
+   engines by ratios, not across runners. KV layout (`vulkan_kv`, default auto): per-slot caches, except unified (as ROCm) for DFlash servers, where b12211 aborts on per-slot caches; the unified pool makes b12211 Vulkan attend with a dense mask (no GPU fused flash attention over K/V rows), so record that as a `--differs` line too. Every server argument that differs from the ROCm baseline, or that the Vulkan
    server could not run, goes in as `--differs "setting: reason"` (shown on the card), never changed silently. Nothing in `org_status` reads it.
 4. Missing local metrics are not swept: a local GPU worker measures them in one quiet local session with both
    engines (step 5).
