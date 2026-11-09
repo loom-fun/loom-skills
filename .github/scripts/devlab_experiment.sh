@@ -276,6 +276,13 @@ EOF
       step "diag ${p1:-2} rounds"
       T=$T LOOM_ROOT=$root bash "$here/.github/scripts/devlab_diag.sh" "$pkg" "$out" "$mem" "${p1:-2}" 2>&1 | tee "$out/diag.log"
       res[$s]=$(grep "^DIAG" "$out/diag.log" | cut -c1-200 | tr '\n' ';');;
+    lperf)   # lperf[:N] Loom only, as devlab_perf.sh's perf steps: perf.py N times, then N times --long, on a fresh server
+      "$SV/stop.sh" "exp-$name" >/dev/null 2>&1; step serve; serve || { res[$s]=ERROR; continue; }
+      card_lib_sha=$("$T" -c "import sys; sys.path.insert(0, '$B/card'); import card_lib; print(card_lib.programs_sha256('$pkg'))")
+      echo "programs_sha256 $card_lib_sha" | tee "$out/lperf_programs.txt"
+      for i in $(seq 1 "${p1:-2}"); do (cd "$out" && "$T" "$B/perf.py" "$url" lperf --model "$model" --no-campaign --log lperf.jsonl | tail -1); done
+      for i in $(seq 1 "${p1:-2}"); do (cd "$out" && "$T" "$B/perf.py" "$url" lperf --model "$model" --no-campaign --log lperf.jsonl --long | tail -1); done
+      res[$s]="programs ${card_lib_sha:0:12}";;
     *) echo "unknown step $s"; res[$s]=ERROR;;
   esac
   echo "RESULT $name $s: ${res[$s]}"

@@ -1,11 +1,18 @@
 {
- "_comment": "Why gemma-4-E2B's head_dim-512 prefill flash (#116, 57.6 KB LDS, 512 lanes) is 2.3x faster than the old one on local Strix Halos but not on DevLab: machine facts and an LDS-padding A/B of the old kernel. Two runners.",
- "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
- "memory_bytes": 16000000000,
+ "_comment": "Re-measure Loom (only) on DevLab today, on the published programs, for the cards with the largest recorded DevLab-vs-local prefill gaps: is the gap the machine, or how the recorded DevLab session measured? lfm3omni-48g: the local session's memory budget.",
+ "card": "loom-fun/unsloth-Qwen3.5-2B-loom",
+ "memory_bytes": 9000000000,
  "kit": null,
  "llamacpp": "b1370",
+ "steps": ["lperf:2"],
  "variants": [
-  {"name": "lds-a", "steps": ["diag:2"]},
-  {"name": "lds-b", "steps": ["diag:2"]}
+  {"name": "q35-2b"},
+  {"name": "q3-14b", "card": "loom-fun/ggml-org-Qwen3-14B-loom", "memory_bytes": 31000000000},
+  {"name": "q25-32b", "card": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom", "memory_bytes": 49000000000},
+  {"name": "lfm3omni", "card": "loom-fun/ggml-org-LFM3-Omni-2B-loom", "memory_bytes": 9000000000},
+  {"name": "lfm3omni-48g", "card": "loom-fun/ggml-org-LFM3-Omni-2B-loom", "memory_bytes": 48000000000},
+  {"name": "laguna", "card": "loom-fun/ggml-org-Laguna-XS-2.1-loom", "memory_bytes": 81000000000},
+  {"name": "bolt-e4b", "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom", "memory_bytes": 36000000000},
+  {"name": "g4-e4b", "card": "loom-fun/unsloth-gemma-4-E4B-it-loom", "memory_bytes": 31000000000}
  ]
 }
