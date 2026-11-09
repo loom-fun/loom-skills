@@ -1,12 +1,12 @@
 {
- "_comment": "o122c (do not merge): Ornith-1.5-122B card programs vs rebuild from main (#193), same runner.",
+ "_comment": "o122c (do not merge): devlab-perf session of the republished Ornith-1.5-122B programs.",
  "card": "loom-fun/bartowski-Ornith-1.5-122B-loom",
  "memory_bytes": 106000000000,
  "kit": null,
  "llamacpp": "b1370",
  "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
  "jobs": [
-  {"name": "ab", "variants": [{"name": "card"}, {"name": "main", "build": {}, "build_args": ["--memory-gib", "98.7"]}],
-   "steps": ["perf:card:2:long", "perf:main:2:long", "c4:card", "c4:main"]}
+  {"name": "perf", "variants": [{"name": "card"}],
+   "steps": ["perf:card:2", "perf:card:2:long", "llama:2", "llama:2:long", "c4:card", "llamac4"]}
  ]
 }
