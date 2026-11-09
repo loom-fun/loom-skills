@@ -59,8 +59,8 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 | reasoning / thinking | ✅ | always on |
 | reasoning effort | — | not applicable |
 | speculative decoding | ✅ | DFlash, depth 3, on by default; drafter [incoai/Flint-DFlash2-GGUF](https://huggingface.co/incoai/Flint-DFlash2-GGUF) |
-| image input | — | not applicable |
-| audio input / output | — | not applicable |
+| image input | ? | not determined |
+| audio input / output | ? | not determined |
 | sampling | ✅ | `temperature`, `top_p`, `top_k`, `seed` |
 | context size | ✅ | 262,144 tokens per request |
 | concurrency | ✅ | 4 concurrent requests |

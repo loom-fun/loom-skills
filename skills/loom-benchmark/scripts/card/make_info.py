@@ -85,7 +85,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 from card_lib import (DRAFTED_ROWS, EVIDENCE_ID, MEDIAN_METRICS, METRIC_KEYS,  # noqa: E402
-                      ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, load_json,
+                      HF, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, load_json,
                       load_package, metric_applies, package_facts, programs_sha256, require_valid, upstream_facts,
                       with_gate_features, write_json)
 
@@ -174,7 +174,9 @@ def cmd_build(a):
     upstream = None
     if a.upstream == "probe":
         ckpt = package_facts(pkg)["checkpoint"]
-        upstream = upstream_facts(ckpt["repo"], pkg["cfg"].get("model_id"))
+        legacy = "call_format" not in (pkg["cfg"].get("chat") or {})   # its chat block says nothing about tools: read the GGUF's template
+        url = f"{HF}/{ckpt['repo']}/resolve/{ckpt.get('revision') or 'main'}/{ckpt['file']}" if legacy else None
+        upstream = upstream_facts(ckpt["repo"], pkg["cfg"].get("model_id"), url)
     facts = package_facts(pkg, upstream)
     card, versions, baseline, sessions, gates = {}, {}, None, [], {}
     baselines = {}   # backend -> {"baseline", "session"}: the latest evidence of each backend replaces the earlier
@@ -672,8 +674,9 @@ def main(argv=None):
     b.add_argument("--status", choices=["paused", "active"], help="paused: work on this model has stopped (active: clears it)")
     b.add_argument("--next-steps", type=next_steps_file, help="a file of next steps, one per line (empty: none)")
     b.add_argument("--upstream", choices=["probe", "none"], default=os.environ.get("LOOM_CARD_UPSTREAM", "probe"),
-                   help="probe: ask Hugging Face whether the upstream model has vision or audio (an mmproj, vision_config, "
-                   "audio_* config keys), for the features that are n/a when it does not; none: offline, they are n/a")
+                   help="probe: ask Hugging Face what the upstream model has (vision: an mmproj or vision_config; audio: audio_* "
+                   "config keys; an older package: the GGUF chat template), for the features that are n/a when it has none; "
+                   "none: offline, they are not determined")
     b.add_argument("-o", default="info.json")
     p = sub.add_parser("perf")
     p.add_argument("--perf-log")

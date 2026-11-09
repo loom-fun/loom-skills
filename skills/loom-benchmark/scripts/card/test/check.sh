@@ -296,19 +296,32 @@ done
 got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 print(*[c.quant_of(n) for n in ('hyperclovax-1.5b-q4_k_m.gguf', 'x-Q4_K_Mfoo', 'x-Q4_K_M_foo', 'model-q4-k-m', 'x-Q8_0-q4_0')])" "$C")
 [ "$got" = "Q4_K_M Q4_K Q4_K_M None Q8_0" ] && echo "OK   quant_of" || { echo "FAIL quant_of: $got"; bad=1; }
-# features: n/a when the upstream model lacks it, no (red) only when upstream has it and Loom does not
+# features: n/a when the upstream model lacks it, no (red) only when upstream has it and Loom does not, unknown (a neutral ?)
+# when upstream cannot be read; an unreadable config.json never reads as absent, an org-less model_id falls back to the base_model tag
 got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
-fake = {'https://huggingface.co/api/models/o/m-GGUF': {'siblings': [{'rfilename': 'mmproj-m.gguf'}]},
-        'https://huggingface.co/o/m/resolve/main/config.json': {'audio_config': {}}}
-up = c.upstream_facts('o/m-GGUF', 'o/m', fake.get)
-txt = c.upstream_facts('o/t-GGUF', 'o/t', lambda u: {'siblings': []} if '/api/' in u else {'hidden': 1})
+H = 'https://huggingface.co/'
+fake = {H + 'api/models/o/m-GGUF': {'siblings': [{'rfilename': 'mmproj-m.gguf'}], 'tags': ['base_model:o/m']},
+        H + 'o/m/resolve/main/config.json': {'audio_config': {}},
+        H + 'api/models/o/t-GGUF': {'siblings': [], 'tags': ['base_model:o/t']}, H + 'o/t/resolve/main/config.json': {'hidden': 1},
+        H + 'api/models/o/g-GGUF': {'siblings': [], 'tags': ['base_model:o/g']},
+        H + 'api/models/o/g': {'config': {'architectures': ['XForCausalLM']}},
+        H + 'api/models/o/u-GGUF': {'siblings': [], 'tags': ['base_model:o/u']},
+        H + 'api/models/o/u': {'config': {'architectures': ['XForConditionalGeneration']}}}
+up = c.upstream_facts('o/m-GGUF', 'bare-name', fetch_json=fake.get)
+txt = c.upstream_facts('o/t-GGUF', 'o/t', fetch_json=fake.get)
+gated = c.upstream_facts('o/g-GGUF', 'o/g', fetch_json=fake.get)
+und = c.upstream_facts('o/u-GGUF', 'o/u', 'http://x/y.gguf', fetch_json=fake.get, fetch_template=lambda u: 'x {{ tools }} enable_thinking')
 cfg = {'chat': {'call_format': 'none', 'thinking': 'never'}, 'drafter': {'tuned': [{'kind': 'none'}, {'kind': 'dflash'}]}}
 f = c.derive_features({}, cfg, 'chat', {}, {}, None, up)
 g = c.derive_features({}, {'chat': {'call_format': 'hermes', 'thinking': 'never'}}, 'chat', {}, {}, None, txt)
-old = c.derive_features({}, {'chat': {}}, 'chat', {}, {}, None, txt)
-print(up['vision'], up['audio'], txt['vision'], txt['audio'], *[f[k]['status'] for k in ('image_input', 'audio', 'tool_calling', 'thinking', 'speculative_decoding')],
-      *[g[k]['status'] for k in ('image_input', 'audio', 'tool_calling', 'speculative_decoding')], old['tool_calling']['status'])" "$C")
-[ "$got" = "True True False False no no n/a n/a no n/a n/a yes n/a unknown" ] && echo "OK   features: n/a vs no" || { echo "FAIL features: $got"; bad=1; }
+old = c.derive_features({}, {'chat': {}}, 'chat', {}, {}, None, und)
+old0 = c.derive_features({}, {'chat': {}}, 'chat', {}, {}, None, None)
+st = lambda d, *ks: [d[k]['status'] for k in ks]
+print(up['vision'], up['audio'], txt['vision'], txt['audio'], gated['audio'], und['audio'], und['template'],
+      *st(f, 'image_input', 'audio', 'tool_calling', 'thinking', 'speculative_decoding'), c.drafting(f),
+      *st(g, 'image_input', 'audio', 'tool_calling', 'speculative_decoding'), *st(old, 'tool_calling', 'thinking', 'reasoning_effort', 'audio'),
+      *st(old0, 'tool_calling', 'audio'))" "$C")
+[ "$got" = "True True False False False None {'tools': True, 'thinking': True, 'reasoning_effort': False} no no n/a n/a yes False n/a n/a yes n/a no no n/a unknown unknown unknown" ] && echo "OK   features: n/a vs no vs not determined" || { echo "FAIL features: $got"; bad=1; }
 # org_status consistency checks: a nightly entry that differs from the card (memory_bytes, llama.cpp build) or is missing,
 # and a generator commit that is not on main: not an ancestor of main and in no merged PR (a throwaway git repo with one
 # commit on main and one on a branch; the PR lookup is injected: merged, open, unknown)

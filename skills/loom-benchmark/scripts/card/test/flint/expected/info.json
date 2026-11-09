@@ -9,7 +9,7 @@
     }
    },
    "audio": {
-    "status": "n/a",
+    "status": "unknown",
     "value": null
    },
    "concurrency": {
@@ -27,7 +27,7 @@
     }
    },
    "image_input": {
-    "status": "n/a",
+    "status": "unknown",
     "value": null
    },
    "max_output_tokens": {
