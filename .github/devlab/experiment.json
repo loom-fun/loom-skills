@@ -8,7 +8,7 @@
   {
    "name": "o122-patch",
    "build": {},
-   "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51",
+   "ref": "cab98e706a2791bb60146462e0a484f4e739dd19",
    "steps": [
     "consdefer:20"
    ]

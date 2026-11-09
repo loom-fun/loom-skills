@@ -2,106 +2,183 @@
  "_comment": "coder6 evidence: main (cfb8312) vs masked partial tiles (3206acd), same runner.",
  "jobs": [
   {
-   "name": "ab-coder",
+   "name": "gates-coder",
    "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
    "memory_bytes": 62000000000,
    "kit": null,
    "llamacpp": "b1370",
    "variants": [
     {
-     "name": "main",
+     "name": "patch",
      "build": {},
-     "ref": "cfb8312"
-    },
-    {
-     "name": "v2",
-     "build": {},
-     "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
-    },
-    {
-     "name": "v3",
-     "build": {},
-     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
+     "ref": "cab98e706a2791bb60146462e0a484f4e739dd19"
     }
    ],
    "steps": [
-    "ktest:v3",
-    "perf:main:3",
-    "perf:v2:3",
-    "perf:v3:3",
-    "perf:main:3:long",
-    "perf:v2:3:long",
-    "perf:v3:3:long"
+    "ktest:patch",
+    "gates:patch:dev"
    ]
   },
   {
-   "name": "ab-q38",
+   "name": "gates-q38",
    "card": "loom-fun/unsloth-Qwen3-8B-loom",
    "memory_bytes": 29000000000,
    "kit": null,
    "llamacpp": "b1368",
    "variants": [
     {
-     "name": "main",
+     "name": "patch",
      "build": {},
-     "ref": "cfb8312"
-    },
-    {
-     "name": "v2",
-     "build": {},
-     "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
-    },
-    {
-     "name": "v3",
-     "build": {},
-     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
+     "ref": "cab98e706a2791bb60146462e0a484f4e739dd19"
     }
    ],
    "steps": [
-    "ktest:v3",
-    "perf:main:3",
-    "perf:v2:3",
-    "perf:v3:3",
-    "perf:main:3:long",
-    "perf:v2:3:long",
-    "perf:v3:3:long"
+    "ktest:patch",
+    "gates:patch:dev"
    ]
   },
   {
-   "name": "ab-l31",
+   "name": "gates-l31",
    "card": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
    "memory_bytes": 35000000000,
    "kit": null,
    "llamacpp": "b1369",
    "variants": [
     {
-     "name": "main",
+     "name": "patch",
      "build": {},
-     "ref": "cfb8312"
-    },
-    {
-     "name": "v2",
-     "build": {},
-     "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
-    },
-    {
-     "name": "v3",
-     "build": {},
-     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
+     "ref": "cab98e706a2791bb60146462e0a484f4e739dd19"
     }
    ],
    "steps": [
-    "ktest:v3",
-    "perf:main:3",
-    "perf:v2:3",
-    "perf:v3:3",
-    "perf:main:3:long",
-    "perf:v2:3:long",
-    "perf:v3:3:long"
+    "ktest:patch",
+    "gates:patch:dev"
    ]
   },
   {
-   "name": "ab-g4",
+   "name": "gates-g4",
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes": 31000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "patch",
+     "build": {},
+     "ref": "cab98e706a2791bb60146462e0a484f4e739dd19"
+    }
+   ],
+   "steps": [
+    "ktest:patch",
+    "gates:patch:dev"
+   ]
+  },
+  {
+   "name": "gates-q359",
+   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "memory_bytes": 30000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "patch",
+     "build": {},
+     "ref": "cab98e706a2791bb60146462e0a484f4e739dd19"
+    }
+   ],
+   "steps": [
+    "ktest:patch",
+    "gates:patch:dev"
+   ]
+  },
+  {
+   "name": "gates-oss",
+   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
+   "memory_bytes": 28000000000,
+   "kit": "gpt-oss",
+   "llamacpp": "b1370",
+   "variants": [
+    {
+     "name": "patch",
+     "build": {},
+     "ref": "cab98e706a2791bb60146462e0a484f4e739dd19"
+    }
+   ],
+   "steps": [
+    "ktest:patch",
+    "gates:patch:dev"
+   ]
+  },
+  {
+   "name": "mut-coder",
+   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "memory_bytes": 62000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "variants": [
+    {
+     "name": "mut",
+     "build": {},
+     "ref": "24e7850f331c86195e3622649f0fc4ba9f7a6359"
+    }
+   ],
+   "steps": [
+    "ktest:mut"
+   ]
+  },
+  {
+   "name": "mut-q38",
+   "card": "loom-fun/unsloth-Qwen3-8B-loom",
+   "memory_bytes": 29000000000,
+   "kit": null,
+   "llamacpp": "b1368",
+   "variants": [
+    {
+     "name": "mut",
+     "build": {},
+     "ref": "24e7850f331c86195e3622649f0fc4ba9f7a6359"
+    }
+   ],
+   "steps": [
+    "ktest:mut"
+   ]
+  },
+  {
+   "name": "cons1-coder",
+   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "memory_bytes": 62000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "variants": [
+    {
+     "name": "patch",
+     "build": {},
+     "ref": "cab98e706a2791bb60146462e0a484f4e739dd19"
+    }
+   ],
+   "steps": [
+    "consistency:patch:40"
+   ]
+  },
+  {
+   "name": "cons2-coder",
+   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "memory_bytes": 62000000000,
+   "kit": null,
+   "llamacpp": "b1370",
+   "variants": [
+    {
+     "name": "patch",
+     "build": {},
+     "ref": "cab98e706a2791bb60146462e0a484f4e739dd19"
+    }
+   ],
+   "steps": [
+    "consistency:patch:40"
+   ]
+  },
+  {
+   "name": "gates-g4main",
    "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
    "memory_bytes": 31000000000,
    "kit": "gemma4",
@@ -111,92 +188,10 @@
      "name": "main",
      "build": {},
      "ref": "cfb8312"
-    },
-    {
-     "name": "v2",
-     "build": {},
-     "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
-    },
-    {
-     "name": "v3",
-     "build": {},
-     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
     }
    ],
    "steps": [
-    "ktest:v3",
-    "perf:main:3",
-    "perf:v2:3",
-    "perf:v3:3",
-    "perf:main:3:long",
-    "perf:v2:3:long",
-    "perf:v3:3:long"
-   ]
-  },
-  {
-   "name": "ab-q359",
-   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
-   "memory_bytes": 30000000000,
-   "kit": null,
-   "llamacpp": "b1369",
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "cfb8312"
-    },
-    {
-     "name": "v2",
-     "build": {},
-     "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
-    },
-    {
-     "name": "v3",
-     "build": {},
-     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
-    }
-   ],
-   "steps": [
-    "ktest:v3",
-    "perf:main:3",
-    "perf:v2:3",
-    "perf:v3:3",
-    "perf:main:3:long",
-    "perf:v2:3:long",
-    "perf:v3:3:long"
-   ]
-  },
-  {
-   "name": "ab-oss",
-   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
-   "memory_bytes": 28000000000,
-   "kit": "gpt-oss",
-   "llamacpp": "b1370",
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "cfb8312"
-    },
-    {
-     "name": "v2",
-     "build": {},
-     "ref": "ca94650754c0d7f87e009f05e9277e394eef8d78"
-    },
-    {
-     "name": "v3",
-     "build": {},
-     "ref": "f37213dc3df5512f71b5956dc8b85a003dc6860d"
-    }
-   ],
-   "steps": [
-    "ktest:v3",
-    "perf:main:3",
-    "perf:v2:3",
-    "perf:v3:3",
-    "perf:main:3:long",
-    "perf:v2:3:long",
-    "perf:v3:3:long"
+    "gates:main:dev"
    ]
   }
  ]
