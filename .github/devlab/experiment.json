@@ -8,13 +8,28 @@
  ],
  "variants": [
   {
-   "name": "reuse-main",
+   "name": "chatml-main",
+   "build": {},
+   "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8"
+  },
+  {
+   "name": "chatml-fixed",
    "build": {}
   },
   {
-   "name": "reuse-pr111",
+   "name": "gemma4-main",
+   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "memory_bytes": 16000000000,
+   "kit": "gemma4",
    "build": {},
-   "ref": "0540170e8b5737264c8f175285ea7411e6fcc0fd"
+   "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8"
+  },
+  {
+   "name": "gemma4-fixed",
+   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "memory_bytes": 16000000000,
+   "kit": "gemma4",
+   "build": {}
   }
  ]
 }
