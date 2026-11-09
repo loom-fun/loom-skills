@@ -544,25 +544,26 @@ for kb in range(KB):
     %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
     %need{kb} = scalar.ori %nb_diag{kb}, %nb_wins{kb} : i1
     {", ".join(outs)} = scf.if %need{kb} -> ({", ".join(["vector<8xf32>"] * NF)}) {{""")
-    for c in range(16):
-        A(f"""      %mc{c}_{kb} = scalar.constant {c} : i32
-      %qc{c}_{kb} = scalar.addi %pos0_i32, %mc{c}_{kb} : i32
-      %thr{c}_{kb} = scalar.subi %qc{c}_{kb}, %base{kb} : i32
-      %thr_v{c}_{kb} = vector.splat %thr{c}_{kb} : vector<16xi32>
-      %mhi{c}_{kb} = vector.cmpi sle, %iota16, %thr_v{c}_{kb} : vector<16xi32> -> vector<16xi1>
-      %lo{c}_{kb} = scalar.subi %thr{c}_{kb}, %c2047_i32 : i32
-      %loe{c}_{kb} = scf.select %is_sliding, %lo{c}_{kb}, %far_below : i32
-      %lo_v{c}_{kb} = vector.splat %loe{c}_{kb} : vector<16xi32>
-      %mlo{c}_{kb} = vector.cmpi sge, %iota16, %lo_v{c}_{kb} : vector<16xi32> -> vector<16xi1>
-      %m{c}_{kb} = vector.andi %mhi{c}_{kb}, %mlo{c}_{kb} : vector<16xi1>
-      %isc{c}_{kb} = scalar.cmpi eq, %lane_col32m, %mc{c}_{kb} : i32""")
-        for d in range(NF):
-            prev_acc = ins[d] if c == 0 else f"%ac{d}_{c - 1}_{kb}"
-            A(f"""      %vs{d}_{c}_{kb} = vector.select %m{c}_{kb}, %vl{d}_{kb}, %zero16h : vector<16xf16>
-      %vm{d}_{c}_{kb} = vector.fragment<lhs> %vs{d}_{c}_{kb} shape [%c16, %c16] : vector<16xf16>
-      %rm{d}_{c}_{kb} = vector.mma %vm{d}_{c}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
-      %ac{d}_{c}_{kb} = scf.select %isc{c}_{kb}, %rm{d}_{c}_{kb}, {prev_acc} : vector<8xf32>""")
-    yv = ", ".join(f"%ac{d}_15_{kb}" for d in range(NF)); vt = ", ".join(["vector<8xf32>"] * NF)
+    for d in range(NF):   # one loop over the 16 query columns per dim fragment keeps the registers of one fragment live
+        A(f"""      %ac{d}_{kb} = scf.for %mc_{d}_{kb} = [%c0 to %c16 step %c1](%acc{d}_{kb} = {ins[d]} : vector<8xf32>) -> (vector<8xf32>) {{
+        %mci{d}_{kb} = index.cast %mc_{d}_{kb} : index to i32
+        %qc{d}_{kb} = scalar.addi %pos0_i32, %mci{d}_{kb} : i32
+        %thr{d}_{kb} = scalar.subi %qc{d}_{kb}, %base{kb} : i32
+        %thr_v{d}_{kb} = vector.splat %thr{d}_{kb} : vector<16xi32>
+        %mhi{d}_{kb} = vector.cmpi sle, %iota16, %thr_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
+        %lo{d}_{kb} = scalar.subi %thr{d}_{kb}, %c2047_i32 : i32
+        %loe{d}_{kb} = scf.select %is_sliding, %lo{d}_{kb}, %far_below : i32
+        %lo_v{d}_{kb} = vector.splat %loe{d}_{kb} : vector<16xi32>
+        %mlo{d}_{kb} = vector.cmpi sge, %iota16, %lo_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
+        %m{d}_{kb} = vector.andi %mhi{d}_{kb}, %mlo{d}_{kb} : vector<16xi1>
+        %isc{d}_{kb} = scalar.cmpi eq, %lane_col32m, %mci{d}_{kb} : i32
+        %vs{d}_{kb} = vector.select %m{d}_{kb}, %vl{d}_{kb}, %zero16h : vector<16xf16>
+        %vm{d}_{kb} = vector.fragment<lhs> %vs{d}_{kb} shape [%c16, %c16] : vector<16xf16>
+        %rm{d}_{kb} = vector.mma %vm{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %acn{d}_{kb} = scf.select %isc{d}_{kb}, %rm{d}_{kb}, %acc{d}_{kb} : vector<8xf32>
+        scf.yield %acn{d}_{kb} : vector<8xf32>
+      }}""")
+    yv = ", ".join(f"%ac{d}_{kb}" for d in range(NF)); vt = ", ".join(["vector<8xf32>"] * NF)
     A(f"      scf.yield {yv} : {vt}" + chr(10) + "    } else {")
     for d in range(NF):
         A(f"      %pl{d}_{kb} = vector.mma %vl{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
