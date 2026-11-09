@@ -1,4 +1,8 @@
-// Whether a 16-token tile is uniform (live, one row, consecutive positions): flash2 handles those.
+// Whether a 16-token tile is uniform (live, one row, consecutive positions) and lies at or past position 512: flash2
+// handles those. Below 512 every token takes the split-K path (g16 listed fallback: at most 16 splits of about 32
+// keys, the decode kernel's split count and arithmetic for up to 512 keys), so a short prompt's attention does not
+// depend on where the scheduler cuts its prefill (a cut leaves partial tiles that only the fallback can compute) or
+// on how many other tokens share the epoch.
 func.def inline @g_tile_uniform(%info: buffer, %tokens: index, %first: index) -> (i1, i32, i32) {
   %zero = index.constant 0 : offset
   %c0 = index.constant 0 : index
@@ -10,7 +14,9 @@ func.def inline @g_tile_uniform(%info: buffer, %tokens: index, %first: index) ->
   %bfirst = index.assume %first [lt(%first, %tokens)] : index
   %row0 = view.load %info_view[%bfirst, %c0] : view<[%tokens]x4xi32> -> i32
   %pos0 = view.load %info_view[%bfirst, %c1] : view<[%tokens]x4xi32> -> i32
-  %ok = scf.for %i = [%c0 to %c16 step %c1](%acc = %true : i1) -> (i1) {
+  %c_flash_from = scalar.constant 512 : i32
+  %deep_enough = scalar.cmpi sge, %pos0, %c_flash_from : i32
+  %ok = scf.for %i = [%c0 to %c16 step %c1](%acc = %deep_enough : i1) -> (i1) {
     %t_value = index.add %first, %i : index
     %in_range = index.cmp ult, %t_value, %tokens : index
     %t_clamped = scf.select %in_range, %t_value, %bfirst : index

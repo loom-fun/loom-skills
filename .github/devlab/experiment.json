@@ -6,37 +6,24 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "qbase",
+   "name": "f512_pair",
    "build": {},
    "steps": [
     "pairs2:3:q"
    ]
   },
   {
-   "name": "qflashoff",
-   "build": {
-    "FLASH_OFF": "1"
-   },
+   "name": "f512_gate",
+   "build": {},
    "steps": [
-    "pairs2:3:q"
+    "consistency:40:llama"
    ]
   },
   {
-   "name": "qskip",
-   "build": {
-    "FLASH_SKIP": "1"
-   },
+   "name": "f512_gate_b",
+   "build": {},
    "steps": [
-    "pairs2:3:q"
-   ]
-  },
-  {
-   "name": "qlistall",
-   "build": {
-    "LIST_ALL": "1"
-   },
-   "steps": [
-    "pairs2:3:q"
+    "consistency:40:llama"
    ]
   }
  ]
