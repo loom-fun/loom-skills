@@ -519,14 +519,54 @@ A(LSUM + '''
     %l_scaled = scalar.mulf %l, %alpha : f32
     %l_new = scalar.addf %l_scaled, %tsum : f32
     %alpha_v = vector.splat %alpha : vector<8xf32>''')
+# O^T += V^T P^T per 16-key block. A weight of exactly 0 does not hide its key's V in the WMMA sum (the product
+# is not skipped: a test of one 16x16x16 WMMA shows the sum changing in the last bit with V at zero-weight keys), so a
+# block with masked keys (the diagonal block; the window's lower edge) runs once per query column with V zeroed at that
+# column's masked keys, keeping that column's result. A token's output then depends on its own keys only, whatever
+# tile it sits in and whatever the memory past the keys holds.
 for d in range(NF):
     A(f"    %os{d} = vector.mulf %a{d}, %alpha_v : vector<8xf32>")
-    prev = f"%os{d}"
-    for kb in range(KB):
-        name = f"%on{d}" if kb == KB - 1 else f"%on{d}_{kb}"
-        A(f"""    %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%d{d * 16 if d else 0}r, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{{VTC}}xf16> -> vector<16xf16>
-    {name} = vector.mma %vl{d}_{kb}, %pt{kb}, {prev} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
-        prev = name
+A("""    %pos0_i32 = index.cast %pos0 : index to i32
+    %pos15_i32 = scalar.addi %pos0_i32, %c15_i32m : i32
+    %lane_col32m = index.cast %lane_col : index to i32
+    %win_lo15 = scalar.subi %pos15_i32, %c2047_i32 : i32
+    %zero16h = vector.constant 0.0 : vector<16xf16>
+    %iota16 = vector.iota %c0_i32 step %c1_i32m : vector<16xi32>""")
+for kb in range(KB):
+    for d in range(NF):
+        A(f"    %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%d{d * 16 if d else 0}r, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{{VTC}}xf16> -> vector<16xf16>")
+    last = kb == KB - 1
+    ins = [f"%os{d}" if kb == 0 else f"%on{d}_{kb - 1}" for d in range(NF)]
+    outs = [f"%on{d}" if last else f"%on{d}_{kb}" for d in range(NF)]
+    A(f"""    %nb_last{kb} = scalar.addi %base{kb}, %c15_i32m : i32
+    %nb_diag{kb} = scalar.cmpi sgt, %nb_last{kb}, %pos0_i32 : i32
+    %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
+    %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
+    %need{kb} = scalar.ori %nb_diag{kb}, %nb_wins{kb} : i1
+    {", ".join(outs)} = scf.if %need{kb} -> ({", ".join(["vector<8xf32>"] * NF)}) {{""")
+    for c in range(16):
+        A(f"""      %mc{c}_{kb} = scalar.constant {c} : i32
+      %qc{c}_{kb} = scalar.addi %pos0_i32, %mc{c}_{kb} : i32
+      %thr{c}_{kb} = scalar.subi %qc{c}_{kb}, %base{kb} : i32
+      %thr_v{c}_{kb} = vector.splat %thr{c}_{kb} : vector<16xi32>
+      %mhi{c}_{kb} = vector.cmpi sle, %iota16, %thr_v{c}_{kb} : vector<16xi32> -> vector<16xi1>
+      %lo{c}_{kb} = scalar.subi %thr{c}_{kb}, %c2047_i32 : i32
+      %loe{c}_{kb} = scf.select %is_sliding, %lo{c}_{kb}, %far_below : i32
+      %lo_v{c}_{kb} = vector.splat %loe{c}_{kb} : vector<16xi32>
+      %mlo{c}_{kb} = vector.cmpi sge, %iota16, %lo_v{c}_{kb} : vector<16xi32> -> vector<16xi1>
+      %m{c}_{kb} = vector.andi %mhi{c}_{kb}, %mlo{c}_{kb} : vector<16xi1>
+      %isc{c}_{kb} = scalar.cmpi eq, %lane_col32m, %mc{c}_{kb} : i32""")
+        for d in range(NF):
+            prev_acc = ins[d] if c == 0 else f"%ac{d}_{c - 1}_{kb}"
+            A(f"""      %vm{d}_{c}_{kb} = vector.select %m{c}_{kb}, %vl{d}_{kb}, %zero16h : vector<16xf16>
+      %rm{d}_{c}_{kb} = vector.mma %vm{d}_{c}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %ac{d}_{c}_{kb} = scf.select %isc{c}_{kb}, %rm{d}_{c}_{kb}, {prev_acc} : vector<8xf32>""")
+    yv = ", ".join(f"%ac{d}_15_{kb}" for d in range(NF)); vt = ", ".join(["vector<8xf32>"] * NF)
+    A(f"      scf.yield {yv} : {vt}" + chr(10) + "    } else {")
+    for d in range(NF):
+        A(f"      %pl{d}_{kb} = vector.mma %vl{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
+    yp = ", ".join(f"%pl{d}_{kb}" for d in range(NF))
+    A(f"      scf.yield {yp} : {vt}" + chr(10) + "    }")
 A('''    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.yield %m_new, %l_new, ''' + ", ".join(f"%on{d}" for d in range(NF)) + " : f32, f32, " + ", ".join(["vector<8xf32>"] * NF) + '''
   }
@@ -595,6 +635,7 @@ if TS > 1:
 consts = "".join(f"  %d{c} = index.constant {c * 16} : index\n" for c in range(NF))
 consts += "".join(f"  %d{d * 16 if d else 0}r = index.constant {d * 16} : index\n" for d in range(NF))
 consts += "".join(f"  %d{i}i = index.constant {i} : index\n" for i in range(8))
+consts += "  %c15_i32m = scalar.constant 15 : i32\n  %c1_i32m = scalar.constant 1 : i32\n  %far_below = scalar.constant -1000000 : i32\n"
 consts += "".join(f"  %kb{kb}_row = index.constant {kb * 16} : index\n  %kbo{kb} = scalar.constant {kb * 16} : i32\n" for kb in range(KB))
 text = text.replace("  %tile_count = index.div %tokens, %c16 : index\n", consts + "  %tile_count = index.div %tokens, %c16 : index\n", 1)
 for key, value in {"{KT_LESS}": KT - 1, "{KT}": KT, "{KBYTES}": KT * (D + 8) * 2, "{VTBYTES}": D * (KT + 8) * 2,
