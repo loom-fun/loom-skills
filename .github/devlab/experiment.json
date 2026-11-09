@@ -1,20 +1,20 @@
 {
- "card": "loom-fun/unsloth-Qwen3-8B-loom",
- "memory_bytes": 29000000000,
+ "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+ "memory_bytes": 5000000000,
  "kit": null,
  "llamacpp": "b1368",
+ "steps": [
+  "reuse"
+ ],
  "variants": [
   {
-   "name": "tune-long",
-   "steps": [
-    "tune:16000"
-   ]
+   "name": "reuse-main",
+   "build": {}
   },
   {
-   "name": "tune-short",
-   "steps": [
-    "tune:0"
-   ]
+   "name": "reuse-pr111",
+   "build": {},
+   "ref": "0540170e8b5737264c8f175285ea7411e6fcc0fd"
   }
  ]
 }

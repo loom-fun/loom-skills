@@ -242,6 +242,29 @@ EOF
       mkdir -p "$D/tok"; cp "$card/tokenizer.json" "$D/tok/"; step "tune TUNE_LONG=$p1"
       TUNE_LONG=$p1 TUNE_PRIOR=0 LOOM_SKILLS=$SK VENV=$root/.venv LOOM_SERVE_STATE=$LOOM_SERVE_STATE "$T" "$ST/draft/tune.py" "$D" "$PORT" "$(( (mem + 1073741823) / 1073741824 ))" "$model" 2>&1 | tee "$out/tune.log" | grep "^tune:\|^TUNE_RESULT"
       res[$s]=$(grep "^TUNE_RESULT" "$out/tune.log" | tail -1 | cut -c1-1500);;
+    reuse)
+      step "history reuse vs fresh"
+      cat > "$D/reuse.py" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from bench_common import stream
+url, model = sys.argv[2], sys.argv[3]
+q1 = [{"role": "user", "content": "Name three rivers in Europe, one per line."}]
+import json
+if sys.argv[4] == "reuse":
+    r1 = stream(url, model, q1, 64); a1 = r1["text"]; json.dump(a1, open(sys.argv[5], "w"))
+else:
+    a1 = json.load(open(sys.argv[5]))
+q2 = q1 + [{"role": "assistant", "content": a1}, {"role": "user", "content": "Which of them is the longest? Answer in one sentence."}]
+r = stream(url, model, q2, 64)
+print("RESULT", sys.argv[4], "prompt_tokens", r["prompt_tokens"], repr(r["text"]), flush=True)
+EOF
+      for mode in reuse fresh; do
+        [ -f "$LOOM_SERVE_STATE/exp-$name.pid" ] && "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
+        serve || { res[$s]=ERROR; continue 2; }
+        "$T" "$D/reuse.py" "$B" "$url" "$model" $mode "$D/a1.json" > "$out/reuse_$mode.log" 2>&1; tail -2 "$out/reuse_$mode.log"
+      done
+      res[$s]=$(grep -h '^RESULT' "$out"/reuse_*.log | cut -c1-300 | tr '\n' ' ');;
     *) echo "unknown step $s"; res[$s]=ERROR;;
   esac
   echo "RESULT $name $s: ${res[$s]}"
