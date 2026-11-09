@@ -234,6 +234,44 @@ printf '%s\n' '{"streams": 4, "window_s": 2.5, "agg_tps": 110.0}' '{"streams": 4
   > "$tmp/c4_bad.txt"
 got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); from make_info import c4_samples; print(c4_samples(sys.argv[2]))" "$C" "$tmp/c4_bad.txt" 2>/dev/null)
 [ "$got" = "[110.0, 112.5]" ] && echo "OK   c4: invalid c4_steady runs are skipped" || { echo "FAIL c4: $got, expected [110.0, 112.5]"; bad=1; }
+# a second llama.cpp backend (make_info.py perf --backend vulkan: a baseline-only DevLab session under
+# performance.baselines): validates, renders as one more DevLab column and a footnote with its build, archive
+# sha256 and the settings it could not run, changes no headline value or guardrail (card_lib.card_metrics/perf_flags),
+# the latest Vulkan evidence replaces the earlier one, --from-info carries it over, a run that fetched other programs
+# than the package is refused, and the card without it renders as before (the goldens)
+dlrows "$F/evidence/verify_llama.jsonl" "$tmp/vk_llama.jsonl" 0.8
+VK=(--backend vulkan --baseline-version b12211 --baseline-name llama.cpp --baseline-sha256 aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb
+    --baseline-args "-cram 0 --spec-type draft-dflash -c 65536 -kvu -np 4" --unsupported "vision projector (--mmproj): not loaded, the workloads are text-only"
+    --metrics decode,prefill_1k --source-kind devlab --run 5005 --device none --hrx-loom none --package "$F/pkg")
+py "$C/make_info.py" perf --llama-jsonl "$tmp/vk_llama.jsonl" "${VK[@]}" -o "$tmp/vk1.json" 2>/dev/null
+py "$C/make_info.py" perf --llama-jsonl "$tmp/dl_llama.jsonl" "${VK[@]}" -o "$tmp/vk2.json" 2>/dev/null
+mkdir -p "$tmp/vk"; cp -r "$F/pkg/." "$tmp/vk/"
+py "$C/make_info.py" build "$tmp/vk" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --memory-bytes 67000000000 --output flint \
+  --report generated --evidence "$tmp/perf.json" "$tmp/perf_dl.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
+  "$F/evidence/roofline.json" "$tmp/vk1.json" -o "$tmp/vk/info.json" 2>/dev/null
+py "$C/make_info.py" build "$tmp/vk" --generator-commit $GEN --from-info "$tmp/vk/info.json" --evidence "$tmp/vk2.json" -o "$tmp/vk_new.json" 2>/dev/null
+py "$C/make_info.py" build "$tmp/vk" --generator-commit $GEN --from-info "$tmp/vk_new.json" -o "$tmp/vk_same.json" 2>/dev/null
+py "$C/render_card.py" "$tmp/vk" 2>/dev/null
+py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+base, vk, new = (c.load_json(f) for f in sys.argv[2:5]); p = c.programs_sha256(sys.argv[5])
+assert c.validate(vk) == [] and c.validate(new) == [], 'not valid'
+b = vk['performance']['baselines']['vulkan']; n = new['performance']['baselines']['vulkan']
+assert b['baseline']['version'] == 'llamacpp-vulkan/b12211' and b['baseline']['sha256'].startswith('aabbcc') and len(b['baseline']['unsupported']) == 1
+assert b['session']['metrics']['decode'] == {'baseline': 56.5, 'baseline_runs': [56.2, 56.8]} and 'loom' not in b['session']['metrics']['decode'], b['session']['metrics']['decode']
+assert n['session']['metrics']['decode']['baseline'] != b['session']['metrics']['decode']['baseline'], 'the later Vulkan evidence did not replace the earlier'
+assert new['performance']['baselines'].keys() == {'vulkan'} and 'baselines' not in base['performance']
+assert vk['performance']['sessions'] == base['performance']['sessions'] and vk['sources'].keys() >= base['sources'].keys()
+assert c.perf_flags(vk, programs=p) == c.perf_flags(base, programs=p) and \
+    {k: v[0]['loom'] for k, v in c.card_metrics(vk).items()} == {k: v[0]['loom'] for k, v in c.card_metrics(base).items()}" \
+  "$C" "$tmp/flint/info.json" "$tmp/vk/info.json" "$tmp/vk_new.json" "$F/pkg" \
+  && cmp -s "$tmp/vk_new.json" "$tmp/vk_same.json" \
+  && grep -q '| DevLab llama.cpp Vulkan |' "$tmp/vk/README.md" && grep -q 'Not run: vision projector' "$tmp/vk/README.md" \
+  && grep -q '^## llama.cpp Vulkan: DevLab Dispatch run 5005' "$tmp/vk/REPORT.md" \
+  && echo "OK   vulkan: a baseline-only session renders as a DevLab column and changes no headline value or flag" \
+  || { echo "FAIL vulkan: the second backend's session does not validate, render or leave the card's values alone"; bad=1; }
+py "$C/make_info.py" perf --llama-jsonl "$tmp/vk_llama.jsonl" "${VK[@]}" --fetched-programs 0000 -o "$tmp/vk_bad.json" 2>/dev/null \
+  && { echo "FAIL vulkan: a run that fetched other programs than the package was accepted"; bad=1; } \
+  || echo "OK   vulkan: a run that fetched other programs than the package is refused"
 for n in flint d1; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null

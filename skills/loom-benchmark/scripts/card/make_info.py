@@ -463,7 +463,7 @@ def cmd_perf(a):
         if a.unsupported:
             perf["baseline"]["unsupported"] = a.unsupported
     write_json(a.o, {"evidence": EVIDENCE_ID, "performance": perf})
-    print(f"wrote {a.o}: " + ", ".join(f"{k} {m['loom']}/{m['baseline']}" for k, m in metrics.items()), file=sys.stderr)
+    print(f"wrote {a.o}: " + ", ".join(f"{k} {m.get('loom')}/{m['baseline']}" for k, m in metrics.items()), file=sys.stderr)
 
 
 # ---------------------------------------------------------------- gate results -> evidence
