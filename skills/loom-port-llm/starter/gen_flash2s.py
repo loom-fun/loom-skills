@@ -416,7 +416,7 @@ for kb in range(KB):
     %nb_diag{kb} = scalar.cmpi sgt, %nb_last{kb}, %pos0_i32 : i32
     %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
     %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
-    %need{kb} = scalar.ori %nb_diag{kb}, %nb_wins{kb} : i1
+    %need{kb} = scalar.cmpi ne, %base{kb}, %base{kb} : i32
     {", ".join(outs)} = scf.if %need{kb} -> ({vt}) {{""")
     for d in range(NFH):
         A(f"""      %ac{d}_{kb} = scf.for %mc_{d}_{kb} = [%c0 to %c16 step %c1](%acc{d}_{kb} = {ins[d]} : vector<8xf32>) -> (vector<8xf32>) {{
