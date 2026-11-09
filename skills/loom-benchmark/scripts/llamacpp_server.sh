@@ -1,5 +1,7 @@
 #!/bin/bash
 # Start the llama.cpp ROCm reference server (lemonade-sdk/llamacpp-rocm build) on a GGUF.
+#   LLAMACPP_BACKEND=vulkan: the same server and arguments on the official ggml-org Vulkan build (fetch_llamacpp.sh
+#   with the same variable): the card's second baseline, same workloads and speculative settings.
 # usage: LLAMACPP_DIR=~/llamacpp-rocm llamacpp_server.sh MODEL.gguf [PORT=8130] [PARALLEL=4] [CTX_PER_SLOT=8192] [unified]
 #   golden / long-context runs: PARALLEL=1 CTX_PER_SLOT=34000
 #   `unified` (5th arg): one KV pool of CTX_PER_SLOT tokens shared by PARALLEL slots (-kvu), so a single
@@ -8,7 +10,7 @@
 #   decoding: the performance runs use it, so Loom is compared drafting vs drafting; references never do.
 #   stop: llamacpp_server.sh --stop PORT   (LLAMACPP_STATE: pid/log dir, default /tmp)
 #   LLAMACPP_ARGS_FILE=F writes the exact server arguments to F (finalize.sh: llamacpp_args.txt, the card's baseline)
-# Refuses a build that does not see a ROCm device: on Windows, builds missing their HIP/BLAS DLLs
+# Refuses a build that does not see a ROCm (Vulkan) device: on Windows, builds missing their HIP/BLAS DLLs
 # silently fall back to CPU.
 set -e
 state=${LLAMACPP_STATE:-/tmp}; mkdir -p "$state"
@@ -32,7 +34,9 @@ exe=./llama-server; [ -f $exe.exe ] && { exe=$exe.exe; command -v cygpath >/dev/
 # Libraries: the build dir, plus any ROCm runtime it links but doesn't ship (lemonade's rocm-stable
 # builds use the TheRock runtime from ~/.cache/lemonade/bin/therock-wheels). LLAMACPP_LIBS= adds dirs.
 libpath=$PWD${LLAMACPP_LIBS:+:$LLAMACPP_LIBS}
+backend=${LLAMACPP_BACKEND:-rocm}; dev=ROCm; [ "$backend" = vulkan ] && dev=Vulkan
 probe=$exe; [ -f libggml-hip.so ] && probe=./libggml-hip.so   # the HIP backend is dlopened: ldd it, not the exe
+[ "$backend" = vulkan ] && [ -f libggml-vulkan.so ] && probe=./libggml-vulkan.so
 if command -v ldd >/dev/null && LD_LIBRARY_PATH=$libpath ldd $probe 2>/dev/null | grep -q "not found"; then
   # Add one runtime install's lib dirs, all of them (the HIP runtime dlopens more than ldd lists).
   for sp in $(ls -d "$HOME"/.cache/lemonade/bin/therock-wheels/*/venv/lib/python*/site-packages 2>/dev/null) /opt/rocm; do
@@ -45,7 +49,7 @@ if command -v ldd >/dev/null && LD_LIBRARY_PATH=$libpath ldd $probe 2>/dev/null 
   LD_LIBRARY_PATH=$libpath ldd $probe 2>/dev/null | grep "not found" && { echo "$dir/llama-server: missing libraries (set LLAMACPP_LIBS)"; exit 1; }
 fi
 export LD_LIBRARY_PATH=$libpath
-$exe --list-devices 2>&1 | grep -q ROCm || { echo "$dir/llama-server sees no ROCm device:"; $exe --list-devices 2>&1 | tail -5; exit 1; }
+$exe --list-devices 2>&1 | grep -q $dev || { echo "$dir/llama-server sees no $dev device:"; $exe --list-devices 2>&1 | tail -5; exit 1; }
 ctxarg=(-c $((np * per))); [ "$mode" = unified ] && ctxarg=(-c $per -kvu)
 # -cram 0: no host-RAM prompt cache. Every reference request is independent (cache_prompt false), and
 # an old build (b10820, a sliding-window model) answered the PREVIOUS prompt from that cache.

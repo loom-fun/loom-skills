@@ -171,6 +171,7 @@ def gate_supersedes(new, cur):
 def cmd_build(a):
     facts = package_facts(load_package(a.pkg))
     card, versions, baseline, sessions, gates = {}, {}, None, [], {}
+    baselines = {}   # backend -> {"baseline", "session"}: the latest evidence of each backend replaces the earlier
     roofline, sweeps = None, []
     sources = Sources()
     if a.from_info:   # a published card: its data first, then the new evidence on top
@@ -188,6 +189,7 @@ def cmd_build(a):
         sources.by_id = dict(old["sources"])
         if old.get("performance"):
             baseline, sessions = old["performance"]["baseline"], list(old["performance"]["sessions"])
+            baselines = json.loads(json.dumps(old["performance"].get("baselines") or {}))
         for name, g in old["gates"].items():   # a published gate has a date, not a time: later evidence that day wins
             gates[name] = ((g.get("date") or "", -1), None, g)
         roofline = old.get("roofline")
@@ -209,12 +211,16 @@ def cmd_build(a):
         if (ev.get("versions") or {}).get("package"):
             versions.setdefault("package", {}).update(ev["versions"]["package"])
         perf = ev.get("performance") or {}
-        if perf.get("baseline"):
-            baseline = perf["baseline"]
-        if perf.get("session"):
-            s = dict(perf["session"])
-            s["source"] = sources.add(s["source"])
-            sessions.append({k: v for k, v in s.items() if v is not None or k in ("date",)})
+        if perf.get("backend"):   # a further llama.cpp backend (make_info.py perf --backend): kept apart from the sessions
+            sess = dict(perf["session"], source=sources.add(perf["session"]["source"]))
+            baselines[perf["backend"]] = {"baseline": perf["baseline"], "session": sess}
+        else:
+            if perf.get("baseline"):
+                baseline = perf["baseline"]
+            if perf.get("session"):
+                s = dict(perf["session"])
+                s["source"] = sources.add(s["source"])
+                sessions.append({k: v for k, v in s.items() if v is not None or k in ("date",)})
         for g in ev.get("gates") or []:
             new = ((g.get("time") or "", i), g, None)
             if g["name"] not in gates or gate_supersedes(new, gates[g["name"]]):
@@ -262,6 +268,8 @@ def cmd_build(a):
     if sessions:
         info["performance"] = {"baseline": baseline or {"name": "llama.cpp", "version": None, "args": None},
                                "sessions": sessions}
+        if baselines:
+            info["performance"]["baselines"] = baselines
     if a.report:
         info["report"] = a.report
     if roofline:
@@ -272,7 +280,7 @@ def cmd_build(a):
         info["next_steps"] = a.next_steps
     if sweeps:
         info["devlab"] = {"sweeps": sweeps}
-    used = ({s["source"] for s in sessions} | {g["source"] for g in gate_out.values()}
+    used = ({s["source"] for s in sessions} | {b["session"]["source"] for b in baselines.values()} | {g["source"] for g in gate_out.values()}
             | {s["source"] for s in info.get("devlab", {}).get("sweeps", [])})
     info["sources"] = {k: v for k, v in sources.by_id.items() if k in used}
     require_valid(info)
@@ -369,9 +377,9 @@ def summary(key, vals):
     return round(statistics.median(vals) if key in MEDIAN_METRICS else statistics.mean(vals), 1)
 
 
-def baseline_version(text):
+def baseline_version(text, backend="rocm"):
     tag = build_tag(text)
-    return f"llamacpp-rocm/{tag}" if tag and text == tag else text
+    return f"llamacpp-{backend}/{tag}" if tag and text == tag else text
 
 
 def refused_tokens(rows, package, measured):
@@ -409,11 +417,14 @@ def cmd_perf(a):
     if a.c4_llama:
         bs["streams4"] = c4_samples(a.c4_llama)
     keep = a.metrics.split(",") if a.metrics else METRIC_KEYS
+    extra = a.backend != "rocm"   # a further llama.cpp backend: a baseline-only session (no Loom values)
+    if extra and (loom_rows or a.c4_loom):
+        sys.exit(f"perf --backend {a.backend}: the session holds the {a.backend} engine's runs only (no Loom files)")
     metrics = {}
     for k in keep:
         if k not in ls and k not in bs:
             continue
-        m = {"loom": summary(k, ls.get(k)), "baseline": summary(k, bs.get(k))}
+        m = {"baseline": summary(k, bs.get(k))} if extra else {"loom": summary(k, ls.get(k)), "baseline": summary(k, bs.get(k))}
         if ls.get(k):
             m["loom_runs"] = ls[k]
         if bs.get(k):
@@ -421,21 +432,36 @@ def cmd_perf(a):
         metrics[k] = m
     with_acceptance(metrics, acceptance_samples(loom_rows, a.c4_loom))
     dp = [len(ls[k]) for k in keep if k in ls and k != "streams4"]
+    if extra:
+        ls = bs   # the runs counted are the baseline engine's
+        dp = [len(bs[k]) for k in keep if k in bs and k != "streams4"]
     runs = {"decode_prefill": max(dp) if dp else None,
             "streams4": len(ls["streams4"]) if "streams4" in keep and ls.get("streams4") else None}
-    date = a.date or max([r["time"][:10] for r in loom_rows if r.get("time")] or [None], key=lambda x: x or "")
+    date = a.date or max([r["time"][:10] for r in loom_rows + llama_rows if r.get("time")] or [None], key=lambda x: x or "")
     commands = list(a.command or [])
     if a.commands_file:
         commands += [line.rstrip("\n") for line in open(a.commands_file, encoding="utf-8") if line.strip()]
-    session = {"date": date, "source": source_arg(a), "runs": runs, "commands": commands, "metrics": metrics,
+    session = {"date": date, "source": source_arg(a), "runs": runs, "metrics": metrics,
                "programs_sha256": programs_sha256(a.package) if a.package else None}
+    if a.fetched_programs and a.package and a.fetched_programs != programs_sha256(a.package):
+        sys.exit(f"the run fetched programs {a.fetched_programs[:12]}, the package has {programs_sha256(a.package)[:12]}: "
+                 "the card was republished in between; re-run")
+    if not extra:
+        session["commands"] = commands
     over = refused_tokens(loom_rows, a.package, set(ls))
-    if over:   # perf.py: the Loom server refused these documents as over its context (card_lib.over_context)
+    if over and not extra:   # perf.py: the Loom server refused these documents as over its context (card_lib.over_context)
         session["over_context"] = over
     perf = {"session": session}
     if a.baseline_version or a.baseline_args:
-        perf["baseline"] = {"name": a.baseline_name, "version": baseline_version(a.baseline_version) if a.baseline_version else None,
+        perf["baseline"] = {"name": a.baseline_name, "version": baseline_version(a.baseline_version, a.backend) if a.baseline_version else None,
                             "args": a.baseline_args}
+    if extra:
+        perf["backend"] = a.backend
+        perf["baseline"] = dict(perf.get("baseline") or {"name": a.baseline_name, "version": None, "args": None})
+        if a.baseline_sha256:
+            perf["baseline"]["sha256"] = a.baseline_sha256
+        if a.unsupported:
+            perf["baseline"]["unsupported"] = a.unsupported
     write_json(a.o, {"evidence": EVIDENCE_ID, "performance": perf})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {m['loom']}/{m['baseline']}" for k, m in metrics.items()), file=sys.stderr)
 
@@ -640,6 +666,12 @@ def main(argv=None):
     p.add_argument("--c4-llama")
     p.add_argument("--baseline-name", default="llama.cpp")
     p.add_argument("--baseline-version", help="the baseline build, e.g. llamacpp-rocm/b1355 (a bare bNNNN tag is expanded)")
+    p.add_argument("--backend", default="rocm", help="the llama.cpp backend measured: rocm (the card's baseline, with Loom) "
+                   "or another (vulkan): a baseline-only session recorded under performance.baselines.BACKEND")
+    p.add_argument("--baseline-sha256", help="sha256 of the baseline release archive (--backend other than rocm)")
+    p.add_argument("--unsupported", action="append", help="a setting of the main baseline this backend could not run, one line (repeat)")
+    p.add_argument("--fetched-programs", help="programs_sha256 the DevLab job fetched (its programs_sha256.txt): refused if "
+                   "it differs from --package's, i.e. the card was republished after the run fetched it")
     p.add_argument("--baseline-args", help="the baseline server's exact arguments, model path, host and port left out")
     p.add_argument("--metrics", help="comma-separated metrics this session provides (default: all it measured)")
     p.add_argument("--command", action="append", help="a measuring command, for REPORT.md (repeat)")

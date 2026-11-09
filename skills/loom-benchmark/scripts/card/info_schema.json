@@ -50,6 +50,42 @@
       "args": {"type": ["string", "null"], "description": "The exact server arguments (model path, host and port left out)"}
      }
     },
+    "baselines": {
+     "type": "object",
+     "description": "Further llama.cpp backends measured with the same workloads, by backend name (vulkan: the official ggml-org release). Optional key, loom-card/2. Never a headline value or a guardrail input (card_lib.card_metrics reads sessions only); rendered as one more DevLab column.",
+     "additionalProperties": {
+      "type": "object", "required": ["baseline", "session"],
+      "properties": {
+       "baseline": {
+        "type": "object", "required": ["name", "version", "args"],
+        "properties": {
+         "name": {"type": "string"},
+         "version": {"type": ["string", "null"], "description": "e.g. llamacpp-vulkan/b12211"},
+         "args": {"type": ["string", "null"], "description": "The exact server arguments (model path, host and port left out)"},
+         "sha256": {"type": ["string", "null"], "description": "sha256 of the release archive the measurement ran"},
+         "unsupported": {"type": "array", "items": {"type": "string"}, "description": "Settings of the main baseline this backend could not run, one line each (never silently changed)"}
+        }
+       },
+       "session": {
+        "type": "object", "required": ["date", "source", "runs", "metrics"],
+        "description": "One baseline-only measurement session (the latest replaces the earlier one); metrics hold the engine's value and per-run values only",
+        "properties": {
+         "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+         "source": {"type": "string"},
+         "runs": {"type": "object"},
+         "programs_sha256": {"type": ["string", "null"], "description": "card_lib.programs_sha256 of the package the run fetched (its GGUF, drafter and settings came from it)"},
+         "metrics": {
+          "type": "object",
+          "additionalProperties": {
+           "type": "object", "required": ["baseline"],
+           "properties": {"baseline": {"type": ["number", "null"]}, "baseline_runs": {"type": "array", "items": {"type": "number"}}}
+          }
+         }
+        }
+       }
+      }
+     }
+    },
     "sessions": {
      "type": "array", "items": {"$ref": "#/$defs/session"},
      "description": "Measurement sessions in evidence order. Per metric the last local session that measured it is the card's headline value, and the last DevLab session (source kind devlab) its DevLab value (card_lib.card_metrics)."

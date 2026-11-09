@@ -10,7 +10,13 @@
 #    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF;
 #                                                                     {hf:OWNER/REPO/FILE}: that Hub file, e.g. a drafter llama.cpp loads and the card doesn't ship)
 #    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
-#   A job may override card, kit, memory_bytes, llamacpp and llama_spec: one experiment can measure several cards.
+#   A job may override card, kit, memory_bytes, llamacpp, llamacpp_vulkan and llama_spec: one experiment can measure several cards.
+#   "llamacpp_vulkan": "b12211": the official ggml-org Vulkan release (sha256-pinned in skills/loom-benchmark/data) that the
+#   steps llama@vulkan, llamac4@vulkan and the other llama.cpp steps with @vulkan run, with the SAME llama_spec and workloads as
+#   the ROCm "llamacpp" build (fetch_llamacpp.sh / llamacpp_server.sh LLAMACPP_BACKEND=vulkan). A server that cannot run a
+#   setting fails its step (RESULT ... ERROR, llamacpp-*.log): recorded as unsupported, never replaced by another setting.
+#   out/ also holds llamacpp_args_<backend>.txt (the exact server arguments), llamacpp_release_vulkan.sha256 and
+#   programs_sha256.txt (the card's programs this job fetched: make_info.py perf --fetched-programs).
 # Variant V: {"name": "card"}                                    the card's own programs, as published
 #            {"name": "x", "build": {"ENV": "1"}, "build_args": [...], "ref": "origin/main",
 #             "execution": {"draft_depth": 3}, "double": ["llm_verify:g_head_mv", "*:g_mv_q8_0"]}
@@ -22,6 +28,7 @@
 #          c4:V                 c4_steady.py 4 streams on V
 #          llama:N[:long|-][:M] llama.cpp (card build + llama_spec, n-max M) perf.py N times, llama_decode.py tokens/step
 #          llamac4[:M]          c4_steady.py on llama.cpp
+#          (llama[@vulkan], llamac4[@vulkan], textmatch@vulkan: the same with the Vulkan build; files perf_llamacpp-vulkan_nN.jsonl)
 #          textmatch:V          text_match.py: first 50 tokens of perf.py's prompts on V, then on llama.cpp
 #          consistency:V:N      consistency.py N times (NOT DETERMINISTIC / concurrent mismatch counts)
 #          determinism:V:C:R    determinism.py (issue #39's script, when present)
@@ -42,6 +49,8 @@ qv() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in
 repo=$(q "print(j.get('card') or e['card'])"); mem=$(q "print(j.get('memory_bytes') or e['memory_bytes'])")
 kit=$(q "print((j['kit'] if 'kit' in j else e.get('kit')) or '-')"); tag=$(q "print(j.get('llamacpp') or e.get('llamacpp') or '-')"); variants=$(q "print(' '.join(v['name'] for v in j['variants']))")
 steps=$(q "print(' '.join(j['steps']))")
+vtag=$(q "print(j.get('llamacpp_vulkan') or e.get('llamacpp_vulkan') or '-')")
+BK=rocm; bkt=-   # the llama.cpp backend of the step running (set by the "@vulkan" suffix) and its file-name infix
 echo "job $job: variants $variants; steps $steps; runner $(hostname)"
 hostname > "$out/runner.txt"
 
@@ -68,6 +77,8 @@ if [ ! -f "$card/.fetched" ]; then
   curl -fsSL --retry 3 "$base/llm_config.json" -o "$card/llm_config.json" || exit 1
   rm -rf "$WORK/fetch-cache"; touch "$card/.fetched"
 fi
+"$T" -c "import sys; sys.path.insert(0, sys.argv[1]); from card_lib import programs_sha256; print(programs_sha256(sys.argv[2]))" \
+  "$here/skills/loom-benchmark/scripts/card" "$card" > "$out/programs_sha256.txt"   # the published programs this job fetched
 # build.py's config: the card's llm_config.json with its GGUFs pointed at the fetched files, plus the tensor table
 "$T" - "$card" "$D/cfg.json" "$here/skills/loom-port-llm/starter" <<'EOF' || exit 1
 import json, os, sys
@@ -186,18 +197,28 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
       "https://huggingface.co/${r}/resolve/main/${f##*/}" -o "$dst.part" && mv "$dst.part" "$dst"; } || { echo "FAIL: fetch $f"; return 1; }
     spec=${spec//"$h"/$dst}
   done
+  spec="$BK|$spec"   # the backend is part of what runs
   [ "$spec" = "$LSPEC" ] && curl -sf "$lurl/health" >/dev/null 2>&1 && return 0
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
-  LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag
-  export LLAMA_SPEC=$spec; LSPEC=$spec
-  step "llama.cpp $tag: $LLAMA_SPEC"
-  "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 4 65536 unified | tail -1
+  local dir
+  if [ "$BK" = rocm ]; then
+    LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag; dir=$LLAMACPP_DIR
+  else   # the official ggml-org Vulkan release: only this server uses it (LLAMACPP_DIR and the gates' ROCm build stay)
+    dir=$(LLAMACPP_BACKEND=$BK "$B/fetch_llamacpp.sh" "$WORK/llamacpp-$BK" "$vtag" | tail -1) || return 1
+    cp "$dir/release.sha256" "$out/llamacpp_release$bkt.sha256" 2>/dev/null
+  fi
+  export LLAMA_SPEC=${spec#*|}; LSPEC=$spec
+  step "llama.cpp $BK ${dir##*/}: $LLAMA_SPEC"
+  LLAMACPP_BACKEND=$BK LLAMACPP_DIR=$dir LLAMACPP_ARGS_FILE=$out/llamacpp_args$bkt.txt "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 4 65536 unified | tail -1
+  [ "${PIPESTATUS[0]}" = 0 ] || { cp "$LLAMACPP_STATE/llamacpp-$LLAMA_PORT.log" "$out/llamacpp_start$bkt.log" 2>/dev/null; return 1; }
 }
 TH=$(q "print(j.get('thinking') or 'off')")   # chat_template_kwargs.enable_thinking sent to both engines
 echo "thinking: $TH (sent to both engines)"
 declare -A res
 for s in $steps; do
   IFS=: read -r kind p1 p2 p3 <<< "$s"
+  BK=rocm; bkt=; case $kind in *@*) BK=${kind#*@}; bkt=-$BK; kind=${kind%@*};; esac   # llama@vulkan: the other backend's build
+  [ "$BK" = rocm ] || [ "$vtag" != - ] || { echo "$s: set llamacpp_vulkan"; res[$s]=ERROR; continue; }
   [ "${p2:-}" = - ] && p2=""
   case $kind in
     ab)
@@ -228,22 +249,22 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] fo
       res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_$p1.txt')))");;
     llama)   # llama:N[:long|-][:N_MAX]
       llama_up "${p3:-}" || { res[$s]=ERROR; continue; }
-      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); lf=perf_llamacpp_n$nm.jsonl
-      step "llama.cpp n-max $nm perf x $p1 ${p2:-} (thinking $TH)"
+      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); lf=perf_llamacpp${bkt}_n$nm.jsonl
+      step "llama.cpp$bkt n-max $nm perf x $p1 ${p2:-} (thinking $TH)"
       for i in $(seq 1 "$p1"); do
-        (cd "$out" && "$T" "$B/perf.py" "$lurl" "llamacpp-n$nm" --kind llama --no-campaign --thinking "$TH" --log "$lf" ${p2:+--long} | tail -1)
+        (cd "$out" && "$T" "$B/perf.py" "$lurl" "llamacpp${bkt}-n$nm" --kind llama --no-campaign --thinking "$TH" --log "$lf" ${p2:+--long} | tail -1)
       done
-      [ -z "${p2:-}" ] && "$T" "$here/.github/scripts/llama_decode.py" "$lurl" 2 --think "$TH" --log "$out/tps_llamacpp_n$nm.jsonl"
+      [ -z "${p2:-}" ] && "$T" "$here/.github/scripts/llama_decode.py" "$lurl" 2 --think "$TH" --log "$out/tps_llamacpp${bkt}_n$nm.jsonl"
       res[$s]=$("$T" -c "
 import json,statistics as st; r=[json.loads(l) for l in open('$out/$lf')]
 k='decode_tps_32k' if '${p2:-}' else 'decode_tps'
-print('llamacpp n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
+print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
     llamac4)   # llamac4[:N_MAX]
       llama_up "${p1:-}" || { res[$s]=ERROR; continue; }
       nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+")
-      step "llama.cpp n-max $nm c4"
-      for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$lurl" 4 --thinking "$TH" | tail -1 | tee -a "c4_llamacpp_n$nm.txt"); done
-      res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp n-max $nm c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_llamacpp_n$nm.txt')))");;
+      step "llama.cpp$bkt n-max $nm c4"
+      for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$lurl" 4 --thinking "$TH" | tail -1 | tee -a "c4_llamacpp${bkt}_n$nm.txt"); done
+      res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp$bkt n-max $nm c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_llamacpp${bkt}_n$nm.txt')))");;
     textmatch)   # textmatch:V: first 50 generated tokens of perf.py's prompts, Loom V then llama.cpp (one at a time)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       "$T" "$B/text_match.py" save "$url" "$out/text_$p1.json" --model "$cardid" --tokenizer "$card/tokenizer.json" --thinking "$TH" | tail -1
