@@ -104,7 +104,9 @@ EOF
 # the base model named in a fine-tune's GGUF can lack them (Mellum2 base: <|im_start|>/<|im_end|> are plain text there
 # and loom-serve finds no terminal marker; Qwen3-1.7B-Base: no <think>/<tool_response>, which Loom splits into pieces
 # where llama.cpp sees one token, and diverges at the first generated token). The first candidate that does wins;
-# else the first one found, with a warning.
+# else the first one found, with a warning. Pure-whitespace tokens (gemma-3's indentation runs) are ordinary
+# vocabulary, and the `special` flag is not required: Glimmer and LFM2 keep their markup tokens unflagged on purpose
+# (chat.nonspecial_tokens), which the old flag check rejected.
 tok_ok() {
   "$T" - "$gguf" "$1" <<'EOF'
 import json, sys
@@ -112,7 +114,7 @@ from gguf import GGUFReader
 r = GGUFReader(sys.argv[1]); f = lambda k: r.fields[k].contents() if k in r.fields else None
 toks, types, tpl = f("tokenizer.ggml.tokens") or [], f("tokenizer.ggml.token_type") or [], f("tokenizer.chat_template") or ""
 have = {a["content"]: a["id"] for a in json.load(open(sys.argv[2], encoding="utf-8")).get("added_tokens", [])}
-missing = [t for i, (t, ty) in enumerate(zip(toks, types)) if ty in (3, 4) and t and t in tpl and have.get(t) != i]
+missing = [t for i, (t, ty) in enumerate(zip(toks, types)) if ty in (3, 4) and t.strip() and t in tpl and have.get(t) != i]
 print(f"tokenizer: {sys.argv[2]} lacks the template's special tokens {missing[:6]}" if missing else "", end="")
 sys.exit(1 if missing else 0)
 EOF
