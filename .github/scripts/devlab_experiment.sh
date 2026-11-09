@@ -21,6 +21,7 @@
 #        determinism:C:R determinism.py, R reps of each prompt with C requests in flight
 #        admit:N         admission only: a needle prompt of N tokens on a fresh server, admitted or refused (503), cancelled
 #        needle:N[:S]    one Loom-only needle probe of N tokens on the running server (read timeout S seconds): status, TTFT
+#        consdefer:N     consistency.py N times for cards whose GGUF and llama.cpp do not fit together: references deferred, filled with Loom stopped, runs re-judged
 #        ktest           the starter's kernel tests (make_kernel_tests.py + run_kernel_tests.sh) on the package
 #        gates:LEVEL     gates.sh at LEVEL against the card's llama.cpp build ("llamacpp" in EXPERIMENT.json)
 # Writes WORK/<variant>/out: summary.json, *.log. Every server it starts is stopped at exit.
@@ -65,10 +66,12 @@ if [ ! -f "$card/.fetched" ]; then
 fi
 
 # build.py's / make_kernel_tests.py's config: the card's llm_config.json with its GGUFs pointed at the fetched files, plus the tensor table
-"$T" - "$card" "$D/cfg.json" "$(q "print(json.dumps(v.get('config') or {}))")" <<'EOF' || exit 1
+"$T" - "$card" "$D/cfg.json" "$(q "print(json.dumps(v.get('config') or {}))")" "$ST" <<'EOF' || exit 1
 import json, os, sys
 import gguf
-card, dst, over = sys.argv[1:]
+card, dst, over, starter = sys.argv[1:]
+sys.path.insert(0, starter)
+from formats import split_parts
 c = json.load(open(os.path.join(card, "llm_config.json")))
 par = lambda f: os.path.join(card, "parameter", os.path.basename(f))
 c["gguf"] = par(c["gguf"])
@@ -78,8 +81,8 @@ for k in ("vision",):
 for k in ("drafter", "assistant"):
     if c.get(k) and c[k].get("gguf"):
         c[k]["gguf"] = par(c[k]["gguf"]) if os.path.exists(par(c[k]["gguf"])) else None
-r = gguf.GGUFReader(c["gguf"])
-c["tensors"] = {t.name: {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]} for t in r.tensors}
+# every part of a split GGUF (the later layers' tensors are in the later parts)
+c["tensors"] = {t.name: {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]} for p in split_parts(c["gguf"]) for t in gguf.GGUFReader(p).tensors}
 for k in ("model_id", "draft"):
     c.pop(k, None)
 c.update(json.loads(over))
@@ -178,6 +181,35 @@ for s in $steps; do
       done
       res[$s]="gate PASS $np/$p1, nondeterministic $nd/$p1, concurrent-mismatch $nc/$p1"
       grep -h "first divergence\|near-tie" "$out"/consistency_*.log | sort | uniq -c | sort -rn | head -8;;
+    consdefer)
+      # consistency.py x N with the gate's one-model-at-a-time protocol (gates.sh): llama.cpp references are deferred, filled with
+      # Loom stopped, and the kept Loom runs re-judged (for cards whose two models do not fit together)
+      export LLAMA_CACHE=$D/llama_cache; mkdir -p "$LLAMA_CACHE"
+      curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
+      step "consistency (deferred llama.cpp) x $p1"
+      rm -f "$out"/pend_*.jsonl*
+      for round in 1 2 3 4; do
+        pend=()
+        for i in $(seq 1 "$p1"); do
+          LLAMA_DEFER=$out/pend_$i.jsonl "$T" "$B/consistency.py" "$url" --model "$model" --pkg "$pkg" --llama "http://127.0.0.1:$LLAMA_PORT" > "$out/consistency_$i.log" 2>&1
+          [ -s "$out/pend_$i.jsonl" ] && pend+=("$out/pend_$i.jsonl")
+        done
+        [ ${#pend[@]} = 0 ] && break
+        step "round $round: filling ${#pend[@]} runs' llama.cpp references with Loom stopped"
+        "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
+        llama_up || break
+        "$T" "$B/llama_fill.py" "http://127.0.0.1:$LLAMA_PORT" "${pend[@]}" > "$out/llama_fill_$round.log" 2>&1; tail -1 "$out/llama_fill_$round.log"
+        rm -f "${pend[@]}"; "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
+        serve || { res[$s]=ERROR; break; }
+      done
+      np=0; nd=0; nc=0
+      for i in $(seq 1 "$p1"); do
+        grep -q "^PASS$" "$out/consistency_$i.log" && np=$((np + 1))
+        grep -q "NOT DETERMINISTIC" "$out/consistency_$i.log" && nd=$((nd + 1))
+        grep -q "identical when concurrent: \[.*False" "$out/consistency_$i.log" && nc=$((nc + 1))
+        echo "  $i: $(grep -h 'first divergence' "$out/consistency_$i.log" | cut -c1-400)"
+      done
+      res[$s]="gate PASS $np/$p1, nondeterministic $nd/$p1, concurrent-mismatch $nc/$p1";;
     determinism)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       step "determinism conc $p1 reps $p2"
