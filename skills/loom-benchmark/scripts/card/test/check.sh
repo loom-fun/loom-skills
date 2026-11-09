@@ -7,6 +7,7 @@
 set -eu
 bad=0
 here=$(cd "$(dirname "$0")" && pwd); C=$here/..; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+export LOOM_CARD_UPSTREAM=none   # offline: vision and audio the package lacks are n/a (no upstream probe)
 py() { python3 -I "$@"; }
 F=$here/flint; D=$here/d1
 GEN=0123456789abcdef0123456789abcdef01234567   # the card generator commit is an input, never read by the renderer
@@ -295,6 +296,19 @@ done
 got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 print(*[c.quant_of(n) for n in ('hyperclovax-1.5b-q4_k_m.gguf', 'x-Q4_K_Mfoo', 'x-Q4_K_M_foo', 'model-q4-k-m', 'x-Q8_0-q4_0')])" "$C")
 [ "$got" = "Q4_K_M Q4_K Q4_K_M None Q8_0" ] && echo "OK   quant_of" || { echo "FAIL quant_of: $got"; bad=1; }
+# features: n/a when the upstream model lacks it, no (red) only when upstream has it and Loom does not
+got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+fake = {'https://huggingface.co/api/models/o/m-GGUF': {'siblings': [{'rfilename': 'mmproj-m.gguf'}]},
+        'https://huggingface.co/o/m/resolve/main/config.json': {'audio_config': {}}}
+up = c.upstream_facts('o/m-GGUF', 'o/m', fake.get)
+txt = c.upstream_facts('o/t-GGUF', 'o/t', lambda u: {'siblings': []} if '/api/' in u else {'hidden': 1})
+cfg = {'chat': {'call_format': 'none', 'thinking': 'never'}, 'drafter': {'tuned': [{'kind': 'none'}, {'kind': 'dflash'}]}}
+f = c.derive_features({}, cfg, 'chat', {}, {}, None, up)
+g = c.derive_features({}, {'chat': {'call_format': 'hermes', 'thinking': 'never'}}, 'chat', {}, {}, None, txt)
+old = c.derive_features({}, {'chat': {}}, 'chat', {}, {}, None, txt)
+print(up['vision'], up['audio'], txt['vision'], txt['audio'], *[f[k]['status'] for k in ('image_input', 'audio', 'tool_calling', 'thinking', 'speculative_decoding')],
+      *[g[k]['status'] for k in ('image_input', 'audio', 'tool_calling', 'speculative_decoding')], old['tool_calling']['status'])" "$C")
+[ "$got" = "True True False False no no n/a n/a no n/a n/a yes n/a unknown" ] && echo "OK   features: n/a vs no" || { echo "FAIL features: $got"; bad=1; }
 # org_status consistency checks: a nightly entry that differs from the card (memory_bytes, llama.cpp build) or is missing,
 # and a generator commit that is not on main: not an ancestor of main and in no merged PR (a throwaway git repo with one
 # commit on main and one on a branch; the PR lookup is injected: merged, open, unknown)

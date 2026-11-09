@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (FEATURES, GATE_NAMES, GATES, HF, LOOM_URL, METHOD, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
                       card_metrics, derived_tags, gate_applies, generator_commit, load_json,
                       load_package, metric_applies, native_context, over_context, package_facts, programs_sha256,
-                      require_valid, stale_metrics)
+                      require_valid, stale_metrics, with_gate_features)
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
 SUP = "¹²³⁴⁵⁶⁷⁸⁹"
@@ -122,8 +122,11 @@ def drafting(spec):
 
 def feature_detail(key, f):
     st, v = f["status"], f["value"] or {}
+    if st == "no" and key == "speculative_decoding":
+        return ("off by default: the upstream " + "/".join(v.get("available") or ["drafter"])
+                + " drafter was measured no faster here")
     if st == "no":
-        return {"sampling": "greedy decoding only"}.get(key, "not supported")
+        return {"sampling": "greedy decoding only"}.get(key, "not supported by Loom (the upstream model has it)")
     if st == "unknown":
         return "not verified"
     if st == "n/a":
@@ -168,10 +171,7 @@ def load(d):
     require_valid(info)
     facts = package_facts(load_package(d))
     feats = {k: dict(v) for k, v in facts["features"].items()}
-    if facts["kind"] == "chat":
-        sg = info["gates"].get("sampling")
-        if sg:
-            feats["sampling"] = {"status": "yes" if sg["status"] == "pass" else "no", "value": None}
+    feats = with_gate_features(feats, facts["kind"], info["gates"])
     for k, v in (info["card"].get("features") or {}).items():
         if k in feats:
             feats[k] = {"status": v["status"], "value": v.get("value")}

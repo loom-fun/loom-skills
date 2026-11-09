@@ -18,7 +18,7 @@
     "output": {"type": "string", "description": "loom-fetch --output directory, when not model.json's model id"},
     "memory_bytes": {"type": "integer", "description": "loom-serve --memory_bytes the card was validated with, when model.json carries none"},
     "features": {"type": "object", "additionalProperties": {"$ref": "#/$defs/feature"},
-                 "description": "A feature status that evidence (not the package) established, e.g. an old report stating greedy-only decoding"}
+                 "description": "Every feature row as the card shows it, so a reader needs no other file: status yes, no (the upstream model has it, Loom lacks it), n/a (the upstream model has none) or unknown, and its value. Written by make_info.py build from the package, the upstream model (vision, audio), the sampling gate and evidence (an old report stating greedy-only decoding); render_card.py shows these over what it derives itself"}
    }
   },
   "versions": {

@@ -54,7 +54,7 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 | reasoning effort | — | not applicable |
 | speculative decoding | — | not applicable |
 | image input | — | not applicable |
-| audio input / output | ❌ | not supported |
+| audio input / output | — | not applicable |
 | sampling | — | not applicable |
 | context size | ❌ | not verified |
 | concurrency | ✅ | 64 pending requests |

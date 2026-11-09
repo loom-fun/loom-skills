@@ -86,7 +86,8 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 from card_lib import (DRAFTED_ROWS, EVIDENCE_ID, MEDIAN_METRICS, METRIC_KEYS,  # noqa: E402
                       ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, load_json,
-                      load_package, metric_applies, package_facts, programs_sha256, require_valid, write_json)
+                      load_package, metric_applies, package_facts, programs_sha256, require_valid, upstream_facts,
+                      with_gate_features, write_json)
 
 
 # ---------------------------------------------------------------- sources
@@ -169,10 +170,16 @@ def gate_supersedes(new, cur):
 
 
 def cmd_build(a):
-    facts = package_facts(load_package(a.pkg))
+    pkg = load_package(a.pkg)
+    upstream = None
+    if a.upstream == "probe":
+        ckpt = package_facts(pkg)["checkpoint"]
+        upstream = upstream_facts(ckpt["repo"], pkg["cfg"].get("model_id"))
+    facts = package_facts(pkg, upstream)
     card, versions, baseline, sessions, gates = {}, {}, None, [], {}
     baselines = {}   # backend -> {"baseline", "session"}: the latest evidence of each backend replaces the earlier
     roofline, sweeps = None, []
+    card_features = {}   # evidence-established feature statuses (import_card.py: greedy-only sampling)
     sources = Sources()
     if a.from_info:   # a published card: its data first, then the new evidence on top
         old = load_json(a.from_info)
@@ -181,6 +188,7 @@ def cmd_build(a):
         if old["repo"] != a.repo:
             sys.exit(f"{a.from_info} is the card of {old['repo']}, not {a.repo}")
         card = json.loads(json.dumps(old["card"]))
+        card_features = {k: v for k, v in card.pop("features", {}).items() if k == "sampling"}   # evidence; the rest is recomputed
         measured = {g["programs_sha256"] for g in old["gates"].values() if g.get("programs_sha256")}
         if card.get("memory_bytes") and a.memory_bytes is None and measured and programs_sha256(a.pkg) not in measured:
             sys.exit(f"{a.from_info}: its gates measured other programs than {a.pkg}; its card.memory_bytes "
@@ -209,7 +217,7 @@ def cmd_build(a):
         c = ev.get("card") or {}
         card.update({k: v for k, v in c.items() if v is not None and k != "features"})
         if c.get("features"):
-            card.setdefault("features", {}).update(c["features"])
+            card_features.update(c["features"])
         if (ev.get("versions") or {}).get("package"):
             versions.setdefault("package", {}).update(ev["versions"]["package"])
         perf = ev.get("performance") or {}
@@ -264,6 +272,12 @@ def cmd_build(a):
         if g.get("programs_sha256"):
             row["programs_sha256"] = g["programs_sha256"]
         gate_out[name] = row
+    # every feature, so a dashboard reads them from info.json alone: the package's and upstream's facts, then the gates'
+    # sampling proof, then evidence (an old report's greedy-only sampling, only without a sampling gate)
+    feats = facts["features"]
+    if "sampling" in card_features and "sampling" not in gate_out:
+        feats["sampling"] = card_features["sampling"]
+    card["features"] = {**with_gate_features(feats, facts["kind"], gate_out), **{k: v for k, v in card_features.items() if k != "sampling"}}
     info = {"schema": SCHEMA_ID, "repo": a.repo, "card": card,
             "versions": {"card_generator": a.generator_commit, **versions},
             "sources": sources.by_id, "gates": gate_out}
@@ -657,6 +671,9 @@ def main(argv=None):
     b.add_argument("--from-info", help="a published info.json to start from (regenerating a card with new evidence)")
     b.add_argument("--status", choices=["paused", "active"], help="paused: work on this model has stopped (active: clears it)")
     b.add_argument("--next-steps", type=next_steps_file, help="a file of next steps, one per line (empty: none)")
+    b.add_argument("--upstream", choices=["probe", "none"], default=os.environ.get("LOOM_CARD_UPSTREAM", "probe"),
+                   help="probe: ask Hugging Face whether the upstream model has vision or audio (an mmproj, vision_config, "
+                   "audio_* config keys), for the features that are n/a when it does not; none: offline, they are n/a")
     b.add_argument("-o", default="info.json")
     p = sub.add_parser("perf")
     p.add_argument("--perf-log")

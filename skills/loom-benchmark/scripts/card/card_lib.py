@@ -194,7 +194,7 @@ def drafter_setting(cfg, execution):
     return draft.get("kind") or "draft", int(depth)
 
 
-def package_facts(pkg_files):
+def package_facts(pkg_files, upstream=None):
     """Everything the card shows that the package's own files determine."""
     model, lock, cfg = pkg_files["model"], pkg_files["lock"], pkg_files["cfg"]
     presets = model.get("presets", {})
@@ -214,7 +214,7 @@ def package_facts(pkg_files):
             "output": model.get("model", {}).get("id", "").split("/")[-1] or None,
             "memory_bytes": execution.get("memory_bytes"),
             "generator": cfg.get("generator"),
-            "features": derive_features(model, cfg, kind, execution, srcs, spec)}
+            "features": derive_features(model, cfg, kind, execution, srcs, spec, upstream)}
 
 
 def tool_calling(chat):
@@ -224,9 +224,43 @@ def tool_calling(chat):
     return chat.get("call_format") not in (None, "none") or bool(chat.get("tools_prefix"))
 
 
-def derive_features(model, cfg, kind, execution, srcs, spec):
+UPSTREAM_DRAFTERS = ("mtp", "dflash", "assist")   # drafter kinds that need an upstream drafter or head (ngram needs none)
+
+
+def upstream_facts(ckpt_repo, model_id, fetch_json=None):
+    """What the upstream model has beyond text, from upstream files alone: {"vision": bool, "audio": bool}.
+    Vision: the GGUF repo ships an mmproj, or the model's config.json declares vision_config. Audio: config.json
+    declares an audio_* or speech_* key. Network: the Hugging Face API (SystemExit when the checkpoint repo cannot
+    be read)."""
+    import urllib.request
+
+    def get(url):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r:
+                return json.load(r)
+        except Exception:
+            return None
+    get = fetch_json or get
+    meta = get(f"{HF}/api/models/{ckpt_repo}")
+    if meta is None:
+        raise SystemExit(f"cannot read {HF}/api/models/{ckpt_repo} (upstream facts for the card's features; "
+                         f"offline: --upstream none)")
+    base = model_id or next((t[len("base_model:"):] for t in meta.get("tags", [])
+                             if t.startswith("base_model:") and t.count(":") == 1), None)
+    keys = list(get(f"{HF}/{base}/resolve/main/config.json") or {}) if base else []
+    mmproj = any("mmproj" in s["rfilename"].lower() for s in meta.get("siblings", []))
+    return {"vision": mmproj or "vision_config" in keys, "audio": any("audio" in k or "speech" in k for k in keys)}
+
+
+def derive_features(model, cfg, kind, execution, srcs, spec, upstream=None):
+    """Each feature is yes (the package has it), no (upstream has it, the package lacks it), n/a (upstream lacks it) or
+    unknown. The chat block is derived from the upstream chat template, so tool calling, thinking and reasoning effort
+    absent from it are absent upstream; a block older than the glue (no call_format / thinking key) says nothing
+    (unknown). `upstream` is upstream_facts(): without it, vision and audio the package lacks are n/a."""
     chat = cfg.get("chat") or {}
+    upstream = upstream or {}
     na = {"status": "n/a", "value": None}
+    unknown = {"status": "unknown", "value": None}
     f = {}
     if kind == "decision":
         f["api"] = {"status": "yes", "value": {"endpoint": "/v1/systemone", "style": "systemone"}}
@@ -235,7 +269,8 @@ def derive_features(model, cfg, kind, execution, srcs, spec):
             f[k] = dict(na)
     else:
         f["api"] = {"status": "yes", "value": {"endpoint": "/v1/chat/completions", "style": "openai"}}
-        f["tool_calling"] = {"status": "yes" if tool_calling(chat) else "no", "value": None}
+        glue = "call_format" in chat   # a chat block from the template glue; older ones record nothing about tools
+        f["tool_calling"] = {"status": "yes", "value": None} if tool_calling(chat) else dict(na) if glue else dict(unknown)
         mode = chat.get("thinking")
         if mode not in ("always", "toggle"):
             mode = "always" if chat.get("starts_in_reasoning") else None
@@ -243,32 +278,44 @@ def derive_features(model, cfg, kind, execution, srcs, spec):
             default = chat.get("thinking_default", True) if mode == "toggle" else True
             f["thinking"] = {"status": "yes", "value": {"mode": mode, "default": bool(default)}}
         else:
-            f["thinking"] = {"status": "no", "value": None}
+            f["thinking"] = dict(na) if "thinking" in chat or glue else dict(unknown)
         levels = list((chat.get("reasoning_instructions") or {}).keys())
         f["reasoning_effort"] = ({"status": "yes", "value": {"levels": levels,
                                                              "default": chat.get("reasoning_effort_default")}}
-                                 if levels else {"status": "no", "value": None})
+                                 if levels else dict(na) if glue else dict(unknown))
         if spec:
             d = srcs.get("draft")
             f["speculative_decoding"] = {"status": "yes", "value": {"method": spec[0], "depth": spec[1],
                                                                     "drafter": d["repo"] if d else None}}
         else:
-            f["speculative_decoding"] = {"status": "no", "value": None}
+            kinds = sorted({t["kind"] for t in (cfg.get("drafter") or {}).get("tuned", []) if t["kind"] in UPSTREAM_DRAFTERS})
+            # a drafter exists upstream but the tuner measured no drafting faster: off by default (no spec gate applies)
+            f["speculative_decoding"] = {"status": "no", "value": {"available": kinds}} if kinds else dict(na)
         v = srcs.get("vision")
         f["image_input"] = ({"status": "yes", "value": {"projector": v["file"]}} if v and cfg.get("vision")
-                            else {"status": "no", "value": None})
-        f["sampling"] = {"status": "unknown", "value": None}   # proven by the sampling gate (evidence)
+                            else {"status": "no", "value": None} if upstream.get("vision") else dict(na))
+        f["sampling"] = dict(unknown)   # proven by the sampling gate (evidence)
         mt = execution.get("max_tokens")
-        f["max_output_tokens"] = {"status": "yes", "value": {"max_tokens": mt}} if mt else {"status": "unknown", "value": None}
+        f["max_output_tokens"] = {"status": "yes", "value": {"max_tokens": mt}} if mt else dict(unknown)
     audio = any(s.get("kind") in ("asr", "tts", "audio", "speech") for s in model.get("services", {}).values())
-    f["audio"] = {"status": "yes" if audio else "no", "value": None}
+    f["audio"] = ({"status": "yes", "value": None} if audio else
+                  {"status": "no", "value": None} if upstream.get("audio") else dict(na))
     ctx = execution.get("context_capacity")
     f["context"] = ({"status": "yes", "value": {"tokens": ctx, "native": cfg.get("context_length")}} if ctx
-                    else {"status": "unknown", "value": None})
+                    else dict(unknown))
     rows, pending = execution.get("rows"), execution.get("pending_requests")
     f["concurrency"] = ({"status": "yes", "value": {"rows": rows, "pending_requests": pending}} if rows or pending
-                        else {"status": "unknown", "value": None})
+                        else dict(unknown))
     return f
+
+
+def with_gate_features(feats, kind, gates):
+    """feats with the sampling feature the sampling gate proves (a chat model; no gate: the feature as it was)."""
+    feats = {k: dict(v) for k, v in feats.items()}
+    sg = gates.get("sampling")
+    if kind == "chat" and sg:
+        feats["sampling"] = {"status": "yes" if sg["status"] == "pass" else "no", "value": None}
+    return feats
 
 
 def derived_tags(features):
