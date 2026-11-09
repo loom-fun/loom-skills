@@ -16,7 +16,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -44,7 +44,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -72,7 +72,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -100,7 +100,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -128,7 +128,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -156,10 +156,11 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
+    "ktest:main",
     "ktest:patch",
     "perf:main:3:long",
     "perf:patch:3:long",
@@ -179,7 +180,7 @@
     {
      "name": "mut",
      "build": {},
-     "ref": "c14bbf5aed1c048041995b27fb093f89e9b28d93"
+     "ref": "2ea9f93bf8d5413a9e48176524c053e3be92c673"
     }
    ],
    "steps": [
@@ -196,7 +197,7 @@
     {
      "name": "mut",
      "build": {},
-     "ref": "c14bbf5aed1c048041995b27fb093f89e9b28d93"
+     "ref": "2ea9f93bf8d5413a9e48176524c053e3be92c673"
     }
    ],
    "steps": [
@@ -213,7 +214,7 @@
     {
      "name": "mut",
      "build": {},
-     "ref": "c14bbf5aed1c048041995b27fb093f89e9b28d93"
+     "ref": "2ea9f93bf8d5413a9e48176524c053e3be92c673"
     }
    ],
    "steps": [
@@ -230,7 +231,7 @@
     {
      "name": "mut",
      "build": {},
-     "ref": "c14bbf5aed1c048041995b27fb093f89e9b28d93"
+     "ref": "2ea9f93bf8d5413a9e48176524c053e3be92c673"
     }
    ],
    "steps": [
@@ -247,7 +248,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -264,7 +265,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -281,7 +282,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -298,7 +299,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -315,7 +316,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -332,7 +333,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -349,7 +350,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [
@@ -366,7 +367,7 @@
     {
      "name": "patch",
      "build": {},
-     "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e"
+     "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51"
     }
    ],
    "steps": [

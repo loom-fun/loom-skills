@@ -5,6 +5,13 @@
  "kit": null,
  "llamacpp": "b1370",
  "variants": [
-  {"name": "o122-patch", "build": {}, "ref": "3206acdebfc65ddec6f62c6fb657c5c12668710e", "steps": ["consdefer:20"]}
+  {
+   "name": "o122-patch",
+   "build": {},
+   "ref": "cb7b63efad92f0303ca93c7bbde2f19d2a45bb51",
+   "steps": [
+    "consdefer:20"
+   ]
+  }
  ]
 }
