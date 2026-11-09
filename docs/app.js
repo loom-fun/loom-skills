@@ -11,7 +11,7 @@ const GATE = [['kernel_tests','kernel tests'],['golden','golden'],['compare','co
 const TIMED = MET.map((m) => m[0]);
 const NORMNAME = {rocm: 'llama.cpp ROCm', vulkan: 'llama.cpp Vulkan'};
 const COL = {loom: '#a84f0e', rocm: '#8f887b', vulkan: '#4a7fb0'};
-const ST = {norm: 'rocm', q: '', sort: 'gain', dir: 'desc'};
+const ST = {norm: 'rocm', q: '', sort: 'gain', dir: 'desc', aggm: 'prefill_32k'};
 const HF = 'https://huggingface.co';
 
 /* ---- info.json -> row (port of compile.py + card_lib) ---- */
@@ -119,6 +119,73 @@ function drawBrag() {
   $('med32').textContent = v == null || isNaN(v) ? '—' : v.toFixed(1) + '×';
 }
 
+function selectRows(models, byRepo, nk) {
+  const q = ST.q.trim().toLowerCase();
+  const rows = models.filter((m) => !q || m.repo.toLowerCase().includes(q) || String(m.model).toLowerCase().includes(q) || String(m.arch).toLowerCase().includes(q));
+  const key = (m) => ST.sort === 'size' ? m.params_b : byRepo.get(m.repo)['median_' + nk];
+  const sign = ST.dir === 'asc' ? 1 : -1;
+  rows.sort((a, b) => { const x = key(a), y = key(b);
+    if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1; return sign * (x - y); });
+  return rows;
+}
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+const sv = (tag, attrs, txt) => { const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (txt != null) e.textContent = txt; return e; };
+const niceMax = (v) => { const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; };
+const aggTip = mk('div', 'tip'); aggTip.hidden = true;
+function drawAgg() {
+  const el = $('aggchart');
+  if (!LOADED) { el.replaceChildren(document.createTextNode('Loading…')); return; }
+  const byRepo = new Map(RATIOS.map((r) => [r.repo, r]));
+  const nk = RN(), absm = ST.norm === 'abs', oth = nk === 'rocm' ? 'vulkan' : 'rocm', k = ST.aggm;
+  const rows = selectRows(MODELS, byRepo, nk);
+  const eng = absm ? ['loom', 'rocm', 'vulkan'] : ['loom', oth];
+  const ename = (e) => e === 'loom' ? 'Loom' : NORMNAME[e];
+  const val = (m, e) => { if (absm) return m[k + '_' + e]; const rt = byRepo.get(m.repo);
+    return e === 'loom' ? rt[k + '_' + nk] : rt[k + '_' + oth + '_vs_' + nk]; };
+  const names = rows.map((m) => m.repo.replace(/^loom-fun\//, ''));
+  const W = Math.max(300, el.clientWidth), H = 320, ml = 52, mr = 12, mt = 10, mb = 120;
+  const vals = rows.flatMap((m) => eng.map((e) => val(m, e))).filter((v) => v != null);
+  const vmax = vals.length ? Math.max(...vals) : null;
+  const top = niceMax(absm ? (vmax || 1) : Math.max(1.2, vmax ?? 1.2));
+  const y = (v) => H - mb - v / top * (H - mb - mt);
+  // band layout: paddingInner .2, paddingOuter .1 (d3 scaleBand)
+  const n = rows.length, bandStep = n ? (W - mr - ml) / (n - 0.2 + 0.2) : 1;
+  const bw = bandStep * 0.8, x0 = ml + (n ? ((W - mr - ml) - (bandStep * (n - 1) + bw)) / 2 : 0);
+  const X = (i) => x0 + i * bandStep;
+  const svg = sv('svg', {width: W, height: H, viewBox: `0 0 ${W} ${H}`});
+  const ticks = []; const ts = top / 5; for (let i = 0; i <= 5; i++) ticks.push(i * ts);
+  const fmtTick = (d) => absm ? (d >= 1000 ? +(d / 1000).toPrecision(3) + 'k' : String(+d.toPrecision(3))) : (+d.toFixed(2)) + '×';
+  ticks.forEach((d) => {
+    svg.append(sv('line', {x1: ml, x2: W - mr, y1: y(d), y2: y(d), stroke: 'currentColor', 'stroke-opacity': 0.1}));
+    svg.append(sv('text', {x: ml - 6, y: y(d), dy: '0.32em', 'text-anchor': 'end', 'font-size': 10, fill: 'currentColor'}, fmtTick(d)));
+  });
+  names.forEach((d, i) => svg.append(sv('text', {transform: `translate(${X(i) + bw / 2},${H - mb + 8}) rotate(-60)`, 'text-anchor': 'end',
+    'font-size': 9, fill: 'currentColor', opacity: 0.75}, d.length > 30 ? d.slice(0, 29) + '…' : d)));
+  // one overlapped stack per model: tallest bar behind, shortest in front
+  rows.forEach((m, i) => eng.map((e) => ({e, v: val(m, e)})).filter((b) => b.v != null).sort((a, b) => b.v - a.v)
+    .forEach((b) => svg.append(sv('rect', {x: X(i), width: bw, y: y(b.v), height: Math.max(0, y(0) - y(b.v)), fill: COL[b.e]}))));
+  if (!absm) svg.append(sv('line', {x1: ml, x2: W - mr, y1: y(1), y2: y(1), stroke: COL[nk], 'stroke-width': 1.5, 'stroke-dasharray': '5 4'}));
+  const hl = sv('line', {y1: mt, y2: H - mb, stroke: 'currentColor', 'stroke-opacity': 0.35}); hl.style.display = 'none'; svg.append(hl);
+  const hit = sv('rect', {x: ml, y: mt, width: W - ml - mr, height: H - mb - mt, fill: 'transparent'});
+  hit.addEventListener('mousemove', (ev) => {
+    if (!n) return;
+    const px = ev.clientX - svg.getBoundingClientRect().left;
+    const i = Math.max(0, Math.min(n - 1, Math.floor((px - x0 + bandStep * 0.1) / bandStep)));
+    hl.setAttribute('x1', X(i) + bw / 2); hl.setAttribute('x2', X(i) + bw / 2); hl.style.display = '';
+    aggTip.textContent = names[i] + ': ' + eng.map((e) => { const v = val(rows[i], e);
+      return ename(e) + ' ' + (v == null ? 'n/a' : (absm ? v + ' tok/s' : v.toFixed(2) + '×')); }).join(', ');
+    aggTip.hidden = false;
+    const r = el.getBoundingClientRect(); let tx = ev.clientX - r.left + 12; const w = aggTip.offsetWidth;
+    if (tx + w > el.clientWidth) tx = Math.max(0, el.clientWidth - w);
+    aggTip.style.left = tx + 'px'; aggTip.style.top = (ev.clientY - r.top + 14) + 'px';
+  });
+  hit.addEventListener('mouseleave', () => { hl.style.display = 'none'; aggTip.hidden = true; });
+  svg.append(hit);
+  el.replaceChildren(svg, aggTip);
+}
+
 function drawCards() {
   const el = $('grid');
   if (!LOADED) { el.replaceChildren(document.createTextNode('Loading…'), tip); return; }
@@ -128,12 +195,7 @@ function drawCards() {
   RATIOS.forEach((r) => MET.forEach(([k]) => { for (const f of [k + '_' + nk, k + '_' + oth + '_vs_' + nk]) if (r[f] != null) all.push(r[f]); }));
   const lo = 0, hi = Math.max(2, all.length ? Math.max(...all) : 2);
   const X = (r) => (r - lo) / (hi - lo) * 100;
-  const q = ST.q.trim().toLowerCase();
-  const rows = MODELS.filter((m) => !q || m.repo.toLowerCase().includes(q) || String(m.model).toLowerCase().includes(q) || String(m.arch).toLowerCase().includes(q));
-  const key = (m) => ST.sort === 'size' ? m.params_b : byRepo.get(m.repo)['median_' + nk];
-  const sign = ST.dir === 'asc' ? 1 : -1;
-  rows.sort((a, b) => { const x = key(a), y = key(b);
-    if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1; return sign * (x - y); });
+  const rows = selectRows(MODELS, byRepo, nk);
   const showTip = (ev, text) => {
     tip.textContent = text; tip.hidden = false;
     const r = el.getBoundingClientRect();
@@ -213,7 +275,7 @@ function drawCards() {
   });
   el.replaceChildren(...cards, ...errs, tip);
 }
-const redraw = () => { drawBrag(); drawCards(); };
+const redraw = () => { drawBrag(); drawCards(); drawAgg(); };
 
 /* ---- data ---- */
 async function fetchJSON(url) {
@@ -245,12 +307,14 @@ document.querySelectorAll('[data-norm]').forEach((b) => b.addEventListener('clic
   document.querySelectorAll('[data-norm]').forEach((o) => { const on = o === b; o.classList.toggle('on', on); o.setAttribute('aria-pressed', String(on)); });
   redraw();
 }));
-$('q').addEventListener('input', (e) => { ST.q = e.target.value; drawCards(); });
-$('sort').addEventListener('change', (e) => { ST.sort = e.target.value; drawCards(); });
+$('q').addEventListener('input', (e) => { ST.q = e.target.value; drawCards(); drawAgg(); });
+$('sort').addEventListener('change', (e) => { ST.sort = e.target.value; drawCards(); drawAgg(); });
 document.querySelectorAll('[data-dir]').forEach((b) => b.addEventListener('click', () => {
   ST.dir = b.getAttribute('data-dir');
   document.querySelectorAll('[data-dir]').forEach((o) => { const on = o === b; o.classList.toggle('on', on); o.setAttribute('aria-pressed', String(on)); });
-  drawCards();
+  drawCards(); drawAgg();
 }));
+$('aggm').addEventListener('change', (e) => { ST.aggm = e.target.value; drawAgg(); });
 drawCards();
 load().catch((e) => { $('grid').textContent = 'Could not load data (' + (e.message || e) + ')'; });
+window.addEventListener('resize', () => { if (LOADED) drawAgg(); });

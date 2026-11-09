@@ -33,6 +33,15 @@
     </div>
   </div>
   <div class="legend" aria-label="Legend"><span><i style="background:#a84f0e"></i>Loom</span><span><i style="background:#8f887b"></i>llama.cpp ROCm</span><span><i style="background:#4a7fb0"></i>llama.cpp Vulkan</span></div>
+  <div class="agg" id="agg">
+    <div class="controls"><span class="lab2" id="agglabel">Metric:</span>
+      <select id="aggm" aria-labelledby="agglabel">
+        <option value="decode">decode</option><option value="decode_2k">decode 2k</option><option value="decode_32k">decode 32k</option>
+        <option value="prefill_1k">prefill 1k</option><option value="prefill_2k">prefill 2k</option><option value="prefill_8k">prefill 8k</option>
+        <option value="prefill_16k">prefill 16k</option><option value="prefill_32k" selected>prefill 32k</option><option value="streams4">4 streams</option>
+      </select></div>
+    <div class="aggchart" id="aggchart">Loading…</div>
+  </div>
   <div class="grid" id="grid">Loading…</div>
 </main>
 <script src="repos.js"></script>
