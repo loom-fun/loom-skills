@@ -85,7 +85,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 from card_lib import (DRAFTED_ROWS, EVIDENCE_ID, MEDIAN_METRICS, METRIC_KEYS,  # noqa: E402
-                      ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, load_json,
+                      ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, load_json,
                       load_package, metric_applies, package_facts, programs_sha256, require_valid, write_json)
 
 
@@ -191,6 +191,8 @@ def cmd_build(a):
             baseline, sessions = old["performance"]["baseline"], list(old["performance"]["sessions"])
             baselines = json.loads(json.dumps(old["performance"].get("baselines") or {}))
         for name, g in old["gates"].items():   # a published gate has a date, not a time: later evidence that day wins
+            if not gate_applies(name, facts["kind"], facts["features"]):   # e.g. spec after drafting was turned off: shown n/a
+                continue
             gates[name] = ((g.get("date") or "", -1), None, g)
         roofline = old.get("roofline")
         sweeps = (old.get("devlab") or {}).get("sweeps") or []   # pre-decision DevLab sweeps: kept as is, not rendered
