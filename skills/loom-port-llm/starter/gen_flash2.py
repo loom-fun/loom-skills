@@ -414,7 +414,8 @@ if CFG["sinks"]:
   %one_init = scalar.constant 1.0 : f32''')
 LMAX = "\n".join(["    %lmax_c0 = scalar.addf %lmax0, %zero_f : f32"] + [f"    %lmax_c{kb} = scalar.maxnumf %lmax_c{kb - 1}, %lmax{kb} : f32" for kb in range(1, KB)] + [f"    %lmax = scalar.addf %lmax_c{KB - 1}, %zero_f : f32"])
 LSUM = "\n".join(["    %lsum_c0 = scalar.addf %ls0, %zero_f : f32"] + [f"    %lsum_c{kb} = scalar.addf %lsum_c{kb - 1}, %ls{kb} : f32" for kb in range(1, KB)] + [f"    %lsum = scalar.addf %lsum_c{KB - 1}, %zero_f : f32"])
-KEYMAX = "%pos_hi" if PARTIAL and not os.environ.get("FLASH2_STALE_REAL") else "%pos_last"   # a partial tile stages no key past its last live position
+_MODE = os.environ.get("FLASH2_STALE_MODE", "")   # diagnostic: "k" zeroes only K past the last live key, "v" only V
+KEYMAX = "%pos_hi" if PARTIAL and not os.environ.get("FLASH2_STALE_REAL") and not _MODE else "%pos_last"   # a partial tile stages no key past its last live position
 STAGE = f"""    %key_pos = index.add %tile_first, %st_key : index
     %key_valid = index.cmp ule, %key_pos, {KEYMAX} : index
     %kvals, %vvals = scf.if %key_valid -> (vector<{DPT}xf16>, vector<{DPT}xf16>) {{
@@ -426,9 +427,9 @@ STAGE = f"""    %key_pos = index.add %tile_first, %st_key : index
     }} else {{
       scf.yield %kz, %kz : vector<{DPT}xf16>, vector<{DPT}xf16>
     }}
-    vector.store %kvals, %k_view[%st_key, %st_dim] : vector<{DPT}xf16>, view<{KT}x{DP8}xf16>
+{"" if not (PARTIAL and _MODE) else "    %key_pos_live = index.cmp ule, %key_pos, %pos_hi : index" + chr(10)}{("    %kvals2 = scf.select %key_pos_live, %kvals, %kz : vector<" + str(DPT) + "xf16>" + chr(10)) if _MODE == "k" else ""}{("    %vvals2 = scf.select %key_pos_live, %vvals, %kz : vector<" + str(DPT) + "xf16>" + chr(10)) if _MODE == "v" else ""}    vector.store {"%kvals2" if _MODE == "k" else "%kvals"}, %k_view[%st_key, %st_dim] : vector<{DPT}xf16>, view<{KT}x{DP8}xf16>
     scf.for %j = [%c0 to %cdpt step %c1] unroll {{
-      %vj = vector.extract %vvals[%j] : vector<{DPT}xf16> -> f16
+      %vj = vector.extract {"%vvals2" if _MODE == "v" else "%vvals"}[%j] : vector<{DPT}xf16> -> f16
       %vt_row_value = index.add %st_dim, %j : index
       %vt_row = index.assume %vt_row_value [range(%vt_row_value, 0, {D - 1})] : index
       view.store %vj, %vt_view[%vt_row, %st_key] : f16, view<{D}x{VTC}xf16>
