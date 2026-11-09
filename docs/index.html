@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loom Model Performance</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="pd">
+  <h1>Loom Model Performance</h1>
+  <div class="brag" id="brag" aria-label="Highlights">
+    <div><b id="n_models">—</b><span>of the top 50 trending LLMs ported</span></div>
+    <div><b>3 days</b><span>of work</span></div>
+    <div><b id="n_archs">—</b><span>architectures</span></div>
+    <div><b id="med32">—</b><span>median 32K prefill speedup vs <span id="normname">llama.cpp ROCm</span></span></div>
+  </div>
+  <div class="controls">
+    <span class="lab2" id="normlabel">Normalize to:</span>
+    <div class="seg" role="group" aria-labelledby="normlabel">
+      <button type="button" data-norm="rocm" class="on" aria-pressed="true">llama.cpp ROCm</button>
+      <button type="button" data-norm="vulkan" aria-pressed="false">llama.cpp Vulkan</button>
+      <button type="button" data-norm="abs" aria-pressed="false">Absolute (tok/s)</button>
+    </div>
+    <input class="q" id="q" type="search" placeholder="Filter by name" aria-label="Filter by name">
+    <select id="sort" aria-label="Sort by">
+      <option value="gain">Sort: performance gain</option>
+      <option value="size">Sort: size</option>
+    </select>
+    <div class="seg" role="group" aria-label="Sort direction">
+      <button type="button" data-dir="desc" class="on" aria-pressed="true">Descending</button>
+      <button type="button" data-dir="asc" aria-pressed="false">Ascending</button>
+    </div>
+  </div>
+  <div class="legend" aria-label="Legend"><span><i style="background:#a84f0e"></i>Loom</span><span><i style="background:#8f887b"></i>llama.cpp ROCm</span><span><i style="background:#4a7fb0"></i>llama.cpp Vulkan</span></div>
+  <div class="grid" id="grid">Loading…</div>
+</main>
+<script src="repos.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
