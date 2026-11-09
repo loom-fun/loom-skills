@@ -69,10 +69,12 @@ if [ ! -f "$card/.fetched" ]; then
   rm -rf "$WORK/fetch-cache"; touch "$card/.fetched"
 fi
 # build.py's config: the card's llm_config.json with its GGUFs pointed at the fetched files, plus the tensor table
-"$T" - "$card" "$D/cfg.json" <<'EOF' || exit 1
+"$T" - "$card" "$D/cfg.json" "$here/skills/loom-port-llm/starter" <<'EOF' || exit 1
 import json, os, sys
 import gguf
-card, dst = sys.argv[1:]
+card, dst, starter = sys.argv[1:]
+sys.path.insert(0, starter)
+from formats import split_parts
 c = json.load(open(os.path.join(card, "llm_config.json")))
 par = lambda f: os.path.join(card, "parameter", os.path.basename(f))
 c["gguf"] = par(c["gguf"])
@@ -81,8 +83,8 @@ if c.get("vision"):
 for k in ("drafter", "assistant"):
     if c.get(k) and c[k].get("gguf"):
         c[k]["gguf"] = par(c[k]["gguf"]) if os.path.exists(par(c[k]["gguf"])) else None
-r = gguf.GGUFReader(c["gguf"])
-c["tensors"] = {t.name: {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]} for t in r.tensors}
+# every part of a split GGUF (the later layers' tensors are in the later parts)
+c["tensors"] = {t.name: {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]} for p in split_parts(c["gguf"]) for t in gguf.GGUFReader(p).tensors}
 for k in ("model_id", "draft"):
     c.pop(k, None)
 json.dump(c, open(dst, "w"), indent=1)

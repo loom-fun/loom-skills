@@ -1,36 +1,12 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "o122c (do not merge): Ornith-1.5-122B card programs vs rebuild from main (#193), same runner.",
+ "card": "loom-fun/bartowski-Ornith-1.5-122B-loom",
+ "memory_bytes": 106000000000,
+ "kit": null,
+ "llamacpp": "b1370",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
  "jobs": [
-  {
-   "name": "tm-off",
-   "thinking": "off",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "textmatch:new"
-   ]
-  },
-  {
-   "name": "tm-on",
-   "thinking": "on",
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "textmatch:new"
-   ]
-  }
+  {"name": "ab", "variants": [{"name": "card"}, {"name": "main", "build": {}, "build_args": ["--memory-gib", "98.7"]}],
+   "steps": ["perf:card:2:long", "perf:main:2:long", "c4:card", "c4:main"]}
  ]
 }
