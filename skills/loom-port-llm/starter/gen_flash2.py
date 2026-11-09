@@ -558,7 +558,8 @@ for kb in range(KB):
       %isc{c}_{kb} = scalar.cmpi eq, %lane_col32m, %mc{c}_{kb} : i32""")
         for d in range(NF):
             prev_acc = ins[d] if c == 0 else f"%ac{d}_{c - 1}_{kb}"
-            A(f"""      %vm{d}_{c}_{kb} = vector.select %m{c}_{kb}, %vl{d}_{kb}, %zero16h : vector<16xf16>
+            A(f"""      %vs{d}_{c}_{kb} = vector.select %m{c}_{kb}, %vl{d}_{kb}, %zero16h : vector<16xf16>
+      %vm{d}_{c}_{kb} = vector.fragment<lhs> %vs{d}_{c}_{kb} shape [%c16, %c16] : vector<16xf16>
       %rm{d}_{c}_{kb} = vector.mma %vm{d}_{c}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
       %ac{d}_{c}_{kb} = scf.select %isc{c}_{kb}, %rm{d}_{c}_{kb}, {prev_acc} : vector<8xf32>""")
     yv = ", ".join(f"%ac{d}_15_{kb}" for d in range(NF)); vt = ", ".join(["vector<8xf32>"] * NF)
