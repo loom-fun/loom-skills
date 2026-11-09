@@ -22,9 +22,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (FEATURES, GATE_NAMES, GATES, HF, LOOM_URL, METHOD, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
                       card_metrics, derived_tags, gate_applies, generator_commit, load_json,
                       load_package, metric_applies, native_context, over_context, package_facts, programs_sha256,
-                      require_valid, stale_metrics)
+                      require_valid, stale_metrics, with_gate_features)
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
+UNKNOWN = "?"   # a feature that could not be determined: neither supported, nor n/a, nor a failure
 SUP = "¹²³⁴⁵⁶⁷⁸⁹"
 STALE = "†"   # a Loom value measured on programs other than this repository's (card_lib.stale_metrics)
 SHORT = {"decode": "decode", "decode_2k": "decode at 2k", "decode_32k": "decode at 32k", "streams4": "4 streams"}
@@ -123,9 +124,9 @@ def drafting(spec):
 def feature_detail(key, f):
     st, v = f["status"], f["value"] or {}
     if st == "no":
-        return {"sampling": "greedy decoding only"}.get(key, "not supported")
+        return {"sampling": "greedy decoding only"}.get(key, "not supported by Loom (the upstream model has it)")
     if st == "unknown":
-        return "not verified"
+        return "not determined"
     if st == "n/a":
         return "not applicable"
     if key == "api":
@@ -142,6 +143,8 @@ def feature_detail(key, f):
     if key == "reasoning_effort":
         d = f" (default {v['default']})" if v.get("default") else ""
         return "`reasoning_effort`: " + ", ".join(v.get("levels") or []) + d
+    if key == "speculative_decoding" and not v.get("method"):
+        return f"available upstream ({', '.join(v.get('available') or [])}); not enabled"
     if key == "speculative_decoding":
         out = f"{METHOD.get(v.get('method'), v.get('method'))}, depth {v.get('depth')}, on by default"
         return out + (f"; drafter {hf(v['drafter'])}" if v.get("drafter") else "")
@@ -168,10 +171,7 @@ def load(d):
     require_valid(info)
     facts = package_facts(load_package(d))
     feats = {k: dict(v) for k, v in facts["features"].items()}
-    if facts["kind"] == "chat":
-        sg = info["gates"].get("sampling")
-        if sg:
-            feats["sampling"] = {"status": "yes" if sg["status"] == "pass" else "no", "value": None}
+    feats = with_gate_features(feats, facts["kind"], info["gates"])
     for k, v in (info["card"].get("features") or {}).items():
         if k in feats:
             feats[k] = {"status": v["status"], "value": v.get("value")}
@@ -368,7 +368,7 @@ def render(d):
     L += ["## Features", "", "| feature | status | detail |", "|---|---|---|"]
     for key, label in FEATURES:
         f = feats[key]
-        st = {"yes": YES, "no": NO, "unknown": NO, "n/a": NA}[f["status"]]
+        st = {"yes": YES, "no": NO, "unknown": UNKNOWN, "n/a": NA}[f["status"]]
         L.append(f"| {label} | {st} | {feature_detail(key, f)} |")
     L.append("")
 

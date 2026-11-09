@@ -1,5 +1,57 @@
 {
  "card": {
+  "features": {
+   "api": {
+    "status": "yes",
+    "value": {
+     "endpoint": "/v1/systemone",
+     "style": "systemone"
+    }
+   },
+   "audio": {
+    "status": "unknown",
+    "value": null
+   },
+   "concurrency": {
+    "status": "yes",
+    "value": {
+     "pending_requests": 64,
+     "rows": null
+    }
+   },
+   "context": {
+    "status": "unknown",
+    "value": null
+   },
+   "image_input": {
+    "status": "n/a",
+    "value": null
+   },
+   "max_output_tokens": {
+    "status": "n/a",
+    "value": null
+   },
+   "reasoning_effort": {
+    "status": "n/a",
+    "value": null
+   },
+   "sampling": {
+    "status": "n/a",
+    "value": null
+   },
+   "speculative_decoding": {
+    "status": "n/a",
+    "value": null
+   },
+   "thinking": {
+    "status": "n/a",
+    "value": null
+   },
+   "tool_calling": {
+    "status": "n/a",
+    "value": null
+   }
+  },
   "license": "other"
  },
  "gates": {
