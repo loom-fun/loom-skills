@@ -1,35 +1,164 @@
 {
- "_comment": "Text match with llama.cpp log-probs at the divergence (matched thinking).",
- "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
- "memory_bytes": 34000000000,
- "kit": "gemma4",
- "llamacpp": "b1368",
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99",
+ "_comment": "Temporary: same-runner A/B of partial-tile flash2 (not for merge).",
+ "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+ "memory_bytes": 62000000000,
+ "kit": null,
+ "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "tm-off",
-   "thinking": "off",
+   "name": "coder",
+   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "memory_bytes": 62000000000,
+   "kit": null,
+   "llamacpp": "b1370",
    "variants": [
     {
-     "name": "new",
+     "name": "main",
+     "ref": "origin/main",
+     "build": {}
+    },
+    {
+     "name": "fix",
      "build": {}
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:main:1:long",
+    "perf:fix:1:long",
+    "c4:main",
+    "c4:fix",
+    "perf:main:1:long",
+    "perf:fix:1:long"
    ]
   },
   {
-   "name": "tm-on",
-   "thinking": "on",
+   "name": "qwen3-8b",
+   "card": "loom-fun/unsloth-Qwen3-8B-loom",
+   "memory_bytes": 29000000000,
+   "kit": null,
+   "llamacpp": "b1368",
    "variants": [
     {
-     "name": "new",
+     "name": "main",
+     "ref": "origin/main",
+     "build": {}
+    },
+    {
+     "name": "fix",
      "build": {}
     }
    ],
    "steps": [
-    "textmatch:new"
+    "perf:main:1:long",
+    "perf:fix:1:long",
+    "c4:main",
+    "c4:fix",
+    "perf:main:1:long",
+    "perf:fix:1:long"
+   ]
+  },
+  {
+   "name": "llama31-8b",
+   "card": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
+   "memory_bytes": 35000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "main",
+     "ref": "origin/main",
+     "build": {}
+    },
+    {
+     "name": "fix",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "perf:main:1:long",
+    "perf:fix:1:long",
+    "c4:main",
+    "c4:fix",
+    "perf:main:1:long",
+    "perf:fix:1:long"
+   ]
+  },
+  {
+   "name": "gemma4-e4b",
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes": 31000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "main",
+     "ref": "origin/main",
+     "build": {}
+    },
+    {
+     "name": "fix",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "perf:main:1:long",
+    "perf:fix:1:long",
+    "c4:main",
+    "c4:fix",
+    "perf:main:1:long",
+    "perf:fix:1:long"
+   ]
+  },
+  {
+   "name": "qwen35-9b",
+   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "memory_bytes": 30000000000,
+   "kit": null,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "main",
+     "ref": "origin/main",
+     "build": {}
+    },
+    {
+     "name": "fix",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "perf:main:1:long",
+    "perf:fix:1:long",
+    "c4:main",
+    "c4:fix",
+    "perf:main:1:long",
+    "perf:fix:1:long"
+   ]
+  },
+  {
+   "name": "gpt-oss-20b",
+   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
+   "memory_bytes": 28000000000,
+   "kit": "gpt-oss",
+   "llamacpp": "b1370",
+   "variants": [
+    {
+     "name": "main",
+     "ref": "origin/main",
+     "build": {}
+    },
+    {
+     "name": "fix",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "perf:main:1:long",
+    "perf:fix:1:long",
+    "c4:main",
+    "c4:fix",
+    "perf:main:1:long",
+    "perf:fix:1:long"
    ]
   }
  ]
