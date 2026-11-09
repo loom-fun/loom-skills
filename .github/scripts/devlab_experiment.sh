@@ -15,7 +15,8 @@
 #                  "config": {"rope_theta": 10000},                     (generator config overrides for a rebuild:
 #                                                                         an injected bug the gates must catch)
 #                  "steps": [...]}]}
-# Steps: consistency:N   consistency.py N times (counts runs that are not deterministic / not consistent)
+# Steps: diag[:R]        devlab_diag.sh: machine facts + the gemma-4-E2B flash2_d512 LDS A/B, R interleaved rounds
+#        consistency:N   consistency.py N times (counts runs that are not deterministic / not consistent)
 #        consistency:N:llama  the same with --pkg/--llama (the card's llama.cpp build): the gate's own verdict
 #        pairs:R         determinism.py --pairs: each prompt twice in a row (prefix-cache miss, then hit), R reps
 #        determinism:C:R determinism.py, R reps of each prompt with C requests in flight
@@ -270,6 +271,11 @@ EOF
         --out "$out/needle_$p1.json" > "$out/needle_$p1.log" 2>&1
       res[$s]=$(grep -h "^OK\|^FAIL" "$out/needle_$p1.log" | tail -1 | cut -c1-240)
       [ -n "${res[$s]}" ] || res[$s]=$(tail -1 "$out/needle_$p1.log" | cut -c1-240);;
+    diag)   # diag[:ROUNDS] machine facts + the flash2_d512 LDS A/B (devlab_diag.sh; gemma-4-E2B card only)
+      "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
+      step "diag ${p1:-2} rounds"
+      T=$T LOOM_ROOT=$root bash "$here/.github/scripts/devlab_diag.sh" "$pkg" "$out" "$mem" "${p1:-2}" 2>&1 | tee "$out/diag.log"
+      res[$s]=$(grep "^DIAG" "$out/diag.log" | cut -c1-200 | tr '\n' ';');;
     *) echo "unknown step $s"; res[$s]=ERROR;;
   esac
   echo "RESULT $name $s: ${res[$s]}"
