@@ -6,7 +6,7 @@ import requests
 sys.path.insert(0, __file__.rsplit("/.github", 1)[0] + "/skills/loom-benchmark/scripts")
 from bench_common import doc
 ap = argparse.ArgumentParser(); ap.add_argument("url"); ap.add_argument("--model", required=True)
-ap.add_argument("--reps", type=int, default=4); ap.add_argument("--n", type=int, default=12)
+ap.add_argument("--reps", type=int, default=4); ap.add_argument("--quick", action="store_true"); ap.add_argument("--n", type=int, default=12)
 a = ap.parse_args()
 body = doc(1000)
 prompts = [f"Question {i}: summarize part {i} of this text.\n\n" + body[i * 700:(i * 700) + 700 + 157 * i] for i in range(4)]
@@ -20,7 +20,7 @@ tot = 0
 for i in range(4):
     for j in range(4):
         if i == j: continue
-        for d in (0, 5, 10, 20, 40, 80, 160):
+        for d in ((20,) if a.quick else (0, 5, 10, 20, 40, 80, 160)):
             bad = [0, 0]
             for _ in range(a.reps):
                 with cf.ThreadPoolExecutor(2) as ex:

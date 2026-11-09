@@ -6,20 +6,37 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "lbase",
+   "name": "qbase",
    "build": {},
    "steps": [
-    "lenp:2"
+    "pairs2:3:q"
    ]
   },
   {
-   "name": "ld0",
-   "build": {},
-   "execution": {
-    "draft_depth": 0
+   "name": "qflashoff",
+   "build": {
+    "FLASH_OFF": "1"
    },
    "steps": [
-    "lenp:2"
+    "pairs2:3:q"
+   ]
+  },
+  {
+   "name": "qskip",
+   "build": {
+    "FLASH_SKIP": "1"
+   },
+   "steps": [
+    "pairs2:3:q"
+   ]
+  },
+  {
+   "name": "qlistall",
+   "build": {
+    "LIST_ALL": "1"
+   },
+   "steps": [
+    "pairs2:3:q"
    ]
   }
  ]

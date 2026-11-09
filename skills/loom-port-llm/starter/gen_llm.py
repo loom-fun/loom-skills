@@ -3297,6 +3297,10 @@ def fallback_text():
         fb = fb.replace("%uniform, %r_unused, %p_unused = func.call @g_tile_uniform(%info, %tokens, %start) : (buffer, index, index) -> (i1, i32, i32)",
                         "%uniform = scalar.constant false : i1\n    %r_unused = scalar.constant 0 : i32\n    %p_unused = scalar.constant 0 : i32")
         assert fb != FALLBACK
+    if os.environ.get("FLASH_SKIP"):   # temporary diagnostic: the tile list is built but flash2 sees count 0
+        fb = fb.replace("view.store %total, %tiles_view[%c0] : i32, view<[%tokens]xi32>", "view.store %c0_i32, %tiles_view[%c0] : i32, view<[%tokens]xi32>")
+    if os.environ.get("LIST_ALL"):   # temporary diagnostic: the listed fallback also takes the tile tokens (after flash2)
+        fb = fb.replace("%not_covered = scalar.xori %covered, %true : i1", "%not_covered = scalar.ori %covered, %true : i1")
     return fb
 
 

@@ -198,7 +198,7 @@ for s in $steps; do
     pairs2)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       step "pair probe x $p1"
-      "$T" "$here/.github/scripts/pair_probe.py" "$url" --model "$model" --reps "${p1:-4}" > "$out/pair.log" 2>&1
+      "$T" "$here/.github/scripts/pair_probe.py" "$url" --model "$model" --reps "${p1:-4}" ${p2:+--quick} > "$out/pair.log" 2>&1
       res[$s]=$(tail -1 "$out/pair.log")" ("$(grep -c differs "$out/pair.log")" schedules)";;
     lenp)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
