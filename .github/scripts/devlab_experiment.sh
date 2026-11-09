@@ -238,6 +238,10 @@ EOF
         --out "$out/needle_$p1.json" > "$out/needle_$p1.log" 2>&1
       res[$s]=$(grep -h "^OK\|^FAIL" "$out/needle_$p1.log" | tail -1 | cut -c1-240)
       [ -n "${res[$s]}" ] || res[$s]=$(tail -1 "$out/needle_$p1.log" | cut -c1-240);;
+    tune)
+      mkdir -p "$D/tok"; cp "$card/tokenizer.json" "$D/tok/"; step "tune TUNE_LONG=$p1"
+      TUNE_LONG=$p1 TUNE_PRIOR=0 LOOM_SKILLS=$SK VENV=$root/.venv LOOM_SERVE_STATE=$LOOM_SERVE_STATE "$T" "$ST/draft/tune.py" "$D" "$PORT" "$(( (mem + 1073741823) / 1073741824 ))" "$model" 2>&1 | tee "$out/tune.log" | grep "^tune:\|^TUNE_RESULT"
+      res[$s]=$(grep "^TUNE_RESULT" "$out/tune.log" | tail -1 | cut -c1-1500);;
     *) echo "unknown step $s"; res[$s]=ERROR;;
   esac
   echo "RESULT $name $s: ${res[$s]}"
