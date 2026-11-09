@@ -14,7 +14,7 @@ func.def inline @g_tile_uniform(%info: buffer, %tokens: index, %first: index) ->
   %bfirst = index.assume %first [lt(%first, %tokens)] : index
   %row0 = view.load %info_view[%bfirst, %c0] : view<[%tokens]x4xi32> -> i32
   %pos0 = view.load %info_view[%bfirst, %c1] : view<[%tokens]x4xi32> -> i32
-  %c_flash_from = scalar.constant 512 : i32
+  %c_flash_from = scalar.constant 0 : i32
   %deep_enough = scalar.cmpi sge, %pos0, %c_flash_from : i32
   %ok = scf.for %i = [%c0 to %c16 step %c1](%acc = %deep_enough : i1) -> (i1) {
     %t_value = index.add %first, %i : index
