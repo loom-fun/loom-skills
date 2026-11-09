@@ -24,7 +24,7 @@
   },
   {
    "name": "dflash",
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 5 -ngld 99",
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:Anbeeld/Qwen3-Coder-30B-A3B-DFlash-GGUF/Qwen3-Coder-30B-A3B-DFlash-Q4_K_M.gguf} --spec-draft-n-max 5 -ngld 99",
    "variants": [
     {
      "name": "card"
