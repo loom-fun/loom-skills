@@ -281,10 +281,13 @@ def render(d):
     here = programs_sha256(d)
     stale = stale_metrics(info, here, kind, feats)
     dshown, dstale = card_metrics(info, devlab=True), stale_metrics(info, here, kind, feats, devlab=True)
+    # further llama.cpp backends (performance.baselines): one DevLab column each, after DevLab Loom
+    extra = {b: x for b, x in (perf.get("baselines") or {}).items()}
+    xnames = {b: f"{x['baseline']['name']} {b.capitalize()}" for b, x in extra.items()}
     L += [f"## Performance vs {bname}", "",
           f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline | DevLab {bname} | DevLab Loom "
-          f"| local ÷ DevLab ({bname}, Loom) |",
-          "|---|---|---|---|---|---|---|---|---|"]
+          + "".join(f"| DevLab {n} " for n in xnames.values()) + f"| local ÷ DevLab ({bname}, Loom) |",
+          "|---|---|---|---|---|---|---|---|---|" + "---|" * len(extra)]
 
     def marked(key, v, i, stale_keys):
         """A value with its session's footnote mark (sessions other than the primary one) and the stale mark."""
@@ -297,18 +300,19 @@ def render(d):
         return out + (f" {STALE}" if key in stale_keys else "")
     for key, label in METRICS:
         if not metric_applies(key, kind, feats, info):
-            L.append(f"| {label} |" + " n/a |" * 8)
+            L.append(f"| {label} |" + " n/a |" * (8 + len(extra)))
             continue
         m, i = shown.get(key, ({"loom": None, "baseline": None}, None))
         loom = marked(key, m.get("loom"), i, stale)
         ceiling = (roof.get(key) or {}).get("ceiling")
         if key == "spec_acceptance":
-            cells = "n/a | n/a | n/a | n/a | n/a"
+            cells = " | ".join(["n/a"] * (5 + len(extra)))
         else:
             dm, di = dshown.get(key, ({}, None))
             ratios = [ratio(m.get(e), dm.get(e)) for e in ("baseline", "loom")]
             cells = (f"{num(key, ceiling)} | {pct(m.get('loom'), ceiling)} | {num(key, dm.get('baseline'))} | "
                      f"{marked(key, dm.get('loom'), di, dstale)} | "
+                     + "".join(f"{num(key, x['session']['metrics'].get(key, {}).get('baseline'))} | " for x in extra.values())
                      + (MISSING if ratios == [MISSING] * 2 else ", ".join(ratios)))
         L.append(f"| {label} | {num(key, m.get('baseline'))} | {loom} | "
                  f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), m.get('baseline'))} | {cells} |")
@@ -340,6 +344,15 @@ def render(d):
     if any(k in dshown for k, _ in METRICS if metric_applies(k, kind, feats, info)):
         L.append("- DevLab: the same measurement on an AMD DevLab Dispatch Strix Halo runner; local ÷ DevLab is the "
                  "local value over the DevLab value of each engine, recorded for comparison, not a verdict.")
+    for b, x in extra.items():
+        xb, xs = x["baseline"], x["session"]
+        L.append(f"- DevLab {xnames[b]}: build {('`' + xb['version'] + '`') if xb['version'] else 'not recorded'}"
+                 + (f" (archive sha256 {short(xb['sha256'])})" if xb.get("sha256") else "")
+                 + ", server arguments " + (f"`{xb['args']}`" if xb["args"] else "not recorded")
+                 + f"; same GGUF, prompts and settings as {bname}; measured {text(xs['date'])} in its own DevLab job "
+                 f"(a different runner than the other DevLab columns: compare the engines through ratios, not across jobs); "
+                 f"source: {src_text(sources[xs['source']])}."
+                 + "".join(f" Differs from {bname}: {u}." for u in xb.get("differs") or []))
     for sha in sorted(set(stale.values()) | set(dstale.values())):
         L.append(f"- {STALE} Measured on programs other than this repository's (sha256 {short(sha)}, this repository's "
                  f"{short(here)}): the value describes another build of the package until a session re-measures it.")
@@ -482,6 +495,19 @@ def render_report(d):
                 acc = (f" ({pct_of(m['acceptance'])} of drafted tokens accepted)"
                        if eng == "Loom" and m.get("acceptance") is not None else "")
                 L.append(f"| {labels.get(k, k)} | {eng} | {r} | {num(k, v)}{acc} |")
+        L.append("")
+    for b, x in (perf.get("baselines") or {}).items():
+        xs, xb = x["session"], x["baseline"]
+        src = sources[xs["source"]]
+        L += [f"## {xb['name']} {b.capitalize()}: {src_text(src)}, {text(xs['date'])}", "",
+              f"- Build: {('`' + xb['version'] + '`') if xb['version'] else 'not recorded'}; server arguments "
+              + (f"`{xb['args']}`" if xb["args"] else "not recorded") + ".",
+              f"- Device: {device_text(src['device'])}."]
+        L += [f"- Differs from {base['name']}: {u}." for u in xb.get("differs") or []]
+        L += ["", "| metric | runs | value |", "|---|---|---|"]
+        order = [k for k, _ in METRICS]
+        for k, m in sorted(xs["metrics"].items(), key=lambda kv: (order.index(kv[0]) if kv[0] in labels else len(order), kv[0])):
+            L.append(f"| {labels.get(k, k)} | {', '.join(str(v) for v in m.get('baseline_runs') or []) or MISSING} | {num(k, m.get('baseline'))} |")
         L.append("")
     r = info.get("roofline")
     if r:

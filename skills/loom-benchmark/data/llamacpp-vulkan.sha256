@@ -1,0 +1,4 @@
+# sha256 of the official ggml-org/llama.cpp Vulkan release archives the Vulkan baseline is pinned to
+# (fetch_llamacpp.sh with LLAMACPP_BACKEND=vulkan refuses an archive that differs). Same as GitHub's asset digest.
+9759acd293d3738f39d3ceed740bd3125d87dfb492ef8c4f00114d3393d37942  llama-b12211-bin-ubuntu-vulkan-x64.tar.gz
+20954cbad1a4626436c6ebaed5e48477f68427b075934689f360301ac426a2f1  llama-b12211-bin-win-vulkan-x64.zip

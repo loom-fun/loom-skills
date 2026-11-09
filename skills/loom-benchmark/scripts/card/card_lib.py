@@ -484,6 +484,9 @@ def validate(info):
     for i, s in enumerate(p.get("sessions", [])):
         if s["source"] not in ids:
             errs.append(f"info.performance.sessions[{i}].source: no source {s['source']!r}")
+    for b, x in (p.get("baselines") or {}).items():
+        if x["session"]["source"] not in ids:
+            errs.append(f"info.performance.baselines.{b}.session.source: no source {x['session']['source']!r}")
     for n, g in info.get("gates", {}).items():
         if g["source"] not in ids:
             errs.append(f"info.gates.{n}.source: no source {g['source']!r}")
