@@ -1,86 +1,69 @@
 {
- "_comment": "Temporary: Coder draft-depth sweep on the regenerated programs (DevLab).",
+ "_comment": "Temporary: Coder drafting candidates (none, n-gram) and plain llama.cpp on DevLab.",
  "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
  "memory_bytes": 62000000000,
  "kit": null,
  "llamacpp": "b1370",
+ "llama_spec": "",
  "jobs": [
   {
-   "name": "sweepA",
+   "name": "nodraft",
    "variants": [
     {
-     "name": "d0",
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "none",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     },
     {
-     "name": "d1",
-     "execution": {
-      "draft_depth": 1
-     }
+     "name": "ng2",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "ngram",
+      "--draft-depth",
+      "2"
+     ]
     },
     {
-     "name": "d2",
-     "execution": {
-      "draft_depth": 2
-     }
+     "name": "ng3",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "ngram",
+      "--draft-depth",
+      "3"
+     ]
     },
     {
-     "name": "d3",
-     "execution": {
-      "draft_depth": 3
-     }
+     "name": "ng5",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "ngram",
+      "--draft-depth",
+      "5"
+     ]
     }
    ],
    "steps": [
-    "perf:d0:2",
-    "perf:d0:2:long",
-    "perf:d1:2",
-    "perf:d1:2:long",
-    "perf:d2:2",
-    "perf:d2:2:long",
-    "perf:d3:2",
-    "perf:d3:2:long"
-   ]
-  },
-  {
-   "name": "sweepB",
-   "variants": [
-    {
-     "name": "d3",
-     "execution": {
-      "draft_depth": 3
-     }
-    },
-    {
-     "name": "d4",
-     "execution": {
-      "draft_depth": 4
-     }
-    },
-    {
-     "name": "d5",
-     "execution": {
-      "draft_depth": 5
-     }
-    },
-    {
-     "name": "d7",
-     "execution": {
-      "draft_depth": 7
-     }
-    }
-   ],
-   "steps": [
-    "perf:d3:2",
-    "perf:d3:2:long",
-    "perf:d4:2",
-    "perf:d4:2:long",
-    "perf:d5:2",
-    "perf:d5:2:long",
-    "perf:d7:2",
-    "perf:d7:2:long"
+    "perf:none:2",
+    "perf:none:2:long",
+    "c4:none",
+    "perf:ng2:2",
+    "perf:ng2:2:long",
+    "c4:ng2",
+    "perf:ng3:2",
+    "perf:ng3:2:long",
+    "c4:ng3",
+    "perf:ng5:2",
+    "perf:ng5:2:long",
+    "c4:ng5",
+    "llama:2",
+    "llama:2:long",
+    "llamac4"
    ]
   }
  ]
