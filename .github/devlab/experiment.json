@@ -6,30 +6,21 @@
  "llamacpp": "b1370",
  "variants": [
   {
-   "name": "pbase",
+   "name": "lbase",
    "build": {},
    "steps": [
-    "pairs2:4"
+    "lenp:2"
    ]
   },
   {
-   "name": "pflashoff",
-   "build": {
-    "FLASH_OFF": "1"
-   },
-   "steps": [
-    "pairs2:4"
-   ]
-  },
-  {
-   "name": "pd0",
+   "name": "ld0",
    "build": {},
-   "steps": [
-    "pairs2:4"
-   ],
    "execution": {
     "draft_depth": 0
-   }
+   },
+   "steps": [
+    "lenp:2"
+   ]
   }
  ]
 }

@@ -200,6 +200,11 @@ for s in $steps; do
       step "pair probe x $p1"
       "$T" "$here/.github/scripts/pair_probe.py" "$url" --model "$model" --reps "${p1:-4}" > "$out/pair.log" 2>&1
       res[$s]=$(tail -1 "$out/pair.log")" ("$(grep -c differs "$out/pair.log")" schedules)";;
+    lenp)
+      curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
+      step "length probe"
+      "$T" "$here/.github/scripts/len_probe.py" "$url" --model "$model" --reps "${p1:-2}" > "$out/len.log" 2>&1
+      res[$s]="differs: $(grep -vc 'differs 0/' "$out/len.log") of $(grep -c differs "$out/len.log") lengths";;
     admit)
       # Admission only: a needle prompt of N tokens on a fresh server; admitted (it runs) or refused (503), then cancelled
       [ -f "$LOOM_SERVE_STATE/exp-$name.pid" ] && "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
