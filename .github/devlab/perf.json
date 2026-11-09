@@ -1,68 +1,41 @@
 {
- "_comment": "Temporary: Coder drafting candidates (none, n-gram) and plain llama.cpp on DevLab.",
+ "_comment": "Temporary: DevLab perf on the final no-draft Coder programs, llama.cpp plain and with DFlash.",
  "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
- "memory_bytes": 62000000000,
+ "memory_bytes": 56000000000,
  "kit": null,
  "llamacpp": "b1370",
- "llama_spec": "",
  "jobs": [
   {
-   "name": "nodraft",
+   "name": "plain",
+   "llama_spec": "",
    "variants": [
     {
-     "name": "none",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "ng2",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "2"
-     ]
-    },
-    {
-     "name": "ng3",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "3"
-     ]
-    },
-    {
-     "name": "ng5",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "5"
-     ]
+     "name": "card"
     }
    ],
    "steps": [
-    "perf:none:2",
-    "perf:none:2:long",
-    "c4:none",
-    "perf:ng2:2",
-    "perf:ng2:2:long",
-    "c4:ng2",
-    "perf:ng3:2",
-    "perf:ng3:2:long",
-    "c4:ng3",
-    "perf:ng5:2",
-    "perf:ng5:2:long",
-    "c4:ng5",
+    "perf:card:2",
+    "perf:card:2:long",
     "llama:2",
     "llama:2:long",
+    "c4:card",
+    "llamac4"
+   ]
+  },
+  {
+   "name": "dflash",
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 5 -ngld 99",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "llama:2",
+    "llama:2:long",
+    "c4:card",
     "llamac4"
    ]
   }
