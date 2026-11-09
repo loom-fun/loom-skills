@@ -81,7 +81,7 @@ def flash_covered(info):
     return covered_tokens(info) | partial_tokens(info)
 def list_launch(tv, t, info, sfx=""):
     """Build the epoch's work lists from INFO (%tiles, %flist, %fcount, each + SFX); TV: the token count's SSA value."""
-    return (f"  %tiles{sfx} = check.generate.fill value(0) : tensor<{t}xi32>\n  %flist{sfx} = check.generate.fill value(0) : tensor<{t}xi32>\n"
+    return (f"  %tiles{sfx} = check.generate.fill value(1073741823) : tensor<{t}xi32>\n  %flist{sfx} = check.generate.fill value(0) : tensor<{t}xi32>\n"
             f"  %fcount{sfx} = check.generate.fill value(0) : tensor<64xi32>\n"
             f"  kernel.launch @g_attention_fallback_list[{tv}]({tv}, {info}, %tiles{sfx}, %flist{sfx}, %fcount{sfx}) : "
             f"[index](index, tensor<{t}x4xi32>, tensor<{t}xi32>, tensor<{t}xi32>, tensor<64xi32>)\n")

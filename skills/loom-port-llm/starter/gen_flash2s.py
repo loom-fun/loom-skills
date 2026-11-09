@@ -110,7 +110,9 @@ if PARTIAL:   # tiles[tokens / 2] counts the partial tiles, the entries follow: 
   %entry_slot_clamped = index.min %entry_slot_value, %last_slot : index
   %entry_slot = index.assume %entry_slot_clamped [lt(%entry_slot_clamped, %tokens)] : index
   %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32
-  %entry = index.cast %entry32 : i32 to index
+  %entry_raw = index.cast %entry32 : i32 to index
+  // entries past the count are not initialized: a workgroup without a tile reads token 0
+  %entry = scf.select %listed, %entry_raw, %c0 : index
   %first_token = index.assume %entry [range(%entry, 0, 8191), lt(%entry, %tokens)] : index
   %info_view = buffer.view %info[%origin] : buffer -> view<[%tokens]x4xi32>
   %row32 = view.load %info_view[%first_token, %c0] : view<[%tokens]x4xi32> -> i32
