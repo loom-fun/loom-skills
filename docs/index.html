@@ -9,6 +9,7 @@
 <body>
 <main class="pd">
   <h1>Loom Model Performance</h1>
+  <p class="intro">This data is from an experiment where an agent team, using 6 DevLab Strix Halos and 1 local Strix Halo, attempted to port and optimize the top-50 trending LLMs on Hugging Face as of November 6, 2026. Models were ported and optimized using <a href="https://github.com/loom-fun/loom-skills" target="_blank" rel="noopener">loom-skills</a>. Click any model name to view the model on Hugging Face, including instructions for serving the model and the .loom kernel files we generated.</p>
   <div class="brag" id="brag" aria-label="Highlights">
     <div><b id="n_models">—</b><span>of the top 50 trending LLMs ported</span></div>
     <div><b>3 days</b><span>of work</span></div>
@@ -43,6 +44,59 @@
     <div class="aggchart" id="aggchart">Loading…</div>
   </div>
   <div class="grid" id="grid">Loading…</div>
+  <section class="meth" id="methodology">
+  <h2>Methodology</h2>
+  <p>What each figure on this page means and how it was collected. This is a reference for the metrics, not a recipe for reproducing them.</p>
+
+  <h3>Campaign resources</h3>
+  <p>Approximate, from the campaign's session logs and card data (Nov 6&ndash;9, 2026). Subagents: median 2 concurrent (maximum 16), counting each subagent from its first to its last transcript event, per minute, over the minutes when the orchestrator or any subagent was active. Local GPUs: 1 (one Strix Halo; from Nov 8 only one worker used it at a time). DevLab runners: up to 6 at once; the median was not computed from job logs, and the card data names 11 distinct DevLab runner hosts across the Loom-only sweeps.</p>
+
+  <h3>Metrics</h3>
+  <p>All requests are greedy (temperature 0) chat completions with thinking off, sent identically to both engines. Each prompt starts with a unique nonce, so no prefix cache applies. Documents are real text (Loom documentation markdown) from <a href="https://github.com/loom-fun/loom-skills/blob/main/skills/loom-benchmark/scripts/bench_common.py">bench_common.py</a> (<code>DOC_SIZES</code>). The reported value is the mean of the runs for decode and prefill and the median of the runs for 4 streams. Each metric uses 1 to 3 runs per session (2 for decode and prefill and 3 for 4 streams in the main sessions).</p>
+  <dl class="defs">
+    <dt>decode</dt><dd>Generation speed after a short prompt: a request for a 300-word essay with max_tokens 300. Loom: (tokens &minus; 1) / (end &minus; first token) measured by the client. llama.cpp: the server's reported predicted tokens per second.</dd>
+    <dt>decode 2k</dt><dd>The same, after a ~2,000-token document, with max_tokens 256.</dd>
+    <dt>decode 32k</dt><dd>The same, after a ~32,000-token document, with max_tokens 128.</dd>
+    <dt>prefill 1k, 2k</dt><dd>Prompt tokens divided by time to first token, for ~1,000- and ~2,000-token documents with max_tokens 4. Each run takes the median of 5 samples. Loom: client-side streaming time to first token. llama.cpp: the server's reported prompt tokens per second (excludes HTTP and tokenization).</dd>
+    <dt>prefill 8k, 16k, 32k</dt><dd>The same for ~8,000-, ~16,000- and ~32,000-token documents, one sample per run. A document longer than the model's context is not measured (n/a).</dd>
+    <dt>4 streams</dt><dd>Aggregate decode tokens per second of 4 concurrent requests (400 tokens each, a history-of-lighthouses essay), counted only inside the window in which all 4 are decoding. Client-side for both engines. Loom serves 4 rows; llama.cpp runs with <code>-np 4</code>.</dd>
+  </dl>
+  <p>A decode request that stops before half of its max_tokens is retried once and otherwise recorded as missing. Before each decode measurement, an untimed warm-up request of the same shape runs. Scripts: <a href="https://github.com/loom-fun/loom-skills/blob/main/skills/loom-benchmark/scripts/perf.py">perf.py</a>, <a href="https://github.com/loom-fun/loom-skills/blob/main/skills/loom-benchmark/scripts/c4_steady.py">c4_steady.py</a>, <a href="https://github.com/loom-fun/loom-skills/blob/main/.github/scripts/devlab_perf.sh">devlab_perf.sh</a>. Speculative decoding is on for Loom when the card enables it (DFlash, MTP, n-gram prompt lookup or an assistant drafter; method and depth chosen by tuning) and the llama.cpp servers use the same method and depth where llama.cpp supports it (see Engines).</p>
+
+  <h3>Engines</h3>
+  <p><b>Loom.</b> loom-serve with hrx-loom 0.1.0 (hrx-system v0.1.0, commit d01d1c1, the PyPI wheel), as recorded in each card's info.json sources. Each card sets <code>memory_bytes</code> (the memory loom-serve may use, from 5 GB to 106 GB depending on the model) and its drafting method and depth.</p>
+  <p><b>llama.cpp ROCm.</b> Prebuilt releases from <a href="https://github.com/lemonade-sdk/llamacpp-rocm">lemonade-sdk/llamacpp-rocm</a> (gfx1151, Ubuntu), fetched by <a href="https://github.com/loom-fun/loom-skills/blob/main/skills/loom-benchmark/scripts/fetch_llamacpp.sh">fetch_llamacpp.sh</a>. The cards record builds b1355 and b1368 to b1371; b1369 and b1370 cover 44 of the 50 cards. Server: <code>-ngl 99 -cram 0 -kvu -np 4</code> (all layers on the GPU, no host-RAM prompt cache, one KV pool shared by 4 slots, pool size set per card, 33,792 to 147,456 tokens), plus the card's speculative decoding arguments where used (<code>--spec-type draft-dflash</code> or <code>draft-mtp</code> with a drafter GGUF, or <code>ngram-simple</code>; <code>--spec-draft-n-max</code> equals Loom's depth) and <code>--mmproj</code> for vision models. The exact arguments are in each card's info.json <code>performance.baseline.args</code>.</p>
+  <p><b>llama.cpp Vulkan.</b> The official <a href="https://github.com/ggml-org/llama.cpp">ggml-org/llama.cpp</a> release b12211 (ubuntu-vulkan), pinned by archive sha256 9759acd2&hellip; in <a href="https://github.com/loom-fun/loom-skills/blob/main/skills/loom-benchmark/data/llamacpp-vulkan.sha256">llamacpp-vulkan.sha256</a>. Same workloads and speculative settings as ROCm. KV cache: per slot (4 slots of 36,864 tokens) by default, because b12211's Vulkan backend has no GPU kernel for the fused flash attention over a unified KV pool (the server falls back to the CPU), which costs 15 to 20% on decode 32k and 4 streams. DFlash servers use the unified pool because b12211 aborts a DFlash server with 4 concurrent streams on per-slot caches. For the 18 DFlash cards, additional configurations were measured (1 slot, no drafting, per-slot KV) in separate DevLab jobs, and each metric shows the highest value among the configurations measured. Details: <a href="https://github.com/loom-fun/loom-skills/blob/main/.github/scripts/devlab_perf.sh">devlab_perf.sh</a> and the <code>differs</code> field in each card's <code>performance.baselines.vulkan</code>.</p>
+
+  <h3>Hardware</h3>
+  <p>DevLab runners: AMD Ryzen AI MAX+ 395 with Radeon 8060S Graphics (gfx1151, Strix Halo), Ubuntu 24.04 (info.json <code>sources[*].device</code>). The values on this page are DevLab values. For each card, Loom and llama.cpp ROCm for a given metric come from the same DevLab job. Different metrics of a card, and the Vulkan numbers, can come from different jobs and runners. Local Strix Halo measurements (Ubuntu 26.04) are on the Hugging Face cards, not here.</p>
+
+  <h3>How the Loom models were built</h3>
+  <p>Each model follows the <a href="https://github.com/loom-fun/loom-skills/blob/main/skills/loom-port-llm/SKILL.md">loom-port-llm</a> skill, orchestrated by <a href="https://github.com/loom-fun/loom-skills/blob/main/skills/loom-org/SKILL.md">loom-org</a>. The source is a plain Q4_K_M GGUF from a named Hugging Face repository, pinned by sha256 in <code>model.json.lock</code>. The starter kit generates the Loom kernels and the command program from the GGUF's metadata, and derives the chat and tool-calling glue from the model's own chat template. The speculative decoding method and depth (or none) are chosen by measured decode speed (<code>draft/tune.py</code>). The package is published to the loom-fun organization on Hugging Face with the <code>programs_sha256</code> of the generated programs recorded in info.json next to each measurement and gate result.</p>
+
+  <h3>Gates</h3>
+  <dl class="defs">
+    <dt>kernel_tests</dt><dd>Unit tests of the generated kernels against reference implementations.</dd>
+    <dt>golden</dt><dd>llama.cpp reference recorded on the same GGUF: greedy tokens and top-5 log-probs, short prompts and 1k to 32k documents.</dd>
+    <dt>compare</dt><dd>Greedy output vs the llama.cpp reference, token by token; every divergence is a near-tie.</dd>
+    <dt>vision</dt><dd>Image input vs llama.cpp with the same projector: identical prompt tokens, replies equal up to near-ties.</dd>
+    <dt>consistency</dt><dd>Concurrent requests give the same output as the same requests run alone.</dd>
+    <dt>spec</dt><dd>Speculative decoding on gives exactly the output of speculative decoding off.</dd>
+    <dt>agent</dt><dd>Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp.</dd>
+    <dt>agent_think_off</dt><dd>The tool-calling loop with thinking off.</dd>
+    <dt>sampling</dt><dd>temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp.</dd>
+    <dt>needle</dt><dd>Needle-in-a-haystack prompt at up to half the context, compared with llama.cpp; over-capacity prompt refused.</dd>
+    <dt>needle_full</dt><dd>Needle-in-a-haystack prompt at the full context is served.</dd>
+    <dt>decision</dt><dd>Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts (decision models only).</dd>
+  </dl>
+  <p>A gate that does not apply to a model (for example vision for a text-only model) shows as &ndash;; a gate with no result shows as ?.</p>
+
+  <h3>Features</h3>
+  <p>&#10003; yes: the Loom package has the feature. &#10060; no: the upstream model has the feature and the Loom package lacks it. &ndash; n/a: the upstream model does not have the feature. ? : not determined. The package's chat features are derived from the upstream chat template, so a feature absent from the template is absent upstream. A drafter the upstream model offers but the package does not enable is shown as available but disabled on the Hugging Face card.</p>
+
+  <h3>Summary figures</h3>
+  <p><b>Models:</b> the number of cards whose info.json loaded. <b>Architectures:</b> the number of distinct GGUF architectures among them. <b>Median prefill 32k speedup:</b> for each card, Loom's prefill 32k divided by the selected baseline's on DevLab values; the figure is the median of those ratios over cards that have both. <b>3 days:</b> the campaign's elapsed time, Nov 6&ndash;9, 2026.</p>
+  </section>
 </main>
 <script src="repos.js"></script>
 <script src="app.js"></script>
