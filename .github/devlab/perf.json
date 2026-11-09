@@ -1,29 +1,86 @@
 {
- "_comment": "Temporary: DevLab perf session on the regenerated Qwen3-Coder card.",
+ "_comment": "Temporary: Coder draft-depth sweep on the regenerated programs (DevLab).",
  "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
  "memory_bytes": 62000000000,
  "kit": null,
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "coder",
-   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
-   "memory_bytes": 62000000000,
-   "kit": null,
-   "llamacpp": "b1370",
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 5 -ngld 99",
+   "name": "sweepA",
    "variants": [
     {
-     "name": "card"
+     "name": "d0",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "d1",
+     "execution": {
+      "draft_depth": 1
+     }
+    },
+    {
+     "name": "d2",
+     "execution": {
+      "draft_depth": 2
+     }
+    },
+    {
+     "name": "d3",
+     "execution": {
+      "draft_depth": 3
+     }
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "llama:2",
-    "llama:2:long",
-    "c4:card",
-    "llamac4"
+    "perf:d0:2",
+    "perf:d0:2:long",
+    "perf:d1:2",
+    "perf:d1:2:long",
+    "perf:d2:2",
+    "perf:d2:2:long",
+    "perf:d3:2",
+    "perf:d3:2:long"
+   ]
+  },
+  {
+   "name": "sweepB",
+   "variants": [
+    {
+     "name": "d3",
+     "execution": {
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "d4",
+     "execution": {
+      "draft_depth": 4
+     }
+    },
+    {
+     "name": "d5",
+     "execution": {
+      "draft_depth": 5
+     }
+    },
+    {
+     "name": "d7",
+     "execution": {
+      "draft_depth": 7
+     }
+    }
+   ],
+   "steps": [
+    "perf:d3:2",
+    "perf:d3:2:long",
+    "perf:d4:2",
+    "perf:d4:2:long",
+    "perf:d5:2",
+    "perf:d5:2:long",
+    "perf:d7:2",
+    "perf:d7:2:long"
    ]
   }
  ]
