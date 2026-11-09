@@ -98,6 +98,38 @@ if PARTIAL:   # at most 2 partial tiles per run of 9 or more tokens: tokens / 4 
   %tiles_count = index.mul %tiles_div, %c4 : index
   kernel.launch.config workgroups(%tiles_count, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
 '''
+POSHI = """  // The last live position of the block: keys past it are not written yet (stale memory, possibly NaN), so they are
+  // staged as zeros, which the causal mask already gives zero weight.
+  %hi_c16_i32 = scalar.constant 16 : i32
+  %hi_true = scalar.constant true : i1
+  %hi_one_i32 = scalar.constant 1 : i32
+  %hi_block_end = scalar.addi %pos0_32, %hi_c16_i32 : i32
+  %hi_alive, %hi_cnt = scf.for %k = [%c1 to %c16 step %c1](%alive = %hi_true : i1, %n = %c0_i32 : i32) -> (i1, i32) {
+    %ahead = index.add %first_token, %k : index
+    %room = index.cmp ult, %ahead, %tokens : index
+    %at_value = scf.select %room, %ahead, %first_token : index
+    %at = index.assume %at_value [lt(%at_value, %tokens)] : index
+    %m_row = view.load %info_view[%at, %c0] : view<[%tokens]x4xi32> -> i32
+    %m_pos = view.load %info_view[%at, %c1] : view<[%tokens]x4xi32> -> i32
+    %m_live = view.load %info_view[%at, %c2] : view<[%tokens]x4xi32> -> i32
+    %k32 = index.cast %k : index to i32
+    %m_want = scalar.addi %posf_32, %k32 : i32
+    %m_same_row = scalar.cmpi eq, %m_row, %row32 : i32
+    %m_at_pos = scalar.cmpi eq, %m_pos, %m_want : i32
+    %m_is_live = scalar.cmpi ne, %m_live, %c0_i32 : i32
+    %m_in_block = scalar.cmpi slt, %m_want, %hi_block_end : i32
+    %m_a = scalar.andi %m_same_row, %m_at_pos : i1
+    %m_b = scalar.andi %m_a, %m_is_live : i1
+    %m_c = scalar.andi %m_b, %m_in_block : i1
+    %m_d = scalar.andi %m_c, %room : i1
+    %next_alive = scalar.andi %alive, %m_d : i1
+    %step = scf.select %next_alive, %hi_one_i32, %c0_i32 : i32
+    %n_next = scalar.addi %n, %step : i32
+    scf.yield %next_alive, %n_next : i1, i32
+  }
+  %pos_hi_i32 = scalar.addi %posf_32, %hi_cnt : i32
+  %pos_hi = index.cast %pos_hi_i32 : i32 to index
+"""
 ANCHOR = "%first_token" if TS == 1 else "%anchor"
 LISTED = f'''  %tiles_view = buffer.view %tiles[%origin] : buffer -> view<[%tokens]xi32>
   %listed_count32 = view.load %tiles_view[%c0] : view<[%tokens]xi32> -> i32
@@ -382,8 +414,9 @@ if CFG["sinks"]:
   %one_init = scalar.constant 1.0 : f32''')
 LMAX = "\n".join(["    %lmax_c0 = scalar.addf %lmax0, %zero_f : f32"] + [f"    %lmax_c{kb} = scalar.maxnumf %lmax_c{kb - 1}, %lmax{kb} : f32" for kb in range(1, KB)] + [f"    %lmax = scalar.addf %lmax_c{KB - 1}, %zero_f : f32"])
 LSUM = "\n".join(["    %lsum_c0 = scalar.addf %ls0, %zero_f : f32"] + [f"    %lsum_c{kb} = scalar.addf %lsum_c{kb - 1}, %ls{kb} : f32" for kb in range(1, KB)] + [f"    %lsum = scalar.addf %lsum_c{KB - 1}, %zero_f : f32"])
+KEYMAX = "%pos_hi" if PARTIAL else "%pos_last"   # a partial tile stages no key past its last live position
 STAGE = f"""    %key_pos = index.add %tile_first, %st_key : index
-    %key_valid = index.cmp ule, %key_pos, %pos_last : index
+    %key_valid = index.cmp ule, %key_pos, {KEYMAX} : index
     %kvals, %vvals = scf.if %key_valid -> (vector<{DPT}xf16>, vector<{DPT}xf16>) {{
       %kp = index.assume %key_pos [range(%key_pos, 0, 262143)] : index
       %k_offset = func.call @{P}_kv_offset(%origins, %row, %kp, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
@@ -544,6 +577,9 @@ QTOKEN_PARTIAL = """%col_ge = index.cmp uge, %lane_col, %off : index
   %slot_b = scalar.andi %slot_a, %slot_is_live : i1
   %slot_c = scalar.andi %slot_b, %q_in : i1
   %slot_ok = scalar.andi %slot_c, %col_ge : i1"""
+if PARTIAL:
+    HEAD = HEAD.replace("  %pos_last = index.add %pos0, %c15 : index\n", "  %pos_last = index.add %pos0, %c15 : index\n" + POSHI, 1)
+    assert "%pos_hi = " in HEAD
 text = "\n".join(U).replace("@@STAGING_SLOTS@@", staging_slots(), 1)
 for key, value in {"@@LAUNCH@@": LAUNCH, "@@HEAD@@": HEAD,
                    "@@TRUE_CONST@@": "  %true_const = scalar.constant true : i1\n" if TS == 1 else "",

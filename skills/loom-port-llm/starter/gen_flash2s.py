@@ -60,6 +60,38 @@ assert LANES >= KT * SEG_N, "need at least 8 waves (head_dim * G >= 1024)"
 SCALE = os.environ.get("FLASH2_SCALE") or repr(D ** -0.5)
 POS_BYTES = int(os.environ.get("FLASH2_POS_BYTES") or KVH * D * 2)   # bytes per KV position (widest layer kind)
 
+POSHI = """  // The last live position of the block: keys past it are not written yet (stale memory, possibly NaN), so they are
+  // staged as zeros, which the causal mask already gives zero weight.
+  %hi_c16_i32 = scalar.constant 16 : i32
+  %hi_true = scalar.constant true : i1
+  %hi_one_i32 = scalar.constant 1 : i32
+  %hi_block_end = scalar.addi %pos0_32, %hi_c16_i32 : i32
+  %hi_alive, %hi_cnt = scf.for %k = [%c1 to %c16 step %c1](%alive = %hi_true : i1, %n = %c0_i32 : i32) -> (i1, i32) {
+    %ahead = index.add %first_token, %k : index
+    %room = index.cmp ult, %ahead, %tokens : index
+    %at_value = scf.select %room, %ahead, %first_token : index
+    %at = index.assume %at_value [lt(%at_value, %tokens)] : index
+    %m_row = view.load %info_view[%at, %c0] : view<[%tokens]x4xi32> -> i32
+    %m_pos = view.load %info_view[%at, %c1] : view<[%tokens]x4xi32> -> i32
+    %m_live = view.load %info_view[%at, %c2] : view<[%tokens]x4xi32> -> i32
+    %k32 = index.cast %k : index to i32
+    %m_want = scalar.addi %posf_32, %k32 : i32
+    %m_same_row = scalar.cmpi eq, %m_row, %row32 : i32
+    %m_at_pos = scalar.cmpi eq, %m_pos, %m_want : i32
+    %m_is_live = scalar.cmpi ne, %m_live, %c0_i32 : i32
+    %m_in_block = scalar.cmpi slt, %m_want, %hi_block_end : i32
+    %m_a = scalar.andi %m_same_row, %m_at_pos : i1
+    %m_b = scalar.andi %m_a, %m_is_live : i1
+    %m_c = scalar.andi %m_b, %m_in_block : i1
+    %m_d = scalar.andi %m_c, %room : i1
+    %next_alive = scalar.andi %alive, %m_d : i1
+    %step = scf.select %next_alive, %hi_one_i32, %c0_i32 : i32
+    %n_next = scalar.addi %n, %step : i32
+    scf.yield %next_alive, %n_next : i1, i32
+  }
+  %pos_hi_i32 = scalar.addi %posf_32, %hi_cnt : i32
+  %pos_hi = index.cast %pos_hi_i32 : i32 to index
+"""
 PARTIAL = os.environ.get("FLASH2_ROLE") == "partial"   # the tiles a run covers only in part (see gen_flash2.py)
 QTOKEN = """%q_token_value = index.add %first_token, %lane_col : index
   %q_token = index.assume %q_token_value [lt(%q_token_value, %tokens)] : index"""
@@ -170,7 +202,7 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
   %pos0_bound = scalar.assume %pos0_32 [range(%pos0_32, 0, 262128)] : i32
   %pos0 = index.cast %pos0_bound : i32 to index
   %pos_last = index.add %pos0, %c15 : index
-  %padded = index.add %context, %c15 : index
+{POSHI if PARTIAL else ""}  %padded = index.add %context, %c15 : index
   %blocks = index.div %padded, %c16 : index
   %k_plane = index.mul %layer, %c2 : index
   %is_sliding = scalar.cmpi ne, %sliding, %c0_i32 : i32
@@ -280,7 +312,7 @@ A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NFH))} = scf.for 
     %tile_first = index.madd %kt, %ckt, %key_low : index
     scf.if %st_live {{
       %key_pos = index.add %tile_first, %st_key : index
-      %key_valid = index.cmp ule, %key_pos, %pos_last : index
+      %key_valid = index.cmp ule, %key_pos, {"%pos_hi" if PARTIAL else "%pos_last"} : index
       %kvals, %vvals = scf.if %key_valid -> (vector<{SEG_W}xf16>, vector<{SEG_W}xf16>) {{
         %kp = index.assume %key_pos [range(%key_pos, 0, 262143)] : index
         %k_offset = func.call @{P}_kv_offset(%origins, %row, %kp, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)

@@ -1704,6 +1704,18 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
 }}
 """
     cases += [cut_case(s, c) for s in ((0, 1) if WIN else (0,)) for c in (53, 48, 75)]   # cuts inside a tile / on a tile boundary / in a later tile
+    # Keys past a run's last position are not written yet: stale memory, possibly NaN. A partial tail tile must not let them
+    # reach the output (0 * NaN): the run (row 1, positions 301-400) ends one token into a block, over an arena whose row-1
+    # keys and values past position 400 are NaN.
+    arena_nan = arena_a.copy(); arena_nan[:, 1024 + 401:2 * 1024] = np.nan
+    save("f_arena_nan", arena_nan.reshape(-1))
+    info_n = epoch_info([(1, 301, 100), (None, 0, 12)])
+    q_n = (rng.standard_normal((len(info_n), QH, D)) * 2.5).astype(np.float32); g_n = rng.standard_normal(q_n.shape).astype(np.float32)
+    o_n = aliased_ref(q_n.astype(np.float16).astype(np.float64), info_n)
+    if cfg.get("attn_gate"):
+        o_n = o_n * gate_mul(g_n)
+    cases.append(epoch_case("flash_prefill_stale", info_n, q_n, g_n, np.where((np.arange(len(info_n)) < 100)[:, None, None], o_n, SENT), 0,
+                            ("g_attention_flash2", "g_attention_flash2_partial")).replace("f_arena_a.npy", "f_arena_nan.npy"))
     cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
     cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
 
