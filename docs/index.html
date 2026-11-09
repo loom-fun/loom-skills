@@ -49,7 +49,7 @@
   <p>What each figure on this page means and how it was collected. This is a reference for the metrics, not a recipe for reproducing them.</p>
 
   <h3>Campaign resources</h3>
-  <p>Approximate, from the campaign's session logs and card data (Nov 6&ndash;9, 2026). Subagents: median 2 concurrent (maximum 16), counting each subagent from its first to its last transcript event, per minute, over the minutes when the orchestrator or any subagent was active. Local GPUs: 1 (one Strix Halo; from Nov 8 only one worker used it at a time). DevLab runners: 6 Strix Halo runners, up to 6 jobs at once.</p>
+  <p>Approximate, from the campaign's session logs and card data (Nov 6&ndash;9, 2026). Subagents: median 2 concurrent (maximum 16), counting each subagent from its first to its last transcript event, per minute, over the minutes when the orchestrator or any subagent was active. Local GPUs: 1 (one Strix Halo; from Nov 8 only one worker used it at a time). DevLab: up to 6 concurrent jobs (the concurrency limit).</p>
 
   <h3>Metrics</h3>
   <p>All requests are greedy (temperature 0) chat completions with thinking off, sent identically to both engines. Each prompt starts with a unique nonce, so no prefix cache applies. Documents are real text (Loom documentation markdown) from <a href="https://github.com/loom-fun/loom-skills/blob/main/skills/loom-benchmark/scripts/bench_common.py">bench_common.py</a> (<code>DOC_SIZES</code>). The reported value is the mean of the runs for decode and prefill and the median of the runs for 4 streams. Each metric uses 1 to 3 runs per session (2 for decode and prefill and 3 for 4 streams in the main sessions).</p>
