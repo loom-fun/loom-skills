@@ -3,13 +3,22 @@
 Objective: validate real GPU porting with Claude Code, Codex and Pi, using a small
 model with a published cousin, and **no needle-in-a-haystack tests**.
 
-- Target: `Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF`, revision
+- Windows pilot: `Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF`, revision
   `ebb2015119c907b064c512bf053e945850b5875f`, file
   `qwen2.5-coder-0.5b-instruct-q4_k_m.gguf`.
-- Cousin: `loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom`, revision
+- Pilot cousin: `loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom`, revision
   `dad263bdf7c45f2e41c05b02df6cb7fae99f20c3`. Its generated `loom-card/2` card
   and qwen2 architecture were verified before selecting the target. This is a
   different fine-tuning of the same small architecture, not a new kernel family.
+- Final common target: `unsloth/Qwen3-0.6B-GGUF`, revision
+  `50968a4468ef4233ed78cd7c3de230dd1d61a56b`, file `Qwen3-0.6B-Q4_K_M.gguf`.
+  Force cousin `loom-fun/ggml-org-Qwen3-1.7B-loom`, revision
+  `caee8b360bf82572dd561da478f1eb4aed847f2d` (verified generated `loom-card/2`,
+  qwen3, reasoning toggle and Hermes tools). Do not reuse the catalog's exact
+  0.6B port: independently build each trial from the GGUF and the 1.7B cousin.
+  The coder pilot passed golden/tool-prompt parity but emitted no actual calls
+  in either engine. Qwen3 is selected for stronger tool/reasoning coverage,
+  rather than counting those vacuous tool-call checks as broad validation.
 - Hardware: local AMD Radeon 8060S / gfx1151. Trials run serially with separate
   work directories and ports, leaving unrelated resident servers alone.
 - SDK: the existing PyPI 0.1.0 Windows installation at `~/loom010`, source

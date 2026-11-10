@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 
 
-def bash_script(script, *args):
+def bash_executable():
     bash = shutil.which("bash")
     if os.name == "nt":
         git = shutil.which("git")
@@ -18,4 +18,12 @@ def bash_script(script, *args):
             raise RuntimeError("Git Bash is required; WindowsApps bash.exe launches WSL")
     if not bash:
         raise RuntimeError("Bash not found; install Git Bash on Windows")
-    return [bash, os.fspath(script), *map(str, args)]
+    return bash
+
+
+def bash_script(script, *args):
+    return [bash_executable(), os.fspath(script), *map(str, args)]
+
+
+def bash_command(command):
+    return [bash_executable(), "-c", command]

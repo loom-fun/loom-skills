@@ -111,11 +111,11 @@ spec_gate() {
   loom_down; loom_argv=("${orig[@]}"); loom_up || return 1
   [ $rc = 0 ] && "$T" "$S/spec_check.py" compare spec_target.jsonl spec_draft.jsonl --metrics-file spec_metrics.txt --pkg "$pkg" ${L:+--llama "$L"}
 }
-drafting=$("$T" -c "import json; print(1 if json.load(open('$pkg/llm_config.json')).get('draft') else '')" 2>/dev/null)
-toggle=$("$T" -c "import json; print(1 if json.load(open('$pkg/llm_config.json')).get('chat', {}).get('thinking') == 'toggle' else '')" 2>/dev/null)
+drafting=$("$T" -c "import json; print(1 if json.load(open('$pkg/llm_config.json')).get('draft') else '')") || exit 2
+toggle=$("$T" -c "import json; print(1 if json.load(open('$pkg/llm_config.json')).get('chat', {}).get('thinking') == 'toggle' else '')") || exit 2
 # A chat-only block (a template that ignores tools) has no tool loop to gate: the card's test (card_lib.tool_calling)
 # decides, so the card shows the agent gates as not applicable rather than missing.
-tools=$("$T" -c "import json, sys; sys.path.insert(0, '$S/card'); import card_lib; print(1 if card_lib.tool_calling(json.load(open('$pkg/llm_config.json')).get('chat') or {}) else '')")
+tools=$("$T" -c "import json, sys; sys.path.insert(0, '$S/card'); import card_lib; print(1 if card_lib.tool_calling(json.load(open('$pkg/llm_config.json')).get('chat') or {}) else '')") || exit 2
 [ -n "$tools" ] || echo "== agent: skipped, tool calling unsupported by the chat template (not applicable)"
 t_start=$(date +%s)
 LL=(); [ -n "$L" ] && LL=(--llama "$L")

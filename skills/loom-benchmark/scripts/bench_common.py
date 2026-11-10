@@ -15,6 +15,7 @@ import sys
 import time
 
 import requests
+from shell_command import bash_command
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(os.path.dirname(HERE), "data")
@@ -423,7 +424,7 @@ def ensure_llama(url):
     if not cmd:
         raise SystemExit(f"llama.cpp is not answering at {url} (and LLAMA_START is not set)")
     print(f"[llama] cache miss: starting llama-server ({cmd})", flush=True)
-    r = subprocess.run(cmd, shell=True)
+    r = subprocess.run(bash_command(cmd))
     if r.returncode:
         raise SystemExit(f"could not start llama-server: {cmd}")
 
@@ -474,6 +475,10 @@ def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=
                         on_token(now)
                     text += piece
                 finish = ch.get("finish_reason") or finish
+                # An EOS-only completion still generated its first token. Without
+                # this event, prefill timing is missing for valid empty replies.
+                if first is None and ch.get("finish_reason") is not None:
+                    first = time.perf_counter() - t0
     total = time.perf_counter() - t0
     n = n if usage else chunks
     return dict(status=200, ttft=first, total=total, tokens=n, prompt_tokens=pt, text=text, finish=finish,

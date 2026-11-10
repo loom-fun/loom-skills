@@ -14,6 +14,11 @@ spec.loader.exec_module(helper)
 
 
 class ShellCommandTests(unittest.TestCase):
+    def test_native_python_runs_bash_environment_assignment(self):
+        command = 'VALUE="expected value"; export VALUE; "$TEST_PYTHON" -c \'import os; print(os.environ["VALUE"])\''
+        result = subprocess.run(helper.bash_command(command), env=dict(os.environ, TEST_PYTHON=Path(sys.executable).as_posix()), capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.strip(), "expected value")
+
     def test_release_metadata_larger_than_native_argument_limit(self):
         prefix = (REPO / "skills/loom-benchmark/scripts/fetch_llamacpp.sh").read_text(encoding="utf-8").split("dir=$dest/$rtag", 1)[0]
         with tempfile.TemporaryDirectory(prefix="release metadata ") as temp:
