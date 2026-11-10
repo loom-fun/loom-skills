@@ -149,8 +149,8 @@ optimization budget shrinks to fit.
 
 ## Safety notes baked into the skills
 
-- **Memory limit.** Never serve models whose weights exceed the GPU's memory budget:
-  a 104 GiB model hard-crashed a 128 GB machine.
+- **Memory limit.** Never serve a model whose device-resident weights plus KV exceed the GPU's
+  memory budget: overcommitting unified memory hard-crashes the machine.
 - **`--memory_bytes`.** Always pass it to `loom-serve`.
 - **Downloaded binaries.** Ask before running one, except Loom from PyPI and lemonade-sdk/llamacpp-rocm releases (pre-approved).
 - **Golden references.** They are external (llama.cpp), never a model written by
