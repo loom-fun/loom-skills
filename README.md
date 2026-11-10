@@ -1,6 +1,6 @@
-# Loom skills for Claude Code
+# Loom agent skills
 
-[Claude Code](https://claude.com/claude-code) skills that let a fresh session use
+Shared skills for Claude Code, Codex and Pi that let a fresh session use
 [AMD Loom](https://github.com/ROCm/hrx-system) (the `hrx-loom` compiler, runtime and
 `loom-serve` model server) from a cold start:
 
@@ -16,42 +16,52 @@ The skills were developed and verified on an AMD Ryzen AI Max+ 395 "Strix Halo"
 
 ## Install
 
-**As a Claude Code plugin (recommended).** Run these inside Claude Code:
+Clone the repository, then install the complete suite (Python 3.12+, no Node or symlinks needed):
 
+```bash
+git clone https://github.com/loom-fun/loom-skills
+cd loom-skills
+python3 scripts/install_skills.py                 # all three agents
+# or: ./install.sh --agent codex                  # claude | codex | pi | all
+# Windows PowerShell: python scripts/install_skills.py
 ```
+
+| Agent | User skill directory | Explicit invocation |
+|---|---|---|
+| Claude Code | `~/.claude/skills` | `/loom` |
+| Codex | `~/.agents/skills` | `$loom` |
+| Pi | `~/.agents/skills` (shared with Codex) | `/skill:loom` |
+
+Start a fresh agent session after installation. All agents can also select the skills from a plain-language request.
+Use `--dest PATH` for a custom skill directory. Native roots can be overridden with
+`CLAUDE_SKILLS_DIR`, `AGENTS_SKILLS_DIR` and `PI_SKILLS_DIR`. Install all nine skills together:
+they share scripts through sibling paths. Copies avoid Windows symlink requirements.
+
+Update by pulling this checkout and running the same installer. Remove with
+`python3 scripts/install_skills.py --uninstall` (using the same agent/destination options).
+The installer refuses to overwrite or remove unmanaged or locally modified skills. For an older
+copy install, move the existing Loom skill directories aside first and preserve your edits.
+
+**Claude Code plugin.** The existing plugin and automatic skill-directory substitution remain supported:
+
+```text
 /plugin marketplace add loom-fun/loom-skills
 /plugin install loom@loom
 ```
 
-Or from a shell:
-
-```bash
-claude plugin marketplace add loom-fun/loom-skills
-claude plugin install loom@loom
-```
-
-Then start a new session. To update later, run
-`claude plugin marketplace update loom && claude plugin update loom@loom`.
-
-> While this repo is private, you need read access to it and working git credentials
-> for github.com, because Claude Code clones it with your existing git setup:
-> `gh auth login && gh auth setup-git`, or an SSH key loaded in ssh-agent.
-
-**Or as plain user skills**, by copying them into `~/.claude/skills`:
-
-```bash
-git clone https://github.com/loom-fun/loom-skills && ./loom-skills/install.sh      # ./install.sh --uninstall to remove
-```
+Use either the plugin or the copy install in Claude to avoid duplicate skills.
+Update the plugin with `claude plugin marketplace update loom && claude plugin update loom@loom`.
+Private repositories require read access and working Git credentials for either installation method.
 
 ## Use
 
 ### Recommended: port, optimize and report in one prompt
 
 ```
-/loom get <hf-org>/<model> working on loom-serve, optimize it, and report the performance relative to llamacpp rocm
+get <hf-org>/<model> working on loom-serve, optimize it, and report the performance relative to llamacpp rocm
 ```
 
-Claude runs the whole pipeline without stopping, within the model's roofline time budget (about
+The agent runs the whole pipeline without stopping, within the model's roofline time budget (about
 25 min for a 0.8B to 70 min for a 30B dense model in recent trials), as four scripted steps
 with the agent's judgment only where it is needed:
 1. `loom-port-llm/port.sh`: pick the GGUF (header-only probe: supported formats, fits in GPU
@@ -74,7 +84,7 @@ Jinja chat template and verified against it. Dense transformers and Qwen3.5-styl
 gated delta-net hybrids are covered by the starter kit. The llama.cpp reference
 outputs are cached, so re-running the gates on an optimized build only costs the Loom side.
 
-**Recent fresh-agent trials (hrx-loom 0.1.0, Strix Halo, November 2026)**, one prompt each, full
+**Recent fresh-agent trials (Claude Code, hrx-loom 0.1.0, Strix Halo, November 2026)**, one prompt each, full
 gates and audit PASS, against the fastest llama.cpp ROCm build on the same GGUF: Qwen3.5-0.8B in 24 min
 (decode +27 %, prefill 1k/2k +22/+28 %), Bolt-E4B (Gemma 4) in 52 min (prefill 1k/2k +44/+58 %),
 flint (40B MoE) in 58 min (decode +25 %), Muse-Glimmer-30B in 71 min. Every trial and its lessons:
@@ -96,20 +106,20 @@ Ask in plain language, for example:
 - "optimize this model" (roofline → targets → about 30 min of optimization → report);
 - "what's the roofline for this model?" or "is +50 % decode achievable?".
 
-The skill descriptions make Claude pick the right one. You can also invoke a skill by
+The skill descriptions help the agent pick the right one. You can also invoke a skill by
 name:
 
-| Plugin install | Copy install | What it does |
-|---|---|---|
-| `/loom:loom` | `/loom` | Start here: overview, hard safety rules, which skill to use |
-| `/loom:loom-setup` | `/loom-setup` | Install the SDK (`hrx-loom` from PyPI) and the matching model library, `loom-fetch`, start/stop/inspect `loom-serve` (GPU and NPU) |
-| `/loom:loom-demo-ui` | `/loom-demo-ui` | Web playground: chat, transcribe, speak, image, embed. It finds models from the servers' `/v1/status` |
-| `/loom:loom-port-llm` | `/loom-port-llm` | Config-driven starter kit that turns a GGUF LLM (dense, or a Qwen3.5-style gated delta-net hybrid) into a Loom package at its native context length, with tool calling, reasoning and history reuse derived from the model's own chat template: inspect → generate kernels → build → kernel unit tests → golden, agent and full-context gates |
-| `/loom:loom-roofline` | `/loom-roofline` | Roofline for decode/prefill/c4 from the GGUF, calibrated against achieved Loom efficiency; picks per-metric targets vs llama.cpp and a time budget; a rate-of-approach controller decides continue / pivot / stop |
-| `/loom:loom-optimize` | `/loom-optimize` | The measure / ablate / change / verify loop, a kernel A/B helper, and a catalog of optimizations that worked (and that didn't) |
-| `/loom:loom-benchmark` | `/loom-benchmark` | Token-by-token golden comparison against llama.cpp ROCm, a multi-turn tool-calling gate, a full-context needle gate, a batching-consistency check, throughput workloads, reporting rules |
-| `/loom:loom-improve` | `/loom-improve` | Improve the skills themselves: the KPIs (wall clock, agentic correctness vs llama.cpp, speed), fresh-agent trials on a reference model suite, a stall watchdog, a KPI regression check and a fixed quiet-GPU evaluator. Prompt: "your goal is to improve the loom skill at X" |
-| `/loom:loom-org` | `/loom-org` | Populate an HF org (loom-fun) with the top models that fit Strix Halo: rank and pick models, classify what the org has (category A current, B older skill), then loop: port and optimize from the best category A reference, publish, sweep expensive gates on DevLab, fix bugs in the skill and regenerate, until every model is correct and fully assessed |
+| Skill | What it does |
+|---|---|
+| `loom` | Start here: overview, hard safety rules, which skill to use |
+| `loom-setup` | Install the SDK (`hrx-loom` from PyPI) and the matching model library, `loom-fetch`, start/stop/inspect `loom-serve` (GPU and NPU) |
+| `loom-demo-ui` | Web playground: chat, transcribe, speak, image, embed. It finds models from the servers' `/v1/status` |
+| `loom-port-llm` | Config-driven starter kit that turns a GGUF LLM (dense, or a Qwen3.5-style gated delta-net hybrid) into a Loom package at its native context length, with tool calling, reasoning and history reuse derived from the model's own chat template: inspect → generate kernels → build → kernel unit tests → golden, agent and full-context gates |
+| `loom-roofline` | Roofline for decode/prefill/c4 from the GGUF, calibrated against achieved Loom efficiency; picks per-metric targets vs llama.cpp and a time budget; a rate-of-approach controller decides continue / pivot / stop |
+| `loom-optimize` | The measure / ablate / change / verify loop, a kernel A/B helper, and a catalog of optimizations that worked (and that didn't) |
+| `loom-benchmark` | Token-by-token golden comparison against llama.cpp ROCm, a multi-turn tool-calling gate, a full-context needle gate, a batching-consistency check, throughput workloads, reporting rules |
+| `loom-improve` | Improve the skills themselves: the KPIs (wall clock, agentic correctness vs llama.cpp, speed), fresh-agent trials on a reference model suite, a stall watchdog, a KPI regression check and a fixed quiet-GPU evaluator. Prompt: "your goal is to improve the loom skill at X" |
+| `loom-org` | Populate an HF org (loom-fun) with the top models that fit Strix Halo: rank and pick models, classify what the org has (category A current, B older skill), then loop: port and optimize from the best category A reference, publish, sweep expensive gates on DevLab, fix bugs in the skill and regenerate, until every model is correct and fully assessed |
 
 A starter-covered model goes from prompt to report within its roofline budget (port ≈1 min,
 qualify ≈10 min, then optimization and finalize). An architecture the starter doesn't
@@ -144,22 +154,33 @@ optimization budget shrinks to fit.
 
 ```
 .claude-plugin/{plugin.json,marketplace.json}   # plugin + single-plugin marketplace
-skills/<skill>/SKILL.md                          # the eight skills, with their scripts and references
-install.sh                                       # copy-install alternative
+skills/<skill>/SKILL.md                          # nine shared skills, with scripts and references
+scripts/install_skills.py                        # native discovery adapters and managed copy install
+install.sh                                       # Bash wrapper for the Python installer
 LICENSE                                          # MIT
 THIRD_PARTY_NOTICES.md
 ```
 
-Skills refer to their bundled files through `${CLAUDE_SKILL_DIR}`, so the same tree
-works both as a plugin and when copied to `~/.claude/skills`.
+Each skill resolves bundled paths from its own `SKILL.md` location, then binds
+`LOOM_SKILL_DIR` for shell commands. Claude Code supplies `${CLAUDE_SKILL_DIR}` automatically;
+Codex and Pi supply the loaded file's path. This works independently of the shell working directory.
+Subagents are optional; serial execution preserves the same correctness gates.
 
 ## Contributing
 
-To try local changes without installing, run `claude --plugin-dir /path/to/loom-skills`, and
-check the manifests with `claude plugin validate .`. When you fix a skill, rerun a
-cold-start test: a fresh subagent follows the skills literally in a new install root
-and reports every wrong or missing instruction. That is how these skills were
-debugged.
+```bash
+python3 -m pip install -r tests/requirements.txt
+python3 -m unittest discover -s tests -v
+```
+
+These CPU checks cover native installation profiles, update/removal ownership, paths with spaces,
+and bundled/sibling resource resolution. CI runs them on Linux and Windows. They do not prove model
+porting quality across agents: use [the cross-agent acceptance procedure](docs/agent-compatibility.md)
+for fresh-session smoke tests and full Loom trials, and record which agents actually passed.
+
+To try Claude's plugin from a checkout: `claude --plugin-dir /path/to/loom-skills`;
+validate its manifests with `claude plugin validate .`. For Codex or Pi, copy the suite into a
+scratch project's `.agents/skills` with `--dest` and launch the agent in that project.
 
 ## License
 

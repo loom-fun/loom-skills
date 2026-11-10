@@ -5,7 +5,16 @@ description: Correctness and performance methodology for Loom models vs llama.cp
 
 # Benchmark and verify Loom models
 
-Scripts are in `${CLAUDE_SKILL_DIR}/scripts/`; run them with the tools
+**Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
+absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
+In Claude Code, run `export LOOM_SKILL_DIR="${CLAUDE_SKILL_DIR}"` (the host substitutes the path).
+In Codex, Pi or another host, export `LOOM_SKILL_DIR` to the loaded file's directory. Use a
+shell-compatible absolute path (Git Bash on Windows). Rebind before using another skill's commands
+and in every new shell; it is not the working directory or SDK root. On Windows, use native `C:/...`
+paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
+or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
+
+Scripts are in `"${LOOM_SKILL_DIR}/scripts/"`; run them with the tools
 venv (`~/loom/.tools/bin/python`). Workload documents: `bench_common.doc(n)` for n in 1000, 2000, 8000, 16000, 32000 (stored as `data/doc_2000.txt` and `doc_32000.txt`; the others are byte prefixes).
 They are real text (Loom's own markdown docs) and their sizes are approximate token counts.
 Scripts that take `PACKAGE` read `llm_config.json`, `tokenizer.json` and the model
@@ -16,9 +25,9 @@ id from a package built by `loom-port-llm/starter/build.py`.
 **Get the latest lemonade build, then pick the fastest of it and what is installed** (`qualify.sh`
 does both):
 ```bash
-S=${CLAUDE_SKILL_DIR}/scripts
-$S/fetch_llamacpp.sh                 # latest lemonade-sdk/llamacpp-rocm for this GPU -> ~/llamacpp-rocm/<tag> (pre-approved, ~25 s)
-$S/pick_llamacpp.sh MODEL.gguf 8139 "$HOME"   # every llama-server with libggml-hip.so, benchmarked and ranked
+S="${LOOM_SKILL_DIR}/scripts"
+"$S/fetch_llamacpp.sh"                 # latest lemonade-sdk/llamacpp-rocm for this GPU -> ~/llamacpp-rocm/<tag> (pre-approved, ~25 s)
+"$S/pick_llamacpp.sh" MODEL.gguf 8139 "$HOME"   # every llama-server with libggml-hip.so, benchmarked and ranked
 ```
 The baseline is the top-ranked build. Don't choose by version string: the lemonade
 nightly prints `version: 1`, and the tag is usually only in the directory name.
@@ -40,9 +49,9 @@ libraries falls back to CPU silently; `llamacpp_server.sh` also adds lemonade's 
 when a build needs them. Pick the zip that matches the GPU (`gfx1151` = Strix
 Halo). Then:
 ```bash
-LLAMACPP_DIR=<dir> $S/llamacpp_server.sh MODEL.gguf 8130 1 34000   # goldens / long context (1 slot, 34k)
-LLAMACPP_DIR=<dir> $S/llamacpp_server.sh MODEL.gguf 8130 4 8192    # perf incl. 4 streams
-$S/llamacpp_server.sh --stop 8130
+LLAMACPP_DIR=<dir> "$S/llamacpp_server.sh" MODEL.gguf 8130 1 34000   # goldens / long context (1 slot, 34k)
+LLAMACPP_DIR=<dir> "$S/llamacpp_server.sh" MODEL.gguf 8130 4 8192    # perf incl. 4 streams
+"$S/llamacpp_server.sh" --stop 8130
 ```
 Always use the **same GGUF file** as the Loom package. Never run llama.cpp and a
 big Loom model at the same time if together they exceed GPU memory.
@@ -143,14 +152,14 @@ separately: `LEVEL=full gates.sh` on the same build re-uses every gate that pass
   a 27B) and only proves the size is served: nightly, and once on a new port's final build.
 
 ```bash
-S=${CLAUDE_SKILL_DIR}/scripts; P=~/work/mymodel/pkg; T=~/loom/.tools/bin/python; mkdir -p ~/work/mymodel/bench && cd ~/work/mymodel/bench   # outputs land here, not in the skill
-$T $S/golden.py $P golden.json --llama http://127.0.0.1:8130 --long 1000,2000,16000,32000    # once per model/GGUF
-$T $S/golden.py $P golden2.json --llama http://127.0.0.1:8130 --long 1000,2000,16000,32000   # 2nd recording: llama.cpp is not run-to-run deterministic
-$T $S/compare.py $P golden.json --alt golden2.json --url http://127.0.0.1:8160   # -> per-prompt lines + {"verdict": "PASS"|"FAIL", ...}
-$T $S/consistency.py http://127.0.0.1:8160 --model <model id>         # concurrent == sequential
-$T $S/agent_golden.py $P http://127.0.0.1:8160 --llama http://127.0.0.1:8130   # tool loop: rendering, reuse, calls, golden per turn
-$T $S/needle.py $P http://127.0.0.1:8160 --llama http://127.0.0.1:8130         # retrieval at 25-100% of context_capacity + over-limit 400
-$T $S/sampling_check.py $P http://127.0.0.1:8160 --llama http://127.0.0.1:8130 # temperature/top_k/top_p/seed semantics + first-token distribution
+S="${LOOM_SKILL_DIR}/scripts"; P=~/work/mymodel/pkg; T=~/loom/.tools/bin/python; mkdir -p ~/work/mymodel/bench && cd ~/work/mymodel/bench   # outputs land here, not in the skill
+$T "$S/golden.py" $P golden.json --llama http://127.0.0.1:8130 --long 1000,2000,16000,32000    # once per model/GGUF
+$T "$S/golden.py" $P golden2.json --llama http://127.0.0.1:8130 --long 1000,2000,16000,32000   # 2nd recording: llama.cpp is not run-to-run deterministic
+$T "$S/compare.py" $P golden.json --alt golden2.json --url http://127.0.0.1:8160   # -> per-prompt lines + {"verdict": "PASS"|"FAIL", ...}
+$T "$S/consistency.py" http://127.0.0.1:8160 --model <model id>         # concurrent == sequential
+$T "$S/agent_golden.py" $P http://127.0.0.1:8160 --llama http://127.0.0.1:8130   # tool loop: rendering, reuse, calls, golden per turn
+$T "$S/needle.py" $P http://127.0.0.1:8160 --llama http://127.0.0.1:8130         # retrieval at 25-100% of context_capacity + over-limit 400
+$T "$S/sampling_check.py" $P http://127.0.0.1:8160 --llama http://127.0.0.1:8130 # temperature/top_k/top_p/seed semantics + first-token distribution
 ```
 For `needle.py` sizes above the llama.cpp slot's context, drop `--llama` (Loom-only:
 it then must find the needle) or give `--sizes`. A 262k-token prefill takes minutes.
@@ -289,10 +298,10 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
 ## 2. Performance
 
 ```bash
-$T $S/perf.py http://127.0.0.1:8160 loom-baseline --model <id> --log perf_log.jsonl
-$T $S/perf.py http://127.0.0.1:8160 loom-baseline --model <id> --long --log perf_log.jsonl
-$T $S/perf.py http://127.0.0.1:8130 llama-rocm --kind llama --log perf_log.jsonl     (and --long, with the 1-slot 34k server)
-$T $S/c4_steady.py http://127.0.0.1:8160 4 --model <id>;  $T $S/c4_steady.py http://127.0.0.1:8130 4
+$T "$S/perf.py" http://127.0.0.1:8160 loom-baseline --model <id> --log perf_log.jsonl
+$T "$S/perf.py" http://127.0.0.1:8160 loom-baseline --model <id> --long --log perf_log.jsonl
+$T "$S/perf.py" http://127.0.0.1:8130 llama-rocm --kind llama --log perf_log.jsonl     (and --long, with the 1-slot 34k server)
+$T "$S/c4_steady.py" http://127.0.0.1:8160 4 --model <id>;  $T "$S/c4_steady.py" http://127.0.0.1:8130 4
 ```
 
 | Metric | Definition |
@@ -353,7 +362,7 @@ a method is recorded as failed in the table and that method is skipped; the repo
 
 **Run the audit first** (from `bench/`):
 ```bash
-$T $S/audit.py .     # -> headline table + checks; exit 1 on FAIL; writes audit.json
+$T "$S/audit.py" .     # -> headline table + checks; exit 1 on FAIL; writes audit.json
 ```
 It checks:
 - **Baseline.** `llamacpp_pick.json` exists, and the measured baseline is the

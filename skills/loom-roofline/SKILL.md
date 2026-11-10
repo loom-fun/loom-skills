@@ -5,6 +5,15 @@ description: Roofline analysis for a Loom LLM port on Strix Halo — compute the
 
 # Roofline → targets
 
+**Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
+absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
+In Claude Code, run `export LOOM_SKILL_DIR="${CLAUDE_SKILL_DIR}"` (the host substitutes the path).
+In Codex, Pi or another host, export `LOOM_SKILL_DIR` to the loaded file's directory. Use a
+shell-compatible absolute path (Git Bash on Windows). Rebind before using another skill's commands
+and in every new shell; it is not the working directory or SDK root. On Windows, use native `C:/...`
+paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
+or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
+
 The point is to decide **once, up front, with numbers**, what the port should reach,
 so the optimization loop (`loom-optimize`) has a finish line, and so a stopping
 decision is a measurement rather than a debate.
@@ -57,9 +66,9 @@ In every case:
 ## 2. Run
 
 ```bash
-T=~/loom/.tools/bin/python; R=${CLAUDE_SKILL_DIR}
+T=~/loom/.tools/bin/python; R="${LOOM_SKILL_DIR}"
 # qualify.sh runs this for you, with the budget from section 0. By hand:
-$T $R/roofline.py MODEL.gguf --cfg cfg.json --baseline bench/perf_log.jsonl --ctx 1000,2000,16000 --out bench/roofline.json \
+$T "$R/roofline.py" MODEL.gguf --cfg cfg.json --baseline bench/perf_log.jsonl --ctx 1000,2000,16000 --out bench/roofline.json \
    --budget-h 0.5          # the user's budget (section 0); add --goal decode_tps=70 for a user target
 ```
 **Long-context models (context ≥ 128k):** add the long sizes to `--ctx` (e.g.
@@ -164,7 +173,7 @@ Label every build (`perf.py URL LABEL`), and pass `--reverted` for a build you
 discard: its time still counts. The budget and any user goals come from
 `roofline.json` (set with `--budget-h` / `--goal`). To run the controller by hand:
 ```bash
-$T $R/progress.py bench/roofline.json bench/targets.jsonl --metric decode_tps
+$T "$R/progress.py" bench/roofline.json bench/targets.jsonl --metric decode_tps
 ```
 It works in **ms per token** (gains add; percentages don't), as follows:
 1. It takes the gap from the best kept build to the ceiling, the target and the

@@ -5,6 +5,15 @@ description: Make a Loom LLM port faster (decode, prefill, long context, concurr
 
 # Optimize a Loom port without breaking it
 
+**Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
+absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
+In Claude Code, run `export LOOM_SKILL_DIR="${CLAUDE_SKILL_DIR}"` (the host substitutes the path).
+In Codex, Pi or another host, export `LOOM_SKILL_DIR` to the loaded file's directory. Use a
+shell-compatible absolute path (Git Bash on Windows). Rebind before using another skill's commands
+and in every new shell; it is not the working directory or SDK root. On Windows, use native `C:/...`
+paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
+or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
+
 Before you start you need:
 - a package that passes the golden gate (`loom-port-llm` + `loom-benchmark`);
 - a baseline row in `perf_log.jsonl`;
@@ -42,14 +51,14 @@ choices are a starting point to re-measure on this model, never a result to copy
    percent.
 2. **Attribute by ablation.** Hardware counters are unavailable (`loom-benchmark`
    counters are UNIMPLEMENTED on gfx1151). Instead, launch a kernel twice (or skip it)
-   and measure end to end: `${CLAUDE_SKILL_DIR}/ablate.py PKG pkg_abl '@attn_decode'`
+   and measure end to end: `"${LOOM_SKILL_DIR}/ablate.py" PKG pkg_abl '@attn_decode'`
    writes the copy with its own model id; serve both in one loom-serve and run
    `ab_perf.py URL <id> <id>-abl-<name>`. The delta is that kernel's cost. Wrong outputs
    are fine for an ablation build; never ship one.
 3. **Change one thing** in the generator: kernel shape, fusion, tiling or dispatch.
    Keep the old variant behind an env switch (like `GEMM_SKIP_PADDING`, `GEMM_N_FASTEST`,
    `FLASH2_KT`; both GEMM switches are on by default, `=0` turns one off).
-4. **Kernel A/B test.** `python ${CLAUDE_SKILL_DIR}/ab_kernel.py OLD/program/llm.loom
+4. **Kernel A/B test.** `python "${LOOM_SKILL_DIR}/ab_kernel.py" OLD/program/llm.loom
    NEW/program/llm.loom KERNEL ab.loom-test` puts the old kernel next to the new one
    as `KERNEL_old`; its docstring has a case skeleton. Launch both on identical
    inputs in a `check.case` and compare with `check.expect.approximate`. Include a
@@ -102,7 +111,7 @@ bench/llama_cache/` (a trial staged 5 GB of ktest/ and llama.cpp builds and `git
 
 - **A busy GPU makes single runs meaningless** (check `pgrep -a 'loom-serve|llama-server'`):
   the same build swings 30–50 %. A/B interleaved (Fast iteration, above) with
-  `${CLAUDE_SKILL_DIR}/ab_perf.py URL MODEL_A MODEL_B --metrics decode,prefill_1k,prefill_2k --rounds 5`:
+  `"${LOOM_SKILL_DIR}/ab_perf.py" URL MODEL_A MODEL_B --metrics decode,prefill_1k,prefill_2k --rounds 5`:
   medians, B/A and a WINS/LOSES/TIE verdict against the noise band, logged to `ab_log.jsonl`. Always
   include the shortest size you report (a chunk size that won at 2k/8k lost 12 % at 1k on flint).
   Measure llama.cpp right next to the final Loom run, and say in the report that the GPU was shared.

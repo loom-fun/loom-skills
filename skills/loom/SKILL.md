@@ -5,6 +5,15 @@ description: Entry point for AMD Loom work (hrx-loom SDK, loom-serve, loom-fetch
 
 # Loom (umbrella)
 
+**Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
+absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
+In Claude Code, run `export LOOM_SKILL_DIR="${CLAUDE_SKILL_DIR}"` (the host substitutes the path).
+In Codex, Pi or another host, export `LOOM_SKILL_DIR` to the loaded file's directory. Use a
+shell-compatible absolute path (Git Bash on Windows). Rebind before using another skill's commands
+and in every new shell; it is not the working directory or SDK root. On Windows, use native `C:/...`
+paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
+or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
+
 Loom = AMD's JIT compiler + runtime + model server (`hrx-loom` on PyPI, 0.1.0 pinned by these skills; source at
 github.com/ROCm/hrx-system, models at github.com/ROCm/hrx-loom-library). Models
 ship as **Loom IR source** (`.loom` kernels + command/control programs) plus a
@@ -14,16 +23,22 @@ and exposes OpenAI-style HTTP endpoints.
 
 ## Pick the sub-skill
 
+Use the host's normal file and shell tools; no Claude-specific tool API is required.
+If subagents are available, delegate independent work with isolated files and ports.
+Otherwise run those steps serially, preserving every correctness gate and the same
+GPU memory/concurrency limits. For a fresh-agent evaluation, use a separate clean
+session rather than treating your current session as independent evidence.
+
 | Task | Skill |
 |---|---|
 | Install the SDK + library, fetch a catalog model, start/stop `loom-serve`, NPU serving | `loom-setup` |
 | Browser playground (chat / ASR / TTS / image / embeddings) over running servers | `loom-demo-ui` |
 | Make an arbitrary GGUF LLM servable by loom-serve (write the program; image input too when the repo ships a supported vision projector) | `loom-port-llm` |
-| What is possible for this model? Pick optimization targets (roofline vs llama.cpp) | `loom-roofline` (`${CLAUDE_SKILL_DIR}/../loom-roofline/SKILL.md`) |
+| What is possible for this model? Pick optimization targets (roofline vs llama.cpp) | `loom-roofline` (`"${LOOM_SKILL_DIR}/../loom-roofline/SKILL.md"`) |
 | Make a ported model faster without breaking correctness | `loom-optimize` |
 | Correctness gate vs llama.cpp, throughput methodology, reporting | `loom-benchmark` |
-| Improve these skills themselves (faster end-to-end runs, fewer failures) without regressing KPIs | `loom-improve` (`${CLAUDE_SKILL_DIR}/../loom-improve/SKILL.md`) |
-| Populate a Hugging Face org with many models (pick the top models, port and publish each, sweep gates on DevLab, fix and regenerate) | `loom-org` (`${CLAUDE_SKILL_DIR}/../loom-org/SKILL.md`) |
+| Improve these skills themselves (faster end-to-end runs, fewer failures) without regressing KPIs | `loom-improve` (`"${LOOM_SKILL_DIR}/../loom-improve/SKILL.md"`) |
+| Populate a Hugging Face org with many models (pick the top models, port and publish each, sweep gates on DevLab, fix and regenerate) | `loom-org` (`"${LOOM_SKILL_DIR}/../loom-org/SKILL.md"`) |
 
 All paths in these skills assume the install root `~/loom` (SDK venv `~/loom/.venv`,
 tools venv `~/loom/.tools`). Substitute your own root consistently. The scripts take overrides:
@@ -32,8 +47,7 @@ run_kernel_tests.sh), `PY=` (pick_llamacpp.sh's python), `UI_VENV=` or the 2nd a
 (start_ui.sh), `LOOM_SERVE_STATE=` (serve.sh PID/log dir) and `LLAMACPP_STATE=`
 (llamacpp_server.sh PID/log dir). `LOOM_RESERVED_GIB=` is memory another resident server already holds
 (e.g. a local agent model): `pick_gguf.py` and `build.py` subtract it from the 60 %-of-RAM cap.
-`PY=` is the python fetch_llamacpp.sh uses (default `python3`). Under a harness other than Claude Code,
-`${CLAUDE_SKILL_DIR}` in these skills means the directory of the SKILL.md being read. On a shared machine set the state dirs inside your work
+`PY=` is the python fetch_llamacpp.sh uses (default `python3`). On a shared machine set the state dirs inside your work
 dir and give `pick_llamacpp.sh` a SEARCH_ROOT (3rd argument) so it only sees builds the
 user approved.
 
@@ -76,13 +90,13 @@ approach curve.
 
 "Get X working, optimize it and report" is a single job. Run it without stopping:
 ```bash
-K=${CLAUDE_SKILL_DIR}/..; W=~/work/<name>; export LOOM_ROOT=~/loom LOOM_SERVE_STATE=$W/state
-bash $K/loom-setup/scripts/install_loom.sh $LOOM_ROOT          # only if $LOOM_ROOT/.venv/bin/loom-serve is missing
-$K/loom-port-llm/port.sh <org>/<repo> $W 8160                   # 1. port: download, inspect, build, serve, kernel tests, smoke (~1 min)
+K="${LOOM_SKILL_DIR}/.."; W=~/work/<name>; export LOOM_ROOT=~/loom LOOM_SERVE_STATE=$W/state
+bash "$K/loom-setup/scripts/install_loom.sh" $LOOM_ROOT          # only if $LOOM_ROOT/.venv/bin/loom-serve is missing
+"$K/loom-port-llm/port.sh" <org>/<repo> $W 8160                   # 1. port: download, inspect, build, serve, kernel tests, smoke (~1 min)
 G=$(ls $W/gguf/*.gguf)
-$K/loom-benchmark/scripts/qualify.sh $W/pkg http://127.0.0.1:8160 $G $W/bench   # 2. llama.cpp pick, gates, baselines, roofline, budget
+"$K/loom-benchmark/scripts/qualify.sh" $W/pkg http://127.0.0.1:8160 $G $W/bench   # 2. llama.cpp pick, gates, baselines, roofline, budget
 #                                                               # 3. optimize (loom-optimize) for the budget qualify printed
-$K/loom-benchmark/scripts/finalize.sh $W/pkg http://127.0.0.1:8160 $G $W/bench  # 4. final perf, full gates, audit, report.html
+"$K/loom-benchmark/scripts/finalize.sh" $W/pkg http://127.0.0.1:8160 $G $W/bench  # 4. final perf, full gates, audit, report.html
 ```
 1. **Port.** `port.sh` first looks up the closest **category A** loom-fun package (card made by the current
    skill) and starts from it (`loom-port-llm`, "Start from a reference"); `REFERENCE=off` ports from scratch.
@@ -136,7 +150,7 @@ binary from a source other than PyPI and lemonade-sdk/llamacpp-rocm. Avoid both 
 - **Baseline = the fastest llama.cpp ROCm build** (latest lemonade release or an installed one):
   `qualify.sh` fetches the latest and picks the fastest (`loom-benchmark` section 0).
 
-The `loom-roofline` skill is at `${CLAUDE_SKILL_DIR}/../loom-roofline/SKILL.md`.
+The `loom-roofline` skill is at `"${LOOM_SKILL_DIR}/../loom-roofline/SKILL.md"`.
 Read it from there if it isn't in your skill list.
 
 ## Hard rules (learned the expensive way)
@@ -154,15 +168,15 @@ Read it from there if it isn't in your skill list.
   `MemAvailable` in /proc/meminfo exceeds that model's weights + KV + 16 GiB: a second flint
   llama-server next to a 79 GB Loom server ran the machine out of RAM and the OOM killer took the
   desktop session.
-- **/tmp is RAM too.** `findmnt -no FSTYPE /tmp` prints `tmpfs` on these boxes, and Claude's scratchpad
-  lives under `/tmp/claude-*`: every file there is held in memory, charged to the session that wrote
+- **/tmp is RAM too.** `findmnt -no FSTYPE /tmp` prints `tmpfs` on these boxes, and agent scratchpads
+  can live there (for example `/tmp/claude-*`): every file there is held in memory, charged to the session that wrote
   it. Keep packages, GGUF copies, kernel-test dumps (`make_kernel_tests.py` writes ~1.7 GiB of
   embedding/head tables per 27B test dir) and anything over ~100 MB in a work dir on disk, not the
   scratchpad. Delete a test dir's `.npy` dumps once its tests pass and an ablation package once its number
   is recorded. Before serving, check `du -sh` of the scratchpad as well as `MemAvailable`.
 - **Run long tunes, gate runs and servers in their own memory-capped scope:**
   `systemd-run --user --scope -p MemoryMax=<weights+KV+8G> CMD`. When RAM runs out, systemd-oomd
-  kills the biggest cgroup: without a scope that is the editor/terminal holding every Claude session.
+  kills the biggest cgroup: without a scope that is the editor/terminal holding every agent session.
   A Qwen3.8-27B `tune.py` (52 GB server) on top of a 21 GB scratchpad of kernel-test dumps got the
   whole VS Code scope (92 GB, all sessions) killed; rerun in its own scope, it finished.
 - **Always pass `--memory_bytes`** to `loom-serve` (weights + KV pool + ~2 GiB
