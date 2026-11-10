@@ -1,9 +1,18 @@
 ---
 name: loom-port-llm
-description: Convert an arbitrary LLM (GGUF checkpoint) into a loom-serve package — generate Loom IR kernels + command program from the GGUF's metadata, derive the chat/tool-calling glue from the model's own chat template, build model.json at the model's native context length, bring it up, unit-test kernels, and validate token-by-token against llama.cpp (short prompts, agent tool loops, full context). Includes a config-driven starter kit for dense transformers (Llama/Qwen2/Qwen3/Mistral-style, GQA, QK-norm, q/k/v biases, fused q|k|v projections, sliding window with its own RoPE base/dims, output gates (elementwise or per head, sigmoid or softplus), per-layer query-head counts, YaRN, post-norms, SwiGLU or GEGLU, head_dim 64/128/256, partial RoPE) and Qwen3.5/Qwen3-Next-style hybrids (gated delta-net layers with recurrent state), with fast decode and WMMA prefill. Speculative decoding is on by default for every model family (the GGUF's MTP block, a Gemma-4 assistant, a DFlash/DFlash2 drafter, or weight-free n-gram prompt lookup, chosen by measured decode speed, output identical to the target). Adds image input automatically when the repo ships a vision projector (mmproj) of a supported family (Gemma 4, Qwen2.5-VL, Qwen3-VL/Qwen3.5+, Muse-Glimmer), and documents how to add a family. Use for "port model X to Loom", "get X working on loom-serve", custom/unsupported models.
+description: 'Port GGUF LLMs to AMD Loom and loom-serve: inspect metadata, generate and test kernels, derive chat/tool/reasoning glue, build at native context, and validate against llama.cpp. Covers dense and MoE transformers, gated delta-net hybrids, speculative decoding and supported vision projectors, with a playbook for new architectures. Use for "port model X to Loom", "get X working on loom-serve", and custom or unsupported models.'
 ---
 
 # Port an LLM to Loom
+
+**Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
+absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
+In Claude Code, run `export LOOM_SKILL_DIR="${CLAUDE_SKILL_DIR}"` (the host substitutes the path).
+In Codex, Pi or another host, export `LOOM_SKILL_DIR` to the loaded file's directory. Use a
+shell-compatible absolute path (Git Bash on Windows). Rebind before using another skill's commands
+and in every new shell; it is not the working directory or SDK root. On Windows, use native `C:/...`
+paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
+or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
 
 The goal is a package directory that `loom-serve --model=PKG/model.json` serves as a
 complete chat model:
@@ -28,12 +37,12 @@ Prerequisites:
 ## Fast path: one command (≈1 min for a 0.6–0.8B model)
 
 ```bash
-LOOM_ROOT=~/loom ${CLAUDE_SKILL_DIR}/port.sh <org>/<repo-GGUF>[:file.gguf] ~/work/mymodel [PORT] [MEMORY_GIB] [MODEL_ID]
+LOOM_ROOT=~/loom "${LOOM_SKILL_DIR}/port.sh" <org>/<repo-GGUF>[:file.gguf] ~/work/mymodel [PORT] [MEMORY_GIB] [MODEL_ID]
 #   PORT, MEMORY_GIB, MODEL_ID are positional (defaults 8160, 56, derived): e.g. ... ~/work/m 8260 40
 # then, in an end-to-end job, loom-benchmark/scripts/qualify.sh (gates + baselines + roofline);
 # or, while fixing the port, the lean gates (a few minutes once the llama.cpp references are cached;
 # LEVEL=quick/full run once before the first card via qualify.sh/finalize.sh, then nightly in CI):
-LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> ${CLAUDE_SKILL_DIR}/../loom-benchmark/scripts/gates.sh \
+LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> "${LOOM_SKILL_DIR}/../loom-benchmark/scripts/gates.sh" \
   ~/work/mymodel/pkg http://127.0.0.1:8160 ~/work/mymodel/gguf/<file.gguf> ~/work/mymodel/bench [LLAMA_PORT=8130]
 ```
 `port.sh` runs steps 1–6 below deterministically:
@@ -107,7 +116,7 @@ The expensive path. Keep it short:
 2. **Diff it against what the starter does** for a dense layer (Qwen3: `attn_norm → Qcur/Kcur/Vcur
    (+ q/k norm, RoPE) → attention → attn_output → ffn_inp → ffn_norm → gate/up → swiglu → down →
    l_out`). Every extra node or different op is a feature to add; write the list down first.
-3. **Copy the starter into the work dir** (`${CLAUDE_SKILL_DIR}/reference/apply_example.sh starter W/kit`,
+3. **Copy the starter into the work dir** (`"${LOOM_SKILL_DIR}/reference/apply_example.sh" starter W/kit`,
    which also records the loom-skills commit in `W/kit/KIT_SOURCE`: `build.py` stamps it and the Loom SDK's
    identity into `llm_config.json` `"generator"`, and the model card shows them) and extend
    the copy: a cfg flag per feature in `inspect_gguf.py`, the op in `gen_llm.py` (decode first:
@@ -117,7 +126,7 @@ The expensive path. Keep it short:
    thinking)` if you define one (how a reply's channels map back to raw text, for a format the
    default doesn't cover). No need to copy the skills tree. Reuse before
    writing: **check `reference/` for the architecture family first** and make the kit with
-   `${CLAUDE_SKILL_DIR}/reference/apply_example.sh EXAMPLE W/kit W/cfg.json` (the starter + the example's
+   `"${LOOM_SKILL_DIR}/reference/apply_example.sh" EXAMPLE W/kit W/cfg.json` (the starter + the example's
    files + its `starter.patch`, and its reviewed config merged into yours: the example's category A loom-fun
    package's `llm_config.json`, pinned in `reference/examples.json`, or the example's own `cfg.json` when none is
    published):
@@ -162,30 +171,30 @@ The expensive path. Keep it short:
 ## Workflow, step by step (what port.sh does; use it to debug a stage)
 
 ```bash
-K=${CLAUDE_SKILL_DIR}/starter; T=~/loom/.tools/bin/python
+K="${LOOM_SKILL_DIR}/starter"; T=~/loom/.tools/bin/python
 W=~/work/mymodel && mkdir -p $W && cd $W
 # 1. Inspect the GGUF: geometry, tensor formats, eos ids, native context, hybrid layers, and the
 #    chat block DERIVED from the GGUF's Jinja chat template (chat_probe.py) and VERIFIED against it:
 #    it prints "chat OK <conversation>" per probe (chat, multi-turn, tools, system+tools, agent loop,
 #    parallel calls, with thinking on/off). Every line must be OK; a FAIL or "not derivable" means
 #    fix cfg.json["chat"] by hand (fields: chat_probe.py) and rerun `chat_probe.py MODEL.gguf`.
-$T -I $K/inspect_gguf.py /path/model-Q4_K_M.gguf cfg.json
+$T -I "$K/inspect_gguf.py" /path/model-Q4_K_M.gguf cfg.json
 # 2. REVIEW cfg.json against llama.cpp's src/models/<arch>.cpp - see the checklist below
 # 3. Tokenizer: the HF tokenizer.json of the *same* model (base repo; GGUF repos often lack it)
 ~/loom/.venv/bin/hf download <org>/<base-model> tokenizer.json --local-dir tok
 # 4. Build: context defaults to the model's native context, the KV pool to context + max(64k, context/4), both fitted
 #    to --memory-gib (default auto: that pool, capped at 60% of RAM; one model is loaded at a time). Prints the model id and --memory_bytes
 #    (weights + KV pool + the largest program's prefill scratch + 3 GiB + recurrent state: a full-context request must fit).
-$T $K/build.py cfg.json pkg --tokenizer tok/tokenizer.json --model-id <org>/<name-without-spaces>
+$T "$K/build.py" cfg.json pkg --tokenizer tok/tokenizer.json --model-id <org>/<name-without-spaces>
 # 5. Serve + smoke test
-VENV=~/loom/.venv ${CLAUDE_SKILL_DIR}/../loom-setup/scripts/serve.sh mine 8160 amdgpu <memory_bytes> pkg/model.json
+VENV=~/loom/.venv "${LOOM_SKILL_DIR}/../loom-setup/scripts/serve.sh" mine 8160 amdgpu <memory_bytes> pkg/model.json
 curl -s localhost:8160/v1/chat/completions -H 'Content-Type: application/json' \
   -d '{"model":"<model id>","messages":[{"role":"user","content":"What is the capital of France?"}],"max_tokens":400}'
 #    thinking models spend 100-400 tokens reasoning: check finish_reason and that content is non-empty;
 #    "chat_template_kwargs": {"enable_thinking": false} (or "reasoning_effort": "none") turns thinking off
 # 6. Kernel unit tests vs numpy dequant references (embed, matvecs, RoPE, the whole attention chain,
 #    the output head, and for hybrids the gated delta-net chain). Run them even if the output looks fine.
-$T -I $K/make_kernel_tests.py cfg.json ktest && VENV=~/loom/.venv $K/run_kernel_tests.sh pkg ktest
+$T -I "$K/make_kernel_tests.py" cfg.json ktest && VENV=~/loom/.venv "$K/run_kernel_tests.sh" pkg ktest
 # 7. Gates vs llama.cpp - loom-benchmark skill: golden.py/compare.py (short prompts + 1k-32k documents),
 #    agent_golden.py (multi-turn tool calling, rendering, history reuse) and needle.py (full context).
 ```

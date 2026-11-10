@@ -15,6 +15,7 @@ import sys
 import time
 
 import requests
+from shell_command import bash_command
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(os.path.dirname(HERE), "data")
@@ -423,7 +424,7 @@ def ensure_llama(url):
     if not cmd:
         raise SystemExit(f"llama.cpp is not answering at {url} (and LLAMA_START is not set)")
     print(f"[llama] cache miss: starting llama-server ({cmd})", flush=True)
-    r = subprocess.run(cmd, shell=True)
+    r = subprocess.run(bash_command(cmd))
     if r.returncode:
         raise SystemExit(f"could not start llama-server: {cmd}")
 
@@ -441,7 +442,7 @@ def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=
     tokens: usage.completion_tokens, or the streamed token chunks when the server sends no usage block;
     on_token(t) is called with time.perf_counter() at every streamed token."""
     t0 = time.perf_counter()
-    first = finish = None
+    first = finish = finished_at = None
     n = pt = chunks = 0
     usage = False
     text = ""
@@ -474,7 +475,13 @@ def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=
                         on_token(now)
                     text += piece
                 finish = ch.get("finish_reason") or finish
+                # Retain the terminal event time for an EOS-only reply. Tool-only
+                # replies still have no text timing and must not gain a fake rate.
+                if first is None and ch.get("finish_reason") is not None:
+                    finished_at = time.perf_counter() - t0
     total = time.perf_counter() - t0
     n = n if usage else chunks
+    if first is None and n == 1 and finish == "stop":
+        first = finished_at
     return dict(status=200, ttft=first, total=total, tokens=n, prompt_tokens=pt, text=text, finish=finish,
                 decode_tps=(n - 1) / (total - first) if n > 1 and first else None)

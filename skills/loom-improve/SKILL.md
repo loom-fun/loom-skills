@@ -5,6 +5,15 @@ description: Improves the loom skills themselves (port, optimize, qualify, repor
 
 # Improve the loom skills
 
+**Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
+absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
+In Claude Code, run `export LOOM_SKILL_DIR="${CLAUDE_SKILL_DIR}"` (the host substitutes the path).
+In Codex, Pi or another host, export `LOOM_SKILL_DIR` to the loaded file's directory. Use a
+shell-compatible absolute path (Git Bash on Windows). Rebind before using another skill's commands
+and in every new shell; it is not the working directory or SDK root. On Windows, use native `C:/...`
+paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
+or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
+
 The job: make `loom` (and its sub-skills) better at an end-to-end request, "get MODEL working on
 loom-serve, optimize it, and report vs llama.cpp", on models it has never seen, without making any
 KPI worse. This skill is evaluation-driven: measure a baseline first, change one thing, re-measure on
@@ -15,9 +24,9 @@ eval guidance; sources at the end).
 
 | KPI | Target | Measured by |
 |---|---|---|
-| **Wall clock** | within **the model's roofline budget** end to end (install -> published report), default prompt, no hand-holding: `loom-roofline/e2e_budget.py` = fixed agent work + optimization + the pipeline's token workload at this model's decode/prefill speed (0.8B ≈ 46 min, 30B dense ≈ 106). A constant target would punish big models for physics and let small ones be sloppy | trial `phases.log` (`scripts/kpi.py summarize`: `wall_min` vs `budget_min`) |
-| **Quality** (agentic correctness vs llama.cpp) | final `LEVEL=full` gates PASS and `AUDIT PASS`: golden compare (all divergences near-ties), consistency, agent tool loop (rendering, history reuse, valid calls), sampling, needle at half and full native context, clean 400 over capacity | trial `bench/gates.json`, `audit.json`; re-checked by `scripts/eval.sh` with a frozen skill tree |
-| **Performance** | decode (TG) and prefill (PP 1k/2k, long) at or above llama.cpp ROCm on the same GGUF; never lower than the previous skill revision | `scripts/eval.sh` on a quiet GPU (interleaved, medians). In-trial numbers are informational only |
+| **Wall clock** | within **the model's roofline budget** end to end (install -> published report), default prompt, no hand-holding: `loom-roofline/e2e_budget.py` = fixed agent work + optimization + the pipeline's token workload at this model's decode/prefill speed (0.8B ≈ 46 min, 30B dense ≈ 106). A constant target would punish big models for physics and let small ones be sloppy | trial `phases.log` (`"${LOOM_SKILL_DIR}/scripts/kpi.py" summarize`: `wall_min` vs `budget_min`) |
+| **Quality** (agentic correctness vs llama.cpp) | final `LEVEL=full` gates PASS and `AUDIT PASS`: golden compare (all divergences near-ties), consistency, agent tool loop (rendering, history reuse, valid calls), sampling, needle at half and full native context, clean 400 over capacity | trial `bench/gates.json`, `audit.json`; re-checked by `"${LOOM_SKILL_DIR}/scripts/eval.sh"` with a frozen skill tree |
+| **Performance** | decode (TG) and prefill (PP 1k/2k, long) at or above llama.cpp ROCm on the same GGUF; never lower than the previous skill revision | `"${LOOM_SKILL_DIR}/scripts/eval.sh"` on a quiet GPU (interleaved, medians). In-trial numbers are informational only |
 
 Secondary (diagnostic, not goals): manual minutes (hand-work phases), friction notes (each `#` line a
 trial agent logs is a skill gap), time per phase, tool calls.
@@ -67,8 +76,8 @@ git worktree add ~/lt/skills-vN <branch> --detach      # one per trial wave; nev
 ```
 **1-2. Run a trial** (section 4). Profile with
 ```bash
-scripts/kpi.py summarize TRIAL --label NAME --skill-rev vN --log kpis.jsonl
-scripts/kpi.py compare --log kpis.jsonl BASE NEW        # exit 1 on a regression
+"${LOOM_SKILL_DIR}/scripts/kpi.py" summarize TRIAL --label NAME --skill-rev vN --log kpis.jsonl
+"${LOOM_SKILL_DIR}/scripts/kpi.py" compare --log kpis.jsonl BASE NEW        # exit 1 on a regression
 ```
 Then read the trial's report and every `#` note. Time estimates in notes are unreliable (an agent
 wrote "45 min" for a 6-minute step): use the timestamps.
@@ -152,7 +161,13 @@ verified (gates passed on it), with the trial's measurement in the commit messag
 **8. Stop** when the goal's models finish within their roofline budgets with all gates passing, or the top remaining cause is outside the
 skill (hardware speed, model size, upstream SDK/llama.cpp bugs): report it with the minutes.
 
-## 4. Running trials with subagents
+## 4. Running trials with fresh agents
+
+Use a fresh subagent if the host supports one. Otherwise launch a separate clean
+session of the same agent with the filled `trial_prompt.md` and frozen snapshot.
+Do not run an "independent" trial in the session that edited the skills. If a clean
+session cannot be launched, finish the deterministic checks and report the agent
+trial as pending. Record the agent, model and version alongside every trial result.
 
 **Brief.** Fill `trial_prompt.md` exactly; it states the objective, the output format (phases,
 numbers, gates, friction list, deliverables), the tools and sources allowed, and the boundaries. A
@@ -167,7 +182,7 @@ vague brief produced duplicated work and contaminated results.
 
 **Supervise, don't wait.** Start a watchdog for every trial, in the background, right after launch:
 ```bash
-scripts/watch_trial.sh TRIAL 25 300    # exits DONE, STALLED (nothing changed for 25 min) or TIMEOUT
+"${LOOM_SKILL_DIR}/scripts/watch_trial.sh" TRIAL 25 300    # exits DONE, STALLED (nothing changed for 25 min) or TIMEOUT
 ```
 A completion notification is not a liveness signal: an agent blocked on its own background loop never
 completes (one sat idle 16 h). On STALLED: look at the last phase and processes; message the agent or
@@ -186,7 +201,7 @@ the prompt is near-deterministic for that model, or llama.cpp disagreeing with i
 
 ## 5. Measuring correctly
 
-- In-trial perf is informational. Comparable perf comes from `scripts/eval.sh OUT PKG GGUF` on a quiet
+- In-trial perf is informational. Comparable perf comes from `"${LOOM_SKILL_DIR}/scripts/eval.sh" OUT PKG GGUF` on a quiet
   GPU (no other loom-serve/llama-server), same llama.cpp build for every revision, one model at a time,
   medians. Re-serve a finished package from its trial dir to evaluate it later.
 - Quality is re-checked by `eval.sh` with a frozen skill tree (`EVAL_SKILLS=`), so a skill change
@@ -217,9 +232,9 @@ the prompt is near-deterministic for that model, or llama.cpp disagreeing with i
 ## Files
 
 - `trial_prompt.md`: the brief for a trial agent (fill the placeholders).
-- `scripts/kpi.py`: trial KPIs (`summarize`) and regression check between two trials (`compare`).
-- `scripts/watch_trial.sh`: trial watchdog (DONE / STALLED / TIMEOUT).
-- `scripts/eval.sh`: fixed quiet-GPU evaluation of a package (frozen gates + perf, one model at a time);
+- `"${LOOM_SKILL_DIR}/scripts/kpi.py"`: trial KPIs (`summarize`) and regression check between two trials (`compare`).
+- `"${LOOM_SKILL_DIR}/scripts/watch_trial.sh"`: trial watchdog (DONE / STALLED / TIMEOUT).
+- `"${LOOM_SKILL_DIR}/scripts/eval.sh"`: fixed quiet-GPU evaluation of a package (frozen gates + perf, one model at a time);
   `LEVEL=dev` re-checks in minutes when the trial's own finalize already ran `full`.
 - `reference/results.md`: every trial so far: the baselines to beat, and the lessons behind each rule.
 

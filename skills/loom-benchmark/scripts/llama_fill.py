@@ -12,9 +12,11 @@ with those arguments ($LLAMA_STOP stops the first one; without it such requests 
 """
 import json
 import os
+import subprocess
 import sys
 
 from bench_common import SERVER_VARIANTS, llama_completion
+from shell_command import bash_command
 
 url, files = sys.argv[1], sys.argv[2:]
 os.environ.pop("LLAMA_DEFER", None)
@@ -32,7 +34,7 @@ for i, r in enumerate(queue):
         if not os.environ.get("LLAMA_STOP"):
             print(f"[fill {i + 1}/{len(todo)}] left for a server started as {variant!r}: $LLAMA_STOP is not set", flush=True)
             continue
-        os.system(os.environ["LLAMA_STOP"])
+        subprocess.run(bash_command(os.environ["LLAMA_STOP"]), check=True)
         os.environ.update(LLAMA_FILL_VARIANT=variant, LLAMA_FILL_SPEC=SERVER_VARIANTS[variant])
         started = variant
     os.environ["LLAMA_GGUF"] = r["gguf"] or ""

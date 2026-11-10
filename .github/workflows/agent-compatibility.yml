@@ -1,0 +1,24 @@
+name: agent-compatibility
+
+on:
+  pull_request:
+    paths: ["skills/**", "scripts/**", "tests/**", "install.sh", ".claude-plugin/**", ".github/workflows/agent-compatibility.yml"]
+  push:
+    branches: [main]
+    paths: ["skills/**", "scripts/**", "tests/**", "install.sh", ".claude-plugin/**", ".github/workflows/agent-compatibility.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  installation-and-resources:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tests -v

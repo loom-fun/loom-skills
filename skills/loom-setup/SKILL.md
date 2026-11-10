@@ -5,15 +5,24 @@ description: Install AMD Loom (hrx-loom from PyPI, or a ROCm/hrx-system CI wheel
 
 # Loom setup: install → fetch → serve
 
+**Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
+absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
+In Claude Code, run `export LOOM_SKILL_DIR="${CLAUDE_SKILL_DIR}"` (the host substitutes the path).
+In Codex, Pi or another host, export `LOOM_SKILL_DIR` to the loaded file's directory. Use a
+shell-compatible absolute path (Git Bash on Windows). Rebind before using another skill's commands
+and in every new shell; it is not the working directory or SDK root. On Windows, use native `C:/...`
+paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
+or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
+
 Read the `loom` umbrella skill's hard rules first (memory limits, `--memory_bytes`,
 binary approval).
 
 ## 1. Install (≈30 s with a warm pip cache, a few minutes cold)
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/install_loom.sh ~/loom            # hrx-loom 0.1.0 from PyPI (what the port templates target)
-bash ${CLAUDE_SKILL_DIR}/scripts/install_loom.sh ~/loom latest     # newest PyPI release
-bash ${CLAUDE_SKILL_DIR}/scripts/install_loom.sh ~/loom ci-latest  # newest main CI wheel (needs gh)
+bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom            # hrx-loom 0.1.0 from PyPI (what the port templates target)
+bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom latest     # newest PyPI release
+bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom ci-latest  # newest main CI wheel (needs gh)
 ```
 The script:
 - creates `~/loom/.venv` with `pip install 'hrx-loom[hf]==0.1.0'`, which provides loom-serve,
@@ -72,11 +81,11 @@ Notes:
 ## 3. Serve
 
 ```bash
-S=${CLAUDE_SKILL_DIR}/scripts
-VENV=~/loom/.venv $S/serve.sh asr 8100 amdgpu 16000000000 ~/loom/models/moonshine/model.json
-VENV=~/loom/.venv $S/serve.sh gpu 8100 amdgpu 53687091200 models/a/model.json models/b/model.json -- --parameter_idle_ms=60000
-VENV=~/loom/.venv-npu $S/serve.sh npu 8101 'xdna://0?columns=8' 4000000000 models/qwen3-embedding/model.json -- --pool_backing=fixed
-$S/stop.sh asr
+S="${LOOM_SKILL_DIR}/scripts"
+VENV=~/loom/.venv "$S/serve.sh" asr 8100 amdgpu 16000000000 ~/loom/models/moonshine/model.json
+VENV=~/loom/.venv "$S/serve.sh" gpu 8100 amdgpu 53687091200 models/a/model.json models/b/model.json -- --parameter_idle_ms=60000
+VENV=~/loom/.venv-npu "$S/serve.sh" npu 8101 'xdna://0?columns=8' 4000000000 models/qwen3-embedding/model.json -- --pool_backing=fixed
+"$S/stop.sh" asr
 ```
 `serve.sh` waits until `/v1/status` reports every model `registration: ready` and
 checks that its PID owns the port. If it reports `failed`, it prints the compile

@@ -112,3 +112,22 @@ UD-Q6_K_XL, the others the quant `pick_gguf.py` chose).
 (Bolt 32k: the 32k document is ~35k tokens with Gemma's tokenizer, over eval.sh's 34k llama.cpp context.)
 Open perf gaps worth a campaign: long prefill on Qwen3.5 (-23% at 32k: gated delta-net prefill is
 sequential), short prefill on the MoE ports (LFM2.5, flint at 1k: flint's 4096 chunk regressed 1k).
+
+## Cross-agent GPU validation (2026-11-09)
+
+Qwen3-0.6B Q4_K_M (`unsloth/Qwen3-0.6B-GGUF`), using the published Qwen3-1.7B
+cousin (`loom-fun/ggml-org-Qwen3-1.7B-loom`). Skills `451d63e`, hrx-loom 0.1.0,
+Windows / Radeon 8060S. Each agent built its own package from the same checkpoint.
+
+| Agent | GPU kernels | Correctness gates | Tool/history, thinking on and off |
+|---|---|---|---|
+| Claude Code 2.1.302 / Sonnet 5.5 | 57/57 | 7/7 PASS | PASS |
+| Codex 0.167.0-alpha.3.2 / CLI default | 57/57 | 7/7 PASS | PASS |
+| Pi 0.73.1 / local Qwen3.5-35B-A3B | 57/57 | 7/7 PASS | PASS |
+
+Gates: golden, compare, consistency, spec, agent, agent_think_off, sampling.
+Needle tests were excluded. All three also passed independent live tool-response
+checks against their GPU deployments. Pi was rechecked against the same ROCm
+`c08d28d` reference as Claude/Codex. Reference discovery exposed exact-target
+metadata, but no exact-target code or weights were reused; these were not blinded
+trials. Shared-machine timings do not establish stable performance gains.

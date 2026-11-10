@@ -5,6 +5,15 @@ description: Start and use the Loom Playground web UI (chat with streaming reaso
 
 # Loom Playground UI
 
+**Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
+absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
+In Claude Code, run `export LOOM_SKILL_DIR="${CLAUDE_SKILL_DIR}"` (the host substitutes the path).
+In Codex, Pi or another host, export `LOOM_SKILL_DIR` to the loaded file's directory. Use a
+shell-compatible absolute path (Git Bash on Windows). Rebind before using another skill's commands
+and in every new shell; it is not the working directory or SDK root. On Windows, use native `C:/...`
+paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
+or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
+
 A small FastAPI proxy (`ui/server.py`) + one static page (`ui/index.html`). The page
 polls each upstream's `/v1/status`, groups ready models by `loom.kind`, and wires
 the tabs:
@@ -26,7 +35,7 @@ The first served model of each kind is used, and missing kinds show "(none)".
 2. Start the UI. The tools venv needs fastapi, uvicorn and httpx:
    ```bash
    LOOM_UI_UPSTREAMS="gpu=http://127.0.0.1:8100,npu=http://127.0.0.1:8101" \
-     bash ${CLAUDE_SKILL_DIR}/start_ui.sh 8090 ~/loom/.tools
+     bash "${LOOM_SKILL_DIR}/start_ui.sh" 8090 ~/loom/.tools
    ```
    It prints `UI: http://127.0.0.1:8090`. The log is `/tmp/loom-ui-8090.log`; to stop it,
    run `kill $(cat /tmp/loom-ui-8090.pid)`.

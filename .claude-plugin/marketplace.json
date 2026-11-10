@@ -1,7 +1,7 @@
 {
   "name": "loom",
   "owner": { "name": "loom-fun" },
-  "description": "Claude Code skills for AMD Loom",
+  "description": "Agent skills for AMD Loom (Claude Code plugin distribution)",
   "plugins": [
     {
       "name": "loom",
