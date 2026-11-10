@@ -62,9 +62,9 @@ export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 card=$WORK/_card_$(echo "$repo" | tr "/" "_"); base=https://huggingface.co/$repo/resolve/main
 if [ ! -f "$card/.fetched" ]; then
   step "fetch $repo"; rm -rf "$card"
-  "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" || { echo "FAIL: loom-fetch"; exit 1; }
+  HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" || { echo "FAIL: loom-fetch"; exit 1; }
   curl -fsSL --retry 3 "$base/llm_config.json" -o "$card/llm_config.json" || exit 1
-  rm -rf "$WORK/fetch-cache"; touch "$card/.fetched"
+  rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; touch "$card/.fetched"
 fi
 
 # build.py's / make_kernel_tests.py's config: the card's llm_config.json with its GGUFs pointed at the fetched files, plus the tensor table

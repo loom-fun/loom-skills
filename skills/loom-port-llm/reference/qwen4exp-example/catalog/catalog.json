@@ -30,6 +30,6 @@
   "expires": "2026-11-22"
  },
  "tokenizer": "Qwen/Qwen3.8-Flash-Next",
- "context": 131072,
- "prefill_capacity": 4096
+ "context": 32768,
+ "prefill_capacity": 8192
 }

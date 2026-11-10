@@ -262,7 +262,7 @@ if [ "$ref" != off ] && [ -s reference.json ] && [ -f cfg.json ] && ! "$T" -c "i
 fi
 
 step "3/6 build"
-"$T" "$K/build.py" cfg.json pkg --tokenizer tok/tokenizer.json --model-id "$model_id" --memory-gib "$mem_gib" | tee build.log
+"$T" "$K/build.py" cfg.json pkg --tokenizer tok/tokenizer.json --model-id "$model_id" --memory-gib "$mem_gib" $([ -n "$catalog" ] && case "${SPEC:-on}" in off|OFF|0) echo --draft none;; esac) | tee build.log
 [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: build.py failed (build.log)"; exit 4; }
 mem=$(grep -o -- "--memory_bytes=[0-9]*" build.log | cut -d= -f2)
 ctx=$(grep -o "^context [0-9]*" build.log | cut -d' ' -f2)

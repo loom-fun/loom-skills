@@ -1,7 +1,7 @@
 {
  "_comment": "Qwen3.8-Flash-Next (catalog card, qwen4exp kit): quick gates without the needle probes, against llama.cpp b1371 (Loom and llama.cpp take turns: the GGUF is 104 GiB). The card's programs are the published ones; a catalog card cannot be rebuilt.",
  "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 97000000000,
+ "memory_bytes": 96000000000,
  "kit": "qwen4exp",
  "llamacpp": "b1371",
  "env": {

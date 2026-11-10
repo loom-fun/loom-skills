@@ -82,9 +82,9 @@ export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 card=$WORK/_card/${repo//\//_}; base=https://huggingface.co/$repo/resolve/main
 if [ ! -f "$card/.fetched" ]; then
   step "fetch $repo"; rm -rf "$card"
-  "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch"; exit 1; }
+  HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch"; exit 1; }
   curl -fsSL --retry 3 "$base/llm_config.json" -o "$card/llm_config.json" || exit 1
-  rm -rf "$WORK/fetch-cache"; touch "$card/.fetched"
+  rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; touch "$card/.fetched"
 fi
 "$T" -c "import sys; sys.path.insert(0, sys.argv[1]); from card_lib import programs_sha256; print(programs_sha256(sys.argv[2]))" \
   "$here/skills/loom-benchmark/scripts/card" "$card" > "$out/programs_sha256.txt"   # the published programs this job fetched
