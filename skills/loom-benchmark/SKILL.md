@@ -5,6 +5,11 @@ description: Correctness and performance methodology for Loom models vs llama.cp
 
 # Benchmark and verify Loom models
 
+If the user explicitly excludes needle-in-a-haystack tests, export `SKIP_NEEDLE=1`
+for gates, qualify and finalize. This skips every needle variant and records the
+exclusion in `gates.json`; the audit warns about missing long-context coverage.
+Do not run `needle.py` separately or claim that excluded coverage passed.
+
 **Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
 absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
 In Claude Code, run `export LOOM_SKILL_DIR="${CLAUDE_SKILL_DIR}"` (the host substitutes the path).

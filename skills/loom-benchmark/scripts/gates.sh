@@ -21,6 +21,8 @@
 #   LEVEL=full  (default; the final build, once): quick + one Loom-only probe at the full context
 #               (proves the whole context is served). QUICK=1 is an alias for LEVEL=quick.
 #   NEEDLE_FULL=0 LEVEL=full without that probe: it is deferred (gates.json "deferred": ["needle_full"],
+#   SKIP_NEEDLE=1 explicitly exclude ALL needle tests at every level (user-requested scoped trials).
+#               The omission is recorded in gates.json, never counted as a passed gate.
 #               an audit WARN, not a FAIL). It has caught one class of bug (a KV pool under the context,
 #               which build.py now warns about) at a median of ~8 min and up to an hour per run, so a
 #               harness may run it separately: a later LEVEL=full run on the same build re-uses every
@@ -78,6 +80,10 @@ pending=()
 run() {  # run NAME CMD...: a gate whose llama.cpp references were all cached gets its verdict;
          # one with deferred references is pending and runs again after the fill
   local name=$1; shift; local t0=$(date +%s)
+  if [ "${SKIP_NEEDLE:-0}" = 1 ] && { [ "$name" = needle ] || [ "$name" = needle_full ]; }; then
+    echo "== $name: SKIPPED (SKIP_NEEDLE=1, explicit trial scope)"
+    return 0
+  fi
   [ -n "${done[$name]:-}" ] && return
   if passed_before "$name"; then
     echo "== $name: PASSED earlier on this exact build (pkg $pkg_hash), not re-run"
@@ -205,6 +211,10 @@ out = {"verdict": verdict, "level": level, "pkg_hash": pkg_hash, "seconds": tota
        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "gates": gates}
 if deferred:
     out["deferred"] = deferred
+if os.environ.get("SKIP_NEEDLE") == "1":
+    out["skipped"] = {"needle": "explicit trial scope (SKIP_NEEDLE=1)",
+                      "needle_full": "explicit trial scope (SKIP_NEEDLE=1)"}
+    out.pop("deferred", None)
 json.dump(out, open("gates.json", "w"), indent=1)
 with open("gates_runs.jsonl", "a") as f:
     f.write(json.dumps(out) + "\n")

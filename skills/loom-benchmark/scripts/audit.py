@@ -144,6 +144,9 @@ else:
     check("gates: consistency", s is not None and s["verdict"] == "PASS",
           f"latest consistency: {s and s['verdict']} (a near-tie with a known cause needs consistency_note.md)")
 gj = json.load(open(P("gates.json"))) if os.path.exists(P("gates.json")) else None
+if gj and any(n.startswith("needle") for n in (gj.get("skipped") or {})):
+    check("gates: needle coverage", False, "explicitly excluded from this trial; long-context retrieval and "
+          "full-context serving were not verified", level="WARN")
 failing = [n for n, g in (gj or {}).get("gates", {}).items() if not g["pass"]]
 documented = failing == ["consistency"] and note   # a near-tie with its cause in consistency_note.md
 check("gates: full run PASS", gj is not None and (gj.get("verdict") == "PASS" or documented) and gj.get("level", "full") == "full",

@@ -30,6 +30,9 @@ import sys
 import sysconfig
 import time
 
+if os.environ.get("SKIP_NEEDLE") == "1":
+    sys.exit("Needle tests disabled by explicit trial scope (SKIP_NEEDLE=1); no request sent")
+
 import requests
 
 from bench_common import Package, doc, llama_greedy, near_tie_at, stream, top_logprobs
