@@ -73,11 +73,12 @@ Codex or Pi.
 
 ## Verification recorded November 9, 2026
 
-Windows, Python 3.15 and Git Bash; the portability working tree based on
-`f18ddc48a5a1d350184c28234c484c524083d0e2`. Twelve CPU tests and all nine
+Initial smoke runs used Windows, Python 3.15 and Git Bash with the portability
+working tree based on `f18ddc48a5a1d350184c28234c484c524083d0e2`. The subsequent
+frozen GPU-trial revision `451d63e` passes 27 CPU regression tests. All nine
 skill metadata validations passed. Claude plugin validation passed with the
-existing missing-version warning. Linux execution is configured in CI, not
-claimed as locally tested.
+existing missing-version warning. Linux and Windows installation CI passed;
+Linux is not claimed as locally tested.
 
 | Agent | Distribution / model | Observed result |
 |---|---|---|
@@ -95,7 +96,9 @@ bound the correct absolute directories. That trial recovered from applying
 `bash -n` to a Python file and a Windows file-tool path typo before completing
 both commands. The file-tool/Git-Bash path distinction is now explicit. These
 are successful smoke tasks with recorded friction, not evidence of flawless
-agent behavior or full model-porting quality. Full GPU trials remain pending.
+agent behavior or full model-porting quality. The subsequent real GPU trials
+are recorded in [GPU agent validation](gpu-agent-validation.md), including their
+actual tool/history coverage and trial-isolation limitations.
 
 Local transcripts are kept under `.agent-smoke/` (gitignored); no credentials or
 raw session logs are committed.

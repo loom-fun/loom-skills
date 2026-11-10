@@ -112,3 +112,46 @@ UD-Q6_K_XL, the others the quant `pick_gguf.py` chose).
 (Bolt 32k: the 32k document is ~35k tokens with Gemma's tokenizer, over eval.sh's 34k llama.cpp context.)
 Open perf gaps worth a campaign: long prefill on Qwen3.5 (-23% at 32k: gated delta-net prefill is
 sequential), short prefill on the MoE ports (LFM2.5, flint at 1k: flint's 4096 chunk regressed 1k).
+
+## Cross-agent GPU workflow validation (2026-11-09)
+
+Independent Claude Code, Codex CLI and Pi runs built `unsloth/Qwen3-0.6B-GGUF`
+(`Qwen3-0.6B-Q4_K_M.gguf`, revision `50968a4468ef4233ed78cd7c3de230dd1d61a56b`)
+with cousin `loom-fun/ggml-org-Qwen3-1.7B-loom` at `caee8b360`. Frozen skills
+`451d63e`, PyPI hrx-loom 0.1.0 / source `d01d1c18`, Windows / Radeon 8060S gfx1151.
+The fixed SDK and download cache were reused; each agent built its own package.
+
+| Agent / model | CLI wall (min) | GPU kernels | Final scoped gates | Actual calls thinking on / off | Package hash |
+|---|---|---|---|---|---|
+| Claude Code 2.1.302 / Sonnet 5.5 | 18.8 | 57/57 | 7/7 PASS, audit PASS | 4 / 4 | `ef40a339b617` |
+| Codex 0.167.0-alpha.3.2 / CLI default, model ID unavailable | 17.5 | 57/57 | 7/7 PASS, audit PASS | 4 / 4 | `248f6f6bd57f` |
+| Pi 0.73.1 / local Qwen3.5-35B-A3B-ThinkingCoder | 22.7 | 57/57 | 7/7 PASS, audit PASS | 4 / 4 | `642bafdcc886` |
+
+Seven gates: golden, compare, consistency, spec, agent, agent_think_off, sampling.
+**Needle and needle_full were excluded at the user's request, never executed or
+counted as passes.** Native context 40960 is preserved, but full-context capacity
+and retrieval probes are not verified. Coordinator checks verified checkpoint
+identity, source/SDK provenance, actual AMD serving processes, gate package
+hashes and logs, cached tool-response history, and fresh live tool-response
+round trips for all three agents.
+
+All retained measured ngram depth 3. Pi's extra prefill environment-variable
+attempt left the executable package unchanged and receives no optimization
+credit. The Windows pilot that preceded this cohort exposed general path,
+process and timing fixes; it is not counted as a final run.
+
+Reference discovery read public exact-target metadata while scanning the
+catalog; no exact-target kernels or weights were reused. These are not blinded
+or pristine cold-cache trials. Codex's worker marked strict trial isolation
+failed while separately recording GPU validation passed; its original result
+is preserved. Acceptance here is the coordinator's independently verified GPU
+workflow result, with that limitation stated explicitly.
+
+Shared-machine measurements do not establish idle-GPU gains or rank agent
+speed. Claude/Codex used ROCm `c08d28d`; Pi's original run used `b1372`. A
+separate Pi supplement against `c08d28d` passed all seven gates with freshly
+generated references, final audit, measurements and an independent live tool
+exchange. See
+[the validation report](../../../docs/gpu-agent-validation.md) for scope,
+friction, exact revisions and evidence. Raw artifacts remain gitignored under
+`.agent-smoke/gpu/`.
