@@ -11,8 +11,11 @@
 # Environment (all optional):
 #   LEVEL         gates.sh level (default full)
 #   WORK          work root (default ~/loom-nightly); this card uses WORK/<slug>/{pkg,bench,out,...}
-#   LOOM_ROOT     Loom install with .venv and .tools (default WORK/loom; installed by install_loom.sh if missing)
-#   LOOM_VERSION  hrx-loom version for a fresh install (default: install_loom.sh's validated version)
+#   LOOM_ROOT     Loom install with .venv and .tools (default WORK/loom; installed by install_loom.sh if missing).
+#                 A card whose llm_config.json pins an SDK ("sdk": hrx-loom wheel) gets its own root next to it
+#                 (loom-setup/scripts/ensure_sdk.sh)
+#   LOOM_VERSION  hrx-loom version for a fresh install (default: the card's SDK pin, else install_loom.sh's validated
+#                 version; set explicitly it overrides the pin)
 #   LLAMACPP_DIR  a llama.cpp ROCm build to use instead of fetching the card's release
 #   LLAMA_ROOT    where releases are unpacked (default WORK/llamacpp)
 #   MATERIALIZE   loom-fetch --materialize (default copy; share avoids a second copy of the GGUFs)
@@ -55,19 +58,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 1. Loom SDK (hrx-loom[hf]) + tools venv, as loom-setup installs them
-root=${LOOM_ROOT:-$WORK/loom}
-if [ ! -x "$root/.venv/bin/loom-serve" ] || [ ! -x "$root/.tools/bin/python" ]; then
-  step "install Loom into $root"
-  "$SV/install_loom.sh" "$root" ${LOOM_VERSION:+"$LOOM_VERSION"} || exit 1
-fi
+# 1. Loom SDK (hrx-loom[hf]) + tools venv, as loom-setup installs them: the SDK the card pins (its llm_config.json),
+# else the default
+base=https://huggingface.co/$repo/resolve/main
+curl -fsSL --retry 3 "$base/llm_config.json" -o "$out/llm_config.json" || { echo "FAIL: no llm_config.json in $repo"; exit 1; }
+step "Loom SDK"
+root=$("$SV/ensure_sdk.sh" "${LOOM_ROOT:-$WORK/loom}" "$out/llm_config.json") || exit 1
 export LOOM_ROOT=$root VENV=$root/.venv
 echo "hrx-loom $("$root/.venv/bin/python" -c 'import importlib.metadata as m; print(m.version("hrx-loom"))')"
 
 # 2. The latest card. loom-fetch installs the files model.json lists; llm_config.json (the gates' view of the
 # port: chat format, vision, drafter) and info.json (the published numbers) come from the repo next to it.
 step "fetch $repo"
-base=https://huggingface.co/$repo/resolve/main
 rm -rf "$pkg"
 "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize="${MATERIALIZE:-copy}" \
   ${FETCH_CACHE:+--cache "$FETCH_CACHE"} --output="$pkg" || { echo "FAIL: loom-fetch"; exit 1; }

@@ -5,9 +5,11 @@
 # (speculative-decoding method and depth by measured decode speed); no hand-written levers.
 # Runs on any Strix Halo (local, or AMD DevLab Dispatch through .github/workflows/devlab-port.yml).
 #
-#   [SK=skills dir] [REFERENCE=auto|off|loom-fun/REPO] [LOOM_ROOT=DIR/loom] [GPU_LOCK=/tmp/loom-gpu.lock] \
+#   [SK=skills dir] [REFERENCE=auto|off|loom-fun/REPO] [CATALOG=DIR] [LOOM_ROOT=DIR/loom] [GPU_LOCK=/tmp/loom-gpu.lock] \
 #     port_e2e.sh ORG/REPO[:FILE.gguf] DIR [PORT=8160] [LLAMA_PORT=8130] [MODEL_ID]
 #
+# A catalog-package port (loom-port-llm/SKILL.md) pins its own SDK: port.sh installs it next to LOOM_ROOT
+# (ensure_sdk.sh) and records the root in work/loom_root, which every later stage here uses.
 # DIR/phases.log (`<epoch> <phase>`: loom-improve's kpi.py reads it), DIR/work (port.sh's WORKDIR: pkg, bench, ...),
 # DIR/out: evidence (ev_perf.json, ev_gates.json), publish/ (the package as it is uploaded, without weights),
 # logs and result.json. GPU_LOCK: every GPU stage holds this flock (one GPU job at a time on a shared machine).
@@ -73,6 +75,7 @@ ph port
   tail -4 "$out/port.log"
   [ $rc = 0 ] || { echo "port.sh exit $rc"; exit $rc; }
   gguf=$(ls "$W"/gguf/*.gguf | head -1)
+  [ -s "$W/loom_root" ] && export LOOM_ROOT=$(cat "$W/loom_root") VENV=$(cat "$W/loom_root")/.venv
   echo "$(date +%s) qualify" >> "$D/phases.log"
   "$B/qualify.sh" "$W/pkg" "$url" "$gguf" "$W/bench" "$lport" > "$out/qualify.log" 2>&1 9>&-; echo "qualify exit $?"
   grep "^QUALIFY_RESULT" "$out/qualify.log" | cut -c1-600
@@ -84,6 +87,7 @@ ph port
 [ $rc = 0 ] || { ph done; save_logs; result failed port $rc; exit $rc; }
 
 ph evidence
+[ -s "$W/loom_root" ] && { root=$(cat "$W/loom_root"); export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python; }
 gguf=$(ls "$W"/gguf/*.gguf | head -1); bench=$W/bench
 build=$("$T" -c "import json,re;r=json.load(open('$bench/llamacpp_pick.json'))['ranked'];m=re.search(r'b1[0-9]{3,}', r[0]['dir']) if r else None;print(m.group(0) if m else '')" 2>/dev/null)
 src=(--package "$W/pkg")
