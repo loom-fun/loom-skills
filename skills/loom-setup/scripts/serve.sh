@@ -18,6 +18,7 @@ state=${LOOM_SERVE_STATE:-$HOME/.cache/loom-serve}; mkdir -p "$state"   # NAME.p
 listeners() { if command -v ss >/dev/null; then ss -ltnp | grep ":$port "; else netstat -ano -p tcp | tr -d '\r' | grep LISTENING | grep ":$port "; fi; }
 owns_port() { if command -v ss >/dev/null; then listeners | grep -q "pid=$1,"; else listeners | grep -q " $(cat /proc/$1/winpid 2>/dev/null || echo $1)\$"; fi; }
 if listeners >/dev/null; then echo "port $port busy:"; listeners; exit 1; fi
+[ "$dev" != amdgpu ] || "$(dirname "$0")/memcheck.sh" "$mem" "loom-serve --memory_bytes=$mem" || exit 1   # only budgets above the cap are checked
 nohup "$bin/loom-serve" --device="$dev" --listen=127.0.0.1:$port --memory_bytes=$mem --workers=8 "${models[@]}" "${extra[@]}" > $state/$name.log 2>&1 &
 echo $! > $state/$name.pid; echo $port > $state/$name.port; start=$(date +%s)
 while kill -0 $(cat $state/$name.pid) 2>/dev/null; do

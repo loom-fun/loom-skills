@@ -29,6 +29,9 @@ listeners() { if command -v ss >/dev/null; then ss -ltnp | grep ":$port "; else 
 if curl -s -m 2 localhost:$port/health >/dev/null 2>&1 || listeners >/dev/null; then
   echo "port $port is busy (another llama-server or loom-serve?)"; listeners || true; exit 1
 fi
+# Weights above the memory cap (a model the default budget does not cover) need MemAvailable headroom too.
+size=$(python3 "$(dirname "$0")/../../loom-port-llm/starter/formats.py" size "$gguf" 2>/dev/null || echo 0)
+"$(dirname "$0")/../../loom-setup/scripts/memcheck.sh" "${size:-0}" "llama-server on $(basename "$gguf")" || exit 1
 cd "$dir"
 exe=./llama-server; [ -f $exe.exe ] && { exe=$exe.exe; command -v cygpath >/dev/null && gguf=$(cygpath -w "$gguf"); }
 # Libraries: the build dir, plus any ROCm runtime it links but doesn't ship (lemonade's rocm-stable
@@ -55,6 +58,9 @@ ctxarg=(-c $((np * per))); [ "$mode" = unified ] && ctxarg=(-c $per -kvu)
 # an old build (b10820, a sliding-window model) answered the PREVIOUS prompt from that cache.
 mm=(); [ -n "${MMPROJ:-}" ] && { mm=(--mmproj "$MMPROJ"); export LLAMA_MEDIA_MARKER='<__media__>'; }   # vision_golden.py's marker
 spec=(); [ -n "${LLAMA_SPEC:-}" ] && read -r -a spec <<< "$LLAMA_SPEC"
+# -ngl 99 offloads the repeating layers only: llama.cpp keeps input-layer tensors (token_embd, and qwen4exp's 27 GiB
+# per_layer_token_embd lookup table) in the CPU buffer on its own (mmap'd), so nothing here forces them onto the GPU.
+# Do not add --no-mmap, -ot or --override-tensor for them.
 args=(-ngl 99 -cram 0 "${mm[@]}" "${spec[@]}" "${ctxarg[@]}" -np $np)
 # LLAMACPP_ARGS_FILE: record the server's exact arguments (model path, host and port left out), the card's baseline args
 if [ -n "${LLAMACPP_ARGS_FILE:-}" ]; then echo "${args[*]}" > "$LLAMACPP_ARGS_FILE"; fi
