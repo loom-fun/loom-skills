@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: devlab-experiment-${{ github.ref }}
+  group: devlab-experiment-${{ github.ref }}-${{ github.event.label.name }}   # a skipped event for another label must not cancel this label's run
   cancel-in-progress: true
 
 jobs:
