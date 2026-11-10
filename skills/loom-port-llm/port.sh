@@ -53,10 +53,10 @@ elif [ "${DRY_RUN:-0}" = 1 ]; then
 else
   # Into the shared HF cache (reused by later runs and by llama.cpp tools), symlinked into WORKDIR/gguf.
   "$hf" download "$repo" "$file" > download.log 2>&1; echo "hf exit $?" >> download.log
-  cached=$(grep -v '^hf exit' download.log | grep -o '/[^ ]*'"$(basename "$file")" | tail -1)
+  cached=$("$T" -I "$here/checkpoint_path.py" from-log download.log "$(basename "$file")") || exit 2
 fi
 [ -f "$cached" ] || { echo "download of $repo/$file failed (download.log):"; tail -5 download.log 2>/dev/null; exit 2; }
-mkdir -p gguf && [ "$cached" -ef "gguf/$(basename "$file")" ] || ln -sf "$cached" "gguf/$(basename "$file")"
+"$T" -I "$here/checkpoint_path.py" link "$cached" "gguf/$(basename "$file")" || exit 2
 gguf=$work/gguf/$(basename "$file")
 # A split GGUF (NAME-00001-of-0000N.gguf, formats.split_parts): every other part, from the same repo directory.
 for pf in $("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import formats; print(*formats.split_parts(sys.argv[2])[1:])" "$K" "$file"); do
@@ -65,10 +65,10 @@ for pf in $("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import form
     "$T" -I "$K/pick_gguf.py" "$repo" --file "$pf" --stub "gguf/$(basename "$pf")" || exit 2; continue
   elif [ ! -f "$pc" ]; then
     "$hf" download "$repo" "$pf" >> download.log 2>&1
-    pc=$(grep -o '/[^ ]*'"$(basename "$pf")" download.log | tail -1)
+    pc=$("$T" -I "$here/checkpoint_path.py" from-log download.log "$(basename "$pf")") || exit 2
   fi
   [ -f "$pc" ] || { echo "download of $repo/$pf failed (download.log)"; exit 2; }
-  [ "$pc" -ef "gguf/$(basename "$pf")" ] || ln -sf "$pc" "gguf/$(basename "$pf")"
+  "$T" -I "$here/checkpoint_path.py" link "$pc" "gguf/$(basename "$pf")" || exit 2
 done
 # Tokenizer: the base model named in the GGUF, else the repo name without -GGUF.
 tokrepos=$("$T" - "$gguf" "$repo" <<'EOF'

@@ -32,6 +32,7 @@ SETUP = os.path.join(SKILLS, "loom-setup", "scripts")
 BENCH = os.path.join(SKILLS, "loom-benchmark", "scripts")
 sys.path.insert(0, BENCH)
 from bench_common import DOC_SIZES, doc, stream  # noqa: E402
+from shell_command import bash_script  # noqa: E402
 
 TOOLS = [{"type": "function", "function": {"name": "search", "description": "Search the web.",
           "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}]
@@ -118,8 +119,8 @@ def prior_depths(prior, kind, allowed):
 
 
 def serve(name, port, mem, card, env):
-    subprocess.run([os.path.join(SETUP, "stop.sh"), name], env=env, capture_output=True)
-    r = subprocess.run([os.path.join(SETUP, "serve.sh"), name, str(port), "amdgpu", str(mem), card], env=env, capture_output=True, text=True)
+    subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), name), env=env, capture_output=True)
+    r = subprocess.run(bash_script(os.path.join(SETUP, "serve.sh"), name, port, "amdgpu", mem, card), env=env, capture_output=True, text=True)
     if r.returncode:
         raise RuntimeError(f"serve {card}: {(r.stdout + r.stderr)[-400:]}")
 
@@ -183,7 +184,7 @@ def main():
             except Exception as e:  # noqa: BLE001  a failing candidate is reported and skipped
                 print(f"tune: {kind} depth {depth}: {e}", file=sys.stderr)
                 tps = 0.0
-            subprocess.run([os.path.join(SETUP, "stop.sh"), "tune"], env=env, capture_output=True)
+            subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
             row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2), "seconds": round(time.time() - t0)}
             print("tune:", json.dumps(row), flush=True)
             table.append(row)
@@ -217,7 +218,7 @@ def main():
             serve("tune", port, mem, p0, env)
             refs[kind] = os.path.join(pkg, "spec_ref.jsonl")
             spec_check.record(url, model_id, refs[kind])
-            subprocess.run([os.path.join(SETUP, "stop.sh"), "tune"], env=env, capture_output=True)
+            subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
         out = os.path.join(pkg, f"spec_d{depth}.jsonl")
         serve("tune", port, mem, os.path.join(pkg, f"model_d{depth}.json"), env)
         spec_check.record(url, model_id, out)
@@ -240,7 +241,7 @@ def main():
                 ok, why = concurrent_ok(f"http://127.0.0.1:{port}", model_id, chats[kind])
         except Exception as e:  # noqa: BLE001
             ok, why = False, str(e)[-300:]
-        subprocess.run([os.path.join(SETUP, "stop.sh"), "tune"], env=env, capture_output=True)
+        subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
         r["checked"] = "ok (exact, concurrent)" if ok else f"FAILED: {why}"
         print("tune:", json.dumps({"kind": kind, "depth": depth, "checked": r["checked"]}), flush=True)
         if ok:

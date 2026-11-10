@@ -47,6 +47,8 @@ if [ ! -s llamacpp_pick.json ]; then
   # The latest lemonade-sdk/llamacpp-rocm release always competes (pre-approved download, ~25 s):
   # new architectures need recent builds (no installed build knew `flint`).
   newest=$("$S/fetch_llamacpp.sh" "${LLAMACPP_HOME:-$HOME/llamacpp-rocm}" | tail -1) || newest=""
+  # SEARCH_ROOT uses colon-separated roots; normalize Windows drive paths first.
+  command -v cygpath >/dev/null && [ -n "$newest" ] && newest=$(cygpath -u "$newest")
   "$S/pick_llamacpp.sh" "$gguf" $((lport + 9)) "${SEARCH_ROOT:-$HOME}${newest:+:$newest}" || exit 1
 fi
 LLAMACPP_DIR=$("$T" -c "import json;r=json.load(open('llamacpp_pick.json'))['ranked'];print(r[0]['dir'] if r else '')" 2>/dev/null)

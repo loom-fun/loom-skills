@@ -1,8 +1,9 @@
 # Sourced by gates.sh, qualify.sh and finalize.sh: their shared arguments, paths and helpers.
 # Arguments: PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
-pkg=$(cd "$1" && pwd); url=$2; bench=$(mkdir -p "$4" && cd "$4" && pwd); lport=${5:-8130}
-gguf=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")   # absolute: the scripts cd into BENCH_DIR
-S=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); root=${LOOM_ROOT:-$HOME/loom}
+native_pwd() { pwd -W 2>/dev/null || pwd; }  # Native Windows Python cannot open /c/... paths in embedded code.
+pkg=$(cd "$1" && native_pwd); url=$2; bench=$(mkdir -p "$4" && cd "$4" && native_pwd); lport=${5:-8130}
+gguf=$(cd "$(dirname "$3")" && native_pwd)/$(basename "$3")   # absolute: the scripts cd into BENCH_DIR
+S=$(cd "$(dirname "${BASH_SOURCE[0]}")" && native_pwd); root=${LOOM_ROOT:-$HOME/loom}
 bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts; T=$bin/python   # Windows venvs use Scripts/
 export PYTHONDONTWRITEBYTECODE=1 LLAMACPP_STATE=${LLAMACPP_STATE:-$bench/llamacpp-state}
 model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
@@ -18,7 +19,22 @@ step() { echo "== $* ($(date +%T))"; }
 # line; loom_up starts that command again (same models, same --memory_bytes), updates serve.sh's
 # pid file and waits for registration. No-ops when no loom-serve owns the port (or without /proc).
 loom_port=${url##*:}; loom_port=${loom_port%%/*}
+loom_argv=()
 loom_down() {
+  if command -v cygpath >/dev/null; then  # Windows Git Bash: preserve the actual server argv.
+    local wpid cl
+    wpid=$(netstat -ano -p tcp | tr -d '\r' | awk -v p=":$loom_port" '$2 ~ p"$" && $4=="LISTENING" {print $5; exit}')
+    [ -n "$wpid" ] || return 0
+    cl=$(powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=$wpid').CommandLine" | tr -d '\r')
+    case "$cl" in *loom-serve*) ;; *) return 0;; esac
+    mapfile -d '' -t loom_argv < <(printf '%s' "$cl" | "$T" "$S/windows_argv.py")
+    [ ${#loom_argv[@]} -gt 0 ] || return 1
+    loom_cwd=$(dirname "$pkg"); loom_name=
+    echo "[one model at a time] stopping loom-serve pid $wpid on :$loom_port"
+    taskkill //PID "$wpid" //F >/dev/null 2>&1 || return 1
+    sleep 1
+    return 0
+  fi
   local pid; pid=$(ss -ltnpH "sport = :$loom_port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
   { [ -n "$pid" ] && [ "$(cat /proc/$pid/comm 2>/dev/null)" = loom-serve ]; } || return 0
   loom_cwd=$(readlink /proc/$pid/cwd); mapfile -d '' -t loom_argv < /proc/$pid/cmdline
@@ -47,7 +63,10 @@ loom_up() {
     case "$st" in *fail*) echo "loom-serve registration failed on restart: $st"; return 1;; esac
     if [ -n "$st" ] && [ "$st" != none ] && ! echo "$st" | tr ',' '\n' | grep -qv '^ready$'; then
       # the pid that owns the port (not the launching subshell's): stop.sh reads it from the pid file
-      pid=$(ss -ltnpH "sport = :$loom_port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); echo "$pid" > "$state/$name.pid"
+      if command -v ss >/dev/null; then
+        pid=$(ss -ltnpH "sport = :$loom_port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+        echo "$pid" > "$state/$name.pid"
+      fi
       echo "[one model at a time] loom-serve back on :$loom_port (pid $pid)"; loom_argv=(); return 0
     fi
     sleep 1

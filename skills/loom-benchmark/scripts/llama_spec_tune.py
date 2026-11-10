@@ -28,6 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "loom-port-llm", "starter", "draft"))
 sys.path.insert(0, HERE)
 from bench_common import stream  # noqa: E402
+from shell_command import bash_script  # noqa: E402
 from tune import WORK  # noqa: E402
 
 
@@ -70,7 +71,7 @@ def main():
     table, base, best = [], 0.0, ("none", 0, "", 0.0)
     for kind, n, args in cands:
         t0 = time.time()
-        r = subprocess.run([srv, gguf, port, "4", ctx, "unified"], env=dict(os.environ, LLAMA_SPEC=args), capture_output=True, text=True)
+        r = subprocess.run(bash_script(srv, gguf, port, "4", ctx, "unified"), env=dict(os.environ, LLAMA_SPEC=args), capture_output=True, text=True)
         tps, err = 0.0, None
         if r.returncode:
             err = (r.stdout + r.stderr).strip().splitlines()[-3:]
@@ -79,7 +80,7 @@ def main():
                 tps = measure(f"http://127.0.0.1:{port}", off)
             except Exception as e:  # noqa: BLE001
                 err = str(e)
-        subprocess.run([srv, "--stop", port], capture_output=True)
+        subprocess.run(bash_script(srv, "--stop", port), capture_output=True)
         row = {"kind": kind, "n_max": n, "decode_tps": round(tps, 2), "seconds": round(time.time() - t0)}
         if err:
             row["error"] = err

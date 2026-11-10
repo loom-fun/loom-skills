@@ -29,7 +29,7 @@ meta=$(curl -fsSL --retry 3 "${auth[@]}" "$api") || { echo "cannot reach the Git
 py=${PY:-python3}   # PY: an interpreter of your own (weaver passes its bundled one)
 read -r rtag url digest < <("$py" -c '
 import json, sys
-d = json.loads(sys.argv[1]); backend = sys.argv[4]
+d = json.load(sys.stdin); backend = sys.argv[4]
 if backend == "vulkan":   # llama-bNNNN-bin-ubuntu-vulkan-x64.tar.gz / llama-bNNNN-bin-win-vulkan-x64.zip
     kind, ext = ("ubuntu", "tar.gz") if sys.argv[2] == "ubuntu" else ("win", "zip")
     name = "llama-" + d["tag_name"] + "-bin-" + kind + "-vulkan-x64." + ext
@@ -37,7 +37,7 @@ if backend == "vulkan":   # llama-bNNNN-bin-ubuntu-vulkan-x64.tar.gz / llama-bNN
 else:
     want = f"-{sys.argv[2]}-rocm-{sys.argv[3]}-x64.zip"
     a = [x for x in d["assets"] if x["name"].endswith(want) and not x["name"].startswith("qualification")]
-print(d["tag_name"], a[0]["browser_download_url"] if a else "", (a[0].get("digest") or "").removeprefix("sha256:") if a else "")' "$meta" "$os" "$gfx" "$backend")
+print(d["tag_name"], a[0]["browser_download_url"] if a else "", (a[0].get("digest") or "").removeprefix("sha256:") if a else "")' - "$os" "$gfx" "$backend" <<< "$meta")
 [ -n "$url" ] || { echo "release $rtag has no $os $backend $gfx asset" >&2; exit 1; }
 dir=$dest/$rtag
 if [ ! -x "$dir/llama-server" ] && [ ! -f "$dir/llama-server.exe" ]; then
