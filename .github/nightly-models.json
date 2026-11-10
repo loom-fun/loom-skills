@@ -570,6 +570,17 @@
    "features": [
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
+   "slug": "qwen3.8-flash-next",
+   "memory_bytes": 97000000000,
+   "kit": "qwen4exp",
+   "llamacpp": "b1371",
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
   }
  ]
 }

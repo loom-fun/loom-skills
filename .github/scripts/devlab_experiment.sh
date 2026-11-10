@@ -11,6 +11,7 @@
 #    "variants": [{"name": "card"},                                   (the card's own programs, as published)
 #                 {"name": "x", "build": {"ENV": "value", ...},       (rebuild: build.py with these env vars;
 #                  "build_args": ["--draft-depth", "3"],                 build_args are extra build.py flags)
+#                  "env": {"SKIP_NEEDLE": "1"},                          (exported for the steps; also allowed at the top level)
 #                  "execution": {"draft_depth": 0},                    (model.json preset overrides)
 #                  "config": {"rope_theta": 10000},                     (generator config overrides for a rebuild:
 #                                                                         an injected bug the gates must catch)
@@ -39,12 +40,14 @@ q() { python3 -c "import json,sys; e=json.load(open('$exp')); v=next(v for v in 
 f() { q "print(v.get('$1', e.get('$1')) or '-')"; }
 repo=$(f card); mem=$(f memory_bytes); kit=$(f kit); tag=$(f llamacpp)
 steps=$(q "print(' '.join(v.get('steps') or e.get('steps') or ['consistency:20']))")
+# "env": {"SKIP_NEEDLE": "1"}: environment for the steps (gates.sh switches)
+eval "$(q "print(' '.join(f'export {k}={x!r}' for k, x in (v.get('env') or e.get('env') or {}).items()))")"
 echo "variant $name: $(q "print(json.dumps(v))")"
 
 cleanup() {
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
-  cp "$LOOM_SERVE_STATE"/*.log "$out/" 2>/dev/null
+  cp "$LOOM_SERVE_STATE"/*.log "$LLAMACPP_STATE"/*.log "$LLAMACPP_STATE"/*.mem "$out/" 2>/dev/null   # *.mem: MemAvailable/RssAnon of llama-server
   echo "devlab_experiment.sh: servers stopped"
 }
 trap cleanup EXIT
@@ -108,8 +111,8 @@ if [ "$(q "print('build' in v)")" = True ]; then
   export LOOM_KIT=$K
   # the card's own build settings (model id, depth, context, pool) unless the variant overrides them
   args=$("$T" -c "
-import json; m=json.load(open('$card/model.json')); c=json.load(open('$card/llm_config.json')); ex=m['presets']['chat']['execution']
-a=['--model-id', m['model']['id'], '--context', str(ex['context_capacity']), '--pool', str(ex['pool_capacity']), '--prefill', str(ex['prefill_capacity'])]
+import json; m=json.load(open('$card/model.json')); c=json.load(open('$card/llm_config.json')); ex=next(iter(m['presets'].values()))['execution']
+a=['--model-id', m['model']['id'], '--context', str(ex['context_capacity']), '--pool', str(ex.get('pool_capacity') or ex['context_capacity']), '--prefill', str(ex['prefill_capacity'])]
 d=c.get('draft') or {}
 a += (['--draft', d['kind'], '--draft-depth', str(d['depth'])] if d.get('kind') else [])
 print(' '.join(a))")
@@ -140,7 +143,7 @@ EOF
 fi
 "$T" - "$pkg/model.json" "$(q "print(json.dumps(v.get('execution') or {}))")" <<'EOF'
 import json, sys
-m = json.load(open(sys.argv[1])); ex = m["presets"]["chat"]["execution"]; ex.update(json.loads(sys.argv[2]))
+m = json.load(open(sys.argv[1])); ex = next(iter(m["presets"].values()))["execution"]; ex.update(json.loads(sys.argv[2]))
 json.dump(m, open(sys.argv[1], "w"), indent=1); print("execution", ex)
 EOF
 cp "$pkg/model.json" "$out/model.json"; sha256sum "$pkg"/program/*.loom > "$out/programs.sha256"

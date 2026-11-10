@@ -67,7 +67,7 @@ hostname > "$out/runner.txt"
 cleanup() {
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
-  cp "$LOOM_SERVE_STATE"/*.log "$LLAMACPP_STATE"/*.log "$out/" 2>/dev/null
+  cp "$LOOM_SERVE_STATE"/*.log "$LLAMACPP_STATE"/*.log "$LLAMACPP_STATE"/*.mem "$out/" 2>/dev/null   # *.mem: MemAvailable/RssAnon of llama-server
   echo "devlab_perf.sh: servers stopped"
 }
 trap cleanup EXIT
@@ -114,8 +114,8 @@ drafter=$("$T" -c "import json; print((json.load(open('$D/cfg.json')).get('draft
 cardid=$("$T" -c "import json; print(json.load(open('$card/model.json'))['model']['id'])")
 # the card's own build settings (model id, depth, context, pool)
 cardargs=$("$T" -c "
-import json; m=json.load(open('$card/model.json')); c=json.load(open('$card/llm_config.json')); ex=m['presets']['chat']['execution']
-a=['--context', str(ex['context_capacity']), '--pool', str(ex['pool_capacity']), '--prefill', str(ex['prefill_capacity'])]
+import json; m=json.load(open('$card/model.json')); c=json.load(open('$card/llm_config.json')); ex=next(iter(m['presets'].values()))['execution']
+a=['--context', str(ex['context_capacity']), '--pool', str(ex.get('pool_capacity') or ex['context_capacity']), '--prefill', str(ex['prefill_capacity'])]
 d=c.get('draft') or {}
 a += (['--draft', d['kind'], '--draft-depth', str(d['depth'])] if d.get('kind') else [])
 print(' '.join(a))")
@@ -179,7 +179,7 @@ if rules:
 EOF
   "$T" - "$pkg/model.json" "$(qv "$v" "print(json.dumps(v.get('execution') or {}))")" "$cardid-$v" <<'EOF'
 import json, sys
-m = json.load(open(sys.argv[1])); ex = m["presets"]["chat"]["execution"]; ex.update(json.loads(sys.argv[2]))
+m = json.load(open(sys.argv[1])); ex = next(iter(m["presets"].values()))["execution"]; ex.update(json.loads(sys.argv[2]))
 json.dump(m, open(sys.argv[1], "w"), indent=1)
 # a small-context copy with its own model id, for several packages in one loom-serve (ab steps)
 m["model"]["id"] = sys.argv[3]; ex["context_capacity"] = 16384; ex["pool_capacity"] = 32768
@@ -198,7 +198,7 @@ serve_alone() { # serve_alone VARIANT
 LSPEC=""
 llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n-max overridden), restarted on change
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
-  local spec; spec=$(q "print((j.get('llama_spec') or e.get('llama_spec') or '').replace('{drafter}', '$drafter'))")
+  local spec; spec=$(q "print((j['llama_spec'] if 'llama_spec' in j else e.get('llama_spec') or '').replace('{drafter}', '$drafter'))")
   [ -n "${1:-}" ] && spec=$(echo "$spec" | sed -E "s/--spec-draft-n-max [0-9]+/--spec-draft-n-max $1/")
   [[ $MODS == *nospec* ]] && spec=""   # @vulkan.nospec: no drafting
   local h; for h in $(echo "$spec" | grep -oE '\{hf:[^}]+\}' | sort -u); do   # {hf:OWNER/REPO/FILE}, fetched once per runner
@@ -267,7 +267,7 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] fo
       res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_$p1.txt')))");;
     llama)   # llama:N[:long|-][:N_MAX]
       llama_up "${p3:-}" || { res[$s]=ERROR; continue; }
-      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); lf=perf_llamacpp${bkt}_n$nm.jsonl
+      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}; lf=perf_llamacpp${bkt}_n$nm.jsonl
       step "llama.cpp$bkt n-max $nm perf x $p1 ${p2:-} (thinking $TH)"
       for i in $(seq 1 "$p1"); do
         (cd "$out" && "$T" "$B/perf.py" "$lurl" "llamacpp${bkt}-n$nm" --kind llama --no-campaign --thinking "$TH" --log "$lf" ${p2:+--long} | tail -1)
@@ -279,7 +279,7 @@ k='decode_tps_32k' if '${p2:-}' else 'decode_tps'
 print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
     llamac4)   # llamac4[:N_MAX]
       llama_up "${p1:-}" || { res[$s]=ERROR; continue; }
-      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+")
+      nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}   # 0: no drafting
       step "llama.cpp$bkt n-max $nm c4"
       for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$lurl" 4 --thinking "$TH" | tail -1 | tee -a "c4_llamacpp${bkt}_n$nm.txt"); done
       res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp$bkt n-max $nm c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_llamacpp${bkt}_n$nm.txt')))");;
