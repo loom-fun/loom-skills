@@ -54,6 +54,14 @@ class StreamTimingTests(unittest.TestCase):
         self.assertEqual(result["ttft"], 1.0)
         self.assertEqual(result["text"], "hello")
 
+    def test_tool_only_completion_does_not_gain_an_artificial_decode_rate(self):
+        result = self.run_stream([
+            {"choices": [{"delta": {"tool_calls": [{"function": {"name": "weather", "arguments": "{}"}}]}, "finish_reason": None}]},
+            {"choices": [{"delta": {}, "finish_reason": "tool_calls"}], "usage": {"completion_tokens": 17, "prompt_tokens": 42}},
+        ])
+        self.assertIsNone(result["ttft"])
+        self.assertIsNone(result["decode_tps"])
+
 
 if __name__ == "__main__":
     unittest.main()
