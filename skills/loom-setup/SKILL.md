@@ -76,8 +76,6 @@ Notes:
   | krea/Krea-2-Turbo | image | `image` or `image-int8` |
   | Qwen3-Embedding-0.6B | embedding (NPU) | `embedding` |
 
-  **Qwen3.8-Flash-Next (104 GiB) does not fit. Never serve it here.**
-
 ## 3. Serve
 
 ```bash
