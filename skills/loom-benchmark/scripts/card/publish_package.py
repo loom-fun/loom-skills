@@ -57,7 +57,10 @@ def cmd_prepare(a):
                 os.makedirs(os.path.dirname(os.path.join(out, r)), exist_ok=True)
                 shutil.copy2(os.path.join(root, f), os.path.join(out, r))
     card = json.load(open(os.path.join(out, "model.json"), encoding="utf-8"))
-    origins, roots = {}, {}
+    # A catalog package declares origins of its own (the checkpoint its tokenizer comes from, the quantized repo its
+    # weights come from) that its files name as @origin/file: they stay, and a weight file keeps the origin name
+    # its entry already uses. Only the revisions are pinned to the cache the files were validated from.
+    origins, roots, param_repos = dict(card.get("origins", {})), {}, set()
     for variant in card.get("variants", {}).values():
         for service in variant.get("services", {}).values():
             for pname, param in service.get("parameters", {}).items():
@@ -66,13 +69,16 @@ def cmd_prepare(a):
                     if src is None:
                         sys.exit(f"{entry['path']}: not a file of the Hugging Face cache; loom-fetch could not acquire it")
                     repo, rev, snap, fname = src
-                    name = "checkpoint" if repo == a.source else ("drafter" if pname in ("draft", "drafter") else pname)
-                    if name in origins and origins[name]["repository"] != repo:
+                    declared = re.match(r"@([^/]+)/", entry.get("origin", ""))
+                    declared = declared.group(1) if declared and origins.get(declared.group(1), {}).get("repository") == repo else None
+                    name = declared or ("checkpoint" if repo == a.source else ("drafter" if pname in ("draft", "drafter") else pname))
+                    if not declared and name in origins and origins[name]["repository"] != repo:
                         name = f"{name}_{len(origins)}"
-                    origins[name] = {"kind": "hf", "repository": repo, "revision": rev}
+                    origins[name] = {**origins.get(name, {}), "kind": "hf", "repository": repo, "revision": rev}
+                    param_repos.add(repo)
                     roots[name] = snap
                     entry["origin"] = f"@{name}/{fname}"
-    if a.source not in [o["repository"] for o in origins.values()]:
+    if a.source not in param_repos:
         sys.exit(f"no parameter file comes from {a.source}")
     card["origins"] = origins
     with open(os.path.join(out, "model.json"), "w", encoding="utf-8") as f:
