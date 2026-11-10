@@ -91,7 +91,7 @@ def cmd_prepare(a):
         if isinstance(d, dict) and isinstance(d.get(k), str):
             d[k] = os.path.basename(d[k])
     base(cfg, "gguf"); base(cfg.get("vision"), "mmproj")
-    for k in ("draft", "drafter", "assistant"):
+    for k in ("draft", "drafter", "assistant", "mtp"):
         base(cfg.get(k), "gguf")
     json.dump(cfg, open(cfgp, "w", encoding="utf-8"), indent=1)
     cmd = [a.loom_fetch, os.path.join(out, "model.json"), "--update-lock", "--all-variants", "--no-input", "--quiet",

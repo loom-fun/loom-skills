@@ -1,6 +1,6 @@
 #!/bin/bash
 # One command from a Hugging Face GGUF repo to a served, tested Loom package.
-# usage: [LOOM_ROOT=~/loom] port.sh ORG/REPO[:FILE.gguf] WORKDIR [PORT] [MEMORY_GIB] [MODEL_ID]
+# usage: [LOOM_ROOT=~/loom] [CATALOG=DIR|EXAMPLE] port.sh ORG/REPO[:FILE.gguf] WORKDIR [PORT] [MEMORY_GIB] [MODEL_ID]
 #   positional: PORT (default 8160), MEMORY_GIB (default auto, see build.py --memory-gib), e.g. port.sh org/repo ~/work/m 8260 40
 #   0. starts the end-to-end clock (WORKDIR/.e2e_start, unless it exists): qualify.sh sizes the
 #      optimization budget from it
@@ -13,6 +13,12 @@
 #      reference fills what inspect left open (cfg["reference"] records it; tune.py takes its drafting as a prior)
 #   3. build.py at the native context, fitted to MEMORY_GIB
 #   4. serve.sh (state in WORKDIR/state), kernel unit tests, smoke test (chat, thinking off, a tool call)
+# CATALOG=DIR|EXAMPLE: the programs are a hand-written catalog package (DIR holds catalog.json + the package; EXAMPLE
+#   names a reference kit that carries one, e.g. qwen4exp), not generated. Same stages, except: the GGUF files, their
+#   revision and the tokenizer come from catalog.json (ORG/REPO:FILE overrides the file; REPO "catalog" = its repo),
+#   no reference/vision/drafter lookup, build.py hands over to catalog.py, no generated kernel tests (the catalog's
+#   are its own), and the Loom SDK is the one catalog.json pins (loom-setup/scripts/ensure_sdk.sh).
+# WORKDIR/loom_root names the Loom install used (export it as LOOM_ROOT for qualify.sh, gates.sh, finalize.sh).
 # Prints PORT_RESULT {...} with the package, model id, context and memory_bytes; the server keeps
 # running (stop: LOOM_SERVE_STATE=WORKDIR/state stop.sh port). Exit codes: 2 download, 3 chat
 # template needs a hand-written block, 4 build/serve, 5 kernel tests, 6 smoke test.
@@ -23,14 +29,35 @@
 set -u
 spec=$1; work=$(mkdir -p "$2" && cd "$2" && pwd); port=${3:-8160}; mem_gib=${4:-auto}; model_id=${5:-}
 here=$(cd "$(dirname "$0")" && pwd); K=${KIT:-$here/starter}; S=$here/../loom-setup/scripts
-root=${LOOM_ROOT:-$HOME/loom}
-bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts
-T=$bin/python; venv=$root/.venv; hf=$venv/bin/hf; [ -x "$hf" ] || hf=$venv/Scripts/hf
+use_root() {   # the Loom install (SDK venv + tools venv) every later stage uses
+  root=$1; bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts
+  T=$bin/python; venv=$root/.venv; hf=$venv/bin/hf; [ -x "$hf" ] || hf=$venv/Scripts/hf
+}
+use_root "${LOOM_ROOT:-$HOME/loom}"
 export LOOM_SERVE_STATE=$work/state PYTHONDONTWRITEBYTECODE=1
 repo=${spec%%:*}; file=""; [ "$spec" != "$repo" ] && file=${spec#*:}
 cd "$work"
 [ -s .e2e_start ] || date +%s > .e2e_start
 step() { echo "== $* ($(date +%T))"; }
+# A catalog package (hand-written programs): CATALOG=DIR|EXAMPLE builds the kit around it; a resumed port finds it in KIT.
+if [ -n "${CATALOG:-}" ] && [ "${FROM:-}" != build ]; then
+  rm -rf kit
+  if [ -d "$here/reference/${CATALOG%-example}-example" ]; then "$here/reference/apply_example.sh" "$CATALOG" "$work/kit" | tail -1
+  else
+    "$here/reference/apply_example.sh" starter "$work/kit" | tail -1 && mkdir -p kit/catalog && cp -r "$CATALOG/." kit/catalog/ \
+      && python3 kit/kit_source.py write kit --skills-dir "$here/.." 2>/dev/null
+  fi
+  K=$work/kit; export LOOM_KIT=$K
+fi
+unset CATALOG   # catalog.py finds it in the kit
+catalog=""; [ -f "$K/catalog/catalog.json" ] && catalog=$K/catalog
+if [ -n "$catalog" ]; then
+  IFS='|' read -r crepo crev cfile ctok cextra < <(python3 -I "$K/catalog.py" source "$catalog")
+  [ "$repo" != catalog ] || repo=$crepo
+  [ -n "$file" ] || file=$cfile
+  use_root "$("$S/ensure_sdk.sh" "$root" "$catalog/catalog.json")" || { echo "STOP: the catalog package's SDK is not installed"; exit 4; }
+fi
+echo "$root" > loom_root
 ref=off; refpick=""   # 1b sets them (FROM=build keeps the reference cfg.json already records)
 
 # FROM=build: resume after hand-fixing cfg.json (exit 3): reuse WORKDIR/gguf, tok and cfg.json, run 3-6.
@@ -52,7 +79,7 @@ elif [ "${DRY_RUN:-0}" = 1 ]; then
   cached=$work/gguf/$(basename "$file")
 else
   # Into the shared HF cache (reused by later runs and by llama.cpp tools), symlinked into WORKDIR/gguf.
-  "$hf" download "$repo" "$file" > download.log 2>&1; echo "hf exit $?" >> download.log
+  "$hf" download "$repo" "$file" ${crev:+--revision "$crev"} > download.log 2>&1; echo "hf exit $?" >> download.log
   cached=$("$T" -I "$here/checkpoint_path.py" from-log download.log "$(basename "$file")") || exit 2
 fi
 [ -f "$cached" ] || { echo "download of $repo/$file failed (download.log):"; tail -5 download.log 2>/dev/null; exit 2; }
@@ -64,11 +91,21 @@ for pf in $("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import form
   if [ ! -f "$pc" ] && [ "${DRY_RUN:-0}" = 1 ]; then
     "$T" -I "$K/pick_gguf.py" "$repo" --file "$pf" --stub "gguf/$(basename "$pf")" || exit 2; continue
   elif [ ! -f "$pc" ]; then
-    "$hf" download "$repo" "$pf" >> download.log 2>&1
+    "$hf" download "$repo" "$pf" ${crev:+--revision "$crev"} >> download.log 2>&1
     pc=$("$T" -I "$here/checkpoint_path.py" from-log download.log "$(basename "$pf")") || exit 2
   fi
   [ -f "$pc" ] || { echo "download of $repo/$pf failed (download.log)"; exit 2; }
   "$T" -I "$here/checkpoint_path.py" link "$pc" "gguf/$(basename "$pf")" || exit 2
+done
+# A catalog package's other weight files (its MTP head), from the snapshot root the GGUF's path is relative to.
+for xf in ${cextra:-}; do
+  [ "${DRY_RUN:-0}" = 1 ] && continue
+  px=${cached%"$file"}$xf
+  if [ ! -f "$px" ]; then
+    "$hf" download "$repo" "$xf" ${crev:+--revision "$crev"} >> download.log 2>&1
+    px=$("$T" -I "$here/checkpoint_path.py" from-log download.log "$(basename "$xf")") || exit 2
+  fi
+  "$T" -I "$here/checkpoint_path.py" link "$px" "gguf/$(basename "$xf")" || exit 2
 done
 # Tokenizer: the base model named in the GGUF, else the repo name without -GGUF.
 tokrepos=$("$T" - "$gguf" "$repo" <<'EOF'
@@ -100,6 +137,7 @@ except Exception:
 print(" ".join(dict.fromkeys(out)))
 EOF
 )
+tokrepos="${ctok:-} $tokrepos"
 # A candidate must carry, with the GGUF's ids, the control and user-defined tokens (types 3, 4) its chat template uses:
 # the base model named in a fine-tune's GGUF can lack them (Mellum2 base: <|im_start|>/<|im_end|> are plain text there
 # and loom-serve finds no terminal marker; Qwen3-1.7B-Base: no <think>/<tool_response>, which Loom splits into pieces
@@ -135,7 +173,7 @@ rm -rf tok/cand tok/first.json
 
 # A published, gate-passing port of the same architecture (or one sharing building blocks) is the starting point:
 # its kit (reference example), its reviewed config, its chat block and its measured drafting choice. Category A only.
-ref=$(echo "${REFERENCE:-auto}" | tr 'A-Z' 'a-z'); refpick=""
+ref=$(echo "${REFERENCE:-auto}" | tr 'A-Z' 'a-z'); refpick=""; [ -z "$catalog" ] || ref=off
 case "$ref" in off|0|no|none) ref=off;; auto|on|1|yes) ;; *) refpick=${REFERENCE};; esac
 if [ "$ref" != off ]; then
   step "1b reference (category A loom-fun packages)"
@@ -203,7 +241,7 @@ fi  # FROM=build
 # encoder plan for, cfg.json gets a "vision" block and the package an image component. VISION=0 skips it;
 # MMPROJ=file picks a projector. An unsupported family prints the reason and the port stays text-only
 # (reference/vision.md: adding a family).
-if [ "${VISION:-1}" != 0 ] && ! "$T" -c "import json,sys; sys.exit(0 if json.load(open('cfg.json')).get('vision') else 1)"; then
+if [ -z "$catalog" ] && [ "${VISION:-1}" != 0 ] && ! "$T" -c "import json,sys; sys.exit(0 if json.load(open('cfg.json')).get('vision') else 1)"; then
   step "2b vision"
   HF=$hf "$T" "$K/vision/add_vision.py" cfg.json "$repo" ${MMPROJ:-} | tee vision.log | grep -v "^$"
 fi
@@ -212,7 +250,7 @@ fi
 # drafter published for the base model (found and validated here) is used; draft/tune.py later keeps whichever
 # decodes fastest, or none. SPEC=off disables it; DRAFTER_REPO=org/name[:file] picks a drafter.
 spec_off=$(echo "${SPEC:-on}" | tr 'A-Z' 'a-z')
-if [ "$spec_off" != off ] && [ "$spec_off" != 0 ] && ! "$T" -c "import json,sys; sys.exit(0 if json.load(open('cfg.json')).get('drafter') else 1)"; then
+if [ -z "$catalog" ] && [ "$spec_off" != off ] && [ "$spec_off" != 0 ] && ! "$T" -c "import json,sys; sys.exit(0 if json.load(open('cfg.json')).get('drafter') else 1)"; then
   step "2c drafter"
   "$T" "$K/draft/find_drafter.py" cfg.json "$repo" --download ${DRAFTER_REPO:+--repo "$DRAFTER_REPO"} > drafter.log 2>&1 || true
   grep "^DRAFTER_RESULT" drafter.log
@@ -233,9 +271,14 @@ step "4/6 serve"
 VENV=$venv "$S/serve.sh" port "$port" amdgpu "$mem" pkg/model.json || exit 4
 
 step "5/6 kernel unit tests"
+if [ -n "$catalog" ]; then
+  # No ktest.log: the card shows the kernel_tests gate as having no evidence here (the catalog's tests run in its own CI)
+  echo "skipped: a catalog package's kernel tests are the catalog's own (Bazel); there are none to generate"
+else
 "$T" -I "$K/make_kernel_tests.py" cfg.json ktest > ktest.log 2>&1 || { tail -5 ktest.log; echo "STOP: make_kernel_tests.py failed (ktest.log)"; exit 5; }
 VENV=$venv "$K/run_kernel_tests.sh" pkg ktest | tee ktest.log | tail -3
 grep -q "^FAIL\|Traceback" ktest.log && { echo "STOP: kernel tests failed (ktest.log); see the bring-up debugging order in SKILL.md"; exit 5; }
+fi
 vmm=$("$T" -c "import json; print((json.load(open('cfg.json')).get('vision') or {}).get('mmproj', ''))")
 if [ -n "$vmm" ]; then   # vision kernels vs NumPy, then the whole encoder vs ref_vit.py at a small size
   side=$("$T" -c "import sys; sys.path.insert(0, '$K/vision'); import encoder, preprocess as P; c = encoder.config('$vmm'); print(4 * c['patch'] * P.FAMILY[c['family']]['merge'])")
@@ -325,4 +368,4 @@ if [ "$draft" != "{}" ] && [ -n "$draft" ]; then
   "$T" "$SC" compare spec_target.jsonl spec_draft.jsonl | tail -3
   [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: drafting changed the output (spec_check); see starter/draft/README.md"; exit 6; }
 fi
-echo "PORT_RESULT $(printf '{"package": "%s", "model_id": "%s", "context": %s, "memory_bytes": %s, "port": %s, "gguf": "%s", "draft": %s}' "$work/pkg" "$model_id" "${ctx:-0}" "$mem" "$port" "$gguf" "$("$T" -c "import json; print(json.dumps(json.load(open('pkg/llm_config.json')).get('draft')))")")"
+echo "PORT_RESULT $(printf '{"package": "%s", "model_id": "%s", "context": %s, "memory_bytes": %s, "port": %s, "gguf": "%s", "loom_root": "%s", "draft": %s}' "$work/pkg" "$model_id" "${ctx:-0}" "$mem" "$port" "$gguf" "$root" "$("$T" -c "import json; print(json.dumps(json.load(open('pkg/llm_config.json')).get('draft')))")")"

@@ -105,8 +105,11 @@ if [ -n "$build" ] && [ -s "$bench/perf_log.jsonl" ]; then
   "$T" "$B/card/make_info.py" perf --perf-log "$bench/perf_log.jsonl" --baseline-version "llamacpp-rocm/$build" \
     ${args:+--baseline-args "$args"} "${c4[@]}" "${src[@]}" -o "$out/ev_perf.json" || echo "WARNING: no perf evidence"
 fi
-"$T" "$B/card/make_info.py" gates "$bench/gates.json" "$W/ktest.log" --time "$(date -u -r "$W/ktest.log" +%FT%T)" "${src[@]}" -o "$out/ev_gates.json" || echo "WARNING: no gate evidence"
+gf=("$bench/gates.json"); kt=$bench/gates.json
+[ -f "$W/ktest.log" ] && { gf+=("$W/ktest.log"); kt=$W/ktest.log; }   # a catalog package has no generated kernel tests
+"$T" "$B/card/make_info.py" gates "${gf[@]}" --time "$(date -u -r "$kt" +%FT%T)" "${src[@]}" -o "$out/ev_gates.json" || echo "WARNING: no gate evidence"
 source_repo=${spec%%:*}
+[ "$source_repo" != catalog ] || source_repo=$(python3 -I "$W/kit/catalog.py" source "$W/kit/catalog" | cut -d"|" -f1)   # CATALOG=... port.sh catalog
 "$T" "$here/skills/loom-benchmark/scripts/card/publish_package.py" prepare "$W/pkg" "$out/publish" --source "$source_repo" \
   --loom-fetch "$root/.venv/bin/loom-fetch" > "$out/publish.log" 2>&1 || { tail "$out/publish.log"; echo "WARNING: publish prepare failed"; }
 ph done

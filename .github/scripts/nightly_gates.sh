@@ -86,7 +86,7 @@ def fix(d, k):
         if os.path.exists(q):
             d[k] = q
 fix(c, "gguf"); fix(c.get("vision"), "mmproj")
-for k in ("draft", "drafter", "assistant"):
+for k in ("draft", "drafter", "assistant", "mtp"):
     fix(c.get(k), "gguf")
 json.dump(c, open(f, "w"), indent=1)
 print("model", c["model_id"], "gguf", c["gguf"], "vision", bool(c.get("vision")), "draft", bool(c.get("draft")),

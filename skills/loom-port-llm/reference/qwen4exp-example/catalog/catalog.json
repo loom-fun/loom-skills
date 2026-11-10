@@ -1,0 +1,34 @@
+{
+ "source": {
+  "repo": "unsloth/Qwen3.8-Flash-Next-GGUF",
+  "revision": "766911a6b7369840a91dbcd95f9f997acaab6cd6",
+  "file": "UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+  "extra": [
+   "mtp-Qwen3.8-Flash-Next-Q8_0.gguf"
+  ]
+ },
+ "variant": "ud-q4-k-xl",
+ "preset": "chat",
+ "mtp_variant": "ud-q4-k-xl-mtp",
+ "mtp_preset": "mtp",
+ "memory": {
+  "resident_weights_bytes": 82869011456,
+  "mtp_weights_bytes": 2775621632,
+  "kv_bytes_per_position": 25344,
+  "mtp_kv_bytes_per_position": 2116,
+  "recurrent_bytes_per_row": 115651840,
+  "workspace_gib": 4,
+  "over_cap": true,
+  "note": "the 26.8 GiB per_layer_token_embd table is read on demand (parameters.gather), not resident"
+ },
+ "sdk": {
+  "hrx_loom": "0.2.0.dev0",
+  "source": "ci",
+  "artifact_id": 13628412621,
+  "hrx_system_sha": "314238a81c0fadb123e0256e756f852f448c1d40",
+  "wheel_sha256": "9dc1e352f51e8020ecbd97a543e9561671835e5cd2382a22f85da069025e5142",
+  "expires": "2026-11-22"
+ },
+ "tokenizer": "Qwen/Qwen3.8-Flash-Next",
+ "context": 262144
+}
