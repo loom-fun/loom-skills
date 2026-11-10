@@ -16,31 +16,37 @@ The skills were developed and verified on an AMD Ryzen AI Max+ 395 "Strix Halo"
 
 ## Install
 
-Clone the repository, then install the complete suite (Python 3.12+, no Node or symlinks needed):
+Install the complete suite with [the skills CLI](https://github.com/vercel-labs/skills) (requires Node.js):
+
+```bash
+npx skills add loom-fun/loom-skills --skill '*'
+```
+
+Choose Claude Code, Codex or Pi when prompted. This installs into the current
+project; add `-g` for all projects. Install all nine skills together: they share
+sibling scripts. Start a fresh agent session afterward.
+
+| Agent | Project skill directory | Invocation |
+|---|---|---|
+| Claude Code | `.claude/skills` | `/loom` |
+| Codex | `.agents/skills` | `$loom` |
+| Pi | `.agents/skills` | `/skill:loom` |
+
+Update with `npx skills update`; remove with `npx skills remove`.
+
+**Without Node.js:** use the Python 3.12+ fallback (standard library only):
 
 ```bash
 git clone https://github.com/loom-fun/loom-skills
 cd loom-skills
-python3 scripts/install_skills.py                 # all three agents
-# or: ./install.sh --agent codex                  # claude | codex | pi | all
+python3 scripts/install_skills.py
 # Windows PowerShell: python scripts/install_skills.py
 ```
 
-| Agent | User skill directory | Explicit invocation |
-|---|---|---|
-| Claude Code | `~/.claude/skills` | `/loom` |
-| Codex | `~/.agents/skills` | `$loom` |
-| Pi | `~/.agents/skills` (shared with Codex) | `/skill:loom` |
-
-Start a fresh agent session after installation. All agents can also select the skills from a plain-language request.
-Use `--dest PATH` for a custom skill directory. Native roots can be overridden with
-`CLAUDE_SKILLS_DIR`, `AGENTS_SKILLS_DIR` and `PI_SKILLS_DIR`. Install all nine skills together:
-they share scripts through sibling paths. Copies avoid Windows symlink requirements.
-
-Update by pulling this checkout and running the same installer. Remove with
-`python3 scripts/install_skills.py --uninstall` (using the same agent/destination options).
-The installer refuses to overwrite or remove unmanaged or locally modified skills. For an older
-copy install, move the existing Loom skill directories aside first and preserve your edits.
+The fallback installs for all three agents in their user skill directories.
+Use `--agent codex` to target one agent, `--dest PATH` for a custom directory,
+and `--uninstall` to remove unchanged copies. It preserves unmanaged and locally
+modified skills.
 
 **Claude Code plugin.** The existing plugin and automatic skill-directory substitution remain supported:
 
@@ -49,7 +55,7 @@ copy install, move the existing Loom skill directories aside first and preserve 
 /plugin install loom@loom
 ```
 
-Use either the plugin or the copy install in Claude to avoid duplicate skills.
+Use either the plugin or a skills install in Claude to avoid duplicates.
 Update the plugin with `claude plugin marketplace update loom && claude plugin update loom@loom`.
 Private repositories require read access and working Git credentials for either installation method.
 
@@ -127,7 +133,7 @@ cover adds the hand port; `loom-port-llm` has a playbook for it (llama.cpp's own
 graph and intermediate tensors via `llama_trace.py`, numpy node-by-node checks), and the
 optimization budget shrinks to fit.
 
-## Requirements
+## Runtime requirements
 
 - Linux or Windows 11 (Git Bash), and an AMD GPU (ROCm-class; developed on gfx1151).
   Windows was verified end to end on Strix Halo with Qwen3-0.6B; see the `loom` skill's
