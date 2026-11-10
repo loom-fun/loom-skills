@@ -169,18 +169,11 @@ Subagents are optional; serial execution preserves the same correctness gates.
 ## Contributing
 
 ```bash
-python3 -m pip install -r tests/requirements.txt
 python3 -m unittest discover -s tests -v
 ```
 
-These CPU checks cover native installation profiles, update/removal ownership, paths with spaces,
-and bundled/sibling resource resolution. CI runs them on Linux and Windows. They do not prove model
-porting quality across agents: use [the cross-agent acceptance procedure](docs/agent-compatibility.md)
-for fresh-session smoke tests and full Loom trials, and record which agents actually passed.
-
-To try Claude's plugin from a checkout: `claude --plugin-dir /path/to/loom-skills`;
-validate its manifests with `claude plugin validate .`. For Codex or Pi, copy the suite into a
-scratch project's `.agents/skills` with `--dest` and launch the agent in that project.
+CI runs these regressions on Linux and Windows. See [compatibility checks](docs/agent-compatibility.md)
+for fresh-agent smoke tests and GPU trials.
 
 ## License
 

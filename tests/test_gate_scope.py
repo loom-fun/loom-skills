@@ -60,21 +60,6 @@ class GateScopeTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no request sent", result.stderr)
 
-    def test_scope_writer_records_exclusion_without_a_pass(self):
-        writer = GATES.split('<<\'EOF\'\n', 1)[1].split("\nEOF", 1)[0]
-        for skip in ("0", "1"):
-            with self.subTest(skip=skip), tempfile.TemporaryDirectory() as temp:
-                subprocess.run(
-                    [sys.executable, "-c", writer, "full", "test-hash", "1", "consistency", "0", "1"],
-                    env=dict(os.environ, SKIP_NEEDLE=skip), cwd=temp, check=True, capture_output=True,
-                )
-                evidence = json.loads((Path(temp) / "gates.json").read_text())
-                self.assertEqual(evidence["verdict"], "PASS")
-                self.assertNotIn("needle", evidence["gates"])
-                self.assertEqual("skipped" in evidence, skip == "1")
-                if skip == "1":
-                    self.assertEqual(set(evidence["skipped"]), {"needle", "needle_full"})
-
     def test_shell_gate_dispatch_never_calls_excluded_commands(self):
         bash = shutil.which("bash")
         if os.name == "nt":

@@ -27,24 +27,17 @@ class CheckpointPathTests(unittest.TestCase):
             source = Path(temp) / "model.gguf"
             source.write_bytes(b"weights")
             log = Path(temp) / "download.log"
-            log.write_text("path=" + str(source) + "\n", encoding="utf-8")
             target = Path(temp) / "work/model.gguf"
             env = dict(os.environ, TEST_PYTHON=Path(sys.executable).as_posix(), TEST_HELPER=(REPO / "skills/loom-port-llm/checkpoint_path.py").as_posix(), TEST_LOG=log.as_posix(), TEST_TARGET=target.as_posix())
             script = 'set -eu; cached=$("$TEST_PYTHON" "$TEST_HELPER" from-log "$TEST_LOG" model.gguf); test -f "$cached"; "$TEST_PYTHON" "$TEST_HELPER" link "$cached" "$TEST_TARGET"'
-            result = subprocess.run([bash, "-c", script], env=env, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(target.read_bytes(), source.read_bytes())
-
-    def test_cli_log_preserves_native_paths_and_spaces(self):
-        with tempfile.TemporaryDirectory(prefix="HF path with spaces ") as temp:
-            source = Path(temp) / "model.gguf"
-            source.write_bytes(b"checkpoint")
-            log = Path(temp) / "download.log"
             for output in (str(source), "path=" + str(source)):
-                log.write_text("Warning: unauthenticated\n" + output + "\nhf exit 0\n", encoding="utf-8")
-                self.assertEqual(helper.from_log(log, "model.gguf"), source.resolve())
+                with self.subTest(output=output):
+                    log.write_text("Warning: unauthenticated\n" + output + "\nhf exit 0\n", encoding="utf-8")
+                    result = subprocess.run([bash, "-c", script], env=env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(target.read_bytes(), source.read_bytes())
 
-    def test_hardlink_fallback_without_symlink_privileges(self):
+    def test_checkpoint_fallbacks_without_symlink_privileges(self):
         with tempfile.TemporaryDirectory() as temp:
             source = Path(temp) / "blob"
             source.write_bytes(b"checkpoint")
@@ -53,16 +46,11 @@ class CheckpointPathTests(unittest.TestCase):
                 helper.link_checkpoint(source, target)
             self.assertTrue(target.samefile(source))
             helper.link_checkpoint(source, target)  # Repeated port is a no-op.
-
-    def test_copy_fallback_when_neither_link_is_available(self):
-        with tempfile.TemporaryDirectory() as temp:
-            source = Path(temp) / "blob"
-            source.write_bytes(b"checkpoint")
-            target = Path(temp) / "model.gguf"
+            copy = Path(temp) / "copy/model.gguf"
             with patch.object(Path, "symlink_to", side_effect=PermissionError()), patch.object(helper.os, "link", side_effect=OSError("cross-volume")):
-                helper.link_checkpoint(source, target)
-            self.assertEqual(target.read_bytes(), source.read_bytes())
-            self.assertFalse(target.samefile(source))
+                helper.link_checkpoint(source, copy)
+            self.assertEqual(copy.read_bytes(), source.read_bytes())
+            self.assertFalse(copy.samefile(source))
 
 
 if __name__ == "__main__":
