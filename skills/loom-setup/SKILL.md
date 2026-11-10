@@ -48,6 +48,17 @@ Facts:
   2259's CI (artifact 12623044407 at the time): `VENV_NAME=.venv-npu install_loom.sh ~/loom
   ci:12623044407`. If that artifact has expired, look for a newer build whose NPU path compiles.
 
+### SDK pins (a package that needs another hrx-loom than the default)
+
+A package whose programs need a newer SDK than PyPI 0.1.0 carries `"sdk": {hrx_loom, source, artifact_id, hrx_system_sha,
+wheel_sha256, expires}` in its `llm_config.json` (a catalog package: from its `catalog.json`). Every script that installs
+Loom for a package calls `scripts/ensure_sdk.sh ROOT llm_config.json`, which prints the root to use: ROOT when it already is
+that wheel, else `ROOT-<artifact id>` (installed from the pinned CI artifact), so pinned and default SDKs coexist.
+`LOOM_VERSION` set explicitly overrides the pin. **CI artifacts expire (~90 days; `sdk.expires`)**, and an expired pin makes
+`ensure_sdk.sh` fail. Refresh it before then: `install_loom.sh ROOT-new ci-latest` (or `ci:ID`), rerun the gates on that SDK, then
+`python3 scripts/sdk_pin.py stamp ROOT-new FILE` for the kit's `catalog.json` and the published card's `llm_config.json`
+(republish the card; the nightly reads the pin from the card). A PyPI release, once one has the features, replaces the pin.
+
 ## 2. Fetch a catalog model
 
 ```bash

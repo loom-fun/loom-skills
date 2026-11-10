@@ -73,7 +73,9 @@ LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> "${LOOM_SKILL_DIR}/../loom-benchmark
 
 **Split GGUFs** (`NAME-00001-of-0000N.gguf`): pass the first part; port.sh fetches and links every part; inspect, build
 and the kernel tests read them all, and the package lists each as a parameter file. A model whose weights need more
-than 60 % of RAM: `LOOM_MEMORY_CAP_GIB=N` sets the memory cap (build.py, pick_gguf.py) (a DevLab port job: `"env": {"LOOM_MEMORY_CAP_GIB": N}`).
+than 60 % of RAM: `LOOM_MEMORY_CAP_GIB=N` sets the memory cap (build.py, pick_gguf.py) (a DevLab port job: `"env": {"LOOM_MEMORY_CAP_GIB": N}`);
+a load above the cap must also pass `loom-setup/scripts/memcheck.sh` (MemAvailable ≥ budget + 16 GiB) when it is served.
+Programs hand-written in the hrx-loom catalog: "Catalog packages" below.
 
 `DRY_RUN=1 port.sh ...` plans a port on the CPU in under a minute: stages 1-2 only, an uncached GGUF read as a
 header-only sparse stub (nothing downloaded), then `DRY_RUN_RESULT {...}` (architecture, kit, reference, inspect).
@@ -105,6 +107,31 @@ Every port and every optimization starts by looking for a published package that
 - A reference saves time; it never lowers the bar: the derived port runs the same kernel tests and gates.
 - `find_reference.py fetch REPO DIR` gets its package (no weights) to read or diff; `show` prints what an
   optimization should start from.
+
+## Catalog packages (hand-written programs: `CATALOG=`)
+
+When ROCm/hrx-loom-library already has a package for an architecture the starter cannot generate (qwen4exp:
+hyper-connections, per-layer-embedding hash table, sparse indexed attention), port it from that package instead of
+writing a kit. `reference/qwen4exp-example` is one: `catalog/catalog.json` + the (adapted) package files.
+```bash
+CATALOG=qwen4exp "${LOOM_SKILL_DIR}/port.sh" catalog ~/work/fn 8160 auto <MODEL_ID>   # or CATALOG=DIR (catalog.json + the package)
+export LOOM_ROOT=$(cat ~/work/fn/loom_root)   # the pinned SDK's root, for qualify.sh / gates.sh / finalize.sh
+```
+Same stages and outputs as any port (`pkg/` with `model.json` cut to one variant and preset, `llm_config.json`, `cfg.json`,
+`model_target.json` for the draft-off twin), so qualify, gates, perf, card, `publish_package.py prepare` and the
+nightly list work unchanged. What differs (`starter/catalog.py`, `catalog.json`'s keys are documented there):
+- **Weights** (repo, revision, split parts, the MTP head) and the tokenizer repo come from `catalog.json`; the package keeps
+  the catalog's `@origin` names, which `prepare` preserves (it only pins the revisions).
+- **SDK pin**: `catalog.json` `sdk` (hrx-loom wheel) goes to `llm_config.json`; `port.sh`, `port_e2e.sh`, the nightly and
+  DevLab scripts install it with `loom-setup/scripts/ensure_sdk.sh` next to the default root (loom-setup "SDK pins").
+- **Memory**: the budget is the package's *resident* set (`memory.resident_weights_bytes`, KV, recurrent rows, workspace),
+  not the GGUF size; above the 60 % default it needs `memory.over_cap` (explicit, with a note) and `memcheck.sh` headroom.
+  llama.cpp keeps `per_layer_token_embd` on the CPU by itself (`llamacpp_server.sh` forces nothing onto the GPU).
+- **No generated kernel tests** (the catalog's run in its CI): the card's `kernel_tests` row says "no evidence". Drafting is the MTP
+  head or none (`tune.py` measures both). No reference lookup, vision or DFlash/n-gram drafter.
+- **Rebuilding variants** (`devlab-perf` `build:`/`ref:` variants, `devlab-experiment`) cannot regenerate programs: use the `card` variant.
+- `inspect_gguf.py` prints starter-coverage warnings for qwen4exp (arch unknown, `q5_1`, head_dim); a NOTE says they do not
+  apply. Use it when the first thing needed is a package, not a kernel set; a new kit (below) only when none exists.
 
 ## New architecture (port.sh exit 3 with "no kernels", or a model the starter doesn't cover)
 
