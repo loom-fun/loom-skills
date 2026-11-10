@@ -24,6 +24,7 @@
 # template needs a hand-written block, 4 build/serve, 5 kernel tests, 6 smoke test.
 # DRY_RUN=1: stages 1-2 only, CPU, no weights (an uncached GGUF is a header-only sparse stub): which reference and kit a
 # port would start from and whether inspect passes; prints DRY_RUN_RESULT {...}.
+# STOP_AFTER=build: stages 1-3 (no serve, no GPU): the package is built, PORT_RESULT is printed, exit 0.
 # Then run loom-benchmark/scripts/qualify.sh (or gates.sh). After hand-fixing cfg.json (exit 3), resume
 # with FROM=build port.sh ORG/REPO WORKDIR [PORT] [MEMORY_GIB] [MODEL_ID] (stages 3-6; KIT=DIR uses your kit copy).
 set -u
@@ -265,6 +266,7 @@ step "3/6 build"
 [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: build.py failed (build.log)"; exit 4; }
 mem=$(grep -o -- "--memory_bytes=[0-9]*" build.log | cut -d= -f2)
 ctx=$(grep -o "^context [0-9]*" build.log | cut -d' ' -f2)
+if [ "${STOP_AFTER:-}" = build ]; then echo "PORT_RESULT {\"package\": \"$work/pkg\", \"model_id\": \"$model_id\", \"context\": ${ctx:-0}, \"memory_bytes\": ${mem:-0}, \"stopped_after\": \"build\"}"; exit 0; fi
 
 step "4/6 serve"
 "$S/stop.sh" port >/dev/null 2>&1

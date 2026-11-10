@@ -1,0 +1,28 @@
+// Pre-epoch stage for on-demand PLE rows. Computes the hash row IDs, publishes
+// the chronological token history (exactly once per epoch, as the epoch body
+// used to), and emits parameters.gather descriptors for the control VM. The
+// epoch body no longer binds per_layer_token_embd.weight.
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+kernel.decl @flash_next_map_tokens(%neural_enabled: i1) launch(%epoch: buffer, %mapping: buffer)
+
+command.decl @flash_next_ple_hash(%history_origin: offset) launch(%span: buffer, %mapping: buffer, %origins: buffer, %tokens: buffer, %arena: buffer, %rows: buffer)
+
+kernel.decl @flash_next_ple_descriptors() launch(%span_arg: buffer, %ids_arg: buffer, %arena_arg: buffer)
+
+command.def public @flash_next_ple_stage() launch(%residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer) {
+  %neural_enabled = scalar.constant true : i1
+  %tokens = config.get @flash_next.token_count : index
+  %mapping_stride = index.constant 16 : offset
+  %mapping_bytes = index.scale %tokens, %mapping_stride : index, offset -> offset
+  %mapping = buffer.alloca<global> align(16) %mapping_bytes : buffer
+  kernel.launch @flash_next_map_tokens[%neural_enabled](%epoch, %mapping) : [i1](buffer, buffer)
+  %id_stride = index.constant 64 : offset
+  %id_bytes = index.scale %tokens, %id_stride : index, offset -> offset
+  %ids = buffer.alloca<global> align(64) %id_bytes : buffer
+  %token_history = index.constant 115458048 : offset
+  command.launch @flash_next_ple_hash[%token_history](%epoch, %mapping, %rows, %input_tokens, %state, %ids) : [offset](buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @flash_next_ple_descriptors(%epoch, %ids, %residual) : (buffer, buffer, buffer)
+  command.return
+}

@@ -1,0 +1,10 @@
+// Flash-Next ple lookup command composition.
+// Rows are gathered on demand from the checkpoint into the staging region of
+// the residual buffer (see flash_next_ple_stage); no resident table binding.
+
+kernel.decl @flash_next_ple_gather_lookup_iq4() launch(%span_arg: buffer, %staging_arg: buffer, %output_arg: buffer)
+
+command.def public @flash_next_ple_lookup() launch(%span: buffer, %staging: buffer, %output: buffer) {
+  kernel.launch @flash_next_ple_gather_lookup_iq4(%span, %staging, %output) : (buffer, buffer, buffer)
+  command.return
+}

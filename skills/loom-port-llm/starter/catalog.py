@@ -13,6 +13,7 @@ catalog.json (schema below; every key optional except memory and source):
    "variant": "ud-q4-k-xl", "preset": "chat",      # the target-only variant and preset to serve
    "mtp_variant": "ud-q4-k-xl-mtp", "mtp_preset": "mtp",   # with the MTP head; its depth is the preset's draft_depth
    "context": 262144,                              # execution.context_capacity (default: the GGUF's native context)
+   "prefill_capacity": 4096,                       # execution.prefill_capacity (default: the catalog preset's)
    "memory": {"resident_weights_bytes": N,         # what the package keeps resident (its own number: the PLE table
               "mtp_weights_bytes": N,              #   is read on demand, not resident)
               "kv_bytes_per_position": N, "mtp_kv_bytes_per_position": N, "recurrent_bytes_per_row": N,
@@ -127,6 +128,8 @@ def build(a, cfg, cdir, tokenizer):
         card["presets"][pname]["memory"] = {"weights_bytes": resident, "workload": mem.get("note") or "resident parameter bank"}
     if a.prefill:
         ex["prefill_capacity"] = a.prefill
+    elif cat.get("prefill_capacity"):   # catalog.json's own chunk size (a DevLab-sized staging budget)
+        ex["prefill_capacity"] = cat["prefill_capacity"]
     elif cfg.get("prefill_capacity"):
         ex["prefill_capacity"] = cfg["prefill_capacity"]
     if a.pool or "pool_capacity" in ex:

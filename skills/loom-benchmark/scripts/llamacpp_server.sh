@@ -29,6 +29,8 @@ listeners() { if command -v ss >/dev/null; then ss -ltnp | grep ":$port "; else 
 if curl -s -m 2 localhost:$port/health >/dev/null 2>&1 || listeners >/dev/null; then
   echo "port $port is busy (another llama-server or loom-serve?)"; listeners || true; exit 1
 fi
+# The size is the whole GGUF (all split parts): llama.cpp b1371 keeps qwen4exp's 27 GiB per_layer_token_embd in the CPU
+# buffer and copies it into anonymous host RAM (GTT ~78 GiB + ~27 GiB anon = the GGUF size), so GTT-only accounting is wrong.
 # Weights above the memory cap (a model the default budget does not cover) need MemAvailable headroom too.
 size=$(python3 "$(dirname "$0")/../../loom-port-llm/starter/formats.py" size "$gguf" 2>/dev/null || echo 0)
 "$(dirname "$0")/../../loom-setup/scripts/memcheck.sh" "${size:-0}" "llama-server on $(basename "$gguf")" || exit 1
@@ -66,6 +68,9 @@ args=(-ngl 99 -cram 0 "${mm[@]}" "${spec[@]}" "${ctxarg[@]}" -np $np)
 if [ -n "${LLAMACPP_ARGS_FILE:-}" ]; then echo "${args[*]}" > "$LLAMACPP_ARGS_FILE"; fi
 nohup $exe -m "$gguf" "${args[@]}" --port $port --host 127.0.0.1 > $state/llamacpp-$port.log 2>&1 &
 echo $! > $state/llamacpp-$port.pid
+# MemAvailable every 10 s while the server lives (state/llamacpp-PORT.mem): the host-RAM copy shows up here, not in GTT
+( p=$(cat $state/llamacpp-$port.pid); while kill -0 $p 2>/dev/null; do
+    echo "$(date +%T) MemAvailable_GiB $(awk '/^MemAvailable/{printf "%.1f", $2/1048576}' /proc/meminfo 2>/dev/null) RssAnon_GiB $(awk '/^RssAnon/{printf "%.1f", $2/1048576}' /proc/$p/status 2>/dev/null)"; sleep 10; done ) >> $state/llamacpp-$port.mem 2>/dev/null &
 for i in $(seq 300); do
   curl -s localhost:$port/health | grep -q ok && { echo "READY llama.cpp $($exe --version 2>&1 | grep -m1 version) on :$port (pid $(cat $state/llamacpp-$port.pid))"; exit 0; }
   kill -0 $(cat $state/llamacpp-$port.pid) 2>/dev/null || { echo "llama-server died:"; tail -20 $state/llamacpp-$port.log; exit 1; }

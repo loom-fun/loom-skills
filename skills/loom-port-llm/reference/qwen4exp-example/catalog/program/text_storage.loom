@@ -1,0 +1,173 @@
+// Control storage keeps the ten-word stage header and resident sampling
+// directory at stable offsets. A cold layout recipe precedes the upload table.
+// Growth changes capacity without declaring stages or touching parameters.
+// Header fields are isolated prefill/decode, shape count, ordinary proposal,
+// draft kind, ordinary/mixed target, mixed proposal, and ordinary/mixed warm.
+
+// Writes one of eleven {bytes, alignment, initial_zero_bytes} bootstrap
+// records. Each requests 256-byte alignment; sizes and zeroing extents come
+// from the caller. Only the selected record changes. Device
+// allocations and their completion frontiers remain with the materializer.
+func.def public @qwen38.allocation(%records: buffer, %slot: index, %bytes: i64, %initial_zero_bytes: i64) {
+  %origin = index.constant 0 : offset
+  %bounded_slot = index.assume %slot [range(%slot, 0, 10)] : index
+  %view = buffer.view %records[%origin] : buffer -> view<11x3xi64>
+  %alignment = scalar.constant 256 : i64
+  view.store %bytes, %view[%bounded_slot, 0] : i64, view<11x3xi64>
+  view.store %alignment, %view[%bounded_slot, 1] : i64, view<11x3xi64>
+  view.store %initial_zero_bytes, %view[%bounded_slot, 2] : i64, view<11x3xi64>
+  func.return
+}
+
+// Writes one {byte_offset, byte_length} private arena view. Four views per
+// resident appear in control/attention/input/progress order. Recurrent slots
+// have a separate geometry record. The caller supplies validated row/slot
+// indices and computed byte extents; all other records remain untouched.
+func.def public @qwen38.row_view(%records: buffer, %row_count: index, %row: index, %slot: index, %offset: i64, %length: i64) {
+  %origin = index.constant 0 : offset
+  %bounded_row = index.assume %row [range(%row, 0, 2147483647), lt(%row, %row_count)] : index
+  %bounded_slot = index.assume %slot [range(%slot, 0, 3)] : index
+  %view = buffer.view %records[%origin] : buffer -> view<[%row_count]x4x2xi64>
+  view.store %offset, %view[%bounded_row, %bounded_slot, 0] : i64, view<[%row_count]x4x2xi64>
+  view.store %length, %view[%bounded_row, %bounded_slot, 1] : i64, view<[%row_count]x4x2xi64>
+  func.return
+}
+
+// Packet storage covers isolated prefill and every selected packed shape,
+// rounded upward to an even capacity. Shapes are validated
+// {token capacity, span capacity} i64 pairs; only the first
+// shape_count records participate. Span capacities and resident counts do
+// not determine packet storage. The caller supplies positive token capacities.
+func.def public @qwen38.packet_capacity(%shapes: buffer, %shape_count: i64, %prefill: i64) -> (i64) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %count_word = scalar.assume %shape_count [range(%shape_count, 0, 2147483647)] : i64
+  %count_value = index.cast %count_word : i64 to index
+  %storage_bytes = buffer.length %shapes
+  %storage_length = index.cast %storage_bytes : offset to index
+  %record_length = index.constant 16 : index
+  %storage_count = index.div %storage_length, %record_length : index
+  %count = index.assume %count_value [le(%count_value, %storage_count)] : index
+  %records = buffer.view %shapes[%origin] : buffer -> view<[%count]x2xi64>
+  %maximum = scf.for %i = [%c0 to %count step %c1](%largest = %prefill : i64) -> (i64) {
+    %tokens = view.load %records[%i, 0] : view<[%count]x2xi64> -> i64
+    %next = scalar.maxui %tokens, %largest : i64
+    scf.yield %next : i64
+  }
+  %alignment = scalar.constant 2 : i64
+  %bias = scalar.constant 1 : i64
+  %padded = scalar.addi %maximum, %bias : i64
+  %units = scalar.divui %padded, %alignment : i64
+  %capacity = scalar.muli %units, %alignment : i64
+  func.return %capacity : i64
+}
+
+// Proposal catalogs contain capacities 1, 2, 4, ... . The level rounds a
+// positive live cohort upward without coupling execution to resident capacity.
+func.def public @qwen38.proposal_level(%count: i32) -> (i32) {
+  %bias = scalar.constant 1 : i32
+  %bits = scalar.constant 32 : i32
+  %previous = scalar.subi %count, %bias : i32
+  %leading = scalar.ctlzi %previous : i32
+  %level = scalar.subi %bits, %leading : i32
+  func.return %level : i32
+}
+
+func.def public @qwen38.control_create(%packet_capacity: i64, %context: i64, %pool: i64, %rows_arg: i64, %pins: i64, %packed: i1, %enabled: i1, %dflash: i1) -> (buffer) {
+  %rows = scalar.assume %rows_arg [range(%rows_arg, 1, 2147483647)] : i64
+  %count = index.cast %rows : i64 to index
+  %origin = index.constant 0 : offset
+  %policy_stride = index.constant 24 : offset
+  %policy_bytes = index.scale %count, %policy_stride : index, offset -> offset
+  %header_bytes = index.constant 40 : offset
+  %recipe_origin = index.add %header_bytes, %policy_bytes : offset
+  %trailer_bytes = index.constant 624 : offset
+  %ple_bytes = index.constant 1024 : offset
+  %ple_recipe_origin = index.add %recipe_origin, %ple_bytes : offset
+  %state_bytes = index.add %ple_recipe_origin, %trailer_bytes : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
+  %c0_i32 = scalar.constant 0 : i32
+  buffer.fill %c0_i32, %state[%origin], %state_bytes : i32
+  %recipe = buffer.view %state[%ple_recipe_origin] : buffer -> view<8xi64>
+  %packed_word = scalar.extui %packed : i1 to i64
+  %enabled_word = scalar.extui %enabled : i1 to i64
+  %dflash_word = scalar.extui %dflash : i1 to i64
+  view.store %packet_capacity, %recipe[0] : i64, view<8xi64>
+  view.store %context, %recipe[1] : i64, view<8xi64>
+  view.store %pool, %recipe[2] : i64, view<8xi64>
+  view.store %rows, %recipe[3] : i64, view<8xi64>
+  view.store %pins, %recipe[4] : i64, view<8xi64>
+  view.store %packed_word, %recipe[5] : i64, view<8xi64>
+  view.store %enabled_word, %recipe[6] : i64, view<8xi64>
+  view.store %dflash_word, %recipe[7] : i64, view<8xi64>
+  func.return %state : buffer
+}
+
+func.def public @qwen38.control_resize(%state: buffer, %rows: i64) -> (buffer, i64, i64, i64, i64, i1, i1, i1) {
+  %origin = index.constant 0 : offset
+  %old_bytes = buffer.length %state
+  %trailer_bytes = index.constant 624 : offset
+  %recipe_origin = index.sub %old_bytes, %trailer_bytes : offset
+  %recipe = buffer.view %state[%recipe_origin] : buffer -> view<8xi64>
+  %packet_capacity = view.load %recipe[0] : view<8xi64> -> i64
+  %context = view.load %recipe[1] : view<8xi64> -> i64
+  %pool = view.load %recipe[2] : view<8xi64> -> i64
+  %pins = view.load %recipe[4] : view<8xi64> -> i64
+  %packed_word = view.load %recipe[5] : view<8xi64> -> i64
+  %enabled_word = view.load %recipe[6] : view<8xi64> -> i64
+  %dflash_word = view.load %recipe[7] : view<8xi64> -> i64
+  %c0_i64 = scalar.constant 0 : i64
+  %packed = scalar.cmpi ne, %packed_word, %c0_i64 : i64
+  %enabled = scalar.cmpi ne, %enabled_word, %c0_i64 : i64
+  %dflash = scalar.cmpi ne, %dflash_word, %c0_i64 : i64
+  %grown = func.call @qwen38.control_create(%packet_capacity, %context, %pool, %rows, %pins, %packed, %enabled, %dflash) : (i64, i64, i64, i64, i64, i1, i1, i1) -> (buffer)
+  // The retired upload table is scratch. Only stages and existing sampling
+  // policies survive; new residents start with an empty request policy.
+  %ple_bytes = index.constant 1024 : offset
+  %ple_origin = index.sub %recipe_origin, %ple_bytes : offset
+  buffer.copy %state[%origin], %grown[%origin], %ple_origin
+  %grown_bytes = buffer.length %grown
+  %grown_recipe = index.sub %grown_bytes, %trailer_bytes : offset
+  %grown_ple = index.sub %grown_recipe, %ple_bytes : offset
+  buffer.copy %state[%ple_origin], %grown[%grown_ple], %ple_bytes
+  func.return %grown, %packet_capacity, %context, %pool, %pins, %packed, %enabled, %dflash : buffer, i64, i64, i64, i64, i1, i1, i1
+}
+
+// The second feedback bank includes tags after the complete retained record
+// plane. Its transfer extent follows packet capacity, independently of the
+// active cohort or the current number of resident sequences.
+func.def public @qwen38.tagged_feedback_bytes(%state: buffer) -> (i64) {
+  %state_bytes = buffer.length %state
+  %trailer_bytes = index.constant 624 : offset
+  %recipe_origin = index.sub %state_bytes, %trailer_bytes : offset
+  %recipe = buffer.view %state[%recipe_origin] : buffer -> view<8xi64>
+  %packet_capacity = view.load %recipe[0] : view<8xi64> -> i64
+  %tagged_stride = scalar.constant 44 : i64
+  %bytes = scalar.muli %packet_capacity, %tagged_stride : i64
+  func.return %bytes : i64
+}
+
+// PLE-on-demand table: i64 words at the block that precedes the recipe.
+// [0] model source ordinal, [1..4] first PLE stage of the ordinary target,
+// mixed target, ordinary verify, mixed verify catalogs, [5] shape count,
+// [8 + i] token capacity of shape i (up to 120 shapes).
+func.def public @qwen38.ple_store(%state: buffer, %slot: index, %value: i64) {
+  %state_bytes = buffer.length %state
+  %trailer_bytes = index.constant 1648 : offset
+  %origin = index.sub %state_bytes, %trailer_bytes : offset
+  %table = buffer.view %state[%origin] : buffer -> view<128xi64>
+  %bounded = index.assume %slot [range(%slot, 0, 127)] : index
+  view.store %value, %table[%bounded] : i64, view<128xi64>
+  func.return
+}
+
+func.def public @qwen38.ple_load(%state: buffer, %slot: index) -> (i64) {
+  %state_bytes = buffer.length %state
+  %trailer_bytes = index.constant 1648 : offset
+  %origin = index.sub %state_bytes, %trailer_bytes : offset
+  %table = buffer.view %state[%origin] : buffer -> view<128xi64>
+  %bounded = index.assume %slot [range(%slot, 0, 127)] : index
+  %value = view.load %table[%bounded] : view<128xi64> -> i64
+  func.return %value : i64
+}
