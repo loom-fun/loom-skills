@@ -153,15 +153,18 @@ def build(a, cfg, cdir, tokenizer):
                 os.link(os.path.realpath(target), link)
             except OSError as e:
                 sys.exit(f"cannot link {target} into {link} ({e}): enable Windows Developer Mode, or put the package on the GGUF's drive")
+    # the served model id is the port's (llm_config.json model_id): the gates and benchmarks request that name
+    model_id = a.model_id or cfg.get("name", "llm").replace(" ", "-")
+    card["model"]["id"] = model_id
     shutil.copyfile(tokenizer, os.path.join(pkg, "tokenizer.json"))   # as upstream has it: its origin's hash is in the lock
     json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
     if kind == "mtp":   # the draft-off twin of the same package (port.sh's spec check, tune.py)
         tpreset = cat.get("preset", "chat")
         twin = card_for(cat["variant"], tpreset, 0)
+        twin["model"]["id"] = model_id
         twin["presets"][tpreset]["execution"].update(context_capacity=context, rows=rows, max_tokens=a.max_tokens)
         json.dump(twin, open(os.path.join(pkg, "model_target.json"), "w"), indent=1)
 
-    model_id = a.model_id or cfg.get("name", "llm").replace(" ", "-")
     bench = {k: v for k, v in cfg.items() if k != "tensors"}
     mtp_file = next((os.path.basename(e["path"]) for _, p, e in files if p == "draft"), None)
     if mtp_file:
