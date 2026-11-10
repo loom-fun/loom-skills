@@ -52,6 +52,20 @@ class CheckpointPathTests(unittest.TestCase):
             self.assertEqual(copy.read_bytes(), source.read_bytes())
             self.assertFalse(copy.samefile(source))
 
+    def test_link_keeps_the_hf_snapshot_path(self):
+        # publish_package.py reads repo and revision from snapshots/REV/FILE: resolving to blobs/ loses them
+        if os.name == "nt":
+            self.skipTest("symlinks")
+        with tempfile.TemporaryDirectory() as temp:
+            snap = Path(temp) / "models--o--r/snapshots" / ("a" * 40)
+            blob = Path(temp) / "models--o--r/blobs/sha"
+            snap.mkdir(parents=True); blob.parent.mkdir(parents=True); blob.write_bytes(b"w")
+            (snap / "m.gguf").symlink_to(blob)
+            target = Path(temp) / "work/m.gguf"
+            helper.link_checkpoint(snap / "m.gguf", target)
+            self.assertEqual(os.readlink(target), str(snap / "m.gguf"))
+            self.assertEqual(target.read_bytes(), b"w")
+
 
 if __name__ == "__main__":
     unittest.main()
