@@ -1,21 +1,30 @@
 {
- "_comment": "Qwen2.5-1.5B decode attention splits at long context: card vs rebuilt variants.",
- "card": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
- "memory_bytes": 8000000000,
+ "_comment": "Qwen2.5-VL-7B (qwen2vl, KVH=4 D=128) decode_32k and streams4: card vs no-drafting vs attention split variants, plus Vulkan on the same runner.",
+ "card": "loom-fun/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+ "memory_bytes": 21000000000,
  "kit": null,
- "llamacpp": "b1369",
+ "llamacpp": "b1370",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "attn-splits",
+   "name": "long",
    "variants": [
     {"name": "card"},
-    {"name": "base", "build": {}},
-    {"name": "s128", "build": {"ATTN_SPLITS": "128"}},
-    {"name": "s256", "build": {"ATTN_SPLITS": "256"}},
-    {"name": "s256k16", "build": {"ATTN_SPLITS": "256", "ATTN_KPS": "16"}},
-    {"name": "noseg", "build": {"SEG_ATTN": "0"}}
+    {"name": "nd", "execution": {"draft_depth": 0}},
+    {"name": "s128", "build": {"ATTN_SPLITS": "128"}, "execution": {"draft_depth": 0}},
+    {"name": "s256", "build": {"ATTN_SPLITS": "256"}, "execution": {"draft_depth": 0}},
+    {"name": "noseg", "build": {"SEG_ATTN": "0"}, "execution": {"draft_depth": 0}}
    ],
-   "steps": ["perf:card:2:long", "perf:base:2:long", "perf:s128:2:long", "perf:s256:2:long", "perf:s256k16:2:long", "perf:noseg:2:long"]
+   "steps": ["perf:card:2:long", "perf:nd:2:long", "perf:s128:2:long", "perf:s256:2:long", "perf:noseg:2:long", "llama@vulkan.np1.nospec:2:long"]
+  },
+  {
+   "name": "c4",
+   "variants": [
+    {"name": "card"},
+    {"name": "nd", "execution": {"draft_depth": 0}},
+    {"name": "d1", "execution": {"draft_depth": 1}}
+   ],
+   "steps": ["c4:card", "c4:nd", "c4:d1", "llamac4@vulkan"]
   }
  ]
 }
