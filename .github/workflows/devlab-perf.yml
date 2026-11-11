@@ -46,6 +46,7 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       GH_TOKEN: ${{ github.token }}
+      C4_REPS: "8"
     steps:
       - uses: actions/checkout@v4
         with:

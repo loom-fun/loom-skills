@@ -263,7 +263,7 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] fo
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "c4 $p1"
-      for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$url" 4 --model "$cardid" --thinking "$TH" | tail -1 | tee -a "c4_$p1.txt"); done
+      for i in $(seq 1 "${C4_REPS:-3}"); do date +%T; (cd "$out" && "$T" "$B/c4_steady.py" "$url" 4 --model "$cardid" --thinking "$TH" | tail -1 | tee -a "c4_$p1.txt"); curl -s "$url/metrics" | grep -iE "draft|spec|accept|propos" | tr "\n" " "; echo; done
       res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_$p1.txt')))");;
     llama)   # llama:N[:long|-][:N_MAX]
       llama_up "${p3:-}" || { res[$s]=ERROR; continue; }
