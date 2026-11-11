@@ -263,6 +263,7 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] fo
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "c4 $p1"
+      if [ -n "${PREWARM_K:-}" ]; then "$T" "$here/.github/scripts/prewarm_ple.py" "$PREWARM_K" $(ls "${gguf%-0000*}"-0000*.gguf) 2>&1 | tail -3; fi
       ( while sleep 10; do echo "$(date +%T) $(grep -E "MemAvailable|^Cached:" /proc/meminfo | tr -s " \n" " ") $(grep -E "pgmajfault|pswpin" /proc/vmstat | tr "\n" " ") $(grep read_bytes /proc/$(pgrep -o loom-serve)/io) psi: $(head -1 /proc/pressure/io) $(head -1 /proc/pressure/memory)"; done > "$out/sys.log" 2>&1 ) &
       SAMP=$!
       for i in $(seq 1 "${C4_REPS:-3}"); do date +%T; (cd "$out" && "$T" "$B/c4_steady.py" "$url" 4 --model "$cardid" --thinking "$TH" | tail -1 | tee -a "c4_$p1.txt"); [ "$i" = "${C4_REPS:-3}" ] && kill $SAMP; curl -s "$url/metrics" | grep -iE "draft|spec|accept|propos" | tr "\n" " "; echo; done
