@@ -1,18 +1,28 @@
 {
- "_comment": "Flash-Next vision gate alone (all six built-in cases) on the published AR card.",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "tune.py per-row scoring on three cards: Qwen3.5-0.8B (ngram, expect none), Muse-Glimmer-30B (DFlash2, expect drafting), Qwen3.5-9B (DFlash).",
+ "llamacpp": "b1369",
+ "steps": [
+  "tune"
+ ],
  "variants": [
   {
-   "name": "fn-vision-diag",
-   "env": {
-    "VISION_ONLY": "1"
-   },
-   "steps": [
-    "gates:full"
-   ]
+   "name": "q35-08b",
+   "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
+   "memory_bytes": 9000000000,
+   "kit": null
+  },
+  {
+   "name": "glimmer",
+   "card": "loom-fun/unsloth-Muse-Glimmer-30B-loom",
+   "memory_bytes": 39000000000,
+   "kit": "glimmer",
+   "llamacpp": "b1355"
+  },
+  {
+   "name": "q35-9b",
+   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "memory_bytes": 30000000000,
+   "kit": null
   }
  ]
 }

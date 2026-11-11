@@ -24,6 +24,7 @@
 #        admit:N         admission only: a needle prompt of N tokens on a fresh server, admitted or refused (503), cancelled
 #        needle:N[:S]    one Loom-only needle probe of N tokens on the running server (read timeout S seconds): status, TTFT
 #        consdefer:N     consistency.py N times for cards whose GGUF and llama.cpp do not fit together: references deferred, filled with Loom stopped, runs re-judged
+#        tune            draft/tune.py on the card's config (a fresh tune of the method and depth; prints TUNE_RESULT)
 #        ktest           the starter's kernel tests (make_kernel_tests.py + run_kernel_tests.sh) on the package
 #        probe           one request on a fresh server + GTT/free memory/status/dmesg (out/probe*.json, probe.txt)
 #        gates:LEVEL     gates.sh at LEVEL against the card's llama.cpp build ("llamacpp" in EXPERIMENT.json)
@@ -178,6 +179,13 @@ for s in $steps; do
       "${LOOM_KIT:-$ST}/run_kernel_tests.sh" "$pkg" "$kt" > "$out/ktest.log" 2>&1; rc=$?
       grep -v "^PASS" "$out/ktest.log" | tail -15; echo "PASS lines: $(grep -c '^PASS' "$out/ktest.log")"
       res[$s]=$([ $rc = 0 ] && echo PASS || echo FAIL);;
+    tune)
+      # draft/tune.py of this checkout (or the kit) on the card's own config: the table per row and the choice
+      step "tune"; [ -f "$LOOM_SERVE_STATE/exp-$name.pid" ] && "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
+      w=$D/tune; rm -rf "$w"; mkdir -p "$w/tok"; cp "$card/tokenizer.json" "$w/tok/"; cp "$D/cfg.json" "$w/cfg.json"
+      LOOM_SKILLS=$SK LOOM_SERVE_STATE=$LOOM_SERVE_STATE "$T" "${LOOM_KIT:-$ST}/draft/tune.py" "$w" "$PORT" 0 "$model" > "$out/tune.log" 2>&1; rc=$?
+      grep "^tune:" "$out/tune.log" | cut -c1-600; cp "$w/cfg.json" "$out/tune_cfg.json" 2>/dev/null
+      res[$s]=$(grep TUNE_RESULT "$out/tune.log" | cut -c1-200); [ -n "${res[$s]}" ] || { tail -20 "$out/tune.log"; res[$s]="ERROR rc=$rc"; };;
     consistency)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       LLA=()
