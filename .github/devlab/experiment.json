@@ -6,10 +6,9 @@
  "llamacpp": "b1371",
  "variants": [
   {
-   "name": "fn-mtp",
+   "name": "fn-ktest",
    "steps": [
-    "probe",
-    "gates:quick"
+    "ktest"
    ]
   }
  ]

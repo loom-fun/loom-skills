@@ -164,6 +164,14 @@ for s in $steps; do
   IFS=: read -r kind p1 p2 <<< "$s"
   case $kind in
     ktest)
+      if [ -f "${LOOM_KIT:-/nonexistent}/catalog_tests.tar.gz" ]; then   # a catalog package: its own loom_test targets, translated from Bazel (kernel_tests.py), on the GPU
+        step "catalog kernel tests (kernel_tests.py, --device amdgpu)"
+        kt=$D/catalog_tests; rm -rf "$kt"; mkdir -p "$kt"; tar xzf "$LOOM_KIT/catalog_tests.tar.gz" -C "$kt"
+        tdir=$(cd "$kt" && ls -d model/*/*/test | head -1)
+        "$T" "$B/kernel_tests.py" "$kt" "$tdir" --loom-test "$root/.venv/bin/loom-test" --loom-link "$root/.venv/bin/loom-link" --device amdgpu \
+          -o "$out/ktest.json" > "$out/ktest.log" 2>&1; rc=$?
+        tail -25 "$out/ktest.log" | cut -c1-240; res[$s]=$(tail -1 "$out/ktest.log"); continue
+      fi
       step "kernel tests"
       kt=$D/ktest; rm -rf "$kt"
       ( cd "${LOOM_KIT:-$ST}" && "$T" make_kernel_tests.py "$D/cfg.json" "$kt" ) > "$out/ktest_make.log" 2>&1 || { tail "$out/ktest_make.log"; res[$s]=ERROR; continue; }
