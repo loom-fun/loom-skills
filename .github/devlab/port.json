@@ -1,7 +1,6 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Qwen3-1.7B regenerated on main with #270's per-row draft tuning (derived from the card itself).",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {"name": "q3-1p7b-regen", "spec": "ggml-org/Qwen3-1.7B-GGUF:Qwen3-1.7B-Q4_K_M.gguf", "reference": "loom-fun/ggml-org-Qwen3-1.7B-loom", "model_id": "Qwen/Qwen3-1.7B"}
  ]
 }
