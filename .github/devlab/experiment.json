@@ -1,12 +1,17 @@
 {
- "_comment": "Qwen3.8-Flash-Next (catalog card, qwen4exp kit; autoregressive vision package by default, on-demand PLE K=0, native 262144 context): the full gate set (quick gates + vision + over-capacity 400 + full-context needle) against llama.cpp b1371; Loom and llama.cpp take turns (the GGUF is 104 GiB). The MTP opt-in preset's DevLab full gates and the kernel tests ran on run 43020798773.",
+ "_comment": "Flash-Next vision diagnosis: the 'wide' case (1600x260) alone plus variants that remove the resize / change the text / change the prompt. (Full-gate experiment: see git history, run 43042120308.)",
  "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
  "memory_bytes": 100000000000,
  "kit": "qwen4exp",
  "llamacpp": "b1371",
  "variants": [
   {
-   "name": "fn-ar-full",
+   "name": "fn-vision-diag",
+   "env": {
+    "VISION_ONLY": "1",
+    "VISION_EXTRA": "1",
+    "VISION_ARGS": "--cases wide,wide_pre,wide_aligned,wide_q2,wide_lower,text"
+   },
    "steps": [
     "gates:full"
    ]

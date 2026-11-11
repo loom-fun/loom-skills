@@ -67,6 +67,13 @@ def builtin_images():
     im = Image.new("RGB", (1600, 260), "white"); d = ImageDraw.Draw(im)
     d.text((800, 130), "THE QUICK BROWN FOX 1234", fill=(120, 0, 0), font=font(90), anchor="mm")
     out["wide"] = (im, "What text is written in this image?")
+    if os.environ.get("VISION_EXTRA"):   # diagnostics for a failing "wide": is it the resize, the grid, or the prompt?
+        out["wide_pre"] = (im.resize((1600, 256), Image.BICUBIC), "What text is written in this image?")   # same grid, resized by us: no resize left to differ
+        im2 = Image.new("RGB", (1600, 320), "white"); ImageDraw.Draw(im2).text((800, 160), "THE QUICK BROWN FOX 1234", fill=(120, 0, 0), font=font(90), anchor="mm")
+        out["wide_aligned"] = (im2, "What text is written in this image?")   # 50x10 merged patches, no resize at all
+        out["wide_q2"] = (im, "Transcribe the text in this image exactly.")
+        im3 = Image.new("RGB", (1600, 260), "white"); ImageDraw.Draw(im3).text((800, 130), "the quick brown fox 1234", fill=(120, 0, 0), font=font(90), anchor="mm")
+        out["wide_lower"] = (im3, "What text is written in this image?")
     return out
 
 

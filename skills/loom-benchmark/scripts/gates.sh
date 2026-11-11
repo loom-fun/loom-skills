@@ -151,6 +151,11 @@ dev_gates() {
   [ -n "$drafting" ] && run spec spec_gate
 }
 all_gates() {
+  # VISION_ONLY=1 [VISION_ARGS="--cases wide,wide_pre"]: just the vision gate (DevLab diagnostics for one failing case)
+  if [ -n "${VISION_ONLY:-}" ]; then
+    [ -n "$MMPROJ" ] && [ -n "$L" ] && run vision "$T" "$S/vision_golden.py" "$pkg" --url "$url" --llama "$L" ${VISION_ARGS:-}
+    return
+  fi
   [ "$level" = dev ] && { dev_gates; return; }
   if [ -n "$L" ]; then
     run golden "$T" "$S/golden.py" "$pkg" golden.json --llama "$L" --long "$long"
