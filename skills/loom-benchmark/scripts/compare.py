@@ -90,7 +90,7 @@ for g in json.load(open(a.golden)):
     t0 = time.perf_counter()
     r = requests.post(a.url + "/v1/chat/completions", headers={"Content-Type": "application/json"},
                       json={"model": pkg.model_id, "messages": [{"role": "user", "content": g["prompt"]}],
-                            "max_tokens": len(g["ids"]), "temperature": 0}).json()
+                            "max_tokens": len(g["ids"]), "temperature": 0, **pkg.default_request()}).json()
     if "choices" not in r:  # e.g. 503 capacity errors: raise --memory_bytes (KV pool must fit)
         print("ERROR", r.get("error"), flush=True)
         rows.append({"prompt": g["prompt"][:80], "error": r.get("error"), "bad": True, "matched": 0, "full_match": False, "divergence_gap": None})

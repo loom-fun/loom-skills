@@ -31,5 +31,6 @@
  },
  "tokenizer": "Qwen/Qwen3.8-Flash-Next",
  "context": 16384,
- "prefill_capacity": 8192
+ "prefill_capacity": 8192,
+ "loom_thinking_default": false
 }

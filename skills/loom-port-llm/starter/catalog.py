@@ -13,6 +13,7 @@ catalog.json (schema below; every key optional except memory and source):
    "variant": "ud-q4-k-xl", "preset": "chat",      # the target-only variant and preset to serve
    "mtp_variant": "ud-q4-k-xl-mtp", "mtp_preset": "mtp",   # with the MTP head; its depth is the preset's draft_depth
    "context": 262144,                              # execution.context_capacity (default: the GGUF's native context)
+   "loom_thinking_default": false,                 # the package's chat program starts with thinking off (the template: on)
    "prefill_capacity": 4096,                       # execution.prefill_capacity (default: the catalog preset's)
    "memory": {"resident_weights_bytes": N,         # what the package keeps resident (its own number: the PLE table
               "mtp_weights_bytes": N,              #   is read on demand, not resident)
@@ -169,6 +170,8 @@ def build(a, cfg, cdir, tokenizer):
     mtp_file = next((os.path.basename(e["path"]) for _, p, e in files if p == "draft"), None)
     if mtp_file:
         bench["mtp"] = {"gguf": os.path.join(gguf_dir, mtp_file), "layers": (cfg.get("mtp") or {}).get("layers", [])}
+    if "loom_thinking_default" in cat:   # the catalog chat program's own default (see Package.default_request)
+        bench["loom_thinking_default"] = cat["loom_thinking_default"]
     bench.update(model_id=model_id, draft={"kind": "mtp", "depth": depth} if kind == "mtp" else None,
                  catalog={"variant": variant, "preset": pname, "draft_kinds": ["mtp"] if cat.get("mtp_variant") else [],
                           "memory": {k: v for k, v in mem.items()}},
