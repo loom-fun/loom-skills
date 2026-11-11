@@ -41,6 +41,7 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 - llama.cpp: build `llamacpp-rocm/b1355`, server arguments `-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model ~/drafter.gguf --spec-draft-n-max 3 -ngld 99 -c 65536 -kvu -np 4`.
 - Loom: speculative decoding on (DFlash, depth 3).
 - Same GGUF on both engines, tokens per second. Loom: client-side timing; llama.cpp: server-side timings. Runs per value: decode and prefill 2 (mean), 4 streams 3 (median).
+- Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs): Loom, served with the active wait, and llama.cpp on the same runner; runners differ between sessions.
 - Measured 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: DevLab Dispatch run 3001.
 - ¹ Measured 2026-11-07; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: DevLab Dispatch run 3002.
 - ² Measured 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: DevLab Dispatch run 3003.
