@@ -8,20 +8,42 @@
  "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 5 -ngld 99",
  "jobs": [
   {
-   "name": "depth",
+   "name": "depth2",
    "variants": [
-    {"name": "card"},
-    {"name": "d0", "execution": {"draft_depth": 0}},
-    {"name": "d1", "execution": {"draft_depth": 1}},
-    {"name": "d3", "execution": {"draft_depth": 3}}
+    {
+     "name": "d2",
+     "execution": {
+      "draft_depth": 2
+     }
+    },
+    {
+     "name": "d3",
+     "execution": {
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "d4",
+     "execution": {
+      "draft_depth": 4
+     }
+    },
+    {
+     "name": "d5",
+     "execution": {
+      "draft_depth": 5
+     }
+    }
    ],
    "steps": [
-    "perf:card:1:long", "c4:card",
-    "perf:d0:1:long", "c4:d0",
-    "perf:d1:1:long", "c4:d1",
-    "perf:d3:1:long", "c4:d3",
-    "llama:1:long", "llamac4",
-    "llama@vulkan.np1.nospec:1:long", "llamac4@vulkan.nospec"
+    "perf:d2:2:long",
+    "c4:d2",
+    "perf:d3:2:long",
+    "c4:d3",
+    "perf:d4:2:long",
+    "c4:d4",
+    "perf:d5:2:long",
+    "c4:d5"
    ]
   }
  ]
