@@ -10,7 +10,54 @@
    "name": "base",
    "variants": [
     {
-     "name": "card"
+     "name": "base",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "r4f-u1",
+     "build": {
+      "MOE_Q8": "0",
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "1"
+     }
+    },
+    {
+     "name": "r4f-u4",
+     "build": {
+      "MOE_Q8": "0",
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "4"
+     }
+    },
+    {
+     "name": "r4q-u4",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "4"
+     }
+    },
+    {
+     "name": "r2f-u4",
+     "build": {
+      "MOE_Q8": "0",
+      "MOE_R": "2",
+      "MOE_ROUTE_U": "4"
+     }
+    },
+    {
+     "name": "r2q-u4",
+     "build": {
+      "MOE_R": "2",
+      "MOE_ROUTE_U": "4"
+     }
+    },
+    {
+     "name": "r8f-u4",
+     "build": {
+      "MOE_Q8": "0",
+      "MOE_ROUTE_U": "4"
+     }
     }
    ],
    "steps": [

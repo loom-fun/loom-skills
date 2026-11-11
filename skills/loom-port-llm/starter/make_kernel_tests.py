@@ -1814,12 +1814,13 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
     def f16_rows(x):   # g_row_scale_f16: each row scaled by a power of two into F16 range, rounded to F16, scaled back
         e = np.clip(np.frexp(np.abs(x).max(-1, keepdims=True))[1] - 1 - 13, 0, 100).astype(np.float64)
         return (x * 2.0 ** -e).astype(np.float16).astype(np.float64) * 2.0 ** e
-    def experts_ref(hx, ids, wts, Wg, Wu, Wd, bg=None, bu=None, bd=None, f16=False):
+    def experts_ref(hx, ids, wts, Wg, Wu, Wd, bg=None, bu=None, bd=None, f16=False, q8=False):
         """f16: the prefill GEMMs' activation precision (hidden rows and expert activations rounded to F16 by the row
         scale kernels), so the reference differs from the kernels only by summation order, not by the rounding the
         design chooses (a cancelling sum of large expert outputs otherwise shows that rounding as an error)."""
         y = np.zeros((len(hx), H))
         if f16: hx = f16_rows(hx.astype(np.float64))
+        if q8: hx = q8_ref(hx.astype(np.float32)).astype(np.float64)   # int8 expert matvecs (gen_llm MOE_Q8): h and the gate/up output are Q8_1-rounded
         for i in range(len(hx)):
             for k in range(KU):
                 e = ids[i, k]; g = Wg[e] @ hx[i]; u = Wu[e] @ hx[i]
@@ -1830,6 +1831,7 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
                 else:
                     a = ffn_act(g) * u
                 if f16: a = f16_rows(a)
+                if q8: a = q8_ref(a.astype(np.float32)[None])[0].astype(np.float64)
                 y[i] += wts[i, k] * (Wd[e] @ a + (bd[e] if EB else 0))
         return y
     done = set()
@@ -1838,6 +1840,8 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
         fu = T[b + UN].tensor_type.name.lower(); gun = (fg if fg == fu else f"{fg}_{fu}") + ("_fused" if FUSED else "")   # gate+up formats (gen_moe)
         if (fd, gun) in done: continue
         done.add((fd, gun))
+        MQ = (ACT_Q8 and os.environ.get("MOE_Q8", "1") == "1" and fg == fu and fg in IQ_FMTS and fd in IQ_FMTS
+              and H // 32 <= 1024 and FE // 32 <= 1024 and not EB)   # gen_llm.moe_iq
         Wr, wr_raw = f32w(b + "ffn_gate_inp.weight"); Wr = Wr.reshape(E_, H)
         bias = (np.asarray(T[b + "exp_probs_b.bias"].data, np.float32) if M["probs_bias"] else
                 np.asarray(T[b + "ffn_gate_inp.bias"].data, np.float32) if M.get("router_bias") else np.zeros(E_, np.float32))
@@ -1865,7 +1869,7 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
             y0 = (rng.standard_normal((t, H)) * 0.1).astype(np.float32) if ACC and sfx != "_p" else np.zeros((t, H), np.float32)
             sgv = 1 / (1 + np.exp(-(hx.astype(np.float64) @ Wsg.astype(np.float64)))) if SHG else np.ones(t)
             wts_s = wts * dsc[ids]   # the combine weights after g_moe_wscale (DSC)
-            yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts_s, Wg, Wu, Wd, ebias.get("gate"), ebias.get("up"), ebias.get("down"), f16=sfx == "_p")
+            yref = sgv[:, None] * y0 + experts_ref(hx, ids, wts_s, Wg, Wu, Wd, ebias.get("gate"), ebias.get("up"), ebias.get("down"), f16=sfx == "_p", q8=MQ and sfx == "")
             for n, a in [("_h", hx), ("_y0", y0), ("_ids", ids), ("_wts", wts.astype(np.float32)), ("_y", yref.astype(np.float32)),
                          ("_sg", sgv.astype(np.float32))] + ([("_wts_s", wts_s.astype(np.float32))] if DSC else []):
                 save(tag + sfx + n, a)
@@ -1879,6 +1883,19 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
         # DSC: g_moe_wscale scales the routed weights by the experts' down scales before the experts run
         wsc = lambda t: f"""  kernel.launch @g_moe_wscale[%t](%t, %ids, %wts, %dsc) : [index](index, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{E_}xf32>)
 """ if DSC else ""
+        def gudn(t):
+            """The decode expert matvecs of the chain: f32 activations, or (MQ) g_quant_q8 then the int8 kernels."""
+            if not MQ:
+                return f"""  kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu{GUB}, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {ut}{GUBT}, tensor<{t * KU}x{FE}xf32>)
+  kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wd{DNB}, %ys) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t * KU}x{FE}xf32>, {dt_}{DNBT}, tensor<{t * KU}x{H}xf32>)
+"""
+            return f"""  %hq = check.generate.fill value(0) : tensor<{t}x{2 * H}xi8>
+  kernel.launch @g_quant_q8[%t, %nH](%t, %nH, %h, %hq) : [index, index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x{2 * H}xi8>)
+  kernel.launch @g_moe_gu_{gun}_q8_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %hq, %wg, %wu, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{2 * H}xi8>, {gt}, {ut}, tensor<{t * KU}x{FE}xf32>)
+  %actq = check.generate.fill value(0) : tensor<{t * KU}x{2 * FE}xi8>
+  kernel.launch @g_quant_q8[%ta, %nFE](%ta, %nFE, %act, %actq) : [index, index](index, index, tensor<{t * KU}x{FE}xf32>, tensor<{t * KU}x{2 * FE}xi8>)
+  kernel.launch @g_moe_dn_{fd}_q8_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %actq, %wd, %ys) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t * KU}x{2 * FE}xi8>, {dt_}, tensor<{t * KU}x{H}xf32>)
+"""
         def common(t, sfx):
             return f"""  %t = check.literal value({t}) : index
   %ta = check.literal value({t * KU}) : index
@@ -1929,8 +1946,7 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
   kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids_l, %wts_l, %info_l) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
   check.expect.equal actual(%ids_l) expected(%eids_l) : tensor<{t}x{KU}xi32>
   check.expect.close actual(%wts_l) expected(%ewts_l) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
-{wsc(t)}  kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, %h, %wg, %wu{GUB}, %act) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t}x{H}xf32>, {gt}, {ut}{GUBT}, tensor<{t * KU}x{FE}xf32>)
-  kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wd{DNB}, %ys) : [index, index](index, index, tensor<{t}x{KU}xi32>, tensor<{t * KU}x{FE}xf32>, {dt_}{DNBT}, tensor<{t * KU}x{H}xf32>)
+{wsc(t)}{gudn(t)}
   kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {SGA}%y) : [index](index, tensor<{t * KU}x{H}xf32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
   check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
   check.expect.equal actual(%ids_tr) expected(%eids) : tensor<{t}x{KU}xi32>
