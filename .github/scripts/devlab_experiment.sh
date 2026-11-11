@@ -12,6 +12,7 @@
 #                 {"name": "x", "build": {"ENV": "value", ...},       (rebuild: build.py with these env vars;
 #                  "build_args": ["--draft-depth", "3"],                 build_args are extra build.py flags)
 #                  "env": {"SKIP_NEEDLE": "1"},                          (exported for the steps; also allowed at the top level)
+#                  "serve_args": ["--pool_backing=fixed"],              (extra loom-serve flags; memory_bytes "none" omits --memory_bytes)
 #                  "execution": {"draft_depth": 0},                    (model.json preset overrides)
 #                  "config": {"rope_theta": 10000},                     (generator config overrides for a rebuild:
 #                                                                         an injected bug the gates must catch)
@@ -156,7 +157,8 @@ llama_up() {   # the card's llama.cpp build on the card's GGUF (reference for ne
   LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag
   "$B/llamacpp_server.sh" "$("$T" -c "import json; print(json.load(open('$pkg/llm_config.json'))['gguf'])")" "$LLAMA_PORT" 1 8192 | tail -1
 }
-serve() { "$SV/serve.sh" "exp-$name" "$PORT" amdgpu "$mem" "$pkg/model.json" | tail -2; curl -sf "$url/v1/models" >/dev/null; }
+sargs=$(q "print(' '.join(v.get('serve_args') or []))")   # extra loom-serve flags (e.g. --pool_backing=fixed with memory_bytes "none")
+serve() { "$SV/serve.sh" "exp-$name" "$PORT" amdgpu "$mem" "$pkg/model.json" ${sargs:+--} $sargs | tail -2; curl -sf "$url/v1/models" >/dev/null; }
 declare -A res
 for s in $steps; do
   IFS=: read -r kind p1 p2 <<< "$s"
