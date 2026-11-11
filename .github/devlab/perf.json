@@ -1,5 +1,5 @@
 {
- "_comment": "gemma-3-1b streams4 diagnosis: published programs vs draft_depth 0 (t4 kernels) vs llama.cpp.",
+ "_comment": "gemma-3-1b streams4: published programs vs draft_depth 0 vs occupancy gate (SPEC_OCC_MIN=2: anchors-only verify when >=2 spans) vs llama.cpp.",
  "card": "loom-fun/ggml-org-gemma-3-1b-it-loom",
  "memory_bytes": 7000000000,
  "kit": null,
@@ -9,9 +9,10 @@
    "name": "g1-diag",
    "variants": [
     {"name": "card"},
-    {"name": "nodraft", "execution": {"draft_depth": 0}}
+    {"name": "nodraft", "execution": {"draft_depth": 0}},
+    {"name": "gate2", "build": {"SPEC_OCC_MIN": "2"}}
    ],
-   "steps": ["c4:card", "c4:nodraft", "perf:card:2", "perf:nodraft:2", "llamac4"]
+   "steps": ["c4:card", "c4:nodraft", "c4:gate2", "perf:card:2", "perf:gate2:2", "consistency:gate2:3", "llamac4", "llamac4@vulkan"]
   }
  ]
 }

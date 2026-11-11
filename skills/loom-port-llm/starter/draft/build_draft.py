@@ -11,6 +11,7 @@ control.loom: control state grows to 2048 header bytes (sampling records move fr
   runs propose -> verify (or advance) -> warm.
 Native contract: hrx-system loom/src/loom/serve/service/text/{model,storage,epoch}.h (hrx-loom 0.1.0).
 """
+import os
 import re
 
 
@@ -21,6 +22,11 @@ def hx(s):
 SAMPLING = 2048          # control-state byte offset of the per-row sampling records
 VERIFY_TABLE, WARM_TABLE = 640, 1152
 PROPOSE_FIRST, PROPOSE_LEVELS, DRAFT_KIND = 1664, 1668, 1672
+# Occupancy gate (SPEC_OCC_MIN=N, default 0 = off): an epoch whose spans are ALL speculative and number >= N verifies only
+# the anchors (1 token per span, the plain decode shape) instead of depth+1 tokens per span. encode_epoch decides and leaves
+# the shape index + 1 at GATE_FLAG; GATE_TABLE[s] holds the index + 1 of the packing shape with s tokens in s spans.
+GATE_FLAG, GATE_TABLE, GATE_SLOTS = 1676, 1700, 32
+OCC_MIN = int(os.environ.get("SPEC_OCC_MIN", "0") or 0)
 
 
 def _sub(text, old, new, count=1):
@@ -59,6 +65,22 @@ def _bind(stage, sources, draft_policy=False):
 
 
 def patch_prepare(text, draft, cfg):
+    gate_fill = ""
+    if OCC_MIN:   # shape index + 1 of the (s tokens, s spans) packing, for the occupancy gate
+        gate_fill = f"""      %same_shape = scalar.cmpi eq, %tokens, %spans : i64
+      %gate_slots = scalar.constant {GATE_SLOTS} : i64
+      %few_spans = scalar.cmpi ult, %spans, %gate_slots : i64
+      %gate_ok = scalar.andi %same_shape, %few_spans : i1
+      scf.if %gate_ok {{
+        %gate_at = index.constant {GATE_TABLE} : offset
+        %gate_view = buffer.view %state[%gate_at] : buffer -> view<{GATE_SLOTS}xi32>
+        %gate_slot = index.cast %spans : i64 to index
+        %gate_i32 = index.cast %i : index to i32
+        %gate_one = scalar.constant 1 : i32
+        %gate_tag = scalar.addi %gate_i32, %gate_one : i32
+        view.store %gate_tag, %gate_view[%gate_slot] : i32, view<{GATE_SLOTS}xi32>
+      }}
+"""
     kind = draft["kind"]
     psrc, wsrc = root_sources(cfg, draft)
     warm_root = {"mtp": "llm_mtp_warm", "dflash": "llm_dflash_warm", "ngram": "llm_ngram_warm", "assist": "llm_as_warm"}[kind]
@@ -164,7 +186,7 @@ global.rodata.def @draft_scope = bytes("{hx("draft")}")
       func.call @config_i64(%wstage, %spans_key, %spans) : (i32, buffer, i64)
 {_bind("wstage", wsrc, bool(draft.get("policy")))}
       view.store %wstage, %warm_view[%i] : i32, view<[%count]xi32>
-    }}
+{gate_fill}    }}
     %draft_at = index.constant {PROPOSE_FIRST} : offset
     %draft_view = buffer.view %state[%draft_at] : buffer -> view<3xi32>
     view.store %first_propose, %draft_view[0] : i32, view<3xi32>
@@ -278,6 +300,60 @@ def patch_storage(text, cfg, draft):
 
 # ---------------------------------------------------------------------------------------------------
 def patch_control(text, cfg, draft):
+    gate_pre = gate_epoch = ""
+    L1 = "    %length = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
+    L2 = "    %length32 = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
+    propose_flag, eff = "propose", "shape_index"
+    if OCC_MIN:
+        gate_pre = f"""  // occupancy gate: all spans speculative and at least {OCC_MIN} of them -> verify the anchors only
+  %c1_i32 = scalar.constant 1 : i32
+  %nspec = scf.for %g = [%c0 to %spans step %c1](%acc = %c0_i32 : i32) -> (i32) {{
+    %gr = index.assume %g [lt(%g, %plan_extent)] : index
+    %gcredit = view.load %requests[%gr, 7] : view<[%plan_extent]x9xi32> -> i32
+    %gspec = scalar.cmpi ne, %gcredit, %c0_i32 : i32
+    %gadd = scalar.extui %gspec : i1 to i32
+    %gnext = scalar.addi %acc, %gadd : i32
+    scf.yield %gnext : i32
+  }}
+  %all_spec = scalar.cmpi eq, %nspec, %first_count : i32
+  %occ_below = scalar.constant {OCC_MIN - 1} : i32
+  %occupied = scalar.cmpi ugt, %first_count, %occ_below : i32
+  %gate_limit = scalar.constant {GATE_SLOTS} : i32
+  %few_spans = scalar.cmpi ult, %first_count, %gate_limit : i32
+  %gate_max = scalar.constant {GATE_SLOTS - 1} : i32
+  %gate_slot32 = scalar.minui %first_count, %gate_max : i32
+  %gate_slot_b = scalar.assume %gate_slot32 [range(%gate_slot32, 0, {GATE_SLOTS - 1})] : i32
+  %gate_slot = index.cast %gate_slot_b : i32 to index
+  %gate_at = index.constant {GATE_TABLE} : offset
+  %gate_view = buffer.view %control_state[%gate_at] : buffer -> view<{GATE_SLOTS}xi32>
+  %gate_raw = view.load %gate_view[%gate_slot] : view<{GATE_SLOTS}xi32> -> i32
+  %gate_shape = scf.select %few_spans, %gate_raw, %c0_i32 : i32
+  %has_shape = scalar.cmpi ne, %gate_shape, %c0_i32 : i32
+  %g1 = scalar.andi %all_spec, %occupied : i1
+  %gate = scalar.andi %g1, %has_shape : i1
+  %flag_value = scf.select %gate, %gate_shape, %c0_i32 : i32
+  %flag_at = index.constant {GATE_FLAG} : offset
+  %flag_view = buffer.view %control_state[%flag_at] : buffer -> view<1xi32>
+  view.store %flag_value, %flag_view[0] : i32, view<1xi32>
+"""
+        L1 = ("    %length_host = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
+              "    %length = scf.select %gate, %c1_i32, %length_host : i32\n"
+              "    view.store %length, %device[%s, 0] : i32, view<[%spans]x9xi32>\n")
+        L2 = ("    %length32_host = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
+              "    %length32 = scf.select %gate, %c1_i32, %length32_host : i32\n")
+        propose_flag, eff = "propose_on", "eff_index"
+        gate_epoch = f"""  %flag_at = index.constant {GATE_FLAG} : offset
+  %flag_view = buffer.view %control_state[%flag_at] : buffer -> view<1xi32>
+  %flag = view.load %flag_view[0] : view<1xi32> -> i32
+  %gated = scalar.cmpi ne, %flag, %c0 : i32
+  %flag_nz = scf.select %gated, %flag, %c1 : i32
+  %flag_idx = scalar.subi %flag_nz, %c1 : i32
+  %flag_b = scalar.assume %flag_idx [range(%flag_idx, 0, 127)] : i32
+  %flag_shape = index.cast %flag_b : i32 to index
+  %eff_index = scf.select %gated, %flag_shape, %shape_index : index
+  %ungated = scalar.cmpi eq, %flag, %c0 : i32
+  %propose_on = scalar.andi %propose, %ungated : i1
+"""
     dflash = draft["kind"] in ("dflash", "ngram")   # stage signatures: no MTP carry
     mrope = bool((cfg.get("vision") or {}).get("mrope"))
     source_step = 1 if mrope else 2   # text-only ports advance the opaque source position by 2 per input
@@ -337,11 +413,10 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
   %four = index.constant 4 : index
   %words = index.div %token_words, %four : index
   %flat = buffer.view %tokens[%origin] : buffer -> view<[%words]xi32>
-  // cursors, flags and the total packed length
+{gate_pre}  // cursors, flags and the total packed length
   %total = scf.for %s = [%c0 to %spans step %c1](%cursor = %c0_i32 : i32) -> (i32) {{
     %sr = index.assume %s [lt(%s, %plan_extent)] : index
-    %length = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32
-    %flags = view.load %requests[%sr, 6] : view<[%plan_extent]x9xi32> -> i32
+{L1}    %flags = view.load %requests[%sr, 6] : view<[%plan_extent]x9xi32> -> i32
     %credit = view.load %requests[%sr, 7] : view<[%plan_extent]x9xi32> -> i32
     %speculative = scalar.cmpi ne, %credit, %c0_i32 : i32
     %credit_bits = scalar.shli %credit, %c8_i32 : i32
@@ -359,8 +434,7 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
     %s = index.sub %last, %r : index
     %sr = index.assume %s [lt(%s, %plan_extent)] : index
     %sd = index.assume %s [lt(%s, %spans)] : index
-    %length32 = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32
-    %begin32 = view.load %requests[%sr, 4] : view<[%plan_extent]x9xi32> -> i32
+{L2}    %begin32 = view.load %requests[%sr, 4] : view<[%plan_extent]x9xi32> -> i32
     %known32 = view.load %requests[%sr, 5] : view<[%plan_extent]x9xi32> -> i32
     %cursor32 = view.load %device[%sd, 4] : view<[%spans]x9xi32> -> i32
     %moves = scalar.cmpi ne, %begin32, %cursor32 : i32
@@ -508,7 +582,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
   %drafting = scalar.cmpi ne, %kind, %c0 : i32
   %propose = scalar.cmpi ne, %proposes, %c0 : i32
   %verify = scalar.cmpi ne, %verifies, %c0 : i32
-  scf.if %propose {{
+{gate_epoch}  scf.if %{propose_flag} {{
     %bits = scalar.constant 32 : i32
     %below = scalar.subi %span_count, %c1 : i32
     %leading = scalar.ctlzi %below : i32
@@ -519,7 +593,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
 {"    %proposal = func.call @execute_4(%pstage, %metadata, %tokens, %draft_origins, %draft_cache) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)" if dflash else ("    %proposal = func.call @execute_5(%pstage, %metadata, %tokens, %origins, %state, %carry) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)" if draft["kind"] == "assist" else "    %proposal = func.call @execute_5(%pstage, %metadata, %tokens, %draft_origins, %draft_cache, %carry) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)")}
   }}
   %target = scf.if %verify -> (i64) {{
-    %vstage = view.load %verify_view[%shape_index] : view<128xi32> -> i32
+    %vstage = view.load %verify_view[%{eff}] : view<128xi32> -> i32
     %completion = func.call @execute_7(%vstage, %residual, %metadata, %origins, %state, %tokens, %committed, %results) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     %count64 = scalar.extui %span_count : i32 to i64
     %record = scalar.constant 40 : i64
@@ -527,7 +601,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
     %feedback = func.call @feedback(%c1, %results, %c0_i64, %length) : (i32, hal.buffer, i64, i64) -> (i64)
     scf.yield %completion : i64
   }} else {{
-    %astage = view.load %advance_view[%shape_index] : view<128xi32> -> i32
+    %astage = view.load %advance_view[%{eff}] : view<128xi32> -> i32
     %completion = func.call @execute_6(%astage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     %count64 = scalar.extui %span_count : i32 to i64
     %word = scalar.constant 4 : i64
@@ -541,7 +615,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
     }} else {{
       scf.yield %metadata : hal.buffer
     }}
-    %wstage = view.load %warm_view[%shape_index] : view<128xi32> -> i32
+    %wstage = view.load %warm_view[%{eff}] : view<128xi32> -> i32
 {"    %warm = func.call @execute_5(%wstage, %residual, %accepted, %draft_origins, %draft_cache, %tokens) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)" if dflash else "    %warm = func.call @execute_6(%wstage, %residual, %accepted, %draft_origins, %draft_cache, %carry, %tokens) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)"}
     scf.yield %warm : i64
   }} else {{
