@@ -267,8 +267,26 @@ def render(d):
         serve.append(f"--memory_bytes={memory}")
     api = ("answers OpenAI-style `/v1/chat/completions` requests" if kind == "chat"
            else f"answers SystemOne decision requests at `{feats['api']['value']['endpoint']}`")
-    L += ["## Quick start", "", "```bash", 'pip install "hrx-loom[hf]"', " ".join(fetch), " ".join(serve), "```", "",
-          f"The server listens on `127.0.0.1:8080` and {api}.", ""]
+    pin = facts.get("sdk")   # llm_config.json "sdk": the package needs this hrx-loom build, not the PyPI default
+    if pin and pin.get("source") == "ci":
+        root = f"~/loom-{pin['artifact_id']}"
+        install = [f"git clone {SKILLS_URL}",
+                   f"loom-skills/skills/loom-setup/scripts/install_loom.sh {root} ci:{pin['artifact_id']}",
+                   f"source {root}/.venv/bin/activate"]
+    elif pin and pin.get("hrx_loom"):
+        install = [f'pip install "hrx-loom[hf]=={pin["hrx_loom"]}"']
+    else:
+        install = ['pip install "hrx-loom[hf]"']
+    L += ["## Quick start", "", "```bash", *install, " ".join(fetch), " ".join(serve), "```", ""]
+    if pin and pin.get("source") == "ci":
+        sha = (pin.get("hrx_system_sha") or "")[:8]
+        L += [f"This package needs an hrx-loom development build (hrx-loom {pin.get('hrx_loom')}, ROCm/hrx-system "
+              f"`{sha}`, CI artifact `{pin['artifact_id']}`); the PyPI release does not run it yet. `install_loom.sh` "
+              "downloads that wheel with an authenticated GitHub CLI (`gh auth login`). "
+              f"**These instructions expire on {pin.get('expires') or 'the artifact expiry date'}**, when GitHub "
+              "deletes the CI artifact; after that the package's SDK pin has to be refreshed to a newer build "
+              "(or a PyPI release that has the features), and this card republished.", ""]
+    L += [f"The server listens on `127.0.0.1:8080` and {api}.", ""]
 
     # ---- performance
     bname = base["name"]
