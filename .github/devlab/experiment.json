@@ -9,9 +9,9 @@
  },
  "variants": [
   {
-   "name": "fn-compare",
+   "name": "fn-probe-think",
    "steps": [
-    "gates:quick"
+    "probe"
    ]
   }
  ]

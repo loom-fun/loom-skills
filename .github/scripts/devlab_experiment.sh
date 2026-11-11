@@ -278,6 +278,8 @@ EOF
       serve || { res[$s]=ERROR; continue; }
       code=$(curl -s -m 900 -o "$out/probe_reply.json" -w '%{http_code}' "$url/v1/chat/completions" -H 'content-type: application/json' \
         -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"What is 2+2?\"}],\"max_tokens\":16,\"chat_template_kwargs\":{\"enable_thinking\":false}}")
+      curl -s -m 900 "$url/v1/chat/completions" -H 'content-type: application/json' \
+        -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the capital of France? Answer in one word.\"}],\"max_tokens\":80}" > "$out/probe_reply_thinking.json"   # thinking at the template default
       curl -s "$url/v1/status" > "$out/probe_status.json"; head -c 600 "$out/probe_reply.json"; echo
       { echo "http $code"; echo "gtt_used $(cat /sys/class/drm/card*/device/mem_info_gtt_used 2>/dev/null | tr '\n' ' ')"; free -g | head -2; dmesg 2>/dev/null | tail -25; } >> "$out/probe.txt"; tail -12 "$out/probe.txt"
       res[$s]="http $code: $(head -c 160 "$out/probe_reply.json" | tr '\n' ' ')";;
