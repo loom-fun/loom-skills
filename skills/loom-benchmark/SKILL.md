@@ -315,7 +315,7 @@ $T "$S/c4_steady.py" http://127.0.0.1:8160 4 --model <id>;  $T "$S/c4_steady.py"
 | prefill[] | 1k and 2k-token documents with max_tokens=4. prompt_tokens / TTFT, the median of 5 runs (`--repeats`); single runs varied 1.5–2.9k tok/s on one build. |
 | decode_tps_2k / _32k | Decode with that much context in the KV cache. |
 | prefill_long[] | 8k / 16k / 32k documents. |
-| c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding. Use this for "N requests at once". A run in which a stream failed exits 1 and records nothing (`make_info.py` also skips a rate <= 0). |
+| c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding, after the untimed warm-up passes (rates in `warmup_agg_tps`). Use this for "N requests at once". A run in which a stream failed exits 1 and records nothing (`make_info.py` also skips a rate <= 0). |
 
 Rules:
 - A card's headline numbers come from one local session: Loom and llama.cpp back to back on a quiet local GPU, the
@@ -325,7 +325,13 @@ Rules:
 - Warm up after every restart. `perf.py` first sends its first timed request's own shape, untimed (the 300-token
   essay with another nonce: prefill, decode, drafting and first-use kernels all run once; a trivial "Say hi."
   left DevLab's short-prompt decode 51-60 % below the local session's while 2k decode agreed), and `c4_steady.py`
-  one short request. Every caller (qualify, finalize, devlab_perf) gets the same warm-up. When timing by hand:
+  one short request and then untimed full N-stream passes (same shape as the timed one) until two successive passes
+  agree within 10 % (at most 4; `--warmup-passes`, `--warmup-tol`). Without them the median of three timed runs
+  reported a cold number: a model that reads weights on demand (Flash-Next's per-layer-embedding table) decoded 4
+  streams at 4 tok/s for its first two passes on a DevLab runner with a slow disk (cold page cache, IO pressure 93 %),
+  then 65. Every warm-up pass's rate is in the JSON line (`warmup_agg_tps`) and nothing is dropped: a server that stays
+  slow after the warm-up reports the slow number, and its slow warm-up passes show why. Every caller (qualify, finalize,
+  devlab_perf) gets the same warm-up. When timing by hand:
   `curl -s URL/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"<id>","messages":[{"role":"user","content":"hi"}],"max_tokens":8}'`.
 - A decode rate counts only if its request generated at least half its max_tokens. `perf.py` logs each timed
   decode request's `completion_tokens` (both engines); a short one is re-requested once with another nonce, then
