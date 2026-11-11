@@ -8,7 +8,7 @@ usage: python build.py CONFIG.json PACKAGE_DIR --tokenizer TOKENIZER.json
 
 Writes PACKAGE_DIR/{model.json, weights.loom, tokenizer.json, program/*.loom,
 parameter/<gguf> (symlink)}. Serve it with
-  loom-serve --model=PACKAGE_DIR/model.json '--device=amdgpu://?completion_spin_ns=1000000000' --memory_bytes=... --listen=...
+  loom-serve --model=PACKAGE_DIR/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=... --listen=...
 """
 import argparse
 import json

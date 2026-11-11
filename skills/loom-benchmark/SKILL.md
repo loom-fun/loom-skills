@@ -319,7 +319,7 @@ $T "$S/c4_steady.py" http://127.0.0.1:8160 4 --model <id>;  $T "$S/c4_steady.py"
 
 Rules:
 - A card's numbers come from one `devlab-perf` job: Loom (card programs, active wait: `serve.sh` serves
-  `--device=amdgpu` as `amdgpu://?completion_spin_ns=1000000000`, `LOOM_ACTIVE_WAIT=0` opts out for A/B only) and
+  `--device=amdgpu` as `amdgpu://?completion_spin_ns=4294967295`, `LOOM_ACTIVE_WAIT=0` opts out for A/B only) and
   llama.cpp on the same runner (`loom-org` step 3). Local runs are for development, never card numbers, and a Loom
   number measured without the active wait is not comparable. A job's variant comparisons (`devlab-perf`,
   `devlab-experiment`) compare within that job only.
