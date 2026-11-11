@@ -6,6 +6,15 @@
 // Text-only compositions keep their original compilation and parameter costs.
 config.def @flash_next.image_inputs = false : i1
 
+// PLE residency: the number K (0..16) of PLE hash heads whose table rows stay
+// resident. The table's 16 heads own contiguous row ranges, so the first K
+// heads are bound as a prefix of per_layer_token_embd.weight and looked up in
+// place; the remaining heads are read on demand with parameters.gather into a
+// staging region. K = 0 binds no table rows (about 77 GiB resident weights);
+// K = 16 is the catalog behaviour (whole 26.82 GiB table resident, no gather).
+// Select with the "flash_next.ple_resident_heads" key in a model.json variant "config".
+config.def @flash_next.ple_resident_heads = 0 : i64
+
 // Rows in the persistent GPU-resident PLE hot-row cache (100 bytes each:
 // 90-byte IQ4_NL row in a 96-byte slot plus a 4-byte tag). 5242880 = 500 MiB.
 // Zero disables the cache; keep it a multiple of 4. Override with the
@@ -108,6 +117,37 @@ global.rodata.def @limits_error = bytes("466c6173682d4e6578742072657175697265732
 // flash_next.ple.cache_entries
 global.rodata.def @cache_entries_key = bytes("666c6173685f6e6578742e706c652e63616368655f656e7472696573")
 
+// flash_next.ple.resident_heads
+global.rodata.def @heads_key = bytes("666c6173685f6e6578742e706c652e7265736964656e745f6865616473")
+
+// flash_next.ple.demand
+global.rodata.def @demand_key = bytes("666c6173685f6e6578742e706c652e64656d616e64")
+
+// 1 when PLE rows are read on demand (parameters.gather), 0 when resident.
+func.def @ple_is_demand() -> (i1) {
+  %heads = config.get @flash_next.ple_resident_heads : i64
+  %all = scalar.constant 16 : i64
+  %demand = scalar.cmpi ult, %heads, %all : i64
+  func.return %demand : i1
+}
+
+func.def @ple_demand_word() -> (i64) {
+  %demand = func.call @ple_is_demand() : () -> (i1)
+  %on = scalar.constant 1 : i64
+  %off = scalar.constant 0 : i64
+  %word = scf.select %demand, %on, %off : i64
+  func.return %word : i64
+}
+
+// Hot-row cache entries: zero in resident mode (no cache, no staging).
+func.def @ple_cache_entries() -> (i64) {
+  %demand = func.call @ple_is_demand() : () -> (i1)
+  %entries = config.get @flash_next.ple_cache_entries : i64
+  %none = scalar.constant 0 : i64
+  %selected = scf.select %demand, %entries, %none : i64
+  func.return %selected : i64
+}
+
 // qwen38.packet_capacity
 global.rodata.def @packet_capacity_key = bytes("7177656e33382e7061636b65745f6361706163697479")
 
@@ -134,8 +174,14 @@ func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %context: i64,
   %verification_key = global.load @verification_key : buffer
   func.call @config_i64(%stage, %verification_key, %verification) : (i32, buffer, i64)
   %cache_key = global.load @cache_entries_key : buffer
-  %cache_entries = config.get @flash_next.ple_cache_entries : i64
+  %cache_entries = func.call @ple_cache_entries() : () -> (i64)
   func.call @config_i64(%stage, %cache_key, %cache_entries) : (i32, buffer, i64)
+  %demand_key = global.load @demand_key : buffer
+  %demand_word = func.call @ple_demand_word() : () -> (i64)
+  func.call @config_i64(%stage, %demand_key, %demand_word) : (i32, buffer, i64)
+  %heads_key = global.load @heads_key : buffer
+  %resident_heads = config.get @flash_next.ple_resident_heads : i64
+  func.call @config_i64(%stage, %heads_key, %resident_heads) : (i32, buffer, i64)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %sidecar_value = index.cast %sidecar_roots : i32 to index
@@ -207,10 +253,14 @@ func.def @qwen38.storage(%tokens: i64, %context: i64, %pool: i64, %rows_arg: i64
   %table_bytes = scalar.addi %map_origin, %map_bytes : i64
   // Residual rows plus on-demand PLE staging: 16 heads x 90 B rows and
   // 16 x 24 B gather descriptors, a 16 x 4 B source map and a 256 B dedupe claim table per token (see flash_next_ple_stage).
-  %residual_stride = scalar.constant 22624 : i64
+  // Resident mode keeps the catalog's 20480-byte rows and has no cache.
+  %demand_storage = func.call @ple_is_demand() : () -> (i1)
+  %stride_demand = scalar.constant 22624 : i64
+  %stride_resident = scalar.constant 20480 : i64
+  %residual_stride = scf.select %demand_storage, %stride_demand, %stride_resident : i64
   %residual_rows_bytes = scalar.muli %tokens, %residual_stride : i64
   // Persistent PLE hot-row cache follows the per-token rows (flash_next_ple_cache_probe).
-  %ple_cache_entries = config.get @flash_next.ple_cache_entries : i64
+  %ple_cache_entries = func.call @ple_cache_entries() : () -> (i64)
   %ple_cache_row_bytes = scalar.constant 100 : i64
   %ple_cache_bytes = scalar.muli %ple_cache_entries, %ple_cache_row_bytes : i64
   %residual_bytes = scalar.addi %residual_rows_bytes, %ple_cache_bytes : i64
@@ -376,8 +426,14 @@ func.def @declare_ple_stage(%tokens: i64, %spans: i64, %context: i64, %pool: i64
   %verification_key = global.load @verification_key : buffer
   func.call @config_i64(%stage, %verification_key, %verification) : (i32, buffer, i64)
   %cache_key = global.load @cache_entries_key : buffer
-  %cache_entries = config.get @flash_next.ple_cache_entries : i64
+  %cache_entries = func.call @ple_cache_entries() : () -> (i64)
   func.call @config_i64(%stage, %cache_key, %cache_entries) : (i32, buffer, i64)
+  %demand_key = global.load @demand_key : buffer
+  %demand_word = func.call @ple_demand_word() : () -> (i64)
+  func.call @config_i64(%stage, %demand_key, %demand_word) : (i32, buffer, i64)
+  %heads_key = global.load @heads_key : buffer
+  %resident_heads = config.get @flash_next.ple_resident_heads : i64
+  func.call @config_i64(%stage, %heads_key, %resident_heads) : (i32, buffer, i64)
   func.return %stage : i32
 }
 
@@ -473,7 +529,11 @@ func.def @declare_packed_stages(%shapes: buffer, %shape_count: i64, %context: i6
   }
   // On-demand PLE catalogs follow every other stage: one per target shape and,
   // with drafting, one per verification shape.
-  %ple_target = scf.for %i = [%c0 to %count step %c1](%first = %c0_i32 : i32) -> (i32) {
+  // Resident mode declares none of them (the lookup happens inside the epoch).
+  %demand = func.call @ple_is_demand() : () -> (i1)
+  %ple_count = scf.select %demand, %count, %c0 : index
+  %ple_enabled = scalar.andi %enabled, %demand : i1
+  %ple_target = scf.for %i = [%c0 to %ple_count step %c1](%first = %c0_i32 : i32) -> (i32) {
     %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
     %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
     %ple = func.call @declare_ple_stage(%tokens, %spans, %context, %pool, %c0_i64, %packet_capacity, %mixed) : (i64, i64, i64, i64, i64, i64, i64) -> (i32)
@@ -481,7 +541,7 @@ func.def @declare_packed_stages(%shapes: buffer, %shape_count: i64, %context: i6
     %origin = scf.select %initial, %ple, %first : i32
     scf.yield %origin : i32
   }
-  %ple_verify = scf.if %enabled -> (i32) {
+  %ple_verify = scf.if %ple_enabled -> (i32) {
     %first_verify = scf.for %i = [%c0 to %count step %c1](%first = %c0_i32 : i32) -> (i32) {
       %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
       %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
@@ -569,8 +629,14 @@ func.def public @text_prepare_v1(%prefill: i64, %context: i64, %pool: i64, %rows
   func.call @qwen38.ple_store(%state, %c3_ple, %ple_verify_word) : (buffer, index, i64)
   func.call @qwen38.ple_store(%state, %c4_ple, %ple_verify_mixed_word) : (buffer, index, i64)
   func.call @qwen38.ple_store(%state, %c5_ple, %shape_count) : (buffer, index, i64)
+  %c6_ple = index.constant 6 : index
+  %demand_word = func.call @ple_demand_word() : () -> (i64)
+  func.call @qwen38.ple_store(%state, %c6_ple, %demand_word) : (buffer, index, i64)
   %max_shapes = scalar.constant 120 : i64
-  %shapes_fit = scalar.cmpi ule, %shape_count, %max_shapes : i64
+  %within_limit = scalar.cmpi ule, %shape_count, %max_shapes : i64
+  %resident_mode = scalar.cmpi eq, %demand_word, %c0_i64 : i64
+  %always = scalar.constant true : i1
+  %shapes_fit = scf.select %resident_mode, %always, %within_limit : i1
   %shapes_fit_word = scalar.extui %shapes_fit : i1 to i32
   %ple_diagnostic = global.load @ple_shape_error : buffer
   func.call @require(%shapes_fit_word, %ple_diagnostic) : (i32, buffer)

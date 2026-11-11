@@ -427,7 +427,7 @@
  },
  "variants": {
   "ud-q4-k-xl": {
-   "description": "Four ordered UD-Q4_K_XL text shards.",
+   "description": "Four ordered UD-Q4_K_XL text shards. Reads per_layer_token_embd.weight rows on demand (parameters.gather) instead of keeping the 26.82 GiB table resident.",
    "services": {
     "chat": {
      "programs": [
@@ -465,12 +465,15 @@
        "origin": "@checkpoint/tokenizer.json",
        "format": "huggingface-json"
       }
+     },
+     "config": {
+      "flash_next.ple_resident_heads": 0
      }
     }
    }
   },
   "ud-q4-k-xl-mtp": {
-   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint.",
+   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint. Reads per_layer_token_embd.weight rows on demand (parameters.gather) instead of keeping the 26.82 GiB table resident.",
    "services": {
     "chat": {
      "programs": [
@@ -517,12 +520,15 @@
        "origin": "@checkpoint/tokenizer.json",
        "format": "huggingface-json"
       }
+     },
+     "config": {
+      "flash_next.ple_resident_heads": 0
      }
     }
    }
   },
   "ud-q4-k-xl-vision": {
-   "description": "Four ordered UD-Q4_K_XL text shards. Includes the matching original BF16 image projector.",
+   "description": "Four ordered UD-Q4_K_XL text shards. Includes the matching original BF16 image projector. Reads per_layer_token_embd.weight rows on demand (parameters.gather) instead of keeping the 26.82 GiB table resident.",
    "services": {
     "vision-chat": {
      "programs": [
@@ -571,13 +577,14 @@
       }
      },
      "config": {
-      "flash_next.image_inputs": true
+      "flash_next.image_inputs": true,
+      "flash_next.ple_resident_heads": 0
      }
     }
    }
   },
   "ud-q4-k-xl-vision-mtp": {
-   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint. Includes the matching original BF16 image projector.",
+   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint. Includes the matching original BF16 image projector. Reads per_layer_token_embd.weight rows on demand (parameters.gather) instead of keeping the 26.82 GiB table resident.",
    "services": {
     "vision-chat": {
      "programs": [
@@ -635,7 +642,230 @@
       }
      },
      "config": {
-      "flash_next.image_inputs": true
+      "flash_next.image_inputs": true,
+      "flash_next.ple_resident_heads": 0
+     }
+    }
+   }
+  },
+  "ud-q4-k-xl-ple-k12": {
+   "description": "Four ordered UD-Q4_K_XL text shards. Partial residency, needs about 110 GiB of host memory (prefill 10 to 25 percent faster). Keeps the first 12 of 16 PLE hash heads of per_layer_token_embd.weight resident and reads the rest on demand.",
+   "services": {
+    "chat": {
+     "programs": [
+      "source"
+     ],
+     "parameters": {
+      "model": {
+       "files": [
+        {
+         "path": "parameter/model-00001.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00002.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00003.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00004.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+         "format": "gguf"
+        }
+       ]
+      }
+     },
+     "tokenizers": {
+      "text": {
+       "path": "tokenizer.json",
+       "origin": "@checkpoint/tokenizer.json",
+       "format": "huggingface-json"
+      }
+     },
+     "config": {
+      "flash_next.ple_resident_heads": 12
+     }
+    }
+   }
+  },
+  "ud-q4-k-xl-mtp-ple-k10": {
+   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint. Partial residency, needs about 110 GiB of host memory (prefill 10 to 25 percent faster). Keeps the first 10 of 16 PLE hash heads of per_layer_token_embd.weight resident and reads the rest on demand.",
+   "services": {
+    "chat": {
+     "programs": [
+      "source"
+     ],
+     "parameters": {
+      "model": {
+       "files": [
+        {
+         "path": "parameter/model-00001.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00002.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00003.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00004.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+         "format": "gguf"
+        }
+       ]
+      },
+      "draft": {
+       "files": [
+        {
+         "path": "parameter/mtp.gguf",
+         "origin": "@quantized/mtp-Qwen3.8-Flash-Next-Q8_0.gguf",
+         "format": "gguf"
+        }
+       ]
+      }
+     },
+     "tokenizers": {
+      "text": {
+       "path": "tokenizer.json",
+       "origin": "@checkpoint/tokenizer.json",
+       "format": "huggingface-json"
+      }
+     },
+     "config": {
+      "flash_next.ple_resident_heads": 10
+     }
+    }
+   }
+  },
+  "ud-q4-k-xl-vision-ple-k12": {
+   "description": "Four ordered UD-Q4_K_XL text shards. Includes the matching original BF16 image projector. Partial residency, needs about 110 GiB of host memory (prefill 10 to 25 percent faster). Keeps the first 12 of 16 PLE hash heads of per_layer_token_embd.weight resident and reads the rest on demand.",
+   "services": {
+    "vision-chat": {
+     "programs": [
+      "vision-source"
+     ],
+     "parameters": {
+      "model": {
+       "files": [
+        {
+         "path": "parameter/model-00001.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00002.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00003.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00004.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+         "format": "gguf"
+        }
+       ]
+      },
+      "vision": {
+       "files": [
+        {
+         "path": "parameter/mmproj.gguf",
+         "origin": "@quantized/mmproj-BF16.gguf",
+         "format": "gguf"
+        }
+       ]
+      }
+     },
+     "tokenizers": {
+      "text": {
+       "path": "tokenizer.json",
+       "origin": "@checkpoint/tokenizer.json",
+       "format": "huggingface-json"
+      }
+     },
+     "config": {
+      "flash_next.image_inputs": true,
+      "flash_next.ple_resident_heads": 12
+     }
+    }
+   }
+  },
+  "ud-q4-k-xl-vision-mtp-ple-k10": {
+   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint. Includes the matching original BF16 image projector. Partial residency, needs about 110 GiB of host memory (prefill 10 to 25 percent faster). Keeps the first 10 of 16 PLE hash heads of per_layer_token_embd.weight resident and reads the rest on demand.",
+   "services": {
+    "vision-chat": {
+     "programs": [
+      "vision-source"
+     ],
+     "parameters": {
+      "model": {
+       "files": [
+        {
+         "path": "parameter/model-00001.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00002.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00003.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+         "format": "gguf"
+        },
+        {
+         "path": "parameter/model-00004.gguf",
+         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+         "format": "gguf"
+        }
+       ]
+      },
+      "draft": {
+       "files": [
+        {
+         "path": "parameter/mtp.gguf",
+         "origin": "@quantized/mtp-Qwen3.8-Flash-Next-Q8_0.gguf",
+         "format": "gguf"
+        }
+       ]
+      },
+      "vision": {
+       "files": [
+        {
+         "path": "parameter/mmproj.gguf",
+         "origin": "@quantized/mmproj-BF16.gguf",
+         "format": "gguf"
+        }
+       ]
+      }
+     },
+     "tokenizers": {
+      "text": {
+       "path": "tokenizer.json",
+       "origin": "@checkpoint/tokenizer.json",
+       "format": "huggingface-json"
+      }
+     },
+     "config": {
+      "flash_next.image_inputs": true,
+      "flash_next.ple_resident_heads": 10
      }
     }
    }
@@ -892,6 +1122,258 @@
    "memory": {
     "weights_bytes": 87163978752,
     "workload": "Resident packed parameter bank without the 26.82 GiB per_layer_token_embd.weight, whose rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+   }
+  },
+  "chat-ple-k12": {
+   "service": "chat",
+   "variant": "ud-q4-k-xl-ple-k12",
+   "programs": "source",
+   "options": {
+    "sampling": {
+     "temperature": 0,
+     "top_p": 1,
+     "top_k": 0
+    }
+   },
+   "execution": {
+    "rows": 4,
+    "context_capacity": 16384,
+    "prefill_capacity": 16384,
+    "draft_depth": 0,
+    "continuation_epochs": 1,
+    "checkpoint_capacity": 4,
+    "max_tokens": 256
+   },
+   "request": {
+    "messages": [
+     {
+      "role": "user",
+      "content": "What is 2+2?"
+     }
+    ],
+    "enable_thinking": false,
+    "temperature": 0,
+    "max_tokens": 64
+   },
+   "memory": {
+    "weights_bytes": 104469083636,
+    "workload": "Resident packed parameter bank with the first 12 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 240000802); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+   }
+  },
+  "mtp-ple-k10": {
+   "service": "chat",
+   "variant": "ud-q4-k-xl-mtp-ple-k10",
+   "programs": "source",
+   "options": {
+    "sampling": {
+     "temperature": 0,
+     "top_p": 1,
+     "top_k": 0
+    }
+   },
+   "execution": {
+    "rows": 4,
+    "context_capacity": 16384,
+    "prefill_capacity": 16384,
+    "draft_depth": 3,
+    "continuation_epochs": 1,
+    "checkpoint_capacity": 4,
+    "max_tokens": 256
+   },
+   "request": {
+    "messages": [
+     {
+      "role": "user",
+      "content": "What is 2+2?"
+     }
+    ],
+    "enable_thinking": false,
+    "temperature": 0,
+    "max_tokens": 64
+   },
+   "memory": {
+    "weights_bytes": 104090286248,
+    "workload": "Resident packed parameter bank with the first 10 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 200000548); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+   }
+  },
+  "mtp-continuation-ple-k10": {
+   "service": "chat",
+   "variant": "ud-q4-k-xl-mtp-ple-k10",
+   "programs": "source",
+   "options": {
+    "sampling": {
+     "temperature": 0,
+     "top_p": 1,
+     "top_k": 0
+    }
+   },
+   "execution": {
+    "rows": 4,
+    "context_capacity": 16384,
+    "prefill_capacity": 16384,
+    "draft_depth": 3,
+    "continuation_epochs": 2,
+    "checkpoint_capacity": 4,
+    "max_tokens": 256
+   },
+   "request": {
+    "messages": [
+     {
+      "role": "user",
+      "content": "What is 2+2?"
+     }
+    ],
+    "enable_thinking": false,
+    "temperature": 0,
+    "max_tokens": 64
+   },
+   "memory": {
+    "weights_bytes": 104090286248,
+    "workload": "Resident packed parameter bank with the first 10 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 200000548); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+   }
+  },
+  "long-context-ple-k12": {
+   "service": "chat",
+   "variant": "ud-q4-k-xl-ple-k12",
+   "programs": "source",
+   "options": {
+    "sampling": {
+     "temperature": 0,
+     "top_p": 1,
+     "top_k": 0
+    }
+   },
+   "execution": {
+    "rows": 8,
+    "context_capacity": 262144,
+    "prefill_capacity": 16384,
+    "draft_depth": 0,
+    "continuation_epochs": 1,
+    "checkpoint_capacity": 8,
+    "max_tokens": 256
+   },
+   "request": {
+    "messages": [
+     {
+      "role": "user",
+      "content": "What is 2+2?"
+     }
+    ],
+    "enable_thinking": false,
+    "temperature": 0,
+    "max_tokens": 64
+   },
+   "memory": {
+    "weights_bytes": 104469083636,
+    "workload": "Resident packed parameter bank with the first 12 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 240000802); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+   }
+  },
+  "long-context-mtp-ple-k10": {
+   "service": "chat",
+   "variant": "ud-q4-k-xl-mtp-ple-k10",
+   "programs": "source",
+   "options": {
+    "sampling": {
+     "temperature": 0,
+     "top_p": 1,
+     "top_k": 0
+    }
+   },
+   "execution": {
+    "rows": 8,
+    "context_capacity": 262144,
+    "prefill_capacity": 16384,
+    "draft_depth": 3,
+    "continuation_epochs": 1,
+    "checkpoint_capacity": 8,
+    "max_tokens": 256
+   },
+   "request": {
+    "messages": [
+     {
+      "role": "user",
+      "content": "What is 2+2?"
+     }
+    ],
+    "enable_thinking": false,
+    "temperature": 0,
+    "max_tokens": 64
+   },
+   "memory": {
+    "weights_bytes": 104090286248,
+    "workload": "Resident packed parameter bank with the first 10 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 200000548); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+   }
+  },
+  "vision-ple-k12": {
+   "service": "vision-chat",
+   "variant": "ud-q4-k-xl-vision-ple-k12",
+   "programs": "vision-source",
+   "options": {
+    "sampling": {
+     "temperature": 0,
+     "top_p": 1,
+     "top_k": 0
+    }
+   },
+   "execution": {
+    "rows": 4,
+    "context_capacity": 16384,
+    "prefill_capacity": 16384,
+    "draft_depth": 0,
+    "continuation_epochs": 1,
+    "checkpoint_capacity": 4,
+    "max_tokens": 256
+   },
+   "request": {
+    "messages": [
+     {
+      "role": "user",
+      "content": "What is 2+2?"
+     }
+    ],
+    "enable_thinking": false,
+    "temperature": 0,
+    "max_tokens": 64
+   },
+   "memory": {
+    "weights_bytes": 105542825460,
+    "workload": "Resident packed parameter bank with the first 12 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 240000802); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+   }
+  },
+  "vision-mtp-ple-k10": {
+   "service": "vision-chat",
+   "variant": "ud-q4-k-xl-vision-mtp-ple-k10",
+   "programs": "vision-source",
+   "options": {
+    "sampling": {
+     "temperature": 0,
+     "top_p": 1,
+     "top_k": 0
+    }
+   },
+   "execution": {
+    "rows": 4,
+    "context_capacity": 16384,
+    "prefill_capacity": 16384,
+    "draft_depth": 3,
+    "continuation_epochs": 1,
+    "checkpoint_capacity": 4,
+    "max_tokens": 256
+   },
+   "request": {
+    "messages": [
+     {
+      "role": "user",
+      "content": "What is 2+2?"
+     }
+    ],
+    "enable_thinking": false,
+    "temperature": 0,
+    "max_tokens": 64
+   },
+   "memory": {
+    "weights_bytes": 105164028072,
+    "workload": "Resident packed parameter bank with the first 10 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 200000548); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
    }
   }
  }

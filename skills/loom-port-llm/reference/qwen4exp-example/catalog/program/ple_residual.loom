@@ -4,7 +4,12 @@
 
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
-command.decl @flash_next_ple_embed() launch(%span: buffer, %staging: buffer, %output: buffer)
+// flash_next.ple.demand: 1 reads PLE rows on demand (gather), 0 uses the resident table.
+config.decl @flash_next.ple.demand : %value: index where [range(%value, 0, 1)]
+
+command.decl @flash_next_ple_embed() launch(%parameters: buffer, %span: buffer, %staging: buffer, %output: buffer)
+
+command.decl @flash_next_ple_embed_resident(%history_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %origins: buffer, %tokens: buffer, %arena: buffer, %output: buffer)
 
 kernel.decl @flash_next_ple_cache_claim() launch(%arena_arg: buffer)
 
@@ -32,10 +37,17 @@ command.def public @flash_next_ple_residual(%layer: index, %token_history_origin
   %value_weight = command.parameter %parameters, "blk.{}.ple_value.weight"[%layer] : view<2560x80x34xi8>
 
   %embedding = buffer.alloca<global> align(256) %hidden_bytes : buffer
-  command.launch @flash_next_ple_embed(%span, %staging, %embedding) : (buffer, buffer, buffer)
-  // The staged rows are consumed exactly once per epoch (here); publish the freshly gathered ones to the persistent cache.
-  kernel.launch @flash_next_ple_cache_claim(%staging) : (buffer)
-  kernel.launch @flash_next_ple_cache_insert(%staging) : (buffer)
+  %demand = config.get @flash_next.ple.demand : index
+  %c0_mode = index.constant 0 : index
+  %on_demand = index.cmp ne, %demand, %c0_mode : index
+  scf.if %on_demand {
+    command.launch @flash_next_ple_embed(%parameters, %span, %staging, %embedding) : (buffer, buffer, buffer, buffer)
+    // The staged rows are consumed exactly once per epoch (here); publish the freshly gathered ones to the persistent cache.
+    kernel.launch @flash_next_ple_cache_claim(%staging) : (buffer)
+    kernel.launch @flash_next_ple_cache_insert(%staging) : (buffer)
+  } else {
+    command.launch @flash_next_ple_embed_resident[%token_history_origin](%parameters, %span, %mapping, %origins, %tokens, %arena, %embedding) : [offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  }
   %key = buffer.alloca<global> align(256) %residual_bytes : buffer
   %key_weight_block_size = index.constant 32 : index
   %key_weight_blocks = index.div %hidden, %key_weight_block_size : index

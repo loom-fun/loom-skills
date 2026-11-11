@@ -13,6 +13,10 @@ func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 // entries = 0 disables the cache.
 config.decl @qwen38.packet_capacity : %value: index where [range(%value, 2, 2147483646), multiple_of(%value, 2)]
 
+// Hash heads below this index read the leading rows of the resident table
+// (flash_next.ple_resident_heads); the others are gathered on demand.
+config.decl @flash_next.ple.resident_heads : %value: index where [range(%value, 0, 16)]
+
 config.decl @flash_next.ple.cache_entries : %value: index where [range(%value, 0, 1073741824), multiple_of(%value, 4)]
 
 func.def inline @flash_next_ple_cache_slot(%id64: i64, %entries: index) -> (i64) {
@@ -110,8 +114,8 @@ kernel.def @flash_next_ple_gather_lookup_iq4() {
   %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
   kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
-} launch(%span_arg: buffer, %staging_arg: buffer, %output_arg: buffer) {
-  %span, %staging, %output = buffer.assume.noalias %span_arg, %staging_arg, %output_arg : buffer, buffer, buffer
+} launch(%span_arg: buffer, %staging_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %span, %staging, %weight, %output = buffer.assume.noalias %span_arg, %staging_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer
   %capacity = config.get @flash_next.token_count : index
   %end = func.call @flash_next_token_count(%span, %capacity) : (buffer, index) -> (index)
   %token = kernel.workgroup.id<x> : index
@@ -138,38 +142,58 @@ kernel.def @flash_next_ple_gather_lookup_iq4() {
     %map_origin = index.scale %capacity, %map_stride : index, offset -> offset
     %sources = buffer.view %staging[%map_origin] : buffer -> view<[%capacity]x16xi32>
     %source_word = view.load %sources[%token, %head] : view<[%capacity]x16xi32> -> i32
-    %zero32 = scalar.constant 0 : i32
-    %from_cache = scalar.cmpi slt, %source_word, %zero32 : i32
-    %row_origin = scf.if %from_cache -> (offset) {
-      %minus_one = scalar.constant -1 : i32
-      %cache_slot32 = scalar.subi %minus_one, %source_word : i32
-      %cache_slot = index.cast %cache_slot32 : i32 to index
-      %entries = config.get @flash_next.ple.cache_entries : index
-      %tag_bytes = index.constant 4 : offset
-      %slot_bytes = index.constant 96 : offset
-      %residual_stride = index.constant 22624 : offset
-      %cache_origin = index.scale %capacity_packet, %residual_stride : index, offset -> offset
-      %tags_size = index.scale %entries, %tag_bytes : index, offset -> offset
-      %data_origin = index.add %cache_origin, %tags_size : offset
-      %slot_delta = index.scale %cache_slot, %slot_bytes : index, offset -> offset
-      %cached_origin = index.add %data_origin, %slot_delta : offset
-      scf.yield %cached_origin : offset
+    %resident_heads = config.get @flash_next.ple.resident_heads : index
+    %is_resident = index.cmp ult, %head, %resident_heads : index
+    scf.if %is_resident {
+      // Resident head: the source map holds the table row id; the weight view
+      // covers the leading rows of the table.
+      %id_index = index.cast %source_word : i32 to index
+      %id = index.assume %id_index [range(%id_index, 0, 320001535)] : index
+      %resident_row = index.scale %id, %row_bytes : index, offset -> offset
+      %resident_delta = index.scale %block, %block_bytes : index, offset -> offset
+      %resident_origin = index.add %resident_row, %resident_delta : offset
+      %codes_r, %scale_r = func.call @ggml_iq4_nl_block(%weight, %resident_origin) : (buffer, offset) -> (vector<32xi8>, f32)
+      %exact_r = vector.sitofp %codes_r : vector<32xi8> to vector<32xf32>
+      %bf_r = vector.fptrunc %exact_r : vector<32xf32> to vector<32xbf16>
+      %values_r = vector.extf %bf_r : vector<32xbf16> to vector<32xf32>
+      %scales_r = vector.splat %scale_r : vector<32xf32>
+      %scaled_r = vector.mulf %values_r, %scales_r : vector<32xf32>
+      %packed_r = vector.fptrunc %scaled_r : vector<32xf32> to vector<32xbf16>
+      vector.store %packed_r, %output_view[%token, %head, %channel] : vector<32xbf16>, view<[%capacity]x16x160xbf16>
     } else {
-      %slot = index.cast %source_word : i32 to index
-      %row_delta = index.scale %slot, %row_bytes : index, offset -> offset
-      %staged_origin = index.add %staging_base, %row_delta : offset
-      scf.yield %staged_origin : offset
+      %zero32 = scalar.constant 0 : i32
+      %from_cache = scalar.cmpi slt, %source_word, %zero32 : i32
+      %row_origin = scf.if %from_cache -> (offset) {
+        %minus_one = scalar.constant -1 : i32
+        %cache_slot32 = scalar.subi %minus_one, %source_word : i32
+        %cache_slot = index.cast %cache_slot32 : i32 to index
+        %entries = config.get @flash_next.ple.cache_entries : index
+        %tag_bytes = index.constant 4 : offset
+        %slot_bytes = index.constant 96 : offset
+        %residual_stride = index.constant 22624 : offset
+        %cache_origin = index.scale %capacity_packet, %residual_stride : index, offset -> offset
+        %tags_size = index.scale %entries, %tag_bytes : index, offset -> offset
+        %data_origin = index.add %cache_origin, %tags_size : offset
+        %slot_delta = index.scale %cache_slot, %slot_bytes : index, offset -> offset
+        %cached_origin = index.add %data_origin, %slot_delta : offset
+        scf.yield %cached_origin : offset
+      } else {
+        %slot = index.cast %source_word : i32 to index
+        %row_delta = index.scale %slot, %row_bytes : index, offset -> offset
+        %staged_origin = index.add %staging_base, %row_delta : offset
+        scf.yield %staged_origin : offset
+      }
+      %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+      %block_origin = index.add %row_origin, %block_delta : offset
+      %integer_codes, %scale = func.call @ggml_iq4_nl_block(%staging, %block_origin) : (buffer, offset) -> (vector<32xi8>, f32)
+      %exact_values = vector.sitofp %integer_codes : vector<32xi8> to vector<32xf32>
+      %codes = vector.fptrunc %exact_values : vector<32xf32> to vector<32xbf16>
+      %values = vector.extf %codes : vector<32xbf16> to vector<32xf32>
+      %scales = vector.splat %scale : vector<32xf32>
+      %scaled = vector.mulf %values, %scales : vector<32xf32>
+      %packed = vector.fptrunc %scaled : vector<32xf32> to vector<32xbf16>
+      vector.store %packed, %output_view[%token, %head, %channel] : vector<32xbf16>, view<[%capacity]x16x160xbf16>
     }
-    %block_delta = index.scale %block, %block_bytes : index, offset -> offset
-    %block_origin = index.add %row_origin, %block_delta : offset
-    %integer_codes, %scale = func.call @ggml_iq4_nl_block(%staging, %block_origin) : (buffer, offset) -> (vector<32xi8>, f32)
-    %exact_values = vector.sitofp %integer_codes : vector<32xi8> to vector<32xf32>
-    %codes = vector.fptrunc %exact_values : vector<32xf32> to vector<32xbf16>
-    %values = vector.extf %codes : vector<32xbf16> to vector<32xf32>
-    %scales = vector.splat %scale : vector<32xf32>
-    %scaled = vector.mulf %values, %scales : vector<32xf32>
-    %packed = vector.fptrunc %scaled : vector<32xf32> to vector<32xbf16>
-    vector.store %packed, %output_view[%token, %head, %channel] : vector<32xbf16>, view<[%capacity]x16x160xbf16>
   }
   kernel.return
 }
@@ -228,7 +252,10 @@ kernel.def @flash_next_ple_claim() {
   %claims = buffer.view %arena[%claim_origin] : buffer -> view<[%entries]xi64>
   %id_view = buffer.view %ids[%origin] : buffer -> view<[%capacity]x16xi32>
   %cache_entries = config.get @flash_next.ple.cache_entries : index
-  %live = index.cmp ult, %token, %end : index
+  %live_token = index.cmp ult, %token, %end : index
+  %resident_heads = config.get @flash_next.ple.resident_heads : index
+  %gathered_head = index.cmp uge, %head, %resident_heads : index
+  %live = scalar.andi %live_token, %gathered_head : i1
   scf.if %live {
     %id_i32 = view.load %id_view[%token, %head] : view<[%capacity]x16xi32> -> i32
     %id64 = scalar.extui %id_i32 : i32 to i64
@@ -327,7 +354,11 @@ kernel.def @flash_next_ple_descriptors() {
   %representative = scf.select %cached, %cache_code, %representative_miss : i64
   %leader_slot = scalar.cmpi eq, %representative, %slot64 : i64
   %representative32 = scalar.trunci %representative : i64 to i32
-  view.store %representative32, %sources[%token, %head] : i32, view<[%capacity]x16xi32>
+  // Resident heads publish their row id (read straight from the bound table prefix) and never fetch.
+  %resident_heads = config.get @flash_next.ple.resident_heads : index
+  %resident = index.cmp ult, %head, %resident_heads : index
+  %source_entry = scf.select %resident, %id_i32, %representative32 : i32
+  view.store %source_entry, %sources[%token, %head] : i32, view<[%capacity]x16xi32>
   %row_size = scalar.constant 90 : i64
   %source = scalar.muli %id64, %row_size : i64
   %row_delta = index.scale %slot, %row_bytes : index, offset -> offset
@@ -336,7 +367,9 @@ kernel.def @flash_next_ple_descriptors() {
   %fetch_slot = scalar.andi %live, %leader_slot : i1
   %not_cached_true = scalar.constant true : i1
   %not_cached = scalar.xori %cached, %not_cached_true : i1
-  %fetch = scalar.andi %fetch_slot, %not_cached : i1
+  %fetch_miss = scalar.andi %fetch_slot, %not_cached : i1
+  %not_resident = scalar.xori %resident, %not_cached_true : i1
+  %fetch = scalar.andi %fetch_miss, %not_resident : i1
   %length = scf.select %fetch, %row_size, %zero : i64
   %source_out = scf.select %fetch, %source, %zero : i64
   %destination_out = scf.select %fetch, %destination, %zero : i64

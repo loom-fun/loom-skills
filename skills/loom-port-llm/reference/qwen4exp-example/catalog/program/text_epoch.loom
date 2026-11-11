@@ -416,7 +416,7 @@ func.decl @qwen38.ple_load(%state: buffer, %slot: index) -> (i64)
 // PLE rows are read on demand: the PLE stage hashes token IDs into gather
 // descriptors, the checkpoint rows land in the residual buffer's staging
 // region, and the epoch stage that follows is ordered after the gather.
-func.def @flash_next.ple_gather(%control_state: buffer, %mixed: i1, %verify: i1, %shape: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer) {
+func.def @flash_next.ple_gather_demand(%control_state: buffer, %mixed: i1, %verify: i1, %shape: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
   %c3 = index.constant 3 : index
@@ -447,6 +447,19 @@ func.def @flash_next.ple_gather(%control_state: buffer, %mixed: i1, %verify: i1,
   %key = buffer.constant utf8("per_layer_token_embd.weight") : buffer
   %gathered = func.call @gather(%source, %key, %produced, %residual, %descriptor_origin, %count, %residual) : (i32, buffer, hal.fence, hal.buffer, i64, i64, hal.buffer) -> (hal.fence)
   func.call @join(%gathered) : (hal.fence)
+  func.return
+}
+
+// Resident mode (control-table slot 6 == 0) looks the rows up inside the epoch
+// and skips the gather entirely.
+func.def @flash_next.ple_gather(%control_state: buffer, %mixed: i1, %verify: i1, %shape: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer) {
+  %c6 = index.constant 6 : index
+  %mode = func.call @qwen38.ple_load(%control_state, %c6) : (buffer, index) -> (i64)
+  %zero = scalar.constant 0 : i64
+  %demand = scalar.cmpi ne, %mode, %zero : i64
+  scf.if %demand {
+    func.call @flash_next.ple_gather_demand(%control_state, %mixed, %verify, %shape, %residual, %metadata, %origins, %state, %tokens) : (buffer, i1, i1, i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+  }
   func.return
 }
 

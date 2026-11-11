@@ -32,13 +32,13 @@
   "expires": "2026-11-22"
  },
  "tokenizer": "Qwen/Qwen3.8-Flash-Next",
- "context": 16384,
+ "context": 262144,
  "prefill_capacity": 4096,
  "serve": {
   "args": [
    "--pool_backing=fixed"
   ],
-  "committed_bytes": 93000000000
+  "committed_bytes": 97000000000
  },
  "vision": {
   "variant": "ud-q4-k-xl-vision",

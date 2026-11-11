@@ -1,10 +1,141 @@
 // Flash-Next ple lookup command composition.
-// Rows are gathered on demand from the checkpoint into the staging region of
-// the residual buffer (see flash_next_ple_stage); no resident table binding.
+// Rows of hash heads at or above flash_next.ple_resident_heads (K) are gathered
+// on demand from the checkpoint into the staging region of the residual buffer
+// (see flash_next_ple_stage). Heads below K read the leading rows of the
+// resident table, bound as a prefix view of per_layer_token_embd.weight.
+// K = 16 uses flash_next_ple_lookup_resident (no gather at all).
 
-kernel.decl @flash_next_ple_gather_lookup_iq4() launch(%span_arg: buffer, %staging_arg: buffer, %output_arg: buffer)
+config.decl @flash_next.ple.resident_heads : %value: index where [range(%value, 0, 16)]
 
-command.def public @flash_next_ple_lookup() launch(%span: buffer, %staging: buffer, %output: buffer) {
-  kernel.launch @flash_next_ple_gather_lookup_iq4(%span, %staging, %output) : (buffer, buffer, buffer)
+config.decl @flash_next.ple.offset_1 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_2 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_3 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_4 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_5 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_6 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_7 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_8 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_9 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_10 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_11 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_12 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_13 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_14 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.offset_15 : %value: i32 where [range(%value, 0, 320001535)]
+
+kernel.decl @flash_next_ple_lookup_iq4() launch(%span_arg: buffer, %ids_arg: buffer, %weight_arg: buffer, %output_arg: buffer)
+
+kernel.decl @flash_next_ple_gather_lookup_iq4() launch(%span_arg: buffer, %staging_arg: buffer, %weight_arg: buffer, %output_arg: buffer)
+
+command.def public @flash_next_ple_lookup() launch(%parameters: buffer, %span: buffer, %staging: buffer, %output: buffer) {
+  %heads = config.get @flash_next.ple.resident_heads : index
+  %c0 = index.constant 0 : index
+  %any = index.cmp ne, %heads, %c0 : index
+  scf.if %any {
+    // Table rows covered by the first K heads (each head owns a contiguous row range).
+    %rows_16 = index.constant 320001536 : index
+    %off_15 = config.get @flash_next.ple.offset_15 : i32
+    %off_15_index = index.cast %off_15 : i32 to index
+    %k_15 = index.constant 15 : index
+    %is_15 = index.cmp eq, %heads, %k_15 : index
+    %rows_15 = scf.select %is_15, %off_15_index, %rows_16 : index
+    %off_14 = config.get @flash_next.ple.offset_14 : i32
+    %off_14_index = index.cast %off_14 : i32 to index
+    %k_14 = index.constant 14 : index
+    %is_14 = index.cmp eq, %heads, %k_14 : index
+    %rows_14 = scf.select %is_14, %off_14_index, %rows_15 : index
+    %off_13 = config.get @flash_next.ple.offset_13 : i32
+    %off_13_index = index.cast %off_13 : i32 to index
+    %k_13 = index.constant 13 : index
+    %is_13 = index.cmp eq, %heads, %k_13 : index
+    %rows_13 = scf.select %is_13, %off_13_index, %rows_14 : index
+    %off_12 = config.get @flash_next.ple.offset_12 : i32
+    %off_12_index = index.cast %off_12 : i32 to index
+    %k_12 = index.constant 12 : index
+    %is_12 = index.cmp eq, %heads, %k_12 : index
+    %rows_12 = scf.select %is_12, %off_12_index, %rows_13 : index
+    %off_11 = config.get @flash_next.ple.offset_11 : i32
+    %off_11_index = index.cast %off_11 : i32 to index
+    %k_11 = index.constant 11 : index
+    %is_11 = index.cmp eq, %heads, %k_11 : index
+    %rows_11 = scf.select %is_11, %off_11_index, %rows_12 : index
+    %off_10 = config.get @flash_next.ple.offset_10 : i32
+    %off_10_index = index.cast %off_10 : i32 to index
+    %k_10 = index.constant 10 : index
+    %is_10 = index.cmp eq, %heads, %k_10 : index
+    %rows_10 = scf.select %is_10, %off_10_index, %rows_11 : index
+    %off_9 = config.get @flash_next.ple.offset_9 : i32
+    %off_9_index = index.cast %off_9 : i32 to index
+    %k_9 = index.constant 9 : index
+    %is_9 = index.cmp eq, %heads, %k_9 : index
+    %rows_9 = scf.select %is_9, %off_9_index, %rows_10 : index
+    %off_8 = config.get @flash_next.ple.offset_8 : i32
+    %off_8_index = index.cast %off_8 : i32 to index
+    %k_8 = index.constant 8 : index
+    %is_8 = index.cmp eq, %heads, %k_8 : index
+    %rows_8 = scf.select %is_8, %off_8_index, %rows_9 : index
+    %off_7 = config.get @flash_next.ple.offset_7 : i32
+    %off_7_index = index.cast %off_7 : i32 to index
+    %k_7 = index.constant 7 : index
+    %is_7 = index.cmp eq, %heads, %k_7 : index
+    %rows_7 = scf.select %is_7, %off_7_index, %rows_8 : index
+    %off_6 = config.get @flash_next.ple.offset_6 : i32
+    %off_6_index = index.cast %off_6 : i32 to index
+    %k_6 = index.constant 6 : index
+    %is_6 = index.cmp eq, %heads, %k_6 : index
+    %rows_6 = scf.select %is_6, %off_6_index, %rows_7 : index
+    %off_5 = config.get @flash_next.ple.offset_5 : i32
+    %off_5_index = index.cast %off_5 : i32 to index
+    %k_5 = index.constant 5 : index
+    %is_5 = index.cmp eq, %heads, %k_5 : index
+    %rows_5 = scf.select %is_5, %off_5_index, %rows_6 : index
+    %off_4 = config.get @flash_next.ple.offset_4 : i32
+    %off_4_index = index.cast %off_4 : i32 to index
+    %k_4 = index.constant 4 : index
+    %is_4 = index.cmp eq, %heads, %k_4 : index
+    %rows_4 = scf.select %is_4, %off_4_index, %rows_5 : index
+    %off_3 = config.get @flash_next.ple.offset_3 : i32
+    %off_3_index = index.cast %off_3 : i32 to index
+    %k_3 = index.constant 3 : index
+    %is_3 = index.cmp eq, %heads, %k_3 : index
+    %rows_3 = scf.select %is_3, %off_3_index, %rows_4 : index
+    %off_2 = config.get @flash_next.ple.offset_2 : i32
+    %off_2_index = index.cast %off_2 : i32 to index
+    %k_2 = index.constant 2 : index
+    %is_2 = index.cmp eq, %heads, %k_2 : index
+    %rows_2 = scf.select %is_2, %off_2_index, %rows_3 : index
+    %off_1 = config.get @flash_next.ple.offset_1 : i32
+    %off_1_index = index.cast %off_1 : i32 to index
+    %k_1 = index.constant 1 : index
+    %is_1 = index.cmp eq, %heads, %k_1 : index
+    %rows_1 = scf.select %is_1, %off_1_index, %rows_2 : index
+    %rows = index.add %rows_1, %c0 : index
+    %row_bytes = index.constant 90 : index
+    %bytes = index.mul %rows, %row_bytes : index
+    %table = command.parameter %parameters, "per_layer_token_embd.weight" : view<[%bytes]xi8>
+    kernel.launch @flash_next_ple_gather_lookup_iq4(%span, %staging, %table, %output) : (buffer, buffer, view<[%bytes]xi8>, buffer)
+  } else {
+    kernel.launch @flash_next_ple_gather_lookup_iq4(%span, %staging, %staging, %output) : (buffer, buffer, buffer, buffer)
+  }
+  command.return
+}
+
+command.def public @flash_next_ple_lookup_resident() launch(%parameters: buffer, %span: buffer, %row_ids: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "per_layer_token_embd.weight" : view<28800138240xi8>
+  kernel.launch @flash_next_ple_lookup_iq4(%span, %row_ids, %weight, %output) : (buffer, buffer, view<28800138240xi8>, buffer)
   command.return
 }
