@@ -3,7 +3,7 @@ name: nightly-gates
 # request set, agent, 200-draw sampling, needle at half and full context) on the LATEST published loom-fun
 # cards, one AMD DevLab Dispatch Strix Halo runner per card, in parallel. Deterministic: no LLM agent, no
 # skill run; each job fetches the card with loom-fetch, serves it and runs .github/scripts/nightly_gates.sh.
-# Correctness only: no performance is measured on DevLab (every card performance number comes from a local session).
+# Correctness only: nightly-gates measures no performance. Every card performance number comes from a devlab-perf job (devlab-perf.yml).
 # The development loop runs the lean LEVEL=dev gates instead (loom-benchmark SKILL.md, "Which level when").
 # A pull request labeled `nightly-gates` runs the matrix on its branch at LEVEL=dev and LEVEL=full (validates gate
 # or workflow changes, and measures the dev level's wall time on every card without using a developer's GPU).

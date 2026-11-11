@@ -2,6 +2,8 @@
 # One job of a DevLab performance experiment (.github/workflows/devlab-perf.yml): fetch a published loom-fun card,
 # build package variants from this checkout (or another ref), and compare them with each other and with llama.cpp
 # ON THIS RUNNER (runners differ from each other and from a dev machine: only same-job numbers are compared).
+# This is the single source of card performance: the card variant (active wait) and llama.cpp on the same runner,
+# ingested with make_info.py perf --source-kind devlab (loom-org SKILL.md step 3).
 #
 #   [WORK=~/devlab-perf] devlab_perf.sh EXPERIMENT.json JOB_NAME
 #
