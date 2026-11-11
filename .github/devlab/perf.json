@@ -6,16 +6,52 @@
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "attn-splits",
+   "name": "long-draft",
    "variants": [
-    {"name": "card"},
-    {"name": "base", "build": {}},
-    {"name": "s128", "build": {"ATTN_SPLITS": "128"}},
-    {"name": "s256", "build": {"ATTN_SPLITS": "256"}},
-    {"name": "s256k16", "build": {"ATTN_SPLITS": "256", "ATTN_KPS": "16"}},
-    {"name": "noseg", "build": {"SEG_ATTN": "0"}}
+    {
+     "name": "base",
+     "build": {}
+    },
+    {
+     "name": "nodraft",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "d4",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "ngram",
+      "--draft-depth",
+      "4"
+     ]
+    },
+    {
+     "name": "segmin2k",
+     "build": {
+      "SEG_MIN": "2048"
+     }
+    },
+    {
+     "name": "segmin32k",
+     "build": {
+      "SEG_MIN": "1000000"
+     }
+    }
    ],
-   "steps": ["perf:card:2:long", "perf:base:2:long", "perf:s128:2:long", "perf:s256:2:long", "perf:s256k16:2:long", "perf:noseg:2:long"]
+   "steps": [
+    "perf:base:3:long",
+    "perf:nodraft:3:long",
+    "perf:d4:3:long",
+    "perf:segmin2k:3:long",
+    "perf:segmin32k:3:long",
+    "llama:3:long",
+    "llama@vulkan:3:long"
+   ]
   }
- ]
+ ],
+ "llamacpp_vulkan": "b12211"
 }
