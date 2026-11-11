@@ -6,7 +6,7 @@
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "prof-nd",
+   "name": "prof2",
    "variants": [
     {
      "name": "nd",
@@ -15,92 +15,58 @@
      }
     },
     {
-     "name": "nd_attn",
+     "name": "nd_g512",
      "execution": {
       "draft_depth": 0
      },
      "double": [
-      "*:attention|rope_store"
+      "*:d512_attention|rope_store_d512"
      ]
     },
     {
-     "name": "nd_moe",
+     "name": "nd_g256",
      "execution": {
       "draft_depth": 0
      },
      "double": [
-      "*:g_moe_"
+      "*:d256_attention|rope_store_d256"
      ]
     },
     {
-     "name": "nd_mvsw",
+     "name": "nd_split",
      "execution": {
       "draft_depth": 0
      },
      "double": [
-      "*:g_mv_.*swiglu|gemm_q4_k_swiglu"
+      "*:attention_split"
      ]
     },
     {
-     "name": "nd_mv",
+     "name": "nd_comb",
      "execution": {
       "draft_depth": 0
      },
      "double": [
-      "*:g_mv_q(?!\\w*swiglu)"
+      "*:attention_combine"
      ]
     },
     {
-     "name": "nd_norm",
+     "name": "nd_fl",
      "execution": {
       "draft_depth": 0
      },
      "double": [
-      "*:norm|quant_q8|row_scale"
+      "*:g_attention_flash2|attention_fallback"
      ]
     }
    ],
    "steps": [
     "perf:nd:1:long",
-    "perf:nd_attn:1:long",
-    "perf:nd_moe:1:long",
-    "perf:nd_mvsw:1:long",
-    "perf:nd_mv:1:long",
-    "perf:nd_norm:1:long",
-    "c4:nd"
-   ]
-  },
-  {
-   "name": "prof-draft",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "dr_attn",
-     "double": [
-      "*:attention|rope_store"
-     ]
-    },
-    {
-     "name": "dr_moe",
-     "double": [
-      "*:g_moe_"
-     ]
-    },
-    {
-     "name": "dr_mv",
-     "double": [
-      "*:g_mv_q(?!\\w*swiglu)"
-     ]
-    }
-   ],
-   "steps": [
-    "perf:card:1:long",
-    "perf:dr_attn:1:long",
-    "perf:dr_moe:1:long",
-    "perf:dr_mv:1:long",
-    "c4:card"
+    "perf:nd_g512:1:long",
+    "perf:nd_g256:1:long",
+    "perf:nd_split:1:long",
+    "perf:nd_comb:1:long",
+    "perf:nd_fl:1:long"
    ]
   }
  ]
