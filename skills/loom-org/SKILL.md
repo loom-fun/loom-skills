@@ -1,6 +1,6 @@
 ---
 name: loom-org
-description: Populate and maintain a Hugging Face org of Loom models (loom-fun) end to end - pick the top models that fit Strix Halo, classify what the org already has (category A current / B older skill / missing), then loop - port and optimize each model with a subagent on the local GPU starting from the best category A reference, publish the package and generated card, sweep the expensive gates on DevLab Dispatch, record performance from both the local GPU (the headline) and DevLab next to the roofline, fix bugs on the skill side and regenerate affected models, send models far from their roofline back to a local GPU worker, merge the fixes - until every model is correct, fully assessed and near its roofline. Use for "populate the loom-fun org", "polish the HF org", "which models still need cards", "port the top N models", or any multi-model campaign.
+description: Populate and maintain a Hugging Face org of Loom models (loom-fun) end to end - pick the top models that fit Strix Halo, classify what the org already has (category A current / B older skill / missing), then loop - port and optimize each model with a subagent on the local GPU starting from the best category A reference, publish the package and generated card, sweep the expensive gates on DevLab Dispatch, record performance from DevLab devlab-perf jobs (Loom with the active wait and llama.cpp on the same runner) next to the roofline, fix bugs on the skill side and regenerate affected models, send models far from their roofline back to a worker, merge the fixes - until every model is correct, fully assessed and near its roofline. Use for "populate the loom-fun org", "polish the HF org", "which models still need cards", "port the top N models", or any multi-model campaign.
 ---
 
 # Populate a Loom HF org
@@ -78,10 +78,10 @@ references. For each target it assigns one action, and lists repos that duplicat
 | `create` | no repo | step 1 |
 | `update` | only a B repo, or one not built from plain Q4_K_M | step 1, from the best A reference; republish to the same repo if its checkpoint is the target's plain Q4_K_M, else a new repo |
 | `fix` | A, a gate fails | step 4 |
-| `remeasure` | A, a headline value needs a fresh local session; `remeasure` lists why: `stale` (measured on programs other than the repo's, `perf.stale`) or `devlab-primary` (only DevLab measured it, `perf.devlab`: e.g. a scripted DevLab port) | a fresh local session (step 5) |
-| `investigate` | A, a metric far from its roofline (`perf.far`) | step 5 |
-| `sweep` | A, applicable gates, metrics, the roofline or the DevLab perf session (`devlab-perf`, `perf.devlab_perf`) have no evidence | step 3 (gates, roofline, DevLab perf); missing metrics: a local session |
-| `done` | A, every applicable gate passes, every applicable metric measured in a local and a DevLab session, the roofline computed, no flag | nothing |
+| `remeasure` | A, a card value was measured on programs other than the repo's (`stale`, `perf.stale`) | a fresh devlab-perf job (step 3.3, step 5) |
+| `investigate` | A, a metric far from its roofline (`perf.far`, judged on the card value) | step 5 |
+| `sweep` | A, applicable gates, metrics or the roofline have no evidence | step 3 (gates, roofline, a devlab-perf job) |
+| `done` | A, every applicable gate passes, every applicable metric measured, the roofline computed, no flag | nothing |
 
 "Applicable" is the card generator's own rule (`card_lib.gate_applies` / `metric_applies`): vision only with a
 projector, spec only with drafting, a long-document metric unless the Loom server refused that document and its
@@ -105,13 +105,13 @@ the lookup both say so) are the most expensive; start them early so they run in 
 
 Repeat until `org_status.py` says `done` for every target.
 
-**Every card records local, DevLab and roofline performance.** DevLab Dispatch runs the gates (step 3), scripted
-ports (step 1) and a DevLab perf session; a local session (both engines, a quiet local GPU, the repo's published
-programs) gives the headline numbers. A local/DevLab gap is noted on the card and never debugged ("Local and DevLab
-performance", below). The two are decoupled on purpose: the local GPU never sits idle waiting for DevLab. When a
-model is handed to DevLab (step 3), the local GPU moves on to the next item in the queue (a port, a fix, a
-re-measure, an investigation). DevLab results come back as gate and DevLab perf evidence on the card and as an action in
-`org_status.py`; they are picked up on a later pass of the loop, not awaited.
+**Every performance number on a card comes from DevLab and sits next to the roofline.** DevLab Dispatch runs the
+gates (step 3), scripted ports (step 1) and the card's `devlab-perf` job (Loom with the active wait and llama.cpp on the
+same runner and programs; "Performance: DevLab is the source", below). The local GPU is for development only (the
+port/optimize inner loop, kernel A/B, quick checks), never for card numbers. The two are decoupled on purpose: the
+local GPU never sits idle waiting for DevLab. When a model is handed to DevLab (step 3), the local GPU moves on to
+the next item in the queue (a port, a fix, an optimization). DevLab results come back as gate and performance
+evidence on the card and as an action in `org_status.py`; they are picked up on a later pass of the loop, not awaited.
 
 ### 1. Port and optimize (worker subagent, local GPU)
 
@@ -126,8 +126,8 @@ One worker per model runs `loom-port-llm` then `loom-optimize`, starting from th
 - **Scripted DevLab ports** (no agent, no local GPU): `.github/workflows/devlab-port.yml` runs on the
   `devlab-port` label, one matrix job per entry of `.github/devlab/port.json`, each `.github/scripts/port_e2e.sh`:
   port -> qualify -> finalize with `NEEDLE_FULL=0` -> card evidence -> `publish/` (the package without weights,
-  in the artifact). qualify still runs `LEVEL=quick`, its half-context needle included. Its gates are evidence;
-  its performance session is the card's DevLab session: see the next bullet.
+  in the artifact). qualify still runs `LEVEL=quick`, its half-context needle included. Its gates and its
+  performance session are the card's evidence: see the next bullet.
 - **Campaign waves** (practice): put each wave on its own branch from main with only `.github/devlab/port.json`
   changed and a draft PR based on **main** (GitHub creates no pull_request runs while a PR has merge conflicts).
   Start the next wave by removing and re-adding the label through the REST API; `gh pr edit` label edits fail
@@ -135,9 +135,8 @@ One worker per model runs `loom-port-llm` then `loom-optimize`, starting from th
   `gh api -X DELETE repos/loom-fun/loom-skills/issues/N/labels/devlab-port`, then
   `gh api -X POST repos/loom-fun/loom-skills/issues/N/labels -f 'labels[]=devlab-port'`.
 - **A DevLab-ported model**: publish it from the job's evidence (`make_info.py ... --source-kind devlab`, as
-  port_e2e.sh writes it), also when the job's result is `failed gates` (step 2). The gates count, and the DevLab performance session stays on the card (its DevLab
-  columns); `org_status` marks the card `remeasure` (`devlab-primary`) until a short local session (Loom and
-  llama.cpp, quiet GPU, the same programs) adds the headline numbers next to it.
+  port_e2e.sh writes it), also when the job's result is `failed gates` (step 2). The gates count, and the job's
+  performance session is the card's performance (DevLab is the source): no follow-up session is needed.
 
 - **Local GPU: one owner, one job at a time.** The local GPU is shared and small: concurrent model servers crashed
   it. Exactly one worker (the local-queue owner) runs local GPU sessions, from a
@@ -153,8 +152,8 @@ One worker per model runs `loom-port-llm` then `loom-optimize`, starting from th
   and the over-capacity 400: `LEVEL=dev` where gates.sh has it, otherwise `LEVEL=quick` without the needle.
   Needle-in-a-haystack (half and full context) and other very expensive gates belong to step 3, not the
   critical path.
-- **Performance** for the card's headline: one local quiet-GPU session, Loom and llama.cpp on the same GGUF and the
-  programs being published, nothing else running. The DevLab session comes from step 3 and never replaces it.
+- **Performance** in the loop is for development: local quiet-GPU runs (Loom and llama.cpp on the same GGUF)
+  guide the optimizer but are not card numbers. The card's numbers come from the `devlab-perf` job of step 3.
 - Speculative decoding stays automatic (opt-out): the optimizer picks the method and settings.
 
 ### 2. Publish the initial result
@@ -183,7 +182,7 @@ with the headroom (`memcheck.sh`); refresh the pin before its `expires` (loom-se
 - On every regeneration pass `make_info.py build --memory-bytes N` explicitly, N being build.py's printed value for
   the regenerated programs. It is not picked up from build.py, and a carried-over old value mislabels the card (#151
   now refuses it when the programs changed).
-- The gates, the local session, the DevLab session and the nightly entry all use that same N.
+- The gates, the devlab-perf job and the nightly entry all use that same N.
 - A memory-capped package (budget below context plus pool headroom) keeps a measured 2 GiB margin (build.py, #130):
   with pool equal to the context and no margin, a full-context request is refused with a 503.
 
@@ -194,10 +193,10 @@ README then ends with a "Next steps" section. `org_status` keeps the repo's acti
 resume, rebuild with `--status active --next-steps /dev/null`. A paused card keeps its evidence; use it also for a
 model dropped from the target list (reason first in the steps).
 
-### 3. Sweep on DevLab Dispatch: missing gates, the roofline and the DevLab perf session
+### 3. Sweep on DevLab Dispatch: missing gates, the roofline and the performance job
 
-DevLab is an elastic pool of Strix Halo runners; sweep many cards' gates at once there, never on the local GPU.
-Hand the card over and move the local GPU on to the next item.
+DevLab is an elastic pool of Strix Halo runners; sweep many cards' gates and performance at once there, never on
+the local GPU. Hand the card over and move the local GPU on to the next item.
 
 1. The card is in `.github/nightly-models.json` (card, memory, kit, llama.cpp build; step 2). Run `nightly-gates.yml`
    (it runs on schedule, or `gh workflow run nightly-gates.yml -f models=loom-fun/REPO,... -f level=full`, or label
@@ -220,16 +219,18 @@ Hand the card over and move the local GPU on to the next item.
      repo comes from info.json, the generator commit from the checkout), `render_card.py DIR`, and
      `publish_package.py upload DIR --repo loom-fun/REPO --card-only --parent-commit $sha` (fails if another worker
      published since: re-read and rebuild).
-3. A card missing `devlab-perf` (local values with no DevLab value on the published programs): one `devlab-perf`
-   job per card (`.github/devlab/perf.json`: card, memory_bytes, kit and llamacpp from `nightly-models.json`,
+3. A card with metrics missing or measured on other programs (`sweep`, `remeasure`): one `devlab-perf` job per card
+   (required: it is the only source of card performance) (`.github/devlab/perf.json`: card, memory_bytes, kit and llamacpp from `nightly-models.json`,
    llama_spec from the card's llama.cpp arguments, its drafter as `{drafter}` or, when llama.cpp used another file,
-   `{hf:OWNER/REPO/FILE}`; variant `{"name": "card"}`, steps `perf:card:2 perf:card:2:long llama:2 llama:2:long
-   c4:card llamac4`; several cards go in one experiment, one job each with its own card fields), then
+   `{hf:OWNER/REPO/FILE}`; variant `{"name": "card"}`, steps `perf:card:2 perf:card:2:long c4:card llama:2 llama:2:long
+   llamac4`; several cards go in one experiment, one job each with its own card fields), then
    `make_info.py perf --loom-jsonl perf_card.jsonl --llama-jsonl perf_llamacpp_nN.jsonl --c4-loom c4_card.txt
-   --c4-llama c4_llamacpp_nN.txt --package DIR --source-kind devlab --run ID --url JOB_URL --device JOB_DEVICE.json --hrx-loom
-   JOB_HRX.json` on the job's artifact (write those two with `card/pull_devlab.py --identity JOBDIR --device-out JOB_DEVICE.json
-   --hrx-out JOB_HRX.json`: the runner and the SDK the job recorded; `none` if absent; no `--baseline-version`: the card keeps its
-   local baseline), and rebuild the card as above. A card with no local value renders its DevLab values as the headline columns. Low priority: it never blocks other work.
+   --c4-llama c4_llamacpp_nN.txt --package DIR --source-kind devlab --run ID --url JOB_URL --device JOB_DEVICE.json
+   --hrx-loom JOB_HRX.json --baseline-version llamacpp-rocm/BUILD --baseline-args "$(cat llamacpp_args.txt)"
+   --fetched-programs "$(cat programs_sha256.txt)"` on the job's artifact (write JOB_DEVICE.json and JOB_HRX.json with
+   `card/pull_devlab.py --identity JOBDIR --device-out JOB_DEVICE.json --hrx-out JOB_HRX.json`: the runner and the SDK
+   the job recorded; `none` if absent; `--source-kind devlab` is perf's default, `--source-kind local` is refused), and
+   rebuild the card as above.
    **Vulkan baseline** (every card, one job each; the same workloads and `llama_spec` as the ROCm baseline): job fields
    `llamacpp_vulkan: "b12211"`, variant `{"name": "card"}`, steps `llama@vulkan:2 llama@vulkan:2:long llamac4@vulkan`
    (add the ROCm and Loom steps to the same job for a same-runner comparison); at the card's own `memory_bytes`. Ingest:
@@ -237,11 +238,10 @@ Hand the card over and move the local GPU on to the next item.
    --baseline-version b12211 --baseline-args "$(cat llamacpp_args-vulkan.txt)" --baseline-sha256 "$(cat
    llamacpp_release-vulkan.sha256)" --fetched-programs "$(cat programs_sha256.txt)" --differs "..." --package DIR
    --source-kind devlab --run ID --url JOB_URL --device none --hrx-loom none` (refused if the job fetched other
-   programs than DIR's), then `make_info.py build --from-info` as above. Its numbers are another DevLab job's: compare
+   programs than DIR's), then `make_info.py build --from-info` as above. Its numbers are another job's: compare
    engines by ratios, not across runners. KV layout (`vulkan_kv`, default auto): per-slot caches, except unified (as ROCm) for DFlash servers, where b12211 aborts on per-slot caches; the unified pool makes b12211 Vulkan attend with a dense mask (no GPU fused flash attention over K/V rows), so record that as a `--differs` line too. Every server argument that differs from the ROCm baseline, or that the Vulkan
    server could not run, goes in as `--differs "setting: reason"` (shown on the card), never changed silently. Nothing in `org_status` reads it.
-4. Missing local metrics are not swept: a local GPU worker measures them in one quiet local session with both
-   engines (step 5).
+4. Missing metrics come from a devlab-perf job (item 3), never from a local session.
 
 ### 4. Fix what the sweep found
 
@@ -266,14 +266,12 @@ metric is n/a only when its prompt exceeds the model's native GGUF context (`car
 - A kernel path that wins at some KV-head counts can lose at others: gate paths by shape and A/B across the
   org's shapes, not one card.
 
-### 5. Re-measure and investigate performance (local GPU worker)
+### 5. Re-measure and investigate performance
 
 First, **re-measure** (action `remeasure`; `org_status` lists the reasons): a card value whose session measured
 programs other than the repo's (`stale`: `card_lib.stale_metrics`, the session's `programs_sha256` vs the published
-`program/*.loom`; the card marks them †) describes another build, and a metric only DevLab measured
-(`devlab-primary`: `card_lib.devlab_metrics`) has no headline value. A local GPU worker runs a fresh local session
-(Loom and llama.cpp, quiet GPU, the repo's programs: `make_info.py perf`, `--source-kind local`) and republishes the
-card, keeping its DevLab session; only then is the far flag below worth acting on.
+`program/*.loom`; the card marks them †) describes another build. Run a fresh devlab-perf job (step 3.3; Loom with the active wait and llama.cpp on the
+same runner, the repo's programs) and republish the card; only then is the far flag below worth acting on.
 
 `org_status.py` flags a category A card (action `investigate`, details under `perf.far`) when a metric is **far from
 its roofline**: its Loom value is below half the efficiency Loom ports have demonstrated for that kind of metric on
@@ -285,11 +283,11 @@ or `EFF_DRAFTED` for drafted rows). Then:
    first, and propose open-ended optimization to the orchestrator before starting it. Fix with a general generator
    change that lifts a whole architecture family (flash subtiles, MoE/GDN prefill kernels), never a per-model hack;
    A/B it on DevLab across the cards it touches and regenerate those through the regeneration rules above. Local
-   measurements go to the local queue. For a
+   measurements for development go to the local queue. For a
    small drafted model far from its decode roofline, the lever is the verify pass and the drafter's cost (the
    ceiling does not count the drafter); the best depth depends on the workload's acceptance, so judge it on the
    session's own acceptance, not the spec gate's.
-2. The worker republishes the card with a fresh local session (step 2). Move the local GPU to the next item meanwhile.
+2. The worker republishes the card with a fresh devlab-perf job (step 3.3). Move the local GPU to the next item meanwhile.
 3. **Deep debugging session** when a metric is still far from its roofline after an optimization round (the card
    comes back `investigate` with the same metric after a `loom-optimize` worker's republish): the worker stops
    tuning and finds out *why* the gap stays, rather than accepting it:
@@ -299,9 +297,9 @@ or `EFF_DRAFTED` for drafted rows). Then:
      points at the model or the roofline, one only Loom is far from points at Loom;
    - the local machine's settings (power profile, CPU governor and EPP, clocks, kernel and firmware, GPU memory
      split, other load).
-   The far flag is judged on the local value only; the DevLab value is not part of this investigation. Record the
-   cause and the fix (or a skill fix under step 4) in the PR; a gap that turns out to be the machine, not Loom, goes
-   into the card's evidence through a re-measured local session, never by hand.
+   The far flag is judged on the card value. Record the cause and the fix (or a skill fix under step 4) in the PR;
+   a gap that turns out to be the machine, not Loom, goes into the card's evidence through a re-measured devlab-perf
+   job, never by hand.
 
 ### 6. Repeat
 
@@ -317,17 +315,15 @@ duplicate and non-target lists to keep or retire.
   `EFF_DRAFTED` was set against ceilings that counted the spec gate's acceptance; once the healthy cards'
   sessions record their own acceptance (perf.py), recompute it from those ceilings.
 
-### Local and DevLab performance (the user's rule)
+### Performance: DevLab is the source
 
-Loom on DevLab often measures well below a local session on the same programs while llama.cpp does not (e.g. prefill
--25 to -52 % on several cards, matched run 42300147814). The rule: if local and DevLab differ significantly, note
-it and move on. Every card records all three, each labeled by source: the local session (the headline Loom vs
-llama.cpp numbers, judged against the roofline), the DevLab session (its DevLab columns, with the local ÷ DevLab
-ratio of each engine) and the roofline. A DevLab session never replaces a local one, nor the other way round
-(`card_lib.card_metrics`). The gap is data: it is never a flag, never blocks `done`, and is never a reason to
-investigate. Diagnosing it is out of scope for port, optimize and campaign work; a separate effort will use the
-recorded data. The Loom-only DevLab sweeps older cards recorded stay in their `info.json` (valid loom-card/2),
-unrendered.
+Every performance number on a card comes from a `devlab-perf` job (Loom with the card's programs and llama.cpp on the
+same runner). Loom used to measure well below a local session on DevLab (prefill -25 to -52 %): the DevLab runners'
+SMU firmware (BIOS 1.12, SMU 0x0a640600) lowers the memory-fabric clocks (FCLK/UCLK) while the CPU is idle, and Loom
+parked its CPU while the GPU worked. Loom is now served with an active wait (`serve.sh` turns `--device=amdgpu` into
+`amdgpu://?completion_spin_ns=4294967295`; `LOOM_ACTIVE_WAIT=0` opts out, for A/B only), and DevLab matches or beats
+the old local numbers. Local runs are for development only (the optimize/port loop, kernel A/B, quick checks), and
+a Loom number measured without the active wait is not comparable with a card's.
 
 ## Orchestrating many workers
 
@@ -345,9 +341,9 @@ Rules; the reasons and details are in `reference/lessons.md`.
 ## Done
 
 A model is done when its repo is category A, built from the target's plain Q4_K_M, every applicable gate passes
-(including needle and full-context, from the sweep), every applicable metric is measured in one local session
-(Loom and llama.cpp, the published programs) and in a DevLab session on the same programs, the card carries its
-roofline, no metric's local value is far from it (whatever the local/DevLab gap), and the card was regenerated
+(including needle and full-context, from the sweep), every applicable metric is measured in a devlab-perf job
+(Loom and llama.cpp, the published programs), the card carries its roofline, no metric's card value is far from it,
+and the card was regenerated
 after the last skill fix that touched it. The org is done when every target is
 done and the user has decided on the rest.
 
@@ -356,5 +352,5 @@ done and the user has decided on the rest.
 | Script | Does |
 |---|---|
 | `scripts/rank_models.py` | draft target list: per-model daily GGUF downloads, fits `--max-gb`, plain Q4_K_M source |
-| `scripts/org_status.py` | category A/B per org repo, missing and failing gates and metrics, performance guardrails (`card_lib.perf_flags`: far from roofline; stale or DevLab-only values to re-measure locally; a missing DevLab perf session), generator commit, `CHECK:` flags (generator off main, nightly entry missing or differing from the card), one action per target |
+| `scripts/org_status.py` | category A/B per org repo, missing and failing gates and metrics, performance guardrails (`card_lib.perf_flags`: far from roofline, stale values to re-measure with a devlab-perf job), generator commit, `CHECK:` flags (generator off main, nightly entry missing or differing from the card), one action per target |
 | `scripts/hub.py` | Hub reads with the user's token and rate-limit retries (used by both) |
