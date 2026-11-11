@@ -510,6 +510,14 @@ if PARTIAL:
     E.append("  }\n")
     text = text[:i0] + "\n".join(E) + text[i1:]
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_partial") @{P}_attention_flash2_partial(', 1)
+# Timing ablations (NOT correct output; perf experiments only): FLASH2S_ABL = comma list of nosv, nostage, nobar.
+_abl = set(filter(None, os.environ.get("FLASH2S_ABL", "").split(",")))
+if "nosv" in _abl:
+    text = "\n".join(ln for ln in text.split("\n") if "view.store %vj, %vt_view" not in ln)
+if "nostage" in _abl:
+    text = text.replace("scf.if %st_live {", "scf.if %st_never {").replace("  %st_key = index.rem", "  %st_never = index.cmp ult, %workitem, %c0 : index\n  %st_key = index.rem", 1)
+if "nobar" in _abl:
+    text = text.replace("kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)", "")
 out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
 if not PARTIAL:
     subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen_flash2s.py")], check=True,

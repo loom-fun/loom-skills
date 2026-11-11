@@ -1,5 +1,5 @@
 {
- "_comment": "gemma4-12b perf-gap: decode_32k / prefill_32k ablations",
+ "_comment": "gemma4-12b flash2_d512 prefill timing ablations (outputs wrong by design)",
  "jobs": [
   {
    "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
@@ -8,118 +8,57 @@
    "llamacpp": "b1370",
    "llamacpp_vulkan": "b12211",
    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
-   "name": "prof-nd",
+   "name": "pf-abl",
    "variants": [
     {
-     "name": "nd",
+     "name": "base",
      "execution": {
       "draft_depth": 0
      }
     },
     {
-     "name": "nd_g512",
+     "name": "nosv",
      "execution": {
       "draft_depth": 0
      },
-     "double": [
-      "*:@(g|g16)d512_attention"
-     ]
+     "build": {
+      "FLASH2S_ABL": "nosv"
+     }
     },
     {
-     "name": "nd_s256",
+     "name": "nostage",
      "execution": {
       "draft_depth": 0
      },
-     "double": [
-      "*:@(g|g16)d256_attention"
-     ]
+     "build": {
+      "FLASH2S_ABL": "nostage"
+     }
     },
     {
-     "name": "nd_pf512",
+     "name": "nobar",
      "execution": {
       "draft_depth": 0
      },
-     "double": [
-      "*:@g_attention_flash2_d512"
-     ]
+     "build": {
+      "FLASH2S_ABL": "nobar"
+     }
     },
     {
-     "name": "nd_pf256",
+     "name": "pure",
      "execution": {
       "draft_depth": 0
      },
-     "double": [
-      "*:@g_attention_flash2\\["
-     ]
-    },
-    {
-     "name": "nd_mv",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:@g_mv_"
-     ]
-    },
-    {
-     "name": "nd_gemm",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:@gemm_"
-     ]
+     "build": {
+      "FLASH2S_ABL": "nostage,nobar"
+     }
     }
    ],
    "steps": [
-    "perf:nd:1:long",
-    "perf:nd_g512:1:long",
-    "perf:nd_s256:1:long",
-    "perf:nd_pf512:1:long",
-    "perf:nd_pf256:1:long",
-    "perf:nd_mv:1:long",
-    "perf:nd_gemm:1:long"
-   ]
-  },
-  {
-   "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
-   "memory_bytes": 81000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1370",
-   "llamacpp_vulkan": "b12211",
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
-   "name": "prof-draft",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "dr_g512",
-     "double": [
-      "*:@(g|g16)d512_attention"
-     ]
-    },
-    {
-     "name": "dr_s256",
-     "double": [
-      "*:@(g|g16)d256_attention"
-     ]
-    },
-    {
-     "name": "dr_mv",
-     "double": [
-      "*:@g_mv_"
-     ]
-    }
-   ],
-   "steps": [
-    "perf:card:1:long",
-    "perf:dr_g512:1:long",
-    "perf:dr_s256:1:long",
-    "perf:dr_mv:1:long",
-    "llama:1:long",
-    "llama@vulkan.np1:1:long",
-    "llama@vulkan.np1.nospec:1:long"
+    "perf:base:1:long",
+    "perf:nosv:1:long",
+    "perf:nostage:1:long",
+    "perf:nobar:1:long",
+    "perf:pure:1:long"
    ]
   }
  ]
