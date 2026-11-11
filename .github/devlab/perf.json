@@ -1,18 +1,22 @@
 {
- "_comment": "perf-gap qwen35 dense: draft depth ablation on the published 0.8B card.",
+ "_comment": "perf-gap qwen35 dense: kernel-share ablation of the 0.8B card with drafting off (every matching kernel.launch of llm_advance runs twice; the delta is that group's time).",
  "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
  "memory_bytes": 9000000000,
  "kit": null,
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "depth",
+   "name": "abl",
    "variants": [
-    {"name": "card"},
     {"name": "d0", "execution": {"draft_depth": 0}},
-    {"name": "d1", "execution": {"draft_depth": 1}}
+    {"name": "all", "execution": {"draft_depth": 0}, "double": ["llm_advance:."]},
+    {"name": "mv", "execution": {"draft_depth": 0}, "double": ["llm_advance:g_mv_|g_gemm_|g_head"]},
+    {"name": "gdn", "execution": {"draft_depth": 0}, "double": ["llm_advance:g_gdn"]},
+    {"name": "attn", "execution": {"draft_depth": 0}, "double": ["llm_advance:g_flash|g_attn|g_split|g_kv"]},
+    {"name": "small", "execution": {"draft_depth": 0}, "double": ["llm_advance:g_quant|g_post_add|g_row_scale|g_rms|g_embed|g_swiglu|g_rope"]},
+    {"name": "rebuilt", "build": {}, "build_args": ["--draft", "none"]}
    ],
-   "steps": ["perf:card:1", "perf:d0:1", "perf:d1:1", "perf:card:1:long", "perf:d0:1:long", "c4:card", "c4:d0", "c4:d1"]
+   "steps": ["perf:d0:2", "perf:all:2", "perf:mv:2", "perf:gdn:2", "perf:attn:2", "perf:small:2", "perf:rebuilt:2", "perf:d0:2:long", "perf:all:2:long", "perf:attn:2:long", "perf:gdn:2:long", "c4:d0", "c4:all", "c4:mv", "c4:gdn", "c4:attn", "c4:small", "c4:rebuilt"]
   }
  ]
 }

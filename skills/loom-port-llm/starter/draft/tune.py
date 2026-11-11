@@ -8,7 +8,8 @@ is built once; a depth is only a model.json setting (the width-specialized stage
 candidate is served alone and timed on decode-heavy requests (short essay, code, a tool-call turn, a reasoning answer,
 a code edit that returns most of its input as agents' file edits do, and one decode after a 16k-token document, at most
 half the context; greedy, client-side tokens/s, harmonic mean: the long-context row counts as much as it costs). The fastest candidate
-wins if it beats no drafting by at least 3 %; its kind/depth go to cfg["drafter"] and pkg/ is rebuilt with it
+wins if it beats no drafting by at least 3 % and costs the plain-text rows (prose, the long document, four prose streams: the
+card's decode, decode_32k and streams4) at most 2 %; its kind/depth go to cfg["drafter"] and pkg/ is rebuilt with it
 (build.py --draft auto reads them). Before it is kept, the fastest candidate must pass a concurrency check and the
 spec gate's equivalence check (loom-benchmark spec_check.py: the same requests at the candidate depth and at
 draft_depth 0 of the same package, identical); a candidate that fails either is recorded with the reason and the
@@ -62,20 +63,49 @@ def sh(*cmd, **kw):
 LONG_CTX = int(os.environ.get("TUNE_LONG", "16000"))
 
 
+PLAIN_ROWS = (0, 3)   # WORK rows of ordinary prose (essay, reasoning): text that does not quote its context
+PLAIN_TOLERANCE = 0.98   # a drafter may cost at most 2 % on plain text, 4 streams and a long document
+
+
 def measure(url, model, chat, context=0):
-    """Harmonic mean of the workload's decode tok/s (the rate of generating the same number of tokens in each)."""
+    """(harmonic mean of the workload's decode tok/s, harmonic mean of the plain-text rows) where a plain row is
+    ordinary prose (essay, reasoning), the long-document decode, and four concurrent prose streams (mean per-stream tok/s).
+    The first number picks the fastest candidate; the second is the guard: the card's headline decode, decode_32k and
+    streams4 are prose, where an n-gram drafter finds few matches and its verify pass costs more than a plain step,
+    so a candidate that wins only on the code-edit row (which quotes its input) must not cost the plain rows."""
+    import threading
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
     stream(url, model, WORK[0][0], 16, extra=off)                       # warm-up (weights, first compiles)
     work = list(WORK)
     n = max((d for d in DOC_SIZES if d <= min(LONG_CTX, context // 2)), default=0)
+    plain = [i for i in PLAIN_ROWS]
     if n >= 4000:
         work.append(([{"role": "user", "content": "Write a long, detailed essay discussing this documentation.\n\n" + doc(n)}], {}))
-    tps = []
-    for messages, extra in work:
+        plain.append(len(work) - 1)
+    tps, plain_tps = [], []
+    for i, (messages, extra) in enumerate(work):
         r = stream(url, model, messages, 256, extra={**off, **extra}, timeout=900)
         if r.get("decode_tps"):
             tps.append(r["decode_tps"])
-    return statistics.harmonic_mean(tps) if tps else 0.0
+            if i in plain:
+                plain_tps.append(r["decode_tps"])
+    # four prose streams at once (the card's streams4): the mean of the streams decode rates
+    topics = ("the printing press", "the steam engine", "the telegraph", "the transistor")
+    res = {}
+
+    def run(i):
+        r = stream(url, model, [{"role": "user", "content": f"Write a 300-word essay about the history of {topics[i]}."}], 256,
+                   extra=off, timeout=900)
+        res[i] = r.get("decode_tps") or 0.0
+    ts = [threading.Thread(target=run, args=(i,)) for i in range(4)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    if all(res.get(i) for i in range(4)):
+        c4 = sum(res.values()) / 4   # mean per-stream rate, comparable with the single-stream rows
+        tps.append(c4)
+        plain_tps.append(c4)
+    hm = lambda v: statistics.harmonic_mean(v) if v else 0.0  # noqa: E731
+    return hm(tps), hm(plain_tps)
 
 
 def concurrent_ok(url, model, chat):
@@ -157,7 +187,7 @@ def main():
     # No --memory-gib: each candidate (and the final package) sizes its own budget for the full native context
     # (a drafter adds KV per position; passing the old budget shrank DFlash packages' context to fit).
     common = ["--tokenizer", os.path.join(work, "tok", "tokenizer.json"), "--model-id", model_id]
-    base = None
+    base = base_plain = None
     for kind, depths in kinds:
         pkg = os.path.join(work, f"pkg_tune_{kind}")
         out = sh(*build, pkg, *common, "--draft", kind).stdout
@@ -183,17 +213,17 @@ def main():
             t0 = time.time()
             try:
                 serve("tune", port, mem, path, env)
-                tps = measure(f"http://127.0.0.1:{port}", model_id, chat,
-                              card["presets"]["chat"]["execution"].get("context_capacity") or 0)
+                tps, plain = measure(f"http://127.0.0.1:{port}", model_id, chat,
+                                     card["presets"]["chat"]["execution"].get("context_capacity") or 0)
             except Exception as e:  # noqa: BLE001  a failing candidate is reported and skipped
                 print(f"tune: {kind} depth {depth}: {e}", file=sys.stderr)
-                tps = 0.0
+                tps = plain = 0.0
             subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
-            row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2), "seconds": round(time.time() - t0)}
+            row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2), "plain_tps": round(plain, 2), "seconds": round(time.time() - t0)}
             print("tune:", json.dumps(row), flush=True)
             table.append(row)
             if depth == 0:
-                base = tps
+                base, base_plain = tps, plain
             elif tps > best[2]:
                 best = (kind, depth, tps)
             if depth:
@@ -206,7 +236,7 @@ def main():
         if first:
             skipped[kind] = [d for d in allowed if d not in measured]
     if base is None:
-        base = 0.0
+        base = base_plain = 0.0
     # Fastest first, each checked for exact output (vs draft_depth 0 of its own package) and under concurrent load;
     # one that fails is reported and skipped.
     import spec_check
@@ -227,7 +257,8 @@ def main():
         serve("tune", port, mem, os.path.join(pkg, f"model_d{depth}.json"), env)
         spec_check.record(url, model_id, out)
         return spec_check.compare(refs[kind], out) == 0
-    ranked = sorted([r for r in table if r["kind"] != "none" and r["decode_tps"] >= 1.03 * base], key=lambda r: -r["decode_tps"])
+    ranked = sorted([r for r in table if r["kind"] != "none" and r["decode_tps"] >= 1.03 * base
+                    and r["plain_tps"] >= PLAIN_TOLERANCE * base_plain], key=lambda r: -r["decode_tps"])
     # Within 5 % of the fastest (measurement noise on these short requests), the shallower depth first: every drafted
     # token is verified with decode attention over the whole context, so a deep draft costs at long context
     # (Qwen3.6-35B-A3B DFlash: depth 7 vs 3 was 109 vs 105 tok/s short, 31 vs 48 tok/s at 32k).
