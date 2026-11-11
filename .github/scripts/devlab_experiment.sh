@@ -24,6 +24,7 @@
 #        needle:N[:S]    one Loom-only needle probe of N tokens on the running server (read timeout S seconds): status, TTFT
 #        consdefer:N     consistency.py N times for cards whose GGUF and llama.cpp do not fit together: references deferred, filled with Loom stopped, runs re-judged
 #        ktest           the starter's kernel tests (make_kernel_tests.py + run_kernel_tests.sh) on the package
+#        probe           one request on a fresh server + GTT/free memory/status/dmesg (out/probe*.json, probe.txt)
 #        gates:LEVEL     gates.sh at LEVEL against the card's llama.cpp build ("llamacpp" in EXPERIMENT.json)
 # Writes WORK/<variant>/out: summary.json, *.log. Every server it starts is stopped at exit.
 set -uo pipefail
@@ -265,6 +266,18 @@ EOF
       FORCE=1 LEVEL=$p1 "$B/gates.sh" "$pkg" "$url" "$gguf" "$D/bench" "$LLAMA_PORT" > "$out/gates.out" 2>&1; rc=$?
       cp "$D"/bench/gates.json "$D"/bench/gates_*.log "$out/" 2>/dev/null
       res[$s]=$(grep -h "^GATES" "$out/gates.out" | tail -1 | cut -c1-300); [ -n "${res[$s]}" ] || res[$s]="rc=$rc";;
+    probe)
+      # One short completion on a fresh server, then what the runner and the server say about it (GTT, free memory,
+      # /v1/status, the kernel log): a model that registers but cannot load shows up here, not in a gate's KeyError
+      [ -f "$LOOM_SERVE_STATE/exp-$name.pid" ] && "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
+      step "probe: serve (fresh), one request"
+      { echo "gtt_total $(cat /sys/class/drm/card*/device/mem_info_gtt_total 2>/dev/null | tr '\n' ' ')"; free -g | head -2; } | tee "$out/probe.txt"
+      serve || { res[$s]=ERROR; continue; }
+      code=$(curl -s -m 900 -o "$out/probe_reply.json" -w '%{http_code}' "$url/v1/chat/completions" -H 'content-type: application/json' \
+        -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"What is 2+2?\"}],\"max_tokens\":16,\"chat_template_kwargs\":{\"enable_thinking\":false}}")
+      curl -s "$url/v1/status" > "$out/probe_status.json"; head -c 600 "$out/probe_reply.json"; echo
+      { echo "http $code"; echo "gtt_used $(cat /sys/class/drm/card*/device/mem_info_gtt_used 2>/dev/null | tr '\n' ' ')"; free -g | head -2; dmesg 2>/dev/null | tail -25; } >> "$out/probe.txt"; tail -12 "$out/probe.txt"
+      res[$s]="http $code: $(head -c 160 "$out/probe_reply.json" | tr '\n' ' ')";;
     needle)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       step "needle $p1"

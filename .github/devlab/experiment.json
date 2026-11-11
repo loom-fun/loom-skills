@@ -9,8 +9,17 @@
  },
  "variants": [
   {
-   "name": "fn-gates-quick",
+   "name": "fn-probe-96",
    "steps": [
+    "probe",
+    "gates:quick"
+   ]
+  },
+  {
+   "name": "fn-probe-88",
+   "memory_bytes": 94489280512,
+   "steps": [
+    "probe",
     "gates:quick"
    ]
   }
