@@ -16,3 +16,8 @@ echo "## kfd topology"; for n in /sys/class/kfd/kfd/topology/nodes/*; do echo "-
 echo "## kfd sched"; cat /sys/module/amdgpu/parameters/sched_policy /sys/module/amdgpu/parameters/mes 2>/dev/null
 echo "## numa/iommu"; ls /sys/class/iommu 2>/dev/null; dmesg 2>/dev/null | grep -i -E "iommu|amdgpu.*(vram|gtt|mtype|mes)" | head -20
 echo "## modinfo"; modinfo amdgpu 2>/dev/null | grep -E "^(version|vermagic|filename)"
+echo "## buddyinfo"; cat /proc/buddyinfo
+echo "## meminfo"; cat /proc/meminfo
+echo "## thp"; for f in /sys/kernel/mm/transparent_hugepage/*; do [ -f $f ] && echo "$(basename $f)=$(cat $f)"; done
+echo "## uptime"; uptime
+echo "## gpu_metrics"; python3 "$(dirname "$0")/gpumetrics.py" 2>&1

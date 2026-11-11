@@ -10,7 +10,8 @@ root=$HOME/devlab-gap/loom
 export VENV=$root/.venv
 pkg=$HOME/devlab-gap/pkg_${R//\//_}
 if [ ! -f "$pkg/.ok" ]; then rm -rf "$pkg"; "$VENV/bin/loom-fetch" "https://huggingface.co/$R/resolve/main/model.json" --no-input --materialize=copy --cache "$HOME/devlab-gap/fc" --output="$pkg" > "$out/fetch.log" 2>&1 && touch "$pkg/.ok"; rm -rf "$HOME/devlab-gap/fc"; fi
-for i in 1 2; do bash "$here/probe.sh" "$out/plain$i" "$pkg" "$MID" "$MEM" - "${WORKLOAD:-1024:4 2048:6 8192:2}" > "$out/plain$i.log" 2>&1; done
+bash "$here/probe.sh" "$out/plain1" "$pkg" "$MID" "$MEM" - "${WORKLOAD:-1024:4 2048:6 8192:2}" > "$out/plain1.log" 2>&1
+bash "$here/probe.sh" "$out/plain2" "$pkg" "$MID" "$MEM" - "2048:20" > "$out/plain2.log" 2>&1
 bash "$here/probe.sh" "$out/prof" "$pkg" "$MID" "$MEM" queue-events,dispatch-events,executable-metadata "2048:4" > "$out/prof.log" 2>&1
 python3 -I "$here/parse_prof.py" "$out/prof/p.ireeprof" "$out/prof/p.pkl" > "$out/prof/parse.txt" 2>&1 && python3 -I "$here/analyze.py" "$out/prof/p.pkl" > "$out/prof/analyze.txt" 2>&1
 rm -f "$out/prof/p.ireeprof"
