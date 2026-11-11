@@ -8,177 +8,107 @@
  "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "abl-short",
+   "name": "mm-a",
    "variants": [
     {
-     "name": "base",
-     "execution": {
-      "draft_depth": 0
+     "name": "card"
+    },
+    {
+     "name": "mm5",
+     "build": {
+      "SPEC_MM_FROM": "5"
      }
     },
     {
-     "name": "attn",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_attention|g16_attention"
-     ]
+     "name": "mm9",
+     "build": {
+      "SPEC_MM_FROM": "9"
+     }
     },
     {
-     "name": "mv2048",
-     "execution": {
-      "draft_depth": 0
+     "name": "mm5d1",
+     "build": {
+      "SPEC_MM_FROM": "5"
      },
-     "double": [
-      "*:g_mv_q4_k_k2048_(?!swiglu)"
-     ]
+     "execution": {
+      "draft_depth": 1
+     }
     },
     {
-     "name": "swiglu",
+     "name": "nodraft",
      "execution": {
       "draft_depth": 0
-     },
-     "double": [
-      "*:mv_q4_k_k2048_swiglu"
-     ]
-    },
-    {
-     "name": "down",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_mv_q[46]_k_k7680"
-     ]
-    },
-    {
-     "name": "head",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_mv_q6_k_k2048"
-     ]
-    },
-    {
-     "name": "norm",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_post_add_norm|g_row_scale"
-     ]
-    },
-    {
-     "name": "sconv",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_sc_"
-     ]
-    },
-    {
-     "name": "quant",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_quant_q8"
-     ]
-    },
-    {
-     "name": "rope",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_qk_rope|g_gate_heads"
-     ]
+     }
     }
    ],
    "steps": [
-    "perf:base:3",
-    "perf:attn:3",
-    "perf:mv2048:3",
-    "perf:swiglu:3",
-    "perf:down:3",
-    "perf:head:3",
-    "perf:norm:3",
-    "perf:sconv:3",
-    "perf:quant:3",
-    "perf:rope:3"
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "perf:mm5:2",
+    "perf:mm5:2:long",
+    "c4:mm5",
+    "perf:mm9:2",
+    "perf:mm9:2:long",
+    "c4:mm9",
+    "perf:mm5d1:2",
+    "perf:mm5d1:2:long",
+    "c4:mm5d1",
+    "perf:nodraft:2",
+    "perf:nodraft:2:long",
+    "c4:nodraft"
    ]
   },
   {
-   "name": "abl-long",
+   "name": "mm-b",
    "variants": [
     {
-     "name": "base",
-     "execution": {
-      "draft_depth": 0
+     "name": "card"
+    },
+    {
+     "name": "mm5",
+     "build": {
+      "SPEC_MM_FROM": "5"
      }
     },
     {
-     "name": "attn",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_attention|g16_attention"
-     ]
+     "name": "mm9",
+     "build": {
+      "SPEC_MM_FROM": "9"
+     }
     },
     {
-     "name": "mv2048",
-     "execution": {
-      "draft_depth": 0
+     "name": "mm5d1",
+     "build": {
+      "SPEC_MM_FROM": "5"
      },
-     "double": [
-      "*:g_mv_q4_k_k2048_(?!swiglu)"
-     ]
+     "execution": {
+      "draft_depth": 1
+     }
     },
     {
-     "name": "swiglu",
+     "name": "nodraft",
      "execution": {
       "draft_depth": 0
-     },
-     "double": [
-      "*:mv_q4_k_k2048_swiglu"
-     ]
-    },
-    {
-     "name": "down",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_mv_q[46]_k_k7680"
-     ]
-    },
-    {
-     "name": "head",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_mv_q6_k_k2048"
-     ]
+     }
     }
    ],
    "steps": [
-    "perf:base:2:long",
-    "c4:base",
-    "perf:attn:2:long",
-    "c4:attn",
-    "perf:mv2048:2:long",
-    "c4:mv2048",
-    "perf:swiglu:2:long",
-    "c4:swiglu",
-    "perf:down:2:long",
-    "c4:down",
-    "perf:head:2:long",
-    "c4:head"
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "perf:mm5:2",
+    "perf:mm5:2:long",
+    "c4:mm5",
+    "perf:mm9:2",
+    "perf:mm9:2:long",
+    "c4:mm9",
+    "perf:mm5d1:2",
+    "perf:mm5d1:2:long",
+    "c4:mm5d1",
+    "perf:nodraft:2",
+    "perf:nodraft:2:long",
+    "c4:nodraft"
    ]
   }
  ]
