@@ -1,40 +1,35 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "HyperCLOVAX same-runner: card vs drafting off vs llama.cpp ROCm/Vulkan (ngram-simple and Vulkan no-draft).",
+ "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+ "memory_bytes": 24000000000,
+ "kit": null,
+ "llamacpp": "b1369",
+ "llamacpp_vulkan": "b12211",
+ "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "ref",
    "variants": [
     {
      "name": "card"
+    },
+    {
+     "name": "d0",
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
     "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
+    "perf:d0:2",
     "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "fn-mtp-b",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
+    "llama@vulkan:2",
+    "llama@vulkan.np1.nospec:2",
+    "llama@vulkan.np1:2",
     "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
+    "perf:d0:2"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
