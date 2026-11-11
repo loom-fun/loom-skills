@@ -332,7 +332,7 @@ def render(d):
         return out + (f" {STALE}" if key in stale_keys else "")
     for key, label in METRICS:
         if not metric_applies(key, kind, feats, info):
-            L.append(f"| {label} |" + " n/a |" * ((6 if devlab_only else 8) + len(extra)))
+            L.append(f"| {label} |" + " n/a |" * ((5 if devlab_only else 8) + len(extra)))
             continue
         m, i = shown.get(key, ({"loom": None, "baseline": None}, None))
         loom = marked(key, m.get("loom"), i, stale)
