@@ -6,11 +6,38 @@
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "abl",
+   "name": "moer",
    "variants": [
     {
-     "name": "card"
+     "name": "main",
+     "build": {}
     },
+    {
+     "name": "r4",
+     "build": {
+      "MOE_R": "4"
+     }
+    },
+    {
+     "name": "r16",
+     "build": {
+      "MOE_R": "16"
+     }
+    },
+    {
+     "name": "r32",
+     "build": {
+      "MOE_R": "32"
+     }
+    }
+   ],
+   "steps": [
+    "ab:16"
+   ]
+  },
+  {
+   "name": "abl2",
+   "variants": [
     {
      "name": "main",
      "build": {}
@@ -37,10 +64,31 @@
      ]
     },
     {
-     "name": "d-mv",
+     "name": "d-quant",
      "build": {},
      "double": [
-      "*:@g_mv_\\w+_q8_r1\\b"
+      "*:@g_quant_q8\\b"
+     ]
+    },
+    {
+     "name": "d-norm",
+     "build": {},
+     "double": [
+      "*:@g_post_add_norm\\b"
+     ]
+    },
+    {
+     "name": "d-rope",
+     "build": {},
+     "double": [
+      "*:@g_qk_rope_store\\b"
+     ]
+    },
+    {
+     "name": "d-combine",
+     "build": {},
+     "double": [
+      "*:@g_moe_combine\\b"
      ]
     },
     {
@@ -51,22 +99,15 @@
      ]
     },
     {
-     "name": "d-misc",
+     "name": "d-mv",
      "build": {},
      "double": [
-      "*:@(g_quant_q8|g_post_add_norm|g_qk_rope_store|g_moe_combine)\\b"
-     ]
-    },
-    {
-     "name": "d-head",
-     "build": {},
-     "double": [
-      "*:@g_head_mv_q8\\b"
+      "*:@g_mv_\\w+_q8_r1\\b"
      ]
     }
    ],
    "steps": [
-    "ab:8"
+    "ab:20"
    ]
   }
  ]
