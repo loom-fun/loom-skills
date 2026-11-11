@@ -233,6 +233,8 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
 TH=$(q "print(j.get('thinking') or 'off')")   # chat_template_kwargs.enable_thinking sent to both engines
 echo "thinking: $TH (sent to both engines)"
 declare -A res
+( while sleep 10; do echo "$(date +%T) $(grep -E "MemAvailable|^Cached:" /proc/meminfo | tr -s " \n" " ") $(grep -E "pgmajfault|pswpin" /proc/vmstat | tr "\n" " ") $(grep read_bytes /proc/$(pgrep -o loom-serve || echo self)/io) psi: $(head -1 /proc/pressure/io) $(head -1 /proc/pressure/memory)"; done > "$out/sys.log" 2>&1 ) &
+SAMP=$!
 for s in $steps; do
   IFS=: read -r kind p1 p2 p3 <<< "$s"
   BK=rocm; bkt=; MODS=; case $kind in *@*) bkt=-${kind#*@}; BK=${kind#*@}; MODS=${BK#"${BK%%.*}"}; BK=${BK%%.*}; kind=${kind%@*};; esac   # llama@vulkan: the other backend's build
@@ -263,10 +265,8 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] fo
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "c4 $p1"
-      PWK=$(q "print(j.get('prewarm') or 0)"); if [ "$PWK" != 0 ]; then "$T" "$here/.github/scripts/prewarm_ple.py" "$PWK" $(ls "${gguf%-0000*}"-0000*.gguf) 2>&1 | tail -3; fi
-      ( while sleep 10; do echo "$(date +%T) $(grep -E "MemAvailable|^Cached:" /proc/meminfo | tr -s " \n" " ") $(grep -E "pgmajfault|pswpin" /proc/vmstat | tr "\n" " ") $(grep read_bytes /proc/$(pgrep -o loom-serve)/io) psi: $(head -1 /proc/pressure/io) $(head -1 /proc/pressure/memory)"; done > "$out/sys.log" 2>&1 ) &
-      SAMP=$!
-      for i in $(seq 1 "${C4_REPS:-3}"); do date +%T; (cd "$out" && "$T" "$B/c4_steady.py" "$url" 4 --model "$cardid" --thinking "$TH" | tail -1 | tee -a "c4_$p1.txt"); [ "$i" = "${C4_REPS:-3}" ] && kill $SAMP; curl -s "$url/metrics" | grep -iE "draft|spec|accept|propos" | tr "\n" " "; echo; done
+      PWK=$(q "print(j.get('prewarm') or 0)"); if [ "$PWK" != 0 ]; then "$T" "$here/.github/scripts/prewarm_ple.py" "$((PWK-1))" $(ls "${gguf%-0000*}"-0000*.gguf) 2>&1 | tail -3; fi
+      for i in $(seq 1 "${C4_REPS:-3}"); do date +%T; (cd "$out" && "$T" "$B/c4_steady.py" "$url" 4 --model "$cardid" --thinking "$TH" | tail -1 | tee -a "c4_$p1.txt"); curl -s "$url/metrics" | grep -iE "draft|spec|accept|propos" | tr "\n" " "; echo; done
       res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_$p1.txt')))");;
     llama)   # llama:N[:long|-][:N_MAX]
       llama_up "${p3:-}" || { res[$s]=ERROR; continue; }

@@ -6,36 +6,30 @@
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "fn-mtp-pw",
+   "name": "fn-long-nopw",
    "variants": [
     {
-     "name": "card",
-     "execution": {
-      "draft_depth": 3
-     }
+     "name": "card"
     }
    ],
    "steps": [
-    "perf:card:2",
-    "c4:card"
-   ],
-   "prewarm": 10
-  },
-  {
-   "name": "fn-mtp-nopw",
-   "variants": [
-    {
-     "name": "card",
-     "execution": {
-      "draft_depth": 3
-     }
-    }
-   ],
-   "steps": [
-    "perf:card:2",
+    "perf:card:1:long",
     "c4:card"
    ],
    "prewarm": 0
+  },
+  {
+   "name": "fn-long-pw",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:1:long",
+    "c4:card"
+   ],
+   "prewarm": 1
   }
  ],
  "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
