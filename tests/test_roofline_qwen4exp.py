@@ -7,7 +7,10 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "skills/loom-benchmark/scripts"))
 spec = importlib.util.spec_from_file_location("roofline", REPO / "skills/loom-roofline/roofline.py")
 roofline = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(roofline)
+try:
+    spec.loader.exec_module(roofline)
+except ModuleNotFoundError as e:   # roofline.py reads GGUFs (gguf, requests): not installed in the unit-test job
+    raise unittest.SkipTest(f"roofline.py needs {e.name}")
 
 L, ROWS, TOP_K = 8, 16, 2048
 META = {"general.architecture": "qwen4exp", "qwen4exp.block_count": L, "qwen4exp.embedding_length": 256,

@@ -76,7 +76,7 @@ class CatalogBuild(unittest.TestCase):
         self.assertIn("--memory_bytes=", r.stdout)
 
     def test_draft_none_serves_the_target_variant(self):
-        pkg, r = self.build({}, "--draft", "none")
+        pkg, r = self.build({}, "--draft", "none", LOOM_MEMORY_CAP_GIB="64")   # the default cap is 60 % of this machine's RAM
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
         m = json.loads((pkg / "model.json").read_text())
         self.assertEqual(list(m["variants"]), ["t"])
