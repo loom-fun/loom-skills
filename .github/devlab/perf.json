@@ -6,21 +6,28 @@
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "tune",
+   "name": "depth",
    "variants": [
     {
-     "name": "nd",
+     "name": "d1",
      "execution": {
-      "draft_depth": 0
+      "draft_depth": 1
      }
     },
     {
-     "name": "df3"
+     "name": "d2",
+     "execution": {
+      "draft_depth": 2
+     }
     }
    ],
    "steps": [
-    "tunemeasure:nd",
-    "tunemeasure:df3"
+    "perf:d1:1:long",
+    "c4:d1",
+    "tunemeasure:d1",
+    "perf:d2:1:long",
+    "c4:d2",
+    "tunemeasure:d2"
    ]
   }
  ]
