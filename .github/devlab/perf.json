@@ -12,12 +12,6 @@
      "name": "b0",
      "build": {},
      "ref": "origin/main",
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "3"
-     ],
      "execution": {
       "draft_depth": 0
      }
@@ -25,12 +19,6 @@
     {
      "name": "n0",
      "build": {},
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "3"
-     ],
      "execution": {
       "draft_depth": 0
      }
@@ -39,12 +27,6 @@
      "name": "b3",
      "build": {},
      "ref": "origin/main",
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "3"
-     ],
      "execution": {
       "draft_depth": 3
      }
@@ -52,12 +34,6 @@
     {
      "name": "n3",
      "build": {},
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "3"
-     ],
      "execution": {
       "draft_depth": 3
      }
