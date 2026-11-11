@@ -21,6 +21,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -75,6 +76,21 @@ def measure(url, model, chat, context=0):
         r = stream(url, model, messages, 256, extra={**off, **extra}, timeout=900)
         if r.get("decode_tps"):
             tps.append(r["decode_tps"])
+    if tps and os.environ.get("TUNE_STREAMS", "4") != "0":
+        # The card's streams4 metric: four requests decoding at once. Drafting verifies 4+ tokens per stream per step, which
+        # on a MoE gathers every expert and can cost more than it gains (Gemma-4-26B-A4B DFlash: 4 streams 110 vs 157 tok/s
+        # without, one stream equal). One row (the per-stream rate of the batch) in the harmonic mean makes the choice weigh it.
+        res = [None] * 4
+
+        def run(i):
+            res[i] = stream(url, model, WORK[i % len(WORK)][0], 256, extra={**off, **WORK[i % len(WORK)][1]}, timeout=900)
+        ts = [threading.Thread(target=run, args=(i,)) for i in range(4)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        rates = [r["decode_tps"] for r in res if r and r.get("decode_tps")]
+        if len(rates) == 4:
+            tps.append(statistics.mean(rates))
+    measure.rows = [round(t, 1) for t in tps]   # the rows (workload order, 4-stream last), for diagnostics
     return statistics.harmonic_mean(tps) if tps else 0.0
 
 
@@ -82,7 +98,6 @@ def concurrent_ok(url, model, chat):
     """Agentic serving runs several requests at once: ~300-token prompts two at a time 0.5 s apart (both draft right
     after nearly simultaneous prefills) and four together (consistency.py's prompts), twice each, must all complete.
     A candidate that fails is not chosen."""
-    import threading
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
     body = doc(1000)
     prompts = [f"Question {i}: summarize part {i} of this text.\n\n" + body[i * 700:(i * 700) + 700 + 157 * i] for i in range(4)]

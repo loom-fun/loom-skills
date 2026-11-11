@@ -68,6 +68,24 @@
     "perf:nd_comb:1:long",
     "perf:nd_fl:1:long"
    ]
+  },
+  {
+   "name": "tune",
+   "variants": [
+    {
+     "name": "nd",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "df3"
+    }
+   ],
+   "steps": [
+    "tunemeasure:nd",
+    "tunemeasure:df3"
+   ]
   }
  ]
 }
