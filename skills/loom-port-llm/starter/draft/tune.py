@@ -75,7 +75,31 @@ def measure(url, model, chat, context=0):
         r = stream(url, model, messages, 256, extra={**off, **extra}, timeout=900)
         if r.get("decode_tps"):
             tps.append(r["decode_tps"])
-    return statistics.harmonic_mean(tps) if tps else 0.0
+    c4 = measure_c4(url, model, chat)
+    return (statistics.harmonic_mean(tps) if tps else 0.0), c4
+
+
+def measure_c4(url, model, chat, n=4, tokens=300):
+    """Aggregate decode tok/s of n simultaneous essay requests (the card's streams4 row, c4_steady.py's prompts), tokens
+    over the window in which every stream is decoding. Drafting verifies depth + 1 tokens per stream, so a drafter
+    whose proposals are rarely accepted (n-gram on free text: 3-5 %) costs much more here than it gains."""
+    import threading
+    off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
+    stamps, toks = [[] for _ in range(n)], [0] * n
+
+    def run(i):
+        r = stream(url, model, [{"role": "user", "content": f"[{time.time()} {i}] Write a very long, detailed essay about the history of lighthouses."}],
+                   tokens, extra=off, timeout=900, on_token=stamps[i].append)
+        toks[i] = r.get("tokens") or 0
+    ts = [threading.Thread(target=run, args=(i,)) for i in range(n)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    if not all(stamps) or not all(toks):
+        return 0.0
+    start, end = max(s[0] for s in stamps), min(s[-1] for s in stamps)
+    if end <= start:
+        return 0.0
+    return sum(sum(1 for x in s if start <= x <= end) * (toks[i] / len(s)) for i, s in enumerate(stamps)) / (end - start)
 
 
 def concurrent_ok(url, model, chat):
@@ -183,17 +207,17 @@ def main():
             t0 = time.time()
             try:
                 serve("tune", port, mem, path, env)
-                tps = measure(f"http://127.0.0.1:{port}", model_id, chat,
-                              card["presets"]["chat"]["execution"].get("context_capacity") or 0)
+                tps, c4 = measure(f"http://127.0.0.1:{port}", model_id, chat,
+                                  card["presets"]["chat"]["execution"].get("context_capacity") or 0)
             except Exception as e:  # noqa: BLE001  a failing candidate is reported and skipped
                 print(f"tune: {kind} depth {depth}: {e}", file=sys.stderr)
-                tps = 0.0
+                tps = c4 = 0.0
             subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
-            row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2), "seconds": round(time.time() - t0)}
+            row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2), "streams4_tps": round(c4, 1), "seconds": round(time.time() - t0)}
             print("tune:", json.dumps(row), flush=True)
             table.append(row)
             if depth == 0:
-                base = tps
+                base, base_c4 = tps, c4
             elif tps > best[2]:
                 best = (kind, depth, tps)
             if depth:
@@ -206,7 +230,7 @@ def main():
         if first:
             skipped[kind] = [d for d in allowed if d not in measured]
     if base is None:
-        base = 0.0
+        base = base_c4 = 0.0
     # Fastest first, each checked for exact output (vs draft_depth 0 of its own package) and under concurrent load;
     # one that fails is reported and skipped.
     import spec_check
@@ -227,7 +251,13 @@ def main():
         serve("tune", port, mem, os.path.join(pkg, f"model_d{depth}.json"), env)
         spec_check.record(url, model_id, out)
         return spec_check.compare(refs[kind], out) == 0
-    ranked = sorted([r for r in table if r["kind"] != "none" and r["decode_tps"] >= 1.03 * base], key=lambda r: -r["decode_tps"])
+    # A candidate must not cost concurrent serving: the 4-stream aggregate stays within C4_MIN (default 0.9) of no
+    # drafting (LFM3-Omni-2B n-gram depth 2: +14 % single stream on the tune requests, 4 streams 311-326 vs 537 tok/s).
+    c4_min = float(os.environ.get("TUNE_C4_MIN", "0.9"))
+    for r in table:
+        if r["kind"] != "none" and base_c4 and r["streams4_tps"] < c4_min * base_c4:
+            r["checked"] = f"rejected: 4 streams {r['streams4_tps']} tok/s vs {round(base_c4, 1)} without drafting"
+    ranked = sorted([r for r in table if r["kind"] != "none" and r["decode_tps"] >= 1.03 * base and "checked" not in r], key=lambda r: -r["decode_tps"])
     # Within 5 % of the fastest (measurement noise on these short requests), the shallower depth first: every drafted
     # token is verified with decode attention over the whole context, so a deep draft costs at long context
     # (Qwen3.6-35B-A3B DFlash: depth 7 vs 3 was 109 vs 105 tok/s short, 31 vs 48 tok/s at 32k).
@@ -261,7 +291,7 @@ def main():
     for kind, _ in kinds:
         shutil.rmtree(os.path.join(work, f"pkg_tune_{kind}"), ignore_errors=True)
     print("TUNE_RESULT", json.dumps({"kind": choice[0], "depth": choice[1], "decode_tps": round(choice[2], 2),
-                                     "baseline_tps": round(base, 2), "memory_bytes": int(final_mem), "table": table,
+                                     "baseline_tps": round(base, 2), "baseline_streams4_tps": round(base_c4, 1), "memory_bytes": int(final_mem), "table": table,
                                      **({"prior": (cfg.get("reference") or {}).get("repo"), "not_measured": skipped} if prior else {})}))
 
 
