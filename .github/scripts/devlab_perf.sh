@@ -265,7 +265,7 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] fo
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "c4 $p1"
-      PWK=$(q "print(j.get('prewarm') or 0)"); if [ "$PWK" != 0 ]; then "$T" "$here/.github/scripts/prewarm_ple.py" "$((PWK-1))" $(ls "${gguf%-0000*}"-0000*.gguf) 2>&1 | tail -3; fi
+      PWK=$(q "print(j.get('prewarm') or 0)"); if [ "$PWK" != 0 ]; then "$T" "$here/.github/scripts/prewarm_ple.py" "$((PWK-1))" $(ls "${gguf%-0000*}"-0000*.gguf) 2>&1 | tee "$out/prewarm.txt" | tail -3; fi
       for i in $(seq 1 "${C4_REPS:-3}"); do date +%T; (cd "$out" && "$T" "$B/c4_steady.py" "$url" 4 --model "$cardid" --thinking "$TH" | tail -1 | tee -a "c4_$p1.txt"); curl -s "$url/metrics" | grep -iE "draft|spec|accept|propos" | tr "\n" " "; echo; done
       res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_$p1.txt')))");;
     llama)   # llama:N[:long|-][:N_MAX]

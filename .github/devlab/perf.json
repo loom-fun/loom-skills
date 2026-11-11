@@ -6,27 +6,25 @@
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "fn-long-nopw",
+   "name": "fn-pwa",
    "variants": [
     {
      "name": "card"
     }
    ],
    "steps": [
-    "perf:card:1:long",
     "c4:card"
    ],
-   "prewarm": 0
+   "prewarm": 1
   },
   {
-   "name": "fn-long-pw",
+   "name": "fn-pwb",
    "variants": [
     {
      "name": "card"
     }
    ],
    "steps": [
-    "perf:card:1:long",
     "c4:card"
    ],
    "prewarm": 1

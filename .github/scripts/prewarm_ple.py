@@ -27,10 +27,16 @@ for path in sys.argv[2:]:
                 import os; end = os.path.getsize(path) - base
             lo = base + off + (end - off) * K // 16; hi = base + end
             print("prewarm", path, nm, dims, "bytes", hi - lo, flush=True)
-            f.seek(lo); left = hi - lo
+            import os, random, time
+            os.posix_fadvise(f.fileno(), lo, hi - lo, os.POSIX_FADV_DONTNEED)
+            t = time.time()
+            for _ in range(300): os.pread(f.fileno(), 4096, random.randrange(lo, hi - 4096) & ~4095)
+            print("random-read-ms", round((time.time() - t) / 300 * 1000, 3), flush=True)
+            t = time.time(); f.seek(lo); left = hi - lo
             while left > 0:
                 b = f.read(min(left, 64 << 20))
                 if not b: break
                 left -= len(b)
+            print("seq-GBps", round((hi - lo) / (time.time() - t) / 1e9, 2), flush=True)
             sys.exit(0)
 print("tensor not found")
