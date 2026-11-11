@@ -13,6 +13,7 @@
     }
    ],
    "steps": [
+    "perf:card:2",
     "c4:card"
    ]
   }
