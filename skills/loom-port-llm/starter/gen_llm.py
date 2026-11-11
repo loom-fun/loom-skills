@@ -1945,6 +1945,72 @@ def fuse_post_add_row_scale(program):
     return program, "".join(post_add_norm_rs(lv) for lv in sorted(used))
 
 
+# g_post_add_norm_q8: g_post_add_norm followed by g_quant_q8 of its output row in one kernel (decode-shaped epochs, the
+# `else` of the row-scale dispatch: the post-attention / post-FFN residual add, the next norm and the int8 copy the
+# next matvecs read). A lane holds exactly one 32-value quantization group of the normalized row (H / 32 <= 256), so
+# the quantization is g_quant_q8's own per-group arithmetic on registers: identical codes, scales and sums, one launch
+# and one re-read of h less per norm. h f32 is still written.
+def post_add_norm_q8():
+    a = NORMS.index('kernel.def export("g_post_add_norm")')
+    t = NORMS[a:]
+    t = t[:t.index("\n}\n") + 3]
+    t = t.replace('export("g_post_add_norm") @g_post_add_norm(', 'export("g_post_add_norm_q8") @g_post_add_norm_q8(')
+    t = t.replace("%w_next: buffer, %h: buffer)", "%w_next: buffer, %h: buffer, %hq: buffer)")
+    old_tail = t[t.rindex("  scf.if %active {"):]
+    assert "vector.store %hv, %h_view" in old_tail and old_tail.rstrip().endswith("kernel.return\n}"), old_tail
+    body = old_tail[:old_tail.index("  }\n  kernel.return")]
+    body = body.replace("  scf.if %active {", "  %hfin = scf.if %active -> (vector<32xf32>) {", 1) + "    scf.yield %hv : vector<32xf32>\n  } else {\n    scf.yield %zero32 : vector<32xf32>\n  }\n"
+    return "\n" + t[:t.rindex("  scf.if %active {")] + body + f"""  scf.if %active {{
+    %g = index.assume %lane [range(%lane, 0, {HG - 1})] : index
+    %q_view = buffer.view %hq[%zero] : buffer -> view<[%tokens]x{HG}x8xi32>
+    %m_bytes = index.constant {H} : offset
+    %m_off = index.scale %tokens, %m_bytes : index, offset -> offset
+    %m_view = buffer.view %hq[%m_off] : buffer -> view<[%tokens]x{HG}x2xf32>
+    %c127 = scalar.constant 127.0 : f32
+    %zero_i = scalar.constant 0 : i32
+    %zero8i = vector.constant 0 : vector<8xi32>
+    %ones8 = vector.constant 1 : vector<32xi8>
+    %a = vector.absf %hfin : vector<32xf32>
+    %amax = vector.reduce<maxnumf> %a, %zero_f : vector<32xf32>, f32
+    %d = scalar.divf %amax, %c127 : f32
+    %nz = scalar.cmpf one, %amax, %zero_f : f32
+    %dv = vector.splat %d : vector<32xf32>
+    %sc = vector.divf %hfin, %dv : vector<32xf32>
+    %rd = vector.roundf %sc : vector<32xf32>
+    %nzv = vector.splat %nz : vector<32xi1>
+    %rs = vector.select %nzv, %rd, %zero32 : vector<32xf32>
+    %q = vector.fptosi %rs : vector<32xf32> to vector<32xi8>
+    %qw = vector.bitcast %q : vector<32xi8> to vector<8xi32>
+    vector.store %qw, %q_view[%token, %g, %c0] : vector<8xi32>, view<[%tokens]x{HG}x8xi32>
+    %qs = vector.dot4i<s8s8> %q, %ones8, %zero8i : vector<32xi8>, vector<32xi8>, vector<8xi32>
+    %qsi = vector.reduce<addi> %qs, %zero_i : vector<8xi32>, i32
+    %qsf = scalar.sitofp %qsi : i32 to f32
+    %dh = scalar.fptrunc %d : f32 to f16
+    %da = scalar.extf %dh : f16 to f32
+    %meta = vector.from_elements %da, %qsf : vector<2xf32>
+    vector.store %meta, %m_view[%token, %g, %c0] : vector<2xf32>, view<[%tokens]x{HG}x2xf32>
+  }}
+  kernel.return
+}}
+"""
+
+
+def fuse_post_add_quant(program):
+    """g_post_add_norm immediately followed by the g_quant_q8 launch of its output row (H wide) becomes one
+    g_post_add_norm_q8 launch. Returns (program, kernel text or "")."""
+    import re as _re
+    pat = _re.compile(
+        r"(?P<ind>[ ]*)kernel\.launch @g_post_add_norm\[(?P<n>%\w+)\]\((?P=n), (?P<args>%\w+, %\w+, %\w+, %\w+), (?P<h>%\w+)\) : \[index\]\(index, (?P<ty>buffer, view<\d+xf32>, buffer, view<\d+xf32>), buffer\)\n"
+        r"[ ]*kernel\.launch @g_quant_q8\[(?P=n), (?P<w>%nH)\]\((?P=n), (?P=w), (?P=h), (?P<hq>%\w+)\) : \[index, index\]\(index, index, buffer, buffer\)\n")
+    n = [0]
+    def rep(m):
+        n[0] += 1
+        return (f"{m.group('ind')}kernel.launch @g_post_add_norm_q8[{m.group('n')}]({m.group('n')}, {m.group('args')}, {m.group('h')}, {m.group('hq')})"
+                f" : [index](index, {m.group('ty')}, buffer, buffer)\n")
+    program = pat.sub(rep, program)
+    return program, (post_add_norm_q8() if n[0] else "")
+
+
 # DeepStack (Qwen3-VL, cfg["vision"]["deepstack"] = n): an image row is n + 1 slices of H floats; g_embed takes slice 0,
 # and after trunk layer k < n, g_deepstack adds slice k + 1 to the residual of image inputs and renormalizes their h
 # (llama.cpp qwen3vl.cpp: deepstack_out = l_out + inp_embd[(k + 1) * n_embd ...]). Text inputs are untouched.
@@ -5175,6 +5241,9 @@ if __name__ == "__main__":
     if os.environ.get("POST_ADD_ROW_SCALE", "1") != "0":   # after live_row_scale; =0 A/B it off
         program, _fused = fuse_post_add_row_scale(program)
         COMMON += _fused
+    if os.environ.get("POST_ADD_QUANT", "1") != "0" and USED_MVQ and H % 32 == 0 and H // 32 <= 256:   # after the row-scale fusion (it leaves norm + g_quant_q8 in its else); =0 A/B it off
+        program, _fusedq = fuse_post_add_quant(program)
+        COMMON += _fusedq
     if any(f == "f32" for f, *_ in USED_MV | USED_MV_R) or "f32" in USED_GEMM:
         COMMON += F32_VALUES
     if any(f == "f16" for f, *_ in USED_MV | USED_MV_R) or "f16" in USED_GEMM:
