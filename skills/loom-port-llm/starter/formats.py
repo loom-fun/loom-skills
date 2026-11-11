@@ -56,3 +56,12 @@ def memory_cap():
     if reserved:
         what += f" minus LOOM_RESERVED_GIB {reserved / 2**30:g}"
     return cap - reserved, what, reserved
+
+
+if __name__ == "__main__":
+    import os
+    import sys
+    if len(sys.argv) == 3 and sys.argv[1] == "size":   # formats.py size FIRST_PART: bytes of the (split) GGUF
+        print(sum(os.path.getsize(p) for p in split_parts(sys.argv[2])))
+    else:
+        sys.exit("usage: formats.py size MODEL.gguf")

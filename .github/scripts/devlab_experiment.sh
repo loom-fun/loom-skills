@@ -11,6 +11,8 @@
 #    "variants": [{"name": "card"},                                   (the card's own programs, as published)
 #                 {"name": "x", "build": {"ENV": "value", ...},       (rebuild: build.py with these env vars;
 #                  "build_args": ["--draft-depth", "3"],                 build_args are extra build.py flags)
+#                  "env": {"SKIP_NEEDLE": "1"},                          (exported for the steps; also allowed at the top level)
+#                  "serve_args": ["--pool_backing=fixed"],              (extra loom-serve flags; memory_bytes "none" omits --memory_bytes)
 #                  "execution": {"draft_depth": 0},                    (model.json preset overrides)
 #                  "config": {"rope_theta": 10000},                     (generator config overrides for a rebuild:
 #                                                                         an injected bug the gates must catch)
@@ -23,6 +25,7 @@
 #        needle:N[:S]    one Loom-only needle probe of N tokens on the running server (read timeout S seconds): status, TTFT
 #        consdefer:N     consistency.py N times for cards whose GGUF and llama.cpp do not fit together: references deferred, filled with Loom stopped, runs re-judged
 #        ktest           the starter's kernel tests (make_kernel_tests.py + run_kernel_tests.sh) on the package
+#        probe           one request on a fresh server + GTT/free memory/status/dmesg (out/probe*.json, probe.txt)
 #        gates:LEVEL     gates.sh at LEVEL against the card's llama.cpp build ("llamacpp" in EXPERIMENT.json)
 # Writes WORK/<variant>/out: summary.json, *.log. Every server it starts is stopped at exit.
 set -uo pipefail
@@ -39,30 +42,31 @@ q() { python3 -c "import json,sys; e=json.load(open('$exp')); v=next(v for v in 
 f() { q "print(v.get('$1', e.get('$1')) or '-')"; }
 repo=$(f card); mem=$(f memory_bytes); kit=$(f kit); tag=$(f llamacpp)
 steps=$(q "print(' '.join(v.get('steps') or e.get('steps') or ['consistency:20']))")
+# "env": {"SKIP_NEEDLE": "1"}: environment for the steps (gates.sh switches)
+eval "$(q "print(' '.join(f'export {k}={x!r}' for k, x in (v.get('env') or e.get('env') or {}).items()))")"
 echo "variant $name: $(q "print(json.dumps(v))")"
 
 cleanup() {
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
-  cp "$LOOM_SERVE_STATE"/*.log "$out/" 2>/dev/null
+  cp "$LOOM_SERVE_STATE"/*.log "$LLAMACPP_STATE"/*.log "$LLAMACPP_STATE"/*.mem "$out/" 2>/dev/null   # *.mem: MemAvailable/RssAnon of llama-server
   echo "devlab_experiment.sh: servers stopped"
 }
 trap cleanup EXIT
 
-# 1. Loom SDK + tools venv
-root=${LOOM_ROOT:-$WORK/loom}
-if [ ! -x "$root/.venv/bin/loom-serve" ] || [ ! -x "$root/.tools/bin/python" ]; then
-  step "install Loom into $root"; "$SV/install_loom.sh" "$root" ${LOOM_VERSION:+"$LOOM_VERSION"} || exit 1
-fi
+# 1. Loom SDK + tools venv: the SDK the card pins in its llm_config.json (ensure_sdk.sh), else the default
+step "Loom SDK"
+curl -fsSL --retry 3 "https://huggingface.co/$repo/resolve/main/llm_config.json" -o "$out/llm_config.json" || { echo "FAIL: no llm_config.json in $repo"; exit 1; }
+root=$("$SV/ensure_sdk.sh" "${LOOM_ROOT:-$WORK/loom}" "$out/llm_config.json") || exit 1
 export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 
 # 2. The card (shared by the variants of one runner: fetched once into WORK/card)
 card=$WORK/_card_$(echo "$repo" | tr "/" "_"); base=https://huggingface.co/$repo/resolve/main
 if [ ! -f "$card/.fetched" ]; then
   step "fetch $repo"; rm -rf "$card"
-  "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" || { echo "FAIL: loom-fetch"; exit 1; }
+  HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" || { echo "FAIL: loom-fetch"; exit 1; }
   curl -fsSL --retry 3 "$base/llm_config.json" -o "$card/llm_config.json" || exit 1
-  rm -rf "$WORK/fetch-cache"; touch "$card/.fetched"
+  rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; touch "$card/.fetched"
 fi
 
 # build.py's / make_kernel_tests.py's config: the card's llm_config.json with its GGUFs pointed at the fetched files, plus the tensor table
@@ -109,8 +113,8 @@ if [ "$(q "print('build' in v)")" = True ]; then
   export LOOM_KIT=$K
   # the card's own build settings (model id, depth, context, pool) unless the variant overrides them
   args=$("$T" -c "
-import json; m=json.load(open('$card/model.json')); c=json.load(open('$card/llm_config.json')); ex=m['presets']['chat']['execution']
-a=['--model-id', m['model']['id'], '--context', str(ex['context_capacity']), '--pool', str(ex['pool_capacity']), '--prefill', str(ex['prefill_capacity'])]
+import json; m=json.load(open('$card/model.json')); c=json.load(open('$card/llm_config.json')); ex=next(iter(m['presets'].values()))['execution']
+a=['--model-id', m['model']['id'], '--context', str(ex['context_capacity']), '--pool', str(ex.get('pool_capacity') or ex['context_capacity']), '--prefill', str(ex['prefill_capacity'])]
 d=c.get('draft') or {}
 a += (['--draft', d['kind'], '--draft-depth', str(d['depth'])] if d.get('kind') else [])
 print(' '.join(a))")
@@ -141,7 +145,7 @@ EOF
 fi
 "$T" - "$pkg/model.json" "$(q "print(json.dumps(v.get('execution') or {}))")" <<'EOF'
 import json, sys
-m = json.load(open(sys.argv[1])); ex = m["presets"]["chat"]["execution"]; ex.update(json.loads(sys.argv[2]))
+m = json.load(open(sys.argv[1])); ex = next(iter(m["presets"].values()))["execution"]; ex.update(json.loads(sys.argv[2]))
 json.dump(m, open(sys.argv[1], "w"), indent=1); print("execution", ex)
 EOF
 cp "$pkg/model.json" "$out/model.json"; sha256sum "$pkg"/program/*.loom > "$out/programs.sha256"
@@ -153,12 +157,21 @@ llama_up() {   # the card's llama.cpp build on the card's GGUF (reference for ne
   LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag
   "$B/llamacpp_server.sh" "$("$T" -c "import json; print(json.load(open('$pkg/llm_config.json'))['gguf'])")" "$LLAMA_PORT" 1 8192 | tail -1
 }
-serve() { "$SV/serve.sh" "exp-$name" "$PORT" amdgpu "$mem" "$pkg/model.json" | tail -2; curl -sf "$url/v1/models" >/dev/null; }
+sargs=$(q "print(' '.join(v.get('serve_args') or []))")   # extra loom-serve flags (e.g. --pool_backing=fixed with memory_bytes "none")
+serve() { "$SV/serve.sh" "exp-$name" "$PORT" amdgpu "$mem" "$pkg/model.json" ${sargs:+--} $sargs | tail -2; curl -sf "$url/v1/models" >/dev/null; }
 declare -A res
 for s in $steps; do
   IFS=: read -r kind p1 p2 <<< "$s"
   case $kind in
     ktest)
+      if [ -f "${LOOM_KIT:-/nonexistent}/catalog_tests.tar.gz" ]; then   # a catalog package: its own loom_test targets, translated from Bazel (kernel_tests.py), on the GPU
+        step "catalog kernel tests (kernel_tests.py, --device amdgpu)"
+        kt=$D/catalog_tests; rm -rf "$kt"; mkdir -p "$kt"; tar xzf "$LOOM_KIT/catalog_tests.tar.gz" -C "$kt"
+        tdir=$(cd "$kt" && ls -d model/*/*/test | head -1)
+        "$T" "$B/kernel_tests.py" "$kt" "$tdir" --loom-test "$root/.venv/bin/loom-test" --loom-link "$root/.venv/bin/loom-link" --device amdgpu \
+          -o "$out/ktest.json" > "$out/ktest.log" 2>&1; rc=$?
+        tail -25 "$out/ktest.log" | cut -c1-240; res[$s]=$(tail -1 "$out/ktest.log"); continue
+      fi
       step "kernel tests"
       kt=$D/ktest; rm -rf "$kt"
       ( cd "${LOOM_KIT:-$ST}" && "$T" make_kernel_tests.py "$D/cfg.json" "$kt" ) > "$out/ktest_make.log" 2>&1 || { tail "$out/ktest_make.log"; res[$s]=ERROR; continue; }
@@ -262,7 +275,22 @@ EOF
       gguf=$("$T" -c "import json; print(json.load(open('$pkg/llm_config.json'))['gguf'])")
       FORCE=1 LEVEL=$p1 "$B/gates.sh" "$pkg" "$url" "$gguf" "$D/bench" "$LLAMA_PORT" > "$out/gates.out" 2>&1; rc=$?
       cp "$D"/bench/gates.json "$D"/bench/gates_*.log "$out/" 2>/dev/null
+      find "$D/bench" -maxdepth 1 -type f -size -4M \( -name "*.json" -o -name "*.jsonl" \) -exec cp {} "$out/" \; 2>/dev/null   # golden/compare recordings
       res[$s]=$(grep -h "^GATES" "$out/gates.out" | tail -1 | cut -c1-300); [ -n "${res[$s]}" ] || res[$s]="rc=$rc";;
+    probe)
+      # One short completion on a fresh server, then what the runner and the server say about it (GTT, free memory,
+      # /v1/status, the kernel log): a model that registers but cannot load shows up here, not in a gate's KeyError
+      [ -f "$LOOM_SERVE_STATE/exp-$name.pid" ] && "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
+      step "probe: serve (fresh), one request"
+      { echo "gtt_total $(cat /sys/class/drm/card*/device/mem_info_gtt_total 2>/dev/null | tr '\n' ' ')"; free -g | head -2; } | tee "$out/probe.txt"
+      serve || { res[$s]=ERROR; continue; }
+      code=$(curl -s -m 900 -o "$out/probe_reply.json" -w '%{http_code}' "$url/v1/chat/completions" -H 'content-type: application/json' \
+        -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"What is 2+2?\"}],\"max_tokens\":16,\"chat_template_kwargs\":{\"enable_thinking\":false}}")
+      curl -s -m 900 "$url/v1/chat/completions" -H 'content-type: application/json' \
+        -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the capital of France? Answer in one word.\"}],\"max_tokens\":80}" > "$out/probe_reply_thinking.json"   # thinking at the template default
+      curl -s "$url/v1/status" > "$out/probe_status.json"; head -c 600 "$out/probe_reply.json"; echo
+      { echo "http $code"; echo "gtt_used $(cat /sys/class/drm/card*/device/mem_info_gtt_used 2>/dev/null | tr '\n' ' ')"; free -g | head -2; dmesg 2>/dev/null | tail -25; } >> "$out/probe.txt"; tail -12 "$out/probe.txt"
+      res[$s]="http $code: $(head -c 160 "$out/probe_reply.json" | tr '\n' ' ')";;
     needle)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       step "needle $p1"

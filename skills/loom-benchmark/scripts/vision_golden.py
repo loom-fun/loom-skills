@@ -66,7 +66,22 @@ def builtin_images():
     out["tall"] = (im, "List the colors of the circles from top to bottom.")
     im = Image.new("RGB", (1600, 260), "white"); d = ImageDraw.Draw(im)
     d.text((800, 130), "THE QUICK BROWN FOX 1234", fill=(120, 0, 0), font=font(90), anchor="mm")
-    out["wide"] = (im, "What text is written in this image?")
+    # A constrained question: "What text is written in this image?" has a first token that is a formatting coin flip
+    # ("The" / " the" / "THE" / " THE"; DevLab runs 43055290435, 43060865813: shifting the same text by 1-13 px flips
+    # llama.cpp and Loom independently, 3 of 6 variants diverge at token 0 with gaps 1.3-3.8 in both directions), which
+    # tests the numerics' luck, not the 50x8 patch grid this case exists to cover. The digits are one decisive answer.
+    out["wide"] = (im, "What number is written in this image? Answer with the digits only.")
+    if os.environ.get("VISION_EXTRA"):   # diagnostics for a failing "wide": is it the resize, the grid, or the prompt?
+        out["wide_open"] = (im, "What text is written in this image?")   # the open question this case used to ask
+        out["wide_pre"] = (im.resize((1600, 256), Image.BICUBIC), "What text is written in this image?")   # same grid, resized by us: no resize left to differ
+        im2 = Image.new("RGB", (1600, 320), "white"); ImageDraw.Draw(im2).text((800, 160), "THE QUICK BROWN FOX 1234", fill=(120, 0, 0), font=font(90), anchor="mm")
+        out["wide_aligned"] = (im2, "What text is written in this image?")   # 50x10 merged patches, no resize at all
+        out["wide_q2"] = (im, "Transcribe the text in this image exactly.")
+        im3 = Image.new("RGB", (1600, 260), "white"); ImageDraw.Draw(im3).text((800, 130), "the quick brown fox 1234", fill=(120, 0, 0), font=font(90), anchor="mm")
+        for i, (dx, fs) in enumerate(((1, 90), (5, 90), (0, 86), (-7, 94), (13, 80))):   # fragility: tiny changes to the same text
+            imv = Image.new("RGB", (1600, 260), "white"); ImageDraw.Draw(imv).text((800 + dx, 130), "THE QUICK BROWN FOX 1234", fill=(120, 0, 0), font=font(fs), anchor="mm")
+            out[f"wide_v{i}"] = (imv, "What text is written in this image?")
+        out["wide_lower"] = (im3, "What text is written in this image?")
     return out
 
 

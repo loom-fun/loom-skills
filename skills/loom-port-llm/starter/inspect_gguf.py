@@ -368,5 +368,8 @@ if head_dim not in (64, 128, 256):
     print("WARNING: head_dim", head_dim, "is not 64, 128 or 256: the attention kernels support only those")
 if cfg["chat"] is None:
     print("WARNING: no chat block; fill it by hand from tokenizer.chat_template (fields: see chat_probe.py)")
+if arch == "qwen4exp":   # hyper-connections, per-layer-embedding hash table, sparse indexed attention: no starter kernels
+    print("NOTE: arch qwen4exp is ported from a catalog package (reference/qwen4exp-example, port.sh CATALOG=qwen4exp): the "
+          "starter-coverage warnings above (arch unknown, head_dim, no kernels for q5_1, 12 query heads per KV head) do not apply")
 json.dump(cfg, open(out, "w"), indent=1)
 print("wrote", out)

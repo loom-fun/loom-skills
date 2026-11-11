@@ -1,0 +1,31 @@
+// GGML IQ4_NL nonlinear four-bit weight blocks.
+//
+// Reference: block_iq4_nl and kvalues_iq4nl in llama.cpp commit
+// 030ebb558a5820b444a8f836ed5cdd46c9b4bd7a:
+// https://github.com/ggml-org/llama.cpp/blob/030ebb558a5820b444a8f836ed5cdd46c9b4bd7a/ggml/src/ggml-common.h
+//
+// Each 18-byte record contains one little-endian F16 scale and 16 packed
+// bytes. Low nibbles encode the first 16 values; high nibbles encode the
+// remaining 16, using the same signed codebook. A value is scale * code.
+// The complete-block reader accepts a caller-owned byte origin and returns
+// the exact I8 codes and F32-expanded scale separately. Consumers own scale
+// application and any rounding to their activation representation. Origins
+// need only F16 alignment, and the caller owns bounds and block selection.
+
+func.def public inline @ggml_iq4_nl_block(%input: buffer, %block_origin: offset) -> (vector<32xi8>, f32) {
+  %payload_delta = index.constant 2 : offset
+  %payload_origin = index.add %block_origin, %payload_delta : offset
+  %scale_view = buffer.view %input[%block_origin] : buffer -> view<1xf16>
+  %payload_view = buffer.view %input[%payload_origin] : buffer -> view<16xi8>
+  %scale_half = view.load %scale_view[0] : view<1xf16> -> f16
+  %scale = scalar.extf %scale_half : f16 to f32
+  %payload = vector.load %payload_view[0] : view<16xi8> -> vector<16xi8>
+  %nibble_mask = vector.splati 15 : vector<16xi8>
+  %nibble_shift = vector.splati 4 : vector<16xi8>
+  %lower = vector.andi %payload, %nibble_mask : vector<16xi8>
+  %upper = vector.shrui %payload, %nibble_shift : vector<16xi8>
+  %indices = vector.concat<0> %lower, %upper : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %codebook = vector.constanti [-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113] : vector<16xi8>
+  %codes = vector.table.lookup %codebook[%indices] : vector<16xi8>, vector<32xi8> -> vector<32xi8>
+  func.return %codes, %scale : vector<32xi8>, f32
+}

@@ -57,6 +57,8 @@ In every case:
 
 - The GGUF and the port's `cfg.json`. The cfg supplies sliding layers, KV sharing
   (`kv_layers`) and `head_dim_swa`, which the GGUF may not spell out.
+  qwen4exp needs no cfg: a per-layer-embedding table costs 16 rows (90 B) per token, not its 27 GiB; sparse indexed attention
+  reads `indexer.top_k` positions plus the indexer's compressed keys (an estimate); hyper-connection matrices stream like any weight.
 - llama.cpp ROCm numbers on the same GGUF, from the fastest build
   (`pick_llamacpp.sh`), measured with `perf.py --kind llama` into
   `bench/perf_log.jsonl`. `roofline.py --baseline bench/perf_log.jsonl` reads the

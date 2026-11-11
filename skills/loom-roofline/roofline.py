@@ -94,19 +94,28 @@ def geometry(meta, cfg):
     n_used = int(g("expert_used_count", 0) or 0)
     # Gemma-4 12B/26B/31B: the global layers have fewer KV heads (cfg kv_heads_global; kv_heads is the sliding count)
     kvh_l = [kvh if i in sliding else int(cfg.get("kv_heads_global") or kvh) for i in range(L)]
+    # qwen4exp (reference/qwen4exp-example): sparse indexed attention (an indexer scores the compressed keys, the top_k
+    # positions are attended) and a per-layer-embedding table of which a token reads one row per hash head
+    ratios = g("attention.compress_ratios") or []
     return dict(arch=arch, L=L, hidden=hidden, heads=heads, kvh=kvh, kvh_l=kvh_l, hd=hd, hd_swa=hd_swa,
-                window=window, sliding=sliding, kv_layers=kv_layers, n_exp=n_exp, n_used=n_used)
+                window=window, sliding=sliding, kv_layers=kv_layers, n_exp=n_exp, n_used=n_used,
+                top_k=int(g("attention.indexer.top_k", 0) or 0), idx_heads=int(g("attention.indexer.head_count", 0) or 0),
+                idx_dim=int(g("attention.indexer.key_length", 0) or 0), ratios=list(ratios) if len(ratios) == L else [],
+                gather_rows=len(g("ple.head_vocab_sizes", []) or []))
 
 
 def weight_bytes(tensors, geo):
-    """Bytes of weights streamed per decode step (1 token), and matmul params for flops."""
+    """Bytes of weights streamed per decode step (1 token), and matmul params for flops. Lookup tables are gathered:
+    one row per token (token_embd), or one row per hash head (qwen4exp's per_layer_token_embd: 16 rows of 90 B out of
+    26.8 GiB, so the table is in the footprint but not in the bandwidth). Hyper-connection matrices (hc_*) stream like
+    any weight; the 4 residual streams' activations are negligible next to them."""
     tied = "output.weight" not in tensors
     read, params, head_bytes, detail = 0.0, 0.0, 0, {}
     for name, (nb, shape) in tensors.items():
         numel = math.prod(shape)
         if GATHERED.search(name):
             rows = shape[-1] if len(shape) > 1 else 1
-            b = nb / rows                       # one row per token
+            b = nb / rows * (geo["gather_rows"] or 1) if "per_layer" in name else nb / rows   # rows read per token
             if tied and name == "token_embd.weight":
                 b, head_bytes = nb, nb          # tied head reads it all
                 params += numel
@@ -138,13 +147,23 @@ def attn_layers(tensors, L):
     return found or set(range(L))
 
 
+def sparse_ratio(geo, i):
+    """The indexer's key compression ratio of attention layer i (qwen4exp), 0 for a dense layer."""
+    return geo["ratios"][i] if geo["top_k"] and geo["ratios"] else 0
+
+
 def kv_read_bytes(geo, ctx):
-    """F16 K+V bytes read per decode token with `ctx` tokens cached (every attending layer)."""
+    """F16 K+V bytes read per decode token with `ctx` tokens cached (every attending layer). A sparse-attention layer
+    reads the top_k selected positions' K+V plus its indexer's keys (ctx / ratio positions, BF16): an estimate, the
+    selection itself is not modelled."""
     tot = 0
     for i in sorted(geo["attn"]):
         sl = i in geo["sliding"]
         hd = geo["hd_swa"] if sl else geo["hd"]
         n = min(ctx, geo["window"]) if (sl and geo["window"]) else ctx
+        if sparse_ratio(geo, i):
+            tot += (ctx // geo["ratios"][i]) * geo["idx_dim"] * 2
+            n = min(n, geo["top_k"])
         tot += 2 * geo["kvh_l"][i] * hd * 2 * n
     return tot
 
@@ -156,6 +175,9 @@ def attn_flops_per_token(geo, P):
         sl = i in geo["sliding"]
         hd = geo["hd_swa"] if sl else geo["hd"]
         avg = min(P / 2, geo["window"]) if (sl and geo["window"]) else P / 2
+        if sparse_ratio(geo, i):   # the indexer scores every compressed key, attention covers the top_k only
+            tot += 2 * geo["idx_heads"] * geo["idx_dim"] * (P / 2) / geo["ratios"][i]
+            avg = min(avg, geo["top_k"])
         tot += 2 * 2 * geo["heads"] * hd * avg
     return tot
 

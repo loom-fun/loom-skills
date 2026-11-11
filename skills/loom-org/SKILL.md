@@ -175,7 +175,9 @@ passing.
 **The nightly entry matches the card exactly**: `memory_bytes`, the llama.cpp build and `features` (why: the nightly
 gates serve with the entry's values, so a mismatch gates a different configuration than the card claims).
 `org_status` prints a `CHECK:` for a missing or differing entry. A republish that changes any of them updates the
-entry in a PR.
+entry in a PR. A catalog-package card (`kit: "qwen4exp"`, loom-port-llm "Catalog packages") has a `memory_bytes` above the
+60 % default and an SDK pin in its `llm_config.json`: the nightly installs that SDK (`ensure_sdk.sh`) and needs a runner
+with the headroom (`memcheck.sh`); refresh the pin before its `expires` (loom-setup "SDK pins").
 
 **Memory budget** (one number for the whole card; details in `reference/lessons.md`):
 - On every regeneration pass `make_info.py build --memory-bytes N` explicitly, N being build.py's printed value for

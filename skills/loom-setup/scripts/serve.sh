@@ -2,7 +2,7 @@
 # Start loom-serve in the background and wait until every model is registered.
 # usage: VENV=~/loom/.venv serve.sh NAME PORT DEVICE MEMORY_BYTES MODEL_JSON [MODEL_JSON...] [-- extra loom-serve flags]
 #   DEVICE: amdgpu | 'xdna://0?columns=8' (NPU; add -- --pool_backing=fixed)
-#   MEMORY_BYTES: always set it (e.g. 16000000000); it caps weights + KV pool + workspace.
+#   MEMORY_BYTES: always set it (or `none` with -- --pool_backing=fixed, which sizes its pools itself) (e.g. 16000000000); it caps weights + KV pool + workspace.
 # Logs/PIDs: ~/.cache/loom-serve/NAME.{log,pid,port} (pick unique NAMEs). Stop: stop.sh NAME
 # Readiness = /v1/status registration "ready"; compile happens at startup (cached after the first run),
 # weights load lazily on the first request. Works on Linux and in Git Bash on Windows.
@@ -18,7 +18,18 @@ state=${LOOM_SERVE_STATE:-$HOME/.cache/loom-serve}; mkdir -p "$state"   # NAME.p
 listeners() { if command -v ss >/dev/null; then ss -ltnp | grep ":$port "; else netstat -ano -p tcp | tr -d '\r' | grep LISTENING | grep ":$port "; fi; }
 owns_port() { if command -v ss >/dev/null; then listeners | grep -q "pid=$1,"; else listeners | grep -q " $(cat /proc/$1/winpid 2>/dev/null || echo $1)\$"; fi; }
 if listeners >/dev/null; then echo "port $port busy:"; listeners; exit 1; fi
-nohup "$bin/loom-serve" --device="$dev" --listen=127.0.0.1:$port --memory_bytes=$mem --workers=8 "${models[@]}" "${extra[@]}" > $state/$name.log 2>&1 &
+# A package may declare how it must be served (llm_config.json "serve": {"args": [...], "committed_bytes": N}): e.g.
+# --pool_backing=fixed, which takes no --memory_bytes (it sizes its pools itself); memcheck then checks committed_bytes.
+if [ ${#models[@]} -gt 0 ] && [ -f "$(dirname "${models[0]#--model=}")/llm_config.json" ]; then
+  IFS='|' read -r pkgargs pkgbytes < <("$py" -c "import json,sys; s=json.load(open(sys.argv[1])).get('serve') or {}; print(' '.join(s.get('args', [])) + '|' + str(s.get('committed_bytes', '')))" "$(dirname "${models[0]#--model=}")/llm_config.json" 2>/dev/null)
+  if [ -n "${pkgargs:-}" ]; then
+    extra=($pkgargs "${extra[@]}")
+    case " $pkgargs " in *" --pool_backing=fixed "*) echo "serve.sh: the package serves with $pkgargs (no --memory_bytes); committed ${pkgbytes:-unknown} bytes" >&2; mem=none; memneed=${pkgbytes:-};; esac
+  fi
+fi
+memflag=(--memory_bytes=$mem); [ "$mem" != none ] || memflag=()   # MEMORY_BYTES=none: no cap (--pool_backing=fixed takes none)
+[ "$dev" != amdgpu ] || { [ "$mem" = none ] && [ -z "${memneed:-}" ]; } || "$(dirname "$0")/memcheck.sh" "${memneed:-$mem}" "loom-serve ${extra[*]:-} --memory_bytes=${mem}" || exit 1   # only budgets above the cap are checked
+nohup "$bin/loom-serve" --device="$dev" --listen=127.0.0.1:$port "${memflag[@]}" --workers=8 "${models[@]}" "${extra[@]}" > $state/$name.log 2>&1 &
 echo $! > $state/$name.pid; echo $port > $state/$name.port; start=$(date +%s)
 while kill -0 $(cat $state/$name.pid) 2>/dev/null; do
   st=$(curl -s -m 2 http://127.0.0.1:$port/v1/status | "$py" -c 'import sys,json; d=json.load(sys.stdin)["data"]; print(",".join(x["loom"]["registration"] for x in d) if d else "none")' 2>/dev/null)

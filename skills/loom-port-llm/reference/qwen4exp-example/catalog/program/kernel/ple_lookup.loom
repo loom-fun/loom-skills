@@ -1,0 +1,506 @@
+// IQ4_NL lookup for checkpoint n-gram features. Shared GGML carriers decode
+// the original packed table into BF16 rows selected by the checkpoint hash
+// IDs.
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+// Persistent hot-row cache for PLE rows, appended to the residual buffer after
+// packet_capacity * 22624 bytes: entries * i32 tags (row id + 1, 0 = empty)
+// then entries * 96-byte slots holding the raw 90-byte IQ4_NL rows. Direct
+// mapped; rows are immutable checkpoint data, so entries never go stale.
+// entries = 0 disables the cache.
+config.decl @qwen38.packet_capacity : %value: index where [range(%value, 2, 2147483646), multiple_of(%value, 2)]
+
+// Hash heads below this index read the leading rows of the resident table
+// (flash_next.ple_resident_heads); the others are gathered on demand.
+config.decl @flash_next.ple.resident_heads : %value: index where [range(%value, 0, 16)]
+
+config.decl @flash_next.ple.cache_entries : %value: index where [range(%value, 0, 1073741824), multiple_of(%value, 4)]
+
+func.def inline @flash_next_ple_cache_slot(%id64: i64, %entries: index) -> (i64) {
+  %multiplier = scalar.constant -7046029254386353131 : i64
+  %shift = scalar.constant 20 : i64
+  %one = scalar.constant 1 : i64
+  %entries64 = index.cast %entries : index to i64
+  %safe = scalar.maxui %entries64, %one : i64
+  %mixed = scalar.muli %id64, %multiplier : i64
+  %high = scalar.shrui %mixed, %shift : i64
+  %slot = scalar.remui %high, %safe : i64
+  func.return %slot : i64
+}
+
+// {hit, cache slot} for a row id.
+func.def inline @flash_next_ple_cache_probe(%arena: buffer, %entries: index, %id64: i64) -> (i1, i64) {
+  %c0 = index.constant 0 : index
+  %one = scalar.constant 1 : i64
+  %stride = index.constant 22624 : offset
+  %capacity = config.get @qwen38.packet_capacity : index
+  %cache_origin = index.scale %capacity, %stride : index, offset -> offset
+  %slot = func.call @flash_next_ple_cache_slot(%id64, %entries) : (i64, index) -> (i64)
+  %enabled = index.cmp ugt, %entries, %c0 : index
+  %hit = scf.if %enabled -> (i1) {
+    %tags = buffer.view %arena[%cache_origin] : buffer -> view<[%entries]xi32>
+    %slot_index = index.cast %slot : i64 to index
+    %tag = view.load %tags[%slot_index] : view<[%entries]xi32> -> i32
+    %want64 = scalar.addi %id64, %one : i64
+    %want = scalar.trunci %want64 : i64 to i32
+    %same = scalar.cmpi eq, %tag, %want : i32
+    scf.yield %same : i1
+  } else {
+    %no = scalar.constant false : i1
+    scf.yield %no : i1
+  }
+  func.return %hit, %slot : i1, i64
+}
+
+func.decl @ggml_iq4_nl_block(%weight: buffer, %block_origin: offset) -> (vector<32xi8>, f32)
+
+// Each head selects one original 90-byte IQ4_NL row. The source hash owns
+// valid row IDs; offset arithmetic preserves addresses throughout the table.
+// Only selected activations expand, with F32 scale application and BF16 output.
+kernel.def @flash_next_ple_lookup_iq4() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %ids_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %span, %ids, %weight, %output = buffer.assume.noalias %span_arg, %ids_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %capacity) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %blocks = index.constant 80 : index
+  %before_end = index.cmp ult, %token, %end : index
+  %is_block = index.cmp ult, %thread, %blocks : index
+  %active = scalar.andi %before_end, %is_block : i1
+  scf.if %active {
+    %c5 = index.constant 5 : index
+    %width = index.constant 32 : index
+    %head = index.div %thread, %c5 : index
+    %block = index.rem %thread, %c5 : index
+    %channel = index.mul %block, %width : index
+    %origin = index.constant 0 : offset
+    %row_bytes = index.constant 90 : offset
+    %block_bytes = index.constant 18 : offset
+    %id_view = buffer.view %ids[%origin] : buffer -> view<[%capacity]x16xi32>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%capacity]x16x160xbf16>
+    %id_i32 = view.load %id_view[%token, %head] : view<[%capacity]x16xi32> -> i32
+    %id_index = index.cast %id_i32 : i32 to index
+    %id = index.assume %id_index [range(%id_index, 0, 320001535)] : index
+    %row_origin = index.scale %id, %row_bytes : index, offset -> offset
+    %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+    %block_origin = index.add %row_origin, %block_delta : offset
+    %integer_codes, %scale = func.call @ggml_iq4_nl_block(%weight, %block_origin) : (buffer, offset) -> (vector<32xi8>, f32)
+    %exact_values = vector.sitofp %integer_codes : vector<32xi8> to vector<32xf32>
+    %codes = vector.fptrunc %exact_values : vector<32xf32> to vector<32xbf16>
+    %values = vector.extf %codes : vector<32xbf16> to vector<32xf32>
+    %scales = vector.splat %scale : vector<32xf32>
+    %scaled = vector.mulf %values, %scales : vector<32xf32>
+    %packed = vector.fptrunc %scaled : vector<32xf32> to vector<32xbf16>
+    vector.store %packed, %output_view[%token, %head, %channel] : vector<32xbf16>, view<[%capacity]x16x160xbf16>
+  }
+  kernel.return
+}
+
+// On-demand variant. The control VM gathers each selected 90-byte IQ4_NL row
+// from the checkpoint into a compact staging region that follows the activation
+// rows of the caller's residual buffer: row (token, head) lives at
+// token_count * 20480 + (token * 16 + head) * 90. Dequantization is identical
+// to flash_next_ple_lookup_iq4.
+kernel.def @flash_next_ple_gather_lookup_iq4() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %staging_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %span, %staging, %weight, %output = buffer.assume.noalias %span_arg, %staging_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %capacity) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %blocks = index.constant 80 : index
+  %before_end = index.cmp ult, %token, %end : index
+  %is_block = index.cmp ult, %thread, %blocks : index
+  %active = scalar.andi %before_end, %is_block : i1
+  scf.if %active {
+    %c5 = index.constant 5 : index
+    %c16 = index.constant 16 : index
+    %width = index.constant 32 : index
+    %head = index.div %thread, %c5 : index
+    %block = index.rem %thread, %c5 : index
+    %channel = index.mul %block, %width : index
+    %origin = index.constant 0 : offset
+    %activation_row_bytes = index.constant 20480 : offset
+    %row_bytes = index.constant 90 : offset
+    %block_bytes = index.constant 18 : offset
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%capacity]x16x160xbf16>
+    %staging_base = index.scale %capacity, %activation_row_bytes : index, offset -> offset
+    %capacity_packet = config.get @qwen38.packet_capacity : index
+    %map_stride = index.constant 22304 : offset
+    %map_origin = index.scale %capacity, %map_stride : index, offset -> offset
+    %sources = buffer.view %staging[%map_origin] : buffer -> view<[%capacity]x16xi32>
+    %source_word = view.load %sources[%token, %head] : view<[%capacity]x16xi32> -> i32
+    %resident_heads = config.get @flash_next.ple.resident_heads : index
+    %is_resident = index.cmp ult, %head, %resident_heads : index
+    scf.if %is_resident {
+      // Resident head: the source map holds the table row id; the weight view
+      // covers the leading rows of the table.
+      %id_index = index.cast %source_word : i32 to index
+      %id = index.assume %id_index [range(%id_index, 0, 320001535)] : index
+      %resident_row = index.scale %id, %row_bytes : index, offset -> offset
+      %resident_delta = index.scale %block, %block_bytes : index, offset -> offset
+      %resident_origin = index.add %resident_row, %resident_delta : offset
+      %codes_r, %scale_r = func.call @ggml_iq4_nl_block(%weight, %resident_origin) : (buffer, offset) -> (vector<32xi8>, f32)
+      %exact_r = vector.sitofp %codes_r : vector<32xi8> to vector<32xf32>
+      %bf_r = vector.fptrunc %exact_r : vector<32xf32> to vector<32xbf16>
+      %values_r = vector.extf %bf_r : vector<32xbf16> to vector<32xf32>
+      %scales_r = vector.splat %scale_r : vector<32xf32>
+      %scaled_r = vector.mulf %values_r, %scales_r : vector<32xf32>
+      %packed_r = vector.fptrunc %scaled_r : vector<32xf32> to vector<32xbf16>
+      vector.store %packed_r, %output_view[%token, %head, %channel] : vector<32xbf16>, view<[%capacity]x16x160xbf16>
+    } else {
+      %zero32 = scalar.constant 0 : i32
+      %from_cache = scalar.cmpi slt, %source_word, %zero32 : i32
+      %row_origin = scf.if %from_cache -> (offset) {
+        %minus_one = scalar.constant -1 : i32
+        %cache_slot32 = scalar.subi %minus_one, %source_word : i32
+        %cache_slot = index.cast %cache_slot32 : i32 to index
+        %entries = config.get @flash_next.ple.cache_entries : index
+        %tag_bytes = index.constant 4 : offset
+        %slot_bytes = index.constant 96 : offset
+        %residual_stride = index.constant 22624 : offset
+        %cache_origin = index.scale %capacity_packet, %residual_stride : index, offset -> offset
+        %tags_size = index.scale %entries, %tag_bytes : index, offset -> offset
+        %data_origin = index.add %cache_origin, %tags_size : offset
+        %slot_delta = index.scale %cache_slot, %slot_bytes : index, offset -> offset
+        %cached_origin = index.add %data_origin, %slot_delta : offset
+        scf.yield %cached_origin : offset
+      } else {
+        %slot = index.cast %source_word : i32 to index
+        %row_delta = index.scale %slot, %row_bytes : index, offset -> offset
+        %staged_origin = index.add %staging_base, %row_delta : offset
+        scf.yield %staged_origin : offset
+      }
+      %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+      %block_origin = index.add %row_origin, %block_delta : offset
+      %integer_codes, %scale = func.call @ggml_iq4_nl_block(%staging, %block_origin) : (buffer, offset) -> (vector<32xi8>, f32)
+      %exact_values = vector.sitofp %integer_codes : vector<32xi8> to vector<32xf32>
+      %codes = vector.fptrunc %exact_values : vector<32xf32> to vector<32xbf16>
+      %values = vector.extf %codes : vector<32xbf16> to vector<32xf32>
+      %scales = vector.splat %scale : vector<32xf32>
+      %scaled = vector.mulf %values, %scales : vector<32xf32>
+      %packed = vector.fptrunc %scaled : vector<32xf32> to vector<32xbf16>
+      vector.store %packed, %output_view[%token, %head, %channel] : vector<32xbf16>, view<[%capacity]x16x160xbf16>
+    }
+  }
+  kernel.return
+}
+
+// Within-epoch dedupe. The residual buffer carries, after the gather
+// descriptors, an i32 source map (capacity x 16) and a lossy claim table of
+// 32 * capacity i64 entries, both zeroed/overwritten every epoch:
+//   source map origin = capacity * 22304, claim origin = capacity * 22368.
+// Pass 1 (flash_next_ple_claim): every live (token, head) stores
+// ((row_id + 1) << 32 | (slot + 1)) into claims[hash(row_id)]. Stores race;
+// whichever lands last wins, and it always carries a complete entry.
+// Pass 2 (flash_next_ple_descriptors): a slot reads the winner of its bucket.
+// If the winner has the same row id, the slot reuses the winner's staged row
+// (source map = winner slot) and emits a zero-length descriptor; otherwise it
+// stages its own row. All slots with one row id see the same bucket value, so
+// they agree on the winner. Lost bucket races only reduce the dedupe rate.
+// Empties the claim table: 32 i64 entries per token slot.
+kernel.def @flash_next_ple_clear() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%arena_arg: buffer) {
+  %arena = buffer.assume.noalias %arena_arg : buffer
+  %capacity = config.get @flash_next.token_count : index
+  %c32 = index.constant 32 : index
+  %claim_stride = index.constant 22368 : offset
+  %claim_origin = index.scale %capacity, %claim_stride : index, offset -> offset
+  %entries = index.mul %capacity, %c32 : index
+  %claims = buffer.view %arena[%claim_origin] : buffer -> view<[%entries]xi64>
+  %token = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %entry = index.madd %token, %c32, %lane : index
+  %zero = scalar.constant 0 : i64
+  view.store %zero, %claims[%entry] : i64, view<[%entries]xi64>
+  kernel.return
+}
+
+kernel.def @flash_next_ple_claim() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 16 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %ids_arg: buffer, %arena_arg: buffer) {
+  %span, %ids, %arena = buffer.assume.noalias %span_arg, %ids_arg, %arena_arg : buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %capacity) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<x> : index
+  %head = kernel.workitem.id<x> : index
+  %origin = index.constant 0 : offset
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %claim_stride = index.constant 22368 : offset
+  %claim_origin = index.scale %capacity, %claim_stride : index, offset -> offset
+  %entries = index.mul %capacity, %c32 : index
+  %claims = buffer.view %arena[%claim_origin] : buffer -> view<[%entries]xi64>
+  %id_view = buffer.view %ids[%origin] : buffer -> view<[%capacity]x16xi32>
+  %cache_entries = config.get @flash_next.ple.cache_entries : index
+  %live_token = index.cmp ult, %token, %end : index
+  %resident_heads = config.get @flash_next.ple.resident_heads : index
+  %gathered_head = index.cmp uge, %head, %resident_heads : index
+  %live = scalar.andi %live_token, %gathered_head : i1
+  scf.if %live {
+    %id_i32 = view.load %id_view[%token, %head] : view<[%capacity]x16xi32> -> i32
+    %id64 = scalar.extui %id_i32 : i32 to i64
+    %cached, %cache_slot_unused = func.call @flash_next_ple_cache_probe(%arena, %cache_entries, %id64) : (buffer, index, i64) -> (i1, i64)
+    %missed_true = scalar.constant true : i1
+    %missed = scalar.xori %cached, %missed_true : i1
+    scf.if %missed {
+    %one = scalar.constant 1 : i64
+    %shift = scalar.constant 32 : i64
+    %multiplier = scalar.constant 2654435761 : i64
+    %entries64 = index.cast %entries : index to i64
+    %mixed = scalar.muli %id64, %multiplier : i64
+    %bucket64 = scalar.remui %mixed, %entries64 : i64
+    %bucket = index.cast %bucket64 : i64 to index
+    %slot = index.madd %token, %c16, %head : index
+    %slot64 = index.cast %slot : index to i64
+    %key = scalar.addi %id64, %one : i64
+    %key_high = scalar.shli %key, %shift : i64
+    %slot_plus = scalar.addi %slot64, %one : i64
+    %entry = scalar.ori %key_high, %slot_plus : i64
+    view.store %entry, %claims[%bucket] : i64, view<[%entries]xi64>
+    }
+  }
+  kernel.return
+}
+
+// Descriptor producer for parameters.gather. For every live token and hash head
+// it emits {entry byte offset, residual destination offset, length}; inactive
+// and deduplicated slots carry zero length. Descriptors follow the staging
+// rows: token_count * (20480 + 1440).
+kernel.def @flash_next_ple_descriptors() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 16 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %ids_arg: buffer, %arena_arg: buffer) {
+  %span, %ids, %arena = buffer.assume.noalias %span_arg, %ids_arg, %arena_arg : buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %capacity) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<x> : index
+  %head = kernel.workitem.id<x> : index
+  %origin = index.constant 0 : offset
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %activation_row_bytes = index.constant 20480 : offset
+  %staged_row_bytes = index.constant 21920 : offset
+  %map_stride = index.constant 22304 : offset
+  %claim_stride = index.constant 22368 : offset
+  %row_bytes = index.constant 90 : offset
+  %descriptor_origin = index.scale %capacity, %staged_row_bytes : index, offset -> offset
+  %staging_base = index.scale %capacity, %activation_row_bytes : index, offset -> offset
+  %map_origin = index.scale %capacity, %map_stride : index, offset -> offset
+  %claim_origin = index.scale %capacity, %claim_stride : index, offset -> offset
+  %entries = index.mul %capacity, %c32 : index
+  %claims = buffer.view %arena[%claim_origin] : buffer -> view<[%entries]xi64>
+  %sources = buffer.view %arena[%map_origin] : buffer -> view<[%capacity]x16xi32>
+  %descriptors = buffer.view %arena[%descriptor_origin] : buffer -> view<[%capacity]x16x3xi64>
+  %live = index.cmp ult, %token, %end : index
+  %zero = scalar.constant 0 : i64
+  %one = scalar.constant 1 : i64
+  %shift = scalar.constant 32 : i64
+  %low_mask = scalar.constant 4294967295 : i64
+  %multiplier = scalar.constant 2654435761 : i64
+  %entries64 = index.cast %entries : index to i64
+  %id_view = buffer.view %ids[%origin] : buffer -> view<[%capacity]x16xi32>
+  %id_i32 = scf.if %live -> (i32) {
+    %loaded = view.load %id_view[%token, %head] : view<[%capacity]x16xi32> -> i32
+    scf.yield %loaded : i32
+  } else {
+    %none = scalar.constant 0 : i32
+    scf.yield %none : i32
+  }
+  %id64 = scalar.extui %id_i32 : i32 to i64
+  %mixed = scalar.muli %id64, %multiplier : i64
+  %bucket64 = scalar.remui %mixed, %entries64 : i64
+  %bucket = index.cast %bucket64 : i64 to index
+  %slot = index.madd %token, %c16, %head : index
+  %slot64 = index.cast %slot : index to i64
+  %entry = scf.if %live -> (i64) {
+    %loaded = view.load %claims[%bucket] : view<[%entries]xi64> -> i64
+    scf.yield %loaded : i64
+  } else {
+    scf.yield %zero : i64
+  }
+  %entry_key = scalar.shrui %entry, %shift : i64
+  %key = scalar.addi %id64, %one : i64
+  %same = scalar.cmpi eq, %entry_key, %key : i64
+  %entry_slot_plus = scalar.andi %entry, %low_mask : i64
+  %winner = scalar.subi %entry_slot_plus, %one : i64
+  %cache_entries = config.get @flash_next.ple.cache_entries : index
+  %cached_raw, %cache_slot = func.call @flash_next_ple_cache_probe(%arena, %cache_entries, %id64) : (buffer, index, i64) -> (i1, i64)
+  %cached = scalar.andi %cached_raw, %live : i1
+  %representative_miss = scf.select %same, %winner, %slot64 : i64
+  %minus_one64 = scalar.constant -1 : i64
+  %cache_code = scalar.subi %minus_one64, %cache_slot : i64
+  %representative = scf.select %cached, %cache_code, %representative_miss : i64
+  %leader_slot = scalar.cmpi eq, %representative, %slot64 : i64
+  %representative32 = scalar.trunci %representative : i64 to i32
+  // Resident heads publish their row id (read straight from the bound table prefix) and never fetch.
+  %resident_heads = config.get @flash_next.ple.resident_heads : index
+  %resident = index.cmp ult, %head, %resident_heads : index
+  %source_entry = scf.select %resident, %id_i32, %representative32 : i32
+  view.store %source_entry, %sources[%token, %head] : i32, view<[%capacity]x16xi32>
+  %row_size = scalar.constant 90 : i64
+  %source = scalar.muli %id64, %row_size : i64
+  %row_delta = index.scale %slot, %row_bytes : index, offset -> offset
+  %destination_offset = index.add %staging_base, %row_delta : offset
+  %destination = index.cast %destination_offset : offset to i64
+  %fetch_slot = scalar.andi %live, %leader_slot : i1
+  %not_cached_true = scalar.constant true : i1
+  %not_cached = scalar.xori %cached, %not_cached_true : i1
+  %fetch_miss = scalar.andi %fetch_slot, %not_cached : i1
+  %not_resident = scalar.xori %resident, %not_cached_true : i1
+  %fetch = scalar.andi %fetch_miss, %not_resident : i1
+  %length = scf.select %fetch, %row_size, %zero : i64
+  %source_out = scf.select %fetch, %source, %zero : i64
+  %destination_out = scf.select %fetch, %destination, %zero : i64
+  view.store %source_out, %descriptors[%token, %head, 0] : i64, view<[%capacity]x16x3xi64>
+  view.store %destination_out, %descriptors[%token, %head, 1] : i64, view<[%capacity]x16x3xi64>
+  view.store %length, %descriptors[%token, %head, 2] : i64, view<[%capacity]x16x3xi64>
+  kernel.return
+}
+
+// Cache insertion, run once per epoch right after the lookup has consumed the
+// staged rows (PLE is read exactly once per epoch, at layer 1). Every freshly
+// gathered row (non-empty descriptor) claims its cache slot in the claim table
+// (lossy, last store wins); the winner copies its row into the cache and then
+// publishes the tag. Distinct row ids that map to one cache slot, or one claim
+// bucket, simply lose: only a winner ever writes a slot, so rows are never torn.
+kernel.def @flash_next_ple_cache_claim() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 16 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%arena_arg: buffer) {
+  %arena = buffer.assume.noalias %arena_arg : buffer
+  %capacity = config.get @flash_next.token_count : index
+  %entries = config.get @flash_next.ple.cache_entries : index
+  %token = kernel.workgroup.id<x> : index
+  %head = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %staged_row_bytes = index.constant 21920 : offset
+  %claim_stride = index.constant 22368 : offset
+  %descriptor_origin = index.scale %capacity, %staged_row_bytes : index, offset -> offset
+  %claim_origin = index.scale %capacity, %claim_stride : index, offset -> offset
+  %claim_entries = index.mul %capacity, %c32 : index
+  %descriptors = buffer.view %arena[%descriptor_origin] : buffer -> view<[%capacity]x16x3xi64>
+  %claims = buffer.view %arena[%claim_origin] : buffer -> view<[%claim_entries]xi64>
+  %length = view.load %descriptors[%token, %head, 2] : view<[%capacity]x16x3xi64> -> i64
+  %zero = scalar.constant 0 : i64
+  %fetched = scalar.cmpi ne, %length, %zero : i64
+  %enabled = index.cmp ugt, %entries, %c0 : index
+  %insert = scalar.andi %fetched, %enabled : i1
+  scf.if %insert {
+    %source = view.load %descriptors[%token, %head, 0] : view<[%capacity]x16x3xi64> -> i64
+    %row_size = scalar.constant 90 : i64
+    %one = scalar.constant 1 : i64
+    %shift = scalar.constant 32 : i64
+    %multiplier = scalar.constant 2654435761 : i64
+    %id64 = scalar.divui %source, %row_size : i64
+    %cache_slot = func.call @flash_next_ple_cache_slot(%id64, %entries) : (i64, index) -> (i64)
+    %claim_entries64 = index.cast %claim_entries : index to i64
+    %mixed = scalar.muli %cache_slot, %multiplier : i64
+    %bucket64 = scalar.remui %mixed, %claim_entries64 : i64
+    %bucket = index.cast %bucket64 : i64 to index
+    %slot = index.madd %token, %c16, %head : index
+    %slot64 = index.cast %slot : index to i64
+    %key = scalar.addi %cache_slot, %one : i64
+    %key_high = scalar.shli %key, %shift : i64
+    %slot_plus = scalar.addi %slot64, %one : i64
+    %entry = scalar.ori %key_high, %slot_plus : i64
+    view.store %entry, %claims[%bucket] : i64, view<[%claim_entries]xi64>
+  }
+  kernel.return
+}
+
+kernel.def @flash_next_ple_cache_insert() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 16 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%arena_arg: buffer) {
+  %arena = buffer.assume.noalias %arena_arg : buffer
+  %capacity = config.get @flash_next.token_count : index
+  %entries = config.get @flash_next.ple.cache_entries : index
+  %packet = config.get @qwen38.packet_capacity : index
+  %token = kernel.workgroup.id<x> : index
+  %head = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %staged_row_bytes = index.constant 21920 : offset
+  %claim_stride = index.constant 22368 : offset
+  %residual_stride = index.constant 22624 : offset
+  %tag_bytes = index.constant 4 : offset
+  %slot_bytes = index.constant 96 : offset
+  %row_bytes = index.constant 90 : offset
+  %descriptor_origin = index.scale %capacity, %staged_row_bytes : index, offset -> offset
+  %claim_origin = index.scale %capacity, %claim_stride : index, offset -> offset
+  %claim_entries = index.mul %capacity, %c32 : index
+  %descriptors = buffer.view %arena[%descriptor_origin] : buffer -> view<[%capacity]x16x3xi64>
+  %claims = buffer.view %arena[%claim_origin] : buffer -> view<[%claim_entries]xi64>
+  %length = view.load %descriptors[%token, %head, 2] : view<[%capacity]x16x3xi64> -> i64
+  %zero = scalar.constant 0 : i64
+  %fetched = scalar.cmpi ne, %length, %zero : i64
+  %enabled = index.cmp ugt, %entries, %c0 : index
+  %insert = scalar.andi %fetched, %enabled : i1
+  scf.if %insert {
+    %source = view.load %descriptors[%token, %head, 0] : view<[%capacity]x16x3xi64> -> i64
+    %destination64 = view.load %descriptors[%token, %head, 1] : view<[%capacity]x16x3xi64> -> i64
+    %row_size = scalar.constant 90 : i64
+    %one = scalar.constant 1 : i64
+    %shift = scalar.constant 32 : i64
+    %multiplier = scalar.constant 2654435761 : i64
+    %id64 = scalar.divui %source, %row_size : i64
+    %cache_slot = func.call @flash_next_ple_cache_slot(%id64, %entries) : (i64, index) -> (i64)
+    %claim_entries64 = index.cast %claim_entries : index to i64
+    %mixed = scalar.muli %cache_slot, %multiplier : i64
+    %bucket64 = scalar.remui %mixed, %claim_entries64 : i64
+    %bucket = index.cast %bucket64 : i64 to index
+    %slot = index.madd %token, %c16, %head : index
+    %slot64 = index.cast %slot : index to i64
+    %key = scalar.addi %cache_slot, %one : i64
+    %key_high = scalar.shli %key, %shift : i64
+    %slot_plus = scalar.addi %slot64, %one : i64
+    %mine = scalar.ori %key_high, %slot_plus : i64
+    %winner = view.load %claims[%bucket] : view<[%claim_entries]xi64> -> i64
+    %owns = scalar.cmpi eq, %winner, %mine : i64
+    scf.if %owns {
+      %destination_bounded = scalar.assume %destination64 [range(%destination64, 0, 2147483647)] : i64
+      %destination = index.cast %destination_bounded : i64 to offset
+      %cache_origin = index.scale %packet, %residual_stride : index, offset -> offset
+      %tags_size = index.scale %entries, %tag_bytes : index, offset -> offset
+      %data_origin = index.add %cache_origin, %tags_size : offset
+      %slot_index = index.cast %cache_slot : i64 to index
+      %slot_delta = index.scale %slot_index, %slot_bytes : index, offset -> offset
+      %target = index.add %data_origin, %slot_delta : offset
+      buffer.copy %arena[%destination], %arena[%target], %row_bytes
+      %tags = buffer.view %arena[%cache_origin] : buffer -> view<[%entries]xi32>
+      %tag_value = scalar.addi %id64, %one : i64
+      %tag = scalar.trunci %tag_value : i64 to i32
+      view.store %tag, %tags[%slot_index] : i32, view<[%entries]xi32>
+    }
+  }
+  kernel.return
+}

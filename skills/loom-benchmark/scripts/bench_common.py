@@ -143,6 +143,14 @@ class Package:
         self.model_id = self.cfg["model_id"]
         self.tok = no_dummy_prefix(Tokenizer.from_file(os.path.join(path, "tokenizer.json")))
 
+    def default_request(self):
+        """Extra request fields that make Loom answer as the chat template does when its own default differs: a
+        hand-written (catalog) chat program that starts with thinking off while the template, and so llama.cpp and the
+        goldens, start with it on (llm_config.json "loom_thinking_default": false)."""
+        if self.cfg.get("loom_thinking_default") is False and self.chat.get("thinking_default"):
+            return {"chat_template_kwargs": {"enable_thinking": True}}
+        return {}
+
     def render(self, user):
         """Exactly what control.loom renders for one user message + generation prompt."""
         return self.render_messages([{"role": "user", "content": user}])

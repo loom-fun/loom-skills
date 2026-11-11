@@ -141,6 +141,10 @@ def main():
         if (cfg.get("assistant") or {}).get("gguf"):
             kinds.append(("assist", [1, 2, 3, 4]))   # Gemma-4 assistant (gemma4 family)
         kinds.append(("ngram", [2, 3, 5]))   # every model: prompt lookup needs no drafter
+    sys.path.insert(0, STARTER)
+    import catalog
+    if catalog.find(STARTER):   # a catalog package drafts with its MTP head or not at all (catalog.py)
+        kinds = [("mtp", [1, 2, 3, 4])] if spec not in ("off", "0", "no", "none") and catalog.meta(catalog.find(STARTER)).get("mtp_variant") else []
     table, best, cand_mem, chats = [], ("none", 0, 0.0), {}, {}
     # A category A reference (find_reference.py apply: cfg["reference"]) measured its own drafting table: start each
     # method at the reference's best depth and its neighbours instead of every depth. Every method is still measured

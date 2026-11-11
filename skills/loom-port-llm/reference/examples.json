@@ -4,5 +4,6 @@
  "flint": {"arch": "flint", "card": "loom-fun/ggml-org-Flint-loom", "revision": "f1805a8a20a510165e1042c72f8639af10598b24"},
  "glimmer": {"arch": "muse-glimmer", "card": "loom-fun/unsloth-Muse-Glimmer-30B-loom", "revision": "58208ef8cf0f8f56e19f6400baf876af11ae4186"},
  "lfm2moe": {"arch": "lfm2moe", "archs": ["lfm3"], "card": null},
+ "qwen4exp": {"arch": "qwen4exp", "card": null},
  "gpt-oss": {"arch": "gpt-oss", "card": "loom-fun/unsloth-gpt-oss-20b-loom", "revision": "0d94a308db12d9a7553a9e158c5106477eba0390"}
 }

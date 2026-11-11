@@ -13,12 +13,16 @@ def from_log(log, filename):
         if candidate.startswith("path="):
             candidate = candidate[5:]
         if candidate.endswith(filename) and Path(candidate).is_file():
-            return Path(candidate).resolve()
+            return Path(os.path.abspath(candidate))   # not resolve(): the snapshots/REV/FILE path names the revision
     raise ValueError(f"No existing {filename} path in {log}")
 
 
 def link_checkpoint(source, target):
-    source = Path(source).resolve(strict=True)  # HF snapshot entries may themselves be symlinks.
+    # Link the HF snapshot entry itself (snapshots/REV/FILE), not the blob it points to: publish_package.py reads the
+    # repository and revision of a package's weights from that path.
+    source = Path(os.path.abspath(source))
+    if not source.is_file():
+        raise FileNotFoundError(source)
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and target.samefile(source):

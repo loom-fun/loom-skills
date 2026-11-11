@@ -18,6 +18,7 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 ap = argparse.ArgumentParser()
 ap.add_argument("config")
 ap.add_argument("package")
@@ -47,6 +48,10 @@ ap.add_argument("--model-id", default=None, help="model id clients send (visible
 a = ap.parse_args()
 
 cfg = json.load(open(a.config))
+import catalog  # noqa: E402  (a kit with a catalog package: hand-written programs instead of generated ones)
+if (_cdir := catalog.find(HERE)):
+    catalog.build(a, cfg, _cdir, a.tokenizer)
+    sys.exit(0)
 if a.prefill is None:
     a.prefill = cfg.get("prefill_capacity") or (4096 if cfg.get("moe") else 1024)
 chat = cfg.get("chat")
