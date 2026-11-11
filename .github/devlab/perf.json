@@ -1,5 +1,5 @@
 {
- "_comment": "MiniCPM-V-4.7 perf-gap: same-runner re-measure vs ROCm/Vulkan, and decode kernel-group ablation.",
+ "_comment": "MiniCPM-V-4.7 decode on #247 MoE kernels: R/U/Q8 sweep vs card and Vulkan on the same runner.",
  "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
  "memory_bytes": 36000000000,
  "kit": null,
@@ -7,19 +7,27 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "base",
+   "name": "sweep",
    "variants": [
     {
-     "name": "base",
-     "build": {},
-     "ref": "origin/main"
+     "name": "card"
     },
     {
-     "name": "r4f-u1",
+     "name": "old",
      "build": {
       "MOE_Q8": "0",
-      "MOE_R": "4",
       "MOE_ROUTE_U": "1"
+     }
+    },
+    {
+     "name": "def",
+     "build": {}
+    },
+    {
+     "name": "r4q-u4",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "4"
      }
     },
     {
@@ -31,21 +39,6 @@
      }
     },
     {
-     "name": "r4q-u4",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "4"
-     }
-    },
-    {
-     "name": "r2f-u4",
-     "build": {
-      "MOE_Q8": "0",
-      "MOE_R": "2",
-      "MOE_ROUTE_U": "4"
-     }
-    },
-    {
      "name": "r2q-u4",
      "build": {
       "MOE_R": "2",
@@ -53,97 +46,30 @@
      }
     },
     {
-     "name": "r8f-u4",
+     "name": "r4q-u8",
      "build": {
-      "MOE_Q8": "0",
-      "MOE_ROUTE_U": "4"
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8"
+     }
+    },
+    {
+     "name": "r4q-u2",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "2"
      }
     }
    ],
    "steps": [
-    "perf:card:2",
-    "llama:2",
-    "llama@vulkan:2"
-   ]
-  },
-  {
-   "name": "abl",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "main",
-     "build": {}
-    },
-    {
-     "name": "d-route",
-     "build": {},
-     "double": [
-      "*:@g_moe_route\\b"
-     ]
-    },
-    {
-     "name": "d-gu",
-     "build": {},
-     "double": [
-      "*:@g_moe_gu_\\w+_r8\\b"
-     ]
-    },
-    {
-     "name": "d-dn",
-     "build": {},
-     "double": [
-      "*:@g_moe_dn_\\w+_r8\\b"
-     ]
-    },
-    {
-     "name": "d-mv",
-     "build": {},
-     "double": [
-      "*:@g_mv_\\w+_q8_r1\\b"
-     ]
-    },
-    {
-     "name": "d-attn",
-     "build": {},
-     "double": [
-      "*:@g_attention_(split|combine)\\b"
-     ]
-    },
-    {
-     "name": "d-gdn",
-     "build": {},
-     "double": [
-      "*:g_gdn_"
-     ]
-    },
-    {
-     "name": "d-misc",
-     "build": {},
-     "double": [
-      "*:@(g_quant_q8|g_post_add_norm|g_qk_rope_store|g_moe_combine)\\b"
-     ]
-    },
-    {
-     "name": "d-head",
-     "build": {},
-     "double": [
-      "*:@g_head_mv_q8\\b"
-     ]
-    }
-   ],
-   "steps": [
-    "perf:card:1",
-    "perf:main:1",
-    "perf:d-route:1",
-    "perf:d-gu:1",
-    "perf:d-dn:1",
-    "perf:d-mv:1",
-    "perf:d-attn:1",
-    "perf:d-gdn:1",
-    "perf:d-misc:1",
-    "perf:d-head:1"
+    "perf:card:1:long",
+    "perf:old:1:long",
+    "perf:def:1:long",
+    "perf:r4q-u4:1:long",
+    "perf:r4f-u4:1:long",
+    "perf:r2q-u4:1:long",
+    "perf:r4q-u8:1:long",
+    "perf:r4q-u2:1:long",
+    "llama@vulkan:2:long"
    ]
   }
  ]
