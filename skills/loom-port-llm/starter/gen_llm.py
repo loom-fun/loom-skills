@@ -2936,12 +2936,13 @@ SEG_MIN = int(os.environ.get("SEG_MIN", "8192"))
 # Decode attention: at most DEC_SPLITS splits of about DEC_KPS keys each (default 64 splits of 32 keys).
 DEC_SPLITS = int(os.environ.get("ATTN_SPLITS", "64"))
 DEC_KPS = int(os.environ.get("ATTN_KPS", "32"))
+SEG_MAX_KVH = int(os.environ.get("SEG_MAX_KVH", "2"))   # KV heads up to which the segment span body replaces the split kernel
 
 
 def seg_tokens():
     """Tokens per segment: the verification span (draft depth + 1), capped so the q and p tiles fit 64 KB of
     workgroup memory (longer runs go one token at a time); 0 when the decode path keeps the split kernel."""
-    if not (os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and D in (64, 128) and KVH <= 2):
+    if not (os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and D in (64, 128) and KVH <= SEG_MAX_KVH):
         return 0
     ts = min(gen_draft.DRAFT["depth"] + 1, 65536 // (G * 4 * (D + 32)))
     return ts if ts >= 2 else 0
