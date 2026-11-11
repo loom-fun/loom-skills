@@ -8,7 +8,7 @@
  "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "gap-a",
+   "name": "single-a",
    "variants": [
     {
      "name": "card"
@@ -26,37 +26,21 @@
      "execution": {
       "draft_depth": 1
      }
-    },
-    {
-     "name": "d3",
-     "build": {},
-     "execution": {
-      "draft_depth": 3
-     }
-    },
-    {
-     "name": "d4",
-     "build": {},
-     "execution": {
-      "draft_depth": 4
-     }
     }
    ],
    "steps": [
-    "c4:card",
-    "llamac4",
-    "llamac4@vulkan",
-    "c4:d0",
-    "c4:d1",
-    "c4:d3",
-    "c4:d4",
-    "c4:card",
-    "llamac4@vulkan",
-    "llamac4"
+    "perf:card:2",
+    "perf:card:2:long",
+    "perf:d0:2",
+    "perf:d0:2:long",
+    "perf:d1:2",
+    "perf:d1:2:long",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long"
    ]
   },
   {
-   "name": "gap-b",
+   "name": "single-b",
    "variants": [
     {
      "name": "card"
@@ -74,33 +58,17 @@
      "execution": {
       "draft_depth": 1
      }
-    },
-    {
-     "name": "d3",
-     "build": {},
-     "execution": {
-      "draft_depth": 3
-     }
-    },
-    {
-     "name": "d4",
-     "build": {},
-     "execution": {
-      "draft_depth": 4
-     }
     }
    ],
    "steps": [
-    "c4:card",
-    "llamac4",
-    "llamac4@vulkan",
-    "c4:d0",
-    "c4:d1",
-    "c4:d3",
-    "c4:d4",
-    "c4:card",
-    "llamac4@vulkan",
-    "llamac4"
+    "perf:card:2",
+    "perf:card:2:long",
+    "perf:d0:2",
+    "perf:d0:2:long",
+    "perf:d1:2",
+    "perf:d1:2:long",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long"
    ]
   }
  ]
