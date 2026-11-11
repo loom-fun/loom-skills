@@ -6,14 +6,25 @@
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "depth-c4",
+   "name": "d3-full",
    "variants": [
-    {"name": "card"},
-    {"name": "d0", "execution": {"draft_depth": 0}},
-    {"name": "d2", "execution": {"draft_depth": 2}},
-    {"name": "d3", "execution": {"draft_depth": 3}}
+    {
+     "name": "d3",
+     "execution": {
+      "draft_depth": 3
+     }
+    }
    ],
-   "steps": ["c4:card", "c4:d3", "c4:d2", "c4:d0", "perf:card:1", "perf:d3:1"]
+   "steps": [
+    "perf:d3:2",
+    "perf:d3:2:long",
+    "c4:d3",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "gates:d3:dev"
+   ]
   }
- ]
+ ],
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99"
 }

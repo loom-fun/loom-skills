@@ -78,6 +78,39 @@ def measure(url, model, chat, context=0):
     return statistics.harmonic_mean(tps) if tps else 0.0
 
 
+def measure_c4(url, model, chat, rows):
+    """Aggregate decode tok/s of `rows` concurrent essay requests (the serving preset's rows, at most 4): a speculative
+    span verifies depth + 1 tokens whatever the load, so 4 streams verify 4 x (depth + 1) tokens per step, and past 16
+    the int8 matvecs give way to the GEMM (Muse-Glimmer: depth 5 gave 41.6 tok/s on 4 streams, depth 3 74.0, no
+    drafting 48.6, while one stream preferred depth 5 by 7 %). Returns 0.0 with a single row."""
+    import threading
+    n = min(max(int(rows or 1), 1), 4)
+    if n < 2:
+        return 0.0
+    off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
+    res = [None] * n
+
+    def run(i):
+        try:
+            res[i] = stream(url, model, [{"role": "user", "content": f"[{time.time()} {i}] Write a very long, detailed essay about the history of lighthouses."}],
+                            256, extra=off, timeout=900)
+        except Exception:  # noqa: BLE001  a failing stream scores 0
+            res[i] = None
+    ts = [threading.Thread(target=run, args=(i,)) for i in range(n)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    if any(not r or not r.get("tokens") or r.get("ttft") is None for r in res):
+        return 0.0
+    span = max(r["total"] - r["ttft"] for r in res)
+    return sum(r["tokens"] for r in res) / span if span > 0 else 0.0
+
+
+def score(r):
+    """A candidate's rank value: the geometric mean of its single-stream rate and its 4-stream aggregate (scale
+    invariant, so only the ratio between candidates matters); the single-stream rate alone when 4 streams were not run."""
+    return (r["decode_tps"] * r["c4_tps"]) ** 0.5 if r.get("c4_tps") else r["decode_tps"]
+
+
 def concurrent_ok(url, model, chat):
     """Agentic serving runs several requests at once: ~300-token prompts two at a time 0.5 s apart (both draft right
     after nearly simultaneous prefills) and four together (consistency.py's prompts), twice each, must all complete.
@@ -157,7 +190,7 @@ def main():
     # No --memory-gib: each candidate (and the final package) sizes its own budget for the full native context
     # (a drafter adds KV per position; passing the old budget shrank DFlash packages' context to fit).
     common = ["--tokenizer", os.path.join(work, "tok", "tokenizer.json"), "--model-id", model_id]
-    base = None
+    base = base_tps = None
     for kind, depths in kinds:
         pkg = os.path.join(work, f"pkg_tune_{kind}")
         out = sh(*build, pkg, *common, "--draft", kind).stdout
@@ -173,6 +206,11 @@ def main():
         chat = chats[kind] = json.load(open(os.path.join(pkg, "llm_config.json")))["chat"]
         allowed = [d for d in depths if d <= block]
         first, climb = prior_depths(prior, kind, allowed)
+        # With several rows every span verifies depth + 1 tokens: the deepest depth whose rows x (depth + 1) still fits
+        # the 16-token int8 matvec is always a candidate, whatever a (single-stream) reference preferred.
+        fit = 16 // max(min(int(card["presets"]["chat"]["execution"].get("rows") or 1), 4), 1) - 1
+        if first and fit >= 1 and fit in allowed and fit not in first:
+            first = sorted(first + [fit])
         measured = {}
         queue = ([0] if base is None else []) + (first or allowed)
         while queue:
@@ -185,19 +223,21 @@ def main():
                 serve("tune", port, mem, path, env)
                 tps = measure(f"http://127.0.0.1:{port}", model_id, chat,
                               card["presets"]["chat"]["execution"].get("context_capacity") or 0)
+                c4 = measure_c4(f"http://127.0.0.1:{port}", model_id, chat, card["presets"]["chat"]["execution"].get("rows"))
             except Exception as e:  # noqa: BLE001  a failing candidate is reported and skipped
                 print(f"tune: {kind} depth {depth}: {e}", file=sys.stderr)
-                tps = 0.0
+                tps = c4 = 0.0
             subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
-            row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2), "seconds": round(time.time() - t0)}
+            row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2), **({"c4_tps": round(c4, 2)} if c4 else {}), "seconds": round(time.time() - t0)}
             print("tune:", json.dumps(row), flush=True)
             table.append(row)
+            sc = score(row)
             if depth == 0:
-                base = tps
-            elif tps > best[2]:
-                best = (kind, depth, tps)
+                base, base_tps = sc, tps
+            elif sc > best[2]:
+                best = (kind, depth, sc)
             if depth:
-                measured[depth] = tps
+                measured[depth] = sc
             # the prior is a starting point: climb while the best depth's neighbours are unmeasured (a method the
             # reference ruled out climbs only when it comes within 10 % of the best candidate so far)
             if not queue and first and measured and (climb or max(measured.values()) >= 0.9 * best[2]):
@@ -206,7 +246,7 @@ def main():
         if first:
             skipped[kind] = [d for d in allowed if d not in measured]
     if base is None:
-        base = 0.0
+        base = base_tps = 0.0
     # Fastest first, each checked for exact output (vs draft_depth 0 of its own package) and under concurrent load;
     # one that fails is reported and skipped.
     import spec_check
@@ -227,14 +267,14 @@ def main():
         serve("tune", port, mem, os.path.join(pkg, f"model_d{depth}.json"), env)
         spec_check.record(url, model_id, out)
         return spec_check.compare(refs[kind], out) == 0
-    ranked = sorted([r for r in table if r["kind"] != "none" and r["decode_tps"] >= 1.03 * base], key=lambda r: -r["decode_tps"])
+    ranked = sorted([r for r in table if r["kind"] != "none" and score(r) >= 1.03 * base], key=lambda r: -score(r))
     # Within 5 % of the fastest (measurement noise on these short requests), the shallower depth first: every drafted
     # token is verified with decode attention over the whole context, so a deep draft costs at long context
     # (Qwen3.6-35B-A3B DFlash: depth 7 vs 3 was 109 vs 105 tok/s short, 31 vs 48 tok/s at 32k).
     if ranked:
-        top = ranked[0]["decode_tps"]
-        ranked.sort(key=lambda r: (r["decode_tps"] < 0.95 * top, r["depth"] if r["decode_tps"] >= 0.95 * top else 0, -r["decode_tps"]))
-    choice = ("none", 0, base)
+        top = score(ranked[0])
+        ranked.sort(key=lambda r: (score(r) < 0.95 * top, r["depth"] if score(r) >= 0.95 * top else 0, -score(r)))
+    choice = ("none", 0, base_tps)
     for r in ranked:
         kind, depth = r["kind"], r["depth"]
         pkg = os.path.join(work, f"pkg_tune_{kind}")
@@ -249,7 +289,7 @@ def main():
         r["checked"] = "ok (exact, concurrent)" if ok else f"FAILED: {why}"
         print("tune:", json.dumps({"kind": kind, "depth": depth, "checked": r["checked"]}), flush=True)
         if ok:
-            choice = (kind, depth, r["decode_tps"])
+            choice = (kind, depth, r["decode_tps"])   # the single-stream rate (the score ranked it)
             break
     cfg = json.load(open(cfg_path))
     cfg.setdefault("drafter", {})
@@ -261,7 +301,7 @@ def main():
     for kind, _ in kinds:
         shutil.rmtree(os.path.join(work, f"pkg_tune_{kind}"), ignore_errors=True)
     print("TUNE_RESULT", json.dumps({"kind": choice[0], "depth": choice[1], "decode_tps": round(choice[2], 2),
-                                     "baseline_tps": round(base, 2), "memory_bytes": int(final_mem), "table": table,
+                                     "baseline_tps": round(base_tps, 2), "memory_bytes": int(final_mem), "table": table,
                                      **({"prior": (cfg.get("reference") or {}).get("repo"), "not_measured": skipped} if prior else {})}))
 
 
