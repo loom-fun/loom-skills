@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
  "_comment": "Active-wait re-measure, last 3 long-epoch cards (the other cards: runs 43033815593 and 43075216088).",
  "jobs": [
   {
@@ -8,6 +9,16 @@
    "kit": null,
    "llamacpp": "b1370",
    "llama_spec": "--spec-type ngram-simple",
+=======
+ "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
+ "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
+ "memory_bytes": 100000000000,
+ "kit": "qwen4exp",
+ "llamacpp": "b1371",
+ "jobs": [
+  {
+   "name": "fn-mtp",
+>>>>>>> origin/main
    "variants": [
     {
      "name": "card"
@@ -82,6 +93,20 @@
     "c4:parked",
     "llama:2",
     "llama:2:long",
+    "llamac4"
+   ]
+  },
+  {
+   "name": "fn-mtp-b",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "c4:card",
+    "llama:2",
     "llamac4"
    ]
   }

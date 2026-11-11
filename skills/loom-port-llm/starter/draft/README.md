@@ -109,8 +109,12 @@ credit in bits 8-15; plan word 4 holds the packed cursor (`encode_epoch`).
 Builds each available kind once at the full native context (build.py sizes each candidate's memory; a drafter adds
 KV per position), serves each depth (a `model.json` setting; DFlash up to the drafter's block - 1) alone, times
 decode-heavy requests (essay, code, a tool call, a reasoning answer; thinking off) plus one decode after a 16k document
-(`TUNE_LONG`, harmonic mean) and ranks candidates that beat
-no drafting by 3 %. The fastest that also passes the spec gate's equivalence check (spec_check.py's requests at the
+(`TUNE_LONG`) and, with a multi-row preset, `rows` concurrent essays (`streams4`). A candidate's margin is its worst
+row relative to depth 0; it is used only if no row is slower than 0.98 x depth 0 and its single-stream rate beats no
+drafting by 3 %, and the best margin ranks first. Low-acceptance drafting loses on exactly the prose, 32k and 4-stream
+rows (every span verifies depth + 1 tokens, padded to 16 at 4 streams): Qwen3.5-0.8B ngram depth 3 decode 223 vs 258 tok/s
+without, 32k 125 vs 166, four streams 498 vs 787, so tune picks none; a span with real acceptance (Muse-Glimmer depth 3 over
+none on 4 streams) keeps it, and the depth whose rows x (depth + 1) fits 16 is always a candidate. The best margin that also passes the spec gate's equivalence check (spec_check.py's requests at the
 candidate depth vs draft_depth 0 of the same package: identical) and a concurrency check (consistency.py-style
 ~300-token prompts, two 0.5 s apart and four at once, twice each: agentic serving overlaps requests) wins; one that
 fails is recorded with the reason (`checked` in the table) and the next is checked. The choice and the whole table go to `cfg["drafter"]` and
