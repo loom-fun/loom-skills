@@ -1,18 +1,28 @@
 {
- "_comment": "perf-gap qwen35 dense: draft depth ablation on the published 0.8B card.",
- "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
- "memory_bytes": 9000000000,
+ "_comment": "perf-gap qwen35 9B: draft depth ablation on the published 9B card, with same-runner llama.cpp ROCm/Vulkan.",
+ "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+ "memory_bytes": 30000000000,
  "kit": null,
  "llamacpp": "b1369",
+ "llamacpp_vulkan": "b12211",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 5 -ngld 99",
  "jobs": [
   {
    "name": "depth",
    "variants": [
     {"name": "card"},
     {"name": "d0", "execution": {"draft_depth": 0}},
-    {"name": "d1", "execution": {"draft_depth": 1}}
+    {"name": "d1", "execution": {"draft_depth": 1}},
+    {"name": "d3", "execution": {"draft_depth": 3}}
    ],
-   "steps": ["perf:card:1", "perf:d0:1", "perf:d1:1", "perf:card:1:long", "perf:d0:1:long", "c4:card", "c4:d0", "c4:d1"]
+   "steps": [
+    "perf:card:1:long", "c4:card",
+    "perf:d0:1:long", "c4:d0",
+    "perf:d1:1:long", "c4:d1",
+    "perf:d3:1:long", "c4:d3",
+    "llama:1:long", "llamac4",
+    "llama@vulkan.np1.nospec:1:long", "llamac4@vulkan.nospec"
+   ]
   }
  ]
 }
