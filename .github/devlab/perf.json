@@ -6,28 +6,41 @@
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "moer",
+   "name": "sweep",
    "variants": [
     {
-     "name": "main",
+     "name": "base",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "q8",
      "build": {}
     },
     {
-     "name": "r4",
+     "name": "q8r4",
      "build": {
       "MOE_R": "4"
      }
     },
     {
-     "name": "r16",
+     "name": "q8r16",
      "build": {
       "MOE_R": "16"
      }
     },
     {
-     "name": "r32",
+     "name": "f32r4",
      "build": {
-      "MOE_R": "32"
+      "MOE_Q8": "0",
+      "MOE_R": "4"
+     }
+    },
+    {
+     "name": "f32r16",
+     "build": {
+      "MOE_Q8": "0",
+      "MOE_R": "16"
      }
     }
    ],
@@ -36,10 +49,10 @@
    ]
   },
   {
-   "name": "abl2",
+   "name": "abl",
    "variants": [
     {
-     "name": "main",
+     "name": "q8",
      "build": {}
     },
     {
@@ -71,24 +84,10 @@
      ]
     },
     {
-     "name": "d-norm",
+     "name": "d-misc",
      "build": {},
      "double": [
-      "*:@g_post_add_norm\\b"
-     ]
-    },
-    {
-     "name": "d-rope",
-     "build": {},
-     "double": [
-      "*:@g_qk_rope_store\\b"
-     ]
-    },
-    {
-     "name": "d-combine",
-     "build": {},
-     "double": [
-      "*:@g_moe_combine\\b"
+      "*:@(g_post_add_norm|g_qk_rope_store|g_moe_combine)\\b"
      ]
     },
     {
@@ -108,6 +107,18 @@
    ],
    "steps": [
     "ab:20"
+   ]
+  },
+  {
+   "name": "kt",
+   "variants": [
+    {
+     "name": "q8",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:q8"
    ]
   }
  ]
