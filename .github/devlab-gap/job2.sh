@@ -22,6 +22,18 @@ if [ "$MODE" = sweep ]; then
     DEVICE='amdgpu://?completion_spin_ns=1000000000' bash "$here/probe.sh" "$out/cspin$r" "$pkg" "$MID" "$MEM" - "$WL" > "$out/cspin$r.log" 2>&1
     LOOM_EXTRA=--task_worker_spin_us=200000 bash "$here/probe.sh" "$out/twspin$r" "$pkg" "$MID" "$MEM" - "$WL" > "$out/twspin$r.log" 2>&1
   done
+elif [ "$MODE" = memory ]; then
+  export LOOM_SERVE_STATE=$out/state
+  for r in 1 2; do for v in cspin_card cspin_48g cspin_spin; do
+    o=$out/perf_${v}$r; mkdir -p "$o"; m=$MEM; [ $v = cspin_48g ] && m=48000000000
+    python3 "$here/sampler.py" "$o/samples.csv" 0.02 & sp=$!
+    "$SK/loom-setup/scripts/serve.sh" s 8461 "amdgpu://?completion_spin_ns=1000000000" "$m" "$pkg/model.json" > "$o/serve.log" 2>&1 || { kill $sp; continue; }
+    spin=; [ $v = cspin_spin ] && { taskset -c 3 sh -c "while :; do :; done" & spin=$!; }
+    "$T" "$SK/loom-benchmark/scripts/perf.py" http://127.0.0.1:8461 $v --model "$MID" --no-campaign --long --log "$o/perf.jsonl" > "$o/perf.out" 2>&1
+    [ -n "$spin" ] && kill $spin
+    grep -E "MemAvailable|MemFree" /proc/meminfo > "$o/meminfo_end.txt"; cat /sys/class/drm/card*/device/mem_info_gtt_used > "$o/gtt_used.txt" 2>/dev/null
+    "$SK/loom-setup/scripts/stop.sh" s; kill $sp; wait $sp
+  done; done
 else
   export LOOM_SERVE_STATE=$out/state
   for r in 1 2; do for v in base spin cspin; do

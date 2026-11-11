@@ -15,10 +15,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {idx: sweep, mode: sweep, card: loom-fun/unsloth-Qwen3.5-2B-loom}
-          - {idx: perf-q35-2b, mode: perf, card: loom-fun/unsloth-Qwen3.5-2B-loom}
-          - {idx: perf-q3-06b, mode: perf, card: loom-fun/unsloth-Qwen3-0.6B-loom}
-          - {idx: perf-gemma-e2b, mode: perf, card: loom-fun/unsloth-gemma-4-E2B-it-loom}
+          - {idx: laguna-mem-1, mode: memory, card: loom-fun/ggml-org-Laguna-XS-2.1-loom}
+          - {idx: laguna-mem-2, mode: memory, card: loom-fun/ggml-org-Laguna-XS-2.1-loom}
     name: probe-${{ matrix.idx }}
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 150
