@@ -1,5 +1,5 @@
 {
- "_comment": "Flash-Next vision diagnosis: the 'wide' case (1600x260) alone plus variants that remove the resize / change the text / change the prompt. (Full-gate experiment: see git history, run 43042120308.)",
+ "_comment": "Flash-Next vision gate alone (all six built-in cases) on the published AR card.",
  "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
  "memory_bytes": 100000000000,
  "kit": "qwen4exp",
@@ -8,8 +8,7 @@
   {
    "name": "fn-vision-diag",
    "env": {
-    "VISION_ONLY": "1",
-    "VISION_EXTRA": "1"
+    "VISION_ONLY": "1"
    },
    "steps": [
     "gates:full"
