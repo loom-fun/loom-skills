@@ -37,11 +37,11 @@
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:attn:2",
-    "perf:gemm_q4:2",
-    "perf:gemm_q6q8:2",
-    "perf:misc:2"
+    "perf:card:1:long",
+    "perf:attn:1:long",
+    "perf:gemm_q4:1:long",
+    "perf:gemm_q6q8:1:long",
+    "perf:misc:1:long"
    ]
   }
  ]
