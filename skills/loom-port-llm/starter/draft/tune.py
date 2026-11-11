@@ -7,8 +7,10 @@ at depths 3, 5, 7 (capped by its block); a Gemma-4 assistant (cfg["assistant"]) 
 is built once; a depth is only a model.json setting (the width-specialized stages compile on first use). Every
 candidate is served alone and timed on decode-heavy requests (short essay, code, a tool-call turn, a reasoning answer,
 a code edit that returns most of its input as agents' file edits do, and one decode after a 16k-token document, at most
-half the context; greedy, client-side tokens/s, harmonic mean: the long-context row counts as much as it costs). The fastest candidate
-wins if it beats no drafting by at least 3 %; its kind/depth go to cfg["drafter"] and pkg/ is rebuilt with it
+half the context; greedy, client-side tokens/s) and, with a multi-row preset, on `rows` concurrent essays (streams4).
+Each candidate's margin is its worst row relative to depth 0. A drafter is used only if no row is slower than 0.98 x depth 0
+(prose, long-document and 4-stream decode are the card's headline rows: low-acceptance drafting loses 20-40 % there) and
+its single-stream rate (harmonic mean) beats no drafting by at least 3 %; the best margin wins; its kind/depth go to cfg["drafter"] and pkg/ is rebuilt with it
 (build.py --draft auto reads them). Before it is kept, the fastest candidate must pass a concurrency check and the
 spec gate's equivalence check (loom-benchmark spec_check.py: the same requests at the candidate depth and at
 draft_depth 0 of the same package, identical); a candidate that fails either is recorded with the reason and the
@@ -62,20 +64,72 @@ def sh(*cmd, **kw):
 LONG_CTX = int(os.environ.get("TUNE_LONG", "16000"))
 
 
-def measure(url, model, chat, context=0):
-    """Harmonic mean of the workload's decode tok/s (the rate of generating the same number of tokens in each)."""
+# Rows that must not get slower: the card's headline decode, decode_32k and streams4 are prose, where an n-gram or
+# low-acceptance drafter finds few matches and the multi-row verify epoch (depth + 1 tokens per span, 16-token
+# matvec padding at 4 streams) costs more than a plain step (Qwen3.5-0.8B: ngram depth 3 decode 223 vs 258 without,
+# 32k 125 vs 166, four streams 498 vs 787 tok/s). So every row is scored against depth 0 and a drafter that is
+# slower than NO_LOSS x depth 0 on any row is not used, however well it does on the code-edit row that quotes its input.
+NO_LOSS = 0.98
+
+
+def measure(url, model, chat, context=0, rows=1):
+    """{row: decode tok/s} of the candidate being served: the WORK requests (work0..), the decode after a long
+    document ("long", at most half the context) and, with a multi-row preset, "streams4": the aggregate of `rows`
+    concurrent essays (measure_c4)."""
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
     stream(url, model, WORK[0][0], 16, extra=off)                       # warm-up (weights, first compiles)
-    work = list(WORK)
+    work = [(f"work{i}", m, x) for i, (m, x) in enumerate(WORK)]
     n = max((d for d in DOC_SIZES if d <= min(LONG_CTX, context // 2)), default=0)
     if n >= 4000:
-        work.append(([{"role": "user", "content": "Write a long, detailed essay discussing this documentation.\n\n" + doc(n)}], {}))
-    tps = []
-    for messages, extra in work:
+        work.append(("long", [{"role": "user", "content": "Write a long, detailed essay discussing this documentation.\n\n" + doc(n)}], {}))
+    res = {}
+    for name, messages, extra in work:
         r = stream(url, model, messages, 256, extra={**off, **extra}, timeout=900)
         if r.get("decode_tps"):
-            tps.append(r["decode_tps"])
-    return statistics.harmonic_mean(tps) if tps else 0.0
+            res[name] = r["decode_tps"]
+    c4 = measure_c4(url, model, chat, rows)
+    if c4:
+        res["streams4"] = c4
+    return res
+
+
+def measure_c4(url, model, chat, rows):
+    """Aggregate decode tok/s of `rows` concurrent essay requests (the serving preset's rows, at most 4): a speculative
+    span verifies depth + 1 tokens whatever the load, so 4 streams verify 4 x (depth + 1) tokens per step, and past 16
+    the int8 matvecs give way to the GEMM (Muse-Glimmer: depth 5 gave 41.6 tok/s on 4 streams, depth 3 74.0, no
+    drafting 48.6, while one stream preferred depth 5 by 7 %). Returns 0.0 with a single row."""
+    import threading
+    n = min(max(int(rows or 1), 1), 4)
+    if n < 2:
+        return 0.0
+    off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
+    res = [None] * n
+
+    def run(i):
+        try:
+            res[i] = stream(url, model, [{"role": "user", "content": f"[{time.time()} {i}] Write a very long, detailed essay about the history of lighthouses."}],
+                            256, extra=off, timeout=900)
+        except Exception:  # noqa: BLE001  a failing stream scores 0
+            res[i] = None
+    ts = [threading.Thread(target=run, args=(i,)) for i in range(n)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    if any(not r or not r.get("tokens") or r.get("ttft") is None for r in res):
+        return 0.0
+    span = max(r["total"] - r["ttft"] for r in res)
+    return sum(r["tokens"] for r in res) / span if span > 0 else 0.0
+
+
+def single_rate(rows):
+    """The single-stream rate of a measurement: the harmonic mean of its single-stream rows (what tune.py reported
+    before the per-row guard)."""
+    v = [t for k, t in rows.items() if k != "streams4" and t]
+    return statistics.harmonic_mean(v) if v else 0.0
+
+
+def margin(rows, base_rows):
+    """The candidate's worst row relative to depth 0 (min over the rows depth 0 measured; 0.0 when a row is missing)."""
+    return min((rows.get(k, 0.0) / t for k, t in base_rows.items() if t), default=0.0)
 
 
 def concurrent_ok(url, model, chat):
@@ -157,7 +211,7 @@ def main():
     # No --memory-gib: each candidate (and the final package) sizes its own budget for the full native context
     # (a drafter adds KV per position; passing the old budget shrank DFlash packages' context to fit).
     common = ["--tokenizer", os.path.join(work, "tok", "tokenizer.json"), "--model-id", model_id]
-    base = None
+    base, base_rows = None, {}
     for kind, depths in kinds:
         pkg = os.path.join(work, f"pkg_tune_{kind}")
         out = sh(*build, pkg, *common, "--draft", kind).stdout
@@ -173,6 +227,12 @@ def main():
         chat = chats[kind] = json.load(open(os.path.join(pkg, "llm_config.json")))["chat"]
         allowed = [d for d in depths if d <= block]
         first, climb = prior_depths(prior, kind, allowed)
+        # With several rows every span verifies depth + 1 tokens: the deepest depth whose rows x (depth + 1) still fits
+        # the 16-token int8 matvec is always a candidate, whatever a (single-stream) reference preferred.
+        rows_n = int(card["presets"]["chat"]["execution"].get("rows") or 1)
+        fit = 16 // max(min(rows_n, 4), 1) - 1
+        if first and fit >= 1 and fit in allowed and fit not in first:
+            first = sorted(first + [fit])
         measured = {}
         queue = ([0] if base is None else []) + (first or allowed)
         while queue:
@@ -183,21 +243,26 @@ def main():
             t0 = time.time()
             try:
                 serve("tune", port, mem, path, env)
-                tps = measure(f"http://127.0.0.1:{port}", model_id, chat,
-                              card["presets"]["chat"]["execution"].get("context_capacity") or 0)
+                rows = measure(f"http://127.0.0.1:{port}", model_id, chat,
+                               card["presets"]["chat"]["execution"].get("context_capacity") or 0, rows_n)
+                tps = single_rate(rows)
             except Exception as e:  # noqa: BLE001  a failing candidate is reported and skipped
                 print(f"tune: {kind} depth {depth}: {e}", file=sys.stderr)
-                tps = 0.0
+                tps, rows = 0.0, {}
             subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
-            row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2), "seconds": round(time.time() - t0)}
+            row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2),
+                   "rows": {k: round(v, 2) for k, v in rows.items()}, "seconds": round(time.time() - t0)}
+            if depth == 0:
+                base, base_rows = tps, rows
+            else:
+                row["margin"] = round(margin(rows, base_rows), 3)   # worst row relative to depth 0
             print("tune:", json.dumps(row), flush=True)
             table.append(row)
-            if depth == 0:
-                base = tps
-            elif tps > best[2]:
-                best = (kind, depth, tps)
+            sc = row.get("margin", 0.0)
+            if depth and sc > best[2]:
+                best = (kind, depth, sc)
             if depth:
-                measured[depth] = tps
+                measured[depth] = sc
             # the prior is a starting point: climb while the best depth's neighbours are unmeasured (a method the
             # reference ruled out climbs only when it comes within 10 % of the best candidate so far)
             if not queue and first and measured and (climb or max(measured.values()) >= 0.9 * best[2]):
@@ -227,13 +292,16 @@ def main():
         serve("tune", port, mem, os.path.join(pkg, f"model_d{depth}.json"), env)
         spec_check.record(url, model_id, out)
         return spec_check.compare(refs[kind], out) == 0
-    ranked = sorted([r for r in table if r["kind"] != "none" and r["decode_tps"] >= 1.03 * base], key=lambda r: -r["decode_tps"])
-    # Within 5 % of the fastest (measurement noise on these short requests), the shallower depth first: every drafted
-    # token is verified with decode attention over the whole context, so a deep draft costs at long context
+    # A drafter is used only if no row is slower than NO_LOSS x depth 0 and the single-stream rate gains at least 3 %;
+    # candidates rank by their worst row relative to depth 0 (the margin).
+    ranked = sorted([r for r in table if r["kind"] != "none" and r["margin"] >= NO_LOSS and r["decode_tps"] >= 1.03 * base],
+                    key=lambda r: -r["margin"])
+    # Within 5 % of the best margin (measurement noise on these short requests), the shallower depth first: every
+    # drafted token is verified with decode attention over the whole context, so a deep draft costs at long context
     # (Qwen3.6-35B-A3B DFlash: depth 7 vs 3 was 109 vs 105 tok/s short, 31 vs 48 tok/s at 32k).
     if ranked:
-        top = ranked[0]["decode_tps"]
-        ranked.sort(key=lambda r: (r["decode_tps"] < 0.95 * top, r["depth"] if r["decode_tps"] >= 0.95 * top else 0, -r["decode_tps"]))
+        top = ranked[0]["margin"]
+        ranked.sort(key=lambda r: (r["margin"] < 0.95 * top, r["depth"] if r["margin"] >= 0.95 * top else 0, -r["margin"]))
     choice = ("none", 0, base)
     for r in ranked:
         kind, depth = r["kind"], r["depth"]
