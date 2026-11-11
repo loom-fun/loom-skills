@@ -2,13 +2,23 @@
   "sdk": "ci:13628412621",
   "repeats": 5,
   "suites": [
-    {"suite": "dense", "dir": "dense",
-     "files": ["bench.loom", "bench_v2.loom", "bench_v2n.loom", "bench_w256.loom"],
-     "config": ["flash_next.token_count=2048"],
-     "args": ["--measure=dispatch_complete", "--batch-size=8", "--profile-final-batch=true"]},
-    {"suite": "exp", "dir": "exp",
-     "files": ["bench.loom", "bench_p2.loom", "bench_p2d.loom", "bench_p3d.loom", "bench_db.loom"],
-     "config": ["flash_next.token_count=2048"],
-     "args": ["--measure=dispatch_complete", "--batch-size=8", "--profile-final-batch=true"]}
+    {
+      "suite": "dense",
+      "dir": "dense",
+      "files": [
+        "bench.loom",
+        "bench_v2.loom",
+        "bench_v2n.loom",
+        "bench_w256.loom"
+      ],
+      "config": [
+        "flash_next.token_count=2048"
+      ],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ]
+    }
   ]
 }
