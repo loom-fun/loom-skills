@@ -1,27 +1,149 @@
 {
- "_comment": "Qwen3.8-Flash-Next (catalog card, qwen4exp kit, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 on the same runner: with the MTP head (depth 3 vs --spec-type draft-mtp n-max 3) and autoregressive (a package built without the drafter). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "Ornith-1.0-35B (qwen35moe, published card is autoregressive) perf-gap: rebuilt AR vs n-gram drafting depth sweep vs published card, same-runner llama.cpp; and d0 kernel-group doubling ablations.",
+ "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
+ "memory_bytes": 49000000000,
+ "kit": null,
+ "llamacpp": "b1369",
+ "llamacpp_vulkan": "b12211",
+ "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "fn-ar",
-   "llama_spec": "",
+   "name": "draft",
    "variants": [
     {
      "name": "card"
+    },
+    {
+     "name": "d0",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "ng2",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "ngram",
+      "--draft-depth",
+      "2"
+     ]
+    },
+    {
+     "name": "ng3",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "ngram",
+      "--draft-depth",
+      "3"
+     ]
+    },
+    {
+     "name": "ng5",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "ngram",
+      "--draft-depth",
+      "5"
+     ]
     }
    ],
    "steps": [
-    "perf:card:2",
     "perf:card:2:long",
     "c4:card",
-    "llama:2",
+    "perf:d0:2:long",
+    "c4:d0",
+    "perf:ng2:2:long",
+    "c4:ng2",
+    "perf:ng3:2:long",
+    "c4:ng3",
+    "perf:ng5:1:long",
+    "c4:ng5",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec",
     "llama:2:long",
     "llamac4"
    ]
+  },
+  {
+   "name": "abl",
+   "variants": [
+    {
+     "name": "d0",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "d0_attn",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:g_attention|g_qk_rope_store"
+     ]
+    },
+    {
+     "name": "d0_gdn",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:g_gdn_"
+     ]
+    },
+    {
+     "name": "d0_moe",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:g_moe_"
+     ]
+    },
+    {
+     "name": "d0_mv",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:g_mv_q(?!\\w*swiglu)|gemm_q"
+     ]
+    },
+    {
+     "name": "d0_norm",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:norm|quant_q8|row_scale"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:d0:2:long",
+    "perf:d0_attn:1:long",
+    "perf:d0_gdn:1:long",
+    "perf:d0_moe:1:long",
+    "perf:d0_mv:1:long",
+    "perf:d0_norm:1:long"
+   ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
