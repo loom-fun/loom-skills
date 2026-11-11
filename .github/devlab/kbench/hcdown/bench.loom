@@ -1,0 +1,336 @@
+func.def public inline @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %word = view.load %view[0] : view<3xi32> -> i32
+  %value = index.cast %word : i32 to index
+  %count = index.assume %value [range(%value, 0, %capacity)] : index
+  func.return %count : index
+}
+
+func.def public inline @flash_next_span_count(%epoch: buffer) -> (index) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %word = view.load %view[1] : view<3xi32> -> i32
+  %value = index.cast %word : i32 to index
+  %count = index.assume %value [range(%value, 0, 2147483647)] : index
+  func.return %count : index
+}
+
+func.def public inline @flash_next_span_active(%epoch: buffer, %span: index) -> (i1) {
+  %count = func.call @flash_next_span_count(%epoch) : (buffer) -> (index)
+  %active = index.cmp ult, %span, %count : index
+  func.return %active : i1
+}
+
+// Each head/channel tile has a bounded set of span workers. Their grid-stride
+// traversal covers the live header count without launching one workgroup per
+// capacity slot when a large stage contains only a few spans.
+func.def public pure inline @flash_next_span_workers(%capacity: index) -> (index) {
+  %parallel_spans = index.constant 16 : index
+  %workers = index.min %capacity, %parallel_spans : index
+  func.return %workers : index
+}
+
+// A fresh span has no readable history. Otherwise the fork frontier selects
+// the immutable anchor once; subsequent spans read their own advancing writer.
+// Origins are byte offsets in one retained arena, independent of token packing.
+func.def public inline @flash_next_span_state(%epoch: buffer, %rows: buffer, %span: index, %layer_origin: offset, %capacity: index) -> (index, index, i1, offset, offset) {
+  %header_bytes = index.constant 12 : offset
+  %record_bytes = index.constant 24 : offset
+  %relative_origin = index.scale %span, %record_bytes : index, offset -> offset
+  %origin = index.add %header_bytes, %relative_origin : offset
+  %record = buffer.view %epoch[%origin] : buffer -> view<6xi32>
+  %length_word = view.load %record[0] : view<6xi32> -> i32
+  %position_word = view.load %record[1] : view<6xi32> -> i32
+  %begin_word = view.load %record[2] : view<6xi32> -> i32
+  %row_word = view.load %record[3] : view<6xi32> -> i32
+  %length_value = index.cast %length_word : i32 to index
+  %length = index.assume %length_value [range(%length_value, 1, %capacity)] : index
+  %begin_value = index.cast %begin_word : i32 to index
+  %begin = index.assume %begin_value [range(%begin_value, 0, %capacity)] : index
+  %end_value = index.add %begin, %length : index
+  %end = index.assume %end_value [range(%end_value, 1, %capacity)] : index
+  %row_value = index.cast %row_word : i32 to index
+  %row = index.assume %row_value [range(%row_value, 0, 2147483647)] : index
+  %row_bytes = index.constant 40 : offset
+  %row_origin = index.scale %row, %row_bytes : index, offset -> offset
+  %entry = buffer.view %rows[%row_origin] : buffer -> view<5xi64>
+  %anchor_word = view.load %entry[0] : view<5xi64> -> i64
+  %writer_word = view.load %entry[1] : view<5xi64> -> i64
+  %frontier = view.load %entry[3] : view<5xi64> -> i64
+  %position = scalar.extui %position_word : i32 to i64
+  %first = scalar.cmpi eq, %position, %frontier : i64
+  %reader_word = scf.select %first, %anchor_word, %writer_word : i64
+  %reader_value = scalar.assume %reader_word [range(%reader_word, 0, 9223372036854775807)] : i64
+  %writer_value = scalar.assume %writer_word [range(%writer_word, 0, 9223372036854775807)] : i64
+  %reader_base = index.cast %reader_value : i64 to offset
+  %writer_base = index.cast %writer_value : i64 to offset
+  %reader = index.add %reader_base, %layer_origin : offset
+  %writer = index.add %writer_base, %layer_origin : offset
+  %c0 = scalar.constant 0 : i64
+  %fresh = scalar.cmpi eq, %position, %c0 : i64
+  func.return %begin, %end, %fresh, %reader, %writer : index, index, i1, offset, offset
+}
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 2147483647)]
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768), range(%value, 1, 32768)]
+
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
+func.def public pure inline @flash_next_output_capacity() -> (index) {
+  %spans = config.get @flash_next.span_capacity : index
+  %width = config.get @flash_next.verification_width : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %ordinary = index.cmp eq, %width, %c0 : index
+  %outputs = scf.select %ordinary, %c1, %width : index
+  %count = index.mul %spans, %outputs : index
+  // Each selected output belongs to a distinct packed input. Small scheduler
+  // buckets can hold fewer inputs than span_capacity * verification_width.
+  %tokens = config.get @flash_next.token_count : index
+  %smaller = index.cmp ult, %count, %tokens : index
+  %capacity = scf.select %smaller, %count, %tokens : index
+  func.return %capacity : index
+}
+
+// Final attention retains up to four original query rows per selected span.
+func.def public pure inline @flash_next_finish_capacity() -> (index) {
+  %spans = config.get @flash_next.span_capacity : index
+  %tokens = config.get @flash_next.token_count : index
+  %queries = index.constant 4 : index
+  %rows = index.mul %spans, %queries : index
+  %capacity = index.min %rows, %tokens : index
+  func.return %capacity : index
+}
+
+// One flag per four-query cohort precedes one flag per draft token.
+func.def public pure inline @flash_next_draft_cohorts(%capacity: index) -> (index) {
+  %rounding = index.constant 3 : index
+  %width = index.constant 4 : index
+  %rounded = index.add %capacity, %rounding : index
+  %count = index.div %rounded, %width : index
+  func.return %count : index
+}
+
+func.def public pure inline @flash_next_draft_mode_origin(%capacity: index) -> (offset) {
+  %cohorts = func.call pure @flash_next_draft_cohorts(%capacity) : (index) -> (index)
+  %word_bytes = index.constant 4 : offset
+  %origin = index.scale %cohorts, %word_bytes : index, offset -> offset
+  func.return %origin : offset
+}
+
+amdgpu.target<gfx11-generic> @hc_int8_wave32 {subgroup_size = 32}
+
+func.def inline @hc_int8_record(%input: buffer, %record_base: index, %first_block: index, %part: index, %half_position: index, %token_lane: index) -> (vector<4xi32>, f32) {
+  %c0 = index.constant 0 : index
+  %record_bytes = index.constant 576 : offset
+  %scale_delta = index.constant 512 : offset
+  %k_block = index.add %first_block, %part : index
+  %record = index.add %record_base, %k_block : index
+  %origin = index.scale %record, %record_bytes : index, offset -> offset
+  %scale_origin = index.add %origin, %scale_delta : offset
+  %code_view = buffer.view %input[%origin] : buffer -> view<32x4xi32>
+  %scale_view = buffer.view %input[%scale_origin] : buffer -> view<16xf32>
+  %codes = vector.load %code_view[%half_position, %c0] : view<32x4xi32> -> vector<4xi32>
+  %scale = view.load %scale_view[%token_lane] : view<16xf32> -> f32
+  func.return %codes, %scale : vector<4xi32>, f32
+}
+
+kernel.def target(@hc_int8_wave32) @k_hcdown() {
+  %capacity = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %c128 = index.constant 128 : index
+  %rounding = index.constant 127 : index
+  %padded = index.add %capacity, %rounding : index
+  %panels = index.div %padded, %c128 : index
+  %groups = index.constant 5 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %panels, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch_arg: buffer, %input_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %epoch, %input, %weight, %output = buffer.assume.noalias %epoch_arg, %input_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c80 = index.constant 80 : index
+  %c128 = index.constant 128 : index
+  %c320 = index.constant 320 : index
+  %batch = kernel.workgroup.id<y> : index
+  %first = index.mul %batch, %c128 : index
+  %end = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
+  %active = index.cmp ult, %first, %end : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %workitem = kernel.workitem.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %sub_lane = index.rem %lane, %c16 : index
+    %half_lane = index.div %lane, %c16 : index
+    %wave_feature = index.div %wave, %c4 : index
+    %wave_token = index.rem %wave, %c4 : index
+    %feature_base = index.mul %group, %c64 : index
+    %producer_row = index.div %workitem, %c4 : index
+    %producer_block = index.rem %workitem, %c4 : index
+    %weight_row = index.add %feature_base, %producer_row : index
+    %weight_tile = index.div %producer_row, %c16 : index
+    %weight_lane = index.rem %producer_row, %c16 : index
+    %weight_high_lane = index.add %weight_lane, %c16 : index
+    %weight_scale_half = index.rem %weight_lane, %c2 : index
+    %weight_scale_lane = index.div %weight_lane, %c2 : index
+    %weight_scale_position = index.madd %weight_scale_half, %c8, %weight_scale_lane : index
+    %input_local_token = index.madd %wave, %c16, %sub_lane : index
+    %input_token = index.add %first, %input_local_token : index
+    %input_live = index.cmp ult, %input_token, %end : index
+    %safe_token = scf.select %input_live, %input_token, %c0 : index
+    %input_token_tile = index.div %safe_token, %c16 : index
+    %input_token_lane = index.rem %safe_token, %c16 : index
+    %input_record_base = index.mul %input_token_tile, %c320 : index
+    %input_half_position = index.madd %half_lane, %c16, %input_token_lane : index
+    %origin = index.constant 0 : offset
+    %stage_bytes = index.constant 27648 : offset
+    %storage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+    %weight_scales_origin = index.constant 8192 : offset
+    %input_codes_origin = index.constant 9216 : offset
+    %input_scales_origin = index.constant 25600 : offset
+    %a = buffer.view %storage[%origin] : buffer -> view<4x4x32x4xi32>
+    %dw = buffer.view %storage[%weight_scales_origin] : buffer -> view<4x4x16xf32>
+    %b = buffer.view %storage[%input_codes_origin] : buffer -> view<4x8x32x4xi32>
+    %dx = buffer.view %storage[%input_scales_origin] : buffer -> view<4x8x16xf32>
+    %weight_row_bytes = index.constant 10880 : offset
+    %weight_origin = index.scale %weight_row, %weight_row_bytes : index, offset -> offset
+    %block_bytes = index.constant 34 : offset
+    %code_delta = index.constant 2 : offset
+    %initial = vector.splatf 0.0 : vector<2x2x8xf32>
+    %integer_zero = vector.splati 0 : vector<8xi32>
+    %schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+    %integer_init = vector.fragment<init> %integer_zero shape [%c16, %c16] : vector<8xi32>
+    %result = scf.for %stage = [%c0 to %c80 step %c1](%accumulators = %initial : vector<2x2x8xf32>) -> (vector<2x2x8xf32>) pipeline(%c2) {
+      %first_block = index.mul %stage, %c4 : index
+      %block = index.add %first_block, %producer_block : index
+      %block_origin = index.scale %block, %block_bytes : index, offset -> offset
+      %scale_origin = index.add %weight_origin, %block_origin : offset
+      %codes_origin = index.add %scale_origin, %code_delta : offset
+      %code_view = buffer.view %weight[%codes_origin] : buffer -> view<32xi8>
+      %scale_view = buffer.view %weight[%scale_origin] : buffer -> view<1xf16>
+      %weight_codes = vector.load %code_view[%c0] : view<32xi8> -> vector<32xi8>
+      %weight_half_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
+      %weight_scale = scalar.extf %weight_half_scale : f16 to f32
+      %weight_words = vector.bitcast %weight_codes : vector<32xi8> to vector<2x4xi32>
+      %weight_low = vector.extract %weight_words[%c0] : vector<2x4xi32> -> vector<4xi32>
+      %weight_high = vector.extract %weight_words[%c1] : vector<2x4xi32> -> vector<4xi32>
+      // Inactive tokens read token zero's initialized record. Matrix columns
+      // are independent, and the epilogue excludes these tokens entirely.
+      %codes0, %scale0 = func.call @hc_int8_record(%input, %input_record_base, %first_block, %c0, %input_half_position, %input_token_lane) : (buffer, index, index, index, index, index) -> (vector<4xi32>, f32)
+      %codes1, %scale1 = func.call @hc_int8_record(%input, %input_record_base, %first_block, %c1, %input_half_position, %input_token_lane) : (buffer, index, index, index, index, index) -> (vector<4xi32>, f32)
+      %codes2, %scale2 = func.call @hc_int8_record(%input, %input_record_base, %first_block, %c2, %input_half_position, %input_token_lane) : (buffer, index, index, index, index, index) -> (vector<4xi32>, f32)
+      %codes3, %scale3 = func.call @hc_int8_record(%input, %input_record_base, %first_block, %c3, %input_half_position, %input_token_lane) : (buffer, index, index, index, index, index) -> (vector<4xi32>, f32)
+      vector.store %weight_low, %a[%producer_block, %weight_tile, %weight_lane, %c0] : vector<4xi32>, view<4x4x32x4xi32>
+      vector.store %weight_high, %a[%producer_block, %weight_tile, %weight_high_lane, %c0] : vector<4xi32>, view<4x4x32x4xi32>
+      view.store %weight_scale, %dw[%producer_block, %weight_tile, %weight_scale_position] : f32, view<4x4x16xf32>
+      vector.store %codes0, %b[%c0, %wave, %lane, %c0] : vector<4xi32>, view<4x8x32x4xi32>
+      vector.store %codes1, %b[%c1, %wave, %lane, %c0] : vector<4xi32>, view<4x8x32x4xi32>
+      vector.store %codes2, %b[%c2, %wave, %lane, %c0] : vector<4xi32>, view<4x8x32x4xi32>
+      vector.store %codes3, %b[%c3, %wave, %lane, %c0] : vector<4xi32>, view<4x8x32x4xi32>
+      %leader = index.cmp ult, %lane, %c16 : index
+      scf.if %leader {
+        view.store %scale0, %dx[%c0, %wave, %lane] : f32, view<4x8x16xf32>
+        view.store %scale1, %dx[%c1, %wave, %lane] : f32, view<4x8x16xf32>
+        view.store %scale2, %dx[%c2, %wave, %lane] : f32, view<4x8x16xf32>
+        view.store %scale3, %dx[%c3, %wave, %lane] : f32, view<4x8x16xf32>
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %next = scf.for %part = [%c0 to %c4 step %c1](%current = %accumulators : vector<2x2x8xf32>) -> (vector<2x2x8xf32>) {
+        %updated = scf.for %token_fragment = [%c0 to %c2 step %c1](%tile = %current : vector<2x2x8xf32>) -> (vector<2x2x8xf32>) unroll schedule(linear) {
+          %token_tile = index.madd %wave_token, %c2, %token_fragment : index
+          %high_lane = index.add %sub_lane, %c16 : index
+          %b0_data = vector.load %b[%part, %token_tile, %sub_lane, %c0] : view<4x8x32x4xi32> -> vector<4xi32>
+          %b1_data = vector.load %b[%part, %token_tile, %high_lane, %c0] : view<4x8x32x4xi32> -> vector<4xi32>
+          %b0 = vector.fragment<rhs> %b0_data shape [%c16, %c16] using {schema = %schema : encoding<schema>} : vector<4xi32>
+          %b1 = vector.fragment<rhs> %b1_data shape [%c16, %c16] using {schema = %schema : encoding<schema>} : vector<4xi32>
+          %activation_scale = view.load %dx[%part, %token_tile, %sub_lane] : view<4x8x16xf32> -> f32
+          %activation_scales = vector.splat %activation_scale : vector<8xf32>
+          %next_tile = scf.for %feature_fragment = [%c0 to %c2 step %c1](%values = %tile : vector<2x2x8xf32>) -> (vector<2x2x8xf32>) unroll schedule(linear) {
+            %feature_tile = index.madd %wave_feature, %c2, %feature_fragment : index
+            %a0_data = vector.load %a[%part, %feature_tile, %sub_lane, %c0] : view<4x4x32x4xi32> -> vector<4xi32>
+            %a1_data = vector.load %a[%part, %feature_tile, %high_lane, %c0] : view<4x4x32x4xi32> -> vector<4xi32>
+            %a0 = vector.fragment<lhs> %a0_data shape [%c16, %c16] using {schema = %schema : encoding<schema>} : vector<4xi32>
+            %a1 = vector.fragment<lhs> %a1_data shape [%c16, %c16] using {schema = %schema : encoding<schema>} : vector<4xi32>
+            %dot0 = vector.mma %a0, %b0, %integer_init : vector<4xi32>, vector<4xi32>, vector<8xi32>
+            %dot1 = vector.mma %a1, %b1, %dot0 : vector<4xi32>, vector<4xi32>, vector<8xi32>
+            %dot = vector.sitofp %dot1 : vector<8xi32> to vector<8xf32>
+            %scale_first = index.mul %half_lane, %c8 : index
+            %weight_scales = vector.load %dw[%part, %feature_tile, %scale_first] : view<4x4x16xf32> -> vector<8xf32>
+            %scaled = vector.mulf %dot, %activation_scales : vector<8xf32>
+            %old = vector.extract %values[%feature_fragment, %token_fragment] : vector<2x2x8xf32> -> vector<8xf32>
+            %contracted = vector.fmaf %scaled, %weight_scales, %old : vector<8xf32>
+            %next_values = vector.insert %contracted into %values[%feature_fragment, %token_fragment] : vector<8xf32>, vector<2x2x8xf32>
+            scf.yield %next_values : vector<2x2x8xf32>
+          }
+          scf.yield %next_tile : vector<2x2x8xf32>
+        }
+        scf.yield %updated : vector<2x2x8xf32>
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      scf.yield %next : vector<2x2x8xf32>
+    }
+    // Each wave transposes a 16-token by 32-feature result through its own
+    // padded LDS region, then stores sixteen contiguous BF16 features/lane.
+    %transpose = buffer.view %storage[%origin] : buffer -> view<8x16x36xf32>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%capacity]x320xbf16>
+    %output_token_lane = index.div %lane, %c2 : index
+    %output_feature_half = index.rem %lane, %c2 : index
+    %output_feature_lane = index.mul %output_feature_half, %c16 : index
+    %wave_feature_base = index.madd %wave_feature, %c32, %feature_base : index
+    %output_feature = index.add %wave_feature_base, %output_feature_lane : index
+    %quarter = vector.splatf 0.25 : vector<16xf32>
+    %c1_16xf32 = vector.splatf 1.0 : vector<16xf32>
+    scf.for %token_fragment = [%c0 to %c2 step %c1] unroll schedule(linear) {
+      scf.for %feature_fragment = [%c0 to %c2 step %c1] unroll schedule(linear) {
+        %values = vector.extract %result[%feature_fragment, %token_fragment] : vector<2x2x8xf32> -> vector<8xf32>
+        %feature_offset = index.mul %feature_fragment, %c16 : index
+        scf.for %element = [%c0 to %c8 step %c1] unroll schedule(linear) {
+          %within = index.madd %element, %c2, %half_lane : index
+          %feature = index.add %feature_offset, %within : index
+          %value = vector.extract %values[%element] : vector<8xf32> -> f32
+          view.store %value, %transpose[%wave, %sub_lane, %feature] : f32, view<8x16x36xf32>
+        }
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %token_tile = index.madd %wave_token, %c2, %token_fragment : index
+      %local_token = index.madd %token_tile, %c16, %output_token_lane : index
+      %token = index.add %first, %local_token : index
+      %live = index.cmp ult, %token, %end : index
+      scf.if %live {
+        %dot = vector.load %transpose[%wave, %output_token_lane, %output_feature_lane] : view<8x16x36xf32> -> vector<16xf32>
+        %scaled = vector.mulf %dot, %quarter : vector<16xf32>
+        %negative = vector.negf %scaled : vector<16xf32>
+        %exponential = vector.expf<afn> %negative : vector<16xf32>
+        %denominator = vector.addf %c1_16xf32, %exponential : vector<16xf32>
+        %activated = vector.divf<arcp> %scaled, %denominator : vector<16xf32>
+        %packed = vector.fptrunc %activated : vector<16xf32> to vector<16xbf16>
+        vector.store %packed, %output_view[%token, %output_feature] : vector<16xbf16>, view<[%capacity]x320xbf16>
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    }
+  }
+  kernel.return
+}
+
+check.case public @hcdown {
+  %seed = check.literal value(5) : i64
+  %epoch = check.generate.fill value(1838) : tensor<3xi32>
+  %input = check.generate.random.uniform seed(%seed) range(-100 to 100) : tensor<23592960xi8>
+  %weight = check.generate.random.uniform seed(%seed) range(-100 to 100) : tensor<3481600xi8>
+  %output = check.generate.fill value(0.0) : tensor<2048x320xbf16>
+  kernel.launch @k_hcdown(%epoch, %input, %weight, %output) : (tensor<3xi32>, tensor<23592960xi8>, tensor<3481600xi8>, tensor<2048x320xbf16>)
+  check.return
+}
+
+check.benchmark<@hcdown> @hcdown_bm
