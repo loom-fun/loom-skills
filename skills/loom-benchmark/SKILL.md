@@ -326,7 +326,7 @@ Rules:
   essay with another nonce: prefill, decode, drafting and first-use kernels all run once; a trivial "Say hi."
   left DevLab's short-prompt decode 51-60 % below the local session's while 2k decode agreed), and `c4_steady.py`
   one short request and then untimed full N-stream passes (same shape as the timed one) until two successive passes
-  agree within 10 % (at most 4; `--warmup-passes`, `--warmup-tol`). Without them the median of three timed runs
+  agree within 10 % (at least 3, at most 6; `--warmup-min`, `--warmup-passes`, `--warmup-tol`; two equal slow passes do not end it early). Without them the median of three timed runs
   reported a cold number: a model that reads weights on demand (Flash-Next's per-layer-embedding table) decoded 4
   streams at 4 tok/s for its first two passes on a DevLab runner with a slow disk (cold page cache, IO pressure 93 %),
   then 65. Every warm-up pass's rate is in the JSON line (`warmup_agg_tps`) and nothing is dropped: a server that stays

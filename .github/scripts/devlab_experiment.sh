@@ -61,13 +61,24 @@ root=$("$SV/ensure_sdk.sh" "${LOOM_ROOT:-$WORK/loom}" "$out/llm_config.json") ||
 export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 
 # 2. The card (shared by the variants of one runner: fetched once into WORK/card)
-card=$WORK/_card_$(echo "$repo" | tr "/" "_"); base=https://huggingface.co/$repo/resolve/main
-if [ ! -f "$card/.fetched" ]; then
+card=$WORK/_card_$(echo "$repo" | tr "/" "_"); rev=$(curl -fsS --retry 3 "https://huggingface.co/api/models/$repo/revision/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || rev=main
+# the files are fetched at one commit (resolve/main can serve an older revision for a while after a publish), and a card
+# directory left by an earlier job on this runner is reused only when it holds that commit
+base=https://huggingface.co/$repo/resolve/$rev
+if [ "$rev" = main ] || [ "$(cat "$card/.fetched" 2>/dev/null)" != "$rev" ]; then
   step "fetch $repo"; rm -rf "$card"
   HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" || { echo "FAIL: loom-fetch"; exit 1; }
   curl -fsSL --retry 3 "$base/llm_config.json" -o "$card/llm_config.json" || exit 1
-  rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; touch "$card/.fetched"
+  rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; echo "$rev" > "$card/.fetched"
 fi
+
+python3 - "$card" <<'EOF' || { echo "FAIL: the fetched card's model.json and llm_config.json disagree (a stale fetch?)"; exit 1; }
+import json, os, sys
+m = json.load(open(os.path.join(sys.argv[1], "model.json"))); c = json.load(open(os.path.join(sys.argv[1], "llm_config.json")))
+depth = next(iter(m["presets"].values()))["execution"].get("draft_depth", 0)
+want = (c.get("draft") or {}).get("depth", 0)
+sys.exit(0 if depth == want else f"model.json draft_depth {depth} != llm_config.json draft depth {want}")
+EOF
 
 # build.py's / make_kernel_tests.py's config: the card's llm_config.json with its GGUFs pointed at the fetched files, plus the tensor table
 "$T" - "$card" "$D/cfg.json" "$(q "print(json.dumps(v.get('config') or {}))")" "$ST" <<'EOF' || exit 1

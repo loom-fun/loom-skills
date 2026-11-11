@@ -28,8 +28,9 @@ ap.add_argument("--log", default="perf_log.jsonl")
 ap.add_argument("--reverted", action="store_true")
 ap.add_argument("--thinking", default="off", choices=["off", "on", "template"],
                 help="chat_template_kwargs.enable_thinking sent to the server (perf.py's flag; template: send nothing)")
-ap.add_argument("--warmup-passes", type=int, default=4,
-                help="at most this many untimed warm-up passes (stops when two successive passes agree within --warmup-tol; 0: none)")
+ap.add_argument("--warmup-passes", type=int, default=6,
+                help="at most this many untimed warm-up passes (0: none); stops after --warmup-min passes once two successive passes agree within --warmup-tol")
+ap.add_argument("--warmup-min", type=int, default=3, help="a cold server can read the same slow rate twice before it speeds up")
 ap.add_argument("--warmup-tol", type=float, default=0.10)
 a = ap.parse_args()
 def one_pass():
@@ -69,7 +70,7 @@ def one_pass():
 
 
 # Warm-up (untimed): full N-stream passes of the timed request's own shape until two successive passes agree within
-# --warmup-tol (or --warmup-passes passes ran). A cold server is slower for its first passes (first-use kernels and, for a
+# --warmup-tol, after at least --warmup-min passes (or --warmup-passes passes ran). A cold server is slower for its first passes (first-use kernels and, for a
 # model that reads weights on demand such as a per-layer-embedding table, a cold page cache on a slow disk: DevLab
 # 4-stream decode read 4 tok/s for two passes, then 65); a median of three timed runs without it reported the cold number.
 # Every warm-up pass's rate is logged ("warmup_agg_tps"): a server that stays slow shows it, nothing is dropped.
@@ -77,7 +78,7 @@ stream(a.url, a.model, [{"role": "user", "content": "Say hi."}], 8)
 warm = []
 for _ in range(a.warmup_passes):
     warm.append(round(one_pass()[0], 1))
-    if len(warm) >= 2 and abs(warm[-1] - warm[-2]) <= a.warmup_tol * max(warm[-1], warm[-2]):
+    if len(warm) >= a.warmup_min and abs(warm[-1] - warm[-2]) <= a.warmup_tol * max(warm[-1], warm[-2]):
         break
 rate, window, tokens, events, acc = one_pass()
 print(json.dumps({"streams": a.n, "thinking": a.thinking, "window_s": round(window, 2), "agg_tps": round(rate, 1),
