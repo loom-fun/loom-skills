@@ -163,19 +163,24 @@ json.dump(c, open(os.path.join(pkg, "llm_config.json"), "w"), indent=1)
 EOF
   fi
   # ablation: every kernel.launch in PROGRAM matching REGEX ("PROGRAM:REGEX", PROGRAM * = any) runs twice
-  "$T" - "$pkg/program/llm.loom" "$(qv "$v" "print(json.dumps(v.get('double') or []))")" <<'EOF'
+  # "skip": the same rules, but the launches are removed (timing only: the output is wrong; for bandwidth-bound kernels the
+  # doubled launch re-reads its weights from the MALL and underestimates)
+  "$T" - "$pkg/program/llm.loom" "$(qv "$v" "print(json.dumps(v.get('double') or []))")" "$(qv "$v" "print(json.dumps(v.get('skip') or []))")" <<'EOF'
 import json, re, sys
 p, rules = sys.argv[1], [r.split(":", 1) for r in json.loads(sys.argv[2])]
-if rules:
-    out, prog, n = [], None, 0
+skips = [r.split(":", 1) for r in json.loads(sys.argv[3])]
+if rules or skips:
+    out, prog, n, k = [], None, 0, 0
     for ln in open(p).read().split("\n"):
         m = re.match(r"command\.program\.def \w+ @(\w+)", ln)
         if m:
             prog = m.group(1)
+        if re.match(r"\s*kernel\.launch @", ln) and any(pr in ("*", prog) and re.search(rx, ln) for pr, rx in skips):
+            k += 1; continue
         out.append(ln)
         if re.match(r"\s*kernel\.launch @", ln) and any(pr in ("*", prog) and re.search(rx, ln) for pr, rx in rules):
             out.append(ln); n += 1
-    open(p, "w").write("\n".join(out)); print(f"ablation: doubled {n} launches")
+    open(p, "w").write("\n".join(out)); print(f"ablation: doubled {n} launches, skipped {k}")
 EOF
   "$T" - "$pkg/model.json" "$(qv "$v" "print(json.dumps(v.get('execution') or {}))")" "$cardid-$v" <<'EOF'
 import json, sys
