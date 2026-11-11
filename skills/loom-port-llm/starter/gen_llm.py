@@ -2611,9 +2611,30 @@ def attention_text(S, P):
     U = UNROLL
     body = []
     pa = attn_rules.paged(U)
-    if pa:   # absolute U-aligned key blocks lie in one 16-position KV page: one page lookup per block
+    PF = pa and attn_rules.ATTN_PF   # software prefetch: block j+U's K/V loads are issued before block j is consumed
+
+    def pf_loads(jn, sfx):
+        t = [f"""      %kb_off{sfx} = func.call @g_kv_offset(%origins, %row, {jn}, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)"""]
+        for i in range(U):
+            t.append(f"""      %kd{i}{sfx} = index.constant {i * POS_BYTES} : offset
+      %ko{i}{sfx} = index.add %kb_off{sfx}, %kd{i}{sfx} : offset
+      %kc{i}{sfx} = buffer.view %arena[%ko{i}{sfx}] : buffer -> view<{KVH}x32x4xf16>
+      %pfk{i}{sfx} = vector.load %kc{i}{sfx}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
+      %vo{i}{sfx} = index.add %ko{i}{sfx}, %plane_stride : offset
+      %vc{i}{sfx} = buffer.view %arena[%vo{i}{sfx}] : buffer -> view<{KVH}x32x4xf16>
+      %pfv{i}{sfx} = vector.load %vc{i}{sfx}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>""")
+        return "\n".join(t)
+    if PF:
+        for i in range(U):
+            body.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
+      %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
+      %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
+      %ok{i} = scalar.andi %okl{i}, %okh{i} : i1
+      %k{i} = vector.extf %pfk{i} : vector<4xf16> to vector<4xf32>
+      %v{i} = vector.extf %pfv{i} : vector<4xf16> to vector<4xf32>""")
+    elif pa:   # absolute U-aligned key blocks lie in one 16-position KV page: one page lookup per block
         body.append(f"""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
-    for i in range(U):
+    for i in range(0 if PF else U):
         body.append((f"""      %key{i}_raw = index.add %j, %c{i}u : index
       %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
       %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
@@ -2663,12 +2684,26 @@ def attention_text(S, P):
       %pv{i} = vector.splat %p{i} : vector<4xf32>
       %aa{i} = vector.fmaf %pv{i}, %v{i}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}", f"%aa{i}"
         yields += [prev, pl, pa]
-    body.append(f"      scf.yield {', '.join(yields)} : " + ", ".join(["f32, f32, vector<4xf32>"] * ILP))
+    PF_ARGS = PF_TYPES = PF_OUTS = PF_PRO = ""
+    if PF:
+        assert ILP == 1
+        body.append("""      %jn_raw = index.add %j, %cU : index
+      %jn_ok = index.cmp ult, %jn_raw, %hi_abs : index
+      %jn = scf.select %jn_ok, %jn_raw, %j : index""")
+        body.append(pf_loads("%jn", "_n"))
+        yields += [f"%pfk{i}_n" for i in range(U)] + [f"%pfv{i}_n" for i in range(U)]
+        PF_ARGS = "".join(f", %pfk{i} = %pfk{i}_p : vector<4xf16>" for i in range(U)) + "".join(f", %pfv{i} = %pfv{i}_p : vector<4xf16>" for i in range(U))
+        PF_TYPES = ", vector<4xf16>" * (2 * U)
+        PF_OUTS = "".join(f", %pfo{i}" for i in range(2 * U))
+        PF_PRO = ("    %lo_ok = index.cmp ult, %lo_al, %hi_abs : index\n    %j0 = scf.select %lo_ok, %lo_al, %c0 : index\n"
+                  + pf_loads("%j0", "_p") + "\n")
+    body.append(f"      scf.yield {', '.join(yields)} : " + ", ".join(["f32, f32, vector<4xf32>"] * ILP) + PF_TYPES)
     ILP_ARGS = "".join(f", %m{c + 1} = %neg_big : f32, %l{c + 1} = %zero_f : f32, %acc{c + 1} = %zero4 : vector<4xf32>" for c in range(1, ILP))
     ILP_TYPES = ", f32, f32, vector<4xf32>" * (ILP - 1)
     ILP_OUTS = "".join(f", %mf{c + 1}, %lf{c + 1}, %af{c + 1}" for c in range(1, ILP))
     ILP_MERGE = ""
     FIN = ("%m_final0, %l_final0, %acc_final0" + ILP_OUTS) if ILP > 1 else "%m_final, %l_final, %acc_final"
+    FIN += PF_OUTS
     if ILP > 1:
         mm = "%m_r"
         ILP_MERGE = "    %m_r = scalar.addf %m_final0, %zero_f : f32\n" + "".join(f"    %mm{c} = scalar.maxnumf {'%m_r' if c == 1 else f'%mm{c - 1}'}, %mf{c + 1} : f32\n" for c in range(1, ILP))
@@ -2807,7 +2842,7 @@ kernel.def export("{P}_attention_split") @{P}_attention_split(%tokens: index) {{
     %hi_abs = index.add %window_low, %stop : index
     %lo_q = index.div %lo_abs, %cU : index
     %lo_al = index.mul %lo_q, %cU : index
-    """ + FIN + """ = scf.for %j = [%lo_al to %hi_abs step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""" if pa else """    """ + FIN + """ = scf.for %j = [%start to %stop step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""") + f"""
+    """ + PF_PRO + FIN + """ = scf.for %j = [%lo_al to %hi_abs step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + PF_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + PF_TYPES + """) {""" if pa else """    """ + FIN + """ = scf.for %j = [%start to %stop step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""") + f"""
 {chr(10).join(body)}
     }}
 {ILP_MERGE}

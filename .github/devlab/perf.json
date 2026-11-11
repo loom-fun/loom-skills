@@ -6,63 +6,40 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "abl32k",
+   "name": "pf",
    "variants": [
     {
      "name": "base",
      "build": {},
      "execution": {
       "draft_depth": 0
-     },
-     "double": []
+     }
     },
     {
-     "name": "split",
-     "build": {},
+     "name": "pf",
+     "build": {
+      "ATTN_PF": "1"
+     },
      "execution": {
       "draft_depth": 0
-     },
-     "double": [
-      "*:@g_attention_split\\b"
-     ]
+     }
     },
     {
-     "name": "combine",
-     "build": {},
+     "name": "pfs128",
+     "build": {
+      "ATTN_PF": "1",
+      "ATTN_SPLITS": "128"
+     },
      "execution": {
       "draft_depth": 0
-     },
-     "double": [
-      "*:@g_attention_combine\\b"
-     ]
-    },
-    {
-     "name": "mv",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:@g_mv_q"
-     ]
-    },
-    {
-     "name": "rope",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:@g_qk_rope_store"
-     ]
+     }
     }
    ],
    "steps": [
-    "perf:base:1:long",
-    "perf:split:1:long",
-    "perf:combine:1:long",
-    "perf:mv:1:long",
-    "perf:rope:1:long"
+    "ktest:pf",
+    "perf:base:2:long",
+    "perf:pf:2:long",
+    "perf:pfs128:2:long"
    ]
   }
  ]
