@@ -143,6 +143,26 @@ for f in sys.argv[2], sys.argv[4]:
 want="decode,prefill_1k/devlab-primary/ /stale/decode_2k,decode_32k,prefill_16k,prefill_2k,prefill_32k,prefill_8k,streams4 "
 [ "$got" = "$want" ] && echo "OK   flags: local and DevLab sessions both count; each one missing is flagged, the gap never" \
   || { echo "FAIL flags: local/DevLab sessions: '$got', expected '$want'"; bad=1; }
+# a card measured on DevLab only (no local value): the DevLab values are the headline columns (llama.cpp, Loom, margin,
+# roofline), the empty local and local ÷ DevLab columns are dropped, a footnote says where the numbers are from, and the
+# session's device and SDK (pull_devlab.py --identity: runner.txt, install.log) and runs per value are on the card
+py "$C/pull_devlab.py" --identity "$here/devlab_job" --device-out "$tmp/jd.json" --hrx-out "$tmp/jh.json" 2>/dev/null
+py "$C/make_info.py" perf --loom-jsonl "$tmp/dl_loom.jsonl" --llama-jsonl "$tmp/dl_llama.jsonl" --metrics decode,prefill_1k \
+  "${SRC[@]}" --source-kind devlab --run 3003 --device "$tmp/jd.json" --hrx-loom "$tmp/jh.json" -o "$tmp/perf_dl2.json" 2>/dev/null
+mkdir -p "$tmp/dlonly"; cp -r "$F/pkg/." "$tmp/dlonly/"
+py "$C/make_info.py" build "$tmp/dlonly" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint \
+  --evidence "$tmp/gates.json" "$tmp/perf_dl2.json" -o "$tmp/dlonly/info.json" 2>/dev/null
+py "$C/render_card.py" "$tmp/dlonly" 2>/dev/null
+py -c "import sys; r = open(sys.argv[1] + '/README.md').read()
+assert '| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline |\n' in r, 'header'
+assert 'local ÷ DevLab' not in r and 'DevLab Loom' not in r, 'local columns'
+row = [l for l in r.splitlines() if l.startswith('| decode tok/s')][0]
+assert row.count('|') == 7 and '—' not in row.split('|')[2] and '—' not in row.split('|')[3] and '—' not in row.split('|')[4], row
+assert 'measured on AMD DevLab Dispatch Strix Halo runners' in r and 'Runs per value: decode and prefill' in r
+assert 'device not recorded' not in r and 'hrx-loom unknown' not in r, 'footnote'
+assert 'X2-LA03-S03-D01' in r and '0.2.0.dev0' in r, 'device/sdk'" "$tmp/dlonly" \
+  && echo "OK   devlab-only: a card with only DevLab values shows them as its headline columns" \
+  || { echo "FAIL devlab-only: DevLab-only card does not render as expected"; bad=1; }
 # the spec gate's acceptance is a drafting statistic, not a timing: a DevLab nightly job's (pull_devlab.evidence, from
 # its gates_spec.log, stamped with the job's programs) replaces a stale spec_acceptance and is not flagged devlab-primary;
 # a job without a spec gate carries none
