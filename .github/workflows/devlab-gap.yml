@@ -15,8 +15,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {idx: laguna-mem-1, mode: memory, card: loom-fun/ggml-org-Laguna-XS-2.1-loom}
-          - {idx: laguna-mem-2, mode: memory, card: loom-fun/ggml-org-Laguna-XS-2.1-loom}
+          - {idx: laguna, mode: memory, card: loom-fun/ggml-org-Laguna-XS-2.1-loom}
+          - {idx: qwen36-27b, mode: memory, card: loom-fun/ggml-org-Qwen3.6-27B-loom}
+          - {idx: ornith-122b, mode: memory, card: loom-fun/bartowski-Ornith-1.5-122B-loom}
     name: probe-${{ matrix.idx }}
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 150

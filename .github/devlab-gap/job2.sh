@@ -24,10 +24,11 @@ if [ "$MODE" = sweep ]; then
   done
 elif [ "$MODE" = memory ]; then
   export LOOM_SERVE_STATE=$out/state
-  for r in 1 2; do for v in cspin_card cspin_48g cspin_spin; do
-    o=$out/perf_${v}$r; mkdir -p "$o"; m=$MEM; [ $v = cspin_48g ] && m=48000000000
+  for r in 1; do for v in cspin_card cspin_max cspin_spin; do
+    o=$out/perf_${v}$r; mkdir -p "$o"; m=$MEM
     python3 "$here/sampler.py" "$o/samples.csv" 0.02 & sp=$!
-    "$SK/loom-setup/scripts/serve.sh" s 8461 "amdgpu://?completion_spin_ns=1000000000" "$m" "$pkg/model.json" > "$o/serve.log" 2>&1 || { kill $sp; continue; }
+    ns=1000000000; [ $v = cspin_max ] && ns=4294967295
+    "$SK/loom-setup/scripts/serve.sh" s 8461 "amdgpu://?completion_spin_ns=$ns" "$m" "$pkg/model.json" > "$o/serve.log" 2>&1 || { kill $sp; continue; }
     spin=; [ $v = cspin_spin ] && { taskset -c 3 sh -c "while :; do :; done" & spin=$!; }
     "$T" "$SK/loom-benchmark/scripts/perf.py" http://127.0.0.1:8461 $v --model "$MID" --no-campaign --long --log "$o/perf.jsonl" > "$o/perf.out" 2>&1
     [ -n "$spin" ] && kill $spin
