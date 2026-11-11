@@ -1,11 +1,13 @@
 {
- "_comment": "gemma4-26b perf-gap profiling: ablations at 32k",
- "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
- "memory_bytes": 81000000000,
- "kit": "gemma4",
- "llamacpp": "b1370",
+ "_comment": "gemma4-12b perf-gap: decode_32k / prefill_32k ablations",
  "jobs": [
   {
+   "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1370",
+   "llamacpp_vulkan": "b12211",
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
    "name": "prof-nd",
    "variants": [
     {
@@ -15,30 +17,39 @@
      }
     },
     {
-     "name": "nd_attn",
+     "name": "nd_g512",
      "execution": {
       "draft_depth": 0
      },
      "double": [
-      "*:attention|rope_store"
+      "*:@(g|g16)d512_attention"
      ]
     },
     {
-     "name": "nd_moe",
+     "name": "nd_s256",
      "execution": {
       "draft_depth": 0
      },
      "double": [
-      "*:g_moe_"
+      "*:@(g|g16)d256_attention"
      ]
     },
     {
-     "name": "nd_mvsw",
+     "name": "nd_pf512",
      "execution": {
       "draft_depth": 0
      },
      "double": [
-      "*:g_mv_.*swiglu|gemm_q4_k_swiglu"
+      "*:@g_attention_flash2_d512"
+     ]
+    },
+    {
+     "name": "nd_pf256",
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:@g_attention_flash2\\["
      ]
     },
     {
@@ -47,60 +58,68 @@
       "draft_depth": 0
      },
      "double": [
-      "*:g_mv_q(?!\\w*swiglu)"
+      "*:@g_mv_"
      ]
     },
     {
-     "name": "nd_norm",
+     "name": "nd_gemm",
      "execution": {
       "draft_depth": 0
      },
      "double": [
-      "*:norm|quant_q8|row_scale"
+      "*:@gemm_"
      ]
     }
    ],
    "steps": [
     "perf:nd:1:long",
-    "perf:nd_attn:1:long",
-    "perf:nd_moe:1:long",
-    "perf:nd_mvsw:1:long",
+    "perf:nd_g512:1:long",
+    "perf:nd_s256:1:long",
+    "perf:nd_pf512:1:long",
+    "perf:nd_pf256:1:long",
     "perf:nd_mv:1:long",
-    "perf:nd_norm:1:long",
-    "c4:nd"
+    "perf:nd_gemm:1:long"
    ]
   },
   {
+   "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1370",
+   "llamacpp_vulkan": "b12211",
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
    "name": "prof-draft",
    "variants": [
     {
      "name": "card"
     },
     {
-     "name": "dr_attn",
+     "name": "dr_g512",
      "double": [
-      "*:attention|rope_store"
+      "*:@(g|g16)d512_attention"
      ]
     },
     {
-     "name": "dr_moe",
+     "name": "dr_s256",
      "double": [
-      "*:g_moe_"
+      "*:@(g|g16)d256_attention"
      ]
     },
     {
      "name": "dr_mv",
      "double": [
-      "*:g_mv_q(?!\\w*swiglu)"
+      "*:@g_mv_"
      ]
     }
    ],
    "steps": [
     "perf:card:1:long",
-    "perf:dr_attn:1:long",
-    "perf:dr_moe:1:long",
+    "perf:dr_g512:1:long",
+    "perf:dr_s256:1:long",
     "perf:dr_mv:1:long",
-    "c4:card"
+    "llama:1:long",
+    "llama@vulkan.np1:1:long",
+    "llama@vulkan.np1.nospec:1:long"
    ]
   }
  ]
