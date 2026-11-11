@@ -4,7 +4,7 @@
   {
    "name": "flint-regen",
    "spec": "ggml-org/Flint-GGUF:Flint-Q4_K_M.gguf",
-   "reference": "loom-fun/ggml-org-Flint-loom"
+   "reference": "loom-fun/ggml-org-Flint-loom", "model_id": "flint"
   }
  ]
 }
