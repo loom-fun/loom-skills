@@ -73,6 +73,7 @@ done
 python3 - "$out" "$suite" "$(for f in $files; do vname "$f"; done | tr '\n' ' ')" <<'PY'
 import glob, json, os, statistics as S, sys
 out, suite, variants = sys.argv[1], sys.argv[2], sys.argv[3].split()
+fails = {}
 res = {}  # variant -> kernel -> [per-run median ms]
 for v in variants:
     for fn in sorted(glob.glob(f"{out}/r_{v}_*.json")):
@@ -80,6 +81,8 @@ for v in variants:
         except Exception: continue
         by = {}
         for w in d.get("work_items", []):
+            if w.get("state") not in (None, "completed", "succeeded", "passed") and not w.get("profile_replay"):
+                fails.setdefault(v, {})[w.get("benchmark")] = (w.get("failure") or {}).get("message", w.get("state"))
             for r in w.get("profile_replay", {}).get("summary", {}).get("rows", []):
                 n = r.get("function_name", "")
                 if n.startswith("k_"): by.setdefault(n, []).append(r["timing"]["mean_ns"] / 1e6)
@@ -97,8 +100,10 @@ for k in kernels:
         rel = f" ({m / S.median(b) - 1:+.1%})" if b and v != base else ""
         cells.append(f"{m:.3f}{rel} n={len(x)} [{min(x):.3f}-{max(x):.3f}]")
     lines.append(f"| {k} | " + " | ".join(cells) + " |")
+for v, f in fails.items():
+    for b, m in f.items(): lines.append(f"\nFAILED `{v}` {b}: {m[:200]}")
 open(f"{out}/summary.md", "w").write("\n".join(lines) + "\n")
-json.dump({"suite": suite, "variants": variants, "ms": res}, open(f"{out}/summary.json", "w"), indent=1)
+json.dump({"suite": suite, "variants": variants, "ms": res, "failures": fails}, open(f"{out}/summary.json", "w"), indent=1)
 print("\n".join(lines))
 PY
 exit $rc
