@@ -64,32 +64,32 @@ LONG_CTX = int(os.environ.get("TUNE_LONG", "16000"))
 
 
 PLAIN_ROWS = (0, 3)   # WORK rows of ordinary prose (essay, reasoning): text that does not quote its context
-PLAIN_TOLERANCE = 0.98   # a drafter may cost at most 2 % on plain text, 4 streams and a long document
+PLAIN_TOLERANCE = 0.98   # a drafter may cost at most 2 % on any plain row (prose, long document, four streams)
 
 
 def measure(url, model, chat, context=0):
-    """(harmonic mean of the workload's decode tok/s, harmonic mean of the plain-text rows) where a plain row is
-    ordinary prose (essay, reasoning), the long-document decode, and four concurrent prose streams (mean per-stream tok/s).
-    The first number picks the fastest candidate; the second is the guard: the card's headline decode, decode_32k and
-    streams4 are prose, where an n-gram drafter finds few matches and its verify pass costs more than a plain step,
-    so a candidate that wins only on the code-edit row (which quotes its input) must not cost the plain rows."""
+    """({row: decode tok/s}, [plain rows]). Rows: the WORK requests, the decode after a long document and four prose
+    streams at once (mean per-stream rate: the card's streams4). Plain rows are ordinary prose (essay, reasoning),
+    the long document and the four streams: the card's headline decode, decode_32k and streams4. There an n-gram
+    drafter finds few matches and its multi-row verify epoch costs more than a plain step (Qwen3.5-0.8B: ngram
+    depth 3 decode 223 vs 258 without, 32k 125 vs 166, four streams 498 vs 787), so a candidate that wins only on
+    the code-edit row (which quotes its input) must not cost any plain row more than PLAIN_TOLERANCE."""
     import threading
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
     stream(url, model, WORK[0][0], 16, extra=off)                       # warm-up (weights, first compiles)
     work = list(WORK)
+    names = [f"work{i}" for i in range(len(work))]
+    plain = [names[i] for i in PLAIN_ROWS]
     n = max((d for d in DOC_SIZES if d <= min(LONG_CTX, context // 2)), default=0)
-    plain = [i for i in PLAIN_ROWS]
     if n >= 4000:
         work.append(([{"role": "user", "content": "Write a long, detailed essay discussing this documentation.\n\n" + doc(n)}], {}))
-        plain.append(len(work) - 1)
-    tps, plain_tps = [], []
-    for i, (messages, extra) in enumerate(work):
+        names.append("long")
+        plain.append("long")
+    rows = {}
+    for name, (messages, extra) in zip(names, work):
         r = stream(url, model, messages, 256, extra={**off, **extra}, timeout=900)
         if r.get("decode_tps"):
-            tps.append(r["decode_tps"])
-            if i in plain:
-                plain_tps.append(r["decode_tps"])
-    # four prose streams at once (the card's streams4): the mean of the streams decode rates
+            rows[name] = r["decode_tps"]
     topics = ("the printing press", "the steam engine", "the telegraph", "the transistor")
     res = {}
 
@@ -101,11 +101,18 @@ def measure(url, model, chat, context=0):
     [t.start() for t in ts]
     [t.join() for t in ts]
     if all(res.get(i) for i in range(4)):
-        c4 = sum(res.values()) / 4   # mean per-stream rate, comparable with the single-stream rows
-        tps.append(c4)
-        plain_tps.append(c4)
-    hm = lambda v: statistics.harmonic_mean(v) if v else 0.0  # noqa: E731
-    return hm(tps), hm(plain_tps)
+        rows["streams4"] = sum(res.values()) / 4   # mean per-stream rate, comparable with the single-stream rows
+        plain.append("streams4")
+    return rows, plain
+
+
+def hmean(rows):
+    return statistics.harmonic_mean(list(rows.values())) if rows else 0.0
+
+
+def plain_ok(rows, plain, base_rows):
+    """No plain row of the candidate is slower than PLAIN_TOLERANCE x the same row without drafting."""
+    return all(rows.get(k, 0.0) >= PLAIN_TOLERANCE * base_rows[k] for k in plain if k in base_rows)
 
 
 def concurrent_ok(url, model, chat):
@@ -187,7 +194,7 @@ def main():
     # No --memory-gib: each candidate (and the final package) sizes its own budget for the full native context
     # (a drafter adds KV per position; passing the old budget shrank DFlash packages' context to fit).
     common = ["--tokenizer", os.path.join(work, "tok", "tokenizer.json"), "--model-id", model_id]
-    base = base_plain = None
+    base, base_rows = None, {}
     for kind, depths in kinds:
         pkg = os.path.join(work, f"pkg_tune_{kind}")
         out = sh(*build, pkg, *common, "--draft", kind).stdout
@@ -213,17 +220,18 @@ def main():
             t0 = time.time()
             try:
                 serve("tune", port, mem, path, env)
-                tps, plain = measure(f"http://127.0.0.1:{port}", model_id, chat,
-                                     card["presets"]["chat"]["execution"].get("context_capacity") or 0)
+                rows, plain = measure(f"http://127.0.0.1:{port}", model_id, chat,
+                                      card["presets"]["chat"]["execution"].get("context_capacity") or 0)
+                tps = hmean(rows)
             except Exception as e:  # noqa: BLE001  a failing candidate is reported and skipped
                 print(f"tune: {kind} depth {depth}: {e}", file=sys.stderr)
-                tps = plain = 0.0
+                tps, rows, plain = 0.0, {}, []
             subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
-            row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2), "plain_tps": round(plain, 2), "seconds": round(time.time() - t0)}
+            row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2), "rows": {k: round(v, 2) for k, v in rows.items()}, "plain": plain, "seconds": round(time.time() - t0)}
             print("tune:", json.dumps(row), flush=True)
             table.append(row)
             if depth == 0:
-                base, base_plain = tps, plain
+                base, base_rows = tps, rows
             elif tps > best[2]:
                 best = (kind, depth, tps)
             if depth:
@@ -236,7 +244,7 @@ def main():
         if first:
             skipped[kind] = [d for d in allowed if d not in measured]
     if base is None:
-        base = base_plain = 0.0
+        base = 0.0
     # Fastest first, each checked for exact output (vs draft_depth 0 of its own package) and under concurrent load;
     # one that fails is reported and skipped.
     import spec_check
@@ -258,7 +266,7 @@ def main():
         spec_check.record(url, model_id, out)
         return spec_check.compare(refs[kind], out) == 0
     ranked = sorted([r for r in table if r["kind"] != "none" and r["decode_tps"] >= 1.03 * base
-                    and r["plain_tps"] >= PLAIN_TOLERANCE * base_plain], key=lambda r: -r["decode_tps"])
+                    and plain_ok(r["rows"], r["plain"], base_rows)], key=lambda r: -r["decode_tps"])
     # Within 5 % of the fastest (measurement noise on these short requests), the shallower depth first: every drafted
     # token is verified with decode attention over the whole context, so a deep draft costs at long context
     # (Qwen3.6-35B-A3B DFlash: depth 7 vs 3 was 109 vs 105 tok/s short, 31 vs 48 tok/s at 32k).
