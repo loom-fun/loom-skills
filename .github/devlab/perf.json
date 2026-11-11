@@ -6,35 +6,18 @@
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "fn-ar",
+   "llama_spec": "",
    "variants": [
     {
      "name": "card"
     }
    ],
    "steps": [
+    "perf:card:2",
     "perf:card:2:long",
     "c4:card",
-    "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "fn-ar",
-   "llama_spec": "",
-   "variants": [
-    {
-     "name": "card",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    }
-   ],
-   "steps": [
-    "perf:card:2:long",
-    "c4:card",
+    "llama:2",
     "llama:2:long",
     "llamac4"
    ]
