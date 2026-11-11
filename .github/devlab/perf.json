@@ -127,6 +127,28 @@
      "double": [
       "g_mv_q8_0"
      ]
+    },
+    {
+     "name": "attn",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:g_attention|g_qk_rope_store"
+     ]
+    },
+    {
+     "name": "moe",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:g_moe_"
+     ]
     }
    ],
    "steps": [
@@ -134,6 +156,8 @@
     "perf:rows:1",
     "perf:gemm:1",
     "perf:small:1",
+    "perf:attn:1",
+    "perf:moe:1",
     "perf:mvq8:1:long"
    ]
   }
