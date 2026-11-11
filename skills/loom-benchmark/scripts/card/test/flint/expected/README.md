@@ -18,33 +18,32 @@ A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `mo
 ```bash
 pip install "hrx-loom[hf]"
 loom-fetch https://huggingface.co/loom-fun/ggml-org-Flint-loom/resolve/main/model.json --materialize=copy --output=flint
-loom-serve --model=flint/model.json --device=amdgpu --memory_bytes=67000000000
+loom-serve --model=flint/model.json '--device=amdgpu://?completion_spin_ns=1000000000' --memory_bytes=67000000000
 ```
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
 ## Performance vs llama.cpp
 
-| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline | DevLab llama.cpp | DevLab Loom | local ÷ DevLab (llama.cpp, Loom) |
-|---|---|---|---|---|---|---|---|---|
-| decode tok/s, short prompt | 70.6 | 92.4 ¹ † | +31 % | 177.8 | 52 % | 67.1 | 55.5 ² | 1.05, 1.66 |
-| decode tok/s, 2k context | 54.7 | 76.3 | +39 % | 173.4 | 44 % | — | — | — |
-| decode tok/s, 32k context | 49.5 | 47.8 | -3 % | 141.3 | 34 % | — | — | — |
-| prefill tok/s, 1k document | 1038.0 | 956.9 ¹ † | -8 % | 12248.4 | 8 % | 986.1 | 574.2 ² | 1.05, 1.67 |
-| prefill tok/s, 2k document | 1079.0 | 1316.4 | +22 % | 11945.5 | 11 % | — | — | — |
-| prefill tok/s, 8k document | 1094.1 | 1424.7 | +30 % | 10484.7 | 14 % | — | — | — |
-| prefill tok/s, 16k document | 929.3 | 1359.0 | +46 % | 9014.9 | 15 % | — | — | — |
-| prefill tok/s, 32k document | 667.6 | 1193.9 | +79 % | 7040.8 | 17 % | — | — | — |
-| 4 streams, aggregate decode tok/s | 124.2 | 134.2 | +8 % | 301.8 | 44 % | — | — | — |
-| speculative decoding, drafted tokens accepted | — | 68 % | — | n/a | n/a | n/a | n/a | n/a |
+| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline |
+|---|---|---|---|---|---|
+| decode tok/s, short prompt | 70.6 | 92.4 ¹ † | +31 % | 177.8 | 52 % |
+| decode tok/s, 2k context | 54.7 | 76.3 | +39 % | 173.4 | 44 % |
+| decode tok/s, 32k context | 49.5 | 47.8 | -3 % | 141.3 | 34 % |
+| prefill tok/s, 1k document | 1038.0 | 956.9 ¹ † | -8 % | 12248.4 | 8 % |
+| prefill tok/s, 2k document | 1079.0 | 1316.4 | +22 % | 11945.5 | 11 % |
+| prefill tok/s, 8k document | 1094.1 | 1424.7 | +30 % | 10484.7 | 14 % |
+| prefill tok/s, 16k document | 929.3 | 1359.0 | +46 % | 9014.9 | 15 % |
+| prefill tok/s, 32k document | 667.6 | 1193.9 | +79 % | 7040.8 | 17 % |
+| 4 streams, aggregate decode tok/s | 124.2 | 134.2 | +8 % | 301.8 | 44 % |
+| speculative decoding, drafted tokens accepted | — | 68 % ² | — | n/a | n/a |
 
 - llama.cpp: build `llamacpp-rocm/b1355`, server arguments `-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model ~/drafter.gguf --spec-draft-n-max 3 -ngld 99 -c 65536 -kvu -np 4`.
 - Loom: speculative decoding on (DFlash, depth 3).
 - Same GGUF on both engines, tokens per second. Loom: client-side timing; llama.cpp: server-side timings. Runs per value: decode and prefill 2 (mean), 4 streams 3 (median).
-- Measured 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: local run.
-- ¹ Measured 2026-11-07; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: local run.
-- ² Measured 2026-11-07; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: DevLab Dispatch run 3003.
-- DevLab: the same measurement on an AMD DevLab Dispatch Strix Halo runner; local ÷ DevLab is the local value over the DevLab value of each engine, recorded for comparison, not a verdict.
+- Measured 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: DevLab Dispatch run 3001.
+- ¹ Measured 2026-11-07; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: DevLab Dispatch run 3002.
+- ² Measured 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: DevLab Dispatch run 3003.
 - † Measured on programs other than this repository's (sha256 `aef7c52`, this repository's `38d15af`): the value describes another build of the package until a session re-measures it.
 - Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the `spec` gate's requests.
 - Roofline: the hardware ceiling for this GGUF on AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151) at 216 GB/s and 59 TFLOP/s, from loom-roofline `roofline.py` (loom-skills `0123456`); decode and 4 streams with speculative decoding: verify passes × (1 + acceptance × depth 3) tokens per pass, the drafter's cost not counted; the `spec` gate's acceptance 68 % (× 3.04 tokens per pass), as the row's session recorded none: the gate's text can accept more or less than the row's.
@@ -83,7 +82,7 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 | `needle_full` | Needle-in-a-haystack prompt at the full context is served | ✅ pass ² |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | — not applicable |
 
-- ¹ local run, LEVEL=quick, 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`).
+- ¹ DevLab Dispatch run 3003, LEVEL=quick, 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`).
 - ² [DevLab Dispatch run 1000](https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000), LEVEL=full, 2026-11-06; device not recorded; hrx-loom `0.1.0` (hrx-system `d01d1c1`, recovered).
 - Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.
 

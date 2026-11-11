@@ -17,25 +17,25 @@ A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `mo
 ```bash
 pip install "hrx-loom[hf]"
 loom-fetch https://huggingface.co/loom-fun/LiquidAI-d1-2B-loom/resolve/main/model.json --materialize=copy --output=d1-2B-GGUF
-loom-serve --model=d1-2B-GGUF/model.json --device=amdgpu
+loom-serve --model=d1-2B-GGUF/model.json '--device=amdgpu://?completion_spin_ns=1000000000'
 ```
 
 The server listens on `127.0.0.1:8080` and answers SystemOne decision requests at `/v1/systemone`.
 
 ## Performance vs llama.cpp
 
-| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline | DevLab llama.cpp | DevLab Loom | local ÷ DevLab (llama.cpp, Loom) |
-|---|---|---|---|---|---|---|---|---|
-| decode tok/s, short prompt | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| decode tok/s, 2k context | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| decode tok/s, 32k context | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| prefill tok/s, 1k document | 5926.4 | 7041.3 | +19 % | — | — | — | — | — |
-| prefill tok/s, 2k document | 5684.0 | 7138.1 | +26 % | — | — | — | — | — |
-| prefill tok/s, 8k document | 4204.3 | 5488.4 | +31 % | — | — | — | — | — |
-| prefill tok/s, 16k document | 3128.7 | 4637.4 | +48 % | — | — | — | — | — |
-| prefill tok/s, 32k document | — | — | — | — | — | — | — | — |
-| 4 streams, aggregate decode tok/s | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| speculative decoding, drafted tokens accepted | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline |
+|---|---|---|---|---|---|
+| decode tok/s, short prompt | n/a | n/a | n/a | n/a | n/a |
+| decode tok/s, 2k context | n/a | n/a | n/a | n/a | n/a |
+| decode tok/s, 32k context | n/a | n/a | n/a | n/a | n/a |
+| prefill tok/s, 1k document | 5926.4 | 7041.3 | +19 % | — | — |
+| prefill tok/s, 2k document | 5684.0 | 7138.1 | +26 % | — | — |
+| prefill tok/s, 8k document | 4204.3 | 5488.4 | +31 % | — | — |
+| prefill tok/s, 16k document | 3128.7 | 4637.4 | +48 % | — | — |
+| prefill tok/s, 32k document | — | — | — | — | — |
+| 4 streams, aggregate decode tok/s | n/a | n/a | n/a | n/a | n/a |
+| speculative decoding, drafted tokens accepted | n/a | n/a | n/a | n/a | n/a |
 
 - llama.cpp: build `llamacpp-rocm/b1357`, server arguments `-ngl 99 -np 4 -c 48000`.
 - Loom: speculative decoding off.
