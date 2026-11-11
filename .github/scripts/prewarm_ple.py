@@ -1,6 +1,7 @@
 """Read the on-demand part of per_layer_token_embd.weight (heads K..15) through the page cache. usage: prewarm_ple.py K SHARD..."""
 import struct, sys
-K = int(sys.argv[1]); def rd(f, fmt): n = struct.calcsize(fmt); return struct.unpack(fmt, f.read(n))
+K = int(sys.argv[1])
+def rd(f, fmt): n = struct.calcsize(fmt); return struct.unpack(fmt, f.read(n))
 def s(f): (n,) = rd(f, "<Q"); return f.read(n).decode()
 def val(f, t):
     if t == 8: return s(f)
