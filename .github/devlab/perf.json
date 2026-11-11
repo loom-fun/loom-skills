@@ -1,5 +1,5 @@
 {
- "_comment": "Active-wait re-measure: every card on DevLab, the card served with the active wait (card) and with the SDK's default parked wait (parked), and llama.cpp, all in one job per card.",
+ "_comment": "Active-wait re-measure: every card (51) on DevLab, the card served with the active wait (card) and with the SDK's default parked wait (parked), and llama.cpp, all in one job per card.",
  "jobs": [
   {
    "name": "bartowski-Qwen3.8-27B",
@@ -1380,6 +1380,34 @@
    "kit": null,
    "llamacpp": "b1371",
    "llama_spec": "--spec-type ngram-simple",
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "parked",
+     "active_wait": false
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "perf:parked:2",
+    "perf:parked:2:long",
+    "c4:parked",
+    "llama:2",
+    "llama:2:long",
+    "llamac4"
+   ]
+  },
+  {
+   "name": "unsloth-Qwen3.8-Flash-Next",
+   "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
+   "memory_bytes": 100000000000,
+   "kit": "qwen4exp",
+   "llamacpp": "b1371",
+   "llama_spec": "",
    "variants": [
     {
      "name": "card"
