@@ -18,17 +18,28 @@
      "execution": {
       "draft_depth": 0
      }
+    },
+    {
+     "name": "d1",
+     "execution": {
+      "draft_depth": 1
+     }
     }
    ],
    "steps": [
+    "perf:card:2",
     "perf:card:2:long",
     "c4:card",
+    "perf:nodraft:2",
     "perf:nodraft:2:long",
     "c4:nodraft",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan:2:long",
-    "llamac4@vulkan"
+    "perf:d1:2",
+    "perf:d1:2:long",
+    "c4:d1",
+    "llama@vulkan.nospec:2",
+    "llama@vulkan.nospec:2:long",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long"
    ]
   },
   {
@@ -42,37 +53,28 @@
      "execution": {
       "draft_depth": 0
      }
-    }
-   ],
-   "steps": [
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan:2:long",
-    "llamac4@vulkan"
-   ]
-  },
-  {
-   "name": "omni-c",
-   "variants": [
-    {
-     "name": "card"
     },
     {
-     "name": "nodraft",
+     "name": "d1",
      "execution": {
-      "draft_depth": 0
+      "draft_depth": 1
      }
     }
    ],
    "steps": [
+    "perf:card:2",
     "perf:card:2:long",
     "c4:card",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan:2:long",
-    "llamac4@vulkan"
+    "perf:nodraft:2",
+    "perf:nodraft:2:long",
+    "c4:nodraft",
+    "perf:d1:2",
+    "perf:d1:2:long",
+    "c4:d1",
+    "llama@vulkan.nospec:2",
+    "llama@vulkan.nospec:2:long",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long"
    ]
   }
  ]
