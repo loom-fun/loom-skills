@@ -73,6 +73,9 @@ def builtin_images():
         out["wide_aligned"] = (im2, "What text is written in this image?")   # 50x10 merged patches, no resize at all
         out["wide_q2"] = (im, "Transcribe the text in this image exactly.")
         im3 = Image.new("RGB", (1600, 260), "white"); ImageDraw.Draw(im3).text((800, 130), "the quick brown fox 1234", fill=(120, 0, 0), font=font(90), anchor="mm")
+        for i, (dx, fs) in enumerate(((1, 90), (5, 90), (0, 86), (-7, 94), (13, 80))):   # fragility: tiny changes to the same text
+            imv = Image.new("RGB", (1600, 260), "white"); ImageDraw.Draw(imv).text((800 + dx, 130), "THE QUICK BROWN FOX 1234", fill=(120, 0, 0), font=font(fs), anchor="mm")
+            out[f"wide_v{i}"] = (imv, "What text is written in this image?")
         out["wide_lower"] = (im3, "What text is written in this image?")
     return out
 
