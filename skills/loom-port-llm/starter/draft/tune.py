@@ -296,12 +296,12 @@ def main():
     # candidates rank by their worst row relative to depth 0 (the margin).
     ranked = sorted([r for r in table if r["kind"] != "none" and r["margin"] >= NO_LOSS and r["decode_tps"] >= 1.03 * base],
                     key=lambda r: -r["margin"])
-    # Within 5 % of the best margin (measurement noise on these short requests), the shallower depth first: every
-    # drafted token is verified with decode attention over the whole context, so a deep draft costs at long context
-    # (Qwen3.6-35B-A3B DFlash: depth 7 vs 3 was 109 vs 105 tok/s short, 31 vs 48 tok/s at 32k).
+    # Within NO_LOSS of the best margin (noise on these short requests; a wider band on a ratio near 1 would admit
+    # every candidate), the shallower depth first: every drafted token is verified with decode attention over the
+    # whole context (Qwen3.6-35B-A3B DFlash: depth 7 vs 3 was 109 vs 105 tok/s short, 31 vs 48 tok/s at 32k).
     if ranked:
         top = ranked[0]["margin"]
-        ranked.sort(key=lambda r: (r["margin"] < 0.95 * top, r["depth"] if r["margin"] >= 0.95 * top else 0, -r["margin"]))
+        ranked.sort(key=lambda r: (r["margin"] < NO_LOSS * top, r["depth"] if r["margin"] >= NO_LOSS * top else 0, -r["margin"]))
     choice = ("none", 0, base)
     for r in ranked:
         kind, depth = r["kind"], r["depth"]
