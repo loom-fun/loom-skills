@@ -1,27 +1,21 @@
 {
- "_comment": "Qwen3.8-Flash-Next (catalog card, qwen4exp kit, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 on the same runner: with the MTP head (depth 3 vs --spec-type draft-mtp n-max 3) and autoregressive (a package built without the drafter). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "Qwen2.5-1.5B decode attention splits at long context: card vs rebuilt variants.",
+ "card": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
+ "memory_bytes": 8000000000,
+ "kit": null,
+ "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "fn-ar",
-   "llama_spec": "",
+   "name": "attn-splits",
    "variants": [
-    {
-     "name": "card"
-    }
+    {"name": "card"},
+    {"name": "base", "build": {}},
+    {"name": "s128", "build": {"ATTN_SPLITS": "128"}},
+    {"name": "s256", "build": {"ATTN_SPLITS": "256"}},
+    {"name": "s256k16", "build": {"ATTN_SPLITS": "256", "ATTN_KPS": "16"}},
+    {"name": "noseg", "build": {"SEG_ATTN": "0"}}
    ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
+   "steps": ["perf:card:2:long", "perf:base:2:long", "perf:s128:2:long", "perf:s256:2:long", "perf:s256k16:2:long", "perf:noseg:2:long"]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
