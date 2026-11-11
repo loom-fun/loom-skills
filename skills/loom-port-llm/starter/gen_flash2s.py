@@ -154,6 +154,56 @@ if PARTIAL:   # tiles[tokens / 2] counts the partial tiles, the entries follow: 
   %pos0_32 = scalar.subi %posf_32, %off32 : i32
   %off = index.cast %off32 : i32 to index
 """
+# V^T staging into workgroup memory. Scatter: lane (key, 16 dims) stores its 16 values one f16 at a time (16 ds_write_b16
+# per lane per tile; at head_dim 512 these were ~45 % of the whole 32k prefill, DevLab 12B ablation). Pairs
+# (FLASH2S_VT=pairs, default when a lane owns 16 dims): lanes 2m and 2m+1 (keys 2m, 2m+1) swap half of their dims with four xor-1
+# shuffles each, so the even lane holds dims 0-7 and the odd lane dims 8-15 of BOTH keys, and each dim is stored as one
+# dword (two adjacent keys): 8 ds_write_b32 instead of 16 ds_write_b16. Same bits in workgroup memory.
+VT_PAIRS = SEG_W == 16 and os.environ.get("FLASH2S_VT", "pairs") == "pairs"
+VT_DEFS = ""
+VT_STORE = f"""      scf.for %j = [%c0 to %cseg_w step %c1] unroll {{
+        %vj = vector.extract %vvals[%j] : vector<{SEG_W}xf16> -> f16
+        %vt_row_value = index.add %st_dim, %j : index
+        %vt_row = index.assume %vt_row_value [range(%vt_row_value, 0, {D - 1})] : index
+        view.store %vj, %vt_view[%vt_row, %st_key] : f16, view<{D}x{VTC}xf16>
+      }}
+"""
+if VT_PAIRS:
+    VT_DEFS = f"""  %kpar = index.rem %st_key, %c2 : index
+  %k_odd = index.cmp ne, %kpar, %c0 : index
+  %kword = index.div %st_key, %c2 : index
+  %vt32_view = buffer.view %vt_tile[%origin] : buffer -> view<{D}x{VTC // 2}xi32>
+  %one_i32 = scalar.constant 1 : i32
+  %lo16_mask = scalar.constant 65535 : i32
+  %hi16_mask = scalar.constant -65536 : i32
+  %c16_i32v = scalar.constant 16 : i32
+  %c8 = index.constant 8 : index
+  %k_dimoff = scf.select %k_odd, %c8, %c0 : index
+"""
+    L2 = ["      %vi = vector.bitcast %vvals : vector<16xf16> to vector<8xi32>"]
+    for j in range(8):
+        L2.append(f"      %vw{j} = vector.extract %vi[%e{j}] : vector<8xi32> -> i32")
+    for j in range(4):
+        L2.append(f"""      %own{j} = scf.select %k_odd, %vw{j + 4}, %vw{j} : i32
+      %snd{j} = scf.select %k_odd, %vw{j}, %vw{j + 4} : i32
+      %sndf{j} = scalar.bitcast %snd{j} : i32 to f32
+      %rcvf{j}, %rcvu{j} = kernel.subgroup.shuffle<xor> %sndf{j}, %one_i32, %width : f32, i32, i32
+      %rcv{j} = scalar.bitcast %rcvf{j} : f32 to i32
+      %ka{j} = scf.select %k_odd, %rcv{j}, %own{j} : i32
+      %kb{j} = scf.select %k_odd, %own{j}, %rcv{j} : i32""")
+    for j in range(4):
+        L2.append(f"""      %lo_a{j} = scalar.andi %ka{j}, %lo16_mask : i32
+      %lo_b{j} = scalar.shli %kb{j}, %c16_i32v : i32
+      %dw{2 * j} = scalar.ori %lo_a{j}, %lo_b{j} : i32
+      %hi_a{j} = scalar.shrui %ka{j}, %c16_i32v : i32
+      %hi_b{j} = scalar.andi %kb{j}, %hi16_mask : i32
+      %dw{2 * j + 1} = scalar.ori %hi_a{j}, %hi_b{j} : i32""")
+    for i in range(8):
+        L2.append(f"""      %vr{i}_a = index.add %st_dim, %k_dimoff : index
+      %vr{i}_b = index.add %vr{i}_a, %e{i} : index
+      %vr{i} = index.assume %vr{i}_b [range(%vr{i}_b, 0, {D - 1})] : index
+      view.store %dw{i}, %vt32_view[%vr{i}, %kword] : i32, view<{D}x{VTC // 2}xi32>""")
+    VT_STORE = "\n".join(L2) + "\n"
 L = []
 A = L.append
 A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: index) {{
@@ -284,7 +334,7 @@ A(f'''  %zero8 = vector.constant 0.0 : vector<8xf32>
   %st_dim_value = index.mul %st_seg, %cseg_w : index
   %st_dim = index.assume %st_dim_value [range(%st_dim_value, 0, {D - SEG_W})] : index
   %kz = vector.constant 0.0 : vector<{SEG_W}xf16>
-  %plane_bytes_i = index.mul %pool, %c1 : index
+{VT_DEFS}  %plane_bytes_i = index.mul %pool, %c1 : index
   %pos_bytes = index.constant {POS_BYTES} : offset
   %v_plane_delta = index.scale %plane_bytes_i, %pos_bytes : index, offset -> offset''')
 if WPH == 2:
@@ -326,13 +376,7 @@ A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NFH))} = scf.for 
         scf.yield %kz, %kz : vector<{SEG_W}xf16>, vector<{SEG_W}xf16>
       }}
       vector.store %kvals, %k_view[%st_key, %st_dim] : vector<{SEG_W}xf16>, view<{KT}x{DP8}xf16>
-      scf.for %j = [%c0 to %cseg_w step %c1] unroll {{
-        %vj = vector.extract %vvals[%j] : vector<{SEG_W}xf16> -> f16
-        %vt_row_value = index.add %st_dim, %j : index
-        %vt_row = index.assume %vt_row_value [range(%vt_row_value, 0, {D - 1})] : index
-        view.store %vj, %vt_view[%vt_row, %st_key] : f16, view<{D}x{VTC}xf16>
-      }}
-    }}
+{VT_STORE}    }}
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     %tf32 = index.cast %tile_first : index to i32''')
 SV = f"view<{WAVES * KB * 16}x16xf32>"
