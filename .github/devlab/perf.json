@@ -1,38 +1,32 @@
 {
- "_comment": "HyperCLOVAX decode overhead attribution: drafting on/off and doubled kernel groups (ab step).",
+ "_comment": "HyperCLOVAX drafted-step attribution (ab step).",
  "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
  "memory_bytes": 24000000000,
  "kit": null,
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "hc-a",
+   "name": "hc-c",
    "variants": [
     {
      "name": "card"
     },
     {
-     "name": "nodraft",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "dhead",
-     "execution": {
-      "draft_depth": 0
-     },
+     "name": "dprop",
      "double": [
-      "*:g_head_mv"
+      "*:g_ng_propose|g_ng_store"
      ]
     },
     {
-     "name": "dattn",
-     "execution": {
-      "draft_depth": 0
-     },
+     "name": "dspec",
      "double": [
-      "*:g_attention_(split|combine)"
+      "*:g_spec_"
+     ]
+    },
+    {
+     "name": "dhead",
+     "double": [
+      "*:g_head_mv"
      ]
     }
    ],
@@ -41,30 +35,27 @@
    ]
   },
   {
-   "name": "hc-b",
+   "name": "hc-d",
    "variants": [
     {
-     "name": "nodraft",
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "card"
     },
     {
      "name": "dmv",
-     "execution": {
-      "draft_depth": 0
-     },
      "double": [
       "*:g_mv_"
      ]
     },
     {
-     "name": "dsmall",
-     "execution": {
-      "draft_depth": 0
-     },
+     "name": "dattn",
      "double": [
-      "*:g_(post_add_norm|qk_rope|quant_q8|row_scale|embed)"
+      "*:g_attention_(split|combine)"
+     ]
+    },
+    {
+     "name": "dnorm",
+     "double": [
+      "*:g_post_add_norm|g_quant_q8|g_row_scale|g_qk_rope"
      ]
     }
    ],
