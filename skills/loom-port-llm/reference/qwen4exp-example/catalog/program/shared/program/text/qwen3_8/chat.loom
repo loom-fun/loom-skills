@@ -1234,7 +1234,8 @@ func.def public @text_chat_begin_v1(%request: buffer, %tools: buffer) -> (buffer
   }
   %has_thinking = scalar.cmpi ne, %thinking_option, %zero64 : i64
   %has_effort = scalar.cmpi ne, %effort_option, %zero64 : i64
-  %enabled = scalar.cmpi eq, %thinking_option, %two64 : i64
+  // The Qwen3.8 template starts with thinking on: only an explicit enable_thinking=false (option 1) turns it off.
+  %enabled = scalar.cmpi ne, %thinking_option, %one64 : i64
   %effort_enabled = scalar.cmpi ugt, %effort_option, %one64 : i64
   %both = scalar.andi %has_thinking, %has_effort : i1
   %same = scalar.cmpi eq, %enabled, %effort_enabled : i1

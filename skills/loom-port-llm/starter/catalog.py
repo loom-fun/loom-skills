@@ -13,7 +13,7 @@ catalog.json (schema below; every key optional except memory and source):
    "variant": "ud-q4-k-xl", "preset": "chat",      # the target-only variant and preset to serve
    "mtp_variant": "ud-q4-k-xl-mtp", "mtp_preset": "mtp",   # with the MTP head; its depth is the preset's draft_depth
    "context": 262144,                              # execution.context_capacity (default: the GGUF's native context)
-   "loom_thinking_default": false,                 # the package's chat program starts with thinking off (the template: on)
+   "loom_thinking_default": false,                 # only for a package whose chat program starts with thinking off while the template starts on (the gates then request it)
    "prefill_capacity": 4096,                       # execution.prefill_capacity (default: the catalog preset's)
    "memory": {"resident_weights_bytes": N,         # what the package keeps resident (its own number: the PLE table
               "mtp_weights_bytes": N,              #   is read on demand, not resident)
