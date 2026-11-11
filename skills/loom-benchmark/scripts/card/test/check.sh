@@ -158,6 +158,8 @@ assert '| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline |\n
 assert 'local ÷ DevLab' not in r and 'DevLab Loom' not in r, 'local columns'
 row = [l for l in r.splitlines() if l.startswith('| decode tok/s')][0]
 assert row.count('|') == 7 and '—' not in row.split('|')[2] and '—' not in row.split('|')[3] and '—' not in row.split('|')[4], row
+rows = [l for l in r.split('## Performance')[1].split('\\n- ')[0].splitlines() if l.startswith('|')]
+assert len(rows) > 5 and all(l.count('|') == 7 for l in rows), rows
 assert 'measured on AMD DevLab Dispatch Strix Halo runners' in r and 'Runs per value: decode and prefill' in r
 assert 'device not recorded' not in r and 'hrx-loom unknown' not in r, 'footnote'
 assert 'X2-LA03-S03-D01' in r and '0.2.0.dev0' in r, 'device/sdk'" "$tmp/dlonly" \
