@@ -6,22 +6,15 @@
  "llamacpp": "b1371",
  "variants": [
   {
-   "name": "fn-mtp-ktest-probe",
-   "memory_bytes": "none",
-   "serve_args": ["--pool_backing=fixed"],
-   "steps": ["ktest", "probe"]
-  },
-  {
-   "name": "fn-mtp-full",
-   "memory_bytes": "none",
-   "serve_args": ["--pool_backing=fixed"],
-   "steps": ["gates:full"]
-  },
-  {
    "name": "fn-ar-full",
    "build": {},
-   "build_args": ["--draft", "none"],
-   "steps": ["gates:full"]
+   "build_args": [
+    "--draft",
+    "none"
+   ],
+   "steps": [
+    "gates:full"
+   ]
   }
  ]
 }
