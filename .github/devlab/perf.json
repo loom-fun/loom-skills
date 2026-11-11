@@ -6,7 +6,7 @@
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "sweep",
+   "name": "sweep2",
    "variants": [
     {
      "name": "base",
@@ -14,111 +14,111 @@
      "ref": "origin/main"
     },
     {
-     "name": "q8",
-     "build": {}
-    },
-    {
-     "name": "q8r4",
-     "build": {
-      "MOE_R": "4"
-     }
-    },
-    {
-     "name": "q8r16",
-     "build": {
-      "MOE_R": "16"
-     }
-    },
-    {
-     "name": "f32r4",
+     "name": "r4f-u1",
      "build": {
       "MOE_Q8": "0",
-      "MOE_R": "4"
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "1"
      }
     },
     {
-     "name": "f32r16",
+     "name": "r4f-u4",
      "build": {
       "MOE_Q8": "0",
-      "MOE_R": "16"
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "4"
+     }
+    },
+    {
+     "name": "r4q-u4",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "4"
+     }
+    },
+    {
+     "name": "r2f-u4",
+     "build": {
+      "MOE_Q8": "0",
+      "MOE_R": "2",
+      "MOE_ROUTE_U": "4"
+     }
+    },
+    {
+     "name": "r2q-u4",
+     "build": {
+      "MOE_R": "2",
+      "MOE_ROUTE_U": "4"
+     }
+    },
+    {
+     "name": "r8f-u4",
+     "build": {
+      "MOE_Q8": "0",
+      "MOE_ROUTE_U": "4"
      }
     }
    ],
    "steps": [
-    "ab:16"
+    "ab:24"
    ]
   },
   {
-   "name": "abl",
+   "name": "sweep3",
    "variants": [
     {
-     "name": "q8",
-     "build": {}
+     "name": "base",
+     "build": {},
+     "ref": "origin/main"
     },
     {
-     "name": "d-route",
-     "build": {},
-     "double": [
-      "*:@g_moe_route\\b"
-     ]
+     "name": "r4f-u1",
+     "build": {
+      "MOE_Q8": "0",
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "1"
+     }
     },
     {
-     "name": "d-gu",
-     "build": {},
-     "double": [
-      "*:@g_moe_gu_\\w+_r8\\b"
-     ]
+     "name": "r4f-u4",
+     "build": {
+      "MOE_Q8": "0",
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "4"
+     }
     },
     {
-     "name": "d-dn",
-     "build": {},
-     "double": [
-      "*:@g_moe_dn_\\w+_r8\\b"
-     ]
+     "name": "r4q-u4",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "4"
+     }
     },
     {
-     "name": "d-quant",
-     "build": {},
-     "double": [
-      "*:@g_quant_q8\\b"
-     ]
+     "name": "r2f-u4",
+     "build": {
+      "MOE_Q8": "0",
+      "MOE_R": "2",
+      "MOE_ROUTE_U": "4"
+     }
     },
     {
-     "name": "d-misc",
-     "build": {},
-     "double": [
-      "*:@(g_post_add_norm|g_qk_rope_store|g_moe_combine)\\b"
-     ]
+     "name": "r2q-u4",
+     "build": {
+      "MOE_R": "2",
+      "MOE_ROUTE_U": "4"
+     }
     },
     {
-     "name": "d-attn",
-     "build": {},
-     "double": [
-      "*:@g_attention_(split|combine)\\b"
-     ]
-    },
-    {
-     "name": "d-mv",
-     "build": {},
-     "double": [
-      "*:@g_mv_\\w+_q8_r1\\b"
-     ]
+     "name": "r8f-u4",
+     "build": {
+      "MOE_Q8": "0",
+      "MOE_ROUTE_U": "4"
+     }
     }
    ],
    "steps": [
-    "ab:20"
-   ]
-  },
-  {
-   "name": "kt",
-   "variants": [
-    {
-     "name": "q8",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:q8"
+    "ab:24"
    ]
   }
  ]

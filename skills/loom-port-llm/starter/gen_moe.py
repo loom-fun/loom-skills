@@ -143,6 +143,27 @@ def route_decode(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
   %prob = scalar.divf %lex_in, %lden : f32
   %score0 = scf.select %in_range, %prob, %removed : f32
 """
+    U = int(os.environ.get("MOE_ROUTE_U", "4"))   # experts per wave scored together: U independent weight loads in flight
+    assert EPW % U == 0
+    loads = "\n".join(load.replace("%wv", f"%wv{u}").replace("%e,", f"%ex{u},") for u in range(U))
+    rloop = f"""  %cU = index.constant {U} : index
+  scf.for %j = [%c0 to %cEPW step %cU] {{
+    %e_raw = index.add %e0, %j : index
+""" + "".join(f"""    %ex{u}_raw = index.add %e_raw, %c{u} : index
+    %ex{u} = index.assume %ex{u}_raw [range(%ex{u}_raw, 0, {E - 1})] : index
+""" for u in range(U)) + f"""    {", ".join(f"%part{u}" for u in range(U))} = scf.for %g = [%lane to %cHG step %c32]({", ".join(f"%acc{u} = %zero_f : f32" for u in range(U))}) -> ({", ".join("f32" for _ in range(U))}) {{
+      %bg = index.assume %g [range(%g, 0, {HG - 1})] : index
+      %xv = vector.load %x_view[%token, %bg, %c0] : view<[%tokens]x{HG}x32xf32> -> vector<32xf32>
+""" + loads + "\n" + "".join(f"""      %d{u} = vector.dotf<reassoc|contract> %wv{u}, %xv, %zero_f : vector<32xf32>, vector<32xf32>, f32
+      %nx{u} = scalar.addf %acc{u}, %d{u} : f32
+""" for u in range(U)) + f"""      scf.yield {", ".join(f"%nx{u}" for u in range(U))} : {", ".join("f32" for _ in range(U))}
+    }}
+""" + "".join(f"""    %logit{u} = kernel.subgroup.reduce<addf> %part{u} : f32
+""" for u in range(U)) + """    scf.if %first {
+""" + "".join(f"""      view.store %logit{u}, %lg_view[%ex{u}] : f32, view<{E}xf32>
+""" for u in range(U)) + """    }
+  }
+"""
     return f"""
 // Router: wave w scores experts w*{EPW}..; then thread e holds expert e and {KU} rounds of
 // workgroup reductions pick the top {KU} (ties: lowest index) of {GATE_NAME[gating]}{' + bias' if bias else ''}.
@@ -162,7 +183,7 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
-  %cHG = index.constant {HG} : index
+{"".join(f"  %c{u} = index.constant {u} : index" + chr(10) for u in range(2, U))}  %cHG = index.constant {HG} : index
   %cE = index.constant {E} : index
   %zero_f = scalar.constant 0.0 : f32
   %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
@@ -173,22 +194,7 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   %first = index.cmp eq, %lane, %c0 : index
   %cEPW = index.constant {EPW} : index
   %e0 = index.mul %wave, %cEPW : index
-  scf.for %j = [%c0 to %cEPW step %c1] {{
-    %e_raw = index.add %e0, %j : index
-    %e = index.assume %e_raw [range(%e_raw, 0, {E - 1})] : index
-    %part = scf.for %g = [%lane to %cHG step %c32](%acc = %zero_f : f32) -> (f32) {{
-      %bg = index.assume %g [range(%g, 0, {HG - 1})] : index
-      %xv = vector.load %x_view[%token, %bg, %c0] : view<[%tokens]x{HG}x32xf32> -> vector<32xf32>
-{load}
-      %d = vector.dotf<reassoc|contract> %wv, %xv, %zero_f : vector<32xf32>, vector<32xf32>, f32
-      %nx = scalar.addf %acc, %d : f32
-      scf.yield %nx : f32
-    }}
-    %logit = kernel.subgroup.reduce<addf> %part : f32
-    scf.if %first {{
-      view.store %logit, %lg_view[%e] : f32, view<{E}xf32>
-    }}
-  }}
+{rloop}
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %t0 = kernel.workitem.id<x> : index
   %tb = index.assume %t0 [range(%t0, 0, 255)] : index
