@@ -325,10 +325,6 @@ Rules:
   `devlab-experiment`) compare within that job only.
 - Warm up after every restart. `perf.py` first sends its first timed request's own shape, untimed (the 300-token
   essay with another nonce: prefill, decode, drafting and first-use kernels all run once; a trivial "Say hi."
-<<<<<<< HEAD
-  left DevLab's short-prompt decode 51-60 % below another session's while 2k decode agreed), and `c4_steady.py`
-  one short request. Every caller (qualify, finalize, devlab_perf) gets the same warm-up. When timing by hand:
-=======
   left DevLab's short-prompt decode 51-60 % below the local session's while 2k decode agreed), and `c4_steady.py`
   one short request and then untimed full N-stream passes (same shape as the timed one) until two successive passes
   agree within 10 % (at least 3, at most 6; `--warmup-min`, `--warmup-passes`, `--warmup-tol`; two equal slow passes do not end it early). Without them the median of three timed runs
@@ -337,7 +333,6 @@ Rules:
   then 65. Every warm-up pass's rate is in the JSON line (`warmup_agg_tps`) and nothing is dropped: a server that stays
   slow after the warm-up reports the slow number, and its slow warm-up passes show why. Every caller (qualify, finalize,
   devlab_perf) gets the same warm-up. When timing by hand:
->>>>>>> origin/main
   `curl -s URL/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"<id>","messages":[{"role":"user","content":"hi"}],"max_tokens":8}'`.
 - A decode rate counts only if its request generated at least half its max_tokens. `perf.py` logs each timed
   decode request's `completion_tokens` (both engines); a short one is re-requested once with another nonce, then
