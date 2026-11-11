@@ -5,6 +5,9 @@ end-to-end and client-side, from tuned Loom ports. `EFF` in `roofline.py` is the
 best (or a representative) value per class. Add one row per finished optimization
 campaign, including ones that missed their target.
 
+The rows below were measured in local sessions (historical). Card values now come from DevLab `devlab-perf` jobs with the
+active wait (`amdgpu://?completion_spin_ns=1000000000`), which match or beat them; the efficiencies stay valid.
+
 | Model (arch, quant) | Metric | Ceiling | Loom achieved | Eff | llama.cpp ROCm | Note |
 |---|---|---|---|---|---|---|
 | Nemotron-3.5-Bolt-E4B (gemma4 dense, Q4_K_M) | decode | 68.1 | 61.1 | 0.90 | 52.7 | adaptive matvec rows, fused QKV, paired-row geglu |
