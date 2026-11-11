@@ -9,8 +9,7 @@
    "name": "fn-vision-diag",
    "env": {
     "VISION_ONLY": "1",
-    "VISION_EXTRA": "1",
-    "VISION_ARGS": "--cases wide,wide_v0,wide_v1,wide_v2,wide_v3,wide_v4"
+    "VISION_EXTRA": "1"
    },
    "steps": [
     "gates:full"
