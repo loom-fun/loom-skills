@@ -10,8 +10,9 @@ import tempfile
 def from_log(log, filename):
     for line in reversed(Path(log).read_text(encoding="utf-8").splitlines()):
         candidate = line.strip()
-        if candidate.startswith("path="):
-            candidate = candidate[5:]
+        for prefix in ("path=", "path:"):   # older hf CLIs print "path=PATH", newer ones "  path: PATH"
+            if candidate.startswith(prefix):
+                candidate = candidate[len(prefix):].strip()
         if candidate.endswith(filename) and Path(candidate).is_file():
             return Path(os.path.abspath(candidate))   # not resolve(): the snapshots/REV/FILE path names the revision
     raise ValueError(f"No existing {filename} path in {log}")

@@ -113,6 +113,20 @@
    "steps": [
     "ab:6"
    ]
+  },
+  {
+   "name": "fn-mtp-b",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "c4:card",
+    "llama:2",
+    "llamac4"
+   ]
   }
  ]
 }
