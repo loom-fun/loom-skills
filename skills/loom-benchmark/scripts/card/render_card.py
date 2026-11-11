@@ -260,7 +260,10 @@ def render(d):
         fetch.append(f"--preset={facts['preset']}")
     fetch += ["--materialize=copy", f"--output={output}"]
     serve = ["loom-serve", f"--model={output}/model.json", "--device=amdgpu"]
-    if memory:
+    pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
+    if pkg_serve:
+        serve += pkg_serve   # e.g. --pool_backing=fixed, which takes no --memory_bytes
+    elif memory:
         serve.append(f"--memory_bytes={memory}")
     api = ("answers OpenAI-style `/v1/chat/completions` requests" if kind == "chat"
            else f"answers SystemOne decision requests at `{feats['api']['value']['endpoint']}`")

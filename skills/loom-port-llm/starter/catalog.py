@@ -14,6 +14,8 @@ catalog.json (schema below; every key optional except memory and source):
    "mtp_variant": "ud-q4-k-xl-mtp", "mtp_preset": "mtp",   # with the MTP head; its depth is the preset's draft_depth
    "context": 262144,                              # execution.context_capacity (default: the GGUF's native context)
    "loom_thinking_default": false,                 # only for a package whose chat program starts with thinking off while the template starts on (the gates then request it)
+   "serve": {"args": ["--pool_backing=fixed"],     # llm_config.json "serve": loom-serve flags the MTP package needs (here: elastic pool
+             "committed_bytes": N},                #   backing page-faults with draft state); --memory_bytes is then not passed, memcheck uses N
    "prefill_capacity": 4096,                       # execution.prefill_capacity (default: the catalog preset's)
    "memory": {"resident_weights_bytes": N,         # what the package keeps resident (its own number: the PLE table
               "mtp_weights_bytes": N,              #   is read on demand, not resident)
@@ -170,6 +172,8 @@ def build(a, cfg, cdir, tokenizer):
     mtp_file = next((os.path.basename(e["path"]) for _, p, e in files if p == "draft"), None)
     if mtp_file:
         bench["mtp"] = {"gguf": os.path.join(gguf_dir, mtp_file), "layers": (cfg.get("mtp") or {}).get("layers", [])}
+    if kind == "mtp" and cat.get("serve"):   # flags the drafting package must be served with (serve.sh, README, DevLab and nightly read them)
+        bench["serve"] = cat["serve"]
     if "loom_thinking_default" in cat:   # the catalog chat program's own default (see Package.default_request)
         bench["loom_thinking_default"] = cat["loom_thinking_default"]
     bench.update(model_id=model_id, draft={"kind": "mtp", "depth": depth} if kind == "mtp" else None,

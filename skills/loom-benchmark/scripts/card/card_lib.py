@@ -215,7 +215,7 @@ def package_facts(pkg_files, upstream=None):
             "name": re.sub(r"[-_]gguf$", "", ckpt["repo"].split("/")[-1], flags=re.I),
             "output": model.get("model", {}).get("id", "").split("/")[-1] or None,
             "memory_bytes": execution.get("memory_bytes"),
-            "generator": cfg.get("generator"),
+            "generator": cfg.get("generator"), "serve": cfg.get("serve"),
             "features": derive_features(model, cfg, kind, execution, srcs, spec, upstream)}
 
 
