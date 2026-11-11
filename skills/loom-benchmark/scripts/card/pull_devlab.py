@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """DevLab Dispatch nightly-gates results for one card -> a make_info.py evidence file.
 
-usage: pull_devlab.py loom-fun/CARD_REPO [--run ID] [--package DIR] [--download-dir DIR] [--hrx-loom FILE.json]
+usage: pull_devlab.py --identity JOBDIR [--device-out F] [--hrx-out F]   (a devlab-perf job's device and SDK)
+       pull_devlab.py loom-fun/CARD_REPO [--run ID] [--package DIR] [--download-dir DIR] [--hrx-loom FILE.json]
                       -o devlab.json
 
 Finds the latest nightly-gates.yml run (or --run ID) of loom-fun/loom-skills with a finished job for the card,
@@ -23,6 +24,7 @@ model.json unchanged (a regenerated package), and a job started right after a pu
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -83,15 +85,51 @@ def evidence(found, rid, hrx_loom=None):
     return ev
 
 
+def perf_identity(d):
+    """(device, hrx_loom) of a devlab-perf job's artifact directory, from what it recorded: runner.txt (the runner's
+    host name) and install.log (install_loom.sh's "hrx-loom VERSION from SOURCE, hrx-system SHA" line and the CI
+    artifact id). The runner is an AMD Strix Halo DevLab Dispatch machine; no finer hardware description is recorded.
+    Either is None when the files are missing. Pass them to make_info.py perf --device/--hrx-loom."""
+    def read(name):
+        try:
+            return open(os.path.join(d, name)).read()
+        except OSError:
+            return ""
+    runner = read("runner.txt").strip()
+    device = ({"cpu": f"AMD Strix Halo (DevLab Dispatch runner {runner})", "gpu": None, "os": "Linux"} if runner else None)
+    if device:
+        device = {k: v for k, v in device.items() if v}
+    log = read("install.log")
+    m = re.search(r"hrx-loom (\S+) from (\w+)(?:, hrx-system ([0-9a-f]+))?", log)
+    art = re.search(r"installing Loom \w+:(\d+)", log)
+    hrx = ({"hrx_loom": m.group(1), "source": m.group(2), "hrx_system_sha": m.group(3),
+            "artifact_id": int(art.group(1)) if art else None, "branch": None, "wheel_sha256": None,
+            "recovered": True, "basis": "install.log of the run"} if m else None)
+    return device, hrx
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("repo")
+    ap.add_argument("repo", nargs="?")
+    ap.add_argument("--identity", metavar="DIR", help="instead of gates: write the device and hrx-loom identity of the "
+                    "devlab-perf job artifact DIR (runner.txt, install.log) to --device-out and --hrx-out")
+    ap.add_argument("--device-out")
+    ap.add_argument("--hrx-out")
     ap.add_argument("--run", help="this nightly-gates run instead of the latest one with a finished job for the card")
     ap.add_argument("--download-dir")
     ap.add_argument("--hrx-loom", help="SDK identity JSON for jobs whose summary.json records none")
     ap.add_argument("--package", help="the card's current files: skip jobs that fetched another model.json")
-    ap.add_argument("-o", required=True)
+    ap.add_argument("-o")
     a = ap.parse_args(argv)
+    if a.identity:
+        device, hrx = perf_identity(a.identity)
+        for path, v in ((a.device_out, device), (a.hrx_out, hrx)):
+            if path and v:
+                write_json(path, v)
+        print(f"device: {device}; hrx-loom: {hrx}", file=sys.stderr)
+        return
+    if not a.repo or not a.o:
+        ap.error("repo and -o are required")
     candidates = [{"databaseId": int(a.run)}] if a.run else runs()
     dl_root = a.download_dir or tempfile.mkdtemp(prefix="devlab-")
     for r in candidates:

@@ -19,7 +19,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import (FEATURES, GATE_NAMES, GATES, HF, LOOM_URL, METHOD, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
+from card_lib import (FEATURES, GATE_NAMES, GATES, HF, LOOM_URL, METHOD, METRICS, SCHEMA_ID, SKILLS_URL, TIMED,  # noqa: E402
                       card_metrics, derived_tags, gate_applies, generator_commit, load_json,
                       load_package, metric_applies, native_context, over_context, package_facts, programs_sha256,
                       require_valid, stale_metrics, with_gate_features)
@@ -291,6 +291,11 @@ def render(d):
     # ---- performance
     bname = base["name"]
     shown = card_metrics(info)
+    # a card with no local timing (measured on DevLab only) shows the DevLab values as its headline columns and drops
+    # the empty local and local ÷ DevLab ones
+    devlab_only = not any(k in TIMED for k in shown) and any(k in TIMED for k in card_metrics(info, devlab=True))
+    if devlab_only:
+        shown = {**shown, **card_metrics(info, devlab=True)}
     rows = {k: shown[k] for k, _ in METRICS if k in shown and metric_applies(k, kind, feats, info)}
     counts = {}
     for k, (_, i) in rows.items():
@@ -300,15 +305,21 @@ def render(d):
     notes = []
     roof = (info.get("roofline") or {}).get("metrics") or {}
     here = programs_sha256(d)
-    stale = stale_metrics(info, here, kind, feats)
+    stale = stale_metrics(info, here, kind, feats, devlab=devlab_only)
     dshown, dstale = card_metrics(info, devlab=True), stale_metrics(info, here, kind, feats, devlab=True)
     # further llama.cpp backends (performance.baselines): one DevLab column each, after DevLab Loom
     extra = {b: x for b, x in (perf.get("baselines") or {}).items()}
     xnames = {b: f"{x['baseline']['name']} {b.capitalize()}" for b, x in extra.items()}
-    L += [f"## Performance vs {bname}", "",
-          f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline | DevLab {bname} | DevLab Loom "
-          + "".join(f"| DevLab {n} " for n in xnames.values()) + f"| local ÷ DevLab ({bname}, Loom) |",
-          "|---|---|---|---|---|---|---|---|---|" + "---|" * len(extra)]
+    if devlab_only:
+        L += [f"## Performance vs {bname}", "",
+              f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline "
+              + "".join(f"| DevLab {n} " for n in xnames.values()) + "|",
+              "|---|---|---|---|---|---|" + "---|" * len(extra)]
+    else:
+        L += [f"## Performance vs {bname}", "",
+              f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline | DevLab {bname} | DevLab Loom "
+              + "".join(f"| DevLab {n} " for n in xnames.values()) + f"| local ÷ DevLab ({bname}, Loom) |",
+              "|---|---|---|---|---|---|---|---|---|" + "---|" * len(extra)]
 
     def marked(key, v, i, stale_keys):
         """A value with its session's footnote mark (sessions other than the primary one) and the stale mark."""
@@ -321,13 +332,16 @@ def render(d):
         return out + (f" {STALE}" if key in stale_keys else "")
     for key, label in METRICS:
         if not metric_applies(key, kind, feats, info):
-            L.append(f"| {label} |" + " n/a |" * (8 + len(extra)))
+            L.append(f"| {label} |" + " n/a |" * ((6 if devlab_only else 8) + len(extra)))
             continue
         m, i = shown.get(key, ({"loom": None, "baseline": None}, None))
         loom = marked(key, m.get("loom"), i, stale)
         ceiling = (roof.get(key) or {}).get("ceiling")
         if key == "spec_acceptance":
-            cells = " | ".join(["n/a"] * (5 + len(extra)))
+            cells = " | ".join(["n/a"] * ((2 if devlab_only else 5) + len(extra)))
+        elif devlab_only:
+            cells = (f"{num(key, ceiling)} | {pct(m.get('loom'), ceiling)}"
+                     + "".join(f" | {num(key, x['session']['metrics'].get(key, {}).get('baseline'))}" for x in extra.values()))
         else:
             dm, di = dshown.get(key, ({}, None))
             ratios = [ratio(m.get(e), dm.get(e)) for e in ("baseline", "loom")]
@@ -362,7 +376,10 @@ def render(d):
         s = sources[sid]
         L.append(f"- {mark(i)} Measured {text(date)}; device {device_text(s['device'])}; hrx-loom {sdk_text(s['hrx_loom'])}; "
                  f"source: {src_text(s)}.")
-    if any(k in dshown for k, _ in METRICS if metric_applies(k, kind, feats, info)):
+    if devlab_only:
+        L.append("- All values were measured on AMD DevLab Dispatch Strix Halo runners (no local measurement); each "
+                 "engine pair ran on the same runner, runners differ between sessions.")
+    elif any(k in dshown for k, _ in METRICS if metric_applies(k, kind, feats, info)):
         L.append("- DevLab: the same measurement on an AMD DevLab Dispatch Strix Halo runner; local ÷ DevLab is the "
                  "local value over the DevLab value of each engine, recorded for comparison, not a verdict.")
     for b, x in extra.items():

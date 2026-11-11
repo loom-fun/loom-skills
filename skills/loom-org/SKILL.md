@@ -226,9 +226,10 @@ Hand the card over and move the local GPU on to the next item.
    `{hf:OWNER/REPO/FILE}`; variant `{"name": "card"}`, steps `perf:card:2 perf:card:2:long llama:2 llama:2:long
    c4:card llamac4`; several cards go in one experiment, one job each with its own card fields), then
    `make_info.py perf --loom-jsonl perf_card.jsonl --llama-jsonl perf_llamacpp_nN.jsonl --c4-loom c4_card.txt
-   --c4-llama c4_llamacpp_nN.txt --package DIR --source-kind devlab --run ID --url JOB_URL --device none --hrx-loom
-   none` on the job's artifact (no `--baseline-version`: the card keeps its local baseline), and rebuild the card as
-   above. Low priority: it never blocks other work.
+   --c4-llama c4_llamacpp_nN.txt --package DIR --source-kind devlab --run ID --url JOB_URL --device JOB_DEVICE.json --hrx-loom
+   JOB_HRX.json` on the job's artifact (write those two with `card/pull_devlab.py --identity JOBDIR --device-out JOB_DEVICE.json
+   --hrx-out JOB_HRX.json`: the runner and the SDK the job recorded; `none` if absent; no `--baseline-version`: the card keeps its
+   local baseline), and rebuild the card as above. A card with no local value renders its DevLab values as the headline columns. Low priority: it never blocks other work.
    **Vulkan baseline** (every card, one job each; the same workloads and `llama_spec` as the ROCm baseline): job fields
    `llamacpp_vulkan: "b12211"`, variant `{"name": "card"}`, steps `llama@vulkan:2 llama@vulkan:2:long llamac4@vulkan`
    (add the ROCm and Loom steps to the same job for a same-runner comparison); at the card's own `memory_bytes`. Ingest:
