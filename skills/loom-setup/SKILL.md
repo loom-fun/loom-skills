@@ -101,16 +101,18 @@ checks that its PID owns the port. If it reports `failed`, it prints the compile
 diagnostics and stops the server. Logs, PIDs and ports go in `~/.cache/loom-serve/NAME.{log,pid,port}`.
 Use unique NAMEs. `stop.sh` refuses to kill a PID that is not a loom-serve.
 
-Raw form: `loom-serve '--device=amdgpu://?completion_spin_ns=1000000000' --listen=127.0.0.1:PORT
+Raw form: `loom-serve '--device=amdgpu://?completion_spin_ns=4294967295' --listen=127.0.0.1:PORT
 --model=pkg/model.json --workers=8 --memory_bytes=N [--preset=NAME] [--parameter_idle_ms=60000]`.
 
 **Active wait (the default on `amdgpu`).** `serve.sh` turns `amdgpu` into
-`amdgpu://?completion_spin_ns=1000000000`: while GPU work is in flight, Loom's `amd-gpu-retire` thread spins on the
+`amdgpu://?completion_spin_ns=4294967295`: while GPU work is in flight, Loom's `amd-gpu-retire` thread spins on the
 completion signal instead of parking on the KFD interrupt (one core while busy, 0% CPU when idle). Strix Halo firmware
 that ties the data-fabric and memory clocks to CPU activity (SMU `0x0a640600`, BIOS 1.12, as on AMD DevLab) otherwise
 holds FCLK/UCLK about 20% low while Loom's CPU sleeps, and Loom measures 10-45% slower (memory-bound kernels most).
 llama.cpp is never affected: HIP keeps a core busy launching and waiting. With the active wait, energy per token
-drops. `LOOM_ACTIVE_WAIT=0 serve.sh ...` keeps the SDK's default wait (A/B only).
+drops. The value is the SDK's maximum (uint32 nanoseconds, 4.29 s): the spin window restarts at each completion,
+so a shorter one parks during multi-second long-prefill submissions. `LOOM_ACTIVE_WAIT=0 serve.sh ...` keeps the
+SDK's default wait (A/B only).
 
 ## 4. Use / inspect
 

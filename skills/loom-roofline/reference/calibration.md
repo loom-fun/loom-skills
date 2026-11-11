@@ -6,7 +6,7 @@ best (or a representative) value per class. Add one row per finished optimizatio
 campaign, including ones that missed their target.
 
 The rows below were measured in local sessions (historical). Card values now come from DevLab `devlab-perf` jobs with the
-active wait (`amdgpu://?completion_spin_ns=1000000000`), which match or beat them; the efficiencies stay valid.
+active wait (`amdgpu://?completion_spin_ns=4294967295`), which match or beat them; the efficiencies stay valid.
 
 | Model (arch, quant) | Metric | Ceiling | Loom achieved | Eff | llama.cpp ROCm | Note |
 |---|---|---|---|---|---|---|

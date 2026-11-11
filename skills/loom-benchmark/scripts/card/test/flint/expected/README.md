@@ -18,7 +18,7 @@ A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `mo
 ```bash
 pip install "hrx-loom[hf]"
 loom-fetch https://huggingface.co/loom-fun/ggml-org-Flint-loom/resolve/main/model.json --materialize=copy --output=flint
-loom-serve --model=flint/model.json '--device=amdgpu://?completion_spin_ns=1000000000' --memory_bytes=67000000000
+loom-serve --model=flint/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=67000000000
 ```
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.

@@ -257,7 +257,7 @@ def render(d):
     if facts["preset"]:
         fetch.append(f"--preset={facts['preset']}")
     fetch += ["--materialize=copy", f"--output={output}"]
-    serve = ["loom-serve", f"--model={output}/model.json", "'--device=amdgpu://?completion_spin_ns=1000000000'"]
+    serve = ["loom-serve", f"--model={output}/model.json", "'--device=amdgpu://?completion_spin_ns=4294967295'"]
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
     if pkg_serve:
         serve += pkg_serve   # e.g. --pool_backing=fixed, which takes no --memory_bytes
@@ -445,7 +445,7 @@ METHOD_TEXT = [
     "- One engine runs at a time on the same machine, with the same GGUF. Loom rates are timed by the client; "
     "llama.cpp rates come from its server-side `timings`.",
     "- Every performance value comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch Strix Halo runner: "
-    "Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=1000000000`), and llama.cpp on the same "
+    "Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), and llama.cpp on the same "
     "runner, with the published programs.",
     "- Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.",
     "- Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD "
