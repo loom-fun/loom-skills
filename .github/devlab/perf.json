@@ -1,5 +1,5 @@
 {
- "_comment": "Qwen3-0.6B streams4 diagnosis: card vs draft depth 0/1 vs llama.cpp ROCm and Vulkan on one runner.",
+ "_comment": "Qwen3-0.6B streams4 ablation: doubling kernel groups under 4 streams with and without drafting.",
  "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
  "memory_bytes": 17000000000,
  "kit": null,
@@ -7,10 +7,30 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "q06-a",
+   "name": "q06-b",
    "variants": [
     {
      "name": "card"
+    },
+    {
+     "name": "d3mv",
+     "double": "*:g_(mv|head_mv)_.*t16"
+    },
+    {
+     "name": "d3mvx",
+     "double": "*:g_mv_"
+    },
+    {
+     "name": "d3ng",
+     "double": "*:g_(ng_|spec_)"
+    },
+    {
+     "name": "d3attn",
+     "double": "*:g_attention"
+    },
+    {
+     "name": "d3small",
+     "double": "*:g_(post_add_norm|qk_rope|quant_q8|row_scale|embed|head_select|token_info)"
     },
     {
      "name": "nodraft",
@@ -19,20 +39,46 @@
      }
     },
     {
-     "name": "d1",
+     "name": "ndmv",
      "execution": {
-      "draft_depth": 1
-     }
+      "draft_depth": 0
+     },
+     "double": "*:g_mv_"
+    },
+    {
+     "name": "ndattn",
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": "*:g_attention"
+    },
+    {
+     "name": "ndsmall",
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": "*:g_(post_add_norm|qk_rope|quant_q8|row_scale|embed|head_select|token_info)"
+    },
+    {
+     "name": "ndhead",
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": "*:g_head_mv"
     }
    ],
    "steps": [
     "c4:card",
+    "c4:d3mv",
+    "c4:d3mvx",
+    "c4:d3ng",
+    "c4:d3attn",
+    "c4:d3small",
     "c4:nodraft",
-    "c4:d1",
-    "perf:card:1",
-    "perf:nodraft:1",
-    "llamac4",
-    "llamac4@vulkan"
+    "c4:ndmv",
+    "c4:ndattn",
+    "c4:ndsmall",
+    "c4:ndhead"
    ]
   }
  ]
