@@ -110,7 +110,10 @@ Builds each available kind once at the full native context (build.py sizes each 
 KV per position), serves each depth (a `model.json` setting; DFlash up to the drafter's block - 1) alone, times
 decode-heavy requests (essay, code, a tool call, a reasoning answer; thinking off) plus one decode after a 16k document
 (`TUNE_LONG`, harmonic mean) and ranks candidates that beat
-no drafting by 3 %. The fastest that also passes the spec gate's equivalence check (spec_check.py's requests at the
+no drafting by 3 %. With a multi-row preset each candidate also runs `rows` concurrent essays (`measure_c4`) and the rank
+value is the geometric mean of the single-stream rate and the aggregate (a span verifies depth + 1 tokens whatever the
+load: Muse-Glimmer depth 5 x 4 streams = 24 tokens left the 16-token matvec, 41.6 tok/s against 74.0 at depth 3 and 48.6
+without drafting); the depth whose rows x (depth + 1) fits 16 is always a candidate. The fastest that also passes the spec gate's equivalence check (spec_check.py's requests at the
 candidate depth vs draft_depth 0 of the same package: identical) and a concurrency check (consistency.py-style
 ~300-token prompts, two 0.5 s apart and four at once, twice each: agentic serving overlaps requests) wins; one that
 fails is recorded with the reason (`checked` in the table) and the next is checked. The choice and the whole table go to `cfg["drafter"]` and
