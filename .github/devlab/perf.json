@@ -6,60 +6,63 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "attn-knobs",
+   "name": "abl32k",
    "variants": [
     {
      "name": "base",
      "build": {},
      "execution": {
       "draft_depth": 0
-     }
+     },
+     "double": []
     },
     {
-     "name": "s128",
-     "build": {
-      "ATTN_SPLITS": "128"
-     },
+     "name": "split",
+     "build": {},
      "execution": {
       "draft_depth": 0
-     }
+     },
+     "double": [
+      "*:@g_attention_split\\b"
+     ]
     },
     {
-     "name": "s256",
-     "build": {
-      "ATTN_SPLITS": "256",
-      "ATTN_KPS": "16"
-     },
+     "name": "combine",
+     "build": {},
      "execution": {
       "draft_depth": 0
-     }
+     },
+     "double": [
+      "*:@g_attention_combine\\b"
+     ]
     },
     {
-     "name": "k16",
-     "build": {
-      "ATTN_KPS": "16"
-     },
+     "name": "mv",
+     "build": {},
      "execution": {
       "draft_depth": 0
-     }
+     },
+     "double": [
+      "*:@g_mv_q"
+     ]
     },
     {
-     "name": "ilp2",
-     "build": {
-      "ATTN_ILP": "2"
-     },
+     "name": "rope",
+     "build": {},
      "execution": {
       "draft_depth": 0
-     }
+     },
+     "double": [
+      "*:@g_qk_rope_store"
+     ]
     }
    ],
    "steps": [
-    "perf:base:2:long",
-    "perf:s128:2:long",
-    "perf:s256:2:long",
-    "perf:k16:2:long",
-    "perf:ilp2:2:long",
-    "llama@vulkan.np1.nospec:2:long"
+    "perf:base:1:long",
+    "perf:split:1:long",
+    "perf:combine:1:long",
+    "perf:mv:1:long",
+    "perf:rope:1:long"
    ]
   }
  ]
