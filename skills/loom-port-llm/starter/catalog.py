@@ -116,7 +116,7 @@ def build(a, cfg, cdir, tokenizer):
     resident = mem["resident_weights_bytes"] + (mem.get("mtp_weights_bytes", 0) if kind == "mtp" else 0) + (mem.get("vision_weights_bytes", 0) if vis else 0)
     kv_pos = mem["kv_bytes_per_position"] + (mem.get("mtp_kv_bytes_per_position", 0) if kind == "mtp" else 0)
     fixed = resident + int(mem.get("workspace_gib", 4) * 2**30) + 2 * rows * mem.get("recurrent_bytes_per_row", 0)
-    want_pool = a.pool or context + max(65536, context // 4)
+    want_pool = context + max(65536, context // 4)   # a catalog package has no pool_capacity setting (loom-serve rejects the field): --pool only sizes the budget in other kits
     need = fixed + want_pool * kv_pos
     cap, what, _ = memory_cap()
     over_cap = bool(mem.get("over_cap"))
@@ -143,7 +143,7 @@ def build(a, cfg, cdir, tokenizer):
         ex["prefill_capacity"] = cat["prefill_capacity"]
     elif cfg.get("prefill_capacity"):
         ex["prefill_capacity"] = cfg["prefill_capacity"]
-    if a.pool or "pool_capacity" in ex:
+    if "pool_capacity" in ex:
         ex["pool_capacity"] = pool
     ex["max_tokens"] = a.max_tokens
     # the first (only) preset names the service's sampling default too
