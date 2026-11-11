@@ -14,12 +14,9 @@
     }
    ],
    "steps": [
-    "perf:card:3:long",
-    "c4:card",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan:3:long",
-    "llamac4@vulkan"
+    "perf:card:2",
+    "llama:2",
+    "llama@vulkan:2"
    ]
   },
   {
@@ -90,7 +87,16 @@
     }
    ],
    "steps": [
-    "ab:8"
+    "perf:card:1",
+    "perf:main:1",
+    "perf:d-route:1",
+    "perf:d-gu:1",
+    "perf:d-dn:1",
+    "perf:d-mv:1",
+    "perf:d-attn:1",
+    "perf:d-gdn:1",
+    "perf:d-misc:1",
+    "perf:d-head:1"
    ]
   }
  ]
