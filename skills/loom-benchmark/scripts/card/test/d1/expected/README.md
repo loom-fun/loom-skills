@@ -40,6 +40,7 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 - llama.cpp: build `llamacpp-rocm/b1357`, server arguments `-ngl 99 -np 4 -c 48000`.
 - Loom: speculative decoding off.
 - Same GGUF on both engines, tokens per second. Loom: client-side timing; llama.cpp: server-side timings. Runs per value: decode and prefill not recorded (mean), 4 streams not recorded (median).
+- Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs): Loom, served with the active wait, and llama.cpp on the same runner; runners differ between sessions.
 - Measured 2026-10-29; device not recorded; hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered); source: [loom-factory run 40842422037](https://github.com/loom-fun/loom-skills/actions/runs/40842422037).
 - Roofline: not computed.
 - — not measured; n/a not applicable.
