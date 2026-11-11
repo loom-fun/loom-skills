@@ -5,7 +5,7 @@
 #
 #   [WORK=~/devlab-kbench] devlab_kbench.sh KBENCH.json SUITE
 #
-# KBENCH.json: {"sdk": "ci:ARTIFACT_ID" | version, "repeats": N,
+# KBENCH.json: {"sdk": (optional) "ci:ARTIFACT_ID" | version, default = install_loom.sh default, "repeats": N,
 #               "suites": [{"suite": name, "dir": "<dir under .github/devlab/kbench>", "files": ["a.loom", ...],
 #                           "config": ["k=v", ...] (--config=), "args": ["--measure=...", ...] (loom-benchmark flags),
 #                           "repeats": N (optional)}]}
@@ -35,7 +35,7 @@ LB=$root/.venv/bin/loom-benchmark
 cp -r "$src"/. "$D/run/"; cd "$D/run" || exit 1
 python3 - <<'PY' || exit 1
 import glob, os, re
-def u8_to_i8(b):  # random bytes mapped into -100..100 (as the dense suite's random weights)
+def u8_to_i8(b):  # random bytes mapped into -100..100
     return b.translate(bytes(((x % 201) - 100) & 255 for x in range(256)))
 seen = {}
 for f in glob.glob("*.loom"):

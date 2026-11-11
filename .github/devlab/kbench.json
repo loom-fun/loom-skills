@@ -1,36 +1,14 @@
 {
-  "sdk": "ci:13628412621",
-  "repeats": 5,
+  "repeats": 3,
   "suites": [
     {
-      "suite": "dense",
-      "dir": "dense",
+      "suite": "example",
+      "dir": "example",
       "files": [
         "bench.loom",
-        "bench_v2.loom",
-        "bench_v2n.loom",
-        "bench_w256.loom",
-        "bench_k128.loom"
+        "bench_v4.loom"
       ],
-      "config": [
-        "flash_next.token_count=2048"
-      ],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ]
-    },
-    {
-      "suite": "hcdown",
-      "dir": "hcdown",
-      "files": [
-        "bench.loom",
-        "bench_k256.loom"
-      ],
-      "config": [
-        "flash_next.token_count=2048"
-      ],
+      "config": [],
       "args": [
         "--measure=dispatch_complete",
         "--batch-size=8",

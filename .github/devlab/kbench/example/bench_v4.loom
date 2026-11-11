@@ -1,0 +1,38 @@
+// SwiGLU elementwise (out = silu(gate) * up) over 4194304 f32, 4 element(s) per thread.
+amdgpu.target<gfx11-generic> @ex_wave32 {subgroup_size = 32}
+
+kernel.def target(@ex_wave32) @k_swiglu() {
+  %c1 = index.constant 1 : index
+  %groups = index.constant 4096 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%gate_arg: buffer, %up_arg: buffer, %out_arg: buffer) {
+  %gate, %up, %out = buffer.assume.noalias %gate_arg, %up_arg, %out_arg : buffer, buffer, buffer
+  %c0 = index.constant 0 : index
+  %c256 = index.constant 256 : index
+  %origin = index.constant 0 : offset
+  %gv = buffer.view %gate[%origin] : buffer -> view<1048576x4xf32>
+  %uv = buffer.view %up[%origin] : buffer -> view<1048576x4xf32>
+  %ov = buffer.view %out[%origin] : buffer -> view<1048576x4xf32>
+  %group = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %flat = index.madd %group, %c256, %thread : index
+  %i = index.assume %flat [range(%flat, 0, 1048575)] : index
+  %a = vector.load %gv[%i, %c0] : view<1048576x4xf32> -> vector<4xf32>
+  %b = vector.load %uv[%i, %c0] : view<1048576x4xf32> -> vector<4xf32>
+  %p = vector.logisticf<afn> %a : vector<4xf32>
+  %s = vector.mulf %a, %p : vector<4xf32>
+  %r = vector.mulf %s, %b : vector<4xf32>
+  vector.store %r, %ov[%i, %c0] : vector<4xf32>, view<1048576x4xf32>
+  kernel.return
+}
+
+check.case public @swiglu {
+  %gate = check.generate.fill value(0.5) : tensor<4194304xf32>
+  %up = check.generate.fill value(2.0) : tensor<4194304xf32>
+  %out = check.generate.fill value(0.0) : tensor<4194304xf32>
+  kernel.launch @k_swiglu(%gate, %up, %out) : (tensor<4194304xf32>, tensor<4194304xf32>, tensor<4194304xf32>)
+  check.return
+}
+
+check.benchmark<@swiglu> @swiglu_bm

@@ -2,7 +2,7 @@ name: devlab-kbench
 # Kernel microbenchmarks (A/B of kernel variants) on AMD DevLab Dispatch Strix Halo runners, one matrix job per suite
 # of .github/devlab/kbench.json (bench sources in .github/devlab/kbench/<suite>/). Runs on a pull request labeled
 # `devlab-kbench` (every push re-runs it), or by hand (workflow_dispatch once this file is on the default branch, or
-# `gh workflow run devlab-kbench.yml --ref BRANCH -f suites=dense`). See .github/scripts/devlab_kbench.sh.
+# `gh workflow run devlab-kbench.yml --ref BRANCH -f suites=example`). See .github/scripts/devlab_kbench.sh.
 on:
   pull_request:
     types: [labeled, synchronize]
