@@ -1,5 +1,5 @@
 {
- "_comment": "Ornith-1.0-35B (qwen35moe, published card is autoregressive) perf-gap: rebuilt AR vs n-gram drafting depth sweep vs published card, same-runner llama.cpp; and d0 kernel-group doubling ablations.",
+ "_comment": "Ornith-1.0-35B: where the non-group time goes: d0 with every launch of a family doubled (all = total serialised kernel time; wall minus that is host/sync overhead).",
  "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
  "memory_bytes": 49000000000,
  "kit": null,
@@ -8,11 +8,8 @@
  "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "draft",
+   "name": "famA",
    "variants": [
-    {
-     "name": "card"
-    },
     {
      "name": "d0",
      "build": {},
@@ -22,55 +19,62 @@
      ]
     },
     {
-     "name": "ng2",
+     "name": "all",
      "build": {},
      "build_args": [
       "--draft",
-      "ngram",
-      "--draft-depth",
-      "2"
+      "none"
+     ],
+     "double": [
+      "."
      ]
     },
     {
-     "name": "ng3",
+     "name": "mvq8",
      "build": {},
      "build_args": [
       "--draft",
-      "ngram",
-      "--draft-depth",
-      "3"
+      "none"
+     ],
+     "double": [
+      "g_mv_q8_0"
      ]
     },
     {
-     "name": "ng5",
+     "name": "head",
      "build": {},
      "build_args": [
       "--draft",
-      "ngram",
-      "--draft-depth",
-      "5"
+      "none"
+     ],
+     "double": [
+      "g_head"
+     ]
+    },
+    {
+     "name": "quant",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "g_quant"
      ]
     }
    ],
    "steps": [
-    "perf:card:2:long",
-    "c4:card",
-    "perf:d0:2:long",
-    "c4:d0",
-    "perf:ng2:2:long",
-    "c4:ng2",
-    "perf:ng3:2:long",
-    "c4:ng3",
-    "perf:ng5:1:long",
-    "c4:ng5",
-    "llama@vulkan.np1.nospec:2:long",
-    "llamac4@vulkan.perslot.nospec",
-    "llama:2:long",
-    "llamac4"
+    "perf:d0:2",
+    "perf:all:1",
+    "perf:mvq8:1",
+    "perf:head:1",
+    "perf:quant:1",
+    "perf:all:1:long",
+    "llama@vulkan.np1.nospec:2"
    ]
   },
   {
-   "name": "abl",
+   "name": "famB",
    "variants": [
     {
      "name": "d0",
@@ -81,68 +85,56 @@
      ]
     },
     {
-     "name": "d0_attn",
+     "name": "rows",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
      "double": [
-      "*:g_attention|g_qk_rope_store"
+      "g_row_scale|g_post_add_norm"
      ]
     },
     {
-     "name": "d0_gdn",
+     "name": "gemm",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
      "double": [
-      "*:g_gdn_"
+      "g_gemm"
      ]
     },
     {
-     "name": "d0_moe",
+     "name": "small",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
      "double": [
-      "*:g_moe_"
+      "g_embed|g_token_info|g_split_qgate|g_gdn_conv|g_gdn_qk|g_gdn_recurrence|g_gdn_norm|g_moe_route|g_moe_bucket|g_moe_combine|g_moe_shared"
      ]
     },
     {
-     "name": "d0_mv",
+     "name": "mvq8",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
      "double": [
-      "*:g_mv_q(?!\\w*swiglu)|gemm_q"
-     ]
-    },
-    {
-     "name": "d0_norm",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "double": [
-      "*:norm|quant_q8|row_scale"
+      "g_mv_q8_0"
      ]
     }
    ],
    "steps": [
-    "perf:d0:2:long",
-    "perf:d0_attn:1:long",
-    "perf:d0_gdn:1:long",
-    "perf:d0_moe:1:long",
-    "perf:d0_mv:1:long",
-    "perf:d0_norm:1:long"
+    "perf:d0:2",
+    "perf:rows:1",
+    "perf:gemm:1",
+    "perf:small:1",
+    "perf:mvq8:1:long"
    ]
   }
  ]
