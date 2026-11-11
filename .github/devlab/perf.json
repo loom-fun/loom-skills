@@ -6,7 +6,7 @@
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "attn1",
+   "name": "hpw",
    "variants": [
     {
      "name": "b0",
@@ -16,38 +16,40 @@
      "build": {}
     },
     {
-     "name": "s128",
+     "name": "h2",
      "execution": {
       "draft_depth": 0
      },
      "build": {
-      "ATTN_SPLITS": "128"
+      "ATTN_HPW": "2"
      }
     },
     {
-     "name": "s256",
+     "name": "h4",
      "execution": {
       "draft_depth": 0
      },
      "build": {
-      "ATTN_SPLITS": "256"
+      "ATTN_HPW": "4"
      }
     },
     {
-     "name": "s512",
+     "name": "h8",
      "execution": {
       "draft_depth": 0
      },
      "build": {
-      "ATTN_SPLITS": "512"
+      "ATTN_HPW": "8"
      }
     }
    ],
    "steps": [
     "perf:b0:1:long",
-    "perf:s128:1:long",
-    "perf:s256:1:long",
-    "perf:s512:1:long"
+    "perf:h2:1:long",
+    "perf:h4:1:long",
+    "perf:h8:1:long",
+    "ktest:h4",
+    "ktest:h8"
    ]
   }
  ]
