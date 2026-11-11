@@ -127,8 +127,9 @@ nightly list work unchanged. What differs (`starter/catalog.py`, `catalog.json`'
 - **Memory**: the budget is the package's *resident* set (`memory.resident_weights_bytes`, KV, recurrent rows, workspace),
   not the GGUF size; above the 60 % default it needs `memory.over_cap` (explicit, with a note) and `memcheck.sh` headroom.
   llama.cpp keeps `per_layer_token_embd` on the CPU by itself (`llamacpp_server.sh` forces nothing onto the GPU).
-- **No generated kernel tests** (the catalog's run in its CI): the card's `kernel_tests` row says "no evidence". Drafting is the MTP
-  head or none (`tune.py` measures both). No reference lookup, vision or DFlash/n-gram drafter.
+- **Kernel tests are the package's own** `loom_test` targets, run by `skills/loom-benchmark/scripts/kernel_tests.py` (no Bazel;
+  `devlab_experiment` runs them on the GPU for catalog kits). Drafting is the MTP head or none (`tune.py` measures both); no
+  reference lookup or DFlash/n-gram drafter. Vision comes from the package's vision variants (`VISION=0` keeps text only).
 - **Rebuilding variants** (`devlab-perf` `build:`/`ref:` variants, `devlab-experiment`) cannot regenerate programs: use the `card` variant.
 - `inspect_gguf.py` prints starter-coverage warnings for qwen4exp (arch unknown, `q5_1`, head_dim); a NOTE says they do not
   apply. Use it when the first thing needed is a package, not a kernel set; a new kit (below) only when none exists.
