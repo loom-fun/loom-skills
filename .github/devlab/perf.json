@@ -6,67 +6,48 @@
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "prof2",
+   "name": "attn1",
    "variants": [
     {
-     "name": "nd",
+     "name": "b0",
      "execution": {
       "draft_depth": 0
+     },
+     "build": {}
+    },
+    {
+     "name": "s128",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {
+      "ATTN_SPLITS": "128"
      }
     },
     {
-     "name": "nd_g512",
+     "name": "s256",
      "execution": {
       "draft_depth": 0
      },
-     "double": [
-      "*:d512_attention|rope_store_d512"
-     ]
+     "build": {
+      "ATTN_SPLITS": "256"
+     }
     },
     {
-     "name": "nd_g256",
+     "name": "s512",
      "execution": {
       "draft_depth": 0
      },
-     "double": [
-      "*:d256_attention|rope_store_d256"
-     ]
-    },
-    {
-     "name": "nd_split",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:attention_split"
-     ]
-    },
-    {
-     "name": "nd_comb",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:attention_combine"
-     ]
-    },
-    {
-     "name": "nd_fl",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_attention_flash2|attention_fallback"
-     ]
+     "build": {
+      "ATTN_SPLITS": "512"
+     }
     }
    ],
    "steps": [
-    "perf:nd:1:long",
-    "perf:nd_g512:1:long",
-    "perf:nd_g256:1:long",
-    "perf:nd_split:1:long",
-    "perf:nd_comb:1:long",
-    "perf:nd_fl:1:long"
+    "perf:b0:1:long",
+    "perf:s128:1:long",
+    "perf:s256:1:long",
+    "perf:s512:1:long"
    ]
   }
  ]
