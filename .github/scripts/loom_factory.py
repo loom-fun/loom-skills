@@ -282,7 +282,7 @@ def cmd_publish(a):
     fetch_args = [f"{HF}/{a.target}/resolve/main/model.json",
                   *([f"--preset={presets[0]}"] if len(presets) > 1 else []), "--materialize=copy"]
     # No --memory_bytes: the default elastic pool has no limit, and any fixed value is a guess per machine.
-    serve_args = ["--device=amdgpu"]
+    serve_args = ["'--device=amdgpu://?completion_spin_ns=1000000000'"]  # active wait keeps the fabric clocks up (loom-setup serve.sh)
     fetch = " ".join(["loom-fetch", *fetch_args, f"--output={install}"])
     serve = " ".join(["loom-serve", f"--model={install}/model.json", *serve_args])
 
