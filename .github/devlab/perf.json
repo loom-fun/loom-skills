@@ -3,9 +3,64 @@
  "memory_bytes": 63000000000,
  "kit": null,
  "llamacpp": "b1368",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
-  {"name": "draft-ab",
-   "variants": [{"name": "card"}, {"name": "nodraft", "execution": {"draft_depth": 0}}, {"name": "d1", "execution": {"draft_depth": 1}}],
-   "steps": ["perf:card:2:long", "c4:card", "perf:nodraft:2:long", "c4:nodraft", "perf:d1:2:long", "c4:d1"]}
+  {
+   "name": "attn-knobs",
+   "variants": [
+    {
+     "name": "base",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "s128",
+     "build": {
+      "ATTN_SPLITS": "128"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "s256",
+     "build": {
+      "ATTN_SPLITS": "256",
+      "ATTN_KPS": "16"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "k16",
+     "build": {
+      "ATTN_KPS": "16"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "ilp2",
+     "build": {
+      "ATTN_ILP": "2"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "perf:base:2:long",
+    "perf:s128:2:long",
+    "perf:s256:2:long",
+    "perf:k16:2:long",
+    "perf:ilp2:2:long",
+    "llama@vulkan.np1.nospec:2:long"
+   ]
+  }
  ]
 }

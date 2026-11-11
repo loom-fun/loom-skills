@@ -2710,11 +2710,11 @@ def attention_text(S, P):
         SINK_LOAD = SINK_W = ""
         M_INIT, D_INIT = "%neg_big", "%zero_f"
     text = f"""
-// Splits for `visible` keys: about 32 keys each, at most {S}.
+// Splits for `visible` keys: about {DEC_KPS if P == "g" else 32} keys each, at most {S}.
 func.def inline @{P}_split_count(%visible: index) -> (index) {{
   %c1 = index.constant 1 : index
-  %c127 = index.constant 31 : index
-  %c128 = index.constant 32 : index
+  %c127 = index.constant {(DEC_KPS if P == "g" else 32) - 1} : index
+  %c128 = index.constant {DEC_KPS if P == "g" else 32} : index
   %cmax = index.constant {S} : index
   %padded = index.add %visible, %c127 : index
   %target = index.div %padded, %c128 : index
@@ -2933,6 +2933,9 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
 # is capped so the workgroup tiles fit 64 KB. Measured losses outside that: 8 KV heads (Qwen3-4B DFlash, -17 %
 # locally), head_dim 256 with one KV head (Gemma-3-1B, 8k/16k -40 %). SEG_ATTN=0 keeps the split kernel everywhere.
 SEG_MIN = int(os.environ.get("SEG_MIN", "8192"))
+# Decode attention: at most DEC_SPLITS splits of about DEC_KPS keys each (default 64 splits of 32 keys).
+DEC_SPLITS = int(os.environ.get("ATTN_SPLITS", "64"))
+DEC_KPS = int(os.environ.get("ATTN_KPS", "32"))
 
 
 def seg_tokens():
@@ -2946,7 +2949,7 @@ def seg_tokens():
 
 def attention_seg(split_text):
     """The span body, from the decode split kernel's text (attention_text(64, "g")): same partials."""
-    TS, S, NC, PB = seg_tokens(), 64, D // 32, POS_BYTES
+    TS, S, NC, PB = seg_tokens(), DEC_SPLITS, D // 32, POS_BYTES
     V = f"vector<{DL}xf32>"
     # values: VW dims per lane, so each key's V row spans LPK lanes and one load step covers KS keys
     VW = 4 if D == 64 else DL   # head_dim 64: two keys per load step (2 dims per lane lost on DevLab: -21 %)
@@ -3284,7 +3287,7 @@ def seg_attention(text):
 def attention():
     """Decode attention with up to 64 splits; the prefill fallback (listed,
     indexed by token over up to 1024 rows) keeps 16 splits."""
-    dec, _, _ = attention_text(64, "g")
+    dec, _, _ = attention_text(DEC_SPLITS, "g")
     pre, split_l, combine_l = attention_text(16, "g16")
     count16 = pre[pre.index("// Splits for"):pre.index('kernel.def export("g16_attention_split")')]
     return dec + "\n" + count16 + split_l + "\n" + combine_l + FALLBACK
@@ -4862,9 +4865,9 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %c_never = index.constant 1000000 : index
   %c128 = index.constant 128 : index
   %prefill_shape = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c64"} : index
-  %pacc_dec = index.constant {QH * 64 * D * 4} : offset
+  %pacc_dec = index.constant {QH * DEC_SPLITS * D * 4} : offset
   %pacc_pre = index.constant {QH * 16 * D * 4} : offset
-  %pml_dec = index.constant {QH * 64 * 2 * 4} : offset
+  %pml_dec = index.constant {QH * DEC_SPLITS * 2 * 4} : offset
   %pml_pre = index.constant {QH * 16 * 2 * 4} : offset
   %pacc_bytes = scf.select %prefill_shape, %pacc_pre, %pacc_dec : offset
   %pml_bytes = scf.select %prefill_shape, %pml_pre, %pml_dec : offset
