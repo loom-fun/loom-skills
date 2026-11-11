@@ -1,27 +1,73 @@
 {
- "_comment": "Qwen3.8-Flash-Next (catalog card, qwen4exp kit, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 on the same runner: with the MTP head (depth 3 vs --spec-type draft-mtp n-max 3) and autoregressive (a package built without the drafter). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
+ "_comment": "qwen3-30b-2507 decode ablation: each decode kernel group launched twice",
+ "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+ "memory_bytes": 57000000000,
+ "kit": null,
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "fn-ar",
-   "llama_spec": "",
+   "name": "abl",
    "variants": [
     {
      "name": "card"
+    },
+    {
+     "name": "main",
+     "build": {}
+    },
+    {
+     "name": "d-route",
+     "build": {},
+     "double": [
+      "*:@g_moe_route\\b"
+     ]
+    },
+    {
+     "name": "d-gu",
+     "build": {},
+     "double": [
+      "*:@g_moe_gu_\\w+_r8\\b"
+     ]
+    },
+    {
+     "name": "d-dn",
+     "build": {},
+     "double": [
+      "*:@g_moe_dn_\\w+_r8\\b"
+     ]
+    },
+    {
+     "name": "d-mv",
+     "build": {},
+     "double": [
+      "*:@g_mv_\\w+_q8_r1\\b"
+     ]
+    },
+    {
+     "name": "d-attn",
+     "build": {},
+     "double": [
+      "*:@g_attention_(split|combine)\\b"
+     ]
+    },
+    {
+     "name": "d-misc",
+     "build": {},
+     "double": [
+      "*:@(g_quant_q8|g_post_add_norm|g_qk_rope_store|g_moe_combine)\\b"
+     ]
+    },
+    {
+     "name": "d-head",
+     "build": {},
+     "double": [
+      "*:@g_head_mv_q8\\b"
+     ]
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
+    "ab:8"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
