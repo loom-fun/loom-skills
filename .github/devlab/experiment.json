@@ -9,33 +9,8 @@
  },
  "variants": [
   {
-   "name": "fn-local-cfg",
-   "memory_bytes": 94489280512,
-   "execution": {
-    "context_capacity": 16384
-   },
+   "name": "fn-compare",
    "steps": [
-    "probe",
-    "gates:quick"
-   ]
-  },
-  {
-   "name": "fn-ctx16k-96",
-   "execution": {
-    "context_capacity": 16384
-   },
-   "steps": [
-    "probe"
-   ]
-  },
-  {
-   "name": "fn-fixed",
-   "memory_bytes": "none",
-   "serve_args": [
-    "--pool_backing=fixed"
-   ],
-   "steps": [
-    "probe",
     "gates:quick"
    ]
   }

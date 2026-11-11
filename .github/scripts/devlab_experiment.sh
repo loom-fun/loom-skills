@@ -267,6 +267,7 @@ EOF
       gguf=$("$T" -c "import json; print(json.load(open('$pkg/llm_config.json'))['gguf'])")
       FORCE=1 LEVEL=$p1 "$B/gates.sh" "$pkg" "$url" "$gguf" "$D/bench" "$LLAMA_PORT" > "$out/gates.out" 2>&1; rc=$?
       cp "$D"/bench/gates.json "$D"/bench/gates_*.log "$out/" 2>/dev/null
+      find "$D/bench" -maxdepth 1 -type f -size -4M \( -name "*.json" -o -name "*.jsonl" \) -exec cp {} "$out/" \; 2>/dev/null   # golden/compare recordings
       res[$s]=$(grep -h "^GATES" "$out/gates.out" | tail -1 | cut -c1-300); [ -n "${res[$s]}" ] || res[$s]="rc=$rc";;
     probe)
       # One short completion on a fresh server, then what the runner and the server say about it (GTT, free memory,

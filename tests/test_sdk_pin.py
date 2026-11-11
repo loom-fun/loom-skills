@@ -1,4 +1,5 @@
 import json
+import sys
 import os
 import shutil
 import subprocess
@@ -57,7 +58,7 @@ class SdkPinTests(unittest.TestCase):
         self.assertNotIn("artifact_id", c["sdk"])
 
 
-@unittest.skipUnless(shutil.which("bash"), "bash")
+@unittest.skipUnless(shutil.which("bash") and sys.platform != "win32", "bash on a POSIX host (fake venv layout, POSIX paths)")
 class EnsureSdkTests(unittest.TestCase):
     def test_pinned_root_is_separate_and_reused(self):
         with tempfile.TemporaryDirectory() as tmp:

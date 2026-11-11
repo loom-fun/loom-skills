@@ -14,7 +14,6 @@
    ],
    "steps": [
     "perf:card:2",
-    "perf:card:2:long",
     "c4:card",
     "llama:2",
     "llama:2:long",
