@@ -1,0 +1,19 @@
+{
+  "repeats": 3,
+  "suites": [
+    {
+      "suite": "example",
+      "dir": "example",
+      "files": [
+        "bench.loom",
+        "bench_v4.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ]
+    }
+  ]
+}

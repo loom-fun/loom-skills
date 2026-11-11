@@ -68,6 +68,12 @@ choices are a starting point to re-measure on this model, never a result to copy
    --xfail=@ab_negative_control=EXPECT/003`; the skeleton in ab_kernel.py shows it. Use the real shapes, including edge counts
    (t=1, t=4, t=63/64, a partial last tile, mixed-sequence tiles, the full context).
    Run it with `loom-test` (see the cookbook in `loom-port-llm/reference/`).
+   **No local GPU free?** A/B kernel timings on DevLab with the `devlab-kbench` workflow: put the
+   self-contained bench files (kernel plus a `check.case` and `check.benchmark`, kernels named `k_*`) in
+   `.github/devlab/kbench/<suite>/`, list them in `.github/devlab/kbench.json` (first file is the baseline), push a
+   branch and add the PR label `devlab-kbench` (`gh api -X POST repos/OWNER/REPO/issues/N/labels -f 'labels[]=devlab-kbench'`).
+   Each suite runs its variants interleaved on one runner and publishes a median-ms table with % vs base as a step
+   summary and artifact. Timing only: keep correctness checks in `loom-test`. See `.github/devlab/kbench/example/`.
 5. **End-to-end gates.** `LEVEL=dev gates.sh PKG URL GGUF BENCH_DIR` (`loom-benchmark`):
    - `consistency.py`: concurrent outputs must equal sequential outputs, and a prompt repeated
      alone must repeat exactly. This catches mixed-tile, padding and race bugs that single

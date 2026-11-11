@@ -1,0 +1,85 @@
+name: devlab-kbench
+# Kernel microbenchmarks (A/B of kernel variants) on AMD DevLab Dispatch Strix Halo runners, one matrix job per suite
+# of .github/devlab/kbench.json (bench sources in .github/devlab/kbench/<suite>/). Runs on a pull request labeled
+# `devlab-kbench` (every push re-runs it), or by hand (workflow_dispatch once this file is on the default branch, or
+# `gh workflow run devlab-kbench.yml --ref BRANCH -f suites=example`). See .github/scripts/devlab_kbench.sh.
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: "Comma list of suites (empty = all)"
+        required: false
+        default: ""
+      kbench:
+        description: "Suite list file"
+        required: false
+        default: .github/devlab/kbench.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devlab-kbench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suites:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'devlab-kbench') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'devlab-kbench'))
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+      file: ${{ steps.pick.outputs.file }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - id: pick
+        env:
+          KB: ${{ inputs.kbench || '.github/devlab/kbench.json' }}
+          WANT: ${{ inputs.suites }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          k = json.load(open(os.environ["KB"]))
+          want = [s.strip() for s in os.environ.get("WANT", "").split(",") if s.strip()]
+          names = [s["suite"] for s in k["suites"] if not want or s["suite"] in want]
+          print("matrix=" + json.dumps({"suite": names}))
+          print("file=" + os.environ["KB"])
+          PY
+
+  run:
+    needs: suites
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.suites.outputs.matrix) }}
+    name: ${{ matrix.suite }}
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: work dir
+        run: mkdir -p "$GITHUB_WORKSPACE/../devlab-kbench" && echo "WORK=$(cd "$GITHUB_WORKSPACE/../devlab-kbench" && pwd)" >> "$GITHUB_ENV"
+      - name: "kbench: ${{ matrix.suite }}"
+        run: bash .github/scripts/devlab_kbench.sh "${{ needs.suites.outputs.file }}" "${{ matrix.suite }}" | tee -a "$WORK/${{ matrix.suite }}.log"
+      - name: summary
+        if: always()
+        run: cat "$WORK/${{ matrix.suite }}/out/summary.md" >> "$GITHUB_STEP_SUMMARY" || true
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devlab-kbench-${{ matrix.suite }}
+          path: ${{ env.WORK }}/${{ matrix.suite }}/out
+          retention-days: 14
+      - name: clean up
+        if: always()
+        run: rm -rf "$WORK/${{ matrix.suite }}"
