@@ -1,23 +1,96 @@
 {
- "_comment": "Qwen3.5-35B-A3B perf-gap: DFlash depth sweep (card depth 7 vs autoregressive vs depth 2/4) on decode, decode_2k/32k and 4 streams.",
- "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
- "memory_bytes": 49000000000,
+ "_comment": "MiniCPM-V-4.7 perf-gap: same-runner re-measure vs ROCm/Vulkan, and decode kernel-group ablation.",
+ "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+ "memory_bytes": 36000000000,
  "kit": null,
  "llamacpp": "b1369",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "depth",
+   "name": "base",
    "variants": [
-    {"name": "card"},
-    {"name": "d0", "execution": {"draft_depth": 0}},
-    {"name": "d2", "execution": {"draft_depth": 2}},
-    {"name": "d4", "execution": {"draft_depth": 4}}
+    {
+     "name": "card"
+    }
    ],
    "steps": [
-    "perf:d0:2:long", "c4:d0",
-    "perf:card:2:long", "c4:card",
-    "perf:d2:2:long", "c4:d2",
-    "perf:d4:2:long", "c4:d4"
+    "perf:card:3:long",
+    "c4:card",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan:3:long",
+    "llamac4@vulkan"
+   ]
+  },
+  {
+   "name": "abl",
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "main",
+     "build": {}
+    },
+    {
+     "name": "d-route",
+     "build": {},
+     "double": [
+      "*:@g_moe_route\\b"
+     ]
+    },
+    {
+     "name": "d-gu",
+     "build": {},
+     "double": [
+      "*:@g_moe_gu_\\w+_r8\\b"
+     ]
+    },
+    {
+     "name": "d-dn",
+     "build": {},
+     "double": [
+      "*:@g_moe_dn_\\w+_r8\\b"
+     ]
+    },
+    {
+     "name": "d-mv",
+     "build": {},
+     "double": [
+      "*:@g_mv_\\w+_q8_r1\\b"
+     ]
+    },
+    {
+     "name": "d-attn",
+     "build": {},
+     "double": [
+      "*:@g_attention_(split|combine)\\b"
+     ]
+    },
+    {
+     "name": "d-gdn",
+     "build": {},
+     "double": [
+      "*:g_gdn_"
+     ]
+    },
+    {
+     "name": "d-misc",
+     "build": {},
+     "double": [
+      "*:@(g_quant_q8|g_post_add_norm|g_qk_rope_store|g_moe_combine)\\b"
+     ]
+    },
+    {
+     "name": "d-head",
+     "build": {},
+     "double": [
+      "*:@g_head_mv_q8\\b"
+     ]
+    }
+   ],
+   "steps": [
+    "ab:8"
    ]
   }
  ]
