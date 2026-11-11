@@ -1,7 +1,7 @@
 {
- "_comment": "Qwen3.8-Flash-Next (catalog card, qwen4exp kit) against llama.cpp b1371 on the same runner: with the MTP head (depth 3 vs --spec-type draft-mtp n-max 3) and autoregressive. Loom and llama.cpp never run together (GGUF 104 GiB).",
+ "_comment": "Qwen3.8-Flash-Next (catalog card, qwen4exp kit, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 on the same runner: with the MTP head (depth 3 vs --spec-type draft-mtp n-max 3) and autoregressive (a package built without the drafter). Loom and llama.cpp never run together (GGUF 104 GiB).",
  "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 96000000000,
+ "memory_bytes": 100000000000,
  "kit": "qwen4exp",
  "llamacpp": "b1371",
  "jobs": [
@@ -26,9 +26,11 @@
    "variants": [
     {
      "name": "card",
-     "execution": {
-      "draft_depth": 0
-     }
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     }
    ],
    "steps": [
