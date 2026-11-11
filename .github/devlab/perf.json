@@ -7,31 +7,70 @@
  "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "short",
+   "name": "abl",
    "variants": [
     {
-     "name": "card"
-    },
-    {
-     "name": "nd",
+     "name": "base",
+     "build": {
+      "ATTN_SPLITS": "128"
+     },
      "execution": {
       "draft_depth": 0
      }
     },
     {
-     "name": "d2seg",
+     "name": "dsplit",
      "build": {
-      "SEG_MAX_KVH": "4"
+      "ATTN_SPLITS": "128"
+     },
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_attention_split"
+     ]
+    },
+    {
+     "name": "dcomb",
+     "build": {
+      "ATTN_SPLITS": "128"
+     },
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_attention_combine"
+     ]
+    },
+    {
+     "name": "dmv",
+     "build": {
+      "ATTN_SPLITS": "128"
+     },
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_mv|g_head"
+     ]
+    },
+    {
+     "name": "k16",
+     "build": {
+      "ATTN_SPLITS": "256",
+      "ATTN_KPS": "16"
+     },
+     "execution": {
+      "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:nd:2",
-    "perf:d2seg:2",
-    "perf:d2seg:2:long",
-    "c4:d2seg",
-    "llama@vulkan.np1.nospec:2"
+    "perf:base:2:long",
+    "perf:dsplit:2:long",
+    "perf:dcomb:2:long",
+    "perf:dmv:2:long",
+    "perf:k16:2:long"
    ]
   }
  ]
