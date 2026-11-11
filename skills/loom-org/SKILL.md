@@ -321,7 +321,7 @@ Every performance number on a card comes from a `devlab-perf` job (Loom with the
 same runner). Loom used to measure well below a local session on DevLab (prefill -25 to -52 %): the DevLab runners'
 SMU firmware (BIOS 1.12, SMU 0x0a640600) lowers the memory-fabric clocks (FCLK/UCLK) while the CPU is idle, and Loom
 parked its CPU while the GPU worked. Loom is now served with an active wait (`serve.sh` turns `--device=amdgpu` into
-`amdgpu://?completion_spin_ns=1000000000`; `LOOM_ACTIVE_WAIT=0` opts out, for A/B only), and DevLab matches or beats
+`amdgpu://?completion_spin_ns=4294967295`; `LOOM_ACTIVE_WAIT=0` opts out, for A/B only), and DevLab matches or beats
 the old local numbers. Local runs are for development only (the optimize/port loop, kernel A/B, quick checks), and
 a Loom number measured without the active wait is not comparable with a card's.
 
