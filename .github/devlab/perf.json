@@ -1,18 +1,41 @@
 {
- "_comment": "perf-gap qwen35 dense: draft depth ablation on the published 0.8B card.",
- "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
- "memory_bytes": 9000000000,
+ "_comment": "perf-gap qwen35 dense: draft depth ablation on the published 2B card.",
+ "card": "loom-fun/unsloth-Qwen3.5-2B-loom",
+ "memory_bytes": 12000000000,
  "kit": null,
  "llamacpp": "b1369",
  "jobs": [
   {
    "name": "depth",
    "variants": [
-    {"name": "card"},
-    {"name": "d0", "execution": {"draft_depth": 0}},
-    {"name": "d1", "execution": {"draft_depth": 1}}
+    {
+     "name": "card"
+    },
+    {
+     "name": "d0",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "d1",
+     "execution": {
+      "draft_depth": 1
+     }
+    }
    ],
-   "steps": ["perf:card:1", "perf:d0:1", "perf:d1:1", "perf:card:1:long", "perf:d0:1:long", "c4:card", "c4:d0", "c4:d1"]
+   "steps": [
+    "perf:card:3",
+    "perf:d0:3",
+    "perf:d1:3",
+    "llama:3",
+    "llama@vulkan:3",
+    "llama@vulkan.np1.nospec:3",
+    "perf:card:1:long",
+    "c4:card",
+    "c4:d0"
+   ]
   }
- ]
+ ],
+ "llamacpp_vulkan": "b12211"
 }
