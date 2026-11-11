@@ -9,7 +9,7 @@ export LOOM_SERVE_STATE=$out/state VENV=${VENV:-$HOME/work/devlabgap/loom/.venv}
 extra=(-- ${LOOM_EXTRA:-})
 [ "$prof" != - ] && extra+=(--device_profiling_mode=$prof --device_profiling_output=$out/p.ireeprof --device_profiling_flush_interval_ms=50)
 python3 "$here/sampler.py" "$out/samples.csv" 0.005 & sp=$!
-"$SK/loom-setup/scripts/serve.sh" s 8461 amdgpu "$mem" "$pkg/model.json" "${extra[@]}" || { kill $sp; exit 1; }
+"$SK/loom-setup/scripts/serve.sh" s 8461 "${DEVICE:-amdgpu}" "$mem" "$pkg/model.json" "${extra[@]}" || { kill $sp; exit 1; }
 python3 "$here/pp.py" http://127.0.0.1:8461 "$mid" 256 3 > /dev/null   # warm-up
 spin=; [ -n "${SPIN:-}" ] && { taskset -c ${SPIN} sh -c "while :; do :; done" & spin=$!; }
 [ -n "${DUTY:-}" ] && { taskset -c 3 python3 "$here/dutyspin.py" ${DUTY%/*} ${DUTY#*/} & spin=$!; }

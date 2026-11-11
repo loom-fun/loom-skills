@@ -19,18 +19,21 @@ if [ "$MODE" = sweep ]; then
     bash "$here/probe.sh" "$out/base$r" "$pkg" "$MID" "$MEM" - "$WL" > "$out/base$r.log" 2>&1
     SPIN=3 bash "$here/probe.sh" "$out/spin$r" "$pkg" "$MID" "$MEM" - "$WL" > "$out/spin$r.log" 2>&1
     for d in 1/1 1/4 1/9 0.2/4.8 0.05/1; do DUTY=$d bash "$here/probe.sh" "$out/duty${d//\//_}_$r" "$pkg" "$MID" "$MEM" - "$WL" > "$out/duty$r.log" 2>&1; done
+    DEVICE='amdgpu://?completion_spin_ns=1000000000' bash "$here/probe.sh" "$out/cspin$r" "$pkg" "$MID" "$MEM" - "$WL" > "$out/cspin$r.log" 2>&1
     LOOM_EXTRA=--task_worker_spin_us=200000 bash "$here/probe.sh" "$out/twspin$r" "$pkg" "$MID" "$MEM" - "$WL" > "$out/twspin$r.log" 2>&1
   done
 else
   export LOOM_SERVE_STATE=$out/state
-  for r in 1 2; do for v in base spin; do
+  for r in 1 2; do for v in base spin cspin; do
     o=$out/perf_${v}$r; mkdir -p "$o"
     python3 "$here/sampler.py" "$o/samples.csv" 0.01 & sp=$!
-    "$SK/loom-setup/scripts/serve.sh" s 8461 amdgpu "$MEM" "$pkg/model.json" > "$o/serve.log" 2>&1 || { kill $sp; continue; }
+    dev=amdgpu; [ $v = cspin ] && dev="amdgpu://?completion_spin_ns=1000000000"
+    "$SK/loom-setup/scripts/serve.sh" s 8461 "$dev" "$MEM" "$pkg/model.json" > "$o/serve.log" 2>&1 || { kill $sp; continue; }
     spin=; [ $v = spin ] && { taskset -c 3 sh -c "while :; do :; done" & spin=$!; }
     "$T" "$SK/loom-benchmark/scripts/perf.py" http://127.0.0.1:8461 $v --model "$MID" --no-campaign --long --log "$o/perf.jsonl" > "$o/perf.out" 2>&1
     "$T" "$SK/loom-benchmark/scripts/c4_steady.py" http://127.0.0.1:8461 4 --model "$MID" --log "$o/c4.jsonl" > "$o/c4.out" 2>&1
     [ -n "$spin" ] && kill $spin
+    python3 "$here/cpuuse.py" $(cat "$LOOM_SERVE_STATE/s.pid") 1 > /dev/null 2>&1
     "$SK/loom-setup/scripts/stop.sh" s; kill $sp; wait $sp
   done; done
 fi
