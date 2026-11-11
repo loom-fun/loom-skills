@@ -1,13 +1,90 @@
 {
- "card": "loom-fun/ggml-org-Qwen3-1.7B-loom",
- "memory_bytes": 17000000000,
+ "_comment": "Ornith-1.5-35B-A3B perf-gap diagnostics: draft depth sweep, d0 kernel-group doubling ablations, same-runner Vulkan.",
+ "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
+ "memory_bytes": 49000000000,
  "kit": null,
  "llamacpp": "b1370",
  "llamacpp_vulkan": "b12211",
- "llama_spec": "",
  "jobs": [
-  {"name": "c4-ab",
-   "variants": [{"name": "card"}, {"name": "d0", "execution": {"draft_depth": 0}}, {"name": "d1", "execution": {"draft_depth": 1}}],
-   "steps": ["c4:card", "c4:d0", "c4:d1", "llamac4", "llamac4@vulkan", "c4:card", "c4:d0", "c4:d1", "llamac4@vulkan"]}
+  {
+   "name": "orn",
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "d0",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "d2",
+     "execution": {
+      "draft_depth": 2
+     }
+    },
+    {
+     "name": "d0_attn",
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_attention|g_qk_rope_store"
+     ]
+    },
+    {
+     "name": "d0_gdn",
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_gdn_"
+     ]
+    },
+    {
+     "name": "d0_moe",
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_moe_"
+     ]
+    },
+    {
+     "name": "d0_mv",
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_mv_q(?!\\w*swiglu)|gemm_q"
+     ]
+    },
+    {
+     "name": "d0_norm",
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:norm|quant_q8|row_scale"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:d0:2:long",
+    "perf:card:2:long",
+    "c4:d0",
+    "c4:card",
+    "perf:d2:1:long",
+    "c4:d2",
+    "perf:d0_attn:1:long",
+    "perf:d0_gdn:1:long",
+    "perf:d0_moe:1:long",
+    "perf:d0_mv:1:long",
+    "perf:d0_norm:1:long",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec"
+   ]
+  }
  ]
 }
