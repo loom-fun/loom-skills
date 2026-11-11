@@ -259,7 +259,7 @@ def render(d):
     if facts["preset"]:
         fetch.append(f"--preset={facts['preset']}")
     fetch += ["--materialize=copy", f"--output={output}"]
-    serve = ["loom-serve", f"--model={output}/model.json", "--device=amdgpu"]
+    serve = ["loom-serve", f"--model={output}/model.json", "'--device=amdgpu://?completion_spin_ns=1000000000'"]
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
     if pkg_serve:
         serve += pkg_serve   # e.g. --pool_backing=fixed, which takes no --memory_bytes

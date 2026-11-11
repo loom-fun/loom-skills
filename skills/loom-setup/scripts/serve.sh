@@ -3,6 +3,11 @@
 # usage: VENV=~/loom/.venv serve.sh NAME PORT DEVICE MEMORY_BYTES MODEL_JSON [MODEL_JSON...] [-- extra loom-serve flags]
 #   DEVICE: amdgpu | 'xdna://0?columns=8' (NPU; add -- --pool_backing=fixed)
 #   MEMORY_BYTES: always set it (or `none` with -- --pool_backing=fixed, which sizes its pools itself) (e.g. 16000000000); it caps weights + KV pool + workspace.
+#   amdgpu gets ?completion_spin_ns=1000000000 (active wait): Loom's retire thread spins on the GPU's completion
+#   signal while work is in flight (one core, 0% when idle) instead of parking on the KFD interrupt. On Strix Halo
+#   firmware that keys the memory-fabric clocks to CPU activity (SMU 0x0a640600, BIOS 1.12: AMD DevLab), a parked
+#   CPU leaves FCLK/UCLK ~20% low and Loom 10-45% slower; HIP (llama.cpp) always keeps a core busy. LOOM_ACTIVE_WAIT=0
+#   keeps the SDK's default wait. A device URI that already sets completion_spin_ns is passed unchanged.
 # Logs/PIDs: ~/.cache/loom-serve/NAME.{log,pid,port} (pick unique NAMEs). Stop: stop.sh NAME
 # Readiness = /v1/status registration "ready"; compile happens at startup (cached after the first run),
 # weights load lazily on the first request. Works on Linux and in Git Bash on Windows.
@@ -10,6 +15,11 @@ set -u
 name=$1; port=$2; dev=$3; mem=$4; shift 4
 models=(); extra=()
 while [ $# -gt 0 ]; do [ "$1" = "--" ] && { shift; extra=("$@"); break; }; models+=("--model=$1"); shift; done
+case "$dev" in
+  amdgpu|amdgpu://*) if [ "${LOOM_ACTIVE_WAIT:-1}" != 0 ] && [ "${dev#*completion_spin_ns=}" = "$dev" ]; then
+    case "$dev" in amdgpu) dev="amdgpu://?";; *\?*) dev="$dev&";; *) dev="$dev?";; esac
+    dev="${dev}completion_spin_ns=1000000000"; fi;;
+esac
 venv=${VENV:-$HOME/loom/.venv}
 bin=$venv/bin; [ -d "$bin" ] || bin=$venv/Scripts   # Windows venvs use Scripts/
 py=$bin/python
