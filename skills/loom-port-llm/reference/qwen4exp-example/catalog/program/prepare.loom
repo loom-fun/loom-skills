@@ -6,6 +6,12 @@
 // Text-only compositions keep their original compilation and parameter costs.
 config.def @flash_next.image_inputs = false : i1
 
+// Rows in the persistent GPU-resident PLE hot-row cache (100 bytes each:
+// 90-byte IQ4_NL row in a 96-byte slot plus a 4-byte tag). 5242880 = 500 MiB.
+// Zero disables the cache; keep it a multiple of 4. Override with the
+// "flash_next.ple_cache_entries" key in model.json "config".
+config.def @flash_next.ple_cache_entries = 5242880 : i64
+
 // flash_next_epoch_output_only
 global.rodata.def @output_only_root = bytes("666c6173685f6e6578745f65706f63685f6f75747075745f6f6e6c79")
 
@@ -99,6 +105,9 @@ global.rodata.def @terminal = bytes("3c7c696d5f656e647c3e")
 // Flash-Next requires pooled packed epochs, draft depth zero through seven, at most 32768 tokens per epoch, and context capacity divisible by 64.
 global.rodata.def @limits_error = bytes("466c6173682d4e65787420726571756972657320706f6f6c6564207061636b65642065706f6368732c206472616674206465707468207a65726f207468726f75676820736576656e2c206174206d6f737420333237363820746f6b656e73207065722065706f63682c20616e6420636f6e7465787420636170616369747920646976697369626c652062792036342e")
 
+// flash_next.ple.cache_entries
+global.rodata.def @cache_entries_key = bytes("666c6173685f6e6578742e706c652e63616368655f656e7472696573")
+
 // qwen38.packet_capacity
 global.rodata.def @packet_capacity_key = bytes("7177656e33382e7061636b65745f6361706163697479")
 
@@ -124,6 +133,9 @@ func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %context: i64,
   func.call @config_i64(%stage, %pool_key, %pool) : (i32, buffer, i64)
   %verification_key = global.load @verification_key : buffer
   func.call @config_i64(%stage, %verification_key, %verification) : (i32, buffer, i64)
+  %cache_key = global.load @cache_entries_key : buffer
+  %cache_entries = config.get @flash_next.ple_cache_entries : i64
+  func.call @config_i64(%stage, %cache_key, %cache_entries) : (i32, buffer, i64)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %sidecar_value = index.cast %sidecar_roots : i32 to index
@@ -194,9 +206,14 @@ func.def @qwen38.storage(%tokens: i64, %context: i64, %pool: i64, %rows_arg: i64
   %map_bytes = scalar.muli %map_entries, %word_bytes : i64
   %table_bytes = scalar.addi %map_origin, %map_bytes : i64
   // Residual rows plus on-demand PLE staging: 16 heads x 90 B rows and
-  // 16 x 24 B gather descriptors per token (see flash_next_ple_stage).
-  %residual_stride = scalar.constant 22304 : i64
-  %residual_bytes = scalar.muli %tokens, %residual_stride : i64
+  // 16 x 24 B gather descriptors, a 16 x 4 B source map and a 256 B dedupe claim table per token (see flash_next_ple_stage).
+  %residual_stride = scalar.constant 22624 : i64
+  %residual_rows_bytes = scalar.muli %tokens, %residual_stride : i64
+  // Persistent PLE hot-row cache follows the per-token rows (flash_next_ple_cache_probe).
+  %ple_cache_entries = config.get @flash_next.ple_cache_entries : i64
+  %ple_cache_row_bytes = scalar.constant 100 : i64
+  %ple_cache_bytes = scalar.muli %ple_cache_entries, %ple_cache_row_bytes : i64
+  %residual_bytes = scalar.addi %residual_rows_bytes, %ple_cache_bytes : i64
   %packet_count = index.cast %packet_capacity : i64 to index
   %packet_extent = func.call @qwen38_packet_bytes(%packet_count) : (index) -> (offset)
   %metadata_bytes = index.cast %packet_extent : offset to i64
@@ -208,7 +225,7 @@ func.def @qwen38.storage(%tokens: i64, %context: i64, %pool: i64, %rows_arg: i64
   scf.for %slot = [%c0 to %c11 step %c1] {
     func.call @qwen38.allocation(%allocations, %slot, %c0_i64, %c0_i64) : (buffer, index, i64, i64)
   }
-  func.call @qwen38.allocation(%allocations, %c0, %residual_bytes, %c0_i64) : (buffer, index, i64, i64)
+  func.call @qwen38.allocation(%allocations, %c0, %residual_bytes, %residual_bytes) : (buffer, index, i64, i64)
   func.call @qwen38.allocation(%allocations, %c1, %arena_bytes, %c0_i64) : (buffer, index, i64, i64)
   func.call @qwen38.allocation(%allocations, %c2, %metadata_bytes, %c0_i64) : (buffer, index, i64, i64)
   func.call @qwen38.allocation(%allocations, %c3, %table_bytes, %c0_i64) : (buffer, index, i64, i64)
@@ -358,6 +375,9 @@ func.def @declare_ple_stage(%tokens: i64, %spans: i64, %context: i64, %pool: i64
   func.call @config_i64(%stage, %pool_key, %pool) : (i32, buffer, i64)
   %verification_key = global.load @verification_key : buffer
   func.call @config_i64(%stage, %verification_key, %verification) : (i32, buffer, i64)
+  %cache_key = global.load @cache_entries_key : buffer
+  %cache_entries = config.get @flash_next.ple_cache_entries : i64
+  func.call @config_i64(%stage, %cache_key, %cache_entries) : (i32, buffer, i64)
   func.return %stage : i32
 }
 

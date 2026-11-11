@@ -11,6 +11,10 @@ command.decl @flash_next_ple_hash(%history_origin: offset) launch(%span: buffer,
 
 kernel.decl @flash_next_ple_descriptors() launch(%span_arg: buffer, %ids_arg: buffer, %arena_arg: buffer)
 
+kernel.decl @flash_next_ple_clear() launch(%arena_arg: buffer)
+
+kernel.decl @flash_next_ple_claim() launch(%span_arg: buffer, %ids_arg: buffer, %arena_arg: buffer)
+
 command.def public @flash_next_ple_stage() launch(%residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer) {
   %neural_enabled = scalar.constant true : i1
   %tokens = config.get @flash_next.token_count : index
@@ -23,6 +27,9 @@ command.def public @flash_next_ple_stage() launch(%residual: buffer, %epoch: buf
   %ids = buffer.alloca<global> align(64) %id_bytes : buffer
   %token_history = index.constant 115458048 : offset
   command.launch @flash_next_ple_hash[%token_history](%epoch, %mapping, %rows, %input_tokens, %state, %ids) : [offset](buffer, buffer, buffer, buffer, buffer, buffer)
+  // The dedupe claim table (32 * tokens i64 entries after the source map) starts empty each epoch.
+  kernel.launch @flash_next_ple_clear(%residual) : (buffer)
+  kernel.launch @flash_next_ple_claim(%epoch, %ids, %residual) : (buffer, buffer, buffer)
   kernel.launch @flash_next_ple_descriptors(%epoch, %ids, %residual) : (buffer, buffer, buffer)
   command.return
 }

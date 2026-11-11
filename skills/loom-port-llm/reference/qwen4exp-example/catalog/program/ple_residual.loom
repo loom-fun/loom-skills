@@ -6,6 +6,10 @@ config.decl @flash_next.token_count : %value: index where [range(%value, 1, 3276
 
 command.decl @flash_next_ple_embed() launch(%span: buffer, %staging: buffer, %output: buffer)
 
+kernel.decl @flash_next_ple_cache_claim() launch(%arena_arg: buffer)
+
+kernel.decl @flash_next_ple_cache_insert() launch(%arena_arg: buffer)
+
 template.decl @flash_next.project_dense_q8(%neural_enabled: i1, %inputs: index, %outputs: index, %blocks: index, %span: buffer, %input: buffer, %weight: view<[%outputs]x[%blocks]x34xi8>, %output: buffer)
 
 command.decl @flash_next_ple_consume(%layer: index, %history_origin: offset) launch(%parameters: buffer, %span: buffer, %origins: buffer, %key: buffer, %value: buffer, %residual: buffer, %history: buffer, %output: buffer, %capture: buffer)
@@ -29,6 +33,9 @@ command.def public @flash_next_ple_residual(%layer: index, %token_history_origin
 
   %embedding = buffer.alloca<global> align(256) %hidden_bytes : buffer
   command.launch @flash_next_ple_embed(%span, %staging, %embedding) : (buffer, buffer, buffer)
+  // The staged rows are consumed exactly once per epoch (here); publish the freshly gathered ones to the persistent cache.
+  kernel.launch @flash_next_ple_cache_claim(%staging) : (buffer)
+  kernel.launch @flash_next_ple_cache_insert(%staging) : (buffer)
   %key = buffer.alloca<global> align(256) %residual_bytes : buffer
   %key_weight_block_size = index.constant 32 : index
   %key_weight_blocks = index.div %hidden, %key_weight_block_size : index

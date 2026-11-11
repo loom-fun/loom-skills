@@ -14,6 +14,10 @@ catalog.json (schema below; every key optional except memory and source):
    "mtp_variant": "ud-q4-k-xl-mtp", "mtp_preset": "mtp",   # with the MTP head; its depth is the preset's draft_depth
    "context": 262144,                              # execution.context_capacity (default: the GGUF's native context)
    "loom_thinking_default": false,                 # only for a package whose chat program starts with thinking off while the template starts on (the gates then request it)
+   "vision": {"variant": "...-vision", "preset": "vision", "mtp_variant": "...-vision-mtp", "mtp_preset": "vision-mtp",
+              "block": {"family": "qwen3vl_merger", "img_begin": "<|vision_start|>", "img_end": "<|vision_end|>", "mrope": true}},
+                                                   # image input: these variants/presets are served (VISION=0: the text ones); the variant lists
+                                                   #   the mmproj as parameters.vision; memory.vision_weights_bytes is its resident share
    "serve": {"args": ["--pool_backing=fixed"],     # llm_config.json "serve": loom-serve flags the MTP package needs (here: elastic pool
              "committed_bytes": N},                #   backing page-faults with draft state); --memory_bytes is then not passed, memcheck uses N
    "prefill_capacity": 4096,                       # execution.prefill_capacity (default: the catalog preset's)
@@ -74,6 +78,10 @@ def build(a, cfg, cdir, tokenizer):
     if kind == "mtp" and not cat.get("mtp_variant"):
         sys.exit("--draft mtp: this catalog package has no MTP variant")
     variant, pname = (cat["mtp_variant"], cat.get("mtp_preset", "mtp")) if kind == "mtp" else (cat["variant"], cat.get("preset", "chat"))
+    # Image input: the catalog's vision variants/presets replace the text ones (VISION=0 keeps the text package)
+    vis = cat.get("vision") if os.environ.get("VISION", "1").lower() not in ("0", "off") else None
+    if vis:
+        variant, pname = (vis["mtp_variant"], vis["mtp_preset"]) if kind == "mtp" else (vis["variant"], vis["preset"])
     depth = 0
     if kind == "mtp":
         depth = a.draft_depth or (tuned.get("depth") if tuned.get("kind") == "mtp" else None) or src["presets"][pname]["execution"].get("draft_depth") or 3
@@ -105,7 +113,7 @@ def build(a, cfg, cdir, tokenizer):
     rows = a.rows
     native = cfg.get("context_length") or 32768
     context = a.context or cat.get("context") or native
-    resident = mem["resident_weights_bytes"] + (mem.get("mtp_weights_bytes", 0) if kind == "mtp" else 0)
+    resident = mem["resident_weights_bytes"] + (mem.get("mtp_weights_bytes", 0) if kind == "mtp" else 0) + (mem.get("vision_weights_bytes", 0) if vis else 0)
     kv_pos = mem["kv_bytes_per_position"] + (mem.get("mtp_kv_bytes_per_position", 0) if kind == "mtp" else 0)
     fixed = resident + int(mem.get("workspace_gib", 4) * 2**30) + 2 * rows * mem.get("recurrent_bytes_per_row", 0)
     want_pool = a.pool or context + max(65536, context // 4)
@@ -162,8 +170,8 @@ def build(a, cfg, cdir, tokenizer):
     shutil.copyfile(tokenizer, os.path.join(pkg, "tokenizer.json"))   # as upstream has it: its origin's hash is in the lock
     json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
     if kind == "mtp":   # the draft-off twin of the same package (port.sh's spec check, tune.py)
-        tpreset = cat.get("preset", "chat")
-        twin = card_for(cat["variant"], tpreset, 0)
+        tpreset = vis["preset"] if vis else cat.get("preset", "chat")
+        twin = card_for(vis["variant"] if vis else cat["variant"], tpreset, 0)
         twin.setdefault("model", {})["id"] = model_id
         twin["presets"][tpreset]["execution"].update(context_capacity=context, rows=rows, max_tokens=a.max_tokens)
         json.dump(twin, open(os.path.join(pkg, "model_target.json"), "w"), indent=1)
@@ -172,6 +180,9 @@ def build(a, cfg, cdir, tokenizer):
     mtp_file = next((os.path.basename(e["path"]) for _, p, e in files if p == "draft"), None)
     if mtp_file:
         bench["mtp"] = {"gguf": os.path.join(gguf_dir, mtp_file), "layers": (cfg.get("mtp") or {}).get("layers", [])}
+    if vis:   # llm_config "vision": the projector file, its family and the prompt markers (starter/vision/add_vision.py's block)
+        vfile = next(os.path.basename(e["path"]) for _, p, e in files if p == "vision")
+        bench["vision"] = {**vis["block"], "mmproj": os.path.join(gguf_dir, vfile)}
     if kind == "mtp" and cat.get("serve"):   # flags the drafting package must be served with (serve.sh, README, DevLab and nightly read them)
         bench["serve"] = cat["serve"]
     if "loom_thinking_default" in cat:   # the catalog chat program's own default (see Package.default_request)
