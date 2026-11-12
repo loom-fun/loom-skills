@@ -19,32 +19,34 @@
      "double": []
     },
     {
-     "name": "all",
+     "name": "none",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "double": [
+     "drop": [
       "*:."
      ]
     },
     {
-     "name": "parked",
+     "name": "headonly",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "double": [],
-     "active_wait": false
+     "drop": [
+      "*:launch @(?!g_head|g_embed|g_token_info)"
+     ]
     }
    ],
    "steps": [
     "probe:d0:1",
-    "probe:d0:4",
-    "probe:all:1",
-    "probe:all:4"
+    "probe:none:1",
+    "probe:none:4",
+    "probe:headonly:1",
+    "probe:headonly:4"
    ]
   }
  ]
