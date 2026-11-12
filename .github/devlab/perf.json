@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
  "_comment": "Ornith-1.0-35B: where the non-group time goes: d0 with every launch of a family doubled (all = total serialised kernel time; wall minus that is host/sync overhead).",
  "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
  "memory_bytes": 49000000000,
@@ -9,6 +10,16 @@
  "jobs": [
   {
    "name": "famA",
+=======
+ "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
+ "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
+ "memory_bytes": 100000000000,
+ "kit": "qwen4exp",
+ "llamacpp": "b1371",
+ "jobs": [
+  {
+   "name": "fn-mtp",
+>>>>>>> origin/main
    "variants": [
     {
      "name": "d0",
@@ -137,6 +148,20 @@
     "perf:gemm:1",
     "perf:small:1",
     "perf:mvq8:1:long"
+   ]
+  },
+  {
+   "name": "fn-mtp-b",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "c4:card",
+    "llama:2",
+    "llamac4"
    ]
   }
  ]
