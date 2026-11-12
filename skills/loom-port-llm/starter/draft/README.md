@@ -104,13 +104,28 @@ Nemotron-3.5-Bolt-E4B with the E4B assistant: acceptance equals llama.cpp's (dep
   Muse-Glimmer 6656) the decode matvec takes `mv_wide` (several 32-value groups per lane). The device plan copy marks speculative spans with flag bit 4 and the output
 credit in bits 8-15; plan word 4 holds the packed cursor (`encode_epoch`).
 
+## Occupancy gate (build_draft.py, `SPEC_OCC_MIN`, default 2; 0 = off)
+
+The host plans depth + 1 tokens for every speculative span every step, so four streams verify a padded 16-token epoch even
+at 3 % acceptance. `encode_epoch` therefore counts the speculative spans first; when ALL spans in the epoch are speculative
+and there are at least `SPEC_OCC_MIN` of them it clamps every span to its anchor, `@epoch` skips propose and runs the
+verify/advance/warm stage of the (s tokens, s spans) shape (the plain decode shape), and results publish as one token per
+span. One stream still drafts (decode and long context unchanged); multi-stream decode runs at the undrafted epoch size.
+The gate flag lives in control state (byte 1676, table at 1700): `encode_epoch` writes it and the same epoch's `@epoch` reads
+it. It needs a `(s, s)` shape for the span count (otherwise the gate stays off for that count). Because the gated c4 rate
+equals depth 0, tune.py's per-row margin keeps a drafter that wins single-stream without paying at four streams.
+
 ## Choosing the drafter and depth (`tune.py`, qualify.sh stage 0)
 
 Builds each available kind once at the full native context (build.py sizes each candidate's memory; a drafter adds
 KV per position), serves each depth (a `model.json` setting; DFlash up to the drafter's block - 1) alone, times
 decode-heavy requests (essay, code, a tool call, a reasoning answer; thinking off) plus one decode after a 16k document
-(`TUNE_LONG`, harmonic mean) and ranks candidates that beat
-no drafting by 3 %. The fastest that also passes the spec gate's equivalence check (spec_check.py's requests at the
+(`TUNE_LONG`) and, with a multi-row preset, `rows` concurrent essays (`streams4`). A candidate's margin is its worst
+row relative to depth 0; it is used only if no row is slower than 0.98 x depth 0 and its single-stream rate beats no
+drafting by 3 %, and the best margin ranks first. Low-acceptance drafting loses on exactly the prose, 32k and 4-stream
+rows (every span verifies depth + 1 tokens, padded to 16 at 4 streams): Qwen3.5-0.8B ngram depth 3 decode 223 vs 258 tok/s
+without, 32k 125 vs 166, four streams 498 vs 787, so tune picks none; a span with real acceptance (Muse-Glimmer depth 3 over
+none on 4 streams) keeps it, and the depth whose rows x (depth + 1) fits 16 is always a candidate. The best margin that also passes the spec gate's equivalence check (spec_check.py's requests at the
 candidate depth vs draft_depth 0 of the same package: identical) and a concurrency check (consistency.py-style
 ~300-token prompts, two 0.5 s apart and four at once, twice each: agentic serving overlaps requests) wins; one that
 fails is recorded with the reason (`checked` in the table) and the next is checked. The choice and the whole table go to `cfg["drafter"]` and
