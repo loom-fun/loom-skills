@@ -364,7 +364,8 @@
    "kit": null,
    "llamacpp": "b1373",
    "features": [
-    "vision"
+    "vision",
+    "draft"
    ]
   },
   {
