@@ -8,122 +8,38 @@
  "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "occ-a",
+   "name": "card-a",
    "variants": [
     {
      "name": "card"
-    },
-    {
-     "name": "nodraft",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "occ2",
-     "ref": "origin/perfgap-gemma3-1b",
-     "build": {
-      "SPEC_OCC_MIN": "2"
-     }
-    },
-    {
-     "name": "occ2d3",
-     "ref": "origin/perfgap-gemma3-1b",
-     "build": {
-      "SPEC_OCC_MIN": "2"
-     },
-     "execution": {
-      "draft_depth": 3
-     }
-    },
-    {
-     "name": "occ2d5",
-     "ref": "origin/perfgap-gemma3-1b",
-     "build": {
-      "SPEC_OCC_MIN": "2"
-     },
-     "execution": {
-      "draft_depth": 5
-     }
     }
    ],
    "steps": [
     "perf:card:2",
     "perf:card:2:long",
     "c4:card",
-    "perf:nodraft:2",
-    "perf:nodraft:2:long",
-    "c4:nodraft",
-    "perf:occ2:2",
-    "perf:occ2:2:long",
-    "c4:occ2",
-    "perf:occ2d3:2",
-    "perf:occ2d3:2:long",
-    "c4:occ2d3",
-    "perf:occ2d5:2",
-    "perf:occ2d5:2:long",
-    "c4:occ2d5",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
     "llama@vulkan:2",
     "llama@vulkan:2:long",
     "llamac4@vulkan"
    ]
   },
   {
-   "name": "occ-b",
+   "name": "card-b",
    "variants": [
     {
      "name": "card"
-    },
-    {
-     "name": "nodraft",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "occ2",
-     "ref": "origin/perfgap-gemma3-1b",
-     "build": {
-      "SPEC_OCC_MIN": "2"
-     }
-    },
-    {
-     "name": "occ2d3",
-     "ref": "origin/perfgap-gemma3-1b",
-     "build": {
-      "SPEC_OCC_MIN": "2"
-     },
-     "execution": {
-      "draft_depth": 3
-     }
-    },
-    {
-     "name": "occ2d5",
-     "ref": "origin/perfgap-gemma3-1b",
-     "build": {
-      "SPEC_OCC_MIN": "2"
-     },
-     "execution": {
-      "draft_depth": 5
-     }
     }
    ],
    "steps": [
     "perf:card:2",
     "perf:card:2:long",
     "c4:card",
-    "perf:nodraft:2",
-    "perf:nodraft:2:long",
-    "c4:nodraft",
-    "perf:occ2:2",
-    "perf:occ2:2:long",
-    "c4:occ2",
-    "perf:occ2d3:2",
-    "perf:occ2d3:2:long",
-    "c4:occ2d3",
-    "perf:occ2d5:2",
-    "perf:occ2d5:2:long",
-    "c4:occ2d5",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
     "llama@vulkan:2",
     "llama@vulkan:2:long",
     "llamac4@vulkan"
