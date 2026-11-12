@@ -65,7 +65,7 @@
    "slug": "qwen3-8b",
    "memory_bytes": 29000000000,
    "kit": null,
-   "llamacpp": "b1368",
+   "llamacpp": "b1374",
    "features": [
     "draft",
     "thinking-toggle"
@@ -312,7 +312,7 @@
    "slug": "qwen3-vl-8b-instruct",
    "memory_bytes": 59000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1374",
    "features": [
     "vision",
     "draft"
@@ -333,7 +333,7 @@
    "slug": "qwen3-30b-a3b-instruct-2507",
    "memory_bytes": 63000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": []
   },
   {
@@ -494,7 +494,7 @@
    "slug": "qwen3-coder-30b-a3b-instruct",
    "memory_bytes": 57000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": []
   },
   {
