@@ -1,40 +1,103 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "Qwen3-Coder attention: keys per split (2k) + GQA (32k); sibling kv8 check on Qwen3-4B-2507.",
+ "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+ "memory_bytes": 57000000000,
+ "kit": null,
+ "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "coder",
    "variants": [
     {
-     "name": "card"
+     "name": "ctl",
+     "build": {
+      "ATTN_GQA": "0"
+     }
+    },
+    {
+     "name": "kps48",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "48"
+     }
+    },
+    {
+     "name": "kps64",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "64"
+     }
+    },
+    {
+     "name": "kps96",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "96"
+     }
+    },
+    {
+     "name": "kps128",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "128"
+     }
+    },
+    {
+     "name": "gqa",
+     "build": {}
+    },
+    {
+     "name": "gqakps64",
+     "build": {
+      "ATTN_KPS": "64"
+     }
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
+    "perf:ctl:2",
+    "perf:kps48:2",
+    "perf:kps64:2",
+    "perf:kps96:2",
+    "perf:kps128:2",
+    "perf:gqa:2",
+    "perf:gqakps64:2",
+    "perf:ctl:1:long",
+    "perf:gqa:1:long",
+    "perf:gqakps64:1:long"
    ]
   },
   {
-   "name": "fn-mtp-b",
+   "name": "q4b",
+   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+   "memory_bytes": 55000000000,
+   "llamacpp": "b1368",
    "variants": [
     {
-     "name": "card"
+     "name": "ctl",
+     "build": {
+      "ATTN_GQA": "0"
+     }
+    },
+    {
+     "name": "kps64",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "64"
+     }
+    },
+    {
+     "name": "kps128",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "128"
+     }
     }
    ],
    "steps": [
-    "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
+    "perf:ctl:2",
+    "perf:kps64:2",
+    "perf:kps128:2"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
