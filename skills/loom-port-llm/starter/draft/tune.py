@@ -155,6 +155,17 @@ def margin(rows, base_rows):
     return min((rows.get(k, 0.0) / t for k, t in base_rows.items() if t), default=0.0)
 
 
+def geomean_margin(rows, base_rows, refs=None):
+    """Geometric mean of the row ratios: each row relative to llama.cpp's rate for it when refs are known (the rows
+    llama_margin maps), else relative to depth 0. The tie-break among candidates whose worst rows are within NO_LOSS."""
+    if refs:
+        ref = lambda k: refs.get("c4" if k == "streams4" else "decode_32k" if k == "long" else "decode")
+        r = [t / ref(k) for k, t in rows.items() if ref(k)]
+    else:
+        r = [rows.get(k, 0.0) / t for k, t in base_rows.items() if t]
+    return statistics.geometric_mean(r) if r and min(r) > 0 else 0.0
+
+
 def load_llama_refs(cfg):
     """{"decode", "decode_32k", "c4"} llama.cpp tok/s: TUNE_BASELINE (a JSON file path or inline JSON), else the best
     llama.cpp backend on the cfg["reference"] card (its info.json: latest session and per-backend baselines), else None."""
@@ -391,12 +402,13 @@ def main():
                 measured[row["depth"]] = sc
                 if sc > best[2]:
                     best = (kind, row["depth"], sc)
-        # context-gate retry for this kind's best depth when only the long row is below NO_LOSS x depth 0
+        # context-gate retry for this kind's best depth when the long row is not ahead of depth 0 by more than the noise
+        # band (long <= depth 0's / NO_LOSS: slower, tied or barely faster); the ranking keeps whichever scores better
         if CTX_GATE and measured and base_rows.get("long"):
             best_d = max(measured, key=measured.get)
             r = next(x for x in table if x["kind"] == kind and x["depth"] == best_d)
             rest = {k: v for k, v in base_rows.items() if k != "long"}
-            if r["rows"].get("long", 0.0) < NO_LOSS * base_rows["long"] and margin(r["rows"], rest) >= NO_LOSS:
+            if r["rows"].get("long", 0.0) <= base_rows["long"] / NO_LOSS and margin(r["rows"], rest) >= NO_LOSS:
                 pkg_c = os.path.join(work, f"pkg_tune_{kind}_ctx")
                 sh(*build, pkg_c, *common, "--draft", kind, env=dict(os.environ, SPEC_CTX_MAX=str(CTX_GATE), SPEC_OCC_MIN=str(r.get("occ_min", 2))))
                 card_c = json.load(open(os.path.join(pkg_c, "model.json")))
@@ -457,17 +469,25 @@ def main():
             if r["kind"] != "none":
                 r["margin"] = r["margin_llama"]
         # the noise band only while the drafter still beats llama.cpp on every row: never trade a losing row for a worse one
-        ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor)
+        # Where depth 0 itself loses a row to llama.cpp (floor < 1) a drafter may tie that row (within half the band) if
+        # its rows' geometric mean is clearly ahead of depth 0's (Ornith-1.5-35B DFlash 3 + ctx gate: worst row 0.979 vs
+        # 0.982, decode 88.9 vs 63.4).
+        base_geo = geomean_margin(base_rows, base_rows, llama_refs)
+        ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor) or (
+            floor < 1.0 and r["margin"] >= (1 + NO_LOSS) / 2 * floor and geomean_margin(r["rows"], base_rows, llama_refs) >= 1.05 * base_geo)
     else:
         ok_margin = lambda r: r["margin"] >= NO_LOSS
     ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
                     key=lambda r: -r["margin"])
     # Within NO_LOSS of the best margin (noise on these short requests; a wider band on a ratio near 1 would admit
-    # every candidate), the shallower depth first: every drafted token is verified with decode attention over the
-    # whole context (Qwen3.6-35B-A3B DFlash: depth 7 vs 3 was 109 vs 105 tok/s short, 31 vs 48 tok/s at 32k).
+    # every candidate), the higher geometric mean of the row ratios first: the context gate (ctx_max) now keeps the
+    # long-context cost of deep drafting out, which "shallowest first" used to protect (Ornith-1.5-35B: DFlash depth 3
+    # with the gate decodes 87.7 vs 66.2 undrafted with streams4 161 vs 165, and lost to a shallower depth on that rule).
     if ranked:
         top = ranked[0]["margin"]
-        ranked.sort(key=lambda r: (r["margin"] < NO_LOSS * top, r["depth"] if r["margin"] >= NO_LOSS * top else 0, -r["margin"]))
+        for r in ranked:
+            r["geomean"] = round(geomean_margin(r["rows"], base_rows, llama_refs), 3)
+        ranked.sort(key=lambda r: (r["margin"] < NO_LOSS * top, -r["geomean"] if r["margin"] >= NO_LOSS * top else 0, -r["margin"]))
     choice, ctx_max = ("none", 0, base, 2), 0
     for r in ranked:
         kind, depth, ctx = r["kind"], r["depth"], r.get("ctx_max", 0)

@@ -1,5 +1,5 @@
 {
- "_comment": "verify32k: K/V-once body for non-span tokens of drafting packages; A/B vs main, MT off, nodraft.",
+ "_comment": "verify32k: WMMA verify-span decode attention (g_attention_split_mma) vs main / K/V-once scalar body / nodraft.",
  "card": "loom-fun/ggml-org-Qwen3-4B-loom",
  "memory_bytes": 55000000000,
  "kit": null,
@@ -15,12 +15,12 @@
      "ref": "origin/main"
     },
     {
-     "name": "gqa"
+     "name": "mma"
     },
     {
-     "name": "nomt",
+     "name": "gqa",
      "build": {
-      "ATTN_MT": "1"
+      "ATTN_MMA": "0"
      }
     },
     {
@@ -32,10 +32,10 @@
     }
    ],
    "steps": [
-    "ktest:gqa",
+    "ktest:mma",
     "perf:main:2:long",
+    "perf:mma:2:long",
     "perf:gqa:2:long",
-    "perf:nomt:2:long",
     "perf:nodraft:2:long"
    ]
   },
@@ -49,12 +49,12 @@
      "ref": "origin/main"
     },
     {
-     "name": "gqa"
+     "name": "mma"
     },
     {
-     "name": "nomt",
+     "name": "gqa",
      "build": {
-      "ATTN_MT": "1"
+      "ATTN_MMA": "0"
      }
     },
     {
@@ -63,21 +63,14 @@
       "--draft",
       "none"
      ]
-    },
-    {
-     "name": "mt4",
-     "build": {
-      "ATTN_MT_MIN_KV": "4"
-     }
     }
    ],
    "steps": [
-    "ktest:gqa",
+    "ktest:mma",
     "perf:main:2:long",
+    "perf:mma:2:long",
     "perf:gqa:2:long",
-    "perf:nomt:2:long",
-    "perf:nodraft:2:long",
-    "perf:mt4:2:long"
+    "perf:nodraft:2:long"
    ]
   },
   {
@@ -90,12 +83,12 @@
      "ref": "origin/main"
     },
     {
-     "name": "gqa"
+     "name": "mma"
     },
     {
-     "name": "nomt",
+     "name": "gqa",
      "build": {
-      "ATTN_MT": "1"
+      "ATTN_MMA": "0"
      }
     },
     {
@@ -107,10 +100,10 @@
     }
    ],
    "steps": [
-    "ktest:gqa",
+    "ktest:mma",
     "perf:main:2:long",
+    "perf:mma:2:long",
     "perf:gqa:2:long",
-    "perf:nomt:2:long",
     "perf:nodraft:2:long"
    ]
   }

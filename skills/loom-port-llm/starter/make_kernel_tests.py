@@ -753,10 +753,79 @@ def seg_case(li):
   check.return
 }}
 """)
+# 3e. g_attention_split_mma (gen_attn_mma.py: drafting builds, head_dim 128, more than 2 KV heads): one decode epoch of four
+# sequences, KV written into a paged pool. Row 0 crosses ATTN_MMA_FROM (the first tokens stay on g_attention_split, the rest take
+# the WMMA kernel), row 1 is a full verify span at an unaligned position, row 2 a single token, row 3 a short span (runs of 1..T
+# tokens inside aligned groups). Each query points at the key one position AFTER its own (a causal leak shows at once).
+def mma_case(li):
+    T_ = attn_rules.mma_tokens(cfg["draft"]["depth"], D, KVH, QH // KVH); F_ = attn_rules.ATTN_MMA_FROM; G_ = QH // KVH
+    rows = [(0, F_ - 3, T_ + 2), (1, F_ + 37, T_), (2, F_ + 100, 1), (3, F_ + 500, 2)]
+    ctx = ((max(p + n for _, p, n in rows) + 15) // 16) * 16 + 32; blocks = ctx // 16; R = len(rows); pool = R * ctx
+    info, toks = [], []
+    for r, p0, n in rows:
+        for i in range(n):
+            info.append([r, p0 + i, 1, 0]); toks.append((r, p0 + i))
+    info = np.array(info, np.int32); t = len(toks)
+    kv = (rng.standard_normal((R, ctx, 2, KVH, D)) * 0.5).astype(np.float16)
+    q = rng.standard_normal((t, QH, D)).astype(np.float32)
+    for i, (r, p) in enumerate(toks):
+        q[i] += 3 * kv[r, p + 1, 0].astype(np.float32)[np.arange(QH) // G_]
+    gate = rng.standard_normal((t, QH, D)).astype(np.float32)
+    sinks = deq(f"blk.{li}.attn_sinks.weight").astype(np.float32) if cfg.get("attn_sinks") else None
+    orig = np.zeros(10 * R + R * blocks, np.int32)
+    arena = np.zeros((2, pool, KVH, D), np.float16)
+    for r in range(R):
+        orig[r * 10 + 8] = (10 * R + r * blocks) * 4
+        orig[10 * R + r * blocks:10 * R + (r + 1) * blocks] = np.arange(blocks) + r * blocks
+        arena[0, r * ctx:(r + 1) * ctx] = kv[r, :, 0]; arena[1, r * ctx:(r + 1) * ctx] = kv[r, :, 1]
+    att = np.zeros((t, QH, D))
+    for i, (r, p) in enumerate(toks):
+        for hh in range(QH):
+            k_, v_ = kv[r, :p + 1, 0, hh // G_].astype(np.float64), kv[r, :p + 1, 1, hh // G_].astype(np.float64)
+            sc = k_ @ q[i, hh].astype(np.float64) / np.sqrt(D)
+            mx = sc.max() if sinks is None else max(sc.max(), sinks[hh])
+            pr = np.exp(sc - mx); den = pr.sum() + (0.0 if sinks is None else np.exp(sinks[hh] - mx))
+            att[i, hh] = pr @ v_ / den
+    if gate_kind and sinks is None:
+        att = att * gate_mul(gate)
+    tag = f"mma_batch_{li}"
+    for nn, a in [("q", q.reshape(t, -1)), ("g", gate.reshape(t, -1)), ("info", info), ("orig", orig), ("sinks", sinks if sinks is not None else np.zeros(QH, np.float32)),
+                  ("arena", arena.reshape(-1)), ("o", att.reshape(t, -1).astype(np.float32))]:
+        save(f"{tag}_{nn}", a)
+    print(f"{tag}: {t} tokens in {R} rows (run {T_}), positions {F_ - 3}..{F_ + 501}")
+    QD, S = QH * D, 64
+    OT, IT, RT, AR = f"tensor<{t}x{QD}xf32>", f"tensor<{t}x4xi32>", f"tensor<{len(orig)}xi32>", f"tensor<{2 * pool * KVH * D}xf16>"
+    PA, PM = f"tensor<{t * QH * S * D}xf32>", f"tensor<{t * QH * S * 2}xf32>"
+    gv, gt = ("%sinks", f"tensor<{QH}xf32>") if sinks is not None else ("%g" if gate_kind else "%q", OT)
+    cases.append(f"""check.case public @{tag} {{
+  %t = check.literal value({t}) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value(0) : i32
+  %ctx = check.literal value({ctx}) : index
+  %pool = check.literal value({pool}) : index
+  %q = check.file.read.npy path("{tag}_q.npy") : {OT}
+  %g = check.file.read.npy path("{tag}_g.npy") : {OT}
+  %sinks = check.file.read.npy path("{tag}_sinks.npy") : tensor<{QH}xf32>
+  %info = check.file.read.npy path("{tag}_info.npy") : {IT}
+  %orig = check.file.read.npy path("{tag}_orig.npy") : {RT}
+  %arena = check.file.read.npy path("{tag}_arena.npy") : {AR}
+  %eo = check.file.read.npy path("{tag}_o.npy") : {OT}
+  %pacc = check.generate.fill value(0.0) : {PA}
+  %pml = check.generate.fill value(0.0) : {PM}
+  %o = check.generate.fill value(0.0) : {OT}
+  kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, {OT}, {IT}, {RT}, {AR}, {PA}, {PM})
+  kernel.launch @g_attention_split_mma[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, {OT}, {IT}, {RT}, {AR}, {PA}, {PM})
+  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, {gv}, %o) : [index](index, i32, {IT}, {PA}, {PM}, {gt}, {OT})
+  check.expect.close actual(%o) expected(%eo) atol(3.0e-3) rtol(1.0e-2) nan(different) : {OT}
+  check.return
+}}
+""")
 # the drafting settings: the config's (a package's llm_config.json) or build.py's LLM_DRAFT (a pre-build cfg.json)
 cfg.setdefault("draft", json.loads(os.environ.get("LLM_DRAFT") or "null"))
 if cfg.get("draft") and not cfg.get("attn_gate") and not cfg.get("attn_sinks"):   # combine's gate input: none here
     seg_case([i for i in range(cfg["layers"]) if i not in set(cfg.get("sliding_layers") or []) | set(cfg.get("recurrent_layers", []))][0])
+if cfg.get("draft") and attn_rules.mma_tokens(cfg["draft"].get("depth", 0), D, KVH, QH // KVH):
+    mma_case([i for i in range(cfg["layers"]) if i not in set(cfg.get("sliding_layers") or []) | set(cfg.get("recurrent_layers", []))][0])
 # 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
 if cfg.get("recurrent_layers"):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -2050,6 +2119,8 @@ def add_partial(c):   # gen_llm.py launches the partial tiles' kernel after ever
         return c
     return re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_partial[\2", c, flags=re.M)
 cases = [add_partial(c) for c in cases]
+if cfg.get("draft") and attn_rules.mma_tokens(cfg["draft"].get("depth", 0), D, KVH, QH // KVH) and not KS:   # gen_llm.py launches g_attention_split_mma after every decode split launch
+    cases = [c if "@g_attention_split_mma[" in c else re.sub(r"^( *)kernel\.launch @g_attention_split\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_split_mma[\2", c, flags=re.M) for c in cases]
 if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
     cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
                     flags=re.M) for c in cases] + DEEP_CASES   # these launch the two kernels as they test them

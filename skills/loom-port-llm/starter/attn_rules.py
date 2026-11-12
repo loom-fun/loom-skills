@@ -14,6 +14,10 @@ ATTN_GQA_FROM = int(os.environ.get("ATTN_GQA_FROM", "4096"))
 # Drafting packages (verify spans, ctx-gated and plain epochs): the K/V-once body also serves the tokens that do not take the
 # multi-token path (1-token epochs, the tail of a span, every token when MT is off) past ATTN_GQA_FROM keys. ATTN_GQA_DRAFT=0: nodraft only.
 ATTN_GQA_DRAFT = os.environ.get("ATTN_GQA_DRAFT", "1") == "1"
+# Drafting packages, head_dim 128, more than 2 KV heads: tokens at >= ATTN_MMA_FROM visible keys on full-attention layers take
+# g_attention_split_mma (gen_attn_mma.py: K/V read once per KV head for a whole verify span x G heads, QK^T and PV on WMMA).
+ATTN_MMA = os.environ.get("ATTN_MMA", "1") == "1"
+ATTN_MMA_FROM = int(os.environ.get("ATTN_MMA_FROM", "4096"))
 ATTN_MT = int(os.environ.get("ATTN_MT", "4"))   # verify-span tokens per wave (gen_llm.multi_token_split)
 ATTN_MT_FROM = int(os.environ.get("ATTN_MT_FROM", "1024"))   # ... from this position on
 # The span path leaves one workgroup per (4 tokens, KV head, split), each running its tokens serially: with fewer KV
@@ -38,7 +42,17 @@ def ilp(U):
 
 def gqa(draft_on, seg):
     """Does the decode split kernel carry the K/V-once body? Drafting packages: not with the segment (KVH <= 2) path."""
-    return ATTN_GQA and (not draft_on or (ATTN_GQA_DRAFT and not seg))
+    return ATTN_GQA and (not draft_on or (ATTN_GQA_DRAFT and not seg and not ATTN_MMA))
+
+
+def mma_tokens(draft_depth, d, kv_heads, g):
+    """Run length of g_attention_split_mma (gen_attn_mma.py) for a drafting build (draft_depth > 0): the verify span, at most 8
+    tokens, at most 32 query columns (tokens x G heads); 0 when the scalar split kernel keeps every token (head_dim != 128, or
+    at most 2 KV heads: the segment path of gen_llm.seg_tokens, or fewer than 2 tokens)."""
+    if not (ATTN_MMA and draft_depth and d == 128 and kv_heads > 2):
+        return 0
+    t = min(draft_depth + 1, 8, 32 // g)
+    return t if t >= 2 else 0
 
 
 def multi_token(U, kv_heads):
