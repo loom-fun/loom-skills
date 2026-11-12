@@ -157,9 +157,16 @@ def margin(rows, base_rows):
     return min((rows.get(k, 0.0) / t for k, t in base_rows.items() if t), default=0.0)
 
 
+CARD_ROWS = ("work0", "long", "streams4")   # the card's decode (perf.py's prose essay), decode_32k and 4-stream rows
+
+
 def geomean_margin(rows, base_rows, refs=None):
-    """Geometric mean of the row ratios: each row relative to llama.cpp's rate for it when refs are known (the rows
-    llama_margin maps), else relative to depth 0. The tie-break among candidates whose worst rows are within NO_LOSS."""
+    """Geometric mean of the card rows' ratios (CARD_ROWS): each relative to llama.cpp's rate for it when refs are known
+    (the rows llama_margin maps), else relative to depth 0. The tie-break among candidates whose worst rows are within
+    NO_LOSS. The code and tool rows stay in the worst-row guard but not here: their 60 % acceptance picked a deep draft
+    that lost the card's prose rows (Qwen3-4B DFlash depth 5: decode 87.6 vs 103.8 at depth 3)."""
+    rows = {k: v for k, v in rows.items() if k in CARD_ROWS} or rows
+    base_rows = {k: v for k, v in base_rows.items() if k in CARD_ROWS} or base_rows
     if refs:
         ref = lambda k: refs.get("c4" if k == "streams4" else "decode_32k" if k == "long" else "decode")
         r = [t / ref(k) for k, t in rows.items() if ref(k)]
