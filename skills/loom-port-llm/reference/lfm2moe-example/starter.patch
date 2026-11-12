@@ -370,7 +370,7 @@
  RD = cfg.get("rope_dims") or D
  qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
  kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
-@@ -1766,272 +1766,106 @@
+@@ -1766,274 +1766,106 @@
      cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
      cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
  
@@ -379,6 +379,14 @@
 -# bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
 -# both with the shared experts' output already in y (scaled by the Qwen shared-expert gate when the model has one).
 -if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
+-    M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ["MOE_R"]) if os.environ.get("MOE_R") else 8   # gen_llm._moe_rows_per_workgroup's rule:
+-    while not os.environ.get("MOE_R") and R > 2 and KU * FE // R < 3000 and FE % (R // 2) == 0 and H % (R // 2) == 0:
+-        R //= 2
+-    SHG, ACC = bool(M.get("shared_gate")), bool(M.get("shared_ffn"))
+-    # Gemma 4: gate and up fused in one tensor (each expert's gate rows, then its up rows), GEGLU, and a per-expert
+-    # output scale folded into the combine weights (g_moe_wscale, gemma4 example)
+-    FUSED, DSC = bool(M.get("gate_up_fused")), bool(M.get("down_scale"))
+-    GN, UN = ("ffn_gate_up_exps.weight",) * 2 if FUSED else ("ffn_gate_exps.weight", "ffn_up_exps.weight")
 +# 5. LFM2 short-conv chain: a 5-token span at position 3 continuing the reader slot's conv history
 +if cfg.get("shortconv_layers"):
 +    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -423,12 +431,7 @@
 +""")
 +# 6. MoE chain on real tensors (one Q4_K-down and one Q6_K-down layer): router -> top-k -> gate/up -> down -> combine
 +if cfg.get("moe"):
-     M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ.get("MOE_R", "8"))
--    SHG, ACC = bool(M.get("shared_gate")), bool(M.get("shared_ffn"))
--    # Gemma 4: gate and up fused in one tensor (each expert's gate rows, then its up rows), GEGLU, and a per-expert
--    # output scale folded into the combine weights (g_moe_wscale, gemma4 example)
--    FUSED, DSC = bool(M.get("gate_up_fused")), bool(M.get("down_scale"))
--    GN, UN = ("ffn_gate_up_exps.weight",) * 2 if FUSED else ("ffn_gate_exps.weight", "ffn_up_exps.weight")
++    M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ.get("MOE_R", "8"))
      def deq3(name):
          tt = T[name]; return dequantize(np.asarray(tt.data), tt.tensor_type).reshape(E_, int(tt.shape[1]), int(tt.shape[0]))
 -    def f32w(name):   # f32 or bf16 tensor -> (f32 values, the raw array the kernel reads)
