@@ -1,21 +1,21 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context, --pool_backing=fixed): kernel tests on the GPU with a probe (one request, GTT, dmesg), and the full gate set (quick gates incl. spec + vision + over-capacity 400 + full-context needle) against llama.cpp b1371; Loom and llama.cpp take turns (the GGUF is 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "gemma-4-26B-A4B rebuilt from this branch (8-key d512 decode blocks, 2 global KV heads), no drafting: kernel tests, consistency, dev gates.",
+ "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+ "memory_bytes": 81000000000,
+ "kit": "gemma4",
+ "llamacpp": "b1370",
  "variants": [
   {
-   "name": "fn-mtp-ktest-probe",
-   "memory_bytes": "none",
-   "serve_args": ["--pool_backing=fixed"],
-   "steps": ["ktest", "probe"]
-  },
-  {
-   "name": "fn-mtp-full",
-   "memory_bytes": "none",
-   "serve_args": ["--pool_backing=fixed"],
-   "steps": ["gates:full"]
+   "name": "pr_nd",
+   "build": {},
+   "execution": {
+    "draft_depth": 0
+   },
+   "steps": [
+    "ktest",
+    "consistency:5",
+    "gates:dev"
+   ]
   }
  ]
 }
