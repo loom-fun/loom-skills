@@ -1,7 +1,6 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "MiniCPM-V-4.7-35B-A3B regenerated from main (MoE decode #247, GDN decode split #350), derived from its own published card.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {"name": "minicpm-regen", "spec": "bartowski/MiniCPM-V-4.7-35B-A3B-GGUF:MiniCPM-V-4.7-35B-A3B-Q4_K_M.gguf", "reference": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom", "model_id": "openbmb/MiniCPM-V-4.7-35B-A3B"}
  ]
 }
