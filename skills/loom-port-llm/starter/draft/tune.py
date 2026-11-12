@@ -346,6 +346,8 @@ def main():
                 row = {"kind": kind, "depth": best_d, "ctx_max": CTX_GATE, "decode_tps": round(tps, 2),
                        "rows": {k: round(v, 2) for k, v in rows.items()}, "seconds": round(time.time() - t0),
                        "margin": round(margin(rows, base_rows), 3)}
+                if llama_refs:
+                    row["margin_llama"] = round(llama_margin(rows, llama_refs), 3)
                 print("tune:", json.dumps(row), flush=True)
                 table.append(row)
                 if row["margin"] > best[2]:
