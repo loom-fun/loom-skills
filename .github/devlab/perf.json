@@ -1,21 +1,34 @@
 {
- "_comment": "Bolt-E4B consistency: main vs peeled vs unpeeled vs pre-#193 (WIP)",
+ "_comment": "Bolt-E4B consistency: which change breaks it (edge block / dead block) (WIP)",
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "boltc",
+   "name": "boltd",
    "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
    "memory_bytes": 40000000000,
    "kit": "gemma4",
    "variants": [
     {
-     "name": "main",
-     "build": {},
+     "name": "e1",
+     "build": {
+      "FLASH2_EDGE_ZERO": "1"
+     },
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "701974f"
+     "ref": "1d4872440842ef47d02a88a1c7d6103b12208112"
+    },
+    {
+     "name": "nd",
+     "build": {
+      "FLASH2_DEAD_SKIP": "0"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "1d4872440842ef47d02a88a1c7d6103b12208112"
     },
     {
      "name": "new",
@@ -23,43 +36,20 @@
      "build_args": [
       "--draft",
       "none"
-     ]
-    },
-    {
-     "name": "new_np",
-     "build": {
-      "FLASH2_PEEL": "0"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "pre",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
      ],
-     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
+     "ref": "1d4872440842ef47d02a88a1c7d6103b12208112"
     }
    ],
    "steps": [
-    "consistency:main:1",
+    "consistency:e1:1",
+    "consistency:nd:1",
     "consistency:new:1",
-    "consistency:new_np:1",
-    "consistency:pre:1",
-    "consistency:main:1",
+    "consistency:e1:1",
+    "consistency:nd:1",
     "consistency:new:1",
-    "consistency:new_np:1",
-    "consistency:pre:1",
-    "consistency:main:1",
-    "consistency:new:1",
-    "consistency:new_np:1",
-    "consistency:pre:1",
-    "ktest:new",
-    "ktest:new_np"
+    "consistency:e1:1",
+    "consistency:nd:1",
+    "consistency:new:1"
    ]
   }
  ]
