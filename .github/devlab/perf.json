@@ -6,43 +6,24 @@
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "bolt-abl",
+   "name": "bolt-vt",
    "variants": [
     {
-     "name": "card"
+     "name": "base",
+     "ref": "origin/main"
     },
     {
-     "name": "attn",
-     "double": [
-      "*:g_attention_flash2\\b|g_attention_flash2_d512|g_attention_flash2_partial"
-     ]
-    },
-    {
-     "name": "gemm_q4",
-     "double": [
-      "*:g_gemm_q4_k_(store|swiglu)"
-     ]
-    },
-    {
-     "name": "gemm_q6q8",
-     "double": [
-      "*:g_gemm_q(6_k|8_0)_store"
-     ]
-    },
-    {
-     "name": "misc",
-     "double": [
-      "*:g_post_add_norm|g_ple_gate|g_row_scale_f16|g_quant_q8|g_qk_rope_store"
-     ]
+     "name": "vt",
+     "ref": "2950807e196aa2c0b706aa711b08bd34fd7fc9fc"
     }
    ],
    "steps": [
-    "perf:card:1:long",
-    "perf:attn:1:long",
-    "perf:gemm_q4:1:long",
-    "perf:gemm_q6q8:1:long",
-    "perf:misc:1:long"
+    "perf:base:2:long",
+    "perf:vt:2:long",
+    "llama@vulkan:1:long",
+    "llama:1:long"
    ]
   }
- ]
+ ],
+ "llamacpp_vulkan": "b12211"
 }
