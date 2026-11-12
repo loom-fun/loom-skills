@@ -242,6 +242,7 @@ def main():
                 raw, d = call_whitespace(P, raw, gids, d)
                 loom_ids = P.ids(raw)
                 rec["golden_match"] = d is None
+                loom_rest = ""   # set below on a divergence; the unpublished-output rule can fail a matching turn
                 if d is not None:
                     k, loom_id, loom_rest = d
                     gap = gap_at(gids, gtops, loom_id, k)
