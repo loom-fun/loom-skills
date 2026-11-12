@@ -5,10 +5,7 @@
    "name": "flint-regen",
    "spec": "ggml-org/Flint-GGUF:Flint-Q4_K_M.gguf",
    "reference": "loom-fun/ggml-org-Flint-loom",
-   "model_id": "flint",
-   "env": {
-    "TUNE_NO_LOSS": "0.85"
-   }
+   "model_id": "flint"
   }
  ]
 }

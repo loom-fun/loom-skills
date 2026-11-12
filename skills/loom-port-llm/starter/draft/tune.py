@@ -74,7 +74,7 @@ LONG_CTX = int(os.environ.get("TUNE_LONG", "16000"))
 # matvec padding at 4 streams) costs more than a plain step (Qwen3.5-0.8B: ngram depth 3 decode 223 vs 258 without,
 # 32k 125 vs 166, four streams 498 vs 787 tok/s). So every row is scored against depth 0 and a drafter that is
 # slower than NO_LOSS x depth 0 on any row is not used, however well it does on the code-edit row that quotes its input.
-NO_LOSS = float(os.environ.get("TUNE_NO_LOSS", "0.98"))   # TUNE_NO_LOSS=0.85: accept a row-loss vs depth 0 that still beats both llama.cpp backends (a decision for the card's owner, recorded in the report)
+NO_LOSS = 0.98
 
 
 def measure(url, model, chat, context=0, rows=1):
