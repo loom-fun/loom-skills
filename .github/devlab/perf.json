@@ -1,40 +1,53 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "gqa_split as its own kernel (no shared register count): Qwen3-30B-A3B (kv4) and Qwen3-4B-2507 (kv8), main vs new",
+ "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+ "memory_bytes": 63000000000,
+ "kit": null,
+ "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "a30",
    "variants": [
     {
-     "name": "card"
+     "name": "main",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
+    "perf:main:2:long",
+    "perf:new:2:long",
+    "perf:main:2",
+    "perf:new:2",
+    "ktest:new",
+    "gates:new:dev"
    ]
   },
   {
-   "name": "fn-mtp-b",
+   "name": "b4",
+   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+   "memory_bytes": 55000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "main",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
+    "perf:main:2:long",
+    "perf:new:2:long",
+    "perf:main:2",
+    "perf:new:2"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }

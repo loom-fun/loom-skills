@@ -676,6 +676,12 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
   check.return
 }}
 """)
+_draft = cfg.get("draft") or {}
+# gen_llm.gqa_split_on: the decode split kernel has a K/V-once twin (non-drafting head_dim 128, uniform head count)
+GQA_ON = bool(D == 128 and attn_rules.ATTN_GQA and attn_rules.paged(attn_rules.UNROLL) and attn_rules.butterfly(attn_rules.UNROLL)
+              and _draft.get("kind") not in ("mtp", "dflash", "ngram", "assist") and not (cfg.get("layer_heads") and set(cfg["layer_heads"]) - {QH}))
+if GQA_ON and os.environ.get("PREFILL_CONT", "1") != "0":   # a span that continues attn_rules.ATTN_GQA_FROM + 200 stored keys: the decode path runs the twin
+    prefill_cont_case(A0, attn_rules.ATTN_GQA_FROM + 200, 16, 0, "pc_gqa")
 if cfg.get("attn_sinks") and os.environ.get("PREFILL_CONT", "1") != "0":
     _sl = cfg.get("sliding_layers") or []
     _ns = [i for i in range(cfg["layers"]) if i not in set(_sl) and i not in set(cfg.get("recurrent_layers", []))]
@@ -2042,6 +2048,11 @@ def add_partial(c):   # gen_llm.py launches the partial tiles' kernel after ever
         return c
     return re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_partial[\2", c, flags=re.M)
 cases = [add_partial(c) for c in cases]
+# gen_llm.py pairs the decode split kernel with its K/V-once twin (gqa_split_on) in non-drafting head_dim 128 packages: both are
+# launched after every split launch (each exits on its side of ATTN_GQA_FROM visible keys)
+if GQA_ON:
+    cases = [re.sub(r"^( *)kernel\.launch @g_attention_split\[(.*)$", lambda m: m.group(0) + "\n" + m.group(1) + "kernel.launch @g_attention_split_gqa[" + m.group(2), c, flags=re.M)
+             for c in cases]
 if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
     cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
                     flags=re.M) for c in cases] + DEEP_CASES   # these launch the two kernels as they test them
