@@ -198,9 +198,9 @@
   {
    "repo": "loom-fun/ggml-org-Qwen3.6-27B-loom",
    "slug": "qwen3.6-27b",
-   "memory_bytes": 53000000000,
+   "memory_bytes": 57000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -240,9 +240,9 @@
   {
    "repo": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
    "slug": "qwen2.5-32b-instruct",
-   "memory_bytes": 49000000000,
+   "memory_bytes": 50000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "draft"
    ]
@@ -461,9 +461,9 @@
   {
    "repo": "loom-fun/bartowski-Ornith-1.5-122B-loom",
    "slug": "ornith-1.5-122b",
-   "memory_bytes": 106000000000,
+   "memory_bytes": 101000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
