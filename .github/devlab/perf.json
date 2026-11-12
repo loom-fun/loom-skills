@@ -7,108 +7,296 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "sweep3",
+   "name": "abl2",
    "variants": [
     {
      "name": "card"
     },
     {
-     "name": "ch8",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8"
-     }
-    },
-    {
-     "name": "rl16",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16"
-     }
-    },
-    {
-     "name": "rl32",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "32"
-     }
-    },
-    {
-     "name": "rl16c2",
+     "name": "best",
      "build": {
       "MOE_R": "4",
       "MOE_ROUTE_U": "8",
       "MV_CHUNK": "8",
       "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2"
-     }
-    },
-    {
-     "name": "rl32c2",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "32",
-      "GDN_COLS": "2"
-     }
-    },
-    {
-     "name": "rl16cb",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_CB": "64"
-     }
-    },
-    {
-     "name": "rl16cu8",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
       "GDN_CONV_UNROLL": "8"
      }
     },
     {
-     "name": "rl16cu2",
+     "name": "d-qkv",
      "build": {
       "MOE_R": "4",
       "MOE_ROUTE_U": "8",
       "MV_CHUNK": "8",
       "GDN_ROW_LANES": "16",
-      "GDN_CONV_UNROLL": "2"
-     }
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:g_mv_q8_0_k2048_q8_r2\\b"
+     ]
     },
     {
-     "name": "rl16ch4",
+     "name": "d-z",
      "build": {
       "MOE_R": "4",
       "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "4",
-      "GDN_ROW_LANES": "16"
-     }
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:g_mv_q8_0_k2048_q8_r1\\b"
+     ]
+    },
+    {
+     "name": "d-out",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:g_mv_q8_0_k4096_q8_r1\\b"
+     ]
+    },
+    {
+     "name": "d-shdn",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:g_mv_q8_0_k512_q8_r1\\b"
+     ]
+    },
+    {
+     "name": "d-shgu",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:g_mv_q8_0_k2048_swiglu_q8_r1\\b"
+     ]
+    },
+    {
+     "name": "d-route",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:@g_moe_route\\b"
+     ]
+    },
+    {
+     "name": "d-gu",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:@g_moe_gu_\\w+_r4\\b"
+     ]
+    },
+    {
+     "name": "d-dn",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:@g_moe_dn_\\w+_r4\\b"
+     ]
+    },
+    {
+     "name": "d-head",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:@g_head_mv_q8\\b"
+     ]
+    },
+    {
+     "name": "d-recur",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:g_gdn_recurrence\\b"
+     ]
+    },
+    {
+     "name": "d-conv",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:g_gdn_conv\\b|g_gdn_conv_commit\\b"
+     ]
+    },
+    {
+     "name": "d-gnorm",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:g_gdn_norm_gate\\b|g_gdn_qk_norm\\b"
+     ]
+    },
+    {
+     "name": "d-quant",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:@g_quant_q8\\b"
+     ]
+    },
+    {
+     "name": "d-pan",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:@g_post_add_norm\\b"
+     ]
+    },
+    {
+     "name": "d-sgate",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:@g_moe_shared_gate_f32\\b"
+     ]
+    },
+    {
+     "name": "d-comb",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:@g_moe_combine\\b"
+     ]
+    },
+    {
+     "name": "d-ab",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:g_mv_f32_k2048_r1\\b"
+     ]
+    },
+    {
+     "name": "d-attn",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     },
+     "double": [
+      "*:g_attention|g_qk_rope_store"
+     ]
     }
    ],
    "steps": [
     "perf:card:1",
-    "perf:ch8:1",
-    "perf:rl16:1",
-    "perf:rl32:1",
-    "perf:rl16c2:1",
-    "perf:rl32c2:1",
-    "perf:rl16cb:1",
-    "perf:rl16cu8:1",
-    "perf:rl16cu2:1",
-    "perf:rl16ch4:1",
+    "perf:best:1",
+    "perf:d-qkv:1",
+    "perf:d-z:1",
+    "perf:d-out:1",
+    "perf:d-shdn:1",
+    "perf:d-shgu:1",
+    "perf:d-route:1",
+    "perf:d-gu:1",
+    "perf:d-dn:1",
+    "perf:d-head:1",
+    "perf:d-recur:1",
+    "perf:d-conv:1",
+    "perf:d-gnorm:1",
+    "perf:d-quant:1",
+    "perf:d-pan:1",
+    "perf:d-sgate:1",
+    "perf:d-comb:1",
+    "perf:d-ab:1",
+    "perf:d-attn:1",
     "llama@vulkan:2"
    ]
   }
