@@ -26,6 +26,13 @@ PROPOSE_FIRST, PROPOSE_LEVELS, DRAFT_KIND = 1664, 1668, 1672
 # the anchors (1 token per span, the plain decode shape) instead of depth+1 tokens per span. encode_epoch decides and leaves
 # the shape index + 1 at GATE_FLAG; GATE_TABLE[s] holds the index + 1 of the packing shape with s tokens in s spans.
 GATE_FLAG, GATE_TABLE, GATE_SLOTS = 1676, 1700, 32
+# DFlash gated epochs run @llm_gate (the plain advance trunk + g_gate_results) with no drafter catch-up; GATE_STAGES[s] is its
+# stage for s spans (gen_draft.gate_advance; SPEC_GATE_VERIFY=1 keeps the one-token verify)
+GATE_STAGES = GATE_TABLE + 4 * GATE_SLOTS
+
+
+def gate_advance(kind):
+    return kind == "dflash" and os.environ.get("SPEC_GATE_VERIFY", "0") != "1"
 OCC_MIN, CTX_MAX = 2, 0
 
 
@@ -78,13 +85,27 @@ def _bind(stage, sources, draft_policy=False):
 def patch_prepare(text, draft, cfg):
     set_gates(cfg)
     gate_fill = ""
+    gate_stage = ""
+    if (OCC_MIN or CTX_MAX) and gate_advance(draft["kind"]):
+        gate_stage = f"""        %gate_root = global.load @gate_root : buffer
+        %gstage = func.call @stage(%gate_root, %tag) : (buffer, i64) -> (i32)
+        func.call @config_i64(%gstage, %context_key, %context) : (i32, buffer, i64)
+        func.call @config_i64(%gstage, %pool_key, %pool) : (i32, buffer, i64)
+        func.call @config_i64(%gstage, %tokens_key, %tokens) : (i32, buffer, i64)
+        func.call @config_i64(%gstage, %spans_key, %spans) : (i32, buffer, i64)
+        func.call @parameter(%gstage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
+        %gs_at = index.constant {GATE_STAGES} : offset
+        %gs_view = buffer.view %state[%gs_at] : buffer -> view<{GATE_SLOTS}xi32>
+        %gs_slot = index.cast %spans : i64 to index
+        view.store %gstage, %gs_view[%gs_slot] : i32, view<{GATE_SLOTS}xi32>
+"""
     if OCC_MIN or CTX_MAX:   # shape index + 1 of the (s tokens, s spans) packing, for the occupancy gate
         gate_fill = f"""      %same_shape = scalar.cmpi eq, %tokens, %spans : i64
       %gate_slots = scalar.constant {GATE_SLOTS} : i64
       %few_spans = scalar.cmpi ult, %spans, %gate_slots : i64
       %gate_ok = scalar.andi %same_shape, %few_spans : i1
       scf.if %gate_ok {{
-        %gate_at = index.constant {GATE_TABLE} : offset
+{gate_stage}        %gate_at = index.constant {GATE_TABLE} : offset
         %gate_view = buffer.view %state[%gate_at] : buffer -> view<{GATE_SLOTS}xi32>
         %gate_slot = index.cast %spans : i64 to index
         %gate_i32 = index.cast %i : index to i32
@@ -101,6 +122,7 @@ def patch_prepare(text, draft, cfg):
     block = draft.get("block_size", 1) if kind == "dflash" else 1
     text = _sub(text, '''// "weights.loom"''', f'''// "llm_verify", "{warm_root}", "{propose_root}", "llm.width", "llm.epoch_spans", "llm.epoch_tokens"
 global.rodata.def @verify_root = bytes("{hx("llm_verify")}")
+{f'{chr(10)}// "llm_gate"{chr(10)}global.rodata.def @gate_root = bytes("{hx("llm_gate")}"){chr(10)}' if (OCC_MIN or CTX_MAX) and gate_advance(kind) else ""}
 
 global.rodata.def @warm_root = bytes("{hx(warm_root)}")
 
@@ -388,6 +410,41 @@ def patch_control(text, cfg, draft):
   %ungated = scalar.cmpi eq, %flag, %c0 : i32
   %propose_on = scalar.andi %propose, %ungated : i1
 """
+    exe7 = "(i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)"
+    verify_run = f"""    %vstage = view.load %verify_view[%{eff}] : view<128xi32> -> i32
+    %VAR = func.call @execute_7(%vstage, %residual, %metadata, %origins, %state, %tokens, %committed, %results) : {exe7}
+"""
+    feedback_ir = """    %count64 = scalar.extui %span_count : i32 to i64
+    %record = scalar.constant 40 : i64
+    %length = scalar.muli %count64, %record : i64
+    %feedback = func.call @feedback(%c1, %results, %c0_i64, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+"""
+    flags_sel = "    %device_flags = scf.select %speculative, %marked, %flags : i32\n"
+    warm_ir, warm_on = "", "drafting"
+    if (OCC_MIN or CTX_MAX) and gate_advance(draft["kind"]):
+        # a gated span is an ordinary selected decode span: no speculative mark, no credit
+        flags_sel = ("    %plain_flags = scalar.ori %flags, %c1_i32 : i32\n"
+                     "    %spec_flags = scf.select %speculative, %marked, %flags : i32\n"
+                     "    %device_flags = scf.select %gate, %plain_flags, %spec_flags : i32\n")
+        # gated epoch: the plain advance trunk (@llm_gate) writes the verification records; nothing proposed, so no catch-up
+        verify_body = f"""    %completion = scf.if %gated -> (i64) {{
+      %gs_max = scalar.constant {GATE_SLOTS - 1} : i32
+      %gs_slot32 = scalar.minui %span_count, %gs_max : i32
+      %gs_slot_b = scalar.assume %gs_slot32 [range(%gs_slot32, 0, {GATE_SLOTS - 1})] : i32
+      %gs_slot = index.cast %gs_slot_b : i32 to index
+      %gs_at = index.constant {GATE_STAGES} : offset
+      %gs_view = buffer.view %control_state[%gs_at] : buffer -> view<{GATE_SLOTS}xi32>
+      %gstage = view.load %gs_view[%gs_slot] : view<{GATE_SLOTS}xi32> -> i32
+      %gcompletion = func.call @execute_7(%gstage, %residual, %metadata, %origins, %state, %tokens, %outputs, %results) : {exe7}
+      scf.yield %gcompletion : i64
+    }} else {{
+{verify_run.replace("%VAR", "%vcompletion")}      scf.yield %vcompletion : i64
+    }}
+{feedback_ir}"""
+        warm_ir = "  %warm_on = scalar.andi %drafting, %ungated : i1\n"
+        warm_on = "warm_on"
+    else:
+        verify_body = verify_run.replace("%VAR", "%completion") + feedback_ir
     dflash = draft["kind"] in ("dflash", "ngram")   # stage signatures: no MTP carry
     mrope = bool((cfg.get("vision") or {}).get("mrope"))
     source_step = 1 if mrope else 2   # text-only ports advance the opaque source position by 2 per input
@@ -456,8 +513,7 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
     %credit_bits = scalar.shli %credit, %c8_i32 : i32
     %spec_bits = scalar.ori %credit_bits, %c4_i32 : i32
     %marked = scalar.ori %flags, %spec_bits : i32
-    %device_flags = scf.select %speculative, %marked, %flags : i32
-    view.store %cursor, %device[%s, 4] : i32, view<[%spans]x9xi32>
+{flags_sel}    view.store %cursor, %device[%s, 4] : i32, view<[%spans]x9xi32>
     view.store %device_flags, %device[%s, 6] : i32, view<[%spans]x9xi32>
     %next = scalar.addi %cursor, %length : i32
     scf.yield %next : i32
@@ -627,13 +683,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
 {"    %proposal = func.call @execute_4(%pstage, %metadata, %tokens, %draft_origins, %draft_cache) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)" if dflash else ("    %proposal = func.call @execute_5(%pstage, %metadata, %tokens, %origins, %state, %carry) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)" if draft["kind"] == "assist" else "    %proposal = func.call @execute_5(%pstage, %metadata, %tokens, %draft_origins, %draft_cache, %carry) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)")}
   }}
   %target = scf.if %verify -> (i64) {{
-    %vstage = view.load %verify_view[%{eff}] : view<128xi32> -> i32
-    %completion = func.call @execute_7(%vstage, %residual, %metadata, %origins, %state, %tokens, %committed, %results) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
-    %count64 = scalar.extui %span_count : i32 to i64
-    %record = scalar.constant 40 : i64
-    %length = scalar.muli %count64, %record : i64
-    %feedback = func.call @feedback(%c1, %results, %c0_i64, %length) : (i32, hal.buffer, i64, i64) -> (i64)
-    scf.yield %completion : i64
+{verify_body}    scf.yield %completion : i64
   }} else {{
     %astage = view.load %advance_view[%{eff}] : view<128xi32> -> i32
     %completion = func.call @execute_6(%astage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
@@ -643,7 +693,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
     %feedback = func.call @feedback(%c0, %outputs, %c0_i64, %length) : (i32, hal.buffer, i64, i64) -> (i64)
     scf.yield %completion : i64
   }}
-  %done = scf.if %drafting -> (i64) {{
+{warm_ir}  %done = scf.if %{warm_on} -> (i64) {{
     %accepted = scf.if %verify -> (hal.buffer) {{
       scf.yield %committed : hal.buffer
     }} else {{

@@ -284,6 +284,38 @@ kernel.def export("g_spec_accept") @g_spec_accept() {{
   kernel.return
 }}
 """)
+    # ---- gated anchor-only epochs run the ordinary advance program; this publishes its one token per span as verification
+    # results (consumed 1, output_count 1, token) so the host's speculative publish path needs no change
+    T.append(r"""
+kernel.def export("g_gate_results") @g_gate_results() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%spans_arg: index, %outputs: buffer, %results: buffer) {
+  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c9 = index.constant 9 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %out = buffer.view %results[%zero] : buffer -> view<[%spans]x10xi32>
+  %tok = buffer.view %outputs[%zero] : buffer -> view<[%spans]xi32>
+  scf.for %s = [%c0 to %spans step %c1] {
+    %sb = index.assume %s [range(%s, 0, 2147483646), lt(%s, %spans)] : index
+    %t = view.load %tok[%sb] : view<[%spans]xi32> -> i32
+    view.store %c1_i32, %out[%sb, 0] : i32, view<[%spans]x10xi32>
+    view.store %c1_i32, %out[%sb, 1] : i32, view<[%spans]x10xi32>
+    view.store %t, %out[%sb, 2] : i32, view<[%spans]x10xi32>
+    scf.for %w = [%c3 to %c9 step %c1] {
+      %wb = index.assume %w [range(%w, 3, 8)] : index
+      view.store %c0_i32, %out[%sb, %wb] : i32, view<[%spans]x10xi32>
+    }
+    view.store %c0_i32, %out[%sb, 9] : i32, view<[%spans]x10xi32>
+  }
+  kernel.return
+}
+""")
     # ---- plain rmsnorm: out[t] = rmsnorm(in[t]) * w
     T.append(f"""
 kernel.def export("g_spec_rmsnorm") @g_spec_rmsnorm(%tokens: index) {{
@@ -916,6 +948,26 @@ def verify_program(program, g):
             tail += spec["replay"](layer)
     tail += "  command.return\n}\n"
     return "config.decl @llm.width : %value: index where [range(%value, 2, 8)]\n\n" + body + tail
+
+
+def gate_advance():
+    """Gated (anchor-only) epochs of DFlash drafters run the ordinary advance program (@llm_gate) instead of a one-token
+    @llm_verify: verification's capture / restore / replay passes, wide head and acceptance cost 5-9 % of a depth-0 epoch at
+    four streams, and with no proposals the drafter's catch-up has nothing to feed. SPEC_GATE_VERIFY=1 keeps the verify path."""
+    return bool(DRAFT) and DRAFT.get("kind") == "dflash" and os.environ.get("SPEC_GATE_VERIFY", "0") != "1"
+
+
+def gate_program(program):
+    """@llm_gate: the plain trunk (no feature taps: nothing warms the drafter after a gated epoch) whose launch ends by
+    writing the verification-result records (g_gate_results); bindings as @llm_verify's (outputs take the committed slot)."""
+    assert ADVANCE_SIG in program
+    body = program[program.index(ADVANCE_SIG):]
+    body = body.replace(ADVANCE_SIG, ADVANCE_SIG.replace("@llm_advance", "@llm_gate").replace("%outputs: buffer)", "%outputs: buffer, %results: buffer)"), 1)
+    tail = "  command.return\n}"
+    body = body.rstrip()
+    assert body.endswith(tail), body[-80:]
+    body = body[:-len(tail)] + "  kernel.launch @g_gate_results(%spans, %outputs, %results) : (index, buffer, buffer)\n" + tail + "\n"
+    return body
 
 
 def _prologue_allocs(prologue):
