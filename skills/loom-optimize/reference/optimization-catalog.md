@@ -69,8 +69,7 @@ agreeing within 0.4 %): main build 14.39 ms per token, all levers below 12.97 ms
 previous. Decode had no kernel at its bandwidth: a 1-token launch is KU x FFN / R workgroups, and with R=8 that is only
 768 for gate/up.
 - **Rows per workgroup `MOE_R`** (auto: aim for ~3000 workgroups per gate/up launch, powers of two within 2..8): R=8 -> 4
-  +4 %, 4 -> 2 +1.5 %, R=1 slower (13.13 vs 12.99 ms). Unrolling the row loop (`MOE_UNROLL=1`, R loads in flight)
-  lost 2-6 %: occupancy beats per-wave memory parallelism here.
+  +4 %, 4 -> 2 +1.5 %, R=1 slower (13.13 vs 12.99 ms).
 - **Router `MOE_ROUTE_U`** (default 4): `g_moe_route` is one latency-bound workgroup per token (34 us per layer: 1.6 ms of
   the 14.4); scoring 4 experts per wave in the same loop (4 independent weight loads in flight, summation order
   unchanged, outputs bit-identical) is +2 %; 8 ties.
@@ -425,6 +424,8 @@ previous. Decode had no kernel at its bandwidth: a 1-token launch is KU x FFN / 
   one tie; never a loss); Qwen3.8-27B and Bolt tie; Flint -4 % at 8k. Repeat the A/B across sessions.
 
 ## Did not help
+- **Unrolling the expert matvec's row loop** (R straight-line copies, all weight loads before the first wave reduction;
+  Qwen3-30B-A3B decode): -2 % at R=2 and -6 % at R=4 against the same R rolled. Occupancy (more, smaller workgroups) beats per-wave memory parallelism.
 - **64-key flash tiles.** Register pressure; occupancy dropped.
 - **Expert gate_up prefetch.** No gain; the kernel is compute-bound already.
 - **Larger MoE tiles or wide GEMM tiles.** More padding waste and less occupancy.
