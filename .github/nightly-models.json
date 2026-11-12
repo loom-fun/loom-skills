@@ -28,9 +28,9 @@
   {
    "repo": "loom-fun/ggml-org-Muse-Glimmer-30B-loom",
    "slug": "ggml-org-muse-glimmer-30b",
-   "memory_bytes": 48000000000,
+   "memory_bytes": 44000000000,
    "kit": "glimmer",
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -121,12 +121,11 @@
   {
    "repo": "loom-fun/unsloth-Qwen3.5-2B-loom",
    "slug": "qwen3.5-2b",
-   "memory_bytes": 9000000000,
+   "memory_bytes": 10000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
     "vision",
-    "draft",
     "thinking-toggle"
    ]
   },
@@ -270,9 +269,8 @@
    "slug": "nanbeige4.3-33b",
    "memory_bytes": 81000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
-    "draft",
     "thinking-toggle"
    ]
   },
@@ -334,7 +332,7 @@
    "slug": "qwen3-30b-a3b-instruct-2507",
    "memory_bytes": 63000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": []
   },
   {
@@ -364,10 +362,9 @@
    "slug": "qwen2.5-vl-7b-instruct",
    "memory_bytes": 21000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": [
-    "vision",
-    "draft"
+    "vision"
    ]
   },
   {
@@ -421,7 +418,7 @@
    "slug": "gemma-4-12b-it",
    "memory_bytes": 81000000000,
    "kit": "gemma4",
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": [
     "draft",
     "thinking-toggle"

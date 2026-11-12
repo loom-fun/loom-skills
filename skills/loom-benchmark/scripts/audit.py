@@ -104,7 +104,7 @@ if row_acc and depth and roof and os.path.exists(roof.get("gguf") or ""):
 
 def ceiling(m, R):
     c = shape and roofline.drafted_row_ceiling(shape, m, depth, row_acc.get(m), roof.get("bw") or roofline.BW)
-    return max(R["ceiling"], c or 0)
+    return max(R["ceiling"], R.get("bound") or 0, c or 0)   # bound: MoE c4 with every stream on the same experts
 
 
 for m, R in metrics.items():
