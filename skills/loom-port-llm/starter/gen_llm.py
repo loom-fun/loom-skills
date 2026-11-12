@@ -2611,6 +2611,7 @@ def attention_text(S, P):
     layers see the last 2048 positions (including the current one). The
     combine kernel folds the splits and applies the sigmoid output gate."""
     U = UNROLL
+    KPS = attn_rules.ATTN_KPS if P == "g" else 32
     body = []
     pa = attn_rules.paged(U)
     if pa:   # absolute U-aligned key blocks lie in one 16-position KV page: one page lookup per block
@@ -2712,11 +2713,11 @@ def attention_text(S, P):
         SINK_LOAD = SINK_W = ""
         M_INIT, D_INIT = "%neg_big", "%zero_f"
     text = f"""
-// Splits for `visible` keys: about 32 keys each, at most {S}.
+// Splits for `visible` keys: about {KPS} keys each, at most {S}.
 func.def inline @{P}_split_count(%visible: index) -> (index) {{
   %c1 = index.constant 1 : index
-  %c127 = index.constant 31 : index
-  %c128 = index.constant 32 : index
+  %c127 = index.constant {KPS - 1} : index
+  %c128 = index.constant {KPS} : index
   %cmax = index.constant {S} : index
   %padded = index.add %visible, %c127 : index
   %target = index.div %padded, %c128 : index
