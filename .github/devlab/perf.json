@@ -8,6 +8,16 @@
    "name": "q8-pf",
    "variants": [
     {
+     "name": "main",
+     "build": {
+      "ATTN_COMBINE_U": "1"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
      "name": "base",
      "build": {},
      "build_args": [
@@ -50,6 +60,7 @@
    "steps": [
     "ktest:pf16",
     "ktest:pf8",
+    "perf:main:2:long",
     "perf:base:2:long",
     "perf:pf16:2:long",
     "perf:pf8:2:long",
@@ -62,6 +73,16 @@
    "memory_bytes": 60000000000,
    "variants": [
     {
+     "name": "main",
+     "build": {
+      "ATTN_COMBINE_U": "1"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
      "name": "base",
      "build": {},
      "build_args": [
@@ -104,12 +125,12 @@
    "steps": [
     "ktest:pf16",
     "ktest:pf8",
+    "perf:main:2:long",
     "perf:base:2:long",
     "perf:pf16:2:long",
     "perf:pf8:2:long",
     "perf:u8:2:long"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
