@@ -1,6 +1,11 @@
 {
- "_comment": "Regenerate the Qwen3-4B-Instruct-2507 card from main (tune.py per-row drafting + occupancy gate) derived from its published card.",
+ "_comment": "Regenerate the Qwen3-0.6B card from main (tune.py per-row drafting + occupancy gate), derived from its published card.",
  "jobs": [
-  {"name": "q3-4b-2507-regen", "spec": "unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "reference": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom", "model_id": "Qwen/Qwen3-4B-Instruct-2507"}
+  {
+   "name": "q06-regen",
+   "spec": "unsloth/Qwen3-0.6B-GGUF:Qwen3-0.6B-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "model_id": "Qwen/Qwen3-0.6B"
+  }
  ]
 }
