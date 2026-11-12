@@ -2710,6 +2710,55 @@ def gqa_split(text, P, S):
     return text[:a] + k + text[b:]
 
 
+def combine_unrolled(text, S, CU, M_INIT, D_INIT):
+    """g_attention_combine with CU splits per loop iteration: the loop over the splits was serial (one dependent global load
+    round trip per split, 64 splits at 32k), so the combine cost a few percent of decode_32k. Loads for CU splits are issued
+    together; the accumulation keeps the original order (the slots past the last split are clamped to a valid one and get
+    weight 0), so the result is bit-identical."""
+    def loop1():
+        t = [f"    %maximum = scf.for %s = [%c0 to %s_eff step %cCU](%mx = {M_INIT} : f32) -> (f32) {{"]
+        for u in range(CU):
+            t.append(f"""      %s_{u} = index.add %s, %cu{u} : index
+      %ok_{u} = index.cmp ult, %s_{u}, %s_eff : index
+      %sc_{u} = scf.select %ok_{u}, %s_{u}, %s_last : index
+      %bs_{u} = index.assume %sc_{u} [range(%sc_{u}, 0, {S - 1})] : index
+      %ms_{u} = view.load %ml_view[%token, %head, %bs_{u}, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32""")
+        prev = "%mx"
+        for u in range(CU):
+            t.append(f"""      %msel_{u} = scf.select %ok_{u}, %ms_{u}, %neg_big : f32
+      %next_{u} = scalar.maxnumf {prev}, %msel_{u} : f32"""); prev = f"%next_{u}"
+        t.append(f"      scf.yield {prev} : f32\n    }}\n")
+        return "\n".join(t)
+    def loop2():
+        t = [f"    %den, %total = scf.for %s = [%c0 to %s_eff step %cCU](%d = {D_INIT} : f32, %acc = %zero4 : vector<4xf32>) -> (f32, vector<4xf32>) {{"]
+        for u in range(CU):
+            t.append(f"""      %s_{u} = index.add %s, %cu{u} : index
+      %ok_{u} = index.cmp ult, %s_{u}, %s_eff : index
+      %sc_{u} = scf.select %ok_{u}, %s_{u}, %s_last : index
+      %bs_{u} = index.assume %sc_{u} [range(%sc_{u}, 0, {S - 1})] : index
+      %ms_{u} = view.load %ml_view[%token, %head, %bs_{u}, 0] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
+      %ls_{u} = view.load %ml_view[%token, %head, %bs_{u}, 1] : view<[%tokens]x{QH}x{S}x2xf32> -> f32
+      %part_{u} = vector.load %acc_view[%token, %head, %bs_{u}, %lane, %c0] : view<[%tokens]x{QH}x{S}x32x4xf32> -> vector<4xf32>""")
+        pd, pa = "%d", "%acc"
+        for u in range(CU):
+            t.append(f"""      %shift_{u} = scalar.subf %ms_{u}, %maximum : f32
+      %w_{u}e = scalar.expf<afn> %shift_{u} : f32
+      %w_{u} = scf.select %ok_{u}, %w_{u}e, %zero_f : f32
+      %wl_{u} = scalar.mulf %w_{u}, %ls_{u} : f32
+      %d_{u} = scalar.addf {pd}, %wl_{u} : f32
+      %w_v{u} = vector.splat %w_{u} : vector<4xf32>
+      %acc_{u} = vector.fmaf %w_v{u}, %part_{u}, {pa} : vector<4xf32>"""); pd, pa = f"%d_{u}", f"%acc_{u}"
+        t.append(f"      scf.yield {pd}, {pa} : f32, vector<4xf32>\n    }}")
+        return "\n".join(t)
+    a = text.index("    %maximum = scf.for")
+    b = text.index("    %one = scalar.constant 1.0 : f32", a)
+    mid = text[a:b]
+    sink_w = mid[mid.index("    }\n", mid.index("scf.yield %next")) + 6:mid.index("    %den, %total")]
+    consts = "".join(f"    %cu{u} = index.constant {u} : index\n" for u in range(CU))
+    pre = f"    %cCU = index.constant {CU} : index\n{consts}    %s_last = index.sub %s_eff, %c1 : index\n"
+    return text[:a] + pre + loop1() + sink_w + loop2() + "\n" + text[b:]
+
+
 def attention_text(S, P):
     """Split-K causal GQA attention: workgroup (token, KV head, split) of 16
     waves, wave w = query head 16*kv + w, lane l = dims 4l..4l+3. Sliding
@@ -3008,6 +3057,8 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
   kernel.return
 }}
 """
+    if P == "g" and attn_rules.COMBINE_U > 1:
+        text = combine_unrolled(text, S, attn_rules.COMBINE_U, M_INIT, D_INIT)
     if P == "g" and D == 128 and attn_rules.ATTN_GQA and attn_rules.paged(U) and attn_rules.butterfly(U) and not gen_draft.enabled():   # measured at head_dim 128 only
         text = gqa_split(text, P, S)
     elif P == "g" and attn_rules.multi_token(U, KVH):
@@ -3399,7 +3450,7 @@ def seg_attention(text):
 def attention():
     """Decode attention with up to 64 splits; the prefill fallback (listed,
     indexed by token over up to 1024 rows) keeps 16 splits."""
-    dec, _, _ = attention_text(64, "g")
+    dec, _, _ = attention_text(attn_rules.SPLITS, "g")
     pre, split_l, combine_l = attention_text(16, "g16")
     count16 = pre[pre.index("// Splits for"):pre.index('kernel.def export("g16_attention_split")')]
     return dec + "\n" + count16 + split_l + "\n" + combine_l + FALLBACK
@@ -5021,9 +5072,9 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %c_never = index.constant 1000000 : index
   %c128 = index.constant 128 : index
   %prefill_shape = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c64"} : index
-  %pacc_dec = index.constant {QH * 64 * D * 4} : offset
+  %pacc_dec = index.constant {QH * attn_rules.SPLITS * D * 4} : offset
   %pacc_pre = index.constant {QH * 16 * D * 4} : offset
-  %pml_dec = index.constant {QH * 64 * 2 * 4} : offset
+  %pml_dec = index.constant {QH * attn_rules.SPLITS * 2 * 4} : offset
   %pml_pre = index.constant {QH * 16 * 2 * 4} : offset
   %pacc_bytes = scf.select %prefill_shape, %pacc_pre, %pacc_dec : offset
   %pml_bytes = scf.select %prefill_shape, %pml_pre, %pml_dec : offset

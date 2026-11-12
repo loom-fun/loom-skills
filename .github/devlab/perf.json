@@ -1,38 +1,82 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "card": "loom-fun/unsloth-Qwen3-8B-loom",
+ "memory_bytes": 55000000000,
+ "kit": null,
+ "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "q8-attn",
    "variants": [
     {
-     "name": "card"
+     "name": "nd",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "cu8",
+     "build": {
+      "ATTN_COMBINE_U": "8"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "cu16",
+     "build": {
+      "ATTN_COMBINE_U": "16"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "s128",
+     "build": {
+      "ATTN_SPLITS": "128",
+      "ATTN_COMBINE_U": "8"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "s32",
+     "build": {
+      "ATTN_SPLITS": "32",
+      "ATTN_COMBINE_U": "8"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "u32",
+     "build": {
+      "ATTN_UNROLL": "32",
+      "ATTN_COMBINE_U": "8"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "fn-mtp-b",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
+    "ktest:cu8",
+    "perf:nd:2:long",
+    "perf:cu8:2:long",
+    "perf:cu16:2:long",
+    "perf:s128:2:long",
+    "perf:s32:2:long",
+    "perf:u32:2:long"
    ]
   }
  ],
