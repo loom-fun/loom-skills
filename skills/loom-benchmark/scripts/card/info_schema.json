@@ -88,7 +88,7 @@
     },
     "sessions": {
      "type": "array", "items": {"$ref": "#/$defs/session"},
-     "description": "Measurement sessions in evidence order. Per metric the last local session that measured it is the card's headline value, and the last DevLab session (source kind devlab) its DevLab value (card_lib.card_metrics)."
+     "description": "Measurement sessions in evidence order, all from AMD DevLab Dispatch (source kind devlab or factory: devlab-perf jobs, scripted DevLab ports, loom-factory). Per metric the last session that measured it is the card's value (card_lib.card_metrics)."
     }
    }
   },
@@ -137,20 +137,13 @@
   },
   "status": {"enum": ["paused"], "description": "Where work on this model stands, when not active: paused (work stopped; the card shows what was reached). Optional key, loom-card/2."},
   "next_steps": {"type": "array", "items": {"type": "string"},
-                 "description": "What would be done next if work continued, one short markdown line each; README.md ends with them under Next steps. Optional key, loom-card/2."},
-  "devlab": {
-   "type": "object", "required": ["sweeps"],
-   "description": "Loom measured alone on AMD DevLab Dispatch runners by the nightly sweep, oldest first. No longer written or rendered: a card's DevLab numbers are performance sessions (Loom and llama.cpp) with a devlab source. Kept (optional key, loom-card/2) so cards that recorded sweeps stay valid; make_info.py build --from-info carries them over unchanged.",
-   "properties": {
-    "sweeps": {"type": "array", "items": {"$ref": "#/$defs/sweep"}}
-   }
-  }
+                 "description": "What would be done next if work continued, one short markdown line each; README.md ends with them under Next steps. Optional key, loom-card/2."}
  },
  "$defs": {
   "source": {
    "type": "object", "required": ["kind", "run", "url", "device", "hrx_loom"],
    "properties": {
-    "kind": {"enum": ["local", "devlab", "factory"], "description": "local: a developer's machine; devlab: a workflow on AMD DevLab Dispatch (nightly-gates, devlab-port, devlab-perf: a performance session from one fills the card's DevLab columns); factory: the loom-factory workflow"},
+    "kind": {"enum": ["local", "devlab", "factory"], "description": "local: a developer's machine (gates only: never a performance session); devlab: a workflow on AMD DevLab Dispatch (nightly-gates, devlab-port, devlab-perf: the card's performance); factory: the loom-factory workflow"},
     "run": {"type": ["string", "null"], "description": "GitHub Actions run id"},
     "url": {"type": ["string", "null"]},
     "device": {"oneOf": [{"$ref": "#/$defs/device"}, {"type": "null"}]},
@@ -234,17 +227,6 @@
     "acceptance": {"type": "number", "minimum": 0, "maximum": 1, "description": "drafted rows: the acceptance this ceiling counts"},
     "acceptance_from": {"enum": ["session", "spec_gate"], "description": "session: measured in the same session as the card's value of this row; spec_gate: the spec gate's (its text can accept more or less than the row's)"},
     "tokens_per_pass": {"type": "number", "description": "drafted rows: 1 + acceptance x depth"}
-   }
-  },
-  "sweep": {
-   "type": "object", "required": ["date", "source", "metrics"],
-   "properties": {
-    "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
-    "source": {"type": "string"},
-    "runner": {"type": ["string", "null"], "description": "the DevLab runner's name"},
-    "commands": {"type": "array", "items": {"type": "string"}},
-    "programs_sha256": {"type": ["string", "null"]},
-    "metrics": {"type": "object", "additionalProperties": {"$ref": "#/$defs/metric"}}
    }
   },
   "feature": {

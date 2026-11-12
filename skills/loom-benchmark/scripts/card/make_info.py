@@ -13,9 +13,12 @@ byte-identical files.
       (tags, the default --output, a memory_bytes in model.json) are dropped. Evidence files apply in order.
       --generator-commit: the loom-skills commit of these card scripts (default: this checkout's HEAD, or
       "unknown" outside a git checkout).
-      --from-info OLD.json: start from a published info.json (its sessions, gates, sources and roofline; Loom-only
-      DevLab sweeps an older card recorded are kept as they are, never rendered) and apply the evidence files on
-      top: how a card is regenerated when only new evidence arrives.
+      --from-info OLD.json: start from a published info.json (its sessions, gates, sources and roofline) and apply
+      the evidence files on top: how a card is regenerated when only new evidence arrives. Performance sessions from
+      anywhere but DevLab (a local machine's, from cards made before DevLab became the only performance source) and
+      an older card's "devlab" sweeps are dropped.
+      --reset-performance: drop OLD.json's performance sessions (its further-backend baselines stay): the card's
+      performance is re-measured from scratch by the evidence given (a devlab-perf job on new programs or settings).
       --repo defaults to OLD.json's repo.
       --next-steps FILE: the card's next steps, one per line (a leading "- " is dropped; an empty FILE removes
       them); --status paused|active (active removes the status). Both are kept from OLD.json unless given.
@@ -34,7 +37,8 @@ byte-identical files.
                      [SOURCE] -o gates_evidence.json
       gates.sh's gates.json (verdicts, level, ts), a gates.out with its "GATES ..." line, or a kernel test
       log ending in "N/M passed" (make_kernel_tests.py) -> gate evidence. The spec gate's "acceptance N% of M
-      proposals" (gates_spec.log or gates.out next to the file, or --spec-log) -> the spec_acceptance metric.
+      proposals" (gates_spec.log or gates.out next to the file, or --spec-log) -> the spec_acceptance metric, from a
+      DevLab (or factory) source only, like every card performance value.
 
   make_info.py roofline --package PKG [--gguf G] [--cfg cfg.json] [--acceptance A | --evidence EV.json ...] [--skills-commit SHA]
                         -o roofline_evidence.json
@@ -49,11 +53,11 @@ byte-identical files.
       records which ("acceptance_from": session | spec_gate): the gate's text can accept far more or less than the
       row's workload, which moves that row's ceiling by the same factor.
 
-  SOURCE (perf and gates): --source-kind local|devlab|factory [--run ID --url URL] [--device auto|none|FILE.json]
-      [--hrx-loom auto|none|FILE.json]. auto (the default) records this machine's device and the Loom SDK under
-      $LOOM_ROOT (../machine_info.py): run perf and gates on the machine that measured (on downloaded DevLab
-      job files: --device none --hrx-loom none). A perf session with --source-kind devlab (a scripted DevLab port, a
-      devlab-perf job) fills the card's DevLab columns; the local sessions give its headline values.
+  SOURCE (perf and gates): --source-kind devlab|factory|local (perf: default devlab; gates: default local) [--run ID --url URL] [--device auto|none|FILE.json]
+      [--hrx-loom auto|none|FILE.json]. auto records this machine's device and the Loom SDK under $LOOM_ROOT
+      (../machine_info.py); on downloaded DevLab job files: --device none --hrx-loom none. Card performance comes
+      only from AMD DevLab Dispatch (a devlab-perf job or a scripted DevLab port, kind devlab; the loom-factory
+      workflow, kind factory): perf refuses --source-kind local. Gates may come from any source.
 
 Evidence file (loom-card-evidence/2), every block optional:
   {"evidence": "loom-card-evidence/2",
@@ -66,12 +70,11 @@ Evidence file (loom-card-evidence/2), every block optional:
    "roofline": {"device", "tool", "checkpoint", "drafting", "metrics"}}
   SOURCE: {"kind", "run", "url", "device", "hrx_loom"}
 Merge rules: card keys and versions: the later file wins. performance: sessions append in order and per metric
-the last local session that measured it is the card's value, the last DevLab one its DevLab value (card_lib
-card_metrics); the baseline is the last one given. gates: per gate the
+the last session that measured it is the card's value (card_lib card_metrics); the baseline is the last one given. gates: per gate the
 latest evidence wins (gate_supersedes: a published date-only gate is older than new evidence of that day; equal
 times: the later file), except that on the same programs_sha256 a later pass at a lower level (dev < fast < quick <
 full) does not replace a pass at a higher level; a later failure always does. roofline: the later file wins. A "devlab"
-block (a DevLab Loom-only sweep, no longer recorded) is ignored. Unknown metric and gate names are kept.
+block (an older Loom-only sweep) is ignored. Unknown metric and gate names are kept.
 """
 import argparse
 import ast
@@ -84,7 +87,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-from card_lib import (DRAFTED_ROWS, EVIDENCE_ID, MEDIAN_METRICS, METRIC_KEYS,  # noqa: E402
+from card_lib import (DRAFTED_ROWS, EVIDENCE_ID, MEDIAN_METRICS, METRIC_KEYS, PERF_SOURCE_KINDS,  # noqa: E402
                       HF, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, load_json,
                       load_package, metric_applies, package_facts, programs_sha256, require_valid, upstream_facts,
                       with_gate_features, write_json)
@@ -180,7 +183,7 @@ def cmd_build(a):
     facts = package_facts(pkg, upstream)
     card, versions, baseline, sessions, gates = {}, {}, None, [], {}
     baselines = {}   # backend -> {"baseline", "session"}: the latest evidence of each backend replaces the earlier
-    roofline, sweeps = None, []
+    roofline = None
     card_features = {}   # evidence-established feature statuses (import_card.py: greedy-only sampling)
     sources = Sources()
     if a.from_info:   # a published card: its data first, then the new evidence on top
@@ -198,14 +201,20 @@ def cmd_build(a):
         versions = {k: v for k, v in old["versions"].items() if k != "card_generator"}
         sources.by_id = dict(old["sources"])
         if old.get("performance"):
-            baseline, sessions = old["performance"]["baseline"], list(old["performance"]["sessions"])
+            baseline = old["performance"]["baseline"]
+            kind_of = lambda s: (old.get("sources") or {}).get(s["source"], {}).get("kind")
+            sessions = [] if a.reset_performance else [s for s in old["performance"]["sessions"]
+                                                       if kind_of(s) in PERF_SOURCE_KINDS]
+            dropped = len(old["performance"]["sessions"]) - len(sessions)
+            if dropped:
+                print(f"--from-info: dropped {dropped} performance session(s)"
+                      + ("" if a.reset_performance else " not measured on DevLab"), file=sys.stderr)
             baselines = json.loads(json.dumps(old["performance"].get("baselines") or {}))
         for name, g in old["gates"].items():   # a published gate has a date, not a time: later evidence that day wins
             if not gate_applies(name, facts["kind"], facts["features"]):   # e.g. spec after drafting was turned off: shown n/a
                 continue
             gates[name] = ((g.get("date") or "", -1), None, g)
         roofline = old.get("roofline")
-        sweeps = (old.get("devlab") or {}).get("sweeps") or []   # pre-decision DevLab sweeps: kept as is, not rendered
         if a.report is None:
             a.report = old.get("report")
         if a.status is None:
@@ -240,7 +249,7 @@ def cmd_build(a):
         if ev.get("roofline"):
             roofline = ev["roofline"]
         if ev.get("devlab"):
-            print(f"{path}: ignored its Loom-only DevLab sweep (a DevLab perf session is make_info.py perf --source-kind devlab)", file=sys.stderr)
+            print(f"{path}: ignored its Loom-only DevLab sweep (card performance is make_info.py perf on a devlab-perf job)", file=sys.stderr)
     if not a.repo:
         sys.exit("make_info.py build: --repo is required without --from-info")
     if not a.generator_commit:
@@ -296,10 +305,7 @@ def cmd_build(a):
         info["status"] = a.status
     if a.next_steps:
         info["next_steps"] = a.next_steps
-    if sweeps:
-        info["devlab"] = {"sweeps": sweeps}
-    used = ({s["source"] for s in sessions} | {b["session"]["source"] for b in baselines.values()} | {g["source"] for g in gate_out.values()}
-            | {s["source"] for s in info.get("devlab", {}).get("sweeps", [])})
+    used = {s["source"] for s in sessions} | {b["session"]["source"] for b in baselines.values()} | {g["source"] for g in gate_out.values()}
     info["sources"] = {k: v for k, v in sources.by_id.items() if k in used}
     require_valid(info)
     out = dumps(info)
@@ -423,6 +429,9 @@ def refused_tokens(rows, package, measured):
 
 
 def cmd_perf(a):
+    if a.source_kind not in PERF_SOURCE_KINDS:
+        sys.exit(f"perf --source-kind {a.source_kind}: card performance comes only from AMD DevLab Dispatch "
+                 "(a devlab-perf job: loom-org SKILL.md step 3); measure locally only to develop")
     if a.perf_log:
         loom_rows = perf_rows(a.perf_log, "loom", a.loom_label)
         llama_rows = perf_rows(a.perf_log, "llama", a.llama_label)
@@ -538,7 +547,7 @@ def cmd_gates(a):
             d = os.path.dirname(os.path.abspath(path))
             logs += [os.path.join(d, "gates_spec.log"), path if path.endswith(".out") else os.path.join(d, "gates.out")]
     ev = {"evidence": EVIDENCE_ID, "gates": out}
-    acc = acceptance(logs) if spec_date else None
+    acc = acceptance(logs) if spec_date and a.source_kind in PERF_SOURCE_KINDS else None   # a card statistic: DevLab only
     if acc is not None:
         ev["performance"] = {"session": {"date": spec_date, "source": src, "runs": {"decode_prefill": None, "streams4": None},
                                          "commands": [], "programs_sha256": psha,
@@ -648,8 +657,8 @@ def next_steps_file(path):
         return [re.sub(r"^[-*]\s+", "", ln.strip()) for ln in f if ln.strip()]
 
 
-def add_source_args(p):
-    p.add_argument("--source-kind", default="local", choices=["local", "devlab", "factory"])
+def add_source_args(p, kind):
+    p.add_argument("--source-kind", default=kind, choices=["devlab", "factory", "local"])
     p.add_argument("--run")
     p.add_argument("--url")
     p.add_argument("--device", default="auto", help="auto (this machine), none, or a JSON file with {cpu, gpu, os}")
@@ -671,6 +680,7 @@ def main(argv=None):
     b.add_argument("--license")
     b.add_argument("--report", choices=["generated", "attached"])
     b.add_argument("--from-info", help="a published info.json to start from (regenerating a card with new evidence)")
+    b.add_argument("--reset-performance", action="store_true", help="drop --from-info's performance sessions (re-measured from scratch)")
     b.add_argument("--status", choices=["paused", "active"], help="paused: work on this model has stopped (active: clears it)")
     b.add_argument("--next-steps", type=next_steps_file, help="a file of next steps, one per line (empty: none)")
     b.add_argument("--upstream", choices=["probe", "none"], default=os.environ.get("LOOM_CARD_UPSTREAM", "probe"),
@@ -699,14 +709,14 @@ def main(argv=None):
     p.add_argument("--command", action="append", help="a measuring command, for REPORT.md (repeat)")
     p.add_argument("--commands-file", help="measuring commands, one per line")
     p.add_argument("--date", help="YYYY-MM-DD (default: the latest Loom row's time)")
-    add_source_args(p)
+    add_source_args(p, "devlab")
     p.add_argument("-o", required=True)
     g = sub.add_parser("gates")
     g.add_argument("files", nargs="+")
     g.add_argument("--time", help="ISO time of the run when the file has none (gates.out, kernel test log)")
     g.add_argument("--level")
     g.add_argument("--spec-log", help="the spec gate's log with 'acceptance N%% of M proposals' (default: next to FILE)")
-    add_source_args(g)
+    add_source_args(g, "local")
     g.add_argument("-o", required=True)
     r = sub.add_parser("roofline")
     r.add_argument("--package", required=True, help="the package (model.json, model.json.lock, llm_config.json)")
