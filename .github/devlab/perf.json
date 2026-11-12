@@ -1,12 +1,12 @@
 {
- "_comment": "flash2: where does the non-flash2 prefill time differ? (drop kernels, timing only)",
+ "_comment": "flash2: #193 with the old prologue / direct first token (WIP)",
  "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
  "memory_bytes": 55000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "f2x",
+   "name": "f2z",
    "variants": [
     {
      "name": "pre",
@@ -16,30 +16,6 @@
       "none"
      ],
      "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
-    },
-    {
-     "name": "pre_nofl",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f",
-     "drop": [
-      "*:g_attention_flash2"
-     ]
-    },
-    {
-     "name": "pre_nofb",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f",
-     "drop": [
-      "*:g16_attention_split_listed|g16_attention_combine_listed"
-     ]
     },
     {
      "name": "p193",
@@ -51,117 +27,33 @@
      "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8"
     },
     {
-     "name": "p193_nofl",
-     "build": {},
+     "name": "p193_oldpro",
+     "build": {
+      "FLASH2_OLD_PROLOGUE": "1"
+     },
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8",
-     "drop": [
-      "*:g_attention_flash2"
-     ]
+     "ref": "231d64a9075b3b4b6600be4155655354053eebda"
     },
     {
-     "name": "p193_nofb",
-     "build": {},
+     "name": "p193_direct",
+     "build": {
+      "FLASH2_DIRECT": "1"
+     },
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8",
-     "drop": [
-      "*:g16_attention_split_listed|g16_attention_combine_listed"
-     ]
+     "ref": "231d64a9075b3b4b6600be4155655354053eebda"
     }
    ],
    "steps": [
     "perf:pre:2:long",
-    "perf:pre_nofl:2:long",
-    "perf:pre_nofb:2:long",
     "perf:p193:2:long",
-    "perf:p193_nofl:2:long",
-    "perf:p193_nofb:2:long"
-   ]
-  },
-  {
-   "name": "f2y",
-   "variants": [
-    {
-     "name": "pre",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
-    },
-    {
-     "name": "main",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "6fd2f49"
-    },
-    {
-     "name": "main_nofl",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "6fd2f49",
-     "drop": [
-      "*:g_attention_flash2"
-     ]
-    },
-    {
-     "name": "main_nofb",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "6fd2f49",
-     "drop": [
-      "*:g16_attention_split_listed|g16_attention_combine_listed"
-     ]
-    },
-    {
-     "name": "main_nofl_nofb",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "6fd2f49",
-     "drop": [
-      "*:g_attention_flash2",
-      "*:g16_attention_split_listed|g16_attention_combine_listed"
-     ]
-    },
-    {
-     "name": "pre_nofl",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f",
-     "drop": [
-      "*:g_attention_flash2"
-     ]
-    }
-   ],
-   "steps": [
-    "perf:pre:2:long",
-    "perf:main:2:long",
-    "perf:main_nofl:2:long",
-    "perf:main_nofb:2:long",
-    "perf:main_nofl_nofb:2:long",
-    "perf:pre_nofl:2:long"
+    "perf:p193_oldpro:2:long",
+    "perf:p193_direct:2:long"
    ]
   }
  ]
