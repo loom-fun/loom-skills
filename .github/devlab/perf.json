@@ -6,7 +6,7 @@
  "llamacpp_vulkan": "b12211",
  "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:AtomicChat/Qwen3-4B-DFlash-GGUF/Qwen3-4B-DFlash.Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
  "jobs": [
-  {"name": "card-perf2",
+  {"name": "card-perf3",
    "variants": [{"name": "card"}],
    "steps": ["perf:card:2", "perf:card:2:long", "c4:card", "llama:2", "llama:2:long", "llamac4",
              "llama@vulkan.np1.nospec:2", "llama@vulkan.np1.nospec:2:long", "llamac4@vulkan.perslot.nospec"]}
