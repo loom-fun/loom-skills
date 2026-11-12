@@ -2613,7 +2613,7 @@ def gqa_split(text, P, S):
     over it. The partial buffers and the combine kernel are unchanged. It has G times fewer waves and G times more work
     per wave, which loses at short context (kv8, nodraft: decode -3 %, 2k -1.5 %, 4 streams -2 %) and wins at long (32k
     +14 %): contexts with fewer than ATTN_GQA_FROM visible keys run the per-head body that stays in the else branch."""
-    U = UNROLL
+    U = min(attn_rules.GQA_U, UNROLL)   # keys per block of this body (8: the K/V rows in flight for G heads fit the registers)
     a = text.index(f'kernel.def export("{P}_attention_split")')
     b = text.index(f'kernel.def export("{P}_attention_combine")', a)
     k = text[a:b]
@@ -2647,14 +2647,15 @@ def gqa_split(text, P, S):
     %head{h} = index.assume %head{h}_raw [range(%head{h}_raw, 0, {QH - 1})] : index
     %q_raw{h} = vector.load %q_view[%token, %head{h}, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
     %q4_{h} = vector.mulf %q_raw{h}, %scale_v : vector<4xf32>""")
-    t.append("""    %lo_abs = index.add %window_low, %start : index
+    t.append(f"""    %lo_abs = index.add %window_low, %start : index
     %hi_abs = index.add %window_low, %stop : index
-    %lo_q = index.div %lo_abs, %cU : index
-    %lo_al = index.mul %lo_q, %cU : index""")
+    %cUg = index.constant {U} : index
+    %lo_q = index.div %lo_abs, %cUg : index
+    %lo_al = index.mul %lo_q, %cUg : index""")
     fin = "".join(f"%mf_{h}, %lf_{h}, %af_{h}, " for h in range(G)).rstrip(", ")
     args = ", ".join(f"%m_{h} = %neg_big : f32, %l_{h} = %zero_f : f32, %acc_{h} = %zero4 : vector<4xf32>" for h in range(G))
     types = ", ".join(["f32, f32, vector<4xf32>"] * G)
-    t.append(f"    {fin} = scf.for %j = [%lo_al to %hi_abs step %cU]({args}) -> ({types}) {{")
+    t.append(f"    {fin} = scf.for %j = [%lo_al to %hi_abs step %cUg]({args}) -> ({types}) {{")
     t.append("""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
     for i in range(U):
         t.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
