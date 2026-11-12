@@ -1,19 +1,50 @@
 {
-  "repeats": 3,
-  "suites": [
-    {
-      "suite": "example",
-      "dir": "example",
-      "files": [
-        "bench.loom",
-        "bench_v4.loom"
-      ],
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ]
-    }
-  ]
+ "repeats": 5,
+ "suites": [
+  {
+   "suite": "f2deep",
+   "dir": "f2deep",
+   "files": [
+    "bench_pre.loom",
+    "bench_p193.loom",
+    "bench_main.loom"
+   ],
+   "config": [],
+   "args": [
+    "--measure=dispatch_complete",
+    "--batch-size=8",
+    "--profile-final-batch=true"
+   ]
+  },
+  {
+   "suite": "f2slide",
+   "dir": "f2slide",
+   "files": [
+    "bench_pre.loom",
+    "bench_p193.loom",
+    "bench_main.loom"
+   ],
+   "config": [],
+   "args": [
+    "--measure=dispatch_complete",
+    "--batch-size=8",
+    "--profile-final-batch=true"
+   ]
+  },
+  {
+   "suite": "f2shallow",
+   "dir": "f2shallow",
+   "files": [
+    "bench_pre.loom",
+    "bench_p193.loom",
+    "bench_main.loom"
+   ],
+   "config": [],
+   "args": [
+    "--measure=dispatch_complete",
+    "--batch-size=8",
+    "--profile-final-batch=true"
+   ]
+  }
+ ]
 }
