@@ -1,61 +1,14 @@
 {
- "_comment": "Active-wait re-measure: Qwen3.8-Flash-Next and Qwen3.5-0.8B (regenerated) (other cards: runs 43033815593, 43075216088, 43106368506).",
+ "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+ "memory_bytes": 55000000000,
+ "kit": null,
+ "llamacpp": "b1368",
+ "llamacpp_vulkan": "b12211",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:AtomicChat/Qwen3-4B-DFlash-GGUF/Qwen3-4B-DFlash.Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
  "jobs": [
-  {
-   "name": "unsloth-Qwen3.8-Flash-Next",
-   "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
-   "memory_bytes": 100000000000,
-   "kit": "qwen4exp",
-   "llamacpp": "b1371",
-   "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "parked",
-     "active_wait": false
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "unsloth-Qwen3.5-0.8B",
-   "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
-   "memory_bytes": 9000000000,
-   "kit": null,
-   "llamacpp": "b1369",
-   "llama_spec": "--spec-type ngram-simple",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "parked",
-     "active_wait": false
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
-  }
+  {"name": "card-perf",
+   "variants": [{"name": "card"}],
+   "steps": ["perf:card:2", "perf:card:2:long", "c4:card", "llama:2", "llama:2:long", "llamac4",
+             "llama@vulkan:2:long", "llama@vulkan.np1.nospec:2:long", "llamac4@vulkan", "llamac4@vulkan.perslot.nospec"]}
  ]
 }
