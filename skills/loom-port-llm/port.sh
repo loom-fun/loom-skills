@@ -170,7 +170,7 @@ if [ ! -f tok/tokenizer.json ] && [ -n "$first" ]; then
 fi
 rm -rf tok/cand tok/first.json
 [ -f tok/tokenizer.json ] || { echo "no tokenizer.json found in: $tokrepos (download it from the base model into $work/tok)"; exit 2; }
-[ -n "$model_id" ] || model_id=$(echo "$tokrepos" | cut -d' ' -f1)
+[ -n "$model_id" ] || model_id=$(echo $tokrepos | cut -d" " -f1)   # unquoted: tokrepos starts with a space when the catalog gives no tokenizer repo (#229), which made cut print an empty id
 
 # A published, gate-passing port of the same architecture (or one sharing building blocks) is the starting point:
 # its kit (reference example), its reviewed config, its chat block and its measured drafting choice. Category A only.
