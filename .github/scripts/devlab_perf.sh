@@ -275,6 +275,15 @@ for s in $steps; do
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
 print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
+    tunerow)   # tunerow:V:N : draft/tune.py's own rows (work*, long after a 16k doc, streams4) N times, V served alone
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "tune rows $p1 x $p2"
+      for i in $(seq 1 "${p2:-1}"); do
+        "$T" -c "
+import json,sys; sys.path.insert(0, '$here/skills/loom-port-llm/starter/draft'); import tune
+print(json.dumps(tune.measure('$url', '$cardid', {}, 32768, 4)))" | tail -1 | tee -a "$out/tunerow_$p1.jsonl"
+      done
+      res[$s]=$(cat "$out/tunerow_$p1.jsonl" | tr '\n' ' ');;
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "c4 $p1"

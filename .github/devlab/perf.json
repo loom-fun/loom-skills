@@ -7,42 +7,60 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "dec",
+   "name": "tune",
    "variants": [
     {
-     "name": "gate",
-     "build": {}
+     "name": "nd",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     },
     {
-     "name": "d1",
+     "name": "ng2",
      "build": {},
-     "execution": {
-      "draft_depth": 1
-     }
+     "build_args": [
+      "--draft",
+      "ngram",
+      "--draft-depth",
+      "2"
+     ]
     },
     {
-     "name": "d3",
+     "name": "ng1",
      "build": {},
-     "execution": {
-      "draft_depth": 3
-     }
+     "build_args": [
+      "--draft",
+      "ngram",
+      "--draft-depth",
+      "1"
+     ]
     },
     {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "nd_s128",
+     "build": {
+      "ATTN_SPLITS": "128"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     }
    ],
    "steps": [
-    "perf:gate:5",
-    "perf:d1:5",
-    "perf:d3:5",
-    "perf:nodraft:5",
-    "c4:d1",
-    "c4:nodraft",
-    "llama@vulkan:5"
+    "tunerow:nd:2",
+    "tunerow:ng2:2",
+    "tunerow:ng1:2",
+    "tunerow:nd_s128:2",
+    "perf:nd:3",
+    "perf:ng1:3",
+    "perf:nd:3:long",
+    "perf:ng1:3:long",
+    "perf:nd_s128:3:long",
+    "perf:ng2:3:long",
+    "llama@vulkan:3:long",
+    "llama@vulkan:3"
    ]
   }
  ]
