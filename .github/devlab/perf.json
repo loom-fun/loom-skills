@@ -1,5 +1,5 @@
 {
- "_comment": "Flint card perf session: Loom (active wait, main) vs llama.cpp ROCm b1373? and Vulkan b12211 on one runner.",
+ "_comment": "Flint card perf session after regen e84d212 -> republish; Loom (active wait) vs ROCm and Vulkan on one runner.",
  "card": "loom-fun/ggml-org-Flint-loom",
  "memory_bytes": 69000000000,
  "kit": null,
