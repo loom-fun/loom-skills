@@ -326,17 +326,20 @@ def cmd_apply(a):
         return
     taken, review = [], []
     for k, v in rc.items():
+        if k == "extra_eos_ids":
+            continue   # below
         if k in OWN or k == "chat":
             continue
         if k not in cfg:
             cfg[k] = v; taken.append(k)
-        elif k == "extra_eos_ids" and cfg.get("eos_id") == rc.get("eos_id") and cfg.get("vocab") == rc.get("vocab") \
-                and set(v) - set(cfg[k]):
-            # extra stop ids (flint: <|user|>, <|observation|>) come from the reviewed port when inspect found fewer:
-            # same architecture, EOS and vocabulary size; only ever more stops, never fewer
-            cfg[k] = sorted(set(cfg[k]) | set(v)); taken.append(k)
         elif cfg[k] != v:
             review.append(k)
+    # extra stop ids (flint: <|user|>, <|observation|>, which the GGUF does not mark EOG) come from the reviewed port
+    # when inspect found fewer: same architecture, EOS and vocabulary size; only ever more stops, never fewer
+    rv = rc.get("extra_eos_ids") or []
+    if rv and cfg.get("eos_id") == rc.get("eos_id") and cfg.get("vocab") == rc.get("vocab") \
+            and set(rv) - set(cfg.get("extra_eos_ids") or []):
+        cfg["extra_eos_ids"] = sorted(set(cfg.get("extra_eos_ids") or []) | set(rv)); taken.append("extra_eos_ids")
     chat_ok = bool(cfg.get("chat")) and not a.chat_failed
     if not chat_ok and rc.get("chat"):
         cfg["chat"] = rc["chat"]; taken.append("chat")
