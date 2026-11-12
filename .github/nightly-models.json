@@ -421,7 +421,7 @@
    "slug": "gemma-4-12b-it",
    "memory_bytes": 81000000000,
    "kit": "gemma4",
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": [
     "draft",
     "thinking-toggle"
