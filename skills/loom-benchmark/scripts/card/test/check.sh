@@ -295,6 +295,10 @@ for n in flint d1; do
   py "$C/render_card.py" --check "$tmp/$n" "$tmp/$n/README.md" >/dev/null \
     || { echo "FAIL $n: expected/README.md is not the render of expected/info.json"; bad=1; }
 done
+# Quick start pins the hrx-loom the package was generated with (flint: PyPI 0.1.0 recorded in llm_config.json);
+# a card with no recorded SDK (d1 fixture) is the only one that installs unpinned
+grep -qF 'pip install "hrx-loom[hf]==0.1.0"' "$tmp/flint/README.md" && echo "OK   quick start pins the recorded hrx-loom version" \
+  || { echo "FAIL flint: Quick start does not pin hrx-loom==0.1.0"; bad=1; }
 # quant_of: any-case names (gguf-my-repo writes q4_k_m) without loosening the boundary guard
 got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 print(*[c.quant_of(n) for n in ('hyperclovax-1.5b-q4_k_m.gguf', 'x-Q4_K_Mfoo', 'x-Q4_K_M_foo', 'model-q4-k-m', 'x-Q8_0-q4_0')])" "$C")
