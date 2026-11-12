@@ -2,6 +2,8 @@
 # One job of a DevLab performance experiment (.github/workflows/devlab-perf.yml): fetch a published loom-fun card,
 # build package variants from this checkout (or another ref), and compare them with each other and with llama.cpp
 # ON THIS RUNNER (runners differ from each other and from a dev machine: only same-job numbers are compared).
+# This is the single source of card performance: the card variant (active wait) and llama.cpp on the same runner,
+# ingested with make_info.py perf --source-kind devlab (loom-org SKILL.md step 3).
 #
 #   [WORK=~/devlab-perf] devlab_perf.sh EXPERIMENT.json JOB_NAME
 #
@@ -29,6 +31,8 @@
 #             "execution": {"draft_depth": 3}, "double": ["llm_verify:g_head_mv", "*:g_mv_q8_0"]}
 #            build: build.py with these env vars (and extra flags); ref: build with that commit's starter;
 #            execution: model.json overrides; double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
+#            {"name": "parked", "active_wait": false}: the card's programs served with the SDK's default completion wait
+#            (LOOM_ACTIVE_WAIT=0 in serve.sh) instead of the active wait every other variant gets.
 # Job "thinking": off (default) | on: chat_template_kwargs.enable_thinking sent to BOTH engines in every step.
 # Steps S: ab:R[:on|off]        every variant in ONE loom-serve (small context), ab_decode.py R interleaved rounds
 #          perf:V:N[:long]      V served alone with its own settings: perf.py N times (+ --long)
@@ -207,7 +211,8 @@ done
 serve_alone() { # serve_alone VARIANT
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
-  step "serve $1"; "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" | tail -2
+  local aw; aw=$(qv "$1" "print(0 if v.get('active_wait') is False else 1)")
+  step "serve $1"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" | tail -2
   curl -sf "$url/v1/models" >/dev/null
 }
 LSPEC=""
