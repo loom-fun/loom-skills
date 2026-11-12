@@ -177,9 +177,10 @@
    "slug": "qwen3.5-35b-a3b",
    "memory_bytes": 49000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
+    "draft",
     "thinking-toggle"
    ]
   },
