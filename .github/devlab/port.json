@@ -1,11 +1,7 @@
 {
- "_comment": "perf-gap gemma-3-1b: regenerate the card from main (per-row draft/tune.py #270, occupancy gate #298).",
+ "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
  "jobs": [
-  {
-   "name": "gemma3-1b-regen",
-   "spec": "ggml-org/gemma-3-1b-it-GGUF:gemma-3-1b-it-Q4_K_M.gguf",
-   "reference": "loom-fun/ggml-org-gemma-3-1b-it-loom",
-   "model_id": "google/gemma-3-1b-it"
-  }
+  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
+  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
  ]
 }
