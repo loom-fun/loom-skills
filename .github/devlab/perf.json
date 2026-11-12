@@ -41,13 +41,23 @@
      "execution": {
       "draft_depth": 0
      }
+    },
+    {
+     "name": "s128",
+     "build": {
+      "ATTN_SPLITS": "128"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
     "perf:base:1:long",
     "perf:noexp:1:long",
     "perf:nored:1:long",
-    "perf:both:1:long"
+    "perf:both:1:long",
+    "perf:s128:1:long"
    ]
   }
  ]
