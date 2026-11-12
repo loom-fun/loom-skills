@@ -1,12 +1,12 @@
 {
- "_comment": "flash2: per layer kind doubling (sliding / global) pre-#193, #193, main; masked-block variants (WIP, not for merge).",
+ "_comment": "flash2: where does the non-flash2 prefill time differ? (drop kernels, timing only)",
  "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
  "memory_bytes": 55000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "f2k",
+   "name": "f2x",
    "variants": [
     {
      "name": "pre",
@@ -18,27 +18,27 @@
      "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
     },
     {
-     "name": "pre_s",
+     "name": "pre_nofl",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
      "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f",
-     "double": [
-      "*:g_attention_flash2\\b.*%layer_(0|1|2|4|5|6|8|9|10|12|13|14|16|17|18|20|21|22|24|25|26|28|29|30|32|33|34),"
+     "drop": [
+      "*:g_attention_flash2"
      ]
     },
     {
-     "name": "pre_g",
+     "name": "pre_nofb",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
      "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f",
-     "double": [
-      "*:g_attention_flash2\\b.*%layer_(3|7|11|15|19|23|27|31|35),"
+     "drop": [
+      "*:g16_attention_split_listed|g16_attention_combine_listed"
      ]
     },
     {
@@ -51,78 +51,51 @@
      "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8"
     },
     {
-     "name": "p193_s",
+     "name": "p193_nofl",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
      "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8",
-     "double": [
-      "*:g_attention_flash2\\b.*%layer_(0|1|2|4|5|6|8|9|10|12|13|14|16|17|18|20|21|22|24|25|26|28|29|30|32|33|34),"
+     "drop": [
+      "*:g_attention_flash2"
      ]
     },
     {
-     "name": "p193_g",
+     "name": "p193_nofb",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
      "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8",
-     "double": [
-      "*:g_attention_flash2\\b.*%layer_(3|7|11|15|19|23|27|31|35),"
-     ]
-    },
-    {
-     "name": "main",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "6fd2f49"
-    },
-    {
-     "name": "main_s",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "6fd2f49",
-     "double": [
-      "*:g_attention_flash2\\b.*%layer_(0|1|2|4|5|6|8|9|10|12|13|14|16|17|18|20|21|22|24|25|26|28|29|30|32|33|34),"
-     ]
-    },
-    {
-     "name": "main_g",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "6fd2f49",
-     "double": [
-      "*:g_attention_flash2\\b.*%layer_(3|7|11|15|19|23|27|31|35),"
+     "drop": [
+      "*:g16_attention_split_listed|g16_attention_combine_listed"
      ]
     }
    ],
    "steps": [
     "perf:pre:2:long",
-    "perf:pre_s:2:long",
-    "perf:pre_g:2:long",
+    "perf:pre_nofl:2:long",
+    "perf:pre_nofb:2:long",
     "perf:p193:2:long",
-    "perf:p193_s:2:long",
-    "perf:p193_g:2:long",
-    "perf:main:2:long",
-    "perf:main_s:2:long",
-    "perf:main_g:2:long"
+    "perf:p193_nofl:2:long",
+    "perf:p193_nofb:2:long"
    ]
   },
   {
-   "name": "f2m",
+   "name": "f2y",
    "variants": [
+    {
+     "name": "pre",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
+    },
     {
      "name": "main",
      "build": {},
@@ -133,92 +106,62 @@
      "ref": "6fd2f49"
     },
     {
-     "name": "main_s",
+     "name": "main_nofl",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
      "ref": "6fd2f49",
-     "double": [
-      "*:g_attention_flash2\\b.*%layer_(0|1|2|4|5|6|8|9|10|12|13|14|16|17|18|20|21|22|24|25|26|28|29|30|32|33|34),"
+     "drop": [
+      "*:g_attention_flash2"
      ]
     },
     {
-     "name": "grp4",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "grp4_s",
+     "name": "main_nofb",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "double": [
-      "*:g_attention_flash2\\b.*%layer_(0|1|2|4|5|6|8|9|10|12|13|14|16|17|18|20|21|22|24|25|26|28|29|30|32|33|34),"
+     "ref": "6fd2f49",
+     "drop": [
+      "*:g16_attention_split_listed|g16_attention_combine_listed"
      ]
     },
     {
-     "name": "grp8",
-     "build": {
-      "FLASH2_MASK_GRP": "8"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "grp8_s",
-     "build": {
-      "FLASH2_MASK_GRP": "8"
-     },
+     "name": "main_nofl_nofb",
+     "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "double": [
-      "*:g_attention_flash2\\b.*%layer_(0|1|2|4|5|6|8|9|10|12|13|14|16|17|18|20|21|22|24|25|26|28|29|30|32|33|34),"
+     "ref": "6fd2f49",
+     "drop": [
+      "*:g_attention_flash2",
+      "*:g16_attention_split_listed|g16_attention_combine_listed"
      ]
     },
     {
-     "name": "fma",
-     "build": {
-      "FLASH2_MASKV": "fma"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "fma_s",
-     "build": {
-      "FLASH2_MASKV": "fma"
-     },
+     "name": "pre_nofl",
+     "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "double": [
-      "*:g_attention_flash2\\b.*%layer_(0|1|2|4|5|6|8|9|10|12|13|14|16|17|18|20|21|22|24|25|26|28|29|30|32|33|34),"
+     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f",
+     "drop": [
+      "*:g_attention_flash2"
      ]
     }
    ],
    "steps": [
+    "perf:pre:2:long",
     "perf:main:2:long",
-    "perf:main_s:2:long",
-    "perf:grp4:2:long",
-    "perf:grp4_s:2:long",
-    "perf:grp8:2:long",
-    "perf:grp8_s:2:long",
-    "perf:fma:2:long",
-    "perf:fma_s:2:long"
+    "perf:main_nofl:2:long",
+    "perf:main_nofb:2:long",
+    "perf:main_nofl_nofb:2:long",
+    "perf:pre_nofl:2:long"
    ]
   }
  ]
