@@ -1,42 +1,29 @@
 {
- "_comment": "Sage-A1.5: published card programs vs regenerated (gated MTP d3, main) vs llama.cpp ROCm/Vulkan, active wait, one runner.",
+ "_comment": "Sage-A1.5 card perf session (regenerated programs, gated MTP d3) vs llama.cpp ROCm/Vulkan, active wait, one runner.",
  "card": "loom-fun/InternScience-Sage-A1.5-loom",
  "memory_bytes": 49000000000,
  "kit": null,
- "llamacpp": "b1370",
+ "llamacpp": "b1369",
  "llamacpp_vulkan": "b12211",
  "llama_spec": "--spec-type draft-mtp --spec-draft-n-max 2",
  "jobs": [
   {
-   "name": "gate",
+   "name": "card",
    "variants": [
     {
      "name": "card"
-    },
-    {
-     "name": "g3",
-     "build": {}
-    },
-    {
-     "name": "g3off",
-     "build": {
-      "SPEC_OCC_MIN": "0"
-     }
     }
    ],
    "steps": [
-    "perf:card:3",
-    "perf:card:3:long",
+    "perf:card:2",
+    "perf:card:2:long",
     "c4:card",
-    "perf:g3:3",
-    "perf:g3:3:long",
-    "c4:g3",
-    "perf:g3off:3",
-    "perf:g3off:3:long",
-    "c4:g3off",
-    "llama:3",
-    "llama:3:long",
-    "llamac4"
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long",
+    "llamac4@vulkan"
    ]
   }
  ]
