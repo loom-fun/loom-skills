@@ -1,40 +1,68 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "Anchor-only gated verify stage: gated c4 vs depth 0 on Qwen3.5-9B (DFlash/GDN) and Qwen3-0.6B.",
+ "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+ "memory_bytes": 20000000000,
+ "kit": null,
+ "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "q9",
+   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "memory_bytes": 20000000000,
+   "llamacpp": "b1369",
    "variants": [
     {
-     "name": "card"
+     "name": "gate",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     }
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
+    "c4:nodraft",
+    "c4:gate",
+    "c4:nodraft",
+    "c4:gate",
+    "perf:gate:2",
+    "consistency:gate:3",
+    "gates:gate:dev",
+    "ktest:gate"
    ]
   },
   {
-   "name": "fn-mtp-b",
+   "name": "q06",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "memory_bytes": 17000000000,
+   "llamacpp": "b1369",
    "variants": [
     {
-     "name": "card"
+     "name": "gate",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     }
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
-    "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
+    "c4:nodraft",
+    "c4:gate",
+    "c4:nodraft",
+    "c4:gate",
+    "perf:gate:2",
+    "consistency:gate:3",
+    "gates:gate:dev"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
