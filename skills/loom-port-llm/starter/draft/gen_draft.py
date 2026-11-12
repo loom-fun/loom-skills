@@ -806,6 +806,10 @@ def small_gemm(program, start=5):
                               "  %mm = index.cmp uge, %t, %c5_mm : index\n")
     program = program.replace("index.scale %t, ", "index.scale %tp, ")
     program = _re.sub(r"scf\.if %gemm \{(\s*)kernel\.launch @g_row_scale_f16", r"scf.if %mm {\1kernel.launch @g_row_scale_f16", program)
+    # decode-shaped MoE (gen_llm.moe_routed, int8 expert activations) runs below 64 tokens, but the row-scale site above makes
+    # the int8 copy only below %mm: quantize the router input for the 17..63-token epochs too
+    program = program.replace("    // moe-hq: %h16q beside the gemm-gap (see gen_draft.small_gemm)\n",
+                              "    scf.if %mm {\n      kernel.launch @g_quant_q8[%t, %nH](%t, %nH, %h, %h16q) : [index, index](index, index, buffer, buffer)\n    }\n")
     program = _re.sub(r"scf\.if %gemm \{(\s*)scf\.if %big \{", r"scf.if %mm {\1scf.if %big {", program)
     program = _re.sub(r"kernel\.launch @(g_gemm_\w+)\[%t, ([^\]]+)\]\(%t, ", r"kernel.launch @\1[%tp, \2](%tp, ", program)
     return program
