@@ -155,7 +155,7 @@
    "slug": "qwen3.6-35b-a3b",
    "memory_bytes": 48000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -492,9 +492,9 @@
   {
    "repo": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
    "slug": "qwen3-coder-30b-a3b-instruct",
-   "memory_bytes": 56000000000,
+   "memory_bytes": 57000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": []
   },
   {
