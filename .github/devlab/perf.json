@@ -7,10 +7,10 @@
  "llama_spec": "",
  "jobs": [
   {
-   "name": "lag",
-   "variants": [{"name": "card"}, {"name": "regen", "build": {}}],
-   "steps": ["perf:card:2", "perf:card:2:long", "c4:card", "perf:regen:2", "perf:regen:2:long", "c4:regen",
-    "llama:2", "llama:2:long", "llamac4", "llama@vulkan:2", "llama@vulkan:2:long", "llamac4@vulkan"]
+   "name": "lag2",
+   "variants": [{"name": "main", "build": {}, "ref": "origin/main"}, {"name": "gqa", "build": {}, "ref": "origin/perfgap-qwen3-gqa-attn"}],
+   "steps": ["perf:main:2", "perf:main:2:long", "c4:main", "perf:gqa:2", "perf:gqa:2:long", "c4:gqa",
+    "llama@vulkan:2", "llama@vulkan:2:long", "llamac4@vulkan", "gates:gqa:dev"]
   }
  ]
 }
