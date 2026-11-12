@@ -97,9 +97,9 @@
   {
    "repo": "loom-fun/unsloth-Qwen3.5-9B-loom",
    "slug": "qwen3.5-9b",
-   "memory_bytes": 30000000000,
+   "memory_bytes": 32000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
