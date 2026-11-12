@@ -1,5 +1,5 @@
 {
- "_comment": "Qwen2.5-0.5B: published card vs depth 0 vs depth 2 (gated) vs ROCm and Vulkan, one runner.",
+ "_comment": "Qwen2.5-0.5B regenerated card (ngram d2, occupancy gate) vs ROCm and Vulkan, active wait, two runners.",
  "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
  "memory_bytes": 5000000000,
  "kit": null,
@@ -8,36 +8,35 @@
  "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "q25-05b-a",
+   "name": "card-a",
    "variants": [
     {
      "name": "card"
-    },
-    {
-     "name": "d0",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "d2",
-     "build": {
-      "DRAFT": "ngram",
-      "DRAFT_DEPTH": "2"
-     }
     }
    ],
    "steps": [
     "perf:card:2",
     "perf:card:2:long",
     "c4:card",
-    "perf:d0:2",
-    "perf:d0:2:long",
-    "c4:d0",
-    "perf:d2:2",
-    "perf:d2:2:long",
-    "c4:d2",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long",
+    "llamac4@vulkan"
+   ]
+  },
+  {
+   "name": "card-b",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
     "llama:2",
     "llama:2:long",
     "llamac4",
