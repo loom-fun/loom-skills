@@ -7,17 +7,22 @@
  "llama_spec": "",
  "jobs": [
   {
-   "name": "regen",
+   "name": "pub",
    "variants": [
-    {"name": "card"},
-    {"name": "new", "build": {}}
+    {
+     "name": "card"
+    }
    ],
    "steps": [
-    "perf:card:2", "perf:card:2:long", "c4:card",
-    "perf:new:2", "perf:new:2:long", "c4:new",
-    "llama:2", "llama:2:long", "llamac4",
-    "llama@vulkan:2", "llama@vulkan:2:long", "llamac4@vulkan",
-    "consistency:new:3", "ktest:new", "gates:new:dev"
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long",
+    "llamac4@vulkan"
    ]
   }
  ]
