@@ -59,56 +59,6 @@ func.def inline @g_tile_uniform(%info: buffer, %tokens: index, %first: index) ->
   func.return %ok, %row0, %pos0 : i1, i32, i32
 }
 
-func.def inline @g_tile_adjacent(%info: buffer, %tokens: index, %first: index, %back: i1) -> (i1) {
-  %zero = index.constant 0 : offset
-  %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
-  %c16 = index.constant 16 : index
-  %c16_i32 = scalar.constant 16 : i32
-  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
-  %bfirst = index.assume %first [range(%first, 0, 8191), lt(%first, %tokens)] : index
-  %row0 = view.load %info_view[%bfirst, %c0] : view<[%tokens]x4xi32> -> i32
-  %pos0 = view.load %info_view[%bfirst, %c1] : view<[%tokens]x4xi32> -> i32
-  %room = index.cmp uge, %first, %c16 : index
-  %back_step = scf.select %room, %c16, %c0 : index
-  %prev = index.sub %first, %back_step : index
-  %next = index.add %first, %c16 : index
-  %other = scf.select %back, %prev, %next : index
-  %in_range = index.cmp ult, %other, %tokens : index
-  %other_clamped = scf.select %in_range, %other, %bfirst : index
-  %other_bound = index.assume %other_clamped [range(%other_clamped, 0, 8191), lt(%other_clamped, %tokens)] : index
-  %uniform, %row, %pos = func.call @g_tile_uniform(%info, %tokens, %other_bound) : (buffer, index, index) -> (i1, i32, i32)
-  %pos_before = scalar.subi %pos0, %c16_i32 : i32
-  %pos_after = scalar.addi %pos0, %c16_i32 : i32
-  %pos_want = scf.select %back, %pos_before, %pos_after : i32
-  %same_row = scalar.cmpi eq, %row, %row0 : i32
-  %next_pos = scalar.cmpi eq, %pos, %pos_want : i32
-  %a = scalar.andi %uniform, %in_range : i1
-  %b = scalar.andi %a, %same_row : i1
-  %ok = scalar.andi %b, %next_pos : i1
-  func.return %ok : i1
-}
-
-func.def inline @g_tile_starts(%info: buffer, %tokens: index, %token: index) -> (i1) {
-  %zero = index.constant 0 : offset
-  %c1 = index.constant 1 : index
-  %c0_i32 = scalar.constant 0 : i32
-  %c15_i32 = scalar.constant 15 : i32
-  %false = scalar.constant false : i1
-  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
-  %bounded = index.assume %token [range(%token, 0, 8191), lt(%token, %tokens)] : index
-  %pos = view.load %info_view[%bounded, %c1] : view<[%tokens]x4xi32> -> i32
-  %skew = scalar.andi %pos, %c15_i32 : i32
-  %aligned = scalar.cmpi eq, %skew, %c0_i32 : i32
-  %starts = scf.if %aligned -> (i1) {
-    %uniform, %row, %pos0 = func.call @g_tile_uniform(%info, %tokens, %bounded) : (buffer, index, index) -> (i1, i32, i32)
-    scf.yield %uniform : i1
-  } else {
-    scf.yield %false : i1
-  }
-  func.return %starts : i1
-}
-
 kernel.def export("k_flash2") @k_flash2(%tokens: index) {
   %c1 = index.constant 1 : index
   %ckv = index.constant 4 : index
@@ -116,7 +66,7 @@ kernel.def export("k_flash2") @k_flash2(%tokens: index) {
   %clanes = index.constant 256 : index
   %tiles = index.div %tokens, %c16 : index
   kernel.launch.config workgroups(%tiles, %ckv, %c1) workgroup_size(%clanes, %c1, %c1) : index
-} launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, %gate: buffer, %info: buffer, %tiles: buffer, %origins: buffer, %arena: buffer, %out: buffer) {
+} launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, %gate: buffer, %info: buffer, %origins: buffer, %arena: buffer, %out: buffer) {
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, 35)] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
@@ -146,19 +96,9 @@ kernel.def export("k_flash2") @k_flash2(%tokens: index) {
   %tile = index.assume %tile_id [lt(%tile_id, %tile_count)] : index
   %kv_id = kernel.workgroup.id<y> : index
   %kv = index.assume %kv_id [range(%kv_id, 0, 3)] : index
-  %tiles_view = buffer.view %tiles[%origin] : buffer -> view<[%tokens]xi32>
-  %listed_count32 = view.load %tiles_view[%c0] : view<[%tokens]xi32> -> i32
-  %listed_count = index.cast %listed_count32 : i32 to index
-  %listed = index.cmp ult, %tile, %listed_count : index
-  %entry_slot_value = index.add %tile, %c1 : index
-  %entry_slot = index.assume %entry_slot_value [lt(%entry_slot_value, %tokens)] : index
-  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32
-  %entry = index.cast %entry32 : i32 to index
-  %first_token = index.assume %entry [range(%entry, 0, 8191), lt(%entry, %tokens)] : index
-  %info_view = buffer.view %info[%origin] : buffer -> view<[%tokens]x4xi32>
-  %row32 = view.load %info_view[%first_token, %c0] : view<[%tokens]x4xi32> -> i32
-  %pos0_32 = view.load %info_view[%first_token, %c1] : view<[%tokens]x4xi32> -> i32
-  scf.if %listed {
+  %first_token = index.mul %tile, %c16 : index
+  %uniform, %row32, %pos0_32 = func.call @g_tile_uniform(%info, %tokens, %first_token) : (buffer, index, index) -> (i1, i32, i32)
+  scf.if %uniform {
   %workitem_id = kernel.workitem.id<x> : index
   %workitem = index.assume %workitem_id [range(%workitem_id, 0, 255)] : index
   %wave_id = kernel.subgroup.id : index
@@ -591,34 +531,17 @@ kernel.def export("k_flash2") @k_flash2(%tokens: index) {
 check.case public @pf {
   %t = check.literal value(1024) : index
   %layer = check.literal value(0) : index
-  %sliding = check.literal value(0) : i32
+  %sliding = check.literal value(1) : i32
   %ctx = check.literal value(17408) : index
-  %pool = check.literal value(17408) : index
+  %pool = check.literal value(327680) : index
   %q = check.generate.fill value(0.05) : tensor<1024x4096xf32>
   %g = check.generate.fill value(0.5) : tensor<1024x4096xf32>
   %info = check.file.read.npy path("info.npy") : tensor<1024x4xi32>
   %orig = check.file.read.npy path("orig.npy") : tensor<1098xi32>
-  %tiles = check.file.read.npy path("tiles.npy") : tensor<1024xi32>
-  %arena = check.generate.fill value(0.01) : tensor<320864256xf16>
+  %arena = check.generate.fill value(0.01) : tensor<671088640xf16>
   %o = check.generate.fill value(0.0) : tensor<1024x4096xf32>
   %layer0 = check.literal value(0) : index
-  kernel.launch @k_flash2[%t](%t, %layer0, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer1 = check.literal value(1) : index
-  kernel.launch @k_flash2[%t](%t, %layer1, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer2 = check.literal value(2) : index
-  kernel.launch @k_flash2[%t](%t, %layer2, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer3 = check.literal value(3) : index
-  kernel.launch @k_flash2[%t](%t, %layer3, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer4 = check.literal value(4) : index
-  kernel.launch @k_flash2[%t](%t, %layer4, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer5 = check.literal value(5) : index
-  kernel.launch @k_flash2[%t](%t, %layer5, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer6 = check.literal value(6) : index
-  kernel.launch @k_flash2[%t](%t, %layer6, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer7 = check.literal value(7) : index
-  kernel.launch @k_flash2[%t](%t, %layer7, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer8 = check.literal value(8) : index
-  kernel.launch @k_flash2[%t](%t, %layer8, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2[%t](%t, %layer0, %sliding, %ctx, %pool, %q, %g, %info, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1098xi32>, tensor<671088640xf16>, tensor<1024x4096xf32>)
   check.return
 }
 

@@ -516,6 +516,12 @@ kernel.def export("k_flash2") @k_flash2(%tokens: index) {
     %cm1_i32m = scalar.constant -1 : i32
     %cffff_i32m = scalar.constant 65535 : i32
     %c4 = index.constant 4 : index
+    %cunr = index.constant 4 : index
+    %cu0 = index.constant 0 : index
+    %cu1 = index.constant 1 : index
+    %cu2 = index.constant 2 : index
+    %cu3 = index.constant 3 : index
+
     %nb_last0 = scalar.addi %base0, %c15_i32m : i32
     %nb_diag0 = scalar.cmpi sgt, %nb_last0, %pos0_i32 : i32
     %nb_win0 = scalar.cmpi slt, %base0, %win_lo15 : i32
@@ -595,115 +601,363 @@ kernel.def export("k_flash2") @k_flash2(%tokens: index) {
       kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
       %vl0_0 = vector.fragment.load<lhs> %vt_view[%vr0, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw0_0 = vector.bitcast %vl0_0 : vector<16xf16> to vector<8xi32>
-      %ac0_0 = scf.for %mc_0_0 = [%c0 to %c16 step %c1](%acc0_0 = %os0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci0_0 = index.cast %mc_0_0 : index to i32
-        %mri0_0 = index.add %mc_0_0, %kb0_row : index
-        %mrow0_0 = vector.load %mk_view[%mri0_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx0_0 = vector.andi %vw0_0, %mrow0_0 : vector<8xi32>
-        %vs0_0 = vector.bitcast %vx0_0 : vector<8xi32> to vector<16xf16>
-        %vm0_0 = vector.fragment<lhs> %vs0_0 shape [%c16, %c16] : vector<16xf16>
-        %rm0_0 = vector.mma %vm0_0, %pt0, %os0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc0_0 = scalar.cmpi eq, %lane_col32m, %mci0_0 : i32
-        %acn0_0 = scf.select %isc0_0, %rm0_0, %acc0_0 : vector<8xf32>
-        scf.yield %acn0_0 : vector<8xf32>
+      %ac0_0 = scf.for %mc_0_0 = [%c0 to %c16 step %cunr](%acc_0_0 = %os0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_0_0 = index.add %mc_0_0, %cu0 : index
+        %mci0_0_0 = index.cast %mcu0_0_0 : index to i32
+        %mri0_0_0 = index.add %mcu0_0_0, %kb0_row : index
+        %mrow0_0_0 = vector.load %mk_view[%mri0_0_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_0_0 = vector.andi %vw0_0, %mrow0_0_0 : vector<8xi32>
+        %vs0_0_0 = vector.bitcast %vx0_0_0 : vector<8xi32> to vector<16xf16>
+        %vm0_0_0 = vector.fragment<lhs> %vs0_0_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_0_0 = vector.mma %vm0_0_0, %pt0, %os0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_0_0 = index.add %mc_0_0, %cu1 : index
+        %mci1_0_0 = index.cast %mcu1_0_0 : index to i32
+        %mri1_0_0 = index.add %mcu1_0_0, %kb0_row : index
+        %mrow1_0_0 = vector.load %mk_view[%mri1_0_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_0_0 = vector.andi %vw0_0, %mrow1_0_0 : vector<8xi32>
+        %vs1_0_0 = vector.bitcast %vx1_0_0 : vector<8xi32> to vector<16xf16>
+        %vm1_0_0 = vector.fragment<lhs> %vs1_0_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_0_0 = vector.mma %vm1_0_0, %pt0, %os0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_0_0 = index.add %mc_0_0, %cu2 : index
+        %mci2_0_0 = index.cast %mcu2_0_0 : index to i32
+        %mri2_0_0 = index.add %mcu2_0_0, %kb0_row : index
+        %mrow2_0_0 = vector.load %mk_view[%mri2_0_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_0_0 = vector.andi %vw0_0, %mrow2_0_0 : vector<8xi32>
+        %vs2_0_0 = vector.bitcast %vx2_0_0 : vector<8xi32> to vector<16xf16>
+        %vm2_0_0 = vector.fragment<lhs> %vs2_0_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_0_0 = vector.mma %vm2_0_0, %pt0, %os0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_0_0 = index.add %mc_0_0, %cu3 : index
+        %mci3_0_0 = index.cast %mcu3_0_0 : index to i32
+        %mri3_0_0 = index.add %mcu3_0_0, %kb0_row : index
+        %mrow3_0_0 = vector.load %mk_view[%mri3_0_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_0_0 = vector.andi %vw0_0, %mrow3_0_0 : vector<8xi32>
+        %vs3_0_0 = vector.bitcast %vx3_0_0 : vector<8xi32> to vector<16xf16>
+        %vm3_0_0 = vector.fragment<lhs> %vs3_0_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_0_0 = vector.mma %vm3_0_0, %pt0, %os0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_0_0 = scalar.cmpi eq, %lane_col32m, %mci0_0_0 : i32
+        %acn0_0_0 = scf.select %isc0_0_0, %rm0_0_0, %acc_0_0 : vector<8xf32>
+        %isc1_0_0 = scalar.cmpi eq, %lane_col32m, %mci1_0_0 : i32
+        %acn1_0_0 = scf.select %isc1_0_0, %rm1_0_0, %acn0_0_0 : vector<8xf32>
+        %isc2_0_0 = scalar.cmpi eq, %lane_col32m, %mci2_0_0 : i32
+        %acn2_0_0 = scf.select %isc2_0_0, %rm2_0_0, %acn1_0_0 : vector<8xf32>
+        %isc3_0_0 = scalar.cmpi eq, %lane_col32m, %mci3_0_0 : i32
+        %acn3_0_0 = scf.select %isc3_0_0, %rm3_0_0, %acn2_0_0 : vector<8xf32>
+        scf.yield %acn3_0_0 : vector<8xf32>
       }
       %vl1_0 = vector.fragment.load<lhs> %vt_view[%vr1, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw1_0 = vector.bitcast %vl1_0 : vector<16xf16> to vector<8xi32>
-      %ac1_0 = scf.for %mc_1_0 = [%c0 to %c16 step %c1](%acc1_0 = %os1 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci1_0 = index.cast %mc_1_0 : index to i32
-        %mri1_0 = index.add %mc_1_0, %kb0_row : index
-        %mrow1_0 = vector.load %mk_view[%mri1_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx1_0 = vector.andi %vw1_0, %mrow1_0 : vector<8xi32>
-        %vs1_0 = vector.bitcast %vx1_0 : vector<8xi32> to vector<16xf16>
-        %vm1_0 = vector.fragment<lhs> %vs1_0 shape [%c16, %c16] : vector<16xf16>
-        %rm1_0 = vector.mma %vm1_0, %pt0, %os1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc1_0 = scalar.cmpi eq, %lane_col32m, %mci1_0 : i32
-        %acn1_0 = scf.select %isc1_0, %rm1_0, %acc1_0 : vector<8xf32>
-        scf.yield %acn1_0 : vector<8xf32>
+      %ac1_0 = scf.for %mc_1_0 = [%c0 to %c16 step %cunr](%acc_1_0 = %os1 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_1_0 = index.add %mc_1_0, %cu0 : index
+        %mci0_1_0 = index.cast %mcu0_1_0 : index to i32
+        %mri0_1_0 = index.add %mcu0_1_0, %kb0_row : index
+        %mrow0_1_0 = vector.load %mk_view[%mri0_1_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_1_0 = vector.andi %vw1_0, %mrow0_1_0 : vector<8xi32>
+        %vs0_1_0 = vector.bitcast %vx0_1_0 : vector<8xi32> to vector<16xf16>
+        %vm0_1_0 = vector.fragment<lhs> %vs0_1_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_1_0 = vector.mma %vm0_1_0, %pt0, %os1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_1_0 = index.add %mc_1_0, %cu1 : index
+        %mci1_1_0 = index.cast %mcu1_1_0 : index to i32
+        %mri1_1_0 = index.add %mcu1_1_0, %kb0_row : index
+        %mrow1_1_0 = vector.load %mk_view[%mri1_1_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_1_0 = vector.andi %vw1_0, %mrow1_1_0 : vector<8xi32>
+        %vs1_1_0 = vector.bitcast %vx1_1_0 : vector<8xi32> to vector<16xf16>
+        %vm1_1_0 = vector.fragment<lhs> %vs1_1_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_1_0 = vector.mma %vm1_1_0, %pt0, %os1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_1_0 = index.add %mc_1_0, %cu2 : index
+        %mci2_1_0 = index.cast %mcu2_1_0 : index to i32
+        %mri2_1_0 = index.add %mcu2_1_0, %kb0_row : index
+        %mrow2_1_0 = vector.load %mk_view[%mri2_1_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_1_0 = vector.andi %vw1_0, %mrow2_1_0 : vector<8xi32>
+        %vs2_1_0 = vector.bitcast %vx2_1_0 : vector<8xi32> to vector<16xf16>
+        %vm2_1_0 = vector.fragment<lhs> %vs2_1_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_1_0 = vector.mma %vm2_1_0, %pt0, %os1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_1_0 = index.add %mc_1_0, %cu3 : index
+        %mci3_1_0 = index.cast %mcu3_1_0 : index to i32
+        %mri3_1_0 = index.add %mcu3_1_0, %kb0_row : index
+        %mrow3_1_0 = vector.load %mk_view[%mri3_1_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_1_0 = vector.andi %vw1_0, %mrow3_1_0 : vector<8xi32>
+        %vs3_1_0 = vector.bitcast %vx3_1_0 : vector<8xi32> to vector<16xf16>
+        %vm3_1_0 = vector.fragment<lhs> %vs3_1_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_1_0 = vector.mma %vm3_1_0, %pt0, %os1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_1_0 = scalar.cmpi eq, %lane_col32m, %mci0_1_0 : i32
+        %acn0_1_0 = scf.select %isc0_1_0, %rm0_1_0, %acc_1_0 : vector<8xf32>
+        %isc1_1_0 = scalar.cmpi eq, %lane_col32m, %mci1_1_0 : i32
+        %acn1_1_0 = scf.select %isc1_1_0, %rm1_1_0, %acn0_1_0 : vector<8xf32>
+        %isc2_1_0 = scalar.cmpi eq, %lane_col32m, %mci2_1_0 : i32
+        %acn2_1_0 = scf.select %isc2_1_0, %rm2_1_0, %acn1_1_0 : vector<8xf32>
+        %isc3_1_0 = scalar.cmpi eq, %lane_col32m, %mci3_1_0 : i32
+        %acn3_1_0 = scf.select %isc3_1_0, %rm3_1_0, %acn2_1_0 : vector<8xf32>
+        scf.yield %acn3_1_0 : vector<8xf32>
       }
       %vl2_0 = vector.fragment.load<lhs> %vt_view[%vr2, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw2_0 = vector.bitcast %vl2_0 : vector<16xf16> to vector<8xi32>
-      %ac2_0 = scf.for %mc_2_0 = [%c0 to %c16 step %c1](%acc2_0 = %os2 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci2_0 = index.cast %mc_2_0 : index to i32
-        %mri2_0 = index.add %mc_2_0, %kb0_row : index
-        %mrow2_0 = vector.load %mk_view[%mri2_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx2_0 = vector.andi %vw2_0, %mrow2_0 : vector<8xi32>
-        %vs2_0 = vector.bitcast %vx2_0 : vector<8xi32> to vector<16xf16>
-        %vm2_0 = vector.fragment<lhs> %vs2_0 shape [%c16, %c16] : vector<16xf16>
-        %rm2_0 = vector.mma %vm2_0, %pt0, %os2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc2_0 = scalar.cmpi eq, %lane_col32m, %mci2_0 : i32
-        %acn2_0 = scf.select %isc2_0, %rm2_0, %acc2_0 : vector<8xf32>
-        scf.yield %acn2_0 : vector<8xf32>
+      %ac2_0 = scf.for %mc_2_0 = [%c0 to %c16 step %cunr](%acc_2_0 = %os2 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_2_0 = index.add %mc_2_0, %cu0 : index
+        %mci0_2_0 = index.cast %mcu0_2_0 : index to i32
+        %mri0_2_0 = index.add %mcu0_2_0, %kb0_row : index
+        %mrow0_2_0 = vector.load %mk_view[%mri0_2_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_2_0 = vector.andi %vw2_0, %mrow0_2_0 : vector<8xi32>
+        %vs0_2_0 = vector.bitcast %vx0_2_0 : vector<8xi32> to vector<16xf16>
+        %vm0_2_0 = vector.fragment<lhs> %vs0_2_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_2_0 = vector.mma %vm0_2_0, %pt0, %os2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_2_0 = index.add %mc_2_0, %cu1 : index
+        %mci1_2_0 = index.cast %mcu1_2_0 : index to i32
+        %mri1_2_0 = index.add %mcu1_2_0, %kb0_row : index
+        %mrow1_2_0 = vector.load %mk_view[%mri1_2_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_2_0 = vector.andi %vw2_0, %mrow1_2_0 : vector<8xi32>
+        %vs1_2_0 = vector.bitcast %vx1_2_0 : vector<8xi32> to vector<16xf16>
+        %vm1_2_0 = vector.fragment<lhs> %vs1_2_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_2_0 = vector.mma %vm1_2_0, %pt0, %os2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_2_0 = index.add %mc_2_0, %cu2 : index
+        %mci2_2_0 = index.cast %mcu2_2_0 : index to i32
+        %mri2_2_0 = index.add %mcu2_2_0, %kb0_row : index
+        %mrow2_2_0 = vector.load %mk_view[%mri2_2_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_2_0 = vector.andi %vw2_0, %mrow2_2_0 : vector<8xi32>
+        %vs2_2_0 = vector.bitcast %vx2_2_0 : vector<8xi32> to vector<16xf16>
+        %vm2_2_0 = vector.fragment<lhs> %vs2_2_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_2_0 = vector.mma %vm2_2_0, %pt0, %os2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_2_0 = index.add %mc_2_0, %cu3 : index
+        %mci3_2_0 = index.cast %mcu3_2_0 : index to i32
+        %mri3_2_0 = index.add %mcu3_2_0, %kb0_row : index
+        %mrow3_2_0 = vector.load %mk_view[%mri3_2_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_2_0 = vector.andi %vw2_0, %mrow3_2_0 : vector<8xi32>
+        %vs3_2_0 = vector.bitcast %vx3_2_0 : vector<8xi32> to vector<16xf16>
+        %vm3_2_0 = vector.fragment<lhs> %vs3_2_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_2_0 = vector.mma %vm3_2_0, %pt0, %os2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_2_0 = scalar.cmpi eq, %lane_col32m, %mci0_2_0 : i32
+        %acn0_2_0 = scf.select %isc0_2_0, %rm0_2_0, %acc_2_0 : vector<8xf32>
+        %isc1_2_0 = scalar.cmpi eq, %lane_col32m, %mci1_2_0 : i32
+        %acn1_2_0 = scf.select %isc1_2_0, %rm1_2_0, %acn0_2_0 : vector<8xf32>
+        %isc2_2_0 = scalar.cmpi eq, %lane_col32m, %mci2_2_0 : i32
+        %acn2_2_0 = scf.select %isc2_2_0, %rm2_2_0, %acn1_2_0 : vector<8xf32>
+        %isc3_2_0 = scalar.cmpi eq, %lane_col32m, %mci3_2_0 : i32
+        %acn3_2_0 = scf.select %isc3_2_0, %rm3_2_0, %acn2_2_0 : vector<8xf32>
+        scf.yield %acn3_2_0 : vector<8xf32>
       }
       %vl3_0 = vector.fragment.load<lhs> %vt_view[%vr3, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw3_0 = vector.bitcast %vl3_0 : vector<16xf16> to vector<8xi32>
-      %ac3_0 = scf.for %mc_3_0 = [%c0 to %c16 step %c1](%acc3_0 = %os3 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci3_0 = index.cast %mc_3_0 : index to i32
-        %mri3_0 = index.add %mc_3_0, %kb0_row : index
-        %mrow3_0 = vector.load %mk_view[%mri3_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx3_0 = vector.andi %vw3_0, %mrow3_0 : vector<8xi32>
-        %vs3_0 = vector.bitcast %vx3_0 : vector<8xi32> to vector<16xf16>
-        %vm3_0 = vector.fragment<lhs> %vs3_0 shape [%c16, %c16] : vector<16xf16>
-        %rm3_0 = vector.mma %vm3_0, %pt0, %os3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc3_0 = scalar.cmpi eq, %lane_col32m, %mci3_0 : i32
-        %acn3_0 = scf.select %isc3_0, %rm3_0, %acc3_0 : vector<8xf32>
-        scf.yield %acn3_0 : vector<8xf32>
+      %ac3_0 = scf.for %mc_3_0 = [%c0 to %c16 step %cunr](%acc_3_0 = %os3 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_3_0 = index.add %mc_3_0, %cu0 : index
+        %mci0_3_0 = index.cast %mcu0_3_0 : index to i32
+        %mri0_3_0 = index.add %mcu0_3_0, %kb0_row : index
+        %mrow0_3_0 = vector.load %mk_view[%mri0_3_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_3_0 = vector.andi %vw3_0, %mrow0_3_0 : vector<8xi32>
+        %vs0_3_0 = vector.bitcast %vx0_3_0 : vector<8xi32> to vector<16xf16>
+        %vm0_3_0 = vector.fragment<lhs> %vs0_3_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_3_0 = vector.mma %vm0_3_0, %pt0, %os3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_3_0 = index.add %mc_3_0, %cu1 : index
+        %mci1_3_0 = index.cast %mcu1_3_0 : index to i32
+        %mri1_3_0 = index.add %mcu1_3_0, %kb0_row : index
+        %mrow1_3_0 = vector.load %mk_view[%mri1_3_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_3_0 = vector.andi %vw3_0, %mrow1_3_0 : vector<8xi32>
+        %vs1_3_0 = vector.bitcast %vx1_3_0 : vector<8xi32> to vector<16xf16>
+        %vm1_3_0 = vector.fragment<lhs> %vs1_3_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_3_0 = vector.mma %vm1_3_0, %pt0, %os3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_3_0 = index.add %mc_3_0, %cu2 : index
+        %mci2_3_0 = index.cast %mcu2_3_0 : index to i32
+        %mri2_3_0 = index.add %mcu2_3_0, %kb0_row : index
+        %mrow2_3_0 = vector.load %mk_view[%mri2_3_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_3_0 = vector.andi %vw3_0, %mrow2_3_0 : vector<8xi32>
+        %vs2_3_0 = vector.bitcast %vx2_3_0 : vector<8xi32> to vector<16xf16>
+        %vm2_3_0 = vector.fragment<lhs> %vs2_3_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_3_0 = vector.mma %vm2_3_0, %pt0, %os3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_3_0 = index.add %mc_3_0, %cu3 : index
+        %mci3_3_0 = index.cast %mcu3_3_0 : index to i32
+        %mri3_3_0 = index.add %mcu3_3_0, %kb0_row : index
+        %mrow3_3_0 = vector.load %mk_view[%mri3_3_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_3_0 = vector.andi %vw3_0, %mrow3_3_0 : vector<8xi32>
+        %vs3_3_0 = vector.bitcast %vx3_3_0 : vector<8xi32> to vector<16xf16>
+        %vm3_3_0 = vector.fragment<lhs> %vs3_3_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_3_0 = vector.mma %vm3_3_0, %pt0, %os3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_3_0 = scalar.cmpi eq, %lane_col32m, %mci0_3_0 : i32
+        %acn0_3_0 = scf.select %isc0_3_0, %rm0_3_0, %acc_3_0 : vector<8xf32>
+        %isc1_3_0 = scalar.cmpi eq, %lane_col32m, %mci1_3_0 : i32
+        %acn1_3_0 = scf.select %isc1_3_0, %rm1_3_0, %acn0_3_0 : vector<8xf32>
+        %isc2_3_0 = scalar.cmpi eq, %lane_col32m, %mci2_3_0 : i32
+        %acn2_3_0 = scf.select %isc2_3_0, %rm2_3_0, %acn1_3_0 : vector<8xf32>
+        %isc3_3_0 = scalar.cmpi eq, %lane_col32m, %mci3_3_0 : i32
+        %acn3_3_0 = scf.select %isc3_3_0, %rm3_3_0, %acn2_3_0 : vector<8xf32>
+        scf.yield %acn3_3_0 : vector<8xf32>
       }
       %vl4_0 = vector.fragment.load<lhs> %vt_view[%vr4, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw4_0 = vector.bitcast %vl4_0 : vector<16xf16> to vector<8xi32>
-      %ac4_0 = scf.for %mc_4_0 = [%c0 to %c16 step %c1](%acc4_0 = %os4 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci4_0 = index.cast %mc_4_0 : index to i32
-        %mri4_0 = index.add %mc_4_0, %kb0_row : index
-        %mrow4_0 = vector.load %mk_view[%mri4_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx4_0 = vector.andi %vw4_0, %mrow4_0 : vector<8xi32>
-        %vs4_0 = vector.bitcast %vx4_0 : vector<8xi32> to vector<16xf16>
-        %vm4_0 = vector.fragment<lhs> %vs4_0 shape [%c16, %c16] : vector<16xf16>
-        %rm4_0 = vector.mma %vm4_0, %pt0, %os4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc4_0 = scalar.cmpi eq, %lane_col32m, %mci4_0 : i32
-        %acn4_0 = scf.select %isc4_0, %rm4_0, %acc4_0 : vector<8xf32>
-        scf.yield %acn4_0 : vector<8xf32>
+      %ac4_0 = scf.for %mc_4_0 = [%c0 to %c16 step %cunr](%acc_4_0 = %os4 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_4_0 = index.add %mc_4_0, %cu0 : index
+        %mci0_4_0 = index.cast %mcu0_4_0 : index to i32
+        %mri0_4_0 = index.add %mcu0_4_0, %kb0_row : index
+        %mrow0_4_0 = vector.load %mk_view[%mri0_4_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_4_0 = vector.andi %vw4_0, %mrow0_4_0 : vector<8xi32>
+        %vs0_4_0 = vector.bitcast %vx0_4_0 : vector<8xi32> to vector<16xf16>
+        %vm0_4_0 = vector.fragment<lhs> %vs0_4_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_4_0 = vector.mma %vm0_4_0, %pt0, %os4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_4_0 = index.add %mc_4_0, %cu1 : index
+        %mci1_4_0 = index.cast %mcu1_4_0 : index to i32
+        %mri1_4_0 = index.add %mcu1_4_0, %kb0_row : index
+        %mrow1_4_0 = vector.load %mk_view[%mri1_4_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_4_0 = vector.andi %vw4_0, %mrow1_4_0 : vector<8xi32>
+        %vs1_4_0 = vector.bitcast %vx1_4_0 : vector<8xi32> to vector<16xf16>
+        %vm1_4_0 = vector.fragment<lhs> %vs1_4_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_4_0 = vector.mma %vm1_4_0, %pt0, %os4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_4_0 = index.add %mc_4_0, %cu2 : index
+        %mci2_4_0 = index.cast %mcu2_4_0 : index to i32
+        %mri2_4_0 = index.add %mcu2_4_0, %kb0_row : index
+        %mrow2_4_0 = vector.load %mk_view[%mri2_4_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_4_0 = vector.andi %vw4_0, %mrow2_4_0 : vector<8xi32>
+        %vs2_4_0 = vector.bitcast %vx2_4_0 : vector<8xi32> to vector<16xf16>
+        %vm2_4_0 = vector.fragment<lhs> %vs2_4_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_4_0 = vector.mma %vm2_4_0, %pt0, %os4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_4_0 = index.add %mc_4_0, %cu3 : index
+        %mci3_4_0 = index.cast %mcu3_4_0 : index to i32
+        %mri3_4_0 = index.add %mcu3_4_0, %kb0_row : index
+        %mrow3_4_0 = vector.load %mk_view[%mri3_4_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_4_0 = vector.andi %vw4_0, %mrow3_4_0 : vector<8xi32>
+        %vs3_4_0 = vector.bitcast %vx3_4_0 : vector<8xi32> to vector<16xf16>
+        %vm3_4_0 = vector.fragment<lhs> %vs3_4_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_4_0 = vector.mma %vm3_4_0, %pt0, %os4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_4_0 = scalar.cmpi eq, %lane_col32m, %mci0_4_0 : i32
+        %acn0_4_0 = scf.select %isc0_4_0, %rm0_4_0, %acc_4_0 : vector<8xf32>
+        %isc1_4_0 = scalar.cmpi eq, %lane_col32m, %mci1_4_0 : i32
+        %acn1_4_0 = scf.select %isc1_4_0, %rm1_4_0, %acn0_4_0 : vector<8xf32>
+        %isc2_4_0 = scalar.cmpi eq, %lane_col32m, %mci2_4_0 : i32
+        %acn2_4_0 = scf.select %isc2_4_0, %rm2_4_0, %acn1_4_0 : vector<8xf32>
+        %isc3_4_0 = scalar.cmpi eq, %lane_col32m, %mci3_4_0 : i32
+        %acn3_4_0 = scf.select %isc3_4_0, %rm3_4_0, %acn2_4_0 : vector<8xf32>
+        scf.yield %acn3_4_0 : vector<8xf32>
       }
       %vl5_0 = vector.fragment.load<lhs> %vt_view[%vr5, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw5_0 = vector.bitcast %vl5_0 : vector<16xf16> to vector<8xi32>
-      %ac5_0 = scf.for %mc_5_0 = [%c0 to %c16 step %c1](%acc5_0 = %os5 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci5_0 = index.cast %mc_5_0 : index to i32
-        %mri5_0 = index.add %mc_5_0, %kb0_row : index
-        %mrow5_0 = vector.load %mk_view[%mri5_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx5_0 = vector.andi %vw5_0, %mrow5_0 : vector<8xi32>
-        %vs5_0 = vector.bitcast %vx5_0 : vector<8xi32> to vector<16xf16>
-        %vm5_0 = vector.fragment<lhs> %vs5_0 shape [%c16, %c16] : vector<16xf16>
-        %rm5_0 = vector.mma %vm5_0, %pt0, %os5 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc5_0 = scalar.cmpi eq, %lane_col32m, %mci5_0 : i32
-        %acn5_0 = scf.select %isc5_0, %rm5_0, %acc5_0 : vector<8xf32>
-        scf.yield %acn5_0 : vector<8xf32>
+      %ac5_0 = scf.for %mc_5_0 = [%c0 to %c16 step %cunr](%acc_5_0 = %os5 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_5_0 = index.add %mc_5_0, %cu0 : index
+        %mci0_5_0 = index.cast %mcu0_5_0 : index to i32
+        %mri0_5_0 = index.add %mcu0_5_0, %kb0_row : index
+        %mrow0_5_0 = vector.load %mk_view[%mri0_5_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_5_0 = vector.andi %vw5_0, %mrow0_5_0 : vector<8xi32>
+        %vs0_5_0 = vector.bitcast %vx0_5_0 : vector<8xi32> to vector<16xf16>
+        %vm0_5_0 = vector.fragment<lhs> %vs0_5_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_5_0 = vector.mma %vm0_5_0, %pt0, %os5 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_5_0 = index.add %mc_5_0, %cu1 : index
+        %mci1_5_0 = index.cast %mcu1_5_0 : index to i32
+        %mri1_5_0 = index.add %mcu1_5_0, %kb0_row : index
+        %mrow1_5_0 = vector.load %mk_view[%mri1_5_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_5_0 = vector.andi %vw5_0, %mrow1_5_0 : vector<8xi32>
+        %vs1_5_0 = vector.bitcast %vx1_5_0 : vector<8xi32> to vector<16xf16>
+        %vm1_5_0 = vector.fragment<lhs> %vs1_5_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_5_0 = vector.mma %vm1_5_0, %pt0, %os5 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_5_0 = index.add %mc_5_0, %cu2 : index
+        %mci2_5_0 = index.cast %mcu2_5_0 : index to i32
+        %mri2_5_0 = index.add %mcu2_5_0, %kb0_row : index
+        %mrow2_5_0 = vector.load %mk_view[%mri2_5_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_5_0 = vector.andi %vw5_0, %mrow2_5_0 : vector<8xi32>
+        %vs2_5_0 = vector.bitcast %vx2_5_0 : vector<8xi32> to vector<16xf16>
+        %vm2_5_0 = vector.fragment<lhs> %vs2_5_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_5_0 = vector.mma %vm2_5_0, %pt0, %os5 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_5_0 = index.add %mc_5_0, %cu3 : index
+        %mci3_5_0 = index.cast %mcu3_5_0 : index to i32
+        %mri3_5_0 = index.add %mcu3_5_0, %kb0_row : index
+        %mrow3_5_0 = vector.load %mk_view[%mri3_5_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_5_0 = vector.andi %vw5_0, %mrow3_5_0 : vector<8xi32>
+        %vs3_5_0 = vector.bitcast %vx3_5_0 : vector<8xi32> to vector<16xf16>
+        %vm3_5_0 = vector.fragment<lhs> %vs3_5_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_5_0 = vector.mma %vm3_5_0, %pt0, %os5 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_5_0 = scalar.cmpi eq, %lane_col32m, %mci0_5_0 : i32
+        %acn0_5_0 = scf.select %isc0_5_0, %rm0_5_0, %acc_5_0 : vector<8xf32>
+        %isc1_5_0 = scalar.cmpi eq, %lane_col32m, %mci1_5_0 : i32
+        %acn1_5_0 = scf.select %isc1_5_0, %rm1_5_0, %acn0_5_0 : vector<8xf32>
+        %isc2_5_0 = scalar.cmpi eq, %lane_col32m, %mci2_5_0 : i32
+        %acn2_5_0 = scf.select %isc2_5_0, %rm2_5_0, %acn1_5_0 : vector<8xf32>
+        %isc3_5_0 = scalar.cmpi eq, %lane_col32m, %mci3_5_0 : i32
+        %acn3_5_0 = scf.select %isc3_5_0, %rm3_5_0, %acn2_5_0 : vector<8xf32>
+        scf.yield %acn3_5_0 : vector<8xf32>
       }
       %vl6_0 = vector.fragment.load<lhs> %vt_view[%vr6, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw6_0 = vector.bitcast %vl6_0 : vector<16xf16> to vector<8xi32>
-      %ac6_0 = scf.for %mc_6_0 = [%c0 to %c16 step %c1](%acc6_0 = %os6 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci6_0 = index.cast %mc_6_0 : index to i32
-        %mri6_0 = index.add %mc_6_0, %kb0_row : index
-        %mrow6_0 = vector.load %mk_view[%mri6_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx6_0 = vector.andi %vw6_0, %mrow6_0 : vector<8xi32>
-        %vs6_0 = vector.bitcast %vx6_0 : vector<8xi32> to vector<16xf16>
-        %vm6_0 = vector.fragment<lhs> %vs6_0 shape [%c16, %c16] : vector<16xf16>
-        %rm6_0 = vector.mma %vm6_0, %pt0, %os6 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc6_0 = scalar.cmpi eq, %lane_col32m, %mci6_0 : i32
-        %acn6_0 = scf.select %isc6_0, %rm6_0, %acc6_0 : vector<8xf32>
-        scf.yield %acn6_0 : vector<8xf32>
+      %ac6_0 = scf.for %mc_6_0 = [%c0 to %c16 step %cunr](%acc_6_0 = %os6 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_6_0 = index.add %mc_6_0, %cu0 : index
+        %mci0_6_0 = index.cast %mcu0_6_0 : index to i32
+        %mri0_6_0 = index.add %mcu0_6_0, %kb0_row : index
+        %mrow0_6_0 = vector.load %mk_view[%mri0_6_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_6_0 = vector.andi %vw6_0, %mrow0_6_0 : vector<8xi32>
+        %vs0_6_0 = vector.bitcast %vx0_6_0 : vector<8xi32> to vector<16xf16>
+        %vm0_6_0 = vector.fragment<lhs> %vs0_6_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_6_0 = vector.mma %vm0_6_0, %pt0, %os6 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_6_0 = index.add %mc_6_0, %cu1 : index
+        %mci1_6_0 = index.cast %mcu1_6_0 : index to i32
+        %mri1_6_0 = index.add %mcu1_6_0, %kb0_row : index
+        %mrow1_6_0 = vector.load %mk_view[%mri1_6_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_6_0 = vector.andi %vw6_0, %mrow1_6_0 : vector<8xi32>
+        %vs1_6_0 = vector.bitcast %vx1_6_0 : vector<8xi32> to vector<16xf16>
+        %vm1_6_0 = vector.fragment<lhs> %vs1_6_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_6_0 = vector.mma %vm1_6_0, %pt0, %os6 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_6_0 = index.add %mc_6_0, %cu2 : index
+        %mci2_6_0 = index.cast %mcu2_6_0 : index to i32
+        %mri2_6_0 = index.add %mcu2_6_0, %kb0_row : index
+        %mrow2_6_0 = vector.load %mk_view[%mri2_6_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_6_0 = vector.andi %vw6_0, %mrow2_6_0 : vector<8xi32>
+        %vs2_6_0 = vector.bitcast %vx2_6_0 : vector<8xi32> to vector<16xf16>
+        %vm2_6_0 = vector.fragment<lhs> %vs2_6_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_6_0 = vector.mma %vm2_6_0, %pt0, %os6 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_6_0 = index.add %mc_6_0, %cu3 : index
+        %mci3_6_0 = index.cast %mcu3_6_0 : index to i32
+        %mri3_6_0 = index.add %mcu3_6_0, %kb0_row : index
+        %mrow3_6_0 = vector.load %mk_view[%mri3_6_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_6_0 = vector.andi %vw6_0, %mrow3_6_0 : vector<8xi32>
+        %vs3_6_0 = vector.bitcast %vx3_6_0 : vector<8xi32> to vector<16xf16>
+        %vm3_6_0 = vector.fragment<lhs> %vs3_6_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_6_0 = vector.mma %vm3_6_0, %pt0, %os6 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_6_0 = scalar.cmpi eq, %lane_col32m, %mci0_6_0 : i32
+        %acn0_6_0 = scf.select %isc0_6_0, %rm0_6_0, %acc_6_0 : vector<8xf32>
+        %isc1_6_0 = scalar.cmpi eq, %lane_col32m, %mci1_6_0 : i32
+        %acn1_6_0 = scf.select %isc1_6_0, %rm1_6_0, %acn0_6_0 : vector<8xf32>
+        %isc2_6_0 = scalar.cmpi eq, %lane_col32m, %mci2_6_0 : i32
+        %acn2_6_0 = scf.select %isc2_6_0, %rm2_6_0, %acn1_6_0 : vector<8xf32>
+        %isc3_6_0 = scalar.cmpi eq, %lane_col32m, %mci3_6_0 : i32
+        %acn3_6_0 = scf.select %isc3_6_0, %rm3_6_0, %acn2_6_0 : vector<8xf32>
+        scf.yield %acn3_6_0 : vector<8xf32>
       }
       %vl7_0 = vector.fragment.load<lhs> %vt_view[%vr7, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw7_0 = vector.bitcast %vl7_0 : vector<16xf16> to vector<8xi32>
-      %ac7_0 = scf.for %mc_7_0 = [%c0 to %c16 step %c1](%acc7_0 = %os7 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci7_0 = index.cast %mc_7_0 : index to i32
-        %mri7_0 = index.add %mc_7_0, %kb0_row : index
-        %mrow7_0 = vector.load %mk_view[%mri7_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx7_0 = vector.andi %vw7_0, %mrow7_0 : vector<8xi32>
-        %vs7_0 = vector.bitcast %vx7_0 : vector<8xi32> to vector<16xf16>
-        %vm7_0 = vector.fragment<lhs> %vs7_0 shape [%c16, %c16] : vector<16xf16>
-        %rm7_0 = vector.mma %vm7_0, %pt0, %os7 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc7_0 = scalar.cmpi eq, %lane_col32m, %mci7_0 : i32
-        %acn7_0 = scf.select %isc7_0, %rm7_0, %acc7_0 : vector<8xf32>
-        scf.yield %acn7_0 : vector<8xf32>
+      %ac7_0 = scf.for %mc_7_0 = [%c0 to %c16 step %cunr](%acc_7_0 = %os7 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_7_0 = index.add %mc_7_0, %cu0 : index
+        %mci0_7_0 = index.cast %mcu0_7_0 : index to i32
+        %mri0_7_0 = index.add %mcu0_7_0, %kb0_row : index
+        %mrow0_7_0 = vector.load %mk_view[%mri0_7_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_7_0 = vector.andi %vw7_0, %mrow0_7_0 : vector<8xi32>
+        %vs0_7_0 = vector.bitcast %vx0_7_0 : vector<8xi32> to vector<16xf16>
+        %vm0_7_0 = vector.fragment<lhs> %vs0_7_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_7_0 = vector.mma %vm0_7_0, %pt0, %os7 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_7_0 = index.add %mc_7_0, %cu1 : index
+        %mci1_7_0 = index.cast %mcu1_7_0 : index to i32
+        %mri1_7_0 = index.add %mcu1_7_0, %kb0_row : index
+        %mrow1_7_0 = vector.load %mk_view[%mri1_7_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_7_0 = vector.andi %vw7_0, %mrow1_7_0 : vector<8xi32>
+        %vs1_7_0 = vector.bitcast %vx1_7_0 : vector<8xi32> to vector<16xf16>
+        %vm1_7_0 = vector.fragment<lhs> %vs1_7_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_7_0 = vector.mma %vm1_7_0, %pt0, %os7 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_7_0 = index.add %mc_7_0, %cu2 : index
+        %mci2_7_0 = index.cast %mcu2_7_0 : index to i32
+        %mri2_7_0 = index.add %mcu2_7_0, %kb0_row : index
+        %mrow2_7_0 = vector.load %mk_view[%mri2_7_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_7_0 = vector.andi %vw7_0, %mrow2_7_0 : vector<8xi32>
+        %vs2_7_0 = vector.bitcast %vx2_7_0 : vector<8xi32> to vector<16xf16>
+        %vm2_7_0 = vector.fragment<lhs> %vs2_7_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_7_0 = vector.mma %vm2_7_0, %pt0, %os7 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_7_0 = index.add %mc_7_0, %cu3 : index
+        %mci3_7_0 = index.cast %mcu3_7_0 : index to i32
+        %mri3_7_0 = index.add %mcu3_7_0, %kb0_row : index
+        %mrow3_7_0 = vector.load %mk_view[%mri3_7_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_7_0 = vector.andi %vw7_0, %mrow3_7_0 : vector<8xi32>
+        %vs3_7_0 = vector.bitcast %vx3_7_0 : vector<8xi32> to vector<16xf16>
+        %vm3_7_0 = vector.fragment<lhs> %vs3_7_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_7_0 = vector.mma %vm3_7_0, %pt0, %os7 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_7_0 = scalar.cmpi eq, %lane_col32m, %mci0_7_0 : i32
+        %acn0_7_0 = scf.select %isc0_7_0, %rm0_7_0, %acc_7_0 : vector<8xf32>
+        %isc1_7_0 = scalar.cmpi eq, %lane_col32m, %mci1_7_0 : i32
+        %acn1_7_0 = scf.select %isc1_7_0, %rm1_7_0, %acn0_7_0 : vector<8xf32>
+        %isc2_7_0 = scalar.cmpi eq, %lane_col32m, %mci2_7_0 : i32
+        %acn2_7_0 = scf.select %isc2_7_0, %rm2_7_0, %acn1_7_0 : vector<8xf32>
+        %isc3_7_0 = scalar.cmpi eq, %lane_col32m, %mci3_7_0 : i32
+        %acn3_7_0 = scf.select %isc3_7_0, %rm3_7_0, %acn2_7_0 : vector<8xf32>
+        scf.yield %acn3_7_0 : vector<8xf32>
       }
       scf.yield %ac0_0, %ac1_0, %ac2_0, %ac3_0, %ac4_0, %ac5_0, %ac6_0, %ac7_0 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
     } else {
@@ -804,115 +1058,363 @@ kernel.def export("k_flash2") @k_flash2(%tokens: index) {
       kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
       %vl0_1 = vector.fragment.load<lhs> %vt_view[%vr0, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw0_1 = vector.bitcast %vl0_1 : vector<16xf16> to vector<8xi32>
-      %ac0_1 = scf.for %mc_0_1 = [%c0 to %c16 step %c1](%acc0_1 = %on0_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci0_1 = index.cast %mc_0_1 : index to i32
-        %mri0_1 = index.add %mc_0_1, %kb1_row : index
-        %mrow0_1 = vector.load %mk_view[%mri0_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx0_1 = vector.andi %vw0_1, %mrow0_1 : vector<8xi32>
-        %vs0_1 = vector.bitcast %vx0_1 : vector<8xi32> to vector<16xf16>
-        %vm0_1 = vector.fragment<lhs> %vs0_1 shape [%c16, %c16] : vector<16xf16>
-        %rm0_1 = vector.mma %vm0_1, %pt1, %on0_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc0_1 = scalar.cmpi eq, %lane_col32m, %mci0_1 : i32
-        %acn0_1 = scf.select %isc0_1, %rm0_1, %acc0_1 : vector<8xf32>
-        scf.yield %acn0_1 : vector<8xf32>
+      %ac0_1 = scf.for %mc_0_1 = [%c0 to %c16 step %cunr](%acc_0_1 = %on0_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_0_1 = index.add %mc_0_1, %cu0 : index
+        %mci0_0_1 = index.cast %mcu0_0_1 : index to i32
+        %mri0_0_1 = index.add %mcu0_0_1, %kb1_row : index
+        %mrow0_0_1 = vector.load %mk_view[%mri0_0_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_0_1 = vector.andi %vw0_1, %mrow0_0_1 : vector<8xi32>
+        %vs0_0_1 = vector.bitcast %vx0_0_1 : vector<8xi32> to vector<16xf16>
+        %vm0_0_1 = vector.fragment<lhs> %vs0_0_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_0_1 = vector.mma %vm0_0_1, %pt1, %on0_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_0_1 = index.add %mc_0_1, %cu1 : index
+        %mci1_0_1 = index.cast %mcu1_0_1 : index to i32
+        %mri1_0_1 = index.add %mcu1_0_1, %kb1_row : index
+        %mrow1_0_1 = vector.load %mk_view[%mri1_0_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_0_1 = vector.andi %vw0_1, %mrow1_0_1 : vector<8xi32>
+        %vs1_0_1 = vector.bitcast %vx1_0_1 : vector<8xi32> to vector<16xf16>
+        %vm1_0_1 = vector.fragment<lhs> %vs1_0_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_0_1 = vector.mma %vm1_0_1, %pt1, %on0_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_0_1 = index.add %mc_0_1, %cu2 : index
+        %mci2_0_1 = index.cast %mcu2_0_1 : index to i32
+        %mri2_0_1 = index.add %mcu2_0_1, %kb1_row : index
+        %mrow2_0_1 = vector.load %mk_view[%mri2_0_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_0_1 = vector.andi %vw0_1, %mrow2_0_1 : vector<8xi32>
+        %vs2_0_1 = vector.bitcast %vx2_0_1 : vector<8xi32> to vector<16xf16>
+        %vm2_0_1 = vector.fragment<lhs> %vs2_0_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_0_1 = vector.mma %vm2_0_1, %pt1, %on0_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_0_1 = index.add %mc_0_1, %cu3 : index
+        %mci3_0_1 = index.cast %mcu3_0_1 : index to i32
+        %mri3_0_1 = index.add %mcu3_0_1, %kb1_row : index
+        %mrow3_0_1 = vector.load %mk_view[%mri3_0_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_0_1 = vector.andi %vw0_1, %mrow3_0_1 : vector<8xi32>
+        %vs3_0_1 = vector.bitcast %vx3_0_1 : vector<8xi32> to vector<16xf16>
+        %vm3_0_1 = vector.fragment<lhs> %vs3_0_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_0_1 = vector.mma %vm3_0_1, %pt1, %on0_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_0_1 = scalar.cmpi eq, %lane_col32m, %mci0_0_1 : i32
+        %acn0_0_1 = scf.select %isc0_0_1, %rm0_0_1, %acc_0_1 : vector<8xf32>
+        %isc1_0_1 = scalar.cmpi eq, %lane_col32m, %mci1_0_1 : i32
+        %acn1_0_1 = scf.select %isc1_0_1, %rm1_0_1, %acn0_0_1 : vector<8xf32>
+        %isc2_0_1 = scalar.cmpi eq, %lane_col32m, %mci2_0_1 : i32
+        %acn2_0_1 = scf.select %isc2_0_1, %rm2_0_1, %acn1_0_1 : vector<8xf32>
+        %isc3_0_1 = scalar.cmpi eq, %lane_col32m, %mci3_0_1 : i32
+        %acn3_0_1 = scf.select %isc3_0_1, %rm3_0_1, %acn2_0_1 : vector<8xf32>
+        scf.yield %acn3_0_1 : vector<8xf32>
       }
       %vl1_1 = vector.fragment.load<lhs> %vt_view[%vr1, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw1_1 = vector.bitcast %vl1_1 : vector<16xf16> to vector<8xi32>
-      %ac1_1 = scf.for %mc_1_1 = [%c0 to %c16 step %c1](%acc1_1 = %on1_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci1_1 = index.cast %mc_1_1 : index to i32
-        %mri1_1 = index.add %mc_1_1, %kb1_row : index
-        %mrow1_1 = vector.load %mk_view[%mri1_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx1_1 = vector.andi %vw1_1, %mrow1_1 : vector<8xi32>
-        %vs1_1 = vector.bitcast %vx1_1 : vector<8xi32> to vector<16xf16>
-        %vm1_1 = vector.fragment<lhs> %vs1_1 shape [%c16, %c16] : vector<16xf16>
-        %rm1_1 = vector.mma %vm1_1, %pt1, %on1_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc1_1 = scalar.cmpi eq, %lane_col32m, %mci1_1 : i32
-        %acn1_1 = scf.select %isc1_1, %rm1_1, %acc1_1 : vector<8xf32>
-        scf.yield %acn1_1 : vector<8xf32>
+      %ac1_1 = scf.for %mc_1_1 = [%c0 to %c16 step %cunr](%acc_1_1 = %on1_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_1_1 = index.add %mc_1_1, %cu0 : index
+        %mci0_1_1 = index.cast %mcu0_1_1 : index to i32
+        %mri0_1_1 = index.add %mcu0_1_1, %kb1_row : index
+        %mrow0_1_1 = vector.load %mk_view[%mri0_1_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_1_1 = vector.andi %vw1_1, %mrow0_1_1 : vector<8xi32>
+        %vs0_1_1 = vector.bitcast %vx0_1_1 : vector<8xi32> to vector<16xf16>
+        %vm0_1_1 = vector.fragment<lhs> %vs0_1_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_1_1 = vector.mma %vm0_1_1, %pt1, %on1_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_1_1 = index.add %mc_1_1, %cu1 : index
+        %mci1_1_1 = index.cast %mcu1_1_1 : index to i32
+        %mri1_1_1 = index.add %mcu1_1_1, %kb1_row : index
+        %mrow1_1_1 = vector.load %mk_view[%mri1_1_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_1_1 = vector.andi %vw1_1, %mrow1_1_1 : vector<8xi32>
+        %vs1_1_1 = vector.bitcast %vx1_1_1 : vector<8xi32> to vector<16xf16>
+        %vm1_1_1 = vector.fragment<lhs> %vs1_1_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_1_1 = vector.mma %vm1_1_1, %pt1, %on1_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_1_1 = index.add %mc_1_1, %cu2 : index
+        %mci2_1_1 = index.cast %mcu2_1_1 : index to i32
+        %mri2_1_1 = index.add %mcu2_1_1, %kb1_row : index
+        %mrow2_1_1 = vector.load %mk_view[%mri2_1_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_1_1 = vector.andi %vw1_1, %mrow2_1_1 : vector<8xi32>
+        %vs2_1_1 = vector.bitcast %vx2_1_1 : vector<8xi32> to vector<16xf16>
+        %vm2_1_1 = vector.fragment<lhs> %vs2_1_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_1_1 = vector.mma %vm2_1_1, %pt1, %on1_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_1_1 = index.add %mc_1_1, %cu3 : index
+        %mci3_1_1 = index.cast %mcu3_1_1 : index to i32
+        %mri3_1_1 = index.add %mcu3_1_1, %kb1_row : index
+        %mrow3_1_1 = vector.load %mk_view[%mri3_1_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_1_1 = vector.andi %vw1_1, %mrow3_1_1 : vector<8xi32>
+        %vs3_1_1 = vector.bitcast %vx3_1_1 : vector<8xi32> to vector<16xf16>
+        %vm3_1_1 = vector.fragment<lhs> %vs3_1_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_1_1 = vector.mma %vm3_1_1, %pt1, %on1_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_1_1 = scalar.cmpi eq, %lane_col32m, %mci0_1_1 : i32
+        %acn0_1_1 = scf.select %isc0_1_1, %rm0_1_1, %acc_1_1 : vector<8xf32>
+        %isc1_1_1 = scalar.cmpi eq, %lane_col32m, %mci1_1_1 : i32
+        %acn1_1_1 = scf.select %isc1_1_1, %rm1_1_1, %acn0_1_1 : vector<8xf32>
+        %isc2_1_1 = scalar.cmpi eq, %lane_col32m, %mci2_1_1 : i32
+        %acn2_1_1 = scf.select %isc2_1_1, %rm2_1_1, %acn1_1_1 : vector<8xf32>
+        %isc3_1_1 = scalar.cmpi eq, %lane_col32m, %mci3_1_1 : i32
+        %acn3_1_1 = scf.select %isc3_1_1, %rm3_1_1, %acn2_1_1 : vector<8xf32>
+        scf.yield %acn3_1_1 : vector<8xf32>
       }
       %vl2_1 = vector.fragment.load<lhs> %vt_view[%vr2, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw2_1 = vector.bitcast %vl2_1 : vector<16xf16> to vector<8xi32>
-      %ac2_1 = scf.for %mc_2_1 = [%c0 to %c16 step %c1](%acc2_1 = %on2_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci2_1 = index.cast %mc_2_1 : index to i32
-        %mri2_1 = index.add %mc_2_1, %kb1_row : index
-        %mrow2_1 = vector.load %mk_view[%mri2_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx2_1 = vector.andi %vw2_1, %mrow2_1 : vector<8xi32>
-        %vs2_1 = vector.bitcast %vx2_1 : vector<8xi32> to vector<16xf16>
-        %vm2_1 = vector.fragment<lhs> %vs2_1 shape [%c16, %c16] : vector<16xf16>
-        %rm2_1 = vector.mma %vm2_1, %pt1, %on2_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc2_1 = scalar.cmpi eq, %lane_col32m, %mci2_1 : i32
-        %acn2_1 = scf.select %isc2_1, %rm2_1, %acc2_1 : vector<8xf32>
-        scf.yield %acn2_1 : vector<8xf32>
+      %ac2_1 = scf.for %mc_2_1 = [%c0 to %c16 step %cunr](%acc_2_1 = %on2_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_2_1 = index.add %mc_2_1, %cu0 : index
+        %mci0_2_1 = index.cast %mcu0_2_1 : index to i32
+        %mri0_2_1 = index.add %mcu0_2_1, %kb1_row : index
+        %mrow0_2_1 = vector.load %mk_view[%mri0_2_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_2_1 = vector.andi %vw2_1, %mrow0_2_1 : vector<8xi32>
+        %vs0_2_1 = vector.bitcast %vx0_2_1 : vector<8xi32> to vector<16xf16>
+        %vm0_2_1 = vector.fragment<lhs> %vs0_2_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_2_1 = vector.mma %vm0_2_1, %pt1, %on2_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_2_1 = index.add %mc_2_1, %cu1 : index
+        %mci1_2_1 = index.cast %mcu1_2_1 : index to i32
+        %mri1_2_1 = index.add %mcu1_2_1, %kb1_row : index
+        %mrow1_2_1 = vector.load %mk_view[%mri1_2_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_2_1 = vector.andi %vw2_1, %mrow1_2_1 : vector<8xi32>
+        %vs1_2_1 = vector.bitcast %vx1_2_1 : vector<8xi32> to vector<16xf16>
+        %vm1_2_1 = vector.fragment<lhs> %vs1_2_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_2_1 = vector.mma %vm1_2_1, %pt1, %on2_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_2_1 = index.add %mc_2_1, %cu2 : index
+        %mci2_2_1 = index.cast %mcu2_2_1 : index to i32
+        %mri2_2_1 = index.add %mcu2_2_1, %kb1_row : index
+        %mrow2_2_1 = vector.load %mk_view[%mri2_2_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_2_1 = vector.andi %vw2_1, %mrow2_2_1 : vector<8xi32>
+        %vs2_2_1 = vector.bitcast %vx2_2_1 : vector<8xi32> to vector<16xf16>
+        %vm2_2_1 = vector.fragment<lhs> %vs2_2_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_2_1 = vector.mma %vm2_2_1, %pt1, %on2_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_2_1 = index.add %mc_2_1, %cu3 : index
+        %mci3_2_1 = index.cast %mcu3_2_1 : index to i32
+        %mri3_2_1 = index.add %mcu3_2_1, %kb1_row : index
+        %mrow3_2_1 = vector.load %mk_view[%mri3_2_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_2_1 = vector.andi %vw2_1, %mrow3_2_1 : vector<8xi32>
+        %vs3_2_1 = vector.bitcast %vx3_2_1 : vector<8xi32> to vector<16xf16>
+        %vm3_2_1 = vector.fragment<lhs> %vs3_2_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_2_1 = vector.mma %vm3_2_1, %pt1, %on2_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_2_1 = scalar.cmpi eq, %lane_col32m, %mci0_2_1 : i32
+        %acn0_2_1 = scf.select %isc0_2_1, %rm0_2_1, %acc_2_1 : vector<8xf32>
+        %isc1_2_1 = scalar.cmpi eq, %lane_col32m, %mci1_2_1 : i32
+        %acn1_2_1 = scf.select %isc1_2_1, %rm1_2_1, %acn0_2_1 : vector<8xf32>
+        %isc2_2_1 = scalar.cmpi eq, %lane_col32m, %mci2_2_1 : i32
+        %acn2_2_1 = scf.select %isc2_2_1, %rm2_2_1, %acn1_2_1 : vector<8xf32>
+        %isc3_2_1 = scalar.cmpi eq, %lane_col32m, %mci3_2_1 : i32
+        %acn3_2_1 = scf.select %isc3_2_1, %rm3_2_1, %acn2_2_1 : vector<8xf32>
+        scf.yield %acn3_2_1 : vector<8xf32>
       }
       %vl3_1 = vector.fragment.load<lhs> %vt_view[%vr3, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw3_1 = vector.bitcast %vl3_1 : vector<16xf16> to vector<8xi32>
-      %ac3_1 = scf.for %mc_3_1 = [%c0 to %c16 step %c1](%acc3_1 = %on3_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci3_1 = index.cast %mc_3_1 : index to i32
-        %mri3_1 = index.add %mc_3_1, %kb1_row : index
-        %mrow3_1 = vector.load %mk_view[%mri3_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx3_1 = vector.andi %vw3_1, %mrow3_1 : vector<8xi32>
-        %vs3_1 = vector.bitcast %vx3_1 : vector<8xi32> to vector<16xf16>
-        %vm3_1 = vector.fragment<lhs> %vs3_1 shape [%c16, %c16] : vector<16xf16>
-        %rm3_1 = vector.mma %vm3_1, %pt1, %on3_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc3_1 = scalar.cmpi eq, %lane_col32m, %mci3_1 : i32
-        %acn3_1 = scf.select %isc3_1, %rm3_1, %acc3_1 : vector<8xf32>
-        scf.yield %acn3_1 : vector<8xf32>
+      %ac3_1 = scf.for %mc_3_1 = [%c0 to %c16 step %cunr](%acc_3_1 = %on3_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_3_1 = index.add %mc_3_1, %cu0 : index
+        %mci0_3_1 = index.cast %mcu0_3_1 : index to i32
+        %mri0_3_1 = index.add %mcu0_3_1, %kb1_row : index
+        %mrow0_3_1 = vector.load %mk_view[%mri0_3_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_3_1 = vector.andi %vw3_1, %mrow0_3_1 : vector<8xi32>
+        %vs0_3_1 = vector.bitcast %vx0_3_1 : vector<8xi32> to vector<16xf16>
+        %vm0_3_1 = vector.fragment<lhs> %vs0_3_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_3_1 = vector.mma %vm0_3_1, %pt1, %on3_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_3_1 = index.add %mc_3_1, %cu1 : index
+        %mci1_3_1 = index.cast %mcu1_3_1 : index to i32
+        %mri1_3_1 = index.add %mcu1_3_1, %kb1_row : index
+        %mrow1_3_1 = vector.load %mk_view[%mri1_3_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_3_1 = vector.andi %vw3_1, %mrow1_3_1 : vector<8xi32>
+        %vs1_3_1 = vector.bitcast %vx1_3_1 : vector<8xi32> to vector<16xf16>
+        %vm1_3_1 = vector.fragment<lhs> %vs1_3_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_3_1 = vector.mma %vm1_3_1, %pt1, %on3_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_3_1 = index.add %mc_3_1, %cu2 : index
+        %mci2_3_1 = index.cast %mcu2_3_1 : index to i32
+        %mri2_3_1 = index.add %mcu2_3_1, %kb1_row : index
+        %mrow2_3_1 = vector.load %mk_view[%mri2_3_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_3_1 = vector.andi %vw3_1, %mrow2_3_1 : vector<8xi32>
+        %vs2_3_1 = vector.bitcast %vx2_3_1 : vector<8xi32> to vector<16xf16>
+        %vm2_3_1 = vector.fragment<lhs> %vs2_3_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_3_1 = vector.mma %vm2_3_1, %pt1, %on3_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_3_1 = index.add %mc_3_1, %cu3 : index
+        %mci3_3_1 = index.cast %mcu3_3_1 : index to i32
+        %mri3_3_1 = index.add %mcu3_3_1, %kb1_row : index
+        %mrow3_3_1 = vector.load %mk_view[%mri3_3_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_3_1 = vector.andi %vw3_1, %mrow3_3_1 : vector<8xi32>
+        %vs3_3_1 = vector.bitcast %vx3_3_1 : vector<8xi32> to vector<16xf16>
+        %vm3_3_1 = vector.fragment<lhs> %vs3_3_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_3_1 = vector.mma %vm3_3_1, %pt1, %on3_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_3_1 = scalar.cmpi eq, %lane_col32m, %mci0_3_1 : i32
+        %acn0_3_1 = scf.select %isc0_3_1, %rm0_3_1, %acc_3_1 : vector<8xf32>
+        %isc1_3_1 = scalar.cmpi eq, %lane_col32m, %mci1_3_1 : i32
+        %acn1_3_1 = scf.select %isc1_3_1, %rm1_3_1, %acn0_3_1 : vector<8xf32>
+        %isc2_3_1 = scalar.cmpi eq, %lane_col32m, %mci2_3_1 : i32
+        %acn2_3_1 = scf.select %isc2_3_1, %rm2_3_1, %acn1_3_1 : vector<8xf32>
+        %isc3_3_1 = scalar.cmpi eq, %lane_col32m, %mci3_3_1 : i32
+        %acn3_3_1 = scf.select %isc3_3_1, %rm3_3_1, %acn2_3_1 : vector<8xf32>
+        scf.yield %acn3_3_1 : vector<8xf32>
       }
       %vl4_1 = vector.fragment.load<lhs> %vt_view[%vr4, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw4_1 = vector.bitcast %vl4_1 : vector<16xf16> to vector<8xi32>
-      %ac4_1 = scf.for %mc_4_1 = [%c0 to %c16 step %c1](%acc4_1 = %on4_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci4_1 = index.cast %mc_4_1 : index to i32
-        %mri4_1 = index.add %mc_4_1, %kb1_row : index
-        %mrow4_1 = vector.load %mk_view[%mri4_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx4_1 = vector.andi %vw4_1, %mrow4_1 : vector<8xi32>
-        %vs4_1 = vector.bitcast %vx4_1 : vector<8xi32> to vector<16xf16>
-        %vm4_1 = vector.fragment<lhs> %vs4_1 shape [%c16, %c16] : vector<16xf16>
-        %rm4_1 = vector.mma %vm4_1, %pt1, %on4_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc4_1 = scalar.cmpi eq, %lane_col32m, %mci4_1 : i32
-        %acn4_1 = scf.select %isc4_1, %rm4_1, %acc4_1 : vector<8xf32>
-        scf.yield %acn4_1 : vector<8xf32>
+      %ac4_1 = scf.for %mc_4_1 = [%c0 to %c16 step %cunr](%acc_4_1 = %on4_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_4_1 = index.add %mc_4_1, %cu0 : index
+        %mci0_4_1 = index.cast %mcu0_4_1 : index to i32
+        %mri0_4_1 = index.add %mcu0_4_1, %kb1_row : index
+        %mrow0_4_1 = vector.load %mk_view[%mri0_4_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_4_1 = vector.andi %vw4_1, %mrow0_4_1 : vector<8xi32>
+        %vs0_4_1 = vector.bitcast %vx0_4_1 : vector<8xi32> to vector<16xf16>
+        %vm0_4_1 = vector.fragment<lhs> %vs0_4_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_4_1 = vector.mma %vm0_4_1, %pt1, %on4_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_4_1 = index.add %mc_4_1, %cu1 : index
+        %mci1_4_1 = index.cast %mcu1_4_1 : index to i32
+        %mri1_4_1 = index.add %mcu1_4_1, %kb1_row : index
+        %mrow1_4_1 = vector.load %mk_view[%mri1_4_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_4_1 = vector.andi %vw4_1, %mrow1_4_1 : vector<8xi32>
+        %vs1_4_1 = vector.bitcast %vx1_4_1 : vector<8xi32> to vector<16xf16>
+        %vm1_4_1 = vector.fragment<lhs> %vs1_4_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_4_1 = vector.mma %vm1_4_1, %pt1, %on4_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_4_1 = index.add %mc_4_1, %cu2 : index
+        %mci2_4_1 = index.cast %mcu2_4_1 : index to i32
+        %mri2_4_1 = index.add %mcu2_4_1, %kb1_row : index
+        %mrow2_4_1 = vector.load %mk_view[%mri2_4_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_4_1 = vector.andi %vw4_1, %mrow2_4_1 : vector<8xi32>
+        %vs2_4_1 = vector.bitcast %vx2_4_1 : vector<8xi32> to vector<16xf16>
+        %vm2_4_1 = vector.fragment<lhs> %vs2_4_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_4_1 = vector.mma %vm2_4_1, %pt1, %on4_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_4_1 = index.add %mc_4_1, %cu3 : index
+        %mci3_4_1 = index.cast %mcu3_4_1 : index to i32
+        %mri3_4_1 = index.add %mcu3_4_1, %kb1_row : index
+        %mrow3_4_1 = vector.load %mk_view[%mri3_4_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_4_1 = vector.andi %vw4_1, %mrow3_4_1 : vector<8xi32>
+        %vs3_4_1 = vector.bitcast %vx3_4_1 : vector<8xi32> to vector<16xf16>
+        %vm3_4_1 = vector.fragment<lhs> %vs3_4_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_4_1 = vector.mma %vm3_4_1, %pt1, %on4_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_4_1 = scalar.cmpi eq, %lane_col32m, %mci0_4_1 : i32
+        %acn0_4_1 = scf.select %isc0_4_1, %rm0_4_1, %acc_4_1 : vector<8xf32>
+        %isc1_4_1 = scalar.cmpi eq, %lane_col32m, %mci1_4_1 : i32
+        %acn1_4_1 = scf.select %isc1_4_1, %rm1_4_1, %acn0_4_1 : vector<8xf32>
+        %isc2_4_1 = scalar.cmpi eq, %lane_col32m, %mci2_4_1 : i32
+        %acn2_4_1 = scf.select %isc2_4_1, %rm2_4_1, %acn1_4_1 : vector<8xf32>
+        %isc3_4_1 = scalar.cmpi eq, %lane_col32m, %mci3_4_1 : i32
+        %acn3_4_1 = scf.select %isc3_4_1, %rm3_4_1, %acn2_4_1 : vector<8xf32>
+        scf.yield %acn3_4_1 : vector<8xf32>
       }
       %vl5_1 = vector.fragment.load<lhs> %vt_view[%vr5, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw5_1 = vector.bitcast %vl5_1 : vector<16xf16> to vector<8xi32>
-      %ac5_1 = scf.for %mc_5_1 = [%c0 to %c16 step %c1](%acc5_1 = %on5_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci5_1 = index.cast %mc_5_1 : index to i32
-        %mri5_1 = index.add %mc_5_1, %kb1_row : index
-        %mrow5_1 = vector.load %mk_view[%mri5_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx5_1 = vector.andi %vw5_1, %mrow5_1 : vector<8xi32>
-        %vs5_1 = vector.bitcast %vx5_1 : vector<8xi32> to vector<16xf16>
-        %vm5_1 = vector.fragment<lhs> %vs5_1 shape [%c16, %c16] : vector<16xf16>
-        %rm5_1 = vector.mma %vm5_1, %pt1, %on5_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc5_1 = scalar.cmpi eq, %lane_col32m, %mci5_1 : i32
-        %acn5_1 = scf.select %isc5_1, %rm5_1, %acc5_1 : vector<8xf32>
-        scf.yield %acn5_1 : vector<8xf32>
+      %ac5_1 = scf.for %mc_5_1 = [%c0 to %c16 step %cunr](%acc_5_1 = %on5_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_5_1 = index.add %mc_5_1, %cu0 : index
+        %mci0_5_1 = index.cast %mcu0_5_1 : index to i32
+        %mri0_5_1 = index.add %mcu0_5_1, %kb1_row : index
+        %mrow0_5_1 = vector.load %mk_view[%mri0_5_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_5_1 = vector.andi %vw5_1, %mrow0_5_1 : vector<8xi32>
+        %vs0_5_1 = vector.bitcast %vx0_5_1 : vector<8xi32> to vector<16xf16>
+        %vm0_5_1 = vector.fragment<lhs> %vs0_5_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_5_1 = vector.mma %vm0_5_1, %pt1, %on5_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_5_1 = index.add %mc_5_1, %cu1 : index
+        %mci1_5_1 = index.cast %mcu1_5_1 : index to i32
+        %mri1_5_1 = index.add %mcu1_5_1, %kb1_row : index
+        %mrow1_5_1 = vector.load %mk_view[%mri1_5_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_5_1 = vector.andi %vw5_1, %mrow1_5_1 : vector<8xi32>
+        %vs1_5_1 = vector.bitcast %vx1_5_1 : vector<8xi32> to vector<16xf16>
+        %vm1_5_1 = vector.fragment<lhs> %vs1_5_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_5_1 = vector.mma %vm1_5_1, %pt1, %on5_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_5_1 = index.add %mc_5_1, %cu2 : index
+        %mci2_5_1 = index.cast %mcu2_5_1 : index to i32
+        %mri2_5_1 = index.add %mcu2_5_1, %kb1_row : index
+        %mrow2_5_1 = vector.load %mk_view[%mri2_5_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_5_1 = vector.andi %vw5_1, %mrow2_5_1 : vector<8xi32>
+        %vs2_5_1 = vector.bitcast %vx2_5_1 : vector<8xi32> to vector<16xf16>
+        %vm2_5_1 = vector.fragment<lhs> %vs2_5_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_5_1 = vector.mma %vm2_5_1, %pt1, %on5_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_5_1 = index.add %mc_5_1, %cu3 : index
+        %mci3_5_1 = index.cast %mcu3_5_1 : index to i32
+        %mri3_5_1 = index.add %mcu3_5_1, %kb1_row : index
+        %mrow3_5_1 = vector.load %mk_view[%mri3_5_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_5_1 = vector.andi %vw5_1, %mrow3_5_1 : vector<8xi32>
+        %vs3_5_1 = vector.bitcast %vx3_5_1 : vector<8xi32> to vector<16xf16>
+        %vm3_5_1 = vector.fragment<lhs> %vs3_5_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_5_1 = vector.mma %vm3_5_1, %pt1, %on5_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_5_1 = scalar.cmpi eq, %lane_col32m, %mci0_5_1 : i32
+        %acn0_5_1 = scf.select %isc0_5_1, %rm0_5_1, %acc_5_1 : vector<8xf32>
+        %isc1_5_1 = scalar.cmpi eq, %lane_col32m, %mci1_5_1 : i32
+        %acn1_5_1 = scf.select %isc1_5_1, %rm1_5_1, %acn0_5_1 : vector<8xf32>
+        %isc2_5_1 = scalar.cmpi eq, %lane_col32m, %mci2_5_1 : i32
+        %acn2_5_1 = scf.select %isc2_5_1, %rm2_5_1, %acn1_5_1 : vector<8xf32>
+        %isc3_5_1 = scalar.cmpi eq, %lane_col32m, %mci3_5_1 : i32
+        %acn3_5_1 = scf.select %isc3_5_1, %rm3_5_1, %acn2_5_1 : vector<8xf32>
+        scf.yield %acn3_5_1 : vector<8xf32>
       }
       %vl6_1 = vector.fragment.load<lhs> %vt_view[%vr6, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw6_1 = vector.bitcast %vl6_1 : vector<16xf16> to vector<8xi32>
-      %ac6_1 = scf.for %mc_6_1 = [%c0 to %c16 step %c1](%acc6_1 = %on6_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci6_1 = index.cast %mc_6_1 : index to i32
-        %mri6_1 = index.add %mc_6_1, %kb1_row : index
-        %mrow6_1 = vector.load %mk_view[%mri6_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx6_1 = vector.andi %vw6_1, %mrow6_1 : vector<8xi32>
-        %vs6_1 = vector.bitcast %vx6_1 : vector<8xi32> to vector<16xf16>
-        %vm6_1 = vector.fragment<lhs> %vs6_1 shape [%c16, %c16] : vector<16xf16>
-        %rm6_1 = vector.mma %vm6_1, %pt1, %on6_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc6_1 = scalar.cmpi eq, %lane_col32m, %mci6_1 : i32
-        %acn6_1 = scf.select %isc6_1, %rm6_1, %acc6_1 : vector<8xf32>
-        scf.yield %acn6_1 : vector<8xf32>
+      %ac6_1 = scf.for %mc_6_1 = [%c0 to %c16 step %cunr](%acc_6_1 = %on6_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_6_1 = index.add %mc_6_1, %cu0 : index
+        %mci0_6_1 = index.cast %mcu0_6_1 : index to i32
+        %mri0_6_1 = index.add %mcu0_6_1, %kb1_row : index
+        %mrow0_6_1 = vector.load %mk_view[%mri0_6_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_6_1 = vector.andi %vw6_1, %mrow0_6_1 : vector<8xi32>
+        %vs0_6_1 = vector.bitcast %vx0_6_1 : vector<8xi32> to vector<16xf16>
+        %vm0_6_1 = vector.fragment<lhs> %vs0_6_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_6_1 = vector.mma %vm0_6_1, %pt1, %on6_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_6_1 = index.add %mc_6_1, %cu1 : index
+        %mci1_6_1 = index.cast %mcu1_6_1 : index to i32
+        %mri1_6_1 = index.add %mcu1_6_1, %kb1_row : index
+        %mrow1_6_1 = vector.load %mk_view[%mri1_6_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_6_1 = vector.andi %vw6_1, %mrow1_6_1 : vector<8xi32>
+        %vs1_6_1 = vector.bitcast %vx1_6_1 : vector<8xi32> to vector<16xf16>
+        %vm1_6_1 = vector.fragment<lhs> %vs1_6_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_6_1 = vector.mma %vm1_6_1, %pt1, %on6_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_6_1 = index.add %mc_6_1, %cu2 : index
+        %mci2_6_1 = index.cast %mcu2_6_1 : index to i32
+        %mri2_6_1 = index.add %mcu2_6_1, %kb1_row : index
+        %mrow2_6_1 = vector.load %mk_view[%mri2_6_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_6_1 = vector.andi %vw6_1, %mrow2_6_1 : vector<8xi32>
+        %vs2_6_1 = vector.bitcast %vx2_6_1 : vector<8xi32> to vector<16xf16>
+        %vm2_6_1 = vector.fragment<lhs> %vs2_6_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_6_1 = vector.mma %vm2_6_1, %pt1, %on6_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_6_1 = index.add %mc_6_1, %cu3 : index
+        %mci3_6_1 = index.cast %mcu3_6_1 : index to i32
+        %mri3_6_1 = index.add %mcu3_6_1, %kb1_row : index
+        %mrow3_6_1 = vector.load %mk_view[%mri3_6_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_6_1 = vector.andi %vw6_1, %mrow3_6_1 : vector<8xi32>
+        %vs3_6_1 = vector.bitcast %vx3_6_1 : vector<8xi32> to vector<16xf16>
+        %vm3_6_1 = vector.fragment<lhs> %vs3_6_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_6_1 = vector.mma %vm3_6_1, %pt1, %on6_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_6_1 = scalar.cmpi eq, %lane_col32m, %mci0_6_1 : i32
+        %acn0_6_1 = scf.select %isc0_6_1, %rm0_6_1, %acc_6_1 : vector<8xf32>
+        %isc1_6_1 = scalar.cmpi eq, %lane_col32m, %mci1_6_1 : i32
+        %acn1_6_1 = scf.select %isc1_6_1, %rm1_6_1, %acn0_6_1 : vector<8xf32>
+        %isc2_6_1 = scalar.cmpi eq, %lane_col32m, %mci2_6_1 : i32
+        %acn2_6_1 = scf.select %isc2_6_1, %rm2_6_1, %acn1_6_1 : vector<8xf32>
+        %isc3_6_1 = scalar.cmpi eq, %lane_col32m, %mci3_6_1 : i32
+        %acn3_6_1 = scf.select %isc3_6_1, %rm3_6_1, %acn2_6_1 : vector<8xf32>
+        scf.yield %acn3_6_1 : vector<8xf32>
       }
       %vl7_1 = vector.fragment.load<lhs> %vt_view[%vr7, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw7_1 = vector.bitcast %vl7_1 : vector<16xf16> to vector<8xi32>
-      %ac7_1 = scf.for %mc_7_1 = [%c0 to %c16 step %c1](%acc7_1 = %on7_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci7_1 = index.cast %mc_7_1 : index to i32
-        %mri7_1 = index.add %mc_7_1, %kb1_row : index
-        %mrow7_1 = vector.load %mk_view[%mri7_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx7_1 = vector.andi %vw7_1, %mrow7_1 : vector<8xi32>
-        %vs7_1 = vector.bitcast %vx7_1 : vector<8xi32> to vector<16xf16>
-        %vm7_1 = vector.fragment<lhs> %vs7_1 shape [%c16, %c16] : vector<16xf16>
-        %rm7_1 = vector.mma %vm7_1, %pt1, %on7_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc7_1 = scalar.cmpi eq, %lane_col32m, %mci7_1 : i32
-        %acn7_1 = scf.select %isc7_1, %rm7_1, %acc7_1 : vector<8xf32>
-        scf.yield %acn7_1 : vector<8xf32>
+      %ac7_1 = scf.for %mc_7_1 = [%c0 to %c16 step %cunr](%acc_7_1 = %on7_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_7_1 = index.add %mc_7_1, %cu0 : index
+        %mci0_7_1 = index.cast %mcu0_7_1 : index to i32
+        %mri0_7_1 = index.add %mcu0_7_1, %kb1_row : index
+        %mrow0_7_1 = vector.load %mk_view[%mri0_7_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_7_1 = vector.andi %vw7_1, %mrow0_7_1 : vector<8xi32>
+        %vs0_7_1 = vector.bitcast %vx0_7_1 : vector<8xi32> to vector<16xf16>
+        %vm0_7_1 = vector.fragment<lhs> %vs0_7_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_7_1 = vector.mma %vm0_7_1, %pt1, %on7_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_7_1 = index.add %mc_7_1, %cu1 : index
+        %mci1_7_1 = index.cast %mcu1_7_1 : index to i32
+        %mri1_7_1 = index.add %mcu1_7_1, %kb1_row : index
+        %mrow1_7_1 = vector.load %mk_view[%mri1_7_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_7_1 = vector.andi %vw7_1, %mrow1_7_1 : vector<8xi32>
+        %vs1_7_1 = vector.bitcast %vx1_7_1 : vector<8xi32> to vector<16xf16>
+        %vm1_7_1 = vector.fragment<lhs> %vs1_7_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_7_1 = vector.mma %vm1_7_1, %pt1, %on7_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_7_1 = index.add %mc_7_1, %cu2 : index
+        %mci2_7_1 = index.cast %mcu2_7_1 : index to i32
+        %mri2_7_1 = index.add %mcu2_7_1, %kb1_row : index
+        %mrow2_7_1 = vector.load %mk_view[%mri2_7_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_7_1 = vector.andi %vw7_1, %mrow2_7_1 : vector<8xi32>
+        %vs2_7_1 = vector.bitcast %vx2_7_1 : vector<8xi32> to vector<16xf16>
+        %vm2_7_1 = vector.fragment<lhs> %vs2_7_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_7_1 = vector.mma %vm2_7_1, %pt1, %on7_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_7_1 = index.add %mc_7_1, %cu3 : index
+        %mci3_7_1 = index.cast %mcu3_7_1 : index to i32
+        %mri3_7_1 = index.add %mcu3_7_1, %kb1_row : index
+        %mrow3_7_1 = vector.load %mk_view[%mri3_7_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_7_1 = vector.andi %vw7_1, %mrow3_7_1 : vector<8xi32>
+        %vs3_7_1 = vector.bitcast %vx3_7_1 : vector<8xi32> to vector<16xf16>
+        %vm3_7_1 = vector.fragment<lhs> %vs3_7_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_7_1 = vector.mma %vm3_7_1, %pt1, %on7_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_7_1 = scalar.cmpi eq, %lane_col32m, %mci0_7_1 : i32
+        %acn0_7_1 = scf.select %isc0_7_1, %rm0_7_1, %acc_7_1 : vector<8xf32>
+        %isc1_7_1 = scalar.cmpi eq, %lane_col32m, %mci1_7_1 : i32
+        %acn1_7_1 = scf.select %isc1_7_1, %rm1_7_1, %acn0_7_1 : vector<8xf32>
+        %isc2_7_1 = scalar.cmpi eq, %lane_col32m, %mci2_7_1 : i32
+        %acn2_7_1 = scf.select %isc2_7_1, %rm2_7_1, %acn1_7_1 : vector<8xf32>
+        %isc3_7_1 = scalar.cmpi eq, %lane_col32m, %mci3_7_1 : i32
+        %acn3_7_1 = scf.select %isc3_7_1, %rm3_7_1, %acn2_7_1 : vector<8xf32>
+        scf.yield %acn3_7_1 : vector<8xf32>
       }
       scf.yield %ac0_1, %ac1_1, %ac2_1, %ac3_1, %ac4_1, %ac5_1, %ac6_1, %ac7_1 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
     } else {
@@ -1467,6 +1969,12 @@ kernel.def export("k_flash2_partial") @k_flash2_partial(%tokens: index) {
     %cm1_i32m = scalar.constant -1 : i32
     %cffff_i32m = scalar.constant 65535 : i32
     %c4 = index.constant 4 : index
+    %cunr = index.constant 4 : index
+    %cu0 = index.constant 0 : index
+    %cu1 = index.constant 1 : index
+    %cu2 = index.constant 2 : index
+    %cu3 = index.constant 3 : index
+
     %nb_last0 = scalar.addi %base0, %c15_i32m : i32
     %nb_diag0 = scalar.cmpi sgt, %nb_last0, %pos0_i32 : i32
     %nb_win0 = scalar.cmpi slt, %base0, %win_lo15 : i32
@@ -1546,115 +2054,363 @@ kernel.def export("k_flash2_partial") @k_flash2_partial(%tokens: index) {
       kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
       %vl0_0 = vector.fragment.load<lhs> %vt_view[%vr0, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw0_0 = vector.bitcast %vl0_0 : vector<16xf16> to vector<8xi32>
-      %ac0_0 = scf.for %mc_0_0 = [%c0 to %c16 step %c1](%acc0_0 = %os0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci0_0 = index.cast %mc_0_0 : index to i32
-        %mri0_0 = index.add %mc_0_0, %kb0_row : index
-        %mrow0_0 = vector.load %mk_view[%mri0_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx0_0 = vector.andi %vw0_0, %mrow0_0 : vector<8xi32>
-        %vs0_0 = vector.bitcast %vx0_0 : vector<8xi32> to vector<16xf16>
-        %vm0_0 = vector.fragment<lhs> %vs0_0 shape [%c16, %c16] : vector<16xf16>
-        %rm0_0 = vector.mma %vm0_0, %pt0, %os0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc0_0 = scalar.cmpi eq, %lane_col32m, %mci0_0 : i32
-        %acn0_0 = scf.select %isc0_0, %rm0_0, %acc0_0 : vector<8xf32>
-        scf.yield %acn0_0 : vector<8xf32>
+      %ac0_0 = scf.for %mc_0_0 = [%c0 to %c16 step %cunr](%acc_0_0 = %os0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_0_0 = index.add %mc_0_0, %cu0 : index
+        %mci0_0_0 = index.cast %mcu0_0_0 : index to i32
+        %mri0_0_0 = index.add %mcu0_0_0, %kb0_row : index
+        %mrow0_0_0 = vector.load %mk_view[%mri0_0_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_0_0 = vector.andi %vw0_0, %mrow0_0_0 : vector<8xi32>
+        %vs0_0_0 = vector.bitcast %vx0_0_0 : vector<8xi32> to vector<16xf16>
+        %vm0_0_0 = vector.fragment<lhs> %vs0_0_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_0_0 = vector.mma %vm0_0_0, %pt0, %os0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_0_0 = index.add %mc_0_0, %cu1 : index
+        %mci1_0_0 = index.cast %mcu1_0_0 : index to i32
+        %mri1_0_0 = index.add %mcu1_0_0, %kb0_row : index
+        %mrow1_0_0 = vector.load %mk_view[%mri1_0_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_0_0 = vector.andi %vw0_0, %mrow1_0_0 : vector<8xi32>
+        %vs1_0_0 = vector.bitcast %vx1_0_0 : vector<8xi32> to vector<16xf16>
+        %vm1_0_0 = vector.fragment<lhs> %vs1_0_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_0_0 = vector.mma %vm1_0_0, %pt0, %os0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_0_0 = index.add %mc_0_0, %cu2 : index
+        %mci2_0_0 = index.cast %mcu2_0_0 : index to i32
+        %mri2_0_0 = index.add %mcu2_0_0, %kb0_row : index
+        %mrow2_0_0 = vector.load %mk_view[%mri2_0_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_0_0 = vector.andi %vw0_0, %mrow2_0_0 : vector<8xi32>
+        %vs2_0_0 = vector.bitcast %vx2_0_0 : vector<8xi32> to vector<16xf16>
+        %vm2_0_0 = vector.fragment<lhs> %vs2_0_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_0_0 = vector.mma %vm2_0_0, %pt0, %os0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_0_0 = index.add %mc_0_0, %cu3 : index
+        %mci3_0_0 = index.cast %mcu3_0_0 : index to i32
+        %mri3_0_0 = index.add %mcu3_0_0, %kb0_row : index
+        %mrow3_0_0 = vector.load %mk_view[%mri3_0_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_0_0 = vector.andi %vw0_0, %mrow3_0_0 : vector<8xi32>
+        %vs3_0_0 = vector.bitcast %vx3_0_0 : vector<8xi32> to vector<16xf16>
+        %vm3_0_0 = vector.fragment<lhs> %vs3_0_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_0_0 = vector.mma %vm3_0_0, %pt0, %os0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_0_0 = scalar.cmpi eq, %lane_col32m, %mci0_0_0 : i32
+        %acn0_0_0 = scf.select %isc0_0_0, %rm0_0_0, %acc_0_0 : vector<8xf32>
+        %isc1_0_0 = scalar.cmpi eq, %lane_col32m, %mci1_0_0 : i32
+        %acn1_0_0 = scf.select %isc1_0_0, %rm1_0_0, %acn0_0_0 : vector<8xf32>
+        %isc2_0_0 = scalar.cmpi eq, %lane_col32m, %mci2_0_0 : i32
+        %acn2_0_0 = scf.select %isc2_0_0, %rm2_0_0, %acn1_0_0 : vector<8xf32>
+        %isc3_0_0 = scalar.cmpi eq, %lane_col32m, %mci3_0_0 : i32
+        %acn3_0_0 = scf.select %isc3_0_0, %rm3_0_0, %acn2_0_0 : vector<8xf32>
+        scf.yield %acn3_0_0 : vector<8xf32>
       }
       %vl1_0 = vector.fragment.load<lhs> %vt_view[%vr1, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw1_0 = vector.bitcast %vl1_0 : vector<16xf16> to vector<8xi32>
-      %ac1_0 = scf.for %mc_1_0 = [%c0 to %c16 step %c1](%acc1_0 = %os1 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci1_0 = index.cast %mc_1_0 : index to i32
-        %mri1_0 = index.add %mc_1_0, %kb0_row : index
-        %mrow1_0 = vector.load %mk_view[%mri1_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx1_0 = vector.andi %vw1_0, %mrow1_0 : vector<8xi32>
-        %vs1_0 = vector.bitcast %vx1_0 : vector<8xi32> to vector<16xf16>
-        %vm1_0 = vector.fragment<lhs> %vs1_0 shape [%c16, %c16] : vector<16xf16>
-        %rm1_0 = vector.mma %vm1_0, %pt0, %os1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc1_0 = scalar.cmpi eq, %lane_col32m, %mci1_0 : i32
-        %acn1_0 = scf.select %isc1_0, %rm1_0, %acc1_0 : vector<8xf32>
-        scf.yield %acn1_0 : vector<8xf32>
+      %ac1_0 = scf.for %mc_1_0 = [%c0 to %c16 step %cunr](%acc_1_0 = %os1 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_1_0 = index.add %mc_1_0, %cu0 : index
+        %mci0_1_0 = index.cast %mcu0_1_0 : index to i32
+        %mri0_1_0 = index.add %mcu0_1_0, %kb0_row : index
+        %mrow0_1_0 = vector.load %mk_view[%mri0_1_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_1_0 = vector.andi %vw1_0, %mrow0_1_0 : vector<8xi32>
+        %vs0_1_0 = vector.bitcast %vx0_1_0 : vector<8xi32> to vector<16xf16>
+        %vm0_1_0 = vector.fragment<lhs> %vs0_1_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_1_0 = vector.mma %vm0_1_0, %pt0, %os1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_1_0 = index.add %mc_1_0, %cu1 : index
+        %mci1_1_0 = index.cast %mcu1_1_0 : index to i32
+        %mri1_1_0 = index.add %mcu1_1_0, %kb0_row : index
+        %mrow1_1_0 = vector.load %mk_view[%mri1_1_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_1_0 = vector.andi %vw1_0, %mrow1_1_0 : vector<8xi32>
+        %vs1_1_0 = vector.bitcast %vx1_1_0 : vector<8xi32> to vector<16xf16>
+        %vm1_1_0 = vector.fragment<lhs> %vs1_1_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_1_0 = vector.mma %vm1_1_0, %pt0, %os1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_1_0 = index.add %mc_1_0, %cu2 : index
+        %mci2_1_0 = index.cast %mcu2_1_0 : index to i32
+        %mri2_1_0 = index.add %mcu2_1_0, %kb0_row : index
+        %mrow2_1_0 = vector.load %mk_view[%mri2_1_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_1_0 = vector.andi %vw1_0, %mrow2_1_0 : vector<8xi32>
+        %vs2_1_0 = vector.bitcast %vx2_1_0 : vector<8xi32> to vector<16xf16>
+        %vm2_1_0 = vector.fragment<lhs> %vs2_1_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_1_0 = vector.mma %vm2_1_0, %pt0, %os1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_1_0 = index.add %mc_1_0, %cu3 : index
+        %mci3_1_0 = index.cast %mcu3_1_0 : index to i32
+        %mri3_1_0 = index.add %mcu3_1_0, %kb0_row : index
+        %mrow3_1_0 = vector.load %mk_view[%mri3_1_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_1_0 = vector.andi %vw1_0, %mrow3_1_0 : vector<8xi32>
+        %vs3_1_0 = vector.bitcast %vx3_1_0 : vector<8xi32> to vector<16xf16>
+        %vm3_1_0 = vector.fragment<lhs> %vs3_1_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_1_0 = vector.mma %vm3_1_0, %pt0, %os1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_1_0 = scalar.cmpi eq, %lane_col32m, %mci0_1_0 : i32
+        %acn0_1_0 = scf.select %isc0_1_0, %rm0_1_0, %acc_1_0 : vector<8xf32>
+        %isc1_1_0 = scalar.cmpi eq, %lane_col32m, %mci1_1_0 : i32
+        %acn1_1_0 = scf.select %isc1_1_0, %rm1_1_0, %acn0_1_0 : vector<8xf32>
+        %isc2_1_0 = scalar.cmpi eq, %lane_col32m, %mci2_1_0 : i32
+        %acn2_1_0 = scf.select %isc2_1_0, %rm2_1_0, %acn1_1_0 : vector<8xf32>
+        %isc3_1_0 = scalar.cmpi eq, %lane_col32m, %mci3_1_0 : i32
+        %acn3_1_0 = scf.select %isc3_1_0, %rm3_1_0, %acn2_1_0 : vector<8xf32>
+        scf.yield %acn3_1_0 : vector<8xf32>
       }
       %vl2_0 = vector.fragment.load<lhs> %vt_view[%vr2, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw2_0 = vector.bitcast %vl2_0 : vector<16xf16> to vector<8xi32>
-      %ac2_0 = scf.for %mc_2_0 = [%c0 to %c16 step %c1](%acc2_0 = %os2 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci2_0 = index.cast %mc_2_0 : index to i32
-        %mri2_0 = index.add %mc_2_0, %kb0_row : index
-        %mrow2_0 = vector.load %mk_view[%mri2_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx2_0 = vector.andi %vw2_0, %mrow2_0 : vector<8xi32>
-        %vs2_0 = vector.bitcast %vx2_0 : vector<8xi32> to vector<16xf16>
-        %vm2_0 = vector.fragment<lhs> %vs2_0 shape [%c16, %c16] : vector<16xf16>
-        %rm2_0 = vector.mma %vm2_0, %pt0, %os2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc2_0 = scalar.cmpi eq, %lane_col32m, %mci2_0 : i32
-        %acn2_0 = scf.select %isc2_0, %rm2_0, %acc2_0 : vector<8xf32>
-        scf.yield %acn2_0 : vector<8xf32>
+      %ac2_0 = scf.for %mc_2_0 = [%c0 to %c16 step %cunr](%acc_2_0 = %os2 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_2_0 = index.add %mc_2_0, %cu0 : index
+        %mci0_2_0 = index.cast %mcu0_2_0 : index to i32
+        %mri0_2_0 = index.add %mcu0_2_0, %kb0_row : index
+        %mrow0_2_0 = vector.load %mk_view[%mri0_2_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_2_0 = vector.andi %vw2_0, %mrow0_2_0 : vector<8xi32>
+        %vs0_2_0 = vector.bitcast %vx0_2_0 : vector<8xi32> to vector<16xf16>
+        %vm0_2_0 = vector.fragment<lhs> %vs0_2_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_2_0 = vector.mma %vm0_2_0, %pt0, %os2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_2_0 = index.add %mc_2_0, %cu1 : index
+        %mci1_2_0 = index.cast %mcu1_2_0 : index to i32
+        %mri1_2_0 = index.add %mcu1_2_0, %kb0_row : index
+        %mrow1_2_0 = vector.load %mk_view[%mri1_2_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_2_0 = vector.andi %vw2_0, %mrow1_2_0 : vector<8xi32>
+        %vs1_2_0 = vector.bitcast %vx1_2_0 : vector<8xi32> to vector<16xf16>
+        %vm1_2_0 = vector.fragment<lhs> %vs1_2_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_2_0 = vector.mma %vm1_2_0, %pt0, %os2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_2_0 = index.add %mc_2_0, %cu2 : index
+        %mci2_2_0 = index.cast %mcu2_2_0 : index to i32
+        %mri2_2_0 = index.add %mcu2_2_0, %kb0_row : index
+        %mrow2_2_0 = vector.load %mk_view[%mri2_2_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_2_0 = vector.andi %vw2_0, %mrow2_2_0 : vector<8xi32>
+        %vs2_2_0 = vector.bitcast %vx2_2_0 : vector<8xi32> to vector<16xf16>
+        %vm2_2_0 = vector.fragment<lhs> %vs2_2_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_2_0 = vector.mma %vm2_2_0, %pt0, %os2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_2_0 = index.add %mc_2_0, %cu3 : index
+        %mci3_2_0 = index.cast %mcu3_2_0 : index to i32
+        %mri3_2_0 = index.add %mcu3_2_0, %kb0_row : index
+        %mrow3_2_0 = vector.load %mk_view[%mri3_2_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_2_0 = vector.andi %vw2_0, %mrow3_2_0 : vector<8xi32>
+        %vs3_2_0 = vector.bitcast %vx3_2_0 : vector<8xi32> to vector<16xf16>
+        %vm3_2_0 = vector.fragment<lhs> %vs3_2_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_2_0 = vector.mma %vm3_2_0, %pt0, %os2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_2_0 = scalar.cmpi eq, %lane_col32m, %mci0_2_0 : i32
+        %acn0_2_0 = scf.select %isc0_2_0, %rm0_2_0, %acc_2_0 : vector<8xf32>
+        %isc1_2_0 = scalar.cmpi eq, %lane_col32m, %mci1_2_0 : i32
+        %acn1_2_0 = scf.select %isc1_2_0, %rm1_2_0, %acn0_2_0 : vector<8xf32>
+        %isc2_2_0 = scalar.cmpi eq, %lane_col32m, %mci2_2_0 : i32
+        %acn2_2_0 = scf.select %isc2_2_0, %rm2_2_0, %acn1_2_0 : vector<8xf32>
+        %isc3_2_0 = scalar.cmpi eq, %lane_col32m, %mci3_2_0 : i32
+        %acn3_2_0 = scf.select %isc3_2_0, %rm3_2_0, %acn2_2_0 : vector<8xf32>
+        scf.yield %acn3_2_0 : vector<8xf32>
       }
       %vl3_0 = vector.fragment.load<lhs> %vt_view[%vr3, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw3_0 = vector.bitcast %vl3_0 : vector<16xf16> to vector<8xi32>
-      %ac3_0 = scf.for %mc_3_0 = [%c0 to %c16 step %c1](%acc3_0 = %os3 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci3_0 = index.cast %mc_3_0 : index to i32
-        %mri3_0 = index.add %mc_3_0, %kb0_row : index
-        %mrow3_0 = vector.load %mk_view[%mri3_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx3_0 = vector.andi %vw3_0, %mrow3_0 : vector<8xi32>
-        %vs3_0 = vector.bitcast %vx3_0 : vector<8xi32> to vector<16xf16>
-        %vm3_0 = vector.fragment<lhs> %vs3_0 shape [%c16, %c16] : vector<16xf16>
-        %rm3_0 = vector.mma %vm3_0, %pt0, %os3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc3_0 = scalar.cmpi eq, %lane_col32m, %mci3_0 : i32
-        %acn3_0 = scf.select %isc3_0, %rm3_0, %acc3_0 : vector<8xf32>
-        scf.yield %acn3_0 : vector<8xf32>
+      %ac3_0 = scf.for %mc_3_0 = [%c0 to %c16 step %cunr](%acc_3_0 = %os3 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_3_0 = index.add %mc_3_0, %cu0 : index
+        %mci0_3_0 = index.cast %mcu0_3_0 : index to i32
+        %mri0_3_0 = index.add %mcu0_3_0, %kb0_row : index
+        %mrow0_3_0 = vector.load %mk_view[%mri0_3_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_3_0 = vector.andi %vw3_0, %mrow0_3_0 : vector<8xi32>
+        %vs0_3_0 = vector.bitcast %vx0_3_0 : vector<8xi32> to vector<16xf16>
+        %vm0_3_0 = vector.fragment<lhs> %vs0_3_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_3_0 = vector.mma %vm0_3_0, %pt0, %os3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_3_0 = index.add %mc_3_0, %cu1 : index
+        %mci1_3_0 = index.cast %mcu1_3_0 : index to i32
+        %mri1_3_0 = index.add %mcu1_3_0, %kb0_row : index
+        %mrow1_3_0 = vector.load %mk_view[%mri1_3_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_3_0 = vector.andi %vw3_0, %mrow1_3_0 : vector<8xi32>
+        %vs1_3_0 = vector.bitcast %vx1_3_0 : vector<8xi32> to vector<16xf16>
+        %vm1_3_0 = vector.fragment<lhs> %vs1_3_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_3_0 = vector.mma %vm1_3_0, %pt0, %os3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_3_0 = index.add %mc_3_0, %cu2 : index
+        %mci2_3_0 = index.cast %mcu2_3_0 : index to i32
+        %mri2_3_0 = index.add %mcu2_3_0, %kb0_row : index
+        %mrow2_3_0 = vector.load %mk_view[%mri2_3_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_3_0 = vector.andi %vw3_0, %mrow2_3_0 : vector<8xi32>
+        %vs2_3_0 = vector.bitcast %vx2_3_0 : vector<8xi32> to vector<16xf16>
+        %vm2_3_0 = vector.fragment<lhs> %vs2_3_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_3_0 = vector.mma %vm2_3_0, %pt0, %os3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_3_0 = index.add %mc_3_0, %cu3 : index
+        %mci3_3_0 = index.cast %mcu3_3_0 : index to i32
+        %mri3_3_0 = index.add %mcu3_3_0, %kb0_row : index
+        %mrow3_3_0 = vector.load %mk_view[%mri3_3_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_3_0 = vector.andi %vw3_0, %mrow3_3_0 : vector<8xi32>
+        %vs3_3_0 = vector.bitcast %vx3_3_0 : vector<8xi32> to vector<16xf16>
+        %vm3_3_0 = vector.fragment<lhs> %vs3_3_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_3_0 = vector.mma %vm3_3_0, %pt0, %os3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_3_0 = scalar.cmpi eq, %lane_col32m, %mci0_3_0 : i32
+        %acn0_3_0 = scf.select %isc0_3_0, %rm0_3_0, %acc_3_0 : vector<8xf32>
+        %isc1_3_0 = scalar.cmpi eq, %lane_col32m, %mci1_3_0 : i32
+        %acn1_3_0 = scf.select %isc1_3_0, %rm1_3_0, %acn0_3_0 : vector<8xf32>
+        %isc2_3_0 = scalar.cmpi eq, %lane_col32m, %mci2_3_0 : i32
+        %acn2_3_0 = scf.select %isc2_3_0, %rm2_3_0, %acn1_3_0 : vector<8xf32>
+        %isc3_3_0 = scalar.cmpi eq, %lane_col32m, %mci3_3_0 : i32
+        %acn3_3_0 = scf.select %isc3_3_0, %rm3_3_0, %acn2_3_0 : vector<8xf32>
+        scf.yield %acn3_3_0 : vector<8xf32>
       }
       %vl4_0 = vector.fragment.load<lhs> %vt_view[%vr4, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw4_0 = vector.bitcast %vl4_0 : vector<16xf16> to vector<8xi32>
-      %ac4_0 = scf.for %mc_4_0 = [%c0 to %c16 step %c1](%acc4_0 = %os4 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci4_0 = index.cast %mc_4_0 : index to i32
-        %mri4_0 = index.add %mc_4_0, %kb0_row : index
-        %mrow4_0 = vector.load %mk_view[%mri4_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx4_0 = vector.andi %vw4_0, %mrow4_0 : vector<8xi32>
-        %vs4_0 = vector.bitcast %vx4_0 : vector<8xi32> to vector<16xf16>
-        %vm4_0 = vector.fragment<lhs> %vs4_0 shape [%c16, %c16] : vector<16xf16>
-        %rm4_0 = vector.mma %vm4_0, %pt0, %os4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc4_0 = scalar.cmpi eq, %lane_col32m, %mci4_0 : i32
-        %acn4_0 = scf.select %isc4_0, %rm4_0, %acc4_0 : vector<8xf32>
-        scf.yield %acn4_0 : vector<8xf32>
+      %ac4_0 = scf.for %mc_4_0 = [%c0 to %c16 step %cunr](%acc_4_0 = %os4 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_4_0 = index.add %mc_4_0, %cu0 : index
+        %mci0_4_0 = index.cast %mcu0_4_0 : index to i32
+        %mri0_4_0 = index.add %mcu0_4_0, %kb0_row : index
+        %mrow0_4_0 = vector.load %mk_view[%mri0_4_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_4_0 = vector.andi %vw4_0, %mrow0_4_0 : vector<8xi32>
+        %vs0_4_0 = vector.bitcast %vx0_4_0 : vector<8xi32> to vector<16xf16>
+        %vm0_4_0 = vector.fragment<lhs> %vs0_4_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_4_0 = vector.mma %vm0_4_0, %pt0, %os4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_4_0 = index.add %mc_4_0, %cu1 : index
+        %mci1_4_0 = index.cast %mcu1_4_0 : index to i32
+        %mri1_4_0 = index.add %mcu1_4_0, %kb0_row : index
+        %mrow1_4_0 = vector.load %mk_view[%mri1_4_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_4_0 = vector.andi %vw4_0, %mrow1_4_0 : vector<8xi32>
+        %vs1_4_0 = vector.bitcast %vx1_4_0 : vector<8xi32> to vector<16xf16>
+        %vm1_4_0 = vector.fragment<lhs> %vs1_4_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_4_0 = vector.mma %vm1_4_0, %pt0, %os4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_4_0 = index.add %mc_4_0, %cu2 : index
+        %mci2_4_0 = index.cast %mcu2_4_0 : index to i32
+        %mri2_4_0 = index.add %mcu2_4_0, %kb0_row : index
+        %mrow2_4_0 = vector.load %mk_view[%mri2_4_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_4_0 = vector.andi %vw4_0, %mrow2_4_0 : vector<8xi32>
+        %vs2_4_0 = vector.bitcast %vx2_4_0 : vector<8xi32> to vector<16xf16>
+        %vm2_4_0 = vector.fragment<lhs> %vs2_4_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_4_0 = vector.mma %vm2_4_0, %pt0, %os4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_4_0 = index.add %mc_4_0, %cu3 : index
+        %mci3_4_0 = index.cast %mcu3_4_0 : index to i32
+        %mri3_4_0 = index.add %mcu3_4_0, %kb0_row : index
+        %mrow3_4_0 = vector.load %mk_view[%mri3_4_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_4_0 = vector.andi %vw4_0, %mrow3_4_0 : vector<8xi32>
+        %vs3_4_0 = vector.bitcast %vx3_4_0 : vector<8xi32> to vector<16xf16>
+        %vm3_4_0 = vector.fragment<lhs> %vs3_4_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_4_0 = vector.mma %vm3_4_0, %pt0, %os4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_4_0 = scalar.cmpi eq, %lane_col32m, %mci0_4_0 : i32
+        %acn0_4_0 = scf.select %isc0_4_0, %rm0_4_0, %acc_4_0 : vector<8xf32>
+        %isc1_4_0 = scalar.cmpi eq, %lane_col32m, %mci1_4_0 : i32
+        %acn1_4_0 = scf.select %isc1_4_0, %rm1_4_0, %acn0_4_0 : vector<8xf32>
+        %isc2_4_0 = scalar.cmpi eq, %lane_col32m, %mci2_4_0 : i32
+        %acn2_4_0 = scf.select %isc2_4_0, %rm2_4_0, %acn1_4_0 : vector<8xf32>
+        %isc3_4_0 = scalar.cmpi eq, %lane_col32m, %mci3_4_0 : i32
+        %acn3_4_0 = scf.select %isc3_4_0, %rm3_4_0, %acn2_4_0 : vector<8xf32>
+        scf.yield %acn3_4_0 : vector<8xf32>
       }
       %vl5_0 = vector.fragment.load<lhs> %vt_view[%vr5, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw5_0 = vector.bitcast %vl5_0 : vector<16xf16> to vector<8xi32>
-      %ac5_0 = scf.for %mc_5_0 = [%c0 to %c16 step %c1](%acc5_0 = %os5 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci5_0 = index.cast %mc_5_0 : index to i32
-        %mri5_0 = index.add %mc_5_0, %kb0_row : index
-        %mrow5_0 = vector.load %mk_view[%mri5_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx5_0 = vector.andi %vw5_0, %mrow5_0 : vector<8xi32>
-        %vs5_0 = vector.bitcast %vx5_0 : vector<8xi32> to vector<16xf16>
-        %vm5_0 = vector.fragment<lhs> %vs5_0 shape [%c16, %c16] : vector<16xf16>
-        %rm5_0 = vector.mma %vm5_0, %pt0, %os5 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc5_0 = scalar.cmpi eq, %lane_col32m, %mci5_0 : i32
-        %acn5_0 = scf.select %isc5_0, %rm5_0, %acc5_0 : vector<8xf32>
-        scf.yield %acn5_0 : vector<8xf32>
+      %ac5_0 = scf.for %mc_5_0 = [%c0 to %c16 step %cunr](%acc_5_0 = %os5 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_5_0 = index.add %mc_5_0, %cu0 : index
+        %mci0_5_0 = index.cast %mcu0_5_0 : index to i32
+        %mri0_5_0 = index.add %mcu0_5_0, %kb0_row : index
+        %mrow0_5_0 = vector.load %mk_view[%mri0_5_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_5_0 = vector.andi %vw5_0, %mrow0_5_0 : vector<8xi32>
+        %vs0_5_0 = vector.bitcast %vx0_5_0 : vector<8xi32> to vector<16xf16>
+        %vm0_5_0 = vector.fragment<lhs> %vs0_5_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_5_0 = vector.mma %vm0_5_0, %pt0, %os5 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_5_0 = index.add %mc_5_0, %cu1 : index
+        %mci1_5_0 = index.cast %mcu1_5_0 : index to i32
+        %mri1_5_0 = index.add %mcu1_5_0, %kb0_row : index
+        %mrow1_5_0 = vector.load %mk_view[%mri1_5_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_5_0 = vector.andi %vw5_0, %mrow1_5_0 : vector<8xi32>
+        %vs1_5_0 = vector.bitcast %vx1_5_0 : vector<8xi32> to vector<16xf16>
+        %vm1_5_0 = vector.fragment<lhs> %vs1_5_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_5_0 = vector.mma %vm1_5_0, %pt0, %os5 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_5_0 = index.add %mc_5_0, %cu2 : index
+        %mci2_5_0 = index.cast %mcu2_5_0 : index to i32
+        %mri2_5_0 = index.add %mcu2_5_0, %kb0_row : index
+        %mrow2_5_0 = vector.load %mk_view[%mri2_5_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_5_0 = vector.andi %vw5_0, %mrow2_5_0 : vector<8xi32>
+        %vs2_5_0 = vector.bitcast %vx2_5_0 : vector<8xi32> to vector<16xf16>
+        %vm2_5_0 = vector.fragment<lhs> %vs2_5_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_5_0 = vector.mma %vm2_5_0, %pt0, %os5 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_5_0 = index.add %mc_5_0, %cu3 : index
+        %mci3_5_0 = index.cast %mcu3_5_0 : index to i32
+        %mri3_5_0 = index.add %mcu3_5_0, %kb0_row : index
+        %mrow3_5_0 = vector.load %mk_view[%mri3_5_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_5_0 = vector.andi %vw5_0, %mrow3_5_0 : vector<8xi32>
+        %vs3_5_0 = vector.bitcast %vx3_5_0 : vector<8xi32> to vector<16xf16>
+        %vm3_5_0 = vector.fragment<lhs> %vs3_5_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_5_0 = vector.mma %vm3_5_0, %pt0, %os5 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_5_0 = scalar.cmpi eq, %lane_col32m, %mci0_5_0 : i32
+        %acn0_5_0 = scf.select %isc0_5_0, %rm0_5_0, %acc_5_0 : vector<8xf32>
+        %isc1_5_0 = scalar.cmpi eq, %lane_col32m, %mci1_5_0 : i32
+        %acn1_5_0 = scf.select %isc1_5_0, %rm1_5_0, %acn0_5_0 : vector<8xf32>
+        %isc2_5_0 = scalar.cmpi eq, %lane_col32m, %mci2_5_0 : i32
+        %acn2_5_0 = scf.select %isc2_5_0, %rm2_5_0, %acn1_5_0 : vector<8xf32>
+        %isc3_5_0 = scalar.cmpi eq, %lane_col32m, %mci3_5_0 : i32
+        %acn3_5_0 = scf.select %isc3_5_0, %rm3_5_0, %acn2_5_0 : vector<8xf32>
+        scf.yield %acn3_5_0 : vector<8xf32>
       }
       %vl6_0 = vector.fragment.load<lhs> %vt_view[%vr6, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw6_0 = vector.bitcast %vl6_0 : vector<16xf16> to vector<8xi32>
-      %ac6_0 = scf.for %mc_6_0 = [%c0 to %c16 step %c1](%acc6_0 = %os6 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci6_0 = index.cast %mc_6_0 : index to i32
-        %mri6_0 = index.add %mc_6_0, %kb0_row : index
-        %mrow6_0 = vector.load %mk_view[%mri6_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx6_0 = vector.andi %vw6_0, %mrow6_0 : vector<8xi32>
-        %vs6_0 = vector.bitcast %vx6_0 : vector<8xi32> to vector<16xf16>
-        %vm6_0 = vector.fragment<lhs> %vs6_0 shape [%c16, %c16] : vector<16xf16>
-        %rm6_0 = vector.mma %vm6_0, %pt0, %os6 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc6_0 = scalar.cmpi eq, %lane_col32m, %mci6_0 : i32
-        %acn6_0 = scf.select %isc6_0, %rm6_0, %acc6_0 : vector<8xf32>
-        scf.yield %acn6_0 : vector<8xf32>
+      %ac6_0 = scf.for %mc_6_0 = [%c0 to %c16 step %cunr](%acc_6_0 = %os6 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_6_0 = index.add %mc_6_0, %cu0 : index
+        %mci0_6_0 = index.cast %mcu0_6_0 : index to i32
+        %mri0_6_0 = index.add %mcu0_6_0, %kb0_row : index
+        %mrow0_6_0 = vector.load %mk_view[%mri0_6_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_6_0 = vector.andi %vw6_0, %mrow0_6_0 : vector<8xi32>
+        %vs0_6_0 = vector.bitcast %vx0_6_0 : vector<8xi32> to vector<16xf16>
+        %vm0_6_0 = vector.fragment<lhs> %vs0_6_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_6_0 = vector.mma %vm0_6_0, %pt0, %os6 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_6_0 = index.add %mc_6_0, %cu1 : index
+        %mci1_6_0 = index.cast %mcu1_6_0 : index to i32
+        %mri1_6_0 = index.add %mcu1_6_0, %kb0_row : index
+        %mrow1_6_0 = vector.load %mk_view[%mri1_6_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_6_0 = vector.andi %vw6_0, %mrow1_6_0 : vector<8xi32>
+        %vs1_6_0 = vector.bitcast %vx1_6_0 : vector<8xi32> to vector<16xf16>
+        %vm1_6_0 = vector.fragment<lhs> %vs1_6_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_6_0 = vector.mma %vm1_6_0, %pt0, %os6 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_6_0 = index.add %mc_6_0, %cu2 : index
+        %mci2_6_0 = index.cast %mcu2_6_0 : index to i32
+        %mri2_6_0 = index.add %mcu2_6_0, %kb0_row : index
+        %mrow2_6_0 = vector.load %mk_view[%mri2_6_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_6_0 = vector.andi %vw6_0, %mrow2_6_0 : vector<8xi32>
+        %vs2_6_0 = vector.bitcast %vx2_6_0 : vector<8xi32> to vector<16xf16>
+        %vm2_6_0 = vector.fragment<lhs> %vs2_6_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_6_0 = vector.mma %vm2_6_0, %pt0, %os6 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_6_0 = index.add %mc_6_0, %cu3 : index
+        %mci3_6_0 = index.cast %mcu3_6_0 : index to i32
+        %mri3_6_0 = index.add %mcu3_6_0, %kb0_row : index
+        %mrow3_6_0 = vector.load %mk_view[%mri3_6_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_6_0 = vector.andi %vw6_0, %mrow3_6_0 : vector<8xi32>
+        %vs3_6_0 = vector.bitcast %vx3_6_0 : vector<8xi32> to vector<16xf16>
+        %vm3_6_0 = vector.fragment<lhs> %vs3_6_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_6_0 = vector.mma %vm3_6_0, %pt0, %os6 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_6_0 = scalar.cmpi eq, %lane_col32m, %mci0_6_0 : i32
+        %acn0_6_0 = scf.select %isc0_6_0, %rm0_6_0, %acc_6_0 : vector<8xf32>
+        %isc1_6_0 = scalar.cmpi eq, %lane_col32m, %mci1_6_0 : i32
+        %acn1_6_0 = scf.select %isc1_6_0, %rm1_6_0, %acn0_6_0 : vector<8xf32>
+        %isc2_6_0 = scalar.cmpi eq, %lane_col32m, %mci2_6_0 : i32
+        %acn2_6_0 = scf.select %isc2_6_0, %rm2_6_0, %acn1_6_0 : vector<8xf32>
+        %isc3_6_0 = scalar.cmpi eq, %lane_col32m, %mci3_6_0 : i32
+        %acn3_6_0 = scf.select %isc3_6_0, %rm3_6_0, %acn2_6_0 : vector<8xf32>
+        scf.yield %acn3_6_0 : vector<8xf32>
       }
       %vl7_0 = vector.fragment.load<lhs> %vt_view[%vr7, %kb0_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw7_0 = vector.bitcast %vl7_0 : vector<16xf16> to vector<8xi32>
-      %ac7_0 = scf.for %mc_7_0 = [%c0 to %c16 step %c1](%acc7_0 = %os7 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci7_0 = index.cast %mc_7_0 : index to i32
-        %mri7_0 = index.add %mc_7_0, %kb0_row : index
-        %mrow7_0 = vector.load %mk_view[%mri7_0, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx7_0 = vector.andi %vw7_0, %mrow7_0 : vector<8xi32>
-        %vs7_0 = vector.bitcast %vx7_0 : vector<8xi32> to vector<16xf16>
-        %vm7_0 = vector.fragment<lhs> %vs7_0 shape [%c16, %c16] : vector<16xf16>
-        %rm7_0 = vector.mma %vm7_0, %pt0, %os7 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc7_0 = scalar.cmpi eq, %lane_col32m, %mci7_0 : i32
-        %acn7_0 = scf.select %isc7_0, %rm7_0, %acc7_0 : vector<8xf32>
-        scf.yield %acn7_0 : vector<8xf32>
+      %ac7_0 = scf.for %mc_7_0 = [%c0 to %c16 step %cunr](%acc_7_0 = %os7 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_7_0 = index.add %mc_7_0, %cu0 : index
+        %mci0_7_0 = index.cast %mcu0_7_0 : index to i32
+        %mri0_7_0 = index.add %mcu0_7_0, %kb0_row : index
+        %mrow0_7_0 = vector.load %mk_view[%mri0_7_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_7_0 = vector.andi %vw7_0, %mrow0_7_0 : vector<8xi32>
+        %vs0_7_0 = vector.bitcast %vx0_7_0 : vector<8xi32> to vector<16xf16>
+        %vm0_7_0 = vector.fragment<lhs> %vs0_7_0 shape [%c16, %c16] : vector<16xf16>
+        %rm0_7_0 = vector.mma %vm0_7_0, %pt0, %os7 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_7_0 = index.add %mc_7_0, %cu1 : index
+        %mci1_7_0 = index.cast %mcu1_7_0 : index to i32
+        %mri1_7_0 = index.add %mcu1_7_0, %kb0_row : index
+        %mrow1_7_0 = vector.load %mk_view[%mri1_7_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_7_0 = vector.andi %vw7_0, %mrow1_7_0 : vector<8xi32>
+        %vs1_7_0 = vector.bitcast %vx1_7_0 : vector<8xi32> to vector<16xf16>
+        %vm1_7_0 = vector.fragment<lhs> %vs1_7_0 shape [%c16, %c16] : vector<16xf16>
+        %rm1_7_0 = vector.mma %vm1_7_0, %pt0, %os7 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_7_0 = index.add %mc_7_0, %cu2 : index
+        %mci2_7_0 = index.cast %mcu2_7_0 : index to i32
+        %mri2_7_0 = index.add %mcu2_7_0, %kb0_row : index
+        %mrow2_7_0 = vector.load %mk_view[%mri2_7_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_7_0 = vector.andi %vw7_0, %mrow2_7_0 : vector<8xi32>
+        %vs2_7_0 = vector.bitcast %vx2_7_0 : vector<8xi32> to vector<16xf16>
+        %vm2_7_0 = vector.fragment<lhs> %vs2_7_0 shape [%c16, %c16] : vector<16xf16>
+        %rm2_7_0 = vector.mma %vm2_7_0, %pt0, %os7 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_7_0 = index.add %mc_7_0, %cu3 : index
+        %mci3_7_0 = index.cast %mcu3_7_0 : index to i32
+        %mri3_7_0 = index.add %mcu3_7_0, %kb0_row : index
+        %mrow3_7_0 = vector.load %mk_view[%mri3_7_0, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_7_0 = vector.andi %vw7_0, %mrow3_7_0 : vector<8xi32>
+        %vs3_7_0 = vector.bitcast %vx3_7_0 : vector<8xi32> to vector<16xf16>
+        %vm3_7_0 = vector.fragment<lhs> %vs3_7_0 shape [%c16, %c16] : vector<16xf16>
+        %rm3_7_0 = vector.mma %vm3_7_0, %pt0, %os7 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_7_0 = scalar.cmpi eq, %lane_col32m, %mci0_7_0 : i32
+        %acn0_7_0 = scf.select %isc0_7_0, %rm0_7_0, %acc_7_0 : vector<8xf32>
+        %isc1_7_0 = scalar.cmpi eq, %lane_col32m, %mci1_7_0 : i32
+        %acn1_7_0 = scf.select %isc1_7_0, %rm1_7_0, %acn0_7_0 : vector<8xf32>
+        %isc2_7_0 = scalar.cmpi eq, %lane_col32m, %mci2_7_0 : i32
+        %acn2_7_0 = scf.select %isc2_7_0, %rm2_7_0, %acn1_7_0 : vector<8xf32>
+        %isc3_7_0 = scalar.cmpi eq, %lane_col32m, %mci3_7_0 : i32
+        %acn3_7_0 = scf.select %isc3_7_0, %rm3_7_0, %acn2_7_0 : vector<8xf32>
+        scf.yield %acn3_7_0 : vector<8xf32>
       }
       scf.yield %ac0_0, %ac1_0, %ac2_0, %ac3_0, %ac4_0, %ac5_0, %ac6_0, %ac7_0 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
     } else {
@@ -1755,115 +2511,363 @@ kernel.def export("k_flash2_partial") @k_flash2_partial(%tokens: index) {
       kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
       %vl0_1 = vector.fragment.load<lhs> %vt_view[%vr0, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw0_1 = vector.bitcast %vl0_1 : vector<16xf16> to vector<8xi32>
-      %ac0_1 = scf.for %mc_0_1 = [%c0 to %c16 step %c1](%acc0_1 = %on0_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci0_1 = index.cast %mc_0_1 : index to i32
-        %mri0_1 = index.add %mc_0_1, %kb1_row : index
-        %mrow0_1 = vector.load %mk_view[%mri0_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx0_1 = vector.andi %vw0_1, %mrow0_1 : vector<8xi32>
-        %vs0_1 = vector.bitcast %vx0_1 : vector<8xi32> to vector<16xf16>
-        %vm0_1 = vector.fragment<lhs> %vs0_1 shape [%c16, %c16] : vector<16xf16>
-        %rm0_1 = vector.mma %vm0_1, %pt1, %on0_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc0_1 = scalar.cmpi eq, %lane_col32m, %mci0_1 : i32
-        %acn0_1 = scf.select %isc0_1, %rm0_1, %acc0_1 : vector<8xf32>
-        scf.yield %acn0_1 : vector<8xf32>
+      %ac0_1 = scf.for %mc_0_1 = [%c0 to %c16 step %cunr](%acc_0_1 = %on0_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_0_1 = index.add %mc_0_1, %cu0 : index
+        %mci0_0_1 = index.cast %mcu0_0_1 : index to i32
+        %mri0_0_1 = index.add %mcu0_0_1, %kb1_row : index
+        %mrow0_0_1 = vector.load %mk_view[%mri0_0_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_0_1 = vector.andi %vw0_1, %mrow0_0_1 : vector<8xi32>
+        %vs0_0_1 = vector.bitcast %vx0_0_1 : vector<8xi32> to vector<16xf16>
+        %vm0_0_1 = vector.fragment<lhs> %vs0_0_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_0_1 = vector.mma %vm0_0_1, %pt1, %on0_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_0_1 = index.add %mc_0_1, %cu1 : index
+        %mci1_0_1 = index.cast %mcu1_0_1 : index to i32
+        %mri1_0_1 = index.add %mcu1_0_1, %kb1_row : index
+        %mrow1_0_1 = vector.load %mk_view[%mri1_0_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_0_1 = vector.andi %vw0_1, %mrow1_0_1 : vector<8xi32>
+        %vs1_0_1 = vector.bitcast %vx1_0_1 : vector<8xi32> to vector<16xf16>
+        %vm1_0_1 = vector.fragment<lhs> %vs1_0_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_0_1 = vector.mma %vm1_0_1, %pt1, %on0_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_0_1 = index.add %mc_0_1, %cu2 : index
+        %mci2_0_1 = index.cast %mcu2_0_1 : index to i32
+        %mri2_0_1 = index.add %mcu2_0_1, %kb1_row : index
+        %mrow2_0_1 = vector.load %mk_view[%mri2_0_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_0_1 = vector.andi %vw0_1, %mrow2_0_1 : vector<8xi32>
+        %vs2_0_1 = vector.bitcast %vx2_0_1 : vector<8xi32> to vector<16xf16>
+        %vm2_0_1 = vector.fragment<lhs> %vs2_0_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_0_1 = vector.mma %vm2_0_1, %pt1, %on0_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_0_1 = index.add %mc_0_1, %cu3 : index
+        %mci3_0_1 = index.cast %mcu3_0_1 : index to i32
+        %mri3_0_1 = index.add %mcu3_0_1, %kb1_row : index
+        %mrow3_0_1 = vector.load %mk_view[%mri3_0_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_0_1 = vector.andi %vw0_1, %mrow3_0_1 : vector<8xi32>
+        %vs3_0_1 = vector.bitcast %vx3_0_1 : vector<8xi32> to vector<16xf16>
+        %vm3_0_1 = vector.fragment<lhs> %vs3_0_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_0_1 = vector.mma %vm3_0_1, %pt1, %on0_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_0_1 = scalar.cmpi eq, %lane_col32m, %mci0_0_1 : i32
+        %acn0_0_1 = scf.select %isc0_0_1, %rm0_0_1, %acc_0_1 : vector<8xf32>
+        %isc1_0_1 = scalar.cmpi eq, %lane_col32m, %mci1_0_1 : i32
+        %acn1_0_1 = scf.select %isc1_0_1, %rm1_0_1, %acn0_0_1 : vector<8xf32>
+        %isc2_0_1 = scalar.cmpi eq, %lane_col32m, %mci2_0_1 : i32
+        %acn2_0_1 = scf.select %isc2_0_1, %rm2_0_1, %acn1_0_1 : vector<8xf32>
+        %isc3_0_1 = scalar.cmpi eq, %lane_col32m, %mci3_0_1 : i32
+        %acn3_0_1 = scf.select %isc3_0_1, %rm3_0_1, %acn2_0_1 : vector<8xf32>
+        scf.yield %acn3_0_1 : vector<8xf32>
       }
       %vl1_1 = vector.fragment.load<lhs> %vt_view[%vr1, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw1_1 = vector.bitcast %vl1_1 : vector<16xf16> to vector<8xi32>
-      %ac1_1 = scf.for %mc_1_1 = [%c0 to %c16 step %c1](%acc1_1 = %on1_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci1_1 = index.cast %mc_1_1 : index to i32
-        %mri1_1 = index.add %mc_1_1, %kb1_row : index
-        %mrow1_1 = vector.load %mk_view[%mri1_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx1_1 = vector.andi %vw1_1, %mrow1_1 : vector<8xi32>
-        %vs1_1 = vector.bitcast %vx1_1 : vector<8xi32> to vector<16xf16>
-        %vm1_1 = vector.fragment<lhs> %vs1_1 shape [%c16, %c16] : vector<16xf16>
-        %rm1_1 = vector.mma %vm1_1, %pt1, %on1_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc1_1 = scalar.cmpi eq, %lane_col32m, %mci1_1 : i32
-        %acn1_1 = scf.select %isc1_1, %rm1_1, %acc1_1 : vector<8xf32>
-        scf.yield %acn1_1 : vector<8xf32>
+      %ac1_1 = scf.for %mc_1_1 = [%c0 to %c16 step %cunr](%acc_1_1 = %on1_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_1_1 = index.add %mc_1_1, %cu0 : index
+        %mci0_1_1 = index.cast %mcu0_1_1 : index to i32
+        %mri0_1_1 = index.add %mcu0_1_1, %kb1_row : index
+        %mrow0_1_1 = vector.load %mk_view[%mri0_1_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_1_1 = vector.andi %vw1_1, %mrow0_1_1 : vector<8xi32>
+        %vs0_1_1 = vector.bitcast %vx0_1_1 : vector<8xi32> to vector<16xf16>
+        %vm0_1_1 = vector.fragment<lhs> %vs0_1_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_1_1 = vector.mma %vm0_1_1, %pt1, %on1_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_1_1 = index.add %mc_1_1, %cu1 : index
+        %mci1_1_1 = index.cast %mcu1_1_1 : index to i32
+        %mri1_1_1 = index.add %mcu1_1_1, %kb1_row : index
+        %mrow1_1_1 = vector.load %mk_view[%mri1_1_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_1_1 = vector.andi %vw1_1, %mrow1_1_1 : vector<8xi32>
+        %vs1_1_1 = vector.bitcast %vx1_1_1 : vector<8xi32> to vector<16xf16>
+        %vm1_1_1 = vector.fragment<lhs> %vs1_1_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_1_1 = vector.mma %vm1_1_1, %pt1, %on1_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_1_1 = index.add %mc_1_1, %cu2 : index
+        %mci2_1_1 = index.cast %mcu2_1_1 : index to i32
+        %mri2_1_1 = index.add %mcu2_1_1, %kb1_row : index
+        %mrow2_1_1 = vector.load %mk_view[%mri2_1_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_1_1 = vector.andi %vw1_1, %mrow2_1_1 : vector<8xi32>
+        %vs2_1_1 = vector.bitcast %vx2_1_1 : vector<8xi32> to vector<16xf16>
+        %vm2_1_1 = vector.fragment<lhs> %vs2_1_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_1_1 = vector.mma %vm2_1_1, %pt1, %on1_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_1_1 = index.add %mc_1_1, %cu3 : index
+        %mci3_1_1 = index.cast %mcu3_1_1 : index to i32
+        %mri3_1_1 = index.add %mcu3_1_1, %kb1_row : index
+        %mrow3_1_1 = vector.load %mk_view[%mri3_1_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_1_1 = vector.andi %vw1_1, %mrow3_1_1 : vector<8xi32>
+        %vs3_1_1 = vector.bitcast %vx3_1_1 : vector<8xi32> to vector<16xf16>
+        %vm3_1_1 = vector.fragment<lhs> %vs3_1_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_1_1 = vector.mma %vm3_1_1, %pt1, %on1_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_1_1 = scalar.cmpi eq, %lane_col32m, %mci0_1_1 : i32
+        %acn0_1_1 = scf.select %isc0_1_1, %rm0_1_1, %acc_1_1 : vector<8xf32>
+        %isc1_1_1 = scalar.cmpi eq, %lane_col32m, %mci1_1_1 : i32
+        %acn1_1_1 = scf.select %isc1_1_1, %rm1_1_1, %acn0_1_1 : vector<8xf32>
+        %isc2_1_1 = scalar.cmpi eq, %lane_col32m, %mci2_1_1 : i32
+        %acn2_1_1 = scf.select %isc2_1_1, %rm2_1_1, %acn1_1_1 : vector<8xf32>
+        %isc3_1_1 = scalar.cmpi eq, %lane_col32m, %mci3_1_1 : i32
+        %acn3_1_1 = scf.select %isc3_1_1, %rm3_1_1, %acn2_1_1 : vector<8xf32>
+        scf.yield %acn3_1_1 : vector<8xf32>
       }
       %vl2_1 = vector.fragment.load<lhs> %vt_view[%vr2, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw2_1 = vector.bitcast %vl2_1 : vector<16xf16> to vector<8xi32>
-      %ac2_1 = scf.for %mc_2_1 = [%c0 to %c16 step %c1](%acc2_1 = %on2_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci2_1 = index.cast %mc_2_1 : index to i32
-        %mri2_1 = index.add %mc_2_1, %kb1_row : index
-        %mrow2_1 = vector.load %mk_view[%mri2_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx2_1 = vector.andi %vw2_1, %mrow2_1 : vector<8xi32>
-        %vs2_1 = vector.bitcast %vx2_1 : vector<8xi32> to vector<16xf16>
-        %vm2_1 = vector.fragment<lhs> %vs2_1 shape [%c16, %c16] : vector<16xf16>
-        %rm2_1 = vector.mma %vm2_1, %pt1, %on2_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc2_1 = scalar.cmpi eq, %lane_col32m, %mci2_1 : i32
-        %acn2_1 = scf.select %isc2_1, %rm2_1, %acc2_1 : vector<8xf32>
-        scf.yield %acn2_1 : vector<8xf32>
+      %ac2_1 = scf.for %mc_2_1 = [%c0 to %c16 step %cunr](%acc_2_1 = %on2_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_2_1 = index.add %mc_2_1, %cu0 : index
+        %mci0_2_1 = index.cast %mcu0_2_1 : index to i32
+        %mri0_2_1 = index.add %mcu0_2_1, %kb1_row : index
+        %mrow0_2_1 = vector.load %mk_view[%mri0_2_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_2_1 = vector.andi %vw2_1, %mrow0_2_1 : vector<8xi32>
+        %vs0_2_1 = vector.bitcast %vx0_2_1 : vector<8xi32> to vector<16xf16>
+        %vm0_2_1 = vector.fragment<lhs> %vs0_2_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_2_1 = vector.mma %vm0_2_1, %pt1, %on2_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_2_1 = index.add %mc_2_1, %cu1 : index
+        %mci1_2_1 = index.cast %mcu1_2_1 : index to i32
+        %mri1_2_1 = index.add %mcu1_2_1, %kb1_row : index
+        %mrow1_2_1 = vector.load %mk_view[%mri1_2_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_2_1 = vector.andi %vw2_1, %mrow1_2_1 : vector<8xi32>
+        %vs1_2_1 = vector.bitcast %vx1_2_1 : vector<8xi32> to vector<16xf16>
+        %vm1_2_1 = vector.fragment<lhs> %vs1_2_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_2_1 = vector.mma %vm1_2_1, %pt1, %on2_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_2_1 = index.add %mc_2_1, %cu2 : index
+        %mci2_2_1 = index.cast %mcu2_2_1 : index to i32
+        %mri2_2_1 = index.add %mcu2_2_1, %kb1_row : index
+        %mrow2_2_1 = vector.load %mk_view[%mri2_2_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_2_1 = vector.andi %vw2_1, %mrow2_2_1 : vector<8xi32>
+        %vs2_2_1 = vector.bitcast %vx2_2_1 : vector<8xi32> to vector<16xf16>
+        %vm2_2_1 = vector.fragment<lhs> %vs2_2_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_2_1 = vector.mma %vm2_2_1, %pt1, %on2_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_2_1 = index.add %mc_2_1, %cu3 : index
+        %mci3_2_1 = index.cast %mcu3_2_1 : index to i32
+        %mri3_2_1 = index.add %mcu3_2_1, %kb1_row : index
+        %mrow3_2_1 = vector.load %mk_view[%mri3_2_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_2_1 = vector.andi %vw2_1, %mrow3_2_1 : vector<8xi32>
+        %vs3_2_1 = vector.bitcast %vx3_2_1 : vector<8xi32> to vector<16xf16>
+        %vm3_2_1 = vector.fragment<lhs> %vs3_2_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_2_1 = vector.mma %vm3_2_1, %pt1, %on2_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_2_1 = scalar.cmpi eq, %lane_col32m, %mci0_2_1 : i32
+        %acn0_2_1 = scf.select %isc0_2_1, %rm0_2_1, %acc_2_1 : vector<8xf32>
+        %isc1_2_1 = scalar.cmpi eq, %lane_col32m, %mci1_2_1 : i32
+        %acn1_2_1 = scf.select %isc1_2_1, %rm1_2_1, %acn0_2_1 : vector<8xf32>
+        %isc2_2_1 = scalar.cmpi eq, %lane_col32m, %mci2_2_1 : i32
+        %acn2_2_1 = scf.select %isc2_2_1, %rm2_2_1, %acn1_2_1 : vector<8xf32>
+        %isc3_2_1 = scalar.cmpi eq, %lane_col32m, %mci3_2_1 : i32
+        %acn3_2_1 = scf.select %isc3_2_1, %rm3_2_1, %acn2_2_1 : vector<8xf32>
+        scf.yield %acn3_2_1 : vector<8xf32>
       }
       %vl3_1 = vector.fragment.load<lhs> %vt_view[%vr3, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw3_1 = vector.bitcast %vl3_1 : vector<16xf16> to vector<8xi32>
-      %ac3_1 = scf.for %mc_3_1 = [%c0 to %c16 step %c1](%acc3_1 = %on3_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci3_1 = index.cast %mc_3_1 : index to i32
-        %mri3_1 = index.add %mc_3_1, %kb1_row : index
-        %mrow3_1 = vector.load %mk_view[%mri3_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx3_1 = vector.andi %vw3_1, %mrow3_1 : vector<8xi32>
-        %vs3_1 = vector.bitcast %vx3_1 : vector<8xi32> to vector<16xf16>
-        %vm3_1 = vector.fragment<lhs> %vs3_1 shape [%c16, %c16] : vector<16xf16>
-        %rm3_1 = vector.mma %vm3_1, %pt1, %on3_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc3_1 = scalar.cmpi eq, %lane_col32m, %mci3_1 : i32
-        %acn3_1 = scf.select %isc3_1, %rm3_1, %acc3_1 : vector<8xf32>
-        scf.yield %acn3_1 : vector<8xf32>
+      %ac3_1 = scf.for %mc_3_1 = [%c0 to %c16 step %cunr](%acc_3_1 = %on3_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_3_1 = index.add %mc_3_1, %cu0 : index
+        %mci0_3_1 = index.cast %mcu0_3_1 : index to i32
+        %mri0_3_1 = index.add %mcu0_3_1, %kb1_row : index
+        %mrow0_3_1 = vector.load %mk_view[%mri0_3_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_3_1 = vector.andi %vw3_1, %mrow0_3_1 : vector<8xi32>
+        %vs0_3_1 = vector.bitcast %vx0_3_1 : vector<8xi32> to vector<16xf16>
+        %vm0_3_1 = vector.fragment<lhs> %vs0_3_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_3_1 = vector.mma %vm0_3_1, %pt1, %on3_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_3_1 = index.add %mc_3_1, %cu1 : index
+        %mci1_3_1 = index.cast %mcu1_3_1 : index to i32
+        %mri1_3_1 = index.add %mcu1_3_1, %kb1_row : index
+        %mrow1_3_1 = vector.load %mk_view[%mri1_3_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_3_1 = vector.andi %vw3_1, %mrow1_3_1 : vector<8xi32>
+        %vs1_3_1 = vector.bitcast %vx1_3_1 : vector<8xi32> to vector<16xf16>
+        %vm1_3_1 = vector.fragment<lhs> %vs1_3_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_3_1 = vector.mma %vm1_3_1, %pt1, %on3_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_3_1 = index.add %mc_3_1, %cu2 : index
+        %mci2_3_1 = index.cast %mcu2_3_1 : index to i32
+        %mri2_3_1 = index.add %mcu2_3_1, %kb1_row : index
+        %mrow2_3_1 = vector.load %mk_view[%mri2_3_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_3_1 = vector.andi %vw3_1, %mrow2_3_1 : vector<8xi32>
+        %vs2_3_1 = vector.bitcast %vx2_3_1 : vector<8xi32> to vector<16xf16>
+        %vm2_3_1 = vector.fragment<lhs> %vs2_3_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_3_1 = vector.mma %vm2_3_1, %pt1, %on3_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_3_1 = index.add %mc_3_1, %cu3 : index
+        %mci3_3_1 = index.cast %mcu3_3_1 : index to i32
+        %mri3_3_1 = index.add %mcu3_3_1, %kb1_row : index
+        %mrow3_3_1 = vector.load %mk_view[%mri3_3_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_3_1 = vector.andi %vw3_1, %mrow3_3_1 : vector<8xi32>
+        %vs3_3_1 = vector.bitcast %vx3_3_1 : vector<8xi32> to vector<16xf16>
+        %vm3_3_1 = vector.fragment<lhs> %vs3_3_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_3_1 = vector.mma %vm3_3_1, %pt1, %on3_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_3_1 = scalar.cmpi eq, %lane_col32m, %mci0_3_1 : i32
+        %acn0_3_1 = scf.select %isc0_3_1, %rm0_3_1, %acc_3_1 : vector<8xf32>
+        %isc1_3_1 = scalar.cmpi eq, %lane_col32m, %mci1_3_1 : i32
+        %acn1_3_1 = scf.select %isc1_3_1, %rm1_3_1, %acn0_3_1 : vector<8xf32>
+        %isc2_3_1 = scalar.cmpi eq, %lane_col32m, %mci2_3_1 : i32
+        %acn2_3_1 = scf.select %isc2_3_1, %rm2_3_1, %acn1_3_1 : vector<8xf32>
+        %isc3_3_1 = scalar.cmpi eq, %lane_col32m, %mci3_3_1 : i32
+        %acn3_3_1 = scf.select %isc3_3_1, %rm3_3_1, %acn2_3_1 : vector<8xf32>
+        scf.yield %acn3_3_1 : vector<8xf32>
       }
       %vl4_1 = vector.fragment.load<lhs> %vt_view[%vr4, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw4_1 = vector.bitcast %vl4_1 : vector<16xf16> to vector<8xi32>
-      %ac4_1 = scf.for %mc_4_1 = [%c0 to %c16 step %c1](%acc4_1 = %on4_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci4_1 = index.cast %mc_4_1 : index to i32
-        %mri4_1 = index.add %mc_4_1, %kb1_row : index
-        %mrow4_1 = vector.load %mk_view[%mri4_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx4_1 = vector.andi %vw4_1, %mrow4_1 : vector<8xi32>
-        %vs4_1 = vector.bitcast %vx4_1 : vector<8xi32> to vector<16xf16>
-        %vm4_1 = vector.fragment<lhs> %vs4_1 shape [%c16, %c16] : vector<16xf16>
-        %rm4_1 = vector.mma %vm4_1, %pt1, %on4_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc4_1 = scalar.cmpi eq, %lane_col32m, %mci4_1 : i32
-        %acn4_1 = scf.select %isc4_1, %rm4_1, %acc4_1 : vector<8xf32>
-        scf.yield %acn4_1 : vector<8xf32>
+      %ac4_1 = scf.for %mc_4_1 = [%c0 to %c16 step %cunr](%acc_4_1 = %on4_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_4_1 = index.add %mc_4_1, %cu0 : index
+        %mci0_4_1 = index.cast %mcu0_4_1 : index to i32
+        %mri0_4_1 = index.add %mcu0_4_1, %kb1_row : index
+        %mrow0_4_1 = vector.load %mk_view[%mri0_4_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_4_1 = vector.andi %vw4_1, %mrow0_4_1 : vector<8xi32>
+        %vs0_4_1 = vector.bitcast %vx0_4_1 : vector<8xi32> to vector<16xf16>
+        %vm0_4_1 = vector.fragment<lhs> %vs0_4_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_4_1 = vector.mma %vm0_4_1, %pt1, %on4_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_4_1 = index.add %mc_4_1, %cu1 : index
+        %mci1_4_1 = index.cast %mcu1_4_1 : index to i32
+        %mri1_4_1 = index.add %mcu1_4_1, %kb1_row : index
+        %mrow1_4_1 = vector.load %mk_view[%mri1_4_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_4_1 = vector.andi %vw4_1, %mrow1_4_1 : vector<8xi32>
+        %vs1_4_1 = vector.bitcast %vx1_4_1 : vector<8xi32> to vector<16xf16>
+        %vm1_4_1 = vector.fragment<lhs> %vs1_4_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_4_1 = vector.mma %vm1_4_1, %pt1, %on4_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_4_1 = index.add %mc_4_1, %cu2 : index
+        %mci2_4_1 = index.cast %mcu2_4_1 : index to i32
+        %mri2_4_1 = index.add %mcu2_4_1, %kb1_row : index
+        %mrow2_4_1 = vector.load %mk_view[%mri2_4_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_4_1 = vector.andi %vw4_1, %mrow2_4_1 : vector<8xi32>
+        %vs2_4_1 = vector.bitcast %vx2_4_1 : vector<8xi32> to vector<16xf16>
+        %vm2_4_1 = vector.fragment<lhs> %vs2_4_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_4_1 = vector.mma %vm2_4_1, %pt1, %on4_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_4_1 = index.add %mc_4_1, %cu3 : index
+        %mci3_4_1 = index.cast %mcu3_4_1 : index to i32
+        %mri3_4_1 = index.add %mcu3_4_1, %kb1_row : index
+        %mrow3_4_1 = vector.load %mk_view[%mri3_4_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_4_1 = vector.andi %vw4_1, %mrow3_4_1 : vector<8xi32>
+        %vs3_4_1 = vector.bitcast %vx3_4_1 : vector<8xi32> to vector<16xf16>
+        %vm3_4_1 = vector.fragment<lhs> %vs3_4_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_4_1 = vector.mma %vm3_4_1, %pt1, %on4_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_4_1 = scalar.cmpi eq, %lane_col32m, %mci0_4_1 : i32
+        %acn0_4_1 = scf.select %isc0_4_1, %rm0_4_1, %acc_4_1 : vector<8xf32>
+        %isc1_4_1 = scalar.cmpi eq, %lane_col32m, %mci1_4_1 : i32
+        %acn1_4_1 = scf.select %isc1_4_1, %rm1_4_1, %acn0_4_1 : vector<8xf32>
+        %isc2_4_1 = scalar.cmpi eq, %lane_col32m, %mci2_4_1 : i32
+        %acn2_4_1 = scf.select %isc2_4_1, %rm2_4_1, %acn1_4_1 : vector<8xf32>
+        %isc3_4_1 = scalar.cmpi eq, %lane_col32m, %mci3_4_1 : i32
+        %acn3_4_1 = scf.select %isc3_4_1, %rm3_4_1, %acn2_4_1 : vector<8xf32>
+        scf.yield %acn3_4_1 : vector<8xf32>
       }
       %vl5_1 = vector.fragment.load<lhs> %vt_view[%vr5, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw5_1 = vector.bitcast %vl5_1 : vector<16xf16> to vector<8xi32>
-      %ac5_1 = scf.for %mc_5_1 = [%c0 to %c16 step %c1](%acc5_1 = %on5_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci5_1 = index.cast %mc_5_1 : index to i32
-        %mri5_1 = index.add %mc_5_1, %kb1_row : index
-        %mrow5_1 = vector.load %mk_view[%mri5_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx5_1 = vector.andi %vw5_1, %mrow5_1 : vector<8xi32>
-        %vs5_1 = vector.bitcast %vx5_1 : vector<8xi32> to vector<16xf16>
-        %vm5_1 = vector.fragment<lhs> %vs5_1 shape [%c16, %c16] : vector<16xf16>
-        %rm5_1 = vector.mma %vm5_1, %pt1, %on5_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc5_1 = scalar.cmpi eq, %lane_col32m, %mci5_1 : i32
-        %acn5_1 = scf.select %isc5_1, %rm5_1, %acc5_1 : vector<8xf32>
-        scf.yield %acn5_1 : vector<8xf32>
+      %ac5_1 = scf.for %mc_5_1 = [%c0 to %c16 step %cunr](%acc_5_1 = %on5_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_5_1 = index.add %mc_5_1, %cu0 : index
+        %mci0_5_1 = index.cast %mcu0_5_1 : index to i32
+        %mri0_5_1 = index.add %mcu0_5_1, %kb1_row : index
+        %mrow0_5_1 = vector.load %mk_view[%mri0_5_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_5_1 = vector.andi %vw5_1, %mrow0_5_1 : vector<8xi32>
+        %vs0_5_1 = vector.bitcast %vx0_5_1 : vector<8xi32> to vector<16xf16>
+        %vm0_5_1 = vector.fragment<lhs> %vs0_5_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_5_1 = vector.mma %vm0_5_1, %pt1, %on5_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_5_1 = index.add %mc_5_1, %cu1 : index
+        %mci1_5_1 = index.cast %mcu1_5_1 : index to i32
+        %mri1_5_1 = index.add %mcu1_5_1, %kb1_row : index
+        %mrow1_5_1 = vector.load %mk_view[%mri1_5_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_5_1 = vector.andi %vw5_1, %mrow1_5_1 : vector<8xi32>
+        %vs1_5_1 = vector.bitcast %vx1_5_1 : vector<8xi32> to vector<16xf16>
+        %vm1_5_1 = vector.fragment<lhs> %vs1_5_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_5_1 = vector.mma %vm1_5_1, %pt1, %on5_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_5_1 = index.add %mc_5_1, %cu2 : index
+        %mci2_5_1 = index.cast %mcu2_5_1 : index to i32
+        %mri2_5_1 = index.add %mcu2_5_1, %kb1_row : index
+        %mrow2_5_1 = vector.load %mk_view[%mri2_5_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_5_1 = vector.andi %vw5_1, %mrow2_5_1 : vector<8xi32>
+        %vs2_5_1 = vector.bitcast %vx2_5_1 : vector<8xi32> to vector<16xf16>
+        %vm2_5_1 = vector.fragment<lhs> %vs2_5_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_5_1 = vector.mma %vm2_5_1, %pt1, %on5_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_5_1 = index.add %mc_5_1, %cu3 : index
+        %mci3_5_1 = index.cast %mcu3_5_1 : index to i32
+        %mri3_5_1 = index.add %mcu3_5_1, %kb1_row : index
+        %mrow3_5_1 = vector.load %mk_view[%mri3_5_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_5_1 = vector.andi %vw5_1, %mrow3_5_1 : vector<8xi32>
+        %vs3_5_1 = vector.bitcast %vx3_5_1 : vector<8xi32> to vector<16xf16>
+        %vm3_5_1 = vector.fragment<lhs> %vs3_5_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_5_1 = vector.mma %vm3_5_1, %pt1, %on5_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_5_1 = scalar.cmpi eq, %lane_col32m, %mci0_5_1 : i32
+        %acn0_5_1 = scf.select %isc0_5_1, %rm0_5_1, %acc_5_1 : vector<8xf32>
+        %isc1_5_1 = scalar.cmpi eq, %lane_col32m, %mci1_5_1 : i32
+        %acn1_5_1 = scf.select %isc1_5_1, %rm1_5_1, %acn0_5_1 : vector<8xf32>
+        %isc2_5_1 = scalar.cmpi eq, %lane_col32m, %mci2_5_1 : i32
+        %acn2_5_1 = scf.select %isc2_5_1, %rm2_5_1, %acn1_5_1 : vector<8xf32>
+        %isc3_5_1 = scalar.cmpi eq, %lane_col32m, %mci3_5_1 : i32
+        %acn3_5_1 = scf.select %isc3_5_1, %rm3_5_1, %acn2_5_1 : vector<8xf32>
+        scf.yield %acn3_5_1 : vector<8xf32>
       }
       %vl6_1 = vector.fragment.load<lhs> %vt_view[%vr6, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw6_1 = vector.bitcast %vl6_1 : vector<16xf16> to vector<8xi32>
-      %ac6_1 = scf.for %mc_6_1 = [%c0 to %c16 step %c1](%acc6_1 = %on6_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci6_1 = index.cast %mc_6_1 : index to i32
-        %mri6_1 = index.add %mc_6_1, %kb1_row : index
-        %mrow6_1 = vector.load %mk_view[%mri6_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx6_1 = vector.andi %vw6_1, %mrow6_1 : vector<8xi32>
-        %vs6_1 = vector.bitcast %vx6_1 : vector<8xi32> to vector<16xf16>
-        %vm6_1 = vector.fragment<lhs> %vs6_1 shape [%c16, %c16] : vector<16xf16>
-        %rm6_1 = vector.mma %vm6_1, %pt1, %on6_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc6_1 = scalar.cmpi eq, %lane_col32m, %mci6_1 : i32
-        %acn6_1 = scf.select %isc6_1, %rm6_1, %acc6_1 : vector<8xf32>
-        scf.yield %acn6_1 : vector<8xf32>
+      %ac6_1 = scf.for %mc_6_1 = [%c0 to %c16 step %cunr](%acc_6_1 = %on6_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_6_1 = index.add %mc_6_1, %cu0 : index
+        %mci0_6_1 = index.cast %mcu0_6_1 : index to i32
+        %mri0_6_1 = index.add %mcu0_6_1, %kb1_row : index
+        %mrow0_6_1 = vector.load %mk_view[%mri0_6_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_6_1 = vector.andi %vw6_1, %mrow0_6_1 : vector<8xi32>
+        %vs0_6_1 = vector.bitcast %vx0_6_1 : vector<8xi32> to vector<16xf16>
+        %vm0_6_1 = vector.fragment<lhs> %vs0_6_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_6_1 = vector.mma %vm0_6_1, %pt1, %on6_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_6_1 = index.add %mc_6_1, %cu1 : index
+        %mci1_6_1 = index.cast %mcu1_6_1 : index to i32
+        %mri1_6_1 = index.add %mcu1_6_1, %kb1_row : index
+        %mrow1_6_1 = vector.load %mk_view[%mri1_6_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_6_1 = vector.andi %vw6_1, %mrow1_6_1 : vector<8xi32>
+        %vs1_6_1 = vector.bitcast %vx1_6_1 : vector<8xi32> to vector<16xf16>
+        %vm1_6_1 = vector.fragment<lhs> %vs1_6_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_6_1 = vector.mma %vm1_6_1, %pt1, %on6_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_6_1 = index.add %mc_6_1, %cu2 : index
+        %mci2_6_1 = index.cast %mcu2_6_1 : index to i32
+        %mri2_6_1 = index.add %mcu2_6_1, %kb1_row : index
+        %mrow2_6_1 = vector.load %mk_view[%mri2_6_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_6_1 = vector.andi %vw6_1, %mrow2_6_1 : vector<8xi32>
+        %vs2_6_1 = vector.bitcast %vx2_6_1 : vector<8xi32> to vector<16xf16>
+        %vm2_6_1 = vector.fragment<lhs> %vs2_6_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_6_1 = vector.mma %vm2_6_1, %pt1, %on6_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_6_1 = index.add %mc_6_1, %cu3 : index
+        %mci3_6_1 = index.cast %mcu3_6_1 : index to i32
+        %mri3_6_1 = index.add %mcu3_6_1, %kb1_row : index
+        %mrow3_6_1 = vector.load %mk_view[%mri3_6_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_6_1 = vector.andi %vw6_1, %mrow3_6_1 : vector<8xi32>
+        %vs3_6_1 = vector.bitcast %vx3_6_1 : vector<8xi32> to vector<16xf16>
+        %vm3_6_1 = vector.fragment<lhs> %vs3_6_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_6_1 = vector.mma %vm3_6_1, %pt1, %on6_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_6_1 = scalar.cmpi eq, %lane_col32m, %mci0_6_1 : i32
+        %acn0_6_1 = scf.select %isc0_6_1, %rm0_6_1, %acc_6_1 : vector<8xf32>
+        %isc1_6_1 = scalar.cmpi eq, %lane_col32m, %mci1_6_1 : i32
+        %acn1_6_1 = scf.select %isc1_6_1, %rm1_6_1, %acn0_6_1 : vector<8xf32>
+        %isc2_6_1 = scalar.cmpi eq, %lane_col32m, %mci2_6_1 : i32
+        %acn2_6_1 = scf.select %isc2_6_1, %rm2_6_1, %acn1_6_1 : vector<8xf32>
+        %isc3_6_1 = scalar.cmpi eq, %lane_col32m, %mci3_6_1 : i32
+        %acn3_6_1 = scf.select %isc3_6_1, %rm3_6_1, %acn2_6_1 : vector<8xf32>
+        scf.yield %acn3_6_1 : vector<8xf32>
       }
       %vl7_1 = vector.fragment.load<lhs> %vt_view[%vr7, %kb1_row] shape [%c16, %c16] : view<256x40xf16> -> vector<16xf16>
       %vw7_1 = vector.bitcast %vl7_1 : vector<16xf16> to vector<8xi32>
-      %ac7_1 = scf.for %mc_7_1 = [%c0 to %c16 step %c1](%acc7_1 = %on7_0 : vector<8xf32>) -> (vector<8xf32>) {
-        %mci7_1 = index.cast %mc_7_1 : index to i32
-        %mri7_1 = index.add %mc_7_1, %kb1_row : index
-        %mrow7_1 = vector.load %mk_view[%mri7_1, %c0] : view<32x8xi32> -> vector<8xi32>
-        %vx7_1 = vector.andi %vw7_1, %mrow7_1 : vector<8xi32>
-        %vs7_1 = vector.bitcast %vx7_1 : vector<8xi32> to vector<16xf16>
-        %vm7_1 = vector.fragment<lhs> %vs7_1 shape [%c16, %c16] : vector<16xf16>
-        %rm7_1 = vector.mma %vm7_1, %pt1, %on7_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %isc7_1 = scalar.cmpi eq, %lane_col32m, %mci7_1 : i32
-        %acn7_1 = scf.select %isc7_1, %rm7_1, %acc7_1 : vector<8xf32>
-        scf.yield %acn7_1 : vector<8xf32>
+      %ac7_1 = scf.for %mc_7_1 = [%c0 to %c16 step %cunr](%acc_7_1 = %on7_0 : vector<8xf32>) -> (vector<8xf32>) {
+        %mcu0_7_1 = index.add %mc_7_1, %cu0 : index
+        %mci0_7_1 = index.cast %mcu0_7_1 : index to i32
+        %mri0_7_1 = index.add %mcu0_7_1, %kb1_row : index
+        %mrow0_7_1 = vector.load %mk_view[%mri0_7_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx0_7_1 = vector.andi %vw7_1, %mrow0_7_1 : vector<8xi32>
+        %vs0_7_1 = vector.bitcast %vx0_7_1 : vector<8xi32> to vector<16xf16>
+        %vm0_7_1 = vector.fragment<lhs> %vs0_7_1 shape [%c16, %c16] : vector<16xf16>
+        %rm0_7_1 = vector.mma %vm0_7_1, %pt1, %on7_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu1_7_1 = index.add %mc_7_1, %cu1 : index
+        %mci1_7_1 = index.cast %mcu1_7_1 : index to i32
+        %mri1_7_1 = index.add %mcu1_7_1, %kb1_row : index
+        %mrow1_7_1 = vector.load %mk_view[%mri1_7_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx1_7_1 = vector.andi %vw7_1, %mrow1_7_1 : vector<8xi32>
+        %vs1_7_1 = vector.bitcast %vx1_7_1 : vector<8xi32> to vector<16xf16>
+        %vm1_7_1 = vector.fragment<lhs> %vs1_7_1 shape [%c16, %c16] : vector<16xf16>
+        %rm1_7_1 = vector.mma %vm1_7_1, %pt1, %on7_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu2_7_1 = index.add %mc_7_1, %cu2 : index
+        %mci2_7_1 = index.cast %mcu2_7_1 : index to i32
+        %mri2_7_1 = index.add %mcu2_7_1, %kb1_row : index
+        %mrow2_7_1 = vector.load %mk_view[%mri2_7_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx2_7_1 = vector.andi %vw7_1, %mrow2_7_1 : vector<8xi32>
+        %vs2_7_1 = vector.bitcast %vx2_7_1 : vector<8xi32> to vector<16xf16>
+        %vm2_7_1 = vector.fragment<lhs> %vs2_7_1 shape [%c16, %c16] : vector<16xf16>
+        %rm2_7_1 = vector.mma %vm2_7_1, %pt1, %on7_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %mcu3_7_1 = index.add %mc_7_1, %cu3 : index
+        %mci3_7_1 = index.cast %mcu3_7_1 : index to i32
+        %mri3_7_1 = index.add %mcu3_7_1, %kb1_row : index
+        %mrow3_7_1 = vector.load %mk_view[%mri3_7_1, %c0] : view<32x8xi32> -> vector<8xi32>
+        %vx3_7_1 = vector.andi %vw7_1, %mrow3_7_1 : vector<8xi32>
+        %vs3_7_1 = vector.bitcast %vx3_7_1 : vector<8xi32> to vector<16xf16>
+        %vm3_7_1 = vector.fragment<lhs> %vs3_7_1 shape [%c16, %c16] : vector<16xf16>
+        %rm3_7_1 = vector.mma %vm3_7_1, %pt1, %on7_0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc0_7_1 = scalar.cmpi eq, %lane_col32m, %mci0_7_1 : i32
+        %acn0_7_1 = scf.select %isc0_7_1, %rm0_7_1, %acc_7_1 : vector<8xf32>
+        %isc1_7_1 = scalar.cmpi eq, %lane_col32m, %mci1_7_1 : i32
+        %acn1_7_1 = scf.select %isc1_7_1, %rm1_7_1, %acn0_7_1 : vector<8xf32>
+        %isc2_7_1 = scalar.cmpi eq, %lane_col32m, %mci2_7_1 : i32
+        %acn2_7_1 = scf.select %isc2_7_1, %rm2_7_1, %acn1_7_1 : vector<8xf32>
+        %isc3_7_1 = scalar.cmpi eq, %lane_col32m, %mci3_7_1 : i32
+        %acn3_7_1 = scf.select %isc3_7_1, %rm3_7_1, %acn2_7_1 : vector<8xf32>
+        scf.yield %acn3_7_1 : vector<8xf32>
       }
       scf.yield %ac0_1, %ac1_1, %ac2_1, %ac3_1, %ac4_1, %ac5_1, %ac6_1, %ac7_1 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
     } else {
@@ -2324,43 +3328,19 @@ kernel.def export("k_flash2_partial") @k_flash2_partial(%tokens: index) {
 check.case public @pf {
   %t = check.literal value(1024) : index
   %layer = check.literal value(0) : index
-  %sliding = check.literal value(1) : i32
+  %sliding = check.literal value(0) : i32
   %ctx = check.literal value(17408) : index
-  %pool = check.literal value(17408) : index
+  %pool = check.literal value(327680) : index
   %q = check.generate.fill value(0.05) : tensor<1024x4096xf32>
   %g = check.generate.fill value(0.5) : tensor<1024x4096xf32>
   %info = check.file.read.npy path("info.npy") : tensor<1024x4xi32>
   %orig = check.file.read.npy path("orig.npy") : tensor<1098xi32>
   %tiles = check.file.read.npy path("tiles.npy") : tensor<1024xi32>
-  %arena = check.generate.fill value(0.01) : tensor<320864256xf16>
+  %arena = check.generate.fill value(0.01) : tensor<671088640xf16>
   %o = check.generate.fill value(0.0) : tensor<1024x4096xf32>
   %layer0 = check.literal value(0) : index
-  kernel.launch @k_flash2[%t](%t, %layer0, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  kernel.launch @k_flash2_partial[%t](%t, %layer0, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer1 = check.literal value(1) : index
-  kernel.launch @k_flash2[%t](%t, %layer1, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  kernel.launch @k_flash2_partial[%t](%t, %layer1, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer2 = check.literal value(2) : index
-  kernel.launch @k_flash2[%t](%t, %layer2, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  kernel.launch @k_flash2_partial[%t](%t, %layer2, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer3 = check.literal value(3) : index
-  kernel.launch @k_flash2[%t](%t, %layer3, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  kernel.launch @k_flash2_partial[%t](%t, %layer3, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer4 = check.literal value(4) : index
-  kernel.launch @k_flash2[%t](%t, %layer4, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  kernel.launch @k_flash2_partial[%t](%t, %layer4, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer5 = check.literal value(5) : index
-  kernel.launch @k_flash2[%t](%t, %layer5, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  kernel.launch @k_flash2_partial[%t](%t, %layer5, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer6 = check.literal value(6) : index
-  kernel.launch @k_flash2[%t](%t, %layer6, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  kernel.launch @k_flash2_partial[%t](%t, %layer6, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer7 = check.literal value(7) : index
-  kernel.launch @k_flash2[%t](%t, %layer7, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  kernel.launch @k_flash2_partial[%t](%t, %layer7, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  %layer8 = check.literal value(8) : index
-  kernel.launch @k_flash2[%t](%t, %layer8, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
-  kernel.launch @k_flash2_partial[%t](%t, %layer8, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2[%t](%t, %layer0, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<671088640xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2_partial[%t](%t, %layer0, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<671088640xf16>, tensor<1024x4096xf32>)
   check.return
 }
 
