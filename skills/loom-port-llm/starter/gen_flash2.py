@@ -686,6 +686,26 @@ if os.environ.get("FLASH2_EDGE_ZERO", "0") != "1":
 if os.environ.get("FLASH2_ABL_NOMASK") == "1":   # DIAGNOSTIC ONLY (not bit-invariant): no per-column path at all, to time it
     import re as _re2
     text = _re2.sub(r"(%need\d+) = scalar\.ori %nb_diag\d+, %nb_wins\d+ : i1", r"\1 = scalar.constant false : i1", text)
+import re
+if os.environ.get("FLASH2_ABL_NOSLOW") == "1":   # DIAGNOSTIC ONLY (not bit-invariant): delete the per-column branch bodies, keep the fast path
+    _ls, _out, _i = text.split("\n"), [], 0
+    while _i < len(_ls):
+        _m = re.match(r"(\s*)(.+?) = scf\.if %need\d+ -> \(.*\) \{\s*$", _ls[_i])
+        if not _m:
+            _out.append(_ls[_i]); _i += 1; continue
+        _outs = [x.strip() for x in _m.group(2).split(",")]; _depth, _j, _else = 1, _i + 1, None
+        while _depth:
+            _s = _ls[_j].strip()
+            if _depth == 1 and _s.startswith("} else {"): _else = _j
+            _depth += _s.count("{") - _s.count("}")
+            _j += 1
+        _body = _ls[_else + 1:_j - 1]
+        _y = [b for b in _body if b.strip().startswith("scf.yield")][-1]
+        _ys = [x.strip() for x in _y.strip()[len("scf.yield"):].split(":")[0].split(",")]
+        _out += [l for l in _body if l is not _y]
+        _out += [f"{_m.group(1)}{o} = vector.addf {y}, %zero_abl : vector<8xf32>" for o, y in zip(_outs, _ys)]
+        _i = _j
+    text = "\n".join(_out).replace("    %zero16h = vector.constant 0.0 : vector<16xf16>", "    %zero16h = vector.constant 0.0 : vector<16xf16>\n    %zero_abl = vector.constant 0.0 : vector<8xf32>")
 out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
 if ROLE == "deep":
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_deep") @{P}_attention_flash2_deep(', 1)
