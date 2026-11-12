@@ -72,7 +72,7 @@
    "detail": null,
    "level": "quick",
    "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
-   "source": "local",
+   "source": "devlab-3003",
    "status": "pass"
   },
   "compare": {
@@ -80,7 +80,7 @@
    "detail": null,
    "level": "quick",
    "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
-   "source": "local",
+   "source": "devlab-3003",
    "status": "pass"
   },
   "consistency": {
@@ -88,7 +88,7 @@
    "detail": null,
    "level": "quick",
    "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
-   "source": "local",
+   "source": "devlab-3003",
    "status": "pass"
   },
   "golden": {
@@ -96,7 +96,7 @@
    "detail": null,
    "level": "quick",
    "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
-   "source": "local",
+   "source": "devlab-3003",
    "status": "pass"
   },
   "needle": {
@@ -104,7 +104,7 @@
    "detail": null,
    "level": "quick",
    "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
-   "source": "local",
+   "source": "devlab-3003",
    "status": "pass"
   },
   "needle_full": {
@@ -119,7 +119,7 @@
    "detail": null,
    "level": "quick",
    "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
-   "source": "local",
+   "source": "devlab-3003",
    "status": "pass"
   },
   "spec": {
@@ -127,7 +127,7 @@
    "detail": null,
    "level": "quick",
    "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
-   "source": "local",
+   "source": "devlab-3003",
    "status": "pass"
   }
  },
@@ -260,44 +260,7 @@
      "decode_prefill": 2,
      "streams4": 3
     },
-    "source": "local"
-   },
-   {
-    "commands": [],
-    "date": "2026-11-07",
-    "metrics": {
-     "decode": {
-      "acceptance": 0.325,
-      "baseline": 67.1,
-      "baseline_runs": [
-       66.7,
-       67.5
-      ],
-      "loom": 55.5,
-      "loom_runs": [
-       55.3,
-       55.6
-      ]
-     },
-     "prefill_1k": {
-      "baseline": 986.1,
-      "baseline_runs": [
-       979.4,
-       992.8
-      ],
-      "loom": 574.2,
-      "loom_runs": [
-       570.1,
-       578.2
-      ]
-     }
-    },
-    "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
-    "runs": {
-     "decode_prefill": 2,
-     "streams4": null
-    },
-    "source": "devlab-3003"
+    "source": "devlab-3001"
    },
    {
     "commands": [],
@@ -312,7 +275,7 @@
      "decode_prefill": null,
      "streams4": null
     },
-    "source": "local"
+    "source": "devlab-3003"
    },
    {
     "commands": [],
@@ -349,7 +312,7 @@
      "decode_prefill": 2,
      "streams4": null
     },
-    "source": "local"
+    "source": "devlab-3002"
    }
   ]
  },
@@ -434,6 +397,42 @@
    "run": "1000",
    "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"
   },
+  "devlab-3001": {
+   "device": {
+    "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu": "AMD Radeon 8060S Graphics",
+    "os": "Ubuntu 26.04"
+   },
+   "hrx_loom": {
+    "artifact_id": null,
+    "branch": "v0.1.0",
+    "hrx_loom": "0.1.0",
+    "hrx_system_sha": "d01d1c18b154189fd073777329052d23f6071f14",
+    "source": "pypi",
+    "wheel_sha256": "4d3897b83cc0857723593487a4372a31d203944a1637e5e3143cad1d0583b98b"
+   },
+   "kind": "devlab",
+   "run": "3001",
+   "url": null
+  },
+  "devlab-3002": {
+   "device": {
+    "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu": "AMD Radeon 8060S Graphics",
+    "os": "Ubuntu 26.04"
+   },
+   "hrx_loom": {
+    "artifact_id": null,
+    "branch": "v0.1.0",
+    "hrx_loom": "0.1.0",
+    "hrx_system_sha": "d01d1c18b154189fd073777329052d23f6071f14",
+    "source": "pypi",
+    "wheel_sha256": "4d3897b83cc0857723593487a4372a31d203944a1637e5e3143cad1d0583b98b"
+   },
+   "kind": "devlab",
+   "run": "3002",
+   "url": null
+  },
   "devlab-3003": {
    "device": {
     "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
@@ -450,24 +449,6 @@
    },
    "kind": "devlab",
    "run": "3003",
-   "url": null
-  },
-  "local": {
-   "device": {
-    "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
-    "gpu": "AMD Radeon 8060S Graphics",
-    "os": "Ubuntu 26.04"
-   },
-   "hrx_loom": {
-    "artifact_id": null,
-    "branch": "v0.1.0",
-    "hrx_loom": "0.1.0",
-    "hrx_system_sha": "d01d1c18b154189fd073777329052d23f6071f14",
-    "source": "pypi",
-    "wheel_sha256": "4d3897b83cc0857723593487a4372a31d203944a1637e5e3143cad1d0583b98b"
-   },
-   "kind": "local",
-   "run": null,
    "url": null
   }
  },
