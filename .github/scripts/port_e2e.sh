@@ -91,8 +91,8 @@ ph evidence
 gguf=$(ls "$W"/gguf/*.gguf | head -1); bench=$W/bench
 build=$("$T" -c "import json,re;r=json.load(open('$bench/llamacpp_pick.json'))['ranked'];m=re.search(r'b1[0-9]{3,}', r[0]['dir']) if r else None;print(m.group(0) if m else '')" 2>/dev/null)
 src=(--package "$W/pkg")
-# On DevLab (GITHUB_RUN_ID) the evidence says so: this perf session fills the card's DevLab columns and stays there;
-# the card's headline values still need a local session (card_lib.perf_flags "devlab", org_status devlab-primary).
+# On DevLab (GITHUB_RUN_ID) the evidence says so: this perf session is the card's performance (DevLab is its only
+# source; make_info.py perf refuses a local one, so a port run elsewhere publishes gates only).
 [ -n "${GITHUB_RUN_ID:-}" ] && src+=(--source-kind devlab --run "$GITHUB_RUN_ID" --url "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-loom-fun/loom-skills}/actions/runs/$GITHUB_RUN_ID")
 if [ -n "$build" ] && [ -s "$bench/perf_log.jsonl" ]; then
   # 4 streams: llama.cpp's c4_steady rows (perf_log.jsonl) and Loom's (targets.jsonl), the final session's only

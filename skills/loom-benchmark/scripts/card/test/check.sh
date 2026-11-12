@@ -12,66 +12,61 @@ py() { python3 -I "$@"; }
 F=$here/flint; D=$here/d1
 GEN=0123456789abcdef0123456789abcdef01234567   # the card generator commit is an input, never read by the renderer
 SRC=(--device "$F/evidence/device.json" --hrx-loom "$F/evidence/hrx_loom.json" --package "$F/pkg")
-# a current card: a stamped package (llm_config.json "generator"), drafting, a local perf session, a second
-# session that re-measured two rows a day later on another build of the programs (stale: the card marks those
-# rows; its decode rows carry their drafted-token acceptance), local gates with the spec gate's acceptance, and
-# DevLab gates (an older failing agent run that the local pass supersedes, a full-context needle), a DevLab perf
-# session of two rows on the same programs (the card's DevLab columns, next to the local values); REPORT.md generated.
+# a current card: a stamped package (llm_config.json "generator"), drafting, a DevLab perf session (devlab-perf), a
+# second session that re-measured two rows a day later on another build of the programs (stale: the card marks those
+# rows; its decode rows carry their drafted-token acceptance), DevLab quick gates with the spec gate's acceptance, and
+# nightly DevLab gates (an older failing agent run that the later pass supersedes, a full-context needle); REPORT.md
+# generated.
 py "$C/make_info.py" perf --loom-jsonl "$F/evidence/loom.jsonl" --llama-jsonl "$F/evidence/llama.jsonl" \
   --c4-loom "$F/evidence/c4_loom_runs.txt" --c4-llama "$F/evidence/c4_llama_runs.txt" --baseline-version b1355 \
   --baseline-args "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model ~/drafter.gguf --spec-draft-n-max 3 -ngld 99 -c 65536 -kvu -np 4" \
   --command "perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign" \
-  --date 2026-11-06 "${SRC[@]}" -o "$tmp/perf.json" 2>/dev/null
+  --date 2026-11-06 "${SRC[@]}" --run 3001 -o "$tmp/perf.json" 2>/dev/null
 mkdir -p "$tmp/rebuilt"; cp -r "$F/pkg/." "$tmp/rebuilt/"; echo "// another build" >> "$tmp/rebuilt/program/llm.loom"
 py "$C/make_info.py" perf --loom-jsonl "$F/evidence/verify_loom.jsonl" --llama-jsonl "$F/evidence/verify_llama.jsonl" \
-  --metrics decode,prefill_1k "${SRC[@]}" --package "$tmp/rebuilt" -o "$tmp/perf2.json" 2>/dev/null
+  --metrics decode,prefill_1k "${SRC[@]}" --run 3002 --package "$tmp/rebuilt" -o "$tmp/perf2.json" 2>/dev/null
 dlrows() {  # dlrows IN OUT FACTOR: the verify rows as a DevLab runner measured them (rates x FACTOR: a real gap)
   py -c "import json, sys; f = float(sys.argv[3]); rs = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
 for r in rs:
     r['decode_tps'] = round(r['decode_tps'] * f, 1); r['prefill'] = [dict(p, prefill_tps=round(p['prefill_tps'] * f, 1)) for p in r['prefill']]
 open(sys.argv[2], 'w').write(''.join(json.dumps(r) + '\n' for r in rs))" "$@"
 }
-dlrows "$F/evidence/verify_loom.jsonl" "$tmp/dl_loom.jsonl" 0.6; dlrows "$F/evidence/verify_llama.jsonl" "$tmp/dl_llama.jsonl" 0.95
-py "$C/make_info.py" perf --loom-jsonl "$tmp/dl_loom.jsonl" --llama-jsonl "$tmp/dl_llama.jsonl" \
-  --metrics decode,prefill_1k "${SRC[@]}" --source-kind devlab --run 3003 -o "$tmp/perf_dl.json" 2>/dev/null
-py "$C/make_info.py" gates "$F/evidence/gates.json" "${SRC[@]}" -o "$tmp/gates.json" 2>/dev/null
+dlrows "$F/evidence/verify_llama.jsonl" "$tmp/dl_llama.jsonl" 0.95
+py "$C/make_info.py" gates "$F/evidence/gates.json" "${SRC[@]}" --source-kind devlab --run 3003 -o "$tmp/gates.json" 2>/dev/null
 # the roofline (evidence/roofline.json: `make_info.py roofline --package pkg --acceptance 0.68` on the real GGUF; CI
 # has neither the GGUF nor the gguf package)
 mkdir -p "$tmp/flint" "$tmp/d1"
 cp -r "$F/pkg/." "$tmp/flint/"
 py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --memory-bytes 67000000000 \
-  --output flint --report generated --evidence "$tmp/perf.json" "$tmp/perf_dl.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
+  --output flint --report generated --evidence "$tmp/perf.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
   "$F/evidence/roofline.json" -o "$tmp/flint/info.json" 2>/dev/null
 # --from-info: regenerating a published card with only the new evidence gives the same info.json
 py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --memory-bytes 67000000000 \
-  --output flint --report generated --evidence "$tmp/perf.json" "$tmp/perf_dl.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
+  --output flint --report generated --evidence "$tmp/perf.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
   -o "$tmp/flint_old.json" 2>/dev/null
 # (--repo comes from the old info.json; without --generator-commit it is this checkout's HEAD)
 py "$C/make_info.py" build "$tmp/flint" --generator-commit $GEN --from-info "$tmp/flint_old.json" \
   --evidence "$F/evidence/roofline.json" -o "$tmp/flint_regen.json" 2>/dev/null
 py "$C/make_info.py" build "$tmp/flint" --from-info "$tmp/flint_old.json" -o "$tmp/flint_head.json" 2>/dev/null
 head_sha=$(git -C "$C" rev-parse HEAD 2>/dev/null || echo unknown)
-# a card published before DevLab stopped measuring performance: its info.json carries Loom-only DevLab sweeps
-# (evidence/devlab_sweeps.json, with their sources). It stays valid loom-card/2, --from-info carries the sweeps over
-# unchanged, they are neither rendered nor judged (same README, REPORT and flags as without them), and a DevLab sweep
-# in a new evidence file is ignored
-mkdir -p "$tmp/swept"; cp -r "$F/pkg/." "$tmp/swept/"
+# a card published before DevLab became the only performance source: a local perf session (a local source, as
+# published cards recorded them) and Loom-only DevLab sweeps (evidence/devlab_sweeps.json). --from-info drops both:
+# the result validates and has neither; perf refuses --source-kind local
+mkdir -p "$tmp/old"; cp -r "$F/pkg/." "$tmp/old/"
 py -c "import json, sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 i, s = c.load_json(sys.argv[2]), c.load_json(sys.argv[3]); i['sources'].update(s['sources']); i['devlab'] = {'sweeps': s['sweeps']}
-c.write_json(sys.argv[4], i)" "$C" "$tmp/flint/info.json" "$F/evidence/devlab_sweeps.json" "$tmp/swept_pub.json"
-py -c "import json, sys; s = json.load(open(sys.argv[1]))['sweeps'][0]; s['source'] = {'kind': 'devlab', 'run': '1001', 'url': None}
-json.dump({'evidence': 'loom-card-evidence/2', 'devlab': {'sweep': s}}, open(sys.argv[2], 'w'))" "$F/evidence/devlab_sweeps.json" "$tmp/sweep_ev.json"
-py "$C/make_info.py" build "$tmp/swept" --generator-commit $GEN --from-info "$tmp/swept_pub.json" --evidence "$tmp/sweep_ev.json" \
-  -o "$tmp/swept/info.json" 2>/dev/null
-py "$C/render_card.py" "$tmp/swept" 2>/dev/null; py "$C/render_card.py" "$tmp/flint" -o "$tmp/flint_README0.md" 2>/dev/null
+i['sources']['local-1'] = {'kind': 'local', 'run': None, 'url': None, 'device': None, 'hrx_loom': None}
+i['performance']['sessions'].append(dict(i['performance']['sessions'][0], source='local-1', date='2026-11-09'))
+c.write_json(sys.argv[4], i)" "$C" "$tmp/flint/info.json" "$F/evidence/devlab_sweeps.json" "$tmp/old_pub.json"
+py "$C/make_info.py" build "$tmp/old" --generator-commit $GEN --from-info "$tmp/old_pub.json" -o "$tmp/old/info.json" 2>/dev/null
 py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
-p, f = c.load_json(sys.argv[2]), c.load_json(sys.argv[3])
-assert c.validate(p) == [] and c.validate(f) == [], 'not valid'
-assert f['devlab'] == p['devlab'] and len(f['devlab']['sweeps']) == 2, 'sweeps not carried over unchanged'
-assert c.perf_flags(f) == c.perf_flags(c.load_json(sys.argv[4])), 'flags differ'" "$C" "$tmp/swept_pub.json" "$tmp/swept/info.json" \
-  "$tmp/flint/info.json" && cmp -s "$tmp/swept/README.md" "$tmp/flint_README0.md" \
-  && echo "OK   flint: a card with old DevLab sweeps stays valid, keeps them, renders and flags as without them" \
-  || { echo "FAIL flint: old DevLab sweeps are not carried over harmlessly"; bad=1; }
+o, f = c.load_json(sys.argv[2]), c.load_json(sys.argv[3])
+assert c.validate(o) == [], 'not valid'
+assert 'devlab' not in o and all(v['kind'] != 'local' for k, v in o['sources'].items() if k in {s['source'] for s in o['performance']['sessions']})
+assert o['performance']['sessions'] == f['performance']['sessions'], 'only the local session should go'" "$C" "$tmp/old/info.json" "$tmp/flint/info.json" \
+  && ! py "$C/make_info.py" perf --loom-jsonl "$F/evidence/loom.jsonl" "${SRC[@]}" --source-kind local -o "$tmp/perf_local.json" 2>/dev/null \
+  && echo "OK   flint: --from-info drops local perf sessions and old DevLab sweeps; perf refuses a local source" \
+  || { echo "FAIL flint: local perf sessions or old DevLab sweeps survive, or a local perf source is accepted"; bad=1; }
 # the performance guardrails loom-org's org_status.py applies (card_lib.perf_flags, with the repo's programs: stale)
 py -c "import sys; sys.path.insert(0, '$C'); import card_lib as c; print(c.dumps(c.perf_flags(c.load_json('$tmp/flint/info.json'), programs=c.programs_sha256('$F/pkg'))), end='')" \
   > "$tmp/flint/flags.json"
@@ -129,23 +124,9 @@ assert len(rows) == 1 and f'| {r.NO} fail' in rows[0], rows
 assert assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])['failing'] == ['agent']" "$C" "$here/../../../../loom-org/scripts" "$tmp/failing" \
   && echo "OK   failing: a card with a failing gate validates, renders it as fail and org_status counts it failing" \
   || { echo "FAIL failing: a card with a failing gate does not publish as failing"; bad=1; }
-# local and DevLab sessions both stay (card_lib.card_metrics: local headline, DevLab columns): a metric only DevLab
-# measured asks for a local session (perf_flags "devlab"; org_status remeasure reason devlab-primary); a local value
-# without a DevLab one on the same programs asks for a DevLab perf session ("devlab_perf"); the gap is never a flag
-py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint \
-  --evidence "$tmp/gates.json" "$tmp/perf_dl.json" -o "$tmp/dl.json" 2>/dev/null
-got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
-p = c.programs_sha256(sys.argv[3])
-for f in sys.argv[2], sys.argv[4]:
-    fl = c.perf_flags(c.load_json(f), programs=p)
-    print(','.join(sorted(fl['devlab'])), ','.join(c.remeasure_reasons(fl)), ','.join(sorted(fl['devlab_perf'])), sep='/', end=' ')" \
-  "$C" "$tmp/dl.json" "$F/pkg" "$tmp/flint/info.json")
-want="decode,prefill_1k/devlab-primary/ /stale/decode_2k,decode_32k,prefill_16k,prefill_2k,prefill_32k,prefill_8k,streams4 "
-[ "$got" = "$want" ] && echo "OK   flags: local and DevLab sessions both count; each one missing is flagged, the gap never" \
-  || { echo "FAIL flags: local/DevLab sessions: '$got', expected '$want'"; bad=1; }
-# a card measured on DevLab only (no local value): the DevLab values are the headline columns (llama.cpp, Loom, margin,
-# roofline), the empty local and local ÷ DevLab columns are dropped, a footnote says where the numbers are from, and the
-# session's device and SDK (pull_devlab.py --identity: runner.txt, install.log) and runs per value are on the card
+# a card from one devlab-perf job: one table (llama.cpp, Loom, margin, roofline), a footnote says where the numbers are
+# from, and the session's device and SDK (pull_devlab.py --identity: runner.txt, install.log) and runs per value are on the card
+dlrows "$F/evidence/verify_loom.jsonl" "$tmp/dl_loom.jsonl" 0.6
 py "$C/pull_devlab.py" --identity "$here/devlab_job" --device-out "$tmp/jd.json" --hrx-out "$tmp/jh.json" 2>/dev/null
 py "$C/make_info.py" perf --loom-jsonl "$tmp/dl_loom.jsonl" --llama-jsonl "$tmp/dl_llama.jsonl" --metrics decode,prefill_1k \
   "${SRC[@]}" --source-kind devlab --run 3003 --device "$tmp/jd.json" --hrx-loom "$tmp/jh.json" -o "$tmp/perf_dl2.json" 2>/dev/null
@@ -160,15 +141,15 @@ row = [l for l in r.splitlines() if l.startswith('| decode tok/s')][0]
 assert row.count('|') == 7 and '—' not in row.split('|')[2] and '—' not in row.split('|')[3] and '—' not in row.split('|')[4], row
 rows = [l for l in r.split('## Performance')[1].split('\\n- ')[0].splitlines() if l.startswith('|')]
 assert len(rows) > 5 and all(l.count('|') == 7 for l in rows), rows
-assert 'measured on AMD DevLab Dispatch Strix Halo runners' in r and 'Runs per value: decode and prefill' in r
+assert 'Measured on AMD DevLab Dispatch Strix Halo runners' in r and 'Runs per value: decode and prefill' in r
 assert 'device not recorded' not in r and 'hrx-loom unknown' not in r, 'footnote'
 assert 'X2-LA03-S03-D01' in r and '0.2.0.dev0' in r, 'device/sdk'" "$tmp/dlonly" \
-  && echo "OK   devlab-only: a card with only DevLab values shows them as its headline columns" \
+  && echo "OK   devlab-only: a card from a devlab-perf job renders one table with the runner and SDK" \
   || { echo "FAIL devlab-only: DevLab-only card does not render as expected"; bad=1; }
 # the spec gate's acceptance is a drafting statistic, not a timing: a DevLab nightly job's (pull_devlab.evidence, from
-# its gates_spec.log, stamped with the job's programs) replaces a stale spec_acceptance and is not flagged devlab-primary;
-# a job without a spec gate carries none
-py "$C/make_info.py" gates "$F/evidence/gates.json" "${SRC[@]}" --package "$tmp/rebuilt" -o "$tmp/gates_old.json" 2>/dev/null
+# its gates_spec.log, stamped with the job's programs) replaces a stale spec_acceptance; a job without a spec gate
+# carries none
+py "$C/make_info.py" gates "$F/evidence/gates.json" "${SRC[@]}" --package "$tmp/rebuilt" --source-kind devlab --run 4000 -o "$tmp/gates_old.json" 2>/dev/null
 mkdir -p "$tmp/job/spec" "$tmp/job/nospec"
 py -c "import json, sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 p = c.programs_sha256(sys.argv[2]); d = sys.argv[3]
@@ -193,23 +174,23 @@ got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 p = c.programs_sha256(sys.argv[2])
 def st(f):
     i = c.load_json(f); fl = c.perf_flags(i, programs=p)
-    return f\"{c.card_metrics(i)['spec_acceptance'][0]['loom']}:{'stale' if 'spec_acceptance' in fl['stale'] else 'fresh'}:{'devlab' if 'spec_acceptance' in fl['devlab'] else 'local-ok'}\"
+    return f\"{c.card_metrics(i)['spec_acceptance'][0]['loom']}:{'stale' if 'spec_acceptance' in fl['stale'] else 'fresh'}\"
 print(st(sys.argv[3]), st(sys.argv[4]), st(sys.argv[5]), sep='/')" "$C" "$F/pkg" "$tmp/acc_old.json" "$tmp/acc_new.json" "$tmp/acc_nospec.json")
 want=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
-a = c.card_metrics(c.load_json(sys.argv[2]))['spec_acceptance'][0]['loom']; print(f'{a}:stale:local-ok/0.65:fresh:local-ok/{a}:stale:local-ok')" \
+a = c.card_metrics(c.load_json(sys.argv[2]))['spec_acceptance'][0]['loom']; print(f'{a}:stale/0.65:fresh/{a}:stale')" \
   "$C" "$tmp/acc_old.json")
 [ "$got" = "$want" ] && echo "OK   flags: a DevLab spec gate's acceptance replaces a stale spec_acceptance (gates only: none)" \
   || { echo "FAIL flags: DevLab spec acceptance: $got, expected $want"; bad=1; }
 # a paused card (make_info.py build --from-info --next-steps --status paused): README.md is the same card with a final
 # "Next steps" section after everything else, org_status reports paused; without the fields nothing changes
-printf '%s\n' '- retry the agent gate on DevLab' '' 'measure `decode_32k` locally' > "$tmp/next.txt"
+printf '%s\n' '- retry the agent gate on DevLab' '' 'measure `decode_32k` in a devlab-perf job' > "$tmp/next.txt"
 mkdir -p "$tmp/paused"; cp -r "$F/pkg/." "$tmp/paused/"
 py "$C/make_info.py" build "$tmp/paused" --generator-commit $GEN --from-info "$tmp/failing/info.json" --next-steps "$tmp/next.txt" \
   --status paused -o "$tmp/paused/info.json" 2>/dev/null
 py "$C/render_card.py" "$tmp/paused" 2>/dev/null
 py "$C/make_info.py" build "$tmp/paused" --generator-commit $GEN --from-info "$tmp/paused/info.json" --next-steps /dev/null \
   --status active -o "$tmp/unpaused.json" 2>/dev/null
-printf '\n## Next steps\n\nWork on this model is paused.\n\n- retry the agent gate on DevLab\n- measure `decode_32k` locally\n' \
+printf '\n## Next steps\n\nWork on this model is paused.\n\n- retry the agent gate on DevLab\n- measure `decode_32k` in a devlab-perf job\n' \
   | cat "$tmp/failing/README.md" - | cmp -s - "$tmp/paused/README.md" && cmp -s "$tmp/failing/info.json" "$tmp/unpaused.json" \
   && py -c "import sys; sys.path.insert(0, sys.argv[1]); from org_status import assess
 a, b = assess('loom-fun/ggml-org-Flint-loom', sys.argv[2]), assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])
@@ -243,7 +224,7 @@ from org_status import assess
 long = {'metric:prefill_32k', 'metric:decode_32k'}
 miss = assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])['missing']
 assert not long & set(miss) and 'metric:prefill_16k' not in miss and 'metric:prefill_1k' in miss, miss
-rows = [l for l in open(sys.argv[3] + '/README.md') if l.startswith('| prefill tok/s, 32k document |' + ' n/a |' * 8)]
+rows = [l for l in open(sys.argv[3] + '/README.md') if l.startswith('| prefill tok/s, 32k document |' + ' n/a |' * 5)]
 assert rows and \"longer than the model's native 32768-token context\" in open(sys.argv[3] + '/README.md').read()
 assert long <= set(assess('loom-fun/ggml-org-Flint-loom', sys.argv[4])['missing']), 'native context unknown'
 facts = c.package_facts(c.load_package(sys.argv[3]))
@@ -258,7 +239,7 @@ printf '%s\n' '{"streams": 4, "window_s": 2.5, "agg_tps": 110.0}' '{"streams": 4
 got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); from make_info import c4_samples; print(c4_samples(sys.argv[2]))" "$C" "$tmp/c4_bad.txt" 2>/dev/null)
 [ "$got" = "[110.0, 112.5]" ] && echo "OK   c4: invalid c4_steady runs are skipped" || { echo "FAIL c4: $got, expected [110.0, 112.5]"; bad=1; }
 # a second llama.cpp backend (make_info.py perf --backend vulkan: a baseline-only DevLab session under
-# performance.baselines): validates, renders as one more DevLab column and a footnote with its build, archive
+# performance.baselines): validates, renders as one more column and a footnote with its build, archive
 # sha256 and the settings it could not run, changes no headline value or guardrail (card_lib.card_metrics/perf_flags),
 # the latest Vulkan evidence replaces the earlier one, --from-info carries it over, a run that fetched other programs
 # than the package is refused, and the card without it renders as before (the goldens)
@@ -270,7 +251,7 @@ py "$C/make_info.py" perf --llama-jsonl "$tmp/vk_llama.jsonl" "${VK[@]}" -o "$tm
 py "$C/make_info.py" perf --llama-jsonl "$tmp/dl_llama.jsonl" "${VK[@]}" -o "$tmp/vk2.json" 2>/dev/null
 mkdir -p "$tmp/vk"; cp -r "$F/pkg/." "$tmp/vk/"
 py "$C/make_info.py" build "$tmp/vk" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --memory-bytes 67000000000 --output flint \
-  --report generated --evidence "$tmp/perf.json" "$tmp/perf_dl.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
+  --report generated --evidence "$tmp/perf.json" "$tmp/gates.json" "$tmp/perf2.json" "$F/evidence/devlab.json" \
   "$F/evidence/roofline.json" "$tmp/vk1.json" -o "$tmp/vk/info.json" 2>/dev/null
 py "$C/make_info.py" build "$tmp/vk" --generator-commit $GEN --from-info "$tmp/vk/info.json" --evidence "$tmp/vk2.json" -o "$tmp/vk_new.json" 2>/dev/null
 py "$C/make_info.py" build "$tmp/vk" --generator-commit $GEN --from-info "$tmp/vk_new.json" -o "$tmp/vk_same.json" 2>/dev/null
@@ -288,9 +269,9 @@ assert c.perf_flags(vk, programs=p) == c.perf_flags(base, programs=p) and \
     {k: v[0]['loom'] for k, v in c.card_metrics(vk).items()} == {k: v[0]['loom'] for k, v in c.card_metrics(base).items()}" \
   "$C" "$tmp/flint/info.json" "$tmp/vk/info.json" "$tmp/vk_new.json" "$F/pkg" \
   && cmp -s "$tmp/vk_new.json" "$tmp/vk_same.json" \
-  && grep -q '| DevLab llama.cpp Vulkan |' "$tmp/vk/README.md" && grep -q 'Differs from llama.cpp: vision projector' "$tmp/vk/README.md" \
+  && grep -q '| llama.cpp Vulkan |' "$tmp/vk/README.md" && grep -q 'Differs from llama.cpp: vision projector' "$tmp/vk/README.md" \
   && grep -q '^## llama.cpp Vulkan: DevLab Dispatch run 5005' "$tmp/vk/REPORT.md" \
-  && echo "OK   vulkan: a baseline-only session renders as a DevLab column and changes no headline value or flag" \
+  && echo "OK   vulkan: a baseline-only session renders as one more column and changes no card value or flag" \
   || { echo "FAIL vulkan: the second backend's session does not validate, render or leave the card's values alone"; bad=1; }
 py "$C/make_info.py" perf --llama-jsonl "$tmp/vk_llama.jsonl" "${VK[@]}" --fetched-programs 0000 -o "$tmp/vk_bad.json" 2>/dev/null \
   && { echo "FAIL vulkan: a run that fetched other programs than the package was accepted"; bad=1; } \
