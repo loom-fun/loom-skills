@@ -1,13 +1,17 @@
 {
- "_comment": "Qwen2.5-1.5B decode attention splits at long context: card vs rebuilt variants.",
+ "_comment": "Qwen2.5-1.5B: card vs main rebuild vs draft policy, active wait, all metrics, with llama.cpp ROCm and Vulkan on the same runner.",
  "card": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
  "memory_bytes": 8000000000,
  "kit": null,
  "llamacpp": "b1369",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "long-draft",
+   "name": "all",
    "variants": [
+    {
+     "name": "card"
+    },
     {
      "name": "base",
      "build": {}
@@ -20,38 +24,27 @@
      }
     },
     {
-     "name": "d4",
+     "name": "d1",
      "build": {},
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "4"
-     ]
-    },
-    {
-     "name": "segmin2k",
-     "build": {
-      "SEG_MIN": "2048"
-     }
-    },
-    {
-     "name": "segmin32k",
-     "build": {
-      "SEG_MIN": "1000000"
+     "execution": {
+      "draft_depth": 1
      }
     }
    ],
    "steps": [
+    "perf:card:3:long",
+    "c4:card",
     "perf:base:3:long",
+    "c4:base",
     "perf:nodraft:3:long",
-    "perf:d4:3:long",
-    "perf:segmin2k:3:long",
-    "perf:segmin32k:3:long",
+    "c4:nodraft",
+    "perf:d1:3:long",
+    "c4:d1",
     "llama:3:long",
-    "llama@vulkan:3:long"
+    "llamac4",
+    "llama@vulkan:3:long",
+    "llamac4@vulkan"
    ]
   }
- ],
- "llamacpp_vulkan": "b12211"
+ ]
 }
