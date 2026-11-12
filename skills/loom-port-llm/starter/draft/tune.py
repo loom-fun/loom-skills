@@ -225,7 +225,8 @@ def concurrent_ok(url, model, chat):
 
 
 def prior_depths(prior, kind, allowed):
-    """(depths to measure first, climb) for this method from a reference's tuned table: its best depth's neighbourhood;
+    """(depths to measure first, climb) for this method from a reference's tuned table: its best depth's neighbourhood
+    and the shallowest depth;
     a method that lost clearly there (under 75 % of the reference's winner) gets one probe at its best depth, and
     climbs only if it does better here (tune() checks)."""
     rows = [r for r in prior or [] if r.get("kind") == kind and r.get("depth") and r.get("decode_tps")]
@@ -236,7 +237,9 @@ def prior_depths(prior, kind, allowed):
     i = min(range(len(allowed)), key=lambda j: abs(allowed[j] - top["depth"]))
     if top["decode_tps"] < 0.75 * winner:
         return [allowed[i]], False
-    return [allowed[j] for j in (i - 1, i, i + 1) if 0 <= j < len(allowed)], True
+    # the shallowest depth too: it reads the fewest verify tokens at long context, where a reference's single-stream
+    # winner can lose (Qwen3-14B n-gram: reference best depth 2, depth 1 won decode_32k 17.3 vs 13.9)
+    return sorted({allowed[j] for j in (0, i - 1, i, i + 1) if 0 <= j < len(allowed)}), True
 
 
 def serve(name, port, mem, card, env):
