@@ -1,5 +1,5 @@
 {
- "_comment": "HyperCLOVAX-1.5B regenerated card (no drafting) vs ngram depth 2/3 builds (occupancy gate on) vs llama.cpp ROCm/Vulkan, same runner, active wait.",
+ "_comment": "HyperCLOVAX-1.5B published card (ngram d2, tune vs llama.cpp) vs ROCm and Vulkan, same runner, active wait.",
  "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
  "memory_bytes": 24000000000,
  "kit": null,
@@ -11,21 +11,21 @@
    "name": "hc",
    "variants": [
     {
-     "name": "d3",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "3"
-     ]
+     "name": "card"
     }
    ],
    "steps": [
-    "gates:d3:dev",
-    "perf:d3:2",
-    "perf:d3:2:long",
-    "c4:d3"
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan.np1.nospec:2",
+    "llama@vulkan.np1.nospec:2:long",
+    "llama@vulkan.np1:2",
+    "llama@vulkan.np1:2:long",
+    "llamac4@vulkan"
    ]
   }
  ]
