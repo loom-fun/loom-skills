@@ -1,5 +1,5 @@
 {
- "_comment": "verify32k: WMMA verify-span decode attention (g_attention_split_mma) vs main / K/V-once scalar body / nodraft.",
+ "_comment": "verify32k: MMA kernel timing ablations (draft_depth 0 at runtime: T=1 runs through the mma kernel).",
  "card": "loom-fun/ggml-org-Qwen3-4B-loom",
  "memory_bytes": 55000000000,
  "kit": null,
@@ -11,33 +11,70 @@
    "memory_bytes": 55000000000,
    "variants": [
     {
-     "name": "main"
-    },
-    {
-     "name": "mma",
-     "build": {}
-    },
-    {
      "name": "gqa",
      "build": {
       "ATTN_MMA": "0"
      }
     },
     {
-     "name": "nodraft",
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "build": {}
+     "name": "nomt",
+     "build": {
+      "ATTN_MMA": "0",
+      "ATTN_MT": "1"
+     }
+    },
+    {
+     "name": "base0",
+     "build": {
+      "ATTN_MMA": "0"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "mma0",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "off0",
+     "build": {
+      "ATTN_MMA_FROM": "1000000"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "nostage0",
+     "build": {
+      "ATTN_MMA_ABL": "nostage"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "nocomp0",
+     "build": {
+      "ATTN_MMA_ABL": "nocompute"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
-    "ktest:mma",
-    "perf:main:2:long",
-    "perf:mma:2:long",
     "perf:gqa:2:long",
-    "perf:nodraft:2:long"
+    "perf:nomt:2:long",
+    "perf:base0:2:long",
+    "perf:mma0:2:long",
+    "perf:off0:2:long",
+    "perf:nostage0:2:long",
+    "perf:nocomp0:2:long"
    ]
   },
   {
@@ -46,68 +83,70 @@
    "memory_bytes": 69000000000,
    "variants": [
     {
-     "name": "main"
-    },
-    {
-     "name": "mma",
-     "build": {}
-    },
-    {
      "name": "gqa",
      "build": {
       "ATTN_MMA": "0"
      }
     },
     {
-     "name": "nodraft",
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:mma",
-    "perf:main:2:long",
-    "perf:mma:2:long",
-    "perf:gqa:2:long",
-    "perf:nodraft:2:long"
-   ]
-  },
-  {
-   "name": "l8",
-   "card": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
-   "memory_bytes": 55000000000,
-   "variants": [
-    {
-     "name": "main"
-    },
-    {
-     "name": "mma",
-     "build": {}
-    },
-    {
-     "name": "gqa",
+     "name": "nomt",
      "build": {
-      "ATTN_MMA": "0"
+      "ATTN_MMA": "0",
+      "ATTN_MT": "1"
      }
     },
     {
-     "name": "nodraft",
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "build": {}
+     "name": "base0",
+     "build": {
+      "ATTN_MMA": "0"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "mma0",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "off0",
+     "build": {
+      "ATTN_MMA_FROM": "1000000"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "nostage0",
+     "build": {
+      "ATTN_MMA_ABL": "nostage"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "nocomp0",
+     "build": {
+      "ATTN_MMA_ABL": "nocompute"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
-    "ktest:mma",
-    "perf:main:2:long",
-    "perf:mma:2:long",
     "perf:gqa:2:long",
-    "perf:nodraft:2:long"
+    "perf:nomt:2:long",
+    "perf:base0:2:long",
+    "perf:mma0:2:long",
+    "perf:off0:2:long",
+    "perf:nostage0:2:long",
+    "perf:nocomp0:2:long"
    ]
   }
  ]

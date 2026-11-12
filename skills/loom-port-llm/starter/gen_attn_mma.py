@@ -17,6 +17,7 @@ this kernel takes (gen_llm.py).
 
 Staging: 32-key tiles of K and V^T in workgroup memory (all 4 waves), then ceil(T * G / 16) waves compute 16 columns
 each. A block of keys past a column's position gets V zeroed for that column (the loop over the run's tokens)."""
+import os
 import re
 
 D, NF, NO, KT, KB, DP8, VTC = 128, 8, 4, 32, 2, 136, 40   # NF: 16-dim fragments of a head, NO: of them one wave accumulates
@@ -418,5 +419,10 @@ kernel.def export("g_attention_split_mma") @g_attention_split_mma(%tokens: index
 }}
 """)
     text = "\n".join(o)
+    abl = os.environ.get("ATTN_MMA_ABL", "")
+    if abl == "nostage":   # timing only: no K/V loads
+        text = text.replace("%key_valid = index.cmp ule, %key_pos, %pos_max : index", "%key_valid = index.cmp ult, %key_pos, %c0 : index", 1)
+    if abl == "nocompute":
+        text = text.replace("%is_compute = index.cmp ult, %wave, %cWC : index", "%is_compute = index.cmp ult, %wave, %c0 : index", 1)
     text = text.replace("    %store_ok = scalar.andi", "    %hi_half_not = index.cmp eq, %lane_half, %c0 : index\n    %store_ok = scalar.andi", 1)
     return text
