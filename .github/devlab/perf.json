@@ -1,5 +1,5 @@
 {
- "_comment": "Qwen3-Coder attention: keys per split (2k) + GQA (32k); sibling kv8 check on Qwen3-4B-2507.",
+ "_comment": "Qwen3-Coder decode attention: separate GQA kernel (g_attention_split_gqa) vs GQA off, same runner; ktest and consistency with the GQA kernel forced on (FROM=16).",
  "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
  "memory_bytes": 57000000000,
  "kit": null,
@@ -15,55 +15,25 @@
      }
     },
     {
-     "name": "kps48",
-     "build": {
-      "ATTN_GQA": "0",
-      "ATTN_KPS": "48"
-     }
-    },
-    {
-     "name": "kps64",
-     "build": {
-      "ATTN_GQA": "0",
-      "ATTN_KPS": "64"
-     }
-    },
-    {
-     "name": "kps96",
-     "build": {
-      "ATTN_GQA": "0",
-      "ATTN_KPS": "96"
-     }
-    },
-    {
-     "name": "kps128",
-     "build": {
-      "ATTN_GQA": "0",
-      "ATTN_KPS": "128"
-     }
-    },
-    {
-     "name": "gqa",
+     "name": "sep",
      "build": {}
     },
     {
-     "name": "gqakps64",
+     "name": "gqa16",
      "build": {
-      "ATTN_KPS": "64"
+      "ATTN_GQA_FROM": "16"
      }
     }
    ],
    "steps": [
     "perf:ctl:2",
-    "perf:kps48:2",
-    "perf:kps64:2",
-    "perf:kps96:2",
-    "perf:kps128:2",
-    "perf:gqa:2",
-    "perf:gqakps64:2",
+    "perf:sep:2",
     "perf:ctl:1:long",
-    "perf:gqa:1:long",
-    "perf:gqakps64:1:long"
+    "perf:sep:1:long",
+    "c4:ctl",
+    "c4:sep",
+    "ktest:gqa16",
+    "consistency:gqa16:2"
    ]
   },
   {
@@ -79,24 +49,15 @@
      }
     },
     {
-     "name": "kps64",
-     "build": {
-      "ATTN_GQA": "0",
-      "ATTN_KPS": "64"
-     }
-    },
-    {
-     "name": "kps128",
-     "build": {
-      "ATTN_GQA": "0",
-      "ATTN_KPS": "128"
-     }
+     "name": "sep",
+     "build": {}
     }
    ],
    "steps": [
     "perf:ctl:2",
-    "perf:kps64:2",
-    "perf:kps128:2"
+    "perf:sep:2",
+    "perf:ctl:1:long",
+    "perf:sep:1:long"
    ]
   }
  ]
