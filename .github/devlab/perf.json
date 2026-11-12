@@ -6,9 +6,82 @@
  "llamacpp_vulkan": "b12211",
  "llama_spec": "--spec-type ngram-simple",
  "jobs": [
-  {"name": "gqa-ab",
-   "variants": [{"name": "base", "build": {}, "execution": {"draft_depth": 0}},
-                {"name": "gqa", "build": {"ATTN_GQA": "1"}, "execution": {"draft_depth": 0}}],
-   "steps": ["perf:base:2:long", "c4:base", "perf:gqa:2:long", "c4:gqa", "llama:2:long", "llamac4", "llama@vulkan.nospec:2:long", "llamac4@vulkan.nospec", "consistency:gqa:2", "gates:gqa:dev"]}
+  {
+   "name": "attn-sweep",
+   "variants": [
+    {
+     "name": "base",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "gqa_head",
+     "build": {
+      "ATTN_GQA": "1",
+      "ATTN_GQA_EXT": "head"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "gqa_u32",
+     "build": {
+      "ATTN_GQA": "1",
+      "ATTN_UNROLL": "32"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "sp128",
+     "build": {
+      "ATTN_SPLITS": "128",
+      "ATTN_KPS": "16"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "sp32",
+     "build": {
+      "ATTN_SPLITS": "32",
+      "ATTN_KPS": "64"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "gqa_sp128",
+     "build": {
+      "ATTN_GQA": "1",
+      "ATTN_SPLITS": "128",
+      "ATTN_KPS": "16"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "perf:base:2:long",
+    "c4:base",
+    "perf:gqa_head:2:long",
+    "c4:gqa_head",
+    "perf:gqa_u32:2:long",
+    "c4:gqa_u32",
+    "perf:sp128:2:long",
+    "c4:sp128",
+    "perf:sp32:2:long",
+    "c4:sp32",
+    "perf:gqa_sp128:2:long",
+    "c4:gqa_sp128"
+   ]
+  }
  ]
 }
