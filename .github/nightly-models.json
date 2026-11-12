@@ -269,9 +269,8 @@
    "slug": "nanbeige4.3-33b",
    "memory_bytes": 81000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
-    "draft",
     "thinking-toggle"
    ]
   },
