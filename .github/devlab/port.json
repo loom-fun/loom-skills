@@ -1,7 +1,11 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "perf-gap llama-3.2-3B: regenerate the card from main (per-row draft/tune.py #270, occupancy gate #298).",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "llama32-3b-regen",
+   "spec": "unsloth/Llama-3.2-3B-Instruct-GGUF:Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
+   "model_id": "meta-llama/Llama-3.2-3B-Instruct"
+  }
  ]
 }
