@@ -304,6 +304,7 @@ def patch_control(text, cfg, draft):
     L1 = "    %length = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
     L2 = "    %length32 = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
     propose_flag, eff = "propose", "shape_index"
+    warm_flag = "drafting"
     if OCC_MIN:
         gate_pre = f"""  // occupancy gate: all spans speculative and at least {OCC_MIN} of them -> verify the anchors only
   %c1_i32 = scalar.constant 1 : i32
@@ -342,6 +343,8 @@ def patch_control(text, cfg, draft):
         L2 = ("    %length32_host = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
               "    %length32 = scf.select %gate, %c1_i32, %length32_host : i32\n")
         propose_flag, eff = "propose_on", "eff_index"
+        if os.environ.get("GATE_ABL") == "nowarm":   # DIAGNOSTIC: skip the drafter catch-up in gated epochs (timing only)
+            warm_flag = "warm_on"
         gate_epoch = f"""  %flag_at = index.constant {GATE_FLAG} : offset
   %flag_view = buffer.view %control_state[%flag_at] : buffer -> view<1xi32>
   %flag = view.load %flag_view[0] : view<1xi32> -> i32
@@ -353,6 +356,7 @@ def patch_control(text, cfg, draft):
   %eff_index = scf.select %gated, %flag_shape, %shape_index : index
   %ungated = scalar.cmpi eq, %flag, %c0 : i32
   %propose_on = scalar.andi %propose, %ungated : i1
+  %warm_on = scalar.andi %drafting, %ungated : i1
 """
     dflash = draft["kind"] in ("dflash", "ngram")   # stage signatures: no MTP carry
     mrope = bool((cfg.get("vision") or {}).get("mrope"))
@@ -609,7 +613,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
     %feedback = func.call @feedback(%c0, %outputs, %c0_i64, %length) : (i32, hal.buffer, i64, i64) -> (i64)
     scf.yield %completion : i64
   }}
-  %done = scf.if %drafting -> (i64) {{
+  %done = scf.if %{warm_flag} -> (i64) {{
     %accepted = scf.if %verify -> (hal.buffer) {{
       scf.yield %committed : hal.buffer
     }} else {{
