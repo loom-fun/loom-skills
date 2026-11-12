@@ -10,8 +10,9 @@ name: nightly-gates
 on:
   pull_request:
     types: [labeled, synchronize]
-  schedule:
-    - cron: "17 7 * * *"   # 07:17 UTC (late evening in the US)
+  # Nightly schedule disabled (Nov 12, 2026); run it by hand with workflow_dispatch or the PR label.
+  # schedule:
+  #   - cron: "17 7 * * *"   # 07:17 UTC (late evening in the US)
   workflow_dispatch:
     inputs:
       models:
