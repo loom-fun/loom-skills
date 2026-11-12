@@ -1,24 +1,14 @@
 {
- "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
- "memory_bytes": 60000000000,
+ "card": "loom-fun/unsloth-Qwen3-8B-loom",
+ "memory_bytes": 55000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "q30-attn",
+   "name": "q8-pf",
    "variants": [
     {
-     "name": "cu1",
-     "build": {
-      "ATTN_COMBINE_U": "1"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "cu8",
+     "name": "base",
      "build": {},
      "build_args": [
       "--draft",
@@ -26,9 +16,9 @@
      ]
     },
     {
-     "name": "s128",
+     "name": "pf16",
      "build": {
-      "ATTN_SPLITS": "128"
+      "ATTN_GQA_PF": "1"
      },
      "build_args": [
       "--draft",
@@ -36,9 +26,20 @@
      ]
     },
     {
-     "name": "s32",
+     "name": "pf8",
      "build": {
-      "ATTN_SPLITS": "32"
+      "ATTN_GQA_PF": "1",
+      "ATTN_UNROLL": "8"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "u8",
+     "build": {
+      "ATTN_UNROLL": "8"
      },
      "build_args": [
       "--draft",
@@ -47,11 +48,66 @@
     }
    ],
    "steps": [
-    "ktest:cu8",
-    "perf:cu1:2:long",
-    "perf:cu8:2:long",
-    "perf:s128:2:long",
-    "perf:s32:2:long"
+    "ktest:pf16",
+    "ktest:pf8",
+    "perf:base:2:long",
+    "perf:pf16:2:long",
+    "perf:pf8:2:long",
+    "perf:u8:2:long"
+   ]
+  },
+  {
+   "name": "q30-pf",
+   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+   "memory_bytes": 60000000000,
+   "variants": [
+    {
+     "name": "base",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "pf16",
+     "build": {
+      "ATTN_GQA_PF": "1"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "pf8",
+     "build": {
+      "ATTN_GQA_PF": "1",
+      "ATTN_UNROLL": "8"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "u8",
+     "build": {
+      "ATTN_UNROLL": "8"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    }
+   ],
+   "steps": [
+    "ktest:pf16",
+    "ktest:pf8",
+    "perf:base:2:long",
+    "perf:pf16:2:long",
+    "perf:pf8:2:long",
+    "perf:u8:2:long"
    ]
   }
  ],
