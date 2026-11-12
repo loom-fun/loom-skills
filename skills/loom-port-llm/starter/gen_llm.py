@@ -2705,9 +2705,29 @@ def gqa_split(text, P, S):
       view.store %mf_{h}, %ml_view[%token, %head{h}, %gs, 0] : f32, view<[%tokens]x{QH}x{S}x2xf32>
       view.store %lf_{h}, %ml_view[%token, %head{h}, %gs, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
     }}""")
-    t.append("    }\n    } else {\n" + old + "    }\n")
-    k = k[:o0] + "\n".join(t) + k[o1:]
-    return text[:a] + k + text[b:]
+    t.append("    }\n    }\n")
+    # Two kernels: the VGPR count of one kernel is the larger body's (per-head 113, GQA 248 at G = 8: half the waves per SIMD),
+    # so a merged kernel cost the short contexts 5 % (Qwen3-Coder, 2k). The per-head kernel keeps its code and skips the
+    # tokens that have >= ATTN_GQA_FROM visible keys; the GQA kernel (a grid of ceil(S / G) groups: its waves cover S slots)
+    # runs those and skips the rest. The control program launches both (an empty launch costs a few microseconds).
+    head = k[:o0]
+    below = f"""    %cgqa = index.constant {attn_rules.ATTN_GQA_FROM} : index
+    %below = index.cmp ult, %visible, %cgqa : index
+"""
+    first = "    %active_split = index.cmp ult, %split, %s_eff : index\n"
+    assert old.startswith(first)
+    per_head = head + below + "    %active_lo = index.cmp ult, %split, %s_eff : index\n    %active_split = scalar.andi %active_lo, %below : i1\n" + old[len(first):] + k[o1:]
+    gq_head = head.replace(f'kernel.def export("{P}_attention_split") @{P}_attention_split(', f'kernel.def export("{P}_attention_split_gqa") @{P}_attention_split_gqa(', 1)
+    cs = f"  %cS = index.constant {S} : index\n"
+    assert gq_head.count(cs) == 1
+    gq_head = gq_head.replace(cs, f"  %cS = index.constant {-(-S // G)} : index\n")
+    gqa = gq_head + "\n".join(t) + k[o1:]
+    return text[:a] + per_head + "\n" + gqa + text[b:]
+
+
+def gqa_enabled(P="g"):
+    """Does the decode attention have the separate GQA kernel (@{P}_attention_split_gqa, launched after @{P}_attention_split)?"""
+    return P == "g" and attn_rules.gqa(UNROLL, D, gen_draft.enabled())
 
 
 def attention_text(S, P):
@@ -2716,7 +2736,6 @@ def attention_text(S, P):
     layers see the last 2048 positions (including the current one). The
     combine kernel folds the splits and applies the sigmoid output gate."""
     U = UNROLL
-    KPS = attn_rules.ATTN_KPS if P == "g" else 32
     body = []
     pa = attn_rules.paged(U)
     if pa:   # absolute U-aligned key blocks lie in one 16-position KV page: one page lookup per block
@@ -2818,11 +2837,11 @@ def attention_text(S, P):
         SINK_LOAD = SINK_W = ""
         M_INIT, D_INIT = "%neg_big", "%zero_f"
     text = f"""
-// Splits for `visible` keys: about {KPS} keys each, at most {S}.
+// Splits for `visible` keys: about 32 keys each, at most {S}.
 func.def inline @{P}_split_count(%visible: index) -> (index) {{
   %c1 = index.constant 1 : index
-  %c127 = index.constant {KPS - 1} : index
-  %c128 = index.constant {KPS} : index
+  %c127 = index.constant 31 : index
+  %c128 = index.constant 32 : index
   %cmax = index.constant {S} : index
   %padded = index.add %visible, %c127 : index
   %target = index.div %padded, %c128 : index
@@ -3009,7 +3028,7 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
   kernel.return
 }}
 """
-    if P == "g" and D == 128 and attn_rules.ATTN_GQA and attn_rules.paged(U) and attn_rules.butterfly(U) and not gen_draft.enabled():   # measured at head_dim 128 only
+    if gqa_enabled(P):   # measured at head_dim 128 only
         text = gqa_split(text, P, S)
     elif P == "g" and attn_rules.multi_token(U, KVH):
         text = multi_token_split(text, P, U, ATTN_MT)
@@ -4671,7 +4690,7 @@ def with_heads(h, gen):
     return re.sub(r'(@|export\(")(' + "|".join(sorted(names, key=len, reverse=True)) + r')\b', rf"\1\2_h{h}", text)
 
 
-NARROW_KERNELS = r"@(g_qk_rope_store(?:_swa)?|g_attention_flash2|g16_attention_split_listed|g16_attention_combine_listed|g_attention_split|g_attention_combine|g_gate_heads)\["
+NARROW_KERNELS = r"@(g_qk_rope_store(?:_swa)?|g_attention_flash2|g16_attention_split_listed|g16_attention_combine_listed|g_attention_split(?:_gqa)?|g_attention_combine|g_gate_heads)\["
 
 
 def qk_rope_swa():
@@ -5158,6 +5177,8 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
         qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
         gate, gty = (f"%sinks_{i}", f"view<{QH}xf32>") if SINKS else (gate0, "buffer")
         nty = f"view<{D}xf32>" if QK_NORM else "buffer"
+        GQA_LAUNCH = f"""
+    kernel.launch @g_attention_split_gqa[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)""" if gqa_enabled() else ""
         if i not in RECUR:
           rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
           T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
@@ -5166,7 +5187,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
     kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
     kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, {gty}, buffer)
   }} else {{
-    kernel.launch @g_attention_split[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @g_attention_split[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer){GQA_LAUNCH}
     kernel.launch @g_attention_combine[%t](%t, %sliding_{i}, %info, %pacc, %pml, {gate}, %o) : [index](index, i32, buffer, buffer, buffer, {gty}, buffer)
   }}
   scf.if %gemm {{

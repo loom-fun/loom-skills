@@ -2042,6 +2042,9 @@ def add_partial(c):   # gen_llm.py launches the partial tiles' kernel after ever
         return c
     return re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_partial[\2", c, flags=re.M)
 cases = [add_partial(c) for c in cases]
+if attn_rules.gqa(attn_rules.UNROLL, D, (cfg.get("drafter") or {}).get("kind") in ("mtp", "dflash", "ngram", "assist")):
+    # gen_llm.py launches the GQA kernel after every decode split launch (each token runs in exactly one of the two)
+    cases = [re.sub(r"^( *)kernel\.launch @g_attention_split\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_split_gqa[\2", c, flags=re.M) for c in cases]
 if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
     cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
                     flags=re.M) for c in cases] + DEEP_CASES   # these launch the two kernels as they test them
@@ -2049,7 +2052,7 @@ if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after e
 # chain and flash cases at that head count, from a child run whose kernels, cases and files take the suffix.
 if KS:
     cases = [re.sub(r"check\.case public @(\w+) \{", rf"check.case public @\1{KS} {{", re.sub(
-        r"@(g_qk_rope_store|g_attention_split|g_attention_combine|g_gate_heads|g_attention_flash2(?:_deep|_partial)?)\[", rf"@\1{KS}[", c))
+        r"@(g_qk_rope_store|g_attention_split(?:_gqa)?|g_attention_combine|g_gate_heads|g_attention_flash2(?:_deep|_partial)?)\[", rf"@\1{KS}[", c))
         .replace('.npy")', f'{KS}.npy")') for c in cases if re.match(r"\s*check\.case public @(attention_chain|attention_span|flash_prefill)", c)]
 for h in sorted(set(cfg.get("layer_heads") or []) - {QH}):
     hc = os.path.join(out, f"cfg_h{h}.json"); json.dump(dict(cfg, heads=h, layer_heads=None), open(hc, "w"))
