@@ -326,17 +326,35 @@ def cmd_apply(a):
         return
     taken, review = [], []
     for k, v in rc.items():
+        if k == "extra_eos_ids":
+            continue   # below
         if k in OWN or k == "chat":
             continue
         if k not in cfg:
             cfg[k] = v; taken.append(k)
         elif cfg[k] != v:
             review.append(k)
+    # extra stop ids (flint: <|user|>, <|observation|>, which the GGUF does not mark EOG) come from the reviewed port
+    # when inspect found fewer: same architecture, EOS and vocabulary size; only ever more stops, never fewer
+    rv = rc.get("extra_eos_ids") or []
+    if rv and cfg.get("eos_id") == rc.get("eos_id") and cfg.get("vocab") == rc.get("vocab") \
+            and set(rv) - set(cfg.get("extra_eos_ids") or []):
+        cfg["extra_eos_ids"] = sorted(set(cfg.get("extra_eos_ids") or []) | set(rv)); taken.append("extra_eos_ids")
     chat_ok = bool(cfg.get("chat")) and not a.chat_failed
     if not chat_ok and rc.get("chat"):
         cfg["chat"] = rc["chat"]; taken.append("chat")
     elif rc.get("chat") and cfg.get("chat") != rc["chat"]:
-        review.append("chat")
+        # stop_after_calls / stop_after_answer are reviewed by hand (the template cannot reveal them: the service
+        # terminal vs the next turn's opener). Without them a call turn runs on past the call to max_tokens. Taken only
+        # when the rest of the derived chat block equals the reference's (the same template, so the same markers).
+        sks = ("stop_after_calls", "stop_after_answer")
+        rest = lambda c: {k: v for k, v in c.items() if k not in sks}
+        if rest(cfg["chat"]) == rest(rc["chat"]):
+            for sk in sks:
+                if rc["chat"].get(sk) and not cfg["chat"].get(sk):
+                    cfg["chat"][sk] = rc["chat"][sk]; taken.append("chat." + sk)
+        if cfg.get("chat") != rc["chat"]:
+            review.append("chat")
     d = rc.get("drafter") or {}
     cfg["reference"] = {"repo": x["repo"], "revision": x["sha"], "category": "A", "score": x["score"],
                         "reasons": x["reasons"], "generator": x["generator"], "kit_example": x["kit_example"],

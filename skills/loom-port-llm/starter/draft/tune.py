@@ -3,7 +3,7 @@
 usage: tune.py WORKDIR PORT MEMORY_GIB MODEL_ID (MEMORY_GIB is ignored: build.py sizes each candidate)   (WORKDIR holds cfg.json, tok/tokenizer.json and pkg/; Loom must not be
                                                  serving another model: one model is loaded at a time)
 Candidates: no drafting; MTP (the GGUF's NextN block) at depths 1-4; DFlash (cfg["drafter"], found by find_drafter.py)
-at depths 3, 5, 7 (capped by its block); a Gemma-4 assistant (cfg["assistant"]) at depths 1-4; n-gram prompt lookup (any model, no weights) at depths 2, 3, 5. Each method
+at depths 1, 2, 3, 5, 7 (capped by its block); a Gemma-4 assistant (cfg["assistant"]) at depths 1-4; n-gram prompt lookup (any model, no weights) at depths 2, 3, 5. Each method
 is built once; a depth is only a model.json setting (the width-specialized stages compile on first use). Every
 candidate is served alone and timed on decode-heavy requests (short essay, code, a tool-call turn, a reasoning answer,
 a code edit that returns most of its input as agents' file edits do, and one decode after a 16k-token document, at most
@@ -16,6 +16,11 @@ spec gate's equivalence check (loom-benchmark spec_check.py: the same requests a
 draft_depth 0 of the same package, identical); a candidate that fails either is recorded with the reason and the
 next one is checked. Prints TUNE_RESULT {...} with the full table (the report shows it).
 SPEC=off skips tuning and builds without drafting.
+TUNE_BASELINE (a JSON file, or inline JSON) = {"decode": X, "decode_32k": Y, "c4": Z}: the fastest llama.cpp tok/s of the card's
+rows; by default read from the cfg["reference"] card's info.json (find_reference.py apply). With it a candidate's margin is its worst row relative to llama.cpp (work* rows -> decode, "long" -> decode_32k, streams4
+-> c4; a row without a reference is ignored), depth 0 is scored the same way, and a drafter is used when its margin beats
+depth 0's (the 3 % single-stream rule stays): a drafter that wins every single-stream row but is 10 % under depth 0 at 4
+streams still beats llama.cpp better than no drafting does. Without it the margin is relative to depth 0 as above.
 """
 import json
 import os
@@ -70,6 +75,10 @@ LONG_CTX = int(os.environ.get("TUNE_LONG", "16000"))
 # 32k 125 vs 166, four streams 498 vs 787 tok/s). So every row is scored against depth 0 and a drafter that is
 # slower than NO_LOSS x depth 0 on any row is not used, however well it does on the code-edit row that quotes its input.
 NO_LOSS = 0.98
+# Context gate (build_draft.py SPEC_CTX_MAX): a candidate that wins every row but the long-document one is retried with
+# drafting off from this causal position on, so short context keeps the drafting gain (Ornith-1.5-35B depth 3: short rows
+# 118 vs 62 tok/s, 16k 44.9 vs 53.5). Below the long row's prompt, above the short rows'. TUNE_CTX_MAX=0 skips the retry.
+CTX_GATE = int(os.environ.get("TUNE_CTX_MAX", "3500"))
 
 
 def measure(url, model, chat, context=0, rows=1):
@@ -93,7 +102,15 @@ def measure(url, model, chat, context=0, rows=1):
     return res
 
 
-def measure_c4(url, model, chat, rows):
+def measure_c4(url, model, chat, rows, repeats=3):
+    """Median of `repeats` measure_c4_once runs: one 256-token sample on a 0.5B model is a few hundred ms of decode and
+    swung +-10 % (Qwen2.5-0.5B: ngram depth 2 scored 1127 vs 1265 without drafting here, 1237 vs 1112 in same-runner
+    devlab-perf), enough to drop a drafter that wins every row."""
+    v = [measure_c4_once(url, model, chat, rows) for _ in range(repeats)]
+    return statistics.median(v) if all(v) else 0.0   # a failing run scores the candidate 0
+
+
+def measure_c4_once(url, model, chat, rows):
     """Aggregate decode tok/s of `rows` concurrent essay requests (the serving preset's rows, at most 4): a speculative
     span verifies depth + 1 tokens whatever the load, so 4 streams verify 4 x (depth + 1) tokens per step, and past 16
     the int8 matvecs give way to the GEMM (Muse-Glimmer: depth 5 gave 41.6 tok/s on 4 streams, depth 3 74.0, no
@@ -108,7 +125,7 @@ def measure_c4(url, model, chat, rows):
     def run(i):
         try:
             res[i] = stream(url, model, [{"role": "user", "content": f"[{time.time()} {i}] Write a very long, detailed essay about the history of lighthouses."}],
-                            256, extra=off, timeout=900)
+                            384, extra=off, timeout=900)
         except Exception:  # noqa: BLE001  a failing stream scores 0
             res[i] = None
     ts = [threading.Thread(target=run, args=(i,)) for i in range(n)]
@@ -130,6 +147,39 @@ def single_rate(rows):
 def margin(rows, base_rows):
     """The candidate's worst row relative to depth 0 (min over the rows depth 0 measured; 0.0 when a row is missing)."""
     return min((rows.get(k, 0.0) / t for k, t in base_rows.items() if t), default=0.0)
+
+
+def load_llama_refs(cfg):
+    """{"decode", "decode_32k", "c4"} llama.cpp tok/s: TUNE_BASELINE (a JSON file path or inline JSON), else the best
+    llama.cpp backend on the cfg["reference"] card (its info.json: latest session and per-backend baselines), else None."""
+    v = os.environ.get("TUNE_BASELINE", "").strip()
+    if v:
+        d = json.loads(v) if v.startswith("{") else json.load(open(v))
+        return {k: float(d[k]) for k in ("decode", "decode_32k", "c4") if d.get(k)} or None
+    ref = cfg.get("reference") or {}
+    if not ref.get("repo"):
+        return None
+    sys.path.insert(0, os.path.join(SKILLS, "loom-port-llm"))
+    import find_reference
+    sha = ref.get("revision") or "main"
+    rc = find_reference.jfile(ref["repo"], sha, "llm_config.json") or {}
+    if os.path.basename(rc.get("gguf") or "") != os.path.basename(cfg.get("gguf") or "-"):
+        return None   # a reference of another model (same architecture): its llama.cpp numbers are not this card's
+    perf = (find_reference.jfile(ref["repo"], sha, "info.json") or {}).get("performance") or {}
+    sets = [s.get("metrics") or {} for s in (perf.get("sessions") or [])[-1:]]
+    sets += [(b.get("session") or {}).get("metrics") or {} for b in (perf.get("baselines") or {}).values()]
+    out = {}
+    for k, m in (("decode", "decode"), ("decode_32k", "decode_32k"), ("c4", "streams4")):
+        vals = [float(s[m]["baseline"]) for s in sets if (s.get(m) or {}).get("baseline")]
+        if vals:
+            out[k] = max(vals)
+    return out or None
+
+
+def llama_margin(rows, refs):
+    """The worst row relative to llama.cpp's rate for that row (work* -> decode, long -> decode_32k, streams4 -> c4)."""
+    ref = lambda k: refs.get("c4" if k == "streams4" else "decode_32k" if k == "long" else "decode")
+    return min((t / ref(k) for k, t in rows.items() if ref(k)), default=0.0)
 
 
 def concurrent_ok(url, model, chat):
@@ -191,7 +241,7 @@ def main():
         if cfg.get("mtp"):
             kinds.append(("mtp", [1, 2, 3, 4]))
         if (cfg.get("drafter") or {}).get("gguf"):
-            kinds.append(("dflash", [3, 5, 7]))
+            kinds.append(("dflash", [1, 2, 3, 5, 7]))   # shallow depths too: 4 streams verify rows x (depth + 1) tokens and long context pays per drafted token (Ornith-1.5-122B: depth 1 beats 3 at 4 streams and 32k)
         if (cfg.get("assistant") or {}).get("gguf"):
             kinds.append(("assist", [1, 2, 3, 4]))   # Gemma-4 assistant (gemma4 family)
         kinds.append(("ngram", [2, 3, 5]))   # every model: prompt lookup needs no drafter
@@ -199,6 +249,7 @@ def main():
     import catalog
     if catalog.find(STARTER):   # a catalog package drafts with its MTP head or not at all (catalog.py)
         kinds = [("mtp", [1, 2, 3, 4])] if spec not in ("off", "0", "no", "none") and catalog.meta(catalog.find(STARTER)).get("mtp_variant") else []
+    llama_refs = load_llama_refs(cfg)
     table, best, cand_mem, chats = [], ("none", 0, 0.0), {}, {}
     # A category A reference (find_reference.py apply: cfg["reference"]) measured its own drafting table: start each
     # method at the reference's best depth and its neighbours instead of every depth. Every method is still measured
@@ -214,7 +265,7 @@ def main():
     base, base_rows = None, {}
     for kind, depths in kinds:
         pkg = os.path.join(work, f"pkg_tune_{kind}")
-        out = sh(*build, pkg, *common, "--draft", kind).stdout
+        out = sh(*build, pkg, *common, "--draft", kind, env=dict(os.environ, SPEC_OCC_MIN="2")).stdout   # gated (default)
         mem = [l for l in out.split() if l.startswith("--memory_bytes=")][-1].split("=")[1]
         cand_mem[kind] = mem
         card = json.load(open(os.path.join(pkg, "model.json")))
@@ -252,6 +303,8 @@ def main():
             subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
             row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2),
                    "rows": {k: round(v, 2) for k, v in rows.items()}, "seconds": round(time.time() - t0)}
+            if llama_refs:
+                row["margin_llama"] = round(llama_margin(rows, llama_refs), 3)   # worst row relative to llama.cpp
             if depth == 0:
                 base, base_rows = tps, rows
             else:
@@ -268,6 +321,71 @@ def main():
             if not queue and first and measured and (climb or max(measured.values()) >= 0.9 * best[2]):
                 i = allowed.index(max(measured, key=measured.get))
                 queue = [allowed[j] for j in (i - 1, i + 1) if 0 <= j < len(allowed) and allowed[j] not in measured]
+        # Occupancy gate (build_draft.py): the default build verifies one token per span once all rows draft, so its
+        # streams4 equals depth 0. A drafter that still wins at 4 streams (rows x (depth + 1) fits 16 and acceptance is
+        # real: Muse-Glimmer depth 3, 74 vs 48.6 tok/s) is better ungated. Build the ungated package (occ_min 0) and
+        # measure ONLY its streams4 per depth (the single-stream rows are identical by construction); a depth takes the
+        # better streams4 and its occ_min goes to cfg["drafter"].
+        if rows_n >= 2 and base_rows.get("streams4"):
+            upkg = os.path.join(work, f"pkg_tune_{kind}_u")
+            sh(*build, upkg, *common, "--draft", kind, env=dict(os.environ, SPEC_OCC_MIN="0"))
+            ucard = json.load(open(os.path.join(upkg, "model.json")))
+            for row in [r for r in table if r["kind"] == kind and r["depth"]]:
+                ucard["presets"]["chat"]["execution"]["draft_depth"] = row["depth"]
+                upath = os.path.join(upkg, f"model_d{row['depth']}.json")
+                json.dump(ucard, open(upath, "w"), indent=1)
+                try:
+                    serve("tune", port, mem, upath, env)
+                    stream(f"http://127.0.0.1:{port}", model_id, WORK[0][0], 16, extra={"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {})   # warm-up as measure() does
+                    c4u = measure_c4(f"http://127.0.0.1:{port}", model_id, chat, rows_n)
+                except Exception as e:  # noqa: BLE001
+                    print(f"tune: {kind} depth {row['depth']} ungated: {e}", file=sys.stderr)
+                    c4u = 0.0
+                subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
+                row["streams4_gated"] = row["rows"].get("streams4")
+                row["streams4_ungated"] = round(c4u, 2)
+                if c4u > (row["rows"].get("streams4") or 0.0):
+                    row["rows"]["streams4"] = round(c4u, 2)
+                    row["occ_min"] = 0
+                    row["margin"] = round(margin(row["rows"], base_rows), 3)
+                    if llama_refs:
+                        row["margin_llama"] = round(llama_margin(row["rows"], llama_refs), 3)
+                print("tune:", json.dumps({k: row[k] for k in ("kind", "depth", "streams4_gated", "streams4_ungated", "margin")}), flush=True)
+                sc = row["margin"]
+                measured[row["depth"]] = sc
+                if sc > best[2]:
+                    best = (kind, row["depth"], sc)
+        # context-gate retry for this kind's best depth when only the long row is below NO_LOSS x depth 0
+        if CTX_GATE and measured and base_rows.get("long"):
+            best_d = max(measured, key=measured.get)
+            r = next(x for x in table if x["kind"] == kind and x["depth"] == best_d)
+            rest = {k: v for k, v in base_rows.items() if k != "long"}
+            if r["rows"].get("long", 0.0) < NO_LOSS * base_rows["long"] and margin(r["rows"], rest) >= NO_LOSS:
+                pkg_c = os.path.join(work, f"pkg_tune_{kind}_ctx")
+                sh(*build, pkg_c, *common, "--draft", kind, env=dict(os.environ, SPEC_CTX_MAX=str(CTX_GATE), SPEC_OCC_MIN=str(r.get("occ_min", 2))))
+                card_c = json.load(open(os.path.join(pkg_c, "model.json")))
+                card_c["presets"]["chat"]["execution"]["draft_depth"] = best_d
+                path = os.path.join(pkg_c, f"model_d{best_d}.json")
+                json.dump(card_c, open(path, "w"), indent=1)
+                t0 = time.time()
+                try:
+                    serve("tune", port, cand_mem[kind], path, env)
+                    rows = measure(f"http://127.0.0.1:{port}", model_id, chat,
+                                   card_c["presets"]["chat"]["execution"].get("context_capacity") or 0, rows_n)
+                    tps = single_rate(rows)
+                except Exception as e:  # noqa: BLE001
+                    print(f"tune: {kind} depth {best_d} ctx_max {CTX_GATE}: {e}", file=sys.stderr)
+                    tps, rows = 0.0, {}
+                subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
+                row = {"kind": kind, "depth": best_d, "ctx_max": CTX_GATE, **({"occ_min": 0} if r.get("occ_min") == 0 else {}), "decode_tps": round(tps, 2),
+                       "rows": {k: round(v, 2) for k, v in rows.items()}, "seconds": round(time.time() - t0),
+                       "margin": round(margin(rows, base_rows), 3)}
+                if llama_refs:
+                    row["margin_llama"] = round(llama_margin(rows, llama_refs), 3)
+                print("tune:", json.dumps(row), flush=True)
+                table.append(row)
+                if row["margin"] > best[2]:
+                    best = (kind, best_d, row["margin"])
         if first:
             skipped[kind] = [d for d in allowed if d not in measured]
     if base is None:
@@ -277,24 +395,33 @@ def main():
     import spec_check
     refs = {}
 
-    def exact(kind, depth, pkg, mem):
+    def exact(kind, depth, pkg, mem):   # kind: the package's key (its directory: gated and ungated builds differ)
         url = f"http://127.0.0.1:{port}"
-        if kind not in refs:
+        if pkg not in refs:
             card0 = json.load(open(os.path.join(pkg, f"model_d{depth}.json")))
             card0["presets"]["chat"]["execution"]["draft_depth"] = 0
             p0 = os.path.join(pkg, "model_d0.json")
             json.dump(card0, open(p0, "w"), indent=1)
             serve("tune", port, mem, p0, env)
-            refs[kind] = os.path.join(pkg, "spec_ref.jsonl")
-            spec_check.record(url, model_id, refs[kind])
+            refs[pkg] = os.path.join(pkg, "spec_ref.jsonl")
+            spec_check.record(url, model_id, refs[pkg])
             subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
         out = os.path.join(pkg, f"spec_d{depth}.jsonl")
         serve("tune", port, mem, os.path.join(pkg, f"model_d{depth}.json"), env)
         spec_check.record(url, model_id, out)
-        return spec_check.compare(refs[kind], out) == 0
+        return spec_check.compare(refs[pkg], out) == 0
     # A drafter is used only if no row is slower than NO_LOSS x depth 0 and the single-stream rate gains at least 3 %;
     # candidates rank by their worst row relative to depth 0 (the margin).
-    ranked = sorted([r for r in table if r["kind"] != "none" and r["margin"] >= NO_LOSS and r["decode_tps"] >= 1.03 * base],
+    # With TUNE_BASELINE the margin is the worst row relative to llama.cpp and a drafter qualifies when it beats depth 0's.
+    if llama_refs:
+        floor = next(r["margin_llama"] for r in table if r["kind"] == "none")
+        for r in table:
+            if r["kind"] != "none":
+                r["margin"] = r["margin_llama"]
+        ok_margin = lambda r: r["margin"] > floor
+    else:
+        ok_margin = lambda r: r["margin"] >= NO_LOSS
+    ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
                     key=lambda r: -r["margin"])
     # Within NO_LOSS of the best margin (noise on these short requests; a wider band on a ratio near 1 would admit
     # every candidate), the shallower depth first: every drafted token is verified with decode attention over the
@@ -302,13 +429,13 @@ def main():
     if ranked:
         top = ranked[0]["margin"]
         ranked.sort(key=lambda r: (r["margin"] < NO_LOSS * top, r["depth"] if r["margin"] >= NO_LOSS * top else 0, -r["margin"]))
-    choice = ("none", 0, base)
+    choice, ctx_max = ("none", 0, base, 2), 0
     for r in ranked:
-        kind, depth = r["kind"], r["depth"]
-        pkg = os.path.join(work, f"pkg_tune_{kind}")
+        kind, depth, ctx = r["kind"], r["depth"], r.get("ctx_max", 0)
+        pkg = os.path.join(work, f"pkg_tune_{kind}" + ("_ctx" if ctx else "_u" if r.get("occ_min") == 0 else ""))
         mem = cand_mem[kind]
         try:
-            ok, why = (True, "") if exact(kind, depth, pkg, mem) else (False, "drafting changed the output (spec_check)")
+            ok, why = (True, "") if exact(pkg, depth, pkg, mem) else (False, "drafting changed the output (spec_check)")
             if ok:   # the server exact() left running serves the candidate
                 ok, why = concurrent_ok(f"http://127.0.0.1:{port}", model_id, chats[kind])
         except Exception as e:  # noqa: BLE001
@@ -317,18 +444,21 @@ def main():
         r["checked"] = "ok (exact, concurrent)" if ok else f"FAILED: {why}"
         print("tune:", json.dumps({"kind": kind, "depth": depth, "checked": r["checked"]}), flush=True)
         if ok:
-            choice = (kind, depth, r["decode_tps"])
+            choice = (kind, depth, r["decode_tps"], r.get("occ_min", 2))
+            ctx_max = ctx
             break
     cfg = json.load(open(cfg_path))
     cfg.setdefault("drafter", {})
-    cfg["drafter"].update(kind=choice[0], depth=choice[1], tuned=table)
+    cfg["drafter"].update(kind=choice[0], depth=choice[1], ctx_max=ctx_max, occ_min=choice[3], tuned=table)
     json.dump(cfg, open(cfg_path, "w"), indent=1)
     args = ["--draft", choice[0] if choice[0] != "none" else "none"] + (["--draft-depth", str(choice[1])] if choice[1] else [])
     out = sh(*build, os.path.join(work, "pkg"), *common, *args).stdout
     final_mem = [l for l in out.split() if l.startswith("--memory_bytes=")][-1].split("=")[1]
     for kind, _ in kinds:
         shutil.rmtree(os.path.join(work, f"pkg_tune_{kind}"), ignore_errors=True)
-    print("TUNE_RESULT", json.dumps({"kind": choice[0], "depth": choice[1], "decode_tps": round(choice[2], 2),
+        shutil.rmtree(os.path.join(work, f"pkg_tune_{kind}_ctx"), ignore_errors=True)
+        shutil.rmtree(os.path.join(work, f"pkg_tune_{kind}_u"), ignore_errors=True)
+    print("TUNE_RESULT", json.dumps({"kind": choice[0], "depth": choice[1], "ctx_max": ctx_max, "occ_min": choice[3], "decode_tps": round(choice[2], 2),
                                      "baseline_tps": round(base, 2), "memory_bytes": int(final_mem), "table": table,
                                      **({"prior": (cfg.get("reference") or {}).get("repo"), "not_measured": skipped} if prior else {})}))
 
