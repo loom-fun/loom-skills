@@ -7,10 +7,10 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "bolt-bisect",
+   "name": "bolt-dbl",
    "variants": [
     {
-     "name": "pre193",
+     "name": "pre",
      "build": {},
      "ref": "815997c^",
      "build_args": [
@@ -19,12 +19,15 @@
      ]
     },
     {
-     "name": "p193",
+     "name": "pre_attn",
      "build": {},
-     "ref": "815997c",
+     "ref": "815997c^",
      "build_args": [
       "--draft",
       "none"
+     ],
+     "double": [
+      "*:g_attention_flash2\\b|g_attention_flash2_d512\\b"
      ]
     },
     {
@@ -35,12 +38,38 @@
       "--draft",
       "none"
      ]
+    },
+    {
+     "name": "main_attn",
+     "build": {},
+     "ref": "origin/main",
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:g_attention_flash2\\b|g_attention_flash2_d512\\b"
+     ]
+    },
+    {
+     "name": "main_list",
+     "build": {},
+     "ref": "origin/main",
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:g_attention_fallback_list|g_attention_flash2_partial|g_attention_flash2_d512_partial"
+     ]
     }
    ],
    "steps": [
-    "perf:pre193:3:long",
-    "perf:p193:3:long",
-    "perf:main:3:long"
+    "perf:pre:2:long",
+    "perf:pre_attn:2:long",
+    "perf:main:2:long",
+    "perf:main_attn:2:long",
+    "perf:main_list:2:long"
    ]
   }
  ]
