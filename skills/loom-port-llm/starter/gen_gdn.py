@@ -509,7 +509,7 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
     %res{m} = scf.select %live, %n{m}, %zero_f : f32""" for m in range(RV))
     # stores after every load: Loom orders each global load after earlier stores (a round trip per store/load pair)
     nw += "\n" + "\n".join(f"    view.store %res{m}, %o_view[%token, %nc{m}] : f32, view<[%tokens]x{VD}xf32>" for m in range(RV))
-    T.append(f"""
+    NG = f"""
 kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
   %c1 = index.constant 1 : index
   %groups = index.constant {HV // HPW} : index
@@ -548,11 +548,57 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
 {nw}
   kernel.return
 }}
-""")
+"""
+    T.append(NG)
+    T.append(_norm_gate_q8(NG, RV, VD, DV))
     text = "\n".join(T)
     if not RL and os.environ.get("GDN_PREFETCH", "1") not in ("", "0"):
         text = _prefetch_recurrence(text, RK)
     return text
+
+
+def _norm_gate_q8(ng, RV, VD, DV):
+    """g_gdn_norm_gate_q8: g_gdn_norm_gate followed by g_quant_q8 of its output o (the decode paths read the int8 copy).
+    The 32-value quantization groups are the lane-strided slices o[hbase + 32m .. +32), one per lane register m, so each
+    group's max |x| and code sum are subgroup reductions; same arithmetic as g_quant_q8 (o f32 is still written)."""
+    t = ng.replace('export("g_gdn_norm_gate") @g_gdn_norm_gate(', 'export("g_gdn_norm_gate_q8") @g_gdn_norm_gate_q8(')
+    t = t.replace("%z: buffer, %o: buffer)", "%z: buffer, %o: buffer, %xq: buffer)")
+    tail = "\n  kernel.return\n}\n"
+    assert t.endswith(tail), t[-200:]
+    q = f"""
+  %c127 = scalar.constant 127.0 : f32
+  %zero_i = scalar.constant 0 : i32
+  %q_view = buffer.view %xq[%zero] : buffer -> view<[%tokens]x{VD}xi8>
+  %m_bytes = index.constant {VD} : offset
+  %m_off = index.scale %tokens, %m_bytes : index, offset -> offset
+  %m_view = buffer.view %xq[%m_off] : buffer -> view<[%tokens]x{VD // 32}x2xf32>
+  %c0 = index.constant 0 : index
+  %leader = index.cmp eq, %lane, %c0 : index"""
+    for m in range(RV):
+        q += f"""
+  %a{m} = scalar.absf %res{m} : f32
+  %amax{m} = kernel.subgroup.reduce<maxnumf> %a{m} : f32
+  %d{m} = scalar.divf %amax{m}, %c127 : f32
+  %nz{m} = scalar.cmpf one, %amax{m}, %zero_f : f32
+  %sc{m} = scalar.divf %res{m}, %d{m} : f32
+  %rd{m} = scalar.roundf %sc{m} : f32
+  %rs{m} = scf.select %nz{m}, %rd{m}, %zero_f : f32
+  %qi{m} = scalar.fptosi %rs{m} : f32 to i32
+  %q8{m} = scalar.trunci %qi{m} : i32 to i8
+  view.store %q8{m}, %q_view[%token, %nc{m}] : i8, view<[%tokens]x{VD}xi8>
+  %qs{m} = kernel.subgroup.reduce<addi> %qi{m} : i32
+  %qsf{m} = scalar.sitofp %qs{m} : i32 to f32
+  %dh{m} = scalar.fptrunc %d{m} : f32 to f16
+  %da{m} = scalar.extf %dh{m} : f16 to f32
+  %meta{m} = vector.from_elements %da{m}, %qsf{m} : vector<2xf32>
+  %gi{m}c = index.constant {m} : index
+  %gi{m}b = index.constant {DV // 32} : index
+  %gi{m}v = index.madd %vh, %gi{m}b, %gi{m}c : index
+  %gi{m} = index.assume %gi{m}v [range(%gi{m}v, 0, {VD // 32 - 1})] : index
+  scf.if %leader {{
+    vector.store %meta{m}, %m_view[%token, %gi{m}, %c0] : vector<2xf32>, view<[%tokens]x{VD // 32}x2xf32>
+  }}"""
+    return t[:-len(tail)] + q + tail
 
 
 def _row_lanes(DK, DV):
