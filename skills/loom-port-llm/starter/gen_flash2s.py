@@ -522,7 +522,7 @@ if PARTIAL:
     E.append("  }\n")
     text = text[:i0] + "\n".join(E) + text[i1:]
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_partial") @{P}_attention_flash2_partial(', 1)
-if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO:   # the masked path only in the last key tile (flash2_peel.py)
+if os.environ.get("FLASH2_PEEL", "1") in ("1", "force") and (not EDGE_ZERO or os.environ.get("FLASH2_PEEL") == "force"):   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     text = peel_last_tile(text)
 if os.environ.get("FLASH2_ENTRY") == "bcast" and os.environ.get("FLASH2_ROLE") != "partial":   # experiment: the listed entry broadcast from lane 0

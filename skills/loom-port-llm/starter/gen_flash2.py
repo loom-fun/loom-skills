@@ -689,7 +689,7 @@ if PARTIAL:
     E.append("  }\n")
     text = text[:i0] + "\n".join(E) + text[i1:]
 # (NF = 16: the straight-line loop of 16 output fragments needs more registers than the budget allows, so it keeps its masked branch)
-if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and NF <= 8:   # the masked path only in the last key tile (flash2_peel.py)
+if os.environ.get("FLASH2_PEEL", "1") in ("1", "force") and (not EDGE_ZERO or os.environ.get("FLASH2_PEEL") == "force") and NF <= 8:   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     text = peel_last_tile(text)
 if os.environ.get("FLASH2_ENTRY") == "bcast" and os.environ.get("FLASH2_ROLE") != "partial":   # experiment: the listed entry broadcast from lane 0
