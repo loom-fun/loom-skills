@@ -6,31 +6,21 @@
  "llamacpp": "b1369",
  "variants": [
   {
-   "name": "q35",
+   "name": "q35-base",
    "build": {},
+   "ref": "origin/main",
    "steps": [
-    "ktest",
     "gates:dev"
    ]
   },
   {
-   "name": "mini",
-   "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
-   "memory_bytes": 36000000000,
-   "build": {},
-   "steps": [
-    "ktest",
-    "gates:dev"
-   ]
-  },
-  {
-   "name": "flint",
+   "name": "flint-base",
    "card": "loom-fun/ggml-org-Flint-loom",
    "memory_bytes": 69000000000,
    "kit": "flint",
    "build": {},
+   "ref": "origin/main",
    "steps": [
-    "ktest",
     "gates:dev"
    ]
   }

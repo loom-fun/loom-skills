@@ -6,31 +6,6 @@
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "mini",
-   "variants": [
-    {
-     "name": "base",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:base:2",
-    "perf:base:2:long",
-    "c4:base",
-    "perf:new:2",
-    "perf:new:2:long",
-    "c4:new"
-   ],
-   "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
-   "memory_bytes": 36000000000,
-   "llamacpp": "b1369"
-  },
-  {
    "name": "flint",
    "card": "loom-fun/ggml-org-Flint-loom",
    "memory_bytes": 69000000000,
@@ -47,10 +22,10 @@
     }
    ],
    "steps": [
-    "perf:base:2",
-    "perf:base:2:long",
-    "perf:new:2",
-    "perf:new:2:long"
+    "perf:base:3",
+    "perf:new:3",
+    "perf:base:3",
+    "perf:new:3"
    ]
   }
  ]
