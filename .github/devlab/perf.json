@@ -1,12 +1,12 @@
 {
- "_comment": "flash2: main-derived variants (dead-block skip, LDS mask, entry broadcast) (WIP)",
+ "_comment": "flash2: peeled last key tile (WIP)",
  "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
  "memory_bytes": 55000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "f2a1",
+   "name": "f2b1",
    "variants": [
     {
      "name": "pre",
@@ -27,39 +27,16 @@
      "ref": "6fd2f49"
     },
     {
-     "name": "m1",
-     "build": {
-      "FLASH2_MASKV": "old"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
-    },
-    {
-     "name": "m3",
+     "name": "p1",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+     "ref": "b56ed383ee8599f7d16691278d183b6104dd4f4c"
     },
     {
-     "name": "m4",
-     "build": {
-      "FLASH2_MASKV": "old",
-      "FLASH2_ENTRY": "bcast"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
-    },
-    {
-     "name": "m5",
+     "name": "p2",
      "build": {
       "FLASH2_ENTRY": "bcast"
      },
@@ -67,20 +44,18 @@
       "--draft",
       "none"
      ],
-     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+     "ref": "b56ed383ee8599f7d16691278d183b6104dd4f4c"
     }
    ],
    "steps": [
     "perf:pre:2:long",
     "perf:main:2:long",
-    "perf:m1:2:long",
-    "perf:m3:2:long",
-    "perf:m4:2:long",
-    "perf:m5:2:long"
+    "perf:p1:2:long",
+    "perf:p2:2:long"
    ]
   },
   {
-   "name": "f2a2",
+   "name": "f2b2",
    "variants": [
     {
      "name": "pre",
@@ -92,39 +67,27 @@
      "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
     },
     {
-     "name": "m1e",
-     "build": {
-      "FLASH2_MASKV": "old",
-      "FLASH2_EDGE_ZERO": "1"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
-    },
-    {
-     "name": "m5e",
+     "name": "p3",
      "build": {
       "FLASH2_ENTRY": "bcast",
-      "FLASH2_EDGE_ZERO": "1"
+      "FLASH2_MASKV": "old"
      },
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+     "ref": "b56ed383ee8599f7d16691278d183b6104dd4f4c"
     },
     {
-     "name": "nomask",
+     "name": "p4",
      "build": {
-      "FLASH2_ABL_NOMASK": "1"
+      "FLASH2_MASKV": "old"
      },
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+     "ref": "b56ed383ee8599f7d16691278d183b6104dd4f4c"
     },
     {
      "name": "nomask_bc",
@@ -136,14 +99,13 @@
       "--draft",
       "none"
      ],
-     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+     "ref": "b56ed383ee8599f7d16691278d183b6104dd4f4c"
     }
    ],
    "steps": [
     "perf:pre:2:long",
-    "perf:m1e:2:long",
-    "perf:m5e:2:long",
-    "perf:nomask:2:long",
+    "perf:p3:2:long",
+    "perf:p4:2:long",
     "perf:nomask_bc:2:long"
    ]
   }
