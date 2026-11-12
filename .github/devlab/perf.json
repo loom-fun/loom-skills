@@ -1,54 +1,47 @@
 {
- "_comment": "verify32k diag: DFlash drafter cost at 32k (idempotent kernels doubled).",
- "card": "loom-fun/ggml-org-Qwen3-4B-loom",
- "memory_bytes": 55000000000,
+ "_comment": "verify32k diag: bisect Flint pc_part_2 ktest failure.",
+ "card": "loom-fun/ggml-org-Flint-loom",
+ "memory_bytes": 69000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "q4d",
-   "card": "loom-fun/ggml-org-Qwen3-4B-loom",
-   "memory_bytes": 55000000000,
+   "name": "flint",
+   "card": "loom-fun/ggml-org-Flint-loom",
+   "memory_bytes": 69000000000,
    "variants": [
     {
-     "name": "new",
-     "build": {}
+     "name": "c03ee631",
+     "build": {},
+     "ref": "03ee631"
     },
     {
-     "name": "dctx",
+     "name": "c357",
      "build": {},
-     "double": [
-      "*:@g_dfl_(ctx_split|attention)\\["
-     ]
+     "ref": "3539670"
     },
     {
-     "name": "dpmv",
+     "name": "c424",
      "build": {},
-     "double": [
-      "llm_dflash_propose:@g_mv_"
-     ]
+     "ref": "ed59b79"
     },
     {
-     "name": "dwarm",
+     "name": "c437",
      "build": {},
-     "double": [
-      "llm_dflash_warm:@"
-     ]
+     "ref": "53b53be"
     },
     {
-     "name": "dtap",
+     "name": "c449",
      "build": {},
-     "double": [
-      "*:@g_dfl_tap\\["
-     ]
+     "ref": "1da302b"
     }
    ],
    "steps": [
-    "perf:new:2:long",
-    "perf:dctx:2:long",
-    "perf:dpmv:2:long",
-    "perf:dwarm:2:long",
-    "perf:dtap:2:long"
+    "ktest:c03ee631",
+    "ktest:c357",
+    "ktest:c424",
+    "ktest:c437",
+    "ktest:c449"
    ]
   }
  ]
