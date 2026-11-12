@@ -232,7 +232,7 @@
   {
    "repo": "loom-fun/bartowski-Qwen2.5-7B-Instruct-loom",
    "slug": "qwen2.5-7b-instruct",
-   "memory_bytes": 14000000000,
+   "memory_bytes": 15000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
