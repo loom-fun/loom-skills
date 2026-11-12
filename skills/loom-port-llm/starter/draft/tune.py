@@ -78,6 +78,7 @@ LONG_HEADROOM = 512
 # 32k 125 vs 166, four streams 498 vs 787 tok/s). So every row is scored against depth 0 and a drafter that is
 # slower than NO_LOSS x depth 0 on any row is not used, however well it does on the code-edit row that quotes its input.
 NO_LOSS = 0.98
+CLEAR_WIN = 1.3
 # Context gate (build_draft.py SPEC_CTX_MAX): a candidate that wins every row but the long-document one is retried with
 # drafting off from this causal position on, so short context keeps the drafting gain (Ornith-1.5-35B depth 3: short rows
 # 118 vs 62 tok/s, 16k 44.9 vs 53.5). Below the long row's prompt, above the short rows'. TUNE_CTX_MAX=0 skips the retry.
@@ -463,20 +464,21 @@ def main():
     # With TUNE_BASELINE the margin is the worst row relative to llama.cpp and a drafter qualifies when it is within NO_LOSS
     # of depth 0's (the same noise band as without a baseline: LFM3-Omni-2B n-gram depth 1 scored 1.066 vs depth 0's 1.086,
     # a 2 % dip on one short request, while gaining 13 % single-stream and 25 % at 2k).
+    # A drafter far ahead overall (geometric mean of its row ratios >= CLEAR_WIN x depth 0's) may sit twice the noise band
+    # below depth 0 on its worst row (Ornith-1.5-35B DFlash 3 + ctx gate: decode 89 vs 65, worst row 0.979 = the 16k
+    # essay, 2 % under the 0.98 band on one run).
+    base_geo = geomean_margin(base_rows, base_rows, llama_refs)
+    clear_win = lambda r, floor: (r["margin"] >= (2 * NO_LOSS - 1) * floor
+                                  and geomean_margin(r["rows"], base_rows, llama_refs) >= CLEAR_WIN * base_geo)
     if llama_refs:
         floor = next(r["margin_llama"] for r in table if r["kind"] == "none")
         for r in table:
             if r["kind"] != "none":
                 r["margin"] = r["margin_llama"]
         # the noise band only while the drafter still beats llama.cpp on every row: never trade a losing row for a worse one
-        # Where depth 0 itself loses a row to llama.cpp (floor < 1) a drafter may tie that row (within half the band) if
-        # its rows' geometric mean is clearly ahead of depth 0's (Ornith-1.5-35B DFlash 3 + ctx gate: worst row 0.979 vs
-        # 0.982, decode 88.9 vs 63.4).
-        base_geo = geomean_margin(base_rows, base_rows, llama_refs)
-        ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor) or (
-            r["margin"] >= (1 + NO_LOSS) / 2 * floor and geomean_margin(r["rows"], base_rows, llama_refs) >= 1.05 * base_geo)
+        ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor) or clear_win(r, floor)
     else:
-        ok_margin = lambda r: r["margin"] >= NO_LOSS
+        ok_margin = lambda r: r["margin"] >= NO_LOSS or clear_win(r, 1.0)
     ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
                     key=lambda r: -r["margin"])
     # Within NO_LOSS of the best margin (noise on these short requests; a wider band on a ratio near 1 would admit
