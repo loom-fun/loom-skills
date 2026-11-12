@@ -1,6 +1,5 @@
 {
-<<<<<<< HEAD
- "_comment": "Ornith-1.5-122B perf-gap diagnostics: draft depth sweep, d0 kernel-group doubling, same-runner Vulkan nospec. GGUF 106 GB: Loom and llama.cpp never run together.",
+ "_comment": "Ornith-1.5-122B perf-gap diagnostics (active wait): draft d0/d1/card. GGUF 106 GB: Loom and llama.cpp never run together.",
  "card": "loom-fun/bartowski-Ornith-1.5-122B-loom",
  "memory_bytes": 106000000000,
  "kit": null,
@@ -9,24 +8,12 @@
  "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
  "jobs": [
   {
-   "name": "sweep",
-=======
- "_comment": "Active-wait re-measure: Qwen3.8-Flash-Next and Qwen3.5-0.8B (regenerated) (other cards: runs 43033815593, 43075216088, 43106368506).",
- "jobs": [
-  {
-   "name": "unsloth-Qwen3.8-Flash-Next",
-   "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
-   "memory_bytes": 100000000000,
-   "kit": "qwen4exp",
-   "llamacpp": "b1371",
-   "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
->>>>>>> origin/devlab-perf-source
+   "name": "d1",
    "variants": [
     {
      "name": "card"
     },
     {
-<<<<<<< HEAD
      "name": "d0",
      "execution": {
       "draft_depth": 0
@@ -37,35 +24,21 @@
      "execution": {
       "draft_depth": 1
      }
-    },
-    {
-     "name": "d2",
-     "execution": {
-      "draft_depth": 2
-     }
-=======
-     "name": "parked",
-     "active_wait": false
->>>>>>> origin/devlab-perf-source
     }
    ],
    "steps": [
-    "perf:d0:2:long",
-    "perf:card:2:long",
-    "c4:d0",
-    "c4:card",
-<<<<<<< HEAD
-    "perf:d1:1:long",
+    "perf:d1:2",
+    "perf:d1:2:long",
     "c4:d1",
-    "perf:d2:1:long",
-    "c4:d2",
-    "llama@vulkan.np1.nospec:2:long",
-    "llamac4@vulkan.perslot.nospec"
+    "llama@vulkan.np1.nospec:2"
    ]
   },
   {
-   "name": "abl",
+   "name": "d0",
    "variants": [
+    {
+     "name": "card"
+    },
     {
      "name": "d0",
      "execution": {
@@ -73,94 +46,19 @@
      }
     },
     {
-     "name": "d0_attn",
+     "name": "d1",
      "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_attention|g_qk_rope_store"
-     ]
-    },
-    {
-     "name": "d0_gdn",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_gdn_"
-     ]
-    },
-    {
-     "name": "d0_moe",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_moe_"
-     ]
-    },
-    {
-     "name": "d0_mv",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_mv_q(?!\\w*swiglu)|gemm_q"
-     ]
-    },
-    {
-     "name": "d0_norm",
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:norm|quant_q8|row_scale"
-     ]
+      "draft_depth": 1
+     }
     }
    ],
    "steps": [
-    "perf:d0:1:long",
-    "perf:d0_attn:1:long",
-    "perf:d0_gdn:1:long",
-    "perf:d0_moe:1:long",
-    "perf:d0_mv:1:long",
-    "perf:d0_norm:1:long"
-=======
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "unsloth-Qwen3.5-0.8B",
-   "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
-   "memory_bytes": 9000000000,
-   "kit": null,
-   "llamacpp": "b1369",
-   "llama_spec": "--spec-type ngram-simple",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "parked",
-     "active_wait": false
-    }
-   ],
-   "steps": [
+    "perf:d0:2",
+    "perf:d0:2:long",
+    "c4:d0",
     "perf:card:2",
     "perf:card:2:long",
-    "c4:card",
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
->>>>>>> origin/devlab-perf-source
+    "c4:card"
    ]
   }
  ]
