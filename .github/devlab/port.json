@@ -1,6 +1,7 @@
 {
- "_comment": "Regeneration of the gemma-4-31B card from main (per-row draft tuning, occupancy gate, active wait, gemma4 kit global-KV-head unroll).",
+ "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
  "jobs": [
-  {"name": "gemma4-31b-regen", "spec": "unsloth/gemma-4-31B-it-GGUF:gemma-4-31B-it-Q4_K_M.gguf", "reference": "loom-fun/unsloth-gemma-4-31B-it-loom", "model_id": "google/gemma-4-31B-it"}
+  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
+  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
  ]
 }
