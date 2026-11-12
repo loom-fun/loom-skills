@@ -177,10 +177,9 @@
    "slug": "qwen3.5-35b-a3b",
    "memory_bytes": 49000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": [
     "vision",
-    "draft",
     "thinking-toggle"
    ]
   },
@@ -475,9 +474,10 @@
    "slug": "ornith-1.5-35b-a3b",
    "memory_bytes": 49000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1374",
    "features": [
     "vision",
+    "draft",
     "thinking-toggle"
    ]
   },
