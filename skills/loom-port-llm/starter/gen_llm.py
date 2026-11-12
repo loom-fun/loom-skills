@@ -2004,6 +2004,25 @@ def fuse_norm_quant(program):
     return program, (post_add_norm_q8() if cnt[0] else "")
 
 
+def fuse_gdn_norm_gate_quant(program):
+    """`scf.if C { g_gdn_norm_gate_lv } else { g_gdn_norm_gate }` + `scf.if C { row_scale } else { g_quant_q8(o -> o16q) }`
+    -> the else of the first becomes g_gdn_norm_gate_q8 (which also writes o16q) and the second keeps only its then-branch."""
+    import re as _re
+    pat = _re.compile(
+        r"(?P<a>(?P<i>[ ]*)scf\.if (?P<c>%\w+) \{\n[ ]*kernel\.launch @g_gdn_norm_gate_lv\[[^\n]*\n[ ]*\} else \{\n)"
+        r"(?P<ind>[ ]*)kernel\.launch @g_gdn_norm_gate\[(?P<n>%\w+)\]\((?P=n), (?P<args>[^\n]*?)\) : \[index\]\((?P<ty>[^\n]*)\)\n"
+        r"(?P<b>[ ]*\}\n)"
+        r"(?P<b0>[ ]*scf\.if (?P=c) \{\n[ ]*kernel\.launch @g_row_scale_f16_live_lv\[[^\n]*\n)"
+        r"[ ]*\} else \{\n[ ]*kernel\.launch @g_quant_q8\[(?P=n), %nVD\]\((?P=n), %nVD, (?P<o>%\w+), (?P<q>%\w+)\) : [^\n]*\n"
+        r"(?P<e>[ ]*\}\n)")
+    cnt = [0]
+    def rep(m):
+        cnt[0] += 1
+        return (m.group("a") + f"{m.group('ind')}kernel.launch @g_gdn_norm_gate_q8[{m.group('n')}]({m.group('n')}, {m.group('args')}, {m.group('q')})"
+                f" : [index]({m.group('ty')}, buffer)\n" + m.group("b") + m.group("b0") + m.group("e"))
+    return pat.sub(rep, program), cnt[0]
+
+
 # DeepStack (Qwen3-VL, cfg["vision"]["deepstack"] = n): an image row is n + 1 slices of H floats; g_embed takes slice 0,
 # and after trunk layer k < n, g_deepstack adds slice k + 1 to the residual of image inputs and renormalizes their h
 # (llama.cpp qwen3vl.cpp: deepstack_out = l_out + inp_embd[(k + 1) * n_embd ...]). Text inputs are untouched.
@@ -5308,6 +5327,8 @@ if __name__ == "__main__":
                       text, flags=re.M)
     if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
         text = live_row_skip(text)
+    if ACT_Q8 and os.environ.get("NORM_Q8", "1") != "0":   # after live_row_skip (it makes the _lv variants this matches)
+        text, _ = fuse_gdn_norm_gate_quant(text)
     if seg_tokens():
         text = seg_attention(text)
     out = os.path.join(out_dir, "model.loom")

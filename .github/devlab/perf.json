@@ -68,6 +68,41 @@
     "textmatch:base",
     "textmatch:fuse"
    ]
+  },
+  {
+   "name": "q08",
+   "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
+   "memory_bytes": 16000000000,
+   "variants": [
+    {
+     "name": "base",
+     "build": {
+      "NORM_Q8": "0"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "fuse",
+     "build": {
+      "NORM_Q8": "1"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:base:2:long",
+    "perf:fuse:2:long",
+    "c4:base",
+    "c4:fuse",
+    "textmatch:base",
+    "textmatch:fuse"
+   ]
   }
  ],
  "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
