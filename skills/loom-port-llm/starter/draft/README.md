@@ -125,7 +125,7 @@ row relative to depth 0; it is used only if no row is slower than 0.98 x depth 0
 drafting by 3 %, and the best margin ranks first. Low-acceptance drafting loses on exactly the prose, 32k and 4-stream
 rows (every span verifies depth + 1 tokens, padded to 16 at 4 streams): Qwen3.5-0.8B ngram depth 3 decode 223 vs 258 tok/s
 without, 32k 125 vs 166, four streams 498 vs 787, so tune picks none; a span with real acceptance (Muse-Glimmer depth 3 over
-none on 4 streams) keeps it, and the depth whose rows x (depth + 1) fits 16 is always a candidate. The best margin that also passes the spec gate's equivalence check (spec_check.py's requests at the
+none on 4 streams) keeps it, and the depth whose rows x (depth + 1) fits 16 is always a candidate. With several rows each drafter is also built ungated (`SPEC_OCC_MIN=0`, the occupancy gate above) and its streams4 measured per depth; a depth takes the better streams4 and the winner's `occ_min` goes to `cfg["drafter"]["occ_min"]` (build_draft.py reads it; the env var overrides): Muse-Glimmer depth 3 ungated 74 tok/s at 4 streams, gated 48.6. The best margin that also passes the spec gate's equivalence check (spec_check.py's requests at the
 candidate depth vs draft_depth 0 of the same package: identical) and a concurrency check (consistency.py-style
 ~300-token prompts, two 0.5 s apart and four at once, twice each: agentic serving overlaps requests) wins; one that
 fails is recorded with the reason (`checked` in the table) and the next is checked. The choice and the whole table go to `cfg["drafter"]` and
