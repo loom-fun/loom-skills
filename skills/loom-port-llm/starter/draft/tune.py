@@ -266,6 +266,36 @@ def main():
     # (a drafter adds KV per position; passing the old budget shrank DFlash packages' context to fit).
     common = ["--tokenizer", os.path.join(work, "tok", "tokenizer.json"), "--model-id", model_id]
     base, base_rows = None, {}
+    if kinds:
+        # The depth 0 row is a package built without a drafter: a drafting build never gets the no-draft-only kernels
+        # (gen_llm.gqa_split: Qwen3-4B-Instruct-2507 decode_32k 24.6 on a drafting package at depth 0, 28.6 on a no-draft
+        # package), and the no-draft package is what ships when "none" wins. If it cannot be measured, depth 0 of the
+        # first drafter's package stands in for it (below).
+        npkg = os.path.join(work, "pkg_tune_none")
+        try:
+            out = sh(*build, npkg, *common, "--draft", "none").stdout
+            nmem = [l for l in out.split() if l.startswith("--memory_bytes=")][-1].split("=")[1]
+            ncard = json.load(open(os.path.join(npkg, "model.json")))
+            nchat = json.load(open(os.path.join(npkg, "llm_config.json")))["chat"]
+            nrows = int(ncard["presets"]["chat"]["execution"].get("rows") or 1)
+            t0 = time.time()
+            serve("tune", port, nmem, os.path.join(npkg, "model.json"), env)
+            rows = measure(f"http://127.0.0.1:{port}", model_id, nchat, ncard["presets"]["chat"]["execution"].get("context_capacity") or 0, nrows)
+            tps = single_rate(rows)
+            subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
+            row = {"kind": "none", "depth": 0, "decode_tps": round(tps, 2), "rows": {k: round(v, 2) for k, v in rows.items()},
+                   "seconds": round(time.time() - t0), "baseline": "no-draft package"}
+            if llama_refs:
+                row["margin_llama"] = round(llama_margin(rows, llama_refs), 3)
+            base, base_rows = tps, rows
+            print("tune:", json.dumps(row), flush=True)
+            table.append(row)
+        except Exception as e:  # noqa: BLE001
+            print(f"tune: no-draft baseline package: {e}", file=sys.stderr)
+            subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
+            base, base_rows = None, {}
+        finally:
+            shutil.rmtree(npkg, ignore_errors=True)
     for kind, depths in kinds:
         pkg = os.path.join(work, f"pkg_tune_{kind}")
         out = sh(*build, pkg, *common, "--draft", kind, env=dict(os.environ, SPEC_OCC_MIN="2")).stdout   # gated (default)
