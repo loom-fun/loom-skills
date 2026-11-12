@@ -2665,15 +2665,18 @@ def gqa_split(text, P, S):
       %ko{i} = index.add %kb_off, %kd{i} : offset
       %kc{i} = buffer.view %arena[%ko{i}] : buffer -> view<{KVH}x32x4xf16>
       %kh{i} = vector.load %kc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
-      %k{i} = vector.extf %kh{i} : vector<4xf16> to vector<4xf32>
       %vo{i} = index.add %ko{i}, %plane_stride : offset
       %vc{i} = buffer.view %arena[%vo{i}] : buffer -> view<{KVH}x32x4xf16>
-      %vh{i} = vector.load %vc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
-      %v{i} = vector.extf %vh{i} : vector<4xf16> to vector<4xf32>""")
+      %vh{i} = vector.load %vc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>""" + ("" if attn_rules.ATTN_GQA_EXT == "head" else f"""
+      %k{i} = vector.extf %kh{i} : vector<4xf16> to vector<4xf32>
+      %v{i} = vector.extf %vh{i} : vector<4xf16> to vector<4xf32>"""))
     yields = []
     for h in range(G):
         for i in range(U):
-            t.append(f"""      %prod{i}_{h} = vector.mulf %q4_{h}, %k{i} : vector<4xf32>
+            if attn_rules.ATTN_GQA_EXT == "head":   # keep K/V as f16 across the heads (half the live registers)
+                t.append(f"      %k{i}_{h} = vector.extf %kh{i} : vector<4xf16> to vector<4xf32>")
+            kk = f"%k{i}_{h}" if attn_rules.ATTN_GQA_EXT == "head" else f"%k{i}"
+            t.append(f"""      %prod{i}_{h} = vector.mulf %q4_{h}, {kk} : vector<4xf32>
       %part{i}_{h} = vector.reduce<addf> %prod{i}_{h}, %zero_f : vector<4xf32>, f32""")
         t.append(allreduce([f"%part{i}_{h}" for i in range(U)], f"ar{h}_", [f"%sr{i}_{h}" for i in range(U)]))
         for i in range(U):
@@ -2688,11 +2691,14 @@ def gqa_split(text, P, S):
       %acc_s_{h} = vector.mulf %acc_{h}, %alpha_v_{h} : vector<4xf32>""")
         pl, pa = f"%l_scaled_{h}", f"%acc_s_{h}"
         for i in range(U):
+            if attn_rules.ATTN_GQA_EXT == "head":
+                t.append(f"      %v{i}_{h} = vector.extf %vh{i} : vector<4xf16> to vector<4xf32>")
+            vv = f"%v{i}_{h}" if attn_rules.ATTN_GQA_EXT == "head" else f"%v{i}"
             t.append(f"""      %d{i}_{h} = scalar.subf %s{i}_{h}, {prev} : f32
       %p{i}_{h} = scalar.expf<afn> %d{i}_{h} : f32
       %la{i}_{h} = scalar.addf {pl}, %p{i}_{h} : f32
       %pv{i}_{h} = vector.splat %p{i}_{h} : vector<4xf32>
-      %aa{i}_{h} = vector.fmaf %pv{i}_{h}, %v{i}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}_{h}", f"%aa{i}_{h}"
+      %aa{i}_{h} = vector.fmaf %pv{i}_{h}, {vv}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}_{h}", f"%aa{i}_{h}"
         yields += [prev, pl, pa]
     t.append(f"      scf.yield {', '.join(yields)} : {types}")
     t.append("    }")
