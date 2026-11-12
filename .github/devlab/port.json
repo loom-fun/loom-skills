@@ -1,7 +1,47 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Regenerate the cards whose 32k decode attention changes with the K/V-once body in drafting packages (#451); reference = each published card.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "flint",
+   "spec": "ggml-org/Flint-GGUF:Flint-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Flint-loom",
+   "model_id": "flint"
+  },
+  {
+   "name": "l31-8b",
+   "spec": "unsloth/Llama-3.1-8B-Instruct-GGUF:Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
+   "model_id": "meta-llama/Llama-3.1-8B-Instruct"
+  },
+  {
+   "name": "vl7",
+   "spec": "ggml-org/Qwen2.5-VL-7B-Instruct-GGUF:Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+   "model_id": "Qwen/Qwen2.5-VL-7B-Instruct"
+  },
+  {
+   "name": "q3-4b",
+   "spec": "ggml-org/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Qwen3-4B-loom",
+   "model_id": "Qwen/Qwen3-4B"
+  },
+  {
+   "name": "q35-4b",
+   "spec": "unsloth/Qwen3.5-4B-GGUF:Qwen3.5-4B-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3.5-4B-loom",
+   "model_id": "Qwen/Qwen3.5-4B"
+  },
+  {
+   "name": "q35-9b",
+   "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "model_id": "Qwen/Qwen3.5-9B"
+  },
+  {
+   "name": "o15-9b",
+   "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Ornith-1.5-9B-loom",
+   "model_id": "ornith-ai/Ornith-1.5-9B"
+  }
  ]
 }
