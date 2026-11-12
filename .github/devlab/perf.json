@@ -1,15 +1,18 @@
 {
- "_comment": "Qwen2.5-32B published card: active-wait card perf vs llama.cpp ROCm and Vulkan on one runner (baseline).",
+ "_comment": "Qwen2.5-32B: published card vs main rebuilds at draft depths 0/1/2 (decode_32k and 4 streams, active wait).",
  "card": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
  "memory_bytes": 49000000000,
  "kit": null,
  "llamacpp": "b1373",
- "llamacpp_vulkan": "b12211",
  "jobs": [
   {
    "name": "card-perf",
-   "variants": [{"name": "card"}],
-   "steps": ["perf:card:2", "perf:card:2:long", "llama:2", "llama:2:long", "c4:card", "llamac4", "llama@vulkan:2", "llama@vulkan:2:long", "llamac4@vulkan"]
+   "variants": [
+    {"name": "main0", "build": {}, "ref": "origin/main", "execution": {"draft_depth": 0}},
+    {"name": "main1", "build": {}, "ref": "origin/main", "execution": {"draft_depth": 1}},
+    {"name": "main2", "build": {}, "ref": "origin/main", "execution": {"draft_depth": 2}}
+   ],
+   "steps": ["perf:main0:2:long", "c4:main0", "perf:main1:2:long", "c4:main1", "perf:main2:2:long", "c4:main2"]
   }
  ]
 }
