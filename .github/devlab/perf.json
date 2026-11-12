@@ -6,21 +6,31 @@
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "bolt-vt",
+   "name": "bolt-pool",
    "variants": [
     {
      "name": "base",
      "ref": "origin/main"
     },
     {
-     "name": "vt",
-     "ref": "2950807e196aa2c0b706aa711b08bd34fd7fc9fc"
+     "name": "pool",
+     "ref": "origin/main",
+     "execution": {
+      "pool_capacity": 131072
+     }
+    },
+    {
+     "name": "pre2k",
+     "ref": "origin/main",
+     "execution": {
+      "prefill_capacity": 2048
+     }
     }
    ],
    "steps": [
-    "perf:base:3:long",
-    "perf:vt:3:long",
-    "llama@vulkan.np1.nospec:2:long"
+    "perf:base:4:long",
+    "perf:pool:4:long",
+    "perf:pre2k:4:long"
    ]
   }
  ],
