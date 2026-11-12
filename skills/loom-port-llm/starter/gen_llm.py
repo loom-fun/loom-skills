@@ -2432,10 +2432,12 @@ def allreduce(vals, p, outs):
 # work in one wave measured ~3 % slower drafted decode at short context on Qwen3-8B). attn_rules.multi_token decides.
 
 
-def multi_token_split(text, P, U, T):
+def multi_token_split(text, P, U, T, until=None):
     """`P`_attention_split with a multi-token path: when the T epoch tokens of this token's aligned group are live,
     of one row and at consecutive positions (a verify span), the group's first workgroup computes all T (one K/V
-    load per key for the T queries of its head) and the others exit; any other token takes the per-token path."""
+    load per key for the T queries of its head) and the others exit; any other token takes the per-token path. `until`: from this
+    position on the per-token path (the K/V-once body) is faster than the span path: the whole group must lie below it (a token
+    then takes the same arithmetic alone and in a span: the span path equals the per-head body, not the K/V-once body)."""
     a = text.index(f'kernel.def export("{P}_attention_split")')
     b = text.index("  kernel.return\n}\n", a)
     k = text[a:b]
@@ -2456,6 +2458,15 @@ def multi_token_split(text, P, U, T):
 {ind}%{p}_pos{j} = view.load %info_view[%{p}_t{j}, 1] : view<[%tokens]x4xi32> -> i32
 {ind}%{p}_live{j} = view.load %info_view[%{p}_t{j}, 2] : view<[%tokens]x4xi32> -> i32""" for j in range(T))
     # Below ATTN_MT_FROM (this token's own position) the group is not read: short contexts pay one compare.
+    sg_own, sg_first = ("%sg_own_far", "%sg_far") if until is None else ("%sg_own_ge", "%sg_far_ge")   # unchanged text without `until`
+    if until is None:
+        sg_until_own = sg_until_first = ""
+    else:
+        sg_until_own = (f"  %sg_to = scalar.constant {until} : i32\n  %sg_own_lt = scalar.cmpi slt, %position32, %sg_to : i32\n"
+                        "  %sg_sl = scalar.cmpi ne, %sliding, %c0_i32 : i32\n  %sg_own_ok = scalar.ori %sg_own_lt, %sg_sl : i1\n"
+                        "  %sg_own_far = scalar.andi %sg_own_ge, %sg_own_ok : i1\n")   # sliding layers never reach the K/V-once body's visible-key count
+        sg_until_first = (f"    %sg_to_first = scalar.constant {until - (T - 1)} : i32\n    %sg_first_lt = scalar.cmpi slt, %sg_pos0, %sg_to_first : i32\n"
+                          "    %sg_first_ok = scalar.ori %sg_first_lt, %sg_sl : i1\n    %sg_far = scalar.andi %sg_far_ge, %sg_first_ok : i1\n")   # the whole group below `until`: a token's arithmetic never depends on its span
     det = [f"""  %live = scalar.andi %live_token, %needed : i1
   // multi-token path: this token's aligned group of {T}
   %sg_true = scalar.constant true : i1
@@ -2466,8 +2477,8 @@ def multi_token_split(text, P, U, T):
   %sg_leader = index.cmp eq, %sg_rem, %c0 : index
   %sg_last = index.sub %tokens, %c1 : index
   %sg_from = scalar.constant {ATTN_MT_FROM} : i32
-  %sg_own_far = scalar.cmpi sge, %position32, %sg_from : i32
-  %sg_uniform = scf.if %sg_own_far -> (i1) {{
+  {sg_own} = scalar.cmpi sge, %position32, %sg_from : i32
+{sg_until_own}  %sg_uniform = scf.if %sg_own_far -> (i1) {{
 {group("sg", "    ")}"""]
     for j in range(T):
         det.append(f"""    %sg_lv{j} = scalar.cmpi ne, %sg_live{j}, %c0_i32 : i32
@@ -2479,8 +2490,8 @@ def multi_token_split(text, P, U, T):
     %sg_b{j} = scalar.andi %sg_a{j}, %sg_rq{j} : i1
     %sg_ok{j} = scalar.andi %sg_b{j}, %sg_pq{j} : i1
     %sg_u{j} = scalar.andi {'%sg_true' if j == 0 else f'%sg_u{j - 1}'}, %sg_ok{j} : i1""")
-    det.append(f"""    %sg_far = scalar.cmpi sge, %sg_pos0, %sg_from : i32
-    %sg_all = scalar.andi %sg_u{T - 1}, %sg_far : i1
+    det.append(f"""    {sg_first} = scalar.cmpi sge, %sg_pos0, %sg_from : i32
+{sg_until_first}    %sg_all = scalar.andi %sg_u{T - 1}, %sg_far : i1
     scf.yield %sg_all : i1
   }} else {{
     scf.yield %sg_false : i1
@@ -3009,10 +3020,11 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
   kernel.return
 }}
 """
-    if P == "g" and D == 128 and attn_rules.ATTN_GQA and attn_rules.paged(U) and attn_rules.butterfly(U) and not gen_draft.enabled():   # measured at head_dim 128 only
+    gqa_on = P == "g" and attn_rules.gqa(gen_draft.enabled(), seg_tokens(), D) and attn_rules.paged(U) and attn_rules.butterfly(U)
+    if gqa_on:
         text = gqa_split(text, P, S)
-    elif P == "g" and attn_rules.multi_token(U, KVH):
-        text = multi_token_split(text, P, U, ATTN_MT)
+    if P == "g" and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans
+        text = multi_token_split(text, P, U, ATTN_MT, attn_rules.ATTN_GQA_FROM - 1 if gqa_on else None)   # gqa body from visible = ATTN_GQA_FROM, i.e. position FROM - 1
     if D != 128:
         text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
                 .replace("x32x4xf32", f"x32x{DL}xf32").replace("vector<4xf32>", f"vector<{DL}xf32>")
