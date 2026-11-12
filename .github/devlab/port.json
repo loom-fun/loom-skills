@@ -1,19 +1,14 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Sage-A1.5 regenerated from main (tune.py per-row drafting scoring, #270), derived from its own published card.",
  "jobs": [
   {
    "name": "sage-tune",
-   "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf",
-   "reference": "auto",
+   "spec": "InternScience/Sage-A1.5-Q4_K_M-GGUF:Sage-A1.5-Q4_K_M.gguf",
+   "reference": "loom-fun/InternScience-Sage-A1.5-loom",
+   "model_id": "InternScience/Sage-A1.5",
    "env": {
     "TUNE_BASELINE": "{\"decode\":76.1,\"decode_32k\":70.6,\"c4\":134.9}"
    }
-  },
-  {
-   "name": "ornith-9b-scratch-v",
-   "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf",
-   "reference": "off",
-   "model_id": "ornith-ai/Ornith-1.5-9B"
   }
  ]
 }
