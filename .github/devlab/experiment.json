@@ -6,20 +6,18 @@
  "llamacpp": "b1369",
  "variants": [
   {
-   "name": "q35-base",
+   "name": "q35",
    "build": {},
-   "ref": "origin/main",
    "steps": [
     "gates:dev"
    ]
   },
   {
-   "name": "flint-base",
+   "name": "flint",
    "card": "loom-fun/ggml-org-Flint-loom",
    "memory_bytes": 69000000000,
    "kit": "flint",
    "build": {},
-   "ref": "origin/main",
    "steps": [
     "gates:dev"
    ]
