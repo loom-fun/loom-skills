@@ -415,13 +415,16 @@ def main():
         return spec_check.compare(refs[pkg], out) == 0
     # A drafter is used only if no row is slower than NO_LOSS x depth 0 and the single-stream rate gains at least 3 %;
     # candidates rank by their worst row relative to depth 0 (the margin).
-    # With TUNE_BASELINE the margin is the worst row relative to llama.cpp and a drafter qualifies when it beats depth 0's.
+    # With TUNE_BASELINE the margin is the worst row relative to llama.cpp and a drafter qualifies when it is within NO_LOSS
+    # of depth 0's (the same noise band as without a baseline: LFM3-Omni-2B n-gram depth 1 scored 1.066 vs depth 0's 1.086,
+    # a 2 % dip on one short request, while gaining 13 % single-stream and 25 % at 2k).
     if llama_refs:
         floor = next(r["margin_llama"] for r in table if r["kind"] == "none")
         for r in table:
             if r["kind"] != "none":
                 r["margin"] = r["margin_llama"]
-        ok_margin = lambda r: r["margin"] > floor
+        # the noise band only while the drafter still beats llama.cpp on every row: never trade a losing row for a worse one
+        ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor)
     else:
         ok_margin = lambda r: r["margin"] >= NO_LOSS
     ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
