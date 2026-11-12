@@ -8,10 +8,14 @@
  "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "splits",
+   "name": "rep",
    "variants": [
     {
      "name": "base",
+     "build": {}
+    },
+    {
+     "name": "base2",
      "build": {}
     },
     {
@@ -21,27 +25,23 @@
      }
     },
     {
-     "name": "s256",
+     "name": "s128b",
      "build": {
-      "ATTN_SPLITS": "256"
-     }
-    },
-    {
-     "name": "s128k16",
-     "build": {
-      "ATTN_SPLITS": "128",
-      "ATTN_KPS": "16"
+      "ATTN_SPLITS": "128"
      }
     }
    ],
    "steps": [
+    "perf:base:4",
+    "perf:base2:4",
+    "perf:s128:4",
+    "perf:s128b:4",
     "perf:base:3:long",
+    "perf:base2:3:long",
     "perf:s128:3:long",
-    "perf:s256:3:long",
-    "perf:s128k16:3:long",
-    "perf:base:2",
-    "perf:s128:2",
-    "llama@vulkan:2:long"
+    "perf:s128b:3:long",
+    "c4:base",
+    "c4:s128"
    ]
   }
  ]
