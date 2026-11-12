@@ -16,7 +16,8 @@
      "build_args": [
       "--draft",
       "none"
-     ]
+     ],
+     "double": []
     },
     {
      "name": "all",
@@ -26,7 +27,7 @@
       "none"
      ],
      "double": [
-      "."
+      "*:."
      ]
     },
     {
@@ -37,7 +38,7 @@
       "none"
      ],
      "double": [
-      "g_mv_q8_0"
+      "*:g_mv_q8_0"
      ]
     },
     {
@@ -48,7 +49,7 @@
       "none"
      ],
      "double": [
-      "g_head"
+      "*:g_head"
      ]
     },
     {
@@ -59,7 +60,7 @@
       "none"
      ],
      "double": [
-      "g_quant"
+      "*:g_quant"
      ]
     }
    ],
@@ -82,7 +83,8 @@
      "build_args": [
       "--draft",
       "none"
-     ]
+     ],
+     "double": []
     },
     {
      "name": "rows",
@@ -92,7 +94,7 @@
       "none"
      ],
      "double": [
-      "g_row_scale|g_post_add_norm"
+      "*:g_row_scale|g_post_add_norm"
      ]
     },
     {
@@ -103,7 +105,7 @@
       "none"
      ],
      "double": [
-      "g_gemm"
+      "*:g_gemm"
      ]
     },
     {
@@ -114,7 +116,7 @@
       "none"
      ],
      "double": [
-      "g_embed|g_token_info|g_split_qgate|g_gdn_conv|g_gdn_qk|g_gdn_recurrence|g_gdn_norm|g_moe_route|g_moe_bucket|g_moe_combine|g_moe_shared"
+      "*:g_embed|g_token_info|g_split_qgate|g_gdn_conv|g_gdn_qk|g_gdn_recurrence|g_gdn_norm|g_moe_route|g_moe_bucket|g_moe_combine|g_moe_shared"
      ]
     },
     {
@@ -125,29 +127,7 @@
       "none"
      ],
      "double": [
-      "g_mv_q8_0"
-     ]
-    },
-    {
-     "name": "attn",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "double": [
-      "*:g_attention|g_qk_rope_store"
-     ]
-    },
-    {
-     "name": "moe",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "double": [
-      "*:g_moe_"
+      "*:g_mv_q8_0"
      ]
     }
    ],
@@ -156,8 +136,6 @@
     "perf:rows:1",
     "perf:gemm:1",
     "perf:small:1",
-    "perf:attn:1",
-    "perf:moe:1",
     "perf:mvq8:1:long"
    ]
   }
