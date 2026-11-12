@@ -11,11 +11,11 @@
    "memory_bytes": 55000000000,
    "variants": [
     {
-     "name": "main",
-     "ref": "origin/main"
+     "name": "main"
     },
     {
-     "name": "mma"
+     "name": "mma",
+     "build": {}
     },
     {
      "name": "gqa",
@@ -28,7 +28,8 @@
      "build_args": [
       "--draft",
       "none"
-     ]
+     ],
+     "build": {}
     }
    ],
    "steps": [
@@ -45,11 +46,11 @@
    "memory_bytes": 69000000000,
    "variants": [
     {
-     "name": "main",
-     "ref": "origin/main"
+     "name": "main"
     },
     {
-     "name": "mma"
+     "name": "mma",
+     "build": {}
     },
     {
      "name": "gqa",
@@ -62,7 +63,8 @@
      "build_args": [
       "--draft",
       "none"
-     ]
+     ],
+     "build": {}
     }
    ],
    "steps": [
@@ -79,11 +81,11 @@
    "memory_bytes": 55000000000,
    "variants": [
     {
-     "name": "main",
-     "ref": "origin/main"
+     "name": "main"
     },
     {
-     "name": "mma"
+     "name": "mma",
+     "build": {}
     },
     {
      "name": "gqa",
@@ -96,7 +98,8 @@
      "build_args": [
       "--draft",
       "none"
-     ]
+     ],
+     "build": {}
     }
    ],
    "steps": [
