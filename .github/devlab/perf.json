@@ -1,12 +1,12 @@
 {
- "_comment": "Occupancy gate (SPEC_OCC_MIN=2) on gemma-3-1b (32k, gates), Qwen3-0.6B and Qwen2.5-0.5B.",
+ "_comment": "Occupancy gate default check: gemma-3-1b 1-stream noise (gate first), Qwen3.5-9B (DFlash), Llama-3.2-3B, HyperCLOVAX.",
  "card": "loom-fun/ggml-org-gemma-3-1b-it-loom",
  "memory_bytes": 7000000000,
  "kit": null,
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "g1-long",
+   "name": "g1-ab",
    "variants": [
     {
      "name": "card"
@@ -19,15 +19,52 @@
     }
    ],
    "steps": [
-    "perf:card:2:long",
+    "perf:gate2:3",
+    "perf:card:3",
+    "perf:gate2:3",
+    "perf:card:3",
+    "llamac4@vulkan"
+   ]
+  },
+  {
+   "name": "q9",
+   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "memory_bytes": 20000000000,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "gate2",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     }
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "c4:card",
+    "c4:gate2",
+    "c4:nodraft",
     "perf:gate2:2:long",
+    "perf:card:2:long",
+    "perf:nodraft:2:long",
+    "consistency:gate2:3",
     "gates:gate2:dev",
+    "llamac4",
+    "llamac4@vulkan",
     "ktest:gate2"
    ]
   },
   {
-   "name": "q06",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "l3",
+   "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
    "memory_bytes": 17000000000,
    "llamacpp": "b1369",
    "variants": [
@@ -51,18 +88,19 @@
     "c4:card",
     "c4:gate2",
     "c4:nodraft",
-    "perf:card:2:long",
     "perf:gate2:2:long",
+    "perf:card:2:long",
     "perf:nodraft:2:long",
     "consistency:gate2:3",
     "gates:gate2:dev",
-    "llamac4"
+    "llamac4",
+    "llamac4@vulkan"
    ]
   },
   {
-   "name": "q05",
-   "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
-   "memory_bytes": 5000000000,
+   "name": "hcx",
+   "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+   "memory_bytes": 12000000000,
    "llamacpp": "b1369",
    "variants": [
     {
@@ -85,12 +123,13 @@
     "c4:card",
     "c4:gate2",
     "c4:nodraft",
-    "perf:card:2:long",
     "perf:gate2:2:long",
+    "perf:card:2:long",
     "perf:nodraft:2:long",
     "consistency:gate2:3",
     "gates:gate2:dev",
-    "llamac4"
+    "llamac4",
+    "llamac4@vulkan"
    ]
   }
  ]
