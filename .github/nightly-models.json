@@ -555,7 +555,7 @@
    "slug": "laguna-xs-2.1",
    "memory_bytes": 81000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": [
     "thinking-toggle"
    ]
