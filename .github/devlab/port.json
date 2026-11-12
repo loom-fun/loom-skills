@@ -2,13 +2,10 @@
  "_comment": "Regenerate the Qwen3-4B-Instruct-2507 card from main (GQA decode attention #357 merged), gates full.",
  "jobs": [
   {
-   "name": "q3-4b-2507-nospec",
+   "name": "q3-4b-2507-tunefix",
    "spec": "unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
    "reference": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
-   "model_id": "Qwen/Qwen3-4B-Instruct-2507",
-   "env": {
-    "SPEC": "off"
-   }
+   "model_id": "Qwen/Qwen3-4B-Instruct-2507"
   }
  ]
 }
