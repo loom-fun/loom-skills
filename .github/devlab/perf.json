@@ -1,33 +1,10 @@
 {
- "_comment": "verify32k: K/V-once decode attention body in drafting packages (PR): published card programs (main) vs rebuild (new); long/short rows, 4 streams, interleaved short decode, ktest, consistency.",
- "card": "loom-fun/ggml-org-Qwen3-4B-loom",
- "memory_bytes": 55000000000,
+ "_comment": "verify32k: Flint: ktest main-vs-new (pc_part_2 decode tolerance), consistency, short rows.",
+ "card": "loom-fun/ggml-org-Flint-loom",
+ "memory_bytes": 69000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
-  {
-   "name": "q4",
-   "card": "loom-fun/ggml-org-Qwen3-4B-loom",
-   "memory_bytes": 55000000000,
-   "variants": [
-    {
-     "name": "main"
-    },
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:new",
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "c4:main",
-    "c4:new",
-    "ab:6",
-    "consistency:new:2"
-   ]
-  },
   {
    "name": "flint",
    "card": "loom-fun/ggml-org-Flint-loom",
@@ -37,27 +14,9 @@
      "name": "main"
     },
     {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:new",
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "c4:main",
-    "c4:new",
-    "ab:6",
-    "consistency:new:2"
-   ]
-  },
-  {
-   "name": "l8",
-   "card": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
-   "memory_bytes": 55000000000,
-   "variants": [
-    {
-     "name": "main"
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
     },
     {
      "name": "new",
@@ -65,35 +24,10 @@
     }
    ],
    "steps": [
+    "ktest:mainb",
     "ktest:new",
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "c4:main",
-    "c4:new",
-    "ab:6",
-    "consistency:new:2"
-   ]
-  },
-  {
-   "name": "vl7",
-   "card": "loom-fun/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
-   "memory_bytes": 55000000000,
-   "variants": [
-    {
-     "name": "main"
-    },
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:new",
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "c4:main",
-    "c4:new",
-    "ab:6",
+    "perf:main:2",
+    "perf:new:2",
     "consistency:new:2"
    ]
   }
