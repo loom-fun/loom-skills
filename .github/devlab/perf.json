@@ -1,35 +1,254 @@
 {
- "_comment": "Bolt-E4B consistency before / at #413",
+ "_comment": "flash2 final verification: 5 interleaved rounds main vs new (pre-#193 where the card predates it), ktest.",
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "bolt413",
+   "name": "spark",
+   "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "variants": [
+    {
+     "name": "pre",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
+    },
+    {
+     "name": "main",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "701974f"
+    },
+    {
+     "name": "new",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "ktest:new"
+   ]
+  },
+  {
+   "name": "bolt",
    "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
    "memory_bytes": 40000000000,
    "kit": "gemma4",
    "variants": [
     {
-     "name": "before413",
+     "name": "pre",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "ec7686efb189f508f7cdd54992ee94e89945a7f4"
+     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
     },
     {
-     "name": "at413",
+     "name": "main",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "6a9f61f72ca23d36d59ba6d6cf86db27136afea7"
+     "ref": "701974f"
+    },
+    {
+     "name": "new",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     }
    ],
    "steps": [
-    "consistency:before413:5",
-    "consistency:at413:5"
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "ktest:new"
+   ]
+  },
+  {
+   "name": "q4b",
+   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "variants": [
+    {
+     "name": "pre",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
+    },
+    {
+     "name": "main",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "701974f"
+    },
+    {
+     "name": "new",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "ktest:new"
+   ]
+  },
+  {
+   "name": "q06",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "memory_bytes": 17000000000,
+   "kit": null,
+   "variants": [
+    {
+     "name": "main",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "701974f"
+    },
+    {
+     "name": "new",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "ktest:new"
    ]
   }
  ]
