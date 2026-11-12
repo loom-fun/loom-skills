@@ -169,7 +169,9 @@
    "memory_bytes": 24000000000,
    "kit": null,
    "llamacpp": "b1373",
-   "features": []
+   "features": [
+    "draft"
+   ]
   },
   {
    "repo": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
@@ -362,10 +364,9 @@
    "slug": "qwen2.5-vl-7b-instruct",
    "memory_bytes": 21000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": [
-    "vision",
-    "draft"
+    "vision"
    ]
   },
   {
@@ -419,7 +420,7 @@
    "slug": "gemma-4-12b-it",
    "memory_bytes": 81000000000,
    "kit": "gemma4",
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": [
     "draft",
     "thinking-toggle"
