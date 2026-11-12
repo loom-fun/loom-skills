@@ -15,7 +15,7 @@
 import json, math, os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_gdn import gdn_geometry, gdn_kernels, split_qgate  # noqa: E402
+from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate  # noqa: E402
 
 CFG = json.load(open(os.environ.get("LLM_CONFIG") or sys.argv[1]))
 H = CFG["hidden"]; HG = H // 32          # hidden size, 32-value groups per hidden row
@@ -2605,6 +2605,111 @@ def multi_token_split(text, P, U, T):
     return text[:a] + k + "\n".join(m) + text[b:]
 
 
+def gqa_split(text, P, S):
+    """Decode split kernel that loads each key's K and V once for all G query heads of its KV head. The per-head kernel gave
+    every query head its own wave (G waves read the same K/V rows through the cache: kv8 reached ~180 GB/s, kv4 ~80). Here
+    wave w of workgroup z is split slot k = z * G + w of the same layout (same key range, same 16-key blocks, same
+    butterfly and online-softmax order per head, so every partial is bit-identical) and runs all G heads of the group
+    over it. The partial buffers and the combine kernel are unchanged. It has G times fewer waves and G times more work
+    per wave, which loses at short context (kv8, nodraft: decode -3 %, 2k -1.5 %, 4 streams -2 %) and wins at long (32k
+    +14 %): contexts with fewer than ATTN_GQA_FROM visible keys run the per-head body that stays in the else branch."""
+    U = UNROLL
+    a = text.index(f'kernel.def export("{P}_attention_split")')
+    b = text.index(f'kernel.def export("{P}_attention_combine")', a)
+    k = text[a:b]
+    o0 = k.index("    %active_split = index.cmp ult, %split, %s_eff : index\n")
+    o1 = k.index("    }\n    }\n  }\n  kernel.return") + len("    }\n    }\n")
+    old = k[o0:o1]
+    assert "%q_view = buffer.view %q[%zero]" in old
+    scale = re.search(r"%scale = scalar.constant (\S+) : f32", old).group(1)   # the per-head body's (a kit may change it; D != 128 is fixed by the caller)
+    t = [f"""    %cgqa = index.constant {attn_rules.ATTN_GQA_FROM} : index
+    %use_gqa = index.cmp uge, %visible, %cgqa : index
+    %gq = index.constant {G} : index
+    scf.if %use_gqa {{
+    %gslot = index.madd %split_id, %gq, %wave : index
+    %active_g = index.cmp ult, %gslot, %s_eff : index
+    scf.if %active_g {{
+    %gs = index.assume %gslot [range(%gslot, 0, {S - 1})] : index
+    %s_less = index.sub %s_eff, %c1 : index
+    %per_padded = index.add %visible, %s_less : index
+    %per = index.div %per_padded, %s_eff : index
+    %start_raw = index.mul %gs, %per : index
+    %start = index.min %start_raw, %visible : index
+    %stop_raw = index.add %start_raw, %per : index
+    %stop = index.min %stop_raw, %visible : index"""]
+    t.append(f"""    %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
+    %scale = scalar.constant {scale} : f32
+    %scale_v = vector.splat %scale : vector<4xf32>
+    %zero4 = vector.splat %zero_f : vector<4xf32>""")
+    for h in range(G):
+        t.append(f"""    %hc{h} = index.constant {h} : index
+    %head{h}_raw = index.madd %kv_head, %cg, %hc{h} : index
+    %head{h} = index.assume %head{h}_raw [range(%head{h}_raw, 0, {QH - 1})] : index
+    %q_raw{h} = vector.load %q_view[%token, %head{h}, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
+    %q4_{h} = vector.mulf %q_raw{h}, %scale_v : vector<4xf32>""")
+    t.append("""    %lo_abs = index.add %window_low, %start : index
+    %hi_abs = index.add %window_low, %stop : index
+    %lo_q = index.div %lo_abs, %cU : index
+    %lo_al = index.mul %lo_q, %cU : index""")
+    fin = "".join(f"%mf_{h}, %lf_{h}, %af_{h}, " for h in range(G)).rstrip(", ")
+    args = ", ".join(f"%m_{h} = %neg_big : f32, %l_{h} = %zero_f : f32, %acc_{h} = %zero4 : vector<4xf32>" for h in range(G))
+    types = ", ".join(["f32, f32, vector<4xf32>"] * G)
+    t.append(f"    {fin} = scf.for %j = [%lo_al to %hi_abs step %cU]({args}) -> ({types}) {{")
+    t.append("""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
+    for i in range(U):
+        t.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
+      %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
+      %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
+      %ok{i} = scalar.andi %okl{i}, %okh{i} : i1
+      %kd{i} = index.constant {i * POS_BYTES} : offset
+      %ko{i} = index.add %kb_off, %kd{i} : offset
+      %kc{i} = buffer.view %arena[%ko{i}] : buffer -> view<{KVH}x32x4xf16>
+      %kh{i} = vector.load %kc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
+      %vo{i} = index.add %ko{i}, %plane_stride : offset
+      %vc{i} = buffer.view %arena[%vo{i}] : buffer -> view<{KVH}x32x4xf16>
+      %vh{i} = vector.load %vc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
+      %k{i} = vector.extf %kh{i} : vector<4xf16> to vector<4xf32>
+      %v{i} = vector.extf %vh{i} : vector<4xf16> to vector<4xf32>""")
+    yields = []
+    for h in range(G):
+        for i in range(U):
+            t.append(f"""      %prod{i}_{h} = vector.mulf %q4_{h}, %k{i} : vector<4xf32>
+      %part{i}_{h} = vector.reduce<addf> %prod{i}_{h}, %zero_f : vector<4xf32>, f32""")
+        t.append(allreduce([f"%part{i}_{h}" for i in range(U)], f"ar{h}_", [f"%sr{i}_{h}" for i in range(U)]))
+        for i in range(U):
+            t.append(f"      %s{i}_{h} = scf.select %ok{i}, %sr{i}_{h}, %neg_big : f32")
+        prev = f"%m_{h}"
+        for i in range(U):
+            t.append(f"      %mx{i}_{h} = scalar.maxnumf {prev}, %s{i}_{h} : f32"); prev = f"%mx{i}_{h}"
+        t.append(f"""      %m_shift_{h} = scalar.subf %m_{h}, {prev} : f32
+      %alpha_{h} = scalar.expf<afn> %m_shift_{h} : f32
+      %l_scaled_{h} = scalar.mulf %l_{h}, %alpha_{h} : f32
+      %alpha_v_{h} = vector.splat %alpha_{h} : vector<4xf32>
+      %acc_s_{h} = vector.mulf %acc_{h}, %alpha_v_{h} : vector<4xf32>""")
+        pl, pa = f"%l_scaled_{h}", f"%acc_s_{h}"
+        for i in range(U):
+            t.append(f"""      %d{i}_{h} = scalar.subf %s{i}_{h}, {prev} : f32
+      %p{i}_{h} = scalar.expf<afn> %d{i}_{h} : f32
+      %la{i}_{h} = scalar.addf {pl}, %p{i}_{h} : f32
+      %pv{i}_{h} = vector.splat %p{i}_{h} : vector<4xf32>
+      %aa{i}_{h} = vector.fmaf %pv{i}_{h}, %v{i}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}_{h}", f"%aa{i}_{h}"
+        yields += [prev, pl, pa]
+    t.append(f"      scf.yield {', '.join(yields)} : {types}")
+    t.append("    }")
+    t.append(f"""    %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
+    %first = index.cmp eq, %lane, %c0 : index
+    %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>""")
+    for h in range(G):
+        t.append(f"""    vector.store %af_{h}, %acc_view[%token, %head{h}, %gs, %lane, %c0] : vector<4xf32>, view<[%tokens]x{QH}x{S}x32x4xf32>
+    scf.if %first {{
+      view.store %mf_{h}, %ml_view[%token, %head{h}, %gs, 0] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+      view.store %lf_{h}, %ml_view[%token, %head{h}, %gs, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+    }}""")
+    t.append("    }\n    } else {\n" + old + "    }\n")
+    k = k[:o0] + "\n".join(t) + k[o1:]
+    return text[:a] + k + text[b:]
+
+
 def attention_text(S, P):
     """Split-K causal GQA attention: workgroup (token, KV head, split) of 16
     waves, wave w = query head 16*kv + w, lane l = dims 4l..4l+3. Sliding
@@ -2903,7 +3008,9 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
   kernel.return
 }}
 """
-    if P == "g" and attn_rules.multi_token(U, KVH):
+    if P == "g" and D == 128 and attn_rules.ATTN_GQA and attn_rules.paged(U) and attn_rules.butterfly(U) and not gen_draft.enabled():   # measured at head_dim 128 only
+        text = gqa_split(text, P, S)
+    elif P == "g" and attn_rules.multi_token(U, KVH):
         text = multi_token_split(text, P, U, ATTN_MT)
     if D != 128:
         text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
@@ -4101,7 +4208,7 @@ def quant_wiring(program):
     freshness invariant covers them."""
     import re as _re
     pat = _re.compile(r"(scf\.if (%\w+) \{\s*kernel\.launch @g_row_scale_f16\[[^\]]*\]\((%\w+), (%\w+), (%\w+), (%\w+), (%\w+)\) : \[index\]\(index, index, buffer, buffer, buffer\)\s*\})")
-    read = set(_re.findall(r"kernel\.launch @g_mv_\w*_q8\w*\[[^\]]*\]\([^,]+, [^,]+, [^,]+, (%\w+),", program))
+    read = set(_re.findall(r"kernel\.launch @(?:g_mv_\w*_q8\w*|g_moe_gu_\w*_q8_k\w*)\[[^\]]*\]\([^,]+, [^,]+, [^,]+, (%\w+),", program))
     def sub(m):
         rows, width, x, x16 = m.group(3), m.group(4), m.group(5), m.group(7)
         if x16 + "q" not in read:   # only f32 consumers (e.g. a DFlash feature projection wider than 32768)
@@ -4111,7 +4218,7 @@ def quant_wiring(program):
     program = _re.sub(r"(?m)^(\s*)(%\w+16) = buffer\.alloca<global> align\(256\) (%\w+) : buffer$",
                       lambda m: f"{m.group(0)}\n{m.group(1)}{m.group(2)}q = buffer.alloca<global> align(256) {m.group(3)} : buffer"
                       if m.group(2) + "q" in read else m.group(0), program)
-    read = set(_re.findall(r"kernel\.launch @g_mv_\w*_q8\w*\[[^\]]*\]\([^,]+, [^,]+, [^,]+, (%\w+),", program))
+    read = set(_re.findall(r"kernel\.launch @(?:g_mv_\w*_q8\w*|g_moe_gu_\w*_q8_k\w*)\[[^\]]*\]\([^,]+, [^,]+, [^,]+, (%\w+),", program))
     made = set(_re.findall(r"kernel\.launch @g_quant_q8\[[^\]]*\]\([^,]+, [^,]+, [^,]+, (%\w+)\)", program))
     assert read <= made, f"ACT_Q8: int8 activations read but never quantized: {sorted(read - made)} (set ACT_Q8=0)"
     return program
@@ -4194,7 +4301,35 @@ def lin_mv(fmt, x, w, wsize, y, n, kval):
 
 
 USED_MOE = set()     # (fmt, K, N, mode) expert matvec / grouped GEMM kernels
-MOE_R = int(os.environ.get("MOE_R", "8"))
+def _moe_rows_per_workgroup():
+    """Rows of one expert matvec per workgroup (MOE_R overrides). A decode token runs KU experts, so a gate/up launch has
+    KU * FFN / R workgroups: Qwen3-30B-A3B (8 x 768) decodes 10 % faster at R=2 (3072 workgroups) than at R=8 (768; R=4 +6 %,
+    R=1 slower), the same count of tiny workgroups the GPU needs to hide each lane's serial row loop. Aim for ~3000
+    workgroups, in powers of two within 2..8."""
+    if os.environ.get("MOE_R"):
+        return int(os.environ["MOE_R"])
+    if not MOE:
+        return 8
+    r = 8
+    while r > 2 and MOE["used"] * MOE["ffn"] // r < 3000 and MOE["ffn"] % (r // 2) == 0 and H % (r // 2) == 0:
+        r //= 2
+    return r
+
+
+MOE_R = _moe_rows_per_workgroup()
+# MOE_Q8=1 (default, with ACT_Q8): the decode expert matvecs read int8 activations (the router's input h16q, made beside
+# g_row_scale_f16, and the gate/up output quantized by a g_quant_q8 launch) and contract with integer dot4 products,
+# like the dense decode matvecs and llama.cpp's mul_mat_vec_q for experts. MOE_Q8=0: f32 activations.
+MOE_Q8 = os.environ.get("MOE_Q8", "1") == "1"
+USED_MOEQ = set()   # (fmt, K, N, mode) of the int8 expert matvecs; USED_MOEF: the f32 ones (USED_MOE: the grouped GEMMs)
+USED_MOEF = set()
+
+
+def moe_iq(gu, fd, x):
+    """Whether this layer's decode expert matvecs take int8 activations (needs the router input as %h: its h16q)."""
+    return (ACT_Q8 and MOE_Q8 and x == "%h" and "+" not in gu and gu in IQ_FMTS and fd in IQ_FMTS
+            and H // 32 <= 1024 and MOE["ffn"] // 32 <= 1024 and not MOE.get("expert_bias"))
+
 
 
 def moe_layer(i, b, nm, sz, par):
@@ -4231,6 +4366,14 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
     gun = gu.replace("+", "_") + ("_fused" if fused else "")
     USED_MOE.add((gu, H, FE, "gu")); USED_MOE.add((fd, FE, H, "dn"))
     R = MOE_R
+    iq = moe_iq(gu, fd, x)
+    for key, ok in (((gu, H, FE, "gu"), iq), ((fd, FE, H, "dn"), iq)):
+        (USED_MOEQ if ok else USED_MOEF).add(key)
+    q8 = "_q8" if iq else ""
+    xa = f"{x}16q" if iq else x
+    quant_act = (f"    kernel.launch @g_quant_q8[%ta, %nFE](%ta, %nFE, %act, %actq) : [index, index](index, index, buffer, buffer)\n" if iq else "")
+    hq = "    // moe-hq: %h16q beside the gemm-gap (see gen_draft.small_gemm)\n" if iq else ""
+    actd = "%actq" if iq else "%act"
     rty = TENS[b + "ffn_gate_inp.weight"]["type"]
     sgarg, sgty = ("%sg, ", "buffer, ") if SHGATE else ("", "")
     bias = f"%ebias_{i}" if MOE["probs_bias"] else "%wts"
@@ -4264,8 +4407,8 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
     kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}{out}) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
   }} else {{
     kernel.launch @g_moe_route[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
-{wsc}    kernel.launch @g_moe_gu_{gun}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, {x}, %wge_{i}, {wu}{gu_b}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
-    kernel.launch @g_moe_dn_{fd}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, %act, %wde_{i}{dn_b}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
+{wsc}{hq}    kernel.launch @g_moe_gu_{gun}{q8}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, {xa}, %wge_{i}, {wu}{gu_b}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
+{quant_act}    kernel.launch @g_moe_dn_{fd}{q8}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, {actd}, %wde_{i}{dn_b}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
     kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {sgarg}{out}) : [index](index, buffer, buffer, {sgty}buffer)
   }}
 """
@@ -4285,6 +4428,7 @@ def moe_alloc():
   %act_bytes = index.constant {KU * FE * 4} : offset
   %act_size = index.scale %t, %act_bytes : index, offset -> offset
   %act = buffer.alloca<global> align(256) %act_size : buffer
+  %actq = buffer.alloca<global> align(256) %act_size : buffer
   %ys_bytes = index.constant {KU * H * 4} : offset
   %ys_size = index.scale %t, %ys_bytes : index, offset -> offset
   %ys = buffer.alloca<global> align(256) %ys_size : buffer
@@ -4327,7 +4471,9 @@ def moe_kernels(row_scale, gemm_fn):
     act = ("swiglu_oai", MOE.get("swiglu_alpha", 1.702), MOE.get("swiglu_limit", 7.0)) if MOE.get("act") == "swiglu_oai" else None
     xb = dict(bias=True, act=act) if MOE.get("expert_bias") else dict(act=act) if act else {}
     for fmt, K, N, mode in sorted(USED_MOE):
-        mv = GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode, fused=bool(MOE.get("gate_up_fused")) and mode == "gu", **xb)
+      key = (fmt, K, N, mode)
+      for iqf in ([None] if key in USED_MOEF or key not in USED_MOEQ else []) + ([(iq_decode, iq_dot, iq_load)] if key in USED_MOEQ else []):
+        mv = GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode, fused=bool(MOE.get("gate_up_fused")) and mode == "gu", iq=iqf, **xb)
         # GEGLU experts: the expert matvec's scalar silu, the grouped GEMM's vector silu, as gelu-tanh
         parts.append(mv.replace("    %silu = scalar.siluf<afn> %t0 : f32\n", gelu_scalar("silu", "t0", "    ") + "\n") if GELU else mv)
     comb, comb_s = GM.combine(H, MOE["used"], acc=bool(FS)), GM.combine_sorted(H, MOE["used"], acc=bool(FS))
@@ -4353,6 +4499,11 @@ def gdn_layer(i, b, nm, sz, par):
          f'    %ssm_a_{i} = command.parameter %weights, "{b}ssm_a" : view<{HV}xf32>\n',
          f'    %dt_bias_{i} = command.parameter %weights, "{b}ssm_dt.bias" : view<{HV}xf32>\n',
          f'    %ssm_norm_{i} = command.parameter %weights, "{b}ssm_norm.weight" : view<{DV}xf32>\n']
+    REC = f"""  kernel.launch @g_gdn_recurrence[%spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gs, %ginv, %galpha, %gbeta, %ssm_a_{i}, %dt_bias_{i}, %graw) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, view<{HV}xf32>, view<{HV}xf32>, buffer)"""
+    if recurrence_pf(g):   # spans of 64+ tokens keep the 8-lane split, shorter ones the faster one (gen_gdn)
+        # every span runs in exactly one of the two kernels (by its own length), so the pf kernel is only needed when
+        # the epoch can hold a long span
+        REC = REC + "\n  scf.if %gemm {\n  " + REC.replace("@g_gdn_recurrence[", "@g_gdn_recurrence_pf[") + "\n  }"
     T = P + [
         "  " + lin(fmt_of(nm("attn_qkv")), "%h", "%s_h", f"%wqkv_{i}", sz("attn_qkv"), "%gq", "%nH", "%nC", H) + "\n",
         "  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wz_{i}", sz("attn_gate"), "%gz", "%nH", "%nVD", H) + "\n",
@@ -4361,7 +4512,7 @@ def gdn_layer(i, b, nm, sz, par):
         f"""  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_{i}, %metadata, %info, %origins, %arena, %gq, %conv_{i}, %gs) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, view<{C * K}xf32>, buffer)
   kernel.launch @g_gdn_conv_commit[%spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gq) : [index](index, index, index, buffer, buffer, buffer, buffer)
   kernel.launch @g_gdn_qk_norm[%t](%t, %gs, %ginv) : [index](index, buffer, buffer)
-  kernel.launch @g_gdn_recurrence[%spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gs, %ginv, %galpha, %gbeta, %ssm_a_{i}, %dt_bias_{i}, %graw) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, view<{HV}xf32>, view<{HV}xf32>, buffer)
+{REC}
   kernel.launch @g_gdn_norm_gate[%t](%t, %info, %graw, %ssm_norm_{i}, %gz, %o) : [index](index, buffer, buffer, view<{DV}xf32>, buffer, buffer)
   scf.if %gemm {{
     kernel.launch @g_row_scale_f16[%t](%t, %nVD, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)
@@ -5166,7 +5317,7 @@ if __name__ == "__main__":
         COMMON += Q5_0
     if any(t["type"] == "mxfp4" for t in TENS.values()):
         COMMON += MXFP4
-    if USED_MVQ:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
+    if USED_MVQ or USED_MOEQ:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
         COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                    for fmt, K, sw, R, TG in sorted(USED_MVQ))
         program = quant_wiring(program)
