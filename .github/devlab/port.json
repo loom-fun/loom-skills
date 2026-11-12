@@ -1,7 +1,9 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Post-#437 regeneration of four Qwen3 cards from main (K/V-once GQA decode attention, tune can pick nodraft); reference = each published card.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {"name": "q30-2507", "spec": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF:Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf", "reference": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom", "model_id": "Qwen/Qwen3-30B-A3B-Instruct-2507"},
+  {"name": "q3-8b", "spec": "unsloth/Qwen3-8B-GGUF:Qwen3-8B-Q4_K_M.gguf", "reference": "loom-fun/unsloth-Qwen3-8B-loom", "model_id": "Qwen/Qwen3-8B"},
+  {"name": "q3-vl-8b", "spec": "unsloth/Qwen3-VL-8B-Instruct-GGUF:Qwen3-VL-8B-Instruct-Q4_K_M.gguf", "reference": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom", "model_id": "Qwen/Qwen3-VL-8B-Instruct"},
+  {"name": "q3-coder", "spec": "ggml-org/Qwen3-Coder-30B-A3B-Instruct-GGUF:Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf", "reference": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom", "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct"}
  ]
 }
