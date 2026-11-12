@@ -276,9 +276,13 @@ def main():
         if os.environ.get("TUNE_PRIOR", "1") != "0" else None
     skipped = {}
     build = [T, os.path.join(STARTER, "build.py"), cfg_path]
-    # No --memory-gib: each candidate (and the final package) sizes its own budget for the full native context
+    # No --memory-gib by default: each candidate (and the final package) sizes its own budget for the full native context
     # (a drafter adds KV per position; passing the old budget shrank DFlash packages' context to fit).
     common = ["--tokenizer", os.path.join(work, "tok", "tokenizer.json"), "--model-id", model_id]
+    # An explicit budget (MEMORY_GIB, as port_e2e.sh/port.sh were given) applies to every build: a GGUF that does not fit the
+    # 60 %-of-RAM default would otherwise be rebuilt here at a 4096-token context (Ornith-1.5-122B), losing the long rows.
+    if os.environ.get("MEMORY_GIB", "auto") not in ("", "auto"):
+        common += ["--memory-gib", os.environ["MEMORY_GIB"]]
     base, base_rows = None, {}
     if kinds:
         # The depth 0 row is a package built without a drafter: a drafting build never gets the no-draft-only kernels
