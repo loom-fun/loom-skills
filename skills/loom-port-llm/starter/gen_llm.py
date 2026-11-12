@@ -5125,6 +5125,8 @@ if __name__ == "__main__":
                           afmt=lambda n: AT[n]["type"], asize=asize,
                           assist_attention=gen_assist.target_attention(program, L, L - 2, L - 1))
         spec = [gen_draft.advance_program(program, gfacts), gen_draft.verify_program(program, gfacts)]
+        if gen_draft.gate_advance():
+            spec.append(gen_draft.gate_program(program))
         if MTP_LAYER is not None:
             spec.append(gen_draft.mtp_programs(gfacts))
         if gen_draft.DRAFT["kind"] == "dflash":
