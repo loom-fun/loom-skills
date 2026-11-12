@@ -144,7 +144,7 @@ def gdn_kernels(cfg, eps):
       %acc{j} = scalar.fmaf %w{j}, %x{j}, {"%zero_f" if j == 0 else f"%acc{j - 1}"} : f32""")
     # CU channels per loop step (c, c + stride, ...), every load before any store: Loom orders a global load
     # after earlier global stores, so one channel per step paid a store -> load round trip per channel.
-    CU = int(os.environ.get("GDN_CONV_UNROLL", "4"))
+    CU = int(os.environ.get("GDN_CONV_UNROLL", "8"))
     tap_text = chr(10).join(taps) + f"""
       %sig = scalar.logisticf<afn> %acc{K - 1} : f32
       %silu = scalar.mulf %acc{K - 1}, %sig : f32"""
@@ -488,7 +488,15 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
 """)
     RL = _row_lanes(DK, DV)
     if RL:
-        T[-1] = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close)
+        # Spans of PF_SPAN+ tokens (prefill) keep the 8 lanes x 4 columns split that measured fastest there; shorter
+        # spans (decode, verify) run g_gdn_recurrence (16 x 2 by default: +5 % decode on Qwen3.5-35B-A3B, -12 % prefill).
+        # Each span runs in exactly one of the two kernels, chosen by its own length, so its numerics never depend on
+        # what else shares the epoch.
+        PF = (8, 4)
+        T[-1] = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "short" if recurrence_pf(G) else None)
+        if recurrence_pf(G):
+            pf = _recurrence_rows(G, NG, LB, *PF, guard_open, guard_close, "long")
+            T.append(pf.replace("g_gdn_recurrence", "g_gdn_recurrence_pf"))
     # ---- gated RMSNorm per value head: out = rmsnorm(o) * w * silu(z); padding tokens get zeros. One wave per head,
     # HPW heads per workgroup: 32-lane workgroups (tokens x HV of them) made this tiny kernel cost as much as the
     # recurrence at prefill (Qwen3.5-35B-A3B, 1k tokens: 32k workgroups per layer).
@@ -555,15 +563,31 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
     return text
 
 
+PF_SPAN = 64   # spans of at least this many tokens (the GEMM epoch shape) run the prefill form
+
+
+def recurrence_pf(G):
+    """True when prefill epochs launch g_gdn_recurrence_pf (the 8 x 4 split) beside the decode form g_gdn_recurrence."""
+    RL = _row_lanes(G["DK"], G["DV"])
+    return bool(RL) and "GDN_ROW_LANES" not in os.environ and RL != (8, 4) and _row_fits(G["DK"], G["DV"], 8, 4)
+
+
+def _row_fits(DK, DV, rl, cw):
+    return rl in (1, 2, 4, 8, 16, 32) and cw in (2, 4, 8) and DK % rl == 0 and (DK // rl) % 4 == 0 and DV % (cw * 32 // rl) == 0
+
+
 def _row_lanes(DK, DV):
     """Lanes per value column in the row-split recurrence (0: the original 32-lane form). GDN_ROW_LANES overrides."""
-    RL = int(os.environ.get("GDN_ROW_LANES", "8"))
-    CW = int(os.environ.get("GDN_COLS", "4"))
-    ok = RL in (1, 2, 4, 8, 16, 32) and CW in (2, 4, 8) and DK % RL == 0 and (DK // RL) % 4 == 0 and DV % (CW * 32 // RL) == 0
-    return (RL, CW) if ok else 0
+    RL = int(os.environ.get("GDN_ROW_LANES", "16"))
+    CW = int(os.environ.get("GDN_COLS", "2"))
+    if _row_fits(DK, DV, RL, CW):
+        return (RL, CW)
+    if "GDN_ROW_LANES" not in os.environ and "GDN_COLS" not in os.environ and _row_fits(DK, DV, 8, 4):
+        return (8, 4)   # the former defaults, for head dims the new ones do not divide
+    return 0
 
 
-def _recurrence_rows(G, NG, LB, RL, CW, guard_open, guard_close):
+def _recurrence_rows(G, NG, LB, RL, CW, guard_open, guard_close, span_class=None):
     """g_gdn_recurrence, row-split form: a 32-lane workgroup owns CW * (32 / RL) value columns of one head; each
     group of RL lanes owns CW columns and lane r of the group the key rows [r * DK / RL, (r + 1) * DK / RL) of
     them (DK / RL * CW state values in registers). S^T k and S^T q are per-lane dot products over the lane's
@@ -572,7 +596,7 @@ def _recurrence_rows(G, NG, LB, RL, CW, guard_open, guard_close):
     the token's decay/beta are computed once per workgroup. The step's inputs are loaded one step ahead and the
     outputs stored in RL-step batches (lane r keeps step r's CW outputs), so no global store sits between the
     loop's loads. Same arithmetic per state element as the 32-lane form; the sums are ordered differently.
-    GDN_ROW_LANES (default 8) / GDN_COLS (default 4) pick RL / CW."""
+    GDN_ROW_LANES (default 16) / GDN_COLS (default 2) pick RL / CW."""
     HK, HV, DK, DV, C, VD = G["HK"], G["HV"], G["DK"], G["DV"], G["C"], G["VD"]
     RPL, CPW = DK // RL, CW * (32 // RL)
     VC = f"vector<{CW}xf32>"
@@ -625,6 +649,14 @@ def _recurrence_rows(G, NG, LB, RL, CW, guard_open, guard_close):
              ", ".join(f"%{n} = %pf_{n} : {t}" for n, t, _ in ld) + f", %ob = %zero4 : {VC}")
     stores = nl.join(f"    vector.store %final{j}, %next_view[%si{j}] : {VR}, view<{NS}xf32>" for j in J)
     shuf = nl.join(f"  %x{d} = scalar.constant {d} : i32" for d in xs)
+    cls_flag, cls_text = "active", ""
+    if span_class:   # a span runs in the kernel of its own length class: its numerics never depend on the epoch's other spans
+        cmp_ = "ult" if span_class == "short" else "uge"
+        cls_flag = "mine"
+        cls_text = f"""  %cpf_len = index.constant {PF_SPAN} : index
+  %in_class = index.cmp {cmp_}, %length, %cpf_len : index
+  %mine = scalar.andi %active, %in_class : i1
+"""
     return f"""
 kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
   %c1 = index.constant 1 : index
@@ -653,7 +685,7 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
   %w32 = scalar.constant 32 : i32
 {shuf}
   %active, %length, %start32, %row, %first = func.call @g_gdn_span(%metadata, %spans, %span) : (buffer, index, index) -> (i1, index, i32, index, index)
-  scf.if %active {{
+{cls_text}  scf.if %{cls_flag} {{
   %layer_stride = index.constant {LB} : offset
   %layer_bytes = index.scale %layer, %layer_stride : index, offset -> offset
   %reader, %writer, %fresh = func.call @g_gdn_slots(%origins, %row, %start32, %layer_bytes) : (buffer, index, i32, offset) -> (offset, offset, i1)
