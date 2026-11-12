@@ -1,5 +1,4 @@
 {
-<<<<<<< HEAD
  "_comment": "Occupancy gate default check: gemma-3-1b 1-stream noise (gate first), Qwen3.5-9B (DFlash), Llama-3.2-3B, HyperCLOVAX.",
  "card": "loom-fun/ggml-org-gemma-3-1b-it-loom",
  "memory_bytes": 7000000000,
@@ -8,23 +7,11 @@
  "jobs": [
   {
    "name": "g1-ab",
-=======
- "_comment": "Active-wait re-measure: Qwen3.8-Flash-Next and Qwen3.5-0.8B (regenerated) (other cards: runs 43033815593, 43075216088, 43106368506).",
- "jobs": [
-  {
-   "name": "unsloth-Qwen3.8-Flash-Next",
-   "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
-   "memory_bytes": 100000000000,
-   "kit": "qwen4exp",
-   "llamacpp": "b1371",
-   "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
->>>>>>> origin/devlab-perf-source
    "variants": [
     {
      "name": "card"
     },
     {
-<<<<<<< HEAD
      "name": "gate2",
      "build": {
       "SPEC_OCC_MIN": "2"
@@ -59,15 +46,10 @@
      "execution": {
       "draft_depth": 0
      }
-=======
-     "name": "parked",
-     "active_wait": false
->>>>>>> origin/devlab-perf-source
     }
    ],
    "steps": [
     "c4:card",
-<<<<<<< HEAD
     "c4:gate2",
     "c4:nodraft",
     "perf:gate2:2:long",
@@ -85,29 +67,11 @@
    "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
    "memory_bytes": 17000000000,
    "llamacpp": "b1369",
-=======
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "unsloth-Qwen3.5-0.8B",
-   "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
-   "memory_bytes": 9000000000,
-   "kit": null,
-   "llamacpp": "b1369",
-   "llama_spec": "--spec-type ngram-simple",
->>>>>>> origin/devlab-perf-source
    "variants": [
     {
      "name": "card"
     },
     {
-<<<<<<< HEAD
      "name": "gate2",
      "build": {
       "SPEC_OCC_MIN": "2"
@@ -166,22 +130,6 @@
     "gates:gate2:dev",
     "llamac4",
     "llamac4@vulkan"
-=======
-     "name": "parked",
-     "active_wait": false
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
->>>>>>> origin/devlab-perf-source
    ]
   }
  ]
