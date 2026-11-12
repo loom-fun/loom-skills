@@ -266,6 +266,36 @@ def main():
     # (a drafter adds KV per position; passing the old budget shrank DFlash packages' context to fit).
     common = ["--tokenizer", os.path.join(work, "tok", "tokenizer.json"), "--model-id", model_id]
     base, base_rows = None, {}
+    if kinds:
+        # The depth 0 row is a package built without a drafter: a drafting build never gets the no-draft-only kernels
+        # (gen_llm.gqa_split: Qwen3-4B-Instruct-2507 decode_32k 24.6 on a drafting package at depth 0, 28.6 on a no-draft
+        # package), and the no-draft package is what ships when "none" wins. If it cannot be measured, depth 0 of the
+        # first drafter's package stands in for it (below).
+        npkg = os.path.join(work, "pkg_tune_none")
+        try:
+            out = sh(*build, npkg, *common, "--draft", "none").stdout
+            nmem = [l for l in out.split() if l.startswith("--memory_bytes=")][-1].split("=")[1]
+            ncard = json.load(open(os.path.join(npkg, "model.json")))
+            nchat = json.load(open(os.path.join(npkg, "llm_config.json")))["chat"]
+            nrows = int(ncard["presets"]["chat"]["execution"].get("rows") or 1)
+            t0 = time.time()
+            serve("tune", port, nmem, os.path.join(npkg, "model.json"), env)
+            rows = measure(f"http://127.0.0.1:{port}", model_id, nchat, ncard["presets"]["chat"]["execution"].get("context_capacity") or 0, nrows)
+            tps = single_rate(rows)
+            subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
+            row = {"kind": "none", "depth": 0, "decode_tps": round(tps, 2), "rows": {k: round(v, 2) for k, v in rows.items()},
+                   "seconds": round(time.time() - t0), "baseline": "no-draft package"}
+            if llama_refs:
+                row["margin_llama"] = round(llama_margin(rows, llama_refs), 3)
+            base, base_rows = tps, rows
+            print("tune:", json.dumps(row), flush=True)
+            table.append(row)
+        except Exception as e:  # noqa: BLE001
+            print(f"tune: no-draft baseline package: {e}", file=sys.stderr)
+            subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
+            base, base_rows = None, {}
+        finally:
+            shutil.rmtree(npkg, ignore_errors=True)
     for kind, depths in kinds:
         pkg = os.path.join(work, f"pkg_tune_{kind}")
         out = sh(*build, pkg, *common, "--draft", kind, env=dict(os.environ, SPEC_OCC_MIN="2")).stdout   # gated (default)
@@ -415,13 +445,16 @@ def main():
         return spec_check.compare(refs[pkg], out) == 0
     # A drafter is used only if no row is slower than NO_LOSS x depth 0 and the single-stream rate gains at least 3 %;
     # candidates rank by their worst row relative to depth 0 (the margin).
-    # With TUNE_BASELINE the margin is the worst row relative to llama.cpp and a drafter qualifies when it beats depth 0's.
+    # With TUNE_BASELINE the margin is the worst row relative to llama.cpp and a drafter qualifies when it is within NO_LOSS
+    # of depth 0's (the same noise band as without a baseline: LFM3-Omni-2B n-gram depth 1 scored 1.066 vs depth 0's 1.086,
+    # a 2 % dip on one short request, while gaining 13 % single-stream and 25 % at 2k).
     if llama_refs:
         floor = next(r["margin_llama"] for r in table if r["kind"] == "none")
         for r in table:
             if r["kind"] != "none":
                 r["margin"] = r["margin_llama"]
-        ok_margin = lambda r: r["margin"] > floor
+        # the noise band only while the drafter still beats llama.cpp on every row: never trade a losing row for a worse one
+        ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor)
     else:
         ok_margin = lambda r: r["margin"] >= NO_LOSS
     ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
