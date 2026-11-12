@@ -1,15 +1,17 @@
 {
- "card": "loom-fun/unsloth-Qwen3-8B-loom",
- "memory_bytes": 55000000000,
+ "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+ "memory_bytes": 60000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "q8-attn",
+   "name": "q30-attn",
    "variants": [
     {
-     "name": "nd",
-     "build": {},
+     "name": "cu1",
+     "build": {
+      "ATTN_COMBINE_U": "1"
+     },
      "build_args": [
       "--draft",
       "none"
@@ -17,19 +19,7 @@
     },
     {
      "name": "cu8",
-     "build": {
-      "ATTN_COMBINE_U": "8"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "cu16",
-     "build": {
-      "ATTN_COMBINE_U": "16"
-     },
+     "build": {},
      "build_args": [
       "--draft",
       "none"
@@ -38,8 +28,7 @@
     {
      "name": "s128",
      "build": {
-      "ATTN_SPLITS": "128",
-      "ATTN_COMBINE_U": "8"
+      "ATTN_SPLITS": "128"
      },
      "build_args": [
       "--draft",
@@ -49,19 +38,7 @@
     {
      "name": "s32",
      "build": {
-      "ATTN_SPLITS": "32",
-      "ATTN_COMBINE_U": "8"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "u32",
-     "build": {
-      "ATTN_UNROLL": "32",
-      "ATTN_COMBINE_U": "8"
+      "ATTN_SPLITS": "32"
      },
      "build_args": [
       "--draft",
@@ -71,12 +48,10 @@
    ],
    "steps": [
     "ktest:cu8",
-    "perf:nd:2:long",
+    "perf:cu1:2:long",
     "perf:cu8:2:long",
-    "perf:cu16:2:long",
     "perf:s128:2:long",
-    "perf:s32:2:long",
-    "perf:u32:2:long"
+    "perf:s32:2:long"
    ]
   }
  ]
