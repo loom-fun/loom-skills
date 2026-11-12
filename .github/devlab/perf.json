@@ -7,35 +7,42 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "all2",
+   "name": "dec",
    "variants": [
-    {
-     "name": "card"
-    },
     {
      "name": "gate",
      "build": {}
     },
     {
-     "name": "nogate",
-     "build": {
-      "SPEC_OCC_MIN": "0"
+     "name": "d1",
+     "build": {},
+     "execution": {
+      "draft_depth": 1
+     }
+    },
+    {
+     "name": "d3",
+     "build": {},
+     "execution": {
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "nodraft",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "perf:card:3",
-    "perf:gate:3",
-    "perf:nogate:3",
-    "c4:gate",
-    "c4:nogate",
-    "perf:gate:3:long",
-    "llama:3",
-    "llama@vulkan:3",
-    "llama:3:long",
-    "llama@vulkan:3:long",
-    "llamac4",
-    "llamac4@vulkan"
+    "perf:gate:5",
+    "perf:d1:5",
+    "perf:d3:5",
+    "perf:nodraft:5",
+    "c4:d1",
+    "c4:nodraft",
+    "llama@vulkan:5"
    ]
   }
  ]
