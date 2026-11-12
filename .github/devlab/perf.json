@@ -7,7 +7,7 @@
    "memory_bytes": 100000000000,
    "kit": "qwen4exp",
    "llamacpp": "b1371",
-   "llama_spec": "",
+   "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
    "variants": [
     {
      "name": "card"
