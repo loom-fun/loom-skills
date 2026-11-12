@@ -1,6 +1,23 @@
 {
- "_comment": "Qwen2.5-1.5B regen from latest main (tune long row = perf.py's own 32k request #467, ctx-gate retry).",
+ "_comment": "Small-card regen 2 from latest main (#451 K/V-once in drafting packages, #467 tune long row = perf request).",
  "jobs": [
-  {"name": "q25-15b", "spec": "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Qwen2.5-1.5B-Instruct-Q4_K_M.gguf", "reference": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom", "model_id": "Qwen/Qwen2.5-1.5B-Instruct"}
+  {
+   "name": "q25-05b",
+   "spec": "bartowski/Qwen2.5-0.5B-Instruct-GGUF:Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+   "model_id": "Qwen/Qwen2.5-0.5B-Instruct"
+  },
+  {
+   "name": "q25-15b",
+   "spec": "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
+   "model_id": "Qwen/Qwen2.5-1.5B-Instruct"
+  },
+  {
+   "name": "hyperclovax",
+   "spec": "rippertnt/HyperCLOVAX-SEED-Text-Instruct-1.5B-Q4_K_M-GGUF:hyperclovax-seed-text-instruct-1.5b-q4_k_m.gguf",
+   "reference": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+   "model_id": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B"
+  }
  ]
 }
