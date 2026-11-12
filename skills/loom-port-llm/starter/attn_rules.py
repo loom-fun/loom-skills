@@ -6,6 +6,10 @@ UNROLL = int(os.environ.get("ATTN_UNROLL", "16"))   # keys per decode-attention 
 ATTN_BFLY = os.environ.get("ATTN_BFLY", "1") == "1"   # decode attention: a block's key scores in one butterfly all-reduce
 ATTN_PAGED = os.environ.get("ATTN_PAGED", "1") == "1"   # decode attention: 16-aligned key blocks, one page lookup each
 ATTN_ILP = int(os.environ.get("ATTN_ILP", "1"))   # independent softmax chains per block (2, 4: no gain on Qwen3.8-27B at 32k)
+ATTN_PF = os.environ.get("ATTN_PF", "0") == "1"   # decode attention: prefetch the next key block while the current one is consumed
+ATTN_GQA = os.environ.get("ATTN_GQA", "0") == "1"   # decode split kernel: K/V loaded once for the G query heads of a KV head (gen_llm.gqa_split; non-drafting packages)
+ATTN_GQA_FROM = int(os.environ.get("ATTN_GQA_FROM", "4096"))   # ... for contexts with at least this many visible keys
+ATTN_GQA_EXT = os.environ.get("ATTN_GQA_EXT", "shared")   # "head": widen K/V to f32 per head (fewer live registers)
 ATTN_MT = int(os.environ.get("ATTN_MT", "4"))   # verify-span tokens per wave (gen_llm.multi_token_split)
 ATTN_MT_FROM = int(os.environ.get("ATTN_MT_FROM", "1024"))   # ... from this position on
 # The span path leaves one workgroup per (4 tokens, KV head, split), each running its tokens serially: with fewer KV

@@ -2605,6 +2605,117 @@ def multi_token_split(text, P, U, T):
     return text[:a] + k + "\n".join(m) + text[b:]
 
 
+def gqa_split(text, P, S):
+    """Decode split kernel that loads each key's K and V once for all G query heads of its KV head. The per-head kernel gave
+    every query head its own wave (G waves read the same K/V rows through the cache: kv8 reached ~180 GB/s, kv4 ~80). Here
+    wave w of workgroup z is split slot k = z * G + w of the same layout (same key range, same 16-key blocks, same
+    butterfly and online-softmax order per head, so every partial is bit-identical) and runs all G heads of the group
+    over it. The partial buffers and the combine kernel are unchanged. It has G times fewer waves and G times more work
+    per wave, which loses at short context (kv8, nodraft: decode -3 %, 2k -1.5 %, 4 streams -2 %) and wins at long (32k
+    +14 %): contexts with fewer than ATTN_GQA_FROM visible keys run the per-head body that stays in the else branch."""
+    U = UNROLL
+    a = text.index(f'kernel.def export("{P}_attention_split")')
+    b = text.index(f'kernel.def export("{P}_attention_combine")', a)
+    k = text[a:b]
+    o0 = k.index("    %active_split = index.cmp ult, %split, %s_eff : index\n")
+    o1 = k.index("    }\n    }\n  }\n  kernel.return") + len("    }\n    }\n")
+    old = k[o0:o1]
+    assert "%q_view = buffer.view %q[%zero]" in old
+    q0 = old.index("    %q_view = buffer.view %q[%zero]")
+    t = [f"""    %cgqa = index.constant {attn_rules.ATTN_GQA_FROM} : index
+    %use_gqa = index.cmp uge, %visible, %cgqa : index
+    %gq = index.constant {G} : index
+    scf.if %use_gqa {{
+    %gslot = index.madd %split_id, %gq, %wave : index
+    %active_g = index.cmp ult, %gslot, %s_eff : index
+    scf.if %active_g {{
+    %gs = index.assume %gslot [range(%gslot, 0, {S - 1})] : index
+    %s_less = index.sub %s_eff, %c1 : index
+    %per_padded = index.add %visible, %s_less : index
+    %per = index.div %per_padded, %s_eff : index
+    %start_raw = index.mul %gs, %per : index
+    %start = index.min %start_raw, %visible : index
+    %stop_raw = index.add %start_raw, %per : index
+    %stop = index.min %stop_raw, %visible : index"""]
+    t.append(f"""    %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
+    %scale = scalar.constant 0.08838834764831845 : f32
+    %scale_v = vector.splat %scale : vector<4xf32>
+    %zero4 = vector.splat %zero_f : vector<4xf32>""")
+    for h in range(G):
+        t.append(f"""    %hc{h} = index.constant {h} : index
+    %head{h}_raw = index.madd %kv_head, %cg, %hc{h} : index
+    %head{h} = index.assume %head{h}_raw [range(%head{h}_raw, 0, {QH - 1})] : index
+    %q_raw{h} = vector.load %q_view[%token, %head{h}, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
+    %q4_{h} = vector.mulf %q_raw{h}, %scale_v : vector<4xf32>""")
+    t.append("""    %lo_abs = index.add %window_low, %start : index
+    %hi_abs = index.add %window_low, %stop : index
+    %lo_q = index.div %lo_abs, %cU : index
+    %lo_al = index.mul %lo_q, %cU : index""")
+    fin = "".join(f"%mf_{h}, %lf_{h}, %af_{h}, " for h in range(G)).rstrip(", ")
+    args = ", ".join(f"%m_{h} = %neg_big : f32, %l_{h} = %zero_f : f32, %acc_{h} = %zero4 : vector<4xf32>" for h in range(G))
+    types = ", ".join(["f32, f32, vector<4xf32>"] * G)
+    t.append(f"    {fin} = scf.for %j = [%lo_al to %hi_abs step %cU]({args}) -> ({types}) {{")
+    t.append("""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
+    for i in range(U):
+        t.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
+      %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
+      %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
+      %ok{i} = scalar.andi %okl{i}, %okh{i} : i1
+      %kd{i} = index.constant {i * POS_BYTES} : offset
+      %ko{i} = index.add %kb_off, %kd{i} : offset
+      %kc{i} = buffer.view %arena[%ko{i}] : buffer -> view<{KVH}x32x4xf16>
+      %kh{i} = vector.load %kc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
+      %vo{i} = index.add %ko{i}, %plane_stride : offset
+      %vc{i} = buffer.view %arena[%vo{i}] : buffer -> view<{KVH}x32x4xf16>
+      %vh{i} = vector.load %vc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>""" + ("" if attn_rules.ATTN_GQA_EXT == "head" else f"""
+      %k{i} = vector.extf %kh{i} : vector<4xf16> to vector<4xf32>
+      %v{i} = vector.extf %vh{i} : vector<4xf16> to vector<4xf32>"""))
+    yields = []
+    for h in range(G):
+        for i in range(U):
+            if attn_rules.ATTN_GQA_EXT == "head":   # keep K/V as f16 across the heads (half the live registers)
+                t.append(f"      %k{i}_{h} = vector.extf %kh{i} : vector<4xf16> to vector<4xf32>")
+            kk = f"%k{i}_{h}" if attn_rules.ATTN_GQA_EXT == "head" else f"%k{i}"
+            t.append(f"""      %prod{i}_{h} = vector.mulf %q4_{h}, {kk} : vector<4xf32>
+      %part{i}_{h} = vector.reduce<addf> %prod{i}_{h}, %zero_f : vector<4xf32>, f32""")
+        t.append(allreduce([f"%part{i}_{h}" for i in range(U)], f"ar{h}_", [f"%sr{i}_{h}" for i in range(U)]))
+        for i in range(U):
+            t.append(f"      %s{i}_{h} = scf.select %ok{i}, %sr{i}_{h}, %neg_big : f32")
+        prev = f"%m_{h}"
+        for i in range(U):
+            t.append(f"      %mx{i}_{h} = scalar.maxnumf {prev}, %s{i}_{h} : f32"); prev = f"%mx{i}_{h}"
+        t.append(f"""      %m_shift_{h} = scalar.subf %m_{h}, {prev} : f32
+      %alpha_{h} = scalar.expf<afn> %m_shift_{h} : f32
+      %l_scaled_{h} = scalar.mulf %l_{h}, %alpha_{h} : f32
+      %alpha_v_{h} = vector.splat %alpha_{h} : vector<4xf32>
+      %acc_s_{h} = vector.mulf %acc_{h}, %alpha_v_{h} : vector<4xf32>""")
+        pl, pa = f"%l_scaled_{h}", f"%acc_s_{h}"
+        for i in range(U):
+            if attn_rules.ATTN_GQA_EXT == "head":
+                t.append(f"      %v{i}_{h} = vector.extf %vh{i} : vector<4xf16> to vector<4xf32>")
+            vv = f"%v{i}_{h}" if attn_rules.ATTN_GQA_EXT == "head" else f"%v{i}"
+            t.append(f"""      %d{i}_{h} = scalar.subf %s{i}_{h}, {prev} : f32
+      %p{i}_{h} = scalar.expf<afn> %d{i}_{h} : f32
+      %la{i}_{h} = scalar.addf {pl}, %p{i}_{h} : f32
+      %pv{i}_{h} = vector.splat %p{i}_{h} : vector<4xf32>
+      %aa{i}_{h} = vector.fmaf %pv{i}_{h}, {vv}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}_{h}", f"%aa{i}_{h}"
+        yields += [prev, pl, pa]
+    t.append(f"      scf.yield {', '.join(yields)} : {types}")
+    t.append("    }")
+    t.append(f"""    %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
+    %first = index.cmp eq, %lane, %c0 : index
+    %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>""")
+    for h in range(G):
+        t.append(f"""    vector.store %af_{h}, %acc_view[%token, %head{h}, %gs, %lane, %c0] : vector<4xf32>, view<[%tokens]x{QH}x{S}x32x4xf32>
+    scf.if %first {{
+      view.store %mf_{h}, %ml_view[%token, %head{h}, %gs, 0] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+      view.store %lf_{h}, %ml_view[%token, %head{h}, %gs, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+    }}""")
+    t.append("    }\n    } else {\n" + old + "    }\n")
+    k = k[:o0] + "\n".join(t) + k[o1:]
+    return text[:a] + k + text[b:]
+
+
 def attention_text(S, P):
     """Split-K causal GQA attention: workgroup (token, KV head, split) of 16
     waves, wave w = query head 16*kv + w, lane l = dims 4l..4l+3. Sliding
@@ -2613,9 +2724,30 @@ def attention_text(S, P):
     U = UNROLL
     body = []
     pa = attn_rules.paged(U)
-    if pa:   # absolute U-aligned key blocks lie in one 16-position KV page: one page lookup per block
+    PF = pa and attn_rules.ATTN_PF   # software prefetch: block j+U's K/V loads are issued before block j is consumed
+
+    def pf_loads(jn, sfx):
+        t = [f"""      %kb_off{sfx} = func.call @g_kv_offset(%origins, %row, {jn}, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)"""]
+        for i in range(U):
+            t.append(f"""      %kd{i}{sfx} = index.constant {i * POS_BYTES} : offset
+      %ko{i}{sfx} = index.add %kb_off{sfx}, %kd{i}{sfx} : offset
+      %kc{i}{sfx} = buffer.view %arena[%ko{i}{sfx}] : buffer -> view<{KVH}x32x4xf16>
+      %pfk{i}{sfx} = vector.load %kc{i}{sfx}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
+      %vo{i}{sfx} = index.add %ko{i}{sfx}, %plane_stride : offset
+      %vc{i}{sfx} = buffer.view %arena[%vo{i}{sfx}] : buffer -> view<{KVH}x32x4xf16>
+      %pfv{i}{sfx} = vector.load %vc{i}{sfx}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>""")
+        return "\n".join(t)
+    if PF:
+        for i in range(U):
+            body.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
+      %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
+      %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
+      %ok{i} = scalar.andi %okl{i}, %okh{i} : i1
+      %k{i} = vector.extf %pfk{i} : vector<4xf16> to vector<4xf32>
+      %v{i} = vector.extf %pfv{i} : vector<4xf16> to vector<4xf32>""")
+    elif pa:   # absolute U-aligned key blocks lie in one 16-position KV page: one page lookup per block
         body.append(f"""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
-    for i in range(U):
+    for i in range(0 if PF else U):
         body.append((f"""      %key{i}_raw = index.add %j, %c{i}u : index
       %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
       %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
@@ -2639,7 +2771,10 @@ def attention_text(S, P):
       %part{i} = vector.reduce<addf> %prod{i}, %zero_f : vector<4xf32>, f32""" + ("" if ab else f"""
       %sr{i} = kernel.subgroup.reduce<addf> %part{i} : f32"""))
     if ab:   # all U key scores of the block in one butterfly all-reduce (~2U shuffles instead of 5U)
-        body.append(allreduce([f"%part{i}" for i in range(U)], "ar", [f"%sr{i}" for i in range(U)]))
+        if "nored" in os.environ.get("ATTN_ABL", ""):   # diagnostic only (wrong output): no cross-lane score reduction
+            body.extend(f"      %sr{i} = scalar.addf %part{i}, %zero_f : f32" for i in range(U))
+        else:
+            body.append(allreduce([f"%part{i}" for i in range(U)], "ar", [f"%sr{i}" for i in range(U)]))
     for i in range(U):
         body.append(f"""      %s{i} = scf.select %ok{i}, %sr{i}, %neg_big : f32""")
     # ATTN_ILP independent online-softmax chains per block (keys interleaved by halves), merged after the loop:
@@ -2660,17 +2795,31 @@ def attention_text(S, P):
         pl, pa = f"%l_scaled{sx}", f"%acc_s{sx}"
         for i in keys:
             body.append(f"""      %d{i} = scalar.subf %s{i}, {prev} : f32
-      %p{i} = scalar.expf<afn> %d{i} : f32
+      %p{i} = {"scalar.addf %d" + str(i) + ", %zero_f" if "noexp" in os.environ.get("ATTN_ABL", "") else "scalar.expf<afn> %d" + str(i)} : f32
       %la{i} = scalar.addf {pl}, %p{i} : f32
       %pv{i} = vector.splat %p{i} : vector<4xf32>
       %aa{i} = vector.fmaf %pv{i}, %v{i}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}", f"%aa{i}"
         yields += [prev, pl, pa]
-    body.append(f"      scf.yield {', '.join(yields)} : " + ", ".join(["f32, f32, vector<4xf32>"] * ILP))
+    PF_ARGS = PF_TYPES = PF_OUTS = PF_PRO = ""
+    if PF:
+        assert ILP == 1
+        body.append("""      %jn_raw = index.add %j, %cU : index
+      %jn_ok = index.cmp ult, %jn_raw, %hi_abs : index
+      %jn = scf.select %jn_ok, %jn_raw, %j : index""")
+        body.append(pf_loads("%jn", "_n"))
+        yields += [f"%pfk{i}_n" for i in range(U)] + [f"%pfv{i}_n" for i in range(U)]
+        PF_ARGS = "".join(f", %pfk{i} = %pfk{i}_p : vector<4xf16>" for i in range(U)) + "".join(f", %pfv{i} = %pfv{i}_p : vector<4xf16>" for i in range(U))
+        PF_TYPES = ", vector<4xf16>" * (2 * U)
+        PF_OUTS = "".join(f", %pfo{i}" for i in range(2 * U))
+        PF_PRO = ("    %lo_ok = index.cmp ult, %lo_al, %hi_abs : index\n    %j0 = scf.select %lo_ok, %lo_al, %c0 : index\n"
+                  + pf_loads("%j0", "_p") + "\n")
+    body.append(f"      scf.yield {', '.join(yields)} : " + ", ".join(["f32, f32, vector<4xf32>"] * ILP) + PF_TYPES)
     ILP_ARGS = "".join(f", %m{c + 1} = %neg_big : f32, %l{c + 1} = %zero_f : f32, %acc{c + 1} = %zero4 : vector<4xf32>" for c in range(1, ILP))
     ILP_TYPES = ", f32, f32, vector<4xf32>" * (ILP - 1)
     ILP_OUTS = "".join(f", %mf{c + 1}, %lf{c + 1}, %af{c + 1}" for c in range(1, ILP))
     ILP_MERGE = ""
     FIN = ("%m_final0, %l_final0, %acc_final0" + ILP_OUTS) if ILP > 1 else "%m_final, %l_final, %acc_final"
+    FIN += PF_OUTS
     if ILP > 1:
         mm = "%m_r"
         ILP_MERGE = "    %m_r = scalar.addf %m_final0, %zero_f : f32\n" + "".join(f"    %mm{c} = scalar.maxnumf {'%m_r' if c == 1 else f'%mm{c - 1}'}, %mf{c + 1} : f32\n" for c in range(1, ILP))
@@ -2712,11 +2861,11 @@ def attention_text(S, P):
         SINK_LOAD = SINK_W = ""
         M_INIT, D_INIT = "%neg_big", "%zero_f"
     text = f"""
-// Splits for `visible` keys: about 32 keys each, at most {S}.
+// Splits for `visible` keys: about {DEC_KPS if P == "g" else 32} keys each, at most {S}.
 func.def inline @{P}_split_count(%visible: index) -> (index) {{
   %c1 = index.constant 1 : index
-  %c127 = index.constant 31 : index
-  %c128 = index.constant 32 : index
+  %c127 = index.constant {(DEC_KPS if P == "g" else 32) - 1} : index
+  %c128 = index.constant {DEC_KPS if P == "g" else 32} : index
   %cmax = index.constant {S} : index
   %padded = index.add %visible, %c127 : index
   %target = index.div %padded, %c128 : index
@@ -2809,7 +2958,7 @@ kernel.def export("{P}_attention_split") @{P}_attention_split(%tokens: index) {{
     %hi_abs = index.add %window_low, %stop : index
     %lo_q = index.div %lo_abs, %cU : index
     %lo_al = index.mul %lo_q, %cU : index
-    """ + FIN + """ = scf.for %j = [%lo_al to %hi_abs step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""" if pa else """    """ + FIN + """ = scf.for %j = [%start to %stop step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""") + f"""
+    """ + PF_PRO + FIN + """ = scf.for %j = [%lo_al to %hi_abs step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + PF_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + PF_TYPES + """) {""" if pa else """    """ + FIN + """ = scf.for %j = [%start to %stop step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<4xf32>""" + ILP_ARGS + """) -> (f32, f32, vector<4xf32>""" + ILP_TYPES + """) {""") + f"""
 {chr(10).join(body)}
     }}
 {ILP_MERGE}
@@ -2903,7 +3052,9 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
   kernel.return
 }}
 """
-    if P == "g" and attn_rules.multi_token(U, KVH):
+    if P == "g" and attn_rules.ATTN_GQA and attn_rules.paged(U) and attn_rules.butterfly(U) and not gen_draft.enabled():
+        text = gqa_split(text, P, S)
+    elif P == "g" and attn_rules.multi_token(U, KVH):
         text = multi_token_split(text, P, U, ATTN_MT)
     if D != 128:
         text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
@@ -2935,6 +3086,9 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
 # is capped so the workgroup tiles fit 64 KB. Measured losses outside that: 8 KV heads (Qwen3-4B DFlash, -17 %
 # locally), head_dim 256 with one KV head (Gemma-3-1B, 8k/16k -40 %). SEG_ATTN=0 keeps the split kernel everywhere.
 SEG_MIN = int(os.environ.get("SEG_MIN", "8192"))
+# Decode attention: at most DEC_SPLITS splits of about DEC_KPS keys each (default 64 splits of 32 keys).
+DEC_SPLITS = int(os.environ.get("ATTN_SPLITS", "64"))
+DEC_KPS = int(os.environ.get("ATTN_KPS", "32"))
 
 
 def seg_tokens():
@@ -2948,7 +3102,7 @@ def seg_tokens():
 
 def attention_seg(split_text):
     """The span body, from the decode split kernel's text (attention_text(64, "g")): same partials."""
-    TS, S, NC, PB = seg_tokens(), 64, D // 32, POS_BYTES
+    TS, S, NC, PB = seg_tokens(), DEC_SPLITS, D // 32, POS_BYTES
     V = f"vector<{DL}xf32>"
     # values: VW dims per lane, so each key's V row spans LPK lanes and one load step covers KS keys
     VW = 4 if D == 64 else DL   # head_dim 64: two keys per load step (2 dims per lane lost on DevLab: -21 %)
@@ -3286,7 +3440,7 @@ def seg_attention(text):
 def attention():
     """Decode attention with up to 64 splits; the prefill fallback (listed,
     indexed by token over up to 1024 rows) keeps 16 splits."""
-    dec, _, _ = attention_text(64, "g")
+    dec, _, _ = attention_text(DEC_SPLITS, "g")
     pre, split_l, combine_l = attention_text(16, "g16")
     count16 = pre[pre.index("// Splits for"):pre.index('kernel.def export("g16_attention_split")')]
     return dec + "\n" + count16 + split_l + "\n" + combine_l + FALLBACK
@@ -4864,9 +5018,9 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
   %c_never = index.constant 1000000 : index
   %c128 = index.constant 128 : index
   %prefill_shape = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c64"} : index
-  %pacc_dec = index.constant {QH * 64 * D * 4} : offset
+  %pacc_dec = index.constant {QH * DEC_SPLITS * D * 4} : offset
   %pacc_pre = index.constant {QH * 16 * D * 4} : offset
-  %pml_dec = index.constant {QH * 64 * 2 * 4} : offset
+  %pml_dec = index.constant {QH * DEC_SPLITS * 2 * 4} : offset
   %pml_pre = index.constant {QH * 16 * 2 * 4} : offset
   %pacc_bytes = scf.select %prefill_shape, %pacc_pre, %pacc_dec : offset
   %pml_bytes = scf.select %prefill_shape, %pml_pre, %pml_dec : offset
