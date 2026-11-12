@@ -1,12 +1,12 @@
 {
- "_comment": "flash2: peeled last key tile (WIP)",
+ "_comment": "flash2: where is the remaining gap of the peeled kernel? (WIP)",
  "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
  "memory_bytes": 55000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "f2b1",
+   "name": "f2c1",
    "variants": [
     {
      "name": "pre",
@@ -18,25 +18,39 @@
      "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
     },
     {
-     "name": "main",
+     "name": "h1",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "6fd2f49"
+     "ref": "666171a730b939edc1d9369449d19bb248397c37"
     },
     {
-     "name": "p1",
+     "name": "h1_direct",
+     "build": {
+      "FLASH2_DIRECT": "1"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "666171a730b939edc1d9369449d19bb248397c37"
+    },
+    {
+     "name": "h1_nopart",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "b56ed383ee8599f7d16691278d183b6104dd4f4c"
+     "ref": "666171a730b939edc1d9369449d19bb248397c37",
+     "drop": [
+      "*:g_attention_flash2_partial"
+     ]
     },
     {
-     "name": "p2",
+     "name": "h1_bc",
      "build": {
       "FLASH2_ENTRY": "bcast"
      },
@@ -44,18 +58,19 @@
       "--draft",
       "none"
      ],
-     "ref": "b56ed383ee8599f7d16691278d183b6104dd4f4c"
+     "ref": "666171a730b939edc1d9369449d19bb248397c37"
     }
    ],
    "steps": [
     "perf:pre:2:long",
-    "perf:main:2:long",
-    "perf:p1:2:long",
-    "perf:p2:2:long"
+    "perf:h1:2:long",
+    "perf:h1_direct:2:long",
+    "perf:h1_nopart:2:long",
+    "perf:h1_bc:2:long"
    ]
   },
   {
-   "name": "f2b2",
+   "name": "f2c2",
    "variants": [
     {
      "name": "pre",
@@ -67,46 +82,44 @@
      "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
     },
     {
-     "name": "p3",
-     "build": {
-      "FLASH2_ENTRY": "bcast",
-      "FLASH2_MASKV": "old"
-     },
+     "name": "pre_fl",
+     "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "b56ed383ee8599f7d16691278d183b6104dd4f4c"
+     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f",
+     "double": [
+      "*:g_attention_flash2\\b"
+     ]
     },
     {
-     "name": "p4",
-     "build": {
-      "FLASH2_MASKV": "old"
-     },
+     "name": "h1",
+     "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "b56ed383ee8599f7d16691278d183b6104dd4f4c"
+     "ref": "666171a730b939edc1d9369449d19bb248397c37"
     },
     {
-     "name": "nomask_bc",
-     "build": {
-      "FLASH2_ABL_NOMASK": "1",
-      "FLASH2_ENTRY": "bcast"
-     },
+     "name": "h1_fl",
+     "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "b56ed383ee8599f7d16691278d183b6104dd4f4c"
+     "ref": "666171a730b939edc1d9369449d19bb248397c37",
+     "double": [
+      "*:g_attention_flash2\\b"
+     ]
     }
    ],
    "steps": [
     "perf:pre:2:long",
-    "perf:p3:2:long",
-    "perf:p4:2:long",
-    "perf:nomask_bc:2:long"
+    "perf:pre_fl:2:long",
+    "perf:h1:2:long",
+    "perf:h1_fl:2:long"
    ]
   }
  ]
