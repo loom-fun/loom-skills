@@ -16,9 +16,9 @@
   {
    "repo": "loom-fun/unsloth-Muse-Glimmer-30B-loom",
    "slug": "muse-glimmer-30b",
-   "memory_bytes": 39000000000,
+   "memory_bytes": 44000000000,
    "kit": "glimmer",
-   "llamacpp": "b1355",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -87,7 +87,7 @@
    "slug": "qwen3.5-4b",
    "memory_bytes": 28000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -111,7 +111,7 @@
    "slug": "ornith-1.5-9b",
    "memory_bytes": 32000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -289,7 +289,7 @@
    "slug": "llama-3.1-8b-instruct",
    "memory_bytes": 35000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "draft"
    ]
