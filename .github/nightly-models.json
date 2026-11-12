@@ -332,7 +332,7 @@
    "slug": "qwen3-30b-a3b-instruct-2507",
    "memory_bytes": 63000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": []
   },
   {
