@@ -692,6 +692,13 @@ if os.environ.get("FLASH2_ENTRY") == "bcast" and os.environ.get("FLASH2_ROLE") !
     _old = "  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %entry = index.cast %entry32 : i32 to index\n"
     assert _old in text, "entry load not found"
     text = text.replace(_old, "  %entry32r = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %lane0 = scalar.constant 0 : i32\n  %entry32 = kernel.subgroup.broadcast %entry32r from %lane0 : i32, i32\n  %entry = index.cast %entry32 : i32 to index\n")
+if os.environ.get("FLASH2_DIRECT") == "1" and os.environ.get("FLASH2_ROLE") != "partial":   # diagnostic (timing only): first token = tile * 16
+    import re as _re0
+    text = _re0.sub(r"  %entry_slot_value = .*?\n  %entry = index.cast[^\n]*\n", "", text, flags=_re0.S)
+    text = _re0.sub(r"  (%first_token|%anchor) = index.assume %entry [^\n]*\n", r"  \1 = index.mul %tile, %c16 : index\n", text)
+if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and not ABL_NOMASK:   # the masked blocks only in the last key tile (flash2_peel.py)
+    from flash2_peel import peel_last_tile
+    text = peel_last_tile(text)
 out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
 if ROLE == "deep":
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_deep") @{P}_attention_flash2_deep(', 1)
