@@ -75,6 +75,10 @@ LONG_CTX = int(os.environ.get("TUNE_LONG", "16000"))
 # 32k 125 vs 166, four streams 498 vs 787 tok/s). So every row is scored against depth 0 and a drafter that is
 # slower than NO_LOSS x depth 0 on any row is not used, however well it does on the code-edit row that quotes its input.
 NO_LOSS = 0.98
+# Context gate (build_draft.py SPEC_CTX_MAX): a candidate that wins every row but the long-document one is retried with
+# drafting off from this causal position on, so short context keeps the drafting gain (Ornith-1.5-35B depth 3: short rows
+# 118 vs 62 tok/s, 16k 44.9 vs 53.5). Below the long row's prompt, above the short rows'. TUNE_CTX_MAX=0 skips the retry.
+CTX_GATE = int(os.environ.get("TUNE_CTX_MAX", "3500"))
 
 
 def measure(url, model, chat, context=0, rows=1):
@@ -317,6 +321,37 @@ def main():
             if not queue and first and measured and (climb or max(measured.values()) >= 0.9 * best[2]):
                 i = allowed.index(max(measured, key=measured.get))
                 queue = [allowed[j] for j in (i - 1, i + 1) if 0 <= j < len(allowed) and allowed[j] not in measured]
+        # context-gate retry for this kind's best depth when only the long row is below NO_LOSS x depth 0
+        if CTX_GATE and measured and base_rows.get("long"):
+            best_d = max(measured, key=measured.get)
+            r = next(x for x in table if x["kind"] == kind and x["depth"] == best_d)
+            rest = {k: v for k, v in base_rows.items() if k != "long"}
+            if r["rows"].get("long", 0.0) < NO_LOSS * base_rows["long"] and margin(r["rows"], rest) >= NO_LOSS:
+                pkg_c = os.path.join(work, f"pkg_tune_{kind}_ctx")
+                sh(*build, pkg_c, *common, "--draft", kind, env=dict(os.environ, SPEC_CTX_MAX=str(CTX_GATE)))
+                card_c = json.load(open(os.path.join(pkg_c, "model.json")))
+                card_c["presets"]["chat"]["execution"]["draft_depth"] = best_d
+                path = os.path.join(pkg_c, f"model_d{best_d}.json")
+                json.dump(card_c, open(path, "w"), indent=1)
+                t0 = time.time()
+                try:
+                    serve("tune", port, cand_mem[kind], path, env)
+                    rows = measure(f"http://127.0.0.1:{port}", model_id, chat,
+                                   card_c["presets"]["chat"]["execution"].get("context_capacity") or 0, rows_n)
+                    tps = single_rate(rows)
+                except Exception as e:  # noqa: BLE001
+                    print(f"tune: {kind} depth {best_d} ctx_max {CTX_GATE}: {e}", file=sys.stderr)
+                    tps, rows = 0.0, {}
+                subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
+                row = {"kind": kind, "depth": best_d, "ctx_max": CTX_GATE, "decode_tps": round(tps, 2),
+                       "rows": {k: round(v, 2) for k, v in rows.items()}, "seconds": round(time.time() - t0),
+                       "margin": round(margin(rows, base_rows), 3)}
+                if llama_refs:
+                    row["margin_llama"] = round(llama_margin(rows, llama_refs), 3)
+                print("tune:", json.dumps(row), flush=True)
+                table.append(row)
+                if row["margin"] > best[2]:
+                    best = (kind, best_d, row["margin"])
         if first:
             skipped[kind] = [d for d in allowed if d not in measured]
     if base is None:
@@ -328,19 +363,19 @@ def main():
 
     def exact(kind, depth, pkg, mem):
         url = f"http://127.0.0.1:{port}"
-        if kind not in refs:
+        if pkg not in refs:
             card0 = json.load(open(os.path.join(pkg, f"model_d{depth}.json")))
             card0["presets"]["chat"]["execution"]["draft_depth"] = 0
             p0 = os.path.join(pkg, "model_d0.json")
             json.dump(card0, open(p0, "w"), indent=1)
             serve("tune", port, mem, p0, env)
-            refs[kind] = os.path.join(pkg, "spec_ref.jsonl")
-            spec_check.record(url, model_id, refs[kind])
+            refs[pkg] = os.path.join(pkg, "spec_ref.jsonl")
+            spec_check.record(url, model_id, refs[pkg])
             subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
         out = os.path.join(pkg, f"spec_d{depth}.jsonl")
         serve("tune", port, mem, os.path.join(pkg, f"model_d{depth}.json"), env)
         spec_check.record(url, model_id, out)
-        return spec_check.compare(refs[kind], out) == 0
+        return spec_check.compare(refs[pkg], out) == 0
     # A drafter is used only if no row is slower than NO_LOSS x depth 0 and the single-stream rate gains at least 3 %;
     # candidates rank by their worst row relative to depth 0 (the margin).
     # With TUNE_BASELINE the margin is the worst row relative to llama.cpp and a drafter qualifies when it beats depth 0's.
@@ -360,10 +395,10 @@ def main():
     if ranked:
         top = ranked[0]["margin"]
         ranked.sort(key=lambda r: (r["margin"] < NO_LOSS * top, r["depth"] if r["margin"] >= NO_LOSS * top else 0, -r["margin"]))
-    choice = ("none", 0, base)
+    choice, ctx_max = ("none", 0, base), 0
     for r in ranked:
-        kind, depth = r["kind"], r["depth"]
-        pkg = os.path.join(work, f"pkg_tune_{kind}")
+        kind, depth, ctx = r["kind"], r["depth"], r.get("ctx_max", 0)
+        pkg = os.path.join(work, f"pkg_tune_{kind}" + ("_ctx" if ctx else ""))
         mem = cand_mem[kind]
         try:
             ok, why = (True, "") if exact(kind, depth, pkg, mem) else (False, "drafting changed the output (spec_check)")
@@ -376,17 +411,19 @@ def main():
         print("tune:", json.dumps({"kind": kind, "depth": depth, "checked": r["checked"]}), flush=True)
         if ok:
             choice = (kind, depth, r["decode_tps"])
+            ctx_max = ctx
             break
     cfg = json.load(open(cfg_path))
     cfg.setdefault("drafter", {})
-    cfg["drafter"].update(kind=choice[0], depth=choice[1], tuned=table)
+    cfg["drafter"].update(kind=choice[0], depth=choice[1], ctx_max=ctx_max, tuned=table)
     json.dump(cfg, open(cfg_path, "w"), indent=1)
     args = ["--draft", choice[0] if choice[0] != "none" else "none"] + (["--draft-depth", str(choice[1])] if choice[1] else [])
     out = sh(*build, os.path.join(work, "pkg"), *common, *args).stdout
     final_mem = [l for l in out.split() if l.startswith("--memory_bytes=")][-1].split("=")[1]
     for kind, _ in kinds:
         shutil.rmtree(os.path.join(work, f"pkg_tune_{kind}"), ignore_errors=True)
-    print("TUNE_RESULT", json.dumps({"kind": choice[0], "depth": choice[1], "decode_tps": round(choice[2], 2),
+        shutil.rmtree(os.path.join(work, f"pkg_tune_{kind}_ctx"), ignore_errors=True)
+    print("TUNE_RESULT", json.dumps({"kind": choice[0], "depth": choice[1], "ctx_max": ctx_max, "decode_tps": round(choice[2], 2),
                                      "baseline_tps": round(base, 2), "memory_bytes": int(final_mem), "table": table,
                                      **({"prior": (cfg.get("reference") or {}).get("repo"), "not_measured": skipped} if prior else {})}))
 
