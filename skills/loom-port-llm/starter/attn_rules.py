@@ -11,6 +11,9 @@ ATTN_ILP = int(os.environ.get("ATTN_ILP", "1"))   # independent softmax chains p
 # 24.5 -> 28.3 (+15 %), decode/2k/4 streams within noise. ATTN_GQA=0 keeps the per-head kernel.
 ATTN_GQA = os.environ.get("ATTN_GQA", "1") == "1"
 ATTN_GQA_FROM = int(os.environ.get("ATTN_GQA_FROM", "4096"))
+# Drafting packages (verify spans, ctx-gated and plain epochs): the K/V-once body also serves the tokens that do not take the
+# multi-token path (1-token epochs, the tail of a span, every token when MT is off) past ATTN_GQA_FROM keys. ATTN_GQA_DRAFT=0: nodraft only.
+ATTN_GQA_DRAFT = os.environ.get("ATTN_GQA_DRAFT", "1") == "1"
 ATTN_MT = int(os.environ.get("ATTN_MT", "4"))   # verify-span tokens per wave (gen_llm.multi_token_split)
 ATTN_MT_FROM = int(os.environ.get("ATTN_MT_FROM", "1024"))   # ... from this position on
 # The span path leaves one workgroup per (4 tokens, KV head, split), each running its tokens serially: with fewer KV
@@ -35,6 +38,11 @@ def butterfly(U):
 
 def ilp(U):
     return ATTN_ILP if U % ATTN_ILP == 0 else 1
+
+
+def gqa(draft_on, seg):
+    """Does the decode split kernel carry the K/V-once body? Drafting packages: not with the segment (KVH <= 2) path."""
+    return ATTN_GQA and (not draft_on or (ATTN_GQA_DRAFT and not seg))
 
 
 def multi_token(U, kv_heads):

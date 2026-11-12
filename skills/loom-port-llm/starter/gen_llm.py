@@ -3060,9 +3060,9 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
 """
     if P == "g" and attn_rules.COMBINE_U > 1:
         text = combine_unrolled(text, S, attn_rules.COMBINE_U, M_INIT, D_INIT)
-    if P == "g" and D == 128 and attn_rules.ATTN_GQA and attn_rules.paged(U) and attn_rules.butterfly(U) and not gen_draft.enabled():   # measured at head_dim 128 only
+    if P == "g" and D == 128 and attn_rules.gqa(gen_draft.enabled(), seg_tokens()) and attn_rules.paged(U) and attn_rules.butterfly(U):   # measured at head_dim 128 only
         text = gqa_split(text, P, S)
-    elif P == "g" and attn_rules.multi_token(U, KVH):
+    if P == "g" and attn_rules.multi_token(U, KVH):
         text = multi_token_split(text, P, U, ATTN_MT)
     if D != 128:
         text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")

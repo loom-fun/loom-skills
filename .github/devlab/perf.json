@@ -1,40 +1,118 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "verify32k: K/V-once body for non-span tokens of drafting packages; A/B vs main, MT off, nodraft.",
+ "card": "loom-fun/ggml-org-Qwen3-4B-loom",
+ "memory_bytes": 55000000000,
+ "kit": null,
+ "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "q4",
+   "card": "loom-fun/ggml-org-Qwen3-4B-loom",
+   "memory_bytes": 55000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "main",
+     "ref": "origin/main"
+    },
+    {
+     "name": "gqa"
+    },
+    {
+     "name": "nomt",
+     "build": {
+      "ATTN_MT": "1"
+     }
+    },
+    {
+     "name": "nodraft",
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
+    "ktest:gqa",
+    "perf:main:2:long",
+    "perf:gqa:2:long",
+    "perf:nomt:2:long",
+    "perf:nodraft:2:long"
    ]
   },
   {
-   "name": "fn-mtp-b",
+   "name": "flint",
+   "card": "loom-fun/ggml-org-Flint-loom",
+   "memory_bytes": 69000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "main",
+     "ref": "origin/main"
+    },
+    {
+     "name": "gqa"
+    },
+    {
+     "name": "nomt",
+     "build": {
+      "ATTN_MT": "1"
+     }
+    },
+    {
+     "name": "nodraft",
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "mt4",
+     "build": {
+      "ATTN_MT_MIN_KV": "4"
+     }
     }
    ],
    "steps": [
-    "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
+    "ktest:gqa",
+    "perf:main:2:long",
+    "perf:gqa:2:long",
+    "perf:nomt:2:long",
+    "perf:nodraft:2:long",
+    "perf:mt4:2:long"
+   ]
+  },
+  {
+   "name": "l8",
+   "card": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "main",
+     "ref": "origin/main"
+    },
+    {
+     "name": "gqa"
+    },
+    {
+     "name": "nomt",
+     "build": {
+      "ATTN_MT": "1"
+     }
+    },
+    {
+     "name": "nodraft",
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    }
+   ],
+   "steps": [
+    "ktest:gqa",
+    "perf:main:2:long",
+    "perf:gqa:2:long",
+    "perf:nomt:2:long",
+    "perf:nodraft:2:long"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
