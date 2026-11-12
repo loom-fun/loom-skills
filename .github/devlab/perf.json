@@ -1,70 +1,87 @@
 {
- "_comment": "Qwen3-Coder-30B-A3B regenerated card: same-runner ROCm + Vulkan comparison, and attention/MoE doubling ablation.",
+ "_comment": "Qwen3-Coder-30B-A3B decode attention (QH32 KVH4 G8 d128): #357 GQA kernel at kv4 + FROM threshold, keys-per-split. Rebuilds from this branch; ctl = GQA off.",
  "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
  "memory_bytes": 57000000000,
  "kit": null,
  "llamacpp": "b1373",
- "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "card-perf",
+   "name": "gqa",
    "variants": [
     {
-     "name": "card"
+     "name": "ctl",
+     "build": {
+      "ATTN_GQA": "0"
+     }
+    },
+    {
+     "name": "gqa",
+     "build": {}
+    },
+    {
+     "name": "gqa1k",
+     "build": {
+      "ATTN_GQA_FROM": "1024"
+     }
+    },
+    {
+     "name": "gqa256",
+     "build": {
+      "ATTN_GQA_FROM": "256"
+     }
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan.np1.nospec:2",
-    "llama@vulkan.np1.nospec:2:long",
-    "llamac4@vulkan.perslot.nospec"
+    "perf:ctl:1",
+    "perf:gqa:1",
+    "perf:gqa1k:1",
+    "perf:gqa256:1",
+    "perf:ctl:1:long",
+    "perf:gqa:1:long",
+    "perf:gqa1k:1:long",
+    "perf:gqa256:1:long"
    ]
   },
   {
-   "name": "abl",
+   "name": "kps",
    "variants": [
     {
-     "name": "card"
+     "name": "ctl",
+     "build": {
+      "ATTN_GQA": "0"
+     }
     },
     {
-     "name": "dsplit",
-     "double": [
-      "*:g_attention_split"
-     ]
+     "name": "kps64",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "64"
+     }
     },
     {
-     "name": "dcomb",
-     "double": [
-      "*:g_attention_combine"
-     ]
+     "name": "kps128",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "128"
+     }
     },
     {
-     "name": "dmoegu",
-     "double": [
-      "*:g_moe_gu_q4_k_q8_k2048_r2"
-     ]
-    },
-    {
-     "name": "dmoedn",
-     "double": [
-      "*:g_moe_dn_q4_k_q8_k768_r2"
-     ]
+     "name": "kps256",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "256"
+     }
     }
    ],
    "steps": [
-    "perf:card:1",
-    "perf:card:1:long",
-    "perf:dsplit:1",
-    "perf:dsplit:1:long",
-    "perf:dcomb:1",
-    "perf:dcomb:1:long",
-    "perf:dmoegu:1",
-    "perf:dmoedn:1"
+    "perf:ctl:1",
+    "perf:kps64:1",
+    "perf:kps128:1",
+    "perf:kps256:1",
+    "perf:ctl:1:long",
+    "perf:kps64:1:long",
+    "perf:kps128:1:long",
+    "perf:kps256:1:long"
    ]
   }
  ]
