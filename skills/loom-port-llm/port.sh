@@ -138,7 +138,7 @@ except Exception:
 print(" ".join(dict.fromkeys(out)))
 EOF
 )
-tokrepos="${ctok:-} $tokrepos"
+tokrepos="${ctok:+$ctok }$tokrepos"
 # A candidate must carry, with the GGUF's ids, the control and user-defined tokens (types 3, 4) its chat template uses:
 # the base model named in a fine-tune's GGUF can lack them (Mellum2 base: <|im_start|>/<|im_end|> are plain text there
 # and loom-serve finds no terminal marker; Qwen3-1.7B-Base: no <think>/<tool_response>, which Loom splits into pieces
