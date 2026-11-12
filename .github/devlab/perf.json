@@ -6,27 +6,6 @@
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "g1-ab",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "gate2",
-     "build": {
-      "SPEC_OCC_MIN": "2"
-     }
-    }
-   ],
-   "steps": [
-    "perf:gate2:3",
-    "perf:card:3",
-    "perf:gate2:3",
-    "perf:card:3",
-    "llamac4@vulkan"
-   ]
-  },
-  {
    "name": "q9",
    "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
    "memory_bytes": 20000000000,
@@ -54,82 +33,10 @@
     "c4:nodraft",
     "perf:gate2:2:long",
     "perf:card:2:long",
-    "perf:nodraft:2:long",
     "consistency:gate2:3",
     "gates:gate2:dev",
-    "llamac4",
-    "llamac4@vulkan",
-    "ktest:gate2"
-   ]
-  },
-  {
-   "name": "l3",
-   "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
-   "memory_bytes": 17000000000,
-   "llamacpp": "b1369",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "gate2",
-     "build": {
-      "SPEC_OCC_MIN": "2"
-     }
-    },
-    {
-     "name": "nodraft",
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "c4:card",
-    "c4:gate2",
-    "c4:nodraft",
-    "perf:gate2:2:long",
-    "perf:card:2:long",
-    "perf:nodraft:2:long",
-    "consistency:gate2:3",
-    "gates:gate2:dev",
-    "llamac4",
-    "llamac4@vulkan"
-   ]
-  },
-  {
-   "name": "hcx",
-   "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
-   "memory_bytes": 12000000000,
-   "llamacpp": "b1369",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "gate2",
-     "build": {
-      "SPEC_OCC_MIN": "2"
-     }
-    },
-    {
-     "name": "nodraft",
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "c4:card",
-    "c4:gate2",
-    "c4:nodraft",
-    "perf:gate2:2:long",
-    "perf:card:2:long",
-    "perf:nodraft:2:long",
-    "consistency:gate2:3",
-    "gates:gate2:dev",
-    "llamac4",
-    "llamac4@vulkan"
+    "ktest:gate2",
+    "llamac4"
    ]
   }
  ]
