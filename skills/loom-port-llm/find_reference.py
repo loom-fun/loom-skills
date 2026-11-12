@@ -342,10 +342,14 @@ def cmd_apply(a):
         cfg["chat"] = rc["chat"]; taken.append("chat")
     elif rc.get("chat") and cfg.get("chat") != rc["chat"]:
         # stop_after_calls / stop_after_answer are reviewed by hand (the template cannot reveal them: the service
-        # terminal vs the next turn's opener). Without them a call turn runs on past the call to max_tokens.
-        for sk in ("stop_after_calls", "stop_after_answer"):
-            if rc["chat"].get(sk) and not cfg["chat"].get(sk):
-                cfg["chat"][sk] = rc["chat"][sk]; taken.append("chat." + sk)
+        # terminal vs the next turn's opener). Without them a call turn runs on past the call to max_tokens. Taken only
+        # when the rest of the derived chat block equals the reference's (the same template, so the same markers).
+        sks = ("stop_after_calls", "stop_after_answer")
+        rest = lambda c: {k: v for k, v in c.items() if k not in sks}
+        if rest(cfg["chat"]) == rest(rc["chat"]):
+            for sk in sks:
+                if rc["chat"].get(sk) and not cfg["chat"].get(sk):
+                    cfg["chat"][sk] = rc["chat"][sk]; taken.append("chat." + sk)
         if cfg.get("chat") != rc["chat"]:
             review.append("chat")
     d = rc.get("drafter") or {}
