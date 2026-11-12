@@ -2935,6 +2935,12 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
 # is capped so the workgroup tiles fit 64 KB. Measured losses outside that: 8 KV heads (Qwen3-4B DFlash, -17 %
 # locally), head_dim 256 with one KV head (Gemma-3-1B, 8k/16k -40 %). SEG_ATTN=0 keeps the split kernel everywhere.
 SEG_MIN = int(os.environ.get("SEG_MIN", "8192"))
+# Longest segment (tokens of one run read together). At head_dim 128 a 4-token segment (depth 3 and up) ran 2.7x
+# slower at long context than a 3-token one (Qwen2.5-1.5B, 16k-token document: depth-3 build 45 tok/s drafted, 124 with
+# a depth-2 build; capping the 3-token build's segments at 3 gave 109), so draft/tune.py, which measures depth 3
+# candidates, dropped n-gram drafting. Longer verification runs are cut into segments of at most this many tokens
+# (same bits). SEG_TS_MAX=N overrides (A/B switch).
+SEG_TS_MAX = int(os.environ.get("SEG_TS_MAX", "3" if D == 128 else "64"))
 
 
 def seg_tokens():
@@ -2942,7 +2948,7 @@ def seg_tokens():
     workgroup memory (longer runs go one token at a time); 0 when the decode path keeps the split kernel."""
     if not (os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and D in (64, 128) and KVH <= 2):
         return 0
-    ts = min(gen_draft.DRAFT["depth"] + 1, 65536 // (G * 4 * (D + 32)))
+    ts = min(gen_draft.DRAFT["depth"] + 1, 65536 // (G * 4 * (D + 32)), SEG_TS_MAX)
     return ts if ts >= 2 else 0
 
 
