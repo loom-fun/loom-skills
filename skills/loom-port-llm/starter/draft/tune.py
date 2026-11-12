@@ -423,7 +423,8 @@ def main():
         for r in table:
             if r["kind"] != "none":
                 r["margin"] = r["margin_llama"]
-        ok_margin = lambda r: r["margin"] >= NO_LOSS * floor
+        # the noise band only while the drafter still beats llama.cpp on every row: never trade a losing row for a worse one
+        ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor)
     else:
         ok_margin = lambda r: r["margin"] >= NO_LOSS
     ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
