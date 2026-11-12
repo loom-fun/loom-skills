@@ -507,12 +507,7 @@ kernel.def export("k_flash2") @k_flash2(%tokens: index) {
     %nb_diag0 = scalar.cmpi sgt, %nb_last0, %pos0_i32 : i32
     %nb_win0 = scalar.cmpi slt, %base0, %win_lo15 : i32
     %nb_wins0 = scalar.andi %nb_win0, %is_sliding : i1
-    %nb_dead0 = scalar.cmpi sgt, %base0, %pos15_i32 : i32
-    %nb_live0 = scalar.xori %nb_dead0, %true_const : i1
-    %nb_diag_live0 = scalar.andi %nb_diag0, %nb_live0 : i1
-    %nb_edge0 = scalar.andi %nb_wins0, %nb_live0 : i1
-    %nb_never0 = scalar.constant false : i1
-    %need0 = scalar.andi %nb_diag_live0, %nb_never0 : i1
+    %need0 = scalar.ori %nb_diag0, %nb_wins0 : i1
     %on0_0, %on1_0, %on2_0, %on3_0, %on4_0, %on5_0, %on6_0, %on7_0 = scf.if %need0 -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
       %ac0_0 = scf.for %mc_0_0 = [%c0 to %c16 step %c1](%acc0_0 = %os0 : vector<8xf32>) -> (vector<8xf32>) {
         %mci0_0 = index.cast %mc_0_0 : index to i32
@@ -690,12 +685,7 @@ kernel.def export("k_flash2") @k_flash2(%tokens: index) {
     %nb_diag1 = scalar.cmpi sgt, %nb_last1, %pos0_i32 : i32
     %nb_win1 = scalar.cmpi slt, %base1, %win_lo15 : i32
     %nb_wins1 = scalar.andi %nb_win1, %is_sliding : i1
-    %nb_dead1 = scalar.cmpi sgt, %base1, %pos15_i32 : i32
-    %nb_live1 = scalar.xori %nb_dead1, %true_const : i1
-    %nb_diag_live1 = scalar.andi %nb_diag1, %nb_live1 : i1
-    %nb_edge1 = scalar.andi %nb_wins1, %nb_live1 : i1
-    %nb_never1 = scalar.constant false : i1
-    %need1 = scalar.andi %nb_diag_live1, %nb_never1 : i1
+    %need1 = scalar.ori %nb_diag1, %nb_wins1 : i1
     %on0, %on1, %on2, %on3, %on4, %on5, %on6, %on7 = scf.if %need1 -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
       %ac0_1 = scf.for %mc_0_1 = [%c0 to %c16 step %c1](%acc0_1 = %on0_0 : vector<8xf32>) -> (vector<8xf32>) {
         %mci0_1 = index.cast %mc_0_1 : index to i32
@@ -1393,12 +1383,7 @@ kernel.def export("k_flash2_partial") @k_flash2_partial(%tokens: index) {
     %nb_diag0 = scalar.cmpi sgt, %nb_last0, %pos0_i32 : i32
     %nb_win0 = scalar.cmpi slt, %base0, %win_lo15 : i32
     %nb_wins0 = scalar.andi %nb_win0, %is_sliding : i1
-    %nb_dead0 = scalar.cmpi sgt, %base0, %pos15_i32 : i32
-    %nb_live0 = scalar.xori %nb_dead0, %true_const : i1
-    %nb_diag_live0 = scalar.andi %nb_diag0, %nb_live0 : i1
-    %nb_edge0 = scalar.andi %nb_wins0, %nb_live0 : i1
-    %nb_never0 = scalar.constant false : i1
-    %need0 = scalar.andi %nb_diag_live0, %nb_never0 : i1
+    %need0 = scalar.ori %nb_diag0, %nb_wins0 : i1
     %on0_0, %on1_0, %on2_0, %on3_0, %on4_0, %on5_0, %on6_0, %on7_0 = scf.if %need0 -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
       %ac0_0 = scf.for %mc_0_0 = [%c0 to %c16 step %c1](%acc0_0 = %os0 : vector<8xf32>) -> (vector<8xf32>) {
         %mci0_0 = index.cast %mc_0_0 : index to i32
@@ -1576,12 +1561,7 @@ kernel.def export("k_flash2_partial") @k_flash2_partial(%tokens: index) {
     %nb_diag1 = scalar.cmpi sgt, %nb_last1, %pos0_i32 : i32
     %nb_win1 = scalar.cmpi slt, %base1, %win_lo15 : i32
     %nb_wins1 = scalar.andi %nb_win1, %is_sliding : i1
-    %nb_dead1 = scalar.cmpi sgt, %base1, %pos15_i32 : i32
-    %nb_live1 = scalar.xori %nb_dead1, %true_const : i1
-    %nb_diag_live1 = scalar.andi %nb_diag1, %nb_live1 : i1
-    %nb_edge1 = scalar.andi %nb_wins1, %nb_live1 : i1
-    %nb_never1 = scalar.constant false : i1
-    %need1 = scalar.andi %nb_diag_live1, %nb_never1 : i1
+    %need1 = scalar.ori %nb_diag1, %nb_wins1 : i1
     %on0, %on1, %on2, %on3, %on4, %on5, %on6, %on7 = scf.if %need1 -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
       %ac0_1 = scf.for %mc_0_1 = [%c0 to %c16 step %c1](%acc0_1 = %on0_0 : vector<8xf32>) -> (vector<8xf32>) {
         %mci0_1 = index.cast %mc_0_1 : index to i32
@@ -2196,16 +2176,41 @@ check.case public @pf {
   %layer = check.literal value(0) : index
   %sliding = check.literal value(1) : i32
   %ctx = check.literal value(17408) : index
-  %pool = check.literal value(327680) : index
+  %pool = check.literal value(17408) : index
   %q = check.generate.fill value(0.05) : tensor<1024x4096xf32>
   %g = check.generate.fill value(0.5) : tensor<1024x4096xf32>
   %info = check.file.read.npy path("info.npy") : tensor<1024x4xi32>
   %orig = check.file.read.npy path("orig.npy") : tensor<1098xi32>
   %tiles = check.file.read.npy path("tiles.npy") : tensor<1024xi32>
-  %arena = check.generate.fill value(0.01) : tensor<671088640xf16>
+  %arena = check.generate.fill value(0.01) : tensor<320864256xf16>
   %o = check.generate.fill value(0.0) : tensor<1024x4096xf32>
-  kernel.launch @k_flash2[%t](%t, %layer, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<671088640xf16>, tensor<1024x4096xf32>)
-  kernel.launch @k_flash2_partial[%t](%t, %layer, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<671088640xf16>, tensor<1024x4096xf32>)
+  %layer0 = check.literal value(0) : index
+  kernel.launch @k_flash2[%t](%t, %layer0, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2_partial[%t](%t, %layer0, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  %layer1 = check.literal value(1) : index
+  kernel.launch @k_flash2[%t](%t, %layer1, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2_partial[%t](%t, %layer1, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  %layer2 = check.literal value(2) : index
+  kernel.launch @k_flash2[%t](%t, %layer2, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2_partial[%t](%t, %layer2, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  %layer3 = check.literal value(3) : index
+  kernel.launch @k_flash2[%t](%t, %layer3, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2_partial[%t](%t, %layer3, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  %layer4 = check.literal value(4) : index
+  kernel.launch @k_flash2[%t](%t, %layer4, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2_partial[%t](%t, %layer4, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  %layer5 = check.literal value(5) : index
+  kernel.launch @k_flash2[%t](%t, %layer5, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2_partial[%t](%t, %layer5, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  %layer6 = check.literal value(6) : index
+  kernel.launch @k_flash2[%t](%t, %layer6, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2_partial[%t](%t, %layer6, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  %layer7 = check.literal value(7) : index
+  kernel.launch @k_flash2[%t](%t, %layer7, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2_partial[%t](%t, %layer7, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  %layer8 = check.literal value(8) : index
+  kernel.launch @k_flash2[%t](%t, %layer8, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
+  kernel.launch @k_flash2_partial[%t](%t, %layer8, %sliding, %ctx, %pool, %q, %g, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, tensor<1024x4096xf32>, tensor<1024x4096xf32>, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1098xi32>, tensor<320864256xf16>, tensor<1024x4096xf32>)
   check.return
 }
 
