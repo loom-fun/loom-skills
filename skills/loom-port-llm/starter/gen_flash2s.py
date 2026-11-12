@@ -92,11 +92,6 @@ POSHI = """  // The last live position of the block: keys past it are not writte
   %pos_hi_i32 = scalar.addi %posf_32, %hi_cnt : i32
   %pos_hi = index.cast %pos_hi_i32 : i32 to index
 """
-# FLASH2_EDGE_ZERO=1: also run the per-column V-zeroing path on the sliding window's lower-edge blocks (the old behaviour).
-# Off by default: a lower-edge block holds the same real keys whatever tile it is read by (the tile's pos0 is always a
-# multiple of 16, so the block's keys depend on the query position only), so its bits do not depend on the cut. Only the
-# diagonal block holds keys that may be unwritten or differ by cut (the partial tile's stale-key case).
-EDGE_ZERO = os.environ.get("FLASH2_EDGE_ZERO", "0") == "1"
 PARTIAL = os.environ.get("FLASH2_ROLE") == "partial"   # the tiles a run covers only in part (see gen_flash2.py)
 QTOKEN = """%q_token_value = index.add %first_token, %lane_col : index
   %q_token = index.assume %q_token_value [lt(%q_token_value, %tokens)] : index"""
@@ -417,11 +412,10 @@ for kb in range(KB):
     vt = ", ".join(["vector<8xf32>"] * NFH)
     A(f"""    %nb_last{kb} = scalar.addi %base{kb}, %c15_i32m : i32
     %nb_diag{kb} = scalar.cmpi sgt, %nb_last{kb}, %pos0_i32 : i32
-""" + (f"""    %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
+    %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
     %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
     %need{kb} = scalar.ori %nb_diag{kb}, %nb_wins{kb} : i1
-""" if EDGE_ZERO else f"""    %need{kb} = scalar.ori %nb_diag{kb}, %nb_diag{kb} : i1
-""") + f"""    {", ".join(outs)} = scf.if %need{kb} -> ({vt}) {{""")
+    {", ".join(outs)} = scf.if %need{kb} -> ({vt}) {{""")
     for d in range(NFH):
         A(f"""      %ac{d}_{kb} = scf.for %mc_{d}_{kb} = [%c0 to %c16 step %c1](%acc{d}_{kb} = {ins[d]} : vector<8xf32>) -> (vector<8xf32>) {{
         %mci{d}_{kb} = index.cast %mc_{d}_{kb} : index to i32
@@ -516,6 +510,13 @@ if PARTIAL:
     E.append("  }\n")
     text = text[:i0] + "\n".join(E) + text[i1:]
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_partial") @{P}_attention_flash2_partial(', 1)
+# Sliding-window lower-edge blocks skip the per-column V-zeroing path (FLASH2_EDGE_ZERO=1 keeps it). Such a block holds
+# the same real keys whatever tile reads it (every tile's pos0 is a multiple of 16, so a block's keys depend on the query
+# position only), so its bits do not depend on the cut; only the diagonal block holds keys that may be unwritten or
+# differ by cut. The per-column path costs 16 MMAs per dim fragment, ~2x the PV work of a 512-window layer.
+if os.environ.get("FLASH2_EDGE_ZERO", "0") != "1":
+    import re as _re
+    text = _re.sub(r"(%nb_wins\d+) = scalar\.andi %nb_win\d+, %is_sliding : i1", r"\1 = scalar.constant false : i1", text)
 out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
 if not PARTIAL:
     subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen_flash2s.py")], check=True,

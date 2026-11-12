@@ -62,11 +62,6 @@ import sys  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mv_rows import flash2_deep_from  # noqa: E402
 ROLE = os.environ.get("FLASH2_ROLE", "")
-# FLASH2_EDGE_ZERO=1: also run the per-column V-zeroing path on the sliding window's lower-edge blocks (the old behaviour).
-# Off by default: a lower-edge block holds the same real keys whatever tile it is read by (the tile's pos0 is always a
-# multiple of 16, so the block's keys depend on the query position only), so its bits do not depend on the cut. Only the
-# diagonal block holds keys that may be unwritten or differ by cut (the partial tile's stale-key case).
-EDGE_ZERO = os.environ.get("FLASH2_EDGE_ZERO", "0") == "1"
 PARTIAL = ROLE == "partial"
 DEEP = flash2_deep_from(_c) if T == "llm" and (ROLE or TS == 1) and not PARTIAL else 0
 W = G * TS                       # waves per workgroup
@@ -542,11 +537,10 @@ for kb in range(KB):
     outs = [f"%on{d}" if last else f"%on{d}_{kb}" for d in range(NF)]
     A(f"""    %nb_last{kb} = scalar.addi %base{kb}, %c15_i32m : i32
     %nb_diag{kb} = scalar.cmpi sgt, %nb_last{kb}, %pos0_i32 : i32
-""" + (f"""    %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
+    %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
     %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
     %need{kb} = scalar.ori %nb_diag{kb}, %nb_wins{kb} : i1
-""" if EDGE_ZERO else f"""    %need{kb} = scalar.ori %nb_diag{kb}, %nb_diag{kb} : i1
-""") + f"""    {", ".join(outs)} = scf.if %need{kb} -> ({", ".join(["vector<8xf32>"] * NF)}) {{""")
+    {", ".join(outs)} = scf.if %need{kb} -> ({", ".join(["vector<8xf32>"] * NF)}) {{""")
     for d in range(NF):   # one loop over the 16 query columns per dim fragment keeps the registers of one fragment live
         A(f"""      %ac{d}_{kb} = scf.for %mc_{d}_{kb} = [%c0 to %c16 step %c1](%acc{d}_{kb} = {ins[d]} : vector<8xf32>) -> (vector<8xf32>) {{
         %mci{d}_{kb} = index.cast %mc_{d}_{kb} : index to i32
@@ -682,6 +676,13 @@ if PARTIAL:
                      + f"    view.store %ov{d}_{i}, %out_flat[%q_token, %dn{d}_{i}] : f32, view<[%tokens]x{QH * D}xf32>")
     E.append("  }\n")
     text = text[:i0] + "\n".join(E) + text[i1:]
+# Sliding-window lower-edge blocks skip the per-column V-zeroing path (FLASH2_EDGE_ZERO=1 keeps it). Such a block holds
+# the same real keys whatever tile reads it (every tile's pos0 is a multiple of 16, so a block's keys depend on the query
+# position only), so its bits do not depend on the cut; only the diagonal block holds keys that may be unwritten or
+# differ by cut. The per-column path costs 16 MMAs per dim fragment, ~2x the PV work of a 512-window layer.
+if os.environ.get("FLASH2_EDGE_ZERO", "0") != "1":
+    import re as _re
+    text = _re.sub(r"(%nb_wins\d+) = scalar\.andi %nb_win\d+, %is_sliding : i1", r"\1 = scalar.constant false : i1", text)
 out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
 if ROLE == "deep":
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_deep") @{P}_attention_flash2_deep(', 1)
