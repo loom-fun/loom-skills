@@ -110,6 +110,7 @@ assert GATE_ACT == "sigmoid" or (HEAD_GATE and GATE_ACT == "softplus"), f"attn_g
 # (buffers); the attention kernels of a narrower layer are generated again for its head count (suffix _h<heads>).
 LH = CFG.get("layer_heads") or [QH] * L
 NARROW = sorted(set(LH) - {QH})
+LH = list(LH) + [QH] * 8   # the MTP NextN blocks sit after the trunk (indices L..): full-width attention, no narrow variants
 assert all(h % KVH == 0 and h // KVH <= 16 for h in NARROW), "layer_heads: multiples of kv_heads, at most 16 per KV head"
 OUT_BIAS = CFG.get("attn_out_bias", False)   # attn_output.bias on every attention layer (gpt-oss): g_bias_add
 # YaRN RoPE scaling (cfg rope_scaling, inspect_gguf.py; llama.cpp ggml rope_yarn with ext_factor 1): pair i's
