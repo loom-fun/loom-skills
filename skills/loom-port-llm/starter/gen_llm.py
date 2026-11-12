@@ -2658,7 +2658,10 @@ def attention_text(S, P):
       %part{i} = vector.reduce<addf> %prod{i}, %zero_f : vector<4xf32>, f32""" + ("" if ab else f"""
       %sr{i} = kernel.subgroup.reduce<addf> %part{i} : f32"""))
     if ab:   # all U key scores of the block in one butterfly all-reduce (~2U shuffles instead of 5U)
-        body.append(allreduce([f"%part{i}" for i in range(U)], "ar", [f"%sr{i}" for i in range(U)]))
+        if "nored" in os.environ.get("ATTN_ABL", ""):   # diagnostic only (wrong output): no cross-lane score reduction
+            body.extend(f"      %sr{i} = scalar.addf %part{i}, %zero_f : f32" for i in range(U))
+        else:
+            body.append(allreduce([f"%part{i}" for i in range(U)], "ar", [f"%sr{i}" for i in range(U)]))
     for i in range(U):
         body.append(f"""      %s{i} = scf.select %ok{i}, %sr{i}, %neg_big : f32""")
     # ATTN_ILP independent online-softmax chains per block (keys interleaved by halves), merged after the loop:
@@ -2679,7 +2682,7 @@ def attention_text(S, P):
         pl, pa = f"%l_scaled{sx}", f"%acc_s{sx}"
         for i in keys:
             body.append(f"""      %d{i} = scalar.subf %s{i}, {prev} : f32
-      %p{i} = scalar.expf<afn> %d{i} : f32
+      %p{i} = {"scalar.addf %d" + str(i) + ", %zero_f" if "noexp" in os.environ.get("ATTN_ABL", "") else "scalar.expf<afn> %d" + str(i)} : f32
       %la{i} = scalar.addf {pl}, %p{i} : f32
       %pv{i} = vector.splat %p{i} : vector<4xf32>
       %aa{i} = vector.fmaf %pv{i}, %v{i}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}", f"%aa{i}"

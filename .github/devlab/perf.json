@@ -6,7 +6,7 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "pf",
+   "name": "abl",
    "variants": [
     {
      "name": "base",
@@ -16,19 +16,27 @@
      }
     },
     {
-     "name": "pf",
+     "name": "noexp",
      "build": {
-      "ATTN_PF": "1"
+      "ATTN_ABL": "noexp"
      },
      "execution": {
       "draft_depth": 0
      }
     },
     {
-     "name": "pfs128",
+     "name": "nored",
      "build": {
-      "ATTN_PF": "1",
-      "ATTN_SPLITS": "128"
+      "ATTN_ABL": "nored"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "both",
+     "build": {
+      "ATTN_ABL": "noexp,nored"
      },
      "execution": {
       "draft_depth": 0
@@ -36,10 +44,10 @@
     }
    ],
    "steps": [
-    "ktest:pf",
-    "perf:base:2:long",
-    "perf:pf:2:long",
-    "perf:pfs128:2:long"
+    "perf:base:1:long",
+    "perf:noexp:1:long",
+    "perf:nored:1:long",
+    "perf:both:1:long"
    ]
   }
  ]
