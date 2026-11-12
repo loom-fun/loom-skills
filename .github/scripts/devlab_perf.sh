@@ -275,6 +275,16 @@ for s in $steps; do
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
 print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
+    tunemeasure)   # tunemeasure:V: draft/tune.py's own workload (essay, code, tool call, reasoning, edit, 16k doc, 4 streams) on V
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "tune measure $p1"
+      ctx=$("$T" -c "import json; print(next(iter(json.load(open('$D/$p1/pkg/model.json'))['presets'].values()))['execution']['context_capacity'])")
+      res[$s]=$(cd "$here/skills/loom-port-llm/starter/draft" && "$T" -c "
+import json,sys
+sys.path.insert(0, '.')
+import tune
+chat = json.load(open('$D/$p1/pkg/llm_config.json'))['chat']
+print('$p1 tune-measure harmonic tok/s', round(tune.measure('$url', '$cardid', chat, $ctx), 2), 'rows', tune.measure.rows)" | tail -1 | tee "$out/tunemeasure_$p1.txt");;
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "c4 $p1"

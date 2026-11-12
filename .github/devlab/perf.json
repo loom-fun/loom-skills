@@ -1,5 +1,5 @@
 {
- "_comment": "gemma4-12b: rebuilt package draft depth sweep (active wait via devlab-perf-source)",
+ "_comment": "gemma4-12b: gd512 decode attention knobs (26B branch) at depth 3, rebuilt",
  "jobs": [
   {
    "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
@@ -8,47 +8,60 @@
    "llamacpp": "b1370",
    "llamacpp_vulkan": "b12211",
    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
-   "name": "depth",
+   "name": "attn",
    "variants": [
     {
-     "name": "d2",
-     "build": {},
-     "execution": {
-      "draft_depth": 2
-     }
-    },
-    {
-     "name": "d3",
+     "name": "base",
      "build": {},
      "execution": {
       "draft_depth": 3
      }
     },
     {
-     "name": "d5",
-     "build": {},
+     "name": "po",
+     "build": {
+      "ATTN_PAGE_OUTER": "1"
+     },
      "execution": {
-      "draft_depth": 5
+      "draft_depth": 3
      }
     },
     {
-     "name": "d7",
-     "build": {},
+     "name": "u8",
+     "build": {
+      "ATTN_UNROLL_512": "8"
+     },
      "execution": {
-      "draft_depth": 7
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "po_u8",
+     "build": {
+      "ATTN_PAGE_OUTER": "1",
+      "ATTN_UNROLL_512": "8"
+     },
+     "execution": {
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "po_u16",
+     "build": {
+      "ATTN_PAGE_OUTER": "1",
+      "ATTN_UNROLL_512": "16"
+     },
+     "execution": {
+      "draft_depth": 3
      }
     }
    ],
    "steps": [
-    "perf:d2:1",
-    "perf:d2:1:long",
-    "perf:d3:1",
-    "perf:d3:1:long",
-    "perf:d5:1",
-    "perf:d5:1:long",
-    "perf:d7:1",
-    "perf:d7:1:long",
-    "c4:d5"
+    "perf:base:1:long",
+    "perf:po:1:long",
+    "perf:u8:1:long",
+    "perf:po_u8:1:long",
+    "perf:po_u16:1:long"
    ]
   }
  ]
