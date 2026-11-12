@@ -330,8 +330,7 @@
    "kit": null,
    "llamacpp": "b1370",
    "features": [
-    "vision",
-    "draft"
+    "vision"
    ]
   },
   {
