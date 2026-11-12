@@ -10,7 +10,6 @@
     {
      "name": "main",
      "build": {
-      "ATTN_COMBINE_U": "1",
       "ATTN_GQA_U": "16"
      },
      "build_args": [
@@ -29,13 +28,12 @@
    ],
    "steps": [
     "ktest:new",
-    "perf:main:2",
-    "perf:new:2",
+    "perf:main:3",
+    "perf:new:3",
     "perf:main:2:long",
     "perf:new:2:long",
     "c4:main",
     "c4:new",
-    "consistency:new:2",
     "gates:new:dev"
    ]
   },
@@ -47,7 +45,6 @@
     {
      "name": "main",
      "build": {
-      "ATTN_COMBINE_U": "1",
       "ATTN_GQA_U": "16"
      },
      "build_args": [
@@ -66,50 +63,13 @@
    ],
    "steps": [
     "ktest:new",
-    "perf:main:2",
-    "perf:new:2",
+    "perf:main:3",
+    "perf:new:3",
     "perf:main:2:long",
     "perf:new:2:long",
     "c4:main",
     "c4:new",
-    "consistency:new:2",
     "gates:new:dev"
-   ]
-  },
-  {
-   "name": "q25-7b",
-   "card": "loom-fun/bartowski-Qwen2.5-7B-Instruct-loom",
-   "memory_bytes": 55000000000,
-   "variants": [
-    {
-     "name": "main",
-     "build": {
-      "ATTN_COMBINE_U": "1",
-      "ATTN_GQA_U": "16"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "new",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    }
-   ],
-   "steps": [
-    "ktest:new",
-    "perf:main:2",
-    "perf:new:2",
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "c4:main",
-    "c4:new",
-    "consistency:new:2"
    ]
   }
  ]

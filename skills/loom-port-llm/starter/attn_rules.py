@@ -19,8 +19,9 @@ ATTN_MT_FROM = int(os.environ.get("ATTN_MT_FROM", "1024"))   # ... from this pos
 # 2 KV heads -6 % (Qwen2.5-1.5B) to -27 % (Qwen2.5-0.5B, head_dim 64); 1 KV head -17 % decode_2k (gemma-3-1b).
 GQA_U = int(os.environ.get("ATTN_GQA_U", "8"))   # keys per block of the K/V-once body (decode_32k, same runner, nodraft: Qwen3-30B-A3B kv4 35.2 -> 36.5 (+3.7 %), Qwen3-8B kv8 22.9 -> 23.2 (+1.5 %) vs 16)
 SPLITS = int(os.environ.get("ATTN_SPLITS", "64"))   # decode split-K slots per head (gen_llm.attention_text)
-# decode_32k (Qwen3-8B, kv8, nodraft, same runner, 2 runs): 22.64 -> 22.89 (+1.1 %) at 8; 16 the same, ktest 57/57, bit-identical
-COMBINE_U = int(os.environ.get("ATTN_COMBINE_U", "8"))   # splits per iteration of the decode combine kernel's loops (gen_llm.combine_unrolled)
+# Off by default: 8 splits per iteration gave decode_32k +0.5 % (Qwen3-8B) / +1 % (30B-A3B) but short decode -2 % (Qwen3-8B: the
+# padded slots cost at 1-2 splits). Bit-identical either way (ktest 57/57).
+COMBINE_U = int(os.environ.get("ATTN_COMBINE_U", "1"))   # splits per iteration of the decode combine kernel's loops (gen_llm.combine_unrolled)
 ATTN_MT_MIN_KV = int(os.environ.get("ATTN_MT_MIN_KV", "8"))   # KV heads from which the span path is taken
 
 
