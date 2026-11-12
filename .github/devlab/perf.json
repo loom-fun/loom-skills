@@ -1,68 +1,72 @@
 {
- "_comment": "Ornith-1.0-35B: drop-launch ablation (upper bound for launch fusion)",
+ "_comment": "Ornith-1.0-35B and Ornith-1.0-9B: g_post_add_norm_q8 (norm+quant fusion, NORM_Q8) A/B against NORM_Q8=0, AR, active wait.",
  "jobs": [
   {
-   "name": "drop",
+   "name": "orn35",
    "variants": [
     {
-     "name": "d0",
-     "build": {},
+     "name": "base",
+     "build": {
+      "NORM_Q8": "0"
+     },
      "build_args": [
       "--draft",
       "none"
      ]
     },
     {
-     "name": "x_quant",
-     "build": {},
+     "name": "fuse",
+     "build": {
+      "NORM_Q8": "1"
+     },
      "build_args": [
       "--draft",
       "none"
-     ],
-     "double": [
-      "!*:g_quant_q8"
-     ]
-    },
-    {
-     "name": "x_gdn",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "double": [
-      "!*:g_gdn_conv|g_gdn_qk_norm|g_gdn_norm_gate"
-     ]
-    },
-    {
-     "name": "x_rows",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "double": [
-      "!*:g_row_scale"
-     ]
-    },
-    {
-     "name": "x_route",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "double": [
-      "!*:g_moe_bucket|g_moe_combine|g_moe_shared_gate"
      ]
     }
    ],
    "steps": [
-    "perf:d0:2",
-    "perf:x_quant:1",
-    "perf:x_gdn:1",
-    "perf:x_rows:1",
-    "perf:x_route:1"
+    "perf:base:2:long",
+    "perf:fuse:2:long",
+    "c4:base",
+    "c4:fuse",
+    "textmatch:base",
+    "textmatch:fuse"
+   ]
+  },
+  {
+   "name": "orn9",
+   "card": "loom-fun/unsloth-Ornith-1.0-9B-loom",
+   "memory_bytes": 30000000000,
+   "variants": [
+    {
+     "name": "base",
+     "build": {
+      "NORM_Q8": "0"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "fuse",
+     "build": {
+      "NORM_Q8": "1"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:base:2:long",
+    "perf:fuse:2:long",
+    "c4:base",
+    "c4:fuse",
+    "textmatch:base",
+    "textmatch:fuse"
    ]
   }
  ],

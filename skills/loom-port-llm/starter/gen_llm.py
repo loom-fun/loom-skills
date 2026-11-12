@@ -1947,6 +1947,63 @@ def fuse_post_add_row_scale(program):
     return program, "".join(post_add_norm_rs(lv) for lv in sorted(used))
 
 
+# g_post_add_norm_q8: g_post_add_norm followed by g_quant_q8 of its output row (the decode-shaped paths read the int8
+# copy). Each lane already holds the 32 normalized values of one quantization group, so the int8 codes, scale d and
+# code sum are lane-local: one launch, no re-read of h. Same arithmetic as g_quant_q8 (h f32 is still written).
+def post_add_norm_q8():
+    a = NORMS.index('kernel.def export("g_post_add_norm")')
+    t = NORMS[a:]
+    t = t[:t.index("\n}\n") + 3]
+    t = t.replace('export("g_post_add_norm") @g_post_add_norm(', 'export("g_post_add_norm_q8") @g_post_add_norm_q8(')
+    t = t.replace("%w_next: buffer, %h: buffer)", "%w_next: buffer, %h: buffer, %xq: buffer)")
+    old_tail = "    vector.store %hv, %h_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{HG}x32xf32>\n  }}\n  kernel.return\n}}\n".replace("{HG}", str(HG)).replace("{{", "{").replace("}}", "}")
+    assert t.endswith(old_tail), t[-400:]
+    quant = f"""    %c127 = scalar.constant 127.0 : f32
+    %zero_i = scalar.constant 0 : i32
+    %zero8i = vector.constant 0 : vector<8xi32>
+    %ones8 = vector.constant 1 : vector<32xi8>
+    %a = vector.absf %hv : vector<32xf32>
+    %amax = vector.reduce<maxnumf> %a, %zero_f : vector<32xf32>, f32
+    %d = scalar.divf %amax, %c127 : f32
+    %nz = scalar.cmpf one, %amax, %zero_f : f32
+    %dv = vector.splat %d : vector<32xf32>
+    %sc = vector.divf %hv, %dv : vector<32xf32>
+    %rd = vector.roundf %sc : vector<32xf32>
+    %nzv = vector.splat %nz : vector<32xi1>
+    %rs = vector.select %nzv, %rd, %zero32 : vector<32xf32>
+    %q = vector.fptosi %rs : vector<32xf32> to vector<32xi8>
+    %qw = vector.bitcast %q : vector<32xi8> to vector<8xi32>
+    %q_view = buffer.view %xq[%zero] : buffer -> view<[%tokens]x{HG}x8xi32>
+    vector.store %qw, %q_view[%token, %bl, %c0] : vector<8xi32>, view<[%tokens]x{HG}x8xi32>
+    %qs = vector.dot4i<s8s8> %q, %ones8, %zero8i : vector<32xi8>, vector<32xi8>, vector<8xi32>
+    %qsi = vector.reduce<addi> %qs, %zero_i : vector<8xi32>, i32
+    %qsf = scalar.sitofp %qsi : i32 to f32
+    %dh = scalar.fptrunc %d : f32 to f16
+    %da = scalar.extf %dh : f16 to f32
+    %meta = vector.from_elements %da, %qsf : vector<2xf32>
+    %m_off = index.constant {2 * 0 + H} : offset
+    %m_base = index.scale %tokens, %m_off : index, offset -> offset
+    %m_view = buffer.view %xq[%m_base] : buffer -> view<[%tokens]x{HG}x2xf32>
+    vector.store %meta, %m_view[%token, %bl, %c0] : vector<2xf32>, view<[%tokens]x{HG}x2xf32>
+"""
+    return "\n" + t[:-len("  }\n  kernel.return\n}\n")] + quant + "  }\n  kernel.return\n}\n"
+
+
+def fuse_norm_quant(program):
+    """else-branch decode path `g_post_add_norm(h)` + `g_quant_q8(rows, H, h -> hq)` -> one g_post_add_norm_q8 launch."""
+    import re as _re
+    pat = _re.compile(
+        r"(?P<ind>[ ]*)kernel\.launch @g_post_add_norm\[(?P<n>%\w+)\]\((?P=n), (?P<args>%\w+, %\w+, %\w+, %\w+), (?P<h>%\w+)\) : \[index\]\(index, (?P<ty>buffer, view<\d+xf32>, buffer, view<\d+xf32>), buffer\)\n"
+        r"[ ]*kernel\.launch @g_quant_q8\[(?P=n), %nH\]\((?P=n), %nH, (?P=h), (?P<q>%\w+)\) : [^\n]*\n")
+    cnt = [0]
+    def rep(m):
+        cnt[0] += 1
+        return (f"{m.group('ind')}kernel.launch @g_post_add_norm_q8[{m.group('n')}]({m.group('n')}, {m.group('args')}, {m.group('h')}, {m.group('q')})"
+                f" : [index](index, {m.group('ty')}, buffer, buffer)\n")
+    program = pat.sub(rep, program)
+    return program, (post_add_norm_q8() if cnt[0] else "")
+
+
 # DeepStack (Qwen3-VL, cfg["vision"]["deepstack"] = n): an image row is n + 1 slices of H floats; g_embed takes slice 0,
 # and after trunk layer k < n, g_deepstack adds slice k + 1 to the residual of image inputs and renormalizes their h
 # (llama.cpp qwen3vl.cpp: deepstack_out = l_out + inp_embd[(k + 1) * n_embd ...]). Text inputs are untouched.
@@ -5177,6 +5234,9 @@ if __name__ == "__main__":
     if os.environ.get("POST_ADD_ROW_SCALE", "1") != "0":   # after live_row_scale; =0 A/B it off
         program, _fused = fuse_post_add_row_scale(program)
         COMMON += _fused
+        if ACT_Q8 and os.environ.get("NORM_Q8", "1") != "0":   # after fuse_post_add_row_scale; =0 A/B it off
+            program, _fq = fuse_norm_quant(program)
+            COMMON += _fq
     if any(f == "f32" for f, *_ in USED_MV | USED_MV_R) or "f32" in USED_GEMM:
         COMMON += F32_VALUES
     if any(f == "f16" for f, *_ in USED_MV | USED_MV_R) or "f16" in USED_GEMM:
