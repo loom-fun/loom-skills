@@ -51,6 +51,17 @@ class Qwen4expRoofline(unittest.TestCase):
         geo = roofline.shape_of(meta, TENSORS)["geo"]
         self.assertEqual(roofline.kv_read_bytes(geo, 4000), 2 * 2 * 2 * 64 * 4000 * 2)
 
+    def test_long_context_decode_efficiency_blends_kv_streaming(self):
+        meta = {k: v for k, v in META.items() if "indexer" not in k and "compress" not in k}
+        m = roofline.shape_of(meta, TENSORS)
+        self.assertEqual(roofline.decode_ctx("decode_tps_32k"), 32000)
+        self.assertEqual(roofline.decode_ctx("decode_2k"), 2000)
+        self.assertEqual(roofline.decode_ctx("decode_tps"), 0)
+        c = 100.0
+        short, long_ = roofline.efficiency(m, "decode_tps", c), roofline.efficiency(m, "decode_tps_32k", c)
+        self.assertGreaterEqual(long_, short)
+        self.assertLessEqual(long_, roofline.KV_EFF)
+
 
 if __name__ == "__main__":
     unittest.main()
