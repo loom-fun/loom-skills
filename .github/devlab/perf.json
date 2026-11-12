@@ -25,5 +25,6 @@
     "llamac4@vulkan"
    ]
   }
- ]
+ ],
+ "llama_spec": "--spec-type ngram-simple"
 }
