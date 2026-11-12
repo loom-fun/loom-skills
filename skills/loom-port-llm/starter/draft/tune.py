@@ -38,7 +38,7 @@ SKILLS = os.environ.get("LOOM_SKILLS") or os.path.join(STARTER, "..", "..")
 SETUP = os.path.join(SKILLS, "loom-setup", "scripts")
 BENCH = os.path.join(SKILLS, "loom-benchmark", "scripts")
 sys.path.insert(0, BENCH)
-from bench_common import DOC_SIZES, doc, stream  # noqa: E402
+from bench_common import DOC_SIZES, doc, long_prompt, stream  # noqa: E402
 from shell_command import bash_script  # noqa: E402
 
 TOOLS = [{"type": "function", "function": {"name": "search", "description": "Search the web.",
@@ -95,11 +95,13 @@ def measure(url, model, chat, context=0, rows=1):
     stream(url, model, WORK[0][0], 256, extra=off)
     work = [(f"work{i}", m, x) for i, (m, x) in enumerate(WORK)]
     n = max((d for d in DOC_SIZES if d <= min(LONG_CTX, context - LONG_HEADROOM)), default=0)
-    if n >= 4000:
-        work.append(("long", [{"role": "user", "content": "Write a long, detailed essay discussing this documentation.\n\n" + doc(n)}], {}))
+    if n >= 4000:   # perf.py's decode_32k request itself (prompt and 128 tokens) when it fits: the row the card reports
+        prompt = long_prompt("decode_tps_32k", f"tune{time.time()}") if n >= 32000 else (
+            "Write a long, detailed essay discussing this documentation.\n\n" + doc(n))
+        work.append(("long", [{"role": "user", "content": prompt}], {}))
     res = {}
     for name, messages, extra in work:
-        r = stream(url, model, messages, 256, extra={**off, **extra}, timeout=900)
+        r = stream(url, model, messages, 128 if name == "long" else 256, extra={**off, **extra}, timeout=900)
         if r.get("decode_tps"):
             res[name] = r["decode_tps"]
     c4 = measure_c4(url, model, chat, rows)
