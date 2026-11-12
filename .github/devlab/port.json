@@ -1,6 +1,6 @@
 {
- "_comment": "Regenerate the Qwen3-14B card from main (tune.py per-row drafting + occupancy gate) derived from its published card.",
+ "_comment": "Regenerate the Qwen3-14B card from main (tune.py per-row drafting incl. ngram depth 1, occupancy gate) derived from its published card.",
  "jobs": [
-  {"name": "q3-14b-regen", "spec": "ggml-org/Qwen3-14B-GGUF:Qwen3-14B-Q4_K_M.gguf", "reference": "loom-fun/ggml-org-Qwen3-14B-loom", "model_id": "Qwen/Qwen3-14B"}
+  {"name": "q3-14b-regen", "spec": "ggml-org/Qwen3-14B-GGUF:Qwen3-14B-Q4_K_M.gguf", "reference": "loom-fun/ggml-org-Qwen3-14B-loom", "model_id": "Qwen/Qwen3-14B", "env": {"TUNE_PRIOR": "0"}}
  ]
 }
