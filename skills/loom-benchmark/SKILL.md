@@ -44,7 +44,7 @@ sha256-pinned in `data/llamacpp-vulkan.sha256`) next to the ROCm one: `LLAMACPP_
 b12211` and `llamacpp_server.sh` (same variable) run the same server arguments, drafting settings and workloads as the
 ROCm baseline. It is measured only in `devlab-perf` jobs (`llama@vulkan:N`, `llamac4@vulkan` steps, `loom-org` step 3)
 and recorded with `make_info.py perf --backend vulkan` under `performance.baselines.vulkan`; the card renders it as one
-more DevLab column. It never feeds a headline value, a guardrail or an `org_status` action. A setting Vulkan cannot run
+more column. It never feeds a card value, a guardrail or an `org_status` action. A setting Vulkan cannot run
 is recorded in `baseline.differs` (with the reason, rendered on the card), never swapped silently.
 
 A weaker baseline inflates every margin you report. Report the chosen build's path and tag.
@@ -90,8 +90,8 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
   other feature lightly, so a feature that breaks outright still fails in minutes.
 - **Where it runs:** the dev machine's GPU is scarce and sequential, DevLab Dispatch is a large elastic pool.
   Locally: only what the inner loop needs. Long or deep checks and anything against published cards: DevLab CI.
-  Performance for a card: a local session (the headline numbers) and a DevLab session, both kept and labeled by
-  source; a gap between them is noted, never debugged (`loom-org`, "Local and DevLab performance").
+  Performance for a card comes only from a DevLab `devlab-perf` job (`loom-org`, "Performance: DevLab is the
+  source"); local runs are for development.
 - `quick` and `full` run **nightly** on the published cards (`.github/workflows/nightly-gates.yml`, below), and
   by hand only once on a new port that has no card yet (qualify.sh / finalize.sh).
 - A `dev` pass is never reused by `quick`/`full` (gates.sh only skips a gate that passed at the same or a
@@ -315,17 +315,24 @@ $T "$S/c4_steady.py" http://127.0.0.1:8160 4 --model <id>;  $T "$S/c4_steady.py"
 | prefill[] | 1k and 2k-token documents with max_tokens=4. prompt_tokens / TTFT, the median of 5 runs (`--repeats`); single runs varied 1.5–2.9k tok/s on one build. |
 | decode_tps_2k / _32k | Decode with that much context in the KV cache. |
 | prefill_long[] | 8k / 16k / 32k documents. |
-| c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding. Use this for "N requests at once". A run in which a stream failed exits 1 and records nothing (`make_info.py` also skips a rate <= 0). |
+| c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding, after the untimed warm-up passes (rates in `warmup_agg_tps`). Use this for "N requests at once". A run in which a stream failed exits 1 and records nothing (`make_info.py` also skips a rate <= 0). |
 
 Rules:
-- A card's headline numbers come from one local session: Loom and llama.cpp back to back on a quiet local GPU, the
-  programs being published. Its DevLab columns come from a DevLab session on the same programs (`loom-org` step 3);
-  the local ÷ DevLab ratio is recorded, never investigated. A DevLab job's variant comparisons (`devlab-perf`,
+- A card's numbers come from one `devlab-perf` job: Loom (card programs, active wait: `serve.sh` serves
+  `--device=amdgpu` as `amdgpu://?completion_spin_ns=4294967295`, `LOOM_ACTIVE_WAIT=0` opts out for A/B only) and
+  llama.cpp on the same runner (`loom-org` step 3). Local runs are for development, never card numbers, and a Loom
+  number measured without the active wait is not comparable. A job's variant comparisons (`devlab-perf`,
   `devlab-experiment`) compare within that job only.
 - Warm up after every restart. `perf.py` first sends its first timed request's own shape, untimed (the 300-token
   essay with another nonce: prefill, decode, drafting and first-use kernels all run once; a trivial "Say hi."
-  left DevLab's short-prompt decode 51-60 % below the local session's while 2k decode agreed), and `c4_steady.py`
-  one short request. Every caller (qualify, finalize, devlab_perf) gets the same warm-up. When timing by hand:
+  left DevLab's short-prompt decode 51-60 % below another session's while 2k decode agreed), and `c4_steady.py`
+  one short request and then untimed full N-stream passes (same shape as the timed one) until two successive passes
+  agree within 10 % (at least 3, at most 6; `--warmup-min`, `--warmup-passes`, `--warmup-tol`; two equal slow passes do not end it early). Without them the median of three timed runs
+  reported a cold number: a model that reads weights on demand (Flash-Next's per-layer-embedding table) decoded 4
+  streams at 4 tok/s for its first two passes on a DevLab runner with a slow disk (cold page cache, IO pressure 93 %),
+  then 65. Every warm-up pass's rate is in the JSON line (`warmup_agg_tps`) and nothing is dropped: a server that stays
+  slow after the warm-up reports the slow number, and its slow warm-up passes show why. Every caller (qualify, finalize,
+  devlab_perf) gets the same warm-up. When timing by hand:
   `curl -s URL/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"<id>","messages":[{"role":"user","content":"hi"}],"max_tokens":8}'`.
 - A decode rate counts only if its request generated at least half its max_tokens. `perf.py` logs each timed
   decode request's `completion_tokens` (both engines); a short one is re-requested once with another nonce, then
@@ -438,8 +445,9 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
      DevLab Dispatch: gates of every finished level (job URL as evidence), and the spec gate's acceptance from the
      job's `gates_spec.log` as the card's `spec_acceptance`, stamped with the job's programs (a drafting statistic of
      model, drafter and text, not a timing: it counts from any source). A perf session recorded with
-     `--source-kind devlab` (a scripted DevLab port, a `devlab-perf` job: `loom-org` step 3) fills the card's DevLab
-     columns and stays next to the local session (`card_lib.card_metrics`);
+     `--source-kind devlab` (a scripted DevLab port, a `devlab-perf` job: `loom-org` step 3) is the card's performance
+     (`card_lib.card_metrics`: per metric the last session); `perf` refuses `--source-kind local`, so finalize's
+     `perf --perf-log` record is a development/report record, not card evidence;
    - `card/make_info.py roofline --package DIR -o ev_roofline.json` (tools venv; CPU only, reads the GGUF from the
      Hugging Face cache): the hardware ceiling of every card metric (`loom-roofline` `roofline.py`) with the
      device constants and the roofline.py sha256 and commit. Drafting packages: decode and 4-stream ceilings are
@@ -457,16 +465,16 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
    `model.json.lock`, `llm_config.json` (and `program/`). Per gate the latest evidence wins, so a later failing
    run shows as a failure, except that on the same programs a later pass at a lower level (dev < fast < quick <
    full) keeps the earlier higher-level pass (a published date-only gate and a same-day timestamped job: the new
-   evidence is the later); per metric the last local session that measured it, and separately the last DevLab
-   one. `--report attached` instead keeps a
+   evidence is the later); per metric the last session that measured it (`build --from-info` drops performance sessions not from DevLab/factory
+   and old `devlab` sweeps; `--reset-performance` drops the old sessions to re-measure from scratch). `--report attached` instead keeps a
    REPORT.md written by the run (the factory's) or an older card's narrative, as is.
    A new or replaced package: `card/publish_package.py prepare PKG DIR --source ORG/GGUF-REPO` first, on the machine
    that holds the GGUFs (copies the package without weights, pins each file's origin at the revision it was validated
    on, writes `model.json.lock` with `loom-fetch --update-lock`), then `make_info.py build DIR ...` on that DIR.
 3. `card/render_card.py DIR` writes `DIR/README.md` (and `DIR/REPORT.md` for `--report generated`: setup,
    commands, every run's value, the roofline, gate evidence). The performance table shows per metric llama.cpp,
-   Loom, the margin, the roofline and Loom as % of it (local session), then DevLab's llama.cpp and Loom and the
-   local ÷ DevLab ratio of each engine; footnotes say what the roofline and the ratio are. Loom-only DevLab
+   Loom, the margin, the roofline and Loom as % of it, then the Vulkan baseline as one more column; footnotes say
+   what the roofline is. Loom-only DevLab
    sweeps that older cards recorded in `info.json` (`devlab`) stay valid and are carried over by `--from-info`, but
    are not rendered. When republishing a card, upload only those three files: `publish_package.py upload DIR --repo
    REPO --card-only --parent-commit SHA` (SHA: the repo commit whose info.json the card was built from; the upload
@@ -474,11 +482,10 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
    A whole package: `publish_package.py upload DIR --repo REPO` (removes files an in-place update leaves stale).
 
 **Performance guardrails** (`card_lib.perf_flags`, applied by `loom-org`'s `org_status.py`): a metric whose Loom
-value is below half the efficiency Loom ports have demonstrated (far from roofline) sends the model back to a local
-GPU worker with `loom-optimize`, and to a deep debugging session if it stays far after that (`loom-org` step 5). A
-local value measured on other programs (stale), or a metric only DevLab measured, is re-measured in a local session
-first; a card without a DevLab value on its programs gets a DevLab perf session (low priority). The local ÷ DevLab
-ratio is never a guardrail.
+value is below half the efficiency Loom ports have demonstrated (far from roofline) sends the model back to a worker
+with `loom-optimize`, and to a deep debugging session if it stays far after that (`loom-org` step 5). A
+value measured on other programs (stale) is re-measured with a fresh `devlab-perf` job first. Flags are only `far`
+and `stale`.
 
 The card's Versions line shows the schema, the loom-skills commit and hrx-loom build that generated the
 programs, and the card generator commit. `loom-setup/scripts/install_loom.sh` writes `$LOOM_ROOT/loom-install.json`

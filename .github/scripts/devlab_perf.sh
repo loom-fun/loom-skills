@@ -2,6 +2,8 @@
 # One job of a DevLab performance experiment (.github/workflows/devlab-perf.yml): fetch a published loom-fun card,
 # build package variants from this checkout (or another ref), and compare them with each other and with llama.cpp
 # ON THIS RUNNER (runners differ from each other and from a dev machine: only same-job numbers are compared).
+# This is the single source of card performance: the card variant (active wait) and llama.cpp on the same runner,
+# ingested with make_info.py perf --source-kind devlab (loom-org SKILL.md step 3).
 #
 #   [WORK=~/devlab-perf] devlab_perf.sh EXPERIMENT.json JOB_NAME
 #
@@ -29,6 +31,8 @@
 #             "execution": {"draft_depth": 3}, "double": ["llm_verify:g_head_mv", "*:g_mv_q8_0"]}
 #            build: build.py with these env vars (and extra flags); ref: build with that commit's starter;
 #            execution: model.json overrides; double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
+#            {"name": "parked", "active_wait": false}: the card's programs served with the SDK's default completion wait
+#            (LOOM_ACTIVE_WAIT=0 in serve.sh) instead of the active wait every other variant gets.
 # Job "thinking": off (default) | on: chat_template_kwargs.enable_thinking sent to BOTH engines in every step.
 # Steps S: ab:R[:on|off]        every variant in ONE loom-serve (small context), ab_decode.py R interleaved rounds
 #          perf:V:N[:long]      V served alone with its own settings: perf.py N times (+ --long)
@@ -79,13 +83,23 @@ root=$("$SV/ensure_sdk.sh" "${LOOM_ROOT:-$WORK/loom}" "$out/llm_config.json" 2> 
 export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 
 # 2. The card (fetched once per runner and card)
-card=$WORK/_card/${repo//\//_}; base=https://huggingface.co/$repo/resolve/main
-if [ ! -f "$card/.fetched" ]; then
+card=$WORK/_card/${repo//\//_}; rev=$(curl -fsS --retry 3 "https://huggingface.co/api/models/$repo/revision/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || rev=main
+# the files are fetched at one commit (resolve/main can serve an older revision for a while after a publish), and a card
+# directory left by an earlier job on this runner is reused only when it holds that commit
+base=https://huggingface.co/$repo/resolve/$rev
+if [ "$rev" = main ] || [ "$(cat "$card/.fetched" 2>/dev/null)" != "$rev" ]; then
   step "fetch $repo"; rm -rf "$card"
   HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch"; exit 1; }
   curl -fsSL --retry 3 "$base/llm_config.json" -o "$card/llm_config.json" || exit 1
-  rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; touch "$card/.fetched"
+  rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; echo "$rev" > "$card/.fetched"
 fi
+python3 - "$card" <<'EOF' || { echo "FAIL: the fetched card's model.json and llm_config.json disagree (a stale fetch?)"; exit 1; }
+import json, os, sys
+m = json.load(open(os.path.join(sys.argv[1], "model.json"))); c = json.load(open(os.path.join(sys.argv[1], "llm_config.json")))
+depth = next(iter(m["presets"].values()))["execution"].get("draft_depth", 0)
+want = (c.get("draft") or {}).get("depth", 0)
+sys.exit(0 if depth == want else f"model.json draft_depth {depth} != llm_config.json draft depth {want}")
+EOF
 "$T" -c "import sys; sys.path.insert(0, sys.argv[1]); from card_lib import programs_sha256; print(programs_sha256(sys.argv[2]))" \
   "$here/skills/loom-benchmark/scripts/card" "$card" > "$out/programs_sha256.txt"   # the published programs this job fetched
 # build.py's config: the card's llm_config.json with its GGUFs pointed at the fetched files, plus the tensor table
@@ -192,7 +206,8 @@ done
 serve_alone() { # serve_alone VARIANT
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
-  step "serve $1"; "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" | tail -2
+  local aw; aw=$(qv "$1" "print(0 if v.get('active_wait') is False else 1)")
+  step "serve $1"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" | tail -2
   curl -sf "$url/v1/models" >/dev/null
 }
 LSPEC=""
