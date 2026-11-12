@@ -6,15 +6,8 @@
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "sweep",
+   "name": "qk",
    "variants": [
-    {
-     "name": "b0",
-     "execution": {
-      "draft_depth": 0
-     },
-     "build": {}
-    },
     {
      "name": "u8",
      "execution": {
@@ -25,67 +18,20 @@
      }
     },
     {
-     "name": "u8_dotf",
+     "name": "u8_qk",
      "execution": {
       "draft_depth": 0
      },
      "build": {
       "ATTN_UNROLL_512": "8",
-      "ATTN_DOTF": "1"
-     }
-    },
-    {
-     "name": "u8_ilp2",
-     "execution": {
-      "draft_depth": 0
-     },
-     "build": {
-      "ATTN_UNROLL_512": "8",
-      "ATTN_ILP": "2"
-     }
-    },
-    {
-     "name": "u8_ilp4",
-     "execution": {
-      "draft_depth": 0
-     },
-     "build": {
-      "ATTN_UNROLL_512": "8",
-      "ATTN_ILP": "4"
-     }
-    },
-    {
-     "name": "u8_s128",
-     "execution": {
-      "draft_depth": 0
-     },
-     "build": {
-      "ATTN_UNROLL_512": "8",
-      "ATTN_SPLITS": "128"
-     }
-    },
-    {
-     "name": "u8_dotf_ilp2_s128",
-     "execution": {
-      "draft_depth": 0
-     },
-     "build": {
-      "ATTN_UNROLL_512": "8",
-      "ATTN_DOTF": "1",
-      "ATTN_ILP": "2",
-      "ATTN_SPLITS": "128"
+      "ATTN_QKF16": "1"
      }
     }
    ],
    "steps": [
-    "perf:b0:1:long",
     "perf:u8:1:long",
-    "perf:u8_dotf:1:long",
-    "perf:u8_ilp2:1:long",
-    "perf:u8_ilp4:1:long",
-    "perf:u8_s128:1:long",
-    "perf:u8_dotf_ilp2_s128:1:long",
-    "ktest:u8_dotf"
+    "perf:u8_qk:1:long",
+    "ktest:u8_qk"
    ]
   }
  ]
