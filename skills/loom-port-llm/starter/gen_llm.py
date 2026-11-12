@@ -4259,6 +4259,7 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
     q8 = "_q8" if iq else ""
     xa = f"{x}16q" if iq else x
     quant_act = (f"    kernel.launch @g_quant_q8[%ta, %nFE](%ta, %nFE, %act, %actq) : [index, index](index, index, buffer, buffer)\n" if iq else "")
+    hq = "    // moe-hq: %h16q beside the gemm-gap (see gen_draft.small_gemm)\n" if iq else ""
     actd = "%actq" if iq else "%act"
     rty = TENS[b + "ffn_gate_inp.weight"]["type"]
     sgarg, sgty = ("%sg, ", "buffer, ") if SHGATE else ("", "")
@@ -4293,7 +4294,7 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
     kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}{out}) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
   }} else {{
     kernel.launch @g_moe_route[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
-{wsc}    kernel.launch @g_moe_gu_{gun}{q8}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, {xa}, %wge_{i}, {wu}{gu_b}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
+{wsc}{hq}    kernel.launch @g_moe_gu_{gun}{q8}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, {xa}, %wge_{i}, {wu}{gu_b}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
 {quant_act}    kernel.launch @g_moe_dn_{fd}{q8}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, {actd}, %wde_{i}{dn_b}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
     kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {sgarg}{out}) : [index](index, buffer, buffer, {sgty}buffer)
   }}
