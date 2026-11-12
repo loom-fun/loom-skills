@@ -411,7 +411,6 @@ A('''    %pos0_i32 = index.cast %pos0 : index to i32
 # its masked keys are keys of the run whatever the cut (older than the window, written long before), so a token's output
 # cannot depend on how the scheduler cut the prefill.
 EDGE_ZERO = os.environ.get("FLASH2_EDGE_ZERO", "0") == "1"
-NB_LIVE = "scalar.xori %nb_dead@, %true_const : i1" if os.environ.get("FLASH2_DEAD_SKIP", "1") == "1" else "scalar.constant true : i1"   # experiment switch
 NEED_OP = ("scalar.ori", "%nb_edge") if EDGE_ZERO else ("scalar.andi", "%nb_live")
 for kb in range(KB):
     last = kb == KB - 1
@@ -423,7 +422,7 @@ for kb in range(KB):
     %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
     %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
     %nb_dead{kb} = scalar.cmpi sgt, %base{kb}, %pos15_i32 : i32
-    %nb_live{kb} = {NB_LIVE.replace('@', str(kb))}
+    %nb_live{kb} = scalar.xori %nb_dead{kb}, %true_const : i1
     %nb_diag_live{kb} = scalar.andi %nb_diag{kb}, %nb_live{kb} : i1
     %nb_edge{kb} = scalar.andi %nb_wins{kb}, %nb_live{kb} : i1
     %need{kb} = {NEED_OP[0]} %nb_diag_live{kb}, {NEED_OP[1]}{kb} : i1
@@ -522,7 +521,7 @@ if PARTIAL:
     E.append("  }\n")
     text = text[:i0] + "\n".join(E) + text[i1:]
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_partial") @{P}_attention_flash2_partial(', 1)
-if os.environ.get("FLASH2_PEEL", "1") in ("1", "force") and (not EDGE_ZERO or os.environ.get("FLASH2_PEEL") == "force"):   # the masked path only in the last key tile (flash2_peel.py)
+if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO:   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     text = peel_last_tile(text)
 if os.environ.get("FLASH2_ENTRY") == "bcast" and os.environ.get("FLASH2_ROLE") != "partial":   # experiment: the listed entry broadcast from lane 0

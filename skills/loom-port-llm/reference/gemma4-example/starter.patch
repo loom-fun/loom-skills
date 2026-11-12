@@ -698,7 +698,7 @@
          E.append(f"    %ou{d} = vector.mulf %o{d}, %inv_v : vector<8xf32>")
          if CFG["gate"]:
              for i in range(8):
-@@ -731,4 +724,6 @@
+@@ -739,4 +732,6 @@
  }}
  """ + open(out_path + ".deep").read()
      os.remove(out_path + ".deep")
