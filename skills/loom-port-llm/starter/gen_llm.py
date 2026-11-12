@@ -2606,32 +2606,37 @@ def multi_token_split(text, P, U, T):
 
 
 def gqa_split(text, P, S):
-    """Decode split kernel that loads each key's K and V once for all G query heads of its KV head. The old kernel gave
+    """Decode split kernel that loads each key's K and V once for all G query heads of its KV head. The per-head kernel gave
     every query head its own wave (G waves read the same K/V rows through the cache: kv8 reached ~180 GB/s, kv4 ~80). Here
-    wave w of workgroup z is split slot k = z * G + w of the old layout (same key range, same 16-key blocks, same
-    butterfly and online-softmax order per head, so every partial is bit-identical to the old kernel's) and runs all G
-    heads of the group over it. The partial buffers and the combine kernel are unchanged; the grid has ceil(S / G) z-groups."""
+    wave w of workgroup z is split slot k = z * G + w of the same layout (same key range, same 16-key blocks, same
+    butterfly and online-softmax order per head, so every partial is bit-identical) and runs all G heads of the group
+    over it. The partial buffers and the combine kernel are unchanged. It has G times fewer waves and G times more work
+    per wave, which loses at short context (kv8, nodraft: decode -3 %, 2k -1.5 %, 4 streams -2 %) and wins at long (32k
+    +14 %): contexts with fewer than ATTN_GQA_FROM visible keys run the per-head body that stays in the else branch."""
     U = UNROLL
     a = text.index(f'kernel.def export("{P}_attention_split")')
     b = text.index(f'kernel.def export("{P}_attention_combine")', a)
     k = text[a:b]
-
-    def sub(old, new):
-        nonlocal k
-        assert k.count(old) == 1, ("gqa_split anchor", old[:60], k.count(old))
-        k = k.replace(old, new)
-    ZG = -(-S // G)
-    sub(f"  %cS = index.constant {S} : index\n  %clanes", f"  %czg = index.constant {ZG} : index\n  %clanes")
-    sub("workgroups(%tokens, %ckvh, %cS)", "workgroups(%tokens, %ckvh, %czg)")
-    sub(f"  %split = index.assume %split_id [range(%split_id, 0, {S - 1})] : index\n", "")
-    sub("  %lane_id = kernel.subgroup.lane.id : index\n",
-        f"  %gq = index.constant {G} : index\n  %split_raw = index.madd %split_id, %gq, %wave : index\n  %lane_id = kernel.subgroup.lane.id : index\n")
-    sub(f"  %head = index.madd %kv_head, %cg, %wave : index\n  %bounded_head = index.assume %head [range(%head, 0, {QH - 1})] : index\n", "")
-    sub("    %active_split = index.cmp ult, %split, %s_eff : index\n    scf.if %active_split {\n",
-        f"    %active_split = index.cmp ult, %split_raw, %s_eff : index\n    scf.if %active_split {{\n    %split = index.assume %split_raw [range(%split_raw, 0, {S - 1})] : index\n")
-    q0 = k.index("    %q_view = buffer.view %q[%zero]")
-    q1 = k.index("    }\n    }\n  }\n  kernel.return") + len("    }\n")   # keep the closers of the active-split and live blocks
-    t = []
+    o0 = k.index("    %active_split = index.cmp ult, %split, %s_eff : index\n")
+    o1 = k.index("    }\n    }\n  }\n  kernel.return") + len("    }\n    }\n")
+    old = k[o0:o1]
+    assert "%q_view = buffer.view %q[%zero]" in old
+    q0 = old.index("    %q_view = buffer.view %q[%zero]")
+    t = [f"""    %cgqa = index.constant {attn_rules.ATTN_GQA_FROM} : index
+    %use_gqa = index.cmp uge, %visible, %cgqa : index
+    %gq = index.constant {G} : index
+    scf.if %use_gqa {{
+    %gslot = index.madd %split_id, %gq, %wave : index
+    %active_g = index.cmp ult, %gslot, %s_eff : index
+    scf.if %active_g {{
+    %gs = index.assume %gslot [range(%gslot, 0, {S - 1})] : index
+    %s_less = index.sub %s_eff, %c1 : index
+    %per_padded = index.add %visible, %s_less : index
+    %per = index.div %per_padded, %s_eff : index
+    %start_raw = index.mul %gs, %per : index
+    %start = index.min %start_raw, %visible : index
+    %stop_raw = index.add %start_raw, %per : index
+    %stop = index.min %stop_raw, %visible : index"""]
     t.append(f"""    %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
     %scale = scalar.constant 0.08838834764831845 : f32
     %scale_v = vector.splat %scale : vector<4xf32>
@@ -2646,7 +2651,6 @@ def gqa_split(text, P, S):
     %hi_abs = index.add %window_low, %stop : index
     %lo_q = index.div %lo_abs, %cU : index
     %lo_al = index.mul %lo_q, %cU : index""")
-    state = "".join(f"%m_{h}, %l_{h}, %acc_{h}, " for h in range(G)).rstrip(", ")
     fin = "".join(f"%mf_{h}, %lf_{h}, %af_{h}, " for h in range(G)).rstrip(", ")
     args = ", ".join(f"%m_{h} = %neg_big : f32, %l_{h} = %zero_f : f32, %acc_{h} = %zero4 : vector<4xf32>" for h in range(G))
     types = ", ".join(["f32, f32, vector<4xf32>"] * G)
@@ -2696,12 +2700,13 @@ def gqa_split(text, P, S):
     %first = index.cmp eq, %lane, %c0 : index
     %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>""")
     for h in range(G):
-        t.append(f"""    vector.store %af_{h}, %acc_view[%token, %head{h}, %split, %lane, %c0] : vector<4xf32>, view<[%tokens]x{QH}x{S}x32x4xf32>
+        t.append(f"""    vector.store %af_{h}, %acc_view[%token, %head{h}, %gs, %lane, %c0] : vector<4xf32>, view<[%tokens]x{QH}x{S}x32x4xf32>
     scf.if %first {{
-      view.store %mf_{h}, %ml_view[%token, %head{h}, %split, 0] : f32, view<[%tokens]x{QH}x{S}x2xf32>
-      view.store %lf_{h}, %ml_view[%token, %head{h}, %split, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+      view.store %mf_{h}, %ml_view[%token, %head{h}, %gs, 0] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+      view.store %lf_{h}, %ml_view[%token, %head{h}, %gs, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
     }}""")
-    k = k[:q0] + "\n".join(t) + "\n" + k[q1:]
+    t.append("    }\n    } else {\n" + old + "    }\n")
+    k = k[:o0] + "\n".join(t) + k[o1:]
     return text[:a] + k + text[b:]
 
 

@@ -5,7 +5,7 @@
  "llamacpp": "b1368",
  "jobs": [
   {
-   "name": "gqa2",
+   "name": "gqa3",
    "variants": [
     {
      "name": "base",
@@ -16,23 +16,16 @@
      "build": {
       "ATTN_GQA": "1"
      }
-    },
-    {
-     "name": "gqa16",
-     "build": {
-      "ATTN_GQA": "1",
-      "ATTN_KPS": "16"
-     }
     }
    ],
    "steps": [
-    "perf:base:2",
-    "perf:gqa:2",
-    "perf:gqa16:2",
+    "ktest:gqa",
+    "perf:base:3",
+    "perf:gqa:3",
     "c4:base",
     "c4:gqa",
-    "c4:gqa16",
-    "perf:gqa16:2:long"
+    "perf:gqa:2:long",
+    "perf:base:2:long"
    ]
   }
  ]
