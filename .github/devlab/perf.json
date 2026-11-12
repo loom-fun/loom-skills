@@ -1,22 +1,13 @@
 {
- "_comment": "flash2 on Bolt-E4B: NF=16 kernel without peel (WIP)",
+ "_comment": "flash2: entry broadcast on d128 TS=1/TS=2 and Spark (WIP)",
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "bolt2",
-   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
-   "memory_bytes": 40000000000,
-   "kit": "gemma4",
+   "name": "q4b",
+   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+   "memory_bytes": 55000000000,
+   "kit": null,
    "variants": [
-    {
-     "name": "pre",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
-    },
     {
      "name": "main",
      "build": {},
@@ -45,11 +36,57 @@
       "none"
      ],
      "ref": "335c879cdd3de16472464d18dd83e0c38e4c1934"
+    }
+   ],
+   "steps": [
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:new_bc:1",
+    "perf:new_bc:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:new_bc:1",
+    "perf:new_bc:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:new_bc:1",
+    "perf:new_bc:1:long"
+   ]
+  },
+  {
+   "name": "q06",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "memory_bytes": 17000000000,
+   "kit": null,
+   "variants": [
+    {
+     "name": "main",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "701974f"
     },
     {
-     "name": "new_e1",
+     "name": "new",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "335c879cdd3de16472464d18dd83e0c38e4c1934"
+    },
+    {
+     "name": "new_bc",
      "build": {
-      "FLASH2_EDGE_ZERO": "1"
+      "FLASH2_ENTRY": "bcast"
      },
      "build_args": [
       "--draft",
@@ -59,36 +96,81 @@
     }
    ],
    "steps": [
-    "perf:pre:1",
-    "perf:pre:1:long",
     "perf:main:1",
     "perf:main:1:long",
     "perf:new:1",
     "perf:new:1:long",
     "perf:new_bc:1",
     "perf:new_bc:1:long",
-    "perf:new_e1:1",
-    "perf:new_e1:1:long",
-    "perf:pre:1",
-    "perf:pre:1:long",
     "perf:main:1",
     "perf:main:1:long",
     "perf:new:1",
     "perf:new:1:long",
     "perf:new_bc:1",
     "perf:new_bc:1:long",
-    "perf:new_e1:1",
-    "perf:new_e1:1:long",
-    "perf:pre:1",
-    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:new_bc:1",
+    "perf:new_bc:1:long"
+   ]
+  },
+  {
+   "name": "spark",
+   "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "variants": [
+    {
+     "name": "main",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "701974f"
+    },
+    {
+     "name": "new",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "335c879cdd3de16472464d18dd83e0c38e4c1934"
+    },
+    {
+     "name": "new_bc",
+     "build": {
+      "FLASH2_ENTRY": "bcast"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "335c879cdd3de16472464d18dd83e0c38e4c1934"
+    }
+   ],
+   "steps": [
     "perf:main:1",
     "perf:main:1:long",
     "perf:new:1",
     "perf:new:1:long",
     "perf:new_bc:1",
     "perf:new_bc:1:long",
-    "perf:new_e1:1",
-    "perf:new_e1:1:long"
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:new_bc:1",
+    "perf:new_bc:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:new_bc:1",
+    "perf:new_bc:1:long"
    ]
   }
  ]
