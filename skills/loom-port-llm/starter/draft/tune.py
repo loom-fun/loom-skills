@@ -469,7 +469,12 @@ def main():
             if r["kind"] != "none":
                 r["margin"] = r["margin_llama"]
         # the noise band only while the drafter still beats llama.cpp on every row: never trade a losing row for a worse one
-        ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor)
+        # Where depth 0 itself loses a row to llama.cpp (floor < 1) a drafter may tie that row (within half the band) if
+        # its rows' geometric mean is clearly ahead of depth 0's (Ornith-1.5-35B DFlash 3 + ctx gate: worst row 0.979 vs
+        # 0.982, decode 88.9 vs 63.4).
+        base_geo = geomean_margin(base_rows, base_rows, llama_refs)
+        ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor) or (
+            r["margin"] >= (1 + NO_LOSS) / 2 * floor and geomean_margin(r["rows"], base_rows, llama_refs) >= 1.05 * base_geo)
     else:
         ok_margin = lambda r: r["margin"] >= NO_LOSS
     ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
