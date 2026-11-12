@@ -1,18 +1,97 @@
 {
- "_comment": "gemma-3-1b streams4: published programs vs draft_depth 0 vs occupancy gate (SPEC_OCC_MIN=2: anchors-only verify when >=2 spans) vs llama.cpp.",
+ "_comment": "Occupancy gate (SPEC_OCC_MIN=2) on gemma-3-1b (32k, gates), Qwen3-0.6B and Qwen2.5-0.5B.",
  "card": "loom-fun/ggml-org-gemma-3-1b-it-loom",
  "memory_bytes": 7000000000,
  "kit": null,
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "g1-diag",
+   "name": "g1-long",
    "variants": [
-    {"name": "card"},
-    {"name": "nodraft", "execution": {"draft_depth": 0}},
-    {"name": "gate2", "build": {"SPEC_OCC_MIN": "2"}}
+    {
+     "name": "card"
+    },
+    {
+     "name": "gate2",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     }
+    }
    ],
-   "steps": ["c4:card", "c4:nodraft", "c4:gate2", "perf:card:2", "perf:gate2:2", "consistency:gate2:3", "llamac4", "llamac4@vulkan"]
+   "steps": [
+    "perf:card:2:long",
+    "perf:gate2:2:long",
+    "gates:gate2:dev",
+    "ktest:gate2"
+   ]
+  },
+  {
+   "name": "q06",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "memory_bytes": 17000000000,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "gate2",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     }
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "c4:card",
+    "c4:gate2",
+    "c4:nodraft",
+    "perf:card:2:long",
+    "perf:gate2:2:long",
+    "perf:nodraft:2:long",
+    "consistency:gate2:3",
+    "gates:gate2:dev",
+    "llamac4"
+   ]
+  },
+  {
+   "name": "q05",
+   "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+   "memory_bytes": 5000000000,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "gate2",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     }
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "c4:card",
+    "c4:gate2",
+    "c4:nodraft",
+    "perf:card:2:long",
+    "perf:gate2:2:long",
+    "perf:nodraft:2:long",
+    "consistency:gate2:3",
+    "gates:gate2:dev",
+    "llamac4"
+   ]
   }
  ]
 }
