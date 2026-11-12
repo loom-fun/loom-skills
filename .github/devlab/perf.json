@@ -1,5 +1,5 @@
 {
- "_comment": "Qwen2.5-32B: published card vs main rebuilds at draft depths 0/1/2 (decode_32k and 4 streams, active wait).",
+ "_comment": "Qwen2.5-32B: PR #357 GQA decode attention at draft depth 0/1 (decode, 2k, 32k, 4 streams, active wait).",
  "card": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
  "memory_bytes": 49000000000,
  "kit": null,
@@ -8,11 +8,29 @@
   {
    "name": "card-perf",
    "variants": [
-    {"name": "main0", "build": {}, "ref": "origin/main", "execution": {"draft_depth": 0}},
-    {"name": "main1", "build": {}, "ref": "origin/main", "execution": {"draft_depth": 1}},
-    {"name": "main2", "build": {}, "ref": "origin/main", "execution": {"draft_depth": 2}}
+    {
+     "name": "gqa0",
+     "build": {},
+     "ref": "origin/perfgap-qwen3-gqa-attn",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "gqa1",
+     "build": {},
+     "ref": "origin/perfgap-qwen3-gqa-attn",
+     "execution": {
+      "draft_depth": 1
+     }
+    }
    ],
-   "steps": ["perf:main0:2:long", "c4:main0", "perf:main1:2:long", "c4:main1", "perf:main2:2:long", "c4:main2"]
+   "steps": [
+    "perf:gqa0:2:long",
+    "c4:gqa0",
+    "perf:gqa1:2:long",
+    "c4:gqa1"
+   ]
   }
  ]
 }
