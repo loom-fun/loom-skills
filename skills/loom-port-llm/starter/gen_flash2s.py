@@ -510,6 +510,12 @@ if PARTIAL:
     E.append("  }\n")
     text = text[:i0] + "\n".join(E) + text[i1:]
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_partial") @{P}_attention_flash2_partial(', 1)
+if os.environ.get("FLASH2_ABL_DIRECT") and not PARTIAL:   # diagnostic (timing only): first token = tile * 16, no tile-list entry load
+    import re
+    text = re.sub(r"  %entry_slot_value = .*?\n  %entry = index.cast[^\n]*\n", "", text, flags=re.S)
+    text = re.sub(r"  (%first_token|%anchor) = index.assume %entry [^\n]*\n", r"  \1 = index.mul %tile, %c16 : index\n", text)
+    if os.environ["FLASH2_ABL_DIRECT"] == "2":
+        text = re.sub(r"  %listed_count32 = [^\n]*\n  %listed_count = [^\n]*\n  %listed = [^\n]*\n", "  %listed = scalar.constant true : i1\n", text)
 out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
 if not PARTIAL:
     subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen_flash2s.py")], check=True,

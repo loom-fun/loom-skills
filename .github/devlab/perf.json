@@ -1,40 +1,129 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "flash2 prefill #193 recovery: Spark-X2.6 nodraft, pre-#193 / #193 / main, kernel doubling, tile-list prologue ablations (WIP, not for merge).",
+ "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+ "memory_bytes": 55000000000,
+ "kit": null,
+ "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "f2a",
    "variants": [
     {
-     "name": "card"
+     "name": "pre",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
+    },
+    {
+     "name": "p193",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8"
+    },
+    {
+     "name": "main",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "pre_fl",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f",
+     "double": [
+      "*:g_attention_flash2\\b"
+     ]
+    },
+    {
+     "name": "p193_fl",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8",
+     "double": [
+      "*:g_attention_flash2\\b"
+     ]
+    },
+    {
+     "name": "main_fl",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:g_attention_flash2\\b"
+     ]
+    },
+    {
+     "name": "main_fb",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:g16_attention_split_listed|g16_attention_combine_listed"
+     ]
+    },
+    {
+     "name": "main_pt",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:g_attention_flash2_partial|g_attention_fallback_list"
+     ]
+    },
+    {
+     "name": "d1",
+     "build": {
+      "FLASH2_ABL_DIRECT": "1"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "d2",
+     "build": {
+      "FLASH2_ABL_DIRECT": "2"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "fn-mtp-b",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
+    "perf:pre:2:long",
+    "perf:p193:2:long",
+    "perf:main:2:long",
+    "perf:pre_fl:2:long",
+    "perf:p193_fl:2:long",
+    "perf:main_fl:2:long",
+    "perf:main_fb:2:long",
+    "perf:main_pt:2:long",
+    "perf:d1:2:long",
+    "perf:d2:2:long"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
