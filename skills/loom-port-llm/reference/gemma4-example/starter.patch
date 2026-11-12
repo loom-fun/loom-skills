@@ -586,8 +586,8 @@
      A(f"    %os{d} = vector.mulf %a{d}, %alpha_v : vector<8xf32>")
  A("""    %pos0_i32 = index.cast %pos0 : index to i32
      %pos15_i32 = scalar.addi %pos0_i32, %c15_i32m : i32
-@@ -533,15 +524,15 @@
-     %iota16 = vector.iota %c0_i32 step %c1_i32m : vector<16xi32>""")
+@@ -540,8 +531,8 @@
+ NEED_OP = ("scalar.ori", "%nb_edge") if EDGE_ZERO else ("scalar.andi", "%nb_live")
  for kb in range(KB):
      last = kb == KB - 1
 -    ins = [f"%os{d}" if kb == 0 else f"%on{d}_{kb - 1}" for d in range(NF)]
@@ -597,8 +597,10 @@
      A(f"""    %nb_last{kb} = scalar.addi %base{kb}, %c15_i32m : i32
      %nb_diag{kb} = scalar.cmpi sgt, %nb_last{kb}, %pos0_i32 : i32
      %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
-     %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
-     %need{kb} = scalar.ori %nb_diag{kb}, %nb_wins{kb} : i1
+@@ -551,8 +542,8 @@
+     %nb_diag_live{kb} = scalar.andi %nb_diag{kb}, %nb_live{kb} : i1
+     %nb_edge{kb} = scalar.andi %nb_wins{kb}, %nb_live{kb} : i1
+     %need{kb} = {NEED_OP[0]} %nb_diag_live{kb}, {NEED_OP[1]}{kb} : i1
 -    {", ".join(outs)} = scf.if %need{kb} -> ({", ".join(["vector<8xf32>"] * NF)}) {{""")
 -    for d in range(NF):   # one loop over the 16 query columns per dim fragment keeps the registers of one fragment live
 +    {", ".join(outs)} = scf.if %need{kb} -> ({", ".join(["vector<8xf32>"] * NFO)}) {{""")
@@ -606,7 +608,7 @@
          A(f"""      %ac{d}_{kb} = scf.for %mc_{d}_{kb} = [%c0 to %c16 step %c1](%acc{d}_{kb} = {ins[d]} : vector<8xf32>) -> (vector<8xf32>) {{
          %mci{d}_{kb} = index.cast %mc_{d}_{kb} : index to i32
          %qc{d}_{kb} = scalar.addi %pos0_i32, %mci{d}_{kb} : i32
-@@ -554,21 +545,21 @@
+@@ -565,21 +556,21 @@
          %mlo{d}_{kb} = vector.cmpi sge, %iota16, %lo_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
          %m{d}_{kb} = vector.andi %mhi{d}_{kb}, %mlo{d}_{kb} : vector<16xi1>
          %isc{d}_{kb} = scalar.cmpi eq, %lane_col32m, %mci{d}_{kb} : i32
@@ -634,7 +636,7 @@
    }
  @@MINE@@  // O^T / l (lane-uniform), gate, and store through a transposed strided view:
    // element (dim row, token column) -> out[first_token + col, head*128 + row].
-@@ -579,21 +570,22 @@
+@@ -590,21 +581,22 @@
    %out_layout = encoding.layout.strided [%c1, %c4096] : encoding<layout>
    %out_first_a = index.mul %first_token, %c4096 : index
    %cdim = index.constant {D} : index
@@ -662,7 +664,7 @@
  A("  }\n" * (2 if TS > 1 else 1) + "  kernel.return\n}\n")
  QTOKEN = """%q_token_value = index.add %first_token, %lane_col : index
    %q_token = index.assume %q_token_value [lt(%q_token_value, %tokens)] : index"""
-@@ -621,7 +613,7 @@
+@@ -632,7 +624,7 @@
  if PARTIAL:
      HEAD = HEAD.replace("  %pos_last = index.add %pos0, %c15 : index\n", "  %pos_last = index.add %pos0, %c15 : index\n" + POSHI, 1)
      assert "%pos_hi = " in HEAD
@@ -671,7 +673,7 @@
  for key, value in {"@@LAUNCH@@": LAUNCH, "@@HEAD@@": HEAD,
                     "@@TRUE_CONST@@": "  %true_const = scalar.constant true : i1\n" if TS == 1 else "",
                     "@@MINE@@": "" if TS == 1 else "  scf.if %mine {\n",
-@@ -638,8 +630,8 @@
+@@ -649,8 +641,8 @@
  consts += "  %c15_i32m = scalar.constant 15 : i32\n  %c1_i32m = scalar.constant 1 : i32\n  %far_below = scalar.constant -1000000 : i32\n"
  consts += "".join(f"  %kb{kb}_row = index.constant {kb * 16} : index\n  %kbo{kb} = scalar.constant {kb * 16} : i32\n" for kb in range(KB))
  text = text.replace("  %tile_count = index.div %tokens, %c16 : index\n", consts + "  %tile_count = index.div %tokens, %c16 : index\n", 1)
@@ -682,7 +684,7 @@
                     '{CFG["layers"]}': CFG["layers"], '{CFG["window"]}': CFG["window"], '{CFG["window"] - 1}': CFG["window"] - 1,
                     "{G - 1}": G - 1, "{QH}": QH, "{QH - 1}": QH - 1, "{QH * 128}": QH * 128, "{KVH - 1}": KVH - 1, "{LANES - 1}": LANES - 1, "{128 - DPT}": 128 - DPT,
                     '{"%sinks" if CFG["sinks"] else "%gate"}': "%sinks" if CFG["sinks"] else "%gate"}.items():
-@@ -654,10 +646,11 @@
+@@ -665,10 +657,11 @@
    %cqd = index.constant """ + str(QH * D) + """ : index
    %out_flat = buffer.view %out[%origin] : buffer -> view<[%tokens]x""" + str(QH * D) + """xf32>
  """ + ("  %gate_flat = buffer.view %gate[%origin] : buffer -> view<[%tokens]x" + str(QH * D) + "xf32>\n" if CFG["gate"] else "") + """  %cdim = index.constant """ + str(D) + """ : index
@@ -696,7 +698,7 @@
          E.append(f"    %ou{d} = vector.mulf %o{d}, %inv_v : vector<8xf32>")
          if CFG["gate"]:
              for i in range(8):
-@@ -717,4 +710,6 @@
+@@ -731,4 +724,6 @@
  }}
  """ + open(out_path + ".deep").read()
      os.remove(out_path + ".deep")
@@ -908,7 +910,7 @@
  def listed(text, name, grid_rest):
      """Variant of a per-token kernel dispatched over the tokens in `list`
      (count read from a device buffer for indirect dispatch)."""
-@@ -2719,18 +2808,18 @@
+@@ -2720,18 +2809,18 @@
      body = []
      pa = attn_rules.paged(U)
      if pa:   # absolute U-aligned key blocks lie in one 16-position KV page: one page lookup per block
@@ -930,7 +932,7 @@
        %kc{i} = buffer.view %arena[%ko{i}] : buffer -> view<{KVH}x32x4xf16>
        %kh{i} = vector.load %kc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
        %k{i} = vector.extf %kh{i} : vector<4xf16> to vector<4xf32>
-@@ -2906,7 +2995,7 @@
+@@ -2907,7 +2996,7 @@
      %stop = index.min %stop_raw, %visible : index
      %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
      %q_raw = vector.load %q_view[%token, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
@@ -939,7 +941,7 @@
      %scale_v = vector.splat %scale : vector<4xf32>
      %q4 = vector.mulf %q_raw, %scale_v : vector<4xf32>
      %zero4 = vector.splat %zero_f : vector<4xf32>
-@@ -3397,12 +3486,140 @@
+@@ -3398,12 +3487,140 @@
  
  
  def attention():
@@ -1086,7 +1088,7 @@
  
  
  FALLBACK = r"""
-@@ -3671,9 +3888,22 @@
+@@ -3672,9 +3889,22 @@
            %is_best = scalar.cmpf oeq, %lv, %best : f32
            %cand_id = scf.select %is_best, %li, %big : i32
            %winner = kernel.workgroup.reduce<minsi> %cand_id : i32
@@ -1110,7 +1112,7 @@
              view.store %winner, %cand_i[%rr] : i32, view<64xi32>
            }}
            scf.yield %best, %winner : f32, i32
-@@ -3788,7 +4018,13 @@
+@@ -3789,7 +4019,13 @@
          args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
          types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
          mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
@@ -1125,7 +1127,7 @@
      args = args.replace(f", {x}, {s},", f", {x16}, {s},")
      iq = ACT_Q8 and fmt in IQ_FMTS and kval // 32 <= 1024   # wider K (mv_wide: DFlash feature projections) stays f32
      if iq:   # int8 copy (g_quant_q8, launched beside the g_row_scale_f16 that makes x16): see quant_wiring()
-@@ -4146,8 +4382,9 @@
+@@ -4147,8 +4383,9 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -1137,7 +1139,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -4487,9 +4724,101 @@
+@@ -4488,9 +4725,101 @@
          gg = GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn,
                               fused=bool(MOE.get("gate_up_fused")) and mode == "gu", **xb)
          parts.append(gelu_vectors(gg) if GELU else gg)
@@ -1239,7 +1241,7 @@
  def gdn_layer(i, b, nm, sz, par):
      """Gated delta-net token mixer of layer i: h -> o (VD wide), then o16 for the output GEMM."""
      g = GDN
-@@ -4957,7 +5286,7 @@
+@@ -4958,7 +5287,7 @@
  def model():
      """Command program: embed, then a statically unrolled layer loop (each
      layer's tensor formats come from the GGUF), then the argmax head."""
@@ -1248,7 +1250,7 @@
      sliding = set(CFG.get("sliding_layers", []))
      global NARROW_ROPE
      NARROW_ROPE = {(LH[i], i in sliding) for i in range(L) if LH[i] != QH and i not in RECUR}
-@@ -4987,7 +5316,7 @@
+@@ -4988,7 +5317,7 @@
  """ + ("" if FF_UNIFORM else "".join(f"  %nFF{w} = index.constant {w} : index\n" for w in sorted(set(FFL)))) + "".join(
          f"  %nQ{h} = index.constant {h * D} : index\n" + (f"  %nQH{h} = index.constant {h} : index\n" if HEAD_GATE else "")
          for h in NARROW) + f"""  %nQ = index.constant {QD} : index
@@ -1257,7 +1259,7 @@
    %zero_i32 = scalar.constant 0 : i32
    %one_i32 = scalar.constant 1 : i32
    %row_bytes = index.constant {H * 4} : offset
-@@ -5054,7 +5383,23 @@
+@@ -5055,7 +5384,23 @@
    %h16 = buffer.alloca<global> align(256) %h16_size : buffer
    %o16 = buffer.alloca<global> align(256) %o16_size : buffer
    %f16 = buffer.alloca<global> align(256) %f16_size : buffer
@@ -1281,7 +1283,7 @@
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if HEAD_GATE:
-@@ -5092,125 +5437,106 @@
+@@ -5093,125 +5438,106 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1491,7 +1493,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -5236,7 +5562,7 @@
+@@ -5237,7 +5563,7 @@
      spec_kernels = ""
      if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too
          head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
@@ -1500,7 +1502,7 @@
                        GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
                        head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
                        prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin, lin2=lin2, pair_kv=PAIR_PROJ in ("1", "kv"),
-@@ -5349,8 +5675,9 @@
+@@ -5350,8 +5676,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1512,7 +1514,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if SWA_ROPE:
-@@ -5381,18 +5708,27 @@
+@@ -5382,18 +5709,27 @@
      gemm_text = subprocess.run([sys.executable, os.path.join(here, "gen_gemm.py")], capture_output=True, text=True, check=True, env=env).stdout
      parts.append(gelu_vectors(gemm_text) if GELU else gemm_text)
      parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
@@ -1908,7 +1910,7 @@
    check.return
  }}
  """)
-@@ -1378,7 +1335,11 @@
+@@ -1386,7 +1343,11 @@
      t, ctx = 64, 1024
      P0 = ctx - t; blocks = ctx // 16; pool = ctx
      kk = rng.standard_normal((ctx, KVH, D)).astype(np.float16); vv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
@@ -1921,7 +1923,7 @@
      qq = (rng.standard_normal((t, QH, D)) * 2.5).astype(np.float32); gg = rng.standard_normal((t, QH, D)).astype(np.float32)
      orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
      info = np.zeros((t, 4), np.int32); info[:, 1] = P0 + np.arange(t); info[:, 2] = 1
-@@ -1397,7 +1358,7 @@
+@@ -1405,7 +1366,7 @@
      # 960-1008 of row 0 (tokens 48-111), whichever tiles share its workgroups (gen_flash2.py TS), and leave the
      # heads (tokens 0-7, 40-47: the listed fallback's) untouched.
      tm = 112; k2 = rng.standard_normal((2, ctx, KVH, D)).astype(np.float16)
@@ -1930,7 +1932,7 @@
      orig_m = np.zeros(20 + 2 * blocks, np.int32); orig_m[8] = 80; orig_m[18] = 80 + 4 * blocks
      orig_m[20:] = np.arange(2 * blocks)
      row = (np.arange(tm) < 40).astype(np.int32)
-@@ -1413,6 +1374,11 @@
+@@ -1421,6 +1382,11 @@
          save(n + tag, a)
      cases.append(flash_case(f"flash_prefill_rows{tag}", "_m", tm, 2 * pool, len(orig_m)))
      cases.append(flash_case(f"flash_prefill{tag}", "", t, pool, len(orig)))
@@ -1942,7 +1944,7 @@
      if ow is not None:
          cases.append(cases[-1].replace(f"@flash_prefill{tag} {{", f"@flash_prefill_window{tag} {{").replace("%sliding = check.literal value(0)", "%sliding = check.literal value(1)")
                       .replace(f'path("f_o{tag}.npy")', f'path("f_ow{tag}.npy")'))
-@@ -1767,6 +1733,8 @@
+@@ -1775,6 +1741,8 @@
                              ("g_attention_flash2", "g_attention_flash2_partial")).replace("f_arena_a.npy", "f_arena_nan.npy"))
      cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
      cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
@@ -1951,7 +1953,7 @@
  
  # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
  # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
-@@ -2036,6 +2004,43 @@
+@@ -2044,6 +2012,43 @@
    check.return
  }}
  """)
