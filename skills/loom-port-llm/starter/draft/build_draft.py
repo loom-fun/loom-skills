@@ -336,6 +336,7 @@ def patch_control(text, cfg, draft):
     L1 = "    %length = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
     L2 = "    %length32 = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
     propose_flag, eff = "propose", "shape_index"
+    vstage_pick = "scalar.addi %vstage_table, %c0 : i32"
     mark_ir = "    %mark_spec = scalar.cmpi ne, %credit, %c0_i32 : i32\n"
     if OCC_MIN or CTX_MAX:
         occupied_ir = (f"  %occ_below = scalar.constant {OCC_MIN - 1} : i32\n  %occupied = scalar.cmpi ugt, %first_count, %occ_below : i32\n"
@@ -396,14 +397,19 @@ def patch_control(text, cfg, draft):
         L2 = ("    %length32_host = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
               "    %length32 = scf.select %gate, %c1_i32, %length32_host : i32\n")
         propose_flag, eff = "propose_on", "eff_index"
+        vstage_pick = "scf.select %gated, %gated_stage, %vstage_table : i32"
         # an anchor-only span is an ordinary known span for the verifier (no speculative flag bit, no credit, no replay)
         mark_ir = "    %not_gate = scalar.cmpi eq, %flag_value, %c0_i32 : i32\n    %mark_spec = scalar.andi %speculative, %not_gate : i1\n"
         gate_epoch = f"""  %flag_at = index.constant {GATE_FLAG} : offset
   %flag_view = buffer.view %control_state[%flag_at] : buffer -> view<1xi32>
   %flag = view.load %flag_view[0] : view<1xi32> -> i32
   %gated = scalar.cmpi ne, %flag, %c0 : i32
-  %flag_nz = scf.select %gated, %flag, %c1 : i32
+  %flag_low_mask = scalar.constant 255 : i32
+  %flag_low = scalar.andi %flag, %flag_low_mask : i32
+  %flag_nz = scf.select %gated, %flag_low, %c1 : i32
   %flag_idx = scalar.subi %flag_nz, %c1 : i32
+  %flag_shift = scalar.constant 8 : i32
+  %gated_stage = scalar.shrui %flag, %flag_shift : i32
   %flag_b = scalar.assume %flag_idx [range(%flag_idx, 0, 127)] : i32
   %flag_shape = index.cast %flag_b : i32 to index
   %eff_index = scf.select %gated, %flag_shape, %shape_index : index
@@ -649,7 +655,8 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
 {"    %proposal = func.call @execute_4(%pstage, %metadata, %tokens, %draft_origins, %draft_cache) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)" if dflash else ("    %proposal = func.call @execute_5(%pstage, %metadata, %tokens, %origins, %state, %carry) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)" if draft["kind"] == "assist" else "    %proposal = func.call @execute_5(%pstage, %metadata, %tokens, %draft_origins, %draft_cache, %carry) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)")}
   }}
   %target = scf.if %verify -> (i64) {{
-    %vstage = view.load %verify_view[%{eff}] : view<128xi32> -> i32
+    %vstage_table = view.load %verify_view[%{eff}] : view<128xi32> -> i32
+    %vstage = {vstage_pick}
     %completion = func.call @execute_7(%vstage, %residual, %metadata, %origins, %state, %tokens, %committed, %results) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     %count64 = scalar.extui %span_count : i32 to i64
     %record = scalar.constant 40 : i64
