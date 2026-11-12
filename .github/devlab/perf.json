@@ -1,5 +1,5 @@
 {
- "_comment": "MiniCPM-V-4.7 decode: knob sweep on top of R4/Q8/U8.",
+ "_comment": "MiniCPM-V-4.7 decode with active wait (devlab-perf-source merged).",
  "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
  "memory_bytes": 36000000000,
  "kit": null,
@@ -7,7 +7,54 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "abl2",
+   "name": "act",
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "def",
+     "build": {}
+    },
+    {
+     "name": "best",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     }
+    },
+    {
+     "name": "gdn",
+     "build": {
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     }
+    },
+    {
+     "name": "moe",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8"
+     }
+    }
+   ],
+   "steps": [
+    "perf:card:1:long",
+    "perf:def:1:long",
+    "perf:best:1:long",
+    "perf:gdn:1:long",
+    "perf:moe:1:long",
+    "llama:2:long",
+    "llama@vulkan:2:long"
+   ]
+  },
+  {
+   "name": "actabl",
    "variants": [
     {
      "name": "card"
