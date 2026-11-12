@@ -198,9 +198,9 @@
   {
    "repo": "loom-fun/ggml-org-Qwen3.6-27B-loom",
    "slug": "qwen3.6-27b",
-   "memory_bytes": 53000000000,
+   "memory_bytes": 57000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
