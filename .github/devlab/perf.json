@@ -1,70 +1,41 @@
 {
- "_comment": "flash2 prefill: last-tile masked path A/B (main vs new, pre-#193 where the card predates it), ktest + consistency.",
+ "_comment": "Bolt-E4B consistency: main vs peeled vs unpeeled vs pre-#193 (WIP)",
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "spark",
-   "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
-   "memory_bytes": 55000000000,
-   "kit": null,
-   "variants": [
-    {
-     "name": "pre",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
-    },
-    {
-     "name": "main",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "701974f"
-    },
-    {
-     "name": "new",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    }
-   ],
-   "steps": [
-    "perf:pre:1",
-    "perf:pre:1:long",
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
-    "perf:pre:1",
-    "perf:pre:1:long",
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
-    "perf:pre:1",
-    "perf:pre:1:long",
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
-    "ktest:new",
-    "consistency:new:2"
-   ]
-  },
-  {
-   "name": "bolt",
+   "name": "boltc",
    "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
    "memory_bytes": 40000000000,
    "kit": "gemma4",
    "variants": [
     {
+     "name": "main",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "701974f"
+    },
+    {
+     "name": "new",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "new_np",
+     "build": {
+      "FLASH2_PEEL": "0"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
      "name": "pre",
      "build": {},
      "build_args": [
@@ -72,128 +43,23 @@
       "none"
      ],
      "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
-    },
-    {
-     "name": "main",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "701974f"
-    },
-    {
-     "name": "new",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ]
     }
    ],
    "steps": [
-    "perf:pre:1",
-    "perf:pre:1:long",
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
-    "perf:pre:1",
-    "perf:pre:1:long",
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
-    "perf:pre:1",
-    "perf:pre:1:long",
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
+    "consistency:main:1",
+    "consistency:new:1",
+    "consistency:new_np:1",
+    "consistency:pre:1",
+    "consistency:main:1",
+    "consistency:new:1",
+    "consistency:new_np:1",
+    "consistency:pre:1",
+    "consistency:main:1",
+    "consistency:new:1",
+    "consistency:new_np:1",
+    "consistency:pre:1",
     "ktest:new",
-    "consistency:new:2"
-   ]
-  },
-  {
-   "name": "q4b",
-   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
-   "memory_bytes": 55000000000,
-   "kit": null,
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "701974f"
-    },
-    {
-     "name": "new",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    }
-   ],
-   "steps": [
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
-    "ktest:new",
-    "consistency:new:2"
-   ]
-  },
-  {
-   "name": "q06",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "memory_bytes": 17000000000,
-   "kit": null,
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "701974f"
-    },
-    {
-     "name": "new",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    }
-   ],
-   "steps": [
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
-    "perf:main:1",
-    "perf:main:1:long",
-    "perf:new:1",
-    "perf:new:1:long",
-    "ktest:new",
-    "consistency:new:2"
+    "ktest:new_np"
    ]
   }
  ]
