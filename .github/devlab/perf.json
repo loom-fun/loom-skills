@@ -6,7 +6,7 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "abl",
+   "name": "stride",
    "variants": [
     {
      "name": "base",
@@ -16,36 +16,45 @@
      }
     },
     {
-     "name": "noexp",
+     "name": "s96",
      "build": {
-      "ATTN_ABL": "noexp"
+      "ATTN_SPLITS": "96"
      },
      "execution": {
       "draft_depth": 0
      }
     },
     {
-     "name": "nored",
+     "name": "s112",
      "build": {
-      "ATTN_ABL": "nored"
+      "ATTN_SPLITS": "112"
      },
      "execution": {
       "draft_depth": 0
      }
     },
     {
-     "name": "both",
+     "name": "s127",
      "build": {
-      "ATTN_ABL": "noexp,nored"
+      "ATTN_SPLITS": "127"
      },
      "execution": {
       "draft_depth": 0
      }
     },
     {
-     "name": "s128",
+     "name": "s120",
      "build": {
-      "ATTN_SPLITS": "128"
+      "ATTN_SPLITS": "120"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "s200",
+     "build": {
+      "ATTN_SPLITS": "200"
      },
      "execution": {
       "draft_depth": 0
@@ -53,11 +62,12 @@
     }
    ],
    "steps": [
-    "perf:base:1:long",
-    "perf:noexp:1:long",
-    "perf:nored:1:long",
-    "perf:both:1:long",
-    "perf:s128:1:long"
+    "perf:base:2:long",
+    "perf:s96:2:long",
+    "perf:s112:2:long",
+    "perf:s127:2:long",
+    "perf:s120:2:long",
+    "perf:s200:2:long"
    ]
   }
  ]
