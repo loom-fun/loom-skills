@@ -18,10 +18,9 @@
     }
    ],
    "steps": [
-    "perf:base:2:long",
-    "perf:vt:2:long",
-    "llama@vulkan:1:long",
-    "llama:1:long"
+    "perf:base:3:long",
+    "perf:vt:3:long",
+    "llama@vulkan.np1.nospec:2:long"
    ]
   }
  ],
