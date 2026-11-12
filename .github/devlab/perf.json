@@ -6,7 +6,7 @@
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "sweep2",
+   "name": "sweep4",
    "variants": [
     {
      "name": "base",
@@ -14,49 +14,64 @@
      "ref": "origin/main"
     },
     {
-     "name": "r4f-u1",
+     "name": "r2q",
      "build": {
-      "MOE_Q8": "0",
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "1"
+      "MOE_R": "2"
      }
     },
     {
-     "name": "r4f-u4",
+     "name": "r1q",
      "build": {
-      "MOE_Q8": "0",
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "4"
+      "MOE_R": "1"
      }
     },
     {
-     "name": "r4q-u4",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "4"
-     }
-    },
-    {
-     "name": "r2f-u4",
-     "build": {
-      "MOE_Q8": "0",
-      "MOE_R": "2",
-      "MOE_ROUTE_U": "4"
-     }
-    },
-    {
-     "name": "r2q-u4",
+     "name": "r2q-un",
      "build": {
       "MOE_R": "2",
-      "MOE_ROUTE_U": "4"
+      "MOE_UNROLL": "1"
      }
     },
     {
-     "name": "r8f-u4",
+     "name": "r4q-un",
      "build": {
-      "MOE_Q8": "0",
-      "MOE_ROUTE_U": "4"
+      "MOE_R": "4",
+      "MOE_UNROLL": "1"
      }
+    },
+    {
+     "name": "r2q-u8",
+     "build": {
+      "MOE_R": "2",
+      "MOE_ROUTE_U": "8"
+     }
+    },
+    {
+     "name": "d-route",
+     "build": {
+      "MOE_R": "2"
+     },
+     "double": [
+      "*:@g_moe_route\\b"
+     ]
+    },
+    {
+     "name": "d-gu",
+     "build": {
+      "MOE_R": "2"
+     },
+     "double": [
+      "*:@g_moe_gu_\\w+_r2\\b"
+     ]
+    },
+    {
+     "name": "d-dn",
+     "build": {
+      "MOE_R": "2"
+     },
+     "double": [
+      "*:@g_moe_dn_\\w+_r2\\b"
+     ]
     }
    ],
    "steps": [
@@ -64,7 +79,7 @@
    ]
   },
   {
-   "name": "sweep3",
+   "name": "sweep5",
    "variants": [
     {
      "name": "base",
@@ -72,49 +87,64 @@
      "ref": "origin/main"
     },
     {
-     "name": "r4f-u1",
+     "name": "r2q",
      "build": {
-      "MOE_Q8": "0",
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "1"
+      "MOE_R": "2"
      }
     },
     {
-     "name": "r4f-u4",
+     "name": "r1q",
      "build": {
-      "MOE_Q8": "0",
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "4"
+      "MOE_R": "1"
      }
     },
     {
-     "name": "r4q-u4",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "4"
-     }
-    },
-    {
-     "name": "r2f-u4",
-     "build": {
-      "MOE_Q8": "0",
-      "MOE_R": "2",
-      "MOE_ROUTE_U": "4"
-     }
-    },
-    {
-     "name": "r2q-u4",
+     "name": "r2q-un",
      "build": {
       "MOE_R": "2",
-      "MOE_ROUTE_U": "4"
+      "MOE_UNROLL": "1"
      }
     },
     {
-     "name": "r8f-u4",
+     "name": "r4q-un",
      "build": {
-      "MOE_Q8": "0",
-      "MOE_ROUTE_U": "4"
+      "MOE_R": "4",
+      "MOE_UNROLL": "1"
      }
+    },
+    {
+     "name": "r2q-u8",
+     "build": {
+      "MOE_R": "2",
+      "MOE_ROUTE_U": "8"
+     }
+    },
+    {
+     "name": "d-route",
+     "build": {
+      "MOE_R": "2"
+     },
+     "double": [
+      "*:@g_moe_route\\b"
+     ]
+    },
+    {
+     "name": "d-gu",
+     "build": {
+      "MOE_R": "2"
+     },
+     "double": [
+      "*:@g_moe_gu_\\w+_r2\\b"
+     ]
+    },
+    {
+     "name": "d-dn",
+     "build": {
+      "MOE_R": "2"
+     },
+     "double": [
+      "*:@g_moe_dn_\\w+_r2\\b"
+     ]
     }
    ],
    "steps": [

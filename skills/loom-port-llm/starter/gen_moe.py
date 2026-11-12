@@ -724,7 +724,28 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   kernel.return
 }
 """)
-    return "\n".join(L)
+    text = "\n".join(L)
+    if int(os.environ.get("MOE_UNROLL", "0")):
+        text = unroll_rows(text, R)
+    return text
+
+
+def unroll_rows(text, R):
+    """MOE_UNROLL=1: the expert matvec's row loop `scf.for %r` as R straight-line copies (SSA names suffixed _u<r>), so the R
+    rows' weight loads are all issued before the first wave reduction waits on its own: more memory in flight per wave."""
+    head = "  scf.for %r = [%c0 to %rows_per step %c1] {\n"
+    tail = "\n  }\n  kernel.barrier<workgroup>"
+    i = text.index(head); j = text.index(tail, i)
+    body = text[i + len(head):j]
+    names = set(re.findall(r"(?m)^\s*(%\w+(?:, %\w+)*) = ", body))
+    names = sorted({n for g in names for n in g.split(", ")} | {"%r"}, key=len, reverse=True)
+    out = []
+    for r in range(R):
+        t = body
+        for n in names:
+            t = re.sub(re.escape(n) + r"(?!\w)", f"{n}_u{r}", t)
+        out.append(f"  %r_u{r} = index.constant {r} : index\n" + t)
+    return text[:i] + "\n".join(out) + text[j + len("\n  }"):]
 
 
 def combine(H, KU, acc=False):
