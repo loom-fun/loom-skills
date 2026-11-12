@@ -115,6 +115,13 @@ The gate flag lives in control state (byte 1676, table at 1700): `encode_epoch` 
 it. It needs a `(s, s)` shape for the span count (otherwise the gate stays off for that count). Because the gated c4 rate
 equals depth 0, tune.py's per-row margin keeps a drafter that wins single-stream without paying at four streams.
 
+Context gate (`SPEC_CTX_MAX` or `cfg["drafter"]["ctx_max"]`, default 0 = off): `encode_epoch` also gates an epoch (all spans
+speculative) whose deepest span's causal position (plan word 1) is >= ctx_max, through the same anchor-only path, because
+verifying depth + 1 tokens per span costs depth + 1 attention passes over the whole context (Ornith-1.5-35B depth 3: short
+rows 118 vs 62 tok/s, 16k 44.9 vs 53.5). tune.py retries the best depth of each kind with ctx_max 3500 when only the long
+row loses, and ranks that candidate by the same margin; a card whose long row wins (80 % acceptance at 32k) keeps ctx_max 0.
+`occ_min` and `ctx_max` are recorded in `cfg["drafter"]`; the env variables win.
+
 ## Choosing the drafter and depth (`tune.py`, qualify.sh stage 0)
 
 Builds each available kind once at the full native context (build.py sizes each candidate's memory; a drafter adds
@@ -125,7 +132,7 @@ row relative to depth 0; it is used only if no row is slower than 0.98 x depth 0
 drafting by 3 %, and the best margin ranks first. Low-acceptance drafting loses on exactly the prose, 32k and 4-stream
 rows (every span verifies depth + 1 tokens, padded to 16 at 4 streams): Qwen3.5-0.8B ngram depth 3 decode 223 vs 258 tok/s
 without, 32k 125 vs 166, four streams 498 vs 787, so tune picks none; a span with real acceptance (Muse-Glimmer depth 3 over
-none on 4 streams) keeps it, and the depth whose rows x (depth + 1) fits 16 is always a candidate. The best margin that also passes the spec gate's equivalence check (spec_check.py's requests at the
+none on 4 streams) keeps it, and the depth whose rows x (depth + 1) fits 16 is always a candidate. With several rows each drafter is also built ungated (`SPEC_OCC_MIN=0`, the occupancy gate above) and its streams4 measured per depth; a depth takes the better streams4 and the winner's `occ_min` goes to `cfg["drafter"]["occ_min"]` (build_draft.py reads it; the env var overrides): Muse-Glimmer depth 3 ungated 74 tok/s at 4 streams, gated 48.6. The best margin that also passes the spec gate's equivalence check (spec_check.py's requests at the
 candidate depth vs draft_depth 0 of the same package: identical) and a concurrency check (consistency.py-style
 ~300-token prompts, two 0.5 s apart and four at once, twice each: agentic serving overlaps requests) wins; one that
 fails is recorded with the reason (`checked` in the table) and the next is checked. The choice and the whole table go to `cfg["drafter"]` and
