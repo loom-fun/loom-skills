@@ -1,28 +1,57 @@
 {
- "_comment": "Qwen3-30B-A3B-2507 streams4 recheck: regenerated card vs the same build with the pre-#437 starter, same runner.",
- "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
- "memory_bytes": 63000000000,
+ "_comment": "Regenerated Ornith-1.5-35B and Qwen3.5-35B cards: same-runner Loom (active wait) vs llama.cpp ROCm and Vulkan (1 slot, no draft).",
+ "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
+ "memory_bytes": 49000000000,
  "kit": null,
  "llamacpp": "b1374",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "q30-c4",
+   "name": "ornith15-35b",
+   "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
+   "memory_bytes": 49000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llama_spec": "",
    "variants": [
     {
      "name": "card"
-    },
-    {
-     "name": "old",
-     "ref": "b1e4d026b763b16a9ec7aae628a33c6186107ad3"
     }
    ],
    "steps": [
-    "c4:card",
-    "c4:old",
     "perf:card:2",
-    "perf:old:2",
+    "perf:card:2:long",
     "c4:card",
-    "c4:old"
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan.np1.nospec:2",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec"
+   ]
+  },
+  {
+   "name": "q35-35b",
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
+   "memory_bytes": 49000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:Anbeeld/Qwen3.5-35B-A3B-DFlash-GGUF/Qwen3.5-35B-A3B-DFlash-Q4_K_M.gguf} --spec-draft-n-max 5 -ngld 99",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan.np1.nospec:2",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec"
    ]
   }
  ]
