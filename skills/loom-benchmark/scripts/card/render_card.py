@@ -107,6 +107,26 @@ def package_sdk(gen, versions):
     return sdk_text((versions.get("package") or {}).get("hrx_loom"))
 
 
+LEARN_MORE = "Learn more on the [Loom ecosystem website](https://loom-fun.github.io/loom-dev/)."
+
+
+def required_sdk(facts, versions, sources):
+    """The hrx-loom build the Quick start must install: llm_config.json "sdk" (an explicit requirement, possibly a CI
+    build), else the PyPI release that generated the programs, else the one the card's package record or its
+    measurement sessions name (only when every named session agrees). A derived pin is only used when that build is a
+    PyPI release (a CI build is not installable by version, so it needs the explicit "sdk"). Never hardcoded per model."""
+    pin = facts.get("sdk")
+    if pin and (pin.get("source") == "ci" or pin.get("hrx_loom")):
+        return pin
+    gen = (facts.get("generator") or {}).get("hrx_loom")
+    pypi = lambda x: isinstance(x, dict) and x.get("hrx_loom") and x.get("source") == "pypi"
+    for x in (gen, (versions.get("package") or {}).get("hrx_loom")):
+        if pypi(x):
+            return x
+    seen = {x["hrx_loom"] for x in (s.get("hrx_loom") for s in sources.values()) if pypi(x)}
+    return {"hrx_loom": seen.pop(), "source": "pypi"} if len(seen) == 1 else None
+
+
 def margin(loom, base):
     if loom is None or base is None or not base:
         return MISSING
@@ -249,7 +269,7 @@ def render(d):
     L += [f"# {facts['name']}{quant} for AMD Loom", "",
           f"A [Loom]({LOOM_URL}) package (`.loom` programs and a `model.json` card) for the unmodified GGUF checkpoint "
           f"{hf(c['repo'])} (`{c['file']}`), generated on an AMD Ryzen AI Max+ 395 \"Strix Halo\" with the "
-          f"[loom-skills]({SKILLS_URL}) workflow.", ""]
+          f"[loom-skills]({SKILLS_URL}) workflow. {LEARN_MORE}", ""]
 
     fetch = ["loom-fetch", f"{HF}/{info['repo']}/resolve/main/model.json"]
     if facts["preset"]:
@@ -263,7 +283,7 @@ def render(d):
         serve.append(f"--memory_bytes={memory}")
     api = ("answers OpenAI-style `/v1/chat/completions` requests" if kind == "chat"
            else f"answers SystemOne decision requests at `{feats['api']['value']['endpoint']}`")
-    pin = facts.get("sdk")   # llm_config.json "sdk": the package needs this hrx-loom build, not the PyPI default
+    pin = required_sdk(facts, versions, sources)
     if pin and pin.get("source") == "ci":
         root = f"~/loom-{pin['artifact_id']}"
         install = [f"git clone {SKILLS_URL}",
@@ -272,7 +292,7 @@ def render(d):
     elif pin and pin.get("hrx_loom"):
         install = [f'pip install "hrx-loom[hf]=={pin["hrx_loom"]}"']
     else:
-        install = ['pip install "hrx-loom[hf]"']
+        install = ['pip install "hrx-loom[hf]"']   # no SDK version recorded anywhere (cannot happen for a built card)
     L += ["## Quick start", "", "```bash", *install, " ".join(fetch), " ".join(serve), "```", ""]
     if pin and pin.get("source") == "ci":
         sha = (pin.get("hrx_system_sha") or "")[:8]

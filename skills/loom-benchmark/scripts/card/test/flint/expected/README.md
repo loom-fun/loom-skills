@@ -11,12 +11,12 @@ tags:
 
 # Flint (Q4_K_M) for AMD Loom
 
-A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `model.json` card) for the unmodified GGUF checkpoint [ggml-org/Flint-GGUF](https://huggingface.co/ggml-org/Flint-GGUF) (`Flint-Q4_K_M.gguf`), generated on an AMD Ryzen AI Max+ 395 "Strix Halo" with the [loom-skills](https://github.com/loom-fun/loom-skills) workflow.
+A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `model.json` card) for the unmodified GGUF checkpoint [ggml-org/Flint-GGUF](https://huggingface.co/ggml-org/Flint-GGUF) (`Flint-Q4_K_M.gguf`), generated on an AMD Ryzen AI Max+ 395 "Strix Halo" with the [loom-skills](https://github.com/loom-fun/loom-skills) workflow. Learn more on the [Loom ecosystem website](https://loom-fun.github.io/loom-dev/).
 
 ## Quick start
 
 ```bash
-pip install "hrx-loom[hf]"
+pip install "hrx-loom[hf]==0.1.0"
 loom-fetch https://huggingface.co/loom-fun/ggml-org-Flint-loom/resolve/main/model.json --materialize=copy --output=flint
 loom-serve --model=flint/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=67000000000
 ```
