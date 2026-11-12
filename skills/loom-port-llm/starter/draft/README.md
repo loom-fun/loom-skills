@@ -112,7 +112,11 @@ and there are at least `SPEC_OCC_MIN` of them it clamps every span to its anchor
 verify/advance/warm stage of the (s tokens, s spans) shape (the plain decode shape), and results publish as one token per
 span. One stream still drafts (decode and long context unchanged); multi-stream decode runs at the undrafted epoch size.
 The gate flag lives in control state (byte 1676, table at 1700): `encode_epoch` writes it and the same epoch's `@epoch` reads
-it. It needs a `(s, s)` shape for the span count (otherwise the gate stays off for that count). Because the gated c4 rate
+it. DFlash drafters run the gated epoch as `@llm_gate` (the plain advance trunk without feature taps, ending in `g_gate_results`,
+which writes the one-token verification records the host's publish path reads; stage table at byte 1828, indexed by span
+count) and skip the drafter catch-up: no capture/replay passes, wide head or acceptance, so a gated epoch costs a depth-0 one.
+The drafter's context K/V then has no entries for gated positions (acceptance only; output stays the target's).
+`SPEC_GATE_VERIFY=1` keeps the one-token verify path. It needs a `(s, s)` shape for the span count (otherwise the gate stays off for that count). Because the gated c4 rate
 equals depth 0, tune.py's per-row margin keeps a drafter that wins single-stream without paying at four streams.
 
 Context gate (`SPEC_CTX_MAX` or `cfg["drafter"]["ctx_max"]`, default 0 = off): `encode_epoch` also gates an epoch (all spans
