@@ -1,6 +1,14 @@
 {
- "_comment": "Qwen2.5-32B: re-port from main (per-row draft tuning #270, occupancy gate #298), derived from its published card.",
+ "_comment": "Qwen2.5-32B: re-port from main without drafting (SPEC=off): 32k attention (#357 GQA) and 4 streams run undrafted.",
  "jobs": [
-  {"name": "qwen25-32b-regen", "spec": "bartowski/Qwen2.5-32B-Instruct-GGUF:Qwen2.5-32B-Instruct-Q4_K_M.gguf", "reference": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom", "model_id": "Qwen/Qwen2.5-32B-Instruct"}
+  {
+   "name": "qwen25-32b-nodraft",
+   "spec": "bartowski/Qwen2.5-32B-Instruct-GGUF:Qwen2.5-32B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
+   "model_id": "Qwen/Qwen2.5-32B-Instruct",
+   "env": {
+    "SPEC": "off"
+   }
+  }
  ]
 }
