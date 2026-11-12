@@ -1,11 +1,33 @@
 {
- "_comment": "Sage agent-gate reuse failure: regen with #386 reverted (diagnostic).",
+ "_comment": "Sage agent-gate reuse bisect: skills at #247^, #247, #350, #351.",
  "jobs": [
   {
-   "name": "sage",
+   "name": "sage-s0",
    "spec": "InternScience/Sage-A1.5-Q4_K_M-GGUF:Sage-A1.5-Q4_K_M.gguf",
    "reference": "loom-fun/InternScience-Sage-A1.5-loom",
-   "model_id": "InternScience/Sage-A1.5"
+   "model_id": "InternScience/Sage-A1.5",
+   "skills_ref": "9b957a76f28fbb72a69b48dc3668a6170a37d89e"
+  },
+  {
+   "name": "sage-s1",
+   "spec": "InternScience/Sage-A1.5-Q4_K_M-GGUF:Sage-A1.5-Q4_K_M.gguf",
+   "reference": "loom-fun/InternScience-Sage-A1.5-loom",
+   "model_id": "InternScience/Sage-A1.5",
+   "skills_ref": "422b4f7cd01761677ba56465437664cbf1c9d302"
+  },
+  {
+   "name": "sage-s2",
+   "spec": "InternScience/Sage-A1.5-Q4_K_M-GGUF:Sage-A1.5-Q4_K_M.gguf",
+   "reference": "loom-fun/InternScience-Sage-A1.5-loom",
+   "model_id": "InternScience/Sage-A1.5",
+   "skills_ref": "f253ef73606ac6a02408d26a91f2ca2050271874"
+  },
+  {
+   "name": "sage-s3",
+   "spec": "InternScience/Sage-A1.5-Q4_K_M-GGUF:Sage-A1.5-Q4_K_M.gguf",
+   "reference": "loom-fun/InternScience-Sage-A1.5-loom",
+   "model_id": "InternScience/Sage-A1.5",
+   "skills_ref": "edf63e173a0f6debf7317888a49b56d57ae9610e"
   }
  ]
 }
