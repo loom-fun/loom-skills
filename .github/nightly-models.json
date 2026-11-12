@@ -139,7 +139,6 @@
    "llamacpp": "b1369",
    "features": [
     "vision",
-    "draft",
     "thinking-toggle"
    ]
   },
@@ -233,7 +232,7 @@
   {
    "repo": "loom-fun/bartowski-Qwen2.5-7B-Instruct-loom",
    "slug": "qwen2.5-7b-instruct",
-   "memory_bytes": 14000000000,
+   "memory_bytes": 15000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
@@ -263,12 +262,10 @@
   {
    "repo": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
    "slug": "qwen3-4b-instruct-2507",
-   "memory_bytes": 63000000000,
+   "memory_bytes": 55000000000,
    "kit": null,
    "llamacpp": "b1368",
-   "features": [
-    "draft"
-   ]
+   "features": []
   },
   {
    "repo": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
@@ -485,7 +482,6 @@
    "llamacpp": "b1370",
    "features": [
     "vision",
-    "draft",
     "thinking-toggle"
    ]
   },
