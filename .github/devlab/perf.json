@@ -211,6 +211,32 @@
    "steps": [
     "ab:6"
    ]
+  },
+  {
+   "name": "ref",
+   "variants": [
+    {
+     "name": "d0",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "d2",
+     "execution": {
+      "draft_depth": 2
+     }
+    }
+   ],
+   "steps": [
+    "perf:d0:2:long",
+    "c4:d0",
+    "perf:d2:2:long",
+    "c4:d2",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec"
+   ]
   }
- ]
+ ],
+ "llamacpp_vulkan": "b12211"
 }
