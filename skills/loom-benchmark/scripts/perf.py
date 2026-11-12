@@ -29,7 +29,7 @@ Completion tokens: every timed decode request logs the tokens it generated (out[
 Warm-up (untimed, logged as warmup_decode_tps): the timed decode request itself with another nonce, so every path
 the first timed request takes (prefill, decode, drafting, lazily loaded weights, first-use kernels) has run once.
 A trivial "Say hi." left the short-prompt decode paying first-use costs (DevLab sweeps measured it 51-60 % below
-the local session while decode at 2k agreed). Both engines and every caller (qualify, finalize, devlab_perf)
+another session while decode at 2k agreed). Both engines and every caller (qualify, finalize, devlab_perf)
 get the same warm-up.
 Loom numbers are client-side (streaming TTFT and token arrival). llama.cpp
 numbers come from its server-side `timings` (excludes HTTP and tokenization),
