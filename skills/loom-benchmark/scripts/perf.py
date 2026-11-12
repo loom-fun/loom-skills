@@ -137,6 +137,9 @@ def long_request(key, f, *args):
 if a.long:
     out["prefill_long"], out["nonce"] = [], nonce
     for n in (8000, 16000, 32000):
+        # untimed ~2k prefill first: the GPU idles while perf.py starts and between requests, and the first long
+        # prefill after an idle gap pays the clock ramp (~0.3 s: -9 % at 8k for Loom, -3 % for llama.cpp Vulkan)
+        long_request("warm", run, f"[warm {nonce} {n} {random.random()}] Summarize this documentation in one sentence.\n\n" + doc(2000), 4)
         r = long_request(f"prefill_{n}", run, long_prompt(f"prefill_{n}", nonce), 4)
         if r:
             out["prefill_long"].append({"prompt_tokens": r[0], "prefill_tps": round(r[1], 1)})

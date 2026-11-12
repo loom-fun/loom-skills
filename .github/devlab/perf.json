@@ -6,23 +6,16 @@
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "bolt-d0",
+   "name": "bolt-warm",
    "variants": [
-    {
-     "name": "d0",
-     "ref": "origin/main",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
     {
      "name": "d3",
      "ref": "origin/main"
     }
    ],
    "steps": [
-    "perf:d0:4:long",
-    "perf:d3:4:long"
+    "perf:d3:4:long",
+    "llama@vulkan.np1.nospec:3:long"
    ]
   }
  ],
