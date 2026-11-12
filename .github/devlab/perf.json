@@ -12,18 +12,31 @@
    "variants": [
     {
      "name": "card"
+    },
+    {
+     "name": "d0draft",
+     "build": {
+      "DRAFT": "ngram",
+      "DRAFT_DEPTH": "2"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "nodraft",
+     "build": {
+      "DRAFT": "none"
+     }
     }
    ],
    "steps": [
     "perf:card:3",
-    "perf:card:3:long",
-    "c4:card",
-    "llama:3",
-    "llama:3:long",
-    "llamac4",
-    "llama@vulkan:3",
-    "llama@vulkan:3:long",
-    "llamac4@vulkan"
+    "perf:d0draft:3",
+    "perf:nodraft:3",
+    "perf:d0draft:1:long",
+    "c4:d0draft",
+    "llama@vulkan:3"
    ]
   }
  ]
