@@ -113,8 +113,6 @@ def margin(loom, base):
     return f"{round((loom / base - 1) * 100):+d} %"
 
 
-
-
 def drafting(spec):
     return f"on ({METHOD.get(spec[0], spec[0])}, depth {spec[1]})" if spec else "off"
 
