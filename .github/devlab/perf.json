@@ -1,12 +1,12 @@
 {
- "_comment": "flash2: broadcast of the listed tile entry (WIP)",
+ "_comment": "flash2: main-derived variants (dead-block skip, LDS mask, entry broadcast) (WIP)",
  "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
  "memory_bytes": 55000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "f2w",
+   "name": "f2a1",
    "variants": [
     {
      "name": "pre",
@@ -18,37 +18,6 @@
      "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
     },
     {
-     "name": "p193",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8"
-    },
-    {
-     "name": "p193_bc",
-     "build": {
-      "FLASH2_ENTRY": "bcast"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "fa2899617634c1c1d7c124338aa0e489ee79d35d"
-    },
-    {
-     "name": "p193_bc3",
-     "build": {
-      "FLASH2_ENTRY": "bcast3"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "fa2899617634c1c1d7c124338aa0e489ee79d35d"
-    },
-    {
      "name": "main",
      "build": {},
      "build_args": [
@@ -58,7 +27,39 @@
      "ref": "6fd2f49"
     },
     {
-     "name": "main_bc",
+     "name": "m1",
+     "build": {
+      "FLASH2_MASKV": "old"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+    },
+    {
+     "name": "m3",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+    },
+    {
+     "name": "m4",
+     "build": {
+      "FLASH2_MASKV": "old",
+      "FLASH2_ENTRY": "bcast"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+    },
+    {
+     "name": "m5",
      "build": {
       "FLASH2_ENTRY": "bcast"
      },
@@ -66,16 +67,84 @@
       "--draft",
       "none"
      ],
-     "ref": "a5269861df4c287f28ca8439c04ed5e37cf9c9da"
+     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
     }
    ],
    "steps": [
     "perf:pre:2:long",
-    "perf:p193:2:long",
-    "perf:p193_bc:2:long",
-    "perf:p193_bc3:2:long",
     "perf:main:2:long",
-    "perf:main_bc:2:long"
+    "perf:m1:2:long",
+    "perf:m3:2:long",
+    "perf:m4:2:long",
+    "perf:m5:2:long"
+   ]
+  },
+  {
+   "name": "f2a2",
+   "variants": [
+    {
+     "name": "pre",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
+    },
+    {
+     "name": "m1e",
+     "build": {
+      "FLASH2_MASKV": "old",
+      "FLASH2_EDGE_ZERO": "1"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+    },
+    {
+     "name": "m5e",
+     "build": {
+      "FLASH2_ENTRY": "bcast",
+      "FLASH2_EDGE_ZERO": "1"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+    },
+    {
+     "name": "nomask",
+     "build": {
+      "FLASH2_ABL_NOMASK": "1"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+    },
+    {
+     "name": "nomask_bc",
+     "build": {
+      "FLASH2_ABL_NOMASK": "1",
+      "FLASH2_ENTRY": "bcast"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "8ec648ceb002223647f46b16bc1e466a4708bd25"
+    }
+   ],
+   "steps": [
+    "perf:pre:2:long",
+    "perf:m1e:2:long",
+    "perf:m5e:2:long",
+    "perf:nomask:2:long",
+    "perf:nomask_bc:2:long"
    ]
   }
  ]
