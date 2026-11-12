@@ -1,5 +1,5 @@
 {
- "_comment": "MiniCPM-V-4.7 decode on #247 MoE kernels: R/U/Q8 sweep vs card and Vulkan on the same runner.",
+ "_comment": "MiniCPM-V-4.7 decode: knob sweep on top of R4/Q8/U8.",
  "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
  "memory_bytes": 36000000000,
  "kit": null,
@@ -7,69 +7,111 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "sweep",
+   "name": "sweep2",
    "variants": [
     {
      "name": "card"
     },
     {
-     "name": "old",
-     "build": {
-      "MOE_Q8": "0",
-      "MOE_ROUTE_U": "1"
-     }
-    },
-    {
-     "name": "def",
-     "build": {}
-    },
-    {
-     "name": "r4q-u4",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "4"
-     }
-    },
-    {
-     "name": "r4f-u4",
-     "build": {
-      "MOE_Q8": "0",
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "4"
-     }
-    },
-    {
-     "name": "r2q-u4",
-     "build": {
-      "MOE_R": "2",
-      "MOE_ROUTE_U": "4"
-     }
-    },
-    {
-     "name": "r4q-u8",
+     "name": "base8",
      "build": {
       "MOE_R": "4",
       "MOE_ROUTE_U": "8"
      }
     },
     {
-     "name": "r4q-u2",
+     "name": "u16",
      "build": {
       "MOE_R": "4",
-      "MOE_ROUTE_U": "2"
+      "MOE_ROUTE_U": "16"
+     }
+    },
+    {
+     "name": "r2u8",
+     "build": {
+      "MOE_R": "2",
+      "MOE_ROUTE_U": "8"
+     }
+    },
+    {
+     "name": "gdnrl4",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "GDN_ROW_LANES": "4"
+     }
+    },
+    {
+     "name": "gdnrl16",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "GDN_ROW_LANES": "16"
+     }
+    },
+    {
+     "name": "gdncols8",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "GDN_COLS": "8"
+     }
+    },
+    {
+     "name": "mvch32",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "32"
+     }
+    },
+    {
+     "name": "mvch8",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8"
+     }
+    },
+    {
+     "name": "pair1",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "PAIR_PROJ": "1"
+     }
+    },
+    {
+     "name": "lastout",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "LAST_OUT": "1"
+     }
+    },
+    {
+     "name": "nofold",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MOE_FOLD": "0"
      }
     }
    ],
    "steps": [
-    "perf:card:1:long",
-    "perf:old:1:long",
-    "perf:def:1:long",
-    "perf:r4q-u4:1:long",
-    "perf:r4f-u4:1:long",
-    "perf:r2q-u4:1:long",
-    "perf:r4q-u8:1:long",
-    "perf:r4q-u2:1:long",
-    "llama@vulkan:2:long"
+    "perf:card:1",
+    "perf:base8:1",
+    "perf:u16:1",
+    "perf:r2u8:1",
+    "perf:gdnrl4:1",
+    "perf:gdnrl16:1",
+    "perf:gdncols8:1",
+    "perf:mvch32:1",
+    "perf:mvch8:1",
+    "perf:pair1:1",
+    "perf:lastout:1",
+    "perf:nofold:1",
+    "llama@vulkan:2"
    ]
   }
  ]
