@@ -412,10 +412,19 @@ def main():
         # context-gate retry for this kind's best depth when the long row is not ahead of depth 0 by more than the noise
         # band (long <= depth 0's / NO_LOSS: slower, tied or barely faster); the ranking keeps whichever scores better
         if CTX_GATE and measured and base_rows.get("long"):
-            best_d = max(measured, key=measured.get)
-            r = next(x for x in table if x["kind"] == kind and x["depth"] == best_d)
             rest = {k: v for k, v in base_rows.items() if k != "long"}
-            if r["rows"].get("long", 0.0) <= base_rows["long"] / NO_LOSS and margin(r["rows"], rest) >= NO_LOSS:
+            row_of = lambda d: next(x for x in table if x["kind"] == kind and x["depth"] == d)
+            rest_rows = lambda d: {k: v for k, v in row_of(d)["rows"].items() if k != "long"}
+            # a depth qualifies for the gate when its non-long rows stay within the band of depth 0's, or still beat
+            # llama.cpp on every one (a 3 % streams4 dip below depth 0 is no loss against a 1.3x llama.cpp margin);
+            # the one retried is the qualifier with the best short-row geometric mean (Qwen3.5-35B: depth 3 decode 88 vs
+            # depth 1's 77, but depth 1 had the best worst-row and was the only one retried, and its streams4 0.97 failed the band)
+            qual = [d for d in measured if margin(rest_rows(d), rest) >= NO_LOSS
+                    or (llama_refs and llama_margin(rest_rows(d), llama_refs) >= 1.0)]
+            best_d = (max(qual, key=lambda d: geomean_margin(rest_rows(d), rest, llama_refs)) if qual
+                      else max(measured, key=measured.get))
+            r = row_of(best_d)
+            if r["rows"].get("long", 0.0) <= base_rows["long"] / NO_LOSS and best_d in qual:
                 pkg_c = os.path.join(work, f"pkg_tune_{kind}_ctx")
                 sh(*build, pkg_c, *common, "--draft", kind, env=dict(os.environ, SPEC_CTX_MAX=str(CTX_GATE), SPEC_OCC_MIN=str(r.get("occ_min", 2))))
                 card_c = json.load(open(os.path.join(pkg_c, "model.json")))
