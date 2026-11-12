@@ -1,55 +1,75 @@
 {
- "_comment": "Bolt-E4B consistency: which change breaks it (edge block / dead block) (WIP)",
+ "_comment": "Bolt-E4B consistency isolation 2 (WIP)",
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "boltd",
+   "name": "boltd2",
    "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
    "memory_bytes": 40000000000,
    "kit": "gemma4",
    "variants": [
     {
+     "name": "main2",
+     "build": {
+      "FLASH2_EDGE_ZERO": "1",
+      "FLASH2_DEAD_SKIP": "0",
+      "FLASH2_PEEL": "0"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "afe81d3570340163e874f708df397fd78928f2f7"
+    },
+    {
+     "name": "ed",
+     "build": {
+      "FLASH2_EDGE_ZERO": "0",
+      "FLASH2_DEAD_SKIP": "0",
+      "FLASH2_PEEL": "0"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "afe81d3570340163e874f708df397fd78928f2f7"
+    },
+    {
+     "name": "pk",
+     "build": {
+      "FLASH2_EDGE_ZERO": "1",
+      "FLASH2_DEAD_SKIP": "0",
+      "FLASH2_PEEL": "force"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "afe81d3570340163e874f708df397fd78928f2f7"
+    },
+    {
      "name": "e1",
      "build": {
-      "FLASH2_EDGE_ZERO": "1"
+      "FLASH2_EDGE_ZERO": "1",
+      "FLASH2_DEAD_SKIP": "1",
+      "FLASH2_PEEL": "0"
      },
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "1d4872440842ef47d02a88a1c7d6103b12208112"
-    },
-    {
-     "name": "nd",
-     "build": {
-      "FLASH2_DEAD_SKIP": "0"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "1d4872440842ef47d02a88a1c7d6103b12208112"
-    },
-    {
-     "name": "new",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "1d4872440842ef47d02a88a1c7d6103b12208112"
+     "ref": "afe81d3570340163e874f708df397fd78928f2f7"
     }
    ],
    "steps": [
+    "consistency:main2:1",
+    "consistency:ed:1",
+    "consistency:pk:1",
     "consistency:e1:1",
-    "consistency:nd:1",
-    "consistency:new:1",
-    "consistency:e1:1",
-    "consistency:nd:1",
-    "consistency:new:1",
-    "consistency:e1:1",
-    "consistency:nd:1",
-    "consistency:new:1"
+    "consistency:main2:1",
+    "consistency:ed:1",
+    "consistency:pk:1",
+    "consistency:e1:1"
    ]
   }
  ]
