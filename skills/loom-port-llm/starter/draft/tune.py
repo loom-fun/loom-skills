@@ -17,7 +17,7 @@ draft_depth 0 of the same package, identical); a candidate that fails either is 
 next one is checked. Prints TUNE_RESULT {...} with the full table (the report shows it).
 SPEC=off skips tuning and builds without drafting.
 TUNE_BASELINE (a JSON file, or inline JSON) = {"decode": X, "decode_32k": Y, "c4": Z}: the fastest llama.cpp tok/s of the card's
-rows. With it a candidate's margin is its worst row relative to llama.cpp (work* rows -> decode, "long" -> decode_32k, streams4
+rows; by default read from the cfg["reference"] card's info.json (find_reference.py apply). With it a candidate's margin is its worst row relative to llama.cpp (work* rows -> decode, "long" -> decode_32k, streams4
 -> c4; a row without a reference is ignored), depth 0 is scored the same way, and a drafter is used when its margin beats
 depth 0's (the 3 % single-stream rule stays): a drafter that wins every single-stream row but is 10 % under depth 0 at 4
 streams still beats llama.cpp better than no drafting does. Without it the margin is relative to depth 0 as above.
@@ -145,13 +145,31 @@ def margin(rows, base_rows):
     return min((rows.get(k, 0.0) / t for k, t in base_rows.items() if t), default=0.0)
 
 
-def load_llama_refs():
-    """TUNE_BASELINE: {"decode", "decode_32k", "c4"} llama.cpp tok/s (a JSON file path or inline JSON), else None."""
+def load_llama_refs(cfg):
+    """{"decode", "decode_32k", "c4"} llama.cpp tok/s: TUNE_BASELINE (a JSON file path or inline JSON), else the best
+    llama.cpp backend on the cfg["reference"] card (its info.json: latest session and per-backend baselines), else None."""
     v = os.environ.get("TUNE_BASELINE", "").strip()
-    if not v:
+    if v:
+        d = json.loads(v) if v.startswith("{") else json.load(open(v))
+        return {k: float(d[k]) for k in ("decode", "decode_32k", "c4") if d.get(k)} or None
+    ref = cfg.get("reference") or {}
+    if not ref.get("repo"):
         return None
-    d = json.loads(v) if v.startswith("{") else json.load(open(v))
-    return {k: float(d[k]) for k in ("decode", "decode_32k", "c4") if d.get(k)} or None
+    sys.path.insert(0, os.path.join(SKILLS, "loom-port-llm"))
+    import find_reference
+    sha = ref.get("revision") or "main"
+    rc = find_reference.jfile(ref["repo"], sha, "llm_config.json") or {}
+    if os.path.basename(rc.get("gguf") or "") != os.path.basename(cfg.get("gguf") or "-"):
+        return None   # a reference of another model (same architecture): its llama.cpp numbers are not this card's
+    perf = (find_reference.jfile(ref["repo"], sha, "info.json") or {}).get("performance") or {}
+    sets = [s.get("metrics") or {} for s in (perf.get("sessions") or [])[-1:]]
+    sets += [(b.get("session") or {}).get("metrics") or {} for b in (perf.get("baselines") or {}).values()]
+    out = {}
+    for k, m in (("decode", "decode"), ("decode_32k", "decode_32k"), ("c4", "streams4")):
+        vals = [float(s[m]["baseline"]) for s in sets if (s.get(m) or {}).get("baseline")]
+        if vals:
+            out[k] = max(vals)
+    return out or None
 
 
 def llama_margin(rows, refs):
@@ -227,7 +245,7 @@ def main():
     import catalog
     if catalog.find(STARTER):   # a catalog package drafts with its MTP head or not at all (catalog.py)
         kinds = [("mtp", [1, 2, 3, 4])] if spec not in ("off", "0", "no", "none") and catalog.meta(catalog.find(STARTER)).get("mtp_variant") else []
-    llama_refs = load_llama_refs()
+    llama_refs = load_llama_refs(cfg)
     table, best, cand_mem, chats = [], ("none", 0, 0.0), {}, {}
     # A category A reference (find_reference.py apply: cfg["reference"]) measured its own drafting table: start each
     # method at the reference's best depth and its neighbours instead of every depth. Every method is still measured
