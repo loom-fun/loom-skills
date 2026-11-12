@@ -29,6 +29,14 @@ GATE_FLAG, GATE_TABLE, GATE_SLOTS = 1676, 1700, 32
 OCC_MIN = int(os.environ.get("SPEC_OCC_MIN", "2") or 0)
 
 
+def set_occ_min(cfg):
+    """SPEC_OCC_MIN (env) wins, else cfg["drafter"]["occ_min"], else 2. A card whose drafting still wins at the gate's
+    span count sets occ_min 0 (Muse-Glimmer depth 3: 4 streams x 4 tokens fit the 16-token matvec, 74 tok/s ungated
+    against 48.6 gated)."""
+    global OCC_MIN
+    OCC_MIN = int(os.environ["SPEC_OCC_MIN"] or 0) if "SPEC_OCC_MIN" in os.environ else int((cfg.get("drafter") or {}).get("occ_min", 2) or 0)
+
+
 def _sub(text, old, new, count=1):
     assert text.count(old) >= 1, f"draft patch anchor not found: {old[:80]!r}"
     return text.replace(old, new, count)
@@ -65,6 +73,7 @@ def _bind(stage, sources, draft_policy=False):
 
 
 def patch_prepare(text, draft, cfg):
+    set_occ_min(cfg)
     gate_fill = ""
     if OCC_MIN:   # shape index + 1 of the (s tokens, s spans) packing, for the occupancy gate
         gate_fill = f"""      %same_shape = scalar.cmpi eq, %tokens, %spans : i64
@@ -300,6 +309,7 @@ def patch_storage(text, cfg, draft):
 
 # ---------------------------------------------------------------------------------------------------
 def patch_control(text, cfg, draft):
+    set_occ_min(cfg)
     gate_pre = gate_epoch = ""
     L1 = "    %length = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
     L2 = "    %length32 = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
