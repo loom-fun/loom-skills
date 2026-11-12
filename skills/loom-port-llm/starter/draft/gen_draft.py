@@ -815,6 +815,11 @@ def verify_program(program, g):
     body = body.replace(f"command.program.def public @llm_advance() launch(%weights: buffer, {fb}: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {{",
                         f"command.program.def public @llm_verify() launch(%weights: buffer, {fb}: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %committed: buffer, %results: buffer) {{", 1)
     assert "@llm_verify()" in body
+    # An anchor-only epoch (build_draft.py's occupancy / context gate, stage config llm.gated 1) has no speculative span: it
+    # needs neither the recurrent-state capture nor the replay, which would otherwise rerun every gated delta-net layer.
+    sig_end = body.index("{", body.index("@llm_verify()")) + 1
+    body = (body[:sig_end] + "\n  %gate_cfg = config.get @llm.gated : index\n  %gate_zero = index.constant 0 : index\n"
+            "  %not_gated = index.cmp eq, %gate_cfg, %gate_zero : index" + body[sig_end:])
     # every drafted token feeds the head: no last-layer output-row selection (gen_llm.last_out_select)
     body = body.replace("%outsel_on = scalar.constant true : i1", "%outsel_on = scalar.constant false : i1")
     GDN = g["GDN"]
@@ -829,7 +834,7 @@ def verify_program(program, g):
         for line in body.split("\n"):
             if line.startswith("  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_"):
                 layer = line.split("%layer_")[1].split(",")[0]
-                out.append(f"  kernel.launch @g_gdn_capture[%t](%t, %layer_{layer}, %gq, %galpha, %gbeta, %capture) : [index](index, index, buffer, buffer, buffer, buffer)")
+                out.append(f"  scf.if %not_gated {{\n    kernel.launch @g_gdn_capture[%t](%t, %layer_{layer}, %gq, %galpha, %gbeta, %capture) : [index](index, index, buffer, buffer, buffer, buffer)\n  }}")
             out.append(line)
         body = "\n".join(out)
     # Generic recurrent replay (kits register it in gen_llm.MODEL_PARTS["replay"]; e.g. LFM2 short-conv,
@@ -855,7 +860,7 @@ def verify_program(program, g):
             if line.startswith(spec["match"]):
                 for bi, (buf, w) in enumerate(spec["buffers"]):
                     out.append(f"  %rs_{spec['name']}_{k}_{bi} = index.constant {k} : index\n"
-                               f"  kernel.launch @g_spec_save_w{w}[%t](%t, %rs_{spec['name']}_{k}_{bi}, {buf}, %rc_{spec['name']}_{bi}) : [index](index, index, buffer, buffer)")
+                               f"  scf.if %not_gated {{\n    kernel.launch @g_spec_save_w{w}[%t](%t, %rs_{spec['name']}_{k}_{bi}, {buf}, %rc_{spec['name']}_{bi}) : [index](index, index, buffer, buffer)\n  }}")
                 k += 1
             out.append(line)
         body = "\n".join(out)
@@ -892,6 +897,7 @@ def verify_program(program, g):
   kernel.launch @g_head_select[%rows](%rows, %rows_meta, %vpartials, %vlogits, %predictions) : [index](index, buffer, buffer, buffer, buffer)
   kernel.launch @g_spec_accept(%spans, %rows, %t, %metadata, %tokens, %predictions, %results, %committed, %replay) : (index, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
 """
+    replay_at = len(tail)
     if GDN:
         tail += "  // ---- gated delta-net replay: conv + recurrence over the accepted speculative inputs, published\n"
         tail += "  kernel.launch @g_token_info[%t](%t, %spans, %replay, %info) : [index](index, index, buffer, buffer)\n"
@@ -910,8 +916,11 @@ def verify_program(program, g):
                 tail += (f"  %rl_{spec['name']}_{k}_{bi} = index.constant {k} : index\n"
                          f"  kernel.launch @g_spec_load_w{w}[%t](%t, %rl_{spec['name']}_{k}_{bi}, {buf}, %rc_{spec['name']}_{bi}) : [index](index, index, buffer, buffer)\n")
             tail += spec["replay"](layer)
+    if len(tail) > replay_at:   # no replay at all in an anchor-only epoch
+        tail = tail[:replay_at] + "  scf.if %not_gated {\n" + tail[replay_at:] + "  }\n"
     tail += "  command.return\n}\n"
-    return "config.decl @llm.width : %value: index where [range(%value, 2, 8)]\n\n" + body + tail
+    return ("config.decl @llm.width : %value: index where [range(%value, 2, 8)]\n\n"
+            "config.decl @llm.gated : %value: index where [range(%value, 0, 1)]\n\n" + body + tail)
 
 
 def _prologue_allocs(prologue):
