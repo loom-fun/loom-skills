@@ -1,7 +1,6 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Regeneration of the gemma-4-12B card from current main (the published card's programs are stale: prefill_32k 429 vs 749 rebuilt) with the active wait (devlab-perf-source).",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {"name": "gemma4-12b-regen", "spec": "unsloth/gemma-4-12B-it-GGUF:gemma-4-12b-it-Q4_K_M.gguf", "reference": "auto", "model_id": "google/gemma-4-12B-it"}
  ]
 }
