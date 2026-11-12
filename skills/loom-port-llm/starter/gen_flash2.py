@@ -692,7 +692,10 @@ if PARTIAL:
 if os.environ.get("FLASH2_PEEL", "1") in ("1", "force") and (not EDGE_ZERO or os.environ.get("FLASH2_PEEL") == "force") and NF <= 8:   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     text = peel_last_tile(text)
-if os.environ.get("FLASH2_ENTRY") == "bcast" and os.environ.get("FLASH2_ROLE") != "partial":   # experiment: the listed entry broadcast from lane 0
+# The listed tile's first token is a loaded value, which the compiler takes as lane-dependent; broadcasting it from lane 0 keeps the
+# kernel as it was before the tile lists. Measured: head_dim 256 with 16 output fragments per wave (Bolt-E4B, unpeeled) +1-2 %;
+# the peeled kernels (head_dim 128, TS 1-2) +-0.5 %. FLASH2_ENTRY=bcast / plain forces either.
+if os.environ.get("FLASH2_ENTRY", "bcast" if NF > 8 else "plain") == "bcast" and os.environ.get("FLASH2_ROLE") != "partial":
     _old = "  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %entry = index.cast %entry32 : i32 to index\n"
     assert _old in text, "entry load not found"
     text = text.replace(_old, "  %entry32r = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %lane0 = scalar.constant 0 : i32\n  %entry32 = kernel.subgroup.broadcast %entry32r from %lane0 : i32, i32\n  %entry = index.cast %entry32 : i32 to index\n")
