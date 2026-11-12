@@ -397,7 +397,7 @@ def patch_control(text, cfg, draft):
               "    %length32 = scf.select %gate, %c1_i32, %length32_host : i32\n")
         propose_flag, eff = "propose_on", "eff_index"
         # an anchor-only span is an ordinary known span for the verifier (no speculative flag bit, no credit, no replay)
-        mark_ir = "    %not_gate = scalar.cmpi eq, %flag_value, %c0_i32\n    %mark_spec = scalar.andi %speculative, %not_gate : i1\n"
+        mark_ir = "    %not_gate = scalar.cmpi eq, %flag_value, %c0_i32 : i32\n    %mark_spec = scalar.andi %speculative, %not_gate : i1\n"
         gate_epoch = f"""  %flag_at = index.constant {GATE_FLAG} : offset
   %flag_view = buffer.view %control_state[%flag_at] : buffer -> view<1xi32>
   %flag = view.load %flag_view[0] : view<1xi32> -> i32
