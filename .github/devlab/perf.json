@@ -1,5 +1,5 @@
 {
- "_comment": "gemma4-12b flash2_d512 V^T pair stores",
+ "_comment": "gemma4-12b: rebuilt packages (the card's own programs are stale): flash2_d512 V^T pair stores",
  "jobs": [
   {
    "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
@@ -8,23 +8,48 @@
    "llamacpp": "b1370",
    "llamacpp_vulkan": "b12211",
    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
-   "name": "pf-pairs",
+   "name": "pf-ktest",
    "variants": [
     {
-     "name": "pairs"
-    },
-    {
-     "name": "scatter",
+     "name": "main",
      "build": {
       "FLASH2S_VT": "scatter"
+     }
+    },
+    {
+     "name": "pairs",
+     "build": {
+      "FLASH2S_VT": "pairs"
      }
     }
    ],
    "steps": [
+    "ktest:main",
     "ktest:pairs",
     "perf:pairs:1:long",
-    "perf:scatter:1:long",
+    "perf:main:1:long",
     "textmatch:pairs"
+   ]
+  },
+  {
+   "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1370",
+   "llamacpp_vulkan": "b12211",
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
+   "name": "pf-gates",
+   "variants": [
+    {
+     "name": "pairs",
+     "build": {
+      "FLASH2S_VT": "pairs"
+     }
+    }
+   ],
+   "steps": [
+    "gates:pairs:dev",
+    "consistency:pairs:1"
    ]
   }
  ]
