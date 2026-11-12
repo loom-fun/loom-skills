@@ -7,24 +7,40 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "bolt-nomask",
+   "name": "bolt-bisect",
    "variants": [
     {
-     "name": "old",
-     "build": {
-      "FLASH2_EDGE_ZERO": "1"
-     }
+     "name": "pre193",
+     "build": {},
+     "ref": "815997c^",
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     },
     {
-     "name": "nomask",
-     "build": {
-      "FLASH2_ABL_NOMASK": "1"
-     }
+     "name": "p193",
+     "build": {},
+     "ref": "815997c",
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "main",
+     "build": {},
+     "ref": "origin/main",
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     }
    ],
    "steps": [
-    "perf:old:4:long",
-    "perf:nomask:4:long"
+    "perf:pre193:3:long",
+    "perf:p193:3:long",
+    "perf:main:3:long"
    ]
   }
  ]
