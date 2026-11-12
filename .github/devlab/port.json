@@ -1,7 +1,9 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Small-card regeneration from main (K/V-once GQA decode attention, tune long row 32k, geomean tie-break); reference = each published card.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {"name": "q25-05b", "spec": "bartowski/Qwen2.5-0.5B-Instruct-GGUF:Qwen2.5-0.5B-Instruct-Q4_K_M.gguf", "reference": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom", "model_id": "Qwen/Qwen2.5-0.5B-Instruct"},
+  {"name": "q25-15b", "spec": "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Qwen2.5-1.5B-Instruct-Q4_K_M.gguf", "reference": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom", "model_id": "Qwen/Qwen2.5-1.5B-Instruct"},
+  {"name": "hyperclovax", "spec": "rippertnt/HyperCLOVAX-SEED-Text-Instruct-1.5B-Q4_K_M-GGUF:hyperclovax-seed-text-instruct-1.5b-q4_k_m.gguf", "reference": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom", "model_id": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B"},
+  {"name": "sage", "spec": "InternScience/Sage-A1.5-Q4_K_M-GGUF:Sage-A1.5-Q4_K_M.gguf", "reference": "loom-fun/InternScience-Sage-A1.5-loom", "model_id": "InternScience/Sage-A1.5"}
  ]
 }
