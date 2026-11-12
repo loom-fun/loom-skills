@@ -517,6 +517,9 @@ if PARTIAL:
 if os.environ.get("FLASH2_EDGE_ZERO", "0") != "1":
     import re as _re
     text = _re.sub(r"(%nb_wins\d+) = scalar\.andi %nb_win\d+, %is_sliding : i1", r"\1 = scalar.constant false : i1", text)
+if os.environ.get("FLASH2_ABL_NOMASK") == "1":   # DIAGNOSTIC ONLY (not bit-invariant): no per-column path at all, to time it
+    import re as _re2
+    text = _re2.sub(r"(%need\d+) = scalar\.ori %nb_diag\d+, %nb_wins\d+ : i1", r"\1 = scalar.constant false : i1", text)
 out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
 if not PARTIAL:
     subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen_flash2s.py")], check=True,

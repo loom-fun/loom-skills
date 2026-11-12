@@ -7,7 +7,7 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "bolt-edge",
+   "name": "bolt-nomask",
    "variants": [
     {
      "name": "old",
@@ -16,18 +16,15 @@
      }
     },
     {
-     "name": "new",
+     "name": "nomask",
      "build": {
-      "FLASH2_EDGE_ZERO": "0"
+      "FLASH2_ABL_NOMASK": "1"
      }
     }
    ],
    "steps": [
-    "ktest:new",
-    "consistency:new:5",
     "perf:old:4:long",
-    "perf:new:4:long",
-    "llama@vulkan.np1.nospec:2:long"
+    "perf:nomask:4:long"
    ]
   }
  ]
