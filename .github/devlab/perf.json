@@ -7,60 +7,49 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "tune",
+   "name": "tune2",
    "variants": [
     {
-     "name": "nd",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "ng2",
+     "name": "b3d0",
      "build": {},
      "build_args": [
       "--draft",
       "ngram",
       "--draft-depth",
-      "2"
-     ]
+      "3"
+     ],
+     "execution": {
+      "draft_depth": 0
+     }
     },
     {
-     "name": "ng1",
+     "name": "b3d2",
      "build": {},
      "build_args": [
       "--draft",
       "ngram",
       "--draft-depth",
-      "1"
-     ]
+      "3"
+     ],
+     "execution": {
+      "draft_depth": 2
+     }
     },
     {
-     "name": "nd_s128",
-     "build": {
-      "ATTN_SPLITS": "128"
-     },
+     "name": "b3d3",
+     "build": {},
      "build_args": [
       "--draft",
-      "none"
+      "ngram",
+      "--draft-depth",
+      "3"
      ]
     }
    ],
    "steps": [
-    "tunerow:nd:2",
-    "tunerow:ng2:2",
-    "tunerow:ng1:2",
-    "tunerow:nd_s128:2",
-    "perf:nd:3",
-    "perf:ng1:3",
-    "perf:nd:3:long",
-    "perf:ng1:3:long",
-    "perf:nd_s128:3:long",
-    "perf:ng2:3:long",
-    "llama@vulkan:3:long",
-    "llama@vulkan:3"
+    "tunerow:b3d0:2",
+    "tunerow:b3d2:2",
+    "tunerow:b3d3:2"
    ]
   }
  ]
