@@ -404,7 +404,25 @@ A('''    %pos0_i32 = index.cast %pos0 : index to i32
     %lane_col32m = index.cast %lane_col : index to i32
     %win_lo15 = scalar.subi %pos15_i32, %cwin_i32 : i32
     %zero16h = vector.constant 0.0 : vector<16xf16>
-    %iota16 = vector.iota %c0_i32 step %c1_i32m : vector<16xi32>''')
+    %iota16 = vector.iota %c0_i32 step %c1_i32m : vector<16xi32>
+    %c2_i32m = scalar.constant 2 : i32
+    %c1_i32w = scalar.constant 1 : i32
+    %iota_even = vector.iota %c0_i32 step %c2_i32m : vector<8xi32>
+    %iota_odd = vector.iota %c1_i32w step %c2_i32m : vector<8xi32>
+    %word_lo_s = scalar.constant 65535 : i32
+    %word_hi_s = scalar.constant -65536 : i32
+    %zero_w_s = scalar.constant 0 : i32
+    %word_lo = vector.splat %word_lo_s : vector<8xi32>
+    %word_hi = vector.splat %word_hi_s : vector<8xi32>
+    %zero_w = vector.splat %zero_w_s : vector<8xi32>
+    %c2i_0 = index.constant 0 : index
+    %c2i_1 = index.constant 2 : index
+    %c2i_2 = index.constant 4 : index
+    %c2i_3 = index.constant 6 : index
+    %c2i_4 = index.constant 8 : index
+    %c2i_5 = index.constant 10 : index
+    %c2i_6 = index.constant 12 : index
+    %c2i_7 = index.constant 14 : index''')
 for kb in range(KB):
     last = kb == KB - 1
     ins = [f"%os{d}" if kb == 0 else f"%on{d}_{kb - 1}" for d in range(NFH)]
@@ -416,26 +434,86 @@ for kb in range(KB):
     %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
     %need{kb} = scalar.ori %nb_diag{kb}, %nb_wins{kb} : i1
     {", ".join(outs)} = scf.if %need{kb} -> ({vt}) {{""")
-    for d in range(NFH):
-        A(f"""      %ac{d}_{kb} = scf.for %mc_{d}_{kb} = [%c0 to %c16 step %c1](%acc{d}_{kb} = {ins[d]} : vector<8xf32>) -> (vector<8xf32>) {{
-        %mci{d}_{kb} = index.cast %mc_{d}_{kb} : index to i32
-        %qc{d}_{kb} = scalar.addi %pos0_i32, %mci{d}_{kb} : i32
-        %thr{d}_{kb} = scalar.subi %qc{d}_{kb}, %base{kb} : i32
-        %thr_v{d}_{kb} = vector.splat %thr{d}_{kb} : vector<16xi32>
-        %mhi{d}_{kb} = vector.cmpi sle, %iota16, %thr_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
-        %lo{d}_{kb} = scalar.subi %thr{d}_{kb}, %cwin_i32 : i32
-        %loe{d}_{kb} = scf.select %is_sliding, %lo{d}_{kb}, %far_below : i32
-        %lo_v{d}_{kb} = vector.splat %loe{d}_{kb} : vector<16xi32>
-        %mlo{d}_{kb} = vector.cmpi sge, %iota16, %lo_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
-        %m{d}_{kb} = vector.andi %mhi{d}_{kb}, %mlo{d}_{kb} : vector<16xi1>
-        %isc{d}_{kb} = scalar.cmpi eq, %lane_col32m, %mci{d}_{kb} : i32
-        %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>
-        %vs{d}_{kb} = vector.select %m{d}_{kb}, %vl{d}_{kb}, %zero16h : vector<16xf16>
-        %vm{d}_{kb} = vector.fragment<lhs> %vs{d}_{kb} shape [%c16, %c16] : vector<16xf16>
-        %rm{d}_{kb} = vector.mma %vm{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %acn{d}_{kb} = scf.select %isc{d}_{kb}, %rm{d}_{kb}, %acc{d}_{kb} : vector<8xf32>
-        scf.yield %acn{d}_{kb} : vector<8xf32>
+    if os.environ.get("FLASH2_MASKV") == "old":
+        for d in range(NFH):
+            A(f"""      %ac{d}_{kb} = scf.for %mc_{d}_{kb} = [%c0 to %c16 step %c1](%acc{d}_{kb} = {ins[d]} : vector<8xf32>) -> (vector<8xf32>) {{
+            %mci{d}_{kb} = index.cast %mc_{d}_{kb} : index to i32
+            %qc{d}_{kb} = scalar.addi %pos0_i32, %mci{d}_{kb} : i32
+            %thr{d}_{kb} = scalar.subi %qc{d}_{kb}, %base{kb} : i32
+            %thr_v{d}_{kb} = vector.splat %thr{d}_{kb} : vector<16xi32>
+            %mhi{d}_{kb} = vector.cmpi sle, %iota16, %thr_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
+            %lo{d}_{kb} = scalar.subi %thr{d}_{kb}, %cwin_i32 : i32
+            %loe{d}_{kb} = scf.select %is_sliding, %lo{d}_{kb}, %far_below : i32
+            %lo_v{d}_{kb} = vector.splat %loe{d}_{kb} : vector<16xi32>
+            %mlo{d}_{kb} = vector.cmpi sge, %iota16, %lo_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
+            %m{d}_{kb} = vector.andi %mhi{d}_{kb}, %mlo{d}_{kb} : vector<16xi1>
+            %isc{d}_{kb} = scalar.cmpi eq, %lane_col32m, %mci{d}_{kb} : i32
+            %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>
+            %vs{d}_{kb} = vector.select %m{d}_{kb}, %vl{d}_{kb}, %zero16h : vector<16xf16>
+            %vm{d}_{kb} = vector.fragment<lhs> %vs{d}_{kb} shape [%c16, %c16] : vector<16xf16>
+            %rm{d}_{kb} = vector.mma %vm{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
+            %acn{d}_{kb} = scf.select %isc{d}_{kb}, %rm{d}_{kb}, %acc{d}_{kb} : vector<8xf32>
+            scf.yield %acn{d}_{kb} : vector<8xf32>
+          }}""")
+    elif os.environ.get("FLASH2_MASKV") == "fma":   # a masked block: P (exactly 0 at masked keys) . V per output row on the VALU
+        # A weight of exactly 0 adds exactly 0 in an f32 FMA whatever the key's V (finite) is, so no per-column V zeroing is needed.
+        for d in range(NFH):
+            A(f"      %vrh{d}_{kb} = index.add %vr{d}, %lane_half : index")
+            for i in range(8):
+                A(f"""      %rw{d}_{i}_{kb} = index.add %vrh{d}_{kb}, %c2i_{i} : index
+      %vrow{d}_{i}_{kb} = vector.load %vt_view[%rw{d}_{i}_{kb}, %kb{kb}_row] : view<{D}x{VTC}xf16> -> vector<16xf16>
+      %vrf{d}_{i}_{kb} = vector.extf %vrow{d}_{i}_{kb} : vector<16xf16> to vector<16xf32>
+      %ds{d}_{i}_{kb} = vector.dotf<reassoc|contract> %pt{kb}_f, %vrf{d}_{i}_{kb}, %zero_f : vector<16xf32>, vector<16xf32>, f32""")
+            A(f"      %pr{d}_{kb} = vector.from_elements {', '.join(f'%ds{d}_{i}_{kb}' for i in range(8))} : vector<8xf32>\n      %ps{d}_{kb} = vector.addf {ins[d]}, %pr{d}_{kb} : vector<8xf32>\n      %pm{d}_{kb} = vector.fragment<init> %ps{d}_{kb} shape [%c16, %c16] : vector<8xf32>")
+        A(f"      scf.yield {', '.join(f'%pm{d}_{kb}' for d in range(NFH))} : {vt}" + chr(10) + "    } else {")
+        for d in range(NFH):
+            A(f"      %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>\n      %pl{d}_{kb} = vector.mma %vl{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
+        A(f"      scf.yield {', '.join(f'%pl{d}_{kb}' for d in range(NFH))} : {vt}" + chr(10) + "    }")
+        continue
+    else:   # one loop over the 16 query columns per group of fragments; the key mask is built per column as 8 words
+        GRP = int(os.environ.get("FLASH2_MASK_GRP", "4"))
+        cur = list(ins)
+        for g0 in range(0, NFH, GRP):
+            ds = list(range(g0, min(NFH, g0 + GRP)))
+            sfx = f"{kb}g{g0}"
+            accs = ", ".join(f"%acc{d}_{sfx} = {cur[d]} : vector<8xf32>" for d in ds)
+            body = []
+            for d in ds:
+                body.append(f"""        %vl{d}_{sfx} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>
+        %vw{d}_{sfx} = vector.bitcast %vl{d}_{sfx} : vector<16xf16> to vector<8xi32>
+        %vx{d}_{sfx} = vector.andi %vw{d}_{sfx}, %mw_{sfx} : vector<8xi32>
+        %vs{d}_{sfx} = vector.bitcast %vx{d}_{sfx} : vector<8xi32> to vector<16xf16>
+        %vm{d}_{sfx} = vector.fragment<lhs> %vs{d}_{sfx} shape [%c16, %c16] : vector<16xf16>
+        %rm{d}_{sfx} = vector.mma %vm{d}_{sfx}, %pt{kb}, {cur[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %acn{d}_{sfx} = scf.select %isc_{sfx}, %rm{d}_{sfx}, %acc{d}_{sfx} : vector<8xf32>""")
+            A(f"""      {", ".join(f"%ac{d}_{sfx}" for d in ds)} = scf.for %mc_{sfx} = [%c0 to %c16 step %c1]({accs}) -> ({", ".join(["vector<8xf32>"] * len(ds))}) {{
+        %mci_{sfx} = index.cast %mc_{sfx} : index to i32
+        %qc_{sfx} = scalar.addi %pos0_i32, %mci_{sfx} : i32
+        %thr_{sfx} = scalar.subi %qc_{sfx}, %base{kb} : i32
+        %thr_v_{sfx} = vector.splat %thr_{sfx} : vector<8xi32>
+        %lo_{sfx} = scalar.subi %thr_{sfx}, %cwin_i32 : i32
+        %loe_{sfx} = scf.select %is_sliding, %lo_{sfx}, %far_below : i32
+        %lo_v_{sfx} = vector.splat %loe_{sfx} : vector<8xi32>
+        %mh0_{sfx} = vector.cmpi sle, %iota_even, %thr_v_{sfx} : vector<8xi32> -> vector<8xi1>
+        %ml0_{sfx} = vector.cmpi sge, %iota_even, %lo_v_{sfx} : vector<8xi32> -> vector<8xi1>
+        %m0_{sfx} = vector.andi %mh0_{sfx}, %ml0_{sfx} : vector<8xi1>
+        %mh1_{sfx} = vector.cmpi sle, %iota_odd, %thr_v_{sfx} : vector<8xi32> -> vector<8xi1>
+        %ml1_{sfx} = vector.cmpi sge, %iota_odd, %lo_v_{sfx} : vector<8xi32> -> vector<8xi1>
+        %m1_{sfx} = vector.andi %mh1_{sfx}, %ml1_{sfx} : vector<8xi1>
+        %w0_{sfx} = vector.select %m0_{sfx}, %word_lo, %zero_w : vector<8xi32>
+        %w1_{sfx} = vector.select %m1_{sfx}, %word_hi, %zero_w : vector<8xi32>
+        %mw_{sfx} = vector.ori %w0_{sfx}, %w1_{sfx} : vector<8xi32>
+        %isc_{sfx} = scalar.cmpi eq, %lane_col32m, %mci_{sfx} : i32
+""" + "\n".join(body) + f"""
+        scf.yield {", ".join(f"%acn{d}_{sfx}" for d in ds)} : {", ".join(["vector<8xf32>"] * len(ds))}
       }}""")
+            for d in ds:
+                cur[d] = f"%ac{d}_{sfx}"
+        A(f"      scf.yield {', '.join(cur)} : {vt}" + chr(10) + "    } else {")
+        for d in range(NFH):
+            A(f"      %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>\n      %pl{d}_{kb} = vector.mma %vl{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
+        A(f"      scf.yield {', '.join(f'%pl{d}_{kb}' for d in range(NFH))} : {vt}" + chr(10) + "    }")
+        continue
     yv = ", ".join(f"%ac{d}_{kb}" for d in range(NFH))
     A(f"      scf.yield {yv} : {vt}" + chr(10) + "    } else {")
     for d in range(NFH):
