@@ -89,7 +89,20 @@ def patch_prepare(text, draft, cfg):
         %gate_slot = index.cast %spans : i64 to index
         %gate_i32 = index.cast %i : index to i32
         %gate_one = scalar.constant 1 : i32
-        %gate_tag = scalar.addi %gate_i32, %gate_one : i32
+        %gate_idx1 = scalar.addi %gate_i32, %gate_one : i32
+        %gtag_base = scalar.constant 256 : i64
+        %gtag = scalar.addi %tag, %gtag_base : i64
+        %gvstage = func.call @stage(%verify_root, %gtag) : (buffer, i64) -> (i32)
+        func.call @config_i64(%gvstage, %context_key, %context) : (i32, buffer, i64)
+        func.call @config_i64(%gvstage, %pool_key, %pool) : (i32, buffer, i64)
+        func.call @config_i64(%gvstage, %tokens_key, %tokens) : (i32, buffer, i64)
+        func.call @config_i64(%gvstage, %spans_key, %spans) : (i32, buffer, i64)
+        func.call @config_i64(%gvstage, %width_key, %width) : (i32, buffer, i64)
+        func.call @config_i64(%gvstage, %gated_key, %gated_on) : (i32, buffer, i64)
+        func.call @parameter(%gvstage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
+        %gate_shift = scalar.constant 8 : i32
+        %gv_high = scalar.shli %gvstage, %gate_shift : i32
+        %gate_tag = scalar.ori %gate_idx1, %gv_high : i32
         view.store %gate_tag, %gate_view[%gate_slot] : i32, view<{GATE_SLOTS}xi32>
       }}
 """
@@ -99,7 +112,7 @@ def patch_prepare(text, draft, cfg):
     propose_root = {"mtp": "llm_mtp_propose", "dflash": "llm_dflash_propose", "ngram": "llm_ngram_propose",
                     "assist": "llm_as_propose"}[kind]
     block = draft.get("block_size", 1) if kind == "dflash" else 1
-    text = _sub(text, '''// "weights.loom"''', f'''// "llm_verify", "{warm_root}", "{propose_root}", "llm.width", "llm.epoch_spans", "llm.epoch_tokens"
+    text = _sub(text, '''// "weights.loom"''', f'''// "llm_verify", "{warm_root}", "{propose_root}", "llm.width", "llm.gated", "llm.epoch_spans", "llm.epoch_tokens"
 global.rodata.def @verify_root = bytes("{hx("llm_verify")}")
 
 global.rodata.def @warm_root = bytes("{hx(warm_root)}")
@@ -107,6 +120,8 @@ global.rodata.def @warm_root = bytes("{hx(warm_root)}")
 global.rodata.def @propose_root = bytes("{hx(propose_root)}")
 
 global.rodata.def @width_key = bytes("{hx("llm.width")}")
+
+global.rodata.def @gated_key = bytes("{hx("llm.gated")}")
 
 global.rodata.def @epoch_spans_key = bytes("{hx("llm.epoch_spans")}")
 
@@ -135,6 +150,9 @@ global.rodata.def @draft_scope = bytes("{hx("draft")}")
   %verify_root = global.load @verify_root : buffer
   %warm_root = global.load @warm_root : buffer
   %width_key = global.load @width_key : buffer
+  %gated_key = global.load @gated_key : buffer
+  %gated_off = scalar.constant 0 : i64
+  %gated_on = scalar.constant 1 : i64
 """)
     draft_source = ("  // the drafter checkpoint (card parameter scope \"draft\")\n  %draft_scope = global.load @draft_scope : buffer\n"
                     "  %draft_source = func.call @source_scope(%draft_scope) : (buffer) -> (i32)\n"
@@ -189,6 +207,7 @@ global.rodata.def @draft_scope = bytes("{hx("draft")}")
       func.call @config_i64(%vstage, %tokens_key, %tokens) : (i32, buffer, i64)
       func.call @config_i64(%vstage, %spans_key, %spans) : (i32, buffer, i64)
       func.call @config_i64(%vstage, %width_key, %width) : (i32, buffer, i64)
+      func.call @config_i64(%vstage, %gated_key, %gated_off) : (i32, buffer, i64)
       func.call @parameter(%vstage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
       view.store %vstage, %verify_view[%i] : i32, view<[%count]xi32>
       %wstage = func.call @stage(%warm_root, %tag) : (buffer, i64) -> (i32)
@@ -317,6 +336,8 @@ def patch_control(text, cfg, draft):
     L1 = "    %length = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
     L2 = "    %length32 = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
     propose_flag, eff = "propose", "shape_index"
+    vstage_pick = "scalar.addi %vstage_table, %c0 : i32"
+    mark_ir = "    %mark_spec = scalar.cmpi ne, %credit, %c0_i32 : i32\n"
     if OCC_MIN or CTX_MAX:
         occupied_ir = (f"  %occ_below = scalar.constant {OCC_MIN - 1} : i32\n  %occupied = scalar.cmpi ugt, %first_count, %occ_below : i32\n"
                        if OCC_MIN else "  %occupied = scalar.cmpi ne, %c0_i32, %c0_i32 : i32\n")
@@ -376,12 +397,19 @@ def patch_control(text, cfg, draft):
         L2 = ("    %length32_host = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
               "    %length32 = scf.select %gate, %c1_i32, %length32_host : i32\n")
         propose_flag, eff = "propose_on", "eff_index"
+        vstage_pick = "scf.select %gated, %gated_stage, %vstage_table : i32"
+        # an anchor-only span is an ordinary known span for the verifier (no speculative flag bit, no credit, no replay)
+        mark_ir = "    %not_gate = scalar.cmpi eq, %flag_value, %c0_i32 : i32\n    %mark_spec = scalar.andi %speculative, %not_gate : i1\n"
         gate_epoch = f"""  %flag_at = index.constant {GATE_FLAG} : offset
   %flag_view = buffer.view %control_state[%flag_at] : buffer -> view<1xi32>
   %flag = view.load %flag_view[0] : view<1xi32> -> i32
   %gated = scalar.cmpi ne, %flag, %c0 : i32
-  %flag_nz = scf.select %gated, %flag, %c1 : i32
+  %flag_low_mask = scalar.constant 255 : i32
+  %flag_low = scalar.andi %flag, %flag_low_mask : i32
+  %flag_nz = scf.select %gated, %flag_low, %c1 : i32
   %flag_idx = scalar.subi %flag_nz, %c1 : i32
+  %flag_shift = scalar.constant 8 : i32
+  %gated_stage = scalar.shrui %flag, %flag_shift : i32
   %flag_b = scalar.assume %flag_idx [range(%flag_idx, 0, 127)] : i32
   %flag_shape = index.cast %flag_b : i32 to index
   %eff_index = scf.select %gated, %flag_shape, %shape_index : index
@@ -453,10 +481,10 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
 {L1}    %flags = view.load %requests[%sr, 6] : view<[%plan_extent]x9xi32> -> i32
     %credit = view.load %requests[%sr, 7] : view<[%plan_extent]x9xi32> -> i32
     %speculative = scalar.cmpi ne, %credit, %c0_i32 : i32
-    %credit_bits = scalar.shli %credit, %c8_i32 : i32
+{mark_ir}    %credit_bits = scalar.shli %credit, %c8_i32 : i32
     %spec_bits = scalar.ori %credit_bits, %c4_i32 : i32
     %marked = scalar.ori %flags, %spec_bits : i32
-    %device_flags = scf.select %speculative, %marked, %flags : i32
+    %device_flags = scf.select %mark_spec, %marked, %flags : i32
     view.store %cursor, %device[%s, 4] : i32, view<[%spans]x9xi32>
     view.store %device_flags, %device[%s, 6] : i32, view<[%spans]x9xi32>
     %next = scalar.addi %cursor, %length : i32
@@ -627,7 +655,8 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
 {"    %proposal = func.call @execute_4(%pstage, %metadata, %tokens, %draft_origins, %draft_cache) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)" if dflash else ("    %proposal = func.call @execute_5(%pstage, %metadata, %tokens, %origins, %state, %carry) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)" if draft["kind"] == "assist" else "    %proposal = func.call @execute_5(%pstage, %metadata, %tokens, %draft_origins, %draft_cache, %carry) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)")}
   }}
   %target = scf.if %verify -> (i64) {{
-    %vstage = view.load %verify_view[%{eff}] : view<128xi32> -> i32
+    %vstage_table = view.load %verify_view[%{eff}] : view<128xi32> -> i32
+    %vstage = {vstage_pick}
     %completion = func.call @execute_7(%vstage, %residual, %metadata, %origins, %state, %tokens, %committed, %results) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     %count64 = scalar.extui %span_count : i32 to i64
     %record = scalar.constant 40 : i64

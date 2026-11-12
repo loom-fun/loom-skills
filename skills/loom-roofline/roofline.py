@@ -337,6 +337,11 @@ def main():
                     gain = max(gain, t["decode_tps"] / t["baseline_tps"])
     rows = [pick_target(k, base.get(k), c, efficiency(m, k, c), efficiency(m, k, c, STRETCH))
             for k, c in ceilings(m, a.bw, a.flops, ctxs, gain).items()]
+    if m["geo"]["n_exp"]:   # the c4 ceiling assumes independent routing; streams of similar text share experts, so the hard
+        # bound (all 4 tokens on the same experts) is what a measurement may not exceed (Qwen3-30B-A3B: 1.17 x ceiling)
+        for r in rows:
+            if r["metric"] == "c4_steady":
+                r["bound"] = round(4 * a.bw / (pass_bytes(m, ctx=600) + 3 * kv_read_bytes(m["geo"], 600)) * gain, 1)
 
     out = dict(gguf=a.gguf, cfg=a.cfg and os.path.abspath(a.cfg), geometry={k: (sorted(v) if isinstance(v, set) else v)
                                       for k, v in geo.items()},
