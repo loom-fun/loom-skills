@@ -299,6 +299,12 @@ done
 # a card with no recorded SDK (d1 fixture) is the only one that installs unpinned
 grep -qF 'pip install "hrx-loom[hf]==0.1.0"' "$tmp/flint/README.md" && echo "OK   quick start pins the recorded hrx-loom version" \
   || { echo "FAIL flint: Quick start does not pin hrx-loom==0.1.0"; bad=1; }
+# the first paragraph of every card ends with the ecosystem link, exactly once
+for n in flint d1; do
+  got=$(awk '/^# /{f=1;next} f&&NF{print;exit}' "$tmp/$n/README.md")
+  case "$got" in *" "'Learn more on the [Loom ecosystem website](https://loom-fun.github.io/loom-dev/).') ;; *) echo "FAIL $n: first paragraph does not end with the ecosystem link"; bad=1;; esac
+  [ "$(grep -cF 'loom-fun.github.io/loom-dev/' "$tmp/$n/README.md")" = 1 ] || { echo "FAIL $n: ecosystem link not exactly once"; bad=1; }
+done
 # quant_of: any-case names (gguf-my-repo writes q4_k_m) without loosening the boundary guard
 got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 print(*[c.quant_of(n) for n in ('hyperclovax-1.5b-q4_k_m.gguf', 'x-Q4_K_Mfoo', 'x-Q4_K_M_foo', 'model-q4-k-m', 'x-Q8_0-q4_0')])" "$C")
