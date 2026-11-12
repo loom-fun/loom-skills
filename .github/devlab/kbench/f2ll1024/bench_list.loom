@@ -1,0 +1,331 @@
+func.def inline @g_run_qualifies(%info: buffer, %tokens: index, %token: index) -> (i1) {
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c9 = index.constant 9 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c9_i32 = scalar.constant 9 : i32
+  %true = scalar.constant true : i1
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %btoken = index.assume %token [lt(%token, %tokens)] : index
+  %row0 = view.load %info_view[%btoken, %c0] : view<[%tokens]x4xi32> -> i32
+  %pos0 = view.load %info_view[%btoken, %c1] : view<[%tokens]x4xi32> -> i32
+  %live0 = view.load %info_view[%btoken, %c2] : view<[%tokens]x4xi32> -> i32
+  %is_live0 = scalar.cmpi ne, %live0, %c0_i32 : i32
+  %alive_l, %left = scf.for %k = [%c1 to %c9 step %c1](%alive = %is_live0 : i1, %n = %c0_i32 : i32) -> (i1, i32) {
+    %room = index.cmp ule, %k, %token : index
+    %back = index.sub %token, %k : index
+    %at_value = scf.select %room, %back, %btoken : index
+    %at = index.assume %at_value [lt(%at_value, %tokens)] : index
+    %row = view.load %info_view[%at, %c0] : view<[%tokens]x4xi32> -> i32
+    %pos = view.load %info_view[%at, %c1] : view<[%tokens]x4xi32> -> i32
+    %live = view.load %info_view[%at, %c2] : view<[%tokens]x4xi32> -> i32
+    %k32 = index.cast %k : index to i32
+    %want = scalar.subi %pos0, %k32 : i32
+    %same_row = scalar.cmpi eq, %row, %row0 : i32
+    %at_pos = scalar.cmpi eq, %pos, %want : i32
+    %is_live = scalar.cmpi ne, %live, %c0_i32 : i32
+    %a = scalar.andi %same_row, %at_pos : i1
+    %b = scalar.andi %a, %is_live : i1
+    %c = scalar.andi %b, %room : i1
+    %next_alive = scalar.andi %alive, %c : i1
+    %step = scf.select %next_alive, %c1_i32, %c0_i32 : i32
+    %n_next = scalar.addi %n, %step : i32
+    scf.yield %next_alive, %n_next : i1, i32
+  }
+  %alive_r, %right = scf.for %k = [%c1 to %c9 step %c1](%alive = %is_live0 : i1, %n = %c0_i32 : i32) -> (i1, i32) {
+    %ahead = index.add %token, %k : index
+    %room = index.cmp ult, %ahead, %tokens : index
+    %at_value = scf.select %room, %ahead, %btoken : index
+    %at = index.assume %at_value [lt(%at_value, %tokens)] : index
+    %row = view.load %info_view[%at, %c0] : view<[%tokens]x4xi32> -> i32
+    %pos = view.load %info_view[%at, %c1] : view<[%tokens]x4xi32> -> i32
+    %live = view.load %info_view[%at, %c2] : view<[%tokens]x4xi32> -> i32
+    %k32 = index.cast %k : index to i32
+    %want = scalar.addi %pos0, %k32 : i32
+    %same_row = scalar.cmpi eq, %row, %row0 : i32
+    %at_pos = scalar.cmpi eq, %pos, %want : i32
+    %is_live = scalar.cmpi ne, %live, %c0_i32 : i32
+    %a = scalar.andi %same_row, %at_pos : i1
+    %b = scalar.andi %a, %is_live : i1
+    %c = scalar.andi %b, %room : i1
+    %next_alive = scalar.andi %alive, %c : i1
+    %step = scf.select %next_alive, %c1_i32, %c0_i32 : i32
+    %n_next = scalar.addi %n, %step : i32
+    scf.yield %next_alive, %n_next : i1, i32
+  }
+  %lr = scalar.addi %left, %right : i32
+  %run = scalar.addi %lr, %c1_i32 : i32
+  %long = scalar.cmpi sge, %run, %c9_i32 : i32
+  %ok = scalar.andi %long, %is_live0 : i1
+  func.return %ok : i1
+}
+
+func.def inline @g_block_starts(%info: buffer, %tokens: index, %token: index) -> (i1) {
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c15_i32 = scalar.constant 15 : i32
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %btoken = index.assume %token [lt(%token, %tokens)] : index
+  %row0 = view.load %info_view[%btoken, %c0] : view<[%tokens]x4xi32> -> i32
+  %pos0 = view.load %info_view[%btoken, %c1] : view<[%tokens]x4xi32> -> i32
+  %skew = scalar.andi %pos0, %c15_i32 : i32
+  %aligned = scalar.cmpi eq, %skew, %c0_i32 : i32
+  %room = index.cmp uge, %token, %c1 : index
+  %back = index.sub %token, %c1 : index
+  %at_value = scf.select %room, %back, %btoken : index
+  %at = index.assume %at_value [lt(%at_value, %tokens)] : index
+  %row = view.load %info_view[%at, %c0] : view<[%tokens]x4xi32> -> i32
+  %pos = view.load %info_view[%at, %c1] : view<[%tokens]x4xi32> -> i32
+  %live = view.load %info_view[%at, %c2] : view<[%tokens]x4xi32> -> i32
+  %want = scalar.subi %pos0, %c1_i32 : i32
+  %same_row = scalar.cmpi eq, %row, %row0 : i32
+  %at_pos = scalar.cmpi eq, %pos, %want : i32
+  %is_live = scalar.cmpi ne, %live, %c0_i32 : i32
+  %a = scalar.andi %same_row, %at_pos : i1
+  %b = scalar.andi %a, %is_live : i1
+  %continues = scalar.andi %b, %room : i1
+  %true = scalar.constant true : i1
+  %starts_run = scalar.xori %continues, %true : i1
+  %starts = scalar.ori %aligned, %starts_run : i1
+  func.return %starts : i1
+}
+
+func.def inline @g_tile_uniform(%info: buffer, %tokens: index, %first: index) -> (i1, i32, i32) {
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c16 = index.constant 16 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %true = scalar.constant true : i1
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %bfirst = index.assume %first [lt(%first, %tokens)] : index
+  %row0 = view.load %info_view[%bfirst, %c0] : view<[%tokens]x4xi32> -> i32
+  %pos0 = view.load %info_view[%bfirst, %c1] : view<[%tokens]x4xi32> -> i32
+  %ok = scf.for %i = [%c0 to %c16 step %c1](%acc = %true : i1) -> (i1) {
+    %t_value = index.add %first, %i : index
+    %in_range = index.cmp ult, %t_value, %tokens : index
+    %t_clamped = scf.select %in_range, %t_value, %bfirst : index
+    %t = index.assume %t_clamped [lt(%t_clamped, %tokens)] : index
+    %row = view.load %info_view[%t, %c0] : view<[%tokens]x4xi32> -> i32
+    %pos = view.load %info_view[%t, %c1] : view<[%tokens]x4xi32> -> i32
+    %c2 = index.constant 2 : index
+    %live = view.load %info_view[%t, %c2] : view<[%tokens]x4xi32> -> i32
+    %i32v = index.cast %i : index to i32
+    %expected = scalar.addi %pos0, %i32v : i32
+    %same_row = scalar.cmpi eq, %row, %row0 : i32
+    %consecutive = scalar.cmpi eq, %pos, %expected : i32
+    %is_live = scalar.cmpi ne, %live, %c0_i32 : i32
+    %a = scalar.andi %same_row, %consecutive : i1
+    %b = scalar.andi %a, %is_live : i1
+    %c = scalar.andi %b, %in_range : i1
+    %next = scalar.andi %acc, %c : i1
+    scf.yield %next : i1
+  }
+  func.return %ok, %row0, %pos0 : i1, i32, i32
+}
+
+func.def inline @g_tile_adjacent(%info: buffer, %tokens: index, %first: index, %back: i1) -> (i1) {
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c16 = index.constant 16 : index
+  %c16_i32 = scalar.constant 16 : i32
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %bfirst = index.assume %first [range(%first, 0, 8191), lt(%first, %tokens)] : index
+  %row0 = view.load %info_view[%bfirst, %c0] : view<[%tokens]x4xi32> -> i32
+  %pos0 = view.load %info_view[%bfirst, %c1] : view<[%tokens]x4xi32> -> i32
+  %room = index.cmp uge, %first, %c16 : index
+  %back_step = scf.select %room, %c16, %c0 : index
+  %prev = index.sub %first, %back_step : index
+  %next = index.add %first, %c16 : index
+  %other = scf.select %back, %prev, %next : index
+  %in_range = index.cmp ult, %other, %tokens : index
+  %other_clamped = scf.select %in_range, %other, %bfirst : index
+  %other_bound = index.assume %other_clamped [range(%other_clamped, 0, 8191), lt(%other_clamped, %tokens)] : index
+  %uniform, %row, %pos = func.call @g_tile_uniform(%info, %tokens, %other_bound) : (buffer, index, index) -> (i1, i32, i32)
+  %pos_before = scalar.subi %pos0, %c16_i32 : i32
+  %pos_after = scalar.addi %pos0, %c16_i32 : i32
+  %pos_want = scf.select %back, %pos_before, %pos_after : i32
+  %same_row = scalar.cmpi eq, %row, %row0 : i32
+  %next_pos = scalar.cmpi eq, %pos, %pos_want : i32
+  %a = scalar.andi %uniform, %in_range : i1
+  %b = scalar.andi %a, %same_row : i1
+  %ok = scalar.andi %b, %next_pos : i1
+  func.return %ok : i1
+}
+
+func.def inline @g_tile_starts(%info: buffer, %tokens: index, %token: index) -> (i1) {
+  %zero = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c15_i32 = scalar.constant 15 : i32
+  %false = scalar.constant false : i1
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %bounded = index.assume %token [range(%token, 0, 8191), lt(%token, %tokens)] : index
+  %pos = view.load %info_view[%bounded, %c1] : view<[%tokens]x4xi32> -> i32
+  %skew = scalar.andi %pos, %c15_i32 : i32
+  %aligned = scalar.cmpi eq, %skew, %c0_i32 : i32
+  %starts = scf.if %aligned -> (i1) {
+    %uniform, %row, %pos0 = func.call @g_tile_uniform(%info, %tokens, %bounded) : (buffer, index, index) -> (i1, i32, i32)
+    scf.yield %uniform : i1
+  } else {
+    scf.yield %false : i1
+  }
+  func.return %starts : i1
+}
+
+kernel.def export("k_list") @k_list(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%tokens_arg: index, %info: buffer, %tiles: buffer, %list: buffer, %count: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c255 = index.constant 255 : index
+  %c256 = index.constant 256 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c15_i32 = scalar.constant 15 : i32
+  %true = scalar.constant true : i1
+  %scratch_bytes = index.constant 1040 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<260xi32>
+  %first = index.cmp eq, %lane, %c0 : index
+  %c256_slot = index.constant 256 : index
+  %c257_slot = index.constant 257 : index
+  %c258_slot = index.constant 258 : index
+  scf.if %first {
+    view.store %c0_i32, %scratch_view[%c256_slot] : i32, view<260xi32>
+    view.store %c0_i32, %scratch_view[%c258_slot] : i32, view<260xi32>
+  }
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %tiles_view = buffer.view %tiles[%zero] : buffer -> view<[%tokens]xi32>
+  %list_view = buffer.view %list[%zero] : buffer -> view<[%tokens]xi32>
+  // Tile starts, in token order: lane L takes the L-th run of `chunk` tokens, counts its tile starts, the first lane
+  // turns the counts into offsets, and every lane writes its starts after those of the lanes before it.
+  %chunk_round = index.add %tokens, %c255 : index
+  %chunk = index.div %chunk_round, %c256 : index
+  %run = index.mul %lane, %chunk : index
+  %mine = scf.for %i = [%c0 to %chunk step %c1](%n = %c0_i32 : i32) -> (i32) {
+    %token_value = index.add %run, %i : index
+    %inside = index.cmp ult, %token_value, %tokens : index
+    %token = scf.select %inside, %token_value, %c0 : index
+    %starts = func.call @g_tile_starts(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+    %counted = scalar.andi %starts, %inside : i1
+    %step = scf.select %counted, %c1_i32, %c0_i32 : i32
+    %next = scalar.addi %n, %step : i32
+    scf.yield %next : i32
+  }
+  view.store %mine, %scratch_view[%lane] : i32, view<260xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  scf.if %first {
+    %total = scf.for %l = [%c0 to %c256 step %c1](%sum = %c0_i32 : i32) -> (i32) {
+      %bounded_l = index.assume %l [range(%l, 0, 255)] : index
+      %count_l = view.load %scratch_view[%bounded_l] : view<260xi32> -> i32
+      view.store %sum, %scratch_view[%bounded_l] : i32, view<260xi32>
+      %sum_next = scalar.addi %sum, %count_l : i32
+      scf.yield %sum_next : i32
+    }
+    view.store %total, %tiles_view[%c0] : i32, view<[%tokens]xi32>
+    view.store %total, %scratch_view[%c257_slot] : i32, view<260xi32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %offset = view.load %scratch_view[%lane] : view<260xi32> -> i32
+  %written = scf.for %i = [%c0 to %chunk step %c1](%n = %offset : i32) -> (i32) {
+    %token_value = index.add %run, %i : index
+    %inside = index.cmp ult, %token_value, %tokens : index
+    %token = scf.select %inside, %token_value, %c0 : index
+    %starts = func.call @g_tile_starts(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+    %counted = scalar.andi %starts, %inside : i1
+    %next = scf.if %counted -> (i32) {
+      %n_bound = scalar.assume %n [range(%n, 0, 511)] : i32
+      %slot_value = index.cast %n_bound : i32 to index
+      %entry_value = index.add %slot_value, %c1 : index
+      %entry = index.assume %entry_value [lt(%entry_value, %tokens)] : index
+      %token32 = index.cast %token : index to i32
+      view.store %token32, %tiles_view[%entry] : i32, view<[%tokens]xi32>
+      %n_next = scalar.addi %n, %c1_i32 : i32
+      scf.yield %n_next : i32
+    } else {
+      scf.yield %n : i32
+    }
+    scf.yield %next : i32
+  }
+  // The entries past the count are token 0, so a workgroup without a tile can read its entry.
+  %listed_total32 = view.load %scratch_view[%c257_slot] : view<260xi32> -> i32
+  %listed_total = index.cast %listed_total32 : i32 to index
+  %c16 = index.constant 16 : index
+  %slots = index.div %tokens, %c16 : index
+  %fill_from = index.add %listed_total, %lane : index
+  scf.for %e = [%fill_from to %slots step %c256] {
+    %e_bound = index.assume %e [range(%e, 0, 8191)] : index
+    %fill_value = index.add %e_bound, %c1 : index
+    %fill_slot = index.assume %fill_value [range(%fill_value, 1, 8192), lt(%fill_value, %tokens)] : index
+    view.store %c0_i32, %tiles_view[%fill_slot] : i32, view<[%tokens]xi32>
+  }
+  // Every token of a run shorter than 9 is the listed fallback's; the blocks of a longer run that flash2 does not take
+  // whole are the partial list's (order does not matter, each is computed on its own).
+  %c2 = index.constant 2 : index
+  %half = index.div %tokens, %c2 : index
+  %half_entry = index.add %half, %c1 : index
+  scf.for %t = [%lane to %tokens step %c256] {
+    %token = index.assume %t [lt(%t, %tokens)] : index
+    %long = func.call @g_run_qualifies(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+    %short = scalar.xori %long, %true : i1
+    scf.if %short {
+      %slot32 = view.atomic.rmw<addi> %c1_i32, %scratch_view[%c256_slot] {ordering = relaxed, scope = workgroup} : i32, view<260xi32> -> i32
+      %slot_bound = scalar.assume %slot32 [range(%slot32, 0, 8191)] : i32
+      %slot_value = index.cast %slot_bound : i32 to index
+      %slot = index.assume %slot_value [lt(%slot_value, %tokens)] : index
+      %token32 = index.cast %token : index to i32
+      view.store %token32, %list_view[%slot] : i32, view<[%tokens]xi32>
+    } else {
+      %block_start = func.call @g_block_starts(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+      %whole = func.call @g_tile_starts(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+      %part = scalar.xori %whole, %true : i1
+      %listed_part = scalar.andi %block_start, %part : i1
+      scf.if %listed_part {
+        %pslot32 = view.atomic.rmw<addi> %c1_i32, %scratch_view[%c258_slot] {ordering = relaxed, scope = workgroup} : i32, view<260xi32> -> i32
+        %pslot_bound = scalar.assume %pslot32 [range(%pslot32, 0, 8191)] : i32
+        %pslot_value = index.cast %pslot_bound : i32 to index
+        %pentry_value = index.add %half_entry, %pslot_value : index
+        %pentry = index.assume %pentry_value [lt(%pentry_value, %tokens)] : index
+        %ptoken32 = index.cast %token : index to i32
+        view.store %ptoken32, %tiles_view[%pentry] : i32, view<[%tokens]xi32>
+      }
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  scf.if %first {
+    %fallbacks = view.load %scratch_view[%c256_slot] : view<260xi32> -> i32
+    %count_view = buffer.view %count[%zero] : buffer -> view<1xi32>
+    view.store %fallbacks, %count_view[0] : i32, view<1xi32>
+    %partials = view.load %scratch_view[%c258_slot] : view<260xi32> -> i32
+    %half_bound = index.assume %half [lt(%half, %tokens)] : index
+    view.store %partials, %tiles_view[%half_bound] : i32, view<[%tokens]xi32>
+  }
+  kernel.return
+}
+
+check.case public @fl {
+  %t = check.literal value(1024) : index
+  %info = check.file.read.npy path("info.npy") : tensor<1024x4xi32>
+  %tiles = check.generate.fill value(0) : tensor<1024xi32>
+  %flist = check.generate.fill value(0) : tensor<1024xi32>
+  %fcount = check.generate.fill value(0) : tensor<64xi32>
+  kernel.launch @k_list[%t](%t, %info, %tiles, %flist, %fcount) : [index](index, tensor<1024x4xi32>, tensor<1024xi32>, tensor<1024xi32>, tensor<64xi32>)
+  check.return
+}
+
+check.benchmark<@fl> @fl_bm
