@@ -2945,7 +2945,7 @@ def seg_tokens():
     workgroup memory (longer runs go one token at a time); 0 when the decode path keeps the split kernel."""
     if not (os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and D in (64, 128) and KVH <= 2):
         return 0
-    ts = min(gen_draft.DRAFT["depth"] + 1, 65536 // (G * 4 * (D + 32)))
+    ts = min(gen_draft.DRAFT["depth"] + 1, 65536 // (G * 4 * (D + 32)), int(os.environ.get("SEG_TS_MAX", "64")))
     return ts if ts >= 2 else 0
 
 
