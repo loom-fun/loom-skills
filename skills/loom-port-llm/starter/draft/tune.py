@@ -16,6 +16,11 @@ spec gate's equivalence check (loom-benchmark spec_check.py: the same requests a
 draft_depth 0 of the same package, identical); a candidate that fails either is recorded with the reason and the
 next one is checked. Prints TUNE_RESULT {...} with the full table (the report shows it).
 SPEC=off skips tuning and builds without drafting.
+TUNE_BASELINE (a JSON file, or inline JSON) = {"decode": X, "decode_32k": Y, "c4": Z}: the fastest llama.cpp tok/s of the card's
+rows; by default read from the cfg["reference"] card's info.json (find_reference.py apply). With it a candidate's margin is its worst row relative to llama.cpp (work* rows -> decode, "long" -> decode_32k, streams4
+-> c4; a row without a reference is ignored), depth 0 is scored the same way, and a drafter is used when its margin beats
+depth 0's (the 3 % single-stream rule stays): a drafter that wins every single-stream row but is 10 % under depth 0 at 4
+streams still beats llama.cpp better than no drafting does. Without it the margin is relative to depth 0 as above.
 """
 import json
 import os
@@ -140,6 +145,39 @@ def margin(rows, base_rows):
     return min((rows.get(k, 0.0) / t for k, t in base_rows.items() if t), default=0.0)
 
 
+def load_llama_refs(cfg):
+    """{"decode", "decode_32k", "c4"} llama.cpp tok/s: TUNE_BASELINE (a JSON file path or inline JSON), else the best
+    llama.cpp backend on the cfg["reference"] card (its info.json: latest session and per-backend baselines), else None."""
+    v = os.environ.get("TUNE_BASELINE", "").strip()
+    if v:
+        d = json.loads(v) if v.startswith("{") else json.load(open(v))
+        return {k: float(d[k]) for k in ("decode", "decode_32k", "c4") if d.get(k)} or None
+    ref = cfg.get("reference") or {}
+    if not ref.get("repo"):
+        return None
+    sys.path.insert(0, os.path.join(SKILLS, "loom-port-llm"))
+    import find_reference
+    sha = ref.get("revision") or "main"
+    rc = find_reference.jfile(ref["repo"], sha, "llm_config.json") or {}
+    if os.path.basename(rc.get("gguf") or "") != os.path.basename(cfg.get("gguf") or "-"):
+        return None   # a reference of another model (same architecture): its llama.cpp numbers are not this card's
+    perf = (find_reference.jfile(ref["repo"], sha, "info.json") or {}).get("performance") or {}
+    sets = [s.get("metrics") or {} for s in (perf.get("sessions") or [])[-1:]]
+    sets += [(b.get("session") or {}).get("metrics") or {} for b in (perf.get("baselines") or {}).values()]
+    out = {}
+    for k, m in (("decode", "decode"), ("decode_32k", "decode_32k"), ("c4", "streams4")):
+        vals = [float(s[m]["baseline"]) for s in sets if (s.get(m) or {}).get("baseline")]
+        if vals:
+            out[k] = max(vals)
+    return out or None
+
+
+def llama_margin(rows, refs):
+    """The worst row relative to llama.cpp's rate for that row (work* -> decode, long -> decode_32k, streams4 -> c4)."""
+    ref = lambda k: refs.get("c4" if k == "streams4" else "decode_32k" if k == "long" else "decode")
+    return min((t / ref(k) for k, t in rows.items() if ref(k)), default=0.0)
+
+
 def concurrent_ok(url, model, chat):
     """Agentic serving runs several requests at once: ~300-token prompts two at a time 0.5 s apart (both draft right
     after nearly simultaneous prefills) and four together (consistency.py's prompts), twice each, must all complete.
@@ -207,6 +245,7 @@ def main():
     import catalog
     if catalog.find(STARTER):   # a catalog package drafts with its MTP head or not at all (catalog.py)
         kinds = [("mtp", [1, 2, 3, 4])] if spec not in ("off", "0", "no", "none") and catalog.meta(catalog.find(STARTER)).get("mtp_variant") else []
+    llama_refs = load_llama_refs(cfg)
     table, best, cand_mem, chats = [], ("none", 0, 0.0), {}, {}
     # A category A reference (find_reference.py apply: cfg["reference"]) measured its own drafting table: start each
     # method at the reference's best depth and its neighbours instead of every depth. Every method is still measured
@@ -260,6 +299,8 @@ def main():
             subprocess.run(bash_script(os.path.join(SETUP, "stop.sh"), "tune"), env=env, capture_output=True)
             row = {"kind": "none" if depth == 0 else kind, "depth": depth, "decode_tps": round(tps, 2),
                    "rows": {k: round(v, 2) for k, v in rows.items()}, "seconds": round(time.time() - t0)}
+            if llama_refs:
+                row["margin_llama"] = round(llama_margin(rows, llama_refs), 3)   # worst row relative to llama.cpp
             if depth == 0:
                 base, base_rows = tps, rows
             else:
@@ -302,7 +343,16 @@ def main():
         return spec_check.compare(refs[kind], out) == 0
     # A drafter is used only if no row is slower than NO_LOSS x depth 0 and the single-stream rate gains at least 3 %;
     # candidates rank by their worst row relative to depth 0 (the margin).
-    ranked = sorted([r for r in table if r["kind"] != "none" and r["margin"] >= NO_LOSS and r["decode_tps"] >= 1.03 * base],
+    # With TUNE_BASELINE the margin is the worst row relative to llama.cpp and a drafter qualifies when it beats depth 0's.
+    if llama_refs:
+        floor = next(r["margin_llama"] for r in table if r["kind"] == "none")
+        for r in table:
+            if r["kind"] != "none":
+                r["margin"] = r["margin_llama"]
+        ok_margin = lambda r: r["margin"] > floor
+    else:
+        ok_margin = lambda r: r["margin"] >= NO_LOSS
+    ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
                     key=lambda r: -r["margin"])
     # Within NO_LOSS of the best margin (noise on these short requests; a wider band on a ratio near 1 would admit
     # every candidate), the shallower depth first: every drafted token is verified with decode attention over the
