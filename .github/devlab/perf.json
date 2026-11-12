@@ -6,75 +6,34 @@
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "abl",
+   "name": "dense",
    "variants": [
     {
-     "name": "u8",
+     "name": "ctl",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "origin/perfgap-gemma4-26b-pr"
+    },
+    {
+     "name": "dense",
      "execution": {
       "draft_depth": 0
      },
      "build": {
       "ATTN_UNROLL_512": "8"
      }
-    },
-    {
-     "name": "a_k",
-     "execution": {
-      "draft_depth": 0
-     },
-     "build": {
-      "ATTN_UNROLL_512": "8",
-      "ATTN_ABL": "k"
-     }
-    },
-    {
-     "name": "a_v",
-     "execution": {
-      "draft_depth": 0
-     },
-     "build": {
-      "ATTN_UNROLL_512": "8",
-      "ATTN_ABL": "v"
-     }
-    },
-    {
-     "name": "a_kv",
-     "execution": {
-      "draft_depth": 0
-     },
-     "build": {
-      "ATTN_UNROLL_512": "8",
-      "ATTN_ABL": "k,v"
-     }
-    },
-    {
-     "name": "a_exp",
-     "execution": {
-      "draft_depth": 0
-     },
-     "build": {
-      "ATTN_UNROLL_512": "8",
-      "ATTN_ABL": "exp"
-     }
-    },
-    {
-     "name": "a_shuf",
-     "execution": {
-      "draft_depth": 0
-     },
-     "build": {
-      "ATTN_UNROLL_512": "8",
-      "ATTN_ABL": "shuf"
-     }
     }
    ],
    "steps": [
-    "perf:u8:1:long",
-    "perf:a_k:1:long",
-    "perf:a_v:1:long",
-    "perf:a_kv:1:long",
-    "perf:a_exp:1:long",
-    "perf:a_shuf:1:long"
+    "perf:ctl:1",
+    "perf:ctl:1:long",
+    "perf:dense:1",
+    "perf:dense:1:long",
+    "ktest:dense",
+    "c4:ctl",
+    "c4:dense"
    ]
   }
  ]
