@@ -2621,7 +2621,7 @@ def gqa_split(text, P, S):
     o1 = k.index("    }\n    }\n  }\n  kernel.return") + len("    }\n    }\n")
     old = k[o0:o1]
     assert "%q_view = buffer.view %q[%zero]" in old
-    q0 = old.index("    %q_view = buffer.view %q[%zero]")
+    scale = re.search(r"%scale = scalar.constant (\S+) : f32", old).group(1)   # the per-head body's (a kit may change it; D != 128 is fixed by the caller)
     t = [f"""    %cgqa = index.constant {attn_rules.ATTN_GQA_FROM} : index
     %use_gqa = index.cmp uge, %visible, %cgqa : index
     %gq = index.constant {G} : index
@@ -2638,7 +2638,7 @@ def gqa_split(text, P, S):
     %stop_raw = index.add %start_raw, %per : index
     %stop = index.min %stop_raw, %visible : index"""]
     t.append(f"""    %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
-    %scale = scalar.constant 0.08838834764831845 : f32
+    %scale = scalar.constant {scale} : f32
     %scale_v = vector.splat %scale : vector<4xf32>
     %zero4 = vector.splat %zero_f : vector<4xf32>""")
     for h in range(G):
