@@ -1,12 +1,7 @@
 {
- "_comment": "Qwen2.5-32B: re-port from main with the tune.py of origin/perfgap-tune-long32k (long row = 32k document).",
+ "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
  "jobs": [
-  {
-   "name": "qwen25-32b-regen",
-   "spec": "bartowski/Qwen2.5-32B-Instruct-GGUF:Qwen2.5-32B-Instruct-Q4_K_M.gguf",
-   "reference": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
-   "model_id": "Qwen/Qwen2.5-32B-Instruct",
-   "skills_ref": "origin/perfgap-tune-long32k"
-  }
+  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
+  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
  ]
 }

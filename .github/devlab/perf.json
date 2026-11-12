@@ -1,36 +1,15 @@
 {
- "_comment": "Qwen2.5-32B: PR #357 GQA decode attention at draft depth 0/1 (decode, 2k, 32k, 4 streams, active wait).",
+ "_comment": "Qwen2.5-32B regenerated card (ngram depth 1, tune with 32k long row): active-wait card perf vs llama.cpp ROCm and Vulkan on one runner.",
  "card": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
- "memory_bytes": 49000000000,
+ "memory_bytes": 50000000000,
  "kit": null,
  "llamacpp": "b1373",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
    "name": "card-perf",
-   "variants": [
-    {
-     "name": "gqa0",
-     "build": {},
-     "ref": "origin/perfgap-qwen3-gqa-attn",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "gqa1",
-     "build": {},
-     "ref": "origin/perfgap-qwen3-gqa-attn",
-     "execution": {
-      "draft_depth": 1
-     }
-    }
-   ],
-   "steps": [
-    "perf:gqa0:2:long",
-    "c4:gqa0",
-    "perf:gqa1:2:long",
-    "c4:gqa1"
-   ]
+   "variants": [{"name": "card"}],
+   "steps": ["perf:card:2", "perf:card:2:long", "llama:2", "llama:2:long", "c4:card", "llamac4", "llama@vulkan:2", "llama@vulkan:2:long", "llamac4@vulkan"]
   }
  ]
 }
