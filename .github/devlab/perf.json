@@ -1,52 +1,82 @@
 {
- "_comment": "gqa_split as its own kernel (no shared register count): Qwen3-30B-A3B (kv4) and Qwen3-4B-2507 (kv8), main vs new",
- "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
- "memory_bytes": 63000000000,
+ "card": "loom-fun/unsloth-Qwen3-8B-loom",
+ "memory_bytes": 55000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "a30",
+   "name": "q8-attn",
    "variants": [
     {
-     "name": "main",
+     "name": "nd",
      "build": {},
-     "ref": "origin/main"
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     },
     {
-     "name": "new",
-     "build": {}
+     "name": "cu8",
+     "build": {
+      "ATTN_COMBINE_U": "8"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "cu16",
+     "build": {
+      "ATTN_COMBINE_U": "16"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "s128",
+     "build": {
+      "ATTN_SPLITS": "128",
+      "ATTN_COMBINE_U": "8"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "s32",
+     "build": {
+      "ATTN_SPLITS": "32",
+      "ATTN_COMBINE_U": "8"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "u32",
+     "build": {
+      "ATTN_UNROLL": "32",
+      "ATTN_COMBINE_U": "8"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     }
    ],
    "steps": [
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "perf:main:2",
-    "perf:new:2",
-    "ktest:new",
-    "gates:new:dev"
-   ]
-  },
-  {
-   "name": "b4",
-   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
-   "memory_bytes": 55000000000,
-   "variants": [
-    {
-     "name": "main",
-     "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:main:2:long",
-    "perf:new:2:long",
-    "perf:main:2",
-    "perf:new:2"
+    "ktest:cu8",
+    "perf:nd:2:long",
+    "perf:cu8:2:long",
+    "perf:cu16:2:long",
+    "perf:s128:2:long",
+    "perf:s32:2:long",
+    "perf:u32:2:long"
    ]
   }
  ]
