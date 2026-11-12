@@ -113,8 +113,6 @@ def margin(loom, base):
     return f"{round((loom / base - 1) * 100):+d} %"
 
 
-def ratio(local, devlab):
-    return f"{local / devlab:.2f}" if local and devlab else MISSING
 
 
 def drafting(spec):
@@ -259,7 +257,7 @@ def render(d):
     if facts["preset"]:
         fetch.append(f"--preset={facts['preset']}")
     fetch += ["--materialize=copy", f"--output={output}"]
-    serve = ["loom-serve", f"--model={output}/model.json", "--device=amdgpu"]
+    serve = ["loom-serve", f"--model={output}/model.json", "'--device=amdgpu://?completion_spin_ns=4294967295'"]
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
     if pkg_serve:
         serve += pkg_serve   # e.g. --pool_backing=fixed, which takes no --memory_bytes
@@ -291,11 +289,6 @@ def render(d):
     # ---- performance
     bname = base["name"]
     shown = card_metrics(info)
-    # a card with no local timing (measured on DevLab only) shows the DevLab values as its headline columns and drops
-    # the empty local and local ÷ DevLab ones
-    devlab_only = not any(k in TIMED for k in shown) and any(k in TIMED for k in card_metrics(info, devlab=True))
-    if devlab_only:
-        shown = {**shown, **card_metrics(info, devlab=True)}
     rows = {k: shown[k] for k, _ in METRICS if k in shown and metric_applies(k, kind, feats, info)}
     counts = {}
     for k, (_, i) in rows.items():
@@ -305,21 +298,14 @@ def render(d):
     notes = []
     roof = (info.get("roofline") or {}).get("metrics") or {}
     here = programs_sha256(d)
-    stale = stale_metrics(info, here, kind, feats, devlab=devlab_only)
-    dshown, dstale = card_metrics(info, devlab=True), stale_metrics(info, here, kind, feats, devlab=True)
-    # further llama.cpp backends (performance.baselines): one DevLab column each, after DevLab Loom
+    stale = stale_metrics(info, here, kind, feats)
+    # further llama.cpp backends (performance.baselines): one column each, after the roofline
     extra = {b: x for b, x in (perf.get("baselines") or {}).items()}
     xnames = {b: f"{x['baseline']['name']} {b.capitalize()}" for b, x in extra.items()}
-    if devlab_only:
-        L += [f"## Performance vs {bname}", "",
-              f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline "
-              + "".join(f"| DevLab {n} " for n in xnames.values()) + "|",
-              "|---|---|---|---|---|---|" + "---|" * len(extra)]
-    else:
-        L += [f"## Performance vs {bname}", "",
-              f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline | DevLab {bname} | DevLab Loom "
-              + "".join(f"| DevLab {n} " for n in xnames.values()) + f"| local ÷ DevLab ({bname}, Loom) |",
-              "|---|---|---|---|---|---|---|---|---|" + "---|" * len(extra)]
+    L += [f"## Performance vs {bname}", "",
+          f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline "
+          + "".join(f"| {n} " for n in xnames.values()) + "|",
+          "|---|---|---|---|---|---|" + "---|" * len(extra)]
 
     def marked(key, v, i, stale_keys):
         """A value with its session's footnote mark (sessions other than the primary one) and the stale mark."""
@@ -332,23 +318,16 @@ def render(d):
         return out + (f" {STALE}" if key in stale_keys else "")
     for key, label in METRICS:
         if not metric_applies(key, kind, feats, info):
-            L.append(f"| {label} |" + " n/a |" * ((5 if devlab_only else 8) + len(extra)))
+            L.append(f"| {label} |" + " n/a |" * (5 + len(extra)))
             continue
         m, i = shown.get(key, ({"loom": None, "baseline": None}, None))
         loom = marked(key, m.get("loom"), i, stale)
         ceiling = (roof.get(key) or {}).get("ceiling")
         if key == "spec_acceptance":
-            cells = " | ".join(["n/a"] * ((2 if devlab_only else 5) + len(extra)))
-        elif devlab_only:
-            cells = (f"{num(key, ceiling)} | {pct(m.get('loom'), ceiling)}"
-                     + "".join(f" | {num(key, x['session']['metrics'].get(key, {}).get('baseline'))}" for x in extra.values()))
+            cells = " | ".join(["n/a"] * (2 + len(extra)))
         else:
-            dm, di = dshown.get(key, ({}, None))
-            ratios = [ratio(m.get(e), dm.get(e)) for e in ("baseline", "loom")]
-            cells = (f"{num(key, ceiling)} | {pct(m.get('loom'), ceiling)} | {num(key, dm.get('baseline'))} | "
-                     f"{marked(key, dm.get('loom'), di, dstale)} | "
-                     + "".join(f"{num(key, x['session']['metrics'].get(key, {}).get('baseline'))} | " for x in extra.values())
-                     + (MISSING if ratios == [MISSING] * 2 else ", ".join(ratios)))
+            cells = " | ".join([num(key, ceiling), pct(m.get('loom'), ceiling)]
+                               + [num(key, x['session']['metrics'].get(key, {}).get('baseline')) for x in extra.values()])
         L.append(f"| {label} | {num(key, m.get('baseline'))} | {loom} | "
                  f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), m.get('baseline'))} | {cells} |")
 
@@ -368,30 +347,26 @@ def render(d):
           f"- Loom: speculative decoding {drafting(facts['spec'])}.",
           "- Same GGUF on both engines, tokens per second. Loom: client-side timing; "
           f"{bname}: server-side timings. Runs per value: decode and prefill {runs_of(tps_keys, False)} (mean), "
-          f"4 streams {runs_of(['streams4'], True)} (median)."]
-    if psrc:   # a card with no local value (DevLab-only) describes its sessions in the marked footnotes alone
+          f"4 streams {runs_of(['streams4'], True)} (median).",
+          "- Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs): Loom, served with the active wait, "
+          "and llama.cpp on the same runner; runners differ between sessions."]
+    if psrc:
         L.append(f"- Measured {text(sessions[primary]['date'])}; device {device_text(psrc['device'])}; "
                  f"hrx-loom {sdk_text(psrc['hrx_loom'])}; source: {src_text(psrc)}.")
     for i, (sid, date) in enumerate(notes, 1):
         s = sources[sid]
         L.append(f"- {mark(i)} Measured {text(date)}; device {device_text(s['device'])}; hrx-loom {sdk_text(s['hrx_loom'])}; "
                  f"source: {src_text(s)}.")
-    if devlab_only:
-        L.append("- All values were measured on AMD DevLab Dispatch Strix Halo runners (no local measurement); each "
-                 "engine pair ran on the same runner, runners differ between sessions.")
-    elif any(k in dshown for k, _ in METRICS if metric_applies(k, kind, feats, info)):
-        L.append("- DevLab: the same measurement on an AMD DevLab Dispatch Strix Halo runner; local ÷ DevLab is the "
-                 "local value over the DevLab value of each engine, recorded for comparison, not a verdict.")
     for b, x in extra.items():
         xb, xs = x["baseline"], x["session"]
-        L.append(f"- DevLab {xnames[b]}: build {('`' + xb['version'] + '`') if xb['version'] else 'not recorded'}"
+        L.append(f"- {xnames[b]}: build {('`' + xb['version'] + '`') if xb['version'] else 'not recorded'}"
                  + (f" (archive sha256 {short(xb['sha256'])})" if xb.get("sha256") else "")
                  + ", server arguments " + (f"`{xb['args']}`" if xb["args"] else "not recorded")
                  + f"; same GGUF, prompts and settings as {bname}; measured {text(xs['date'])} in its own DevLab job "
-                 f"(a different runner than the other DevLab columns: compare the engines through ratios, not across jobs); "
+                 f"(another runner than the other columns: compare the engines through ratios, not across jobs); "
                  f"source: {src_text(sources[xs['source']])}."
                  + "".join(f" Differs from {bname}: {u}." for u in xb.get("differs") or []))
-    for sha in sorted(set(stale.values()) | set(dstale.values())):
+    for sha in sorted(set(stale.values())):
         L.append(f"- {STALE} Measured on programs other than this repository's (sha256 {short(sha)}, this repository's "
                  f"{short(here)}): the value describes another build of the package until a session re-measures it.")
     if metric_applies("spec_acceptance", kind, feats):
@@ -469,8 +444,9 @@ METHOD_TEXT = [
     "4 are decoding; the card shows the median of the runs.",
     "- One engine runs at a time on the same machine, with the same GGUF. Loom rates are timed by the client; "
     "llama.cpp rates come from its server-side `timings`.",
-    "- Each session below is labeled by its source: local sessions give the card's headline values, DevLab sessions "
-    "(an AMD DevLab Dispatch runner) its DevLab columns.",
+    "- Every performance value comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch Strix Halo runner: "
+    "Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), and llama.cpp on the same "
+    "runner, with the published programs.",
     "- Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.",
     "- Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD "
     "DevLab Dispatch.",
