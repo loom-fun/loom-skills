@@ -7,66 +7,13 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "sweep2",
+   "name": "sweep3",
    "variants": [
     {
      "name": "card"
     },
     {
-     "name": "base8",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8"
-     }
-    },
-    {
-     "name": "u16",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "16"
-     }
-    },
-    {
-     "name": "r2u8",
-     "build": {
-      "MOE_R": "2",
-      "MOE_ROUTE_U": "8"
-     }
-    },
-    {
-     "name": "gdnrl4",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "GDN_ROW_LANES": "4"
-     }
-    },
-    {
-     "name": "gdnrl16",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "GDN_ROW_LANES": "16"
-     }
-    },
-    {
-     "name": "gdncols8",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "GDN_COLS": "8"
-     }
-    },
-    {
-     "name": "mvch32",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "32"
-     }
-    },
-    {
-     "name": "mvch8",
+     "name": "ch8",
      "build": {
       "MOE_R": "4",
       "MOE_ROUTE_U": "8",
@@ -74,43 +21,94 @@
      }
     },
     {
-     "name": "pair1",
+     "name": "rl16",
      "build": {
       "MOE_R": "4",
       "MOE_ROUTE_U": "8",
-      "PAIR_PROJ": "1"
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16"
      }
     },
     {
-     "name": "lastout",
+     "name": "rl32",
      "build": {
       "MOE_R": "4",
       "MOE_ROUTE_U": "8",
-      "LAST_OUT": "1"
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "32"
      }
     },
     {
-     "name": "nofold",
+     "name": "rl16c2",
      "build": {
       "MOE_R": "4",
       "MOE_ROUTE_U": "8",
-      "MOE_FOLD": "0"
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2"
+     }
+    },
+    {
+     "name": "rl32c2",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "32",
+      "GDN_COLS": "2"
+     }
+    },
+    {
+     "name": "rl16cb",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_CB": "64"
+     }
+    },
+    {
+     "name": "rl16cu8",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_CONV_UNROLL": "8"
+     }
+    },
+    {
+     "name": "rl16cu2",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "8",
+      "GDN_ROW_LANES": "16",
+      "GDN_CONV_UNROLL": "2"
+     }
+    },
+    {
+     "name": "rl16ch4",
+     "build": {
+      "MOE_R": "4",
+      "MOE_ROUTE_U": "8",
+      "MV_CHUNK": "4",
+      "GDN_ROW_LANES": "16"
      }
     }
    ],
    "steps": [
     "perf:card:1",
-    "perf:base8:1",
-    "perf:u16:1",
-    "perf:r2u8:1",
-    "perf:gdnrl4:1",
-    "perf:gdnrl16:1",
-    "perf:gdncols8:1",
-    "perf:mvch32:1",
-    "perf:mvch8:1",
-    "perf:pair1:1",
-    "perf:lastout:1",
-    "perf:nofold:1",
+    "perf:ch8:1",
+    "perf:rl16:1",
+    "perf:rl32:1",
+    "perf:rl16c2:1",
+    "perf:rl32c2:1",
+    "perf:rl16cb:1",
+    "perf:rl16cu8:1",
+    "perf:rl16cu2:1",
+    "perf:rl16ch4:1",
     "llama@vulkan:2"
    ]
   }
