@@ -74,12 +74,11 @@
   {
    "repo": "loom-fun/unsloth-Ornith-1.0-9B-loom",
    "slug": "ornith-1.0-9b",
-   "memory_bytes": 21000000000,
+   "memory_bytes": 22000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
     "vision",
-    "draft",
     "thinking-toggle"
    ]
   },
@@ -169,10 +168,8 @@
    "slug": "hyperclovax-seed-text-instruct-1.5b",
    "memory_bytes": 24000000000,
    "kit": null,
-   "llamacpp": "b1369",
-   "features": [
-    "draft"
-   ]
+   "llamacpp": "b1373",
+   "features": []
   },
   {
    "repo": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
@@ -182,7 +179,6 @@
    "llamacpp": "b1369",
    "features": [
     "vision",
-    "draft",
     "thinking-toggle"
    ]
   },
@@ -328,8 +324,7 @@
    "kit": null,
    "llamacpp": "b1370",
    "features": [
-    "vision",
-    "draft"
+    "vision"
    ]
   },
   {
