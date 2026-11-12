@@ -15,14 +15,10 @@ const ST = {norm: 'rocm', q: '', sort: 'gain', dir: 'desc', aggm: 'prefill_32k'}
 const HF = 'https://huggingface.co';
 
 /* ---- info.json -> row (port of compile.py + card_lib) ---- */
-const isDevlab = (info, s) => {
-  const src = (s.source && typeof s.source === 'object') ? s.source : (info.sources || {})[s.source];
-  return !!src && src.kind === 'devlab';
-};
-const devlabMetrics = (info) => {
+/* card_lib.card_metrics: per metric the last session that measured it (all sessions are DevLab devlab-perf jobs) */
+const cardMetrics = (info) => {
   const out = {};
   ((info.performance || {}).sessions || []).forEach((s) => {
-    if (!isDevlab(info, s)) return;
     for (const [k, m] of Object.entries(s.metrics || {})) if (TIMED.includes(k)) out[k] = m;
   });
   return out;
@@ -63,7 +59,7 @@ function rowFromInfo(repo, info) {
   const full = {};
   FEAT.forEach(([k]) => { full[k] = stored[k] ? {status: stored[k].status, value: stored[k].value} : {status: 'unknown', value: null}; });
   const r = {repo, model: meta.model, arch: meta.arch, params_b: meta.params_b == null ? null : meta.params_b};
-  const dl = devlabMetrics(info);
+  const dl = cardMetrics(info);
   const vk = ((((info.performance || {}).baselines || {}).vulkan || {}).session || {}).metrics || {};
   TIMED.forEach((k) => {
     const ok = metricApplies(k, kind, full, info);
@@ -289,7 +285,7 @@ async function load() {
   if (mock) {
     MODELS = await fetchJSON(mock);
   } else {
-    try { await fetchJSON(HF + '/api/models?author=loom-fun&limit=1000'); } catch (e) { /* listing is advisory; the 50 repos are fixed */ }
+    try { await fetchJSON(HF + '/api/models?author=loom-fun&limit=1000'); } catch (e) { /* listing is advisory; the repos in repos.js are fixed */ }
     const res = await Promise.all(repos.map(async (repo) => {
       try { return rowFromInfo(repo, await fetchJSON(HF + '/' + repo + '/resolve/main/info.json')); }
       catch (e) { return {repo, error: e.message || String(e)}; }

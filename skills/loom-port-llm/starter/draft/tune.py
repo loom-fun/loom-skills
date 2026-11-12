@@ -98,7 +98,15 @@ def measure(url, model, chat, context=0, rows=1):
     return res
 
 
-def measure_c4(url, model, chat, rows):
+def measure_c4(url, model, chat, rows, repeats=3):
+    """Median of `repeats` measure_c4_once runs: one 256-token sample on a 0.5B model is a few hundred ms of decode and
+    swung +-10 % (Qwen2.5-0.5B: ngram depth 2 scored 1127 vs 1265 without drafting here, 1237 vs 1112 in same-runner
+    devlab-perf), enough to drop a drafter that wins every row."""
+    v = [measure_c4_once(url, model, chat, rows) for _ in range(repeats)]
+    return statistics.median(v) if all(v) else 0.0   # a failing run scores the candidate 0
+
+
+def measure_c4_once(url, model, chat, rows):
     """Aggregate decode tok/s of `rows` concurrent essay requests (the serving preset's rows, at most 4): a speculative
     span verifies depth + 1 tokens whatever the load, so 4 streams verify 4 x (depth + 1) tokens per step, and past 16
     the int8 matvecs give way to the GEMM (Muse-Glimmer: depth 5 gave 41.6 tok/s on 4 streams, depth 3 74.0, no
@@ -113,7 +121,7 @@ def measure_c4(url, model, chat, rows):
     def run(i):
         try:
             res[i] = stream(url, model, [{"role": "user", "content": f"[{time.time()} {i}] Write a very long, detailed essay about the history of lighthouses."}],
-                            256, extra=off, timeout=900)
+                            384, extra=off, timeout=900)
         except Exception:  # noqa: BLE001  a failing stream scores 0
             res[i] = None
     ts = [threading.Thread(target=run, args=(i,)) for i in range(n)]
