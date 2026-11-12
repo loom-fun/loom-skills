@@ -1,0 +1,69 @@
+// Global-layer KV scan, head_dim 512, 2 KV heads, 32768 keys: stride 2048 B, one key per wave
+amdgpu.target<gfx11-generic> @ex_wave32 {subgroup_size = 32}
+
+kernel.def target(@ex_wave32) @k_scan_s2048_paged() {
+  %c1 = index.constant 1 : index
+  %ckvh = index.constant 2 : index
+  %csplit = index.constant 64 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%ckvh, %csplit, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%arena_arg: buffer, %out_arg: buffer) {
+  %arena, %out = buffer.assume.noalias %arena_arg, %out_arg : buffer, buffer
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c512 = index.constant 512 : index
+  %kv_id = kernel.workgroup.id<x> : index
+  %kv = index.assume %kv_id [range(%kv_id, 0, 1)] : index
+  %split_id = kernel.workgroup.id<y> : index
+  %split = index.assume %split_id [range(%split_id, 0, 63)] : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, 7)] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %stride = index.constant 2048 : offset
+  %plane = index.constant 134217728 : offset
+  %kvoff = index.constant 1024 : offset
+  %kvbase = index.scale %kv, %kvoff : index, offset -> offset
+  %start = index.mul %split, %c512 : index
+  %end = index.add %start, %c512 : index
+  %zero_f = scalar.constant 0.0 : f32
+  %zero16 = vector.splat %zero_f : vector<16xf32>
+  %acc = scf.for %j = [%start to %end step %c8](%a = %zero16 : vector<16xf32>) -> (vector<16xf32>) {
+    %jk0 = index.add %j, %wave : index
+    %c16p = index.constant 16 : index
+    %pg = index.div %jk0, %c16p : index
+    %inpg = index.rem %jk0, %c16p : index
+    %pgs = index.add %pg, %c0 : index
+    %blk = index.constant 65536 : offset
+    %pgo = index.scale %pgs, %blk : index, offset -> offset
+    %ko0 = index.scale %inpg, %stride : index, offset -> offset
+    %kop = index.add %ko0, %pgo : offset
+
+    %kb0 = index.add %kop, %kvbase : offset
+    %kc0 = buffer.view %arena[%kb0] : buffer -> view<32x16xf16>
+    %kh0 = vector.load %kc0[%lane, %c0] : view<32x16xf16> -> vector<16xf16>
+    %kf0 = vector.extf %kh0 : vector<16xf16> to vector<16xf32>
+    %vb0 = index.add %kb0, %plane : offset
+    %vc0 = buffer.view %arena[%vb0] : buffer -> view<32x16xf16>
+    %vh0 = vector.load %vc0[%lane, %c0] : view<32x16xf16> -> vector<16xf16>
+    %vf0 = vector.extf %vh0 : vector<16xf16> to vector<16xf32>
+    %s0 = vector.addf %kf0, %vf0 : vector<16xf32>
+    %a0 = vector.addf %a, %s0 : vector<16xf32>
+    scf.yield %a0 : vector<16xf32>
+  }
+  %out_view = buffer.view %out[%zero] : buffer -> view<2x64x8x32x16xf32>
+  vector.store %acc, %out_view[%kv, %split, %wave, %lane, %c0] : vector<16xf32>, view<2x64x8x32x16xf32>
+  kernel.return
+}
+
+check.case public @scan_s2048_paged {
+  %arena = check.generate.fill value(0.5) : tensor<134217728xf16>
+  %out = check.generate.fill value(0.0) : tensor<524288xf32>
+  kernel.launch @k_scan_s2048_paged(%arena, %out) : (tensor<134217728xf16>, tensor<524288xf32>)
+  check.return
+}
+
+check.benchmark<@scan_s2048_paged> @scan_s2048_paged_bm

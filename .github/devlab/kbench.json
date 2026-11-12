@@ -5,10 +5,10 @@
    "suite": "scan",
    "dir": "scan",
    "files": [
-    "bench_s4096_red.loom",
-    "bench_s2048_red.loom",
     "bench_s4096_one.loom",
-    "bench_s2048_one.loom"
+    "bench_s2048_one.loom",
+    "bench_s2048_paged.loom",
+    "bench_s2048_pagedshuf.loom"
    ],
    "config": [],
    "args": [
