@@ -2630,7 +2630,7 @@ def gqa_split(text, P, S):
     sub("    %active_split = index.cmp ult, %split, %s_eff : index\n    scf.if %active_split {\n",
         f"    %active_split = index.cmp ult, %split_raw, %s_eff : index\n    scf.if %active_split {{\n    %split = index.assume %split_raw [range(%split_raw, 0, {S - 1})] : index\n")
     q0 = k.index("    %q_view = buffer.view %q[%zero]")
-    q1 = k.index("    }\n    }\n  }\n  kernel.return")
+    q1 = k.index("    }\n    }\n  }\n  kernel.return") + len("    }\n")   # keep the closers of the active-split and live blocks
     t = []
     t.append(f"""    %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
     %scale = scalar.constant 0.08838834764831845 : f32
