@@ -122,12 +122,11 @@
   {
    "repo": "loom-fun/unsloth-Qwen3.5-2B-loom",
    "slug": "qwen3.5-2b",
-   "memory_bytes": 9000000000,
+   "memory_bytes": 10000000000,
    "kit": null,
    "llamacpp": "b1369",
    "features": [
     "vision",
-    "draft",
     "thinking-toggle"
    ]
   },
