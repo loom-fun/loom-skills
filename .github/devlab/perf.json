@@ -1,12 +1,12 @@
 {
- "_comment": "Qwen3-Coder-30B-A3B decode attention (QH32 KVH4 G8 d128): #357 GQA kernel at kv4 + FROM threshold, keys-per-split. Rebuilds from this branch; ctl = GQA off.",
+ "_comment": "Qwen3-Coder attention: keys per split (2k) + GQA (32k); sibling kv8 check on Qwen3-4B-2507.",
  "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
  "memory_bytes": 57000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "gqa",
+   "name": "coder",
    "variants": [
     {
      "name": "ctl",
@@ -15,35 +15,62 @@
      }
     },
     {
+     "name": "kps48",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "48"
+     }
+    },
+    {
+     "name": "kps64",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "64"
+     }
+    },
+    {
+     "name": "kps96",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "96"
+     }
+    },
+    {
+     "name": "kps128",
+     "build": {
+      "ATTN_GQA": "0",
+      "ATTN_KPS": "128"
+     }
+    },
+    {
      "name": "gqa",
      "build": {}
     },
     {
-     "name": "gqa1k",
+     "name": "gqakps64",
      "build": {
-      "ATTN_GQA_FROM": "1024"
-     }
-    },
-    {
-     "name": "gqa256",
-     "build": {
-      "ATTN_GQA_FROM": "256"
+      "ATTN_KPS": "64"
      }
     }
    ],
    "steps": [
-    "perf:ctl:1",
-    "perf:gqa:1",
-    "perf:gqa1k:1",
-    "perf:gqa256:1",
+    "perf:ctl:2",
+    "perf:kps48:2",
+    "perf:kps64:2",
+    "perf:kps96:2",
+    "perf:kps128:2",
+    "perf:gqa:2",
+    "perf:gqakps64:2",
     "perf:ctl:1:long",
     "perf:gqa:1:long",
-    "perf:gqa1k:1:long",
-    "perf:gqa256:1:long"
+    "perf:gqakps64:1:long"
    ]
   },
   {
-   "name": "kps",
+   "name": "q4b",
+   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+   "memory_bytes": 55000000000,
+   "llamacpp": "b1368",
    "variants": [
     {
      "name": "ctl",
@@ -64,24 +91,12 @@
       "ATTN_GQA": "0",
       "ATTN_KPS": "128"
      }
-    },
-    {
-     "name": "kps256",
-     "build": {
-      "ATTN_GQA": "0",
-      "ATTN_KPS": "256"
-     }
     }
    ],
    "steps": [
-    "perf:ctl:1",
-    "perf:kps64:1",
-    "perf:kps128:1",
-    "perf:kps256:1",
-    "perf:ctl:1:long",
-    "perf:kps64:1:long",
-    "perf:kps128:1:long",
-    "perf:kps256:1:long"
+    "perf:ctl:2",
+    "perf:kps64:2",
+    "perf:kps128:2"
    ]
   }
  ]
