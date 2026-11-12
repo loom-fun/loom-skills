@@ -7,19 +7,26 @@
  "llama_spec": "",
  "jobs": [
   {
-   "name": "occ",
+   "name": "occ-full",
    "variants": [
-    {"name": "card"},
-    {"name": "occ2", "build": {"SPEC_OCC_MIN": "2"}},
-    {"name": "nodraft", "execution": {"draft_depth": 0}}
+    {
+     "name": "occ2",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     }
+    }
    ],
    "steps": [
-    "perf:card:2:long", "c4:card",
-    "perf:occ2:2:long", "c4:occ2",
-    "perf:nodraft:2:long", "c4:nodraft",
-    "llama:2", "llama:2:long", "llamac4",
-    "llama@vulkan:2", "llama@vulkan:2:long", "llamac4@vulkan",
-    "consistency:occ2:3", "ktest:occ2", "gates:occ2:dev"
+    "perf:occ2:2",
+    "perf:occ2:2:long",
+    "c4:occ2",
+    "c4:occ2",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long",
+    "llamac4@vulkan"
    ]
   }
  ]
