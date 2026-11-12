@@ -354,5 +354,12 @@ text = text.replace("  %tile_count = index.div %tokens, %c16 : index\n", consts 
 text = text.replace("  %partner = scalar.xori_index_placeholder\n", "")
 if os.environ.get("FLASH2_NAME"):
     text = text.replace(f"{P}_attention_flash2", os.environ["FLASH2_NAME"])
+import re as _re   # diagnostic (timing only), see perfgap flash2 notes
+if os.environ.get("FLASH2_OLD_PROLOGUE") == "1" and os.environ.get("FLASH2_ROLE") != "partial":
+    text = _re.sub(r"  %tiles_view = buffer.view %tiles.*?  %pos0_32 = view.load [^\n]*\n  scf.if %listed \{\n",
+                   "  %first_token = index.mul %tile, %c16 : index\n  %uniform, %row32, %pos0_32 = func.call @g_tile_uniform(%info, %tokens, %first_token) : (buffer, index, index) -> (i1, i32, i32)\n  scf.if %uniform {\n", text, count=1, flags=_re.S)
+if os.environ.get("FLASH2_DIRECT") == "1":
+    text = _re.sub(r"  %entry_slot_value = .*?\n  %entry = index.cast[^\n]*\n", "", text, flags=_re.S)
+    text = _re.sub(r"  %first_token = index.assume %entry [^\n]*\n", "  %first_token = index.mul %tile, %c16 : index\n", text)
 out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
 open(out_path, "w", newline="\n").write(text)
