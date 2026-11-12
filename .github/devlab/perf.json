@@ -8,9 +8,6 @@
  "jobs": [
   {
    "name": "sib",
-   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
-   "memory_bytes": 49000000000,
-   "llamacpp": "b1369",
    "variants": [
     {
      "name": "base",
@@ -35,17 +32,35 @@
      "execution": {
       "draft_depth": 0
      }
+    },
+    {
+     "name": "newr4",
+     "build": {
+      "MOE_R": "4"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "newf32",
+     "build": {
+      "MOE_Q8": "0"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
     "ab:20"
-   ]
+   ],
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
+   "memory_bytes": 49000000000,
+   "llamacpp": "b1369"
   },
   {
    "name": "sib2",
-   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
-   "memory_bytes": 49000000000,
-   "llamacpp": "b1369",
    "variants": [
     {
      "name": "base",
@@ -61,28 +76,41 @@
      "execution": {
       "draft_depth": 0
      }
-    }
-   ],
-   "steps": [
-    "ab:20"
-   ]
-  },
-  {
-   "name": "a30",
-   "variants": [
-    {
-     "name": "base",
-     "build": {},
-     "ref": "origin/main"
     },
     {
-     "name": "new",
-     "build": {}
+     "name": "newr8",
+     "build": {
+      "MOE_R": "8"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "newr4",
+     "build": {
+      "MOE_R": "4"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "newf32",
+     "build": {
+      "MOE_Q8": "0"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
     "ab:20"
-   ]
+   ],
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
+   "memory_bytes": 49000000000,
+   "llamacpp": "b1369"
   }
  ]
 }
