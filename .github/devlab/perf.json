@@ -29,46 +29,19 @@
    "steps": [
     "ktest:new",
     "gates:new:dev",
-    "consistency:new:2",
+    "consistency:new:3",
     "perf:old:1:long",
     "c4:old",
     "perf:new:1:long",
-    "c4:new",
-    "llama@vulkan:2:long",
-    "llamac4@vulkan"
-   ]
-  },
-  {
-   "name": "q35-08b",
-   "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
-   "memory_bytes": 9000000000,
-   "variants": [
-    {
-     "name": "old",
-     "build": {
-      "GDN_ROW_LANES": "8",
-      "GDN_COLS": "4",
-      "GDN_CONV_UNROLL": "4"
-     }
-    },
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:old:1:long",
-    "c4:old",
-    "perf:new:1:long",
-    "c4:new",
-    "perf:old:1:long",
-    "perf:new:1:long"
+    "c4:new"
    ]
   },
   {
    "name": "q35-9b",
    "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
    "memory_bytes": 30000000000,
+   "llamacpp": "b1369",
+   "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "old",
@@ -84,45 +57,21 @@
     }
    ],
    "steps": [
+    "ktest:new",
+    "gates:new:dev",
+    "consistency:new:3",
     "perf:old:1:long",
     "c4:old",
     "perf:new:1:long",
-    "c4:new",
-    "perf:old:1:long",
-    "perf:new:1:long"
-   ]
-  },
-  {
-   "name": "orn10-35b",
-   "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
-   "memory_bytes": 36000000000,
-   "variants": [
-    {
-     "name": "old",
-     "build": {
-      "GDN_ROW_LANES": "8",
-      "GDN_COLS": "4",
-      "GDN_CONV_UNROLL": "4"
-     }
-    },
-    {
-     "name": "new",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "perf:old:1:long",
-    "c4:old",
-    "perf:new:1:long",
-    "c4:new",
-    "perf:old:1:long",
-    "perf:new:1:long"
+    "c4:new"
    ]
   },
   {
    "name": "q35-35b",
    "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
    "memory_bytes": 49000000000,
+   "llamacpp": "b1369",
+   "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "old",
@@ -138,12 +87,13 @@
     }
    ],
    "steps": [
+    "ktest:new",
+    "gates:new:dev",
+    "consistency:new:3",
     "perf:old:1:long",
     "c4:old",
     "perf:new:1:long",
-    "c4:new",
-    "perf:old:1:long",
-    "perf:new:1:long"
+    "c4:new"
    ]
   }
  ]
