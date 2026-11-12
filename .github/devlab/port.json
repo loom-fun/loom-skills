@@ -1,7 +1,6 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Regenerate the Qwen3-Coder-30B-A3B card with the separate GQA decode kernel (per-head kernel keeps 113 VGPRs at 2k, GQA kernel from 4096 keys), gates full, tune scored against llama.cpp.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {"name": "q3-coder-regen2", "spec": "ggml-org/Qwen3-Coder-30B-A3B-Instruct-GGUF:Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf", "reference": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom", "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct"}
  ]
 }
