@@ -6,7 +6,7 @@
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "po",
+   "name": "sweep",
    "variants": [
     {
      "name": "b0",
@@ -25,40 +25,54 @@
      }
     },
     {
-     "name": "u16",
+     "name": "u8_dotf",
      "execution": {
       "draft_depth": 0
      },
      "build": {
-      "ATTN_UNROLL_512": "16"
+      "ATTN_UNROLL_512": "8",
+      "ATTN_DOTF": "1"
      }
     },
     {
-     "name": "po",
+     "name": "u8_ilp2",
      "execution": {
       "draft_depth": 0
      },
      "build": {
-      "ATTN_PAGE_OUTER": "1"
+      "ATTN_UNROLL_512": "8",
+      "ATTN_ILP": "2"
      }
     },
     {
-     "name": "po8",
+     "name": "u8_ilp4",
      "execution": {
       "draft_depth": 0
      },
      "build": {
-      "ATTN_PAGE_OUTER": "1",
-      "ATTN_UNROLL_512": "8"
+      "ATTN_UNROLL_512": "8",
+      "ATTN_ILP": "4"
      }
     },
     {
-     "name": "po_s128",
+     "name": "u8_s128",
      "execution": {
       "draft_depth": 0
      },
      "build": {
-      "ATTN_PAGE_OUTER": "1",
+      "ATTN_UNROLL_512": "8",
+      "ATTN_SPLITS": "128"
+     }
+    },
+    {
+     "name": "u8_dotf_ilp2_s128",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {
+      "ATTN_UNROLL_512": "8",
+      "ATTN_DOTF": "1",
+      "ATTN_ILP": "2",
       "ATTN_SPLITS": "128"
      }
     }
@@ -66,11 +80,12 @@
    "steps": [
     "perf:b0:1:long",
     "perf:u8:1:long",
-    "perf:u16:1:long",
-    "perf:po:1:long",
-    "perf:po8:1:long",
-    "perf:po_s128:1:long",
-    "ktest:po"
+    "perf:u8_dotf:1:long",
+    "perf:u8_ilp2:1:long",
+    "perf:u8_ilp4:1:long",
+    "perf:u8_s128:1:long",
+    "perf:u8_dotf_ilp2_s128:1:long",
+    "ktest:u8_dotf"
    ]
   }
  ]
