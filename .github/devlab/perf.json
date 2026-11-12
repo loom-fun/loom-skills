@@ -1,47 +1,14 @@
 {
- "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
- "memory_bytes": 55000000000,
+ "card": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom",
+ "memory_bytes": 70000000000,
  "kit": null,
- "llamacpp": "b1368",
+ "llamacpp": "b1370",
+ "llamacpp_vulkan": "b12211",
+ "llama_spec": "--spec-type ngram-simple",
  "jobs": [
-  {
-   "name": "gqa4",
-   "variants": [
-    {
-     "name": "base",
-     "build": {}
-    },
-    {
-     "name": "gqa",
-     "build": {
-      "ATTN_GQA": "1"
-     }
-    },
-    {
-     "name": "gqah",
-     "build": {
-      "ATTN_GQA": "1",
-      "ATTN_GQA_EXT": "head"
-     }
-    },
-    {
-     "name": "gqaoff",
-     "build": {
-      "ATTN_GQA": "1",
-      "ATTN_GQA_FROM": "1000000"
-     }
-    }
-   ],
-   "steps": [
-    "ktest:gqah",
-    "perf:base:3",
-    "perf:gqa:3",
-    "perf:gqah:3",
-    "perf:gqaoff:3",
-    "perf:gqah:2:long",
-    "c4:base",
-    "c4:gqah"
-   ]
-  }
+  {"name": "gqa-ab",
+   "variants": [{"name": "base", "build": {}, "execution": {"draft_depth": 0}},
+                {"name": "gqa", "build": {"ATTN_GQA": "1"}, "execution": {"draft_depth": 0}}],
+   "steps": ["perf:base:2:long", "c4:base", "perf:gqa:2:long", "c4:gqa", "llama:2:long", "llamac4", "llama@vulkan.nospec:2:long", "llamac4@vulkan.nospec", "consistency:gqa:2", "gates:gqa:dev"]}
  ]
 }
