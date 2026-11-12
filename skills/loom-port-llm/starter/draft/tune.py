@@ -6,8 +6,8 @@ Candidates: no drafting; MTP (the GGUF's NextN block) at depths 1-4; DFlash (cfg
 at depths 1, 2, 3, 5, 7 (capped by its block); a Gemma-4 assistant (cfg["assistant"]) at depths 1-4; n-gram prompt lookup (any model, no weights) at depths 1, 2, 3, 5. Each method
 is built once; a depth is only a model.json setting (the width-specialized stages compile on first use). Every
 candidate is served alone and timed on decode-heavy requests (short essay, code, a tool-call turn, a reasoning answer,
-a code edit that returns most of its input as agents' file edits do, and one decode after a 16k-token document, at most
-half the context; greedy, client-side tokens/s) and, with a multi-row preset, on `rows` concurrent essays (streams4).
+a code edit that returns most of its input as agents' file edits do, and one decode after the 32k-token document (the card's
+decode_32k row; the largest that fits a shorter context); greedy, client-side tokens/s) and, with a multi-row preset, on `rows` concurrent essays (streams4).
 Each candidate's margin is its worst row relative to depth 0. A drafter is used only if no row is slower than 0.98 x depth 0
 (prose, long-document and 4-stream decode are the card's headline rows: low-acceptance drafting loses 20-40 % there) and
 its single-stream rate (harmonic mean) beats no drafting by at least 3 %; the best margin wins; its kind/depth go to cfg["drafter"] and pkg/ is rebuilt with it
@@ -63,10 +63,13 @@ def sh(*cmd, **kw):
     return subprocess.run([str(c) for c in cmd], check=True, text=True, capture_output=True, **kw)
 
 
-# One decode request after a long document (TUNE_LONG tokens, at most half the context): each verified token pays its
-# decode attention over the whole KV and a drafter attends the context too, so the depth that wins on short text can
-# lose at long context (Qwen3-8B DFlash at 32k: depth 7 13.7 tok/s, depth 3 20.1, none 19.5). TUNE_LONG=0 leaves it out.
-LONG_CTX = int(os.environ.get("TUNE_LONG", "16000"))
+# One decode request after a long document (TUNE_LONG tokens, the card's decode_32k document when the context holds it plus
+# the 256-token reply and LONG_HEADROOM): each verified token pays its decode attention over the whole KV and a drafter
+# attends the context too, so the depth that wins on short text can lose at long context (Qwen3-8B DFlash at 32k: depth 7
+# 13.7 tok/s, depth 3 20.1, none 19.5). A 16k row hid the 32k loss: Qwen2.5-32B ngram depth 2 won 16k by 14 % and lost
+# decode_32k by 13 % (6.45 vs 7.43 tok/s without drafting, attention reads 8.6 GB of KV there). TUNE_LONG=0 leaves it out.
+LONG_CTX = int(os.environ.get("TUNE_LONG", "32000"))
+LONG_HEADROOM = 512
 
 
 # Rows that must not get slower: the card's headline decode, decode_32k and streams4 are prose, where an n-gram or
@@ -83,15 +86,15 @@ CTX_GATE = int(os.environ.get("TUNE_CTX_MAX", "3500"))
 
 def measure(url, model, chat, context=0, rows=1):
     """{row: decode tok/s} of the candidate being served: the WORK requests (work0..), the decode after a long
-    document ("long", at most half the context) and, with a multi-row preset, "streams4": the aggregate of `rows`
-    concurrent essays (measure_c4)."""
+    document ("long": the decode_32k document if the context holds it, else the largest that fits) and, with a
+    multi-row preset, "streams4": the aggregate of `rows` concurrent essays (measure_c4)."""
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
     # Warm-up: the first timed request's own shape, untimed (perf.py does the same). A 16-token request left the drafted
     # stages' first compiles inside work0: LFM3-Omni-2B scored 154 tok/s there at every n-gram depth against 169 without
     # drafting, where the same request after a full warm-up decodes 172 (card perf, depth 2) and the tuner dropped drafting.
     stream(url, model, WORK[0][0], 256, extra=off)
     work = [(f"work{i}", m, x) for i, (m, x) in enumerate(WORK)]
-    n = max((d for d in DOC_SIZES if d <= min(LONG_CTX, context // 2)), default=0)
+    n = max((d for d in DOC_SIZES if d <= min(LONG_CTX, context - LONG_HEADROOM)), default=0)
     if n >= 4000:
         work.append(("long", [{"role": "user", "content": "Write a long, detailed essay discussing this documentation.\n\n" + doc(n)}], {}))
     res = {}

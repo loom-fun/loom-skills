@@ -16,9 +16,9 @@
   {
    "repo": "loom-fun/unsloth-Muse-Glimmer-30B-loom",
    "slug": "muse-glimmer-30b",
-   "memory_bytes": 39000000000,
+   "memory_bytes": 44000000000,
    "kit": "glimmer",
-   "llamacpp": "b1355",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -87,7 +87,7 @@
    "slug": "qwen3.5-4b",
    "memory_bytes": 28000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -111,7 +111,7 @@
    "slug": "ornith-1.5-9b",
    "memory_bytes": 32000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -155,7 +155,7 @@
    "slug": "qwen3.6-35b-a3b",
    "memory_bytes": 48000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -177,9 +177,10 @@
    "slug": "qwen3.5-35b-a3b",
    "memory_bytes": 49000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
+    "draft",
     "thinking-toggle"
    ]
   },
@@ -289,7 +290,7 @@
    "slug": "llama-3.1-8b-instruct",
    "memory_bytes": 35000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "draft"
    ]
@@ -364,7 +365,8 @@
    "kit": null,
    "llamacpp": "b1373",
    "features": [
-    "vision"
+    "vision",
+    "draft"
    ]
   },
   {
@@ -381,7 +383,7 @@
   {
    "repo": "loom-fun/ggml-org-LFM3-Omni-2B-loom",
    "slug": "lfm3-omni-2b",
-   "memory_bytes": 9000000000,
+   "memory_bytes": 10000000000,
    "kit": "lfm2moe",
    "llamacpp": "b1370",
    "features": [
@@ -490,9 +492,9 @@
   {
    "repo": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
    "slug": "qwen3-coder-30b-a3b-instruct",
-   "memory_bytes": 56000000000,
+   "memory_bytes": 57000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": []
   },
   {
@@ -554,7 +556,7 @@
    "slug": "laguna-xs-2.1",
    "memory_bytes": 81000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": [
     "thinking-toggle"
    ]
