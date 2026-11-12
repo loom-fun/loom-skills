@@ -6,7 +6,7 @@
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "skA",
+   "name": "s_e_gu",
    "variants": [
     {
      "name": "base",
@@ -15,34 +15,99 @@
      }
     },
     {
-     "name": "s_e_gu",
+     "name": "x",
      "execution": {
       "draft_depth": 0
      },
      "skip": [
       "*:@g_moe_(gu|ggu)_q4_k_k2048[A-Za-z0-9_]*\\["
      ]
+    }
+   ],
+   "steps": [
+    "ab:6"
+   ]
+  },
+  {
+   "name": "s_e_dn",
+   "variants": [
+    {
+     "name": "base",
+     "execution": {
+      "draft_depth": 0
+     }
     },
     {
-     "name": "s_e_dn",
+     "name": "x",
      "execution": {
       "draft_depth": 0
      },
      "skip": [
       "*:@g_moe_(gdn|dn)_q5_k_k512[A-Za-z0-9_]*\\["
      ]
+    }
+   ],
+   "steps": [
+    "ab:6"
+   ]
+  },
+  {
+   "name": "s_comb",
+   "variants": [
+    {
+     "name": "base",
+     "execution": {
+      "draft_depth": 0
+     }
     },
     {
-     "name": "s_m_rest",
+     "name": "x",
      "execution": {
       "draft_depth": 0
      },
      "skip": [
-      "*:@g_moe_(route|route_tr_live|bucket|combine|combine_sorted|combine_sorted_lv|shared_gate_f32|shared_gate_f32_lv)\\["
+      "*:@g_moe_(combine|combine_sorted|combine_sorted_lv)\\["
      ]
+    }
+   ],
+   "steps": [
+    "ab:6"
+   ]
+  },
+  {
+   "name": "s_shg",
+   "variants": [
+    {
+     "name": "base",
+     "execution": {
+      "draft_depth": 0
+     }
     },
     {
-     "name": "s_mv",
+     "name": "x",
+     "execution": {
+      "draft_depth": 0
+     },
+     "skip": [
+      "*:@g_moe_shared_gate_f32[a-z_]*\\["
+     ]
+    }
+   ],
+   "steps": [
+    "ab:6"
+   ]
+  },
+  {
+   "name": "s_mv",
+   "variants": [
+    {
+     "name": "base",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "x",
      "execution": {
       "draft_depth": 0
      },
@@ -56,7 +121,7 @@
    ]
   },
   {
-   "name": "skB",
+   "name": "s_quant",
    "variants": [
     {
      "name": "base",
@@ -65,48 +130,81 @@
      }
     },
     {
-     "name": "s_norm",
-     "execution": {
-      "draft_depth": 0
-     },
-     "skip": [
-      "*:@g_post_add_norm[A-Za-z0-9_]*\\["
-     ]
-    },
-    {
-     "name": "s_gdn",
-     "execution": {
-      "draft_depth": 0
-     },
-     "skip": [
-      "*:@g_gdn_[a-z_]*\\["
-     ]
-    },
-    {
-     "name": "s_quant",
+     "name": "x",
      "execution": {
       "draft_depth": 0
      },
      "skip": [
       "*:@g_quant_q8\\["
      ]
+    }
+   ],
+   "steps": [
+    "ab:6"
+   ]
+  },
+  {
+   "name": "s_norm",
+   "variants": [
+    {
+     "name": "base",
+     "execution": {
+      "draft_depth": 0
+     }
     },
     {
-     "name": "s_attn",
+     "name": "x",
+     "execution": {
+      "draft_depth": 0
+     },
+     "skip": [
+      "*:@g_post_add_norm[A-Za-z0-9_]*\\["
+     ]
+    }
+   ],
+   "steps": [
+    "ab:6"
+   ]
+  },
+  {
+   "name": "s_gdn",
+   "variants": [
+    {
+     "name": "base",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "x",
+     "execution": {
+      "draft_depth": 0
+     },
+     "skip": [
+      "*:@g_gdn_[a-z_]*\\["
+     ]
+    }
+   ],
+   "steps": [
+    "ab:6"
+   ]
+  },
+  {
+   "name": "s_attn",
+   "variants": [
+    {
+     "name": "base",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "x",
      "execution": {
       "draft_depth": 0
      },
      "skip": [
       "*:@g_attention_[a-z0-9_]*\\["
-     ]
-    },
-    {
-     "name": "s_rowscale",
-     "execution": {
-      "draft_depth": 0
-     },
-     "skip": [
-      "*:@g_row_scale_f16[a-z_]*\\["
      ]
     }
    ],
