@@ -104,6 +104,17 @@ Nemotron-3.5-Bolt-E4B with the E4B assistant: acceptance equals llama.cpp's (dep
   Muse-Glimmer 6656) the decode matvec takes `mv_wide` (several 32-value groups per lane). The device plan copy marks speculative spans with flag bit 4 and the output
 credit in bits 8-15; plan word 4 holds the packed cursor (`encode_epoch`).
 
+## Occupancy gate (build_draft.py, `SPEC_OCC_MIN`, default 2; 0 = off)
+
+The host plans depth + 1 tokens for every speculative span every step, so four streams verify a padded 16-token epoch even
+at 3 % acceptance. `encode_epoch` therefore counts the speculative spans first; when ALL spans in the epoch are speculative
+and there are at least `SPEC_OCC_MIN` of them it clamps every span to its anchor, `@epoch` skips propose and runs the
+verify/advance/warm stage of the (s tokens, s spans) shape (the plain decode shape), and results publish as one token per
+span. One stream still drafts (decode and long context unchanged); multi-stream decode runs at the undrafted epoch size.
+The gate flag lives in control state (byte 1676, table at 1700): `encode_epoch` writes it and the same epoch's `@epoch` reads
+it. It needs a `(s, s)` shape for the span count (otherwise the gate stays off for that count). Because the gated c4 rate
+equals depth 0, tune.py's per-row margin keeps a drafter that wins single-stream without paying at four streams.
+
 ## Choosing the drafter and depth (`tune.py`, qualify.sh stage 0)
 
 Builds each available kind once at the full native context (build.py sizes each candidate's memory; a drafter adds
