@@ -6,7 +6,7 @@
    "spec": "bartowski/Ornith-1.5-122B-GGUF:Ornith-1.5-122B-Q4_K_M/Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf",
    "reference": "loom-fun/bartowski-Ornith-1.5-122B-loom",
    "model_id": "ornith-ai/Ornith-1.5-122B",
-   "env": {"MEMORY_GIB": "98"}
+   "env": {"MEMORY_GIB": "98", "TUNE_PRIOR": "0"}
   }
  ]
 }
