@@ -1,5 +1,5 @@
 {
- "_comment": "Nanbeige4.3-33B perf-gap diagnosis: published card programs vs rebuild from main (ngram d2, d1, d0) vs ROCm and Vulkan, same runner, active wait (not for merge).",
+ "_comment": "Nanbeige4.3-33B regenerated card (no drafting) vs ROCm and Vulkan, same runner, active wait; plus decode-attention GQA split (#357) A/B on the same base (not for merge).",
  "card": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
  "memory_bytes": 81000000000,
  "kit": null,
@@ -8,19 +8,18 @@
  "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "nb-a",
-   "variants": [
-    {"name": "card"},
-    {"name": "main", "build": {"PERFGAP": "1"}},
-    {"name": "d0", "build": {"PERFGAP": "1"}, "execution": {"draft_depth": 0}},
-    {"name": "d1", "build": {"PERFGAP": "1"}, "execution": {"draft_depth": 1}}
-   ],
-   "steps": ["perf:card:2", "perf:card:2:long", "perf:main:2", "perf:main:2:long", "perf:d0:2", "perf:d0:2:long", "perf:d1:2", "perf:d1:2:long", "c4:card", "c4:main", "c4:d0", "c4:d1"]
+   "name": "nb-card",
+   "variants": [{"name": "card"}],
+   "steps": ["perf:card:2", "perf:card:2:long", "c4:card", "llama:2", "llama:2:long", "llamac4", "llama@vulkan.np1.nospec:2", "llama@vulkan.np1.nospec:2:long", "llama@vulkan.np1:2:long", "llamac4@vulkan"]
   },
   {
-   "name": "nb-b",
-   "variants": [{"name": "card"}],
-   "steps": ["llama:2", "llama:2:long", "llamac4", "llama@vulkan.np1.nospec:2", "llama@vulkan.np1.nospec:2:long", "llama@vulkan.np1:2", "llama@vulkan.np1:2:long", "llamac4@vulkan"]
+   "name": "nb-gqa",
+   "variants": [
+    {"name": "card"},
+    {"name": "gqa", "ref": "c511ad1a5042900f2a735d52a95cc2f98595fda1", "build": {"ATTN_GQA": "1"}},
+    {"name": "nogqa", "ref": "c511ad1a5042900f2a735d52a95cc2f98595fda1", "build": {"ATTN_GQA": "0"}}
+   ],
+   "steps": ["ktest:gqa", "perf:gqa:2", "perf:gqa:2:long", "perf:nogqa:2:long", "perf:card:2:long", "c4:gqa", "c4:nogqa", "textmatch:gqa"]
   }
  ]
 }
