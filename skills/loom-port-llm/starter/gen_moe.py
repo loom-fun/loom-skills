@@ -143,6 +143,27 @@ def route_decode(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
   %prob = scalar.divf %lex_in, %lden : f32
   %score0 = scf.select %in_range, %prob, %removed : f32
 """
+    U = int(os.environ.get("MOE_ROUTE_U", "4"))   # experts per wave scored together: U independent weight loads in flight
+    assert EPW % U == 0
+    loads = "\n".join(load.replace("%wv", f"%wv{u}").replace("%e,", f"%ex{u},") for u in range(U))
+    rloop = f"""  %cU = index.constant {U} : index
+  scf.for %j = [%c0 to %cEPW step %cU] {{
+    %e_raw = index.add %e0, %j : index
+""" + "".join(f"""    %ex{u}_raw = index.add %e_raw, %c{u} : index
+    %ex{u} = index.assume %ex{u}_raw [range(%ex{u}_raw, 0, {E - 1})] : index
+""" for u in range(U)) + f"""    {", ".join(f"%part{u}" for u in range(U))} = scf.for %g = [%lane to %cHG step %c32]({", ".join(f"%acc{u} = %zero_f : f32" for u in range(U))}) -> ({", ".join("f32" for _ in range(U))}) {{
+      %bg = index.assume %g [range(%g, 0, {HG - 1})] : index
+      %xv = vector.load %x_view[%token, %bg, %c0] : view<[%tokens]x{HG}x32xf32> -> vector<32xf32>
+""" + loads + "\n" + "".join(f"""      %d{u} = vector.dotf<reassoc|contract> %wv{u}, %xv, %zero_f : vector<32xf32>, vector<32xf32>, f32
+      %nx{u} = scalar.addf %acc{u}, %d{u} : f32
+""" for u in range(U)) + f"""      scf.yield {", ".join(f"%nx{u}" for u in range(U))} : {", ".join("f32" for _ in range(U))}
+    }}
+""" + "".join(f"""    %logit{u} = kernel.subgroup.reduce<addf> %part{u} : f32
+""" for u in range(U)) + """    scf.if %first {
+""" + "".join(f"""      view.store %logit{u}, %lg_view[%ex{u}] : f32, view<{E}xf32>
+""" for u in range(U)) + """    }
+  }
+"""
     return f"""
 // Router: wave w scores experts w*{EPW}..; then thread e holds expert e and {KU} rounds of
 // workgroup reductions pick the top {KU} (ties: lowest index) of {GATE_NAME[gating]}{' + bias' if bias else ''}.
@@ -162,7 +183,7 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
-  %cHG = index.constant {HG} : index
+{"".join(f"  %c{u} = index.constant {u} : index" + chr(10) for u in range(2, U))}  %cHG = index.constant {HG} : index
   %cE = index.constant {E} : index
   %zero_f = scalar.constant 0.0 : f32
   %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
@@ -173,22 +194,7 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   %first = index.cmp eq, %lane, %c0 : index
   %cEPW = index.constant {EPW} : index
   %e0 = index.mul %wave, %cEPW : index
-  scf.for %j = [%c0 to %cEPW step %c1] {{
-    %e_raw = index.add %e0, %j : index
-    %e = index.assume %e_raw [range(%e_raw, 0, {E - 1})] : index
-    %part = scf.for %g = [%lane to %cHG step %c32](%acc = %zero_f : f32) -> (f32) {{
-      %bg = index.assume %g [range(%g, 0, {HG - 1})] : index
-      %xv = vector.load %x_view[%token, %bg, %c0] : view<[%tokens]x{HG}x32xf32> -> vector<32xf32>
-{load}
-      %d = vector.dotf<reassoc|contract> %wv, %xv, %zero_f : vector<32xf32>, vector<32xf32>, f32
-      %nx = scalar.addf %acc, %d : f32
-      scf.yield %nx : f32
-    }}
-    %logit = kernel.subgroup.reduce<addf> %part : f32
-    scf.if %first {{
-      view.store %logit, %lg_view[%e] : f32, view<{E}xf32>
-    }}
-  }}
+{rloop}
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %t0 = kernel.workitem.id<x> : index
   %tb = index.assume %t0 [range(%t0, 0, 255)] : index
@@ -526,20 +532,24 @@ def route(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     return route_decode(H, E, KU, gating, norm, bias, wty, scale) + route_prefill(H, E, KU, gating, norm, bias, wty, scale)
 
 
-def expert_mv(fmt, K, N, E, KU, R, mode, fused=False, bias=False, act=None):
+def expert_mv(fmt, K, N, E, KU, R, mode, fused=False, bias=False, act=None, iq=None):
     """mode 'gu': act[a] = silu(Wg[e] x[a/KU]) * Wu[e] x[a/KU]; mode 'dn': ys[a] = Wd[e] x[a].
     fmt "GATE+UP" ('gu'): gate and up weights in different formats, each with its own strides and dequant.
     fused ('gu'): one gate_up tensor passed as both weights, expert e's N gate rows then its N up rows.
     bias: per-expert output biases (gpt-oss ffn_{gate,up,down}_exps.bias, [E, N] f32) added before the activation;
-    act: the gate/up activation (see act_scalar)."""
+    act: the gate/up activation (see act_scalar).
+    iq: (iq_decode, iq_dot, iq_load) of gen_llm (ACT_Q8): the activation is read as int8 codes + (scale, code sum) written by
+    g_quant_q8 (layout: rows x groups x 32 int8, then rows x groups x (d, sum)) and contracted with the weight codes by
+    integer dot4, as llama.cpp's mul_mat_vec_q does for expert matvecs; kernel name g_moe_{mode}_{fmt}_q8_k{K}_r{R}."""
     fmt, _, fmt2 = fmt.partition("+")
+    assert iq is None or (not fmt2 and not bias), "int8 expert matvecs: one weight format, no biases"
     groups = K // 32
     lanes = (groups + 31) // 32 * 32
     waves = lanes // 32
     rb = row_bytes(fmt, K)
     eb = rb * N
     nw = 2 if mode == "gu" else 1
-    name = f"g_moe_{mode}_{fmt}{'_' + fmt2 if fmt2 else ''}{'_fused' if fused else ''}_k{K}_r{R}"
+    name = f"g_moe_{mode}_{fmt}{'_' + fmt2 if fmt2 else ''}{'_fused' if fused else ''}{'_q8' if iq else ''}_k{K}_r{R}"
     wargs = "%w: buffer, %w2: buffer" if nw == 2 else "%w: buffer"
     if bias:
         wargs += ", %bg: buffer, %bu: buffer" if nw == 2 else ", %bd: buffer"
@@ -589,10 +599,24 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %xr = index.assume %xr_v [lt(%xr_v, %xrows)] : index""")
     else:
         L.append("  %xr = index.assume %a [lt(%a, %tokens)] : index")
-    L.append(f"""  %x_view = buffer.view %x[%zero] : buffer -> view<[{xrows}]x{groups}x32xf32>
+    xview = (f"""  %xq_view = buffer.view %x[%zero] : buffer -> view<[{xrows}]x{groups}x8xi32>
+  %cK = index.constant {K} : index
+  %xm_bytes = index.cast %cK : index to offset
+  %xm_off = index.scale {xrows}, %xm_bytes : index, offset -> offset
+  %xm_view = buffer.view %x[%xm_off] : buffer -> view<[{xrows}]x{groups}x2xf32>
+  %zero32i8 = vector.constant 0 : vector<32xi8>
+  %zero1i = vector.constant 0 : vector<1xi32>""" if iq else f"""  %x_view = buffer.view %x[%zero] : buffer -> view<[{xrows}]x{groups}x32xf32>""")
+    L.append(f"""{xview}
   %row_base = index.mul %group_id, %rows_per : index
   %ok = index.cmp ult, %workitem, %groups_c : index""".replace("%groups_c", f"%cgroups"))
     L.insert(-1, f"  %cgroups = index.constant {groups} : index")
+    xload = (iq[2](0, "%ok", "%xr", groups, xrows) if iq else """  %xg = scf.if %ok -> (vector<32xf32>) {
+    %v = vector.load %x_view[%xr, %g, %c0] : view<[XROWS]xGROUPSx32xf32> -> vector<32xf32>
+    scf.yield %v : vector<32xf32>
+  } else {
+    scf.yield %zero32 : vector<32xf32>
+  }
+  %xs = vector.reduce<addf> %xg, %zero_f : vector<32xf32>, f32""".replace("XROWS", xrows).replace("GROUPS", str(groups)))
     L.append(f"""  %g_last = index.constant {groups - 1} : index
   %g_c = index.min %workitem, %g_last : index
   %g = index.assume %g_c [range(%g_c, 0, {groups - 1})] : index
@@ -600,13 +624,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %blk = index.div %g, %cgpb : index
   %within = index.rem %g, %cgpb : index
   %ba = index.scale %blk, %block_bytes : index, offset -> offset
-  %xg = scf.if %ok -> (vector<32xf32>) {{
-    %v = vector.load %x_view[%xr, %g, %c0] : view<[{xrows}]x{groups}x32xf32> -> vector<32xf32>
-    scf.yield %v : vector<32xf32>
-  }} else {{
-    scf.yield %zero32 : vector<32xf32>
-  }}
-  %xs = vector.reduce<addf> %xg, %zero_f : vector<32xf32>, f32
+{xload}
   %part_bytes = index.constant {waves * R * nw * 4} : offset
   %parts = buffer.alloca<workgroup> align(16) %part_bytes : buffer
   %pv = buffer.view %parts[%zero] : buffer -> view<{nw}x{waves}x{R}xf32>
@@ -639,7 +657,10 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
             o = "%o_u"
             L.append(f"""    %up_bytes = index.constant {eb} : offset
     %o_u = index.add %o, %up_bytes : offset""")
-        if fold and fw == "q4_k":
+        if iq:
+            L.append(iq[0](fw, wi, w, "%ok", o, within))
+            L.append(iq[1](fw, wi, 0, f"%d{wi}"))
+        elif fold and fw == "q4_k":
             L.append(f"""    %wv{wi}, %sc{wi}, %mn{wi} = scf.if %ok -> (vector<32xf32>, f32, f32) {{
       %v, %sa, %sb = func.call @g_q4_k_codes(%{w}, {o}, {within}) : (buffer, offset, index) -> (vector<32xf32>, f32, f32)
       scf.yield %v, %sa, %sb : vector<32xf32>, f32, f32
