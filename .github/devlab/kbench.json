@@ -2,13 +2,13 @@
  "repeats": 5,
  "suites": [
   {
-   "suite": "f2ndeep",
-   "dir": "f2ndeep",
+   "suite": "f2odeep",
+   "dir": "f2odeep",
    "files": [
     "bench_pre.loom",
     "bench_main.loom",
-    "bench_dead.loom",
-    "bench_deadedge.loom"
+    "bench_nomask.loom",
+    "bench_e1.loom"
    ],
    "config": [],
    "args": [
@@ -18,13 +18,13 @@
    ]
   },
   {
-   "suite": "f2nslide",
-   "dir": "f2nslide",
+   "suite": "f2oslide",
+   "dir": "f2oslide",
    "files": [
     "bench_pre.loom",
     "bench_main.loom",
-    "bench_dead.loom",
-    "bench_deadedge.loom"
+    "bench_nomask.loom",
+    "bench_e1.loom"
    ],
    "config": [],
    "args": [
@@ -34,13 +34,13 @@
    ]
   },
   {
-   "suite": "f2nshallow",
-   "dir": "f2nshallow",
+   "suite": "f2oshallow",
+   "dir": "f2oshallow",
    "files": [
     "bench_pre.loom",
     "bench_main.loom",
-    "bench_dead.loom",
-    "bench_deadedge.loom"
+    "bench_nomask.loom",
+    "bench_e1.loom"
    ],
    "config": [],
    "args": [

@@ -511,7 +511,8 @@ kernel.def export("k_flash2") @k_flash2(%tokens: index) {
     %nb_live0 = scalar.xori %nb_dead0, %true_const : i1
     %nb_diag_live0 = scalar.andi %nb_diag0, %nb_live0 : i1
     %nb_edge0 = scalar.andi %nb_wins0, %nb_live0 : i1
-    %need0 = scalar.ori %nb_diag_live0, %nb_edge0 : i1
+    %nb_never0 = scalar.constant false : i1
+    %need0 = scalar.andi %nb_diag_live0, %nb_never0 : i1
     %on0_0, %on1_0, %on2_0, %on3_0, %on4_0, %on5_0, %on6_0, %on7_0 = scf.if %need0 -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
       %ac0_0 = scf.for %mc_0_0 = [%c0 to %c16 step %c1](%acc0_0 = %os0 : vector<8xf32>) -> (vector<8xf32>) {
         %mci0_0 = index.cast %mc_0_0 : index to i32
@@ -693,7 +694,8 @@ kernel.def export("k_flash2") @k_flash2(%tokens: index) {
     %nb_live1 = scalar.xori %nb_dead1, %true_const : i1
     %nb_diag_live1 = scalar.andi %nb_diag1, %nb_live1 : i1
     %nb_edge1 = scalar.andi %nb_wins1, %nb_live1 : i1
-    %need1 = scalar.ori %nb_diag_live1, %nb_edge1 : i1
+    %nb_never1 = scalar.constant false : i1
+    %need1 = scalar.andi %nb_diag_live1, %nb_never1 : i1
     %on0, %on1, %on2, %on3, %on4, %on5, %on6, %on7 = scf.if %need1 -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
       %ac0_1 = scf.for %mc_0_1 = [%c0 to %c16 step %c1](%acc0_1 = %on0_0 : vector<8xf32>) -> (vector<8xf32>) {
         %mci0_1 = index.cast %mc_0_1 : index to i32
@@ -1395,7 +1397,8 @@ kernel.def export("k_flash2_partial") @k_flash2_partial(%tokens: index) {
     %nb_live0 = scalar.xori %nb_dead0, %true_const : i1
     %nb_diag_live0 = scalar.andi %nb_diag0, %nb_live0 : i1
     %nb_edge0 = scalar.andi %nb_wins0, %nb_live0 : i1
-    %need0 = scalar.ori %nb_diag_live0, %nb_edge0 : i1
+    %nb_never0 = scalar.constant false : i1
+    %need0 = scalar.andi %nb_diag_live0, %nb_never0 : i1
     %on0_0, %on1_0, %on2_0, %on3_0, %on4_0, %on5_0, %on6_0, %on7_0 = scf.if %need0 -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
       %ac0_0 = scf.for %mc_0_0 = [%c0 to %c16 step %c1](%acc0_0 = %os0 : vector<8xf32>) -> (vector<8xf32>) {
         %mci0_0 = index.cast %mc_0_0 : index to i32
@@ -1577,7 +1580,8 @@ kernel.def export("k_flash2_partial") @k_flash2_partial(%tokens: index) {
     %nb_live1 = scalar.xori %nb_dead1, %true_const : i1
     %nb_diag_live1 = scalar.andi %nb_diag1, %nb_live1 : i1
     %nb_edge1 = scalar.andi %nb_wins1, %nb_live1 : i1
-    %need1 = scalar.ori %nb_diag_live1, %nb_edge1 : i1
+    %nb_never1 = scalar.constant false : i1
+    %need1 = scalar.andi %nb_diag_live1, %nb_never1 : i1
     %on0, %on1, %on2, %on3, %on4, %on5, %on6, %on7 = scf.if %need1 -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
       %ac0_1 = scf.for %mc_0_1 = [%c0 to %c16 step %c1](%acc0_1 = %on0_0 : vector<8xf32>) -> (vector<8xf32>) {
         %mci0_1 = index.cast %mc_0_1 : index to i32
