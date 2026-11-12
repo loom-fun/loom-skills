@@ -1,6 +1,0 @@
-{
- "_comment": "Regenerate the Qwen3-4B-Instruct-2507 card with the GQA decode attention kernel (PR #357), gates full.",
- "jobs": [
-  {"name": "q3-4b-2507-gqa", "spec": "unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "reference": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom", "model_id": "Qwen/Qwen3-4B-Instruct-2507"}
- ]
-}
