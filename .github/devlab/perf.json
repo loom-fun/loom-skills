@@ -22,15 +22,29 @@
      "build": {
       "SPEC_OCC_MIN": "2"
      }
+    },
+    {
+     "name": "ctx",
+     "build": {
+      "SPEC_OCC_MIN": "2",
+      "SPEC_CTX_MAX": "3500"
+     }
     }
    ],
    "steps": [
     "perf:card:3",
     "perf:occ0:3",
     "perf:occ2:3",
+    "perf:ctx:3",
     "perf:card:3",
     "perf:occ0:3",
-    "perf:occ2:3"
+    "perf:occ2:3",
+    "perf:ctx:3",
+    "c4:occ0",
+    "c4:occ2",
+    "c4:ctx",
+    "consistency:ctx:3",
+    "gates:ctx:dev"
    ]
   }
  ]
