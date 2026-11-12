@@ -474,7 +474,7 @@ def main():
         # 0.982, decode 88.9 vs 63.4).
         base_geo = geomean_margin(base_rows, base_rows, llama_refs)
         ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor) or (
-            r["margin"] >= (1 + NO_LOSS) / 2 * floor and geomean_margin(r["rows"], base_rows, llama_refs) >= 1.05 * base_geo)
+            floor < 1.0 and r["margin"] >= (1 + NO_LOSS) / 2 * floor and geomean_margin(r["rows"], base_rows, llama_refs) >= 1.05 * base_geo)
     else:
         ok_margin = lambda r: r["margin"] >= NO_LOSS
     ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
