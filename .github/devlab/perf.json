@@ -1,5 +1,5 @@
 {
- "_comment": "MiniCPM-V-4.7 decode with active wait (devlab-perf-source merged).",
+ "_comment": "GDN knob defaults A/B on qwen35 siblings (active wait).",
  "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
  "memory_bytes": 36000000000,
  "kit": null,
@@ -7,25 +7,13 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "act",
+   "name": "q35-08b",
+   "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
+   "memory_bytes": 9000000000,
    "variants": [
     {
-     "name": "card"
-    },
-    {
-     "name": "def",
+     "name": "base",
      "build": {}
-    },
-    {
-     "name": "best",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     }
     },
     {
      "name": "gdn",
@@ -34,317 +22,96 @@
       "GDN_COLS": "2",
       "GDN_CONV_UNROLL": "8"
      }
-    },
-    {
-     "name": "moe",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8"
-     }
     }
    ],
    "steps": [
-    "perf:card:1:long",
-    "perf:def:1:long",
-    "perf:best:1:long",
+    "perf:base:1:long",
+    "c4:base",
     "perf:gdn:1:long",
-    "perf:moe:1:long",
-    "llama:2:long",
-    "llama@vulkan:2:long"
+    "c4:gdn",
+    "perf:base:1:long",
+    "perf:gdn:1:long"
    ]
   },
   {
-   "name": "actabl",
+   "name": "q35-9b",
+   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "memory_bytes": 30000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "base",
+     "build": {}
     },
     {
-     "name": "best",
+     "name": "gdn",
      "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
       "GDN_ROW_LANES": "16",
       "GDN_COLS": "2",
       "GDN_CONV_UNROLL": "8"
      }
-    },
-    {
-     "name": "d-qkv",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:g_mv_q8_0_k2048_q8_r2\\b"
-     ]
-    },
-    {
-     "name": "d-z",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:g_mv_q8_0_k2048_q8_r1\\b"
-     ]
-    },
-    {
-     "name": "d-out",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:g_mv_q8_0_k4096_q8_r1\\b"
-     ]
-    },
-    {
-     "name": "d-shdn",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:g_mv_q8_0_k512_q8_r1\\b"
-     ]
-    },
-    {
-     "name": "d-shgu",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:g_mv_q8_0_k2048_swiglu_q8_r1\\b"
-     ]
-    },
-    {
-     "name": "d-route",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:@g_moe_route\\b"
-     ]
-    },
-    {
-     "name": "d-gu",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:@g_moe_gu_\\w+_r4\\b"
-     ]
-    },
-    {
-     "name": "d-dn",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:@g_moe_dn_\\w+_r4\\b"
-     ]
-    },
-    {
-     "name": "d-head",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:@g_head_mv_q8\\b"
-     ]
-    },
-    {
-     "name": "d-recur",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:g_gdn_recurrence\\b"
-     ]
-    },
-    {
-     "name": "d-conv",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:g_gdn_conv\\b|g_gdn_conv_commit\\b"
-     ]
-    },
-    {
-     "name": "d-gnorm",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:g_gdn_norm_gate\\b|g_gdn_qk_norm\\b"
-     ]
-    },
-    {
-     "name": "d-quant",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:@g_quant_q8\\b"
-     ]
-    },
-    {
-     "name": "d-pan",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:@g_post_add_norm\\b"
-     ]
-    },
-    {
-     "name": "d-sgate",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:@g_moe_shared_gate_f32\\b"
-     ]
-    },
-    {
-     "name": "d-comb",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:@g_moe_combine\\b"
-     ]
-    },
-    {
-     "name": "d-ab",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:g_mv_f32_k2048_r1\\b"
-     ]
-    },
-    {
-     "name": "d-attn",
-     "build": {
-      "MOE_R": "4",
-      "MOE_ROUTE_U": "8",
-      "MV_CHUNK": "8",
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     },
-     "double": [
-      "*:g_attention|g_qk_rope_store"
-     ]
     }
    ],
    "steps": [
-    "perf:card:1",
-    "perf:best:1",
-    "perf:d-qkv:1",
-    "perf:d-z:1",
-    "perf:d-out:1",
-    "perf:d-shdn:1",
-    "perf:d-shgu:1",
-    "perf:d-route:1",
-    "perf:d-gu:1",
-    "perf:d-dn:1",
-    "perf:d-head:1",
-    "perf:d-recur:1",
-    "perf:d-conv:1",
-    "perf:d-gnorm:1",
-    "perf:d-quant:1",
-    "perf:d-pan:1",
-    "perf:d-sgate:1",
-    "perf:d-comb:1",
-    "perf:d-ab:1",
-    "perf:d-attn:1",
-    "llama@vulkan:2"
+    "perf:base:1:long",
+    "c4:base",
+    "perf:gdn:1:long",
+    "c4:gdn",
+    "perf:base:1:long",
+    "perf:gdn:1:long"
+   ]
+  },
+  {
+   "name": "orn10-35b",
+   "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
+   "memory_bytes": 36000000000,
+   "variants": [
+    {
+     "name": "base",
+     "build": {}
+    },
+    {
+     "name": "gdn",
+     "build": {
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     }
+    }
+   ],
+   "steps": [
+    "perf:base:1:long",
+    "c4:base",
+    "perf:gdn:1:long",
+    "c4:gdn",
+    "perf:base:1:long",
+    "perf:gdn:1:long"
+   ]
+  },
+  {
+   "name": "q35-35b",
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
+   "memory_bytes": 49000000000,
+   "variants": [
+    {
+     "name": "base",
+     "build": {}
+    },
+    {
+     "name": "gdn",
+     "build": {
+      "GDN_ROW_LANES": "16",
+      "GDN_COLS": "2",
+      "GDN_CONV_UNROLL": "8"
+     }
+    }
+   ],
+   "steps": [
+    "perf:base:1:long",
+    "c4:base",
+    "perf:gdn:1:long",
+    "c4:gdn",
+    "perf:base:1:long",
+    "perf:gdn:1:long"
    ]
   }
  ]
