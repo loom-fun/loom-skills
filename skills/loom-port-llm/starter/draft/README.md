@@ -115,6 +115,8 @@ The gate flag lives in control state (byte 1676, table at 1700): `encode_epoch` 
 it. It needs a `(s, s)` shape for the span count (otherwise the gate stays off for that count). Because the gated c4 rate
 equals depth 0, tune.py's per-row margin keeps a drafter that wins single-stream without paying at four streams.
 
+A gated epoch verifies its anchors as ordinary known spans in a separate verify stage per `(s, s)` shape (`llm.gated` 1, id packed with the shape index in the gate flag): the speculative flag and credit are not set on the device plan, and the stage skips the recurrent-state capture and the replay (every gated delta-net layer would otherwise run its conv and recurrence twice). Qwen3.5-9B four streams: gate 139.8 vs depth 0 142.8 tok/s (was 130.2).
+
 Context gate (`SPEC_CTX_MAX` or `cfg["drafter"]["ctx_max"]`, default 0 = off): `encode_epoch` also gates an epoch (all spans
 speculative) whose deepest span's causal position (plan word 1) is >= ctx_max, through the same anchor-only path, because
 verifying depth + 1 tokens per span costs depth + 1 attention passes over the whole context (Ornith-1.5-35B depth 3: short
