@@ -5396,7 +5396,17 @@ if __name__ == "__main__":
             os.remove(hcfg)
     parts.append(program)
     text = "\n".join(parts)
-    if "_attention_flash2_partial\")" in text:   # the blocks a run covers in part: their kernel after each launch
+    if "_attention_flash2_partial\")" in text and os.environ.get("FLASH2_PARTIAL_AT") == "after_combine":   # experiment
+        out_, pend = [], None
+        for ln in text.split("\n"):
+            out_.append(ln)
+            m_ = re.match(r"^( *)kernel\.launch @(\w+)_attention_flash2(_h\d+)?\[(.*)$", ln)
+            if m_:
+                pend = f"{m_.group(1)}kernel.launch @{m_.group(2)}_attention_flash2_partial{m_.group(3) or ''}[{m_.group(4)}"
+            elif pend and re.match(r"^ *kernel\.launch @\w+_attention_combine_listed", ln):
+                out_.append(pend); pend = None
+        text = "\n".join(out_)
+    elif "_attention_flash2_partial\")" in text:   # the blocks a run covers in part: their kernel after each launch
         text = re.sub(r"^( *)kernel\.launch @(\w+)_attention_flash2(_h\d+)?\[(.*)$",
                       r"\g<0>\n\1kernel.launch @\2_attention_flash2_partial\3[\4",
                       text, flags=re.M)
