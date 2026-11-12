@@ -6,108 +6,7 @@
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "q4g2",
-   "card": "loom-fun/ggml-org-Qwen3-4B-loom",
-   "memory_bytes": 30000000000,
-   "llamacpp": "b1369",
-   "variants": [
-    {
-     "name": "ga",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     }
-    },
-    {
-     "name": "gv",
-     "build": {
-      "SPEC_GATE_VERIFY": "1"
-     }
-    },
-    {
-     "name": "d0",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "gates:ga:dev"
-   ]
-  },
-  {
-   "name": "m35",
-   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
-   "memory_bytes": 40000000000,
-   "llamacpp": "b1369",
-   "variants": [
-    {
-     "name": "ga",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     }
-    },
-    {
-     "name": "gv",
-     "build": {
-      "SPEC_GATE_VERIFY": "1"
-     }
-    },
-    {
-     "name": "d0",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "c4:ga",
-    "c4:d0",
-    "c4:gv",
-    "perf:ga:2",
-    "perf:d0:2",
-    "consistency:ga:2"
-   ]
-  },
-  {
-   "name": "m35g",
-   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
-   "memory_bytes": 40000000000,
-   "llamacpp": "b1369",
-   "variants": [
-    {
-     "name": "ga",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     }
-    },
-    {
-     "name": "gv",
-     "build": {
-      "SPEC_GATE_VERIFY": "1"
-     }
-    },
-    {
-     "name": "d0",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "gates:ga:dev"
-   ]
-  },
-  {
-   "name": "q9c",
+   "name": "q9t",
    "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
    "memory_bytes": 20000000000,
    "llamacpp": "b1369",
@@ -132,20 +31,48 @@
      "execution": {
       "draft_depth": 0
      }
+    }
+   ],
+   "steps": [
+    "transition:d0",
+    "transition:ga:d0",
+    "transition:gv:d0",
+    "transition:ga:gv"
+   ]
+  },
+  {
+   "name": "m35t",
+   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
+   "memory_bytes": 40000000000,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "ga",
+     "build": {
+      "SPEC_GATE_VERIFY": "0"
+     }
     },
     {
-     "name": "gc",
+     "name": "gv",
      "build": {
-      "SPEC_GATE_VERIFY": "0",
-      "SPEC_CTX_MAX": "3500"
+      "SPEC_GATE_VERIFY": "1"
+     }
+    },
+    {
+     "name": "d0",
+     "build": {
+      "SPEC_GATE_VERIFY": "0"
+     },
+     "execution": {
+      "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "perf:ga:2:long",
-    "perf:gc:2:long",
-    "perf:d0:2:long",
-    "consistency:gc:2"
+    "transition:d0",
+    "transition:ga:d0",
+    "transition:gv:d0",
+    "transition:ga:gv"
    ]
   }
  ]

@@ -45,6 +45,7 @@
 #          step), .perslot 4 slots of 36864, .nospec no drafting; files perf_llamacpp-vulkan.np1.nospec_nN.jsonl)
 #          textmatch:V          text_match.py: first 50 tokens of perf.py's prompts on V, then on llama.cpp
 #          consistency:V:N      consistency.py N times (NOT DETERMINISTIC / concurrent mismatch counts)
+#          transition:V[:REF]   transition.py: 4 requests of different lengths (4 -> 1 streams), texts vs variant REF's
 #          determinism:V:C:R    determinism.py (issue #39's script, when present)
 #          ktest:V              make_kernel_tests.py + run_kernel_tests.sh with V's kit
 #          gates:V:LEVEL        gates.sh against llama.cpp
@@ -328,6 +329,11 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', ro
       done
       "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
       res[$s]="PASS $np/$p2, nondeterministic $nd/$p2, concurrent near-tie divergences $nc/$p2";;
+    transition)   # transition:V[:REF]: 4 requests of different lengths (4 -> 1 streams); texts compared to variant REF's
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "transition $p1 ${p2:+vs $p2}"
+      "$T" "$B/transition.py" "$url" --model "$cardid" --out "$out/transition_$p1.json" ${p2:+--ref "$out/transition_$p2.json"} | tee "$out/transition_$p1.log"
+      res[$s]=$(grep -E "^(TRANSITION|lengths)" "$out/transition_$p1.log" | tr '\n' ' ' | cut -c1-200);;
     determinism)
       [ -f "$B/determinism.py" ] || { res[$s]="no determinism.py"; continue; }
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
