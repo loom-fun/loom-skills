@@ -830,9 +830,9 @@ if cfg.get("recurrent_layers"):
 }}
 """)
 # 4b. g_gdn_recurrence alone on one launch of two spans: a fresh 37-token span (position 0) and a 5-token span that
-# continues its reader slot (odd lengths: partial output batches; each span's own reader/writer slots).
+# continues its reader slot, plus a 70-token span that runs in the prefill-form kernel (odd lengths: partial output batches; each span's own reader/writer slots).
 if cfg.get("recurrent_layers"):
-    spans_ = [(37, 0, False), (5, 10, True)]; t = sum(L for L, _, _ in spans_); ns = len(spans_)
+    spans_ = [(37, 0, False), (70, 0, False), (5, 10, True)]; t = sum(L for L, _, _ in spans_); ns = len(spans_)
     x = rng.standard_normal((t, C)).astype(np.float32)
     qs, ks, vs = x[:, :HK * DK].reshape(t, HK, DK), x[:, HK * DK:2 * HK * DK].reshape(t, HK, DK), x[:, 2 * HK * DK:].reshape(t, HV, DV)
     qinv = 1 / np.sqrt((qs.astype(np.float64) ** 2).sum(-1) + eps); kinv = 1 / np.sqrt((ks.astype(np.float64) ** 2).sum(-1) + eps)
@@ -861,6 +861,8 @@ if cfg.get("recurrent_layers"):
                  ("gr_x", x), ("gr_inv", inv), ("gr_alpha", alpha), ("gr_beta", beta), ("gr_raw", raw_o.reshape(t, VD).astype(np.float32))]:
         save(n, a)
     AT = f"tensor<{2 * ns * LB // 4}xf32>"; MT = f"tensor<{4 + 9 * ns}xi32>"; OT = f"tensor<{10 * ns}xi32>"
+    from gen_gdn import gdn_geometry as _gg, recurrence_pf as _rpf
+    PF_LAUNCH = f'\n  kernel.launch @g_gdn_recurrence_pf[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x, %inv, %alpha, %beta, %a, %dt, %raw) : [index](index, index, index, {MT}, {OT}, {AT}, tensor<{t}x{C}xf32>, tensor<{t}x{2 * HK}xf32>, tensor<{t}x{HV}xf32>, tensor<{t}x{HV}xf32>, tensor<{HV}xf32>, tensor<{HV}xf32>, tensor<{t}x{VD}xf32>)' if _rpf(_gg(cfg)) else ""
     cases.append(f"""check.case public @gdn_recurrence_spans {{
   %t = check.literal value({t}) : index
   %spans = check.literal value({ns}) : index
@@ -877,7 +879,7 @@ if cfg.get("recurrent_layers"):
   %dt = check.file.read.npy path("g_dt.npy") : tensor<{HV}xf32>
   %eraw = check.file.read.npy path("gr_raw.npy") : tensor<{t}x{VD}xf32>
   %raw = check.generate.fill value(0.0) : tensor<{t}x{VD}xf32>
-  kernel.launch @g_gdn_recurrence[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x, %inv, %alpha, %beta, %a, %dt, %raw) : [index](index, index, index, {MT}, {OT}, {AT}, tensor<{t}x{C}xf32>, tensor<{t}x{2 * HK}xf32>, tensor<{t}x{HV}xf32>, tensor<{t}x{HV}xf32>, tensor<{HV}xf32>, tensor<{HV}xf32>, tensor<{t}x{VD}xf32>)
+  kernel.launch @g_gdn_recurrence[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x, %inv, %alpha, %beta, %a, %dt, %raw) : [index](index, index, index, {MT}, {OT}, {AT}, tensor<{t}x{C}xf32>, tensor<{t}x{2 * HK}xf32>, tensor<{t}x{HV}xf32>, tensor<{t}x{HV}xf32>, tensor<{HV}xf32>, tensor<{HV}xf32>, tensor<{t}x{VD}xf32>){PF_LAUNCH}
   check.expect.close actual(%raw) expected(%eraw) atol(1.0e-4) rtol(2.0e-3) nan(different) : tensor<{t}x{VD}xf32>
   check.expect.close actual(%arena) expected(%expect) atol(1.0e-4) rtol(1.0e-3) nan(different) : {AT}
   check.return
