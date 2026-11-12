@@ -1,60 +1,56 @@
 {
- "_comment": "Active-wait re-measure: Qwen3.8-Flash-Next and Qwen3.5-0.8B (regenerated) (other cards: runs 43033815593, 43075216088, 43106368506).",
+ "_comment": "perf-gap qwen35 9B: occupancy gate on/off vs published card, active wait, same-runner llama.cpp.",
+ "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+ "memory_bytes": 30000000000,
+ "kit": null,
+ "llamacpp": "b1369",
+ "llamacpp_vulkan": "b12211",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 5 -ngld 99",
  "jobs": [
   {
-   "name": "unsloth-Qwen3.8-Flash-Next",
-   "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
-   "memory_bytes": 100000000000,
-   "kit": "qwen4exp",
-   "llamacpp": "b1371",
-   "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
+   "name": "gate",
    "variants": [
     {
      "name": "card"
     },
     {
-     "name": "parked",
-     "active_wait": false
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "unsloth-Qwen3.5-0.8B",
-   "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
-   "memory_bytes": 9000000000,
-   "kit": null,
-   "llamacpp": "b1369",
-   "llama_spec": "--spec-type ngram-simple",
-   "variants": [
-    {
-     "name": "card"
+     "name": "g3",
+     "execution": {
+      "draft_depth": 3
+     },
+     "ref": "origin/main"
     },
     {
-     "name": "parked",
-     "active_wait": false
+     "name": "o0",
+     "build": {
+      "SPEC_OCC_MIN": "0"
+     },
+     "execution": {
+      "draft_depth": 3
+     },
+     "ref": "origin/main"
+    },
+    {
+     "name": "d0",
+     "execution": {
+      "draft_depth": 0
+     },
+     "ref": "origin/main"
     }
    ],
    "steps": [
-    "perf:card:2",
     "perf:card:2:long",
     "c4:card",
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
+    "perf:g3:2:long",
+    "c4:g3",
+    "perf:o0:2:long",
+    "c4:o0",
+    "perf:d0:2:long",
+    "c4:d0",
+    "llama:1:long",
+    "llamac4",
+    "llama@vulkan.np1.nospec:1:long",
+    "llamac4@vulkan.nospec"
    ]
   }
  ]
