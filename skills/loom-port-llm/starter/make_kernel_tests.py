@@ -639,8 +639,10 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
     ZB_DECL = "".join(f"  %zb{p} = check.generate.fill value(0.0) : tensor<{BW[p]}xf32>\n" for p in BIAS)
     ZB_ARGS = "".join(f", %zb{p}" for p in BIAS)
     def st(tt, pre):
-        return (f"  kernel.launch @g_qk_rope_store[%{pre}t](%{pre}t, %layer, %rope, %ctx, %pool, %{pre}q, %{pre}k, %{pre}v, %qn, %kn, %{pre}info, %orig, %arena{ZB_ARGS}) : "
-                f"[index](index, index, i32, index, index, tensor<{tt}x{QD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{tt}x4xi32>, tensor<{10 + blocks}xi32>, {AR}{B_TYPES})\n")
+        mr = (f"  %{pre}mr_meta = check.file.read.npy path(\"mr_meta.npy\") : tensor<16xi32>\n  %{pre}mr_ids = check.generate.fill value(0) : tensor<{tt * 8}xi32>\n" if MR else "")
+        mra = f", %{pre}mr_meta, %{pre}mr_ids" if MR else ""
+        return (mr + f"  kernel.launch @g_qk_rope_store[%{pre}t](%{pre}t, %layer, %rope, %ctx, %pool, %{pre}q, %{pre}k, %{pre}v, %qn, %kn, %{pre}info, %orig, %arena{mra}{ZB_ARGS}) : "
+                f"[index](index, index, i32, index, index, tensor<{tt}x{QD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{tt}x4xi32>, tensor<{10 + blocks}xi32>, {AR}{mr_types(tt)}{B_TYPES})\n")
     cases.append(f"""check.case public @{tag} {{
   %ht = check.literal value({p0}) : index
   %st = check.literal value({t}) : index
