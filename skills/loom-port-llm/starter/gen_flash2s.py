@@ -43,7 +43,7 @@ VTC = KT + 8                      # padded V^T row
 # Query-head groups per KV head: one workgroup per (tile, KV head, group) when the G heads' S partials don't fit
 # next to the K and V^T tiles in 64 KiB of workgroup memory (G = 8: 70 KiB; Qwen3.5/3.6 MoE). Each group stages
 # K/V itself (the staging is repeated per group; the score/softmax/output work is not).
-NG = next(n for n in (1, 2, 4) if G % n == 0 and (KT * DP8 * 2 + D * VTC * 2 + (WPH * G // n) * KB * 16 * 16 * 4 <= 65536
+NG = next(n for n in (1, 2, 4) if G % n == 0 and (KT * DP8 * 2 + D * VTC * 2 + (WPH * G // n) * KB * 16 * 16 * 4 + KB * 16 * 8 * 4 <= 65536
                                                   or WPH * G // n == 8))
 GW = G // NG                      # query heads per workgroup
 WAVES = WPH * GW
@@ -240,6 +240,10 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
   %s_bytes = index.constant {WAVES * KB * 16 * 16 * 4} : offset
   %s_tile = buffer.alloca<workgroup> align(16) %s_bytes : buffer
   %s_view = buffer.view %s_tile[%origin] : buffer -> view<{WAVES * KB * 16}x16xf32>
+  // Key masks of the masked blocks, one row of 8 words (two f16 keys each) per block and query column.
+  %mk_bytes = index.constant {KB * 16 * 8 * 4} : offset
+  %mk_tile = buffer.alloca<workgroup> align(16) %mk_bytes : buffer
+  %mk_view = buffer.view %mk_tile[%origin] : buffer -> view<{KB * 16}x8xi32>
 
   // This wave's half of Q^T as MMA rhs, held for the whole key loop: lane column = token, 16 dims each.
   %q_view = buffer.view %q[%origin] : buffer -> view<[%tokens]x{QH}x{D}xf32>
@@ -405,24 +409,26 @@ A('''    %pos0_i32 = index.cast %pos0 : index to i32
     %win_lo15 = scalar.subi %pos15_i32, %cwin_i32 : i32
     %zero16h = vector.constant 0.0 : vector<16xf16>
     %iota16 = vector.iota %c0_i32 step %c1_i32m : vector<16xi32>
+    %c16_i32m = scalar.constant 16 : i32
+    %c0_i32m = scalar.constant 0 : i32
     %c2_i32m = scalar.constant 2 : i32
-    %c1_i32w = scalar.constant 1 : i32
-    %iota_even = vector.iota %c0_i32 step %c2_i32m : vector<8xi32>
-    %iota_odd = vector.iota %c1_i32w step %c2_i32m : vector<8xi32>
-    %word_lo_s = scalar.constant 65535 : i32
-    %word_hi_s = scalar.constant -65536 : i32
-    %zero_w_s = scalar.constant 0 : i32
-    %word_lo = vector.splat %word_lo_s : vector<8xi32>
-    %word_hi = vector.splat %word_hi_s : vector<8xi32>
-    %zero_w = vector.splat %zero_w_s : vector<8xi32>
-    %c2i_0 = index.constant 0 : index
-    %c2i_1 = index.constant 2 : index
-    %c2i_2 = index.constant 4 : index
-    %c2i_3 = index.constant 6 : index
-    %c2i_4 = index.constant 8 : index
-    %c2i_5 = index.constant 10 : index
-    %c2i_6 = index.constant 12 : index
-    %c2i_7 = index.constant 14 : index''')
+    %c4_i32m = scalar.constant 4 : i32
+    %c6_i32m = scalar.constant 6 : i32
+    %c3_i32m = scalar.constant 3 : i32
+    %cm1_i32m = scalar.constant -1 : i32
+    %cffff_i32m = scalar.constant 65535 : i32
+    %c4 = index.constant 4 : index
+    %cunr = index.constant ''' + str(int(os.environ.get("FLASH2_MC_UNR", "4"))) + ''' : index
+''' + "".join(f"    %cu{u} = index.constant {u} : index\n" for u in range(int(os.environ.get("FLASH2_MC_UNR", "4")))))
+# FLASH2_EDGE_ZERO=1: a sliding window's lower-edge block also takes the per-column V-zeroing path (default: only the diagonal block;
+# the keys below the window are real, finite keys of the run whatever the cut, so a token's output does not depend on the cut)
+EDGE_ZERO = os.environ.get("FLASH2_EDGE_ZERO", "0") == "1"
+NEED_OP = ("scalar.ori", "%nb_edge") if EDGE_ZERO else ("scalar.andi", "%nb_live")
+MC_UNROLL = " unroll " if os.environ.get("FLASH2_MC_UNROLL", "1") == "1" else " "
+MASKV = os.environ.get("FLASH2_MASKV", "lds")   # "old": the key mask rebuilt per fragment and column
+ABL_NOMASK = os.environ.get("FLASH2_ABL_NOMASK") == "1"   # diagnostic (timing only): no block takes the masked path
+if ABL_NOMASK:
+    NEED_OP = ("scalar.andi", "%nb_never")
 for kb in range(KB):
     last = kb == KB - 1
     ins = [f"%os{d}" if kb == 0 else f"%on{d}_{kb - 1}" for d in range(NFH)]
@@ -432,83 +438,93 @@ for kb in range(KB):
     %nb_diag{kb} = scalar.cmpi sgt, %nb_last{kb}, %pos0_i32 : i32
     %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
     %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
-    %need{kb} = scalar.ori %nb_diag{kb}, %nb_wins{kb} : i1
+    %nb_dead{kb} = scalar.cmpi sgt, %base{kb}, %pos15_i32 : i32
+    %nb_live{kb} = scalar.xori %nb_dead{kb}, %true_const : i1
+    %nb_diag_live{kb} = scalar.andi %nb_diag{kb}, %nb_live{kb} : i1
+    %nb_edge{kb} = scalar.andi %nb_wins{kb}, %nb_live{kb} : i1
+    %nb_never{kb} = scalar.constant false : i1
+    %need{kb} = {NEED_OP[0]} %nb_diag_live{kb}, {NEED_OP[1]}{kb} : i1
     {", ".join(outs)} = scf.if %need{kb} -> ({vt}) {{""")
-    if os.environ.get("FLASH2_MASKV") == "old":
+    if MASKV == "old":
         for d in range(NFH):
             A(f"""      %ac{d}_{kb} = scf.for %mc_{d}_{kb} = [%c0 to %c16 step %c1](%acc{d}_{kb} = {ins[d]} : vector<8xf32>) -> (vector<8xf32>) {{
-            %mci{d}_{kb} = index.cast %mc_{d}_{kb} : index to i32
-            %qc{d}_{kb} = scalar.addi %pos0_i32, %mci{d}_{kb} : i32
-            %thr{d}_{kb} = scalar.subi %qc{d}_{kb}, %base{kb} : i32
-            %thr_v{d}_{kb} = vector.splat %thr{d}_{kb} : vector<16xi32>
-            %mhi{d}_{kb} = vector.cmpi sle, %iota16, %thr_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
-            %lo{d}_{kb} = scalar.subi %thr{d}_{kb}, %cwin_i32 : i32
-            %loe{d}_{kb} = scf.select %is_sliding, %lo{d}_{kb}, %far_below : i32
-            %lo_v{d}_{kb} = vector.splat %loe{d}_{kb} : vector<16xi32>
-            %mlo{d}_{kb} = vector.cmpi sge, %iota16, %lo_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
-            %m{d}_{kb} = vector.andi %mhi{d}_{kb}, %mlo{d}_{kb} : vector<16xi1>
-            %isc{d}_{kb} = scalar.cmpi eq, %lane_col32m, %mci{d}_{kb} : i32
-            %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>
-            %vs{d}_{kb} = vector.select %m{d}_{kb}, %vl{d}_{kb}, %zero16h : vector<16xf16>
-            %vm{d}_{kb} = vector.fragment<lhs> %vs{d}_{kb} shape [%c16, %c16] : vector<16xf16>
-            %rm{d}_{kb} = vector.mma %vm{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
-            %acn{d}_{kb} = scf.select %isc{d}_{kb}, %rm{d}_{kb}, %acc{d}_{kb} : vector<8xf32>
-            scf.yield %acn{d}_{kb} : vector<8xf32>
-          }}""")
-    elif os.environ.get("FLASH2_MASKV") == "fma":   # a masked block: P (exactly 0 at masked keys) . V per output row on the VALU
-        # A weight of exactly 0 adds exactly 0 in an f32 FMA whatever the key's V (finite) is, so no per-column V zeroing is needed.
-        for d in range(NFH):
-            A(f"      %vrh{d}_{kb} = index.add %vr{d}, %lane_half : index")
-            for i in range(8):
-                A(f"""      %rw{d}_{i}_{kb} = index.add %vrh{d}_{kb}, %c2i_{i} : index
-      %vrow{d}_{i}_{kb} = vector.load %vt_view[%rw{d}_{i}_{kb}, %kb{kb}_row] : view<{D}x{VTC}xf16> -> vector<16xf16>
-      %vrf{d}_{i}_{kb} = vector.extf %vrow{d}_{i}_{kb} : vector<16xf16> to vector<16xf32>
-      %ds{d}_{i}_{kb} = vector.dotf<reassoc|contract> %pt{kb}_f, %vrf{d}_{i}_{kb}, %zero_f : vector<16xf32>, vector<16xf32>, f32""")
-            A(f"      %pr{d}_{kb} = vector.from_elements {', '.join(f'%ds{d}_{i}_{kb}' for i in range(8))} : vector<8xf32>\n      %ps{d}_{kb} = vector.addf {ins[d]}, %pr{d}_{kb} : vector<8xf32>\n      %pm{d}_{kb} = vector.fragment<init> %ps{d}_{kb} shape [%c16, %c16] : vector<8xf32>")
-        A(f"      scf.yield {', '.join(f'%pm{d}_{kb}' for d in range(NFH))} : {vt}" + chr(10) + "    } else {")
-        for d in range(NFH):
-            A(f"      %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>\n      %pl{d}_{kb} = vector.mma %vl{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
-        A(f"      scf.yield {', '.join(f'%pl{d}_{kb}' for d in range(NFH))} : {vt}" + chr(10) + "    }")
-        continue
-    else:   # one loop over the 16 query columns per group of fragments; the key mask is built per column as 8 words
-        GRP = int(os.environ.get("FLASH2_MASK_GRP", "4"))
-        cur = list(ins)
-        for g0 in range(0, NFH, GRP):
-            ds = list(range(g0, min(NFH, g0 + GRP)))
-            sfx = f"{kb}g{g0}"
-            accs = ", ".join(f"%acc{d}_{sfx} = {cur[d]} : vector<8xf32>" for d in ds)
-            body = []
-            for d in ds:
-                body.append(f"""        %vl{d}_{sfx} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>
-        %vw{d}_{sfx} = vector.bitcast %vl{d}_{sfx} : vector<16xf16> to vector<8xi32>
-        %vx{d}_{sfx} = vector.andi %vw{d}_{sfx}, %mw_{sfx} : vector<8xi32>
-        %vs{d}_{sfx} = vector.bitcast %vx{d}_{sfx} : vector<8xi32> to vector<16xf16>
-        %vm{d}_{sfx} = vector.fragment<lhs> %vs{d}_{sfx} shape [%c16, %c16] : vector<16xf16>
-        %rm{d}_{sfx} = vector.mma %vm{d}_{sfx}, %pt{kb}, {cur[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
-        %acn{d}_{sfx} = scf.select %isc_{sfx}, %rm{d}_{sfx}, %acc{d}_{sfx} : vector<8xf32>""")
-            A(f"""      {", ".join(f"%ac{d}_{sfx}" for d in ds)} = scf.for %mc_{sfx} = [%c0 to %c16 step %c1]({accs}) -> ({", ".join(["vector<8xf32>"] * len(ds))}) {{
-        %mci_{sfx} = index.cast %mc_{sfx} : index to i32
-        %qc_{sfx} = scalar.addi %pos0_i32, %mci_{sfx} : i32
-        %thr_{sfx} = scalar.subi %qc_{sfx}, %base{kb} : i32
-        %thr_v_{sfx} = vector.splat %thr_{sfx} : vector<8xi32>
-        %lo_{sfx} = scalar.subi %thr_{sfx}, %cwin_i32 : i32
-        %loe_{sfx} = scf.select %is_sliding, %lo_{sfx}, %far_below : i32
-        %lo_v_{sfx} = vector.splat %loe_{sfx} : vector<8xi32>
-        %mh0_{sfx} = vector.cmpi sle, %iota_even, %thr_v_{sfx} : vector<8xi32> -> vector<8xi1>
-        %ml0_{sfx} = vector.cmpi sge, %iota_even, %lo_v_{sfx} : vector<8xi32> -> vector<8xi1>
-        %m0_{sfx} = vector.andi %mh0_{sfx}, %ml0_{sfx} : vector<8xi1>
-        %mh1_{sfx} = vector.cmpi sle, %iota_odd, %thr_v_{sfx} : vector<8xi32> -> vector<8xi1>
-        %ml1_{sfx} = vector.cmpi sge, %iota_odd, %lo_v_{sfx} : vector<8xi32> -> vector<8xi1>
-        %m1_{sfx} = vector.andi %mh1_{sfx}, %ml1_{sfx} : vector<8xi1>
-        %w0_{sfx} = vector.select %m0_{sfx}, %word_lo, %zero_w : vector<8xi32>
-        %w1_{sfx} = vector.select %m1_{sfx}, %word_hi, %zero_w : vector<8xi32>
-        %mw_{sfx} = vector.ori %w0_{sfx}, %w1_{sfx} : vector<8xi32>
-        %isc_{sfx} = scalar.cmpi eq, %lane_col32m, %mci_{sfx} : i32
-""" + "\n".join(body) + f"""
-        scf.yield {", ".join(f"%acn{d}_{sfx}" for d in ds)} : {", ".join(["vector<8xf32>"] * len(ds))}
+        %mci{d}_{kb} = index.cast %mc_{d}_{kb} : index to i32
+        %qc{d}_{kb} = scalar.addi %pos0_i32, %mci{d}_{kb} : i32
+        %thr{d}_{kb} = scalar.subi %qc{d}_{kb}, %base{kb} : i32
+        %thr_v{d}_{kb} = vector.splat %thr{d}_{kb} : vector<16xi32>
+        %mhi{d}_{kb} = vector.cmpi sle, %iota16, %thr_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
+        %lo{d}_{kb} = scalar.subi %thr{d}_{kb}, %cwin_i32 : i32
+        %loe{d}_{kb} = scf.select %is_sliding, %lo{d}_{kb}, %far_below : i32
+        %lo_v{d}_{kb} = vector.splat %loe{d}_{kb} : vector<16xi32>
+        %mlo{d}_{kb} = vector.cmpi sge, %iota16, %lo_v{d}_{kb} : vector<16xi32> -> vector<16xi1>
+        %m{d}_{kb} = vector.andi %mhi{d}_{kb}, %mlo{d}_{kb} : vector<16xi1>
+        %isc{d}_{kb} = scalar.cmpi eq, %lane_col32m, %mci{d}_{kb} : i32
+        %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>
+        %vs{d}_{kb} = vector.select %m{d}_{kb}, %vl{d}_{kb}, %zero16h : vector<16xf16>
+        %vm{d}_{kb} = vector.fragment<lhs> %vs{d}_{kb} shape [%c16, %c16] : vector<16xf16>
+        %rm{d}_{kb} = vector.mma %vm{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %acn{d}_{kb} = scf.select %isc{d}_{kb}, %rm{d}_{kb}, %acc{d}_{kb} : vector<8xf32>
+        scf.yield %acn{d}_{kb} : vector<8xf32>
       }}""")
-            for d in ds:
-                cur[d] = f"%ac{d}_{sfx}"
+    else:
+        # The block's key masks, once per wave: lane (column c, half h) writes words 4h..4h+3 of row c, the f16 pairs (2w, 2w+1)
+        # of the keys that column sees (key <= its position, and inside the window).
+        A(f"""      %mq_{kb} = scalar.addi %pos0_i32, %lane_col32m : i32
+      %mt_{kb} = scalar.subi %mq_{kb}, %base{kb} : i32
+      %mt1_{kb} = scalar.addi %mt_{kb}, %c1_i32m : i32
+      %mhi0_{kb} = scalar.maxsi %mt1_{kb}, %c0_i32 : i32
+      %mhi1_{kb} = scalar.minsi %mhi0_{kb}, %c16_i32m : i32
+      %mlw_{kb} = scalar.subi %mt_{kb}, %cwin_i32 : i32
+      %mle_{kb} = scf.select %is_sliding, %mlw_{kb}, %far_below : i32
+      %mlo0_{kb} = scalar.maxsi %mle_{kb}, %c0_i32 : i32
+      %mlo1_{kb} = scalar.minsi %mlo0_{kb}, %c16_i32m : i32
+      %mhs_{kb} = scalar.shli %c1_i32m, %mhi1_{kb} : i32
+      %mhm_{kb} = scalar.subi %mhs_{kb}, %c1_i32m : i32
+      %mls_{kb} = scalar.shli %c1_i32m, %mlo1_{kb} : i32
+      %mlm_{kb} = scalar.subi %mls_{kb}, %c1_i32m : i32
+      %mln_{kb} = scalar.xori %mlm_{kb}, %cm1_i32m : i32
+      %mbits_{kb} = scalar.andi %mhm_{kb}, %mln_{kb} : i32
+      %mh32_{kb} = index.cast %lane_half : index to i32
+      %msh_{kb} = scalar.shli %mh32_{kb}, %c3_i32m : i32""")
+        for t in range(4):
+            A(f"""      %msa{t}_{kb} = scalar.addi %msh_{kb}, %c{2 * t}_i32m : i32
+      %msb{t}_{kb} = scalar.addi %msa{t}_{kb}, %c1_i32m : i32
+      %mua{t}_{kb} = scalar.shrui %mbits_{kb}, %msa{t}_{kb} : i32
+      %mub{t}_{kb} = scalar.shrui %mbits_{kb}, %msb{t}_{kb} : i32
+      %mba{t}_{kb} = scalar.andi %mua{t}_{kb}, %c1_i32m : i32
+      %mbb{t}_{kb} = scalar.andi %mub{t}_{kb}, %c1_i32m : i32
+      %mna{t}_{kb} = scalar.subi %c0_i32, %mba{t}_{kb} : i32
+      %mnb{t}_{kb} = scalar.subi %c0_i32, %mbb{t}_{kb} : i32
+      %mwa{t}_{kb} = scalar.andi %mna{t}_{kb}, %cffff_i32m : i32
+      %mwb{t}_{kb} = scalar.shli %mnb{t}_{kb}, %c16_i32m : i32
+      %mw{t}_{kb} = scalar.ori %mwa{t}_{kb}, %mwb{t}_{kb} : i32""")
+        A(f"""      %mwv_{kb} = vector.from_elements {", ".join(f"%mw{t}_{kb}" for t in range(4))} : vector<4xi32>
+      %mrowi_{kb} = index.add %kb{kb}_row, %lane_col : index
+      %mcol_{kb} = index.mul %lane_half, %c4 : index
+      vector.store %mwv_{kb}, %mk_view[%mrowi_{kb}, %mcol_{kb}] : vector<4xi32>, view<{KB * 16}x8xi32>
+      kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)""")
+        # one loop per dim fragment over the 16 query columns; the next column's mask row is loaded while this column's MMA runs
+        cur = list(ins)
+        for d in range(NFH):
+            sfx = f"{d}_{kb}"
+            A(f"""      %vl{sfx} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>
+      %vw{sfx} = vector.bitcast %vl{sfx} : vector<16xf16> to vector<8xi32>
+      %mrow0_{sfx} = vector.load %mk_view[%kb{kb}_row, %c0] : view<{KB * 16}x8xi32> -> vector<8xi32>
+      %ac{sfx}, %mlast_{sfx} = scf.for %mc_{sfx} = [%c0 to %c16 step %c1](%acc_{sfx} = {ins[d]} : vector<8xf32>, %mrow_{sfx} = %mrow0_{sfx} : vector<8xi32>) -> (vector<8xf32>, vector<8xi32>) {{
+        %mnx_{sfx} = index.add %mc_{sfx}, %c1 : index
+        %mnc_{sfx} = index.min %mnx_{sfx}, %c15 : index
+        %mri_{sfx} = index.add %mnc_{sfx}, %kb{kb}_row : index
+        %mrn_{sfx} = vector.load %mk_view[%mri_{sfx}, %c0] : view<{KB * 16}x8xi32> -> vector<8xi32>
+        %mci_{sfx} = index.cast %mc_{sfx} : index to i32
+        %vx_{sfx} = vector.andi %vw{sfx}, %mrow_{sfx} : vector<8xi32>
+        %vs_{sfx} = vector.bitcast %vx_{sfx} : vector<8xi32> to vector<16xf16>
+        %vm_{sfx} = vector.fragment<lhs> %vs_{sfx} shape [%c16, %c16] : vector<16xf16>
+        %rm_{sfx} = vector.mma %vm_{sfx}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %isc_{sfx} = scalar.cmpi eq, %lane_col32m, %mci_{sfx} : i32
+        %acn_{sfx} = scf.select %isc_{sfx}, %rm_{sfx}, %acc_{sfx} : vector<8xf32>
+        scf.yield %acn_{sfx}, %mrn_{sfx} : vector<8xf32>, vector<8xi32>
+      }}""")
+            cur[d] = f"%ac{sfx}"
         A(f"      scf.yield {', '.join(cur)} : {vt}" + chr(10) + "    } else {")
         for d in range(NFH):
             A(f"      %vl{d}_{kb} = vector.fragment.load<lhs> %vt_view[%vr{d}, %kb{kb}_row] shape [%c16, %c16] : view<{D}x{VTC}xf16> -> vector<16xf16>\n      %pl{d}_{kb} = vector.mma %vl{d}_{kb}, %pt{kb}, {ins[d]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
@@ -588,12 +604,10 @@ if PARTIAL:
     E.append("  }\n")
     text = text[:i0] + "\n".join(E) + text[i1:]
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_partial") @{P}_attention_flash2_partial(', 1)
-if os.environ.get("FLASH2_ABL_DIRECT") and not PARTIAL:   # diagnostic (timing only): first token = tile * 16, no tile-list entry load
-    import re
-    text = re.sub(r"  %entry_slot_value = .*?\n  %entry = index.cast[^\n]*\n", "", text, flags=re.S)
-    text = re.sub(r"  (%first_token|%anchor) = index.assume %entry [^\n]*\n", r"  \1 = index.mul %tile, %c16 : index\n", text)
-    if os.environ["FLASH2_ABL_DIRECT"] == "2":
-        text = re.sub(r"  %listed_count32 = [^\n]*\n  %listed_count = [^\n]*\n  %listed = [^\n]*\n", "  %listed = scalar.constant true : i1\n", text)
+if os.environ.get("FLASH2_ENTRY") == "bcast" and os.environ.get("FLASH2_ROLE") != "partial":   # diagnostic: the listed entry is broadcast from lane 0 (scalar)
+    _old = "  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %entry = index.cast %entry32 : i32 to index\n"
+    assert _old in text, "entry load not found"
+    text = text.replace(_old, "  %entry32r = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %lane0 = scalar.constant 0 : i32\n  %entry32 = kernel.subgroup.broadcast %entry32r from %lane0 : i32, i32\n  %entry = index.cast %entry32 : i32 to index\n")
 out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
 if not PARTIAL:
     subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen_flash2s.py")], check=True,
