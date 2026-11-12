@@ -63,6 +63,23 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   grid. It is cheap to find by ablation, because doubling it costs a visible
   fraction of a millisecond.
 
+### MoE decode: expert matvec workgroups, int8 expert activations, router loads (`gen_moe.py`)
+Qwen3-30B-A3B-Instruct-2507 (128 experts, top-8, 48 layers; DevLab, interleaved `ab` rounds in one server, two runners
+agreeing within 0.4 %): main build 14.39 ms per token, all levers below 12.97 ms (1.11x), each measured on top of the
+previous. Decode had no kernel at its bandwidth: a 1-token launch is KU x FFN / R workgroups, and with R=8 that is only
+768 for gate/up.
+- **Rows per workgroup `MOE_R`** (auto: aim for ~3000 workgroups per gate/up launch, powers of two within 2..8): R=8 -> 4
+  +4 %, 4 -> 2 +1.5 %, R=1 slower (13.13 vs 12.99 ms).
+- **Router `MOE_ROUTE_U`** (default 4): `g_moe_route` is one latency-bound workgroup per token (34 us per layer: 1.6 ms of
+  the 14.4); scoring 4 experts per wave in the same loop (4 independent weight loads in flight, summation order
+  unchanged, outputs bit-identical) is +2 %; 8 ties.
+- **int8 expert activations `MOE_Q8`** (default on with `ACT_Q8`): the router input's `g_quant_q8` copy (made beside the
+  row scale) feeds the gate/up matvec, a `g_quant_q8` launch quantizes the gate/up output for the down matvec, and both
+  contract with the weight codes by integer dot4 (llama.cpp's mul_mat_vec_q for experts). +2 %; alone, at R=8, it
+  tied (the f32 kernel was latency-bound, not bandwidth-bound). The kernel-test chain emulates the Q8_1 rounding.
+- The ablation by doubling under-reports bandwidth-bound expert launches (a 14 MB layer of experts re-read from the MALL):
+  the route and small-op doublings (+0.8 ms, +0.6 ms per 48 layers) are the believable ones.
+
 ### Argmax head (`head_mv()`)
 - Vocabulary rows are split into 128-row chunks. Each workgroup writes
   (max, argmax) per chunk per span, and `g_head_select` reduces the chunks.
@@ -248,6 +265,11 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   Qwen3.8-27B same-server A/B vs r3 (5 rounds): prefill 1k/2k/8k +2.7/+2.8/+2.8 % (2k 496.9 -> 510.7 tok/s),
   32k +2.4 % (3 rounds), decode +1.8 % (tie). Doubling the recurrence at 2k: 0.124 -> 0.079 ms/token
   (6.1 -> 4.0 % of 2k prefill).
+  - Decode vs prefill split (MiniCPM-V-4.7 / Qwen3.5-35B-A3B, DevLab, active wait): spans shorter than 64 tokens
+    (decode, verify) run `g_gdn_recurrence` with RL 16 x 2 columns, `GDN_CONV_UNROLL=8`; longer spans run
+    `g_gdn_recurrence_pf` (RL 8 x 4 columns, the 2k winner above). Uniform 16 x 2 gave decode +5-8 % but prefill -12 to
+    -16 % on the MoE hybrids (-3 % on Qwen3.5-9B), hence two kernels; a span runs in exactly one of them, chosen by its own length, so batching never changes its numerics. `GDN_ROW_LANES`/`GDN_COLS` set in the environment
+    force one form for both.
   - Variants (2k, 3 rounds each, vs the same baseline): RL 4 (32 rows/lane) -1.6 %, RL 16 +1.0 %, RL 8 with
     8 columns per lane (`GDN_COLS=8`) +2.6 %, RL 16 with 8 columns +1.7 %; RL 8 x 4 columns +2.9 % kept.
   - Not tried (time-box): the chunked WY / "chunked delta rule" form (llama.cpp `build_delta_net_chunking`,
@@ -407,6 +429,8 @@ bucketed grouped GEMM idea in `flint-moe-example/gen_moe.py`).
   one tie; never a loss); Qwen3.8-27B and Bolt tie; Flint -4 % at 8k. Repeat the A/B across sessions.
 
 ## Did not help
+- **Unrolling the expert matvec's row loop** (R straight-line copies, all weight loads before the first wave reduction;
+  Qwen3-30B-A3B decode): -2 % at R=2 and -6 % at R=4 against the same R rolled. Occupancy (more, smaller workgroups) beats per-wave memory parallelism.
 - **64-key flash tiles.** Register pressure; occupancy dropped.
 - **Expert gate_up prefetch.** No gain; the kernel is compute-bound already.
 - **Larger MoE tiles or wide GEMM tiles.** More padding waste and less occupancy.
