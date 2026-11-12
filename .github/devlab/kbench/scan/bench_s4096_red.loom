@@ -1,0 +1,98 @@
+// Global-layer KV scan, head_dim 512, 2 KV heads, 32768 keys: stride 4096 B, redundant waves
+amdgpu.target<gfx11-generic> @ex_wave32 {subgroup_size = 32}
+
+kernel.def target(@ex_wave32) @k_scan_s4096_red() {
+  %c1 = index.constant 1 : index
+  %ckvh = index.constant 2 : index
+  %csplit = index.constant 64 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%ckvh, %csplit, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%arena_arg: buffer, %out_arg: buffer) {
+  %arena, %out = buffer.assume.noalias %arena_arg, %out_arg : buffer, buffer
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c512 = index.constant 512 : index
+  %kv_id = kernel.workgroup.id<x> : index
+  %kv = index.assume %kv_id [range(%kv_id, 0, 1)] : index
+  %split_id = kernel.workgroup.id<y> : index
+  %split = index.assume %split_id [range(%split_id, 0, 63)] : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, 7)] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %stride = index.constant 4096 : offset
+  %plane = index.constant 134217728 : offset
+  %kvoff = index.constant 1024 : offset
+  %kvbase = index.scale %kv, %kvoff : index, offset -> offset
+  %start = index.mul %split, %c512 : index
+  %end = index.add %start, %c512 : index
+  %zero_f = scalar.constant 0.0 : f32
+  %zero16 = vector.splat %zero_f : vector<16xf32>
+  %acc = scf.for %j = [%start to %end step %c4](%a = %zero16 : vector<16xf32>) -> (vector<16xf32>) {
+    %jk1 = index.add %j, %c1 : index
+    %ci2 = index.constant 2 : index
+    %jk2 = index.add %j, %ci2 : index
+    %ci3 = index.constant 3 : index
+    %jk3 = index.add %j, %ci3 : index
+    %ko0 = index.scale %j, %stride : index, offset -> offset
+    %kb0 = index.add %ko0, %kvbase : offset
+    %kc0 = buffer.view %arena[%kb0] : buffer -> view<32x16xf16>
+    %kh0 = vector.load %kc0[%lane, %c0] : view<32x16xf16> -> vector<16xf16>
+    %kf0 = vector.extf %kh0 : vector<16xf16> to vector<16xf32>
+    %vb0 = index.add %kb0, %plane : offset
+    %vc0 = buffer.view %arena[%vb0] : buffer -> view<32x16xf16>
+    %vh0 = vector.load %vc0[%lane, %c0] : view<32x16xf16> -> vector<16xf16>
+    %vf0 = vector.extf %vh0 : vector<16xf16> to vector<16xf32>
+    %s0 = vector.addf %kf0, %vf0 : vector<16xf32>
+    %a0 = vector.addf %a, %s0 : vector<16xf32>
+    %ko1 = index.scale %jk1, %stride : index, offset -> offset
+    %kb1 = index.add %ko1, %kvbase : offset
+    %kc1 = buffer.view %arena[%kb1] : buffer -> view<32x16xf16>
+    %kh1 = vector.load %kc1[%lane, %c0] : view<32x16xf16> -> vector<16xf16>
+    %kf1 = vector.extf %kh1 : vector<16xf16> to vector<16xf32>
+    %vb1 = index.add %kb1, %plane : offset
+    %vc1 = buffer.view %arena[%vb1] : buffer -> view<32x16xf16>
+    %vh1 = vector.load %vc1[%lane, %c0] : view<32x16xf16> -> vector<16xf16>
+    %vf1 = vector.extf %vh1 : vector<16xf16> to vector<16xf32>
+    %s1 = vector.addf %kf1, %vf1 : vector<16xf32>
+    %a1 = vector.addf %a0, %s1 : vector<16xf32>
+    %ko2 = index.scale %jk2, %stride : index, offset -> offset
+    %kb2 = index.add %ko2, %kvbase : offset
+    %kc2 = buffer.view %arena[%kb2] : buffer -> view<32x16xf16>
+    %kh2 = vector.load %kc2[%lane, %c0] : view<32x16xf16> -> vector<16xf16>
+    %kf2 = vector.extf %kh2 : vector<16xf16> to vector<16xf32>
+    %vb2 = index.add %kb2, %plane : offset
+    %vc2 = buffer.view %arena[%vb2] : buffer -> view<32x16xf16>
+    %vh2 = vector.load %vc2[%lane, %c0] : view<32x16xf16> -> vector<16xf16>
+    %vf2 = vector.extf %vh2 : vector<16xf16> to vector<16xf32>
+    %s2 = vector.addf %kf2, %vf2 : vector<16xf32>
+    %a2 = vector.addf %a1, %s2 : vector<16xf32>
+    %ko3 = index.scale %jk3, %stride : index, offset -> offset
+    %kb3 = index.add %ko3, %kvbase : offset
+    %kc3 = buffer.view %arena[%kb3] : buffer -> view<32x16xf16>
+    %kh3 = vector.load %kc3[%lane, %c0] : view<32x16xf16> -> vector<16xf16>
+    %kf3 = vector.extf %kh3 : vector<16xf16> to vector<16xf32>
+    %vb3 = index.add %kb3, %plane : offset
+    %vc3 = buffer.view %arena[%vb3] : buffer -> view<32x16xf16>
+    %vh3 = vector.load %vc3[%lane, %c0] : view<32x16xf16> -> vector<16xf16>
+    %vf3 = vector.extf %vh3 : vector<16xf16> to vector<16xf32>
+    %s3 = vector.addf %kf3, %vf3 : vector<16xf32>
+    %a3 = vector.addf %a2, %s3 : vector<16xf32>
+    scf.yield %a3 : vector<16xf32>
+  }
+  %out_view = buffer.view %out[%zero] : buffer -> view<2x64x8x32x16xf32>
+  vector.store %acc, %out_view[%kv, %split, %wave, %lane, %c0] : vector<16xf32>, view<2x64x8x32x16xf32>
+  kernel.return
+}
+
+check.case public @scan_s4096_red {
+  %arena = check.generate.fill value(0.5) : tensor<134217728xf16>
+  %out = check.generate.fill value(0.0) : tensor<524288xf32>
+  kernel.launch @k_scan_s4096_red(%arena, %out) : (tensor<134217728xf16>, tensor<524288xf32>)
+  check.return
+}
+
+check.benchmark<@scan_s4096_red> @scan_s4096_red_bm
