@@ -29,6 +29,7 @@
 # Variant V: {"name": "card"}                                    the card's own programs, as published
 #            {"name": "x", "build": {"ENV": "1"}, "build_args": [...], "ref": "origin/main",
 #             "execution": {"draft_depth": 3}, "double": ["llm_verify:g_head_mv", "*:g_mv_q8_0"]}
+#            config: generator-config overrides for a rebuild (e.g. {"layers": 12}: timing only)
 #            build: build.py with these env vars (and extra flags); ref: build with that commit's starter;
 #            execution: model.json overrides; double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
 #            {"name": "parked", "active_wait": false}: the card's programs served with the SDK's default completion wait
@@ -36,7 +37,7 @@
 # Job "thinking": off (default) | on: chat_template_kwargs.enable_thinking sent to BOTH engines in every step.
 # Steps S: ab:R[:on|off]        every variant in ONE loom-serve (small context), ab_decode.py R interleaved rounds
 #          perf:V:N[:long]      V served alone with its own settings: perf.py N times (+ --long)
-#          c4:V                 c4_steady.py 4 streams on V
+#          c4:V[:N]             c4_steady.py N (default 4) streams on V
 #          llama:N[:long|-][:M] llama.cpp (card build + llama_spec, n-max M) perf.py N times, llama_decode.py tokens/step
 #          llamac4[:M]          c4_steady.py on llama.cpp
 #          (llama[@vulkan], llamac4[@vulkan]: the same with the Vulkan build; files perf_llamacpp-vulkan_nN.jsonl. Modifiers after
@@ -155,7 +156,14 @@ for v in $variants; do
     extra=$(qv "$v" "print(' '.join(v.get('build_args') or []))")
     envs=$(qv "$v" "print(' '.join(f'{k}={x}' for k, x in (v.get('build') or {}).items()))")
     step "build $v: env $envs; build.py $cardargs $extra"
-    ( cd "${KIT[$v]}" && env $envs "$T" build.py "$D/cfg.json" "$pkg" --tokenizer "$card/tokenizer.json" --model-id "$cardid" $cardargs $extra ) > "$out/build_$v.log" 2>&1 \
+    # "config": generator-config overrides for this variant's rebuild (e.g. {"layers": 12}: a truncated model; the step
+    # time minus the layer-proportional part is the per-step fixed cost; outputs are garbage, only timing counts)
+    vcfg=$(qv "$v" "print(json.dumps(v.get('config') or {}))")
+    "$T" - "$D/cfg.json" "$D/$v/cfg.json" "$vcfg" <<'EOF2'
+import json, sys
+c = json.load(open(sys.argv[1])); c.update(json.loads(sys.argv[3])); json.dump(c, open(sys.argv[2], "w"), indent=1)
+EOF2
+    ( cd "${KIT[$v]}" && env $envs "$T" build.py "$D/$v/cfg.json" "$pkg" --tokenizer "$card/tokenizer.json" --model-id "$cardid" $cardargs $extra ) > "$out/build_$v.log" 2>&1 \
       || { tail -30 "$out/build_$v.log"; echo "FAIL: build $v"; exit 1; }
     tail -3 "$out/build_$v.log"
   else
@@ -287,8 +295,9 @@ print(json.dumps(tune.measure('$url', '$cardid', {}, 32768, 4)))" | tail -1 | te
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "c4 $p1"
-      for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$url" 4 --model "$cardid" --thinking "$TH" | tail -1 | tee -a "c4_$p1.txt"); done
-      res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_$p1.txt')))");;
+      cn=${p2:-4}; cf=c4_$p1$([ "$cn" = 4 ] || echo "_n$cn").txt   # c4:V[:N] N concurrent streams (default 4)
+      for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$url" "$cn" --model "$cardid" --thinking "$TH" | tail -1 | tee -a "$cf"); done
+      res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4$([ "$cn" = 4 ] || echo " n$cn") median', st.median(json.loads(l)['agg_tps'] for l in open('$out/$cf')))");;
     llama)   # llama:N[:long|-][:N_MAX]
       llama_up "${p3:-}" || { res[$s]=ERROR; continue; }
       nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}; lf=perf_llamacpp${bkt}_n$nm.jsonl

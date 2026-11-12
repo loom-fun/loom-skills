@@ -19,7 +19,7 @@ models=(); extra=()
 while [ $# -gt 0 ]; do [ "$1" = "--" ] && { shift; extra=("$@"); break; }; models+=("--model=$1"); shift; done
 case "$dev" in
   amdgpu|amdgpu://*) if [ "${LOOM_ACTIVE_WAIT:-1}" != 0 ] && [ "${dev#*completion_spin_ns=}" = "$dev" ]; then
-    case "$dev" in amdgpu) dev="amdgpu://?";; *\?*) dev="$dev&";; *) dev="$dev?";; esac
+    case "$dev" in amdgpu) dev="amdgpu://?";; *\?) ;; *\?*) dev="$dev&";; *) dev="$dev?";; esac
     dev="${dev}completion_spin_ns=4294967295"; fi;;
 esac
 venv=${VENV:-$HOME/loom/.venv}
