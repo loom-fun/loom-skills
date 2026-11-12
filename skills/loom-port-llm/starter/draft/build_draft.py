@@ -22,11 +22,11 @@ def hx(s):
 SAMPLING = 2048          # control-state byte offset of the per-row sampling records
 VERIFY_TABLE, WARM_TABLE = 640, 1152
 PROPOSE_FIRST, PROPOSE_LEVELS, DRAFT_KIND = 1664, 1668, 1672
-# Occupancy gate (SPEC_OCC_MIN=N, default 0 = off): an epoch whose spans are ALL speculative and number >= N verifies only
+# Occupancy gate (SPEC_OCC_MIN=N, default 2; 0 = off): an epoch whose spans are ALL speculative and number >= N verifies only
 # the anchors (1 token per span, the plain decode shape) instead of depth+1 tokens per span. encode_epoch decides and leaves
 # the shape index + 1 at GATE_FLAG; GATE_TABLE[s] holds the index + 1 of the packing shape with s tokens in s spans.
 GATE_FLAG, GATE_TABLE, GATE_SLOTS = 1676, 1700, 32
-OCC_MIN = int(os.environ.get("SPEC_OCC_MIN", "0") or 0)
+OCC_MIN = int(os.environ.get("SPEC_OCC_MIN", "2") or 0)
 
 
 def _sub(text, old, new, count=1):
