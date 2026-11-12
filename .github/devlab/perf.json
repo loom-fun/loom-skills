@@ -6,11 +6,46 @@
  "llamacpp": "b1368",
  "llamacpp_vulkan": "b12211",
  "jobs": [
-  {"name": "ho", "variants": [
-    {"name": "d0", "build": {}, "build_args": ["--draft", "none"], "double": []},
-    {"name": "all", "build": {}, "build_args": ["--draft", "none"], "double": ["*:."]},
-    {"name": "parked", "build": {}, "build_args": ["--draft", "none"], "double": [], "active_wait": false}
+  {
+   "name": "ho",
+   "variants": [
+    {
+     "name": "d0",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": []
+    },
+    {
+     "name": "all",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [
+      "*:."
+     ]
+    },
+    {
+     "name": "parked",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "double": [],
+     "active_wait": false
+    }
    ],
-   "steps": ["perf:d0:2", "c4:d0", "perf:all:2", "c4:all", "perf:parked:2", "c4:parked"]}
+   "steps": [
+    "probe:d0:1",
+    "probe:d0:4",
+    "probe:all:1",
+    "probe:all:4"
+   ]
+  }
  ]
 }

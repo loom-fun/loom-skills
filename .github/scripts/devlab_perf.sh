@@ -326,6 +326,11 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', ro
       "$T" "$B/determinism.py" "$url" --model "$cardid" --conc "$p2" --reps "$p3" --log "$out/determinism_${p1}_c$p2.jsonl" \
         > "$out/determinism_${p1}_c$p2.log" 2>&1
       tail -3 "$out/determinism_${p1}_c$p2.log"; res[$s]=$(tail -1 "$out/determinism_${p1}_c$p2.log" | cut -c1-120);;
+    probe)   # probe:V:N: N streams with /logz epoch records and GPU busy sampling (host_probe.py)
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "probe $p1 streams $p2"
+      "$T" "$here/.github/scripts/host_probe.py" "$url" "$cardid" "$p2" "$out/probe_${p1}_$p2" 2>&1 | tee "$out/probe_${p1}_$p2.log" | cut -c1-300
+      res[$s]=$(grep -E "^(streams|gpu_busy|epochs|epoch period)" "$out/probe_${p1}_$p2.log" | tr '\n' ';' | cut -c1-400);;
     ktest)
       grep -q '"catalog"' "$card/llm_config.json" && { res[$s]="SKIP (catalog package: no generated kernel tests)"; continue; }
       serve_alone "$p1" >/dev/null 2>&1; for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
