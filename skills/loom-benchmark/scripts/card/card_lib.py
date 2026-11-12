@@ -210,6 +210,7 @@ def package_facts(pkg_files, upstream=None):
     ckpt = srcs["model"]
     return {"kind": kind, "execution": execution, "preset": preset_name if len(presets) > 1 else None,
             "checkpoint": ckpt, "drafter": srcs.get("draft"), "projector": srcs.get("vision"), "spec": spec,
+            "occ_min": int((cfg.get("drafter") or cfg.get("draft") or {}).get("occ_min") or 0),   # occupancy gate: streams >= occ_min run undrafted
             "name": re.sub(r"[-_]gguf$", "", ckpt["repo"].split("/")[-1], flags=re.I),
             "output": model.get("model", {}).get("id", "").split("/")[-1] or None,
             "memory_bytes": execution.get("memory_bytes"),

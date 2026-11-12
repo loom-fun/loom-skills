@@ -16,9 +16,9 @@
   {
    "repo": "loom-fun/unsloth-Muse-Glimmer-30B-loom",
    "slug": "muse-glimmer-30b",
-   "memory_bytes": 39000000000,
+   "memory_bytes": 44000000000,
    "kit": "glimmer",
-   "llamacpp": "b1355",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -65,7 +65,7 @@
    "slug": "qwen3-8b",
    "memory_bytes": 29000000000,
    "kit": null,
-   "llamacpp": "b1368",
+   "llamacpp": "b1374",
    "features": [
     "draft",
     "thinking-toggle"
@@ -87,7 +87,7 @@
    "slug": "qwen3.5-4b",
    "memory_bytes": 28000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -111,7 +111,7 @@
    "slug": "ornith-1.5-9b",
    "memory_bytes": 32000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -155,7 +155,7 @@
    "slug": "qwen3.6-35b-a3b",
    "memory_bytes": 48000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -177,9 +177,10 @@
    "slug": "qwen3.5-35b-a3b",
    "memory_bytes": 49000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
+    "draft",
     "thinking-toggle"
    ]
   },
@@ -197,9 +198,9 @@
   {
    "repo": "loom-fun/ggml-org-Qwen3.6-27B-loom",
    "slug": "qwen3.6-27b",
-   "memory_bytes": 53000000000,
+   "memory_bytes": 57000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -239,9 +240,9 @@
   {
    "repo": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
    "slug": "qwen2.5-32b-instruct",
-   "memory_bytes": 49000000000,
+   "memory_bytes": 50000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "draft"
    ]
@@ -289,7 +290,7 @@
    "slug": "llama-3.1-8b-instruct",
    "memory_bytes": 35000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1373",
    "features": [
     "draft"
    ]
@@ -311,7 +312,7 @@
    "slug": "qwen3-vl-8b-instruct",
    "memory_bytes": 59000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1374",
    "features": [
     "vision",
     "draft"
@@ -332,7 +333,7 @@
    "slug": "qwen3-30b-a3b-instruct-2507",
    "memory_bytes": 63000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": []
   },
   {
@@ -364,7 +365,8 @@
    "kit": null,
    "llamacpp": "b1373",
    "features": [
-    "vision"
+    "vision",
+    "draft"
    ]
   },
   {
@@ -459,9 +461,9 @@
   {
    "repo": "loom-fun/bartowski-Ornith-1.5-122B-loom",
    "slug": "ornith-1.5-122b",
-   "memory_bytes": 106000000000,
+   "memory_bytes": 101000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": [
     "vision",
     "draft",
@@ -490,9 +492,9 @@
   {
    "repo": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
    "slug": "qwen3-coder-30b-a3b-instruct",
-   "memory_bytes": 56000000000,
+   "memory_bytes": 57000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1374",
    "features": []
   },
   {
@@ -533,7 +535,7 @@
    "slug": "qwen3-14b",
    "memory_bytes": 31000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": [
     "draft",
     "thinking-toggle"
@@ -554,7 +556,7 @@
    "slug": "laguna-xs-2.1",
    "memory_bytes": 81000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1373",
    "features": [
     "thinking-toggle"
    ]

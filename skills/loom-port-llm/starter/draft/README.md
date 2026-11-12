@@ -128,8 +128,8 @@ row loses, and ranks that candidate by the same margin; a card whose long row wi
 
 Builds each available kind once at the full native context (build.py sizes each candidate's memory; a drafter adds
 KV per position), serves each depth (a `model.json` setting; DFlash up to the drafter's block - 1) alone, times
-decode-heavy requests (essay, code, a tool call, a reasoning answer; thinking off) plus one decode after a 16k document
-(`TUNE_LONG`) and, with a multi-row preset, `rows` concurrent essays (`streams4`). A candidate's margin is its worst
+decode-heavy requests (essay, code, a tool call, a reasoning answer; thinking off) plus one decode after the 32k document the card's decode_32k row uses
+(`TUNE_LONG`, the largest document the context holds) and, with a multi-row preset, `rows` concurrent essays (`streams4`). A candidate's margin is its worst
 row relative to depth 0; it is used only if no row is slower than 0.98 x depth 0 and its single-stream rate beats no
 drafting by 3 %, and the best margin ranks first. Low-acceptance drafting loses on exactly the prose, 32k and 4-stream
 rows (every span verifies depth + 1 tokens, padded to 16 at 4 streams): Qwen3.5-0.8B ngram depth 3 decode 223 vs 258 tok/s

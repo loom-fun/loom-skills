@@ -639,8 +639,10 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
     ZB_DECL = "".join(f"  %zb{p} = check.generate.fill value(0.0) : tensor<{BW[p]}xf32>\n" for p in BIAS)
     ZB_ARGS = "".join(f", %zb{p}" for p in BIAS)
     def st(tt, pre):
-        return (f"  kernel.launch @g_qk_rope_store[%{pre}t](%{pre}t, %layer, %rope, %ctx, %pool, %{pre}q, %{pre}k, %{pre}v, %qn, %kn, %{pre}info, %orig, %arena{ZB_ARGS}) : "
-                f"[index](index, index, i32, index, index, tensor<{tt}x{QD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{tt}x4xi32>, tensor<{10 + blocks}xi32>, {AR}{B_TYPES})\n")
+        mr = (f"  %{pre}mr_meta = check.file.read.npy path(\"mr_meta.npy\") : tensor<16xi32>\n  %{pre}mr_ids = check.generate.fill value(0) : tensor<{tt * 8}xi32>\n" if MR else "")
+        mra = f", %{pre}mr_meta, %{pre}mr_ids" if MR else ""
+        return (mr + f"  kernel.launch @g_qk_rope_store[%{pre}t](%{pre}t, %layer, %rope, %ctx, %pool, %{pre}q, %{pre}k, %{pre}v, %qn, %kn, %{pre}info, %orig, %arena{mra}{ZB_ARGS}) : "
+                f"[index](index, index, i32, index, index, tensor<{tt}x{QD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{tt}x{KD}xf32>, tensor<{D}xf32>, tensor<{D}xf32>, tensor<{tt}x4xi32>, tensor<{10 + blocks}xi32>, {AR}{mr_types(tt)}{B_TYPES})\n")
     cases.append(f"""check.case public @{tag} {{
   %ht = check.literal value({p0}) : index
   %st = check.literal value({t}) : index
@@ -676,6 +678,12 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
   check.return
 }}
 """)
+# gen_llm.gqa_split: non-drafting head_dim 128 packages decode past attn_rules.ATTN_GQA_FROM visible keys with the K/V-once kernel body;
+# no other case here reaches 4096 keys, so this span (4296 keys, decode path vs numpy) is its only coverage
+_draft = cfg.get("draft") or {}
+if (D == 128 and attn_rules.ATTN_GQA and attn_rules.paged(attn_rules.UNROLL) and attn_rules.butterfly(attn_rules.UNROLL)
+        and _draft.get("kind") not in ("mtp", "dflash", "ngram", "assist") and os.environ.get("PREFILL_CONT", "1") != "0"):
+    prefill_cont_case(A0, attn_rules.ATTN_GQA_FROM + 200, 16, 0, "pc_gqa")
 if cfg.get("attn_sinks") and os.environ.get("PREFILL_CONT", "1") != "0":
     _sl = cfg.get("sliding_layers") or []
     _ns = [i for i in range(cfg["layers"]) if i not in set(_sl) and i not in set(cfg.get("recurrent_layers", []))]

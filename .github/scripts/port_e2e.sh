@@ -7,6 +7,8 @@
 #
 #   [SK=skills dir] [REFERENCE=auto|off|loom-fun/REPO] [CATALOG=DIR] [LOOM_ROOT=DIR/loom] [GPU_LOCK=/tmp/loom-gpu.lock] \
 #     port_e2e.sh ORG/REPO[:FILE.gguf] DIR [PORT=8160] [LLAMA_PORT=8130] [MODEL_ID]
+#   MEMORY_GIB (env, default auto = 60 % of RAM): the memory budget port.sh fits the context to; a job whose native context
+#   does not fit the default (a 104 GiB GGUF is built at 4096 tokens) sets it in port.json ("env": {"MEMORY_GIB": "98"}).
 #
 # A catalog-package port (loom-port-llm/SKILL.md) pins its own SDK: port.sh installs it next to LOOM_ROOT
 # (ensure_sdk.sh) and records the root in work/loom_root, which every later stage here uses.
@@ -71,7 +73,7 @@ ph port
 # stage runs with fd 9 closed (9>&-): a server it leaves running must not inherit the lock (flock -o, as in lock()).
 (
   [ -n "${GPU_LOCK:-}" ] && { exec 9>"$GPU_LOCK"; flock 9; }
-  "$P/port.sh" "$spec" "$W" "$port" auto $model_id > "$out/port.log" 2>&1 9>&-; rc=$?
+  "$P/port.sh" "$spec" "$W" "$port" "${MEMORY_GIB:-auto}" $model_id > "$out/port.log" 2>&1 9>&-; rc=$?
   tail -4 "$out/port.log"
   [ $rc = 0 ] || { echo "port.sh exit $rc"; exit $rc; }
   gguf=$(ls "$W"/gguf/*.gguf | head -1)

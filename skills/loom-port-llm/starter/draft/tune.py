@@ -6,8 +6,8 @@ Candidates: no drafting; MTP (the GGUF's NextN block) at depths 1-4; DFlash (cfg
 at depths 1, 2, 3, 5, 7 (capped by its block); a Gemma-4 assistant (cfg["assistant"]) at depths 1-4; n-gram prompt lookup (any model, no weights) at depths 1, 2, 3, 5. Each method
 is built once; a depth is only a model.json setting (the width-specialized stages compile on first use). Every
 candidate is served alone and timed on decode-heavy requests (short essay, code, a tool-call turn, a reasoning answer,
-a code edit that returns most of its input as agents' file edits do, and one decode after a 16k-token document, at most
-half the context; greedy, client-side tokens/s) and, with a multi-row preset, on `rows` concurrent essays (streams4).
+a code edit that returns most of its input as agents' file edits do, and one decode after the 32k-token document (the card's
+decode_32k row; the largest that fits a shorter context); greedy, client-side tokens/s) and, with a multi-row preset, on `rows` concurrent essays (streams4).
 Each candidate's margin is its worst row relative to depth 0. A drafter is used only if no row is slower than 0.98 x depth 0
 (prose, long-document and 4-stream decode are the card's headline rows: low-acceptance drafting loses 20-40 % there) and
 its single-stream rate (harmonic mean) beats no drafting by at least 3 %; the best margin wins; its kind/depth go to cfg["drafter"] and pkg/ is rebuilt with it
@@ -63,10 +63,13 @@ def sh(*cmd, **kw):
     return subprocess.run([str(c) for c in cmd], check=True, text=True, capture_output=True, **kw)
 
 
-# One decode request after a long document (TUNE_LONG tokens, at most half the context): each verified token pays its
-# decode attention over the whole KV and a drafter attends the context too, so the depth that wins on short text can
-# lose at long context (Qwen3-8B DFlash at 32k: depth 7 13.7 tok/s, depth 3 20.1, none 19.5). TUNE_LONG=0 leaves it out.
-LONG_CTX = int(os.environ.get("TUNE_LONG", "16000"))
+# One decode request after a long document (TUNE_LONG tokens, the card's decode_32k document when the context holds it plus
+# the 256-token reply and LONG_HEADROOM): each verified token pays its decode attention over the whole KV and a drafter
+# attends the context too, so the depth that wins on short text can lose at long context (Qwen3-8B DFlash at 32k: depth 7
+# 13.7 tok/s, depth 3 20.1, none 19.5). A 16k row hid the 32k loss: Qwen2.5-32B ngram depth 2 won 16k by 14 % and lost
+# decode_32k by 13 % (6.45 vs 7.43 tok/s without drafting, attention reads 8.6 GB of KV there). TUNE_LONG=0 leaves it out.
+LONG_CTX = int(os.environ.get("TUNE_LONG", "32000"))
+LONG_HEADROOM = 512
 
 
 # Rows that must not get slower: the card's headline decode, decode_32k and streams4 are prose, where an n-gram or
@@ -83,15 +86,15 @@ CTX_GATE = int(os.environ.get("TUNE_CTX_MAX", "3500"))
 
 def measure(url, model, chat, context=0, rows=1):
     """{row: decode tok/s} of the candidate being served: the WORK requests (work0..), the decode after a long
-    document ("long", at most half the context) and, with a multi-row preset, "streams4": the aggregate of `rows`
-    concurrent essays (measure_c4)."""
+    document ("long": the decode_32k document if the context holds it, else the largest that fits) and, with a
+    multi-row preset, "streams4": the aggregate of `rows` concurrent essays (measure_c4)."""
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
     # Warm-up: the first timed request's own shape, untimed (perf.py does the same). A 16-token request left the drafted
     # stages' first compiles inside work0: LFM3-Omni-2B scored 154 tok/s there at every n-gram depth against 169 without
     # drafting, where the same request after a full warm-up decodes 172 (card perf, depth 2) and the tuner dropped drafting.
     stream(url, model, WORK[0][0], 256, extra=off)
     work = [(f"work{i}", m, x) for i, (m, x) in enumerate(WORK)]
-    n = max((d for d in DOC_SIZES if d <= min(LONG_CTX, context // 2)), default=0)
+    n = max((d for d in DOC_SIZES if d <= min(LONG_CTX, context - LONG_HEADROOM)), default=0)
     if n >= 4000:
         work.append(("long", [{"role": "user", "content": "Write a long, detailed essay discussing this documentation.\n\n" + doc(n)}], {}))
     res = {}
@@ -150,6 +153,17 @@ def single_rate(rows):
 def margin(rows, base_rows):
     """The candidate's worst row relative to depth 0 (min over the rows depth 0 measured; 0.0 when a row is missing)."""
     return min((rows.get(k, 0.0) / t for k, t in base_rows.items() if t), default=0.0)
+
+
+def geomean_margin(rows, base_rows, refs=None):
+    """Geometric mean of the row ratios: each row relative to llama.cpp's rate for it when refs are known (the rows
+    llama_margin maps), else relative to depth 0. The tie-break among candidates whose worst rows are within NO_LOSS."""
+    if refs:
+        ref = lambda k: refs.get("c4" if k == "streams4" else "decode_32k" if k == "long" else "decode")
+        r = [t / ref(k) for k, t in rows.items() if ref(k)]
+    else:
+        r = [rows.get(k, 0.0) / t for k, t in base_rows.items() if t]
+    return statistics.geometric_mean(r) if r and min(r) > 0 else 0.0
 
 
 def load_llama_refs(cfg):
@@ -211,7 +225,8 @@ def concurrent_ok(url, model, chat):
 
 
 def prior_depths(prior, kind, allowed):
-    """(depths to measure first, climb) for this method from a reference's tuned table: its best depth's neighbourhood;
+    """(depths to measure first, climb) for this method from a reference's tuned table: its best depth's neighbourhood
+    and the shallowest depth;
     a method that lost clearly there (under 75 % of the reference's winner) gets one probe at its best depth, and
     climbs only if it does better here (tune() checks)."""
     rows = [r for r in prior or [] if r.get("kind") == kind and r.get("depth") and r.get("decode_tps")]
@@ -222,7 +237,9 @@ def prior_depths(prior, kind, allowed):
     i = min(range(len(allowed)), key=lambda j: abs(allowed[j] - top["depth"]))
     if top["decode_tps"] < 0.75 * winner:
         return [allowed[i]], False
-    return [allowed[j] for j in (i - 1, i, i + 1) if 0 <= j < len(allowed)], True
+    # the shallowest depth too: it reads the fewest verify tokens at long context, where a reference's single-stream
+    # winner can lose (Qwen3-14B n-gram: reference best depth 2, depth 1 won decode_32k 17.3 vs 13.9)
+    return sorted({allowed[j] for j in (0, i - 1, i, i + 1) if 0 <= j < len(allowed)}), True
 
 
 def serve(name, port, mem, card, env):
@@ -262,9 +279,13 @@ def main():
         if os.environ.get("TUNE_PRIOR", "1") != "0" else None
     skipped = {}
     build = [T, os.path.join(STARTER, "build.py"), cfg_path]
-    # No --memory-gib: each candidate (and the final package) sizes its own budget for the full native context
+    # No --memory-gib by default: each candidate (and the final package) sizes its own budget for the full native context
     # (a drafter adds KV per position; passing the old budget shrank DFlash packages' context to fit).
     common = ["--tokenizer", os.path.join(work, "tok", "tokenizer.json"), "--model-id", model_id]
+    # An explicit budget (MEMORY_GIB, as port_e2e.sh/port.sh were given) applies to every build: a GGUF that does not fit the
+    # 60 %-of-RAM default would otherwise be rebuilt here at a 4096-token context (Ornith-1.5-122B), losing the long rows.
+    if os.environ.get("MEMORY_GIB", "auto") not in ("", "auto"):
+        common += ["--memory-gib", os.environ["MEMORY_GIB"]]
     base, base_rows = None, {}
     if kinds:
         # The depth 0 row is a package built without a drafter: a drafting build never gets the no-draft-only kernels
@@ -388,12 +409,13 @@ def main():
                 measured[row["depth"]] = sc
                 if sc > best[2]:
                     best = (kind, row["depth"], sc)
-        # context-gate retry for this kind's best depth when only the long row is below NO_LOSS x depth 0
+        # context-gate retry for this kind's best depth when the long row is not ahead of depth 0 by more than the noise
+        # band (long <= depth 0's / NO_LOSS: slower, tied or barely faster); the ranking keeps whichever scores better
         if CTX_GATE and measured and base_rows.get("long"):
             best_d = max(measured, key=measured.get)
             r = next(x for x in table if x["kind"] == kind and x["depth"] == best_d)
             rest = {k: v for k, v in base_rows.items() if k != "long"}
-            if r["rows"].get("long", 0.0) < NO_LOSS * base_rows["long"] and margin(r["rows"], rest) >= NO_LOSS:
+            if r["rows"].get("long", 0.0) <= base_rows["long"] / NO_LOSS and margin(r["rows"], rest) >= NO_LOSS:
                 pkg_c = os.path.join(work, f"pkg_tune_{kind}_ctx")
                 sh(*build, pkg_c, *common, "--draft", kind, env=dict(os.environ, SPEC_CTX_MAX=str(CTX_GATE), SPEC_OCC_MIN=str(r.get("occ_min", 2))))
                 card_c = json.load(open(os.path.join(pkg_c, "model.json")))
@@ -454,17 +476,25 @@ def main():
             if r["kind"] != "none":
                 r["margin"] = r["margin_llama"]
         # the noise band only while the drafter still beats llama.cpp on every row: never trade a losing row for a worse one
-        ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor)
+        # Where depth 0 itself loses a row to llama.cpp (floor < 1) a drafter may tie that row (within half the band) if
+        # its rows' geometric mean is clearly ahead of depth 0's (Ornith-1.5-35B DFlash 3 + ctx gate: worst row 0.979 vs
+        # 0.982, decode 88.9 vs 63.4).
+        base_geo = geomean_margin(base_rows, base_rows, llama_refs)
+        ok_margin = lambda r: r["margin"] > floor or (r["margin"] >= 1.0 and r["margin"] >= NO_LOSS * floor) or (
+            floor < 1.0 and r["margin"] >= (1 + NO_LOSS) / 2 * floor and geomean_margin(r["rows"], base_rows, llama_refs) >= 1.05 * base_geo)
     else:
         ok_margin = lambda r: r["margin"] >= NO_LOSS
     ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
                     key=lambda r: -r["margin"])
     # Within NO_LOSS of the best margin (noise on these short requests; a wider band on a ratio near 1 would admit
-    # every candidate), the shallower depth first: every drafted token is verified with decode attention over the
-    # whole context (Qwen3.6-35B-A3B DFlash: depth 7 vs 3 was 109 vs 105 tok/s short, 31 vs 48 tok/s at 32k).
+    # every candidate), the higher geometric mean of the row ratios first: the context gate (ctx_max) now keeps the
+    # long-context cost of deep drafting out, which "shallowest first" used to protect (Ornith-1.5-35B: DFlash depth 3
+    # with the gate decodes 87.7 vs 66.2 undrafted with streams4 161 vs 165, and lost to a shallower depth on that rule).
     if ranked:
         top = ranked[0]["margin"]
-        ranked.sort(key=lambda r: (r["margin"] < NO_LOSS * top, r["depth"] if r["margin"] >= NO_LOSS * top else 0, -r["margin"]))
+        for r in ranked:
+            r["geomean"] = round(geomean_margin(r["rows"], base_rows, llama_refs), 3)
+        ranked.sort(key=lambda r: (r["margin"] < NO_LOSS * top, -r["geomean"] if r["margin"] >= NO_LOSS * top else 0, -r["margin"]))
     choice, ctx_max = ("none", 0, base, 2), 0
     for r in ranked:
         kind, depth, ctx = r["kind"], r["depth"], r.get("ctx_max", 0)

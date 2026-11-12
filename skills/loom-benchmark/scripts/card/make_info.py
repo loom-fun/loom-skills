@@ -591,7 +591,9 @@ def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acc
             continue
         c = ceil[rk]
         row = {"ceiling": round(c, 1), "efficiency": round(R.efficiency(m, rk, c), 3)}
-        if spec and key in DRAFTED_ROWS:
+        if spec and key in DRAFTED_ROWS and key == "streams4" and 0 < facts.get("occ_min", 0) <= 4:
+            pass   # the occupancy gate runs 4 streams undrafted: the plain ceiling above is the row's
+        elif spec and key in DRAFTED_ROWS:
             row = {"ceiling": None, "single_pass": round(c, 1)}
             acc, how = (row_acceptance or {}).get(key), "session"
             if acc is None:
