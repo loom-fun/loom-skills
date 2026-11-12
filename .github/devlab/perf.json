@@ -6,7 +6,7 @@
  "llamacpp": "b1370",
  "jobs": [
   {
-   "name": "hpw",
+   "name": "po",
    "variants": [
     {
      "name": "b0",
@@ -16,40 +16,61 @@
      "build": {}
     },
     {
-     "name": "h2",
+     "name": "u8",
      "execution": {
       "draft_depth": 0
      },
      "build": {
-      "ATTN_HPW": "2"
+      "ATTN_UNROLL_512": "8"
      }
     },
     {
-     "name": "h4",
+     "name": "u16",
      "execution": {
       "draft_depth": 0
      },
      "build": {
-      "ATTN_HPW": "4"
+      "ATTN_UNROLL_512": "16"
      }
     },
     {
-     "name": "h8",
+     "name": "po",
      "execution": {
       "draft_depth": 0
      },
      "build": {
-      "ATTN_HPW": "8"
+      "ATTN_PAGE_OUTER": "1"
+     }
+    },
+    {
+     "name": "po8",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {
+      "ATTN_PAGE_OUTER": "1",
+      "ATTN_UNROLL_512": "8"
+     }
+    },
+    {
+     "name": "po_s128",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {
+      "ATTN_PAGE_OUTER": "1",
+      "ATTN_SPLITS": "128"
      }
     }
    ],
    "steps": [
     "perf:b0:1:long",
-    "perf:h2:1:long",
-    "perf:h4:1:long",
-    "perf:h8:1:long",
-    "ktest:h4",
-    "ktest:h8"
+    "perf:u8:1:long",
+    "perf:u16:1:long",
+    "perf:po:1:long",
+    "perf:po8:1:long",
+    "perf:po_s128:1:long",
+    "ktest:po"
    ]
   }
  ]
