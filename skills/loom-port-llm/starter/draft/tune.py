@@ -3,7 +3,7 @@
 usage: tune.py WORKDIR PORT MEMORY_GIB MODEL_ID (MEMORY_GIB is ignored: build.py sizes each candidate)   (WORKDIR holds cfg.json, tok/tokenizer.json and pkg/; Loom must not be
                                                  serving another model: one model is loaded at a time)
 Candidates: no drafting; MTP (the GGUF's NextN block) at depths 1-4; DFlash (cfg["drafter"], found by find_drafter.py)
-at depths 3, 5, 7 (capped by its block); a Gemma-4 assistant (cfg["assistant"]) at depths 1-4; n-gram prompt lookup (any model, no weights) at depths 2, 3, 5. Each method
+at depths 3, 5, 7 (capped by its block); a Gemma-4 assistant (cfg["assistant"]) at depths 1-4; n-gram prompt lookup (any model, no weights) at depths 1, 2, 3, 5. Each method
 is built once; a depth is only a model.json setting (the width-specialized stages compile on first use). Every
 candidate is served alone and timed on decode-heavy requests (short essay, code, a tool-call turn, a reasoning answer,
 a code edit that returns most of its input as agents' file edits do, and one decode after a 16k-token document, at most
@@ -240,7 +240,7 @@ def main():
             kinds.append(("dflash", [3, 5, 7]))
         if (cfg.get("assistant") or {}).get("gguf"):
             kinds.append(("assist", [1, 2, 3, 4]))   # Gemma-4 assistant (gemma4 family)
-        kinds.append(("ngram", [2, 3, 5]))   # every model: prompt lookup needs no drafter
+        kinds.append(("ngram", [1, 2, 3, 5]))   # every model: prompt lookup needs no drafter   # depth 1: LFM3-Omni-2B decode_32k 122 vs 108 at depth 2 (verify tokens pay 32k attention), decode_2k 206 vs 220
     sys.path.insert(0, STARTER)
     import catalog
     if catalog.find(STARTER):   # a catalog package drafts with its MTP head or not at all (catalog.py)
