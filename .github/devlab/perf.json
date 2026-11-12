@@ -1,9 +1,9 @@
 {
- "_comment": "Sweep C prefill regression ablation on Spark-X2.6 (published card vs rebuild from main).",
+ "_comment": "Sweep C prefill regression bisect on Spark-X2.6: rebuilds from older starter commits.",
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "x26abl",
+   "name": "b_p213",
    "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
    "memory_bytes": 55000000000,
    "kit": null,
@@ -20,41 +20,9 @@
      ]
     },
     {
-     "name": "nolive",
-     "build": {
-      "LIVE_ROW_SKIP": "0"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "noflash",
-     "build": {
-      "NO_FLASH2": "1"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "norowscale",
-     "build": {
-      "POST_ADD_ROW_SCALE": "0",
-      "ROW_SCALE_LIVE": "0"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "nogemm256",
-     "build": {
-      "GEMM_M256": "0"
-     },
+     "name": "p213",
+     "build": {},
+     "ref": "6c36e0d8b532c15a1e690d54b25a910f2f2c026d",
      "build_args": [
       "--draft",
       "none"
@@ -66,14 +34,116 @@
     "perf:card:2:long",
     "perf:m0:2",
     "perf:m0:2:long",
-    "perf:nolive:2",
-    "perf:nolive:2:long",
-    "perf:noflash:2",
-    "perf:noflash:2:long",
-    "perf:norowscale:2",
-    "perf:norowscale:2:long",
-    "perf:nogemm256:2",
-    "perf:nogemm256:2:long"
+    "perf:p213:2",
+    "perf:p213:2:long"
+   ]
+  },
+  {
+   "name": "b_p193",
+   "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "m0",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "p193",
+     "build": {},
+     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f",
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "perf:m0:2",
+    "perf:m0:2:long",
+    "perf:p193:2",
+    "perf:p193:2:long"
+   ]
+  },
+  {
+   "name": "b_p136",
+   "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "m0",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "p136",
+     "build": {},
+     "ref": "67a32221a30953b8c2c0617f3710520d6badcf94",
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "perf:m0:2",
+    "perf:m0:2:long",
+    "perf:p136:2",
+    "perf:p136:2:long"
+   ]
+  },
+  {
+   "name": "b_p116",
+   "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "m0",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    },
+    {
+     "name": "p116",
+     "build": {},
+     "ref": "37248356094ac8f23ddaa5301ea9e5a043175308",
+     "build_args": [
+      "--draft",
+      "none"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "perf:m0:2",
+    "perf:m0:2:long",
+    "perf:p116:2",
+    "perf:p116:2:long"
    ]
   }
  ]
