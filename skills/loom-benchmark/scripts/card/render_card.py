@@ -107,6 +107,9 @@ def package_sdk(gen, versions):
     return sdk_text((versions.get("package") or {}).get("hrx_loom"))
 
 
+LEARN_MORE = "Learn more on the [Loom ecosystem website](https://loom-fun.github.io/loom-dev/)."
+
+
 def required_sdk(facts, versions, sources):
     """The hrx-loom build the Quick start must install: llm_config.json "sdk" (an explicit requirement, possibly a CI
     build), else the PyPI release that generated the programs, else the one the card's package record or its
@@ -266,7 +269,7 @@ def render(d):
     L += [f"# {facts['name']}{quant} for AMD Loom", "",
           f"A [Loom]({LOOM_URL}) package (`.loom` programs and a `model.json` card) for the unmodified GGUF checkpoint "
           f"{hf(c['repo'])} (`{c['file']}`), generated on an AMD Ryzen AI Max+ 395 \"Strix Halo\" with the "
-          f"[loom-skills]({SKILLS_URL}) workflow.", ""]
+          f"[loom-skills]({SKILLS_URL}) workflow. {LEARN_MORE}", ""]
 
     fetch = ["loom-fetch", f"{HF}/{info['repo']}/resolve/main/model.json"]
     if facts["preset"]:
