@@ -330,6 +330,11 @@ def cmd_apply(a):
             continue
         if k not in cfg:
             cfg[k] = v; taken.append(k)
+        elif k == "extra_eos_ids" and cfg.get("eos_id") == rc.get("eos_id") and cfg.get("vocab") == rc.get("vocab") \
+                and set(v) - set(cfg[k]):
+            # extra stop ids (flint: <|user|>, <|observation|>) come from the reviewed port when inspect found fewer:
+            # same architecture, EOS and vocabulary size; only ever more stops, never fewer
+            cfg[k] = sorted(set(cfg[k]) | set(v)); taken.append(k)
         elif cfg[k] != v:
             review.append(k)
     chat_ok = bool(cfg.get("chat")) and not a.chat_failed
