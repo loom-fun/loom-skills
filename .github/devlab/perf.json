@@ -1,12 +1,12 @@
 {
- "_comment": "flash2: #193 with the old prologue / direct first token (WIP)",
+ "_comment": "flash2: broadcast of the listed tile entry (WIP)",
  "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
  "memory_bytes": 55000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "f2z",
+   "name": "f2w",
    "variants": [
     {
      "name": "pre",
@@ -27,33 +27,55 @@
      "ref": "815997c1166b74ebb1d8e74e1d4e2728b3b34cb8"
     },
     {
-     "name": "p193_oldpro",
+     "name": "p193_bc",
      "build": {
-      "FLASH2_OLD_PROLOGUE": "1"
+      "FLASH2_ENTRY": "bcast"
      },
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "231d64a9075b3b4b6600be4155655354053eebda"
+     "ref": "fa2899617634c1c1d7c124338aa0e489ee79d35d"
     },
     {
-     "name": "p193_direct",
+     "name": "p193_bc3",
      "build": {
-      "FLASH2_DIRECT": "1"
+      "FLASH2_ENTRY": "bcast3"
      },
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "231d64a9075b3b4b6600be4155655354053eebda"
+     "ref": "fa2899617634c1c1d7c124338aa0e489ee79d35d"
+    },
+    {
+     "name": "main",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "6fd2f49"
+    },
+    {
+     "name": "main_bc",
+     "build": {
+      "FLASH2_ENTRY": "bcast"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "a5269861df4c287f28ca8439c04ed5e37cf9c9da"
     }
    ],
    "steps": [
     "perf:pre:2:long",
     "perf:p193:2:long",
-    "perf:p193_oldpro:2:long",
-    "perf:p193_direct:2:long"
+    "perf:p193_bc:2:long",
+    "perf:p193_bc3:2:long",
+    "perf:main:2:long",
+    "perf:main_bc:2:long"
    ]
   }
  ]
