@@ -23,7 +23,6 @@ import shutil
 import statistics
 import subprocess
 import sys
-import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -87,26 +86,6 @@ def measure(url, model, chat, context=0, rows=1):
     for name, messages, extra in work:
         r = stream(url, model, messages, 256, extra={**off, **extra}, timeout=900)
         if r.get("decode_tps"):
-<<<<<<< HEAD
-            tps.append(r["decode_tps"])
-    if tps and os.environ.get("TUNE_STREAMS", "4") != "0":
-        # The card's streams4 metric: four requests decoding at once. Drafting verifies 4+ tokens per stream per step, which
-        # on a MoE gathers every expert and can cost more than it gains (Gemma-4-26B-A4B DFlash: 4 streams 110 vs 157 tok/s
-        # without, one stream equal). One row (the per-stream rate of the batch) in the harmonic mean makes the choice weigh it.
-        res = [None] * 4
-        PLAIN = [w for w in WORK if "tools" not in w[1]][:4]   # the tool-call turn reports no decode rate
-
-        def run(i):
-            res[i] = stream(url, model, PLAIN[i][0], 256, extra=off, timeout=900)
-        ts = [threading.Thread(target=run, args=(i,)) for i in range(4)]
-        [t.start() for t in ts]
-        [t.join() for t in ts]
-        rates = [r["decode_tps"] for r in res if r and r.get("decode_tps")]
-        if len(rates) == 4:
-            tps.append(statistics.mean(rates))
-    measure.rows = [round(t, 1) for t in tps]   # the rows (workload order, 4-stream last), for diagnostics
-    return statistics.harmonic_mean(tps) if tps else 0.0
-=======
             res[name] = r["decode_tps"]
     c4 = measure_c4(url, model, chat, rows)
     if c4:
@@ -151,13 +130,13 @@ def single_rate(rows):
 def margin(rows, base_rows):
     """The candidate's worst row relative to depth 0 (min over the rows depth 0 measured; 0.0 when a row is missing)."""
     return min((rows.get(k, 0.0) / t for k, t in base_rows.items() if t), default=0.0)
->>>>>>> origin/devlab-perf-source
 
 
 def concurrent_ok(url, model, chat):
     """Agentic serving runs several requests at once: ~300-token prompts two at a time 0.5 s apart (both draft right
     after nearly simultaneous prefills) and four together (consistency.py's prompts), twice each, must all complete.
     A candidate that fails is not chosen."""
+    import threading
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
     body = doc(1000)
     prompts = [f"Question {i}: summarize part {i} of this text.\n\n" + body[i * 700:(i * 700) + 700 + 157 * i] for i in range(4)]
@@ -212,7 +191,7 @@ def main():
         if cfg.get("mtp"):
             kinds.append(("mtp", [1, 2, 3, 4]))
         if (cfg.get("drafter") or {}).get("gguf"):
-            kinds.append(("dflash", [1, 2, 3, 5, 7]))   # 1-2: a shallow draft can win the multi-stream and long-context rows (Gemma-4-26B-A4B)
+            kinds.append(("dflash", [3, 5, 7]))
         if (cfg.get("assistant") or {}).get("gguf"):
             kinds.append(("assist", [1, 2, 3, 4]))   # Gemma-4 assistant (gemma4 family)
         kinds.append(("ngram", [2, 3, 5]))   # every model: prompt lookup needs no drafter
