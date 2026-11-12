@@ -708,7 +708,7 @@
 +# KV heads per kind: Gemma-4 12B/26B/31B give the global layers fewer (cfg kv_heads_global; kv_heads is the sliding count).
 +KVH_G = CFG.get("kv_heads_global") or KVH
 +assert KVH_G == KVH or DSWA != D, "per-kind KV heads need distinct sliding/global head dims"
-+DIMS = {D: dict(rd=CFG.get("rope_dims") or D, theta=CFG["rope_theta"], unroll=(8 if KVH_G == 1 else 4) if D >= 512 else 16, cut=FREQ_CUT, kvh=KVH_G)}
++DIMS = {D: dict(rd=CFG.get("rope_dims") or D, theta=CFG["rope_theta"], unroll=(8 if KVH_G <= 2 else 4) if D >= 512 else 16, cut=FREQ_CUT, kvh=KVH_G)}
 +if DSWA != D:
 +    DIMS[DSWA] = dict(rd=CFG.get("rope_dims_swa") or DSWA, theta=CFG.get("rope_theta_swa") or CFG["rope_theta"], unroll=16, cut=None, kvh=KVH)
  DL = D // 32                              # head dims per lane in the attention kernels
