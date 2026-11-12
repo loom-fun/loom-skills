@@ -883,6 +883,9 @@ if cfg.get("recurrent_layers"):
   check.return
 }}
 """)
+    from gen_gdn import gdn_geometry as _gg, recurrence_pf as _rpf
+    if _rpf(_gg(cfg)):   # prefill epochs launch the 8 x 4 split g_gdn_recurrence_pf: the same case
+        cases.append(cases[-1].replace("g_gdn_recurrence[", "g_gdn_recurrence_pf[").replace("@gdn_recurrence_spans", "@gdn_recurrence_pf_spans"))
 # g_row_scale_f16 (the GEMM A operand): per-row power-of-two scale 2^-e, e = clamp(floor(log2 max|x|) - 13, 0, 100),
 # x16 = f16(x * scale); rows of very different magnitude, width = the FFN width (the widest the model uses).
 if os.environ.get("GEMM_TESTS", "1") == "1":

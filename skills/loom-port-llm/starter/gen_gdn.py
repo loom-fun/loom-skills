@@ -144,7 +144,7 @@ def gdn_kernels(cfg, eps):
       %acc{j} = scalar.fmaf %w{j}, %x{j}, {"%zero_f" if j == 0 else f"%acc{j - 1}"} : f32""")
     # CU channels per loop step (c, c + stride, ...), every load before any store: Loom orders a global load
     # after earlier global stores, so one channel per step paid a store -> load round trip per channel.
-    CU = int(os.environ.get("GDN_CONV_UNROLL", "4"))
+    CU = int(os.environ.get("GDN_CONV_UNROLL", "8"))
     tap_text = chr(10).join(taps) + f"""
       %sig = scalar.logisticf<afn> %acc{K - 1} : f32
       %silu = scalar.mulf %acc{K - 1}, %sig : f32"""
@@ -489,6 +489,12 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
     RL = _row_lanes(DK, DV)
     if RL:
         T[-1] = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close)
+        # Prefill epochs (gen_llm's %gemm shape) keep the 8 lanes x 4 columns split that measured fastest there; the
+        # decode/verify epochs run g_gdn_recurrence (16 x 2 by default: +5 % decode on Qwen3.5-35B-A3B, -12 % prefill).
+        PF = (8, 4)
+        if recurrence_pf(G):
+            pf = _recurrence_rows(G, NG, LB, *PF, guard_open, guard_close)
+            T.append(pf.replace("g_gdn_recurrence", "g_gdn_recurrence_pf"))
     # ---- gated RMSNorm per value head: out = rmsnorm(o) * w * silu(z); padding tokens get zeros. One wave per head,
     # HPW heads per workgroup: 32-lane workgroups (tokens x HV of them) made this tiny kernel cost as much as the
     # recurrence at prefill (Qwen3.5-35B-A3B, 1k tokens: 32k workgroups per layer).
@@ -555,12 +561,25 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
     return text
 
 
+def recurrence_pf(G):
+    """True when prefill epochs launch g_gdn_recurrence_pf (the 8 x 4 split) beside the decode form g_gdn_recurrence."""
+    RL = _row_lanes(G["DK"], G["DV"])
+    return bool(RL) and "GDN_ROW_LANES" not in os.environ and RL != (8, 4) and _row_fits(G["DK"], G["DV"], 8, 4)
+
+
+def _row_fits(DK, DV, rl, cw):
+    return rl in (1, 2, 4, 8, 16, 32) and cw in (2, 4, 8) and DK % rl == 0 and (DK // rl) % 4 == 0 and DV % (cw * 32 // rl) == 0
+
+
 def _row_lanes(DK, DV):
     """Lanes per value column in the row-split recurrence (0: the original 32-lane form). GDN_ROW_LANES overrides."""
-    RL = int(os.environ.get("GDN_ROW_LANES", "8"))
-    CW = int(os.environ.get("GDN_COLS", "4"))
-    ok = RL in (1, 2, 4, 8, 16, 32) and CW in (2, 4, 8) and DK % RL == 0 and (DK // RL) % 4 == 0 and DV % (CW * 32 // RL) == 0
-    return (RL, CW) if ok else 0
+    RL = int(os.environ.get("GDN_ROW_LANES", "16"))
+    CW = int(os.environ.get("GDN_COLS", "2"))
+    if _row_fits(DK, DV, RL, CW):
+        return (RL, CW)
+    if "GDN_ROW_LANES" not in os.environ and "GDN_COLS" not in os.environ and _row_fits(DK, DV, 8, 4):
+        return (8, 4)   # the former defaults, for head dims the new ones do not divide
+    return 0
 
 
 def _recurrence_rows(G, NG, LB, RL, CW, guard_open, guard_close):
@@ -572,7 +591,7 @@ def _recurrence_rows(G, NG, LB, RL, CW, guard_open, guard_close):
     the token's decay/beta are computed once per workgroup. The step's inputs are loaded one step ahead and the
     outputs stored in RL-step batches (lane r keeps step r's CW outputs), so no global store sits between the
     loop's loads. Same arithmetic per state element as the 32-lane form; the sums are ordered differently.
-    GDN_ROW_LANES (default 8) / GDN_COLS (default 4) pick RL / CW."""
+    GDN_ROW_LANES (default 16) / GDN_COLS (default 2) pick RL / CW."""
     HK, HV, DK, DV, C, VD = G["HK"], G["HV"], G["DK"], G["DV"], G["C"], G["VD"]
     RPL, CPW = DK // RL, CW * (32 // RL)
     VC = f"vector<{CW}xf32>"
