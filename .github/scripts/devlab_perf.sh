@@ -166,6 +166,7 @@ EOF2
     ( cd "${KIT[$v]}" && env $envs "$T" build.py "$D/$v/cfg.json" "$pkg" --tokenizer "$card/tokenizer.json" --model-id "$cardid" $cardargs $extra ) > "$out/build_$v.log" 2>&1 \
       || { tail -30 "$out/build_$v.log"; echo "FAIL: build $v"; exit 1; }
     tail -3 "$out/build_$v.log"
+    gzip -c "$pkg/program/llm.loom" > "$out/llm_$v.loom.gz"   # diagnostic: the exact program
   else
     kit_for "$v" "" || exit 1
     mkdir -p "$pkg"; cp -r "$card/program" "$card/model.json" "$card/tokenizer.json" "$card"/*.loom "$pkg/" 2>/dev/null
