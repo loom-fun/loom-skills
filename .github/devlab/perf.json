@@ -6,7 +6,108 @@
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "q9",
+   "name": "q4g2",
+   "card": "loom-fun/ggml-org-Qwen3-4B-loom",
+   "memory_bytes": 30000000000,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "ga",
+     "build": {
+      "SPEC_GATE_VERIFY": "0"
+     }
+    },
+    {
+     "name": "gv",
+     "build": {
+      "SPEC_GATE_VERIFY": "1"
+     }
+    },
+    {
+     "name": "d0",
+     "build": {
+      "SPEC_GATE_VERIFY": "0"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "gates:ga:dev"
+   ]
+  },
+  {
+   "name": "m35",
+   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
+   "memory_bytes": 40000000000,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "ga",
+     "build": {
+      "SPEC_GATE_VERIFY": "0"
+     }
+    },
+    {
+     "name": "gv",
+     "build": {
+      "SPEC_GATE_VERIFY": "1"
+     }
+    },
+    {
+     "name": "d0",
+     "build": {
+      "SPEC_GATE_VERIFY": "0"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "c4:ga",
+    "c4:d0",
+    "c4:gv",
+    "perf:ga:2",
+    "perf:d0:2",
+    "consistency:ga:2"
+   ]
+  },
+  {
+   "name": "m35g",
+   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
+   "memory_bytes": 40000000000,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "ga",
+     "build": {
+      "SPEC_GATE_VERIFY": "0"
+     }
+    },
+    {
+     "name": "gv",
+     "build": {
+      "SPEC_GATE_VERIFY": "1"
+     }
+    },
+    {
+     "name": "d0",
+     "build": {
+      "SPEC_GATE_VERIFY": "0"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "gates:ga:dev"
+   ]
+  },
+  {
+   "name": "q9c",
    "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
    "memory_bytes": 20000000000,
    "llamacpp": "b1369",
@@ -31,126 +132,20 @@
      "execution": {
       "draft_depth": 0
      }
-    }
-   ],
-   "steps": [
-    "c4:ga",
-    "c4:d0",
-    "c4:gv",
-    "c4:ga",
-    "c4:d0",
-    "c4:gv",
-    "perf:ga:2",
-    "perf:gv:2",
-    "perf:d0:2"
-   ]
-  },
-  {
-   "name": "q9g",
-   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
-   "memory_bytes": 20000000000,
-   "llamacpp": "b1369",
-   "variants": [
-    {
-     "name": "ga",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     }
     },
     {
-     "name": "gv",
+     "name": "gc",
      "build": {
-      "SPEC_GATE_VERIFY": "1"
-     }
-    },
-    {
-     "name": "d0",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     },
-     "execution": {
-      "draft_depth": 0
+      "SPEC_GATE_VERIFY": "0",
+      "SPEC_CTX_MAX": "3500"
      }
     }
    ],
    "steps": [
-    "consistency:ga:3",
-    "gates:ga:dev",
-    "ktest:ga"
-   ]
-  },
-  {
-   "name": "q4",
-   "card": "loom-fun/ggml-org-Qwen3-4B-loom",
-   "memory_bytes": 12000000000,
-   "llamacpp": "b1369",
-   "variants": [
-    {
-     "name": "ga",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     }
-    },
-    {
-     "name": "gv",
-     "build": {
-      "SPEC_GATE_VERIFY": "1"
-     }
-    },
-    {
-     "name": "d0",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "c4:ga",
-    "c4:d0",
-    "c4:gv",
-    "c4:ga",
-    "c4:d0",
-    "c4:gv",
-    "perf:ga:2",
-    "perf:gv:2",
-    "perf:d0:2"
-   ]
-  },
-  {
-   "name": "q4g",
-   "card": "loom-fun/ggml-org-Qwen3-4B-loom",
-   "memory_bytes": 12000000000,
-   "llamacpp": "b1369",
-   "variants": [
-    {
-     "name": "ga",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     }
-    },
-    {
-     "name": "gv",
-     "build": {
-      "SPEC_GATE_VERIFY": "1"
-     }
-    },
-    {
-     "name": "d0",
-     "build": {
-      "SPEC_GATE_VERIFY": "0"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "consistency:ga:3",
-    "gates:ga:dev",
-    "ktest:ga"
+    "perf:ga:2:long",
+    "perf:gc:2:long",
+    "perf:d0:2:long",
+    "consistency:gc:2"
    ]
   }
  ]
