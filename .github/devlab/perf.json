@@ -8,36 +8,42 @@
  "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "mm-a",
+   "name": "occ-a",
    "variants": [
     {
      "name": "card"
     },
     {
-     "name": "mm5",
-     "build": {
-      "SPEC_MM_FROM": "5"
-     }
-    },
-    {
-     "name": "mm9",
-     "build": {
-      "SPEC_MM_FROM": "9"
-     }
-    },
-    {
-     "name": "mm5d1",
-     "build": {
-      "SPEC_MM_FROM": "5"
-     },
-     "execution": {
-      "draft_depth": 1
-     }
-    },
-    {
      "name": "nodraft",
      "execution": {
       "draft_depth": 0
+     }
+    },
+    {
+     "name": "occ2",
+     "ref": "origin/perfgap-gemma3-1b",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     }
+    },
+    {
+     "name": "occ2d3",
+     "ref": "origin/perfgap-gemma3-1b",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     },
+     "execution": {
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "occ2d5",
+     "ref": "origin/perfgap-gemma3-1b",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     },
+     "execution": {
+      "draft_depth": 5
      }
     }
    ],
@@ -45,51 +51,60 @@
     "perf:card:2",
     "perf:card:2:long",
     "c4:card",
-    "perf:mm5:2",
-    "perf:mm5:2:long",
-    "c4:mm5",
-    "perf:mm9:2",
-    "perf:mm9:2:long",
-    "c4:mm9",
-    "perf:mm5d1:2",
-    "perf:mm5d1:2:long",
-    "c4:mm5d1",
     "perf:nodraft:2",
     "perf:nodraft:2:long",
-    "c4:nodraft"
+    "c4:nodraft",
+    "perf:occ2:2",
+    "perf:occ2:2:long",
+    "c4:occ2",
+    "perf:occ2d3:2",
+    "perf:occ2d3:2:long",
+    "c4:occ2d3",
+    "perf:occ2d5:2",
+    "perf:occ2d5:2:long",
+    "c4:occ2d5",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long",
+    "llamac4@vulkan"
    ]
   },
   {
-   "name": "mm-b",
+   "name": "occ-b",
    "variants": [
     {
      "name": "card"
     },
     {
-     "name": "mm5",
-     "build": {
-      "SPEC_MM_FROM": "5"
-     }
-    },
-    {
-     "name": "mm9",
-     "build": {
-      "SPEC_MM_FROM": "9"
-     }
-    },
-    {
-     "name": "mm5d1",
-     "build": {
-      "SPEC_MM_FROM": "5"
-     },
-     "execution": {
-      "draft_depth": 1
-     }
-    },
-    {
      "name": "nodraft",
      "execution": {
       "draft_depth": 0
+     }
+    },
+    {
+     "name": "occ2",
+     "ref": "origin/perfgap-gemma3-1b",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     }
+    },
+    {
+     "name": "occ2d3",
+     "ref": "origin/perfgap-gemma3-1b",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     },
+     "execution": {
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "occ2d5",
+     "ref": "origin/perfgap-gemma3-1b",
+     "build": {
+      "SPEC_OCC_MIN": "2"
+     },
+     "execution": {
+      "draft_depth": 5
      }
     }
    ],
@@ -97,18 +112,21 @@
     "perf:card:2",
     "perf:card:2:long",
     "c4:card",
-    "perf:mm5:2",
-    "perf:mm5:2:long",
-    "c4:mm5",
-    "perf:mm9:2",
-    "perf:mm9:2:long",
-    "c4:mm9",
-    "perf:mm5d1:2",
-    "perf:mm5d1:2:long",
-    "c4:mm5d1",
     "perf:nodraft:2",
     "perf:nodraft:2:long",
-    "c4:nodraft"
+    "c4:nodraft",
+    "perf:occ2:2",
+    "perf:occ2:2:long",
+    "c4:occ2",
+    "perf:occ2d3:2",
+    "perf:occ2d3:2:long",
+    "c4:occ2d3",
+    "perf:occ2d5:2",
+    "perf:occ2d5:2:long",
+    "c4:occ2d5",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long",
+    "llamac4@vulkan"
    ]
   }
  ]
