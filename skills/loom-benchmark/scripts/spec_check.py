@@ -25,6 +25,7 @@ the same prompt's greedy pair is identical or a near-tie. Everything must still 
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 
 PROMPTS = [
@@ -42,7 +43,10 @@ TOOLS = [{"type": "function", "function": {"name": "get_weather", "description":
 
 def post(url, body):
     req = urllib.request.Request(url + "/v1/chat/completions", json.dumps(body).encode(), {"Content-Type": "application/json"})
-    return json.load(urllib.request.urlopen(req, timeout=3600))
+    try:
+        return json.load(urllib.request.urlopen(req, timeout=3600))
+    except urllib.error.HTTPError as e:   # name the server's reason, not just the status
+        raise SystemExit("spec_check: HTTP %d for %s: %s" % (e.code, json.dumps(body)[:300], e.read().decode(errors="replace")[:1500]))
 
 
 def image_requests(model):
