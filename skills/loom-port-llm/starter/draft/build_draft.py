@@ -330,8 +330,13 @@ def patch_control(text, cfg, draft):
   }}
   %ctx_over = scalar.cmpi uge, %deepest, %ctx_max : i32
 """ if CTX_MAX else "  %ctx_over = scalar.cmpi ne, %c0_i32, %c0_i32 : i32\n")
+        # a context gate must look at every epoch; the occupancy gate alone cannot fire below occ_min spans, so a
+        # single stream skips the whole pre-pass (the 1-row path stays free)
+        try_ir = (f"  %try_below = scalar.constant {OCC_MIN - 1} : i32\n  %try = scalar.cmpi ugt, %first_count, %try_below : i32\n"
+                  if OCC_MIN and not CTX_MAX else "  %try = scalar.cmpi eq, %c0_i32, %c0_i32 : i32\n")
         gate_pre = f"""  // occupancy / context gate: all spans speculative and at least {OCC_MIN} of them -> verify the anchors only
   %c1_i32 = scalar.constant 1 : i32
+{try_ir}  %flag_value = scf.if %try -> (i32) {{
   %nspec = scf.for %g = [%c0 to %spans step %c1](%acc = %c0_i32 : i32) -> (i32) {{
     %gr = index.assume %g [lt(%g, %plan_extent)] : index
     %gcredit = view.load %requests[%gr, 7] : view<[%plan_extent]x9xi32> -> i32
@@ -354,15 +359,20 @@ def patch_control(text, cfg, draft):
   %has_shape = scalar.cmpi ne, %gate_shape, %c0_i32 : i32
 {ctx_ir}  %g0 = scalar.ori %occupied, %ctx_over : i1
   %g1 = scalar.andi %all_spec, %g0 : i1
-  %gate = scalar.andi %g1, %has_shape : i1
-  %flag_value = scf.select %gate, %gate_shape, %c0_i32 : i32
+  %gate_in = scalar.andi %g1, %has_shape : i1
+  %flag_sel = scf.select %gate_in, %gate_shape, %c0_i32 : i32
+  scf.yield %flag_sel : i32
+  }} else {{
+  scf.yield %c0_i32 : i32
+  }}
+  %gate = scalar.cmpi ne, %flag_value, %c0_i32 : i32
   %flag_at = index.constant {GATE_FLAG} : offset
   %flag_view = buffer.view %control_state[%flag_at] : buffer -> view<1xi32>
   view.store %flag_value, %flag_view[0] : i32, view<1xi32>
 """
         L1 = ("    %length_host = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
               "    %length = scf.select %gate, %c1_i32, %length_host : i32\n"
-              "    view.store %length, %device[%s, 0] : i32, view<[%spans]x9xi32>\n")
+              "    scf.if %gate {\n      view.store %length, %device[%s, 0] : i32, view<[%spans]x9xi32>\n    }\n")
         L2 = ("    %length32_host = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
               "    %length32 = scf.select %gate, %c1_i32, %length32_host : i32\n")
         propose_flag, eff = "propose_on", "eff_index"
