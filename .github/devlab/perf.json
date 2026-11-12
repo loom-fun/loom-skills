@@ -8,7 +8,7 @@
  "llama_spec": "--spec-type draft-mtp --spec-draft-n-max 2",
  "jobs": [
   {
-   "name": "ab",
+   "name": "gate",
    "variants": [
     {
      "name": "card"
@@ -16,21 +16,27 @@
     {
      "name": "g3",
      "build": {}
+    },
+    {
+     "name": "g3off",
+     "build": {
+      "SPEC_OCC_MIN": "0"
+     }
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
+    "perf:card:3",
+    "perf:card:3:long",
     "c4:card",
-    "perf:g3:2",
-    "perf:g3:2:long",
+    "perf:g3:3",
+    "perf:g3:3:long",
     "c4:g3",
-    "llama:2",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan:2",
-    "llama@vulkan:2:long",
-    "llamac4@vulkan"
+    "perf:g3off:3",
+    "perf:g3off:3:long",
+    "c4:g3off",
+    "llama:3",
+    "llama:3:long",
+    "llamac4"
    ]
   }
  ]
