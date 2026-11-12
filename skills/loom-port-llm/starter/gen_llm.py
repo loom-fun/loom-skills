@@ -108,7 +108,9 @@ GATE_ACT = CFG.get("attn_gate_act", "sigmoid")
 assert GATE_ACT == "sigmoid" or (HEAD_GATE and GATE_ACT == "softplus"), f"attn_gate_act {GATE_ACT}: per-head softplus or sigmoid"
 # Query heads per layer (cfg layer_heads; laguna: 48 on full-attention layers, 64 on sliding ones). QH is the widest
 # (buffers); the attention kernels of a narrower layer are generated again for its head count (suffix _h<heads>).
-LH = CFG.get("layer_heads") or [QH] * L
+LH = list(CFG.get("layer_heads") or [QH] * L)
+# MTP NextN blocks sit after the trunk (indices L..) at full width.
+LH += [QH] * (max((CFG.get("mtp") or {}).get("layers", []), default=L - 1) + 1 - len(LH))
 NARROW = sorted(set(LH) - {QH})
 assert all(h % KVH == 0 and h // KVH <= 16 for h in NARROW), "layer_heads: multiples of kv_heads, at most 16 per KV head"
 OUT_BIAS = CFG.get("attn_out_bias", False)   # attn_output.bias on every attention layer (gpt-oss): g_bias_add
