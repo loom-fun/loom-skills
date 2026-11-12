@@ -1,81 +1,47 @@
 {
- "_comment": "Qwen2.5-1.5B: card vs main rebuild vs draft policy, active wait, all metrics, with llama.cpp ROCm and Vulkan on the same runner.",
+ "_comment": "1.5B: decode_32k seg path split sweep, active wait",
  "card": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
  "memory_bytes": 8000000000,
  "kit": null,
- "llamacpp": "b1369",
+ "llamacpp": "b1373",
  "llamacpp_vulkan": "b12211",
+ "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "segts",
+   "name": "splits",
    "variants": [
     {
-     "name": "d3c3",
-     "build": {
-      "SEG_TS_MAX": "3"
-     },
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "3"
-     ]
+     "name": "base",
+     "build": {}
     },
     {
-     "name": "d3c2",
+     "name": "s128",
      "build": {
-      "SEG_TS_MAX": "2"
-     },
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "3"
-     ]
+      "ATTN_SPLITS": "128"
+     }
     },
     {
-     "name": "d4",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "4"
-     ]
+     "name": "s256",
+     "build": {
+      "ATTN_SPLITS": "256"
+     }
     },
     {
-     "name": "d4c3",
+     "name": "s128k16",
      "build": {
-      "SEG_TS_MAX": "3"
-     },
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "4"
-     ]
-    },
-    {
-     "name": "d5c3",
-     "build": {
-      "SEG_TS_MAX": "3"
-     },
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "5"
-     ]
+      "ATTN_SPLITS": "128",
+      "ATTN_KPS": "16"
+     }
     }
    ],
    "steps": [
-    "tunerow:d3c3:1",
-    "tunerow:d3c2:1",
-    "tunerow:d4:1",
-    "tunerow:d4c3:1",
-    "tunerow:d5c3:1",
-    "perf:d3c3:3:long",
-    "perf:d4c3:3:long"
+    "perf:base:3:long",
+    "perf:s128:3:long",
+    "perf:s256:3:long",
+    "perf:s128k16:3:long",
+    "perf:base:2",
+    "perf:s128:2",
+    "llama@vulkan:2:long"
    ]
   }
  ]
