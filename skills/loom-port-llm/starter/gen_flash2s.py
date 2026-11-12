@@ -358,6 +358,16 @@ import re as _re   # diagnostic (timing only), see perfgap flash2 notes
 if os.environ.get("FLASH2_OLD_PROLOGUE") == "1" and os.environ.get("FLASH2_ROLE") != "partial":
     text = _re.sub(r"  %tiles_view = buffer.view %tiles.*?  %pos0_32 = view.load [^\n]*\n  scf.if %listed \{\n",
                    "  %first_token = index.mul %tile, %c16 : index\n  %uniform, %row32, %pos0_32 = func.call @g_tile_uniform(%info, %tokens, %first_token) : (buffer, index, index) -> (i1, i32, i32)\n  scf.if %uniform {\n", text, count=1, flags=_re.S)
+if os.environ.get("FLASH2_ENTRY") == "mult16":   # diagnostic: entries are multiples of 16
+    text = text.replace("%first_token = index.assume %entry [range(%entry, 0, 8191), lt(%entry, %tokens)] : index", "%first_token = index.assume %entry [range(%entry, 0, 8191), lt(%entry, %tokens), multiple_of(%entry, 16)] : index")
+if os.environ.get("FLASH2_ENTRY") == "bcast3":    # diagnostic: entry, row and pos0 broadcast from lane 0
+    text = text.replace("  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %entry = index.cast %entry32 : i32 to index\n",
+                        "  %entry32r = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %lane0 = scalar.constant 0 : i32\n  %entry32 = kernel.subgroup.broadcast %entry32r from %lane0 : i32, i32\n  %entry = index.cast %entry32 : i32 to index\n")
+    text = text.replace("  %row32 = view.load %info_view[%first_token, %c0] : view<[%tokens]x4xi32> -> i32\n  %pos0_32 = view.load %info_view[%first_token, %c1] : view<[%tokens]x4xi32> -> i32\n",
+                        "  %row32r = view.load %info_view[%first_token, %c0] : view<[%tokens]x4xi32> -> i32\n  %pos0_32r = view.load %info_view[%first_token, %c1] : view<[%tokens]x4xi32> -> i32\n  %row32 = kernel.subgroup.broadcast %row32r from %lane0 : i32, i32\n  %pos0_32 = kernel.subgroup.broadcast %pos0_32r from %lane0 : i32, i32\n")
+if os.environ.get("FLASH2_ENTRY") == "bcast":    # diagnostic: entry broadcast from lane 0
+    text = text.replace("  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %entry = index.cast %entry32 : i32 to index\n",
+                        "  %entry32r = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %lane0 = scalar.constant 0 : i32\n  %entry32 = kernel.subgroup.broadcast %entry32r from %lane0 : i32, i32\n  %entry = index.cast %entry32 : i32 to index\n")
 if os.environ.get("FLASH2_DIRECT") == "1":
     text = _re.sub(r"  %entry_slot_value = .*?\n  %entry = index.cast[^\n]*\n", "", text, flags=_re.S)
     text = _re.sub(r"  %first_token = index.assume %entry [^\n]*\n", "  %first_token = index.mul %tile, %c16 : index\n", text)
