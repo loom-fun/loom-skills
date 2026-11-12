@@ -26,7 +26,18 @@ PROPOSE_FIRST, PROPOSE_LEVELS, DRAFT_KIND = 1664, 1668, 1672
 # the anchors (1 token per span, the plain decode shape) instead of depth+1 tokens per span. encode_epoch decides and leaves
 # the shape index + 1 at GATE_FLAG; GATE_TABLE[s] holds the index + 1 of the packing shape with s tokens in s spans.
 GATE_FLAG, GATE_TABLE, GATE_SLOTS = 1676, 1700, 32
-OCC_MIN = int(os.environ.get("SPEC_OCC_MIN", "2") or 0)
+OCC_MIN, CTX_MAX = 2, 0
+
+
+def set_gates(cfg):
+    """The two gates, each an env switch (SPEC_OCC_MIN, SPEC_CTX_MAX) that wins over cfg["drafter"] ("occ_min", "ctx_max",
+    written by tune.py) and defaults to occupancy 2 / no context limit. 0 turns a gate off. Occupancy: epochs with >= occ_min
+    streams verify anchors only. Context: an epoch with any span at causal position >= ctx_max does too (long-context
+    verification costs depth + 1 attention passes per span, which low acceptance does not repay)."""
+    global OCC_MIN, CTX_MAX
+    d = cfg.get("drafter") or {}
+    OCC_MIN = int(os.environ["SPEC_OCC_MIN"] or 0) if "SPEC_OCC_MIN" in os.environ else int(d.get("occ_min", 2) or 0)
+    CTX_MAX = int(os.environ["SPEC_CTX_MAX"] or 0) if "SPEC_CTX_MAX" in os.environ else int(d.get("ctx_max", 0) or 0)
 
 
 def _sub(text, old, new, count=1):
@@ -65,8 +76,9 @@ def _bind(stage, sources, draft_policy=False):
 
 
 def patch_prepare(text, draft, cfg):
+    set_gates(cfg)
     gate_fill = ""
-    if OCC_MIN:   # shape index + 1 of the (s tokens, s spans) packing, for the occupancy gate
+    if OCC_MIN or CTX_MAX:   # shape index + 1 of the (s tokens, s spans) packing, for the occupancy gate
         gate_fill = f"""      %same_shape = scalar.cmpi eq, %tokens, %spans : i64
       %gate_slots = scalar.constant {GATE_SLOTS} : i64
       %few_spans = scalar.cmpi ult, %spans, %gate_slots : i64
@@ -300,12 +312,25 @@ def patch_storage(text, cfg, draft):
 
 # ---------------------------------------------------------------------------------------------------
 def patch_control(text, cfg, draft):
+    set_gates(cfg)
     gate_pre = gate_epoch = ""
     L1 = "    %length = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
     L2 = "    %length32 = view.load %requests[%sr, 0] : view<[%plan_extent]x9xi32> -> i32\n"
     propose_flag, eff = "propose", "shape_index"
-    if OCC_MIN:
-        gate_pre = f"""  // occupancy gate: all spans speculative and at least {OCC_MIN} of them -> verify the anchors only
+    if OCC_MIN or CTX_MAX:
+        occupied_ir = (f"  %occ_below = scalar.constant {OCC_MIN - 1} : i32\n  %occupied = scalar.cmpi ugt, %first_count, %occ_below : i32\n"
+                       if OCC_MIN else "  %occupied = scalar.cmpi ne, %c0_i32, %c0_i32 : i32\n")
+        ctx_ir = (f"""  %ctx_max = scalar.constant {CTX_MAX} : i32
+  %deepest = scf.for %g = [%c0 to %spans step %c1](%acc = %c0_i32 : i32) -> (i32) {{
+    %gr = index.assume %g [lt(%g, %plan_extent)] : index
+    %gpos = view.load %requests[%gr, 1] : view<[%plan_extent]x9xi32> -> i32
+    %gbig = scalar.cmpi ugt, %gpos, %acc : i32
+    %gmax = scf.select %gbig, %gpos, %acc : i32
+    scf.yield %gmax : i32
+  }}
+  %ctx_over = scalar.cmpi uge, %deepest, %ctx_max : i32
+""" if CTX_MAX else "  %ctx_over = scalar.cmpi ne, %c0_i32, %c0_i32 : i32\n")
+        gate_pre = f"""  // occupancy / context gate: all spans speculative and at least {OCC_MIN} of them -> verify the anchors only
   %c1_i32 = scalar.constant 1 : i32
   %nspec = scf.for %g = [%c0 to %spans step %c1](%acc = %c0_i32 : i32) -> (i32) {{
     %gr = index.assume %g [lt(%g, %plan_extent)] : index
@@ -316,9 +341,7 @@ def patch_control(text, cfg, draft):
     scf.yield %gnext : i32
   }}
   %all_spec = scalar.cmpi eq, %nspec, %first_count : i32
-  %occ_below = scalar.constant {OCC_MIN - 1} : i32
-  %occupied = scalar.cmpi ugt, %first_count, %occ_below : i32
-  %gate_limit = scalar.constant {GATE_SLOTS} : i32
+{occupied_ir}  %gate_limit = scalar.constant {GATE_SLOTS} : i32
   %few_spans = scalar.cmpi ult, %first_count, %gate_limit : i32
   %gate_max = scalar.constant {GATE_SLOTS - 1} : i32
   %gate_slot32 = scalar.minui %first_count, %gate_max : i32
@@ -329,7 +352,8 @@ def patch_control(text, cfg, draft):
   %gate_raw = view.load %gate_view[%gate_slot] : view<{GATE_SLOTS}xi32> -> i32
   %gate_shape = scf.select %few_spans, %gate_raw, %c0_i32 : i32
   %has_shape = scalar.cmpi ne, %gate_shape, %c0_i32 : i32
-  %g1 = scalar.andi %all_spec, %occupied : i1
+{ctx_ir}  %g0 = scalar.ori %occupied, %ctx_over : i1
+  %g1 = scalar.andi %all_spec, %g0 : i1
   %gate = scalar.andi %g1, %has_shape : i1
   %flag_value = scf.select %gate, %gate_shape, %c0_i32 : i32
   %flag_at = index.constant {GATE_FLAG} : offset
