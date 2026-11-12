@@ -346,6 +346,8 @@ def main():
                     row["rows"]["streams4"] = round(c4u, 2)
                     row["occ_min"] = 0
                     row["margin"] = round(margin(row["rows"], base_rows), 3)
+                    if llama_refs:
+                        row["margin_llama"] = round(llama_margin(row["rows"], llama_refs), 3)
                 print("tune:", json.dumps({k: row[k] for k in ("kind", "depth", "streams4_gated", "streams4_ungated", "margin")}), flush=True)
                 sc = row["margin"]
                 measured[row["depth"]] = sc
