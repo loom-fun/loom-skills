@@ -261,12 +261,10 @@
   {
    "repo": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
    "slug": "qwen3-4b-instruct-2507",
-   "memory_bytes": 63000000000,
+   "memory_bytes": 55000000000,
    "kit": null,
    "llamacpp": "b1368",
-   "features": [
-    "draft"
-   ]
+   "features": []
   },
   {
    "repo": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
