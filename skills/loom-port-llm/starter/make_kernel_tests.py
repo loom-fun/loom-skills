@@ -1771,7 +1771,9 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
 # bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
 # both with the shared experts' output already in y (scaled by the Qwen shared-expert gate when the model has one).
 if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
-    M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ.get("MOE_R", "8"))
+    M = cfg["moe"]; E_, KU, FE = M["experts"], M["used"], M["ffn"]; R = int(os.environ["MOE_R"]) if os.environ.get("MOE_R") else 8   # gen_llm._moe_rows_per_workgroup's rule:
+    while not os.environ.get("MOE_R") and R > 2 and KU * FE // R < 3000 and FE % (R // 2) == 0 and H % (R // 2) == 0:
+        R //= 2
     SHG, ACC = bool(M.get("shared_gate")), bool(M.get("shared_ffn"))
     # Gemma 4: gate and up fused in one tensor (each expert's gate rows, then its up rows), GEGLU, and a per-expert
     # output scale folded into the combine weights (g_moe_wscale, gemma4 example)

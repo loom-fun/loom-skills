@@ -4186,7 +4186,22 @@ def lin_mv(fmt, x, w, wsize, y, n, kval):
 
 
 USED_MOE = set()     # (fmt, K, N, mode) expert matvec / grouped GEMM kernels
-MOE_R = int(os.environ.get("MOE_R", "8"))
+def _moe_rows_per_workgroup():
+    """Rows of one expert matvec per workgroup (MOE_R overrides). A decode token runs KU experts, so a gate/up launch has
+    KU * FFN / R workgroups: Qwen3-30B-A3B (8 x 768) decodes 10 % faster at R=2 (3072 workgroups) than at R=8 (768; R=4 +6 %,
+    R=1 slower), the same count of tiny workgroups the GPU needs to hide each lane's serial row loop. Aim for ~3000
+    workgroups, in powers of two within 2..8."""
+    if os.environ.get("MOE_R"):
+        return int(os.environ["MOE_R"])
+    if not MOE:
+        return 8
+    r = 8
+    while r > 2 and MOE["used"] * MOE["ffn"] // r < 3000 and MOE["ffn"] % (r // 2) == 0 and H % (r // 2) == 0:
+        r //= 2
+    return r
+
+
+MOE_R = _moe_rows_per_workgroup()
 # MOE_Q8=1 (default, with ACT_Q8): the decode expert matvecs read int8 activations (the router's input h16q, made beside
 # g_row_scale_f16, and the gate/up output quantized by a g_quant_q8 launch) and contract with integer dot4 products,
 # like the dense decode matvecs and llama.cpp's mul_mat_vec_q for experts. MOE_Q8=0: f32 activations.

@@ -1,85 +1,74 @@
 {
- "_comment": "qwen3-30b-2507 decode ablation: each decode kernel group launched twice",
+ "_comment": "Qwen3-30B-A3B decode: expert matvec rows per workgroup, int8 expert activations, router ILP (PR #247); sibling A/B on Qwen3.5-35B-A3B",
  "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
  "memory_bytes": 57000000000,
  "kit": null,
  "llamacpp": "b1371",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "sweep4",
+   "name": "sib",
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
+   "memory_bytes": 49000000000,
+   "llamacpp": "b1369",
    "variants": [
     {
      "name": "base",
      "build": {},
-     "ref": "origin/main"
-    },
-    {
-     "name": "r2q",
-     "build": {
-      "MOE_R": "2"
+     "ref": "origin/main",
+     "execution": {
+      "draft_depth": 0
      }
     },
     {
-     "name": "r1q",
-     "build": {
-      "MOE_R": "1"
+     "name": "new",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
      }
     },
     {
-     "name": "r2q-un",
+     "name": "newr8",
      "build": {
-      "MOE_R": "2",
-      "MOE_UNROLL": "1"
-     }
-    },
-    {
-     "name": "r4q-un",
-     "build": {
-      "MOE_R": "4",
-      "MOE_UNROLL": "1"
-     }
-    },
-    {
-     "name": "r2q-u8",
-     "build": {
-      "MOE_R": "2",
-      "MOE_ROUTE_U": "8"
-     }
-    },
-    {
-     "name": "d-route",
-     "build": {
-      "MOE_R": "2"
+      "MOE_R": "8"
      },
-     "double": [
-      "*:@g_moe_route\\b"
-     ]
-    },
-    {
-     "name": "d-gu",
-     "build": {
-      "MOE_R": "2"
-     },
-     "double": [
-      "*:@g_moe_gu_\\w+_r2\\b"
-     ]
-    },
-    {
-     "name": "d-dn",
-     "build": {
-      "MOE_R": "2"
-     },
-     "double": [
-      "*:@g_moe_dn_\\w+_r2\\b"
-     ]
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
-    "ab:24"
+    "ab:20"
    ]
   },
   {
-   "name": "sweep5",
+   "name": "sib2",
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
+   "memory_bytes": 49000000000,
+   "llamacpp": "b1369",
+   "variants": [
+    {
+     "name": "base",
+     "build": {},
+     "ref": "origin/main",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "new",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "ab:20"
+   ]
+  },
+  {
+   "name": "a30",
    "variants": [
     {
      "name": "base",
@@ -87,68 +76,12 @@
      "ref": "origin/main"
     },
     {
-     "name": "r2q",
-     "build": {
-      "MOE_R": "2"
-     }
-    },
-    {
-     "name": "r1q",
-     "build": {
-      "MOE_R": "1"
-     }
-    },
-    {
-     "name": "r2q-un",
-     "build": {
-      "MOE_R": "2",
-      "MOE_UNROLL": "1"
-     }
-    },
-    {
-     "name": "r4q-un",
-     "build": {
-      "MOE_R": "4",
-      "MOE_UNROLL": "1"
-     }
-    },
-    {
-     "name": "r2q-u8",
-     "build": {
-      "MOE_R": "2",
-      "MOE_ROUTE_U": "8"
-     }
-    },
-    {
-     "name": "d-route",
-     "build": {
-      "MOE_R": "2"
-     },
-     "double": [
-      "*:@g_moe_route\\b"
-     ]
-    },
-    {
-     "name": "d-gu",
-     "build": {
-      "MOE_R": "2"
-     },
-     "double": [
-      "*:@g_moe_gu_\\w+_r2\\b"
-     ]
-    },
-    {
-     "name": "d-dn",
-     "build": {
-      "MOE_R": "2"
-     },
-     "double": [
-      "*:@g_moe_dn_\\w+_r2\\b"
-     ]
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "ab:24"
+    "ab:20"
    ]
   }
  ]
