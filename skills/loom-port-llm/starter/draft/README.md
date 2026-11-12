@@ -115,6 +115,13 @@ The gate flag lives in control state (byte 1676, table at 1700): `encode_epoch` 
 it. It needs a `(s, s)` shape for the span count (otherwise the gate stays off for that count). Because the gated c4 rate
 equals depth 0, tune.py's per-row margin keeps a drafter that wins single-stream without paying at four streams.
 
+Context gate (`SPEC_CTX_MAX` or `cfg["drafter"]["ctx_max"]`, default 0 = off): `encode_epoch` also gates an epoch (all spans
+speculative) whose deepest span's causal position (plan word 1) is >= ctx_max, through the same anchor-only path, because
+verifying depth + 1 tokens per span costs depth + 1 attention passes over the whole context (Ornith-1.5-35B depth 3: short
+rows 118 vs 62 tok/s, 16k 44.9 vs 53.5). tune.py retries the best depth of each kind with ctx_max 3500 when only the long
+row loses, and ranks that candidate by the same margin; a card whose long row wins (80 % acceptance at 32k) keeps ctx_max 0.
+`occ_min` and `ctx_max` are recorded in `cfg["drafter"]`; the env variables win.
+
 ## Choosing the drafter and depth (`tune.py`, qualify.sh stage 0)
 
 Builds each available kind once at the full native context (build.py sizes each candidate's memory; a drafter adds
