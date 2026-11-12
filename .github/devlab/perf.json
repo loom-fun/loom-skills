@@ -1,5 +1,5 @@
 {
- "_comment": "GDN knob defaults A/B on qwen35 siblings (active wait).",
+ "_comment": "GDN recurrence: 16x2 decode / 8x4 prefill split, A/B vs old uniform 8x4, gates on MiniCPM.",
  "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
  "memory_bytes": 36000000000,
  "kit": null,
@@ -7,30 +7,62 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
+   "name": "minicpm",
+   "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+   "memory_bytes": 36000000000,
+   "llamacpp": "b1369",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "old",
+     "build": {
+      "GDN_ROW_LANES": "8",
+      "GDN_COLS": "4",
+      "GDN_CONV_UNROLL": "4"
+     }
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new",
+    "gates:new:dev",
+    "consistency:new:2",
+    "perf:old:1:long",
+    "c4:old",
+    "perf:new:1:long",
+    "c4:new",
+    "llama@vulkan:2:long",
+    "llamac4@vulkan"
+   ]
+  },
+  {
    "name": "q35-08b",
    "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
    "memory_bytes": 9000000000,
    "variants": [
     {
-     "name": "base",
-     "build": {}
+     "name": "old",
+     "build": {
+      "GDN_ROW_LANES": "8",
+      "GDN_COLS": "4",
+      "GDN_CONV_UNROLL": "4"
+     }
     },
     {
-     "name": "gdn",
-     "build": {
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     }
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "perf:base:1:long",
-    "c4:base",
-    "perf:gdn:1:long",
-    "c4:gdn",
-    "perf:base:1:long",
-    "perf:gdn:1:long"
+    "perf:old:1:long",
+    "c4:old",
+    "perf:new:1:long",
+    "c4:new",
+    "perf:old:1:long",
+    "perf:new:1:long"
    ]
   },
   {
@@ -39,25 +71,25 @@
    "memory_bytes": 30000000000,
    "variants": [
     {
-     "name": "base",
-     "build": {}
+     "name": "old",
+     "build": {
+      "GDN_ROW_LANES": "8",
+      "GDN_COLS": "4",
+      "GDN_CONV_UNROLL": "4"
+     }
     },
     {
-     "name": "gdn",
-     "build": {
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     }
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "perf:base:1:long",
-    "c4:base",
-    "perf:gdn:1:long",
-    "c4:gdn",
-    "perf:base:1:long",
-    "perf:gdn:1:long"
+    "perf:old:1:long",
+    "c4:old",
+    "perf:new:1:long",
+    "c4:new",
+    "perf:old:1:long",
+    "perf:new:1:long"
    ]
   },
   {
@@ -66,25 +98,25 @@
    "memory_bytes": 36000000000,
    "variants": [
     {
-     "name": "base",
-     "build": {}
+     "name": "old",
+     "build": {
+      "GDN_ROW_LANES": "8",
+      "GDN_COLS": "4",
+      "GDN_CONV_UNROLL": "4"
+     }
     },
     {
-     "name": "gdn",
-     "build": {
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     }
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "perf:base:1:long",
-    "c4:base",
-    "perf:gdn:1:long",
-    "c4:gdn",
-    "perf:base:1:long",
-    "perf:gdn:1:long"
+    "perf:old:1:long",
+    "c4:old",
+    "perf:new:1:long",
+    "c4:new",
+    "perf:old:1:long",
+    "perf:new:1:long"
    ]
   },
   {
@@ -93,25 +125,25 @@
    "memory_bytes": 49000000000,
    "variants": [
     {
-     "name": "base",
-     "build": {}
+     "name": "old",
+     "build": {
+      "GDN_ROW_LANES": "8",
+      "GDN_COLS": "4",
+      "GDN_CONV_UNROLL": "4"
+     }
     },
     {
-     "name": "gdn",
-     "build": {
-      "GDN_ROW_LANES": "16",
-      "GDN_COLS": "2",
-      "GDN_CONV_UNROLL": "8"
-     }
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "perf:base:1:long",
-    "c4:base",
-    "perf:gdn:1:long",
-    "c4:gdn",
-    "perf:base:1:long",
-    "perf:gdn:1:long"
+    "perf:old:1:long",
+    "c4:old",
+    "perf:new:1:long",
+    "c4:new",
+    "perf:old:1:long",
+    "perf:new:1:long"
    ]
   }
  ]
