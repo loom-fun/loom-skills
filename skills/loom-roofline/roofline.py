@@ -51,6 +51,12 @@ STRETCH = {
 # not shrink with model size. Best seen: Bolt-E4B 1.69 ms over 42 layers = 40 us.
 # It dominates small models (Qwen2.5-0.5B: 1.8 ms of weights, 24 layers).
 LAYER_US = 35
+LAYER_US = 35
+# K/V streaming at long context needs no small kernels: the bytes are one long contiguous read per head. The best
+# demonstrated fraction of the bandwidth ceiling on decode @32k: llama.cpp ROCm 0.965 / Vulkan 0.955 (VL-8B and
+# Qwen3-8B, whose K/V is half of the pass bytes there), Loom 0.92. The EFF decode cap (0.90, set by the per-layer small
+# kernels) applies to the weight bytes only; the K/V bytes of a decode row at ctx tokens stream at KV_EFF.
+KV_EFF = 0.97
 GATHERED = re.compile(r"(^|\.)(token_embd|per_layer_token_embd)\.weight$")
 EXPERT = re.compile(r"_exps\.weight$")
 
@@ -260,10 +266,20 @@ def efficiency(m, metric, ceiling, table=None, tokens_per_pass=None):
     if metric.startswith("c4"):
         return table["c4_moe" if moe else "c4"]
     floor_ms = m["geo"]["L"] * LAYER_US / 1000
-    if tokens_per_pass:
-        t = tokens_per_pass * 1000
-        return min(table["decode_moe" if moe else "decode"], (t / (t / ceiling + floor_ms)) / ceiling)
-    return min(table["decode_moe" if moe else "decode"], (1000 / (1000 / ceiling + floor_ms)) / ceiling)
+    t = (tokens_per_pass or 1) * 1000
+    eff = min(table["decode_moe" if moe else "decode"], (t / (t / ceiling + floor_ms)) / ceiling)
+    ctx = decode_ctx(metric)
+    if ctx:   # the K/V share of the pass streams at KV_EFF, the weight share at eff
+        kv = kv_read_bytes(m["geo"], ctx)
+        share = kv / pass_bytes(m, ctx=ctx)
+        eff = 1 / ((1 - share) / eff + share / max(KV_EFF, eff))
+    return eff
+
+
+def decode_ctx(metric):
+    """The context of a decode row by roofline.json metric name (decode_tps_32k, or the card key decode_32k): 0 if none."""
+    mt = re.fullmatch(r"decode(?:_tps)?_(\d+)k", metric)
+    return int(mt.group(1)) * 1000 if mt else 0
 
 
 def pick_target(name, base, ceiling, eff, stretch):
