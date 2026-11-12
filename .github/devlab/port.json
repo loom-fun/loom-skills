@@ -1,11 +1,12 @@
 {
- "_comment": "Qwen2.5-32B: re-port from main (tune with real no-draft row #414, GQA #357, ctx gate #351), derived from its published card.",
+ "_comment": "Qwen2.5-32B: re-port from main with the tune.py of origin/perfgap-tune-long32k (long row = 32k document).",
  "jobs": [
   {
    "name": "qwen25-32b-regen",
    "spec": "bartowski/Qwen2.5-32B-Instruct-GGUF:Qwen2.5-32B-Instruct-Q4_K_M.gguf",
    "reference": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
-   "model_id": "Qwen/Qwen2.5-32B-Instruct"
+   "model_id": "Qwen/Qwen2.5-32B-Instruct",
+   "skills_ref": "origin/perfgap-tune-long32k"
   }
  ]
 }
