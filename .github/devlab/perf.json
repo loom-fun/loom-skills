@@ -1,61 +1,100 @@
 {
- "_comment": "Active-wait re-measure: Qwen3.8-Flash-Next and Qwen3.5-0.8B (regenerated) (other cards: runs 43033815593, 43075216088, 43106368506).",
+ "_comment": "Muse-Glimmer regenerated from main (occupancy gate on/off, depth 3/5) vs the published card, against ROCm and Vulkan llama.cpp.",
  "jobs": [
   {
-   "name": "unsloth-Qwen3.8-Flash-Next",
-   "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
-   "memory_bytes": 100000000000,
-   "kit": "qwen4exp",
-   "llamacpp": "b1371",
-   "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
+   "name": "ab-rocm",
    "variants": [
     {
      "name": "card"
     },
     {
-     "name": "parked",
-     "active_wait": false
+     "name": "g5",
+     "build": {},
+     "build_args": [
+      "--draft-depth",
+      "5"
+     ]
+    },
+    {
+     "name": "g3",
+     "build": {},
+     "build_args": [
+      "--draft-depth",
+      "3"
+     ]
+    },
+    {
+     "name": "o3",
+     "build": {
+      "SPEC_OCC_MIN": "0"
+     },
+     "build_args": [
+      "--draft-depth",
+      "3"
+     ]
     }
    ],
    "steps": [
+    "c4:g5",
+    "c4:g3",
+    "perf:o3:2",
+    "perf:o3:2:long",
+    "c4:o3",
     "perf:card:2",
     "perf:card:2:long",
     "c4:card",
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
     "llama:2",
     "llama:2:long",
     "llamac4"
    ]
   },
   {
-   "name": "unsloth-Qwen3.5-0.8B",
-   "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
-   "memory_bytes": 9000000000,
-   "kit": null,
-   "llamacpp": "b1369",
-   "llama_spec": "--spec-type ngram-simple",
+   "name": "vs-vulkan",
    "variants": [
     {
-     "name": "card"
-    },
-    {
-     "name": "parked",
-     "active_wait": false
+     "name": "o3",
+     "build": {
+      "SPEC_OCC_MIN": "0"
+     },
+     "build_args": [
+      "--draft-depth",
+      "3"
+     ]
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
+    "perf:o3:2",
+    "perf:o3:2:long",
+    "c4:o3",
+    "llama@vulkan:2",
+    "llama@vulkan:2:long",
+    "llamac4@vulkan"
+   ]
+  },
+  {
+   "name": "gates",
+   "variants": [
+    {
+     "name": "o3",
+     "build": {
+      "SPEC_OCC_MIN": "0"
+     },
+     "build_args": [
+      "--draft-depth",
+      "3"
+     ]
+    }
+   ],
+   "steps": [
+    "ktest:o3",
+    "gates:o3:dev"
    ]
   }
- ]
+ ],
+ "card": "loom-fun/ggml-org-Muse-Glimmer-30B-loom",
+ "memory_bytes": 48000000000,
+ "kit": "glimmer",
+ "llamacpp": "b1369",
+ "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
+ "llamacpp_vulkan": "b12211"
 }
