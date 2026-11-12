@@ -17,8 +17,8 @@
    ]
   },
   {
-   "suite": "f2slide",
-   "dir": "f2slide",
+   "suite": "f2bigdeep",
+   "dir": "f2bigdeep",
    "files": [
     "bench_pre.loom",
     "bench_p193.loom",
@@ -32,8 +32,8 @@
    ]
   },
   {
-   "suite": "f2shallow",
-   "dir": "f2shallow",
+   "suite": "f2bigslide",
+   "dir": "f2bigslide",
    "files": [
     "bench_pre.loom",
     "bench_p193.loom",
