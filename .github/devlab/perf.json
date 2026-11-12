@@ -7,8 +7,11 @@
  "llama_spec": "",
  "jobs": [
   {
-   "name": "occ-full",
+   "name": "occ-dec",
    "variants": [
+    {
+     "name": "card"
+    },
     {
      "name": "occ2",
      "build": {
@@ -17,16 +20,11 @@
     }
    ],
    "steps": [
-    "perf:occ2:2",
-    "perf:occ2:2:long",
-    "c4:occ2",
-    "c4:occ2",
-    "llama:2",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan:2",
-    "llama@vulkan:2:long",
-    "llamac4@vulkan"
+    "perf:card:3",
+    "perf:occ2:3",
+    "perf:card:3",
+    "perf:occ2:3",
+    "llama@vulkan:3"
    ]
   }
  ]
