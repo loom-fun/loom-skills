@@ -1,4 +1,4 @@
-// Static fields not present in info.json: upstream model id, architecture, parameter count (B). The 50 repos shown.
+// Static fields not present in info.json: upstream model id, architecture, parameter count (B). The repos shown: the top-50 campaign plus Qwen3.8-Flash-Next.
 window.REPOS = {
  "loom-fun/bartowski-Qwen3.8-27B-loom": {
   "model": "Qwen/Qwen3.8-27B",
@@ -249,5 +249,10 @@ window.REPOS = {
   "model": "JetBrains/Mellum2.1-12B-A2.5B-Thinking",
   "arch": "mellum",
   "params_b": 12.1
+ },
+ "loom-fun/unsloth-Qwen3.8-Flash-Next-loom": {
+  "model": "Qwen/Qwen3.8-Flash-Next",
+  "arch": "qwen4exp",
+  "params_b": 176.9
  }
 };
