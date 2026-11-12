@@ -186,6 +186,8 @@ if rules:
         m = re.match(r"command\.program\.def \w+ @(\w+)", ln)
         if m:
             prog = m.group(1)
+        if re.match(r"\s*kernel\.launch @", ln) and any(pr.startswith("!") and pr[1:] in ("*", prog) and re.search(rx, ln) for pr, rx in rules):
+            n += 1; continue   # "!*:REGEX": DROP these launches (timing only: outputs are wrong)
         out.append(ln)
         if re.match(r"\s*kernel\.launch @", ln) and any(pr in ("*", prog) and re.search(rx, ln) for pr, rx in rules):
             out.append(ln); n += 1
