@@ -381,7 +381,7 @@
   {
    "repo": "loom-fun/ggml-org-LFM3-Omni-2B-loom",
    "slug": "lfm3-omni-2b",
-   "memory_bytes": 9000000000,
+   "memory_bytes": 10000000000,
    "kit": "lfm2moe",
    "llamacpp": "b1370",
    "features": [
