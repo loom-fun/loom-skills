@@ -1,12 +1,12 @@
 {
- "_comment": "flash2: where is the remaining gap of the peeled kernel? (WIP)",
- "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
- "memory_bytes": 55000000000,
- "kit": null,
+ "_comment": "flash2 on Bolt-E4B: NF=16 kernel without peel (WIP)",
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "f2c1",
+   "name": "bolt2",
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "memory_bytes": 40000000000,
+   "kit": "gemma4",
    "variants": [
     {
      "name": "pre",
@@ -18,39 +18,25 @@
      "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
     },
     {
-     "name": "h1",
+     "name": "main",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "666171a730b939edc1d9369449d19bb248397c37"
+     "ref": "701974f"
     },
     {
-     "name": "h1_direct",
-     "build": {
-      "FLASH2_DIRECT": "1"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "666171a730b939edc1d9369449d19bb248397c37"
-    },
-    {
-     "name": "h1_nopart",
+     "name": "new",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "666171a730b939edc1d9369449d19bb248397c37",
-     "drop": [
-      "*:g_attention_flash2_partial"
-     ]
+     "ref": "335c879cdd3de16472464d18dd83e0c38e4c1934"
     },
     {
-     "name": "h1_bc",
+     "name": "new_bc",
      "build": {
       "FLASH2_ENTRY": "bcast"
      },
@@ -58,68 +44,51 @@
       "--draft",
       "none"
      ],
-     "ref": "666171a730b939edc1d9369449d19bb248397c37"
+     "ref": "335c879cdd3de16472464d18dd83e0c38e4c1934"
+    },
+    {
+     "name": "new_e1",
+     "build": {
+      "FLASH2_EDGE_ZERO": "1"
+     },
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "335c879cdd3de16472464d18dd83e0c38e4c1934"
     }
    ],
    "steps": [
-    "perf:pre:2:long",
-    "perf:h1:2:long",
-    "perf:h1_direct:2:long",
-    "perf:h1_nopart:2:long",
-    "perf:h1_bc:2:long"
-   ]
-  },
-  {
-   "name": "f2c2",
-   "variants": [
-    {
-     "name": "pre",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
-    },
-    {
-     "name": "pre_fl",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f",
-     "double": [
-      "*:g_attention_flash2\\b"
-     ]
-    },
-    {
-     "name": "h1",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "666171a730b939edc1d9369449d19bb248397c37"
-    },
-    {
-     "name": "h1_fl",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "666171a730b939edc1d9369449d19bb248397c37",
-     "double": [
-      "*:g_attention_flash2\\b"
-     ]
-    }
-   ],
-   "steps": [
-    "perf:pre:2:long",
-    "perf:pre_fl:2:long",
-    "perf:h1:2:long",
-    "perf:h1_fl:2:long"
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:new_bc:1",
+    "perf:new_bc:1:long",
+    "perf:new_e1:1",
+    "perf:new_e1:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:new_bc:1",
+    "perf:new_bc:1:long",
+    "perf:new_e1:1",
+    "perf:new_e1:1:long",
+    "perf:pre:1",
+    "perf:pre:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:new_bc:1",
+    "perf:new_bc:1:long",
+    "perf:new_e1:1",
+    "perf:new_e1:1:long"
    ]
   }
  ]
