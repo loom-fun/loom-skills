@@ -285,7 +285,7 @@ async function load() {
   if (mock) {
     MODELS = await fetchJSON(mock);
   } else {
-    try { await fetchJSON(HF + '/api/models?author=loom-fun&limit=1000'); } catch (e) { /* listing is advisory; the 50 repos are fixed */ }
+    try { await fetchJSON(HF + '/api/models?author=loom-fun&limit=1000'); } catch (e) { /* listing is advisory; the repos in repos.js are fixed */ }
     const res = await Promise.all(repos.map(async (repo) => {
       try { return rowFromInfo(repo, await fetchJSON(HF + '/' + repo + '/resolve/main/info.json')); }
       catch (e) { return {repo, error: e.message || String(e)}; }
