@@ -1,46 +1,35 @@
 {
- "_comment": "Bolt-E4B consistency: is main itself flaky? (WIP)",
+ "_comment": "Bolt-E4B consistency before / at #413",
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "boltc3",
+   "name": "bolt413",
    "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
    "memory_bytes": 40000000000,
    "kit": "gemma4",
    "variants": [
     {
-     "name": "main",
+     "name": "before413",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "701974f"
+     "ref": "ec7686efb189f508f7cdd54992ee94e89945a7f4"
     },
     {
-     "name": "new",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ]
-    },
-    {
-     "name": "pre",
+     "name": "at413",
      "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
+     "ref": "6a9f61f72ca23d36d59ba6d6cf86db27136afea7"
     }
    ],
    "steps": [
-    "consistency:main:6",
-    "consistency:new:6",
-    "consistency:pre:4",
-    "consistency:main:6",
-    "consistency:new:6"
+    "consistency:before413:5",
+    "consistency:at413:5"
    ]
   }
  ]
