@@ -11,19 +11,6 @@
    "name": "hc",
    "variants": [
     {
-     "name": "card"
-    },
-    {
-     "name": "d2",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "ngram",
-      "--draft-depth",
-      "2"
-     ]
-    },
-    {
      "name": "d3",
      "build": {},
      "build_args": [
@@ -35,23 +22,10 @@
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "perf:d2:2",
-    "perf:d2:2:long",
-    "c4:d2",
+    "gates:d3:dev",
     "perf:d3:2",
     "perf:d3:2:long",
-    "c4:d3",
-    "llama:2",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan.np1.nospec:2",
-    "llama@vulkan.np1.nospec:2:long",
-    "llamac4@vulkan",
-    "llama@vulkan.np1:2",
-    "llama@vulkan.np1:2:long"
+    "c4:d3"
    ]
   }
  ]
