@@ -1,40 +1,134 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "verify32k: DFlash drafter context attention rows = block length (draft depth + 1), not 8: origin/main rebuild vs this branch.",
+ "card": "loom-fun/ggml-org-Qwen3-4B-loom",
+ "memory_bytes": 55000000000,
+ "kit": null,
+ "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "q4",
+   "card": "loom-fun/ggml-org-Qwen3-4B-loom",
+   "memory_bytes": 55000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
+    "ktest:new",
+    "perf:mainb:2:long",
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
    ]
   },
   {
-   "name": "fn-mtp-b",
+   "name": "q35-4b",
+   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
+   "memory_bytes": 55000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
+    "ktest:new",
+    "perf:mainb:2:long",
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
+   ]
+  },
+  {
+   "name": "q35-9b",
+   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new",
+    "perf:mainb:2:long",
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
+   ]
+  },
+  {
+   "name": "o15",
+   "card": "loom-fun/bartowski-Ornith-1.5-9B-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new",
+    "perf:mainb:2:long",
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
+   ]
+  },
+  {
+   "name": "q3-8b",
+   "card": "loom-fun/unsloth-Qwen3-8B-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new",
+    "perf:mainb:2:long",
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }

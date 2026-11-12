@@ -217,8 +217,17 @@ kernel.def export("g_dfl_rope_info") @g_dfl_rope_info(%tokens: index) {
 # GQ query heads, each wave scoring every chunk token against a key it loaded once; g_dfl_attention then merges the
 # splits, adds the block's own keys and normalizes. Proposals only: the target's output never depends on it.
 DFL_SPLITS = int(os.environ.get("DFL_SPLITS", "32"))
-DFL_TQ = 8      # block tokens per wave (a power of two; x DFL_KU keys = values per butterfly all-reduce, <= 32)
-DFL_KU = 2      # context keys per iteration
+DFL_TQ = 8      # most block tokens per wave (a power of two; x keys per iteration = values per butterfly all-reduce, <= 32)
+DFL_KU = None   # context keys per iteration (default: 16 values per all-reduce: 16 / tokens per wave)
+
+
+def ctx_tq():
+    """Block tokens per wave: the smallest power of two that holds the block (draft depth + 1 tokens: the anchor and its masks),
+    at most DFL_TQ. A depth-3 block filled half of the 8 rows the wave scored, so half of the scalar work of the context
+    attention (10 ms of a 64 ms Qwen3-4B epoch at 32k) went to rows no proposal reads."""
+    import json
+    depth = (json.loads(os.environ.get("LLM_DRAFT") or "null") or {}).get("depth") or 7
+    return max(2, min(DFL_TQ, 1 << int(depth).bit_length()))
 
 
 def split_enabled(F):
@@ -227,7 +236,8 @@ def split_enabled(F):
 
 def ctx_split_kernel(F, QH, KVH, D, POSB, g):
     """g_dfl_ctx_split: the context part of the draft attention, split-K (see DFL_SPLITS)."""
-    S, TQ, KU, GQ, DPL = DFL_SPLITS, DFL_TQ, DFL_KU, QH // KVH, D // 32
+    S, TQ, GQ, DPL = DFL_SPLITS, ctx_tq(), QH // KVH, D // 32
+    KU = DFL_KU or max(1, 16 // TQ)
     t = [f"""
 // Context part of the draft attention, split-K: workgroup (block token, KV head, split), wave = query head of the
 // KV head. The workgroup of a chunk's first token (block offset % {TQ} == 0) scores the chunk's tokens against each
