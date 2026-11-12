@@ -1,114 +1,16 @@
 {
-<<<<<<< HEAD
- "_comment": "Active-wait re-measure, last 3 long-epoch cards (the other cards: runs 43033815593 and 43075216088).",
+ "_comment": "Qwen3.5-0.8B regenerated card (drafting off): DevLab perf session vs llama.cpp ROCm and Vulkan on the same runner.",
+ "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
+ "memory_bytes": 9000000000,
+ "kit": null,
+ "llamacpp": "b1369",
+ "llamacpp_vulkan": "b12211",
+ "llama_spec": "--spec-type ngram-simple",
  "jobs": [
   {
-   "name": "ggml-org-Laguna-XS-2.1",
-   "card": "loom-fun/ggml-org-Laguna-XS-2.1-loom",
-   "memory_bytes": 81000000000,
-   "kit": null,
-   "llamacpp": "b1370",
-   "llama_spec": "--spec-type ngram-simple",
-=======
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
- "jobs": [
-  {
-   "name": "fn-mtp",
->>>>>>> origin/main
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "parked",
-     "active_wait": false
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "unsloth-gemma-4-31B-it",
-   "card": "loom-fun/unsloth-gemma-4-31B-it-loom",
-   "memory_bytes": 80000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1370",
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "parked",
-     "active_wait": false
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "ggml-org-Qwen3-Coder-30B-A3B-Instruct",
-   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
-   "memory_bytes": 56000000000,
-   "kit": null,
-   "llamacpp": "b1370",
-   "llama_spec": "",
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "parked",
-     "active_wait": false
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "perf:parked:2",
-    "perf:parked:2:long",
-    "c4:parked",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "fn-mtp-b",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
-   ]
+   "name": "card",
+   "variants": [{"name": "card"}],
+   "steps": ["perf:card:2", "perf:card:2:long", "c4:card", "llama:2", "llama:2:long", "llamac4", "llama@vulkan:2", "llama@vulkan:2:long", "llamac4@vulkan"]
   }
  ]
 }
