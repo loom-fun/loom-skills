@@ -1,5 +1,5 @@
 {
- "_comment": "Sage-A1.5 active-wait perf: gated MTP (rebuilt from main with #298) depth 3/2/0 vs llama.cpp ROCm/Vulkan on one runner.",
+ "_comment": "Sage-A1.5: published card programs vs regenerated (gated MTP d3, main) vs llama.cpp ROCm/Vulkan, active wait, one runner.",
  "card": "loom-fun/InternScience-Sage-A1.5-loom",
  "memory_bytes": 49000000000,
  "kit": null,
@@ -8,37 +8,23 @@
  "llama_spec": "--spec-type draft-mtp --spec-draft-n-max 2",
  "jobs": [
   {
-   "name": "gated",
+   "name": "ab",
    "variants": [
+    {
+     "name": "card"
+    },
     {
      "name": "g3",
      "build": {}
-    },
-    {
-     "name": "g2",
-     "build": {},
-     "execution": {
-      "draft_depth": 2
-     }
-    },
-    {
-     "name": "g0",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
     }
    ],
    "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
     "perf:g3:2",
     "perf:g3:2:long",
     "c4:g3",
-    "perf:g0:2",
-    "perf:g0:2:long",
-    "c4:g0",
-    "perf:g2:2",
-    "perf:g2:2:long",
-    "c4:g2",
     "llama:2",
     "llama:2:long",
     "llamac4",
