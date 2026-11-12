@@ -7,7 +7,10 @@ the last with `%need<kb>` false (straight-line code, no masked code for the regi
 file serves the loop, which was measured at 10-14 % of Spark-X2.6 prefill when the masked code sat inside it), and a copy of
 the body follows the loop for the last tile, with the masked path.
 """
+import os
 import re
+
+FENCE = os.environ.get("FLASH2_PEEL_FENCE", "0") == "1"
 
 HEADER = re.compile(r"^(?P<ind> *)%m_final, %l_final, (?P<outs>[^=]*) = scf\.for %kt = \[%c0 to %key_tiles step %c1\]\((?P<args>.*)\) -> \((?P<types>.*)\) \{$")
 
@@ -29,6 +32,9 @@ def peel_last_tile(text):
     assert len(acc_names) == len(outs)
     # hot copy: no block takes the masked path
     hot = [re.sub(r"^(\s*)(%need\d+) = .* : i1$", r"\1\2 = scalar.constant false : i1", ln) for ln in body]
+    if FENCE:   # a scheduling boundary where the masked branch was: the straight-line loop would otherwise be scheduled across it
+        k0 = next(i for i, ln in enumerate(hot) if ln.lstrip().startswith("%nb_last0 ="))
+        hot.insert(k0, " " * (len(hot[k0]) - len(hot[k0].lstrip())) + "kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)")
     # peeled copy: every name it defines gets a suffix; the loop-carried values and %kt come from the hot loop
     defined = set()
     for ln in body:
