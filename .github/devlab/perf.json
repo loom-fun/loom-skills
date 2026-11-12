@@ -1,73 +1,29 @@
 {
  "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
- "memory_bytes": 63000000000,
+ "memory_bytes": 55000000000,
  "kit": null,
  "llamacpp": "b1368",
- "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "stride",
+   "name": "gqa",
    "variants": [
     {
      "name": "base",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "build": {}
     },
     {
-     "name": "s96",
+     "name": "gqa",
      "build": {
-      "ATTN_SPLITS": "96"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "s112",
-     "build": {
-      "ATTN_SPLITS": "112"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "s127",
-     "build": {
-      "ATTN_SPLITS": "127"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "s120",
-     "build": {
-      "ATTN_SPLITS": "120"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "s200",
-     "build": {
-      "ATTN_SPLITS": "200"
-     },
-     "execution": {
-      "draft_depth": 0
+      "ATTN_GQA": "1"
      }
     }
    ],
    "steps": [
+    "ktest:gqa",
     "perf:base:2:long",
-    "perf:s96:2:long",
-    "perf:s112:2:long",
-    "perf:s127:2:long",
-    "perf:s120:2:long",
-    "perf:s200:2:long"
+    "perf:gqa:2:long",
+    "c4:base",
+    "c4:gqa"
    ]
   }
  ]
