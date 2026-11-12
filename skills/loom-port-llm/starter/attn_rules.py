@@ -17,7 +17,7 @@ ATTN_MT_FROM = int(os.environ.get("ATTN_MT_FROM", "1024"))   # ... from this pos
 # heads the grid is too small to hide that latency. Same-runner decode_32k, path on vs off (ngram depth 2-3 unless noted):
 # 8 KV heads +8 % (Llama-3.2-3B), +21 % (Qwen3-4B DFlash), 2x (Qwen3-8B); 4 KV heads 0 % (Qwen2.5-7B), -15 % (Flint DFlash);
 # 2 KV heads -6 % (Qwen2.5-1.5B) to -27 % (Qwen2.5-0.5B, head_dim 64); 1 KV head -17 % decode_2k (gemma-3-1b).
-GQA_PF = os.environ.get("ATTN_GQA_PF", "0") == "1"   # K/V-once kernel: the next block's rows are loaded before this block's arithmetic (gen_llm.gqa_split)
+GQA_U = int(os.environ.get("ATTN_GQA_U", "8"))   # keys per block of the K/V-once body (decode_32k, same runner, nodraft: Qwen3-30B-A3B kv4 35.2 -> 36.5 (+3.7 %), Qwen3-8B kv8 22.9 -> 23.2 (+1.5 %) vs 16)
 SPLITS = int(os.environ.get("ATTN_SPLITS", "64"))   # decode split-K slots per head (gen_llm.attention_text)
 # decode_32k (Qwen3-8B, kv8, nodraft, same runner, 2 runs): 22.64 -> 22.89 (+1.1 %) at 8; 16 the same, ktest 57/57, bit-identical
 COMBINE_U = int(os.environ.get("ATTN_COMBINE_U", "8"))   # splits per iteration of the decode combine kernel's loops (gen_llm.combine_unrolled)

@@ -2613,7 +2613,7 @@ def gqa_split(text, P, S):
     over it. The partial buffers and the combine kernel are unchanged. It has G times fewer waves and G times more work
     per wave, which loses at short context (kv8, nodraft: decode -3 %, 2k -1.5 %, 4 streams -2 %) and wins at long (32k
     +14 %): contexts with fewer than ATTN_GQA_FROM visible keys run the per-head body that stays in the else branch."""
-    U = UNROLL
+    U = min(attn_rules.GQA_U, UNROLL)   # keys per block of this body (8: the K/V rows in flight for G heads fit the registers)
     a = text.index(f'kernel.def export("{P}_attention_split")')
     b = text.index(f'kernel.def export("{P}_attention_combine")', a)
     k = text[a:b]
@@ -2647,54 +2647,17 @@ def gqa_split(text, P, S):
     %head{h} = index.assume %head{h}_raw [range(%head{h}_raw, 0, {QH - 1})] : index
     %q_raw{h} = vector.load %q_view[%token, %head{h}, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
     %q4_{h} = vector.mulf %q_raw{h}, %scale_v : vector<4xf32>""")
-    t.append("""    %lo_abs = index.add %window_low, %start : index
+    t.append(f"""    %lo_abs = index.add %window_low, %start : index
     %hi_abs = index.add %window_low, %stop : index
-    %lo_q = index.div %lo_abs, %cU : index
-    %lo_al = index.mul %lo_q, %cU : index""")
-    PF = attn_rules.GQA_PF
+    %cUg = index.constant {U} : index
+    %lo_q = index.div %lo_abs, %cUg : index
+    %lo_al = index.mul %lo_q, %cUg : index""")
     fin = "".join(f"%mf_{h}, %lf_{h}, %af_{h}, " for h in range(G)).rstrip(", ")
     args = ", ".join(f"%m_{h} = %neg_big : f32, %l_{h} = %zero_f : f32, %acc_{h} = %zero4 : vector<4xf32>" for h in range(G))
     types = ", ".join(["f32, f32, vector<4xf32>"] * G)
-    if PF:   # the next block's K/V rows are loaded before this block's arithmetic and carried through the loop
-        for i in range(U):   # prologue: the first block (an empty split loads block 0, never read)
-            if i == 0:
-                t.append("""    %lo_nonempty = index.cmp ult, %lo_abs, %hi_abs : index
-    %pj = scf.select %lo_nonempty, %lo_al, %c0 : index
-    %pkb_off = func.call @g_kv_offset(%origins, %row, %pj, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
-            t.append(f"""    %pkd{i} = index.constant {i * POS_BYTES} : offset
-    %pko{i} = index.add %pkb_off, %pkd{i} : offset
-    %pkc{i} = buffer.view %arena[%pko{i}] : buffer -> view<{KVH}x32x4xf16>
-    %pk{i} = vector.load %pkc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
-    %pvo{i} = index.add %pko{i}, %plane_stride : offset
-    %pvc{i} = buffer.view %arena[%pvo{i}] : buffer -> view<{KVH}x32x4xf16>
-    %pv{i} = vector.load %pvc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>""")
-        fin += ", " + ", ".join(f"%kx{i}, %vx{i}" for i in range(U))
-        args += ", " + ", ".join(f"%kh{i} = %pk{i} : vector<4xf16>, %vh{i} = %pv{i} : vector<4xf16>" for i in range(U))
-        types += ", " + ", ".join(["vector<4xf16>, vector<4xf16>"] * U)
-    t.append(f"    {fin} = scf.for %j = [%lo_al to %hi_abs step %cU]({args}) -> ({types}) {{")
-    if PF:
-        t.append("""      %jn = index.add %j, %cU : index
-      %jn_ok = index.cmp ult, %jn, %hi_abs : index
-      %jn_c = scf.select %jn_ok, %jn, %j : index
-      %nkb_off = func.call @g_kv_offset(%origins, %row, %jn_c, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
-        for i in range(U):
-            t.append(f"""      %nkd{i} = index.constant {i * POS_BYTES} : offset
-      %nko{i} = index.add %nkb_off, %nkd{i} : offset
-      %nkc{i} = buffer.view %arena[%nko{i}] : buffer -> view<{KVH}x32x4xf16>
-      %nk{i} = vector.load %nkc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
-      %nvo{i} = index.add %nko{i}, %plane_stride : offset
-      %nvc{i} = buffer.view %arena[%nvo{i}] : buffer -> view<{KVH}x32x4xf16>
-      %nv{i} = vector.load %nvc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>""")
-        for i in range(U):
-            t.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
-      %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
-      %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
-      %ok{i} = scalar.andi %okl{i}, %okh{i} : i1
-      %k{i} = vector.extf %kh{i} : vector<4xf16> to vector<4xf32>
-      %v{i} = vector.extf %vh{i} : vector<4xf16> to vector<4xf32>""")
-    else:
-      t.append("""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
-      for i in range(U):
+    t.append(f"    {fin} = scf.for %j = [%lo_al to %hi_abs step %cUg]({args}) -> ({types}) {{")
+    t.append("""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
+    for i in range(U):
         t.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
       %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
       %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
@@ -2732,8 +2695,6 @@ def gqa_split(text, P, S):
       %pv{i}_{h} = vector.splat %p{i}_{h} : vector<4xf32>
       %aa{i}_{h} = vector.fmaf %pv{i}_{h}, %v{i}, {pa} : vector<4xf32>"""); pl, pa = f"%la{i}_{h}", f"%aa{i}_{h}"
         yields += [prev, pl, pa]
-    if PF:
-        yields += [x for i in range(U) for x in (f"%nk{i}", f"%nv{i}")]
     t.append(f"      scf.yield {', '.join(yields)} : {types}")
     t.append("    }")
     t.append(f"""    %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x4xf32>
