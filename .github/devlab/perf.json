@@ -6,31 +6,23 @@
  "llamacpp": "b1371",
  "jobs": [
   {
-   "name": "bolt-pool",
+   "name": "bolt-d0",
    "variants": [
     {
-     "name": "base",
+     "name": "d0",
+     "ref": "origin/main",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "d3",
      "ref": "origin/main"
-    },
-    {
-     "name": "pool",
-     "ref": "origin/main",
-     "execution": {
-      "pool_capacity": 131072
-     }
-    },
-    {
-     "name": "pre2k",
-     "ref": "origin/main",
-     "execution": {
-      "prefill_capacity": 2048
-     }
     }
    ],
    "steps": [
-    "perf:base:4:long",
-    "perf:pool:4:long",
-    "perf:pre2k:4:long"
+    "perf:d0:4:long",
+    "perf:d3:4:long"
    ]
   }
  ],
