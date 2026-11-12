@@ -3943,6 +3943,31 @@ kernel.def export("{name}") @{name}(%spans: index) {{
 
 
 
+HEAD_UNROLL = int(os.environ.get("HEAD_UNROLL", "1"))   # rows per iteration of the int8 head's row loop (1, 2 or 4)
+
+
+def head_sx(u):
+    return "" if u == 0 else f"_u{u}"
+
+
+def head_row_setup(u, V, RB):
+    """Row (r + u) of the int8 head's sub-block: bounds, weight offset and the LDS slot index (u = 0 keeps the
+    1-row loop's names, so HEAD_UNROLL=1 emits the same text as before)."""
+    sx = head_sx(u)
+    r = "%r" if u == 0 else f"%r{sx}"
+    pre = "" if u == 0 else f"    %ru{sx} = index.constant {u} : index\n    %r{sx} = index.add %r, %ru{sx} : index\n"
+    return pre + f"""    %row_value{sx} = index.add %blk_row, {r} : index
+    %in_vocab{sx} = index.cmp ult, %row_value{sx}, %vocab : index
+    %load{sx} = scalar.andi %in_vocab{sx}, %ok : i1
+    %last_row{sx} = index.constant {V - 1} : index
+    %row_c{sx} = index.min %row_value{sx}, %last_row{sx} : index
+    %ro{sx} = index.scale %row_c{sx}, %row_bytes : index, offset -> offset
+    %o{sx} = index.add %ro{sx}, %ba : offset
+    %rb{sx} = index.assume {r} [range({r}, 0, {RB - 1})] : index
+"""
+
+
+
 def head_iq_body(TG, fmt, R, waves, rb, perm=False):
     """Row loop and argmax of the int8 head (ACT_Q8): the 128-row chunk runs in sub-blocks of RB rows so the
     workgroup's partials (waves x RB x TG F32) stay ~14 KB at any TG (a 128 x 8-span buffer, 28 KB, held one or two
@@ -3958,7 +3983,7 @@ def head_iq_body(TG, fmt, R, waves, rb, perm=False):
   %parts = buffer.alloca<workgroup> align(16) %part_bytes : buffer
   %pv = buffer.view %parts[%zero] : buffer -> view<{waves}x{RB}x{TG}xf32>
   %rbk = index.constant {RB} : index
-  %nsb = index.constant {NSB} : index
+{"" if HEAD_UNROLL == 1 else f"  %cunroll = index.constant {HEAD_UNROLL} : index" + chr(10)}  %nsb = index.constant {NSB} : index
   %neg_inf = scalar.constant -3.0e38 : f32"""]
     for j in range(TG):
         t.append(f"""  %wsel{j} = index.cmp eq, %workitem, %sj{j} : index
@@ -3975,19 +4000,15 @@ def head_iq_body(TG, fmt, R, waves, rb, perm=False):
   %best, %best_id = scf.for %sb = [%c0 to %nsb step %c1](%cbv = %neg_inf : f32, %cbi = %c0_i32 : i32) -> (f32, i32) {{
   %sb_row = index.mul %sb, %rbk : index
   %blk_row = index.add %first_row, %sb_row : index
-  scf.for %r = [%c0 to %rbk step %c1] {{
-    %row_value = index.add %blk_row, %r : index
-    %in_vocab = index.cmp ult, %row_value, %vocab : index
-    %load = scalar.andi %in_vocab, %ok : i1
-    %last_row = index.constant {V - 1} : index
-    %row_c = index.min %row_value, %last_row : index
-    %ro = index.scale %row_c, %row_bytes : index, offset -> offset
-    %o = index.add %ro, %ba : offset
-    %rb = index.assume %r [range(%r, 0, {RB - 1})] : index
-""" + iq_decode(fmt, 0, "w", "%load", "%o", "%within"))
-    t.append("\n".join(iq_dot(fmt, 0, j, f"%pa{j}") for j in range(TG)))
-    t.append(bfly_store([f"%pa{j}" for j in range(TG)], "hb",
-                        lambda v: f"view.store {v}, %pv[%wave, %rb, %bt_idx] : f32, view<{waves}x{RB}x{TG}xf32>", presorted=perm))
+  scf.for %r = [%c0 to %rbk step {"%c1" if HEAD_UNROLL == 1 else "%cunroll"}] {{
+""" + "".join(head_row_setup(u, V, RB) for u in range(HEAD_UNROLL)) +
+             "\n".join(iq_decode(fmt, u, "w", f"%load{head_sx(u)}", f"%o{head_sx(u)}", "%within") for u in range(HEAD_UNROLL)))
+    for u in range(HEAD_UNROLL):   # each row: the same dot and xor-16/8/4/2/1 tree as the 1-row loop
+        pa = (lambda j, u=u: f"%pa{j}" if u == 0 else f"%pa{u}_{j}")
+        t.append("\n".join(iq_dot(fmt, u, j, pa(j)) for j in range(TG)))
+        t.append(bfly_store([pa(j) for j in range(TG)], "hb" if u == 0 else f"hb{u}",
+                            (lambda u: lambda v: f"view.store {v}, %pv[%wave, %rb{head_sx(u)}, %bt_idx] : f32, view<{waves}x{RB}x{TG}xf32>")(u),
+                            presorted=perm))
     t.append(f"""  }}
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %nbv, %nbi = scf.if %my_live -> (f32, i32) {{

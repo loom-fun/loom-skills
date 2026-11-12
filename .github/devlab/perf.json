@@ -1,15 +1,15 @@
 {
- "_comment": "0.8B fixed per-step cost: 1-2 layer rebuilds, doubled head matvec / select / norms / layer matvecs (drafting off).",
+ "_comment": "Int8 head row loop unrolled 2/4 rows per iteration (HEAD_UNROLL), Qwen3.5-0.8B (248320 x 1024 Q6_K), drafting off.",
  "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
  "memory_bytes": 9000000000,
  "kit": null,
  "llamacpp": "b1369",
  "jobs": [
   {
-   "name": "ovh2",
+   "name": "head",
    "variants": [
     {
-     "name": "r24",
+     "name": "base",
      "build": {},
      "build_args": [
       "--draft",
@@ -17,97 +17,37 @@
      ]
     },
     {
-     "name": "r1",
-     "build": {},
+     "name": "u2",
+     "build": {
+      "HEAD_UNROLL": "2"
+     },
      "build_args": [
       "--draft",
       "none"
-     ],
-     "config": {
-      "layers": 1,
-      "recurrent_layers": [
-       0
-      ],
-      "kv_layers": 0
-     }
-    },
-    {
-     "name": "r2",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "config": {
-      "layers": 2,
-      "recurrent_layers": [
-       0,
-       1
-      ],
-      "kv_layers": 0
-     }
-    },
-    {
-     "name": "headmv",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "double": [
-      "llm_advance:g_head_mv"
      ]
     },
     {
-     "name": "select",
-     "build": {},
+     "name": "u4",
+     "build": {
+      "HEAD_UNROLL": "4"
+     },
      "build_args": [
       "--draft",
       "none"
-     ],
-     "double": [
-      "llm_advance:g_head_select"
-     ]
-    },
-    {
-     "name": "norm",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "double": [
-      "llm_advance:g_post_add_norm|g_quant_q8"
-     ]
-    },
-    {
-     "name": "lmv",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "double": [
-      "llm_advance:g_mv_q4_k|g_mv_q5_k|g_mv_q6_k|g_mv_q8_0"
      ]
     }
    ],
    "steps": [
-    "perf:r24:2",
-    "perf:r1:2",
-    "perf:r2:2",
-    "perf:headmv:2",
-    "perf:select:2",
-    "perf:norm:2",
-    "perf:lmv:2",
-    "c4:r1:1",
-    "c4:r1:4",
-    "c4:r2:4",
-    "c4:headmv:1",
-    "c4:headmv:4",
-    "c4:select:4",
-    "c4:r24:1",
-    "c4:r24:4"
+    "ktest:u2",
+    "ktest:u4",
+    "perf:base:2",
+    "perf:u2:2",
+    "perf:u4:2",
+    "c4:base",
+    "c4:u2",
+    "c4:u4",
+    "perf:base:2:long",
+    "perf:u4:2:long"
    ]
   }
  ]
