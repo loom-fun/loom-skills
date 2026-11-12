@@ -9,13 +9,12 @@ For each model repo in the org, reads its model.json, model.json.lock, llm_confi
             B = card exists but came from an older skill (e.g. "report": "attached", imported by import_card.py)
                 or an older schema; never use a B repo as a reference
   missing   gates and metrics the card should have (card_lib.gate_applies / metric_applies) but has no evidence for,
-            the roofline, and devlab-perf (perf.devlab_perf: local values without a DevLab value on the repo's programs)
+            and the roofline (performance: a devlab-perf job on AMD DevLab Dispatch, the cards' only performance source)
   failing   gates whose latest evidence is not a pass
-  perf      the performance guardrails (card_lib.perf_flags), on the local (headline) values: far = metrics whose Loom
-            value is below FAR_FRACTION x the efficiency Loom ports have demonstrated (roofline); stale = metrics whose
-            value was measured on programs other than the repo's (card_lib.stale_metrics: the session's
-            programs_sha256 vs the published program/*.loom); devlab = metrics only DevLab measured (no local value);
-            devlab_perf = see missing. The local / DevLab ratio is never a flag.
+  perf      the performance guardrails (card_lib.perf_flags) on the card values: far = metrics whose Loom value is
+            below FAR_FRACTION x the efficiency Loom ports have demonstrated (roofline); stale = metrics whose value
+            was measured on programs other than the repo's (card_lib.stale_metrics: the session's programs_sha256 vs
+            the published program/*.loom)
   generator the loom-skills commit that generated the programs: llm_config.json "generator".skills_commit (build.py's
             stamp), else info.json's recovered versions.package.skills_commit; generator_source says which
   paused    true when info.json "status" is "paused" (work stopped; the card ends with its next steps); the
@@ -34,14 +33,12 @@ each target one action:
   create  no repo for the model                         -> loop step 1 (port + optimize, publish)
   update  only a category B repo, or one not built from plain Q4_K_M -> loop step 1, from the best A reference
   fix     category A with a failing gate                -> loop step 4 (fix the skill, regenerate)
-  remeasure  category A, a card value that a fresh local session (Loom and llama.cpp, quiet GPU, the repo's programs)
-             must replace before any performance judgement; "remeasure" lists why (card_lib.remeasure_reasons):
-             stale (measured on other programs, perf.stale) or devlab-primary (only DevLab measured it, perf.devlab)
-  investigate  category A, far from roofline (perf.far) -> loop step 5 (local GPU worker, loom-optimize)
-  sweep   category A, gates, metrics, the roofline or the DevLab perf session missing -> loop step 3 (gates,
-          devlab-perf: DevLab; metrics: local)
-  done    category A, every applicable gate passes, every applicable metric is measured locally and on DevLab, the
-          roofline is computed and no flag is raised
+  remeasure  category A, a card value measured on programs other than the repo's (perf.stale): a fresh devlab-perf
+             job must replace it before any performance judgement (card_lib.remeasure_reasons)
+  investigate  category A, far from roofline (perf.far) -> loop step 5 (loom-optimize)
+  sweep   category A, gates, metrics or the roofline missing -> loop step 3 (gates and a devlab-perf job on DevLab)
+  done    category A, every applicable gate passes, every applicable metric is measured, the roofline is computed and
+          no flag is raised
 Repos that duplicate a target's better repo, or match no target, are listed under "extra" (retire or keep: ask the
 user; never delete a repo on your own).
 """
@@ -235,8 +232,6 @@ def assess(repo, d):
             out["missing"].append("roofline")
         out["programs_sha256"] = programs_sha256(d)
         out["perf"] = perf_flags(info, facts["kind"], facts["features"], programs=out["programs_sha256"] or "")
-        if out["perf"]["devlab_perf"]:
-            out["missing"].append("devlab-perf")
     if out["quant"] != "Q4_K_M" or re.search(r"UD-", ck["file"]):
         out["notes"].append(f"checkpoint is {ck['file']}, not plain Q4_K_M")
     return out
@@ -275,8 +270,6 @@ def main():
 
     def flag_text(p):
         out = [f"stale {k} (measured programs {v[:8]})" for k, v in (p.get("stale") or {}).items()]
-        if p.get("devlab"):
-            out.append("devlab-primary " + ",".join(sorted(p["devlab"])) + " (no local session)")
         out += [f"far {k} {v[0]:.0%} of roofline (demonstrated {v[1]:.0%})" for k, v in p["far"].items()]
         return "; ".join(out)
 
@@ -324,9 +317,9 @@ def main():
             elif primary["failing"]:
                 action = "fix"
             elif remeasure(primary):
-                action = "remeasure"   # other programs or no local session: a fresh local session first
+                action = "remeasure"   # measured on other programs: a fresh devlab-perf job first
             elif flagged(primary):
-                action = "investigate"   # far from roofline: back to a local GPU worker
+                action = "investigate"   # far from roofline: loom-optimize
             elif primary["missing"]:
                 action = "sweep"
             else:
