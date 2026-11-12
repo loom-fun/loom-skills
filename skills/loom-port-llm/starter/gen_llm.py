@@ -3017,7 +3017,7 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
   kernel.return
 }}
 """
-    gqa_on = P == "g" and D == 128 and attn_rules.gqa(gen_draft.enabled(), seg_tokens()) and attn_rules.paged(U) and attn_rules.butterfly(U)   # measured at head_dim 128 only
+    gqa_on = P == "g" and attn_rules.gqa(gen_draft.enabled(), seg_tokens(), D) and attn_rules.paged(U) and attn_rules.butterfly(U)
     if gqa_on:
         text = gqa_split(text, P, S)
     if P == "g" and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans

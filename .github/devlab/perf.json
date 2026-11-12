@@ -1,22 +1,17 @@
 {
- "_comment": "verify32k: Flint: ktest main-vs-new (pc_part_2 decode tolerance), consistency, short rows.",
- "card": "loom-fun/ggml-org-Flint-loom",
- "memory_bytes": 69000000000,
+ "_comment": "verify32k: K/V-once decode body at head_dim 256 in drafting packages (qwen35 hybrids): published card programs (main) vs rebuild (new).",
+ "card": "loom-fun/bartowski-Ornith-1.5-9B-loom",
+ "memory_bytes": 55000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "flint",
-   "card": "loom-fun/ggml-org-Flint-loom",
-   "memory_bytes": 69000000000,
+   "name": "o15",
+   "card": "loom-fun/bartowski-Ornith-1.5-9B-loom",
+   "memory_bytes": 55000000000,
    "variants": [
     {
      "name": "main"
-    },
-    {
-     "name": "mainb",
-     "build": {},
-     "ref": "origin/main"
     },
     {
      "name": "new",
@@ -24,10 +19,81 @@
     }
    ],
    "steps": [
-    "ktest:mainb",
     "ktest:new",
-    "perf:main:2",
-    "perf:new:2",
+    "perf:main:2:long",
+    "perf:new:2:long",
+    "c4:main",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
+   ]
+  },
+  {
+   "name": "q35",
+   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new",
+    "perf:main:2:long",
+    "perf:new:2:long",
+    "c4:main",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
+   ]
+  },
+  {
+   "name": "q354",
+   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new",
+    "perf:main:2:long",
+    "perf:new:2:long",
+    "c4:main",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
+   ]
+  },
+  {
+   "name": "o10",
+   "card": "loom-fun/unsloth-Ornith-1.0-9B-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new",
+    "perf:main:2:long",
+    "perf:new:2:long",
+    "c4:main",
+    "c4:new",
+    "ab:6",
     "consistency:new:2"
    ]
   }

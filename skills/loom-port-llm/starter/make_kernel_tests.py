@@ -682,7 +682,7 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
 # no other case here reaches 4096 keys, so this span (4296 keys, decode path vs numpy) is its only coverage
 _draft = cfg.get("draft") or json.loads(os.environ.get("LLM_DRAFT") or "null") or {}
 _seg = bool(_draft.get("kind") and D in (64, 128) and KVH <= 2)   # gen_llm.seg_tokens(): drafting builds with few KV heads take the segment path
-if (D == 128 and attn_rules.gqa(bool(_draft.get("kind")), _seg) and attn_rules.paged(attn_rules.UNROLL) and attn_rules.butterfly(attn_rules.UNROLL)
+if (attn_rules.gqa(bool(_draft.get("kind")), _seg, D) and attn_rules.paged(attn_rules.UNROLL) and attn_rules.butterfly(attn_rules.UNROLL)
         and os.environ.get("PREFILL_CONT", "1") != "0"):
     prefill_cont_case(A0, attn_rules.ATTN_GQA_FROM + 200, 16, 0, "pc_gqa")
 if cfg.get("attn_sinks") and os.environ.get("PREFILL_CONT", "1") != "0":
