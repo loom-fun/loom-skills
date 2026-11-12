@@ -72,20 +72,6 @@
     "perf:dmv:2:long",
     "perf:k16:2:long"
    ]
-  },
-  {
-   "name": "fn-mtp-b",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
-   ]
   }
  ]
 }
