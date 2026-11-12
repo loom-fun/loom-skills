@@ -1,75 +1,46 @@
 {
- "_comment": "Bolt-E4B consistency isolation 2 (WIP)",
+ "_comment": "Bolt-E4B consistency: is main itself flaky? (WIP)",
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "boltd2",
+   "name": "boltc3",
    "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
    "memory_bytes": 40000000000,
    "kit": "gemma4",
    "variants": [
     {
-     "name": "main2",
-     "build": {
-      "FLASH2_EDGE_ZERO": "1",
-      "FLASH2_DEAD_SKIP": "0",
-      "FLASH2_PEEL": "0"
-     },
+     "name": "main",
+     "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "afe81d3570340163e874f708df397fd78928f2f7"
+     "ref": "701974f"
     },
     {
-     "name": "ed",
-     "build": {
-      "FLASH2_EDGE_ZERO": "0",
-      "FLASH2_DEAD_SKIP": "0",
-      "FLASH2_PEEL": "0"
-     },
+     "name": "new",
+     "build": {},
      "build_args": [
       "--draft",
       "none"
-     ],
-     "ref": "afe81d3570340163e874f708df397fd78928f2f7"
+     ]
     },
     {
-     "name": "pk",
-     "build": {
-      "FLASH2_EDGE_ZERO": "1",
-      "FLASH2_DEAD_SKIP": "0",
-      "FLASH2_PEEL": "force"
-     },
+     "name": "pre",
+     "build": {},
      "build_args": [
       "--draft",
       "none"
      ],
-     "ref": "afe81d3570340163e874f708df397fd78928f2f7"
-    },
-    {
-     "name": "e1",
-     "build": {
-      "FLASH2_EDGE_ZERO": "1",
-      "FLASH2_DEAD_SKIP": "1",
-      "FLASH2_PEEL": "0"
-     },
-     "build_args": [
-      "--draft",
-      "none"
-     ],
-     "ref": "afe81d3570340163e874f708df397fd78928f2f7"
+     "ref": "2b2ead594d90c4b156279cdf29750c38c4ba3a9f"
     }
    ],
    "steps": [
-    "consistency:main2:1",
-    "consistency:ed:1",
-    "consistency:pk:1",
-    "consistency:e1:1",
-    "consistency:main2:1",
-    "consistency:ed:1",
-    "consistency:pk:1",
-    "consistency:e1:1"
+    "consistency:main:6",
+    "consistency:new:6",
+    "consistency:pre:4",
+    "consistency:main:6",
+    "consistency:new:6"
    ]
   }
  ]
