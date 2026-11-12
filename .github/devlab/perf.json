@@ -1,5 +1,5 @@
 {
- "_comment": "verify32k: MMA kernel timing ablations (draft_depth 0 at runtime: T=1 runs through the mma kernel).",
+ "_comment": "verify32k: K/V-once decode attention body in drafting packages (PR): published card programs (main) vs rebuild (new); long/short rows, 4 streams, interleaved short decode, ktest, consistency.",
  "card": "loom-fun/ggml-org-Qwen3-4B-loom",
  "memory_bytes": 55000000000,
  "kit": null,
@@ -11,70 +11,21 @@
    "memory_bytes": 55000000000,
    "variants": [
     {
-     "name": "gqa",
-     "build": {
-      "ATTN_MMA": "0"
-     }
+     "name": "main"
     },
     {
-     "name": "nomt",
-     "build": {
-      "ATTN_MMA": "0",
-      "ATTN_MT": "1"
-     }
-    },
-    {
-     "name": "base0",
-     "build": {
-      "ATTN_MMA": "0"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "mma0",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "off0",
-     "build": {
-      "ATTN_MMA_FROM": "1000000"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "nostage0",
-     "build": {
-      "ATTN_MMA_ABL": "nostage"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "nocomp0",
-     "build": {
-      "ATTN_MMA_ABL": "nocompute"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "perf:gqa:2:long",
-    "perf:nomt:2:long",
-    "perf:base0:2:long",
-    "perf:mma0:2:long",
-    "perf:off0:2:long",
-    "perf:nostage0:2:long",
-    "perf:nocomp0:2:long"
+    "ktest:new",
+    "perf:main:2:long",
+    "perf:new:2:long",
+    "c4:main",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
    ]
   },
   {
@@ -83,70 +34,67 @@
    "memory_bytes": 69000000000,
    "variants": [
     {
-     "name": "gqa",
-     "build": {
-      "ATTN_MMA": "0"
-     }
+     "name": "main"
     },
     {
-     "name": "nomt",
-     "build": {
-      "ATTN_MMA": "0",
-      "ATTN_MT": "1"
-     }
-    },
-    {
-     "name": "base0",
-     "build": {
-      "ATTN_MMA": "0"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "mma0",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "off0",
-     "build": {
-      "ATTN_MMA_FROM": "1000000"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "nostage0",
-     "build": {
-      "ATTN_MMA_ABL": "nostage"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "nocomp0",
-     "build": {
-      "ATTN_MMA_ABL": "nocompute"
-     },
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "new",
+     "build": {}
     }
    ],
    "steps": [
-    "perf:gqa:2:long",
-    "perf:nomt:2:long",
-    "perf:base0:2:long",
-    "perf:mma0:2:long",
-    "perf:off0:2:long",
-    "perf:nostage0:2:long",
-    "perf:nocomp0:2:long"
+    "ktest:new",
+    "perf:main:2:long",
+    "perf:new:2:long",
+    "c4:main",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
+   ]
+  },
+  {
+   "name": "l8",
+   "card": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new",
+    "perf:main:2:long",
+    "perf:new:2:long",
+    "c4:main",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
+   ]
+  },
+  {
+   "name": "vl7",
+   "card": "loom-fun/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:new",
+    "perf:main:2:long",
+    "perf:new:2:long",
+    "c4:main",
+    "c4:new",
+    "ab:6",
+    "consistency:new:2"
    ]
   }
  ]
