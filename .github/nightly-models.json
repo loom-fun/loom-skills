@@ -482,7 +482,6 @@
    "llamacpp": "b1370",
    "features": [
     "vision",
-    "draft",
     "thinking-toggle"
    ]
   },
