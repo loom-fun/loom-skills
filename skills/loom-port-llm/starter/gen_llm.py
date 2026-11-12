@@ -2436,7 +2436,8 @@ def multi_token_split(text, P, U, T, until=None):
     """`P`_attention_split with a multi-token path: when the T epoch tokens of this token's aligned group are live,
     of one row and at consecutive positions (a verify span), the group's first workgroup computes all T (one K/V
     load per key for the T queries of its head) and the others exit; any other token takes the per-token path. `until`: from this
-    position on the per-token path (the K/V-once body) is faster than the span path: the group's first position must be below it."""
+    position on the per-token path (the K/V-once body) is faster than the span path: the whole group must lie below it (a token
+    then takes the same arithmetic alone and in a span: the span path equals the per-head body, not the K/V-once body)."""
     a = text.index(f'kernel.def export("{P}_attention_split")')
     b = text.index("  kernel.return\n}\n", a)
     k = text[a:b]
@@ -2462,8 +2463,10 @@ def multi_token_split(text, P, U, T, until=None):
         sg_until_own = sg_until_first = ""
     else:
         sg_until_own = (f"  %sg_to = scalar.constant {until} : i32\n  %sg_own_lt = scalar.cmpi slt, %position32, %sg_to : i32\n"
-                        "  %sg_own_far = scalar.andi %sg_own_ge, %sg_own_lt : i1\n")
-        sg_until_first = ("    %sg_first_lt = scalar.cmpi slt, %sg_pos0, %sg_to : i32\n    %sg_far = scalar.andi %sg_far_ge, %sg_first_lt : i1\n")
+                        "  %sg_sl = scalar.cmpi ne, %sliding, %c0_i32 : i32\n  %sg_own_ok = scalar.ori %sg_own_lt, %sg_sl : i1\n"
+                        "  %sg_own_far = scalar.andi %sg_own_ge, %sg_own_ok : i1\n")   # sliding layers never reach the K/V-once body's visible-key count
+        sg_until_first = (f"    %sg_to_first = scalar.constant {until - (T - 1)} : i32\n    %sg_first_lt = scalar.cmpi slt, %sg_pos0, %sg_to_first : i32\n"
+                          "    %sg_first_ok = scalar.ori %sg_first_lt, %sg_sl : i1\n    %sg_far = scalar.andi %sg_far_ge, %sg_first_ok : i1\n")   # the whole group below `until`: a token's arithmetic never depends on its span
     det = [f"""  %live = scalar.andi %live_token, %needed : i1
   // multi-token path: this token's aligned group of {T}
   %sg_true = scalar.constant true : i1
@@ -3021,7 +3024,7 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
     if gqa_on:
         text = gqa_split(text, P, S)
     if P == "g" and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans
-        text = multi_token_split(text, P, U, ATTN_MT, attn_rules.ATTN_GQA_FROM if gqa_on else None)
+        text = multi_token_split(text, P, U, ATTN_MT, attn_rules.ATTN_GQA_FROM - 1 if gqa_on else None)   # gqa body from visible = ATTN_GQA_FROM, i.e. position FROM - 1
     if D != 128:
         text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
                 .replace("x32x4xf32", f"x32x{DL}xf32").replace("vector<4xf32>", f"vector<{DL}xf32>")

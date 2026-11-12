@@ -682,8 +682,8 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
 # no other case here reaches 4096 keys, so this span (4296 keys, decode path vs numpy) is its only coverage
 _draft = cfg.get("draft") or json.loads(os.environ.get("LLM_DRAFT") or "null") or {}
 _seg = bool(_draft.get("kind") and D in (64, 128) and KVH <= 2)   # gen_llm.seg_tokens(): drafting builds with few KV heads take the segment path
-if (attn_rules.gqa(bool(_draft.get("kind")), _seg, D) and attn_rules.paged(attn_rules.UNROLL) and attn_rules.butterfly(attn_rules.UNROLL)
-        and os.environ.get("PREFILL_CONT", "1") != "0"):
+_gqa = attn_rules.gqa(bool(_draft.get("kind")), _seg, D) and attn_rules.paged(attn_rules.UNROLL) and attn_rules.butterfly(attn_rules.UNROLL)
+if _gqa and D == 128 and os.environ.get("PREFILL_CONT", "1") != "0":
     prefill_cont_case(A0, attn_rules.ATTN_GQA_FROM + 200, 16, 0, "pc_gqa")
 if cfg.get("attn_sinks") and os.environ.get("PREFILL_CONT", "1") != "0":
     _sl = cfg.get("sliding_layers") or []
@@ -1025,10 +1025,10 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 # 3c. a verify span at long context: ATTN_MT tokens of one row at consecutive positions past ATTN_MT_FROM take the
 # multi-token split-K path (one K/V load per key for the span); K/V written straight into the arena (identity pages).
 # The model's attention scale and sinks are in the reference; a sliding layer (window W) gets its own case.
-def attention_span_case(tag, sliding):
+def attention_span_case(tag, sliding, p0=None, t=None):
     W = cfg.get("sliding_window") or 0
-    t = attn_rules.ATTN_MT
-    p0 = max(attn_rules.ATTN_MT_FROM + 76, W + 100 if sliding else 0)
+    t = t or attn_rules.ATTN_MT
+    p0 = p0 or max(attn_rules.ATTN_MT_FROM + 76, W + 100 if sliding else 0)
     ctx = (p0 + t + 15) // 16 * 16 + 64
     scale = cfg["attn_scale"] if cfg.get("attn_scale") is not None else 1 / np.sqrt(D)
     sinks = deq(f"blk.{A0}.attn_sinks.weight").astype(np.float32) if cfg.get("attn_sinks") else None
@@ -1079,6 +1079,8 @@ def attention_span_case(tag, sliding):
 """)
 
 
+if _gqa:   # a run of 6 tokens that crosses ATTN_GQA_FROM (the first token's visible keys are below it): per-head body, then the K/V-once body
+    attention_span_case("attention_gqa", False, attn_rules.ATTN_GQA_FROM - 2, 6)
 if attn_rules.multi_token(attn_rules.UNROLL, KVH):   # the condition gen_llm.py emits the multi-token path on
     attention_span_case("attention_span", False)
     if cfg.get("sliding_layers") and cfg.get("sliding_window"):
