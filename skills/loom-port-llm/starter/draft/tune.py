@@ -82,7 +82,10 @@ def measure(url, model, chat, context=0, rows=1):
     document ("long", at most half the context) and, with a multi-row preset, "streams4": the aggregate of `rows`
     concurrent essays (measure_c4)."""
     off = {"chat_template_kwargs": {"enable_thinking": False}} if chat.get("thinking") == "toggle" else {}
-    stream(url, model, WORK[0][0], 16, extra=off)                       # warm-up (weights, first compiles)
+    # Warm-up: the first timed request's own shape, untimed (perf.py does the same). A 16-token request left the drafted
+    # stages' first compiles inside work0: LFM3-Omni-2B scored 154 tok/s there at every n-gram depth against 169 without
+    # drafting, where the same request after a full warm-up decodes 172 (card perf, depth 2) and the tuner dropped drafting.
+    stream(url, model, WORK[0][0], 256, extra=off)
     work = [(f"work{i}", m, x) for i, (m, x) in enumerate(WORK)]
     n = max((d for d in DOC_SIZES if d <= min(LONG_CTX, context // 2)), default=0)
     if n >= 4000:
