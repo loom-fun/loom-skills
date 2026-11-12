@@ -1,52 +1,13 @@
 {
- "_comment": "verify32k: q4 drafted-epoch ablation (double verify attention / matvecs / drafter kernels), o10 rebuild-from-main text check, ktest of the new attention_gqa case at head_dim 256.",
+ "_comment": "verify32k PR evidence: origin/main rebuild (mainb) vs this branch (new), same runner, drafted rows and 4 streams.",
  "card": "loom-fun/ggml-org-Qwen3-4B-loom",
  "memory_bytes": 55000000000,
  "kit": null,
  "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "q4abl",
+   "name": "q4",
    "card": "loom-fun/ggml-org-Qwen3-4B-loom",
-   "memory_bytes": 55000000000,
-   "variants": [
-    {
-     "name": "new",
-     "build": {}
-    },
-    {
-     "name": "dattn",
-     "build": {},
-     "double": [
-      "llm_verify:@g_attention_(split|combine)\\["
-     ]
-    },
-    {
-     "name": "dmv",
-     "build": {},
-     "double": [
-      "llm_verify:@g_mv_"
-     ]
-    },
-    {
-     "name": "ddfl",
-     "build": {},
-     "double": [
-      "*:@g_dfl_"
-     ]
-    }
-   ],
-   "steps": [
-    "ktest:new",
-    "perf:new:2:long",
-    "perf:dattn:2:long",
-    "perf:dmv:2:long",
-    "perf:ddfl:2:long"
-   ]
-  },
-  {
-   "name": "o10",
-   "card": "loom-fun/unsloth-Ornith-1.0-9B-loom",
    "memory_bytes": 55000000000,
    "variants": [
     {
@@ -60,10 +21,98 @@
     }
    ],
    "steps": [
-    "ktest:new",
-    "ab:6",
     "perf:mainb:2:long",
-    "perf:new:2:long"
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new"
+   ]
+  },
+  {
+   "name": "flint",
+   "card": "loom-fun/ggml-org-Flint-loom",
+   "memory_bytes": 69000000000,
+   "variants": [
+    {
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "perf:mainb:2:long",
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new"
+   ]
+  },
+  {
+   "name": "l8",
+   "card": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "perf:mainb:2:long",
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new"
+   ]
+  },
+  {
+   "name": "vl7",
+   "card": "loom-fun/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "perf:mainb:2:long",
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new"
+   ]
+  },
+  {
+   "name": "o15",
+   "card": "loom-fun/bartowski-Ornith-1.5-9B-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "perf:mainb:2:long",
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new"
    ]
   },
   {
@@ -72,12 +121,42 @@
    "memory_bytes": 55000000000,
    "variants": [
     {
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
      "name": "new",
      "build": {}
     }
    ],
    "steps": [
-    "ktest:new"
+    "perf:mainb:2:long",
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new"
+   ]
+  },
+  {
+   "name": "q354",
+   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
+   "memory_bytes": 55000000000,
+   "variants": [
+    {
+     "name": "mainb",
+     "build": {},
+     "ref": "origin/main"
+    },
+    {
+     "name": "new",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "perf:mainb:2:long",
+    "perf:new:2:long",
+    "c4:mainb",
+    "c4:new"
    ]
   }
  ]
