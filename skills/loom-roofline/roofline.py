@@ -229,6 +229,8 @@ def ceilings(m, bw=BW, flops=FLOPS, ctxs=(1000, 2000, 16000, 32000), gain=1.0):
     for P in ctxs:   # 2 flops per matmul param per token, the head on the last token only, causal attention
         out[f"prefill_{P}"] = flops / (2 * (m["params"] - m["head_params"]) + attn_flops_per_token(m["geo"], P))
     out["c4_steady"] = 4 * bw / pass_bytes(m, tokens=4, ctx=600, streams=4) * gain
+    if m["geo"]["n_exp"]:   # MoE: streams of similar text share experts; the hard bound (all 4 tokens on the same experts) is what a measurement may not exceed
+        out["c4_steady_shared"] = 4 * bw / (pass_bytes(m, ctx=600) + 3 * kv_read_bytes(m["geo"], 600)) * gain
     return out
 
 
@@ -352,7 +354,7 @@ def main():
                 if t.get("kind", "none") != "none" and t.get("baseline_tps"):
                     gain = max(gain, t["decode_tps"] / t["baseline_tps"])
     rows = [pick_target(k, base.get(k), c, efficiency(m, k, c), efficiency(m, k, c, STRETCH))
-            for k, c in ceilings(m, a.bw, a.flops, ctxs, gain).items()]
+            for k, c in ceilings(m, a.bw, a.flops, ctxs, gain).items() if k != "c4_steady_shared"]
     if m["geo"]["n_exp"]:   # the c4 ceiling assumes independent routing; streams of similar text share experts, so the hard
         # bound (all 4 tokens on the same experts) is what a measurement may not exceed (Qwen3-30B-A3B: 1.17 x ceiling)
         for r in rows:

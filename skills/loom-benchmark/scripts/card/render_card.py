@@ -28,6 +28,7 @@ from card_lib import (FEATURES, GATE_NAMES, GATES, HF, LOOM_URL, METHOD, METRICS
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
 UNKNOWN = "?"   # a feature that could not be determined: neither supported, nor n/a, nor a failure
 SUP = "¹²³⁴⁵⁶⁷⁸⁹"
+ABOVE = "‡"   # a Loom value above its modeled ceiling
 STALE = "†"   # a Loom value measured on programs other than this repository's (card_lib.stale_metrics)
 SHORT = {"decode": "decode", "decode_2k": "decode at 2k", "decode_32k": "decode at 32k", "streams4": "4 streams"}
 
@@ -275,6 +276,13 @@ def drafted_note(dr, metrics):
     return out + "; 4 streams run without drafting, so its ceiling is single-pass"
 
 
+def basis_note(metrics):
+    """A mixture-of-experts model's 4-stream ceiling is the bound with the four streams on the same experts."""
+    if any(m.get("basis") == "shared-experts" for m in metrics.values()):
+        return "; the 4-stream ceiling of this mixture-of-experts model assumes the four streams route to the same experts (the bound a run may not exceed)"
+    return ""
+
+
 def roofline_note(info):
     """The footnote that says what the roofline column is."""
     r = info.get("roofline")
@@ -286,7 +294,7 @@ def roofline_note(info):
                + (", with local changes" if t.get("dirty") else "") + ")")
         if dr:
             out += drafted_note(dr, r["metrics"])
-        out += "."
+        out += basis_note(r["metrics"]) + "."
     else:
         out = "Roofline: not computed."
     return out
@@ -376,6 +384,7 @@ def render(d):
                 notes.append(nk)
             out += f" {mark(notes.index(nk) + 1)}"
         return out + (f" {STALE}" if key in stale_keys else "")
+    above = []
     for key, label in METRICS:
         if not metric_applies(key, kind, feats, info):
             L.append(f"| {label} |" + " n/a |" * (5 + len(extra)))
@@ -386,7 +395,10 @@ def render(d):
         if key == "spec_acceptance":
             cells = " | ".join(["n/a"] * (2 + len(extra)))
         else:
-            cells = " | ".join([num(key, ceiling), pct(m.get('loom'), ceiling)]
+            over100 = m.get("loom") is not None and ceiling and m["loom"] > ceiling
+            if over100 and ABOVE not in above:
+                above.append(ABOVE)
+            cells = " | ".join([num(key, ceiling), pct(m.get('loom'), ceiling) + (f" {ABOVE}" if over100 else "")]
                                + [num(key, x['session']['metrics'].get(key, {}).get('baseline')) for x in extra.values()])
         L.append(f"| {label} | {num(key, m.get('baseline'))} | {loom} | "
                  f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), m.get('baseline'))} | {cells} |")
@@ -424,6 +436,8 @@ def render(d):
     if metric_applies("spec_acceptance", kind, feats):
         L.append("- Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the "
                  "`spec` gate's requests.")
+    if above:
+        L.append(f"- {ABOVE} measured above the modeled ceiling; the roofline is an estimate (216 GB/s effective bandwidth).")
     L.append("- " + roofline_note(info))
     oc = ", ".join(sorted(over_context(info, native_context(feats))))
     L += [f"- {MISSING} not measured; n/a not applicable" + (f" ({oc}: the document is longer than the model's native "
