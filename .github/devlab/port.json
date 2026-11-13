@@ -1,7 +1,68 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Final benchmark rule: ngram -> none rebuilds (SPEC=off) from main; reference = live card.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "spark25-4b",
+   "spec": "XHToken/Spark-X2.5-4B-GGUF:Spark-X2.5-4B-Q4_K_M.gguf",
+   "reference": "loom-fun/XHToken-Spark-X2.5-4B-loom",
+   "model_id": "XHToken/Spark-X2.5-4B",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "q3-vl-8b",
+   "spec": "unsloth/Qwen3-VL-8B-Instruct-GGUF:Qwen3-VL-8B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom",
+   "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "hcx-1p5b",
+   "spec": "rippertnt/HyperCLOVAX-SEED-Text-Instruct-1.5B-Q4_K_M-GGUF:hyperclovax-seed-text-instruct-1.5b-q4_k_m.gguf",
+   "reference": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+   "model_id": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "q25-7b",
+   "spec": "bartowski/Qwen2.5-7B-Instruct-GGUF:Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Qwen2.5-7B-Instruct-loom",
+   "model_id": "Qwen/Qwen2.5-7B-Instruct",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "spark26-4b",
+   "spec": "bartowski/Spark-X2.6-4B-GGUF:Spark-X2.6-4B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+   "model_id": "XHToken/Spark-X2.6-4B",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "lfm3-omni",
+   "spec": "ggml-org/LFM3-Omni-2B-GGUF:LFM3-Omni-2B-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-LFM3-Omni-2B-loom",
+   "model_id": "LiquidAI/LFM3-Omni-2B",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "q25-32b",
+   "spec": "bartowski/Qwen2.5-32B-Instruct-GGUF:Qwen2.5-32B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
+   "model_id": "Qwen/Qwen2.5-32B-Instruct",
+   "env": {
+    "SPEC": "off"
+   }
+  }
  ]
 }
