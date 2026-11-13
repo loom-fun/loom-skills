@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "scope": "assets",
+  "origins": {
+    "checkpoint": {
+      "requested": {
+        "kind": "hf",
+        "repository": "unsloth/Qwen3-0.6B-GGUF",
+        "revision": "50968a4468ef4233ed78cd7c3de230dd1d61a56b"
+      },
+      "resolved": {
+        "revision": "50968a4468ef4233ed78cd7c3de230dd1d61a56b"
+      }
+    }
+  },
+  "files": [
+    {
+      "origin": "@checkpoint/Qwen3-0.6B-Q4_K_M.gguf",
+      "size": 396705472,
+      "sha256": "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a"
+    },
+    {
+      "origin": "tokenizer.json",
+      "size": 5969576,
+      "sha256": "a15cda23be411de16c671b7e1c50a9c0ba1516a69f348d159e4c6ee6f3c02a26"
+    }
+  ]
+}

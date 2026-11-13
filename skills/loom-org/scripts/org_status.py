@@ -55,9 +55,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "..", "loom-benchmark", "scripts", "card"))
-from card_lib import (GATE_NAMES, build_tag, METRIC_KEYS, SCHEMA_ID, gate_applies, generator_commit,  # noqa: E402
-                      load_package, metric_applies, package_facts, perf_flags, programs_sha256, quant_of,
-                      remeasure_reasons)
+from card_lib import (GATE_NAMES, build_tag, LEGACY_SCHEMA_IDS, METRIC_KEYS, SCHEMA_ID, gate_applies, generator_commit,  # noqa: E402
+                      load_package, metric_applies, normalize, package_facts, perf_flags, programs_sha256, quant_of,
+                      remeasure_reasons, single)
 
 from hub import HF, get_json  # noqa: E402
 from hub import fetch as fetch_bytes  # noqa: E402
@@ -201,12 +201,14 @@ def assess(repo, d):
     ck = facts["checkpoint"]
     out.update(checkpoint=ck["repo"], file=ck["file"], quant=quant_of(ck["file"]))
     info_p = os.path.join(d, "info.json")
-    info = json.load(open(info_p)) if os.path.exists(info_p) else {}
+    # a loom-card/3 card covers several GPUs: this reports its primary GPU's results (strix-halo, else the first with
+    # results); a loom-card/2 card is that one GPU
+    info = single(normalize(json.load(open(info_p)))) if os.path.exists(info_p) else {}
     out["generator"], out["generator_source"] = generator_commit(facts.get("generator"), info.get("versions"))
     if not info:
         out["notes"].append("no info.json: no card")
         return out
-    if info.get("schema") == SCHEMA_ID and info.get("report") == "generated":
+    if info.get("schema") in (SCHEMA_ID, *LEGACY_SCHEMA_IDS) and info.get("report") == "generated":
         out["category"] = "A"
     out["report"] = info.get("report")
     out["memory_bytes"] = (info.get("card") or {}).get("memory_bytes")

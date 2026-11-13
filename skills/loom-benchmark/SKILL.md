@@ -424,8 +424,8 @@ differ. No prose of your own on a card: no "what's new", no explanations, no cav
 renders as not measured / no evidence / unknown; never fill one in by hand. A card with failing gates is published
 as it is (`loom-org` step 2): each renders as fail, and only new evidence changes it.
 
-`info.json` (schema `card/info_schema.json`, `"schema": "loom-card/2"`) holds only what no package file
-records: measurement sessions (per-run values, commands, the baseline's version and exact server arguments),
+`info.json` (schema `card/info_schema.json`, `"schema": "loom-card/3"`; a `loom-card/2` file reads as its one GPU, Strix
+Halo) holds only what no package file records. Per GPU (`devices.strix-halo`, `devices.radeon-r9700`: card_lib.GPUS): measurement sessions (per-run values, commands, the baseline's version and exact server arguments),
 the spec gate's acceptance, gate evidence, the device and Loom SDK of each source, dates and versions. The card
 reads everything else from the repo's own files: sources, revisions, sha256 and sizes from `model.json.lock`;
 context, rows, presets and drafting depth from `model.json`; features, the drafter and the generating
@@ -457,6 +457,11 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
      less than perf.py's essay: 41 % vs ~17 % on a small drafted model, a 1.8x too-high ceiling). Without either
      they have none. A first card has no `DIR/info.json` yet: pass the run's evidence (`--evidence ev_perf.json
      ev_gates.json`), or build once, run roofline, and build again.
+   Cards for two GPUs (methodology rule 12): pass `--gpu strix-halo|radeon-r9700` to `perf`, `gates`, `roofline` and
+   `pull_devlab.py` (the R9700's roofline uses `roofline.py --device radeon-r9700s`, set by `--gpu`); a GPU without evidence is
+   `--gpus strix-halo,radeon-r9700` on `build` (`not_measured`), `build --fit VERDICT.json` records the R9700's memory
+   budget and served context or marks a package that does not fit it, `--org loom-fun-staging` writes the card's repo under
+   another org.
 2. `card/make_info.py build DIR --repo loom-fun/REPO --memory-bytes N --output OUT --report generated
    --evidence ev_*.json -o DIR/info.json` (`--generator-commit` defaults to this checkout's HEAD; to regenerate a
    published card with only new evidence: `--from-info DIR/info.json`, re-read from the Hub right before, which
@@ -490,7 +495,7 @@ The card's Versions line shows the schema, the loom-skills commit and hrx-loom b
 programs, and the card generator commit. `loom-setup/scripts/install_loom.sh` writes `$LOOM_ROOT/loom-install.json`
 (version, hrx-system commit, CI artifact or PyPI release, wheel sha256), which `build.py` stamps into the package
 and the evidence records for every measurement. A schema change that only adds keys, metrics or gates keeps
-`loom-card/2` (readers ignore unknown names); renaming, removing or retyping a key bumps it.
+`loom-card/3` (readers ignore unknown names); renaming, removing or retyping a key bumps it.
 To change what every card says, change `render_card.py` (and `card/test/check.sh`'s golden files with
 `UPDATE=1`, CI `check-cards`), then re-render all cards. `card/import_card.py` maps cards published before
 loom-card/1 to evidence (one time; their versions are recovered from the factory run and the report they

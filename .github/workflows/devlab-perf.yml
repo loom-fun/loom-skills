@@ -1,6 +1,7 @@
 name: devlab-perf
-# Performance experiments on AMD DevLab Dispatch Strix Halo runners: one matrix job per entry of "jobs" in
-# .github/devlab/perf.json. Each job builds its package variants from this branch (or another ref), measures them
+# Performance experiments on AMD DevLab Dispatch runners: one matrix job per entry of "jobs" in
+# .github/devlab/perf.json, on the Strix Halo runner (default) or, with "runner": "r9700" on the job (or the experiment),
+# the Radeon AI PRO R9700 runner. Each job builds its package variants from this branch (or another ref), measures them
 # against each other and against llama.cpp on the SAME runner (runners differ: never compare across jobs), and can
 # run consistency / determinism loops, kernel tests and gates. See .github/scripts/devlab_perf.sh.
 # Its numbers are the cards' only performance source (loom-org SKILL.md, "Performance: DevLab is the source").
@@ -33,7 +34,14 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           e = json.load(open(".github/devlab/perf.json"))
-          print("matrix=" + json.dumps({"job": [j["name"] for j in e["jobs"]]}))
+          labels = {"strix": ["strix-halo", "devlab-dispatch", "Linux", "self-hosted"],   # without Linux a job can land on Windows
+                    "r9700": ["self-hosted", "devlab-dispatch", "radeon-r9700"]}
+          inc = []
+          for j in e["jobs"]:
+              r = j.get("runner") or e.get("runner") or "strix"
+              assert r in labels, f"job {j['name']}: unknown runner {r!r} (strix | r9700)"
+              inc.append({"job": j["name"], "labels": json.dumps(labels[r])})
+          print("matrix=" + json.dumps({"include": inc}))
           PY
 
   run:
@@ -42,7 +50,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.jobs.outputs.matrix) }}
     name: ${{ matrix.job }}
-    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}

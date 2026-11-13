@@ -1,0 +1,173 @@
+{
+ "name": "Qwen3-0.6B",
+ "arch": "qwen3",
+ "gguf": "Qwen3-0.6B-Q4_K_M.gguf",
+ "hidden": 1024,
+ "layers": 28,
+ "heads": 16,
+ "kv_heads": 8,
+ "head_dim": 128,
+ "ffn": 3072,
+ "vocab": 151936,
+ "context_length": 40960,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 1000000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": true,
+ "eos_id": 151645,
+ "extra_eos_ids": [
+  151643
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "trim_content": false,
+  "think_open": "<think>\n",
+  "think_close": "\n</think>\n\n",
+  "history_think": "nonempty",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n<think>\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "thinking": "toggle",
+  "thinking_default": true,
+  "starts_in_reasoning": true,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": true,
+  "tools_system_separator": "\n\n",
+  "tools_prefix": "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>",
+  "tools_suffix": "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>",
+  "call_format": "hermes",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "attn_sinks": false,
+ "reference": {
+  "repo": "loom-fun/unsloth-Qwen3-0.6B-loom",
+  "revision": "c9c747673b0d7f168e9d37770dcce86d4ff17aa7",
+  "category": "A",
+  "score": 171.0,
+  "reasons": [
+   "same architecture (qwen3)",
+   "same family (qwen3)",
+   "tool-call format hermes",
+   "thinking switch",
+   "drafter type ngram",
+   "head_dim 128"
+  ],
+  "generator": {
+   "skills_commit": "f458443f30016c4e79e5c22456e8fd33203e2fbc",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "ngram",
+    "depth": 2,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 188.22,
+      "rows": {
+       "work0": 289.03,
+       "work1": 294.12,
+       "work3": 294.43,
+       "work4": 289.72,
+       "long": 77.78,
+       "streams4": 1013.22
+      },
+      "seconds": 13
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 315.99,
+      "rows": {
+       "work0": 368.72,
+       "work1": 387.85,
+       "work3": 423.21,
+       "work4": 676.84,
+       "long": 149.42,
+       "streams4": 1131.08
+      },
+      "seconds": 10,
+      "margin": 1.116,
+      "checked": "ok (exact, concurrent)"
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 296.27,
+      "rows": {
+       "work0": 324.81,
+       "work1": 350.72,
+       "work3": 381.55,
+       "work4": 677.66,
+       "long": 145.98,
+       "streams4": 1010.08
+      },
+      "seconds": 11,
+      "margin": 0.997
+     },
+     {
+      "kind": "ngram",
+      "depth": 5,
+      "decode_tps": 234.51,
+      "rows": {
+       "work0": 236.07,
+       "work1": 253.32,
+       "work3": 289.34,
+       "work4": 611.96,
+       "long": 124.27,
+       "streams4": 1023.19
+      },
+      "seconds": 12,
+      "margin": 0.817
+     }
+    ]
+   }
+  }
+ },
+ "model_id": "Qwen/Qwen3-0.6B",
+ "draft": null,
+ "generator": {
+  "skills_commit": "c6506b936c2c7642349e538037fd2228fa76fd04",
+  "dirty": false,
+  "hrx_loom": {
+   "artifact_id": null,
+   "branch": "v0.1.0",
+   "hrx_loom": "0.1.0",
+   "hrx_system_sha": "d01d1c18b154189fd073777329052d23f6071f14",
+   "source": "pypi",
+   "wheel_sha256": "4d3897b83cc0857723593487a4372a31d203944a1637e5e3143cad1d0583b98b"
+  }
+ }
+}
