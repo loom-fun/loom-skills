@@ -28,7 +28,7 @@ for b in blocks:
 open("combined.loom", "w").write("".join(out))
 PY
 mkdir -p dump; "$bin/loom-test" combined.loom --device=${DEVICE:-amdgpu} --file-output-root="$PWD/dump" > out.json 2> err.txt
-o="$dir/../../out"; [ -d "$o" ] || o="$(dirname "$dir")/out"; mkdir -p "$o/kdump"; cp dump/* dumpmap.txt "$o/kdump/" 2>/dev/null; find . -maxdepth 1 -name 'f*.npy' -size -3M -exec cp {} "$o/kdump/" \; 2>/dev/null; cp cases_used.loom-test "$o/kdump/" 2>/dev/null
+o="$dir/../../out"; [ -d "$o" ] || o="$(dirname "$dir")/out"; vn=$(basename "$(dirname "$pkg")"); mkdir -p "$o/kdump_$vn"; cp dump/* dumpmap.txt "$o/kdump_$vn/" 2>/dev/null; find . -maxdepth 1 -name 'f*.npy' -size -3M -exec cp {} "$o/kdump_$vn/" \; 2>/dev/null; cp cases_used.loom-test "$o/kdump_$vn/" 2>/dev/null
 grep -v '^{"format' err.txt | head -20
 "$bin/python" - <<'PY'
 import json, sys

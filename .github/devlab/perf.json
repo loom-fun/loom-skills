@@ -15,15 +15,24 @@
      "build": {}
     },
     {
-     "name": "ts2",
-     "build": {
-      "FLASH2_TS": "2"
+     "name": "kv4",
+     "build": {},
+     "config": {
+      "kv_heads": 4
+     }
+    },
+    {
+     "name": "kv16",
+     "build": {},
+     "config": {
+      "kv_heads": 16
      }
     }
    ],
    "steps": [
     "ktest:dual",
-    "ktest:ts2"
+    "ktest:kv4",
+    "ktest:kv16"
    ],
    "kit": null
   },
@@ -34,10 +43,34 @@
     {
      "name": "dual",
      "build": {}
+    },
+    {
+     "name": "g8",
+     "build": {},
+     "config": {
+      "kv_heads_global": 8
+     }
+    },
+    {
+     "name": "g4",
+     "build": {},
+     "config": {
+      "kv_heads_global": 4
+     }
+    },
+    {
+     "name": "g2",
+     "build": {},
+     "config": {
+      "kv_heads_global": 2
+     }
     }
    ],
    "steps": [
-    "ktest:dual"
+    "ktest:dual",
+    "ktest:g8",
+    "ktest:g4",
+    "ktest:g2"
    ],
    "kit": "gemma4"
   }
