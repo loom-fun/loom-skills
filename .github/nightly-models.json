@@ -299,7 +299,7 @@
    "slug": "gemma-4-e4b-it",
    "memory_bytes": 31000000000,
    "kit": "gemma4",
-   "llamacpp": "b1369",
+   "llamacpp": "b1374",
    "features": [
     "vision",
     "draft",
