@@ -363,9 +363,10 @@ def render(d):
     L += ["", f"- {bname}: build {('`' + base['version'] + '`') if base['version'] else 'not recorded'}, server arguments "
               + (f"`{base['args']}`." if base["args"] else "not recorded."),
           f"- Loom: speculative decoding {drafting(facts['spec'])}.",
-          "- Apples to apples: Loom and llama.cpp draft identically on every row: speculative decoding on, with the same drafter "
-          "and depth, for the 1-stream rows (decode, decode_2k, decode_32k, prefill) and off for 4 streams. Where llama.cpp "
-          "cannot run the package's drafter the difference is listed below.",
+          "- Apples to apples: per model one drafting choice for Loom and llama.cpp, from what is published for this exact model "
+          "(an MTP head in the GGUF, else the model maker's or Z-Lab's DFlash/assistant drafter, else none; never n-gram). The "
+          "1-stream rows (decode, decode_2k, decode_32k, prefill) run each engine loaded once with it, each with its own depth "
+          "(recorded below); 4 streams run with drafting off on both. Anything llama.cpp cannot run is listed below.",
           "- Same GGUF on both engines, tokens per second. Loom: client-side timing; "
           f"{bname}: server-side timings. Runs per value: decode and prefill {runs_of(tps_keys, False)} (mean), "
           f"4 streams {runs_of(['streams4'], True)} (median).",

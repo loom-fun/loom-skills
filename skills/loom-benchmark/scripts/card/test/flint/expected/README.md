@@ -40,7 +40,7 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 
 - llama.cpp: build `llamacpp-rocm/b1355`, server arguments `-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model ~/drafter.gguf --spec-draft-n-max 3 -ngld 99 -c 65536 -kvu -np 4`.
 - Loom: speculative decoding on (DFlash, depth 3).
-- Apples to apples: Loom and llama.cpp draft identically on every row: speculative decoding on, with the same drafter and depth, for the 1-stream rows (decode, decode_2k, decode_32k, prefill) and off for 4 streams. Where llama.cpp cannot run the package's drafter the difference is listed below.
+- Apples to apples: per model one drafting choice for Loom and llama.cpp, from what is published for this exact model (an MTP head in the GGUF, else the model maker's or Z-Lab's DFlash/assistant drafter, else none; never n-gram). The 1-stream rows (decode, decode_2k, decode_32k, prefill) run each engine loaded once with it, each with its own depth (recorded below); 4 streams run with drafting off on both. Anything llama.cpp cannot run is listed below.
 - Same GGUF on both engines, tokens per second. Loom: client-side timing; llama.cpp: server-side timings. Runs per value: decode and prefill 2 (mean), 4 streams 3 (median).
 - Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs): Loom, served with the active wait, and llama.cpp on the same runner; runners differ between sessions.
 - Measured 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: DevLab Dispatch run 3001.
