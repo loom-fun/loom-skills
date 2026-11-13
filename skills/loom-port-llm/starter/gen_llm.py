@@ -4698,8 +4698,9 @@ def with_heads(h, gen):
         text = gen()
     finally:
         QH, G = saved
-    names = set(re.findall(r"(?:kernel|func)\.def (?:export\(\"\w+\"\) |inline )?@(\w+)\(", text))
-    return re.sub(r'(@|export\(")(' + "|".join(sorted(names, key=len, reverse=True)) + r')\b', rf"\1\2_h{h}", text)
+    names = set(re.findall(r"(?:kernel|func)\.def (?:target\(@\w+\) )?(?:export\(\"\w+\"\) |inline )?@(\w+)\(", text))
+    text = re.sub(r'(@|export\(")(' + "|".join(sorted(names, key=len, reverse=True)) + r')\b', rf"\1\2_h{h}", text)
+    return re.sub(rf"_rdna4_h{h}\b", f"_h{h}_rdna4", text)   # a gfx12 twin K_rdna4 of K_h<h> is K_h<h>_rdna4
 
 
 NARROW_KERNELS = r"@(g_qk_rope_store(?:_swa)?|g_attention_flash2|g16_attention_split_listed|g16_attention_combine_listed|g_attention_split|g_attention_combine|g_gate_heads)\["
