@@ -10,7 +10,7 @@
    "name": "q35-4b",
    "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
    "memory_bytes": 28000000000,
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:AtomicChat/Qwen3.5-4B-DFlash-GGUF/Qwen3.5-4B-DFlash.Q8_0.gguf} --spec-draft-n-max 5 -ngld 99",
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:AtomicChat/Qwen3.5-4B-DFlash-GGUF/Qwen3.5-4B-DFlash.Q8_0.gguf} --spec-draft-n-max 3 -ngld 99",
    "variants": [
     {
      "name": "card"
