@@ -340,7 +340,7 @@
    "slug": "spark-x2.5-4b",
    "memory_bytes": 55000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1374",
    "features": [
     "draft",
     "thinking-toggle"
@@ -351,7 +351,7 @@
    "slug": "spark-x2.6-4b",
    "memory_bytes": 55000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1374",
    "features": [
     "draft",
     "thinking-toggle"
@@ -407,7 +407,7 @@
    "slug": "gemma-4-e2b-it",
    "memory_bytes": 16000000000,
    "kit": "gemma4",
-   "llamacpp": "b1369",
+   "llamacpp": "b1374",
    "features": [
     "vision",
     "draft",
