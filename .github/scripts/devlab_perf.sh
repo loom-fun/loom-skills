@@ -9,9 +9,16 @@
 #
 # EXPERIMENT.json:
 #   {"card": "loom-fun/<repo>", "memory_bytes": N, "kit": "gemma4" | null, "llamacpp": "b1368",
-#    "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF;
+#    "llama_spec": "matched" (default),   the llama.cpp servers' drafting = the card's own (see below); or an explicit override
+#                  "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF;
 #                                                                     {hf:OWNER/REPO/FILE}: that Hub file, e.g. a drafter llama.cpp loads and the card doesn't ship)
 #    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
+#   APPLES TO APPLES (user rule): llama.cpp (ROCm and Vulkan) runs in the SAME drafting configuration as the published Loom
+#   package, for every row: "matched" (card/matched_spec.py) = the package's draft kind/depth mapped to llama.cpp (dflash ->
+#   draft-dflash + the same drafter GGUF, mtp -> draft-mtp, assist -> draft-mtp + the assistant GGUF, ngram -> ngram-simple,
+#   n-max = Loom's depth); a package that does not draft gets no drafting on llama.cpp either. Never a best-of mix of drafting
+#   on and off. Single-stream rows run on 1 slot (llama@rocm.np1 / llama@vulkan.np1), streams4 on 4 (llamac4@rocm / llamac4@vulkan).
+#   "llama_spec_vulkan": a Vulkan-only override, for a drafter the Vulkan build cannot run (record it with --differs).
 #   A job may override card, kit, memory_bytes, llamacpp, llamacpp_vulkan, vulkan_kv and llama_spec: one experiment can
 #   measure several cards.
 #   "llamacpp_vulkan": "b12211": the official ggml-org Vulkan release (sha256-pinned in skills/loom-benchmark/data) that the
@@ -40,9 +47,9 @@
 #          c4:V[:N]             c4_steady.py N (default 4) streams on V
 #          llama:N[:long|-][:M] llama.cpp (card build + llama_spec, n-max M) perf.py N times, llama_decode.py tokens/step
 #          llamac4[:M]          c4_steady.py on llama.cpp
-#          (llama[@vulkan], llamac4[@vulkan]: the same with the Vulkan build; files perf_llamacpp-vulkan_nN.jsonl. Modifiers after
-#          @vulkan pick its server configuration, e.g. llama@vulkan.np1.nospec:2 : .np1 one slot of 36864 tokens (no 4-stream
-#          step), .perslot 4 slots of 36864, .nospec no drafting; files perf_llamacpp-vulkan.np1.nospec_nN.jsonl)
+#          (llama[@vulkan|@rocm], llamac4[@vulkan|@rocm]: the same with the Vulkan build; files perf_llamacpp-vulkan_nN.jsonl. Modifiers
+#          after @backend pick the server configuration, e.g. llama@vulkan.np1:2 : .np1 one slot (Vulkan 36864 tokens, ROCm 65536;
+#          no 4-stream step), .perslot (Vulkan) 4 slots of 36864; files perf_llamacpp-vulkan.np1_nN.jsonl)
 #          textmatch:V          text_match.py: first 50 tokens of perf.py's prompts on V, then on llama.cpp
 #          consistency:V:N      consistency.py N times (NOT DETERMINISTIC / concurrent mismatch counts)
 #          determinism:V:C:R    determinism.py (issue #39's script, when present)
@@ -125,7 +132,12 @@ for k in ("model_id", "draft"):
 json.dump(c, open(dst, "w"), indent=1)
 EOF
 gguf=$("$T" -c "import json; print(json.load(open('$D/cfg.json'))['gguf'])")
-drafter=$("$T" -c "import json; print((json.load(open('$D/cfg.json')).get('drafter') or {}).get('gguf') or '')")
+drafter=$("$T" -I -c "
+import json, os, sys
+sys.path.insert(0, sys.argv[1]); from matched_spec import drafter_file
+f = drafter_file(json.load(open(sys.argv[2])))   # the drafter / assistant GGUF the package ships (fetched into the card's parameter dir)
+p = os.path.join(sys.argv[3], 'parameter', os.path.basename(f)) if f else ''
+print(p if p and os.path.exists(p) else '')" "$here/skills/loom-benchmark/scripts/card" "$card/llm_config.json" "$card")
 cardid=$("$T" -c "import json; print(json.load(open('$card/model.json'))['model']['id'])")
 # the card's own build settings (model id, depth, context, pool)
 cardargs=$("$T" -c "
@@ -221,9 +233,13 @@ serve_alone() { # serve_alone VARIANT
 LSPEC=""
 llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n-max overridden), restarted on change
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
-  local spec; spec=$(q "print((j['llama_spec'] if 'llama_spec' in j else e.get('llama_spec') or '').replace('{drafter}', '$drafter'))")
+  # llama_spec absent or "matched": the package's own drafting (matched_spec.py: same method, same drafter GGUF, n-max = Loom's
+  # depth; none when the package does not draft). Any other value is an explicit override (a drafter the card doesn't ship...).
+  local spec; spec=$(q "print(j['llama_spec'] if 'llama_spec' in j else e.get('llama_spec') or 'matched')")
+  [ "$BK" = vulkan ] && { local vs; vs=$(q "print(j.get('llama_spec_vulkan') or e.get('llama_spec_vulkan') or '')"); [ -n "$vs" ] && spec=$vs; }
+  [ "$spec" = matched ] && spec=$("$T" -I "$here/skills/loom-benchmark/scripts/card/matched_spec.py" "$card/llm_config.json")
+  spec=${spec//'{drafter}'/$drafter}
   [ -n "${1:-}" ] && spec=$(echo "$spec" | sed -E "s/--spec-draft-n-max [0-9]+/--spec-draft-n-max $1/")
-  [[ $MODS == *nospec* ]] && spec=""   # @vulkan.nospec: no drafting
   local h; for h in $(echo "$spec" | grep -oE '\{hf:[^}]+\}' | sort -u); do   # {hf:OWNER/REPO/FILE}, fetched once per runner
     local f=${h#\{hf:}; f=${f%\}}; local dst=$WORK/hf/$f r=${f%/*}
     [ -f "$dst" ] || { mkdir -p "${dst%/*}" && curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
@@ -242,7 +258,8 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   fi
   export LLAMA_SPEC=${spec#*|}; LSPEC=$spec
   step "llama.cpp $BK ${dir##*/}: $LLAMA_SPEC"
-  local np=4 kv=(65536 unified)   # one KV pool shared by 4 slots (-kvu), as the ROCm baseline
+  local np=4 kv=(65536 unified)   # one KV pool shared by 4 slots (-kvu)
+  [[ $MODS == *np1* ]] && { np=1; kv=(65536); }   # .np1: one slot, the single-stream rows (the same slot policy as Loom's)
   if [ "$BK" = vulkan ]; then   # modifiers: .np1 (one slot of 36864 tokens), .perslot (4 slots of 36864); else vulkan_kv
     if [[ $MODS == *np1* ]]; then np=1; kv=(36864)
     elif [[ $MODS == *perslot* ]]; then kv=(36864)

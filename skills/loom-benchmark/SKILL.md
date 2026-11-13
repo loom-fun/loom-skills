@@ -363,14 +363,20 @@ tuning table (`bench/draft_tune.json`: decode tok/s per method and depth, includ
 acceptance rate from the `spec` gate log. Decode numbers with drafting depend on the text: report them on the
 standard workloads and say so.
 
-**The baseline drafts too (drafting vs drafting).** `qualify.sh` runs `scripts/llama_spec_tune.py` before the
-llama.cpp baseline: the same drafters Loom has (`--spec-type draft-mtp` for a GGUF with an MTP block,
-`--spec-type draft-dflash --spec-draft-model DRAFTER` for the DFlash drafter `find_drafter.py` found) at
-`--spec-draft-n-max` 1-4 / 3, 5, 7, its n-gram drafters (`ngram-simple`, `ngram-mod`) for every model, plus none,
-each timed on the same requests as Loom's `tune.py`; the fastest
-(>= 3 % over none) goes to `bench/llamacpp_spec.json`, and `llamacpp_server.sh` adds it (`LLAMA_SPEC`) to every
-llama.cpp performance run in qualify and finalize. References (goldens, gates) never draft. A build that rejects
-a method is recorded as failed in the table and that method is skipped; the report shows the table.
+**The baseline drafts like the package (apples to apples).** llama.cpp (ROCm and Vulkan) is measured in the SAME drafting
+configuration as the published Loom package, for every row (decode, decode_2k, decode_32k, prefill, streams4):
+- the package drafts (`llm_config.json` `draft`): llama.cpp drafts with the equivalent method and the same drafter GGUF
+  (`card/matched_spec.py`: dflash -> `--spec-type draft-dflash --spec-draft-model DRAFTER`, mtp -> `draft-mtp`, assist ->
+  `draft-mtp` + the assistant GGUF, ngram -> `ngram-simple`), `--spec-draft-n-max` = Loom's depth. Loom's own occupancy/context
+  gating is internal to its shipped config; llama.cpp gets its shipped drafting on for every row. A backend that cannot run
+  the drafter fails its step: record that on the card (`--differs`) and use the closest drafting-on config
+  (`llama_spec_vulkan`/`llama_spec` override in the experiment), never a silent no-draft fallback;
+- the package does not draft: llama.cpp does not either, for all rows;
+- never a best-of-several-configurations per metric that mixes drafting on and off. Slots as Loom's rows: 1 slot for the
+  single-stream rows (`llama@rocm.np1`, `llama@vulkan.np1`), 4 for streams4 (`llamac4@rocm`, `llamac4@vulkan`).
+`devlab_perf.sh` derives all of it from the card (`llama_spec` absent = `matched`); `qualify.sh`'s `llama_spec_tune.py` table
+stays a diagnostic of what llama.cpp could do (and of which drafter Loom should ship), not a card baseline. References
+(goldens, gates) never draft.
 
 **Run the audit first** (from `bench/`):
 ```bash

@@ -363,6 +363,9 @@ def render(d):
     L += ["", f"- {bname}: build {('`' + base['version'] + '`') if base['version'] else 'not recorded'}, server arguments "
               + (f"`{base['args']}`." if base["args"] else "not recorded."),
           f"- Loom: speculative decoding {drafting(facts['spec'])}.",
+          "- Apples to apples: llama.cpp runs with speculative decoding on exactly when the Loom package drafts (the same method "
+          "and drafter, depth = Loom's) and off when it does not, for every row; single-stream rows on 1 slot, 4 streams on 4. "
+          "Where llama.cpp cannot run the package's drafter the difference is listed below.",
           "- Same GGUF on both engines, tokens per second. Loom: client-side timing; "
           f"{bname}: server-side timings. Runs per value: decode and prefill {runs_of(tps_keys, False)} (mean), "
           f"4 streams {runs_of(['streams4'], True)} (median).",
