@@ -245,7 +245,7 @@ if R["claimed_features"].get("image_input") == "yes":
 
 # -- 4. performance spot-check -------------------------------------------------------------------------------------
 if not a.skip_perf and R["claims"]:
-    subprocess.run([vpy, "-m", "pip", "install", "-q", "requests"], env=env)
+    subprocess.run([vpy, "-m", "pip", "install", "-q", "requests", "jinja2"], env=env)
     perf_log = os.path.join(OUT, "perf.log")
     with open(perf_log, "w", encoding="utf-8", errors="replace") as f:
         p = subprocess.run([vpy, os.path.join(SCRIPTS, "perf.py"), URL, "windows", "--model", model_id, "--no-campaign",
@@ -288,3 +288,4 @@ fail = [k for k, v in R["steps"].items() if not v["ok"]] + [k for k, v in R["che
 R["verdict"] = "fail: " + ", ".join(fail) if fail else "pass"
 save()
 print(json.dumps({"verdict": R["verdict"], "ratios": R["ratios"], "perf": {k: v for k, v in R["perf"].items() if k != "perf_py"}}))
+sys.exit(1 if fail else 0)
