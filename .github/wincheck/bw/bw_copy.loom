@@ -1,0 +1,30 @@
+// Streaming copy: 512 MiB read + 512 MiB written, 16 B per thread.
+kernel.def @k_copy() {
+  %c1 = index.constant 1 : index
+  %groups = index.constant 131072 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%in_arg: buffer, %out_arg: buffer) {
+  %in, %out = buffer.assume.noalias %in_arg, %out_arg : buffer, buffer
+  %c0 = index.constant 0 : index
+  %c256 = index.constant 256 : index
+  %origin = index.constant 0 : offset
+  %iv = buffer.view %in[%origin] : buffer -> view<33554432x4xf32>
+  %ov = buffer.view %out[%origin] : buffer -> view<33554432x4xf32>
+  %group = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %flat = index.madd %group, %c256, %thread : index
+  %i = index.assume %flat [range(%flat, 0, 33554431)] : index
+  %a = vector.load %iv[%i, %c0] : view<33554432x4xf32> -> vector<4xf32>
+  vector.store %a, %ov[%i, %c0] : vector<4xf32>, view<33554432x4xf32>
+  kernel.return
+}
+
+check.case public @copy {
+  %in = check.generate.fill value(1.0) : tensor<134217728xf32>
+  %out = check.generate.fill value(0.0) : tensor<134217728xf32>
+  kernel.launch @k_copy(%in, %out) : (tensor<134217728xf32>, tensor<134217728xf32>)
+  check.return
+}
+
+check.benchmark<@copy> @copy_bm

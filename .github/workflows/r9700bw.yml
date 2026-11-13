@@ -1,0 +1,52 @@
+name: r9700bw
+# Streaming bandwidth with Loom kernels (loom-benchmark, .github/wincheck/bw): the roofline's bw on Strix Halo vs R9700.
+on:
+  push:
+    branches: ["wincheck/r9700-bw**"]
+permissions:
+  contents: read
+concurrency:
+  group: r9700bw-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  bw:
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu: [strix-halo, radeon-r9700]
+    name: bw ${{ matrix.gpu }}
+    runs-on: ["${{ matrix.gpu }}", devlab-dispatch, self-hosted]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/wincheck
+      - name: bandwidth
+        run: |
+          OUT=$RUNNER_TEMP/bw-out; mkdir -p $OUT; cd $RUNNER_TEMP
+          python3 -m venv venv && . venv/bin/activate && pip install -q "hrx-loom==0.1.0"
+          rocminfo | grep -E "Marketing Name|Name: +gfx"
+          for b in read copy; do
+            loom-benchmark $GITHUB_WORKSPACE/.github/wincheck/bw/bw_$b.loom --device=amdgpu --benchmark=@${b}_bm --batch-size=16 --output=$OUT/$b.json || true
+            python3 - $OUT/$b.json $b <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1])); kind = sys.argv[2]
+          for w in r.get("work_items", []):
+              m = w.get("measurement") or {}
+              t = (m.get("operation_timing_ns") or m.get("timing_ns") or {})
+              byts = (1 << 30) + (1 << 30) // 16 * 1 // 4 * 4 // 4 if kind == "read" else (1 << 30)
+              # read: 1 GiB read + 64 Mi f32 writes = 1 GiB + 64 MiB ; copy: 512 MiB read + 512 MiB written
+              byts = (1 << 30) + (1 << 26) if kind == "read" else (1 << 30)
+              p50 = t.get("p50"); mn = t.get("min")
+              print(kind, "p50 ns", p50, "min ns", mn, "GB/s p50", round(byts / p50, 1) if p50 else None, "GB/s best", round(byts / mn, 1) if mn else None)
+          print(json.dumps(r.get("failures") or r.get("summary"))[:600])
+          PY
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bw-${{ matrix.gpu }}
+          path: ${{ runner.temp }}/bw-out
