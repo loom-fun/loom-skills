@@ -636,7 +636,10 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
     QD = QH * D; KD = KVH * D; AR = f"tensor<{2 * ctx * KD}xf16>"; OT = f"tensor<{t}x{QD}xf32>"
     S = 64; S16 = 16
     gt = f"tensor<{QH}xf32>" if cfg.get("attn_sinks") else OT
-    gv = "%sinks" if cfg.get("attn_sinks") else "%sq"
+    # a gated model's flash2 and combine kernels scale the output by the gate: pass a saturated one so the numpy reference (ungated) holds
+    # (the query used to stand in for it, which scaled every element by sigmoid(q): LFM3-1.7B pc_gqa, expected -0.038 vs -0.027)
+    gate_fill = "1.0" if cfg.get("attn_gate_act") == "softplus" else "40.0"   # sigmoid(40) = 1.0 in f32; softplus gates hold the value
+    gv = "%sinks" if cfg.get("attn_sinks") else "%pcgate" if cfg.get("attn_gate") else "%sq"
     # projection biases (if the model has them) are zero here: g_qk_rope_store's bias add is checked by @qk_rope
     ZB_DECL = "".join(f"  %zb{p} = check.generate.fill value(0.0) : tensor<{BW[p]}xf32>\n" for p in BIAS)
     ZB_ARGS = "".join(f", %zb{p}" for p in BIAS)
@@ -671,7 +674,7 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
   %pacc = check.generate.fill value(0.0) : tensor<{t * QH * S * D}xf32>
   %pml = check.generate.fill value(0.0) : tensor<{t * QH * S * 2}xf32>
   %o_pre = check.generate.fill value(0.0) : {OT}
-  %o_dec = check.generate.fill value(0.0) : {OT}
+{f"  %pcgate = check.generate.fill value({gate_fill}) : {OT}" + chr(10) if cfg.get("attn_gate") and not cfg.get("attn_sinks") else ""}  %o_dec = check.generate.fill value(0.0) : {OT}
 {ZB_DECL}{st(p0, "h")}{st(t, "s")}{list_launch("%st", t, "%sinfo")}  kernel.launch @g_attention_flash2[%st](%st, %layer, %sliding, %ctx, %pool, %sq, {gv}, %sinfo, %tiles, %orig, %arena, %o_pre) : [index](index, index, i32, index, index, {OT}, {gt}, tensor<{t}x4xi32>, tensor<{t}xi32>, tensor<{10 + blocks}xi32>, {AR}, {OT})
   kernel.launch @g_attention_split[%st](%st, %layer, %sliding, %ctx, %pool, %sq, %sinfo, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, {OT}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>)
   kernel.launch @g_attention_combine[%st](%st, %sliding, %sinfo, %pacc, %pml, {gv}, %o_dec) : [index](index, i32, tensor<{t}x4xi32>, tensor<{t * QH * S * D}xf32>, tensor<{t * QH * S * 2}xf32>, {gt}, {OT})
