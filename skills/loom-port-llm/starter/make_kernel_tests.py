@@ -1000,8 +1000,6 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
         # gen_llm.linear launches the 128/256-row kernels only on output widths their 128-wide tiles divide
         big = n_use % (64 if swiglu else 128) == 0
         for rows, kern in ((128, base_k),) + (((256, base_k + "_m128"),) + (() if fmt in GEMM_HELPER else ((512, base_k + "_m256"),)) if big else ()):
-            if os.environ.get("KTEST_GEMM_TWIN", "0") not in ("", "0"):
-                kern += "_rdna4"   # run the gfx12 twin (gen_gemm_rdna4.py) directly: on an RDNA4 device
             x16 = rng.standard_normal((rows, K)).astype(np.float16)
             inv = rng.uniform(0.25, 2.0, rows).astype(np.float32)
             sc = np.stack([np.ones(rows, np.float32), inv], 1)

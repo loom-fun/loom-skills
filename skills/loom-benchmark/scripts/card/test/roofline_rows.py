@@ -10,7 +10,7 @@ import os
 import sys
 
 sys.path.insert(0, sys.argv[1])
-from card_lib import ROOFLINE_METRIC, dumps, load_json, load_package, package_facts  # noqa: E402
+from card_lib import ROOFLINE_METRIC, dumps, load_json, load_package, normalize, package_facts  # noqa: E402
 from make_info import drafted_acceptance, roofline_block  # noqa: E402
 from render_card import drafted_note  # noqa: E402
 
@@ -37,7 +37,7 @@ class StubRoofline:
 
 
 facts = package_facts(load_package(sys.argv[2]))
-info = load_json(sys.argv[3])
+info = normalize(load_json(sys.argv[3]))["devices"]["strix-halo"]
 gate, rows = drafted_acceptance(facts, info["performance"]["sessions"])
 block = roofline_block(facts, None, gate, StubRoofline, 1.0, 1.0, {}, os.path.basename(facts["checkpoint"]["file"]), rows)
 sys.stdout.write(dumps({"metrics": {k: r for k, r in block["metrics"].items() if "single_pass" in r},

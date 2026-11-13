@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a loom-fun card's README.md (and a generated REPORT.md) from the files of its repository (schema loom-card/2).
+"""Render a loom-fun card's README.md (and a generated REPORT.md) from the files of its repository (schema loom-card/3).
 
 usage: render_card.py DIR [-o README.md]           (-o - prints to stdout; default: DIR/README.md)
        render_card.py --check DIR README.md        exit 1 unless README.md is exactly what DIR renders to
@@ -20,13 +20,14 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import (FEATURES, GATE_NAMES, GATES, HF, LOOM_URL, METHOD, METRICS, SCHEMA_ID, SKILLS_URL, TIMED,  # noqa: E402
-                      card_metrics, derived_tags, gate_applies, generator_commit, load_json,
-                      load_package, metric_applies, native_context, over_context, package_facts, programs_sha256,
-                      require_valid, stale_metrics, with_gate_features)
+from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
+                      TIMED, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory,
+                      gpu_view, has_results, load_info, load_json, load_package, metric_applies, native_context, over_context,
+                      package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features)
 from matched_spec import TIE_BAND  # noqa: E402
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
+FIT = "doesn't fit"   # a row or gate that needs more context than the GPU's memory serves: accepted, not a failure
 UNKNOWN = "?"   # a feature that could not be determined: neither supported, nor n/a, nor a failure
 SUP = "¹²³⁴⁵⁶⁷⁸⁹"
 ABOVE = "‡"   # a Loom value above its modeled ceiling
@@ -234,15 +235,24 @@ def feature_detail(key, f):
 
 
 def load(d):
-    info = load_json(os.path.join(d, "info.json"))
+    info = load_info(os.path.join(d, "info.json"))
     require_valid(info)
     facts = package_facts(load_package(d))
     feats = {k: dict(v) for k, v in facts["features"].items()}
-    feats = with_gate_features(feats, facts["kind"], info["gates"])
+    feats = with_gate_features(feats, facts["kind"], all_gates(info))
     for k, v in (info["card"].get("features") or {}).items():
         if k in feats:
             feats[k] = {"status": v["status"], "value": v.get("value")}
     return info, facts, feats
+
+
+def all_gates(info):
+    """Every gate's evidence on the card, the first GPU (card order) that has it: what the package's features need."""
+    out = {}
+    for g in card_gpus(info):
+        for n, row in (info["devices"][g].get("gates") or {}).items():
+            out.setdefault(n, row)
+    return out
 
 
 def pct(v, ceiling):
@@ -302,78 +312,68 @@ def roofline_note(info):
     return out
 
 
-def render(d):
-    info, facts, feats = load(d)
-    c, card, kind = facts["checkpoint"], info["card"], facts["kind"]
-    sources, versions = info["sources"], info["versions"]
-    perf = info.get("performance") or {"baseline": {"name": "llama.cpp", "version": None, "args": None}, "sessions": []}
-    base, sessions = perf["baseline"], perf["sessions"]
-    output = card.get("output") or facts["output"] or facts["name"]
-    memory = facts["memory_bytes"] or card.get("memory_bytes")
+def gib(n):
+    return f"{n / 2**30:.0f} GiB"
 
-    L = ["---", f"base_model: {c['repo']}"]
-    if card.get("license"):
-        L.append(f"license: {card['license']}")
-    tags = derived_tags(feats) + [t for t in card.get("tags") or [] if t not in derived_tags(feats)]
-    L += ["tags:", *[f"- {t}" for t in tags], "---", ""]
 
-    quant = f" ({c['quant']})" if c["quant"] else ""
-    L += [f"# {facts['name']}{quant} for AMD Loom", "",
-          f"A [Loom]({LOOM_URL}) package (`.loom` programs and a `model.json` card) for the unmodified GGUF checkpoint "
-          f"{hf(c['repo'])} (`{c['file']}`), generated on an AMD Ryzen AI Max+ 395 \"Strix Halo\" with the "
-          f"[loom-skills]({SKILLS_URL}) workflow. {LEARN_MORE}", ""]
+def gpu_title(g):
+    """Strix Halo (gfx1151); Radeon AI PRO R9700 (gfx1201, 32 GB)"""
+    return f"{GPUS[g]['short']} ({GPUS[g]['arch']}" + (f", {GPUS[g]['memory']}" if GPUS[g]["memory"] else "") + ")"
 
-    fetch = ["loom-fetch", f"{HF}/{info['repo']}/resolve/main/model.json"]
-    if facts["preset"]:
-        fetch.append(f"--preset={facts['preset']}")
-    fetch += ["--materialize=copy", f"--output={output}"]
+
+def gpu_arch(g):
+    return GPUS[g]["arch"] + (f", {GPUS[g]['memory']}" if GPUS[g]["memory"] else "")
+
+
+def gpu_line(info, g):
+    """The one factual line of a GPU the card has no results for: not yet re-measured, or the package does not fit."""
+    dev = info["devices"][g]
+    if dev.get("state") == "unsupported":
+        return (f"{GPUS[g]['name']} ({gpu_arch(g)}): this package does not fit its "
+                f"{GPUS[g]['memory'] or 'memory'} (it needs about {dev['required_bytes'] / 1e9:.0f} GB).")
+    return f"{GPUS[g]['name']} ({gpu_arch(g)}): the results for this package are not yet re-measured."
+
+
+def single_layout(info):
+    """True for a card of one GPU with results (every other GPU, if any, is one the package does not fit): the card
+    reads exactly as the cards of one GPU always did. Otherwise each GPU gets its own table and column."""
+    gpus = card_gpus(info)
+    res = [g for g in gpus if has_results(info["devices"][g])]
+    return len(res) == 1 and all(info["devices"][g].get("state") == "unsupported" for g in gpus if g not in res)
+
+
+def serve_command(info, facts, feats, gpu, output):
     serve = ["loom-serve", f"--model={output}/model.json", "'--device=amdgpu://?completion_spin_ns=4294967295'"]
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
+    memory = gpu_memory(info, facts["memory_bytes"], gpu)
     if pkg_serve:
         serve += pkg_serve   # e.g. --pool_backing=fixed, which takes no --memory_bytes
     elif memory:
         serve.append(f"--memory_bytes={memory}")
-    api = ("answers OpenAI-style `/v1/chat/completions` requests" if kind == "chat"
-           else f"answers SystemOne decision requests at `{feats['api']['value']['endpoint']}`")
-    pin = required_sdk(facts, versions, sources)
-    if pin and pin.get("source") == "ci":
-        root = f"~/loom-{pin['artifact_id']}"
-        install = [f"git clone {SKILLS_URL}",
-                   f"loom-skills/skills/loom-setup/scripts/install_loom.sh {root} ci:{pin['artifact_id']}",
-                   f"source {root}/.venv/bin/activate"]
-    elif pin and pin.get("hrx_loom"):
-        install = [f'pip install "hrx-loom[hf]=={pin["hrx_loom"]}"']
-    else:
-        install = ['pip install "hrx-loom[hf]"']   # no SDK version recorded anywhere (cannot happen for a built card)
-    L += ["## Quick start", "", "```bash", *install, " ".join(fetch), " ".join(serve), "```", ""]
-    if pin and pin.get("source") == "ci":
-        sha = (pin.get("hrx_system_sha") or "")[:8]
-        L += [f"This package needs an hrx-loom development build (hrx-loom {pin.get('hrx_loom')}, ROCm/hrx-system "
-              f"`{sha}`, CI artifact `{pin['artifact_id']}`); the PyPI release does not run it yet. `install_loom.sh` "
-              "downloads that wheel with an authenticated GitHub CLI (`gh auth login`). "
-              f"**These instructions expire on {pin.get('expires') or 'the artifact expiry date'}**, when GitHub "
-              "deletes the CI artifact; after that the package's SDK pin has to be refreshed to a newer build "
-              "(or a PyPI release that has the features), and this card republished.", ""]
-    L += [f"The server listens on `127.0.0.1:8080` and {api}.", ""]
+    return " ".join(serve)
 
-    # ---- performance
+
+def perf_section(L, info, facts, feats, d, g, here, ctx):
+    """One GPU's performance table, methodology and footnotes (appended to L). ctx: the tokens per request that GPU serves."""
+    kind = facts["kind"]
+    view = gpu_view(info, g)
+    sources, perf = info["sources"], view.get("performance") or {"baseline": {"name": "llama.cpp", "version": None, "args": None}, "sessions": []}
+    base, sessions = perf["baseline"], perf["sessions"]
     bname = base["name"]
-    shown = card_metrics(info)
-    rows = {k: shown[k] for k, _ in METRICS if k in shown and metric_applies(k, kind, feats, info)}
+    shown = card_metrics(view)
+    rows = {k: shown[k] for k, _ in METRICS if k in shown and metric_applies(k, kind, feats, view, ctx)}
     counts = {}
     for k, (_, i) in rows.items():
         counts[i] = counts.get(i, 0) + 1
     primary = min(counts, key=lambda i: (-counts[i], i)) if counts else None
     pkey = (sessions[primary]["source"], sessions[primary]["date"]) if primary is not None else None
     notes = []
-    roof = (info.get("roofline") or {}).get("metrics") or {}
-    here = programs_sha256(d)
-    stale = stale_metrics(info, here, kind, feats)
+    roof = (view.get("roofline") or {}).get("metrics") or {}
+    stale = stale_metrics(view, here, kind, feats)
     # further llama.cpp backends (performance.baselines): one column each, after the roofline
     extra = {b: x for b, x in (perf.get("baselines") or {}).items()}
     xnames = {b: f"{x['baseline']['name']} {b.capitalize()}" for b, x in extra.items()}
-    L += [f"## Performance vs {bname}", "",
-          f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline "
+    L += [f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline "
           + "".join(f"| {n} " for n in xnames.values()) + "|",
           "|---|---|---|---|---|---|" + "---|" * len(extra)]
 
@@ -388,8 +388,9 @@ def render(d):
         return out + (f" {STALE}" if key in stale_keys else "")
     above = []
     for key, label in METRICS:
-        if not metric_applies(key, kind, feats, info):
-            L.append(f"| {label} |" + " n/a |" * (5 + len(extra)))
+        if not metric_applies(key, kind, feats, view, ctx):
+            cell = FIT if beyond_context(view, key, ctx, native_context(feats)) else "n/a"
+            L.append(f"| {label} |" + f" {cell} |" * (5 + len(extra)))
             continue
         m, i = shown.get(key, ({"loom": None, "baseline": None}, None))
         loom = marked(key, m.get("loom"), i, stale)
@@ -418,9 +419,9 @@ def render(d):
     psrc = sources[sessions[primary]["source"]] if primary is not None else None
     drafter = None
     if facts["drafter"]:
-        drafter = hf(facts["drafter"]["repo"]).strip() if False else f"{facts['drafter']['repo']} / {facts['drafter']['file']}"
+        drafter = f"{facts['drafter']['repo']} / {facts['drafter']['file']}"
     L += ["", "**Methodology**", "", *methodology(base, extra, facts["spec"], drafter, runs_of(tps_keys, False), runs_of(["streams4"], True)),
-          "- Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs); runners differ between sessions."]
+          f"- Measured on AMD DevLab Dispatch {GPUS[g]['runner']} runners (`devlab-perf` jobs); runners differ between sessions."]
     if psrc:
         L.append(f"- Measured {text(sessions[primary]['date'])}; device {device_text(psrc['device'])}; "
                  f"hrx-loom {sdk_text(psrc['hrx_loom'])}; source: {src_text(psrc)}.")
@@ -439,43 +440,151 @@ def render(d):
         L.append("- Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the "
                  "`spec` gate's requests.")
     if above:
-        L.append(f"- {ABOVE} measured above the modeled ceiling; the roofline is an estimate (216 GB/s effective bandwidth).")
-    L.append("- " + roofline_note(info))
-    oc = ", ".join(sorted(over_context(info, native_context(feats))))
-    L += [f"- {MISSING} not measured; n/a not applicable" + (f" ({oc}: the document is longer than the model's native "
-                                                             f"{native_context(feats)}-token context)" if oc else "") + ".", ""]
+        bw = ((view.get("roofline") or {}).get("device") or {}).get("bandwidth_bytes_per_s") or 216e9
+        L.append(f"- {ABOVE} measured above the modeled ceiling; the roofline is an estimate ({bw / 1e9:.0f} GB/s effective bandwidth).")
+    L.append("- " + roofline_note(view))
+    native = native_context(feats)
+    nofit_keys = [k for k in METRIC_KEYS if beyond_context(view, k, ctx, native)]
+    nofit = ", ".join(nofit_keys)
+    oc = ", ".join(sorted(over_context(view, ctx) - set(nofit_keys)))
+    served = ctx != native
+    if nofit:   # the user's rule: what does not fit this GPU's memory is not expected to be done
+        L.append(f"- {FIT} ({nofit}): the document is longer than the {ctx:,}-token context this GPU serves; not expected "
+                 "to be measured, not a failure.")
+    L += [f"- {MISSING} not measured; n/a not applicable" + (
+        f" ({oc}: the document is longer than the " + (f"{ctx:,}-token context this GPU serves" if served else
+                                                       f"model's native {ctx}-token context") + ")" if oc else "") + ".", ""]
+
+
+def render(d):
+    info, facts, feats = load(d)
+    c, card, kind = facts["checkpoint"], info["card"], facts["kind"]
+    sources, versions = info["sources"], info["versions"]
+    gpus = card_gpus(info)
+    solo = single_layout(info)
+    live = [g for g in gpus if has_results(info["devices"][g])]
+    named = [g for g in gpus if info["devices"][g].get("state") != "unsupported"]
+    output = card.get("output") or facts["output"] or facts["name"]
+    native = native_context(feats)
+
+    L = ["---", f"base_model: {c['repo']}"]
+    if card.get("license"):
+        L.append(f"license: {card['license']}")
+    tags = derived_tags(feats, named) + [t for t in card.get("tags") or [] if t not in derived_tags(feats, named)]
+    L += ["tags:", *[f"- {t}" for t in tags], "---", ""]
+
+    quant = f" ({c['quant']})" if c["quant"] else ""
+    where = " and ".join(GPUS[g]["name"] for g in named) if named else GPUS[DEFAULT_GPU]["name"]
+    L += [f"# {facts['name']}{quant} for AMD Loom", "",
+          f"A [Loom]({LOOM_URL}) package (`.loom` programs and a `model.json` card) for the unmodified GGUF checkpoint "
+          f"{hf(c['repo'])} (`{c['file']}`), generated on an {where} with the "
+          f"[loom-skills]({SKILLS_URL}) workflow. {LEARN_MORE}" if solo or len(named) < 2 else
+          f"A [Loom]({LOOM_URL}) package (`.loom` programs and a `model.json` card) for the unmodified GGUF checkpoint "
+          f"{hf(c['repo'])} (`{c['file']}`), for the {where} GPUs, generated with the "
+          f"[loom-skills]({SKILLS_URL}) workflow. {LEARN_MORE}", ""]
+
+    fetch = ["loom-fetch", f"{HF}/{info['repo']}/resolve/main/model.json"]
+    if facts["preset"]:
+        fetch.append(f"--preset={facts['preset']}")
+    fetch += ["--materialize=copy", f"--output={output}"]
+    api = ("answers OpenAI-style `/v1/chat/completions` requests" if kind == "chat"
+           else f"answers SystemOne decision requests at `{feats['api']['value']['endpoint']}`")
+    pin = required_sdk(facts, versions, sources)
+    if pin and pin.get("source") == "ci":
+        root = f"~/loom-{pin['artifact_id']}"
+        install = [f"git clone {SKILLS_URL}",
+                   f"loom-skills/skills/loom-setup/scripts/install_loom.sh {root} ci:{pin['artifact_id']}",
+                   f"source {root}/.venv/bin/activate"]
+    elif pin and pin.get("hrx_loom"):
+        install = [f'pip install "hrx-loom[hf]=={pin["hrx_loom"]}"']
+    else:
+        install = ['pip install "hrx-loom[hf]"']   # no SDK version recorded anywhere (cannot happen for a built card)
+    serving = [g for g in gpus if info["devices"][g].get("state") != "unsupported"] or [DEFAULT_GPU]
+    if len(serving) == 1:
+        L += ["## Quick start", "", "```bash", *install, " ".join(fetch), serve_command(info, facts, feats, serving[0], output), "```", ""]
+    else:   # the same install and fetch; the serve line differs by the GPU's memory
+        L += ["## Quick start", "", "```bash", *install, " ".join(fetch), "```", ""]
+        for g in serving:
+            L += [f"Serve on the {GPUS[g]['name']} ({gpu_arch(g)}):", "", "```bash",
+                  serve_command(info, facts, feats, g, output), "```", ""]
+    if pin and pin.get("source") == "ci":
+        sha = (pin.get("hrx_system_sha") or "")[:8]
+        L += [f"This package needs an hrx-loom development build (hrx-loom {pin.get('hrx_loom')}, ROCm/hrx-system "
+              f"`{sha}`, CI artifact `{pin['artifact_id']}`); the PyPI release does not run it yet. `install_loom.sh` "
+              "downloads that wheel with an authenticated GitHub CLI (`gh auth login`). "
+              f"**These instructions expire on {pin.get('expires') or 'the artifact expiry date'}**, when GitHub "
+              "deletes the CI artifact; after that the package's SDK pin has to be refreshed to a newer build "
+              "(or a PyPI release that has the features), and this card republished.", ""]
+    L += [f"The server listens on `127.0.0.1:8080` and {api}.", ""]
+    for g in serving:   # a GPU whose memory holds less KV cache than the native context needs serves a shorter context
+        sc = info["devices"][g].get("served_context")
+        if sc:
+            L += [f"On the {GPUS[g]['name']}, `--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}` bounds the memory pool: "
+                  f"this package serves up to {sc:,} tokens per request there (its native context is {native:,}); "
+                  "the package files are the same on every GPU.", ""]
+    for g in gpus:
+        if info["devices"][g].get("state") == "unsupported":
+            L += [gpu_line(info, g), ""]
+
+    # ---- performance
+    here = programs_sha256(d)
+    first = next(iter(live), None)
+    bname = ((info["devices"][first].get("performance") or {}).get("baseline") or {}).get("name", "llama.cpp") if first else "llama.cpp"
+    L += [f"## Performance vs {bname}", ""]
+    if solo:
+        perf_section(L, info, facts, feats, d, live[0], here, gpu_context(info, live[0], native))
+    else:
+        for g in gpus:
+            L += [f"### {gpu_title(g)}", ""]
+            if has_results(info["devices"][g]):
+                perf_section(L, info, facts, feats, d, g, here, gpu_context(info, g, native))
+            else:
+                L += [gpu_line(info, g), ""]
 
     # ---- features
     L += ["## Features", "", "| feature | status | detail |", "|---|---|---|"]
     for key, label in FEATURES:
         f = feats[key]
         st = {"yes": YES, "no": NO, "unknown": UNKNOWN, "n/a": NA}[f["status"]]
-        L.append(f"| {label} | {st} | {feature_detail(key, f)} |")
+        detail = feature_detail(key, f)
+        if key == "context" and not solo:
+            cut = [f"{GPUS[g]['short']} up to {info['devices'][g]['served_context']:,} (its memory)" for g in gpus
+                   if info["devices"][g].get("served_context")]
+            if cut:
+                detail += "; " + "; ".join(cut)
+        L.append(f"| {label} | {st} | {detail} |")
     L.append("")
 
     # ---- correctness
-    L += ["## Correctness", "", "| gate | description | result |", "|---|---|---|"]
+    cols = [live[0]] if solo else gpus
+    head = "| gate | description | result |" if solo else "| gate | description | " + " | ".join(GPUS[g]["short"] for g in cols) + " |"
+    L += ["## Correctness", "", head, "|---|---|" + "---|" * len(cols)]
     ev = []
+
+    def gate_cell(g, name, desc):
+        dev = info["devices"][g]
+        if not has_results(dev):
+            return MISSING + (" not yet re-measured" if dev.get("state") == "not_measured" else " does not fit")
+        gt = dev["gates"].get(name)
+        if gt is None and beyond_context(gpu_view(info, g), name, gpu_context(info, g, native), native):
+            return f"{FIT} (needs more context than the {gpu_context(info, g, native):,} tokens this GPU serves)"
+        if gt is None:
+            return f"{NO} no evidence" if gate_applies(name, kind, feats) else f"{NA} not applicable"
+        key = (gt["source"], gt["level"], gt["date"])
+        gsha = gt.get("programs_sha256")
+        if gsha and gsha != here and gt["status"] == "pass":   # a pass on other programs says nothing about this package
+            return (f"{UNKNOWN} not re-run on this package (the last pass was on a previous build, sha256 {short(gsha)}; "
+                    f"the nightly gates re-run it)")
+        if gsha and gsha != here:   # a failure is never hidden
+            if key not in ev:
+                ev.append(key)
+            return f"{NO} fail on a previous build (sha256 {short(gsha)}), not re-run on this package {mark(ev.index(key) + 1)}"
+        if key not in ev:
+            ev.append(key)
+        res = (f"{YES} pass" if gt["status"] == "pass" else f"{NO} fail")
+        return res + (f" ({gt['detail']})" if gt["detail"] else "") + f" {mark(ev.index(key) + 1)}"
     for name, desc in GATES:
-        g = info["gates"].get(name)
-        if g is None:
-            res = f"{NO} no evidence" if gate_applies(name, kind, feats) else f"{NA} not applicable"
-        else:
-            key = (g["source"], g["level"], g["date"])
-            gsha = g.get("programs_sha256")
-            if gsha and gsha != here and g["status"] == "pass":   # a pass on other programs says nothing about this package
-                res = (f"{UNKNOWN} not re-run on this package (the last pass was on a previous build, sha256 {short(gsha)}; "
-                       f"the nightly gates re-run it)")
-            elif gsha and gsha != here:   # a failure is never hidden
-                if key not in ev:
-                    ev.append(key)
-                res = f"{NO} fail on a previous build (sha256 {short(gsha)}), not re-run on this package {mark(ev.index(key) + 1)}"
-            else:
-                if key not in ev:
-                    ev.append(key)
-                res = (f"{YES} pass" if g["status"] == "pass" else f"{NO} fail")
-                res += (f" ({g['detail']})" if g["detail"] else "") + f" {mark(ev.index(key) + 1)}"
-        L.append(f"| `{name}` | {desc} | {res} |")
+        L.append(f"| `{name}` | {desc} | " + " | ".join(gate_cell(g, name, desc) for g in cols) + " |")
     L.append("")
     for i, (sid, level, date) in enumerate(ev, 1):
         s = sources[sid]
@@ -513,7 +622,10 @@ def render(d):
     return "\n".join(L) + "\n"
 
 
-METHOD_TEXT = [
+def method_text(gpus):
+    """The report's method bullets; the runner is the one GPU's (the same text a one-GPU card always had)."""
+    runner = " or ".join(GPUS[g]["runner"] for g in gpus) if gpus else GPUS[DEFAULT_GPU]["runner"]
+    return [
     "- `perf.py` (loom-benchmark) sends real-text requests: a short prompt for decode, decode after 2k and 32k tokens "
     "of context, and prefill of documents of about 1k, 2k, 8k, 16k and 32k tokens. Each run gives one value per "
     "metric; the card shows the mean of the runs.",
@@ -521,7 +633,7 @@ METHOD_TEXT = [
     "4 are decoding; the card shows the median of the runs.",
     "- One engine runs at a time on the same machine, with the same GGUF. Loom rates are timed by the client; "
     "llama.cpp rates come from its server-side `timings`.",
-    "- Every performance value comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch Strix Halo runner: "
+    f"- Every performance value comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch {runner} runner: "
     "Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), and llama.cpp on the same "
     "runner, with the published programs.",
     "- Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.",
@@ -533,15 +645,16 @@ METHOD_TEXT = [
     "and 4 streams are verify passes per second x (1 + acceptance x depth) tokens per pass, with the acceptance measured "
     "in the row's own session (loom-serve's drafted-token counters around perf.py's decode request, or around "
     "c4_steady.py's streams), else the `spec` gate's.",
-]
+    ]
 
 
-def render_report(d):
-    info, facts, feats = load(d)
-    sources, versions = info["sources"], info["versions"]
-    perf = info.get("performance") or {"baseline": {"name": "llama.cpp", "version": None, "args": None}, "sessions": []}
-    base, c = perf["baseline"], facts["checkpoint"]
-    here = programs_sha256(d)
+def report_gpu(L, info, facts, g, here, h, single):
+    """One GPU's part of REPORT.md: baseline, sessions, further baselines, roofline and gate evidence, under headings
+    of level h ("##" for a one-GPU card, "###" under the GPU's own heading)."""
+    sources = info["sources"]
+    view = gpu_view(info, g)
+    perf = view.get("performance") or {"baseline": {"name": "llama.cpp", "version": None, "args": None}, "sessions": []}
+    base = perf["baseline"]
 
     def prog(sha):
         if not sha:
@@ -549,28 +662,10 @@ def render_report(d):
         rel = "" if here is None else (", the same as this repository's programs" if sha == here
                                        else ", not the same as this repository's programs")
         return f"sha256 `{sha}`{rel}"
-    L = [f"# {facts['name']} for AMD Loom: measurement report", "",
-         f"How the values on this repository's model card were measured. Generated from `info.json` (schema "
-         f"`{SCHEMA_ID}`) by the loom-skills card generator; the card's README.md is rendered from the same data.", "",
-         "## Setup", "",
-         f"- Package: this repository. Programs generated by loom-skills {skills_text(facts['generator'], versions)} with "
-         f"hrx-loom {package_sdk(facts['generator'], versions)}.",
-         f"- Checkpoint: {hf(c['repo'])}" + (f" @ `{c['revision']}`" if c["revision"] else "") + f", `{c['file']}`"
-         + (f", sha256 `{c['sha256']}`" if c["sha256"] else "") + "."]
-    if facts["drafter"]:
-        x = facts["drafter"]
-        L.append(f"- Drafter: {hf(x['repo'])}" + (f" @ `{x['revision']}`" if x["revision"] else "") + f", `{x['file']}`; "
-                 f"Loom speculative decoding {drafting(facts['spec'])}.")
-    L += [f"- Baseline: {base['name']} " + (f"`{base['version']}`" if base["version"] else "(build not recorded)")
-          + ", server arguments " + (f"`{base['args']}`" if base["args"] else "not recorded")
-          + " (model path, host and port left out).",
-          "- Programs measured: the sha256 below is card_lib.programs_sha256, over `program/*.loom` without each file's "
-          "first-line generator comment.", "",
-          "## Method", "", *METHOD_TEXT, ""]
     labels = dict(METRICS)
     for i, s in enumerate(perf["sessions"], 1):
         src = sources[s["source"]]
-        L += [f"## Session {i}: {src_text(src)}, {text(s['date'])}", "",
+        L += [f"{h} Session {i}: {src_text(src)}, {text(s['date'])}", "",
               f"- Device: {device_text(src['device'])}.",
               f"- Loom SDK: hrx-loom {sdk_text(src['hrx_loom'])}.",
               f"- Programs measured: {prog(s.get('programs_sha256'))}."]
@@ -590,7 +685,7 @@ def render_report(d):
     for b, x in (perf.get("baselines") or {}).items():
         xs, xb = x["session"], x["baseline"]
         src = sources[xs["source"]]
-        L += [f"## {xb['name']} {b.capitalize()}: {src_text(src)}, {text(xs['date'])}", "",
+        L += [f"{h} {xb['name']} {b.capitalize()}: {src_text(src)}, {text(xs['date'])}", "",
               f"- Build: {('`' + xb['version'] + '`') if xb['version'] else 'not recorded'}; server arguments "
               + (f"`{xb['args']}`" if xb["args"] else "not recorded") + ".",
               f"- Device: {device_text(src['device'])}."]
@@ -600,10 +695,10 @@ def render_report(d):
         for k, m in sorted(xs["metrics"].items(), key=lambda kv: (order.index(kv[0]) if kv[0] in labels else len(order), kv[0])):
             L.append(f"| {labels.get(k, k)} | {', '.join(str(v) for v in m.get('baseline_runs') or []) or MISSING} | {num(k, m.get('baseline'))} |")
         L.append("")
-    r = info.get("roofline")
+    r = view.get("roofline")
     if r:
         t, d, dr = r["tool"], r["device"], r.get("drafting")
-        L += ["## Roofline", "",
+        L += [f"{h} Roofline", "",
               f"- Device: {d['name']}, {d['bandwidth_bytes_per_s'] / 1e9:.0f} GB/s, {d['peak_flops'] / 1e12:.0f} TFLOP/s.",
               f"- Tool: `{t['script']}` sha256 `{t['sha256']}`, loom-skills "
               + (f"`{t['skills_commit']}`" if t["skills_commit"] != "unknown" else "commit unknown")
@@ -625,25 +720,68 @@ def render_report(d):
                 L.append(f"| {labels[k]} | {num(k, row.get('ceiling'))} | {num(k, row.get('single_pass'))} | {acc}"
                          + (f"{round(row['efficiency'] * 100)} %" if row.get("efficiency") is not None else MISSING) + " |")
         L.append("")
-    L += ["## Gate evidence", ""]
+    L += [f"{h} Gate evidence", ""]
     groups = []
-    for name in GATE_NAMES + sorted(set(info["gates"]) - set(GATE_NAMES)):
-        g = info["gates"].get(name)
-        if not g:
+    gates = view["gates"]
+    for name in GATE_NAMES + sorted(set(gates) - set(GATE_NAMES)):
+        gt = gates.get(name)
+        if not gt:
             continue
-        key = (g["source"], g["level"], g["date"], g.get("programs_sha256"))
+        key = (gt["source"], gt["level"], gt["date"], gt.get("programs_sha256"))
         if key not in [k for k, _ in groups]:
             groups.append((key, []))
-        dict(groups)[key].append(f"`{name}` {g['status']}" + (f" ({g['detail']})" if g["detail"] else ""))
+        dict(groups)[key].append(f"`{name}` {gt['status']}" + (f" ({gt['detail']})" if gt["detail"] else ""))
     for (sid, level, date, sha), names in groups:
         s = sources[sid]
-        L += [f"### {src_text(s)}" + (f", LEVEL={level}" if level else "") + f", {text(date)}", "",
+        L += [f"{'###' if h == '##' else '####'} {src_text(s)}" + (f", LEVEL={level}" if level else "") + f", {text(date)}", "",
               f"- Gates: {', '.join(names)}.",
               f"- Device: {device_text(s['device'])}.",
               f"- Loom SDK: hrx-loom {sdk_text(s['hrx_loom'])}.",
               f"- Programs: {prog(sha)}.", ""]
     if not groups:
         L += ["No gate evidence is recorded.", ""]
+
+
+def render_report(d):
+    info, facts, feats = load(d)
+    versions = info["versions"]
+    c = facts["checkpoint"]
+    here = programs_sha256(d)
+    gpus = card_gpus(info)
+    live = [g for g in gpus if has_results(info["devices"][g])]
+    solo = single_layout(info)
+    base_line = lambda b: (f"- Baseline: {b['name']} " + (f"`{b['version']}`" if b["version"] else "(build not recorded)")
+                           + ", server arguments " + (f"`{b['args']}`" if b["args"] else "not recorded")
+                           + " (model path, host and port left out).")
+    L = [f"# {facts['name']} for AMD Loom: measurement report", "",
+         f"How the values on this repository's model card were measured. Generated from `info.json` (schema "
+         f"`{SCHEMA_ID}`) by the loom-skills card generator; the card's README.md is rendered from the same data.", "",
+         "## Setup", "",
+         f"- Package: this repository. Programs generated by loom-skills {skills_text(facts['generator'], versions)} with "
+         f"hrx-loom {package_sdk(facts['generator'], versions)}.",
+         f"- Checkpoint: {hf(c['repo'])}" + (f" @ `{c['revision']}`" if c["revision"] else "") + f", `{c['file']}`"
+         + (f", sha256 `{c['sha256']}`" if c["sha256"] else "") + "."]
+    if facts["drafter"]:
+        x = facts["drafter"]
+        L.append(f"- Drafter: {hf(x['repo'])}" + (f" @ `{x['revision']}`" if x["revision"] else "") + f", `{x['file']}`; "
+                 f"Loom speculative decoding {drafting(facts['spec'])}.")
+    if solo:
+        perf = gpu_view(info, live[0]).get("performance") or {"baseline": {"name": "llama.cpp", "version": None, "args": None}}
+        L.append(base_line(perf["baseline"]))
+    L += ["- Programs measured: the sha256 below is card_lib.programs_sha256, over `program/*.loom` without each file's "
+          "first-line generator comment.", "",
+          "## Method", "", *method_text(live if not solo else live), ""]
+    if solo:
+        report_gpu(L, info, facts, live[0], here, "##", True)
+    else:
+        for g in gpus:
+            L += [f"## {GPUS[g]['name']} ({gpu_arch(g)})", ""]
+            if not has_results(info["devices"][g]):
+                L += [gpu_line(info, g), ""]
+                continue
+            perf = gpu_view(info, g).get("performance") or {"baseline": {"name": "llama.cpp", "version": None, "args": None}}
+            L += [base_line(perf["baseline"]), ""]
+            report_gpu(L, info, facts, g, here, "###", False)
     while L[-1] == "":
         L.pop()
     return "\n".join(L) + "\n"

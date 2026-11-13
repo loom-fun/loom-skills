@@ -1,0 +1,150 @@
+{
+ "card": {
+  "features": {
+   "api": {
+    "status": "yes",
+    "value": {
+     "endpoint": "/v1/systemone",
+     "style": "systemone"
+    }
+   },
+   "audio": {
+    "status": "unknown",
+    "value": null
+   },
+   "concurrency": {
+    "status": "yes",
+    "value": {
+     "pending_requests": 64,
+     "rows": null
+    }
+   },
+   "context": {
+    "status": "unknown",
+    "value": null
+   },
+   "image_input": {
+    "status": "n/a",
+    "value": null
+   },
+   "max_output_tokens": {
+    "status": "n/a",
+    "value": null
+   },
+   "reasoning_effort": {
+    "status": "n/a",
+    "value": null
+   },
+   "sampling": {
+    "status": "n/a",
+    "value": null
+   },
+   "speculative_decoding": {
+    "status": "n/a",
+    "value": null
+   },
+   "thinking": {
+    "status": "n/a",
+    "value": null
+   },
+   "tool_calling": {
+    "status": "n/a",
+    "value": null
+   }
+  },
+  "license": "other"
+ },
+ "gates": {
+  "consistency": {
+   "date": "2026-10-29",
+   "detail": null,
+   "level": null,
+   "source": "factory-40842422037",
+   "status": "pass"
+  },
+  "decision": {
+   "date": "2026-10-29",
+   "detail": null,
+   "level": null,
+   "source": "factory-40842422037",
+   "status": "pass"
+  }
+ },
+ "performance": {
+  "baseline": {
+   "args": "-ngl 99 -np 4 -c 48000",
+   "name": "llama.cpp",
+   "version": "llamacpp-rocm/b1357"
+  },
+  "sessions": [
+   {
+    "commands": [],
+    "date": "2026-10-29",
+    "metrics": {
+     "prefill_16k": {
+      "baseline": 3128.7,
+      "loom": 4637.4
+     },
+     "prefill_1k": {
+      "baseline": 5926.4,
+      "loom": 7041.3
+     },
+     "prefill_2k": {
+      "baseline": 5684.0,
+      "loom": 7138.1
+     },
+     "prefill_8k": {
+      "baseline": 4204.3,
+      "loom": 5488.4
+     }
+    },
+    "runs": {
+     "decode_prefill": null,
+     "streams4": null
+    },
+    "source": "factory-40842422037"
+   }
+  ]
+ },
+ "repo": "loom-fun/LiquidAI-d1-2B-loom",
+ "report": "attached",
+ "schema": "loom-card/2",
+ "sources": {
+  "factory-40842422037": {
+   "device": null,
+   "hrx_loom": {
+    "artifact_id": 12763223321,
+    "basis": "the card's report names hrx-system CI artifact 12763223321; commit and branch from its workflow run",
+    "branch": "users/benvanik/loom/agent-client-compat",
+    "hrx_loom": "0.1.0",
+    "hrx_system_sha": "dd5ad00f3b68fa1855a234eaf25f62cfb193f2ab",
+    "recovered": true,
+    "source": "ci",
+    "wheel_sha256": null
+   },
+   "kind": "factory",
+   "run": "40842422037",
+   "url": "https://github.com/loom-fun/loom-skills/actions/runs/40842422037"
+  }
+ },
+ "versions": {
+  "card_generator": "0123456789abcdef0123456789abcdef01234567",
+  "package": {
+   "hrx_loom": {
+    "artifact_id": 12763223321,
+    "basis": "the card's report names hrx-system CI artifact 12763223321; commit and branch from its workflow run",
+    "branch": "users/benvanik/loom/agent-client-compat",
+    "hrx_loom": "0.1.0",
+    "hrx_system_sha": "dd5ad00f3b68fa1855a234eaf25f62cfb193f2ab",
+    "recovered": true,
+    "source": "ci",
+    "wheel_sha256": null
+   },
+   "skills_commit": {
+    "basis": "head commit of the loom-factory run 40842422037 that info.json names",
+    "commit": "b0f589799787822ee5491b38960debf54808ae93",
+    "recovered": true
+   }
+  }
+ }
+}

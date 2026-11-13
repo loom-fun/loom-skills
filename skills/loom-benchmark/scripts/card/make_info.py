@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Write a card's info.json (schema loom-card/2) from measurement evidence.
+"""Write a card's info.json (schema loom-card/3) from measurement evidence.
 
 info.json holds only what no package file records (see info_schema.json); render_card.py combines it with the
 package's model.json, model.json.lock and llm_config.json. Both scripts are pure functions of their inputs (no
 clock, no environment: the generator commit is an input, by default the checkout's HEAD), so the same inputs give
 byte-identical files.
 
-  make_info.py build PKG --repo loom-fun/NAME [--generator-commit SHA] [--evidence EV.json ...]
+  make_info.py build PKG --repo loom-fun/NAME [--org ORG] [--generator-commit SHA] [--evidence EV.json ...]
                          [--memory-bytes N] [--output DIR] [--license ID] [--report generated|attached]
+                         [--gpus ID,ID] [--gpu-memory GPU=N] [--served-context GPU=N] [--fit VERDICT.json]
                          [--from-info OLD.json] [--next-steps FILE] [--status paused|active] [-o PKG/info.json]
       PKG holds model.json (and model.json.lock, llm_config.json): card values the package already implies
       (tags, the default --output, a memory_bytes in model.json) are dropped. Evidence files apply in order.
@@ -19,11 +20,20 @@ byte-identical files.
       an older card's "devlab" sweeps are dropped.
       --reset-performance: drop OLD.json's performance sessions (its further-backend baselines stay): the card's
       performance is re-measured from scratch by the evidence given (a devlab-perf job on new programs or settings).
-      --repo defaults to OLD.json's repo.
+      --repo defaults to OLD.json's repo. --org ORG: the card's repo is ORG/NAME (NAME from --repo or OLD.json): how the
+      staging flow (--org loom-fun-staging) gives the same repo names under another org; the Quick start fetches from it.
+      GPUs (card_lib.GPUS: strix-halo, radeon-r9700): evidence says which GPU measured it (an evidence file's "gpu",
+      else the GPU its source device names, else strix-halo), and info.json keeps every GPU's gates, performance and
+      roofline under devices.<gpu> (an OLD.json of loom-card/2 is its strix-halo entry, unchanged). --gpus lists the
+      GPUs the card covers: one without evidence gets state not_measured (the card says this package has no results
+      there yet). --gpu-memory GPU=N: loom-serve --memory_bytes on that GPU (default: the package's, at most the GPU's
+      memory); --served-context GPU=N: the tokens per request that GPU serves when its memory holds less KV cache than
+      the native context needs. --fit VERDICT.json: both, and state unsupported for a package that does not fit, for
+      radeon-r9700, from the fit table (a list of {slug, w: weight bytes, kv: KV bytes at ctx tokens, ctx, need}).
       --next-steps FILE: the card's next steps, one per line (a leading "- " is dropped; an empty FILE removes
       them); --status paused|active (active removes the status). Both are kept from OLD.json unless given.
 
-  make_info.py perf --loom-jsonl LOOM.jsonl --llama-jsonl LLAMA.jsonl [--c4-loom F] [--c4-llama F]
+  make_info.py perf [--gpu GPU] --loom-jsonl LOOM.jsonl --llama-jsonl LLAMA.jsonl [--c4-loom F] [--c4-llama F]
                     --baseline-version llamacpp-rocm/bNNNN [--baseline-args "ARGS"] [--metrics decode,...]
                     [--command CMD ...] [--package PKG] [--date YYYY-MM-DD] [SOURCE] -o perf_evidence.json
       perf.py logs (one engine per file; or --perf-log perf_log.jsonl with finalize.sh's labels final /
@@ -33,14 +43,14 @@ byte-identical files.
       drafted-token acceptance of their decode requests (perf.py "acceptance", c4_steady.py JSON lines) give each
       drafted metric its session's "acceptance" (mean of the runs).
 
-  make_info.py gates FILE [FILE ...] [--time YYYY-MM-DDTHH:MM:SS] [--level L] [--spec-log F] [--package PKG]
+  make_info.py gates [--gpu GPU] FILE [FILE ...] [--time YYYY-MM-DDTHH:MM:SS] [--level L] [--spec-log F] [--package PKG]
                      [SOURCE] -o gates_evidence.json
       gates.sh's gates.json (verdicts, level, ts), a gates.out with its "GATES ..." line, or a kernel test
       log ending in "N/M passed" (make_kernel_tests.py) -> gate evidence. The spec gate's "acceptance N% of M
       proposals" (gates_spec.log or gates.out next to the file, or --spec-log) -> the spec_acceptance metric, from a
       DevLab (or factory) source only, like every card performance value.
 
-  make_info.py roofline --package PKG [--gguf G] [--cfg cfg.json] [--acceptance A | --evidence EV.json ...] [--skills-commit SHA]
+  make_info.py roofline [--gpu GPU] --package PKG [--gguf G] [--cfg cfg.json] [--acceptance A | --evidence EV.json ...] [--skills-commit SHA]
                         -o roofline_evidence.json
       The hardware ceiling of every card metric that has one (loom-roofline/roofline.py; needs the `gguf` Python
       package: run it with the tools venv). --gguf defaults to the checkpoint model.json.lock pins, in the Hugging
@@ -60,7 +70,8 @@ byte-identical files.
       workflow, kind factory): perf refuses --source-kind local. Gates may come from any source.
 
 Evidence file (loom-card-evidence/2), every block optional:
-  {"evidence": "loom-card-evidence/2",
+  {"evidence": "loom-card-evidence/2", "gpu": "strix-halo" | "radeon-r9700",   # the GPU that produced it (perf, gates, roofline
+                                      # --gpu; without: the GPU the SOURCE's device names, else strix-halo)
    "card": {"license", "tags", "output", "memory_bytes", "features"},
    "versions": {"package": {"skills_commit", "hrx_loom"}},          # recovered, for packages built unstamped
    "performance": {"baseline": {"name", "version", "args"},
@@ -87,10 +98,11 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-from card_lib import (DRAFTED_ROWS, EVIDENCE_ID, MEDIAN_METRICS, METRIC_KEYS, PERF_SOURCE_KINDS,  # noqa: E402
-                      HF, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, load_json,
-                      load_package, metric_applies, native_context, over_context, package_facts, programs_sha256, require_valid, upstream_facts,
-                      with_gate_features, write_json)
+from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, MEDIAN_METRICS, METRIC_KEYS, PERF_SOURCE_KINDS,  # noqa: E402
+                      HF, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
+                      gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
+                      programs_sha256, require_valid, served_context, upstream_facts, with_gate_features, write_json,
+                      SERVE_HEADROOM)
 
 
 # ---------------------------------------------------------------- sources
@@ -113,6 +125,13 @@ def source_arg(a):
         return hrx_loom_identity()
     return {"kind": a.source_kind, "run": str(a.run) if a.run else None, "url": a.url,
             "device": ident(a.device, auto_device), "hrx_loom": ident(a.hrx_loom, auto_sdk)}
+
+
+def gpu_key(a, src):
+    """{"gpu": id} for an evidence file: --gpu, else the GPU the SOURCE's device names; {} when neither says (then
+    build reads it as strix-halo, the only GPU before loom-card/3)."""
+    gpu = getattr(a, "gpu", None) or gpu_from_device((src or {}).get("device"))
+    return {"gpu": gpu} if gpu else {}
 
 
 def source_id(src):
@@ -172,6 +191,33 @@ def gate_supersedes(new, cur):
     return later
 
 
+def evidence_gpu(ev, src=None):
+    """The GPU an evidence block belongs to: the file's "gpu", else the GPU its SOURCE's device names, else strix-halo
+    (every card measurement before loom-card/3 came from a Strix Halo)."""
+    return ev.get("gpu") or gpu_from_device((src or {}).get("device")) or DEFAULT_GPU
+
+
+def fit_settings(verdict_path, repo, gpu="radeon-r9700"):
+    """(memory_bytes, served_context, required_bytes) of a package on a GPU from the fit table: the table's row of the
+    repo's name. required_bytes is set (and nothing else) when the package does not fit the GPU's memory; memory_bytes
+    and served_context only when the KV cache of the native context does not fit (the GPU's whole memory is the pool
+    and bounds the context); all None when the native context fits."""
+    rows = load_json(verdict_path)
+    name = repo.split("/")[-1]
+    row = next((r for r in rows if r["slug"] == name), None)
+    if row is None:
+        sys.exit(f"{verdict_path}: no row for {name}")
+    mem = GPUS[gpu]["memory_bytes"]
+    need = row["w"] + row["kv"] + SERVE_HEADROOM
+    if need > mem and row["kv"] == 0:   # weights alone (no KV cache to cut): the model does not fit
+        return None, None, int(need)
+    if row["w"] + SERVE_HEADROOM >= mem:
+        return None, None, int(need)
+    if need <= mem:
+        return None, None, None   # the native context fits: the package's own memory_bytes (at most the GPU's) serves it
+    return mem, served_context(row["w"], row["kv"] / row["ctx"], mem), None
+
+
 def cmd_build(a):
     pkg = load_package(a.pkg)
     upstream = None
@@ -181,40 +227,47 @@ def cmd_build(a):
         url = f"{HF}/{ckpt['repo']}/resolve/{ckpt.get('revision') or 'main'}/{ckpt['file']}" if legacy else None
         upstream = upstream_facts(ckpt["repo"], pkg["cfg"].get("model_id"), url)
     facts = package_facts(pkg, upstream)
-    card, versions, baseline, sessions, gates = {}, {}, None, [], {}
-    baselines = {}   # backend -> {"baseline", "session"}: the latest evidence of each backend replaces the earlier
-    roofline = None
+    card, versions = {}, {}
+    G = {}   # gpu -> {"baseline", "sessions", "gates", "baselines", "roofline", "meta"}: everything one GPU measured
+
+    def gpu_state(gpu):
+        return G.setdefault(gpu, {"baseline": None, "sessions": [], "gates": {}, "baselines": {}, "roofline": None, "meta": {}, "data": False})
     card_features = {}   # evidence-established feature statuses (import_card.py: greedy-only sampling)
     sources = Sources()
     if a.from_info:   # a published card: its data first, then the new evidence on top
-        old = load_json(a.from_info)
+        old = load_info(a.from_info)   # loom-card/2: its one GPU is strix-halo
         require_valid(old, a.from_info)
         a.repo = a.repo or old["repo"]
-        if old["repo"] != a.repo:
+        if (old["repo"].split("/")[-1] if a.org else old["repo"]) != (a.repo.split("/")[-1] if a.org else a.repo):
             sys.exit(f"{a.from_info} is the card of {old['repo']}, not {a.repo}")
         card = json.loads(json.dumps(old["card"]))
         card_features = {k: v for k, v in card.pop("features", {}).items() if k == "sampling"}   # evidence; the rest is recomputed
-        measured = {g["programs_sha256"] for g in old["gates"].values() if g.get("programs_sha256")}
+        measured = {g["programs_sha256"] for d in old["devices"].values() for g in (d.get("gates") or {}).values()
+                    if g.get("programs_sha256")}
         if card.get("memory_bytes") and a.memory_bytes is None and measured and programs_sha256(a.pkg) not in measured:
             sys.exit(f"{a.from_info}: its gates measured other programs than {a.pkg}; its card.memory_bytes "
                      f"({card['memory_bytes']}) is the old build's. Pass --memory-bytes (build.py prints the new one).")
         versions = {k: v for k, v in old["versions"].items() if k != "card_generator"}
         sources.by_id = dict(old["sources"])
-        if old.get("performance"):
-            baseline = old["performance"]["baseline"]
-            kind_of = lambda s: (old.get("sources") or {}).get(s["source"], {}).get("kind")
-            sessions = [] if a.reset_performance else [s for s in old["performance"]["sessions"]
-                                                       if kind_of(s) in PERF_SOURCE_KINDS]
-            dropped = len(old["performance"]["sessions"]) - len(sessions)
-            if dropped:
-                print(f"--from-info: dropped {dropped} performance session(s)"
-                      + ("" if a.reset_performance else " not measured on DevLab"), file=sys.stderr)
-            baselines = json.loads(json.dumps(old["performance"].get("baselines") or {}))
-        for name, g in old["gates"].items():   # a published gate has a date, not a time: later evidence that day wins
-            if not gate_applies(name, facts["kind"], facts["features"]):   # e.g. spec after drafting was turned off: shown n/a
-                continue
-            gates[name] = ((g.get("date") or "", -1), None, g)
-        roofline = old.get("roofline")
+        kind_of = lambda s: (old.get("sources") or {}).get(s["source"], {}).get("kind")
+        for gpu, dev in old["devices"].items():
+            st = gpu_state(gpu)
+            st["meta"] = {k: dev[k] for k in ("state", "required_bytes", "memory_bytes", "served_context") if k in dev}
+            st["data"] = "state" not in dev
+            if dev.get("performance"):
+                st["baseline"] = dev["performance"]["baseline"]
+                st["sessions"] = [] if a.reset_performance else [s for s in dev["performance"]["sessions"]
+                                                                if kind_of(s) in PERF_SOURCE_KINDS]
+                dropped = len(dev["performance"]["sessions"]) - len(st["sessions"])
+                if dropped:
+                    print(f"--from-info ({gpu}): dropped {dropped} performance session(s)"
+                          + ("" if a.reset_performance else " not measured on DevLab"), file=sys.stderr)
+                st["baselines"] = json.loads(json.dumps(dev["performance"].get("baselines") or {}))
+            for name, g in (dev.get("gates") or {}).items():   # a published gate has a date, not a time: later evidence that day wins
+                if not gate_applies(name, facts["kind"], facts["features"]):   # e.g. spec after drafting was turned off: shown n/a
+                    continue
+                st["gates"][name] = ((g.get("date") or "", -1), None, g)
+            st["roofline"] = dev.get("roofline")
         if a.report is None:
             a.report = old.get("report")
         if a.status is None:
@@ -232,33 +285,46 @@ def cmd_build(a):
         if (ev.get("versions") or {}).get("package"):
             versions.setdefault("package", {}).update(ev["versions"]["package"])
         perf = ev.get("performance") or {}
+        if perf.get("session"):
+            st = gpu_state(evidence_gpu(ev, perf["session"].get("source")))
+        else:
+            st = gpu_state(evidence_gpu(ev))
+        st["data"] = True
+        if ev.get("serve"):   # how this GPU serves the package: {"memory_bytes", "served_context"}
+            st["meta"].update({k: v for k, v in ev["serve"].items() if v is not None})
         if perf.get("backend"):   # a further llama.cpp backend (make_info.py perf --backend): kept apart from the sessions
             sess = dict(perf["session"], source=sources.add(perf["session"]["source"]))
-            baselines[perf["backend"]] = {"baseline": perf["baseline"], "session": sess}
+            st["baselines"][perf["backend"]] = {"baseline": perf["baseline"], "session": sess}
         else:
             if perf.get("baseline"):
-                baseline = perf["baseline"]
+                st["baseline"] = perf["baseline"]
             if perf.get("session"):
                 s = dict(perf["session"])
                 s["source"] = sources.add(s["source"])
-                sessions.append({k: v for k, v in s.items() if v is not None or k in ("date",)})
+                st["sessions"].append({k: v for k, v in s.items() if v is not None or k in ("date",)})
         for g in ev.get("gates") or []:
+            gst = gpu_state(g.get("gpu") or evidence_gpu(ev, g.get("source")))
+            gst["data"] = True
             new = ((g.get("time") or "", i), g, None)
-            if g["name"] not in gates or gate_supersedes(new, gates[g["name"]]):
-                gates[g["name"]] = new
+            if g["name"] not in gst["gates"] or gate_supersedes(new, gst["gates"][g["name"]]):
+                gst["gates"][g["name"]] = new
         if ev.get("roofline"):
-            roofline = ev["roofline"]
+            rst = gpu_state(ev.get("gpu") or gpu_from_device({"name": ev["roofline"]["device"]["name"]}) or DEFAULT_GPU)
+            rst["roofline"], rst["data"] = ev["roofline"], True
         if ev.get("devlab"):
             print(f"{path}: ignored its Loom-only DevLab sweep (card performance is make_info.py perf on a devlab-perf job)", file=sys.stderr)
     if not a.repo:
         sys.exit("make_info.py build: --repo is required without --from-info")
+    if a.org:   # the same repo name under another org (the staging flow)
+        a.repo = f"{a.org}/{a.repo.split('/')[-1]}"
     if not a.generator_commit:
         a.generator_commit = skills_checkout(__file__)[0]
     for k, v in (("license", a.license), ("output", a.output), ("memory_bytes", a.memory_bytes)):
         if v is not None:
             card[k] = v
     # what the package's own files already say is not repeated
-    tags = [t for t in card.get("tags") or [] if t not in derived_tags(facts["features"])]
+    gpus = [g for g in GPUS if g in G or g in (a.gpus or "").split(",")]
+    tags = [t for t in card.get("tags") or [] if t not in derived_tags(facts["features"], gpus or (DEFAULT_GPU,))]
     card.pop("tags", None)
     if tags:
         card["tags"] = tags
@@ -271,41 +337,95 @@ def cmd_build(a):
     if facts["generator"]:
         versions.pop("package", None)   # the build stamp in llm_config.json wins
 
-    gate_out = {}
-    for name in sorted(gates):
-        if gates[name][2] is not None:   # kept from --from-info as published
-            gate_out[name] = gates[name][2]
-            continue
-        g = gates[name][1]
-        t = g.get("time")
-        row = {"status": g["status"], "level": g.get("level"), "date": t[:10] if t else None,
-               "source": sources.add(g["source"]), "detail": g.get("detail")}
-        if g.get("programs_sha256"):
-            row["programs_sha256"] = g["programs_sha256"]
-        gate_out[name] = row
+    # per-GPU serving settings: the command line, then the fit table
+    for spec, key in ((a.gpu_memory, "memory_bytes"), (a.served_context, "served_context")):
+        for item in spec or []:
+            gpu, _, n = item.partition("=")
+            if gpu not in GPUS or not n.isdigit():
+                sys.exit(f"--{key.replace('_', '-')} {item}: expected GPU=N with GPU one of {', '.join(GPUS)}")
+            gpu_state(gpu)["meta"][key] = int(n)
+    if a.fit:
+        for gpu in ("radeon-r9700",):
+            if gpu in gpus or gpu in G:
+                mem, ctx, need = fit_settings(a.fit, a.repo, gpu)
+                m = gpu_state(gpu)["meta"]
+                if need is not None:
+                    m.update(state="unsupported", required_bytes=need)
+                else:
+                    m.pop("state", None)
+                    m.pop("required_bytes", None)
+                    for k in ("memory_bytes", "served_context"):
+                        m.pop(k, None)
+                    if mem is not None:
+                        m["memory_bytes"] = mem
+                    if ctx is not None:
+                        m["served_context"] = ctx
+    gpus = [g for g in GPUS if g in G or g in (a.gpus or "").split(",")]
+    for g in (a.gpus or "").split(",") if a.gpus else []:
+        if g and g not in GPUS:
+            sys.exit(f"--gpus {g}: not one of {', '.join(GPUS)}")
+
+    def gate_rows(gates):
+        out = {}
+        for name in sorted(gates):
+            if gates[name][2] is not None:   # kept from --from-info as published
+                out[name] = gates[name][2]
+                continue
+            g = gates[name][1]
+            t = g.get("time")
+            row = {"status": g["status"], "level": g.get("level"), "date": t[:10] if t else None,
+                   "source": sources.add(g["source"]), "detail": g.get("detail")}
+            if g.get("programs_sha256"):
+                row["programs_sha256"] = g["programs_sha256"]
+            out[name] = row
+        return out
+    gate_out = {g: gate_rows(G[g]["gates"]) for g in G}
     # every feature, so a dashboard reads them from info.json alone: the package's and upstream's facts, then the gates'
-    # sampling proof, then evidence (an old report's greedy-only sampling, only without a sampling gate)
+    # sampling proof, then evidence (an old report's greedy-only sampling, only without a sampling gate). The sampling
+    # gate of any GPU proves it.
     feats = facts["features"]
-    if "sampling" in card_features and "sampling" not in gate_out:
+    any_gates = {}
+    for g in GPUS:
+        for n, row in (gate_out.get(g) or {}).items():
+            any_gates.setdefault(n, row)
+    if "sampling" in card_features and "sampling" not in any_gates:
         feats["sampling"] = card_features["sampling"]
-    card["features"] = {**with_gate_features(feats, facts["kind"], gate_out), **{k: v for k, v in card_features.items() if k != "sampling"}}
+    card["features"] = {**with_gate_features(feats, facts["kind"], any_gates), **{k: v for k, v in card_features.items() if k != "sampling"}}
+    devices = {}
+    for gpu in gpus:
+        st = G.get(gpu) or {"meta": {}, "sessions": [], "baselines": {}, "gates": {}, "baseline": None, "roofline": None, "data": False}
+        d = dict(st["meta"])
+        has = st["data"] or bool(gate_out.get(gpu) or st["sessions"] or st["baselines"] or st["roofline"])
+        if has:
+            d.pop("state", None)
+            d.pop("required_bytes", None)
+            d["gates"] = gate_out.get(gpu) or {}
+            if st["sessions"]:
+                d["performance"] = {"baseline": st["baseline"] or {"name": "llama.cpp", "version": None, "args": None},
+                                    "sessions": st["sessions"]}
+                if st["baselines"]:
+                    d["performance"]["baselines"] = st["baselines"]
+            if st["roofline"]:
+                d["roofline"] = st["roofline"]
+            cap = GPUS[gpu]["memory_bytes"]
+            base_mem = facts["memory_bytes"] or card.get("memory_bytes")
+            if cap and "memory_bytes" not in d and base_mem and base_mem > cap:
+                d["memory_bytes"] = cap   # the package's budget is more than this GPU has
+        elif "state" not in d:
+            d["state"] = "not_measured"
+        devices[gpu] = d
     info = {"schema": SCHEMA_ID, "repo": a.repo, "card": card,
             "versions": {"card_generator": a.generator_commit, **versions},
-            "sources": sources.by_id, "gates": gate_out}
-    if sessions:
-        info["performance"] = {"baseline": baseline or {"name": "llama.cpp", "version": None, "args": None},
-                               "sessions": sessions}
-        if baselines:
-            info["performance"]["baselines"] = baselines
+            "sources": sources.by_id, "devices": devices}
     if a.report:
         info["report"] = a.report
-    if roofline:
-        info["roofline"] = roofline
     if a.status and a.status != "active":
         info["status"] = a.status
     if a.next_steps:
         info["next_steps"] = a.next_steps
-    used = {s["source"] for s in sessions} | {b["session"]["source"] for b in baselines.values()} | {g["source"] for g in gate_out.values()}
+    used = {s["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])}
+    used |= {b["session"]["source"] for d in devices.values() for b in ((d.get("performance") or {}).get("baselines") or {}).values()}
+    used |= {g["source"] for d in devices.values() for g in (d.get("gates") or {}).values()}
     info["sources"] = {k: v for k, v in sources.by_id.items() if k in used}
     require_valid(info)
     out = dumps(info)
@@ -490,7 +610,7 @@ def cmd_perf(a):
             perf["baseline"]["sha256"] = a.baseline_sha256
     if a.differs and "baseline" in perf:   # the main baseline too: a Loom-side note or a cell llama.cpp cannot run (rule: never silent)
         perf["baseline"]["differs"] = a.differs
-    write_json(a.o, {"evidence": EVIDENCE_ID, "performance": perf})
+    write_json(a.o, {"evidence": EVIDENCE_ID, **gpu_key(a, session["source"]), "performance": perf})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {m.get('loom')}/{m['baseline']}" for k, m in metrics.items()), file=sys.stderr)
 
 
@@ -547,7 +667,7 @@ def cmd_gates(a):
         if not a.spec_log:
             d = os.path.dirname(os.path.abspath(path))
             logs += [os.path.join(d, "gates_spec.log"), path if path.endswith(".out") else os.path.join(d, "gates.out")]
-    ev = {"evidence": EVIDENCE_ID, "gates": out}
+    ev = {"evidence": EVIDENCE_ID, **gpu_key(a, src), "gates": out}
     acc = acceptance(logs) if spec_date and a.source_kind in PERF_SOURCE_KINDS else None   # a card statistic: DevLab only
     if acc is not None:
         ev["performance"] = {"session": {"date": spec_date, "source": src, "runs": {"decode_prefill": None, "streams4": None},
@@ -634,6 +754,8 @@ def cmd_roofline(a):
     rdir = os.path.join(HERE, "..", "..", "..", "loom-roofline")
     sys.path.insert(0, rdir)
     import roofline as R
+    if a.device is None:
+        a.device = GPUS[a.gpu or DEFAULT_GPU]["roofline"]   # the preset of the GPU (radeon-r9700: the DevLab R9700S runner)
     dev = R.DEVICES[a.device]
     a.bw, a.flops = a.bw or dev["bw"], a.flops or dev["flops"]
     facts = package_facts(load_package(a.package))
@@ -643,9 +765,14 @@ def cmd_roofline(a):
     cfg_p = a.cfg or os.path.join(a.package, "llm_config.json")
     cfg = load_json(cfg_p) if os.path.exists(cfg_p) else {}
     info_p = os.path.join(a.package, "info.json")
-    sessions = list(((load_json(info_p).get("performance") or {}).get("sessions") or [])
+    gpu = a.gpu or gpu_from_device({"name": dev["name"]}) or DEFAULT_GPU
+    sessions = list(((gpu_view(load_info(info_p), gpu).get("performance") or {}).get("sessions") or [])
                     if os.path.exists(info_p) else [])
-    sessions += [s for s in ((load_json(ev).get("performance") or {}).get("session") for ev in a.evidence or []) if s]
+    for path in a.evidence or []:
+        ev = load_json(path)
+        s = (ev.get("performance") or {}).get("session")
+        if s and evidence_gpu(ev, s.get("source")) == gpu:
+            sessions.append(s)
     # a drafted ceiling counts acceptance measured on THIS package's programs only: another build's acceptance (an older drafter, depth
     # or n-gram package) says nothing about it; without a current one the card shows the single-pass ceiling
     here = programs_sha256(a.package)
@@ -659,9 +786,9 @@ def cmd_roofline(a):
                 "skills_commit": a.skills_commit or commit}
     if dirty and not a.skills_commit:
         tool["dirty"] = True
-    skip = over_context({"performance": {"sessions": all_sessions}}, native_context(facts["features"]))
+    skip = over_context({"performance": {"sessions": all_sessions}}, a.served_context or native_context(facts["features"]))
     block = roofline_block(facts, R.model_shape(gguf, cfg), acc, R, a.bw, a.flops, tool, os.path.basename(gguf), row_acc, skip)
-    write_json(a.o, {"evidence": EVIDENCE_ID, "roofline": block})
+    write_json(a.o, {"evidence": EVIDENCE_ID, "gpu": gpu, "roofline": block})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {r['ceiling']}" for k, r in block["metrics"].items())
           + "".join(f"; {k} acceptance {r['acceptance']} ({r['acceptance_from']})" for k, r in block["metrics"].items()
                     if r.get("acceptance_from")),
@@ -680,6 +807,8 @@ def add_source_args(p, kind):
     p.add_argument("--device", default="auto", help="auto (this machine), none, or a JSON file with {cpu, gpu, os}")
     p.add_argument("--hrx-loom", default="auto", help="auto (the SDK under $LOOM_ROOT), none, or a JSON file")
     p.add_argument("--package", help="the package measured (records card_lib.programs_sha256 of its programs)")
+    p.add_argument("--gpu", choices=sorted(GPUS), help="the GPU that measured (default: the one the source's device names, "
+                   "else strix-halo; a DevLab job's downloaded files carry no device: pass it)")
 
 
 def main(argv=None):
@@ -688,6 +817,11 @@ def main(argv=None):
     b = sub.add_parser("build")
     b.add_argument("pkg")
     b.add_argument("--repo", help="loom-fun/NAME (default with --from-info: its repo)")
+    b.add_argument("--org", help="the Hugging Face org of the card's repo (the repo name stays): staging cards use loom-fun-staging")
+    b.add_argument("--gpus", help="comma-separated GPU ids the card covers (card_lib.GPUS); one without evidence is not_measured")
+    b.add_argument("--gpu-memory", action="append", metavar="GPU=BYTES", help="loom-serve --memory_bytes on that GPU (repeat)")
+    b.add_argument("--served-context", action="append", metavar="GPU=TOKENS", help="tokens per request that GPU serves (repeat)")
+    b.add_argument("--fit", metavar="VERDICT.json", help="the fit table: radeon-r9700's memory_bytes, served context or unsupported state")
     b.add_argument("--generator-commit", help="loom-skills commit of the card scripts, or 'unknown' (default: this "
                    "checkout's HEAD)")
     b.add_argument("--evidence", nargs="*")
@@ -743,8 +877,12 @@ def main(argv=None):
     r.add_argument("--evidence", nargs="*", help="evidence files whose sessions count on top of PKG/info.json's (perf: the "
                    "rows' acceptance; gates: spec_acceptance), e.g. a first card's, which has no info.json yet")
     r.add_argument("--skills-commit", help="record this loom-skills commit instead of the checkout's")
-    r.add_argument("--device", default="strix-halo", help="roofline.py device preset for --bw / --flops (roofline.DEVICES)")
+    r.add_argument("--device", default=None, help="roofline.py device preset for --bw / --flops (roofline.DEVICES; default: the "
+                   "--gpu's: strix-halo, radeon-r9700 -> radeon-r9700s, the DevLab R9700S runner)")
     r.add_argument("--bw", type=float, default=None, help="memory bandwidth, bytes/s (default: the --device preset)")
+    r.add_argument("--gpu", choices=sorted(GPUS), help="the GPU the ceilings are for (default strix-halo); sets --device")
+    r.add_argument("--served-context", type=int, help="tokens per request the GPU serves, when less than the native context: "
+                   "documents longer than it were refused, so they have no ceiling")
     r.add_argument("--flops", type=float, default=None, help="peak FLOP/s (default: the --device preset)")
     r.add_argument("-o", required=True)
     a = ap.parse_args(argv)

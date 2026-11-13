@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a finished package to a loom-fun repo: the files loom-fetch needs, with pinned origins, and the card.
+"""Publish a finished package to a Hugging Face org's repo (default org loom-fun): the files loom-fetch needs, with pinned origins, and the card.
 
   publish_package.py prepare PKG OUT --source ORG/REPO [--loom-fetch EXE]
       Run on the machine that holds the GGUFs (where the package was built). Copies PKG into OUT without weights
@@ -9,7 +9,11 @@
       HF cache path the file links to), then writes model.json.lock with
       `loom-fetch --update-lock --all-variants` (the local snapshot dirs stand in for the origins: nothing is
       downloaded). OUT is what the repo holds apart from the card.
-  publish_package.py upload OUT --repo loom-fun/NAME [--message MSG] [--card-only] [--parent-commit SHA]
+  publish_package.py upload OUT --repo NAME|ORG/NAME [--org ORG] [--dry-run] [--message MSG] [--card-only] [--parent-commit SHA]
+      The target is ORG/NAME: ORG is --org (default loom-fun), NAME the last part of --repo, so the same repo names go
+      to another org (the staging flow: --org loom-fun-staging). The card's info.json "repo" must be that target (its
+      Quick start fetches from it; make_info.py build --org writes it). --dry-run checks everything and lists what would
+      be uploaded and deleted, without a token or a network call.
       Uploads OUT (with the card: README.md, info.json, REPORT.md made by make_info.py build + render_card.py)
       and deletes repo files OUT no longer has (an in-place update of an older package leaves nothing stale;
       .gitattributes stays). --card-only uploads just README.md, info.json and REPORT.md. --parent-commit SHA: the
@@ -104,19 +108,38 @@ def cmd_prepare(a):
 STRAY = re.compile(r"^(ev_[\w.-]+\.json|\.loom-fetch\.lock)$")   # working files, never part of a card repo
 
 
-def check_card_text(out):
-    """Refuse to publish a card whose free text is not template output or a short factual caveat."""
+DEFAULT_ORG = "loom-fun"
+
+
+def target_repo(org, repo):
+    """ORG/NAME: the org (default loom-fun) and the name part of --repo (NAME or any ORG/NAME)."""
+    return f"{org or DEFAULT_ORG}/{repo.split('/')[-1]}"
+
+
+def check_card_text(out, repo=None):
+    """Refuse to publish a card whose free text is not template output or a short factual caveat, or whose repo is
+    not the one it is published to (its Quick start fetches from info.json's repo)."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import card_lib
     info = card_lib.load_json(os.path.join(out, "info.json"))
     card_lib.require_valid(info, os.path.join(out, "info.json"))
+    if repo and info.get("repo") != repo:
+        sys.exit(f"info.json is the card of {info.get('repo')}, not {repo}: rebuild it with make_info.py build --org "
+                 f"{repo.split('/')[0]} (the Quick start fetches from the card's repo)")
     if info.get("report") != "generated":
         sys.exit("info.json: only a generated REPORT.md is published (an attached, hand-written report is narrative)")
 
 
 def cmd_upload(a):
+    a.repo = target_repo(a.org, a.repo)
+    check_card_text(a.out, a.repo)
+    local = {os.path.relpath(os.path.join(r, f), a.out).replace(os.sep, "/") for r, _, fs in os.walk(a.out) for f in fs}
+    if a.dry_run:
+        files = sorted(f for f in local if not a.card_only or f in CARD)
+        print(f"dry run: would upload {len(files)} files to https://huggingface.co/{a.repo}"
+              + (" (card only)" if a.card_only else "") + ": " + ", ".join(files[:12]) + (" ..." if len(files) > 12 else ""))
+        return
     from huggingface_hub import HfApi
-    check_card_text(a.out)
     api = HfApi()
     api.create_repo(a.repo, repo_type="model", exist_ok=True)
     if a.card_only:
@@ -131,7 +154,6 @@ def cmd_upload(a):
     for f in ("model.json", "model.json.lock", "llm_config.json", *CARD):
         if not os.path.isfile(os.path.join(a.out, f)):
             sys.exit(f"{f} missing in {a.out} (prepare, then make_info.py build + render_card.py)")
-    local = {os.path.relpath(os.path.join(r, f), a.out).replace(os.sep, "/") for r, _, fs in os.walk(a.out) for f in fs}
     stale = [f for f in api.list_repo_files(a.repo) if f not in local and f != ".gitattributes"]
     api.upload_folder(repo_id=a.repo, folder_path=a.out, delete_patterns=stale or None,
                       commit_message=a.message or "Loom package and card", parent_commit=a.parent_commit)
@@ -146,7 +168,9 @@ def main(argv=None):
     p.add_argument("--source", required=True, help="the GGUF repo the checkpoint comes from")
     p.add_argument("--loom-fetch", default="loom-fetch")
     u = sub.add_parser("upload")
-    u.add_argument("out"); u.add_argument("--repo", required=True)
+    u.add_argument("out"); u.add_argument("--repo", required=True, help="NAME or ORG/NAME (the name part is used)")
+    u.add_argument("--org", default=DEFAULT_ORG, help=f"the Hugging Face org to publish to (default {DEFAULT_ORG}; staging: loom-fun-staging)")
+    u.add_argument("--dry-run", action="store_true", help="check the card and list what would be uploaded; no token, no network")
     u.add_argument("--message"); u.add_argument("--card-only", action="store_true")
     u.add_argument("--parent-commit", help="fail unless the repo's main is still this commit (the one the card was "
                    "built from): concurrent publishes fail instead of overwriting each other")

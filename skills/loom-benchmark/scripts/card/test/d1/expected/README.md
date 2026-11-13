@@ -94,7 +94,7 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 - `info.json`: the measurements, gate evidence and versions this card shows; everything else comes from the files above.
 - `REPORT.md`: the report written when this package was made.
 
-Versions: card schema `loom-card/2`; loom-skills `b0f5897` (recovered); hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered); card generator `0123456`.
+Versions: card schema `loom-card/3`; loom-skills `b0f5897` (recovered); hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered); card generator `0123456`.
 
 Source files, fetched by `loom-fetch` from their own repositories:
 
