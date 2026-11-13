@@ -30,7 +30,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.models.outputs.matrix) }}
     name: ${{ matrix.repo }}
-    runs-on: [windows, strix-halo, devlab-dispatch]
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 300
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -39,7 +39,7 @@ jobs:
       PYTHONUTF8: "1"
     defaults:
       run:
-        shell: powershell
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,31 +47,21 @@ jobs:
             .github/wincheck
             skills/loom-benchmark
             skills/loom-port-llm/starter
-      - name: wincheck
+      - name: wincheck (Linux control)
         run: |
-          $slug = "${{ matrix.repo }}".Split("/")[1]
-          "SLUG=$slug" >> $env:GITHUB_ENV
-          python --version
-          python .github/wincheck/wincheck.py "${{ matrix.repo }}" "$env:RUNNER_TEMP\wincheck-out"
-          if ($LASTEXITCODE -ne 0) { throw "wincheck exited $LASTEXITCODE" }
-      - name: summary
-        if: always()
-        run: |
-          $f = "$env:RUNNER_TEMP\wincheck-out\result.json"
-          if (Test-Path $f) {
-            $r = Get-Content $f -Raw | ConvertFrom-Json
-            "### ${{ matrix.repo }}: $($r.verdict)" >> $env:GITHUB_STEP_SUMMARY
-            '```json' >> $env:GITHUB_STEP_SUMMARY
-            (Get-Content $f -Raw).Substring(0, [Math]::Min(6000, (Get-Content $f -Raw).Length)) >> $env:GITHUB_STEP_SUMMARY
-            '```' >> $env:GITHUB_STEP_SUMMARY
-          }
+          echo "SLUG=${REPO#*/}" >> "$GITHUB_ENV"
+          export HF_HOME="$RUNNER_TEMP/hf"
+          python3 --version
+          python3 .github/wincheck/wincheck.py "$REPO" "$RUNNER_TEMP/wincheck-out"
+        env:
+          REPO: ${{ matrix.repo }}
       - name: upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wincheck-${{ env.SLUG }}
+          name: linctl-${{ env.SLUG }}
           path: ${{ runner.temp }}/wincheck-out
           retention-days: 30
       - name: clean up
         if: always()
-        run: Remove-Item -Recurse -Force "$env:RUNNER_TEMP\wincheck-work","$env:RUNNER_TEMP\wincheck-out" -ErrorAction SilentlyContinue
+        run: rm -rf "$RUNNER_TEMP/wincheck-work" "$RUNNER_TEMP/wincheck-out" "$RUNNER_TEMP/hf"

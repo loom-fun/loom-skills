@@ -41,6 +41,8 @@ SCRIPTS = os.path.join(HERE, "..", "..", "skills", "loom-benchmark", "scripts")
 WORK = os.path.join(os.environ.get("RUNNER_TEMP", OUT), "wincheck-work")
 os.makedirs(WORK, exist_ok=True)
 URL = "http://127.0.0.1:8080"
+WIN = os.name == "nt"
+BIN = "Scripts" if WIN else "bin"
 R = {"repo": a.repo, "started": time.strftime("%Y-%m-%d %H:%M:%S"), "steps": {}, "checks": {}, "perf": {}, "claims": {},
      "ratios": {}, "env": {}}
 
@@ -68,7 +70,8 @@ def ps(line, log, cwd, env, timeout=None):
     with open(log, "w", encoding="utf-8", errors="replace") as f:
         f.write(f"> {line}\n")
         f.flush()
-        p = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", line + "; exit $LASTEXITCODE"],
+        cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", line + "; exit $LASTEXITCODE"] if WIN else ["bash", "-c", line]
+        p = subprocess.run(cmd,
                            cwd=cwd, env=env, stdout=f, stderr=subprocess.STDOUT, timeout=timeout)
     return p.returncode, round(time.time() - t, 1)
 
@@ -84,6 +87,7 @@ def tail(path, n=40):
 R["env"]["python"] = sys.version.split()[0]
 R["env"]["platform"] = platform.platform()
 try:
+  if WIN:
     R["env"]["gpu"] = subprocess.run(["powershell", "-NoProfile", "-Command",
                                       "(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name + ' / driver ' + $_.DriverVersion }) -join '; '"],
                                      capture_output=True, text=True, timeout=60).stdout.strip()
@@ -92,6 +96,9 @@ try:
     R["env"]["ram_gb"] = subprocess.run(["powershell", "-NoProfile", "-Command",
                                          "[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB,1)"],
                                         capture_output=True, text=True, timeout=60).stdout.strip()
+  else:
+    R["env"]["cpu"] = open("/proc/cpuinfo").read().split("model name")[1].split(":")[1].split("\n")[0].strip()
+    R["env"]["ram_gb"] = round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30, 1)
 except Exception as e:  # environment info is best effort
     R["env"]["error"] = str(e)
 R["env"]["disk_free_gb"] = round(shutil.disk_usage(WORK).free / 1e9, 1)
@@ -130,10 +137,10 @@ save()
 venv = os.path.join(WORK, "venv")
 subprocess.run([sys.executable, "-m", "venv", venv], check=True)
 env = dict(os.environ)
-env["PATH"] = os.path.join(venv, "Scripts") + os.pathsep + env["PATH"]
+env["PATH"] = os.path.join(venv, BIN) + os.pathsep + env["PATH"]
 env["VIRTUAL_ENV"] = venv
 env["PYTHONUTF8"] = "1"
-vpy = os.path.join(venv, "Scripts", "python.exe")
+vpy = os.path.join(venv, BIN, "python.exe" if WIN else "python")
 serve_line = None
 for i, line in enumerate(lines):
     if line.startswith("loom-serve"):
@@ -154,12 +161,16 @@ slog = open(serve_log, "w", encoding="utf-8", errors="replace")
 slog.write(f"> {serve_line}\n")
 slog.flush()
 t0 = time.time()
-srv = subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-Command", serve_line], cwd=WORK, env=env,
-                       stdout=slog, stderr=subprocess.STDOUT)
+srv = subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-Command", serve_line] if WIN else ["bash", "-c", "exec " + serve_line],
+                       cwd=WORK, env=env, stdout=slog, stderr=subprocess.STDOUT, start_new_session=not WIN)
 
 
 def stop_server():
-    subprocess.run(["taskkill", "/T", "/F", "/PID", str(srv.pid)], capture_output=True)
+    if WIN:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(srv.pid)], capture_output=True)
+    else:
+        import signal
+        os.killpg(srv.pid, signal.SIGTERM)
 
 
 model_id = None
