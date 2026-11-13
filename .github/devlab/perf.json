@@ -1,10 +1,10 @@
 {
- "_comment": "E2B prefill ablation with PRUNE_SHARED: double each kernel class of @llm_advance.",
+ "_comment": "prefill chunk size A/B with PRUNE_SHARED.",
  "kit": "gemma4",
  "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "abl",
+   "name": "e2b",
    "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
    "memory_bytes": 16000000000,
    "variants": [
@@ -15,98 +15,90 @@
      }
     },
     {
-     "name": "d_ple",
+     "name": "c2048",
      "build": {
       "PRUNE_SHARED": "1"
      },
-     "double": [
-      "llm_advance:g_ple_prep"
+     "build_args": [
+      "--prefill",
+      "2048"
      ]
     },
     {
-     "name": "d_plegate",
+     "name": "c4096",
      "build": {
       "PRUNE_SHARED": "1"
      },
-     "double": [
-      "llm_advance:g_ple_gate|g_gemm_f32|g_mv_f32"
+     "build_args": [
+      "--prefill",
+      "4096"
      ]
     },
     {
-     "name": "d_swiglu",
+     "name": "c512",
      "build": {
       "PRUNE_SHARED": "1"
      },
-     "double": [
-      "llm_advance:g_gemm_q4_k_swiglu"
-     ]
-    },
-    {
-     "name": "d_store",
-     "build": {
-      "PRUNE_SHARED": "1"
-     },
-     "double": [
-      "llm_advance:g_gemm_q4_k_store|g_gemm_q6_k_store"
-     ]
-    },
-    {
-     "name": "d_attnswa",
-     "build": {
-      "PRUNE_SHARED": "1"
-     },
-     "double": [
-      "llm_advance:g_attention_flash2\\[|g_attention_flash2_partial\\["
-     ]
-    },
-    {
-     "name": "d_attn512",
-     "build": {
-      "PRUNE_SHARED": "1"
-     },
-     "double": [
-      "llm_advance:g_attention_flash2_d512"
-     ]
-    },
-    {
-     "name": "d_fallback",
-     "build": {
-      "PRUNE_SHARED": "1"
-     },
-     "double": [
-      "llm_advance:g16d\\d+_attention"
-     ]
-    },
-    {
-     "name": "d_elem",
-     "build": {
-      "PRUNE_SHARED": "1"
-     },
-     "double": [
-      "llm_advance:g_row_scale|g_post_add_norm|g_qk_rope|g_quant_q8|g_token_info|g_embed|g_head"
-     ]
-    },
-    {
-     "name": "d_info",
-     "build": {
-      "PRUNE_SHARED": "1"
-     },
-     "double": [
-      "llm_advance:g_attention_fallback_list|g_token_info"
+     "build_args": [
+      "--prefill",
+      "512"
      ]
     }
    ],
    "steps": [
     "perf:p:2",
-    "perf:d_ple:2",
-    "perf:d_plegate:2",
-    "perf:d_swiglu:2",
-    "perf:d_store:2",
-    "perf:d_attnswa:2",
-    "perf:d_attn512:2",
-    "perf:d_fallback:2",
-    "perf:d_elem:2",
-    "perf:d_info:2"
+    "perf:c2048:2",
+    "perf:c4096:2",
+    "perf:c512:2"
+   ]
+  },
+  {
+   "name": "e4b",
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes": 31000000000,
+   "variants": [
+    {
+     "name": "p",
+     "build": {
+      "PRUNE_SHARED": "1"
+     }
+    },
+    {
+     "name": "c2048",
+     "build": {
+      "PRUNE_SHARED": "1"
+     },
+     "build_args": [
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "c4096",
+     "build": {
+      "PRUNE_SHARED": "1"
+     },
+     "build_args": [
+      "--prefill",
+      "4096"
+     ]
+    },
+    {
+     "name": "c512",
+     "build": {
+      "PRUNE_SHARED": "1"
+     },
+     "build_args": [
+      "--prefill",
+      "512"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:p:2",
+    "perf:c2048:2",
+    "perf:c4096:2",
+    "perf:c512:2"
    ]
   }
  ]
