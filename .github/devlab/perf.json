@@ -16,58 +16,41 @@
     },
     {
      "name": "prune"
-    }
-   ],
-   "steps": [
-    "perf:base:2",
-    "perf:prune:2",
-    "perf:base:2:long",
-    "perf:prune:2:long",
-    "consistency:prune:3"
-   ]
-  },
-  {
-   "name": "e4b",
-   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
-   "memory_bytes": 31000000000,
-   "variants": [
-    {
-     "name": "base",
-     "build": {
-      "PRUNE_SHARED": "0"
-     }
     },
     {
-     "name": "prune"
-    }
-   ],
-   "steps": [
-    "perf:base:2",
-    "perf:prune:2",
-    "perf:base:2:long",
-    "perf:prune:2:long",
-    "consistency:prune:3"
-   ]
-  },
-  {
-   "name": "bolt",
-   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
-   "memory_bytes": 36000000000,
-   "variants": [
-    {
-     "name": "base",
+     "name": "nd",
      "build": {
       "PRUNE_SHARED": "0"
-     }
+     },
+     "build_args": [
+      "--draft-depth",
+      "0"
+     ]
     },
     {
-     "name": "prune"
+     "name": "ndp",
+     "build_args": [
+      "--draft-depth",
+      "0"
+     ]
+    },
+    {
+     "name": "l15",
+     "build_args": [
+      "--draft-depth",
+      "0"
+     ],
+     "config": {
+      "layers": 15
+     }
     }
    ],
    "steps": [
-    "perf:base:2",
-    "perf:prune:2",
-    "consistency:prune:3"
+    "perf:base:1",
+    "perf:prune:1",
+    "perf:nd:1",
+    "perf:ndp:1",
+    "perf:l15:1"
    ]
   }
  ]
