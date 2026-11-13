@@ -230,6 +230,7 @@ import os as _os, sys as _sys
 _HERE = _os.path.dirname(_os.path.abspath(__file__))
 _sys.path.insert(0, _os.path.dirname(_HERE))          # the starter (or kit) directory: gen_gemm.py
 import gen_gemm as _gg                                # noqa: E402
+import gen_gemm_rdna4 as _rdna4                       # noqa: E402  gfx12 twins of the WMMA kernels (LOOM_RDNA4=0: none)
 
 # Projector weights are F16 / BF16 / F32: add those formats to gen_gemm's F16 staging.
 _DEQ = {
@@ -360,7 +361,7 @@ def gemm(fmt, K, N, mode="store"):
     s = re.sub(r"%n = index.assume %n_arg \[[^\]]*\] : index", f"%n = index.constant {N} : index", s)
     # the config region computes tiles from %n: make it constant too
     s = s.replace("  %out_tiles = index.div %n, %c64 : index", f"  %n_const = index.constant {N} : index\n  %out_tiles = index.div %n_const, %c64 : index", 1)
-    return name, s
+    return name, _rdna4.with_twins(s)
 
 def row_scale(K=8):
     """Row-scaled F16 copy of rows K wide (K a multiple of 8; else a variant for multiples of 4)."""
