@@ -1,7 +1,41 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "flash2 prefill recovery: regenerate the six cards blocked on #193 (reference = the published card; branch carries PR 480).",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "bolt-e4b",
+   "spec": "nvidia/NVIDIA-Nemotron-3.5-Bolt-E4B-4GB:Nemotron-3.5-Bolt-E4B-Q4_K_M.gguf",
+   "reference": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "model_id": "nemotron-3.5-bolt-e4b"
+  },
+  {
+   "name": "gemma4-e4b",
+   "spec": "unsloth/gemma-4-E4B-it-GGUF:gemma-4-E4B-it-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "model_id": "google/gemma-4-E4B-it"
+  },
+  {
+   "name": "gemma4-e2b",
+   "spec": "unsloth/gemma-4-E2B-it-GGUF:gemma-4-E2B-it-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "model_id": "google/gemma-4-E2B-it"
+  },
+  {
+   "name": "spark-x25",
+   "spec": "XHToken/Spark-X2.5-4B-GGUF:Spark-X2.5-4B-Q4_K_M.gguf",
+   "reference": "loom-fun/XHToken-Spark-X2.5-4B-loom",
+   "model_id": "XHToken/Spark-X2.5-4B"
+  },
+  {
+   "name": "spark-x26",
+   "spec": "bartowski/Spark-X2.6-4B-GGUF:Spark-X2.6-4B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+   "model_id": "XHToken/Spark-X2.6-4B"
+  },
+  {
+   "name": "lfm3-1p7b",
+   "spec": "bartowski/LFM3-1.7B-GGUF:LFM3-1.7B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-LFM3-1.7B-loom",
+   "model_id": "LiquidAI/LFM3-1.7B"
+  }
  ]
 }
