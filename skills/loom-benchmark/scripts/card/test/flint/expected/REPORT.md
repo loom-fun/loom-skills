@@ -1,6 +1,6 @@
 # Flint for AMD Loom: measurement report
 
-How the values on this repository's model card were measured. Generated from `info.json` (schema `loom-card/2`) by the loom-skills card generator; the card's README.md is rendered from the same data.
+How the values on this repository's model card were measured. Generated from `info.json` (schema `loom-card/3`) by the loom-skills card generator; the card's README.md is rendered from the same data.
 
 ## Setup
 

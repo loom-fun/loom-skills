@@ -100,7 +100,7 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 - `info.json`: the measurements, gate evidence and versions this card shows; everything else comes from the files above.
 - `REPORT.md`: how the values above were measured: setup, commands and the value of every run.
 
-Versions: card schema `loom-card/2`; loom-skills `af9f2a0`; hrx-loom `0.1.0` (hrx-system `d01d1c1`); card generator `0123456`.
+Versions: card schema `loom-card/3`; loom-skills `af9f2a0`; hrx-loom `0.1.0` (hrx-system `d01d1c1`); card generator `0123456`.
 
 Source files, fetched by `loom-fetch` from their own repositories:
 

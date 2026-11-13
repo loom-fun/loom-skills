@@ -39,6 +39,8 @@
 # Variant V: {"name": "card"}                                    the card's own programs, as published
 #            {"name": "x", "build": {"ENV": "1"}, "build_args": [...], "ref": "origin/main",
 #             "execution": {"draft_depth": 3}, "double": ["llm_verify:g_head_mv", "*:g_mv_q8_0"]}
+#            "context": N: the served context of a reduced-context model on the R9700 (execution context_capacity / pool_capacity N;
+#            a rebuild also gets --context N --pool N); rows beyond it are refused by the server (HTTP 400) and skipped by perf.py.
 #            config: generator-config overrides for a rebuild (e.g. {"layers": 12}: timing only)
 #            build: build.py with these env vars (and extra flags); ref: build with that commit's starter;
 #            execution: model.json overrides; double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
@@ -56,12 +58,14 @@
 #          textmatch:V          text_match.py: first 50 tokens of perf.py's prompts on V, then on llama.cpp
 #          consistency:V:N      consistency.py N times (NOT DETERMINISTIC / concurrent mismatch counts)
 #          determinism:V:C:R    determinism.py (issue #39's script, when present)
+#          func:V               V served alone: the functional checks the card claims (chat, tool calling, image input;
+#                               r9700_func.py: the same checks as the Windows red-team harness), out/func_V.json
 #          ktest:V              make_kernel_tests.py + run_kernel_tests.sh with V's kit
 #          gates:V:LEVEL        gates.sh against llama.cpp
 # Runner: "runner": "strix" (default) | "r9700" on the experiment or a job picks the DevLab runner (workflow runs-on). On the
 #   R9700 (gfx1201, 32 GB VRAM, 31 GB host RAM, no HIP headers, no Vulkan loader) this script installs libvulkan1 +
-#   mesa-vulkan-drivers (sudo -n apt-get), sets LOOM_MEMORY_CAP_GIB=32 (the budget is VRAM there, not host RAM: memcheck.sh
-#   would otherwise refuse anything above 60 % of the host's RAM) and clamps memory_bytes to 30000000000 (override with
+#   mesa-vulkan-drivers (sudo -n apt-get), sets LOOM_MEMORY_CAP_GIB=34 (the budget is VRAM there, not host RAM: memcheck.sh
+#   would otherwise refuse anything above 60 % of the host's RAM) and clamps memory_bytes to 34000000000, the R9700 pool the card's Quick start states (card_lib.GPUS; override with
 #   "memory_bytes_r9700" on the job/experiment: the per-model budget from fit/verdict.json). llama.cpp ROCm = lemonade's
 #   gfx120X build (fetch_llamacpp.sh finds it), Vulkan = b12211. A registration failure of a package (today: WMMA kernels
 #   before the gfx12 twins land) ends that step at once as ERROR with the first diagnostics in the log.
@@ -69,7 +73,7 @@
 # KERNEL TEST ON THE R9700 (copy into .github/devlab/perf.json on your branch, label your PR devlab-perf; the dual-target
 # twins K_rdna4 run on gfx12 through run_kernel_tests.sh once the package carries them; "build": {} rebuilds the package from
 # this branch with the card's own settings; a job that only tests kernels sets "kit" to the model's kit or null):
-#   {"card": "loom-fun/unsloth-Qwen3-0.6B-loom", "memory_bytes": 30000000000, "kit": null, "llamacpp": "b1375",
+#   {"card": "loom-fun/unsloth-Qwen3-0.6B-loom", "memory_bytes": 34000000000, "kit": null, "llamacpp": "b1375",
 #    "runner": "r9700",
 #    "jobs": [{"name": "ktest-r9700", "variants": [{"name": "dual", "build": {}}], "steps": ["ktest:dual"]}]}
 #   result: "PASS (N/N passed; M skipped)" in summary.json; per-case lines in ktest_dual.log (artifact devlab-perf-ktest-r9700).
@@ -95,8 +99,8 @@ vkv=$(q "print(j.get('vulkan_kv') or e.get('vulkan_kv') or 'auto')")
 RUNNER=$(q "print(j.get('runner') or e.get('runner') or 'strix')")
 if [ "$RUNNER" = r9700 ]; then
   rm9=$(q "print(j.get('memory_bytes_r9700') or e.get('memory_bytes_r9700') or '')")
-  if [ -n "$rm9" ]; then mem=$rm9; elif [ "$mem" -gt 30000000000 ]; then echo "r9700: memory_bytes $mem clamped to 30000000000 (32 GB VRAM)"; mem=30000000000; fi
-  export LOOM_MEMORY_CAP_GIB=${LOOM_MEMORY_CAP_GIB:-32}   # the budget lives in VRAM: memcheck.sh's 60 %-of-host-RAM rule does not apply
+  if [ -n "$rm9" ]; then mem=$rm9; elif [ "$mem" -gt 34000000000 ]; then echo "r9700: memory_bytes $mem clamped to 34000000000 (the R9700 pool, card_lib.GPUS)"; mem=34000000000; fi
+  export LOOM_MEMORY_CAP_GIB=${LOOM_MEMORY_CAP_GIB:-34}   # the budget lives in VRAM: memcheck.sh's 60 %-of-host-RAM rule does not apply
   if ! ldconfig -p 2>/dev/null | grep -q 'libvulkan\.so\.1' || ! ls /usr/share/vulkan/icd.d/radeon_icd*.json >/dev/null 2>&1; then
     { sudo -n apt-get install -y libvulkan1 mesa-vulkan-drivers || { sudo -n apt-get update -qq && sudo -n apt-get install -y libvulkan1 mesa-vulkan-drivers; }; } >/dev/null 2>&1 \
       || echo "WARNING: could not install libvulkan1 mesa-vulkan-drivers (the @vulkan steps will fail)"
@@ -195,7 +199,7 @@ for v in $variants; do
   pkg=$D/$v/pkg; mkdir -p "$D/$v"
   if [ "$(qv "$v" "print('build' in v)")" = True ]; then
     kit_for "$v" "$(qv "$v" "print(v.get('ref') or '')")" || exit 1
-    extra=$(qv "$v" "print(' '.join(v.get('build_args') or []))")
+    extra=$(qv "$v" "print(' '.join(v.get('build_args') or []) + (f\" --context {v['context']} --pool {v['context']}\" if v.get('context') else ''))")   # "context": N = the served context of a reduced-context model (later flags win)
     envs=$(qv "$v" "print(' '.join(f'{k}={x}' for k, x in (v.get('build') or {}).items()))")
     step "build $v: env $envs; build.py $cardargs $extra"
     # "config": generator-config overrides for this variant's rebuild (e.g. {"layers": 12}: a truncated model; the step
@@ -393,7 +397,7 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', ro
     ktest)
       grep -q '"catalog"' "$card/llm_config.json" && { res[$s]="SKIP (catalog package: no generated kernel tests)"; continue; }
       serve_alone "$p1" >/dev/null 2>&1; for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
-      step "kernel tests $p1"; kt=$D/$p1/ktest; rm -rf "$kt"; export KTEST_GEMM_TWIN=1 KTEST_GEMM_ERR=1
+      step "kernel tests $p1"; kt=$D/$p1/ktest; rm -rf "$kt"; export KTEST_GEMM_ERR=1
       ( cd "${KIT[$p1]}" && LLM_DRAFT=$("$T" -c "import json, sys; print(json.dumps(json.load(open(sys.argv[1])).get('draft')))" "$D/$p1/pkg/llm_config.json") \
           "$T" make_kernel_tests.py "$D/cfg.json" "$kt" ) > "$out/ktest_make_$p1.log" 2>&1 || { tail "$out/ktest_make_$p1.log"; res[$s]=ERROR; continue; }
       "${KIT[$p1]}/run_kernel_tests.sh" "$D/$p1/pkg" "$kt" > "$out/ktest_$p1.log" 2>&1; rc=$?
@@ -401,6 +405,13 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', ro
       grep -v "^PASS" "$out/ktest_$p1.log" | tail -15
       tot=$(grep -oE "^[0-9]+/[0-9]+ passed" "$out/ktest_$p1.log" | tail -1)
       res[$s]="$([ $rc = 0 ] && [ -n "$tot" ] && [ "${tot%%/*}" = "$(echo "${tot#*/}" | cut -d' ' -f1)" ] && echo PASS || echo FAIL) ($tot; $(grep -c '^SKIP' "$out/ktest_$p1.log") skipped)";;
+    func)
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "functional checks $p1"
+      curl -fsSL --retry 2 "$base/info.json" -o "$out/info_card.json" 2>/dev/null || rm -f "$out/info_card.json"
+      fa=(); grep -q '"vision"' "$card/llm_config.json" && fa+=(--vision)
+      "$T" "$here/.github/scripts/r9700_func.py" "$url" "$cardid" "$out/func_$p1.json" ${fa[@]+"${fa[@]}"} $([ -f "$out/info_card.json" ] && echo --info "$out/info_card.json") 2>&1 | tee "$out/func_$p1.log"
+      res[$s]=$(tail -1 "$out/func_$p1.log");;
     vtest)
       step "vision v_gemm twins on $RUNNER"
       VISION_TEST_RDNA4=1 VISION_TEST_DIR="$D/vt" "$T" "${KIT[$p1]}/vision/tests/test_gemm.py" > "$out/vtest.log" 2>&1; rc=$?
