@@ -609,7 +609,8 @@ def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acc
                 row.update(ceiling=round(d, 1), efficiency=round(R.efficiency(m, rk, d, tokens_per_pass=t), 3),
                            acceptance=acc, acceptance_from="session", tokens_per_pass=t, single_pass=round(c, 1))
         metrics[key] = row
-    return {"device": {"name": R.DEVICE if (bw, flops) == (R.BW, R.FLOPS) else f"{R.DEVICE}, overridden",
+    preset = next((d["name"] for d in R.DEVICES.values() if (d["bw"], d["flops"]) == (bw, flops)), None)
+    return {"device": {"name": preset or f"{R.DEVICE}, overridden",
                        "bandwidth_bytes_per_s": bw, "peak_flops": flops},
             "tool": tool, "checkpoint": checkpoint,
             "drafting": ({"method": spec[0], "depth": spec[1], "acceptance": acceptance, "tokens_per_pass": tpp}
@@ -633,6 +634,8 @@ def cmd_roofline(a):
     rdir = os.path.join(HERE, "..", "..", "..", "loom-roofline")
     sys.path.insert(0, rdir)
     import roofline as R
+    dev = R.DEVICES[a.device]
+    a.bw, a.flops = a.bw or dev["bw"], a.flops or dev["flops"]
     facts = package_facts(load_package(a.package))
     gguf = a.gguf or cached_gguf(facts["checkpoint"])
     if not gguf:
@@ -740,8 +743,9 @@ def main(argv=None):
     r.add_argument("--evidence", nargs="*", help="evidence files whose sessions count on top of PKG/info.json's (perf: the "
                    "rows' acceptance; gates: spec_acceptance), e.g. a first card's, which has no info.json yet")
     r.add_argument("--skills-commit", help="record this loom-skills commit instead of the checkout's")
-    r.add_argument("--bw", type=float, default=216e9, help="memory bandwidth, bytes/s (roofline.py's default)")
-    r.add_argument("--flops", type=float, default=59e12, help="peak FLOP/s (roofline.py's default)")
+    r.add_argument("--device", default="strix-halo", help="roofline.py device preset for --bw / --flops (roofline.DEVICES)")
+    r.add_argument("--bw", type=float, default=None, help="memory bandwidth, bytes/s (default: the --device preset)")
+    r.add_argument("--flops", type=float, default=None, help="peak FLOP/s (default: the --device preset)")
     r.add_argument("-o", required=True)
     a = ap.parse_args(argv)
     {"build": cmd_build, "perf": cmd_perf, "gates": cmd_gates, "roofline": cmd_roofline}[a.cmd](a)

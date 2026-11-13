@@ -1,6 +1,6 @@
 ---
 name: loom-roofline
-description: Roofline analysis for a Loom LLM port on Strix Halo — compute the hardware ceiling for decode, long-context decode, prefill and 4-stream throughput from the GGUF, compare llama.cpp ROCm's efficiency, and pick realistic, achievable, impressive per-metric optimization targets with a stopping rule. Use before any open-ended "optimize this model" / "make it fast" / "beat llama.cpp" request, when the user gives no target, or when asked "what's possible" / "is this target achievable".
+description: Roofline analysis for a Loom LLM port on Strix Halo (or another preset device such as the Radeon AI PRO R9700) — compute the hardware ceiling for decode, long-context decode, prefill and 4-stream throughput from the GGUF, compare llama.cpp ROCm's efficiency, and pick realistic, achievable, impressive per-metric optimization targets with a stopping rule. Use before any open-ended "optimize this model" / "make it fast" / "beat llama.cpp" request, when the user gives no target, or when asked "what's possible" / "is this target achievable".
 ---
 
 # Roofline → targets
@@ -93,7 +93,7 @@ Per metric it then prints a row:
 
 | Column | Meaning |
 |---|---|
-| ceiling | Hardware roofline. Decode: 216 GB/s ÷ (weights + KV read per token). Prefill: 59 TFLOP/s ÷ (2·params + causal attention flops) per token. c4: 4 tokens per weight pass. For MoE, the 4 tokens route to their own experts, so those weights are read for each token. |
+| ceiling | Hardware roofline. Decode: the device bandwidth (Strix Halo 216 GB/s) ÷ (weights + KV read per token). Prefill: the device's dense f16 WMMA peak (Strix Halo 59 TFLOP/s) ÷ (2·params + causal attention flops) per token. c4: 4 tokens per weight pass. For MoE, the 4 tokens route to their own experts, so those weights are read for each token. |
 | eff | llama.cpp's fraction of the ceiling. **This, not Loom, decides how big the win can be.** At eff 0.75, the most Loom can gain is about 1.3×. At eff 0.15, 3–6× is on the table, and such results are routinely reported for new architectures, MoE and prefill. |
 | TARGET | ceiling × the **best efficiency a Loom port has actually reached** on this hardware (`EFF` in the script; sources in `reference/calibration.md`). Realistic by construction. |
 | margin | TARGET ÷ llama.cpp − 1. Reported as is, with no cap and no label. |
@@ -104,6 +104,23 @@ Per metric it then prints a row:
 0.95 on any metric, the roofline undercounts. Check for a missed sliding window, KV
 sharing, a gathered table counted in full, or a wrong expert count. Fix that before
 setting targets.
+
+**Devices.** `--device` selects the hardware preset (`roofline.DEVICES`); `--bw` / `--flops` still override it.
+llama.cpp's MMQ prefill uses int8 WMMA (twice the f16 rate), so on prefill it can approach or pass an f16 ceiling. `make_info.py roofline --device` takes the same names and records the preset's name on the card.
+
+| `--device` | GPU | bw (streaming) | flops (dense f16 WMMA) |
+|---|---|---|---|
+| `strix-halo` (default) | Ryzen AI Max+ 395, gfx1151, LPDDR5X-8000 256-bit | 216 GB/s (256 peak) | 59 TFLOP/s (40 CU x 512 x 2.9 GHz) |
+| `radeon-r9700` | Radeon AI PRO R9700, gfx1201, 32 GB GDDR6 20 Gbps 256-bit | 600 GB/s (640 peak; llama.cpp decode already streams 569) | 95.7 TFLOP/s (64 CU x 512 x 2.92 GHz; 191 is the sparse figure) |
+| `radeon-r9700s` | R9700S: the DevLab `radeon-r9700` runners (same memory, 2.35 GHz max clock) | 600 GB/s | 77.0 TFLOP/s (64 CU x 512 x 2.35 GHz) |
+
+The efficiencies (`EFF`, `STRETCH`, `LAYER_US`) were all measured on Strix Halo. On another device, TARGET is an
+out-of-sample estimate until a row in `reference/calibration.md` measures that device. On the R9700 in
+particular: the fixed per-layer cost weighs about 3x more against a 3x faster weight stream, so expect a lower decode
+efficiency for small models. The device also has 32 GB of VRAM, which the card's `--memory_bytes` must fit.
+RDNA4 (gfx12) WMMA takes `vector<8xf16>` lhs/rhs fragments, where RDNA3 (gfx11) takes `vector<16xf16>`. The starter
+kit's GEMM and flash-prefill kernels are written for gfx11, so hrx-loom 0.1.0 rejects them on gfx1201 (AMDGPU/023).
+A port for the R9700 needs gfx12 variants of those kernels before any of these ceilings can be approached.
 
 ## 3. Pick the targets: realistic, achievable, impressive
 
