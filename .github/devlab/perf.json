@@ -1,14 +1,13 @@
 {
- "_comment": "R9700 validation (Qwen3-0.6B, runner r9700): llama.cpp ROCm (lemonade gfx120X b1375) and Vulkan (b12211) baselines on the R9700, and the package rebuilt from this branch ('build': {}) with Loom steps and the kernel tests. Until the gfx12 twins land, Loom registration fails on gfx1201 (WMMA kernels): the Loom steps then end as ERROR within seconds. The 'ktest on R9700' job template is documented at the top of .github/scripts/devlab_perf.sh.",
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "_comment": "MoE grouped-GEMM twins numerical check on the R9700 (make_kernel_tests moe_prefill cases launch K_rdna4 through template.apply)",
+ "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
  "runner": "r9700",
  "memory_bytes": 30000000000,
  "kit": null,
  "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "r9700-q06",
+   "name": "ktest-qwen3moe",
    "variants": [
     {
      "name": "dual",
@@ -16,11 +15,20 @@
     }
    ],
    "steps": [
-    "llama:1",
-    "llama@vulkan.np1:1",
-    "llamac4",
-    "perf:dual:1",
-    "c4:dual",
+    "ktest:dual"
+   ]
+  },
+  {
+   "name": "ktest-gptoss",
+   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
+   "kit": "gpt-oss",
+   "variants": [
+    {
+     "name": "dual",
+     "build": {}
+    }
+   ],
+   "steps": [
     "ktest:dual"
    ]
   }
