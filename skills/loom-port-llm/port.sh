@@ -178,7 +178,7 @@ ref=$(echo "${REFERENCE:-auto}" | tr 'A-Z' 'a-z'); refpick=""; [ -z "$catalog" ]
 case "$ref" in off|0|no|none) ref=off;; auto|on|1|yes) ;; *) refpick=${REFERENCE};; esac
 if [ "$ref" != off ]; then
   step "1b reference (category A loom-fun packages)"
-  "$T" -I "$here/find_reference.py" rank "$gguf" --repo "$repo" -o reference.json > reference.log 2>&1 || echo "reference lookup failed (reference.log); continuing from scratch"
+  "$T" -I "$here/find_reference.py" rank "$gguf" --repo "$repo" ${refpick:+--top 100} -o reference.json > reference.log 2>&1 || echo "reference lookup failed (reference.log); continuing from scratch"
   grep -v "^REFERENCE_RESULT" reference.log | head -8
   ex=$("$T" -c "
 import json, sys; r = json.load(open('reference.json')); p = '$refpick'
