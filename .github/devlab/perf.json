@@ -1,10 +1,10 @@
 {
- "_comment": "endgame: LFM3-1.7B regenerated card vs ROCm+Vulkan same runner.",
+ "_comment": "endgame: Bolt-E4B regenerated card vs ROCm+Vulkan same runner.",
  "jobs": [
   {
-   "name": "lfm3",
-   "card": "loom-fun/bartowski-LFM3-1.7B-loom",
-   "memory_bytes": 13000000000,
+   "name": "bolt",
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "memory_bytes": 33000000000,
    "kit": null,
    "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
