@@ -212,9 +212,7 @@
    "memory_bytes": 5000000000,
    "kit": null,
    "llamacpp": "b1374",
-   "features": [
-    "draft"
-   ]
+   "features": []
   },
   {
    "repo": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
@@ -222,9 +220,7 @@
    "memory_bytes": 8000000000,
    "kit": null,
    "llamacpp": "b1374",
-   "features": [
-    "draft"
-   ]
+   "features": []
   },
   {
    "repo": "loom-fun/bartowski-Qwen2.5-7B-Instruct-loom",
@@ -280,9 +276,7 @@
    "memory_bytes": 29000000000,
    "kit": null,
    "llamacpp": "b1369",
-   "features": [
-    "draft"
-   ]
+   "features": []
   },
   {
    "repo": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
@@ -364,8 +358,7 @@
    "kit": null,
    "llamacpp": "b1374",
    "features": [
-    "vision",
-    "draft"
+    "vision"
    ]
   },
   {
@@ -503,7 +496,6 @@
    "kit": null,
    "llamacpp": "b1369",
    "features": [
-    "draft",
     "thinking-toggle"
    ]
   },
@@ -514,7 +506,6 @@
    "kit": null,
    "llamacpp": "b1370",
    "features": [
-    "draft",
     "thinking-toggle"
    ]
   },
@@ -536,7 +527,6 @@
    "kit": null,
    "llamacpp": "b1373",
    "features": [
-    "draft",
     "thinking-toggle"
    ]
   },
