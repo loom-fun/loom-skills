@@ -196,12 +196,12 @@ DEVICES = {
     # LPDDR5X-8000, 256-bit (256 GB/s peak); 40 CUs x 512 x 2.9 GHz
     "strix-halo": dict(name='AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151)', bw=216e9, flops=59e12),
     # GDDR6 20 Gbps, 256-bit (640 GB/s peak), 32 GB; 64 CUs x 512 x 2.92 GHz = 95.7 TFLOP/s dense (191 with sparsity).
-    # bw: 600 GB/s (94 % of peak). llama.cpp's own decode on the DevLab R9700S already streams 569 GB/s
-    # (Qwen2.5-32B Q4_K_M, Vulkan b12211, 29.3 tok/s x 19.4 GB per token = 569 GB/s), so a streaming kernel reaches at least that.
-    "radeon-r9700": dict(name="AMD Radeon AI PRO R9700 (gfx1201, 32 GB)", bw=600e9, flops=95.7e12),
+    # bw: 613 GB/s, measured on a DevLab R9700S: Loom streaming read of 1 GiB, loom-benchmark dispatch_complete
+    # (.github/wincheck/bw on branch wincheck/r9700-bw; copy 610). llama.cpp decode reaches 569 (Qwen2.5-32B Q4_K_M, Vulkan).
+    "radeon-r9700": dict(name="AMD Radeon AI PRO R9700 (gfx1201, 32 GB)", bw=613e9, flops=95.7e12),
     # The AMD DevLab Dispatch `radeon-r9700` runners: R9700S, the same Navi 48 / 640 GB/s memory at a 2.35 GHz
     # max engine clock (rocminfo): 64 x 512 x 2.35 GHz = 77.0 TFLOP/s dense f16
-    "radeon-r9700s": dict(name="AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz)", bw=600e9, flops=77.0e12),
+    "radeon-r9700s": dict(name="AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz)", bw=613e9, flops=77.0e12),
 }
 DEVICE_KEY = "strix-halo"
 DEVICE, BW, FLOPS = DEVICES[DEVICE_KEY]["name"], DEVICES[DEVICE_KEY]["bw"], DEVICES[DEVICE_KEY]["flops"]
