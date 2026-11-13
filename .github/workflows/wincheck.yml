@@ -1,0 +1,74 @@
+name: wincheck
+# Windows red-team of loom-fun cards: on AMD DevLab Dispatch Windows Strix Halo runners, run each card's Quick start
+# verbatim (Windows PowerShell) and spot-check its Loom claims (.github/wincheck/wincheck.py). One matrix job per
+# model in .github/wincheck/targets.json. Runs on a push to a wincheck/** branch.
+on:
+  push:
+    branches: ["wincheck/**", "!wincheck/base"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wincheck-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  models:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        run: |
+          python3 -c "import json; m=json.load(open('.github/wincheck/targets.json'))['models']; print('matrix='+json.dumps({'repo': m}))" >> "$GITHUB_OUTPUT"
+
+  check:
+    needs: models
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.models.outputs.matrix) }}
+    name: ${{ matrix.repo }}
+    runs-on: [self-hosted, devlab-dispatch, radeon-r9700]
+    timeout-minutes: 360
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_HUB_DOWNLOAD_TIMEOUT: "120"
+      HF_HUB_ETAG_TIMEOUT: "60"
+      PYTHONUTF8: "1"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/wincheck
+            skills/loom-benchmark
+            skills/loom-port-llm/starter
+      - name: GPU probe
+        run: |
+          uname -a; cat /etc/os-release | head -3; nproc; free -g; df -h "$RUNNER_TEMP" | tail -1
+          (rocminfo 2>/dev/null | grep -E "Marketing Name|Name: +gfx|Compute Unit|Max Clock" | head -20) || true
+          for d in /sys/class/drm/card*/device; do [ -f $d/mem_info_vram_total ] && echo "$d vram_total=$(cat $d/mem_info_vram_total) vis=$(cat $d/mem_info_vis_vram_total)"; done || true
+          (rocm-smi --showproductname --showmeminfo vram --showclocks 2>/dev/null | head -40) || true
+          ls /opt/rocm*/bin 2>/dev/null | head -50 || true
+      - name: r9700check
+        run: |
+          echo "SLUG=${REPO#*/}" >> "$GITHUB_ENV"
+          export HF_HOME="$RUNNER_TEMP/hf"
+          python3 --version
+          python3 .github/wincheck/wincheck.py "$REPO" "$RUNNER_TEMP/wincheck-out" --long
+        env:
+          REPO: ${{ matrix.repo }}
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r9700-${{ env.SLUG }}
+          path: ${{ runner.temp }}/wincheck-out
+          retention-days: 30
+      - name: clean up
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/wincheck-work" "$RUNNER_TEMP/wincheck-out" "$RUNNER_TEMP/hf"
