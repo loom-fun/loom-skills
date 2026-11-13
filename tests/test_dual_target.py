@@ -132,3 +132,19 @@ class KernelTestSelectTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ApplyDirTests(unittest.TestCase):
+    def test_cross_file_launch_fails_loudly(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "lib.loom").write_text(FIXTURE[:FIXTURE.index("command.program.def")])
+            (Path(d) / "prog.loom").write_text(FIXTURE[FIXTURE.index("command.program.def"):])
+            with self.assertRaisesRegex(ValueError, "defined in program/lib.loom"):
+                dual_target.apply_dir(d)
+
+    def test_dir_rewrites_defining_file_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "llm.loom").write_text(FIXTURE)
+            (Path(d) / "control.loom").write_text("func.def @f() {\n  func.return\n}\n")
+            self.assertEqual(dual_target.apply_dir(d), ["llm.loom"])
+            self.assertEqual((Path(d) / "control.loom").read_text(), "func.def @f() {\n  func.return\n}\n")

@@ -30,7 +30,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import EVIDENCE_ID, load_json, programs_sha256, write_json  # noqa: E402
+from card_lib import EVIDENCE_ID, GPUS, load_json, programs_sha256, write_json  # noqa: E402
 from make_info import acceptance  # noqa: E402
 
 GH_REPO = "loom-fun/loom-skills"
@@ -63,7 +63,7 @@ def finished_artifacts(run_id, dest):
     return [os.path.join(dest, n) for n in sorted(names)]
 
 
-def evidence(found, rid, hrx_loom=None):
+def evidence(found, rid, hrx_loom=None, gpu=None):
     """The evidence file of a run's finished jobs for one card: found = [(summary.json, gates.json, job dir, job URL)].
     Every gate of every job; the spec gate's acceptance (gates_spec.log, else gates.out) as a spec_acceptance-only
     session stamped with the job's programs_sha256, the latest job's that reports one."""
@@ -79,16 +79,17 @@ def evidence(found, rid, hrx_loom=None):
             session = {"date": (g.get("ts") or "")[:10] or None, "source": src,
                        "runs": {"decode_prefill": None, "streams4": None}, "commands": [],
                        "programs_sha256": s.get("programs_sha256"), "metrics": {"spec_acceptance": {"loom": acc}}}
-    ev = {"evidence": EVIDENCE_ID, "gates": gates}
+    ev = {"evidence": EVIDENCE_ID, **({"gpu": gpu} if gpu else {}), "gates": gates}
     if session:
         ev["performance"] = {"session": session}
     return ev
 
 
-def perf_identity(d):
+def perf_identity(d, gpu=None):
     """(device, hrx_loom) of a devlab-perf job's artifact directory, from what it recorded: runner.txt (the runner's
     host name) and install.log (install_loom.sh's "hrx-loom VERSION from SOURCE, hrx-system SHA" line and the CI
-    artifact id). The runner is an AMD Strix Halo DevLab Dispatch machine; no finer hardware description is recorded.
+    artifact id). The runner is an AMD Strix Halo DevLab Dispatch machine (gpu radeon-r9700: an R9700S one, whose
+    GPU name is the preset's); no finer hardware description is recorded.
     Either is None when the files are missing. Pass them to make_info.py perf --device/--hrx-loom."""
     def read(name):
         try:
@@ -97,6 +98,8 @@ def perf_identity(d):
             return ""
     runner = read("runner.txt").strip()
     device = ({"cpu": f"AMD Strix Halo (DevLab Dispatch runner {runner})", "gpu": None, "os": "Linux"} if runner else None)
+    if device and gpu == "radeon-r9700":
+        device = {"cpu": f"DevLab Dispatch runner {runner}", "gpu": "AMD Radeon AI PRO R9700S (gfx1201)", "os": "Linux"}
     if device:
         device = {k: v for k, v in device.items() if v}
     log = read("install.log")
@@ -113,6 +116,7 @@ def main(argv=None):
     ap.add_argument("repo", nargs="?")
     ap.add_argument("--identity", metavar="DIR", help="instead of gates: write the device and hrx-loom identity of the "
                     "devlab-perf job artifact DIR (runner.txt, install.log) to --device-out and --hrx-out")
+    ap.add_argument("--gpu", choices=sorted(GPUS), help="the GPU of the job's runner (default strix-halo); recorded in the evidence")
     ap.add_argument("--device-out")
     ap.add_argument("--hrx-out")
     ap.add_argument("--run", help="this nightly-gates run instead of the latest one with a finished job for the card")
@@ -122,7 +126,7 @@ def main(argv=None):
     ap.add_argument("-o")
     a = ap.parse_args(argv)
     if a.identity:
-        device, hrx = perf_identity(a.identity)
+        device, hrx = perf_identity(a.identity, a.gpu)
         for path, v in ((a.device_out, device), (a.hrx_out, hrx)):
             if path and v:
                 write_json(path, v)
@@ -160,7 +164,7 @@ def main(argv=None):
     else:
         sys.exit(f"no finished nightly-gates job for {a.repo}" + (f" in run {a.run}" if a.run else ""))
 
-    ev = evidence(found, rid, load_json(a.hrx_loom) if a.hrx_loom else None)
+    ev = evidence(found, rid, load_json(a.hrx_loom) if a.hrx_loom else None, a.gpu)
     gates, session = ev["gates"], (ev.get("performance") or {}).get("session")
     write_json(a.o, ev)
     print(f"wrote {a.o}: run {rid}, " + ", ".join(f"{x['level']}:{x['name']}={x['status']}" for x in gates)
