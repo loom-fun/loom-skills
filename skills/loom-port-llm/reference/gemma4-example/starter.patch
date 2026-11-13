@@ -905,8 +905,8 @@
 +    g = DIMS[d]
 +    D, DL, RD, THETA, UNROLL, ROPE_CUT, KVH = d, d // 32, g["rd"], g["theta"], g["unroll"], g["cut"], g["kvh"]
 +    G = QH // KVH
-+    KVW = KVH * d * 2
-+    KVF = kv_fn_name(KVW, d)
++    KVF = kv_fn_name(KVH * d * 2, d)
++    KVW = KVH * d * 2 if KVF != "g_kv_offset" else POS_BYTES   # position stride within a page: the kind's own width only when dense
 +    try:
 +        return fn(*args)
 +    finally:

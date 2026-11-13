@@ -38,6 +38,18 @@
     "consistency:6:llama",
     "gates:dev"
    ]
+  },
+  {
+   "name": "e2b",
+   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "memory_bytes": 30000000000,
+   "build": {},
+   "steps": [
+    "ktest",
+    "pairs:3",
+    "consistency:6:llama",
+    "gates:dev"
+   ]
   }
  ]
 }
