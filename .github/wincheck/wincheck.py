@@ -206,6 +206,14 @@ while time.time() - t0 < a.ready_timeout:
         save()
     time.sleep(5)
 if not model_id:
+    for path, fn in (("/logz", "logz.txt"), ("/v1/status", "status.json"), ("/metrics", "metrics.txt")):
+        try:
+            with urllib.request.urlopen(URL + path, timeout=20) as r:
+                open(os.path.join(OUT, fn), "wb").write(r.read())
+        except Exception as e:
+            open(os.path.join(OUT, fn), "w").write(f"{type(e).__name__}: {e}")
+    print("== logz tail:\n" + "\n".join(tail(os.path.join(OUT, "logz.txt"), 60)), flush=True)
+    print("== status: " + open(os.path.join(OUT, "status.json"), errors="replace").read()[:3000], flush=True)
     step("serve_ready", False, exited=srv.poll(), seconds=round(time.time() - t0), tail=tail(serve_log, 40))
     stop_server()
     sys.exit(1)
