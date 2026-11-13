@@ -280,6 +280,11 @@ def main():
             kinds.append(("assist", [1, 2, 3, 4]))   # Gemma-4 assistant (gemma4 family)
         if os.environ.get("TUNE_NGRAM", "0") == "1":   # opt-in only: the benchmark rule allows no n-gram drafting (loom-benchmark)
             kinds.append(("ngram", [1, 2, 3, 5]))   # prompt lookup needs no drafter; depth 1: LFM3-Omni-2B decode_32k 122 vs 108 at depth 2
+    # The benchmark rule decides the drafter by what is published for this exact model (loom-benchmark data/drafting_classification.json),
+    # not by speed: TUNE_KIND=mtp|dflash|assist restricts the search to that method (with TUNE_REQUIRE_DRAFT=1 it ships it); a
+    # model classified "none" is built with SPEC=off.
+    if os.environ.get("TUNE_KIND"):
+        kinds = [k for k in kinds if k[0] == os.environ["TUNE_KIND"]]
     sys.path.insert(0, STARTER)
     import catalog
     if catalog.find(STARTER):   # a catalog package drafts with its MTP head or not at all (catalog.py)

@@ -13,14 +13,12 @@
 #                  "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF;
 #                                                                     {hf:OWNER/REPO/FILE}: that Hub file, e.g. a drafter llama.cpp loads and the card doesn't ship)
 #    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
-#   APPLES TO APPLES (user rule): llama.cpp (ROCm and Vulkan) runs in the SAME drafting configuration as the published Loom
-#   package on every 1-stream row (benchmark rule: 4 streams undrafted on every engine): "matched" (card/matched_spec.py) = the package's draft kind/depth mapped to llama.cpp (dflash ->
-#   draft-dflash + the same drafter GGUF, mtp -> draft-mtp, assist -> draft-mtp + the assistant GGUF, ngram -> ngram-simple,
-#   n-max = Loom's depth); a package that does not draft gets no drafting on llama.cpp either. Never a best-of mix of drafting
-#   on and off. Single-stream rows run on 1 slot (llama@rocm.np1 / llama@vulkan.np1), streams4 on 4 (llamac4@rocm.nodraft / llamac4@vulkan.perslot.nodraft: streams4 never drafts).
-#   Streams4 on Loom: variant {"name": "nodraft", "execution": {"draft_depth": 0}} (the shipped package loaded with drafting off,
-#   the load-time exception the rule allows at 4 streams), step c4:nodraft. A model whose package does not draft: job field
-#   "llama_spec_probe" + steps llama@rocm.np1.probe:2:-:N (N = 1..3) next to llama@rocm.np1:2 (undrafted): drafted faster -> rebuild.
+#   FINAL BENCHMARK RULE (RULE_BASELINES.md): one drafting choice per model, identical on Loom and llama.cpp (ROCm, Vulkan), from
+#   data/drafting_classification.json (MTP head in the GGUF > exact-model DFlash/assistant drafter > none; never ngram): "matched"
+#   (the default) = that choice as llama.cpp arguments (card/matched_spec.py); Loom keeps its tuned depth, llama.cpp the drafter's
+#   recommended n-max. The 1-stream rows load each engine once with it (llama@rocm.np1 / llama@vulkan.np1); streams4 loads both
+#   without drafting (llamac4@rocm.nodraft / llamac4@vulkan.perslot.nodraft; Loom: variant {"name": "nodraft", "execution":
+#   {"draft_depth": 0}}, step c4:nodraft). A server that cannot run the drafter fails its step = "not supported", never replaced.
 #   "llama_spec_vulkan": a Vulkan-only override, for a drafter the Vulkan build cannot run (record it with --differs).
 #   A job may override card, kit, memory_bytes, llamacpp, llamacpp_vulkan, vulkan_kv and llama_spec: one experiment can
 #   measure several cards.
@@ -240,11 +238,8 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   # depth; none when the package does not draft). Any other value is an explicit override (a drafter the card doesn't ship...).
   local spec; spec=$(q "print(j['llama_spec'] if 'llama_spec' in j else e.get('llama_spec') or 'matched')")
   [ "$BK" = vulkan ] && { local vs; vs=$(q "print(j.get('llama_spec_vulkan') or e.get('llama_spec_vulkan') or '')"); [ -n "$vs" ] && spec=$vs; }
-  [ "$spec" = matched ] && spec=$("$T" -I "$here/skills/loom-benchmark/scripts/card/matched_spec.py" "$card/llm_config.json")
+  [ "$spec" = matched ] && { spec=$("$T" -I "$here/skills/loom-benchmark/scripts/card/matched_spec.py" "$repo") || { echo "FAIL: $repo is not in data/drafting_classification.json"; return 1; }; }
   spec=${spec//'{drafter}'/$drafter}
-  # .probe: the drafted-vs-undrafted check of a model whose package does not draft: job field llama_spec_probe (the best
-  # drafter: MTP > DFlash {hf:...} > ngram-simple), n-max from the step (llama@rocm.np1.probe:1:-:2)
-  [[ $MODS == *probe* ]] && spec=$(q "print(j.get('llama_spec_probe') or e.get('llama_spec_probe') or '')")
   [[ $MODS == *nodraft* ]] && spec=""   # .nodraft: the streams4 servers (benchmark rule: 4 streams run undrafted on every engine, Loom's occ_min gate too)
   [ -n "${1:-}" ] && spec=$(echo "$spec" | sed -E "s/--spec-draft-n-max [0-9]+/--spec-draft-n-max $1/")
   local h; for h in $(echo "$spec" | grep -oE '\{hf:[^}]+\}' | sort -u); do   # {hf:OWNER/REPO/FILE}, fetched once per runner
