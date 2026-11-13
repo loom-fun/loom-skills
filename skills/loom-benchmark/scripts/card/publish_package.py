@@ -101,15 +101,30 @@ def cmd_prepare(a):
     print(f"prepared {out}: origins {json.dumps(origins)}; lock: {len(lock.get('files', []))} files")
 
 
+STRAY = re.compile(r"^(ev_[\w.-]+\.json|\.loom-fetch\.lock)$")   # working files, never part of a card repo
+
+
+def check_card_text(out):
+    """Refuse to publish a card whose free text is not template output or a short factual caveat."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import card_lib
+    info = card_lib.load_json(os.path.join(out, "info.json"))
+    card_lib.require_valid(info, os.path.join(out, "info.json"))
+    if info.get("report") != "generated":
+        sys.exit("info.json: only a generated REPORT.md is published (an attached, hand-written report is narrative)")
+
+
 def cmd_upload(a):
     from huggingface_hub import HfApi
+    check_card_text(a.out)
     api = HfApi()
     api.create_repo(a.repo, repo_type="model", exist_ok=True)
     if a.card_only:
         missing = [f for f in CARD if not os.path.isfile(os.path.join(a.out, f))]
         if missing:
             sys.exit(f"card files missing in {a.out}: {missing}")
-        api.upload_folder(repo_id=a.repo, folder_path=a.out, allow_patterns=list(CARD),
+        strays = [f for f in api.list_repo_files(a.repo) if STRAY.match(f)]
+        api.upload_folder(repo_id=a.repo, folder_path=a.out, allow_patterns=list(CARD), delete_patterns=strays or None,
                           commit_message=a.message or "Card", parent_commit=a.parent_commit)
         print(f"card uploaded to https://huggingface.co/{a.repo}")
         return

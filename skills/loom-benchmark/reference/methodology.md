@@ -44,10 +44,19 @@ two or three lines; if they disagree with this file, this file wins and the othe
 
 ## Card text and publishing
 
-10. **Card text.** `render_card.py` generates a short Methodology section (5-8 bullets, same template on every card) from the card's
-    own data: what is compared, the drafting choice and each engine's depth, 4 streams undrafted, what the rows mean (with the tie
-    band), the server arguments, every "not supported" cell with its reason. Never hand-write it; no paragraph about configurations
-    that "differ". The hrx-loom install is pinned to the version the card recorded.
+10. **Card text.** A public card holds only what `render_card.py` generates, plus short caveats. Allowed: the title and first
+    paragraph (with "Learn more on the Loom ecosystem website"), Quick start (pinned install, `loom-fetch`, `loom-serve`), the
+    performance table with its generated Methodology bullets (5-8, same template on every card: what is compared, the drafting
+    choice and each engine's depth, 4 streams undrafted, what the rows mean with the tie band, the server arguments, every "not
+    supported" cell with its reason, the measurement sessions) and footnotes, Features, Correctness (a gate without evidence says
+    "no evidence"; one measured on other programs says "not re-run on this package"), Files, versions and sources, and, only for
+    a paused card, Next steps. `REPORT.md` is generated from `info.json` (never attached or hand-written). Never hand-write a
+    paragraph, and never put history in text: no "I/we", "tried", "previously", "ruled out", ideas, run/PR/agent chatter, local
+    paths, or what a card does not do beyond the standard. A caveat is one short factual line (`differs`, at most 240 characters,
+    one sentence): `not supported: <reason>`, `MTP head present but not yet supported by Loom (<reason>)`, `llama.cpp loads <repo>
+    (a conversion of the same <drafter> drafter)`, a gate not run / not re-run. `card_lib.free_text_errors` (run by `validate`,
+    `render_card.py`, `publish_package.py upload`) and `card/test/check.sh` enforce this. The hrx-loom install is pinned to the
+    version the card recorded.
 11. **Publishing.** `make_info.py build PKG -o PKG/info.json` (always `-o`), `publish_package.py upload ... --parent-commit SHA`,
     then fetch the live `info.json` and confirm the new session id (`performance.sessions[-1].source`) and the gates'
     `programs_sha256` equal the package's before saying "published". Publish partial progress; never fake a cell.
