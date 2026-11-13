@@ -28,6 +28,8 @@ FF_UNIFORM = len(set(FFL)) == 1
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "draft"))
 import gen_draft  # noqa: E402  speculative decoding (LLM_DRAFT, set by build.py): verify + drafter programs
 MTP_LAYER = None
+from gen_gdn import single_form  # noqa: E402
+single_form(gen_draft.DRAFT["kind"] if gen_draft.enabled() else None)
 if gen_draft.enabled() and gen_draft.DRAFT["kind"] == "mtp":
     MTP_LAYER = CFG["mtp"]["layers"][0]
     _w = CFG["tensors"].get(f"blk.{MTP_LAYER}.ffn_gate.weight", {"shape": [0, FF]})["shape"][1]   # MoE block: no dense FFN

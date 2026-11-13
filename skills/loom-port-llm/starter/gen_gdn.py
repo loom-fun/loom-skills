@@ -566,6 +566,15 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
 PF_SPAN = 64   # spans of at least this many tokens (the GEMM epoch shape) run the prefill form
 
 
+def single_form(draft_kind):
+    """MTP-drafted hybrids keep one recurrence form (8 x 4) for every span. With the decode/prefill split (#350) Sage-A1.5
+    (MTP depth 3) failed the agent gate's history reuse at one turn ('cached 0'); the 8 x 4 form everywhere passes every
+    gate (run 43351934089). The other drafters (DFlash, n-gram) passed with the split. The environment still wins."""
+    if draft_kind == "mtp":
+        os.environ.setdefault("GDN_ROW_LANES", "8")
+        os.environ.setdefault("GDN_COLS", "4")
+
+
 def recurrence_pf(G):
     """True when prefill epochs launch g_gdn_recurrence_pf (the 8 x 4 split) beside the decode form g_gdn_recurrence."""
     RL = _row_lanes(G["DK"], G["DV"])
