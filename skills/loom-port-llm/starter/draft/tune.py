@@ -82,10 +82,11 @@ NO_LOSS = 0.98
 # drafting off from this causal position on, so short context keeps the drafting gain (Ornith-1.5-35B depth 3: short rows
 # 118 vs 62 tok/s, 16k 44.9 vs 53.5). Below the long row's prompt, above the short rows'. TUNE_CTX_MAX=0 skips the retry.
 CTX_GATE = int(os.environ.get("TUNE_CTX_MAX", "3500"))   # runtime-adaptive, so allowed by the benchmark rule
-# Benchmark rule (Nov 13; loom-benchmark "one drafting rule"): every card drafts on its 1-stream rows and runs 4 streams undrafted
-# (occupancy gate, occ_min 2). So tune always ships its best drafter (never "none" while one passes the exact and concurrency
-# checks) and does not try ungated 4-stream drafting. TUNE_RULE=0 restores the free choice (none, occ_min 0, as before).
-RULE = os.environ.get("TUNE_RULE", "1") != "0"
+# Benchmark rule (Nov 13; loom-benchmark): 4 streams run undrafted on every engine, so tune never tries ungated 4-stream
+# drafting (occ_min stays 2). A no-draft package is fine when llama.cpp is also fastest undrafted; when it isn't, the card is
+# rebuilt with TUNE_REQUIRE_DRAFT=1: tune then ships its best drafter (never "none" while one passes the exact and concurrency
+# checks).
+RULE = os.environ.get("TUNE_REQUIRE_DRAFT", "0") == "1"
 
 
 def measure(url, model, chat, context=0, rows=1):
@@ -393,7 +394,7 @@ def main():
         # real: Muse-Glimmer depth 3, 74 vs 48.6 tok/s) is better ungated. Build the ungated package (occ_min 0) and
         # measure ONLY its streams4 per depth (the single-stream rows are identical by construction); a depth takes the
         # better streams4 and its occ_min goes to cfg["drafter"].
-        if rows_n >= 2 and base_rows.get("streams4") and not RULE:
+        if rows_n >= 2 and base_rows.get("streams4") and os.environ.get("TUNE_UNGATED", "0") == "1":   # off: benchmark rule
             upkg = os.path.join(work, f"pkg_tune_{kind}_u")
             sh(*build, upkg, *common, "--draft", kind, env=dict(os.environ, SPEC_OCC_MIN="0"))
             ucard = json.load(open(os.path.join(upkg, "model.json")))
