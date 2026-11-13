@@ -2063,7 +2063,9 @@ cases = [add_partial(c) for c in cases]
 # 7. The grouped MoE GEMMs alone (g_moe_ggu_* gate/up with a gathered A, g_moe_gdn_* down on sorted rows), launched with a
 # hand-made tile table: a full 64-row tile, a partial one, an unused tile (expert -1) and a 5-row tile, three experts, on the
 # real expert tensors. Needed where a kit has no prefill router in its tests (lfm2moe) and cheap everywhere else; plain
-# experts only (the fused / bias / swiglu_oai variants are covered by the chain's moe_prefill case).
+# experts only (the fused / bias / swiglu_oai variants are covered by the chain's moe_prefill case). Tolerance: the Q4_K
+# dequant runs in F16 (code * scale + min, cancelling), so silu(g) * u of a 20x input is good to a few percent of the mean |act|
+# (identical on gfx11 and gfx12, DevLab runs 43522159314 / 43525204171); a wrong fragment layout is off by 100 %.
 if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1" and os.environ.get("MOE_GEMM_TESTS", "1") == "1" \
         and not cfg["moe"].get("gate_up_fused") and not cfg["moe"].get("expert_bias") and cfg["moe"].get("act") != "swiglu_oai":
     M7 = cfg["moe"]; E7, KU7, FE7 = M7["experts"], M7["used"], M7["ffn"]
@@ -2130,8 +2132,8 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1" and os.environ.get
   %ys = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
   kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %ti, %rm, %x, %s, %wg, %wu, %act) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t7}x{H}xf16>, tensor<{t7}x2xf32>, {gt7}, {ut7}, tensor<{mr}x{FE7}xf32>)
   kernel.launch @g_moe_gdn_{fd}_k{FE7}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %ti, %rm, %a16, %sr, %wd, %ys) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE7}xf16>, tensor<{mr}x2xf32>, {dt7}, tensor<{mr}x{H}xf32>)
-  check.expect.close actual(%act) expected(%eact) atol({0.03 * float(np.abs(act_ref).mean()):.3g}) rtol(3.0e-2) nan(different) : tensor<{mr}x{FE7}xf32>
-  check.expect.close actual(%ys) expected(%eys) atol({0.03 * float(np.abs(ys_ref).mean()):.3g}) rtol(3.0e-2) nan(different) : tensor<{mr}x{H}xf32>
+  check.expect.close actual(%act) expected(%eact) atol({0.15 * float(np.abs(act_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{FE7}xf32>
+  check.expect.close actual(%ys) expected(%eys) atol({0.05 * float(np.abs(ys_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{H}xf32>
   check.return
 }}
 """)
