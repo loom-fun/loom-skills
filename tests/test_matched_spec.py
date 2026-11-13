@@ -37,11 +37,10 @@ class MatchedSpecTests(unittest.TestCase):
         self.assertFalse(any(row_states({}).values()))
 
     def test_rule_violations(self):
-        ok = {"draft": {"kind": "ngram", "depth": 2}, "drafter": {"ctx_max": 0, "occ_min": 2}}
-        self.assertEqual(rule_violations(ok), [])
-        self.assertEqual(rule_violations({"draft": {"kind": "ngram", "depth": 2}}), [])
+        ok = {"draft": {"kind": "ngram", "depth": 2}, "drafter": {"ctx_max": 3500, "occ_min": 0}}
+        self.assertEqual(rule_violations(ok), [])   # ctx_max / occ_min are runtime gates: allowed
         self.assertEqual(len(rule_violations({})), 1)
-        self.assertEqual(len(rule_violations(dict(ok, drafter={"ctx_max": 3500, "occ_min": 0}))), 1)   # ctx_max is allowed
+        self.assertEqual(rule_violations({}, undrafted_ok=True), [])   # llama.cpp is best undrafted too
 
 
 if __name__ == "__main__":

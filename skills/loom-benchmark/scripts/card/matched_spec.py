@@ -36,28 +36,25 @@ def matched_spec(cfg):
 
 
 # THE per-row drafting table (benchmark rule, Nov 13), ONE value per row applied identically to Loom, llama.cpp ROCm and
-# llama.cpp Vulkan: every 1-stream row (decode, decode_2k, decode_32k, prefill_*) drafts; streams4 does not.
+# llama.cpp Vulkan: every 1-stream row (decode, decode_2k, decode_32k, prefill_*) drafts (one config for all of them, runtime
+# gates like ctx_max allowed); streams4 is loaded with drafting off on every engine (a load-time setting).
 ROWS = {"decode": 1, "decode_2k": 1, "decode_32k": 1, "prefill_1k": 1, "prefill_2k": 1, "prefill_4k": 1, "prefill_8k": 1,
         "prefill_16k": 1, "prefill_32k": 1, "streams4": 4}   # row -> concurrent streams
 
 
 def row_states(cfg):
-    """{row: True|False}: whether drafting is on for that row, for BOTH engines. A card with no draft is a rule violation
-    (rule_violations), not a table of False."""
+    """{row: True|False}: whether drafting is loaded for that row, for BOTH engines (all False for a no-draft model)."""
     on = bool(matched_spec(cfg))
     return {row: on and streams == 1 for row, streams in ROWS.items()}
 
 
-def rule_violations(cfg):
-    """Why the package as shipped does not follow the rule (empty: it does): it must draft and gate drafting off at
-    4 streams (drafter.occ_min between 1 and 4, default 2). The context gate (ctx_max) is runtime-adaptive and allowed."""
-    out = []
-    if not matched_spec(cfg):
-        out.append("no drafting")
-    g = cfg.get("drafter") or {}
-    if "occ_min" in g and not 1 <= int(g.get("occ_min") or 0) <= 4:
-        out.append(f"occ_min {g.get('occ_min')}: drafting is not gated off at 4 streams")
-    return out
+def rule_violations(cfg, undrafted_ok=False):
+    """Why the package as shipped does not follow the rule (empty: it does). Consistency: Loom and llama.cpp use the same
+    drafting choice per model, so a package that does not draft is a violation unless llama.cpp is also best undrafted on
+    the same runner (undrafted_ok: the card's recorded drafted-vs-undrafted probe, devlab_perf's llama@...probe steps).
+    The context gate (drafter.ctx_max) and occupancy gate are runtime-adaptive and allowed; streams4 is measured with
+    drafting off at load time on every engine (no package setting needed)."""
+    return ["no drafting, and llama.cpp is faster drafted"] if not matched_spec(cfg) and not undrafted_ok else []
 
 
 def drafter_file(cfg):
@@ -73,6 +70,6 @@ if __name__ == "__main__":
     if "--rows" in sys.argv:
         print(json.dumps(row_states(c)))
     elif "--violations" in sys.argv:
-        print("; ".join(rule_violations(c)))
+        print("; ".join(rule_violations(c, "--undrafted-ok" in sys.argv)))
     else:
         print(matched_spec(c))

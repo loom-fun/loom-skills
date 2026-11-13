@@ -363,22 +363,24 @@ tuning table (`bench/draft_tune.json`: decode tok/s per method and depth, includ
 acceptance rate from the `spec` gate log. Decode numbers with drafting depend on the text: report them on the
 standard workloads and say so.
 
-**One drafting rule for both engines (apples to apples).** Every card, every engine (Loom, llama.cpp ROCm, llama.cpp Vulkan):
+**One drafting rule for both engines (apples to apples).** Per model, Loom and llama.cpp (ROCm, Vulkan) make the SAME drafting
+choice (on/off, drafter, depth); the choice may differ between models.
 
-| rows | drafting |
-|---|---|
-| decode, decode_2k, decode_32k, prefill_1k..32k (1 stream) | ON, same drafter, same depth |
-| streams4 | OFF |
+| rows | Loom | llama.cpp |
+|---|---|---|
+| decode, decode_2k, decode_32k, prefill_1k..32k | the shipped package, drafting on (its runtime gates, `ctx_max`/`occ_min`, may act) | ONE 1-slot server config for all these rows, drafting on: same drafter, n-max = Loom's depth |
+| streams4 | the shipped package loaded with drafting off (`draft_depth` 0 override, variant `nodraft`, step `c4:nodraft`) | separate 4-slot server, no `--spec-*` flags |
 
-The drafter is the card's best available method (MTP if the GGUF has NextN, else DFlash if a drafter GGUF exists, else ngram:
-every card drafts). Depth = Loom's tuned depth = llama.cpp's `--spec-draft-n-max`. Loom may ship a context gate (`ctx_max`: runtime-adaptive, allowed)
-and ships `occ_min` 2 (4 streams run undrafted); llama.cpp's streams4 server has no `--spec-*` flags.
+No load-time per-metric toggling except at 4 streams. Drafter = the card's best available method (MTP if the GGUF has NextN, else
+DFlash if a drafter GGUF exists, else ngram). A model may run undrafted on both engines when no-draft is also llama.cpp's best:
+the job measures llama.cpp drafted vs undrafted once on the same runner (`llama_spec_probe`, steps `llama@rocm.np1.probe:2:-:N`
+for N = 1..3 next to `llama@rocm.np1:2`); if llama.cpp is faster drafted, rebuild Loom with that drafter and depth.
 `card/matched_spec.py` is the single table (`row_states`, `rule_violations`) and derives llama.cpp's arguments (dflash ->
 `draft-dflash` + the same drafter GGUF, mtp -> `draft-mtp`, assist -> `draft-mtp` + the assistant GGUF, ngram -> `ngram-simple`).
-`devlab_perf.sh` runs it: `llama@rocm.np1` / `llama@vulkan.np1` (1 slot, drafting) and `llamac4@rocm.nodraft` /
-`llamac4@vulkan.perslot.nodraft` (4 slots, none); `llama_spec` absent = matched. A backend that cannot run the drafter fails its
-step: record it on the card (`--differs`) and use the closest drafting config (`llama_spec` / `llama_spec_vulkan` override), never a
-silent no-draft fallback. No best-of-configurations. `llama_spec_tune.py`'s table stays a diagnostic. References never draft.
+`devlab_perf.sh`: `llama@rocm.np1` / `llama@vulkan.np1` (1 slot) and `llamac4@rocm.nodraft` / `llamac4@vulkan.perslot.nodraft`;
+`llama_spec` absent = matched. A backend that cannot run the drafter fails its step: record it on the card (`--differs`) and use the
+closest drafting config (`llama_spec` / `llama_spec_vulkan` override), never a silent no-draft fallback. No best-of-configurations;
+every baseline records its two server configs. `llama_spec_tune.py`'s table stays a diagnostic. References never draft.
 
 **Run the audit first** (from `bench/`):
 ```bash
