@@ -33,6 +33,9 @@ ap.add_argument("--skip-perf", action="store_true")
 ap.add_argument("--ready-timeout", type=int, default=2400)
 ap.add_argument("--c4-runs", type=int, default=2)
 a = ap.parse_args()
+MEMOVR = None
+if "@" in a.repo:  # probe: loom-fun/x@BYTES replaces the Quick start's --memory_bytes
+    a.repo, MEMOVR = a.repo.split("@")
 
 OUT = os.path.abspath(a.outdir)
 os.makedirs(OUT, exist_ok=True)
@@ -149,6 +152,9 @@ if not serve_line:
     step("serve_line", False, error="no loom-serve line in the Quick start")
     sys.exit(1)
 
+if MEMOVR:
+    serve_line = re.sub(r"--memory_bytes=\d+", "--memory_bytes=" + MEMOVR, serve_line)
+    R["memory_override"] = MEMOVR
 serve_log = os.path.join(OUT, "loom-serve.log")
 slog = open(serve_log, "w", encoding="utf-8", errors="replace")
 slog.write(f"> {serve_line}\n")

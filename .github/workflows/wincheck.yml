@@ -49,7 +49,7 @@ jobs:
             skills/loom-port-llm/starter
       - name: wincheck
         run: |
-          $slug = "${{ matrix.repo }}".Split("/")[1]
+          $slug = "${{ matrix.repo }}".Split("/")[1].Replace("@","-")
           "SLUG=$slug" >> $env:GITHUB_ENV
           python --version
           python .github/wincheck/wincheck.py "${{ matrix.repo }}" "$env:RUNNER_TEMP\wincheck-out"
