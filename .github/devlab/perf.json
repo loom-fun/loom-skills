@@ -1,12 +1,16 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "verify32k: ggml Qwen3-4B card perf after the #451 regen (d3 + ctx gate): Loom active wait vs llama.cpp ROCm DFlash and Vulkan nospec, same runner.",
+ "card": "loom-fun/ggml-org-Qwen3-4B-loom",
+ "memory_bytes": 25000000000,
+ "kit": null,
+ "llamacpp": "b1374",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "q3-4b",
+   "card": "loom-fun/ggml-org-Qwen3-4B-loom",
+   "memory_bytes": 25000000000,
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
    "variants": [
     {
      "name": "card"
@@ -18,23 +22,11 @@
     "c4:card",
     "llama:2",
     "llama:2:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "fn-mtp-b",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
+    "llamac4",
+    "llama@vulkan.np1.nospec:2",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
