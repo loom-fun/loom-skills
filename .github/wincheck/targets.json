@@ -1,1 +1,1 @@
-{"models": ["loom-fun/unsloth-Qwen3-0.6B-loom"]}
+{"models": ["loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom", "loom-fun/unsloth-gpt-oss-20b-loom", "loom-fun/ggml-org-LFM2.5-24B-A2B-loom", "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom"]}
