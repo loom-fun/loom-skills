@@ -23,22 +23,22 @@
       "PRUNE_SHARED": "0"
      },
      "build_args": [
-      "--draft-depth",
-      "0"
+      "--draft",
+      "none"
      ]
     },
     {
      "name": "ndp",
      "build_args": [
-      "--draft-depth",
-      "0"
+      "--draft",
+      "none"
      ]
     },
     {
      "name": "l15",
      "build_args": [
-      "--draft-depth",
-      "0"
+      "--draft",
+      "none"
      ],
      "config": {
       "layers": 15
