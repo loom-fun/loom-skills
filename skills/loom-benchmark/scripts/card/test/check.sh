@@ -141,7 +141,7 @@ row = [l for l in r.splitlines() if l.startswith('| decode tok/s')][0]
 assert row.count('|') == 7 and '—' not in row.split('|')[2] and '—' not in row.split('|')[3] and '—' not in row.split('|')[4], row
 rows = [l for l in r.split('## Performance')[1].split('\\n- ')[0].splitlines() if l.startswith('|')]
 assert len(rows) > 5 and all(l.count('|') == 7 for l in rows), rows
-assert 'Measured on AMD DevLab Dispatch Strix Halo runners' in r and 'Runs per value: decode and prefill' in r
+assert 'Measured on AMD DevLab Dispatch Strix Halo runners' in r and 'Values are the mean of' in r and '**Methodology**' in r
 assert 'device not recorded' not in r and 'hrx-loom unknown' not in r, 'footnote'
 assert 'X2-LA03-S03-D01' in r and '0.2.0.dev0' in r, 'device/sdk'" "$tmp/dlonly" \
   && echo "OK   devlab-only: a card from a devlab-perf job renders one table with the runner and SDK" \
@@ -269,7 +269,7 @@ assert c.perf_flags(vk, programs=p) == c.perf_flags(base, programs=p) and \
     {k: v[0]['loom'] for k, v in c.card_metrics(vk).items()} == {k: v[0]['loom'] for k, v in c.card_metrics(base).items()}" \
   "$C" "$tmp/flint/info.json" "$tmp/vk/info.json" "$tmp/vk_new.json" "$F/pkg" \
   && cmp -s "$tmp/vk_new.json" "$tmp/vk_same.json" \
-  && grep -q '| llama.cpp Vulkan |' "$tmp/vk/README.md" && grep -q 'Differs from llama.cpp: vision projector' "$tmp/vk/README.md" \
+  && grep -q '| llama.cpp Vulkan |' "$tmp/vk/README.md" && grep -q 'Not supported / not measured: llama.cpp Vulkan: vision projector' "$tmp/vk/README.md" \
   && grep -q '^## llama.cpp Vulkan: DevLab Dispatch run 5005' "$tmp/vk/REPORT.md" \
   && echo "OK   vulkan: a baseline-only session renders as one more column and changes no card value or flag" \
   || { echo "FAIL vulkan: the second backend's session does not validate, render or leave the card's values alone"; bad=1; }
