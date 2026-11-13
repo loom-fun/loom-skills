@@ -1,5 +1,5 @@
 {
- "_comment": "endgame regen of Bolt-E4B on main with its own card as reference, its unsloth mmproj and context 131072.",
+ "_comment": "Bolt regen 4: as regen 3 but tune restricted to the DFlash drafter (assist d3 decoded 87 vs the card's DFlash 100 tok/s).",
  "jobs": [
   {
    "name": "bolt-e4b",
@@ -8,7 +8,8 @@
    "model_id": "nemotron-3.5-bolt-e4b",
    "env": {
     "VISION_REPO": "unsloth/NVIDIA-Nemotron-3.5-Bolt-E4B-GGUF",
-    "CONTEXT_LENGTH": "131072"
+    "CONTEXT_LENGTH": "131072",
+    "TUNE_KIND": "dflash"
    }
   }
  ]
