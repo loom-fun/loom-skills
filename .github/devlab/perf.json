@@ -1,35 +1,11 @@
 {
- "_comment": "Small cards regenerated from main: same-runner active-wait Loom vs llama.cpp ROCm (ngram-simple) and Vulkan (1 slot, no draft), 3 rounds.",
- "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
- "memory_bytes": 5000000000,
+ "_comment": "1.5B A/B same runner: published regen1 (d1) vs main-built d1/d2 and no-draft; ROCm + Vulkan.",
+ "card": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
+ "memory_bytes": 8000000000,
  "kit": null,
  "llamacpp": "b1374",
  "llamacpp_vulkan": "b12211",
  "jobs": [
-  {
-   "name": "q25-05b",
-   "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
-   "memory_bytes": 5000000000,
-   "kit": null,
-   "llamacpp": "b1374",
-   "llama_spec": "--spec-type ngram-simple",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:card",
-    "llama:3",
-    "llama:3:long",
-    "llamac4",
-    "llama@vulkan.np1.nospec:3",
-    "llama@vulkan.np1.nospec:3:long",
-    "llamac4@vulkan.perslot.nospec"
-   ]
-  },
   {
    "name": "q25-15b",
    "card": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
@@ -40,36 +16,52 @@
    "variants": [
     {
      "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:card",
-    "llama:3",
-    "llama:3:long",
-    "llamac4",
-    "llama@vulkan.np1.nospec:3",
-    "llama@vulkan.np1.nospec:3:long",
-    "llamac4@vulkan.perslot.nospec"
-   ]
-  },
-  {
-   "name": "hyperclovax",
-   "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
-   "memory_bytes": 24000000000,
-   "kit": null,
-   "llamacpp": "b1374",
-   "llama_spec": "--spec-type ngram-simple",
-   "variants": [
+    },
     {
-     "name": "card"
+     "name": "r2d1",
+     "build": {},
+     "ref": "origin/main",
+     "build_args": [
+      "--draft",
+      "ngram",
+      "--draft-depth",
+      "1"
+     ]
+    },
+    {
+     "name": "r2d2",
+     "build": {},
+     "ref": "origin/main",
+     "build_args": [
+      "--draft",
+      "ngram",
+      "--draft-depth",
+      "2"
+     ]
+    },
+    {
+     "name": "nod",
+     "build": {},
+     "ref": "origin/main",
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     }
    ],
    "steps": [
     "perf:card:3",
     "perf:card:3:long",
     "c4:card",
+    "perf:r2d1:3",
+    "perf:r2d1:3:long",
+    "c4:r2d1",
+    "perf:r2d2:3",
+    "perf:r2d2:3:long",
+    "c4:r2d2",
+    "perf:nod:3",
+    "perf:nod:3:long",
+    "c4:nod",
     "llama:3",
     "llama:3:long",
     "llamac4",
