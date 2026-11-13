@@ -7,35 +7,10 @@
  "llamacpp": "b1375",
  "jobs": [
   {
-   "name": "kt-q06",
+   "name": "kt-q06-strix",
+   "runner": "strix",
+   "memory_bytes": 50000000000,
    "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "variants": [
-    {
-     "name": "dual",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:dual"
-   ]
-  },
-  {
-   "name": "kt-g4e2b",
-   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
-   "variants": [
-    {
-     "name": "dual",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:dual"
-   ],
-   "kit": "gemma4"
-  },
-  {
-   "name": "kt-q38",
-   "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
    "variants": [
     {
      "name": "dual",
