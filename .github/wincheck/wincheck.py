@@ -198,6 +198,18 @@ while time.time() - t0 < a.ready_timeout:
         break
     except Exception:
         pass
+    try:   # a failed registration never recovers: stop waiting (the server itself stays up with no model)
+        failed = [m for m in seen["/v1/status"]["data"] if (m.get("loom") or {}).get("registration") == "failed"]
+    except Exception:
+        failed = []
+    if failed:
+        lm = failed[0]["loom"]
+        comp = lm.get("compilation") or {}
+        R["registration_error"] = {"message": (lm.get("error") or {}).get("message"), "errors": comp.get("errors"),
+                                   "kernels": comp.get("kernels"),
+                                   "diagnostics": sorted({d.get("message", "") for d in comp.get("diagnostics") or []})}
+        print("== registration failed: " + json.dumps(R["registration_error"])[:3000], flush=True)
+        break
     if time.time() - last_print > 30:   # what the server says while the model is not listed (it was invisible before)
         last_print = time.time()
         entry = {"s": round(time.time() - t0), **{k: (json.dumps(v)[:1500] if not isinstance(v, str) else v[:300]) for k, v in seen.items()}}
