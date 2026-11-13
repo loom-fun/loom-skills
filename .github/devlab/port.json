@@ -1,7 +1,17 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "flash2 regen of Bolt-E4B and LFM3-1.7B on main with #480.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "bolt-e4b",
+   "spec": "nvidia/NVIDIA-Nemotron-3.5-Bolt-E4B-4GB:Nemotron-3.5-Bolt-E4B-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "model_id": "nemotron-3.5-bolt-e4b"
+  },
+  {
+   "name": "lfm3-1p7b",
+   "spec": "bartowski/LFM3-1.7B-GGUF:LFM3-1.7B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-LFM3-1.7B-loom",
+   "model_id": "LiquidAI/LFM3-1.7B"
+  }
  ]
 }
