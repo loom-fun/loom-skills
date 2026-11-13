@@ -1012,7 +1012,7 @@ def bfly_store(vals, p, store, presorted=False):
     return "\n".join(t)
 
 
-def mv(fmt, K, R=16, TG=1, swiglu=False, suffix="", iq=False, pair=False):
+def _mv(fmt, K, R=16, TG=1, swiglu=False, suffix="", iq=False, pair=False, chunk=None):
     """Decode matrix-vector: a workgroup covers one K row with one lane per
     32-value group (lanes = groups rounded up to a wave), R output rows and TG
     tokens. Each lane keeps its x group for the TG tokens in registers and
@@ -1032,10 +1032,7 @@ def mv(fmt, K, R=16, TG=1, swiglu=False, suffix="", iq=False, pair=False):
     name = f"g_mv_{fmt}_k{K}" + ("_swiglu" if swiglu else "_pair" if pair else "") + (f"_t{TG}" if TG > 1 else "") + ("_q8" if iq else "") + suffix
     # int8 variants above MV_CHUNK tokens run the token chunks one after another in the workgroup: registers stay at
     # the chunk's level and later chunks re-read this workgroup's weight rows from cache, not DRAM.
-    # A full 1024-lane workgroup (K of 31745..32768) must fit 8 waves per SIMD: 16 tokens of int8 x groups need >192
-    # VGPRs there (AMDGPU/052 on gfx1151 and gfx1201), so it takes chunks of 8; each token is computed on its own, so
-    # the values are identical.
-    CHK = min(TG, int(os.environ.get("MV_CHUNK", "8" if lanes >= 1024 else "16"))) if iq else TG   # chunks of 8 measured no faster
+    CHK = min(TG, chunk or int(os.environ.get("MV_CHUNK", "16"))) if iq else TG   # chunks of 8 measured no faster
     NCH = TG // CHK
     assert NCH * CHK == TG
     PERM = iq and nw == 2 and BFLY_PERM and CHK >= 8
@@ -1221,6 +1218,21 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
 }
 """)
     return "\n".join(L)
+
+
+def mv(fmt, K, R=16, TG=1, swiglu=False, suffix="", iq=False, pair=False):
+    """_mv(), plus a gfx12 twin `<name>_rdna4` where gfx12 must differ. A full 1024-lane workgroup (K of 31745..32768)
+    must fit 8 waves per SIMD (<=192 VGPRs); the 16-token int8 kernel needs 207-208, which gfx1201 rejects
+    (AMDGPU/052). The twin takes the tokens in chunks of 8 (each token is computed independently, so the values are
+    identical); the gfx11 kernel keeps its text. dual_target.py selects between them."""
+    text = _mv(fmt, K, R, TG, swiglu, suffix, iq, pair)
+    groups = K // 32
+    if iq and TG == 16 and groups <= 1024 and (groups + 31) // 32 * 32 >= 1024 and \
+            os.environ.get("LOOM_RDNA4", "1").strip().lower() not in ("0", "off", "no", "false"):
+        name = re.search(r'kernel\.def export\("([^"]+)"\) @', text).group(1)
+        twin = _mv(fmt, K, R, TG, swiglu, suffix, iq, pair, chunk=8).replace(f'export("{name}") @{name}(', f'export("{name}_rdna4") @{name}_rdna4(')
+        text += "\n" + twin
+    return text
 
 
 def mv_wide(fmt, K, R=16, TG=1, swiglu=False, suffix=""):
