@@ -27,6 +27,7 @@ jobs:
           sparse-checkout: |
             .github/wincheck
             skills/loom-benchmark
+            skills/loom-port-llm/starter
       - name: probe
         run: |
           set -x

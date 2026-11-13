@@ -1,3 +1,4 @@
+target.decl @device
 amdgpu.target<gfx11-generic> @rdna3
 amdgpu.target<gfx12-generic> @rdna4
 
@@ -26134,7 +26135,7 @@ template.def<@sel20_g_gemm_q4_k_store> target(@rdna4) @sel20_g_gemm_q4_k_store_r
   template.return
 }
 
-command.program.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {
+command.program.def public target(@device) @llm_advance() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {
   %t = config.get @llm.tokens : index
   %spans = config.get @llm.spans : index
   %context = config.get @llm.context : index

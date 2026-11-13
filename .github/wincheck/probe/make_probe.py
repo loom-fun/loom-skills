@@ -62,9 +62,11 @@ for l in out:
         res.append(f"{ind}template.apply<@{sigs[key]}>({', '.join(g + a)}) : ({', '.join(gt + at)})")
     else:
         res.append(l)
-head = ["amdgpu.target<gfx11-generic> @rdna3", "amdgpu.target<gfx12-generic> @rdna4", ""]
+head = ["target.decl @device", "amdgpu.target<gfx11-generic> @rdna3", "amdgpu.target<gfx12-generic> @rdna4", ""]
 body = "\n".join(res)
 # kernels and templates must precede the command program: insert before it
+ci = body.index("command.program.def")
+body = body.replace("command.program.def public @", "command.program.def public target(@device) @")
 ci = body.index("command.program.def")
 body = body[:ci] + ("\n".join(stubs) if mode == "stub" else "") + "\n" + "\n".join(decls) + "\n\n" + body[ci:]
 open(dst, "w").write("\n".join(head) + "\n" + body)
