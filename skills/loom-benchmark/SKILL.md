@@ -363,14 +363,22 @@ tuning table (`bench/draft_tune.json`: decode tok/s per method and depth, includ
 acceptance rate from the `spec` gate log. Decode numbers with drafting depend on the text: report them on the
 standard workloads and say so.
 
-**The baseline drafts too (drafting vs drafting).** `qualify.sh` runs `scripts/llama_spec_tune.py` before the
-llama.cpp baseline: the same drafters Loom has (`--spec-type draft-mtp` for a GGUF with an MTP block,
-`--spec-type draft-dflash --spec-draft-model DRAFTER` for the DFlash drafter `find_drafter.py` found) at
-`--spec-draft-n-max` 1-4 / 3, 5, 7, its n-gram drafters (`ngram-simple`, `ngram-mod`) for every model, plus none,
-each timed on the same requests as Loom's `tune.py`; the fastest
-(>= 3 % over none) goes to `bench/llamacpp_spec.json`, and `llamacpp_server.sh` adds it (`LLAMA_SPEC`) to every
-llama.cpp performance run in qualify and finalize. References (goldens, gates) never draft. A build that rejects
-a method is recorded as failed in the table and that method is skipped; the report shows the table.
+**One drafting rule for both engines (apples to apples).** Every card, every engine (Loom, llama.cpp ROCm, llama.cpp Vulkan):
+
+| rows | drafting |
+|---|---|
+| decode, decode_2k, decode_32k, prefill_1k..32k (1 stream) | ON, same drafter, same depth |
+| streams4 | OFF |
+
+The drafter is the card's best available method (MTP if the GGUF has NextN, else DFlash if a drafter GGUF exists, else ngram:
+every card drafts). Depth = Loom's tuned depth = llama.cpp's `--spec-draft-n-max`. Loom ships `ctx_max` 0 (no context gate: `tune.py`
+no longer produces one) and `occ_min` 2 (4 streams run undrafted); llama.cpp's streams4 server has no `--spec-*` flags.
+`card/matched_spec.py` is the single table (`row_states`, `rule_violations`) and derives llama.cpp's arguments (dflash ->
+`draft-dflash` + the same drafter GGUF, mtp -> `draft-mtp`, assist -> `draft-mtp` + the assistant GGUF, ngram -> `ngram-simple`).
+`devlab_perf.sh` runs it: `llama@rocm.np1` / `llama@vulkan.np1` (1 slot, drafting) and `llamac4@rocm.nodraft` /
+`llamac4@vulkan.perslot.nodraft` (4 slots, none); `llama_spec` absent = matched. A backend that cannot run the drafter fails its
+step: record it on the card (`--differs`) and use the closest drafting config (`llama_spec` / `llama_spec_vulkan` override), never a
+silent no-draft fallback. No best-of-configurations. `llama_spec_tune.py`'s table stays a diagnostic. References never draft.
 
 **Run the audit first** (from `bench/`):
 ```bash

@@ -221,9 +221,10 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
      published since: re-read and rebuild).
 3. A card with metrics missing or measured on other programs (`sweep`, `remeasure`): one `devlab-perf` job per card
    (required: it is the only source of card performance) (`.github/devlab/perf.json`: card, memory_bytes, kit and llamacpp from `nightly-models.json`,
-   llama_spec from the card's llama.cpp arguments, its drafter as `{drafter}` or, when llama.cpp used another file,
-   `{hf:OWNER/REPO/FILE}`; variant `{"name": "card"}`, steps `perf:card:2 perf:card:2:long c4:card llama:2 llama:2:long
-   llamac4`; several cards go in one experiment, one job each with its own card fields), then
+   llama_spec omitted = `matched`: llama.cpp drafts exactly like the package (same method, drafter and depth; none if the
+   package does not draft; see loom-benchmark "apples to apples"), an explicit `llama_spec` only overrides it (`{drafter}` = the
+   card's drafter, `{hf:OWNER/REPO/FILE}` a Hub file, e.g. an MTP head the card doesn't ship); variant `{"name": "card"}`, steps `perf:card:2 perf:card:2:long c4:card llama@rocm.np1:2 llama@rocm.np1:2:long
+   llamac4@rocm.nodraft` (files `perf_llamacpp-rocm.np1_nN.jsonl`, `c4_llamacpp-rocm_nN.txt`); several cards go in one experiment, one job each with its own card fields), then
    `make_info.py perf --loom-jsonl perf_card.jsonl --llama-jsonl perf_llamacpp_nN.jsonl --c4-loom c4_card.txt
    --c4-llama c4_llamacpp_nN.txt --package DIR --source-kind devlab --run ID --url JOB_URL --device JOB_DEVICE.json
    --hrx-loom JOB_HRX.json --baseline-version llamacpp-rocm/BUILD --baseline-args "$(cat llamacpp_args.txt)"
@@ -232,7 +233,7 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
    the job recorded; `none` if absent; `--source-kind devlab` is perf's default, `--source-kind local` is refused), and
    rebuild the card as above.
    **Vulkan baseline** (every card, one job each; the same workloads and `llama_spec` as the ROCm baseline): job fields
-   `llamacpp_vulkan: "b12211"`, variant `{"name": "card"}`, steps `llama@vulkan:2 llama@vulkan:2:long llamac4@vulkan`
+   `llamacpp_vulkan: "b12211"`, variant `{"name": "card"}`, steps `llama@vulkan.np1:2 llama@vulkan.np1:2:long llamac4@vulkan.perslot.nodraft` (Vulkan drafts like the package on 1-stream rows too)
    (add the ROCm and Loom steps to the same job for a same-runner comparison); at the card's own `memory_bytes`. Ingest:
    `make_info.py perf --backend vulkan --llama-jsonl perf_llamacpp-vulkan_nN.jsonl --c4-llama c4_llamacpp-vulkan_nN.txt
    --baseline-version b12211 --baseline-args "$(cat llamacpp_args-vulkan.txt)" --baseline-sha256 "$(cat
