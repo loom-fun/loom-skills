@@ -8,7 +8,7 @@ byte-identical files.
 
   make_info.py build PKG --repo loom-fun/NAME [--generator-commit SHA] [--evidence EV.json ...]
                          [--memory-bytes N] [--output DIR] [--license ID] [--report generated|attached]
-                         [--from-info OLD.json] [--next-steps FILE] [--status paused|active] [-o info.json]
+                         [--from-info OLD.json] [--next-steps FILE] [--status paused|active] [-o PKG/info.json]
       PKG holds model.json (and model.json.lock, llm_config.json): card values the package already implies
       (tags, the default --output, a memory_bytes in model.json) are dropped. Evidence files apply in order.
       --generator-commit: the loom-skills commit of these card scripts (default: this checkout's HEAD, or
@@ -312,6 +312,7 @@ def cmd_build(a):
     if a.o == "-":
         sys.stdout.write(out)
     else:
+        a.o = a.o or os.path.join(a.pkg, "info.json")
         with open(a.o, "w", encoding="utf-8", newline="\n") as f:
             f.write(out)
         print(f"wrote {a.o}", file=sys.stderr)
@@ -689,7 +690,7 @@ def main(argv=None):
                    help="probe: ask Hugging Face what the upstream model has (vision: an mmproj or vision_config; audio: audio_* "
                    "config keys; an older package: the GGUF chat template), for the features that are n/a when it has none; "
                    "none: offline, they are not determined")
-    b.add_argument("-o", default="info.json")
+    b.add_argument("-o", help="where to write the card (default: PKG/info.json, the file render_card.py and publish_package.py read; never the current directory)")
     p = sub.add_parser("perf")
     p.add_argument("--perf-log")
     p.add_argument("--loom-label", default="final")
