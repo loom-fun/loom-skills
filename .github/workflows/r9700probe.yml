@@ -16,7 +16,7 @@ jobs:
       matrix:
         gpu: [strix-halo, radeon-r9700]
     name: probe ${{ matrix.gpu }}
-    runs-on: ["${{ matrix.gpu }}", devlab-dispatch, self-hosted]
+    runs-on: ["${{ matrix.gpu }}", devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 90
     defaults:
       run:

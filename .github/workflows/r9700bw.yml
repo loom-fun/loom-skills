@@ -13,9 +13,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gpu: [strix-halo, radeon-r9700]
+        gpu: [strix-halo]
     name: bw ${{ matrix.gpu }}
-    runs-on: ["${{ matrix.gpu }}", devlab-dispatch, self-hosted]
+    runs-on: ["${{ matrix.gpu }}", devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 30
     defaults:
       run:
