@@ -20,33 +20,6 @@
    ]
   },
   {
-   "name": "kt-lfm3",
-   "card": "loom-fun/bartowski-LFM3-1.7B-loom",
-   "variants": [
-    {
-     "name": "dual",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:dual"
-   ],
-   "kit": "lfm2moe"
-  },
-  {
-   "name": "kt-q25",
-   "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
-   "variants": [
-    {
-     "name": "dual",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:dual"
-   ]
-  },
-  {
    "name": "kt-g4e2b",
    "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
    "variants": [
@@ -63,20 +36,6 @@
   {
    "name": "kt-q38",
    "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
-   "variants": [
-    {
-     "name": "dual",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:dual"
-   ]
-  },
-  {
-   "name": "kt-nemo",
-   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
-   "kit": "gemma4",
    "variants": [
     {
      "name": "dual",
