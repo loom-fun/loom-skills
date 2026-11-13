@@ -21,7 +21,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: pick
-        run: python3 -c "import json; m=json.load(open('.github/wincheck/targets.json'))['models']; print('matrix='+json.dumps({'repo': m}))" >> "$GITHUB_OUTPUT"
+        run: |
+          python3 -c "import json; m=json.load(open('.github/wincheck/targets.json'))['models']; print('matrix='+json.dumps({'repo': m}))" >> "$GITHUB_OUTPUT"
 
   check:
     needs: models
