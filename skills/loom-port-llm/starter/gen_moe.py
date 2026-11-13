@@ -1221,8 +1221,8 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
             "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
     if bias or (act and act != "silu"):
         text = _gemm_bias_act(text, mode, N, E, bias, act)
-    import rdna4_port
-    return text + "\n" + rdna4_port.twin(text) if rdna4_port.enabled() else text   # the gfx12 twin K_rdna4 beside K
+    import gen_gemm_rdna4
+    return text + "\n" + gen_gemm_rdna4.twin(text) if gen_gemm_rdna4.enabled() else text   # the gfx12 twin K_rdna4 beside K
 
 
 def combine_sorted(H, KU, acc=False):

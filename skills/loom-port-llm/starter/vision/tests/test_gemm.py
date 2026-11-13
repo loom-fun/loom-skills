@@ -14,6 +14,9 @@ for fmt, (M, K, N) in [("f16", (128, 768, 2304)), ("bf16", (64, 1536, 8960)), ("
     ref = x @ wf.T
     c = V.Case(f"t_{nm}", d); m = c.lit(M); k = c.lit(K); n = c.lit(N)
     xa = c.arr(x); sc = c.out((M, 2)); x16 = c.out((M, K), "f16"); wa = c.arr(raw.reshape(-1)); y = c.out((M, N))
-    c.launch(rs, [m], [m, k, xa, sc, x16]); c.launch(nm, [m, n], [m, k, n, x16, sc, wa, y])
+    c.launch(rs, [m], [m, k, xa, sc, x16]); c.launch(nm + ('_rdna4' if __import__('os').environ.get('VISION_TEST_RDNA4') else ''), [m, n], [m, k, n, x16, sc, wa, y])
     c.expect(y, ref, 2e-2 * np.abs(ref).max() / 10, 2e-2); cases.append(c)
-V.run("\n".join(src), cases, d)
+if __import__("os").environ.get("VISION_TEST_RDNA4"):   # the gfx12 twins (K_rdna4, target(@rdna4)) need the target declarations of dual_target.py
+    src.insert(0, "target.decl @device\namdgpu.target<gfx11-generic> @rdna3\namdgpu.target<gfx12-generic> @rdna4\n")
+ok = V.run("\n".join(src), cases, d)
+sys.exit(0 if ok else 1)

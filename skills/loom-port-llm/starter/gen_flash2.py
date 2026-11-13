@@ -688,6 +688,11 @@ if PARTIAL:
     E.append("  }\n")
     text = text[:i0] + "\n".join(E) + text[i1:]
 # (NF = 16: the straight-line loop of 16 output fragments needs more registers than the budget allows, so it keeps its masked branch)
+import subprocess  # noqa: E402
+R4 = os.environ.get("FLASH2_ARCH") == "rdna4"   # the gfx12 twin (flash2_rdna4.py); FLASH2_ARCH unset: the gfx11 kernel
+if R4:
+    from flash2_rdna4 import to_rdna4, twin_names
+    text = to_rdna4(text)
 if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and NF <= 8:   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     text = peel_last_tile(text)
@@ -713,7 +718,7 @@ if DEEP and not ROLE:   # the main kernel's run adds the deep pairs' kernel (PAR
     import subprocess
     subprocess.run([sys.executable, os.path.abspath(__file__)], check=True, env=dict(
         os.environ, FLASH2_TS="2", FLASH2_ROLE="deep", FLASH2_TS_DEPTH=str(DEEP), FLASH2_OUT=out_path + ".deep"))
-    text += f"""
+    text += ("" if R4 else f"""
 // The tile at FIRST and its partner (the other tile of its aligned pair of positions, 2 PAIR and 2 PAIR + 1 for
 // position tiles) form a pair for {P}_attention_flash2_deep: both inside one span, the pair at key position >= {DEEP}.
 func.def inline @{P}_pair_deep(%info: buffer, %tokens: index, %first: index) -> (i1) {{
@@ -737,6 +742,12 @@ func.def inline @{P}_pair_deep(%info: buffer, %tokens: index, %first: index) -> 
   %both = scalar.andi %partner, %far : i1
   func.return %both : i1
 }}
-""" + open(out_path + ".deep").read()
+""") + open(out_path + ".deep").read()
     os.remove(out_path + ".deep")
+if R4 and not ROLE:
+    text = twin_names(text)
+elif not R4 and not ROLE and os.environ.get("LOOM_RDNA4", "1") != "0":   # the gfx12 twins K_rdna4 (flash2_rdna4.py) follow the kernels
+    subprocess.run([sys.executable, os.path.abspath(__file__)], check=True, env=dict(os.environ, FLASH2_ARCH="rdna4", FLASH2_OUT=out_path + ".rdna4"))
+    text += open(out_path + ".rdna4").read()
+    os.remove(out_path + ".rdna4")
 open(out_path, "w", newline="\n").write(text)

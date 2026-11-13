@@ -973,6 +973,7 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 # Prefill GEMMs (gen_gemm.py): y = (x16 . W^T) * inv per row, x16 the f16 row-scaled activations and inv the
 # row's inverse scale (g_row_scale_f16's contract); swiglu: silu(gate) * up. One tensor per (format, K) the
 # model's prefill uses: the 64-, 128- (_m128) and 256-row (_m256) kernels, two row tiles each.
+from formats import DECODES as _GEMM_FMTS  # noqa: E402
 def gemm_cases():
     seen_g = set()
     for li in range(cfg["layers"]):
@@ -983,10 +984,22 @@ def gemm_cases():
             fmt = T[name].tensor_type.name.lower()
             up = f"blk.{li}.ffn_up.weight"
             sw = nm_ == "ffn_gate" and up in T and T[up].tensor_type == T[name].tensor_type
-            if fmt not in IQ_FMTS or (fmt, sw) in seen_g:   # the formats with GEMM kernel tests (formats.ICODES)
+            if fmt not in (_GEMM_FMTS if os.environ.get("KTEST_GEMM_ALL", "0") not in ("", "0") else IQ_FMTS) or (fmt, sw) in seen_g:   # the formats with GEMM kernel tests (formats.ICODES; KTEST_GEMM_ALL=1: every GEMM format, e.g. bf16/f32/q4_0 on a new device)
                 continue
             seen_g.add((fmt, sw))
             yield name, fmt, sw
+    if os.environ.get("KTEST_GEMM_ALL", "0") not in ("", "0"):   # formats no named projection above has (gemma4's bf16 / f32 per-layer matrices ...): the smallest tile-able weight of each
+        pick = {}
+        for name, t in T.items():
+            fmt = t.tensor_type.name.lower()
+            if (fmt, False) in seen_g or fmt not in _GEMM_FMTS or not name.endswith(".weight") or len(t.shape) != 2:
+                continue
+            k_, n_ = int(t.shape[0]), int(t.shape[1])
+            if k_ % 256 == 0 and n_ % 64 == 0 and n_ >= 128 and (fmt not in pick or k_ * n_ < pick[fmt][1]):
+                pick[fmt] = (name, k_ * n_)
+        for fmt, (name, _) in sorted(pick.items()):
+            seen_g.add((fmt, False))
+            yield name, fmt, False
 if os.environ.get("GEMM_TESTS", "1") == "1":
     for name, fmt, swiglu in gemm_cases():
         W = deq(name); n, K = W.shape
@@ -1016,7 +1029,7 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
             if swiglu:
                 save(tag + "_u", Ur); wdecl += f'  %u = check.file.read.npy path("{tag}_u.npy") : {ty(Ur)}\n'; wargs += ", %u"; wtys += ", " + ty(Ur)
             tol = 3.0e-2 * float(np.abs(yv).std() + 1e-6)
-            cases.append(f"""check.case public @{tag} {{
+            _case = (f"""check.case public @{tag} {{
   %rows = check.literal value({rows}) : index
   %k = check.literal value({K}) : index
   %n = check.literal value({n_use}) : index
@@ -1029,6 +1042,11 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   check.return
 }}
 """)
+            cases.append(_case)
+            if os.environ.get("KTEST_GEMM_ERR", "0") not in ("", "0"):   # error probe: the case again at 0.3 / 0.1 / 0.03 / 0.01 of its tolerance; the tightest one that passes bounds the error
+                for f in (0.3, 0.1, 0.03, 0.01):
+                    cases.append(_case.replace(f"@{tag} {{", f"@{tag}_x{round(f * 100)} {{", 1).replace(f"atol({tol:.3e}) rtol(1.0e-2)", f"atol({tol * f:.3e}) rtol({1.0e-2 * f:.3e})", 1))
+                cases.append(_case.replace(f"@{tag} {{", f"@{tag}_err {{", 1).replace(f"atol({tol:.3e}) rtol(1.0e-2)", "atol(0.0) rtol(0.0)", 1))
 # 3c. a verify span at long context: ATTN_MT tokens of one row at consecutive positions past ATTN_MT_FROM take the
 # multi-token split-K path (one K/V load per key for the span); K/V written straight into the arena (identity pages).
 # The model's attention scale and sinks are in the reference; a sliding layer (window W) gets its own case.

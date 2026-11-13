@@ -521,6 +521,10 @@ if PARTIAL:
     E.append("  }\n")
     text = text[:i0] + "\n".join(E) + text[i1:]
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_partial") @{P}_attention_flash2_partial(', 1)
+R4 = os.environ.get("FLASH2_ARCH") == "rdna4"   # the gfx12 twin (flash2_rdna4.py); FLASH2_ARCH unset: the gfx11 kernel
+if R4:
+    from flash2_rdna4 import to_rdna4, twin_names
+    text = to_rdna4(text)
 if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO:   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     text = peel_last_tile(text)
@@ -536,4 +540,10 @@ if not PARTIAL:
     os.remove(out_path + ".partial")
 if os.environ.get("FLASH2_NAME"):
     text = text.replace(f"{P}_attention_flash2", os.environ["FLASH2_NAME"])
+if R4 and not PARTIAL:
+    text = twin_names(text)
+elif not R4 and not PARTIAL and os.environ.get("LOOM_RDNA4", "1") != "0":   # the gfx12 twins K_rdna4 (flash2_rdna4.py) follow the kernels
+    subprocess.run([sys.executable, os.path.abspath(__file__)], check=True, env=dict(os.environ, FLASH2_ARCH="rdna4", FLASH2_OUT=out_path + ".rdna4"))
+    text += open(out_path + ".rdna4").read()
+    os.remove(out_path + ".rdna4")
 open(out_path, "w", newline="\n").write(text)

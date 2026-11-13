@@ -1,4 +1,4 @@
-"""MoE grouped-GEMM generators: the gfx12 twin K_rdna4 beside K (rdna4_port.py), K's text unchanged, LOOM_RDNA4=0 = no twin."""
+"""MoE grouped-GEMM generators: the gfx12 twin K_rdna4 beside K (gen_gemm_rdna4.py), K's text unchanged, LOOM_RDNA4=0 = no twin."""
 import os
 import re
 import sys
@@ -38,12 +38,14 @@ class MoeTwins(unittest.TestCase):
             self.assertNotIn("vector<16xf16>, vector<16xf16>, vector<8xf32>", twin)
             self.assertIn("vector.fragment.load<rhs>", twin)
 
-    def test_lfm_kit_twin_has_tight_bounds(self):
+    def test_lfm_kit_bounds_are_tight_in_both_kernels(self):
         fn = lambda: gen_moe_lfm.grouped_gemm("q4_k", "store", 2048, 1536, 64, 4, gen_gemm.gemm)
         off, on = gen(fn, True), gen(fn, False)
         self.assertTrue(on.startswith(off))
-        self.assertIn("1048576), multiple_of(%rows_arg, 64)", off)
-        self.assertNotIn("1048576), multiple_of(%rows_arg, 64)", on[len(off):])
+        for text in (off, on[len(off):]):   # the 2^20 x 2^18 dynamic-stride extent is rejected by the fragment store
+            self.assertNotIn("1048576), multiple_of(%rows_arg, 64)", text)
+            self.assertIn(f"range(%rows_arg, 64, {8192 * 4 + 64 * 64})", text)
+            self.assertIn("range(%n_arg, 64, 2048)", text)
 
 
 if __name__ == "__main__":
