@@ -167,7 +167,7 @@
    "slug": "hyperclovax-seed-text-instruct-1.5b",
    "memory_bytes": 24000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": [
     "draft"
    ]
@@ -211,7 +211,7 @@
    "slug": "qwen2.5-0.5b-instruct",
    "memory_bytes": 5000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1374",
    "features": [
     "draft"
    ]
@@ -221,7 +221,7 @@
    "slug": "qwen2.5-1.5b-instruct",
    "memory_bytes": 8000000000,
    "kit": null,
-   "llamacpp": "b1369",
+   "llamacpp": "b1374",
    "features": [
     "draft"
    ]
