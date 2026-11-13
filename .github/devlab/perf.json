@@ -7,20 +7,6 @@
  "llamacpp": "b1375",
  "jobs": [
   {
-   "name": "ktest-q06",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "variants": [
-    {
-     "name": "dual",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:dual"
-   ],
-   "kit": null
-  },
-  {
    "name": "ktest-q8b",
    "card": "loom-fun/unsloth-Qwen3-8B-loom",
    "variants": [
@@ -35,8 +21,8 @@
    "kit": null
   },
   {
-   "name": "ktest-llama3b",
-   "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
+   "name": "ktest-q8b-strix",
+   "card": "loom-fun/unsloth-Qwen3-8B-loom",
    "variants": [
     {
      "name": "dual",
@@ -46,21 +32,8 @@
    "steps": [
     "ktest:dual"
    ],
-   "kit": null
-  },
-  {
-   "name": "ktest-q35-4b",
-   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
-   "variants": [
-    {
-     "name": "dual",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:dual"
-   ],
-   "kit": null
+   "kit": null,
+   "runner": "strix"
   },
   {
    "name": "ktest-gemma4-12b",
