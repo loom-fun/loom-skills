@@ -1,7 +1,68 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "rebuild-c: final-rule rebuild, drafting none (SPEC=off) per work/baselines/CLASSIFICATION.md; reference = live card.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "q06",
+   "spec": "unsloth/Qwen3-0.6B-GGUF:Qwen3-0.6B-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "model_id": "Qwen/Qwen3-0.6B",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "q3-1p7b",
+   "spec": "ggml-org/Qwen3-1.7B-GGUF:Qwen3-1.7B-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Qwen3-1.7B-loom",
+   "model_id": "Qwen/Qwen3-1.7B",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "q3-14b",
+   "spec": "ggml-org/Qwen3-14B-GGUF:Qwen3-14B-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Qwen3-14B-loom",
+   "model_id": "Qwen/Qwen3-14B",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "q25-1p5b",
+   "spec": "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Qwen2.5-1.5B-Instruct-loom",
+   "model_id": "Qwen/Qwen2.5-1.5B-Instruct",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "q25-vl7",
+   "spec": "ggml-org/Qwen2.5-VL-7B-Instruct-GGUF:Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+   "model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "q25-0p5b",
+   "spec": "bartowski/Qwen2.5-0.5B-Instruct-GGUF:Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+   "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+   "env": {
+    "SPEC": "off"
+   }
+  },
+  {
+   "name": "llama32-3b",
+   "spec": "unsloth/Llama-3.2-3B-Instruct-GGUF:Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
+   "model_id": "meta-llama/Llama-3.2-3B-Instruct",
+   "env": {
+    "SPEC": "off"
+   }
+  }
  ]
 }
