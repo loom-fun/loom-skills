@@ -35,6 +35,29 @@ def matched_spec(cfg):
     return a
 
 
+# THE per-row drafting table: (context tokens, concurrent streams) of every timed row. A row's drafting state is ONE value
+# applied identically to Loom and to llama.cpp (the final rule on which gates count is the coordinator's; today it mirrors
+# Loom's shipped gating: llm_config.json drafter.ctx_max (drafting off above that context, 0 = no limit) and
+# drafter.occ_min (off at >= that many streams, 0 = no limit)).
+ROWS = {"decode": (0, 1), "decode_2k": (2000, 1), "decode_32k": (32000, 1), "streams4": (600, 4),
+        "prefill_1k": (1000, 1), "prefill_2k": (2000, 1), "prefill_4k": (4000, 1), "prefill_8k": (8000, 1),
+        "prefill_16k": (16000, 1), "prefill_32k": (32000, 1)}
+
+
+def row_states(cfg, honor_gates=True):
+    """{row: True|False}: whether drafting is on for that row, for BOTH engines. No draft: all False."""
+    on = bool(matched_spec(cfg))
+    g = cfg.get("drafter") or {}
+    cmax, omin = int(g.get("ctx_max") or 0), int(g.get("occ_min") or 0)
+    out = {}
+    for row, (ctx, streams) in ROWS.items():
+        ok = on
+        if on and honor_gates:
+            ok = not ((cmax and ctx > cmax) or (omin and streams >= omin))
+        out[row] = ok
+    return out
+
+
 def drafter_file(cfg):
     """The drafter / assistant GGUF file name the package ships (None: none, e.g. MTP inside the main GGUF or n-gram)."""
     for k in ("drafter", "assistant"):
@@ -44,4 +67,8 @@ def drafter_file(cfg):
 
 
 if __name__ == "__main__":
-    print(matched_spec(json.load(open(sys.argv[1]))))
+    c = json.load(open(sys.argv[1]))
+    if "--rows" in sys.argv:
+        print(json.dumps(row_states(c)))
+    else:
+        print(matched_spec(c))
