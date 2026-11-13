@@ -1,0 +1,17 @@
+check.case public @gemm_q4_k_store {
+  %rows = check.literal value(64) : index
+  %k = check.literal value(256) : index
+  %n = check.literal value(64) : index
+  %x = check.file.read.npy path("g_x.npy") : tensor<64x256xf16>
+  %s = check.file.read.npy path("g_s.npy") : tensor<64x2xf32>
+  %w = check.file.read.npy path("g_w.npy") : tensor<9216xi8>
+  %e = check.file.read.npy path("g_y.npy") : tensor<64x64xf32>
+  %y = check.generate.fill value(0.0) : tensor<64x64xf32>
+  kernel.launch @g_gemm_q4_k_store[%rows, %n](%rows, %k, %n, %x, %s, %w, %y) : [index, index](index, index, index, tensor<64x256xf16>, tensor<64x2xf32>, tensor<9216xi8>, tensor<64x64xf32>)
+  check.expect.approximate actual(%y) expected(%e) atol(1.0e-2) rtol(1.0e-2) nan(different) : tensor<64x64xf32>, tensor<64x64xf32>
+  check.return
+}
+check.case public @other_only {
+  kernel.launch @g_missing[%rows](%rows) : [index](index)
+  check.return
+}
