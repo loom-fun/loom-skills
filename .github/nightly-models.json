@@ -186,7 +186,7 @@
    "slug": "qwen3.6-27b",
    "memory_bytes": 57000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": [
     "vision",
     "draft",
@@ -222,7 +222,7 @@
    "slug": "qwen2.5-32b-instruct",
    "memory_bytes": 50000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": []
   },
   {
@@ -391,7 +391,7 @@
    "slug": "gemma-4-31b-it",
    "memory_bytes": 80000000000,
    "kit": "gemma4",
-   "llamacpp": "b1370",
+   "llamacpp": "b1374",
    "features": [
     "draft",
     "thinking-toggle"
@@ -496,7 +496,7 @@
    "slug": "qwen3-14b",
    "memory_bytes": 31000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": [
     "thinking-toggle"
    ]
