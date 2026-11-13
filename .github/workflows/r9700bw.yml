@@ -30,13 +30,13 @@ jobs:
           python3 -m venv venv && . venv/bin/activate && pip install -q "hrx-loom==0.1.0"
           rocminfo | grep -E "Marketing Name|Name: +gfx"
           for b in read copy; do
-            loom-benchmark $GITHUB_WORKSPACE/.github/wincheck/bw/bw_$b.loom --device=amdgpu --benchmark=@${b}_bm --batch-size=16 --output=$OUT/$b.json || true
+            loom-benchmark $GITHUB_WORKSPACE/.github/wincheck/bw/bw_$b.loom --device=amdgpu --benchmark=@${b}_bm --measure=dispatch_complete --batch-size=16 --iterations=20 --profile-final-batch=false --output=$OUT/$b.json || true
             python3 - $OUT/$b.json $b <<'PY'
           import json, sys
           r = json.load(open(sys.argv[1])); kind = sys.argv[2]
           for w in r.get("work_items", []):
               m = w.get("measurement") or {}
-              t = (m.get("operation_timing_ns") or m.get("timing_ns") or {})
+              t = (m.get("operation_timing_ns") or m.get("timing_ns") or {}); print(kind, "measure", (w.get("policy") or {}).get("measure"), "per-dispatch mean ns", m.get("mean_physical_dispatch_duration_ns"))
               byts = (1 << 30) + (1 << 30) // 16 * 1 // 4 * 4 // 4 if kind == "read" else (1 << 30)
               # read: 1 GiB read + 64 Mi f32 writes = 1 GiB + 64 MiB ; copy: 512 MiB read + 512 MiB written
               byts = (1 << 30) + (1 << 26) if kind == "read" else (1 << 30)
