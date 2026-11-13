@@ -37,6 +37,8 @@
 #   out/ also holds llamacpp_args-vulkan.txt (the exact server arguments), llamacpp_release-vulkan.sha256 and
 #   programs_sha256.txt (the card's programs this job fetched: make_info.py perf --fetched-programs).
 # Variant V: {"name": "card"}                                    the card's own programs, as published
+#            {"name": "fun", "card": "loom-fun/<repo>"}              another card's published programs next to this job's card (a Strix
+#                                                                    A/B of the staging package against the loom-fun one: ab / perf / textmatch)
 #            {"name": "x", "build": {"ENV": "1"}, "build_args": [...], "ref": "origin/main",
 #             "execution": {"draft_depth": 3}, "double": ["llm_verify:g_head_mv", "*:g_mv_q8_0"]}
 #            "context": N: the served context of a reduced-context model on the R9700 (execution context_capacity / pool_capacity N;
@@ -125,16 +127,20 @@ root=$("$SV/ensure_sdk.sh" "${LOOM_ROOT:-$WORK/loom}" "$out/llm_config.json" 2> 
 export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 
 # 2. The card (fetched once per runner and card)
-card=$WORK/_card/${repo//\//_}; rev=$(curl -fsS --retry 3 "https://huggingface.co/api/models/$repo/revision/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || rev=main
-# the files are fetched at one commit (resolve/main can serve an older revision for a while after a publish), and a card
-# directory left by an earlier job on this runner is reused only when it holds that commit
-base=https://huggingface.co/$repo/resolve/$rev
-if [ "$rev" = main ] || [ "$(cat "$card/.fetched" 2>/dev/null)" != "$rev" ]; then
-  step "fetch $repo"; rm -rf "$card"
-  HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$base/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$card" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch"; exit 1; }
-  curl -fsSL --retry 3 "$base/llm_config.json" -o "$card/llm_config.json" || exit 1
-  rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; echo "$rev" > "$card/.fetched"
-fi
+fetch_card() {   # fetch_card REPO -> sets CARD_DIR: the card's files at one commit (a variant "card": ORG/REPO fetches another card)
+  local r=$1 rv bs
+  CARD_DIR=$WORK/_card/${r//\//_}; rv=$(curl -fsS --retry 3 "https://huggingface.co/api/models/$r/revision/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || rv=main
+  # the files are fetched at one commit (resolve/main can serve an older revision for a while after a publish), and a card
+  # directory left by an earlier job on this runner is reused only when it holds that commit
+  bs=https://huggingface.co/$r/resolve/$rv
+  if [ "$rv" = main ] || [ "$(cat "$CARD_DIR/.fetched" 2>/dev/null)" != "$rv" ]; then
+    step "fetch $r"; rm -rf "$CARD_DIR"
+    HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$bs/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$CARD_DIR" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch $r"; exit 1; }
+    curl -fsSL --retry 3 "$bs/llm_config.json" -o "$CARD_DIR/llm_config.json" || exit 1
+    rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; echo "$rv" > "$CARD_DIR/.fetched"
+  fi
+}
+fetch_card "$repo"; card=$CARD_DIR
 python3 - "$card" <<'EOF' || { echo "FAIL: the fetched card's model.json and llm_config.json disagree (a stale fetch?)"; exit 1; }
 import json, os, sys
 m = json.load(open(os.path.join(sys.argv[1], "model.json"))); c = json.load(open(os.path.join(sys.argv[1], "llm_config.json")))
@@ -214,9 +220,11 @@ EOF2
     tail -3 "$out/build_$v.log"
   else
     kit_for "$v" "" || exit 1
-    mkdir -p "$pkg"; cp -r "$card/program" "$card/model.json" "$card/tokenizer.json" "$card"/*.loom "$pkg/" 2>/dev/null
-    ln -sfn "$card/parameter" "$pkg/parameter"
-    "$T" - "$card" "$pkg" <<'EOF'
+    vcard=$card; vrepo=$(qv "$v" "print(v.get('card') or '')")   # variant "card": ORG/REPO = that card's published programs (e.g. loom-fun's, next to the staging card's)
+    if [ -n "$vrepo" ]; then fetch_card "$vrepo"; vcard=$CARD_DIR; fi
+    mkdir -p "$pkg"; cp -r "$vcard/program" "$vcard/model.json" "$vcard/tokenizer.json" "$vcard"/*.loom "$pkg/" 2>/dev/null
+    ln -sfn "$vcard/parameter" "$pkg/parameter"
+    "$T" - "$vcard" "$pkg" <<'EOF'
 import json, os, sys
 card, pkg = sys.argv[1:]
 c = json.load(open(os.path.join(card, "llm_config.json")))
