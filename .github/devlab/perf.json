@@ -7,7 +7,9 @@
  "llamacpp": "b1375",
  "jobs": [
   {
-   "name": "ktest-qwen3moe",
+   "name": "ktest-mellum",
+   "card": "loom-fun/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
+   "kit": null,
    "variants": [
     {
      "name": "dual",
@@ -19,9 +21,23 @@
    ]
   },
   {
-   "name": "ktest-gptoss",
-   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
-   "kit": "gpt-oss",
+   "name": "ktest-gemma4",
+   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "kit": "gemma4",
+   "variants": [
+    {
+     "name": "dual",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:dual"
+   ]
+  },
+  {
+   "name": "ktest-lfm2moe",
+   "card": "loom-fun/ggml-org-LFM2.5-24B-A2B-loom",
+   "kit": "lfm2moe",
    "variants": [
     {
      "name": "dual",
