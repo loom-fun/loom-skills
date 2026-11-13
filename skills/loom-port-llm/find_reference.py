@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Find the published loom-fun packages a port (or an optimization) should start from, instead of from scratch.
 
-Only CATEGORY A packages count: cards made by the current skill, i.e. info.json has "schema": "loom-card/2" AND
+Only CATEGORY A packages count: cards made by the current skill, i.e. info.json has "schema": "loom-card/2" or "loom-card/3" AND
 "report": "generated" (fresh measurements through make_info.py -> render_card.py). Cards imported from old runs
 ("report": "attached", import_card.py) are listed as skipped, never used: their programs predate the current
 starter and their numbers were not re-measured.
@@ -42,7 +42,16 @@ import urllib.request
 
 HF = "https://huggingface.co"
 CACHE = os.path.join(os.path.expanduser(os.environ.get("XDG_CACHE_HOME", "~/.cache")), "loom-skills", "references")
-SCHEMA = "loom-card/2"
+SCHEMAS = ("loom-card/2", "loom-card/3")   # loom-card/3 keeps gates, performance and roofline per GPU under "devices"
+
+
+def primary(info):
+    """A loom-card/3 card as the one-GPU shape of loom-card/2: the strix-halo entry, else the first GPU with results."""
+    devs = info.get("devices")
+    if not devs:
+        return info
+    g = next((k for k in ("strix-halo", *devs) if k in devs and not devs[k].get("state")), None)
+    return {**{k: v for k, v in info.items() if k != "devices"}, **(devs.get(g) or {})}
 # Keys inspect_gguf.py derives from the GGUF (or that name this package's own files): never taken from a reference.
 OWN = {"name", "gguf", "tensors", "model_id", "draft", "drafter", "assistant", "vision", "generator", "reference",
        "mtp", "hidden", "layers", "heads", "kv_heads", "kv_heads_global", "head_dim", "ffn", "vocab", "context_length", "rms_eps",
@@ -245,8 +254,8 @@ def candidates(org):
         if not sha or "info.json" not in files or "llm_config.json" not in files:
             skipped.append({"repo": repo, "why": "no info.json/llm_config.json"})
             continue
-        info = jfile(repo, sha, "info.json") or {}
-        if info.get("schema") != SCHEMA or info.get("report") != "generated":
+        info = primary(jfile(repo, sha, "info.json") or {})
+        if info.get("schema") not in SCHEMAS or info.get("report") != "generated":
             skipped.append({"repo": repo, "why": f"category B (schema {info.get('schema')}, report {info.get('report')})"})
             continue
         cfg = jfile(repo, sha, "llm_config.json") or {}
@@ -393,8 +402,8 @@ def example_cfg(name):
     e = examples().get(name) or {}
     if not e.get("card"):
         sys.exit(f"example {name}: no cfg.json and no category A package in {EXAMPLES}")
-    info = jfile(e["card"], e["revision"], "info.json") or {}
-    if info.get("schema") != SCHEMA or info.get("report") != "generated":
+    info = primary(jfile(e["card"], e["revision"], "info.json") or {})
+    if info.get("schema") not in SCHEMAS or info.get("report") != "generated":
         sys.exit(f"{e['card']}@{e['revision'][:9]} is not category A (schema {info.get('schema')}, report {info.get('report')})")
     cfg = jfile(e["card"], e["revision"], "llm_config.json")
     if not cfg or cfg.get("arch") != e["arch"]:
@@ -422,9 +431,10 @@ def cmd_show(a):
     else:
         repo = a.what; sha = json.loads(get(f"{HF}/api/models/{repo}"))["sha"]
     info, cfg, card = (jfile(repo, sha, n) or {} for n in ("info.json", "llm_config.json", "model.json"))
+    info = primary(info)
     ex = next(iter((card.get("presets") or {}).values()), {}).get("execution", {})
     d = cfg.get("drafter") or {}
-    print(f"{repo}@{sha[:9]} ({'category A' if info.get('schema') == SCHEMA and info.get('report') == 'generated' else 'NOT category A'})")
+    print(f"{repo}@{sha[:9]} ({'category A' if info.get('schema') in SCHEMAS and info.get('report') == 'generated' else 'NOT category A'})")
     print(f"  generator: {json.dumps(cfg.get('generator'))}")
     print(f"  drafting: {d.get('kind')} depth {d.get('depth')}; tuned: " + ", ".join(
         f"{r['kind']}/{r['depth']}={r['decode_tps']}" for r in d.get("tuned") or []))

@@ -54,61 +54,65 @@
   },
   "license": "other"
  },
- "gates": {
-  "consistency": {
-   "date": "2026-10-29",
-   "detail": null,
-   "level": null,
-   "source": "factory-40842422037",
-   "status": "pass"
-  },
-  "decision": {
-   "date": "2026-10-29",
-   "detail": null,
-   "level": null,
-   "source": "factory-40842422037",
-   "status": "pass"
-  }
- },
- "performance": {
-  "baseline": {
-   "args": "-ngl 99 -np 4 -c 48000",
-   "name": "llama.cpp",
-   "version": "llamacpp-rocm/b1357"
-  },
-  "sessions": [
-   {
-    "commands": [],
-    "date": "2026-10-29",
-    "metrics": {
-     "prefill_16k": {
-      "baseline": 3128.7,
-      "loom": 4637.4
-     },
-     "prefill_1k": {
-      "baseline": 5926.4,
-      "loom": 7041.3
-     },
-     "prefill_2k": {
-      "baseline": 5684.0,
-      "loom": 7138.1
-     },
-     "prefill_8k": {
-      "baseline": 4204.3,
-      "loom": 5488.4
+ "devices": {
+  "strix-halo": {
+   "gates": {
+    "consistency": {
+     "date": "2026-10-29",
+     "detail": null,
+     "level": null,
+     "source": "factory-40842422037",
+     "status": "pass"
+    },
+    "decision": {
+     "date": "2026-10-29",
+     "detail": null,
+     "level": null,
+     "source": "factory-40842422037",
+     "status": "pass"
+    }
+   },
+   "performance": {
+    "baseline": {
+     "args": "-ngl 99 -np 4 -c 48000",
+     "name": "llama.cpp",
+     "version": "llamacpp-rocm/b1357"
+    },
+    "sessions": [
+     {
+      "commands": [],
+      "date": "2026-10-29",
+      "metrics": {
+       "prefill_16k": {
+        "baseline": 3128.7,
+        "loom": 4637.4
+       },
+       "prefill_1k": {
+        "baseline": 5926.4,
+        "loom": 7041.3
+       },
+       "prefill_2k": {
+        "baseline": 5684.0,
+        "loom": 7138.1
+       },
+       "prefill_8k": {
+        "baseline": 4204.3,
+        "loom": 5488.4
+       }
+      },
+      "runs": {
+       "decode_prefill": null,
+       "streams4": null
+      },
+      "source": "factory-40842422037"
      }
-    },
-    "runs": {
-     "decode_prefill": null,
-     "streams4": null
-    },
-    "source": "factory-40842422037"
+    ]
    }
-  ]
+  }
  },
  "repo": "loom-fun/LiquidAI-d1-2B-loom",
  "report": "attached",
- "schema": "loom-card/2",
+ "schema": "loom-card/3",
  "sources": {
   "factory-40842422037": {
    "device": null,

@@ -899,6 +899,10 @@ if DRAFT:
     card = build_draft.card_drafter(card, pkg, DRAFT)
 if cfg.get("vision"):
     card = build_vision.write_component(pkg, card, cfg["vision"], vision_cfg)
+# Dual-target (RDNA3 + RDNA4) programs: every program file that has a `K_rdna4` twin kernel selects it per device
+# (dual_target.py; LOOM_RDNA4=0 turns it off, and files without twins are left as they are).
+import dual_target  # noqa: E402
+dual_target.apply_dir(os.path.join(pkg, "program"))
 json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
 # The benchmark scripts read the chat format and model id from here.
 bench = {k: v for k, v in cfg.items() if k != "tensors"}
