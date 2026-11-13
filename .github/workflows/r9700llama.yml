@@ -41,6 +41,8 @@ jobs:
             hipcc --rocm-path="$rp" -O3 --offload-arch=gfx1201 .github/wincheck/bw.hip -o $RUNNER_TEMP/bw && break
           done
           $RUNNER_TEMP/bw && $RUNNER_TEMP/bw || true
+          (amd-smi static -a 2>&1 | grep -i -E -A3 "vram|memory|clock|board|product|market" | head -80) || true
+          (amd-smi metric -c -m 2>&1 | head -40) || true
       - name: smoke
         run: |
           set -x
@@ -63,7 +65,7 @@ jobs:
           while read url; do
             f=$RUNNER_TEMP/$(basename "$url"); [ -f "$f" ] || curl -fsSL --retry 5 -o "$f" "$url"
             n=$(basename "$f" .gguf)
-            "$dir/llama-bench" -m "$f" -ngl 99 -p 512,2048 -n 128 -r 3 -o json > $OUT/bench-$n.json 2> $OUT/bench-$n.log || { rc=1; tail -30 $OUT/bench-$n.log; }
+            "$dir/llama-bench" -m "$f" -ngl 99 -p 512,2048 -n 128,512 -r 3 -o json > $OUT/bench-$n.json 2> $OUT/bench-$n.log || { rc=1; tail -30 $OUT/bench-$n.log; }
             cat $OUT/bench-$n.json | python3 -c "import json,sys; [print(r['n_prompt'], r['n_gen'], round(r['avg_ts'],1)) for r in json.load(sys.stdin)]" || true
             LLAMACPP_DIR=$dir LLAMACPP_STATE=$OUT skills/loom-benchmark/scripts/llamacpp_server.sh "$f" 8130 1 8192 || { rc=1; tail -40 $OUT/llamacpp-8130.log; }
             curl -s -m 120 localhost:8130/v1/chat/completions -H 'Content-Type: application/json' \
