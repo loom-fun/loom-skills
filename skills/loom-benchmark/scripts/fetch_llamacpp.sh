@@ -6,14 +6,14 @@
 #   fetch_llamacpp.sh ~/llamacpp-vulkan b12211. The archive's sha256 must equal data/llamacpp-vulkan.sha256's pin
 #   (a tag without a pin: GitHub's asset digest); the build dir holds release.sha256. The Vulkan baseline
 #   (llamacpp_server.sh with the same LLAMACPP_BACKEND) runs the same workloads as the ROCm one.
-#   GFX: gfx1151 (Strix Halo), gfx1150, ...; auto reads it from llama.cpp-visible ROCm (rocminfo) or
-#   defaults to gfx1151. OS asset: ubuntu (Linux) or windows (Git Bash).
+#   GFX: gfx1151 (Strix Halo), gfx1150, gfx1201 (Radeon R9700 / RX 9070), ...; auto reads the first GPU agent from
+#   rocminfo or defaults to gfx1151. A target without its own asset uses its family's (gfx1201 -> gfx120X). OS asset: ubuntu (Linux) or windows (Git Bash).
 # Run by qualify.sh before pick_llamacpp.sh, so the newest build always competes with the installed
 # ones (a new model architecture usually needs a recent build: no installed build knew `flint`).
 set -eu
 dest=${1:-$HOME/llamacpp-rocm}; tag=${2:-latest}; gfx=${3:-auto}
 if [ "$gfx" = auto ]; then
-  gfx=$( (rocminfo 2>/dev/null || true) | grep -o "gfx11[0-9][0-9]" | head -1)
+  gfx=$( (rocminfo 2>/dev/null || true) | grep -oE "gfx(9[0-9a-f]{2}|1[0-2][0-9a-f]{2})" | grep -v "^gfx000" | head -1)
   gfx=${gfx:-gfx1151}
 fi
 os=ubuntu; case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) os=windows;; esac
@@ -35,8 +35,10 @@ if backend == "vulkan":   # llama-bNNNN-bin-ubuntu-vulkan-x64.tar.gz / llama-bNN
     name = "llama-" + d["tag_name"] + "-bin-" + kind + "-vulkan-x64." + ext
     a = [x for x in d["assets"] if x["name"] == name]
 else:
-    want = f"-{sys.argv[2]}-rocm-{sys.argv[3]}-x64.zip"
-    a = [x for x in d["assets"] if x["name"].endswith(want) and not x["name"].startswith("qualification")]
+    a = []
+    for g in (sys.argv[3], sys.argv[3][:-1] + "X"):   # the exact target, then its family build (gfx1201 -> gfx120X)
+        want = f"-{sys.argv[2]}-rocm-{g}-x64.zip"
+        a = a or [x for x in d["assets"] if x["name"].endswith(want) and not x["name"].startswith("qualification")]
 print(d["tag_name"], a[0]["browser_download_url"] if a else "", (a[0].get("digest") or "").removeprefix("sha256:") if a else "")' - "$os" "$gfx" "$backend" <<< "$meta")
 [ -n "$url" ] || { echo "release $rtag has no $os $backend $gfx asset" >&2; exit 1; }
 dir=$dest/$rtag

@@ -1,0 +1,67 @@
+name: r9700llama
+# Smoke test: do llama.cpp ROCm (lemonade gfx120X) and Vulkan (ggml-org, pinned) work on an AMD DevLab Radeon R9700 at all?
+# llama-bench (pp512 / tg128) and one chat request through llama-server, per backend, on .github/wincheck/llama.json's GGUFs.
+on:
+  push:
+    branches: ["wincheck/r9700-llama**"]
+permissions:
+  contents: read
+concurrency:
+  group: r9700llama-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  llama:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [rocm, vulkan]
+    name: llama.cpp ${{ matrix.backend }}
+    runs-on: [self-hosted, devlab-dispatch, radeon-r9700]
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LLAMACPP_BACKEND: ${{ matrix.backend }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/wincheck
+            skills/loom-benchmark
+            skills/loom-setup
+            skills/loom-port-llm/starter
+      - name: smoke
+        run: |
+          set -x
+          OUT=$RUNNER_TEMP/llama-out; mkdir -p $OUT
+          rocminfo | grep -E "Marketing Name|Name: +gfx" || true
+          (vulkaninfo --summary 2>&1 | head -30) || echo "no vulkaninfo"
+          tag=latest; [ "$LLAMACPP_BACKEND" = vulkan ] && tag=b12211
+          dir=$(skills/loom-benchmark/scripts/fetch_llamacpp.sh $RUNNER_TEMP/llamacpp-$LLAMACPP_BACKEND $tag | tail -1)
+          echo "build: $dir"; ls "$dir" | head -40
+          export LD_LIBRARY_PATH=$dir
+          "$dir/llama-server" --list-devices 2>&1 | tee $OUT/devices.txt
+          python3 - <<'PY' > $RUNNER_TEMP/models.txt
+          import json; [print(m["url"]) for m in json.load(open(".github/wincheck/llama.json"))["gguf"]]
+          PY
+          rc=0
+          while read url; do
+            f=$RUNNER_TEMP/$(basename "$url"); [ -f "$f" ] || curl -fsSL --retry 5 -o "$f" "$url"
+            n=$(basename "$f" .gguf)
+            "$dir/llama-bench" -m "$f" -ngl 99 -p 512,2048 -n 128 -r 3 -o json > $OUT/bench-$n.json 2> $OUT/bench-$n.log || { rc=1; tail -30 $OUT/bench-$n.log; }
+            cat $OUT/bench-$n.json | python3 -c "import json,sys; [print(r['n_prompt'], r['n_gen'], round(r['avg_ts'],1)) for r in json.load(sys.stdin)]" || true
+            LLAMACPP_DIR=$dir LLAMACPP_STATE=$OUT skills/loom-benchmark/scripts/llamacpp_server.sh "$f" 8130 1 8192 || { rc=1; tail -40 $OUT/llamacpp-8130.log; }
+            curl -s -m 120 localhost:8130/v1/chat/completions -H 'Content-Type: application/json' \
+              -d '{"messages":[{"role":"user","content":"What is the capital of France? Answer in one word. /no_think"}],"max_tokens":64,"temperature":0}' | tee $OUT/chat-$n.json; echo
+            grep -qi paris $OUT/chat-$n.json || rc=1
+            LLAMACPP_STATE=$OUT skills/loom-benchmark/scripts/llamacpp_server.sh --stop 8130
+          done < $RUNNER_TEMP/models.txt
+          exit $rc
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-${{ matrix.backend }}
+          path: ${{ runner.temp }}/llama-out
