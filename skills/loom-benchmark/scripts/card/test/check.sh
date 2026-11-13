@@ -339,7 +339,7 @@ assert 'memory_bytes' not in two['devices']['radeon-r9700'] and 'served_context'
 assert none['devices']['radeon-r9700'] == {'state': 'unsupported', 'required_bytes': 82400000000} and c.has_results(none['devices']['strix-halo'])
 assert stg['devices']['strix-halo'] == {'state': 'not_measured'}, stg['devices']['strix-halo']
 r = stg['devices']['radeon-r9700']
-assert r['memory_bytes'] == 34359738368 and r['served_context'] == 20480 and r['performance']['sessions'][0]['over_context'], r.keys()
+assert r['memory_bytes'] == 34000000000 and r['served_context'] == 20480 and r['performance']['sessions'][0]['over_context'], r.keys()
 assert set(r['gates']) >= {'golden', 'agent'} and 'performance' in r and 'roofline' in r" \
   "$C" "$tmp/r9700_two" "$tmp/r9700_none" "$tmp/r9700_staging" "$tmp/r_strix_info.json" \
   && echo "OK   r9700: the strix-halo entry is the loom-card/2 card unchanged; R9700 evidence, state and served context are recorded per GPU" \
@@ -370,7 +370,7 @@ py "$C/publish_package.py" upload "$tmp/r9700_none" --repo unsloth-Qwen3-0.6B-lo
 got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 print(c.gpu_from_device({'cpu': 'AMD RYZEN AI MAX+ 395 w/ Radeon 8060S', 'gpu': 'AMD Radeon 8060S Graphics'}),
       c.gpu_from_device({'cpu': 'AMD EPYC', 'gpu': 'AMD Radeon AI PRO R9700S'}), c.gpu_from_device({'cpu': 'AMD Strix Halo (DevLab Dispatch runner X2)', 'os': 'Linux'}),
-      c.gpu_from_device(None), c.served_context(396705472, 1.5e6, 34359738368))" "$C")
+      c.gpu_from_device(None), c.served_context(396705472, 1.5e6, 34000000000))" "$C")
 [ "$got" = "strix-halo radeon-r9700 strix-halo None 20480" ] && echo "OK   gpu detection and served context" || { echo "FAIL gpu detection: $got"; bad=1; }
 for n in flint d1 r9700_two r9700_none r9700_staging; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"

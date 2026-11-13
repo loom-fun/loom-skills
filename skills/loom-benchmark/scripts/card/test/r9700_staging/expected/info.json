@@ -122,7 +122,7 @@
      "status": "pass"
     }
    },
-   "memory_bytes": 34359738368,
+   "memory_bytes": 34000000000,
    "performance": {
     "baseline": {
      "args": "-ngl 99 -cram 0 -c 65536 -kvu -np 4",

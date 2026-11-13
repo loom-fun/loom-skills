@@ -28,12 +28,12 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 Serve on the AMD Radeon AI PRO R9700 (gfx1201, 32 GB):
 
 ```bash
-loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=34359738368
+loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=34000000000
 ```
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
-On the AMD Radeon AI PRO R9700, `--memory_bytes=34359738368` bounds the memory pool: this package serves up to 20,480 tokens per request there (its native context is 40,960); the package files are the same on every GPU.
+On the AMD Radeon AI PRO R9700, `--memory_bytes=34000000000` bounds the memory pool: this package serves up to 20,480 tokens per request there (its native context is 40,960); the package files are the same on every GPU.
 
 ## Performance vs llama.cpp
 
@@ -47,12 +47,12 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 |---|---|---|---|---|---|---|
 | decode tok/s, short prompt | 781.9 | 1023.4 | +31 % | 1535.5 | 67 % | 744.4 |
 | decode tok/s, 2k context | 638.9 | 841.0 | +32 % | 967.5 | 87 % | 609.6 |
-| decode tok/s, 32k context | n/a | n/a | n/a | n/a | n/a | n/a |
+| decode tok/s, 32k context | doesn't fit | doesn't fit | doesn't fit | doesn't fit | doesn't fit | doesn't fit |
 | prefill tok/s, 1k document | 17154.6 | 21764.2 | +27 % | 77348.7 | 28 % | 9164.3 |
 | prefill tok/s, 2k document | 18192.9 | 24133.0 | +33 % | 69358.1 | 35 % | 9447.7 |
 | prefill tok/s, 8k document | 12104.5 | 18302.3 | +51 % | 42818.0 | 43 % | 6150.7 |
 | prefill tok/s, 16k document | 8161.1 | 14047.5 | +72 % | 28352.5 | 50 % | 3931.4 |
-| prefill tok/s, 32k document | n/a | n/a | n/a | n/a | n/a | n/a |
+| prefill tok/s, 32k document | doesn't fit | doesn't fit | doesn't fit | doesn't fit | doesn't fit | doesn't fit |
 | 4 streams, aggregate decode tok/s | 1710.4 | 2350.8 | +37 % | 3603.6 | 65 % | 1204.7 |
 | speculative decoding, drafted tokens accepted | n/a | n/a | n/a | n/a | n/a | n/a |
 
@@ -68,7 +68,8 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 - Measured 2026-11-14; device TEST FIXTURE: made-up numbers, not a measurement, AMD Radeon AI PRO R9700S (gfx1201), Ubuntu 24.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: [DevLab Dispatch run 9000001](https://github.com/loom-fun/loom-skills/actions/runs/9000001).
 - llama.cpp Vulkan: measured 2026-11-14; source: [DevLab Dispatch run 9000001](https://github.com/loom-fun/loom-skills/actions/runs/9000001). Archive sha256 `aabbccd`.
 - Roofline: the hardware ceiling for this GGUF on AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz) at 600 GB/s and 77 TFLOP/s, from loom-roofline `roofline.py` (loom-skills `0123456`).
-- — not measured; n/a not applicable (decode_32k, prefill_32k: the document is longer than the 20,480-token context this GPU serves).
+- doesn't fit (decode_32k, prefill_32k): the document is longer than the 20,480-token context this GPU serves; not expected to be measured, not a failure.
+- — not measured; n/a not applicable.
 
 ## Features
 
@@ -100,7 +101,7 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 | `agent_think_off` | The tool-calling loop with thinking off | — not yet re-measured | ✅ pass ¹ |
 | `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | — not yet re-measured | ✅ pass ¹ |
 | `needle` | Needle-in-a-haystack prompt at up to half the context, compared with llama.cpp; over-capacity prompt refused | — not yet re-measured | ✅ pass ¹ |
-| `needle_full` | Needle-in-a-haystack prompt at the full context is served | — not yet re-measured | ❌ no evidence |
+| `needle_full` | Needle-in-a-haystack prompt at the full context is served | — not yet re-measured | doesn't fit (needs more context than the 20,480 tokens this GPU serves) |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | — not yet re-measured | — not applicable |
 
 - ¹ [DevLab Dispatch run 9000001](https://github.com/loom-fun/loom-skills/actions/runs/9000001), LEVEL=quick, 2026-11-14; device TEST FIXTURE: made-up numbers, not a measurement, AMD Radeon AI PRO R9700S (gfx1201), Ubuntu 24.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`).
