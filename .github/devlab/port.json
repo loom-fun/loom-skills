@@ -1,7 +1,68 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "rebuild-a: final-rule drafting rebuilds (classification)",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "q38-27b",
+   "spec": "bartowski/Qwen3.8-27B-GGUF:Qwen3.8-27B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Qwen3.8-27B-loom",
+   "model_id": "qwen3.8-27b",
+   "env": {
+    "TUNE_KIND": "mtp",
+    "TUNE_REQUIRE_DRAFT": "1"
+   }
+  },
+  {
+   "name": "ornith-35b",
+   "spec": "bartowski/Ornith-1.5-35B-A3B-GGUF:Ornith-1.5-35B-A3B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
+   "model_id": "ornith-ai/Ornith-1.5-35B-A3B",
+   "env": {
+    "TUNE_KIND": "mtp",
+    "TUNE_REQUIRE_DRAFT": "1"
+   }
+  },
+  {
+   "name": "ornith-122b",
+   "spec": "bartowski/Ornith-1.5-122B-GGUF:Ornith-1.5-122B-Q4_K_M/Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf",
+   "reference": "loom-fun/bartowski-Ornith-1.5-122B-loom",
+   "model_id": "ornith-ai/Ornith-1.5-122B",
+   "env": {
+    "TUNE_KIND": "mtp",
+    "TUNE_REQUIRE_DRAFT": "1"
+   }
+  },
+  {
+   "name": "laguna",
+   "spec": "ggml-org/Laguna-XS-2.1-GGUF:Laguna-XS-2.1-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Laguna-XS-2.1-loom",
+   "model_id": "poolside/Laguna-XS-2.1",
+   "env": {
+    "TUNE_KIND": "dflash",
+    "TUNE_REQUIRE_DRAFT": "1",
+    "DRAFTER_REPO": "dev7a/Laguna-XS-2.1-DFlash-GGUF"
+   }
+  },
+  {
+   "name": "coder",
+   "spec": "ggml-org/Qwen3-Coder-30B-A3B-Instruct-GGUF:Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+   "env": {
+    "TUNE_KIND": "dflash",
+    "TUNE_REQUIRE_DRAFT": "1",
+    "DRAFTER_REPO": "Anbeeld/Qwen3-Coder-30B-A3B-DFlash-GGUF"
+   }
+  },
+  {
+   "name": "gptoss",
+   "spec": "unsloth/gpt-oss-20b-GGUF:gpt-oss-20b-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-gpt-oss-20b-loom",
+   "model_id": "openai/gpt-oss-20b",
+   "env": {
+    "TUNE_KIND": "dflash",
+    "TUNE_REQUIRE_DRAFT": "1",
+    "DRAFTER_REPO": "Anbeeld/gpt-oss-20b-DFlash-GGUF"
+   }
+  }
  ]
 }
