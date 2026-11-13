@@ -19,6 +19,8 @@
 #   recommended n-max. The 1-stream rows load each engine once with it (llama@rocm.np1 / llama@vulkan.np1); streams4 loads both
 #   without drafting (llamac4@rocm.nodraft / llamac4@vulkan.perslot.nodraft; Loom: variant {"name": "nodraft", "execution":
 #   {"draft_depth": 0}}, step c4:nodraft). A server that cannot run the drafter fails its step = "not supported", never replaced.
+#   n-max tuning (rule: tuned like Loom's depth): llama@rocm.np1:3:-:N / llama@vulkan.np1:3:-:N (and the :long form) with N in 1 2 3 4 d
+#   (d = llama.cpp default); card/pick_nmax.py chooses the best geometric mean over the 1-stream rows per backend.
 #   "llama_spec_vulkan": a Vulkan-only override, for a drafter the Vulkan build cannot run (record it with --differs).
 #   A job may override card, kit, memory_bytes, llamacpp, llamacpp_vulkan, vulkan_kv and llama_spec: one experiment can
 #   measure several cards.
@@ -241,7 +243,12 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   [ "$spec" = matched ] && { spec=$("$T" -I "$here/skills/loom-benchmark/scripts/card/matched_spec.py" "$repo") || { echo "FAIL: $repo is not in data/drafting_classification.json"; return 1; }; }
   spec=${spec//'{drafter}'/$drafter}
   [[ $MODS == *nodraft* ]] && spec=""   # .nodraft: the streams4 servers (benchmark rule: 4 streams run undrafted on every engine, Loom's occ_min gate too)
-  [ -n "${1:-}" ] && spec=$(echo "$spec" | sed -E "s/--spec-draft-n-max [0-9]+/--spec-draft-n-max $1/")
+  # N_MAX (the step's last parameter): a number sets --spec-draft-n-max (adding it when the spec has none), "d" = llama.cpp's
+  # default (the flag removed). Benchmark rule: llama.cpp's n-max is tuned like Loom's depth, from {1,2,3,4,default} (llama@rocm.np1:3:-:N).
+  if [ -n "${1:-}" ] && [ -n "$spec" ]; then
+    spec=$(echo "$spec" | sed -E "s/ ?--spec-draft-n-max [0-9]+//")
+    [ "$1" = d ] || spec="$spec --spec-draft-n-max $1"
+  fi
   local h; for h in $(echo "$spec" | grep -oE '\{hf:[^}]+\}' | sort -u); do   # {hf:OWNER/REPO/FILE}, fetched once per runner
     local f=${h#\{hf:}; f=${f%\}}; local dst=$WORK/hf/$f r=${f%/*}
     [ -f "$dst" ] || { mkdir -p "${dst%/*}" && curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
@@ -311,6 +318,7 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] fo
     llama)   # llama:N[:long|-][:N_MAX]
       llama_up "${p3:-}" || { res[$s]=ERROR; continue; }
       nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}; lf=perf_llamacpp${bkt}_n$nm.jsonl
+      cp "$out/llamacpp_args$bkt.txt" "$out/llamacpp_args$bkt.n$nm.txt" 2>/dev/null   # the arguments of THIS n-max (the plain file is overwritten per server start)
       step "llama.cpp$bkt n-max $nm perf x $p1 ${p2:-} (thinking $TH)"
       for i in $(seq 1 "$p1"); do
         (cd "$out" && "$T" "$B/perf.py" "$lurl" "llamacpp${bkt}-n$nm" --kind llama --no-campaign --thinking "$TH" --log "$lf" ${p2:+--long} | tail -1)
