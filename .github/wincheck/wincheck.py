@@ -206,9 +206,32 @@ def c_chat():
                                      "usage": r.get("usage")}
 
 
-check("chat", c_chat)
+DECISION = "/v1/systemone" in readme and "not a chat model" in readme.lower() or "answers SystemOne decision" in readme
 
-if R["claimed_features"].get("tool_calling") == "yes":
+
+def sysone(state, timeout=600):
+    body = {"model": model_id, "state": state, "questions": {
+        "refund": {"type": "noul", "instructions": "Is the customer asking for a refund?"},
+        "team": {"type": "choice", "instructions": "Which team should handle this?",
+                 "criteria": {"billing": "Charges, refunds, invoices", "technical": "App or site faults"}}}}
+    t = time.time()
+    r = http("/v1/systemone", body, timeout=timeout)
+    return r, time.time() - t
+
+
+def c_decision():
+    r, s = sysone("I was charged twice this month, please refund one of them.")
+    txt = json.dumps(r)
+    ok = "refund" in r and "team" in r if isinstance(r, dict) else False
+    return ok, {"response": txt[:600], "s": round(s, 2)}
+
+
+if DECISION:
+    check("decision", c_decision)
+else:
+    check("chat", c_chat)
+
+if not DECISION and R["claimed_features"].get("tool_calling") == "yes":
     TOOLS = [{"type": "function", "function": {"name": "get_weather", "description": "Get the current weather for a city",
               "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]
 
@@ -231,7 +254,7 @@ def png(w, h, rgb):
         chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
 
 
-if R["claimed_features"].get("image_input") == "yes":
+if not DECISION and R["claimed_features"].get("image_input") == "yes":
     def c_image():
         url = "data:image/png;base64," + base64.b64encode(png(224, 224, (220, 20, 20))).decode()
         r = chat([{"role": "user", "content": [{"type": "image_url", "image_url": {"url": url}},
@@ -244,7 +267,33 @@ if R["claimed_features"].get("image_input") == "yes":
     check("image_input", c_image)
 
 # -- 4. performance spot-check -------------------------------------------------------------------------------------
-if not a.skip_perf and R["claims"]:
+if DECISION and not a.skip_perf and R["claims"]:
+    # decision model: perf.py/c4 drive chat; measure prefill as prompt tokens / s of a one-question decision.
+    base = "The quick brown fox jumps over the lazy dog while the customer waits for an answer about the invoice. "
+    for k, target in (("prefill_1k", 1160), ("prefill_2k", 2230)):
+        try:
+            n = max(1, target // 20)
+            doc = lambda i: f"[nonce {i} {time.time()}] " + base * n
+            r, _ = sysone(doc(0))  # warm up
+            ts, toks = [], None
+            for i in range(1, 4):
+                r, s = sysone(doc(i))
+                ts.append(s)
+                u = (r.get("usage") or {}) if isinstance(r, dict) else {}
+                toks = u.get("prompt_tokens") or u.get("input_tokens") or toks
+            est = toks is None
+            toks = toks or len(doc(1)) / 4.0
+            R["perf"][k] = round(toks / (sum(ts) / len(ts)), 1)
+            R["perf"][k + "_tokens"] = toks
+            R["perf"][k + "_tokens_estimated"] = est
+        except Exception as e:
+            R["perf"][k + "_error"] = f"{type(e).__name__}: {e}"
+    for k, claim in R["claims"].items():
+        got = R["perf"].get(k)
+        if isinstance(claim, float) and isinstance(got, (int, float)) and claim:
+            R["ratios"][k] = round(got / claim, 3)
+    step("perf", any(k in R["perf"] for k in ("prefill_1k", "prefill_2k")))
+elif not a.skip_perf and R["claims"]:
     subprocess.run([vpy, "-m", "pip", "install", "-q", "requests", "jinja2"], env=env)
     perf_log = os.path.join(OUT, "perf.log")
     with open(perf_log, "w", encoding="utf-8", errors="replace") as f:
