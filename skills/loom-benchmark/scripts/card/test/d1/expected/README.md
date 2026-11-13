@@ -37,11 +37,14 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 | 4 streams, aggregate decode tok/s | n/a | n/a | n/a | n/a | n/a |
 | speculative decoding, drafted tokens accepted | n/a | n/a | n/a | n/a | n/a |
 
-- llama.cpp: build `llamacpp-rocm/b1357`, server arguments `-ngl 99 -np 4 -c 48000`.
-- Loom: speculative decoding off.
-- Apples to apples: per model one drafting choice for Loom and llama.cpp, from what is published for this exact model (an MTP head in the GGUF, else the model maker's or Z-Lab's DFlash/assistant drafter, else none; never n-gram). The 1-stream rows (decode, decode_2k, decode_32k, prefill) run each engine loaded once with it, each with its own depth (recorded below); 4 streams run with drafting off on both. Anything llama.cpp cannot run is listed below.
-- Same GGUF on both engines, tokens per second. Loom: client-side timing; llama.cpp: server-side timings. Runs per value: decode and prefill not recorded (mean), 4 streams not recorded (median).
-- Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs): Loom, served with the active wait, and llama.cpp on the same runner; runners differ between sessions.
+**Methodology**
+
+- Compared: Loom against llama.cpp ROCm `llamacpp-rocm/b1357`; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with the active wait. Values are the mean of not recorded rounds (4 streams: median of not recorded); Loom is timed by the client, llama.cpp by its server.
+- Drafting, 1-stream rows (decode, decode_2k, decode_32k, prefill): no drafting on either engine (no MTP head in the GGUF and no drafter published for this exact model). Each engine is loaded once for all these rows.
+- 4 streams: both engines loaded with drafting off, 4 parallel requests, aggregate tokens per second.
+- Rows: decode = short-context decode; decode_2k / decode_32k = decode after a ~2k / ~32k-token context; prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode.
+- llama.cpp ROCm server arguments: `-ngl 99 -np 4 -c 48000`.
+- Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs); runners differ between sessions.
 - Measured 2026-10-29; device not recorded; hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered); source: [loom-factory run 40842422037](https://github.com/loom-fun/loom-skills/actions/runs/40842422037).
 - Roofline: not computed.
 - — not measured; n/a not applicable.
