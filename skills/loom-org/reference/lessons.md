@@ -2,6 +2,15 @@
 
 Detail behind the rules in SKILL.md. Rules first, reasons after.
 
+## Publishing: verify the live card
+- `make_info.py build` used to write `./info.json` (the current directory) when `-o` was omitted, while
+  `render_card.py` and `publish_package.py upload` read `PKG/info.json`. Wrapper scripts that omitted `-o` published
+  the OLD info.json next to regenerated programs (Nov 12: 12 cards carried gates and sessions of other programs, and
+  card-only perf republishes never landed). The default is now `PKG/info.json`.
+- After every upload, fetch `https://huggingface.co/loom-fun/REPO/resolve/main/info.json` and confirm the new session
+  id (`performance.sessions[-1].source`) and the gates' `programs_sha256` equal the published package's; an upload
+  that "succeeded" is not a published card until the live file says so.
+
 ## Memory budget
 - `make_info.py build --from-info` copies the old `card` block; only `--memory-bytes` changes it. A regenerated card
   once kept its old budget while build.py printed a larger one. The build now refuses a carried value when the published gates' programs

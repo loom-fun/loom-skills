@@ -3068,7 +3068,9 @@ def seg_tokens():
     workgroup memory (longer runs go one token at a time); 0 when the decode path keeps the split kernel."""
     if not (os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and D in (64, 128) and KVH <= 2):
         return 0
-    ts = min(gen_draft.DRAFT["depth"] + 1, 65536 // (G * 4 * (D + 32)), SEG_TS_MAX)
+    # at least 3 tokens even for depth 1: a depth-1 build with 2-token segments ran slower at long context than the same
+    # spans in 3-token segments (Qwen2.5-1.5B 16k-32k: 76 vs 95-98 tok/s), and tune measures depths on one build
+    ts = min(max(gen_draft.DRAFT["depth"] + 1, 3), 65536 // (G * 4 * (D + 32)), SEG_TS_MAX)
     return ts if ts >= 2 else 0
 
 
