@@ -42,10 +42,17 @@
     {
      "name": "dual",
      "build": {}
+    },
+    {
+     "name": "nopeel",
+     "build": {
+      "FLASH2_PEEL": "0"
+     }
     }
    ],
    "steps": [
-    "ktest:dual"
+    "ktest:dual",
+    "ktest:nopeel"
    ],
    "kit": "gemma4"
   }
