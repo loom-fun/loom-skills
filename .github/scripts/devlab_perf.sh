@@ -58,6 +58,23 @@
 #          determinism:V:C:R    determinism.py (issue #39's script, when present)
 #          ktest:V              make_kernel_tests.py + run_kernel_tests.sh with V's kit
 #          gates:V:LEVEL        gates.sh against llama.cpp
+# Runner: "runner": "strix" (default) | "r9700" on the experiment or a job picks the DevLab runner (workflow runs-on). On the
+#   R9700 (gfx1201, 32 GB VRAM, 31 GB host RAM, no HIP headers, no Vulkan loader) this script installs libvulkan1 +
+#   mesa-vulkan-drivers (sudo -n apt-get), sets LOOM_MEMORY_CAP_GIB=32 (the budget is VRAM there, not host RAM: memcheck.sh
+#   would otherwise refuse anything above 60 % of the host's RAM) and clamps memory_bytes to 30000000000 (override with
+#   "memory_bytes_r9700" on the job/experiment: the per-model budget from fit/verdict.json). llama.cpp ROCm = lemonade's
+#   gfx120X build (fetch_llamacpp.sh finds it), Vulkan = b12211. A registration failure of a package (today: WMMA kernels
+#   before the gfx12 twins land) ends that step at once as ERROR with the first diagnostics in the log.
+#
+# KERNEL TEST ON THE R9700 (copy into .github/devlab/perf.json on your branch, label your PR devlab-perf; the dual-target
+# twins K_rdna4 run on gfx12 through run_kernel_tests.sh once the package carries them; "build": {} rebuilds the package from
+# this branch with the card's own settings; a job that only tests kernels sets "kit" to the model's kit or null):
+#   {"card": "loom-fun/unsloth-Qwen3-0.6B-loom", "memory_bytes": 30000000000, "kit": null, "llamacpp": "b1375",
+#    "runner": "r9700",
+#    "jobs": [{"name": "ktest-r9700", "variants": [{"name": "dual", "build": {}}], "steps": ["ktest:dual"]}]}
+#   result: "PASS (N/N passed; M skipped)" in summary.json; per-case lines in ktest_dual.log (artifact devlab-perf-ktest-r9700).
+#   Add "LOOM_RDNA4": "1" to the variant's build env when the branch's default is off; steps "perf:dual:1" / "c4:dual" time the
+#   rebuilt package on the R9700 and "llama@vulkan.np1:1" / "llamac4" run the baselines on the same runner.
 # Writes WORK/<job>/out (summary.json, *.jsonl, *.log). Every server it starts is stopped at exit.
 set -uo pipefail
 exp=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); job=${2:?usage: devlab_perf.sh EXPERIMENT.json JOB}
@@ -75,8 +92,18 @@ kit=$(q "print((j['kit'] if 'kit' in j else e.get('kit')) or '-')"); tag=$(q "pr
 steps=$(q "print(' '.join(j['steps']))")
 vtag=$(q "print(j.get('llamacpp_vulkan') or e.get('llamacpp_vulkan') or '-')")
 vkv=$(q "print(j.get('vulkan_kv') or e.get('vulkan_kv') or 'auto')")
+RUNNER=$(q "print(j.get('runner') or e.get('runner') or 'strix')")
+if [ "$RUNNER" = r9700 ]; then
+  rm9=$(q "print(j.get('memory_bytes_r9700') or e.get('memory_bytes_r9700') or '')")
+  if [ -n "$rm9" ]; then mem=$rm9; elif [ "$mem" -gt 30000000000 ]; then echo "r9700: memory_bytes $mem clamped to 30000000000 (32 GB VRAM)"; mem=30000000000; fi
+  export LOOM_MEMORY_CAP_GIB=${LOOM_MEMORY_CAP_GIB:-32}   # the budget lives in VRAM: memcheck.sh's 60 %-of-host-RAM rule does not apply
+  if ! ldconfig -p 2>/dev/null | grep -q 'libvulkan\.so\.1' || ! ls /usr/share/vulkan/icd.d/radeon_icd*.json >/dev/null 2>&1; then
+    { sudo -n apt-get install -y libvulkan1 mesa-vulkan-drivers || { sudo -n apt-get update -qq && sudo -n apt-get install -y libvulkan1 mesa-vulkan-drivers; }; } >/dev/null 2>&1 \
+      || echo "WARNING: could not install libvulkan1 mesa-vulkan-drivers (the @vulkan steps will fail)"
+  fi
+elif [ "$RUNNER" != strix ]; then echo "unknown runner $RUNNER (strix | r9700)"; exit 1; fi
 BK=rocm; bkt=-   # the llama.cpp backend of the step running (set by the "@vulkan" suffix) and its file-name infix
-echo "job $job: variants $variants; steps $steps; runner $(hostname)"
+echo "job $job: variants $variants; steps $steps; runner $RUNNER $(hostname); memory_bytes $mem"
 hostname > "$out/runner.txt"
 
 cleanup() {
@@ -230,7 +257,8 @@ serve_alone() { # serve_alone VARIANT
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
   local aw; aw=$(qv "$1" "print(0 if v.get('active_wait') is False else 1)")
-  step "serve $1"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" | tail -2
+  step "serve $1"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
+  grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null
 }
 LSPEC=""
@@ -292,7 +320,7 @@ for s in $steps; do
       for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
       "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
       ms=(); ids=(); for v in $variants; do ms+=("$D/$v/pkg/model_ab.json"); ids+=("$cardid-$v"); done
-      nv=${#ms[@]}; abmem=$(( 11000000000 * nv + 4000000000 ))
+      nv=${#ms[@]}; abmem=$(( 11000000000 * nv + 4000000000 )); [ "$RUNNER" = r9700 ] && [ "$abmem" -gt "$mem" ] && abmem=$mem
       step "ab: one loom-serve with $nv packages ($abmem bytes)"
       "$SV/serve.sh" abserve "$PORT" amdgpu "$abmem" "${ms[@]}" | tail -2
       "$T" "$here/.github/scripts/ab_decode.py" "$url" "${ids[@]}" --rounds "$p1" --think "${p2:-$TH}" --log "$out/ab.jsonl" 2>&1 | tee "$out/ab.log"
