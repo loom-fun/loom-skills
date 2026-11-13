@@ -47,7 +47,8 @@
      "properties": {
       "name": {"type": "string", "description": "The engine compared with, e.g. llama.cpp"},
       "version": {"type": ["string", "null"], "description": "Its build, e.g. llamacpp-rocm/b1355"},
-      "args": {"type": ["string", "null"], "description": "The exact server arguments (model path, host and port left out)"}
+      "args": {"type": ["string", "null"], "description": "The exact server arguments (model path, host and port left out)"},
+      "differs": {"type": "array", "items": {"type": "string"}, "description": "Notes the card must show: a cell llama.cpp cannot run (not supported, with the reason) or a Loom-side limitation, one line each"}
      }
     },
     "baselines": {
