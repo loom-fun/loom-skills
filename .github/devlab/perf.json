@@ -7,8 +7,23 @@
  "llamacpp": "b1375",
  "jobs": [
   {
+   "name": "ktest-q06",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "kit": null,
+   "variants": [
+    {
+     "name": "dual",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:dual"
+   ]
+  },
+  {
    "name": "ktest-q8b",
    "card": "loom-fun/unsloth-Qwen3-8B-loom",
+   "kit": null,
    "variants": [
     {
      "name": "dual",
@@ -20,36 +35,49 @@
      "config": {
       "kv_heads": 4
      }
-    },
-    {
-     "name": "kv16",
-     "build": {},
-     "config": {
-      "kv_heads": 16
-     }
     }
    ],
    "steps": [
     "ktest:dual",
-    "ktest:kv4",
-    "ktest:kv16"
-   ],
-   "kit": null
+    "ktest:kv4"
+   ]
   },
   {
-   "name": "ktest-gemma4-12b",
-   "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
+   "name": "ktest-llama3b",
+   "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom",
+   "kit": null,
    "variants": [
     {
      "name": "dual",
      "build": {}
-    },
+    }
+   ],
+   "steps": [
+    "ktest:dual"
+   ]
+  },
+  {
+   "name": "ktest-q35-4b",
+   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
+   "kit": null,
+   "variants": [
     {
-     "name": "g8",
-     "build": {},
-     "config": {
-      "kv_heads_global": 8
-     }
+     "name": "dual",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:dual"
+   ]
+  },
+  {
+   "name": "ktest-gemma4-12b",
+   "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
+   "kit": "gemma4",
+   "variants": [
+    {
+     "name": "dual",
+     "build": {}
     },
     {
      "name": "g4",
@@ -68,11 +96,37 @@
    ],
    "steps": [
     "ktest:dual",
-    "ktest:g8",
     "ktest:g4",
     "ktest:g2"
+   ]
+  },
+  {
+   "name": "ktest-q25-05b",
+   "card": "loom-fun/bartowski-Qwen2.5-0.5B-Instruct-loom",
+   "kit": null,
+   "variants": [
+    {
+     "name": "dual",
+     "build": {}
+    }
    ],
-   "kit": "gemma4"
+   "steps": [
+    "ktest:dual"
+   ]
+  },
+  {
+   "name": "ktest-q25-7b",
+   "card": "loom-fun/bartowski-Qwen2.5-7B-Instruct-loom",
+   "kit": null,
+   "variants": [
+    {
+     "name": "dual",
+     "build": {}
+    }
+   ],
+   "steps": [
+    "ktest:dual"
+   ]
   }
  ]
 }

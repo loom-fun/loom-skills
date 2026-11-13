@@ -40,8 +40,12 @@ def to_rdna4(text):
     # masked path: a lane's V^T keys are 8 * half + j
     sub(r"%iota16 = vector\.iota %c0_i32 step %c1_i32m : vector<16xi32>",
         "%iota16 = vector.iota %lane_h8_i32 step %c1_i32m : vector<8xi32>")
-    for t in ("f16", "f32", "i32", "i1"):
-        sub(rf"vector<16x{t}>", f"vector<8x{t}>")
+    # the operand types (MMA fragments, their masks and the Q load); NOT the K/V staging vectors, which can be
+    # vector<16xf16> too (head_dim / waves per workgroup = 16 dims per lane) and are not WMMA operands
+    operand = re.compile(r"vector\.fragment|vector\.mma|%zero16h|%iota16|%thr_v|%lo_v|%mhi|%mlo|%m\d+_\d+ = vector\.andi|"
+                         r"%vs\d|%qraw|%qh\d+ = vector\.fptrunc|%pt\d+_h = ")
+    text = "\n".join(re.sub(r"vector<16x(f16|f32|i32|i1)>", r"vector<8x\1>", ln) if operand.search(ln) else ln
+                     for ln in text.split("\n"))
     # partial tile epilogue: element i of this lane is row i + 8 * half
     sub(r"(%col_base = index\.add %\w+, )%lane_half : index", r"\1%lane_h8 : index")
     text = re.sub(r"(%dc(\d+)_(\d+) = index\.constant )(\d+)( : index)",
