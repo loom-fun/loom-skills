@@ -1,7 +1,65 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "rebuild-a: benchmark-rule rebuilds (drafting on, ctx_max 0, occ_min 2); reference = live card",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "spark25",
+   "spec": "XHToken/Spark-X2.5-4B-GGUF:Spark-X2.5-4B-Q4_K_M.gguf",
+   "reference": "loom-fun/XHToken-Spark-X2.5-4B-loom",
+   "model_id": "XHToken/Spark-X2.5-4B"
+  },
+  {
+   "name": "spark26",
+   "spec": "bartowski/Spark-X2.6-4B-GGUF:Spark-X2.6-4B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+   "model_id": "XHToken/Spark-X2.6-4B"
+  },
+  {
+   "name": "lfm3-17b",
+   "spec": "bartowski/LFM3-1.7B-GGUF:LFM3-1.7B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-LFM3-1.7B-loom",
+   "model_id": "LiquidAI/LFM3-1.7B"
+  },
+  {
+   "name": "q35-08b",
+   "spec": "unsloth/Qwen3.5-0.8B-GGUF:Qwen3.5-0.8B-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3.5-0.8B-loom",
+   "model_id": "Qwen/Qwen3.5-0.8B"
+  },
+  {
+   "name": "q35-2b",
+   "spec": "unsloth/Qwen3.5-2B-GGUF:Qwen3.5-2B-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3.5-2B-loom",
+   "model_id": "Qwen/Qwen3.5-2B"
+  },
+  {
+   "name": "gemma3-1b",
+   "spec": "ggml-org/gemma-3-1b-it-GGUF:gemma-3-1b-it-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-gemma-3-1b-it-loom",
+   "model_id": "google/gemma-3-1b-it"
+  },
+  {
+   "name": "q3-4b-2507",
+   "spec": "unsloth/Qwen3-4B-Instruct-2507-GGUF:Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+   "model_id": "Qwen/Qwen3-4B-Instruct-2507"
+  },
+  {
+   "name": "q3-vl-4b",
+   "spec": "unsloth/Qwen3-VL-4B-Instruct-GGUF:Qwen3-VL-4B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom",
+   "model_id": "Qwen/Qwen3-VL-4B-Instruct"
+  },
+  {
+   "name": "q3-4b",
+   "spec": "ggml-org/Qwen3-4B-GGUF:Qwen3-4B-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Qwen3-4B-loom",
+   "model_id": "Qwen/Qwen3-4B"
+  },
+  {
+   "name": "gemma4-e4b",
+   "spec": "unsloth/gemma-4-E4B-it-GGUF:gemma-4-E4B-it-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "model_id": "google/gemma-4-E4B-it"
+  }
  ]
 }
