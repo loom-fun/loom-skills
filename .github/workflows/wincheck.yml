@@ -4,7 +4,7 @@ name: wincheck
 # model in .github/wincheck/targets.json. Runs on a push to a wincheck/** branch.
 on:
   push:
-    branches: ["wincheck/**", "!wincheck/base"]
+    branches: ["wincheck/**", "!wincheck/base", "!wincheck/r9700-llama**"]
 
 permissions:
   contents: read

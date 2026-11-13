@@ -32,6 +32,15 @@ jobs:
             skills/loom-benchmark
             skills/loom-setup
             skills/loom-port-llm/starter
+      - name: bandwidth
+        run: |
+          find /opt/rocm* -name hip_runtime.h 2>/dev/null | head
+          ls -d /opt/rocm* ; which hipcc; hipcc --version 2>&1 | head -5
+          for rp in /opt/rocm/core-* /opt/rocm; do
+            [ -f "$rp/include/hip/hip_runtime.h" ] || continue
+            hipcc --rocm-path="$rp" -O3 --offload-arch=gfx1201 .github/wincheck/bw.hip -o $RUNNER_TEMP/bw && break
+          done
+          $RUNNER_TEMP/bw && $RUNNER_TEMP/bw || true
       - name: smoke
         run: |
           set -x
