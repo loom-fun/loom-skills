@@ -1,0 +1,76 @@
+name: wincheck
+# Windows red-team of loom-fun cards: on AMD DevLab Dispatch Windows Strix Halo runners, run each card's Quick start
+# verbatim (Windows PowerShell) and spot-check its Loom claims (.github/wincheck/wincheck.py). One matrix job per
+# model in .github/wincheck/targets.json. Runs on a push to a wincheck/** branch.
+on:
+  push:
+    branches: ["wincheck/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wincheck-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  models:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        run: python3 -c "import json; m=json.load(open('.github/wincheck/targets.json'))['models']; print('matrix='+json.dumps({'repo': m}))" >> "$GITHUB_OUTPUT"
+
+  check:
+    needs: models
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.models.outputs.matrix) }}
+    name: ${{ matrix.repo }}
+    runs-on: [windows, strix-halo, devlab-dispatch]
+    timeout-minutes: 300
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_HUB_DOWNLOAD_TIMEOUT: "120"
+      HF_HUB_ETAG_TIMEOUT: "60"
+      PYTHONUTF8: "1"
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/wincheck
+            skills/loom-benchmark
+            skills/loom-port-llm/starter
+      - name: wincheck
+        run: |
+          $slug = "${{ matrix.repo }}".Split("/")[1]
+          "SLUG=$slug" >> $env:GITHUB_ENV
+          python --version
+          python .github/wincheck/wincheck.py "${{ matrix.repo }}" "$env:RUNNER_TEMP\wincheck-out"
+          if ($LASTEXITCODE -ne 0) { throw "wincheck exited $LASTEXITCODE" }
+      - name: summary
+        if: always()
+        run: |
+          $f = "$env:RUNNER_TEMP\wincheck-out\result.json"
+          if (Test-Path $f) {
+            $r = Get-Content $f -Raw | ConvertFrom-Json
+            "### ${{ matrix.repo }}: $($r.verdict)" >> $env:GITHUB_STEP_SUMMARY
+            '```json' >> $env:GITHUB_STEP_SUMMARY
+            (Get-Content $f -Raw).Substring(0, [Math]::Min(6000, (Get-Content $f -Raw).Length)) >> $env:GITHUB_STEP_SUMMARY
+            '```' >> $env:GITHUB_STEP_SUMMARY
+          }
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wincheck-${{ env.SLUG }}
+          path: ${{ runner.temp }}/wincheck-out
+          retention-days: 30
+      - name: clean up
+        if: always()
+        run: Remove-Item -Recurse -Force "$env:RUNNER_TEMP\wincheck-work","$env:RUNNER_TEMP\wincheck-out" -ErrorAction SilentlyContinue
