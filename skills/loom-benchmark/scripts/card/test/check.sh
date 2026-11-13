@@ -124,6 +124,13 @@ assert len(rows) == 1 and f'| {r.NO} fail' in rows[0], rows
 assert assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])['failing'] == ['agent']" "$C" "$here/../../../../loom-org/scripts" "$tmp/failing" \
   && echo "OK   failing: a card with a failing gate validates, renders it as fail and org_status counts it failing" \
   || { echo "FAIL failing: a card with a failing gate does not publish as failing"; bad=1; }
+# a gate passed on OTHER programs is no evidence for this package: the card says "not re-run", never a pass
+mkdir -p "$tmp/oldgate"; cp -r "$tmp/flint/." "$tmp/oldgate/"
+py -c "import json, sys; p = sys.argv[1] + '/info.json'; i = json.load(open(p)); g = i['gates']['golden']; g['status'] = 'pass'; g['programs_sha256'] = 'ab' * 32; json.dump(i, open(p, 'w'), indent=1)" "$tmp/oldgate"
+py "$C/render_card.py" "$tmp/oldgate" >/dev/null 2>&1
+grep -E '^\| `golden` \|' "$tmp/oldgate/README.md" | grep -q 'not re-run on this package' \
+  && echo "OK   gates: a pass stamped with other programs renders as not re-run" \
+  || { echo "FAIL gates: a pass on other programs still renders as a pass"; bad=1; }
 # a card from one devlab-perf job: one table (llama.cpp, Loom, margin, roofline), a footnote says where the numbers are
 # from, and the session's device and SDK (pull_devlab.py --identity: runner.txt, install.log) and runs per value are on the card
 dlrows "$F/evidence/verify_loom.jsonl" "$tmp/dl_loom.jsonl" 0.6
