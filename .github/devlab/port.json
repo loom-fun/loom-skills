@@ -1,7 +1,7 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "gemma-4-26B-A4B and gemma-4-12B regen from main (dense KV pages re-landed in #483), reference = the published cards.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {"name": "gemma26b-regen", "spec": "lmstudio-community/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-Q4_K_M.gguf", "reference": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom", "model_id": "google/gemma-4-26B-A4B-it"},
+  {"name": "gemma12b-regen", "spec": "unsloth/gemma-4-12B-it-GGUF:gemma-4-12b-it-Q4_K_M.gguf", "reference": "loom-fun/unsloth-gemma-4-12B-it-loom", "model_id": "google/gemma-4-12B-it"}
  ]
 }
