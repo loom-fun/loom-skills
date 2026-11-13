@@ -73,6 +73,31 @@
     "llamac4@vulkan.perslot.nospec"
    ],
    "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:AtomicChat/gemma-4-E2B-it-assistant-GGUF/gemma-4-E2B-it-assistant.Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+  },
+  {
+   "name": "e4b",
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes": 31000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan.np1.nospec:2",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec"
+   ],
+   "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:AtomicChat/gemma-4-E4B-it-assistant-GGUF/gemma-4-E4B-it-assistant.Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
   }
  ]
 }
