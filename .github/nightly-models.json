@@ -53,7 +53,7 @@
    "slug": "nemotron-3.5-bolt-e4b",
    "memory_bytes": 36000000000,
    "kit": "gemma4",
-   "llamacpp": "b1368",
+   "llamacpp": "b1374",
    "features": [
     "vision",
     "draft",
