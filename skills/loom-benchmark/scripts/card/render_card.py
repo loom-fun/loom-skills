@@ -175,7 +175,7 @@ def methodology(base, extra, spec, drafter, runs_dec, runs_c4):
            "prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode."]
     for n, b in engines:
         out.append(f"- {n} server arguments: " + (f"`{b['args']}`." if b.get("args") else "not recorded."))
-    ns = [f"{n}: {u}" for n, b in engines for u in (b.get("differs") or [])]
+    ns = [u if u.startswith("Loom:") else f"{n}: {u}" for n, b in engines for u in (b.get("differs") or [])]
     if ns:
         out.append("- Not supported / not measured: " + "; ".join(ns) + ".")
     return out
