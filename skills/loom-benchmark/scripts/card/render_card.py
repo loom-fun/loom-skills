@@ -452,10 +452,19 @@ def render(d):
             res = f"{NO} no evidence" if gate_applies(name, kind, feats) else f"{NA} not applicable"
         else:
             key = (g["source"], g["level"], g["date"])
-            if key not in ev:
-                ev.append(key)
-            res = (f"{YES} pass" if g["status"] == "pass" else f"{NO} fail")
-            res += (f" ({g['detail']})" if g["detail"] else "") + f" {mark(ev.index(key) + 1)}"
+            gsha = g.get("programs_sha256")
+            if gsha and gsha != here and g["status"] == "pass":   # a pass on other programs says nothing about this package
+                res = (f"{UNKNOWN} not re-run on this package (the last pass was on a previous build, sha256 {short(gsha)}; "
+                       f"the nightly gates re-run it)")
+            elif gsha and gsha != here:   # a failure is never hidden
+                if key not in ev:
+                    ev.append(key)
+                res = f"{NO} fail on a previous build (sha256 {short(gsha)}), not re-run on this package {mark(ev.index(key) + 1)}"
+            else:
+                if key not in ev:
+                    ev.append(key)
+                res = (f"{YES} pass" if g["status"] == "pass" else f"{NO} fail")
+                res += (f" ({g['detail']})" if g["detail"] else "") + f" {mark(ev.index(key) + 1)}"
         L.append(f"| `{name}` | {desc} | {res} |")
     L.append("")
     for i, (sid, level, date) in enumerate(ev, 1):
