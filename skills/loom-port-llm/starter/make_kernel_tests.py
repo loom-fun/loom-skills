@@ -1018,7 +1018,7 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
             if swiglu:
                 save(tag + "_u", Ur); wdecl += f'  %u = check.file.read.npy path("{tag}_u.npy") : {ty(Ur)}\n'; wargs += ", %u"; wtys += ", " + ty(Ur)
             tol = 3.0e-2 * float(np.abs(yv).std() + 1e-6)
-            cases.append(f"""check.case public @{tag} {{
+            _case = (f"""check.case public @{tag} {{
   %rows = check.literal value({rows}) : index
   %k = check.literal value({K}) : index
   %n = check.literal value({n_use}) : index
@@ -1031,6 +1031,9 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   check.return
 }}
 """)
+            cases.append(_case)
+            if os.environ.get("KTEST_GEMM_ERR", "0") not in ("", "0"):   # error probe: zero tolerance, so the failure detail reports the max abs/rel error
+                cases.append(_case.replace(f"@{tag} {{", f"@{tag}_err {{", 1).replace(f"atol({tol:.3e}) rtol(1.0e-2)", "atol(0.0) rtol(0.0)", 1))
 # 3c. a verify span at long context: ATTN_MT tokens of one row at consecutive positions past ATTN_MT_FROM take the
 # multi-token split-K path (one K/V load per key for the span); K/V written straight into the arena (identity pages).
 # The model's attention scale and sinks are in the reference; a sliding layer (window W) gets its own case.

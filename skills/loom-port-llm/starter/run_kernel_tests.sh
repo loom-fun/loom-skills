@@ -8,7 +8,7 @@ cd "$dir" || exit 1
 "$bin/python" - "$pkg/program/llm.loom" <<'PY'
 import re, sys
 lib = open(sys.argv[1]).read()
-defined = set(re.findall(r'kernel\.def export\("([^"]+)"\)', lib)) | set(re.findall(r'kernel\.def[^@]*@([\w.]+)', lib))
+defined = set(re.findall(r'kernel\.def export\("([^"]+)"\)', lib)) | set(re.findall(r'kernel\.def[^@]*@([\w.]+)', lib)) | set(re.findall(r'^kernel\.def[^\n]*export\("([^"]+)"\)', lib, re.M))   # a twin's def has target(@rdna4) before export
 text = open("cases.loom-test").read()
 defined |= set(re.findall(r'kernel\.def export\("([^"]+)"\)', text))   # test helper kernels
 blocks = re.split(r'(?m)^(?=check\.case )', text)
