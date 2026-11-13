@@ -7,7 +7,7 @@ on:
   pull_request:
     paths: ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py", "skills/loom-port-llm/starter/kit_source.py", "skills/loom-org/scripts/**", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
   push:
-    branches: [main]
+    branches: [main, r9700]
     paths: ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py", "skills/loom-port-llm/starter/kit_source.py", "skills/loom-org/scripts/**", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
 
 permissions:

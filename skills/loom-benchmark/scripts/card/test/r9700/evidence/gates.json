@@ -1,0 +1,44 @@
+{
+ "verdict": "PASS",
+ "level": "quick",
+ "pkg_hash": "fixture",
+ "seconds": 0,
+ "ts": "2026-11-14T10:00:00",
+ "gates": {
+  "golden": {
+   "pass": true,
+   "log": "gates_golden.log",
+   "seconds": 0
+  },
+  "compare": {
+   "pass": true,
+   "log": "gates_compare.log",
+   "seconds": 0
+  },
+  "consistency": {
+   "pass": true,
+   "log": "gates_consistency.log",
+   "seconds": 0
+  },
+  "agent": {
+   "pass": true,
+   "log": "gates_agent.log",
+   "seconds": 0
+  },
+  "agent_think_off": {
+   "pass": true,
+   "log": "gates_agent_think_off.log",
+   "seconds": 0
+  },
+  "sampling": {
+   "pass": true,
+   "log": "gates_sampling.log",
+   "seconds": 0
+  },
+  "needle": {
+   "pass": true,
+   "log": "gates_needle.log",
+   "seconds": 0
+  }
+ }
+}
