@@ -3,7 +3,7 @@
 usage: tune.py WORKDIR PORT MEMORY_GIB MODEL_ID (MEMORY_GIB is ignored: build.py sizes each candidate)   (WORKDIR holds cfg.json, tok/tokenizer.json and pkg/; Loom must not be
                                                  serving another model: one model is loaded at a time)
 Candidates: no drafting; MTP (the GGUF's NextN block) at depths 1-4; DFlash (cfg["drafter"], found by find_drafter.py)
-at depths 1, 2, 3, 5, 7 (capped by its block); a Gemma-4 assistant (cfg["assistant"]) at depths 1-4; n-gram prompt lookup (any model, no weights) at depths 1, 2, 3, 5. Each method
+at depths 1, 2, 3, 5, 7 (capped by its block); a Gemma-4 assistant (cfg["assistant"]) at depths 1-4; n-gram prompt lookup (any model, no weights; only with TUNE_NGRAM=1: the benchmark rule excludes it) at depths 1, 2, 3, 5. Each method
 is built once; a depth is only a model.json setting (the width-specialized stages compile on first use). Every
 candidate is served alone and timed on decode-heavy requests (short essay, code, a tool-call turn, a reasoning answer,
 a code edit that returns most of its input as agents' file edits do, and one decode after the 32k-token document (the card's
@@ -81,7 +81,12 @@ NO_LOSS = 0.98
 # Context gate (build_draft.py SPEC_CTX_MAX): a candidate that wins every row but the long-document one is retried with
 # drafting off from this causal position on, so short context keeps the drafting gain (Ornith-1.5-35B depth 3: short rows
 # 118 vs 62 tok/s, 16k 44.9 vs 53.5). Below the long row's prompt, above the short rows'. TUNE_CTX_MAX=0 skips the retry.
-CTX_GATE = int(os.environ.get("TUNE_CTX_MAX", "3500"))
+CTX_GATE = int(os.environ.get("TUNE_CTX_MAX", "3500"))   # runtime-adaptive, so allowed by the benchmark rule
+# Benchmark rule (Nov 13; loom-benchmark): 4 streams run undrafted on every engine, so tune never tries ungated 4-stream
+# drafting (occ_min stays 2). A no-draft package is fine when llama.cpp is also fastest undrafted; when it isn't, the card is
+# rebuilt with TUNE_REQUIRE_DRAFT=1: tune then ships its best drafter (never "none" while one passes the exact and concurrency
+# checks).
+RULE = os.environ.get("TUNE_REQUIRE_DRAFT", "0") == "1"
 
 
 def measure(url, model, chat, context=0, rows=1):
@@ -273,7 +278,8 @@ def main():
             kinds.append(("dflash", [1, 2, 3, 5, 7]))   # shallow depths too: 4 streams verify rows x (depth + 1) tokens and long context pays per drafted token (Ornith-1.5-122B: depth 1 beats 3 at 4 streams and 32k)
         if (cfg.get("assistant") or {}).get("gguf"):
             kinds.append(("assist", [1, 2, 3, 4]))   # Gemma-4 assistant (gemma4 family)
-        kinds.append(("ngram", [1, 2, 3, 5]))   # every model: prompt lookup needs no drafter   # depth 1: LFM3-Omni-2B decode_32k 122 vs 108 at depth 2 (verify tokens pay 32k attention), decode_2k 206 vs 220
+        if os.environ.get("TUNE_NGRAM", "0") == "1":   # opt-in only: the benchmark rule allows no n-gram drafting (loom-benchmark)
+            kinds.append(("ngram", [1, 2, 3, 5]))   # prompt lookup needs no drafter; depth 1: LFM3-Omni-2B decode_32k 122 vs 108 at depth 2
     sys.path.insert(0, STARTER)
     import catalog
     if catalog.find(STARTER):   # a catalog package drafts with its MTP head or not at all (catalog.py)
@@ -389,7 +395,7 @@ def main():
         # real: Muse-Glimmer depth 3, 74 vs 48.6 tok/s) is better ungated. Build the ungated package (occ_min 0) and
         # measure ONLY its streams4 per depth (the single-stream rows are identical by construction); a depth takes the
         # better streams4 and its occ_min goes to cfg["drafter"].
-        if rows_n >= 2 and base_rows.get("streams4"):
+        if rows_n >= 2 and base_rows.get("streams4") and os.environ.get("TUNE_UNGATED", "0") == "1":   # off: benchmark rule
             upkg = os.path.join(work, f"pkg_tune_{kind}_u")
             sh(*build, upkg, *common, "--draft", kind, env=dict(os.environ, SPEC_OCC_MIN="0"))
             ucard = json.load(open(os.path.join(upkg, "model.json")))
@@ -502,7 +508,8 @@ def main():
             floor < 1.0 and r["margin"] >= (1 + NO_LOSS) / 2 * floor and geomean_margin(r["rows"], base_rows, llama_refs) >= 1.05 * base_geo)
     else:
         ok_margin = lambda r: r["margin"] >= NO_LOSS
-    ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
+    ranked = sorted([r for r in table if r["kind"] != "none" and (ok_margin(r) and r["decode_tps"] >= 1.03 * base
+                                                                  or RULE and r["decode_tps"] > 0)],
                     key=lambda r: -r["margin"])
     # Within NO_LOSS of the best margin (noise on these short requests; a wider band on a ratio near 1 would admit
     # every candidate), the higher geometric mean of the row ratios first: the context gate (ctx_max) now keeps the

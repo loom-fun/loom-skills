@@ -373,9 +373,8 @@
    "slug": "lfm3-1.7b",
    "memory_bytes": 13000000000,
    "kit": "lfm2moe",
-   "llamacpp": "b1370",
+   "llamacpp": "b1374",
    "features": [
-    "draft",
     "thinking-toggle"
    ]
   },
@@ -451,7 +450,7 @@
    "slug": "gemma-4-26b-a4b-it",
    "memory_bytes": 81000000000,
    "kit": "gemma4",
-   "llamacpp": "b1370",
+   "llamacpp": "b1374",
    "features": [
     "draft",
     "thinking-toggle"

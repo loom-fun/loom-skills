@@ -240,11 +240,11 @@ fi  # FROM=build
 
 # Image input: when the repo ships a vision projector (mmproj GGUF) of a family starter/vision has an
 # encoder plan for, cfg.json gets a "vision" block and the package an image component. VISION=0 skips it;
-# MMPROJ=file picks a projector. An unsupported family prints the reason and the port stays text-only
+# MMPROJ=file picks a projector; VISION_REPO=org/name takes it from another repo (a GGUF repo that ships none). An unsupported family prints the reason and the port stays text-only
 # (reference/vision.md: adding a family).
 if [ -z "$catalog" ] && [ "${VISION:-1}" != 0 ] && ! "$T" -c "import json,sys; sys.exit(0 if json.load(open('cfg.json')).get('vision') else 1)"; then
   step "2b vision"
-  HF=$hf "$T" "$K/vision/add_vision.py" cfg.json "$repo" ${MMPROJ:-} | tee vision.log | grep -v "^$"
+  HF=$hf "$T" "$K/vision/add_vision.py" cfg.json "${VISION_REPO:-$repo}" ${MMPROJ:-} | tee vision.log | grep -v "^$"
 fi
 
 # Speculative decoding is on by default: an MTP/NextN block in the GGUF (inspect records cfg["mtp"]) or a DFlash
@@ -259,6 +259,12 @@ fi
 
 if [ "$ref" != off ] && [ -s reference.json ] && [ -f cfg.json ] && ! "$T" -c "import json,sys; sys.exit(0 if json.load(open('cfg.json')).get('reference') else 1)"; then
   "$T" -I "$here/find_reference.py" apply cfg.json reference.json ${refpick:+--pick "$refpick"} | tee -a reference.log
+fi
+# CONTEXT_LENGTH=N: the context the card serves, when the GGUF's own value is lower than the model's native one
+# (a published card's context; the kernel tests and gates then run at it). Applied to cfg.json before the build.
+if [ -n "${CONTEXT_LENGTH:-}" ] && [ -f cfg.json ]; then
+  "$T" -c "import json; c = json.load(open('cfg.json')); c['context_length'] = int('$CONTEXT_LENGTH'); json.dump(c, open('cfg.json', 'w'), indent=1, ensure_ascii=False)"
+  echo "context_length set to $CONTEXT_LENGTH (CONTEXT_LENGTH)"
 fi
 
 step "3/6 build"
