@@ -1,12 +1,16 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "verify32k: card perf of the cards regenerated after #451 (Loom active wait vs llama.cpp ROCm and Vulkan nospec, same runner).",
+ "card": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
+ "memory_bytes": 35000000000,
+ "kit": null,
+ "llamacpp": "b1374",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "l31-8b",
+   "card": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
+   "memory_bytes": 35000000000,
+   "llama_spec": "--spec-type ngram-simple",
    "variants": [
     {
      "name": "card"
@@ -18,11 +22,17 @@
     "c4:card",
     "llama:2",
     "llama:2:long",
-    "llamac4"
+    "llamac4",
+    "llama@vulkan.np1.nospec:2",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec"
    ]
   },
   {
-   "name": "fn-mtp-b",
+   "name": "vl7",
+   "card": "loom-fun/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+   "memory_bytes": 21000000000,
+   "llama_spec": "",
    "variants": [
     {
      "name": "card"
@@ -30,11 +40,81 @@
    ],
    "steps": [
     "perf:card:2",
+    "perf:card:2:long",
     "c4:card",
     "llama:2",
-    "llamac4"
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan.np1.nospec:2",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec"
+   ]
+  },
+  {
+   "name": "q35-4b",
+   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
+   "memory_bytes": 28000000000,
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 5 -ngld 99",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan.np1.nospec:2",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec"
+   ]
+  },
+  {
+   "name": "q35-9b",
+   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "memory_bytes": 32000000000,
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan.np1.nospec:2",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec"
+   ]
+  },
+  {
+   "name": "o15-9b",
+   "card": "loom-fun/bartowski-Ornith-1.5-9B-loom",
+   "memory_bytes": 32000000000,
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "c4:card",
+    "llama:2",
+    "llama:2:long",
+    "llamac4",
+    "llama@vulkan.np1.nospec:2",
+    "llama@vulkan.np1.nospec:2:long",
+    "llamac4@vulkan.perslot.nospec"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
