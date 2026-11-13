@@ -24,7 +24,7 @@ two or three lines; if they disagree with this file, this file wins and the othe
    changes, no best-of-configurations. *Why: a user loads a server once.*
 4. **streams4 is the one load-time exception: both engines are loaded with drafting off and serve 4 parallel requests** (Loom: the
    same package with a `draft_depth` 0 override, variant `nodraft`; llama.cpp: a 4-slot server without `--spec-*`).
-   *Why: verifying drafts at 4 streams is not a configuration anyone ships.*
+   *Why: at 4 concurrent streams drafting usually costs more than it saves (measured on most cards); this is the one load-time exception the methodology allows, applied to both engines.*
 5. **Fair measurement.** Same GGUF, same DevLab runner and job, same prompts (nonce'd; no prompt-cache reuse), Loom with the active
    wait, 3 rounds averaged (streams4: median of 3), timing source disclosed (Loom client-side, llama.cpp server `timings`), one
    pinned llama.cpp build per backend. Compare engines only within one runner/job (ratios, never across runners).
