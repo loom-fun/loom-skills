@@ -988,6 +988,18 @@ def gemm_cases():
                 continue
             seen_g.add((fmt, sw))
             yield name, fmt, sw
+    if os.environ.get("KTEST_GEMM_ALL", "0") not in ("", "0"):   # formats no named projection above has (gemma4's bf16 / f32 per-layer matrices ...): the smallest tile-able weight of each
+        pick = {}
+        for name, t in T.items():
+            fmt = t.tensor_type.name.lower()
+            if (fmt, False) in seen_g or fmt not in _GEMM_FMTS or not name.endswith(".weight") or len(t.shape) != 2:
+                continue
+            k_, n_ = int(t.shape[0]), int(t.shape[1])
+            if k_ % 256 == 0 and n_ % 64 == 0 and n_ >= 128 and (fmt not in pick or k_ * n_ < pick[fmt][1]):
+                pick[fmt] = (name, k_ * n_)
+        for fmt, (name, _) in sorted(pick.items()):
+            seen_g.add((fmt, False))
+            yield name, fmt, False
 if os.environ.get("GEMM_TESTS", "1") == "1":
     for name, fmt, swiglu in gemm_cases():
         W = deq(name); n, K = W.shape
