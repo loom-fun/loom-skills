@@ -1,0 +1,48 @@
+name: r9700probe
+# Does one package serve both RDNA3/3.5 and RDNA4? Original Qwen3-0.6B card vs a probe build whose WMMA kernels are
+# target(@rdna3) with template-selected target(@rdna4) stubs (.github/wincheck/probe). Same job: original, then probe.
+on:
+  push:
+    branches: ["wincheck/r9700-probe**"]
+permissions:
+  contents: read
+concurrency:
+  group: r9700probe-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu: [strix-halo, radeon-r9700]
+    name: probe ${{ matrix.gpu }}
+    runs-on: ["${{ matrix.gpu }}", devlab-dispatch, self-hosted]
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/wincheck
+            skills/loom-benchmark
+      - name: probe
+        run: |
+          set -x
+          OUT=$RUNNER_TEMP/probe-out; mkdir -p $OUT; cd $RUNNER_TEMP
+          python3 -m venv venv && . venv/bin/activate && pip install -q "hrx-loom[hf]==0.1.0" requests jinja2
+          rocminfo | grep -E "Marketing Name|Name: +gfx"
+          loom-fetch https://huggingface.co/loom-fun/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --materialize=copy --output=orig > /dev/null
+          cp -r orig probe && cp $GITHUB_WORKSPACE/.github/wincheck/probe/llm.loom probe/program/llm.loom
+          P=$GITHUB_WORKSPACE/.github/wincheck/probe/probe.py
+          perf=""; [ "${{ matrix.gpu }}" = strix-halo ] && perf=--perf
+          for round in 1 2; do
+            python3 $P $RUNNER_TEMP/orig $OUT/orig_$round.json $perf || true
+            python3 $P $RUNNER_TEMP/probe $OUT/probe_$round.json $perf || true
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-${{ matrix.gpu }}
+          path: ${{ runner.temp }}/probe-out
