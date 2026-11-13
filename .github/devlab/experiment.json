@@ -1,21 +1,43 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context, --pool_backing=fixed): kernel tests on the GPU with a probe (one request, GTT, dmesg), and the full gate set (quick gates incl. spec + vision + over-capacity 400 + full-context needle) against llama.cpp b1371; Loom and llama.cpp take turns (the GGUF is 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "gemma4 kit dense KV pages: ktest, prefix-cache pairs, consistency vs llama.cpp and gates dev on the rebuilt packages (the card's own drafting config)",
+ "kit": "gemma4",
+ "llamacpp": "b1373",
  "variants": [
   {
-   "name": "fn-mtp-ktest-probe",
-   "memory_bytes": "none",
-   "serve_args": ["--pool_backing=fixed"],
-   "steps": ["ktest", "probe"]
+   "name": "bolt",
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "memory_bytes": 40000000000,
+   "build": {},
+   "steps": [
+    "ktest",
+    "pairs:3",
+    "consistency:6:llama",
+    "gates:dev"
+   ]
   },
   {
-   "name": "fn-mtp-full",
-   "memory_bytes": "none",
-   "serve_args": ["--pool_backing=fixed"],
-   "steps": ["gates:full"]
+   "name": "g26b",
+   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "memory_bytes": 81000000000,
+   "build": {},
+   "steps": [
+    "ktest",
+    "pairs:3",
+    "consistency:6:llama",
+    "gates:dev"
+   ]
+  },
+  {
+   "name": "g12b",
+   "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
+   "memory_bytes": 81000000000,
+   "build": {},
+   "steps": [
+    "ktest",
+    "pairs:3",
+    "consistency:6:llama",
+    "gates:dev"
+   ]
   }
  ]
 }

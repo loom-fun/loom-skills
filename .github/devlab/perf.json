@@ -1,40 +1,117 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context) against llama.cpp b1371 (draft-mtp n-max 3) on the same runner; two jobs, two runners (DevLab disks differ: the 4-streams step warms up before its timed runs). Loom and llama.cpp never run together (GGUF 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
- "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "_comment": "gemma4 kit: dense KV pages for narrow layer kinds, re-landed with every KV reader of the kind layout-aware (sliding flash2 for Bolt-E4B). main = 5cf5363 (no dense pages) vs this branch, same runner.",
+ "llamacpp": "b1373",
  "jobs": [
   {
-   "name": "fn-mtp",
+   "name": "bolt",
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "memory_bytes": 40000000000,
+   "kit": "gemma4",
    "variants": [
     {
-     "name": "card"
+     "name": "main",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "5cf5363"
+    },
+    {
+     "name": "new",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4"
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "c4:main",
+    "c4:new",
+    "ktest:new",
+    "consistency:new:6"
    ]
   },
   {
-   "name": "fn-mtp-b",
+   "name": "g26b",
+   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
    "variants": [
     {
-     "name": "card"
+     "name": "main",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ],
+     "ref": "5cf5363"
+    },
+    {
+     "name": "new",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "none"
+     ]
     }
    ],
    "steps": [
-    "perf:card:2",
-    "c4:card",
-    "llama:2",
-    "llamac4"
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "c4:main",
+    "c4:new",
+    "ktest:new",
+    "consistency:new:3"
+   ]
+  },
+  {
+   "name": "g12b",
+   "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "variants": [
+    {
+     "name": "main",
+     "build": {},
+     "build_args": [],
+     "ref": "5cf5363"
+    },
+    {
+     "name": "new",
+     "build": {},
+     "build_args": []
+    }
+   ],
+   "steps": [
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "perf:main:1",
+    "perf:main:1:long",
+    "perf:new:1",
+    "perf:new:1:long",
+    "c4:main",
+    "c4:new",
+    "ktest:new",
+    "consistency:new:3"
    ]
   }
- ],
- "llama_spec": "--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} --spec-draft-n-max 3 -ngld 99"
+ ]
 }
