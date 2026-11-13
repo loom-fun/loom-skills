@@ -1,28 +1,45 @@
 {
- "_comment": "R9700 validation (Qwen3-0.6B, runner r9700): llama.cpp ROCm (lemonade gfx120X b1375) and Vulkan (b12211) baselines on the R9700, and the package rebuilt from this branch ('build': {}) with Loom steps and the kernel tests. Until the gfx12 twins land, Loom registration fails on gfx1201 (WMMA kernels): the Loom steps then end as ERROR within seconds. The 'ktest on R9700' job template is documented at the top of .github/scripts/devlab_perf.sh.",
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
  "runner": "r9700",
- "memory_bytes": 30000000000,
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211",
+ "memory_bytes": 34000000000,
+ "llama_spec": "matched",
  "jobs": [
   {
-   "name": "r9700-q06",
+   "name": "unsloth-qwen3-0-6b-loom",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "dual",
+     "name": "card",
      "build": {}
+    },
+    {
+     "name": "nodraft",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
-    "llama:1",
-    "llama@vulkan.np1:1",
-    "llamac4",
-    "perf:dual:1",
-    "c4:dual",
-    "ktest:dual"
+    "func:card",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   }
- ]
+ ],
+ "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "kit": null,
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211"
 }
