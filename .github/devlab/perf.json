@@ -26,6 +26,8 @@
    ],
    "steps": [
     "func:card",
+    "ktest:card",
+    "gates:card:dev",
     "perf:card:3",
     "perf:card:3:long",
     "c4:nodraft",
