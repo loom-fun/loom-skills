@@ -31,14 +31,16 @@
   "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
   "live_kind": "dflash",
   "live_depth": 1,
-  "choice": "mtp",
+  "choice": "dflash",
   "provenance": [
-   "https://huggingface.co/bartowski/Ornith-1.5-35B-A3B-GGUF"
+   "https://huggingface.co/na0x2c6/Ornith-1.5-35B-A3B-DFlash-GGUF",
+   "https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B-DFlash"
   ],
-  "evidence": "qwen35moe.nextn_predict_layers=1, 4 nextn tensors",
-  "llama_spec": "--spec-type draft-mtp",
-  "llama_n_max": null,
-  "nmax_src": "llama.cpp default"
+  "evidence": "DFlash by the model maker (ornith-ai); GGUF = conversion of it. GGUF also has an MTP head",
+  "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:na0x2c6/Ornith-1.5-35B-A3B-DFlash-GGUF/Ornith-1.5-35B-A3B-DFlash-Q8_0.gguf} --spec-draft-n-max 8 -ngld 99",
+  "llama_n_max": 8,
+  "nmax_src": "ornith-ai/Ornith-1.5-35B-A3B-DFlash README (num_speculative_tokens 8)",
+  "note": "MTP head present but not yet supported by Loom (q4_0 NextN experts)"
  },
  "loom-fun/bartowski-Ornith-1.5-9B-loom": {
   "card": "loom-fun/bartowski-Ornith-1.5-9B-loom",
@@ -130,14 +132,16 @@
   "card": "loom-fun/bartowski-Ornith-1.5-122B-loom",
   "live_kind": "dflash",
   "live_depth": 1,
-  "choice": "mtp",
+  "choice": "dflash",
   "provenance": [
-   "https://huggingface.co/bartowski/Ornith-1.5-122B-GGUF"
+   "https://huggingface.co/kaivoss/Ornith-1.5-122B-DFlash2-GGUF",
+   "https://huggingface.co/incoai/Ornith-1.5-122B-DFlash2"
   ],
-  "evidence": "qwen35moe.nextn_predict_layers=1 (part 1 header; tensors in later part: helper verifies)",
-  "llama_spec": "--spec-type draft-mtp",
-  "llama_n_max": null,
-  "nmax_src": "llama.cpp default"
+  "evidence": "DFlash 2 from incoai (DFlash 2 authors), base ornith-ai/Ornith-1.5-122B; accepted by the orchestrator as the exact-model drafter",
+  "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:kaivoss/Ornith-1.5-122B-DFlash2-GGUF/Ornith-1.5-122B-DFlash2-Q4_K_M.gguf} --spec-draft-n-max 15 -ngld 99",
+  "llama_n_max": 15,
+  "nmax_src": "incoai/Ornith-1.5-122B-DFlash2 README (block size 16)",
+  "note": "MTP head present but not yet supported by Loom (q4_0 NextN experts)"
  },
  "loom-fun/unsloth-Qwen3.5-4B-loom": {
   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
@@ -312,16 +316,13 @@
   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
   "live_kind": "none",
   "live_depth": null,
-  "choice": "dflash",
-  "provenance": [
-   "https://huggingface.co/Anbeeld/gpt-oss-20b-DFlash-GGUF",
-   "https://huggingface.co/z-lab/gpt-oss-20b-DFlash"
-  ],
-  "evidence": "drafter published for this exact model by Z-Lab; GGUF = conversion of that release",
+  "choice": "none",
+  "provenance": [],
+  "evidence": "z-lab/gpt-oss-20b-DFlash exists but no llama.cpp-loadable GGUF upstream (Anbeeld repo has no .gguf files)",
   "drafter_file": null,
-  "llama_n_max": 7,
-  "nmax_src": "z-lab/gpt-oss-20b-DFlash README (num_speculative_tokens)",
-  "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:Anbeeld/gpt-oss-20b-DFlash-GGUF/FILE} --spec-draft-n-max 7 -ngld 99"
+  "llama_n_max": null,
+  "nmax_src": "",
+  "llama_spec": ""
  },
  "loom-fun/bartowski-Qwen2.5-7B-Instruct-loom": {
   "card": "loom-fun/bartowski-Qwen2.5-7B-Instruct-loom",
