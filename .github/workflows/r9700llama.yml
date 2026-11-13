@@ -37,12 +37,16 @@ jobs:
           set -x
           OUT=$RUNNER_TEMP/llama-out; mkdir -p $OUT
           rocminfo | grep -E "Marketing Name|Name: +gfx" || true
+          if [ "$LLAMACPP_BACKEND" = vulkan ] && ! ldconfig -p | grep -q libvulkan.so.1; then
+            sudo -n true 2>/dev/null && { sudo -n apt-get update -qq && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libvulkan1 mesa-vulkan-drivers vulkan-tools; } || echo "no passwordless sudo: cannot install the Vulkan loader"
+          fi
           (vulkaninfo --summary 2>&1 | head -30) || echo "no vulkaninfo"
           tag=latest; [ "$LLAMACPP_BACKEND" = vulkan ] && tag=b12211
           dir=$(skills/loom-benchmark/scripts/fetch_llamacpp.sh $RUNNER_TEMP/llamacpp-$LLAMACPP_BACKEND $tag | tail -1)
           echo "build: $dir"; ls "$dir" | head -40
           export LD_LIBRARY_PATH=$dir
           "$dir/llama-server" --list-devices 2>&1 | tee $OUT/devices.txt
+          grep -qE "ROCm0|Vulkan0" $OUT/devices.txt || { echo "no GPU device: llama.cpp would run on the CPU"; exit 1; }
           python3 - <<'PY' > $RUNNER_TEMP/models.txt
           import json; [print(m["url"]) for m in json.load(open(".github/wincheck/llama.json"))["gguf"]]
           PY
