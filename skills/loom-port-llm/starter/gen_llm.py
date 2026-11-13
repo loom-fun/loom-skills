@@ -1032,7 +1032,10 @@ def mv(fmt, K, R=16, TG=1, swiglu=False, suffix="", iq=False, pair=False):
     name = f"g_mv_{fmt}_k{K}" + ("_swiglu" if swiglu else "_pair" if pair else "") + (f"_t{TG}" if TG > 1 else "") + ("_q8" if iq else "") + suffix
     # int8 variants above MV_CHUNK tokens run the token chunks one after another in the workgroup: registers stay at
     # the chunk's level and later chunks re-read this workgroup's weight rows from cache, not DRAM.
-    CHK = min(TG, int(os.environ.get("MV_CHUNK", "16"))) if iq else TG   # chunks of 8 measured no faster
+    # A full 1024-lane workgroup (K of 31745..32768) must fit 8 waves per SIMD: 16 tokens of int8 x groups need >192
+    # VGPRs there (AMDGPU/052 on gfx1151 and gfx1201), so it takes chunks of 8; each token is computed on its own, so
+    # the values are identical.
+    CHK = min(TG, int(os.environ.get("MV_CHUNK", "8" if lanes >= 1024 else "16"))) if iq else TG   # chunks of 8 measured no faster
     NCH = TG // CHK
     assert NCH * CHK == TG
     PERM = iq and nw == 2 and BFLY_PERM and CHK >= 8
