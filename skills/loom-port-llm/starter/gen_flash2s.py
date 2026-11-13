@@ -405,6 +405,13 @@ A('''    %pos0_i32 = index.cast %pos0 : index to i32
     %win_lo15 = scalar.subi %pos15_i32, %cwin_i32 : i32
     %zero16h = vector.constant 0.0 : vector<16xf16>
     %iota16 = vector.iota %c0_i32 step %c1_i32m : vector<16xi32>''')
+# A block that starts past the tile's last position holds no visible key: its weights are exactly 0 and its V is staged as
+# zeros, so adding it changes nothing (the plain path does it at the cost of one set of MMAs; it never takes the masked path).
+# FLASH2_EDGE_ZERO=1: a sliding window's lower-edge block also takes the masked path (V zeroed per query column). Default off:
+# its masked keys are keys of the run whatever the cut (older than the window, written long before), so a token's output
+# cannot depend on how the scheduler cut the prefill.
+EDGE_ZERO = os.environ.get("FLASH2_EDGE_ZERO", "0") == "1"
+NEED_OP = ("scalar.ori", "%nb_edge") if EDGE_ZERO else ("scalar.andi", "%nb_live")
 for kb in range(KB):
     last = kb == KB - 1
     ins = [f"%os{d}" if kb == 0 else f"%on{d}_{kb - 1}" for d in range(NFH)]
@@ -414,7 +421,11 @@ for kb in range(KB):
     %nb_diag{kb} = scalar.cmpi sgt, %nb_last{kb}, %pos0_i32 : i32
     %nb_win{kb} = scalar.cmpi slt, %base{kb}, %win_lo15 : i32
     %nb_wins{kb} = scalar.andi %nb_win{kb}, %is_sliding : i1
-    %need{kb} = scalar.ori %nb_diag{kb}, %nb_wins{kb} : i1
+    %nb_dead{kb} = scalar.cmpi sgt, %base{kb}, %pos15_i32 : i32
+    %nb_live{kb} = scalar.xori %nb_dead{kb}, %true_const : i1
+    %nb_diag_live{kb} = scalar.andi %nb_diag{kb}, %nb_live{kb} : i1
+    %nb_edge{kb} = scalar.andi %nb_wins{kb}, %nb_live{kb} : i1
+    %need{kb} = {NEED_OP[0]} %nb_diag_live{kb}, {NEED_OP[1]}{kb} : i1
     {", ".join(outs)} = scf.if %need{kb} -> ({vt}) {{""")
     for d in range(NFH):
         A(f"""      %ac{d}_{kb} = scf.for %mc_{d}_{kb} = [%c0 to %c16 step %c1](%acc{d}_{kb} = {ins[d]} : vector<8xf32>) -> (vector<8xf32>) {{
@@ -510,6 +521,13 @@ if PARTIAL:
     E.append("  }\n")
     text = text[:i0] + "\n".join(E) + text[i1:]
     text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_partial") @{P}_attention_flash2_partial(', 1)
+if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO:   # the masked path only in the last key tile (flash2_peel.py)
+    from flash2_peel import peel_last_tile
+    text = peel_last_tile(text)
+if os.environ.get("FLASH2_ENTRY") == "bcast" and os.environ.get("FLASH2_ROLE") != "partial":   # experiment: the listed entry broadcast from lane 0
+    _old = "  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %entry = index.cast %entry32 : i32 to index\n"
+    assert _old in text, "entry load not found"
+    text = text.replace(_old, "  %entry32r = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %lane0 = scalar.constant 0 : i32\n  %entry32 = kernel.subgroup.broadcast %entry32r from %lane0 : i32, i32\n  %entry = index.cast %entry32 : i32 to index\n")
 out_path = os.environ.get("FLASH2_OUT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "flash2.loom"))
 if not PARTIAL:
     subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen_flash2s.py")], check=True,
