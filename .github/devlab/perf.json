@@ -1,104 +1,16 @@
 {
- "_comment": "verify32k: card perf of the cards regenerated after #451 (Loom active wait vs llama.cpp ROCm and Vulkan nospec, same runner).",
- "card": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
- "memory_bytes": 35000000000,
+ "_comment": "verify32k: Qwen3.5-4B card perf, ROCm DFlash with the AtomicChat drafter (the card's new drafter does not load in llama.cpp).",
+ "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
+ "memory_bytes": 28000000000,
  "kit": null,
  "llamacpp": "b1374",
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "l31-8b",
-   "card": "loom-fun/unsloth-Llama-3.1-8B-Instruct-loom",
-   "memory_bytes": 35000000000,
-   "llama_spec": "--spec-type ngram-simple",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan.np1.nospec:2",
-    "llama@vulkan.np1.nospec:2:long",
-    "llamac4@vulkan.perslot.nospec"
-   ]
-  },
-  {
-   "name": "vl7",
-   "card": "loom-fun/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
-   "memory_bytes": 21000000000,
-   "llama_spec": "",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan.np1.nospec:2",
-    "llama@vulkan.np1.nospec:2:long",
-    "llamac4@vulkan.perslot.nospec"
-   ]
-  },
-  {
    "name": "q35-4b",
    "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
    "memory_bytes": 28000000000,
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 5 -ngld 99",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan.np1.nospec:2",
-    "llama@vulkan.np1.nospec:2:long",
-    "llamac4@vulkan.perslot.nospec"
-   ]
-  },
-  {
-   "name": "q35-9b",
-   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
-   "memory_bytes": 32000000000,
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "c4:card",
-    "llama:2",
-    "llama:2:long",
-    "llamac4",
-    "llama@vulkan.np1.nospec:2",
-    "llama@vulkan.np1.nospec:2:long",
-    "llamac4@vulkan.perslot.nospec"
-   ]
-  },
-  {
-   "name": "o15-9b",
-   "card": "loom-fun/bartowski-Ornith-1.5-9B-loom",
-   "memory_bytes": 32000000000,
-   "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 3 -ngld 99",
+   "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:AtomicChat/Qwen3.5-4B-DFlash-GGUF/Qwen3.5-4B-DFlash.Q8_0.gguf} --spec-draft-n-max 5 -ngld 99",
    "variants": [
     {
      "name": "card"
