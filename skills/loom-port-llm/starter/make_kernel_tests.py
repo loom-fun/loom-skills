@@ -2054,6 +2054,12 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
   check.return
 }}
 """)
+import re
+def add_partial(c):   # gen_llm.py launches the partial tiles' kernel after every flash launch (the flash_prefill* cases pick their kernels)
+    if re.match(r"\s*check\.case public @flash_prefill", c):
+        return c
+    return re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_partial[\2", c, flags=re.M)
+cases = [add_partial(c) for c in cases]
 # 7. The grouped MoE GEMMs alone (g_moe_ggu_* gate/up with a gathered A, g_moe_gdn_* down on sorted rows), launched with a
 # hand-made tile table: a full 64-row tile, a partial one, an unused tile (expert -1) and a 5-row tile, three experts, on the
 # real expert tensors. Needed where a kit has no prefill router in its tests (lfm2moe) and cheap everywhere else; plain
@@ -2130,12 +2136,6 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1" and os.environ.get
 }}
 """)
         print(f"moe_gemm layer {li}: {gun}/{fd}, mean |act| {np.abs(act_ref).mean():.3g}, mean |ys| {np.abs(ys_ref).mean():.3g}")
-import re
-def add_partial(c):   # gen_llm.py launches the partial tiles' kernel after every flash launch (the flash_prefill* cases pick their kernels)
-    if re.match(r"\s*check\.case public @flash_prefill", c):
-        return c
-    return re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_partial[\2", c, flags=re.M)
-cases = [add_partial(c) for c in cases]
 if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
     cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
                     flags=re.M) for c in cases] + DEEP_CASES   # these launch the two kernels as they test them
