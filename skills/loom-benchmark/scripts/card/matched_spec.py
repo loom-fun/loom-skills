@@ -35,26 +35,30 @@ def matched_spec(cfg):
     return a
 
 
-# THE per-row drafting table: (context tokens, concurrent streams) of every timed row. A row's drafting state is ONE value
-# applied identically to Loom and to llama.cpp (the final rule on which gates count is the coordinator's; today it mirrors
-# Loom's shipped gating: llm_config.json drafter.ctx_max (drafting off above that context, 0 = no limit) and
-# drafter.occ_min (off at >= that many streams, 0 = no limit)).
-ROWS = {"decode": (0, 1), "decode_2k": (2000, 1), "decode_32k": (32000, 1), "streams4": (600, 4),
-        "prefill_1k": (1000, 1), "prefill_2k": (2000, 1), "prefill_4k": (4000, 1), "prefill_8k": (8000, 1),
-        "prefill_16k": (16000, 1), "prefill_32k": (32000, 1)}
+# THE per-row drafting table (benchmark rule, Nov 13), ONE value per row applied identically to Loom, llama.cpp ROCm and
+# llama.cpp Vulkan: every 1-stream row (decode, decode_2k, decode_32k, prefill_*) drafts; streams4 does not.
+ROWS = {"decode": 1, "decode_2k": 1, "decode_32k": 1, "prefill_1k": 1, "prefill_2k": 1, "prefill_4k": 1, "prefill_8k": 1,
+        "prefill_16k": 1, "prefill_32k": 1, "streams4": 4}   # row -> concurrent streams
 
 
-def row_states(cfg, honor_gates=True):
-    """{row: True|False}: whether drafting is on for that row, for BOTH engines. No draft: all False."""
+def row_states(cfg):
+    """{row: True|False}: whether drafting is on for that row, for BOTH engines. A card with no draft is a rule violation
+    (rule_violations), not a table of False."""
     on = bool(matched_spec(cfg))
+    return {row: on and streams == 1 for row, streams in ROWS.items()}
+
+
+def rule_violations(cfg):
+    """Why the package as shipped does not follow the rule (empty: it does): it must draft, have no context gate
+    (drafter.ctx_max 0), and gate drafting off at 4 streams (drafter.occ_min between 1 and 4, default 2)."""
+    out = []
+    if not matched_spec(cfg):
+        out.append("no drafting")
     g = cfg.get("drafter") or {}
-    cmax, omin = int(g.get("ctx_max") or 0), int(g.get("occ_min") or 0)
-    out = {}
-    for row, (ctx, streams) in ROWS.items():
-        ok = on
-        if on and honor_gates:
-            ok = not ((cmax and ctx > cmax) or (omin and streams >= omin))
-        out[row] = ok
+    if int(g.get("ctx_max") or 0) > 0:
+        out.append(f"ctx_max {g['ctx_max']} turns drafting off on long 1-stream rows")
+    if "occ_min" in g and not 1 <= int(g.get("occ_min") or 0) <= 4:
+        out.append(f"occ_min {g.get('occ_min')}: drafting is not gated off at 4 streams")
     return out
 
 
@@ -70,5 +74,7 @@ if __name__ == "__main__":
     c = json.load(open(sys.argv[1]))
     if "--rows" in sys.argv:
         print(json.dumps(row_states(c)))
+    elif "--violations" in sys.argv:
+        print("; ".join(rule_violations(c)))
     else:
         print(matched_spec(c))

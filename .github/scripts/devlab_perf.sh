@@ -14,10 +14,10 @@
 #                                                                     {hf:OWNER/REPO/FILE}: that Hub file, e.g. a drafter llama.cpp loads and the card doesn't ship)
 #    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
 #   APPLES TO APPLES (user rule): llama.cpp (ROCm and Vulkan) runs in the SAME drafting configuration as the published Loom
-#   package, for every row: "matched" (card/matched_spec.py) = the package's draft kind/depth mapped to llama.cpp (dflash ->
+#   package on every 1-stream row (benchmark rule: 4 streams undrafted on every engine): "matched" (card/matched_spec.py) = the package's draft kind/depth mapped to llama.cpp (dflash ->
 #   draft-dflash + the same drafter GGUF, mtp -> draft-mtp, assist -> draft-mtp + the assistant GGUF, ngram -> ngram-simple,
 #   n-max = Loom's depth); a package that does not draft gets no drafting on llama.cpp either. Never a best-of mix of drafting
-#   on and off. Single-stream rows run on 1 slot (llama@rocm.np1 / llama@vulkan.np1), streams4 on 4 (llamac4@rocm / llamac4@vulkan).
+#   on and off. Single-stream rows run on 1 slot (llama@rocm.np1 / llama@vulkan.np1), streams4 on 4 (llamac4@rocm.nodraft / llamac4@vulkan.perslot.nodraft: streams4 never drafts).
 #   "llama_spec_vulkan": a Vulkan-only override, for a drafter the Vulkan build cannot run (record it with --differs).
 #   A job may override card, kit, memory_bytes, llamacpp, llamacpp_vulkan, vulkan_kv and llama_spec: one experiment can
 #   measure several cards.
@@ -239,6 +239,7 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   [ "$BK" = vulkan ] && { local vs; vs=$(q "print(j.get('llama_spec_vulkan') or e.get('llama_spec_vulkan') or '')"); [ -n "$vs" ] && spec=$vs; }
   [ "$spec" = matched ] && spec=$("$T" -I "$here/skills/loom-benchmark/scripts/card/matched_spec.py" "$card/llm_config.json")
   spec=${spec//'{drafter}'/$drafter}
+  [[ $MODS == *nodraft* ]] && spec=""   # .nodraft: the streams4 servers (benchmark rule: 4 streams run undrafted on every engine, Loom's occ_min gate too)
   [ -n "${1:-}" ] && spec=$(echo "$spec" | sed -E "s/--spec-draft-n-max [0-9]+/--spec-draft-n-max $1/")
   local h; for h in $(echo "$spec" | grep -oE '\{hf:[^}]+\}' | sort -u); do   # {hf:OWNER/REPO/FILE}, fetched once per runner
     local f=${h#\{hf:}; f=${f%\}}; local dst=$WORK/hf/$f r=${f%/*}

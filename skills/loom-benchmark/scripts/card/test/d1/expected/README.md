@@ -39,7 +39,7 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 
 - llama.cpp: build `llamacpp-rocm/b1357`, server arguments `-ngl 99 -np 4 -c 48000`.
 - Loom: speculative decoding off.
-- Apples to apples: llama.cpp runs with speculative decoding on exactly when the Loom package drafts (the same method and drafter, depth = Loom's) and off when it does not, for every row; single-stream rows on 1 slot, 4 streams on 4. Where llama.cpp cannot run the package's drafter the difference is listed below.
+- Apples to apples: Loom and llama.cpp draft identically on every row: speculative decoding on, with the same drafter and depth, for the 1-stream rows (decode, decode_2k, decode_32k, prefill) and off for 4 streams. Where llama.cpp cannot run the package's drafter the difference is listed below.
 - Same GGUF on both engines, tokens per second. Loom: client-side timing; llama.cpp: server-side timings. Runs per value: decode and prefill not recorded (mean), 4 streams not recorded (median).
 - Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs): Loom, served with the active wait, and llama.cpp on the same runner; runners differ between sessions.
 - Measured 2026-10-29; device not recorded; hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered); source: [loom-factory run 40842422037](https://github.com/loom-fun/loom-skills/actions/runs/40842422037).
