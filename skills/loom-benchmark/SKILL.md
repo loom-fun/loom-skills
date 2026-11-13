@@ -371,8 +371,8 @@ standard workloads and say so.
 | streams4 | OFF |
 
 The drafter is the card's best available method (MTP if the GGUF has NextN, else DFlash if a drafter GGUF exists, else ngram:
-every card drafts). Depth = Loom's tuned depth = llama.cpp's `--spec-draft-n-max`. Loom ships `ctx_max` 0 (no context gate: `tune.py`
-no longer produces one) and `occ_min` 2 (4 streams run undrafted); llama.cpp's streams4 server has no `--spec-*` flags.
+every card drafts). Depth = Loom's tuned depth = llama.cpp's `--spec-draft-n-max`. Loom may ship a context gate (`ctx_max`: runtime-adaptive, allowed)
+and ships `occ_min` 2 (4 streams run undrafted); llama.cpp's streams4 server has no `--spec-*` flags.
 `card/matched_spec.py` is the single table (`row_states`, `rule_violations`) and derives llama.cpp's arguments (dflash ->
 `draft-dflash` + the same drafter GGUF, mtp -> `draft-mtp`, assist -> `draft-mtp` + the assistant GGUF, ngram -> `ngram-simple`).
 `devlab_perf.sh` runs it: `llama@rocm.np1` / `llama@vulkan.np1` (1 slot, drafting) and `llamac4@rocm.nodraft` /

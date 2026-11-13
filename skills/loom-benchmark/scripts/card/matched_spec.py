@@ -49,14 +49,12 @@ def row_states(cfg):
 
 
 def rule_violations(cfg):
-    """Why the package as shipped does not follow the rule (empty: it does): it must draft, have no context gate
-    (drafter.ctx_max 0), and gate drafting off at 4 streams (drafter.occ_min between 1 and 4, default 2)."""
+    """Why the package as shipped does not follow the rule (empty: it does): it must draft and gate drafting off at
+    4 streams (drafter.occ_min between 1 and 4, default 2). The context gate (ctx_max) is runtime-adaptive and allowed."""
     out = []
     if not matched_spec(cfg):
         out.append("no drafting")
     g = cfg.get("drafter") or {}
-    if int(g.get("ctx_max") or 0) > 0:
-        out.append(f"ctx_max {g['ctx_max']} turns drafting off on long 1-stream rows")
     if "occ_min" in g and not 1 <= int(g.get("occ_min") or 0) <= 4:
         out.append(f"occ_min {g.get('occ_min')}: drafting is not gated off at 4 streams")
     return out

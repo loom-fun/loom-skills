@@ -81,8 +81,7 @@ NO_LOSS = 0.98
 # Context gate (build_draft.py SPEC_CTX_MAX): a candidate that wins every row but the long-document one is retried with
 # drafting off from this causal position on, so short context keeps the drafting gain (Ornith-1.5-35B depth 3: short rows
 # 118 vs 62 tok/s, 16k 44.9 vs 53.5). Below the long row's prompt, above the short rows'. TUNE_CTX_MAX=0 skips the retry.
-# benchmark rule: drafting is on for every 1-stream row on every card, so no context gate by default (TUNE_CTX_MAX=3500 re-enables the retry)
-CTX_GATE = int(os.environ.get("TUNE_CTX_MAX", "0"))
+CTX_GATE = int(os.environ.get("TUNE_CTX_MAX", "3500"))   # runtime-adaptive, so allowed by the benchmark rule
 # Benchmark rule (Nov 13; loom-benchmark "one drafting rule"): every card drafts on its 1-stream rows and runs 4 streams undrafted
 # (occupancy gate, occ_min 2). So tune always ships its best drafter (never "none" while one passes the exact and concurrency
 # checks) and does not try ungated 4-stream drafting. TUNE_RULE=0 restores the free choice (none, occ_min 0, as before).

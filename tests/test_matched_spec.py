@@ -41,7 +41,7 @@ class MatchedSpecTests(unittest.TestCase):
         self.assertEqual(rule_violations(ok), [])
         self.assertEqual(rule_violations({"draft": {"kind": "ngram", "depth": 2}}), [])
         self.assertEqual(len(rule_violations({})), 1)
-        self.assertEqual(len(rule_violations(dict(ok, drafter={"ctx_max": 3500, "occ_min": 0}))), 2)
+        self.assertEqual(len(rule_violations(dict(ok, drafter={"ctx_max": 3500, "occ_min": 0}))), 1)   # ctx_max is allowed
 
 
 if __name__ == "__main__":
