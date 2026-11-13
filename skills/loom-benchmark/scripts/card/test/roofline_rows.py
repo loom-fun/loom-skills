@@ -17,6 +17,7 @@ from render_card import drafted_note  # noqa: E402
 
 class StubRoofline:
     DEVICE, BW, FLOPS = "stub device", 1.0, 1.0
+    DEVICES = {"stub": {"name": "stub device", "bw": 1.0, "flops": 1.0}}
 
     @staticmethod
     def ceilings(m, bw, flops, docs):

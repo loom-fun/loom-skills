@@ -188,10 +188,23 @@ def attn_flops_per_token(geo, P):
     return tot
 
 
-# Strix Halo (AMD Ryzen AI Max+ 395, gfx1151): the memory bandwidth a streaming kernel reaches (LPDDR5X-8000) and
-# the peak f16 WMMA rate. The CLI's --bw / --flops override them.
-DEVICE = 'AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151)'
-BW, FLOPS = 216e9, 59e12
+# Devices (--device): the memory bandwidth a streaming kernel reaches and the peak dense f16 WMMA rate
+# (CUs x 512 flops/clock x boost clock on RDNA3/3.5/4). The CLI's --bw / --flops override them.
+# EFF / STRETCH / LAYER_US above were calibrated on Strix Halo; on another device they are an out-of-sample estimate
+# until a row in reference/calibration.md says otherwise.
+DEVICES = {
+    # LPDDR5X-8000, 256-bit (256 GB/s peak); 40 CUs x 512 x 2.9 GHz
+    "strix-halo": dict(name='AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151)', bw=216e9, flops=59e12),
+    # GDDR6 20 Gbps, 256-bit (640 GB/s peak), 32 GB; 64 CUs x 512 x 2.92 GHz = 95.7 TFLOP/s dense (191 with sparsity).
+    # bw: 600 GB/s (94 % of peak). llama.cpp's own decode on the DevLab R9700S already streams 569 GB/s
+    # (Qwen2.5-32B Q4_K_M, Vulkan b12211, 29.3 tok/s x 19.4 GB per token = 569 GB/s), so a streaming kernel reaches at least that.
+    "radeon-r9700": dict(name="AMD Radeon AI PRO R9700 (gfx1201, 32 GB)", bw=600e9, flops=95.7e12),
+    # The AMD DevLab Dispatch `radeon-r9700` runners: R9700S, the same Navi 48 / 640 GB/s memory at a 2.35 GHz
+    # max engine clock (rocminfo): 64 x 512 x 2.35 GHz = 77.0 TFLOP/s dense f16
+    "radeon-r9700s": dict(name="AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz)", bw=600e9, flops=77.0e12),
+}
+DEVICE_KEY = "strix-halo"
+DEVICE, BW, FLOPS = DEVICES[DEVICE_KEY]["name"], DEVICES[DEVICE_KEY]["bw"], DEVICES[DEVICE_KEY]["flops"]
 
 
 def shape_of(meta, tensors, cfg=None):
@@ -312,8 +325,10 @@ def main():
     ap.add_argument("--cfg")
     ap.add_argument("--baseline")
     ap.add_argument("--out")
-    ap.add_argument("--bw", type=float, default=BW)
-    ap.add_argument("--flops", type=float, default=FLOPS)
+    ap.add_argument("--device", default=DEVICE_KEY, choices=sorted(DEVICES),
+                    help="hardware preset for --bw / --flops (default strix-halo)")
+    ap.add_argument("--bw", type=float, default=None, help="streaming bandwidth, bytes/s (default: the --device preset)")
+    ap.add_argument("--flops", type=float, default=None, help="peak dense f16 flop/s (default: the --device preset)")
     ap.add_argument("--ctx", default="1000,2000,16000,32000")
     ap.add_argument("--budget-h", type=float, default=0.5,
                     help="the user's time budget for optimization (default 0.5 h; qualify.sh computes it for end-to-end jobs); saved for progress.py")
@@ -327,6 +342,9 @@ def main():
     ap.add_argument("--goal", action="append", default=[],
                     help="user target, METRIC=TOK_S (e.g. decode_tps=70); replaces target/stretch for it")
     a = ap.parse_args()
+    dev = DEVICES[a.device]
+    a.bw = a.bw or dev["bw"]
+    a.flops = a.flops or dev["flops"]
     cfg = json.load(open(a.cfg)) if a.cfg else {}
     m = model_shape(a.gguf, cfg)
     geo, wb, params, head, detail = m["geo"], m["wb"], m["params"], m["head"], m["detail"]
@@ -366,7 +384,7 @@ def main():
                weight_bytes_per_token=round(wb), head_bytes=head,
                bytes_by_kind={k: round(v) for k, v in detail.items()},
                matmul_params=round(params), efficiency_assumed=EFF, stretch_assumed=STRETCH,
-               bw=a.bw, flops=a.flops, draft_gain=round(gain, 3), metrics=rows,
+               device=dev["name"], bw=a.bw, flops=a.flops, draft_gain=round(gain, 3), metrics=rows,
                campaign=dict(budget_h=a.budget_h, reserve_min=a.reserve_min,
                              goals={g.split("=")[0]: float(g.split("=")[1]) for g in a.goal}))
     if a.out:
