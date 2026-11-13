@@ -1,7 +1,65 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Benchmark-rule rebuild (rebuild-b): regenerate from main (#514: best drafter always shipped, ctx_max 0, occ_min 2); reference = live cards.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "o15-9b",
+   "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Ornith-1.5-9B-loom",
+   "model_id": "ornith-ai/Ornith-1.5-9B"
+  },
+  {
+   "name": "q35-9b",
+   "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "model_id": "Qwen/Qwen3.5-9B"
+  },
+  {
+   "name": "o10-9b",
+   "spec": "unsloth/Ornith-1.0-9B-GGUF:Ornith-1.0-9B-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Ornith-1.0-9B-loom",
+   "model_id": "deepreinforce-ai/Ornith-1.0-9B"
+  },
+  {
+   "name": "q3-vl-8b",
+   "spec": "unsloth/Qwen3-VL-8B-Instruct-GGUF:Qwen3-VL-8B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom",
+   "model_id": "Qwen/Qwen3-VL-8B-Instruct"
+  },
+  {
+   "name": "q3-8b",
+   "spec": "unsloth/Qwen3-8B-GGUF:Qwen3-8B-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3-8B-loom",
+   "model_id": "Qwen/Qwen3-8B"
+  },
+  {
+   "name": "mellum21",
+   "spec": "bartowski/Mellum2.1-12B-A2.5B-Thinking-GGUF:Mellum2.1-12B-A2.5B-Thinking-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
+   "model_id": "JetBrains/Mellum2.1-12B-A2.5B-Thinking"
+  },
+  {
+   "name": "q36-27b",
+   "spec": "ggml-org/Qwen3.6-27B-GGUF:Qwen3.6-27B-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Qwen3.6-27B-loom",
+   "model_id": "Qwen/Qwen3.6-27B"
+  },
+  {
+   "name": "lfm25-24b",
+   "spec": "ggml-org/LFM2.5-24B-A2B-GGUF:LFM2.5-24B-A2B-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-LFM2.5-24B-A2B-loom",
+   "model_id": "LiquidAI/LFM2.5-24B-A2B"
+  },
+  {
+   "name": "gpt-oss-20b",
+   "spec": "unsloth/gpt-oss-20b-GGUF:gpt-oss-20b-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-gpt-oss-20b-loom",
+   "model_id": "openai/gpt-oss-20b"
+  },
+  {
+   "name": "laguna",
+   "spec": "ggml-org/Laguna-XS-2.1-GGUF:Laguna-XS-2.1-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Laguna-XS-2.1-loom",
+   "model_id": "poolside/Laguna-XS-2.1"
+  }
  ]
 }
