@@ -1,82 +1,112 @@
 {
- "_comment": "gemma4 KV-shared-layer prefill pruning (PRUNE_SHARED): same-runner A/B of the rebuilt card with and without it (prefill 1k-32k, consistency).",
+ "_comment": "E2B prefill ablation with PRUNE_SHARED: double each kernel class of @llm_advance.",
  "kit": "gemma4",
  "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "e2b",
+   "name": "abl",
    "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
    "memory_bytes": 16000000000,
    "variants": [
     {
-     "name": "base",
-     "build": {
-      "PRUNE_SHARED": "0"
-     }
-    },
-    {
-     "name": "prune",
+     "name": "p",
      "build": {
       "PRUNE_SHARED": "1"
      }
-    }
-   ],
-   "steps": [
-    "perf:base:2",
-    "perf:prune:2",
-    "perf:base:2:long",
-    "perf:prune:2:long",
-    "consistency:prune:3"
-   ]
-  },
-  {
-   "name": "e4b",
-   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
-   "memory_bytes": 31000000000,
-   "variants": [
-    {
-     "name": "base",
-     "build": {
-      "PRUNE_SHARED": "0"
-     }
     },
     {
-     "name": "prune",
+     "name": "d_ple",
      "build": {
       "PRUNE_SHARED": "1"
-     }
-    }
-   ],
-   "steps": [
-    "perf:base:2",
-    "perf:prune:2",
-    "perf:base:2:long",
-    "perf:prune:2:long",
-    "consistency:prune:3"
-   ]
-  },
-  {
-   "name": "bolt",
-   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
-   "memory_bytes": 36000000000,
-   "variants": [
-    {
-     "name": "base",
-     "build": {
-      "PRUNE_SHARED": "0"
-     }
+     },
+     "double": [
+      "llm_advance:g_ple_prep"
+     ]
     },
     {
-     "name": "prune",
+     "name": "d_plegate",
      "build": {
       "PRUNE_SHARED": "1"
-     }
+     },
+     "double": [
+      "llm_advance:g_ple_gate|g_gemm_f32|g_mv_f32"
+     ]
+    },
+    {
+     "name": "d_swiglu",
+     "build": {
+      "PRUNE_SHARED": "1"
+     },
+     "double": [
+      "llm_advance:g_gemm_q4_k_swiglu"
+     ]
+    },
+    {
+     "name": "d_store",
+     "build": {
+      "PRUNE_SHARED": "1"
+     },
+     "double": [
+      "llm_advance:g_gemm_q4_k_store|g_gemm_q6_k_store"
+     ]
+    },
+    {
+     "name": "d_attnswa",
+     "build": {
+      "PRUNE_SHARED": "1"
+     },
+     "double": [
+      "llm_advance:g_attention_flash2\\[|g_attention_flash2_partial\\["
+     ]
+    },
+    {
+     "name": "d_attn512",
+     "build": {
+      "PRUNE_SHARED": "1"
+     },
+     "double": [
+      "llm_advance:g_attention_flash2_d512"
+     ]
+    },
+    {
+     "name": "d_fallback",
+     "build": {
+      "PRUNE_SHARED": "1"
+     },
+     "double": [
+      "llm_advance:g16d\\d+_attention"
+     ]
+    },
+    {
+     "name": "d_elem",
+     "build": {
+      "PRUNE_SHARED": "1"
+     },
+     "double": [
+      "llm_advance:g_row_scale|g_post_add_norm|g_qk_rope|g_quant_q8|g_token_info|g_embed|g_head"
+     ]
+    },
+    {
+     "name": "d_info",
+     "build": {
+      "PRUNE_SHARED": "1"
+     },
+     "double": [
+      "llm_advance:g_attention_fallback_list|g_token_info"
+     ]
     }
    ],
    "steps": [
-    "perf:base:2",
-    "perf:prune:2",
-    "consistency:prune:3"
+    "perf:p:2",
+    "perf:d_ple:2",
+    "perf:d_plegate:2",
+    "perf:d_swiglu:2",
+    "perf:d_store:2",
+    "perf:d_attnswa:2",
+    "perf:d_attn512:2",
+    "perf:d_fallback:2",
+    "perf:d_elem:2",
+    "perf:d_info:2"
    ]
   }
  ]
