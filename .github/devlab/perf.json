@@ -61,8 +61,8 @@
    "kit": "gemma4"
   },
   {
-   "name": "kt-gptoss",
-   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
+   "name": "kt-q38",
+   "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
    "variants": [
     {
      "name": "dual",
@@ -71,12 +71,12 @@
    ],
    "steps": [
     "ktest:dual"
-   ],
-   "kit": "gpt-oss"
+   ]
   },
   {
-   "name": "vt",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "kt-nemo",
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "kit": "gemma4",
    "variants": [
     {
      "name": "dual",
@@ -84,7 +84,7 @@
     }
    ],
    "steps": [
-    "vtest:dual"
+    "ktest:dual"
    ]
   }
  ]
