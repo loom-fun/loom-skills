@@ -40,8 +40,10 @@ bad = 0
 for s in d["samples"]:
     fails = [f.get("detail", f.get("message", "")) if isinstance(f, dict) else str(f) for f in s["expectations"].get("failures", [])]
     issues = [i.get("message", "") for i in s.get("issues", [])]
-    bad += not s["passed"]
-    print(("PASS " if s["passed"] else "FAIL ") + s["case"], *(x[:300] for x in issues + fails[:2]))
+    neg = "_negcontrol" in s["case"]   # a negative control must FAIL (it feeds the kernel data in the wrong layout)
+    ok = (not s["passed"]) if neg else s["passed"]
+    bad += not ok
+    print(("PASS " if ok else "FAIL ") + s["case"] + (" (negative control failed, as it must)" if neg and ok else " (negative control passed: the test cannot see a layout error)" if neg else ""), *(x[:300] for x in issues + fails[:2]))
 print(f"{len(d['samples']) - bad}/{len(d['samples'])} passed")
 sys.exit(1 if bad else 0)
 PY
