@@ -227,7 +227,8 @@
     "efficiency": {"type": "number", "description": "the fraction of the ceiling tuned Loom ports have demonstrated for this kind of metric (roofline.py EFF / EFF_DRAFTED); the far-from-roofline guardrail compares against it"},
     "acceptance": {"type": "number", "minimum": 0, "maximum": 1, "description": "drafted rows: the acceptance this ceiling counts"},
     "acceptance_from": {"enum": ["session", "spec_gate"], "description": "session: measured in the same session as the card's value of this row; spec_gate: the spec gate's (its text can accept more or less than the row's)"},
-    "tokens_per_pass": {"type": "number", "description": "drafted rows: 1 + acceptance x depth"}
+    "tokens_per_pass": {"type": "number", "description": "drafted rows: 1 + acceptance x depth"},
+    "basis": {"enum": ["shared-experts"], "description": "mixture-of-experts 4-stream row: the ceiling assumes the four streams route to the same experts (the hard bound a run may not exceed)"}
    }
   },
   "feature": {

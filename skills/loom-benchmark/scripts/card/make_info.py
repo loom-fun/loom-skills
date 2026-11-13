@@ -89,7 +89,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 from card_lib import (DRAFTED_ROWS, EVIDENCE_ID, MEDIAN_METRICS, METRIC_KEYS, PERF_SOURCE_KINDS,  # noqa: E402
                       HF, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, load_json,
-                      load_package, metric_applies, package_facts, programs_sha256, require_valid, upstream_facts,
+                      load_package, metric_applies, native_context, over_context, package_facts, programs_sha256, require_valid, upstream_facts,
                       with_gate_features, write_json)
 
 
@@ -580,7 +580,7 @@ def cached_gguf(ck):
     return p if ck.get("revision") and os.path.exists(p) else None
 
 
-def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acceptance=None):
+def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acceptance=None, skip=()):
     """info.json "roofline" from roofline.py's model shape m (R: the roofline module). A drafted row's ceiling counts
     row_acceptance[metric] (measured in the row's own session) when given, else `acceptance` (the spec gate's)."""
     ceil = R.ceilings(m, bw, flops, (1000, 2000, 8000, 16000, 32000))
@@ -590,8 +590,15 @@ def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acc
     for key, rk in ROOFLINE_METRIC.items():
         if not metric_applies(key, facts["kind"], facts["features"]):
             continue
+        if key in skip:   # a document longer than the model's native context was never measured: no ceiling to show
+            continue
         c = ceil[rk]
+        basis = None
+        if key == "streams4" and ceil.get("c4_steady_shared"):   # MoE: the 4 streams' experts overlap; the ceiling a run may not exceed
+            c, basis = ceil["c4_steady_shared"], "shared-experts"
         row = {"ceiling": round(c, 1), "efficiency": round(R.efficiency(m, rk, c), 3)}
+        if basis:
+            row["basis"] = basis
         # benchmark rule: 4 streams are loaded without drafting, so that row's ceiling is always the plain one. A drafted row counts the
         # acceptance measured in the row's own session on THIS package; with none (or 0) the row shows the single-pass ceiling.
         if spec and key in DRAFTED_ROWS and key != "streams4":
@@ -639,6 +646,7 @@ def cmd_roofline(a):
     # a drafted ceiling counts acceptance measured on THIS package's programs only: another build's acceptance (an older drafter, depth
     # or n-gram package) says nothing about it; without a current one the card shows the single-pass ceiling
     here = programs_sha256(a.package)
+    all_sessions = sessions
     sessions = [s for s in sessions if s.get("programs_sha256") == here]
     acc, row_acc = drafted_acceptance(facts, sessions, a.acceptance)
     script = os.path.join(rdir, "roofline.py")
@@ -648,7 +656,8 @@ def cmd_roofline(a):
                 "skills_commit": a.skills_commit or commit}
     if dirty and not a.skills_commit:
         tool["dirty"] = True
-    block = roofline_block(facts, R.model_shape(gguf, cfg), acc, R, a.bw, a.flops, tool, os.path.basename(gguf), row_acc)
+    skip = over_context({"performance": {"sessions": all_sessions}}, native_context(facts["features"]))
+    block = roofline_block(facts, R.model_shape(gguf, cfg), acc, R, a.bw, a.flops, tool, os.path.basename(gguf), row_acc, skip)
     write_json(a.o, {"evidence": EVIDENCE_ID, "roofline": block})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {r['ceiling']}" for k, r in block["metrics"].items())
           + "".join(f"; {k} acceptance {r['acceptance']} ({r['acceptance_from']})" for k, r in block["metrics"].items()
