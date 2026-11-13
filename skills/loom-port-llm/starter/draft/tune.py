@@ -83,6 +83,10 @@ NO_LOSS = 0.98
 # 118 vs 62 tok/s, 16k 44.9 vs 53.5). Below the long row's prompt, above the short rows'. TUNE_CTX_MAX=0 skips the retry.
 # benchmark rule: drafting is on for every 1-stream row on every card, so no context gate by default (TUNE_CTX_MAX=3500 re-enables the retry)
 CTX_GATE = int(os.environ.get("TUNE_CTX_MAX", "0"))
+# Benchmark rule (Nov 13; loom-benchmark "one drafting rule"): every card drafts on its 1-stream rows and runs 4 streams undrafted
+# (occupancy gate, occ_min 2). So tune always ships its best drafter (never "none" while one passes the exact and concurrency
+# checks) and does not try ungated 4-stream drafting. TUNE_RULE=0 restores the free choice (none, occ_min 0, as before).
+RULE = os.environ.get("TUNE_RULE", "1") != "0"
 
 
 def measure(url, model, chat, context=0, rows=1):
@@ -390,7 +394,7 @@ def main():
         # real: Muse-Glimmer depth 3, 74 vs 48.6 tok/s) is better ungated. Build the ungated package (occ_min 0) and
         # measure ONLY its streams4 per depth (the single-stream rows are identical by construction); a depth takes the
         # better streams4 and its occ_min goes to cfg["drafter"].
-        if rows_n >= 2 and base_rows.get("streams4"):
+        if rows_n >= 2 and base_rows.get("streams4") and not RULE:
             upkg = os.path.join(work, f"pkg_tune_{kind}_u")
             sh(*build, upkg, *common, "--draft", kind, env=dict(os.environ, SPEC_OCC_MIN="0"))
             ucard = json.load(open(os.path.join(upkg, "model.json")))
@@ -503,7 +507,8 @@ def main():
             floor < 1.0 and r["margin"] >= (1 + NO_LOSS) / 2 * floor and geomean_margin(r["rows"], base_rows, llama_refs) >= 1.05 * base_geo)
     else:
         ok_margin = lambda r: r["margin"] >= NO_LOSS
-    ranked = sorted([r for r in table if r["kind"] != "none" and ok_margin(r) and r["decode_tps"] >= 1.03 * base],
+    ranked = sorted([r for r in table if r["kind"] != "none" and (ok_margin(r) and r["decode_tps"] >= 1.03 * base
+                                                                  or RULE and r["decode_tps"] > 0)],
                     key=lambda r: -r["margin"])
     # Within NO_LOSS of the best margin (noise on these short requests; a wider band on a ratio near 1 would admit
     # every candidate), the higher geometric mean of the row ratios first: the context gate (ctx_max) now keeps the
