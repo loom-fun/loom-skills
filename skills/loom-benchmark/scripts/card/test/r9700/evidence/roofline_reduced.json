@@ -1,0 +1,48 @@
+{
+ "evidence": "loom-card-evidence/2",
+ "gpu": "radeon-r9700",
+ "roofline": {
+  "checkpoint": "Qwen3-0.6B-Q4_K_M.gguf",
+  "device": {
+   "bandwidth_bytes_per_s": 600000000000.0,
+   "name": "AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz)",
+   "peak_flops": 77000000000000.0
+  },
+  "drafting": null,
+  "metrics": {
+   "decode": {
+    "ceiling": 1535.5,
+    "efficiency": 0.399
+   },
+   "decode_2k": {
+    "ceiling": 967.5,
+    "efficiency": 0.622
+   },
+   "prefill_16k": {
+    "ceiling": 28352.5,
+    "efficiency": 0.33
+   },
+   "prefill_1k": {
+    "ceiling": 77348.7,
+    "efficiency": 0.33
+   },
+   "prefill_2k": {
+    "ceiling": 69358.1,
+    "efficiency": 0.33
+   },
+   "prefill_8k": {
+    "ceiling": 42818.0,
+    "efficiency": 0.33
+   },
+   "streams4": {
+    "ceiling": 3603.6,
+    "efficiency": 0.7
+   }
+  },
+  "tool": {
+   "script": "skills/loom-roofline/roofline.py",
+   "sha256": "e2580b65f6bbdfad305c66492242c1a5e94da94378d023f3a1a44834b9a7fef0",
+   "skills_commit": "0123456789abcdef0123456789abcdef01234567"
+  }
+ }
+}

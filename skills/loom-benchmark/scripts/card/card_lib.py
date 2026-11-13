@@ -1,4 +1,4 @@
-"""Shared definitions for the loom-fun card generator (schema loom-card/2).
+"""Shared definitions for the loom-fun card generator (schema loom-card/3; loom-card/2 cards are read as one GPU).
 
 A card is rendered from the files of the package's repository:
   model.json.lock   sources, revisions, file names, sha256 and sizes
@@ -18,7 +18,8 @@ import os
 import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCHEMA_ID = "loom-card/2"
+SCHEMA_ID = "loom-card/3"
+LEGACY_SCHEMA_IDS = ("loom-card/2",)   # one GPU (Strix Halo): normalize() reads it as devices["strix-halo"]
 EVIDENCE_ID = "loom-card-evidence/2"
 SCHEMA_PATH = os.path.join(HERE, "info_schema.json")
 
@@ -91,7 +92,30 @@ GATES = [
 GATE_NAMES = [n for n, _ in GATES]
 # speculative decoding methods (llm_config.json draft.kind) as the card names them
 METHOD = {"dflash": "DFlash", "mtp": "MTP", "ngram": "n-gram prompt lookup", "assist": "assistant drafter"}
-BASE_TAGS = ["loom", "loom-serve", "gguf", "strix-halo"]
+BASE_TAGS = ["loom", "loom-serve", "gguf"]
+
+# The GPUs a card can cover, in the order the card shows them. id: the key of info.json "devices"; name: the card's
+# name for the GPU; arch: its ISA; roofline: the loom-roofline roofline.py --device preset a card's ceilings use
+# (radeon-r9700s is the AMD DevLab Dispatch R9700S runner every R9700 measurement runs on); memory_bytes: the
+# memory loom-serve may use there (None: the package's own value); detect: what machine_info.py's GPU string says.
+GPUS = {
+    "strix-halo": {"name": 'AMD Ryzen AI Max+ 395 "Strix Halo"', "short": "Strix Halo", "arch": "gfx1151", "memory": None,
+                   "roofline": "strix-halo", "memory_bytes": None, "runner": "Strix Halo", "tag": "strix-halo",
+                   "detect": re.compile(r"strix|8060s|gfx1151", re.I)},
+    "radeon-r9700": {"name": "AMD Radeon AI PRO R9700", "short": "Radeon AI PRO R9700", "arch": "gfx1201", "memory": "32 GB",
+                     "roofline": "radeon-r9700s", "memory_bytes": 34_000_000_000, "runner": "R9700", "tag": "radeon-r9700",
+                     "detect": re.compile(r"r9700|gfx1201|radeon ai pro", re.I)},
+}
+DEFAULT_GPU = "strix-halo"   # a card of loom-card/2 and evidence that names no GPU
+# The R9700 pool: the board reports 31.86 GiB (34.2 GB) of VRAM and the driver reserves part of it, so loom-serve gets
+# 34.0 GB (31.67 GiB): below what the board reports, above the 33.2 GB the largest package that fits at its native
+# context needs (fit/verdict.json: weights + KV + SERVE_HEADROOM).
+# The tokens a card row or gate needs one request to hold: on a GPU that serves a shorter context the cell reads
+# "doesn't fit" (the user's rule: an accepted outcome, not a failure).
+METRIC_CONTEXT = {"decode_2k": 2000, "decode_32k": 32000, "prefill_1k": 1000, "prefill_2k": 2000, "prefill_8k": 8000,
+                  "prefill_16k": 16000, "prefill_32k": 32000}
+GATE_CONTEXT = {"golden": 32000, "needle_full": "native"}   # golden's longest document; needle_full: the whole native context
+SERVE_HEADROOM = 2_000_000_000   # bytes beyond weights and KV cache a GPU needs (the fit table's reserve)
 
 HF = "https://huggingface.co"
 LOOM_URL = "https://github.com/ROCm/hrx-system"
@@ -418,8 +442,8 @@ def drafting(feats):
     return sd["status"] == "yes" and bool(sd["value"].get("method"))
 
 
-def derived_tags(features):
-    tags = list(BASE_TAGS)
+def derived_tags(features, gpus=(DEFAULT_GPU,)):
+    tags = list(BASE_TAGS) + [GPUS[g]["tag"] for g in GPUS if g in gpus]
     if drafting(features):
         tags += ["speculative-decoding", features["speculative_decoding"]["value"]["method"]]
     if features["image_input"]["status"] == "yes":
@@ -452,18 +476,34 @@ def over_context(info, native):
     400) at a counted prompt longer than `native`, and no session measured it. A refusal at or below the native
     context (a package built smaller), an uncounted one, or an unknown native context exempts nothing, and a measured
     value always counts."""
-    sessions = (info or {}).get("performance", {}).get("sessions", [])
+    sessions = (single(info or {})).get("performance", {}).get("sessions", [])
     measured = {k for s in sessions for k, m in s["metrics"].items() if m.get("loom") is not None}
     return {k for s in sessions for k, n in (s.get("over_context") or {}).items()
             if native and n and n > native} - measured
 
 
-def metric_applies(key, kind, feats, info=None):
+def metric_applies(key, kind, feats, info=None, context=None):
     if kind == "decision" and key in ("decode", "decode_2k", "decode_32k", "streams4", "spec_acceptance"):
         return False   # a decision model answers in one forward pass: no decode
     if key == "spec_acceptance":
         return drafting(feats)
-    return key not in over_context(info, native_context(feats))   # with info.json: longer than the native context
+    # with info.json: longer than the native context (context: the context a GPU serves, when its memory holds less)
+    native = native_context(feats)
+    return key not in over_context(info, context or native) and not beyond_context(info, key, context, native)
+
+
+def beyond_context(info, key, context, native):
+    """Whether a card row (or gate, when `key` is a gate name) needs more tokens than the `context` a GPU serves, a
+    context shorter than the model's `native` one. A GPU that serves the native context has no such rows (what the
+    server refused there stays n/a), and a row a session measured fits."""
+    if not context or not native or context >= native:
+        return False
+    need = {**METRIC_CONTEXT, **GATE_CONTEXT}.get(key)
+    need = native if need == "native" else need
+    if not need or need <= context:
+        return False
+    sessions = (single(info or {})).get("performance", {}).get("sessions", [])
+    return not any(m.get("loom") is not None for s in sessions for k, m in s["metrics"].items() if k == key)
 
 
 def native_context(feats):
@@ -475,7 +515,7 @@ def card_metrics(info):
     """{metric: (metric entry, session index)}: per metric the last performance session that measured it (the card's
     value)."""
     out = {}
-    for i, s in enumerate((info.get("performance") or {}).get("sessions", [])):
+    for i, s in enumerate((single(info).get("performance") or {}).get("sessions", [])):
         for k, m in s["metrics"].items():
             out[k] = (m, i)
     return out
@@ -487,7 +527,7 @@ def stale_metrics(info, programs, kind=None, feats=None):
     `programs` is unknown; a session that recorded no programs is not flagged."""
     if not programs:
         return {}
-    sessions = (info.get("performance") or {}).get("sessions", [])
+    sessions = (single(info).get("performance") or {}).get("sessions", [])
     out = {}
     for k, (_, i) in card_metrics(info).items():
         sha = sessions[i].get("programs_sha256")
@@ -503,6 +543,7 @@ def perf_flags(info, kind=None, feats=None, programs=None):
     stale        {metric: programs measured} where the card value was measured on programs other than `programs`,
                  the package's own (stale_metrics; only with `programs`): it describes another build, and far is
                  judged on it, so a fresh devlab-perf job comes first"""
+    info = single(info)
     loom = {k: m.get("loom") for k, (m, _) in card_metrics(info).items()}
     if kind is not None:
         loom = {k: v for k, v in loom.items() if metric_applies(k, kind, feats, info)}
@@ -537,6 +578,96 @@ def generator_commit(gen, versions):
 
 
 # ---- validation: the subset of JSON Schema info_schema.json uses (no third-party dependency) ----
+
+# ---- GPUs: loom-card/3 keeps gates, performance and roofline per GPU under info["devices"]
+
+def gpu_from_device(device):
+    """The GPU id a machine_info.py device block ({cpu, gpu, os}) names, else None."""
+    text = " ".join(str(v) for v in (device or {}).values())
+    return next((g for g, x in GPUS.items() if x["detect"].search(text)), None)
+
+
+def normalize(info):
+    """info as loom-card/3 (a copy): a loom-card/2 card's top-level gates, performance and roofline become the
+    strix-halo entry of devices. A loom-card/3 card is returned as it is. Everything that reads a card goes through
+    this (load_info), so one code path serves both."""
+    if info.get("schema") not in LEGACY_SCHEMA_IDS:
+        return info
+    out = {k: v for k, v in info.items() if k not in ("gates", "performance", "roofline")}
+    out["schema"] = SCHEMA_ID
+    out["devices"] = {DEFAULT_GPU: {k: info[k] for k in ("gates", "performance", "roofline") if k in info}}
+    return out
+
+
+def load_info(path):
+    return normalize(load_json(path))
+
+
+def has_results(dev):
+    """Whether a devices entry holds results (not a placeholder state)."""
+    return dev is not None and not dev.get("state")
+
+
+def card_gpus(info):
+    """The GPU ids of a card in display order: every devices entry (results, or a state)."""
+    return [g for g in GPUS if g in (info.get("devices") or {})]
+
+
+def gpu_view(info, gpu):
+    """A loom-card/2-shaped view of one GPU (top-level gates, performance, roofline of that GPU, plus its state,
+    memory_bytes and served_context): what the single-GPU functions below take."""
+    d = (info.get("devices") or {}).get(gpu) or {}
+    out = {k: v for k, v in info.items() if k != "devices"}
+    out["gates"] = d.get("gates") or {}
+    for k in ("performance", "roofline", "state", "required_bytes", "memory_bytes", "served_context"):
+        if d.get(k) is not None:
+            out[k] = d[k]
+    out["gpu"] = gpu
+    return out
+
+
+def primary_gpu(info):
+    """The GPU a single-GPU reader (loom-org's org_status, the card's dashboards) reads: strix-halo when it has
+    results, else the first GPU that has."""
+    devs = info.get("devices") or {}
+    for g in GPUS:
+        if has_results(devs.get(g)):
+            return g
+    return DEFAULT_GPU
+
+
+def single(info):
+    """info itself when it is single-GPU shaped (a gpu_view, or loom-card/2), else its primary GPU's view."""
+    if "devices" not in info:
+        return info
+    return gpu_view(info, primary_gpu(info))
+
+
+def gpu_memory(info, facts_memory, gpu):
+    """The loom-serve --memory_bytes of a GPU: the GPU's own recorded value, else the package's (model.json, then
+    card.memory_bytes), at most the GPU's memory."""
+    d = (info.get("devices") or {}).get(gpu) or {}
+    if d.get("memory_bytes"):
+        return d["memory_bytes"]
+    base = facts_memory or (info.get("card") or {}).get("memory_bytes")
+    cap = GPUS[gpu]["memory_bytes"]
+    return min(base, cap) if base and cap else base
+
+
+def gpu_context(info, gpu, native):
+    """Tokens per request a GPU serves: its served_context when its memory holds less KV cache than the native
+    context needs, else the native context."""
+    return ((info.get("devices") or {}).get(gpu) or {}).get("served_context") or native
+
+
+def served_context(weights, kv_bytes_per_token, memory_bytes, headroom=SERVE_HEADROOM):
+    """Tokens of KV cache one request can address when loom-serve is given memory_bytes: what the budget leaves
+    after the weights and the headroom, in whole 1024-token blocks (the elastic pool's address range follows the
+    budget; docs/serving: --memory_bytes tightens it)."""
+    if kv_bytes_per_token <= 0:
+        return None
+    return max(0, int((memory_bytes - weights - headroom) // kv_bytes_per_token) // 1024 * 1024)
+
 
 def _types(t):
     return t if isinstance(t, list) else [t]
@@ -626,13 +757,19 @@ def text_errors(label, s, limit):
 
 
 def free_text_errors(info):
+    info = normalize(info)
     errs = []
-    p = info.get("performance") or {}
-    for i, u in enumerate((p.get("baseline") or {}).get("differs") or []):
-        errs += text_errors(f"info.performance.baseline.differs[{i}]", u, CAVEAT_MAX)
-    for b, x in (p.get("baselines") or {}).items():
-        for i, u in enumerate(x["baseline"].get("differs") or []):
-            errs += text_errors(f"info.performance.baselines.{b}.baseline.differs[{i}]", u, CAVEAT_MAX)
+    for gpu, dev in (info.get("devices") or {}).items():
+        at = f"info.devices.{gpu}"
+        p = dev.get("performance") or {}
+        for i, u in enumerate((p.get("baseline") or {}).get("differs") or []):
+            errs += text_errors(f"{at}.performance.baseline.differs[{i}]", u, CAVEAT_MAX)
+        for b, x in (p.get("baselines") or {}).items():
+            for i, u in enumerate(x["baseline"].get("differs") or []):
+                errs += text_errors(f"{at}.performance.baselines.{b}.baseline.differs[{i}]", u, CAVEAT_MAX)
+        for n, g in (dev.get("gates") or {}).items():
+            if g.get("detail"):
+                errs += text_errors(f"{at}.gates.{n}.detail", g["detail"], DETAIL_MAX)
     steps = info.get("next_steps") or []
     if steps and info.get("status") != "paused":
         errs.append("info.next_steps: only a paused card (status: paused) shows next steps")
@@ -640,9 +777,6 @@ def free_text_errors(info):
         errs.append("info.next_steps: at most 5 steps")
     for i, u in enumerate(steps):
         errs += text_errors(f"info.next_steps[{i}]", u, STEP_MAX)
-    for n, g in (info.get("gates") or {}).items():
-        if g.get("detail"):
-            errs += text_errors(f"info.gates.{n}.detail", g["detail"], DETAIL_MAX)
     card = info.get("card") or {}
     for k in ("license", "output"):
         if card.get(k) and not re.fullmatch(r"[A-Za-z0-9._+/-]+", card[k]):
@@ -654,22 +788,32 @@ def free_text_errors(info):
 
 
 def validate(info):
-    """Errors of info against info_schema.json, plus the cross-references the schema can't express (empty: valid)."""
+    """Errors of info (loom-card/3, or loom-card/2 read as one GPU) against info_schema.json, plus the
+    cross-references the schema can't express (empty: valid)."""
+    info = normalize(info)
     schema = load_json(SCHEMA_PATH)
     errs = _check(info, schema, schema, "info", [])
     if errs:
         return errs
     ids = set(info.get("sources", {}))
-    p = info.get("performance") or {}
-    for i, s in enumerate(p.get("sessions", [])):
-        if s["source"] not in ids:
-            errs.append(f"info.performance.sessions[{i}].source: no source {s['source']!r}")
-    for b, x in (p.get("baselines") or {}).items():
-        if x["session"]["source"] not in ids:
-            errs.append(f"info.performance.baselines.{b}.session.source: no source {x['session']['source']!r}")
-    for n, g in info.get("gates", {}).items():
-        if g["source"] not in ids:
-            errs.append(f"info.gates.{n}.source: no source {g['source']!r}")
+    for gpu, dev in info["devices"].items():
+        at = f"info.devices.{gpu}"
+        if gpu not in GPUS:
+            errs.append(f"{at}: unknown GPU (known: {', '.join(GPUS)})")
+        if dev.get("state") and (dev.get("gates") or dev.get("performance") or dev.get("roofline")):
+            errs.append(f"{at}: state {dev['state']} cannot come with results")
+        if dev.get("state") == "unsupported" and not dev.get("required_bytes"):
+            errs.append(f"{at}: state unsupported needs required_bytes")
+        p = dev.get("performance") or {}
+        for i, s in enumerate(p.get("sessions", [])):
+            if s["source"] not in ids:
+                errs.append(f"{at}.performance.sessions[{i}].source: no source {s['source']!r}")
+        for b, x in (p.get("baselines") or {}).items():
+            if x["session"]["source"] not in ids:
+                errs.append(f"{at}.performance.baselines.{b}.session.source: no source {x['session']['source']!r}")
+        for n, g in (dev.get("gates") or {}).items():
+            if g["source"] not in ids:
+                errs.append(f"{at}.gates.{n}.source: no source {g['source']!r}")
     return errs + free_text_errors(info)
 
 

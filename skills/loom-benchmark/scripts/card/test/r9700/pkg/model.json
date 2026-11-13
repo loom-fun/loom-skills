@@ -1,0 +1,80 @@
+{
+ "schema_version": 1,
+ "model": {
+  "id": "Qwen/Qwen3-0.6B",
+  "name": "Qwen3-0.6B (Loom port, GGUF)"
+ },
+ "programs": {
+  "source": {
+   "inputs": [
+    {
+     "path": "program/prepare.loom",
+     "data": [
+      "weights.loom"
+     ]
+    },
+    "program/control.loom",
+    "program/storage.loom",
+    "program/service.loom"
+   ],
+   "libraries": [
+    "program/llm.loom"
+   ]
+  }
+ },
+ "services": {
+  "chat": {
+   "kind": "text",
+   "version": 1
+  }
+ },
+ "variants": {
+  "gguf": {
+   "services": {
+    "chat": {
+     "programs": [
+      "source"
+     ],
+     "config": {
+      "llm.card": true
+     },
+     "parameters": {
+      "model": {
+       "files": [
+        {
+         "path": "parameter/Qwen3-0.6B-Q4_K_M.gguf",
+         "format": "gguf",
+         "origin": "@checkpoint/Qwen3-0.6B-Q4_K_M.gguf"
+        }
+       ]
+      }
+     },
+     "tokenizers": {
+      "text": "tokenizer.json"
+     }
+    }
+   }
+  }
+ },
+ "presets": {
+  "chat": {
+   "service": "chat",
+   "variant": "gguf",
+   "programs": "source",
+   "execution": {
+    "rows": 4,
+    "context_capacity": 40960,
+    "pool_capacity": 106496,
+    "prefill_capacity": 1024,
+    "max_tokens": 4096
+   }
+  }
+ },
+ "origins": {
+  "checkpoint": {
+   "kind": "hf",
+   "repository": "unsloth/Qwen3-0.6B-GGUF",
+   "revision": "50968a4468ef4233ed78cd7c3de230dd1d61a56b"
+  }
+ }
+}
