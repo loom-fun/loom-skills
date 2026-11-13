@@ -973,6 +973,7 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 # Prefill GEMMs (gen_gemm.py): y = (x16 . W^T) * inv per row, x16 the f16 row-scaled activations and inv the
 # row's inverse scale (g_row_scale_f16's contract); swiglu: silu(gate) * up. One tensor per (format, K) the
 # model's prefill uses: the 64-, 128- (_m128) and 256-row (_m256) kernels, two row tiles each.
+from formats import DECODES as _GEMM_FMTS  # noqa: E402
 def gemm_cases():
     seen_g = set()
     for li in range(cfg["layers"]):
@@ -983,7 +984,7 @@ def gemm_cases():
             fmt = T[name].tensor_type.name.lower()
             up = f"blk.{li}.ffn_up.weight"
             sw = nm_ == "ffn_gate" and up in T and T[up].tensor_type == T[name].tensor_type
-            if fmt not in IQ_FMTS or (fmt, sw) in seen_g:   # the formats with GEMM kernel tests (formats.ICODES)
+            if fmt not in (_GEMM_FMTS if os.environ.get("KTEST_GEMM_ALL", "0") not in ("", "0") else IQ_FMTS) or (fmt, sw) in seen_g:   # the formats with GEMM kernel tests (formats.ICODES; KTEST_GEMM_ALL=1: every GEMM format, e.g. bf16/f32/q4_0 on a new device)
                 continue
             seen_g.add((fmt, sw))
             yield name, fmt, sw
@@ -1000,8 +1001,6 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
         # gen_llm.linear launches the 128/256-row kernels only on output widths their 128-wide tiles divide
         big = n_use % (64 if swiglu else 128) == 0
         for rows, kern in ((128, base_k),) + (((256, base_k + "_m128"),) + (() if fmt in GEMM_HELPER else ((512, base_k + "_m256"),)) if big else ()):
-            if os.environ.get("KTEST_GEMM_TWIN", "0") not in ("", "0"):
-                kern += "_rdna4"   # run the gfx12 twin (gen_gemm_rdna4.py) directly: on an RDNA4 device
             x16 = rng.standard_normal((rows, K)).astype(np.float16)
             inv = rng.uniform(0.25, 2.0, rows).astype(np.float32)
             sc = np.stack([np.ones(rows, np.float32), inv], 1)
@@ -1032,7 +1031,9 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 }}
 """)
             cases.append(_case)
-            if os.environ.get("KTEST_GEMM_ERR", "0") not in ("", "0"):   # error probe: zero tolerance, so the failure detail reports the max abs/rel error
+            if os.environ.get("KTEST_GEMM_ERR", "0") not in ("", "0"):   # error probe: the case again at 0.3 / 0.1 / 0.03 / 0.01 of its tolerance; the tightest one that passes bounds the error
+                for f in (0.3, 0.1, 0.03, 0.01):
+                    cases.append(_case.replace(f"@{tag} {{", f"@{tag}_x{round(f * 100)} {{", 1).replace(f"atol({tol:.3e}) rtol(1.0e-2)", f"atol({tol * f:.3e}) rtol({1.0e-2 * f:.3e})", 1))
                 cases.append(_case.replace(f"@{tag} {{", f"@{tag}_err {{", 1).replace(f"atol({tol:.3e}) rtol(1.0e-2)", "atol(0.0) rtol(0.0)", 1))
 # 3c. a verify span at long context: ATTN_MT tokens of one row at consecutive positions past ATTN_MT_FROM take the
 # multi-token split-K path (one K/V load per key for the span); K/V written straight into the arena (identity pages).
