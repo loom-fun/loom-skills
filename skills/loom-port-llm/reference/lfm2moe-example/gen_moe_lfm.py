@@ -567,7 +567,15 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
         rep("  %bounded_x_row = index.assume %x_row [lt(%x_row, %rows)] : index", "  %bounded_x_row = index.assume %x_row [lt(%x_row, %xrows)] : index")
         rep("    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index", "    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %xrows)] : index")
     rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
-    return text
+    import rdna4_port
+    if not rdna4_port.enabled():
+        return text
+    # the gfx12 twin K_rdna4 beside K: gfx12's fragment store needs the tight row/column bounds of gen_moe.grouped_gemm
+    # (the 2^20 x 2^18 dynamic-stride extent is rejected); same launch signature
+    tight = text.replace("[range(%rows_arg, 64, 1048576), multiple_of(%rows_arg, 64)]", f"[range(%rows_arg, 64, {8192 * KU + 64 * E}), multiple_of(%rows_arg, 64)]")
+    tight = tight.replace("[range(%n_arg, 64, 262144), multiple_of(%n_arg, 64)]", f"[range(%n_arg, 64, {N}), multiple_of(%n_arg, 64)]")
+    assert tight != text
+    return text + "\n" + rdna4_port.twin(tight)
 
 
 def combine_sorted(H, KU):
