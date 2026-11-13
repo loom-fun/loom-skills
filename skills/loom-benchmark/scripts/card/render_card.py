@@ -20,13 +20,14 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_URL, METHOD, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
-                      TIMED, card_gpus, card_metrics, derived_tags, gate_applies, generator_commit, gpu_context, gpu_memory,
+from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
+                      TIMED, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory,
                       gpu_view, has_results, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features)
 from matched_spec import TIE_BAND  # noqa: E402
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
+FIT = "doesn't fit"   # a row or gate that needs more context than the GPU's memory serves: accepted, not a failure
 UNKNOWN = "?"   # a feature that could not be determined: neither supported, nor n/a, nor a failure
 SUP = "¹²³⁴⁵⁶⁷⁸⁹"
 ABOVE = "‡"   # a Loom value above its modeled ceiling
@@ -388,7 +389,8 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
     above = []
     for key, label in METRICS:
         if not metric_applies(key, kind, feats, view, ctx):
-            L.append(f"| {label} |" + " n/a |" * (5 + len(extra)))
+            cell = FIT if beyond_context(view, key, ctx, native_context(feats)) else "n/a"
+            L.append(f"| {label} |" + f" {cell} |" * (5 + len(extra)))
             continue
         m, i = shown.get(key, ({"loom": None, "baseline": None}, None))
         loom = marked(key, m.get("loom"), i, stale)
@@ -441,8 +443,14 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
         bw = ((view.get("roofline") or {}).get("device") or {}).get("bandwidth_bytes_per_s") or 216e9
         L.append(f"- {ABOVE} measured above the modeled ceiling; the roofline is an estimate ({bw / 1e9:.0f} GB/s effective bandwidth).")
     L.append("- " + roofline_note(view))
-    oc = ", ".join(sorted(over_context(view, ctx)))
-    served = ctx != native_context(feats)
+    native = native_context(feats)
+    nofit_keys = [k for k in METRIC_KEYS if beyond_context(view, k, ctx, native)]
+    nofit = ", ".join(nofit_keys)
+    oc = ", ".join(sorted(over_context(view, ctx) - set(nofit_keys)))
+    served = ctx != native
+    if nofit:   # the user's rule: what does not fit this GPU's memory is not expected to be done
+        L.append(f"- {FIT} ({nofit}): the document is longer than the {ctx:,}-token context this GPU serves; not expected "
+                 "to be measured, not a failure.")
     L += [f"- {MISSING} not measured; n/a not applicable" + (
         f" ({oc}: the document is longer than the " + (f"{ctx:,}-token context this GPU serves" if served else
                                                        f"model's native {ctx}-token context") + ")" if oc else "") + ".", ""]
@@ -558,6 +566,8 @@ def render(d):
         if not has_results(dev):
             return MISSING + (" not yet re-measured" if dev.get("state") == "not_measured" else " does not fit")
         gt = dev["gates"].get(name)
+        if gt is None and beyond_context(gpu_view(info, g), name, gpu_context(info, g, native), native):
+            return f"{FIT} (needs more context than the {gpu_context(info, g, native):,} tokens this GPU serves)"
         if gt is None:
             return f"{NO} no evidence" if gate_applies(name, kind, feats) else f"{NA} not applicable"
         key = (gt["source"], gt["level"], gt["date"])

@@ -103,10 +103,18 @@ GPUS = {
                    "roofline": "strix-halo", "memory_bytes": None, "runner": "Strix Halo", "tag": "strix-halo",
                    "detect": re.compile(r"strix|8060s|gfx1151", re.I)},
     "radeon-r9700": {"name": "AMD Radeon AI PRO R9700", "short": "Radeon AI PRO R9700", "arch": "gfx1201", "memory": "32 GB",
-                     "roofline": "radeon-r9700s", "memory_bytes": 34359738368, "runner": "R9700", "tag": "radeon-r9700",
+                     "roofline": "radeon-r9700s", "memory_bytes": 34_000_000_000, "runner": "R9700", "tag": "radeon-r9700",
                      "detect": re.compile(r"r9700|gfx1201|radeon ai pro", re.I)},
 }
 DEFAULT_GPU = "strix-halo"   # a card of loom-card/2 and evidence that names no GPU
+# The R9700 pool: the board reports 31.86 GiB (34.2 GB) of VRAM and the driver reserves part of it, so loom-serve gets
+# 34.0 GB (31.67 GiB): below what the board reports, above the 33.2 GB the largest package that fits at its native
+# context needs (fit/verdict.json: weights + KV + SERVE_HEADROOM).
+# The tokens a card row or gate needs one request to hold: on a GPU that serves a shorter context the cell reads
+# "doesn't fit" (the user's rule: an accepted outcome, not a failure).
+METRIC_CONTEXT = {"decode_2k": 2000, "decode_32k": 32000, "prefill_1k": 1000, "prefill_2k": 2000, "prefill_8k": 8000,
+                  "prefill_16k": 16000, "prefill_32k": 32000}
+GATE_CONTEXT = {"golden": 32000, "needle_full": "native"}   # golden's longest document; needle_full: the whole native context
 SERVE_HEADROOM = 2_000_000_000   # bytes beyond weights and KV cache a GPU needs (the fit table's reserve)
 
 HF = "https://huggingface.co"
@@ -480,7 +488,22 @@ def metric_applies(key, kind, feats, info=None, context=None):
     if key == "spec_acceptance":
         return drafting(feats)
     # with info.json: longer than the native context (context: the context a GPU serves, when its memory holds less)
-    return key not in over_context(info, context or native_context(feats))
+    native = native_context(feats)
+    return key not in over_context(info, context or native) and not beyond_context(info, key, context, native)
+
+
+def beyond_context(info, key, context, native):
+    """Whether a card row (or gate, when `key` is a gate name) needs more tokens than the `context` a GPU serves, a
+    context shorter than the model's `native` one. A GPU that serves the native context has no such rows (what the
+    server refused there stays n/a), and a row a session measured fits."""
+    if not context or not native or context >= native:
+        return False
+    need = {**METRIC_CONTEXT, **GATE_CONTEXT}.get(key)
+    need = native if need == "native" else need
+    if not need or need <= context:
+        return False
+    sessions = (single(info or {})).get("performance", {}).get("sessions", [])
+    return not any(m.get("loom") is not None for s in sessions for k, m in s["metrics"].items() if k == key)
 
 
 def native_context(feats):

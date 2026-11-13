@@ -68,7 +68,7 @@ two or three lines; if they disagree with this file, this file wins and the othe
     perf|gates|roofline --gpu`; else the GPU its source device names, else Strix Halo). The package is the same on both: one
     `model.json`, the context is native on a GPU with room for its KV cache; on a GPU whose memory holds less (`--fit`: weights + KV
     + 2 GB must fit the GPU's memory), `--memory_bytes` is that GPU's memory, the card states the context served there (`served_context`)
-    and documents longer than it are `n/a`. A package that does not fit a GPU's memory is that GPU's `unsupported` state (one factual
+    and a row or gate that needs more context than that (`decode_32k`, `prefill_32k`, `needle_full` at the native context, `golden`'s 32k documents) reads `doesn't fit` in every column of that GPU (Loom, llama.cpp, roofline): an accepted outcome, not a failure and not "no evidence". `--memory_bytes` for the R9700 is 34.0 GB (the board reports 31.86 GiB). A package that does not fit a GPU's memory is that GPU's `unsupported` state (one factual
     line). A GPU without results for this package is `not_measured` (one factual line, no numbers copied from another package or
     program). Publishing goes to one org (`publish_package.py upload --org`, default `loom-fun`); the staging flow uses `--org
     loom-fun-staging` with the same repo names, and a card whose `info.json` repo is another org is refused.
