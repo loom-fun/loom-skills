@@ -129,8 +129,21 @@ def apply_file(path):
 
 
 def apply_dir(program_dir):
-    """The pass over every *.loom file of a package's program/ directory; the files rewritten."""
-    return [n for n in sorted(os.listdir(program_dir)) if n.endswith(".loom") and apply_file(os.path.join(program_dir, n))]
+    """The pass over every *.loom file of a package's program/ directory; the files rewritten. A kernel with a twin
+    that a file launches without defining it (the twin is in another file) is an error: the pass only rewrites the
+    launches of the file that defines both, and the others would launch the gfx11 kernel on a gfx12 device."""
+    files = {n: open(os.path.join(program_dir, n), encoding="utf-8", newline="").read()
+             for n in sorted(os.listdir(program_dir)) if n.endswith(".loom")}
+    if enabled():
+        owner = {k: n for n, t in files.items() for k in twins(t)}
+        for n, t in files.items():
+            if "target.decl @device" in t:
+                continue
+            for m in (LAUNCH.match(l) for l in t.split("\n")):
+                if m and m.group(2) in owner and owner[m.group(2)] != n:
+                    raise ValueError(f"program/{n} launches @{m.group(2)}, whose {SUFFIX} twin is defined in program/{owner[m.group(2)]}: "
+                                     "a dual-target kernel must be launched from the file that defines it")
+    return [n for n in files if apply_file(os.path.join(program_dir, n))]
 
 
 if __name__ == "__main__":
