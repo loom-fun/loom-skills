@@ -68,7 +68,7 @@ LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> "${LOOM_SKILL_DIR}/../loom-benchmark
 - **speculative decoding, by default**: an MTP/NextN block in the GGUF, or a DFlash drafter found for the base
   model (stage 2c, `starter/draft/find_drafter.py`; vendor repos and BF16-only drafters included), is built in;
   the smoke stage proves drafting changes no token (`spec_check.py`). `qualify.sh` later keeps whichever drafter
-  (n-gram prompt lookup is a candidate for every model) and depth decode fastest, or none
+  (n-gram is opt-in, never on a card) and depth decode fastest, or none
   (`starter/draft/README.md`). `SPEC=off` opts out.
 
 **Split GGUFs** (`NAME-00001-of-0000N.gguf`): pass the first part; port.sh fetches and links every part; inspect, build

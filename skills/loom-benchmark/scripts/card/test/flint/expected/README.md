@@ -43,7 +43,7 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 - Compared: Loom against llama.cpp ROCm `llamacpp-rocm/b1355`; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with the active wait. Values are the mean of 2 rounds (4 streams: median of 3); Loom is timed by the client, llama.cpp by its server.
 - Drafting, 1-stream rows (decode, decode_2k, decode_32k, prefill): DFlash (incoai/Flint-DFlash2-GGUF / Flint-DFlash2-Q4_K_M.gguf) on both engines; draft depth: Loom 3, llama.cpp --spec-draft-n-max 3 (each engine its own). Each engine is loaded once for all these rows.
 - 4 streams: both engines loaded with drafting off, 4 parallel requests, aggregate tokens per second.
-- Rows: decode = short-context decode; decode_2k / decode_32k = decode after a ~2k / ~32k-token context; prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode.
+- Rows: decode = short-context decode; decode_2k / decode_32k = decode after a ~2k / ~32k-token context; prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode. A margin within +-3 % (the measured same-runner noise) is a tie.
 - llama.cpp ROCm server arguments: `-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model ~/drafter.gguf --spec-draft-n-max 3 -ngld 99 -c 65536 -kvu -np 4`.
 - Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs); runners differ between sessions.
 - Measured 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: DevLab Dispatch run 3001.

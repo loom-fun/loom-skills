@@ -13,14 +13,14 @@
 #                  "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF;
 #                                                                     {hf:OWNER/REPO/FILE}: that Hub file, e.g. a drafter llama.cpp loads and the card doesn't ship)
 #    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
-#   FINAL BENCHMARK RULE (RULE_BASELINES.md): one drafting choice per model, identical on Loom and llama.cpp (ROCm, Vulkan), from
+#   BENCHMARK RULE (skills/loom-benchmark/reference/methodology.md): one drafting choice per model, identical on Loom and llama.cpp (ROCm, Vulkan), from
 #   data/drafting_classification.json (MTP head in the GGUF > exact-model DFlash/assistant drafter > none; never ngram): "matched"
 #   (the default) = that choice as llama.cpp arguments (card/matched_spec.py); Loom keeps its tuned depth, llama.cpp the drafter's
 #   recommended n-max. The 1-stream rows load each engine once with it (llama@rocm.np1 / llama@vulkan.np1); streams4 loads both
 #   without drafting (llamac4@rocm.nodraft / llamac4@vulkan.perslot.nodraft; Loom: variant {"name": "nodraft", "execution":
 #   {"draft_depth": 0}}, step c4:nodraft). A server that cannot run the drafter fails its step = "not supported", never replaced.
-#   n-max tuning (rule: tuned like Loom's depth): llama@rocm.np1:3:-:N / llama@vulkan.np1:3:-:N (and the :long form) with N in 1 2 3 4 d
-#   (d = llama.cpp default); card/pick_nmax.py chooses the best geometric mean over the 1-stream rows per backend.
+#   n-max sweep (DIAGNOSTIC, not a card input: the card uses the documented n-max or the default): llama@rocm.np1:3:-:N /
+#   llama@vulkan.np1:3:-:N (and the :long form), N in 1 2 3 4 d (d = llama.cpp default); card/pick_nmax.py tabulates it.
 #   "llama_spec_vulkan": a Vulkan-only override, for a drafter the Vulkan build cannot run (record it with --differs).
 #   A job may override card, kit, memory_bytes, llamacpp, llamacpp_vulkan, vulkan_kv and llama_spec: one experiment can
 #   measure several cards.
@@ -244,7 +244,7 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   spec=${spec//'{drafter}'/$drafter}
   [[ $MODS == *nodraft* ]] && spec=""   # .nodraft: the streams4 servers (benchmark rule: 4 streams run undrafted on every engine, Loom's occ_min gate too)
   # N_MAX (the step's last parameter): a number sets --spec-draft-n-max (adding it when the spec has none), "d" = llama.cpp's
-  # default (the flag removed). Benchmark rule: llama.cpp's n-max is tuned like Loom's depth, from {1,2,3,4,default} (llama@rocm.np1:3:-:N).
+  # default (the flag removed). Diagnostic n-max sweep only (llama@rocm.np1:3:-:N); card runs use no N.
   if [ -n "${1:-}" ] && [ -n "$spec" ]; then
     spec=$(echo "$spec" | sed -E "s/ ?--spec-draft-n-max [0-9]+//")
     [ "$1" = d ] || spec="$spec --spec-draft-n-max $1"

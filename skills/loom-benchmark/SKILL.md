@@ -34,7 +34,8 @@ S="${LOOM_SKILL_DIR}/scripts"
 "$S/fetch_llamacpp.sh"                 # latest lemonade-sdk/llamacpp-rocm for this GPU -> ~/llamacpp-rocm/<tag> (pre-approved, ~25 s)
 "$S/pick_llamacpp.sh" MODEL.gguf 8139 "$HOME"   # every llama-server with libggml-hip.so, benchmarked and ranked
 ```
-The baseline is the top-ranked build. Don't choose by version string: the lemonade
+The baseline is the top-ranked build (a build choice for local qualification; cards pin one build per backend, and
+configurations are never picked by speed: `reference/methodology.md`). Don't choose by version string: the lemonade
 nightly prints `version: 1`, and the tag is usually only in the directory name.
 Builds differ up to 2× on the same GGUF (a stale build once inflated a margin from +25 % to 2.5×),
 and a new architecture can need the newest release (no installed build knew `flint`).
@@ -45,7 +46,8 @@ b12211` and `llamacpp_server.sh` (same variable) run the same server arguments, 
 ROCm baseline. It is measured only in `devlab-perf` jobs (`llama@vulkan:N`, `llamac4@vulkan` steps, `loom-org` step 3)
 and recorded with `make_info.py perf --backend vulkan` under `performance.baselines.vulkan`; the card renders it as one
 more column. It never feeds a card value, a guardrail or an `org_status` action. A setting Vulkan cannot run
-is recorded in `baseline.differs` (with the reason, rendered on the card), never swapped silently.
+is a "not supported" cell with the reason (`baseline.differs`, rendered on the card), never swapped silently
+(`reference/methodology.md` rules 1-6).
 
 A weaker baseline inflates every margin you report. Report the chosen build's path and tag.
 lemonade-sdk/llamacpp-rocm releases are pre-approved: download them without asking. Check that
@@ -363,22 +365,11 @@ tuning table (`bench/draft_tune.json`: decode tok/s per method and depth, includ
 acceptance rate from the `spec` gate log. Decode numbers with drafting depend on the text: report them on the
 standard workloads and say so.
 
-**One drafting rule for both engines (final benchmark rule, `RULE_BASELINES.md`).** Per model, ONE drafting choice, the same on Loom
-and llama.cpp (ROCm and Vulkan), decided by what is officially available for that exact model, never by which engine is faster
-(`data/drafting_classification.json`, the 51-card table with provenance links in `data/drafting_classification.md`):
-1. an MTP head in the card's own GGUF (checked in the GGUF header: `nextn_predict_layers`) -> MTP on both;
-2. else a DFlash drafter / assistant published for this exact model by its maker or Z-Lab (a faithful GGUF conversion of that release
-   is fine) -> that drafter on both;
-3. else no drafting on both. Never n-gram. Never a drafter trained for another model. Provenance you cannot verify -> (3).
-Depth is per engine: Loom its tuned depth; llama.cpp the drafter's upstream-recommended `--spec-draft-n-max`, else its default (both
-recorded on the card). The 1-stream rows (decode, decode_2k, decode_32k, prefill_1k..32k) load each engine once with that choice
-(Loom's runtime gates `ctx_max`/`occ_min` may act); streams4 loads both engines without drafting (Loom: the shipped package with a
-`draft_depth` 0 override, variant `nodraft`, step `c4:nodraft`; llama.cpp: a 4-slot server without `--spec-*`). A backend that cannot
-run the drafter: that cell is "not supported", never another configuration. No best-of-configurations.
-`card/matched_spec.py` derives everything from the classification (`devlab_perf.sh`: `llama_spec` absent = matched;
-`llama@rocm.np1`, `llama@vulkan.np1`, `llamac4@rocm.nodraft`, `llamac4@vulkan.perslot.nodraft`). Rebuild a package whose
-drafting differs from its classification with `TUNE_KIND=<choice> TUNE_REQUIRE_DRAFT=1` (or `SPEC=off` for "none"); `tune.py`
-never picks n-gram (`TUNE_NGRAM=1` is opt-in for experiments). `llama_spec_tune.py`'s table stays a diagnostic. References never draft.
+**Benchmark methodology (normative: [`reference/methodology.md`](reference/methodology.md)).** One drafting choice per model, the same on
+Loom and llama.cpp ROCm + Vulkan (MTP head in the card's GGUF > exact-model DFlash/assistant drafter > none; never n-gram; from
+`data/drafting_classification.json`); each engine loaded once for the 1-stream rows, both undrafted for streams4; win/tie/loss at +-3 %
+vs the better backend. `card/matched_spec.py` derives the llama.cpp arguments and checks the rule (`rule_violations`). To rebuild a
+package whose drafting differs from its classification: `TUNE_KIND=<choice> TUNE_REQUIRE_DRAFT=1` (or `SPEC=off`). References never draft.
 
 **Run the audit first** (from `bench/`):
 ```bash
