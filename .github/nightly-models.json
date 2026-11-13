@@ -42,7 +42,7 @@
    "slug": "flint",
    "memory_bytes": 69000000000,
    "kit": null,
-   "llamacpp": "b1355",
+   "llamacpp": "b1374",
    "features": [
     "draft",
     "thinking-always"
@@ -87,7 +87,7 @@
    "slug": "qwen3.5-4b",
    "memory_bytes": 28000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": [
     "vision",
     "draft",
@@ -99,7 +99,7 @@
    "slug": "qwen3.5-9b",
    "memory_bytes": 32000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": [
     "vision",
     "draft",
@@ -111,7 +111,7 @@
    "slug": "ornith-1.5-9b",
    "memory_bytes": 32000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": [
     "vision",
     "draft",
@@ -362,7 +362,7 @@
    "slug": "qwen2.5-vl-7b-instruct",
    "memory_bytes": 21000000000,
    "kit": null,
-   "llamacpp": "b1373",
+   "llamacpp": "b1374",
    "features": [
     "vision",
     "draft"
@@ -524,7 +524,7 @@
    "slug": "qwen3-4b",
    "memory_bytes": 25000000000,
    "kit": null,
-   "llamacpp": "b1370",
+   "llamacpp": "b1374",
    "features": [
     "draft",
     "thinking-toggle"
