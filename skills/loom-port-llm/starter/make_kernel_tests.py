@@ -683,6 +683,8 @@ def prefill_cont_case(li, p0, t, pad, tag, qscale=1.0):
 # gen_llm.gqa_split: head_dim 128 packages (drafting ones too, but the segment path) decode past attn_rules.ATTN_GQA_FROM visible keys with the K/V-once kernel body;
 # no other case here reaches 4096 keys, so this span (4296 keys, decode path vs numpy) is its only coverage
 _draft = cfg.get("draft") or json.loads(os.environ.get("LLM_DRAFT") or "null") or {}
+from gen_gdn import single_form  # noqa: E402  the recurrence form gen_llm.py built (one form for MTP drafting)
+single_form(_draft.get("kind"))
 _seg = bool(_draft.get("kind") and D in (64, 128) and KVH <= 2)   # gen_llm.seg_tokens(): drafting builds with few KV heads take the segment path
 _gqa = attn_rules.gqa(bool(_draft.get("kind")), _seg, D) and attn_rules.paged(attn_rules.UNROLL) and attn_rules.butterfly(attn_rules.UNROLL)
 if _gqa and D == 128 and os.environ.get("PREFILL_CONT", "1") != "0":
