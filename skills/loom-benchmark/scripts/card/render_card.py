@@ -16,6 +16,7 @@ cards. Never edit a rendered README by hand: change the data (make_info.py) or t
 """
 import argparse
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -131,6 +132,53 @@ def margin(loom, base):
     if loom is None or base is None or not base:
         return MISSING
     return f"{round((loom / base - 1) * 100):+d} %"
+
+
+LLAMA_METHOD = {"draft-dflash": "DFlash", "draft-mtp": "MTP", "ngram-simple": "n-gram", "ngram-mod": "n-gram"}
+
+
+def llama_draft(args):
+    """(method, n-max or None) of a llama.cpp server's arguments, (None, None) without speculative decoding."""
+    m = re.search(r"--spec-type (\S+)", args or "")
+    n = re.search(r"--spec-draft-n-max (\d+)", args or "")
+    return (LLAMA_METHOD.get(m.group(1), m.group(1)) if m else None), (int(n.group(1)) if n else None)
+
+
+def methodology(base, extra, spec, drafter, runs_dec, runs_c4):
+    """The card's methodology: the same short template on every card, filled from the card's own data (baseline server
+    arguments, drafting setting, runs). Anything that differs between the engines is stated as it is, not smoothed over."""
+    vk = next((x["baseline"] for b, x in extra.items() if b == "vulkan"), None)
+    engines = [(base["name"] + " ROCm", base)] + ([(base["name"] + " Vulkan", vk)] if vk else [])
+    ver = ", ".join(f"{n} `{b['version']}`" if b.get("version") else f"{n} (build not recorded)" for n, b in engines)
+    loom_m = METHOD.get(spec[0], spec[0]) if spec else None
+    ll = [(n, *llama_draft(b.get("args"))) for n, b in engines]
+    if spec is None and all(m is None for _, m, _ in ll):
+        draft = "no drafting on either engine (no MTP head in the GGUF and no drafter published for this exact model)"
+        depth = ""
+    elif spec and all(m is not None and (m == loom_m or (loom_m == "assistant drafter" and m == "MTP")) for _, m, _ in ll):
+        d = f" ({drafter})" if drafter else ""
+        draft = f"{loom_m}{d} on both engines"
+        depth = "; draft depth: Loom " + str(spec[1]) + ", llama.cpp --spec-draft-n-max " + " / ".join(
+            (str(n) if n else "llama.cpp default") for _, _, n in ll[:1]) + " (each engine its own)"
+    else:
+        draft = ("Loom " + (f"{loom_m} depth {spec[1]}" if spec else "no drafting") + "; "
+                 + "; ".join(f"{n} " + (f"{m}" + (f" n-max {k}" if k else "") if m else "no drafting") for n, m, k in ll)
+                 + " (NOT the same choice on both engines)")
+        depth = ""
+    out = [f"- Compared: Loom against {ver}; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with "
+           f"the active wait. Values are the mean of {runs_dec} rounds (4 streams: median of {runs_c4}); Loom is timed by the client, "
+           "llama.cpp by its server.",
+           f"- Drafting, 1-stream rows (decode, decode_2k, decode_32k, prefill): {draft}{depth}. Each engine is loaded once for "
+           "all these rows.",
+           "- 4 streams: both engines loaded with drafting off, 4 parallel requests, aggregate tokens per second.",
+           "- Rows: decode = short-context decode; decode_2k / decode_32k = decode after a ~2k / ~32k-token context; "
+           "prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode."]
+    for n, b in engines:
+        out.append(f"- {n} server arguments: " + (f"`{b['args']}`." if b.get("args") else "not recorded."))
+    ns = [f"{n}: {u}" for n, b in engines for u in (b.get("differs") or [])]
+    if ns:
+        out.append("- Not supported / not measured: " + "; ".join(ns) + ".")
+    return out
 
 
 def drafting(spec):
@@ -360,18 +408,11 @@ def render(d):
         return "–".join(str(v) for v in sorted(vals)) if vals else "not recorded"
     tps_keys = [k for k, _ in METRICS if k not in ("streams4", "spec_acceptance")]
     psrc = sources[sessions[primary]["source"]] if primary is not None else None
-    L += ["", f"- {bname}: build {('`' + base['version'] + '`') if base['version'] else 'not recorded'}, server arguments "
-              + (f"`{base['args']}`." if base["args"] else "not recorded."),
-          f"- Loom: speculative decoding {drafting(facts['spec'])}.",
-          "- Apples to apples: per model one drafting choice for Loom and llama.cpp, from what is published for this exact model "
-          "(an MTP head in the GGUF, else the model maker's or Z-Lab's DFlash/assistant drafter, else none; never n-gram). The "
-          "1-stream rows (decode, decode_2k, decode_32k, prefill) run each engine loaded once with it, each with its own depth "
-          "(recorded below); 4 streams run with drafting off on both. Anything llama.cpp cannot run is listed below.",
-          "- Same GGUF on both engines, tokens per second. Loom: client-side timing; "
-          f"{bname}: server-side timings. Runs per value: decode and prefill {runs_of(tps_keys, False)} (mean), "
-          f"4 streams {runs_of(['streams4'], True)} (median).",
-          "- Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs): Loom, served with the active wait, "
-          "and llama.cpp on the same runner; runners differ between sessions."]
+    drafter = None
+    if facts["drafter"]:
+        drafter = hf(facts["drafter"]["repo"]).strip() if False else f"{facts['drafter']['repo']} / {facts['drafter']['file']}"
+    L += ["", "**Methodology**", "", *methodology(base, extra, facts["spec"], drafter, runs_of(tps_keys, False), runs_of(["streams4"], True)),
+          "- Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs); runners differ between sessions."]
     if psrc:
         L.append(f"- Measured {text(sessions[primary]['date'])}; device {device_text(psrc['device'])}; "
                  f"hrx-loom {sdk_text(psrc['hrx_loom'])}; source: {src_text(psrc)}.")
@@ -381,13 +422,8 @@ def render(d):
                  f"source: {src_text(s)}.")
     for b, x in extra.items():
         xb, xs = x["baseline"], x["session"]
-        L.append(f"- {xnames[b]}: build {('`' + xb['version'] + '`') if xb['version'] else 'not recorded'}"
-                 + (f" (archive sha256 {short(xb['sha256'])})" if xb.get("sha256") else "")
-                 + ", server arguments " + (f"`{xb['args']}`" if xb["args"] else "not recorded")
-                 + f"; same GGUF, prompts and settings as {bname}; measured {text(xs['date'])} in its own DevLab job "
-                 f"(another runner than the other columns: compare the engines through ratios, not across jobs); "
-                 f"source: {src_text(sources[xs['source']])}."
-                 + "".join(f" Differs from {bname}: {u}." for u in xb.get("differs") or []))
+        L.append(f"- {xnames[b]}: measured {text(xs['date'])}; source: {src_text(sources[xs['source']])}."
+                 + (f" Archive sha256 {short(xb['sha256'])}." if xb.get("sha256") else ""))
     for sha in sorted(set(stale.values())):
         L.append(f"- {STALE} Measured on programs other than this repository's (sha256 {short(sha)}, this repository's "
                  f"{short(here)}): the value describes another build of the package until a session re-measures it.")
