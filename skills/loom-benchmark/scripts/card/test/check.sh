@@ -393,4 +393,25 @@ assert len(consistency_checks(r, ok, sys.argv[3], none, lambda c: ['.github/devl
 assert consistency_checks(r, ok, sys.argv[3], none, lambda c: None) != [] and consistency_checks(r, ok, sys.argv[3], lambda c: None, lambda c: None) == []" "$here/../../../../loom-org/scripts" "$tmp/flint" "$tmp/skills" \
   && echo "OK   org_status checks: nightly entry matches the card, generator commit is on main or in a merged PR" \
   || { echo "FAIL org_status checks: nightly/generator consistency flags are wrong"; bad=1; }
+py -c "import sys; sys.path.insert(0, sys.argv[1]); import matched_spec as m, json
+assert m.TIE_BAND == 0.03
+o = m.outcome   # win > +3 %, tie within +-3 %, loss < -3 % against the BETTER llama.cpp backend; missing = neutral
+assert (o(104, 100), o(103, 100), o(97, 100), o(96.9, 100), o(120, [100, 125]), o(None, 100), o(100, []), o(100, None)) == ('win', 'tie', 'tie', 'loss', 'loss', None, None, None)
+t = m.tally(['win', 'tie', None]); assert t['wins_or_ties_every_row'] and not t['wins_every_row'] and not t['loses_a_row']
+assert m.tally(['win', 'win'])['wins_every_row'] and m.tally(['win', 'loss'])['loses_a_row'] and not m.tally([None])['wins_every_row']
+cls = json.load(open(m.DATA)); assert len(cls) == 51
+assert all(c['choice'] in ('mtp', 'dflash', 'assist', 'none') and 'ngram' not in c['llama_spec'] for c in cls.values()), 'ngram in the classification'
+r = next(k for k, c in cls.items() if c['choice'] == 'dflash'); n = next(k for k, c in cls.items() if c['choice'] == 'none')
+spec = cls[r]['llama_spec']; rows = m.row_states(r)
+assert rows['streams4'] is False and rows['decode'] is True and m.row_states(n)['decode'] is False
+assert m.rule_violations(r, {'draft': {'kind': 'dflash'}}, {'rocm': spec, 'vulkan': spec}, {k: {'loom': v, 'llama': v} for k, v in rows.items()}) == []
+assert m.rule_violations(r, {'draft': {'kind': 'ngram'}}), 'a package drafting with n-gram'
+assert m.rule_violations(n, {'draft': {'kind': 'dflash'}}), 'a package drafting where the rule says none (a drafter for another model)'
+assert m.rule_violations(r, None, {'vulkan': '--spec-type ngram-simple'}), 'llama.cpp n-gram'
+assert m.rule_violations(r, None, {'rocm': ''}), 'llama.cpp not drafting where the rule says drafting'
+assert m.rule_violations(n, None, {'rocm': spec}), 'llama.cpp drafting where the rule says none'
+assert m.rule_violations(r, None, None, {'streams4': {'loom': True}}), 'streams4 drafted'
+assert m.rule_violations(r, None, None, {'decode_32k': {'llama': False}}), 'a per-row toggle'" "$C" \
+  && echo "OK   methodology rule: tie band, outcome counts, drafting rule (no n-gram, one choice, per-row loads)" \
+  || { echo "FAIL methodology rule: matched_spec constants/checks"; bad=1; }
 exit $bad

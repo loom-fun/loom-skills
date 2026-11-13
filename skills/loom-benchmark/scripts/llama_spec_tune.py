@@ -1,4 +1,5 @@
-"""Chooses llama.cpp's speculative decoding for the baseline, so Loom is compared drafting vs drafting.
+"""A DIAGNOSTIC sweep of llama.cpp speculative settings for local development. Card numbers do NOT use it: the card rule
+(reference/methodology.md) fixes one drafting choice per model from data/drafting_classification.json.
 
 usage: LLAMACPP_DIR=DIR llama_spec_tune.py GGUF PORT CTX OUT.json [--cfg WORKDIR/cfg.json] [--pkg PKG]
 Candidates, each served alone (llamacpp_server.sh, 4 slots, unified KV of CTX) and timed on the same decode-heavy

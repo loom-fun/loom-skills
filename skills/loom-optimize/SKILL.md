@@ -157,10 +157,10 @@ tokens are in flight (Qwen3.5-0.8B decode +18 %, identical output; `GDN_CB=1` re
 
 **Tried and did not help** (don't repeat without a new reason): see the catalog's "Did not help".
 
-**Speculative decoding** (on by default when the GGUF has an MTP block or a DFlash drafter exists, and n-gram
-prompt lookup is a candidate for every model; `loom-port-llm/starter/draft/README.md`). `qualify.sh` already chose the method and depth by measurement
-(`bench/draft_tune.json`) and gave the llama.cpp baseline its own best drafting
-(`bench/llamacpp_spec.json`), so decode targets are drafting vs drafting; re-run `draft/tune.py WORKDIR PORT MEMORY_GIB MODEL_ID` after a change that moves
+**Speculative decoding** (on by default when the GGUF has an MTP block or a DFlash drafter exists;
+`loom-port-llm/starter/draft/README.md`; n-gram is opt-in, `TUNE_NGRAM=1`, never on a card). `qualify.sh` chose the method and depth by
+measurement (`bench/draft_tune.json`); card comparisons use the model's classified drafting choice on both engines
+(`loom-benchmark/reference/methodology.md`), so decode targets are drafting vs drafting; re-run `draft/tune.py WORKDIR PORT MEMORY_GIB MODEL_ID` after a change that moves
 the decode/verify balance (it rebuilds `pkg`). On a bandwidth-bound model it is the biggest decode lever
 (Qwen3.8-27B Q4_K_M: 12.8 -> 21.0 tok/s with MTP depth 3); on small launch-bound models it loses (Qwen3.5-0.8B:
 262 -> 208) and tune.py keeps it off. The multi-token target step that used to cap it (issue #21: f32 activations

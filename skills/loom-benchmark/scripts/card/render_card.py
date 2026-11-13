@@ -24,6 +24,7 @@ from card_lib import (FEATURES, GATE_NAMES, GATES, HF, LOOM_URL, METHOD, METRICS
                       card_metrics, derived_tags, gate_applies, generator_commit, load_json,
                       load_package, metric_applies, native_context, over_context, package_facts, programs_sha256,
                       require_valid, stale_metrics, with_gate_features)
+from matched_spec import TIE_BAND  # noqa: E402
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
 UNKNOWN = "?"   # a feature that could not be determined: neither supported, nor n/a, nor a failure
@@ -173,7 +174,8 @@ def methodology(base, extra, spec, drafter, runs_dec, runs_c4):
            "all these rows.",
            "- 4 streams: both engines loaded with drafting off, 4 parallel requests, aggregate tokens per second.",
            "- Rows: decode = short-context decode; decode_2k / decode_32k = decode after a ~2k / ~32k-token context; "
-           "prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode."]
+           "prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode. A margin within "
+           f"+-{round(TIE_BAND * 100)} % (the measured same-runner noise) is a tie."]
     for n, b in engines:
         out.append(f"- {n} server arguments: " + (f"`{b['args']}`." if b.get("args") else "not recorded."))
     ns = [u if u.startswith("Loom:") else f"{n}: {u}" for n, b in engines for u in (b.get("differs") or [])]

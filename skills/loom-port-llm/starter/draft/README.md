@@ -5,8 +5,8 @@ needs configuring: `port.sh` enables a drafter, `qualify.sh` measures which draf
 fastest (or none), and the gates prove the output did not change. `SPEC=off` opts out (port, build, qualify).
 It works for every family the starter and the reference examples port (dense, gated delta-net and short-conv
 hybrids, MoE, sinks/sliding window, Gemma-style scaled embeddings, vision): the verifier is the trunk itself, the
-drafters only need the target's embedding, head and hidden features, and every model has at least the n-gram
-drafter as a candidate.
+drafters only need the target's embedding, head and hidden features. Which drafter a *card* uses (and that n-gram never
+is one) is fixed by `loom-benchmark/reference/methodology.md`, not by tune.py.
 
 ## Drafters
 
@@ -16,7 +16,7 @@ drafter as a candidate.
 | `dflash` | a DFlash (v1) drafter GGUF exists for the base model (`find_drafter.py`) | a small non-causal block-diffusion transformer over the target's hidden features; one pass proposes a whole block |
 | `dflash` (v2 / DFlash2) | as above, drafter with `attn_conv_proj` / `selector_*` tensors | DFlash plus 2-tap conv modulation, a 2048-key context window and a low-rank candidate selector |
 | `assist` | a gemma4-family target and a Gemma-4 "assistant" GGUF (arch `gemma4-assistant`, e.g. `AtomicChat/gemma-4-E4B-it-assistant-GGUF`; `find_drafter.py` records `cfg["assistant"]`) | Gemma 4's own MTP head as a separate ~100 MB model (`gen_assist.py`): `draft_depth` autoregressive rounds of 4 small layers that attend the target's own K/V (sliding layers: target layer L-2's cache, full: L-1's), fed by the target's embedding and post-norm hidden like MTP |
-| `ngram` | always (`gen_ngram.py`; tune.py tries it for every model) | prompt lookup: the newest longest suffix match of the anchor in the row's own token history proposes what followed it. No weights; wins where output quotes context (code edits, tool arguments, JSON) |
+| `ngram` | opt-in experiments only (`gen_ngram.py`; `TUNE_NGRAM=1`; never on a card) | prompt lookup: the newest longest suffix match of the anchor in the row's own token history proposes what followed it. No weights; wins where output quotes context (code edits, tool arguments, JSON) |
 
 `find_drafter.py` (port.sh stage 2c) searches HF by the base model's name (repo without -GGUF, `general.name`,
 without -Instruct; a bare-name search also finds vendor variants such as `nvidia/<base>-4GB-DFlash`), ranks exact

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tune llama.cpp's draft n-max the way Loom's depth is tuned (benchmark rule, item 2).
+"""DIAGNOSTIC: tabulate a llama.cpp draft n-max sweep (not a card input: reference/methodology.md rule 2 uses the documented n-max or the default).
 
   pick_nmax.py JOB_OUT_DIR [--candidates 1 2 3 4 0]
 
