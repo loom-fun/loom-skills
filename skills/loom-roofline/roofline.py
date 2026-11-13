@@ -384,7 +384,7 @@ def main():
                weight_bytes_per_token=round(wb), head_bytes=head,
                bytes_by_kind={k: round(v) for k, v in detail.items()},
                matmul_params=round(params), efficiency_assumed=EFF, stretch_assumed=STRETCH,
-               device=dev["name"], bw=a.bw, flops=a.flops, draft_gain=round(gain, 3), metrics=rows,
+               device=dev["name"] if (a.bw, a.flops) == (dev["bw"], dev["flops"]) else dev["name"] + ", overridden", bw=a.bw, flops=a.flops, draft_gain=round(gain, 3), metrics=rows,
                campaign=dict(budget_h=a.budget_h, reserve_min=a.reserve_min,
                              goals={g.split("=")[0]: float(g.split("=")[1]) for g in a.goal}))
     if a.out:
