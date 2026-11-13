@@ -61,5 +61,17 @@ two or three lines; if they disagree with this file, this file wins and the othe
     then fetch the live `info.json` and confirm the new session id (`performance.sessions[-1].source`) and the gates'
     `programs_sha256` equal the package's before saying "published". Publish partial progress; never fake a cell.
 
+12. **Cards for two GPUs** (`loom-card/3`: Strix Halo `strix-halo`, gfx1151; AMD Radeon AI PRO R9700 `radeon-r9700`, gfx1201, 32 GB).
+    Every rule above holds per GPU: each GPU has its own table, measured in one job on one runner of that GPU (never compare or
+    mix values across GPUs), its own llama.cpp ROCm and Vulkan baselines on that runner, its own roofline (`roofline.py --device`:
+    `strix-halo`, `radeon-r9700s` for the R9700 DevLab runner) and its own gate evidence. Evidence names its GPU (`make_info.py
+    perf|gates|roofline --gpu`; else the GPU its source device names, else Strix Halo). The package is the same on both: one
+    `model.json`, the context is native on a GPU with room for its KV cache; on a GPU whose memory holds less (`--fit`: weights + KV
+    + 2 GB must fit the GPU's memory), `--memory_bytes` is that GPU's memory, the card states the context served there (`served_context`)
+    and documents longer than it are `n/a`. A package that does not fit a GPU's memory is that GPU's `unsupported` state (one factual
+    line). A GPU without results for this package is `not_measured` (one factual line, no numbers copied from another package or
+    program). Publishing goes to one org (`publish_package.py upload --org`, default `loom-fun`); the staging flow uses `--org
+    loom-fun-staging` with the same repo names, and a card whose `info.json` repo is another org is refused.
+
 Local qualification (`qualify.sh`, `llama_spec_tune.py`, `tune.py`) is a development loop: its tables guide the optimizer, are
 not card numbers, and may try configurations the card rule excludes. Audit a card with `matched_spec.rule_violations`.

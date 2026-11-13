@@ -1,13 +1,13 @@
 {
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://github.com/loom-fun/loom-skills/skills/loom-benchmark/scripts/card/info_schema.json",
- "title": "Loom model card measurements (info.json), schema loom-card/2",
- "description": "The data of a loom-fun card that has no other home: measurements, gate evidence, the device and Loom SDK that measured, the baseline, dates and versions. What the package is comes from its own files and is never repeated here: sources, revisions, files, sha256 and sizes from model.json.lock; services, context, rows, max_tokens and drafting depth from model.json; chat features, the drafter and the generating loom-skills commit and SDK from llm_config.json. render_card.py renders README.md from all four. Unknown values are null or absent (rendered as not measured / no evidence / unknown), never guessed.",
- "$comment": "Compatibility: the schema string changes only on a breaking change. Readers ignore metric names, gate names and object keys they don't know, so adding a metric, a gate, an optional key or a new enum value of source.kind keeps loom-card/2. Removing or renaming a key, changing a key's type or meaning, or making a key required is breaking and bumps the schema to loom-card/3.",
+ "title": "Loom model card measurements (info.json), schema loom-card/3",
+ "description": "The data of a loom-fun card that has no other home: per GPU (devices): measurements, gate evidence, the device and Loom SDK that measured, the baseline, dates and versions. What the package is comes from its own files and is never repeated here: sources, revisions, files, sha256 and sizes from model.json.lock; services, context, rows, max_tokens and drafting depth from model.json; chat features, the drafter and the generating loom-skills commit and SDK from llm_config.json. render_card.py renders README.md from all four. Unknown values are null or absent (rendered as not measured / no evidence / unknown), never guessed.",
+ "$comment": "Compatibility: the schema string changes only on a breaking change. Readers ignore metric names, gate names and object keys they don't know, so adding a metric, a gate, an optional key or a new enum value of source.kind keeps loom-card/3. Removing or renaming a key, changing a key's type or meaning, or making a key required is breaking and bumps the schema to loom-card/4. loom-card/3 moved gates, performance and roofline under devices.<gpu>; loom-card/2 cards read as the strix-halo device (card_lib.normalize).",
  "type": "object",
- "required": ["schema", "repo", "card", "versions", "sources", "gates"],
+ "required": ["schema", "repo", "card", "versions", "sources", "devices"],
  "properties": {
-  "schema": {"const": "loom-card/2"},
+  "schema": {"const": "loom-card/3"},
   "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "description": "The Hugging Face repo of this card"},
   "card": {
    "type": "object",
@@ -39,108 +39,121 @@
    "type": "object", "additionalProperties": {"$ref": "#/$defs/source"},
    "description": "Where evidence came from, by id (referenced by performance sessions and gates)"
   },
-  "performance": {
-   "type": "object", "required": ["baseline", "sessions"],
-   "properties": {
-    "baseline": {
-     "type": "object", "required": ["name", "version", "args"],
-     "properties": {
-      "name": {"type": "string", "description": "The engine compared with, e.g. llama.cpp"},
-      "version": {"type": ["string", "null"], "description": "Its build, e.g. llamacpp-rocm/b1355"},
-      "args": {"type": ["string", "null"], "description": "The exact server arguments (model path, host and port left out)"},
-      "differs": {"type": "array", "items": {"type": "string"}, "description": "Notes the card must show: a cell llama.cpp cannot run (not supported, with the reason) or a Loom-side limitation, one line each"}
-     }
-    },
-    "baselines": {
-     "type": "object",
-     "description": "Further llama.cpp backends measured with the same workloads, by backend name (vulkan: the official ggml-org release). Optional key, loom-card/2. Never a headline value or a guardrail input (card_lib.card_metrics reads sessions only); rendered as one more DevLab column.",
-     "additionalProperties": {
-      "type": "object", "required": ["baseline", "session"],
-      "properties": {
-       "baseline": {
-        "type": "object", "required": ["name", "version", "args"],
-        "properties": {
-         "name": {"type": "string"},
-         "version": {"type": ["string", "null"], "description": "e.g. llamacpp-vulkan/b12211"},
-         "args": {"type": ["string", "null"], "description": "The exact server arguments (model path, host and port left out)"},
-         "sha256": {"type": ["string", "null"], "description": "sha256 of the release archive the measurement ran"},
-         "differs": {"type": "array", "items": {"type": "string"}, "description": "Server settings that differ from the main baseline's or that this backend could not run, with the reason, one line each (never silently changed)"}
-        }
-       },
-       "session": {
-        "type": "object", "required": ["date", "source", "runs", "metrics"],
-        "description": "One baseline-only measurement session (the latest replaces the earlier one); metrics hold the engine's value and per-run values only",
-        "properties": {
-         "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
-         "source": {"type": "string"},
-         "runs": {"type": "object"},
-         "programs_sha256": {"type": ["string", "null"], "description": "card_lib.programs_sha256 of the package the run fetched (its GGUF, drafter and settings came from it)"},
-         "metrics": {
-          "type": "object",
-          "additionalProperties": {
-           "type": "object", "required": ["baseline"],
-           "properties": {"baseline": {"type": ["number", "null"]}, "baseline_runs": {"type": "array", "items": {"type": "number"}}}
-          }
-         }
-        }
-       }
-      }
-     }
-    },
-    "sessions": {
-     "type": "array", "items": {"$ref": "#/$defs/session"},
-     "description": "Measurement sessions in evidence order, all from AMD DevLab Dispatch (source kind devlab or factory: devlab-perf jobs, scripted DevLab ports, loom-factory). Per metric the last session that measured it is the card's value (card_lib.card_metrics)."
-    }
-   }
-  },
-  "gates": {
-   "type": "object", "additionalProperties": {"$ref": "#/$defs/gate"},
-   "description": "Per gate name the most recent evidence. Gates the package's features make applicable but that have no entry render as no evidence."
-  },
+  "devices": {"type": "object", "propertyNames": {"enum": ["strix-halo", "radeon-r9700"]}, "additionalProperties": {"$ref": "#/$defs/gpu"},
+   "description": "Per GPU, keyed by id (card_lib.GPUS). Added in loom-card/3: loom-card/2 held gates, performance and roofline at the top level, which readers take as the strix-halo entry (card_lib.normalize)."},
   "report": {"enum": ["generated", "attached"],
              "description": "REPORT.md in the repo: generated by render_card.py from this file, or attached as written (an older card's narrative report, a factory run's REPORT.md)"},
-  "roofline": {
-   "type": "object", "required": ["device", "tool", "metrics"],
-   "description": "The hardware ceiling of each performance metric, computed from the GGUF by loom-roofline's roofline.py (make_info.py roofline). Added in loom-card/2 (optional key).",
-   "properties": {
-    "device": {
-     "type": "object", "required": ["name", "bandwidth_bytes_per_s", "peak_flops"],
-     "properties": {
-      "name": {"type": "string"},
-      "bandwidth_bytes_per_s": {"type": "number", "description": "memory bandwidth the decode ceilings divide by"},
-      "peak_flops": {"type": "number", "description": "peak FLOP/s the prefill ceilings divide by"}
-     }
-    },
-    "tool": {
-     "type": "object", "required": ["script", "sha256", "skills_commit"],
-     "properties": {
-      "script": {"type": "string", "description": "the script, relative to the loom-skills checkout"},
-      "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "sha256 of that script's file"},
-      "skills_commit": {"type": "string", "description": "loom-skills commit of the checkout ('unknown' if not a git checkout)"},
-      "dirty": {"type": "boolean", "description": "the checkout had uncommitted changes"}
-     }
-    },
-    "checkpoint": {"type": ["string", "null"], "description": "the GGUF file the ceilings were computed from"},
-    "drafting": {
-     "oneOf": [{"type": "null"}, {
-      "type": "object", "required": ["method", "depth", "acceptance", "tokens_per_pass"],
-      "description": "drafted rows (decode, 4 streams): ceiling = verify passes per second x tokens_per_pass = 1 + acceptance x depth; the drafter's own passes are not counted (an upper bound)",
-      "properties": {
-       "method": {"type": "string"},
-       "depth": {"type": "integer"},
-       "acceptance": {"type": ["number", "null"], "description": "the spec gate's acceptance (the card's spec_acceptance) when computed: the fallback for drafted rows whose session recorded no acceptance of its own"},
-       "tokens_per_pass": {"type": ["number", "null"]}
-      }
-     }]
-    },
-    "metrics": {"type": "object", "additionalProperties": {"$ref": "#/$defs/ceiling"}}
-   }
-  },
   "status": {"enum": ["paused"], "description": "Where work on this model stands, when not active: paused (work stopped; the card shows what was reached). Optional key, loom-card/2."},
   "next_steps": {"type": "array", "items": {"type": "string"},
                  "description": "What would be done next if work continued, one short markdown line each; README.md ends with them under Next steps. Optional key, loom-card/2."}
  },
  "$defs": {
+  "gpu": {
+   "type": "object",
+   "description": "What the card records for one GPU: measurements, gate evidence, roofline and how the package is served on it. A GPU without results carries a state.",
+   "additionalProperties": false,
+   "properties": {
+    "state": {"enum": ["not_measured", "unsupported"], "description": "not_measured: this package has no results on this GPU yet (the card says so and shows no numbers). unsupported: the package does not fit this GPU (required_bytes; the card says so). Absent: the GPU has results."},
+    "required_bytes": {"type": "integer", "description": "unsupported only: the memory the package needs on this GPU (weights, KV cache at the native context, headroom)"},
+    "memory_bytes": {"type": "integer", "description": "loom-serve --memory_bytes on this GPU when it differs from the package value (model.json or card.memory_bytes): the GPU memory bounds the elastic pool"},
+    "served_context": {"type": "integer", "description": "Tokens per request this GPU serves when its memory budget holds less KV cache than the native context needs; the same package serves it, --memory_bytes bounds the pool. Absent: the native context."},
+      "performance": {
+       "type": "object", "required": ["baseline", "sessions"],
+       "properties": {
+        "baseline": {
+         "type": "object", "required": ["name", "version", "args"],
+         "properties": {
+          "name": {"type": "string", "description": "The engine compared with, e.g. llama.cpp"},
+          "version": {"type": ["string", "null"], "description": "Its build, e.g. llamacpp-rocm/b1355"},
+          "args": {"type": ["string", "null"], "description": "The exact server arguments (model path, host and port left out)"},
+          "differs": {"type": "array", "items": {"type": "string"}, "description": "Notes the card must show: a cell llama.cpp cannot run (not supported, with the reason) or a Loom-side limitation, one line each"}
+         }
+        },
+        "baselines": {
+         "type": "object",
+         "description": "Further llama.cpp backends measured with the same workloads, by backend name (vulkan: the official ggml-org release). Optional key, loom-card/2. Never a headline value or a guardrail input (card_lib.card_metrics reads sessions only); rendered as one more DevLab column.",
+         "additionalProperties": {
+          "type": "object", "required": ["baseline", "session"],
+          "properties": {
+           "baseline": {
+            "type": "object", "required": ["name", "version", "args"],
+            "properties": {
+             "name": {"type": "string"},
+             "version": {"type": ["string", "null"], "description": "e.g. llamacpp-vulkan/b12211"},
+             "args": {"type": ["string", "null"], "description": "The exact server arguments (model path, host and port left out)"},
+             "sha256": {"type": ["string", "null"], "description": "sha256 of the release archive the measurement ran"},
+             "differs": {"type": "array", "items": {"type": "string"}, "description": "Server settings that differ from the main baseline's or that this backend could not run, with the reason, one line each (never silently changed)"}
+            }
+           },
+           "session": {
+            "type": "object", "required": ["date", "source", "runs", "metrics"],
+            "description": "One baseline-only measurement session (the latest replaces the earlier one); metrics hold the engine's value and per-run values only",
+            "properties": {
+             "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+             "source": {"type": "string"},
+             "runs": {"type": "object"},
+             "programs_sha256": {"type": ["string", "null"], "description": "card_lib.programs_sha256 of the package the run fetched (its GGUF, drafter and settings came from it)"},
+             "metrics": {
+              "type": "object",
+              "additionalProperties": {
+               "type": "object", "required": ["baseline"],
+               "properties": {"baseline": {"type": ["number", "null"]}, "baseline_runs": {"type": "array", "items": {"type": "number"}}}
+              }
+             }
+            }
+           }
+          }
+         }
+        },
+        "sessions": {
+         "type": "array", "items": {"$ref": "#/$defs/session"},
+         "description": "Measurement sessions in evidence order, all from AMD DevLab Dispatch (source kind devlab or factory: devlab-perf jobs, scripted DevLab ports, loom-factory). Per metric the last session that measured it is the card's value (card_lib.card_metrics)."
+        }
+       }
+      },
+      "gates": {
+       "type": "object", "additionalProperties": {"$ref": "#/$defs/gate"},
+       "description": "Per gate name the most recent evidence. Gates the package's features make applicable but that have no entry render as no evidence."
+      },
+      "roofline": {
+       "type": "object", "required": ["device", "tool", "metrics"],
+       "description": "The hardware ceiling of each performance metric, computed from the GGUF by loom-roofline's roofline.py (make_info.py roofline). Added in loom-card/2 (optional key).",
+       "properties": {
+        "device": {
+         "type": "object", "required": ["name", "bandwidth_bytes_per_s", "peak_flops"],
+         "properties": {
+          "name": {"type": "string"},
+          "bandwidth_bytes_per_s": {"type": "number", "description": "memory bandwidth the decode ceilings divide by"},
+          "peak_flops": {"type": "number", "description": "peak FLOP/s the prefill ceilings divide by"}
+         }
+        },
+        "tool": {
+         "type": "object", "required": ["script", "sha256", "skills_commit"],
+         "properties": {
+          "script": {"type": "string", "description": "the script, relative to the loom-skills checkout"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "sha256 of that script's file"},
+          "skills_commit": {"type": "string", "description": "loom-skills commit of the checkout ('unknown' if not a git checkout)"},
+          "dirty": {"type": "boolean", "description": "the checkout had uncommitted changes"}
+         }
+        },
+        "checkpoint": {"type": ["string", "null"], "description": "the GGUF file the ceilings were computed from"},
+        "drafting": {
+         "oneOf": [{"type": "null"}, {
+          "type": "object", "required": ["method", "depth", "acceptance", "tokens_per_pass"],
+          "description": "drafted rows (decode, 4 streams): ceiling = verify passes per second x tokens_per_pass = 1 + acceptance x depth; the drafter's own passes are not counted (an upper bound)",
+          "properties": {
+           "method": {"type": "string"},
+           "depth": {"type": "integer"},
+           "acceptance": {"type": ["number", "null"], "description": "the spec gate's acceptance (the card's spec_acceptance) when computed: the fallback for drafted rows whose session recorded no acceptance of its own"},
+           "tokens_per_pass": {"type": ["number", "null"]}
+          }
+         }]
+        },
+        "metrics": {"type": "object", "additionalProperties": {"$ref": "#/$defs/ceiling"}}
+       }
+      }
+   }
+  },
   "source": {
    "type": "object", "required": ["kind", "run", "url", "device", "hrx_loom"],
    "properties": {

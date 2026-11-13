@@ -196,7 +196,7 @@ def load_llama_refs(cfg):
     rc = find_reference.jfile(ref["repo"], sha, "llm_config.json") or {}
     if os.path.basename(rc.get("gguf") or "") != os.path.basename(cfg.get("gguf") or "-"):
         return None   # a reference of another model (same architecture): its llama.cpp numbers are not this card's
-    perf = (find_reference.jfile(ref["repo"], sha, "info.json") or {}).get("performance") or {}
+    perf = find_reference.primary(find_reference.jfile(ref["repo"], sha, "info.json") or {}).get("performance") or {}
     sets = [s.get("metrics") or {} for s in (perf.get("sessions") or [])[-1:]]
     sets += [(b.get("session") or {}).get("metrics") or {} for b in (perf.get("baselines") or {}).values()]
     out = {}

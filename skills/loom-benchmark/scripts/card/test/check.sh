@@ -56,14 +56,14 @@ mkdir -p "$tmp/old"; cp -r "$F/pkg/." "$tmp/old/"
 py -c "import json, sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 i, s = c.load_json(sys.argv[2]), c.load_json(sys.argv[3]); i['sources'].update(s['sources']); i['devlab'] = {'sweeps': s['sweeps']}
 i['sources']['local-1'] = {'kind': 'local', 'run': None, 'url': None, 'device': None, 'hrx_loom': None}
-i['performance']['sessions'].append(dict(i['performance']['sessions'][0], source='local-1', date='2026-11-09'))
+i['devices']['strix-halo']['performance']['sessions'].append(dict(i['devices']['strix-halo']['performance']['sessions'][0], source='local-1', date='2026-11-09'))
 c.write_json(sys.argv[4], i)" "$C" "$tmp/flint/info.json" "$F/evidence/devlab_sweeps.json" "$tmp/old_pub.json"
 py "$C/make_info.py" build "$tmp/old" --generator-commit $GEN --from-info "$tmp/old_pub.json" -o "$tmp/old/info.json" 2>/dev/null
 py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 o, f = c.load_json(sys.argv[2]), c.load_json(sys.argv[3])
 assert c.validate(o) == [], 'not valid'
-assert 'devlab' not in o and all(v['kind'] != 'local' for k, v in o['sources'].items() if k in {s['source'] for s in o['performance']['sessions']})
-assert o['performance']['sessions'] == f['performance']['sessions'], 'only the local session should go'" "$C" "$tmp/old/info.json" "$tmp/flint/info.json" \
+assert 'devlab' not in o and all(v['kind'] != 'local' for k, v in o['sources'].items() if k in {s['source'] for s in o['devices']['strix-halo']['performance']['sessions']})
+assert o['devices']['strix-halo']['performance']['sessions'] == f['devices']['strix-halo']['performance']['sessions'], 'only the local session should go'" "$C" "$tmp/old/info.json" "$tmp/flint/info.json" \
   && ! py "$C/make_info.py" perf --loom-jsonl "$F/evidence/loom.jsonl" "${SRC[@]}" --source-kind local -o "$tmp/perf_local.json" 2>/dev/null \
   && echo "OK   flint: --from-info drops local perf sessions and old DevLab sweeps; perf refuses a local source" \
   || { echo "FAIL flint: local perf sessions or old DevLab sweeps survive, or a local perf source is accepted"; bad=1; }
@@ -94,7 +94,7 @@ gate_case() {  # gate_case WHAT STATUS/LEVEL/SHA [--from-info F] --evidence EV..
   local what=$1 want=$2 got; shift 2
   py "$C/make_info.py" build "$tmp/flint" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint "$@" \
     -o "$tmp/gc.json" 2>/dev/null
-  got=$(py -c "import json, sys; g = json.load(open(sys.argv[1]))['gates']['agent']; print(g['status'], g['level'], g.get('programs_sha256'), sep='/')" "$tmp/gc.json")
+  got=$(py -c "import json, sys; g = json.load(open(sys.argv[1]))['devices']['strix-halo']['gates']['agent']; print(g['status'], g['level'], g.get('programs_sha256'), sep='/')" "$tmp/gc.json")
   [ "$got" = "$want" ] && echo "OK   gates: $what" || { echo "FAIL gates: $what: $got, expected $want"; bad=1; }
 }
 gev "$tmp/g_full.json" pass full 2026-11-06T07:00:00 aaa
@@ -126,7 +126,7 @@ assert assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])['failing'] == ['agent
   || { echo "FAIL failing: a card with a failing gate does not publish as failing"; bad=1; }
 # a gate passed on OTHER programs is no evidence for this package: the card says "not re-run", never a pass
 mkdir -p "$tmp/oldgate"; cp -r "$tmp/flint/." "$tmp/oldgate/"
-py -c "import json, sys; p = sys.argv[1] + '/info.json'; i = json.load(open(p)); g = i['gates']['golden']; g['status'] = 'pass'; g['programs_sha256'] = 'ab' * 32; json.dump(i, open(p, 'w'), indent=1)" "$tmp/oldgate"
+py -c "import json, sys; p = sys.argv[1] + '/info.json'; i = json.load(open(p)); g = i['devices']['strix-halo']['gates']['golden']; g['status'] = 'pass'; g['programs_sha256'] = 'ab' * 32; json.dump(i, open(p, 'w'), indent=1)" "$tmp/oldgate"
 py "$C/render_card.py" "$tmp/oldgate" >/dev/null 2>&1
 grep -E '^\| `golden` \|' "$tmp/oldgate/README.md" | grep -q 'not re-run on this package' \
   && echo "OK   gates: a pass stamped with other programs renders as not re-run" \
@@ -266,12 +266,13 @@ py "$C/render_card.py" "$tmp/vk" 2>/dev/null
 py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 base, vk, new = (c.load_json(f) for f in sys.argv[2:5]); p = c.programs_sha256(sys.argv[5])
 assert c.validate(vk) == [] and c.validate(new) == [], 'not valid'
-b = vk['performance']['baselines']['vulkan']; n = new['performance']['baselines']['vulkan']
+bd, vd, nd = (c.normalize(x)['devices']['strix-halo'] for x in (base, vk, new))
+b = vd['performance']['baselines']['vulkan']; n = nd['performance']['baselines']['vulkan']
 assert b['baseline']['version'] == 'llamacpp-vulkan/b12211' and b['baseline']['sha256'].startswith('aabbcc') and len(b['baseline']['differs']) == 1
 assert b['session']['metrics']['decode'] == {'baseline': 56.5, 'baseline_runs': [56.2, 56.8]} and 'loom' not in b['session']['metrics']['decode'], b['session']['metrics']['decode']
 assert n['session']['metrics']['decode']['baseline'] != b['session']['metrics']['decode']['baseline'], 'the later Vulkan evidence did not replace the earlier'
-assert new['performance']['baselines'].keys() == {'vulkan'} and 'baselines' not in base['performance']
-assert vk['performance']['sessions'] == base['performance']['sessions'] and vk['sources'].keys() >= base['sources'].keys()
+assert nd['performance']['baselines'].keys() == {'vulkan'} and 'baselines' not in bd['performance']
+assert vd['performance']['sessions'] == bd['performance']['sessions'] and vk['sources'].keys() >= base['sources'].keys()
 assert c.perf_flags(vk, programs=p) == c.perf_flags(base, programs=p) and \
     {k: v[0]['loom'] for k, v in c.card_metrics(vk).items()} == {k: v[0]['loom'] for k, v in c.card_metrics(base).items()}" \
   "$C" "$tmp/flint/info.json" "$tmp/vk/info.json" "$tmp/vk_new.json" "$F/pkg" \
@@ -283,7 +284,95 @@ assert c.perf_flags(vk, programs=p) == c.perf_flags(base, programs=p) and \
 py "$C/make_info.py" perf --llama-jsonl "$tmp/vk_llama.jsonl" "${VK[@]}" --fetched-programs 0000 -o "$tmp/vk_bad.json" 2>/dev/null \
   && { echo "FAIL vulkan: a run that fetched other programs than the package was accepted"; bad=1; } \
   || echo "OK   vulkan: a run that fetched other programs than the package is refused"
+# ---- two GPUs (loom-card/3): Strix Halo (gfx1151) and the AMD Radeon AI PRO R9700 (gfx1201, 32 GB). The R9700 fixture
+# (test/r9700) is a Qwen3-0.6B package with MADE-UP R9700 numbers: a test fixture, not a measurement; only its roofline is
+# computed (roofline.py --device radeon-r9700s).
+R=$here/r9700
+RSRC=(--package "$R/pkg" --source-kind devlab --run 9000001 --url https://github.com/loom-fun/loom-skills/actions/runs/9000001
+      --device "$R/evidence/device.json" --hrx-loom "$R/evidence/hrx_loom.json" --gpu radeon-r9700)
+ROCM=(--baseline-version b1374 --baseline-args "-ngl 99 -cram 0 -c 65536 -kvu -np 4")
+VKA=(--backend vulkan --baseline-version b12211 --baseline-sha256 aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb
+     --baseline-args "-ngl 99 -cram 0 -c 65536 -kvu -np 4")
+SUB=decode,decode_2k,prefill_1k,prefill_2k,prefill_8k,prefill_16k,streams4   # a session that could not run the 32k documents
+py "$C/make_info.py" gates "$R/evidence/gates.json" "${RSRC[@]}" -o "$tmp/r_gates.json" 2>/dev/null
+py "$C/make_info.py" perf --loom-jsonl "$R/evidence/loom.jsonl" --llama-jsonl "$R/evidence/llama.jsonl" --c4-loom "$R/evidence/c4_loom_runs.txt" \
+  --c4-llama "$R/evidence/c4_llama_runs.txt" "${ROCM[@]}" "${RSRC[@]}" -o "$tmp/r_perf.json" 2>/dev/null
+py "$C/make_info.py" perf --llama-jsonl "$R/evidence/llama_vulkan.jsonl" --c4-llama "$R/evidence/c4_llama_vulkan_runs.txt" "${VKA[@]}" "${RSRC[@]}" \
+  -o "$tmp/r_vk.json" 2>/dev/null
+py "$C/make_info.py" perf --loom-jsonl "$R/evidence/loom.jsonl" --llama-jsonl "$R/evidence/llama.jsonl" --c4-loom "$R/evidence/c4_loom_runs.txt" \
+  --c4-llama "$R/evidence/c4_llama_runs.txt" "${ROCM[@]}" --metrics $SUB "${RSRC[@]}" -o "$tmp/r_perf_sub.json" 2>/dev/null
+py "$C/make_info.py" perf --llama-jsonl "$R/evidence/llama_vulkan.jsonl" --c4-llama "$R/evidence/c4_llama_vulkan_runs.txt" "${VKA[@]}" --metrics $SUB \
+  "${RSRC[@]}" -o "$tmp/r_vk_sub.json" 2>/dev/null
+py -c "import json, sys; e = json.load(open(sys.argv[1])); e['performance']['session']['over_context'] = {'prefill_32k': 31420, 'decode_32k': 31420}
+json.dump(e, open(sys.argv[1], 'w'))" "$tmp/r_perf_sub.json"   # perf.py: the server refused the 32k documents (HTTP 400)
+# the existing Strix Halo card of this model (a loom-card/2 info.json, the real loom-fun numbers), its programs the fixture's
+RSHA=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c; print(c.programs_sha256(sys.argv[2]))" "$C" "$R/pkg")
+sed "s/f9325ef2fd831f13958945c00c61300296a0f2189307734198c299bafbd40416/$RSHA/g; s/d91ff13a6b13e6eb5c51807da3a99c6443e4a02f54bb73eed8ea86195a2c307c/$RSHA/g; s/fcdc910801f92377c703811a3710899955739623fbba76d58ad3bced8ec06aae/$RSHA/g; s/bfb43417dd7be1529c08e4aa650611461f9d90df1040fbaae8d8c20c24a0cea2/$RSHA/g" \
+  "$R/strix_info.json" > "$tmp/r_strix_info.json"
+R3=(--generator-commit $GEN --report generated)
+# two GPUs: the Strix Halo card as it was (--from-info: a loom-card/2 file is its strix-halo entry) plus the R9700 evidence
+mkdir -p "$tmp/r9700_two"; cp -r "$R/pkg/." "$tmp/r9700_two/"
+py "$C/make_info.py" build "$tmp/r9700_two" --from-info "$tmp/r_strix_info.json" "${R3[@]}" --org loom-fun-staging --gpus strix-halo,radeon-r9700 \
+  --fit "$R/fit_native.json" --evidence "$tmp/r_gates.json" "$tmp/r_perf.json" "$tmp/r_vk.json" "$R/evidence/roofline.json" -o "$tmp/r9700_two/info.json" 2>/dev/null
+# the package does not fit the R9700: Strix Halo only, with one line saying so
+mkdir -p "$tmp/r9700_none"; cp -r "$R/pkg/." "$tmp/r9700_none/"
+py "$C/make_info.py" build "$tmp/r9700_none" --from-info "$tmp/r_strix_info.json" "${R3[@]}" --gpus strix-halo,radeon-r9700 \
+  --fit "$R/fit_none.json" -o "$tmp/r9700_none/info.json" 2>/dev/null
+# a staging card: R9700 results only (Strix Halo not yet re-measured), a context the R9700's 32 GB cannot hold
+mkdir -p "$tmp/r9700_staging"; cp -r "$R/pkg/." "$tmp/r9700_staging/"
+py "$C/make_info.py" build "$tmp/r9700_staging" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging "${R3[@]}" --memory-bytes 17000000000 \
+  --gpus strix-halo,radeon-r9700 --fit "$R/fit_reduced.json" --evidence "$tmp/r_gates.json" "$tmp/r_perf_sub.json" "$tmp/r_vk_sub.json" \
+  "$R/evidence/roofline_reduced.json" -o "$tmp/r9700_staging/info.json" 2>/dev/null
+for n in r9700_two r9700_none r9700_staging; do
+  py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+assert c.validate(c.load_json(sys.argv[2])) == [], c.validate(c.load_json(sys.argv[2]))" "$C" "$tmp/$n/info.json" \
+    || { echo "FAIL $n: info.json is not valid"; bad=1; }
+done
+py -c "import json, sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+two, none, stg = (json.load(open(f'{d}/info.json')) for d in sys.argv[2:5])
+assert two['schema'] == 'loom-card/3' and two['repo'] == 'loom-fun-staging/unsloth-Qwen3-0.6B-loom'
+assert sorted(two['devices']) == ['radeon-r9700', 'strix-halo'] and all(c.has_results(d) for d in two['devices'].values())
+old = c.normalize(json.load(open(sys.argv[5])))['devices']['strix-halo']
+assert two['devices']['strix-halo']['gates'] == old['gates'] and two['devices']['strix-halo']['performance'] == old['performance'], 'strix entry changed'
+assert two['devices']['radeon-r9700']['roofline']['device']['name'].startswith('AMD Radeon AI PRO R9700S'), 'roofline device'
+assert 'memory_bytes' not in two['devices']['radeon-r9700'] and 'served_context' not in two['devices']['radeon-r9700']
+assert none['devices']['radeon-r9700'] == {'state': 'unsupported', 'required_bytes': 82400000000} and c.has_results(none['devices']['strix-halo'])
+assert stg['devices']['strix-halo'] == {'state': 'not_measured'}, stg['devices']['strix-halo']
+r = stg['devices']['radeon-r9700']
+assert r['memory_bytes'] == 34359738368 and r['served_context'] == 20480 and r['performance']['sessions'][0]['over_context'], r.keys()
+assert set(r['gates']) >= {'golden', 'agent'} and 'performance' in r and 'roofline' in r" \
+  "$C" "$tmp/r9700_two" "$tmp/r9700_none" "$tmp/r9700_staging" "$tmp/r_strix_info.json" \
+  && echo "OK   r9700: the strix-halo entry is the loom-card/2 card unchanged; R9700 evidence, state and served context are recorded per GPU" \
+  || { echo "FAIL r9700: two-GPU info.json is wrong"; bad=1; }
+# loom-card/2 reads as one GPU: the old cards render exactly as before (only the schema string of the Versions line moved)
 for n in flint d1; do
+  mkdir -p "$tmp/legacy_$n"; cp -r "$F/pkg/." "$tmp/legacy_$n/" 2>/dev/null; [ $n = d1 ] && { rm -rf "$tmp/legacy_$n"; mkdir -p "$tmp/legacy_$n"; cp -r "$tmp/d1/." "$tmp/legacy_$n/"; }
+  cp "$here/legacy/$n/info.json" "$tmp/legacy_$n/info.json"
+  [ $n = d1 ] && cp "$here/legacy/d1/REPORT.md" "$tmp/legacy_$n/REPORT.md"
+  py "$C/render_card.py" "$tmp/legacy_$n" 2>/dev/null
+  for f in README.md REPORT.md; do
+    sed 's#card schema `loom-card/2`#card schema `loom-card/3`#; s#(schema `loom-card/2`)#(schema `loom-card/3`)#' "$here/legacy/$n/$f" > "$tmp/legacy_$n.$f"
+    cmp -s "$tmp/legacy_$n.$f" "$tmp/legacy_$n/$f" && echo "OK   legacy $n/$f: a loom-card/2 card renders as it did (schema string aside)" \
+      || { echo "FAIL legacy $n/$f: a loom-card/2 card renders differently"; diff "$tmp/legacy_$n.$f" "$tmp/legacy_$n/$f" | head -20; bad=1; }
+  done
+done
+# the publish target is a parameter: the same repo names under another org (staging: --org loom-fun-staging), loom-fun by default;
+# a card whose repo is not the target (its Quick start fetches from it) is refused; --dry-run needs no token and no network
+got=$(py "$C/publish_package.py" upload "$tmp/r9700_two" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging --dry-run 2>&1 | head -1)
+case "$got" in "dry run: would upload "*"to https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom"*) echo "OK   publish: --org sends the same repo name to another org";;
+  *) echo "FAIL publish: --org loom-fun-staging: $got"; bad=1;; esac
+py "$C/publish_package.py" upload "$tmp/r9700_two" --repo loom-fun/unsloth-Qwen3-0.6B-loom --dry-run >/dev/null 2>&1 \
+  && { echo "FAIL publish: a staging card was accepted for the default org (loom-fun)"; bad=1; } \
+  || echo "OK   publish: a card of another repo than the target is refused (default org loom-fun)"
+py "$C/publish_package.py" upload "$tmp/r9700_none" --repo unsloth-Qwen3-0.6B-loom --dry-run 2>&1 | grep -q "huggingface.co/loom-fun/unsloth-Qwen3-0.6B-loom" \
+  && echo "OK   publish: the default org is loom-fun (a bare NAME works)" || { echo "FAIL publish: default org"; bad=1; }
+# the GPU an evidence file belongs to: its "gpu", else the one its source's device names, else strix-halo
+got=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+print(c.gpu_from_device({'cpu': 'AMD RYZEN AI MAX+ 395 w/ Radeon 8060S', 'gpu': 'AMD Radeon 8060S Graphics'}),
+      c.gpu_from_device({'cpu': 'AMD EPYC', 'gpu': 'AMD Radeon AI PRO R9700S'}), c.gpu_from_device({'cpu': 'AMD Strix Halo (DevLab Dispatch runner X2)', 'os': 'Linux'}),
+      c.gpu_from_device(None), c.served_context(396705472, 1.5e6, 34359738368))" "$C")
+[ "$got" = "strix-halo radeon-r9700 strix-halo None 20480" ] && echo "OK   gpu detection and served context" || { echo "FAIL gpu detection: $got"; bad=1; }
+for n in flint d1 r9700_two r9700_none r9700_staging; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null
   py "$C/render_card.py" "$tmp/$n" -o "$tmp/${n}_README2.md" 2>/dev/null

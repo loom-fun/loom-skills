@@ -1,0 +1,384 @@
+{
+ "card": {
+  "features": {
+   "api": {
+    "status": "yes",
+    "value": {
+     "endpoint": "/v1/chat/completions",
+     "style": "openai"
+    }
+   },
+   "audio": {
+    "status": "unknown",
+    "value": null
+   },
+   "concurrency": {
+    "status": "yes",
+    "value": {
+     "pending_requests": null,
+     "rows": 4
+    }
+   },
+   "context": {
+    "status": "yes",
+    "value": {
+     "native": 40960,
+     "tokens": 40960
+    }
+   },
+   "image_input": {
+    "status": "unknown",
+    "value": null
+   },
+   "max_output_tokens": {
+    "status": "yes",
+    "value": {
+     "max_tokens": 4096
+    }
+   },
+   "reasoning_effort": {
+    "status": "n/a",
+    "value": null
+   },
+   "sampling": {
+    "status": "yes",
+    "value": null
+   },
+   "speculative_decoding": {
+    "status": "n/a",
+    "value": null
+   },
+   "thinking": {
+    "status": "yes",
+    "value": {
+     "default": true,
+     "mode": "toggle"
+    }
+   },
+   "tool_calling": {
+    "status": "yes",
+    "value": null
+   }
+  },
+  "memory_bytes": 17000000000
+ },
+ "devices": {
+  "radeon-r9700": {
+   "gates": {
+    "agent": {
+     "date": "2026-11-14",
+     "detail": null,
+     "level": "quick",
+     "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
+     "source": "devlab-9000001",
+     "status": "pass"
+    },
+    "agent_think_off": {
+     "date": "2026-11-14",
+     "detail": null,
+     "level": "quick",
+     "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
+     "source": "devlab-9000001",
+     "status": "pass"
+    },
+    "compare": {
+     "date": "2026-11-14",
+     "detail": null,
+     "level": "quick",
+     "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
+     "source": "devlab-9000001",
+     "status": "pass"
+    },
+    "consistency": {
+     "date": "2026-11-14",
+     "detail": null,
+     "level": "quick",
+     "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
+     "source": "devlab-9000001",
+     "status": "pass"
+    },
+    "golden": {
+     "date": "2026-11-14",
+     "detail": null,
+     "level": "quick",
+     "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
+     "source": "devlab-9000001",
+     "status": "pass"
+    },
+    "needle": {
+     "date": "2026-11-14",
+     "detail": null,
+     "level": "quick",
+     "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
+     "source": "devlab-9000001",
+     "status": "pass"
+    },
+    "sampling": {
+     "date": "2026-11-14",
+     "detail": null,
+     "level": "quick",
+     "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
+     "source": "devlab-9000001",
+     "status": "pass"
+    }
+   },
+   "memory_bytes": 34359738368,
+   "performance": {
+    "baseline": {
+     "args": "-ngl 99 -cram 0 -c 65536 -kvu -np 4",
+     "name": "llama.cpp",
+     "version": "llamacpp-rocm/b1374"
+    },
+    "baselines": {
+     "vulkan": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 -c 65536 -kvu -np 4",
+       "name": "llama.cpp",
+       "sha256": "aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb",
+       "version": "llamacpp-vulkan/b12211"
+      },
+      "session": {
+       "date": "2026-11-14",
+       "metrics": {
+        "decode": {
+         "baseline": 744.4,
+         "baseline_runs": [
+          742.9,
+          745.87
+         ]
+        },
+        "decode_2k": {
+         "baseline": 609.6,
+         "baseline_runs": [
+          610.8,
+          608.36
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 3931.4,
+         "baseline_runs": [
+          3911.8,
+          3950.9
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 9164.3,
+         "baseline_runs": [
+          9210.4,
+          9118.3
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 9447.7,
+         "baseline_runs": [
+          9400.7,
+          9494.7
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 6150.7,
+         "baseline_runs": [
+          6120.1,
+          6181.3
+         ]
+        },
+        "streams4": {
+         "baseline": 1204.7,
+         "baseline_runs": [
+          1204.7,
+          1199.3,
+          1210.6
+         ]
+        }
+       },
+       "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 3
+       },
+       "source": "devlab-9000001"
+      }
+     }
+    },
+    "sessions": [
+     {
+      "commands": [],
+      "date": "2026-11-14",
+      "metrics": {
+       "decode": {
+        "baseline": 781.9,
+        "baseline_runs": [
+         780.3,
+         783.42
+        ],
+        "loom": 1023.4,
+        "loom_runs": [
+         1021.4,
+         1025.49
+        ]
+       },
+       "decode_2k": {
+        "baseline": 638.9,
+        "baseline_runs": [
+         640.2,
+         637.64
+        ],
+        "loom": 841.0,
+        "loom_runs": [
+         842.7,
+         839.33
+        ]
+       },
+       "prefill_16k": {
+        "baseline": 8161.1,
+        "baseline_runs": [
+         8120.5,
+         8201.7
+        ],
+        "loom": 14047.5,
+        "loom_runs": [
+         13977.6,
+         14117.4
+        ]
+       },
+       "prefill_1k": {
+        "baseline": 17154.6,
+        "baseline_runs": [
+         17240.8,
+         17068.4
+        ],
+        "loom": 21764.2,
+        "loom_runs": [
+         21873.5,
+         21654.8
+        ]
+       },
+       "prefill_2k": {
+        "baseline": 18192.9,
+        "baseline_runs": [
+         18102.4,
+         18283.4
+        ],
+        "loom": 24133.0,
+        "loom_runs": [
+         24012.9,
+         24253.0
+        ]
+       },
+       "prefill_8k": {
+        "baseline": 12104.5,
+        "baseline_runs": [
+         12044.3,
+         12164.7
+        ],
+        "loom": 18302.3,
+        "loom_runs": [
+         18211.3,
+         18393.4
+        ]
+       },
+       "streams4": {
+        "baseline": 1710.4,
+        "baseline_runs": [
+         1710.4,
+         1702.8,
+         1718.1
+        ],
+        "loom": 2350.8,
+        "loom_runs": [
+         2350.8,
+         2331.2,
+         2364.9
+        ]
+       }
+      },
+      "over_context": {
+       "decode_32k": 31420,
+       "prefill_32k": 31420
+      },
+      "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
+      "runs": {
+       "decode_prefill": 2,
+       "streams4": 3
+      },
+      "source": "devlab-9000001"
+     }
+    ]
+   },
+   "roofline": {
+    "checkpoint": "Qwen3-0.6B-Q4_K_M.gguf",
+    "device": {
+     "bandwidth_bytes_per_s": 600000000000.0,
+     "name": "AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz)",
+     "peak_flops": 77000000000000.0
+    },
+    "drafting": null,
+    "metrics": {
+     "decode": {
+      "ceiling": 1535.5,
+      "efficiency": 0.399
+     },
+     "decode_2k": {
+      "ceiling": 967.5,
+      "efficiency": 0.622
+     },
+     "prefill_16k": {
+      "ceiling": 28352.5,
+      "efficiency": 0.33
+     },
+     "prefill_1k": {
+      "ceiling": 77348.7,
+      "efficiency": 0.33
+     },
+     "prefill_2k": {
+      "ceiling": 69358.1,
+      "efficiency": 0.33
+     },
+     "prefill_8k": {
+      "ceiling": 42818.0,
+      "efficiency": 0.33
+     },
+     "streams4": {
+      "ceiling": 3603.6,
+      "efficiency": 0.7
+     }
+    },
+    "tool": {
+     "script": "skills/loom-roofline/roofline.py",
+     "sha256": "e2580b65f6bbdfad305c66492242c1a5e94da94378d023f3a1a44834b9a7fef0",
+     "skills_commit": "0123456789abcdef0123456789abcdef01234567"
+    }
+   },
+   "served_context": 20480
+  },
+  "strix-halo": {
+   "state": "not_measured"
+  }
+ },
+ "repo": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+ "report": "generated",
+ "schema": "loom-card/3",
+ "sources": {
+  "devlab-9000001": {
+   "device": {
+    "cpu": "TEST FIXTURE: made-up numbers, not a measurement",
+    "gpu": "AMD Radeon AI PRO R9700S (gfx1201)",
+    "os": "Ubuntu 24.04"
+   },
+   "hrx_loom": {
+    "artifact_id": null,
+    "branch": "v0.1.0",
+    "hrx_loom": "0.1.0",
+    "hrx_system_sha": "d01d1c18b154189fd073777329052d23f6071f14",
+    "source": "pypi",
+    "wheel_sha256": "4d3897b83cc0857723593487a4372a31d203944a1637e5e3143cad1d0583b98b"
+   },
+   "kind": "devlab",
+   "run": "9000001",
+   "url": "https://github.com/loom-fun/loom-skills/actions/runs/9000001"
+  }
+ },
+ "versions": {
+  "card_generator": "0123456789abcdef0123456789abcdef01234567"
+ }
+}
