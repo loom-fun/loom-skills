@@ -25,6 +25,9 @@
 #        needle:N[:S]    one Loom-only needle probe of N tokens on the running server (read timeout S seconds): status, TTFT
 #        consdefer:N     consistency.py N times for cards whose GGUF and llama.cpp do not fit together: references deferred, filled with Loom stopped, runs re-judged
 #        ktest           the starter's kernel tests (make_kernel_tests.py + run_kernel_tests.sh) on the package
+#        bare            a bare chat request as an external verifier sends it (no template kwargs, temperature 0, max_tokens 256,
+#                        "What is two plus two? Reply with the digit only."), at the template default and with thinking off: finish_reason,
+#                        content and reasoning_content (out/bare*.json); PASS when the content is the digit
 #        probe           one request on a fresh server + GTT/free memory/status/dmesg (out/probe*.json, probe.txt)
 #        gates:LEVEL     gates.sh at LEVEL against the card's llama.cpp build ("llamacpp" in EXPERIMENT.json)
 # Writes WORK/<variant>/out: summary.json, *.log. Every server it starts is stopped at exit.
@@ -288,6 +291,23 @@ EOF
       cp "$D"/bench/gates.json "$D"/bench/gates_*.log "$out/" 2>/dev/null
       find "$D/bench" -maxdepth 1 -type f -size -4M \( -name "*.json" -o -name "*.jsonl" \) -exec cp {} "$out/" \; 2>/dev/null   # golden/compare recordings
       res[$s]=$(grep -h "^GATES" "$out/gates.out" | tail -1 | cut -c1-300); [ -n "${res[$s]}" ] || res[$s]="rc=$rc";;
+    bare)
+      [ -f "$LOOM_SERVE_STATE/exp-$name.pid" ] && "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
+      step "bare request: serve (fresh)"; serve || { res[$s]=ERROR; continue; }
+      res[$s]=$("$T" - "$url" "$model" "$out" <<'EOF'
+import json, sys, urllib.request
+url, model, out = sys.argv[1:]
+verdict = []
+for tag, extra in (("default", {}), ("think_off", {"chat_template_kwargs": {"enable_thinking": False}}), ("default_1024", {"max_tokens": 1024})):
+    body = {"model": model, "messages": [{"role": "user", "content": "What is two plus two? Reply with the digit only."}],
+            "max_tokens": 256, "temperature": 0, "stream": False, **extra}
+    r = json.load(urllib.request.urlopen(urllib.request.Request(url + "/v1/chat/completions", json.dumps(body).encode(), {"Content-Type": "application/json"}), timeout=600))
+    json.dump(r, open(f"{out}/bare_{tag}.json", "w"), indent=1)
+    c = r["choices"][0]; m = c["message"]
+    verdict.append(f"{tag}: {'PASS' if (m.get('content') or '').strip() == '4' else 'FAIL'} finish={c['finish_reason']} tokens={r['usage']['completion_tokens']} content={(m.get('content') or '')[:20]!r} reasoning={(m.get('reasoning_content') or '')[:30]!r}")
+print(" | ".join(verdict))
+EOF
+); echo "${res[$s]}";;
     probe)
       # One short completion on a fresh server, then what the runner and the server say about it (GTT, free memory,
       # /v1/status, the kernel log): a model that registers but cannot load shows up here, not in a gate's KeyError

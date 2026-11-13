@@ -1,21 +1,17 @@
 {
- "_comment": "Qwen3.8-Flash-Next published card (vision + MTP draft depth 3, on-demand PLE K=0, native 262144 context, --pool_backing=fixed): kernel tests on the GPU with a probe (one request, GTT, dmesg), and the full gate set (quick gates incl. spec + vision + over-capacity 400 + full-context needle) against llama.cpp b1371; Loom and llama.cpp take turns (the GGUF is 104 GiB).",
- "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
+ "_comment": "hrx-systems-test failures: a bare chat request (no template kwargs, max_tokens 256) against the published Qwen3-14B and MiniCPM-V-4.7 cards.",
  "memory_bytes": 100000000000,
- "kit": "qwen4exp",
- "llamacpp": "b1371",
+ "steps": [
+  "bare"
+ ],
  "variants": [
   {
-   "name": "fn-mtp-ktest-probe",
-   "memory_bytes": "none",
-   "serve_args": ["--pool_backing=fixed"],
-   "steps": ["ktest", "probe"]
+   "name": "q14",
+   "card": "loom-fun/ggml-org-Qwen3-14B-loom"
   },
   {
-   "name": "fn-mtp-full",
-   "memory_bytes": "none",
-   "serve_args": ["--pool_backing=fixed"],
-   "steps": ["gates:full"]
+   "name": "minicpm",
+   "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom"
   }
  ]
 }
