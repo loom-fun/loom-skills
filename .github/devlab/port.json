@@ -1,7 +1,86 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "Benchmark-rule rebuild (rebuild-c): regen from main with drafting forced per RULE_BASELINES.md, ctx_max 0, occ_min 2; reference = live cards.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {
+   "name": "orn15-35b",
+   "spec": "bartowski/Ornith-1.5-35B-A3B-GGUF:Ornith-1.5-35B-A3B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
+   "model_id": "ornith-ai/Ornith-1.5-35B-A3B",
+   "env": {
+    "MEMORY_GIB": "80"
+   }
+  },
+  {
+   "name": "gemma26b",
+   "spec": "lmstudio-community/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-Q4_K_M.gguf",
+   "reference": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "model_id": "google/gemma-4-26B-A4B-it",
+   "env": {
+    "MEMORY_GIB": "98"
+   }
+  },
+  {
+   "name": "orn10-35b",
+   "spec": "lmstudio-community/Ornith-1.0-35B-GGUF:Ornith-1.0-35B-Q4_K_M.gguf",
+   "reference": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
+   "model_id": "ornith-ai/Ornith-1.0-35B",
+   "env": {
+    "MEMORY_GIB": "80"
+   }
+  },
+  {
+   "name": "glimmer",
+   "spec": "ggml-org/Muse-Glimmer-30B-GGUF:Muse-Glimmer-30B-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Muse-Glimmer-30B-loom",
+   "model_id": "meta-models/Muse-Glimmer-30B",
+   "env": {
+    "MEMORY_GIB": "80"
+   }
+  },
+  {
+   "name": "minicpm",
+   "spec": "bartowski/MiniCPM-V-4.7-35B-A3B-GGUF:MiniCPM-V-4.7-35B-A3B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+   "model_id": "openbmb/MiniCPM-V-4.7-35B-A3B",
+   "env": {
+    "MEMORY_GIB": "80"
+   }
+  },
+  {
+   "name": "nanbeige",
+   "spec": "bartowski/Nanbeige_Nanbeige4.3-33B-GGUF:Nanbeige_Nanbeige4.3-33B-Q4_K_M.gguf",
+   "reference": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
+   "model_id": "Nanbeige/Nanbeige4.3-33B",
+   "env": {
+    "MEMORY_GIB": "98"
+   }
+  },
+  {
+   "name": "q3-coder",
+   "spec": "ggml-org/Qwen3-Coder-30B-A3B-Instruct-GGUF:Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+   "reference": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+   "env": {
+    "MEMORY_GIB": "80"
+   }
+  },
+  {
+   "name": "q30-2507",
+   "spec": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF:Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+   "model_id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+   "env": {
+    "MEMORY_GIB": "80"
+   }
+  },
+  {
+   "name": "q35-35b",
+   "spec": "unsloth/Qwen3.5-35B-A3B-GGUF:Qwen3.5-35B-A3B-Q4_K_M.gguf",
+   "reference": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
+   "model_id": "Qwen/Qwen3.5-35B-A3B",
+   "env": {
+    "MEMORY_GIB": "80"
+   }
+  }
  ]
 }
