@@ -222,7 +222,8 @@ def sysone(state, timeout=600):
 def c_decision():
     r, s = sysone("I was charged twice this month, please refund one of them.")
     txt = json.dumps(r)
-    ok = "refund" in r and "team" in r if isinstance(r, dict) else False
+    a_ = r.get("answers", {}) if isinstance(r, dict) else {}
+    ok = "refund" in a_ and a_.get("team", {}).get("choice") == "billing" and a_["refund"].get("noul", 0) > 0.5
     return ok, {"response": txt[:600], "s": round(s, 2)}
 
 
@@ -272,7 +273,7 @@ if DECISION and not a.skip_perf and R["claims"]:
     base = "The quick brown fox jumps over the lazy dog while the customer waits for an answer about the invoice. "
     for k, target in (("prefill_1k", 1160), ("prefill_2k", 2230)):
         try:
-            n = max(1, target // 20)
+            n = max(1, target // 44)
             doc = lambda i: f"[nonce {i} {time.time()}] " + base * n
             r, _ = sysone(doc(0))  # warm up
             ts, toks = [], None
