@@ -49,21 +49,6 @@
    "kit": null
   },
   {
-   "name": "ktest-lfm2moe-strix",
-   "card": "loom-fun/ggml-org-LFM2.5-24B-A2B-loom",
-   "kit": "lfm2moe",
-   "variants": [
-    {
-     "name": "dual",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:dual"
-   ],
-   "runner": "strix"
-  },
-  {
    "name": "ktest-qwen3moe-strix",
    "variants": [
     {
