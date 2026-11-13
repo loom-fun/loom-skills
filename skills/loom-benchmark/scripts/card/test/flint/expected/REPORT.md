@@ -80,7 +80,7 @@ perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign
 - Device: AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151), 216 GB/s, 59 TFLOP/s.
 - Tool: `skills/loom-roofline/roofline.py` sha256 `915576a9df574f4d5565c8b61151e622a737104f63b2cfc2d047617da1f863b7`, loom-skills `0123456789abcdef0123456789abcdef01234567`.
 - Checkpoint: `Flint-Q4_K_M.gguf`.
-- Speculative decoding: DFlash, depth 3; a drafted row's ceiling counts the acceptance measured in its own session, else the `spec` gate's (68 %, 3.04 tokens per verify pass).
+- Speculative decoding: DFlash, depth 3; a drafted row's ceiling counts the acceptance measured in its own session on this package; a row without one shows the single-pass ceiling; 4 streams run without drafting.
 
 | metric | ceiling | without drafting | acceptance | demonstrated efficiency |
 |---|---|---|---|---|

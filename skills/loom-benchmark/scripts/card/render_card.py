@@ -261,24 +261,18 @@ def row_acceptance(dr, row):
 
 
 def drafted_note(dr, metrics):
-    """How the drafted rows' ceilings count speculative decoding: per row, the acceptance measured in the row's own
-    session (perf.py, c4_steady.py), else the spec gate's (another text: it can accept more or less than the row's)."""
-    rows = {k: row_acceptance(dr, metrics[k]) for k in SHORT if "single_pass" in metrics.get(k, {})}
-    session = [k for k, (_, how) in rows.items() if how == "session"]
-    gate = [k for k, (_, how) in rows.items() if how == "gate"]
-    if not session and not gate:
-        return "; decode and 4 streams with speculative decoding have no ceiling until acceptance is measured"
-    out = (f"; decode and 4 streams with speculative decoding: verify passes × (1 + acceptance × depth {dr['depth']}) "
-           "tokens per pass, the drafter's cost not counted")
-    if session:
-        out += ("; acceptance measured in the row's own session: "
-                + ", ".join(f"{SHORT[k]} {pct_of(rows[k][0])}" for k in session))
-    if gate:
-        acc = rows[gate[0]][0]
-        out += (f"; {'for ' + ', '.join(SHORT[k] for k in gate) + ', ' if session else ''}the `spec` gate's acceptance "
-                f"{pct_of(acc)} (× {round(1 + acc * dr['depth'], 3):g} tokens per pass), as the row's session recorded "
-                "none: the gate's text can accept more or less than the row's")
-    return out
+    """How the drafted rows' ceilings count speculative decoding: per row, the acceptance measured in the row's own session on this
+    package; a row without one shows the single-pass ceiling. 4 streams run without drafting (the benchmark rule)."""
+    drafted = {k: m for k, m in metrics.items() if k in SHORT and k != "streams4" and m.get("acceptance_from") == "session"}
+    single = [k for k in SHORT if k in metrics and k != "streams4" and k not in drafted]
+    out = ""
+    if drafted:
+        out += (f"; decode rows with speculative decoding: verify passes × (1 + acceptance × depth {dr['depth']}) tokens per pass, "
+                "the drafter's cost not counted, with the acceptance measured in the row's own session: "
+                + ", ".join(f"{SHORT[k]} {pct_of(m['acceptance'])}" for k, m in drafted.items()))
+    if single:
+        out += ("; " if out else "; ") + "single-pass ceiling (no acceptance measured on this package) for " + ", ".join(SHORT[k] for k in single)
+    return out + "; 4 streams run without drafting, so its ceiling is single-pass"
 
 
 def roofline_note(info):
@@ -601,9 +595,8 @@ def render_report(d):
               f"- Checkpoint: `{text(r.get('checkpoint'))}`."]
         if dr:
             L.append(f"- Speculative decoding: {METHOD.get(dr['method'], dr['method'])}, depth {dr['depth']}; a drafted row's "
-                     "ceiling counts the acceptance measured in its own session, else the `spec` gate's ("
-                     + (f"{pct_of(dr['acceptance'])}, {dr['tokens_per_pass']:g} tokens per verify pass)."
-                        if dr.get("tokens_per_pass") else "not measured)."))
+                     "ceiling counts the acceptance measured in its own session on this package; a row without one shows the single-pass "
+                     "ceiling; 4 streams run without drafting.")
         L += ["", "| metric | ceiling | without drafting | " + ("acceptance | " if dr else "") + "demonstrated efficiency |",
               "|---|---|---|" + ("---|" if dr else "") + "---|"]
         for k, row in sorted(r["metrics"].items(), key=lambda kv: [x for x, _ in METRICS].index(kv[0])

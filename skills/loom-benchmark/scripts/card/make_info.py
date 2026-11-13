@@ -592,18 +592,15 @@ def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acc
             continue
         c = ceil[rk]
         row = {"ceiling": round(c, 1), "efficiency": round(R.efficiency(m, rk, c), 3)}
-        if spec and key in DRAFTED_ROWS and key == "streams4" and 0 < facts.get("occ_min", 0) <= 4:
-            pass   # the occupancy gate runs 4 streams undrafted: the plain ceiling above is the row's
-        elif spec and key in DRAFTED_ROWS:
-            row = {"ceiling": None, "single_pass": round(c, 1)}
-            acc, how = (row_acceptance or {}).get(key), "session"
-            if acc is None:
-                acc, how = acceptance, "spec_gate"
-            if acc is not None:
+        # benchmark rule: 4 streams are loaded without drafting, so that row's ceiling is always the plain one. A drafted row counts the
+        # acceptance measured in the row's own session on THIS package; with none (or 0) the row shows the single-pass ceiling.
+        if spec and key in DRAFTED_ROWS and key != "streams4":
+            acc = (row_acceptance or {}).get(key)
+            if acc:
                 t = round(1 + acc * spec[1], 3)
                 d = R.drafted_row_ceiling(m, rk, spec[1], acc, bw)
                 row.update(ceiling=round(d, 1), efficiency=round(R.efficiency(m, rk, d, tokens_per_pass=t), 3),
-                           acceptance=acc, acceptance_from=how, tokens_per_pass=t)
+                           acceptance=acc, acceptance_from="session", tokens_per_pass=t, single_pass=round(c, 1))
         metrics[key] = row
     return {"device": {"name": R.DEVICE if (bw, flops) == (R.BW, R.FLOPS) else f"{R.DEVICE}, overridden",
                        "bandwidth_bytes_per_s": bw, "peak_flops": flops},
@@ -639,6 +636,10 @@ def cmd_roofline(a):
     sessions = list(((load_json(info_p).get("performance") or {}).get("sessions") or [])
                     if os.path.exists(info_p) else [])
     sessions += [s for s in ((load_json(ev).get("performance") or {}).get("session") for ev in a.evidence or []) if s]
+    # a drafted ceiling counts acceptance measured on THIS package's programs only: another build's acceptance (an older drafter, depth
+    # or n-gram package) says nothing about it; without a current one the card shows the single-pass ceiling
+    here = programs_sha256(a.package)
+    sessions = [s for s in sessions if s.get("programs_sha256") == here]
     acc, row_acc = drafted_acceptance(facts, sessions, a.acceptance)
     script = os.path.join(rdir, "roofline.py")
     commit, dirty = skills_checkout(script)

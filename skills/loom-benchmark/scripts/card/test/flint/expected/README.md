@@ -51,7 +51,7 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 - ² Measured 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: DevLab Dispatch run 3003.
 - † Measured on programs other than this repository's (sha256 `aef7c52`, this repository's `38d15af`): the value describes another build of the package until a session re-measures it.
 - Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the `spec` gate's requests.
-- Roofline: the hardware ceiling for this GGUF on AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151) at 216 GB/s and 59 TFLOP/s, from loom-roofline `roofline.py` (loom-skills `0123456`); decode and 4 streams with speculative decoding: verify passes × (1 + acceptance × depth 3) tokens per pass, the drafter's cost not counted; the `spec` gate's acceptance 68 % (× 3.04 tokens per pass), as the row's session recorded none: the gate's text can accept more or less than the row's.
+- Roofline: the hardware ceiling for this GGUF on AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151) at 216 GB/s and 59 TFLOP/s, from loom-roofline `roofline.py` (loom-skills `0123456`); single-pass ceiling (no acceptance measured on this package) for decode, decode at 2k, decode at 32k; 4 streams run without drafting, so its ceiling is single-pass.
 - — not measured; n/a not applicable.
 
 ## Features
