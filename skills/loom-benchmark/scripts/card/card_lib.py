@@ -589,6 +589,70 @@ def _check(v, s, root, path, errs):
     return errs
 
 
+# ---- free text: the only places a card shows words nobody templated (everything else is render_card.py's template)
+# A caveat is one short factual line ("not supported: <reason>", "MTP head present but not yet supported by Loom (<reason>)",
+# "llama.cpp loads <repo> (a conversion of the same <drafter> drafter)", "vision projector (--mmproj): not loaded, ...").
+# Narrative (first person, history, what was tried, ideas, run/PR/agent chatter, speculation, local paths) is not a caveat.
+NARRATIVE = re.compile(
+    r"(?:\b(?:I|I'm|I've|I'll)\b|\b(?:we|we've|we'll|our|ours|my|me)\b"
+    r"|\b(?:tried|trying|previously|earlier|formerly|used to|no longer|so far|for now|ruled out|remaining ideas?|ideas?"
+    r"|workarounds?|attempt(?:ed|s)?|turns? out|seems?|appears? to|probably|likely|maybe|perhaps|hopefully|should|"
+    r"investigat\w*|debug\w*|campaign|orchestrator|tech[- ]?lead|TODO|WIP|hack|guardrail)\b"
+    r"|\bafter (?:we|the fix)\b|\bsince (?:then|we)\b|\bPR ?#?\d+|(?<![\w`])#\d+\b)",
+    re.IGNORECASE)
+LOCAL_PATH = re.compile(r"/home/|/tmp/|~/")   # in free text only: the Quick start legitimately installs under ~/
+CAVEAT_MAX, STEP_MAX, DETAIL_MAX = 240, 140, 60
+
+
+def narrative_hits(text):
+    """The narrative phrases in text (empty: none)."""
+    return sorted({m.group(0) for m in NARRATIVE.finditer(text)})
+
+
+def text_errors(label, s, limit):
+    """Errors of one free-text line: one short factual sentence, no narrative."""
+    out = []
+    if not isinstance(s, str) or not s.strip():
+        return [f"{label}: empty"]
+    if len(s) > limit:
+        out.append(f"{label}: {len(s)} characters (at most {limit}): a caveat is one short factual line")
+    if "\n" in s or re.search(r"[.!?]\s+[A-Z]", s):
+        out.append(f"{label}: more than one sentence")
+    if LOCAL_PATH.search(s):
+        out.append(f"{label}: a local path")
+    if narrative_hits(s):
+        out.append(f"{label}: narrative ({', '.join(narrative_hits(s))}): state the fact (not supported: <reason>), not the history")
+    return out
+
+
+def free_text_errors(info):
+    errs = []
+    p = info.get("performance") or {}
+    for i, u in enumerate((p.get("baseline") or {}).get("differs") or []):
+        errs += text_errors(f"info.performance.baseline.differs[{i}]", u, CAVEAT_MAX)
+    for b, x in (p.get("baselines") or {}).items():
+        for i, u in enumerate(x["baseline"].get("differs") or []):
+            errs += text_errors(f"info.performance.baselines.{b}.baseline.differs[{i}]", u, CAVEAT_MAX)
+    steps = info.get("next_steps") or []
+    if steps and info.get("status") != "paused":
+        errs.append("info.next_steps: only a paused card (status: paused) shows next steps")
+    if len(steps) > 5:
+        errs.append("info.next_steps: at most 5 steps")
+    for i, u in enumerate(steps):
+        errs += text_errors(f"info.next_steps[{i}]", u, STEP_MAX)
+    for n, g in (info.get("gates") or {}).items():
+        if g.get("detail"):
+            errs += text_errors(f"info.gates.{n}.detail", g["detail"], DETAIL_MAX)
+    card = info.get("card") or {}
+    for k in ("license", "output"):
+        if card.get(k) and not re.fullmatch(r"[A-Za-z0-9._+/-]+", card[k]):
+            errs.append(f"info.card.{k}: {card[k]!r} is not a plain identifier")
+    for t in card.get("tags") or []:
+        if not re.fullmatch(r"[A-Za-z0-9._+-]+", t):
+            errs.append(f"info.card.tags: {t!r} is not a plain tag")
+    return errs
+
+
 def validate(info):
     """Errors of info against info_schema.json, plus the cross-references the schema can't express (empty: valid)."""
     schema = load_json(SCHEMA_PATH)
@@ -606,7 +670,7 @@ def validate(info):
     for n, g in info.get("gates", {}).items():
         if g["source"] not in ids:
             errs.append(f"info.gates.{n}.source: no source {g['source']!r}")
-    return errs
+    return errs + free_text_errors(info)
 
 
 def require_valid(info, what="info.json"):

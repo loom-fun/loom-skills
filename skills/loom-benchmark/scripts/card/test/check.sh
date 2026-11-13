@@ -414,4 +414,25 @@ assert m.rule_violations(r, None, None, {'streams4': {'loom': True}}), 'streams4
 assert m.rule_violations(r, None, None, {'decode_32k': {'llama': False}}), 'a per-row toggle'" "$C" \
   && echo "OK   methodology rule: tie band, outcome counts, drafting rule (no n-gram, one choice, per-row loads)" \
   || { echo "FAIL methodology rule: matched_spec constants/checks"; bad=1; }
+# card text: free text is one short factual caveat; rendered cards (README.md, REPORT.md) carry no narrative (first person,
+# history, what was tried, ideas, run/PR chatter, local paths) outside code spans and links
+py -c "import sys, re, glob; sys.path.insert(0, sys.argv[1]); import card_lib as c
+for t in ('Tried and ruled out: a 32-row expert tile', 'we tried a bigger tile and it was slower', 'previously failed on the earlier run',
+          'Remaining ideas: fused dequant', 'see PR #123', 'a drafter I made', 'fails. Then it was fixed.', 'x' * 300,
+          'prefill_1k sits at about 18% of roofline (the far-from-roofline guardrail is 16.5%)'):
+    assert c.text_errors('t', t, c.CAVEAT_MAX), t
+for t in ('not supported: the DFlash drafter does not load in llama.cpp b1374', 'MTP head present but not yet supported by Loom (q4_0 NextN experts)',
+          'llama.cpp loads org/X-GGUF dflash-Q8_0 (a conversion of the same z-lab/X-DFlash drafter)', 'vision projector (--mmproj): not loaded, the workloads are text-only'):
+    assert not c.text_errors('t', t, c.CAVEAT_MAX), t
+info = c.load_json(sys.argv[2] + '/info.json')
+assert not c.free_text_errors(info)
+assert c.free_text_errors(dict(info, status=None, next_steps=['measure decode_32k'])), 'next steps without status paused'
+bad = 0
+for p in glob.glob(sys.argv[3] + '/*/expected/README.md') + glob.glob(sys.argv[3] + '/*/expected/REPORT.md'):
+    t = re.sub(r'\`\`\`.*?\`\`\`|\`[^\`]*\`|\]\([^)]*\)', ' ', open(p).read(), flags=re.S)
+    h = c.narrative_hits(t)
+    if h: print('narrative in', p, h); bad = 1
+sys.exit(bad)" "$C" "$tmp/flint" "$here" \
+  && echo "OK   card text: caveats are short factual lines, rendered cards carry no narrative" \
+  || { echo "FAIL card text: narrative in free text or in a rendered card"; bad=1; }
 exit $bad
