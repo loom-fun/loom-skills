@@ -488,8 +488,8 @@ def cmd_perf(a):
         perf["baseline"] = dict(perf.get("baseline") or {"name": a.baseline_name, "version": None, "args": None})
         if a.baseline_sha256:
             perf["baseline"]["sha256"] = a.baseline_sha256
-        if a.differs:
-            perf["baseline"]["differs"] = a.differs
+    if a.differs and "baseline" in perf:   # the main baseline too: a Loom-side note or a cell llama.cpp cannot run (rule: never silent)
+        perf["baseline"]["differs"] = a.differs
     write_json(a.o, {"evidence": EVIDENCE_ID, "performance": perf})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {m.get('loom')}/{m['baseline']}" for k, m in metrics.items()), file=sys.stderr)
 
