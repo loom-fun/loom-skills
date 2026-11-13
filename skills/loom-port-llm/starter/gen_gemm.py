@@ -1194,17 +1194,18 @@ if __name__ == "__main__":
     on = lambda k: os.environ.get(k, "0") not in ("", "0", "false", "no")  # GEMM_X=0 really means off
     skip = skip_padding if on("GEMM_SKIP_PADDING") else (lambda t: t)
     order = n_fastest if on("GEMM_N_FASTEST") else (lambda t: t)
+    import gen_gemm_rdna4 as _rdna4   # LOOM_RDNA4=0: no gfx12 twins (output byte-identical to the gfx11-only generator)
     post = lambda t: order(skip(t))
     on256 = os.environ.get("GEMM_M256", "1") not in ("", "0", "false", "no")   # 256-row kernels (_m256)
     for item in spec.split(","):
         fmt, modes = item.split(":")
         for mode in modes.split("+"):
-            out.append(post(gemm(fmt, mode)))
+            out.append(_rdna4.with_twins(post(gemm(fmt, mode))))
             if fmt in HELPER:   # the 64-row tile kernel under the 128-row name (its dequant has no prefetchable load)
                 name = f"{PREFIX}_gemm_{fmt}_{mode}"
-                out.append(post(gemm(fmt, mode)).replace(f'export("{name}") @{name}(', f'export("{name}_m128") @{name}_m128('))
+                out.append(_rdna4.with_twins(post(gemm(fmt, mode)).replace(f'export("{name}") @{name}(', f'export("{name}_m128") @{name}_m128(')))
             else:
-                out.append(post(gemm_big(fmt, mode)))
+                out.append(_rdna4.with_twins(post(gemm_big(fmt, mode))))
                 if on256:
-                    out.append(post(gemm_big256(fmt, mode)))
+                    out.append(_rdna4.with_twins(post(gemm_big256(fmt, mode))))
     sys.stdout.write("\n".join(out))
