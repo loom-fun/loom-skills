@@ -1,12 +1,12 @@
 {
- "_comment": "prefill chunk size A/B with PRUNE_SHARED.",
+ "_comment": "prefill chunk size A/B with PRUNE_SHARED: long prefill rows and 4 streams.",
  "kit": "gemma4",
  "llamacpp": "b1374",
  "jobs": [
   {
    "name": "e2b",
    "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
-   "memory_bytes": 16000000000,
+   "memory_bytes": 24000000000,
    "variants": [
     {
      "name": "p",
@@ -33,29 +33,21 @@
       "--prefill",
       "4096"
      ]
-    },
-    {
-     "name": "c512",
-     "build": {
-      "PRUNE_SHARED": "1"
-     },
-     "build_args": [
-      "--prefill",
-      "512"
-     ]
     }
    ],
    "steps": [
-    "perf:p:2",
-    "perf:c2048:2",
-    "perf:c4096:2",
-    "perf:c512:2"
+    "perf:p:2:long",
+    "c4:p:2",
+    "perf:c2048:2:long",
+    "c4:c2048:2",
+    "perf:c4096:2:long",
+    "c4:c4096:2"
    ]
   },
   {
    "name": "e4b",
    "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
-   "memory_bytes": 31000000000,
+   "memory_bytes": 40000000000,
    "variants": [
     {
      "name": "p",
@@ -82,23 +74,15 @@
       "--prefill",
       "4096"
      ]
-    },
-    {
-     "name": "c512",
-     "build": {
-      "PRUNE_SHARED": "1"
-     },
-     "build_args": [
-      "--prefill",
-      "512"
-     ]
     }
    ],
    "steps": [
-    "perf:p:2",
-    "perf:c2048:2",
-    "perf:c4096:2",
-    "perf:c512:2"
+    "perf:p:2:long",
+    "c4:p:2",
+    "perf:c2048:2:long",
+    "c4:c2048:2",
+    "perf:c4096:2:long",
+    "c4:c4096:2"
    ]
   }
  ]
