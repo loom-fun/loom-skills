@@ -25,7 +25,8 @@
   "drafter_file": "Qwen3.6-35B-A3B-DFlash-Q8_0.gguf",
   "llama_n_max": 7,
   "nmax_src": "z-lab/Qwen3.6-35B-A3B-DFlash README (dflash block size - 1)",
-  "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99"
+  "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:ggml-org/Qwen3.6-35B-A3B-GGUF/dflash-Qwen3.6-35B-A3B-Q8_0.gguf} --spec-draft-n-max 7 -ngld 99",
+  "llama_note": "llama.cpp loads ggml-org/Qwen3.6-35B-A3B-GGUF dflash-Q8_0 (a conversion of the same z-lab/Qwen3.6-35B-A3B-DFlash drafter): the card's magnitudedev conversion fails to load in llama.cpp b1374/b12211"
  },
  "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom": {
   "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
@@ -156,7 +157,8 @@
   "drafter_file": "Qwen3.5-4B-DFlash-Q8_0.gguf",
   "llama_n_max": 7,
   "nmax_src": "z-lab/Qwen3.5-4B-DFlash README (dflash block size - 1)",
-  "llama_spec": "--spec-type draft-dflash --spec-draft-model {drafter} --spec-draft-n-max 7 -ngld 99"
+  "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:AtomicChat/Qwen3.5-4B-DFlash-GGUF/Qwen3.5-4B-DFlash.Q8_0.gguf} --spec-draft-n-max 7 -ngld 99",
+  "llama_note": "llama.cpp loads AtomicChat/Qwen3.5-4B-DFlash-GGUF (a conversion of the same z-lab/Qwen3.5-4B-DFlash drafter): the card's magnitudedev conversion fails to load in llama.cpp b1374/b12211"
  },
  "loom-fun/ggml-org-LFM2.5-24B-A2B-loom": {
   "card": "loom-fun/ggml-org-LFM2.5-24B-A2B-loom",
