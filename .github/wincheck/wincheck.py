@@ -182,14 +182,29 @@ def stop_server():
 
 
 model_id = None
+R["serve_poll"] = []
+last_print = 0
 while time.time() - t0 < a.ready_timeout:
     if srv.poll() is not None:
         break
+    seen = {}
+    for path in ("/v1/models", "/v1/status"):
+        try:
+            seen[path] = http(path, timeout=10)
+        except Exception as e:
+            seen[path] = f"{type(e).__name__}: {e}"
     try:
-        model_id = http("/v1/models", timeout=10)["data"][0]["id"]
+        model_id = seen["/v1/models"]["data"][0]["id"]
         break
     except Exception:
-        time.sleep(5)
+        pass
+    if time.time() - last_print > 30:   # what the server says while the model is not listed (it was invisible before)
+        last_print = time.time()
+        entry = {"s": round(time.time() - t0), **{k: (json.dumps(v)[:1500] if not isinstance(v, str) else v[:300]) for k, v in seen.items()}}
+        R["serve_poll"] = (R["serve_poll"] + [entry])[-20:]
+        print("== poll", json.dumps(entry)[:2000], flush=True)
+        save()
+    time.sleep(5)
 if not model_id:
     step("serve_ready", False, exited=srv.poll(), seconds=round(time.time() - t0), tail=tail(serve_log, 40))
     stop_server()

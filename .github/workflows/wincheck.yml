@@ -53,13 +53,13 @@ jobs:
           (rocminfo 2>/dev/null | grep -E "Marketing Name|Name: +gfx|Compute Unit|Max Clock" | head -20) || true
           for d in /sys/class/drm/card*/device; do [ -f $d/mem_info_vram_total ] && echo "$d vram_total=$(cat $d/mem_info_vram_total) vis=$(cat $d/mem_info_vis_vram_total)"; done || true
           (rocm-smi --showproductname --showmeminfo vram --showclocks 2>/dev/null | head -40) || true
-          ls /opt/rocm*/bin 2>/dev/null | head -50 || true
+          (cd "$RUNNER_TEMP" && hipcc -O3 --offload-arch=gfx1201 "$GITHUB_WORKSPACE/.github/wincheck/bw.hip" -o bw && ./bw && ./bw) || true
       - name: r9700check
         run: |
           echo "SLUG=${REPO#*/}" >> "$GITHUB_ENV"
           export HF_HOME="$RUNNER_TEMP/hf"
           python3 --version
-          python3 .github/wincheck/wincheck.py "$REPO" "$RUNNER_TEMP/wincheck-out" --long
+          python3 .github/wincheck/wincheck.py "$REPO" "$RUNNER_TEMP/wincheck-out" --long --ready-timeout 900
         env:
           REPO: ${{ matrix.repo }}
       - name: upload
