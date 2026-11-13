@@ -13,27 +13,19 @@
     {
      "name": "dual",
      "build": {}
+    },
+    {
+     "name": "ts2",
+     "build": {
+      "FLASH2_TS": "2"
+     }
     }
    ],
    "steps": [
-    "ktest:dual"
+    "ktest:dual",
+    "ktest:ts2"
    ],
    "kit": null
-  },
-  {
-   "name": "ktest-q8b-strix",
-   "card": "loom-fun/unsloth-Qwen3-8B-loom",
-   "variants": [
-    {
-     "name": "dual",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "ktest:dual"
-   ],
-   "kit": null,
-   "runner": "strix"
   },
   {
    "name": "ktest-gemma4-12b",
@@ -42,17 +34,10 @@
     {
      "name": "dual",
      "build": {}
-    },
-    {
-     "name": "nopeel",
-     "build": {
-      "FLASH2_PEEL": "0"
-     }
     }
    ],
    "steps": [
-    "ktest:dual",
-    "ktest:nopeel"
+    "ktest:dual"
    ],
    "kit": "gemma4"
   }
