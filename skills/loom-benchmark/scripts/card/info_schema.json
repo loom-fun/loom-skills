@@ -63,7 +63,8 @@
       "programs_sha256": {"type": "string", "description": "card_lib.programs_sha256 of the package re-measured (this repository's)"},
       "compared_programs": {"type": "string", "description": "programs_sha256 of the build compared with (the sessions shown)"},
       "result": {"enum": ["within"]}, "worst_metric": {"type": ["string", "null"]}, "worst_ratio": {"type": ["number", "null"]},
-      "ratios": {"type": "object", "additionalProperties": {"type": ["number", "null"]}}}},
+      "ratios": {"type": "object", "additionalProperties": {"type": ["number", "null"]}},
+      "exceptions": {"type": "object", "additionalProperties": {"type": ["number", "null"]}, "description": "metrics outside the band in this run whose confirming run did not repeat it in the same direction (the card names them)"}}},
       "performance": {
        "type": "object", "required": ["baseline", "sessions"],
        "properties": {
