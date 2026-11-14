@@ -20,7 +20,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
+from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, gpu_preset, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
                       TIMED, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory,
                       gpu_view, has_results, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features)
@@ -483,10 +483,10 @@ def render(d):
           f"{hf(c['repo'])} (`{c['file']}`), for the {where} GPUs, generated with the "
           f"[loom-skills]({SKILLS_URL}) workflow. {LEARN_MORE}", ""]
 
-    fetch = ["loom-fetch", f"{HF}/{info['repo']}/resolve/main/model.json"]
-    if facts["preset"]:
-        fetch.append(f"--preset={facts['preset']}")
-    fetch += ["--materialize=copy", f"--output={output}"]
+    def fetch_for(g):   # the fetch command of a GPU: its preset (the R9700's own when the package has one)
+        pr = gpu_preset(facts, g)
+        return " ".join(["loom-fetch", f"{HF}/{info['repo']}/resolve/main/model.json"] + ([f"--preset={pr}"] if pr else [])
+                        + ["--materialize=copy", f"--output={output}"])
     api = ("answers OpenAI-style `/v1/chat/completions` requests" if kind == "chat"
            else f"answers SystemOne decision requests at `{feats['api']['value']['endpoint']}`")
     pin = required_sdk(facts, versions, sources)
@@ -501,12 +501,17 @@ def render(d):
         install = ['pip install "hrx-loom[hf]"']   # no SDK version recorded anywhere (cannot happen for a built card)
     serving = [g for g in gpus if info["devices"][g].get("state") != "unsupported"] or [DEFAULT_GPU]
     if len(serving) == 1:
-        L += ["## Quick start", "", "```bash", *install, " ".join(fetch), serve_command(info, facts, feats, serving[0], output), "```", ""]
-    else:   # the same install and fetch; the serve line differs by the GPU's memory
-        L += ["## Quick start", "", "```bash", *install, " ".join(fetch), "```", ""]
+        L += ["## Quick start", "", "```bash", *install, fetch_for(serving[0]), serve_command(info, facts, feats, serving[0], output), "```", ""]
+    elif len({fetch_for(g) for g in serving}) == 1:   # the same install and fetch; the serve line differs by the GPU's memory
+        L += ["## Quick start", "", "```bash", *install, fetch_for(serving[0]), "```", ""]
         for g in serving:
             L += [f"Serve on the {GPUS[g]['name']} ({gpu_arch(g)}):", "", "```bash",
                   serve_command(info, facts, feats, g, output), "```", ""]
+    else:   # a GPU with its own preset (R9700: larger prefill chunk): the fetch differs too, same install
+        L += ["## Quick start", "", "```bash", *install, "```", ""]
+        for g in serving:
+            L += [f"Fetch and serve on the {GPUS[g]['name']} ({gpu_arch(g)}):", "", "```bash",
+                  fetch_for(g), serve_command(info, facts, feats, g, output), "```", ""]
     if pin and pin.get("source") == "ci":
         sha = (pin.get("hrx_system_sha") or "")[:8]
         L += [f"This package needs an hrx-loom development build (hrx-loom {pin.get('hrx_loom')}, ROCm/hrx-system "

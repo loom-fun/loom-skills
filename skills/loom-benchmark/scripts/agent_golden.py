@@ -80,6 +80,9 @@ def history_edits(hist, prompt):
             if tag != "equal" and not (tag == "insert" and i1 == len(hist))]
 
 
+MERGE_GAP = 64   # characters
+
+
 def template_rewrite(prev_prompt, prev_out, verified, prompt, continuation=None, first_token=lambda s: s[:1]):
     """Is PROMPT's change of the retained history (PREV_PROMPT + PREV_OUT) the template's? Each edit's replaced span must lie
     inside the previous prompt (e.g. thinking off: a generation prompt's empty think block, which history drops) or
@@ -100,7 +103,17 @@ def template_rewrite(prev_prompt, prev_out, verified, prompt, continuation=None,
         template_rewrite.trace.append((i1 - n, mine, tmpl, cont))
         return cont.startswith(mine) and not cont.startswith(tmpl)
     edits = history_edits(hist, prompt)
-    return bool(edits) and all(ok(*e) for e in edits)
+    # difflib splits one rewrite into character-level fragments around text both sides share (harmony: "<|channel|>commentary
+    # to=functions.f <|constrain|>json" -> " to=functions.f<|channel|>commentary json" is 5 edits, cut inside words where
+    # llama.cpp's continuation has nothing to say). Edits less than MERGE_GAP characters apart are also judged as the one
+    # span they make up; a span passes when the reference writes the history's text over all of it, or every fragment passes.
+    spans, group = [], []
+    for e in edits:
+        if group and e[0] - group[-1][1] >= MERGE_GAP:
+            spans.append(group); group = []
+        group.append(e)
+    spans.append(group) if group else None
+    return bool(edits) and all(len(g) > 1 and ok(g[0][0], g[-1][1], g[0][2], g[-1][3]) or all(ok(*e) for e in g) for g in spans)
 
 
 template_rewrite.trace = []   # (offset in the output, history text, template text, llama.cpp's continuation) of every anchored edit

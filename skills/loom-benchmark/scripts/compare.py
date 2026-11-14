@@ -100,6 +100,21 @@ for g in json.load(open(a.golden)):
     # Same rule on Loom's side: raw_from_chat re-adds think_close's trailing whitespace (Qwen: "\n</think>\n\n"),
     # which the golden no longer has, so every reasoning answer would diverge right after </think>.
     got = strip_ws_after_think({"ids": pkg.ids(text), "top": []})["ids"]
+    extended = False
+    if len(got) + 4 < (r.get("usage") or {}).get("completion_tokens", 0) and ch["finish_reason"] == "length":
+        # max_tokens (the golden's length) cut the reply inside a structural run its parser consumes (a channel header such as
+        # harmony's <|end|><|start|>assistant<|channel|>final, empty content so far): those tokens are generated but not in the
+        # parsed reply, so the rebuilt ids stop short. Ask again with a few tokens more: the reply then publishes them.
+        r2 = requests.post(a.url + "/v1/chat/completions", headers={"Content-Type": "application/json"},
+                           json={"model": pkg.model_id, "messages": [{"role": "user", "content": g["prompt"]}],
+                                 "max_tokens": len(g["ids"]) + 12, "temperature": 0, **pkg.default_request()}).json()
+        if "choices" in r2:
+            ch2 = r2["choices"][0]
+            text2 = pkg.raw_from_chat(ch2["message"], ch2["finish_reason"] == "stop")
+            got2 = strip_ws_after_think({"ids": pkg.ids(text2), "top": []})["ids"]
+            if len(got2) + 4 >= (r2.get("usage") or {}).get("completion_tokens", 0):
+                r, ch, text, got, extended = r2, ch2, text2, got2, True
+                print(f"       reply cut inside a structural run: asked again with {len(g['ids']) + 12} tokens ({len(got)} published)", flush=True)
     n, gap, near = match(got, g)
     # llama.cpp can emit a non-canonical split (e.g. '[' 'A' where the HF tokenizer gives '[A');
     # identical text is a match, whatever the token boundaries.
@@ -136,9 +151,7 @@ for g in json.load(open(a.golden)):
     gold = g["ids"]
     if not published and n >= len(got):   # the reply is a prefix of the golden only because generated tokens never
         n, gap, near = len(got), "unpublished", False   # reached it (a divergence inside the reply decides by itself)
-        print(f"       unpublished: {r['usage']['completion_tokens']} generated, {len(got)} in the parsed reply, finish "
-              f"{ch['finish_reason']}; reply tail {text[-80:]!r}; golden tail past it {pkg.tok.decode(gold[len(got):], skip_special_tokens=False)!r}", flush=True)
-    full = n >= min(len(gold), len(got)) and abs(len(got) - len(gold)) <= 1
+    full = n >= min(len(gold), len(got)) and (extended and len(got) >= len(gold) or abs(len(got) - len(gold)) <= 1)
     bad = not near
     rows.append({"prompt": g["prompt"][:80], "prompt_tokens": g.get("prompt_tokens"), "golden_tokens": len(gold), "matched": n,
                  "full_match": full, "divergence_gap": gap, "noise": noise, "bad": bad, "seconds": round(time.perf_counter() - t0, 2), "loom_text": text[:160]})
