@@ -67,7 +67,7 @@ Small models sit lower: the drafter and the verify pass's fixed costs are a larg
 
 No Loom port runs on gfx12 yet: hrx-loom 0.1.0 rejects the starter kit's gfx11-shaped WMMA kernels (GEMM, flash
 prefill) for `amdgpu-rdna4`. The rows below are llama.cpp on the same runners: they set the `radeon-r9700s` preset's
-bandwidth and show what the hardware gives. Ceilings: `--device radeon-r9700s` (600 GB/s, 214 TFLOP/s measured).
+bandwidth and show what the hardware gives. Ceilings: `--device radeon-r9700s` (613 GB/s, 214 TFLOP/s, both measured).
 
 | Model | Metric | Ceiling | llama.cpp ROCm b1375 (gfx120X) | llama.cpp Vulkan b12211 (RADV) | Eff (best) |
 |---|---|---|---|---|---|
