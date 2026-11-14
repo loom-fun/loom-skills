@@ -57,6 +57,13 @@
     "required_bytes": {"type": "integer", "description": "unsupported only: the memory the package needs on this GPU (weights, KV cache at the native context, headroom)"},
     "memory_bytes": {"type": "integer", "description": "loom-serve --memory_bytes on this GPU when it differs from the package value (model.json or card.memory_bytes): the GPU memory bounds the elastic pool"},
     "served_context": {"type": "integer", "description": "Tokens per request this GPU serves when its memory budget holds less KV cache than the native context needs; the same package serves it, --memory_bytes bounds the pool. Absent: the native context."},
+    "remeasure": {"type": "object", "required": ["date", "source", "band", "programs_sha256", "compared_programs", "result"], "additionalProperties": false,
+     "description": "A same-runner A/B (make_info.py remeasure, from strix_ab_compare.py) that re-measured this GPU on this package against the build whose performance sessions the card shows: every card metric within +-band. Sessions measured on compared_programs then stand for programs_sha256 (not marked as another build); the card says so in one line. Optional key.",
+     "properties": {"date": {"type": "string"}, "source": {"type": "string"}, "band": {"type": "number"},
+      "programs_sha256": {"type": "string", "description": "card_lib.programs_sha256 of the package re-measured (this repository's)"},
+      "compared_programs": {"type": "string", "description": "programs_sha256 of the build compared with (the sessions shown)"},
+      "result": {"enum": ["within"]}, "worst_metric": {"type": ["string", "null"]}, "worst_ratio": {"type": ["number", "null"]},
+      "ratios": {"type": "object", "additionalProperties": {"type": ["number", "null"]}}}},
       "performance": {
        "type": "object", "required": ["baseline", "sessions"],
        "properties": {

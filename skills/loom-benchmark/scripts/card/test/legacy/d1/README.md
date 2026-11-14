@@ -40,6 +40,7 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 **Methodology**
 
 - Compared: Loom against llama.cpp ROCm `llamacpp-rocm/b1357`; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with the active wait. Values are the mean of not recorded rounds (4 streams: median of not recorded); Loom is timed by the client, llama.cpp by its server.
+- Out of the box on both engines: Loom serves the preset shipped in this package; llama.cpp runs its build defaults plus only the server arguments listed below (offload, context and slots). No tuning sweep on either engine.
 - Drafting, 1-stream rows (decode, decode_2k, decode_32k, prefill): no drafting on either engine (no MTP head in the GGUF and no drafter published for this exact model). Each engine is loaded once for all these rows.
 - 4 streams: both engines loaded with drafting off, 4 parallel requests, aggregate tokens per second.
 - Rows: decode = short-context decode; decode_2k / decode_32k = decode after a ~2k / ~32k-token context; prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode. A margin within +-3 % (the measured same-runner noise) is a tie.

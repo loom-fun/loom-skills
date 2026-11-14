@@ -533,11 +533,14 @@ def stale_metrics(info, programs, kind=None, feats=None):
     `programs` is unknown; a session that recorded no programs is not flagged."""
     if not programs:
         return {}
-    sessions = (single(info).get("performance") or {}).get("sessions", [])
+    view = single(info)
+    sessions = (view.get("performance") or {}).get("sessions", [])
+    rm = view.get("remeasure") or {}
+    same = {programs} | ({rm["compared_programs"]} if rm.get("programs_sha256") == programs else set())   # a same-runner A/B within the band
     out = {}
     for k, (_, i) in card_metrics(info).items():
         sha = sessions[i].get("programs_sha256")
-        if sha and sha != programs and (kind is None or metric_applies(k, kind, feats, info)):
+        if sha and sha not in same and (kind is None or metric_applies(k, kind, feats, info)):
             out[k] = sha
     return out
 
@@ -625,7 +628,7 @@ def gpu_view(info, gpu):
     d = (info.get("devices") or {}).get(gpu) or {}
     out = {k: v for k, v in info.items() if k != "devices"}
     out["gates"] = d.get("gates") or {}
-    for k in ("performance", "roofline", "state", "required_bytes", "memory_bytes", "served_context"):
+    for k in ("performance", "roofline", "state", "required_bytes", "memory_bytes", "served_context", "remeasure"):
         if d.get(k) is not None:
             out[k] = d[k]
     out["gpu"] = gpu
@@ -886,6 +889,8 @@ def validate(info):
         for b, x in (p.get("baselines") or {}).items():
             if x["session"]["source"] not in ids:
                 errs.append(f"{at}.performance.baselines.{b}.session.source: no source {x['session']['source']!r}")
+        if dev.get("remeasure") and dev["remeasure"]["source"] not in ids:
+            errs.append(f"{at}.remeasure.source: no source {dev['remeasure']['source']!r}")
         for n, g in (dev.get("gates") or {}).items():
             if g["source"] not in ids:
                 errs.append(f"{at}.gates.{n}.source: no source {g['source']!r}")
