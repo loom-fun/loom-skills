@@ -382,6 +382,7 @@ for s in $steps; do
       for i in $(seq 1 "$p2"); do
         (cd "$out" && "$T" "$B/perf.py" "$url" "$p1" --model "$cardid" --no-campaign --thinking "$TH" --log "perf_$p1.jsonl" ${p3:+--long} | tail -1)
       done
+      echo "{\"session_end\": \"$p1\"}" >> "$out/perf_$p1.jsonl"   # one serve session ends (strix_ab_compare.py: per-session medians)
       "$T" "$here/.github/scripts/ab_decode.py" "$url" "$cardid" --rounds 2 --think "$TH" --log "$out/tps_$p1.jsonl" | grep SUMMARY
       res[$s]=$("$T" -c "
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
@@ -403,7 +404,8 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(v), 2) 
       step "c4 $p1"
       cn=${p2:-4}; cf=c4_$p1$([ "$cn" = 4 ] || echo "_n$cn").txt   # c4:V[:N] N concurrent streams (default 4)
       for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$url" "$cn" --model "$cardid" --thinking "$TH" | tail -1 | tee -a "$cf"); done
-      res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4$([ "$cn" = 4 ] || echo " n$cn") median', st.median(json.loads(l)['agg_tps'] for l in open('$out/$cf')))");;
+      echo "{\"session_end\": \"$p1\"}" >> "$out/$cf"   # one serve session ends
+      res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4$([ "$cn" = 4 ] || echo " n$cn") median', st.median(r['agg_tps'] for l in open('$out/$cf') if 'agg_tps' in (r := json.loads(l))))");;
     llama)   # llama:N[:long|-][:N_MAX]
       llama_up "${p3:-}" || { res[$s]=ERROR; continue; }
       nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}; lf=perf_llamacpp${bkt}_n$nm.jsonl

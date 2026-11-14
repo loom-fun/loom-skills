@@ -26,8 +26,8 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 ap = argparse.ArgumentParser()
 ap.add_argument("slugs", nargs="+")
 ap.add_argument("--gates", default="dev")
-ap.add_argument("--reps", type=int, default=None, help="serve sessions per side for the 1-stream rows (default: 3; 6 for a fast model)")
-ap.add_argument("--fast-tps", type=float, default=150, help="a model whose published Strix decode is above this gets 6 short-row sessions and 4 c4 sessions per side")
+ap.add_argument("--reps", type=int, default=None, help="serve sessions per side for the 1-stream rows (default: 3; 6 for a fast model, which also gets 3 perf.py runs per session)")
+ap.add_argument("--fast-tps", type=float, default=100, help="a model whose published Strix decode is above this gets 6 short-row sessions and 4 c4 sessions per side")
 ap.add_argument("--old-org", default="loom-fun")
 ap.add_argument("--new-org", default="loom-fun-staging")
 ap.add_argument("--baselines", action="store_true", help="also run the llama.cpp ROCm + Vulkan rows (off: the A/B compares Loom with Loom; no llama.cpp re-measure)")
@@ -69,6 +69,7 @@ for slug in a.slugs:
     fast = (card_decode(slug) or 0) > a.fast_tps
     n = a.reps or (6 if fast else 3)
     nc = 4 if fast else 2
+    spp = 3 if fast else 1
     name = ("sab-" + slug.lower().replace(".", "-"))[:40 - len(a.suffix)] + a.suffix
     jobs.append({
         "name": name, "runner": "strix", "card": f"{a.new_org}/{slug}", "memory_bytes": m["memory_bytes"],
@@ -79,7 +80,8 @@ for slug in a.slugs:
         # every run in its own serve session, interleaved (ABBAAB...): a small model's decode rate is a property of the serve
         # session (Qwen3-0.6B: 297 or 345 tok/s for the same package in two sessions on one runner), so each side's mean
         # spans n sessions and neither side gets all the slow ones
-        "steps": [f"perf:{v}:1" for v in abba(n)] + [f"perf:{v}:1:long" for v in abba(3, start=1)]
+        # fast models: 3 perf.py runs per session (a session's value is the median of its samples: decode_2k, decode_32k, prefill_8k)
+        "steps": [f"perf:{v}:{spp}" for v in abba(n)] + [f"perf:{v}:{spp}:long" for v in abba(3, start=1)]
                  + [f"c4:{v}nd" for v in abba(nc)] + ["textmatch:fun", "textmatch:staging",
                   "func:staging", "ktest:staging", *([f"gates:staging:{a.gates}"] if a.gates else []),
                   *([] if not a.baselines else [f"llama@rocm.np1:{a.llama_reps}", f"llama@rocm.np1:{a.llama_reps}:long", "llamac4@rocm.nodraft",
