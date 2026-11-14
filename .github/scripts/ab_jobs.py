@@ -91,7 +91,7 @@ def build(a):
         old = (refs.get(slug) or {}).get("old") or ref(a.old_org, slug, a.old_rev)
         new = (refs.get(slug) or {}).get("new") or ref(a.new_org, slug, a.new_rev)
         # a fast model's decode rate is bimodal per serve session (Qwen3-0.6B: ~297 or ~330 tok/s, both packages): more sessions per side
-        dec = card_lib.published_decode(slug, old.split("/")[0])
+        dec = card_lib.published_decode(slug, a.old_org)   # the published Strix decode (--old-org, never a pinned ref's org: a staging card may carry no Strix number)
         n, rr = card_lib.sampling_plan(dec, a.fast_tps)   # the sampling rule (methodology rule 5): fast: 6 sessions, 3 samples per session
         n = a.reps or n
         nc = 4 if rr > 1 else 2
