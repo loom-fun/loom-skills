@@ -41,6 +41,13 @@ ap.add_argument("--gates", default="", help="add the gates step at this LEVEL (d
 ap.add_argument("--reps", type=int, default=3)
 a = ap.parse_args()
 
+# Drafters llama.cpp cannot load (llama.cpp b1375 ROCm / b12211 Vulkan): the matched llama.cpp server then fails to start
+# ("done_getting_tensors: wrong number of tensors; expected 64, got 58" for Laguna's DFlash) and the whole job has no baseline
+# rows. Their llama.cpp rows run WITHOUT drafting ("llama_spec": ""), as the published loom-fun card does; the card's baseline
+# says so (make_info.py perf --differs "1-stream rows: not supported: the <drafter> does not load in llama.cpp ...").
+NO_LLAMA_DRAFT = {"ggml-org-Laguna-XS-2.1-loom": "the DFlash drafter dev7a/Laguna-XS-2.1-DFlash-GGUF (a conversion of poolside/Laguna-XS-2.1-DFlash) "
+                                                 "does not load in llama.cpp b1375 (ROCm) or b12211 (Vulkan)"}
+
 GPU = "radeon-r9700"
 POOL = card_lib.GPUS[GPU]["memory_bytes"]
 models = {m["repo"].split("/")[-1]: m for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
@@ -79,6 +86,7 @@ for slug in slugs:
         lkv = max(36864, min(65536, int((POOL - f["w"] - 2_500_000_000) // kvt) // 4096 * 4096))
     jobs.append({
         **({"llama_kv_rocm": lkv} if lkv else {}),
+        **({"llama_spec": ""} if slug in NO_LLAMA_DRAFT else {}),
         "name": slug.lower().replace(".", "-")[:40],
         "card": f"{a.card_org}/{slug}", **({"require_preset_r9700": True} if preset else {}), "kit": m["kit"], "llamacpp": "b1375", "llamacpp_vulkan": "b12211",
         "memory_bytes_r9700": mem, **({"served_context": ctx} if ctx else {}),
