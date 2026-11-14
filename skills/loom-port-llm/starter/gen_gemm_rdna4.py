@@ -85,3 +85,66 @@ def with_twins(text):
             if is_wmma(k):
                 out.append(twin(k).rstrip("\n") + "\n\n")
     return "".join(out)
+
+
+# ---- q4_k m256 twin: one 16-byte weight load per thread feeds both nibble groups of its page half -------------------
+def q4k_m256_native(t, unroll=False):
+    """Rewrites the dequant staging of a q4_k m256 twin text t (store or swiglu): a thread stages row t/2, 16-value
+    half h = t%2 of BOTH groups of the step's 32-byte page (low nibbles = group 2p, high nibbles = 2p+1), so it loads
+    the page half once (the mechanical twin loads 32 bytes and drops half) and decodes each group's scale/minimum once
+    (it decoded the same group twice). Same arithmetic per value, so the result is bit-identical to the mechanical twin."""
+    W = re.search(r"%dqap_header_view = buffer\.view (%\w+)\[", t).group(1)
+
+    def loads(p, step):   # raw loads for weight step `step` (an index): superblock header + this thread's page half
+        return f"""    {p}_sb = index.div {step}, %c4 : index
+    {p}_page = index.rem {step}, %c4 : index
+    {p}_bo_add = index.scale {p}_sb, %block_bytes : index, offset -> offset
+    {p}_bo = index.add %w_row_origin, {p}_bo_add : offset
+    {p}_hv = buffer.view {W}[{p}_bo] : buffer -> view<4xi32>
+    {p}_hdr = vector.load {p}_hv[0] : view<4xi32> -> vector<4xi32>
+    {p}_pay = index.add {p}_bo, %sixteen : offset
+    {p}_wv = buffer.view {W}[{p}_pay] : buffer -> view<32xi32>
+    {p}_pw8 = index.mul {p}_page, %c8 : index
+    {p}_pw = index.add {p}_pw8, %pk_hw : index
+    {p}_pk = vector.load {p}_wv[{p}_pw] : view<32xi32> -> vector<4xi32>
+"""
+    # prologue: step 0
+    a = t.index("  %wcolap = ")
+    b = t.index("    %x_colp = ")
+    pro = "  %pk_hw = index.mul %stage_ks, %c4 : index\n  %pk_lo_col = index.mul %stage_ks, %c16 : index\n  %pk_hi_col = index.add %pk_lo_col, %c32 : index\n"
+    pro += "  %step0 = index.constant 0 : index\n" + loads("%q0", "%step0").replace("\n    ", "\n  ").replace("    %q", "  %q", 1)
+    t = t[:a] + pro + t[b:]
+    # loop-carried values
+    t = t.replace("%cr_dqa_header = %dqap_header : vector<4xi32>, %cr_dqa_packed = %dqap_packed : vector<4xi32>, %cr_dqb_header = %dqbp_header : vector<4xi32>, %cr_dqb_packed = %dqbp_packed : vector<4xi32>",
+                  "%cr_hdr = %q0_hdr : vector<4xi32>, %cr_pk = %q0_pk : vector<4xi32>")
+    t = t.replace("%unused_0, %unused_1, %unused_2, %unused_3, %unused_4, %unused_5 = scf.for", "%unused_0, %unused_1, %unused_2, %unused_3 = scf.for")
+    t = t.replace("vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<32xf16>, vector<32xf16>) {", "vector<4xi32>, vector<4xi32>, vector<32xf16>, vector<32xf16>) {")
+    t = t.replace("%dqan_header, %dqan_packed, %dqbn_header, %dqbn_packed, %x_rawn, %x_rawn1 : ", "%qn_hdr, %qn_pk, %x_rawn, %x_rawn1 : ")
+    t = t.replace("vector<8xf32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<32xf16>, vector<32xf16>\n", "vector<8xf32>, vector<4xi32>, vector<4xi32>, vector<32xf16>, vector<32xf16>\n")
+    # in-loop: dequantize and stage both slices
+    a = t.index("    %wcola = ")
+    b = t.index("    kernel.barrier<workgroup>", a)
+    cp = "    %g0_page = index.rem %step, %c4 : index\n    %g0_v = index.mul %g0_page, %c2 : index\n    %g0 = index.assume %g0_v [range(%g0_v, 0, 6)] : index\n"
+    cp += "    %g1_v = index.add %g0, %c1 : index\n    %g1 = index.assume %g1_v [range(%g1_v, 1, 7)] : index\n"
+    cp += "    %s0, %m0 = func.call @g_k_metadata(%cr_hdr, %g0) : (vector<4xi32>, index) -> (f32, f32)\n"
+    cp += "    %s1, %m1 = func.call @g_k_metadata(%cr_hdr, %g1) : (vector<4xi32>, index) -> (f32, f32)\n"
+    cp += "    %c4_i32 = scalar.constant 4 : i32\n    %sh4 = vector.splat %c4_i32 : vector<4xi32>\n"
+    cp += "    %pk_lo = vector.andi %cr_pk, %nibble_mask : vector<4xi32>\n    %pk_hs = vector.shrui %cr_pk, %sh4 : vector<4xi32>\n    %pk_hi = vector.andi %pk_hs, %nibble_mask : vector<4xi32>\n"
+    for nm, g in (("lo", 0), ("hi", 1)):
+        cp += f"""    %{nm}_bytes = vector.bitcast %pk_{nm} : vector<4xi32> to vector<16xi8>
+    %{nm}_codes = vector.uitofp %{nm}_bytes : vector<16xi8> to vector<16xf16>
+    %{nm}_scale_h = scalar.fptrunc %s{g} : f32 to f16
+    %{nm}_neg_min = scalar.negf %m{g} : f32
+    %{nm}_neg_min_h = scalar.fptrunc %{nm}_neg_min : f32 to f16
+    %{nm}_scales = vector.splat %{nm}_scale_h : vector<16xf16>
+    %{nm}_minima = vector.splat %{nm}_neg_min_h : vector<16xf16>
+    %dq_{nm} = vector.fmaf %{nm}_codes, %{nm}_scales, %{nm}_minima : vector<16xf16>
+    vector.store %dq_{nm}, %w_stage_view[%stage_row, %pk_{nm}_col] : vector<16xf16>, view<128x72xf16>
+"""
+    t = t[:a] + cp + t[b:]
+    # next-stage raw loads
+    a = t.index("    %wcolan = ")
+    b = t.index("    %x_more = ")
+    nx = "    %qn_s1 = index.add %step, %c1 : index\n    %qn_last = index.sub %k_steps, %c1 : index\n    %qn_step = index.min %qn_s1, %qn_last : index\n" + loads("%qn", "%qn_step")
+    t = t[:a] + nx + t[b:]
+    return t
