@@ -212,6 +212,14 @@ def main():
                 print(f"     diag: prev_total {prev_total} cached {rec['cached']} exact={prompt.startswith(prev_text)} retokenized prev {len(pids2)} ids, "
                       f"common with this prompt {c2}; prev output tail {prev_text[-80:]!r}; this prompt there {prompt[max(0, len(prev_text) - 80):len(prev_text) + 60]!r}; "
                       f"prev ids tail {pids2[-6:]} this {ids[max(0, len(pids2) - 6):len(pids2) + 3]}", flush=True)
+                import urllib.request as _ur
+                for ep in ("/logz", "/v1/observe"):
+                    try:
+                        print(f"     diag {ep}: {_ur.urlopen(a.url + ep, timeout=10).read()[-3000:].decode('utf-8', 'replace')!r}", flush=True)
+                    except Exception as e:
+                        print(f"     diag {ep}: {e}", flush=True)
+                r2 = post(a.url, dict(model=P.model_id, messages=msgs, tools=TOOLS, max_tokens=1, temperature=0, **extra))
+                print(f"     diag: the same request again: cached {r2.get('usage', {}).get('prompt_tokens_details', {}).get('cached_tokens')} of {r2.get('usage', {}).get('prompt_tokens')}", flush=True)
             calls_ok = True
             for c in m.get("tool_calls") or []:
                 try:

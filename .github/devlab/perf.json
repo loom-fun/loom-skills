@@ -5,48 +5,6 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "bartowski-minicpm-v-4-7-35b-a3b-loom",
-   "card": "loom-fun-staging/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "variants": [
-    {
-     "name": "c16k",
-     "context": 16384,
-     "execution": {
-      "context_capacity": 16384,
-      "pool_capacity": 16384,
-      "prefill_capacity": 2048
-     }
-    },
-    {
-     "name": "c64k",
-     "context": 65536,
-     "execution": {
-      "context_capacity": 65536,
-      "pool_capacity": 65536,
-      "prefill_capacity": 2048
-     }
-    },
-    {
-     "name": "c128k",
-     "context": 131072,
-     "execution": {
-      "context_capacity": 131072,
-      "pool_capacity": 131072,
-      "prefill_capacity": 2048
-     }
-    }
-   ],
-   "steps": [
-    "func:c16k",
-    "func:c64k",
-    "func:c128k"
-   ]
-  },
-  {
    "name": "lmstudio-community-ornith-1-0-35b-loom",
    "card": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom",
    "kit": null,
@@ -62,30 +20,9 @@
       "pool_capacity": 16384,
       "prefill_capacity": 2048
      }
-    },
-    {
-     "name": "c64k",
-     "context": 65536,
-     "execution": {
-      "context_capacity": 65536,
-      "pool_capacity": 65536,
-      "prefill_capacity": 2048
-     }
-    },
-    {
-     "name": "c128k",
-     "context": 131072,
-     "execution": {
-      "context_capacity": 131072,
-      "pool_capacity": 131072,
-      "prefill_capacity": 2048
-     }
     }
    ],
    "steps": [
-    "func:c16k",
-    "func:c64k",
-    "func:c128k",
     "gates:c16k:dev"
    ]
   }
