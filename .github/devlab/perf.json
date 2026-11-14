@@ -1,23 +1,33 @@
 {
- "_comment": "Nemotron-Bolt full R9700 job (staging package re-uploaded with its extra weights files) + served-context probes for the three reduced/over-promised models (12B, 26B, 31B): perf --long per candidate context at memory_bytes 34e9",
+ "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "nvidia-nvidia-nemotron-3-5-bolt-e4b-4gb-",
-   "card": "loom-fun-staging/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "llama_kv_rocm": 49152,
+   "name": "unsloth-gemma-4-12b-it-loom",
+   "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
    "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 34000000000,
+   "served_context": 51200,
    "variants": [
     {
-     "name": "card"
+     "name": "card",
+     "context": 51200,
+     "execution": {
+      "context_capacity": 51200,
+      "pool_capacity": 51200
+     }
     },
     {
      "name": "nodraft",
+     "context": 51200,
      "execution": {
+      "context_capacity": 51200,
+      "pool_capacity": 51200,
       "draft_depth": 0
      }
     }
@@ -38,133 +48,93 @@
    ]
   },
   {
-   "name": "probe-unsloth-gemma-4-12b-it-loom",
-   "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
-   "kit": "gemma4",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "variants": [
-    {
-     "name": "c24k",
-     "context": 24576,
-     "execution": {
-      "context_capacity": 24576,
-      "pool_capacity": 24576
-     }
-    },
-    {
-     "name": "c36k",
-     "context": 36864,
-     "execution": {
-      "context_capacity": 36864,
-      "pool_capacity": 36864
-     }
-    },
-    {
-     "name": "c47k",
-     "context": 48128,
-     "execution": {
-      "context_capacity": 48128,
-      "pool_capacity": 48128
-     }
-    },
-    {
-     "name": "c64k",
-     "context": 65536,
-     "execution": {
-      "context_capacity": 65536,
-      "pool_capacity": 65536
-     }
-    }
-   ],
-   "steps": [
-    "perf:c24k:1:long",
-    "perf:c36k:1:long",
-    "perf:c47k:1:long",
-    "perf:c64k:1:long"
-   ]
-  },
-  {
-   "name": "probe-munity-gemma-4-26b-a4b-it-loom",
+   "llama_kv_rocm": 36864,
+   "name": "lmstudio-community-gemma-4-26b-a4b-it-lo",
    "card": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom",
    "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 34000000000,
+   "served_context": 31744,
    "variants": [
     {
-     "name": "c16k",
-     "context": 16384,
+     "name": "card",
+     "context": 31744,
      "execution": {
-      "context_capacity": 16384,
-      "pool_capacity": 16384
+      "context_capacity": 31744,
+      "pool_capacity": 31744
      }
     },
     {
-     "name": "c26k",
-     "context": 26624,
+     "name": "nodraft",
+     "context": 31744,
      "execution": {
-      "context_capacity": 26624,
-      "pool_capacity": 26624
-     }
-    },
-    {
-     "name": "c40k",
-     "context": 40960,
-     "execution": {
-      "context_capacity": 40960,
-      "pool_capacity": 40960
+      "context_capacity": 31744,
+      "pool_capacity": 31744,
+      "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "perf:c16k:1:long",
-    "perf:c26k:1:long",
-    "perf:c40k:1:long"
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   },
   {
-   "name": "probe-unsloth-gemma-4-31b-it-loom",
+   "llama_kv_rocm": 36864,
+   "name": "unsloth-gemma-4-31b-it-loom",
    "card": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
    "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 34000000000,
+   "served_context": 8192,
    "variants": [
     {
-     "name": "c7k",
-     "context": 7168,
+     "name": "card",
+     "context": 8192,
      "execution": {
-      "context_capacity": 7168,
-      "pool_capacity": 7168
+      "context_capacity": 8192,
+      "pool_capacity": 8192
      }
     },
     {
-     "name": "c14k",
-     "context": 14336,
+     "name": "nodraft",
+     "context": 8192,
      "execution": {
-      "context_capacity": 14336,
-      "pool_capacity": 14336
-     }
-    },
-    {
-     "name": "c24k",
-     "context": 24576,
-     "execution": {
-      "context_capacity": 24576,
-      "pool_capacity": 24576
+      "context_capacity": 8192,
+      "pool_capacity": 8192,
+      "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "perf:c7k:1:long",
-    "perf:c14k:1:long",
-    "perf:c24k:1:long"
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   }
  ],
- "card": "loom-fun-staging/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+ "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
