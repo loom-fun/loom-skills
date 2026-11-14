@@ -19,6 +19,7 @@ def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
+@unittest.skipIf(sys.platform == "win32", "campaign scripts are POSIX (bash, fcntl): campaigns run on the Linux dev host")
 class Scaffold(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
