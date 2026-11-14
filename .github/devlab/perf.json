@@ -6,7 +6,7 @@
  "jobs": [
   {
    "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
@@ -17,30 +17,233 @@
      "build": {}
     },
     {
-     "name": "nodraft",
+     "name": "nd",
      "build": {},
      "execution": {
       "draft_depth": 0
      }
+    },
+    {
+     "name": "dgemm",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_gemm_"
+     ]
+    },
+    {
+     "name": "dattn",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_attention_flash2"
+     ]
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "perf:card:2",
+    "perf:card:2:long",
+    "perf:nd:2",
+    "perf:nd:2:long",
+    "perf:dgemm:2",
+    "perf:dgemm:2:long",
+    "perf:dattn:2",
+    "perf:dattn:2:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:2:long"
+   ]
+  },
+  {
+   "name": "unsloth-qwen3-8b-loom",
+   "card": "loom-fun-staging/unsloth-Qwen3-8B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 29000000000,
+   "variants": [
+    {
+     "name": "card",
+     "build": {}
+    },
+    {
+     "name": "nd",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "dgemm",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_gemm_"
+     ]
+    },
+    {
+     "name": "dattn",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_attention_flash2"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "perf:nd:2",
+    "perf:nd:2:long",
+    "perf:dgemm:2",
+    "perf:dgemm:2:long",
+    "perf:dattn:2",
+    "perf:dattn:2:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:2:long"
+   ]
+  },
+  {
+   "name": "bartowski-qwen2-5-32b-instruct-loom",
+   "card": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "variants": [
+    {
+     "name": "card",
+     "build": {}
+    },
+    {
+     "name": "nd",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "dgemm",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_gemm_"
+     ]
+    },
+    {
+     "name": "dattn",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_attention_flash2"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "perf:nd:2",
+    "perf:nd:2:long",
+    "perf:dgemm:2",
+    "perf:dgemm:2:long",
+    "perf:dattn:2",
+    "perf:dattn:2:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:2:long"
+   ]
+  },
+  {
+   "name": "unsloth-qwen3-30b-a3b-instruct-2507-loom",
+   "card": "loom-fun-staging/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 136192,
+   "variants": [
+    {
+     "name": "card",
+     "build": {},
+     "context": 136192
+    },
+    {
+     "name": "nd",
+     "build": {},
+     "context": 136192,
+     "execution": {
+      "context_capacity": 136192,
+      "pool_capacity": 136192,
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "dgemm",
+     "build": {},
+     "context": 136192,
+     "execution": {
+      "context_capacity": 136192,
+      "pool_capacity": 136192,
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_gemm_"
+     ]
+    },
+    {
+     "name": "dattn",
+     "build": {},
+     "context": 136192,
+     "execution": {
+      "context_capacity": 136192,
+      "pool_capacity": 136192,
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_attention_flash2"
+     ]
+    },
+    {
+     "name": "dmoe",
+     "build": {},
+     "context": 136192,
+     "execution": {
+      "context_capacity": 136192,
+      "pool_capacity": 136192,
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_moe_(ggu|gdn)_"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:card:2",
+    "perf:card:2:long",
+    "perf:nd:2",
+    "perf:nd:2:long",
+    "perf:dgemm:2",
+    "perf:dgemm:2:long",
+    "perf:dattn:2",
+    "perf:dattn:2:long",
+    "perf:dmoe:2",
+    "perf:dmoe:2:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:2:long"
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
