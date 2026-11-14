@@ -115,27 +115,33 @@
  },
  {
   "slug": "bartowski-Qwen2.5-0.5B-Instruct-loom",
-  "w": 529304992,
+  "w": 916376992,
   "kv": 402653184,
   "kv32": 402653184,
   "kvpp": 12288,
   "ctx": 32768,
   "mem": 5000000000,
-  "need": 2931958176.0,
+  "need": 3319030176.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 0
+  "n_exp": 0,
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
  },
  {
   "slug": "bartowski-Qwen2.5-1.5B-Instruct-loom",
-  "w": 1213492832,
+  "w": 1888398944,
   "kv": 939524096,
   "kv32": 939524096,
   "kvpp": 28672,
   "ctx": 32768,
   "mem": 8000000000,
-  "need": 4153016928.0,
+  "need": 4827923040.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 0
+  "n_exp": 0,
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
  },
  {
   "slug": "bartowski-Qwen2.5-32B-Instruct-loom",
@@ -264,15 +270,18 @@
  },
  {
   "slug": "ggml-org-Qwen3-1.7B-loom",
-  "w": 1542907328,
+  "w": 2316903872,
   "kv": 4697620480,
   "kv32": 3758096384,
   "kvpp": 114688,
   "ctx": 40960,
   "mem": 17000000000,
-  "need": 8240527808.0,
+  "need": 9014524352.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 0
+  "n_exp": 0,
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
  },
  {
   "slug": "ggml-org-Qwen3-14B-loom",
