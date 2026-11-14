@@ -5,42 +5,54 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "prof06",
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
+     "name": "base",
      "build": {}
     },
     {
-     "name": "nodraft",
+     "name": "dflash",
+     "build": {},
+     "double": [
+      "*:g_attention_flash2>"
+     ]
+    },
+    {
+     "name": "dgemm",
+     "build": {},
+     "double": [
+      "*:g_gemm_"
+     ]
+    },
+    {
+     "name": "chunk2k",
      "build": {},
      "execution": {
-      "draft_depth": 0
+      "prefill_capacity": 2048
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "perf:base:2",
+    "perf:base:3:long",
+    "perf:dflash:2",
+    "perf:dflash:3:long",
+    "perf:dgemm:2",
+    "perf:dgemm:3:long",
+    "perf:chunk2k:2",
+    "perf:chunk2k:3:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:3:long"
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
