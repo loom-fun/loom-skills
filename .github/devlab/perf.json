@@ -73,7 +73,7 @@
   {
    "name": "ggml-org-flint-loom",
    "card": "loom-fun-staging/ggml-org-Flint-loom",
-   "kit": null,
+   "kit": "flint",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 34000000000,
@@ -106,7 +106,7 @@
   {
    "name": "ggml-org-lfm2-5-24b-a2b-loom",
    "card": "loom-fun-staging/ggml-org-LFM2.5-24B-A2B-loom",
-   "kit": null,
+   "kit": "lfm2moe",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 24000000000,
@@ -176,34 +176,6 @@
     "llama@vulkan.np1:3",
     "llama@vulkan.np1:3:long",
     "llamac4@vulkan.perslot.nodraft"
-   ]
-  },
-  {
-   "name": "strix-ab-lfm25",
-   "runner": "strix",
-   "card": "loom-fun-staging/ggml-org-LFM2.5-24B-A2B-loom",
-   "memory_bytes": 24000000000,
-   "kit": null,
-   "llamacpp": "b1374",
-   "variants": [
-    {
-     "name": "fun",
-     "card": "loom-fun/ggml-org-LFM2.5-24B-A2B-loom"
-    },
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "ab:4",
-    "perf:fun:3",
-    "perf:staging:3",
-    "c4:fun",
-    "c4:staging",
-    "textmatch:fun",
-    "textmatch:staging",
-    "func:staging",
-    "ktest:staging"
    ]
   }
  ],
