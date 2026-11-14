@@ -1,37 +1,35 @@
 {
- "_comment": "Probe 3 (diagnostic): prefill_capacity 2048 + the largest context the 34 GB pool should hold; Loom steps only (baselines from run 43540739799). Never merge.",
+ "_comment": "Probe 4 (diagnostic): Ornith-1.0 agent-gate prefix-cache miss vs pool>context; Qwen3.6 at 128k. Never merge.",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "llama_kv_rocm": 36864,
-   "name": "q35-p2048-c96k",
-   "card": "loom-fun-staging/unsloth-Qwen3.5-35B-A3B-loom",
+   "name": "o10-p2048-c128k-pool192k",
+   "card": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 34000000000,
-   "served_context": 98304,
    "variants": [
     {
      "name": "card",
-     "context": 98304,
+     "context": 131072,
      "execution": {
-      "context_capacity": 98304,
-      "pool_capacity": 98304,
+      "context_capacity": 131072,
+      "pool_capacity": 196608,
       "prefill_capacity": 2048
      }
     },
     {
      "name": "nodraft",
-     "context": 98304,
      "execution": {
-      "context_capacity": 98304,
-      "pool_capacity": 98304,
       "draft_depth": 0,
+      "context_capacity": 131072,
+      "pool_capacity": 196608,
       "prefill_capacity": 2048
-     }
+     },
+     "context": 131072
     }
    ],
    "steps": [
@@ -40,7 +38,82 @@
     "perf:card:3",
     "perf:card:3:long",
     "c4:nodraft"
-   ]
+   ],
+   "served_context": 131072
+  },
+  {
+   "name": "o10-p2048-c256k-pool320k",
+   "card": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "variants": [
+    {
+     "name": "card",
+     "context": 262144,
+     "execution": {
+      "context_capacity": 262144,
+      "pool_capacity": 327680,
+      "prefill_capacity": 2048
+     }
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0,
+      "context_capacity": 262144,
+      "pool_capacity": 327680,
+      "prefill_capacity": 2048
+     },
+     "context": 262144
+    }
+   ],
+   "steps": [
+    "func:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft"
+   ],
+   "served_context": 262144
+  },
+  {
+   "name": "o10-p4096-c128k-pool192k",
+   "card": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "variants": [
+    {
+     "name": "card",
+     "context": 131072,
+     "execution": {
+      "context_capacity": 131072,
+      "pool_capacity": 196608,
+      "prefill_capacity": 4096
+     }
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0,
+      "context_capacity": 131072,
+      "pool_capacity": 196608,
+      "prefill_capacity": 4096
+     },
+     "context": 131072
+    }
+   ],
+   "steps": [
+    "func:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft"
+   ],
+   "served_context": 131072
   },
   {
    "llama_kv_rocm": 36864,
@@ -65,9 +138,9 @@
      "name": "nodraft",
      "context": 131072,
      "execution": {
+      "draft_depth": 0,
       "context_capacity": 131072,
       "pool_capacity": 131072,
-      "draft_depth": 0,
       "prefill_capacity": 2048
      }
     }
@@ -79,193 +152,6 @@
     "perf:card:3:long",
     "c4:nodraft"
    ]
-  },
-  {
-   "llama_kv_rocm": 36864,
-   "name": "o15-p2048-c96k",
-   "card": "loom-fun-staging/bartowski-Ornith-1.5-35B-A3B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 98304,
-   "variants": [
-    {
-     "name": "card",
-     "context": 98304,
-     "execution": {
-      "context_capacity": 98304,
-      "pool_capacity": 98304,
-      "prefill_capacity": 2048
-     }
-    },
-    {
-     "name": "nodraft",
-     "context": 98304,
-     "execution": {
-      "context_capacity": 98304,
-      "pool_capacity": 98304,
-      "draft_depth": 0,
-      "prefill_capacity": 2048
-     }
-    }
-   ],
-   "steps": [
-    "func:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft"
-   ]
-  },
-  {
-   "llama_kv_rocm": 36864,
-   "name": "sage-p2048-c192k",
-   "card": "loom-fun-staging/InternScience-Sage-A1.5-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 196608,
-   "variants": [
-    {
-     "name": "card",
-     "context": 196608,
-     "execution": {
-      "context_capacity": 196608,
-      "pool_capacity": 196608,
-      "prefill_capacity": 2048
-     }
-    },
-    {
-     "name": "nodraft",
-     "context": 196608,
-     "execution": {
-      "context_capacity": 196608,
-      "pool_capacity": 196608,
-      "draft_depth": 0,
-      "prefill_capacity": 2048
-     }
-    }
-   ],
-   "steps": [
-    "func:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft"
-   ]
-  },
-  {
-   "name": "coder-p2048-c96k",
-   "card": "loom-fun-staging/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 98304,
-   "variants": [
-    {
-     "name": "card",
-     "context": 98304,
-     "execution": {
-      "context_capacity": 98304,
-      "pool_capacity": 98304,
-      "prefill_capacity": 2048
-     }
-    },
-    {
-     "name": "nodraft",
-     "context": 98304,
-     "execution": {
-      "context_capacity": 98304,
-      "pool_capacity": 98304,
-      "draft_depth": 0,
-      "prefill_capacity": 2048
-     }
-    }
-   ],
-   "steps": [
-    "func:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft"
-   ]
-  },
-  {
-   "name": "coder-p2048-c64k",
-   "card": "loom-fun-staging/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 65536,
-   "variants": [
-    {
-     "name": "card",
-     "context": 65536,
-     "execution": {
-      "context_capacity": 65536,
-      "pool_capacity": 65536,
-      "prefill_capacity": 2048
-     }
-    },
-    {
-     "name": "nodraft",
-     "context": 65536,
-     "execution": {
-      "context_capacity": 65536,
-      "pool_capacity": 65536,
-      "draft_depth": 0,
-      "prefill_capacity": 2048
-     }
-    }
-   ],
-   "steps": [
-    "func:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft"
-   ]
-  },
-  {
-   "name": "o10-p2048-c256k",
-   "card": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "variants": [
-    {
-     "name": "card",
-     "context": 262144,
-     "execution": {
-      "context_capacity": 262144,
-      "pool_capacity": 262144,
-      "prefill_capacity": 2048
-     }
-    },
-    {
-     "name": "nodraft",
-     "execution": {
-      "draft_depth": 0,
-      "context_capacity": 262144,
-      "pool_capacity": 262144,
-      "prefill_capacity": 2048
-     },
-     "context": 262144
-    }
-   ],
-   "steps": [
-    "func:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft"
-   ],
-   "served_context": 262144
   }
  ],
  "card": "loom-fun-staging/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
