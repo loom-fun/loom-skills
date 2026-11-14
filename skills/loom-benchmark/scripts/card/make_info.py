@@ -741,8 +741,11 @@ def cmd_remeasure(a):
     a.gpu = a.gpu or DEFAULT_GPU
     if not a.package:
         sys.exit("remeasure: --package (the package re-measured) is required")
-    if x["verdict"] != "pass" or x.get("out_of_band") or x.get("gate_failures"):
+    if x["verdict"] != "pass" or x.get("gate_failures"):
         sys.exit(f"{a.cmp}: verdict {x['verdict']} (out of band {x.get('out_of_band')}, gate failures {x.get('gate_failures')}): not within the band")
+    # a confirming re-run (strix_ab_compare.py --prev) may pass with a metric outside the band in the opposite direction to the
+    # first run: the card names it
+    exc = {k: m["ratio"] for k, m in x["metrics"].items() if m["status"] != "PASS"}
     here = programs_sha256(a.package)
     if a.fetched_programs and a.fetched_programs != here:
         sys.exit(f"the run fetched programs {a.fetched_programs[:12]}, the package has {here[:12]}: re-run")
@@ -762,7 +765,7 @@ def cmd_remeasure(a):
     ev = {"evidence": EVIDENCE_ID, "gpu": a.gpu, "remeasure": {
         "date": date, "source": src, "band": x["band"], "programs_sha256": here, "compared_programs": old, "result": "within",
         "worst_metric": x.get("worst_metric"), "worst_ratio": x.get("worst_ratio"),
-        "ratios": {k: m["ratio"] for k, m in x["metrics"].items()}}}
+        "ratios": {k: m["ratio"] for k, m in x["metrics"].items()}, **({"exceptions": exc} if exc else {})}}
     write_json(a.o, ev)
     print(f"wrote {a.o}: {a.gpu} within +-{x['band']:.0%} (worst {x.get('worst_metric')} {x.get('worst_ratio')}); programs {here[:12]} ~ {old[:12]}", file=sys.stderr)
 

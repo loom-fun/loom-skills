@@ -435,8 +435,10 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
                  f"source: {src_text(s)}.")
     rm = view.get("remeasure")
     if rm and rm["programs_sha256"] == here:   # a same-runner A/B of this package against the build the table measured
+        exc = "".join(f", {k} {(r - 1) * 100:+.1f} %" for k, r in (rm.get("exceptions") or {}).items() if r)
         L.append(f"- {GPUS[g]['short']} re-measured on this package on {text(rm['date'])}: within +-{round(rm['band'] * 100)} % of "
-                 f"these values ({src_text(sources[rm['source']])}).")
+                 f"these values" + (f" except{exc[1:]} (not repeated in the same direction by the first run)" if exc else "")
+                 + f" ({src_text(sources[rm['source']])}).")
     for b, x in extra.items():
         xb, xs = x["baseline"], x["session"]
         L.append(f"- {xnames[b]}: measured {text(xs['date'])}; source: {src_text(sources[xs['source']])}."
