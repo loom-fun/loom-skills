@@ -7,7 +7,7 @@
   {
    "name": "gptoss-gates",
    "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
-   "kit": null,
+   "kit": "gpt-oss",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 34000000000,
