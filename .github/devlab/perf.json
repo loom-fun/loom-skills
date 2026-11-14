@@ -5,20 +5,53 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "bartowski-minicpm-v-4-7-35b-a3b-loom",
+   "card": "loom-fun-staging/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+   "require_preset_r9700": true,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 34000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "card"
     },
     {
      "name": "nodraft",
-     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "lmstudio-community-ornith-1-0-35b-loom",
+   "card": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom",
+   "require_preset_r9700": true,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "nodraft",
      "execution": {
       "draft_depth": 0
      }
@@ -40,7 +73,7 @@
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
