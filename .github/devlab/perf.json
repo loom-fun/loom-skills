@@ -5,20 +5,170 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "unsloth-qwen3-5-35b-a3b-loom",
+   "card": "loom-fun-staging/unsloth-Qwen3.5-35B-A3B-loom",
+   "require_preset_r9700": true,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 90112,
    "variants": [
     {
      "name": "card",
-     "build": {}
+     "context": 90112
     },
     {
      "name": "nodraft",
-     "build": {},
+     "context": 90112,
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "ggml-org-qwen3-coder-30b-a3b-instruct-lo",
+   "card": "loom-fun-staging/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "require_preset_r9700": true,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 98304,
+   "variants": [
+    {
+     "name": "card",
+     "context": 98304
+    },
+    {
+     "name": "nodraft",
+     "context": 98304,
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "ggml-org-qwen3-6-35b-a3b-loom",
+   "card": "loom-fun-staging/ggml-org-Qwen3.6-35B-A3B-loom",
+   "require_preset_r9700": true,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 117760,
+   "variants": [
+    {
+     "name": "card",
+     "context": 117760
+    },
+    {
+     "name": "nodraft",
+     "context": 117760,
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "internscience-sage-a1-5-loom",
+   "card": "loom-fun-staging/InternScience-Sage-A1.5-loom",
+   "require_preset_r9700": true,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 196608,
+   "variants": [
+    {
+     "name": "card",
+     "context": 196608
+    },
+    {
+     "name": "nodraft",
+     "context": 196608,
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "bartowski-ornith-1-5-35b-a3b-loom",
+   "card": "loom-fun-staging/bartowski-Ornith-1.5-35B-A3B-loom",
+   "require_preset_r9700": true,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 89088,
+   "variants": [
+    {
+     "name": "card",
+     "context": 89088
+    },
+    {
+     "name": "nodraft",
+     "context": 89088,
      "execution": {
       "draft_depth": 0
      }
@@ -40,7 +190,7 @@
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-Qwen3.5-35B-A3B-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
