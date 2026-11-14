@@ -1,23 +1,22 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "Diagnostic: the staging package of Ornith-1.0-35B on a Strix runner: agent gate (does the Tokyo+London reuse miss happen there too?) + agent probe",
+ "runner": "strix",
+ "memory_bytes": 36000000000,
  "llama_spec": "matched",
  "jobs": [
   {
    "name": "lmstudio-community-ornith-1-0-35b-loom",
    "card": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom",
-   "require_preset_r9700": true,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
    "variants": [
     {
      "name": "card"
     }
    ],
    "steps": [
+    "gates:card:dev",
     "agentprobe:card"
    ]
   }
