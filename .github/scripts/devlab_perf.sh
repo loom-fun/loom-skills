@@ -45,6 +45,7 @@
 #            a rebuild also gets --context N --pool N); rows beyond it are refused by the server (HTTP 400) and skipped by perf.py.
 #            config: generator-config overrides for a rebuild (e.g. {"layers": 12}: timing only)
 #            build: build.py with these env vars (and extra flags); ref: build with that commit's starter;
+# Job "require_preset_r9700": true (r9700_jobs.py, a package with a fit-row r9700_execution): serving fails unless the card has its <first>-r9700 preset.
 #            serve_args: extra loom-serve flags; execution: model.json overrides (every preset); double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
 #            {"name": "parked", "active_wait": false}: the card's programs served with the SDK's default completion wait
 #            (LOOM_ACTIVE_WAIT=0 in serve.sh) instead of the active wait every other variant gets.
@@ -136,7 +137,21 @@ fetch_card() {   # fetch_card REPO -> sets CARD_DIR: the card's files at one com
   bs=https://huggingface.co/$r/resolve/$rv; CARD_BASE=$bs
   if [ "$rv" = main ] || [ "$(cat "$CARD_DIR/.fetched" 2>/dev/null)" != "$rv" ]; then
     step "fetch $r"; rm -rf "$CARD_DIR"
-    HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$bs/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$CARD_DIR" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch $r"; exit 1; }
+    # a card with several presets (the R9700's `<first>-r9700`) needs one named: install the first (the default), then add the others' blocks
+    # to the installed model.json (same variant and programs, so they only name other execution settings): both can then be served
+    curl -fsSL --retry 3 "$bs/model.json" -o "$out/model_card.json" || { echo "FAIL: no model.json in $r"; exit 1; }
+    pf=$(python3 -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print('--preset=' + p[0] if len(p) > 1 else '')" "$out/model_card.json")
+    HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$bs/model.json" $pf --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$CARD_DIR" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch $r"; exit 1; }
+    [ -z "$pf" ] || python3 - "$out/model_card.json" "$CARD_DIR/model.json" <<'EOF' || exit 1
+import json, sys
+src, dst = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
+for n, p in src["presets"].items():
+    if n not in dst["presets"]:
+        assert p["variant"] in dst["variants"] and p["programs"] in dst["programs"], f"preset {n} needs another variant or program set"
+        dst["presets"][n] = p
+json.dump(dst, open(sys.argv[2], "w"), indent=1)
+print("presets:", list(dst["presets"]))
+EOF
     curl -fsSL --retry 3 "$bs/llm_config.json" -o "$CARD_DIR/llm_config.json" || exit 1
     rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; echo "$rv" > "$CARD_DIR/.fetched"
   fi
@@ -275,6 +290,8 @@ serve_alone() { # serve_alone VARIANT
   sa=$(qv "$1" "print(' '.join(v.get('serve_args') or []))")   # "serve_args": extra loom-serve flags
   # a package with a `<first preset>-r9700` preset (build.py --prefill-r9700) serves it on the R9700, as the card's R9700 Quick start does
   rp=""; [ "$RUNNER" = r9700 ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] + '-r9700' if p[0] + '-r9700' in p else '')" "$D/$1/pkg/model.json")
+  if [ -z "$rp" ] && [ "$RUNNER" = r9700 ] && [ "$(q "print(j.get('require_preset_r9700') or '')")" = True ]; then
+    echo "FAIL: the card has no <first>-r9700 preset (its fit row has r9700_execution): publish the package with it first"; return 1; fi
   if [ -n "$rp" ] && [[ "$sa" != *--preset=* ]]; then sa="--preset=$rp $sa"; fi
   step "serve $1"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }

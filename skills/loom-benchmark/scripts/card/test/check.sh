@@ -329,7 +329,31 @@ rm -rf "$tmp/r9700_preset"; cp -r "$tmp/r9700_staging" "$tmp/r9700_preset"
 py -c "import json, sys; m = json.load(open(sys.argv[1])); p = m['presets']; f = next(iter(p))
 p[f + '-r9700'] = json.loads(json.dumps(p[f])); p[f + '-r9700']['execution']['prefill_capacity'] = 4096
 json.dump(m, open(sys.argv[1], 'w'), indent=1)" "$tmp/r9700_preset/model.json"
-for n in r9700_two r9700_none r9700_staging r9700_preset; do
+# a package that needs other serving settings on the R9700 (fit row "r9700_execution"): make_info.py build --fit writes the
+# `<first>-r9700` preset into its model.json (default preset, programs and lock untouched), served context included; the card's R9700
+# Quick start fetches it and says what it sets
+mkdir -p "$tmp/r9700_exec"; cp -r "$R/pkg/." "$tmp/r9700_exec/"
+py "$C/make_info.py" build "$tmp/r9700_exec" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging "${R3[@]}" --memory-bytes 17000000000 \
+  --gpus strix-halo,radeon-r9700 --fit "$R/fit_preset.json" --evidence "$tmp/r_gates.json" "$tmp/r_perf_sub.json" "$tmp/r_vk_sub.json" \
+  "$R/evidence/roofline_reduced.json" -o "$tmp/r9700_exec/info.json" 2>/dev/null
+py -c "import json, sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+d = sys.argv[2]; m = c.load_json(d + '/model.json'); old = c.load_json(sys.argv[3] + '/model.json')
+assert c.validate(c.load_json(d + '/info.json')) == []
+assert list(m['presets']) == ['chat', 'chat-r9700'], list(m['presets'])
+assert m['presets']['chat'] == old['presets']['chat'], 'the default preset (Strix Halo) changed'
+assert {k: v for k, v in m.items() if k != 'presets'} == {k: v for k, v in old.items() if k != 'presets'}
+ex = m['presets']['chat-r9700']['execution']
+assert ex['prefill_capacity'] == 2048 and ex['rows'] == 2 and ex['context_capacity'] == ex['pool_capacity'] == 20480, ex
+assert {k: v for k, v in ex.items() if k not in ('prefill_capacity', 'rows', 'context_capacity', 'pool_capacity')} == {k: v for k, v in old['presets']['chat']['execution'].items() if k not in ('prefill_capacity', 'rows', 'context_capacity', 'pool_capacity')}
+assert c.with_gpu_preset(m, ex) == m   # idempotent" "$C" "$tmp/r9700_exec" "$R/pkg" \
+  && echo "OK   r9700 preset: the fit row's r9700_execution adds the chat-r9700 preset (Strix preset and programs untouched), served context included" \
+  || { echo "FAIL r9700 preset: the fit-row preset is wrong"; bad=1; }
+# a row without the block leaves model.json as it is
+mkdir -p "$tmp/r9700_noexec"; cp -r "$R/pkg/." "$tmp/r9700_noexec/"
+py "$C/make_info.py" build "$tmp/r9700_noexec" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging "${R3[@]}" --memory-bytes 17000000000 \
+  --gpus strix-halo,radeon-r9700 --fit "$R/fit_reduced.json" -o "$tmp/r9700_noexec/info.json" 2>/dev/null
+cmp -s "$tmp/r9700_noexec/model.json" "$R/pkg/model.json" && echo "OK   r9700 preset: a fit row without r9700_execution leaves model.json alone" || { echo "FAIL r9700 preset: model.json changed without a block"; bad=1; }
+for n in r9700_two r9700_none r9700_staging r9700_preset r9700_exec; do
   py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 assert c.validate(c.load_json(sys.argv[2])) == [], c.validate(c.load_json(sys.argv[2]))" "$C" "$tmp/$n/info.json" \
     || { echo "FAIL $n: info.json is not valid"; bad=1; }
@@ -378,7 +402,7 @@ print(c.gpu_from_device({'cpu': 'AMD RYZEN AI MAX+ 395 w/ Radeon 8060S', 'gpu': 
       c.gpu_from_device({'cpu': 'AMD EPYC', 'gpu': 'AMD Radeon AI PRO R9700S'}), c.gpu_from_device({'cpu': 'AMD Strix Halo (DevLab Dispatch runner X2)', 'os': 'Linux'}),
       c.gpu_from_device(None), c.served_context(396705472, 1.5e6, 34000000000))" "$C")
 [ "$got" = "strix-halo radeon-r9700 strix-halo None 20480" ] && echo "OK   gpu detection and served context" || { echo "FAIL gpu detection: $got"; bad=1; }
-for n in flint d1 r9700_two r9700_none r9700_staging r9700_preset; do
+for n in flint d1 r9700_two r9700_none r9700_staging r9700_preset r9700_exec; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null
   py "$C/render_card.py" "$tmp/$n" -o "$tmp/${n}_README2.md" 2>/dev/null
