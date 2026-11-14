@@ -6,41 +6,78 @@
  "jobs": [
   {
    "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
+     "name": "base",
      "build": {},
      "execution": {
       "draft_depth": 0
      }
+    },
+    {
+     "name": "pre",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "perf:base:2",
+    "perf:base:1:long",
+    "perf:pre:2",
+    "perf:pre:1:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:1:long"
+   ]
+  },
+  {
+   "name": "unsloth-gemma-4-e2b-it-loom",
+   "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 16000000000,
+   "variants": [
+    {
+     "name": "base",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "pre",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:base:2",
+    "perf:base:1:long",
+    "perf:pre:2",
+    "perf:pre:1:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:1:long"
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
