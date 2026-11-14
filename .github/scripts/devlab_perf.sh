@@ -270,7 +270,8 @@ serve_alone() { # serve_alone VARIANT
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
   local aw; aw=$(qv "$1" "print(0 if v.get('active_wait') is False else 1)")
-  step "serve $1"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
+  local sa=(); read -r -a sa <<< "$(qv "$1" "print(' '.join(v.get('serve_args') or []))")"   # variant "serve_args": extra loom-serve flags (diagnostics, tuning)
+  step "serve $1 ${sa[*]:-}"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" ${sa[@]:+-- "${sa[@]}"} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null
 }
@@ -355,6 +356,7 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] fo
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "stall probe $p1"
       "$T" "$here/.github/scripts/stall_probe.py" "$url" "$cardid" "$out/probe_$p1.jsonl" > "$out/probe_$p1.log" 2>&1; tail -3 "$out/probe_$p1.log" | cut -c1-200
+      cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/servelog_$p1.log" 2>/dev/null   # heartbeat telemetry (--heartbeat_ms=N in serve_args)
       res[$s]="$(wc -l < "$out/probe_$p1.jsonl") requests";;
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
