@@ -98,6 +98,7 @@ kit=$(q "print((j['kit'] if 'kit' in j else e.get('kit')) or '-')"); tag=$(q "pr
 steps=$(q "print(' '.join(j['steps']))")
 vtag=$(q "print(j.get('llamacpp_vulkan') or e.get('llamacpp_vulkan') or '-')")
 vkv=$(q "print(j.get('vulkan_kv') or e.get('vulkan_kv') or 'auto')")
+lkv=$(q "print(j.get('llama_kv_rocm') or '')")   # ROCm llama.cpp KV pool tokens when 65536 does not fit the GPU (r9700_jobs.py sets it)
 RUNNER=$(q "print(j.get('runner') or e.get('runner') or 'strix')")
 if [ "$RUNNER" = r9700 ]; then
   rm9=$(q "print(j.get('memory_bytes_r9700') or e.get('memory_bytes_r9700') or '')")
@@ -309,6 +310,7 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   step "llama.cpp $BK ${dir##*/}: $LLAMA_SPEC"
   local np=4 kv=(65536 unified)   # one KV pool shared by 4 slots (-kvu)
   [[ $MODS == *np1* ]] && { np=1; kv=(65536); }   # .np1: one slot, the single-stream rows (the same slot policy as Loom's)
+  [ "$BK" = rocm ] && [ -n "$lkv" ] && kv[0]=$lkv   # a model whose 65536-token KV pool does not fit beside its weights (32 GB R9700)
   if [ "$BK" = vulkan ]; then   # modifiers: .np1 (one slot of 36864 tokens), .perslot (4 slots of 36864); else vulkan_kv
     if [[ $MODS == *np1* ]]; then np=1; kv=(36864)
     elif [[ $MODS == *perslot* ]]; then kv=(36864)
