@@ -28,6 +28,7 @@ ALL_SHAPES = [  # (fmt, mode, rows, K, N): the prefill GEMMs of Gemma-4-E2B (k15
 ]
 
 NATIVE = {"dq2": R.q4k_m256_native, "sb": R.q4k_m256_sb, "sbnb": lambda t: R.q4k_m256_sb(t, nb=True),
+          "sbst": lambda t: R.q4k_m256_sb(t) if "_store_" in t[:200] else t, "sbsw": lambda t: R.q4k_m256_sb(t) if "_swiglu_" in t[:200] else t,
           "sbsc": lambda t: R.q4k_m256_sb(t, sc=True), "sbnbsc": lambda t: R.q4k_m256_sb(t, nb=True, sc=True)}   # variants that swap the m256 q4_k twin for a native gfx12 kernel (no ablation transform)
 
 def kernel_text(text, name):
@@ -62,6 +63,50 @@ def transform(tw, variant):
     elif variant == "nobar":
         tw = _re.sub(r"^\s*kernel\.barrier<workgroup>[^\n]*\n", "", tw, flags=_re.M)
     return tw
+
+COLD = [("q4_k", "store", 1024, 12288, 4096, 4), ("q4_k", "swiglu", 1024, 4096, 12288, 3)]   # weights far beyond the 64 MB MALL: launches cycle over distinct weight tensors
+
+def write_q4k_npy(path, nblocks, seed):
+    """A realistic Q4_K tensor (valid f16 d/dmin, random 6-bit scales/mins and nibbles) as an int8 .npy file."""
+    import struct
+    rnd = bytearray(os.urandom(nblocks * 144))
+    for i, b in enumerate(struct.pack("<2e", 0.012 + 0.001 * seed, 0.004)):
+        rnd[i::144] = bytes([b]) * nblocks
+    hdr = "{'descr': '|i1', 'fortran_order': False, 'shape': (%d,), }" % len(rnd)
+    hdr += " " * (63 - (len(hdr) + 10) % 64) + "\n"
+    while (10 + len(hdr)) % 64: hdr = hdr[:-1] + " \n"
+    with open(path, "wb") as fh:
+        fh.write(b"\x93NUMPY\x01\x00" + struct.pack("<H", len(hdr)) + hdr.encode()); fh.write(rnd)
+
+def cold_cases(outdir):
+    out = []
+    for fmt, mode, rows, K, N, reps in COLD:
+        kn = f"k_{fmt}_{mode}_m256_{rows}x{K}x{N}"
+        nw = 2 if mode == "swiglu" else 1
+        wb = N * K // 256 * 144
+        decl, args, tys = "", [], []
+        for r in range(reps):
+            for w in range(nw):
+                p = f"cold_{mode}_{r}_{w}.npy"
+                if outdir: write_q4k_npy(os.path.join(outdir, p), wb // 144, r * 2 + w)
+                decl += f'  %w{r}_{w} = check.file.read.npy path("{p}") : tensor<{wb}xi8>\n'
+        launches = ""
+        for r in range(reps):
+            ws = ", ".join(f"%w{r}_{w}" for w in range(nw)); wt = ", ".join([f"tensor<{wb}xi8>"] * nw)
+            launches += f"  kernel.launch @{kn}[%rows, %n](%rows, %k, %n, %x, %s, {ws}, %y) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {wt}, tensor<{rows}x{N}xf32>)\n"
+        out.append(f"""check.case public @k_cold_{mode}_case {{
+  %seed = check.literal value(12345) : i64
+  %rows = check.literal value({rows}) : index
+  %k = check.literal value({K}) : index
+  %n = check.literal value({N}) : index
+  %x = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<{rows}x{K}xf16>
+  %s = check.generate.fill value(1.0) : tensor<{rows}x2xf32>
+{decl}  %y = check.generate.fill value(0.0) : tensor<{rows}x{N}xf32>
+{launches}  check.return
+}}
+check.benchmark<@k_cold_{mode}_case> @k_cold_{mode}_{reps}x_bm
+""")
+    return out
 
 def build(variant=""):
     out = []
@@ -100,6 +145,8 @@ def build(variant=""):
 }}
 check.benchmark<@{kn}_case> @{kn}_bm
 """)
+    if variant in ("", "sb") or variant in NATIVE:
+        out += cold_cases(os.environ.get("KB_OUTDIR"))
     return out
 
 
@@ -184,6 +231,7 @@ HEAD = "amdgpu.target<gfx12-generic> @rdna4 {subgroup_size = 32}\n\n" + open(os.
 if __name__ == "__main__" and len(sys.argv) > 2:
     d = sys.argv[2]
     os.makedirs(d, exist_ok=True)
+    os.environ["KB_OUTDIR"] = d
     for v in (sys.argv[3:] or ["base"]):
         v = "" if v == "base" else v
         open(os.path.join(d, "bench%s.loom" % ("_" + v if v else "")), "w").write(HEAD + "\n".join(build(v)) + ("\n" + PEAK + "".join("\n" + mix(n) for n in (0, 8, 16, 32, 64)) if not v else ""))

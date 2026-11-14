@@ -23,18 +23,14 @@
       "gen_variants": [
         "base",
         "sb",
-        "sb_nox",
-        "sb_xhalf",
-        "sb_nowst",
-        "sb_nodq"
+        "sbst",
+        "sbsw"
       ],
       "files": [
         "bench.loom",
         "bench_sb.loom",
-        "bench_sb_nox.loom",
-        "bench_sb_xhalf.loom",
-        "bench_sb_nowst.loom",
-        "bench_sb_nodq.loom"
+        "bench_sbst.loom",
+        "bench_sbsw.loom"
       ],
       "config": [],
       "args": [
