@@ -13,19 +13,6 @@
    "memory_bytes_r9700": 16000000000,
    "variants": [
     {
-     "name": "sb",
-     "build": {
-      "LOOM_RDNA4_Q4K": "sb"
-     },
-     "execution": {
-      "draft_depth": 0
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ]
-    },
-    {
      "name": "pre",
      "build": {},
      "execution": {
@@ -37,9 +24,9 @@
      ]
     },
     {
-     "name": "sbst",
+     "name": "dq2sw",
      "build": {
-      "LOOM_RDNA4_Q4K": "sbst"
+      "LOOM_RDNA4_Q4K": "dq2:swiglu"
      },
      "execution": {
       "draft_depth": 0
@@ -52,7 +39,7 @@
     {
      "name": "sbsw",
      "build": {
-      "LOOM_RDNA4_Q4K": "sbsw"
+      "LOOM_RDNA4_Q4K": "sb:swiglu"
      },
      "execution": {
       "draft_depth": 0
@@ -63,9 +50,9 @@
      ]
     },
     {
-     "name": "sb2",
+     "name": "sbst",
      "build": {
-      "LOOM_RDNA4_Q4K": "sb"
+      "LOOM_RDNA4_Q4K": "sb:store"
      },
      "execution": {
       "draft_depth": 0
@@ -76,8 +63,10 @@
      ]
     },
     {
-     "name": "pre2",
-     "build": {},
+     "name": "dq2st",
+     "build": {
+      "LOOM_RDNA4_Q4K": "dq2:store"
+     },
      "execution": {
       "draft_depth": 0
      },
@@ -88,13 +77,11 @@
     }
    ],
    "steps": [
-    "perf:sb:2",
     "perf:pre:2",
-    "perf:sbst:2",
+    "perf:dq2sw:2",
     "perf:sbsw:2",
-    "perf:sb2:2",
-    "perf:pre2:2",
-    "llama@rocm.np1:2"
+    "perf:sbst:2",
+    "perf:dq2st:2"
    ]
   }
  ],

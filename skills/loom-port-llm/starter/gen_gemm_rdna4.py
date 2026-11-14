@@ -16,8 +16,17 @@ def enabled():
 
 
 def q4k_variant():
-    """LOOM_RDNA4_Q4K: the q4_k m256 twin's dequant staging: mech (the mechanical twin), dq2 or sb (q4k_m256_native / q4k_m256_sb)."""
+    """LOOM_RDNA4_Q4K: the q4_k m256 twin's dequant staging: mech (the mechanical twin), dq2 or sb (q4k_m256_native / q4k_m256_sb), optionally
+    restricted to one mode: "sb:store", "sb:swiglu"."""
     return os.environ.get("LOOM_RDNA4_Q4K", "mech")
+
+
+def q4k_apply(t, mode):
+    """The q4_k m256 twin text t of `mode` (store | swiglu) per q4k_variant()."""
+    v, _, scope = q4k_variant().partition(":")
+    if v in ("", "mech") or (scope and scope != mode):
+        return t
+    return {"dq2": q4k_m256_native, "sb": q4k_m256_sb}[v](t)
 
 
 _DEF = re.compile(r'^kernel\.def export\("(\w+)"\) @(\w+)\(', re.M)
@@ -74,11 +83,8 @@ def twin(text):
     assert "%lane_row = " in t, old
     assert "vector<16xf16>, vector<16xf16>" not in t and "vector.fragment<rhs>" not in t, old
     mm = re.search(r"_gemm_q4_k_(store|swiglu)_m256$", old)
-    if mm and q4k_variant() != "mech":
-        v = q4k_variant()
-        if v in ("sbst", "sbsw") and mm.group(1) != ("store" if v == "sbst" else "swiglu"):
-            return t
-        t = {"dq2": q4k_m256_native, "sb": q4k_m256_sb, "sbst": q4k_m256_sb, "sbsw": q4k_m256_sb}[v](t)
+    if mm:
+        t = q4k_apply(t, mm.group(1))
     return t
 
 
