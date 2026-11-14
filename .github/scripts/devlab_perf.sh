@@ -397,8 +397,13 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(v), 2) 
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "agent probe $p1"
       curl -sN -H "X-Loom-Model: $cardid" "$url/logz/stream" > "$out/logz_$p1.txt" 2>&1 & lp1=$!
-      "$T" "$here/.github/scripts/agent_probe.py" "$D/$p1/pkg" "$url" "$cardid" > "$out/agentprobe_$p1.log" 2>&1; tail -3 "$out/agentprobe_$p1.log" | cut -c1-200
+      "$T" "$here/.github/scripts/agent_probe.py" "$D/$p1/pkg" "$url" "$cardid" --save "$out/agentprobe_step0.json" > "$out/agentprobe_$p1.log" 2>&1; tail -3 "$out/agentprobe_$p1.log" | cut -c1-200
       kill $lp1 2>/dev/null
+      # phase 2: the model's own whitespace (llama.cpp ROCm on the same prompt; Loom stopped first, the GPU holds one model)
+      LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag
+      for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
+      LLAMACPP_BACKEND=rocm LLAMACPP_DIR=$LLAMACPP_DIR "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 1 16384 | tail -1
+      "$T" "$here/.github/scripts/agent_probe.py" "$D/$p1/pkg" "http://127.0.0.1:$LLAMA_PORT" "$cardid" --save "$out/agentprobe_step0.json" --llama "http://127.0.0.1:$LLAMA_PORT" > "$out/agentprobe_llama_$p1.log" 2>&1; cat "$out/agentprobe_llama_$p1.log" | cut -c1-1500
       res[$s]="$(wc -l < "$out/agentprobe_$p1.log") lines";;
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
