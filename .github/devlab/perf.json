@@ -13,33 +13,53 @@
    "memory_bytes_r9700": 16000000000,
    "variants": [
     {
-     "name": "base",
-     "build": {},
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ]
-    },
-    {
-     "name": "f16o",
+     "name": "c4096",
      "build": {
+      "FLASH2_SWA_TWIN": "s",
+      "FLASH2_POS_BYTES": "1024",
+      "FLASH2_LAZY": "1",
       "GEMM_F16O": "swiglu"
      },
      "build_args": [
       "--prefill-r9700",
       "4096"
      ]
+    },
+    {
+     "name": "c8192",
+     "build": {
+      "FLASH2_SWA_TWIN": "s",
+      "FLASH2_POS_BYTES": "1024",
+      "FLASH2_LAZY": "1",
+      "GEMM_F16O": "swiglu"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "8192"
+     ]
+    },
+    {
+     "name": "c2048",
+     "build": {
+      "FLASH2_SWA_TWIN": "s",
+      "FLASH2_POS_BYTES": "1024",
+      "FLASH2_LAZY": "1",
+      "GEMM_F16O": "swiglu"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "2048"
+     ]
     }
    ],
    "steps": [
-    "ktest:f16o",
-    "func:f16o",
-    "perf:base:3",
-    "perf:f16o:3",
-    "perf:base:3:long",
-    "perf:f16o:3:long",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long"
+    "ktest:c4096",
+    "perf:c4096:3",
+    "perf:c8192:3",
+    "perf:c2048:3",
+    "perf:c4096:3:long",
+    "perf:c8192:3:long",
+    "perf:c2048:3:long"
    ]
   }
  ],
