@@ -95,4 +95,47 @@ for name, out, verified, prompt, cont, want in anchored:
     got = template_rewrite(P, out, verified, prompt, cont, FIRST)
     bad += got != want
     print(("ok  " if got == want else "FAIL"), name, "->", got)
+
+# whitespace_ties: the whitespace the parsed reply cannot show (between calls, before the stop token), anchored on llama.cpp's
+# own top list there (mocked: TOPS maps the text before the position to {token text: logprob}).
+from agent_golden import whitespace_ties  # noqa: E402
+
+VOCAB = ["\n\n", "\n", "<tool_call>", "</tool_call>", "<|im_end|>"]
+
+
+class FakeP:
+    chat = {"call_marker": "<tool_call>", "terminal": "<|im_end|>"}
+
+    class tok:
+        decode = staticmethod(lambda ids, skip_special_tokens=False: "".join(VOCAB[i] if i < len(VOCAB) else chr(i) for i in ids))
+
+    @staticmethod
+    def ids(text):
+        out, i = [], 0
+        while i < len(text):
+            for k, t in enumerate(VOCAB):
+                if text.startswith(t, i):
+                    out.append(k); i += len(t); break
+            else:
+                out.append(ord(text[i])); i += 1
+        return out
+
+
+RAW = "think\n</think>\n\n<tool_call>A</tool_call>\n<tool_call>B</tool_call>"
+tie_cases = [
+    # the model is torn between "\n" (the template's) and "\n\n" after the first call: a tie, so the gate can excuse a reuse miss
+    ("tie between calls", {"think\n</think>\n\n<tool_call>A</tool_call>": {1: -0.7, 0: -0.93}, RAW: {4: 0.0}}, True),
+    # the model is sure of "\n" (the other whitespace 5 nats down): no excuse, a reuse miss is a bug
+    ("sure of the template's whitespace", {"think\n</think>\n\n<tool_call>A</tool_call>": {1: -0.01, 0: -5.0}, RAW: {4: 0.0}}, False),
+    # after the last call: "\n" before the stop within a nat of the stop token
+    ("tie before the stop", {"think\n</think>\n\n<tool_call>A</tool_call>": {1: 0.0}, RAW: {4: -0.3, 1: -0.8}}, True),
+    ("sure of the stop", {"think\n</think>\n\n<tool_call>A</tool_call>": {1: 0.0}, RAW: {4: 0.0, 1: -6.0}}, False),
+    # the template's token is not in llama.cpp's list at all: nothing to compare
+    ("template token unlisted", {"think\n</think>\n\n<tool_call>A</tool_call>": {0: -0.1, 2: -0.2}, RAW: {4: 0.0}}, False),
+]
+for name, tops, want in tie_cases:
+    fn = lambda ids, t=tops: {FakeP.ids(k)[0] if False else None: 0 for k in ()} or t.get(FakeP.tok.decode(ids), {})
+    got = bool(whitespace_ties(FakeP, "x", [], RAW, True, tops_at=fn))
+    bad += got != want
+    print(("ok  " if got == want else "FAIL"), name, "->", got)
 sys.exit(1 if bad else 0)

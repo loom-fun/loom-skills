@@ -273,7 +273,13 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     retained history (a note prints where the template changed it). Neither is a turn after a reply whose
     parse dropped a second call where the template takes one (Llama 3.1: the reply generated more tokens than
     its parse holds, all of them matched the golden, and the golden's continuation opens another call): the
-    retained history holds tokens no rebuilt prompt has.
+    retained history holds tokens no rebuilt prompt has. Nor is a turn that reused nothing (`cached` 0) after a
+    reply whose whitespace between calls, or before the stop token, the parsed reply cannot show: the
+    retained tokens must equal the template's rendering byte for byte, so a model that wrote `\n\n` where
+    the template prints `\n` leaves nothing exact to reuse. Waived only with `--llama`, and only where
+    llama.cpp, given Loom's text before that position, puts a whitespace-only token within the near-tie rule of the
+    template's token (`whitespace_ties`; a model that is sure of the template's whitespace is no excuse, a
+    note and `reuse_waived` record the positions).
   - `calls_ok`: tool calls name a declared function with JSON arguments.
   - golden: Loom's turn vs llama.cpp `/completion` on the same prompt ids; a
     divergence must be a near-tie (the compare rule). Loom's turn is its parsed reply re-tokenized, so
