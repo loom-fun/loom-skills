@@ -14,6 +14,25 @@
         "--batch-size=8",
         "--profile-final-batch=true"
       ]
+    },
+    {
+      "suite": "gemm_r9700",
+      "runner": "r9700",
+      "dir": "gemm_r9700",
+      "gen": "gemm_r9700/gen_gemm_bench.py",
+      "gen_variants": [
+        "base"
+      ],
+      "files": [
+        "bench.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ],
+      "repeats": 3
     }
   ]
 }

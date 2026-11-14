@@ -232,7 +232,7 @@ def package_facts(pkg_files, upstream=None):
         raise SystemExit("model.json has no checkpoint file with an @origin (parameters.model)")
     spec = drafter_setting(cfg, execution) if kind == "chat" else None
     ckpt = srcs["model"]
-    return {"kind": kind, "execution": execution, "preset": preset_name if len(presets) > 1 else None,
+    return {"kind": kind, "execution": execution, "preset": preset_name if len(presets) > 1 else None, "presets": list(presets),
             "checkpoint": ckpt, "drafter": srcs.get("draft"), "projector": srcs.get("vision"), "spec": spec,
             "occ_min": int((cfg.get("drafter") or cfg.get("draft") or {}).get("occ_min") or 0),   # occupancy gate: streams >= occ_min run undrafted
             "name": re.sub(r"[-_]gguf$", "", ckpt["repo"].split("/")[-1], flags=re.I),
@@ -641,6 +641,16 @@ def single(info):
     if "devices" not in info:
         return info
     return gpu_view(info, primary_gpu(info))
+
+
+def gpu_preset(facts, gpu):
+    """The preset a GPU's Quick start fetches: `<first preset>-r9700` on the R9700 when the package has one (build.py
+    --prefill-r9700: a larger prefill chunk, same programs), else the default preset (None when the package has one)."""
+    first = (facts.get("presets") or [None])[0]
+    alt = f"{first}-r9700"
+    if gpu == "radeon-r9700" and first and alt in facts["presets"]:
+        return alt
+    return facts.get("preset")
 
 
 def gpu_memory(info, facts_memory, gpu):
