@@ -35,7 +35,7 @@ jobs:
           import json
           e = json.load(open(".github/devlab/perf.json"))
           labels = {"strix": ["strix-halo", "devlab-dispatch", "Linux", "self-hosted"],   # without Linux a job can land on Windows
-                    "r9700": ["self-hosted", "devlab-dispatch", "radeon-r9700"]}
+                    "r9700": ["self-hosted", "devlab-dispatch", "radeon-r9700", "Linux"]}
           inc = []
           for j in e["jobs"]:
               r = j.get("runner") or e.get("runner") or "strix"
