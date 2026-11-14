@@ -1,0 +1,23 @@
+{
+ "job": "rab-unsloth-gemma-4-e2b-it-loom",
+ "runner": "ephemeral-devlab-sm-01-02-r9700s-6-132564945445",
+ "results": {
+  "perf:fun:1": "fun decode_tps [269.98, 271.91, 271.49, 274.36, 271.28, 270.99] median 271.38",
+  "perf:staging:1": "staging decode_tps [272.6, 270.77, 274.17, 270.82, 272.2, 271.23] median 271.72",
+  "perf:staging:1:long": "staging decode_tps_32k [206.59, 194.6, 199.02, 195.13, 203.15, 195.21] median 197.12",
+  "perf:fun:1:long": "fun decode_tps_32k [199.5, 196.07, 205.05, 194.49, 197.53, 206.62] median 198.51",
+  "c4:funnd": "funnd c4 median 812.75",
+  "c4:stagingnd": "stagingnd c4 median 818.8499999999999",
+  "textmatch:fun": "TEXT_MATCH thinking=off: 2/3 prompts on the same text (>= 10 leading tokens identical)",
+  "textmatch:staging": "TEXT_MATCH thinking=off: 2/3 prompts on the same text (>= 10 leading tokens identical)",
+  "func:staging": "pass",
+  "ktest:staging": "PASS (72/72 passed; 1 skipped)",
+  "gates:staging:dev": "GATES PASS level=dev 103s {'spec': 'PASS', 'consistency': 'PASS', 'agent_think_off': 'PASS', 'golden': 'PASS', 'compare': 'PASS', 'vision': 'PASS', 'sampling': 'PASS', 'agent': 'PASS'}",
+  "llama@rocm.np1:6": "llamacpp-rocm.np1 n-max 0 decode_tps [135.84, 135.71, 138.29, 140.27, 138.46, 140.12] median 138.38",
+  "llama@rocm.np1:6:long": "llamacpp-rocm.np1 n-max 0 decode_tps_32k [123.84, 119.2, 127.01, 116.97, 127.78, 118.65] median 121.52",
+  "llamac4@rocm.nodraft": "llamacpp-rocm.nodraft n-max 0 c4 median 430.3",
+  "llama@vulkan.np1:6": "llamacpp-vulkan.np1 n-max 0 decode_tps [217.33, 230.09, 234.36, 233.93, 236.32, 236.9] median 234.15",
+  "llama@vulkan.np1:6:long": "llamacpp-vulkan.np1 n-max 0 decode_tps_32k [187.7, 188.01, 188.13, 177.2, 187.31, 188.21] median 187.85",
+  "llamac4@vulkan.perslot.nodraft": "llamacpp-vulkan.perslot.nodraft n-max 0 c4 median 602.7"
+ }
+}
