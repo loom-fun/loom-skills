@@ -16,7 +16,7 @@
       be uploaded and deleted, without a token or a network call.
       Uploads OUT (with the card: README.md, info.json, REPORT.md made by make_info.py build + render_card.py)
       and deletes repo files OUT no longer has (an in-place update of an older package leaves nothing stale;
-      .gitattributes stays). --card-only uploads just README.md, info.json and REPORT.md. --parent-commit SHA: the
+      .gitattributes stays). --card-only uploads just README.md, info.json and REPORT.md, and model.json when it differs from the repo's only in the R9700 preset (`<first>-r9700`, written by make_info.py build --fit from the fit row's "r9700_execution"; anything else differing is refused). --parent-commit SHA: the
       repo commit the card was built from (the revision whose info.json you re-read, e.g. `hf download` of it, or
       the Hub API's model sha): the upload fails if the repo has moved since (another worker published), instead
       of overwriting that card; re-read info.json and rebuild. Needs huggingface_hub and a write token (HF_TOKEN or
@@ -130,6 +130,23 @@ def check_card_text(out, repo=None):
         sys.exit("info.json: only a generated REPORT.md is published (an attached, hand-written report is narrative)")
 
 
+def card_model(a, api):
+    """["model.json"] when a card-only upload must carry it: the local model.json differs from the repo's only in the R9700
+    preset (`<first>-r9700`, written by make_info.py build --fit from the fit row's r9700_execution: a serving setting of the
+    card, not a program or weight change); [] when they are the same. Anything else differing is refused (a stale or other build)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import card_lib
+    from huggingface_hub import hf_hub_download
+    local = card_lib.load_json(os.path.join(a.out, "model.json"))
+    remote = card_lib.load_json(hf_hub_download(a.repo, "model.json", revision=a.parent_commit))
+    alt = card_lib.gpu_preset_name(local)
+    strip = lambda m: {**m, "presets": {k: v for k, v in m["presets"].items() if k != alt}}
+    if strip(local) != strip(remote):
+        sys.exit(f"{a.out}/model.json differs from {a.repo}'s beyond the {alt} preset: --card-only uploads no other model.json change "
+                 "(publish the whole package)")
+    return [] if local == remote else ["model.json"]
+
+
 def cmd_upload(a):
     a.repo = target_repo(a.org, a.repo)
     check_card_text(a.out, a.repo)
@@ -143,11 +160,12 @@ def cmd_upload(a):
     api = HfApi()
     api.create_repo(a.repo, repo_type="model", exist_ok=True)
     if a.card_only:
+        files = list(CARD) + card_model(a, api)
         missing = [f for f in CARD if not os.path.isfile(os.path.join(a.out, f))]
         if missing:
             sys.exit(f"card files missing in {a.out}: {missing}")
         strays = [f for f in api.list_repo_files(a.repo) if STRAY.match(f)]
-        api.upload_folder(repo_id=a.repo, folder_path=a.out, allow_patterns=list(CARD), delete_patterns=strays or None,
+        api.upload_folder(repo_id=a.repo, folder_path=a.out, allow_patterns=files, delete_patterns=strays or None,
                           commit_message=a.message or "Card", parent_commit=a.parent_commit)
         print(f"card uploaded to https://huggingface.co/{a.repo}")
         return

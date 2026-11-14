@@ -72,6 +72,25 @@ anchored = [
     ("anchored reject: unrelated insertion", OUT, at("plan2"), P + OUT.replace("<tool_call|>", "\n<tool_call|>") + RESP,
      lambda k, n: "Let me think again."[:n], False),
 ]
+# gpt-oss (harmony): the model writes a call as "<|channel|>commentary to=functions.NAME <|constrain|>json<|message|>", the template
+# re-renders it as "<|start|>assistant to=functions.NAME<|channel|>commentary json<|message|>": difflib splits that one rewrite into
+# several small edits around the unchanged "to=functions.NAME"; each is anchored on llama.cpp's continuation as ONE edit.
+HP = "<|start|>user<|message|>weather?<|end|><|start|>assistant"
+HCALL = "<|channel|>commentary to=functions.get_weather <|constrain|>json<|message|>{\"city\":\"Paris\"}<|call|>"
+HOUT = "<|channel|>analysis<|message|>Need the tool.<|end|><|start|>assistant" + HCALL
+HNEXT = (HP + "<|channel|>analysis<|message|>Need the tool.<|end|><|start|>assistant to=functions.get_weather<|channel|>commentary json<|message|>"
+         "{\"city\":\"Paris\"}<|call|><|start|>functions.get_weather to=assistant<|channel|>commentary<|message|>{}<|end|>")
+hat = HOUT.index("<|channel|>commentary")
+atoken = lambda text: (lambda k, n: text[k:k + n] if k == len(text) or text[k:k + 2] == "<|" else "?" * n)   # a mid-word cut: no usable continuation
+for name, verified, cont, want in [
+    ("harmony call spelling, edits cut inside words (merged into one span)", 10, atoken(HOUT), True),
+    ("harmony call spelling, diverged before it, llama.cpp writes the model's spelling", 10, reference(HOUT), True),
+    ("harmony call spelling, llama.cpp writes the template's spelling", 10, reference(HOUT.replace(HCALL, HNEXT[HNEXT.index(" to=functions.get_weather<"):HNEXT.index("<|call|>")] + "<|call|>")), False),
+    ("harmony call spelling, verified past it", len(HOUT), None, True),
+]:
+    got = template_rewrite(HP, HOUT, verified, HNEXT, cont, lambda t: t[:1])
+    bad += got != want
+    print(("ok  " if got == want else "FAIL"), name, "->", got)
 for name, out, verified, prompt, cont, want in anchored:
     got = template_rewrite(P, out, verified, prompt, cont, FIRST)
     bad += got != want

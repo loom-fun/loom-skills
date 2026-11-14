@@ -21,7 +21,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, gpu_preset, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
-                      TIMED, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory,
+                      TIMED, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, gpu_serve_args,
                       gpu_view, has_results, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features)
 from matched_spec import TIE_BAND  # noqa: E402
@@ -346,8 +346,9 @@ def serve_command(info, facts, feats, gpu, output):
     serve = ["loom-serve", f"--model={output}/model.json", "'--device=amdgpu://?completion_spin_ns=4294967295'"]
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
     memory = gpu_memory(info, facts["memory_bytes"], gpu)
-    if pkg_serve:
-        serve += pkg_serve   # e.g. --pool_backing=fixed, which takes no --memory_bytes
+    gpu_serve = gpu_serve_args(gpu)   # the GPU's own flags (R9700: --pool_backing=fixed), which take no --memory_bytes either
+    if gpu_serve or pkg_serve:
+        serve += gpu_serve + [a for a in (pkg_serve or []) if a not in gpu_serve]   # e.g. --pool_backing=fixed, which takes no --memory_bytes
     elif memory:
         serve.append(f"--memory_bytes={memory}")
     return " ".join(serve)
@@ -524,9 +525,20 @@ def render(d):
     for g in serving:   # a GPU whose memory holds less KV cache than the native context needs serves a shorter context
         sc = info["devices"][g].get("served_context")
         if sc:
-            L += [f"On the {GPUS[g]['name']}, `--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}` bounds the memory pool: "
+            bound = (f"the package's preset sizes the memory pool (`{gpu_serve_args(g)[0]}` commits it up front)" if gpu_serve_args(g)
+                     else f"`--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}` bounds the memory pool")
+            L += [f"On the {GPUS[g]['name']}, {bound}: "
                   f"this package serves up to {sc:,} tokens per request there (its native context is {native:,}); "
                   "the package files are the same on every GPU.", ""]
+    for g in serving:   # a GPU's own preset: what it sets differently from the default preset (same programs, weights, tokenizer)
+        pr = gpu_preset(facts, g)
+        if pr and pr != facts["preset"] and g != DEFAULT_GPU:
+            pm = load_package(d)["model"]["presets"]
+            diff = {k: v for k, v in pm[pr]["execution"].items() if pm[next(iter(pm))]["execution"].get(k) != v}
+            if diff:
+                L += [f"On the {GPUS[g]['name']}, the Quick start fetches the `{pr}` preset of `model.json`: the default preset with "
+                      + ", ".join(f"`{k}` {v:,}" if isinstance(v, int) and not isinstance(v, bool) else f"`{k}` {v}" for k, v in sorted(diff.items()))
+                      + f" for its {GPUS[g]['memory'] or 'memory'}. The programs, weights and tokenizer are the same.", ""]
     for g in gpus:
         if info["devices"][g].get("state") == "unsupported":
             L += [gpu_line(info, g), ""]

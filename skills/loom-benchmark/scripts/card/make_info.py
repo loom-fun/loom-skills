@@ -101,7 +101,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, MEDIAN_METRICS, METRIC_KEYS, PERF_SOURCE_KINDS,  # noqa: E402
                       HF, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
-                      programs_sha256, require_valid, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
+                      programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM)
 
 
@@ -217,6 +217,29 @@ def fit_settings(verdict_path, repo, gpu="radeon-r9700"):
     if ctx is None:
         return None, None, None   # the native context fits: the package's own memory_bytes (at most the GPU's) serves it
     return mem, ctx, None
+
+
+def write_gpu_preset(pkg_dir, model, verdict_path, repo, ctx):
+    """Add the `<first>-r9700` preset to the package's model.json from the fit row's "r9700_execution" (idempotent: the same
+    settings give the same file); returns the execution the preset sets, or None when the row has no block (model.json is
+    then left as it is, whatever presets a build gave it). The default preset, programs, weights and lock are untouched."""
+    row = next((r for r in load_json(verdict_path) if r["slug"] == repo.split("/")[-1]), None)
+    ex = gpu_preset_execution(row, ctx) or {}
+    # the R9700 is served with fixed state backing (card_lib.GPUS "serve_args"): the pool is committed eagerly, so a default preset
+    # whose pool is larger than the GPU holds beside the weights gets a smaller one (a native context that fits always fits it)
+    base = next(iter(model["presets"].values()))["execution"]
+    cap = fixed_pool_capacity(row)
+    pool = ex.get("pool_capacity") or base.get("pool_capacity") or base.get("context_capacity")
+    if cap is not None and pool and pool > cap:
+        ex["pool_capacity"] = cap
+        ex["context_capacity"] = min(ex.get("context_capacity") or base["context_capacity"], cap)
+    if not ex:
+        return None
+    doc = with_gpu_preset(model, ex)
+    with open(os.path.join(pkg_dir, "model.json"), "w", encoding="utf-8", newline="\n") as f:
+        json.dump(doc, f, indent=1, ensure_ascii=False)
+        f.write("\n")
+    return doc["presets"][gpu_preset_name(doc)]["execution"]
 
 
 def cmd_build(a):
@@ -361,6 +384,8 @@ def cmd_build(a):
                         m["memory_bytes"] = mem
                     if ctx is not None:
                         m["served_context"] = ctx
+                    if need is None:
+                        write_gpu_preset(a.pkg, pkg["model"], a.fit, a.repo, ctx)
     gpus = [g for g in GPUS if g in G or g in (a.gpus or "").split(",")]
     for g in (a.gpus or "").split(",") if a.gpus else []:
         if g and g not in GPUS:
