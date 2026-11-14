@@ -25,8 +25,8 @@ def peel_last_tile(text):
     yield_line = lines[yi]
     outs = [o.strip() for o in m.group("outs").split(",")]          # %o0 ... %o<NF-1>
     args = m.group("args")
-    acc_names = re.findall(r"(%a\d+) = ", args)
-    assert len(acc_names) == len(outs)
+    acc_names = re.findall(r"(%\w+) = ", args)[2:]   # after %m, %l: the accumulators, and flash2_prefetch's carried K/V
+    assert len(acc_names) == len(outs), (acc_names, outs)
     # hot copy: no block takes the masked path
     hot = [re.sub(r"^(\s*)(%need\d+) = .* : i1$", r"\1\2 = scalar.constant false : i1", ln) for ln in body]
     # peeled copy: every name it defines gets a suffix; the loop-carried values and %kt come from the hot loop
@@ -49,7 +49,7 @@ def peel_last_tile(text):
     out += hot + [yield_line, lines[yi + 1]] + peel
     # the loop's results are the peeled tile's: %l_final -> %l_new_pt, %o<d> -> %on<d>_pt in what follows
     final = {"%l_final": "%l_new_pt", "%m_final": "%m_new_pt"}
-    final.update({o: "%on" + o[2:] + "_pt" for o in outs})
+    final.update({o: "%on" + o[2:] + "_pt" for o in outs if re.fullmatch(r"%o\d+", o)})
     rest = "\n".join(lines[yi + 2:])
     rest = re.sub(r"%\w+", lambda mm: final.get(mm.group(0), mm.group(0)), rest)
     return "\n".join(out) + "\n" + rest
