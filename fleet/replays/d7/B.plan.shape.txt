@@ -1,0 +1,10 @@
+| GPU | stratum | members | rows | representatives |
+|---|---|---|---|---|
+| strix-halo | arch=* hd=256 G=16 kv=<=2 draft=dflash moe fam=attn_decode fmt=- | 1 | decode,decode_2k,decode_32k,streams4 | bartowski-Ornith-1.5-122B-loom (heaviest for the changed kernel) |
+| radeon-r9700 | arch=* hd=256 G=8 kv=<=2 draft=dflash moe fam=attn_decode fmt=- | 3 | decode,decode_2k,decode_32k,streams4 | bartowski-Ornith-1.5-35B-A3B-loom (heaviest for the changed kernel) |
+| strix-halo | arch=* hd=256 G=8 kv=<=2 draft=dflash moe fam=attn_decode fmt=- | 3 | decode,decode_2k,decode_32k,streams4 | bartowski-Ornith-1.5-35B-A3B-loom (heaviest for the changed kernel) |
+| radeon-r9700 | arch=* hd=256 G=8 kv=<=2 draft=mtp moe fam=attn_decode fmt=- | 1 | decode,decode_2k,decode_32k,streams4 | InternScience-Sage-A1.5-loom (heaviest for the changed kernel) |
+| strix-halo | arch=* hd=256 G=8 kv=<=2 draft=mtp moe fam=attn_decode fmt=- | 1 | decode,decode_2k,decode_32k,streams4 | InternScience-Sage-A1.5-loom (heaviest for the changed kernel) |
+| radeon-r9700 | skipped | bartowski-Ornith-1.5-122B-loom | | does not fit radeon-r9700 |
+
+strata 5; touched model-GPU pairs 9; sampled 5; T1 canary ~2.86 runner-h vs full A/B of every touched model ~15.45 runner-h

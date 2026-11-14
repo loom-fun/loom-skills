@@ -1,0 +1,13 @@
+diff --git a/fleet/unsloth-gemma-4-E2B-it-loom/llm_config.json b/fleet/unsloth-gemma-4-E2B-it-loom/llm_config.json
+index 71406f0..9a885cc 100644
+--- a/fleet/unsloth-gemma-4-E2B-it-loom/llm_config.json
++++ b/fleet/unsloth-gemma-4-E2B-it-loom/llm_config.json
+@@ -372,6 +372,5 @@
+    }
+   ]
+  },
+- "model_id": "google/gemma-4-E2B-it",
+- "rdna4_f16_ffn": true
++ "model_id": "google/gemma-4-E2B-it"
+ }
+\ No newline at end of file

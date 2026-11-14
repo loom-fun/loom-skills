@@ -1,0 +1,2 @@
+{"pr": "D7", "title": "Drafted qwen35moe decode_32k regression (K/V-once of #451 at head_dim 256, 2 KV heads)", "base_from": "r451:A", "variants": ["A", "B"],
+ "intent": "restore decode_32k on drafted qwen35moe without losing the #451 gain elsewhere: A = ATTN_GQA_D256=0 as the default (the env), B = the scope rule"}
