@@ -10,9 +10,11 @@
   "need": 35286210896.0,
   "verdict": "fits (reduced ctx)",
   "n_exp": 256,
-  "ctx_cap": 196608,
+  "ctx_cap": 138240,
   "r9700_execution": {
-   "prefill_capacity": 2048
+   "prefill_capacity": 2048,
+   "context_capacity": 138240,
+   "pool_capacity": 138240
   }
  },
  {
@@ -64,7 +66,12 @@
   "mem": 36000000000,
   "need": 33248456736.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 256
+  "n_exp": 256,
+  "r9700_execution": {
+   "context_capacity": 249856,
+   "pool_capacity": 249856
+  },
+  "ctx_cap": 249856
  },
  {
   "slug": "bartowski-Nanbeige4.3-33B-loom",
@@ -101,8 +108,11 @@
   "verdict": "fits (reduced ctx)",
   "n_exp": 256,
   "r9700_execution": {
-   "prefill_capacity": 2048
-  }
+   "prefill_capacity": 2048,
+   "context_capacity": 55296,
+   "pool_capacity": 55296
+  },
+  "ctx_cap": 55296
  },
  {
   "slug": "bartowski-Ornith-1.5-9B-loom",
@@ -324,9 +334,11 @@
   "need": 51742686144.0,
   "verdict": "fits (reduced ctx)",
   "n_exp": 128,
-  "ctx_cap": 98304,
+  "ctx_cap": 94208,
   "r9700_execution": {
-   "prefill_capacity": 2048
+   "prefill_capacity": 2048,
+   "context_capacity": 94208,
+   "pool_capacity": 94208
   }
  },
  {
@@ -356,8 +368,11 @@
   "verdict": "fits (reduced ctx)",
   "n_exp": 256,
   "r9700_execution": {
-   "prefill_capacity": 2048
-  }
+   "prefill_capacity": 2048,
+   "context_capacity": 84992,
+   "pool_capacity": 84992
+  },
+  "ctx_cap": 84992
  },
  {
   "slug": "ggml-org-gemma-3-1b-it-loom",
@@ -384,7 +399,12 @@
   "mem": 36000000000,
   "need": 33587130459.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 256
+  "n_exp": 256,
+  "r9700_execution": {
+   "context_capacity": 233472,
+   "pool_capacity": 233472
+  },
+  "ctx_cap": 233472
  },
  {
   "slug": "lmstudio-community-gemma-4-26B-A4B-it-loom",
@@ -482,7 +502,12 @@
   "mem": 63000000000,
   "need": 48934708992.0,
   "verdict": "fits (reduced ctx)",
-  "n_exp": 128
+  "n_exp": 128,
+  "r9700_execution": {
+   "context_capacity": 99328,
+   "pool_capacity": 99328
+  },
+  "ctx_cap": 99328
  },
  {
   "slug": "unsloth-Qwen3-4B-Instruct-2507-loom",
@@ -568,8 +593,11 @@
   "verdict": "fits (reduced ctx)",
   "n_exp": 256,
   "r9700_execution": {
-   "prefill_capacity": 2048
-  }
+   "prefill_capacity": 2048,
+   "context_capacity": 56320,
+   "pool_capacity": 56320
+  },
+  "ctx_cap": 56320
  },
  {
   "slug": "unsloth-Qwen3.5-4B-loom",
