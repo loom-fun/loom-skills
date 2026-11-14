@@ -47,8 +47,11 @@ jobs:
           import json, os
           k = json.load(open(os.environ["KB"]))
           want = [s.strip() for s in os.environ.get("WANT", "").split(",") if s.strip()]
-          names = [s["suite"] for s in k["suites"] if not want or s["suite"] in want]
-          print("matrix=" + json.dumps({"suite": names}))
+          labels = {"strix": ["strix-halo", "devlab-dispatch", "Linux", "self-hosted"],   # a suite's "runner": strix (default) | r9700
+                    "r9700": ["self-hosted", "devlab-dispatch", "radeon-r9700"]}
+          inc = [{"suite": s["suite"], "labels": json.dumps(labels[s.get("runner", "strix")])}
+                 for s in k["suites"] if not want or s["suite"] in want]
+          print("matrix=" + json.dumps({"include": inc}))
           print("file=" + os.environ["KB"])
           PY
 
@@ -58,7 +61,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.suites.outputs.matrix) }}
     name: ${{ matrix.suite }}
-    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 120
     env:
       GH_TOKEN: ${{ github.token }}
