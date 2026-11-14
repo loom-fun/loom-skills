@@ -27,7 +27,6 @@ import argparse
 import base64
 import contextlib
 import datetime
-import fcntl
 import glob
 import json
 import os
@@ -48,6 +47,10 @@ import card_lib  # noqa: E402
 import promote_check  # noqa: E402
 import sample_lib  # noqa: E402
 
+try:
+    import fcntl
+except ImportError:   # Windows: the tests import this module; a campaign runs on Linux
+    fcntl = None
 REPO = "loom-fun/loom-skills"
 BASELINES = os.path.join(HERE, "baselines.json")   # the ratchet store: what each card says today
 PY = sys.executable
@@ -122,8 +125,7 @@ class State:
         return s
 
     def save(self):
-        with open(self.path + ".lock", "w") as lk:
-            fcntl.flock(lk, fcntl.LOCK_EX)
+        with locked(self.path):
             tmp = self.path + ".tmp"
             json.dump(self.d, open(tmp, "w"), indent=1, sort_keys=True)
             os.replace(tmp, self.path)
@@ -135,6 +137,15 @@ class State:
     def log(self, msg):
         self.d.setdefault("log", []).append(f"{now()} {msg}")
         print(msg)
+
+
+@contextlib.contextmanager
+def locked(path):
+    """an exclusive lock on PATH.lock (several steps and the other engineers' status writers share status.json)"""
+    with open(path + ".lock", "w") as lk:
+        if fcntl:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+        yield
 
 
 def die(msg):
@@ -669,8 +680,7 @@ def cmd_status(a):
 
 def write_status(st, path):
     """models.<slug>.<gpu> = {stage, verdict, run}: what the dashboard reads (a round-2 job's entry wins over its first run's)."""
-    with open(path + ".lock", "w") as lk:
-        fcntl.flock(lk, fcntl.LOCK_EX)
+    with locked(path):
         d = json.load(open(path))
         for n, e in sorted(st.jobs.items(), key=lambda kv: kv[1]["round"]):
             m = d.setdefault("models", {}).setdefault(e["slug"], {})
