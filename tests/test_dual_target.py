@@ -94,6 +94,66 @@ class DualTargetTests(unittest.TestCase):
                 self.assertTrue(out.exists() and out.stat().st_size > 0, f"{arch}: {r.stdout}{r.stderr}")
 
 
+class ProgramSelectTests(unittest.TestCase):
+    """target.dual.select=program: one template.apply per command program."""
+    prog = dual_target.apply(FIXTURE, enable=True, select="program")
+
+    def test_launch_is_the_default_and_unchanged(self):
+        self.assertEqual(dual_target.apply(FIXTURE, enable=True, select="launch"), dual_target.apply(FIXTURE, enable=True))
+
+    def test_program_is_one_apply(self):
+        out = self.prog
+        self.assertEqual(out.count("template.apply<@dual_probe_body>"), 1)
+        self.assertEqual(out.count("template.apply<@sel"), 0)
+        self.assertIn("command.program.def public target(@device) @dual_probe() launch(", out)
+        self.assertEqual(len(re.findall(r"^template\.def<@dual_probe_body> target\(@rdna[34]\)", out, re.M)), 2)
+        m3 = re.search(r"template\.def<@dual_probe_body> target\(@rdna3\).*?\n}\n", out, re.S).group(0)
+        m4 = re.search(r"template\.def<@dual_probe_body> target\(@rdna4\).*?\n}\n", out, re.S).group(0)
+        self.assertEqual(m3.count(f"kernel.launch @{K}["), 2)
+        self.assertEqual(m4.count(f"kernel.launch @{TWIN}["), 2)
+        self.assertNotIn(f"@{K}[", m4)
+
+    def test_kernels_unchanged(self):
+        a, b = dual_target.apply(FIXTURE, enable=True), self.prog
+        self.assertEqual(a[:a.index("template.decl")], b[:b.index("template.decl")])
+
+    def test_idempotent(self):
+        self.assertEqual(dual_target.apply(self.prog, enable=True, select="program"), self.prog)
+
+    def test_group_in_program(self):
+        # a group in a program: gfx11 launches kept in the rdna3 provider, the single rdna4 launch in the rdna4 one
+        lines = FIXTURE.split("\n")
+        i = next(n for n, l in enumerate(lines) if l.startswith("  kernel.launch @" + K))
+        alt = lines[i].replace("@" + K, "@" + TWIN)
+        lines[i:i + 1] = ["  // dual-group: rdna4 " + alt.strip(), lines[i], "  // dual-group: end"]
+        out = dual_target.apply("\n".join(lines), enable=True, select="program")
+        m4 = re.search(r"template\.def<@dual_probe_body> target\(@rdna4\).*?\n}\n", out, re.S).group(0)
+        self.assertEqual(m4.count(f"kernel.launch @{TWIN}["), 2)
+        self.assertNotIn("dual-group", out)
+
+    def test_bad_mode(self):
+        old = os.environ.get("LOOM_DUAL_SELECT")
+        try:
+            os.environ["LOOM_DUAL_SELECT"] = "bogus"
+            with self.assertRaises(ValueError):
+                dual_target.apply(FIXTURE, enable=True)
+        finally:
+            os.environ.pop("LOOM_DUAL_SELECT") if old is None else os.environ.__setitem__("LOOM_DUAL_SELECT", old)
+
+    @unittest.skipUnless(shutil.which("loom-link") or os.path.exists("/home/jfowers/lt/loom010/.venv/bin/loom-link"), "loom-link not found")
+    def test_link_keeps_one_provider_per_target(self):
+        link = shutil.which("loom-link") or "/home/jfowers/lt/loom010/.venv/bin/loom-link"
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "dual.loom"
+            p.write_text(self.prog)
+            for arch, want, not_want in (("gfx1151", K + "[", TWIN), ("gfx1201", TWIN + "[", "@" + K + "[")):
+                r = subprocess.run([link, str(p), "--root=@dual_probe", f"--target=amdgpu:{arch}"], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                body = r.stdout[r.stdout.index("template.def<@dual_probe_body>"):]
+                self.assertEqual(body.count("kernel.launch @" + want), 2, arch)
+                self.assertNotIn(not_want, body, arch)
+
+
 class KernelTestSelectTests(unittest.TestCase):
     lib = dual_target.apply(FIXTURE, enable=True)
 

@@ -7,5 +7,13 @@
  },
  "owner": "kb",
  "facets": [],
- "choices": []
+ "choices": [
+  {
+   "when": {},
+   "set": {
+    "target.dual.select": "program"
+   },
+   "evidence": "PENDING"
+  }
+ ]
 }

@@ -160,6 +160,11 @@ CHOICE("target.rdna4_twins", "bool", True, "LOOM_RDNA4", kernels=["*_rdna4"], de
        from_pr="dual_target.py", enc=("1", "0"),
        doc="Emit the gfx12 twins K_rdna4 and the dual-target selection (LOOM_RDNA4=0: gfx11 programs only, byte-identical to the "
            "pre-dual generator).")
+CHOICE("target.dual.select", "str", "launch", "LOOM_DUAL_SELECT", kernels=[], rows=ROWS_ALL, devices=["rdna3"], per_target=False,
+       from_pr="dual_target.py (refactor, dualprog)", generator_defaults=("launch",),
+       doc="Where a dual-target package selects between K and K_rdna4: launch = one template.apply per kernel launch (today); "
+           "program = one template.apply per command program that launches a twin (the gfx11 provider is the plain gfx11-only body, as "
+           "in a single-target build). No kernel text changes; only the command programs.")
 
 # ======================================================================================================================
 # Execution settings of one (model, device) preset (model.json): resolved per device, never part of a program
