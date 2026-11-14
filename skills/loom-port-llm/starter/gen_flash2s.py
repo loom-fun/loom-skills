@@ -545,6 +545,9 @@ if R4:
     if os.environ.get("FLASH2_VTF", "1") == "1":   # flat-index V^T stores (flash2_trim.py); gfx12 twin only
         from flash2_trim import vtflat
         text = vtflat(text)
+    if os.environ.get("FLASH2_PIPE", "0") == "1":   # two barriers per tile, next tile's loads in flight (flash2_pipe.py); gfx12 twin only
+        from flash2_pipe import pipe
+        text = pipe(text)
     if os.environ.get("FLASH2_VP", "0") == "1":   # two keys per staging lane: one 32-bit V^T store per dim pair (flash2_vpack.py); gfx12 twin only
         from flash2_vpack import vpack
         text = vpack(text)
