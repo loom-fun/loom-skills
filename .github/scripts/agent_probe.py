@@ -16,6 +16,8 @@ import agent_golden as G  # noqa: E402
 from bench_common import Package  # noqa: E402
 
 pkg, url, model = sys.argv[1:4]
+LLAMA = sys.argv[sys.argv.index("--llama") + 1] if "--llama" in sys.argv else None   # phase 2: llama.cpp reads the saved replies
+SAVE = sys.argv[sys.argv.index("--save") + 1]
 P = Package(pkg)
 SYS = {"role": "system", "content": "You are a helpful assistant. Use the tools when they help."}
 
@@ -48,7 +50,7 @@ def show(tag, ch, u):
 def sessions(tag):
     for p in ("/v1/sessions", "/v1/requests"):
         try:
-            print(f"  [{tag}] GET {p}:", requests.get(url + p, timeout=30).text[:1500])
+            print(f"  [{tag}] GET {p}:", requests.get(url + p, headers={"X-Loom-Model": model}, timeout=30).text[:1500])
         except Exception as e:  # noqa: BLE001
             print("  sessions error", e)
 
@@ -82,6 +84,8 @@ def scenario(name, thinking, task_idx, session=None, pin=False, stream_first=Fal
     ch, u = chat(msgs, thinking, session)
     if not ch: return
     show("step0", ch, u)
+    if name == "tokyo-london plain":
+        json.dump({"msgs": msgs, "message": ch["message"]}, open(SAVE, "w"))
     sessions("after step0")
     if pin and session:
         r = requests.post(f"{url}/v1/checkpoints/pin-{session}", headers={"X-Loom-Session": session}, timeout=60)
@@ -99,6 +103,56 @@ def scenario(name, thinking, task_idx, session=None, pin=False, stream_first=Fal
     if ch3:
         print(f"  [step1 repeat] cached={u3.get('prompt_tokens_details')} prompt_tokens={u3['prompt_tokens']}")
 
+
+def llama_phase():
+    from bench_common import llama_greedy
+    d = json.load(open(SAVE))
+    msgs, message = d["msgs"], d["message"]
+    prev = P.render_messages(msgs, G.TOOLS, None)
+    raw = P.raw_from_chat(message, True, None, prev)
+    print("loom raw (rebuilt from channels):", repr(raw[-400:]))
+    r, gen, _ = llama_greedy(LLAMA, P.ids(prev), 300, P)
+    text = P.tok.decode(gen, skip_special_tokens=False)
+    print("llama.cpp greedy from the same prompt:", repr(text))
+    # continue llama.cpp after Loom's reasoning + the first call: what whitespace does the model write between calls?
+    marker = P.chat.get("call_marker") or "<tool_call>"
+    cut = raw.find("</tool_call>") + len("</tool_call>")
+    for tag, tail in (("after first call", raw[:cut]),):
+        _, g2, _ = llama_greedy(LLAMA, P.ids(prev + tail), 40, P)
+        print(f"llama.cpp continuation {tag}:", repr(P.tok.decode(g2, skip_special_tokens=False)), g2[:12])
+    # the whitespace tokens llama.cpp prefers right after </tool_call>
+    _, g3, cp = llama_greedy(LLAMA, P.ids(prev + raw[:cut]), 1, P, n_probs=8)
+    print("top after first </tool_call>:", [(P.tok.decode([x["id"]], skip_special_tokens=False), round(x.get("logprob", 0), 3)) for x in (cp[0].get("top_logprobs") or cp[0].get("top") or [])] if cp else cp)
+    _, g4, cp4 = llama_greedy(LLAMA, P.ids(prev + raw[:raw.find("<tool_call>")]), 1, P, n_probs=8)
+    print("top before first <tool_call>:", [(P.tok.decode([x["id"]], skip_special_tokens=False), round(x.get("logprob", 0), 3)) for x in (cp4[0].get("top_logprobs") or cp4[0].get("top") or [])] if cp4 else cp4)
+
+
+if LLAMA:
+    llama_phase(); sys.exit(0)
+
+
+def rawtext():
+    """The reply's own whitespace: the template's whole system block (tools included) is sent as the system message and no
+    tools are declared, so the prompt tokens are the gate's and Loom returns the calls as plain content, bytes untouched."""
+    full = P.render_messages([SYS, {"role": "user", "content": "x"}], G.TOOLS, None)
+    head = full[:full.index("<|im_start|>user")]
+    sysblock = head[len("<|im_start|>system\n"):-len("<|im_end|>\n")]
+    print("=== rawtext: system block ends", repr(sysblock[-80:]))
+    for q in ("Now check Tokyo and London too, then tell me which of the three cities is warmest.",
+              "What's the weather in Paris and in Berlin? Use the tool for both.",
+              "Check the weather for Madrid, Rome and Oslo.",
+              "Get the weather for Cairo and Lima, then tell me which is warmer.",
+              "What is the weather in Sydney and in Toronto?"):
+        body = dict(model=model, messages=[{"role": "system", "content": sysblock}, {"role": "user", "content": q}],
+                    max_tokens=1024, temperature=0)
+        r = post(body).json()
+        if "error" in r:
+            print("  ERROR", r["error"]); continue
+        m = r["choices"][0]["message"]
+        print(f"  q={q[:40]!r} prompt_tokens={r['usage']['prompt_tokens']} reasoning_tail={(m.get('reasoning_content') or '')[-40:]!r}\n    content={m.get('content')!r}")
+
+
+rawtext()
 
 scenario("paris-one-call-control", None, 0, session="ctl", pin=True)
 scenario("tokyo-london plain", None, 1)
