@@ -12,7 +12,10 @@
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
-     "name": "card"
+     "name": "card",
+     "serve_args": [
+      "--preset=chat"
+     ]
     }
    ],
    "steps": [
