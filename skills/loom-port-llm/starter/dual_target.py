@@ -29,7 +29,7 @@ import sys
 
 
 def _rows():
-    """(base target symbol, twin target symbol, twin suffix, header text, preset suffix of the twin family's device) from the device registry (skills/loom-kb/device/<family>/family.json).
+    """(base target symbol, twin target symbol, twin suffix, header text, preset suffix of the twin family's device, {device: preset suffix}) from the device registry (skills/loom-kb/device/<family>/family.json).
     The registry is found next to the skills (LOOM_SKILLS, else relative to this file); a kit copied outside the skills tree falls back to the
     rows below, which tests/test_registry.py keeps equal to the registry's."""
     try:
@@ -40,13 +40,18 @@ def _rows():
         finally:
             sys.path.pop(0)
         r = registry.dual_target()
-        return r["base"], r["twins"][0], r["suffix"], r["header"], registry.device("radeon-r9700")["preset_suffix"]
+        suffixes = {k: d["preset_suffix"] for k, d in registry.devices().items() if d.get("preset_suffix")}
+        twin = registry.families()[next(f for f, v in registry.families().items() if v.get("dual_target") and not v.get("base"))]["devices"][0]
+        return r["base"], r["twins"][0], r["suffix"], r["header"], suffixes[twin], suffixes
     except (ImportError, OSError, KeyError):
         return ("rdna3", "rdna4", "_rdna4",
-                "target.decl @device\namdgpu.target<gfx11-generic> @rdna3\namdgpu.target<gfx12-generic> @rdna4\n\n", "-r9700")
+                "target.decl @device\namdgpu.target<gfx11-generic> @rdna3\namdgpu.target<gfx12-generic> @rdna4\n\n", "-r9700",
+                {"radeon-rx7900xtx": "-rx7900xtx", "radeon-r9700": "-r9700"})
 
 
-BASE, TWIN, SUFFIX, HEADER, R9700_PRESET_SUFFIX = _rows()   # R9700_PRESET_SUFFIX: build.py's second preset `<preset>-r9700`
+BASE, TWIN, SUFFIX, HEADER, R9700_PRESET_SUFFIX, PRESET_SUFFIXES = _rows()
+# PRESET_SUFFIXES {device: suffix}: build.py's extra preset of a device `<preset><suffix>` (--prefill-device DEVICE=N); R9700_PRESET_SUFFIX is the twin
+# family's (gfx12) first device's, the alias of --prefill-r9700
 KERNEL_DEF = re.compile(r"^kernel\.def\b(?P<attrs>.*?)\s@(?P<sym>\w+)\(")
 LAUNCH = re.compile(r"^(\s*)kernel\.launch @(\w+)\[([^\]]*)\]\((.*)\) : \[([^\]]*)\]\((.*)\)\s*$")
 PROGRAM_DEF = re.compile(r"^(command\.program\.def\s+(?:public\s+)?)(?!target\()(@)", re.M)

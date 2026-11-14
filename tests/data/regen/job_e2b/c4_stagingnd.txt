@@ -1,0 +1,16 @@
+{"streams": 4, "thinking": "off", "window_s": 1.94, "agg_tps": 818.3, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [811.6, 816.7, 817.5]}
+{"streams": 4, "thinking": "off", "window_s": 1.94, "agg_tps": 818.2, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [817.7, 817.3, 817.9]}
+{"streams": 4, "thinking": "off", "window_s": 1.95, "agg_tps": 817.7, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [819.3, 817.3, 815.9]}
+{"session_end": "stagingnd"}
+{"streams": 4, "thinking": "off", "window_s": 1.94, "agg_tps": 820.1, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [811.2, 820.7, 820.4]}
+{"streams": 4, "thinking": "off", "window_s": 1.93, "agg_tps": 822.3, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [819.1, 823.0, 821.4]}
+{"streams": 4, "thinking": "off", "window_s": 1.94, "agg_tps": 819.4, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [819.9, 822.3, 822.2]}
+{"session_end": "stagingnd"}
+{"streams": 4, "thinking": "off", "window_s": 1.93, "agg_tps": 823.2, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [817.7, 822.1, 823.1]}
+{"streams": 4, "thinking": "off", "window_s": 1.93, "agg_tps": 823.1, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [825.0, 822.7, 823.6]}
+{"streams": 4, "thinking": "off", "window_s": 1.94, "agg_tps": 820.9, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [822.6, 822.9, 822.7]}
+{"session_end": "stagingnd"}
+{"streams": 4, "thinking": "off", "window_s": 1.95, "agg_tps": 815.9, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [811.6, 816.6, 816.7]}
+{"streams": 4, "thinking": "off", "window_s": 1.95, "agg_tps": 816.2, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [816.4, 816.2, 817.4]}
+{"streams": 4, "thinking": "off", "window_s": 1.95, "agg_tps": 816.1, "per_stream_events": [400, 400, 400, 400], "per_stream_tokens": [400, 400, 400, 400], "warmup_agg_tps": [814.5, 814.7, 818.6]}
+{"session_end": "stagingnd"}

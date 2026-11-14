@@ -39,6 +39,9 @@ ap.add_argument("--prefill-r9700", type=int, default=None, metavar="N",
                      "Qwen3-1.7B -2/+1/+11/+12/+18, but Qwen3-14B -8/-5/+1/+2/+6 (hidden size <= 2048 benefits). The first preset stays "
                      "the default (Strix Halo); the card's R9700 Quick start fetches `--preset=<preset>-r9700`. Same programs: only "
                      "model.json differs")
+ap.add_argument("--prefill-device", action="append", default=[], metavar="DEVICE=N",
+                help="--prefill-r9700 for any registry device (repeat): a preset `<preset><device preset suffix>` with prefill_capacity N "
+                     "(default: cfg['prefill_capacity_device'] {device: N}); --prefill-r9700 N is --prefill-device radeon-r9700=N")
 ap.add_argument("--rows", type=int, default=4, help="initial resident rows (grows on demand); c4 benchmarks need >= 4")
 ap.add_argument("--max-tokens", type=int, default=4096, help="default completion length when a request sets none")
 ap.add_argument("--temperature", type=float, default=0.0, help="default sampling temperature when a request sets none (0 = greedy)")
@@ -911,17 +914,23 @@ if DRAFT:
     card = build_draft.card_drafter(card, pkg, DRAFT)
 if cfg.get("vision"):
     card = build_vision.write_component(pkg, card, cfg["vision"], vision_cfg)
+import dual_target  # noqa: E402
 a.prefill_r9700 = a.prefill_r9700 or cfg.get("prefill_capacity_r9700")
-if a.prefill_r9700 and a.prefill_r9700 != a.prefill:
-    import copy
-    first = next(iter(card["presets"]))
-    alt = copy.deepcopy(card["presets"][first])
-    alt["execution"]["prefill_capacity"] = a.prefill_r9700
-    import dual_target
-    card["presets"][f"{first}{dual_target.R9700_PRESET_SUFFIX}"] = alt
+chunks = {**(cfg.get("prefill_capacity_device") or {}), **({"radeon-r9700": a.prefill_r9700} if a.prefill_r9700 else {})}
+for item in a.prefill_device:   # DEVICE=N: the command line wins over the cfg
+    dev, _, n = item.partition("=")
+    if dev not in dual_target.PRESET_SUFFIXES or not n.isdigit():
+        sys.exit(f"--prefill-device {item}: expected DEVICE=N with DEVICE one of {', '.join(dual_target.PRESET_SUFFIXES)}")
+    chunks[dev] = int(n)
+for dev, n in chunks.items():
+    if n and n != a.prefill:
+        import copy
+        first = next(iter(card["presets"]))
+        alt = copy.deepcopy(card["presets"][first])
+        alt["execution"]["prefill_capacity"] = n
+        card["presets"][f"{first}{dual_target.PRESET_SUFFIXES[dev]}"] = alt
 # Dual-target (RDNA3 + RDNA4) programs: every program file that has a `K_rdna4` twin kernel selects it per device
 # (dual_target.py; LOOM_RDNA4=0 turns it off, and files without twins are left as they are).
-import dual_target  # noqa: E402
 dual_target.apply_dir(os.path.join(pkg, "program"))
 json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
 # The benchmark scripts read the chat format and model id from here.

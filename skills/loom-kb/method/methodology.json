@@ -192,6 +192,9 @@
       "vulkan": {
         "build": "b12211"
       }
+    },
+    "radeon-rx7900xtx": {
+      "none": "no runner: no llama.cpp build is chosen until a DevLab runner is registered (device.json runner.labels); then add rocm and vulkan builds here"
     }
   },
   "ratchet": {
