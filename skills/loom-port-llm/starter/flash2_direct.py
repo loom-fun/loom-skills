@@ -17,9 +17,10 @@ zeroed per key (`%vok`) in the partial kernel (its hot copy drops the select: fl
 import re
 
 
-def direct(text, mode, kvh, d, partial):
+def direct(text, mode, kvh, d, partial, kwide=False):
     assert mode == 2, 'FLASH2_DIRECT=2 (K and V^T direct) is the only mode'
     R = kvh * d
+    pos_bytes = int(re.search(r"%pos_bytes = index\.constant (\d+) : offset", text).group(1))
     HALF = 128   # dims per wave
     m = re.search(r"^( *)scf\.if %st_live \{\n.*?^ *\}\n( *)kernel\.barrier<workgroup> scope\(workgroup\) ordering\(acq_rel\)\n", text, re.M | re.S)
     assert m, "flash2_direct: staging block not found"
@@ -36,17 +37,26 @@ def direct(text, mode, kvh, d, partial):
 {ind}%kh_pg = index.assume %kh_pg_v [range(%kh_pg_v, 0, %kh_last), lt(%kh_pg_v, %blocks)] : index
 {ind}%kh_ph32r = view.load %kh_map[%kh_pg] : view<[%blocks]xi32> -> i32
 {ind}%kh_ph32 = kernel.subgroup.broadcast %kh_ph32r from %kh_lane0 : i32, i32
-{ind}%kh_phb = scalar.assume %kh_ph32 [range(%kh_ph32, 0, 1048575)] : i32
+{ind}%kh_phb = scalar.assume %kh_ph32 [range(%kh_ph32, 0, 65535)] : i32
 {ind}%kh_ph = index.cast %kh_phb : i32 to index
-{ind}%kh_sb = index.mul %kh_ph, %kh_c16 : index
-{ind}%kh_ps = index.add %kh_pp, %kh_sb : index
-{ind}%k_offset = index.scale %kh_ps, %pos_bytes : index, offset -> offset
-{ind}%v_offset = index.add %k_offset, %v_plane_delta : offset
-{ind}%k_wbase = index.add %k_offset, %vd_boff : offset
-{ind}%v_wbase = index.add %v_offset, %vd_boff : offset
+{ind}%kh_pg16_v = index.mul %kh_ph, %kh_c16 : index
+{ind}%krow_v = index.add %kh_pp, %kh_pg16_v : index
+{ind}%vrow_v = index.add %krow_v, %pool : index
+{ind}%krow_i = index.cast %krow_v : index to i32
+{ind}%vrow_i = index.cast %vrow_v : index to i32
+{ind}%krow_u = kernel.subgroup.broadcast %krow_i from %kh_lane0 : i32, i32
+{ind}%vrow_u = kernel.subgroup.broadcast %vrow_i from %kh_lane0 : i32, i32
+{ind}%krow_b = scalar.assume %krow_u [range(%krow_u, 0, 67108863)] : i32
+{ind}%vrow_b = scalar.assume %vrow_u [range(%vrow_u, 0, 67108863)] : i32
+{ind}%krow = index.cast %krow_b : i32 to index
+{ind}%vrow = index.cast %vrow_b : i32 to index
+{ind}%k_wbase_a = index.scale %krow, %pos_bytes : index, offset -> offset
+{ind}%v_wbase_a = index.scale %vrow, %pos_bytes : index, offset -> offset
+{ind}%k_wbase = index.add %k_wbase_a, %vd_boff : offset
+{ind}%v_wbase = index.add %v_wbase_a, %vd_boff : offset
 {ind}%v_g = buffer.view %arena[%v_wbase] : buffer -> view<{HALF}x16xf16, %vt_g_layout>
+{ind}%k_g = buffer.view %arena[%k_wbase] : buffer -> view<16x{HALF}xf16, %k_g_layout>
 """
-    kv_lines += f"{ind}%k_g = buffer.view %arena[%k_wbase] : buffer -> view<16x{HALF}xf16, %k_g_layout>\n"
     text = text.replace(stage, kv_lines, 1)
     # allocas: no K / V^T tiles; the S exchange is double buffered
     text = re.sub(r"^ *%k_bytes = .*\n *%k_tile = .*\n *%k_view = .*\n", "", text, flags=re.M)
@@ -81,6 +91,12 @@ def direct(text, mode, kvh, d, partial):
 {hi}%kh_map = buffer.view %origins[%kh_map_origin] : buffer -> view<[%blocks]xi32>
 {hi}%kh_last = index.sub %blocks, %kh_c1 : index
 {hi}%kh_pp = index.mul %k_plane, %pool : index
+{hi}%kh_pagebytes64 = scalar.constant {16 * pos_bytes} : i64
+{hi}%kh_ppo = index.scale %kh_pp, %pos_bytes : index, offset -> offset
+{hi}%k_inv_o = index.add %kh_ppo, %vd_boff : offset
+{hi}%v_inv_o = index.add %k_inv_o, %v_plane_delta : offset
+{hi}%k_inv_i = index.cast %k_inv_o : offset to i64
+{hi}%v_inv_i = index.cast %v_inv_o : offset to i64
 """)
     text = text[:hdr.start()] + defs + text[hdr.start():]
     # parity of the tile selects the S exchange buffer; the one barrier is the one after the S partial store
@@ -96,6 +112,25 @@ def direct(text, mode, kvh, d, partial):
     # K fragments (S = K Q^T) from the arena, V^T fragments from the transposed arena view
     text = re.sub(r"^( *)(%kc\d+_\d+) = index\.add %dim_base, (%qd\d+_o) : index$", r"\1\2 = index.add \3, %c0 : index", text, flags=re.M)
     text = re.sub(r"%k_view\[(%kb\d+_row), (%kc\d+_\d+)\] shape \[%c16, %c16\] : view<\d+x\d+xf16>", rf"%k_g[\1, \2] shape [%c16, %c16] : view<16x{HALF}xf16, %k_g_layout>", text)
+    assert not kwide, "wide K load: not ported to the page-coordinate views"
+    if kwide:
+        # K fragments from ONE 128-byte load per lane (eight 16-byte loads off one address): lane (key row l % 16, half h) holds dims
+        # 64 h + 8 c + j of the wave's 128 as fragment c's k slots. The dims of a fragment's k axis are any bijection as long as Q^T uses
+        # the same one (the products are summed over k), so Q^T's fragment c lane half h holds those dims too.
+        text = text.replace("%lane_h8 = index.assume", "%kw_c64 = index.constant 64 : index\n  %kw_h64_v = index.mul %lane_half, %kw_c64 : index\n  %kw_h64 = index.assume %kw_h64_v [range(%kw_h64_v, 0, 64)] : index\n  %lane_h8 = index.assume", 1)
+        text, nq = re.subn(r"^( *)(%qdh(\d+)_v) = index\.add %qd\d+, %lane_h8 : index$",
+                           lambda mm: f"{mm.group(1)}%kw_o{mm.group(3)} = index.constant {8 * int(mm.group(3))} : index\n{mm.group(1)}%kw_a{mm.group(3)} = index.add %kw_h64, %kw_o{mm.group(3)} : index\n{mm.group(1)}{mm.group(2)} = index.add %dim_base, %kw_a{mm.group(3)} : index", text, flags=re.M)
+        assert nq == 8, nq
+        def kw(mm):
+            ind, nm, kb, c, view = mm.group(1), mm.group(2), mm.group(3), int(mm.group(4)), mm.group(5)
+            out = ""
+            if c == 0:
+                out += f"{ind}%kraw{kb}{mm.group(6)} = vector.load {view}[%kh_pg_lane, %kw_h64] : view<16x{HALF}xf16, %k_g_layout> -> vector<64xf16>\n"
+            out += f"{ind}%ks{kb}_{c}{mm.group(6)} = vector.slice %kraw{kb}{mm.group(6)}[{8 * c}] : vector<64xf16> -> vector<8xf16>\n"
+            out += f"{ind}{nm} = vector.fragment<lhs> %ks{kb}_{c}{mm.group(6)} shape [%c16, %c16] : vector<8xf16>"
+            return out
+        text, nk = re.subn(r"^( *)(%kl(\d+)_(\d+)(_pt)?) = vector\.fragment\.load<lhs> (%k_g(?:_pt)?)\[%kb\d+_row, %kc\d+_\d+(?:_pt)?\] shape \[%c16, %c16\] : view<16x\d+xf16, %k_g_layout> -> vector<8xf16>$", lambda mm: kw(type("M", (), {"group": lambda self, i, mm=mm: {1: mm.group(1), 2: mm.group(2), 3: mm.group(3), 4: mm.group(4), 5: mm.group(6), 6: mm.group(5) or ""}[i]})()), text, flags=re.M)
+        assert nk >= 8, nk
     text = re.sub(r"^( *)(%vr\d+) = index\.add %dim_base, (%qd\d+_o) : index$", r"\1\2 = index.add \3, %c0 : index", text, flags=re.M)
     text = re.sub(r"%vt_view\[(%vr\d+), (%kb\d+_row)\] shape \[%c16, %c16\] : view<\d+x\d+xf16>", rf"%v_g[\1, \2] shape [%c16, %c16] : view<{HALF}x16xf16, %vt_g_layout>", text)
     # the third barrier (end of the tile) goes: the double-buffered exchange makes it redundant. Exactly the last one of the loop body.

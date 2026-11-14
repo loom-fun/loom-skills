@@ -35,15 +35,58 @@
      "config": {
       "rdna4_f16_ffn": true
      }
+    },
+    {
+     "name": "d2noqk",
+     "build": {
+      "FLASH2_DIRECT": "2",
+      "FLASH2_ABL": "noqk"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     }
+    },
+    {
+     "name": "d2nopv",
+     "build": {
+      "FLASH2_DIRECT": "2",
+      "FLASH2_ABL": "nopv"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     }
+    },
+    {
+     "name": "d2nosm",
+     "build": {
+      "FLASH2_DIRECT": "2",
+      "FLASH2_ABL": "nosm"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     }
     }
    ],
    "steps": [
     "func:d2",
     "ktest:d2",
-    "perf:stack:3",
-    "perf:d2:3",
     "perf:stack:3:long",
-    "perf:d2:3:long"
+    "perf:d2:3:long",
+    "perf:d2noqk:3:long",
+    "perf:d2nopv:3:long",
+    "perf:d2nosm:3:long"
    ]
   }
  ],

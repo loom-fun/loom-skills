@@ -541,7 +541,7 @@ if R4:
         text = lazy(text)
     if os.environ.get("FLASH2_DIRECT", "0") == "2" and D == 512:   # K and V^T straight from the KV arena, no staging, one barrier per tile (flash2_direct.py); gfx12 twin only
         from flash2_direct import direct
-        text = direct(text, 2, KVH, D, PARTIAL)
+        text = direct(text, 2, KVH, D, PARTIAL, os.environ.get("FLASH2_DIRECT_K") == "wide")
     if os.environ.get("FLASH2_KVH", os.environ.get("FLASH2_TRIM", "0")) == "1":   # loop-invariant half of the paged-KV lookup hoisted (flash2_trim.py); gfx12 twin only
         from flash2_trim import kvhoist
         text = kvhoist(text)
