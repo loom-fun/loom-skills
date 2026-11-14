@@ -13,6 +13,8 @@ if __name__ == "__main__":
     sys.path.insert(0, os.path.join(sys.argv[1], "skills", "loom-port-llm", "starter"))
 import gen_gemm as G
 import gen_gemm_rdna4 as R
+sys.path.insert(0, HERE)
+import q4k_variants as V
 
 SHAPES = [  # (see ALL_SHAPES for the full list)
     ("q4_k", "swiglu", 1024, 1536, 6144), ("q4_k", "store", 1024, 6144, 1536),
@@ -29,9 +31,9 @@ ALL_SHAPES = [  # (fmt, mode, rows, K, N): the prefill GEMMs of Gemma-4-E2B (k15
     ("q4_k", "swiglu", 4096, 1536, 6144), ("q4_k", "store", 4096, 6144, 1536),
 ]
 
-NATIVE = {"dq2": R.q4k_m256_native, "sb": R.q4k_m256_sb, "sbnb": lambda t: R.q4k_m256_sb(t, nb=True),
-          "sbst": lambda t: R.q4k_m256_sb(t) if "_store_" in t[:200] else t, "sbsw": lambda t: R.q4k_m256_sb(t) if "_swiglu_" in t[:200] else t,
-          "sbsc": lambda t: R.q4k_m256_sb(t, sc=True), "sbnbsc": lambda t: R.q4k_m256_sb(t, nb=True, sc=True)}   # variants that swap the m256 q4_k twin for a native gfx12 kernel (no ablation transform)
+NATIVE = {"dq2": V.q4k_m256_native, "sb": V.q4k_m256_sb, "sbnb": lambda t: V.q4k_m256_sb(t, nb=True),
+          "sbst": lambda t: V.q4k_m256_sb(t) if "_store_" in t[:200] else t, "sbsw": lambda t: V.q4k_m256_sb(t) if "_swiglu_" in t[:200] else t,
+          "sbsc": lambda t: V.q4k_m256_sb(t, sc=True), "sbnbsc": lambda t: V.q4k_m256_sb(t, nb=True, sc=True)}   # variants that swap the m256 q4_k twin for a native gfx12 kernel (no ablation transform)
 
 def kernel_text(text, name):
     m = re.search(r'kernel\.def (?:target\(@\w+\) )?export\("%s"\)' % re.escape(name), text)
@@ -112,10 +114,10 @@ check.benchmark<@k_cold_{mode}_case> @k_cold_{mode}_{reps}x_bm
 
 import subprocess, functools
 @functools.lru_cache(maxsize=None)
-def gen_kernels(fmts, q4k):
+def gen_kernels(fmts):
     """name -> kernel text of the generator's whole output for FMTS ("q4_k:store+swiglu,..."), built as the models are (GEMM_SKIP_PADDING and
-    GEMM_N_FASTEST on, the gen_llm.py defaults) with LOOM_RDNA4_Q4K=q4k."""
-    env = dict(os.environ, GEMM_FORMATS=fmts, GEMM_SKIP_PADDING="1", GEMM_N_FASTEST="1", LOOM_RDNA4_Q4K=q4k, LOOM_RDNA4="1")
+    GEMM_N_FASTEST on, the gen_llm.py defaults)."""
+    env = dict(os.environ, GEMM_FORMATS=fmts, GEMM_SKIP_PADDING="1", GEMM_N_FASTEST="1", LOOM_RDNA4="1")
     txt = subprocess.run([sys.executable, os.path.join(ROOT, "skills", "loom-port-llm", "starter", "gen_gemm.py")], env=env, check=True, capture_output=True, text=True).stdout
     return {m.group(1): kernel_text(txt, m.group(1)) for m in re.finditer(r'kernel\.def (?:target\(@\w+\) )?export\("(\w+)"\)', txt)}
 
@@ -152,9 +154,8 @@ def build(variant=""):
                 if big != "m256": continue
             elif abl == "" and variant not in ("", "nfast", "nomma", "nodq", "nobar", "ablw", "ablx", "nox", "xhalf", "nowst"):
                 raise SystemExit("unknown variant " + variant)
-            q4 = "sb" if nat in ("sb", "sbst", "sbsw") else "mech"   # the generator's own LOOM_RDNA4_Q4K flavors; the others transform the mechanical twin here
-            kern = gen_kernels(f"{fmt}:{mode}", q4)[f"g_{'gemm_' + fmt + '_' + mode}_{big}_rdna4"]
-            if nat in NATIVE and nat not in ("sb", "sbst", "sbsw"): kern = NATIVE[nat](kern)
+            kern = gen_kernels(f"{fmt}:{mode}")[f"g_{'gemm_' + fmt + '_' + mode}_{big}_rdna4"]
+            if nat in NATIVE: kern = NATIVE[nat](kern)
             tw = transform(kern, abl if nat in NATIVE else variant)
             m = re.search(r'export\("(\w+)"\)', tw); old = m.group(1)
             kn = f"k_{fmt}_{mode}_{big}_{rows}x{K}x{N}"

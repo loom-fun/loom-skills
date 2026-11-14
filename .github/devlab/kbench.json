@@ -22,11 +22,17 @@
       "gen": "gemm_r9700/gen_gemm_bench.py",
       "gen_variants": [
         "base",
-        "sb"
+        "dq2",
+        "sb",
+        "sb_nodq",
+        "sb_nobar"
       ],
       "files": [
         "bench.loom",
-        "bench_sb.loom"
+        "bench_dq2.loom",
+        "bench_sb.loom",
+        "bench_sb_nodq.loom",
+        "bench_sb_nobar.loom"
       ],
       "config": [],
       "args": [
