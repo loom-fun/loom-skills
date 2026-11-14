@@ -17,27 +17,46 @@
      "build": {}
     },
     {
+     "name": "nopre",
+     "build": {},
+     "execution": {
+      "prefix_cache_capacity": 0
+     }
+    },
+    {
+     "name": "nosess",
+     "build": {},
+     "execution": {
+      "session_cache_capacity": 0
+     }
+    },
+    {
+     "name": "nocache",
+     "build": {},
+     "execution": {
+      "prefix_cache_capacity": 0,
+      "session_cache_capacity": 0
+     }
+    },
+    {
      "name": "pool200k",
      "build": {},
      "execution": {
       "pool_capacity": 200000
      }
-    },
-    {
-     "name": "pool64k",
-     "build": {},
-     "execution": {
-      "pool_capacity": 65536
-     }
     }
    ],
    "steps": [
     "perf:base:2",
-    "perf:base:5:long",
+    "perf:base:4:long",
+    "perf:nopre:2",
+    "perf:nopre:4:long",
+    "perf:nosess:2",
+    "perf:nosess:4:long",
+    "perf:nocache:2",
+    "perf:nocache:4:long",
     "perf:pool200k:2",
-    "perf:pool200k:5:long",
-    "perf:pool64k:2",
-    "perf:pool64k:5:long"
+    "perf:pool200k:4:long"
    ]
   }
  ],
