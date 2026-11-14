@@ -114,7 +114,47 @@ def apply(text, enable=None):
     # res has one line per line of out: the templates go right after the last twin kernel
     res = res[:last_def_end] + ([""] + decls if decls else []) + res[last_def_end:]
     body = PROGRAM_DEF.sub(r"\1target(@device) \2", "\n".join(res))
-    return HEADER + body
+    return HEADER + encodings_first(body)
+
+
+ENC_LIMIT = 60000   # SSA values (counted as below) before an encoding-typed use that hrx-loom 0.1.0 still resolves
+
+
+ENC_BYTES = 4_000_000   # bytes before an encoding-typed line: hrx-loom 0.1.0 fails past 4 MiB (engineer sweep bisected 4,191,941 ok, 4,281,430 fails)
+
+
+def _enc_depth(text):
+    """The largest count of SSA values defined before a line that defines or uses an encoding in a type (or ENC_LIMIT + 1
+    when such a line lies past ENC_BYTES of the file)."""
+    c = worst = pos = 0
+    for l in text.split("\n"):
+        pos += len(l.encode()) + 1
+        if pos > ENC_BYTES and ("encoding<layout>" in l or re.search(r"view<[^>]*, %", l)):
+            return ENC_LIMIT + 1
+        m = re.match(r"\s*((?:%[\w.]+\s*,\s*)*%[\w.]+)\s*=", l)
+        if m:
+            c += m.group(1).count("%")
+        if "encoding<layout>" in l or re.search(r"view<[^>]*, %", l):
+            worst = max(worst, c)
+    return worst
+
+
+def encodings_first(text):
+    """hrx-loom 0.1.0 resolves an encoding referenced in a type wrongly once the module has defined about 2^16 values before
+    it (ENCODING/004 '... references encoding value %x which is not defined at this point', naming an unrelated earlier
+    value; seen on Laguna-XS-2.1's dual-target llm.loom, 94k lines). A big file whose encoding-typed kernels sit that deep
+    gets its top-level definitions reordered, stably: funcs, then the kernels that use encodings, then the rest (templates
+    and command programs stay after them). Kernel texts are unchanged; smaller files are returned as they are."""
+    if _enc_depth(text) <= ENC_LIMIT:
+        return text
+    parts = re.split(r"(?m)^(?=kernel\.def |func\.def |template\.|command\.program\.def )", text)
+    head, rest = parts[0], parts[1:]
+    first_late = next((i for i, p in enumerate(rest) if p.startswith(("template.", "command.program.def"))), len(rest))
+    defs, late = rest[:first_late], rest[first_late:]
+    funcs = [p for p in defs if p.startswith("func.def")]
+    enc = [p for p in defs if p.startswith("kernel.def") and ("encoding<layout>" in p or re.search(r"view<[^>]*, %", p))]
+    other = [p for p in defs if not p.startswith("func.def") and p not in enc]
+    return head + "".join(funcs + enc + other + late)
 
 
 def apply_file(path):

@@ -148,3 +148,18 @@ class ApplyDirTests(unittest.TestCase):
             (Path(d) / "control.loom").write_text("func.def @f() {\n  func.return\n}\n")
             self.assertEqual(dual_target.apply_dir(d), ["llm.loom"])
             self.assertEqual((Path(d) / "control.loom").read_text(), "func.def @f() {\n  func.return\n}\n")
+
+
+class EncodingsFirstTests(unittest.TestCase):
+    def test_small_file_unchanged(self):
+        self.assertEqual(dual_target.encodings_first(FIXTURE), FIXTURE)
+
+    def test_deep_file_reordered_stably(self):
+        filler = "kernel.def export(\"f\") @f() {\n" + "".join(f"  %v{i} = index.constant 0 : index\n" for i in range(dual_target.ENC_LIMIT + 10)) + "}\n"
+        enc = "kernel.def export(\"e\") @e() {\n  %l = encoding.layout.strided [%a, %b] : encoding<layout>\n}\n"
+        text = "func.def @h() {\n}\n" + filler + enc + "command.program.def public target(@device) @p() {\n}\n"
+        out = dual_target.encodings_first(text)
+        self.assertEqual(sorted(out.split("\n")), sorted(text.split("\n")))
+        self.assertLess(out.index('@e()'), out.index('@f()'))
+        self.assertLess(out.index('@h()'), out.index('@e()'))
+        self.assertTrue(out.rstrip().endswith("command.program.def public target(@device) @p() {\n}".rstrip()))
