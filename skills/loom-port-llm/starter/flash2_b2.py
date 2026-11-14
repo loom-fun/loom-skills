@@ -57,14 +57,12 @@ def rewrite_b2(text, kvh, d, partial):
     alloc = (f"  %c0_i = index.constant 0 : index\n  %c1_i = index.constant 1 : index\n"
              f"  %ql_bytes = index.constant {2 * 32 * QP * 2} : offset\n  %ql_tile = buffer.alloca<workgroup> align(16) %ql_bytes : buffer\n"
              f"  %ql_view = buffer.view %ql_tile[%origin] : buffer -> view<2x32x{QP}xf16>\n"
-             f"  %pl_bytes = index.constant {2 * 2 * waves * 32 * 16} : offset\n  %pl_tile = buffer.alloca<workgroup> align(16) %pl_bytes : buffer\n"
-             f"  %pl_view = buffer.view %pl_tile[%origin] : buffer -> view<2x2x{waves}x32x8xf16>\n"
-             f"  %mx_bytes = index.constant {2 * 2 * waves * 32 * 4} : offset\n  %mx_tile = buffer.alloca<workgroup> align(16) %mx_bytes : buffer\n"
-             f"  %mx_view = buffer.view %mx_tile[%origin] : buffer -> view<2x2x{waves}x32xf32>\n"
-             f"  %vo_bytes = index.constant {waves * 4 * 32 * 8} : offset\n  %vo_tile = buffer.alloca<workgroup> align(16) %vo_bytes : buffer\n"
-             f"  %vo_view = buffer.view %vo_tile[%origin] : buffer -> view<{waves}x4x32xi64>\n"
+             f"  %pl_bytes = index.constant {2 * waves * 32 * 16} : offset\n  %pl_tile = buffer.alloca<workgroup> align(16) %pl_bytes : buffer\n"
+             f"  %pl_view = buffer.view %pl_tile[%origin] : buffer -> view<1x2x{waves}x32x8xf16>\n"
+             f"  %mx_bytes = index.constant {2 * waves * 32 * 4} : offset\n  %mx_tile = buffer.alloca<workgroup> align(16) %mx_bytes : buffer\n"
+             f"  %mx_view = buffer.view %mx_tile[%origin] : buffer -> view<1x2x{waves}x32xf32>\n"
              f"  %ls_tile = buffer.alloca<workgroup> align(16) %mx_bytes : buffer\n"
-             f"  %ls_view = buffer.view %ls_tile[%origin] : buffer -> view<2x2x{waves}x32xf32>\n")
+             f"  %ls_view = buffer.view %ls_tile[%origin] : buffer -> view<1x2x{waves}x32xf32>\n")
     defs = f"""  %vt_g_c1 = index.constant 1 : index
   %vt_g_crow = index.constant {R} : index
   %vt_g_layout = encoding.layout.strided [%vt_g_c1, %vt_g_crow] : encoding<layout>
@@ -169,11 +167,11 @@ def rewrite_b2(text, kvh, d, partial):
     %lmax{s_} = vector.reduce<maxnumf> %masked{s_}, %neg_big : vector<8xf32>, f32
     %omax{s_}, %omax{s_}_u = kernel.subgroup.shuffle<xor> %lmax{s_}, %exchange, %width : f32, i32, i32
     %tmax{s_} = scalar.maxnumf %lmax{s_}, %omax{s_} : f32
-    view.store %tmax{s_}, %mx_view[%par, %c{hh}_i, %fb_wv, %lane] : f32, view<2x2x{waves}x32xf32>""")
+    view.store %tmax{s_}, %mx_view[%c0_i, %c{hh}_i, %fb_wv, %lane] : f32, view<1x2x{waves}x32xf32>""")
     A("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
     for hh, s_ in ((0, ""), (1, "B")):
         for i in range(4):
-            A(f"    %mx{s_}{i} = view.load %mx_view[%par, %c{hh}_i, %fq{i}, %lane] : view<2x2x{waves}x32xf32> -> f32")
+            A(f"    %mx{s_}{i} = view.load %mx_view[%c0_i, %c{hh}_i, %fq{i}, %lane] : view<1x2x{waves}x32xf32> -> f32")
         A(f"""    %mxa{s_} = scalar.maxnumf %mx{s_}0, %mx{s_}1 : f32
     %mxb{s_} = scalar.maxnumf %mx{s_}2, %mx{s_}3 : f32
     %bm{s_} = scalar.maxnumf %mxa{s_}, %mxb{s_} : f32
@@ -188,12 +186,12 @@ def rewrite_b2(text, kvh, d, partial):
     %osum{s_}, %osum{s_}_u = kernel.subgroup.shuffle<xor> %ls{s_}, %exchange, %width : f32, i32, i32
     %tsum{s_} = scalar.addf %ls{s_}, %osum{s_} : f32
     %pt_h{s_} = vector.fptrunc %p{s_} : vector<8xf32> to vector<8xf16>
-    vector.store %pt_h{s_}, %pl_view[%par, %c{hh}_i, %fb_wv, %lane, %c0] : vector<8xf16>, view<2x2x{waves}x32x8xf16>
-    view.store %tsum{s_}, %ls_view[%par, %c{hh}_i, %fb_wv, %lane] : f32, view<2x2x{waves}x32xf32>""")
+    vector.store %pt_h{s_}, %pl_view[%c0_i, %c{hh}_i, %fb_wv, %lane, %c0] : vector<8xf16>, view<1x2x{waves}x32x8xf16>
+    view.store %tsum{s_}, %ls_view[%c0_i, %c{hh}_i, %fb_wv, %lane] : f32, view<1x2x{waves}x32xf32>""")
     A("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
     for hh, s_ in ((0, ""), (1, "B")):
         for j in range(4):
-            A(f"    %lv{s_}{j} = view.load %ls_view[%par, %c{hh}_i, %fq{j}, %lane] : view<2x2x{waves}x32xf32> -> f32")
+            A(f"    %lv{s_}{j} = view.load %ls_view[%c0_i, %c{hh}_i, %fq{j}, %lane] : view<1x2x{waves}x32xf32> -> f32")
         A(f"""    %lt01{s_} = scalar.addf %lv{s_}0, %lv{s_}1 : f32
     %lt012{s_} = scalar.addf %lt01{s_}, %lv{s_}2 : f32
     %lt{s_} = scalar.addf %lt012{s_}, %lv{s_}3 : f32
@@ -226,9 +224,9 @@ def rewrite_b2(text, kvh, d, partial):
       %jj_c2 = index.cmp eq, %jj, %c2 : index
       %jj_c0 = index.cmp eq, %jj, %c0 : index
 {VJ}      %vj = buffer.view %arena[%vj_o] : buffer -> view<128x16xf16, %vt_g_layout>
-      %prA = vector.load %pl_view[%par, %c0_i, %jj_a, %lane, %c0] : view<2x2x{waves}x32x8xf16> -> vector<8xf16>
+      %prA = vector.load %pl_view[%c0_i, %c0_i, %jj_a, %lane, %c0] : view<1x2x{waves}x32x8xf16> -> vector<8xf16>
       %pfA = vector.fragment<rhs> %prA shape [%c16, %c16] : vector<8xf16>
-      %prB = vector.load %pl_view[%par, %c1_i, %jj_a, %lane, %c0] : view<2x2x{waves}x32x8xf16> -> vector<8xf16>
+      %prB = vector.load %pl_view[%c0_i, %c1_i, %jj_a, %lane, %c0] : view<1x2x{waves}x32x8xf16> -> vector<8xf16>
       %pfB = vector.fragment<rhs> %prB shape [%c16, %c16] : vector<8xf16>""")
     if partial:
         A("""      %jj16 = index.mul %jj_a, %c16 : index
