@@ -5,50 +5,39 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "prof06",
+   "name": "stall06",
    "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 30000000000,
    "variants": [
     {
      "name": "base",
      "build": {}
     },
     {
-     "name": "dflash",
-     "build": {},
-     "double": [
-      "*:g_attention_flash2>"
-     ]
-    },
-    {
-     "name": "dgemm",
-     "build": {},
-     "double": [
-      "*:g_gemm_"
-     ]
-    },
-    {
-     "name": "chunk2k",
+     "name": "pool200k",
      "build": {},
      "execution": {
-      "prefill_capacity": 2048
+      "pool_capacity": 200000
+     }
+    },
+    {
+     "name": "pool64k",
+     "build": {},
+     "execution": {
+      "pool_capacity": 65536
      }
     }
    ],
    "steps": [
     "perf:base:2",
-    "perf:base:3:long",
-    "perf:dflash:2",
-    "perf:dflash:3:long",
-    "perf:dgemm:2",
-    "perf:dgemm:3:long",
-    "perf:chunk2k:2",
-    "perf:chunk2k:3:long",
-    "llama@rocm.np1:2",
-    "llama@rocm.np1:3:long"
+    "perf:base:5:long",
+    "perf:pool200k:2",
+    "perf:pool200k:5:long",
+    "perf:pool64k:2",
+    "perf:pool64k:5:long"
    ]
   }
  ],
