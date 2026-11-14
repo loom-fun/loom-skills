@@ -6,7 +6,8 @@ usage: strix_ab_compare.py JOB_OUT_DIR [--band 0.03] [--fun-info loom-fun info.j
 Per metric (card_lib.METRIC_KEYS, aggregated as make_info.py perf does: mean of the runs, median for streams4) and per drafted
 metric's acceptance: old, new, new/old, PASS inside +-band, else OUT (a re-run decides). Plus: greedy text (text_fun.json vs
 text_staging.json, per prompt), func / ktest / gates of the staging package (summary.json), and new vs the published loom-fun card value.
-Exit 0 always; the verdict is in the JSON ("verdict": pass | rerun | gate_fail).
+Exit 0 always; the verdict is in the JSON ("verdict": pass | rerun | gate_fail; with --prev FIRST.json: pass | out_of_margin | gate_fail).
+A missing metric (a step failed) counts as out of band: re-run.
 """
 import argparse
 import json
@@ -24,6 +25,8 @@ ap.add_argument("out")
 ap.add_argument("--band", type=float, default=0.03)
 ap.add_argument("--fun-info", help="the published loom-fun info.json (card values)")
 ap.add_argument("--json")
+ap.add_argument("--prev", help="the first run's --json (this run is the confirming re-run): verdict out_of_margin when a metric is "
+                "outside the band in both runs in the same direction, else pass")
 a = ap.parse_args()
 o = a.out
 
@@ -103,6 +106,21 @@ res = {"job": summ and json.load(open(os.path.join(o, "summary.json")))["job"], 
        "out_of_band": outs, "gate_failures": fails,
        "worst_metric": worst[1] if worst else None, "worst_ratio": worst[2] if worst else None,
        "verdict": "gate_fail" if fails else ("rerun" if outs else "pass")}
+if a.prev:   # the stop rule: re-run once; still outside the band in the same direction = OUT OF MARGIN
+    p = json.load(open(a.prev))
+    def sides(x):
+        out = {}
+        for k, e in x["metrics"].items():
+            if e["status"] == "OUT":
+                out[k] = 1 if e["ratio"] > 1 else -1
+        for k, e in x["acceptance"].items():
+            if e["status"] == "OUT":
+                out[f"acceptance:{k}"] = 1 if e["ratio"] > 1 else -1
+        return out
+    sp, sn = sides(p), sides(res)
+    res["first_run"] = {"job": p["job"], "runner": p["runner"], "out_of_band": p["out_of_band"]}
+    res["out_of_margin"] = sorted(k for k in sn if sp.get(k) == sn[k])
+    res["verdict"] = "gate_fail" if fails else ("out_of_margin" if res["out_of_margin"] else "pass")
 if a.json:
     json.dump(res, open(a.json, "w"), indent=1)
 print(f"{res['job']} on {res['runner']}: verdict {res['verdict']}  worst {res['worst_metric']} {res['worst_ratio']}")
