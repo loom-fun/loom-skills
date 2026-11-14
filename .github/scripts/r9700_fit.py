@@ -12,6 +12,11 @@ windows included: that is what the pool allocates). Row fields (same as before):
   kv    KV bytes at ctx (the native context, at most the kernels' 262144)       kv32  KV bytes at 32768
   need  w + kv + card_lib.SERVE_HEADROOM       verdict  fits (native ctx) | fits (reduced ctx) | does not fit
   mem   the card's memory_bytes     n_exp  experts (kept from the previous table)     kvpp  KV bytes per position
+Optional, kept from the previous table (measured, never derived): "ctx_cap" (a measured limit on the served context) and
+"r9700_execution" {"prefill_capacity": 2048, ...}: the execution settings the package needs on the R9700 beyond model.json's
+(its program scratch at the card's prefill chunk does not fit beside the weights and the drafter, say). The package then has
+its own R9700 model document, model.radeon-r9700.json (make_info.py build --fit writes it, publish_package.py uploads it, the
+card's R9700 Quick start fetches it, r9700_jobs.py measures it); this script sizes it at the document's prefill_capacity and rows.
 GGUFs may be header-only stubs (sparse files of the right size): only headers are read.
 """
 import argparse
@@ -48,7 +53,11 @@ for slug in a.slugs or sorted(models):
     shutil.rmtree(w, ignore_errors=True)
     sizing = os.path.join(w, "sizing.json")
     os.makedirs(w, exist_ok=True)
-    ok, msg, _ = sc.build(slug, f"{a.pkgs}/{slug}", w, ("--sizing-json", sizing))
+    # a package with "r9700_execution" is served from its R9700 document: size the program scratch at that document's prefill chunk and rows
+    rx = o.get("r9700_execution") or {}
+    ok, msg, _ = sc.build(slug, f"{a.pkgs}/{slug}", w, ("--sizing-json", sizing,
+                          *(("--prefill", str(rx["prefill_capacity"])) if rx.get("prefill_capacity") else ()),
+                          *(("--rows", str(rx["rows"])) if rx.get("rows") else ())))
     if not ok or not os.path.exists(sizing):
         print(f"{slug}: no sizing ({msg or 'catalog kit'}): previous row kept", file=sys.stderr)
         if o:
@@ -69,7 +78,8 @@ for slug in a.slugs or sorted(models):
     else:
         verdict = "fits (native ctx)" if need <= POOL else "fits (reduced ctx)"
     row = {"slug": slug, "w": fixed, "kv": kv, "kv32": kvpp * 32768, "kvpp": kvpp, "ctx": ctx, "mem": models[slug].get("memory_bytes") or o.get("mem"),
-           "need": float(need), "verdict": verdict, "n_exp": o.get("n_exp", 0), **({"ctx_cap": o["ctx_cap"]} if o.get("ctx_cap") else {})}
+           "need": float(need), "verdict": verdict, "n_exp": o.get("n_exp", 0), **({"ctx_cap": o["ctx_cap"]} if o.get("ctx_cap") else {}),
+           **({"r9700_execution": rx} if rx else {})}
     rows.append(row)
     reduced = lambda r, v: card_lib.served_context(r["w"], r["kv"] / r["ctx"], POOL) if r.get("kv") and v.startswith("fits (red") else None
     sc_old = reduced(o, o.get("verdict", "")) if o else None

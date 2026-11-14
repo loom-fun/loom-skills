@@ -619,7 +619,7 @@ def gpu_view(info, gpu):
     d = (info.get("devices") or {}).get(gpu) or {}
     out = {k: v for k, v in info.items() if k != "devices"}
     out["gates"] = d.get("gates") or {}
-    for k in ("performance", "roofline", "state", "required_bytes", "memory_bytes", "served_context"):
+    for k in ("performance", "roofline", "state", "required_bytes", "memory_bytes", "served_context", "model_document"):
         if d.get(k) is not None:
             out[k] = d[k]
     out["gpu"] = gpu
@@ -667,6 +667,48 @@ def served_context(weights, kv_bytes_per_token, memory_bytes, headroom=SERVE_HEA
     if kv_bytes_per_token <= 0:
         return None
     return max(0, int((memory_bytes - weights - headroom) // kv_bytes_per_token) // 1024 * 1024)
+
+
+def gpu_document(gpu):
+    """The file name of a GPU's own model document in a package repo (model.radeon-r9700.json), next to model.json (the
+    default, Strix Halo's). Only a package that needs other serving settings on that GPU carries one."""
+    return f"model.{gpu}.json"
+
+
+def gpu_document_execution(row, served_ctx=None):
+    """The execution overrides a fit-table row's "r9700_execution" gives the R9700 document, plus the served context
+    (context_capacity = pool_capacity = served_ctx) when the GPU serves a shorter context and the row does not say
+    otherwise. None: the row has no overrides, so the package has no R9700 document."""
+    ex = (row or {}).get("r9700_execution")
+    if not ex:
+        return None
+    out = {}
+    if served_ctx:
+        out.update(context_capacity=served_ctx, pool_capacity=served_ctx)
+    out.update(ex)
+    return out
+
+
+def gpu_document_model(model, execution):
+    """model.json's document with `execution` merged over every preset's execution: the programs, weights, origins and
+    tokenizer are exactly the package's (a GPU document differs from model.json only in how it serves them)."""
+    doc = json.loads(json.dumps(model))
+    for p in doc.get("presets", {}).values():
+        p.setdefault("execution", {}).update(execution)
+    return doc
+
+
+def gpu_document_errors(model, doc):
+    """Why `doc` is not a valid GPU document of model.json (it may differ only in the presets' execution blocks)."""
+    strip = lambda m: {**{k: v for k, v in m.items() if k != "presets"},
+                       "presets": {n: {k: v for k, v in p.items() if k != "execution"} for n, p in m.get("presets", {}).items()}}
+    errs = []
+    if strip(model) != strip(doc):
+        errs.append("differs from model.json beyond the presets' execution blocks (programs, weights, origins, "
+                    "tokenizers and services must be the package's)")
+    if list(model.get("presets", {})) != list(doc.get("presets", {})):
+        errs.append("declares other presets than model.json")
+    return errs
 
 
 def fit_served_context(row, memory_bytes):

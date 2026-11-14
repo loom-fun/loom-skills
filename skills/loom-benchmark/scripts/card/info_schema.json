@@ -56,6 +56,9 @@
     "state": {"enum": ["not_measured", "unsupported"], "description": "not_measured: this package has no results on this GPU yet (the card says so and shows no numbers). unsupported: the package does not fit this GPU (required_bytes; the card says so). Absent: the GPU has results."},
     "required_bytes": {"type": "integer", "description": "unsupported only: the memory the package needs on this GPU (weights, KV cache at the native context, headroom)"},
     "memory_bytes": {"type": "integer", "description": "loom-serve --memory_bytes on this GPU when it differs from the package value (model.json or card.memory_bytes): the GPU memory bounds the elastic pool"},
+    "model_document": {"type": "object", "required": ["file", "execution"], "additionalProperties": false,
+     "description": "This GPU is served from its own model document in the repo (model.radeon-r9700.json, with its .lock): model.json with other execution settings (prefill chunk, context and pool capacity, rows, drafting) for this GPU's memory; the same programs, weights and tokenizer. The card's Quick start fetches it for this GPU.",
+     "properties": {"file": {"type": "string"}, "execution": {"type": "object", "description": "The execution values the document sets, over model.json's"}}},
     "served_context": {"type": "integer", "description": "Tokens per request this GPU serves when its memory budget holds less KV cache than the native context needs; the same package serves it, --memory_bytes bounds the pool. Absent: the native context."},
       "performance": {
        "type": "object", "required": ["baseline", "sessions"],

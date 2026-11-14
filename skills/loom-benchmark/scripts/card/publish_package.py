@@ -16,7 +16,7 @@
       be uploaded and deleted, without a token or a network call.
       Uploads OUT (with the card: README.md, info.json, REPORT.md made by make_info.py build + render_card.py)
       and deletes repo files OUT no longer has (an in-place update of an older package leaves nothing stale;
-      .gitattributes stays). --card-only uploads just README.md, info.json and REPORT.md. --parent-commit SHA: the
+      .gitattributes stays). --card-only uploads just README.md, info.json, REPORT.md and a GPU's model document (model.radeon-r9700.json + .lock, written by make_info.py build --fit from the fit row's "r9700_execution": model.json with that GPU's execution settings, same programs and weights). --parent-commit SHA: the
       repo commit the card was built from (the revision whose info.json you re-read, e.g. `hf download` of it, or
       the Hub API's model sha): the upload fails if the repo has moved since (another worker published), instead
       of overwriting that card; re-read info.json and rebuild. Needs huggingface_hub and a write token (HF_TOKEN or
@@ -126,16 +126,42 @@ def check_card_text(out, repo=None):
     if repo and info.get("repo") != repo:
         sys.exit(f"info.json is the card of {info.get('repo')}, not {repo}: rebuild it with make_info.py build --org "
                  f"{repo.split('/')[0]} (the Quick start fetches from the card's repo)")
+    # a GPU's own model document: info.json names it, it is a file of the package differing from model.json only in execution
+    names = {gpu: (dev.get("model_document") or {}).get("file") for gpu, dev in info.get("devices", {}).items()}
+    for gpu, name in names.items():
+        stray = card_lib.gpu_document(gpu)
+        if name and name != stray:
+            sys.exit(f"info.json: {gpu}'s model document must be {stray}, not {name}")
+    for gpu in card_lib.GPUS:
+        doc = os.path.join(out, card_lib.gpu_document(gpu))
+        if names.get(gpu):
+            if not os.path.isfile(doc) or not os.path.isfile(doc + ".lock"):
+                sys.exit(f"{doc} or its .lock is missing (make_info.py build --fit writes both)")
+            errs = card_lib.gpu_document_errors(card_lib.load_json(os.path.join(out, "model.json")), card_lib.load_json(doc))
+            if errs:
+                sys.exit(f"{os.path.basename(doc)}: " + "; ".join(errs))
+        elif os.path.exists(doc) or os.path.exists(doc + ".lock"):
+            sys.exit(f"{os.path.basename(doc)} is in {out} but info.json does not name it for {gpu}: rebuild the card with make_info.py build --fit")
     if info.get("report") != "generated":
         sys.exit("info.json: only a generated REPORT.md is published (an attached, hand-written report is narrative)")
+
+
+def card_files(out):
+    """The files of the card itself (README.md, info.json, REPORT.md, and each GPU's model document and its lock)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import card_lib
+    docs = [f for g in card_lib.GPUS for f in (card_lib.gpu_document(g), card_lib.gpu_document(g) + ".lock")
+            if os.path.isfile(os.path.join(out, f))]
+    return [*CARD, *docs]
 
 
 def cmd_upload(a):
     a.repo = target_repo(a.org, a.repo)
     check_card_text(a.out, a.repo)
+    cardf = card_files(a.out)
     local = {os.path.relpath(os.path.join(r, f), a.out).replace(os.sep, "/") for r, _, fs in os.walk(a.out) for f in fs}
     if a.dry_run:
-        files = sorted(f for f in local if not a.card_only or f in CARD)
+        files = sorted(f for f in local if not a.card_only or f in cardf)
         print(f"dry run: would upload {len(files)} files to https://huggingface.co/{a.repo}"
               + (" (card only)" if a.card_only else "") + ": " + ", ".join(files[:12]) + (" ..." if len(files) > 12 else ""))
         return
@@ -144,10 +170,11 @@ def cmd_upload(a):
     api.create_repo(a.repo, repo_type="model", exist_ok=True)
     if a.card_only:
         missing = [f for f in CARD if not os.path.isfile(os.path.join(a.out, f))]
+        gone = [f for f in api.list_repo_files(a.repo) if re.fullmatch(r"model\.[\w-]+\.json(\.lock)?", f) and f not in cardf]
         if missing:
             sys.exit(f"card files missing in {a.out}: {missing}")
         strays = [f for f in api.list_repo_files(a.repo) if STRAY.match(f)]
-        api.upload_folder(repo_id=a.repo, folder_path=a.out, allow_patterns=list(CARD), delete_patterns=strays or None,
+        api.upload_folder(repo_id=a.repo, folder_path=a.out, allow_patterns=cardf, delete_patterns=(strays + gone) or None,
                           commit_message=a.message or "Card", parent_commit=a.parent_commit)
         print(f"card uploaded to https://huggingface.co/{a.repo}")
         return

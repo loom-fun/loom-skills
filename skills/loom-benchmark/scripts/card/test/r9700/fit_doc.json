@@ -1,0 +1,12 @@
+[
+ {
+  "slug": "unsloth-Qwen3-0.6B-loom",
+  "w": 396705472,
+  "kv": 61440000000,
+  "ctx": 40960,
+  "need": 63836705472,
+  "r9700_execution": {
+   "prefill_capacity": 2048
+  }
+ }
+]

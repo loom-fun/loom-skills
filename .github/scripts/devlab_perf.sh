@@ -37,6 +37,9 @@
 #   out/ also holds llamacpp_args-vulkan.txt (the exact server arguments), llamacpp_release-vulkan.sha256 and
 #   programs_sha256.txt (the card's programs this job fetched: make_info.py perf --fetched-programs).
 # Variant V: {"name": "card"}                                    the card's own programs, as published
+# Job "model_document": "model.radeon-r9700.json": every variant of the job starts from the card's own document for this GPU instead
+#   of model.json (loom-fetch installs it as model.json: same programs and weights, the GPU's execution settings, and the
+#   variants' "execution" overrides apply on top of it); r9700_jobs.py sets it for a package that has one.
 #            {"name": "fun", "card": "loom-fun/<repo>"}              another card's published programs next to this job's card (a Strix
 #                                                                    A/B of the staging package against the loom-fun one: ab / perf / textmatch)
 #            {"name": "x", "build": {"ENV": "1"}, "build_args": [...], "ref": "origin/main",
@@ -128,26 +131,31 @@ root=$("$SV/ensure_sdk.sh" "${LOOM_ROOT:-$WORK/loom}" "$out/llm_config.json" 2> 
 export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 
 # 2. The card (fetched once per runner and card)
-fetch_card() {   # fetch_card REPO -> sets CARD_DIR: the card's files at one commit (a variant "card": ORG/REPO fetches another card)
-  local r=$1 rv bs
-  CARD_DIR=$WORK/_card/${r//\//_}; rv=$(curl -fsS --retry 3 "https://huggingface.co/api/models/$r/revision/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || rv=main
+fetch_card() {   # fetch_card REPO [DOCUMENT] -> sets CARD_DIR: the card's files at one commit (a variant "card": ORG/REPO fetches another card);
+                 # DOCUMENT (default model.json): the card's own model document for a GPU, e.g. model.radeon-r9700.json (loom-fetch
+                 # installs it as model.json: the programs, weights and tokenizer are the same, the execution settings are the GPU's)
+  local r=$1 doc=${2:-model.json} rv bs
+  CARD_DIR=$WORK/_card/${r//\//_}; [ "$doc" = model.json ] || CARD_DIR=$CARD_DIR@$doc; rv=$(curl -fsS --retry 3 "https://huggingface.co/api/models/$r/revision/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || rv=main
   # the files are fetched at one commit (resolve/main can serve an older revision for a while after a publish), and a card
   # directory left by an earlier job on this runner is reused only when it holds that commit
   bs=https://huggingface.co/$r/resolve/$rv; CARD_BASE=$bs
   if [ "$rv" = main ] || [ "$(cat "$CARD_DIR/.fetched" 2>/dev/null)" != "$rv" ]; then
     step "fetch $r"; rm -rf "$CARD_DIR"
-    HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$bs/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$CARD_DIR" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch $r"; exit 1; }
+    HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$bs/$doc" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$CARD_DIR" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch $r"; exit 1; }
     curl -fsSL --retry 3 "$bs/llm_config.json" -o "$CARD_DIR/llm_config.json" || exit 1
     rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; echo "$rv" > "$CARD_DIR/.fetched"
   fi
 }
-fetch_card "$repo"; card=$CARD_DIR; base=$CARD_BASE
-python3 - "$card" <<'EOF' || { echo "FAIL: the fetched card's model.json and llm_config.json disagree (a stale fetch?)"; exit 1; }
+mdoc=$(q "print(j.get('model_document') or e.get('model_document') or '')")   # "model_document": the card's own document for this runner's GPU
+fetch_card "$repo" "$mdoc"; card=$CARD_DIR; base=$CARD_BASE
+[ -n "$mdoc" ] && echo "serving the card's $mdoc (installed as model.json): execution $(python3 -c "import json; print(json.dumps(next(iter(json.load(open('$card/model.json'))['presets'].values()))['execution']))")"
+[ -n "$mdoc" ] && cp "$card/model.json" "$out/model_document.json"
+MODEL_DOCUMENT=$mdoc python3 - "$card" <<'EOF' || { echo "FAIL: the fetched card's model.json and llm_config.json disagree (a stale fetch?)"; exit 1; }
 import json, os, sys
 m = json.load(open(os.path.join(sys.argv[1], "model.json"))); c = json.load(open(os.path.join(sys.argv[1], "llm_config.json")))
 depth = next(iter(m["presets"].values()))["execution"].get("draft_depth", 0)
 want = (c.get("draft") or {}).get("depth", 0)
-sys.exit(0 if depth == want else f"model.json draft_depth {depth} != llm_config.json draft depth {want}")
+sys.exit(0 if depth == want or os.environ.get("MODEL_DOCUMENT") else f"model.json draft_depth {depth} != llm_config.json draft depth {want}")
 EOF
 "$T" -c "import sys; sys.path.insert(0, sys.argv[1]); from card_lib import programs_sha256; print(programs_sha256(sys.argv[2]))" \
   "$here/skills/loom-benchmark/scripts/card" "$card" > "$out/programs_sha256.txt"   # the published programs this job fetched

@@ -323,6 +323,34 @@ mkdir -p "$tmp/r9700_staging"; cp -r "$R/pkg/." "$tmp/r9700_staging/"
 py "$C/make_info.py" build "$tmp/r9700_staging" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging "${R3[@]}" --memory-bytes 17000000000 \
   --gpus strix-halo,radeon-r9700 --fit "$R/fit_reduced.json" --evidence "$tmp/r_gates.json" "$tmp/r_perf_sub.json" "$tmp/r_vk_sub.json" \
   "$R/evidence/roofline_reduced.json" -o "$tmp/r9700_staging/info.json" 2>/dev/null
+# a package that needs other settings on the R9700 (fit row "r9700_execution"): its own model document, model.radeon-r9700.json
+# (+ lock), the Quick start fetches it for that GPU, model.json (Strix Halo) is untouched
+mkdir -p "$tmp/r9700_doc"; cp -r "$R/pkg/." "$tmp/r9700_doc/"
+py "$C/make_info.py" build "$tmp/r9700_doc" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging "${R3[@]}" --memory-bytes 17000000000 \
+  --gpus strix-halo,radeon-r9700 --fit "$R/fit_doc.json" --evidence "$tmp/r_gates.json" "$tmp/r_perf_sub.json" "$tmp/r_vk_sub.json" \
+  "$R/evidence/roofline_reduced.json" -o "$tmp/r9700_doc/info.json" 2>/dev/null
+py -c "import json, sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+d = sys.argv[2]; m = c.load_json(d + '/model.json'); doc = c.load_json(d + '/model.radeon-r9700.json'); i = c.load_json(d + '/info.json')
+assert c.validate(i) == [], c.validate(i)
+ex = doc['presets']['chat']['execution']
+assert ex['prefill_capacity'] == 2048 and ex['context_capacity'] == ex['pool_capacity'] == 20480, ex
+assert {k: v for k, v in ex.items() if k not in ('prefill_capacity', 'context_capacity', 'pool_capacity')} == {k: v for k, v in m['presets']['chat']['execution'].items() if k not in ('prefill_capacity', 'context_capacity', 'pool_capacity')}
+assert c.gpu_document_errors(m, doc) == []
+assert open(d + '/model.radeon-r9700.json.lock').read() == open(d + '/model.json.lock').read()
+assert i['devices']['radeon-r9700']['model_document'] == {'file': 'model.radeon-r9700.json', 'execution': {'context_capacity': 20480, 'pool_capacity': 20480, 'prefill_capacity': 2048}}
+assert 'model_document' not in i['devices']['strix-halo']
+doc['services']['chat']['version'] = 2   # not the package's service: refused
+assert c.gpu_document_errors(m, doc)" "$C" "$tmp/r9700_doc" \
+  && echo "OK   r9700 document: model.radeon-r9700.json is model.json with the R9700 execution settings (and its lock), recorded in info.json" \
+  || { echo "FAIL r9700 document"; bad=1; }
+# rebuilding the card from a fit row that no longer overrides removes the document (model.json stays the only one)
+cp -r "$tmp/r9700_doc" "$tmp/r9700_nodoc"
+py "$C/make_info.py" build "$tmp/r9700_nodoc" "${R3[@]}" --from-info "$tmp/r9700_doc/info.json" --gpus strix-halo,radeon-r9700 --fit "$R/fit_reduced.json" -o "$tmp/r9700_nodoc/info.json" 2>/dev/null
+[ ! -e "$tmp/r9700_nodoc/model.radeon-r9700.json" ] && [ ! -e "$tmp/r9700_nodoc/model.radeon-r9700.json.lock" ] \
+  && echo "OK   r9700 document: a fit row without overrides removes it" || { echo "FAIL r9700 document: stale after the override was dropped"; bad=1; }
+got=$(py "$C/publish_package.py" upload "$tmp/r9700_doc" --repo unsloth-Qwen3-0.6B-loom --org loom-fun-staging --dry-run --card-only 2>&1 | head -1)
+case "$got" in *model.radeon-r9700.json*model.radeon-r9700.json.lock*|*model.radeon-r9700.json.lock*model.radeon-r9700.json*) echo "OK   publish: the GPU document and its lock are uploaded (also with --card-only)";;
+  *) echo "FAIL publish: GPU document not in $got"; bad=1;; esac
 for n in r9700_two r9700_none r9700_staging; do
   py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 assert c.validate(c.load_json(sys.argv[2])) == [], c.validate(c.load_json(sys.argv[2]))" "$C" "$tmp/$n/info.json" \
@@ -372,7 +400,7 @@ print(c.gpu_from_device({'cpu': 'AMD RYZEN AI MAX+ 395 w/ Radeon 8060S', 'gpu': 
       c.gpu_from_device({'cpu': 'AMD EPYC', 'gpu': 'AMD Radeon AI PRO R9700S'}), c.gpu_from_device({'cpu': 'AMD Strix Halo (DevLab Dispatch runner X2)', 'os': 'Linux'}),
       c.gpu_from_device(None), c.served_context(396705472, 1.5e6, 34000000000))" "$C")
 [ "$got" = "strix-halo radeon-r9700 strix-halo None 20480" ] && echo "OK   gpu detection and served context" || { echo "FAIL gpu detection: $got"; bad=1; }
-for n in flint d1 r9700_two r9700_none r9700_staging; do
+for n in flint d1 r9700_two r9700_none r9700_staging r9700_doc; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null
   py "$C/render_card.py" "$tmp/$n" -o "$tmp/${n}_README2.md" 2>/dev/null

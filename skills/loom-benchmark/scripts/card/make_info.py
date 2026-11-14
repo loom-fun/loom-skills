@@ -92,6 +92,7 @@ import ast
 import json
 import os
 import re
+import shutil
 import statistics
 import sys
 
@@ -101,7 +102,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, MEDIAN_METRICS, METRIC_KEYS, PERF_SOURCE_KINDS,  # noqa: E402
                       HF, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
-                      programs_sha256, require_valid, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
+                      programs_sha256, require_valid, gpu_document, gpu_document_execution, gpu_document_model, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM)
 
 
@@ -219,6 +220,28 @@ def fit_settings(verdict_path, repo, gpu="radeon-r9700"):
     return mem, ctx, None
 
 
+def write_gpu_document(pkg_dir, model, verdict_path, repo, gpu, ctx):
+    """The package's GPU document (model.radeon-r9700.json and its lock) from the fit row's "r9700_execution"; returns
+    {"file", "execution"} for info.json, or None (and removes stale files) when the row has no overrides. The lock is
+    model.json.lock's content: the document names the same origins and files, and loom-fetch reads CARD.lock."""
+    rows = load_json(verdict_path)
+    row = next((r for r in rows if r["slug"] == repo.split("/")[-1]), None)
+    ex = gpu_document_execution(row, ctx)
+    name = gpu_document(gpu)
+    paths = [os.path.join(pkg_dir, name), os.path.join(pkg_dir, name + ".lock")]
+    if not ex:
+        for p in paths:
+            if os.path.exists(p):
+                os.remove(p)
+        return None
+    lock = os.path.join(pkg_dir, "model.json.lock")
+    if not os.path.exists(lock):
+        sys.exit(f"{pkg_dir}: model.json.lock missing (publish_package.py prepare writes it): the {name} lock is its copy")
+    write_json(paths[0], gpu_document_model(model, ex))
+    shutil.copyfile(lock, paths[1])
+    return {"file": name, "execution": ex}
+
+
 def cmd_build(a):
     pkg = load_package(a.pkg)
     upstream = None
@@ -253,7 +276,7 @@ def cmd_build(a):
         kind_of = lambda s: (old.get("sources") or {}).get(s["source"], {}).get("kind")
         for gpu, dev in old["devices"].items():
             st = gpu_state(gpu)
-            st["meta"] = {k: dev[k] for k in ("state", "required_bytes", "memory_bytes", "served_context") if k in dev}
+            st["meta"] = {k: dev[k] for k in ("state", "required_bytes", "memory_bytes", "served_context", "model_document") if k in dev}
             st["data"] = "state" not in dev
             if dev.get("performance"):
                 st["baseline"] = dev["performance"]["baseline"]
@@ -361,6 +384,11 @@ def cmd_build(a):
                         m["memory_bytes"] = mem
                     if ctx is not None:
                         m["served_context"] = ctx
+                    m.pop("model_document", None)
+                    if need is None:
+                        doc = write_gpu_document(a.pkg, pkg["model"], a.fit, a.repo, gpu, ctx)
+                        if doc:
+                            m["model_document"] = doc
     gpus = [g for g in GPUS if g in G or g in (a.gpus or "").split(",")]
     for g in (a.gpus or "").split(",") if a.gpus else []:
         if g and g not in GPUS:

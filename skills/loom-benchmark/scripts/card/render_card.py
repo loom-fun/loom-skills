@@ -22,7 +22,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
                       TIMED, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory,
-                      gpu_view, has_results, load_info, load_json, load_package, metric_applies, native_context, over_context,
+                      gpu_document_errors, gpu_view, has_results, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features)
 from matched_spec import TIE_BAND  # noqa: E402
 
@@ -483,10 +483,22 @@ def render(d):
           f"{hf(c['repo'])} (`{c['file']}`), for the {where} GPUs, generated with the "
           f"[loom-skills]({SKILLS_URL}) workflow. {LEARN_MORE}", ""]
 
-    fetch = ["loom-fetch", f"{HF}/{info['repo']}/resolve/main/model.json"]
-    if facts["preset"]:
-        fetch.append(f"--preset={facts['preset']}")
-    fetch += ["--materialize=copy", f"--output={output}"]
+    for g, dev in info["devices"].items():   # a GPU's model document is a file of the package that differs from model.json only in execution
+        md = dev.get("model_document")
+        if md:
+            path = os.path.join(d, md["file"])
+            if not os.path.isfile(path) or not os.path.isfile(path + ".lock"):
+                sys.exit(f"{g}: info.json names {md['file']} but {path} or its .lock is missing (make_info.py build --fit writes both)")
+            errs = gpu_document_errors(load_json(os.path.join(d, "model.json")), load_json(path))
+            if errs or any(load_json(path)["presets"][n]["execution"].get(k) != v for n in load_json(path)["presets"] for k, v in md["execution"].items()):
+                sys.exit(f"{md['file']}: " + "; ".join(errs or ["its execution settings are not info.json's"]))
+
+    def fetch_for(g=None):   # the loom-fetch line: model.json, or the GPU's own document when the package has one
+        doc = ((info["devices"].get(g) or {}).get("model_document") or {}).get("file") if g else None
+        f = ["loom-fetch", f"{HF}/{info['repo']}/resolve/main/{doc or 'model.json'}"]
+        if facts["preset"]:
+            f.append(f"--preset={facts['preset']}")
+        return " ".join(f + ["--materialize=copy", f"--output={output}"])
     api = ("answers OpenAI-style `/v1/chat/completions` requests" if kind == "chat"
            else f"answers SystemOne decision requests at `{feats['api']['value']['endpoint']}`")
     pin = required_sdk(facts, versions, sources)
@@ -500,10 +512,16 @@ def render(d):
     else:
         install = ['pip install "hrx-loom[hf]"']   # no SDK version recorded anywhere (cannot happen for a built card)
     serving = [g for g in gpus if info["devices"][g].get("state") != "unsupported"] or [DEFAULT_GPU]
+    own_doc = any((info["devices"].get(g) or {}).get("model_document") for g in serving)
     if len(serving) == 1:
-        L += ["## Quick start", "", "```bash", *install, " ".join(fetch), serve_command(info, facts, feats, serving[0], output), "```", ""]
+        L += ["## Quick start", "", "```bash", *install, fetch_for(serving[0]), serve_command(info, facts, feats, serving[0], output), "```", ""]
+    elif own_doc:   # a GPU with its own model document fetches it: the fetch line is per GPU too
+        L += ["## Quick start", "", "```bash", *install, "```", ""]
+        for g in serving:
+            L += [f"Fetch and serve on the {GPUS[g]['name']} ({gpu_arch(g)}):", "", "```bash", fetch_for(g),
+                  serve_command(info, facts, feats, g, output), "```", ""]
     else:   # the same install and fetch; the serve line differs by the GPU's memory
-        L += ["## Quick start", "", "```bash", *install, " ".join(fetch), "```", ""]
+        L += ["## Quick start", "", "```bash", *install, fetch_for(), "```", ""]
         for g in serving:
             L += [f"Serve on the {GPUS[g]['name']} ({gpu_arch(g)}):", "", "```bash",
                   serve_command(info, facts, feats, g, output), "```", ""]
@@ -521,7 +539,14 @@ def render(d):
         if sc:
             L += [f"On the {GPUS[g]['name']}, `--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}` bounds the memory pool: "
                   f"this package serves up to {sc:,} tokens per request there (its native context is {native:,}); "
-                  "the package files are the same on every GPU.", ""]
+                  ("the programs and weights are the same on every GPU." if info["devices"][g].get("model_document") else "the package files are the same on every GPU."), ""]
+    for g in serving:   # a GPU's own model document: what it changes (the same programs, weights and tokenizer)
+        md = info["devices"][g].get("model_document")
+        if md:
+            L += [f"On the {GPUS[g]['name']}, the Quick start fetches `{md['file']}`: `model.json` with these execution settings for "
+                  f"its {GPUS[g]['memory'] or 'memory'}: " + ", ".join(f"`{k}` {v:,}" if isinstance(v, int) and not isinstance(v, bool) else f"`{k}` {v}"
+                                                                   for k, v in sorted(md["execution"].items())) + ". "
+                  "The programs, weights and tokenizer are the same.", ""]
     for g in gpus:
         if info["devices"][g].get("state") == "unsupported":
             L += [gpu_line(info, g), ""]
@@ -596,6 +621,8 @@ def render(d):
     # ---- files
     L += ["## Files", "",
           "- `model.json` / `model.json.lock`: the card and the pinned source files (sha256 checked by `loom-fetch`).",
+          *([f"- `{md['file']}` / `{md['file']}.lock`: {GPUS[g]['short']}'s own card: `model.json` with that GPU's execution settings."
+             for g in gpus for md in [info["devices"][g].get("model_document")] if md]),
           "- `program/*.loom`, `weights.loom`: the generated Loom programs.",
           "- `tokenizer.json`: the tokenizer.",
           "- `llm_config.json`: the configuration the programs were generated from.",
