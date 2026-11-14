@@ -356,8 +356,9 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] fo
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "stall probe $p1"
       # telemetry during the probe: /logz/stream (records, incl. the --heartbeat_ms snapshots) and /v1/observe; /metrics every 50 ms
-      curl -sN "$url/logz/stream" > "$out/logz_$p1.txt" 2>&1 & lp1=$!; curl -sN "$url/v1/observe" > "$out/observe_$p1.txt" 2>&1 & lp2=$!
-      ( while true; do echo "T $(date +%s.%N)"; curl -s "$url/metrics"; sleep 0.05; done > "$out/metrics_$p1.txt" 2>&1 ) & lp3=$!
+      curl -sN -H "X-Loom-Model: $cardid" "$url/logz/stream" > "$out/logz_$p1.txt" 2>&1 & lp1=$!
+      ( while true; do echo "T $(date +%s.%N)"; curl -s "$url/v1/sessions"; echo; curl -s "$url/v1/requests"; echo; sleep 0.1; done > "$out/sessions_$p1.txt" 2>&1 ) & lp2=$!
+      lp3=$lp2
       "$T" "$here/.github/scripts/stall_probe.py" "$url" "$cardid" "$out/probe_$p1.jsonl" > "$out/probe_$p1.log" 2>&1; tail -3 "$out/probe_$p1.log" | cut -c1-200
       kill $lp1 $lp2 $lp3 2>/dev/null
       cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/servelog_$p1.log" 2>/dev/null   # heartbeat telemetry (--heartbeat_ms=N in serve_args)
