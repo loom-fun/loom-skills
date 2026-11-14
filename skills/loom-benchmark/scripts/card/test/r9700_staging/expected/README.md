@@ -16,24 +16,27 @@ A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `mo
 
 ```bash
 pip install "hrx-loom[hf]==0.1.0"
-loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --materialize=copy --output=Qwen3-0.6B
 ```
 
-Serve on the AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151):
+Fetch and serve on the AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151):
 
 ```bash
+loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --preset=chat --materialize=copy --output=Qwen3-0.6B
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=17000000000
 ```
 
-Serve on the AMD Radeon AI PRO R9700 (gfx1201, 32 GB):
+Fetch and serve on the AMD Radeon AI PRO R9700 (gfx1201, 32 GB):
 
 ```bash
+loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --preset=chat-r9700 --materialize=copy --output=Qwen3-0.6B
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed
 ```
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
 On the AMD Radeon AI PRO R9700, the package's preset sizes the memory pool (`--pool_backing=fixed` commits it up front): this package serves up to 20,480 tokens per request there (its native context is 40,960); the package files are the same on every GPU.
+
+On the AMD Radeon AI PRO R9700, the Quick start fetches the `chat-r9700` preset of `model.json`: the default preset with `context_capacity` 20,480, `pool_capacity` 20,480 for its 32 GB. The programs, weights and tokenizer are the same.
 
 ## Performance vs llama.cpp
 

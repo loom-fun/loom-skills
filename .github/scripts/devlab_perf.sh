@@ -452,7 +452,7 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', ro
       step "kernel tests $p1"; kt=$D/$p1/ktest; rm -rf "$kt"
       kenv=$(qv "$p1" "print(' '.join(f'{k}={x}' for k, x in (v.get('build') or {}).items()))")   # the variant's build env (e.g. GEMM_F16O) shapes the test cases too
       ( cd "${KIT[$p1]}" && env $kenv LLM_DRAFT="$("$T" -c "import json, sys; print(json.dumps(json.load(open(sys.argv[1])).get('draft')))" "$D/$p1/pkg/llm_config.json")" \
-          "$T" make_kernel_tests.py "$D/cfg.json" "$kt" ) > "$out/ktest_make_$p1.log" 2>&1 || { tail "$out/ktest_make_$p1.log"; res[$s]=ERROR; continue; }
+          "$T" make_kernel_tests.py "$([ -f "$D/$p1/cfg.json" ] && echo "$D/$p1/cfg.json" || echo "$D/cfg.json")" "$kt" ) > "$out/ktest_make_$p1.log" 2>&1 || { tail "$out/ktest_make_$p1.log"; res[$s]=ERROR; continue; }
       "${KIT[$p1]}/run_kernel_tests.sh" "$D/$p1/pkg" "$kt" > "$out/ktest_$p1.log" 2>&1; rc=$?
       grep -v "^PASS" "$out/ktest_$p1.log" | tail -15
       tot=$(grep -oE "^[0-9]+/[0-9]+ passed" "$out/ktest_$p1.log" | tail -1)

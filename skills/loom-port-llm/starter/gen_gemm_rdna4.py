@@ -87,7 +87,7 @@ def f16out(twin_text):
     t, n1 = re.subn(r"(view<\d+x\d+x)f32(, %y_layout>)", r"\1f16\2", t)
     assert n1 >= 3, n1
     live = "  %tile_live = scalar.cmpf one, %tile_any, %no_scale : f32\n"
-    assert t.count(live) == 1
+    assert t.count(live) == 1, "f16out needs GEMM_SKIP_PADDING=1 (gen_llm's default): the dead-row scales are written where the tile skip is decided"
     t = t.replace(live, live + """  %so_view = buffer.view %scales_out[%origin] : buffer -> view<[%rows]x2xf32>
   %so_n0 = index.cmp eq, %out_group, %c0 : index
   %so_act = scalar.andi %so_n0, %skip_in : i1
@@ -102,7 +102,16 @@ def f16out(twin_text):
     return t
 
 
-F16O = os.environ.get("GEMM_F16O", "")   # "swiglu": also emit the f16-output swiglu twins (used through program.py's groups)
+F16O = os.environ.get("GEMM_F16O", "")   # "swiglu": also emit the f16-output swiglu twins (used through f16o_fuse.py's groups)
+
+
+def f16o_swiglu(cfg=None):
+    """Whether this build fuses the swiglu GEMM with its row scale on gfx12: env GEMM_F16O=swiglu, or the model's llm_config key
+    `rdna4_f16_ffn` (GEMM_F16O=0 turns either off). Always False with LOOM_RDNA4=0."""
+    e = os.environ.get("GEMM_F16O", "")
+    if not enabled() or e.lower() in ("0", "off", "no", "false"):
+        return False
+    return "swiglu" in e or bool((cfg or {}).get("rdna4_f16_ffn"))
 
 
 def with_twins(text):
@@ -119,6 +128,6 @@ def with_twins(text):
             if is_wmma(k):
                 tw = twin(k)
                 out.append(tw.rstrip("\n") + "\n\n")
-                if "swiglu" in F16O and "swiglu" in k.split("\n", 1)[0]:
+                if os.environ.get("GEMM_F16O_ON") == "swiglu" and "swiglu" in k.split("\n", 1)[0]:
                     out.append(f16out(tw).rstrip("\n") + "\n\n")
     return "".join(out)
