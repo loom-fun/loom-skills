@@ -25,7 +25,23 @@ An A/A run (a package against itself, e.g. old = staging@REV, new = staging at m
   reduced-context model and the llama.cpp ROCm KV size; the old package, which may carry no such preset, is served with the same
   execution settings (variant "execution" + "cap_pool" = what the fixed pool backing can hold); --pool_backing=fixed and the memory clamp are
   devlab_perf.sh's. A model whose weights do not fit gets no job.
-Ingest the NEW package's card rows from one job: skills/loom-benchmark/reference/ab_ingest.md (notes/REGEN_RECIPE.md "measure + ingest").
+
+Ingest the NEW package's card rows from one job (JOB = the downloaded artifact dir, OUT = the package dir holding the card to update, RUN/URL = the
+run and the job page; the new variant's files are perf_staging.jsonl / c4_stagingnd.txt, the baselines' the same as r9700_jobs.py's):
+  S=skills/loom-benchmark/scripts/card
+  pull_devlab.py --identity $JOB --gpu GPU --device-out dev.json --hrx-out hrx.json
+  make_info.py perf --gpu GPU --loom-jsonl $JOB/perf_staging.jsonl --llama-jsonl $JOB/perf_llamacpp-rocm.np1_n*.jsonl --c4-loom $JOB/c4_stagingnd.txt \
+      --c4-llama $JOB/c4_llamacpp-rocm.nodraft_n0.txt --package $OUT --source-kind devlab --run RUN --url URL --device dev.json --hrx-loom hrx.json \
+      --baseline-version llamacpp-rocm/b1375 --baseline-args "$(cat $JOB/llamacpp_args-rocm.np1.txt)" --fetched-programs "$(cat $JOB/programs_sha256.txt)" -o ev_perf.json
+  make_info.py perf --gpu GPU --backend vulkan --llama-jsonl $JOB/perf_llamacpp-vulkan.np1_n*.jsonl --c4-llama $JOB/c4_llamacpp-vulkan.perslot.nodraft_n0.txt \
+      --baseline-version b12211 --baseline-args "$(cat $JOB/llamacpp_args-vulkan.np1.txt)" --baseline-sha256 "$(cat $JOB/llamacpp_release-vulkan.np1.sha256)" \
+      --fetched-programs "$(cat $JOB/programs_sha256.txt)" --package $OUT --source-kind devlab --run RUN --url URL --device none --hrx-loom none -o ev_vulkan.json
+  make_info.py gates --gpu GPU --time JOB_END_UTC $JOB/gates_staging/gates.json $JOB/ktest_staging.log --package $OUT --source-kind devlab --run RUN --url URL \
+      --device dev.json --hrx-loom hrx.json -o ev_gates.json
+  make_info.py roofline --gpu GPU --device ROOFLINE_PRESET --package $OUT --evidence ev_perf.json -o ev_roof.json
+  make_info.py build $OUT --org ORG --gpus strix-halo,radeon-r9700 --fit .github/devlab/r9700_fit.json --memory-bytes N --from-info info_prev.json \
+      --evidence ev_perf.json ev_vulkan.json ev_gates.json ev_roof.json -o info_new.json      (then cp to $OUT/info.json; render_card.py $OUT; --check)
+  The job's card_revision.txt names the new package's commit the run measured (the --package dir must hold that revision: --fetched-programs refuses a mismatch).
 """
 import argparse
 import json
