@@ -10,6 +10,9 @@ import re
 
 def rewrite_b2(text, kvh, d, partial):
     assert d == 512
+    import os
+    JU = " unroll" if os.environ.get("FLASH2_B2_UNROLL") == "1" else ""
+    VOFF = False
     waves = 4
     R = kvh * d
     NF = d // 16
@@ -58,6 +61,8 @@ def rewrite_b2(text, kvh, d, partial):
              f"  %pl_view = buffer.view %pl_tile[%origin] : buffer -> view<2x2x{waves}x32x8xf16>\n"
              f"  %mx_bytes = index.constant {2 * 2 * waves * 32 * 4} : offset\n  %mx_tile = buffer.alloca<workgroup> align(16) %mx_bytes : buffer\n"
              f"  %mx_view = buffer.view %mx_tile[%origin] : buffer -> view<2x2x{waves}x32xf32>\n"
+             f"  %vo_bytes = index.constant {waves * 4 * 32 * 8} : offset\n  %vo_tile = buffer.alloca<workgroup> align(16) %vo_bytes : buffer\n"
+             f"  %vo_view = buffer.view %vo_tile[%origin] : buffer -> view<{waves}x4x32xi64>\n"
              f"  %ls_tile = buffer.alloca<workgroup> align(16) %mx_bytes : buffer\n"
              f"  %ls_view = buffer.view %ls_tile[%origin] : buffer -> view<2x2x{waves}x32xf32>\n")
     defs = f"""  %vt_g_c1 = index.constant 1 : index
@@ -199,20 +204,28 @@ def rewrite_b2(text, kvh, d, partial):
         A("    %pos_hi_v = vector.splat %pos_hi_i32 : vector<8xi32>")
     for k in range(8):
         A(f"    %os{k} = vector.mulf %a{k}, %alpha_v : vector<8xf32>\n    %osB{k} = vector.mulf %b{k}, %alphaB_v : vector<8xf32>")
+    if VOFF:
+        for j in range(4):
+            A(f"""    %vjr{j}_o = index.scale %rw{j}, %pos_bytes : index, offset -> offset
+    %vjo{j} = index.add %vb_o, %vjr{j}_o : offset
+    %vjo{j}_i = index.cast %vjo{j} : offset to i64
+    view.store %vjo{j}_i, %vo_view[%fb_wv, %fq{j}, %lane] : i64, view<{waves}x4x32xi64>""")
     pvin = ", ".join([f"%pa{k} = %os{k} : vector<8xf32>" for k in range(8)] + [f"%pb{k} = %osB{k} : vector<8xf32>" for k in range(8)])
     pvout = ", ".join([f"%on{k}" for k in range(8)] + [f"%onB{k}" for k in range(8)])
-    A(f"    {pvout} = scf.for %jj = [%c0 to %c4 step %c1]({pvin}) -> ({ty16}) {{")
-    A(f"""      %jj_a = index.assume %jj [range(%jj, 0, 3)] : index
-      %jj_c1 = index.cmp eq, %jj, %c1 : index
-      %jj_c2 = index.cmp eq, %jj, %c2 : index
-      %jj_c0 = index.cmp eq, %jj, %c0 : index
-      %rj_a = scf.select %jj_c2, %rw2, %rw3 : index
+    A(f"    {pvout} = scf.for %jj = [%c0 to %c4 step %c1]({pvin}) -> ({ty16}){JU} {{")
+    VJ = ("      %vj_o_i = view.load %vo_view[%fb_wv, %jj_a, %lane] : view<%WV%x4x32xi64> -> i64\n      %vj_o = index.cast %vj_o_i : i64 to offset\n".replace("%WV%", str(waves)) if VOFF else
+          """      %rj_a = scf.select %jj_c2, %rw2, %rw3 : index
       %rj_b = scf.select %jj_c1, %rw1, %rj_a : index
       %rj_c = scf.select %jj_c0, %rw0, %rj_b : index
       %rj = index.assume %rj_c [range(%rj_c, 0, 1048560), lt(%rj_c, %pl_rows_m)] : index
       %vj_ro = index.scale %rj, %pos_bytes : index, offset -> offset
       %vj_o = index.add %vb_o, %vj_ro : offset
-      %vj = buffer.view %arena[%vj_o] : buffer -> view<128x16xf16, %vt_g_layout>
+""")
+    A(f"""      %jj_a = index.assume %jj [range(%jj, 0, 3)] : index
+      %jj_c1 = index.cmp eq, %jj, %c1 : index
+      %jj_c2 = index.cmp eq, %jj, %c2 : index
+      %jj_c0 = index.cmp eq, %jj, %c0 : index
+{VJ}      %vj = buffer.view %arena[%vj_o] : buffer -> view<128x16xf16, %vt_g_layout>
       %prA = vector.load %pl_view[%par, %c0_i, %jj_a, %lane, %c0] : view<2x2x{waves}x32x8xf16> -> vector<8xf16>
       %pfA = vector.fragment<rhs> %prA shape [%c16, %c16] : vector<8xf16>
       %prB = vector.load %pl_view[%par, %c1_i, %jj_a, %lane, %c0] : view<2x2x{waves}x32x8xf16> -> vector<8xf16>

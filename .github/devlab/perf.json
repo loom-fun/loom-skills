@@ -24,20 +24,6 @@
      }
     },
     {
-     "name": "d2n4",
-     "build": {
-      "FLASH2_DIRECT": "2",
-      "FLASH2_NG512": "4"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "config": {
-      "rdna4_f16_ffn": true
-     }
-    },
-    {
      "name": "c1",
      "build": {
       "FLASH2_B": "2",
@@ -50,19 +36,34 @@
      "config": {
       "rdna4_f16_ffn": true
      }
+    },
+    {
+     "name": "c2",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     }
     }
    ],
    "steps": [
-    "func:d2n4",
-    "ktest:d2n4",
     "func:c1",
     "ktest:c1",
+    "func:c2",
+    "ktest:c2",
     "perf:stack:3",
-    "perf:d2n4:3",
     "perf:c1:3",
+    "perf:c2:3",
     "perf:stack:3:long",
-    "perf:d2n4:3:long",
-    "perf:c1:3:long"
+    "perf:c1:3:long",
+    "perf:c2:3:long"
    ]
   }
  ],
