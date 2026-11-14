@@ -349,6 +349,11 @@ for s in $steps; do
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
 print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
+    probe)   # probe:V: stall_probe.py (when does a prefill stall? TTFT + GPU clocks per request)
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "stall probe $p1"
+      "$T" "$here/.github/scripts/stall_probe.py" "$url" "$cardid" "$out/probe_$p1.jsonl" > "$out/probe_$p1.log" 2>&1; tail -3 "$out/probe_$p1.log" | cut -c1-200
+      res[$s]="$(wc -l < "$out/probe_$p1.jsonl") requests";;
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "c4 $p1"
