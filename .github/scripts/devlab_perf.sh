@@ -3,7 +3,7 @@
 # build package variants from this checkout (or another ref), and compare them with each other and with llama.cpp
 # ON THIS RUNNER (runners differ from each other and from a dev machine: only same-job numbers are compared).
 # This is the single source of card performance: the card variant (active wait) and llama.cpp on the same runner,
-# ingested with make_info.py perf --source-kind devlab (loom-org SKILL.md step 3).
+# ingested with make_info.py perf --source-kind devlab (loom-fleet reference/publish.md step 3).
 #
 #   [WORK=~/devlab-perf] devlab_perf.sh EXPERIMENT.json JOB_NAME
 #
@@ -89,6 +89,7 @@
 set -uo pipefail
 exp=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); job=${2:?usage: devlab_perf.sh EXPERIMENT.json JOB}
 here=$(cd "$(dirname "$0")/../.." && pwd); SK=$here/skills
+export LOOM_KB_ROOT=${LOOM_KB_ROOT:-$SK/loom-kb}   # kits copied out of the skills tree (ktest, --build) resolve choices from this checkout's knowledge base
 B=$SK/loom-benchmark/scripts; SV=$SK/loom-setup/scripts
 WORK=${WORK:-$HOME/devlab-perf}; mkdir -p "$WORK"; WORK=$(cd "$WORK" && pwd)
 D=$WORK/$job; out=$D/out; rm -rf "$D"; mkdir -p "$out"
@@ -97,7 +98,8 @@ PORT=${LOOM_PORT:-8161}; LLAMA_PORT=${LLAMA_PORT:-8131}; url=http://127.0.0.1:$P
 t0=$(date +%s); step() { echo "== $* ($(date +%T), +$(( $(date +%s) - t0 ))s)"; }
 q() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); $1"; }
 qv() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); v=next(v for v in j['variants'] if v['name']=='$1'); $2"; }
-repo=$(q "print(j.get('card') or e['card'])"); mem=$(q "print(j.get('memory_bytes') or e['memory_bytes'])")
+# a card reference is ORG/REPO or ORG/REPO@REV (job "card" and variant "card"): REV pins the commit fetched instead of main
+repo_ref=$(q "print(j.get('card') or e['card'])"); repo=${repo_ref%@*}; mem=$(q "print(j.get('memory_bytes') or e['memory_bytes'])")
 kit=$(q "print((j['kit'] if 'kit' in j else e.get('kit')) or '-')"); tag=$(q "print(j.get('llamacpp') or e.get('llamacpp') or '-')"); variants=$(q "print(' '.join(v['name'] for v in j['variants']))")
 steps=$(q "print(' '.join(j['steps']))")
 vtag=$(q "print(j.get('llamacpp_vulkan') or e.get('llamacpp_vulkan') or '-')")
@@ -132,17 +134,19 @@ trap cleanup EXIT
 
 # 1. Loom SDK + tools venv: the SDK the card pins in its llm_config.json (ensure_sdk.sh), else the default
 step "Loom SDK"
-curl -fsSL --retry 3 "https://huggingface.co/$repo/resolve/main/llm_config.json" -o "$out/llm_config.json" || { echo "FAIL: no llm_config.json in $repo"; exit 1; }
+curl -fsSL --retry 3 "https://huggingface.co/$repo/resolve/$([[ $repo_ref == *@* ]] && echo "${repo_ref#*@}" || echo main)/llm_config.json" -o "$out/llm_config.json" || { echo "FAIL: no llm_config.json in $repo"; exit 1; }
 root=$("$SV/ensure_sdk.sh" "${LOOM_ROOT:-$WORK/loom}" "$out/llm_config.json" 2> "$out/install.log") || { tail "$out/install.log"; exit 1; }
 export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 
 # 2. The card (fetched once per runner and card)
-fetch_card() {   # fetch_card REPO -> sets CARD_DIR: the card's files at one commit (a variant "card": ORG/REPO fetches another card)
-  local r=$1 rv bs
-  CARD_DIR=$WORK/_card/${r//\//_}; rv=$(curl -fsS --retry 3 "https://huggingface.co/api/models/$r/revision/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || rv=main
+fetch_card() {   # fetch_card REF -> sets CARD_DIR, CARD_BASE, CARD_REV: the card's files at one commit (REF = ORG/REPO[@REV]; a variant "card": REF fetches another card)
+  local ref=$1 r=${1%@*} want=main rv bs
+  [[ $ref == *@* ]] && want=${ref#*@}   # pinned: that revision instead of main (an old published revision, or a commit of the staging card)
+  CARD_DIR=$WORK/_card/${r//\//_}; rv=$(curl -fsS --retry 3 "https://huggingface.co/api/models/$r/revision/$want" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || rv=$want
+  [ "$want" = main ] || CARD_DIR=${CARD_DIR}@${rv:0:12}   # a pinned card has its own directory next to the same card at main
   # the files are fetched at one commit (resolve/main can serve an older revision for a while after a publish), and a card
   # directory left by an earlier job on this runner is reused only when it holds that commit
-  bs=https://huggingface.co/$r/resolve/$rv; CARD_BASE=$bs
+  bs=https://huggingface.co/$r/resolve/$rv; CARD_BASE=$bs; CARD_REV=$rv
   if [ "$rv" = main ] || [ "$(cat "$CARD_DIR/.fetched" 2>/dev/null)" != "$rv" ]; then
     step "fetch $r"; rm -rf "$CARD_DIR"
     # a card with several presets (the R9700's `<first>-r9700`) needs one named: install the first (the default), then add the others' blocks
@@ -164,7 +168,8 @@ EOF
     rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; echo "$rv" > "$CARD_DIR/.fetched"
   fi
 }
-fetch_card "$repo"; card=$CARD_DIR; base=$CARD_BASE
+fetch_card "$repo_ref"; card=$CARD_DIR; base=$CARD_BASE
+echo "$repo@$CARD_REV" > "$out/card_revision.txt"   # the commit of the job's card this job fetched (a pinned REV resolved to the full sha)
 python3 - "$card" <<'EOF' || { echo "FAIL: the fetched card's model.json and llm_config.json disagree (a stale fetch?)"; exit 1; }
 import json, os, sys
 m = json.load(open(os.path.join(sys.argv[1], "model.json"))); c = json.load(open(os.path.join(sys.argv[1], "llm_config.json")))
@@ -245,7 +250,7 @@ EOF2
   else
     kit_for "$v" "" || exit 1
     vcard=$card; vrepo=$(qv "$v" "print(v.get('card') or '')")   # variant "card": ORG/REPO = that card's published programs (e.g. loom-fun's, next to the staging card's)
-    if [ -n "$vrepo" ]; then fetch_card "$vrepo"; vcard=$CARD_DIR; fi
+    if [ -n "$vrepo" ]; then fetch_card "$vrepo"; vcard=$CARD_DIR; echo "${vrepo%@*}@$CARD_REV" > "$out/card_revision_$v.txt"; fi
     mkdir -p "$pkg"; cp -r "$vcard/program" "$vcard/model.json" "$vcard/tokenizer.json" "$vcard"/*.loom "$pkg/" 2>/dev/null
     ln -sfn "$vcard/parameter" "$pkg/parameter"
     "$T" - "$vcard" "$pkg" <<'EOF'
@@ -277,11 +282,15 @@ if rules:
             out.append(ln); n += 1
     open(p, "w").write("\n".join(out)); print(f"ablation: doubled {n} launches")
 EOF
-  "$T" - "$pkg/model.json" "$(qv "$v" "print(json.dumps(v.get('execution') or {}))")" "$cardid-$v" <<'EOF'
+  "$T" - "$pkg/model.json" "$(qv "$v" "print(json.dumps(v.get('execution') or {}))")" "$cardid-$v" "$(qv "$v" "print(json.dumps(v.get('cap_pool')))")" <<'EOF'
 import json, sys
 m = json.load(open(sys.argv[1])); ex = next(iter(m["presets"].values()))["execution"]
+cap = json.loads(sys.argv[4])   # "cap_pool": N (R9700, fixed backing commits the pool eagerly): a pool above N shrinks to N, the context with it
 for pr in m["presets"].values():   # the overrides apply to every preset (build.py --prefill-r9700 adds a second one)
     pr["execution"].update(json.loads(sys.argv[2]))
+    if cap and (pr["execution"].get("pool_capacity") or 0) > cap:
+        pr["execution"]["pool_capacity"] = cap
+        pr["execution"]["context_capacity"] = min(pr["execution"]["context_capacity"], cap)
 json.dump(m, open(sys.argv[1], "w"), indent=1)
 # a small-context copy with its own model id, for several packages in one loom-serve (ab steps)
 m["model"]["id"] = sys.argv[3]; ex["context_capacity"] = 16384; ex["pool_capacity"] = 32768
@@ -298,7 +307,8 @@ serve_alone() { # serve_alone VARIANT
   sa=$(qv "$1" "print(' '.join(v.get('serve_args') or []))")   # "serve_args": extra loom-serve flags
   # a package with a `<first preset>-r9700` preset (build.py --prefill-r9700) serves it on the R9700, as the card's R9700 Quick start does
   rp=""; [ "$RUNNER" = r9700 ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] + '-r9700' if p[0] + '-r9700' in p else '')" "$D/$1/pkg/model.json")
-  if [ -z "$rp" ] && [ "$RUNNER" = r9700 ] && [ "$(q "print(j.get('require_preset_r9700') or '')")" = True ]; then
+  # (the job's "require_preset_r9700" covers the job's own card; a variant of another card, e.g. the old package of an A/B, has no R9700 preset unless it sets the key itself)
+  if [ -z "$rp" ] && [ "$RUNNER" = r9700 ] && [ "$(qv "$1" "print(v['require_preset_r9700'] if 'require_preset_r9700' in v else (j.get('require_preset_r9700') or '') if 'card' not in v else '')")" = True ]; then
     echo "FAIL: the card has no <first>-r9700 preset (its fit row has r9700_execution): publish the package with it first"; return 1; fi
   # elsewhere (Strix) a package with several presets serves its first (the default), as the card's Strix Quick start fetches --preset=<first>
   [ -z "$rp" ] && [ "$RUNNER" != r9700 ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] if len(p) > 1 else '')" "$D/$1/pkg/model.json")

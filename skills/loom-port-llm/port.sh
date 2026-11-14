@@ -30,6 +30,7 @@
 set -u
 spec=$1; work=$(mkdir -p "$2" && cd "$2" && pwd); port=${3:-8160}; mem_gib=${4:-auto}; model_id=${5:-}
 here=$(cd "$(dirname "$0")" && pwd); K=${KIT:-$here/starter}; S=$here/../loom-setup/scripts
+export LOOM_KB_ROOT=${LOOM_KB_ROOT:-$here/../loom-kb}   # the choices build.py resolves (a kit copy finds the knowledge base here)
 use_root() {   # the Loom install (SDK venv + tools venv) every later stage uses
   root=$1; bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts
   T=$bin/python; venv=$root/.venv; hf=$venv/bin/hf; [ -x "$hf" ] || hf=$venv/Scripts/hf

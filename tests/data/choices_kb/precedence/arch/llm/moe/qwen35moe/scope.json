@@ -1,0 +1,3 @@
+{"scope": "arch/llm/moe/qwen35moe", "match": {"arch": ["qwen35moe"]}, "owner": "fixture",
+ "choices": [{"set": {"decode.attn.kv_once.from_keys": 3000}, "evidence": "fixture: family leaf"},
+             {"when": {"facets": ["drafted"]}, "set": {"decode.attn.kv_once.d256": false}, "evidence": "fixture: drafted qwen35moe (D7)"}]}

@@ -1,0 +1,2 @@
+{"scope": "device/rdna4", "match": {}, "owner": "fixture",
+ "choices": [{"set": {"decode.mv.wg1": 1024}, "evidence": "fixture: shared by both targets, so not allowed per device"}]}

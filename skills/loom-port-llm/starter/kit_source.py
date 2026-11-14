@@ -101,7 +101,9 @@ def main(argv=None):
         print(json.dumps(generator_stamp(a.kit), indent=1, sort_keys=True))
         return
     commit, dirty = git_commit(a.skills_dir)
-    ks = {"skills_commit": commit or "unknown", "dirty": dirty, "example": a.example, "kit_sha256": kit_sha256(a.kit)}
+    kb = os.path.abspath(os.path.join(a.skills_dir, "..", "loom-kb"))   # the knowledge base beside the skill the kit came from
+    ks = {"skills_commit": commit or "unknown", "dirty": dirty, "example": a.example, "kit_sha256": kit_sha256(a.kit),
+          "kb_root": kb if os.path.isdir(kb) else None}
     with open(os.path.join(a.kit, "KIT_SOURCE"), "w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(ks, indent=1, sort_keys=True) + "\n")
     print(f"KIT_SOURCE: loom-skills {ks['skills_commit'][:12]}{' (local changes)' if dirty else ''}", file=sys.stderr)

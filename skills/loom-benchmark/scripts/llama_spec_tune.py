@@ -28,6 +28,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "loom-port-llm", "starter", "draft"))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "..", "loom-kb"))
+import registry  # noqa: E402  (draft_tuning thresholds: loom-kb/method/methodology.json)
 from bench_common import stream  # noqa: E402
 from shell_command import bash_script  # noqa: E402
 from tune import WORK  # noqa: E402
@@ -91,7 +93,7 @@ def main():
             base = tps
         elif tps > best[3]:
             best = (kind, n, args, tps)
-    choice = best if best[0] != "none" and best[3] >= 1.03 * base else ("none", 0, "", base)
+    choice = best if best[0] != "none" and best[3] >= registry.methodology()["draft_tuning"]["min_gain"] * base else ("none", 0, "", base)
     res = {"args": choice[2], "kind": choice[0], "n_max": choice[1], "decode_tps": round(choice[3], 2),
            "baseline_tps": round(base, 2), "build": os.environ.get("LLAMACPP_DIR"), "table": table}
     json.dump(res, open(out, "w"), indent=1)

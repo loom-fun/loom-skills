@@ -1,0 +1,2 @@
+{"scope": "facet/moe", "match": {"facets": ["moe"]}, "owner": "fixture",
+ "choices": [{"set": {"decode.mv.wg1": 1024}}]}

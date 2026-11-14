@@ -9,7 +9,7 @@ Finds the latest nightly-gates.yml run (or --run ID) of loom-fun/loom-skills wit
 downloads that run's artifacts (gh run download; nightly_gates.sh writes summary.json and gates.json per card
 and level) and writes the gates: every gate of every finished level job (dev, quick, full) with its verdict, level and
 time, the job's URL as the evidence. A job's performance files (an older PERF=1 run's Loom-only perf.jsonl) are not
-read: a card's DevLab perf session measures both engines (devlab-perf, loom-org SKILL.md).
+read: a card's DevLab perf session measures both engines (devlab-perf, loom-fleet reference/publish.md).
 The spec gate's drafted-token acceptance ("acceptance N% of M proposals" in the job's gates_spec.log or gates.out)
 is not a timing: it depends on the model, drafter and text, not the machine, so it is carried as the card's
 spec_acceptance (a session holding only that metric, stamped with the job's programs_sha256), as make_info.py gates
@@ -30,7 +30,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import EVIDENCE_ID, GPUS, load_json, programs_sha256, write_json  # noqa: E402
+from card_lib import DEFAULT_GPU, EVIDENCE_ID, GPUS, registry, load_json, programs_sha256, write_json  # noqa: E402
 from make_info import acceptance  # noqa: E402
 
 GH_REPO = "loom-fun/loom-skills"
@@ -97,9 +97,8 @@ def perf_identity(d, gpu=None):
         except OSError:
             return ""
     runner = read("runner.txt").strip()
-    device = ({"cpu": f"AMD Strix Halo (DevLab Dispatch runner {runner})", "gpu": None, "os": "Linux"} if runner else None)
-    if device and gpu == "radeon-r9700":
-        device = {"cpu": f"DevLab Dispatch runner {runner}", "gpu": "AMD Radeon AI PRO R9700S (gfx1201)", "os": "Linux"}
+    blk = registry.devices()[gpu if gpu in GPUS else DEFAULT_GPU]["devlab_device_block"]   # the runner's machine description, per GPU (device.json)
+    device = {k: (v.format(runner=runner) if v else v) for k, v in blk.items()} if runner else None
     if device:
         device = {k: v for k, v in device.items() if v}
     log = read("install.log")

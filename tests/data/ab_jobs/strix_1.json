@@ -1,0 +1,136 @@
+{
+ "_comment": "Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, loom-fun package (fun) vs loom-fun-staging package (staging), same prompts and settings; compare with strix_ab_compare.py",
+ "runner": "strix",
+ "memory_bytes": 17000000000,
+ "llama_spec": "matched",
+ "jobs": [
+  {
+   "name": "sab-unsloth-qwen3-0-6b-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+   "memory_bytes": 17000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/unsloth-Qwen3-0.6B-loom"
+    },
+    {
+     "name": "staging"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev"
+   ]
+  },
+  {
+   "name": "sab-ggml-org-qwen3-4b-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
+   "memory_bytes": 25000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/ggml-org-Qwen3-4B-loom"
+    },
+    {
+     "name": "staging"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun/ggml-org-Qwen3-4B-loom",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev"
+   ]
+  }
+ ],
+ "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+ "kit": null,
+ "llamacpp": "b1374"
+}

@@ -15,6 +15,8 @@ import json, sys, os, numpy as np
 from gguf import GGUFReader
 from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import kb_choices  # noqa: E402  the choices the model's kernels were generated with (resolved.env of the package, else resolved here)
+kb_choices.apply_for_tests(json.load(open(sys.argv[1])))
 from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
 from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402
 from gen_gemm_rdna4 import f16o_swiglu as _f16o_on  # noqa: E402  formats with no 256-row (_m256) GEMM

@@ -109,6 +109,9 @@ def build_one(slug, m, skills, out, rdna4, keep, real=None):
         json.dump(cfg, open(os.path.join(work, "cfg.json"), "w"), indent=1)
         env = dict(os.environ, LOOM_RDNA4=str(rdna4))
         env.pop("LLM_CONFIG", None)
+        kb = os.path.join(skills, "..", "loom-kb")   # the choices build.py resolves (a ref without the registry has none)
+        if os.path.isdir(kb) and "LOOM_KB_ROOT" not in env:
+            env["LOOM_KB_ROOT"] = os.path.abspath(kb)
         rc, o = sh([sys.executable, os.path.join(kit, "build.py"), "cfg.json", "pkg"] + build_args(m), work, env)
         log.append(o)
         if rc:

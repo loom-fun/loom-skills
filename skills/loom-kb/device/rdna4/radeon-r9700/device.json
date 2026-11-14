@@ -1,0 +1,62 @@
+{
+  "schema": "loom-kb/device/1",
+  "device": "radeon-r9700",
+  "family": "rdna4",
+  "gfx": "gfx1201",
+  "aliases": [
+    "gfx1201",
+    "r9700",
+    "radeon-r9700s"
+  ],
+  "name": "AMD Radeon AI PRO R9700",
+  "short": "Radeon AI PRO R9700",
+  "memory": "32 GB",
+  "memory_bytes": 34000000000,
+  "card": {
+    "runner": "R9700",
+    "tag": "radeon-r9700",
+    "detect": {
+      "pattern": "r9700|gfx1201|radeon ai pro",
+      "flags": "i"
+    },
+    "serve_args": [
+      "--pool_backing=fixed"
+    ],
+    "serve_args_note": "fixed state backing: the default elastic backing runs a synchronous trim + compaction after every session end, which stalls the next long prefill; fixed backing commits the preset's pool_capacity eagerly, so the R9700 preset sizes the pool to the GPU (fixed_pool_capacity)"
+  },
+  "roofline": {
+    "default": "radeon-r9700s",
+    "presets": {
+      "radeon-r9700": {
+        "name": "AMD Radeon AI PRO R9700 (gfx1201, 32 GB)",
+        "bw": 613000000000.0,
+        "flops": 191400000000000.0,
+        "note": "GDDR6 20 Gbps, 256-bit (640 GB/s peak), 32 GB; 64 CUs x 1024 x 2.92 GHz = 191 TFLOP/s dense f16 WMMA (AMD's spec). bw 613 GB/s measured on a DevLab R9700S"
+      },
+      "radeon-r9700s": {
+        "name": "AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz)",
+        "bw": 613000000000.0,
+        "flops": 214000000000000.0,
+        "note": "The DevLab Dispatch radeon-r9700 runners are R9700S (same Navi 48 / 640 GB/s). Peak f16 WMMA measured there: 214 TFLOP/s (devlab-kbench gemm_r9700, #601)"
+      }
+    }
+  },
+  "runner": {
+    "key": "r9700",
+    "labels": [
+      "self-hosted",
+      "devlab-dispatch",
+      "radeon-r9700"
+    ],
+    "concurrent_runners": 3
+  },
+  "preset_suffix": "-r9700",
+  "fit_table": ".github/devlab/r9700_fit.json",
+  "prefill_flag": "--prefill-r9700",
+  "pool_note": "the board reports 31.86 GiB (34.2 GB) and the driver reserves part: loom-serve gets 34.0 GB, above the 33.2 GB the largest package that fits at its native context needs",
+  "devlab_device_block": {
+    "cpu": "DevLab Dispatch runner {runner}",
+    "gpu": "AMD Radeon AI PRO R9700S (gfx1201)",
+    "os": "Linux"
+  }
+}

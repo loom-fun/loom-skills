@@ -16,7 +16,7 @@ sys.path.insert(0, HERE)
 import gguf_stub  # noqa: E402
 
 HF = os.path.expanduser(os.environ.get("HF_HUB_CACHE", "~/.cache/huggingface/hub"))
-DROP = ("tensors", "generator", "draft")   # outputs of a build (build.py rewrites them), not inputs
+DROP = ("tensors", "generator", "draft", "resolved")   # outputs of a build (build.py rewrites them), not inputs
 
 
 def origin_file(lock, origin):

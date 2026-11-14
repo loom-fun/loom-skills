@@ -10,7 +10,7 @@ for A/B packages: same kernels, faster to serve):
   serve.sh ab PORT amdgpu MEM A/model.json B/model.json
 Requests alternate A, B, B, A, ... for --rounds rounds (load swings hit both sides), every prompt
 carries a nonce (no prefix cache). Prints per-metric medians, B/A, and a verdict per metric:
-  B WINS / B LOSES when the medians differ by more than the noise band (3 %, or the spread of A's
+  B WINS / B LOSES when the medians differ by more than the noise band (the row's band from loom-kb/method/methodology.json: 2-4 %, or the spread of A's
   own samples if larger), else TIE. Appends one JSON line per run to --log.
 """
 import argparse
@@ -23,6 +23,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "loom-benchmark", "scripts"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "loom-kb"))
+import registry  # noqa: E402  (the per-row A/B bands: loom-kb/method/methodology.json)
 from bench_common import doc, stream  # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -82,7 +84,8 @@ out = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "label": a.label, "A": a.a, "B"
 for m in metrics:
     A, B = res[m]["A"], res[m]["B"]
     ma, mb = statistics.median(A), statistics.median(B)
-    band = max(0.03, (max(A) - min(A)) / ma / 2 if len(A) > 2 else 0.03)
+    floor = registry.band(m)   # the row's own band (c4 = streams4)
+    band = max(floor, (max(A) - min(A)) / ma / 2 if len(A) > 2 else floor)
     ratio = mb / ma
     verdict = "B WINS" if ratio > 1 + band else "B LOSES" if ratio < 1 - band else "TIE"
     out["metrics"][m] = {"A": round(ma, 1), "B": round(mb, 1), "ratio": round(ratio, 3), "band": round(band, 3), "verdict": verdict}

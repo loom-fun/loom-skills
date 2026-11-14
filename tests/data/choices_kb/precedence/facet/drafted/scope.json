@@ -1,0 +1,2 @@
+{"scope": "facet/drafted", "match": {"facets": ["drafted"]}, "owner": "fixture",
+ "choices": [{"when": {"arch": ["qwen35moe"]}, "set": {"decode.attn.kv_once.from_keys": 5000}, "evidence": "fixture: facet beats arch"}]}

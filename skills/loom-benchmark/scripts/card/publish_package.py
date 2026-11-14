@@ -49,7 +49,20 @@ def hf_origin(path):
     return None
 
 
+def refuse_dirty(cfgp, allow=False):
+    """A package built with generator choices set in the caller's environment (build.py: llm_config generator.dirty_choices) is not
+    reproducible from the knowledge base: refuse to publish it (--allow-dirty overrides)."""
+    try:
+        dirty = (json.load(open(cfgp, encoding="utf-8")).get("generator") or {}).get("dirty_choices") or []
+    except (OSError, ValueError):
+        return
+    if dirty and not allow:
+        sys.exit(f"{cfgp}: built with generator choices set in the environment: {', '.join(dirty)}. Rebuild from the knowledge base "
+                 f"(scope.json / llm_config choices), or pass --allow-dirty")
+
+
 def cmd_prepare(a):
+    refuse_dirty(os.path.join(a.pkg, "llm_config.json"), a.allow_dirty)
     pkg, out = os.path.abspath(a.pkg), os.path.abspath(a.out)
     shutil.rmtree(out, ignore_errors=True)
     for root, dirs, files in os.walk(pkg):
@@ -169,6 +182,7 @@ def cmd_upload(a):
                           commit_message=a.message or "Card", parent_commit=a.parent_commit)
         print(f"card uploaded to https://huggingface.co/{a.repo}")
         return
+    refuse_dirty(os.path.join(a.out, "llm_config.json"), a.allow_dirty)
     for f in ("model.json", "model.json.lock", "llm_config.json", *CARD):
         if not os.path.isfile(os.path.join(a.out, f)):
             sys.exit(f"{f} missing in {a.out} (prepare, then make_info.py build + render_card.py)")
@@ -185,11 +199,13 @@ def main(argv=None):
     p.add_argument("pkg"); p.add_argument("out")
     p.add_argument("--source", required=True, help="the GGUF repo the checkpoint comes from")
     p.add_argument("--loom-fetch", default="loom-fetch")
+    p.add_argument("--allow-dirty", action="store_true", help="publish a package built with generator choices set in the environment")
     u = sub.add_parser("upload")
     u.add_argument("out"); u.add_argument("--repo", required=True, help="NAME or ORG/NAME (the name part is used)")
     u.add_argument("--org", default=DEFAULT_ORG, help=f"the Hugging Face org to publish to (default {DEFAULT_ORG}; staging: loom-fun-staging)")
     u.add_argument("--dry-run", action="store_true", help="check the card and list what would be uploaded; no token, no network")
     u.add_argument("--message"); u.add_argument("--card-only", action="store_true")
+    u.add_argument("--allow-dirty", action="store_true", help="upload a package built with generator choices set in the environment")
     u.add_argument("--parent-commit", help="fail unless the repo's main is still this commit (the one the card was "
                    "built from): concurrent publishes fail instead of overwriting each other")
     a = ap.parse_args(argv)

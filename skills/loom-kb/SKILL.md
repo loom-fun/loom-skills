@@ -16,7 +16,7 @@ or change into the installed skill tree. Install the complete Loom suite: siblin
 
 Domain knowledge (what is special about a family, which optimization applies where, measured results) is stored
 once, in the most specific node it applies to. The workflow skills (`loom-port-llm`, `loom-optimize`,
-`loom-benchmark`, `loom-roofline`, `loom-org`, ...) hold process and checklists only and send you here.
+`loom-benchmark`, `loom-roofline`, `loom-fleet`, ...) hold process and checklists only and send you here.
 
 ## Route, then read
 
@@ -65,7 +65,7 @@ Topics are tasks, not model properties: name the ones the work needs (`--topic p
 
 ## Mandate rules (every workflow that changes skills, kernels or cards)
 
-These apply to `loom-port-llm`, `loom-optimize`, `loom-org` and `loom-improve`; they link here instead of copying.
+These apply to `loom-port-llm`, `loom-optimize` and `loom-fleet`; they link here instead of copying.
 
 1. **Declare the scope first**: the PR body carries a `loom-scope` block (kind, scopes, kernels; DECISIONS section 6)
    before any edit. Work only inside it.
@@ -76,3 +76,6 @@ These apply to `loom-port-llm`, `loom-optimize`, `loom-org` and `loom-improve`; 
 4. **Stop on out-of-mandate needs**: a change to a protected core file (generator core, `dual_target.py`, `build.py`,
    `kb.py`, `choices.py` legacy values, methodology, registries, card schema, workflows) is an `architecture` PR, not part
    of a targeted task. Report the need and stop; do not work around it.
+
+The full process around these rules: `loom-fleet/reference/targeted-fix.md` (a narrow change, checklist) and
+`loom-fleet/reference/campaign.md` (a team campaign); why the guards exist: `loom-fleet/reference/architecture.md`.

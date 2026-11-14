@@ -37,8 +37,10 @@ session rather than treating your current session as independent evidence.
 | What is possible for this model? Pick optimization targets (roofline vs llama.cpp) | `loom-roofline` (`"${LOOM_SKILL_DIR}/../loom-roofline/SKILL.md"`) |
 | Make a ported model faster without breaking correctness | `loom-optimize` |
 | Correctness gate vs llama.cpp, throughput methodology, reporting | `loom-benchmark` |
-| Improve these skills themselves (faster end-to-end runs, fewer failures) without regressing KPIs | `loom-improve` (`"${LOOM_SKILL_DIR}/../loom-improve/SKILL.md"`) |
-| Populate a Hugging Face org with many models (pick the top models, port and publish each, sweep gates on DevLab, fix and regenerate) | `loom-org` (`"${LOOM_SKILL_DIR}/../loom-org/SKILL.md"`) |
+| A targeted fix to one model, family, GPU or quant (scoped change, sampled DevLab A/B, promotion) | `loom-fleet` (`"${LOOM_SKILL_DIR}/../loom-fleet/reference/targeted-fix.md"`) |
+| A campaign: new GPU, many models, a refactor (team roles, mailboxes, state files, DevLab rules, velocity) | `loom-fleet` (`"${LOOM_SKILL_DIR}/../loom-fleet/reference/campaign.md"`) |
+| Improve these skills themselves (faster end-to-end runs, fewer failures) without regressing KPIs | `loom-fleet` (`"${LOOM_SKILL_DIR}/../loom-fleet/reference/skill-trials.md"`) |
+| Populate a Hugging Face org with many models (pick the top models, port and publish each, sweep gates on DevLab, fix and regenerate) | `loom-fleet` (`"${LOOM_SKILL_DIR}/../loom-fleet/reference/populate-org.md"`) |
 | What is special about a model family / GPU / quant, which levers apply where (the knowledge base router) | `loom-kb` (`"${LOOM_SKILL_DIR}/../loom-kb/SKILL.md"`) |
 
 All paths in these skills assume the install root `~/loom` (SDK venv `~/loom/.venv`,

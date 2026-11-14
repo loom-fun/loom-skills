@@ -193,6 +193,8 @@ def build(a, cfg, cdir, tokenizer):
                  sdk=cat.get("sdk"))
     from kit_source import generator_stamp  # noqa: E402
     bench["generator"] = generator_stamp()
+    from kb_choices import exempt_block  # noqa: E402
+    bench["resolved"] = exempt_block("catalog package: hand-written programs, no generator runs")
     json.dump({k: v for k, v in bench.items() if v is not None}, open(os.path.join(pkg, "llm_config.json"), "w"), indent=1)
 
     print("package:", os.path.join(pkg, "model.json"), f"(model id {model_id!r}; catalog variant {variant}, preset {pname})")

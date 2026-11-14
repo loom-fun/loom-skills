@@ -1,0 +1,30 @@
+{
+  "schema": "loom-kb/file_quants/1",
+  "note": "GGUF file quants the loom factory (loom_factory.py) accepts, in order of preference; the tensor formats they mix are in quant/<fmt>/format.json",
+  "file_quants": [
+    {
+      "name": "Q4_K_M",
+      "rank": 0
+    },
+    {
+      "name": "Q4_K_S",
+      "rank": 1
+    },
+    {
+      "name": "Q5_K_M",
+      "rank": 2
+    },
+    {
+      "name": "Q5_K_S",
+      "rank": 3
+    },
+    {
+      "name": "Q6_K",
+      "rank": 4
+    },
+    {
+      "name": "Q8_0",
+      "rank": 5
+    }
+  ]
+}

@@ -61,7 +61,7 @@ OWN = {"name", "gguf", "tensors", "model_id", "draft", "drafter", "assistant", "
 
 # What apply_example.sh never copies from an example's config into a port's: the port's own GGUF, tensor table and
 # name, and what names one package's files (model id, drafter, vision projector, build stamps).
-EXCLUDE = {"gguf", "tensors", "name", "model_id", "draft", "drafter", "assistant", "vision", "generator", "reference"}
+EXCLUDE = {"gguf", "tensors", "name", "model_id", "draft", "drafter", "assistant", "vision", "generator", "resolved", "reference"}
 EXAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reference", "examples.json")
 
 
@@ -294,7 +294,7 @@ def cmd_rank(a):
                        "kit_published": any(f.startswith("kit/") for f in r["files"]),
                        "drafter": {k: (r["cfg"].get("drafter") or {}).get(k) for k in ("kind", "depth")},
                        "quality": gate_summary(r["info"]),
-                       # still a reference, but loom-org's rule says the repo itself needs an update (plain Q4_K_M only)
+                       # still a reference, but loom-fleet populate-org.md rule says the repo itself needs an update (plain Q4_K_M only)
                        "plain_q4_k_m": plain_q4km(r["cfg"].get("gguf"))})
     ranked.sort(key=lambda x: -x["score"])
     out = {"target": t, "org": a.org, "rule": "category A only: info.json schema loom-card/2 and report generated",

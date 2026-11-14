@@ -77,7 +77,10 @@ LONG_HEADROOM = 512
 # matvec padding at 4 streams) costs more than a plain step (Qwen3.5-0.8B: ngram depth 3 decode 223 vs 258 without,
 # 32k 125 vs 166, four streams 498 vs 787 tok/s). So every row is scored against depth 0 and a drafter that is
 # slower than NO_LOSS x depth 0 on any row is not used, however well it does on the code-edit row that quotes its input.
-NO_LOSS = 0.98
+sys.path.insert(0, os.path.join(SKILLS, "loom-kb"))
+import registry  # noqa: E402  (draft_tuning thresholds: loom-kb/method/methodology.json)
+NO_LOSS = registry.methodology()["draft_tuning"]["no_loss"]
+MIN_GAIN = registry.methodology()["draft_tuning"]["min_gain"]   # a drafter must raise the single-stream rate by this factor
 # Context gate (build_draft.py SPEC_CTX_MAX): a candidate that wins every row but the long-document one is retried with
 # drafting off from this causal position on, so short context keeps the drafting gain (Ornith-1.5-35B depth 3: short rows
 # 118 vs 62 tok/s, 16k 44.9 vs 53.5). Below the long row's prompt, above the short rows'. TUNE_CTX_MAX=0 skips the retry.
@@ -513,7 +516,7 @@ def main():
             floor < 1.0 and r["margin"] >= (1 + NO_LOSS) / 2 * floor and geomean_margin(r["rows"], base_rows, llama_refs) >= 1.05 * base_geo)
     else:
         ok_margin = lambda r: r["margin"] >= NO_LOSS
-    ranked = sorted([r for r in table if r["kind"] != "none" and (ok_margin(r) and r["decode_tps"] >= 1.03 * base
+    ranked = sorted([r for r in table if r["kind"] != "none" and (ok_margin(r) and r["decode_tps"] >= MIN_GAIN * base
                                                                   or RULE and r["decode_tps"] > 0)],
                     key=lambda r: -r["margin"])
     # Within NO_LOSS of the best margin (noise on these short requests; a wider band on a ratio near 1 would admit

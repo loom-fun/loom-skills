@@ -1,0 +1,18 @@
+{
+  "schema": "loom-kb/family/1",
+  "family": "xdna2",
+  "status": "planned",
+  "order": 3,
+  "gfx_generic": null,
+  "target_symbol": null,
+  "twin_suffix": null,
+  "base": false,
+  "dual_target": false,
+  "wave_size": null,
+  "matrix": {
+    "isa": "npu",
+    "fragment": null
+  },
+  "devices": [],
+  "note": "NPU (loom-serve --target xdna): not a gfx target; needs a model graph to consume, not kernel text."
+}
