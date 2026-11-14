@@ -78,6 +78,22 @@
    "steps": [
     "gates:card:dev"
    ]
+  },
+  {
+   "name": "strix-gates-gpt-oss",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
+   "memory_bytes": 28000000000,
+   "kit": "gpt-oss",
+   "llamacpp": "b1374",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "gates:staging:dev"
+   ]
   }
  ],
  "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
