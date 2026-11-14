@@ -9,6 +9,7 @@ random operands), plus k_peak: a register-only WMMA loop (the device's real f16 
 import os, sys, re
 HERE = os.path.dirname(os.path.abspath(__file__))
 if __name__ == "__main__":
+    ROOT = os.path.abspath(sys.argv[1])
     sys.path.insert(0, os.path.join(sys.argv[1], "skills", "loom-port-llm", "starter"))
 import gen_gemm as G
 import gen_gemm_rdna4 as R
@@ -108,20 +109,29 @@ check.benchmark<@k_cold_{mode}_case> @k_cold_{mode}_{reps}x_bm
 """)
     return out
 
+import subprocess, functools
+@functools.lru_cache(maxsize=None)
+def gen_kernels(fmts, q4k):
+    """name -> kernel text of the generator's whole output for FMTS ("q4_k:store+swiglu,..."), built as the models are (GEMM_SKIP_PADDING and
+    GEMM_N_FASTEST on, the gen_llm.py defaults) with LOOM_RDNA4_Q4K=q4k."""
+    env = dict(os.environ, GEMM_FORMATS=fmts, GEMM_SKIP_PADDING="1", GEMM_N_FASTEST="1", LOOM_RDNA4_Q4K=q4k, LOOM_RDNA4="1")
+    txt = subprocess.run([sys.executable, os.path.join(ROOT, "skills", "loom-port-llm", "starter", "gen_gemm.py")], env=env, check=True, capture_output=True, text=True).stdout
+    return {m.group(1): kernel_text(txt, m.group(1)) for m in re.finditer(r'kernel\.def (?:target\(@\w+\) )?export\("(\w+)"\)', txt)}
+
 def build(variant=""):
     out = []
     for fmt, mode, rows, K, N in SHAPES + (EXTRA if not variant else []):
         for big in ("m128", "m256"):
             if big == "m256" and rows % 256: continue
-            g = G.gemm_big(fmt, mode) if big == "m128" else G.gemm_big256(fmt, mode)
-            tw = R.twin(g)
             nat, _, abl = variant.partition("_")
             if nat in NATIVE:
                 if big != "m256": continue
-                tw = NATIVE[nat](tw)
             elif abl == "" and variant not in ("", "nfast", "nomma", "nodq", "nobar", "ablw", "ablx", "nox", "xhalf", "nowst"):
                 raise SystemExit("unknown variant " + variant)
-            tw = transform(tw, abl if nat in NATIVE else variant)
+            q4 = "sb" if nat in ("sb", "sbst", "sbsw") else "mech"   # the generator's own LOOM_RDNA4_Q4K flavors; the others transform the mechanical twin here
+            kern = gen_kernels(f"{fmt}:{mode}", q4)[f"g_{'gemm_' + fmt + '_' + mode}_{big}_rdna4"]
+            if nat in NATIVE and nat not in ("sb", "sbst", "sbsw"): kern = NATIVE[nat](kern)
+            tw = transform(kern, abl if nat in NATIVE else variant)
             m = re.search(r'export\("(\w+)"\)', tw); old = m.group(1)
             kn = f"k_{fmt}_{mode}_{big}_{rows}x{K}x{N}"
             tw = tw.replace(f'export("{old}") @{old}(', f'export("{kn}") @{kn}(')
