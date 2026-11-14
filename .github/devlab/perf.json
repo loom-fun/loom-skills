@@ -24,19 +24,6 @@
      ]
     },
     {
-     "name": "dq2sw",
-     "build": {
-      "LOOM_RDNA4_Q4K": "dq2:swiglu"
-     },
-     "execution": {
-      "draft_depth": 0
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ]
-    },
-    {
      "name": "sbsw",
      "build": {
       "LOOM_RDNA4_Q4K": "sb:swiglu"
@@ -50,9 +37,23 @@
      ]
     },
     {
-     "name": "sbst",
+     "name": "pre_d",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "double": [
+      "llm:sel\\w*_g_gemm_q4_k_swiglu_m256"
+     ]
+    },
+    {
+     "name": "sbsw_d",
      "build": {
-      "LOOM_RDNA4_Q4K": "sb:store"
+      "LOOM_RDNA4_Q4K": "sb:swiglu"
      },
      "execution": {
       "draft_depth": 0
@@ -60,12 +61,15 @@
      "build_args": [
       "--prefill-r9700",
       "4096"
+     ],
+     "double": [
+      "llm:sel\\w*_g_gemm_q4_k_swiglu_m256"
      ]
     },
     {
-     "name": "dq2st",
+     "name": "dq2sw",
      "build": {
-      "LOOM_RDNA4_Q4K": "dq2:store"
+      "LOOM_RDNA4_Q4K": "dq2:swiglu"
      },
      "execution": {
       "draft_depth": 0
@@ -78,10 +82,10 @@
    ],
    "steps": [
     "perf:pre:2",
-    "perf:dq2sw:2",
     "perf:sbsw:2",
-    "perf:sbst:2",
-    "perf:dq2st:2"
+    "perf:pre_d:2",
+    "perf:sbsw_d:2",
+    "perf:dq2sw:2"
    ]
   }
  ],
