@@ -16,10 +16,7 @@
     {
      "name": "new",
      "build": {},
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
+     "build_args": [],
      "config": {
       "rdna4_f16_ffn": true
      }
