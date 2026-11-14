@@ -5,21 +5,29 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "llama_kv_rocm": 40960,
+   "name": "bartowski-qwen2-5-32b-instruct-loom",
+   "card": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 24576,
    "variants": [
     {
      "name": "card",
-     "build": {}
+     "context": 24576,
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576
+     }
     },
     {
      "name": "nodraft",
-     "build": {},
+     "context": 24576,
      "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576,
       "draft_depth": 0
      }
     }
@@ -40,7 +48,7 @@
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
