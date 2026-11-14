@@ -39,6 +39,21 @@
         "--profile-final-batch=true"
       ],
       "repeats": 3
+    },
+    {
+      "suite": "e2b_small",
+      "runner": "r9700",
+      "dir": "e2b_small",
+      "files": [
+        "bench.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ],
+      "repeats": 3
     }
   ]
 }
