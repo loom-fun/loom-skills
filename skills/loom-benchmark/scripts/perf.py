@@ -1,7 +1,7 @@
 """Throughput on fixed workloads, for Loom or llama.cpp (same prompts both sides).
 
 usage: python perf.py URL LABEL [--kind loom|llama] [--model MODEL_ID] [--long] [--log perf_log.jsonl] [--reverted]
-                     [--no-campaign]
+                     [--no-campaign] [--repeat-rows N]
 Every run appends one row to --log (also with --no-campaign, which only skips the optimization campaign's
 requirements and tracking: make_info.py perf and devlab_perf.sh read those rows).
 
@@ -19,6 +19,10 @@ prefix cache can help):
   acceptance        Loom with speculative decoding: per decode metric, accepted / proposed drafted tokens of that
                     very request (loom-serve's /metrics counters before and after it), so the roofline of a drafted
                     row uses the acceptance of the text it decoded (make_info.py roofline), not the spec gate's
+--repeat-rows N   fast models (published/expected decode > ~100 tok/s; methodology rule 5): decode_2k (short run), decode_32k and
+                    prefill_8k (--long) are measured N times in this run (each repeat its own nonce). The row keeps their median
+                    as its value and logs every repeat in out["samples"] {card metric: [values]}: make_info.py perf takes a
+                    session's value as the median of its samples (a session's repeats and perf.py runs pool alike).
 Completion tokens: every timed decode request logs the tokens it generated (out["completion_tokens"][metric]:
                     one entry per attempt, from the usage block on both engines). A request that stopped before half its
                     max_tokens is not a decode measurement: the rate is (n-1)/time over a few tokens, and with drafting
@@ -61,6 +65,9 @@ ap.add_argument("--no-campaign", action="store_true",
                 help="ad-hoc/ablation measurement: skip the roofline/baseline requirement and the campaign's tracking "
                      "(targets.jsonl, rate-of-approach verdict); the row still goes to --log")
 ap.add_argument("--repeats", type=int, default=5, help="samples per short-prefill size (median reported)")
+ap.add_argument("--repeat-rows", type=int, default=1,
+                help="measure decode_2k, decode_32k and prefill_8k this many times in one run (fast models: 3); the median is the "
+                     "row's value, every repeat is logged in out['samples']")
 ap.add_argument("--thinking", default="off", choices=["off", "on", "template"],
                 help="chat_template_kwargs.enable_thinking sent to BOTH engines (template: send nothing)")
 a = ap.parse_args()
@@ -134,14 +141,51 @@ def long_request(key, f, *args):
         return None
 
 
+def median(v):
+    v = sorted(v)
+    return v[len(v) // 2] if len(v) % 2 else (v[len(v) // 2 - 1] + v[len(v) // 2]) / 2
+
+
+def repeats(key, metric, make, f):
+    """f(make(i)) for i in range(--repeat-rows) (repeat 0 is the plain run); the successful values' median, with all of
+    them in out["samples"][metric] when there are several. The drafted-token acceptance of the repeats is averaged."""
+    vals, accs = [], []
+    for i in range(max(1, a.repeat_rows)):
+        out.get("acceptance", {}).pop(key, None)
+        v = f(make(i))
+        if v is not None:
+            vals.append(v)
+            if key in out.get("acceptance", {}):
+                accs.append(out["acceptance"][key])
+    if accs:
+        out["acceptance"][key] = round(sum(accs) / len(accs), 4)
+    if a.repeat_rows > 1 and vals:
+        out.setdefault("samples", {})[metric] = vals
+    return median(vals) if vals else None
+
+
 if a.long:
     out["prefill_long"], out["nonce"] = [], nonce
     for n in (8000, 16000, 32000):
-        r = long_request(f"prefill_{n}", run, long_prompt(f"prefill_{n}", nonce), 4)
-        if r:
-            out["prefill_long"].append({"prompt_tokens": r[0], "prefill_tps": round(r[1], 1)})
+        k = f"prefill_{n}"
+        tag = lambda i: nonce if i == 0 else f"{nonce}.{i}"
+        reps = a.repeat_rows if n == 8000 else 1
+        rs = []
+        for i in range(max(1, reps)):
+            r = long_request(k, run, long_prompt(k, tag(i)), 4)
+            if r:
+                rs.append(r)
+        if rs:
+            tps = [x[1] for x in rs]
+            out["prefill_long"].append({"prompt_tokens": rs[0][0], "prefill_tps": round(median(tps), 1)})
+            if reps > 1:
+                out.setdefault("samples", {})["prefill_8k"] = [round(x, 1) for x in tps]
             print(out["prefill_long"][-1], flush=True)
-    out["decode_tps_32k"] = long_request("decode_tps_32k", decode, "decode_tps_32k", long_prompt("decode_tps_32k", nonce), 128)
+    out["decode_tps_32k"] = long_request("decode_tps_32k", repeats, "decode_tps_32k", "decode_32k",
+                                         lambda i: long_prompt("decode_tps_32k", nonce if i == 0 else f"{nonce}.{i}"),
+                                         lambda c: decode("decode_tps_32k", c, 128))
+    if out["decode_tps_32k"] is not None:
+        out["decode_tps_32k"] = round(out["decode_tps_32k"], 2)
 else:
     out["decode_tps"] = decode("decode_tps", ESSAY, 300)
     out["prefill"] = []
@@ -150,7 +194,11 @@ else:
         pps = sorted(x[1] for x in samples)
         out["prefill"].append({"prompt_tokens": samples[0][0], "prefill_tps": round(pps[len(pps) // 2], 1),
                                "min": round(pps[0], 1), "max": round(pps[-1], 1), "n": len(pps)})
-    out["decode_tps_2k"] = decode("decode_tps_2k", f"[{nonce} ctx] Write a long, detailed essay discussing this documentation.\n\n" + doc(2000), 256)
+    out["decode_tps_2k"] = repeats("decode_tps_2k", "decode_2k",
+                                   lambda i: f"[{nonce} ctx{'' if i == 0 else i}] Write a long, detailed essay discussing this documentation.\n\n" + doc(2000),
+                                   lambda c: decode("decode_tps_2k", c, 256))
+    if out["decode_tps_2k"] is not None:
+        out["decode_tps_2k"] = round(out["decode_tps_2k"], 2)
 for k, v in list(out.items()):
     if isinstance(v, float):
         out[k] = round(v, 2)

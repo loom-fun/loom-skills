@@ -82,7 +82,7 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 
 **Methodology**
 
-- Compared: Loom against llama.cpp ROCm `llamacpp-rocm/b1374`, llama.cpp Vulkan `llamacpp-vulkan/b12211`; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with the active wait. Values are the mean of 2 rounds (4 streams: median of 3); Loom is timed by the client, llama.cpp by its server.
+- Compared: Loom against llama.cpp ROCm `llamacpp-rocm/b1374`, llama.cpp Vulkan `llamacpp-vulkan/b12211`; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with the active wait. Values are the median of 2 sessions (4 streams: median of 3); Loom is timed by the client, llama.cpp by its server.
 - Out of the box on both engines: Loom serves the preset shipped in this package; llama.cpp runs its build defaults plus only the server arguments listed below (offload, context and slots). No tuning sweep on either engine.
 - Drafting, 1-stream rows (decode, decode_2k, decode_32k, prefill): no drafting on either engine (no MTP head in the GGUF and no drafter published for this exact model). Each engine is loaded once for all these rows.
 - 4 streams: both engines loaded with drafting off, 4 parallel requests, aggregate tokens per second.

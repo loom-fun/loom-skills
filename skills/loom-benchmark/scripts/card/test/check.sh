@@ -148,11 +148,56 @@ row = [l for l in r.splitlines() if l.startswith('| decode tok/s')][0]
 assert row.count('|') == 7 and '—' not in row.split('|')[2] and '—' not in row.split('|')[3] and '—' not in row.split('|')[4], row
 rows = [l for l in r.split('## Performance')[1].split('\\n- ')[0].splitlines() if l.startswith('|')]
 assert len(rows) > 5 and all(l.count('|') == 7 for l in rows), rows
-assert 'Measured on AMD DevLab Dispatch Strix Halo runners' in r and 'Values are the mean of' in r and '**Methodology**' in r
+assert 'Measured on AMD DevLab Dispatch Strix Halo runners' in r and 'Values are the median of' in r and '**Methodology**' in r
 assert 'device not recorded' not in r and 'hrx-loom unknown' not in r, 'footnote'
 assert 'X2-LA03-S03-D01' in r and '0.2.0.dev0' in r, 'device/sdk'" "$tmp/dlonly" \
   && echo "OK   devlab-only: a card from a devlab-perf job renders one table with the runner and SDK" \
   || { echo "FAIL devlab-only: DevLab-only card does not render as expected"; bad=1; }
+# sampling rule (methodology rule 5): serve sessions end at {"session_end"} lines, a row measured several times in one run
+# (perf.py --repeat-rows) logs its "samples"; every metric = median over sessions of each session's median sample, the session
+# says "aggregate": "median" (+ runs.samples), and a card shows per session the method its numbers were measured with: a session
+# without the key is the mean of its rounds and keeps saying so, next to the median ones
+printf '%s\n' \
+  '{"label": "m", "kind": "loom", "time": "2026-11-14 10:00:00", "decode_tps": 50.0, "decode_tps_2k": 110.0, "samples": {"decode_2k": [100.0, 110.0, 120.0]}}' '{"session_end": "m"}' \
+  '{"label": "m", "kind": "loom", "time": "2026-11-14 10:10:00", "decode_tps": 54.0, "decode_tps_2k": 130.0, "samples": {"decode_2k": [125.0, 130.0, 140.0]}}' '{"session_end": "m"}' \
+  '{"label": "m", "kind": "loom", "time": "2026-11-14 10:20:00", "decode_tps": 52.0, "decode_tps_2k": 95.0, "samples": {"decode_2k": [90.0, 95.0, 100.0]}}' '{"session_end": "m"}' \
+  > "$tmp/med_loom.jsonl"
+py "$C/make_info.py" perf --loom-jsonl "$tmp/med_loom.jsonl" "${SRC[@]}" --source-kind devlab --run 3010 --device "$tmp/jd.json" --hrx-loom "$tmp/jh.json" -o "$tmp/perf_med.json" 2>/dev/null
+py "$C/make_info.py" perf --loom-jsonl "$F/evidence/verify_loom.jsonl" "${SRC[@]}" --source-kind devlab --run 3011 --device "$tmp/jd.json" --hrx-loom "$tmp/jh.json" -o "$tmp/perf_unmarked.json" 2>/dev/null
+mkdir -p "$tmp/medcard"; cp -r "$F/pkg/." "$tmp/medcard/"
+py "$C/make_info.py" build "$tmp/medcard" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint \
+  --evidence "$tmp/gates.json" "$tmp/perf_med.json" -o "$tmp/medcard/info.json" 2>/dev/null
+py "$C/render_card.py" "$tmp/medcard" 2>/dev/null
+mkdir -p "$tmp/medcard/mix" "$tmp/medcard/legacy"
+py -c "
+import json, sys, copy
+d, med, unm = sys.argv[1], json.load(open(sys.argv[2]))['performance']['session'], json.load(open(sys.argv[3]))['performance']['session']
+m = med['metrics']
+assert med['aggregate'] == 'median' and med['runs']['decode_prefill'] == 3 and med['runs']['samples'] == {'decode_2k': 3}, med['runs']
+assert m['decode_2k']['loom'] == 110.0 and m['decode_2k']['loom_runs'] == [110.0, 130.0, 95.0] and m['decode']['loom'] == 52.0, m
+assert unm['aggregate'] == 'median' and 'samples' not in unm['runs'], unm['runs']   # rows without markers: each row a round
+i = json.load(open(d + '/info.json')); sess = i['devices']['strix-halo']['performance']['sessions']
+assert [x.get('aggregate') for x in sess] == [None, 'median'], 'build: a legacy DevLab session and the median one'
+m = copy.deepcopy(i); lg = m['devices']['strix-halo']['performance']['sessions'][0]   # the legacy session re-measured decode last
+lg['date'] = '2026-11-15'; lg['runs'] = {'decode_prefill': 3, 'streams4': 3}; lg['metrics'] = {'decode': dict(sess[1]['metrics']['decode'], loom_runs=[50.0, 54.0, 52.0])}
+m['devices']['strix-halo']['performance']['sessions'] = [m['devices']['strix-halo']['performance']['sessions'][1], lg]
+import os; os.makedirs(d + '/mixed', exist_ok=True); json.dump(m, open(d + '/mixed/info.json', 'w'), indent=1)
+for name, keep in (('median', lambda x: x.get('aggregate')), ('legacy', lambda x: not x.get('aggregate'))):
+    j = copy.deepcopy(i); j['devices']['strix-halo']['performance']['sessions'] = [x for x in sess if keep(x)]
+    os.makedirs(d + '/' + name, exist_ok=True); json.dump(j, open(d + '/' + name + '/info.json', 'w'), indent=1)
+" "$tmp/medcard" "$tmp/perf_med.json" "$tmp/perf_unmarked.json" \
+  && for v in mixed median legacy; do rm -rf "$tmp/$v"; mkdir "$tmp/$v"; cp -r "$tmp/medcard/." "$tmp/$v/"; rm -rf "$tmp/$v/median" "$tmp/$v/legacy" "$tmp/$v/mixed"; cp "$tmp/medcard/$v/info.json" "$tmp/$v/info.json"; py "$C/render_card.py" "$tmp/$v" 2>/dev/null; done \
+  && py -c "
+import sys
+line = lambda d: [l for l in open(d + '/README.md').read().splitlines() if 'Values are' in l][0]
+mixed, med, leg = line(sys.argv[4]), line(sys.argv[2]), line(sys.argv[3])
+assert \"Values are the median of 3 sessions (a session's value is the median of its samples: 3 samples for decode_2k; one sample for the others) (4 streams\" in med, med
+assert 'the mean of' not in med.split('Loom is timed')[0], med
+assert 'Values are the mean of ' in leg and ' rounds (4 streams' in leg and 'median of 3 sessions' not in leg, leg
+# a card with both: each row says the method it was measured with, old numbers are never relabelled
+assert 'the mean of ' in mixed and ' rounds for ' in mixed and 'the median of 3 sessions' in mixed and 'samples for decode_2k' in mixed, mixed" "$tmp/medcard" "$tmp/median" "$tmp/legacy" "$tmp/mixed" \
+  && echo "OK   sampling: median over sessions of each session's median sample, recorded and rendered per session (legacy mean sessions keep their label)" \
+  || { echo "FAIL sampling: median-over-sessions aggregation or its card text"; bad=1; }
 # the spec gate's acceptance is a drafting statistic, not a timing: a DevLab nightly job's (pull_devlab.evidence, from
 # its gates_spec.log, stamped with the job's programs) replaces a stale spec_acceptance; a job without a spec gate
 # carries none
