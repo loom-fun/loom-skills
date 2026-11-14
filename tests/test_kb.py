@@ -38,7 +38,7 @@ class RouteTests(unittest.TestCase):
     def test_config_derives_facets(self):
         with tempfile.TemporaryDirectory() as d:
             cfg = Path(d) / "llm_config.json"
-            cfg.write_text(json.dumps({"arch": "qwen35", "layers": 64, "kv_layers": 16, "kv_heads": 4,
+            cfg.write_text(json.dumps({"arch": "qwen35", "layers": 64, "kv_layers": 16, "kv_heads": 4, "gdn": {"conv_kernel": 4},
                                        "vision": {"mmproj": "x"}, "draft": {"kind": "dflash"}}))
             code, out, _ = run("route", "--config", str(cfg), "--relative")
         self.assertEqual(code, 0)
