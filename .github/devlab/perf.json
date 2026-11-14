@@ -21,70 +21,9 @@
      ]
     },
     {
-     "name": "swas",
+     "name": "f16o",
      "build": {
-      "FLASH2_SWA_TWIN": "s",
-      "FLASH2_POS_BYTES": "1024"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ]
-    },
-    {
-     "name": "nostv",
-     "build": {
-      "FLASH2_ABL": "nostv"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ]
-    },
-    {
-     "name": "nokld",
-     "build": {
-      "FLASH2_ABL": "nokld"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ]
-    },
-    {
-     "name": "nobar",
-     "build": {
-      "FLASH2_ABL": "nobar"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ]
-    },
-    {
-     "name": "noqk",
-     "build": {
-      "FLASH2_ABL": "noqk"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ]
-    },
-    {
-     "name": "nopv",
-     "build": {
-      "FLASH2_ABL": "nopv"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ]
-    },
-    {
-     "name": "nosm",
-     "build": {
-      "FLASH2_ABL": "nosm"
+      "GEMM_F16O": "swiglu"
      },
      "build_args": [
       "--prefill-r9700",
@@ -93,23 +32,14 @@
     }
    ],
    "steps": [
-    "ktest:swas",
-    "perf:base:2",
-    "perf:swas:2",
-    "perf:nostv:2",
-    "perf:nokld:2",
-    "perf:nobar:2",
-    "perf:noqk:2",
-    "perf:nopv:2",
-    "perf:nosm:2",
-    "perf:base:2:long",
-    "perf:swas:2:long",
-    "perf:nostv:2:long",
-    "perf:nokld:2:long",
-    "perf:nobar:2:long",
-    "perf:noqk:2:long",
-    "perf:nopv:2:long",
-    "perf:nosm:2:long"
+    "ktest:f16o",
+    "func:f16o",
+    "perf:base:3",
+    "perf:f16o:3",
+    "perf:base:3:long",
+    "perf:f16o:3:long",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long"
    ]
   }
  ],
