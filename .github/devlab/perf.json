@@ -6,18 +6,19 @@
  "jobs": [
   {
    "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
-   "require_preset_r9700": true,
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "card",
+     "build": {}
     },
     {
      "name": "nodraft",
+     "build": {},
      "execution": {
       "draft_depth": 0
      }
@@ -39,7 +40,7 @@
    ]
   }
  ],
- "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
