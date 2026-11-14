@@ -51,13 +51,15 @@ class DeviceRegistry(unittest.TestCase):
         d = registry.devices()
         self.assertEqual(d["strix-halo"]["runner"]["labels"], ["strix-halo", "devlab-dispatch", "Linux", "self-hosted"])
         self.assertEqual(d["radeon-r9700"]["runner"]["labels"], ["self-hosted", "devlab-dispatch", "radeon-r9700"])
-        for wf in ("devlab-perf.yml", "devlab-kbench.yml"):
+        for wf in ("devlab-perf.yml", "devlab-kbench.yml"):   # the workflows read the registry (no inline copy to drift)
             txt = (ROOT / ".github/workflows" / wf).read_text(encoding="utf-8")
-            for dev in d.values():
-                if not dev["runner"]["labels"]:
-                    continue   # no runner registered yet (radeon-rx7900xtx): nothing for a workflow to select
-                labels = ", ".join(f'"{x}"' for x in dev["runner"]["labels"])
-                self.assertIn(f'"{dev["runner"]["key"]}": [{labels}]', txt, f"{wf} {dev['device']}")
+            self.assertIn("registry.runner_labels()", txt, wf)
+            self.assertNotIn('"devlab-dispatch"', txt, f"{wf}: an inline runner label table")
+        self.assertEqual(registry.runner_labels(), {dev["runner"]["key"]: dev["runner"]["labels"] for dev in d.values() if dev["runner"]["labels"]})
+        out = subprocess.run([sys.executable, str(ROOT / ".github/scripts/runner_device.py"), "--labels"], capture_output=True, text=True, check=True).stdout
+        self.assertEqual(json.loads(out), registry.runner_labels())
+        prefixes = [(dev["runner"].get("ab_prefix") or dev["runner"]["key"] + "ab-") for dev in d.values() if dev["runner"]["labels"]]
+        self.assertEqual(len(prefixes), len(set(prefixes)), "A/B job name prefixes are unique per runner")
 
     def test_info_schema_devices(self):   # the card schema's device enum is the registry's device list (a device row adds one entry)
         schema = json.loads((CARD / "info_schema.json").read_text(encoding="utf-8"))
@@ -194,7 +196,10 @@ class Methodology(unittest.TestCase):
             self.assertIn(k, registry.devices())
         self.assertEqual(b["radeon-r9700"]["rocm"]["build"], "b1375")
         self.assertEqual(b["strix-halo"]["rocm"]["fallback"], "b1374")
-        self.assertEqual({b[k]["vulkan"]["build"] for k in b if k in registry.devices()}, {"b12211"})
+        self.assertEqual({b[k]["vulkan"]["build"] for k in b if k in registry.devices() and "vulkan" in b[k]}, {"b12211"})
+        for k, d in registry.devices().items():   # every device is accounted for: builds, or an explicit "none" (no runner) that names why
+            self.assertIn(k, b, k)
+            self.assertEqual("none" in b[k], not d["runner"]["labels"], f"{k}: baselines name builds exactly when the device has a runner")
 
 
 class ABCompare(unittest.TestCase):

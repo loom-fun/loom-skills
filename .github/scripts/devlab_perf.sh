@@ -111,15 +111,21 @@ rrows=$(q "print(j.get('repeat_rows') or e.get('repeat_rows') or 1)")
 RUNNER=$(q "print(j.get('runner') or e.get('runner') or 'strix')")
 # "env": {"NAME": "value"} on the experiment or a job: exported for every step (gates.sh switches; the job's wins)
 eval "$(q "import shlex; print('\n'.join(f'export {k}={shlex.quote(str(v))}' for k, v in {**(e.get('env') or {}), **(j.get('env') or {})}.items()))")"
-if [ "$RUNNER" = r9700 ]; then
-  rm9=$(q "print(j.get('memory_bytes_r9700') or e.get('memory_bytes_r9700') or '')")
-  if [ -n "$rm9" ]; then mem=$rm9; elif [ "$mem" -gt 34000000000 ]; then echo "r9700: memory_bytes $mem clamped to 34000000000 (the R9700 pool, card_lib.GPUS)"; mem=34000000000; fi
-  export LOOM_MEMORY_CAP_GIB=${LOOM_MEMORY_CAP_GIB:-34}   # the budget lives in VRAM: memcheck.sh's 60 %-of-host-RAM rule does not apply
+# a runner other than strix is a device with its own memory pool (the registry's device.json: skills/loom-kb, runner_device.py): RDEV is its
+# device key, RPOOL its memory_bytes, RSUF its preset suffix; the job's "memory_bytes_<runner>" / "require_preset_<runner>" are keyed by the runner
+RDEV=""; RPOOL=0; RSUF=-
+if [ "$RUNNER" != strix ]; then
+  read -r RDEV RPOOL RSUF < <(python3 -I "$here/.github/scripts/runner_device.py" "$RUNNER") || { echo "unknown runner $RUNNER"; exit 1; }
+fi
+if [ -n "$RDEV" ]; then
+  rm9=$(q "print(j.get('memory_bytes_$RUNNER') or e.get('memory_bytes_$RUNNER') or '')")
+  if [ -n "$rm9" ]; then mem=$rm9; elif [ "$RPOOL" -gt 0 ] && [ "$mem" -gt "$RPOOL" ]; then echo "$RUNNER: memory_bytes $mem clamped to $RPOOL (the $RDEV pool, card_lib.GPUS)"; mem=$RPOOL; fi
+  export LOOM_MEMORY_CAP_GIB=${LOOM_MEMORY_CAP_GIB:-$((RPOOL / 1000000000))}   # the budget lives in VRAM: memcheck.sh's 60 %-of-host-RAM rule does not apply
   if ! ldconfig -p 2>/dev/null | grep -q 'libvulkan\.so\.1' || ! ls /usr/share/vulkan/icd.d/radeon_icd*.json >/dev/null 2>&1; then
     { sudo -n apt-get install -y libvulkan1 mesa-vulkan-drivers || { sudo -n apt-get update -qq && sudo -n apt-get install -y libvulkan1 mesa-vulkan-drivers; }; } >/dev/null 2>&1 \
       || echo "WARNING: could not install libvulkan1 mesa-vulkan-drivers (the @vulkan steps will fail)"
   fi
-elif [ "$RUNNER" != strix ]; then echo "unknown runner $RUNNER (strix | r9700)"; exit 1; fi
+fi
 BK=rocm; bkt=-   # the llama.cpp backend of the step running (set by the "@vulkan" suffix) and its file-name infix
 echo "job $job: variants $variants; steps $steps; runner $RUNNER $(hostname); memory_bytes $mem"
 hostname > "$out/runner.txt"
@@ -306,18 +312,19 @@ serve_alone() { # serve_alone VARIANT
   local aw sa rp vmem; aw=$(qv "$1" "print(0 if v.get('active_wait') is False else 1)")
   sa=$(qv "$1" "print(' '.join(v.get('serve_args') or []))")   # "serve_args": extra loom-serve flags
   # a package with a `<first preset>-r9700` preset (build.py --prefill-r9700) serves it on the R9700, as the card's R9700 Quick start does
-  rp=""; [ "$RUNNER" = r9700 ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] + '-r9700' if p[0] + '-r9700' in p else '')" "$D/$1/pkg/model.json")
+  rp=""; [ -n "$RDEV" ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] + sys.argv[2] if p[0] + sys.argv[2] in p else '')" "$D/$1/pkg/model.json" "$RSUF")
   # (the job's "require_preset_r9700" covers the job's own card; a variant of another card, e.g. the old package of an A/B, has no R9700 preset unless it sets the key itself)
-  if [ -z "$rp" ] && [ "$RUNNER" = r9700 ] && [ "$(qv "$1" "print(v['require_preset_r9700'] if 'require_preset_r9700' in v else (j.get('require_preset_r9700') or '') if 'card' not in v else '')")" = True ]; then
-    echo "FAIL: the card has no <first>-r9700 preset (its fit row has r9700_execution): publish the package with it first"; return 1; fi
+  if [ -z "$rp" ] && [ -n "$RDEV" ] && [ "$(qv "$1" "print(v['require_preset_$RUNNER'] if 'require_preset_$RUNNER' in v else (j.get('require_preset_$RUNNER') or '') if 'card' not in v else '')")" = True ]; then
+    echo "FAIL: the card has no <first>$RSUF preset (its fit row has ${RUNNER}_execution): publish the package with it first"; return 1; fi
   # elsewhere (Strix) a package with several presets serves its first (the default), as the card's Strix Quick start fetches --preset=<first>
-  [ -z "$rp" ] && [ "$RUNNER" != r9700 ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] if len(p) > 1 else '')" "$D/$1/pkg/model.json")
+  [ -z "$rp" ] && [ -z "$RDEV" ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] if len(p) > 1 else '')" "$D/$1/pkg/model.json")
   if [ -n "$rp" ] && [[ "$sa" != *--preset=* ]]; then sa="--preset=$rp $sa"; fi
   vmem=$(qv "$1" "print(v.get('memory_bytes') or '$mem')")   # variant "memory_bytes": "none" with --pool_backing=fixed
   # the R9700 is served as its card's Quick start serves it: card_lib.GPUS "serve_args" (--pool_backing=fixed, no --memory_bytes; the elastic
   # backing's trim + compaction stalls the long-prefill rows), unless the variant brings its own serve_args/memory_bytes or is "elastic": true
-  if [ "$RUNNER" = r9700 ] && [[ "$sa" != *--pool_backing=* ]] && [ "$(qv "$1" "print(bool(v.get('elastic') or v.get('memory_bytes')))")" = False ]; then
-    sa="$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.gpu_serve_args('radeon-r9700')))" "$here/skills/loom-benchmark/scripts/card") $sa"
+  gsa=""; if [ -n "$RDEV" ]; then gsa=$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.gpu_serve_args(sys.argv[2])))" "$here/skills/loom-benchmark/scripts/card" "$RDEV"); fi
+  if [ -n "$gsa" ] && [[ "$sa" != *--pool_backing=* ]] && [ "$(qv "$1" "print(bool(v.get('elastic') or v.get('memory_bytes')))")" = False ]; then
+    sa="$gsa $sa"
     vmem=none
   fi
   step "serve $1"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
@@ -384,7 +391,7 @@ for s in $steps; do
       for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
       "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
       ms=(); ids=(); for v in $variants; do ms+=("$D/$v/pkg/model_ab.json"); ids+=("$cardid-$v"); done
-      nv=${#ms[@]}; abmem=$(( 11000000000 * nv + 4000000000 )); [ "$RUNNER" = r9700 ] && [ "$abmem" -gt "$mem" ] && abmem=$mem
+      nv=${#ms[@]}; abmem=$(( 11000000000 * nv + 4000000000 )); [ -n "$RDEV" ] && [ "$abmem" -gt "$mem" ] && abmem=$mem
       step "ab: one loom-serve with $nv packages ($abmem bytes)"
       "$SV/serve.sh" abserve "$PORT" amdgpu "$abmem" "${ms[@]}" | tail -2
       "$T" "$here/.github/scripts/ab_decode.py" "$url" "${ids[@]}" --rounds "$p1" --think "${p2:-$TH}" --log "$out/ab.jsonl" 2>&1 | tee "$out/ab.log"

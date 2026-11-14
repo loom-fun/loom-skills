@@ -44,6 +44,7 @@
   },
   "runner": {
     "key": "r9700",
+    "ab_prefix": "rab-",
     "labels": [
       "self-hosted",
       "devlab-dispatch",

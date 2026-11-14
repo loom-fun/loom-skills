@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Same-runner A/B jobs for the devlab-perf workflow, on any registered device: write .github/devlab/perf.json for some models.
 
-usage: ab_jobs.py --device strix-halo|radeon-r9700 [--old-org ORG] [--new-org ORG] [--old-rev REV] [--new-rev REV] [--refs MAP.json]
+usage: ab_jobs.py --device DEVICE (any registry device with a runner: strix-halo, radeon-r9700, ...) [--old-org ORG] [--new-org ORG] [--old-rev REV] [--new-rev REV] [--refs MAP.json]
                   [--baselines] [--gates dev] [--reps N] [--suffix -r2] SLUG... > .github/devlab/perf.json
 
 One job per model on ONE runner of the device: the old package (variant "fun") and the new package (variant "staging") served one
@@ -20,8 +20,8 @@ writes card_revision.txt / card_revision_fun.txt). --old-rev / --new-rev pin eve
 An A/A run (a package against itself, e.g. old = staging@REV, new = staging at main) measures the runner's own noise.
 
 --device strix-halo: the Strix Halo runner (strix_ab_jobs.py is a wrapper with these defaults), the old card's --memory_bytes.
---device radeon-r9700: the R9700 runner, both variants served as the NEW card's R9700 Quick start serves it (r9700_jobs.py): the fit row
-  (--fit, default .github/devlab/r9700_fit.json) gives the <first>-r9700 preset (job "require_preset_r9700"), the served context of a
+--device with a memory pool (radeon-r9700): the device's runner, both variants served as the NEW card's Quick start for it serves it
+  (device_jobs.py, r9700_jobs.py): the fit row (--fit, default the device's fit table, device.json "fit_table") gives the <first>-r9700 preset (job "require_preset_r9700"), the served context of a
   reduced-context model and the llama.cpp ROCm KV size; the old package, which may carry no such preset, is served with the same
   execution settings (variant "execution" + "cap_pool" = what the fixed pool backing can hold); --pool_backing=fixed and the memory clamp are
   devlab_perf.sh's. A model whose weights do not fit gets no job.
@@ -52,14 +52,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card"))
 import card_lib  # noqa: E402
+sys.path.insert(0, HERE)
+import device_jobs  # noqa: E402
 
-# the devices an A/B can run on: the device registry (skills/loom-kb: device.json runner key, methodology.json baselines per device)
-DEVICES = {d: {"runner": card_lib.registry.device(d)["runner"]["key"], "baselines": card_lib.registry.methodology()["baselines"][d]}
-           for d in ("strix-halo", "radeon-r9700")}
-for _d in DEVICES.values():
-    _d["prefix"] = _d["runner"][0] + "ab-"   # job names: sab-<slug> (strix), rab-<slug> (r9700)
-    _d["llamacpp"] = _d["baselines"]["rocm"].get("fallback") or _d["baselines"]["rocm"]["build"]   # the ROCm build when nightly-models.json names none
-    _d["vulkan"] = _d["baselines"]["vulkan"]["build"]
+# the devices an A/B can run on: the device registry's devices with a DevLab runner (skills/loom-kb: device.json runner, methodology.json
+# baselines per device); a device without a runner or baselines cannot be measured
+DEVICES = {}
+for _k, _dv in card_lib.registry.devices().items():
+    _b = card_lib.registry.methodology()["baselines"].get(_k)
+    if _dv["runner"]["labels"] and _b and "rocm" in _b:
+        DEVICES[_k] = {"runner": _dv["runner"]["key"], "baselines": _b,
+                       "prefix": _dv["runner"].get("ab_prefix") or _dv["runner"]["key"] + "ab-",   # job names: sab-<slug> (strix), rab-<slug> (r9700)
+                       "llamacpp": _b["rocm"].get("fallback") or _b["rocm"]["build"],   # the ROCm build when nightly-models.json names none
+                       "vulkan": _b["vulkan"]["build"]}
 
 
 def abba(k, start=0):
@@ -74,37 +79,22 @@ def ref(org, slug, rev=None):
     return f"{org}/{slug}" + (f"@{rev}" if rev else "")
 
 
-def r9700_fields(slug, f, m, pool):
-    """What r9700_jobs.py derives from the fit row f of a model: (job fields, new-variant execution, old-variant fields, memory) or None
-    when the weights do not fit. The new variants are exactly r9700_jobs' card / nodraft."""
-    if f["w"] + card_lib.SERVE_HEADROOM >= pool or not f["verdict"].startswith("fits"):
-        return None
-    mem = min(m["memory_bytes"], pool)
-    ctx = card_lib.fit_served_context(f, pool)   # the native context's KV cache does not fit (or the row caps it): serve what does
-    if ctx:
-        mem = pool
-    preset = card_lib.gpu_preset_execution(f, ctx)
-    ex_ctx = {"context_capacity": ctx, "pool_capacity": ctx} if ctx and not preset else {}
-    # llama.cpp ROCm keeps one 65536-token KV pool; shrink it when that plus ~2.5 GB of buffers does not fit beside the weights
-    lkv = None
-    kvt = f["kv"] / f["ctx"]
-    if f["w"] + 65536 * kvt + 2_500_000_000 > pool:
-        lkv = max(36864, min(65536, int((pool - f["w"] - 2_500_000_000) // kvt) // 4096 * 4096))
-    job = {**({"llama_kv_rocm": lkv} if lkv else {}), **({"require_preset_r9700": True} if preset else {}),
-           "memory_bytes_r9700": mem, **({"served_context": ctx} if ctx else {})}
-    # the old package carries no <first>-r9700 preset: the same settings as an execution override (its pool shrunk to what fixed backing holds)
-    old = {**({"context": ctx} if ctx else {}), "execution": preset or ex_ctx, "cap_pool": card_lib.fixed_pool_capacity(f)}
-    return job, ex_ctx, old, ctx
+def r9700_fields(slug, f, m, pool, gpu="radeon-r9700"):
+    """What device_jobs.py derives from the fit row f of a model on a device with the memory POOL: (job fields, new-variant execution,
+    old-variant fields, served context) or None when the weights do not fit. The new variants are exactly device_jobs' card / nodraft."""
+    got = device_jobs.device_fields(gpu, f, m, pool)
+    return got and got[:4]
 
 
 def build(a):
     dev = DEVICES[a.device]
     refs = json.load(open(a.refs)) if a.refs else {}
     models = {m["repo"].split("/")[-1]: m for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
-    r9700 = a.device == "radeon-r9700"
+    pool = card_lib.GPUS[a.device]["memory_bytes"]
+    r9700 = pool is not None   # a device with its own memory pool (the R9700's path: fit table, device preset); Strix Halo takes the package's
+    NAME = card_lib.GPUS[a.device]["runner"]
     if r9700:
-        pool = card_lib.GPUS["radeon-r9700"]["memory_bytes"]
-        fit = {r["slug"]: r for r in json.load(open(a.fit))}
+        fit = {r["slug"]: r for r in json.load(open(a.fit or os.path.join(ROOT, card_lib.registry.fit_table(a.device))))}
     jobs, skipped = [], []
     for slug in a.slugs:
         m = models[slug]
@@ -136,7 +126,7 @@ def build(a):
                 # session's value is the median of its samples), 6 sessions of each kind
                 "steps": steps})
             continue
-        got = r9700_fields(slug, fit[slug], m, pool)
+        got = r9700_fields(slug, fit[slug], m, pool, a.device)
         if not got:
             skipped.append(slug)   # the weights do not fit: no run (the card says "doesn't fit")
             continue
@@ -151,10 +141,10 @@ def build(a):
             "variants": [ov("fun", {}), nv("staging", ex_ctx), ov("funnd", {"draft_depth": 0}), nv("stagingnd", {**ex_ctx, "draft_depth": 0})],
             "steps": steps})
     if not jobs:
-        sys.exit("no job: " + (", ".join(skipped) + " do not fit the R9700" if skipped else "no model given"))
+        sys.exit("no job: " + (", ".join(skipped) + f" do not fit the {NAME}" if skipped else "no model given"))
     if r9700:
-        return {"_comment": f"R9700 A/B (ab_jobs.py): per model one job on one R9700 runner, old package (fun) vs new package (staging), served as the new "
-                            f"card's R9700 Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: {', '.join(skipped) or 'none'}",
+        return {"_comment": f"{NAME} A/B (ab_jobs.py): per model one job on one {NAME} runner, old package (fun) vs new package (staging), served as the new "
+                            f"card's {NAME} Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: {', '.join(skipped) or 'none'}",
                 "runner": dev["runner"], "memory_bytes": pool, "llama_spec": "matched", "jobs": jobs,
                 "card": jobs[0]["card"], "kit": None, "llamacpp": dev["llamacpp"], "llamacpp_vulkan": dev["vulkan"]}
     return {"_comment": "Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, "
@@ -178,7 +168,7 @@ def parser(device=None):
     ap.add_argument("--old-rev", help="pin the old card of every slug to this revision (ORG/SLUG@REV)")
     ap.add_argument("--new-rev", help="pin the new card of every slug to this revision")
     ap.add_argument("--refs", help='JSON {"SLUG": {"old": "org/repo@rev", "new": "org/repo@rev"}}: per-slug card references (win over the org/rev options)')
-    ap.add_argument("--fit", default=os.path.join(ROOT, card_lib.registry.device("radeon-r9700")["fit_table"]), help="radeon-r9700: the fit table")
+    ap.add_argument("--fit", default=None, help="a device with a memory pool (radeon-r9700): its fit table (default: device.json fit_table)")
     ap.add_argument("--baselines", action="store_true", help="also run the llama.cpp ROCm + Vulkan rows (off: the A/B compares Loom with Loom; no llama.cpp re-measure)")
     ap.add_argument("--llama-reps", type=int, default=None, help="llama.cpp runs per 1-stream row (default: 2 on Strix Halo; on the R9700 the Loom session count, as r9700_jobs.py)")
     ap.add_argument("--suffix", default="", help="appended to the job name (a confirming re-run: -r2)")

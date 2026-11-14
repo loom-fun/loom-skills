@@ -34,12 +34,14 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           e = json.load(open(".github/devlab/perf.json"))
-          labels = {"strix": ["strix-halo", "devlab-dispatch", "Linux", "self-hosted"],   # without Linux a job can land on Windows
-                    "r9700": ["self-hosted", "devlab-dispatch", "radeon-r9700"]}
+          import sys
+          sys.path.insert(0, "skills/loom-kb")
+          import registry
+          labels = registry.runner_labels()   # {runner key: runs-on labels} of the device registry (device.json runner; Strix includes Linux: without it a job can land on Windows)
           inc = []
           for j in e["jobs"]:
               r = j.get("runner") or e.get("runner") or "strix"
-              assert r in labels, f"job {j['name']}: unknown runner {r!r} (strix | r9700)"
+              assert r in labels, f"job {j['name']}: unknown runner {r!r} ({' | '.join(labels)})"
               inc.append({"job": j["name"], "labels": json.dumps(labels[r])})
           print("matrix=" + json.dumps({"include": inc}))
           PY

@@ -104,7 +104,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       HF, RETIRED_GATES, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
-                      SERVE_HEADROOM)
+                      SERVE_HEADROOM, registry)
 
 
 # ---------------------------------------------------------------- sources
@@ -199,7 +199,23 @@ def evidence_gpu(ev, src=None):
     return ev.get("gpu") or gpu_from_device((src or {}).get("device")) or DEFAULT_GPU
 
 
-def fit_settings(verdict_path, repo, gpu="radeon-r9700"):
+def fit_tables(specs):
+    """[(gpu, fit table path)] of the --fit arguments: GPU=PATH, 'auto' (every registry device whose fit table exists in this checkout), or a
+    path (the device whose device.json fit_table has that file name, else radeon-r9700: the legacy single table)."""
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
+    out = []
+    for spec in specs or []:
+        if spec == "auto":
+            out += [(g, os.path.join(repo_root, registry.fit_table(g))) for g in GPUS if os.path.exists(os.path.join(repo_root, registry.fit_table(g)))]
+        elif "=" in spec and spec.split("=")[0] in GPUS:
+            out.append(tuple(spec.split("=", 1)))
+        else:
+            hit = [g for g in GPUS if os.path.basename(registry.fit_table(g)) == os.path.basename(spec)]
+            out.append((hit[0] if hit else "radeon-r9700", spec))
+    return out
+
+
+def fit_settings(verdict_path, repo, gpu="radeon-r9700"):   # gpu: any device with a fit table (device.json fit_table)
     """(memory_bytes, served_context, required_bytes) of a package on a GPU from the fit table: the table's row of the
     repo's name. required_bytes is set (and nothing else) when the package does not fit the GPU's memory; memory_bytes
     and served_context only when the KV cache of the native context does not fit (the GPU's whole memory is the pool
@@ -210,6 +226,8 @@ def fit_settings(verdict_path, repo, gpu="radeon-r9700"):
     if row is None:
         sys.exit(f"{verdict_path}: no row for {name}")
     mem = GPUS[gpu]["memory_bytes"]
+    if mem is None:
+        return None, None, None   # the device takes the package's own memory (Strix Halo): nothing to fit
     need = row["w"] + row["kv"] + SERVE_HEADROOM
     if need > mem and row["kv"] == 0:   # weights alone (no KV cache to cut): the model does not fit
         return None, None, int(need)
@@ -221,29 +239,29 @@ def fit_settings(verdict_path, repo, gpu="radeon-r9700"):
     return mem, ctx, None
 
 
-def write_gpu_preset(pkg_dir, model, verdict_path, repo, ctx):
+def write_gpu_preset(pkg_dir, model, verdict_path, repo, ctx, gpu="radeon-r9700"):
     """Add the `<first>-r9700` preset to the package's model.json from the fit row's "r9700_execution" (idempotent: the same
     settings give the same file); returns the execution the preset sets, or None when the row has no block (model.json is
     then left as it is, whatever presets a build gave it). The default preset, programs, weights and lock are untouched."""
     row = next((r for r in load_json(verdict_path) if r["slug"] == repo.split("/")[-1]), None)
-    ex = gpu_preset_execution(row, ctx) or {}
+    ex = gpu_preset_execution(row, ctx, gpu) or {}
     if ctx and "context_capacity" not in ex:   # a served context below the native one (fit ctx_cap or memory): the preset serves it
         ex.update(context_capacity=ctx, pool_capacity=min(ctx, ex.get("pool_capacity") or ctx))
     # the R9700 is served with fixed state backing (card_lib.GPUS "serve_args"): the pool is committed eagerly, so a default preset
     # whose pool is larger than the GPU holds beside the weights gets a smaller one (a native context that fits always fits it)
     base = next(iter(model["presets"].values()))["execution"]
-    cap = fixed_pool_capacity(row)
+    cap = fixed_pool_capacity(row, gpu=gpu)
     pool = ex.get("pool_capacity") or base.get("pool_capacity") or base.get("context_capacity")
     if cap is not None and pool and pool > cap:
         ex["pool_capacity"] = cap
         ex["context_capacity"] = min(ex.get("context_capacity") or base["context_capacity"], cap)
     if not ex:
         return None
-    doc = with_gpu_preset(model, ex)
+    doc = with_gpu_preset(model, ex, gpu)
     with open(os.path.join(pkg_dir, "model.json"), "w", encoding="utf-8", newline="\n") as f:
         json.dump(doc, f, indent=1, ensure_ascii=False)
         f.write("\n")
-    return doc["presets"][gpu_preset_name(doc)]["execution"]
+    return doc["presets"][gpu_preset_name(doc, gpu)]["execution"]
 
 
 def cmd_build(a):
@@ -397,24 +415,23 @@ def cmd_build(a):
             if gpu not in GPUS or not n.isdigit():
                 sys.exit(f"--{key.replace('_', '-')} {item}: expected GPU=N with GPU one of {', '.join(GPUS)}")
             gpu_state(gpu)["meta"][key] = int(n)
-    if a.fit:
-        for gpu in ("radeon-r9700",):
-            if gpu in gpus or gpu in G:
-                mem, ctx, need = fit_settings(a.fit, a.repo, gpu)
-                m = gpu_state(gpu)["meta"]
-                if need is not None:
-                    m.update(state="unsupported", required_bytes=need)
-                else:
-                    m.pop("state", None)
-                    m.pop("required_bytes", None)
-                    for k in ("memory_bytes", "served_context"):
-                        m.pop(k, None)
-                    if mem is not None:
-                        m["memory_bytes"] = mem
-                    if ctx is not None:
-                        m["served_context"] = ctx
-                    if need is None:
-                        write_gpu_preset(a.pkg, pkg["model"], a.fit, a.repo, ctx)
+    for gpu, fit in fit_tables(a.fit):
+        if gpu in gpus or gpu in G:
+            mem, ctx, need = fit_settings(fit, a.repo, gpu)
+            m = gpu_state(gpu)["meta"]
+            if need is not None:
+                m.update(state="unsupported", required_bytes=need)
+            else:
+                m.pop("state", None)
+                m.pop("required_bytes", None)
+                for k in ("memory_bytes", "served_context"):
+                    m.pop(k, None)
+                if mem is not None:
+                    m["memory_bytes"] = mem
+                if ctx is not None:
+                    m["served_context"] = ctx
+                if need is None:
+                    write_gpu_preset(a.pkg, pkg["model"], fit, a.repo, ctx, gpu)
     gpus = [g for g in GPUS if g in G or g in (a.gpus or "").split(",")]
     for g in (a.gpus or "").split(",") if a.gpus else []:
         if g and g not in GPUS:
@@ -999,7 +1016,9 @@ def main(argv=None):
     b.add_argument("--gpus", help="comma-separated GPU ids the card covers (card_lib.GPUS); one without evidence is not_measured")
     b.add_argument("--gpu-memory", action="append", metavar="GPU=BYTES", help="loom-serve --memory_bytes on that GPU (repeat)")
     b.add_argument("--served-context", action="append", metavar="GPU=TOKENS", help="tokens per request that GPU serves (repeat)")
-    b.add_argument("--fit", metavar="VERDICT.json", help="the fit table: radeon-r9700's memory_bytes, served context or unsupported state")
+    b.add_argument("--fit", action="append", metavar="VERDICT.json", help="a fit table (repeat; GPU=PATH names the device): the device's memory_bytes, served context or "
+                   "unsupported state. A path takes the device whose device.json fit_table has that file name, else radeon-r9700; 'auto' = the table of every "
+                   "registry device that has one in this checkout")
     b.add_argument("--generator-commit", help="loom-skills commit of the card scripts, or 'unknown' (default: this "
                    "checkout's HEAD)")
     b.add_argument("--evidence", nargs="*")
