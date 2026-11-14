@@ -5,42 +5,65 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "unsloth-gemma-4-e2b-it-loom",
+   "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 16000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "c4096",
+     "build": {
+      "FLASH2_SWA_TWIN": "s",
+      "FLASH2_POS_BYTES": "1024",
+      "FLASH2_LAZY": "1",
+      "GEMM_F16O": "swiglu"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
     },
     {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "c8192",
+     "build": {
+      "FLASH2_SWA_TWIN": "s",
+      "FLASH2_POS_BYTES": "1024",
+      "FLASH2_LAZY": "1",
+      "GEMM_F16O": "swiglu"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "8192"
+     ]
+    },
+    {
+     "name": "c2048",
+     "build": {
+      "FLASH2_SWA_TWIN": "s",
+      "FLASH2_POS_BYTES": "1024",
+      "FLASH2_LAZY": "1",
+      "GEMM_F16O": "swiglu"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "2048"
+     ]
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "ktest:c4096",
+    "perf:c4096:3",
+    "perf:c8192:3",
+    "perf:c2048:3",
+    "perf:c4096:3:long",
+    "perf:c8192:3:long",
+    "perf:c2048:3:long"
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
