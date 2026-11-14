@@ -76,3 +76,6 @@ These apply to `loom-port-llm`, `loom-optimize`, `loom-org` and `loom-improve`; 
 4. **Stop on out-of-mandate needs**: a change to a protected core file (generator core, `dual_target.py`, `build.py`,
    `kb.py`, `choices.py` legacy values, methodology, registries, card schema, workflows) is an `architecture` PR, not part
    of a targeted task. Report the need and stop; do not work around it.
+
+The full process around these rules: `loom-improve/reference/targeted-fix.md` (a narrow change, checklist) and
+`loom-improve/reference/campaign.md` (a team campaign); why the guards exist: `loom-improve/reference/architecture.md`.

@@ -37,6 +37,8 @@ session rather than treating your current session as independent evidence.
 | What is possible for this model? Pick optimization targets (roofline vs llama.cpp) | `loom-roofline` (`"${LOOM_SKILL_DIR}/../loom-roofline/SKILL.md"`) |
 | Make a ported model faster without breaking correctness | `loom-optimize` |
 | Correctness gate vs llama.cpp, throughput methodology, reporting | `loom-benchmark` |
+| A targeted fix to one model, family, GPU or quant (scoped change, sampled DevLab A/B, promotion) | `loom-improve` (`"${LOOM_SKILL_DIR}/../loom-improve/reference/targeted-fix.md"`) |
+| A campaign: new GPU, many models, a refactor (team roles, mailboxes, state files, DevLab rules, velocity) | `loom-improve` (`"${LOOM_SKILL_DIR}/../loom-improve/reference/campaign.md"`) |
 | Improve these skills themselves (faster end-to-end runs, fewer failures) without regressing KPIs | `loom-improve` (`"${LOOM_SKILL_DIR}/../loom-improve/SKILL.md"`) |
 | Populate a Hugging Face org with many models (pick the top models, port and publish each, sweep gates on DevLab, fix and regenerate) | `loom-org` (`"${LOOM_SKILL_DIR}/../loom-org/SKILL.md"`) |
 | What is special about a model family / GPU / quant, which levers apply where (the knowledge base router) | `loom-kb` (`"${LOOM_SKILL_DIR}/../loom-kb/SKILL.md"`) |

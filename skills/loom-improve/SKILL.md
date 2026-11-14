@@ -1,6 +1,6 @@
 ---
 name: loom-improve
-description: Improves the loom skills themselves (port, optimize, qualify, report) without regressing them - the KPIs (end-to-end wall clock, correctness vs llama.cpp in agentic use, decode/prefill speed), how to measure them with fresh-agent trials on a reference model suite, the improve-retest loop, subagent handling, and the rules that keep changes general. Use for "improve the loom skill at X", "make the loom skill faster/more reliable", "why did the skill take so long on model Y", or any change to the skills in this repo.
+description: Improves the loom skills themselves (port, optimize, qualify, report) without regressing them - the KPIs (end-to-end wall clock, correctness vs llama.cpp in agentic use, decode/prefill speed), how to measure them with fresh-agent trials on a reference model suite, the improve-retest loop, subagent handling, and the rules that keep changes general. Use for "improve the loom skill at X", "make the loom skill faster/more reliable", "why did the skill take so long on model Y", any change to the skills in this repo, a targeted fix to one model, family, GPU or quant, or running a campaign (new GPU, many models, a refactor).
 ---
 
 # Improve the loom skills
@@ -19,6 +19,16 @@ loom-serve, optimize it, and report vs llama.cpp", on models it has never seen, 
 KPI worse. This skill is evaluation-driven: measure a baseline first, change one thing, re-measure on
 the same models, and keep the change only if no KPI regressed (Anthropic's skill-authoring and agent
 eval guidance; sources at the end).
+
+## Which job? (read the file, do not improvise)
+
+| Request | Read |
+|---|---|
+| A narrow change to one model / family / GPU / quant (fix a regression, speed up one family, support one quant) | [reference/targeted-fix.md](reference/targeted-fix.md): route, declare scope, opt-in rule, fleet diff, sampled DevLab A/B, promotion |
+| A campaign: new GPU, many models, a refactor, regenerating the fleet | [reference/campaign.md](reference/campaign.md): roles, mailboxes, state files, DevLab rules, velocity; start with `scripts/campaign/new_campaign.sh` |
+| Why the repo is structured this way (layout, registries, T0-T3, guards) | [reference/architecture.md](reference/architecture.md) |
+| Where a campaign rule lives | [reference/practices-checklist.md](reference/practices-checklist.md) |
+| Improve the port/optimize/report skills against the KPIs | sections 1-4 below |
 
 ## 1. KPIs (all three, every time)
 
