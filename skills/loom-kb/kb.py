@@ -294,7 +294,8 @@ def resolve_footer(cfg, devs, root):
     try:
         import resolve  # noqa: PLC0415  (lazy: owned by the registry)
         out = resolve.resolve(cfg, devs)
-        return out if isinstance(out, str) else json.dumps(out, indent=1, sort_keys=True, default=str)
+        text = out if isinstance(out, str) else json.dumps(out, indent=1, sort_keys=True, default=str)
+        return "\n".join(l if l.startswith("#") else "# " + l for l in text.splitlines())   # comment lines: the file list stays parseable
     except Exception as exc:  # the router must not break on a registry error
         return f"# resolve.py failed: {type(exc).__name__}: {exc}"
     finally:
