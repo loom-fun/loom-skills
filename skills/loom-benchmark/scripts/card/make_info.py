@@ -257,7 +257,8 @@ def cmd_build(a):
     G = {}   # gpu -> {"baseline", "sessions", "gates", "baselines", "roofline", "meta"}: everything one GPU measured
 
     def gpu_state(gpu):
-        return G.setdefault(gpu, {"baseline": None, "sessions": [], "gates": {}, "baselines": {}, "roofline": None, "meta": {}, "data": False})
+        return G.setdefault(gpu, {"baseline": None, "sessions": [], "gates": {}, "baselines": {}, "roofline": None, "meta": {}, "data": False,
+                                  "remeasure": None})
     card_features = {}   # evidence-established feature statuses (import_card.py: greedy-only sampling)
     sources = Sources()
     if a.from_info:   # a published card: its data first, then the new evidence on top
@@ -294,12 +295,31 @@ def cmd_build(a):
                     continue
                 st["gates"][name] = ((g.get("date") or "", -1), None, g)
             st["roofline"] = dev.get("roofline")
+            st["remeasure"] = dev.get("remeasure")
         if a.report is None:
             a.report = old.get("report")
         if a.status is None:
             a.status = old.get("status")
         if a.next_steps is None:
             a.next_steps = old.get("next_steps")
+    for spec in a.perf_from or []:   # GPU=INFO.json: that card's performance on GPU (sessions, baselines and their sources) as published
+        gpu, _, path = spec.partition("=")
+        if gpu not in GPUS or not path:
+            sys.exit(f"--perf-from {spec}: expected GPU=INFO.json with GPU one of {', '.join(GPUS)}")
+        other = load_info(path)
+        require_valid(other, path)
+        if other["repo"].split("/")[-1] != (a.repo or "").split("/")[-1]:
+            sys.exit(f"--perf-from {path} is the card of {other['repo']}, not {a.repo}")
+        dev = (other.get("devices") or {}).get(gpu) or {}
+        if not dev.get("performance"):
+            sys.exit(f"--perf-from {path}: no {gpu} performance")
+        st = gpu_state(gpu)
+        st["data"] = True
+        osrc = lambda sid: sources.add(other["sources"][sid])
+        perf = json.loads(json.dumps(dev["performance"]))
+        st["baseline"] = perf["baseline"]
+        st["sessions"] = [dict(s, source=osrc(s["source"])) for s in perf["sessions"]]
+        st["baselines"] = {b: dict(x, session=dict(x["session"], source=osrc(x["session"]["source"]))) for b, x in (perf.get("baselines") or {}).items()}
     for i, path in enumerate(a.evidence or []):
         ev = load_json(path)
         if ev.get("evidence") != EVIDENCE_ID:
@@ -334,6 +354,9 @@ def cmd_build(a):
             new = ((g.get("time") or "", i), g, None)
             if g["name"] not in gst["gates"] or gate_supersedes(new, gst["gates"][g["name"]]):
                 gst["gates"][g["name"]] = new
+        if ev.get("remeasure"):   # make_info.py remeasure: a same-runner A/B of this package against the build the table shows
+            mst = gpu_state(evidence_gpu(ev))
+            mst["remeasure"] = dict(ev["remeasure"], source=sources.add(ev["remeasure"]["source"]))
         if ev.get("roofline"):
             rst = gpu_state(ev.get("gpu") or gpu_from_device({"name": ev["roofline"]["device"]["name"]}) or DEFAULT_GPU)
             rst["roofline"], rst["data"] = ev["roofline"], True
@@ -435,6 +458,8 @@ def cmd_build(a):
                     d["performance"]["baselines"] = st["baselines"]
             if st["roofline"]:
                 d["roofline"] = st["roofline"]
+            if st.get("remeasure") and st["remeasure"]["programs_sha256"] == programs_sha256(a.pkg):   # about this package only
+                d["remeasure"] = st["remeasure"]
             cap = GPUS[gpu]["memory_bytes"]
             base_mem = facts["memory_bytes"] or card.get("memory_bytes")
             if cap and "memory_bytes" not in d and base_mem and base_mem > cap:
@@ -454,6 +479,7 @@ def cmd_build(a):
     used = {s["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])}
     used |= {b["session"]["source"] for d in devices.values() for b in ((d.get("performance") or {}).get("baselines") or {}).values()}
     used |= {g["source"] for d in devices.values() for g in (d.get("gates") or {}).values()}
+    used |= {d["remeasure"]["source"] for d in devices.values() if d.get("remeasure")}
     info["sources"] = {k: v for k, v in sources.by_id.items() if k in used}
     require_valid(info)
     out = dumps(info)
@@ -706,6 +732,41 @@ def cmd_gates(a):
           + (f", spec_acceptance={acc}" if acc is not None else ""), file=sys.stderr)
 
 
+# ---------------------------------------------------------------- same-runner re-measure (A/B) -> evidence
+
+def cmd_remeasure(a):
+    """A strix_ab_compare.py result (the package re-measured against the build whose sessions the card shows, one
+    runner, one job): every card metric within the band, else refused (the stop rule, not a card fact)."""
+    x = load_json(a.cmp)
+    a.gpu = a.gpu or DEFAULT_GPU
+    if not a.package:
+        sys.exit("remeasure: --package (the package re-measured) is required")
+    if x["verdict"] != "pass" or x.get("out_of_band") or x.get("gate_failures"):
+        sys.exit(f"{a.cmp}: verdict {x['verdict']} (out of band {x.get('out_of_band')}, gate failures {x.get('gate_failures')}): not within the band")
+    here = programs_sha256(a.package)
+    if a.fetched_programs and a.fetched_programs != here:
+        sys.exit(f"the run fetched programs {a.fetched_programs[:12]}, the package has {here[:12]}: re-run")
+    old = a.compared_programs
+    if not old:   # the compared build's programs at the revision the job fetched
+        import tempfile
+        from huggingface_hub import hf_hub_download, list_repo_files
+        with tempfile.TemporaryDirectory() as t:
+            for f in list_repo_files(a.compared_repo, revision=a.compared_revision):
+                if f.startswith("program/") and f.endswith(".loom"):
+                    hf_hub_download(a.compared_repo, f, revision=a.compared_revision, local_dir=t)
+            old = programs_sha256(t)
+    src = source_arg(a)
+    date = a.date or x.get("date")
+    if not date:
+        sys.exit("--date is required (the job's day)")
+    ev = {"evidence": EVIDENCE_ID, "gpu": a.gpu, "remeasure": {
+        "date": date, "source": src, "band": x["band"], "programs_sha256": here, "compared_programs": old, "result": "within",
+        "worst_metric": x.get("worst_metric"), "worst_ratio": x.get("worst_ratio"),
+        "ratios": {k: m["ratio"] for k, m in x["metrics"].items()}}}
+    write_json(a.o, ev)
+    print(f"wrote {a.o}: {a.gpu} within +-{x['band']:.0%} (worst {x.get('worst_metric')} {x.get('worst_ratio')}); programs {here[:12]} ~ {old[:12]}", file=sys.stderr)
+
+
 # ---------------------------------------------------------------- roofline -> evidence
 
 def skills_checkout(path):
@@ -859,6 +920,8 @@ def main(argv=None):
     b.add_argument("--report", choices=["generated", "attached"])
     b.add_argument("--from-info", help="a published info.json to start from (regenerating a card with new evidence)")
     b.add_argument("--reset-performance", action="store_true", help="drop --from-info's performance sessions (re-measured from scratch)")
+    b.add_argument("--perf-from", action="append", metavar="GPU=INFO.json", help="take that GPU's performance (sessions, baselines, their sources) "
+                   "from another card's info.json (the staging flow: the loom-fun card's Strix table, with a remeasure evidence)")
     b.add_argument("--status", choices=["paused", "active"], help="paused: work on this model has stopped (active: clears it)")
     b.add_argument("--next-steps", type=next_steps_file, help="a file of next steps, one per line (empty: none)")
     b.add_argument("--upstream", choices=["probe", "none"], default=os.environ.get("LOOM_CARD_UPSTREAM", "probe"),
@@ -913,8 +976,17 @@ def main(argv=None):
                    "documents longer than it were refused, so they have no ceiling")
     r.add_argument("--flops", type=float, default=None, help="peak FLOP/s (default: the --device preset)")
     r.add_argument("-o", required=True)
+    m = sub.add_parser("remeasure", help="a same-runner A/B of this package against the build the card's table shows (strix_ab_compare.py --json)")
+    m.add_argument("--cmp", required=True, help="strix_ab_compare.py --json output (verdict pass)")
+    m.add_argument("--compared-programs", help="programs_sha256 of the build compared with (default: computed from --compared-repo at --compared-revision)")
+    m.add_argument("--compared-repo", help="ORG/NAME the old build was fetched from (e.g. loom-fun/NAME)")
+    m.add_argument("--compared-revision", help="its commit the job fetched (model_fun.json's document URL)")
+    m.add_argument("--fetched-programs", help="programs_sha256 the job fetched for the package (programs_sha256.txt)")
+    m.add_argument("--date", help="YYYY-MM-DD of the job")
+    add_source_args(m, "devlab")
+    m.add_argument("-o", required=True)
     a = ap.parse_args(argv)
-    {"build": cmd_build, "perf": cmd_perf, "gates": cmd_gates, "roofline": cmd_roofline}[a.cmd](a)
+    {"build": cmd_build, "perf": cmd_perf, "gates": cmd_gates, "roofline": cmd_roofline, "remeasure": cmd_remeasure}[a.cmd](a)
 
 
 if __name__ == "__main__":

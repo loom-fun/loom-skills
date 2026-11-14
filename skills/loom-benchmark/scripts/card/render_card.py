@@ -171,6 +171,9 @@ def methodology(base, extra, spec, drafter, runs_dec, runs_c4):
     out = [f"- Compared: Loom against {ver}; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with "
            f"the active wait. Values are the mean of {runs_dec} rounds (4 streams: median of {runs_c4}); Loom is timed by the client, "
            "llama.cpp by its server.",
+           "- Out of the box on both engines: Loom serves the preset shipped in this package; llama.cpp runs its build defaults "
+           "plus only the server arguments listed below (" + ("offload, context and slots, and on the 1-stream rows the drafting flags "
+           "that match Loom's drafting" if any(m for _, m, _ in ll) else "offload, context and slots") + "). No tuning sweep on either engine.",
            f"- Drafting, 1-stream rows (decode, decode_2k, decode_32k, prefill): {draft}{depth}. Each engine is loaded once for "
            "all these rows.",
            "- 4 streams: both engines loaded with drafting off, 4 parallel requests, aggregate tokens per second.",
@@ -430,6 +433,10 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
         s = sources[sid]
         L.append(f"- {mark(i)} Measured {text(date)}; device {device_text(s['device'])}; hrx-loom {sdk_text(s['hrx_loom'])}; "
                  f"source: {src_text(s)}.")
+    rm = view.get("remeasure")
+    if rm and rm["programs_sha256"] == here:   # a same-runner A/B of this package against the build the table measured
+        L.append(f"- {GPUS[g]['short']} re-measured on this package on {text(rm['date'])}: within +-{round(rm['band'] * 100)} % of "
+                 f"these values ({src_text(sources[rm['source']])}).")
     for b, x in extra.items():
         xb, xs = x["baseline"], x["session"]
         L.append(f"- {xnames[b]}: measured {text(xs['date'])}; source: {src_text(sources[xs['source']])}."
