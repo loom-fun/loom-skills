@@ -1,5 +1,5 @@
 {
- "_comment": "abtool pilot: R9700 A/A (staging@rev vs staging main, --baselines) for 0.6B and 4B, Strix A/B (fun vs staging) for 0.6B",
+ "_comment": "abtool pilot 2: R9700 A/A 0.6B with the fast-model plan",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
@@ -7,6 +7,7 @@
   {
    "name": "rab-unsloth-qwen3-0-6b-loom",
    "runner": "r9700",
+   "repeat_rows": 3,
    "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
    "require_preset_r9700": true,
    "memory_bytes_r9700": 17000000000,
@@ -48,12 +49,28 @@
     "perf:fun:1",
     "perf:fun:1",
     "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
     "perf:staging:1:long",
     "perf:fun:1:long",
     "perf:fun:1:long",
     "perf:staging:1:long",
     "perf:staging:1:long",
     "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
     "c4:funnd",
     "c4:stagingnd",
     "c4:stagingnd",
@@ -63,146 +80,12 @@
     "func:staging",
     "ktest:staging",
     "gates:staging:dev",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
+    "llama@rocm.np1:6",
+    "llama@rocm.np1:6:long",
     "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
+    "llama@vulkan.np1:6",
+    "llama@vulkan.np1:6:long",
     "llamac4@vulkan.perslot.nodraft"
-   ]
-  },
-  {
-   "name": "rab-ggml-org-qwen3-4b-loom",
-   "runner": "r9700",
-   "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
-   "memory_bytes_r9700": 25000000000,
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "fun",
-     "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom@2f36cf09a2576a806f243ce7005189f6b4e0cc99",
-     "cap_pool": 166912,
-     "execution": {}
-    },
-    {
-     "name": "staging"
-    },
-    {
-     "name": "funnd",
-     "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom@2f36cf09a2576a806f243ce7005189f6b4e0cc99",
-     "cap_pool": 166912,
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "stagingnd",
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1",
-    "perf:fun:1",
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "perf:fun:1:long",
-    "perf:staging:1:long",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "c4:funnd",
-    "c4:stagingnd",
-    "c4:stagingnd",
-    "c4:funnd",
-    "textmatch:fun",
-    "textmatch:staging",
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
-  },
-  {
-   "name": "sab-unsloth-qwen3-0-6b-loom",
-   "runner": "strix",
-   "repeat_rows": 3,
-   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
-   "memory_bytes": 17000000000,
-   "kit": null,
-   "llamacpp": "b1374",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "fun",
-     "card": "loom-fun/unsloth-Qwen3-0.6B-loom"
-    },
-    {
-     "name": "staging"
-    },
-    {
-     "name": "funnd",
-     "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "stagingnd",
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1",
-    "perf:fun:1",
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1",
-    "perf:fun:1",
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1",
-    "perf:fun:1",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "perf:fun:1:long",
-    "perf:staging:1:long",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "perf:fun:1:long",
-    "perf:staging:1:long",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "perf:fun:1:long",
-    "perf:staging:1:long",
-    "c4:funnd",
-    "c4:stagingnd",
-    "c4:stagingnd",
-    "c4:funnd",
-    "c4:funnd",
-    "c4:stagingnd",
-    "c4:stagingnd",
-    "c4:funnd",
-    "textmatch:fun",
-    "textmatch:staging",
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
    ]
   }
  ],
