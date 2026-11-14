@@ -15,11 +15,13 @@ Scope nodes. Every `scope.json` under the KB root (skills/loom-kb/**) is a selec
      "owner": "...",
      "choices": [{"when": {"facets": ["drafted"], "devices": ["rdna4"]},   (optional, narrows the node's match)
                   "set": {"decode.attn.kv_once.d256": false}, "evidence": "run/PR link and numbers"}]}
-  match / when keys:  arch (GGUF arch, one or a list)  facets (all of)  not_facets (none of)  kv_heads, head_dim, heads, layers
-                      (a number, or [lo, hi] inclusive)  quant (any tensor format of the model is one of)  devices (any of the
-                      build's device families or device slugs).
-  facets are derived from the config (derive_facets): drafted, draft-<kind>, mtp, vision, hybrid-gdn, moe, sliding, kv-le2, sinks,
-  gated-attn, shortconv.
+  match / when keys:  arch (GGUF arch, one or a list)  facets (all of)  not_facets (none of)  has / lacks (config keys that are / are
+                      not set)  kv_heads, head_dim, heads, layers, sliding_window (a number, or [lo, hi] inclusive, null: open)
+                      recurrent_kv (gated-delta-net hybrids)  quant (any tensor format of the model is one of)  devices (any of
+                      the build's device families or device slugs). kb.py's matcher reads the same keys.
+  An arch node may list `facets` its family implies (gemma3: sliding-window); a facet node (facet/<tag>) is on for a model its
+  `match` holds for; built-in facets come from the config (derive_facets): drafted, draft-<kind>, mtp, vision, hybrid-gdn, moe,
+  sliding-window, kv-le2, sinks, gated-attn, shortconv. `has: ["draft"]` sees the draft the build uses.
 
 Precedence, later wins: registry default < device family (device/<fam>) < device (device/<fam>/<dev>) < quant (quant/<fmt>)
 < arch root->leaf (arch/...) < facet (facet/<tag>) < model (cfg["choices"]). Two matching nodes at the same level (same
@@ -42,7 +44,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 AUTO = object()
 LEVELS = {"device_family": 1, "device": 2, "quant": 3, "arch": 4, "facet": 5, "model": 6}
-MATCH_KEYS = {"arch", "facets", "not_facets", "kv_heads", "head_dim", "heads", "layers", "quant", "devices"}
+RANGE_KEYS = ("kv_heads", "head_dim", "heads", "layers", "sliding_window")
+MATCH_KEYS = {"arch", "facets", "not_facets", "has", "lacks", "recurrent_kv", "quant", "devices", *RANGE_KEYS}
+NODE_KEYS = ("scope", "match", "owner", "choices", "doc", "facets", "also")
 FALLBACK_FAMILY = {"strix-halo": "rdna3", "gfx1151": "rdna3", "gfx1100": "rdna3", "radeon-r9700": "rdna4", "gfx1201": "rdna4"}
 
 
@@ -103,8 +107,8 @@ def derive_facets(cfg, kind):
         f.add("hybrid-gdn")
     if cfg.get("moe"):
         f.add("moe")
-    if cfg.get("sliding_layers") or cfg.get("sliding_window"):
-        f.add("sliding")
+    if (cfg.get("sliding_window") or 0) >= 1:
+        f.add("sliding-window")
     if cfg.get("kv_heads") is not None and cfg["kv_heads"] <= 2:
         f.add("kv-le2")
     if cfg.get("attn_sinks"):
@@ -134,8 +138,12 @@ def _num(spec, v):
     if v is None:
         return False
     if isinstance(spec, list):
-        return len(spec) == 2 and spec[0] <= v <= spec[1]
+        return len(spec) == 2 and (spec[0] is None or v >= spec[0]) and (spec[1] is None or v <= spec[1])
     return v == spec
+
+
+def truthy(v):
+    return bool(v) and v != "none" and not (isinstance(v, dict) and v.get("kind") == "none")
 
 
 def match(m, env, where="match"):
@@ -149,9 +157,14 @@ def match(m, env, where="match"):
             return False
     if not set(m.get("facets", [])) <= env.facets or env.facets & set(m.get("not_facets", [])):
         return False
-    for k in ("kv_heads", "head_dim", "heads", "layers"):
+    for k in RANGE_KEYS:
         if k in m and not _num(m[k], cfg.get(k)):
             return False
+    if not all(truthy(cfg.get(k)) for k in m.get("has", [])) or any(truthy(cfg.get(k)) for k in m.get("lacks", [])):
+        return False
+    if m.get("recurrent_kv") and not (cfg.get("kv_layers") and cfg.get("layers") and cfg["kv_layers"] < cfg["layers"]
+                                      and not cfg.get("shortconv_layers")):
+        return False
     if "quant" in m and not (env.formats & {q.lower() for q in (m["quant"] if isinstance(m["quant"], list) else [m["quant"]])}):
         return False
     if "devices" in m and not (env.names & set(m["devices"])):
@@ -217,7 +230,7 @@ def validate_node(scope, node, ch):
     """Schema errors of one scope node (list of strings)."""
     errs = []
     for k in node:
-        if k not in ("scope", "match", "owner", "choices", "doc"):
+        if k not in NODE_KEYS:
             errs.append(f"{scope}: unknown key {k!r}")
     try:
         match(node.get("match") or {}, Env({}, [], ["rdna3"], lambda d: d), f"{scope} match")
@@ -284,15 +297,35 @@ def _check_devices(c, when_devices, build_families, family_of, where):
 
 
 def resolve(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=None):
+    """The resolution of CFG (see the module docstring); resolve_full() adds the value of every registered choice."""
+    r = resolve_full(cfg, devices, kb_root, draft, kit)
+    r.pop("values")
+    return r
+
+
+def resolve_full(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=None):
     kb_root = os.path.abspath(kb_root or HERE)
     ch = choices_module(kb_root)
     idx = device_index(kb_root)
     family_of = lambda d: idx.get(d, d)
-    devices = list(devices)
+    devices = list(devices) or ["rdna3", "rdna4"]
     kind = draft_kind(cfg, draft)
-    facets = derive_facets(cfg, kind)
-    env = Env(cfg, facets, devices, family_of)
+    cfg = dict(cfg, draft={"kind": kind} if kind else None)   # what `has: ["draft"]` of a facet node sees: the draft this build uses
     nodes = load_scopes(kb_root)
+    facets = set(derive_facets(cfg, kind))
+    for _ in range(4):   # facet nodes switch on by their own match; arch nodes imply facets (gemma3: sliding-window)
+        before = len(facets)
+        e = Env(cfg, facets, devices, family_of)
+        for scope, node in nodes:
+            lvl = level_of(scope)[0]
+            if lvl == LEVELS["arch"] and node.get("facets") and match(node.get("match") or {}, e):
+                facets |= set(node["facets"])
+            elif lvl == LEVELS["facet"] and node.get("match") and match(node["match"], e):
+                facets.add(scope.split("/")[1])
+        if len(facets) == before:
+            break
+    facets = sorted(facets)
+    env = Env(cfg, facets, devices, family_of)
     matched, contrib = [], {}
     for scope, node in nodes:
         errs = validate_node(scope, node, ch)
@@ -350,8 +383,8 @@ def resolve(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=None)
 
 
 def effective(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=None):
-    """resolve() with every registered choice's value (defaults included) under "all"."""
-    r = resolve(cfg, devices, kb_root, draft, kit)
+    """resolve_full() with every registered choice's value (defaults included) under "all"."""
+    r = resolve_full(cfg, devices, kb_root, draft, kit)
     ch = choices_module(kb_root)
     r["all"] = {k: {"value": r["values"][k], "from": r["choices"][k]["from"] if k in r["choices"] else "default",
                     "env": ch.CHOICES[k].env} for k in ch.CHOICES}

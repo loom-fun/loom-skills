@@ -25,7 +25,10 @@ def _lit(n):
 
 def scan_py(path, text=None):
     """[(name, lineno, kind, default)]: kind in get/set/sub/in/write."""
-    src = text if text is not None else open(path, encoding="utf-8").read()
+    if text is None:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    src = text
     t = ast.parse(src)
     out = []
     for n in ast.walk(t):
@@ -59,7 +62,9 @@ def scan_py(path, text=None):
 
 def scan_patch(path):
     out = []
-    for i, line in enumerate(open(path, encoding="utf-8", errors="replace"), 1):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        lines = f.read().splitlines()
+    for i, line in enumerate(lines, 1):
         if line.startswith("+") and not line.startswith("+++"):
             for m in PATCH_RE.finditer(line):
                 d = m.group(2)

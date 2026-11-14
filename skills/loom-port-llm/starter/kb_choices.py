@@ -67,7 +67,7 @@ def apply(cfg, draft_kind, environ=None, kit=None, devices=None, kit_dir=HERE):
     if devices is None:
         devices = ("rdna3",) if environ.get("LOOM_RDNA4", "1").strip().lower() in OFF else ("rdna3", "rdna4")
     try:
-        res = rs.resolve(cfg, devices, root, draft_kind, kit)
+        res = rs.resolve_full(cfg, devices, root, draft_kind, kit)
     except rs.ResolveError as e:
         sys.exit(f"choices: {e}")
     dirty = []

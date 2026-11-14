@@ -61,7 +61,7 @@ OWN = {"name", "gguf", "tensors", "model_id", "draft", "drafter", "assistant", "
 
 # What apply_example.sh never copies from an example's config into a port's: the port's own GGUF, tensor table and
 # name, and what names one package's files (model id, drafter, vision projector, build stamps).
-EXCLUDE = {"gguf", "tensors", "name", "model_id", "draft", "drafter", "assistant", "vision", "generator", "reference"}
+EXCLUDE = {"gguf", "tensors", "name", "model_id", "draft", "drafter", "assistant", "vision", "generator", "resolved", "reference"}
 EXAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reference", "examples.json")
 
 

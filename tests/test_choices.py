@@ -150,6 +150,7 @@ class Resolution(unittest.TestCase):
         self.assertEqual(resolve.derive_facets(cfg(), None), [])
         f = resolve.derive_facets(moe35(vision={"mmproj": "m"}), "dflash")
         self.assertEqual(f, ["draft-dflash", "drafted", "hybrid-gdn", "kv-le2", "moe", "vision"])
+        self.assertIn("sliding-window", resolve.derive_facets(cfg(sliding_window=512), None))
         self.assertEqual(resolve.auto_draft_kind(cfg(mtp={"layers": [1]})), "mtp")
         self.assertEqual(resolve.auto_draft_kind(cfg(assistant={"gguf": "a"})), "assist")
         self.assertIsNone(resolve.auto_draft_kind(cfg()))
@@ -157,6 +158,18 @@ class Resolution(unittest.TestCase):
         # a built package's llm_config.json records the draft it was built with
         self.assertEqual(resolve.draft_kind(cfg(draft=None, mtp={"layers": [1]})), None)
         self.assertEqual(resolve.draft_kind(cfg(draft={"kind": "mtp", "depth": 3})), "mtp")
+
+    def test_the_real_nodes_match_the_way_kb_py_reads_them(self):
+        """The kb engineer's scope.json vocabulary: has/lacks/ranges with null, node `facets` implied by a family, facet nodes."""
+        r = resolve.resolve(moe35(vision={"mmproj": "m"}), ("rdna3", "rdna4"), KB)
+        self.assertIn("arch/llm/moe/qwen35moe", r["scopes"])
+        self.assertIn("facet/drafted", r["scopes"])   # has: ["draft"] sees the draft the build uses
+        self.assertIn("facet/vision", r["scopes"])
+        self.assertTrue({"moe", "hybrid-gdn", "drafted", "vision", "kv-le2"} <= set(r["facets"]), r["facets"])
+        r = resolve.resolve(cfg(arch="gemma3", sliding_window=512, kv_heads=1), ("rdna3",), KB)
+        self.assertTrue({"sliding-window", "kv-le2"} <= set(r["facets"]))
+        self.assertNotIn("facet/drafted", resolve.resolve(cfg(), ("rdna3",), KB, draft=None)["scopes"])
+        self.assertEqual(resolve.resolve(cfg(), ())["devices"], ["rdna3", "rdna4"])   # kb.py route without --device
 
     def test_precedence_later_wins(self):
         kb = os.path.join(FIX, "precedence")
@@ -190,7 +203,7 @@ class Resolution(unittest.TestCase):
     def test_the_d7_shape_of_rule_touches_only_drafted_qwen35moe(self):
         """The test-only rule: qwen35moe + drafted -> decode.attn.kv_once.d256 = false (ATTN_GQA_D256=0)."""
         kb = os.path.join(FIX, "precedence")
-        hit = resolve.resolve(moe35(), ("rdna3", "rdna4"), kb, draft="dflash")
+        hit = resolve.resolve_full(moe35(), ("rdna3", "rdna4"), kb, draft="dflash")
         self.assertEqual(hit["env"].get("ATTN_GQA_D256"), "0")
         self.assertFalse(hit["values"]["decode.attn.kv_once.d256"])
         for other, draft in ((moe35(), None), (cfg(), "dflash"), (cfg(arch="qwen3moe", moe={"experts": 8}), "dflash"),
@@ -254,11 +267,11 @@ class Resolution(unittest.TestCase):
         self.assertEqual(e["env"], {})   # exporting nothing: the generators derive these from the cfg flag themselves
         self.assertFalse(resolve.effective(cfg(), ("rdna3", "rdna4"), KB)["all"]["prefill.gemm.f16o_swiglu"]["value"])
         # a scope that switches it off for a flagged model exports GEMM_F16O=0, and FLASH2_TRIM follows
-        r = resolve.resolve(cfg(rdna4_f16_ffn=True, choices={"prefill.gemm.f16o_swiglu": False}), ("rdna3", "rdna4"), KB)
+        r = resolve.resolve_full(cfg(rdna4_f16_ffn=True, choices={"prefill.gemm.f16o_swiglu": False}), ("rdna3", "rdna4"), KB)
         self.assertEqual(r["env"], {"GEMM_F16O": "0"})
         self.assertFalse(r["values"]["prefill.attn.flash2_trim"])
         # on for a model without the flag: GEMM_F16O=swiglu, and the trims follow
-        r = resolve.resolve(cfg(choices={"prefill.gemm.f16o_swiglu": True}), ("rdna3", "rdna4"), KB)
+        r = resolve.resolve_full(cfg(choices={"prefill.gemm.f16o_swiglu": True}), ("rdna3", "rdna4"), KB)
         self.assertEqual(r["env"], {"GEMM_F16O": "swiglu"})
         self.assertTrue(r["values"]["prefill.attn.flash2_trim"])
         self.assertEqual(resolve.effective(cfg(gemm_n_fastest=False), ("rdna3",), KB)["all"]["prefill.gemm.n_fastest"]["value"], False)
