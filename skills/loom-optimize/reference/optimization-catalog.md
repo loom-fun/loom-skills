@@ -302,7 +302,14 @@ site must be matched on `apply<@selN_<kernel>` (a plain `g_gemm_` regex also hit
   ~2500 of them VALU/LDS issue of 4 waves per SIMD). Tried and not worth it: prefetching the next K/V tile into registers (-6..-13 %: the loads sit behind
   an `scf.if` phi and are waited for at once), eight head groups per KV head / 4 waves per workgroup (`FLASH2_NG512=4`: -5..-11 %: the K/V staging is
   per workgroup), two keys per staging lane with one 32-bit V^T store (-2..-4 %), S partials exchanged as lane vectors, mask-free hot loop, flat V^T store
-  indices, hoisting the page-map pointer (each ~0 to +0.5 %). A workgroup may reserve at most 65536 bytes of workgroup memory on gfx1201 (TARGET/051).
+  indices, hoisting the page-map pointer (each ~0 to +0.5 %), 16-key tiles for the sliding kernel (`FLASH2_KT256=16`: one workgroup holds all eight heads, -0.5..-1.8 %),
+  and a two-barrier pipelined loop (`FLASH2_PIPE=1`, flash2_pipe.py: K_{t+1} stored after barrier B, V^T_{t+1} after C, loads of tile t+1 issued
+  before the S MMAs, page entry of t+2 carried; correct, ktest 72/72, but -0.8..-3 %). The disassembly shows why a restructure at IR level does not
+  pay: the backend copies loaded vectors into other registers right away (`s_wait_loadcnt` before the first S MMA, so the prefetch is waited for at
+  once; it also waits for in-flight loads when it reuses their address registers) and issues the K fragment loads one at a time with `s_wait_dscnt 0`
+  before each WMMA (216 VGPRs). The knobs stay opt-in. A workgroup may reserve at most 65536 bytes of workgroup memory on gfx1201 (TARGET/051).
+  Per-token elementwise kernels (norm, row scale) are bandwidth bound, not dispatch bound: 64 / 128 / 256 threads per row make no difference in the
+  `e2b_small` kbench (norm 33 us, row scale 10 us at 2048 x 1536 f32).
 - **Prefill chunk with the stack:** 4096 vs 8192 vs 2048: 16.5k vs 16.4k vs 16.3k (1k), 18.1k vs 18.1k vs 17.6k (2k), 17.2k vs 16.8k vs 17.1k (8k).
 
 ### Gated delta-net recurrence (`gen_gdn.py`) and the f16 row scale
