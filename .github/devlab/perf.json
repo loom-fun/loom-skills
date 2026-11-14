@@ -14,7 +14,10 @@
    "memory_bytes": 16000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "card",
+     "serve_args": [
+      "--preset=chat"
+     ]
     }
    ],
    "steps": [
