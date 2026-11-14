@@ -13,17 +13,49 @@
    "memory_bytes_r9700": 16000000000,
    "variants": [
     {
-     "name": "base",
-     "build": {},
+     "name": "swas",
+     "build": {
+      "FLASH2_SWA_TWIN": "s",
+      "FLASH2_POS_BYTES": "1024"
+     },
      "build_args": [
       "--prefill-r9700",
       "4096"
      ]
     },
     {
-     "name": "f16o",
+     "name": "lazy",
      "build": {
-      "GEMM_F16O": "swiglu"
+      "FLASH2_SWA_TWIN": "s",
+      "FLASH2_POS_BYTES": "1024",
+      "FLASH2_LAZY": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    },
+    {
+     "name": "vtf",
+     "build": {
+      "FLASH2_SWA_TWIN": "s",
+      "FLASH2_POS_BYTES": "1024",
+      "FLASH2_VTF": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    },
+    {
+     "name": "all4",
+     "build": {
+      "FLASH2_SWA_TWIN": "s",
+      "FLASH2_POS_BYTES": "1024",
+      "FLASH2_SX": "1",
+      "FLASH2_HOT": "1",
+      "FLASH2_LAZY": "1",
+      "FLASH2_VTF": "1"
      },
      "build_args": [
       "--prefill-r9700",
@@ -32,14 +64,15 @@
     }
    ],
    "steps": [
-    "ktest:f16o",
-    "func:f16o",
-    "perf:base:3",
-    "perf:f16o:3",
-    "perf:base:3:long",
-    "perf:f16o:3:long",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long"
+    "ktest:all4",
+    "perf:swas:3",
+    "perf:lazy:3",
+    "perf:vtf:3",
+    "perf:all4:3",
+    "perf:swas:3:long",
+    "perf:lazy:3:long",
+    "perf:vtf:3:long",
+    "perf:all4:3:long"
    ]
   }
  ],
