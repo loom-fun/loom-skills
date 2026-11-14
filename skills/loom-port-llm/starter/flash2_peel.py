@@ -12,7 +12,7 @@ import re
 HEADER = re.compile(r"^(?P<ind> *)%m_final, %l_final, (?P<outs>[^=]*) = scf\.for %kt = \[%c0 to %key_tiles step %c1\]\((?P<args>.*)\) -> \((?P<types>.*)\) \{$")
 
 
-def peel_last_tile(text):
+def peel_last_tile(text, hot_xform=None):
     lines = text.split("\n")
     hi = next((i for i, ln in enumerate(lines) if HEADER.match(ln)), None)
     if hi is None:
@@ -29,6 +29,8 @@ def peel_last_tile(text):
     assert len(acc_names) == len(outs), (acc_names, outs)
     # hot copy: no block takes the masked path
     hot = [re.sub(r"^(\s*)(%need\d+) = .* : i1$", r"\1\2 = scalar.constant false : i1", ln) for ln in body]
+    if hot_xform:   # gfx12 twin trims of the hot copy (flash2_trim.py)
+        hot = hot_xform(hot)
     # peeled copy: every name it defines gets a suffix; the loop-carried values and %kt come from the hot loop
     defined = set()
     for ln in body:

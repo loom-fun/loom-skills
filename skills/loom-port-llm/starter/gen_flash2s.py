@@ -531,6 +531,9 @@ if R4:
     if os.environ.get("FLASH2_ABL"):   # timing ablations (flash2_ablate.py), profiling only
         from flash2_ablate import ablate
         text = ablate(text, os.environ["FLASH2_ABL"])
+    if os.environ.get("FLASH2_SX", "0") == "1":   # S partials exchanged as the lanes' own vectors (flash2_trim.py); gfx12 twin only
+        from flash2_trim import sx
+        text = sx(text)
     if os.environ.get("FLASH2_VP", "0") == "1":   # two keys per staging lane: one 32-bit V^T store per dim pair (flash2_vpack.py); gfx12 twin only
         from flash2_vpack import vpack
         text = vpack(text)
@@ -539,7 +542,11 @@ if R4:
         text = prefetch(text)
 if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO:   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
-    text = peel_last_tile(text)
+    _hot = None
+    if R4 and os.environ.get("FLASH2_HOT", "0") == "1":   # gfx12 twin: the hot copy skips the validity / mask selects (flash2_trim.py)
+        from flash2_trim import hot as _trim_hot
+        _hot = lambda ls: _trim_hot(ls, D == 512)
+    text = peel_last_tile(text, _hot)
 if os.environ.get("FLASH2_ENTRY") == "bcast" and os.environ.get("FLASH2_ROLE") != "partial":   # experiment: the listed entry broadcast from lane 0
     _old = "  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %entry = index.cast %entry32 : i32 to index\n"
     assert _old in text, "entry load not found"
