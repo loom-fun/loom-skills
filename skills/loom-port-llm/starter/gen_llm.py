@@ -5438,6 +5438,10 @@ if __name__ == "__main__":
                       text, flags=re.M)
     if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
         text = live_row_skip(text)
+    if "swiglu" in os.environ.get("GEMM_F16O", "") and os.environ.get("LOOM_RDNA4", "1") not in ("", "0", "false", "no"):   # gfx12: swiglu GEMM + the row scale of its result (f16_fuse.py)
+        from f16o_fuse import fuse as _f16o_fuse
+        text, _nf16o = _f16o_fuse(text)
+        print("f16o groups:", _nf16o)
     if seg_tokens():
         text = seg_attention(text)
     out = os.path.join(out_dir, "model.loom")
