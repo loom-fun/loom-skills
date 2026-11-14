@@ -1,46 +1,58 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "R9700 final check (attn512b): E2B stack (FLASH2_B=0) vs FLASH2_B=2 default, llama.cpp ROCm + Vulkan in the same job",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "unsloth-gemma-4-e2b-it-loom",
+   "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 16000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "stack0",
+     "build": {
+      "FLASH2_B": "0"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     }
     },
     {
-     "name": "nodraft",
+     "name": "new",
      "build": {},
-     "execution": {
-      "draft_depth": 0
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
+    "func:new",
+    "ktest:new",
+    "gates:new:dev",
+    "perf:stack0:3",
+    "perf:new:3",
+    "perf:stack0:3:long",
+    "perf:new:3:long",
     "llama@rocm.np1:3",
     "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
     "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "llama@vulkan.np1:3:long"
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
