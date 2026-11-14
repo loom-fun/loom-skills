@@ -97,9 +97,13 @@ def template_rewrite(prev_prompt, prev_out, verified, prompt, continuation=None,
         ctx = first_token(hist[i2:i2 + 64])
         mine, tmpl = hist[i1:i2] + ctx, prompt[j1:j2] + ctx
         cont = continuation(i1 - n, max(len(mine), len(tmpl)))
+        template_rewrite.trace.append((i1 - n, mine, tmpl, cont))
         return cont.startswith(mine) and not cont.startswith(tmpl)
     edits = history_edits(hist, prompt)
     return bool(edits) and all(ok(*e) for e in edits)
+
+
+template_rewrite.trace = []   # (offset in the output, history text, template text, llama.cpp's continuation) of every anchored edit
 
 
 def call_whitespace(P, raw, gids, d):
@@ -177,6 +181,7 @@ def main():
                     _, gen, _ = llama_greedy(a.llama, prev_ids + P.ids(po[:k]), min(nchars + 2, 64), P)
                     return P.tok.decode(gen, skip_special_tokens=False)
                 first = lambda t: P.tok.decode(P.ids(t)[:1], skip_special_tokens=False)
+                template_rewrite.trace.clear()
                 rewritten = not exact and template_rewrite(prev_prompt, po, prev_verified, prompt,
                                                            continuation if a.llama else None, first)
                 rec["history_verbatim"] = exact or (common >= 0.8 * len(pids) and not rewritten)
@@ -197,6 +202,8 @@ def main():
                 hist = prev_text
                 print(f"     reuse miss: cached {rec['cached']} of {prev_total}, previous output verified to char {prev_verified}; "
                       f"history edits (hist[i1:i2] -> prompt[j1:j2]):", flush=True)
+                for t in template_rewrite.trace[-6:]:
+                    print(f"       anchored on llama.cpp at output offset {t[0]}: history {t[1]!r} template {t[2]!r} llama.cpp wrote {t[3]!r}", flush=True)
                 for i1, i2, j1, j2 in history_edits(hist, prompt)[:6]:
                     print(f"       @{i1} (prompt {len(prev_prompt)}) {hist[max(0, i1 - 30):i2 + 30]!r} -> {prompt[max(0, j1 - 30):j2 + 30]!r}", flush=True)
             calls_ok = True
