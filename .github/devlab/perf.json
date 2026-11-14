@@ -1,30 +1,18 @@
 {
- "_comment": "R9700 final check (attn512b): E2B stack (FLASH2_B=0) vs FLASH2_B=2 default, llama.cpp ROCm + Vulkan in the same job",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "Strix check (attn512b): E2B rebuilt from this branch (FLASH2_B=2 twin is gfx12-only): func, kernel tests, gates dev",
+ "memory_bytes": 16000000000,
  "llama_spec": "matched",
+ "llamacpp": "b1375",
+ "kit": "gemma4",
+ "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
  "jobs": [
   {
-   "name": "unsloth-gemma-4-e2b-it-loom",
+   "name": "e2b-strix-check",
    "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
    "kit": "gemma4",
    "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 16000000000,
+   "memory_bytes": 16000000000,
    "variants": [
-    {
-     "name": "stack0",
-     "build": {
-      "FLASH2_B": "0"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "config": {
-      "rdna4_f16_ffn": true
-     }
-    },
     {
      "name": "new",
      "build": {},
@@ -40,20 +28,8 @@
    "steps": [
     "func:new",
     "ktest:new",
-    "gates:new:dev",
-    "perf:stack0:3",
-    "perf:new:3",
-    "perf:stack0:3:long",
-    "perf:new:3:long",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long"
+    "gates:new:dev"
    ]
   }
- ],
- "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
