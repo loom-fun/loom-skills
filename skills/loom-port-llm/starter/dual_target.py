@@ -224,7 +224,7 @@ def encodings_first(text):
 
 def apply_file(path):
     with open(path, encoding="utf-8", newline="") as f:
-        text = f.read()
+        text = f.read().replace("\r\n", "\n")   # a file written in text mode on Windows has CRLF line ends; the pass works on LF lines
     new = apply(text)
     if new != text:
         with open(path, "w", encoding="utf-8", newline="\n") as f:

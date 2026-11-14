@@ -102,7 +102,7 @@ class SharedSuiteTests(unittest.TestCase):
     def test_complete_real_suite_from_unrelated_working_directory(self):
         # Exercise each native profile without touching the user's installed skills.
         with tempfile.TemporaryDirectory(prefix="loom path with spaces ") as temp:
-            home = Path(temp)
+            home = Path(temp).resolve()   # Windows: the 8.3 short temp name (RUNNER~1) resolves to the long one
             unrelated = home / "unrelated cwd"
             unrelated.mkdir()
             with patch.dict(os.environ, {}, clear=True):
