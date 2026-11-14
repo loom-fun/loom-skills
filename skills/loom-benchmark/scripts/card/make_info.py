@@ -101,7 +101,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, MEDIAN_METRICS, METRIC_KEYS, PERF_SOURCE_KINDS,  # noqa: E402
                       HF, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
-                      programs_sha256, require_valid, served_context, upstream_facts, with_gate_features, write_json,
+                      programs_sha256, require_valid, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM)
 
 
@@ -213,9 +213,10 @@ def fit_settings(verdict_path, repo, gpu="radeon-r9700"):
         return None, None, int(need)
     if row["w"] + SERVE_HEADROOM >= mem:
         return None, None, int(need)
-    if need <= mem:
+    ctx = fit_served_context(row, mem)
+    if ctx is None:
         return None, None, None   # the native context fits: the package's own memory_bytes (at most the GPU's) serves it
-    return mem, served_context(row["w"], row["kv"] / row["ctx"], mem), None
+    return mem, ctx, None
 
 
 def cmd_build(a):

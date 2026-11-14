@@ -120,10 +120,17 @@ def apply(text, enable=None):
 ENC_LIMIT = 60000   # SSA values (counted as below) before an encoding-typed use that hrx-loom 0.1.0 still resolves
 
 
+ENC_BYTES = 4_000_000   # bytes before an encoding-typed line: hrx-loom 0.1.0 fails past 4 MiB (engineer sweep bisected 4,191,941 ok, 4,281,430 fails)
+
+
 def _enc_depth(text):
-    """The largest count of SSA values defined before a line that defines or uses an encoding in a type."""
-    c = worst = 0
+    """The largest count of SSA values defined before a line that defines or uses an encoding in a type (or ENC_LIMIT + 1
+    when such a line lies past ENC_BYTES of the file)."""
+    c = worst = pos = 0
     for l in text.split("\n"):
+        pos += len(l.encode()) + 1
+        if pos > ENC_BYTES and ("encoding<layout>" in l or re.search(r"view<[^>]*, %", l)):
+            return ENC_LIMIT + 1
         m = re.match(r"\s*((?:%[\w.]+\s*,\s*)*%[\w.]+)\s*=", l)
         if m:
             c += m.group(1).count("%")
