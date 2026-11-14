@@ -270,7 +270,8 @@
   "mem": 44000000000,
   "need": 39564391595.0,
   "verdict": "fits (reduced ctx)",
-  "n_exp": 0
+  "n_exp": 0,
+  "ctx_cap": 32768
  },
  {
   "slug": "ggml-org-Qwen2.5-VL-7B-Instruct-loom",
