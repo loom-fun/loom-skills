@@ -310,6 +310,18 @@ site must be matched on `apply<@selN_<kernel>` (a plain `g_gemm_` regex also hit
   before each WMMA (216 VGPRs). The knobs stay opt-in. A workgroup may reserve at most 65536 bytes of workgroup memory on gfx1201 (TARGET/051).
   Per-token elementwise kernels (norm, row scale) are bandwidth bound, not dispatch bound: 64 / 128 / 256 threads per row make no difference in the
   `e2b_small` kbench (norm 33 us, row scale 10 us at 2048 x 1536 f32).
+- **d512 global-layer flash: two heads per wave, key-split loop (`FLASH2_B=2`, `flash2_b2.py`; +7.3 / +11.7 / +18.8 % at 8k / 16k / 32k, +2.6 % at 2k,
+  +0.8 % at 1k over the stack above; func pass, ktest 72/72).** The kernel is bound by the K / V fragment loads, not by the instruction count. What
+  did not move it (same job, same stack; 8k / 16k / 32k tok/s vs 17.1k / 15.2k / 11.9k): K and V^T fragments straight from the arena with
+  `global_load_tr_b128` and no staging (`flash2_direct.py`: ~598 -> 471 instructions per tile, 17.4k / 15.5k / 12.3k), the same with the
+  fragments shared through workgroup memory (391 instructions, 17.2k / 15.2k / 12.0k), 256 dims per wave and two waves per head (spills 256 VGPRs,
+  14.7k / 12.0k / 8.4k), eight waves per workgroup instead of 16 (+2 / +3 / +4 %), and a key-split loop with ONE softmax per S tile and one head per
+  wave (19 % fewer instructions, ties). What did: giving each wave TWO query heads, so a K fragment (one 128-byte load per lane per 8 fragments)
+  and a V^T fragment feed two WMMAs and a workgroup requests half the K / V bytes per query row (128 WMMAs per wave and 64-key block, 2 barriers,
+  single-buffered exchange: 40 KB of workgroup memory, three workgroups per WGP; the double-buffered 50 KB version was 18.2k / 16.6k / 13.4k).
+  Q^T of the two heads (32 KB, f16) is staged once per workgroup; four heads per wave would need 64 KB. A wave's per-load scalar address math
+  (64-bit base + constant per fragment, rematerialised for every load: ~17 SALU per V^T load) and the loop-carried accumulator copies (~150 v_mov
+  per block) remain; making the base a divergent value is rejected by the fragment-load lowering (`fragment_memory.dynamic_stride`).
 - **Prefill chunk with the stack:** 4096 vs 8192 vs 2048: 16.5k vs 16.4k vs 16.3k (1k), 18.1k vs 18.1k vs 17.6k (2k), 17.2k vs 16.8k vs 17.1k (8k).
 
 ### Gated delta-net recurrence (`gen_gdn.py`) and the f16 row scale
