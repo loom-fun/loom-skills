@@ -4,7 +4,7 @@
   "rows": {
     "decode": {
       "label": "decode tok/s, short prompt",
-      "band": 0.03,
+      "band": 0.035,
       "reject": 0.92,
       "kind": "decode",
       "context": 0,
@@ -89,7 +89,7 @@
     "c4_steady": "streams4"
   },
   "default_band": 0.03,
-  "band_note": "Per-row bands for A/B verdicts (same-runner, ABBA): half-width of the interval around ratio 1.0 inside which a row PASSes. Calibrated from the 63 phase-3 A/B files (spread within one side, p50/p90): prefill_8k/16k/32k 0.6/2.6, 0.4/1.4, 0.3/0.9 %; prefill_1k/2k 1.3/5.0, 0.8/3.5 %; decode, decode_32k 1.6/9.2, 1.5/6.8 %; decode_2k, streams4 4.0/10.0, 1.8/8.4 %. reject: the T1 (2 sessions per side) ratio below which a change is rejected.",
+  "band_note": "Per-row bands for A/B verdicts (same-runner, ABBA): half-width of the interval around ratio 1.0 inside which a row PASSes. Calibrated from the 63 phase-3 A/B files (spread within one side, p50/p90): prefill_8k/16k/32k 0.6/2.6, 0.4/1.4, 0.3/0.9 %; prefill_1k/2k 1.3/5.0, 0.8/3.5 %; decode, decode_32k 1.6/9.2, 1.5/6.8 %; decode_2k, streams4 4.0/10.0, 1.8/8.4 %. reject: the T1 (2 sessions per side) ratio below which a change is rejected. A/A check (below, `band_calibration_aa`): the plan values were then replayed on true A/A pairs only; decode is widened to 3.5 %.",
   "tie_band": 0.03,
   "tie_band_note": "Card outcome of a row against the better llama.cpp backend (rule 7): win > +3 %, tie within +-3 %, loss < -3 %. Flat on purpose: a card prints the band it was measured with and must not change when A/B bands do.",
   "statistic": "median over sessions of each session's median sample (rule 5), Loom and llama.cpp alike",
@@ -198,5 +198,89 @@
     "rule": "promote a (model, GPU) package when every row >= baseline - band, gates pass, and greedy text matches or is a near-tie",
     "improvements": "reach a card only after 2 confirming runs",
     "store": "fleet/baselines.json"
+  },
+  "band_calibration_aa": {
+    "method": "A/B results of the Strix phase-3 campaign (63 files, /lt/r9700stg/eng/*/ab) whose gfx11 programs were byte-identical between the published (loom-fun) and the staging package (fleet/loomtext.py view, gfx11); the old/new difference there is only runner and session noise. Per row: share of A/A |ratio-1| above the plan band; if above 5 %, band = max(plan, p95 of A/A |ratio-1|, rounded up to 0.5 %).",
+    "pairs": {
+      "models": 23,
+      "files": 26,
+      "files_total": 63,
+      "population": "22 pairs excluding Qwen2.5-0.5B and Qwen3-0.6B (bimodal models are judged mode-aware, see bimodal_models; their two modes sit ~10 % apart so no flat band applies)"
+    },
+    "rows": {
+      "decode": {
+        "plan": 0.03,
+        "n": 22,
+        "over_plan": 3,
+        "p95": 0.0341,
+        "band": 0.035,
+        "changed": true
+      },
+      "decode_2k": {
+        "plan": 0.04,
+        "n": 22,
+        "over_plan": 0,
+        "p95": 0.028,
+        "band": 0.04,
+        "changed": false
+      },
+      "decode_32k": {
+        "plan": 0.03,
+        "n": 22,
+        "over_plan": 0,
+        "p95": 0.0221,
+        "band": 0.03,
+        "changed": false
+      },
+      "prefill_1k": {
+        "plan": 0.03,
+        "n": 22,
+        "over_plan": 0,
+        "p95": 0.022,
+        "band": 0.03,
+        "changed": false
+      },
+      "prefill_2k": {
+        "plan": 0.03,
+        "n": 22,
+        "over_plan": 0,
+        "p95": 0.0135,
+        "band": 0.03,
+        "changed": false
+      },
+      "prefill_8k": {
+        "plan": 0.02,
+        "n": 22,
+        "over_plan": 1,
+        "p95": 0.0159,
+        "band": 0.02,
+        "changed": false
+      },
+      "prefill_16k": {
+        "plan": 0.02,
+        "n": 22,
+        "over_plan": 0,
+        "p95": 0.0046,
+        "band": 0.02,
+        "changed": false
+      },
+      "prefill_32k": {
+        "plan": 0.02,
+        "n": 22,
+        "over_plan": 1,
+        "p95": 0.004,
+        "band": 0.02,
+        "changed": false
+      },
+      "streams4": {
+        "plan": 0.04,
+        "n": 22,
+        "over_plan": 0,
+        "p95": 0.0385,
+        "band": 0.04,
+        "changed": false
+      }
+    },
+    "including_bimodal": "with the two bimodal models in (26 pairs) decode exceeds 19 % (p95 3.9 %) and streams4 11.5 % (p95 9.8 %): bimodal-mode flips, not row noise; handled by the mode-aware rule, not a wider band."
   }
 }

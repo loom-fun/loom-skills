@@ -143,9 +143,9 @@ class Methodology(unittest.TestCase):
     def test_markdown_states_the_json_numbers(self):
         block = re.search(r"<!-- bands -->(.*?)<!-- /bands -->", self.MD, re.S).group(1)
         stated = {}
-        for line in re.findall(r"- ([\w, ]+): \+-(\d+) %, reject below ([\d.]+)", block):
+        for line in re.findall(r"- ([\w, ]+): \+-([\d.]+) %, reject below ([\d.]+)", block):
             for row in (r.strip() for r in line[0].split(",")):
-                stated[row] = (int(line[1]) / 100, float(line[2]))
+                stated[row] = (round(float(line[1]) / 100, 4), float(line[2]))
         self.assertEqual(stated, {k: (v["band"], v["reject"]) for k, v in self.M["rows"].items() if v["reject"] is not None})
         tie = int(self.M["tie_band"] * 100)
         self.assertIn(f"win > +{tie} %, tie within +-{tie} %", self.MD)
