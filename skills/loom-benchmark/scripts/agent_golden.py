@@ -206,6 +206,12 @@ def main():
             else:
                 rec["history_verbatim"] = True
             rec["reuse_ok"] = step == 0 or not rec["history_verbatim"] or rec["cached"] >= 0.8 * prev_total
+            if not rec["reuse_ok"]:   # diagnostics: is the miss the retokenization of the history, or the server's retained state?
+                pids2 = P.ids(prev_text)
+                c2 = next((i for i, (x, y) in enumerate(zip(pids2, ids)) if x != y), min(len(pids2), len(ids)))
+                print(f"     diag: prev_total {prev_total} cached {rec['cached']} exact={prompt.startswith(prev_text)} retokenized prev {len(pids2)} ids, "
+                      f"common with this prompt {c2}; prev output tail {prev_text[-80:]!r}; this prompt there {prompt[max(0, len(prev_text) - 80):len(prev_text) + 60]!r}; "
+                      f"prev ids tail {pids2[-6:]} this {ids[max(0, len(pids2) - 6):len(pids2) + 3]}", flush=True)
             calls_ok = True
             for c in m.get("tool_calls") or []:
                 try:
