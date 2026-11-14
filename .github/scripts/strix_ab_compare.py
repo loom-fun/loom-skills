@@ -30,6 +30,8 @@ ap.add_argument("--fun-info", help="the published loom-fun info.json (card value
 ap.add_argument("--json")
 ap.add_argument("--prev", help="the first run's --json (this run is the confirming re-run): verdict out_of_margin when a metric is "
                 "outside the band in both runs in the same direction, else pass")
+ap.add_argument("--gates-from", help="a gates-only job dir of the same package (func / ktest / gates) whose results replace the A/B job's: "
+                "for a run whose kernel-test step failed on a tooling fault and only that step was re-run (the verdict names it: gates_from)")
 a = ap.parse_args()
 o = a.out
 bands = {}   # row -> the band its verdict used
@@ -97,7 +99,8 @@ if os.path.exists(tf) and os.path.exists(ts):
             "identical": sum(same), "common_prefix_chars": [lead(x, y) for x, y in zip(ta, tb)]}
 
 summ = json.load(open(os.path.join(o, "summary.json")))["results"] if os.path.exists(os.path.join(o, "summary.json")) else {}
-gates = {k: v for k, v in summ.items() if k.split(":")[0] in ("func", "ktest", "gates")}
+gsumm = json.load(open(os.path.join(a.gates_from, "summary.json")))["results"] if a.gates_from else summ
+gates = {k: v for k, v in gsumm.items() if k.split(":")[0] in ("func", "ktest", "gates")}
 def gate_ok(k, v):
     t = k.split(":")[0]
     if t == "func":
@@ -112,7 +115,7 @@ fails = [k for k, s in gate_status.items() if s != "PASS"]
 worst = min(((abs(e["ratio"] - 1), k, e["ratio"]) for k, e in metrics.items() if e["ratio"]), default=None, key=lambda x: -x[0])
 res = {"job": summ and json.load(open(os.path.join(o, "summary.json")))["job"], "runner": open(os.path.join(o, "runner.txt")).read().strip() if os.path.exists(os.path.join(o, "runner.txt")) else None,
        "band": max(bands.values(), default=a.band if a.band is not None else registry.methodology()["default_band"]), "bands": bands, "metrics": metrics, "acceptance": acc, "text": text, "gates": gates, "gate_status": gate_status,
-       "out_of_band": outs, "gate_failures": fails,
+       "out_of_band": outs, "gate_failures": fails, "gates_from": (json.load(open(os.path.join(a.gates_from, "summary.json")))["job"] if a.gates_from else None),
        "worst_metric": worst[1] if worst else None, "worst_ratio": worst[2] if worst else None,
        "verdict": "gate_fail" if fails else ("rerun" if outs else "pass")}
 if a.prev:   # the stop rule: re-run once; still outside the band in the same direction = OUT OF MARGIN
