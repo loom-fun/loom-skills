@@ -47,11 +47,18 @@ VTC = KT + 8                      # padded V^T row
 # K/V itself (the staging is repeated per group; the score/softmax/output work is not).
 NG = next(n for n in (1, 2, 4) if G % n == 0 and (KT * DP8 * 2 + D * VTC * 2 + (WPH * G // n) * KB * 16 * 16 * 4 <= 65536
                                                   or WPH * G // n == 8))
+# FLASH2_B=2 (gfx12 twin, head_dim 512, 8 query heads per KV head; opt-in, llm_config rdna4_f16_ffn sets it): the key-split two-heads-per-wave
+# loop of flash2_b2.py; a workgroup is the four waves of a head pair. Other shapes keep the plain twin.
+B_MODE = "2" if os.environ.get("FLASH2_B") == "2" and D == 512 and G == 8 and os.environ.get("FLASH2_ARCH") == "rdna4" else "0"
+if B_MODE == "2":
+    NG = 4
 if D == 512 and os.environ.get("FLASH2_NG512"):   # experiment: query-head groups per KV head at head_dim 512 (more groups: fewer waves per workgroup, cheaper barriers)
     NG = int(os.environ["FLASH2_NG512"])
     assert G % NG == 0
 GW = G // NG                      # query heads per workgroup
 WAVES = WPH * GW
+if B_MODE == "2":   # two heads per wave: a workgroup is the four waves of a head pair
+    WAVES = WPH
 LANES = 32 * WAVES
 # Staging: lane = key (workitem % KT), workitem / KT = dim segment. 256 dims over 2G segments: G = 6 -> 12
 # segments of 21.3: use 16 segments of 16 dims on the first 16*32 = 512 lanes when there are that many, else 8
@@ -61,7 +68,7 @@ if KT == 16:
     SEG_N = 2 * SEG_N
 SEG_W = D // SEG_N
 assert WPH == 2 or KB == 1, "head_dim 512: 16-key tiles"
-assert LANES >= KT * SEG_N, "need at least 8 waves (head_dim * G >= 1024)"
+assert LANES >= KT * SEG_N or B_MODE == "2", "need at least 8 waves (head_dim * G >= 1024)"
 SCALE = os.environ.get("FLASH2_SCALE") or repr(D ** -0.5)
 POS_BYTES = int(os.environ.get("FLASH2_POS_BYTES") or KVH * D * 2)   # bytes per KV position (widest layer kind)
 
@@ -530,28 +537,32 @@ R4 = os.environ.get("FLASH2_ARCH") == "rdna4"   # the gfx12 twin (flash2_rdna4.p
 if R4:
     from flash2_rdna4 import to_rdna4, twin_names
     text = to_rdna4(text)
-    if os.environ.get("FLASH2_ABL"):   # timing ablations (flash2_ablate.py), profiling only
+    if B_MODE == "2":
+        from flash2_b2 import rewrite_b2
+        assert GW == 2 and WPH == 4 and WAVES == 4
+        text = rewrite_b2(text, KVH, D, PARTIAL)
+    if not B_MODE == "2" and os.environ.get("FLASH2_ABL"):   # timing ablations (flash2_ablate.py), profiling only
         from flash2_ablate import ablate
         text = ablate(text, os.environ["FLASH2_ABL"])
-    if os.environ.get("FLASH2_SX", os.environ.get("FLASH2_TRIM", "0")) == "1":   # S partials exchanged as the lanes' own vectors (flash2_trim.py); gfx12 twin only
+    if not B_MODE == "2" and os.environ.get("FLASH2_SX", os.environ.get("FLASH2_TRIM", "0")) == "1":   # S partials exchanged as the lanes' own vectors (flash2_trim.py); gfx12 twin only
         from flash2_trim import sx
         text = sx(text)
-    if os.environ.get("FLASH2_LAZY", os.environ.get("FLASH2_TRIM", "0")) == "1":   # O^T rescale only when a column's max changed (flash2_trim.py); gfx12 twin only
+    if not B_MODE == "2" and os.environ.get("FLASH2_LAZY", os.environ.get("FLASH2_TRIM", "0")) == "1":   # O^T rescale only when a column's max changed (flash2_trim.py); gfx12 twin only
         from flash2_trim import lazy
         text = lazy(text)
-    if os.environ.get("FLASH2_KVH", os.environ.get("FLASH2_TRIM", "0")) == "1":   # loop-invariant half of the paged-KV lookup hoisted (flash2_trim.py); gfx12 twin only
+    if not B_MODE == "2" and os.environ.get("FLASH2_KVH", os.environ.get("FLASH2_TRIM", "0")) == "1":   # loop-invariant half of the paged-KV lookup hoisted (flash2_trim.py); gfx12 twin only
         from flash2_trim import kvhoist
         text = kvhoist(text)
-    if os.environ.get("FLASH2_VTF", os.environ.get("FLASH2_TRIM", "0")) == "1":   # flat-index V^T stores (flash2_trim.py); gfx12 twin only
+    if not B_MODE == "2" and os.environ.get("FLASH2_VTF", os.environ.get("FLASH2_TRIM", "0")) == "1":   # flat-index V^T stores (flash2_trim.py); gfx12 twin only
         from flash2_trim import vtflat
         text = vtflat(text)
-    if os.environ.get("FLASH2_VP", "0") == "1":   # two keys per staging lane: one 32-bit V^T store per dim pair (flash2_vpack.py); gfx12 twin only
+    if not B_MODE == "2" and os.environ.get("FLASH2_VP", "0") == "1":   # two keys per staging lane: one 32-bit V^T store per dim pair (flash2_vpack.py); gfx12 twin only
         from flash2_vpack import vpack
         text = vpack(text)
-    if os.environ.get("FLASH2_PF", "0") == "1":   # the next K/V tile's loads in flight during this tile's math (flash2_prefetch.py); gfx12 twin only
+    if not B_MODE == "2" and os.environ.get("FLASH2_PF", "0") == "1":   # the next K/V tile's loads in flight during this tile's math (flash2_prefetch.py); gfx12 twin only
         from flash2_prefetch import prefetch
         text = prefetch(text)
-if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO:   # the masked path only in the last key tile (flash2_peel.py)
+if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and B_MODE != "2":   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     _hot = None
     if R4 and os.environ.get("FLASH2_HOT", os.environ.get("FLASH2_TRIM", "0")) == "1":   # gfx12 twin: the hot copy skips the validity / mask selects (flash2_trim.py)
