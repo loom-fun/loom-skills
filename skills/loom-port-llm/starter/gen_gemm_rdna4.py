@@ -73,8 +73,12 @@ def twin(text):
                       f"  {V}_t = buffer.view {buf}[{off}] : buffer -> view<{C}x{R}xf16, {V}_tl>\n", 1)
     assert "%lane_row = " in t, old
     assert "vector<16xf16>, vector<16xf16>" not in t and "vector.fragment<rhs>" not in t, old
-    if re.search(r"_gemm_q4_k_(store|swiglu)_m256$", old) and q4k_variant() != "mech":
-        t = {"dq2": lambda x: q4k_m256_native(x), "sb": lambda x: q4k_m256_sb(x)}[q4k_variant()](t)
+    mm = re.search(r"_gemm_q4_k_(store|swiglu)_m256$", old)
+    if mm and q4k_variant() != "mech":
+        v = q4k_variant()
+        if v in ("sbst", "sbsw") and mm.group(1) != ("store" if v == "sbst" else "swiglu"):
+            return t
+        t = {"dq2": q4k_m256_native, "sb": q4k_m256_sb, "sbst": q4k_m256_sb, "sbsw": q4k_m256_sb}[v](t)
     return t
 
 

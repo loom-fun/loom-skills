@@ -13,17 +13,6 @@
    "memory_bytes_r9700": 16000000000,
    "variants": [
     {
-     "name": "pre",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ]
-    },
-    {
      "name": "sb",
      "build": {
       "LOOM_RDNA4_Q4K": "sb"
@@ -35,51 +24,77 @@
       "--prefill-r9700",
       "4096"
      ]
-    }
-   ],
-   "steps": [
-    "ktest:sb",
-    "perf:pre:2",
-    "perf:pre:1:long",
-    "perf:sb:2",
-    "perf:sb:1:long",
-    "llama@rocm.np1:2",
-    "llama@rocm.np1:1:long"
-   ]
-  },
-  {
-   "name": "unsloth-qwen3-8b-loom",
-   "card": "loom-fun-staging/unsloth-Qwen3-8B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 29000000000,
-   "variants": [
+    },
     {
      "name": "pre",
      "build": {},
      "execution": {
       "draft_depth": 0
-     }
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
     },
     {
-     "name": "sb",
+     "name": "sbst",
+     "build": {
+      "LOOM_RDNA4_Q4K": "sbst"
+     },
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    },
+    {
+     "name": "sbsw",
+     "build": {
+      "LOOM_RDNA4_Q4K": "sbsw"
+     },
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    },
+    {
+     "name": "sb2",
      "build": {
       "LOOM_RDNA4_Q4K": "sb"
      },
      "execution": {
       "draft_depth": 0
-     }
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    },
+    {
+     "name": "pre2",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
     }
    ],
    "steps": [
-    "ktest:sb",
-    "perf:pre:2",
-    "perf:pre:1:long",
     "perf:sb:2",
-    "perf:sb:1:long",
-    "llama@rocm.np1:2",
-    "llama@rocm.np1:1:long"
+    "perf:pre:2",
+    "perf:sbst:2",
+    "perf:sbsw:2",
+    "perf:sb2:2",
+    "perf:pre2:2",
+    "llama@rocm.np1:2"
    ]
   }
  ],
