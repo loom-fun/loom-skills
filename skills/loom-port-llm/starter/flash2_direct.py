@@ -17,8 +17,21 @@ zeroed per key (`%vok`) in the partial kernel (its hot copy drops the select: fl
 import re
 
 
+LDS_LOADS = """{ind}%lf_k0 = vector.fragment.load<lhs> %k_g[%kb0_row, %lf_col0] shape [%c16, %c16] : view<16x{R}xf16, %k_g_layout> -> vector<8xf16>
+{ind}%lf_k1 = vector.fragment.load<lhs> %k_g[%kb0_row, %lf_col1] shape [%c16, %c16] : view<16x{R}xf16, %k_g_layout> -> vector<8xf16>
+{ind}%lf_v0 = vector.fragment.load<lhs> %v_g[%lf_col0, %kb0_row] shape [%c16, %c16] : view<{R}x16xf16, %vt_g_layout> -> vector<8xf16>
+{ind}%lf_v1 = vector.fragment.load<lhs> %v_g[%lf_col1, %kb0_row] shape [%c16, %c16] : view<{R}x16xf16, %vt_g_layout> -> vector<8xf16>
+{ind}vector.store %lf_k0, %kvl_view[%lf_w0, %lane, %c0] : vector<8xf16>, view<64x32x8xf16>
+{ind}vector.store %lf_k1, %kvl_view[%lf_w1, %lane, %c0] : vector<8xf16>, view<64x32x8xf16>
+{ind}vector.store %lf_v0, %kvl_view[%lf_wv0, %lane, %c0] : vector<8xf16>, view<64x32x8xf16>
+{ind}vector.store %lf_v1, %kvl_view[%lf_wv1, %lane, %c0] : vector<8xf16>, view<64x32x8xf16>
+{ind}kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+"""
+
+
 def direct(text, mode, kvh, d, partial, kwide=False):
-    assert mode == 2, 'FLASH2_DIRECT=2 (K and V^T direct) is the only mode'
+    assert mode in (2, 3), 'FLASH2_DIRECT=2 (K and V^T direct) or 3 (direct, shared through workgroup memory)'
+    lds = mode == 3
     R = kvh * d
     pos_bytes = int(re.search(r"%pos_bytes = index\.constant (\d+) : offset", text).group(1))
     HALF = 128   # dims per wave
@@ -57,6 +70,9 @@ def direct(text, mode, kvh, d, partial, kwide=False):
 {ind}%v_g = buffer.view %arena[%v_wbase] : buffer -> view<{HALF}x16xf16, %vt_g_layout>
 {ind}%k_g = buffer.view %arena[%k_wbase] : buffer -> view<16x{HALF}xf16, %k_g_layout>
 """
+    if lds:
+        kv_lines = kv_lines.replace("%vd_boff : offset", "%origin : offset").replace(f"view<{HALF}x16xf16", f"view<{R}x16xf16").replace(f"view<16x{HALF}xf16", f"view<16x{R}xf16")
+        kv_lines += LDS_LOADS.replace("{ind}", ind).replace("{R}", str(R))
     text = text.replace(stage, kv_lines, 1)
     # allocas: no K / V^T tiles; the S exchange is double buffered
     text = re.sub(r"^ *%k_bytes = .*\n *%k_tile = .*\n *%k_view = .*\n", "", text, flags=re.M)
@@ -138,11 +154,41 @@ def direct(text, mode, kvh, d, partial, kwide=False):
     ends = [mm for mm in re.finditer(r"^ *kernel\.barrier<workgroup> scope\(workgroup\) ordering\(acq_rel\)\n( *)scf\.yield %m_new, %l_new, ", text, re.M)]
     assert len(ends) == 1, len(ends)
     text = text[:ends[0].start()] + ends[0].group(0).split("\n", 1)[1] + text[ends[0].end():]
+    if lds:
+        # K / V^T fragments: each wave loads two fragments of its dim slice from the arena (the four head waves of a slice split its eight),
+        # stores them in lane layout, and every wave reads the slice's eight back after the barrier (no per-wave global address work).
+        text = text.replace("  %s_tile = buffer.alloca<workgroup>", "  %kvl_bytes = index.constant 32768 : offset\n  %kvl_tile = buffer.alloca<workgroup> align(16) %kvl_bytes : buffer\n  %kvl_view = buffer.view %kvl_tile[%origin] : buffer -> view<64x32x8xf16>\n  %s_tile = buffer.alloca<workgroup>", 1)
+        pre = ("{hi}%lf_c8 = index.constant 8 : index\n{hi}%lf_c32 = index.constant 32 : index\n{hi}%lf_kb = index.mul %dim_half, %lf_c8 : index\n"
+               "{hi}%lf_2h = index.mul %head_in_group, %c2 : index\n{hi}%lf_w0_v = index.add %lf_kb, %lf_2h : index\n"
+               "{hi}%lf_w0 = index.assume %lf_w0_v [range(%lf_w0_v, 0, 62)] : index\n{hi}%lf_w1_v = index.add %lf_w0, %c1 : index\n"
+               "{hi}%lf_w1 = index.assume %lf_w1_v [range(%lf_w1_v, 0, 63)] : index\n{hi}%lf_wv0_v = index.add %lf_w0, %lf_c32 : index\n"
+               "{hi}%lf_wv0 = index.assume %lf_wv0_v [range(%lf_wv0_v, 0, 63)] : index\n{hi}%lf_wv1_v = index.add %lf_w1, %lf_c32 : index\n"
+               "{hi}%lf_wv1 = index.assume %lf_wv1_v [range(%lf_wv1_v, 0, 63)] : index\n"
+               "{hi}%lf_h32 = index.mul %head_in_group, %lf_c32 : index\n{hi}%lf_col0_v = index.add %vd_base, %lf_h32 : index\n"
+               "{hi}%lf_col0 = index.assume %lf_col0_v [range(%lf_col0_v, 0, " + str(R - 32) + ")] : index\n{hi}%lf_col1_v = index.add %lf_col0, %c16 : index\n"
+               "{hi}%lf_col1 = index.assume %lf_col1_v [range(%lf_col1_v, 0, " + str(R - 16) + ")] : index\n").replace("{hi}", hi)
+        for c in range(8):
+            pre += (f"{hi}%lf_kc{c}_o = index.add %lf_kb, %e{c} : index\n{hi}%lf_ks{c} = index.assume %lf_kc{c}_o [range(%lf_kc{c}_o, 0, 63)] : index\n"
+                    f"{hi}%lf_vc{c}_o = index.add %lf_ks{c}, %lf_c32 : index\n{hi}%lf_vs{c} = index.assume %lf_vc{c}_o [range(%lf_vc{c}_o, 0, 63)] : index\n")
+        hdr2 = re.search(r"^( *)%m_final, %l_final, [^=]*= scf\.for %kt = ", text, re.M)
+        text = text[:hdr2.start()] + pre + text[hdr2.start():]
+        def klds(mm):
+            ind_, nm, c = mm.group(1), mm.group(2), int(mm.group(3))
+            return (f"{ind_}%{nm[1:]}_raw = vector.load %kvl_view[%lf_ks{c}, %lane, %c0] : view<64x32x8xf16> -> vector<8xf16>\n"
+                    f"{ind_}{nm} = vector.fragment<lhs> %{nm[1:]}_raw shape [%c16, %c16] : vector<8xf16>")
+        text, nk = re.subn(r"^( *)(%kl0_(\d+)) = vector\.fragment\.load<lhs> %k_g\[[^\n]*$", klds, text, flags=re.M)
+        assert nk == 8, nk
+        # V^T fragments are read right after the S store (before the exchange barrier) and held through the softmax
+        vr = "".join(f"%vrw{c} = vector.load %kvl_view[%lf_vs{c}, %lane, %c0] : view<64x32x8xf16> -> vector<8xf16>\n    " for c in range(8))
+        text, ns = re.subn(r"^( *)(vector\.store %s0_7, %sx_view\[%wave_p, %lane, %c0\] : [^\n]*\n)", lambda mm: mm.group(0) + "".join(f"{mm.group(1)}%vrw{c} = vector.load %kvl_view[%lf_vs{c}, %lane, %c0] : view<64x32x8xf16> -> vector<8xf16>\n" for c in range(8)), text, flags=re.M)
+        assert ns == 1, ns
+        text, nv = re.subn(r"^( *)(%vl(\d+)_0) = vector\.fragment\.load<lhs> %v_g\[[^\n]*$", lambda mm: f"{mm.group(1)}{mm.group(2)} = vector.fragment<lhs> %vrw{mm.group(3)} shape [%c16, %c16] : vector<8xf16>", text, flags=re.M)
+        assert nv >= 8, nv
     if partial:   # stale keys: V^T of keys past the last written position is zeroed (see the module doc)
         text = re.sub(r"^( *)(%iota16 = vector\.iota [^\n]*\n)",
                       lambda mm: mm.group(0) + f"{mm.group(1)}%vk_base_v = vector.splat %tf32 : vector<8xi32>\n{mm.group(1)}%vk_pos = vector.addi %vk_base_v, %iota16 : vector<8xi32>\n"
                                  f"{mm.group(1)}%vk_hi_v = vector.splat %pos_hi_i32 : vector<8xi32>\n{mm.group(1)}%vok = vector.cmpi sle, %vk_pos, %vk_hi_v : vector<8xi32> -> vector<8xi1>\n", text, flags=re.M)
-        text = re.sub(r"^( *)(%vl(\d+_\d+)) = (vector\.fragment\.load<lhs> %v_g\[[^\n]*)$",
+        text = re.sub(r"^( *)(%vl(\d+_\d+)) = (vector\.fragment\.load<lhs> %v_g\[[^\n]*)$" if not lds else r"^( *)(%vl(\d+_\d+)) = (vector\.fragment<lhs> %vrw\d+ [^\n]*)$",
                       lambda mm: (f"{mm.group(1)}%vlraw{mm.group(3)} = {mm.group(4)}\n{mm.group(1)}%vlsel{mm.group(3)} = vector.select %vok, %vlraw{mm.group(3)}, %zero16h : vector<8xf16>\n"
                                   f"{mm.group(1)}{mm.group(2)} = vector.fragment<lhs> %vlsel{mm.group(3)} shape [%c16, %c16] : vector<8xf16>"), text, flags=re.M)
     return text

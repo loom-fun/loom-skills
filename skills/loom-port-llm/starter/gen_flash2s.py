@@ -539,9 +539,9 @@ if R4:
     if os.environ.get("FLASH2_LAZY", os.environ.get("FLASH2_TRIM", "0")) == "1":   # O^T rescale only when a column's max changed (flash2_trim.py); gfx12 twin only
         from flash2_trim import lazy
         text = lazy(text)
-    if os.environ.get("FLASH2_DIRECT", "0") == "2" and D == 512:   # K and V^T straight from the KV arena, no staging, one barrier per tile (flash2_direct.py); gfx12 twin only
+    if os.environ.get("FLASH2_DIRECT", "0") in ("2", "3") and D == 512:   # K and V^T straight from the KV arena, no staging, one barrier per tile (flash2_direct.py); gfx12 twin only
         from flash2_direct import direct
-        text = direct(text, 2, KVH, D, PARTIAL, os.environ.get("FLASH2_DIRECT_K") == "wide")
+        text = direct(text, int(os.environ["FLASH2_DIRECT"]), KVH, D, PARTIAL, os.environ.get("FLASH2_DIRECT_K") == "wide")
     if os.environ.get("FLASH2_KVH", os.environ.get("FLASH2_TRIM", "0")) == "1":   # loop-invariant half of the paged-KV lookup hoisted (flash2_trim.py); gfx12 twin only
         from flash2_trim import kvhoist
         text = kvhoist(text)
