@@ -14,6 +14,21 @@
         "--batch-size=8",
         "--profile-final-batch=true"
       ]
+    },
+    {
+      "suite": "gemm_r9700",
+      "runner": "r9700",
+      "dir": "gemm_r9700",
+      "files": [
+        "bench.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ],
+      "repeats": 3
     }
   ]
 }
