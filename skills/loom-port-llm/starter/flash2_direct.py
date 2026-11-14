@@ -14,6 +14,7 @@ Keys past the block's last written position (the partial kernel's last tile) are
 wrote zeros for them; here K needs nothing (their S entries are masked by the causal select) and the V^T fragments are
 zeroed per key (`%vok`) in the partial kernel (its hot copy drops the select: flash2_trim.hot).
 """
+import os
 import re
 
 
@@ -45,14 +46,23 @@ def direct(text, mode, kvh, d, partial, kwide=False):
     assert kvfn == "g_kv_offset", f"flash2_direct: the plain KV layout only (got {kvfn})"
     # The tile is page aligned: one page lookup, broadcast from lane 0 so the arena offset is wave-uniform (a per-lane value cannot be
     # the scalar base of a fragment load: its 64-bit range does not fit the 32-bit lane offset).
+    plane = (not lds) and os.environ.get("FLASH2_PLANE", "1") == "1"
     kv_lines = f"""{ind}%kp = index.assume %tile_first [range(%tile_first, 0, 262143)] : index
 {ind}%kh_pg_v = index.div %kp, %kh_c16 : index
 {ind}%kh_pg = index.assume %kh_pg_v [range(%kh_pg_v, 0, %kh_last), lt(%kh_pg_v, %blocks)] : index
 {ind}%kh_ph32r = view.load %kh_map[%kh_pg] : view<[%blocks]xi32> -> i32
-{ind}%kh_ph32 = kernel.subgroup.broadcast %kh_ph32r from %kh_lane0 : i32, i32
+{ind}%kh_ph32 = {"scalar.addi %kh_ph32r, %kh_lane0 : i32" if plane and os.environ.get("FLASH2_PLANE_V", "1") == "1" else "kernel.subgroup.broadcast %kh_ph32r from %kh_lane0 : i32, i32"}
 {ind}%kh_phb = scalar.assume %kh_ph32 [range(%kh_ph32, 0, 65535)] : i32
 {ind}%kh_ph = index.cast %kh_phb : i32 to index
-{ind}%kh_pg16_v = index.mul %kh_ph, %kh_c16 : index
+"""
+    if plane:
+        # Plane views (before the loop): the KV plane's base is a 64-bit byte offset computed once; a tile's coordinates inside the plane
+        # (a position row < pool <= 2^20, times 1 KiB) fit 32 bits, so a fragment load is one 32-bit lane offset off a shared base.
+        kv_lines += f"""{ind}%krow16_v = index.mul %kh_ph, %kh_c16 : index
+{ind}%krow16 = index.assume %krow16_v [range(%krow16_v, 0, 1048560), lt(%krow16_v, %pl_rows_m)] : index
+"""
+    else:
+        kv_lines += f"""{ind}%kh_pg16_v = index.mul %kh_ph, %kh_c16 : index
 {ind}%krow_v = index.add %kh_pp, %kh_pg16_v : index
 {ind}%vrow_v = index.add %krow_v, %pool : index
 {ind}%krow_i = index.cast %krow_v : index to i32
@@ -113,7 +123,15 @@ def direct(text, mode, kvh, d, partial, kwide=False):
 {hi}%v_inv_o = index.add %k_inv_o, %v_plane_delta : offset
 {hi}%k_inv_i = index.cast %k_inv_o : offset to i64
 {hi}%v_inv_i = index.cast %v_inv_o : offset to i64
-""")
+""" + (f"""{hi}%pl_rows_m = index.sub %pool, %kh_c16 : index
+{hi}%k_pv = buffer.view %arena[%k_inv_o] : buffer -> view<[%pool]x{HALF}xf16, %k_g_layout>
+{hi}%v_pv = buffer.view %arena[%v_inv_o] : buffer -> view<{HALF}x[%pool]xf16, %vt_g_layout>
+""" + ("".join(f"""{hi}%pc{c}_o = index.constant {32 * c} : offset
+{hi}%kpc{c}_o = index.add %k_inv_o, %pc{c}_o : offset
+{hi}%kpc{c} = buffer.view %arena[%kpc{c}_o] : buffer -> view<[%pool]x16xf16, %k_g_layout>
+{hi}%vpc{c}_o = index.add %v_inv_o, %pc{c}_o : offset
+{hi}%vpc{c} = buffer.view %arena[%vpc{c}_o] : buffer -> view<16x[%pool]xf16, %vt_g_layout>
+""" for c in range(HALF // 16)) if os.environ.get("FLASH2_COLV", "0") == "1" else "") if (not lds) and os.environ.get("FLASH2_PLANE", "1") == "1" else ""))
     text = text[:hdr.start()] + defs + text[hdr.start():]
     # parity of the tile selects the S exchange buffer; the one barrier is the one after the S partial store
     text = re.sub(r"^( *)%tf32 = index\.cast %tile_first : index to i32\n",
@@ -130,6 +148,10 @@ def direct(text, mode, kvh, d, partial, kwide=False):
     # K fragments (S = K Q^T) from the arena, V^T fragments from the transposed arena view
     text = re.sub(r"^( *)(%kc\d+_\d+) = index\.add %dim_base, (%qd\d+_o) : index$", r"\1\2 = index.add \3, %c0 : index", text, flags=re.M)
     text = re.sub(r"%k_view\[(%kb\d+_row), (%kc\d+_\d+)\] shape \[%c16, %c16\] : view<\d+x\d+xf16>", rf"%k_g[\1, \2] shape [%c16, %c16] : view<16x{HALF}xf16, %k_g_layout>", text)
+    if (not lds) and os.environ.get("FLASH2_PLANE", "1") == "1":
+        text = re.sub(r"%k_g\[%kb0_row, (%kc\d+_\d+)\] shape \[%c16, %c16\] : view<16x\d+xf16, %k_g_layout>", rf"%k_pv[%krow16, \1] shape [%c16, %c16] : view<[%pool]x{HALF}xf16, %k_g_layout>", text)
+        if os.environ.get("FLASH2_COLV", "0") == "1":
+            text = re.sub(r"%k_pv\[%krow16, %kc\d+_(\d+)\] shape \[%c16, %c16\] : view<\[%pool\]x\d+xf16, %k_g_layout>", lambda mm: f"%kpc{mm.group(1)}[%krow16, %c0] shape [%c16, %c16] : view<[%pool]x16xf16, %k_g_layout>", text)
     assert not kwide, "wide K load: not ported to the page-coordinate views"
     if kwide:
         # K fragments from ONE 128-byte load per lane (eight 16-byte loads off one address): lane (key row l % 16, half h) holds dims
@@ -151,6 +173,10 @@ def direct(text, mode, kvh, d, partial, kwide=False):
         assert nk >= 8, nk
     text = re.sub(r"^( *)(%vr\d+) = index\.add %dim_base, (%qd\d+_o) : index$", r"\1\2 = index.add \3, %c0 : index", text, flags=re.M)
     text = re.sub(r"%vt_view\[(%vr\d+), (%kb\d+_row)\] shape \[%c16, %c16\] : view<\d+x\d+xf16>", rf"%v_g[\1, \2] shape [%c16, %c16] : view<{HALF}x16xf16, %vt_g_layout>", text)
+    if (not lds) and os.environ.get("FLASH2_PLANE", "1") == "1":
+        text = re.sub(r"%v_g\[(%vr\d+), %kb0_row\] shape \[%c16, %c16\] : view<\d+x16xf16, %vt_g_layout>", rf"%v_pv[\1, %krow16] shape [%c16, %c16] : view<{HALF}x[%pool]xf16, %vt_g_layout>", text)
+        if os.environ.get("FLASH2_COLV", "0") == "1":
+            text = re.sub(r"%v_pv\[%vr(\d+), %krow16\] shape \[%c16, %c16\] : view<\d+x\[%pool\]xf16, %vt_g_layout>", lambda mm: f"%vpc{mm.group(1)}[%c0, %krow16] shape [%c16, %c16] : view<16x[%pool]xf16, %vt_g_layout>", text)
     # the third barrier (end of the tile) goes: the double-buffered exchange makes it redundant. Exactly the last one of the loop body.
     # barriers: [after staging (removed with the staging block)], [after the S store: kept], [loop end]
     ends = [mm for mm in re.finditer(r"^ *kernel\.barrier<workgroup> scope\(workgroup\) ordering\(acq_rel\)\n( *)scf\.yield %m_new, %l_new, ", text, re.M)]

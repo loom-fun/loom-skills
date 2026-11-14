@@ -49,7 +49,7 @@ VTC = KT + 8                      # padded V^T row
 # K/V itself (the staging is repeated per group; the score/softmax/output work is not).
 NG = next(n for n in (1, 2, 4) if G % n == 0 and (KT * DP8 * 2 + D * VTC * 2 + (WPH * G // n) * KB * 16 * 16 * 4 <= 65536
                                                   or WPH * G // n == 8))
-if D == 512 and os.environ.get("FLASH2_NG512"):   # experiment: query-head groups per KV head at head_dim 512 (more groups: fewer waves per workgroup, cheaper barriers)
+if D == 512 and os.environ.get("FLASH2_NG512") and os.environ.get("FLASH2_ARCH") == "rdna4":   # experiment: query-head groups per KV head at head_dim 512 (more groups: fewer waves per workgroup, cheaper barriers)
     NG = int(os.environ["FLASH2_NG512"])
     assert G % NG == 0
 GW = G // NG                      # query heads per workgroup
