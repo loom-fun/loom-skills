@@ -58,6 +58,44 @@
     "perf:pool200k:2",
     "perf:pool200k:4:long"
    ]
+  },
+  {
+   "name": "prof-e2b",
+   "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 16000000000,
+   "variants": [
+    {
+     "name": "base",
+     "build": {}
+    },
+    {
+     "name": "dflash",
+     "build": {},
+     "double": [
+      "*:g_attention_flash2(_d512)?>"
+     ]
+    },
+    {
+     "name": "dgemm",
+     "build": {},
+     "double": [
+      "*:g_gemm_"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:base:2",
+    "perf:base:1:long",
+    "perf:dflash:2",
+    "perf:dflash:1:long",
+    "perf:dgemm:2",
+    "perf:dgemm:1:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:1:long"
+   ]
   }
  ],
  "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
