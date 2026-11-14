@@ -32,6 +32,13 @@ ap.add_argument("--memory-gib", default="auto",
 ap.add_argument("--prefill", type=int, default=None,
                 help="prefill chunk (prefill_capacity), 1024-4096; default cfg['prefill_capacity'], else 4096 for MoE "
                      "(fuller expert tiles: Flint 2k/8k/32k +22/+38/+28 %% vs 1024), else 1024")
+ap.add_argument("--prefill-r9700", type=int, default=None, metavar="N",
+                help="prefill chunk of a second preset, `<preset>-r9700`: execution identical except prefill_capacity N (default: "
+                     "cfg['prefill_capacity_r9700'], else none). The R9700 (gfx12, 64 CUs) fills its GEMM tiles at larger epochs than "
+                     "Strix Halo: Qwen3-0.6B 4096 vs 1024 prefill +7/+13/+18/+20/+24 %% at 1k/2k/8k/16k/32k, Gemma-4-E2B +15/+8/+6/+5/+5, "
+                     "Qwen3-1.7B -2/+1/+11/+12/+18, but Qwen3-14B -8/-5/+1/+2/+6 (hidden size <= 2048 benefits). The first preset stays "
+                     "the default (Strix Halo); the card's R9700 Quick start fetches `--preset=<preset>-r9700`. Same programs: only "
+                     "model.json differs")
 ap.add_argument("--rows", type=int, default=4, help="initial resident rows (grows on demand); c4 benchmarks need >= 4")
 ap.add_argument("--max-tokens", type=int, default=4096, help="default completion length when a request sets none")
 ap.add_argument("--temperature", type=float, default=0.0, help="default sampling temperature when a request sets none (0 = greedy)")
@@ -900,6 +907,13 @@ if DRAFT:
     card = build_draft.card_drafter(card, pkg, DRAFT)
 if cfg.get("vision"):
     card = build_vision.write_component(pkg, card, cfg["vision"], vision_cfg)
+a.prefill_r9700 = a.prefill_r9700 or cfg.get("prefill_capacity_r9700")
+if a.prefill_r9700 and a.prefill_r9700 != a.prefill:
+    import copy
+    first = next(iter(card["presets"]))
+    alt = copy.deepcopy(card["presets"][first])
+    alt["execution"]["prefill_capacity"] = a.prefill_r9700
+    card["presets"][f"{first}-r9700"] = alt
 # Dual-target (RDNA3 + RDNA4) programs: every program file that has a `K_rdna4` twin kernel selects it per device
 # (dual_target.py; LOOM_RDNA4=0 turns it off, and files without twins are left as they are).
 import dual_target  # noqa: E402

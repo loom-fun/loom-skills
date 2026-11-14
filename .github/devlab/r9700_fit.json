@@ -357,7 +357,8 @@
   "mem": 81000000000,
   "need": 95272324352.0,
   "verdict": "fits (reduced ctx)",
-  "n_exp": 128
+  "n_exp": 128,
+  "ctx_cap": 26624
  },
  {
   "slug": "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",

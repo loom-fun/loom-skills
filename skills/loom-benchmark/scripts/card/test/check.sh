@@ -323,7 +323,13 @@ mkdir -p "$tmp/r9700_staging"; cp -r "$R/pkg/." "$tmp/r9700_staging/"
 py "$C/make_info.py" build "$tmp/r9700_staging" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging "${R3[@]}" --memory-bytes 17000000000 \
   --gpus strix-halo,radeon-r9700 --fit "$R/fit_reduced.json" --evidence "$tmp/r_gates.json" "$tmp/r_perf_sub.json" "$tmp/r_vk_sub.json" \
   "$R/evidence/roofline_reduced.json" -o "$tmp/r9700_staging/info.json" 2>/dev/null
-for n in r9700_two r9700_none r9700_staging; do
+# the same staging card, its package with a second preset for the R9700 (build.py --prefill-r9700: larger prefill chunk, same programs):
+# the R9700 Quick start fetches that preset, the Strix Halo one the default
+rm -rf "$tmp/r9700_preset"; cp -r "$tmp/r9700_staging" "$tmp/r9700_preset"
+py -c "import json, sys; m = json.load(open(sys.argv[1])); p = m['presets']; f = next(iter(p))
+p[f + '-r9700'] = json.loads(json.dumps(p[f])); p[f + '-r9700']['execution']['prefill_capacity'] = 4096
+json.dump(m, open(sys.argv[1], 'w'), indent=1)" "$tmp/r9700_preset/model.json"
+for n in r9700_two r9700_none r9700_staging r9700_preset; do
   py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 assert c.validate(c.load_json(sys.argv[2])) == [], c.validate(c.load_json(sys.argv[2]))" "$C" "$tmp/$n/info.json" \
     || { echo "FAIL $n: info.json is not valid"; bad=1; }
@@ -372,7 +378,7 @@ print(c.gpu_from_device({'cpu': 'AMD RYZEN AI MAX+ 395 w/ Radeon 8060S', 'gpu': 
       c.gpu_from_device({'cpu': 'AMD EPYC', 'gpu': 'AMD Radeon AI PRO R9700S'}), c.gpu_from_device({'cpu': 'AMD Strix Halo (DevLab Dispatch runner X2)', 'os': 'Linux'}),
       c.gpu_from_device(None), c.served_context(396705472, 1.5e6, 34000000000))" "$C")
 [ "$got" = "strix-halo radeon-r9700 strix-halo None 20480" ] && echo "OK   gpu detection and served context" || { echo "FAIL gpu detection: $got"; bad=1; }
-for n in flint d1 r9700_two r9700_none r9700_staging; do
+for n in flint d1 r9700_two r9700_none r9700_staging r9700_preset; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null
   py "$C/render_card.py" "$tmp/$n" -o "$tmp/${n}_README2.md" 2>/dev/null

@@ -45,7 +45,7 @@
 #            a rebuild also gets --context N --pool N); rows beyond it are refused by the server (HTTP 400) and skipped by perf.py.
 #            config: generator-config overrides for a rebuild (e.g. {"layers": 12}: timing only)
 #            build: build.py with these env vars (and extra flags); ref: build with that commit's starter;
-#            execution: model.json overrides; double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
+#            serve_args: extra loom-serve flags; execution: model.json overrides (every preset); double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
 #            {"name": "parked", "active_wait": false}: the card's programs served with the SDK's default completion wait
 #            (LOOM_ACTIVE_WAIT=0 in serve.sh) instead of the active wait every other variant gets.
 # Job "thinking": off (default) | on: chat_template_kwargs.enable_thinking sent to BOTH engines in every step.
@@ -256,7 +256,9 @@ if rules:
 EOF
   "$T" - "$pkg/model.json" "$(qv "$v" "print(json.dumps(v.get('execution') or {}))")" "$cardid-$v" <<'EOF'
 import json, sys
-m = json.load(open(sys.argv[1])); ex = next(iter(m["presets"].values()))["execution"]; ex.update(json.loads(sys.argv[2]))
+m = json.load(open(sys.argv[1])); ex = next(iter(m["presets"].values()))["execution"]
+for pr in m["presets"].values():   # the overrides apply to every preset (build.py --prefill-r9700 adds a second one)
+    pr["execution"].update(json.loads(sys.argv[2]))
 json.dump(m, open(sys.argv[1], "w"), indent=1)
 # a small-context copy with its own model id, for several packages in one loom-serve (ab steps)
 m["model"]["id"] = sys.argv[3]; ex["context_capacity"] = 16384; ex["pool_capacity"] = 32768
@@ -269,10 +271,13 @@ done
 serve_alone() { # serve_alone VARIANT
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
-  local aw; aw=$(qv "$1" "print(0 if v.get('active_wait') is False else 1)")
-  local sa=(); read -r -a sa <<< "$(qv "$1" "print(' '.join(v.get('serve_args') or []))")"   # variant "serve_args": extra loom-serve flags (diagnostics, tuning)
-  local vmem; vmem=$(qv "$1" "print(v.get('memory_bytes') or '$mem')")   # variant "memory_bytes": "none" with --pool_backing=fixed
-  step "serve $1 ${sa[*]:-}"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa[@]:+-- "${sa[@]}"} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
+  local aw sa rp vmem; aw=$(qv "$1" "print(0 if v.get('active_wait') is False else 1)")
+  sa=$(qv "$1" "print(' '.join(v.get('serve_args') or []))")   # "serve_args": extra loom-serve flags
+  # a package with a `<first preset>-r9700` preset (build.py --prefill-r9700) serves it on the R9700, as the card's R9700 Quick start does
+  rp=""; [ "$RUNNER" = r9700 ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] + '-r9700' if p[0] + '-r9700' in p else '')" "$D/$1/pkg/model.json")
+  if [ -n "$rp" ] && [[ "$sa" != *--preset=* ]]; then sa="--preset=$rp $sa"; fi
+  vmem=$(qv "$1" "print(v.get('memory_bytes') or '$mem')")   # variant "memory_bytes": "none" with --pool_backing=fixed
+  step "serve $1"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null
 }
@@ -352,7 +357,7 @@ for s in $steps; do
       res[$s]=$("$T" -c "
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
-print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
+print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
     probe)   # probe:V: stall_probe.py (when does a prefill stall? TTFT + GPU clocks per request)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "stall probe $p1"
@@ -382,7 +387,7 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] fo
       res[$s]=$("$T" -c "
 import json,statistics as st; r=[json.loads(l) for l in open('$out/$lf')]
 k='decode_tps_32k' if '${p2:-}' else 'decode_tps'
-print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
+print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
     llamac4)   # llamac4[:N_MAX]
       llama_up "${p1:-}" || { res[$s]=ERROR; continue; }
       nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}   # 0: no drafting
