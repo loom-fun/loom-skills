@@ -72,6 +72,16 @@ class R9700(unittest.TestCase):
         self.assertIn("llama@vulkan.np1:6", j["steps"])   # fast model: 6 sessions, llama.cpp as many runs
         self.assertEqual(j["steps"].count("perf:fun:1"), 6)
 
+    def test_sampling_plan_follows_old_org_not_the_pinned_ref(self):
+        # an A/A against a staging revision still takes the fast-model plan from the published loom-fun decode rate
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump({FAST: {"old": f"loom-fun-staging/{FAST}@abc"}}, f)
+            f.flush()
+            j = self.jobs("--refs", f.name, FAST)["jobs"][0]
+        self.assertEqual(j["repeat_rows"], 3)
+        self.assertEqual(j["steps"].count("perf:fun:1"), 6)
+
     def test_no_fit_no_job(self):
         r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "ab_jobs.py"), "--device", "radeon-r9700", "bartowski-Ornith-1.5-122B-loom"], capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)
