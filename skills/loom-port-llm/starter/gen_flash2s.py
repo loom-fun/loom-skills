@@ -37,6 +37,8 @@ HALF = 128                        # dims per wave
 NFH = HALF // 16                  # 16-dim fragments per wave (8)
 WPH = D // HALF                   # waves per query head (2, or 4 at head_dim 512)
 KT = 32 if D == 256 else 16       # keys per tile (head_dim 512: K and V^T of 32 keys exceed 64 KiB)
+if D == 256 and os.environ.get("FLASH2_KT256"):   # experiment: 16-key tiles at head_dim 256 (one workgroup can then hold all query heads of a KV head)
+    KT = int(os.environ["FLASH2_KT256"])
 KB = KT // 16                     # 16-key blocks per tile
 DP8 = D + 8                       # padded K row
 VTC = KT + 8                      # padded V^T row
@@ -292,12 +294,12 @@ A(f'''  %zero8 = vector.constant 0.0 : vector<8xf32>
   %v_plane_delta = index.scale %plane_bytes_i, %pos_bytes : index, offset -> offset''')
 if WPH == 2:
     A(f'''  // S exchange slots: mine and my partner's (wave ^ 1).
-  %my_s = index.mul %wave, %c32 : index
+  %my_s = index.mul %wave, %c{32 if KB == 2 else 16} : index
   %partner_odd = index.cmp eq, %dim_half, %c0 : index
   %partner_add = scf.select %partner_odd, %c1, %c0 : index
   %partner_id_value = index.madd %head_in_group, %c2, %partner_add : index
   %partner_id = index.assume %partner_id_value [range(%partner_id_value, 0, {WAVES - 1})] : index
-  %their_s = index.mul %partner_id, %c32 : index
+  %their_s = index.mul %partner_id, %c{32 if KB == 2 else 16} : index
   %kb1 = index.constant 16 : index
   %my_s1 = index.add %my_s, %kb1 : index
   %their_s1 = index.add %their_s, %kb1 : index
