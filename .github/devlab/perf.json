@@ -5,42 +5,115 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "unsloth-gemma-4-e2b-it-loom",
+   "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 16000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "base",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
     },
     {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "swas",
+     "build": {
+      "FLASH2_SWA_TWIN": "s",
+      "FLASH2_POS_BYTES": "1024"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    },
+    {
+     "name": "nostv",
+     "build": {
+      "FLASH2_ABL": "nostv"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    },
+    {
+     "name": "nokld",
+     "build": {
+      "FLASH2_ABL": "nokld"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    },
+    {
+     "name": "nobar",
+     "build": {
+      "FLASH2_ABL": "nobar"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    },
+    {
+     "name": "noqk",
+     "build": {
+      "FLASH2_ABL": "noqk"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    },
+    {
+     "name": "nopv",
+     "build": {
+      "FLASH2_ABL": "nopv"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
+    },
+    {
+     "name": "nosm",
+     "build": {
+      "FLASH2_ABL": "nosm"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "ktest:swas",
+    "perf:base:2",
+    "perf:swas:2",
+    "perf:nostv:2",
+    "perf:nokld:2",
+    "perf:nobar:2",
+    "perf:noqk:2",
+    "perf:nopv:2",
+    "perf:nosm:2",
+    "perf:base:2:long",
+    "perf:swas:2:long",
+    "perf:nostv:2:long",
+    "perf:nokld:2:long",
+    "perf:nobar:2:long",
+    "perf:noqk:2:long",
+    "perf:nopv:2:long",
+    "perf:nosm:2:long"
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"

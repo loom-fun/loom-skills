@@ -525,6 +525,12 @@ R4 = os.environ.get("FLASH2_ARCH") == "rdna4"   # the gfx12 twin (flash2_rdna4.p
 if R4:
     from flash2_rdna4 import to_rdna4, twin_names
     text = to_rdna4(text)
+    if os.environ.get("FLASH2_ABL"):   # timing ablations (flash2_ablate.py), profiling only
+        from flash2_ablate import ablate
+        text = ablate(text, os.environ["FLASH2_ABL"])
+    if os.environ.get("FLASH2_PF", "0") == "1":   # the next K/V tile's loads in flight during this tile's math (flash2_prefetch.py); gfx12 twin only
+        from flash2_prefetch import prefetch
+        text = prefetch(text)
 if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO:   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     text = peel_last_tile(text)
