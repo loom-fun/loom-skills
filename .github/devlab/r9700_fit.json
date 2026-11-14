@@ -219,7 +219,11 @@
   "need": 59750359296.0,
   "verdict": "fits (reduced ctx)",
   "n_exp": 256,
-  "ctx_cap": 36864
+  "ctx_cap": 36864,
+  "r9700_execution": {
+   "context_capacity": 36864,
+   "pool_capacity": 36864
+  }
  },
  {
   "slug": "ggml-org-LFM2.5-24B-A2B-loom",
@@ -271,7 +275,11 @@
   "need": 39564391595.0,
   "verdict": "fits (reduced ctx)",
   "n_exp": 0,
-  "ctx_cap": 32768
+  "ctx_cap": 32768,
+  "r9700_execution": {
+   "context_capacity": 32768,
+   "pool_capacity": 32768
+  }
  },
  {
   "slug": "ggml-org-Qwen2.5-VL-7B-Instruct-loom",
