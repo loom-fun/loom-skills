@@ -660,14 +660,18 @@
  },
  {
   "slug": "unsloth-gemma-4-E2B-it-loom",
-  "w": 3872780736,
-  "kv": 1893728256,
-  "kv32": 484442112,
+  "w": 13907998052,
+  "kv": 4027056128,
+  "kv32": 1006764032,
+  "kvpp": 30724,
   "ctx": 131072,
   "mem": 16000000000,
-  "need": 7766508992.0,
+  "need": 19935054180.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 0
+  "n_exp": 0,
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
  },
  {
   "slug": "unsloth-gemma-4-E4B-it-loom",
