@@ -379,7 +379,10 @@
   "mem": 36000000000,
   "need": 26707425827.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 0
+  "n_exp": 0,
+  "r9700_execution": {
+   "pool_capacity": 131072
+  }
  },
  {
   "slug": "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
