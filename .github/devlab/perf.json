@@ -6,20 +6,20 @@
  "jobs": [
   {
    "llama_kv_rocm": 45056,
-   "name": "glimmer-ctx45056",
+   "name": "glimmer-ctx32768",
    "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
    "kit": "glimmer",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 34000000000,
-   "served_context": 45056,
+   "served_context": 32768,
    "variants": [
     {
      "name": "card",
-     "context": 45056,
+     "context": 32768,
      "execution": {
-      "context_capacity": 45056,
-      "pool_capacity": 45056
+      "context_capacity": 32768,
+      "pool_capacity": 32768
      }
     }
    ],
@@ -30,20 +30,20 @@
   },
   {
    "llama_kv_rocm": 45056,
-   "name": "glimmer-ctx36864",
+   "name": "glimmer-ctx30720",
    "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
    "kit": "glimmer",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 34000000000,
-   "served_context": 36864,
+   "served_context": 30720,
    "variants": [
     {
      "name": "card",
-     "context": 36864,
+     "context": 30720,
      "execution": {
-      "context_capacity": 36864,
-      "pool_capacity": 36864
+      "context_capacity": 30720,
+      "pool_capacity": 30720
      }
     }
    ],
@@ -53,8 +53,8 @@
    ]
   },
   {
-   "llama_kv_rocm": 45056,
-   "name": "glimmer-ctx28672",
+   "llama_kv_rocm": 28672,
+   "name": "glimmer-full28672",
    "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
    "kit": "glimmer",
    "llamacpp": "b1375",
@@ -69,11 +69,30 @@
       "context_capacity": 28672,
       "pool_capacity": 28672
      }
+    },
+    {
+     "name": "nodraft",
+     "context": 28672,
+     "execution": {
+      "context_capacity": 28672,
+      "pool_capacity": 28672,
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
     "func:card",
-    "gates:card:dev"
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   }
  ],
