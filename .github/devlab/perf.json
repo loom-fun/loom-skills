@@ -1,5 +1,5 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none Plus Strix A/B jobs (loom-fun card programs vs staging package, same runner) for the three kit-drift models.",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
@@ -35,6 +35,273 @@
     "llama@vulkan.np1:3",
     "llama@vulkan.np1:3:long",
     "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "unsloth-gemma-4-e4b-it-loom",
+   "card": "loom-fun-staging/unsloth-gemma-4-E4B-it-loom",
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 31000000000,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "nvidia-nvidia-nemotron-3-5-bolt-e4b-4gb-",
+   "card": "loom-fun-staging/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "unsloth-gemma-4-12b-it-loom",
+   "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "unsloth-gemma-4-31b-it-loom",
+   "card": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 36864,
+   "variants": [
+    {
+     "name": "card",
+     "context": 36864,
+     "execution": {
+      "context_capacity": 36864,
+      "pool_capacity": 36864
+     }
+    },
+    {
+     "name": "nodraft",
+     "context": 36864,
+     "execution": {
+      "context_capacity": 36864,
+      "pool_capacity": 36864,
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "lmstudio-community-gemma-4-26b-a4b-it-lo",
+   "card": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 179200,
+   "variants": [
+    {
+     "name": "card",
+     "context": 179200,
+     "execution": {
+      "context_capacity": 179200,
+      "pool_capacity": 179200
+     }
+    },
+    {
+     "name": "nodraft",
+     "context": 179200,
+     "execution": {
+      "context_capacity": 179200,
+      "pool_capacity": 179200,
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "strix-ab-unsloth-gemma-4-12b-it-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/unsloth-gemma-4-12B-it-loom"
+    },
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "ab:4",
+    "perf:fun:3",
+    "perf:staging:3",
+    "c4:fun",
+    "c4:staging",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "strix-ab-unsloth-gemma-4-31b-it-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
+   "memory_bytes": 80000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/unsloth-gemma-4-31B-it-loom"
+    },
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "ab:4",
+    "perf:fun:3",
+    "perf:staging:3",
+    "c4:fun",
+    "c4:staging",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "strix-ab-lmstudio-community-gemma-4-26b",
+   "runner": "strix",
+   "card": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom"
+    },
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "ab:4",
+    "perf:fun:3",
+    "perf:staging:3",
+    "c4:fun",
+    "c4:staging",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging"
    ]
   }
  ],
