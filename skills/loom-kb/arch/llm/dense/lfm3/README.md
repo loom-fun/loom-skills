@@ -12,8 +12,3 @@ model's rms eps (`post_norm_eps`). The rest is the starter's: the per-head outpu
 sliding layers' rope base (`rope_theta_swa`, `g_qk_rope_store_swa`) and the global layers' `rope_freqs` factors
 (`rope_freq_factors`: 1 / 1e30, only the first 32 of 64 rotary pairs rotate), and the empty `<think></think>` before
 the last user message (`history_think_before`).
-
-## Fleet models (published packages, llm_config.json)
-
-- `bartowski-LFM3-1.7B-loom` (lfm3): 24L h2048, 16h/4kv hd128, kv_layers 11, shortconv, swa 256, ctx 262144
-- `ggml-org-LFM3-Omni-2B-loom` (lfm3): 24L h2048, 16h/4kv hd128, kv_layers 11, shortconv, swa 256, ctx 128000
