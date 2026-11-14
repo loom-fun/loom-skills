@@ -15,6 +15,11 @@ def enabled():
     return os.environ.get("LOOM_RDNA4", "1") not in ("", "0", "false", "no")
 
 
+def q4k_variant():
+    """LOOM_RDNA4_Q4K: the q4_k m256 twin's dequant staging: mech (the mechanical twin), dq2 or sb (q4k_m256_native / q4k_m256_sb)."""
+    return os.environ.get("LOOM_RDNA4_Q4K", "mech")
+
+
 _DEF = re.compile(r'^kernel\.def export\("(\w+)"\) @(\w+)\(', re.M)
 _LOAD = re.compile(r"^(\s*)(%\w+) = vector\.load (%\w+)\[(%\w+), (%\w+)\] : view<(\d+)x(\d+)xf16> -> vector<16xf16>$")
 _FRAG = re.compile(r"^\s*(%\w+) = vector\.fragment<rhs> (%\w+) shape \[%c16, %c16\] : vector<16xf16>$")
@@ -68,6 +73,8 @@ def twin(text):
                       f"  {V}_t = buffer.view {buf}[{off}] : buffer -> view<{C}x{R}xf16, {V}_tl>\n", 1)
     assert "%lane_row = " in t, old
     assert "vector<16xf16>, vector<16xf16>" not in t and "vector.fragment<rhs>" not in t, old
+    if re.search(r"_gemm_q4_k_(store|swiglu)_m256$", old) and q4k_variant() != "mech":
+        t = {"dq2": lambda x: q4k_m256_native(x), "sb": lambda x: q4k_m256_sb(x)}[q4k_variant()](t)
     return t
 
 
