@@ -6,25 +6,22 @@
  "jobs": [
   {
    "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "card",
+     "build": {}
     },
     {
      "name": "nodraft",
+     "build": {},
      "execution": {
       "draft_depth": 0
      }
-    },
-    {
-     "name": "elastic",
-     "build": {},
-     "elastic": true
     }
    ],
    "steps": [
@@ -33,85 +30,6 @@
     "gates:card:dev",
     "perf:card:3",
     "perf:card:3:long",
-    "perf:elastic:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
-  },
-  {
-   "name": "bartowski-qwen2-5-0-5b-instruct-loom",
-   "card": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 5000000000,
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "nodraft",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "elastic",
-     "build": {},
-     "elastic": true
-    }
-   ],
-   "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "perf:elastic:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
-  },
-  {
-   "name": "ggml-org-qwen3-4b-loom",
-   "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 25000000000,
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "nodraft",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "elastic",
-     "build": {},
-     "elastic": true
-    }
-   ],
-   "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "perf:elastic:3:long",
     "c4:nodraft",
     "llama@rocm.np1:3",
     "llama@rocm.np1:3:long",
@@ -122,7 +40,7 @@
    ]
   }
  ],
- "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
