@@ -132,7 +132,7 @@ fetch_card() {   # fetch_card REPO -> sets CARD_DIR: the card's files at one com
   CARD_DIR=$WORK/_card/${r//\//_}; rv=$(curl -fsS --retry 3 "https://huggingface.co/api/models/$r/revision/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || rv=main
   # the files are fetched at one commit (resolve/main can serve an older revision for a while after a publish), and a card
   # directory left by an earlier job on this runner is reused only when it holds that commit
-  bs=https://huggingface.co/$r/resolve/$rv
+  bs=https://huggingface.co/$r/resolve/$rv; CARD_BASE=$bs
   if [ "$rv" = main ] || [ "$(cat "$CARD_DIR/.fetched" 2>/dev/null)" != "$rv" ]; then
     step "fetch $r"; rm -rf "$CARD_DIR"
     HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$bs/model.json" --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$CARD_DIR" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch $r"; exit 1; }
@@ -140,7 +140,7 @@ fetch_card() {   # fetch_card REPO -> sets CARD_DIR: the card's files at one com
     rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; echo "$rv" > "$CARD_DIR/.fetched"
   fi
 }
-fetch_card "$repo"; card=$CARD_DIR
+fetch_card "$repo"; card=$CARD_DIR; base=$CARD_BASE
 python3 - "$card" <<'EOF' || { echo "FAIL: the fetched card's model.json and llm_config.json disagree (a stale fetch?)"; exit 1; }
 import json, os, sys
 m = json.load(open(os.path.join(sys.argv[1], "model.json"))); c = json.load(open(os.path.join(sys.argv[1], "llm_config.json")))
