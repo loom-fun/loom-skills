@@ -1,9 +1,9 @@
 # Architecture of the skill repo: layout, registries, testing, guards
 
 Explanation (why the repo is built this way). Process lives in [targeted-fix.md](targeted-fix.md) and [campaign.md](campaign.md); the
-facts live in `skills/loom-kb`. Status when written: the layout, router, fleet tools and sampler are on the integration branch;
-the choice registry, device/quant/methodology registries and the guards (`fleet/scope_lint.py`, `.github/workflows/impact.yml`) land
-from their own PRs, and this file names them where they matter.
+facts live in `skills/loom-kb`. Status when written: the layout, router, fleet tools, sampler, choice registry and the device/quant/methodology registries are on
+the integration branch; the guards (`fleet/scope_lint.py`, `fleet/ownership.json`, `.github/workflows/impact.yml`) and the
+device-generic A/B job generator (`.github/scripts/ab_jobs.py`) land from their own PRs, and this file names them where they matter.
 
 ## Contents
 - Goals and the invariant
