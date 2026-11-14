@@ -9,21 +9,31 @@ random operands), plus k_peak: a register-only WMMA loop (the device's real f16 
 import os, sys, re
 HERE = os.path.dirname(os.path.abspath(__file__))
 if __name__ == "__main__":
+    ROOT = os.path.abspath(sys.argv[1])
     sys.path.insert(0, os.path.join(sys.argv[1], "skills", "loom-port-llm", "starter"))
 import gen_gemm as G
 import gen_gemm_rdna4 as R
+sys.path.insert(0, HERE)
+import q4k_variants as V
 
 SHAPES = [  # (see ALL_SHAPES for the full list)
     ("q4_k", "swiglu", 1024, 1536, 6144), ("q4_k", "store", 1024, 6144, 1536),
     ("q4_k", "swiglu", 1024, 4096, 12288), ("q4_k", "store", 1024, 12288, 4096),
     ("q4_k", "swiglu", 1024, 1024, 3072), ("q4_k", "store", 1024, 3072, 1024),
 ]
+ROWS = [("q4_k", "store", 1024, 1024, 3072), ("q4_k", "swiglu", 2048, 1536, 6144), ("q4_k", "swiglu", 4096, 1536, 6144), ("q4_k", "store", 4096, 6144, 1536), ("q4_k", "swiglu", 4096, 4096, 12288)]   # chunk rows (the R9700 preset: 4096)
+EXTRA = [("bf16", "store", 1024, 6144, 1536), ("bf16", "swiglu", 1024, 1536, 6144), ("bf16", "store", 1024, 12288, 4096),
+         ("q6_k", "store", 1024, 6144, 1536), ("q6_k", "store", 1024, 12288, 4096)]
 ALL_SHAPES = [  # (fmt, mode, rows, K, N): the prefill GEMMs of Gemma-4-E2B (k1536), Qwen3-8B (k4096) and Qwen3-0.6B (k1024)
     ("q4_k", "swiglu", 1024, 1536, 6144), ("q4_k", "store", 1024, 6144, 1536), ("q4_k", "store", 1024, 1536, 2048),
     ("q4_k", "swiglu", 1024, 4096, 12288), ("q4_k", "store", 1024, 12288, 4096), ("q4_k", "store", 1024, 4096, 4096),
     ("q4_k", "swiglu", 1024, 1024, 3072), ("q4_k", "store", 1024, 3072, 1024),
     ("q4_k", "swiglu", 4096, 1536, 6144), ("q4_k", "store", 4096, 6144, 1536),
 ]
+
+NATIVE = {"dq2": V.q4k_m256_native, "sb": V.q4k_m256_sb, "sbnb": lambda t: V.q4k_m256_sb(t, nb=True),
+          "sbst": lambda t: V.q4k_m256_sb(t) if "_store_" in t[:200] else t, "sbsw": lambda t: V.q4k_m256_sb(t) if "_swiglu_" in t[:200] else t,
+          "sbsc": lambda t: V.q4k_m256_sb(t, sc=True), "sbnbsc": lambda t: V.q4k_m256_sb(t, nb=True, sc=True)}   # variants that swap the m256 q4_k twin for a native gfx12 kernel (no ablation transform)
 
 def kernel_text(text, name):
     m = re.search(r'kernel\.def (?:target\(@\w+\) )?export\("%s"\)' % re.escape(name), text)
@@ -33,7 +43,18 @@ def kernel_text(text, name):
 
 import re as _re
 def transform(tw, variant):
-    """Ablations of one twin kernel text (timing only, wrong results): nomma, nodq, nobar."""
+    """Ablations of one twin kernel text (timing only, wrong results): nomma, nodq, nobar, ablw (no per-step weight loads: the
+    carried raw values are reused), ablx (no per-step activation loads)."""
+    if variant == "nox":      # no activation staging at all (loads and LDS stores)
+        tw = _re.sub(r"^\s*vector\.store (?:%cr_x1?|%x_rawn1?_u\d), %x_stage_view\[[^\n]*\n", "", tw, flags=_re.M)
+    elif variant == "xhalf":  # the second activation row of each thread is not staged
+        tw = _re.sub(r"^\s*vector\.store (?:%cr_x1|%x_rawn1_u\d), %x_stage_view\[[^\n]*\n", "", tw, flags=_re.M)
+    elif variant == "nowst":  # no weight staging stores (dequantization and loads vanish with them)
+        tw = _re.sub(r"^\s*vector\.store %dq_(?:lo|hi)_u\d, %w_stage_view\[[^\n]*\n", "", tw, flags=_re.M)
+    elif variant == "ablw":
+        tw = _re.sub(r"^(\s*)(%nx_(?:pk|hdr)\w*) = vector\.load [^\n]*-> vector<4xi32>$", lambda m: "%s%s = vector.andi %s, %s : vector<4xi32>" % (m.group(1), m.group(2), "%cr_pk" if "pk" in m.group(2) else "%cr_hdr", "%cr_pk" if "pk" in m.group(2) else "%cr_hdr"), tw, flags=_re.M)
+    elif variant == "ablx":
+        tw = _re.sub(r"^(\s*)(%x_rawn1?_u\d) = vector\.load [^\n]*$", lambda m: "%s%s = vector.bitcast %%cr_x%s : vector<32xf16> to vector<32xf16>" % (m.group(1), m.group(2), "1" if "rawn1" in m.group(2) else ""), tw, flags=_re.M)
     if variant == "nomma":
         tw = _re.sub(r"^(\s*)(%\w+) = vector\.mma (%\w+), (%\w+), (%\w+) : vector<8xf16>, vector<8xf16>, vector<8xf32>$", r"\1\2 = vector.addf \5, \5 : vector<8xf32>", tw, flags=_re.M)
     elif variant == "nodq":
@@ -47,17 +68,99 @@ def transform(tw, variant):
         tw = _re.sub(r"^\s*kernel\.barrier<workgroup>[^\n]*\n", "", tw, flags=_re.M)
     return tw
 
+COLD = [("q4_k", "store", 1024, 12288, 4096, 4), ("q4_k", "swiglu", 1024, 4096, 12288, 3)]   # weights far beyond the 64 MB MALL: launches cycle over distinct weight tensors
+
+def write_q4k_npy(path, nblocks, seed):
+    """A realistic Q4_K tensor (valid f16 d/dmin, random 6-bit scales/mins and nibbles) as an int8 .npy file."""
+    import struct
+    rnd = bytearray(os.urandom(nblocks * 144))
+    for i, b in enumerate(struct.pack("<2e", 0.012 + 0.001 * seed, 0.004)):
+        rnd[i::144] = bytes([b]) * nblocks
+    hdr = "{'descr': '|i1', 'fortran_order': False, 'shape': (%d,), }" % len(rnd)
+    hdr += " " * (63 - (len(hdr) + 10) % 64) + "\n"
+    while (10 + len(hdr)) % 64: hdr = hdr[:-1] + " \n"
+    with open(path, "wb") as fh:
+        fh.write(b"\x93NUMPY\x01\x00" + struct.pack("<H", len(hdr)) + hdr.encode()); fh.write(rnd)
+
+def cold_cases(outdir):
+    out = []
+    for fmt, mode, rows, K, N, reps in COLD:
+        kn = f"k_{fmt}_{mode}_m256_{rows}x{K}x{N}"
+        nw = 2 if mode == "swiglu" else 1
+        wb = N * K // 256 * 144
+        decl, args, tys = "", [], []
+        for r in range(reps):
+            for w in range(nw):
+                p = f"cold_{mode}_{r}_{w}.npy"
+                if outdir: write_q4k_npy(os.path.join(outdir, p), wb // 144, r * 2 + w)
+                decl += f'  %w{r}_{w} = check.file.read.npy path("{p}") : tensor<{wb}xi8>\n'
+        launches = ""
+        for r in range(reps):
+            ws = ", ".join(f"%w{r}_{w}" for w in range(nw)); wt = ", ".join([f"tensor<{wb}xi8>"] * nw)
+            launches += f"  kernel.launch @{kn}[%rows, %n](%rows, %k, %n, %x, %s, {ws}, %y) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {wt}, tensor<{rows}x{N}xf32>)\n"
+        out.append(f"""check.case public @k_cold_{mode}_case {{
+  %seed = check.literal value(12345) : i64
+  %rows = check.literal value({rows}) : index
+  %k = check.literal value({K}) : index
+  %n = check.literal value({N}) : index
+  %x = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<{rows}x{K}xf16>
+  %s = check.generate.fill value(1.0) : tensor<{rows}x2xf32>
+{decl}  %y = check.generate.fill value(0.0) : tensor<{rows}x{N}xf32>
+{launches}  check.return
+}}
+check.benchmark<@k_cold_{mode}_case> @k_cold_{mode}_{reps}x_bm
+""")
+    return out
+
+import subprocess, functools
+@functools.lru_cache(maxsize=None)
+def gen_kernels(fmts):
+    """name -> kernel text of the generator's whole output for FMTS ("q4_k:store+swiglu,..."), built as the models are (GEMM_SKIP_PADDING and
+    GEMM_N_FASTEST on, the gen_llm.py defaults)."""
+    env = dict(os.environ, GEMM_FORMATS=fmts, GEMM_SKIP_PADDING="1", GEMM_N_FASTEST="1", LOOM_RDNA4="1")
+    txt = subprocess.run([sys.executable, os.path.join(ROOT, "skills", "loom-port-llm", "starter", "gen_gemm.py")], env=env, check=True, capture_output=True, text=True).stdout
+    return {m.group(1): kernel_text(txt, m.group(1)) for m in re.finditer(r'kernel\.def (?:target\(@\w+\) )?export\("(\w+)"\)', txt)}
+
+def real_cases():
+    """Qwen3-0.6B layer 3 ffn_gate / ffn_up (Q4_K, 3072 x 1024) as the weights of the 1024x1024x3072 kernels (real headers and nibbles)."""
+    n = 1769472
+    out = []
+    for mode, ws in (("swiglu", ("real_gate.npy", "real_up.npy")), ("store", ("real_gate.npy",))):
+        kn = f"k_q4_k_{mode}_m256_1024x1024x3072"
+        decl = "".join(f'  %w{i} = check.file.read.npy path("{w}") : tensor<{n}xi8>\n' for i, w in enumerate(ws))
+        args = ", ".join(f"%w{i}" for i in range(len(ws))); tys = ", ".join([f"tensor<{n}xi8>"] * len(ws))
+        out.append(f"""check.case public @k_real_{mode}_case {{
+  %seed = check.literal value(12345) : i64
+  %rows = check.literal value(1024) : index
+  %k = check.literal value(1024) : index
+  %nn = check.literal value(3072) : index
+  %x = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<1024x1024xf16>
+  %s = check.generate.fill value(1.0) : tensor<1024x2xf32>
+{decl}  %y = check.generate.fill value(0.0) : tensor<1024x3072xf32>
+  kernel.launch @{kn}[%rows, %nn](%rows, %k, %nn, %x, %s, {args}, %y) : [index, index](index, index, index, tensor<1024x1024xf16>, tensor<1024x2xf32>, {tys}, tensor<1024x3072xf32>)
+  check.return
+}}
+check.benchmark<@k_real_{mode}_case> @k_real_{mode}_bm
+""")
+    return out
+
 def build(variant=""):
     out = []
-    for fmt, mode, rows, K, N in SHAPES:
+    for fmt, mode, rows, K, N in SHAPES + ROWS + (EXTRA if not variant else []):
         for big in ("m128", "m256"):
             if big == "m256" and rows % 256: continue
-            g = G.gemm_big(fmt, mode) if big == "m128" else G.gemm_big256(fmt, mode)
-            tw = transform(R.twin(g), variant)
+            nat, _, abl = variant.partition("_")
+            if nat in NATIVE:
+                if big != "m256": continue
+            elif abl == "" and variant not in ("", "nfast", "nomma", "nodq", "nobar", "ablw", "ablx", "nox", "xhalf", "nowst"):
+                raise SystemExit("unknown variant " + variant)
+            kern = gen_kernels(f"{fmt}:{mode}")[f"g_{'gemm_' + fmt + '_' + mode}_{big}_rdna4"]
+            if nat in NATIVE: kern = NATIVE[nat](kern)
+            tw = transform(kern, abl if nat in NATIVE else variant)
             m = re.search(r'export\("(\w+)"\)', tw); old = m.group(1)
             kn = f"k_{fmt}_{mode}_{big}_{rows}x{K}x{N}"
             tw = tw.replace(f'export("{old}") @{old}(', f'export("{kn}") @{kn}(')
-            wb = N * K // 256 * 144
+            wb = N * K * 2 if fmt == "bf16" else N * K // 256 * (210 if fmt == "q6_k" else 144)
             two = mode == "swiglu"
             wdecl = f"  %w = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<{wb}xi8>\n"
             wargs, wtys = "%w", f"tensor<{wb}xi8>"
@@ -77,6 +180,8 @@ def build(variant=""):
 }}
 check.benchmark<@{kn}_case> @{kn}_bm
 """)
+    if variant in ("", "sb") or variant in NATIVE:
+        out += cold_cases(os.environ.get("KB_OUTDIR")) + real_cases()
     return out
 
 
@@ -133,10 +238,35 @@ check.case public @k_peak_case {
 check.benchmark<@k_peak_case> @k_peak_bm
 """
 
+def mix(nv, nw=8):
+    """k_mix<nv>: k_peak's WMMA loop with nv extra independent f16 vector FMAs (4 v_pk_fma_f16 each) per iteration: does VALU work overlap the matrix unit?"""
+    p = PEAK.replace("k_peak", "k_mix%d" % nv)
+    fm = "".join("    %%f{0}_n = vector.fmaf %%f{0}, %%a_c, %%b_c : vector<8xf16>\n".format(i % 4) if False else "" for i in range(0))
+    chains = "".join("%%f%d = %%a : vector<8xf16>, " % i for i in range(4))
+    # carried f16 chains appended to the loop carries
+    p = p.replace("%a0 = %init : vector<8xf32>,", "%a0 = %init : vector<8xf32>,", 1)
+    carry_decl = ", ".join("%%g%d = %%a : vector<8xf16>" % i for i in range(4))
+    ty = ", ".join(["vector<8xf16>"] * 4)
+    p = p.replace(") -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {",
+                  ", " + carry_decl + ") -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, " + ty + ") {", 1)
+    p = p.replace("%r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 = scf.for", "%r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7, %q0, %q1, %q2, %q3 = scf.for", 1)
+    body = ""
+    cur = ["%%g%d" % i for i in range(4)]
+    for n in range(nv):
+        c = n % 4
+        body += "    %%h%d_%d = vector.fmaf %s, %%b, %%a : vector<8xf16>\n" % (c, n, cur[c])
+        cur[c] = "%%h%d_%d" % (c, n)
+    p = p.replace("    scf.yield %n0,", body + "    scf.yield %n0,", 1)
+    p = p.replace("%n7 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>\n  }",
+                  "%n7, " + ", ".join(cur) + " : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, " + ty + "\n  }", 1)
+    p = p.replace("  %sum = vector.addf %s03, %s47 : vector<8xf32>", "  %sum0 = vector.addf %s03, %s47 : vector<8xf32>\n  %qq = vector.addf %q0, %q1 : vector<8xf16>\n  %qr = vector.addf %q2, %q3 : vector<8xf16>\n  %qs = vector.addf %qq, %qr : vector<8xf16>\n  %qx = vector.extf %qs : vector<8xf16> to vector<8xf32>\n  %sum = vector.addf %sum0, %qx : vector<8xf32>", 1)
+    return p
+
 HEAD = "amdgpu.target<gfx12-generic> @rdna4 {subgroup_size = 32}\n\n" + open(os.path.join(HERE, "gemm_helpers.loom")).read() + "\n"
 if __name__ == "__main__" and len(sys.argv) > 2:
     d = sys.argv[2]
     os.makedirs(d, exist_ok=True)
+    os.environ["KB_OUTDIR"] = d
     for v in (sys.argv[3:] or ["base"]):
         v = "" if v == "base" else v
-        open(os.path.join(d, "bench%s.loom" % ("_" + v if v else "")), "w").write(HEAD + "\n".join(build(v)) + ("\n" + PEAK if not v else ""))
+        open(os.path.join(d, "bench%s.loom" % ("_" + v if v else "")), "w").write(HEAD + "\n".join(build(v)) + ("\n" + PEAK + "".join("\n" + mix(n) for n in (0, 8, 16, 32, 64)) if not v else ""))
