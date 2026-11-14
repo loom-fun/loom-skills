@@ -5,6 +5,7 @@ and kernel -> family rules, stratum signatures, the impact adapter. Stdlib only.
 import json
 import os
 import re
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
@@ -15,7 +16,11 @@ PREFILL_ROWS = ["prefill_1k", "prefill_2k", "prefill_8k", "prefill_16k", "prefil
 # perf.py without --long measures SHORT_ROWS, with --long LONG_ROWS; streams4 is the c4 step (devlab_perf.sh)
 SHORT_ROWS = ["decode", "decode_2k", "prefill_1k", "prefill_2k"]
 LONG_ROWS = ["decode_32k", "prefill_8k", "prefill_16k", "prefill_32k"]
-GPUS = {"strix-halo": "gfx11", "radeon-r9700": "gfx12"}      # card GPU id -> target family of the programs
+sys.path.insert(0, os.path.join(ROOT, "skills", "loom-kb"))
+import registry  # noqa: E402
+
+# card GPU id -> target family of the programs ("gfx11", "gfx12"): from the device registry (a device row adds its entry here)
+GPUS = {k: registry.family_of(k)["gfx_generic"].split("-")[0] for k in registry.devices()}
 FAMILY_OF = {v: k for k, v in GPUS.items()}
 
 # plan Appendix A section 5 (calibrated on the 63 phase-3 A/B files): band = PASS inside 1 +- band, reject = T1 threshold

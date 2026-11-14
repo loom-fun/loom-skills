@@ -26,7 +26,7 @@ class DeviceRegistry(unittest.TestCase):
     def test_tree_is_consistent(self):
         fams, devs = registry.families(), registry.devices()
         self.assertEqual(list(fams), ["rdna3", "rdna4", "cdna3", "xdna2"])
-        self.assertEqual(list(devs), ["strix-halo", "radeon-r9700"])
+        self.assertEqual(list(devs), ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"])
         for name, f in fams.items():
             self.assertTrue((KB / "device" / name / "README.md").exists(), name)
             for d in f["devices"]:
@@ -35,7 +35,8 @@ class DeviceRegistry(unittest.TestCase):
             self.assertTrue((KB / d["path"] / "README.md").exists(), key)
             self.assertIn(d["roofline"]["default"], d["roofline"]["presets"])
             self.assertIn(key, fams[d["family"]]["devices"])
-            self.assertIn("Linux" if key == "strix-halo" else "radeon-r9700", d["runner"]["labels"])
+            if d["runner"]["labels"]:   # a device with no DevLab runner (spec-only row) has none
+                self.assertIn("Linux" if key == "strix-halo" else "radeon-r9700", d["runner"]["labels"])
         self.assertEqual({f["status"] for f in fams.values()}, {"supported", "planned"})
 
     def test_lookup_by_alias(self):
@@ -53,12 +54,18 @@ class DeviceRegistry(unittest.TestCase):
         for wf in ("devlab-perf.yml", "devlab-kbench.yml"):
             txt = (ROOT / ".github/workflows" / wf).read_text(encoding="utf-8")
             for dev in d.values():
+                if not dev["runner"]["labels"]:
+                    continue   # no runner registered yet (radeon-rx7900xtx): nothing for a workflow to select
                 labels = ", ".join(f'"{x}"' for x in dev["runner"]["labels"])
                 self.assertIn(f'"{dev["runner"]["key"]}": [{labels}]', txt, f"{wf} {dev['device']}")
 
+    def test_info_schema_devices(self):   # the card schema's device enum is the registry's device list (a device row adds one entry)
+        schema = json.loads((CARD / "info_schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(schema["properties"]["devices"]["propertyNames"]["enum"], list(registry.devices()))
+
     def test_card_gpus(self):   # card_lib.GPUS as it was hard-coded
         g = card_lib.GPUS
-        self.assertEqual(list(g), ["strix-halo", "radeon-r9700"])
+        self.assertEqual(list(g), ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"])
         self.assertEqual({k: v for k, v in g["strix-halo"].items() if k != "detect"},
                          {"name": 'AMD Ryzen AI Max+ 395 "Strix Halo"', "short": "Strix Halo", "arch": "gfx1151", "memory": None,
                           "roofline": "strix-halo", "memory_bytes": None, "runner": "Strix Halo", "tag": "strix-halo"})
@@ -77,7 +84,7 @@ class DeviceRegistry(unittest.TestCase):
     def test_roofline_presets(self):
         p = registry.roofline_presets()
         self.assertEqual({k: (v["bw"], v["flops"]) for k, v in p.items()},
-                         {"strix-halo": (216e9, 59e12), "radeon-r9700": (613e9, 191.4e12), "radeon-r9700s": (613e9, 214e12)})
+                         {"strix-halo": (216e9, 59e12), "radeon-rx7900xtx": (960e9, 123e12), "radeon-r9700": (613e9, 191.4e12), "radeon-r9700s": (613e9, 214e12)})
         for g in card_lib.GPUS.values():   # every card GPU names a roofline preset that exists
             self.assertIn(g["roofline"], p)
 

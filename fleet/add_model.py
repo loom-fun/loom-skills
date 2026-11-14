@@ -3,7 +3,8 @@
 staging repo: llm_config.json, model.json, model.json.lock, tokenizer.json). Only small files are read; every GGUF the build
 reads is dumped from the HF cache or by HTTP range reads at the revision the package's lock pins (gguf_stub.py).
 
-usage: add_model.py SLUG PACKAGE_DIR [--staging-revision REV] [--hf-cache DIR] [--refresh-dumps]
+usage: add_model.py SLUG PACKAGE_DIR [--staging-revision REV] [--refresh-dumps] [--root DIR]
+--root DIR: write DIR/fleet/ instead of this checkout's fleet/ (a scratch manifest copy: the manifest is read from DIR/fleet/manifest.json when it exists)
 Writes fleet/<slug>/{llm_config.json, tokenizer_min.json, gguf/<file>.json.gz} and fleet/manifest.json[slug].
 """
 import argparse
@@ -73,10 +74,13 @@ def main():
     ap.add_argument("package")
     ap.add_argument("--staging-revision")
     ap.add_argument("--refresh-dumps", action="store_true")
+    ap.add_argument("--root", help="scratch checkout root: DIR/fleet/ receives the model (default: this checkout)")
     a = ap.parse_args()
-    mp = os.path.join(HERE, "manifest.json")
+    root = os.path.abspath(a.root) if a.root else os.path.dirname(HERE)
+    mp = os.path.join(root, "fleet", "manifest.json")
+    os.makedirs(os.path.dirname(mp), exist_ok=True)
     m = json.load(open(mp)) if os.path.exists(mp) else {"models": {}}
-    m["models"][a.slug] = entry(a.slug, a.package, a.staging_revision, a.refresh_dumps)
+    m["models"][a.slug] = entry(a.slug, a.package, a.staging_revision, a.refresh_dumps, root)
     m["models"] = dict(sorted(m["models"].items()))
     json.dump(m, open(mp, "w"), indent=1)
 
