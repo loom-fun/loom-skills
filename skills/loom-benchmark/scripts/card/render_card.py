@@ -467,9 +467,21 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
     rm = view.get("remeasure")
     if rm and rm["programs_sha256"] == here:   # a same-runner A/B of this package against the build the table measured
         exc = "".join(f", {k} {(r - 1) * 100:+.1f} %" for k, r in (rm.get("exceptions") or {}).items() if r)
-        L.append(f"- {GPUS[g]['short']} re-measured on this package on {text(rm['date'])}: within +-{round(rm['band'] * 100)} % of "
-                 f"these values" + (f" except{exc[1:]} (not repeated in the same direction by the first run)" if exc else "")
-                 + f" ({src_text(sources[rm['source']])}).")
+        imp = rm.get("improved") or {}
+        bands = sorted({round(b * 100, 1) for b in (rm.get("bands") or {}).values()})
+        within = (f"+-{round(rm['band'] * 100)} %" if len(bands) < 2 else
+                  f"the per-row bands (methodology, {bands[0]:g}-{bands[-1]:g} %)")
+        srcs = ", ".join(src_text(sources[sid]) for sid in (rm.get("first_source"), rm["source"]) if sid)
+        L.append(f"- {GPUS[g]['short']} re-measured on this package on {text(rm['date'])}: within {within} of the "
+                 + ("published" if imp else "these") + " values"
+                 + (f" except {', '.join(imp)} (faster, confirmed in 2 runs; new values shown)" if imp else "")
+                 + (f"{', and' if imp else ' except'}{exc[1:]} (not repeated in the same direction by the first run)" if exc else "")
+                 + f" ({srcs}).")
+        if imp:
+            runs = ", ".join("%s %.1f and %.1f" % (k, *v["runs"][:2]) for k, v in imp.items())
+            was = ", ".join("%s %.1f" % (k, v["published"]) for k, v in imp.items() if v.get("published"))
+            L.append(f"- {', '.join(imp)}: the card value is the mean of the two re-measure runs' medians (each the median of "
+                     f"3 sessions; {runs}); the published value was {was}; llama.cpp values are as published (not re-measured).")
     for b, x in extra.items():
         xb, xs = x["baseline"], x["session"]
         L.append(f"- {xnames[b]}: measured {text(xs['date'])}; source: {src_text(sources[xs['source']])}."
