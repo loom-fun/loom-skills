@@ -11,6 +11,7 @@
    "memory_bytes": 17000000000,
    "kit": null,
    "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "fun",
@@ -44,7 +45,13 @@
     "textmatch:staging",
     "func:staging",
     "ktest:staging",
-    "gates:staging:dev"
+    "gates:staging:dev",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:2:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:2",
+    "llama@vulkan.np1:2:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   },
   {
@@ -54,6 +61,7 @@
    "memory_bytes": 25000000000,
    "kit": null,
    "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "fun",
@@ -87,7 +95,13 @@
     "textmatch:staging",
     "func:staging",
     "ktest:staging",
-    "gates:staging:dev"
+    "gates:staging:dev",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:2:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:2",
+    "llama@vulkan.np1:2:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   },
   {
@@ -97,6 +111,7 @@
    "memory_bytes": 13000000000,
    "kit": "lfm2moe",
    "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "fun",
@@ -130,7 +145,13 @@
     "textmatch:staging",
     "func:staging",
     "ktest:staging",
-    "gates:staging:dev"
+    "gates:staging:dev",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:2:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:2",
+    "llama@vulkan.np1:2:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   }
  ],
