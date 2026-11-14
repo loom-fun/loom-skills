@@ -7,59 +7,54 @@
   {
    "name": "unsloth-gemma-4-e2b-it-loom",
    "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "require_preset_r9700": true,
    "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 16000000000,
    "variants": [
     {
-     "name": "c4096",
-     "build": {
-      "FLASH2_SWA_TWIN": "s",
-      "FLASH2_POS_BYTES": "1024",
-      "FLASH2_LAZY": "1",
-      "GEMM_F16O": "swiglu"
-     },
+     "name": "card"
+    },
+    {
+     "name": "stack",
+     "build": {},
      "build_args": [
       "--prefill-r9700",
       "4096"
-     ]
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     }
     },
     {
-     "name": "c8192",
-     "build": {
-      "FLASH2_SWA_TWIN": "s",
-      "FLASH2_POS_BYTES": "1024",
-      "FLASH2_LAZY": "1",
-      "GEMM_F16O": "swiglu"
-     },
+     "name": "nodraft",
+     "build": {},
      "build_args": [
       "--prefill-r9700",
-      "8192"
-     ]
-    },
-    {
-     "name": "c2048",
-     "build": {
-      "FLASH2_SWA_TWIN": "s",
-      "FLASH2_POS_BYTES": "1024",
-      "FLASH2_LAZY": "1",
-      "GEMM_F16O": "swiglu"
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
      },
-     "build_args": [
-      "--prefill-r9700",
-      "2048"
-     ]
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
-    "ktest:c4096",
-    "perf:c4096:3",
-    "perf:c8192:3",
-    "perf:c2048:3",
-    "perf:c4096:3:long",
-    "perf:c8192:3:long",
-    "perf:c2048:3:long"
+    "func:stack",
+    "ktest:stack",
+    "gates:stack:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "perf:stack:3",
+    "perf:stack:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long"
    ]
   }
  ],
