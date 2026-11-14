@@ -5,67 +5,7 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "gptoss-gates",
-   "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
-   "kit": "gpt-oss",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gates:card:dev"
-   ]
-  },
-  {
-   "name": "flint-sweep2",
-   "card": "loom-fun-staging/ggml-org-Flint-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "variants": [
-    {
-     "name": "p43008",
-     "execution": {
-      "context_capacity": 43008,
-      "pool_capacity": 43008
-     }
-    },
-    {
-     "name": "p44032",
-     "execution": {
-      "context_capacity": 44032,
-      "pool_capacity": 44032
-     }
-    },
-    {
-     "name": "p45056",
-     "execution": {
-      "context_capacity": 45056,
-      "pool_capacity": 45056
-     }
-    },
-    {
-     "name": "p46080",
-     "execution": {
-      "context_capacity": 46080,
-      "pool_capacity": 46080
-     }
-    }
-   ],
-   "steps": [
-    "func:p43008",
-    "func:p44032",
-    "func:p45056",
-    "func:p46080"
-   ]
-  },
-  {
-   "name": "flint-full",
+   "name": "flint-pools",
    "card": "loom-fun-staging/ggml-org-Flint-loom",
    "kit": null,
    "llamacpp": "b1375",
@@ -74,7 +14,35 @@
    "llama_kv_rocm": 40960,
    "variants": [
     {
-     "name": "p40960",
+     "name": "c32p40",
+     "execution": {
+      "context_capacity": 32768,
+      "pool_capacity": 40960
+     }
+    },
+    {
+     "name": "c24p40",
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 40960
+     }
+    },
+    {
+     "name": "c32p32",
+     "execution": {
+      "context_capacity": 32768,
+      "pool_capacity": 32768
+     }
+    },
+    {
+     "name": "c24p24",
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576
+     }
+    },
+    {
+     "name": "c40p40",
      "execution": {
       "context_capacity": 40960,
       "pool_capacity": 40960
@@ -82,9 +50,17 @@
     }
    ],
    "steps": [
-    "func:p40960",
-    "gates:p40960:dev",
-    "perf:p40960:1:long"
+    "func:c32p40",
+    "gates:c32p40:dev",
+    "perf:c32p40:1:long",
+    "func:c24p40",
+    "gates:c24p40:dev",
+    "perf:c24p40:1:long",
+    "gates:c32p32:dev",
+    "perf:c32p32:1:long",
+    "gates:c24p24:dev",
+    "perf:c24p24:1:long",
+    "perf:c40p40:1:long"
    ]
   }
  ],

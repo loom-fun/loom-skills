@@ -344,7 +344,7 @@ for s in $steps; do
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "perf $p1 x $p2 ${p3:-} (thinking $TH)"
       for i in $(seq 1 "$p2"); do
-        (cd "$out" && "$T" "$B/perf.py" "$url" "$p1" --model "$cardid" --no-campaign --thinking "$TH" --log "perf_$p1.jsonl" ${p3:+--long} | tail -1)
+        (cd "$out" && "$T" "$B/perf.py" "$url" "$p1" --model "$cardid" --no-campaign --thinking "$TH" --log "perf_$p1.jsonl" ${p3:+--long} 2>&1 | tee -a "perf_$p1.out" | tail -1)
       done
       "$T" "$here/.github/scripts/ab_decode.py" "$url" "$cardid" --rounds 2 --think "$TH" --log "$out/tps_$p1.jsonl" | grep SUMMARY
       res[$s]=$("$T" -c "
