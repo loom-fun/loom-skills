@@ -16,7 +16,8 @@ from gguf import GGUFReader
 from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
-from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402  formats with no 256-row (_m256) GEMM
+from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402
+from gen_gemm_rdna4 import f16o_swiglu as _f16o_on  # noqa: E402  formats with no 256-row (_m256) GEMM
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
 from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
 import attn_rules  # noqa: E402
@@ -1043,7 +1044,7 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 }}
 """)
             cases.append(_case)
-            if swiglu and "swiglu" in os.environ.get("GEMM_F16O", "") and os.environ.get("LOOM_RDNA4", "1") not in ("", "0", "false", "no"):
+            if swiglu and _f16o_on(cfg):
                 # the gfx12 f16-output swiglu twin (f16o_fuse.py's group): f16 result, scales_out = (1, 1) per live row and (0, 0) per dead
                 # row (a row whose input scale is 0: its x16 row is zeros); gfx12 only (ktest_select.py skips it elsewhere)
                 dead = rng.choice(rows, 5, replace=False)

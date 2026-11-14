@@ -748,7 +748,8 @@ if R4 and not ROLE:
     text = twin_names(text)
 elif not R4 and not ROLE and os.environ.get("LOOM_RDNA4", "1") != "0":   # the gfx12 twins K_rdna4 (flash2_rdna4.py) follow the kernels
     # FLASH2_SWA_TWIN=s: the gfx12 twin is gen_flash2s.py's split-dims kernel (same launch signature) instead of this generic one
-    _twin_gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen_flash2s.py") if os.environ.get("FLASH2_SWA_TWIN") == "s" else os.path.abspath(__file__)
+    _twin_gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen_flash2s.py") if (
+        os.environ.get("FLASH2_SWA_TWIN") == "s" and T == "llm" and CFG["dim"] in (256, 512) and not CFG["sinks"] and CFG["dim"] * CFG["group"] >= 1024) else os.path.abspath(__file__)
     subprocess.run([sys.executable, _twin_gen], check=True, env=dict(os.environ, FLASH2_ARCH="rdna4", FLASH2_OUT=out_path + ".rdna4"))
     text += open(out_path + ".rdna4").read()
     os.remove(out_path + ".rdna4")
