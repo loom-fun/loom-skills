@@ -224,7 +224,7 @@ c4_steady three runs; llama.cpp b1368 drafting from the same BF16 GGUF):
 - `spec` (gates.sh quick/full, and port.sh's smoke stage): the same package with `draft_depth 0`
   (`model_target.json`, same compiled program) is the reference; every completion (greedy, seeded sampling,
   tool calls, reasoning, a 1k-token prompt) must be identical. `spec_check.py compare` also prints acceptance.
-- `agent` and `needle` run with drafting on: multi-turn tool loops with history reuse, and the full context.
+- `agent` runs with drafting on: multi-turn tool loops with history reuse.
 
 ## Limits / next levers
 

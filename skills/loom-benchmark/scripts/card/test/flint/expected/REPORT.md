@@ -12,7 +12,7 @@ How the values on this repository's model card were measured. Generated from `in
 
 ## Method
 
-- `perf.py` (loom-benchmark) sends real-text requests: a short prompt for decode, decode after 2k and 32k tokens of context, and prefill of documents of about 1k, 2k, 8k, 16k and 32k tokens. Each run gives one value per metric; the card shows the mean of the runs.
+- `perf.py` (loom-benchmark) sends real-text requests: a short prompt for decode, decode after 2k and 32k tokens of context, and prefill of documents of about 1k, 2k, 8k, 16k and 32k tokens. Each run gives one value per metric; the card shows, per session, the median over its sessions ("aggregate": "median") or the mean of its runs (older sessions).
 - `c4_steady.py` runs 4 concurrent streams and reports the aggregate decode rate over the window in which all 4 are decoding; the card shows the median of the runs.
 - One engine runs at a time on the same machine, with the same GGUF. Loom rates are timed by the client; llama.cpp rates come from its server-side `timings`.
 - Every performance value comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch Strix Halo runner: Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), and llama.cpp on the same runner, with the published programs.
@@ -25,6 +25,7 @@ How the values on this repository's model card were measured. Generated from `in
 - Device: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04.
 - Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).
 - Programs measured: sha256 `38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e`, the same as this repository's programs.
+- Values: the median over 2 sessions (4 streams: over 3 runs), a session's value being the median of its samples.
 - Commands:
 
 ```bash
@@ -67,6 +68,7 @@ perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign
 - Device: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04.
 - Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).
 - Programs measured: sha256 `aef7c526a984ca6c1687156c3c62ada8d82e27d6945875090811806b6b690cf9`, not the same as this repository's programs.
+- Values: the median over 2 sessions, a session's value being the median of its samples.
 
 | metric | engine | runs | value |
 |---|---|---|---|
@@ -98,14 +100,7 @@ perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign
 
 ### DevLab Dispatch run 3003, LEVEL=quick, 2026-11-06
 
-- Gates: `golden` pass, `compare` pass, `consistency` pass, `spec` pass, `agent` pass, `sampling` pass, `needle` pass.
+- Gates: `golden` pass, `compare` pass, `consistency` pass, `spec` pass, `agent` pass, `sampling` pass.
 - Device: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04.
 - Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).
 - Programs: sha256 `38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e`, the same as this repository's programs.
-
-### [DevLab Dispatch run 1000](https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000), LEVEL=full, 2026-11-06
-
-- Gates: `needle_full` pass.
-- Device: not recorded.
-- Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`, recovered).
-- Programs: not recorded.

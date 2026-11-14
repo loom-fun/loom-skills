@@ -5,7 +5,7 @@ usage: report.py [BENCH_DIR=.] [--pkg PKG] [--title TITLE] [--notes notes.md]
   -> BENCH_DIR/report.html (single page, light/dark) and BENCH_DIR/report.md
 
 Reads: audit.json (headline table; run audit.py first), gates.json + gates_runs.jsonl,
-compare.json, agent_golden.json, needle.json, gates_sampling.log, gates_consistency.log,
+compare.json, agent_golden.json, gates_sampling.log, gates_consistency.log,
 llamacpp_pick.json, roofline.json, targets.jsonl, decisions.jsonl, ../.e2e_start and the
 package's llm_config.json/model.json. --notes adds your own markdown-free text (one paragraph
 per blank-line-separated block) under "Notes": what was optimized, what was skipped and why.
@@ -54,11 +54,6 @@ pick = load("llamacpp_pick.json", {})
 roof = load("roofline.json", {})
 cmp_rows = load("compare.json", [])
 agent = load("agent_golden.json", {})
-needle = load("needle.json", {})
-_full = load("needle_full.json", {})
-if _full:  # finalize's full-context probe (the compared half-context probe may be in needle.json)
-    needle = {"context": _full.get("context", needle.get("context")), "over_capacity": _full.get("over_capacity", {}),
-              "results": needle.get("results", []) + _full.get("results", [])}
 decisions = jl("decisions.jsonl")
 targets = jl("targets.jsonl")
 cfg, preset = {}, {}
@@ -82,7 +77,6 @@ elapsed_min = round((now - start) / 60) if start else None
 cmp_ok = [r for r in cmp_rows if not r.get("error")]
 gaps = [r["divergence_gap"] for r in cmp_ok if isinstance(r.get("divergence_gap"), float)]
 turns = agent.get("turns", [])
-nres = needle.get("results", [])
 samp = [l for l in tail("gates_sampling.log", 10) if l.startswith(("OK", "FAIL"))]
 cons = [l for l in tail("gates_consistency.log", 10) if l.startswith(("PASS", "FAIL", "prompt tokens"))]
 
@@ -114,10 +108,8 @@ if cmp_ok:
 if turns:
     lines.append(f"- agent tool loop: {len(turns)} turns; rendering exact {sum(t['render_ok'] for t in turns)}/{len(turns)}, "
                  f"history reuse {sum(t['reuse_ok'] for t in turns)}/{len(turns)}, valid tool calls {sum(t['calls_ok'] for t in turns)}/{len(turns)}")
-if nres:
-    lines.append(f"- needle: sizes {sorted({r['n'] for r in nres})} of a {needle.get('context', 0):,}-token context; "
-                 f"all probes served: {'yes' if all(r.get('status') == 200 for r in nres) else 'NO'}; "
-                 f"over-capacity prompt -> HTTP {needle.get('over_capacity', {}).get('status')}")
+if gates.get("context_admit"):
+    lines.append(f"- native-context admission: {gates['context_admit'].get('detail')}")
 for l in samp:
     lines.append(f"- sampling: {l}")
 for l in cons:

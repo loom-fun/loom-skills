@@ -147,7 +147,7 @@ def llama_draft(args):
     return (LLAMA_METHOD.get(m.group(1), m.group(1)) if m else None), (int(n.group(1)) if n else None)
 
 
-def methodology(base, extra, spec, drafter, runs_dec, runs_c4):
+def methodology(base, extra, spec, drafter, values, runs_c4):
     """The card's methodology: the same short template on every card, filled from the card's own data (baseline server
     arguments, drafting setting, runs). Anything that differs between the engines is stated as it is, not smoothed over."""
     vk = next((x["baseline"] for b, x in extra.items() if b == "vulkan"), None)
@@ -169,7 +169,7 @@ def methodology(base, extra, spec, drafter, runs_dec, runs_c4):
                  + " (NOT the same choice on both engines)")
         depth = ""
     out = [f"- Compared: Loom against {ver}; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with "
-           f"the active wait. Values are the mean of {runs_dec} rounds (4 streams: median of {runs_c4}); Loom is timed by the client, "
+           f"the active wait. {values} (4 streams: median of {runs_c4}); Loom is timed by the client, "
            "llama.cpp by its server.",
            "- Out of the box on both engines: Loom serves the preset shipped in this package; llama.cpp runs its build defaults "
            "plus only the server arguments listed below (" + ("offload, context and slots, and on the 1-stream rows the drafting flags "
@@ -419,12 +419,41 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
                 if n:
                     vals.add(n)
         return "–".join(str(v) for v in sorted(vals)) if vals else "not recorded"
+
+    def values_of(keys):
+        """How the 1-stream values were aggregated, per session provenance: a session recorded with "aggregate": "median" is
+        the median over its sessions of each session's median sample; a session without the key is the mean of its rounds
+        (measured before that rule: never relabelled). Rows from both kinds are named separately."""
+        groups = {}
+        for k in keys:
+            if k in rows:
+                groups.setdefault(sessions[rows[k][1]].get("aggregate"), []).append(k)
+        parts = []
+        for agg, ks in groups.items():
+            n = runs_of(ks, False)
+            if agg != "median":
+                parts.append((f"the mean of {n} rounds", ks))
+                continue
+            t = f"the median of {n} sessions"
+            rep = {}
+            for k in ks:
+                c = (sessions[rows[k][1]]["runs"].get("samples") or {}).get(k, 1)
+                if c > 1:
+                    rep.setdefault(c, []).append(k)
+            if rep:
+                t += (" (a session's value is the median of its samples: "
+                      + "; ".join(f"{c} samples for {', '.join(v)}" for c, v in sorted(rep.items()))
+                      + ("; one sample for the others" if sum(map(len, rep.values())) < len(ks) else "") + ")")
+            parts.append((t, ks))
+        if not parts:
+            return "Values are the mean of not recorded rounds"
+        return "Values are " + (parts[0][0] if len(parts) == 1 else "; ".join(f"{t} for {', '.join(ks)}" for t, ks in parts))
     tps_keys = [k for k, _ in METRICS if k not in ("streams4", "spec_acceptance")]
     psrc = sources[sessions[primary]["source"]] if primary is not None else None
     drafter = None
     if facts["drafter"]:
         drafter = f"{facts['drafter']['repo']} / {facts['drafter']['file']}"
-    L += ["", "**Methodology**", "", *methodology(base, extra, facts["spec"], drafter, runs_of(tps_keys, False), runs_of(["streams4"], True)),
+    L += ["", "**Methodology**", "", *methodology(base, extra, facts["spec"], drafter, values_of(tps_keys), runs_of(["streams4"], True)),
           f"- Measured on AMD DevLab Dispatch {GPUS[g]['runner']} runners (`devlab-perf` jobs); runners differ between sessions."]
     if psrc:
         L.append(f"- Measured {text(sessions[primary]['date'])}; device {device_text(psrc['device'])}; "
@@ -435,8 +464,10 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
                  f"source: {src_text(s)}.")
     rm = view.get("remeasure")
     if rm and rm["programs_sha256"] == here:   # a same-runner A/B of this package against the build the table measured
+        exc = "".join(f", {k} {(r - 1) * 100:+.1f} %" for k, r in (rm.get("exceptions") or {}).items() if r)
         L.append(f"- {GPUS[g]['short']} re-measured on this package on {text(rm['date'])}: within +-{round(rm['band'] * 100)} % of "
-                 f"these values ({src_text(sources[rm['source']])}).")
+                 f"these values" + (f" except{exc[1:]} (not repeated in the same direction by the first run)" if exc else "")
+                 + f" ({src_text(sources[rm['source']])}).")
     for b, x in extra.items():
         xb, xs = x["baseline"], x["session"]
         L.append(f"- {xnames[b]}: measured {text(xs['date'])}; source: {src_text(sources[xs['source']])}."
@@ -646,13 +677,19 @@ def render(d):
     return "\n".join(L) + "\n"
 
 
-def method_text(gpus):
-    """The report's method bullets; the runner is the one GPU's (the same text a one-GPU card always had)."""
+def method_text(gpus, aggs=(None,)):
+    """The report's method bullets; the runner is the one GPU's (the same text a one-GPU card always had). aggs: the
+    "aggregate" of every session shown (None: the mean of its runs, recorded before the median rule)."""
+    aggs = set(aggs)
+    value = ("the card shows the median over the sessions of each session's median sample (a session without an \"aggregate\" "
+             "key was measured as the mean of its runs: its row says so)" if aggs == {"median"} else
+             "the card shows the mean of the runs" if aggs <= {None} else
+             "the card shows, per session, the median over its sessions (\"aggregate\": \"median\") or the mean of its runs (older sessions)")
     runner = " or ".join(GPUS[g]["runner"] for g in gpus) if gpus else GPUS[DEFAULT_GPU]["runner"]
     return [
     "- `perf.py` (loom-benchmark) sends real-text requests: a short prompt for decode, decode after 2k and 32k tokens "
     "of context, and prefill of documents of about 1k, 2k, 8k, 16k and 32k tokens. Each run gives one value per "
-    "metric; the card shows the mean of the runs.",
+    f"metric; {value}.",
     "- `c4_steady.py` runs 4 concurrent streams and reports the aggregate decode rate over the window in which all "
     "4 are decoding; the card shows the median of the runs.",
     "- One engine runs at a time on the same machine, with the same GGUF. Loom rates are timed by the client; "
@@ -693,6 +730,11 @@ def report_gpu(L, info, facts, g, here, h, single):
               f"- Device: {device_text(src['device'])}.",
               f"- Loom SDK: hrx-loom {sdk_text(src['hrx_loom'])}.",
               f"- Programs measured: {prog(s.get('programs_sha256'))}."]
+        if s.get("aggregate") == "median":
+            sm = s["runs"].get("samples") or {}
+            L.append(f"- Values: the median over {s['runs'].get('decode_prefill') or 'the'} sessions"
+                     + (f" (4 streams: over {s['runs']['streams4']} runs)" if s["runs"].get("streams4") else "") + ", a session's "
+                     "value being the median of its samples" + (f" ({', '.join(f'{k}: {c}' for k, c in sm.items())} per session)" if sm else "") + ".")
         if s.get("commands"):
             L += ["- Commands:", "", "```bash", *s["commands"], "```"]
         L += ["", "| metric | engine | runs | value |", "|---|---|---|---|"]
@@ -794,7 +836,8 @@ def render_report(d):
         L.append(base_line(perf["baseline"]))
     L += ["- Programs measured: the sha256 below is card_lib.programs_sha256, over `program/*.loom` without each file's "
           "first-line generator comment.", "",
-          "## Method", "", *method_text(live if not solo else live), ""]
+          "## Method", "", *method_text(live, [s.get("aggregate") for g in live
+                                                    for s in (gpu_view(info, g).get("performance") or {}).get("sessions", [])]), ""]
     if solo:
         report_gpu(L, info, facts, live[0], here, "##", True)
     else:

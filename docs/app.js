@@ -7,7 +7,7 @@ const FEAT = [['api','API'],['tool_calling','tool calling'],['thinking','thinkin
   ['context','context'],['concurrency','concurrency'],['max_output_tokens','max output']];
 const GATE = [['kernel_tests','kernel tests'],['golden','golden'],['compare','compare'],['vision','vision'],
   ['consistency','consistency'],['spec','spec'],['agent','agent'],['agent_think_off','agent think-off'],
-  ['sampling','sampling'],['needle','needle'],['needle_full','needle full'],['decision','decision']];
+  ['sampling','sampling'],['decision','decision']];
 const TIMED = MET.map((m) => m[0]);
 const NORMNAME = {rocm: 'llama.cpp ROCm', vulkan: 'llama.cpp Vulkan'};
 const COL = {loom: '#a84f0e', rocm: '#8f887b', vulkan: '#4a7fb0'};

@@ -3,7 +3,7 @@
  "$id": "https://github.com/loom-fun/loom-skills/skills/loom-benchmark/scripts/card/info_schema.json",
  "title": "Loom model card measurements (info.json), schema loom-card/3",
  "description": "The data of a loom-fun card that has no other home: per GPU (devices): measurements, gate evidence, the device and Loom SDK that measured, the baseline, dates and versions. What the package is comes from its own files and is never repeated here: sources, revisions, files, sha256 and sizes from model.json.lock; services, context, rows, max_tokens and drafting depth from model.json; chat features, the drafter and the generating loom-skills commit and SDK from llm_config.json. render_card.py renders README.md from all four. Unknown values are null or absent (rendered as not measured / no evidence / unknown), never guessed.",
- "$comment": "Compatibility: the schema string changes only on a breaking change. Readers ignore metric names, gate names and object keys they don't know, so adding a metric, a gate, an optional key or a new enum value of source.kind keeps loom-card/3. Removing or renaming a key, changing a key's type or meaning, or making a key required is breaking and bumps the schema to loom-card/4. loom-card/3 moved gates, performance and roofline under devices.<gpu>; loom-card/2 cards read as the strix-halo device (card_lib.normalize).",
+ "$comment": "Compatibility: the schema string changes only on a breaking change. Readers ignore metric names, gate names and object keys they don't know (the retired gates needle and needle_full stay valid in old files; make_info.py build drops them, card_lib.RETIRED_GATES), so adding a metric, a gate, an optional key or a new enum value of source.kind keeps loom-card/3. Removing or renaming a key, changing a key's type or meaning, or making a key required is breaking and bumps the schema to loom-card/4. loom-card/3 moved gates, performance and roofline under devices.<gpu>; loom-card/2 cards read as the strix-halo device (card_lib.normalize).",
  "type": "object",
  "required": ["schema", "repo", "card", "versions", "sources", "devices"],
  "properties": {
@@ -63,7 +63,8 @@
       "programs_sha256": {"type": "string", "description": "card_lib.programs_sha256 of the package re-measured (this repository's)"},
       "compared_programs": {"type": "string", "description": "programs_sha256 of the build compared with (the sessions shown)"},
       "result": {"enum": ["within"]}, "worst_metric": {"type": ["string", "null"]}, "worst_ratio": {"type": ["number", "null"]},
-      "ratios": {"type": "object", "additionalProperties": {"type": ["number", "null"]}}}},
+      "ratios": {"type": "object", "additionalProperties": {"type": ["number", "null"]}},
+      "exceptions": {"type": "object", "additionalProperties": {"type": ["number", "null"]}, "description": "metrics outside the band in this run whose confirming run did not repeat it in the same direction (the card names them)"}}},
       "performance": {
        "type": "object", "required": ["baseline", "sessions"],
        "properties": {
@@ -99,6 +100,7 @@
              "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
              "source": {"type": "string"},
              "runs": {"type": "object"},
+             "aggregate": {"const": "median", "description": "as session.aggregate; absent: the mean of the runs"},
              "programs_sha256": {"type": ["string", "null"], "description": "card_lib.programs_sha256 of the package the run fetched (its GGUF, drafter and settings came from it)"},
              "metrics": {
               "type": "object",
@@ -208,10 +210,12 @@
     "runs": {
      "type": "object", "required": ["decode_prefill", "streams4"],
      "properties": {
-      "decode_prefill": {"type": ["integer", "null"], "description": "runs averaged (mean) per decode/prefill value"},
-      "streams4": {"type": ["integer", "null"], "description": "runs per 4-stream value (median)"}
+      "decode_prefill": {"type": ["integer", "null"], "description": "sessions per decode/prefill value (\"aggregate\": \"median\"), else runs averaged (mean)"},
+      "streams4": {"type": ["integer", "null"], "description": "runs per 4-stream value (median)"},
+      "samples": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 2}, "description": "metric -> samples per session, for the rows measured several times within a session (perf.py --repeat-rows); the other rows have one"}
      }
     },
+    "aggregate": {"const": "median", "description": "how the session's values were made: the MEDIAN over serve sessions (rounds) of each session's median sample (methodology rule 5). Absent: the session was measured as the mean of runs.decode_prefill rounds (4 streams: median of runs.streams4); never relabelled"},
     "commands": {"type": "array", "items": {"type": "string"}, "description": "The measuring commands, for REPORT.md"},
     "programs_sha256": {"type": ["string", "null"], "description": "card_lib.programs_sha256 of the package measured"},
     "metrics": {"type": "object", "additionalProperties": {"$ref": "#/$defs/metric"}},
@@ -223,9 +227,9 @@
    "properties": {
     "loom": {"type": ["number", "null"]},
     "baseline": {"type": ["number", "null"]},
-    "loom_runs": {"type": "array", "items": {"type": "number"}, "description": "per-run values the card value summarizes"},
+    "loom_runs": {"type": "array", "items": {"type": "number"}, "description": "per-session values (per-run in a session without aggregate; 4 streams: its runs) the card value summarizes"},
     "baseline_runs": {"type": "array", "items": {"type": "number"}},
-    "acceptance": {"type": "number", "minimum": 0, "maximum": 1, "description": "speculative decoding: accepted / proposed drafted tokens of this metric's own Loom requests (mean of the runs; perf.py, c4_steady.py), the acceptance its roofline ceiling counts"}
+    "acceptance": {"type": "number", "minimum": 0, "maximum": 1, "description": "speculative decoding: accepted / proposed drafted tokens of this metric's own Loom requests (median over the sessions of each session's median, mean of the runs in a session without aggregate; perf.py, c4_steady.py), the acceptance its roofline ceiling counts"}
    }
   },
   "gate": {

@@ -40,7 +40,7 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 
 **Methodology**
 
-- Compared: Loom against llama.cpp ROCm `llamacpp-rocm/b1355`; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with the active wait. Values are the mean of 2 rounds (4 streams: median of 3); Loom is timed by the client, llama.cpp by its server.
+- Compared: Loom against llama.cpp ROCm `llamacpp-rocm/b1355`; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with the active wait. Values are the median of 2 sessions (4 streams: median of 3); Loom is timed by the client, llama.cpp by its server.
 - Out of the box on both engines: Loom serves the preset shipped in this package; llama.cpp runs its build defaults plus only the server arguments listed below (offload, context and slots, and on the 1-stream rows the drafting flags that match Loom's drafting). No tuning sweep on either engine.
 - Drafting, 1-stream rows (decode, decode_2k, decode_32k, prefill): DFlash (incoai/Flint-DFlash2-GGUF / Flint-DFlash2-Q4_K_M.gguf) on both engines; draft depth: Loom 3, llama.cpp --spec-draft-n-max 3 (each engine its own). Each engine is loaded once for all these rows.
 - 4 streams: both engines loaded with drafting off, 4 parallel requests, aggregate tokens per second.
@@ -84,12 +84,9 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 | `agent` | Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp | ✅ pass ¹ |
 | `agent_think_off` | The tool-calling loop with thinking off | — not applicable |
 | `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | ✅ pass ¹ |
-| `needle` | Needle-in-a-haystack prompt at up to half the context, compared with llama.cpp; over-capacity prompt refused | ✅ pass ¹ |
-| `needle_full` | Needle-in-a-haystack prompt at the full context is served | ✅ pass ² |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | — not applicable |
 
 - ¹ DevLab Dispatch run 3003, LEVEL=quick, 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`).
-- ² [DevLab Dispatch run 1000](https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000), LEVEL=full, 2026-11-06; device not recorded; hrx-loom `0.1.0` (hrx-system `d01d1c1`, recovered).
 - Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.
 
 ## Files

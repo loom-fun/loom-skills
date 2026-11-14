@@ -3,8 +3,8 @@
 
 usage: strix_ab_compare.py JOB_OUT_DIR [--band 0.03] [--fun-info loom-fun info.json] [--json out.json]
 
-Per metric (card_lib.METRIC_KEYS, aggregated as make_info.py perf does: mean of the runs, median for streams4) and per drafted
-metric's acceptance: old, new, new/old, PASS inside +-band, else OUT (a re-run decides). Plus: greedy text (text_fun.json vs
+Per metric (card_lib.METRIC_KEYS) and per drafted metric's acceptance, decided on the MEDIAN of the serve sessions per side, a
+session's value being the median of its samples (user rule, 2026-11-14 10:38): old, new, new/old, PASS inside +-band, else OUT (a re-run decides). Plus: greedy text (text_fun.json vs
 text_staging.json, per prompt), func / ktest / gates of the staging package (summary.json), and new vs the published loom-fun card value.
 Exit 0 always; the verdict is in the JSON ("verdict": pass | rerun | gate_fail; with --prev FIRST.json: pass | out_of_margin | gate_fail).
 A missing metric (a step failed) counts as out of band: re-run.
@@ -18,7 +18,7 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card"))
 import card_lib  # noqa: E402
-from make_info import perf_rows, metric_samples, acceptance_samples, c4_samples, summary  # noqa: E402
+from make_info import loom_sessions, read_rows  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("out")
@@ -32,14 +32,12 @@ o = a.out
 
 
 def side(v, nd):
-    p = os.path.join(o, f"perf_{v}.jsonl")
-    rows = perf_rows(p) if os.path.exists(p) else []
-    s = metric_samples(rows)
-    c4 = os.path.join(o, f"c4_{nd}.txt")
-    if os.path.exists(c4):
-        s["streams4"] = c4_samples(c4)
-    acc = acceptance_samples(rows, c4 if os.path.exists(c4) else None)
-    return s, acc
+    """{metric: [per-session median]} and {metric: [per-session median acceptance]} of one package (user rule 2026-11-14 10:38:
+    each metric is decided on the median of the sessions; a session's value is the median of its samples). The same function
+    builds the cards' values (make_info.py perf)."""
+    p, c4 = os.path.join(o, f"perf_{v}.jsonl"), os.path.join(o, f"c4_{nd}.txt")
+    out, _, acc = loom_sessions(read_rows(p) if os.path.exists(p) else [], c4 if os.path.exists(c4) else None)
+    return out, acc
 
 
 old, oacc = side("fun", "funnd")
@@ -53,20 +51,21 @@ metrics = {}
 for k in card_lib.METRIC_KEYS:
     if k == "spec_acceptance":
         continue
-    ov, nv = summary(k, old.get(k)), summary(k, new.get(k))
+    med = lambda x: round(statistics.median(x), 1) if x else None
+    ov, nv = med(old.get(k)), med(new.get(k))
     if ov is None and nv is None:
         continue
     r = round(nv / ov, 4) if ov and nv else None
     st = "PASS" if r is not None and abs(r - 1) <= a.band else ("MISSING" if r is None else "OUT")
-    e = {"old": ov, "new": nv, "ratio": r, "status": st, "old_runs": old.get(k), "new_runs": new.get(k)}
+    e = {"old": ov, "new": nv, "ratio": r, "status": st, "old_sessions": old.get(k), "new_sessions": new.get(k)}
     if card.get(k):
         e["card"] = card[k]
         e["new_vs_card"] = round(nv / card[k], 4) if nv else None
     metrics[k] = e
 acc = {}
 for k in sorted(set(oacc) | set(nacc)):
-    ov = round(statistics.mean(oacc[k]), 4) if oacc.get(k) else None
-    nv = round(statistics.mean(nacc[k]), 4) if nacc.get(k) else None
+    ov = round(statistics.median(oacc[k]), 4) if oacc.get(k) else None
+    nv = round(statistics.median(nacc[k]), 4) if nacc.get(k) else None
     r = round(nv / ov, 4) if ov and nv else None
     acc[k] = {"old": ov, "new": nv, "ratio": r,
               "status": "PASS" if (r is not None and abs(r - 1) <= a.band) or (ov == 0 and nv == 0) else ("MISSING" if r is None else "OUT")}

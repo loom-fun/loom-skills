@@ -84,12 +84,9 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 | `agent` | Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp | ✅ pass ¹ |
 | `agent_think_off` | The tool-calling loop with thinking off | — not applicable |
 | `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | ✅ pass ¹ |
-| `needle` | Needle-in-a-haystack prompt at up to half the context, compared with llama.cpp; over-capacity prompt refused | ✅ pass ¹ |
-| `needle_full` | Needle-in-a-haystack prompt at the full context is served | ✅ pass ² |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | — not applicable |
 
 - ¹ DevLab Dispatch run 3003, LEVEL=quick, 2026-11-06; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`).
-- ² [DevLab Dispatch run 1000](https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000), LEVEL=full, 2026-11-06; device not recorded; hrx-loom `0.1.0` (hrx-system `d01d1c1`, recovered).
 - Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.
 
 ## Files

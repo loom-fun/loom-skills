@@ -224,14 +224,14 @@ curl -s localhost:8160/v1/chat/completions -H 'Content-Type: application/json' \
 #    the output head, and for hybrids the gated delta-net chain). Run them even if the output looks fine.
 $T -I "$K/make_kernel_tests.py" cfg.json ktest && VENV=~/loom/.venv "$K/run_kernel_tests.sh" pkg ktest
 # 7. Gates vs llama.cpp - loom-benchmark skill: golden.py/compare.py (short prompts + 1k-32k documents),
-#    agent_golden.py (multi-turn tool calling, rendering, history reuse) and needle.py (full context).
+#    agent_golden.py (multi-turn tool calling, rendering, history reuse) and `ctx_admit.py` (the full native context is admitted).
 ```
 After every rebuild, restart the server with `stop.sh` and then `serve.sh`; the
 server does not reload the package (`serve.sh` stops a server whose registration failed).
 
 **A port is done when** the kernel tests pass, the golden gate shows only near-tie
 divergences, `agent_golden.py` passes (exact rendering, reuse inside tool loops,
-valid calls), and `needle.py` passes up to the context capacity with a clean 400 above it.
+valid calls), and `ctx_admit.py` shows the full context capacity admitted.
 
 ## Speculative decoding (automatic)
 

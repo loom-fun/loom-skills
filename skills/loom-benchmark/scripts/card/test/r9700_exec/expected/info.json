@@ -105,14 +105,6 @@
      "source": "devlab-9000001",
      "status": "pass"
     },
-    "needle": {
-     "date": "2026-11-14",
-     "detail": null,
-     "level": "quick",
-     "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
-     "source": "devlab-9000001",
-     "status": "pass"
-    },
     "sampling": {
      "date": "2026-11-14",
      "detail": null,
@@ -138,6 +130,7 @@
        "version": "llamacpp-vulkan/b12211"
       },
       "session": {
+       "aggregate": "median",
        "date": "2026-11-14",
        "metrics": {
         "decode": {
@@ -202,6 +195,7 @@
     },
     "sessions": [
      {
+      "aggregate": "median",
       "commands": [],
       "date": "2026-11-14",
       "metrics": {

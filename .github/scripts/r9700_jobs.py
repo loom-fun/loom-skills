@@ -40,7 +40,9 @@ ap.add_argument("--fit", default=os.path.join(ROOT, ".github", "devlab", "r9700_
 ap.add_argument("--card-org", default="loom-fun-staging")
 ap.add_argument("--build", action="store_true", help="rebuild the variants from this branch instead of fetching the card's programs")
 ap.add_argument("--gates", default="", help="add the gates step at this LEVEL (dev|fast|quick|full) on the card variant")
-ap.add_argument("--reps", type=int, default=3)
+ap.add_argument("--reps", type=int, default=None, help="serve sessions (= llama.cpp runs) per 1-stream row: default 3, 6 for a fast model (methodology rule 5)")
+ap.add_argument("--fast-tps", type=float, default=card_lib.FAST_DECODE_TPS, help="a model whose published loom-fun (Strix) decode is above this is fast: 6 sessions, --repeat-rows 3")
+ap.add_argument("--old-org", default="loom-fun", help="the org whose published cards give each model's decode rate")
 a = ap.parse_args()
 
 GPU = "radeon-r9700"
@@ -48,7 +50,6 @@ POOL = card_lib.GPUS[GPU]["memory_bytes"]
 models = {m["repo"].split("/")[-1]: m for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
 fit = {r["slug"]: r for r in json.load(open(a.fit))}
 slugs = sorted(m for m in models if fit.get(m, {}).get("verdict", "").startswith("fits")) if a.all else a.slugs
-n = a.reps
 jobs = []
 skipped = sorted(m for m in models if not fit.get(m, {}).get("verdict", "").startswith("fits")) if a.all else []
 for slug in slugs:
@@ -57,6 +58,8 @@ for slug in slugs:
         skipped.append(slug)   # the weights do not fit: no run (the card says "doesn't fit")
         continue
     mem = min(m["memory_bytes"], POOL)
+    n, rr = card_lib.sampling_plan(card_lib.published_decode(slug, a.old_org), a.fast_tps)   # the one sampling rule, Loom and llama.cpp alike
+    n = a.reps or n
     ctx = None
     ctx = card_lib.fit_served_context(f, POOL)   # the native context's KV cache does not fit (or the row caps it): serve what does
     if ctx:
@@ -81,11 +84,11 @@ for slug in slugs:
         lkv = max(36864, min(65536, int((POOL - f["w"] - 2_500_000_000) // kvt) // 4096 * 4096))
     jobs.append({
         **({"llama_kv_rocm": lkv} if lkv else {}),
-        "name": slug.lower().replace(".", "-")[:40],
+        "name": slug.lower().replace(".", "-")[:40], **({"repeat_rows": rr} if rr > 1 else {}),
         "card": f"{a.card_org}/{slug}", **({"require_preset_r9700": True} if preset else {}), "kit": m["kit"], "llamacpp": "b1375", "llamacpp_vulkan": "b12211",
         "memory_bytes_r9700": mem, **({"served_context": ctx} if ctx else {}),
         "variants": [card, nodraft],
-        "steps": ["func:card", "ktest:card", *([f"gates:card:{a.gates}"] if a.gates else []), f"perf:card:{n}", f"perf:card:{n}:long", "c4:nodraft",
+        "steps": ["func:card", "ktest:card", *([f"gates:card:{a.gates}"] if a.gates else []), *["perf:card:1"] * n, *["perf:card:1:long"] * n, "c4:nodraft",
                   f"llama@rocm.np1:{n}", f"llama@rocm.np1:{n}:long", "llamac4@rocm.nodraft",
                   f"llama@vulkan.np1:{n}", f"llama@vulkan.np1:{n}:long", "llamac4@vulkan.perslot.nodraft"]})
 if not jobs:

@@ -26,8 +26,16 @@ two or three lines; if they disagree with this file, this file wins and the othe
    same package with a `draft_depth` 0 override, variant `nodraft`; llama.cpp: a 4-slot server without `--spec-*`).
    *Why: at 4 concurrent streams drafting usually costs more than it saves (measured on most cards); this is the one load-time exception the methodology allows, applied to both engines.*
 5. **Fair measurement.** Same GGUF, same DevLab runner and job, same prompts (nonce'd; no prompt-cache reuse), Loom with the active
-   wait, 3 rounds averaged (streams4: median of 3), timing source disclosed (Loom client-side, llama.cpp server `timings`), one
-   pinned llama.cpp build per backend. Compare engines only within one runner/job (ratios, never across runners).
+   wait, timing source disclosed (Loom client-side, llama.cpp server `timings`), one pinned llama.cpp build per backend. Compare
+   engines only within one runner/job (ratios, never across runners). **Sampling, identical for Loom and llama.cpp (ROCm and
+   Vulkan): every metric is the MEDIAN over sessions (rounds); a session's value is the median of its samples.** A session is one
+   serve session of the engine (a llama.cpp round: one `perf.py` run). A fast model (published or expected decode above ~100
+   tok/s) gets 6 sessions, and `perf.py --repeat-rows 3` measures decode_2k, decode_32k and prefill_8k three times per session
+   (median of 3 samples); every other model, and every other row, 3 sessions of one sample. streams4 is the median of its
+   `c4_steady.py` runs (a session's runs, then the median over sessions). The Strix A/B uses the same code
+   (`make_info.loom_sessions`, `card_lib.sampling_plan`). The card says which method each value was measured with
+   (`aggregate: "median"` on the session; a session without it was measured earlier as the mean of N rounds and is never
+   relabelled). *Why: a fast model's rate is bimodal per serve session and a mean follows the outlier.*
 6. **A backend that cannot run the chosen drafter: that cell is "not supported" with the reason.** Never substitute another
    configuration. *Why: a substitute is a different comparison.*
 
@@ -68,7 +76,7 @@ two or three lines; if they disagree with this file, this file wins and the othe
     perf|gates|roofline --gpu`; else the GPU its source device names, else Strix Halo). The package is the same on both: one
     `model.json`, the context is native on a GPU with room for its KV cache; on a GPU whose memory holds less (`--fit`: weights + KV
     + 2 GB must fit the GPU's memory), `--memory_bytes` is that GPU's memory, the card states the context served there (`served_context`)
-    and a row or gate that needs more context than that (`decode_32k`, `prefill_32k`, `needle_full` at the native context, `golden`'s 32k documents) reads `doesn't fit` in every column of that GPU (Loom, llama.cpp, roofline): an accepted outcome, not a failure and not "no evidence". `--memory_bytes` for the R9700 is 34.0 GB (the board reports 31.86 GiB). A package that does not fit a GPU's memory is that GPU's `unsupported` state (one factual
+    and a row or gate that needs more context than that (`decode_32k`, `prefill_32k`, `golden`'s 32k documents) reads `doesn't fit` in every column of that GPU (Loom, llama.cpp, roofline): an accepted outcome, not a failure and not "no evidence". `--memory_bytes` for the R9700 is 34.0 GB (the board reports 31.86 GiB). A package that does not fit a GPU's memory is that GPU's `unsupported` state (one factual
     line). A GPU without results for this package is `not_measured` (one factual line, no numbers copied from another package or
     program). Publishing goes to one org (`publish_package.py upload --org`, default `loom-fun`); the staging flow uses `--org
     loom-fun-staging` with the same repo names, and a card whose `info.json` repo is another org is refused.

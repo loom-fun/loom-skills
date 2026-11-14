@@ -101,21 +101,6 @@
      "source": "devlab-3003",
      "status": "pass"
     },
-    "needle": {
-     "date": "2026-11-06",
-     "detail": null,
-     "level": "quick",
-     "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
-     "source": "devlab-3003",
-     "status": "pass"
-    },
-    "needle_full": {
-     "date": "2026-11-06",
-     "detail": null,
-     "level": "full",
-     "source": "devlab-1000-job2000",
-     "status": "pass"
-    },
     "sampling": {
      "date": "2026-11-06",
      "detail": null,
@@ -141,6 +126,7 @@
     },
     "sessions": [
      {
+      "aggregate": "median",
       "commands": [
        "perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign"
       ],
@@ -280,6 +266,7 @@
       "source": "devlab-3003"
      },
      {
+      "aggregate": "median",
       "commands": [],
       "date": "2026-11-07",
       "metrics": {
@@ -385,22 +372,6 @@
  "report": "generated",
  "schema": "loom-card/3",
  "sources": {
-  "devlab-1000-job2000": {
-   "device": null,
-   "hrx_loom": {
-    "artifact_id": null,
-    "basis": "job log: install_loom.sh installed hrx-loom 0.1.0 from PyPI",
-    "branch": "v0.1.0",
-    "hrx_loom": "0.1.0",
-    "hrx_system_sha": "d01d1c18b154189fd073777329052d23f6071f14",
-    "recovered": true,
-    "source": "pypi",
-    "wheel_sha256": "4d3897b83cc0857723593487a4372a31d203944a1637e5e3143cad1d0583b98b"
-   },
-   "kind": "devlab",
-   "run": "1000",
-   "url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000"
-  },
   "devlab-3001": {
    "device": {
     "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",

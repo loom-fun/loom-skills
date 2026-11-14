@@ -117,22 +117,6 @@
      "source": "devlab-43376610754",
      "status": "pass"
     },
-    "needle": {
-     "date": "2026-11-13",
-     "detail": null,
-     "level": "full",
-     "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
-     "source": "devlab-43376610754",
-     "status": "pass"
-    },
-    "needle_full": {
-     "date": "2026-11-08",
-     "detail": null,
-     "level": "full",
-     "programs_sha256": "34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b",
-     "source": "devlab-42445355675-job128623039814",
-     "status": "pass"
-    },
     "sampling": {
      "date": "2026-11-13",
      "detail": null,

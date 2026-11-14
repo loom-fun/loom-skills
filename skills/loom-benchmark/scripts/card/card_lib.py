@@ -37,8 +37,32 @@ METRICS = [
     ("spec_acceptance", "speculative decoding, drafted tokens accepted"),
 ]
 METRIC_KEYS = [k for k, _ in METRICS]
-# how a metric's per-run samples become the card value
-MEDIAN_METRICS = {"streams4"}
+# Sampling rule (methodology.md rule 5): every card value is the MEDIAN over sessions of each session's median sample. A fast model
+# (published or expected decode above FAST_DECODE_TPS tok/s: its rate is bimodal per serve session) gets SESSIONS_FAST sessions and
+# REPEAT_FAST samples per session of decode_2k, decode_32k and prefill_8k (perf.py --repeat-rows); the others SESSIONS sessions.
+FAST_DECODE_TPS, SESSIONS, SESSIONS_FAST, REPEAT_FAST = 100, 3, 6, 3
+
+
+def sampling_plan(decode_tps, fast_tps=FAST_DECODE_TPS):
+    """(sessions per 1-stream row, perf.py --repeat-rows) for a model whose published/expected decode rate is decode_tps (None: unknown = not fast)."""
+    return (SESSIONS_FAST, REPEAT_FAST) if (decode_tps or 0) > fast_tps else (SESSIONS, 1)
+
+
+def published_decode(slug, org="loom-fun"):
+    """The published card's Strix Halo decode tok/s of org/slug (None when it cannot be read)."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"https://huggingface.co/{org}/{slug}/resolve/main/info.json", timeout=30) as r:
+            info = json.load(r)
+    except Exception:  # noqa: BLE001
+        return None
+    perf = info.get("performance") or ((info.get("devices") or {}).get("strix-halo") or {}).get("performance") or {}
+    v = None
+    for s in perf.get("sessions", []):
+        v = (s["metrics"].get("decode") or {}).get("loom") or v
+    return v
+
+
 # card metric -> loom-roofline/roofline.py metric (the hardware ceiling). spec_acceptance has none.
 ROOFLINE_METRIC = {"decode": "decode_tps", "decode_2k": "decode_tps_2k", "decode_32k": "decode_tps_32k",
                    "prefill_1k": "prefill_1000", "prefill_2k": "prefill_2000", "prefill_8k": "prefill_8000",
@@ -85,11 +109,13 @@ GATES = [
     ("agent", "Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp"),
     ("agent_think_off", "The tool-calling loop with thinking off"),
     ("sampling", "temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp"),
-    ("needle", "Needle-in-a-haystack prompt at up to half the context, compared with llama.cpp; over-capacity prompt refused"),
-    ("needle_full", "Needle-in-a-haystack prompt at the full context is served"),
     ("decision", "Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts"),
 ]
 GATE_NAMES = [n for n, _ in GATES]
+# Gates that no longer exist (the needle gates were removed; gates.sh now only probes that the native context is admitted,
+# which is a check, not a gate). Published info.json files and old evidence still carry them: make_info.py drops them,
+# normalize() strips them for every reader, so a card never shows one. The schema still accepts them (unknown gate names).
+RETIRED_GATES = ("needle", "needle_full")
 # speculative decoding methods (llm_config.json draft.kind) as the card names them
 METHOD = {"dflash": "DFlash", "mtp": "MTP", "ngram": "n-gram prompt lookup", "assist": "assistant drafter"}
 BASE_TAGS = ["loom", "loom-serve", "gguf"]
@@ -120,7 +146,7 @@ DEFAULT_GPU = "strix-halo"   # a card of loom-card/2 and evidence that names no 
 # "doesn't fit" (the user's rule: an accepted outcome, not a failure).
 METRIC_CONTEXT = {"decode_2k": 2000, "decode_32k": 32000, "prefill_1k": 1000, "prefill_2k": 2000, "prefill_8k": 8000,
                   "prefill_16k": 16000, "prefill_32k": 32000}
-GATE_CONTEXT = {"golden": 32000, "needle_full": "native"}   # golden's longest document; needle_full: the whole native context
+GATE_CONTEXT = {"golden": 32000}   # golden's longest document
 SERVE_HEADROOM = 2_000_000_000   # bytes beyond weights and KV cache a GPU needs (the fit table's reserve)
 
 HF = "https://huggingface.co"
@@ -599,12 +625,17 @@ def gpu_from_device(device):
 def normalize(info):
     """info as loom-card/3 (a copy): a loom-card/2 card's top-level gates, performance and roofline become the
     strix-halo entry of devices. A loom-card/3 card is returned as it is. Everything that reads a card goes through
-    this (load_info), so one code path serves both."""
-    if info.get("schema") not in LEGACY_SCHEMA_IDS:
+    this (load_info), so one code path serves both. Retired gates (RETIRED_GATES) are dropped from either."""
+    if info.get("schema") in LEGACY_SCHEMA_IDS:
+        out = {k: v for k, v in info.items() if k not in ("gates", "performance", "roofline")}
+        out["schema"] = SCHEMA_ID
+        out["devices"] = {DEFAULT_GPU: {k: info[k] for k in ("gates", "performance", "roofline") if k in info}}
+        info = out
+    elif not any(g in RETIRED_GATES for d in (info.get("devices") or {}).values() for g in (d.get("gates") or {})):
         return info
-    out = {k: v for k, v in info.items() if k not in ("gates", "performance", "roofline")}
-    out["schema"] = SCHEMA_ID
-    out["devices"] = {DEFAULT_GPU: {k: info[k] for k in ("gates", "performance", "roofline") if k in info}}
+    out = dict(info)
+    out["devices"] = {gpu: ({**d, "gates": {n: g for n, g in d["gates"].items() if n not in RETIRED_GATES}}
+                            if d.get("gates") else d) for gpu, d in (info.get("devices") or {}).items()}
     return out
 
 

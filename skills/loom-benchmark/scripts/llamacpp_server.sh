@@ -5,7 +5,7 @@
 # usage: LLAMACPP_DIR=~/llamacpp-rocm llamacpp_server.sh MODEL.gguf [PORT=8130] [PARALLEL=4] [CTX_PER_SLOT=8192] [unified]
 #   golden / long-context runs: PARALLEL=1 CTX_PER_SLOT=34000
 #   `unified` (5th arg): one KV pool of CTX_PER_SLOT tokens shared by PARALLEL slots (-kvu), so a single
-#   request can use all of it and 4 streams still run: one server covers goldens, needle and perf.
+#   request can use all of it and 4 streams still run: one server covers goldens and perf.
 #   LLAMA_SPEC="--spec-type draft-mtp --spec-draft-n-max 3" (llama_spec_tune.py's choice) adds speculative
 #   decoding: the performance runs use it, so Loom is compared drafting vs drafting; references never do.
 #   stop: llamacpp_server.sh --stop PORT   (LLAMACPP_STATE: pid/log dir, default /tmp)

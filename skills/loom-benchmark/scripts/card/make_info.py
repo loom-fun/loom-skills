@@ -37,11 +37,13 @@ byte-identical files.
                     --baseline-version llamacpp-rocm/bNNNN [--baseline-args "ARGS"] [--metrics decode,...]
                     [--command CMD ...] [--package PKG] [--date YYYY-MM-DD] [SOURCE] -o perf_evidence.json
       perf.py logs (one engine per file; or --perf-log perf_log.jsonl with finalize.sh's labels final /
-      llama-final) -> one measurement session: per-metric per-run values, their mean (decode, prefill) and the
-      median of the c4_steady.py runs (4 streams). --metrics keeps only those metrics (a session that re-measured
+      llama-final) -> one measurement session ("aggregate": "median"): the rows split into serve sessions at devlab_perf.sh's
+      {"session_end": V} lines (no markers: each row is a session); a session's value is the median of its samples (a row measured
+      with perf.py --repeat-rows logs "samples"), the metric the median over the sessions (loom_runs: those values; runs.samples:
+      the samples per session of the repeated rows); 4 streams: the median of the c4_steady.py runs. --metrics keeps only those metrics (a session that re-measured
       some rows). --package records which programs were measured (card_lib.programs_sha256). Rows that carry the
       drafted-token acceptance of their decode requests (perf.py "acceptance", c4_steady.py JSON lines) give each
-      drafted metric its session's "acceptance" (mean of the runs).
+      drafted metric its session's "acceptance" (median over the sessions).
 
   make_info.py gates [--gpu GPU] FILE [FILE ...] [--time YYYY-MM-DDTHH:MM:SS] [--level L] [--spec-log F] [--package PKG]
                      [SOURCE] -o gates_evidence.json
@@ -98,8 +100,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, MEDIAN_METRICS, METRIC_KEYS, PERF_SOURCE_KINDS,  # noqa: E402
-                      HF, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
+from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS, PERF_SOURCE_KINDS,  # noqa: E402
+                      HF, RETIRED_GATES, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM)
@@ -291,7 +293,7 @@ def cmd_build(a):
                           + ("" if a.reset_performance else " not measured on DevLab"), file=sys.stderr)
                 st["baselines"] = json.loads(json.dumps(dev["performance"].get("baselines") or {}))
             for name, g in (dev.get("gates") or {}).items():   # a published gate has a date, not a time: later evidence that day wins
-                if not gate_applies(name, facts["kind"], facts["features"]):   # e.g. spec after drafting was turned off: shown n/a
+                if name in RETIRED_GATES or not gate_applies(name, facts["kind"], facts["features"]):   # e.g. spec after drafting was turned off: shown n/a
                     continue
                 st["gates"][name] = ((g.get("date") or "", -1), None, g)
             st["roofline"] = dev.get("roofline")
@@ -349,6 +351,8 @@ def cmd_build(a):
                 s["source"] = sources.add(s["source"])
                 st["sessions"].append({k: v for k, v in s.items() if v is not None or k in ("date",)})
         for g in ev.get("gates") or []:
+            if g["name"] in RETIRED_GATES:   # evidence from before the needle gates were removed
+                continue
             gst = gpu_state(g.get("gpu") or evidence_gpu(ev, g.get("source")))
             gst["data"] = True
             new = ((g.get("time") or "", i), g, None)
@@ -516,18 +520,68 @@ DECODE = (("decode_tps", "decode"), ("decode_tps_2k", "decode_2k"), ("decode_tps
 
 
 def metric_samples(rows):
-    """{metric: [values]} of perf.py rows (prefill samples bucketed by prompt tokens, as bench_common does)."""
+    """{metric: [values]} of perf.py rows (prefill samples bucketed by prompt tokens, as bench_common does). A row measured
+    with --repeat-rows carries r["samples"] {metric: [the repeats]} (card metric names): those replace its single value."""
     out = {}
     for r in rows:
+        one = {}
         for k, m in DECODE:
             if r.get(k) is not None:
-                out.setdefault(m, []).append(r[k])
+                one.setdefault(m, []).append(r[k])
         for p in r.get("prefill", []) + r.get("prefill_long", []):
             n = min(DOC, key=lambda x: abs(x - p["prompt_tokens"]))
-            out.setdefault(DOC[n], []).append(p["prefill_tps"])
+            one.setdefault(DOC[n], []).append(p["prefill_tps"])
         if r.get("agg_tps") is not None:
-            out.setdefault("streams4", []).append(r["agg_tps"])
+            one.setdefault("streams4", []).append(r["agg_tps"])
+        one.update({m: v for m, v in (r.get("samples") or {}).items() if v})
+        for m, v in one.items():
+            out.setdefault(m, []).extend(v)
     return out
+
+
+def split_sessions(rows):
+    """Rows split into serve sessions: devlab_perf.sh writes {"session_end": V} after each session's runs. Rows without any
+    marker (older runs, a single local log): every row is its own session (a round)."""
+    out, cur, marked = [], [], False
+    for r in rows:
+        if "session_end" in r:
+            marked = True
+            if cur:
+                out.append(cur)
+            cur = []
+        else:
+            cur.append(r)
+    if cur:
+        out.append(cur)
+    return out if marked else [[r] for s_ in out for r in s_]
+
+
+def read_rows(path):
+    """The JSON rows of a perf / c4 log (lines that are not JSON objects are skipped; a bare number is a c4 agg_tps)."""
+    rows = []
+    for line in open(path, encoding="utf-8"):
+        line = line.strip()
+        if line.startswith("{"):
+            rows.append(json.loads(line))
+        elif line:
+            try:
+                rows.append({"agg_tps": float(line)})
+            except ValueError:
+                pass
+    return rows
+
+
+def session_values(rows, fn=None):
+    """({metric: [per-session value]}, {metric: [per-session sample counts]}) of rows split into sessions: a session's
+    value is the MEDIAN of its samples (the one rule of every card value, the Strix A/B and the llama.cpp rows)."""
+    fn = fn or metric_samples
+    out, counts = {}, {}
+    for sess in split_sessions(rows):
+        for k, vals in fn(sess).items():
+            if vals:
+                out.setdefault(k, []).append(statistics.median(vals))
+                counts.setdefault(k, []).append(len(vals))
+    return out, counts
 
 
 def acceptance_samples(rows, c4_path=None):
@@ -545,35 +599,62 @@ def acceptance_samples(rows, c4_path=None):
 
 
 def with_acceptance(metrics, acc):
-    """Adds each metric's session acceptance (mean of its runs) to metrics, in place."""
+    """Adds each metric's session acceptance (median over the sessions of each session's median) to metrics, in place."""
     for k, vals in acc.items():
         if k in metrics and vals:
-            metrics[k]["acceptance"] = round(statistics.mean(vals), 3)
+            metrics[k]["acceptance"] = round(statistics.median(vals), 3)
     return metrics
 
 
+def loom_sessions(rows, c4_path=None):
+    """The Loom (or one llama.cpp engine's) measurement as per-session values: ({metric: [per-session median]},
+    {metric: [per-session sample counts]}, {metric: [per-session median acceptance]}); streams4 from the c4_steady.py log
+    (a session = one serve session of its runs; the value of a session is the median of its runs). One function for
+    the cards (cmd_perf) and the Strix A/B (strix_ab_compare.py)."""
+    vals, counts = session_values(rows)
+    acc, _ = session_values(rows, acceptance_samples)
+    if c4_path:
+        sess = c4_sessions(c4_path)
+        if sess:
+            vals["streams4"] = [statistics.median(v) for v, _ in sess]
+            counts["streams4"] = [len(v) for v, _ in sess]
+        a4 = [statistics.median(a) for _, a in sess if a]
+        if a4:
+            acc["streams4"] = a4
+    return vals, counts, acc
+
+
+def c4_sessions(path):
+    """The aggregate rates of c4_steady.py's runs (its JSON lines, or one number per line), per serve session
+    ({"session_end": V} markers; a file without any is one session). A run that measured nothing (a rate <= 0, or a
+    window <= 0 s: every stream failed) is skipped, with a note: a crash, not data."""
+    rows = read_rows(path)
+    out = []
+    for rs in (split_sessions(rows) if any("session_end" in r for r in rows) else [rows]):
+        vals = []
+        for r in rs:
+            if r.get("agg_tps") is None:
+                continue
+            if r["agg_tps"] <= 0 or r.get("window_s", 1) <= 0:
+                print(f"{path}: skipped an invalid c4_steady run: {json.dumps(r)[:120]}", file=sys.stderr)
+                continue
+            vals.append(r["agg_tps"])
+        if vals:
+            out.append((vals, [r["acceptance"] for r in rs if r.get("acceptance") is not None]))
+    return out
+
+
 def c4_samples(path):
-    """The aggregate rates of c4_steady.py's runs (its JSON lines, or one number per line). A run that measured
-    nothing (a rate <= 0, or a window <= 0 s: every stream failed) is skipped, with a note: a crash, not data."""
-    vals = []
-    for line in open(path, encoding="utf-8"):
-        line = line.strip()
-        if not line:
-            continue
-        r = json.loads(line) if line.startswith("{") else {"agg_tps": float(line)}
-        if r.get("agg_tps") is None:
-            continue
-        if r["agg_tps"] <= 0 or r.get("window_s", 1) <= 0:
-            print(f"{path}: skipped an invalid c4_steady run: {line[:120]}", file=sys.stderr)
-            continue
-        vals.append(r["agg_tps"])
-    return vals
+    """All the runs of c4_sessions, flat."""
+    return [v for vals, _ in c4_sessions(path) for v in vals]
 
 
 def summary(key, vals):
+    """A card value: the median of the per-session values (a session recorded before this rule has no "aggregate" key:
+    it is the mean of N rounds and is never recomputed)."""
     if not vals:
         return None
-    return round(statistics.median(vals) if key in MEDIAN_METRICS else statistics.mean(vals), 1)
+    return round(statistics.median(vals), 1)
 
 
 def baseline_version(text, backend="rocm"):
@@ -603,6 +684,12 @@ def refused_tokens(rows, package, measured):
     return out
 
 
+def runs_of(key, sessions, c4_path):
+    """The per-run values a card metric records: the per-session medians; streams4: its runs (c4_steady.py), whose median
+    is also the median of the session medians when the job had one session."""
+    return c4_samples(c4_path) if key == "streams4" and c4_path else sessions[key]
+
+
 def cmd_perf(a):
     if a.source_kind not in PERF_SOURCE_KINDS:
         sys.exit(f"perf --source-kind {a.source_kind}: card performance comes only from AMD DevLab Dispatch "
@@ -613,11 +700,8 @@ def cmd_perf(a):
     else:
         loom_rows = perf_rows(a.loom_jsonl) if a.loom_jsonl else []
         llama_rows = perf_rows(a.llama_jsonl) if a.llama_jsonl else []
-    ls, bs = metric_samples(loom_rows), metric_samples(llama_rows)
-    if a.c4_loom:
-        ls["streams4"] = c4_samples(a.c4_loom)
-    if a.c4_llama:
-        bs["streams4"] = c4_samples(a.c4_llama)
+    ls, lcount, lacc = loom_sessions(loom_rows, a.c4_loom)
+    bs, bcount, _ = loom_sessions(llama_rows, a.c4_llama)
     keep = a.metrics.split(",") if a.metrics else METRIC_KEYS
     extra = a.backend != "rocm"   # a further llama.cpp backend: a baseline-only session (no Loom values)
     if extra and (loom_rows or a.c4_loom):
@@ -628,22 +712,24 @@ def cmd_perf(a):
             continue
         m = {"baseline": summary(k, bs.get(k))} if extra else {"loom": summary(k, ls.get(k)), "baseline": summary(k, bs.get(k))}
         if ls.get(k):
-            m["loom_runs"] = ls[k]
+            m["loom_runs"] = runs_of(k, ls, a.c4_loom)
         if bs.get(k):
-            m["baseline_runs"] = bs[k]
+            m["baseline_runs"] = runs_of(k, bs, a.c4_llama)
         metrics[k] = m
-    with_acceptance(metrics, acceptance_samples(loom_rows, a.c4_loom))
-    dp = [len(ls[k]) for k in keep if k in ls and k != "streams4"]
+    with_acceptance(metrics, lacc)
     if extra:
-        ls = bs   # the runs counted are the baseline engine's
-        dp = [len(bs[k]) for k in keep if k in bs and k != "streams4"]
+        ls, lcount = bs, bcount   # the runs counted are the baseline engine's
+    dp = [len(ls[k]) for k in keep if k in ls and k != "streams4"]
     runs = {"decode_prefill": max(dp) if dp else None,
-            "streams4": len(ls["streams4"]) if "streams4" in keep and ls.get("streams4") else None}
+            "streams4": len(runs_of("streams4", ls, a.c4_llama if extra else a.c4_loom)) if "streams4" in keep and ls.get("streams4") else None}
+    rep = {k: max(lcount[k]) for k in keep if k in lcount and k != "streams4" and max(lcount[k]) > 1}
+    if rep:
+        runs["samples"] = rep   # rows measured several times per session (perf.py --repeat-rows): samples per session
     date = a.date or max([r["time"][:10] for r in loom_rows + llama_rows if r.get("time")] or [None], key=lambda x: x or "")
     commands = list(a.command or [])
     if a.commands_file:
         commands += [line.rstrip("\n") for line in open(a.commands_file, encoding="utf-8") if line.strip()]
-    session = {"date": date, "source": source_arg(a), "runs": runs, "metrics": metrics,
+    session = {"date": date, "source": source_arg(a), "runs": runs, "aggregate": "median", "metrics": metrics,
                "programs_sha256": programs_sha256(a.package) if a.package else None}
     if a.fetched_programs and a.package and a.fetched_programs != programs_sha256(a.package):
         sys.exit(f"the run fetched programs {a.fetched_programs[:12]}, the package has {programs_sha256(a.package)[:12]}: "
@@ -741,8 +827,11 @@ def cmd_remeasure(a):
     a.gpu = a.gpu or DEFAULT_GPU
     if not a.package:
         sys.exit("remeasure: --package (the package re-measured) is required")
-    if x["verdict"] != "pass" or x.get("out_of_band") or x.get("gate_failures"):
+    if x["verdict"] != "pass" or x.get("gate_failures"):
         sys.exit(f"{a.cmp}: verdict {x['verdict']} (out of band {x.get('out_of_band')}, gate failures {x.get('gate_failures')}): not within the band")
+    # a confirming re-run (strix_ab_compare.py --prev) may pass with a metric outside the band in the opposite direction to the
+    # first run: the card names it
+    exc = {k: m["ratio"] for k, m in x["metrics"].items() if m["status"] != "PASS"}
     here = programs_sha256(a.package)
     if a.fetched_programs and a.fetched_programs != here:
         sys.exit(f"the run fetched programs {a.fetched_programs[:12]}, the package has {here[:12]}: re-run")
@@ -762,7 +851,7 @@ def cmd_remeasure(a):
     ev = {"evidence": EVIDENCE_ID, "gpu": a.gpu, "remeasure": {
         "date": date, "source": src, "band": x["band"], "programs_sha256": here, "compared_programs": old, "result": "within",
         "worst_metric": x.get("worst_metric"), "worst_ratio": x.get("worst_ratio"),
-        "ratios": {k: m["ratio"] for k, m in x["metrics"].items()}}}
+        "ratios": {k: m["ratio"] for k, m in x["metrics"].items()}, **({"exceptions": exc} if exc else {})}}
     write_json(a.o, ev)
     print(f"wrote {a.o}: {a.gpu} within +-{x['band']:.0%} (worst {x.get('worst_metric')} {x.get('worst_ratio')}); programs {here[:12]} ~ {old[:12]}", file=sys.stderr)
 

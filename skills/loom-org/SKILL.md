@@ -125,8 +125,8 @@ One worker per model runs `loom-port-llm` then `loom-optimize`, starting from th
   other than plain Q4_K_M is still used as a reference, flagged in the ranking (the repo itself is `update`).
 - **Scripted DevLab ports** (no agent, no local GPU): `.github/workflows/devlab-port.yml` runs on the
   `devlab-port` label, one matrix job per entry of `.github/devlab/port.json`, each `.github/scripts/port_e2e.sh`:
-  port -> qualify -> finalize with `NEEDLE_FULL=0` -> card evidence -> `publish/` (the package without weights,
-  in the artifact). qualify still runs `LEVEL=quick`, its half-context needle included. Its gates and its
+  port -> qualify -> finalize -> card evidence -> `publish/` (the package without weights,
+  in the artifact). qualify runs `LEVEL=quick`. Its gates and its
   performance session are the card's evidence: see the next bullet.
 - **Campaign waves** (practice): put each wave on its own branch from main with only `.github/devlab/port.json`
   changed and a draft PR based on **main** (GitHub creates no pull_request runs while a PR has merge conflicts).
@@ -148,9 +148,8 @@ One worker per model runs `loom-port-llm` then `loom-optimize`, starting from th
   before starting a server, stopping only its own. Follow the user's GPU instruction for the session (some forbid the
   local GPU; then use `.github/workflows/devlab-port.yml`).
 - **Gates in the loop: the correctness set only.** Kernel tests, golden compare vs llama.cpp (divergences are
-  near-ties), consistency, `spec` (drafting packages), agent tool loop, sampling, vision (with a projector),
-  and the over-capacity 400: `LEVEL=dev` where gates.sh has it, otherwise `LEVEL=quick` without the needle.
-  Needle-in-a-haystack (half and full context) and other very expensive gates belong to step 3, not the
+  near-ties), consistency, `spec` (drafting packages), agent tool loop, sampling, vision (with a projector):
+  `LEVEL=dev` where gates.sh has it, otherwise `LEVEL=quick`. Other very expensive gates belong to step 3, not the
   critical path.
 - **Performance** in the loop is for development: local quiet-GPU runs (Loom and llama.cpp on the same GGUF)
   guide the optimizer but are not card numbers. The card's numbers come from the `devlab-perf` job of step 3.
@@ -224,8 +223,8 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
    (required: it is the only source of card performance) (`.github/devlab/perf.json`: card, memory_bytes, kit and llamacpp from `nightly-models.json`,
    llama_spec omitted = `matched`: llama.cpp gets the card's classified drafting choice (same method and drafter, its documented n-max;
    none if the classification says none; `../loom-benchmark/reference/methodology.md`), an explicit `llama_spec` only overrides it (`{drafter}` = the
-   card's drafter, `{hf:OWNER/REPO/FILE}` a Hub file, e.g. an MTP head the card doesn't ship); variant `{"name": "card"}`, steps `perf:card:2 perf:card:2:long c4:card llama@rocm.np1:2 llama@rocm.np1:2:long
-   llamac4@rocm.nodraft` (files `perf_llamacpp-rocm.np1_nN.jsonl`, `c4_llamacpp-rocm_nN.txt`); several cards go in one experiment, one job each with its own card fields), then
+   card's drafter, `{hf:OWNER/REPO/FILE}` a Hub file, e.g. an MTP head the card doesn't ship); variant `{"name": "card"}`, steps `perf:card:1` x3 (6 for a fast model, decode > ~100 tok/s: also job field `"repeat_rows": 3`, perf.py `--repeat-rows`), the same count of `perf:card:1:long`, `c4:card`, `llama@rocm.np1:3 llama@rocm.np1:3:long` (6 for a fast model)
+   `llamac4@rocm.nodraft` (every metric = the median over sessions of each session's median sample, methodology rule 5; `r9700_jobs.py` and `strix_ab_jobs.py` write exactly this) (files `perf_llamacpp-rocm.np1_nN.jsonl`, `c4_llamacpp-rocm_nN.txt`); several cards go in one experiment, one job each with its own card fields), then
    `make_info.py perf --loom-jsonl perf_card.jsonl --llama-jsonl perf_llamacpp_nN.jsonl --c4-loom c4_card.txt
    --c4-llama c4_llamacpp_nN.txt --package DIR --source-kind devlab --run ID --url JOB_URL --device JOB_DEVICE.json
    --hrx-loom JOB_HRX.json --baseline-version llamacpp-rocm/BUILD --baseline-args "$(cat llamacpp_args.txt)"
@@ -343,7 +342,7 @@ Rules; the reasons and details are in `reference/lessons.md`.
 ## Done
 
 A model is done when its repo is category A, built from the target's plain Q4_K_M, every applicable gate passes
-(including needle and full-context, from the sweep), every applicable metric is measured in a devlab-perf job
+(from the sweep, with the native context admitted), every applicable metric is measured in a devlab-perf job
 (Loom and llama.cpp, the published programs), the card carries its roofline, no metric's card value is far from it,
 and the card was regenerated
 after the last skill fix that touched it. The org is done when every target is

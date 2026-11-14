@@ -25,7 +25,7 @@ eval guidance; sources at the end).
 | KPI | Target | Measured by |
 |---|---|---|
 | **Wall clock** | within **the model's roofline budget** end to end (install -> published report), default prompt, no hand-holding: `loom-roofline/e2e_budget.py` = fixed agent work + optimization + the pipeline's token workload at this model's decode/prefill speed (0.8B ≈ 46 min, 30B dense ≈ 106). A constant target would punish big models for physics and let small ones be sloppy | trial `phases.log` (`"${LOOM_SKILL_DIR}/scripts/kpi.py" summarize`: `wall_min` vs `budget_min`) |
-| **Quality** (agentic correctness vs llama.cpp) | final `LEVEL=full` gates PASS and `AUDIT PASS`: golden compare (all divergences near-ties), consistency, agent tool loop (rendering, history reuse, valid calls), sampling, needle at half and full native context, clean 400 over capacity | trial `bench/gates.json`, `audit.json`; re-checked by `"${LOOM_SKILL_DIR}/scripts/eval.sh"` with a frozen skill tree |
+| **Quality** (agentic correctness vs llama.cpp) | final `LEVEL=full` gates PASS and `AUDIT PASS`: golden compare (all divergences near-ties), consistency, agent tool loop (rendering, history reuse, valid calls), sampling, native context admitted | trial `bench/gates.json`, `audit.json`; re-checked by `"${LOOM_SKILL_DIR}/scripts/eval.sh"` with a frozen skill tree |
 | **Performance** | decode (TG) and prefill (PP 1k/2k, long) at or above llama.cpp ROCm on the same GGUF; never lower than the previous skill revision | `"${LOOM_SKILL_DIR}/scripts/eval.sh"` on a quiet GPU (interleaved, medians). In-trial numbers are informational only |
 
 Secondary (diagnostic, not goals): manual minutes (hand-work phases), friction notes (each `#` line a

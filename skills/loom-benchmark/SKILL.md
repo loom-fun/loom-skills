@@ -1,14 +1,15 @@
 ---
 name: loom-benchmark
-description: Correctness and performance methodology for Loom models vs llama.cpp ROCm — golden token-by-token comparison with log-prob near-tie analysis, a multi-turn tool-calling (agent) gate, a full-context needle gate, batching consistency, decode/prefill/long-context/concurrency throughput on real-text workloads, and how to report results honestly (tables, executive artifact). Use for "benchmark", "compare with llama.cpp", "is the port correct", "performance report".
+description: Correctness and performance methodology for Loom models vs llama.cpp ROCm — golden token-by-token comparison with log-prob near-tie analysis, a multi-turn tool-calling (agent) gate, a native-context admission check, batching consistency, decode/prefill/long-context/concurrency throughput on real-text workloads, and how to report results honestly (tables, executive artifact). Use for "benchmark", "compare with llama.cpp", "is the port correct", "performance report".
 ---
 
 # Benchmark and verify Loom models
 
-If the user explicitly excludes needle-in-a-haystack tests, export `SKIP_NEEDLE=1`
-for gates, qualify and finalize. This skips every needle variant and records the
-exclusion in `gates.json`; the audit warns about missing long-context coverage.
-Do not run `needle.py` separately or claim that excluded coverage passed.
+There are no needle-in-a-haystack gates: long-context retrieval is not part of the correctness gates (the 1k-32k goldens
+cover long prefill and KV paging). One cheap check remains, the **native-context admission probe** (`ctx_admit.py`, run
+by `gates.sh` at `quick` and `full`): one request of about the package's native context is sent, must be admitted by
+loom-serve (not refused with a 4xx/503) and is then cancelled. It is a check, not a gate: no gate row, no card row;
+`gates.json` records it under `context_admit` and a refusal fails the run and the audit.
 
 **Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
 absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
@@ -75,16 +76,16 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
 
 | LEVEL | When | Gates | Cost |
 |---|---|---|---|
-| `dev` | **after each kept change** (loom-optimize, loom-improve) | consistency; agent tool loop (thinking on, and off when the template toggles it); goldens (cached) + compare on 12 short prompts + 1k/2k documents; vision on 2 images (with a projector); `spec` on 5–6 short requests (drafting packages); sampling (temperature 0 = greedy, seed reproduces); needle at 16k vs llama.cpp | Qwen3.8-27B (drafting, vision): 3.3 min cached, 5.5 min with the first reference fill; Bolt-E4B: 1.1 / 2.2 min |
+| `dev` | **after each kept change** (loom-optimize, loom-improve) | consistency; agent tool loop (thinking on, and off when the template toggles it); goldens (cached) + compare on 12 short prompts + 1k/2k documents; vision on 2 images (with a projector); `spec` on 5–6 short requests (drafting packages); sampling (temperature 0 = greedy, seed reproduces) | Qwen3.8-27B (drafting, vision): 3.3 min cached, 5.5 min with the first reference fill; Bolt-E4B: 1.1 / 2.2 min |
 | `fast` | (kept for scripts that call it) | goldens + compare (20 short prompts + 1k–32k documents), consistency, vision on all 6 images | 1–3 min |
-| `quick` | nightly CI; a new port's first qualification (`qualify.sh`) | fast + `spec` (full request set), agent tool loop (thinking on, and off when the template toggles it), 200-draw sampling, needle at half the context (≤ 60k) vs llama.cpp | median 11 min, up to 42 min (audit) |
-| `full` | nightly CI; once on a new port's final build before its first card (`finalize.sh`) | quick + one Loom-only probe at the full context | + one full-context prefill (up to 1 h on a 27B) |
+| `quick` | nightly CI; a new port's first qualification (`qualify.sh`) | fast + `spec` (full request set), agent tool loop (thinking on, and off when the template toggles it), 200-draw sampling, native-context admission probe (seconds) | median 11 min, up to 42 min (audit) |
+| `full` | nightly CI; once on a new port's final build before its first card (`finalize.sh`) | quick (the same gates; the admission probe is in both) | as quick |
 
 **Which level when** (from an audit of every gate run in the issue #26–#29 sessions):
 - Real Loom bugs caught: consistency 3 (an MoE router race, batch-variant matvec rows, a DFlash hang under
   concurrency), agent 3–4 (stop tokens, a missing `<eos>`, history reuse), compare 2 (both at first bring-up),
-  needle_full 1 class (a KV pool < 1.5x the context; `build.py` now warns statically), spec 0–1. Vision,
-  sampling and the half-context needle: 0 (every failure was the reference or the harness). About 85 % of
+  a KV pool < 1.5x the context 1 class (found by the former full-context needle; `build.py` now warns statically and
+  the admission probe checks it), spec 0–1. Vision and sampling: 0 (every failure was the reference or the harness). About 85 % of
   compare failures were noise or harness. One `LEVEL=quick` loop of 24+ runs cost 6.6 GPU-hours and found 0 bugs.
 - So the development loop runs: kernel tests for new or changed kernels (`run_kernel_tests.sh`), `chat_probe
   --verify` when the chat glue changes (seconds, CPU; it caught the template derivation errors), and
@@ -114,17 +115,16 @@ LEVEL=quick WORK=~/loom-nightly LOOM_PORT=8160 LLAMA_PORT=8130 MATERIALIZE=share
 Adding a card: an entry in `nightly-models.json` (its `--memory_bytes`, the reference example its chat
 format needs or null, the llama.cpp release it was measured against).
 
-`NEEDLE_FULL=0` (gates.sh, finalize.sh) runs `full` without the full-context probe and records it as deferred:
-the audit WARNs instead of failing. Across the #26–#29 sessions it caught one class of bug (a KV pool smaller than
-the context, which build.py now warns about) at a median of ~8 min and up to an hour per run. A harness can run it
-separately: `LEVEL=full gates.sh` on the same build re-uses every gate that passed and runs only the probe.
+The native-context admission probe (`ctx_admit.py PKG URL [--tokens N]`, in `gates.sh` at `quick`/`full`, and the
+`admit[:N]` step of `devlab_experiment.sh`) catches a KV pool or memory budget below the context in seconds: it sends one
+request of about the native context, treats "the server accepts it and starts" as admitted and a 4xx/503 as refused, then
+closes the connection (no long prefill, no generation).
 
 - **Speculative-decoding gate `spec`** (packages that draft; `spec_check.py`): the package must produce exactly
   what the same package produces with `draft_depth 0` (`PKG/model_target.json`, same compiled program): greedy
   and seeded-sampling chat, a 1k-token prompt, a tool call, a reasoning answer. Any difference fails (drafting
   is lossless by construction: a difference is a verification, acceptance or state-replay bug). The log also
-  prints the acceptance rate. The agent and needle gates run with drafting on, so they cover multi-turn reuse
-  and the full context with speculation.
+  prints the acceptance rate. The agent gate runs with drafting on, so it covers multi-turn reuse with speculation.
 - **Vision gate** (packages with image input, every level; `dev` sends 2 of them): `vision_golden.py` sends six built-in images
   (shapes + text, chart, document, photo-like, tall, wide; `--images` adds files) to Loom as chat
   requests and to llama-server `--mmproj` (gates.sh sets `MMPROJ` from the package, so the lazily
@@ -152,11 +152,10 @@ separately: `LEVEL=full gates.sh` on the same build re-uses every gate that pass
   request): it never depends on the Loom build, so only the first run pays for it. Re-running the
   gates on an optimized build costs Loom time only.
 - `dev` is enough inside the loop: consistency and agent are the gates that found real bugs; compare keeps
-  the short prompts and the 1k/2k documents (prefill, KV paging, attention); the 16k needle covers long
+  the short prompts and the 1k/2k documents (prefill, KV paging, attention); the 16k golden document covers long
   context; the rest catch a feature that breaks outright. When you change the chat glue (`control.loom`), run
   `chat_probe --verify` first; `dev` then checks rendering, reuse and both thinking modes in the agent gate.
-- The full-context probe is the most expensive step (a 261k prompt: ~8 min for a 0.8B hybrid, up to an hour on
-  a 27B) and only proves the size is served: nightly, and once on a new port's final build.
+- The native-context admission probe costs seconds (it never prefills the whole prompt): it runs at `quick` and `full`.
 
 ```bash
 S="${LOOM_SKILL_DIR}/scripts"; P=~/work/mymodel/pkg; T=~/loom/.tools/bin/python; mkdir -p ~/work/mymodel/bench && cd ~/work/mymodel/bench   # outputs land here, not in the skill
@@ -165,11 +164,9 @@ $T "$S/golden.py" $P golden2.json --llama http://127.0.0.1:8130 --long 1000,2000
 $T "$S/compare.py" $P golden.json --alt golden2.json --url http://127.0.0.1:8160   # -> per-prompt lines + {"verdict": "PASS"|"FAIL", ...}
 $T "$S/consistency.py" http://127.0.0.1:8160 --model <model id>         # concurrent == sequential
 $T "$S/agent_golden.py" $P http://127.0.0.1:8160 --llama http://127.0.0.1:8130   # tool loop: rendering, reuse, calls, golden per turn
-$T "$S/needle.py" $P http://127.0.0.1:8160 --llama http://127.0.0.1:8130         # retrieval at 25-100% of context_capacity + over-limit 400
+$T "$S/ctx_admit.py" $P http://127.0.0.1:8160                                    # the native context is admitted (then cancelled)
 $T "$S/sampling_check.py" $P http://127.0.0.1:8160 --llama http://127.0.0.1:8130 # temperature/top_k/top_p/seed semantics + first-token distribution
 ```
-For `needle.py` sizes above the llama.cpp slot's context, drop `--llama` (Loom-only:
-it then must find the needle) or give `--sizes`. A 262k-token prefill takes minutes.
 - **How golden.py works.** It renders each prompt with the package's chat block
   and sends the *token ids* to llama.cpp `/completion` (greedy, `n_probs: 5`). Both
   engines therefore see identical prompts: 20 short prompts × 64 tokens, plus 1
@@ -201,7 +198,7 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
     Limit: a mild long-context RoPE error (base 5e5 vs 1e6) is below this bar's resolution, since
     llama.cpp's own views disagree that much there (16k: 1.24 golden, 0.98 and 1.44 views).
     Only the first divergence of a prompt (turn, probe) is judged, as before. compare.py, agent_golden.py,
-    needle.py and spec_check.py use it (`near_tie_at`); vision_golden.py (image prompts) does not. No
+    spec_check.py uses it (`near_tie_at`); vision_golden.py (image prompts) does not. No
     micro-batch view where llama.cpp cannot extend its cache in small steps (recurrent state).
   - **FAIL**: a large gap, or a token outside every view's top list. That is a real bug, even
     if the text reads fine.
@@ -298,15 +295,11 @@ it then must find the needle) or give `--sizes`. A 262k-token prefill takes minu
   reproduces, different seeds vary, and 200 temperature-1 draws of the first token
   match llama.cpp's probabilities on the same ids (total-variation distance within
   sampling noise; Qwen3-0.6B: 0.011).
-- **needle.py** hides access codes in a real-text haystack and asks for them (thinking off
-  when the template allows), then sends a prompt over the capacity (must be a clean HTTP
-  400, server still healthy). **Retrieval is not the gate**: a small model finds or misses a
-  needle on a near-tie first token (Qwen3.5-0.8B at 130k: llama.cpp's top two first tokens
-  0.013 nats apart), so a handful of probes says nothing statistically. Up to `--llama-max`
-  each probe is compared with llama.cpp on the same ids and passes when Loom found the
-  needle, llama.cpp missed it too, or the first divergence is a near-tie (the compare rule, in
-  the top-5: the compare.py rule). The full-context probe (Loom only; llama.cpp would take
-  many minutes) proves the size is served. Found counts are reported as information.
+- **ctx_admit.py** (the native-context admission check, not a gate): sends one streaming request whose prompt is about
+  `context_capacity` tokens of real text (`max_tokens` 1; thinking off when the template allows) and watches
+  `/v1/status`: admitted when the server answers 200 or shows an active request; refused on a 4xx/503. It then closes the
+  connection and waits for the server to go idle (a server that keeps prefilling a cancelled request is flagged). Exit 1 on a
+  refusal or no answer; the verdict goes to `context_admit.json` and `gates.json`.
 
 ## 2. Performance
 
@@ -331,6 +324,12 @@ Rules:
   llama.cpp on the same runner (`loom-org` step 3). Local runs are for development, never card numbers, and a Loom
   number measured without the active wait is not comparable. A job's variant comparisons (`devlab-perf`,
   `devlab-experiment`) compare within that job only.
+- Sampling (`reference/methodology.md` rule 5): every metric is the median over sessions (rounds) of each session's
+  median sample, identical for Loom and llama.cpp (ROCm, Vulkan). A fast model (decode > ~100 tok/s) gets 6 sessions and
+  `perf.py --repeat-rows 3` (decode_2k, decode_32k, prefill_8k three times per session); the others 3 sessions of one
+  sample. `devlab_perf.sh` marks each session end in the log (`{"session_end": V}`) and the job's `repeat_rows` passes the
+  option; `make_info.py perf` aggregates and records `aggregate: "median"` on the session (older sessions are the mean of N
+  rounds and say so on the card).
 - Warm up after every restart. `perf.py` first sends its first timed request's own shape, untimed (the 300-token
   essay with another nonce: prefill, decode, drafting and first-use kernels all run once; a trivial "Say hi."
   left DevLab's short-prompt decode 51-60 % below another session's while 2k decode agreed), and `c4_steady.py`

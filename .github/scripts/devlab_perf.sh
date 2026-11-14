@@ -49,9 +49,11 @@
 #            serve_args: extra loom-serve flags; execution: model.json overrides (every preset); double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
 #            {"name": "parked", "active_wait": false}: the card's programs served with the SDK's default completion wait
 #            (LOOM_ACTIVE_WAIT=0 in serve.sh) instead of the active wait every other variant gets.
+# Job/experiment "env": {"NAME": "value"}: environment for every step.
 # Job "thinking": off (default) | on: chat_template_kwargs.enable_thinking sent to BOTH engines in every step.
 # Steps S: ab:R[:on|off]        every variant in ONE loom-serve (small context), ab_decode.py R interleaved rounds
-#          perf:V:N[:long]      V served alone with its own settings: perf.py N times (+ --long)
+#          perf:V:N[:long]      V served alone with its own settings: perf.py N times (+ --long); N runs = one session (its value: the median of
+#                               its samples); one run per session = perf:V:1 repeated (a round each). Job "repeat_rows": R (fast models: 3) adds --repeat-rows R
 #          c4:V[:N]             c4_steady.py N (default 4) streams on V
 #          llama:N[:long|-][:M] llama.cpp (card build + llama_spec, n-max M) perf.py N times, llama_decode.py tokens/step
 #          llamac4[:M]          c4_steady.py on llama.cpp
@@ -101,7 +103,12 @@ steps=$(q "print(' '.join(j['steps']))")
 vtag=$(q "print(j.get('llamacpp_vulkan') or e.get('llamacpp_vulkan') or '-')")
 vkv=$(q "print(j.get('vulkan_kv') or e.get('vulkan_kv') or 'auto')")
 lkv=$(q "print(j.get('llama_kv_rocm') or '')")   # ROCm llama.cpp KV pool tokens when 65536 does not fit the GPU (r9700_jobs.py sets it)
+# "repeat_rows": 3 on a job (a fast model, published decode > 100 tok/s: methodology rule 5): every perf.py run measures decode_2k,
+# decode_32k and prefill_8k that many times (perf.py --repeat-rows); a session's value is the median of its samples
+rrows=$(q "print(j.get('repeat_rows') or e.get('repeat_rows') or 1)")
 RUNNER=$(q "print(j.get('runner') or e.get('runner') or 'strix')")
+# "env": {"NAME": "value"} on the experiment or a job: exported for every step (gates.sh switches; the job's wins)
+eval "$(q "import shlex; print('\n'.join(f'export {k}={shlex.quote(str(v))}' for k, v in {**(e.get('env') or {}), **(j.get('env') or {})}.items()))")"
 if [ "$RUNNER" = r9700 ]; then
   rm9=$(q "print(j.get('memory_bytes_r9700') or e.get('memory_bytes_r9700') or '')")
   if [ -n "$rm9" ]; then mem=$rm9; elif [ "$mem" -gt 34000000000 ]; then echo "r9700: memory_bytes $mem clamped to 34000000000 (the R9700 pool, card_lib.GPUS)"; mem=34000000000; fi
@@ -377,13 +384,14 @@ for s in $steps; do
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "perf $p1 x $p2 ${p3:-} (thinking $TH)"
       for i in $(seq 1 "$p2"); do
-        (cd "$out" && "$T" "$B/perf.py" "$url" "$p1" --model "$cardid" --no-campaign --thinking "$TH" --log "perf_$p1.jsonl" ${p3:+--long} | tail -1)
+        (cd "$out" && "$T" "$B/perf.py" "$url" "$p1" --model "$cardid" --no-campaign --thinking "$TH" --repeat-rows "$rrows" --log "perf_$p1.jsonl" ${p3:+--long} | tail -1)
       done
+      echo "{\"session_end\": \"$p1\"}" >> "$out/perf_$p1.jsonl"   # one serve session ends (strix_ab_compare.py: per-session medians)
       "$T" "$here/.github/scripts/ab_decode.py" "$url" "$cardid" --rounds 2 --think "$TH" --log "$out/tps_$p1.jsonl" | grep SUMMARY
       res[$s]=$("$T" -c "
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
-print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
+print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
     probe)   # probe:V: stall_probe.py (when does a prefill stall? TTFT + GPU clocks per request)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "stall probe $p1"
@@ -400,20 +408,22 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(v), 2) 
       step "c4 $p1"
       cn=${p2:-4}; cf=c4_$p1$([ "$cn" = 4 ] || echo "_n$cn").txt   # c4:V[:N] N concurrent streams (default 4)
       for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$url" "$cn" --model "$cardid" --thinking "$TH" | tail -1 | tee -a "$cf"); done
-      res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4$([ "$cn" = 4 ] || echo " n$cn") median', st.median(json.loads(l)['agg_tps'] for l in open('$out/$cf')))");;
+      echo "{\"session_end\": \"$p1\"}" >> "$out/$cf"   # one serve session ends
+      res[$s]=$("$T" -c "import json,statistics as st; print('$p1 c4$([ "$cn" = 4 ] || echo " n$cn") median', st.median(r['agg_tps'] for l in open('$out/$cf') if 'agg_tps' in (r := json.loads(l))))");;
     llama)   # llama:N[:long|-][:N_MAX]
       llama_up "${p3:-}" || { res[$s]=ERROR; continue; }
       nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}; lf=perf_llamacpp${bkt}_n$nm.jsonl
       cp "$out/llamacpp_args$bkt.txt" "$out/llamacpp_args$bkt.n$nm.txt" 2>/dev/null   # the arguments of THIS n-max (the plain file is overwritten per server start)
       step "llama.cpp$bkt n-max $nm perf x $p1 ${p2:-} (thinking $TH)"
       for i in $(seq 1 "$p1"); do
-        (cd "$out" && "$T" "$B/perf.py" "$lurl" "llamacpp${bkt}-n$nm" --kind llama --no-campaign --thinking "$TH" --log "$lf" ${p2:+--long} | tail -1)
+        (cd "$out" && "$T" "$B/perf.py" "$lurl" "llamacpp${bkt}-n$nm" --kind llama --no-campaign --thinking "$TH" --repeat-rows "$rrows" --log "$lf" ${p2:+--long} | tail -1)
+        echo "{\"session_end\": \"llamacpp$bkt-n$nm\"}" >> "$out/$lf"   # each llama.cpp run is a session (the server stays up): make_info.py perf takes the median of the runs
       done
       [ -z "${p2:-}" ] && "$T" "$here/.github/scripts/llama_decode.py" "$lurl" 2 --think "$TH" --log "$out/tps_llamacpp${bkt}_n$nm.jsonl"
       res[$s]=$("$T" -c "
 import json,statistics as st; r=[json.loads(l) for l in open('$out/$lf')]
 k='decode_tps_32k' if '${p2:-}' else 'decode_tps'
-print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
+print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
     llamac4)   # llamac4[:N_MAX]
       llama_up "${p1:-}" || { res[$s]=ERROR; continue; }
       nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}   # 0: no drafting

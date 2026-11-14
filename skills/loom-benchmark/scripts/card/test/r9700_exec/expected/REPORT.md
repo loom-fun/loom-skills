@@ -10,7 +10,7 @@ How the values on this repository's model card were measured. Generated from `in
 
 ## Method
 
-- `perf.py` (loom-benchmark) sends real-text requests: a short prompt for decode, decode after 2k and 32k tokens of context, and prefill of documents of about 1k, 2k, 8k, 16k and 32k tokens. Each run gives one value per metric; the card shows the mean of the runs.
+- `perf.py` (loom-benchmark) sends real-text requests: a short prompt for decode, decode after 2k and 32k tokens of context, and prefill of documents of about 1k, 2k, 8k, 16k and 32k tokens. Each run gives one value per metric; the card shows the median over the sessions of each session's median sample (a session without an "aggregate" key was measured as the mean of its runs: its row says so).
 - `c4_steady.py` runs 4 concurrent streams and reports the aggregate decode rate over the window in which all 4 are decoding; the card shows the median of the runs.
 - One engine runs at a time on the same machine, with the same GGUF. Loom rates are timed by the client; llama.cpp rates come from its server-side `timings`.
 - Every performance value comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch R9700 runner: Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), and llama.cpp on the same runner, with the published programs.
@@ -31,6 +31,7 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 - Device: TEST FIXTURE: made-up numbers, not a measurement, AMD Radeon AI PRO R9700S (gfx1201), Ubuntu 24.04.
 - Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).
 - Programs measured: sha256 `34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b`, the same as this repository's programs.
+- Values: the median over 2 sessions (4 streams: over 3 runs), a session's value being the median of its samples.
 
 | metric | engine | runs | value |
 |---|---|---|---|
@@ -84,7 +85,7 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 
 #### [DevLab Dispatch run 9000001](https://github.com/loom-fun/loom-skills/actions/runs/9000001), LEVEL=quick, 2026-11-14
 
-- Gates: `golden` pass, `compare` pass, `consistency` pass, `agent` pass, `agent_think_off` pass, `sampling` pass, `needle` pass.
+- Gates: `golden` pass, `compare` pass, `consistency` pass, `agent` pass, `agent_think_off` pass, `sampling` pass.
 - Device: TEST FIXTURE: made-up numbers, not a measurement, AMD Radeon AI PRO R9700S (gfx1201), Ubuntu 24.04.
 - Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).
 - Programs: sha256 `34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b`, the same as this repository's programs.
