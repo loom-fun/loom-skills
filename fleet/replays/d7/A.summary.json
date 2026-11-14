@@ -1,0 +1,38 @@
+{
+ "patch": "A.patch",
+ "files_edited": [
+  "skills/loom-kb/choices.py",
+  "skills/loom-port-llm/starter/attn_rules.py"
+ ],
+ "lint_exit": 1,
+ "touched_by_family": {
+  "gfx11": 10,
+  "gfx12": 0
+ },
+ "impact_summary": {
+  "models": 51,
+  "touched": 10,
+  "gpus": [
+   "gfx11",
+   "gfx12"
+  ],
+  "rows": [
+   "decode",
+   "decode_2k",
+   "decode_32k",
+   "streams4"
+  ]
+ },
+ "touched_models": [
+  "InternScience-Sage-A1.5-loom",
+  "bartowski-Ornith-1.5-122B-loom",
+  "bartowski-Ornith-1.5-35B-A3B-loom",
+  "bartowski-Ornith-1.5-9B-loom",
+  "bartowski-Qwen3.8-27B-loom",
+  "ggml-org-Qwen3.6-27B-loom",
+  "ggml-org-Qwen3.6-35B-A3B-loom",
+  "unsloth-Qwen3.5-35B-A3B-loom",
+  "unsloth-Qwen3.5-4B-loom",
+  "unsloth-Qwen3.5-9B-loom"
+ ]
+}

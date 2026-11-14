@@ -447,7 +447,29 @@ print(c.gpu_from_device({'cpu': 'AMD RYZEN AI MAX+ 395 w/ Radeon 8060S', 'gpu': 
       c.gpu_from_device({'cpu': 'AMD EPYC', 'gpu': 'AMD Radeon AI PRO R9700S'}), c.gpu_from_device({'cpu': 'AMD Strix Halo (DevLab Dispatch runner X2)', 'os': 'Linux'}),
       c.gpu_from_device(None), c.served_context(396705472, 1.5e6, 34000000000))" "$C")
 [ "$got" = "strix-halo radeon-r9700 strix-halo None 20480" ] && echo "OK   gpu detection and served context" || { echo "FAIL gpu detection: $got"; bad=1; }
-for n in flint d1 r9700_two r9700_none r9700_staging r9700_preset r9700_exec; do
+# the ratchet: a confirming re-run out of margin only by a row FASTER than the card in both runs (prefill_8k +3.1 / +3.4 %) is accepted;
+# the card keeps every published value except that row (the mean of the two runs' medians), llama.cpp and speedups follow, the
+# re-measure line names the row; a row slower beyond its band in both runs, or a missing first run, is refused
+RT=$here/ratchet; FSHA=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c; print(c.programs_sha256(sys.argv[2]))" "$C" "$tmp/flint")
+RM=(--package "$tmp/flint" --compared-programs "$FSHA" --fetched-programs "$FSHA" --date 2026-11-14 --url https://example.invalid/run/3011 --device none --hrx-loom none --source-kind devlab --run 3011)
+py "$C/make_info.py" remeasure --cmp "$RT/cmp2.json" --first-cmp "$RT/cmp1.json" --first-run 3010 --first-url https://example.invalid/run/3010 "${RM[@]}" -o "$tmp/ratchet_ev.json" 2>/dev/null \
+  && echo "OK   ratchet: rows faster than the card in both runs are accepted" || { echo "FAIL ratchet: improved row refused"; bad=1; }
+py "$C/make_info.py" remeasure --cmp "$RT/cmp2.json" "${RM[@]}" -o "$tmp/ratchet_ev0.json" 2>/dev/null \
+  && { echo "FAIL ratchet: accepted without the first run"; bad=1; } || echo "OK   ratchet: out_of_margin without --first-cmp is refused"
+for v in cmp1 cmp2; do py -c "import json, sys; x = json.load(open(sys.argv[1])); m = x['metrics']['prefill_8k']; m['ratio'] = 0.95; m['new'] = round(m['old'] * 0.95, 1); m['status'] = 'OUT'
+json.dump(x, open(sys.argv[2], 'w'))" "$RT/$v.json" "$tmp/slow_$v.json"; done
+py "$C/make_info.py" remeasure --cmp "$tmp/slow_cmp2.json" --first-cmp "$tmp/slow_cmp1.json" --first-run 3010 --first-url https://example.invalid/run/3010 "${RM[@]}" -o "$tmp/ratchet_ev1.json" 2>/dev/null \
+  && { echo "FAIL ratchet: a slower row accepted"; bad=1; } || echo "OK   ratchet: a row slower than its band in both runs is refused"
+mkdir -p "$tmp/ratchet"; cp -r "$tmp/flint/." "$tmp/ratchet/"
+py "$C/make_info.py" build "$tmp/ratchet" --generator-commit $GEN --from-info "$tmp/flint/info.json" --evidence "$tmp/ratchet_ev.json" -o "$tmp/ratchet/info.json" 2>/dev/null
+py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+a, b = (c.single(c.load_json(f)) for f in sys.argv[2:4]); assert c.validate(c.load_json(sys.argv[3])) == []
+ma, mb = ({k: m for k, (m, _) in c.card_metrics(i).items()} for i in (a, b))
+assert [k for k in ma if ma[k] != mb[k]] == ['prefill_8k'], [k for k in ma if ma[k] != mb[k]]
+assert mb['prefill_8k']['loom'] == round((1424.7 * 1.031 + 1424.7 * 1.034) / 2, 1) and mb['prefill_8k']['baseline'] == ma['prefill_8k']['baseline']
+assert b['remeasure']['improved']['prefill_8k']['published'] == 1424.7" "$C" "$tmp/flint/info.json" "$tmp/ratchet/info.json" \
+  && echo "OK   ratchet: only the improved row's Loom value changed (mean of the two runs), llama.cpp kept" || { echo "FAIL ratchet: card values"; bad=1; }
+for n in flint d1 ratchet r9700_two r9700_none r9700_staging r9700_preset r9700_exec; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null
   py "$C/render_card.py" "$tmp/$n" -o "$tmp/${n}_README2.md" 2>/dev/null

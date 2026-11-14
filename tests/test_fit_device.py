@@ -7,6 +7,8 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(ROOT, "fleet"))
 import fit_device  # noqa: E402
 import sample_lib  # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, "skills", "loom-kb"))
+import registry  # noqa: E402
 
 
 class FitDevice(unittest.TestCase):
@@ -25,7 +27,9 @@ class FitDevice(unittest.TestCase):
         self.assertEqual(n("strix-halo"), len(rows))   # no memory_bytes: the package's own
 
     def test_targets_follow_the_registry(self):
-        self.assertEqual(sample_lib.GPUS, {"strix-halo": "gfx11", "radeon-rx7900xtx": "gfx11", "radeon-r9700": "gfx12"})
+        pinned = {"strix-halo": "gfx11", "radeon-rx7900xtx": "gfx11", "radeon-r9700": "gfx12"}
+        self.assertEqual({k: v for k, v in sample_lib.GPUS.items() if k in pinned}, pinned)   # existing rows keep their target; new devices add rows
+        self.assertEqual(list(sample_lib.GPUS), list(registry.devices()))
 
 
 if __name__ == "__main__":

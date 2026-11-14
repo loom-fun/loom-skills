@@ -1,0 +1,2 @@
+kind: horizontal
+kernels: attention_decode

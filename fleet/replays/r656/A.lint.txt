@@ -1,0 +1,10 @@
+exit 1
+### Scope lint: FAIL
+kind `targeted`; scopes `arch/llm/dense/gemma4`; kernels -; 1 file(s) changed.
+Program impact: 1 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+
+| rule | problem |
+|---|---|
+| files | fleet/unsloth-gemma-4-E2B-it-loom/llm_config.json: not allowed for kind targeted (a targeted PR may change only its scope nodes' directories and tests) |
+- kb lint: kb lint: 0 error(s)
+

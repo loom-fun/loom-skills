@@ -1,0 +1,61 @@
+{
+ "job": "sab-flint",
+ "runner": "X2-LA03-S01-D04",
+ "band": 0.04,
+ "bands": {
+  "decode": 0.035,
+  "decode_2k": 0.04,
+  "prefill_8k": 0.02,
+  "prefill_32k": 0.02,
+  "streams4": 0.04
+ },
+ "metrics": {
+  "decode": {
+   "old": 96.9,
+   "new": 96.9,
+   "ratio": 1.0,
+   "status": "PASS",
+   "card": 96.9
+  },
+  "decode_2k": {
+   "old": 76.3,
+   "new": 75.5,
+   "ratio": 0.99,
+   "status": "PASS",
+   "card": 76.3
+  },
+  "prefill_8k": {
+   "old": 1424.7,
+   "new": 1468.9,
+   "ratio": 1.031,
+   "status": "OUT",
+   "card": 1424.7
+  },
+  "prefill_32k": {
+   "old": 1193.9,
+   "new": 1158.1,
+   "ratio": 0.97,
+   "status": "OUT",
+   "card": 1193.9
+  },
+  "streams4": {
+   "old": 134.2,
+   "new": 134.2,
+   "ratio": 1.0,
+   "status": "PASS",
+   "card": 134.2
+  }
+ },
+ "acceptance": {},
+ "gate_status": {
+  "gates:staging:dev": "PASS"
+ },
+ "gate_failures": [],
+ "out_of_band": [
+  "prefill_8k",
+  "prefill_32k"
+ ],
+ "worst_metric": "prefill_32k",
+ "worst_ratio": 1.0,
+ "verdict": "rerun"
+}

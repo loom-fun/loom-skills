@@ -1,0 +1,1 @@
+{"pr": "#694", "title": "Sampling methodology: median over sessions (perf.py, devlab_perf.sh, card schema)", "commit": "1095646", "intent": "benchmark tooling, card schema and methodology; no program may change"}

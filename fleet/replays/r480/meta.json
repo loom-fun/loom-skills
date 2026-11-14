@@ -1,0 +1,2 @@
+{"pr": "#480", "title": "flash2 prefill: masked path only in the last key tile (recovers the #193/#213 prefill loss of six cards)", "variants": ["A", "A2", "B"],
+ "intent": "A = FLASH2_PEEL on by default (the way it was merged; the other parts of #480 are not switchable and stay in the kit), B = opt-in rule on the measured families (gemma4 sliding window <= 512: E2B/E4B/Bolt, spark2_5, lfm3)"}

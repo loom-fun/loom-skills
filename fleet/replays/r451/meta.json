@@ -1,0 +1,2 @@
+{"pr": "#451", "title": "Decode attention: K/V-once body in drafting packages (head_dim 128, and 256 for qwen35 hybrids)", "base_from": "r357:A", "variants": ["A", "A2", "B"],
+ "intent": "extends #357 to drafted packages; measured: Qwen2.5-VL-7B, Llama-3.1-8B, Flint, Qwen3-4B (DFlash), Qwen3.5-4B/9B, Ornith-1.5-9B (noise)"}

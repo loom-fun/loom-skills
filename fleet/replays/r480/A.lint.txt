@@ -1,0 +1,40 @@
+exit 1
+### Scope lint: FAIL
+kind `targeted`; scopes `arch/llm/dense/gemma4`, `arch/llm/dense/spark2_5`, `arch/llm/dense/lfm3`; kernels -; 3 file(s) changed.
+Program impact: 50 model(s) touched; leaked outside the declared scope: 40 (leak rate 80%).
+
+| rule | problem |
+|---|---|
+| files | skills/loom-port-llm/starter/gen_flash2.py: not allowed for kind targeted (a targeted PR may change only its scope nodes' directories and tests) |
+| files | skills/loom-port-llm/starter/gen_flash2s.py: not allowed for kind targeted (a targeted PR may change only its scope nodes' directories and tests) |
+| registry | registry key 'prefill.attn.flash2_peel' changed (legacy); legacy/env/type/derive define today's behaviour; needs kind: architecture |
+| leak | InternScience-Sage-A1.5-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Mellum2.1-12B-A2.5B-Thinking-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-MiniCPM-V-4.7-35B-A3B-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Nanbeige4.3-33B-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Ornith-1.5-122B-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Ornith-1.5-35B-A3B-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Ornith-1.5-9B-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Qwen2.5-0.5B-Instruct-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Qwen2.5-1.5B-Instruct-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Qwen2.5-32B-Instruct-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Qwen2.5-7B-Instruct-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Qwen3.8-27B-loom: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3; narrow the change (or declare `leak:` with horizontal/architecture) |
+| ... | 28 more (all in the JSON report) |
+- leaked: `InternScience-Sage-A1.5-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Mellum2.1-12B-A2.5B-Thinking-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-MiniCPM-V-4.7-35B-A3B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Nanbeige4.3-33B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Ornith-1.5-122B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Ornith-1.5-35B-A3B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Ornith-1.5-9B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Qwen2.5-0.5B-Instruct-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Qwen2.5-1.5B-Instruct-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Qwen2.5-32B-Instruct-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Qwen2.5-7B-Instruct-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Qwen3.8-27B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `ggml-org-Flint-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `ggml-org-LFM2.5-24B-A2B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `ggml-org-Laguna-XS-2.1-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- kb lint: kb lint: 0 error(s)
+

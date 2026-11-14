@@ -1,0 +1,37 @@
+{
+ "patch": "B.patch",
+ "files_edited": [
+  "skills/loom-kb/arch/llm/dense/gemma4/scope.json",
+  "skills/loom-kb/arch/llm/dense/lfm3/scope.json",
+  "skills/loom-kb/arch/llm/dense/spark2_5/scope.json"
+ ],
+ "lint_exit": 0,
+ "touched_by_family": {
+  "gfx11": 7,
+  "gfx12": 7
+ },
+ "impact_summary": {
+  "models": 51,
+  "touched": 7,
+  "gpus": [
+   "gfx11",
+   "gfx12"
+  ],
+  "rows": [
+   "prefill_1k",
+   "prefill_2k",
+   "prefill_8k",
+   "prefill_16k",
+   "prefill_32k"
+  ]
+ },
+ "touched_models": [
+  "XHToken-Spark-X2.5-4B-loom",
+  "bartowski-LFM3-1.7B-loom",
+  "bartowski-Spark-X2.6-4B-loom",
+  "ggml-org-LFM3-Omni-2B-loom",
+  "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+  "unsloth-gemma-4-E2B-it-loom",
+  "unsloth-gemma-4-E4B-it-loom"
+ ]
+}

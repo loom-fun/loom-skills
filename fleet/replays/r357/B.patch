@@ -1,0 +1,48 @@
+diff --git a/skills/loom-kb/arch/llm/dense/qwen3/scope.json b/skills/loom-kb/arch/llm/dense/qwen3/scope.json
+index f0b3b1f..0909ae8 100644
+--- a/skills/loom-kb/arch/llm/dense/qwen3/scope.json
++++ b/skills/loom-kb/arch/llm/dense/qwen3/scope.json
+@@ -7,5 +7,18 @@
+  },
+  "owner": "kb",
+  "facets": [],
+- "choices": []
++ "choices": [
++  {
++   "when": {
++    "not_facets": [
++     "drafted"
++    ],
++    "head_dim": 128
++   },
++   "set": {
++    "decode.attn.kv_once": true
++   },
++   "evidence": "PR #357: Qwen3-4B decode_32k 24.5 -> 28.3 tok/s (DevLab same runner), decode / 2k / 4 streams within noise"
++  }
++ ]
+ }
+diff --git a/skills/loom-kb/arch/llm/dense/qwen3vl/scope.json b/skills/loom-kb/arch/llm/dense/qwen3vl/scope.json
+index 93ff9e9..0ea16df 100644
+--- a/skills/loom-kb/arch/llm/dense/qwen3vl/scope.json
++++ b/skills/loom-kb/arch/llm/dense/qwen3vl/scope.json
+@@ -9,5 +9,18 @@
+  "facets": [
+   "vision"
+  ],
+- "choices": []
++ "choices": [
++  {
++   "when": {
++    "not_facets": [
++     "drafted"
++    ],
++    "head_dim": 128
++   },
++   "set": {
++    "decode.attn.kv_once": true
++   },
++   "evidence": "PR #357: Qwen3-4B decode_32k 24.5 -> 28.3 tok/s (DevLab same runner), decode / 2k / 4 streams within noise"
++  }
++ ]
+ }

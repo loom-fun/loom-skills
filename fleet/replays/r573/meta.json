@@ -1,0 +1,3 @@
+{"pr": "#573 / #574", "title": "RDNA4 (gfx12) twins K_rdna4 of every prefill GEMM (#573) and flash attention (#574) kernel", "variants": ["A", "B"],
+ "base_args": ["--rdna4", "0"], "head_args": ["--rdna4", "1"],
+ "intent": "device-horizontal change: gfx12 twins appended after the gfx11 kernels; the gfx11 text must not change. The base is built with the twins off (LOOM_RDNA4=0, gfx11 programs only), the head with them on; A edits every site that reads the LOOM_RDNA4 default (6 kit files + the registry legacy), B declares it as a rule of the device/rdna4 node"}

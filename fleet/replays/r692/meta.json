@@ -1,0 +1,1 @@
+{"pr": "#692", "title": "Strix A/B: each metric on the median of serve sessions per side", "commit": "9319cc0", "intent": "A/B tooling; no program may change"}
