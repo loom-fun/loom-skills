@@ -49,12 +49,17 @@ VTC = KT + 8                      # padded V^T row
 # K/V itself (the staging is repeated per group; the score/softmax/output work is not).
 NG = next(n for n in (1, 2, 4) if G % n == 0 and (KT * DP8 * 2 + D * VTC * 2 + (WPH * G // n) * KB * 16 * 16 * 4 <= 65536
                                                   or WPH * G // n == 8))
+# FLASH2_B (gfx12 twin, head_dim 512, 8 query heads per KV head; opt-in, llm_config rdna4_f16_ffn sets 2): the key-split loop of flash2_b.py (1) / flash2_b2.py (2:
+# two heads per wave, a workgroup is a head pair). Other shapes keep the plain twin.
+B_MODE = os.environ.get("FLASH2_B", "0") if D == 512 and G == 8 and os.environ.get("FLASH2_ARCH") == "rdna4" else "0"
+if B_MODE == "2":
+    NG = 4
 if D == 512 and os.environ.get("FLASH2_NG512") and os.environ.get("FLASH2_ARCH") == "rdna4":   # experiment: query-head groups per KV head at head_dim 512 (more groups: fewer waves per workgroup, cheaper barriers)
     NG = int(os.environ["FLASH2_NG512"])
     assert G % NG == 0
 GW = G // NG                      # query heads per workgroup
 WAVES = WPH * GW
-if D == 512 and os.environ.get("FLASH2_B") == "2" and os.environ.get("FLASH2_ARCH") == "rdna4":   # two heads per wave: a workgroup is the four waves of a head pair
+if B_MODE == "2":   # two heads per wave: a workgroup is the four waves of a head pair
     WAVES = WPH
 LANES = 32 * WAVES
 # Staging: lane = key (workitem % KT), workitem / KT = dim segment. 256 dims over 2G segments: G = 6 -> 12
@@ -65,7 +70,7 @@ if KT == 16:
     SEG_N = 2 * SEG_N
 SEG_W = D // SEG_N
 assert WPH == 2 or KB == 1, "head_dim 512: 16-key tiles"
-assert LANES >= KT * SEG_N or os.environ.get("FLASH2_B") in ("1", "2") or os.environ.get("FLASH2_DIRECT") in ("2", "3"), "need at least 8 waves (head_dim * G >= 1024)"
+assert LANES >= KT * SEG_N or B_MODE in ("1", "2") or os.environ.get("FLASH2_DIRECT") in ("2", "3"), "need at least 8 waves (head_dim * G >= 1024)"
 SCALE = os.environ.get("FLASH2_SCALE") or repr(D ** -0.5)
 POS_BYTES = int(os.environ.get("FLASH2_POS_BYTES") or KVH * D * 2)   # bytes per KV position (widest layer kind)
 
@@ -534,8 +539,8 @@ R4 = os.environ.get("FLASH2_ARCH") == "rdna4"   # the gfx12 twin (flash2_rdna4.p
 if R4:
     from flash2_rdna4 import to_rdna4, twin_names
     text = to_rdna4(text)
-    B = D == 512 and os.environ.get("FLASH2_B", "0") in ("1", "2")   # key-split loop (flash2_b.py; 2: two heads per wave, flash2_b2.py)
-    if B and os.environ["FLASH2_B"] == "2":
+    B = B_MODE in ("1", "2")   # key-split loop (flash2_b.py; 2: two heads per wave, flash2_b2.py)
+    if B_MODE == "2":
         from flash2_b2 import rewrite_b2
         assert GW == 2 and WPH == 4 and WAVES == 4, "FLASH2_B=2 needs FLASH2_NG512=4 (a head pair per workgroup)"
         text = rewrite_b2(text, KVH, D, PARTIAL)
@@ -567,7 +572,7 @@ if R4:
     if not B and os.environ.get("FLASH2_PF", "0") == "1":   # the next K/V tile's loads in flight during this tile's math (flash2_prefetch.py); gfx12 twin only
         from flash2_prefetch import prefetch
         text = prefetch(text)
-if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and not (R4 and D == 512 and os.environ.get("FLASH2_B", "0") in ("1", "2")):   # the masked path only in the last key tile (flash2_peel.py)
+if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and not B_MODE in ("1", "2"):   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     _hot = None
     if R4 and os.environ.get("FLASH2_HOT", os.environ.get("FLASH2_TRIM", "0")) == "1":   # gfx12 twin: the hot copy skips the validity / mask selects (flash2_trim.py)

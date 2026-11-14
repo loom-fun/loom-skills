@@ -1,18 +1,26 @@
-"""FLASH2_B=2: the key-split loop of flash2_b.py with TWO query heads per wave (gfx12 head_dim 512 twin, opt-in).
+"""Key-split flash loop with two query heads per wave for the gfx12 head_dim 512 twin (gen_flash2s.py, FLASH2_B=2; llm_config rdna4_f16_ffn sets it).
 
-A wave owns 16 query columns of each of two heads that share the KV head: the K fragments of its key chunk and the V^T fragments of its
-dims are loaded ONCE and feed both heads' WMMAs (half the global fragment loads and address arithmetic per WMMA, and half the K/V
-bytes requested per query row). A workgroup is the four dim/chunk waves of a head PAIR (128 lanes); the softmax, P^T exchange and
-barriers are those of flash2_b.py, per head. The output epilogue of the first head is repeated for the second.
+The staged twin lets the four waves of a query head compute every 16-key S tile together (each over its 128 dims, an f32 partial exchange,
+four redundant softmaxes) and every wave streams its own K / V^T fragments for ONE head. This loop reorganises the work the way llama.cpp's
+Vulkan flash_attn_cm1 does and shares the K / V fragments between two heads:
+  * a block is 64 keys; wave j of a workgroup computes the S^T tile of keys 16 j .. 16 j + 15 over ALL 512 dims (32 WMMAs per head; the K
+    fragments straight from the paged KV arena as four 128-byte loads per lane, the Q^T fragments from workgroup memory where the four
+    waves staged them once) for BOTH heads of the workgroup's head pair, so a K fragment feeds two WMMAs;
+  * ONE softmax per S tile: the column maxima of the four tiles of a head are exchanged (one barrier), every wave derives the same running
+    max, exponentiates its own tile and publishes P^T (f16, the rhs fragment as it is) and its row sum;
+  * PV: every wave reads the four P^T tiles of both heads (second barrier) and accumulates O^T of ITS 128 dims over all 64 keys; a V^T
+    fragment (global_load_tr_b128 from the arena) feeds both heads' WMMAs.
+Per 64 keys and head pair: two barriers, 128 WMMAs per wave. A workgroup is the four waves of a head pair (128 lanes); the exchange buffers
+are single (a wave cannot reach the next block's store before every wave has finished reading this block's), so the workgroup needs 40 KB of
+workgroup memory and three of them share a WGP. Keys past the tile's last written page re-read the last page (finite, fully masked, weight 0);
+the partial kernel zeroes V^T for positions past its last written key. The first head's output epilogue is repeated for the second head.
+Measured on E2B (R9700, vs the staged twin): prefill +7 / +12 / +19 % at 8k / 16k / 32k.
 """
 import re
 
 
 def rewrite_b2(text, kvh, d, partial):
     assert d == 512
-    import os
-    JU = " unroll" if os.environ.get("FLASH2_B2_UNROLL") == "1" else ""
-    VOFF = False
     waves = 4
     R = kvh * d
     NF = d // 16
@@ -130,7 +138,7 @@ def rewrite_b2(text, kvh, d, partial):
     A("    %rk_a = scf.select %fb_is2, %rw2, %rw3 : index\n    %rk_b = scf.select %fb_is1, %rw1, %rk_a : index\n    %rk_c = scf.select %fb_is0, %rw0, %rk_b : index\n    %rk = index.assume %rk_c [range(%rk_c, 0, 1048560), lt(%rk_c, %pl_rows_m)] : index")
     A("    %kw_lr_v = index.add %rk, %lane_col : index\n    %kw_lr = index.assume %kw_lr_v [range(%kw_lr_v, 0, 1048575), lt(%kw_lr_v, %pool)] : index\n"
       "    %kw_c256 = index.constant 256 : index\n    %kw_h = index.mul %lane_half, %kw_c256 : index\n    %c64k = index.constant 64 : index\n    %fq8c = index.constant 8 : index")
-    A(f"    %sA_f, %sB_f = scf.for %kw = [%c0 to %c4 step %c1](%sA = %init : vector<8xf32>, %sB = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {{")
+    A(f"    %sA_f, %sB_f = scf.for %kw = [%c0 to %c4 step %c1](%sA = %init : vector<8xf32>, %sB = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>){{")
     A(f"""      %kw_a = index.assume %kw [range(%kw, 0, 3)] : index
       %kw_o = index.mul %kw_a, %c64k : index
       %kw_c = index.add %kw_h, %kw_o : index
@@ -202,23 +210,16 @@ def rewrite_b2(text, kvh, d, partial):
         A("    %pos_hi_v = vector.splat %pos_hi_i32 : vector<8xi32>")
     for k in range(8):
         A(f"    %os{k} = vector.mulf %a{k}, %alpha_v : vector<8xf32>\n    %osB{k} = vector.mulf %b{k}, %alphaB_v : vector<8xf32>")
-    if VOFF:
-        for j in range(4):
-            A(f"""    %vjr{j}_o = index.scale %rw{j}, %pos_bytes : index, offset -> offset
-    %vjo{j} = index.add %vb_o, %vjr{j}_o : offset
-    %vjo{j}_i = index.cast %vjo{j} : offset to i64
-    view.store %vjo{j}_i, %vo_view[%fb_wv, %fq{j}, %lane] : i64, view<{waves}x4x32xi64>""")
     pvin = ", ".join([f"%pa{k} = %os{k} : vector<8xf32>" for k in range(8)] + [f"%pb{k} = %osB{k} : vector<8xf32>" for k in range(8)])
     pvout = ", ".join([f"%on{k}" for k in range(8)] + [f"%onB{k}" for k in range(8)])
-    A(f"    {pvout} = scf.for %jj = [%c0 to %c4 step %c1]({pvin}) -> ({ty16}){JU} {{")
-    VJ = ("      %vj_o_i = view.load %vo_view[%fb_wv, %jj_a, %lane] : view<%WV%x4x32xi64> -> i64\n      %vj_o = index.cast %vj_o_i : i64 to offset\n".replace("%WV%", str(waves)) if VOFF else
-          """      %rj_a = scf.select %jj_c2, %rw2, %rw3 : index
+    A(f"    {pvout} = scf.for %jj = [%c0 to %c4 step %c1]({pvin}) -> ({ty16}) unroll {{")
+    VJ = """      %rj_a = scf.select %jj_c2, %rw2, %rw3 : index
       %rj_b = scf.select %jj_c1, %rw1, %rj_a : index
       %rj_c = scf.select %jj_c0, %rw0, %rj_b : index
       %rj = index.assume %rj_c [range(%rj_c, 0, 1048560), lt(%rj_c, %pl_rows_m)] : index
       %vj_ro = index.scale %rj, %pos_bytes : index, offset -> offset
       %vj_o = index.add %vb_o, %vj_ro : offset
-""")
+"""
     A(f"""      %jj_a = index.assume %jj [range(%jj, 0, 3)] : index
       %jj_c1 = index.cmp eq, %jj, %c1 : index
       %jj_c2 = index.cmp eq, %jj, %c2 : index

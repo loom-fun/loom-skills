@@ -71,6 +71,8 @@ FFN_NORM = CFG.get("ffn_norm_tensor", "ffn_norm")
 from gen_gemm_rdna4 import f16o_swiglu as _f16o_stack  # noqa: E402
 if _f16o_stack(CFG):
     os.environ.setdefault("FLASH2_TRIM", "1")
+    os.environ.setdefault("FLASH2_B", "2")           # head_dim 512, 8 heads per KV head (gemma4 E2B): the key-split two-heads-per-wave global-layer flash twin (flash2_b2.py)
+    os.environ.setdefault("FLASH2_B2_UNROLL", "1")
 MOE = CFG.get("moe")                      # MoE FFN (gen_moe.py: router + top-k experts, optional shared experts)
 MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) | ({MTP_LAYER} if MTP_LAYER is not None else set()) if MOE else set()
 FS = (MOE or {}).get("shared_ffn", 0)     # shared-expert FFN width (0: none)

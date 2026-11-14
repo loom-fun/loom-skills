@@ -1,5 +1,5 @@
 {
- "_comment": "R9700 experiment (attn512): E2B d512 flash variants",
+ "_comment": "E2B prefill family profile (attn512b): each variant runs the launches of one kernel family twice (timing only)",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
@@ -13,18 +13,7 @@
    "memory_bytes_r9700": 16000000000,
    "variants": [
     {
-     "name": "stack",
-     "build": {},
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "config": {
-      "rdna4_f16_ffn": true
-     }
-    },
-    {
-     "name": "c5",
+     "name": "base",
      "build": {
       "FLASH2_B": "2",
       "FLASH2_NG512": "4",
@@ -39,10 +28,11 @@
      }
     },
     {
-     "name": "c6",
+     "name": "d_f32",
      "build": {
       "FLASH2_B": "2",
-      "FLASH2_NG512": "4"
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
      },
      "build_args": [
       "--prefill-r9700",
@@ -50,20 +40,224 @@
      ],
      "config": {
       "rdna4_f16_ffn": true
-     }
+     },
+     "double": [
+      "llm_advance:g_gemm_f32_store"
+     ]
+    },
+    {
+     "name": "d_bf16",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "llm_advance:g_gemm_bf16_store"
+     ]
+    },
+    {
+     "name": "d_pan",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "llm_advance:g_post_add_norm|g_as_norm"
+     ]
+    },
+    {
+     "name": "d_quant",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "llm_advance:g_quant_q8"
+     ]
+    },
+    {
+     "name": "d_rs",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "llm_advance:g_row_scale"
+     ]
+    },
+    {
+     "name": "d_rope",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "llm_advance:g_qk_rope"
+     ]
+    },
+    {
+     "name": "d_ple",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "llm_advance:g_ple_gate"
+     ]
+    },
+    {
+     "name": "d_q4",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "llm_advance:g_gemm_q4_k_store"
+     ]
+    },
+    {
+     "name": "d_swi",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "llm_advance:g_gemm_q4_k_swiglu|g_gemm_q8_0_swiglu"
+     ]
+    },
+    {
+     "name": "d_q6",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "llm_advance:g_gemm_q6_k_store"
+     ]
+    },
+    {
+     "name": "d_q8",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "llm_advance:g_gemm_q8_0_store"
+     ]
+    },
+    {
+     "name": "d_fl",
+     "build": {
+      "FLASH2_B": "2",
+      "FLASH2_NG512": "4",
+      "FLASH2_B2_UNROLL": "1"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "llm_advance:g_attention_flash2"
+     ]
     }
    ],
    "steps": [
-    "func:c5",
-    "ktest:c5",
-    "func:c6",
-    "ktest:c6",
-    "perf:stack:3",
-    "perf:c5:3",
-    "perf:c6:3",
-    "perf:stack:3:long",
-    "perf:c5:3:long",
-    "perf:c6:3:long"
+    "perf:base:3:long",
+    "perf:d_f32:3:long",
+    "perf:d_bf16:3:long",
+    "perf:d_pan:3:long",
+    "perf:d_quant:3:long",
+    "perf:d_rs:3:long",
+    "perf:d_rope:3:long",
+    "perf:d_ple:3:long",
+    "perf:d_q4:3:long",
+    "perf:d_swi:3:long",
+    "perf:d_q6:3:long",
+    "perf:d_q8:3:long",
+    "perf:d_fl:3:long"
    ]
   }
  ],
