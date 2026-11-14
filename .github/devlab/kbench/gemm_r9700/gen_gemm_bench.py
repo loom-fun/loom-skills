@@ -19,7 +19,7 @@ SHAPES = [  # (see ALL_SHAPES for the full list)
     ("q4_k", "swiglu", 1024, 4096, 12288), ("q4_k", "store", 1024, 12288, 4096),
     ("q4_k", "swiglu", 1024, 1024, 3072), ("q4_k", "store", 1024, 3072, 1024),
 ]
-ROWS = [("q4_k", "swiglu", 2048, 1536, 6144), ("q4_k", "swiglu", 4096, 1536, 6144), ("q4_k", "store", 4096, 6144, 1536), ("q4_k", "swiglu", 4096, 4096, 12288)]   # chunk rows (the R9700 preset: 4096)
+ROWS = [("q4_k", "store", 1024, 1024, 3072), ("q4_k", "swiglu", 2048, 1536, 6144), ("q4_k", "swiglu", 4096, 1536, 6144), ("q4_k", "store", 4096, 6144, 1536), ("q4_k", "swiglu", 4096, 4096, 12288)]   # chunk rows (the R9700 preset: 4096)
 EXTRA = [("bf16", "store", 1024, 6144, 1536), ("bf16", "swiglu", 1024, 1536, 6144), ("bf16", "store", 1024, 12288, 4096),
          ("q6_k", "store", 1024, 6144, 1536), ("q6_k", "store", 1024, 12288, 4096)]
 ALL_SHAPES = [  # (fmt, mode, rows, K, N): the prefill GEMMs of Gemma-4-E2B (k1536), Qwen3-8B (k4096) and Qwen3-0.6B (k1024)
@@ -119,6 +119,29 @@ def gen_kernels(fmts, q4k):
     txt = subprocess.run([sys.executable, os.path.join(ROOT, "skills", "loom-port-llm", "starter", "gen_gemm.py")], env=env, check=True, capture_output=True, text=True).stdout
     return {m.group(1): kernel_text(txt, m.group(1)) for m in re.finditer(r'kernel\.def (?:target\(@\w+\) )?export\("(\w+)"\)', txt)}
 
+def real_cases():
+    """Qwen3-0.6B layer 3 ffn_gate / ffn_up (Q4_K, 3072 x 1024) as the weights of the 1024x1024x3072 kernels (real headers and nibbles)."""
+    n = 1769472
+    out = []
+    for mode, ws in (("swiglu", ("real_gate.npy", "real_up.npy")), ("store", ("real_gate.npy",))):
+        kn = f"k_q4_k_{mode}_m256_1024x1024x3072"
+        decl = "".join(f'  %w{i} = check.file.read.npy path("{w}") : tensor<{n}xi8>\n' for i, w in enumerate(ws))
+        args = ", ".join(f"%w{i}" for i in range(len(ws))); tys = ", ".join([f"tensor<{n}xi8>"] * len(ws))
+        out.append(f"""check.case public @k_real_{mode}_case {{
+  %seed = check.literal value(12345) : i64
+  %rows = check.literal value(1024) : index
+  %k = check.literal value(1024) : index
+  %nn = check.literal value(3072) : index
+  %x = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<1024x1024xf16>
+  %s = check.generate.fill value(1.0) : tensor<1024x2xf32>
+{decl}  %y = check.generate.fill value(0.0) : tensor<1024x3072xf32>
+  kernel.launch @{kn}[%rows, %nn](%rows, %k, %nn, %x, %s, {args}, %y) : [index, index](index, index, index, tensor<1024x1024xf16>, tensor<1024x2xf32>, {tys}, tensor<1024x3072xf32>)
+  check.return
+}}
+check.benchmark<@k_real_{mode}_case> @k_real_{mode}_bm
+""")
+    return out
+
 def build(variant=""):
     out = []
     for fmt, mode, rows, K, N in SHAPES + ROWS + (EXTRA if not variant else []):
@@ -157,7 +180,7 @@ def build(variant=""):
 check.benchmark<@{kn}_case> @{kn}_bm
 """)
     if variant in ("", "sb") or variant in NATIVE:
-        out += cold_cases(os.environ.get("KB_OUTDIR"))
+        out += cold_cases(os.environ.get("KB_OUTDIR")) + real_cases()
     return out
 
 
