@@ -24,7 +24,8 @@ class GateScopeTests(unittest.TestCase):
         prefix = GATES.split("t_start=$(date +%s)", 1)[0]
         with tempfile.TemporaryDirectory(prefix="gate native paths ") as temp:
             base = Path(temp)
-            scripts = base / "scripts"
+            scripts = base / "skills/loom-benchmark/scripts"   # card_lib reads the registry from skills/loom-kb
+            shutil.copytree(REPO / "skills/loom-kb", base / "skills/loom-kb", ignore=shutil.ignore_patterns("__pycache__"))
             (scripts / "card").mkdir(parents=True)
             shutil.copyfile(REPO / "skills/loom-benchmark/scripts/_lib.sh", scripts / "_lib.sh")
             shutil.copyfile(REPO / "skills/loom-benchmark/scripts/card/card_lib.py", scripts / "card/card_lib.py")

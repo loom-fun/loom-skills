@@ -1,0 +1,22 @@
+{
+  "schema": "loom-kb/format/1",
+  "format": "iq4_xs",
+  "ggml_type": "IQ4_XS",
+  "block_size": 256,
+  "bytes_per_block": 136,
+  "bits_per_weight": 4.25,
+  "low_bit": true,
+  "int8_path": false,
+  "moe": false,
+  "dequant_helper": "quant_values.loom (appended when used)",
+  "ktest": {
+    "matvec_int8": false,
+    "gemm_default": false,
+    "gemm_all": true
+  },
+  "devices_verified": {
+    "rdna3": true,
+    "rdna4": true
+  },
+  "evidence": "used by published packages (programs of the local copies define its dequant helper; all published packages are dual-target, built for gfx1151 and gfx1201)"
+}

@@ -16,8 +16,11 @@ import hashlib
 import json
 import os
 import re
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "loom-kb"))   # skills/loom-kb: devices, quants, methodology as data
+import registry  # noqa: E402
 SCHEMA_ID = "loom-card/3"
 LEGACY_SCHEMA_IDS = ("loom-card/2",)   # one GPU (Strix Halo): normalize() reads it as devices["strix-halo"]
 EVIDENCE_ID = "loom-card-evidence/2"
@@ -40,7 +43,8 @@ METRIC_KEYS = [k for k, _ in METRICS]
 # Sampling rule (methodology.md rule 5): every card value is the MEDIAN over sessions of each session's median sample. A fast model
 # (published or expected decode above FAST_DECODE_TPS tok/s: its rate is bimodal per serve session) gets SESSIONS_FAST sessions and
 # REPEAT_FAST samples per session of decode_2k, decode_32k and prefill_8k (perf.py --repeat-rows); the others SESSIONS sessions.
-FAST_DECODE_TPS, SESSIONS, SESSIONS_FAST, REPEAT_FAST = 100, 3, 6, 3
+_S = registry.methodology()["sessions"]
+FAST_DECODE_TPS, SESSIONS, SESSIONS_FAST, REPEAT_FAST = _S["fast_decode_tps"], _S["normal"], _S["fast"], _S["fast_repeat_rows"]
 
 
 def sampling_plan(decode_tps, fast_tps=FAST_DECODE_TPS):
@@ -124,20 +128,22 @@ BASE_TAGS = ["loom", "loom-serve", "gguf"]
 # name for the GPU; arch: its ISA; roofline: the loom-roofline roofline.py --device preset a card's ceilings use
 # (radeon-r9700s is the AMD DevLab Dispatch R9700S runner every R9700 measurement runs on); memory_bytes: the
 # memory loom-serve may use there (None: the package's own value); detect: what machine_info.py's GPU string says.
-GPUS = {
-    "strix-halo": {"name": 'AMD Ryzen AI Max+ 395 "Strix Halo"', "short": "Strix Halo", "arch": "gfx1151", "memory": None,
-                   "roofline": "strix-halo", "memory_bytes": None, "runner": "Strix Halo", "tag": "strix-halo",
-                   "detect": re.compile(r"strix|8060s|gfx1151", re.I)},
-    "radeon-r9700": {"name": "AMD Radeon AI PRO R9700", "short": "Radeon AI PRO R9700", "arch": "gfx1201", "memory": "32 GB",
-                     "roofline": "radeon-r9700s", "memory_bytes": 34_000_000_000, "runner": "R9700", "tag": "radeon-r9700",
-                     # loom-serve flags this GPU is served with (instead of --memory_bytes): fixed state backing. The default
-                     # elastic backing runs a synchronous trim + compaction (copying the retained KV pages, 0.3-0.5 s per ~1 GB)
-                     # after every session end, which stalls the next long prefill (perf.py --long's 8k/16k rows lost to
-                     # llama.cpp from the second round); fixed backing has no virtual state buffer to trim. It commits the
-                     # preset's pool_capacity eagerly, so the R9700 preset sizes the pool to the GPU (fixed_pool_capacity).
-                     "serve_args": ["--pool_backing=fixed"],
-                     "detect": re.compile(r"r9700|gfx1201|radeon ai pro", re.I)},
-}
+# The card's view of the registry's device rows (loom-kb/device/<family>/<device>/device.json):
+
+
+def _gpu_row(dev):
+    c = dev["card"]
+    row = {"name": dev["name"], "short": dev["short"], "arch": dev["gfx"], "memory": dev["memory"], "roofline": dev["roofline"]["default"],
+           "memory_bytes": dev["memory_bytes"], "runner": c["runner"], "tag": c["tag"],
+           "detect": re.compile(c["detect"]["pattern"], re.I if "i" in c["detect"].get("flags", "") else 0)}
+    if c.get("serve_args"):
+        row["serve_args"] = list(c["serve_args"])
+    if dev.get("preset_suffix"):
+        row["preset_suffix"] = dev["preset_suffix"]
+    return row
+
+
+GPUS = {k: _gpu_row(d) for k, d in registry.devices().items()}
 DEFAULT_GPU = "strix-halo"   # a card of loom-card/2 and evidence that names no GPU
 # The R9700 pool: the board reports 31.86 GiB (34.2 GB) of VRAM and the driver reserves part of it, so loom-serve gets
 # 34.0 GB (31.67 GiB): below what the board reports, above the 33.2 GB the largest package that fits at its native
@@ -687,8 +693,9 @@ def gpu_preset(facts, gpu):
     """The preset a GPU's Quick start fetches: `<first preset>-r9700` on the R9700 when the package has one (build.py
     --prefill-r9700: a larger prefill chunk, same programs), else the default preset (None when the package has one)."""
     first = (facts.get("presets") or [None])[0]
-    alt = f"{first}-r9700"
-    if gpu == "radeon-r9700" and first and alt in facts["presets"]:
+    suffix = (GPUS.get(gpu) or {}).get("preset_suffix", "")
+    alt = f"{first}{suffix}"
+    if suffix and first and alt in facts["presets"]:
         return alt
     return facts.get("preset")
 
@@ -737,7 +744,7 @@ def gpu_preset_name(model_or_presets):
     """`<first preset>-r9700`: the preset a package carries for the R9700 when its serving settings differ from model.json's
     default preset (Strix Halo's)."""
     presets = model_or_presets.get("presets", model_or_presets) if isinstance(model_or_presets, dict) else model_or_presets
-    return f"{next(iter(presets))}-r9700"
+    return f"{next(iter(presets))}{GPUS['radeon-r9700']['preset_suffix']}"
 
 
 def gpu_preset_execution(row, served_ctx=None):

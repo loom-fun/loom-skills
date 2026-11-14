@@ -1,0 +1,202 @@
+{
+  "schema": "loom-kb/methodology/1",
+  "normative_text": "method/methodology.md",
+  "rows": {
+    "decode": {
+      "label": "decode tok/s, short prompt",
+      "band": 0.03,
+      "reject": 0.92,
+      "kind": "decode",
+      "context": 0,
+      "streams": 1
+    },
+    "decode_2k": {
+      "label": "decode tok/s, 2k context",
+      "band": 0.04,
+      "reject": 0.92,
+      "kind": "decode",
+      "context": 2000,
+      "streams": 1
+    },
+    "decode_32k": {
+      "label": "decode tok/s, 32k context",
+      "band": 0.03,
+      "reject": 0.92,
+      "kind": "decode",
+      "context": 32000,
+      "streams": 1
+    },
+    "prefill_1k": {
+      "label": "prefill tok/s, 1k document",
+      "band": 0.03,
+      "reject": 0.94,
+      "kind": "prefill",
+      "context": 1000,
+      "streams": 1
+    },
+    "prefill_2k": {
+      "label": "prefill tok/s, 2k document",
+      "band": 0.03,
+      "reject": 0.94,
+      "kind": "prefill",
+      "context": 2000,
+      "streams": 1
+    },
+    "prefill_8k": {
+      "label": "prefill tok/s, 8k document",
+      "band": 0.02,
+      "reject": 0.95,
+      "kind": "prefill",
+      "context": 8000,
+      "streams": 1
+    },
+    "prefill_16k": {
+      "label": "prefill tok/s, 16k document",
+      "band": 0.02,
+      "reject": 0.95,
+      "kind": "prefill",
+      "context": 16000,
+      "streams": 1
+    },
+    "prefill_32k": {
+      "label": "prefill tok/s, 32k document",
+      "band": 0.02,
+      "reject": 0.95,
+      "kind": "prefill",
+      "context": 32000,
+      "streams": 1
+    },
+    "streams4": {
+      "label": "4 streams, aggregate decode tok/s",
+      "band": 0.04,
+      "reject": 0.92,
+      "kind": "decode",
+      "context": 0,
+      "streams": 4
+    },
+    "spec_acceptance": {
+      "label": "speculative decoding, drafted tokens accepted",
+      "band": 0.03,
+      "reject": null,
+      "kind": "acceptance",
+      "context": 0,
+      "streams": 1,
+      "note": "a ratio of acceptance rates; not in the plan's calibration, keeps the flat band it always had"
+    }
+  },
+  "row_aliases": {
+    "c4": "streams4",
+    "c4_steady": "streams4"
+  },
+  "default_band": 0.03,
+  "band_note": "Per-row bands for A/B verdicts (same-runner, ABBA): half-width of the interval around ratio 1.0 inside which a row PASSes. Calibrated from the 63 phase-3 A/B files (spread within one side, p50/p90): prefill_8k/16k/32k 0.6/2.6, 0.4/1.4, 0.3/0.9 %; prefill_1k/2k 1.3/5.0, 0.8/3.5 %; decode, decode_32k 1.6/9.2, 1.5/6.8 %; decode_2k, streams4 4.0/10.0, 1.8/8.4 %. reject: the T1 (2 sessions per side) ratio below which a change is rejected.",
+  "tie_band": 0.03,
+  "tie_band_note": "Card outcome of a row against the better llama.cpp backend (rule 7): win > +3 %, tie within +-3 %, loss < -3 %. Flat on purpose: a card prints the band it was measured with and must not change when A/B bands do.",
+  "statistic": "median over sessions of each session's median sample (rule 5), Loom and llama.cpp alike",
+  "sessions": {
+    "normal": 3,
+    "fast": 6,
+    "fast_decode_tps": 100,
+    "fast_repeat_rows": 3,
+    "repeat_rows": [
+      "decode_2k",
+      "decode_32k",
+      "prefill_8k"
+    ],
+    "streams4": "the median of its c4_steady.py runs (a session's runs, then the median over sessions)"
+  },
+  "sequential": {
+    "start_sessions_per_side": 2,
+    "extend_to": 6,
+    "extend_within": 0.02,
+    "note": "T1: start at 2+2 sessions; when a ratio falls within 2 points of its reject threshold extend to 6+6"
+  },
+  "bimodal_models": [
+    "Qwen2.5-0.5B",
+    "Qwen3-0.6B"
+  ],
+  "bimodal_note": "two decode modes ~10 % apart on both packages; compare sessions within a mode, never a silent pass when the slow mode's frequency moves",
+  "roofline": {
+    "at_ceiling": 0.03,
+    "note": "roofline.py: a measured row within this fraction of its ceiling is at the ceiling (no headroom to chase)"
+  },
+  "draft_tuning": {
+    "min_gain": 1.03,
+    "no_loss": 0.98,
+    "note": "draft/tune.py and llama_spec_tune.py: a drafter is used when the single-stream rate gains >= min_gain and no row is slower than no_loss x depth 0 (development loop, not a card number)"
+  },
+  "gates": {
+    "note": "gates.sh LEVEL; the gate names are the card's gate rows (card_lib.gate_applies decides which apply to a package)",
+    "levels": {
+      "dev": {
+        "gates": [
+          "consistency",
+          "agent",
+          "agent_think_off",
+          "golden",
+          "compare",
+          "vision",
+          "sampling",
+          "spec"
+        ],
+        "golden": "12 short prompts + 1k/2k documents",
+        "sampling": "no 200-draw distribution",
+        "use": "after each kept change in optimize / improve"
+      },
+      "fast": {
+        "gates": [
+          "golden",
+          "compare",
+          "vision",
+          "consistency"
+        ],
+        "golden": "20 short prompts + 1k-32k documents"
+      },
+      "quick": {
+        "gates": [
+          "golden",
+          "compare",
+          "vision",
+          "consistency",
+          "spec",
+          "agent",
+          "agent_think_off",
+          "sampling"
+        ],
+        "checks": [
+          "context_admit"
+        ],
+        "use": "nightly; once before a new port's first card"
+      },
+      "full": {
+        "alias_of": "quick",
+        "use": "the default; the final build, once"
+      }
+    }
+  },
+  "baselines": {
+    "note": "llama.cpp builds every Loom-vs-llama.cpp comparison on that device uses (one pinned build per backend, same job as Loom)",
+    "strix-halo": {
+      "rocm": {
+        "build": "per card (nightly-models.json llamacpp)",
+        "fallback": "b1374"
+      },
+      "vulkan": {
+        "build": "b12211"
+      }
+    },
+    "radeon-r9700": {
+      "rocm": {
+        "build": "b1375"
+      },
+      "vulkan": {
+        "build": "b12211"
+      }
+    }
+  },
+  "ratchet": {
+    "rule": "promote a (model, GPU) package when every row >= baseline - band, gates pass, and greedy text matches or is a near-tie",
+    "improvements": "reach a card only after 2 confirming runs",
+    "store": "fleet/baselines.json"
+  }
+}

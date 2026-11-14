@@ -37,6 +37,9 @@ ap.add_argument("--llama-reps", type=int, default=2)
 ap.add_argument("--suffix", default="", help="appended to the job name (a confirming re-run: -r2)")
 a = ap.parse_args()
 
+GPU = "strix-halo"
+DEV = card_lib.registry.device(GPU)   # runner key and llama.cpp baselines: skills/loom-kb (device.json, methodology.json)
+BASE = card_lib.registry.methodology()["baselines"][GPU]
 models = {m["repo"].split("/")[-1]: m for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
 jobs = []
 
@@ -59,8 +62,8 @@ for slug in a.slugs:
     nc = 4 if rr > 1 else 2
     name = ("sab-" + slug.lower().replace(".", "-"))[:40 - len(a.suffix)] + a.suffix
     jobs.append({
-        "name": name, "runner": "strix", **({"repeat_rows": rr} if rr > 1 else {}), "card": f"{a.new_org}/{slug}", "memory_bytes": m["memory_bytes"],
-        "kit": m["kit"], "llamacpp": m.get("llamacpp") or "b1374", "llamacpp_vulkan": "b12211",
+        "name": name, "runner": DEV["runner"]["key"], **({"repeat_rows": rr} if rr > 1 else {}), "card": f"{a.new_org}/{slug}", "memory_bytes": m["memory_bytes"],
+        "kit": m["kit"], "llamacpp": m.get("llamacpp") or BASE["rocm"]["fallback"], "llamacpp_vulkan": BASE["vulkan"]["build"],
         "variants": [{"name": "fun", "card": old}, {"name": "staging"},
                      {"name": "funnd", "card": old, "execution": {"draft_depth": 0}},
                      {"name": "stagingnd", "execution": {"draft_depth": 0}}],
@@ -76,7 +79,7 @@ for slug in a.slugs:
                                                f"llama@vulkan.np1:{a.llama_reps}", f"llama@vulkan.np1:{a.llama_reps}:long", "llamac4@vulkan.perslot.nodraft"])]})
 exp = {"_comment": "Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, "
                    f"{a.old_org} package (fun) vs {a.new_org} package (staging), same prompts and settings; compare with strix_ab_compare.py",
-       "runner": "strix", "memory_bytes": jobs[0]["memory_bytes"], "llama_spec": "matched", "jobs": jobs,
+       "runner": DEV["runner"]["key"], "memory_bytes": jobs[0]["memory_bytes"], "llama_spec": "matched", "jobs": jobs,
        "card": jobs[0]["card"], "kit": None, "llamacpp": jobs[0]["llamacpp"]}
 json.dump(exp, sys.stdout, indent=1)
 print()

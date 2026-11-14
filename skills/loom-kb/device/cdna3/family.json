@@ -1,0 +1,18 @@
+{
+  "schema": "loom-kb/family/1",
+  "family": "cdna3",
+  "status": "planned",
+  "order": 2,
+  "gfx_generic": null,
+  "target_symbol": null,
+  "twin_suffix": null,
+  "base": false,
+  "dual_target": false,
+  "wave_size": 64,
+  "matrix": {
+    "isa": "mfma",
+    "fragment": null
+  },
+  "devices": [],
+  "note": "gfx9xx / MI300: wave64, MFMA instead of WMMA, different LDS and matrix layouts. A regex rewrite of the RDNA3 text cannot produce good MFMA kernels: each matrix-kernel family needs its own emitter."
+}

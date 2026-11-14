@@ -1,0 +1,20 @@
+{
+  "schema": "loom-kb/family/1",
+  "family": "rdna3",
+  "status": "supported",
+  "order": 0,
+  "gfx_generic": "gfx11-generic",
+  "target_symbol": "rdna3",
+  "twin_suffix": "",
+  "base": true,
+  "dual_target": true,
+  "wave_size": 32,
+  "matrix": {
+    "isa": "wmma16",
+    "fragment": "vector<16xf16>"
+  },
+  "devices": [
+    "strix-halo"
+  ],
+  "note": "The base target of every program file: a kernel K carries target(@rdna3) and nothing else of its text changes. gfx1100 (discrete RDNA3) shares gfx11-generic: a device row, no new kernels."
+}

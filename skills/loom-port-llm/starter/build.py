@@ -913,7 +913,8 @@ if a.prefill_r9700 and a.prefill_r9700 != a.prefill:
     first = next(iter(card["presets"]))
     alt = copy.deepcopy(card["presets"][first])
     alt["execution"]["prefill_capacity"] = a.prefill_r9700
-    card["presets"][f"{first}-r9700"] = alt
+    import dual_target
+    card["presets"][f"{first}{dual_target.R9700_PRESET_SUFFIX}"] = alt
 # Dual-target (RDNA3 + RDNA4) programs: every program file that has a `K_rdna4` twin kernel selects it per device
 # (dual_target.py; LOOM_RDNA4=0 turns it off, and files without twins are left as they are).
 import dual_target  # noqa: E402

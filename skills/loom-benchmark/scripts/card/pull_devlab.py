@@ -30,7 +30,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import EVIDENCE_ID, GPUS, load_json, programs_sha256, write_json  # noqa: E402
+from card_lib import DEFAULT_GPU, EVIDENCE_ID, GPUS, registry, load_json, programs_sha256, write_json  # noqa: E402
 from make_info import acceptance  # noqa: E402
 
 GH_REPO = "loom-fun/loom-skills"
@@ -97,9 +97,8 @@ def perf_identity(d, gpu=None):
         except OSError:
             return ""
     runner = read("runner.txt").strip()
-    device = ({"cpu": f"AMD Strix Halo (DevLab Dispatch runner {runner})", "gpu": None, "os": "Linux"} if runner else None)
-    if device and gpu == "radeon-r9700":
-        device = {"cpu": f"DevLab Dispatch runner {runner}", "gpu": "AMD Radeon AI PRO R9700S (gfx1201)", "os": "Linux"}
+    blk = registry.devices()[gpu if gpu in GPUS else DEFAULT_GPU]["devlab_device_block"]   # the runner's machine description, per GPU (device.json)
+    device = {k: (v.format(runner=runner) if v else v) for k, v in blk.items()} if runner else None
     if device:
         device = {k: v for k, v in device.items() if v}
     log = read("install.log")

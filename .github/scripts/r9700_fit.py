@@ -36,8 +36,9 @@ ap = argparse.ArgumentParser()
 ap.add_argument("slugs", nargs="*")
 ap.add_argument("--pkgs", default=os.path.expanduser("~/lt/r9700/pkgs"))
 ap.add_argument("--work", default=os.path.expanduser("~/lt/r9700stg/eng/fit_work"))
-ap.add_argument("--fit", default=os.path.join(ROOT, ".github", "devlab", "r9700_fit.json"))
-ap.add_argument("-o", "--out", default=os.path.join(ROOT, ".github", "devlab", "r9700_fit.json"))
+FIT_TABLE = os.path.join(ROOT, card_lib.registry.device("radeon-r9700")["fit_table"])   # device.json
+ap.add_argument("--fit", default=FIT_TABLE)
+ap.add_argument("-o", "--out", default=FIT_TABLE)
 a = ap.parse_args()
 if a.work.startswith("/tmp"):
     sys.exit("--work must not be under /tmp (RAM)")
