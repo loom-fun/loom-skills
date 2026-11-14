@@ -20,7 +20,7 @@ import sys
 
 import requests
 
-from bench_common import Package, llama_greedy, near_tie_at, text_divergence, top_logprobs
+from bench_common import Package, llama_greedy, near_tie, near_tie_at, text_divergence, top_logprobs
 
 TOOLS = [
     {"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city.",
@@ -139,6 +139,47 @@ def call_whitespace(P, raw, gids, d):
     return raw, d
 
 
+def whitespace_ties(P, llama, prompt_ids, raw, finished, tops_at=None):
+    """The whitespace the parsed reply cannot show: before each call after the first (the rebuild prints the template's
+    call separator) and after the last call, before the stop token. loom-serve retains the tokens the model generated and
+    reuses them only when the next prompt extends the text it generated (control.loom complete_text: the reply must equal
+    the canonical rendering byte for byte), so a model that wrote another whitespace there ("\\n\\n" between two calls
+    where the template prints "\\n") leaves nothing exact to reuse, as llama.cpp itself would decode on from the
+    difference. -> [(offset, template's text, other whitespace token, log-prob gap)] for each such position where
+    llama.cpp, given Loom's own text before it, puts a whitespace-only token within the near-tie rule of the template's
+    token (bench_common.near_tie_at): the model's choice there is a coin flip, not a Loom bug. A whitespace token
+    llama.cpp ranks far below the template's (the model is sure) is no excuse. TOPS_AT(ids) -> {id: logprob} is llama.cpp's
+    top list after ids (a test hook)."""
+    marker = P.chat.get("call_marker")
+    if not marker or marker not in raw:
+        return []
+    starts, at = [], raw.find(marker)
+    while at >= 0:
+        starts.append(at)
+        at = raw.find(marker, at + 1)
+    stop = P.ids(P.chat.get("terminal") or "")[:1]
+    spots = [(starts[k], raw[:starts[k]].rstrip(), raw[len(raw[:starts[k]].rstrip()):starts[k]]) for k in range(1, len(starts))]
+    tail = raw.rstrip()
+    if finished and stop and raw[len(tail):] == "":
+        spots.append((len(raw), tail, None))   # the stop token follows the last call
+    def tops(ids):
+        if tops_at:
+            return tops_at(ids)
+        _, _, cp = llama_greedy(llama, ids, 1, P, n_probs=8)
+        return top_logprobs(cp, 0) if cp else {}
+    ties = []
+    for pos, before, ws in spots:
+        canon = P.ids(ws + marker)[:1] if ws else stop
+        top = tops(list(prompt_ids) + P.ids(before))
+        if not canon or canon[0] not in top:
+            continue
+        for tid in top:
+            text = P.tok.decode([tid], skip_special_tokens=False)
+            if tid != canon[0] and text and not text.strip() and near_tie(top, canon[0], tid):
+                ties.append((pos, ws if ws else P.chat.get("terminal"), text, round(top[canon[0]] - top[tid], 3)))
+    return ties
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pkg")
@@ -206,6 +247,16 @@ def main():
             else:
                 rec["history_verbatim"] = True
             rec["reuse_ok"] = step == 0 or not rec["history_verbatim"] or rec["cached"] >= 0.8 * prev_total
+            if step and not rec["reuse_ok"] and rec["cached"] == 0 and a.llama and turns[-1]["calls"] and prev_text.startswith(prev_prompt):
+                # Nothing was reused although the history is an exact extension of the rebuilt output. The rebuild prints the
+                # template's whitespace between calls and before the stop; where the model's own whitespace there is a coin
+                # flip for llama.cpp too (a near-tie of the template's), the retained tokens differ from the rebuilt text and
+                # loom-serve rightly replays the history.
+                ties = whitespace_ties(P, a.llama, prev_ids, prev_text[len(prev_prompt):], turns[-1]["finish"] in ("stop", "tool_calls"))
+                if ties:
+                    rec["reuse_ok"], rec["reuse_waived"] = True, ties
+                    print(f"     note: nothing was reused; the previous reply's whitespace is a near-tie for llama.cpp at {ties}: "
+                          "the model may have written another whitespace than the template prints, so the retained tokens are no exact prefix", flush=True)
             calls_ok = True
             for c in m.get("tool_calls") or []:
                 try:
