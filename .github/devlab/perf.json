@@ -5,20 +5,18 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "bartowski-mellum2-1-12b-a2-5b-thinking-l",
+   "card": "loom-fun-staging/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 27000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "card"
     },
     {
      "name": "nodraft",
-     "build": {},
      "execution": {
       "draft_depth": 0
      }
@@ -38,9 +36,220 @@
     "llama@vulkan.np1:3:long",
     "llamac4@vulkan.perslot.nodraft"
    ]
+  },
+  {
+   "name": "unsloth-gpt-oss-20b-loom",
+   "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
+   "kit": "gpt-oss",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 28000000000,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "ggml-org-flint-loom",
+   "card": "loom-fun-staging/ggml-org-Flint-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "ggml-org-lfm2-5-24b-a2b-loom",
+   "card": "loom-fun-staging/ggml-org-LFM2.5-24B-A2B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 24000000000,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "strix-ab-mellum",
+   "runner": "strix",
+   "card": "loom-fun-staging/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
+   "memory_bytes": 27000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom"
+    },
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "ab:4",
+    "perf:fun:3",
+    "perf:staging:3",
+    "c4:fun",
+    "c4:staging",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "strix-ab-gpt-oss",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
+   "memory_bytes": 28000000000,
+   "kit": "gpt-oss",
+   "llamacpp": "b1374",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/unsloth-gpt-oss-20b-loom"
+    },
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "ab:4",
+    "perf:fun:3",
+    "perf:staging:3",
+    "c4:fun",
+    "c4:staging",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "strix-ab-flint",
+   "runner": "strix",
+   "card": "loom-fun-staging/ggml-org-Flint-loom",
+   "memory_bytes": 69000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/ggml-org-Flint-loom"
+    },
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "ab:4",
+    "perf:fun:3",
+    "perf:staging:3",
+    "c4:fun",
+    "c4:staging",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "strix-ab-lfm25",
+   "runner": "strix",
+   "card": "loom-fun-staging/ggml-org-LFM2.5-24B-A2B-loom",
+   "memory_bytes": 24000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/ggml-org-LFM2.5-24B-A2B-loom"
+    },
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "ab:4",
+    "perf:fun:3",
+    "perf:staging:3",
+    "c4:fun",
+    "c4:staging",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging"
+   ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
