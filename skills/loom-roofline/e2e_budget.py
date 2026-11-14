@@ -55,23 +55,20 @@ def speeds(meta, tensors, cfg):
 
 def workload(dec, pre, context):
     """Seconds of pure measurement/gate work, from the token counts the scripts send."""
-    cmp_n = min(context // 2, 61440)
     longs = [n for n in (1000, 2000, 16000, 32000) if n + 2000 <= context]
     t = {}
     # golden (one engine): 20 short prompts x 64 tokens + one 64-token answer per long document
     golden = 20 * (40 / pre(40) + 64 / dec(600)) + sum(n / pre(n) + 64 / dec(n) for n in longs)
     agent = 6 * (150 / dec(600)) + 3500 / pre(600)
     sampling = 216 * (40 / pre(40) + 1 / dec(40)) + 16 * 16 / dec(40)
-    needle_cmp = cmp_n / pre(cmp_n) + 40 / dec(cmp_n)
     consistency = 12 * (300 / pre(300) + 40 / dec(300))
     perf_short = 300 / dec(40) + 10 * (1500 / pre(1500)) + 2000 / pre(2000) + 256 / dec(2000)
     perf_long = sum(n / pre(n) for n in (8000, 16000, 32000, 32000) if n + 2000 <= context) + 128 / dec(32000)
     c4 = 4 * 400 / (dec(600) * C4_GAIN)
     picker = 2 * (200 / dec(40) + 1000 / pre(1000) + 30)       # two builds, each with a model load
-    t["qualify"] = picker + 2 * (golden + agent + sampling + needle_cmp) + consistency \
+    t["qualify"] = picker + 2 * (golden + agent + sampling) + consistency \
         + 2 * (perf_short + perf_long + c4)
-    full_probe = (context - 2048) / pre(context - 2048)
-    t["finalize"] = 2 * (2 * perf_short + perf_long + c4) + golden + agent + sampling + consistency + full_probe
+    t["finalize"] = 2 * (2 * perf_short + perf_long + c4) + golden + agent + sampling + consistency
     return t
 
 

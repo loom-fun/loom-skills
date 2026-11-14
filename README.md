@@ -114,8 +114,6 @@ The skills use these validation gates to assess whether a model program is corre
 | Sampling (`sampling`) | Checks greedy behavior, seeded reproducibility and sampling distributions |
 | Vision (`vision`) | Compares image-conditioned outputs with llama.cpp when image input is enabled |
 | Drafting (`spec`) | Checks that speculative decoding preserves undrafted output |
-| Long context (`needle`) | Checks retrieval from a long prompt against llama.cpp |
-| Context limit (`needle_full`) | Checks retrieval at the configured context limit on Loom alone |
 
 ## Runtime requirements
 

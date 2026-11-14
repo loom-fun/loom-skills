@@ -213,16 +213,9 @@ serve.sh: --device=amdgpu://?completion_spin_ns=4294967295  # active wait
 
 #### [DevLab Dispatch run 43376610754](https://github.com/loom-fun/loom-skills/actions/runs/43376610754), LEVEL=full, 2026-11-13
 
-- Gates: `golden` pass, `compare` pass, `consistency` pass, `agent` pass, `agent_think_off` pass, `sampling` pass, `needle` pass.
+- Gates: `golden` pass, `compare` pass, `consistency` pass, `agent` pass, `agent_think_off` pass, `sampling` pass.
 - Device: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 24.04.
 - Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).
-- Programs: sha256 `34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b`, the same as this repository's programs.
-
-#### [DevLab Dispatch run 42445355675](https://github.com/loom-fun/loom-skills/actions/runs/42445355675/job/128623039814), LEVEL=full, 2026-11-08
-
-- Gates: `needle_full` pass.
-- Device: not recorded.
-- Loom SDK: hrx-loom unknown.
 - Programs: sha256 `34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b`, the same as this repository's programs.
 
 ## AMD Radeon AI PRO R9700 (gfx1201, 32 GB)
@@ -295,7 +288,7 @@ serve.sh: --device=amdgpu://?completion_spin_ns=4294967295  # active wait
 
 #### [DevLab Dispatch run 9000001](https://github.com/loom-fun/loom-skills/actions/runs/9000001), LEVEL=quick, 2026-11-14
 
-- Gates: `golden` pass, `compare` pass, `consistency` pass, `agent` pass, `agent_think_off` pass, `sampling` pass, `needle` pass.
+- Gates: `golden` pass, `compare` pass, `consistency` pass, `agent` pass, `agent_think_off` pass, `sampling` pass.
 - Device: TEST FIXTURE: made-up numbers, not a measurement, AMD Radeon AI PRO R9700S (gfx1201), Ubuntu 24.04.
 - Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).
 - Programs: sha256 `34567d07861dab33a62a27d6fd87c611bca98b1247bd3ab73c459449d07ed85b`, the same as this repository's programs.

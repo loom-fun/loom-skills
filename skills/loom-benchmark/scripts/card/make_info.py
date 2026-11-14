@@ -99,7 +99,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, MEDIAN_METRICS, METRIC_KEYS, PERF_SOURCE_KINDS,  # noqa: E402
-                      HF, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
+                      HF, RETIRED_GATES, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM)
@@ -291,7 +291,7 @@ def cmd_build(a):
                           + ("" if a.reset_performance else " not measured on DevLab"), file=sys.stderr)
                 st["baselines"] = json.loads(json.dumps(dev["performance"].get("baselines") or {}))
             for name, g in (dev.get("gates") or {}).items():   # a published gate has a date, not a time: later evidence that day wins
-                if not gate_applies(name, facts["kind"], facts["features"]):   # e.g. spec after drafting was turned off: shown n/a
+                if name in RETIRED_GATES or not gate_applies(name, facts["kind"], facts["features"]):   # e.g. spec after drafting was turned off: shown n/a
                     continue
                 st["gates"][name] = ((g.get("date") or "", -1), None, g)
             st["roofline"] = dev.get("roofline")
@@ -349,6 +349,8 @@ def cmd_build(a):
                 s["source"] = sources.add(s["source"])
                 st["sessions"].append({k: v for k, v in s.items() if v is not None or k in ("date",)})
         for g in ev.get("gates") or []:
+            if g["name"] in RETIRED_GATES:   # evidence from before the needle gates were removed
+                continue
             gst = gpu_state(g.get("gpu") or evidence_gpu(ev, g.get("source")))
             gst["data"] = True
             new = ((g.get("time") or "", i), g, None)

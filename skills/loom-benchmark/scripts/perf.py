@@ -12,7 +12,7 @@ prefix cache can help):
                     median (and min/max) of --repeats runs; single samples vary up to 2x
   decode_tps_2k     256-token generation after a 2k document (decode with KV in use)
   --long: prefill 8k/16k/32k documents and decode_tps_32k (128 tokens after 32k). A long request the server
-                    refuses with HTTP 400 (its answer to a prompt over its context: the needle gate checks it) is
+                    refuses with HTTP 400 (its answer to a prompt over its context) is
                     skipped and logged in out["over_context"] (roofline.json metric names; out["nonce"] lets
                     make_info.py perf re-render and count it); the other sizes are kept. A tokenizer can make the
                     "32k" document longer than a 32768-token native context (34.9k tokens for Gemma 3).

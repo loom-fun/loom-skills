@@ -15,7 +15,7 @@ SRC=(--device "$F/evidence/device.json" --hrx-loom "$F/evidence/hrx_loom.json" -
 # a current card: a stamped package (llm_config.json "generator"), drafting, a DevLab perf session (devlab-perf), a
 # second session that re-measured two rows a day later on another build of the programs (stale: the card marks those
 # rows; its decode rows carry their drafted-token acceptance), DevLab quick gates with the spec gate's acceptance, and
-# nightly DevLab gates (an older failing agent run that the later pass supersedes, a full-context needle); REPORT.md
+# nightly DevLab gates (an older failing agent run that the later pass supersedes, retired needle gates, which build drops); REPORT.md
 # generated.
 py "$C/make_info.py" perf --loom-jsonl "$F/evidence/loom.jsonl" --llama-jsonl "$F/evidence/llama.jsonl" \
   --c4-loom "$F/evidence/c4_loom_runs.txt" --c4-llama "$F/evidence/c4_llama_runs.txt" --baseline-version b1355 \

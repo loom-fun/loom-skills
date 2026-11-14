@@ -73,7 +73,6 @@ for slug in a.slugs:
     jobs.append({
         "name": name, "runner": "strix", "card": f"{a.new_org}/{slug}", "memory_bytes": m["memory_bytes"],
         "kit": m["kit"], "llamacpp": m.get("llamacpp") or "b1374", "llamacpp_vulkan": "b12211",
-        "env": {"SKIP_NEEDLE": "1"},   # user: no needle gates in the A/B (needle / full context stay nightly)
         "variants": [{"name": "fun", "card": old}, {"name": "staging"},
                      {"name": "funnd", "card": old, "execution": {"draft_depth": 0}},
                      {"name": "stagingnd", "execution": {"draft_depth": 0}}],

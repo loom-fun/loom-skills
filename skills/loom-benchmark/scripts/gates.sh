@@ -8,25 +8,21 @@
 #                 and off when the template toggles it), golden + compare (12 short prompts + 1k/2k documents),
 #                 vision (2 images, with a projector), spec (5-6 short requests drafted vs undrafted, when the
 #                 package drafts), sampling (temperature 0 == greedy, seed reproduces; no 200-draw
-#                 distribution), needle at 16k (compared with llama.cpp, no over-capacity probe).
+#                 distribution).
 #               Audit of the 26-29 sessions: consistency 3 real bugs, agent 3-4, compare 2 (first bring-up),
-#               needle_full 1 class, spec 0-1; vision, sampling and half-context needle 0. quick/full run nightly
+#               spec 0-1; vision and sampling 0. quick/full run nightly
 #               on the published cards (.github/workflows/nightly-gates.yml).
 #   LEVEL=fast  golden + compare (20 short prompts + 1k-32k documents) and consistency (concurrent == sequential).
 #   LEVEL=quick (nightly CI; once before a new port's first card): fast + speculative-decoding equivalence (spec_check.py, when the package
-#               drafts), agent tool loop (thinking on, and off when the template toggles it, as at dev), sampling, needle at half the context
-#               (at most 60k) compared with llama.cpp by the near-tie rule.
+#               drafts), agent tool loop (thinking on, and off when the template toggles it, as at dev), sampling, and the context admission
+#               probe (below).
 #   NO_LLAMA=1  no llama.cpp runs this model: reference-free checks only (consistency, agent rendering/
-#               reuse/calls, sampling semantics, needle retrieval); report correctness as unverified.
-#   LEVEL=full  (default; the final build, once): quick + one Loom-only probe at the full context
-#               (proves the whole context is served). QUICK=1 is an alias for LEVEL=quick.
-#   NEEDLE_FULL=0 LEVEL=full without that probe: it is deferred (gates.json "deferred": ["needle_full"],
-#   SKIP_NEEDLE=1 explicitly exclude ALL needle tests at every level (user-requested scoped trials).
-#               The omission is recorded in gates.json, never counted as a passed gate.
-#               an audit WARN, not a FAIL). It has caught one class of bug (a KV pool under the context,
-#               which build.py now warns about) at a median of ~8 min and up to an hour per run, so a
-#               harness may run it separately: a later LEVEL=full run on the same build re-uses every
-#               other gate and runs only the probe.
+#               reuse/calls, sampling semantics); report correctness as unverified.
+#   LEVEL=full  (default; the final build, once): quick. QUICK=1 is an alias for LEVEL=quick.
+# Context admission (quick and full; a check, not a gate: no gate row, no card row): ctx_admit.py sends one request of
+# ~the package's native context_capacity and cancels it once the server has accepted it (seconds, no long prefill). A
+# refusal (4xx/503: a KV pool or memory budget below the context) fails the run: gates.json "context_admit"
+# {"admitted", "tokens", "context", "detail"} (make_info.py ignores it), a "CONTEXT_ADMIT FAIL ..." line precedes the GATES line, which says FAIL (exit 1).
 # llama.cpp references are cached in BENCH_DIR/llama_cache (they depend on the GGUF and the request,
 # not on the Loom build), so only the first run pays for them. llama-server starts lazily, on the
 # first cache miss: a later run that is fully cached never loads it. LLAMA_URL=http://... uses an
@@ -38,18 +34,15 @@ set -u
 level=${LEVEL:-full}; [ "${QUICK:-0}" = 1 ] && level=quick
 case $level in dev|fast|quick|full) ;; *) echo "LEVEL must be dev, fast, quick or full"; exit 2;; esac
 export LOOM_NO_AUDIT=1 LLAMA_CACHE=$bench/llama_cache
-# Long goldens that fit the context; the llama.cpp slot covers them (and needle sizes up to 64k).
+# Long goldens that fit the context; the llama.cpp slot covers them.
 long=$("$T" -c "print(','.join(str(n) for n in (1000, 2000, 16000, 32000) if n + 2000 <= $ctx))")
 slot=$("$T" -c "print(min($ctx, 65536) + 1024)")
-# LEVEL=dev: the needle size (16k, or half a smaller context) and a llama.cpp slot just large enough for it.
-dev_needle=$(( ctx / 2 < 16384 ? ctx / 2 : 16384 ))
-[ "$level" = dev ] && slot=$(( dev_needle + 4096 ))
 cd "$bench"
 defer=0
 # A package with image input: llama-server also loads its projector (MMPROJ), for the vision gate.
 MMPROJ=${MMPROJ:-$("$T" -c "import json; print((json.load(open('$pkg/llm_config.json')).get('vision') or {}).get('mmproj', ''))" 2>/dev/null)}; export MMPROJ
 if [ "${NO_LLAMA:-0}" = 1 ]; then
-  L=""   # Loom-only: no golden/compare; agent, sampling and needle run their reference-free checks
+  L=""   # Loom-only: no golden/compare; agent and sampling run their reference-free checks
 elif [ -n "${LLAMA_URL:-}" ]; then
   L=$LLAMA_URL   # an already running llama-server (both models loaded: only if memory allows)
 else
@@ -65,7 +58,7 @@ order=()
 # the inputs are identical (llama.cpp references are cached too). FORCE=1 re-runs everything.
 # A LEVEL=dev pass counts only for LEVEL=dev (its gates are lighter versions under the same names).
 pkg_hash=$(cat "$pkg/model.json" "$pkg"/program/*.loom 2>/dev/null | sha256sum | cut -c1-12)   # includes the vision programs
-passed_before() {  # passed_before NAME [NEEDLE_SIZE]
+passed_before() {  # passed_before NAME
   [ "${FORCE:-0}" = 1 ] && return 1
   [ -f gates_runs.jsonl ] || return 1
   "$T" - "$pkg_hash" "$1" "$level" <<'PY'
@@ -80,10 +73,6 @@ pending=()
 run() {  # run NAME CMD...: a gate whose llama.cpp references were all cached gets its verdict;
          # one with deferred references is pending and runs again after the fill
   local name=$1; shift; local t0=$(date +%s)
-  if [ "${SKIP_NEEDLE:-0}" = 1 ] && { [ "$name" = needle ] || [ "$name" = needle_full ]; }; then
-    echo "== $name: SKIPPED (SKIP_NEEDLE=1, explicit trial scope)"
-    return 0
-  fi
   [ -n "${done[$name]:-}" ] && return
   if passed_before "$name"; then
     echo "== $name: PASSED earlier on this exact build (pkg $pkg_hash), not re-run"
@@ -119,7 +108,6 @@ tools=$("$T" -c "import json, sys; sys.path.insert(0, '$S/card'); import card_li
 [ -n "$tools" ] || echo "== agent: skipped, tool calling unsupported by the chat template (not applicable)"
 t_start=$(date +%s)
 LL=(); [ -n "$L" ] && LL=(--llama "$L")
-cmp=$(( ctx / 2 < 61440 ? ctx / 2 : 61440 ))
 # Tool calling + history reuse (every level but fast): reasoning on, and off when the template toggles it (the card
 # lists agent_think_off for such packages, card_lib.gate_applies). Nothing without tool calling (not applicable).
 agent_gates() {
@@ -145,8 +133,6 @@ dev_gates() {
     [ -n "$MMPROJ" ] && run vision "$T" "$S/vision_golden.py" "$pkg" --url "$url" --llama "$L" --cases shapes,wide
   fi
   run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" "${LL[@]}" --draws 0
-  run needle "$T" "$S/needle.py" "$pkg" "$url" "${LL[@]}" --llama-max $(( slot - 1024 )) --out needle_dev.json \
-    --sizes $dev_needle --probes 1 --no-over-capacity
   # Last: it restarts Loom twice (drafting off, then on again).
   [ -n "$drafting" ] && run spec spec_gate
 }
@@ -174,17 +160,6 @@ all_gates() {
     [ -n "$drafting" ] && run spec spec_gate
     agent_gates
     run sampling "$T" "$S/sampling_check.py" "$pkg" "$url" "${LL[@]}"
-    # Needle: compared with llama.cpp (near-tie rule) up to the llama.cpp slot; the full-context
-    # probe (LEVEL=full) proves the size is served.
-    if [ "$level" = quick ] || [ "${NEEDLE_FULL:-1}" = 0 ]; then
-      # quick, or full with the probe deferred: the compared half-context needle only
-      run needle "$T" "$S/needle.py" "$pkg" "$url" "${LL[@]}" --llama-max $(( slot - 1024 )) --out needle.json --sizes $cmp --probes 1
-    else
-      # The compared half-context probe passed on this build already (qualify): only the full-context probe is new.
-      local sizes=(--sizes $cmp $(( ctx - 2048 )) --probes 1 --top-probes 1)
-      passed_before needle && sizes=(--sizes $(( ctx - 2048 )) --probes 1)
-      run needle_full "$T" "$S/needle.py" "$pkg" "$url" "${LL[@]}" --llama-max $(( slot - 1024 )) --out needle_full.json "${sizes[@]}"
-    fi
   fi
 }
 # Loom runs a gate kept across one invocation's deferred-reference rounds (consistency.py) never outlive it
@@ -203,27 +178,32 @@ for round in 1 2 3 4 5; do
   loom_up || { echo "FAIL: could not restart Loom after the llama.cpp fill"; exit 1; }
 done
 for p in "${pending[@]}"; do result[$p]=1; order+=("$p"); echo "== $p: references still pending after 5 rounds (FAIL)"; done
+# Context admission probe (quick, full): the server is up here; a check, not a gate (see the header).
+rm -f context_admit.json
+if [ "$level" = quick ] || [ "$level" = full ]; then
+  echo "== context admission"
+  "$T" "$S/ctx_admit.py" "$pkg" "$url" --out context_admit.json > gates_context_admit.log 2>&1 || true
+  [ -s context_admit.json ] || "$T" -c "import json; json.dump({'admitted': False, 'tokens': None, 'context': $ctx, 'detail': 'ctx_admit.py crashed (see gates_context_admit.log)'}, open('context_admit.json', 'w'))"
+  tail -2 gates_context_admit.log
+fi
 args=()
 for n in "${order[@]}"; do args+=("$n" "${result[$n]}" "${secs[$n]}"); done
 "$T" - "$level" "$pkg_hash" $(( $(date +%s) - t_start )) "${args[@]}" <<'EOF'
 import json, os, sys, time
 level, pkg_hash, total, rest = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4:]
-deferred = ["needle_full"] if level == "full" and os.environ.get("NEEDLE_FULL", "1") == "0" else []
 gates = {rest[i]: {"pass": rest[i + 1] == "0", "log": f"gates_{rest[i]}.log", "seconds": int(rest[i + 2])}
          for i in range(0, len(rest), 3)}
-verdict = "PASS" if all(g["pass"] for g in gates.values()) else "FAIL"
+admit = json.load(open("context_admit.json")) if os.path.exists("context_admit.json") else None
+verdict = "PASS" if all(g["pass"] for g in gates.values()) and (admit is None or admit["admitted"]) else "FAIL"
 out = {"verdict": verdict, "level": level, "pkg_hash": pkg_hash, "seconds": total,
        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "gates": gates}
-if deferred:
-    out["deferred"] = deferred
-if os.environ.get("SKIP_NEEDLE") == "1":
-    out["skipped"] = {"needle": "explicit trial scope (SKIP_NEEDLE=1)",
-                      "needle_full": "explicit trial scope (SKIP_NEEDLE=1)"}
-    out.pop("deferred", None)
+if admit is not None:   # a check, not a gate: not in "gates" (make_info.py and the card ignore it)
+    out["context_admit"] = admit
 json.dump(out, open("gates.json", "w"), indent=1)
 with open("gates_runs.jsonl", "a") as f:
     f.write(json.dumps(out) + "\n")
-print("GATES", verdict, f"level={level} {total}s", {n: ("PASS" if g["pass"] else "FAIL") for n, g in gates.items()},
-      *([f"deferred: {', '.join(deferred)}"] if deferred else []))
+if admit is not None:
+    print("CONTEXT_ADMIT", "PASS" if admit["admitted"] else "FAIL", admit["detail"])
+print("GATES", verdict, f"level={level} {total}s", {n: ("PASS" if g["pass"] else "FAIL") for n, g in gates.items()})
 sys.exit(0 if verdict == "PASS" else 1)
 EOF

@@ -1,4 +1,4 @@
-"""Verify explicit needle exclusion never executes a needle or fabricates a pass."""
+"""Gate scope: tool-calling applicability in gates.sh, and the retired needle gates."""
 import json
 import os
 from pathlib import Path
@@ -52,33 +52,18 @@ class GateScopeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertNotIn("tool calling unsupported", result.stdout)
 
-    def test_direct_needle_is_disabled_before_imports_or_requests(self):
-        result = subprocess.run(
-            [sys.executable, str(REPO / "skills/loom-benchmark/scripts/needle.py")],
-            env=dict(os.environ, SKIP_NEEDLE="1"), capture_output=True, text=True,
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("no request sent", result.stderr)
+    def test_no_needle_gates_remain(self):
+        self.assertNotIn("needle", GATES.lower())
+        self.assertFalse((REPO / "skills/loom-benchmark/scripts/needle.py").exists())
+        self.assertTrue((REPO / "skills/loom-benchmark/scripts/ctx_admit.py").is_file())
 
-    def test_shell_gate_dispatch_never_calls_excluded_commands(self):
-        bash = shutil.which("bash")
-        if os.name == "nt":
-            git = shutil.which("git")
-            candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-            bash = str(candidate) if candidate and candidate.is_file() else None
-        if not bash:
-            self.skipTest("Bash unavailable")
-        function = "run() {" + GATES.split("run() {", 1)[1].split("\n# Speculative decoding", 1)[0]
-        with tempfile.TemporaryDirectory() as temp:
-            script = "set -u\ndeclare -A result secs done\norder=(); defer=0\npassed_before() { return 1; }\n"
-            script += function + "\n"
-            script += 'run needle bash -c "touch forbidden"\nrun needle_full bash -c "touch forbidden"\n'
-            script += 'run consistency bash -c "echo real-gate > executed"\n'
-            result = subprocess.run([bash, "-c", script], cwd=temp, env=dict(os.environ, SKIP_NEEDLE="1"), capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse((Path(temp) / "forbidden").exists())
-            self.assertEqual((Path(temp) / "executed").read_text().strip(), "real-gate")
-            self.assertEqual(result.stdout.count("SKIPPED"), 2)
+    def test_retired_gates_are_dropped_from_old_cards(self):
+        sys.path.insert(0, str(REPO / "skills/loom-benchmark/scripts/card"))
+        import card_lib
+        old = {"schema": "loom-card/3", "devices": {"strix-halo": {"gates": {"golden": {"status": "pass"}, "needle": {"status": "pass"}, "needle_full": {"status": "pass"}}}}}
+        self.assertEqual(sorted(card_lib.normalize(old)["devices"]["strix-halo"]["gates"]), ["golden"])
+        self.assertIn("needle", old["devices"]["strix-halo"]["gates"])   # the input is not changed
+        self.assertNotIn("needle", card_lib.GATE_NAMES)
 
 
 if __name__ == "__main__":

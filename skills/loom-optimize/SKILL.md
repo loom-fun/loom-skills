@@ -84,7 +84,7 @@ choices are a starting point to re-measure on this model, never a result to copy
      (the compare rule, `bench_common.near_tie`). A new divergence with a large gap is a bug even
      if the text "looks fine".
    - a light touch of the rest: 2 images, 5–6 short drafted-vs-undrafted requests, sampling
-     semantics, a 16k needle.
+     semantics.
    The llama.cpp goldens come from the cache `qualify.sh` filled, so this costs only the Loom
    side (a few minutes; `loom-benchmark` has the measured times). Kernel tests (step 4) for every new or changed
    kernel and `chat_probe --verify` for a chat-glue change come first: they are cheaper and
