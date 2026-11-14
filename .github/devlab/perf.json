@@ -1,82 +1,28 @@
 {
  "_comment": "Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, loom-fun package (fun) vs loom-fun-staging package (staging), same prompts and settings; compare with strix_ab_compare.py",
  "runner": "strix",
- "memory_bytes": 31000000000,
+ "memory_bytes": 81000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "sab-unsloth-gemma-4-e4b-it-loom-r2",
+   "name": "sab-unsloth-gemma-4-12b-it-loom-r2",
    "runner": "strix",
-   "card": "loom-fun-staging/unsloth-gemma-4-E4B-it-loom@56d2a5f3983be461b4306b608bc23ac0a06d50f2",
-   "memory_bytes": 31000000000,
+   "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom@71cf24dd1f9d3c42132b24c2f4ed053314f173f8",
+   "memory_bytes": 81000000000,
    "kit": "gemma4",
    "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "fun",
-     "card": "loom-fun/unsloth-gemma-4-E4B-it-loom"
+     "card": "loom-fun/unsloth-gemma-4-12B-it-loom"
     },
     {
      "name": "staging"
     },
     {
      "name": "funnd",
-     "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "stagingnd",
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1",
-    "perf:fun:1",
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "perf:fun:1:long",
-    "perf:staging:1:long",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "c4:funnd",
-    "c4:stagingnd",
-    "c4:stagingnd",
-    "c4:funnd",
-    "textmatch:fun",
-    "textmatch:staging",
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "name": "sab-nvidia-nvidia-nemotron-3-5-bolt-e-r2",
-   "runner": "strix",
-   "card": "loom-fun-staging/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@5be70da34cc70aed70551b21e6e50b392fae4e40",
-   "memory_bytes": 36000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1374",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "fun",
-     "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom"
-    },
-    {
-     "name": "staging"
-    },
-    {
-     "name": "funnd",
-     "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+     "card": "loom-fun/unsloth-gemma-4-12B-it-loom",
      "execution": {
       "draft_depth": 0
      }
@@ -113,7 +59,7 @@
    ]
   }
  ],
- "card": "loom-fun-staging/unsloth-gemma-4-E4B-it-loom@56d2a5f3983be461b4306b608bc23ac0a06d50f2",
+ "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom@71cf24dd1f9d3c42132b24c2f4ed053314f173f8",
  "kit": null,
  "llamacpp": "b1374"
 }
