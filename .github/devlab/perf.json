@@ -21,130 +21,26 @@
      ]
     },
     {
-     "name": "rs",
-     "build": {},
+     "name": "pf",
+     "build": {
+      "FLASH2_PF": "1"
+     },
      "build_args": [
       "--prefill-r9700",
       "4096"
-     ],
-     "double": [
-      "*:g_row_scale_f16"
-     ]
-    },
-    {
-     "name": "norm",
-     "build": {},
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "double": [
-      "*:g_post_add_norm"
-     ]
-    },
-    {
-     "name": "fl256",
-     "build": {},
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "double": [
-      "*:g_attention_flash2(_partial)?\\["
-     ]
-    },
-    {
-     "name": "fl512",
-     "build": {},
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "double": [
-      "*:g_attention_flash2_d512(_partial)?\\["
-     ]
-    },
-    {
-     "name": "gf32",
-     "build": {},
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "double": [
-      "*:g_gemm_f32_store"
-     ]
-    },
-    {
-     "name": "gbf16",
-     "build": {},
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "double": [
-      "*:g_gemm_bf16_store"
-     ]
-    },
-    {
-     "name": "ple",
-     "build": {},
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "double": [
-      "*:g_ple_(gate|prep)"
-     ]
-    },
-    {
-     "name": "rope",
-     "build": {},
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "double": [
-      "*:g_qk_rope_store"
-     ]
-    },
-    {
-     "name": "gq",
-     "build": {},
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "double": [
-      "*:g_gemm_q[46]_k_"
      ]
     }
    ],
    "steps": [
-    "perf:base:2",
-    "perf:rs:2",
-    "perf:norm:2",
-    "perf:fl256:2",
-    "perf:fl512:2",
-    "perf:gf32:2",
-    "perf:gbf16:2",
-    "perf:ple:2",
-    "perf:rope:2",
-    "perf:gq:2",
-    "perf:base:2:long",
-    "perf:rs:2:long",
-    "perf:norm:2:long",
-    "perf:fl256:2:long",
-    "perf:fl512:2:long",
-    "perf:gf32:2:long",
-    "perf:gbf16:2:long",
-    "perf:ple:2:long",
-    "perf:rope:2:long",
-    "perf:gq:2:long",
-    "llama@rocm.np1:2",
-    "llama@rocm.np1:2:long",
-    "llama@vulkan.np1:2",
-    "llama@vulkan.np1:2:long"
+    "ktest:pf",
+    "perf:base:3",
+    "perf:pf:3",
+    "perf:base:3:long",
+    "perf:pf:3:long",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long"
    ]
   }
  ],
