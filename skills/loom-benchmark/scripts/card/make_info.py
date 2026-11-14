@@ -225,6 +225,8 @@ def write_gpu_preset(pkg_dir, model, verdict_path, repo, ctx):
     then left as it is, whatever presets a build gave it). The default preset, programs, weights and lock are untouched."""
     row = next((r for r in load_json(verdict_path) if r["slug"] == repo.split("/")[-1]), None)
     ex = gpu_preset_execution(row, ctx) or {}
+    if ctx and "context_capacity" not in ex:   # a served context below the native one (fit ctx_cap or memory): the preset serves it
+        ex.update(context_capacity=ctx, pool_capacity=min(ctx, ex.get("pool_capacity") or ctx))
     # the R9700 is served with fixed state backing (card_lib.GPUS "serve_args"): the pool is committed eagerly, so a default preset
     # whose pool is larger than the GPU holds beside the weights gets a smaller one (a native context that fits always fits it)
     base = next(iter(model["presets"].values()))["execution"]

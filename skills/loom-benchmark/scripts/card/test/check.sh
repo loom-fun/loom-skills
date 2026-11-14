@@ -6,7 +6,7 @@
 # rewrites the expected files after an intended template change; review the diff before committing it.
 set -eu
 bad=0
-here=$(cd "$(dirname "$0")" && pwd); C=$here/..; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+here=$(cd "$(dirname "$0")" && pwd); C=$here/..; tmp=$(mktemp -d); trap '[ -n "${KEEP:-}" ] || rm -rf "$tmp"' EXIT; echo "tmp $tmp"
 export LOOM_CARD_UPSTREAM=none   # offline: vision and audio the package lacks are n/a (no upstream probe)
 py() { python3 -I "$@"; }
 F=$here/flint; D=$here/d1
@@ -348,11 +348,11 @@ assert {k: v for k, v in ex.items() if k not in ('prefill_capacity', 'rows', 'co
 assert c.with_gpu_preset(m, ex) == m   # idempotent" "$C" "$tmp/r9700_exec" "$R/pkg" \
   && echo "OK   r9700 preset: the fit row's r9700_execution adds the chat-r9700 preset (Strix preset and programs untouched), served context included" \
   || { echo "FAIL r9700 preset: the fit-row preset is wrong"; bad=1; }
-# a row without the block leaves model.json as it is
+# a row without the block whose native context fits leaves model.json as it is (a reduced served context gets a preset: fixed backing)
 mkdir -p "$tmp/r9700_noexec"; cp -r "$R/pkg/." "$tmp/r9700_noexec/"
 py "$C/make_info.py" build "$tmp/r9700_noexec" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging "${R3[@]}" --memory-bytes 17000000000 \
-  --gpus strix-halo,radeon-r9700 --fit "$R/fit_reduced.json" -o "$tmp/r9700_noexec/info.json" 2>/dev/null
-cmp -s "$tmp/r9700_noexec/model.json" "$R/pkg/model.json" && echo "OK   r9700 preset: a fit row without r9700_execution leaves model.json alone" || { echo "FAIL r9700 preset: model.json changed without a block"; bad=1; }
+  --gpus strix-halo,radeon-r9700 --fit "$R/fit_native.json" -o "$tmp/r9700_noexec/info.json" 2>/dev/null
+cmp -s "$tmp/r9700_noexec/model.json" "$R/pkg/model.json" && echo "OK   r9700 preset: a fit row without r9700_execution at native context leaves model.json alone" || { echo "FAIL r9700 preset: model.json changed without a block"; bad=1; }
 for n in r9700_two r9700_none r9700_staging r9700_preset r9700_exec; do
   py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 assert c.validate(c.load_json(sys.argv[2])) == [], c.validate(c.load_json(sys.argv[2]))" "$C" "$tmp/$n/info.json" \
