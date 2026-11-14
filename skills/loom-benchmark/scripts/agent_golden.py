@@ -218,6 +218,23 @@ def main():
                         print(f"     diag {ep}: {_ur.urlopen(a.url + ep, timeout=10).read()[-3000:].decode('utf-8', 'replace')!r}", flush=True)
                     except Exception as e:
                         print(f"     diag {ep}: {e}", flush=True)
+                try:   # re-ask the previous step with logprobs: do the generated token pieces equal the canonical tokenization of their text?
+                    lu = max(i for i, mm in enumerate(msgs) if mm["role"] == "user")
+                    rl = post(a.url, dict(model=P.model_id, messages=msgs[:lu + 1], tools=TOOLS, max_tokens=a.max_tokens, temperature=0, logprobs=True, top_logprobs=1, **extra))
+                    lp = (rl["choices"][0].get("logprobs") or {}).get("content") or []
+                    gen = [x.get("token") for x in lp]
+                    print(f"     diag logprobs: {len(lp)} generated tokens; keys {sorted(lp[0]) if lp else None}; usage {rl.get('usage')}", flush=True)
+                    if lp:
+                        print(f"     diag first 40 pieces: {gen[:40]!r}", flush=True)
+                        print(f"     diag last 12 pieces: {gen[-12:]!r}", flush=True)
+                        canon = P.tok.convert_ids_to_tokens(P.ids(po))
+                        print(f"     diag canonical last 12 pieces of the output: {canon[-12:]!r} ({len(canon)} tokens)", flush=True)
+                        if all("id" in x for x in lp):
+                            gids_ = [x["id"] for x in lp]
+                            cids_ = P.ids("".join(P.tok.decode([i], skip_special_tokens=False) for i in gids_))
+                            print(f"     diag generated ids == canonical retokenization of their text: {gids_ == cids_} ({len(gids_)} vs {len(cids_)})", flush=True)
+                except Exception as e:
+                    print(f"     diag logprobs: {e!r}", flush=True)
                 r2 = post(a.url, dict(model=P.model_id, messages=msgs, tools=TOOLS, max_tokens=1, temperature=0, **extra))
                 print(f"     diag: the same request again: cached {r2.get('usage', {}).get('prompt_tokens_details', {}).get('cached_tokens')} of {r2.get('usage', {}).get('prompt_tokens')}", flush=True)
             calls_ok = True
