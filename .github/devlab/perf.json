@@ -5,17 +5,13 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "unsloth-gemma-4-e2b-it-loom",
+   "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 16000000000,
    "variants": [
-    {
-     "name": "card",
-     "build": {}
-    },
     {
      "name": "nd",
      "build": {},
@@ -24,17 +20,37 @@
      }
     },
     {
-     "name": "dgemm",
+     "name": "dq4",
      "build": {},
      "execution": {
       "draft_depth": 0
      },
      "double": [
-      "*:g_gemm_"
+      "*:g_gemm_q4_k_"
      ]
     },
     {
-     "name": "dattn",
+     "name": "df32",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_gemm_f32_"
+     ]
+    },
+    {
+     "name": "dq6",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_gemm_q6_k_"
+     ]
+    },
+    {
+     "name": "dflash",
      "build": {},
      "execution": {
       "draft_depth": 0
@@ -42,19 +58,121 @@
      "double": [
       "*:g_attention_flash2"
      ]
+    },
+    {
+     "name": "dnorm",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_post_add_norm|g_quant_q8|g_row_scale"
+     ]
+    },
+    {
+     "name": "dple",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_ple_"
+     ]
+    },
+    {
+     "name": "dqk",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "double": [
+      "*:g_qk_rope"
+     ]
+    },
+    {
+     "name": "c2048",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "c4096",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--prefill",
+      "4096"
+     ]
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
     "perf:nd:2",
-    "perf:nd:2:long",
-    "perf:dgemm:2",
-    "perf:dgemm:2:long",
-    "perf:dattn:2",
-    "perf:dattn:2:long",
-    "llama@rocm.np1:2",
-    "llama@rocm.np1:2:long"
+    "perf:nd:1:long",
+    "perf:dq4:2",
+    "perf:df32:2",
+    "perf:dq6:2",
+    "perf:dflash:2",
+    "perf:dnorm:2",
+    "perf:dple:2",
+    "perf:dqk:2",
+    "perf:c2048:2",
+    "perf:c2048:1:long",
+    "perf:c4096:2",
+    "perf:c4096:1:long"
+   ]
+  },
+  {
+   "name": "unsloth-qwen3-0-6b-loom",
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 17000000000,
+   "variants": [
+    {
+     "name": "nd",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "c2048",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "c4096",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--prefill",
+      "4096"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:nd:2",
+    "perf:nd:1:long",
+    "perf:c2048:2",
+    "perf:c2048:1:long",
+    "perf:c4096:2",
+    "perf:c4096:1:long"
    ]
   },
   {
@@ -66,10 +184,6 @@
    "memory_bytes_r9700": 29000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
      "name": "nd",
      "build": {},
      "execution": {
@@ -77,169 +191,35 @@
      }
     },
     {
-     "name": "dgemm",
+     "name": "c2048",
      "build": {},
      "execution": {
       "draft_depth": 0
      },
-     "double": [
-      "*:g_gemm_"
+     "build_args": [
+      "--prefill",
+      "2048"
      ]
     },
     {
-     "name": "dattn",
+     "name": "c4096",
      "build": {},
      "execution": {
       "draft_depth": 0
      },
-     "double": [
-      "*:g_attention_flash2"
-     ]
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "perf:nd:2",
-    "perf:nd:2:long",
-    "perf:dgemm:2",
-    "perf:dgemm:2:long",
-    "perf:dattn:2",
-    "perf:dattn:2:long",
-    "llama@rocm.np1:2",
-    "llama@rocm.np1:2:long"
-   ]
-  },
-  {
-   "name": "bartowski-qwen2-5-32b-instruct-loom",
-   "card": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "variants": [
-    {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nd",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "dgemm",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_gemm_"
-     ]
-    },
-    {
-     "name": "dattn",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_attention_flash2"
+     "build_args": [
+      "--prefill",
+      "4096"
      ]
     }
    ],
    "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
     "perf:nd:2",
-    "perf:nd:2:long",
-    "perf:dgemm:2",
-    "perf:dgemm:2:long",
-    "perf:dattn:2",
-    "perf:dattn:2:long",
-    "llama@rocm.np1:2",
-    "llama@rocm.np1:2:long"
-   ]
-  },
-  {
-   "name": "unsloth-qwen3-30b-a3b-instruct-2507-loom",
-   "card": "loom-fun-staging/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 136192,
-   "variants": [
-    {
-     "name": "card",
-     "build": {},
-     "context": 136192
-    },
-    {
-     "name": "nd",
-     "build": {},
-     "context": 136192,
-     "execution": {
-      "context_capacity": 136192,
-      "pool_capacity": 136192,
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "dgemm",
-     "build": {},
-     "context": 136192,
-     "execution": {
-      "context_capacity": 136192,
-      "pool_capacity": 136192,
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_gemm_"
-     ]
-    },
-    {
-     "name": "dattn",
-     "build": {},
-     "context": 136192,
-     "execution": {
-      "context_capacity": 136192,
-      "pool_capacity": 136192,
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_attention_flash2"
-     ]
-    },
-    {
-     "name": "dmoe",
-     "build": {},
-     "context": 136192,
-     "execution": {
-      "context_capacity": 136192,
-      "pool_capacity": 136192,
-      "draft_depth": 0
-     },
-     "double": [
-      "*:g_moe_(ggu|gdn)_"
-     ]
-    }
-   ],
-   "steps": [
-    "perf:card:2",
-    "perf:card:2:long",
-    "perf:nd:2",
-    "perf:nd:2:long",
-    "perf:dgemm:2",
-    "perf:dgemm:2:long",
-    "perf:dattn:2",
-    "perf:dattn:2:long",
-    "perf:dmoe:2",
-    "perf:dmoe:2:long",
-    "llama@rocm.np1:2",
-    "llama@rocm.np1:2:long"
+    "perf:nd:1:long",
+    "perf:c2048:2",
+    "perf:c2048:1:long",
+    "perf:c4096:2",
+    "perf:c4096:1:long"
    ]
   }
  ],
