@@ -278,7 +278,7 @@ def route(args, root=HERE):
             continue
         seen.add(rel)
         if (Path(root) / rel).is_file():
-            print(Path(root) / rel if not args.relative else rel)
+            print((rel if args.relative else Path(root) / rel).as_posix())
     print(f"# arch {arch} -> {fam['rel']}; facets: {','.join(facets) or '-'}; "
           f"devices: {','.join(chosen_devices or fam_list) or '-'}; topics: {','.join(wanted_topics) or '-'}")
     footer = resolve_footer(cfg, chosen_devices or fam_list, root)
