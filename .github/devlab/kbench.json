@@ -22,15 +22,11 @@
       "gen": "gemm_r9700/gen_gemm_bench.py",
       "gen_variants": [
         "base",
-        "sb",
-        "sbst",
-        "sbsw"
+        "sb"
       ],
       "files": [
         "bench.loom",
-        "bench_sb.loom",
-        "bench_sbst.loom",
-        "bench_sbsw.loom"
+        "bench_sb.loom"
       ],
       "config": [],
       "args": [

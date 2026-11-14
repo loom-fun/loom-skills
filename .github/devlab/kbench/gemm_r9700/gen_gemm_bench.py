@@ -19,6 +19,7 @@ SHAPES = [  # (see ALL_SHAPES for the full list)
     ("q4_k", "swiglu", 1024, 4096, 12288), ("q4_k", "store", 1024, 12288, 4096),
     ("q4_k", "swiglu", 1024, 1024, 3072), ("q4_k", "store", 1024, 3072, 1024),
 ]
+ROWS = [("q4_k", "swiglu", 2048, 1536, 6144), ("q4_k", "swiglu", 4096, 1536, 6144), ("q4_k", "store", 4096, 6144, 1536), ("q4_k", "swiglu", 4096, 4096, 12288)]   # chunk rows (the R9700 preset: 4096)
 EXTRA = [("bf16", "store", 1024, 6144, 1536), ("bf16", "swiglu", 1024, 1536, 6144), ("bf16", "store", 1024, 12288, 4096),
          ("q6_k", "store", 1024, 6144, 1536), ("q6_k", "store", 1024, 12288, 4096)]
 ALL_SHAPES = [  # (fmt, mode, rows, K, N): the prefill GEMMs of Gemma-4-E2B (k1536), Qwen3-8B (k4096) and Qwen3-0.6B (k1024)
@@ -120,7 +121,7 @@ def gen_kernels(fmts, q4k):
 
 def build(variant=""):
     out = []
-    for fmt, mode, rows, K, N in SHAPES + (EXTRA if not variant else []):
+    for fmt, mode, rows, K, N in SHAPES + ROWS + (EXTRA if not variant else []):
         for big in ("m128", "m256"):
             if big == "m256" and rows % 256: continue
             nat, _, abl = variant.partition("_")
