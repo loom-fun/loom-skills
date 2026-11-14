@@ -27,8 +27,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install the build dependency (inspect_gguf.py)
-        run: python -m pip install --quiet gguf numpy
+      - name: Install the build dependency (inspect_gguf.py, build.py)
+        run: python -m pip install --quiet gguf numpy jinja2 tokenizers
       - name: Fleet program diff (base vs head)
         id: diff
         env:
