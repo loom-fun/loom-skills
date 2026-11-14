@@ -363,7 +363,11 @@
   "need": 95272324352.0,
   "verdict": "fits (reduced ctx)",
   "n_exp": 128,
-  "ctx_cap": 26624
+  "ctx_cap": 26624,
+  "r9700_execution": {
+   "context_capacity": 26624,
+   "pool_capacity": 26624
+  }
  },
  {
   "slug": "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
