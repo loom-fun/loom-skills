@@ -29,7 +29,3 @@ Chat notes:
   re-rendered, not reused (`raw_alternatives` lists both spellings for the agent gate's golden).
 - Tool schemas: string (enum, nullable), number/integer, boolean, type lists, arrays of those and objects of those
   (one level) render as the template does; deeper schemas and `oneOf` render as `any` (the template recurses).
-
-## Fleet models (published packages, llm_config.json)
-
-- `unsloth-gpt-oss-20b-loom` (gpt-oss): 24L h2880, 64h/8kv hd64, moe 32e top-4, swa 128, ctx 131072

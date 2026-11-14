@@ -152,8 +152,9 @@ def card_model(a, api):
     from huggingface_hub import hf_hub_download
     local = card_lib.load_json(os.path.join(a.out, "model.json"))
     remote = card_lib.load_json(hf_hub_download(a.repo, "model.json", revision=a.parent_commit))
-    alt = card_lib.gpu_preset_name(local)
-    strip = lambda m: {**m, "presets": {k: v for k, v in m["presets"].items() if k != alt}}
+    alts = {card_lib.gpu_preset_name(local, g) for g in card_lib.GPUS if card_lib.GPUS[g].get("preset_suffix")}   # every GPU's own preset
+    alt = ", ".join(sorted(alts))
+    strip = lambda m: {**m, "presets": {k: v for k, v in m["presets"].items() if k not in alts}}
     if strip(local) != strip(remote):
         sys.exit(f"{a.out}/model.json differs from {a.repo}'s beyond the {alt} preset: --card-only uploads no other model.json change "
                  "(publish the whole package)")

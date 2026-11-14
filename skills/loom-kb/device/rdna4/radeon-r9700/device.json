@@ -1,6 +1,7 @@
 {
   "schema": "loom-kb/device/1",
   "device": "radeon-r9700",
+  "order": 0,
   "family": "rdna4",
   "gfx": "gfx1201",
   "aliases": [
@@ -43,6 +44,7 @@
   },
   "runner": {
     "key": "r9700",
+    "ab_prefix": "rab-",
     "labels": [
       "self-hosted",
       "devlab-dispatch",

@@ -10,6 +10,9 @@
   family_of(name)      the family dict of a device
   dual_target()        the rows dual_target.py needs: base + twin families, header text, twin suffix
   detect(text)         the device key whose card "detect" pattern matches text, else None
+  runner_labels()      {runner key: labels} of every device with a DevLab runner (the workflows' runs-on tables)
+  fit_table(name)      repo-relative path of a device's fit table (device.json "fit_table", else .github/devlab/<device>_fit.json)
+  fit_execution_key(name)  the fit-row key holding a device's preset execution (r9700: "r9700_execution")
   roofline_presets()   {preset: {name, bw, flops, device}} every roofline device preset of every device
   quants()             {format: format dict}         quant/<fmt>/format.json
   file_quants()        the GGUF file quants the factory accepts, in order of preference
@@ -49,15 +52,18 @@ def families():
 
 
 def devices():
-    """{key: device dict}, in family order then directory order; each dict has "family" and "path" (relative to the KB root)."""
+    """{key: device dict}, in family order, then the device's "order" (default 0), then its name; each dict has "family" and "path" (relative to the KB root)."""
     out = {}
     for fam in families():
+        rows = []
         for d in _subdirs("device", fam):
             p = os.path.join("device", fam, d, "device.json")
             if os.path.exists(os.path.join(ROOT, p)):
                 dev = dict(_load(*p.split(os.sep)))
                 dev["path"] = os.path.dirname(p)
-                out[dev["device"]] = dev
+                rows.append(dev)
+        for dev in sorted(rows, key=lambda x: (x.get("order", 0), x["device"])):
+            out[dev["device"]] = dev
     return out
 
 
@@ -82,6 +88,22 @@ def detect(text):
         if re.search(d["pattern"], text, re.I if "i" in d.get("flags", "") else 0):
             return key
     return None
+
+
+def runner_labels():
+    """{runner key: runs-on labels} of every device with a DevLab runner; a device without labels has no runner (nothing can be measured)."""
+    return {d["runner"]["key"]: list(d["runner"]["labels"]) for d in devices().values() if d["runner"]["labels"]}
+
+
+def fit_table(name):
+    """Repo-relative path of a device's fit table: device.json "fit_table", else .github/devlab/<device>_fit.json (the file may not exist yet)."""
+    dev = device(name)
+    return dev.get("fit_table") or f".github/devlab/{dev['device']}_fit.json"
+
+
+def fit_execution_key(name):
+    """The key of a fit-table row that holds the execution settings of the device's own preset: "<runner key>_execution" (r9700_execution)."""
+    return f"{device(name)['runner']['key']}_execution"
 
 
 def roofline_presets():

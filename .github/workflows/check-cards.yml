@@ -6,10 +6,10 @@ name: check-cards
 # The contract step runs loom-dev's summarize_info.py (vendored, test/contract/SOURCE.txt) on the golden cards of both schemas.
 on:
   pull_request:
-    paths: ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py", "skills/loom-port-llm/starter/kit_source.py", "skills/loom-org/scripts/**", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
+    paths: ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py", "skills/loom-port-llm/starter/kit_source.py", "skills/loom-fleet/scripts/**", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
   push:
     branches: [main, r9700]
-    paths: ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py", "skills/loom-port-llm/starter/kit_source.py", "skills/loom-org/scripts/**", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
+    paths: ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py", "skills/loom-port-llm/starter/kit_source.py", "skills/loom-fleet/scripts/**", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]
 
 permissions:
   contents: read
@@ -22,5 +22,5 @@ jobs:
       - name: Card generator matches the golden cards
         run: |
           python3 -m py_compile skills/loom-benchmark/scripts/card/*.py skills/loom-benchmark/scripts/machine_info.py \
-            skills/loom-port-llm/starter/kit_source.py skills/loom-org/scripts/*.py .github/scripts/loom_factory.py
+            skills/loom-port-llm/starter/kit_source.py skills/loom-fleet/scripts/*.py .github/scripts/loom_factory.py
           skills/loom-benchmark/scripts/card/test/check.sh

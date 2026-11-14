@@ -9,7 +9,7 @@ Finds the latest nightly-gates.yml run (or --run ID) of loom-fun/loom-skills wit
 downloads that run's artifacts (gh run download; nightly_gates.sh writes summary.json and gates.json per card
 and level) and writes the gates: every gate of every finished level job (dev, quick, full) with its verdict, level and
 time, the job's URL as the evidence. A job's performance files (an older PERF=1 run's Loom-only perf.jsonl) are not
-read: a card's DevLab perf session measures both engines (devlab-perf, loom-org SKILL.md).
+read: a card's DevLab perf session measures both engines (devlab-perf, loom-fleet reference/publish.md).
 The spec gate's drafted-token acceptance ("acceptance N% of M proposals" in the job's gates_spec.log or gates.out)
 is not a timing: it depends on the model, drafter and text, not the machine, so it is carried as the card's
 spec_acceptance (a session holding only that metric, stamped with the job's programs_sha256), as make_info.py gates

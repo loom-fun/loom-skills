@@ -111,7 +111,7 @@ class SharedSuiteTests(unittest.TestCase):
                 for agent, directory in (("claude", ".claude"), ("codex", ".agents"), ("pi", ".agents")):
                     self.assertEqual(installer.destinations(agent, home), [home / directory / "skills"])
                 expected = sorted(p.parent.name for p in (REPO / "skills").glob("*/SKILL.md"))
-                self.assertIn("loom-org", expected)
+                self.assertIn("loom-fleet", expected)
                 self.assertEqual(installer.install(roots), len(expected))
                 for root in roots:
                     self.assertEqual(sorted(p.name for p in root.iterdir()), expected)
@@ -123,7 +123,7 @@ class SharedSuiteTests(unittest.TestCase):
                         for suffix in re.findall(r'\$\{LOOM_SKILL_DIR\}(/[\w./-]+)', text):
                             self.assertTrue((skill / suffix.lstrip("/")).exists(), (root, name, suffix))
                     result = subprocess.run(
-                        [sys.executable, "-B", str(root / "loom-improve/scripts/kpi.py"), "--help"],
+                        [sys.executable, "-B", str(root / "loom-fleet/scripts/kpi.py"), "--help"],
                         cwd=unrelated, capture_output=True, text=True, check=True,
                     )
                     self.assertIn("summarize", result.stdout)

@@ -67,7 +67,7 @@ assert o['devices']['strix-halo']['performance']['sessions'] == f['devices']['st
   && ! py "$C/make_info.py" perf --loom-jsonl "$F/evidence/loom.jsonl" "${SRC[@]}" --source-kind local -o "$tmp/perf_local.json" 2>/dev/null \
   && echo "OK   flint: --from-info drops local perf sessions and old DevLab sweeps; perf refuses a local source" \
   || { echo "FAIL flint: local perf sessions or old DevLab sweeps survive, or a local perf source is accepted"; bad=1; }
-# the performance guardrails loom-org's org_status.py applies (card_lib.perf_flags, with the repo's programs: stale)
+# the performance guardrails loom-fleet org_status.py applies (card_lib.perf_flags, with the repo's programs: stale)
 py -c "import sys; sys.path.insert(0, '$C'); import card_lib as c; print(c.dumps(c.perf_flags(c.load_json('$tmp/flint/info.json'), programs=c.programs_sha256('$F/pkg'))), end='')" \
   > "$tmp/flint/flags.json"
 # the acceptance each drafted roofline row counts: its session's (perf.py's counters) where recorded, else the spec gate's
@@ -110,7 +110,7 @@ gev "$tmp/g_sameday.json" pass quick 2026-11-07T09:00:00 bbb
 gate_case "published full pass, a same-day quick pass keeps it" pass/full/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
 gev "$tmp/g_sameday.json" fail quick 2026-11-07T09:00:00 bbb
 gate_case "published full pass, a same-day quick fail shows" fail/quick/bbb --from-info "$tmp/g_pub.json" --evidence "$tmp/g_sameday.json"
-# a card with a failing gate is published as is (loom-org step 2): it validates, renders the gate as a failure, and
+# a card with a failing gate is published as is (loom-fleet publish.md step 2): it validates, renders the gate as a failure, and
 # org_status counts it as failing (action fix)
 mkdir -p "$tmp/failing"; cp -r "$F/pkg/." "$tmp/failing/"
 py "$C/make_info.py" build "$tmp/failing" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint --report generated \
@@ -121,7 +121,7 @@ from org_status import assess
 assert c.validate(c.load_json(sys.argv[3] + '/info.json')) == [], 'not valid'
 rows = [l for l in open(sys.argv[3] + '/README.md') if l.startswith('| \x60agent\x60 |')]
 assert len(rows) == 1 and f'| {r.NO} fail' in rows[0], rows
-assert assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])['failing'] == ['agent']" "$C" "$here/../../../../loom-org/scripts" "$tmp/failing" \
+assert assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])['failing'] == ['agent']" "$C" "$here/../../../../loom-fleet/scripts" "$tmp/failing" \
   && echo "OK   failing: a card with a failing gate validates, renders it as fail and org_status counts it failing" \
   || { echo "FAIL failing: a card with a failing gate does not publish as failing"; bad=1; }
 # a gate passed on OTHER programs is no evidence for this package: the card says "not re-run", never a pass
@@ -246,7 +246,7 @@ printf '\n## Next steps\n\nWork on this model is paused.\n\n- retry the agent ga
   | cat "$tmp/failing/README.md" - | cmp -s - "$tmp/paused/README.md" && cmp -s "$tmp/failing/info.json" "$tmp/unpaused.json" \
   && py -c "import sys; sys.path.insert(0, sys.argv[1]); from org_status import assess
 a, b = assess('loom-fun/ggml-org-Flint-loom', sys.argv[2]), assess('loom-fun/ggml-org-Flint-loom', sys.argv[3])
-assert a.get('paused') is True and 'paused' not in b and a['failing'] == b['failing']" "$here/../../../../loom-org/scripts" \
+assert a.get('paused') is True and 'paused' not in b and a['failing'] == b['failing']" "$here/../../../../loom-fleet/scripts" \
   "$tmp/paused" "$tmp/failing" \
   && echo "OK   paused: next steps render last, org_status reports paused, and clearing them gives the card back" \
   || { echo "FAIL paused: a paused card's next steps do not render or clear as expected"; bad=1; }
@@ -282,7 +282,7 @@ assert long <= set(assess('loom-fun/ggml-org-Flint-loom', sys.argv[4])['missing'
 facts = c.package_facts(c.load_package(sys.argv[3]))
 for f in sys.argv[5:]:   # a refusal within the native context, and a measured value: still required
     assert c.over_context(c.load_json(f), c.native_context(facts['features'])) == set(), f" \
-  "$C" "$here/../../../../loom-org/scripts" "$tmp/oc_native" "$tmp/oc" "$tmp/oc_fits.json" "$tmp/oc_both.json" \
+  "$C" "$here/../../../../loom-fleet/scripts" "$tmp/oc_native" "$tmp/oc" "$tmp/oc_fits.json" "$tmp/oc_both.json" \
   && echo "OK   over context: n/a only past the native context; required within it, without it, or once measured" \
   || { echo "FAIL over context: a refused long document is not judged against the native context"; bad=1; }
 # c4_steady.py runs that measured nothing (every stream failed: rate -0.0, a negative window) are not samples
@@ -447,7 +447,29 @@ print(c.gpu_from_device({'cpu': 'AMD RYZEN AI MAX+ 395 w/ Radeon 8060S', 'gpu': 
       c.gpu_from_device({'cpu': 'AMD EPYC', 'gpu': 'AMD Radeon AI PRO R9700S'}), c.gpu_from_device({'cpu': 'AMD Strix Halo (DevLab Dispatch runner X2)', 'os': 'Linux'}),
       c.gpu_from_device(None), c.served_context(396705472, 1.5e6, 34000000000))" "$C")
 [ "$got" = "strix-halo radeon-r9700 strix-halo None 20480" ] && echo "OK   gpu detection and served context" || { echo "FAIL gpu detection: $got"; bad=1; }
-for n in flint d1 r9700_two r9700_none r9700_staging r9700_preset r9700_exec; do
+# the ratchet: a confirming re-run out of margin only by a row FASTER than the card in both runs (prefill_8k +3.1 / +3.4 %) is accepted;
+# the card keeps every published value except that row (the mean of the two runs' medians), llama.cpp and speedups follow, the
+# re-measure line names the row; a row slower beyond its band in both runs, or a missing first run, is refused
+RT=$here/ratchet; FSHA=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c; print(c.programs_sha256(sys.argv[2]))" "$C" "$tmp/flint")
+RM=(--package "$tmp/flint" --compared-programs "$FSHA" --fetched-programs "$FSHA" --date 2026-11-14 --url https://example.invalid/run/3011 --device none --hrx-loom none --source-kind devlab --run 3011)
+py "$C/make_info.py" remeasure --cmp "$RT/cmp2.json" --first-cmp "$RT/cmp1.json" --first-run 3010 --first-url https://example.invalid/run/3010 "${RM[@]}" -o "$tmp/ratchet_ev.json" 2>/dev/null \
+  && echo "OK   ratchet: rows faster than the card in both runs are accepted" || { echo "FAIL ratchet: improved row refused"; bad=1; }
+py "$C/make_info.py" remeasure --cmp "$RT/cmp2.json" "${RM[@]}" -o "$tmp/ratchet_ev0.json" 2>/dev/null \
+  && { echo "FAIL ratchet: accepted without the first run"; bad=1; } || echo "OK   ratchet: out_of_margin without --first-cmp is refused"
+for v in cmp1 cmp2; do py -c "import json, sys; x = json.load(open(sys.argv[1])); m = x['metrics']['prefill_8k']; m['ratio'] = 0.95; m['new'] = round(m['old'] * 0.95, 1); m['status'] = 'OUT'
+json.dump(x, open(sys.argv[2], 'w'))" "$RT/$v.json" "$tmp/slow_$v.json"; done
+py "$C/make_info.py" remeasure --cmp "$tmp/slow_cmp2.json" --first-cmp "$tmp/slow_cmp1.json" --first-run 3010 --first-url https://example.invalid/run/3010 "${RM[@]}" -o "$tmp/ratchet_ev1.json" 2>/dev/null \
+  && { echo "FAIL ratchet: a slower row accepted"; bad=1; } || echo "OK   ratchet: a row slower than its band in both runs is refused"
+mkdir -p "$tmp/ratchet"; cp -r "$tmp/flint/." "$tmp/ratchet/"
+py "$C/make_info.py" build "$tmp/ratchet" --generator-commit $GEN --from-info "$tmp/flint/info.json" --evidence "$tmp/ratchet_ev.json" -o "$tmp/ratchet/info.json" 2>/dev/null
+py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+a, b = (c.single(c.load_json(f)) for f in sys.argv[2:4]); assert c.validate(c.load_json(sys.argv[3])) == []
+ma, mb = ({k: m for k, (m, _) in c.card_metrics(i).items()} for i in (a, b))
+assert [k for k in ma if ma[k] != mb[k]] == ['prefill_8k'], [k for k in ma if ma[k] != mb[k]]
+assert mb['prefill_8k']['loom'] == round((1424.7 * 1.031 + 1424.7 * 1.034) / 2, 1) and mb['prefill_8k']['baseline'] == ma['prefill_8k']['baseline']
+assert b['remeasure']['improved']['prefill_8k']['published'] == 1424.7" "$C" "$tmp/flint/info.json" "$tmp/ratchet/info.json" \
+  && echo "OK   ratchet: only the improved row's Loom value changed (mean of the two runs), llama.cpp kept" || { echo "FAIL ratchet: card values"; bad=1; }
+for n in flint d1 ratchet r9700_two r9700_none r9700_staging r9700_preset r9700_exec; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null
   py "$C/render_card.py" "$tmp/$n" -o "$tmp/${n}_README2.md" 2>/dev/null
@@ -554,7 +576,7 @@ r['generator'] = g('side')
 none = lambda c: []
 assert consistency_checks(r, ok, sys.argv[3], none, lambda c: ['.github/devlab/port.json', '.github/devlab/perf.json']) == []
 assert len(consistency_checks(r, ok, sys.argv[3], none, lambda c: ['.github/devlab/port.json', 'skills/x.py'])) == 1
-assert consistency_checks(r, ok, sys.argv[3], none, lambda c: None) != [] and consistency_checks(r, ok, sys.argv[3], lambda c: None, lambda c: None) == []" "$here/../../../../loom-org/scripts" "$tmp/flint" "$tmp/skills" \
+assert consistency_checks(r, ok, sys.argv[3], none, lambda c: None) != [] and consistency_checks(r, ok, sys.argv[3], lambda c: None, lambda c: None) == []" "$here/../../../../loom-fleet/scripts" "$tmp/flint" "$tmp/skills" \
   && echo "OK   org_status checks: nightly entry matches the card, generator commit is on main or in a merged PR" \
   || { echo "FAIL org_status checks: nightly/generator consistency flags are wrong"; bad=1; }
 py -c "import sys; sys.path.insert(0, sys.argv[1]); import matched_spec as m, json

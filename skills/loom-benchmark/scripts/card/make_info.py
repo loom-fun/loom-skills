@@ -104,7 +104,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       HF, RETIRED_GATES, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
-                      SERVE_HEADROOM)
+                      SERVE_HEADROOM, registry)
 
 
 # ---------------------------------------------------------------- sources
@@ -199,7 +199,23 @@ def evidence_gpu(ev, src=None):
     return ev.get("gpu") or gpu_from_device((src or {}).get("device")) or DEFAULT_GPU
 
 
-def fit_settings(verdict_path, repo, gpu="radeon-r9700"):
+def fit_tables(specs):
+    """[(gpu, fit table path)] of the --fit arguments: GPU=PATH, 'auto' (every registry device whose fit table exists in this checkout), or a
+    path (the device whose device.json fit_table has that file name, else radeon-r9700: the legacy single table)."""
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
+    out = []
+    for spec in specs or []:
+        if spec == "auto":
+            out += [(g, os.path.join(repo_root, registry.fit_table(g))) for g in GPUS if os.path.exists(os.path.join(repo_root, registry.fit_table(g)))]
+        elif "=" in spec and spec.split("=")[0] in GPUS:
+            out.append(tuple(spec.split("=", 1)))
+        else:
+            hit = [g for g in GPUS if os.path.basename(registry.fit_table(g)) == os.path.basename(spec)]
+            out.append((hit[0] if hit else "radeon-r9700", spec))
+    return out
+
+
+def fit_settings(verdict_path, repo, gpu="radeon-r9700"):   # gpu: any device with a fit table (device.json fit_table)
     """(memory_bytes, served_context, required_bytes) of a package on a GPU from the fit table: the table's row of the
     repo's name. required_bytes is set (and nothing else) when the package does not fit the GPU's memory; memory_bytes
     and served_context only when the KV cache of the native context does not fit (the GPU's whole memory is the pool
@@ -210,6 +226,8 @@ def fit_settings(verdict_path, repo, gpu="radeon-r9700"):
     if row is None:
         sys.exit(f"{verdict_path}: no row for {name}")
     mem = GPUS[gpu]["memory_bytes"]
+    if mem is None:
+        return None, None, None   # the device takes the package's own memory (Strix Halo): nothing to fit
     need = row["w"] + row["kv"] + SERVE_HEADROOM
     if need > mem and row["kv"] == 0:   # weights alone (no KV cache to cut): the model does not fit
         return None, None, int(need)
@@ -221,29 +239,29 @@ def fit_settings(verdict_path, repo, gpu="radeon-r9700"):
     return mem, ctx, None
 
 
-def write_gpu_preset(pkg_dir, model, verdict_path, repo, ctx):
+def write_gpu_preset(pkg_dir, model, verdict_path, repo, ctx, gpu="radeon-r9700"):
     """Add the `<first>-r9700` preset to the package's model.json from the fit row's "r9700_execution" (idempotent: the same
     settings give the same file); returns the execution the preset sets, or None when the row has no block (model.json is
     then left as it is, whatever presets a build gave it). The default preset, programs, weights and lock are untouched."""
     row = next((r for r in load_json(verdict_path) if r["slug"] == repo.split("/")[-1]), None)
-    ex = gpu_preset_execution(row, ctx) or {}
+    ex = gpu_preset_execution(row, ctx, gpu) or {}
     if ctx and "context_capacity" not in ex:   # a served context below the native one (fit ctx_cap or memory): the preset serves it
         ex.update(context_capacity=ctx, pool_capacity=min(ctx, ex.get("pool_capacity") or ctx))
     # the R9700 is served with fixed state backing (card_lib.GPUS "serve_args"): the pool is committed eagerly, so a default preset
     # whose pool is larger than the GPU holds beside the weights gets a smaller one (a native context that fits always fits it)
     base = next(iter(model["presets"].values()))["execution"]
-    cap = fixed_pool_capacity(row)
+    cap = fixed_pool_capacity(row, gpu=gpu)
     pool = ex.get("pool_capacity") or base.get("pool_capacity") or base.get("context_capacity")
     if cap is not None and pool and pool > cap:
         ex["pool_capacity"] = cap
         ex["context_capacity"] = min(ex.get("context_capacity") or base["context_capacity"], cap)
     if not ex:
         return None
-    doc = with_gpu_preset(model, ex)
+    doc = with_gpu_preset(model, ex, gpu)
     with open(os.path.join(pkg_dir, "model.json"), "w", encoding="utf-8", newline="\n") as f:
         json.dump(doc, f, indent=1, ensure_ascii=False)
         f.write("\n")
-    return doc["presets"][gpu_preset_name(doc)]["execution"]
+    return doc["presets"][gpu_preset_name(doc, gpu)]["execution"]
 
 
 def cmd_build(a):
@@ -361,6 +379,8 @@ def cmd_build(a):
         if ev.get("remeasure"):   # make_info.py remeasure: a same-runner A/B of this package against the build the table shows
             mst = gpu_state(evidence_gpu(ev))
             mst["remeasure"] = dict(ev["remeasure"], source=sources.add(ev["remeasure"]["source"]))
+            if ev["remeasure"].get("first_source"):
+                mst["remeasure"]["first_source"] = sources.add(ev["remeasure"]["first_source"])
         if ev.get("roofline"):
             rst = gpu_state(ev.get("gpu") or gpu_from_device({"name": ev["roofline"]["device"]["name"]}) or DEFAULT_GPU)
             rst["roofline"], rst["data"] = ev["roofline"], True
@@ -397,24 +417,23 @@ def cmd_build(a):
             if gpu not in GPUS or not n.isdigit():
                 sys.exit(f"--{key.replace('_', '-')} {item}: expected GPU=N with GPU one of {', '.join(GPUS)}")
             gpu_state(gpu)["meta"][key] = int(n)
-    if a.fit:
-        for gpu in ("radeon-r9700",):
-            if gpu in gpus or gpu in G:
-                mem, ctx, need = fit_settings(a.fit, a.repo, gpu)
-                m = gpu_state(gpu)["meta"]
-                if need is not None:
-                    m.update(state="unsupported", required_bytes=need)
-                else:
-                    m.pop("state", None)
-                    m.pop("required_bytes", None)
-                    for k in ("memory_bytes", "served_context"):
-                        m.pop(k, None)
-                    if mem is not None:
-                        m["memory_bytes"] = mem
-                    if ctx is not None:
-                        m["served_context"] = ctx
-                    if need is None:
-                        write_gpu_preset(a.pkg, pkg["model"], a.fit, a.repo, ctx)
+    for gpu, fit in fit_tables(a.fit):
+        if gpu in gpus or gpu in G:
+            mem, ctx, need = fit_settings(fit, a.repo, gpu)
+            m = gpu_state(gpu)["meta"]
+            if need is not None:
+                m.update(state="unsupported", required_bytes=need)
+            else:
+                m.pop("state", None)
+                m.pop("required_bytes", None)
+                for k in ("memory_bytes", "served_context"):
+                    m.pop(k, None)
+                if mem is not None:
+                    m["memory_bytes"] = mem
+                if ctx is not None:
+                    m["served_context"] = ctx
+                if need is None:
+                    write_gpu_preset(a.pkg, pkg["model"], fit, a.repo, ctx, gpu)
     gpus = [g for g in GPUS if g in G or g in (a.gpus or "").split(",")]
     for g in (a.gpus or "").split(",") if a.gpus else []:
         if g and g not in GPUS:
@@ -464,6 +483,10 @@ def cmd_build(a):
                 d["roofline"] = st["roofline"]
             if st.get("remeasure") and st["remeasure"]["programs_sha256"] == programs_sha256(a.pkg):   # about this package only
                 d["remeasure"] = st["remeasure"]
+                for k, imp in (st["remeasure"].get("improved") or {}).items():   # confirmed faster in 2 runs: the card value is the runs' mean
+                    row = next((s["metrics"][k] for s in reversed(st["sessions"]) if k in s["metrics"]), None)
+                    if row is not None:
+                        row["loom"], row["loom_runs"] = imp["loom"], imp["runs"]
             cap = GPUS[gpu]["memory_bytes"]
             base_mem = facts["memory_bytes"] or card.get("memory_bytes")
             if cap and "memory_bytes" not in d and base_mem and base_mem > cap:
@@ -484,6 +507,7 @@ def cmd_build(a):
     used |= {b["session"]["source"] for d in devices.values() for b in ((d.get("performance") or {}).get("baselines") or {}).values()}
     used |= {g["source"] for d in devices.values() for g in (d.get("gates") or {}).values()}
     used |= {d["remeasure"]["source"] for d in devices.values() if d.get("remeasure")}
+    used |= {d["remeasure"]["first_source"] for d in devices.values() if (d.get("remeasure") or {}).get("first_source")}
     info["sources"] = {k: v for k, v in sources.by_id.items() if k in used}
     require_valid(info)
     out = dumps(info)
@@ -693,7 +717,7 @@ def runs_of(key, sessions, c4_path):
 def cmd_perf(a):
     if a.source_kind not in PERF_SOURCE_KINDS:
         sys.exit(f"perf --source-kind {a.source_kind}: card performance comes only from AMD DevLab Dispatch "
-                 "(a devlab-perf job: loom-org SKILL.md step 3); measure locally only to develop")
+                 "(a devlab-perf job: loom-fleet reference/publish.md step 3); measure locally only to develop")
     if a.perf_log:
         loom_rows = perf_rows(a.perf_log, "loom", a.loom_label)
         llama_rows = perf_rows(a.perf_log, "llama", a.llama_label)
@@ -827,11 +851,31 @@ def cmd_remeasure(a):
     a.gpu = a.gpu or DEFAULT_GPU
     if not a.package:
         sys.exit("remeasure: --package (the package re-measured) is required")
-    if x["verdict"] != "pass" or x.get("gate_failures"):
+    improved = {}   # out of margin only by rows FASTER than the card in both runs (the ratchet): their new values go on the card
+    if x["verdict"] == "out_of_margin" and not x.get("gate_failures"):
+        if not a.first_cmp:
+            sys.exit(f"{a.cmp}: verdict out_of_margin: --first-cmp (the first run's comparison) is needed to confirm the rows are faster in both runs")
+        f = load_json(a.first_cmp)
+        if (x.get("first_run") or {}).get("job") != f.get("job"):
+            sys.exit(f"{a.first_cmp}: is not the first run {a.cmp} was compared with ({(x.get('first_run') or {}).get('job')})")
+        slower = []
+        for k in x["out_of_margin"]:
+            if k.startswith("acceptance:"):   # informational: not a card row
+                continue
+            r1, r2 = f["metrics"][k], x["metrics"][k]
+            if not (r1["ratio"] and r2["ratio"] and r1["ratio"] > 1 and r2["ratio"] > 1):
+                slower.append(k)
+            else:
+                improved[k] = {"published": r2.get("card"), "loom": round((r1["new"] + r2["new"]) / 2, 1), "runs": [r1["new"], r2["new"]]}
+        if slower:
+            sys.exit(f"{a.cmp}: {', '.join(slower)} outside the band in both runs and not faster: refused (not within the band)")
+        if not improved:
+            sys.exit(f"{a.cmp}: out_of_margin names no card row")
+    elif x["verdict"] != "pass" or x.get("gate_failures"):
         sys.exit(f"{a.cmp}: verdict {x['verdict']} (out of band {x.get('out_of_band')}, gate failures {x.get('gate_failures')}): not within the band")
     # a confirming re-run (strix_ab_compare.py --prev) may pass with a metric outside the band in the opposite direction to the
     # first run: the card names it
-    exc = {k: m["ratio"] for k, m in x["metrics"].items() if m["status"] != "PASS"}
+    exc = {k: m["ratio"] for k, m in x["metrics"].items() if m["status"] != "PASS" and k not in improved}
     here = programs_sha256(a.package)
     if a.fetched_programs and a.fetched_programs != here:
         sys.exit(f"the run fetched programs {a.fetched_programs[:12]}, the package has {here[:12]}: re-run")
@@ -848,12 +892,19 @@ def cmd_remeasure(a):
     date = a.date or x.get("date")
     if not date:
         sys.exit("--date is required (the job's day)")
+    first_src = None
+    if improved:
+        if not (a.first_run and a.first_url):
+            sys.exit("remeasure: --first-run and --first-url (the first run's links) are required with improved rows")
+        first_src = dict(src, run=str(a.first_run), url=a.first_url)
     ev = {"evidence": EVIDENCE_ID, "gpu": a.gpu, "remeasure": {
-        "date": date, "source": src, "band": x["band"], "programs_sha256": here, "compared_programs": old, "result": "within",
+        "date": date, "source": src, "band": x["band"], "programs_sha256": here, "compared_programs": old,
+        "result": "improved" if improved else "within", **({"bands": x["bands"]} if x.get("bands") else {}),
+        **({"improved": improved, "first_source": first_src} if improved else {}),
         "worst_metric": x.get("worst_metric"), "worst_ratio": x.get("worst_ratio"),
         "ratios": {k: m["ratio"] for k, m in x["metrics"].items()}, **({"exceptions": exc} if exc else {})}}
     write_json(a.o, ev)
-    print(f"wrote {a.o}: {a.gpu} within +-{x['band']:.0%} (worst {x.get('worst_metric')} {x.get('worst_ratio')}); programs {here[:12]} ~ {old[:12]}", file=sys.stderr)
+    print(f"wrote {a.o}: {a.gpu} within +-{x['band']:.0%}" + (f" except {', '.join(improved)} (faster in both runs)" if improved else "") + f" (worst {x.get('worst_metric')} {x.get('worst_ratio')}); programs {here[:12]} ~ {old[:12]}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------- roofline -> evidence
@@ -999,7 +1050,9 @@ def main(argv=None):
     b.add_argument("--gpus", help="comma-separated GPU ids the card covers (card_lib.GPUS); one without evidence is not_measured")
     b.add_argument("--gpu-memory", action="append", metavar="GPU=BYTES", help="loom-serve --memory_bytes on that GPU (repeat)")
     b.add_argument("--served-context", action="append", metavar="GPU=TOKENS", help="tokens per request that GPU serves (repeat)")
-    b.add_argument("--fit", metavar="VERDICT.json", help="the fit table: radeon-r9700's memory_bytes, served context or unsupported state")
+    b.add_argument("--fit", action="append", metavar="VERDICT.json", help="a fit table (repeat; GPU=PATH names the device): the device's memory_bytes, served context or "
+                   "unsupported state. A path takes the device whose device.json fit_table has that file name, else radeon-r9700; 'auto' = the table of every "
+                   "registry device that has one in this checkout")
     b.add_argument("--generator-commit", help="loom-skills commit of the card scripts, or 'unknown' (default: this "
                    "checkout's HEAD)")
     b.add_argument("--evidence", nargs="*")
@@ -1072,6 +1125,10 @@ def main(argv=None):
     m.add_argument("--compared-revision", help="its commit the job fetched (model_fun.json's document URL)")
     m.add_argument("--fetched-programs", help="programs_sha256 the job fetched for the package (programs_sha256.txt)")
     m.add_argument("--date", help="YYYY-MM-DD of the job")
+    m.add_argument("--first-cmp", help="the first run's strix_ab_compare.py --json, when --cmp is the confirming re-run with verdict out_of_margin: "
+                   "rows faster than the card in both runs get the mean of the two runs' medians as the card value")
+    m.add_argument("--first-run", help="the first run's Actions run id (with --first-cmp)")
+    m.add_argument("--first-url", help="the first run's job URL (with --first-cmp)")
     add_source_args(m, "devlab")
     m.add_argument("-o", required=True)
     a = ap.parse_args(argv)

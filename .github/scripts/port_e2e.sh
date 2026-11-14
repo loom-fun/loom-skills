@@ -12,7 +12,7 @@
 #
 # A catalog-package port (loom-port-llm/SKILL.md) pins its own SDK: port.sh installs it next to LOOM_ROOT
 # (ensure_sdk.sh) and records the root in work/loom_root, which every later stage here uses.
-# DIR/phases.log (`<epoch> <phase>`: loom-improve's kpi.py reads it), DIR/work (port.sh's WORKDIR: pkg, bench, ...),
+# DIR/phases.log (`<epoch> <phase>`: loom-fleet's kpi.py reads it), DIR/work (port.sh's WORKDIR: pkg, bench, ...),
 # DIR/out: evidence (ev_perf.json, ev_gates.json), publish/ (the package as it is uploaded, without weights),
 # logs and result.json. GPU_LOCK: every GPU stage holds this flock (one GPU job at a time on a shared machine).
 set -uo pipefail
@@ -116,5 +116,5 @@ save_logs
 v=$("$T" -c "import json; print(json.load(open('$bench/gates.json'))['verdict'])" 2>/dev/null)
 a=$(grep -o "AUDIT [A-Z]*" "$out/finalize.log" | tail -1)
 echo "gates: $v; audit: $a"
-# a failed gate fails the job; out/ (evidence, publish/) is still complete and is published as is (loom-org step 2)
+# a failed gate fails the job; out/ (evidence, publish/) is still complete and is published as is (loom-fleet publish.md step 2)
 if [ "$v" = PASS ]; then result ok done 0; else result failed gates 1; exit 1; fi
