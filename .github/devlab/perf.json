@@ -5,20 +5,93 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "unsloth-qwen3-30b-a3b-instruct-2507-loom",
+   "card": "loom-fun-staging/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 109568,
    "variants": [
     {
      "name": "card",
-     "build": {}
+     "context": 109568,
+     "execution": {
+      "context_capacity": 109568,
+      "pool_capacity": 109568
+     }
     },
     {
      "name": "nodraft",
-     "build": {},
+     "context": 109568,
+     "execution": {
+      "context_capacity": 109568,
+      "pool_capacity": 109568,
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "bartowski-minicpm-v-4-7-35b-a3b-loom",
+   "card": "loom-fun-staging/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "lmstudio-community-ornith-1-0-35b-loom",
+   "card": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "nodraft",
      "execution": {
       "draft_depth": 0
      }
@@ -40,7 +113,7 @@
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
