@@ -1,31 +1,28 @@
 {
- "_comment": "R9700 A/B (ab_jobs.py): per model one job on one R9700 runner, old package (fun) vs new package (staging), served as the new card's R9700 Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, loom-fun package (fun) vs loom-fun-staging package (staging), same prompts and settings; compare with strix_ab_compare.py",
+ "runner": "strix",
+ "memory_bytes": 81000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "rab-unsloth-llama-3-2-3b-instruct-loo-r2",
-   "runner": "r9700",
-   "card": "loom-fun-staging/unsloth-Llama-3.2-3B-Instruct-loom@90fcb2da96e3b4bb8bf28629ffcf9d31c9c1b05d",
-   "memory_bytes_r9700": 29000000000,
+   "name": "sab-bartowski-nanbeige4-3-33b-loom-r2",
+   "runner": "strix",
+   "card": "loom-fun-staging/bartowski-Nanbeige4.3-33B-loom",
+   "memory_bytes": 81000000000,
    "kit": null,
-   "llamacpp": "b1375",
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "fun",
-     "card": "loom-fun-staging/unsloth-Llama-3.2-3B-Instruct-loom@90fcb2da96e3b4bb8bf28629ffcf9d31c9c1b05d",
-     "cap_pool": 258048,
-     "execution": {}
+     "card": "loom-fun/bartowski-Nanbeige4.3-33B-loom"
     },
     {
      "name": "staging"
     },
     {
      "name": "funnd",
-     "card": "loom-fun-staging/unsloth-Llama-3.2-3B-Instruct-loom@90fcb2da96e3b4bb8bf28629ffcf9d31c9c1b05d",
-     "cap_pool": 258048,
+     "card": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
      "execution": {
       "draft_depth": 0
      }
@@ -58,18 +55,11 @@
     "textmatch:staging",
     "func:staging",
     "ktest:staging",
-    "gates:staging:dev",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "gates:staging:dev"
    ]
   }
  ],
- "card": "loom-fun-staging/unsloth-Llama-3.2-3B-Instruct-loom@90fcb2da96e3b4bb8bf28629ffcf9d31c9c1b05d",
+ "card": "loom-fun-staging/bartowski-Nanbeige4.3-33B-loom",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "llamacpp": "b1374"
 }
