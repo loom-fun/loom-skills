@@ -10,7 +10,12 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "skills", "loom-port-llm
 import gen_gemm as G
 import gen_gemm_rdna4 as R
 
-SHAPES = [  # (fmt, mode, rows, K, N): the prefill GEMMs of Gemma-4-E2B (k1536), Qwen3-8B (k4096) and Qwen3-0.6B (k1024)
+SHAPES = [  # (see ALL_SHAPES for the full list)
+    ("q4_k", "swiglu", 1024, 1536, 6144), ("q4_k", "store", 1024, 6144, 1536),
+    ("q4_k", "swiglu", 1024, 4096, 12288), ("q4_k", "store", 1024, 12288, 4096),
+    ("q4_k", "swiglu", 1024, 1024, 3072), ("q4_k", "store", 1024, 3072, 1024),
+]
+ALL_SHAPES = [  # (fmt, mode, rows, K, N): the prefill GEMMs of Gemma-4-E2B (k1536), Qwen3-8B (k4096) and Qwen3-0.6B (k1024)
     ("q4_k", "swiglu", 1024, 1536, 6144), ("q4_k", "store", 1024, 6144, 1536), ("q4_k", "store", 1024, 1536, 2048),
     ("q4_k", "swiglu", 1024, 4096, 12288), ("q4_k", "store", 1024, 12288, 4096), ("q4_k", "store", 1024, 4096, 4096),
     ("q4_k", "swiglu", 1024, 1024, 3072), ("q4_k", "store", 1024, 3072, 1024),
@@ -23,13 +28,25 @@ def kernel_text(text, name):
     e = text.index("  kernel.return\n}\n", s) + len("  kernel.return\n}\n")
     return text[s:e]
 
-def build(variants):
+import re as _re
+def transform(tw, variant):
+    """Ablations of one twin kernel text (timing only, wrong results): nomma, nodq, nobar."""
+    if variant == "nomma":
+        tw = _re.sub(r"^(\s*)(%\w+) = vector\.mma (%\w+), (%\w+), (%\w+) : vector<8xf16>, vector<8xf16>, vector<8xf32>$", r"\1\2 = vector.addf \5, \5 : vector<8xf32>", tw, flags=_re.M)
+    elif variant == "nodq":
+        tw = tw.replace("  %origin = index.constant 0 : offset\n", "  %origin = index.constant 0 : offset\n  %zero16 = vector.constant 0.0 : vector<16xf16>\n", 1)
+        tw = _re.sub(r"vector\.store %dq\w+, ", "vector.store %zero16, ", tw)
+    elif variant == "nobar":
+        tw = _re.sub(r"^\s*kernel\.barrier<workgroup>[^\n]*\n", "", tw, flags=_re.M)
+    return tw
+
+def build(variant=""):
     out = []
     for fmt, mode, rows, K, N in SHAPES:
         for big in ("m128", "m256"):
             if big == "m256" and rows % 256: continue
             g = G.gemm_big(fmt, mode) if big == "m128" else G.gemm_big256(fmt, mode)
-            tw = R.twin(g)
+            tw = transform(R.twin(g), variant)
             m = re.search(r'export\("(\w+)"\)', tw); old = m.group(1)
             kn = f"k_{fmt}_{mode}_{big}_{rows}x{K}x{N}"
             tw = tw.replace(f'export("{old}") @{old}(', f'export("{kn}") @{kn}(')
@@ -113,4 +130,5 @@ HEAD = "amdgpu.target<gfx12-generic> @rdna4 {subgroup_size = 32}\n\n" + open(os.
 if __name__ == "__main__":
     d = sys.argv[1]
     os.makedirs(d, exist_ok=True)
-    open(os.path.join(d, "bench.loom"), "w").write(HEAD + "\n".join(build({})) + "\n" + PEAK)
+    for v in ["", "nomma", "nodq", "nobar"]:
+        open(os.path.join(d, "bench%s.loom" % ("_" + v if v else "")), "w").write(HEAD + "\n".join(build(v)) + ("\n" + PEAK if not v else ""))
