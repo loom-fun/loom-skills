@@ -1584,7 +1584,7 @@
 +    os.environ.setdefault("FLASH2_KT", "16")   # head_dim 256 + window spills at 32-key tiles
 +    fenv = dict(os.environ, FLASH2_TARGET="llm", FLASH2_OUT=flash2, LLM_CONFIG=fcfg,
 +                FLASH2_KV_FN=kv_fn_name(DIMS[DSWA]["kvh"] * DSWA * 2, DSWA))
-+    if DSWA == 256 and FLASH512 and os.environ.get("FLASH2_SWA_TWIN", "s") == "s":   # gfx12: the sliding kernel's twin is gen_flash2s.py's split-dims kernel (same launch signature); POS_BYTES: the V plane's offset
++    if DSWA == 256 and FLASH512 and os.environ.get("FLASH2_SWA_TWIN", "s" if os.environ.get("FLASH2_TRIM") == "1" else "") == "s":   # gfx12: the sliding kernel's twin is gen_flash2s.py's split-dims kernel (same launch signature); POS_BYTES: the V plane's offset
 +        fenv.update(FLASH2_SWA_TWIN="s", FLASH2_POS_BYTES=str(POS_BYTES))
 +    if ATTN_SCALE is not None:
 +        fenv["FLASH2_SCALE"] = repr(float(ATTN_SCALE))

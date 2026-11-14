@@ -66,6 +66,11 @@ GELU = CFG.get("ffn_act") == "gelu"      # GEGLU FFN (gelu-tanh, llama.cpp LLM_F
 RECUR = set(CFG.get("recurrent_layers", []))  # gated delta-net layers (hybrid models)
 GDN = gdn_geometry(CFG) if RECUR else None
 FFN_NORM = CFG.get("ffn_norm_tensor", "ffn_norm")
+# The R9700 (gfx12) prefill stack of #656 is opt-in per model (llm_config rdna4_f16_ffn, or GEMM_F16O=swiglu): the f16-output
+# swiglu group, the gen_flash2s.py flash-twin trims and the split-dims sliding twin; other packages keep the default twins.
+from gen_gemm_rdna4 import f16o_swiglu as _f16o_stack  # noqa: E402
+if _f16o_stack(CFG):
+    os.environ.setdefault("FLASH2_TRIM", "1")
 MOE = CFG.get("moe")                      # MoE FFN (gen_moe.py: router + top-k experts, optional shared experts)
 MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) | ({MTP_LAYER} if MTP_LAYER is not None else set()) if MOE else set()
 FS = (MOE or {}).get("shared_ffn", 0)     # shared-expert FFN width (0: none)
