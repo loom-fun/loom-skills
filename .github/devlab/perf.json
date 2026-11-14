@@ -6,8 +6,9 @@
  "jobs": [
   {
    "llama_kv_rocm": 45056,
-   "name": "glimmer-ctx32768",
+   "name": "ggml-org-muse-glimmer-30b-loom",
    "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
+   "require_preset_r9700": true,
    "kit": "glimmer",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
@@ -16,66 +17,12 @@
    "variants": [
     {
      "name": "card",
-     "context": 32768,
-     "execution": {
-      "context_capacity": 32768,
-      "pool_capacity": 32768
-     }
-    }
-   ],
-   "steps": [
-    "func:card",
-    "gates:card:dev"
-   ]
-  },
-  {
-   "llama_kv_rocm": 45056,
-   "name": "glimmer-ctx30720",
-   "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
-   "kit": "glimmer",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 30720,
-   "variants": [
-    {
-     "name": "card",
-     "context": 30720,
-     "execution": {
-      "context_capacity": 30720,
-      "pool_capacity": 30720
-     }
-    }
-   ],
-   "steps": [
-    "func:card",
-    "gates:card:dev"
-   ]
-  },
-  {
-   "llama_kv_rocm": 28672,
-   "name": "glimmer-full28672",
-   "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
-   "kit": "glimmer",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 28672,
-   "variants": [
-    {
-     "name": "card",
-     "context": 28672,
-     "execution": {
-      "context_capacity": 28672,
-      "pool_capacity": 28672
-     }
+     "context": 32768
     },
     {
      "name": "nodraft",
-     "context": 28672,
+     "context": 32768,
      "execution": {
-      "context_capacity": 28672,
-      "pool_capacity": 28672,
       "draft_depth": 0
      }
     }
@@ -96,7 +43,7 @@
    ]
   }
  ],
- "card": "loom-fun-staging/unsloth-Qwen3-VL-4B-Instruct-loom",
+ "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
