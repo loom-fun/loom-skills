@@ -1,0 +1,2 @@
+{"pr": "#656 / #665", "title": "gemma-4-E2B R9700 prefill stack, opt-in (swiglu f16-output group, flash twin trims, d512 two-heads-per-wave flash)", "variants": ["A", "B"],
+ "intent": "opt-in per model: A sets llm_config rdna4_f16_ffn on the E2B package (the way it was merged), B declares the measured scope as a rule of the gemma4 node (8 heads on 1 KV head, rdna4)"}

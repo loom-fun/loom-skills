@@ -1,0 +1,14 @@
+| GPU | stratum | members | rows | representatives |
+|---|---|---|---|---|
+| radeon-r9700 | arch=gemma4 hd=512 G=4 kv=<=2 draft=assist dense fam=attn_prefill fmt=- | 1 | prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k | unsloth-gemma-4-E4B-it-loom (heaviest for the changed kernel) |
+| strix-halo | arch=gemma4 hd=512 G=4 kv=<=2 draft=assist dense fam=attn_prefill fmt=- | 1 | prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k | unsloth-gemma-4-E4B-it-loom (heaviest for the changed kernel) |
+| radeon-r9700 | arch=gemma4 hd=512 G=4 kv=<=2 draft=dflash dense fam=attn_prefill fmt=- | 1 | prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k | nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom (heaviest for the changed kernel) |
+| strix-halo | arch=gemma4 hd=512 G=4 kv=<=2 draft=dflash dense fam=attn_prefill fmt=- | 1 | prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k | nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom (heaviest for the changed kernel) |
+| radeon-r9700 | arch=gemma4 hd=512 G=8 kv=<=2 draft=assist dense fam=attn_prefill fmt=- | 1 | prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k | unsloth-gemma-4-E2B-it-loom (heaviest for the changed kernel) |
+| strix-halo | arch=gemma4 hd=512 G=8 kv=<=2 draft=assist dense fam=attn_prefill fmt=- | 1 | prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k | unsloth-gemma-4-E2B-it-loom (heaviest for the changed kernel) |
+| radeon-r9700 | arch=lfm3 hd=128 G=4 kv=4 draft=none dense fam=attn_prefill fmt=- | 2 | prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k | bartowski-LFM3-1.7B-loom (heaviest for the changed kernel) |
+| strix-halo | arch=lfm3 hd=128 G=4 kv=4 draft=none dense fam=attn_prefill fmt=- | 2 | prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k | bartowski-LFM3-1.7B-loom (heaviest for the changed kernel) |
+| radeon-r9700 | arch=spark2_5 hd=256 G=4 kv=4 draft=none dense fam=attn_prefill fmt=- | 2 | prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k | XHToken-Spark-X2.5-4B-loom (heaviest for the changed kernel) |
+| strix-halo | arch=spark2_5 hd=256 G=4 kv=4 draft=none dense fam=attn_prefill fmt=- | 2 | prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k | XHToken-Spark-X2.5-4B-loom (heaviest for the changed kernel) |
+
+strata 10; touched model-GPU pairs 14; sampled 10; T1 canary ~2.35 runner-h vs full A/B of every touched model ~8.29 runner-h

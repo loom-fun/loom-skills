@@ -1,0 +1,39 @@
+{
+ "patch": "B.patch",
+ "files_edited": [
+  "skills/loom-kb/arch/llm/dense/llama/scope.json",
+  "skills/loom-kb/arch/llm/dense/qwen2vl/scope.json",
+  "skills/loom-kb/arch/llm/dense/qwen3/scope.json",
+  "skills/loom-kb/arch/llm/hybrid/qwen35/scope.json",
+  "skills/loom-kb/arch/llm/moe/flint/scope.json"
+ ],
+ "lint_exit": 0,
+ "touched_by_family": {
+  "gfx11": 8,
+  "gfx12": 0
+ },
+ "impact_summary": {
+  "models": 51,
+  "touched": 8,
+  "gpus": [
+   "gfx11",
+   "gfx12"
+  ],
+  "rows": [
+   "decode",
+   "decode_2k",
+   "decode_32k",
+   "streams4"
+  ]
+ },
+ "touched_models": [
+  "bartowski-Ornith-1.5-9B-loom",
+  "bartowski-Qwen3.8-27B-loom",
+  "ggml-org-Flint-loom",
+  "ggml-org-Qwen3-4B-loom",
+  "ggml-org-Qwen3.6-27B-loom",
+  "unsloth-Qwen3-8B-loom",
+  "unsloth-Qwen3.5-4B-loom",
+  "unsloth-Qwen3.5-9B-loom"
+ ]
+}

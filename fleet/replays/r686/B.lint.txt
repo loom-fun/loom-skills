@@ -1,0 +1,89 @@
+=== part kind architecture: 3 file(s), exit 0
+  .github/workflows/nightly-gates.yml
+  skills/loom-benchmark/scripts/card/info_schema.json
+  skills/loom-benchmark/scripts/card/make_info.py
+### Scope lint: pass
+kind `architecture`; scopes -; kernels -; 3 file(s) changed.
+Program impact: 0 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+
+
+=== part kind card: 24 file(s), exit 0
+  skills/loom-benchmark/scripts/card/card_lib.py
+  skills/loom-benchmark/scripts/card/test/check.sh
+  skills/loom-benchmark/scripts/card/test/d1/expected/README.md
+  skills/loom-benchmark/scripts/card/test/flint/expected/README.md
+  skills/loom-benchmark/scripts/card/test/flint/expected/REPORT.md
+  skills/loom-benchmark/scripts/card/test/flint/expected/info.json
+  skills/loom-benchmark/scripts/card/test/legacy/d1/README.md
+  skills/loom-benchmark/scripts/card/test/legacy/flint/README.md
+  skills/loom-benchmark/scripts/card/test/legacy/flint/REPORT.md
+  skills/loom-benchmark/scripts/card/test/r9700_exec/expected/README.md
+  skills/loom-benchmark/scripts/card/test/r9700_exec/expected/REPORT.md
+  skills/loom-benchmark/scripts/card/test/r9700_exec/expected/info.json
+  skills/loom-benchmark/scripts/card/test/r9700_none/expected/README.md
+  skills/loom-benchmark/scripts/card/test/r9700_none/expected/REPORT.md
+  skills/loom-benchmark/scripts/card/test/r9700_none/expected/info.json
+  skills/loom-benchmark/scripts/card/test/r9700_preset/expected/README.md
+  skills/loom-benchmark/scripts/card/test/r9700_preset/expected/REPORT.md
+  skills/loom-benchmark/scripts/card/test/r9700_preset/expected/info.json
+  skills/loom-benchmark/scripts/card/test/r9700_staging/expected/README.md
+  skills/loom-benchmark/scripts/card/test/r9700_staging/expected/REPORT.md
+  skills/loom-benchmark/scripts/card/test/r9700_staging/expected/info.json
+  skills/loom-benchmark/scripts/card/test/r9700_two/expected/README.md
+  skills/loom-benchmark/scripts/card/test/r9700_two/expected/REPORT.md
+  skills/loom-benchmark/scripts/card/test/r9700_two/expected/info.json
+### Scope lint: pass
+kind `card`; scopes -; kernels -; 24 file(s) changed.
+Program impact: 0 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+
+
+=== part kind docs: 10 file(s), exit 0
+  README.md
+  docs/app.js
+  docs/index.html
+  skills/loom-benchmark/SKILL.md
+  skills/loom-benchmark/reference/methodology.md
+  skills/loom-improve/SKILL.md
+  skills/loom-optimize/SKILL.md
+  skills/loom-org/SKILL.md
+  skills/loom-port-llm/SKILL.md
+  skills/loom-port-llm/starter/draft/README.md
+### Scope lint: pass
+kind `docs`; scopes -; kernels -; 10 file(s) changed.
+Program impact: 0 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+
+
+=== part kind tooling: 16 file(s), exit 0
+  .github/scripts/devlab_experiment.sh
+  .github/scripts/devlab_perf.sh
+  .github/scripts/port_e2e.sh
+  .github/scripts/strix_ab_jobs.py
+  skills/loom-benchmark/scripts/audit.py
+  skills/loom-benchmark/scripts/ctx_admit.py
+  skills/loom-benchmark/scripts/finalize.sh
+  skills/loom-benchmark/scripts/gates.sh
+  skills/loom-benchmark/scripts/llamacpp_server.sh
+  skills/loom-benchmark/scripts/needle.py
+  skills/loom-benchmark/scripts/perf.py
+  skills/loom-benchmark/scripts/qualify.sh
+  skills/loom-benchmark/scripts/report.py
+  skills/loom-improve/scripts/kpi.py
+  skills/loom-improve/scripts/watch_trial.sh
+  tests/test_gate_scope.py
+### Scope lint: pass
+kind `tooling`; scopes -; kernels -; 16 file(s) changed.
+Program impact: 0 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+
+
+=== part kind tooling: 2 file(s), exit 1
+  .github/devlab/experiment.json
+  skills/loom-roofline/e2e_budget.py
+### Scope lint: FAIL
+kind `tooling`; scopes -; kernels -; 2 file(s) changed.
+Program impact: 0 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+
+| rule | problem |
+|---|---|
+| files | .github/devlab/experiment.json: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| files | skills/loom-roofline/e2e_budget.py: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+

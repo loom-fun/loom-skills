@@ -1,0 +1,69 @@
+diff --git a/skills/loom-kb/arch/llm/moe/qwen35moe/scope.json b/skills/loom-kb/arch/llm/moe/qwen35moe/scope.json
+index 63994e2..76d0612 100644
+--- a/skills/loom-kb/arch/llm/moe/qwen35moe/scope.json
++++ b/skills/loom-kb/arch/llm/moe/qwen35moe/scope.json
+@@ -10,17 +10,5 @@
+   "moe",
+   "hybrid-gdn"
+  ],
+- "choices": [
+-  {
+-   "when": {
+-    "facets": [
+-     "drafted"
+-    ]
+-   },
+-   "set": {
+-    "decode.attn.kv_once.d256": false
+-   },
+-   "evidence": "Drafted qwen35moe (head_dim 256, 2 KV heads): the K/V-once decode body (#451) cost decode_32k 0.74-0.78x on Strix (runs 43603564334, 43608671297, 43611547482). Rule off: Strix decode_32k vs loom-fun 1.00/1.04/0.98/1.04, R9700 vs staging main 1.22-1.41 (run 43631671557, PR #715)."
+-  }
+- ]
++ "choices": []
+ }
+diff --git a/skills/loom-kb/choices.py b/skills/loom-kb/choices.py
+index 96494a3..92fa1a9 100644
+--- a/skills/loom-kb/choices.py
++++ b/skills/loom-kb/choices.py
+@@ -158,16 +158,16 @@ CHOICE("decode.attn.unroll", "int", 16, "ATTN_UNROLL", doc="Keys per decode-atte
+ CHOICE("decode.attn.butterfly", "bool", True, "ATTN_BFLY", doc="A block's key scores in one butterfly all-reduce.", **_DA)
+ CHOICE("decode.attn.paged", "bool", True, "ATTN_PAGED", doc="16-aligned key blocks, one page lookup each.", **_DA)
+ CHOICE("decode.attn.ilp", "int", 1, "ATTN_ILP", doc="Independent softmax chains per block (2, 4: no gain on Qwen3.8-27B at 32k).", **_DA)
+-CHOICE("decode.attn.kv_once", "bool", True, "ATTN_GQA", rows=["decode_32k", "decode_2k"],
++CHOICE("decode.attn.kv_once", "bool", False, "ATTN_GQA", rows=["decode_32k", "decode_2k"],
+        kernels=["g_attention_split"], from_pr="gqa_split",
+        doc="Decode split kernel (non-drafting, head_dim 128): K/V loaded once for the G query heads of a KV head; the per-head "
+            "body stays under decode.attn.kv_once.from_keys visible keys. Qwen3-4B decode_32k 24.5 -> 28.3 tok/s.")
+ CHOICE("decode.attn.kv_once.from_keys", "int", 4096, "ATTN_GQA_FROM", rows=["decode_32k"], kernels=["g_attention_split"],
+        doc="Visible keys from which the K/V-once body is taken.")
+-CHOICE("decode.attn.kv_once.drafted", "bool", True, "ATTN_GQA_DRAFT", rows=["decode_32k"], kernels=["g_attention_split"],
++CHOICE("decode.attn.kv_once.drafted", "bool", False, "ATTN_GQA_DRAFT", rows=["decode_32k"], kernels=["g_attention_split"],
+        doc="Drafting packages carry the K/V-once body too (Flint 50.1 -> 57-61, Llama-3.1-8B 24.9 -> 29.7 at decode_32k). "
+            "False: non-drafting packages only. Not with the segment path.")
+-CHOICE("decode.attn.kv_once.d256", "bool", True, "ATTN_GQA_D256", rows=["decode_32k"], kernels=["g_attention_split"],
++CHOICE("decode.attn.kv_once.d256", "bool", False, "ATTN_GQA_D256", rows=["decode_32k"], kernels=["g_attention_split"],
+        doc="head_dim 256 (qwen35 hybrids, 252 VGPRs) carries the K/V-once body in drafting packages too.")
+ CHOICE("decode.attn.kv_once.block_keys", "int", 8, "ATTN_GQA_U", rows=["decode_32k"], kernels=["g_attention_split"],
+        doc="Keys per block of the K/V-once body (Qwen3-30B-A3B kv4 35.2 -> 36.5 tok/s vs 16).")
+diff --git a/skills/loom-port-llm/starter/attn_rules.py b/skills/loom-port-llm/starter/attn_rules.py
+index 65972ec..1c58aea 100644
+--- a/skills/loom-port-llm/starter/attn_rules.py
++++ b/skills/loom-port-llm/starter/attn_rules.py
+@@ -9,14 +9,14 @@ ATTN_ILP = int(os.environ.get("ATTN_ILP", "1"))   # independent softmax chains p
+ # Decode split kernel (non-drafting packages): K/V loaded once for the G query heads of a KV head (gen_llm.gqa_split); the
+ # per-head body stays for contexts under ATTN_GQA_FROM visible keys. Nodraft Qwen3-4B (kv8, d128), same runner: decode_32k
+ # 24.5 -> 28.3 (+15 %), decode/2k/4 streams within noise. ATTN_GQA=0 keeps the per-head kernel.
+-ATTN_GQA = os.environ.get("ATTN_GQA", "1") == "1"
++ATTN_GQA = os.environ.get("ATTN_GQA", "0") == "1"
+ ATTN_GQA_FROM = int(os.environ.get("ATTN_GQA_FROM", "4096"))
+ # Drafting packages (verify spans, 1-token and ctx-gated epochs) carry the same K/V-once body: every token past ATTN_GQA_FROM keys
+ # reads each key once for its G heads, the tokens of a verify span re-read through the cache (the multi-token path below hands over
+ # to it at ATTN_GQA_FROM). Same-runner decode_32k, drafted vs main: Flint (4 KV heads, DFlash d3) 50.1 -> 57-61, Llama-3.1-8B
+ # (8 KV heads, ngram d2) 24.9 -> 29.7. ATTN_GQA_DRAFT=0: nodraft only. Not with the segment path (<= 2 KV heads, gen_llm.seg_tokens).
+-ATTN_GQA_DRAFT = os.environ.get("ATTN_GQA_DRAFT", "1") == "1"
+-GQA_D256 = os.environ.get("ATTN_GQA_D256", "1") == "1"   # head_dim 256 (qwen35 hybrids, 252 VGPRs) carries the body in drafting packages too
++ATTN_GQA_DRAFT = os.environ.get("ATTN_GQA_DRAFT", "0") == "1"
++GQA_D256 = os.environ.get("ATTN_GQA_D256", "0") == "1"   # head_dim 256 (qwen35 hybrids, 252 VGPRs) carries the body in drafting packages too
+ ATTN_MT = int(os.environ.get("ATTN_MT", "4"))   # verify-span tokens per wave (gen_llm.multi_token_split)
+ ATTN_MT_FROM = int(os.environ.get("ATTN_MT_FROM", "1024"))   # ... from this position on
+ # The span path leaves one workgroup per (4 tokens, KV head, split), each running its tokens serially: with fewer KV
