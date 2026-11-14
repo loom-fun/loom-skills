@@ -1,0 +1,442 @@
+{
+ "name": "Qwen3-8B",
+ "arch": "qwen3",
+ "gguf": "Qwen3-8B-Q4_K_M.gguf",
+ "hidden": 4096,
+ "layers": 36,
+ "heads": 32,
+ "kv_heads": 8,
+ "head_dim": 128,
+ "ffn": 12288,
+ "vocab": 151936,
+ "context_length": 40960,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 1000000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 151645,
+ "extra_eos_ids": [
+  151643
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "trim_content": false,
+  "think_open": "<think>\n",
+  "think_close": "\n</think>\n\n",
+  "history_think": "nonempty",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n<think>\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "thinking": "toggle",
+  "thinking_default": true,
+  "starts_in_reasoning": true,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": true,
+  "tools_system_separator": "\n\n",
+  "tools_prefix": "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>",
+  "tools_suffix": "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>",
+  "call_format": "hermes",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "attn_sinks": false,
+ "drafter": {
+  "gguf": "Qwen3-8B-DFlash.Q8_0.gguf",
+  "repo": "AtomicChat/Qwen3-8B-DFlash-GGUF",
+  "file": "Qwen3-8B-DFlash.Q8_0.gguf",
+  "kind": "dflash",
+  "depth": 3,
+  "ctx_max": 3500,
+  "occ_min": 0,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 37.92,
+    "rows": {
+     "work0": 45.33,
+     "work1": 45.33,
+     "work3": 45.32,
+     "work4": 45.03,
+     "long": 23.0,
+     "streams4": 169.87
+    },
+    "seconds": 102,
+    "baseline": "no-draft package",
+    "margin_llama": 0.881
+   },
+   {
+    "kind": "dflash",
+    "depth": 1,
+    "decode_tps": 40.12,
+    "rows": {
+     "work0": 49.27,
+     "work1": 57.53,
+     "work3": 59.97,
+     "work4": 60.82,
+     "long": 18.58,
+     "streams4": 163.0
+    },
+    "seconds": 100,
+    "margin_llama": 0.848,
+    "margin": 0.848,
+    "streams4_gated": 163.0,
+    "streams4_ungated": 150.85
+   },
+   {
+    "kind": "dflash",
+    "depth": 2,
+    "decode_tps": 50.32,
+    "rows": {
+     "work0": 58.03,
+     "work1": 76.15,
+     "work3": 85.62,
+     "work4": 82.88,
+     "long": 22.09,
+     "streams4": 164.24
+    },
+    "seconds": 95,
+    "margin_llama": 1.009,
+    "margin": 1.009,
+    "streams4_gated": 164.24,
+    "streams4_ungated": 159.34,
+    "geomean": 1.102
+   },
+   {
+    "kind": "dflash",
+    "depth": 3,
+    "decode_tps": 54.06,
+    "rows": {
+     "work0": 61.64,
+     "work1": 90.19,
+     "work3": 105.55,
+     "work4": 102.91,
+     "long": 21.75,
+     "streams4": 169.04
+    },
+    "seconds": 92,
+    "margin_llama": 0.993,
+    "margin": 0.993,
+    "streams4_gated": 162.59,
+    "streams4_ungated": 169.04,
+    "occ_min": 0,
+    "geomean": 1.129
+   },
+   {
+    "kind": "dflash",
+    "depth": 5,
+    "decode_tps": 46.78,
+    "rows": {
+     "work0": 55.15,
+     "work1": 86.11,
+     "work3": 103.38,
+     "work4": 107.81,
+     "long": 17.18,
+     "streams4": 164.96
+    },
+    "seconds": 95,
+    "margin_llama": 0.785,
+    "margin": 0.785,
+    "streams4_gated": 164.96,
+    "streams4_ungated": 100.34
+   },
+   {
+    "kind": "dflash",
+    "depth": 3,
+    "ctx_max": 3500,
+    "occ_min": 0,
+    "decode_tps": 55.51,
+    "rows": {
+     "work0": 62.42,
+     "work1": 91.45,
+     "work3": 106.6,
+     "work4": 104.08,
+     "long": 22.66,
+     "streams4": 164.66
+    },
+    "seconds": 91,
+    "margin": 1.035,
+    "margin_llama": 1.035,
+    "geomean": 1.14,
+    "checked": "ok (exact, concurrent)"
+   },
+   {
+    "kind": "ngram",
+    "depth": 1,
+    "decode_tps": 47.46,
+    "rows": {
+     "work0": 46.29,
+     "work1": 50.28,
+     "work3": 56.88,
+     "work4": 60.98,
+     "long": 33.46,
+     "streams4": 170.39
+    },
+    "seconds": 97,
+    "margin_llama": 0.906,
+    "margin": 0.906,
+    "streams4_gated": 170.39,
+    "streams4_ungated": 138.64,
+    "geomean": 1.188
+   },
+   {
+    "kind": "ngram",
+    "depth": 2,
+    "decode_tps": 52.32,
+    "rows": {
+     "work0": 45.24,
+     "work1": 50.35,
+     "work3": 59.62,
+     "work4": 67.34,
+     "long": 45.51,
+     "streams4": 167.99
+    },
+    "seconds": 96,
+    "margin_llama": 0.885,
+    "margin": 0.885,
+    "streams4_gated": 167.99,
+    "streams4_ungated": 123.1,
+    "geomean": 1.3
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 53.14,
+    "rows": {
+     "work0": 45.24,
+     "work1": 50.31,
+     "work3": 61.64,
+     "work4": 69.99,
+     "long": 46.28,
+     "streams4": 166.95
+    },
+    "seconds": 96,
+    "margin_llama": 0.885,
+    "margin": 0.885,
+    "streams4_gated": 166.95,
+    "streams4_ungated": 120.72,
+    "geomean": 1.305
+   },
+   {
+    "kind": "ngram",
+    "depth": 5,
+    "decode_tps": 45.05,
+    "rows": {
+     "work0": 36.48,
+     "work1": 40.96,
+     "work3": 51.18,
+     "work4": 60.26,
+     "long": 43.44,
+     "streams4": 169.8
+    },
+    "seconds": 101,
+    "margin_llama": 0.714,
+    "margin": 0.714,
+    "streams4_gated": 169.8,
+    "streams4_ungated": 66.9
+   }
+  ]
+ },
+ "reference": {
+  "repo": "loom-fun/unsloth-Qwen3-8B-loom",
+  "revision": "0c02e6357d20eeb00fcb56b3564869f3d3cbfa56",
+  "category": "A",
+  "score": 171.0,
+  "reasons": [
+   "same architecture (qwen3)",
+   "same family (qwen3)",
+   "tool-call format hermes",
+   "thinking switch",
+   "drafter type dflash",
+   "head_dim 128"
+  ],
+  "generator": {
+   "skills_commit": "c994c152cfc2cdb43cb012c2c08c4a9a09a240e6",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "dflash",
+    "depth": 3,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 37.87,
+      "rows": {
+       "work0": 45.31,
+       "work1": 45.33,
+       "work3": 45.35,
+       "work4": 45.06,
+       "long": 22.9,
+       "streams4": 170.9
+      },
+      "seconds": 106,
+      "baseline": "no-draft package",
+      "margin_llama": 0.76
+     },
+     {
+      "kind": "dflash",
+      "depth": 2,
+      "decode_tps": 45.52,
+      "rows": {
+       "work0": 58.73,
+       "work1": 77.0,
+       "work3": 86.56,
+       "work4": 83.88,
+       "long": 17.75,
+       "streams4": 166.97
+      },
+      "seconds": 101,
+      "margin_llama": 0.807,
+      "margin": 0.807,
+      "streams4_gated": 166.65,
+      "streams4_ungated": 166.97,
+      "occ_min": 0
+     },
+     {
+      "kind": "dflash",
+      "depth": 3,
+      "decode_tps": 50.93,
+      "rows": {
+       "work0": 62.68,
+       "work1": 91.86,
+       "work3": 107.33,
+       "work4": 104.59,
+       "long": 19.06,
+       "streams4": 167.61
+      },
+      "seconds": 97,
+      "margin_llama": 0.866,
+      "margin": 0.866,
+      "streams4_gated": 166.04,
+      "streams4_ungated": 167.61,
+      "occ_min": 0
+     },
+     {
+      "kind": "dflash",
+      "depth": 5,
+      "decode_tps": 41.74,
+      "rows": {
+       "work0": 55.27,
+       "work1": 86.36,
+       "work3": 103.58,
+       "work4": 108.17,
+       "long": 14.04,
+       "streams4": 166.34
+      },
+      "seconds": 104,
+      "margin_llama": 0.638,
+      "margin": 0.638,
+      "streams4_gated": 166.34,
+      "streams4_ungated": 102.75
+     },
+     {
+      "kind": "dflash",
+      "depth": 3,
+      "ctx_max": 3500,
+      "occ_min": 0,
+      "decode_tps": 52.39,
+      "rows": {
+       "work0": 62.87,
+       "work1": 92.14,
+       "work3": 107.64,
+       "work4": 104.88,
+       "long": 20.06,
+       "streams4": 170.02
+      },
+      "seconds": 96,
+      "margin": 0.912,
+      "margin_llama": 0.912,
+      "checked": "ok (exact, concurrent)"
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 45.38,
+      "rows": {
+       "work0": 45.21,
+       "work1": 50.42,
+       "work3": 59.75,
+       "work4": 67.4,
+       "long": 27.28,
+       "streams4": 167.63
+      },
+      "seconds": 102,
+      "margin_llama": 0.762,
+      "margin": 0.762,
+      "streams4_gated": 167.63,
+      "streams4_ungated": 126.82
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 47.01,
+      "rows": {
+       "work0": 46.17,
+       "work1": 51.32,
+       "work3": 62.97,
+       "work4": 71.47,
+       "long": 28.29,
+       "streams4": 170.23
+      },
+      "seconds": 100,
+      "margin_llama": 0.779,
+      "margin": 0.779,
+      "streams4_gated": 170.23,
+      "streams4_ungated": 123.42
+     },
+     {
+      "kind": "ngram",
+      "depth": 5,
+      "decode_tps": 37.41,
+      "rows": {
+       "work0": 36.84,
+       "work1": 41.35,
+       "work3": 51.76,
+       "work4": 60.86,
+       "long": 21.47,
+       "streams4": 170.08
+      },
+      "seconds": 108,
+      "margin_llama": 0.621,
+      "margin": 0.621,
+      "streams4_gated": 170.08,
+      "streams4_ungated": 68.92
+     }
+    ]
+   }
+  }
+ },
+ "model_id": "Qwen/Qwen3-8B"
+}

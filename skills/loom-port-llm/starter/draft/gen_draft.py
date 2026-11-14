@@ -1,6 +1,6 @@
 """Speculative decoding for starter ports: target verification, device acceptance, and the MTP drafter.
 
-gen_llm.py imports this module when LLM_DRAFT is set (build.py sets it; see draft/README.md). Everything
+gen_llm.py imports this module when LLM_DRAFT is set (build.py sets it; see the loom-kb `speculative` topic (`kb.py route --topic speculative`)). Everything
 here is emitted into llm.loom next to the trunk, reusing the trunk's own kernels and layer text:
 
 - @llm_advance (ordinary epochs) keeps the trunk, but its final normalized hidden rows land in the

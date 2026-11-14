@@ -1,0 +1,52 @@
+{
+  "schema": "loom-kb/device/1",
+  "device": "strix-halo",
+  "family": "rdna3",
+  "gfx": "gfx1151",
+  "aliases": [
+    "gfx1151",
+    "strix"
+  ],
+  "name": "AMD Ryzen AI Max+ 395 \"Strix Halo\"",
+  "short": "Strix Halo",
+  "memory": null,
+  "memory_bytes": null,
+  "card": {
+    "runner": "Strix Halo",
+    "tag": "strix-halo",
+    "detect": {
+      "pattern": "strix|8060s|gfx1151",
+      "flags": "i"
+    },
+    "serve_args": []
+  },
+  "roofline": {
+    "default": "strix-halo",
+    "presets": {
+      "strix-halo": {
+        "name": "AMD Ryzen AI Max+ 395 \"Strix Halo\" (gfx1151)",
+        "bw": 216000000000.0,
+        "flops": 59000000000000.0,
+        "note": "LPDDR5X-8000, 256-bit (256 GB/s peak); 40 CUs x 512 x 2.9 GHz"
+      }
+    }
+  },
+  "runner": {
+    "key": "strix",
+    "labels": [
+      "strix-halo",
+      "devlab-dispatch",
+      "Linux",
+      "self-hosted"
+    ],
+    "note": "always include Linux: without it a job can land on a Windows runner"
+  },
+  "preset_suffix": "",
+  "fit_table": null,
+  "prefill_flag": null,
+  "devlab_device_block": {
+    "cpu": "AMD Strix Halo (DevLab Dispatch runner {runner})",
+    "gpu": null,
+    "os": "Linux"
+  }
+}

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Compare the two packages of a Strix A/B job (strix_ab_jobs.py): new (staging) / old (fun) per card metric.
 
-usage: strix_ab_compare.py JOB_OUT_DIR [--band 0.03] [--fun-info loom-fun info.json] [--json out.json]
+usage: strix_ab_compare.py JOB_OUT_DIR [--band X] [--fun-info loom-fun info.json] [--json out.json]
 
 Per metric (card_lib.METRIC_KEYS) and per drafted metric's acceptance, decided on the MEDIAN of the serve sessions per side, a
-session's value being the median of its samples (user rule, 2026-11-14 10:38): old, new, new/old, PASS inside +-band, else OUT (a re-run decides). Plus: greedy text (text_fun.json vs
+session's value being the median of its samples (user rule, 2026-11-14 10:38): old, new, new/old, PASS inside +-band of that row, else OUT (a re-run decides). The band is per row
+(skills/loom-kb/method/methodology.json: prefill_8k..32k 2 %, prefill_1k/2k 3 %, decode and decode_32k 3 %, decode_2k and streams4 4 %);
+--band X forces one flat band for every row. The result's "band" is the widest band applied (what "within +-band" on a card states), "bands" the per-row ones. Plus: greedy text (text_fun.json vs
 text_staging.json, per prompt), func / ktest / gates of the staging package (summary.json), and new vs the published loom-fun card value.
 Exit 0 always; the verdict is in the JSON ("verdict": pass | rerun | gate_fail; with --prev FIRST.json: pass | out_of_margin | gate_fail).
 A missing metric (a step failed) counts as out of band: re-run.
@@ -18,17 +20,25 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card"))
 import card_lib  # noqa: E402
+from card_lib import registry  # noqa: E402
 from make_info import loom_sessions, read_rows  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("out")
-ap.add_argument("--band", type=float, default=0.03)
+ap.add_argument("--band", type=float, default=None, help="one flat band for every row (default: the per-row bands of methodology.json)")
 ap.add_argument("--fun-info", help="the published loom-fun info.json (card values)")
 ap.add_argument("--json")
 ap.add_argument("--prev", help="the first run's --json (this run is the confirming re-run): verdict out_of_margin when a metric is "
                 "outside the band in both runs in the same direction, else pass")
 a = ap.parse_args()
 o = a.out
+bands = {}   # row -> the band its verdict used
+
+
+def band_of(row):
+    bands[row] = a.band if a.band is not None else registry.band(row)
+    return bands[row]
+
 
 
 def side(v, nd):
@@ -56,7 +66,7 @@ for k in card_lib.METRIC_KEYS:
     if ov is None and nv is None:
         continue
     r = round(nv / ov, 4) if ov and nv else None
-    st = "PASS" if r is not None and abs(r - 1) <= a.band else ("MISSING" if r is None else "OUT")
+    st = "PASS" if r is not None and abs(r - 1) <= band_of(k) else ("MISSING" if r is None else "OUT")
     e = {"old": ov, "new": nv, "ratio": r, "status": st, "old_sessions": old.get(k), "new_sessions": new.get(k)}
     if card.get(k):
         e["card"] = card[k]
@@ -68,7 +78,7 @@ for k in sorted(set(oacc) | set(nacc)):
     nv = round(statistics.median(nacc[k]), 4) if nacc.get(k) else None
     r = round(nv / ov, 4) if ov and nv else None
     acc[k] = {"old": ov, "new": nv, "ratio": r,
-              "status": "PASS" if (r is not None and abs(r - 1) <= a.band) or (ov == 0 and nv == 0) else ("MISSING" if r is None else "OUT")}
+              "status": "PASS" if (r is not None and abs(r - 1) <= band_of("spec_acceptance")) or (ov == 0 and nv == 0) else ("MISSING" if r is None else "OUT")}
 
 # greedy text: the Loom texts of both packages, prompt by prompt
 text = {"status": "MISSING"}
@@ -101,7 +111,7 @@ outs = [k for k, e in metrics.items() if e["status"] != "PASS"] + [f"acceptance:
 fails = [k for k, s in gate_status.items() if s != "PASS"]
 worst = min(((abs(e["ratio"] - 1), k, e["ratio"]) for k, e in metrics.items() if e["ratio"]), default=None, key=lambda x: -x[0])
 res = {"job": summ and json.load(open(os.path.join(o, "summary.json")))["job"], "runner": open(os.path.join(o, "runner.txt")).read().strip() if os.path.exists(os.path.join(o, "runner.txt")) else None,
-       "band": a.band, "metrics": metrics, "acceptance": acc, "text": text, "gates": gates, "gate_status": gate_status,
+       "band": max(bands.values(), default=a.band if a.band is not None else registry.methodology()["default_band"]), "bands": bands, "metrics": metrics, "acceptance": acc, "text": text, "gates": gates, "gate_status": gate_status,
        "out_of_band": outs, "gate_failures": fails,
        "worst_metric": worst[1] if worst else None, "worst_ratio": worst[2] if worst else None,
        "verdict": "gate_fail" if fails else ("rerun" if outs else "pass")}

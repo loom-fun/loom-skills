@@ -1,0 +1,286 @@
+{
+ "name": "Nanbeige4.3 33B",
+ "arch": "llama",
+ "gguf": "Nanbeige_Nanbeige4.3-33B-Q4_K_M.gguf",
+ "hidden": 7168,
+ "layers": 52,
+ "heads": 56,
+ "kv_heads": 8,
+ "head_dim": 128,
+ "ffn": 22016,
+ "vocab": 166912,
+ "context_length": 524288,
+ "rms_eps": 9.999999747378752e-06,
+ "rope_theta": 120000000.0,
+ "rope_type": "norm",
+ "qk_norm": false,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 166101,
+ "extra_eos_ids": [
+  166102
+ ],
+ "bos_id": 166100,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "\u4f60\u662f\u5357\u5317\u9601\uff0c\u4e00\u6b3e\u7531BOSS\u76f4\u8058\u81ea\u4e3b\u7814\u53d1\u5e76\u8bad\u7ec3\u7684\u4e13\u4e1a\u5927\u8bed\u8a00\u6a21\u578b\u3002",
+  "trim_content": false,
+  "think_open": "<think>\n",
+  "think_close": "\n</think>\n\n",
+  "history_think": "always",
+  "history_think_scope": "all",
+  "generation_prompt": "<|im_start|>assistant\n<think>\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "thinking": "toggle",
+  "thinking_default": true,
+  "starts_in_reasoning": true,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": true,
+  "tools_system_separator": "\n\n",
+  "tools_prefix": "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>",
+  "tools_suffix": "\n</tools>\n\nFor each function call, output the function name and arguments within the following XML format:\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>",
+  "default_system_tools": "\u4f60\u662f\u4e00\u4f4d\u5de5\u5177\u51fd\u6570\u8c03\u7528\u4e13\u5bb6\uff0c\u4f60\u4f1a\u5f97\u5230\u4e00\u4e2a\u95ee\u9898\u548c\u4e00\u7ec4\u53ef\u80fd\u7684\u5de5\u5177\u51fd\u6570\u3002\u6839\u636e\u95ee\u9898\uff0c\u4f60\u9700\u8981\u8fdb\u884c\u4e00\u4e2a\u6216\u591a\u4e2a\u51fd\u6570/\u5de5\u5177\u8c03\u7528\u4ee5\u5b9e\u73b0\u76ee\u7684\uff0c\u8bf7\u5c3d\u91cf\u5c1d\u8bd5\u63a2\u7d22\u901a\u8fc7\u5de5\u5177\u89e3\u51b3\u95ee\u9898\u3002\n\u5982\u679c\u6ca1\u6709\u4e00\u4e2a\u51fd\u6570\u53ef\u4ee5\u4f7f\u7528\uff0c\u8bf7\u76f4\u63a5\u4f7f\u7528\u81ea\u7136\u8bed\u8a00\u56de\u590d\u7528\u6237\u3002\n\u5982\u679c\u7ed9\u5b9a\u7684\u95ee\u9898\u7f3a\u5c11\u51fd\u6570\u6240\u9700\u7684\u53c2\u6570\uff0c\u8bf7\u4f7f\u7528\u81ea\u7136\u8bed\u8a00\u8fdb\u884c\u63d0\u95ee\uff0c\u5411\u7528\u6237\u8be2\u95ee\u5fc5\u8981\u4fe1\u606f\u3002\n\u5982\u679c\u8c03\u7528\u7ed3\u679c\u5df2\u7ecf\u8db3\u591f\u56de\u7b54\u7528\u6237\u95ee\u9898\uff0c\u8bf7\u5bf9\u5386\u53f2\u7ed3\u679c\u8fdb\u884c\u603b\u7ed3\uff0c\u4f7f\u7528\u81ea\u7136\u8bed\u8a00\u56de\u590d\u7528\u6237\u3002",
+  "call_format": "qwen_xml",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "attn_sinks": false,
+ "reference": {
+  "repo": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
+  "revision": "3e3ac6ee631c43c2d1e65ebad93c3bce3b0bfe63",
+  "category": "A",
+  "score": 169.0,
+  "reasons": [
+   "same architecture (llama)",
+   "same family (nanbeige4.3)",
+   "tool-call format qwen_xml",
+   "thinking switch",
+   "head_dim 128"
+  ],
+  "generator": {
+   "skills_commit": "28a64fe93532881b7b4ab20656f0a2996fd6151d",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "none",
+    "depth": 0,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 10.86,
+      "rows": {
+       "work0": 11.32,
+       "work1": 11.32,
+       "work2": 11.37,
+       "work3": 11.32,
+       "work4": 11.27,
+       "long": 9.03,
+       "streams4": 43.19
+      },
+      "seconds": 296,
+      "margin_llama": 1.064
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 12.72,
+      "rows": {
+       "work0": 11.83,
+       "work1": 12.86,
+       "work2": 18.29,
+       "work3": 14.41,
+       "work4": 17.87,
+       "long": 7.73,
+       "streams4": 43.21
+      },
+      "seconds": 282,
+      "margin_llama": 0.991,
+      "margin": 0.991
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 12.86,
+      "rows": {
+       "work0": 11.7,
+       "work1": 12.9,
+       "work2": 19.56,
+       "work3": 14.48,
+       "work4": 18.98,
+       "long": 7.66,
+       "streams4": 42.83
+      },
+      "seconds": 281,
+      "margin_llama": 0.982,
+      "margin": 0.982
+     },
+     {
+      "kind": "ngram",
+      "depth": 5,
+      "decode_tps": 11.59,
+      "rows": {
+       "work0": 10.92,
+       "work1": 12.08,
+       "work2": 19.38,
+       "work3": 13.87,
+       "work4": 18.8,
+       "long": 6.01,
+       "streams4": 43.11
+      },
+      "seconds": 295,
+      "margin_llama": 0.77,
+      "margin": 0.77
+     }
+    ]
+   }
+  }
+ },
+ "drafter": {
+  "kind": "none",
+  "depth": 0,
+  "ctx_max": 0,
+  "occ_min": 2,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 10.58,
+    "rows": {
+     "work0": 11.31,
+     "work1": 11.31,
+     "work2": 11.35,
+     "work3": 11.31,
+     "work4": 11.26,
+     "long": 8.01,
+     "streams4": 43.17
+    },
+    "seconds": 407,
+    "baseline": "no-draft package",
+    "margin_llama": 1.027
+   },
+   {
+    "kind": "ngram",
+    "depth": 2,
+    "decode_tps": 11.39,
+    "rows": {
+     "work0": 11.79,
+     "work1": 12.82,
+     "work2": 18.23,
+     "work3": 14.36,
+     "work4": 17.82,
+     "long": 5.45,
+     "streams4": 43.07
+    },
+    "seconds": 403,
+    "margin_llama": 0.699,
+    "margin": 0.699,
+    "streams4_gated": 43.07,
+    "streams4_ungated": 29.79
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 11.53,
+    "rows": {
+     "work0": 11.74,
+     "work1": 12.94,
+     "work2": 19.63,
+     "work3": 14.53,
+     "work4": 19.04,
+     "long": 5.39,
+     "streams4": 43.04
+    },
+    "seconds": 401,
+    "margin_llama": 0.691,
+    "margin": 0.691,
+    "streams4_gated": 43.04,
+    "streams4_ungated": 29.39
+   },
+   {
+    "kind": "ngram",
+    "depth": 5,
+    "decode_tps": 9.91,
+    "rows": {
+     "work0": 10.94,
+     "work1": 12.11,
+     "work2": 19.42,
+     "work3": 13.9,
+     "work4": 18.84,
+     "long": 3.92,
+     "streams4": 43.06
+    },
+    "seconds": 426,
+    "margin_llama": 0.503,
+    "margin": 0.503,
+    "streams4_gated": 43.06,
+    "streams4_ungated": 13.23
+   },
+   {
+    "kind": "ngram",
+    "depth": 1,
+    "decode_tps": 11.59,
+    "rows": {
+     "work0": 11.88,
+     "work1": 12.73,
+     "work2": 16.43,
+     "work3": 13.6,
+     "work4": 15.58,
+     "long": 6.4,
+     "streams4": 42.95
+    },
+    "seconds": 399,
+    "margin_llama": 0.82,
+    "margin": 0.82,
+    "streams4_gated": 42.95,
+    "streams4_ungated": 41.22
+   },
+   {
+    "kind": "ngram",
+    "depth": 1,
+    "ctx_max": 3500,
+    "decode_tps": 12.02,
+    "rows": {
+     "work0": 11.84,
+     "work1": 12.69,
+     "work2": 16.38,
+     "work3": 13.55,
+     "work4": 15.55,
+     "long": 7.32,
+     "streams4": 42.96
+    },
+    "seconds": 395,
+    "margin": 0.939,
+    "margin_llama": 0.939
+   }
+  ]
+ },
+ "model_id": "Nanbeige/Nanbeige4.3-33B"
+}

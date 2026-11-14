@@ -27,13 +27,29 @@ import os
 import re
 import sys
 
-SUFFIX = "_rdna4"
+
+def _rows():
+    """(base target symbol, twin target symbol, twin suffix, header text, preset suffix of the twin family's device) from the device registry (skills/loom-kb/device/<family>/family.json).
+    The registry is found next to the skills (LOOM_SKILLS, else relative to this file); a kit copied outside the skills tree falls back to the
+    rows below, which tests/test_registry.py keeps equal to the registry's."""
+    try:
+        skills = os.environ.get("LOOM_SKILLS") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+        sys.path.insert(0, os.path.join(skills, "loom-kb"))
+        try:
+            import registry
+        finally:
+            sys.path.pop(0)
+        r = registry.dual_target()
+        return r["base"], r["twins"][0], r["suffix"], r["header"], registry.device("radeon-r9700")["preset_suffix"]
+    except (ImportError, OSError, KeyError):
+        return ("rdna3", "rdna4", "_rdna4",
+                "target.decl @device\namdgpu.target<gfx11-generic> @rdna3\namdgpu.target<gfx12-generic> @rdna4\n\n", "-r9700")
+
+
+BASE, TWIN, SUFFIX, HEADER, R9700_PRESET_SUFFIX = _rows()   # R9700_PRESET_SUFFIX: build.py's second preset `<preset>-r9700`
 KERNEL_DEF = re.compile(r"^kernel\.def\b(?P<attrs>.*?)\s@(?P<sym>\w+)\(")
 LAUNCH = re.compile(r"^(\s*)kernel\.launch @(\w+)\[([^\]]*)\]\((.*)\) : \[([^\]]*)\]\((.*)\)\s*$")
 PROGRAM_DEF = re.compile(r"^(command\.program\.def\s+(?:public\s+)?)(?!target\()(@)", re.M)
-HEADER = ("target.decl @device\n"
-          "amdgpu.target<gfx11-generic> @rdna3\n"
-          "amdgpu.target<gfx12-generic> @rdna4\n\n")
 
 
 def enabled():
@@ -63,7 +79,7 @@ def twins(text):
     return sorted(k for k in syms if k + SUFFIX in syms)
 
 
-GROUP_BEGIN = re.compile(r"^(\s*)// dual-group: rdna4 (kernel\.launch .*)$")
+GROUP_BEGIN = re.compile(r"^(\s*)// dual-group: " + TWIN + r" (kernel\.launch .*)$")
 GROUP_END = re.compile(r"^\s*// dual-group: end\s*$")
 
 
@@ -109,10 +125,10 @@ def _groups(lines, decls, sigs):
                 gp = [f"%p{next(pos)}" for _ in g]
                 ap = [f"%p{next(pos)}" for _ in a]
                 lines3.append(f"  kernel.launch @{k}[{', '.join(gp)}]({', '.join(ap)}) : [{', '.join(gt)}]({', '.join(at)})")
-            decls.append(f"template.def<@{name}> target(@rdna3) @{name}_rdna3({ps}) {{")
+            decls.append(f"template.def<@{name}> target(@{BASE}) @{name}_{BASE}({ps}) {{")
             decls += lines3[:-1]
             decls.append("  template.return\n}")
-            decls.append(f"template.def<@{name}> target(@rdna4) @{name}_rdna4({ps}) {{")
+            decls.append(f"template.def<@{name}> target(@{TWIN}) @{name}_{TWIN}({ps}) {{")
             decls.append(lines3[-1])
             decls.append("  template.return\n}")
         out.append(f"{ind}template.apply<@{sigs[key]}>({', '.join(names)}) : ({', '.join(types)})")
@@ -142,7 +158,7 @@ def apply(text, enable=None):
         sym = m.group("sym")
         base = sym[:-len(SUFFIX)] if sym.endswith(SUFFIX) and sym[:-len(SUFFIX)] in tw else sym
         if base in tw and "target(" not in m.group("attrs"):
-            l = l.replace("kernel.def ", f"kernel.def target(@{'rdna4' if sym != base else 'rdna3'}) ", 1)
+            l = l.replace("kernel.def ", f"kernel.def target(@{TWIN if sym != base else BASE}) ", 1)
         out.append(l)
         i += 1
         while lines[i] != "}":
@@ -169,7 +185,7 @@ def apply(text, enable=None):
                 gv = ", ".join(f"%g{j}" for j in range(len(gt)))
                 av = ", ".join(f"%a{j}" for j in range(len(at)))
                 decls.append(f"template.decl @{name}({', '.join(ps)})")
-                for tgt, kk in (("rdna3", k), ("rdna4", k + SUFFIX)):
+                for tgt, kk in ((BASE, k), (TWIN, k + SUFFIX)):
                     decls.append(f"template.def<@{name}> target(@{tgt}) @{name}_{tgt}({', '.join(ps)}) {{")
                     decls.append(f"  kernel.launch @{kk}[{gv}]({av}) : [{', '.join(gt)}]({', '.join(at)})")
                     decls.append("  template.return\n}")
@@ -224,7 +240,7 @@ def encodings_first(text):
 
 def apply_file(path):
     with open(path, encoding="utf-8", newline="") as f:
-        text = f.read()
+        text = f.read().replace("\r\n", "\n")   # a file written in text mode on Windows has CRLF line ends; the pass works on LF lines
     new = apply(text)
     if new != text:
         with open(path, "w", encoding="utf-8", newline="\n") as f:

@@ -1,0 +1,14 @@
+{
+ "scope": "arch/llm/dense/gemma4",
+ "match": {
+  "arch": [
+   "gemma4",
+   "gemma4_assistant"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "sliding-window"
+ ],
+ "choices": []
+}

@@ -42,6 +42,7 @@ skill directly.
 | `loom-benchmark` | Validate a port, measure it against llama.cpp, and generate reports |
 | `loom-improve` | Improve and evaluate the skills themselves |
 | `loom-org` | Port, publish and maintain a collection of models on Hugging Face |
+| `loom-kb` | Find the knowledge for a model, GPU and task: the router that prints which files to read |
 
 ### Example requests
 

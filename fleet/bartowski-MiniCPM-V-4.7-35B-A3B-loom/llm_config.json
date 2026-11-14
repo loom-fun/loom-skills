@@ -1,0 +1,250 @@
+{
+ "name": "MiniCPM V 4.7 35B A3B",
+ "arch": "qwen35moe",
+ "gguf": "MiniCPM-V-4.7-35B-A3B-Q4_K_M.gguf",
+ "hidden": 2048,
+ "layers": 40,
+ "heads": 16,
+ "kv_heads": 2,
+ "head_dim": 256,
+ "ffn": 512,
+ "vocab": 248144,
+ "context_length": 262144,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 10000000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": "fused_q",
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 248046,
+ "extra_eos_ids": [
+  248044
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "trim_content": true,
+  "think_open": "<think>\n",
+  "think_close": "\n</think>\n\n",
+  "history_think": "always",
+  "history_think_scope": "after_last_query",
+  "history_think_before": "empty",
+  "generation_prompt": "<|im_start|>assistant\n<think>\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "thinking": "toggle",
+  "thinking_default": true,
+  "starts_in_reasoning": true,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": false,
+  "tools_prefix": "# Tools\n\nYou have access to the following functions:\n\n<tools>",
+  "tools_system_separator": "\n\n",
+  "tools_suffix": "\n</tools>\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>",
+  "call_format": "qwen_xml",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "rope_dims": 64,
+ "recurrent_layers": [
+  0,
+  1,
+  2,
+  4,
+  5,
+  6,
+  8,
+  9,
+  10,
+  12,
+  13,
+  14,
+  16,
+  17,
+  18,
+  20,
+  21,
+  22,
+  24,
+  25,
+  26,
+  28,
+  29,
+  30,
+  32,
+  33,
+  34,
+  36,
+  37,
+  38
+ ],
+ "gdn": {
+  "conv_kernel": 4,
+  "k_heads": 16,
+  "v_heads": 32,
+  "head_k": 128,
+  "inner": 4096,
+  "head_v": 128
+ },
+ "kv_layers": 10,
+ "ffn_norm_tensor": "post_attention_norm",
+ "attn_sinks": false,
+ "moe": {
+  "experts": 256,
+  "used": 8,
+  "ffn": 512,
+  "leading_dense": 0,
+  "gating": 1,
+  "norm_weights": true,
+  "scale": 1.0,
+  "probs_bias": false,
+  "shared_ffn": 512,
+  "shared_gate": true
+ },
+ "reference": {
+  "repo": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+  "revision": "c73aa6c2b2a74083bd8deb226b607f3beae0f34d",
+  "category": "A",
+  "score": 189.0,
+  "reasons": [
+   "same architecture (qwen35moe)",
+   "same family (minicpm-v-4.7)",
+   "recurrent hybrid layers",
+   "MoE routing (256 experts)",
+   "tool-call format qwen_xml",
+   "thinking switch",
+   "head_dim 256"
+  ],
+  "generator": {
+   "skills_commit": "5e9703beed6fa5fa877540835d044540196ac542",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "none",
+    "depth": 0,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 53.27,
+      "seconds": 25
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 0.0,
+      "seconds": 4
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 0.0,
+      "seconds": 3
+     },
+     {
+      "kind": "ngram",
+      "depth": 5,
+      "decode_tps": 0.0,
+      "seconds": 4
+     }
+    ]
+   }
+  }
+ },
+ "drafter": {
+  "kind": "none",
+  "depth": 0,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 59.4,
+    "rows": {
+     "work0": 61.2,
+     "work1": 61.12,
+     "work3": 61.18,
+     "work4": 60.92,
+     "long": 53.43,
+     "streams4": 157.98
+    },
+    "seconds": 64,
+    "margin_llama": 1.059
+   },
+   {
+    "kind": "ngram",
+    "depth": 2,
+    "decode_tps": 46.43,
+    "rows": {
+     "work0": 40.9,
+     "work1": 45.32,
+     "work3": 48.11,
+     "work4": 70.59,
+     "long": 38.13,
+     "streams4": 147.48
+    },
+    "seconds": 73,
+    "margin_llama": 0.711,
+    "margin": 0.711
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 48.48,
+    "rows": {
+     "work0": 42.62,
+     "work1": 47.4,
+     "work3": 50.91,
+     "work4": 79.29,
+     "long": 37.99,
+     "streams4": 143.66
+    },
+    "seconds": 73,
+    "margin_llama": 0.741,
+    "margin": 0.741
+   },
+   {
+    "kind": "ngram",
+    "depth": 5,
+    "decode_tps": 33.39,
+    "rows": {
+     "work0": 29.37,
+     "work1": 32.1,
+     "work3": 35.19,
+     "work4": 58.46,
+     "long": 25.63,
+     "streams4": 141.78
+    },
+    "seconds": 85,
+    "margin_llama": 0.511,
+    "margin": 0.511
+   }
+  ]
+ },
+ "model_id": "openbmb/MiniCPM-V-4.7-35B-A3B"
+}

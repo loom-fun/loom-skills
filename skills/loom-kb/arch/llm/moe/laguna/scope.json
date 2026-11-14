@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/moe/laguna",
+ "match": {
+  "arch": [
+   "laguna"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "moe"
+ ],
+ "choices": []
+}

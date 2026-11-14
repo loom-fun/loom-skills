@@ -21,6 +21,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 C = os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card")
 PY = sys.executable
+sys.path.insert(0, os.path.join(ROOT, "skills", "loom-kb"))
+import registry  # noqa: E402
 GH = "loom-fun/loom-skills"
 
 
@@ -77,7 +79,7 @@ if not mem:
     mem = next(m["memory_bytes"] for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]
                if m["repo"].split("/")[-1] == slug)
 ev = [f"{W}/ev_rm.json"] + ([f"{W}/ev_gates.json"] if gates else [])
-run(PY, f"{C}/make_info.py", "build", out, "--gpus", "strix-halo,radeon-r9700", "--fit", os.path.join(ROOT, ".github", "devlab", "r9700_fit.json"),
+run(PY, f"{C}/make_info.py", "build", out, "--gpus", "strix-halo,radeon-r9700", "--fit", os.path.join(ROOT, registry.device("radeon-r9700")["fit_table"]),
     "--memory-bytes", mem, "--from-info", f"{W}/info_prev.json", "--perf-from", f"strix-halo={W}/fun_info.json", "--evidence", *ev,
     "-o", f"{W}/info_new.json")
 shutil.copy(f"{W}/info_new.json", os.path.join(out, "info.json"))

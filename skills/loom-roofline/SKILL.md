@@ -41,7 +41,7 @@ In every case:
 - Within a budget, spend time where the **expected gain per hour** is highest
   across the headline metrics. New kernels count too: a flash prefill kernel for a new
   head_dim is ~30 min and paid off (+19–28 % prefill) inside a 1 h budget.
-- **Catalog levers first.** Levers in `loom-optimize/reference/optimization-catalog.md`
+- **Catalog levers first.** Levers in the loom-kb `decode`/`prefill` topics (`kb.py route --topic decode,prefill`)
   that have a measured gain on a similar model are the cheapest ms/h there is. Apply
   them in catalog order before inventing new ones (skipping them for untested ideas cost
   a trial 1–2 % decode).
@@ -95,7 +95,7 @@ Per metric it then prints a row:
 |---|---|
 | ceiling | Hardware roofline. Decode: the device bandwidth (Strix Halo 216 GB/s) ÷ (weights + KV read per token). Prefill: the device's dense f16 WMMA peak (Strix Halo 59 TFLOP/s) ÷ (2·params + causal attention flops) per token. c4: 4 tokens per weight pass. For MoE, the 4 tokens route to their own experts, so those weights are read for each token. |
 | eff | llama.cpp's fraction of the ceiling. **This, not Loom, decides how big the win can be.** At eff 0.75, the most Loom can gain is about 1.3×. At eff 0.15, 3–6× is on the table, and such results are routinely reported for new architectures, MoE and prefill. |
-| TARGET | ceiling × the **best efficiency a Loom port has actually reached** on this hardware (`EFF` in the script; sources in `reference/calibration.md`). Realistic by construction. |
+| TARGET | ceiling × the **best efficiency a Loom port has actually reached** on this hardware (`EFF` in the script; sources in the loom-kb `roofline` topic (`kb.py route --topic roofline`)). Realistic by construction. |
 | margin | TARGET ÷ llama.cpp − 1. Reported as is, with no cap and no label. |
 | stretch | ceiling × `STRETCH`: what the known but not yet built levers should give (GEMM efficiency already seen in isolation, small-op fusion, batched expert gather). |
 | at-ceiling | Under 3 % headroom: llama.cpp is near the roofline. Target parity and spend the effort elsewhere. |
@@ -115,7 +115,7 @@ llama.cpp's MMQ prefill uses int8 WMMA (twice the f16 rate), so on prefill it ca
 | `radeon-r9700s` | R9700S: the DevLab `radeon-r9700` runners (same memory, 2.35 GHz max clock) | 613 GB/s measured | 214 TFLOP/s (measured peak f16 WMMA on the runner, devlab-kbench gemm_r9700) |
 
 The efficiencies (`EFF`, `STRETCH`, `LAYER_US`) were all measured on Strix Halo. On another device, TARGET is an
-out-of-sample estimate until a row in `reference/calibration.md` measures that device. On the R9700 in
+out-of-sample estimate until a row in the loom-kb `roofline` topic (`kb.py route --topic roofline`) measures that device. On the R9700 in
 particular: the fixed per-layer cost weighs about 3x more against a 3x faster weight stream, so expect a lower decode
 efficiency for small models. The device also has 32 GB of VRAM, which the card's `--memory_bytes` must fit.
 RDNA4 (gfx12) WMMA takes `vector<8xf16>` lhs/rhs fragments, where RDNA3 (gfx11) takes `vector<16xf16>`. The starter
@@ -269,7 +269,7 @@ done; see `loom-benchmark`. It must print `AUDIT PASS`. Use its headline table
   vs llama.cpp, and met / short (with the reason). Include the approach curve (gap
   vs elapsed time, from `targets.jsonl`) and the stop or pivot decisions.
 - If a port reached a higher efficiency than `EFF` (or `EFF_DRAFTED` with drafting), update it in `roofline.py`
-  and add the row to `reference/calibration.md`. Do the same for `STRETCH` if a
+  and add the row to the loom-kb `roofline` topic (`kb.py route --topic roofline`). Do the same for `STRETCH` if a
   port beat it. This is how the targets get more ambitious over time.
 - If a target was missed, also add the row. A metric type (decode, prefill, c4) that keeps landing short means
   its efficiency is too optimistic.

@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/moe/mellum",
+ "match": {
+  "arch": [
+   "mellum"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "moe"
+ ],
+ "choices": []
+}

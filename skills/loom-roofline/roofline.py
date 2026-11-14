@@ -17,6 +17,9 @@ llama.cpp ROCm numbers, keys as in perf.py output:
 """
 import argparse, json, math, os, re, sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "loom-kb"))
+import registry  # noqa: E402
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "loom-benchmark", "scripts"))
 from bench_common import perf_metrics  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "loom-port-llm", "starter"))
@@ -25,7 +28,7 @@ from formats import split_parts  # noqa: E402
 # Demonstrated efficiencies on Strix Halo (fraction of the roofline actually reached by
 # a tuned Loom port, end to end). Update these when a port beats them; cite the source.
 EFF = {
-    "decode": 0.90,      # dense. Bolt-E4B 61.1 / 68.1 (reference/calibration.md)
+    "decode": 0.90,      # dense. Bolt-E4B 61.1 / 68.1 (the loom-kb `roofline` topic (`kb.py route --topic roofline`))
     "decode_moe": 0.78,  # expert gather. Flint 101 / 130
     "prefill": 0.33,     # end to end. Bolt-E4B with d256/d512 flash prefill: 2339 / 7094 (Flint 0.22-0.28)
     "c4": 0.70,          # dense. Bolt 0.65-0.66
@@ -191,19 +194,11 @@ def attn_flops_per_token(geo, P):
 # Devices (--device): the memory bandwidth a streaming kernel reaches and the peak dense f16 WMMA rate
 # (CUs x 512 flops/clock x boost clock on RDNA3/3.5; RDNA4 doubles the dense f16 WMMA rate per CU: x 1024). The CLI's --bw / --flops override them.
 # EFF / STRETCH / LAYER_US above were calibrated on Strix Halo; on another device they are an out-of-sample estimate
-# until a row in reference/calibration.md says otherwise.
-DEVICES = {
-    # LPDDR5X-8000, 256-bit (256 GB/s peak); 40 CUs x 512 x 2.9 GHz
-    "strix-halo": dict(name='AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151)', bw=216e9, flops=59e12),
-    # GDDR6 20 Gbps, 256-bit (640 GB/s peak), 32 GB; 64 CUs x 1024 x 2.92 GHz = 191 TFLOP/s dense f16 WMMA (AMD's spec; 383 with sparsity).
-    # bw: 613 GB/s, measured on a DevLab R9700S: Loom streaming read of 1 GiB, loom-benchmark dispatch_complete
-    # (.github/wincheck/bw on branch wincheck/r9700-bw; copy 610). llama.cpp decode reaches 569 (Qwen2.5-32B Q4_K_M, Vulkan).
-    "radeon-r9700": dict(name="AMD Radeon AI PRO R9700 (gfx1201, 32 GB)", bw=613e9, flops=191.4e12),
-    # The AMD DevLab Dispatch `radeon-r9700` runners: R9700S, the same Navi 48 / 640 GB/s memory. Peak f16 WMMA MEASURED there:
-    # 214 TFLOP/s (devlab-kbench gemm_r9700 suite, #601; the engine clock runs above rocminfo's 2.35 GHz under load, 2.8-3.2 GHz
-    # observed), the same way the bandwidth is the measured one
-    "radeon-r9700s": dict(name="AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz)", bw=613e9, flops=214e12),
-}
+# until a row in the loom-kb `roofline` topic (`kb.py route --topic roofline`) says otherwise.
+# The device presets are rows of the registry (loom-kb/device/<family>/<device>/device.json "roofline": spec presets and the DevLab
+# runner's measured one, e.g. radeon-r9700 vs radeon-r9700s); the notes on bandwidth and peak flops live there.
+DEVICES = {k: dict(name=p["name"], bw=p["bw"], flops=p["flops"]) for k, p in registry.roofline_presets().items()}
+AT_CEILING = registry.methodology()["roofline"]["at_ceiling"]
 DEVICE_KEY = "strix-halo"
 DEVICE, BW, FLOPS = DEVICES[DEVICE_KEY]["name"], DEVICES[DEVICE_KEY]["bw"], DEVICES[DEVICE_KEY]["flops"]
 
@@ -314,8 +309,8 @@ def pick_target(name, base, ceiling, eff, stretch):
     h = practical / base - 1
     r.update(baseline=base, baseline_eff=round(base / ceiling, 3),
              margin=round(h, 3), stretch_margin=round(st / base - 1, 3),
-             at_ceiling=h < 0.03)
-    if h < 0.03:
+             at_ceiling=h < AT_CEILING)
+    if h < AT_CEILING:
         r["target"] = base
     return r
 

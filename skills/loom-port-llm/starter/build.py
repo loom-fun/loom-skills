@@ -48,7 +48,7 @@ ap.add_argument("--drafter", default=os.environ.get("DRAFTER"), help="DFlash/DFl
 ap.add_argument("--draft", default=os.environ.get("DRAFT", "auto"), choices=["auto", "mtp", "dflash", "ngram", "assist", "none"],
                 help="speculative decoding drafter. auto (default): draft/tune.py's measured choice, else the GGUF's MTP/NextN "
                      "block, else a DFlash drafter, else a Gemma-4 assistant; assist: Gemma-4 assistant GGUF (cfg assistant); ngram: prompt lookup in the row's own history (any model, no drafter "
-                     "weights); none: ordinary decoding (also SPEC=off). Draft settings are tuned by draft/tune.py (draft/README.md)")
+                     "weights); none: ordinary decoding (also SPEC=off). Draft settings are tuned by draft/tune.py (the loom-kb `speculative` topic (`kb.py route --topic speculative`))")
 ap.add_argument("--draft-depth", type=int, default=int(os.environ.get("DRAFT_DEPTH", "0")) or None,
                 help="proposed tokens per verification step (1-7)")
 ap.add_argument("--sizing-json", default=None, help="write what loom-serve must hold resident (weights, workspace, recurrent state, KV bytes per position) to this file: the fit table's input")
@@ -69,7 +69,7 @@ missing = [k for k in ("generation_prompt_plain", "call_format", "tool_item_pref
 if missing:
     sys.exit(f"chat block lacks {missing}: regenerate it with inspect_gguf.py / chat_probe.py")
 KERNEL_CONTEXT, KERNEL_POOL = 262144, 1048576
-# Speculative decoding is on by default when the checkpoint carries a drafter (draft/README.md).
+# Speculative decoding is on by default when the checkpoint carries a drafter (the loom-kb `speculative` topic (`kb.py route --topic speculative`)).
 if os.environ.get("SPEC", "").lower() in ("0", "off", "no", "false", "none"):
     a.draft = "none"
 a.drafter = a.drafter or (cfg.get("drafter") or {}).get("gguf")
@@ -83,6 +83,10 @@ if a.draft == "dflash" and not a.drafter:
 _tuned = cfg.get("drafter") or {}
 _depth = a.draft_depth or (_tuned.get("depth") if _tuned.get("kind") == a.draft else None) or 3   # draft/tune.py's choice
 DRAFT = {"kind": a.draft, "depth": max(1, min(7, _depth))} if a.draft != "none" else None
+# The model's generator choices (skills/loom-kb: registry defaults, scope.json rules, llm_config "choices"): resolved once, exported
+# as the environment gen_llm.py and its subprocesses read. A registered variable the caller set wins and marks the build dirty.
+import kb_choices  # noqa: E402
+RESOLVED = kb_choices.apply(cfg, DRAFT["kind"] if DRAFT else None)
 if DRAFT and DRAFT["kind"] == "dflash":
     sys.path.insert(0, os.path.join(HERE, "draft"))
     import gen_dflash  # noqa: E402
@@ -913,7 +917,8 @@ if a.prefill_r9700 and a.prefill_r9700 != a.prefill:
     first = next(iter(card["presets"]))
     alt = copy.deepcopy(card["presets"][first])
     alt["execution"]["prefill_capacity"] = a.prefill_r9700
-    card["presets"][f"{first}-r9700"] = alt
+    import dual_target
+    card["presets"][f"{first}{dual_target.R9700_PRESET_SUFFIX}"] = alt
 # Dual-target (RDNA3 + RDNA4) programs: every program file that has a `K_rdna4` twin kernel selects it per device
 # (dual_target.py; LOOM_RDNA4=0 turns it off, and files without twins are left as they are).
 import dual_target  # noqa: E402
@@ -927,6 +932,9 @@ bench["draft"] = DRAFT
 # shows them; a kit made by apply_example.sh carries the commit in KIT_SOURCE.
 from kit_source import generator_stamp  # noqa: E402
 bench["generator"] = generator_stamp()
+if RESOLVED["dirty"]:   # registered choices the caller set in the environment: not reproducible from the knowledge base
+    bench["generator"]["dirty_choices"] = RESOLVED["dirty"]
+bench["resolved"] = {k: v for k, v in RESOLVED.items() if k != "dirty"}
 json.dump(bench, open(os.path.join(pkg, "llm_config.json"), "w"), indent=1)
 kv = a.pool * kv_per_position
 need = weights_bytes + kv + workspace + 2 * a.rows * recurrent_bytes

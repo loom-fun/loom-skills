@@ -1,0 +1,197 @@
+{
+ "name": "HyperCLOVAX SEED Text Instruct 1.5B",
+ "arch": "llama",
+ "gguf": "hyperclovax-seed-text-instruct-1.5b-q4_k_m.gguf",
+ "hidden": 2048,
+ "layers": 24,
+ "heads": 16,
+ "kv_heads": 8,
+ "head_dim": 128,
+ "ffn": 7168,
+ "vocab": 110592,
+ "context_length": 131072,
+ "rms_eps": 9.999999747378752e-06,
+ "rope_theta": 100000000.0,
+ "rope_type": "norm",
+ "qk_norm": false,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 100275,
+ "extra_eos_ids": [
+  100257,
+  100273
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "trim_content": false,
+  "think_open": "",
+  "think_close": "",
+  "history_think": "nonempty",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n",
+  "thinking": "never",
+  "thinking_default": false,
+  "starts_in_reasoning": false,
+  "think_end": "</think>",
+  "tools_prefix": "",
+  "tools_suffix": "",
+  "tool_line_prefix": "",
+  "tool_separator": "",
+  "tools_system_separator": "",
+  "tools_after_system": true,
+  "tools_function_only": true,
+  "call_format": "none",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "",
+  "call_separator": "",
+  "tool_turn_prefix": "",
+  "tool_item_prefix": "",
+  "tool_item_suffix": "",
+  "tool_turn_suffix": "",
+  "terminal": "<|im_end|>"
+ },
+ "attn_sinks": false,
+ "reference": {
+  "repo": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+  "revision": "910d7d1bf836e4ea02eddf25b95dad3fbb8fe166",
+  "category": "A",
+  "score": 159.0,
+  "reasons": [
+   "same architecture (llama)",
+   "same family (hyperclovax-seed-text)",
+   "drafter type ngram",
+   "head_dim 128"
+  ],
+  "generator": {
+   "skills_commit": "69a7e59d6be275bda72ac4e55bb762c28697f463",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "ngram",
+    "depth": 3,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 133.64,
+      "rows": {
+       "work0": 167.43,
+       "work1": 167.54,
+       "work2": 168.51,
+       "work3": 167.65,
+       "work4": 166.29,
+       "long": 66.47,
+       "streams4": 587.82
+      },
+      "seconds": 28,
+      "baseline": "no-draft package",
+      "margin_llama": 0.674
+     },
+     {
+      "kind": "ngram",
+      "depth": 1,
+      "decode_tps": 159.86,
+      "rows": {
+       "work0": 175.5,
+       "work1": 199.08,
+       "work2": 180.19,
+       "work3": 201.12,
+       "work4": 245.68,
+       "long": 81.84,
+       "streams4": 575.64
+      },
+      "seconds": 27,
+      "margin_llama": 0.83,
+      "margin": 0.83,
+      "streams4_gated": 575.64,
+      "streams4_ungated": 531.72,
+      "geomean": 1.082
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 206.04,
+      "rows": {
+       "work0": 183.93,
+       "work1": 213.02,
+       "work2": 178.43,
+       "work3": 218.58,
+       "work4": 294.56,
+       "long": 184.68,
+       "streams4": 620.07
+      },
+      "seconds": 26,
+      "margin_llama": 1.004,
+      "margin": 1.004,
+      "streams4_gated": 620.07,
+      "streams4_ungated": 430.52,
+      "geomean": 1.295
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 208.07,
+      "rows": {
+       "work0": 182.39,
+       "work1": 218.06,
+       "work2": 179.72,
+       "work3": 224.92,
+       "work4": 323.8,
+       "long": 176.39,
+       "streams4": 620.47
+      },
+      "seconds": 26,
+      "margin_llama": 1.011,
+      "margin": 1.011,
+      "streams4_gated": 620.47,
+      "streams4_ungated": 444.39,
+      "geomean": 1.314,
+      "checked": "ok (exact, concurrent)"
+     },
+     {
+      "kind": "ngram",
+      "depth": 5,
+      "decode_tps": 163.39,
+      "rows": {
+       "work0": 141.44,
+       "work1": 174.09,
+       "work2": 139.49,
+       "work3": 179.5,
+       "work4": 278.72,
+       "long": 131.94,
+       "streams4": 623.53
+      },
+      "seconds": 28,
+      "margin_llama": 0.785,
+      "margin": 0.785,
+      "streams4_gated": 623.53,
+      "streams4_ungated": 278.55,
+      "geomean": 1.076
+     }
+    ]
+   }
+  }
+ },
+ "model_id": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B"
+}

@@ -1,0 +1,11 @@
+{
+ "scope": "facet/sliding-window",
+ "match": {
+  "sliding_window": [
+   1,
+   null
+  ]
+ },
+ "owner": "kb",
+ "choices": []
+}

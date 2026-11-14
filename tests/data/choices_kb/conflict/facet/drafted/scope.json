@@ -1,0 +1,2 @@
+{"scope": "facet/drafted", "match": {"facets": ["drafted"]}, "owner": "fixture",
+ "choices": [{"set": {"decode.mv.wg1": 1024}, "evidence": "fixture"}]}

@@ -18,8 +18,10 @@ import urllib.parse
 import urllib.request
 
 HF = "https://huggingface.co"
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "skills", "loom-kb"))
+import registry  # noqa: E402
 # Quant files the loom-port-llm starter has dequant helpers for, in order of preference.
-QUANTS = ["Q4_K_M", "Q4_K_S", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0"]
+QUANTS = registry.file_quants()   # skills/loom-kb/quant/file_quants.json
 SHARD = re.compile(r"-\d{5}-of-\d{5}(?=\.gguf$)", re.I)
 GIB = 2**30
 # Hugging Face organizations whose GGUF repositories scheduled runs may convert: original model

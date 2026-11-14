@@ -1,0 +1,14 @@
+{
+ "scope": "arch/llm/moe/gpt-oss",
+ "match": {
+  "arch": [
+   "gpt-oss",
+   "gptoss"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "moe"
+ ],
+ "choices": []
+}

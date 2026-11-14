@@ -178,7 +178,7 @@ entry in a PR. A catalog-package card (`kit: "qwen4exp"`, loom-port-llm "Catalog
 60 % default and an SDK pin in its `llm_config.json`: the nightly installs that SDK (`ensure_sdk.sh`) and needs a runner
 with the headroom (`memcheck.sh`); refresh the pin before its `expires` (loom-setup "SDK pins").
 
-**Memory budget** (one number for the whole card; details in `reference/lessons.md`):
+**Memory budget** (one number for the whole card; details in the loom-kb `org` topic (`kb.py route --topic org`)):
 - On every regeneration pass `make_info.py build --memory-bytes N` explicitly, N being build.py's printed value for
   the regenerated programs. It is not picked up from build.py, and a carried-over old value mislabels the card (#151
   now refuses it when the programs changed).
@@ -328,7 +328,7 @@ a Loom number measured without the active wait is not comparable with a card's.
 
 ## Orchestrating many workers
 
-Rules; the reasons and details are in `reference/lessons.md`.
+Rules; the reasons and details are in the loom-kb `org` topic (`kb.py route --topic org`).
 - Keep a handoff file (state, active workers, open PRs, next actions) and a status page; refresh `org_status` and the
   page after every change. Sessions restart: everything must be resumable from disk.
 - Every PR gets an independent review before merge (DRY, general, no regression, no vendored package contents); the
@@ -355,3 +355,8 @@ done and the user has decided on the rest.
 | `scripts/rank_models.py` | draft target list: per-model daily GGUF downloads, fits `--max-gb`, plain Q4_K_M source |
 | `scripts/org_status.py` | category A/B per org repo, missing and failing gates and metrics, performance guardrails (`card_lib.perf_flags`: far from roofline, stale values to re-measure with a devlab-perf job), generator commit, `CHECK:` flags (generator off main, nightly entry missing or differing from the card), one action per target |
 | `scripts/hub.py` | Hub reads with the user's token and rate-limit retries (used by both) |
+
+## Mandate
+
+Declare the scope first, work only inside it, opt in by scope, run `fleet/scope_lint.py` before a PR, stop on
+out-of-mandate needs: `loom-kb/SKILL.md` ("Mandate rules").

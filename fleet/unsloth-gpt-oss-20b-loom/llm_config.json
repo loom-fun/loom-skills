@@ -1,0 +1,158 @@
+{
+ "name": "Gpt-Oss-20B",
+ "arch": "gpt-oss",
+ "gguf": "gpt-oss-20b-Q4_K_M.gguf",
+ "hidden": 2880,
+ "layers": 24,
+ "heads": 64,
+ "kv_heads": 8,
+ "head_dim": 64,
+ "ffn": 2880,
+ "vocab": 201088,
+ "context_length": 131072,
+ "rms_eps": 9.999999747378752e-06,
+ "rope_theta": 150000.0,
+ "rope_type": "neox",
+ "qk_norm": false,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 128,
+ "sliding_layers": [
+  0,
+  2,
+  4,
+  6,
+  8,
+  10,
+  12,
+  14,
+  16,
+  18,
+  20,
+  22
+ ],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 200002,
+ "extra_eos_ids": [
+  199999,
+  200012
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|start|>system<|message|>",
+  "suffix": "<|end|>",
+  "user_prefix": "<|start|>user<|message|>",
+  "assistant_prefix": "<|start|>assistant<|channel|>final<|message|>",
+  "default_system": "You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\nReasoning: medium\n\n# Valid channels: analysis, commentary, final. Channel must be included for every message.",
+  "trim_content": false,
+  "think_open": "<|channel|>analysis<|message|>",
+  "think_close": "<|end|>",
+  "history_think": "nonempty",
+  "history_think_scope": "all",
+  "generation_prompt": "<|start|>assistant",
+  "generation_prompt_plain": "<|start|>assistant",
+  "thinking": "always",
+  "thinking_default": true,
+  "starts_in_reasoning": false,
+  "think_end": "<|end|>",
+  "reasoning_instructions": {
+   "low": "low",
+   "medium": "medium",
+   "high": "high"
+  },
+  "reasoning_effort_default": "medium",
+  "reasoning_separator": "",
+  "terminal": "<|return|>",
+  "nonspecial_tokens": [
+   "<|start|>",
+   "<|channel|>",
+   "<|message|>",
+   "<|constrain|>",
+   "<|end|>"
+  ],
+  "tools_function_only": true,
+  "tools_prefix": "",
+  "tools_suffix": "",
+  "tools_after_system": true,
+  "tools_system_separator": "\n\n",
+  "tool_line_prefix": "\n",
+  "call_format": "harmony",
+  "base_call_format": "hermes",
+  "tool_turn_prefix": "",
+  "tool_item_prefix": "<|call|><|start|>functions.",
+  "tool_item_suffix": "<|end|>",
+  "tool_turn_suffix": "",
+  "content_call_separator": "",
+  "call_separator": "",
+  "call_marker": " to=functions.",
+  "stop_after_calls": "<|call|>",
+  "stop_after_answer": "<|end|>",
+  "_note": "OpenAI harmony channel format: control.loom renders the whole conversation in chat_begin (chat/harmony.loom); the generic fields are informational. No 'Current date' line (deliberate)."
+ },
+ "rope_scaling": {
+  "type": "yarn",
+  "factor": 32.0,
+  "orig_ctx": 4096,
+  "beta_fast": 32.0,
+  "beta_slow": 1.0,
+  "attn_factor": 1.0
+ },
+ "ffn_norm_tensor": "post_attention_norm",
+ "attn_out_bias": true,
+ "attn_bias": [
+  "q",
+  "k",
+  "v"
+ ],
+ "attn_sinks": true,
+ "moe": {
+  "experts": 32,
+  "used": 4,
+  "ffn": 2880,
+  "leading_dense": 0,
+  "gating": 3,
+  "norm_weights": false,
+  "scale": 1.0,
+  "probs_bias": false,
+  "act": "swiglu_oai",
+  "swiglu_alpha": 1.702,
+  "swiglu_limit": 7.0,
+  "router_bias": true,
+  "expert_bias": true
+ },
+ "drafter": {
+  "kind": "none",
+  "depth": 0,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 78.41,
+    "seconds": 17
+   },
+   {
+    "kind": "ngram",
+    "depth": 2,
+    "decode_tps": 51.79,
+    "seconds": 26
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 54.46,
+    "seconds": 25
+   },
+   {
+    "kind": "ngram",
+    "depth": 5,
+    "decode_tps": 32.74,
+    "seconds": 38
+   }
+  ]
+ },
+ "model_id": "openai/gpt-oss-20b"
+}

@@ -1,0 +1,13 @@
+{
+ "scope": "facet/vision",
+ "match": {
+  "has": [
+   "vision"
+  ]
+ },
+ "owner": "kb",
+ "choices": [],
+ "also": [
+  "arch/vision/README.md"
+ ]
+}

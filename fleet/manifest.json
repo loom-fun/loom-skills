@@ -1,0 +1,1779 @@
+{
+ "models": {
+  "InternScience-Sage-A1.5-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/InternScience-Sage-A1.5-loom",
+    "revision": "916b1195e2704ecfc0e785d9b638ba6a78dd87a4"
+   },
+   "model_id": "InternScience/Sage-A1.5",
+   "kit": null,
+   "arch": "qwen35moe",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Sage-A1.5-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "InternScience/Sage-A1.5-Q4_K_M-GGUF",
+     "revision": "10b179b52f2c841030db327627e707d076b4c8cf",
+     "path": "Sage-A1.5-Q4_K_M.gguf",
+     "size": 21713463520,
+     "dump": "InternScience-Sage-A1.5-loom/gguf/Sage-A1.5-Q4_K_M.gguf.json.gz"
+    },
+    "Sage-A1.5-mmproj.gguf": {
+     "origin": "checkpoint",
+     "repo": "InternScience/Sage-A1.5-Q4_K_M-GGUF",
+     "revision": "10b179b52f2c841030db327627e707d076b4c8cf",
+     "path": "Sage-A1.5-mmproj.gguf",
+     "size": 899282880,
+     "dump": "InternScience-Sage-A1.5-loom/gguf/Sage-A1.5-mmproj.gguf.json.gz"
+    }
+   }
+  },
+  "XHToken-Spark-X2.5-4B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/XHToken-Spark-X2.5-4B-loom",
+    "revision": "b446975f597a22bacc459d58635f15832d8d3650"
+   },
+   "model_id": "XHToken/Spark-X2.5-4B",
+   "kit": null,
+   "arch": "spark2_5",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Spark-X2.5-4B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "XHToken/Spark-X2.5-4B-GGUF",
+     "revision": "9826e0be84e6e6e8b9668abc91421109a1df1e2d",
+     "path": "Spark-X2.5-4B-Q4_K_M.gguf",
+     "size": 2600224352,
+     "dump": "XHToken-Spark-X2.5-4B-loom/gguf/Spark-X2.5-4B-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-LFM3-1.7B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-LFM3-1.7B-loom",
+    "revision": "6528d107c7c05ff3e0f3f255e478fc5d1b44cb76"
+   },
+   "model_id": "LiquidAI/LFM3-1.7B",
+   "kit": "lfm2moe",
+   "arch": "lfm3",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "LFM3-1.7B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/LFM3-1.7B-GGUF",
+     "revision": "9693095706f068e826377eaf576263ebeda926df",
+     "path": "LFM3-1.7B-Q4_K_M.gguf",
+     "size": 1115637312,
+     "dump": "bartowski-LFM3-1.7B-loom/gguf/LFM3-1.7B-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-Mellum2.1-12B-A2.5B-Thinking-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
+    "revision": "edf69fb3127846bd33061728426a71df07cd373b"
+   },
+   "model_id": "JetBrains/Mellum2.1-12B-A2.5B-Thinking",
+   "kit": null,
+   "arch": "mellum",
+   "build": {
+    "preset": "chat",
+    "context": 131072,
+    "pool": 196608,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Mellum2.1-12B-A2.5B-Thinking-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Mellum2.1-12B-A2.5B-Thinking-GGUF",
+     "revision": "355e97042763a75b33efc51efd731ce0149413d4",
+     "path": "Mellum2.1-12B-A2.5B-Thinking-Q4_K_M.gguf",
+     "size": 8819358432,
+     "dump": "bartowski-Mellum2.1-12B-A2.5B-Thinking-loom/gguf/Mellum2.1-12B-A2.5B-Thinking-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-MiniCPM-V-4.7-35B-A3B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+    "revision": "2be05e5e7506355fd1a66e4a48c5018203c69e31"
+   },
+   "model_id": "openbmb/MiniCPM-V-4.7-35B-A3B",
+   "kit": null,
+   "arch": "qwen35moe",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "MiniCPM-V-4.7-35B-A3B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/MiniCPM-V-4.7-35B-A3B-GGUF",
+     "revision": "098bdee54114f39f7b2246e3d4632aaa05f0da78",
+     "path": "MiniCPM-V-4.7-35B-A3B-Q4_K_M.gguf",
+     "size": 22317742272,
+     "dump": "bartowski-MiniCPM-V-4.7-35B-A3B-loom/gguf/MiniCPM-V-4.7-35B-A3B-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-Nanbeige4.3-33B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-Nanbeige4.3-33B-loom",
+    "revision": "97c9a2fb5b4a17319ab44959a60a3eb989b5b834"
+   },
+   "model_id": "Nanbeige/Nanbeige4.3-33B",
+   "kit": null,
+   "arch": "llama",
+   "build": {
+    "preset": "chat",
+    "context": 242688,
+    "pool": 249856,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Nanbeige_Nanbeige4.3-33B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Nanbeige_Nanbeige4.3-33B-GGUF",
+     "revision": "9beb68421fdf7be095093a6888325fa2c83ddd38",
+     "path": "Nanbeige_Nanbeige4.3-33B-Q4_K_M.gguf",
+     "size": 20788825216,
+     "dump": "bartowski-Nanbeige4.3-33B-loom/gguf/Nanbeige_Nanbeige4.3-33B-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-Ornith-1.5-122B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-Ornith-1.5-122B-loom",
+    "revision": "7e5c06d06c1917f153e12b4bc98f16b09521e480"
+   },
+   "model_id": "ornith-ai/Ornith-1.5-122B",
+   "kit": null,
+   "arch": "qwen35moe",
+   "build": {
+    "preset": "chat",
+    "context": 108544,
+    "pool": 108544,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 1
+   },
+   "files": {
+    "Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Ornith-1.5-122B-GGUF",
+     "revision": "a8bc08fa33fc3a3e79380bf661a84688c7ea0a50",
+     "path": "Ornith-1.5-122B-Q4_K_M/Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf",
+     "size": 40005676608,
+     "dump": "bartowski-Ornith-1.5-122B-loom/gguf/Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf.json.gz"
+    },
+    "Ornith-1.5-122B-Q4_K_M-00002-of-00002.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Ornith-1.5-122B-GGUF",
+     "revision": "a8bc08fa33fc3a3e79380bf661a84688c7ea0a50",
+     "path": "Ornith-1.5-122B-Q4_K_M/Ornith-1.5-122B-Q4_K_M-00002-of-00002.gguf",
+     "size": 38916060128,
+     "dump": "bartowski-Ornith-1.5-122B-loom/gguf/Ornith-1.5-122B-Q4_K_M-00002-of-00002.gguf.json.gz"
+    },
+    "mmproj-Ornith-1.5-122B-f16.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Ornith-1.5-122B-GGUF",
+     "revision": "a8bc08fa33fc3a3e79380bf661a84688c7ea0a50",
+     "path": "mmproj-Ornith-1.5-122B-f16.gguf",
+     "size": 908724576,
+     "dump": "bartowski-Ornith-1.5-122B-loom/gguf/mmproj-Ornith-1.5-122B-f16.gguf.json.gz"
+    },
+    "Ornith-1.5-122B-DFlash2-Q4_K_M.gguf": {
+     "origin": "drafter",
+     "repo": "kaivoss/Ornith-1.5-122B-DFlash2-GGUF",
+     "revision": "d8a9bcba85eedb76c1ee97bde2057fda631b6f65",
+     "path": "Ornith-1.5-122B-DFlash2-Q4_K_M.gguf",
+     "size": 551110784,
+     "dump": "bartowski-Ornith-1.5-122B-loom/gguf/Ornith-1.5-122B-DFlash2-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-Ornith-1.5-35B-A3B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-Ornith-1.5-35B-A3B-loom",
+    "revision": "53d8cf9b7c74b65b1104472c51f91ba087ee52f9"
+   },
+   "model_id": "ornith-ai/Ornith-1.5-35B-A3B",
+   "kit": null,
+   "arch": "qwen35moe",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 1
+   },
+   "files": {
+    "Ornith-1.5-35B-A3B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Ornith-1.5-35B-A3B-GGUF",
+     "revision": "64b0493d34a5ca4c1b4ad67bb99b41d74b4f07d6",
+     "path": "Ornith-1.5-35B-A3B-Q4_K_M.gguf",
+     "size": 21864081056,
+     "dump": "bartowski-Ornith-1.5-35B-A3B-loom/gguf/Ornith-1.5-35B-A3B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-Ornith-1.5-35B-A3B-f16.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Ornith-1.5-35B-A3B-GGUF",
+     "revision": "64b0493d34a5ca4c1b4ad67bb99b41d74b4f07d6",
+     "path": "mmproj-Ornith-1.5-35B-A3B-f16.gguf",
+     "size": 899283296,
+     "dump": "bartowski-Ornith-1.5-35B-A3B-loom/gguf/mmproj-Ornith-1.5-35B-A3B-f16.gguf.json.gz"
+    },
+    "Ornith-1.5-35B-A3B-DFlash-Q8_0.gguf": {
+     "origin": "drafter",
+     "repo": "na0x2c6/Ornith-1.5-35B-A3B-DFlash-GGUF",
+     "revision": "3427ea426d150d03c633b0d25b8a0626453b3f2f",
+     "path": "Ornith-1.5-35B-A3B-DFlash-Q8_0.gguf",
+     "size": 421060960,
+     "dump": "bartowski-Ornith-1.5-35B-A3B-loom/gguf/Ornith-1.5-35B-A3B-DFlash-Q8_0.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-Ornith-1.5-9B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-Ornith-1.5-9B-loom",
+    "revision": "cba1738e95a15c54a7bfb90242de81af13229d95"
+   },
+   "model_id": "ornith-ai/Ornith-1.5-9B",
+   "kit": null,
+   "arch": "qwen35",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Ornith-1.5-9B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Ornith-1.5-9B-GGUF",
+     "revision": "1fc60d6805eaa18bbed4088391db9336eb9581c4",
+     "path": "Ornith-1.5-9B-Q4_K_M.gguf",
+     "size": 5910782848,
+     "dump": "bartowski-Ornith-1.5-9B-loom/gguf/Ornith-1.5-9B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-Ornith-1.5-9B-f16.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Ornith-1.5-9B-GGUF",
+     "revision": "1fc60d6805eaa18bbed4088391db9336eb9581c4",
+     "path": "mmproj-Ornith-1.5-9B-f16.gguf",
+     "size": 918165728,
+     "dump": "bartowski-Ornith-1.5-9B-loom/gguf/mmproj-Ornith-1.5-9B-f16.gguf.json.gz"
+    },
+    "Ornith-1.5-9B-DFlash-Q4_K_M.gguf": {
+     "origin": "drafter",
+     "repo": "abenzerps/Ornith-1.5-9B-DFlash-GGUF",
+     "revision": "4ba29c7a17fb17ba07deb79e25ebdeb00fd01e01",
+     "path": "Ornith-1.5-9B-DFlash-Q4_K_M.gguf",
+     "size": 765960480,
+     "dump": "bartowski-Ornith-1.5-9B-loom/gguf/Ornith-1.5-9B-DFlash-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-Qwen2.5-0.5B-Instruct-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom",
+    "revision": "688486e2cd80bc7f9364bf7673151e42fb6d3d40"
+   },
+   "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+   "kit": null,
+   "arch": "qwen2",
+   "build": {
+    "preset": "chat",
+    "context": 32768,
+    "pool": 98304,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+     "revision": "41ba88dbac95fed2528c92514c131d73eb5a174b",
+     "path": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+     "size": 397808192,
+     "dump": "bartowski-Qwen2.5-0.5B-Instruct-loom/gguf/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-Qwen2.5-1.5B-Instruct-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-Qwen2.5-1.5B-Instruct-loom",
+    "revision": "2cd82c1688f00367729251e0fa7883f59a8aef6b"
+   },
+   "model_id": "Qwen/Qwen2.5-1.5B-Instruct",
+   "kit": null,
+   "arch": "qwen2",
+   "build": {
+    "preset": "chat",
+    "context": 32768,
+    "pool": 98304,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Qwen2.5-1.5B-Instruct-GGUF",
+     "revision": "9eadc66189c7641e1ddd226b8267a9119b2ce2d4",
+     "path": "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+     "size": 986048768,
+     "dump": "bartowski-Qwen2.5-1.5B-Instruct-loom/gguf/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-Qwen2.5-32B-Instruct-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom",
+    "revision": "daabdaa7868b8e2030b61ad9f5e4681ed3d6a4be"
+   },
+   "model_id": "Qwen/Qwen2.5-32B-Instruct",
+   "kit": null,
+   "arch": "qwen2",
+   "build": {
+    "preset": "chat",
+    "context": 32768,
+    "pool": 98304,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen2.5-32B-Instruct-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Qwen2.5-32B-Instruct-GGUF",
+     "revision": "2116cbb385b8ce3a4d28cf3bf1cd2039a55821a6",
+     "path": "Qwen2.5-32B-Instruct-Q4_K_M.gguf",
+     "size": 19851336576,
+     "dump": "bartowski-Qwen2.5-32B-Instruct-loom/gguf/Qwen2.5-32B-Instruct-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-Qwen2.5-7B-Instruct-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-Qwen2.5-7B-Instruct-loom",
+    "revision": "923fd691fd089adffa11ddb553d99fa94d61cbc7"
+   },
+   "model_id": "Qwen/Qwen2.5-7B-Instruct",
+   "kit": null,
+   "arch": "qwen2",
+   "build": {
+    "preset": "chat",
+    "context": 32768,
+    "pool": 98304,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen2.5-7B-Instruct-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+     "revision": "8911e8a47f92bac19d6f5c64a2e2095bd2f7d031",
+     "path": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+     "size": 4683074240,
+     "dump": "bartowski-Qwen2.5-7B-Instruct-loom/gguf/Qwen2.5-7B-Instruct-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-Qwen3.8-27B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-Qwen3.8-27B-loom",
+    "revision": "9b1f69cc6fa0a3593ee48667185cc3f4d9079a93"
+   },
+   "model_id": "qwen3.8-27b",
+   "kit": null,
+   "arch": "qwen35",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Qwen3.8-27B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Qwen3.8-27B-GGUF",
+     "revision": "87410e7b9a5c21e6ca70c0c9cc5237de909fe621",
+     "path": "Qwen3.8-27B-Q4_K_M.gguf",
+     "size": 17442399968,
+     "dump": "bartowski-Qwen3.8-27B-loom/gguf/Qwen3.8-27B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-Qwen3.8-27B-f16.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Qwen3.8-27B-GGUF",
+     "revision": "87410e7b9a5c21e6ca70c0c9cc5237de909fe621",
+     "path": "mmproj-Qwen3.8-27B-f16.gguf",
+     "size": 927607008,
+     "dump": "bartowski-Qwen3.8-27B-loom/gguf/mmproj-Qwen3.8-27B-f16.gguf.json.gz"
+    }
+   }
+  },
+  "bartowski-Spark-X2.6-4B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/bartowski-Spark-X2.6-4B-loom",
+    "revision": "7fda207fd80ae370e08d7790902cac16e8b38c27"
+   },
+   "model_id": "XHToken/Spark-X2.6-4B",
+   "kit": null,
+   "arch": "spark2_5",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Spark-X2.6-4B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "bartowski/Spark-X2.6-4B-GGUF",
+     "revision": "17682e38297a4510899b12a95ab3d8dcebc674e5",
+     "path": "Spark-X2.6-4B-Q4_K_M.gguf",
+     "size": 2621104768,
+     "dump": "bartowski-Spark-X2.6-4B-loom/gguf/Spark-X2.6-4B-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-Flint-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-Flint-loom",
+    "revision": "0a831f1265695c387dcc33b200adec9fc521a440"
+   },
+   "model_id": "flint",
+   "kit": "flint",
+   "arch": "flint",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Flint-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Flint-GGUF",
+     "revision": "468307a1b38259e9e4c9d4fe53d4e3b76386572c",
+     "path": "Flint-Q4_K_M.gguf",
+     "size": 23387911136,
+     "dump": "ggml-org-Flint-loom/gguf/Flint-Q4_K_M.gguf.json.gz"
+    },
+    "Flint-DFlash2-Q4_K_M.gguf": {
+     "origin": "drafter",
+     "repo": "incoai/Flint-DFlash2-GGUF",
+     "revision": "74e6ac0c538cfd393d97bd93694e5c4c6b6aa8c3",
+     "path": "Flint-DFlash2-Q4_K_M.gguf",
+     "size": 239808192,
+     "dump": "ggml-org-Flint-loom/gguf/Flint-DFlash2-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-LFM2.5-24B-A2B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-LFM2.5-24B-A2B-loom",
+    "revision": "7cf56f35e934341b4a6d7788e2651e78685b1d57"
+   },
+   "model_id": "LiquidAI/LFM2.5-24B-A2B",
+   "kit": "lfm2moe",
+   "arch": "lfm2moe",
+   "build": {
+    "preset": "chat",
+    "context": 131072,
+    "pool": 196608,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "LFM2.5-24B-A2B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/LFM2.5-24B-A2B-GGUF",
+     "revision": "93d5056976d1340c8975f6b4e792b50f6c4f7423",
+     "path": "LFM2.5-24B-A2B-Q4_K_M.gguf",
+     "size": 14526259296,
+     "dump": "ggml-org-LFM2.5-24B-A2B-loom/gguf/LFM2.5-24B-A2B-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-LFM3-Omni-2B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-LFM3-Omni-2B-loom",
+    "revision": "39ad986f05aa23c49d40dfafd8e3dadf9b4ae2ba"
+   },
+   "model_id": "LiquidAI/LFM3-Omni-2B",
+   "kit": "lfm2moe",
+   "arch": "lfm3",
+   "build": {
+    "preset": "chat",
+    "context": 128000,
+    "pool": 193536,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "LFM3-Omni-2B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/LFM3-Omni-2B-GGUF",
+     "revision": "8e0303f6b4dfe1760e608abdd259af78d2677fd7",
+     "path": "LFM3-Omni-2B-Q4_K_M.gguf",
+     "size": 1099630048,
+     "dump": "ggml-org-LFM3-Omni-2B-loom/gguf/LFM3-Omni-2B-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-Laguna-XS-2.1-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-Laguna-XS-2.1-loom",
+    "revision": "2c6560d1999b9cb105bb66684f5c96fea1cffbf6"
+   },
+   "model_id": "poolside/Laguna-XS-2.1",
+   "kit": null,
+   "arch": "laguna",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 270336,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Laguna-XS-2.1-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Laguna-XS-2.1-GGUF",
+     "revision": "1c7823dff255ab71b381a6c5082af8b07e70c150",
+     "path": "Laguna-XS-2.1-Q4_K_M.gguf",
+     "size": 19563570240,
+     "dump": "ggml-org-Laguna-XS-2.1-loom/gguf/Laguna-XS-2.1-Q4_K_M.gguf.json.gz"
+    },
+    "Laguna-XS-2.1-DFlash-Q8_0.gguf": {
+     "origin": "drafter",
+     "repo": "dev7a/Laguna-XS-2.1-DFlash-GGUF",
+     "revision": "335be330b72a556fb107f99881261e275b21050d",
+     "path": "Laguna-XS-2.1-DFlash-Q8_0.gguf",
+     "size": 494735712,
+     "dump": "ggml-org-Laguna-XS-2.1-loom/gguf/Laguna-XS-2.1-DFlash-Q8_0.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-Muse-Glimmer-30B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
+    "revision": "c3b7f783c87bfd079e3833c610337a84a708247a"
+   },
+   "model_id": "meta-models/Muse-Glimmer-30B",
+   "kit": "glimmer",
+   "arch": "muse-glimmer",
+   "build": {
+    "preset": "chat",
+    "context": 131072,
+    "pool": 196608,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Muse-Glimmer-30B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Muse-Glimmer-30B-GGUF",
+     "revision": "5da9c17514ceb04baf73445648d215272275b114",
+     "path": "Muse-Glimmer-30B-Q4_K_M.gguf",
+     "size": 19246214464,
+     "dump": "ggml-org-Muse-Glimmer-30B-loom/gguf/Muse-Glimmer-30B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-Muse-Glimmer-30B-BF16.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Muse-Glimmer-30B-GGUF",
+     "revision": "5da9c17514ceb04baf73445648d215272275b114",
+     "path": "mmproj-Muse-Glimmer-30B-BF16.gguf",
+     "size": 3849173952,
+     "dump": "ggml-org-Muse-Glimmer-30B-loom/gguf/mmproj-Muse-Glimmer-30B-BF16.gguf.json.gz"
+    },
+    "Muse-Glimmer-30B-DFlash2-Q4_K_M.gguf": {
+     "origin": "drafter",
+     "repo": "z-lab/Muse-Glimmer-30B-DFlash2-GGUF",
+     "revision": "880882627431093d99d3b2368efb4a6fcf12d4cb",
+     "path": "Muse-Glimmer-30B-DFlash2-Q4_K_M.gguf",
+     "size": 1645657280,
+     "dump": "ggml-org-Muse-Glimmer-30B-loom/gguf/Muse-Glimmer-30B-DFlash2-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-Qwen2.5-VL-7B-Instruct-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+    "revision": "6e063335db1ca66e0cdf22536440d73d4722298b"
+   },
+   "model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
+   "kit": null,
+   "arch": "qwen2vl",
+   "build": {
+    "preset": "chat",
+    "context": 128000,
+    "pool": 193536,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Qwen2.5-VL-7B-Instruct-GGUF",
+     "revision": "508edd0afaa66bb9e9f40587acc2184f02daf1f6",
+     "path": "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+     "size": 4683072032,
+     "dump": "ggml-org-Qwen2.5-VL-7B-Instruct-loom/gguf/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-Qwen2.5-VL-7B-Instruct-f16.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Qwen2.5-VL-7B-Instruct-GGUF",
+     "revision": "508edd0afaa66bb9e9f40587acc2184f02daf1f6",
+     "path": "mmproj-Qwen2.5-VL-7B-Instruct-f16.gguf",
+     "size": 1354162912,
+     "dump": "ggml-org-Qwen2.5-VL-7B-Instruct-loom/gguf/mmproj-Qwen2.5-VL-7B-Instruct-f16.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-Qwen3-1.7B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-Qwen3-1.7B-loom",
+    "revision": "365896156c86008fdc305eaa8373417bed6f2c7a"
+   },
+   "model_id": "Qwen/Qwen3-1.7B",
+   "kit": null,
+   "arch": "qwen3",
+   "build": {
+    "preset": "chat",
+    "context": 40960,
+    "pool": 106496,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen3-1.7B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Qwen3-1.7B-GGUF",
+     "revision": "daeb8e2d528a760970442092f6bf1e55c3b659eb",
+     "path": "Qwen3-1.7B-Q4_K_M.gguf",
+     "size": 1282439264,
+     "dump": "ggml-org-Qwen3-1.7B-loom/gguf/Qwen3-1.7B-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-Qwen3-14B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-Qwen3-14B-loom",
+    "revision": "ceabeb3584e79771e09f2eed01de36a545385203"
+   },
+   "model_id": "Qwen/Qwen3-14B",
+   "kit": null,
+   "arch": "qwen3",
+   "build": {
+    "preset": "chat",
+    "context": 40960,
+    "pool": 106496,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen3-14B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Qwen3-14B-GGUF",
+     "revision": "af3732ec4e23a1dfff21a0479cd3545ace763e38",
+     "path": "Qwen3-14B-Q4_K_M.gguf",
+     "size": 9001753376,
+     "dump": "ggml-org-Qwen3-14B-loom/gguf/Qwen3-14B-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-Qwen3-4B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
+    "revision": "2f36cf09a2576a806f243ce7005189f6b4e0cc99"
+   },
+   "model_id": "Qwen/Qwen3-4B",
+   "kit": null,
+   "arch": "qwen3",
+   "build": {
+    "preset": "chat",
+    "context": 40960,
+    "pool": 106496,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Qwen3-4B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Qwen3-4B-GGUF",
+     "revision": "2f3b082b1356a6123f7ed71e65aea340da25d53c",
+     "path": "Qwen3-4B-Q4_K_M.gguf",
+     "size": 2497280640,
+     "dump": "ggml-org-Qwen3-4B-loom/gguf/Qwen3-4B-Q4_K_M.gguf.json.gz"
+    },
+    "Qwen3-4B-DFlash.Q8_0.gguf": {
+     "origin": "drafter",
+     "repo": "AtomicChat/Qwen3-4B-DFlash-GGUF",
+     "revision": "700be51d025f928249abf1c72aef735961051e23",
+     "path": "Qwen3-4B-DFlash.Q8_0.gguf",
+     "size": 577047008,
+     "dump": "ggml-org-Qwen3-4B-loom/gguf/Qwen3-4B-DFlash.Q8_0.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+    "revision": "9c89a5d0a057f528aaf694913418fe8cf652da45"
+   },
+   "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+   "kit": null,
+   "arch": "qwen3moe",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 1
+   },
+   "files": {
+    "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+     "revision": "0ca51122012fe4a20dc82988ee58780b008ce4e3",
+     "path": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+     "size": 17988419552,
+     "dump": "ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom/gguf/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.json.gz"
+    },
+    "Qwen3-Coder-30B-A3B-DFlash-Q4_K_M.gguf": {
+     "origin": "drafter",
+     "repo": "Anbeeld/Qwen3-Coder-30B-A3B-DFlash-GGUF",
+     "revision": "313e1f5ac2144a583057a4e864e46b7780ce4c11",
+     "path": "Qwen3-Coder-30B-A3B-DFlash-Q4_K_M.gguf",
+     "size": 286754240,
+     "dump": "ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom/gguf/Qwen3-Coder-30B-A3B-DFlash-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-Qwen3.6-27B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-Qwen3.6-27B-loom",
+    "revision": "0724a0aabd985c43f41ff08b4765318f6c8190b0"
+   },
+   "model_id": "Qwen/Qwen3.6-27B",
+   "kit": null,
+   "arch": "qwen35",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Qwen3.6-27B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Qwen3.6-27B-GGUF",
+     "revision": "1132d03976d88e30a09ab0ddbf1531d5e1b46e7c",
+     "path": "Qwen3.6-27B-Q4_K_M.gguf",
+     "size": 19095766304,
+     "dump": "ggml-org-Qwen3.6-27B-loom/gguf/Qwen3.6-27B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-Qwen3.6-27B-BF16.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Qwen3.6-27B-GGUF",
+     "revision": "1132d03976d88e30a09ab0ddbf1531d5e1b46e7c",
+     "path": "mmproj-Qwen3.6-27B-BF16.gguf",
+     "size": 931145984,
+     "dump": "ggml-org-Qwen3.6-27B-loom/gguf/mmproj-Qwen3.6-27B-BF16.gguf.json.gz"
+    },
+    "Qwen3.6-27B-DFlash-Q4_K_M.gguf": {
+     "origin": "drafter",
+     "repo": "Anbeeld/Qwen3.6-27B-DFlash-GGUF",
+     "revision": "f14c6b308ee71deb2b2cb47c331e164271968e6b",
+     "path": "Qwen3.6-27B-DFlash-Q4_K_M.gguf",
+     "size": 1033066592,
+     "dump": "ggml-org-Qwen3.6-27B-loom/gguf/Qwen3.6-27B-DFlash-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-Qwen3.6-35B-A3B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-Qwen3.6-35B-A3B-loom",
+    "revision": "8286586818611bfb1075c5aec13ab48d6aae89b6"
+   },
+   "model_id": "Qwen/Qwen3.6-35B-A3B",
+   "kit": null,
+   "arch": "qwen35moe",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Qwen3.6-35B-A3B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Qwen3.6-35B-A3B-GGUF",
+     "revision": "52f9f9b8052fb9c8b69bba4a95eda0f319ac3d2a",
+     "path": "Qwen3.6-35B-A3B-Q4_K_M.gguf",
+     "size": 20542732576,
+     "dump": "ggml-org-Qwen3.6-35B-A3B-loom/gguf/Qwen3.6-35B-A3B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-Qwen3.6-35B-A3B-BF16.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/Qwen3.6-35B-A3B-GGUF",
+     "revision": "52f9f9b8052fb9c8b69bba4a95eda0f319ac3d2a",
+     "path": "mmproj-Qwen3.6-35B-A3B-BF16.gguf",
+     "size": 902822144,
+     "dump": "ggml-org-Qwen3.6-35B-A3B-loom/gguf/mmproj-Qwen3.6-35B-A3B-BF16.gguf.json.gz"
+    },
+    "Qwen3.6-35B-A3B-DFlash-Q8_0.gguf": {
+     "origin": "drafter",
+     "repo": "magnitudedev/Qwen3.6-35B-A3B-DFlash-GGUF",
+     "revision": "4f5e4df8dc4520256bdc0bc8752c7010bbfb1eec",
+     "path": "Qwen3.6-35B-A3B-DFlash-Q8_0.gguf",
+     "size": 421060896,
+     "dump": "ggml-org-Qwen3.6-35B-A3B-loom/gguf/Qwen3.6-35B-A3B-DFlash-Q8_0.gguf.json.gz"
+    }
+   }
+  },
+  "ggml-org-gemma-3-1b-it-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/ggml-org-gemma-3-1b-it-loom",
+    "revision": "5c2d8a926324696002a66e0100dfce9dc4cb1a89"
+   },
+   "model_id": "google/gemma-3-1b-it",
+   "kit": null,
+   "arch": "gemma3",
+   "build": {
+    "preset": "chat",
+    "context": 32768,
+    "pool": 98304,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "gemma-3-1b-it-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "ggml-org/gemma-3-1b-it-GGUF",
+     "revision": "f9c28bcd85737ffc5aef028638d3341d49869c27",
+     "path": "gemma-3-1b-it-Q4_K_M.gguf",
+     "size": 806058240,
+     "dump": "ggml-org-gemma-3-1b-it-loom/gguf/gemma-3-1b-it-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "lmstudio-community-Ornith-1.0-35B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom",
+    "revision": "176343307200c62af74a1d4229573b89e03dda76"
+   },
+   "model_id": "ornith-ai/Ornith-1.0-35B",
+   "kit": null,
+   "arch": "qwen35moe",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Ornith-1.0-35B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "lmstudio-community/Ornith-1.0-35B-GGUF",
+     "revision": "a133768a77ba629558f3910ece680e8f60d2aa3d",
+     "path": "Ornith-1.0-35B-Q4_K_M.gguf",
+     "size": 21166757536,
+     "dump": "lmstudio-community-Ornith-1.0-35B-loom/gguf/Ornith-1.0-35B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-Ornith-1.0-35B-BF16.gguf": {
+     "origin": "checkpoint",
+     "repo": "lmstudio-community/Ornith-1.0-35B-GGUF",
+     "revision": "a133768a77ba629558f3910ece680e8f60d2aa3d",
+     "path": "mmproj-Ornith-1.0-35B-BF16.gguf",
+     "size": 902822048,
+     "dump": "lmstudio-community-Ornith-1.0-35B-loom/gguf/mmproj-Ornith-1.0-35B-BF16.gguf.json.gz"
+    }
+   }
+  },
+  "lmstudio-community-gemma-4-26B-A4B-it-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom",
+    "revision": "da552a1b3ace6251df0b7b38bc709afb258d38cc"
+   },
+   "model_id": "google/gemma-4-26B-A4B-it",
+   "kit": "gemma4",
+   "arch": "gemma4",
+   "build": {
+    "preset": "chat",
+    "context": 201728,
+    "pool": 201728,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 1
+   },
+   "files": {
+    "gemma-4-26B-A4B-it-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "lmstudio-community/gemma-4-26B-A4B-it-GGUF",
+     "revision": "f6e6747823b2912661935db7e0009287c4838073",
+     "path": "gemma-4-26B-A4B-it-Q4_K_M.gguf",
+     "size": 16796017248,
+     "dump": "lmstudio-community-gemma-4-26B-A4B-it-loom/gguf/gemma-4-26B-A4B-it-Q4_K_M.gguf.json.gz"
+    },
+    "gemma4-26b-a4b-it-dflash-Q4_K_M.gguf": {
+     "origin": "drafter",
+     "repo": "Anbeeld/gemma-4-26B-A4B-it-DFlash-GGUF",
+     "revision": "d5262e1db8fc07d80f41ef2d0f333eac7978e97a",
+     "path": "gemma4-26b-a4b-it-dflash-Q4_K_M.gguf",
+     "size": 267271136,
+     "dump": "lmstudio-community-gemma-4-26B-A4B-it-loom/gguf/gemma4-26b-a4b-it-dflash-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+    "revision": "5be70da34cc70aed70551b21e6e50b392fae4e40"
+   },
+   "model_id": "nemotron-3.5-bolt-e4b",
+   "kit": "gemma4",
+   "arch": "gemma4",
+   "build": {
+    "preset": "chat",
+    "context": 131072,
+    "pool": 196608,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Nemotron-3.5-Bolt-E4B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "nvidia/NVIDIA-Nemotron-3.5-Bolt-E4B-4GB",
+     "revision": "1db54d5b12533ff1bcaa8e42cf4c667988a1f1be",
+     "path": "Nemotron-3.5-Bolt-E4B-Q4_K_M.gguf",
+     "size": 6180446208,
+     "dump": "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom/gguf/Nemotron-3.5-Bolt-E4B-Q4_K_M.gguf.json.gz"
+    },
+    "Nemotron-3.5-Bolt-E4B-DFlash-BF16.gguf": {
+     "origin": "drafter",
+     "repo": "nvidia/NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-DFlash",
+     "revision": "0949a2eb7152ec6fda1a91ff9302aecbcd464fbf",
+     "path": "Nemotron-3.5-Bolt-E4B-DFlash-BF16.gguf",
+     "size": 736812096,
+     "dump": "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom/gguf/Nemotron-3.5-Bolt-E4B-DFlash-BF16.gguf.json.gz"
+    },
+    "mmproj-F16.gguf": {
+     "origin": "vision",
+     "repo": "unsloth/NVIDIA-Nemotron-3.5-Bolt-E4B-GGUF",
+     "revision": "b738967d6da3441a7d1c71fcec15e49e32e16ecd",
+     "path": "mmproj-F16.gguf",
+     "size": 990373568,
+     "dump": "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom/gguf/mmproj-F16.gguf.json.gz"
+    }
+   }
+  },
+  "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+    "revision": "a91b72675c73ff5258e6128a189b614e242b59b2"
+   },
+   "model_id": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+   "kit": null,
+   "arch": "llama",
+   "build": {
+    "preset": "chat",
+    "context": 131072,
+    "pool": 196608,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "hyperclovax-seed-text-instruct-1.5b-q4_k_m.gguf": {
+     "origin": "checkpoint",
+     "repo": "rippertnt/HyperCLOVAX-SEED-Text-Instruct-1.5B-Q4_K_M-GGUF",
+     "revision": "3d2edd543d75372922aabd4ae538e6d181634b5d",
+     "path": "hyperclovax-seed-text-instruct-1.5b-q4_k_m.gguf",
+     "size": 1133974368,
+     "dump": "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom/gguf/hyperclovax-seed-text-instruct-1.5b-q4_k_m.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Llama-3.2-3B-Instruct-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Llama-3.2-3B-Instruct-loom",
+    "revision": "90fcb2da96e3b4bb8bf28629ffcf9d31c9c1b05d"
+   },
+   "model_id": "meta-llama/Llama-3.2-3B-Instruct",
+   "kit": null,
+   "arch": "llama",
+   "build": {
+    "preset": "chat",
+    "context": 131072,
+    "pool": 196608,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Llama-3.2-3B-Instruct-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Llama-3.2-3B-Instruct-GGUF",
+     "revision": "e7d0997e49c9cb00d88b4c1a6a16aa894b0bbc31",
+     "path": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+     "size": 2019377600,
+     "dump": "unsloth-Llama-3.2-3B-Instruct-loom/gguf/Llama-3.2-3B-Instruct-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Ornith-1.0-9B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Ornith-1.0-9B-loom",
+    "revision": "c38405e3b351489a9954f64657bf36473a694757"
+   },
+   "model_id": "deepreinforce-ai/Ornith-1.0-9B",
+   "kit": null,
+   "arch": "qwen35",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Ornith-1.0-9B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Ornith-1.0-9B-GGUF",
+     "revision": "a674c5a128bb74049b1bb3619f1355073db5b48c",
+     "path": "Ornith-1.0-9B-Q4_K_M.gguf",
+     "size": 5701067872,
+     "dump": "unsloth-Ornith-1.0-9B-loom/gguf/Ornith-1.0-9B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-F16.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Ornith-1.0-9B-GGUF",
+     "revision": "a674c5a128bb74049b1bb3619f1355073db5b48c",
+     "path": "mmproj-F16.gguf",
+     "size": 918166144,
+     "dump": "unsloth-Ornith-1.0-9B-loom/gguf/mmproj-F16.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3-0.6B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+    "revision": "416fc147ec934f99e680bdae4c66f780c7137acc"
+   },
+   "model_id": "Qwen/Qwen3-0.6B",
+   "kit": null,
+   "arch": "qwen3",
+   "build": {
+    "preset": "chat",
+    "context": 40960,
+    "pool": 106496,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen3-0.6B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3-0.6B-GGUF",
+     "revision": "50968a4468ef4233ed78cd7c3de230dd1d61a56b",
+     "path": "Qwen3-0.6B-Q4_K_M.gguf",
+     "size": 396705472,
+     "dump": "unsloth-Qwen3-0.6B-loom/gguf/Qwen3-0.6B-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3-30B-A3B-Instruct-2507-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+    "revision": "173974bffeabc99323bfcece350719336ee25541"
+   },
+   "model_id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+   "kit": null,
+   "arch": "qwen3moe",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
+     "revision": "eea7b2be5805a5f151f8847ede8e5f9a9284bf77",
+     "path": "Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf",
+     "size": 18556686752,
+     "dump": "unsloth-Qwen3-30B-A3B-Instruct-2507-loom/gguf/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3-4B-Instruct-2507-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3-4B-Instruct-2507-loom",
+    "revision": "8069f6a10b9c21d08a89dcace64bbcee4b7ee188"
+   },
+   "model_id": "Qwen/Qwen3-4B-Instruct-2507",
+   "kit": null,
+   "arch": "qwen3",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen3-4B-Instruct-2507-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+     "revision": "a06e946bb6b655725eafa393f4a9745d460374c9",
+     "path": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+     "size": 2497281120,
+     "dump": "unsloth-Qwen3-4B-Instruct-2507-loom/gguf/Qwen3-4B-Instruct-2507-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3-8B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3-8B-loom",
+    "revision": "6318d783577386bb9ebc8bbb5bad7b1d04ad11d9"
+   },
+   "model_id": "Qwen/Qwen3-8B",
+   "kit": null,
+   "arch": "qwen3",
+   "build": {
+    "preset": "chat",
+    "context": 40960,
+    "pool": 106496,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Qwen3-8B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3-8B-GGUF",
+     "revision": "a6adef130ffb23ddaf1a62fec9dced968c9bc482",
+     "path": "Qwen3-8B-Q4_K_M.gguf",
+     "size": 5027784512,
+     "dump": "unsloth-Qwen3-8B-loom/gguf/Qwen3-8B-Q4_K_M.gguf.json.gz"
+    },
+    "Qwen3-8B-DFlash.Q8_0.gguf": {
+     "origin": "drafter",
+     "repo": "AtomicChat/Qwen3-8B-DFlash-GGUF",
+     "revision": "603692f6ac1fac016e03f3ad47321312614f3581",
+     "path": "Qwen3-8B-DFlash.Q8_0.gguf",
+     "size": 1120250336,
+     "dump": "unsloth-Qwen3-8B-loom/gguf/Qwen3-8B-DFlash.Q8_0.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3-VL-4B-Instruct-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3-VL-4B-Instruct-loom",
+    "revision": "903ae417b0987ff5cd0378a9c06f4200b2f6236a"
+   },
+   "model_id": "Qwen/Qwen3-VL-4B-Instruct",
+   "kit": null,
+   "arch": "qwen3vl",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen3-VL-4B-Instruct-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3-VL-4B-Instruct-GGUF",
+     "revision": "00c00da0690c4b14b5539b02c4ea5d7c9102b35e",
+     "path": "Qwen3-VL-4B-Instruct-Q4_K_M.gguf",
+     "size": 2497282336,
+     "dump": "unsloth-Qwen3-VL-4B-Instruct-loom/gguf/Qwen3-VL-4B-Instruct-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-F16.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3-VL-4B-Instruct-GGUF",
+     "revision": "00c00da0690c4b14b5539b02c4ea5d7c9102b35e",
+     "path": "mmproj-F16.gguf",
+     "size": 836180640,
+     "dump": "unsloth-Qwen3-VL-4B-Instruct-loom/gguf/mmproj-F16.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3-VL-8B-Instruct-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3-VL-8B-Instruct-loom",
+    "revision": "84cc2c4ddcb1f79d0df1fea5b726bb3db29b558b"
+   },
+   "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+   "kit": null,
+   "arch": "qwen3vl",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen3-VL-8B-Instruct-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3-VL-8B-Instruct-GGUF",
+     "revision": "b93a7ee713758252c555be4210c00540df954dc2",
+     "path": "Qwen3-VL-8B-Instruct-Q4_K_M.gguf",
+     "size": 5027785568,
+     "dump": "unsloth-Qwen3-VL-8B-Instruct-loom/gguf/Qwen3-VL-8B-Instruct-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-F16.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3-VL-8B-Instruct-GGUF",
+     "revision": "b93a7ee713758252c555be4210c00540df954dc2",
+     "path": "mmproj-F16.gguf",
+     "size": 1159030336,
+     "dump": "unsloth-Qwen3-VL-8B-Instruct-loom/gguf/mmproj-F16.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3.5-0.8B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3.5-0.8B-loom",
+    "revision": "f479222a17ac23b069bd2ebe3eeb6667f83508c7"
+   },
+   "model_id": "Qwen/Qwen3.5-0.8B",
+   "kit": null,
+   "arch": "qwen35",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen3.5-0.8B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3.5-0.8B-GGUF",
+     "revision": "6ab461498e2023f6e3c1baea90a8f0fe38ab64d0",
+     "path": "Qwen3.5-0.8B-Q4_K_M.gguf",
+     "size": 532517120,
+     "dump": "unsloth-Qwen3.5-0.8B-loom/gguf/Qwen3.5-0.8B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-F16.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3.5-0.8B-GGUF",
+     "revision": "6ab461498e2023f6e3c1baea90a8f0fe38ab64d0",
+     "path": "mmproj-F16.gguf",
+     "size": 204987232,
+     "dump": "unsloth-Qwen3.5-0.8B-loom/gguf/mmproj-F16.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3.5-2B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3.5-2B-loom",
+    "revision": "fea023079264b8dca72b74d91c65cdc9aac4c903"
+   },
+   "model_id": "Qwen/Qwen3.5-2B",
+   "kit": null,
+   "arch": "qwen35",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "Qwen3.5-2B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3.5-2B-GGUF",
+     "revision": "f6d5376be1edb4d416d56da11e5397a961aca8ae",
+     "path": "Qwen3.5-2B-Q4_K_M.gguf",
+     "size": 1280835840,
+     "dump": "unsloth-Qwen3.5-2B-loom/gguf/Qwen3.5-2B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-F16.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3.5-2B-GGUF",
+     "revision": "f6d5376be1edb4d416d56da11e5397a961aca8ae",
+     "path": "mmproj-F16.gguf",
+     "size": 668227264,
+     "dump": "unsloth-Qwen3.5-2B-loom/gguf/mmproj-F16.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3.5-35B-A3B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3.5-35B-A3B-loom",
+    "revision": "98454720f2cf4227f1c8c50bbf42d69435b0a1d0"
+   },
+   "model_id": "Qwen/Qwen3.5-35B-A3B",
+   "kit": null,
+   "arch": "qwen35moe",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Qwen3.5-35B-A3B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3.5-35B-A3B-GGUF",
+     "revision": "bc014a17be43adabd7066b7a86075ff935c6a4e2",
+     "path": "Qwen3.5-35B-A3B-Q4_K_M.gguf",
+     "size": 22016023168,
+     "dump": "unsloth-Qwen3.5-35B-A3B-loom/gguf/Qwen3.5-35B-A3B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-F16.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3.5-35B-A3B-GGUF",
+     "revision": "bc014a17be43adabd7066b7a86075ff935c6a4e2",
+     "path": "mmproj-F16.gguf",
+     "size": 899283648,
+     "dump": "unsloth-Qwen3.5-35B-A3B-loom/gguf/mmproj-F16.gguf.json.gz"
+    },
+    "Qwen3.5-35B-A3B-DFlash-Q4_K_M.gguf": {
+     "origin": "drafter",
+     "repo": "Anbeeld/Qwen3.5-35B-A3B-DFlash-GGUF",
+     "revision": "31335d2996d3fcaf269225f17693c5d9205822a4",
+     "path": "Qwen3.5-35B-A3B-DFlash-Q4_K_M.gguf",
+     "size": 235692352,
+     "dump": "unsloth-Qwen3.5-35B-A3B-loom/gguf/Qwen3.5-35B-A3B-DFlash-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3.5-4B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3.5-4B-loom",
+    "revision": "2c1b47e9e64cd8c09ace39c2a6b7008f9599be62"
+   },
+   "model_id": "Qwen/Qwen3.5-4B",
+   "kit": null,
+   "arch": "qwen35",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Qwen3.5-4B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3.5-4B-GGUF",
+     "revision": "e87f176479d0855a907a41277aca2f8ee7a09523",
+     "path": "Qwen3.5-4B-Q4_K_M.gguf",
+     "size": 2740937888,
+     "dump": "unsloth-Qwen3.5-4B-loom/gguf/Qwen3.5-4B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-F16.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3.5-4B-GGUF",
+     "revision": "e87f176479d0855a907a41277aca2f8ee7a09523",
+     "path": "mmproj-F16.gguf",
+     "size": 672423616,
+     "dump": "unsloth-Qwen3.5-4B-loom/gguf/mmproj-F16.gguf.json.gz"
+    },
+    "Qwen3.5-4B-DFlash-Q8_0.gguf": {
+     "origin": "drafter",
+     "repo": "magnitudedev/Qwen3.5-4B-DFlash-GGUF",
+     "revision": "0094e74a88676605d53b79c7c3d26096335c9746",
+     "path": "Qwen3.5-4B-DFlash-Q8_0.gguf",
+     "size": 685134176,
+     "dump": "unsloth-Qwen3.5-4B-loom/gguf/Qwen3.5-4B-DFlash-Q8_0.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3.5-9B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3.5-9B-loom",
+    "revision": "d078130e689b16506c1b4997e8bb856bc2ab7d9f"
+   },
+   "model_id": "Qwen/Qwen3.5-9B",
+   "kit": null,
+   "arch": "qwen35",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Qwen3.5-9B-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3.5-9B-GGUF",
+     "revision": "3885219b6810b007914f3a7950a8d1b469d598a5",
+     "path": "Qwen3.5-9B-Q4_K_M.gguf",
+     "size": 5680522464,
+     "dump": "unsloth-Qwen3.5-9B-loom/gguf/Qwen3.5-9B-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-F16.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3.5-9B-GGUF",
+     "revision": "3885219b6810b007914f3a7950a8d1b469d598a5",
+     "path": "mmproj-F16.gguf",
+     "size": 918166080,
+     "dump": "unsloth-Qwen3.5-9B-loom/gguf/mmproj-F16.gguf.json.gz"
+    },
+    "Qwen3.5-9B-DFlash.Q8_0.gguf": {
+     "origin": "drafter",
+     "repo": "AtomicChat/Qwen3.5-9B-DFlash-GGUF",
+     "revision": "de44b8556576637d1049951f8fdbd98bcb2462f3",
+     "path": "Qwen3.5-9B-DFlash.Q8_0.gguf",
+     "size": 1383768224,
+     "dump": "unsloth-Qwen3.5-9B-loom/gguf/Qwen3.5-9B-DFlash.Q8_0.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-Qwen3.8-Flash-Next-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom",
+    "revision": "0ecd0cf1ec7c048d9dbd1d2e70b760e0528fd663"
+   },
+   "model_id": "unsloth-Qwen3.8-Flash-Next-loom",
+   "kit": "qwen4exp",
+   "arch": "qwen4exp",
+   "build": {
+    "preset": "vision-mtp",
+    "context": 262144,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf": {
+     "origin": "quantized",
+     "repo": "unsloth/Qwen3.8-Flash-Next-GGUF",
+     "revision": "766911a6b7369840a91dbcd95f9f997acaab6cd6",
+     "path": "UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+     "size": 10946624,
+     "dump": "unsloth-Qwen3.8-Flash-Next-loom/gguf/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf.json.gz"
+    },
+    "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf": {
+     "origin": "quantized",
+     "repo": "unsloth/Qwen3.8-Flash-Next-GGUF",
+     "revision": "766911a6b7369840a91dbcd95f9f997acaab6cd6",
+     "path": "UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+     "size": 49859583136,
+     "dump": "unsloth-Qwen3.8-Flash-Next-loom/gguf/Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf.json.gz"
+    },
+    "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf": {
+     "origin": "quantized",
+     "repo": "unsloth/Qwen3.8-Flash-Next-GGUF",
+     "revision": "766911a6b7369840a91dbcd95f9f997acaab6cd6",
+     "path": "UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+     "size": 49376141504,
+     "dump": "unsloth-Qwen3.8-Flash-Next-loom/gguf/Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf.json.gz"
+    },
+    "Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf": {
+     "origin": "quantized",
+     "repo": "unsloth/Qwen3.8-Flash-Next-GGUF",
+     "revision": "766911a6b7369840a91dbcd95f9f997acaab6cd6",
+     "path": "UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+     "size": 12087983520,
+     "dump": "unsloth-Qwen3.8-Flash-Next-loom/gguf/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf.json.gz"
+    },
+    "mmproj-BF16.gguf": {
+     "origin": "quantized",
+     "repo": "unsloth/Qwen3.8-Flash-Next-GGUF",
+     "revision": "766911a6b7369840a91dbcd95f9f997acaab6cd6",
+     "path": "mmproj-BF16.gguf",
+     "size": 907542944,
+     "dump": "unsloth-Qwen3.8-Flash-Next-loom/gguf/mmproj-BF16.gguf.json.gz"
+    },
+    "mtp-Qwen3.8-Flash-Next-Q8_0.gguf": {
+     "origin": "quantized",
+     "repo": "unsloth/Qwen3.8-Flash-Next-GGUF",
+     "revision": "766911a6b7369840a91dbcd95f9f997acaab6cd6",
+     "path": "mtp-Qwen3.8-Flash-Next-Q8_0.gguf",
+     "size": 4137429120,
+     "dump": "unsloth-Qwen3.8-Flash-Next-loom/gguf/mtp-Qwen3.8-Flash-Next-Q8_0.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-gemma-4-12B-it-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
+    "revision": "71cf24dd1f9d3c42132b24c2f4ed053314f173f8"
+   },
+   "model_id": "google/gemma-4-12B-it",
+   "kit": "gemma4",
+   "arch": "gemma4",
+   "build": {
+    "preset": "chat",
+    "context": 160768,
+    "pool": 160768,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "gemma-4-12b-it-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/gemma-4-12B-it-GGUF",
+     "revision": "fc034cfff751157913579611efad8462ac1be606",
+     "path": "gemma-4-12b-it-Q4_K_M.gguf",
+     "size": 7121861440,
+     "dump": "unsloth-gemma-4-12B-it-loom/gguf/gemma-4-12b-it-Q4_K_M.gguf.json.gz"
+    },
+    "gemma4-12B-it-DFlash-Q4_K_M.gguf": {
+     "origin": "drafter",
+     "repo": "Anbeeld/gemma4-12B-it-DFlash-GGUF",
+     "revision": "586b6ba31beba0d9dff7927b49d684728c4dfd69",
+     "path": "gemma4-12B-it-DFlash-Q4_K_M.gguf",
+     "size": 442399712,
+     "dump": "unsloth-gemma-4-12B-it-loom/gguf/gemma4-12B-it-DFlash-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-gemma-4-31B-it-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
+    "revision": "ea101adcee1a5c4114a0f87ab137cddcb08f08e9"
+   },
+   "model_id": "google/gemma-4-31B-it",
+   "kit": "gemma4",
+   "arch": "gemma4",
+   "build": {
+    "preset": "chat",
+    "context": 53248,
+    "pool": 53248,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "gemma-4-31B-it-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/gemma-4-31B-it-GGUF",
+     "revision": "c1ac76e99d5513b141e8adde7288b85c3f9c32ec",
+     "path": "gemma-4-31B-it-Q4_K_M.gguf",
+     "size": 18323733440,
+     "dump": "unsloth-gemma-4-31B-it-loom/gguf/gemma-4-31B-it-Q4_K_M.gguf.json.gz"
+    },
+    "gemma4-31b-it-dflash-Q4_K_M.gguf": {
+     "origin": "drafter",
+     "repo": "Anbeeld/gemma-4-31B-it-DFlash-GGUF",
+     "revision": "16e51736d898d460e527acebd5aaa31f72cf7ff7",
+     "path": "gemma4-31b-it-dflash-Q4_K_M.gguf",
+     "size": 912636896,
+     "dump": "unsloth-gemma-4-31B-it-loom/gguf/gemma4-31b-it-dflash-Q4_K_M.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-gemma-4-E2B-it-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+    "revision": "512e9bb19d98b83a7c995a135e4c036c0ad0190e"
+   },
+   "model_id": "google/gemma-4-E2B-it",
+   "kit": "gemma4",
+   "arch": "gemma4",
+   "build": {
+    "preset": "chat",
+    "context": 131072,
+    "pool": 196608,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 2
+   },
+   "files": {
+    "gemma-4-E2B-it-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/gemma-4-E2B-it-GGUF",
+     "revision": "0314792d7f1f7e229411f620751375812bb9faf2",
+     "path": "gemma-4-E2B-it-Q4_K_M.gguf",
+     "size": 3106738272,
+     "dump": "unsloth-gemma-4-E2B-it-loom/gguf/gemma-4-E2B-it-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-F16.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/gemma-4-E2B-it-GGUF",
+     "revision": "0314792d7f1f7e229411f620751375812bb9faf2",
+     "path": "mmproj-F16.gguf",
+     "size": 985654080,
+     "dump": "unsloth-gemma-4-E2B-it-loom/gguf/mmproj-F16.gguf.json.gz"
+    },
+    "gemma-4-E2B-it-assistant.Q8_0.gguf": {
+     "origin": "drafter",
+     "repo": "AtomicChat/gemma-4-E2B-it-assistant-GGUF",
+     "revision": "c540008a0f33650558acdc87c823f7d1591191e3",
+     "path": "gemma-4-E2B-it-assistant.Q8_0.gguf",
+     "size": 97817696,
+     "dump": "unsloth-gemma-4-E2B-it-loom/gguf/gemma-4-E2B-it-assistant.Q8_0.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-gemma-4-E4B-it-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-gemma-4-E4B-it-loom",
+    "revision": "56d2a5f3983be461b4306b608bc23ac0a06d50f2"
+   },
+   "model_id": "google/gemma-4-E4B-it",
+   "kit": "gemma4",
+   "arch": "gemma4",
+   "build": {
+    "preset": "chat",
+    "context": 131072,
+    "pool": 196608,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "gemma-4-E4B-it-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/gemma-4-E4B-it-GGUF",
+     "revision": "bfc15c382204943c3a8fff0c750b94ae2364d7a3",
+     "path": "gemma-4-E4B-it-Q4_K_M.gguf",
+     "size": 4977171584,
+     "dump": "unsloth-gemma-4-E4B-it-loom/gguf/gemma-4-E4B-it-Q4_K_M.gguf.json.gz"
+    },
+    "mmproj-F16.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/gemma-4-E4B-it-GGUF",
+     "revision": "bfc15c382204943c3a8fff0c750b94ae2364d7a3",
+     "path": "mmproj-F16.gguf",
+     "size": 990372672,
+     "dump": "unsloth-gemma-4-E4B-it-loom/gguf/mmproj-F16.gguf.json.gz"
+    },
+    "gemma-4-E4B-it-assistant.Q8_0.gguf": {
+     "origin": "drafter",
+     "repo": "AtomicChat/gemma-4-E4B-it-assistant-GGUF",
+     "revision": "d87ced306ffb9d82e032e60b34beef4a702e308b",
+     "path": "gemma-4-E4B-it-assistant.Q8_0.gguf",
+     "size": 98653280,
+     "dump": "unsloth-gemma-4-E4B-it-loom/gguf/gemma-4-E4B-it-assistant.Q8_0.gguf.json.gz"
+    }
+   }
+  },
+  "unsloth-gpt-oss-20b-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
+    "revision": "0510de3ecaeea5ffe4f0948f3b23eeb269ed37ce"
+   },
+   "model_id": "openai/gpt-oss-20b",
+   "kit": "gpt-oss",
+   "arch": "gpt-oss",
+   "build": {
+    "preset": "chat",
+    "context": 131072,
+    "pool": 196608,
+    "prefill": 4096,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "gpt-oss-20b-Q4_K_M.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/gpt-oss-20b-GGUF",
+     "revision": "d449b42d93e1c2c7bda5312f5c25c8fb91dfa9b4",
+     "path": "gpt-oss-20b-Q4_K_M.gguf",
+     "size": 11624759488,
+     "dump": "unsloth-gpt-oss-20b-loom/gguf/gpt-oss-20b-Q4_K_M.gguf.json.gz"
+    }
+   }
+  }
+ }
+}

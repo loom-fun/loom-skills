@@ -1,0 +1,10 @@
+{
+ "scope": "facet/hybrid-gdn",
+ "match": {
+  "has": [
+   "gdn"
+  ]
+ },
+ "owner": "kb",
+ "choices": []
+}

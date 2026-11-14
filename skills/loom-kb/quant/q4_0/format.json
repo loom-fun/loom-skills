@@ -1,0 +1,22 @@
+{
+  "schema": "loom-kb/format/1",
+  "format": "q4_0",
+  "ggml_type": "Q4_0",
+  "block_size": 32,
+  "bytes_per_block": 18,
+  "bits_per_weight": 4.5,
+  "low_bit": true,
+  "int8_path": false,
+  "moe": false,
+  "dequant_helper": "gen_llm.py (proposal head copy; weights too)",
+  "ktest": {
+    "matvec_int8": false,
+    "gemm_default": false,
+    "gemm_all": true
+  },
+  "devices_verified": {
+    "rdna3": true,
+    "rdna4": true
+  },
+  "evidence": "used by published packages (programs of the local copies define its dequant helper; all published packages are dual-target, built for gfx1151 and gfx1201)"
+}

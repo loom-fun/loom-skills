@@ -1,0 +1,392 @@
+{
+ "name": "Flint",
+ "arch": "flint",
+ "gguf": "Flint-Q4_K_M.gguf",
+ "hidden": 2048,
+ "layers": 49,
+ "heads": 32,
+ "kv_heads": 4,
+ "head_dim": 128,
+ "ffn": 6144,
+ "vocab": 150144,
+ "context_length": 262144,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 10000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 513,
+ "sliding_layers": [
+  2,
+  3,
+  4,
+  6,
+  7,
+  8,
+  10,
+  11,
+  12,
+  14,
+  15,
+  16,
+  18,
+  19,
+  20,
+  22,
+  23,
+  24,
+  26,
+  27,
+  28,
+  30,
+  31,
+  32,
+  34,
+  35,
+  36,
+  38,
+  39,
+  40,
+  42,
+  43,
+  44,
+  46,
+  47
+ ],
+ "nope_layers": [
+  0,
+  1,
+  5,
+  9,
+  13,
+  17,
+  21,
+  25,
+  29,
+  33,
+  37,
+  41,
+  45,
+  48
+ ],
+ "tied_embeddings": false,
+ "eos_id": 150001,
+ "extra_eos_ids": [
+  150003,
+  150005,
+  150018
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|system|>",
+  "suffix": "",
+  "user_prefix": "<|user|>",
+  "assistant_prefix": "<|assistant|>",
+  "default_system": "",
+  "trim_content": false,
+  "think_open": "<think>",
+  "think_close": "</think>",
+  "history_think": "nonempty",
+  "history_think_scope": "all",
+  "generation_prompt": "<|assistant|><think>",
+  "generation_prompt_plain": "<|assistant|><think>",
+  "thinking": "always",
+  "thinking_default": true,
+  "starts_in_reasoning": true,
+  "think_end": "</think>",
+  "tools_function_only": true,
+  "tool_line_prefix": "",
+  "tool_separator": "",
+  "tools_after_system": true,
+  "tools_system_separator": "<|system|>",
+  "tools_prefix": "\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>",
+  "tools_suffix": "</tools>\n\nFor each function call, output the function name and arguments within the following XML format:\n<tool_call>{function-name}<arg_key>{arg-key-1}</arg_key><arg_value>{arg-value-1}</arg_value>...</tool_call>\n",
+  "call_format": "glm",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "",
+  "call_separator": "",
+  "tool_turn_prefix": "",
+  "tool_item_prefix": "<|observation|><tool_response>",
+  "tool_item_suffix": "</tool_response>",
+  "tool_turn_suffix": "",
+  "terminal": "<|end_of_text|>",
+  "stop_after_calls": "<|observation|>",
+  "stop_after_answer": "<|user|>"
+ },
+ "attn_sinks": true,
+ "moe": {
+  "experts": 256,
+  "used": 6,
+  "ffn": 512,
+  "leading_dense": 2,
+  "gating": 2,
+  "norm_weights": true,
+  "scale": 1.0,
+  "probs_bias": false,
+  "shared_ffn": 1024
+ },
+ "drafter": {
+  "gguf": "Flint-DFlash2-Q4_K_M.gguf",
+  "repo": "incoai/Flint-DFlash2-GGUF",
+  "file": "Flint-DFlash2-Q4_K_M.gguf",
+  "kind": "dflash",
+  "depth": 3,
+  "ctx_max": 0,
+  "occ_min": 2,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 69.17,
+    "rows": {
+     "work0": 73.32,
+     "work1": 73.29,
+     "work2": 74.43,
+     "work3": 73.35,
+     "work4": 72.65,
+     "long": 53.68,
+     "streams4": 189.9
+    },
+    "seconds": 67,
+    "baseline": "no-draft package",
+    "margin_llama": 0.899
+   },
+   {
+    "kind": "dflash",
+    "depth": 1,
+    "decode_tps": 86.38,
+    "rows": {
+     "work0": 91.75,
+     "work1": 98.88,
+     "work2": 100.35,
+     "work3": 95.42,
+     "work4": 96.03,
+     "long": 56.86,
+     "streams4": 187.6
+    },
+    "seconds": 64,
+    "margin_llama": 0.952,
+    "margin": 0.952,
+    "streams4_gated": 187.6,
+    "streams4_ungated": 178.37,
+    "geomean": 1.166
+   },
+   {
+    "kind": "dflash",
+    "depth": 2,
+    "decode_tps": 88.25,
+    "rows": {
+     "work0": 92.14,
+     "work1": 107.36,
+     "work2": 114.21,
+     "work3": 96.39,
+     "work4": 102.41,
+     "long": 52.84,
+     "streams4": 188.75
+    },
+    "seconds": 64,
+    "margin_llama": 0.885,
+    "margin": 0.885,
+    "streams4_gated": 188.75,
+    "streams4_ungated": 137.13
+   },
+   {
+    "kind": "dflash",
+    "depth": 3,
+    "decode_tps": 103.01,
+    "rows": {
+     "work0": 102.7,
+     "work1": 125.37,
+     "work2": 135.25,
+     "work3": 116.98,
+     "work4": 124.41,
+     "long": 60.42,
+     "streams4": 187.45
+    },
+    "seconds": 62,
+    "margin_llama": 1.012,
+    "margin": 1.012,
+    "streams4_gated": 187.45,
+    "streams4_ungated": 157.38,
+    "geomean": 1.235,
+    "checked": "ok (exact, concurrent)"
+   },
+   {
+    "kind": "dflash",
+    "depth": 5,
+    "decode_tps": 76.77,
+    "rows": {
+     "work0": 74.43,
+     "work1": 106.11,
+     "work2": 105.23,
+     "work3": 92.98,
+     "work4": 94.33,
+     "long": 40.93,
+     "streams4": 188.12
+    },
+    "seconds": 67,
+    "margin_llama": 0.686,
+    "margin": 0.686,
+    "streams4_gated": 188.12,
+    "streams4_ungated": 98.57
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 59.39,
+    "rows": {
+     "work0": 60.0,
+     "work1": 63.08,
+     "work2": 73.23,
+     "work3": 67.7,
+     "work4": 64.82,
+     "long": 40.57,
+     "streams4": 190.75
+    },
+    "seconds": 72,
+    "margin_llama": 0.68,
+    "margin": 0.68,
+    "streams4_gated": 190.75,
+    "streams4_ungated": 92.07
+   }
+  ]
+ },
+ "reference": {
+  "repo": "loom-fun/ggml-org-Flint-loom",
+  "revision": "43e95537629aa352afb16adf8830fa99a384d2d8",
+  "category": "A",
+  "score": 175.0,
+  "reasons": [
+   "same architecture (flint)",
+   "same family (flint)",
+   "MoE routing (256 experts)",
+   "sliding-window attention",
+   "drafter type dflash",
+   "head_dim 128"
+  ],
+  "generator": {
+   "skills_commit": "79e8d92ad856a9ed530decc81280282d51667f65",
+   "kit": {
+    "example": "flint",
+    "modified": false
+   },
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": "flint",
+  "taken": [
+   "extra_eos_ids",
+   "chat.stop_after_calls",
+   "chat.stop_after_answer"
+  ],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "dflash",
+    "depth": 3,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 70.73,
+      "rows": {
+       "work0": 72.7,
+       "work1": 73.1,
+       "work2": 74.06,
+       "work3": 73.1,
+       "work4": 72.45,
+       "long": 60.97,
+       "streams4": 190.42
+      },
+      "seconds": 59,
+      "margin_llama": 0.839
+     },
+     {
+      "kind": "dflash",
+      "depth": 2,
+      "decode_tps": 91.73,
+      "rows": {
+       "work0": 92.67,
+       "work1": 108.03,
+       "work2": 112.55,
+       "work3": 97.06,
+       "work4": 103.44,
+       "long": 60.6,
+       "streams4": 193.83
+      },
+      "seconds": 55,
+      "margin_llama": 1.074,
+      "margin": 1.074,
+      "streams4_gated": 193.83,
+      "streams4_ungated": 135.51
+     },
+     {
+      "kind": "dflash",
+      "depth": 3,
+      "decode_tps": 104.54,
+      "rows": {
+       "work0": 102.48,
+       "work1": 125.06,
+       "work2": 135.31,
+       "work3": 117.41,
+       "work4": 125.19,
+       "long": 63.52,
+       "streams4": 190.06
+      },
+      "seconds": 53,
+      "margin_llama": 1.188,
+      "margin": 1.188,
+      "streams4_gated": 190.06,
+      "streams4_ungated": 155.59,
+      "checked": "ok (exact, concurrent)"
+     },
+     {
+      "kind": "dflash",
+      "depth": 5,
+      "decode_tps": 80.26,
+      "rows": {
+       "work0": 74.61,
+       "work1": 106.41,
+       "work2": 106.2,
+       "work3": 93.24,
+       "work4": 94.51,
+       "long": 47.08,
+       "streams4": 192.96
+      },
+      "seconds": 58,
+      "margin_llama": 0.865,
+      "margin": 0.865,
+      "streams4_gated": 192.96,
+      "streams4_ungated": 103.52
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 59.37,
+      "rows": {
+       "work0": 60.39,
+       "work1": 63.55,
+       "work2": 73.59,
+       "work3": 68.19,
+       "work4": 65.33,
+       "long": 39.68,
+       "streams4": 191.56
+      },
+      "seconds": 65,
+      "margin_llama": 0.7,
+      "margin": 0.7,
+      "streams4_gated": 191.56,
+      "streams4_ungated": 91.86
+     }
+    ]
+   }
+  }
+ },
+ "model_id": "flint"
+}

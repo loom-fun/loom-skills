@@ -53,9 +53,13 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card"))
 import card_lib  # noqa: E402
 
-# device -> the devlab-perf runner key, the job-name prefix, the llama.cpp ROCm build when nightly-models.json names none
-DEVICES = {"strix-halo": {"runner": "strix", "prefix": "sab-", "llamacpp": "b1374"},
-           "radeon-r9700": {"runner": "r9700", "prefix": "rab-", "llamacpp": "b1375"}}
+# the devices an A/B can run on: the device registry (skills/loom-kb: device.json runner key, methodology.json baselines per device)
+DEVICES = {d: {"runner": card_lib.registry.device(d)["runner"]["key"], "baselines": card_lib.registry.methodology()["baselines"][d]}
+           for d in ("strix-halo", "radeon-r9700")}
+for _d in DEVICES.values():
+    _d["prefix"] = _d["runner"][0] + "ab-"   # job names: sab-<slug> (strix), rab-<slug> (r9700)
+    _d["llamacpp"] = _d["baselines"]["rocm"].get("fallback") or _d["baselines"]["rocm"]["build"]   # the ROCm build when nightly-models.json names none
+    _d["vulkan"] = _d["baselines"]["vulkan"]["build"]
 
 
 def abba(k, start=0):
@@ -121,7 +125,7 @@ def build(a):
         if not r9700:
             jobs.append({
                 "name": name, "runner": dev["runner"], **({"repeat_rows": rr} if rr > 1 else {}), "card": new, "memory_bytes": m["memory_bytes"],
-                "kit": m["kit"], "llamacpp": m.get("llamacpp") or dev["llamacpp"], "llamacpp_vulkan": "b12211",
+                "kit": m["kit"], "llamacpp": m.get("llamacpp") or dev["llamacpp"], "llamacpp_vulkan": dev["vulkan"],
                 "variants": [{"name": "fun", "card": old}, {"name": "staging"},
                              {"name": "funnd", "card": old, "execution": {"draft_depth": 0}},
                              {"name": "stagingnd", "execution": {"draft_depth": 0}}],
@@ -143,7 +147,7 @@ def build(a):
         jobs.append({
             **{k: v for k, v in jf.items() if k == "llama_kv_rocm"},
             "name": name, "runner": dev["runner"], **({"repeat_rows": rr} if rr > 1 else {}), "card": new,
-            **{k: v for k, v in jf.items() if k != "llama_kv_rocm"}, "kit": m["kit"], "llamacpp": dev["llamacpp"], "llamacpp_vulkan": "b12211",
+            **{k: v for k, v in jf.items() if k != "llama_kv_rocm"}, "kit": m["kit"], "llamacpp": dev["llamacpp"], "llamacpp_vulkan": dev["vulkan"],
             "variants": [ov("fun", {}), nv("staging", ex_ctx), ov("funnd", {"draft_depth": 0}), nv("stagingnd", {**ex_ctx, "draft_depth": 0})],
             "steps": steps})
     if not jobs:
@@ -151,11 +155,11 @@ def build(a):
     if r9700:
         return {"_comment": f"R9700 A/B (ab_jobs.py): per model one job on one R9700 runner, old package (fun) vs new package (staging), served as the new "
                             f"card's R9700 Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: {', '.join(skipped) or 'none'}",
-                "runner": "r9700", "memory_bytes": pool, "llama_spec": "matched", "jobs": jobs,
-                "card": jobs[0]["card"], "kit": None, "llamacpp": dev["llamacpp"], "llamacpp_vulkan": "b12211"}
+                "runner": dev["runner"], "memory_bytes": pool, "llama_spec": "matched", "jobs": jobs,
+                "card": jobs[0]["card"], "kit": None, "llamacpp": dev["llamacpp"], "llamacpp_vulkan": dev["vulkan"]}
     return {"_comment": "Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, "
                         f"{a.old_org} package (fun) vs {a.new_org} package (staging), same prompts and settings; compare with strix_ab_compare.py",
-            "runner": "strix", "memory_bytes": jobs[0]["memory_bytes"], "llama_spec": "matched", "jobs": jobs,
+            "runner": dev["runner"], "memory_bytes": jobs[0]["memory_bytes"], "llama_spec": "matched", "jobs": jobs,
             "card": jobs[0]["card"], "kit": None, "llamacpp": jobs[0]["llamacpp"]}
 
 
@@ -174,7 +178,7 @@ def parser(device=None):
     ap.add_argument("--old-rev", help="pin the old card of every slug to this revision (ORG/SLUG@REV)")
     ap.add_argument("--new-rev", help="pin the new card of every slug to this revision")
     ap.add_argument("--refs", help='JSON {"SLUG": {"old": "org/repo@rev", "new": "org/repo@rev"}}: per-slug card references (win over the org/rev options)')
-    ap.add_argument("--fit", default=os.path.join(ROOT, ".github", "devlab", "r9700_fit.json"), help="radeon-r9700: the fit table")
+    ap.add_argument("--fit", default=os.path.join(ROOT, card_lib.registry.device("radeon-r9700")["fit_table"]), help="radeon-r9700: the fit table")
     ap.add_argument("--baselines", action="store_true", help="also run the llama.cpp ROCm + Vulkan rows (off: the A/B compares Loom with Loom; no llama.cpp re-measure)")
     ap.add_argument("--llama-reps", type=int, default=None, help="llama.cpp runs per 1-stream row (default: 2 on Strix Halo; on the R9700 the Loom session count, as r9700_jobs.py)")
     ap.add_argument("--suffix", default="", help="appended to the job name (a confirming re-run: -r2)")

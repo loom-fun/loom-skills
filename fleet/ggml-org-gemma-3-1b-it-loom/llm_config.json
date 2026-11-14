@@ -1,0 +1,220 @@
+{
+ "name": "Gemma 3 1b It",
+ "arch": "gemma3",
+ "gguf": "gemma-3-1b-it-Q4_K_M.gguf",
+ "hidden": 1152,
+ "layers": 26,
+ "heads": 4,
+ "kv_heads": 1,
+ "head_dim": 256,
+ "ffn": 6912,
+ "vocab": 262144,
+ "context_length": 32768,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 1000000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": false,
+ "post_norms": true,
+ "embed_norm": false,
+ "embed_scale": 33.94112549695428,
+ "sliding_window": 512,
+ "sliding_layers": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  6,
+  7,
+  8,
+  9,
+  10,
+  12,
+  13,
+  14,
+  15,
+  16,
+  18,
+  19,
+  20,
+  21,
+  22,
+  24,
+  25
+ ],
+ "nope_layers": [],
+ "tied_embeddings": true,
+ "eos_id": 1,
+ "extra_eos_ids": [
+  106
+ ],
+ "bos_id": 2,
+ "chat": {
+  "bos": "<bos>",
+  "system_prefix": "<start_of_turn>system\n",
+  "suffix": "<end_of_turn>\n",
+  "user_prefix": "<start_of_turn>user\n",
+  "system_in_user": "\n\n",
+  "system_in_user_trim": false,
+  "assistant_prefix": "<start_of_turn>model\n",
+  "default_system": "",
+  "trim_content": true,
+  "think_open": "",
+  "think_close": "",
+  "history_think": "nonempty",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<start_of_turn>model\n",
+  "generation_prompt_plain": "<start_of_turn>model\n",
+  "thinking": "never",
+  "thinking_default": false,
+  "starts_in_reasoning": false,
+  "think_end": "</think>",
+  "tools_prefix": "",
+  "tools_suffix": "",
+  "tool_line_prefix": "",
+  "tool_separator": "",
+  "tools_system_separator": "",
+  "tools_after_system": true,
+  "tools_function_only": true,
+  "call_format": "none",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "",
+  "call_separator": "",
+  "tool_turn_prefix": "",
+  "tool_item_prefix": "",
+  "tool_item_suffix": "",
+  "tool_turn_suffix": "",
+  "terminal": "<end_of_turn>"
+ },
+ "ffn_act": "gelu",
+ "rope_theta_swa": 10000.0,
+ "attn_sinks": false,
+ "reference": {
+  "repo": "loom-fun/ggml-org-gemma-3-1b-it-loom",
+  "revision": "aa944f218c71253bdd6897cbc38d22143d9938a1",
+  "category": "A",
+  "score": 163.0,
+  "reasons": [
+   "same architecture (gemma3)",
+   "same family (gemma-3)",
+   "sliding-window attention",
+   "drafter type ngram",
+   "head_dim 256"
+  ],
+  "generator": {
+   "skills_commit": "0ce946ac0daa948f7f85c3e6f88c6c371de0c7a7",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "ngram",
+    "depth": 3,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 160.81,
+      "seconds": 10
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 202.84,
+      "seconds": 10
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 229.22,
+      "seconds": 10,
+      "checked": "ok (exact, concurrent)"
+     },
+     {
+      "kind": "ngram",
+      "depth": 5,
+      "decode_tps": 200.04,
+      "seconds": 12
+     }
+    ]
+   }
+  }
+ },
+ "drafter": {
+  "kind": "none",
+  "depth": 0,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 201.13,
+    "rows": {
+     "work0": 202.32,
+     "work1": 204.56,
+     "work2": 204.66,
+     "work3": 204.7,
+     "work4": 203.6,
+     "long": 188.05,
+     "streams4": 744.68
+    },
+    "seconds": 14
+   },
+   {
+    "kind": "ngram",
+    "depth": 2,
+    "decode_tps": 231.62,
+    "rows": {
+     "work0": 198.58,
+     "work1": 235.71,
+     "work2": 205.79,
+     "work3": 217.27,
+     "work4": 498.39,
+     "long": 193.88,
+     "streams4": 722.63
+    },
+    "seconds": 13,
+    "margin": 0.97
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 235.76,
+    "rows": {
+     "work0": 200.01,
+     "work1": 237.01,
+     "work2": 204.96,
+     "work3": 217.39,
+     "work4": 619.24,
+     "long": 194.66,
+     "streams4": 726.72
+    },
+    "seconds": 13,
+    "margin": 0.976
+   },
+   {
+    "kind": "ngram",
+    "depth": 5,
+    "decode_tps": 194.89,
+    "rows": {
+     "work0": 162.18,
+     "work1": 195.94,
+     "work2": 167.27,
+     "work3": 176.87,
+     "work4": 663.78,
+     "long": 156.78,
+     "streams4": 733.4
+    },
+    "seconds": 14,
+    "margin": 0.802
+   }
+  ]
+ },
+ "model_id": "google/gemma-3-1b-it"
+}

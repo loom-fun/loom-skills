@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/moe/qwen3moe",
+ "match": {
+  "arch": [
+   "qwen3moe"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "moe"
+ ],
+ "choices": []
+}

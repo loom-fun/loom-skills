@@ -19,7 +19,7 @@ def config(path):
     r = gguf.GGUFReader(path)
     fam = _kv(r, "clip.vision.projector_type") or _kv(r, "clip.projector_type")
     if fam not in FAMILIES:
-        raise SystemExit(f"STOP: vision projector '{fam}' has no encoder plan yet (see loom-port-llm/reference/vision.md)")
+        raise SystemExit(f"STOP: vision projector '{fam}' has no encoder plan yet (see the loom-kb vision node (`kb.py route --facets vision`))")
     tens = {t.name: dict(type=t.tensor_type.name, shape=[int(x) for x in t.shape], bytes=int(t.n_bytes)) for t in r.tensors
             if not t.name.startswith(("a.", "mm.a."))}
     E = _kv(r, "clip.vision.embedding_length"); NH = _kv(r, "clip.vision.attention.head_count")

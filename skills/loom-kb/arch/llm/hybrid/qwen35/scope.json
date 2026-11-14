@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/hybrid/qwen35",
+ "match": {
+  "arch": [
+   "qwen35"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "hybrid-gdn"
+ ],
+ "choices": []
+}

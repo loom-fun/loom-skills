@@ -1,0 +1,2 @@
+{"scope": "facet/moe", "match": {"facets": ["moe"]}, "owner": "fixture",
+ "choices": [{"set": {"decode.no.such.key": 1}, "evidence": "fixture"}]}

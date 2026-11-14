@@ -10,13 +10,16 @@ upstream-recommended n-max, else its own default. streams4 is loaded without dra
   matched_spec.py LOOM-FUN/REPO --choice    mtp | dflash | assist | none
   matched_spec.py LLM_CONFIG.json --violations   what the package's own drafting differs in from the classification (needs --repo)
 
-The normative text is skills/loom-benchmark/reference/methodology.md; this module holds its constants and checks (TIE_BAND, outcome,
+The normative text is skills/loom-kb/method/methodology.md (numbers: method/methodology.json); this module holds its constants and checks (TIE_BAND, outcome,
 tally, rule_violations) so the renderer, the audit and the tests share one copy.
 """
 import json
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "loom-kb"))
+import registry  # noqa: E402
 
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "drafting_classification.json")
 
@@ -73,7 +76,7 @@ def rule_violations(repo, cfg=None, llama_args=None, row_loads=None):
 
 
 # Outcome of a row against the better llama.cpp backend (methodology.md rule 7); TIE_BAND is the measured same-runner noise.
-TIE_BAND = 0.03
+TIE_BAND = registry.methodology()["tie_band"]
 
 
 def outcome(loom, llama):

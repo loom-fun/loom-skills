@@ -1,0 +1,20 @@
+{
+  "schema": "loom-kb/family/1",
+  "family": "rdna4",
+  "status": "supported",
+  "order": 1,
+  "gfx_generic": "gfx12-generic",
+  "target_symbol": "rdna4",
+  "twin_suffix": "_rdna4",
+  "base": false,
+  "dual_target": true,
+  "wave_size": 32,
+  "matrix": {
+    "isa": "wmma8",
+    "fragment": "vector<8xf16>"
+  },
+  "devices": [
+    "radeon-r9700"
+  ],
+  "note": "A kernel with a gfx12 version K_rdna4 selects it per device (dual_target.py). gen_gemm_rdna4.twin() and flash2_rdna4.to_rdna4() rewrite the RDNA3 text; flash2_b2/trim/vpack/prefetch and f16o_fuse are gfx12-only."
+}

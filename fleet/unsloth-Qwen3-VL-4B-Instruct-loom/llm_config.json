@@ -1,0 +1,270 @@
+{
+ "name": "Qwen3-Vl-4B-Instruct",
+ "arch": "qwen3vl",
+ "gguf": "Qwen3-VL-4B-Instruct-Q4_K_M.gguf",
+ "hidden": 2560,
+ "layers": 36,
+ "heads": 32,
+ "kv_heads": 8,
+ "head_dim": 128,
+ "ffn": 9728,
+ "vocab": 151936,
+ "context_length": 262144,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 5000000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": true,
+ "eos_id": 151645,
+ "extra_eos_ids": [
+  151643
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "trim_content": false,
+  "think_open": "",
+  "think_close": "",
+  "history_think": "nonempty",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n",
+  "thinking": "never",
+  "thinking_default": false,
+  "starts_in_reasoning": false,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": true,
+  "tools_system_separator": "\n\n",
+  "tools_prefix": "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>",
+  "tools_suffix": "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>",
+  "call_format": "hermes",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "attn_sinks": false,
+ "mrope": {
+  "sections": [
+   24,
+   20,
+   20,
+   0
+  ],
+  "interleaved": true
+ },
+ "vision": {
+  "mmproj": "mmproj-F16.gguf",
+  "family": "qwen3vl_merger",
+  "img_begin": "<|vision_start|>",
+  "img_end": "<|vision_end|>",
+  "mrope": true,
+  "deepstack": 3
+ },
+ "reference": {
+  "repo": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom",
+  "revision": "2fba494331b9b9b205d79309208cbf1a86f9375d",
+  "category": "A",
+  "score": 172.0,
+  "reasons": [
+   "same architecture (qwen3vl)",
+   "same family (qwen3-vl)",
+   "tool-call format hermes",
+   "vision tower (qwen3vl_merger)",
+   "head_dim 128"
+  ],
+  "generator": {
+   "skills_commit": "30423ddcdc294140fe8990097f686da3b5c21e1b",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "none",
+    "depth": 0,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 64.68,
+      "rows": {
+       "work0": 78.4,
+       "work1": 78.2,
+       "work3": 78.12,
+       "work4": 77.13,
+       "long": 38.47,
+       "streams4": 280.43
+      },
+      "seconds": 36
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 66.42,
+      "rows": {
+       "work0": 74.46,
+       "work1": 83.06,
+       "work3": 98.87,
+       "work4": 117.0,
+       "long": 32.11,
+       "streams4": 277.91
+      },
+      "seconds": 36,
+      "margin": 0.835
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 64.59,
+      "rows": {
+       "work0": 72.4,
+       "work1": 80.92,
+       "work3": 97.88,
+       "work4": 119.81,
+       "long": 30.6,
+       "streams4": 267.35
+      },
+      "seconds": 36,
+      "margin": 0.795
+     },
+     {
+      "kind": "ngram",
+      "depth": 5,
+      "decode_tps": 51.67,
+      "rows": {
+       "work0": 61.14,
+       "work1": 68.82,
+       "work3": 86.23,
+       "work4": 109.37,
+       "long": 22.15,
+       "streams4": 270.9
+      },
+      "seconds": 41,
+      "margin": 0.576
+     }
+    ]
+   }
+  }
+ },
+ "drafter": {
+  "kind": "none",
+  "depth": 0,
+  "ctx_max": 0,
+  "occ_min": 2,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 56.73,
+    "rows": {
+     "work0": 76.09,
+     "work1": 76.25,
+     "work3": 76.3,
+     "work4": 75.48,
+     "long": 28.15,
+     "streams4": 263.89
+    },
+    "seconds": 75,
+    "baseline": "no-draft package",
+    "margin_llama": 1.006
+   },
+   {
+    "kind": "ngram",
+    "depth": 1,
+    "decode_tps": 61.69,
+    "rows": {
+     "work0": 78.23,
+     "work1": 84.63,
+     "work3": 96.18,
+     "work4": 106.64,
+     "long": 27.26,
+     "streams4": 274.44
+    },
+    "seconds": 72,
+    "margin_llama": 0.981,
+    "margin": 0.981,
+    "streams4_gated": 274.44,
+    "streams4_ungated": 234.71
+   },
+   {
+    "kind": "ngram",
+    "depth": 2,
+    "decode_tps": 56.31,
+    "rows": {
+     "work0": 74.47,
+     "work1": 83.35,
+     "work3": 99.22,
+     "work4": 117.31,
+     "long": 22.33,
+     "streams4": 274.03
+    },
+    "seconds": 74,
+    "margin_llama": 0.803,
+    "margin": 0.803,
+    "streams4_gated": 274.03,
+    "streams4_ungated": 181.54
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 56.32,
+    "rows": {
+     "work0": 73.52,
+     "work1": 83.32,
+     "work3": 100.8,
+     "work4": 123.04,
+     "long": 22.16,
+     "streams4": 271.43
+    },
+    "seconds": 74,
+    "margin_llama": 0.797,
+    "margin": 0.797,
+    "streams4_gated": 271.43,
+    "streams4_ungated": 177.46
+   },
+   {
+    "kind": "ngram",
+    "depth": 1,
+    "ctx_max": 3500,
+    "decode_tps": 58.08,
+    "rows": {
+     "work0": 76.2,
+     "work1": 82.63,
+     "work3": 93.4,
+     "work4": 103.51,
+     "long": 24.69,
+     "streams4": 264.25
+    },
+    "seconds": 74,
+    "margin": 0.888,
+    "margin_llama": 0.888
+   }
+  ]
+ },
+ "model_id": "Qwen/Qwen3-VL-4B-Instruct"
+}

@@ -36,7 +36,7 @@ import card_lib  # noqa: E402
 ap = argparse.ArgumentParser()
 ap.add_argument("slugs", nargs="*", help="card repo names (without the org), e.g. unsloth-Qwen3-0.6B-loom")
 ap.add_argument("--all", action="store_true")
-ap.add_argument("--fit", default=os.path.join(ROOT, ".github", "devlab", "r9700_fit.json"))
+ap.add_argument("--fit", default=os.path.join(ROOT, card_lib.registry.device("radeon-r9700")["fit_table"]))
 ap.add_argument("--card-org", default="loom-fun-staging")
 ap.add_argument("--build", action="store_true", help="rebuild the variants from this branch instead of fetching the card's programs")
 ap.add_argument("--gates", default="", help="add the gates step at this LEVEL (dev|fast|quick|full) on the card variant")
@@ -47,6 +47,8 @@ a = ap.parse_args()
 
 GPU = "radeon-r9700"
 POOL = card_lib.GPUS[GPU]["memory_bytes"]
+DEV = card_lib.registry.device(GPU)   # runner key and llama.cpp baselines: skills/loom-kb (device.json, methodology.json)
+BASE = card_lib.registry.methodology()["baselines"][GPU]
 models = {m["repo"].split("/")[-1]: m for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
 fit = {r["slug"]: r for r in json.load(open(a.fit))}
 slugs = sorted(m for m in models if fit.get(m, {}).get("verdict", "").startswith("fits")) if a.all else a.slugs
@@ -85,7 +87,7 @@ for slug in slugs:
     jobs.append({
         **({"llama_kv_rocm": lkv} if lkv else {}),
         "name": slug.lower().replace(".", "-")[:40], **({"repeat_rows": rr} if rr > 1 else {}),
-        "card": f"{a.card_org}/{slug}", **({"require_preset_r9700": True} if preset else {}), "kit": m["kit"], "llamacpp": "b1375", "llamacpp_vulkan": "b12211",
+        "card": f"{a.card_org}/{slug}", **({"require_preset_r9700": True} if preset else {}), "kit": m["kit"], "llamacpp": BASE["rocm"]["build"], "llamacpp_vulkan": BASE["vulkan"]["build"],
         "memory_bytes_r9700": mem, **({"served_context": ctx} if ctx else {}),
         "variants": [card, nodraft],
         "steps": ["func:card", "ktest:card", *([f"gates:card:{a.gates}"] if a.gates else []), *["perf:card:1"] * n, *["perf:card:1:long"] * n, "c4:nodraft",
@@ -94,9 +96,9 @@ for slug in slugs:
 if not jobs:
     sys.exit("no job: " + (", ".join(skipped) + " do not fit the R9700" if skipped else "no model given"))
 exp = {"_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; "
-                   "loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, "
+                   f"loom-fun-staging card, llama.cpp ROCm {BASE['rocm']['build']} + Vulkan {BASE['vulkan']['build']} with the matched drafting, "
                    "reduced-context models served at served_context. Does not fit: " + (", ".join(skipped) or "none"),
-       "runner": "r9700", "memory_bytes": POOL, "llama_spec": "matched", "jobs": jobs,
-       "card": jobs[0]["card"], "kit": None, "llamacpp": "b1375", "llamacpp_vulkan": "b12211"}
+       "runner": DEV["runner"]["key"], "memory_bytes": POOL, "llama_spec": "matched", "jobs": jobs,
+       "card": jobs[0]["card"], "kit": None, "llamacpp": BASE["rocm"]["build"], "llamacpp_vulkan": BASE["vulkan"]["build"]}
 json.dump(exp, sys.stdout, indent=1)
 print()

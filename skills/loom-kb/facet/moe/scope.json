@@ -1,0 +1,10 @@
+{
+ "scope": "facet/moe",
+ "match": {
+  "has": [
+   "moe"
+  ]
+ },
+ "owner": "kb",
+ "choices": []
+}

@@ -1,0 +1,10 @@
+{
+ "scope": "facet/drafted",
+ "match": {
+  "has": [
+   "draft"
+  ]
+ },
+ "owner": "kb",
+ "choices": []
+}

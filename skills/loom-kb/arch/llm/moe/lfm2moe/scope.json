@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/moe/lfm2moe",
+ "match": {
+  "arch": [
+   "lfm2moe"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "moe"
+ ],
+ "choices": []
+}

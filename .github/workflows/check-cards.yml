@@ -3,6 +3,7 @@ name: check-cards
 # loom-fun model cards are generated (skills/loom-benchmark/scripts/card): info.json by make_info.py, README.md
 # and REPORT.md by render_card.py from info.json and the repo's model.json, model.json.lock and llm_config.json.
 # Keep them deterministic and the template stable: fixture inputs must reproduce the golden files byte for byte.
+# The contract step runs loom-dev's summarize_info.py (vendored, test/contract/SOURCE.txt) on the golden cards of both schemas.
 on:
   pull_request:
     paths: ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py", "skills/loom-port-llm/starter/kit_source.py", "skills/loom-org/scripts/**", ".github/scripts/loom_factory.py", ".github/workflows/check-cards.yml"]

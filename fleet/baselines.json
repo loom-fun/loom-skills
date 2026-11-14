@@ -1,0 +1,4748 @@
+{
+ "generated": "2026-11-14",
+ "models": {
+  "InternScience-Sage-A1.5-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591175",
+     "value": 187.9
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591175",
+     "value": 172.9
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591175",
+     "value": 129.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591175",
+     "value": 6446.5
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591175",
+     "value": 5724.3
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591175",
+     "value": 6197.8
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591175",
+     "value": 5654.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591175",
+     "value": 6976.1
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591175",
+     "value": 378.5
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300401",
+     "value": 79.0
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300401",
+     "value": 73.7
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300401",
+     "value": 66.4
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300401",
+     "value": 2370.5
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300401",
+     "value": 2173.8
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300401",
+     "value": 2445.2
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300401",
+     "value": 2054.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300401",
+     "value": 2568.3
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300401",
+     "value": 156.7
+    }
+   }
+  },
+  "XHToken-Spark-X2.5-4B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111259",
+     "value": 161.1
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111259",
+     "value": 151.2
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111259",
+     "value": 116.0
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111259",
+     "value": 8182.6
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111259",
+     "value": 8856.5
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111259",
+     "value": 9052.7
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111259",
+     "value": 6848.8
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111259",
+     "value": 8961.2
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111259",
+     "value": 563.2
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975724",
+     "value": 71.2
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975724",
+     "value": 67.0
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975724",
+     "value": 47.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975724",
+     "value": 2423.5
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975724",
+     "value": 2782.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975724",
+     "value": 2803.7
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975724",
+     "value": 2092.8
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975724",
+     "value": 2578.1
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975724",
+     "value": 251.8
+    }
+   }
+  },
+  "bartowski-LFM3-1.7B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486555",
+     "value": 372.6
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486555",
+     "value": 352.5
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486555",
+     "value": 284.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486555",
+     "value": 23640.0
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486555",
+     "value": 23087.4
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486555",
+     "value": 24928.7
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486555",
+     "value": 20210.8
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486555",
+     "value": 25716.2
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486555",
+     "value": 1364.3
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300441",
+     "value": 169.0
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300441",
+     "value": 163.3
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300441",
+     "value": 126.0
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300441",
+     "value": 6537.6
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300441",
+     "value": 6945.1
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300441",
+     "value": 7066.5
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300441",
+     "value": 5627.2
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300441",
+     "value": 6988.3
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300441",
+     "value": 610.7
+    }
+   }
+  },
+  "bartowski-Mellum2.1-12B-A2.5B-Thinking-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253377",
+     "value": 226.2
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253377",
+     "value": 205.3
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253377",
+     "value": 163.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253377",
+     "value": 10519.3
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253377",
+     "value": 10692.0
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253377",
+     "value": 11426.4
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253377",
+     "value": 8821.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253377",
+     "value": 11398.0
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253377",
+     "value": 526.4
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300502",
+     "value": 97.8
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300502",
+     "value": 91.5
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300502",
+     "value": 73.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300502",
+     "value": 3118.7
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300502",
+     "value": 3711.4
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300502",
+     "value": 3742.5
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300502",
+     "value": 2763.7
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300502",
+     "value": 3458.6
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300502",
+     "value": 219.2
+    }
+   }
+  },
+  "bartowski-MiniCPM-V-4.7-35B-A3B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277092",
+     "value": 133.0
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277092",
+     "value": 127.6
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277092",
+     "value": 112.0
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277092",
+     "value": 6527.9
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277092",
+     "value": 6061.0
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277092",
+     "value": 6427.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277092",
+     "value": 5685.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277092",
+     "value": 7110.7
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277092",
+     "value": 362.1
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300488",
+     "value": 59.0
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300488",
+     "value": 57.3
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300488",
+     "value": 48.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300488",
+     "value": 2383.5
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300488",
+     "value": 2322.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300488",
+     "value": 2518.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300488",
+     "value": 2055.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300488",
+     "value": 2630.1
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300488",
+     "value": 155.5
+    }
+   }
+  },
+  "bartowski-Nanbeige4.3-33B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111281",
+     "value": 29.2
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111281",
+     "value": 27.6
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111281",
+     "value": 19.8
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111281",
+     "value": 1189.3
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111281",
+     "value": 1416.5
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111281",
+     "value": 1398.9
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111281",
+     "value": 928.7
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111281",
+     "value": 1351.3
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111281",
+     "value": 108.4
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300420",
+     "value": 11.2
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300420",
+     "value": 10.7
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300420",
+     "value": 8.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300420",
+     "value": 345.2
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300420",
+     "value": 420.3
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300420",
+     "value": 418.5
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300420",
+     "value": 258.4
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300420",
+     "value": 397.5
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300420",
+     "value": 42.6
+    }
+   }
+  },
+  "bartowski-Ornith-1.5-122B-loom": {
+   "radeon-r9700": {
+    "_state": "unsupported"
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276661",
+     "value": 27.7
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276661",
+     "value": 24.5
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276661",
+     "value": 20.9
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276661",
+     "value": 860.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276661",
+     "value": 795.8
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276661",
+     "value": 901.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276661",
+     "value": 762.0
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276661",
+     "value": 932.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276661",
+     "value": 54.6
+    }
+   }
+  },
+  "bartowski-Ornith-1.5-35B-A3B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591042",
+     "value": 146.7
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591042",
+     "value": 127.9
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591042",
+     "value": 82.5
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591042",
+     "value": 6464.6
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591042",
+     "value": 5729.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591042",
+     "value": 6160.0
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591042",
+     "value": 5680.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591042",
+     "value": 7025.6
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591042",
+     "value": 363.4
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276608",
+     "value": 72.5
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276608",
+     "value": 61.7
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276608",
+     "value": 51.5
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276608",
+     "value": 2310.4
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276608",
+     "value": 2153.5
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276608",
+     "value": 2378.4
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276608",
+     "value": 2014.0
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276608",
+     "value": 2500.0
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276608",
+     "value": 163.8
+    }
+   }
+  },
+  "bartowski-Ornith-1.5-9B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556116",
+     "value": 151.2
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556116",
+     "value": 127.6
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556116",
+     "value": 90.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556116",
+     "value": 5271.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556116",
+     "value": 4881.6
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556116",
+     "value": 5222.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556116",
+     "value": 4806.8
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556116",
+     "value": 5499.1
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556116",
+     "value": 337.3
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300345",
+     "value": 61.4
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300345",
+     "value": 53.0
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300345",
+     "value": 40.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300345",
+     "value": 1534.2
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300345",
+     "value": 1559.5
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300345",
+     "value": 1587.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300345",
+     "value": 1404.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300345",
+     "value": 1592.4
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300345",
+     "value": 141.2
+    }
+   }
+  },
+  "bartowski-Qwen2.5-0.5B-Instruct-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086310",
+     "value": 644.8
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086310",
+     "value": 513.2
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086310",
+     "value": 326.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086310",
+     "value": 36131.2
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086310",
+     "value": 44461.5
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086310",
+     "value": 50976.8
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086310",
+     "value": 26041.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086310",
+     "value": 44955.9
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086310",
+     "value": 2238.0
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918533",
+     "value": 311.5
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918533",
+     "value": 273.6
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918533",
+     "value": 170.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918533",
+     "value": 12420.9
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918533",
+     "value": 18074.2
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918533",
+     "value": 19036.7
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918533",
+     "value": 8667.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918533",
+     "value": 15245.4
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918533",
+     "value": 1134.6
+    }
+   }
+  },
+  "bartowski-Qwen2.5-1.5B-Instruct-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086292",
+     "value": 366.7
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086292",
+     "value": 306.4
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086292",
+     "value": 150.8
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086292",
+     "value": 18596.2
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086292",
+     "value": 23370.4
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086292",
+     "value": 24491.2
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086292",
+     "value": 12887.2
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086292",
+     "value": 23177.8
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086292",
+     "value": 1263.4
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918651",
+     "value": 177.1
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918651",
+     "value": 157.2
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918651",
+     "value": 83.5
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918651",
+     "value": 4819.4
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918651",
+     "value": 6963.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918651",
+     "value": 7169.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918651",
+     "value": 3325.4
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918651",
+     "value": 5936.3
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918651",
+     "value": 615.7
+    }
+   }
+  },
+  "bartowski-Qwen2.5-32B-Instruct-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086324",
+     "value": 29.9
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086324",
+     "value": 28.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086324",
+     "value": 1238.7
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086324",
+     "value": 1382.6
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086324",
+     "value": 1455.7
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086324",
+     "value": 1372.5
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086324",
+     "value": 110.9
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43399002251/job/131796943033",
+     "value": 11.5
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43399002251/job/131796943033",
+     "value": 11.0
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43399002251/job/131796943033",
+     "value": 7.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43399002251/job/131796943033",
+     "value": 349.1
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43399002251/job/131796943033",
+     "value": 438.8
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43399002251/job/131796943033",
+     "value": 453.0
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43399002251/job/131796943033",
+     "value": 297.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43399002251/job/131796943033",
+     "value": 400.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43399002251/job/131796943033",
+     "value": 43.8
+    }
+   }
+  },
+  "bartowski-Qwen2.5-7B-Instruct-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086336",
+     "value": 117.3
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086336",
+     "value": 108.4
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086336",
+     "value": 70.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086336",
+     "value": 5137.0
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086336",
+     "value": 5970.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086336",
+     "value": 6293.2
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086336",
+     "value": 3746.2
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086336",
+     "value": 5829.1
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086336",
+     "value": 425.6
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918728",
+     "value": 47.2
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918728",
+     "value": 44.6
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918728",
+     "value": 33.8
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918728",
+     "value": 1637.9
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918728",
+     "value": 1966.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918728",
+     "value": 2051.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918728",
+     "value": 1212.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918728",
+     "value": 1837.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918728",
+     "value": 179.0
+    }
+   }
+  },
+  "bartowski-Qwen3.8-27B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556067",
+     "value": 65.0
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556067",
+     "value": 59.0
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556067",
+     "value": 52.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556067",
+     "value": 1647.2
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556067",
+     "value": 1525.1
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556067",
+     "value": 1612.9
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556067",
+     "value": 1525.4
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556067",
+     "value": 1710.0
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556067",
+     "value": 117.1
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975716",
+     "value": 25.2
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975716",
+     "value": 24.1
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975716",
+     "value": 21.0
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975716",
+     "value": 511.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975716",
+     "value": 524.9
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975716",
+     "value": 529.9
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975716",
+     "value": 465.0
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975716",
+     "value": 536.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975716",
+     "value": 46.9
+    }
+   }
+  },
+  "bartowski-Spark-X2.6-4B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111258",
+     "value": 161.5
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111258",
+     "value": 151.1
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111258",
+     "value": 114.9
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111258",
+     "value": 8250.5
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111258",
+     "value": 8889.2
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111258",
+     "value": 9092.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111258",
+     "value": 6914.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111258",
+     "value": 9019.1
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111258",
+     "value": 557.3
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975630",
+     "value": 72.6
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975630",
+     "value": 68.6
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975630",
+     "value": 48.0
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975630",
+     "value": 2444.2
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975630",
+     "value": 2807.3
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975630",
+     "value": 2820.8
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975630",
+     "value": 2112.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975630",
+     "value": 2599.3
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975630",
+     "value": 251.6
+    }
+   }
+  },
+  "ggml-org-Flint-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253447",
+     "value": 257.5
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253447",
+     "value": 186.6
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253447",
+     "value": 138.8
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253447",
+     "value": 7934.6
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253447",
+     "value": 6323.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253447",
+     "value": 8656.5
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253447",
+     "value": 6493.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253447",
+     "value": 8813.1
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253447",
+     "value": 452.6
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300467",
+     "value": 112.0
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300467",
+     "value": 76.8
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300467",
+     "value": 62.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300467",
+     "value": 2231.3
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300467",
+     "value": 2023.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300467",
+     "value": 2488.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300467",
+     "value": 1829.0
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300467",
+     "value": 2463.9
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300467",
+     "value": 191.0
+    }
+   }
+  },
+  "ggml-org-LFM2.5-24B-A2B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253407",
+     "value": 238.3
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253407",
+     "value": 225.5
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253407",
+     "value": 179.3
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253407",
+     "value": 11465.3
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253407",
+     "value": 10001.3
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253407",
+     "value": 11508.8
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253407",
+     "value": 10266.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253407",
+     "value": 11821.2
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253407",
+     "value": 503.7
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300381",
+     "value": 110.4
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300381",
+     "value": 105.2
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300381",
+     "value": 77.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300381",
+     "value": 3248.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300381",
+     "value": 3064.4
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300381",
+     "value": 3304.4
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300381",
+     "value": 2909.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300381",
+     "value": 3357.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300381",
+     "value": 216.9
+    }
+   }
+  },
+  "ggml-org-LFM3-Omni-2B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486532",
+     "value": 369.9
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486532",
+     "value": 349.6
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486532",
+     "value": 280.3
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486532",
+     "value": 23992.2
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486532",
+     "value": 22962.1
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486532",
+     "value": 25277.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486532",
+     "value": 20525.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486532",
+     "value": 26092.4
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486532",
+     "value": 1353.5
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975639",
+     "value": 170.2
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975639",
+     "value": 163.6
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975639",
+     "value": 126.8
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975639",
+     "value": 6736.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975639",
+     "value": 7085.0
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975639",
+     "value": 7314.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975639",
+     "value": 5794.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975639",
+     "value": 7188.7
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975639",
+     "value": 570.5
+    }
+   }
+  },
+  "ggml-org-Laguna-XS-2.1-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253412",
+     "value": 102.1
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253412",
+     "value": 71.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253412",
+     "value": 6877.6
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253412",
+     "value": 6058.9
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253412",
+     "value": 6889.1
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253412",
+     "value": 7580.2
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253412",
+     "value": 399.9
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975620",
+     "value": 43.9
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975620",
+     "value": 33.0
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975620",
+     "value": 16.4
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975620",
+     "value": 1694.3
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975620",
+     "value": 1932.3
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975620",
+     "value": 2085.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975620",
+     "value": 1452.8
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975620",
+     "value": 1975.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975620",
+     "value": 179.4
+    }
+   }
+  },
+  "ggml-org-Muse-Glimmer-30B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43571359304/job/132376312175",
+     "value": 72.4
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43571359304/job/132376312175",
+     "value": 60.0
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43571359304/job/132376312175",
+     "value": 58.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43571359304/job/132376312175",
+     "value": 1725.3
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43571359304/job/132376312175",
+     "value": 1596.0
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43571359304/job/132376312175",
+     "value": 1736.4
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43571359304/job/132376312175",
+     "value": 1655.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43571359304/job/132376312175",
+     "value": 1728.3
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43571359304/job/132376312175",
+     "value": 128.2
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300479",
+     "value": 28.2
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300479",
+     "value": 24.5
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300479",
+     "value": 24.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300479",
+     "value": 493.7
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300479",
+     "value": 477.0
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300479",
+     "value": 504.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300479",
+     "value": 472.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300479",
+     "value": 496.6
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300479",
+     "value": 49.2
+    }
+   }
+  },
+  "ggml-org-Qwen2.5-VL-7B-Instruct-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255537",
+     "value": 117.0
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255537",
+     "value": 108.5
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255537",
+     "value": 70.4
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255537",
+     "value": 5240.9
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255537",
+     "value": 5979.6
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255537",
+     "value": 6354.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255537",
+     "value": 3838.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255537",
+     "value": 5879.4
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255537",
+     "value": 428.4
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918554",
+     "value": 47.9
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918554",
+     "value": 45.1
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918554",
+     "value": 33.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918554",
+     "value": 1613.9
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918554",
+     "value": 1910.9
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918554",
+     "value": 2005.5
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918554",
+     "value": 1188.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918554",
+     "value": 1791.0
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918554",
+     "value": 177.9
+    }
+   }
+  },
+  "ggml-org-Qwen3-1.7B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086295",
+     "value": 320.0
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086295",
+     "value": 254.9
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086295",
+     "value": 105.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086295",
+     "value": 14988.9
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086295",
+     "value": 20196.3
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086295",
+     "value": 21770.8
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086295",
+     "value": 10362.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086295",
+     "value": 19847.4
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086295",
+     "value": 1149.5
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918584",
+     "value": 154.5
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918584",
+     "value": 125.5
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918584",
+     "value": 43.5
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918584",
+     "value": 4352.1
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918584",
+     "value": 6491.9
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918584",
+     "value": 6753.0
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918584",
+     "value": 3056.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918584",
+     "value": 5342.7
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918584",
+     "value": 536.9
+    }
+   }
+  },
+  "ggml-org-Qwen3-14B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086265",
+     "value": 65.1
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086265",
+     "value": 60.0
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086265",
+     "value": 39.9
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086265",
+     "value": 2635.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086265",
+     "value": 3068.1
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086265",
+     "value": 3246.0
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086265",
+     "value": 1945.7
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086265",
+     "value": 3010.2
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086265",
+     "value": 241.0
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918465",
+     "value": 25.6
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918465",
+     "value": 24.0
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918465",
+     "value": 15.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918465",
+     "value": 719.1
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918465",
+     "value": 979.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918465",
+     "value": 1014.0
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918465",
+     "value": 582.7
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918465",
+     "value": 864.7
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918465",
+     "value": 95.6
+    }
+   }
+  },
+  "ggml-org-Qwen3-4B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086266",
+     "value": 230.8
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086266",
+     "value": 184.2
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086266",
+     "value": 71.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086266",
+     "value": 6167.3
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086266",
+     "value": 8568.9
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086266",
+     "value": 9066.4
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086266",
+     "value": 3786.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086266",
+     "value": 7855.9
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086266",
+     "value": 615.1
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300485",
+     "value": 104.2
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300485",
+     "value": 87.6
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300485",
+     "value": 28.9
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300485",
+     "value": 1745.3
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300485",
+     "value": 2955.5
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300485",
+     "value": 3017.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300485",
+     "value": 1185.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300485",
+     "value": 2300.4
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300485",
+     "value": 274.1
+    }
+   }
+  },
+  "ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591049",
+     "value": 157.4
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591049",
+     "value": 129.8
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591049",
+     "value": 67.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591049",
+     "value": 4663.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591049",
+     "value": 6704.3
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591049",
+     "value": 6669.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591049",
+     "value": 2945.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591049",
+     "value": 6060.8
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591049",
+     "value": 466.3
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975653",
+     "value": 68.0
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975653",
+     "value": 59.2
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975653",
+     "value": 34.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975653",
+     "value": 1498.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975653",
+     "value": 2351.1
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975653",
+     "value": 2342.2
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975653",
+     "value": 936.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975653",
+     "value": 1980.6
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975653",
+     "value": 191.9
+    }
+   }
+  },
+  "ggml-org-Qwen3.6-27B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556137",
+     "value": 60.1
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556137",
+     "value": 53.2
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556137",
+     "value": 50.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556137",
+     "value": 1623.5
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556137",
+     "value": 1523.2
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556137",
+     "value": 1595.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556137",
+     "value": 1503.2
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556137",
+     "value": 1684.7
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556137",
+     "value": 113.4
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300448",
+     "value": 22.8
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300448",
+     "value": 21.3
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300448",
+     "value": 18.4
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300448",
+     "value": 510.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300448",
+     "value": 527.3
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300448",
+     "value": 533.2
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300448",
+     "value": 462.7
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300448",
+     "value": 535.4
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300448",
+     "value": 43.9
+    }
+   }
+  },
+  "ggml-org-Qwen3.6-35B-A3B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591028",
+     "value": 209.9
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591028",
+     "value": 154.8
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591028",
+     "value": 97.9
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591028",
+     "value": 6572.9
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591028",
+     "value": 5863.5
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591028",
+     "value": 6331.7
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591028",
+     "value": 5752.1
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591028",
+     "value": 7113.7
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591028",
+     "value": 393.0
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803291",
+     "value": 89.1
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803291",
+     "value": 69.0
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803291",
+     "value": 51.8
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803291",
+     "value": 2331.7
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803291",
+     "value": 2213.5
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803291",
+     "value": 2406.2
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803291",
+     "value": 2026.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803291",
+     "value": 2555.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803291",
+     "value": 165.2
+    }
+   }
+  },
+  "ggml-org-gemma-3-1b-it-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486575",
+     "value": 396.5
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486575",
+     "value": 374.3
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486575",
+     "value": 31791.0
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486575",
+     "value": 29097.4
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486575",
+     "value": 31375.4
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486575",
+     "value": 32703.5
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486575",
+     "value": 1421.8
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300498",
+     "value": 209.9
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300498",
+     "value": 201.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300498",
+     "value": 7516.5
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300498",
+     "value": 8778.1
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300498",
+     "value": 9229.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300498",
+     "value": 8686.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300498",
+     "value": 714.2
+    }
+   }
+  },
+  "lmstudio-community-Ornith-1.0-35B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277106",
+     "value": 152.2
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277106",
+     "value": 144.4
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277106",
+     "value": 123.4
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277106",
+     "value": 6487.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277106",
+     "value": 5985.3
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277106",
+     "value": 6355.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277106",
+     "value": 5662.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277106",
+     "value": 7064.7
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43572020832/job/132378277106",
+     "value": 381.0
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300519",
+     "value": 74.3
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300519",
+     "value": 71.3
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300519",
+     "value": 55.8
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300519",
+     "value": 2369.4
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300519",
+     "value": 2274.0
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300519",
+     "value": 2497.9
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300519",
+     "value": 2049.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300519",
+     "value": 2589.9
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300519",
+     "value": 173.0
+    }
+   }
+  },
+  "lmstudio-community-gemma-4-26B-A4B-it-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364680",
+     "value": 150.7
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364680",
+     "value": 123.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364680",
+     "value": 6120.7
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364680",
+     "value": 6079.4
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364680",
+     "value": 6682.4
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364680",
+     "value": 6569.7
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364680",
+     "value": 355.8
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300361",
+     "value": 67.8
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300361",
+     "value": 54.1
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300361",
+     "value": 49.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300361",
+     "value": 1695.7
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300361",
+     "value": 1970.8
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300361",
+     "value": 2010.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300361",
+     "value": 1463.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300361",
+     "value": 1787.7
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300361",
+     "value": 156.7
+    }
+   }
+  },
+  "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43562417234/job/132348830739",
+     "value": 221.4
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43562417234/job/132348830739",
+     "value": 190.1
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43562417234/job/132348830739",
+     "value": 149.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43562417234/job/132348830739",
+     "value": 8066.9
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43562417234/job/132348830739",
+     "value": 7517.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43562417234/job/132348830739",
+     "value": 8541.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43562417234/job/132348830739",
+     "value": 6922.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43562417234/job/132348830739",
+     "value": 8509.5
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43562417234/job/132348830739",
+     "value": 509.6
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400470470/job/131801831202",
+     "value": 97.9
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400470470/job/131801831202",
+     "value": 82.3
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400470470/job/131801831202",
+     "value": 63.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400470470/job/131801831202",
+     "value": 2299.1
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400470470/job/131801831202",
+     "value": 2478.5
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400470470/job/131801831202",
+     "value": 2683.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400470470/job/131801831202",
+     "value": 1969.1
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400470470/job/131801831202",
+     "value": 2462.1
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400470470/job/131801831202",
+     "value": 219.4
+    }
+   }
+  },
+  "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486534",
+     "value": 362.0
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486534",
+     "value": 291.8
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486534",
+     "value": 122.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486534",
+     "value": 16681.6
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486534",
+     "value": 21296.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486534",
+     "value": 23249.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486534",
+     "value": 11786.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486534",
+     "value": 21199.1
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43561006786/job/132344486534",
+     "value": 1334.3
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975665",
+     "value": 179.9
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975665",
+     "value": 144.9
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975665",
+     "value": 51.0
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975665",
+     "value": 4831.4
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975665",
+     "value": 6865.1
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975665",
+     "value": 7055.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975665",
+     "value": 3356.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975665",
+     "value": 5219.6
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975665",
+     "value": 618.3
+    }
+   }
+  },
+  "unsloth-Llama-3.2-3B-Instruct-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111222",
+     "value": 227.9
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111222",
+     "value": 191.6
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111222",
+     "value": 90.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111222",
+     "value": 8634.6
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111222",
+     "value": 12523.4
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111222",
+     "value": 12752.9
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111222",
+     "value": 5677.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111222",
+     "value": 11170.0
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560887043/job/132344111222",
+     "value": 824.1
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918588",
+     "value": 98.7
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918588",
+     "value": 85.1
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918588",
+     "value": 37.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918588",
+     "value": 2291.4
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918588",
+     "value": 3711.9
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918588",
+     "value": 3761.5
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918588",
+     "value": 1530.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918588",
+     "value": 3064.0
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918588",
+     "value": 347.4
+    }
+   }
+  },
+  "unsloth-Ornith-1.0-9B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556125",
+     "value": 100.8
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556125",
+     "value": 98.4
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556125",
+     "value": 83.9
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556125",
+     "value": 5406.3
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556125",
+     "value": 5144.8
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556125",
+     "value": 5451.9
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556125",
+     "value": 4914.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556125",
+     "value": 5664.6
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556125",
+     "value": 357.7
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300499",
+     "value": 40.5
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300499",
+     "value": 39.7
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300499",
+     "value": 32.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300499",
+     "value": 1614.9
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300499",
+     "value": 1666.1
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300499",
+     "value": 1685.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300499",
+     "value": 1474.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300499",
+     "value": 1683.6
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300499",
+     "value": 143.9
+    }
+   }
+  },
+  "unsloth-Qwen3-0.6B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43559492127/job/132339781444",
+     "value": 498.0
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43559492127/job/132339781444",
+     "value": 360.4
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43559492127/job/132339781444",
+     "value": 118.4
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43559492127/job/132339781444",
+     "value": 21522.2
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43559492127/job/132339781444",
+     "value": 38118.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43559492127/job/132339781444",
+     "value": 41881.4
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43559492127/job/132339781444",
+     "value": 13132.1
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43559492127/job/132339781444",
+     "value": 33323.2
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43559492127/job/132339781444",
+     "value": 1767.6
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918531",
+     "value": 330.3
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918531",
+     "value": 221.3
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918531",
+     "value": 50.3
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918531",
+     "value": 6763.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918531",
+     "value": 15193.5
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918531",
+     "value": 15420.9
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918531",
+     "value": 4024.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918531",
+     "value": 9466.5
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918531",
+     "value": 963.3
+    }
+   }
+  },
+  "unsloth-Qwen3-30B-A3B-Instruct-2507-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591064",
+     "value": 177.0
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591064",
+     "value": 143.8
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591064",
+     "value": 68.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591064",
+     "value": 4820.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591064",
+     "value": 6945.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591064",
+     "value": 7252.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591064",
+     "value": 3124.1
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591064",
+     "value": 6275.8
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591064",
+     "value": 399.1
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300491",
+     "value": 85.8
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300491",
+     "value": 71.7
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300491",
+     "value": 35.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300491",
+     "value": 1523.6
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300491",
+     "value": 2326.6
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300491",
+     "value": 2370.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300491",
+     "value": 924.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300491",
+     "value": 1954.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300491",
+     "value": 180.3
+    }
+   }
+  },
+  "unsloth-Qwen3-4B-Instruct-2507-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086289",
+     "value": 182.4
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086289",
+     "value": 152.9
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086289",
+     "value": 72.4
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086289",
+     "value": 6236.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086289",
+     "value": 9096.3
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086289",
+     "value": 9374.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086289",
+     "value": 3782.5
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086289",
+     "value": 7915.8
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086289",
+     "value": 623.3
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300454",
+     "value": 76.6
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300454",
+     "value": 65.8
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300454",
+     "value": 28.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300454",
+     "value": 1756.9
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300454",
+     "value": 3034.8
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300454",
+     "value": 3083.5
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300454",
+     "value": 1180.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300454",
+     "value": 2348.8
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300454",
+     "value": 263.4
+    }
+   }
+  },
+  "unsloth-Qwen3-8B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086327",
+     "value": 162.5
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086327",
+     "value": 131.7
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086327",
+     "value": 57.8
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086327",
+     "value": 4450.5
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086327",
+     "value": 5302.8
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086327",
+     "value": 5658.2
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086327",
+     "value": 3051.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086327",
+     "value": 5229.9
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560879399/job/132344086327",
+     "value": 413.2
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300419",
+     "value": 68.2
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300419",
+     "value": 56.9
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300419",
+     "value": 22.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300419",
+     "value": 1230.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300419",
+     "value": 1637.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300419",
+     "value": 1704.5
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300419",
+     "value": 910.1
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300419",
+     "value": 1461.9
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300419",
+     "value": 167.3
+    }
+   }
+  },
+  "unsloth-Qwen3-VL-4B-Instruct-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255523",
+     "value": 178.3
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255523",
+     "value": 150.2
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255523",
+     "value": 71.9
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255523",
+     "value": 6190.0
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255523",
+     "value": 9039.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255523",
+     "value": 9315.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255523",
+     "value": 3791.1
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255523",
+     "value": 7866.6
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255523",
+     "value": 610.9
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300344",
+     "value": 75.3
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300344",
+     "value": 64.8
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300344",
+     "value": 28.5
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300344",
+     "value": 1732.6
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300344",
+     "value": 2934.0
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300344",
+     "value": 3013.2
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300344",
+     "value": 1161.1
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300344",
+     "value": 2287.9
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300344",
+     "value": 268.2
+    }
+   }
+  },
+  "unsloth-Qwen3-VL-8B-Instruct-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255486",
+     "value": 111.9
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255486",
+     "value": 100.5
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255486",
+     "value": 58.3
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255486",
+     "value": 4543.6
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255486",
+     "value": 5632.1
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255486",
+     "value": 5903.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255486",
+     "value": 3096.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255486",
+     "value": 5324.5
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560614807/job/132343255486",
+     "value": 411.3
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975696",
+     "value": 44.5
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975696",
+     "value": 40.3
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975696",
+     "value": 23.1
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975696",
+     "value": 1249.1
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975696",
+     "value": 1695.2
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975696",
+     "value": 1751.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975696",
+     "value": 916.8
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975696",
+     "value": 1491.4
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43390795404/job/131769975696",
+     "value": 168.4
+    }
+   }
+  },
+  "unsloth-Qwen3.5-0.8B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566584",
+     "value": 468.5
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566584",
+     "value": 433.4
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566584",
+     "value": 340.0
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566584",
+     "value": 29989.7
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566584",
+     "value": 27325.8
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566584",
+     "value": 31069.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566584",
+     "value": 25013.2
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566584",
+     "value": 33407.6
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566584",
+     "value": 1520.0
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300521",
+     "value": 262.3
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300521",
+     "value": 245.2
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300521",
+     "value": 166.3
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300521",
+     "value": 10640.7
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300521",
+     "value": 12580.2
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300521",
+     "value": 12744.8
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300521",
+     "value": 8454.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300521",
+     "value": 12212.5
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300521",
+     "value": 727.9
+    }
+   }
+  },
+  "unsloth-Qwen3.5-2B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566554",
+     "value": 320.8
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566554",
+     "value": 306.0
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566554",
+     "value": 255.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566554",
+     "value": 19373.5
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566554",
+     "value": 17895.9
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566554",
+     "value": 19509.4
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566554",
+     "value": 17103.7
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566554",
+     "value": 20832.6
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43568179169/job/132366566554",
+     "value": 1099.7
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300476",
+     "value": 140.8
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300476",
+     "value": 135.4
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300476",
+     "value": 102.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300476",
+     "value": 6007.5
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300476",
+     "value": 6359.8
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300476",
+     "value": 6479.4
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300476",
+     "value": 5291.7
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300476",
+     "value": 6524.6
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300476",
+     "value": 477.5
+    }
+   }
+  },
+  "unsloth-Qwen3.5-35B-A3B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591077",
+     "value": 190.5
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591077",
+     "value": 164.6
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591077",
+     "value": 81.5
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591077",
+     "value": 6447.1
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591077",
+     "value": 5734.3
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591077",
+     "value": 6193.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591077",
+     "value": 5642.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591077",
+     "value": 7016.4
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43564275214/job/132354591077",
+     "value": 387.0
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300587",
+     "value": 81.2
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300587",
+     "value": 69.9
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300587",
+     "value": 49.4
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300587",
+     "value": 2368.4
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300587",
+     "value": 2184.0
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300587",
+     "value": 2423.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300587",
+     "value": 2061.9
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300587",
+     "value": 2575.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300587",
+     "value": 164.1
+    }
+   }
+  },
+  "unsloth-Qwen3.5-4B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556128",
+     "value": 198.8
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556128",
+     "value": 185.3
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556128",
+     "value": 138.8
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556128",
+     "value": 7908.1
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556128",
+     "value": 7402.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556128",
+     "value": 8062.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556128",
+     "value": 6910.2
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556128",
+     "value": 8469.4
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556128",
+     "value": 532.1
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803214",
+     "value": 87.4
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803214",
+     "value": 84.1
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803214",
+     "value": 60.9
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803214",
+     "value": 2649.1
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803214",
+     "value": 2839.5
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803214",
+     "value": 2905.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803214",
+     "value": 2305.7
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803214",
+     "value": 2827.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43400168275/job/131800803214",
+     "value": 223.4
+    }
+   }
+  },
+  "unsloth-Qwen3.5-9B-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556080",
+     "value": 145.6
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556080",
+     "value": 136.2
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556080",
+     "value": 105.8
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556080",
+     "value": 5243.5
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556080",
+     "value": 4873.1
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556080",
+     "value": 5204.9
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556080",
+     "value": 4785.4
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556080",
+     "value": 5469.8
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560709637/job/132343556080",
+     "value": 360.7
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300389",
+     "value": 60.7
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300389",
+     "value": 57.3
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300389",
+     "value": 44.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300389",
+     "value": 1545.4
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300389",
+     "value": 1568.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300389",
+     "value": 1599.1
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300389",
+     "value": 1418.2
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300389",
+     "value": 1603.3
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300389",
+     "value": 147.7
+    }
+   }
+  },
+  "unsloth-Qwen3.8-Flash-Next-loom": {
+   "radeon-r9700": {
+    "_state": "unsupported"
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300576",
+     "value": 41.9
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300576",
+     "value": 35.2
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300576",
+     "value": 33.2
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300576",
+     "value": 1203.6
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300576",
+     "value": 1143.9
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300576",
+     "value": 1154.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300576",
+     "value": 1196.2
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300576",
+     "value": 1179.0
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300576",
+     "value": 67.6
+    }
+   }
+  },
+  "unsloth-gemma-4-12B-it-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364693",
+     "value": 126.3
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364693",
+     "value": 96.6
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364693",
+     "value": 81.8
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364693",
+     "value": 3142.0
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364693",
+     "value": 3177.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364693",
+     "value": 3463.4
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364693",
+     "value": 2742.4
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364693",
+     "value": 3336.6
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364693",
+     "value": 261.4
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300399",
+     "value": 52.3
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300399",
+     "value": 39.7
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300399",
+     "value": 34.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300399",
+     "value": 832.4
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300399",
+     "value": 972.2
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300399",
+     "value": 997.8
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300399",
+     "value": 730.7
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300399",
+     "value": 877.2
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300399",
+     "value": 105.7
+    }
+   }
+  },
+  "unsloth-gemma-4-31B-it-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364674",
+     "value": 62.7
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364674",
+     "value": 46.2
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364674",
+     "value": 1286.9
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364674",
+     "value": 1355.5
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364674",
+     "value": 109.6
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300549",
+     "value": 24.2
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300549",
+     "value": 18.6
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300549",
+     "value": 14.0
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300549",
+     "value": 322.7
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300549",
+     "value": 369.9
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300549",
+     "value": 382.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300549",
+     "value": 280.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300549",
+     "value": 348.8
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300549",
+     "value": 42.9
+    }
+   }
+  },
+  "unsloth-gemma-4-E2B-it-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43597987098/job/132456507718",
+     "value": 272.4
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43597987098/job/132456507718",
+     "value": 281.2
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43597987098/job/132456507718",
+     "value": 197.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43597987098/job/132456507718",
+     "value": 17019.1
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43597987098/job/132456507718",
+     "value": 16706.9
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43597987098/job/132456507718",
+     "value": 18355.4
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43597987098/job/132456507718",
+     "value": 14214.4
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43597987098/job/132456507718",
+     "value": 18475.0
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43597987098/job/132456507718",
+     "value": 817.6
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300494",
+     "value": 149.3
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300494",
+     "value": 151.6
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300494",
+     "value": 103.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300494",
+     "value": 3349.0
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300494",
+     "value": 3930.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300494",
+     "value": 4156.9
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300494",
+     "value": 2647.7
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300494",
+     "value": 3806.8
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300494",
+     "value": 397.6
+    }
+   }
+  },
+  "unsloth-gemma-4-E4B-it-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364679",
+     "value": 190.8
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364679",
+     "value": 197.7
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364679",
+     "value": 138.6
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364679",
+     "value": 8204.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364679",
+     "value": 7609.7
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364679",
+     "value": 8738.3
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364679",
+     "value": 7038.4
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364679",
+     "value": 8677.0
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560650043/job/132343364679",
+     "value": 505.7
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300426",
+     "value": 90.7
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300426",
+     "value": 93.1
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300426",
+     "value": 60.4
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300426",
+     "value": 2257.8
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300426",
+     "value": 2418.8
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300426",
+     "value": 2612.6
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300426",
+     "value": 1926.0
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300426",
+     "value": 2418.7
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43376548212/job/131724300426",
+     "value": 218.8
+    }
+   }
+  },
+  "unsloth-gpt-oss-20b-loom": {
+   "radeon-r9700": {
+    "decode": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253414",
+     "value": 192.7
+    },
+    "decode_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253414",
+     "value": 179.7
+    },
+    "decode_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253414",
+     "value": 122.5
+    },
+    "prefill_16k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253414",
+     "value": 6204.7
+    },
+    "prefill_1k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253414",
+     "value": 5961.8
+    },
+    "prefill_2k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253414",
+     "value": 6550.0
+    },
+    "prefill_32k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253414",
+     "value": 5319.6
+    },
+    "prefill_8k": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253414",
+     "value": 6701.9
+    },
+    "streams4": {
+     "date": "2026-11-14",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43560613100/job/132343253414",
+     "value": 322.7
+    }
+   },
+   "strix-halo": {
+    "decode": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276660",
+     "value": 80.2
+    },
+    "decode_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276660",
+     "value": 75.9
+    },
+    "decode_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276660",
+     "value": 54.7
+    },
+    "prefill_16k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276660",
+     "value": 2193.0
+    },
+    "prefill_1k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276660",
+     "value": 2147.4
+    },
+    "prefill_2k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276660",
+     "value": 2338.8
+    },
+    "prefill_32k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276660",
+     "value": 1890.3
+    },
+    "prefill_8k": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276660",
+     "value": 2350.5
+    },
+    "streams4": {
+     "date": "2026-11-13",
+     "run": "https://github.com/loom-fun/loom-skills/actions/runs/43392400146/job/131775276660",
+     "value": 164.1
+    }
+   }
+  }
+ },
+ "schema": "loom-baselines/1",
+ "sources": {
+  "radeon-r9700": "loom-fun-staging cards",
+  "strix-halo": "loom-fun cards"
+ }
+}

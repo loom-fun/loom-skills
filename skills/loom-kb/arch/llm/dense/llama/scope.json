@@ -1,0 +1,11 @@
+{
+ "scope": "arch/llm/dense/llama",
+ "match": {
+  "arch": [
+   "llama"
+  ]
+ },
+ "owner": "kb",
+ "facets": [],
+ "choices": []
+}

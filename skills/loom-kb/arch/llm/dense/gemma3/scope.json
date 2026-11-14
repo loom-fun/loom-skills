@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/dense/gemma3",
+ "match": {
+  "arch": [
+   "gemma3"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "sliding-window"
+ ],
+ "choices": []
+}

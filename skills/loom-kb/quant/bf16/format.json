@@ -1,0 +1,22 @@
+{
+  "schema": "loom-kb/format/1",
+  "format": "bf16",
+  "ggml_type": "BF16",
+  "block_size": 32,
+  "bytes_per_block": 64,
+  "bits_per_weight": 16.0,
+  "low_bit": false,
+  "int8_path": false,
+  "moe": false,
+  "dequant_helper": "gen_llm.py (@g_bf16_values)",
+  "ktest": {
+    "matvec_int8": false,
+    "gemm_default": false,
+    "gemm_all": true
+  },
+  "devices_verified": {
+    "rdna3": true,
+    "rdna4": true
+  },
+  "evidence": "used by published packages (programs of the local copies define its dequant helper; all published packages are dual-target, built for gfx1151 and gfx1201)"
+}
