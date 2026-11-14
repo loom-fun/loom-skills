@@ -38,38 +38,10 @@
      }
     },
     {
-     "name": "d2n8",
+     "name": "c1",
      "build": {
-      "FLASH2_DIRECT": "2",
-      "FLASH2_NG512": "8"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "config": {
-      "rdna4_f16_ffn": true
-     }
-    },
-    {
-     "name": "b2",
-     "build": {
-      "FLASH2_B": "1",
+      "FLASH2_B": "2",
       "FLASH2_NG512": "4"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "config": {
-      "rdna4_f16_ffn": true
-     }
-    },
-    {
-     "name": "b2n8",
-     "build": {
-      "FLASH2_B": "1",
-      "FLASH2_NG512": "8"
      },
      "build_args": [
       "--prefill-r9700",
@@ -83,22 +55,14 @@
    "steps": [
     "func:d2n4",
     "ktest:d2n4",
-    "func:d2n8",
-    "ktest:d2n8",
-    "func:b2",
-    "ktest:b2",
-    "func:b2n8",
-    "ktest:b2n8",
+    "func:c1",
+    "ktest:c1",
     "perf:stack:3",
     "perf:d2n4:3",
-    "perf:d2n8:3",
-    "perf:b2:3",
-    "perf:b2n8:3",
+    "perf:c1:3",
     "perf:stack:3:long",
     "perf:d2n4:3:long",
-    "perf:d2n8:3:long",
-    "perf:b2:3:long",
-    "perf:b2n8:3:long"
+    "perf:c1:3:long"
    ]
   }
  ],
