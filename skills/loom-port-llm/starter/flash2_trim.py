@@ -43,3 +43,47 @@ def hot(lines, global_only):
             ln = re.sub(r"^(\s*%p\d+) = vector\.select %valid\d+, (%pe\d+), %zero8 : vector<8xf32>$", r"\1 = vector.addf \2, %zero8 : vector<8xf32>", ln)
         out.append(ln)
     return out
+
+
+def lazy(text):
+    """FLASH2_LAZY=1: the O^T rescale (8 fragments x 8 elements: 64 multiplies per wave and tile) runs only when some query column of
+    the wave changed its running max (kernel.subgroup.vote.any of m_new != m). A column whose max is unchanged has alpha == 1 exactly,
+    so the multiplies the skipped branch drops are multiplications by 1.0: same results, bit for bit."""
+    pat = re.compile(r"^( *)%os(\d+) = vector\.mulf %a\2, %alpha_v : vector<8xf32>$", re.M)
+    ms = list(pat.finditer(text))
+    if not ms:
+        return text
+    n = len(ms)
+    ind = ms[0].group(1)
+    names = [f"%os{m.group(2)}" for m in ms]
+    avs = [f"%a{m.group(2)}" for m in ms]
+    tys = ", ".join(["vector<8xf32>"] * n)
+    blk = [f"{ind}%lz_chg = scalar.cmpf one, %m_new, %m : f32",
+           f"{ind}%lz_any = kernel.subgroup.vote.any %lz_chg : i1",
+           f"{ind}{', '.join(names)} = scf.if %lz_any -> ({tys}) {{"]
+    blk += [f"{ind}  %lzs{m.group(2)} = vector.mulf %a{m.group(2)}, %alpha_v : vector<8xf32>" for m in ms]
+    blk += [f"{ind}  scf.yield {', '.join(f'%lzs{m.group(2)}' for m in ms)} : {tys}", f"{ind}}} else {{",
+            f"{ind}  scf.yield {', '.join(avs)} : {tys}", f"{ind}}}"]
+    first = ms[0]
+    out = text[:first.start()] + "\n".join(blk) + text[first.end():]
+    for m in ms[1:]:
+        out = out.replace(m.group(0) + "\n", "", 1)
+    return out
+
+
+def vtflat(text):
+    """FLASH2_VTF=1: the V^T staging stores take a flat index (base + j * pitch) so the address math of the unrolled stores folds
+    into the store offsets."""
+    m = re.search(r"%vt_view = buffer\.view %vt_tile\[%origin\] : buffer -> view<(\d+)x(\d+)xf16>", text)
+    if not m:
+        return text
+    d, vtc = int(m.group(1)), int(m.group(2))
+    text = text.replace(m.group(0), m.group(0) + f"\n  %vtf_view = buffer.view %vt_tile[%origin] : buffer -> view<{d * vtc}xf16>\n  %vtf_c = index.constant {vtc} : index", 1)
+    pat = re.compile(r"( *)%vt_row_value = index\.add %st_dim, %j : index\n *%vt_row = index\.assume %vt_row_value \[range\(%vt_row_value, 0, \d+\)\] : index\n *view\.store (%\w+), %vt_view\[%vt_row, %st_key\] : f16, view<\d+x\d+xf16>")
+    def rep(mm):
+        i = mm.group(1)
+        return (f"{i}%vtf_b0 = index.mul %st_dim, %vtf_c : index\n{i}%vtf_b = index.add %vtf_b0, %st_key : index\n{i}%vtf_jo = index.mul %j, %vtf_c : index\n"
+                f"{i}%vtf_iv = index.add %vtf_b, %vtf_jo : index\n{i}%vtf_i = index.assume %vtf_iv [range(%vtf_iv, 0, {d * vtc - 1})] : index\n"
+                f"{i}view.store {mm.group(2)}, %vtf_view[%vtf_i] : f16, view<{d * vtc}xf16>")
+    text, n = pat.subn(rep, text)
+    return text

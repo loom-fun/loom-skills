@@ -534,6 +534,12 @@ if R4:
     if os.environ.get("FLASH2_SX", "0") == "1":   # S partials exchanged as the lanes' own vectors (flash2_trim.py); gfx12 twin only
         from flash2_trim import sx
         text = sx(text)
+    if os.environ.get("FLASH2_LAZY", "0") == "1":   # O^T rescale only when a column's max changed (flash2_trim.py); gfx12 twin only
+        from flash2_trim import lazy
+        text = lazy(text)
+    if os.environ.get("FLASH2_VTF", "0") == "1":   # flat-index V^T stores (flash2_trim.py); gfx12 twin only
+        from flash2_trim import vtflat
+        text = vtflat(text)
     if os.environ.get("FLASH2_VP", "0") == "1":   # two keys per staging lane: one 32-bit V^T store per dim pair (flash2_vpack.py); gfx12 twin only
         from flash2_vpack import vpack
         text = vpack(text)
