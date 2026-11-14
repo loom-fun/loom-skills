@@ -309,62 +309,6 @@
     "llama@vulkan.np1:3:long",
     "llamac4@vulkan.perslot.nodraft"
    ]
-  },
-  {
-   "name": "strix-ab-ggml-org-qwen3-4b-loom",
-   "runner": "strix",
-   "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
-   "memory_bytes": 25000000000,
-   "kit": null,
-   "llamacpp": "b1374",
-   "variants": [
-    {
-     "name": "fun",
-     "card": "loom-fun/ggml-org-Qwen3-4B-loom"
-    },
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "ab:4",
-    "perf:fun:3",
-    "perf:staging:3",
-    "c4:fun",
-    "c4:staging",
-    "textmatch:fun",
-    "textmatch:staging",
-    "func:staging",
-    "ktest:staging"
-   ]
-  },
-  {
-   "name": "strix-ab-unsloth-qwen3-4b-instruct-2507-l",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-Qwen3-4B-Instruct-2507-loom",
-   "memory_bytes": 55000000000,
-   "kit": null,
-   "llamacpp": "b1374",
-   "variants": [
-    {
-     "name": "fun",
-     "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom"
-    },
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "ab:4",
-    "perf:fun:3",
-    "perf:staging:3",
-    "c4:fun",
-    "c4:staging",
-    "textmatch:fun",
-    "textmatch:staging",
-    "func:staging",
-    "ktest:staging"
-   ]
   }
  ],
  "card": "loom-fun-staging/ggml-org-Qwen3-1.7B-loom",
