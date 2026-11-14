@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/dense/qwen2vl",
+ "match": {
+  "arch": [
+   "qwen2vl"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "vision"
+ ],
+ "choices": []
+}

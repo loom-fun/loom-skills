@@ -1,0 +1,14 @@
+{
+ "scope": "arch/llm/moe/qwen35moe",
+ "match": {
+  "arch": [
+   "qwen35moe"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "moe",
+  "hybrid-gdn"
+ ],
+ "choices": []
+}

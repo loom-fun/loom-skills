@@ -1,0 +1,11 @@
+{
+ "scope": "facet/kv-le2",
+ "match": {
+  "kv_heads": [
+   null,
+   2
+  ]
+ },
+ "owner": "kb",
+ "choices": []
+}

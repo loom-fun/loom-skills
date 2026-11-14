@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/moe/flint",
+ "match": {
+  "arch": [
+   "flint"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "moe"
+ ],
+ "choices": []
+}

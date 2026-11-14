@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/moe/qwen4exp",
+ "match": {
+  "arch": [
+   "qwen4exp"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "moe"
+ ],
+ "choices": []
+}

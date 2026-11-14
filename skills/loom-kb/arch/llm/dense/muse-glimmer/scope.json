@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/dense/muse-glimmer",
+ "match": {
+  "arch": [
+   "muse-glimmer"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "sliding-window"
+ ],
+ "choices": []
+}

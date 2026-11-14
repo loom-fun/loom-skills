@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/dense/spark2_5",
+ "match": {
+  "arch": [
+   "spark2_5"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "sliding-window"
+ ],
+ "choices": []
+}

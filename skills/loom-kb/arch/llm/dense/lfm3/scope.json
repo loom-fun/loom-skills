@@ -1,0 +1,13 @@
+{
+ "scope": "arch/llm/dense/lfm3",
+ "match": {
+  "arch": [
+   "lfm3"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "sliding-window"
+ ],
+ "choices": []
+}

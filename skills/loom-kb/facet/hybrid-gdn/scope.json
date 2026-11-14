@@ -1,0 +1,8 @@
+{
+ "scope": "facet/hybrid-gdn",
+ "match": {
+  "recurrent_kv": true
+ },
+ "owner": "kb",
+ "choices": []
+}
