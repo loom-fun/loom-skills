@@ -79,9 +79,42 @@ def find_in_cache(name):
     return _INDEX.get(name)
 
 
-def link_gguf(name, work):
-    """Link GGUF `name` (and, for a split GGUF, every sibling in its snapshot) into work."""
-    p = find_in_cache(name)
+def find_in_repo(repo, name):
+    """GGUF `name` of the Hugging Face repo `repo` (OWNER/NAME) from the cache: two models can ship files of one name
+    (every Qwen3-VL has an mmproj-F16.gguf), so a file is taken from the repo its package's model.json names."""
+    for p in glob.glob(f"{HF}/models--{repo.replace('/', '--')}/snapshots/*/{name}"):
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def origin_repos(pkgdir):
+    """{GGUF file name: HF repo} from a package's model.json (each parameter file's @origin/name and the origins)."""
+    try:
+        card = json.load(open(f"{pkgdir}/model.json"))
+    except OSError:
+        return {}
+    origins, out = card.get("origins", {}), {}
+
+    def walk(o):
+        if isinstance(o, dict):
+            if o.get("format") == "gguf" and o.get("origin", "").startswith("@"):
+                key, fn = o["origin"][1:].split("/", 1)
+                if origins.get(key, {}).get("repository"):
+                    out[os.path.basename(fn)] = origins[key]["repository"]
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(card)
+    return out
+
+
+def link_gguf(name, work, repo=None):
+    """Link GGUF `name` (and, for a split GGUF, every sibling in its snapshot) into work. repo: the Hugging Face repo
+    the package takes it from (preferred over a same-named file of another repo)."""
+    p = (find_in_repo(repo, name) if repo else None) or find_in_cache(name)
     if not p:
         return False
     d = os.path.dirname(p)
@@ -102,7 +135,7 @@ def sh(cmd, cwd, env=None, timeout=3600):
     return p.returncode, (p.stdout + p.stderr)
 
 
-def build(slug, pkgdir, work):
+def build(slug, pkgdir, work, extra=()):
     """Rebuild slug's package into work/pkg with this checkout's kit. Returns (ok, message, program_dir)."""
     pcfg = json.load(open(f"{pkgdir}/llm_config.json"))
     os.makedirs(work, exist_ok=True)
@@ -112,8 +145,9 @@ def build(slug, pkgdir, work):
             names.append(pcfg[k]["gguf"])
     if (pcfg.get("vision") or {}).get("mmproj"):
         names.append(pcfg["vision"]["mmproj"])
+    repos = origin_repos(pkgdir)
     for n in names:
-        if not link_gguf(os.path.basename(n), work):
+        if not link_gguf(os.path.basename(n), work, repos.get(os.path.basename(n))):
             return False, f"GGUF not in the HF cache: {n}", None
     # kit: the starter, plus the example the package was generated with
     kit = os.path.join(work, "kit")
@@ -133,7 +167,7 @@ def build(slug, pkgdir, work):
     cfg.update({k: v for k, v in pcfg.items() if k not in ("tensors", "generator")})
     json.dump(cfg, open(os.path.join(work, "cfg.json"), "w"), indent=1)
     env = dict(os.environ, LOOM_RDNA4=os.environ.get("LOOM_RDNA4", "1"))
-    rc, out = sh([py, f"{kit}/build.py", "cfg.json", "pkg", "--tokenizer", f"{pkgdir}/tokenizer.json"], work, env)
+    rc, out = sh([py, f"{kit}/build.py", "cfg.json", "pkg", "--tokenizer", f"{pkgdir}/tokenizer.json", *extra], work, env)
     if rc:
         return False, "build.py: " + out.strip().splitlines()[-1][-250:], None
     return True, "", os.path.join(work, "pkg", "program")
