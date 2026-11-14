@@ -16,7 +16,8 @@ from gguf import GGUFReader
 from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
-from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402  formats with no 256-row (_m256) GEMM
+from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402
+from gen_gemm_rdna4 import f16o_swiglu as _f16o_on  # noqa: E402  formats with no 256-row (_m256) GEMM
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
 from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
 import attn_rules  # noqa: E402
@@ -1043,6 +1044,32 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 }}
 """)
             cases.append(_case)
+            if swiglu and _f16o_on(cfg):
+                # the gfx12 f16-output swiglu twin (f16o_fuse.py's group): f16 result, scales_out = (1, 1) per live row and (0, 0) per dead
+                # row (a row whose input scale is 0: its x16 row is zeros); gfx12 only (ktest_select.py skips it elsewhere)
+                dead = rng.choice(rows, 5, replace=False)
+                x16d = x16.copy(); x16d[dead] = 0
+                scd = sc.copy(); scd[dead] = 0
+                gd = (x16d.astype(np.float64) @ Ws.T) * inv[:, None]; ud = (x16d.astype(np.float64) @ U.T) * inv[:, None]
+                yd = ffn_act(gd) * ud
+                so = np.ones((rows, 2), np.float32); so[dead] = 0
+                save(tag + "_xd", x16d); save(tag + "_sd", scd); save(tag + "_yd", yd.astype(np.float16)); save(tag + "_so", so)
+                cases.append(f"""check.case public @{tag}_f16o {{
+  %rows = check.literal value({rows}) : index
+  %k = check.literal value({K}) : index
+  %n = check.literal value({n_use}) : index
+  %x = check.file.read.npy path("{tag}_xd.npy") : tensor<{rows}x{K}xf16>
+  %s = check.file.read.npy path("{tag}_sd.npy") : tensor<{rows}x2xf32>
+{wdecl}  %e = check.file.read.npy path("{tag}_yd.npy") : tensor<{rows}x{n_use}xf16>
+  %eso = check.file.read.npy path("{tag}_so.npy") : tensor<{rows}x2xf32>
+  %y = check.generate.fill value(0.0) : tensor<{rows}x{n_use}xf16>
+  %so = check.generate.fill value(7.0) : tensor<{rows}x2xf32>
+  kernel.launch @{kern}_f16o_rdna4[%rows, %n](%rows, %k, %n, %x, %s, {wargs}, %y, %so) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {wtys}, tensor<{rows}x{n_use}xf16>, tensor<{rows}x2xf32>)
+  check.expect.close actual(%y) expected(%e) atol({tol:.3e}) rtol(1.0e-2) nan(different) : tensor<{rows}x{n_use}xf16>
+  check.expect.close actual(%so) expected(%eso) atol(0.0) rtol(0.0) nan(different) : tensor<{rows}x2xf32>
+  check.return
+}}
+""")
             if os.environ.get("KTEST_GEMM_ERR", "0") not in ("", "0"):   # error probe: the case again at 0.3 / 0.1 / 0.03 / 0.01 of its tolerance; the tightest one that passes bounds the error
                 for f in (0.3, 0.1, 0.03, 0.01):
                     cases.append(_case.replace(f"@{tag} {{", f"@{tag}_x{round(f * 100)} {{", 1).replace(f"atol({tol:.3e}) rtol(1.0e-2)", f"atol({tol * f:.3e}) rtol({1.0e-2 * f:.3e})", 1))

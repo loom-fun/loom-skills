@@ -15,6 +15,7 @@ import dual_target  # noqa: E402
 
 EXPORT = re.compile(r'^kernel\.def\b[^\n]*?\bexport\("([^"]+)"\)', re.M)
 SYMBOL = re.compile(r'^kernel\.def\b[^\n]*?\s@([\w.]+)\(', re.M)
+RDNA4_ONLY = re.compile(r'^kernel\.def\b[^\n]*?target\(@rdna4\)[^\n]*?\s@([\w.]+)\(', re.M)
 RDNA3_ONLY = re.compile(r'^kernel\.def\b[^\n]*?target\(@rdna3\)[^\n]*?\s@([\w.]+)\(', re.M)
 
 
@@ -29,6 +30,7 @@ def select(lib, cases, arch=None, rdna4=None):
     defined = set(EXPORT.findall(lib)) | set(SYMBOL.findall(lib))
     defined |= set(EXPORT.findall(cases)) | set(SYMBOL.findall(cases))   # test helper kernels
     gfx11_only = set(RDNA3_ONLY.findall(lib)) - {k[:-len(dual_target.SUFFIX)] for k in defined if k.endswith(dual_target.SUFFIX)}
+    gfx12_only = {k for k in RDNA4_ONLY.findall(lib) if k.endswith(dual_target.SUFFIX) and k[:-len(dual_target.SUFFIX)] not in defined}   # K_rdna4 with no K (f16o fusions)
     keep, skipped = [], []
     for b in re.split(r'(?m)^(?=check\.case )', cases):
         if not b.startswith("check.case"):
@@ -41,6 +43,8 @@ def select(lib, cases, arch=None, rdna4=None):
         used = set(re.findall(r'kernel\.launch @([\w.]+)', b))
         if used - defined:
             skipped.append(f"SKIP {name}: kernel(s) not in this build: {', '.join(sorted(used - defined))}")
+        elif not (gfx12 and rdna4) and used & gfx12_only:
+            skipped.append(f"SKIP {name}: gfx12-only kernel(s): {', '.join(sorted(used & gfx12_only))}")
         elif gfx12 and used & gfx11_only:
             skipped.append(f"SKIP {name}: gfx11-only kernel(s) without a _rdna4 twin: {', '.join(sorted(used & gfx11_only))}")
         else:
