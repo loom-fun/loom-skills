@@ -12,6 +12,9 @@ One job per model, on ONE R9700 runner, exactly as skills/loom-benchmark/referen
     prefill 1k/2k/8k/16k/32k), c4:nodraft (4 streams), then llama.cpp ROCm (lemonade gfx120X) and Vulkan (b12211) with the
     package's matched drafting on the same runner: llama@rocm.np1:3 / :3:long, llamac4@rocm.nodraft, llama@vulkan.np1:3 /
     :3:long, llamac4@vulkan.perslot.nodraft.
+  * a package whose fit row has "r9700_execution" is served from its `<first>-r9700` preset (model.json, written by make_info.py build --fit);
+    the job carries "require_preset_r9700": devlab_perf.sh fails unless the fetched card has that preset, so func, gates, perf and c4
+    measure exactly what the card's R9700 Quick start serves.
   * memory budget: what the card's rendered R9700 Quick start line passes as --memory_bytes (card_lib.gpu_memory: the
     package's memory_bytes, at most card_lib.GPUS["radeon-r9700"]["memory_bytes"]; the GPU's whole pool for a reduced context). A model whose native context needs more KV cache than the pool holds after the weights is
     served at card_lib.served_context(...) tokens (variant "context"): the rows beyond it are refused by the server and
@@ -56,12 +59,17 @@ for slug in slugs:
     ctx = card_lib.fit_served_context(f, POOL)   # the native context's KV cache does not fit (or the row caps it): serve what does
     if ctx:
         mem = POOL
+    # a package whose fit row has "r9700_execution" carries the `<first>-r9700` preset (card_lib.gpu_preset_execution): devlab_perf.sh serves it
+    # on the R9700 exactly as the card's Quick start does, and its execution already holds the served context: no override is added here
+    preset = card_lib.gpu_preset_execution(f, ctx)
     v = lambda name, ex: {"name": name, **({"build": {}} if a.build else {}), **({"context": ctx} if ctx else {}),
                           **({"execution": ex} if ex else {})}
-    ex_ctx = {"context_capacity": ctx, "pool_capacity": ctx} if ctx else {}
+    ex_ctx = {"context_capacity": ctx, "pool_capacity": ctx} if ctx and not preset else {}
     card = {**v("card", ex_ctx)}
     if a.build:
         card.pop("execution", None)
+        if preset:
+            sys.exit(f"{slug}: --build rebuilds from the default preset's settings, not the R9700 preset's: publish the package and measure the card")
     nodraft = v("nodraft", {**ex_ctx, "draft_depth": 0})
     # llama.cpp ROCm keeps one 65536-token KV pool (devlab_perf.sh); when that plus its ~2.5 GB of buffers and context does not fit the pool
     # beside the weights, shrink it to what fits (at least the 36864 tokens Vulkan uses per slot): "llama_kv_rocm"
@@ -72,7 +80,7 @@ for slug in slugs:
     jobs.append({
         **({"llama_kv_rocm": lkv} if lkv else {}),
         "name": slug.lower().replace(".", "-")[:40],
-        "card": f"{a.card_org}/{slug}", "kit": m["kit"], "llamacpp": "b1375", "llamacpp_vulkan": "b12211",
+        "card": f"{a.card_org}/{slug}", **({"require_preset_r9700": True} if preset else {}), "kit": m["kit"], "llamacpp": "b1375", "llamacpp_vulkan": "b12211",
         "memory_bytes_r9700": mem, **({"served_context": ctx} if ctx else {}),
         "variants": [card, nodraft],
         "steps": ["func:card", "ktest:card", *([f"gates:card:{a.gates}"] if a.gates else []), f"perf:card:{n}", f"perf:card:{n}:long", "c4:nodraft",

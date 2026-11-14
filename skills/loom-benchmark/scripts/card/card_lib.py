@@ -679,6 +679,40 @@ def served_context(weights, kv_bytes_per_token, memory_bytes, headroom=SERVE_HEA
     return max(0, int((memory_bytes - weights - headroom) // kv_bytes_per_token) // 1024 * 1024)
 
 
+def gpu_preset_name(model_or_presets):
+    """`<first preset>-r9700`: the preset a package carries for the R9700 when its serving settings differ from model.json's
+    default preset (Strix Halo's)."""
+    presets = model_or_presets.get("presets", model_or_presets) if isinstance(model_or_presets, dict) else model_or_presets
+    return f"{next(iter(presets))}-r9700"
+
+
+def gpu_preset_execution(row, served_ctx=None):
+    """The execution overrides a fit-table row's "r9700_execution" gives the R9700 preset (prefill_capacity, rows, draft_depth,
+    context_capacity/pool_capacity ...), plus the served context (context_capacity = pool_capacity = served_ctx) when the R9700
+    serves a shorter context and the row does not say otherwise. None: the row has no block, so the preset is not touched."""
+    ex = (row or {}).get("r9700_execution")
+    if not ex:
+        return None
+    out = {}
+    if served_ctx:
+        out.update(context_capacity=served_ctx, pool_capacity=served_ctx)
+    out.update(ex)
+    return out
+
+
+def with_gpu_preset(model, execution):
+    """model.json's document with the `<first>-r9700` preset: a copy of the first preset (or of the preset a build already
+    made, e.g. build.py --prefill-r9700) with `execution` over its execution. The programs, weights and the default preset
+    (Strix Halo) are untouched."""
+    doc = json.loads(json.dumps(model))
+    name = gpu_preset_name(doc)
+    first = next(iter(doc["presets"]))
+    alt = doc["presets"].get(name) or json.loads(json.dumps(doc["presets"][first]))
+    alt["execution"].update(execution)
+    doc["presets"][name] = alt
+    return doc
+
+
 def fit_served_context(row, memory_bytes):
     """Tokens one request holds on a GPU, from a fit-table row: None when the native context fits (the package's own
     context), else what the memory leaves after the weights; a row's optional "ctx_cap" (a measured limit, e.g. the
