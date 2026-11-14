@@ -62,6 +62,22 @@
     "perf:c24p24:1:long",
     "perf:c40p40:1:long"
    ]
+  },
+  {
+   "name": "gptoss-gates",
+   "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
+   "kit": "gpt-oss",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gates:card:dev"
+   ]
   }
  ],
  "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
