@@ -104,7 +104,7 @@ class DeviceRegistry(unittest.TestCase):
         """A kit copied outside the skills tree (no loom-kb next to it) uses built-in rows: they must equal the registry's."""
         code = ("import sys, dual_target as d; print(repr((d.BASE, d.TWIN, d.SUFFIX, d.HEADER, d.R9700_PRESET_SUFFIX)))")
         out = subprocess.run([sys.executable, "-I", "-c", f"import sys; sys.path.insert(0, {str(STARTER)!r}); {code}"],
-                             capture_output=True, text=True, env={"LOOM_SKILLS": "/nonexistent"}, check=True).stdout
+                             capture_output=True, text=True, env={**os.environ, "LOOM_SKILLS": "/nonexistent"}, check=True).stdout
         r = registry.dual_target()
         self.assertEqual(out.strip(), repr((r["base"], r["twins"][0], r["suffix"], r["header"], "-r9700")))
 
