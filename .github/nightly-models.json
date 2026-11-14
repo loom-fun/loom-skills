@@ -131,7 +131,7 @@
   {
    "repo": "loom-fun/ggml-org-LFM2.5-24B-A2B-loom",
    "slug": "lfm2.5-24b-a2b",
-   "memory_bytes": 22000000000,
+   "memory_bytes": 24000000000,
    "kit": null,
    "llamacpp": "b1374",
    "features": [
@@ -504,7 +504,7 @@
   {
    "repo": "loom-fun/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
    "slug": "mellum2.1-12b-a2.5b-thinking",
-   "memory_bytes": 26000000000,
+   "memory_bytes": 27000000000,
    "kit": null,
    "llamacpp": "b1374",
    "features": [
