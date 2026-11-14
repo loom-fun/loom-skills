@@ -41,6 +41,7 @@ def hot(lines, global_only):
         if global_only:
             ln = re.sub(r"^(\s*%masked\d+) = vector\.select %valid\d+, (%sc\d+), %neg_v : vector<8xf32>$", r"\1 = vector.addf \2, %zero8 : vector<8xf32>", ln)
             ln = re.sub(r"^(\s*%p\d+) = vector\.select %valid\d+, (%pe\d+), %zero8 : vector<8xf32>$", r"\1 = vector.addf \2, %zero8 : vector<8xf32>", ln)
+        ln = re.sub(r"^(\s*%vlsel\d+_\d+) = vector\.select %vok, (%vlraw\d+_\d+), %zero16h : vector<8xf16>$", r"\1 = vector.bitcast \2 : vector<8xf16> to vector<8xf16>", ln)   # flash2_direct.py: no stale keys in a non-last tile
         out.append(ln)
     return out
 
