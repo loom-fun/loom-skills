@@ -89,6 +89,7 @@
 set -uo pipefail
 exp=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); job=${2:?usage: devlab_perf.sh EXPERIMENT.json JOB}
 here=$(cd "$(dirname "$0")/../.." && pwd); SK=$here/skills
+export LOOM_KB_ROOT=${LOOM_KB_ROOT:-$SK/loom-kb}   # kits copied out of the skills tree (ktest, --build) resolve choices from this checkout's knowledge base
 B=$SK/loom-benchmark/scripts; SV=$SK/loom-setup/scripts
 WORK=${WORK:-$HOME/devlab-perf}; mkdir -p "$WORK"; WORK=$(cd "$WORK" && pwd)
 D=$WORK/$job; out=$D/out; rm -rf "$D"; mkdir -p "$out"
