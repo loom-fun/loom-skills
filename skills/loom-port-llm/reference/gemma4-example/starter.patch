@@ -717,7 +717,7 @@
  KVH, G, D = _c["kv_heads"], _c["heads"] // _c["kv_heads"], _c["head_dim"]
  QH = KVH * G
  WINDOW = _c.get("sliding_window") or 262144
-@@ -315,7 +316,7 @@
+@@ -318,7 +319,7 @@
        %key_valid = index.cmp ule, %key_pos, {"%pos_hi" if PARTIAL else "%pos_last"} : index
        %kvals, %vvals = scf.if %key_valid -> (vector<{SEG_W}xf16>, vector<{SEG_W}xf16>) {{
          %kp = index.assume %key_pos [range(%key_pos, 0, 262143)] : index
@@ -791,7 +791,7 @@
  COMMON += r"""
  // Q8_0 block (34 bytes): F16 scale d, 32 int8 codes; value = d * q.
  func.def inline @g_q8_0_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
-@@ -1667,6 +1704,21 @@
+@@ -1682,6 +1719,21 @@
  """
  
  
@@ -813,7 +813,7 @@
  ROW_SCALE = r"""
  
  // Per-row power-of-two scale (as g_row_scale) plus the scaled row as F16, the
-@@ -2189,11 +2241,11 @@
+@@ -2204,11 +2256,11 @@
      yt = ", ".join(["f32"] * n)
      xs = ", ".join(f"%x{i}" for i in range(n))
      t = [f"""
@@ -827,7 +827,7 @@
    %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
    %layer = index.assume %layer_arg [range(%layer_arg, 0, {L - 1})] : index
    %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-@@ -2213,8 +2265,10 @@
+@@ -2228,8 +2280,10 @@
    %c15 = index.constant 15 : index
    %c16 = index.constant 16 : index
    %cqh = index.constant {QH} : index
@@ -839,7 +839,7 @@
    %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
    %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
    %position32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
-@@ -2232,8 +2286,10 @@
+@@ -2247,8 +2301,10 @@
    %zero_f = scalar.constant 0.0 : f32
  """]
      for j, idx in enumerate(freq_idx):
@@ -852,7 +852,7 @@
          t.append(f"""  // angle = position * theta^(-2i/RD) = position * exp(-i * 2 ln(theta) / RD)
    %li{j} = index.cast {idx} : index to i32
    %lf{j} = scalar.sitofp %li{j} : i32 to f32
-@@ -2328,7 +2384,7 @@
+@@ -2343,7 +2399,7 @@
          %padded = index.add %context, %c15 : index
          %blocks = index.div %padded, %c16 : index
          %k_plane = index.mul %layer, %c2 : index
@@ -861,7 +861,7 @@
          %position_bytes_v = index.constant {POS_BYTES} : offset
          %plane_stride = index.scale %pool, %position_bytes_v : index, offset -> offset
          %v_offset = index.add %k_offset, %plane_stride : offset
-@@ -2337,8 +2393,22 @@
+@@ -2352,8 +2408,22 @@
      for i in range(n):
          t.append(f"""        %h{i} = scalar.fptrunc %r{i} : f32 to f16
          view.store %h{i}, %k_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>
@@ -886,7 +886,7 @@
          view.store %vh{i}, %v_cache[%kh, {dims[i]}] : f16, view<{KVH}x{D}xf16>""")
      t.append("""      }
      }
-@@ -2349,6 +2419,31 @@
+@@ -2364,6 +2434,31 @@
      return "\n".join(t)
  
  
@@ -918,7 +918,7 @@
  def listed(text, name, grid_rest):
      """Variant of a per-token kernel dispatched over the tokens in `list`
      (count read from a device buffer for indirect dispatch)."""
-@@ -2555,11 +2650,11 @@
+@@ -2570,11 +2665,11 @@
      m.append(f"""    %mt_lo_q = index.div %mt_lou{T - 1}, %cU : index
      %mt_lo_al = index.mul %mt_lo_q, %cU : index
      {outs} = scf.for %mj = [%mt_lo_al to %mt_hiu{T - 1} step %cU]({iters}) -> ({rtypes}) {{
@@ -932,7 +932,7 @@
        %mko{i} = index.add %mkb, %mkd{i} : offset
        %mkc{i} = buffer.view %arena[%mko{i}] : buffer -> view<{KVH}x32x4xf16>
        %mkh{i} = vector.load %mkc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> {ht}
-@@ -2669,13 +2764,13 @@
+@@ -2684,13 +2779,13 @@
      args = ", ".join(f"%m_{h} = %neg_big : f32, %l_{h} = %zero_f : f32, %acc_{h} = %zero4 : vector<4xf32>" for h in range(G))
      types = ", ".join(["f32, f32, vector<4xf32>"] * G)
      t.append(f"    {fin} = scf.for %j = [%lo_al to %hi_abs step %cUg]({args}) -> ({types}) {{")
@@ -948,7 +948,7 @@
        %ko{i} = index.add %kb_off, %kd{i} : offset
        %kc{i} = buffer.view %arena[%ko{i}] : buffer -> view<{KVH}x32x4xf16>
        %kh{i} = vector.load %kc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
-@@ -2733,18 +2828,18 @@
+@@ -2748,18 +2843,18 @@
      body = []
      pa = attn_rules.paged(U)
      if pa:   # absolute U-aligned key blocks lie in one 16-position KV page: one page lookup per block
@@ -970,7 +970,7 @@
        %kc{i} = buffer.view %arena[%ko{i}] : buffer -> view<{KVH}x32x4xf16>
        %kh{i} = vector.load %kc{i}[%kv_head, %lane, %c0] : view<{KVH}x32x4xf16> -> vector<4xf16>
        %k{i} = vector.extf %kh{i} : vector<4xf16> to vector<4xf32>
-@@ -2920,7 +3015,7 @@
+@@ -2935,7 +3030,7 @@
      %stop = index.min %stop_raw, %visible : index
      %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x32x4xf32>
      %q_raw = vector.load %q_view[%token, %bounded_head, %lane, %c0] : view<[%tokens]x{QH}x32x4xf32> -> vector<4xf32>
@@ -979,7 +979,7 @@
      %scale_v = vector.splat %scale : vector<4xf32>
      %q4 = vector.mulf %q_raw, %scale_v : vector<4xf32>
      %zero4 = vector.splat %zero_f : vector<4xf32>
-@@ -3078,7 +3173,7 @@
+@@ -3093,7 +3188,7 @@
  
  def attention_seg(split_text):
      """The span body, from the decode split kernel's text (attention_text(64, "g")): same partials."""
@@ -988,7 +988,7 @@
      V = f"vector<{DL}xf32>"
      # values: VW dims per lane, so each key's V row spans LPK lanes and one load step covers KS keys
      VW = 4 if D == 64 else DL   # head_dim 64: two keys per load step (2 dims per lane lost on DevLab: -21 %)
-@@ -3171,8 +3266,8 @@
+@@ -3186,8 +3281,8 @@
        %anc_lo = index.min %alo_a, %hi_u_less : index
        %ahi_a = index.max %j16, %lo_u : index
        %anc_hi = index.min %ahi_a, %hi_u_less : index
@@ -999,7 +999,7 @@
        %key = index.add %j, %lane : index
        %oku_l = index.cmp uge, %key, %lo_u : index
        %oku_h = index.cmp ult, %key, %hi_u : index
-@@ -3414,12 +3509,140 @@
+@@ -3429,12 +3524,140 @@
  
  
  def attention():
@@ -1146,7 +1146,7 @@
  
  
  FALLBACK = r"""
-@@ -3688,9 +3911,22 @@
+@@ -3703,9 +3926,22 @@
            %is_best = scalar.cmpf oeq, %lv, %best : f32
            %cand_id = scf.select %is_best, %li, %big : i32
            %winner = kernel.workgroup.reduce<minsi> %cand_id : i32
@@ -1170,7 +1170,7 @@
              view.store %winner, %cand_i[%rr] : i32, view<64xi32>
            }}
            scf.yield %best, %winner : f32, i32
-@@ -3805,7 +4041,13 @@
+@@ -3820,7 +4056,13 @@
          args = f"%t, {k}, {n}, {x}, {s}, {w}, {y}"
          types = f"index, index, index, buffer, buffer, view<{wsize}xi8>, buffer"
          mv_args = f"({n}, %t, %zero_i32, {x}, {w}, {y}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)"
@@ -1185,7 +1185,7 @@
      args = args.replace(f", {x}, {s},", f", {x16}, {s},")
      iq = ACT_Q8 and fmt in IQ_FMTS and kval // 32 <= 1024   # wider K (mv_wide: DFlash feature projections) stays f32
      if iq:   # int8 copy (g_quant_q8, launched beside the g_row_scale_f16 that makes x16): see quant_wiring()
-@@ -4163,8 +4405,9 @@
+@@ -4178,8 +4420,9 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -1197,7 +1197,7 @@
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
-@@ -4504,9 +4747,101 @@
+@@ -4519,9 +4762,101 @@
          gg = GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn,
                               fused=bool(MOE.get("gate_up_fused")) and mode == "gu", **xb)
          parts.append(gelu_vectors(gg) if GELU else gg)
@@ -1299,7 +1299,7 @@
  def gdn_layer(i, b, nm, sz, par):
      """Gated delta-net token mixer of layer i: h -> o (VD wide), then o16 for the output GEMM."""
      g = GDN
-@@ -4975,7 +5310,7 @@
+@@ -4990,7 +5325,7 @@
  def model():
      """Command program: embed, then a statically unrolled layer loop (each
      layer's tensor formats come from the GGUF), then the argmax head."""
@@ -1308,7 +1308,7 @@
      sliding = set(CFG.get("sliding_layers", []))
      global NARROW_ROPE
      NARROW_ROPE = {(LH[i], i in sliding) for i in range(L) if LH[i] != QH and i not in RECUR}
-@@ -5005,7 +5340,7 @@
+@@ -5020,7 +5355,7 @@
  """ + ("" if FF_UNIFORM else "".join(f"  %nFF{w} = index.constant {w} : index\n" for w in sorted(set(FFL)))) + "".join(
          f"  %nQ{h} = index.constant {h * D} : index\n" + (f"  %nQH{h} = index.constant {h} : index\n" if HEAD_GATE else "")
          for h in NARROW) + f"""  %nQ = index.constant {QD} : index
@@ -1317,7 +1317,7 @@
    %zero_i32 = scalar.constant 0 : i32
    %one_i32 = scalar.constant 1 : i32
    %row_bytes = index.constant {H * 4} : offset
-@@ -5072,7 +5407,23 @@
+@@ -5087,7 +5422,23 @@
    %h16 = buffer.alloca<global> align(256) %h16_size : buffer
    %o16 = buffer.alloca<global> align(256) %o16_size : buffer
    %f16 = buffer.alloca<global> align(256) %f16_size : buffer
@@ -1341,7 +1341,7 @@
      if GATE:
          L_.append("  %gate = buffer.alloca<global> align(256) %q_size : buffer\n")
      if HEAD_GATE:
-@@ -5110,125 +5461,106 @@
+@@ -5125,125 +5476,106 @@
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
  """)
@@ -1551,7 +1551,7 @@
      L_.append(f"""
    %head = command.parameter %weights, "{head_name}" : view<{hsize}xi8>
    %one_span = index.cmp eq, %spans, %c1 : index
-@@ -5254,7 +5586,7 @@
+@@ -5269,7 +5601,7 @@
      spec_kernels = ""
      if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too
          head_name = "output.weight" if "output.weight" in TENS else "token_embd.weight"
@@ -1560,7 +1560,7 @@
                        GDN=GDN, NG=len(RECUR), gdn_layers=[(i, n) for n, i in enumerate(sorted(RECUR))],
                        head_name=head_name, head_size=tensor_bytes(head_name), esize=tensor_bytes("token_embd.weight"),
                        prologue=MODEL_PARTS.get("prologue"), layer_text=MODEL_PARTS.get("layer_text"), lin=lin, lin2=lin2, pair_kv=PAIR_PROJ in ("1", "kv"),
-@@ -5367,8 +5699,9 @@
+@@ -5382,8 +5714,9 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -1572,7 +1572,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if SWA_ROPE:
-@@ -5399,18 +5732,28 @@
+@@ -5417,18 +5750,30 @@
      gemm_text = subprocess.run([sys.executable, os.path.join(here, "gen_gemm.py")], capture_output=True, text=True, check=True, env=env).stdout
      parts.append(gelu_vectors(gemm_text) if GELU else gemm_text)
      parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
@@ -1584,6 +1584,8 @@
 +    os.environ.setdefault("FLASH2_KT", "16")   # head_dim 256 + window spills at 32-key tiles
 +    fenv = dict(os.environ, FLASH2_TARGET="llm", FLASH2_OUT=flash2, LLM_CONFIG=fcfg,
 +                FLASH2_KV_FN=kv_fn_name(DIMS[DSWA]["kvh"] * DSWA * 2, DSWA))
++    if DSWA == 256 and FLASH512 and os.environ.get("FLASH2_SWA_TWIN", "s" if os.environ.get("FLASH2_TRIM") == "1" else "") == "s":   # gfx12: the sliding kernel's twin is gen_flash2s.py's split-dims kernel (same launch signature); POS_BYTES: the V plane's offset
++        fenv.update(FLASH2_SWA_TWIN="s", FLASH2_POS_BYTES=str(POS_BYTES))
 +    if ATTN_SCALE is not None:
 +        fenv["FLASH2_SCALE"] = repr(float(ATTN_SCALE))
 +    subprocess.run([sys.executable, os.path.join(here, "gen_flash2.py")], check=True, env=fenv)
@@ -1614,7 +1616,7 @@
      if "_attention_flash2_partial\")" in text:   # the blocks a run covers in part: their kernel after each launch
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -86,6 +86,12 @@
+@@ -87,6 +87,12 @@
              f"  kernel.launch @g_attention_fallback_list[{tv}]({tv}, {info}, %tiles{sfx}, %flist{sfx}, %fcount{sfx}) : "
              f"[index](index, tensor<{t}x4xi32>, tensor<{t}xi32>, tensor<{t}xi32>, tensor<64xi32>)\n")
  def ty(a): return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int8": "i8", "int32": "i32", "float16": "f16"}[str(a.dtype)] + ">"
@@ -1627,7 +1629,7 @@
  # 1. embed
  ids = np.array([0, cfg['vocab'] - 1, cfg['vocab'] // 2, 1000], dtype=np.int32); t = len(ids)
  # M-RoPE (cfg "mrope"): the rope kernel also reads the epoch metadata (one span, offset 0: rotary position =
-@@ -185,14 +191,17 @@
+@@ -186,14 +192,17 @@
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
  for li in range(cfg["layers"]):
@@ -1648,7 +1650,7 @@
  for name, K in todo:
      fmt = T[name].tensor_type.name.lower(); W = deq(name); n = W.shape[0]
      for tg in (1, 4):
-@@ -347,116 +356,50 @@
+@@ -348,116 +357,50 @@
    check.return
  }}
  """)
@@ -1809,7 +1811,7 @@
  # 3a. output head (argmax over the vocabulary) for one selected span of 3 tokens
  t = 3
  head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
-@@ -517,76 +460,90 @@
+@@ -518,76 +461,90 @@
  """ + hl("g_head_mv_q8", "1") + "".join(hl(k, tag) for k, tag in variants) + "".join(
              f"  check.expect.close actual(%l{tag}) expected(%l1) atol(0.0) rtol(0.0) nan(different) : tensor<{S * CH * 128}xf32>\n"
              f"  check.expect.equal actual(%p{tag}) expected(%p1) : tensor<{S * CH * 2}xi32>\n" for _, tag in variants) + "  check.return\n}\n")
@@ -1969,7 +1971,7 @@
    check.return
  }}
  """)
-@@ -1396,7 +1353,15 @@
+@@ -1441,7 +1398,15 @@
      t, ctx = 64, 1024
      P0 = ctx - t; blocks = ctx // 16; pool = ctx
      kk = rng.standard_normal((ctx, KVH, D)).astype(np.float16); vv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
@@ -1986,7 +1988,7 @@
      qq = (rng.standard_normal((t, QH, D)) * 2.5).astype(np.float32); gg = rng.standard_normal((t, QH, D)).astype(np.float32)
      orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
      info = np.zeros((t, 4), np.int32); info[:, 1] = P0 + np.arange(t); info[:, 2] = 1
-@@ -1415,7 +1380,10 @@
+@@ -1460,7 +1425,10 @@
      # 960-1008 of row 0 (tokens 48-111), whichever tiles share its workgroups (gen_flash2.py TS), and leave the
      # heads (tokens 0-7, 40-47: the listed fallback's) untouched.
      tm = 112; k2 = rng.standard_normal((2, ctx, KVH, D)).astype(np.float16)
@@ -1998,7 +2000,7 @@
      orig_m = np.zeros(20 + 2 * blocks, np.int32); orig_m[8] = 80; orig_m[18] = 80 + 4 * blocks
      orig_m[20:] = np.arange(2 * blocks)
      row = (np.arange(tm) < 40).astype(np.int32)
-@@ -1434,6 +1402,11 @@
+@@ -1479,6 +1447,11 @@
      if ow is not None:
          cases.append(cases[-1].replace(f"@flash_prefill{tag} {{", f"@flash_prefill_window{tag} {{").replace("%sliding = check.literal value(0)", "%sliding = check.literal value(1)")
                       .replace(f'path("f_o{tag}.npy")', f'path("f_ow{tag}.npy")'))
@@ -2010,7 +2012,7 @@
  
  
  DEEP_CASES = []
-@@ -1785,6 +1758,12 @@
+@@ -1830,6 +1803,12 @@
                              ("g_attention_flash2", "g_attention_flash2_partial")).replace("f_arena_a.npy", "f_arena_nan.npy"))
      cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
      cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
@@ -2023,7 +2025,7 @@
  
  # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
  # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
-@@ -2054,6 +2033,43 @@
+@@ -2099,6 +2078,43 @@
    check.return
  }}
  """)

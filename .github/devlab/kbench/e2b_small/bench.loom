@@ -1,0 +1,392 @@
+amdgpu.target<gfx12-generic> @rdna4 {subgroup_size = 32}
+
+kernel.def target(@rdna4) export("k_norm_wg256") @k_norm_wg256(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%tokens_arg: index, %y: buffer, %w_post: buffer, %x: buffer, %w_next: buffer, %h: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %groups = index.constant 48 : index
+  %zero_f = scalar.constant 0.0 : f32
+  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %count = scalar.constant 1536.0 : f32
+  %active = index.cmp ult, %lane, %groups : index
+  %bl_raw = index.min %lane, %groups : index
+  %y_view = buffer.view %y[%zero] : buffer -> view<[%tokens]x48x32xf32>
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x48x32xf32>
+  %yv, %xv = scf.if %active -> (vector<32xf32>, vector<32xf32>) {
+    %bl = index.assume %lane [range(%lane, 0, 47)] : index
+    %a = vector.load %y_view[%token, %bl, %c0] : view<[%tokens]x48x32xf32> -> vector<32xf32>
+    %b = vector.load %x_view[%token, %bl, %c0] : view<[%tokens]x48x32xf32> -> vector<32xf32>
+    scf.yield %a, %b : vector<32xf32>, vector<32xf32>
+  } else {
+    scf.yield %zero32, %zero32 : vector<32xf32>, vector<32xf32>
+  }
+  %ysq = vector.mulf %yv, %yv : vector<32xf32>
+  %ylocal = vector.reduce<addf> %ysq, %zero_f : vector<32xf32>, f32
+  %ysum = kernel.workgroup.reduce<addf> %ylocal : f32
+  %ymean = scalar.divf %ysum, %count : f32
+  %post_eps = scalar.constant 9.999999974752427e-07 : f32
+  %ystable = scalar.addf %ymean, %post_eps : f32
+  %yinv = scalar.rsqrtf %ystable : f32
+  %yinvs = vector.splat %yinv : vector<32xf32>
+  %w_post_view = buffer.view %w_post[%zero] : buffer -> view<48x32xf32>
+  %w_next_view = buffer.view %w_next[%zero] : buffer -> view<48x32xf32>
+  %xn = scf.if %active -> (vector<32xf32>) {
+    %bl = index.assume %lane [range(%lane, 0, 47)] : index
+    %wp = vector.load %w_post_view[%bl, %c0] : view<48x32xf32> -> vector<32xf32>
+    %yn = vector.mulf %yv, %yinvs : vector<32xf32>
+    %r = vector.mulf %yn, %wp : vector<32xf32>
+    %sum = vector.addf %xv, %r : vector<32xf32>
+    vector.store %sum, %x_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x48x32xf32>
+    scf.yield %sum : vector<32xf32>
+  } else {
+    scf.yield %zero32 : vector<32xf32>
+  }
+  %xsq = vector.mulf %xn, %xn : vector<32xf32>
+  %xlocal = vector.reduce<addf> %xsq, %zero_f : vector<32xf32>, f32
+  %xsum = kernel.workgroup.reduce<addf> %xlocal : f32
+  %xmean = scalar.divf %xsum, %count : f32
+  %eps = scalar.constant 9.999999974752427e-07 : f32
+  %xstable = scalar.addf %xmean, %eps : f32
+  %xinv = scalar.rsqrtf %xstable : f32
+  %xinvs = vector.splat %xinv : vector<32xf32>
+  scf.if %active {
+    %bl = index.assume %lane [range(%lane, 0, 47)] : index
+    %wn = vector.load %w_next_view[%bl, %c0] : view<48x32xf32> -> vector<32xf32>
+    %xnn = vector.mulf %xn, %xinvs : vector<32xf32>
+    %hv = vector.mulf %xnn, %wn : vector<32xf32>
+    %h_view = buffer.view %h[%zero] : buffer -> view<[%tokens]x48x32xf32>
+    vector.store %hv, %h_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x48x32xf32>
+  }
+  kernel.return
+}
+
+check.case public @k_norm_wg256_case {
+  %rows = check.literal value(2048) : index
+  %y = check.generate.fill value(0.5) : tensor<2048x1536xf32>
+  %wp = check.generate.fill value(1.0) : tensor<1536xf32>
+  %x = check.generate.fill value(0.25) : tensor<2048x1536xf32>
+  %wn = check.generate.fill value(1.0) : tensor<1536xf32>
+  %h = check.generate.fill value(0.0) : tensor<2048x1536xf32>
+  kernel.launch @k_norm_wg256[%rows](%rows, %y, %wp, %x, %wn, %h) : [index](index, tensor<2048x1536xf32>, tensor<1536xf32>, tensor<2048x1536xf32>, tensor<1536xf32>, tensor<2048x1536xf32>)
+  check.return
+}
+check.benchmark<@k_norm_wg256_case> @k_norm_wg256_bm
+
+kernel.def target(@rdna4) export("k_rs_wg256") @k_rs_wg256(%rows: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%rows_arg: index, %k_arg: index, %x: buffer, %scales: buffer, %x16: buffer) {
+  %rows = index.assume %rows_arg [range(%rows_arg, 1, 2097152)] : index
+  %k = index.assume %k_arg [range(%k_arg, 256, 65536), multiple_of(%k_arg, 256)] : index
+  %row_id = kernel.workgroup.id<x> : index
+  %row = index.assume %row_id [lt(%row_id, %rows)] : index
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  %zero_f = scalar.constant 0.0 : f32
+  // vector<4> steps (k is a multiple of 256): each step of a scalar loop waits for its load (and in pass 2
+  // for the previous step's store), so 4x fewer steps is ~4x less exposed latency.
+  %c4 = index.constant 4 : index
+  %k4 = index.div %k, %c4 : index
+  %x4_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k4]x4xf32>
+  %h4_view = buffer.view %x16[%zero] : buffer -> view<[%rows]x[%k4]x4xf16>
+  %local = scf.for %c = [%lane to %k4 step %c256](%m = %zero_f : f32) -> (f32) {
+    %bc = index.assume %c [lt(%c, %k4)] : index
+    %v = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>
+    %a = vector.absf %v : vector<4xf32>
+    %n = vector.reduce<maxnumf> %a, %m : vector<4xf32>, f32
+    scf.yield %n : f32
+  }
+  %maximum = kernel.workgroup.reduce<maxnumf> %local : f32
+  %bits = scalar.bitcast %maximum : f32 to i32
+  %c23 = scalar.constant 23 : i32
+  %c255 = scalar.constant 255 : i32
+  %shifted = scalar.shrui %bits, %c23 : i32
+  %biased = scalar.andi %shifted, %c255 : i32
+  %c127 = scalar.constant 127 : i32
+  %c13 = scalar.constant 13 : i32
+  %c0_i32 = scalar.constant 0 : i32
+  %c100 = scalar.constant 100 : i32
+  %unbiased = scalar.subi %biased, %c127 : i32
+  %raw_e = scalar.subi %unbiased, %c13 : i32
+  %positive = scalar.maxsi %raw_e, %c0_i32 : i32
+  %e = scalar.minsi %positive, %c100 : i32
+  %scale_exp = scalar.subi %c127, %e : i32
+  %inverse_exp = scalar.addi %c127, %e : i32
+  %scale_bits = scalar.shli %scale_exp, %c23 : i32
+  %inverse_bits = scalar.shli %inverse_exp, %c23 : i32
+  %scale = scalar.bitcast %scale_bits : i32 to f32
+  %inverse = scalar.bitcast %inverse_bits : i32 to f32
+  %scale4 = vector.splat %scale : vector<4xf32>
+  scf.for %c = [%lane to %k4 step %c256] {
+    %bc = index.assume %c [lt(%c, %k4)] : index
+    %v = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>
+    %sv = vector.mulf %v, %scale4 : vector<4xf32>
+    %hv = vector.fptrunc %sv : vector<4xf32> to vector<4xf16>
+    vector.store %hv, %h4_view[%row, %bc, %c0] : vector<4xf16>, view<[%rows]x[%k4]x4xf16>
+  }
+  %first = index.cmp eq, %lane, %c0 : index
+  scf.if %first {
+    %s_view = buffer.view %scales[%zero] : buffer -> view<[%rows]x2xf32>
+    view.store %scale, %s_view[%row, %c0] : f32, view<[%rows]x2xf32>
+    view.store %inverse, %s_view[%row, %c1] : f32, view<[%rows]x2xf32>
+  }
+  kernel.return
+}
+
+check.case public @k_rs_wg256_case {
+  %rows = check.literal value(2048) : index
+  %k = check.literal value(1536) : index
+  %seed0 = check.literal value(7) : i64
+  %x = check.generate.random.uniform seed(%seed0) range(-1.0 to 1.0) : tensor<2048x1536xf32>
+  %s = check.generate.fill value(0.0) : tensor<2048x2xf32>
+  %x16 = check.generate.fill value(0.0) : tensor<2048x1536xf16>
+  kernel.launch @k_rs_wg256[%rows](%rows, %k, %x, %s, %x16) : [index](index, index, tensor<2048x1536xf32>, tensor<2048x2xf32>, tensor<2048x1536xf16>)
+  check.return
+}
+check.benchmark<@k_rs_wg256_case> @k_rs_wg256_bm
+
+kernel.def target(@rdna4) export("k_rs_wg128") @k_rs_wg128(%rows: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 128 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%rows_arg: index, %k_arg: index, %x: buffer, %scales: buffer, %x16: buffer) {
+  %rows = index.assume %rows_arg [range(%rows_arg, 1, 2097152)] : index
+  %k = index.assume %k_arg [range(%k_arg, 256, 65536), multiple_of(%k_arg, 256)] : index
+  %row_id = kernel.workgroup.id<x> : index
+  %row = index.assume %row_id [lt(%row_id, %rows)] : index
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 128 : index
+  %zero_f = scalar.constant 0.0 : f32
+  // vector<4> steps (k is a multiple of 256): each step of a scalar loop waits for its load (and in pass 2
+  // for the previous step's store), so 4x fewer steps is ~4x less exposed latency.
+  %c4 = index.constant 4 : index
+  %k4 = index.div %k, %c4 : index
+  %x4_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k4]x4xf32>
+  %h4_view = buffer.view %x16[%zero] : buffer -> view<[%rows]x[%k4]x4xf16>
+  %local = scf.for %c = [%lane to %k4 step %c256](%m = %zero_f : f32) -> (f32) {
+    %bc = index.assume %c [lt(%c, %k4)] : index
+    %v = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>
+    %a = vector.absf %v : vector<4xf32>
+    %n = vector.reduce<maxnumf> %a, %m : vector<4xf32>, f32
+    scf.yield %n : f32
+  }
+  %maximum = kernel.workgroup.reduce<maxnumf> %local : f32
+  %bits = scalar.bitcast %maximum : f32 to i32
+  %c23 = scalar.constant 23 : i32
+  %c255 = scalar.constant 255 : i32
+  %shifted = scalar.shrui %bits, %c23 : i32
+  %biased = scalar.andi %shifted, %c255 : i32
+  %c127 = scalar.constant 127 : i32
+  %c13 = scalar.constant 13 : i32
+  %c0_i32 = scalar.constant 0 : i32
+  %c100 = scalar.constant 100 : i32
+  %unbiased = scalar.subi %biased, %c127 : i32
+  %raw_e = scalar.subi %unbiased, %c13 : i32
+  %positive = scalar.maxsi %raw_e, %c0_i32 : i32
+  %e = scalar.minsi %positive, %c100 : i32
+  %scale_exp = scalar.subi %c127, %e : i32
+  %inverse_exp = scalar.addi %c127, %e : i32
+  %scale_bits = scalar.shli %scale_exp, %c23 : i32
+  %inverse_bits = scalar.shli %inverse_exp, %c23 : i32
+  %scale = scalar.bitcast %scale_bits : i32 to f32
+  %inverse = scalar.bitcast %inverse_bits : i32 to f32
+  %scale4 = vector.splat %scale : vector<4xf32>
+  scf.for %c = [%lane to %k4 step %c256] {
+    %bc = index.assume %c [lt(%c, %k4)] : index
+    %v = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>
+    %sv = vector.mulf %v, %scale4 : vector<4xf32>
+    %hv = vector.fptrunc %sv : vector<4xf32> to vector<4xf16>
+    vector.store %hv, %h4_view[%row, %bc, %c0] : vector<4xf16>, view<[%rows]x[%k4]x4xf16>
+  }
+  %first = index.cmp eq, %lane, %c0 : index
+  scf.if %first {
+    %s_view = buffer.view %scales[%zero] : buffer -> view<[%rows]x2xf32>
+    view.store %scale, %s_view[%row, %c0] : f32, view<[%rows]x2xf32>
+    view.store %inverse, %s_view[%row, %c1] : f32, view<[%rows]x2xf32>
+  }
+  kernel.return
+}
+
+check.case public @k_rs_wg128_case {
+  %rows = check.literal value(2048) : index
+  %k = check.literal value(1536) : index
+  %seed0 = check.literal value(7) : i64
+  %x = check.generate.random.uniform seed(%seed0) range(-1.0 to 1.0) : tensor<2048x1536xf32>
+  %s = check.generate.fill value(0.0) : tensor<2048x2xf32>
+  %x16 = check.generate.fill value(0.0) : tensor<2048x1536xf16>
+  kernel.launch @k_rs_wg128[%rows](%rows, %k, %x, %s, %x16) : [index](index, index, tensor<2048x1536xf32>, tensor<2048x2xf32>, tensor<2048x1536xf16>)
+  check.return
+}
+check.benchmark<@k_rs_wg128_case> @k_rs_wg128_bm
+
+kernel.def target(@rdna4) export("k_norm_wg64") @k_norm_wg64(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 64 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%tokens_arg: index, %y: buffer, %w_post: buffer, %x: buffer, %w_next: buffer, %h: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 63)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %groups = index.constant 48 : index
+  %zero_f = scalar.constant 0.0 : f32
+  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %count = scalar.constant 1536.0 : f32
+  %active = index.cmp ult, %lane, %groups : index
+  %bl_raw = index.min %lane, %groups : index
+  %y_view = buffer.view %y[%zero] : buffer -> view<[%tokens]x48x32xf32>
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x48x32xf32>
+  %yv, %xv = scf.if %active -> (vector<32xf32>, vector<32xf32>) {
+    %bl = index.assume %lane [range(%lane, 0, 47)] : index
+    %a = vector.load %y_view[%token, %bl, %c0] : view<[%tokens]x48x32xf32> -> vector<32xf32>
+    %b = vector.load %x_view[%token, %bl, %c0] : view<[%tokens]x48x32xf32> -> vector<32xf32>
+    scf.yield %a, %b : vector<32xf32>, vector<32xf32>
+  } else {
+    scf.yield %zero32, %zero32 : vector<32xf32>, vector<32xf32>
+  }
+  %ysq = vector.mulf %yv, %yv : vector<32xf32>
+  %ylocal = vector.reduce<addf> %ysq, %zero_f : vector<32xf32>, f32
+  %ysum = kernel.workgroup.reduce<addf> %ylocal : f32
+  %ymean = scalar.divf %ysum, %count : f32
+  %post_eps = scalar.constant 9.999999974752427e-07 : f32
+  %ystable = scalar.addf %ymean, %post_eps : f32
+  %yinv = scalar.rsqrtf %ystable : f32
+  %yinvs = vector.splat %yinv : vector<32xf32>
+  %w_post_view = buffer.view %w_post[%zero] : buffer -> view<48x32xf32>
+  %w_next_view = buffer.view %w_next[%zero] : buffer -> view<48x32xf32>
+  %xn = scf.if %active -> (vector<32xf32>) {
+    %bl = index.assume %lane [range(%lane, 0, 47)] : index
+    %wp = vector.load %w_post_view[%bl, %c0] : view<48x32xf32> -> vector<32xf32>
+    %yn = vector.mulf %yv, %yinvs : vector<32xf32>
+    %r = vector.mulf %yn, %wp : vector<32xf32>
+    %sum = vector.addf %xv, %r : vector<32xf32>
+    vector.store %sum, %x_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x48x32xf32>
+    scf.yield %sum : vector<32xf32>
+  } else {
+    scf.yield %zero32 : vector<32xf32>
+  }
+  %xsq = vector.mulf %xn, %xn : vector<32xf32>
+  %xlocal = vector.reduce<addf> %xsq, %zero_f : vector<32xf32>, f32
+  %xsum = kernel.workgroup.reduce<addf> %xlocal : f32
+  %xmean = scalar.divf %xsum, %count : f32
+  %eps = scalar.constant 9.999999974752427e-07 : f32
+  %xstable = scalar.addf %xmean, %eps : f32
+  %xinv = scalar.rsqrtf %xstable : f32
+  %xinvs = vector.splat %xinv : vector<32xf32>
+  scf.if %active {
+    %bl = index.assume %lane [range(%lane, 0, 47)] : index
+    %wn = vector.load %w_next_view[%bl, %c0] : view<48x32xf32> -> vector<32xf32>
+    %xnn = vector.mulf %xn, %xinvs : vector<32xf32>
+    %hv = vector.mulf %xnn, %wn : vector<32xf32>
+    %h_view = buffer.view %h[%zero] : buffer -> view<[%tokens]x48x32xf32>
+    vector.store %hv, %h_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x48x32xf32>
+  }
+  kernel.return
+}
+
+check.case public @k_norm_wg64_case {
+  %rows = check.literal value(2048) : index
+  %y = check.generate.fill value(0.5) : tensor<2048x1536xf32>
+  %wp = check.generate.fill value(1.0) : tensor<1536xf32>
+  %x = check.generate.fill value(0.25) : tensor<2048x1536xf32>
+  %wn = check.generate.fill value(1.0) : tensor<1536xf32>
+  %h = check.generate.fill value(0.0) : tensor<2048x1536xf32>
+  kernel.launch @k_norm_wg64[%rows](%rows, %y, %wp, %x, %wn, %h) : [index](index, tensor<2048x1536xf32>, tensor<1536xf32>, tensor<2048x1536xf32>, tensor<1536xf32>, tensor<2048x1536xf32>)
+  check.return
+}
+check.benchmark<@k_norm_wg64_case> @k_norm_wg64_bm
+
+kernel.def target(@rdna4) export("k_rs_wg64") @k_rs_wg64(%rows: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 64 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%rows_arg: index, %k_arg: index, %x: buffer, %scales: buffer, %x16: buffer) {
+  %rows = index.assume %rows_arg [range(%rows_arg, 1, 2097152)] : index
+  %k = index.assume %k_arg [range(%k_arg, 256, 65536), multiple_of(%k_arg, 256)] : index
+  %row_id = kernel.workgroup.id<x> : index
+  %row = index.assume %row_id [lt(%row_id, %rows)] : index
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 64 : index
+  %zero_f = scalar.constant 0.0 : f32
+  // vector<4> steps (k is a multiple of 256): each step of a scalar loop waits for its load (and in pass 2
+  // for the previous step's store), so 4x fewer steps is ~4x less exposed latency.
+  %c4 = index.constant 4 : index
+  %k4 = index.div %k, %c4 : index
+  %x4_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k4]x4xf32>
+  %h4_view = buffer.view %x16[%zero] : buffer -> view<[%rows]x[%k4]x4xf16>
+  %local = scf.for %c = [%lane to %k4 step %c256](%m = %zero_f : f32) -> (f32) {
+    %bc = index.assume %c [lt(%c, %k4)] : index
+    %v = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>
+    %a = vector.absf %v : vector<4xf32>
+    %n = vector.reduce<maxnumf> %a, %m : vector<4xf32>, f32
+    scf.yield %n : f32
+  }
+  %maximum = kernel.workgroup.reduce<maxnumf> %local : f32
+  %bits = scalar.bitcast %maximum : f32 to i32
+  %c23 = scalar.constant 23 : i32
+  %c255 = scalar.constant 255 : i32
+  %shifted = scalar.shrui %bits, %c23 : i32
+  %biased = scalar.andi %shifted, %c255 : i32
+  %c127 = scalar.constant 127 : i32
+  %c13 = scalar.constant 13 : i32
+  %c0_i32 = scalar.constant 0 : i32
+  %c100 = scalar.constant 100 : i32
+  %unbiased = scalar.subi %biased, %c127 : i32
+  %raw_e = scalar.subi %unbiased, %c13 : i32
+  %positive = scalar.maxsi %raw_e, %c0_i32 : i32
+  %e = scalar.minsi %positive, %c100 : i32
+  %scale_exp = scalar.subi %c127, %e : i32
+  %inverse_exp = scalar.addi %c127, %e : i32
+  %scale_bits = scalar.shli %scale_exp, %c23 : i32
+  %inverse_bits = scalar.shli %inverse_exp, %c23 : i32
+  %scale = scalar.bitcast %scale_bits : i32 to f32
+  %inverse = scalar.bitcast %inverse_bits : i32 to f32
+  %scale4 = vector.splat %scale : vector<4xf32>
+  scf.for %c = [%lane to %k4 step %c256] {
+    %bc = index.assume %c [lt(%c, %k4)] : index
+    %v = vector.load %x4_view[%row, %bc, %c0] : view<[%rows]x[%k4]x4xf32> -> vector<4xf32>
+    %sv = vector.mulf %v, %scale4 : vector<4xf32>
+    %hv = vector.fptrunc %sv : vector<4xf32> to vector<4xf16>
+    vector.store %hv, %h4_view[%row, %bc, %c0] : vector<4xf16>, view<[%rows]x[%k4]x4xf16>
+  }
+  %first = index.cmp eq, %lane, %c0 : index
+  scf.if %first {
+    %s_view = buffer.view %scales[%zero] : buffer -> view<[%rows]x2xf32>
+    view.store %scale, %s_view[%row, %c0] : f32, view<[%rows]x2xf32>
+    view.store %inverse, %s_view[%row, %c1] : f32, view<[%rows]x2xf32>
+  }
+  kernel.return
+}
+
+check.case public @k_rs_wg64_case {
+  %rows = check.literal value(2048) : index
+  %k = check.literal value(1536) : index
+  %seed0 = check.literal value(7) : i64
+  %x = check.generate.random.uniform seed(%seed0) range(-1.0 to 1.0) : tensor<2048x1536xf32>
+  %s = check.generate.fill value(0.0) : tensor<2048x2xf32>
+  %x16 = check.generate.fill value(0.0) : tensor<2048x1536xf16>
+  kernel.launch @k_rs_wg64[%rows](%rows, %k, %x, %s, %x16) : [index](index, index, tensor<2048x1536xf32>, tensor<2048x2xf32>, tensor<2048x1536xf16>)
+  check.return
+}
+check.benchmark<@k_rs_wg64_case> @k_rs_wg64_bm
