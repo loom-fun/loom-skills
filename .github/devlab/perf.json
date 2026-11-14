@@ -5,7 +5,7 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "stall1",
+   "name": "unsloth-qwen3-0-6b-loom",
    "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
    "kit": null,
    "llamacpp": "b1375",
@@ -13,30 +13,8 @@
    "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "hb",
-     "build": {},
-     "serve_args": []
-    },
-    {
-     "name": "slab256",
-     "build": {},
-     "serve_args": [
-      "--state_slab_bytes=256mib"
-     ]
-    },
-    {
-     "name": "slab1g",
-     "build": {},
-     "serve_args": [
-      "--state_slab_bytes=1gib"
-     ]
-    },
-    {
-     "name": "slab4g",
-     "build": {},
-     "serve_args": [
-      "--state_slab_bytes=4gib"
-     ]
+     "name": "card",
+     "build": {}
     },
     {
      "name": "fixed",
@@ -45,14 +23,132 @@
       "--pool_backing=fixed"
      ],
      "memory_bytes": "none"
+    },
+    {
+     "name": "nodraft",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "fixednd",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "serve_args": [
+      "--pool_backing=fixed"
+     ],
+     "memory_bytes": "none"
     }
    ],
    "steps": [
-    "probe:hb",
-    "probe:slab256",
-    "probe:slab1g",
-    "probe:slab4g",
-    "probe:fixed"
+    "perf:card:3:long",
+    "perf:fixed:3:long",
+    "c4:nodraft",
+    "c4:fixednd",
+    "func:fixed",
+    "gates:fixed:dev",
+    "llama@rocm.np1:3:long"
+   ]
+  },
+  {
+   "name": "bartowski-qwen2-5-0-5b-instruct-loom",
+   "card": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 5000000000,
+   "variants": [
+    {
+     "name": "card",
+     "build": {}
+    },
+    {
+     "name": "fixed",
+     "build": {},
+     "serve_args": [
+      "--pool_backing=fixed"
+     ],
+     "memory_bytes": "none"
+    },
+    {
+     "name": "nodraft",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "fixednd",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "serve_args": [
+      "--pool_backing=fixed"
+     ],
+     "memory_bytes": "none"
+    }
+   ],
+   "steps": [
+    "perf:card:3:long",
+    "perf:fixed:3:long",
+    "c4:nodraft",
+    "c4:fixednd",
+    "func:fixed",
+    "gates:fixed:dev",
+    "llama@rocm.np1:3:long"
+   ]
+  },
+  {
+   "name": "ggml-org-qwen3-4b-loom",
+   "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 25000000000,
+   "variants": [
+    {
+     "name": "card",
+     "build": {}
+    },
+    {
+     "name": "fixed",
+     "build": {},
+     "serve_args": [
+      "--pool_backing=fixed"
+     ],
+     "memory_bytes": "none"
+    },
+    {
+     "name": "nodraft",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "fixednd",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     },
+     "serve_args": [
+      "--pool_backing=fixed"
+     ],
+     "memory_bytes": "none"
+    }
+   ],
+   "steps": [
+    "perf:card:3:long",
+    "perf:fixed:3:long",
+    "c4:nodraft",
+    "c4:fixednd",
+    "func:fixed",
+    "gates:fixed:dev",
+    "llama@rocm.np1:3:long"
    ]
   }
  ],
