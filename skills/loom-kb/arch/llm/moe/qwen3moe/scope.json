@@ -9,5 +9,17 @@
  "facets": [
   "moe"
  ],
- "choices": []
+ "choices": [
+  {
+   "when": {
+    "not_facets": [
+     "drafted"
+    ]
+   },
+   "set": {
+    "prefill.attn.flash2_peel": false
+   },
+   "evidence": "PLACEHOLDER"
+  }
+ ]
 }
