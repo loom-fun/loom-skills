@@ -189,7 +189,8 @@
   "mem": 69000000000,
   "need": 59750359296.0,
   "verdict": "fits (reduced ctx)",
-  "n_exp": 256
+  "n_exp": 256,
+  "ctx_cap": 36864
  },
  {
   "slug": "ggml-org-LFM2.5-24B-A2B-loom",
