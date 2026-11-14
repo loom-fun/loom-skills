@@ -46,6 +46,49 @@
     "llama@vulkan.np1:3:long",
     "llamac4@vulkan.perslot.nodraft"
    ]
+  },
+  {
+   "llama_kv_rocm": 36864,
+   "llama_spec": "",
+   "name": "ggml-org-laguna-xs-2-1-loom",
+   "card": "loom-fun-staging/ggml-org-Laguna-XS-2.1-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 24576,
+   "variants": [
+    {
+     "name": "card",
+     "context": 24576,
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576
+     }
+    },
+    {
+     "name": "nodraft",
+     "context": 24576,
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576,
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
   }
  ],
  "card": "loom-fun-staging/ggml-org-Flint-loom",
