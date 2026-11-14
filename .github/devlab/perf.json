@@ -3,6 +3,10 @@
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
+ "card": "loom-fun-staging/ggml-org-Flint-loom",
+ "kit": null,
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
    "llama_kv_rocm": 40960,
@@ -16,7 +20,7 @@
    "variants": [
     {
      "name": "card",
-     "context": 48128,
+     "context": 40960,
      "execution": {
       "context_capacity": 48128,
       "pool_capacity": 48128
@@ -24,7 +28,7 @@
     },
     {
      "name": "nodraft",
-     "context": 48128,
+     "context": 40960,
      "execution": {
       "context_capacity": 48128,
       "pool_capacity": 48128,
@@ -49,7 +53,7 @@
   },
   {
    "llama_kv_rocm": 36864,
-   "name": "ggml-org-laguna-xs-2-1-loom",
+   "name": "laguna-llama-diag",
    "card": "loom-fun-staging/ggml-org-Laguna-XS-2.1-loom",
    "kit": null,
    "llamacpp": "b1375",
@@ -76,44 +80,31 @@
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "llama@rocm.np1:1"
    ]
   },
   {
-   "name": "strix-gates-gpt-oss",
-   "runner": "strix",
+   "name": "gptoss-gates-repeat",
    "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
-   "memory_bytes": 28000000000,
    "kit": "gpt-oss",
-   "llamacpp": "b1374",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 28000000000,
    "variants": [
     {
-     "name": "fun",
-     "card": "loom-fun/unsloth-gpt-oss-20b-loom"
+     "name": "card"
     },
     {
-     "name": "staging"
+     "name": "nodraft",
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
-    "gates:fun:dev",
-    "gates:staging:dev"
+    "gates:card:dev",
+    "gates:nodraft:dev"
    ]
   }
- ],
- "card": "loom-fun-staging/ggml-org-Flint-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
