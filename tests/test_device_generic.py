@@ -99,7 +99,7 @@ class MakeInfoFit(unittest.TestCase):
         self.assertEqual(make_info.fit_tables(["x/r9700_fit.json"]), [(R9, "x/r9700_fit.json")])      # a path: the device whose table has that name
         self.assertEqual(make_info.fit_tables(["x/other.json"]), [(R9, "x/other.json")])               # the legacy single table
         self.assertEqual(make_info.fit_tables([f"{RX}=y.json"]), [(RX, "y.json")])
-        self.assertEqual(make_info.fit_tables(["auto"]), [(R9, r9)])                                    # tables that exist in this checkout
+        self.assertEqual([(g, os.path.normpath(p)) for g, p in make_info.fit_tables(["auto"])], [(R9, os.path.normpath(r9))])                                    # tables that exist in this checkout
         self.assertEqual(make_info.fit_tables(None), [])
 
 
