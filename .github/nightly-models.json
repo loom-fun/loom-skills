@@ -29,7 +29,7 @@
    "repo": "loom-fun/ggml-org-Flint-loom",
    "slug": "flint",
    "memory_bytes": 69000000000,
-   "kit": null,
+   "kit": "flint",
    "llamacpp": "b1374",
    "features": [
     "draft",
@@ -132,7 +132,7 @@
    "repo": "loom-fun/ggml-org-LFM2.5-24B-A2B-loom",
    "slug": "lfm2.5-24b-a2b",
    "memory_bytes": 24000000000,
-   "kit": null,
+   "kit": "lfm2moe",
    "llamacpp": "b1374",
    "features": [
     "thinking-always"
