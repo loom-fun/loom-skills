@@ -1,51 +1,54 @@
 {
- "_comment": "omoe2 diagnostics: gpt-oss gates with diagnostics; Flint drafted pool sweep; Laguna llama.cpp rows without the unloadable drafter",
+ "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "flint-pools",
+   "llama_kv_rocm": 40960,
+   "name": "ggml-org-flint-loom",
    "card": "loom-fun-staging/ggml-org-Flint-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 34000000000,
-   "llama_kv_rocm": 40960,
+   "served_context": 36864,
    "variants": [
     {
-     "name": "c34p34",
-     "execution": {
-      "context_capacity": 34816,
-      "pool_capacity": 34816
-     }
-    },
-    {
-     "name": "c36p36",
+     "name": "card",
+     "context": 36864,
      "execution": {
       "context_capacity": 36864,
       "pool_capacity": 36864
      }
     },
     {
-     "name": "c38p38",
+     "name": "nodraft",
+     "context": 36864,
      "execution": {
-      "context_capacity": 38912,
-      "pool_capacity": 38912
+      "context_capacity": 36864,
+      "pool_capacity": 36864,
+      "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "gates:c34p34:dev",
-    "perf:c34p34:1:long",
-    "gates:c36p36:dev",
-    "perf:c36p36:1:long",
-    "gates:c38p38:dev",
-    "perf:c38p38:1:long"
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   }
  ],
- "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
+ "card": "loom-fun-staging/ggml-org-Flint-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
