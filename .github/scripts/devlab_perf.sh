@@ -97,7 +97,8 @@ PORT=${LOOM_PORT:-8161}; LLAMA_PORT=${LLAMA_PORT:-8131}; url=http://127.0.0.1:$P
 t0=$(date +%s); step() { echo "== $* ($(date +%T), +$(( $(date +%s) - t0 ))s)"; }
 q() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); $1"; }
 qv() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); v=next(v for v in j['variants'] if v['name']=='$1'); $2"; }
-repo=$(q "print(j.get('card') or e['card'])"); mem=$(q "print(j.get('memory_bytes') or e['memory_bytes'])")
+repo=$(q "print(j.get('card') or e['card'])"); repo_rev=main; case $repo in *@*) repo_rev=${repo#*@}; repo=${repo%@*};; esac   # "ORG/REPO@BRANCH": a candidate package on a branch revision (not main)
+mem=$(q "print(j.get('memory_bytes') or e['memory_bytes'])")
 kit=$(q "print((j['kit'] if 'kit' in j else e.get('kit')) or '-')"); tag=$(q "print(j.get('llamacpp') or e.get('llamacpp') or '-')"); variants=$(q "print(' '.join(v['name'] for v in j['variants']))")
 steps=$(q "print(' '.join(j['steps']))")
 vtag=$(q "print(j.get('llamacpp_vulkan') or e.get('llamacpp_vulkan') or '-')")
@@ -132,14 +133,16 @@ trap cleanup EXIT
 
 # 1. Loom SDK + tools venv: the SDK the card pins in its llm_config.json (ensure_sdk.sh), else the default
 step "Loom SDK"
-curl -fsSL --retry 3 "https://huggingface.co/$repo/resolve/main/llm_config.json" -o "$out/llm_config.json" || { echo "FAIL: no llm_config.json in $repo"; exit 1; }
+curl -fsSL --retry 3 "https://huggingface.co/$repo/resolve/$repo_rev/llm_config.json" -o "$out/llm_config.json" || { echo "FAIL: no llm_config.json in $repo"; exit 1; }
 root=$("$SV/ensure_sdk.sh" "${LOOM_ROOT:-$WORK/loom}" "$out/llm_config.json" 2> "$out/install.log") || { tail "$out/install.log"; exit 1; }
 export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
 
 # 2. The card (fetched once per runner and card)
 fetch_card() {   # fetch_card REPO -> sets CARD_DIR: the card's files at one commit (a variant "card": ORG/REPO fetches another card)
-  local r=$1 rv bs
-  CARD_DIR=$WORK/_card/${r//\//_}; rv=$(curl -fsS --retry 3 "https://huggingface.co/api/models/$r/revision/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || rv=main
+  local r=$1 rv bs br=main
+  case $r in *@*) br=${r#*@}; r=${r%@*};; esac   # ORG/REPO@BRANCH: a branch revision of the card
+  CARD_DIR=$WORK/_card/${r//\//_}$([ "$br" = main ] || echo "@$br"); rv=$(curl -fsS --retry 3 "https://huggingface.co/api/models/$r/revision/$br" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])') || rv=main
+  [ "$br" = main ] || [ "$rv" != main ] || { echo "FAIL: no branch $br in $r"; exit 1; }
   # the files are fetched at one commit (resolve/main can serve an older revision for a while after a publish), and a card
   # directory left by an earlier job on this runner is reused only when it holds that commit
   bs=https://huggingface.co/$r/resolve/$rv; CARD_BASE=$bs
@@ -164,7 +167,7 @@ EOF
     rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; echo "$rv" > "$CARD_DIR/.fetched"
   fi
 }
-fetch_card "$repo"; card=$CARD_DIR; base=$CARD_BASE
+fetch_card "$repo@$repo_rev"; card=$CARD_DIR; base=$CARD_BASE
 python3 - "$card" <<'EOF' || { echo "FAIL: the fetched card's model.json and llm_config.json disagree (a stale fetch?)"; exit 1; }
 import json, os, sys
 m = json.load(open(os.path.join(sys.argv[1], "model.json"))); c = json.load(open(os.path.join(sys.argv[1], "llm_config.json")))
