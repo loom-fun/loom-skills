@@ -245,11 +245,11 @@ p, rules = sys.argv[1], [r.split(":", 1) for r in json.loads(sys.argv[2])]
 if rules:
     out, prog, n = [], None, 0
     for ln in open(p).read().split("\n"):
-        m = re.match(r"command\.program\.def \w+ @(\w+)", ln)
+        m = re.match(r"command\.program\.def\b.*\s@(\w+)\(", ln)
         if m:
             prog = m.group(1)
         out.append(ln)
-        if re.match(r"\s*kernel\.launch @", ln) and any(pr in ("*", prog) and re.search(rx, ln) for pr, rx in rules):
+        if re.match(r"\s*(kernel\.launch @|template\.apply<@)", ln) and any(pr in ("*", prog) and re.search(rx, ln) for pr, rx in rules):
             out.append(ln); n += 1
     open(p, "w").write("\n".join(out)); print(f"ablation: doubled {n} launches")
 EOF
@@ -349,6 +349,11 @@ for s in $steps; do
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
 print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(x[k] for x in r if x.get(k)), 2))");;
+    probe)   # probe:V: stall_probe.py (when does a prefill stall? TTFT + GPU clocks per request)
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "stall probe $p1"
+      "$T" "$here/.github/scripts/stall_probe.py" "$url" "$cardid" "$out/probe_$p1.jsonl" > "$out/probe_$p1.log" 2>&1; tail -3 "$out/probe_$p1.log" | cut -c1-200
+      res[$s]="$(wc -l < "$out/probe_$p1.jsonl") requests";;
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "c4 $p1"
