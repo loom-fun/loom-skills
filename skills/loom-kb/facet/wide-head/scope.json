@@ -1,0 +1,11 @@
+{
+ "scope": "facet/wide-head",
+ "match": {
+  "head_dim": [
+   256,
+   null
+  ]
+ },
+ "owner": "kb",
+ "choices": []
+}

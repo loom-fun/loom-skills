@@ -10,5 +10,17 @@
   "moe",
   "hybrid-gdn"
  ],
- "choices": []
+ "choices": [
+  {
+   "when": {
+    "facets": [
+     "drafted"
+    ]
+   },
+   "set": {
+    "decode.attn.kv_once.d256": false
+   },
+   "evidence": "Drafted qwen35moe (head_dim 256, 2 KV heads): the K/V-once decode body (#451) cost decode_32k 0.74-0.78x on Strix (runs 43603564334, 43608671297, 43611547482). Rule off: Strix decode_32k vs loom-fun 1.00/1.04/0.98/1.04, R9700 vs staging main 1.22-1.41 (run 43631671557, PR #715)."
+  }
+ ]
 }

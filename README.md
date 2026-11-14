@@ -40,8 +40,7 @@ skill directly.
 | `loom-roofline` | Estimate performance limits and choose targets and a budget |
 | `loom-optimize` | Improve a port's speed while checking correctness |
 | `loom-benchmark` | Validate a port, measure it against llama.cpp, and generate reports |
-| `loom-improve` | Improve and evaluate the skills themselves |
-| `loom-org` | Port, publish and maintain a collection of models on Hugging Face |
+| `loom-fleet` | Targeted fixes, campaigns, populating a Hugging Face org, publishing, and evaluating the skills themselves (merges the former `loom-org` and `loom-improve`) |
 | `loom-kb` | Find the knowledge for a model, GPU and task: the router that prints which files to read |
 
 ### Example requests

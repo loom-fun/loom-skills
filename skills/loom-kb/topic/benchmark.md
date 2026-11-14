@@ -105,7 +105,7 @@ supplies data, `scripts/card/` turns it into the card. Every loom-fun card has t
 footnotes (lead-in, quick start, performance vs llama.cpp, features, correctness gates, files); only the values
 differ. No prose of your own on a card: no "what's new", no explanations, no caveats. A value without evidence
 renders as not measured / no evidence / unknown; never fill one in by hand. A card with failing gates is published
-as it is (`loom-org` step 2): each renders as fail, and only new evidence changes it.
+as it is (`loom-fleet` publish.md step 2): each renders as fail, and only new evidence changes it.
 
 `info.json` (schema `card/info_schema.json`, `"schema": "loom-card/3"`; a `loom-card/2` file reads as its one GPU, Strix
 Halo) holds only what no package file records. Per GPU (`devices.strix-halo`, `devices.radeon-r9700`: card_lib.GPUS): measurement sessions (per-run values, commands, the baseline's version and exact server arguments),
@@ -127,7 +127,7 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
      DevLab Dispatch: gates of every finished level (job URL as evidence), and the spec gate's acceptance from the
      job's `gates_spec.log` as the card's `spec_acceptance`, stamped with the job's programs (a drafting statistic of
      model, drafter and text, not a timing: it counts from any source). A perf session recorded with
-     `--source-kind devlab` (a scripted DevLab port, a `devlab-perf` job: `loom-org` step 3) is the card's performance
+     `--source-kind devlab` (a scripted DevLab port, a `devlab-perf` job: `loom-fleet` publish.md step 3) is the card's performance
      (`card_lib.card_metrics`: per metric the last session); `perf` refuses `--source-kind local`, so finalize's
      `perf --perf-log` record is a development/report record, not card evidence;
    - `card/make_info.py roofline --package DIR -o ev_roofline.json` (tools venv; CPU only, reads the GGUF from the
@@ -168,9 +168,9 @@ loom-skills commit and SDK from `llm_config.json` (`"generator"`, stamped by `bu
    fails instead of overwriting a card another worker published since). Never re-upload a repo's programs, `model.json`, lock or weights for a card change.
    A whole package: `publish_package.py upload DIR --repo REPO` (removes files an in-place update leaves stale).
 
-**Performance guardrails** (`card_lib.perf_flags`, applied by `loom-org`'s `org_status.py`): a metric whose Loom
+**Performance guardrails** (`card_lib.perf_flags`, applied by `loom-fleet`'s `org_status.py`): a metric whose Loom
 value is below half the efficiency Loom ports have demonstrated (far from roofline) sends the model back to a worker
-with `loom-optimize`, and to a deep debugging session if it stays far after that (`loom-org` step 5). A
+with `loom-optimize`, and to a deep debugging session if it stays far after that (`loom-fleet` populate-org.md step 5). A
 value measured on other programs (stale) is re-measured with a fresh `devlab-perf` job first. Flags are only `far`
 and `stale`.
 

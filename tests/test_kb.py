@@ -40,10 +40,10 @@ class RouteTests(unittest.TestCase):
             cfg = Path(d) / "llm_config.json"
             cfg.write_text(json.dumps({"arch": "qwen35", "layers": 64, "kv_layers": 16, "kv_heads": 4, "gdn": {"conv_kernel": 4},
                                        "vision": {"mmproj": "x"}, "draft": {"kind": "dflash"}}))
-            code, out, _ = run("route", "--config", str(cfg), "--relative")
+            code, out, _ = run("route", "--config", str(cfg), "--relative", "--topic", "porting")
         self.assertEqual(code, 0)
         for node in ("facet/drafted/README.md", "facet/vision/README.md", "facet/hybrid-gdn/README.md",
-                     "arch/vision/README.md", "arch/llm/hybrid/qwen35/README.md"):
+                     "arch/vision/porting.md", "arch/llm/hybrid/qwen35/README.md"):
             self.assertIn(node, out.splitlines())
         self.assertNotIn("facet/moe/README.md", out.splitlines())
 
@@ -51,6 +51,22 @@ class RouteTests(unittest.TestCase):
         code, out, _ = run("route", "--arch", "qwen3", "--device", "rdna4", "--topic", "decode", "--relative")
         self.assertEqual(code, 0)
         self.assertIn("topic/decode.md", out.splitlines())
+
+    def test_node_task_files_follow_the_topic(self):
+        argv = ("route", "--arch", "qwen35moe", "--facets", "drafted", "--device", "strix-halo", "--relative")
+        _, none, _ = run(*argv)
+        _, decode, _ = run(*argv, "--topic", "decode")
+        _, prefill, _ = run(*argv, "--topic", "prefill")
+        self.assertNotIn("facet/moe/decode.md", none.splitlines())
+        self.assertIn("facet/moe/decode.md", decode.splitlines())
+        self.assertNotIn("facet/moe/prefill.md", decode.splitlines())
+        self.assertIn("facet/moe/prefill.md", prefill.splitlines())
+        order = prefill.splitlines()
+        self.assertLess(order.index("facet/moe/README.md"), order.index("facet/moe/prefill.md"))
+        self.assertLess(order.index("facet/moe/prefill.md"), order.index("topic/prefill.md"))
+        # a node's task file is printed only for models that match the node
+        _, dense, _ = run("route", "--arch", "qwen3", "--topic", "decode", "--relative")
+        self.assertNotIn("facet/moe/decode.md", dense.splitlines())
 
     def test_unknown_values_fail_with_valid_list(self):
         for argv, word in ((("route", "--arch", "nope"), "qwen3"), (("route", "--arch", "qwen3", "--device", "x"), "strix-halo"),
@@ -132,6 +148,18 @@ class LintTests(unittest.TestCase):
         self.assertIn("no '## Contents'", text)
         self.assertIn("links to node", text)
         self.assertIn("claimed by 2 family nodes", text)
+
+    def test_node_task_file_must_be_a_topic(self):
+        root = self.make({
+            "skills/loom-kb/SKILL.md": self.SKILL.format(n="loom-kb"),
+            "skills/loom-kb/topic/decode.md": "# decode\n",
+            "skills/loom-kb/facet/x/README.md": "# x\n",
+            "skills/loom-kb/facet/x/decode.md": "# x decode\n",
+            "skills/loom-kb/facet/x/dekode.md": "# typo\n",
+        })
+        text = "\n".join(kb.lint(root)[0])
+        self.assertIn("facet/x/dekode.md: a node task file must be named after a topic", text)
+        self.assertNotIn("facet/x/decode.md: a node", text)
 
     def test_real_repo_lints_clean(self):
         errors, _ = kb.lint(REPO)
