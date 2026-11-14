@@ -94,7 +94,10 @@ def build(a):
     r9700 = pool is not None   # a device with its own memory pool (the R9700's path: fit table, device preset); Strix Halo takes the package's
     NAME = card_lib.GPUS[a.device]["runner"]
     if r9700:
-        fit = {r["slug"]: r for r in json.load(open(a.fit or os.path.join(ROOT, card_lib.registry.fit_table(a.device))))}
+        fit_path = a.fit or os.path.join(ROOT, card_lib.registry.fit_table(a.device))
+        if not os.path.exists(fit_path):
+            sys.exit(f"{fit_path}: no fit table for {a.device} (fit.py --device {a.device} writes it)")
+        fit = {r["slug"]: r for r in json.load(open(fit_path))}
     jobs, skipped = [], []
     for slug in a.slugs:
         m = models[slug]

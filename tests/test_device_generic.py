@@ -48,7 +48,10 @@ class DeviceJobs(unittest.TestCase):
             self.assertEqual(a, b)
 
     def test_only_measurable_devices(self):   # a runner, a pool and baselines
-        self.assertEqual(device_jobs.job_devices(), [R9])
+        jd = device_jobs.job_devices()
+        self.assertIn(R9, jd)
+        self.assertNotIn(RX, jd)      # no runner
+        self.assertNotIn(STRIX, jd)   # no memory pool (ab_jobs.py covers it)
         r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "device_jobs.py"), "--device", RX, "x"], capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)   # argparse: RX is not a choice (no runner, no pool fit table, no baselines)
 
@@ -66,8 +69,9 @@ class DeviceJobs(unittest.TestCase):
 
     def test_ab_devices_are_the_registry_devices_with_a_runner(self):
         import ab_jobs
-        self.assertEqual(sorted(ab_jobs.DEVICES), sorted(k for k, d in registry.devices().items() if d["runner"]["labels"]))
-        self.assertEqual({k: v["prefix"] for k, v in ab_jobs.DEVICES.items()}, {STRIX: "sab-", R9: "rab-"})
+        b = registry.methodology()["baselines"]
+        self.assertEqual(sorted(ab_jobs.DEVICES), sorted(k for k, d in registry.devices().items() if d["runner"]["labels"] and "rocm" in b.get(k, {})))
+        self.assertEqual({k: ab_jobs.DEVICES[k]["prefix"] for k in (STRIX, R9)}, {STRIX: "sab-", R9: "rab-"})   # grandfathered job names
 
 
 class FitTable(unittest.TestCase):

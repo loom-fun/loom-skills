@@ -26,7 +26,7 @@ class DeviceRegistry(unittest.TestCase):
     def test_tree_is_consistent(self):
         fams, devs = registry.families(), registry.devices()
         self.assertEqual(list(fams), ["rdna3", "rdna4", "cdna3", "xdna2"])
-        self.assertEqual(list(devs), ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"])
+        self.assertEqual(list(devs)[:3], ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"])   # the first rows keep their order; a new device row may follow
         for name, f in fams.items():
             self.assertTrue((KB / "device" / name / "README.md").exists(), name)
             for d in f["devices"]:
@@ -36,7 +36,7 @@ class DeviceRegistry(unittest.TestCase):
             self.assertIn(d["roofline"]["default"], d["roofline"]["presets"])
             self.assertIn(key, fams[d["family"]]["devices"])
             if d["runner"]["labels"]:   # a device with no DevLab runner (spec-only row) has none
-                self.assertIn("Linux" if key == "strix-halo" else "radeon-r9700", d["runner"]["labels"])
+                self.assertIn("Linux" if key == "strix-halo" else "devlab-dispatch", d["runner"]["labels"])   # a Strix job without Linux can land on Windows
         self.assertEqual({f["status"] for f in fams.values()}, {"supported", "planned"})
 
     def test_lookup_by_alias(self):
@@ -67,7 +67,8 @@ class DeviceRegistry(unittest.TestCase):
 
     def test_card_gpus(self):   # card_lib.GPUS as it was hard-coded
         g = card_lib.GPUS
-        self.assertEqual(list(g), ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"])
+        self.assertEqual(list(g)[:3], ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"])
+        self.assertEqual(list(g), list(registry.devices()))
         self.assertEqual({k: v for k, v in g["strix-halo"].items() if k != "detect"},
                          {"name": 'AMD Ryzen AI Max+ 395 "Strix Halo"', "short": "Strix Halo", "arch": "gfx1151", "memory": None,
                           "roofline": "strix-halo", "memory_bytes": None, "runner": "Strix Halo", "tag": "strix-halo"})
@@ -85,8 +86,8 @@ class DeviceRegistry(unittest.TestCase):
 
     def test_roofline_presets(self):
         p = registry.roofline_presets()
-        self.assertEqual({k: (v["bw"], v["flops"]) for k, v in p.items()},
-                         {"strix-halo": (216e9, 59e12), "radeon-rx7900xtx": (960e9, 123e12), "radeon-r9700": (613e9, 191.4e12), "radeon-r9700s": (613e9, 214e12)})
+        pinned = {"strix-halo": (216e9, 59e12), "radeon-rx7900xtx": (960e9, 123e12), "radeon-r9700": (613e9, 191.4e12), "radeon-r9700s": (613e9, 214e12)}
+        self.assertEqual({k: (v["bw"], v["flops"]) for k, v in p.items() if k in pinned}, pinned)   # existing rows keep their values; new devices add presets
         for g in card_lib.GPUS.values():   # every card GPU names a roofline preset that exists
             self.assertIn(g["roofline"], p)
 
@@ -197,9 +198,11 @@ class Methodology(unittest.TestCase):
         self.assertEqual(b["radeon-r9700"]["rocm"]["build"], "b1375")
         self.assertEqual(b["strix-halo"]["rocm"]["fallback"], "b1374")
         self.assertEqual({b[k]["vulkan"]["build"] for k in b if k in registry.devices() and "vulkan" in b[k]}, {"b12211"})
-        for k, d in registry.devices().items():   # every device is accounted for: builds, or an explicit "none" (no runner) that names why
-            self.assertIn(k, b, k)
-            self.assertEqual("none" in b[k], not d["runner"]["labels"], f"{k}: baselines name builds exactly when the device has a runner")
+        for k, d in registry.devices().items():   # a device with a runner names its llama.cpp builds; "none: ..." (or no entry) says it has no runner
+            if d["runner"]["labels"]:
+                self.assertTrue({"rocm", "vulkan"} <= set(b.get(k, {})), f"{k}: a runner needs llama.cpp builds in methodology.json baselines")
+            else:
+                self.assertNotIn("rocm", b.get(k, {}), f"{k}: builds without a runner")
 
 
 class ABCompare(unittest.TestCase):
