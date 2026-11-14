@@ -15,13 +15,44 @@
     {
      "name": "hb",
      "build": {},
+     "serve_args": []
+    },
+    {
+     "name": "slab256",
+     "build": {},
      "serve_args": [
-      "--heartbeat_ms=50"
+      "--state_slab_bytes=256mib"
      ]
+    },
+    {
+     "name": "slab1g",
+     "build": {},
+     "serve_args": [
+      "--state_slab_bytes=1gib"
+     ]
+    },
+    {
+     "name": "slab4g",
+     "build": {},
+     "serve_args": [
+      "--state_slab_bytes=4gib"
+     ]
+    },
+    {
+     "name": "fixed",
+     "build": {},
+     "serve_args": [
+      "--pool_backing=fixed"
+     ],
+     "memory_bytes": "none"
     }
    ],
    "steps": [
-    "probe:hb"
+    "probe:hb",
+    "probe:slab256",
+    "probe:slab1g",
+    "probe:slab4g",
+    "probe:fixed"
    ]
   }
  ],

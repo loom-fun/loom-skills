@@ -271,7 +271,8 @@ serve_alone() { # serve_alone VARIANT
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
   local aw; aw=$(qv "$1" "print(0 if v.get('active_wait') is False else 1)")
   local sa=(); read -r -a sa <<< "$(qv "$1" "print(' '.join(v.get('serve_args') or []))")"   # variant "serve_args": extra loom-serve flags (diagnostics, tuning)
-  step "serve $1 ${sa[*]:-}"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" ${sa[@]:+-- "${sa[@]}"} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
+  local vmem; vmem=$(qv "$1" "print(v.get('memory_bytes') or '$mem')")   # variant "memory_bytes": "none" with --pool_backing=fixed
+  step "serve $1 ${sa[*]:-}"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa[@]:+-- "${sa[@]}"} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null
 }
