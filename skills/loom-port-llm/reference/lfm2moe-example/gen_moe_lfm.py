@@ -519,7 +519,10 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
     rep(f'export("{base}") @{base}(', f'export("{name}") @{name}(')
     rep("launch(%rows_arg: index, %k_arg: index, %n_arg: index, %x: buffer, %scales: buffer,",
         "launch(%rows_arg: index, %k_arg: index, %n_arg: index, %xrows_arg: index, %tile_info: buffer, %rowmap: buffer, %x: buffer, %scales: buffer,")
-    rep("[range(%rows_arg, 64, 8192), multiple_of(%rows_arg, 64)]", "[range(%rows_arg, 64, 1048576), multiple_of(%rows_arg, 64)]")
+    # rows = max_tiles*64 <= 8192 tokens * KU + 64 * E; n is this kernel's N. Tight bounds keep the output tile's dynamic-stride
+    # extent (rows * n * 4 bytes) inside what the AMDGPU fragment store accepts (rows 2^20 x n 2^18 is rejected, gfx11 and gfx12).
+    rep("[range(%rows_arg, 64, 8192), multiple_of(%rows_arg, 64)]", f"[range(%rows_arg, 64, {8192 * KU + 64 * E}), multiple_of(%rows_arg, 64)]")
+    rep("[range(%n_arg, 64, 262144), multiple_of(%n_arg, 64)]", f"[range(%n_arg, 64, {N}), multiple_of(%n_arg, 64)]")
     rep("  %origin = index.constant 0 : offset\n", "  %origin = index.constant 0 : offset\n  %xrows = index.assume %xrows_arg [range(%xrows_arg, 1, 1048576)] : index\n")
     # skip tiles of no expert; expert weight offset
     rep("  %workitem_id = kernel.workitem.id<x> : index\n", f"""  %ti_view = buffer.view %tile_info[%origin] : buffer -> view<[%row_tile_count]x2xi32>
@@ -567,7 +570,8 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
         rep("  %bounded_x_row = index.assume %x_row [lt(%x_row, %rows)] : index", "  %bounded_x_row = index.assume %x_row [lt(%x_row, %xrows)] : index")
         rep("    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index", "    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %xrows)] : index")
     rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
-    return text
+    import gen_gemm_rdna4
+    return text + "\n" + gen_gemm_rdna4.twin(text) if gen_gemm_rdna4.enabled() else text   # the gfx12 twin K_rdna4 beside K
 
 
 def combine_sorted(H, KU):

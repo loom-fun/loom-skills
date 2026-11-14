@@ -2078,6 +2078,84 @@ def add_partial(c):   # gen_llm.py launches the partial tiles' kernel after ever
         return c
     return re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_partial[\2", c, flags=re.M)
 cases = [add_partial(c) for c in cases]
+# 7. The grouped MoE GEMMs alone (g_moe_ggu_* gate/up with a gathered A, g_moe_gdn_* down on sorted rows), launched with a
+# hand-made tile table: a full 64-row tile, a partial one, an unused tile (expert -1) and a 5-row tile, three experts, on the
+# real expert tensors. Needed where a kit has no prefill router in its tests (lfm2moe) and cheap everywhere else; plain
+# experts only (the fused / bias / swiglu_oai variants are covered by the chain's moe_prefill case). Tolerance: the Q4_K
+# dequant runs in F16 (code * scale + min, cancelling), so silu(g) * u of a 20x input is good to a few percent of the mean |act|
+# (identical on gfx11 and gfx12, DevLab runs 43522159314 / 43525204171); a wrong fragment layout is off by 100 %.
+if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1" and os.environ.get("MOE_GEMM_TESTS", "1") == "1" \
+        and not cfg["moe"].get("gate_up_fused") and not cfg["moe"].get("expert_bias") and cfg["moe"].get("act") != "swiglu_oai":
+    M7 = cfg["moe"]; E7, KU7, FE7 = M7["experts"], M7["used"], M7["ffn"]
+    def exp_deq(name, e):
+        tt = T[name]; return dequantize(np.asarray(tt.data)[e], tt.tensor_type).reshape(int(tt.shape[1]), int(tt.shape[0])).astype(np.float64)
+    seen7 = set()
+    for li in range(M7["leading_dense"], cfg["layers"]):
+        b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower()
+        fg = T[b + "ffn_gate_exps.weight"].tensor_type.name.lower(); fu = T[b + "ffn_up_exps.weight"].tensor_type.name.lower()
+        gun = fg if fg == fu else f"{fg}_{fu}"
+        if (fd, gun) in seen7: continue
+        seen7.add((fd, gun))
+        tg = f"mg{li}"
+        ex = [0, E7 // 2, E7 - 1]; mt = 4; mr = mt * 64; t7 = 40; ta7 = t7 * KU7
+        counts = [64, 37, 0, 5]; tile_exp = [ex[0], ex[1], -1, ex[2]]
+        tile_info = np.array([[e, c] for e, c in zip(tile_exp, counts)], np.int32)
+        rowmap = np.full(mr, -1, np.int32)
+        for ti, c in enumerate(counts):
+            rowmap[ti * 64:ti * 64 + c] = rng.integers(0, ta7, c)
+        live = rowmap >= 0
+        tile_of = np.repeat(np.arange(mt), 64)
+        # gate/up: x16 rows (token), scale pairs [2^-e, 2^e] per token; out[r] = act(Wg x) * (Wu x), x rounded to F16
+        xs = (rng.standard_normal((t7, H)) * rng.choice([0.05, 1.0, 20.0], (t7, 1))).astype(np.float32)
+        ee = np.clip(np.frexp(np.abs(xs).max(-1))[1] - 1 - 13, 0, 100).astype(np.float64)
+        sc = np.stack([2.0 ** -ee, 2.0 ** ee], 1).astype(np.float32); x16 = (xs * sc[:, :1]).astype(np.float16)
+        wgs = {e: exp_deq(b + "ffn_gate_exps.weight", e) for e in ex}; wus = {e: exp_deq(b + "ffn_up_exps.weight", e) for e in ex}
+        wds = {e: exp_deq(b + "ffn_down_exps.weight", e) for e in ex}
+        act_ref = np.zeros((mr, FE7)); ys_ref = np.zeros((mr, H))
+        act_in = np.zeros((mr, FE7), np.float32)
+        for r in np.flatnonzero(live):
+            e = tile_exp[tile_of[r]]; tok = rowmap[r] // KU7
+            xr = x16[tok].astype(np.float64)
+            si = float(sc[tok, 1]); act_ref[r] = ffn_act((wgs[e] @ xr) * si) * ((wus[e] @ xr) * si)   # both GEMM outputs times the row's inverse scale
+            act_in[r] = rng.standard_normal(FE7) * rng.choice([0.05, 1.0, 20.0])
+        er = np.clip(np.frexp(np.abs(act_in).max(-1))[1] - 1 - 13, 0, 100).astype(np.float64)
+        sr = np.stack([2.0 ** -er, 2.0 ** er], 1).astype(np.float32); sr[~live] = 0
+        a16 = (act_in * sr[:, :1]).astype(np.float16)
+        for r in np.flatnonzero(live):
+            e = tile_exp[tile_of[r]]
+            ys_ref[r] = (wds[e] @ a16[r].astype(np.float64)) * sr[r, 1].astype(np.float64)
+        for n, a in [("_ti", tile_info), ("_rm", rowmap), ("_x", x16), ("_s", sc), ("_act", act_ref.astype(np.float32)), ("_a16", a16),
+                     ("_sr", sr), ("_ys", ys_ref.astype(np.float32))]:
+            save(tg + n, a)
+        for n, a in [("_wg", raw(b + "ffn_gate_exps.weight")), ("_wu", raw(b + "ffn_up_exps.weight")), ("_wd", raw(b + "ffn_down_exps.weight"))]:
+            save(tg + n, a)
+        gt7, ut7, dt7 = ty(raw(b + "ffn_gate_exps.weight")), ty(raw(b + "ffn_up_exps.weight")), ty(raw(b + "ffn_down_exps.weight"))
+        cases.append(f"""check.case public @moe_gemm_{li} {{
+  %max_rows = check.literal value({mr}) : index
+  %nFE = check.literal value({FE7}) : index
+  %nH = check.literal value({H}) : index
+  %t = check.literal value({t7}) : index
+  %ti = check.file.read.npy path("{tg}_ti.npy") : tensor<{mt}x2xi32>
+  %rm = check.file.read.npy path("{tg}_rm.npy") : tensor<{mr}xi32>
+  %x = check.file.read.npy path("{tg}_x.npy") : tensor<{t7}x{H}xf16>
+  %s = check.file.read.npy path("{tg}_s.npy") : tensor<{t7}x2xf32>
+  %wg = check.file.read.npy path("{tg}_wg.npy") : {gt7}
+  %wu = check.file.read.npy path("{tg}_wu.npy") : {ut7}
+  %wd = check.file.read.npy path("{tg}_wd.npy") : {dt7}
+  %eact = check.file.read.npy path("{tg}_act.npy") : tensor<{mr}x{FE7}xf32>
+  %a16 = check.file.read.npy path("{tg}_a16.npy") : tensor<{mr}x{FE7}xf16>
+  %sr = check.file.read.npy path("{tg}_sr.npy") : tensor<{mr}x2xf32>
+  %eys = check.file.read.npy path("{tg}_ys.npy") : tensor<{mr}x{H}xf32>
+  %act = check.generate.fill value(0.0) : tensor<{mr}x{FE7}xf32>
+  %ys = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
+  kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %ti, %rm, %x, %s, %wg, %wu, %act) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t7}x{H}xf16>, tensor<{t7}x2xf32>, {gt7}, {ut7}, tensor<{mr}x{FE7}xf32>)
+  kernel.launch @g_moe_gdn_{fd}_k{FE7}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %ti, %rm, %a16, %sr, %wd, %ys) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE7}xf16>, tensor<{mr}x2xf32>, {dt7}, tensor<{mr}x{H}xf32>)
+  check.expect.close actual(%act) expected(%eact) atol({0.15 * float(np.abs(act_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{FE7}xf32>
+  check.expect.close actual(%ys) expected(%eys) atol({0.05 * float(np.abs(ys_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{H}xf32>
+  check.return
+}}
+""")
+        print(f"moe_gemm layer {li}: {gun}/{fd}, mean |act| {np.abs(act_ref).mean():.3g}, mean |ys| {np.abs(ys_ref).mean():.3g}")
 if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
     cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
                     flags=re.M) for c in cases] + DEEP_CASES   # these launch the two kernels as they test them
