@@ -95,6 +95,7 @@ two or three lines; if they disagree with this file, this file wins and the othe
     The bands were checked on true A/A pairs (same programs on both sides, `band_calibration_aa` in `methodology.json`): a row whose A/A
     spread exceeded its band in more than 5 % of pairs was widened (decode: 3 -> 3.5 %).
     A ratio within 2 points of its reject threshold extends 2+2 sessions to 6+6. `strix_ab_compare.py --band X` forces one flat band.
+    Drafting acceptance rows are reported but informational: they never make a verdict rerun or out_of_margin (perf rows decide).
 
 Local qualification (`qualify.sh`, `llama_spec_tune.py`, `tune.py`) is a development loop: its tables guide the optimizer, are
 not card numbers, and may try configurations the card rule excludes. Audit a card with `matched_spec.rule_violations`.
