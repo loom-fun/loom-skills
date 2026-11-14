@@ -2,20 +2,6 @@
 
 Levers for the WMMA GEMMs, flash attention, chunk size and fusions. Numbers come from the Flint (40B MoE) and Muse Glimmer (30B dense) ports on Strix Halo (RDNA3.5, gfx1151) against llama.cpp ROCm b1355 unless a lever says otherwise. Kernels are in `loom-port-llm/starter/gen_llm.py` / `gen_gemm.py` / `gen_flash2*.py`.
 
-## Contents
-
-- WMMA GEMM (`gen_gemm.py`)
-- flash2 (`gen_flash2.py`)
-- flash2 at head_dim 256 and 512 (`gen_flash2s.py`)
-- Last-layer output rows (`LAST_OUT`, llama.cpp `inp_out_ids`)
-- Listed fallback
-- Per-token RoPE + KV store (`qk_rope()`)
-- Fusions
-- Tile order per port (`cfg["gemm_n_fastest"]`)
-- Settled for starter ports (do not re-run these A/Bs)
-- RDNA4 (gfx12) GEMM twins (pointer)
-- Did not help (prefill)
-
 ## WMMA GEMM (`gen_gemm.py`)
 
 - **Row-scaled f16 inputs.** `g_row_scale_f16` writes x/scale as f16 together with
@@ -23,39 +9,6 @@ Levers for the WMMA GEMMs, flash attention, chunk size and fusions. Numbers come
   in f32. The output is multiplied by the row scale (store, acc or swiglu modes).
 - **Tiles.** 64, 128 or 256 rows × N tile: m128 from 128 tokens, m256 (`gemm_big256`) when the epoch's rows
   are a multiple of 256 (`GEMM_M256=0` turns it off).
-- **m256: dequant per MMA halved** (why: the RDNA3 VALU/WMMA serialization, in `device/rdna3`).
-  m256 is the m128 layout with twice the
-  rows (512 threads, 256 × 128 tile; swiglu interleaves 64 gate + 64 up rows in one weight stage, picking the
-  buffer per wave with `scf.select` on `buffer`), so each dequantized weight slice feeds 256 rows (~115 VALU per
-  32 WMMAs). 55 KB LDS (padded rows), 2 workgroups per WGP. Real-data microbenchmark (interleaved
-  `loom-benchmark --compare`), Qwen3.8-27B shapes at 1024 rows: down +9.5 %, gate +5.4 %, gate/up swiglu
-  +4.5 %; prefill 1k/2k/8k +5.8/+5.0/+6.0 % (this includes the GDN input prefetch below; the recurrence
-  ablation puts that share near zero).
-  - Tried: gufo's 256 × 256 tile with 1024 threads. LDS can't hold both padded operands (73 KB), so the
-    stages were K-slice-major unpadded (`[4 x 256 rows] x 16`): 22.8 TFLOP/s vs 30.8 (one workgroup per WGP,
-    2-way LDS read conflicts). A half-swap swizzle to remove the conflicts made the compiler keep one address
-    register per fragment half (VGPR 184 → >192, did not fit 1024 threads; the 512-thread swizzled form ran
-    256 VGPRs and 19-22 TFLOP/s). Moving m128's 8 KB inverse-scale tile into the activation stage (3 instead
-    of 2 workgroups per WGP) was mixed: down -4 %, swiglu/gate +1.5/+2 %; not kept.
-  - Tile order (`GEMM_N_FASTEST`) makes no difference for m256 on the 27B shapes.
-- **m256 with 64 × 64 waves.** `gemm_big256` now runs 256 threads (8 waves, 4 × 2) of 64 rows × 64 columns
-  instead of 16 waves of 32 × 64: each A fragment feeds 4 B fragments and each B fragment 4 A fragments (0.5
-  LDS fragment reads per MMA instead of 0.75), VALU per WMMA 4.5 → 3.0 (store loop), 232-248 VGPRs (two
-  workgroups per WGP still fit). Each thread stages two activation rows and one 32-value K group of a weight
-  row. Real-data microbenchmark, 27B shapes at 1024 rows (REPS=7 interleaved): swiglu/gate/down
-  +2.5/+2.1/+4.3 %. Qwen3.8-27B same-server A/B (two sessions): prefill 2k +2.0/+1.7 % (484.5 → 494.2,
-  482.7 → 490.9), 1k +1.3 %, 8k +1.9 %; Bolt (gemma4 kit) 1k/2k +1.3/+1.1 %. All inside the noise band, but
-  the sign held in every run.
-  - Where the m256 time goes (store kernel, 27B shapes, same session): full kernel 32 TFLOP/s; no LDS
-    fragment reads (fragments held in registers) 36; no staging (no global loads, dequant, barriers) 37-38;
-    neither (WMMA from registers only) 40-41. Single ablations were each small: no dequant +6-8 %, no global
-    loads +4.5 %, no barriers 0-5 %, 1 of 4 B fragments +1-3 %. The overheads are latency, not bandwidth.
-  - Tried: loads of fragment step kk+1 placed before step kk's MMAs: the compiler reschedules anyway (tie).
-    Forcing that order with `scf.schedule.fence`: 200-208 VGPRs, -15 %. Fences around each step's loads and
-    MMAs: +2 % once, -6/-10 % on reruns (noise). The 64 × 64 layout with fences: swiglu -8/-10 %. A per-wave
-    `buffer.view` at the B-fragment row so all B reads use immediate offsets (swiglu VGPR 208 → 160): tie,
-    so occupancy is not the limit either. Sharing one Q4_K scale/min decode between a thread's two 16-value
-    slices: tie (not kept). Load-time weight repack: capped at the dequant ablation's 6-8 %; not tried.
 - **Register prefetch** of the next K-step, guarded by `scf.if step+1 < k_steps`
   (without the guard the prover rejects the access).
 - `GEMM_N_FASTEST=1` puts output tiles on grid x, so consecutive workgroups reuse
@@ -85,23 +38,6 @@ Levers for the WMMA GEMMs, flash attention, chunk size and fusions. Numbers come
   the KV cache per 32 queries and is bandwidth-bound (Qwen3-0.6B: 25 % of roofline at 1k, 13 % at 32k). Two tiles per
   workgroup share each staged K/V tile: Qwen3-0.6B / 1.7B 32k prefill 2.6x / 2.1x, 1k tie (default at G <= 2). At
   G = 3 / 4 it lost 3-16 %; 4 or 8 tiles lost to 2 (too few workgroups per chunk).
-
-## flash2 at head_dim 256 and 512 (`gen_flash2s.py`)
-
-- At head_dim 256, 256 dims of Q (as f16 fragments) plus 256 dims of output accumulators exceed 256 VGPRs, so
-  gen_flash2.py reloads all of Q from global memory (f32, converted each time) every 32-key tile: ~6x the K/V
-  tile's bytes. gen_flash2s.py gives each query head TWO waves of 128 dims: a wave holds its Q half in
-  registers for the whole key loop, computes S^T over its dims, publishes it to LDS and adds its partner's
-  (commutative add: both waves hold bit-identical S, softmax and P), then accumulates its 128 output dims.
-- Staging: lane = key, workitem/32 = dim segment, so a wave's V^T writes hit 32 consecutive columns
-  (conflict-free) and each lane does one paged-KV lookup per tile (V = K offset + one plane).
-- Qwen3.8-27B (G = 6, 12 waves, 61 KB LDS): a 1024-token chunk at 32k depth runs 16.9 TFLOP/s; prefill
-  2k/8k/32k 401.6/368.6/262.5 -> 429.1/426.7/378.1 tok/s. Attention had been 1.42 ms of 3.8 ms per token at 32k.
-- Head_dim 512 (gemma4 global layers): four waves per head, 16-key tiles (K and V^T of 32 keys exceed 64 KiB), each
-  wave sums the head's four S partials in wave order. Over the two-pass kernel that reloaded Q per tile and
-  recomputed S per 256-dim output half: gemma-4-26B-A4B prefill 1k/8k/16k/32k 1.11/1.35/1.64/2.17x (local A/B).
-- Test it standalone with real shapes: a flash2 harness (paged arena filled directly, float64 reference with
-  the gate) plus a broken variant (partner sum dropped) as the negative control.
 
 ## Last-layer output rows (`LAST_OUT`, llama.cpp `inp_out_ids`)
 
@@ -150,10 +86,6 @@ trials re-tested them on Qwen3.5-0.8B and the defaults won or tied every time:
 measured neutral) or on the long
 prefill path. Bigger or MoE models: the chunk size is worth one A/B measured at 1k too (4096 helped
 one MoE port; 2048 and 4096 both cost 12-18 % at 1k on flint).
-
-## RDNA4 (gfx12) GEMM twins
-
-The gfx12 twins' kbench findings (what bounds them, what was tried, why int8 WMMA is not the answer) are in `device/rdna4`.
 
 ## Did not help (prefill)
 

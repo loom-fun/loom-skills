@@ -102,7 +102,7 @@ G=$(ls $W/gguf/*.gguf)
 "$K/loom-benchmark/scripts/finalize.sh" $W/pkg http://127.0.0.1:8160 $G $W/bench  # 4. final perf, full gates, audit, report.html
 ```
 1. **Port.** `port.sh` first looks up the closest **category A** loom-fun package (card made by the current
-   skill) and starts from it (`loom-port-llm`, "Start from a reference"); `REFERENCE=off` ports from scratch.
+   skill) and starts from it (loom-kb topic `reference`); `REFERENCE=off` ports from scratch.
    `port.sh` stops with an exit code naming the stage that needs hand-work
    (3: the chat template, or an architecture the starter doesn't cover). Then follow
    `loom-port-llm` for that stage only, and continue with step 2 once the package
@@ -166,7 +166,7 @@ Read it from there if it isn't in your skill list.
   llama.cpp runs), but `starter/pick_gguf.py` still keeps a GGUF that fits twice (a 40B repo's
   UD-Q5_K_XL instead of its 39 GiB Q8_0) until quant choice accounts for the KV pool at full context.
   A model whose **resident** set legitimately exceeds that default (a package that reads a big lookup table from the
-  GGUF on demand instead of keeping it resident: `catalog.json` `memory.over_cap`, loom-port-llm "Catalog packages")
+  GGUF on demand instead of keeping it resident: `catalog.json` `memory.over_cap`, loom-kb topic `catalog-ports`)
   carries an explicit per-model budget; `serve.sh` and `llamacpp_server.sh` then run `loom-setup/scripts/memcheck.sh`
   and refuse unless `MemAvailable` ≥ the budget + 16 GiB (`LOOM_MEMORY_HEADROOM_GIB`). Nothing else big may be resident.
 - **GPU memory is system RAM** (unified memory: GTT reports ~115 GiB on a 128 GB box, but the desktop

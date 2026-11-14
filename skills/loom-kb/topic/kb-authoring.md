@@ -1,0 +1,29 @@
+# Topic: kb-authoring (where a fact goes, node layout, scope rules, lint)
+
+## Where a fact goes
+
+1. One model family only: `arch/llm/<topology>/<family>/README.md`.
+2. One GPU or GPU family: `device/...`. One quant format: `quant/...`.
+3. Every model with a property (MoE, drafter, vision, sliding window, hybrid, few KV heads): the facet.
+4. Everything else about a task: the topic file. Never copy a fact into two nodes; the duplicate-paragraph lint fails.
+5. Keep the number and its evidence (PR, run, date) with the fact. Node README <= 300 lines (TOC above 100), no
+   links between nodes (the router is the table of contents), every relative link resolves.
+
+## Nodes, owners and scope rules
+
+- A selector node has `scope.json`: `{"scope": <its path>, "match": {...}, "owner": "...", "facets": [...], "choices": []}`.
+  `match` keys: `arch` (cfg arch / GGUF architecture names), `has` / `lacks` (cfg keys), `kv_heads`, `head_dim`,
+  `sliding_window`, `layers` as `[lo, hi]`, `recurrent_kv`. Each arch value belongs to exactly one family node.
+- `choices` is empty unless the node sets model-affecting choices (see `choices.py`). A new choice is opt-in by
+  scope: its legacy value is today's behaviour and only the models the node matches change.
+- Add a family: create `arch/llm/<topology>/<family>/{README.md,scope.json}`. Add a facet: `facet/<tag>/`.
+  Add a topic: `topic/<name>.md`. Then run `python3 "${LOOM_SKILL_DIR}/kb.py" lint` (also in CI).
+- `kb.py lint` checks: SKILL.md <= 500 lines and frontmatter limits for every skill, node size and TOC, links,
+  no node-to-node links, no duplicated paragraph (>= 200 chars; intentional ones in `lint_allow.json`), and that every
+  fleet arch maps to one family node.
+
+## Where facts live (summary)
+
+- Where facts live: one family only -> its family node; a property shared across families (MoE, drafter, vision,
+  sliding window, hybrid, <= 2 KV heads) -> the facet; a task -> the topic. `kb.py route` prints exactly the files for
+  a model, device and task.

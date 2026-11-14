@@ -8,6 +8,6 @@
  "owner": "kb",
  "choices": [],
  "also": [
-  "arch/vision/README.md"
+  "arch/vision/porting.md"
  ]
 }

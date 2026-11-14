@@ -229,7 +229,7 @@ The horizon is what is left of the budget, minus the reserve.
      matvec lost when the matvec was under-filled, and may win now that it isn't.
      To fork, branch from that decision's commit (`git worktree add ../fork-X <commit>`),
      then build it with its own `--model-id` and serve it next to the best build
-     (`loom-optimize` "Fast iteration"). Choose an
+     (loom-kb topic `optimize-loop`, "Fast iteration"). Choose an
      earlier commit when a later choice blocks the lever, for example a layout that
      prevents a fusion.
 3. **Pick the best candidate** if its expected rate gives an ETA to the goal within

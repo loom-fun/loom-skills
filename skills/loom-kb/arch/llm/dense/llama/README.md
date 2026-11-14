@@ -12,9 +12,3 @@ GGUF arch `llama` (Llama-3.x, Nanbeige, HyperCLOVAX): neox-less `norm` RoPE pair
     llama.cpp, which a control program can't; Loom renders the templates' own no-clock date, 26 Jul 2024
     (`chat_probe.CLOCK`), so prompts are the same every day. The architecture side is `rope_freq_factors`
     (`rope_freqs.weight`: llama.cpp divides each rotary pair's frequency by it).
-
-## Fleet models (published packages, llm_config.json)
-
-- `bartowski-Nanbeige4.3-33B-loom` (llama): 52L h7168, 56h/8kv hd128, ctx 524288
-- `rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom` (llama): 24L h2048, 16h/8kv hd128, ctx 131072
-- `unsloth-Llama-3.2-3B-Instruct-loom` (llama): 28L h3072, 24h/8kv hd128, ctx 131072
