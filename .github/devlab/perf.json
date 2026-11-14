@@ -5,20 +5,145 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "llama_kv_rocm": 36864,
+   "name": "bartowski-nanbeige4-3-33b-loom",
+   "card": "loom-fun-staging/bartowski-Nanbeige4.3-33B-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 37888,
    "variants": [
     {
      "name": "card",
-     "build": {}
+     "context": 37888,
+     "execution": {
+      "context_capacity": 37888,
+      "pool_capacity": 37888
+     }
     },
     {
      "name": "nodraft",
-     "build": {},
+     "context": 37888,
+     "execution": {
+      "context_capacity": 37888,
+      "pool_capacity": 37888,
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "xhtoken-spark-x2-5-4b-loom",
+   "card": "loom-fun-staging/XHToken-Spark-X2.5-4B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 195584,
+   "variants": [
+    {
+     "name": "card",
+     "context": 195584,
+     "execution": {
+      "context_capacity": 195584,
+      "pool_capacity": 195584
+     }
+    },
+    {
+     "name": "nodraft",
+     "context": 195584,
+     "execution": {
+      "context_capacity": 195584,
+      "pool_capacity": 195584,
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "bartowski-spark-x2-6-4b-loom",
+   "card": "loom-fun-staging/bartowski-Spark-X2.6-4B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 194560,
+   "variants": [
+    {
+     "name": "card",
+     "context": 194560,
+     "execution": {
+      "context_capacity": 194560,
+      "pool_capacity": 194560
+     }
+    },
+    {
+     "name": "nodraft",
+     "context": 194560,
+     "execution": {
+      "context_capacity": 194560,
+      "pool_capacity": 194560,
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
+   "name": "unsloth-llama-3-2-3b-instruct-loom",
+   "card": "loom-fun-staging/unsloth-Llama-3.2-3B-Instruct-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 29000000000,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "nodraft",
      "execution": {
       "draft_depth": 0
      }
@@ -40,7 +165,7 @@
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/bartowski-Nanbeige4.3-33B-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
