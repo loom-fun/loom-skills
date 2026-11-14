@@ -313,15 +313,19 @@
  },
  {
   "slug": "ggml-org-Qwen3.6-35B-A3B-loom",
-  "w": 29982562617,
+  "w": 26530410809,
   "kv": 11811160064,
   "kv32": 1476395008,
   "kvpp": 45056,
   "ctx": 262144,
   "mem": 48000000000,
-  "need": 43793722681.0,
+  "need": 40341570873.0,
   "verdict": "fits (reduced ctx)",
-  "n_exp": 256
+  "n_exp": 256,
+  "r9700_execution": {
+   "prefill_capacity": 2048
+  },
+  "ctx_cap": 65536
  },
  {
   "slug": "ggml-org-gemma-3-1b-it-loom",

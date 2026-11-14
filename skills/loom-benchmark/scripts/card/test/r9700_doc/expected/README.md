@@ -34,7 +34,7 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
-On the AMD Radeon AI PRO R9700, `--memory_bytes=34000000000` bounds the memory pool: this package serves up to 20,480 tokens per request there (its native context is 40,960); the package files are the same on every GPU.
+On the AMD Radeon AI PRO R9700, `--memory_bytes=34000000000` bounds the memory pool: this package serves up to 20,480 tokens per request there (its native context is 40,960); the programs and weights are the same on every GPU.
 
 On the AMD Radeon AI PRO R9700, the Quick start fetches `model.radeon-r9700.json`: `model.json` with these execution settings for its 32 GB: `context_capacity` 20,480, `pool_capacity` 20,480, `prefill_capacity` 2,048. The programs, weights and tokenizer are the same.
 

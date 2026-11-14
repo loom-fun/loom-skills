@@ -539,7 +539,7 @@ def render(d):
         if sc:
             L += [f"On the {GPUS[g]['name']}, `--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}` bounds the memory pool: "
                   f"this package serves up to {sc:,} tokens per request there (its native context is {native:,}); "
-                  ("the programs and weights are the same on every GPU." if info["devices"][g].get("model_document") else "the package files are the same on every GPU."), ""]
+                  + ("the programs and weights are the same on every GPU." if info["devices"][g].get("model_document") else "the package files are the same on every GPU."), ""]
     for g in serving:   # a GPU's own model document: what it changes (the same programs, weights and tokenizer)
         md = info["devices"][g].get("model_document")
         if md:

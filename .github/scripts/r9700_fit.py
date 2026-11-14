@@ -87,9 +87,8 @@ for slug in a.slugs or sorted(models):
     print(f"{slug}: w {fixed / 1e9:.1f} GB kv/pos {kvpp / 1024:.1f} KiB need {need / 1e9:.1f} GB {verdict} (was {o.get('verdict')}; served ctx {sc_old} -> {sc_new})", flush=True)
     if o.get("verdict") != verdict or sc_old != sc_new:
         changes.append((slug, o.get("verdict"), sc_old, verdict, sc_new))
-if not a.slugs:   # the models this run did not rebuild (not in nightly-models) keep their rows
-    seen = {r["slug"] for r in rows}
-    rows += [o for s, o in old.items() if s not in seen]
+seen = {r["slug"] for r in rows}   # the models this run did not rebuild (not named, or not in nightly-models) keep their rows
+rows += [o for s, o in old.items() if s not in seen]
 rows.sort(key=lambda r: r["slug"])
 json.dump(rows, open(a.out, "w"), indent=1)
 print("\nverdict or served context changed:")
