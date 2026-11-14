@@ -129,6 +129,7 @@ def parse_block(text):
 
 # --- matching models against scopes -------------------------------------------------------------------------------------------
 def load_module(path, name):
+    sys.dont_write_bytecode = True   # never leave __pycache__ in the tree under lint
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
@@ -141,16 +142,14 @@ class Matcher:
 
     def __init__(self, tree):
         self.kb = os.path.join(tree, "skills", "loom-kb")
-        self.r = None
         rp = os.path.join(self.kb, "resolve.py")
-        if os.path.isfile(rp):
-            try:
-                sys.path.insert(0, self.kb)
-                self.r = load_module(rp, "loom_kb_resolve_for_lint")
-            except Exception:   # noqa: BLE001
-                self.r = None
-            finally:
-                sys.path.remove(self.kb)
+        if not os.path.isfile(rp):
+            raise SystemExit(f"scope_lint: {rp} missing (resolve.py is the one matcher)")
+        sys.path.insert(0, self.kb)
+        try:
+            self.r = load_module(rp, "loom_kb_resolve_for_lint")
+        finally:
+            sys.path.remove(self.kb)
         self.nodes = {}
         for dp, dn, fn in os.walk(self.kb):
             dn[:] = sorted(d for d in dn if not d.startswith((".", "__")))
@@ -175,24 +174,8 @@ class Matcher:
         return self.devdirs.get(dev) or DEVICE_FAMILY.get(dev) or dev
 
     def facets(self, cfg, draft):
-        if self.r is not None:
-            kind = self.r.draft_kind(cfg, self.r.AUTO) if draft is None else (None if draft == "none" else draft)
-            return self.r.derive_facets(cfg, kind)
-        f = set()
-        d = cfg.get("drafter") or {}
-        kind = draft if draft not in (None, "none") else (None if draft == "none" else (
-            d.get("kind") or ("mtp" if cfg.get("mtp") else ("dflash" if d.get("gguf") else None))))
-        if kind:
-            f |= {"drafted", f"draft-{kind}"}
-        for flag, name in (("mtp", "mtp"), ("vision", "vision"), ("recurrent_layers", "hybrid-gdn"), ("moe", "moe"),
-                           ("attn_sinks", "sinks"), ("attn_gate", "gated-attn"), ("shortconv_layers", "shortconv")):
-            if cfg.get(flag):
-                f.add(name)
-        if cfg.get("sliding_layers") or cfg.get("sliding_window"):
-            f.add("sliding")
-        if cfg.get("kv_heads") is not None and cfg["kv_heads"] <= 2:
-            f.add("kv-le2")
-        return sorted(f)
+        kind = self.r.draft_kind(cfg, self.r.AUTO) if draft is None else (None if draft == "none" else draft)
+        return self.r.derive_facets(cfg, kind)
 
     def node_matches(self, scope, cfg, facets, devices=("rdna3", "rdna4")):
         """True / False; raises ValueError when the node is unknown or invalid."""
@@ -201,28 +184,11 @@ class Matcher:
             raise ValueError(f"scope {scope!r}: no scope.json under skills/loom-kb/{scope}")
         if node is None:
             raise ValueError(f"scope {scope!r}: scope.json is not JSON")
-        m = node.get("match") or {}
-        if self.r is not None:
-            try:
-                env = self.r.Env(cfg, facets, list(devices), self.family_of)
-                return bool(self.r.match(m, env, scope))
-            except self.r.ResolveError as e:
-                raise ValueError(str(e))
-        fs = set(facets)
-        if "arch" in m and cfg.get("arch") not in (m["arch"] if isinstance(m["arch"], list) else [m["arch"]]):
-            return False
-        if not set(m.get("facets", [])) <= fs or fs & set(m.get("not_facets", [])):
-            return False
-        for k in ("kv_heads", "head_dim", "heads", "layers"):
-            if k in m:
-                v, spec = cfg.get(k), m[k]
-                if v is None or not (spec[0] <= v <= spec[1] if isinstance(spec, list) else v == spec):
-                    return False
-        if "quant" in m:
-            fm = {str(t.get("type", "")).lower() for t in (cfg.get("tensors") or {}).values() if isinstance(t, dict)}
-            if not fm & {q.lower() for q in (m["quant"] if isinstance(m["quant"], list) else [m["quant"]])}:
-                return False
-        return True
+        env = self.r.Env(cfg, facets, list(devices), self.family_of)
+        try:
+            return bool(self.r.match(node.get("match") or {}, env, scope))
+        except self.r.ResolveError as e:
+            raise ValueError(str(e))
 
 
 def parse_scope(entry):

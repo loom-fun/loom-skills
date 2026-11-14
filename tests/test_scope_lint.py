@@ -42,6 +42,7 @@ class Repo:
         self.d = tempfile.mkdtemp(prefix="scope_lint_test_")
         self.write("fleet/ownership.json", json.dumps(OWN))
         self.write("skills/loom-kb/choices.py", CHOICES)
+        self.write("skills/loom-kb/resolve.py", (ROOT / "skills" / "loom-kb" / "resolve.py").read_text())
         for node, m in {"arch/llm/moe/qwen35moe": {"arch": ["qwen35moe"]}, "facet/drafted": {"facets": ["drafted"]},
                         "arch/llm/dense/qwen3": {"arch": ["qwen3"]}}.items():
             self.write(f"skills/loom-kb/{node}/scope.json", json.dumps({"scope": node, "match": m, "owner": "t", "choices": []}))
