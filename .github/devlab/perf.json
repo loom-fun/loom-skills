@@ -18,28 +18,175 @@
      "build_args": [
       "--prefill-r9700",
       "4096"
-     ]
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     }
     },
     {
-     "name": "f16o",
-     "build": {
-      "GEMM_F16O": "swiglu"
-     },
+     "name": "fl256",
+     "build": {},
      "build_args": [
       "--prefill-r9700",
       "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "*:apply<@sel\\d+_g_attention_flash2(_partial)?>"
+     ]
+    },
+    {
+     "name": "fl512",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "*:apply<@sel\\d+_g_attention_flash2_d512(_partial)?>"
+     ]
+    },
+    {
+     "name": "gsw",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "*:apply<@grp\\d+_g_gemm_\\w*swiglu"
+     ]
+    },
+    {
+     "name": "gq4",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "*:apply<@sel\\d+_g_gemm_q4_k_store"
+     ]
+    },
+    {
+     "name": "gq6",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "*:apply<@sel\\d+_g_gemm_q6_k_store"
+     ]
+    },
+    {
+     "name": "gf32",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "*:apply<@sel\\d+_g_gemm_f32_store"
+     ]
+    },
+    {
+     "name": "rs",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "*:g_row_scale_f16"
+     ]
+    },
+    {
+     "name": "norm",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "*:g_post_add_norm"
+     ]
+    },
+    {
+     "name": "ple",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "*:g_ple_(gate|prep)"
+     ]
+    },
+    {
+     "name": "rope",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     },
+     "double": [
+      "*:g_qk_rope_store"
      ]
     }
    ],
    "steps": [
-    "ktest:f16o",
-    "func:f16o",
-    "perf:base:3",
-    "perf:f16o:3",
-    "perf:base:3:long",
-    "perf:f16o:3:long",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long"
+    "perf:base:2",
+    "perf:fl256:2",
+    "perf:fl512:2",
+    "perf:gsw:2",
+    "perf:gq4:2",
+    "perf:gq6:2",
+    "perf:gf32:2",
+    "perf:rs:2",
+    "perf:norm:2",
+    "perf:ple:2",
+    "perf:rope:2",
+    "perf:base:2:long",
+    "perf:fl256:2:long",
+    "perf:fl512:2:long",
+    "perf:gsw:2:long",
+    "perf:gq4:2:long",
+    "perf:gq6:2:long",
+    "perf:gf32:2:long",
+    "perf:rs:2:long",
+    "perf:norm:2:long",
+    "perf:ple:2:long",
+    "perf:rope:2:long"
    ]
   }
  ],
