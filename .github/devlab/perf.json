@@ -1,5 +1,5 @@
 {
- "_comment": "gemmq: q4_k m256 gfx12 twin variants (sb = superblock-unrolled, one page-half load per thread) vs the mechanical twin, same job, vs llama.cpp ROCm; E2B at its R9700 preset (prefill 4096)",
+ "_comment": "gemmq: q4_k m256 gfx12 twin, dq2 (one page-half load per thread feeds both nibble groups) vs the mechanical twin, same job, vs llama.cpp ROCm",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
@@ -7,6 +7,7 @@
   {
    "name": "unsloth-gemma-4-e2b-it-loom",
    "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "require_preset_r9700": true,
    "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
@@ -24,52 +25,9 @@
      ]
     },
     {
-     "name": "sbsw",
+     "name": "dq2",
      "build": {
-      "LOOM_RDNA4_Q4K": "sb:swiglu"
-     },
-     "execution": {
-      "draft_depth": 0
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ]
-    },
-    {
-     "name": "pre_d",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "double": [
-      "*:sel\\w*_g_gemm_q4_k_swiglu_m256"
-     ]
-    },
-    {
-     "name": "sbsw_d",
-     "build": {
-      "LOOM_RDNA4_Q4K": "sb:swiglu"
-     },
-     "execution": {
-      "draft_depth": 0
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "double": [
-      "*:sel\\w*_g_gemm_q4_k_swiglu_m256"
-     ]
-    },
-    {
-     "name": "dq2sw",
-     "build": {
-      "LOOM_RDNA4_Q4K": "dq2:swiglu"
+      "LOOM_RDNA4_Q4K": "dq2"
      },
      "execution": {
       "draft_depth": 0
@@ -81,11 +39,48 @@
     }
    ],
    "steps": [
+    "ktest:dq2",
     "perf:pre:2",
-    "perf:sbsw:2",
-    "perf:pre_d:2",
-    "perf:sbsw_d:2",
-    "perf:dq2sw:2"
+    "perf:pre:1:long",
+    "perf:dq2:2",
+    "perf:dq2:1:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:1:long"
+   ]
+  },
+  {
+   "name": "unsloth-qwen3-8b-loom",
+   "card": "loom-fun-staging/unsloth-Qwen3-8B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 29000000000,
+   "variants": [
+    {
+     "name": "pre",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "dq2",
+     "build": {
+      "LOOM_RDNA4_Q4K": "dq2"
+     },
+     "execution": {
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "ktest:dq2",
+    "perf:pre:2",
+    "perf:pre:1:long",
+    "perf:dq2:2",
+    "perf:dq2:1:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:1:long"
    ]
   }
  ],
