@@ -4,7 +4,7 @@ name: devlab-perf
 # the Radeon AI PRO R9700 runner. Each job builds its package variants from this branch (or another ref), measures them
 # against each other and against llama.cpp on the SAME runner (runners differ: never compare across jobs), and can
 # run consistency / determinism loops, kernel tests and gates. See .github/scripts/devlab_perf.sh.
-# Its numbers are the cards' only performance source (loom-org SKILL.md, "Performance: DevLab is the source").
+# Its numbers are the cards' only performance source (loom-fleet reference/publish.md, "Performance: DevLab is the source").
 # Runs on a pull request labeled `devlab-perf` (every push re-runs it).
 on:
   pull_request:

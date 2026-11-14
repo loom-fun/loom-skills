@@ -101,6 +101,16 @@ def apply_for_tests(cfg, environ=None):
                     continue
                 environ[env] = val
         return rec
+    if cfg.get("generator") is not None:
+        # a package built before the registry existed (stamped, no "resolved" block): its kernels were generated with the
+        # generators' defaults = the registry's legacy values; resolving today's knowledge base could pick a later scope rule
+        return None
+    if find_kb_root() is None:
+        # A package built before the registry (no "resolved" block) with no knowledge base next to this kit (a kit copied out of
+        # the skills tree, as devlab_perf.sh does): its kernels were generated with the generators' defaults, which are the
+        # registry's legacy values, so the tests need no override.
+        print("kb_choices: no resolved block and no loom-kb found: testing with the generators' defaults", file=sys.stderr)
+        return None
     draft = cfg.get("draft") or json.loads(environ.get("LLM_DRAFT") or "null") or {}
     return apply(cfg, draft.get("kind") or None, environ)
 

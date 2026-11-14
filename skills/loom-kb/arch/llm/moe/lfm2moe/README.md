@@ -17,7 +17,3 @@ Routing must keep the top-k weights in registers: a global write + workgroup bar
 through the per-WGP cache when neighbouring tokens' workgroups share a cache line (a flint port built on
 this file saw run-to-run different prefill output). Test: one >= 64-token prompt sent alone 4 times must
 give identical greedy text.
-
-## Fleet models (published packages, llm_config.json)
-
-- `ggml-org-LFM2.5-24B-A2B-loom` (lfm2moe): 40L h2048, 32h/8kv hd64, moe 64e top-4, kv_layers 10, shortconv, ctx 131072

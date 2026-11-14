@@ -37,10 +37,10 @@ session rather than treating your current session as independent evidence.
 | What is possible for this model? Pick optimization targets (roofline vs llama.cpp) | `loom-roofline` (`"${LOOM_SKILL_DIR}/../loom-roofline/SKILL.md"`) |
 | Make a ported model faster without breaking correctness | `loom-optimize` |
 | Correctness gate vs llama.cpp, throughput methodology, reporting | `loom-benchmark` |
-| A targeted fix to one model, family, GPU or quant (scoped change, sampled DevLab A/B, promotion) | `loom-improve` (`"${LOOM_SKILL_DIR}/../loom-improve/reference/targeted-fix.md"`) |
-| A campaign: new GPU, many models, a refactor (team roles, mailboxes, state files, DevLab rules, velocity) | `loom-improve` (`"${LOOM_SKILL_DIR}/../loom-improve/reference/campaign.md"`) |
-| Improve these skills themselves (faster end-to-end runs, fewer failures) without regressing KPIs | `loom-improve` (`"${LOOM_SKILL_DIR}/../loom-improve/SKILL.md"`) |
-| Populate a Hugging Face org with many models (pick the top models, port and publish each, sweep gates on DevLab, fix and regenerate) | `loom-org` (`"${LOOM_SKILL_DIR}/../loom-org/SKILL.md"`) |
+| A targeted fix to one model, family, GPU or quant (scoped change, sampled DevLab A/B, promotion) | `loom-fleet` (`"${LOOM_SKILL_DIR}/../loom-fleet/reference/targeted-fix.md"`) |
+| A campaign: new GPU, many models, a refactor (team roles, mailboxes, state files, DevLab rules, velocity) | `loom-fleet` (`"${LOOM_SKILL_DIR}/../loom-fleet/reference/campaign.md"`) |
+| Improve these skills themselves (faster end-to-end runs, fewer failures) without regressing KPIs | `loom-fleet` (`"${LOOM_SKILL_DIR}/../loom-fleet/reference/skill-trials.md"`) |
+| Populate a Hugging Face org with many models (pick the top models, port and publish each, sweep gates on DevLab, fix and regenerate) | `loom-fleet` (`"${LOOM_SKILL_DIR}/../loom-fleet/reference/populate-org.md"`) |
 | What is special about a model family / GPU / quant, which levers apply where (the knowledge base router) | `loom-kb` (`"${LOOM_SKILL_DIR}/../loom-kb/SKILL.md"`) |
 
 All paths in these skills assume the install root `~/loom` (SDK venv `~/loom/.venv`,
@@ -102,7 +102,7 @@ G=$(ls $W/gguf/*.gguf)
 "$K/loom-benchmark/scripts/finalize.sh" $W/pkg http://127.0.0.1:8160 $G $W/bench  # 4. final perf, full gates, audit, report.html
 ```
 1. **Port.** `port.sh` first looks up the closest **category A** loom-fun package (card made by the current
-   skill) and starts from it (`loom-port-llm`, "Start from a reference"); `REFERENCE=off` ports from scratch.
+   skill) and starts from it (loom-kb topic `reference`); `REFERENCE=off` ports from scratch.
    `port.sh` stops with an exit code naming the stage that needs hand-work
    (3: the chat template, or an architecture the starter doesn't cover). Then follow
    `loom-port-llm` for that stage only, and continue with step 2 once the package
@@ -166,7 +166,7 @@ Read it from there if it isn't in your skill list.
   llama.cpp runs), but `starter/pick_gguf.py` still keeps a GGUF that fits twice (a 40B repo's
   UD-Q5_K_XL instead of its 39 GiB Q8_0) until quant choice accounts for the KV pool at full context.
   A model whose **resident** set legitimately exceeds that default (a package that reads a big lookup table from the
-  GGUF on demand instead of keeping it resident: `catalog.json` `memory.over_cap`, loom-port-llm "Catalog packages")
+  GGUF on demand instead of keeping it resident: `catalog.json` `memory.over_cap`, loom-kb topic `catalog-ports`)
   carries an explicit per-model budget; `serve.sh` and `llamacpp_server.sh` then run `loom-setup/scripts/memcheck.sh`
   and refuse unless `MemAvailable` ≥ the budget + 16 GiB (`LOOM_MEMORY_HEADROOM_GIB`). Nothing else big may be resident.
 - **GPU memory is system RAM** (unified memory: GTT reports ~115 GiB on a 128 GB box, but the desktop

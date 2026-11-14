@@ -49,15 +49,18 @@ def families():
 
 
 def devices():
-    """{key: device dict}, in family order then directory order; each dict has "family" and "path" (relative to the KB root)."""
+    """{key: device dict}, in family order, then the device's "order" (default 0), then its name; each dict has "family" and "path" (relative to the KB root)."""
     out = {}
     for fam in families():
+        rows = []
         for d in _subdirs("device", fam):
             p = os.path.join("device", fam, d, "device.json")
             if os.path.exists(os.path.join(ROOT, p)):
                 dev = dict(_load(*p.split(os.sep)))
                 dev["path"] = os.path.dirname(p)
-                out[dev["device"]] = dev
+                rows.append(dev)
+        for dev in sorted(rows, key=lambda x: (x.get("order", 0), x["device"])):
+            out[dev["device"]] = dev
     return out
 
 

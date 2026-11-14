@@ -14,7 +14,8 @@
     "fragment": "vector<16xf16>"
   },
   "devices": [
-    "strix-halo"
+    "strix-halo",
+    "radeon-rx7900xtx"
   ],
   "note": "The base target of every program file: a kernel K carries target(@rdna3) and nothing else of its text changes. gfx1100 (discrete RDNA3) shares gfx11-generic: a device row, no new kernels."
 }
