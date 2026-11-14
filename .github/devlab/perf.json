@@ -5,7 +5,7 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "sab-unsloth-gemma-4-e2b-it-loom",
+   "name": "sab-unsloth-gemma-4-e2b-it-loom-r2",
    "runner": "strix",
    "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
    "memory_bytes": 16000000000,
@@ -59,7 +59,7 @@
    ]
   },
   {
-   "name": "sab-unsloth-gemma-4-e4b-it-loom",
+   "name": "sab-unsloth-gemma-4-e4b-it-loom-r2",
    "runner": "strix",
    "card": "loom-fun-staging/unsloth-gemma-4-E4B-it-loom",
    "memory_bytes": 31000000000,
@@ -113,61 +113,7 @@
    ]
   },
   {
-   "name": "sab-nvidia-nvidia-nemotron-3-5-bolt-e4b-",
-   "runner": "strix",
-   "card": "loom-fun-staging/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
-   "memory_bytes": 36000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1374",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "fun",
-     "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom"
-    },
-    {
-     "name": "staging"
-    },
-    {
-     "name": "funnd",
-     "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "stagingnd",
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1",
-    "perf:fun:1",
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "perf:fun:1:long",
-    "perf:staging:1:long",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "c4:funnd",
-    "c4:stagingnd",
-    "c4:stagingnd",
-    "c4:funnd",
-    "textmatch:fun",
-    "textmatch:staging",
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "name": "sab-unsloth-gemma-4-12b-it-loom",
+   "name": "sab-unsloth-gemma-4-12b-it-loom-r2",
    "runner": "strix",
    "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
    "memory_bytes": 81000000000,
@@ -221,7 +167,7 @@
    ]
   },
   {
-   "name": "sab-unsloth-gemma-4-31b-it-loom",
+   "name": "sab-unsloth-gemma-4-31b-it-loom-r2",
    "runner": "strix",
    "card": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
    "memory_bytes": 80000000000,
@@ -275,7 +221,7 @@
    ]
   },
   {
-   "name": "sab-lmstudio-community-gemma-4-26b-a4b-i",
+   "name": "sab-lmstudio-community-gemma-4-26b-a4-r2",
    "runner": "strix",
    "card": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom",
    "memory_bytes": 81000000000,
