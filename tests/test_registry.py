@@ -51,7 +51,7 @@ class DeviceRegistry(unittest.TestCase):
         self.assertEqual(d["strix-halo"]["runner"]["labels"], ["strix-halo", "devlab-dispatch", "Linux", "self-hosted"])
         self.assertEqual(d["radeon-r9700"]["runner"]["labels"], ["self-hosted", "devlab-dispatch", "radeon-r9700"])
         for wf in ("devlab-perf.yml", "devlab-kbench.yml"):
-            txt = (ROOT / ".github/workflows" / wf).read_text()
+            txt = (ROOT / ".github/workflows" / wf).read_text(encoding="utf-8")
             for dev in d.values():
                 labels = ", ".join(f'"{x}"' for x in dev["runner"]["labels"])
                 self.assertIn(f'"{dev["runner"]["key"]}": [{labels}]', txt, f"{wf} {dev['device']}")
@@ -123,19 +123,19 @@ class QuantRegistry(unittest.TestCase):
         self.assertEqual(set(q), set(formats.DECODES))
 
     def test_moe_support_agrees_with_gen_moe(self):
-        src = (STARTER / "gen_moe.py").read_text()
+        src = (STARTER / "gen_moe.py").read_text(encoding="utf-8")
         moe = set(eval(re.search(r"^FMT = (\{.*?\})", src, re.M).group(1)))
         self.assertEqual({f for f, d in registry.quants().items() if d["moe"]}, moe)
 
     def test_factory_quants_come_from_the_registry(self):
-        src = (ROOT / ".github/scripts/loom_factory.py").read_text()   # parses its arguments at import: read the source
+        src = (ROOT / ".github/scripts/loom_factory.py").read_text(encoding="utf-8")   # parses its arguments at import: read the source
         self.assertIn("QUANTS = registry.file_quants()", src)
         self.assertEqual(registry.file_quants(), ["Q4_K_M", "Q4_K_S", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0"])
 
 
 class Methodology(unittest.TestCase):
     M = registry.methodology()
-    MD = (KB / "method/methodology.md").read_text()
+    MD = (KB / "method/methodology.md").read_text(encoding="utf-8")
 
     def test_rows_are_the_card_rows(self):
         self.assertEqual(list(self.M["rows"]), card_lib.METRIC_KEYS)
@@ -159,7 +159,7 @@ class Methodology(unittest.TestCase):
                       f"{self.M['sequential']['extend_to']}+{self.M['sequential']['extend_to']}", self.MD)
 
     def test_old_path_is_a_pointer(self):
-        old = (ROOT / "skills/loom-benchmark/reference/methodology.md").read_text()
+        old = (ROOT / "skills/loom-benchmark/reference/methodology.md").read_text(encoding="utf-8")
         self.assertLessEqual(len(old.strip().splitlines()), 5)
         self.assertIn("skills/loom-kb/method/methodology.md", old)
 
@@ -173,7 +173,7 @@ class Methodology(unittest.TestCase):
         self.assertEqual(registry.band("something_new"), self.M["default_band"])
 
     def test_gate_levels_exist_in_gates_sh(self):
-        sh = (ROOT / "skills/loom-benchmark/scripts/gates.sh").read_text()
+        sh = (ROOT / "skills/loom-benchmark/scripts/gates.sh").read_text(encoding="utf-8")
         self.assertIn("case $level in " + "|".join(["dev", "fast", "quick", "full"]) + ")", sh)
         self.assertEqual(set(self.M["gates"]["levels"]), {"dev", "fast", "quick", "full"})
         names = set(card_lib.GATE_NAMES)
@@ -202,7 +202,7 @@ class ABCompare(unittest.TestCase):
             res = subprocess.run([sys.executable, str(ROOT / ".github/scripts/strix_ab_compare.py"), d, "--json", str(out), *extra],
                                  capture_output=True, text=True)
             self.assertEqual(res.returncode, 0, res.stderr[-400:])
-            return json.loads(out.read_text())
+            return json.loads(out.read_text(encoding="utf-8"))
 
     def test_per_row_band_by_default(self):
         j = self.run_compare(1.035)
