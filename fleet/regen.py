@@ -235,7 +235,9 @@ def cmd_plan(a):
         # pin the new package of every slug to the staging revision it is measured at (the card the run measures is the card ingested)
         refs = {s: dict(e) for s, e in (refs or {}).items()}
         for s in slugs:
-            refs.setdefault(s, {}).setdefault("new", f"{a.new_org}/{s}@{hf_head(f'{a.new_org}/{s}')}")
+            ent = refs.setdefault(s, {})
+            if "new" not in ent:
+                ent["new"] = f"{a.new_org}/{s}@{hf_head(f'{a.new_org}/{s}')}"
     st = {"schema": "regen/1", "created": now(), "mode": a.mode, "work": work, "state": state_path,
           "opts": {"gates": a.gates, "new_org": a.new_org, "old_org": old_org, "batch": a.batch, "refs": None},
           "devices": devices, "batches": [], "jobs": {}, "log": []}
@@ -512,6 +514,10 @@ def cmd_rerun(a):
     if not want:
         print("no confirming runs needed")
         return
+    if a.dry_run:
+        for dev, items in sorted(want.items(), key=lambda kv: device_order(kv[0])):
+            print(f"would queue a confirming batch ({dev}): {', '.join(e['slug'] for _, e in items)}")
+        return
     for dev, items in sorted(want.items(), key=lambda kv: device_order(kv[0])):
         slugs = [e["slug"] for _, e in items]
         # the same card revisions as the first run: refs of the first plan (pinned)
@@ -705,7 +711,10 @@ def cmd_accept(a):
             paths = ([st.jobs[e["prev"]]["cmp"]] if e.get("prev") else []) + [e["cmp"]]
             decision, reasons, res = decide(st, name, e, paths)
             e["decision"], e["reason"] = decision, "; ".join(reasons)
-            e["stage"] = "collected" if decision == "promote" else "needs_decision"
+            if decision == "promote" or (decision in ("rerun", "improved-pending") and e["round"] == 1):
+                e["stage"] = "collected"     # round 1: `rerun` queues the confirming job, as collect does
+            else:
+                e["stage"] = "needs_decision"
             e["accepted"] = f"near-tie text accepted: {a.note}"
             st.log(f"{e['slug']} {e['device']}: near-tie accepted -> {e['stage']} ({decision})")
     st.save()
