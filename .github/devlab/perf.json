@@ -5,42 +5,133 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "unsloth-gemma-4-e2b-it-loom",
+   "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 16000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "base",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ]
     },
     {
-     "name": "nodraft",
+     "name": "fl256",
      "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "double": [
+      "*:apply<@sel\\d+_g_attention_flash2(_partial)?>"
+     ]
+    },
+    {
+     "name": "fl512",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "double": [
+      "*:apply<@sel\\d+_g_attention_flash2_d512(_partial)?>"
+     ]
+    },
+    {
+     "name": "gf32",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "double": [
+      "*:apply<@sel\\d+_g_gemm_f32_store"
+     ]
+    },
+    {
+     "name": "gq4",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "double": [
+      "*:apply<@sel\\d+_g_gemm_q4_k_store"
+     ]
+    },
+    {
+     "name": "gsw",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "double": [
+      "*:apply<@sel\\d+_g_gemm_q4_k_swiglu"
+     ]
+    },
+    {
+     "name": "gq6",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "double": [
+      "*:apply<@sel\\d+_g_gemm_q6_k_store"
+     ]
+    },
+    {
+     "name": "rope",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "double": [
+      "*:g_qk_rope_store"
+     ]
+    },
+    {
+     "name": "rs",
+     "build": {},
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "double": [
+      "*:g_row_scale_f16"
+     ]
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "perf:base:2",
+    "perf:fl256:2",
+    "perf:fl512:2",
+    "perf:gf32:2",
+    "perf:gq4:2",
+    "perf:gsw:2",
+    "perf:gq6:2",
+    "perf:rope:2",
+    "perf:rs:2",
+    "perf:base:2:long",
+    "perf:fl256:2:long",
+    "perf:fl512:2:long",
+    "perf:gf32:2:long",
+    "perf:gq4:2:long",
+    "perf:gsw:2:long",
+    "perf:gq6:2:long",
+    "perf:rope:2:long",
+    "perf:rs:2:long"
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
