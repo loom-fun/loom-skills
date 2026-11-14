@@ -138,6 +138,18 @@ class Resolution(unittest.TestCase):
     def test_the_real_knowledge_base_lints(self):
         self.assertEqual(resolve.lint(KB), [])
 
+    def test_scope_rules_touch_declared_models(self):
+        """D7 (the real knowledge base): the K/V-once decode body for head_dim 256 is off for drafted qwen35moe only, on both device
+        families (the key is one kernel shared by both targets), exporting ATTN_GQA_D256=0 and nothing else."""
+        for dev in (("rdna3",), ("rdna4",), ("rdna3", "rdna4"), ("strix-halo", "radeon-r9700")):
+            for kind in ("dflash", "mtp"):
+                r = resolve.resolve(moe35(drafter={"kind": kind, "gguf": "d.gguf"}), dev, KB, draft=kind)
+                self.assertEqual(r["env"], {"ATTN_GQA_D256": "0"}, (dev, kind))
+                self.assertEqual(r["choices"]["decode.attn.kv_once.d256"]["from"], "arch/llm/moe/qwen35moe")
+        for other, draft in ((moe35(drafter=None), None), (moe35(arch="qwen35", moe=None), "dflash"), (cfg(), "dflash"),
+                             (cfg(arch="qwen3moe", moe={"experts": 8}), "dflash"), (cfg(vision={"mmproj": "x"}), None)):
+            self.assertEqual(resolve.resolve(other, ("rdna3", "rdna4"), KB, draft=draft)["env"], {}, other["arch"])
+
     def test_no_scope_sets_anything_by_default_means_no_exports(self):
         """Every program is as before: nothing is exported for any model shape, with the real knowledge base as of this change."""
         if any(s["choices"] for _, s in resolve.load_scopes(KB)):
