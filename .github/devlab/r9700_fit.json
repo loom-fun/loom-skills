@@ -58,20 +58,21 @@
  },
  {
   "slug": "bartowski-MiniCPM-V-4.7-35B-A3B-loom",
-  "w": 25879747616,
+  "w": 24456590368,
   "kv": 5368709120,
   "kv32": 671088640,
   "kvpp": 20480,
   "ctx": 262144,
   "mem": 36000000000,
-  "need": 33248456736.0,
+  "need": 31825299488.0,
   "verdict": "fits (native ctx)",
   "n_exp": 256,
+  "ctx_cap": 262144,
   "r9700_execution": {
-   "context_capacity": 176128,
-   "pool_capacity": 176128
-  },
-  "ctx_cap": 176128
+   "prefill_capacity": 2048,
+   "context_capacity": 262144,
+   "pool_capacity": 262144
+  }
  },
  {
   "slug": "bartowski-Nanbeige4.3-33B-loom",
@@ -392,20 +393,21 @@
  },
  {
   "slug": "lmstudio-community-Ornith-1.0-35B-loom",
-  "w": 26218421339,
+  "w": 24795264091,
   "kv": 5368709120,
   "kv32": 671088640,
   "kvpp": 20480,
   "ctx": 262144,
   "mem": 36000000000,
-  "need": 33587130459.0,
+  "need": 32163973211.0,
   "verdict": "fits (native ctx)",
   "n_exp": 256,
+  "ctx_cap": 262144,
   "r9700_execution": {
-   "context_capacity": 159744,
-   "pool_capacity": 159744
-  },
-  "ctx_cap": 159744
+   "prefill_capacity": 2048,
+   "context_capacity": 262144,
+   "pool_capacity": 262144
+  }
  },
  {
   "slug": "lmstudio-community-gemma-4-26B-A4B-it-loom",
