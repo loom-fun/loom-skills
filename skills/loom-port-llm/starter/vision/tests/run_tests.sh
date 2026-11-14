@@ -1,7 +1,7 @@
 #!/bin/bash
 # usage: VENV=~/loom/.venv run_tests.sh [MMPROJ.gguf H W]   - vision kernel unit tests (vs NumPy), then, given an
 # mmproj and a processed image size (multiples of patch*merge), the whole encoder vs ref_vit.py
-# (per-row cosine; ref_vit itself is checked against llama-mtmd-debug, see reference/vision.md).
+# (per-row cosine; ref_vit itself is checked against llama-mtmd-debug, see the loom-kb vision node (`kb.py route --facets vision`)).
 here=$(cd "$(dirname "$0")" && pwd); T=${PY:-${LOOM_ROOT:-$HOME/loom}/.tools/bin/python}; bad=0
 export VENV=${VENV:-${LOOM_ROOT:-$HOME/loom}/.venv}
 cd "$here"

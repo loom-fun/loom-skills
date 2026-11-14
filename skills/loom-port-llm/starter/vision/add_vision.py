@@ -1,6 +1,6 @@
 """Adds image input to a port: picks the repo's vision projector (mmproj GGUF), downloads it to the HF cache,
 and writes cfg["vision"] for build.py. Exit 0 with VISION_RESULT {...}; exit 3 when the repo has a projector
-whose family has no encoder plan yet (the text port is unaffected: follow reference/vision.md to add it).
+whose family has no encoder plan yet (the text port is unaffected: follow the loom-kb vision node (`kb.py route --facets vision`) to add it).
 
 usage: add_vision.py CFG.json ORG/REPO [MMPROJ_FILE]      (a local path for MMPROJ_FILE skips the download)
 """

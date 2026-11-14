@@ -1,7 +1,7 @@
 # starter/vision: image input for ported LLMs
 
 Used by `port.sh` stage 2b and `build.py` when `cfg.json` has a `vision` block. Overview, the supported
-projector families and **how to add one**: `../../reference/vision.md`.
+projector families and **how to add one**: the loom-kb vision node (`kb.py route --facets vision`).
 
 | File | Role |
 |---|---|

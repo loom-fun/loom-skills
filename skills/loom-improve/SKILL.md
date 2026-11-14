@@ -114,7 +114,7 @@ the change can affect, which models exercise that path, the cheapest evidence fo
 would count as a regression; it goes in the results.md row. Reason from what each model's trial actually
 uses: an example's files only by its model; the starter path only by models without an example (Qwen3.5
 today); a doc only by trials that read it (past trial transcripts show which: only flint read
-`porting-notes.md` and `loom-ir-cookbook.md`). The maker of a change wants it to pass: plan before
+the loom-kb `porting` topic and the loom-kb `kernels-ir` topic). The maker of a change wants it to pass: plan before
 seeing results, and don't shrink the plan afterwards. Cheapest evidence first:
 - Syntax: `bash -n`, `python3 -m py_compile`.
 - Benchmark, gate or perf scripts: replay the changed script (or `LEVEL=dev gates.sh`, or `eval.sh`) on
@@ -244,3 +244,8 @@ Anthropic: [Skill authoring best practices](https://platform.claude.com/docs/en/
 [Equipping agents with Agent Skills](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills),
 [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents),
 [How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system).
+
+## Mandate
+
+Declare the scope first, work only inside it, opt in by scope, run `fleet/scope_lint.py` before a PR, stop on
+out-of-mandate needs: `loom-kb/SKILL.md` ("Mandate rules").

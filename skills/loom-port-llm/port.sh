@@ -241,7 +241,7 @@ fi  # FROM=build
 # Image input: when the repo ships a vision projector (mmproj GGUF) of a family starter/vision has an
 # encoder plan for, cfg.json gets a "vision" block and the package an image component. VISION=0 skips it;
 # MMPROJ=file picks a projector; VISION_REPO=org/name takes it from another repo (a GGUF repo that ships none). An unsupported family prints the reason and the port stays text-only
-# (reference/vision.md: adding a family).
+# (the loom-kb vision node (`kb.py route --facets vision`): adding a family).
 if [ -z "$catalog" ] && [ "${VISION:-1}" != 0 ] && ! "$T" -c "import json,sys; sys.exit(0 if json.load(open('cfg.json')).get('vision') else 1)"; then
   step "2b vision"
   HF=$hf "$T" "$K/vision/add_vision.py" cfg.json "${VISION_REPO:-$repo}" ${MMPROJ:-} | tee vision.log | grep -v "^$"
@@ -291,7 +291,7 @@ vmm=$("$T" -c "import json; print((json.load(open('cfg.json')).get('vision') or 
 if [ -n "$vmm" ]; then   # vision kernels vs NumPy, then the whole encoder vs ref_vit.py at a small size
   side=$("$T" -c "import sys; sys.path.insert(0, '$K/vision'); import encoder, preprocess as P; c = encoder.config('$vmm'); print(4 * c['patch'] * P.FAMILY[c['family']]['merge'])")
   VENV=$venv "$K/vision/tests/run_tests.sh" "$vmm" "$side" "$side" > vtest.log 2>&1; rc=$?; grep -c "^PASS" vtest.log | sed 's/^/vision kernel tests passed: /'; tail -1 vtest.log
-  [ $rc = 0 ] || { echo "STOP: vision tests failed (vtest.log); see reference/vision.md"; exit 5; }
+  [ $rc = 0 ] || { echo "STOP: vision tests failed (vtest.log); see the loom-kb vision node (`kb.py route --facets vision`)"; exit 5; }
 fi
 
 step "6/6 smoke test"
@@ -374,6 +374,6 @@ if [ "$draft" != "{}" ] && [ -n "$draft" ]; then
   "$S/stop.sh" port >/dev/null 2>&1
   VENV=$venv "$S/serve.sh" port "$port" amdgpu "$mem" pkg/model.json >/dev/null || exit 4
   "$T" "$SC" compare spec_target.jsonl spec_draft.jsonl | tail -3
-  [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: drafting changed the output (spec_check); see starter/draft/README.md"; exit 6; }
+  [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: drafting changed the output (spec_check); see the loom-kb `speculative` topic (`kb.py route --topic speculative`)"; exit 6; }
 fi
 echo "PORT_RESULT $(printf '{"package": "%s", "model_id": "%s", "context": %s, "memory_bytes": %s, "port": %s, "gguf": "%s", "loom_root": "%s", "draft": %s}' "$work/pkg" "$model_id" "${ctx:-0}" "$mem" "$port" "$gguf" "$root" "$("$T" -c "import json; print(json.dumps(json.load(open('pkg/llm_config.json')).get('draft')))")")"

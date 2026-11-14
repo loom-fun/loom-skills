@@ -1,7 +1,7 @@
 """Experimental variants of the gfx12 q4_k m256 GEMM twin, as text rewrites of the generator's mechanical twin (gen_gemm_rdna4.twin of
 gen_gemm.gemm_big256), for the gemm_r9700 kbench suite. They are NOT used by the generator: measured on the R9700 they are within
 +-2 % of the mechanical twin per kernel (one kernel-level exception: none), and the superblock-unrolled one (sb) is 3x slower for the
-swiglu kernel inside a model (kbench does not reproduce it). See skills/loom-optimize/reference/optimization-catalog.md (R9700 GEMM).
+swiglu kernel inside a model (kbench does not reproduce it). See the loom-kb `decode`/`prefill` topics (`kb.py route --topic decode,prefill`) (R9700 GEMM).
 
   q4k_m256_native(t)             dq2: a thread stages row t/2, 16-value half h = t%2 of BOTH nibble groups of the step's 32-byte page
   q4k_m256_sb(t, nb=, sc=)       dq2 with the K loop unrolled by one superblock (constant groups, header once per 4 steps);

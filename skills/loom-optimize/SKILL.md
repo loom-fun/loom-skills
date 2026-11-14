@@ -134,62 +134,18 @@ bench/llama_cache/` (a trial staged 5 GB of ktest/ and llama.cpp builds and `git
 - Lazy weight load, stale servers on the port, server- vs client-side timing and near-tie
   noise: see the `loom` hard rules and `loom-benchmark`.
 
-## Catalog: what worked (Strix Halo gfx1151, measured end to end)
+## Levers and what is known (loom-kb)
 
-`reference/optimization-catalog.md` has each lever with its rationale and numbers. Decode (bandwidth-
-bound): multi-token matvec, adaptive rows per workgroup, Q4_K scale/min folding, fused QKV and paired-row
-gate/up, argmax head, adaptive split-K attention, F16 KV. Prefill (compute/attention-bound): WMMA GEMMs on
-row-scaled f16 (N-fastest order: A/B it per port), padding-free tiles, flash2, listed fallback, per-token
-RoPE + KV store, fused norm + row scale, prefill chunk size. Apply them in catalog order.
+Every lever, its rationale, numbers and the "did not help" lists are in the knowledge base, stored at the most
+specific scope. Run `python3 "${LOOM_SKILL_DIR}/../loom-kb/kb.py" route --config PKG/llm_config.json --device DEVICE
+--topic decode,prefill` (add `speculative,spec-tuning,long-context,concurrency,roofline` for those levers) and read
+what it prints, in that order: do not re-run an A/B a node already settled for your family or facet. A lever you
+add goes to the node it was measured at (family, facet or device), opt-in by scope.
 
-**Settled for starter ports (dense / Qwen3.5 hybrid, ≤ 4B): don't re-run these A/Bs.** Fresh-agent
-trials re-tested them on Qwen3.5-0.8B and the defaults won or tied every time:
-`GEMM_N_FASTEST=0` (slower prefill, 3 trials), `MV_WG1=1024` (no decode win), `--prefill 4096`
-(short prefill −20–37 %; 2048 ≈ 1024 within noise). On the R9700 (64 CUs) the larger chunk wins for small models (hidden size ≤ 2048: Qwen3-0.6B +7..+24 %, Gemma-4-E2B +5..+15 %, Qwen3-1.7B +11..+18 % from 8k) and loses at 1k/2k on big ones (Qwen3-14B −8/−5 %): `build.py --prefill-r9700 N` (or `prefill_capacity_r9700` in llm_config.json) adds a second preset `<preset>-r9700` that only the R9700 Quick start fetches. On a starter port, spend the budget on fusion
-(fewer launches per layer: fused QKV or norm fusion, which you write in a copy of the generator; pairing Qwen3.5's tiny GDN alpha/beta matvecs
-measured neutral) or on the long
-prefill path. Bigger or MoE models: the chunk size is worth one A/B measured at 1k too (4096 helped
-one MoE port; 2048 and 4096 both cost 12-18 % at 1k on flint).
+## Mandate
 
-**Folded into the starter from trials** (already on; don't redo): the gated delta-net conv and
-history-commit kernels spread channels over `GDN_CB` workgroups per token when fewer than 64
-tokens are in flight (Qwen3.5-0.8B decode +18 %, identical output; `GDN_CB=1` restores the old grid).
-
-**Tried and did not help** (don't repeat without a new reason): see the catalog's "Did not help".
-
-**Speculative decoding** (on by default when the GGUF has an MTP block or a DFlash drafter exists;
-`loom-port-llm/starter/draft/README.md`; n-gram is opt-in, `TUNE_NGRAM=1`, never on a card). `qualify.sh` chose the method and depth by
-measurement (`bench/draft_tune.json`); card comparisons use the model's classified drafting choice on both engines
-(`loom-benchmark/reference/methodology.md`), so decode targets are drafting vs drafting; re-run `draft/tune.py WORKDIR PORT MEMORY_GIB MODEL_ID` after a change that moves
-the decode/verify balance (it rebuilds `pkg`). On a bandwidth-bound model it is the biggest decode lever
-(Qwen3.8-27B Q4_K_M: 12.8 -> 21.0 tok/s with MTP depth 3); on small launch-bound models it loses (Qwen3.5-0.8B:
-262 -> 208) and tune.py keeps it off. The multi-token target step that used to cap it (issue #21: f32 activations
-in the 4-token matvec, 192+ VGPRs per lane) is fixed in the starter: decode-shaped linears and the head use int8
-activations with integer dot4 contractions (`ACT_Q8`, llama.cpp's mul_mat_vec_q numerics), with 1-/4-/8-/16-token
-variants that round each token like 1-token decode (`draft/README.md` "Limits"). Remaining levers: verify epochs
-of 17+ tokens (many drafting streams) take the WMMA GEMM; long-context verify pays decode attention per token (draft/README.md), drafter catch-up cost at prefill, and the MoE expert
-matvecs (starter `gen_moe.py`, the lfm2moe kit), which still use f32 activations. Every change
-here must keep the `spec` gate exact.
-
-## Where the remaining gap usually is
-
-- **Prefill GEMM efficiency.** Q4_K GEMMs run ~28 TFLOP/s in the model (~30 on real data in isolation), ~70 %
-  of the real-data WMMA ceiling (~40–43 TOPS, see above); gufo (an engine tuned for this chip) reaches ~80 %
-  with int8 (W8A8 / K-quant×Q8_1) wave64 GEMMs, which halve LDS and activation traffic, and fused
-  norm/SwiGLU→Q8_1 epilogues. int8 WMMA is not faster per instruction here (same ~40 TOPS on real data), so
-  the gain is energy: fewer bytes moved per MAC. Tried here and slower on real data: a wave64 port of the f16
-  GEMM through transposed fragment loads (27.6 vs 30.5 TFLOP/s) and llama.cpp's mmq formulation
-  (`gen_gemm.gemm_q8`: Q8_1 activations x Q4_K codes on int8 WMMA, 20.7; 26.2 even with the per-block scaling
-  removed): the f16 kernel's staging pipeline is the better one; an int8 kernel would need gufo's deeper
-  pipelining to pay off.
-- **Gated delta-net prefill** (hybrids): the register recurrence steps through the chunk token by token
-  (Qwen3.8-27B: 0.14 ms/token of 2.3, all GDN kernels 0.27); a chunked (WY / parallel-scan) form is the lever.
-- **Small models** (≤ 1B), for example Qwen3-0.6B: decode at 2k context ran 179
-  vs 193 tok/s for llama.cpp. There, the attention and launch overhead per layer
-  dominates rather than weight bandwidth. Fewer, fused launches per layer, and
-  fewer splits when context is short, are the levers.
-- **MoE decode** is bound by the expert gather: batch the active experts' matvecs
-  per token group.
+Declare the scope first, work only inside it, opt in by scope, run `fleet/scope_lint.py` before the PR, stop on
+out-of-mandate needs: `loom-kb/SKILL.md` ("Mandate rules").
 
 ## Reporting a win
 
@@ -197,4 +153,4 @@ Report only numbers from the same machine, the same GGUF, the same workloads and
 the same session, with llama.cpp ROCm beside them, plus the correctness gate
 summary. See `loom-benchmark`. For each metric, include its target, its % of
 ceiling and whether it was met. Add the result to
-`loom-roofline/reference/calibration.md`.
+the loom-kb `roofline` topic (`kb.py route --topic roofline`).

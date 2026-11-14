@@ -110,8 +110,8 @@ class LintTests(unittest.TestCase):
         root = self.make({
             "skills/a/SKILL.md": self.SKILL.format(n="a") + "\n" * 500,
             "skills/Bad/SKILL.md": "---\nname: Bad_Name\ndescription: d\n---\n[x](missing.md)\n",
-            "skills/c/SKILL.md": self.SKILL.format(n="c") + para + "\n",
-            "skills/d/SKILL.md": self.SKILL.format(n="d") + para + "\n",
+            "skills/c/SKILL.md": self.SKILL.format(n="c") + "\n" + para + "\n",
+            "skills/d/SKILL.md": self.SKILL.format(n="d") + "\n" + para + "\n",
         })
         text = "\n".join(kb.lint(root)[0])
         self.assertIn("lines (> 500)", text)

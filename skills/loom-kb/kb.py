@@ -356,13 +356,13 @@ def dup_groups(repo, allow=()):
 SENT_MIN_CHARS = 100
 
 
-def dup_sentences(repo):
+def dup_sentences(repo, min_chars=None):
     """Sentences (>= SENT_MIN_CHARS, normalized) that occur in two or more different files: repeated facts."""
     seen = {}
     for p in md_files(repo):
         text = " ".join(t for _, t in paragraphs(p))
         for s in re.split(r"(?<=[.;!?])\s+", text):
-            if len(s) >= SENT_MIN_CHARS and not s.startswith("|"):
+            if len(s) >= (min_chars or SENT_MIN_CHARS) and not s.startswith("|"):
                 key = hashlib.sha1(s.encode()).hexdigest()[:12]
                 seen.setdefault(key, set()).add(Path(p).relative_to(repo).as_posix())
     return {k: v for k, v in seen.items() if len(v) > 1}
@@ -529,7 +529,8 @@ def main(argv=None):
     dp = sub.add_parser("dupes", help="duplicate paragraph count (any checkout)")
     dp.add_argument("--root", default=str(SKILLS.parent))
     dp.add_argument("--no-allow", action="store_true", help="ignore lint_allow.json (raw count)")
-    dp.add_argument("--sentences", action="store_true", help="also count repeated sentences (>= 100 chars) across files")
+    dp.add_argument("--sentences", action="store_true", help="also count repeated sentences across files")
+    dp.add_argument("--min-sentence", type=int, default=SENT_MIN_CHARS, help="sentence length threshold (default 100)")
     sub.add_parser("list", help="valid devices, families, facets, topics")
     args = ap.parse_args(argv)
 
@@ -549,10 +550,10 @@ def main(argv=None):
             print(f"sha1:{key} x{len(locs)}: " + "; ".join(f"{Path(p).relative_to(args.root)}:{n}" for p, n in locs))
         print(f"{len(groups)} duplicated paragraphs (>= {DUP_MIN_CHARS} chars)")
         if args.sentences:
-            sent = dup_sentences(args.root)
+            sent = dup_sentences(args.root, args.min_sentence)
             for key, locs in sorted(sent.items()):
                 print(f"sentence sha1:{key} x{len(locs)}: " + "; ".join(sorted(locs)))
-            print(f"{len(sent)} sentences (>= {SENT_MIN_CHARS} chars) repeated in 2+ files")
+            print(f"{len(sent)} sentences (>= {args.min_sentence} chars) repeated in 2+ files")
         return 0
     errors, notes = lint(args.root)
     for n in notes:

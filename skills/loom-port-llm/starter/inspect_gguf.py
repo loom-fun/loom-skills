@@ -363,7 +363,7 @@ fmts = sorted({v["type"] for k, v in tensors.items() if k.endswith(".weight") an
 print(f"{cfg['name']}: arch={arch} L={L} H={H} heads={heads}/{cfg['kv_heads']} d={head_dim} ffn={cfg['ffn']} vocab={vocab} formats={fmts}")
 unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
 if unsupported:
-    print("WARNING: no kernels for", unsupported, "- add dequant helpers (see reference/porting-notes.md)")
+    print("WARNING: no kernels for", unsupported, "- add dequant helpers (see the loom-kb `porting` topic)")
 if head_dim not in (64, 128, 256):
     print("WARNING: head_dim", head_dim, "is not 64, 128 or 256: the attention kernels support only those")
 if cfg["chat"] is None:

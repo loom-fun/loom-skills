@@ -63,13 +63,13 @@ LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> "${LOOM_SKILL_DIR}/../loom-benchmark
   an encoder plan (`gemma4v`, `qwen3vl_merger`, `qwen2.5vl_merger`, `muse-glimmer`), adds the image component and tests it
   (stage 5: vision kernels vs NumPy, the whole encoder vs a reference checked against llama.cpp;
   stage 6: one image). `VISION=0` skips it, `MMPROJ=file` picks the projector. An unsupported family
-  leaves a text-only port; `reference/vision.md` says how to add one. (A recognized family can still fail
+  leaves a text-only port; the loom-kb vision node (`kb.py route --facets vision`) says how to add one. (A recognized family can still fail
   to build an encoder: Qwen3.8-27B's projector has head_dim 72; `VISION=0` gives a text-only port.)
 - **speculative decoding, by default**: an MTP/NextN block in the GGUF, or a DFlash drafter found for the base
   model (stage 2c, `starter/draft/find_drafter.py`; vendor repos and BF16-only drafters included), is built in;
   the smoke stage proves drafting changes no token (`spec_check.py`). `qualify.sh` later keeps whichever drafter
   (n-gram is opt-in, never on a card) and depth decode fastest, or none
-  (`starter/draft/README.md`). `SPEC=off` opts out.
+  (the loom-kb `speculative` topic (`kb.py route --topic speculative`)). `SPEC=off` opts out.
 
 **Split GGUFs** (`NAME-00001-of-0000N.gguf`): pass the first part; port.sh fetches and links every part; inspect, build
 and the kernel tests read them all, and the package lists each as a parameter file. A model whose weights need more
@@ -187,7 +187,7 @@ The expensive path. Keep it short:
 7. **Prefill can come second.** A decode-only port (prefill through the matvec path, chunk 1) is
    correct but slow: get the gates passing first, then add GEMM prefill as the first optimization.
 8. **The chat block** for templates `chat_probe.py` can't model (channels, role tags without a
-   suffix, tools inside a message): see the checklist below and
+   suffix, tools inside a message): see the loom-kb `cfg-review` topic and
    `reference/glimmer-example` (a channel format end to end: `chat/atem.loom` + its `chat_probe.py`; another
    channel format reuses `starter/templates/control_channels.loom`, as `reference/gpt-oss-example` does).
 9. **Work in parallel when you can spawn agents.** The kernels (steps 1–6) and the chat block
@@ -207,7 +207,7 @@ W=~/work/mymodel && mkdir -p $W && cd $W
 #    parallel calls, with thinking on/off). Every line must be OK; a FAIL or "not derivable" means
 #    fix cfg.json["chat"] by hand (fields: chat_probe.py) and rerun `chat_probe.py MODEL.gguf`.
 $T -I "$K/inspect_gguf.py" /path/model-Q4_K_M.gguf cfg.json
-# 2. REVIEW cfg.json against llama.cpp's src/models/<arch>.cpp - see the checklist below
+# 2. REVIEW cfg.json against llama.cpp's src/models/<arch>.cpp - see the loom-kb `cfg-review` topic
 # 3. Tokenizer: the HF tokenizer.json of the *same* model (base repo; GGUF repos often lack it)
 ~/loom/.venv/bin/hf download <org>/<base-model> tokenizer.json --local-dir tok
 # 4. Build: context defaults to the model's native context, the KV pool to context + max(64k, context/4), both fitted
@@ -233,273 +233,28 @@ server does not reload the package (`serve.sh` stops a server whose registration
 divergences, `agent_golden.py` passes (exact rendering, reuse inside tool loops,
 valid calls), and `ctx_admit.py` shows the full context capacity admitted.
 
-## Speculative decoding (automatic)
+## Domain knowledge (run the router, read what it prints)
 
-Nothing to configure; read `starter/draft/README.md` only to debug it.
-- Kinds: `mtp` (the GGUF's NextN block; Qwen3.5/3.6/3.8, unsloth `*-MTP-GGUF` repos), `dflash` (DFlash and
-  DFlash2 drafter GGUFs from z-lab or the model's vendor, a separate `draft` parameter scope), `ngram` (prompt
-  lookup in the row's own history, any model, no weights), `assist` (a Gemma-4 assistant GGUF for gemma4-family
-  targets: Gemma 4's MTP head, reading the target's K/V). `build.py --draft auto|mtp|dflash|assist|ngram|none`
-  `[--drafter GGUF] [--draft-depth N]`; auto takes `cfg["drafter"]` (tune.py's measured choice), else MTP, else DFlash.
-- Across families: the verifier is the trunk itself; DFlash embeds its block the way llama.cpp does (the target's
-  raw row times the drafter's `embedding_scale`), so Gemma-style scaled or Glimmer-style normed embeddings work.
-  A kit with a recurrent layer other than gated delta-net (LFM2 short-conv) registers a state replay
-  (`starter/draft/README.md` "Recurrent layers"); without one the `spec` gate fails on the first rejected draft.
-- Output is exactly the target's: verification, device acceptance and gated delta-net replay commit only target
-  tokens, and seeded sampling draws at the true position. The `spec` gate compares with the same package at
-  `draft_depth 0` (`pkg/model_target.json`); for a single request (up to 16 verified tokens: the int8 matvecs'
-  1-/4-/8-/16-token variants round like 1-token decode) a difference is a bug, not a near-tie. Wider verification
-  (many drafting streams, 17+ tokens) takes the f16 WMMA GEMM for speed and can flip near-ties (`SPEC_EXACT=1`
-  builds trade that speed for decode's rounding); tune.py runs the equivalence check before it keeps a drafter and
-  depth, so a depth that changes a request's output is never chosen.
-- Drafting works to the full context and with history reuse and checkpoints: the draft K/V shares the pool's pages.
-- Depth is a `model.json` setting (`execution.draft_depth`, 1-7); the method needs a rebuild.
-- Small models (< ~2B) decode faster without it (launch-bound); `tune.py` measures and decides.
+Facts about families, facets, devices and tasks are in `loom-kb`, not here. For this port run
+`python3 "${LOOM_SKILL_DIR}/../loom-kb/kb.py" route --config cfg.json --device strix-halo --topic porting,cfg-review,starter`
+(add `speculative`, `kernels-ir` as needed) and read the files it prints:
 
-## What the starter generates
-
-| File | Role |
+| Need | Topic or node |
 |---|---|
-| `inspect_gguf.py` | GGUF metadata → `cfg.json`: hidden, layers, heads/kv_heads, head_dim, ffn, vocab, **context_length**, rms_eps, rope_theta/type, **rope_dims** (partial RoPE), qk_norm, attn_bias (q/k/v projection biases, Qwen2; added by the QK-norm + RoPE kernel), attn_gate (`true`: separate tensor; `"fused_q"`: packed in attn_q), post_norms, sliding window/layers, NoPE layers, tied embeddings, eos ids, **recurrent_layers / gdn** (hybrids), the chat block (via `chat_probe.py`), and every tensor's format and shape. |
-| `chat_probe.py` | Renders the model's Jinja chat template on probe conversations and cuts out what the control program needs: role prefixes/suffix, BOS, default system prompt, generation prompts with thinking on/off, the tools block and its order relative to the system message, the tool-call format (`hermes` JSON, `qwen_xml`, `glm`, `pythonic`) and separators, tool-response framing, reasoning-in-history policy, trimming. A template that ignores `tools` (plain ChatML chat models) gives a chat-only block (`call_format` `none`): a request's tools are ignored as the template does, no call is parsed, the card says tool calling "no" and gates.sh skips the agent gates (not applicable); probes with tool calls or results print SKIP. `verify()` re-renders a dozen conversations exactly as `control.loom` will (`simulate()`) and diffs them against the template. `simulate()` is also what the benchmark scripts use to build golden prompts. |
-| `gen_llm.py` | `cfg.json` → `llm.loom`: all kernels plus the `@llm_advance` command program. The command program is a **static per-layer unroll**, so each layer's kind (attention or gated delta-net) and tensor formats come from the GGUF (Q4_K_M mixes Q4_K/Q5_K/Q6_K/Q8_0 per tensor). Decode-shaped linears (< 64 tokens) and the head use int8 activations (`g_quant_q8` + `_q8` matvecs with integer dot4, llama.cpp's Q8_1 numerics; 1-, 4-, 8- and 16-token variants that round alike) for Q8_0/Q4_K/Q5_K/Q6_K/Q5_0 weights (`formats.ICODES`); `ACT_Q8=0` keeps f32 activations. |
-| `gen_moe.py` | MoE FFN kernels (router + top-k, expert matvecs, shared-expert gate, combine; bucketing + grouped WMMA GEMMs for prefill), for `cfg["moe"]` models. |
-| `gen_gdn.py` | Gated delta-net kernels (conv1d + SiLU, history commit, q/k L2 norms, register recurrence, gated RMSNorm) and the fused q/gate split, for hybrids. Recurrent state lives in the runtime's recurrent slots (see porting-notes). |
-| `gen_gemm.py` | WMMA prefill GEMMs per (format, mode). Formats: q4_k, q5_k, q6_k, q8_0, and through `gen_llm.py`'s value helpers (`HELPER`) q4_0, q5_0, iq4_nl, iq4_xs, q3_k, iq3_s, f16. Modes: store, acc, swiglu. |
-| `gen_flash2.py` | Prefill flash attention (transposed, K/V staged once per KV head for `FLASH2_TS` 16-token tiles: 2 by default at head_dim <= 128 with <= 2 query heads per KV head, else 1), head_dim 64 or 128 (and 256 with `FLASH2_SPLIT=0`). |
-| `gen_flash2s.py` | Prefill flash attention for head_dim 256 and 512 (used automatically): two (four) waves per query head own 128 dims each, so Q stays in registers for the whole key loop; they sum S partials through workgroup memory. |
-| `tile_uniform.loom` | Helpers that classify 16-token tiles (and their neighbours) for flash2. |
-| `templates/*.loom` | Serving glue for the hrx-loom 0.1.0 text ABI (`text_*_v1` exports). `prepare` stages one program per packing shape. `storage` sets the KV geometry (2 planes per attention layer, F16) and the recurrent slot size. `control` is the chat policy: rendering, tools, reasoning, thinking switch, tokenization, output channels, tool-call parsing, canonical history for reuse. `service` maps the ABI exports. `weights.loom` is the parameter policy. |
-| `build.py` | Fills the templates from `cfg.json["chat"]`, sizes context/pool/memory, then writes `model.json`, `tokenizer.json`, the GGUF symlink and `llm_config.json` (read by the benchmark scripts). |
-| `pick_gguf.py` | Chooses the GGUF in a repo from the headers only (HTTP range read): quant preference, tensor formats the kit supports, and the memory rule (the file must fit twice: a conservative margin, kept until quant choice accounts for the KV pool at full context). |
-| `llama_trace.py` | llama.cpp's intermediate tensors and compute graph for a prompt (`llama-eval-callback`): the spec and the node-by-node reference for a new architecture. |
-| `draft/` | Speculative decoding: `gen_draft.py` (verify stage, device acceptance, GDN capture/replay and the generic replay hook, MTP drafter), `gen_dflash.py` (DFlash/DFlash2 drafters), `gen_assist.py` (Gemma-4 assistant), `gen_ngram.py` (prompt lookup), `build_draft.py` (prepare/storage/control glue), `find_drafter.py`, `tune.py`; see its README. |
-| `make_kernel_tests.py`, `run_kernel_tests.sh` | `check.case` unit tests with numpy references (gguf dequantize) on the real tensor shapes: embed, matvecs (every format/K in use), QK-norm + RoPE, the prefill GEMMs (every format/mode in use, 64-, 128- and 256-row kernels), the f16 row scale, the attention chain (q/gate split → RoPE + paged KV store → split-K attention → gated combine), the output head argmax, and the gated delta-net chain on a span that continues a stored state. |
+| cfg.json review checklist (step 2), chat template fields | `cfg-review` |
+| What the starter generates, fixed assumptions, chat policy | `starter` |
+| How loom-serve drives a program, bring-up debugging order, new quant format, ABI | `porting` |
+| Loom IR idioms and compile-error fixes | `kernels-ir` |
+| Speculative decoding (drafters, gates, tuning) | `speculative`, `spec-tuning` |
+| Image input and adding a projector family | facet `vision` and `arch/vision` |
+| MoE, hybrid gated-delta-net, sliding window, drafted, kv-le2 | the matching facet |
 
-Kernel inventory:
-- **Decode:**
-  - one-lane-per-32-value-group matvecs, 1-token and 4-token variants, with fused SwiGLU;
-  - an argmax output head that writes no logits to memory;
-  - split-K decode attention with up to 64 splits and early exit.
-- **Prefill:**
-  - f16 row-scaled activations feeding WMMA GEMMs;
-  - transposed flash attention;
-  - a split-K fallback for tokens in mixed (multi-sequence) tiles.
-- **Shared:** a per-token QK-norm + RoPE + F16 KV store kernel, and fused add + RMSNorm.
+`reference/*-example/`: worked ports (table in step 3), applied with `apply_example.sh`; `examples.json` names
+each one's category A loom-fun package (its reviewed config). `find_reference.py`: the reference lookup.
+Maintainers: after changing the starter, `reference/rebase_examples.sh OLD_STARTER` rebuilds the
+examples' patches and `check_examples.sh` must pass.
 
-**Fixed assumptions:**
-- head_dim 64, 128 or 256 (attention); gated delta-net head dims multiples of 32; query-head groups that are not a
-  power of two (Qwen3.8: 6) use flash prefill with staging sized for the power of two below (`gen_flash2.py`);
-  `NO_FLASH2=1` forces the listed split-K path for every prefill token (diagnostics; quadratic at long prompts);
-- K-quant / Q8_0 / Q4_0 / Q5_0 / IQ4_NL / IQ4_XS / Q3_K / IQ3_S / MXFP4 (experts) weights (`starter/formats.py`, `quant_values.loom`; add dequant helpers
-  for other formats); f32 norms and conv weights;
-- hidden ≤ 8192; context ≤ 262,144 (kernel bounds; raise the `range(..., 262144)` facts for 1M-context models);
-- **sampling**: `temperature`, `top_p`, `top_k` and `seed` per request. Temperature 0 (the default
-  unless `build.py --temperature/--top-p/--top-k` set other defaults) is exact greedy. Otherwise the
-  head draws from the top-k candidates (k ≤ 64; `top_k` 0 = 64) after temperature softmax and top-p,
-  with a counter-based RNG keyed by (seed, position): a fixed `seed` reproduces a completion, and a
-  request without one draws from its own nonce. Thinking models want sampling (Qwen: temperature
-  0.6, top_p 0.95, top_k 20 for thinking; 0.7/0.8/20 without); greedy can end reasoning with EOS or
-  loop, which `agent_golden.py` flags. Gates and goldens always send temperature 0.
-- text only (image content parts are rejected; text parts are joined).
+## Mandate
 
-**Chat policy facts (control.loom):**
-- Tools follow the template exactly (verified by `chat_probe.py`). Tool definitions are printed as
-  the request sent them; send them serialized like Jinja `tojson` (`json.dumps` defaults) for
-  byte parity with the template.
-- Hermes-JSON calls are parsed in source without a JSON parser, so a malformed call never fails
-  the request: its arguments go back as generated for the harness to handle. Qwen-XML and GLM
-  calls go through the host `tools.parse_xml` codec (a malformed XML frame fails the request; a
-  frame cut off by `max_tokens` is dropped). Text after the last complete call is dropped.
-  Content before a call ends without `content_call_separator`: the template prints it between content and
-  calls, so returning it doubled it in the next turn's rendering and broke history reuse (`@content_until`;
-  streaming withholds trailing whitespace until it is known not to precede a call).
-- Reasoning is rendered for assistant turns after the last user message, as the Qwen templates do.
-  A new user turn therefore re-renders earlier turns without reasoning; inside a tool loop the previous
-  turn is reused entirely (`prompt_tokens_details.cached_tokens`). loom-serve resumes a retained row only
-  when the new prompt extends its history (`complete_text`) exactly: it cannot cut a row back to a common
-  prefix, so a turn the template re-renders differently (dropped reasoning, an added newline) is prefilled
-  again (the prefix cache only keeps intermediate frontiers of long prefills).
-- loom-serve rejects `"reasoning_content": null` in a message: omit the field instead.
-- `usage.prompt_tokens` of a turn that reuses history is one lower than `/v1/chat/completions/input_tokens`
-  (the previous turn's EOS is already in the row); compare renderings with `input_tokens`.
-- `input_tokens` above `chat_probe.simulate()` while the rendered text is right (a debug `@require(0, %prefixed)`
-  in chat_begin returns it as the error message) is loom-serve's tokenizer: it differs from HF tokenizers after
-  64 pre-tokenizer pieces when a later `Sequence` stage splits them further. build.py rewrites an
-  individual-digits `Digits` stage (Spark-X, Mellum) as the equivalent Isolated `\p{N}` Split; check another shape with
-  HF vs loom-serve counts on a long text.
-
-## cfg.json review checklist (step 2)
-
-Compare with llama.cpp's graph builder for the arch (`src/models/<arch>.cpp` in
-recent llama.cpp; older trees have it in `src/llama-model.cpp`). Check these fields:
-- `rope_type`:
-  - `neox` pairs (d, d+64). Used by qwen2/qwen3/gemma/phi3/…; llama.cpp's
-    `LLAMA_ROPE_TYPE_NEOX`.
-  - `norm` pairs (2d, 2d+1). Used by llama/mistral; `LLAMA_ROPE_TYPE_NORM`.
-  - A wrong value still gives plausible-looking text for a few tokens, then degrades.
-- `rope_theta`; Llama-3 frequency factors (`rope_freqs.weight` -> `rope_freq_factors`) and YaRN scaling (`rope_scaling`,
-  when the GGUF says `rope.scaling.type` yarn, as llama.cpp does: gpt-oss, laguna) are applied; linear scaling is **not**
-  implemented, so add it in `qk_rope()` if the model uses it.
-- `qk_norm` (per-head RMSNorm on q/k before RoPE), `post_norms` (Gemma-style
-  post-attention/FFN norms), `attn_gate` (sigmoid output gate), `embed_scale`
-  (Gemma multiplies embeddings by √hidden), `embed_norm`.
-- Sliding-window layers: list them in `sliding_layers` and set `sliding_window` (from the GGUF's pattern, else
-  `inspect_gguf.SWA_PERIOD`: `arch: (n, dense_first)`, the period llama.cpp hard-codes in `load_swa_pattern`).
-  Sliding layers with their own RoPE at the same head_dim (`rope_theta_swa`, `rope_dims_swa` from
-  `rope.freq_base_swa` / `rope.dimension_count_swa`, spark2_5) get `g_qk_rope_store_swa`.
-- `attn_qkv` (one fused q|k|v projection, split by `g_split_qkv`), `attn_gate: "per_head"` (one sigmoid logit
-  per query head, broadcast by `g_gate_heads`; `attn_gate_act: "softplus"` applies softplus there instead, laguna),
-  `ffn_act: "gelu"` (GEGLU; `inspect_gguf.FFN_ACT` lists the architectures llama.cpp hard-codes it for). spark2_5 uses
-  all three. A per-layer `attention.head_count` gives `layer_heads` (`heads` is the widest): the attention kernels are
-  generated again for each narrower count (`_h<heads>`) and kernel-tested at it.
-- Chat templates whose first system block always opens with the default prompt and append the request's
-  system message (`system_lead`, `system_lead_separator`; reasoning instructions appended to it:
-  `reasoning_after_lead`), that render a turn without reasoning as a bare think close (`history_think: "close"`)
-  or print tools as compact JSON (`tools_compact`) are derived by `chat_probe.py`; so are templates that close each
-  role with its own tag (`system_suffix`, `assistant_suffix` beside the user's `suffix`; the terminal is the
-  assistant's) and that show reasoning in history only with thinking on, a bare think close in every turn with it off
-  (`history_think_off: "close"`). build.py patches control.loom only for blocks that use them.
-  `nope_layers` are layers without RoPE.
-- `extra_eos_ids`: every id that should stop generation. For ChatML models that is
-  `<|im_end|>` and `<|endoftext|>`.
-- `chat`: derived and verified automatically (all `chat OK` lines). It matches the
-  template byte for byte with **one deliberate exception**: when the model emits
-  `<think>` itself (Qwen3 hybrid), `<think>\n` is appended to the thinking generation
-  prompt so output starts in the reasoning channel. llama.cpp's *chat* endpoint then
-  sees fewer prompt tokens than Loom; the goldens render with Loom's prompt, so they
-  are exact. Check the printed summary against the model card:
-  - `thinking`: `toggle` (Qwen3, Qwen3.5: `enable_thinking`), `always`, or `never`
-    (`*-Instruct-2507`); `thinking_default` (Qwen3: on; Qwen3.5 small models: **off**);
-  - `call_format`: `hermes` (Qwen2.5/Qwen3), `qwen_xml` (Qwen3.5/Qwen3-Coder), `glm`, `pythonic`
-    (LFM2: `<|tool_call_start|>[f(a='x', n=3)]<|tool_call_end|>`, parsed in control.loom);
-  - `default_system` (Qwen2.5 inserts "You are Qwen, created by Alibaba Cloud…"); `default_system_tools` when the
-    template swaps in another default when tools are present (Nanbeige: a "tool-calling expert" prompt; the text
-    beside the tools block, separator included; absent otherwise);
-  - `history_think_before: "empty"` (MiniCPM-V): turns before the last user query keep an empty think block.
-  - A template that renders reasoning in history reads as thinking `always`, also for models that never reason
-    (Qwen3-*-Instruct-2507); no template signal tells them from Flint or Jan-v1. port.sh's smoke test decides: two
-    finished replies that never leave the reasoning channel switch the block to `never` (`chat_probe.py GGUF --never
-    cfg.json`, verified against the template), rebuild and smoke again.
-  - `bos` only when the template prints `bos_token` (a GGUF whose bos id is the role tag `<|im_start|>` is not).
-  - Llama 3.x (`call_format` `json`: `{"name": ..., "parameters": ...}` without a wrapper, one call per turn):
-    `system_preamble`/`system_preamble_tools` (the always-printed system block's "Cutting Knowledge Date ... Today
-    Date ..." text, "Environment: ipython" with tools), `tools_in_user` (the tools open the first user message),
-    `tools_indent` (tojson(indent=4)), `calls_drop_content`, `tool_content_json` (results as JSON strings);
-    `templates/control_json.loom` holds their control functions. The date: `strftime_now` renders the request day in
-    llama.cpp, which a control program can't; Loom renders the templates' own no-clock date, 26 Jul 2024
-    (`chat_probe.CLOCK`), so prompts are the same every day. The architecture side is `rope_freq_factors`
-    (`rope_freqs.weight`: llama.cpp divides each rotary pair's frequency by it).
-  - `reasoning_instructions` (Qwen3.8: "Reasoning effort is set to xhigh. …" per `reasoning_effort`, only
-    with thinking on, `reasoning_separator` before the tools text / system message): build.py advertises
-    those efforts (plus none = thinking off) and `chat_begin` renders the request effort's text.
-
-  **History reuse depends on the canonical rendering.** `complete_text` must store the turn as the
-  template re-renders it, not as the model generated it. Two trials failed `reuse_ok` here: a model
-  that omits `<|eom|>` before a tool call (the template renders it), and one that writes newlines
-  after a call that the template drops. If `reuse_ok` fails after a tool call, diff Loom's
-  `input_tokens` rendering of the next turn against `chat_probe.simulate()` and canonicalize those bytes.
-  GLM-style templates: the model ends a call turn with `<|observation|>` and an answer with `<|user|>`;
-  those stop tokens stay in the KV row, so set `chat.stop_after_calls` / `chat.stop_after_answer`:
-  `complete_text` publishes them, and `g_embed` maps the service terminal loom-serve feeds back at the
-  next turn to the real stop token (`stop_restore()`; flint reused turns diverged at gaps up to 2.7 without it).
-  Templates the probe can't model (e.g. role tags with no closing suffix, tools
-  inside the first user message, channel formats): fill the block by hand, keep
-  `simulate()` in step, and run `chat_probe.py MODEL.gguf --verify cfg.json` (your kit's copy) until every line is OK. If the
-  control program must parse structural tokens out of the generated text (e.g.
-  channel tags), list them in `chat.nonspecial_tokens`: loom-serve strips special
-  tokens from decoded text.
-- Hybrids (`recurrent_layers` present): check `gdn` against llama.cpp's
-  `src/models/qwen35.cpp` (k/v heads, head dims, conv kernel), that `kv_layers`
-  counts only the attention layers, `rope_dims` (Qwen3.5: 64 of 256), `attn_gate:
-  "fused_q"`, and `ffn_norm_tensor: "post_attention_norm"`.
-
-## Bring-up debugging order
-
-1. **The server fails to register.** `serve.sh` prints diagnostics. See
-   `reference/loom-ir-cookbook.md` for each diagnostic family (PARSE, TYPE,
-   SUBRANGE, TARGET, SYMBOL).
-2. **Garbage from the first token.** Run the kernel unit tests. They found the
-   one-wave matvec writer bug (K=1024 gives 32 lanes for 64 outputs) in seconds.
-   Then suspect, in order:
-   - rope pairing;
-   - the norm eps;
-   - a tied head that is missing `output.weight` (the head must use `token_embd.weight`);
-   - a tensor format with no dequant helper.
-3. **Correct short answers but wrong long ones.** The prefill path (≥64 tokens:
-   GEMM + flash2 + fallback) is wrong, or KV paging is. Compare 1k/2k goldens
-   against short goldens, and run `consistency.py` for mixed batches.
-4. **Correct but stops early or never stops.** Check the EOS ids and the chat
-   `terminal`.
-5. **503 "insufficient completion capacity".** `--memory_bytes` is too small. The message blames retained
-   state, but it also comes on a fresh server: every admission charges the weights, the request's KV pages and
-   the largest command program's scratch at a prefill-sized invocation (a drafting hybrid's `@llm_verify` keeps
-   every token's gated delta-net inputs: 7 GB at a 4096-token prefill of a 30-layer MoE). build.py's printed
-   value covers the weights (projector included), the KV pool (pool × 2·kv_layers × kv_heads·head_dim·2 bytes),
-   that scratch + 3 GiB, and the recurrent state.
-6. **Registration fails with a VGPR spill (`spill-traffic-register-exhausted`).** A
-   kernel holds too much in registers for this model's shape. Split the work over more waves
-   (`gen_flash2s.py`: two waves per head at head_dim 256, four at 512) or reload operands per iteration.
-7. **Coherent but wrong from the first token, kernel tests pass.** A wiring or
-   config bug. Compare against `starter/llama_trace.py` (llama.cpp's intermediate tensors,
-   node by node) with a numpy forward of layers 0–1; then read the generated command program for one layer of each kind
-   (`awk '/---- layer N$/,/---- layer N+1/' pkg/program/llm.loom`). A real example:
-   a stale cfg.json with `qk_norm: false` left Qwen3.5's Q/K norms out (`%no_norm`).
-   An independent numpy forward of a short prompt that matches llama.cpp's top
-   logits narrows "my understanding of the model" vs "my kernels" quickly; it is a
-   diagnostic, never the golden.
-
-## Beyond the starter (MoE, other formats, new ops)
-
-- **MoE** is in the starter (`gen_moe.py`, wired by `gen_llm.py` from `cfg["moe"]`): router top-k (softmax,
-  sigmoid + selection bias, or llama.cpp's SOFTMAX_WEIGHT with the router's own bias; weights kept in registers, times
-  `expert_weights_scale`),
-  per-expert output biases and the gpt-oss clamped SwiGLU (`moe.expert_bias`, `moe.act`), per-assignment expert matvecs for decode, tokens bucketed
-  by expert and grouped WMMA GEMMs for prefill, shared experts (with the Qwen sigmoid gate), combine; MoE layers
-  after `leading_dense` dense ones (an MoE MTP block generates too; not yet validated on the GPU). `inspect_gguf.py` fills `cfg["moe"]` from the GGUF;
-  routing choices llama.cpp hard-codes per architecture instead of writing them (`expert_gating_func`,
-  `expert_weights_norm`) come from `MOE_DEFAULTS`: add a row for a new MoE architecture from its
-  `src/models/<arch>.cpp` (`build_moe_ffn` arguments). Expert formats: Q4_K/Q5_K/Q6_K/Q8_0/MXFP4, gate and up may differ
-  (`GATE+UP` kernels, e.g. bartowski's MiniCPM-V-4.7 Q4_K_M: Q4_K gate, Q6_K up) (`gen_moe.FMT`; an MTP
-  block in another format is left out). Kernel tests cover the decode and prefill chains on the real tensors.
-  Ported this way: Qwen3.6-35B-A3B (`qwen35moe`, hybrid + MoE, 256 experts top-8), gpt-oss-20b (MXFP4 experts,
-  `reference/gpt-oss-example` for its chat format).
-- **Gemma-3n / Gemma-4 family (arch `gemma3n`, `gemma4`).** `apply_example.sh gemma4`: a complete,
-  gate-passing port whose README lists every feature the starter lacks (PLE, KV sharing, mixed
-  head_dim 256/512, KV heads per layer kind and V = K on global layers without `attn_v` (12B/26B/31B), MoE
-  layers beside the dense FFN (26B-A4B), proportional partial RoPE, V norm without weights, GEGLU, softcap, bf16); each
-  one silently breaks output if missed. Read llama.cpp's `src/models/gemma*.cpp` for a new variant.
-  Sliding layers with a small window (<= ~1k keys) don't need flash prefill: split-K is fine there
-  (a trial spent 15 min on it for no gain).
-- **New quant format.** Add a `@g_<fmt>_values` func in `COMMON` (gen_llm.py; `mv()` calls it),
-  add the entries to `FMT`/`SB` in `starter/formats.py` (inspect_gguf.py's "no kernels" check and pick_gguf.py read
-  the same table), and add a `dequant16` case in `gen_gemm.py` (or list it in `gen_gemm.HELPER`: the GEMM then
-  dequantizes through the value helper). For int8 decode matvecs, also an `@g_<fmt>_icodes` (integer codes, scale,
-  minimum) and the format in `formats.ICODES`; `gen_llm.Q5_0` is a worked example of both helpers. bf16 needs a
-  value helper (`view<32xbf16>` -> `vector.extf`). Unit-test against `gguf.quants.dequantize` (make_kernel_tests.py
-  does, for every format and K a model uses).
-- **Other recurrent layers (Mamba, RWKV, other delta-net variants).** Follow
-  `gen_gdn.py`: per-span kernels read the reader slot at the fork position (else the
-  row's writer slot), start from zeros at position 0, and publish the final state to
-  the writer slot; `build.py` sizes the slot (`gdn_geometry()["slot_bytes"]`). Test the
-  chain like `make_kernel_tests.py`'s `gdn_chain` (a span that continues a stored state).
-- **Library programs are the canonical reference** for the text-service ABI (prepare,
-  control, storage, service entry points). `templates/` follow the upstream tiny-text
-  fixture (`loom/src/loom/serve/fixture/text` at tag v0.1.0 of ROCm/hrx-system) and
-  `library/program/text/qwen3_8/chat.loom`. The upstream doc is
-  `loom/docs/src/serving/model-programs.md`. When a new hrx-loom release changes the
-  ABI, diff that fixture between the old and new tags; the registration error names
-  the missing export (e.g. `root symbol '@text_chat_reasoning_v1' was not found`).
-
-## Reference
-
-- `reference/loom-ir-cookbook.md`: IR idioms, proof facts, and compile-error fixes.
-- `reference/vision.md`: image input: what port.sh adds, how it works (image component, chat markers,
-  media input records, M-RoPE), and **how to add a projector family** (llama.cpp graph -> NumPy
-  reference vs `llama-mtmd-debug` -> kernels -> plan -> gate). Code: `starter/vision/`.
-- `reference/porting-notes.md`: how the text service drives the program (epochs,
-  spans, metadata packets, KV paging), and what each glue file does.
-- `reference/*-example/`: worked ports (table in step 3), applied with `apply_example.sh`; `examples.json` names
-  each one's category A loom-fun package (its reviewed config). `find_reference.py`: the reference lookup.
-  Maintainers: after changing the starter, `reference/rebase_examples.sh OLD_STARTER` rebuilds the
-  examples' patches and `check_examples.sh` must pass.
+Declare the scope first, work inside it, opt in by scope, run `fleet/scope_lint.py` before a PR, stop on
+out-of-mandate needs: the rules are in `loom-kb/SKILL.md` ("Mandate rules").

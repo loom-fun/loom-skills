@@ -1,3 +1,101 @@
-# Topic: roofline
+# Topic: roofline (calibration of achieved efficiency; where the remaining gap usually is)
 
-TODO(kb migration)
+## Contents
+
+- Where the remaining gap usually is
+
+Ceilings are from `roofline.py` (216 GB/s, 59 TFLOP/s). Achieved numbers are
+end-to-end and client-side, from tuned Loom ports. `EFF` in `roofline.py` is the
+best (or a representative) value per class. Add one row per finished optimization
+campaign, including ones that missed their target.
+
+The rows below were measured in local sessions (historical). Card values now come from DevLab `devlab-perf` jobs with the
+active wait (`amdgpu://?completion_spin_ns=4294967295`), which match or beat them; the efficiencies stay valid.
+
+| Model (arch, quant) | Metric | Ceiling | Loom achieved | Eff | llama.cpp ROCm | Note |
+|---|---|---|---|---|---|---|
+| Nemotron-3.5-Bolt-E4B (gemma4 dense, Q4_K_M) | decode | 68.1 | 61.1 | 0.90 | 52.7 | adaptive matvec rows, fused QKV, paired-row geglu |
+| 〃 | decode @1k | 66.8 | 59.2 | 0.89 | 50.6 | |
+| 〃 | decode @2k | 66.2 | 57.9 | 0.87 | 48.7 | |
+| 〃 | prefill 1k | 7146 | 1830 | 0.26 | 1593 | head_dim 256/512: no flash2, simple split attention |
+| 〃 | prefill 2k | 7094 | 1801 | 0.25 | 1678 | |
+| 〃 | c4 steady | 255 | 165 | 0.65 | 157 | |
+| Bolt-E4B, run 2 (fresh agent, 1 turn, 1 h budget) | decode | 68.1 | 60.0 | 0.88 | 52.7 (b1355) | adaptive rows only; fused QKV / paired-row not tried |
+| 〃 | prefill 1k / 2k | 7146 / 7094 | 2201 / 2339 | 0.31 / 0.33 | 1593 / 1678 | new flash prefill kernel for head_dim 256/512 (~30 min to build) |
+| 〃 | c4 steady | 255 | 169 | 0.66 | 157 | |
+| LFM2.5-24B-A2B (lfm2moe hybrid: 30 short-conv + 10 attention layers, MoE 64×4, Q4_K_M; fresh agent, 1 turn, 74 min) | decode | 140 | 100.4 | 0.72 | 97.3 (b1355) | MoE decode below 0.78; the roofline step was skipped, so no targets steered the run |
+| 〃 | prefill 1k / 2k | 13208 / 12970 | 2677 / 2744 | 0.20 / 0.21 | 2140 / 2213 | prefill chunk 4096: every chunk reads all 64 experts |
+| 〃 | c4 steady | 204 | 185.7 | 0.91 | 158.9 | |
+| Qwen2.5-0.5B-Instruct (qwen2 dense, Q4_K_M/Q5_0; fresh agent, 1 turn, 35 min, campaign tools used) | decode | 551 (target 377 with per-layer floor) | 289 | 0.52 | 288 (b1355) | small model: per-layer launch cost dominates |
+| 〃 | prefill 1k / 2k / 16k | 77769 / 73596 / – | 17571 / 18571 / 11920 | 0.23 / 0.25 / 0.28 | 13851 / 13890 / 8202 | |
+| Flint (MoE 256×6, int4 q4_1) | decode | 130 | 99–104 | 0.78 | 62 | expert gather bound |
+| 〃 | decode @32k | 82.7 | 63 | 0.76 | 48 | |
+| 〃 | prefill 2k | 11946 | ~2650 | 0.22 | 1509 | |
+| 〃 | prefill 32k | 7041 | 1976 | 0.28 | 1047 | |
+| 〃 | c4 steady | 244 | 181 | 0.74 | 152 | |
+| Muse-Glimmer-30B (dense, Q5_K_M) | decode | – | 13.1 | – | 12.4 | |
+| 〃 | prefill 2k / 32k | – | ~430 / 420 | – | 355 / 359 | |
+| Qwen3-0.6B (dense, Q8_0; starter, no tuning) | decode / decode @2k | – | 252 / 179 | – | 253 / 193 | per-layer launch and attention cost dominate at 2k |
+| 〃 | prefill 2k | – | 13.0k | – | 10.5k | |
+| 〃 | c4 steady | – | 690 | – | 578 | |
+
+Observations:
+- Dense decode reaches about 0.9 of the bandwidth roofline. The last 10 % is the
+  per-layer small kernels plus attention.
+- Prefill end to end is ~0.25–0.33 of WMMA peak, even though the GEMMs alone reach ~0.5.
+  Attention, norms and dispatch make up the rest. A target above ~0.3 needs new
+  GEMM work (LDS double-buffering, dequant into fragments).
+- These efficiencies were fitted on the same two models, so targets for a new
+  architecture are an out-of-sample prediction. Record the result here.
+
+## Speculative decoding (`EFF_DRAFTED`)
+
+Against `drafted_ceiling()`: the bandwidth ceiling of one verify pass of depth + 1 positions (MoE: their distinct
+experts) x (1 + acceptance x depth) tokens per pass, the drafter's own passes not counted. Published loom-fun
+cards, DFlash depth 3, local session of 2026-11-06:
+
+| Model | Metric | Ceiling | Loom | Eff | Acceptance |
+|---|---|---|---|---|---|
+| Qwen3.8-27B (dense, Q4_K_M) | decode | 42.4 | 29.2 | 0.69 | 0.76 |
+| 〃 | c4 steady | 168.0 | 61.7 | 0.37 | |
+| Muse-Glimmer-30B (dense, UD-Q5_K_M) | decode | 38.1 | 25.8 | 0.68 | 0.73 |
+| 〃 | c4 steady | 151.4 | 68.8 | 0.45 | |
+| Bolt-E4B (dense, Q4_K_M) | decode | 205.1 | 97.6 | 0.48 | 0.67 |
+| 〃 | c4 steady | 768.2 | 219.1 | 0.29 | |
+| Flint (MoE, Q4_K_M) | decode | 177.8 | 92.4 | 0.52 | 0.68 |
+| 〃 | c4 steady | 301.8 | 134.2 | 0.44 | |
+
+Small models sit lower: the drafter and the verify pass's fixed costs are a larger share of a short pass.
+
+## Radeon AI PRO R9700S (gfx1201, DevLab `radeon-r9700`), 2026-11-13
+
+No Loom port runs on gfx12 yet: hrx-loom 0.1.0 rejects the starter kit's gfx11-shaped WMMA kernels (GEMM, flash
+prefill) for `amdgpu-rdna4`. The rows below are llama.cpp on the same runners: they set the `radeon-r9700s` preset's
+bandwidth and show what the hardware gives. Ceilings: `--device radeon-r9700s` (613 GB/s, 214 TFLOP/s, both measured).
+
+| Model | Metric | Ceiling | llama.cpp ROCm b1375 (gfx120X) | llama.cpp Vulkan b12211 (RADV) | Eff (best) |
+|---|---|---|---|---|---|
+| Qwen2.5-32B-Instruct Q4_K_M | decode (tg128) | 30.9 | 28.4 | 29.3 | 0.95 |
+| 〃 | prefill 512 | ~1200 | 1091 | 776 | 0.91 (int8 MMQ: not bound by the f16 peak) |
+| Qwen3-14B Q4_K_M | decode (tg128) | 70.0 | 59.4 | 63.4 | 0.91 |
+| Qwen3-0.6B Q4_K_M | decode (tg128) | ~1500 | 358 | 506 | 0.34 (per-layer launch cost dominates) |
+
+## Where the remaining gap usually is
+
+- **Prefill GEMM efficiency.** Q4_K GEMMs run ~28 TFLOP/s in the model (~30 on real data in isolation), ~70 %
+  of the real-data WMMA ceiling (~40–43 TOPS, see above); gufo (an engine tuned for this chip) reaches ~80 %
+  with int8 (W8A8 / K-quant×Q8_1) wave64 GEMMs, which halve LDS and activation traffic, and fused
+  norm/SwiGLU→Q8_1 epilogues. int8 WMMA is not faster per instruction here (same ~40 TOPS on real data), so
+  the gain is energy: fewer bytes moved per MAC. Tried here and slower on real data: a wave64 port of the f16
+  GEMM through transposed fragment loads (27.6 vs 30.5 TFLOP/s) and llama.cpp's mmq formulation
+  (`gen_gemm.gemm_q8`: Q8_1 activations x Q4_K codes on int8 WMMA, 20.7; 26.2 even with the per-block scaling
+  removed): the f16 kernel's staging pipeline is the better one; an int8 kernel would need gufo's deeper
+  pipelining to pay off.
+- **Gated delta-net prefill** (hybrids): the register recurrence steps through the chunk token by token
+  (Qwen3.8-27B: 0.14 ms/token of 2.3, all GDN kernels 0.27); a chunked (WY / parallel-scan) form is the lever.
+- **Small models** (≤ 1B), for example Qwen3-0.6B: decode at 2k context ran 179
+  vs 193 tok/s for llama.cpp. There, the attention and launch overhead per layer
+  dominates rather than weight bandwidth. Fewer, fused launches per layer, and
+  fewer splits when context is short, are the levers.
+- **MoE decode** is bound by the expert gather: batch the active experts' matvecs
+  per token group.

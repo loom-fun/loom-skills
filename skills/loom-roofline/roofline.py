@@ -25,7 +25,7 @@ from formats import split_parts  # noqa: E402
 # Demonstrated efficiencies on Strix Halo (fraction of the roofline actually reached by
 # a tuned Loom port, end to end). Update these when a port beats them; cite the source.
 EFF = {
-    "decode": 0.90,      # dense. Bolt-E4B 61.1 / 68.1 (reference/calibration.md)
+    "decode": 0.90,      # dense. Bolt-E4B 61.1 / 68.1 (the loom-kb `roofline` topic (`kb.py route --topic roofline`))
     "decode_moe": 0.78,  # expert gather. Flint 101 / 130
     "prefill": 0.33,     # end to end. Bolt-E4B with d256/d512 flash prefill: 2339 / 7094 (Flint 0.22-0.28)
     "c4": 0.70,          # dense. Bolt 0.65-0.66
@@ -191,7 +191,7 @@ def attn_flops_per_token(geo, P):
 # Devices (--device): the memory bandwidth a streaming kernel reaches and the peak dense f16 WMMA rate
 # (CUs x 512 flops/clock x boost clock on RDNA3/3.5; RDNA4 doubles the dense f16 WMMA rate per CU: x 1024). The CLI's --bw / --flops override them.
 # EFF / STRETCH / LAYER_US above were calibrated on Strix Halo; on another device they are an out-of-sample estimate
-# until a row in reference/calibration.md says otherwise.
+# until a row in the loom-kb `roofline` topic (`kb.py route --topic roofline`) says otherwise.
 DEVICES = {
     # LPDDR5X-8000, 256-bit (256 GB/s peak); 40 CUs x 512 x 2.9 GHz
     "strix-halo": dict(name='AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151)', bw=216e9, flops=59e12),

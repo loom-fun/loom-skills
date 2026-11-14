@@ -15,4 +15,4 @@ those). Ideas, not a base:
 The rest of that port (adaptive split-K decode attention, fused RMSNorm + f16 row scale, the listed
 prefill fallback, per-token RoPE + KV store) has been folded into the starter's `gen_llm.py`.
 Its measured numbers (int4 build vs llama.cpp b1355: decode 99-104 vs 62 tok/s) are in
-`loom-roofline/reference/calibration.md`.
+the loom-kb `roofline` topic (`kb.py route --topic roofline`).

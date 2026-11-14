@@ -48,7 +48,7 @@ ap.add_argument("--drafter", default=os.environ.get("DRAFTER"), help="DFlash/DFl
 ap.add_argument("--draft", default=os.environ.get("DRAFT", "auto"), choices=["auto", "mtp", "dflash", "ngram", "assist", "none"],
                 help="speculative decoding drafter. auto (default): draft/tune.py's measured choice, else the GGUF's MTP/NextN "
                      "block, else a DFlash drafter, else a Gemma-4 assistant; assist: Gemma-4 assistant GGUF (cfg assistant); ngram: prompt lookup in the row's own history (any model, no drafter "
-                     "weights); none: ordinary decoding (also SPEC=off). Draft settings are tuned by draft/tune.py (draft/README.md)")
+                     "weights); none: ordinary decoding (also SPEC=off). Draft settings are tuned by draft/tune.py (the loom-kb `speculative` topic (`kb.py route --topic speculative`))")
 ap.add_argument("--draft-depth", type=int, default=int(os.environ.get("DRAFT_DEPTH", "0")) or None,
                 help="proposed tokens per verification step (1-7)")
 ap.add_argument("--sizing-json", default=None, help="write what loom-serve must hold resident (weights, workspace, recurrent state, KV bytes per position) to this file: the fit table's input")
@@ -69,7 +69,7 @@ missing = [k for k in ("generation_prompt_plain", "call_format", "tool_item_pref
 if missing:
     sys.exit(f"chat block lacks {missing}: regenerate it with inspect_gguf.py / chat_probe.py")
 KERNEL_CONTEXT, KERNEL_POOL = 262144, 1048576
-# Speculative decoding is on by default when the checkpoint carries a drafter (draft/README.md).
+# Speculative decoding is on by default when the checkpoint carries a drafter (the loom-kb `speculative` topic (`kb.py route --topic speculative`)).
 if os.environ.get("SPEC", "").lower() in ("0", "off", "no", "false", "none"):
     a.draft = "none"
 a.drafter = a.drafter or (cfg.get("drafter") or {}).get("gguf")
