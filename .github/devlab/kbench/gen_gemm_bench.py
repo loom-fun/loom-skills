@@ -46,7 +46,7 @@ def build(variant=""):
         for big in ("m128", "m256"):
             if big == "m256" and rows % 256: continue
             g = G.gemm_big(fmt, mode) if big == "m128" else G.gemm_big256(fmt, mode)
-            tw = transform(R.twin(g), variant)
+            tw = R.native_m256(fmt, mode) if (variant == "pipe" and big == "m256") else transform(R.twin(g), variant)
             m = re.search(r'export\("(\w+)"\)', tw); old = m.group(1)
             kn = f"k_{fmt}_{mode}_{big}_{rows}x{K}x{N}"
             tw = tw.replace(f'export("{old}") @{old}(', f'export("{kn}") @{kn}(')
@@ -130,5 +130,5 @@ HEAD = "amdgpu.target<gfx12-generic> @rdna4 {subgroup_size = 32}\n\n" + open(os.
 if __name__ == "__main__":
     d = sys.argv[1]
     os.makedirs(d, exist_ok=True)
-    for v in ["", "nomma", "nodq", "nobar"]:
+    for v in ["", "pipe"]:
         open(os.path.join(d, "bench%s.loom" % ("_" + v if v else "")), "w").write(HEAD + "\n".join(build(v)) + ("\n" + PEAK if not v else ""))

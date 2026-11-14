@@ -7,9 +7,7 @@
       "dir": "gemm_r9700",
       "files": [
         "bench.loom",
-        "bench_nomma.loom",
-        "bench_nodq.loom",
-        "bench_nobar.loom"
+        "bench_pipe.loom"
       ],
       "config": [],
       "args": [
