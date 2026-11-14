@@ -40,7 +40,10 @@ def load_methodology(path=None):
         return out
     with open(path) as fh:
         d = json.load(fh)
-    out["source"] = os.path.relpath(path, ROOT)
+    try:
+        out["source"] = os.path.relpath(path, ROOT)
+    except ValueError:      # another drive (Windows)
+        out["source"] = path
     table = d.get("rows") or d.get("bands") or {}
     for r, e in (table.items() if isinstance(table, dict) else []):
         if r in bands:

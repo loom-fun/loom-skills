@@ -143,10 +143,11 @@ class Ratchet(unittest.TestCase):
 
     def test_methodology_file_overrides_defaults(self):
         import tempfile
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-            json.dump({"rows": {"decode": {"band": 0.10, "reject": 0.80}}, "bimodal_models": ["Foo-1B"]}, f)
-        m = L.load_methodology(f.name)
-        os.unlink(f.name)
+        with tempfile.TemporaryDirectory() as t:
+            path = os.path.join(t, "methodology.json")
+            with open(path, "w") as f:
+                json.dump({"rows": {"decode": {"band": 0.10, "reject": 0.80}}, "bimodal_models": ["Foo-1B"]}, f)
+            m = L.load_methodology(path)
         self.assertEqual(m["bands"]["decode"], (0.10, 0.80))
         self.assertEqual(m["bands"]["prefill_8k"], L.DEFAULT_BANDS["prefill_8k"])
         self.assertTrue(L.is_bimodal("x-Foo-1B-loom", m))
