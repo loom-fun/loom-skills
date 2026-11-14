@@ -537,6 +537,9 @@ if R4:
     if os.environ.get("FLASH2_LAZY", "0") == "1":   # O^T rescale only when a column's max changed (flash2_trim.py); gfx12 twin only
         from flash2_trim import lazy
         text = lazy(text)
+    if os.environ.get("FLASH2_KVH", "0") == "1":   # loop-invariant half of the paged-KV lookup hoisted (flash2_trim.py); gfx12 twin only
+        from flash2_trim import kvhoist
+        text = kvhoist(text)
     if os.environ.get("FLASH2_VTF", "0") == "1":   # flat-index V^T stores (flash2_trim.py); gfx12 twin only
         from flash2_trim import vtflat
         text = vtflat(text)

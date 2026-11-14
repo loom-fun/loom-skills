@@ -87,3 +87,46 @@ def vtflat(text):
                 f"{i}view.store {mm.group(2)}, %vtf_view[%vtf_i] : f16, view<{d * vtc}xf16>")
     text, n = pat.subn(rep, text)
     return text
+
+
+def kvhoist(text):
+    """FLASH2_KVH=1: the paged-KV lookup of the tile loop without its loop-invariant half. g_kv_offset (inline) reloads the row's
+    page-map pointer (a 64-bit global load) on every call, and the compiler does not hoist a load out of a loop that has barriers:
+    three dependent global loads per tile (map pointer, page entry, K/V). Here the map view and the plane base are made once before
+    the loop; a tile does the page-entry load and the address math."""
+    if "func.call @g_kv_offset(%origins, %row, %kp, %blocks, %k_plane, %pool)" not in text:
+        return text
+    pb = re.search(r"%pos_bytes = index\.constant (\d+) : offset", text)
+    hdr = re.compile(r"^( *)%m_final, %l_final, [^=]*= scf\.for %kt = ", re.M)
+    mh = hdr.search(text)
+    ind = mh.group(1)
+    defs = f"""{ind}%kh_c1 = index.constant 1 : index
+{ind}%kh_c16 = index.constant 16 : index
+{ind}%kh_rec_stride = index.constant 40 : offset
+{ind}%kh_row = index.assume %row [range(%row, 0, 2147483646)] : index
+{ind}%kh_rec_off = index.scale %kh_row, %kh_rec_stride : index, offset -> offset
+{ind}%kh_records = buffer.view %origins[%kh_rec_off] : buffer -> view<5xi64>
+{ind}%kh_map64 = view.load %kh_records[4] : view<5xi64> -> i64
+{ind}%kh_map_b = scalar.assume %kh_map64 [range(%kh_map64, 0, 9223372036854775807)] : i64
+{ind}%kh_map_origin = index.cast %kh_map_b : i64 to offset
+{ind}%kh_map = buffer.view %origins[%kh_map_origin] : buffer -> view<[%blocks]xi32>
+{ind}%kh_last = index.sub %blocks, %kh_c1 : index
+{ind}%kh_pp = index.mul %k_plane, %pool : index
+"""
+    call = re.compile(r"^( *)%k_offset = func\.call @g_kv_offset\(%origins, %row, %kp, %blocks, %k_plane, %pool\) : \(buffer, index, index, index, index, index\) -> \(offset\)$", re.M)
+    def rep(m):
+        i = m.group(1)
+        return (f"{i}%kh_pg_v = index.div %kp, %kh_c16 : index\n"
+                f"{i}%kh_pg = index.assume %kh_pg_v [range(%kh_pg_v, 0, %kh_last), lt(%kh_pg_v, %blocks)] : index\n"
+                f"{i}%kh_ph32 = view.load %kh_map[%kh_pg] : view<[%blocks]xi32> -> i32\n"
+                f"{i}%kh_phb = scalar.assume %kh_ph32 [range(%kh_ph32, 0, 1048575)] : i32\n"
+                f"{i}%kh_ph = index.cast %kh_phb : i32 to index\n"
+                f"{i}%kh_sb = index.mul %kh_ph, %kh_c16 : index\n"
+                f"{i}%kh_wi = index.rem %kp, %kh_c16 : index\n"
+                f"{i}%kh_sl = index.add %kh_sb, %kh_wi : index\n"
+                f"{i}%kh_ps = index.add %kh_pp, %kh_sl : index\n"
+                f"{i}%k_offset = index.scale %kh_ps, %pos_bytes : index, offset -> offset")
+    new, n = call.subn(rep, text)
+    assert n >= 1
+    mh = hdr.search(new)
+    return new[:mh.start()] + defs + new[mh.start():]
