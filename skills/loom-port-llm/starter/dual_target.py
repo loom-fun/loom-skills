@@ -10,6 +10,13 @@ A generator that has a gfx12 version of a kernel K (WMMA fragments differ betwee
     a `template.def<@selN_K> target(@rdna3)` provider that launches K and a `target(@rdna4)` one that launches K_rdna4;
   * every `command.program.def` gets `target(@device)`.
 
+  * a launch GROUP (gen_llm.py / make_kernel_tests.py, only on gfx12-specific fusions): the lines
+        // dual-group: rdna4 kernel.launch @K_rdna4[...](...) : [...](...)
+        kernel.launch @A[...](...) ...        (the gfx11 launches, in order)
+        // dual-group: end
+    become one `template.apply` whose @rdna3 provider is the gfx11 launches and whose @rdna4 provider is the single rdna4 launch
+    (a fused kernel with no gfx11 counterpart). Operands are deduplicated by SSA name into the template's parameters.
+
 A file without a twin is returned unchanged, as is every file when env LOOM_RDNA4 is "0". Applying the pass to its own
 output is a no-op.
 
@@ -56,6 +63,63 @@ def twins(text):
     return sorted(k for k in syms if k + SUFFIX in syms)
 
 
+GROUP_BEGIN = re.compile(r"^(\s*)// dual-group: rdna4 (kernel\.launch .*)$")
+GROUP_END = re.compile(r"^\s*// dual-group: end\s*$")
+
+
+def _groups(lines, decls, sigs):
+    """Lines with every launch group replaced by a template.apply (its template appended to DECLS; SIGS keys the templates)."""
+    out, i = [], 0
+    while i < len(lines):
+        m = GROUP_BEGIN.match(lines[i])
+        if not m:
+            out.append(lines[i])
+            i += 1
+            continue
+        ind, alt = m.groups()
+        j = i + 1
+        body = []
+        while not GROUP_END.match(lines[j]):
+            body.append(lines[j])
+            j += 1
+        launches = []
+        for l in body + [ind + alt]:
+            lm = LAUNCH.match(l)
+            if not lm:
+                raise ValueError(f"dual-group: not a launch: {l.strip()}")
+            _, k, grid, args, gty, aty = lm.groups()
+            launches.append((k, _split_top(grid), _split_top(args), _split_top(gty), _split_top(aty)))
+        # operands in first-seen order over the gfx11 launches (grid, then arguments), then the gfx12 one
+        names, types, pat = [], [], []
+        for k, g, a, gt, at in launches:
+            for nm, ty in zip(g + a, gt + at):
+                if nm not in names:
+                    names.append(nm)
+                    types.append(ty)
+                pat.append(names.index(nm))
+        key = ("group", tuple((k, tuple(gt), tuple(at)) for k, g, a, gt, at in launches), tuple(pat), tuple(types))
+        if key not in sigs:
+            name = f"grp{len([x for x in sigs.values() if x.startswith('grp')]) + 1}_{launches[-1][0]}"
+            sigs[key] = name
+            ps = ", ".join(f"%p{n}: {t}" for n, t in enumerate(types))
+            decls.append(f"template.decl @{name}({ps})")
+            pos = iter(pat)
+            lines3 = []
+            for k, g, a, gt, at in launches:
+                gp = [f"%p{next(pos)}" for _ in g]
+                ap = [f"%p{next(pos)}" for _ in a]
+                lines3.append(f"  kernel.launch @{k}[{', '.join(gp)}]({', '.join(ap)}) : [{', '.join(gt)}]({', '.join(at)})")
+            decls.append(f"template.def<@{name}> target(@rdna3) @{name}_rdna3({ps}) {{")
+            decls += lines3[:-1]
+            decls.append("  template.return\n}")
+            decls.append(f"template.def<@{name}> target(@rdna4) @{name}_rdna4({ps}) {{")
+            decls.append(lines3[-1])
+            decls.append("  template.return\n}")
+        out.append(f"{ind}template.apply<@{sigs[key]}>({', '.join(names)}) : ({', '.join(types)})")
+        i = j + 1
+    return out
+
+
 def apply(text, enable=None):
     """TEXT made dual-target; unchanged when it has no twin kernels (or the pass is off)."""
     if enable is None:
@@ -86,9 +150,10 @@ def apply(text, enable=None):
             i += 1
         out.append("}")
         i += 1
-        if base in tw:
+        if base in tw or sym.endswith(SUFFIX):
             last_def_end = len(out)
     decls, sigs, res = [], {}, []
+    out = _groups(out, decls, sigs)
     for idx, l in enumerate(out):
         m = LAUNCH.match(l)
         if m and m.group(2) in tw:
