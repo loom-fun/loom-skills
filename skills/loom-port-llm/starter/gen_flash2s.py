@@ -532,31 +532,36 @@ R4 = os.environ.get("FLASH2_ARCH") == "rdna4"   # the gfx12 twin (flash2_rdna4.p
 if R4:
     from flash2_rdna4 import to_rdna4, twin_names
     text = to_rdna4(text)
-    if os.environ.get("FLASH2_ABL"):   # timing ablations (flash2_ablate.py), profiling only
+    B = D == 512 and os.environ.get("FLASH2_B", "0") == "1"   # key-split loop (flash2_b.py)
+    if B:
+        from flash2_b import rewrite_b
+        assert GW == 2 and WPH == 4, "FLASH2_B needs FLASH2_NG512=4 (two heads per workgroup)"
+        text = rewrite_b(text, KVH, D, PARTIAL, GW)
+    if not B and os.environ.get("FLASH2_ABL"):   # timing ablations (flash2_ablate.py), profiling only
         from flash2_ablate import ablate
         text = ablate(text, os.environ["FLASH2_ABL"])
-    if os.environ.get("FLASH2_SX", os.environ.get("FLASH2_TRIM", "0")) == "1":   # S partials exchanged as the lanes' own vectors (flash2_trim.py); gfx12 twin only
+    if not B and os.environ.get("FLASH2_SX", os.environ.get("FLASH2_TRIM", "0")) == "1":   # S partials exchanged as the lanes' own vectors (flash2_trim.py); gfx12 twin only
         from flash2_trim import sx
         text = sx(text)
-    if os.environ.get("FLASH2_LAZY", os.environ.get("FLASH2_TRIM", "0")) == "1":   # O^T rescale only when a column's max changed (flash2_trim.py); gfx12 twin only
+    if not B and os.environ.get("FLASH2_LAZY", os.environ.get("FLASH2_TRIM", "0")) == "1":   # O^T rescale only when a column's max changed (flash2_trim.py); gfx12 twin only
         from flash2_trim import lazy
         text = lazy(text)
-    if os.environ.get("FLASH2_DIRECT", "0") in ("2", "3") and D == 512:   # K and V^T straight from the KV arena, no staging, one barrier per tile (flash2_direct.py); gfx12 twin only
+    if not B and os.environ.get("FLASH2_DIRECT", "0") in ("2", "3") and D == 512:   # K and V^T straight from the KV arena, no staging, one barrier per tile (flash2_direct.py); gfx12 twin only
         from flash2_direct import direct
         text = direct(text, int(os.environ["FLASH2_DIRECT"]), KVH, D, PARTIAL, os.environ.get("FLASH2_DIRECT_K") == "wide")
-    if os.environ.get("FLASH2_KVH", os.environ.get("FLASH2_TRIM", "0")) == "1":   # loop-invariant half of the paged-KV lookup hoisted (flash2_trim.py); gfx12 twin only
+    if not B and os.environ.get("FLASH2_KVH", os.environ.get("FLASH2_TRIM", "0")) == "1":   # loop-invariant half of the paged-KV lookup hoisted (flash2_trim.py); gfx12 twin only
         from flash2_trim import kvhoist
         text = kvhoist(text)
-    if os.environ.get("FLASH2_VTF", os.environ.get("FLASH2_TRIM", "0")) == "1":   # flat-index V^T stores (flash2_trim.py); gfx12 twin only
+    if not B and os.environ.get("FLASH2_VTF", os.environ.get("FLASH2_TRIM", "0")) == "1":   # flat-index V^T stores (flash2_trim.py); gfx12 twin only
         from flash2_trim import vtflat
         text = vtflat(text)
-    if os.environ.get("FLASH2_VP", "0") == "1":   # two keys per staging lane: one 32-bit V^T store per dim pair (flash2_vpack.py); gfx12 twin only
+    if not B and os.environ.get("FLASH2_VP", "0") == "1":   # two keys per staging lane: one 32-bit V^T store per dim pair (flash2_vpack.py); gfx12 twin only
         from flash2_vpack import vpack
         text = vpack(text)
-    if os.environ.get("FLASH2_PF", "0") == "1":   # the next K/V tile's loads in flight during this tile's math (flash2_prefetch.py); gfx12 twin only
+    if not B and os.environ.get("FLASH2_PF", "0") == "1":   # the next K/V tile's loads in flight during this tile's math (flash2_prefetch.py); gfx12 twin only
         from flash2_prefetch import prefetch
         text = prefetch(text)
-if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO:   # the masked path only in the last key tile (flash2_peel.py)
+if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and not (R4 and D == 512 and os.environ.get("FLASH2_B", "0") == "1"):   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     _hot = None
     if R4 and os.environ.get("FLASH2_HOT", os.environ.get("FLASH2_TRIM", "0")) == "1":   # gfx12 twin: the hot copy skips the validity / mask selects (flash2_trim.py)

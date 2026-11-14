@@ -51,10 +51,10 @@
      }
     },
     {
-     "name": "d2pv0",
+     "name": "b1",
      "build": {
-      "FLASH2_DIRECT": "2",
-      "FLASH2_PLANE_V": "0"
+      "FLASH2_B": "1",
+      "FLASH2_NG512": "4"
      },
      "build_args": [
       "--prefill-r9700",
@@ -70,16 +70,16 @@
     "ktest:d2",
     "func:d2n4",
     "ktest:d2n4",
-    "func:d2pv0",
-    "ktest:d2pv0",
+    "func:b1",
+    "ktest:b1",
     "perf:stack:3",
     "perf:d2:3",
     "perf:d2n4:3",
-    "perf:d2pv0:3",
+    "perf:b1:3",
     "perf:stack:3:long",
     "perf:d2:3:long",
     "perf:d2n4:3:long",
-    "perf:d2pv0:3:long"
+    "perf:b1:3:long"
    ]
   }
  ],
