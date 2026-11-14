@@ -68,10 +68,10 @@
   "verdict": "fits (native ctx)",
   "n_exp": 256,
   "r9700_execution": {
-   "context_capacity": 249856,
-   "pool_capacity": 249856
+   "context_capacity": 176128,
+   "pool_capacity": 176128
   },
-  "ctx_cap": 249856
+  "ctx_cap": 176128
  },
  {
   "slug": "bartowski-Nanbeige4.3-33B-loom",
@@ -401,10 +401,10 @@
   "verdict": "fits (native ctx)",
   "n_exp": 256,
   "r9700_execution": {
-   "context_capacity": 233472,
-   "pool_capacity": 233472
+   "context_capacity": 159744,
+   "pool_capacity": 159744
   },
-  "ctx_cap": 233472
+  "ctx_cap": 159744
  },
  {
   "slug": "lmstudio-community-gemma-4-26B-A4B-it-loom",
