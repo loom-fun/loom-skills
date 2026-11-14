@@ -63,7 +63,7 @@ if KT == 16:
     SEG_N = 2 * SEG_N
 SEG_W = D // SEG_N
 assert WPH == 2 or KB == 1, "head_dim 512: 16-key tiles"
-assert LANES >= KT * SEG_N, "need at least 8 waves (head_dim * G >= 1024)"
+assert LANES >= KT * SEG_N or os.environ.get("FLASH2_B") == "1" or os.environ.get("FLASH2_DIRECT") in ("2", "3"), "need at least 8 waves (head_dim * G >= 1024)"
 SCALE = os.environ.get("FLASH2_SCALE") or repr(D ** -0.5)
 POS_BYTES = int(os.environ.get("FLASH2_POS_BYTES") or KVH * D * 2)   # bytes per KV position (widest layer kind)
 
@@ -535,7 +535,7 @@ if R4:
     B = D == 512 and os.environ.get("FLASH2_B", "0") == "1"   # key-split loop (flash2_b.py)
     if B:
         from flash2_b import rewrite_b
-        assert GW == 2 and WPH == 4, "FLASH2_B needs FLASH2_NG512=4 (two heads per workgroup)"
+        assert GW in (1, 2) and WPH == 4, "FLASH2_B needs FLASH2_NG512=4 or 8 (two or one head per workgroup)"
         text = rewrite_b(text, KVH, D, PARTIAL, GW)
     if not B and os.environ.get("FLASH2_ABL"):   # timing ablations (flash2_ablate.py), profiling only
         from flash2_ablate import ablate

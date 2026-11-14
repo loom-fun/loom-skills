@@ -21,6 +21,7 @@ def rewrite_b(text, kvh, d, partial, gw):
     waves = wph * gw
     R = kvh * d
     NF = d // 16     # 32 fragments over the head dim
+    QP = NF * 8 + 8  # elements per lane in the Q^T staging (8 per fragment, padded: the 16-byte reads of a wave's lanes hit different banks)
     pos_bytes = int(re.search(r"%pos_bytes = index\.constant (\d+) : offset", text).group(1))
     h0 = text.index("  %m_final, %l_final,")
     marker = "  // Partial tile: O^T / l" if partial else "  // O^T / l, gate, store through"
@@ -39,14 +40,15 @@ def rewrite_b(text, kvh, d, partial, gw):
            "  %fb_h256 = index.mul %lane_half, %fb_c256 : index\n  %fb_qb = index.add %fb_h256, %fb_dh64 : index\n")
     for c in range(8):
         qst += (f"  %fqs{c}_v = index.add %fb_dh8, %e{c} : index\n  %fqs{c} = index.assume %fqs{c}_v [range(%fqs{c}_v, 0, {NF - 1})] : index\n"
+                f"  %fqe{c}_v = index.mul %fqs{c}, %fb_c8 : index\n  %fqe{c} = index.assume %fqe{c}_v [range(%fqe{c}_v, 0, {QP - 8})] : index\n"
                 f"  %fb_hg{c} = index.assume %head_in_group [range(%head_in_group, 0, {gw - 1})] : index\n"
                 f"  %fqn{c}_o = index.constant {8 * c} : index\n  %fqn{c}_v = index.add %fb_qb, %fqn{c}_o : index\n"
                 f"  %fqn{c} = index.assume %fqn{c}_v [range(%fqn{c}_v, 0, {d - 8})] : index\n"
                 f"  %fqraw{c} = vector.load %q_view[%q_token, %head, %fqn{c}] : view<[%tokens]x{kvh * 8}x{d}xf32> -> vector<8xf32>\n"
                 f"  %fqh{c} = vector.fptrunc %fqraw{c} : vector<8xf32> to vector<8xf16>\n"
-                f"  vector.store %fqh{c}, %ql_view[%fb_hg{c}, %fqs{c}, %lane, %c0] : vector<8xf16>, view<{gw}x{NF}x32x8xf16>\n")
-    alloc = (f"  %ql_bytes = index.constant {gw * NF * 32 * 16} : offset\n  %ql_tile = buffer.alloca<workgroup> align(16) %ql_bytes : buffer\n"
-             f"  %ql_view = buffer.view %ql_tile[%origin] : buffer -> view<{gw}x{NF}x32x8xf16>\n"
+                f"  vector.store %fqh{c}, %ql_view[%fb_hg{c}, %lane, %fqe{c}] : vector<8xf16>, view<{gw}x32x{QP}xf16>\n")
+    alloc = (f"  %ql_bytes = index.constant {gw * 32 * QP * 2} : offset\n  %ql_tile = buffer.alloca<workgroup> align(16) %ql_bytes : buffer\n"
+             f"  %ql_view = buffer.view %ql_tile[%origin] : buffer -> view<{gw}x32x{QP}xf16>\n"
              f"  %pl_bytes = index.constant {2 * waves * 32 * 16} : offset\n  %pl_tile = buffer.alloca<workgroup> align(16) %pl_bytes : buffer\n"
              f"  %pl_view = buffer.view %pl_tile[%origin] : buffer -> view<2x{waves}x32x8xf16>\n"
              f"  %mx_bytes = index.constant {2 * waves * 32 * 4} : offset\n  %mx_tile = buffer.alloca<workgroup> align(16) %mx_bytes : buffer\n"
@@ -132,10 +134,11 @@ def rewrite_b(text, kvh, d, partial, gw):
       %kw_ci = index.assume %kw_c [range(%kw_c, 0, {d - 64})] : index
       %kwv = vector.load %k_pv[%kw_lr, %kw_ci] : view<[%pool]x{d}xf16, %k_g_layout> -> vector<64xf16>
       %kw_f0 = index.mul %kw_a, %fq8 : index""")
+    A(f"""      %kqo_v = index.mul %kw_f0, %fb_c8 : index
+      %kqo = index.assume %kqo_v [range(%kqo_v, 0, {QP - 64})] : index
+      %qrw = vector.load %ql_view[%head_in_group, %lane, %kqo] : view<{gw}x32x{QP}xf16> -> vector<64xf16>""")
     for sl in range(8):
-        A(f"""      %kwf{sl}_v = index.add %kw_f0, %fq{sl} : index
-      %kwf{sl} = index.assume %kwf{sl}_v [range(%kwf{sl}_v, 0, {NF - 1})] : index
-      %qr{sl} = vector.load %ql_view[%head_in_group, %kwf{sl}, %lane, %c0] : view<{gw}x{NF}x32x8xf16> -> vector<8xf16>""")
+        A(f"      %qr{sl} = vector.slice %qrw[{8 * sl}] : vector<64xf16> -> vector<8xf16>")
     prev = "%sacc"
     for sl in range(8):
         A(f"""      %kfs{sl} = vector.slice %kwv[{8 * sl}] : vector<64xf16> -> vector<8xf16>
@@ -204,6 +207,9 @@ def rewrite_b(text, kvh, d, partial, gw):
       %rj_b = scf.select %jj_c1, %rw1, %rj_a : index
       %rj_c = scf.select %jj_c0, %rw0, %rj_b : index
       %rj = index.assume %rj_c [range(%rj_c, 0, 1048560), lt(%rj_c, %pl_rows_m)] : index
+      %vj_ro = index.scale %rj, %pos_bytes : index, offset -> offset
+      %vj_o = index.add %vb_o, %vj_ro : offset
+      %vj = buffer.view %arena[%vj_o] : buffer -> view<128x16xf16, %vt_g_layout>
       %hwj_v = index.add %fb_hw, %jj_a : index
       %hwj = index.assume %hwj_v [range(%hwj_v, 0, {waves - 1})] : index
       %pr = vector.load %pl_view[%par, %hwj, %lane, %c0] : view<2x{waves}x32x8xf16> -> vector<8xf16>
@@ -216,7 +222,7 @@ def rewrite_b(text, kvh, d, partial, gw):
       %vkp = vector.addi %vkb_v, %row_off : vector<8xi32>
       %vok = vector.cmpi sle, %vkp, %pos_hi_v : vector<8xi32> -> vector<8xi1>""")
     for k in range(8):
-        A(f"      %vc{k} = vector.fragment.load<lhs> %v_pv[%kcol{k}, %rj] shape [%c16, %c16] : view<128x[%pool]xf16, %vt_g_layout> -> vector<8xf16>")
+        A(f"      %vc{k} = vector.fragment.load<lhs> %vj[%kcol{k}, %c0] shape [%c16, %c16] : view<128x16xf16, %vt_g_layout> -> vector<8xf16>")
     for k in range(8):
         vname = f"%vc{k}"
         if partial:
