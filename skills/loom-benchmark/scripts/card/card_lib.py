@@ -731,27 +731,32 @@ def gpu_serve_args(gpu):
     return list(GPUS[gpu].get("serve_args") or [])
 
 
-def fixed_pool_capacity(row, memory_bytes=None):
-    """KV pool positions a fixed-backing server (no --memory_bytes budget: the pool is committed eagerly) can hold on the R9700 beside
+def has_runner(gpu):
+    """True when the device has a DevLab runner (device.json runner.labels): without one nothing can be measured on it."""
+    return bool(registry.device(gpu)["runner"]["labels"])
+
+
+def fixed_pool_capacity(row, memory_bytes=None, gpu="radeon-r9700"):
+    """KV pool positions a fixed-backing server (no --memory_bytes budget: the pool is committed eagerly) can hold on the GPU (default the R9700) beside
     the package's weights/workspace/recurrent state (fit row "w") and SERVE_HEADROOM, rounded down to 1024; None when the row has no sizing."""
     if not row or not row.get("kvpp") or "w" not in row:
         return None
-    mem = memory_bytes or GPUS["radeon-r9700"]["memory_bytes"]
+    mem = memory_bytes or GPUS[gpu]["memory_bytes"]
     return max(0, int((mem - row["w"] - SERVE_HEADROOM) // row["kvpp"]) // 1024 * 1024)
 
 
-def gpu_preset_name(model_or_presets):
-    """`<first preset>-r9700`: the preset a package carries for the R9700 when its serving settings differ from model.json's
-    default preset (Strix Halo's)."""
+def gpu_preset_name(model_or_presets, gpu="radeon-r9700"):
+    """`<first preset><device preset suffix>` (`<first>-r9700`): the preset a package carries for a GPU when its serving settings differ
+    from model.json's default preset (Strix Halo's). The suffix is the device's "preset_suffix" (device.json)."""
     presets = model_or_presets.get("presets", model_or_presets) if isinstance(model_or_presets, dict) else model_or_presets
-    return f"{next(iter(presets))}{GPUS['radeon-r9700']['preset_suffix']}"
+    return f"{next(iter(presets))}{GPUS[gpu]['preset_suffix']}"
 
 
-def gpu_preset_execution(row, served_ctx=None):
-    """The execution overrides a fit-table row's "r9700_execution" gives the R9700 preset (prefill_capacity, rows, draft_depth,
+def gpu_preset_execution(row, served_ctx=None, gpu="radeon-r9700"):
+    """The execution overrides a fit-table row's "<runner>_execution" ("r9700_execution": registry.fit_execution_key) gives the GPU's preset (prefill_capacity, rows, draft_depth,
     context_capacity/pool_capacity ...), plus the served context (context_capacity = pool_capacity = served_ctx) when the R9700
     serves a shorter context and the row does not say otherwise. None: the row has no block, so the preset is not touched."""
-    ex = (row or {}).get("r9700_execution")
+    ex = (row or {}).get(registry.fit_execution_key(gpu))
     if not ex:
         return None
     out = {}
@@ -761,12 +766,12 @@ def gpu_preset_execution(row, served_ctx=None):
     return out
 
 
-def with_gpu_preset(model, execution):
-    """model.json's document with the `<first>-r9700` preset: a copy of the first preset (or of the preset a build already
+def with_gpu_preset(model, execution, gpu="radeon-r9700"):
+    """model.json's document with the GPU's `<first>-r9700` preset: a copy of the first preset (or of the preset a build already
     made, e.g. build.py --prefill-r9700) with `execution` over its execution. The programs, weights and the default preset
     (Strix Halo) are untouched."""
     doc = json.loads(json.dumps(model))
-    name = gpu_preset_name(doc)
+    name = gpu_preset_name(doc, gpu)
     first = next(iter(doc["presets"]))
     alt = doc["presets"].get(name) or json.loads(json.dumps(doc["presets"][first]))
     alt["execution"].update(execution)

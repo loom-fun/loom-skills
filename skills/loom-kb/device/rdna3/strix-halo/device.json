@@ -34,6 +34,7 @@
   },
   "runner": {
     "key": "strix",
+    "ab_prefix": "sab-",
     "labels": [
       "strix-halo",
       "devlab-dispatch",

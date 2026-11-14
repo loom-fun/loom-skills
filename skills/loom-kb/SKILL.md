@@ -14,15 +14,12 @@ and in every new shell; it is not the working directory or SDK root. On Windows,
 paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
 or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
 
-Domain knowledge (what is special about a family, which optimization applies where, measured results) is stored
-once, in the most specific node it applies to. The workflow skills (`loom-port-llm`, `loom-optimize`,
-`loom-benchmark`, `loom-roofline`, `loom-fleet`, ...) hold process and checklists only and send you here.
+Domain knowledge is stored once, in the most specific node it applies to; the workflow skills hold process only and send you here.
 
 ## Route, then read
 
 ```bash
 python3 "${LOOM_SKILL_DIR}/kb.py" route --config W/pkg/llm_config.json --device strix-halo --topic prefill,decode
-python3 "${LOOM_SKILL_DIR}/kb.py" route --gguf model.gguf --device radeon-r9700 --topic porting
 python3 "${LOOM_SKILL_DIR}/kb.py" route --arch gemma4 --facets drafted --device rdna4 --topic speculative
 python3 "${LOOM_SKILL_DIR}/kb.py" list        # valid devices, families, facets, topics
 ```
@@ -32,36 +29,16 @@ order, and nothing else from the knowledge base (an unknown arch, device or topi
 
 | Printed first to last | Holds |
 |---|---|
-| `device/<family>/README.md`, `device/<family>/<device>/README.md` | GPU family and device facts: matrix ISA, memory, runners, calibration |
-| `quant/<fmt>/README.md` | what a quant format needs (kernels, dequant, support matrix) |
-| `arch/llm/README.md`, `arch/llm/<topology>/README.md`, `arch/llm/<topology>/<family>/README.md` | every LLM; dense / hybrid / moe; the one family (GGUF arch) |
-| `facet/<tag>/README.md` | properties that cross families: drafted, vision, hybrid-gdn, moe, sliding-window, kv-le2 |
-| `topic/<topic>.md` | task knowledge: prefill, decode, long-context, concurrency, speculative, spec-tuning, porting, kernels-ir, benchmark, roofline, org |
+| `device/...`, `quant/<fmt>/`, `arch/llm/...` (root, topology, family), `facet/<tag>/` | the selector nodes the model and device match: GPU family and device, quant formats, the one family, properties that cross families (drafted, vision, hybrid-gdn, moe, sliding-window, kv-le2, wide-head) |
+| `<node>/README.md` | what is true of the node for every task |
+| `<node>/<topic>.md` | that node's facts for one task; printed only when the topic is requested |
+| `topic/<topic>.md` | the task's knowledge that applies to every model |
 
-Topics are tasks, not model properties: name the ones the work needs (`--topic prefill,decode` to optimize,
-`--topic porting,kernels-ir` to port). Selector nodes (device, quant, arch, facet) are matched from the model.
+Topics are tasks: `porting`, `kernels-ir` (write kernels), `ir-debug`, `program-abi`, `cfg-review`, `starter` to port; `prefill`, `decode`,
+`optimize-loop`, `long-context`, `concurrency`, `speculative`, `spec-tuning`, `roofline` to optimize; `benchmark`, `org`, `kb-authoring`.
+Name only the ones the work needs: the router prints a node's task file for each topic you name and nothing else.
 
-## Where a fact goes
-
-1. One model family only: `arch/llm/<topology>/<family>/README.md`.
-2. One GPU or GPU family: `device/...`. One quant format: `quant/...`.
-3. Every model with a property (MoE, drafter, vision, sliding window, hybrid, few KV heads): the facet.
-4. Everything else about a task: the topic file. Never copy a fact into two nodes; the duplicate-paragraph lint fails.
-5. Keep the number and its evidence (PR, run, date) with the fact. Node README <= 300 lines (TOC above 100), no
-   links between nodes (the router is the table of contents), every relative link resolves.
-
-## Nodes, owners and scope rules
-
-- A selector node has `scope.json`: `{"scope": <its path>, "match": {...}, "owner": "...", "facets": [...], "choices": []}`.
-  `match` keys: `arch` (cfg arch / GGUF architecture names), `has` / `lacks` (cfg keys), `kv_heads`, `head_dim`,
-  `sliding_window`, `layers` as `[lo, hi]`, `recurrent_kv`. Each arch value belongs to exactly one family node.
-- `choices` is empty unless the node sets model-affecting choices (see `choices.py`). A new choice is opt-in by
-  scope: its legacy value is today's behaviour and only the models the node matches change.
-- Add a family: create `arch/llm/<topology>/<family>/{README.md,scope.json}`. Add a facet: `facet/<tag>/`.
-  Add a topic: `topic/<name>.md`. Then run `python3 "${LOOM_SKILL_DIR}/kb.py" lint` (also in CI).
-- `kb.py lint` checks: SKILL.md <= 500 lines and frontmatter limits for every skill, node size and TOC, links,
-  no node-to-node links, no duplicated paragraph (>= 200 chars; intentional ones in `lint_allow.json`), and that every
-  fleet arch maps to one family node.
+Adding or moving a fact, a family, a facet, a device or a topic: topic `kb-authoring` (`kb.py route --arch qwen3 --topic kb-authoring`).
 
 ## Mandate rules (every workflow that changes skills, kernels or cards)
 

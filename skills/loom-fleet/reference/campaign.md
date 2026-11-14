@@ -156,9 +156,13 @@ dry run is not cheaper than its predecessor is not finished.
 For a GPU whose ISA family exists (a discrete RDNA3 card shares gfx11-generic): copy `skills/loom-kb/device/<family>/<device>/device.json` + `README.md`
 of a sibling, mark every value not measured as spec, add the device to the family's `family.json` `devices`, and add it to `info_schema.json`
 (`devices` enum; a test checks it against the registry). Then: `build_fleet.py` + `diff_fleet.py` against the base must report 0 models touched;
-`fit_device.py DEVICE` gives which models fit; `new_device_impact.py DEVICE > impact.json; sample_plan.py impact.json --gpus DEVICE` gives the
-first measurement wave; `roofline.py --device DEVICE` gives ceilings. A runner needs its labels in `device.json`, the two workflow label tables
-(`devlab-perf.yml`, `devlab-kbench.yml`) and a job generator (`r9700_jobs.py` is R9700-only).
+`fit.py --device DEVICE --approx` gives which models fit (no builds; `fleet/fit_device.py` is the same); `new_device_impact.py DEVICE > impact.json; sample_plan.py impact.json --gpus DEVICE` gives the
+first measurement wave; `roofline.py --device DEVICE` gives ceilings. The device row is the whole change for the tooling: the workflows read
+the runner labels from the registry (`registry.runner_labels()`), `devlab_perf.sh` finds the device of a runner key (`runner_device.py`),
+`ab_jobs.py` / `device_jobs.py --device DEVICE` write the measurement jobs (`r9700_jobs.py`, `strix_ab_jobs.py` are wrappers), `fit.py --device DEVICE` writes the
+fit table (path: `fit_table`, default `.github/devlab/<device>_fit.json`), `make_info.py build --fit auto` and `build.py --prefill-device DEVICE=N` use the device's
+preset suffix. Once a runner exists: fill `runner.labels` (include Linux) and `runner.key` in `device.json`, add its llama.cpp builds under the device in
+`method/methodology.json` `baselines` (replacing the explicit `"none"`), then measure. A device with no runner gets no Quick start on a card: it reads "not measured".
 
 ## Working style
 

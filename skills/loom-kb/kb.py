@@ -9,6 +9,8 @@
 
 `route` prints, one path per line and in reading order: device family README, device README, quant READMEs,
 the arch chain root -> leaf, facet READMEs, topic files; then a '# resolved choices' footer when resolve.py exists.
+A selector node may hold task files `<node>/<topic>.md` (e.g. facet/drafted/decode.md): printed right after the node's
+README when that topic is requested, so a node loads only the facts the task needs.
 """
 import argparse
 import glob
@@ -257,18 +259,26 @@ def route(args, root=HERE):
         quants = [str(q).lower() for q in cfg["formats"]]
 
     files = []
+
+    def node(directory):
+        files.append(Path(directory) / "README.md")
+        for t in wanted_topics:
+            files.append(Path(directory) / f"{t}.md")
+
     for f in fam_list:
-        files.append(Path("device") / f / "README.md")
+        node(Path("device") / f)
     for d in chosen_devices:
-        files.append(Path("device") / devs[d] / d / "README.md")
+        node(Path("device") / devs[d] / d)
     for q in quants:
-        files.append(Path("quant") / q / "README.md")
-    files += [Path("arch/llm/README.md"), Path("arch/llm") / fam["topology"] / "README.md",
-              Path(fam["rel"]) / "README.md"]
+        node(Path("quant") / q)
+    for directory in ("arch/llm", Path("arch/llm") / fam["topology"], fam["rel"]):
+        node(directory)
     for tag in facets:
-        files.append(Path("facet") / tag / "README.md")
+        node(Path("facet") / tag)
         for extra in facet_nodes[tag].get("also", []):
-            files.append(Path(extra))
+            extra = Path(extra)
+            if extra.name == "README.md" or extra.stem in wanted_topics:
+                files.append(extra)
     for t in wanted_topics:
         files.append(Path("topic") / f"{t}.md")
 
@@ -447,6 +457,11 @@ def lint(repo, allow=None):
     # node files: size, TOC, no node-to-node links
     nodes = [p for p in sorted(kb.rglob("*.md")) if p.name != "SKILL.md"] if kb.is_dir() else []
     nodeset = {p.resolve() for p in nodes}
+    valid_topics = set(topics(kb)) if kb.is_dir() else set()
+    for p in nodes:
+        in_selector_tree = p.relative_to(kb).parts[0] in ("device", "quant", "arch", "facet")
+        if in_selector_tree and p.name != "README.md" and p.stem not in valid_topics:
+            errors.append(f"{rel(p)}: a node task file must be named after a topic ({', '.join(sorted(valid_topics))})")
     for p in nodes:
         text = p.read_text(encoding="utf-8")
         n = len(text.splitlines())
