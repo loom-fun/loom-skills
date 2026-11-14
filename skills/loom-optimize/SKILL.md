@@ -145,7 +145,7 @@ RoPE + KV store, fused norm + row scale, prefill chunk size. Apply them in catal
 **Settled for starter ports (dense / Qwen3.5 hybrid, ≤ 4B): don't re-run these A/Bs.** Fresh-agent
 trials re-tested them on Qwen3.5-0.8B and the defaults won or tied every time:
 `GEMM_N_FASTEST=0` (slower prefill, 3 trials), `MV_WG1=1024` (no decode win), `--prefill 4096`
-(short prefill −20–37 %; 2048 ≈ 1024 within noise). On a starter port, spend the budget on fusion
+(short prefill −20–37 %; 2048 ≈ 1024 within noise). On the R9700 (64 CUs) the larger chunk wins for small models (hidden size ≤ 2048: Qwen3-0.6B +7..+24 %, Gemma-4-E2B +5..+15 %, Qwen3-1.7B +11..+18 % from 8k) and loses at 1k/2k on big ones (Qwen3-14B −8/−5 %): `build.py --prefill-r9700 N` (or `prefill_capacity_r9700` in llm_config.json) adds a second preset `<preset>-r9700` that only the R9700 Quick start fetches. On a starter port, spend the budget on fusion
 (fewer launches per layer: fused QKV or norm fusion, which you write in a copy of the generator; pairing Qwen3.5's tiny GDN alpha/beta matvecs
 measured neutral) or on the long
 prefill path. Bigger or MoE models: the chunk size is worth one A/B measured at 1k too (4096 helped
