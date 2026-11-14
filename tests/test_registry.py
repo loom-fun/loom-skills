@@ -1,5 +1,6 @@
 """The device / quant / methodology registries (skills/loom-kb): consistency, and that every reader builds the table it replaced."""
 import importlib
+import importlib.util
 import json
 import os
 import re
@@ -77,12 +78,20 @@ class DeviceRegistry(unittest.TestCase):
         p = registry.roofline_presets()
         self.assertEqual({k: (v["bw"], v["flops"]) for k, v in p.items()},
                          {"strix-halo": (216e9, 59e12), "radeon-r9700": (613e9, 191.4e12), "radeon-r9700s": (613e9, 214e12)})
-        sys.path.insert(0, str(ROOT / "skills/loom-roofline"))
-        import roofline
+        for g in card_lib.GPUS.values():   # every card GPU names a roofline preset that exists
+            self.assertIn(g["roofline"], p)
+
+    def test_roofline_module_builds_its_table(self):
+        sys.path.insert(0, str(ROOT / "skills/loom-benchmark/scripts"))
+        spec = importlib.util.spec_from_file_location("roofline", ROOT / "skills/loom-roofline/roofline.py")
+        roofline = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(roofline)
+        except ModuleNotFoundError as e:   # roofline.py reads GGUFs (gguf, requests): not installed in the unit-test job
+            self.skipTest(f"roofline.py needs {e.name}")
         self.assertEqual(roofline.DEVICES["radeon-r9700s"]["name"], "AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz)")
         self.assertEqual((roofline.BW, roofline.FLOPS), (216e9, 59e12))
-        for g in card_lib.GPUS.values():   # every card GPU names a roofline preset that exists
-            self.assertIn(g["roofline"], roofline.DEVICES)
+        self.assertEqual(roofline.AT_CEILING, 0.03)
 
     def test_dual_target_rows(self):
         r = registry.dual_target()
