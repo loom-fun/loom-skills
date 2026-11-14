@@ -79,6 +79,31 @@ def find_in_cache(name):
     return _INDEX.get(name)
 
 
+STUBS = os.path.expanduser(os.environ.get("GGUF_STUB_DIR", "~/.cache/loom-gguf-stubs"))
+
+
+def pinned_gguf(repo, name, revision):
+    """GGUF `name` of `repo` at the REVISION the package's model.json pins: the cache snapshot of that commit, else a header
+    stub (sparse file of the true size, first 32 MiB fetched) kept in GGUF_STUB_DIR. A newer cached revision is never used
+    in its place (its tensors can differ, so the sizing and programs would not be the published package's)."""
+    p = f"{HF}/models--{repo.replace('/', '--')}/snapshots/{revision}/{name}"
+    if os.path.exists(p):
+        return p
+    p = f"{STUBS}/{repo}/{revision[:8]}/{name}"
+    if not os.path.exists(p):
+        import requests
+        from huggingface_hub import get_hf_file_metadata, hf_hub_url
+        url = hf_hub_url(repo, name, revision=revision)
+        size = get_hf_file_metadata(url).size
+        r = requests.get(url, headers={"Range": "bytes=0-33554431"}, allow_redirects=True, timeout=300)
+        r.raise_for_status()
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as fo:
+            fo.write(r.content)
+            fo.truncate(size)
+    return p
+
+
 def find_in_repo(repo, name):
     """GGUF `name` of the Hugging Face repo `repo` (OWNER/NAME) from the cache: two models can ship files of one name
     (every Qwen3-VL has an mmproj-F16.gguf), so a file is taken from the repo its package's model.json names."""
@@ -88,8 +113,8 @@ def find_in_repo(repo, name):
     return None
 
 
-def origin_repos(pkgdir):
-    """{GGUF file name: HF repo} from a package's model.json (each parameter file's @origin/name and the origins)."""
+def origin_repos(pkgdir, revisions=False):
+    """{GGUF file name: HF repo} ({name: (repo, pinned revision)} with revisions=True) from a package's model.json (each parameter file's @origin/name and the origins)."""
     try:
         card = json.load(open(f"{pkgdir}/model.json"))
     except OSError:
@@ -101,7 +126,8 @@ def origin_repos(pkgdir):
             if o.get("format") == "gguf" and o.get("origin", "").startswith("@"):
                 key, fn = o["origin"][1:].split("/", 1)
                 if origins.get(key, {}).get("repository"):
-                    out[os.path.basename(fn)] = origins[key]["repository"]
+                    out[os.path.basename(fn)] = ((origins[key]["repository"], origins[key].get("revision"))
+                                                 if revisions else origins[key]["repository"])
             for v in o.values():
                 walk(v)
         elif isinstance(o, list):
@@ -111,10 +137,11 @@ def origin_repos(pkgdir):
     return out
 
 
-def link_gguf(name, work, repo=None):
+def link_gguf(name, work, repo=None, revision=None):
     """Link GGUF `name` (and, for a split GGUF, every sibling in its snapshot) into work. repo: the Hugging Face repo
     the package takes it from (preferred over a same-named file of another repo)."""
-    p = (find_in_repo(repo, name) if repo else None) or find_in_cache(name)
+    p = (pinned_gguf(repo, name, revision) if repo and revision else None) or \
+        (find_in_repo(repo, name) if repo else None) or find_in_cache(name)
     if not p:
         return False
     d = os.path.dirname(p)
@@ -145,9 +172,9 @@ def build(slug, pkgdir, work, extra=()):
             names.append(pcfg[k]["gguf"])
     if (pcfg.get("vision") or {}).get("mmproj"):
         names.append(pcfg["vision"]["mmproj"])
-    repos = origin_repos(pkgdir)
+    repos = origin_repos(pkgdir, revisions=True)
     for n in names:
-        if not link_gguf(os.path.basename(n), work, repos.get(os.path.basename(n))):
+        if not link_gguf(os.path.basename(n), work, *repos.get(os.path.basename(n), (None, None))):
             return False, f"GGUF not in the HF cache: {n}", None
     # kit: the starter, plus the example the package was generated with
     kit = os.path.join(work, "kit")

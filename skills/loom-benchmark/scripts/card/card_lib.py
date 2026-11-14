@@ -104,6 +104,12 @@ GPUS = {
                    "detect": re.compile(r"strix|8060s|gfx1151", re.I)},
     "radeon-r9700": {"name": "AMD Radeon AI PRO R9700", "short": "Radeon AI PRO R9700", "arch": "gfx1201", "memory": "32 GB",
                      "roofline": "radeon-r9700s", "memory_bytes": 34_000_000_000, "runner": "R9700", "tag": "radeon-r9700",
+                     # loom-serve flags this GPU is served with (instead of --memory_bytes): fixed state backing. The default
+                     # elastic backing runs a synchronous trim + compaction (copying the retained KV pages, 0.3-0.5 s per ~1 GB)
+                     # after every session end, which stalls the next long prefill (perf.py --long's 8k/16k rows lost to
+                     # llama.cpp from the second round); fixed backing has no virtual state buffer to trim. It commits the
+                     # preset's pool_capacity eagerly, so the R9700 preset sizes the pool to the GPU (fixed_pool_capacity).
+                     "serve_args": ["--pool_backing=fixed"],
                      "detect": re.compile(r"r9700|gfx1201|radeon ai pro", re.I)},
 }
 DEFAULT_GPU = "strix-halo"   # a card of loom-card/2 and evidence that names no GPU
@@ -677,6 +683,54 @@ def served_context(weights, kv_bytes_per_token, memory_bytes, headroom=SERVE_HEA
     if kv_bytes_per_token <= 0:
         return None
     return max(0, int((memory_bytes - weights - headroom) // kv_bytes_per_token) // 1024 * 1024)
+
+
+def gpu_serve_args(gpu):
+    """The loom-serve flags a GPU is served with in place of --memory_bytes (card_lib.GPUS "serve_args"), [] when it takes the budget."""
+    return list(GPUS[gpu].get("serve_args") or [])
+
+
+def fixed_pool_capacity(row, memory_bytes=None):
+    """KV pool positions a fixed-backing server (no --memory_bytes budget: the pool is committed eagerly) can hold on the R9700 beside
+    the package's weights/workspace/recurrent state (fit row "w") and SERVE_HEADROOM, rounded down to 1024; None when the row has no sizing."""
+    if not row or not row.get("kvpp") or "w" not in row:
+        return None
+    mem = memory_bytes or GPUS["radeon-r9700"]["memory_bytes"]
+    return max(0, int((mem - row["w"] - SERVE_HEADROOM) // row["kvpp"]) // 1024 * 1024)
+
+
+def gpu_preset_name(model_or_presets):
+    """`<first preset>-r9700`: the preset a package carries for the R9700 when its serving settings differ from model.json's
+    default preset (Strix Halo's)."""
+    presets = model_or_presets.get("presets", model_or_presets) if isinstance(model_or_presets, dict) else model_or_presets
+    return f"{next(iter(presets))}-r9700"
+
+
+def gpu_preset_execution(row, served_ctx=None):
+    """The execution overrides a fit-table row's "r9700_execution" gives the R9700 preset (prefill_capacity, rows, draft_depth,
+    context_capacity/pool_capacity ...), plus the served context (context_capacity = pool_capacity = served_ctx) when the R9700
+    serves a shorter context and the row does not say otherwise. None: the row has no block, so the preset is not touched."""
+    ex = (row or {}).get("r9700_execution")
+    if not ex:
+        return None
+    out = {}
+    if served_ctx:
+        out.update(context_capacity=served_ctx, pool_capacity=served_ctx)
+    out.update(ex)
+    return out
+
+
+def with_gpu_preset(model, execution):
+    """model.json's document with the `<first>-r9700` preset: a copy of the first preset (or of the preset a build already
+    made, e.g. build.py --prefill-r9700) with `execution` over its execution. The programs, weights and the default preset
+    (Strix Halo) are untouched."""
+    doc = json.loads(json.dumps(model))
+    name = gpu_preset_name(doc)
+    first = next(iter(doc["presets"]))
+    alt = doc["presets"].get(name) or json.loads(json.dumps(doc["presets"][first]))
+    alt["execution"].update(execution)
+    doc["presets"][name] = alt
+    return doc
 
 
 def fit_served_context(row, memory_bytes):
