@@ -5409,6 +5409,9 @@ if __name__ == "__main__":
         _gg = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_gg)
         parts.append(moe_kernels(ROW_SCALE, _gg.gemm))
     env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
+    from gen_gemm_rdna4 import f16o_swiglu as _f16o_env
+    if _f16o_env(CFG):
+        env["GEMM_F16O_ON"] = "swiglu"   # gen_gemm.py emits the f16-output swiglu twins (gen_gemm_rdna4.with_twins)
     # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
     env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
     gemm_text = subprocess.run([sys.executable, os.path.join(here, "gen_gemm.py")], capture_output=True, text=True, check=True, env=env).stdout
@@ -5438,6 +5441,11 @@ if __name__ == "__main__":
                       text, flags=re.M)
     if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
         text = live_row_skip(text)
+    from gen_gemm_rdna4 import f16o_swiglu as _f16o_on
+    if _f16o_on(CFG):   # gfx12: swiglu GEMM + the row scale of its result (f16o_fuse.py; env GEMM_F16O=swiglu or llm_config rdna4_f16_ffn)
+        from f16o_fuse import fuse as _f16o_fuse
+        text, _nf16o = _f16o_fuse(text)
+        print("f16o groups:", _nf16o)
     if seg_tokens():
         text = seg_attention(text)
     out = os.path.join(out_dir, "model.loom")
