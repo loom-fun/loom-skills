@@ -13,6 +13,8 @@ published model, without a GPU and without any weights.
 | `add_model.py` | add or refresh a model from its package directory (reads only small files) |
 | `build_fleet.py` | `--ref REF` / `--tree PATH` `--out DIR`: programs-only build of the fleet, CPU only, both targets |
 | `diff_fleet.py` | `BASE_DIR HEAD_DIR --json --md`: per model changed files, blocks, GPU target, card rows, strata, model.json |
+| `scope_lint.py` | `--base REF --pr-body FILE [--impact IMPACT.json]`: does a PR stay inside its `loom-scope` block (files per kind, scope leak, protected files, registry legacy values, kb lint); `--local` builds the impact itself |
+| `ownership.json` | protected core files, files each PR kind may change, kernel family -> files and rows_map rule ids (data; protected) |
 | `rows_map.json` | kernel family -> card rows / gates (data; first matching rule wins) |
 
     python fleet/build_fleet.py --ref origin/r9700 --out $WORK/base --jobs 12      # ~2 min on 12 cores
