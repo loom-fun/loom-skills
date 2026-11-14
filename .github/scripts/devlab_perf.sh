@@ -393,6 +393,13 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(v), 2) 
       kill $lp1 $lp2 $lp3 2>/dev/null
       cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/servelog_$p1.log" 2>/dev/null   # heartbeat telemetry (--heartbeat_ms=N in serve_args)
       res[$s]="$(wc -l < "$out/probe_$p1.jsonl") requests";;
+    agentprobe)   # agentprobe:V: agent_probe.py (why is a two-tool-call thinking turn not reused? raw replies, sessions, pin, cached tokens)
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "agent probe $p1"
+      curl -sN -H "X-Loom-Model: $cardid" "$url/logz/stream" > "$out/logz_$p1.txt" 2>&1 & lp1=$!
+      "$T" "$here/.github/scripts/agent_probe.py" "$D/$p1/pkg" "$url" "$cardid" > "$out/agentprobe_$p1.log" 2>&1; tail -3 "$out/agentprobe_$p1.log" | cut -c1-200
+      kill $lp1 2>/dev/null
+      res[$s]="$(wc -l < "$out/agentprobe_$p1.log") lines";;
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "c4 $p1"
