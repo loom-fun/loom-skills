@@ -1,9 +1,5 @@
 # Topic: roofline (calibration of achieved efficiency; where the remaining gap usually is)
 
-## Contents
-
-- Where the remaining gap usually is
-
 Ceilings are from `roofline.py` (`--device`, presets in the device registry). `EFF` in `roofline.py` is the best (or a representative) value per class.
 The measured calibration rows live with the device they were measured on: `device/strix-halo` (the table the efficiencies were fitted on) and
 `device/radeon-r9700`. Add one row per finished optimization campaign there, including ones that missed their target.

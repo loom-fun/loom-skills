@@ -25,7 +25,7 @@ complete chat model:
 The starter kit (`starter/`) gets a dense GGUF LLM, a Qwen3.5-style hybrid, or either with a
 MoE FFN (Qwen3 / Qwen3.5 / Qwen3.6 MoE: softmax router, shared experts with a sigmoid gate) there
 in minutes. Other architectures (MLA, other recurrent layers) need new kernels;
-see "Beyond the starter" below.
+see the loom-kb topic `new-arch`.
 
 Prerequisites:
 - `loom-setup` is done: `~/loom/.venv` has the SDK (`hrx-loom` 0.1.0 from PyPI, which
@@ -48,7 +48,7 @@ LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> "${LOOM_SKILL_DIR}/../loom-benchmark
 `port.sh` runs steps 1–6 below deterministically:
 - **starts from a published reference** (stage 1b, `find_reference.py`; `REFERENCE=off` skips it,
   `REFERENCE=loom-fun/REPO` picks one): ranks the loom-fun org's **category A** packages for this GGUF and starts
-  from the best one (section "Start from a reference" below);
+  from the best one (loom-kb topic `reference`);
 - picks the GGUF (`starter/pick_gguf.py`): **Q4_K_M** (then UD-Q4_K_XL / Q4_K_S only when the repo has no Q4_K_M; a bigger
   tier only with `QUANT_TIER=Q5|Q6|Q8`), then a file **already in the HF cache** (any revision: nothing is downloaded
   twice), formats the starter decodes (incl. unsloth UD's IQ4_XS/IQ4_NL/Q3_K/IQ3_S and Q4_0), and a file that
@@ -75,7 +75,7 @@ LEVEL=dev LLAMACPP_DIR=<llama.cpp ROCm dir> "${LOOM_SKILL_DIR}/../loom-benchmark
 and the kernel tests read them all, and the package lists each as a parameter file. A model whose weights need more
 than 60 % of RAM: `LOOM_MEMORY_CAP_GIB=N` sets the memory cap (build.py, pick_gguf.py) (a DevLab port job: `"env": {"LOOM_MEMORY_CAP_GIB": N}`);
 a load above the cap must also pass `loom-setup/scripts/memcheck.sh` (MemAvailable ≥ budget + 16 GiB) when it is served.
-Programs hand-written in the hrx-loom catalog: "Catalog packages" below.
+Programs hand-written in the hrx-loom catalog: loom-kb topic `catalog-ports`.
 
 `DRY_RUN=1 port.sh ...` plans a port on the CPU in under a minute: stages 1-2 only, an uncached GGUF read as a
 header-only sparse stub (nothing downloaded), then `DRY_RUN_RESULT {...}` (architecture, kit, reference, inspect).
@@ -83,118 +83,6 @@ header-only sparse stub (nothing downloaded), then `DRY_RUN_RESULT {...}` (archi
 Its exit code says where it stopped (2 download, 3 chat template or uncovered architecture,
 4 build/serve, 5 kernel tests, 6 smoke); only then do you need the manual steps below for that
 stage. Verified on Qwen3-0.6B (Q8_0/Q4_K_M) and Qwen3.5-0.8B (Q4_K_M).
-
-## Start from a reference (loom-fun, category A only)
-
-Every port and every optimization starts by looking for a published package that already solved most of it
-(port.sh does this itself; by hand: `find_reference.py rank GGUF --repo ORG/REPO -o W/reference.json`).
-- **Only category A counts**: a card made by the current skill, `info.json` with `"schema": "loom-card/2"` and
-  `"report": "generated"`. Imported cards (`"report": "attached"`, old factory runs) are listed as skipped, never used.
-- **Ranking:** same architecture and family (GGUF name, base-model chain), then same architecture, then shared
-  building blocks (gated delta-net hybrid, MoE routing, vision tower, tool-call format, thinking switch, drafter
-  type), then nearest size. The `generator` stamp of its `llm_config.json` says how stale it is.
-- **What is taken:** the reference's example kit (when it was built from one: `reference/examples.json` maps the
-  packages to `*-example` kits; with no category A package of the architecture, the example kit of that architecture alone); the cfg keys `inspect_gguf.py` left open (geometry, formats and eos ids always stay
-  this GGUF's); its chat block when this template's derivation fails, accepted only if `chat_probe.py --verify`
-  passes on THIS template; and its measured drafting table, from which `draft/tune.py` starts each method at the
-  reference's best depth and climbs from there, and gives a method the reference ruled out (under 75 % of its
-  winner) one probe (`TUNE_PRIOR=0` measures all). The llama.cpp baseline's own tuning never takes a prior.
-- **Where it pays:** an architecture the starter doesn't cover (the reference's kit is applied automatically; its
-  chat block replaces a failed derivation when it verifies). On the starter path (Qwen3.5 sizes) port.sh is already
-  automatic: the reference trims the drafting search and pre-answers the cfg review (only geometry differs).
-- **What is recorded:** `cfg["reference"]` (repo, revision, score, reasons, what was taken, what differs), which
-  `build.py` copies into the package's `llm_config.json`.
-- A reference saves time; it never lowers the bar: the derived port runs the same kernel tests and gates.
-- `find_reference.py fetch REPO DIR` gets its package (no weights) to read or diff; `show` prints what an
-  optimization should start from.
-
-## Catalog packages (hand-written programs: `CATALOG=`)
-
-When ROCm/hrx-loom-library already has a package for an architecture the starter cannot generate (qwen4exp:
-hyper-connections, per-layer-embedding hash table, sparse indexed attention), port it from that package instead of
-writing a kit. `reference/qwen4exp-example` is one: `catalog/catalog.json` + the (adapted) package files.
-```bash
-CATALOG=qwen4exp "${LOOM_SKILL_DIR}/port.sh" catalog ~/work/fn 8160 auto <MODEL_ID>   # or CATALOG=DIR (catalog.json + the package)
-export LOOM_ROOT=$(cat ~/work/fn/loom_root)   # the pinned SDK's root, for qualify.sh / gates.sh / finalize.sh
-```
-Same stages and outputs as any port (`pkg/` with `model.json` cut to one variant and preset, `llm_config.json`, `cfg.json`,
-`model_target.json` for the draft-off twin), so qualify, gates, perf, card, `publish_package.py prepare` and the
-nightly list work unchanged. What differs (`starter/catalog.py`, `catalog.json`'s keys are documented there):
-- **Weights** (repo, revision, split parts, the MTP head) and the tokenizer repo come from `catalog.json`; the package keeps
-  the catalog's `@origin` names, which `prepare` preserves (it only pins the revisions).
-- **SDK pin**: `catalog.json` `sdk` (hrx-loom wheel) goes to `llm_config.json`; `port.sh`, `port_e2e.sh`, the nightly and
-  DevLab scripts install it with `loom-setup/scripts/ensure_sdk.sh` next to the default root (loom-setup "SDK pins").
-- **Memory**: the budget is the package's *resident* set (`memory.resident_weights_bytes`, KV, recurrent rows, workspace),
-  not the GGUF size; above the 60 % default it needs `memory.over_cap` (explicit, with a note) and `memcheck.sh` headroom.
-  llama.cpp keeps `per_layer_token_embd` on the CPU by itself (`llamacpp_server.sh` forces nothing onto the GPU).
-- **Kernel tests are the package's own** `loom_test` targets, run by `skills/loom-benchmark/scripts/kernel_tests.py` (no Bazel;
-  `devlab_experiment` runs them on the GPU for catalog kits). Drafting is the MTP head or none (`tune.py` measures both); no
-  reference lookup or DFlash/n-gram drafter. Vision comes from the package's vision variants (`VISION=0` keeps text only).
-- **Rebuilding variants** (`devlab-perf` `build:`/`ref:` variants, `devlab-experiment`) cannot regenerate programs: use the `card` variant.
-- `inspect_gguf.py` prints starter-coverage warnings for qwen4exp (arch unknown, `q5_1`, head_dim); a NOTE says they do not
-  apply. Use it when the first thing needed is a package, not a kernel set; a new kit (below) only when none exists.
-
-## New architecture (port.sh exit 3 with "no kernels", or a model the starter doesn't cover)
-
-The expensive path. Keep it short:
-1. **Get the spec from llama.cpp itself.** `starter/llama_trace.py LLAMACPP_DIR MODEL.gguf "Hello world" --grep '-0$'`
-   prints layer 0's compute graph as llama.cpp runs it (op, input names, shapes, values). Use
-   `--grep '-N$'` for a layer of each kind (sliding/global, attention/recurrent, dense/MoE). This
-   is faster and more exact than reading C++; the GGUF's `arch.*` metadata gives the constants.
-2. **Diff it against what the starter does** for a dense layer (Qwen3: `attn_norm → Qcur/Kcur/Vcur
-   (+ q/k norm, RoPE) → attention → attn_output → ffn_inp → ffn_norm → gate/up → swiglu → down →
-   l_out`). Every extra node or different op is a feature to add; write the list down first.
-3. **Copy the starter into the work dir** (`"${LOOM_SKILL_DIR}/reference/apply_example.sh" starter W/kit`,
-   which also records the loom-skills commit in `W/kit/KIT_SOURCE`: `build.py` stamps it and the Loom SDK's
-   identity into `llm_config.json` `"generator"`, and the model card shows them) and extend
-   the copy: a cfg flag per feature in `inspect_gguf.py`, the op in `gen_llm.py` (decode first:
-   matvec path, prefill later), and a kernel test case in `make_kernel_tests.py`. If you change
-   `chat_probe.py` (a chat format it can't model), `export LOOM_KIT=W/kit`: the benchmark
-   scripts then render prompts with your copy, and use its `raw_from_chat(chat, message, finished,
-   thinking)` if you define one (how a reply's channels map back to raw text, for a format the
-   default doesn't cover). No need to copy the skills tree. Reuse before
-   writing: **check `reference/` for the architecture family first** and make the kit with
-   `"${LOOM_SKILL_DIR}/reference/apply_example.sh" EXAMPLE W/kit W/cfg.json` (the starter + the example's
-   files + its `starter.patch`, and its reviewed config merged into yours: the example's category A loom-fun
-   package's `llm_config.json`, pinned in `reference/examples.json`, or the example's own `cfg.json` when none is
-   published):
-
-   | Family | Example |
-   |---|---|
-   | Gemma-3n / Gemma-4 (PLE, KV sharing, head_dim 512, Gemma chat format) | `gemma4` |
-   | LFM2 / LFM3 short-conv hybrids (+ its own MoE kernels) | `lfm2moe` (top-k router, expert matvecs, grouped WMMA prefill; lfm3: kernel-7 conv, sandwich norms; its per-head gate and SWA rope base are the starter's `per_head` and `rope_theta_swa`) |
-   | NoPE pattern, GLM-style stop tokens (sinks, SWA and MoE from the starter) | `flint` (built on lfm2moe in ~12 min; its MoE and sinks are now the starter's) |
-   | OpenAI harmony channel format, reasoning effort (sinks, SWA, YaRN, biases, MXFP4 MoE from the starter) | `gpt-oss` |
-   | channel chat formats (ATEM), norm RoPE, NoPE | `glimmer` |
-
-   `../loom-optimize/reference/flint-moe-example/` holds one more MoE idea (bucketed grouped GEMM), not
-   a base. The starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls, and tool
-   declarations printed as JSON or as XML elements (Qwen3-Coder: `chat.tools_format` `"xml"`).
-4. **Test every path that implements an op.** Attention runs in three kernels (decode split-K + combine,
-   prefill `flash2`, the listed fallback for mixed tiles); a feature added to one (sinks, softcap, a gate,
-   a window) must be added and unit-tested in all of them. A mismatch passes the goldens and shows up only
-   when a turn reuses history the model decoded itself (flint: sinks differed between flash2 and split-K).
-   Prefill output must not depend on where the scheduler cuts a request: runs of 9 or more tokens go through flash2
-   (whole 16-position tiles) or its partial kernel (head and tail blocks), the same bits either way; runs of 1 to 8 tokens
-   (decode, verify) use split-K and are not cut-invariant.
-5. **Check numerically, node by node.** A short numpy forward of layers 0–1 on the trace's tokens
-   (gguf `dequantize` for weights) compared with the trace's sums and edge values names the first
-   misunderstood op in minutes. Then the Loom kernels against numpy (kernel tests), `chat_probe --verify`
-   for the chat glue, then the gates (`LEVEL=dev` while iterating).
-6. **Resume the scripted path** once the kit builds: `FROM=build KIT=W/kit port.sh ORG/REPO W PORT
-   MEMORY_GIB MODEL_ID` (all three positionals) reruns build, serve, kernel tests and the smoke test from your `cfg.json`
-   (no need to replay those stages by hand), then go on with `qualify.sh`.
-7. **Prefill can come second.** A decode-only port (prefill through the matvec path, chunk 1) is
-   correct but slow: get the gates passing first, then add GEMM prefill as the first optimization.
-8. **The chat block** for templates `chat_probe.py` can't model (channels, role tags without a
-   suffix, tools inside a message): see the loom-kb `cfg-review` topic and
-   `reference/glimmer-example` (a channel format end to end: `chat/atem.loom` + its `chat_probe.py`; another
-   channel format reuses `starter/templates/control_channels.loom`, as `reference/gpt-oss-example` does).
-9. **Work in parallel when you can spawn agents.** The kernels (steps 1–6) and the chat block
-   (step 8: `chat_probe.py` + `control.loom`, verified against the Jinja template) are
-   independent until `build.py`. Give the chat work to a subagent on its own copy of the kit and
-   its own port; merge when both pass. Without subagents (other harnesses, e.g. Pi under weaver), do the
-   kernels first and the chat block second.
 
 ## Workflow, step by step (what port.sh does; use it to debug a stage)
 
@@ -235,24 +123,23 @@ valid calls), and `ctx_admit.py` shows the full context capacity admitted.
 
 ## Domain knowledge (run the router, read what it prints)
 
-Facts about families, facets, devices and tasks are in `loom-kb`, not here. For this port run
-`python3 "${LOOM_SKILL_DIR}/../loom-kb/kb.py" route --config cfg.json --device strix-halo --topic porting,cfg-review,starter`
-(add `speculative`, `kernels-ir` as needed) and read the files it prints:
+Facts about families, facets, devices and tasks are in `loom-kb`, not here. Route the topics this port needs:
+`python3 "${LOOM_SKILL_DIR}/../loom-kb/kb.py" route --config cfg.json --device strix-halo --topic porting,kernels-ir`
+(cfg.json is the `inspect_gguf.py` output; before it exists use `--gguf MODEL.gguf`). The router prints a node's facts for each topic you name.
 
-| Need | Topic or node |
+| Need | Topic |
 |---|---|
-| cfg.json review checklist (step 2), chat template fields | `cfg-review` |
-| What the starter generates, fixed assumptions, chat policy | `starter` |
-| How loom-serve drives a program, bring-up debugging order, new quant format, ABI | `porting` |
-| Loom IR idioms and compile-error fixes | `kernels-ir` |
+| Bring-up debugging order, package card, tokenizer gotchas | `porting` |
+| Writing kernels: Loom IR shape and fast idioms; compile errors, proof facts, kernel tests | `kernels-ir`; `ir-debug` |
+| cfg.json review checklist (step 2), chat template fields; what the starter generates | `cfg-review`; `starter` |
+| The program ABI, lifecycle, a new quant format | `program-abi` |
+| An architecture the starter cannot generate; its example kits (`reference/*-example/`, applied with `apply_example.sh`) | `new-arch` |
+| A published package to start from (`find_reference.py`); a hand-written catalog package | `reference`; `catalog-ports` |
 | Speculative decoding (drafters, gates, tuning) | `speculative`, `spec-tuning` |
-| Image input and adding a projector family | facet `vision` and `arch/vision` |
-| MoE, hybrid gated-delta-net, sliding window, drafted, kv-le2 | the matching facet |
 
-`reference/*-example/`: worked ports (table in step 3), applied with `apply_example.sh`; `examples.json` names
-each one's category A loom-fun package (its reviewed config). `find_reference.py`: the reference lookup.
-Maintainers: after changing the starter, `reference/rebase_examples.sh OLD_STARTER` rebuilds the
-examples' patches and `check_examples.sh` must pass.
+`examples.json` names each example's category A loom-fun package (its reviewed config). Maintainers: after changing the starter,
+`reference/rebase_examples.sh OLD_STARTER` rebuilds the examples' patches and `check_examples.sh` must pass. Image input and
+adding a projector family: facet `vision` (printed for `--topic porting`).
 
 ## Mandate
 

@@ -14,7 +14,7 @@ budget = FIXED_MIN (agent work: install, port, reading, decisions, report; the o
          length (attention makes long prefill slower: the roofline counts it)
        + --manual-min (hand-port allowance for an architecture the starter doesn't cover; 0 if
          the starter or a reference example covers it)
-The constants are calibrated on fresh-agent trials (loom-improve/reference/results.md): edit them
+The constants are calibrated on fresh-agent trials (loom-fleet/reference/results.md): edit them
 there and here together.
 """
 import argparse

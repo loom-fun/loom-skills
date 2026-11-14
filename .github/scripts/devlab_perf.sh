@@ -3,7 +3,7 @@
 # build package variants from this checkout (or another ref), and compare them with each other and with llama.cpp
 # ON THIS RUNNER (runners differ from each other and from a dev machine: only same-job numbers are compared).
 # This is the single source of card performance: the card variant (active wait) and llama.cpp on the same runner,
-# ingested with make_info.py perf --source-kind devlab (loom-org SKILL.md step 3).
+# ingested with make_info.py perf --source-kind devlab (loom-fleet reference/publish.md step 3).
 #
 #   [WORK=~/devlab-perf] devlab_perf.sh EXPERIMENT.json JOB_NAME
 #
@@ -89,6 +89,7 @@
 set -uo pipefail
 exp=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); job=${2:?usage: devlab_perf.sh EXPERIMENT.json JOB}
 here=$(cd "$(dirname "$0")/../.." && pwd); SK=$here/skills
+export LOOM_KB_ROOT=${LOOM_KB_ROOT:-$SK/loom-kb}   # kits copied out of the skills tree (ktest, --build) resolve choices from this checkout's knowledge base
 B=$SK/loom-benchmark/scripts; SV=$SK/loom-setup/scripts
 WORK=${WORK:-$HOME/devlab-perf}; mkdir -p "$WORK"; WORK=$(cd "$WORK" && pwd)
 D=$WORK/$job; out=$D/out; rm -rf "$D"; mkdir -p "$out"

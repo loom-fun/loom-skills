@@ -1,7 +1,7 @@
 #!/bin/bash
 # Correctness gates for a served package, one verdict file.
 # usage: [LOOM_ROOT=~/loom] [LEVEL=dev|fast|quick|full] LLAMACPP_DIR=DIR gates.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
-#   LEVEL=dev   (the development loop: after each kept change in loom-optimize / loom-improve, a few minutes
+#   LEVEL=dev   (the development loop: after each kept change in loom-optimize / loom-fleet, a few minutes
 #               once the llama.cpp references are cached): the gates that caught real bugs, at full
 #               strength, plus a light touch of every other feature the package has:
 #                 consistency (concurrent == alone, run-to-run determinism), agent tool loop (thinking on,
