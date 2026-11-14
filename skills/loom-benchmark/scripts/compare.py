@@ -136,6 +136,8 @@ for g in json.load(open(a.golden)):
     gold = g["ids"]
     if not published and n >= len(got):   # the reply is a prefix of the golden only because generated tokens never
         n, gap, near = len(got), "unpublished", False   # reached it (a divergence inside the reply decides by itself)
+        print(f"       unpublished: {r['usage']['completion_tokens']} generated, {len(got)} in the parsed reply, finish "
+              f"{ch['finish_reason']}; reply tail {text[-80:]!r}; golden tail past it {pkg.tok.decode(gold[len(got):], skip_special_tokens=False)!r}", flush=True)
     full = n >= min(len(gold), len(got)) and abs(len(got) - len(gold)) <= 1
     bad = not near
     rows.append({"prompt": g["prompt"][:80], "prompt_tokens": g.get("prompt_tokens"), "golden_tokens": len(gold), "matched": n,

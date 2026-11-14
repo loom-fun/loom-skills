@@ -425,6 +425,7 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'mean', ro
       curl -fsSL --retry 2 "$base/info.json" -o "$out/info_card.json" 2>/dev/null || rm -f "$out/info_card.json"
       fa=(); grep -q '"vision"' "$card/llm_config.json" && fa+=(--vision)
       "$T" "$here/.github/scripts/r9700_func.py" "$url" "$cardid" "$out/func_$p1.json" ${fa[@]+"${fa[@]}"} $([ -f "$out/info_card.json" ] && echo --info "$out/info_card.json") 2>&1 | tee "$out/func_$p1.log"
+      curl -s -m 10 "$url/v1/status" > "$out/status_$p1.json" 2>/dev/null   # registration + memory plan as loom-serve reports it after the first requests
       res[$s]=$(tail -1 "$out/func_$p1.log");;
     gates)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }

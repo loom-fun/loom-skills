@@ -193,6 +193,12 @@ def main():
             else:
                 rec["history_verbatim"] = True
             rec["reuse_ok"] = step == 0 or not rec["history_verbatim"] or rec["cached"] >= 0.8 * prev_total
+            if step and not rec["reuse_ok"]:   # what the retained history (previous prompt + rebuilt output) lacks of this prompt
+                hist = prev_text
+                print(f"     reuse miss: cached {rec['cached']} of {prev_total}, previous output verified to char {prev_verified}; "
+                      f"history edits (hist[i1:i2] -> prompt[j1:j2]):", flush=True)
+                for i1, i2, j1, j2 in history_edits(hist, prompt)[:6]:
+                    print(f"       @{i1} (prompt {len(prev_prompt)}) {hist[max(0, i1 - 30):i2 + 30]!r} -> {prompt[max(0, j1 - 30):j2 + 30]!r}", flush=True)
             calls_ok = True
             for c in m.get("tool_calls") or []:
                 try:
