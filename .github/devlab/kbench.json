@@ -22,7 +22,8 @@
       "gen": "gemm_r9700/gen_gemm_bench.py",
       "gen_variants": [
         "base",
-        "dq2"
+        "dq2",
+        "sb"
       ],
       "files": [
         "bench.loom"

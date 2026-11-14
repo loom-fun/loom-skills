@@ -25,7 +25,7 @@ ALL_SHAPES = [  # (fmt, mode, rows, K, N): the prefill GEMMs of Gemma-4-E2B (k15
     ("q4_k", "swiglu", 4096, 1536, 6144), ("q4_k", "store", 4096, 6144, 1536),
 ]
 
-NATIVE = {"dq2": R.q4k_m256_native}   # variants that swap the m256 q4_k twin for a native gfx12 kernel (no ablation transform)
+NATIVE = {"dq2": R.q4k_m256_native, "sb": R.q4k_m256_sb}   # variants that swap the m256 q4_k twin for a native gfx12 kernel (no ablation transform)
 
 def kernel_text(text, name):
     m = re.search(r'kernel\.def (?:target\(@\w+\) )?export\("%s"\)' % re.escape(name), text)
