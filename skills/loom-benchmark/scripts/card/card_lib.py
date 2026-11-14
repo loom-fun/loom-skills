@@ -669,6 +669,17 @@ def served_context(weights, kv_bytes_per_token, memory_bytes, headroom=SERVE_HEA
     return max(0, int((memory_bytes - weights - headroom) // kv_bytes_per_token) // 1024 * 1024)
 
 
+def fit_served_context(row, memory_bytes):
+    """Tokens one request holds on a GPU, from a fit-table row: None when the native context fits (the package's own
+    context), else what the memory leaves after the weights; a row's optional "ctx_cap" (a measured limit, e.g. the
+    retained prefix state of the 8k/16k rows leaves no room for a 32k request) lowers it further."""
+    cap = row.get("ctx_cap")
+    if row["w"] + row["kv"] + SERVE_HEADROOM <= memory_bytes and not (cap and cap < row["ctx"]):
+        return None
+    ctx = served_context(row["w"], row["kv"] / row["ctx"], memory_bytes) if row["kv"] else row["ctx"]
+    return min(ctx, cap) if cap else ctx
+
+
 def _types(t):
     return t if isinstance(t, list) else [t]
 

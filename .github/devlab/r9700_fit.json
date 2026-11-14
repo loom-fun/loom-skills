@@ -140,7 +140,8 @@
   "mem": 50000000000,
   "need": 31176766720.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 0
+  "n_exp": 0,
+  "ctx_cap": 24576
  },
  {
   "slug": "bartowski-Qwen2.5-7B-Instruct-loom",

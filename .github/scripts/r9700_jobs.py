@@ -53,9 +53,9 @@ for slug in slugs:
         continue
     mem = min(m["memory_bytes"], POOL)
     ctx = None
-    if f["w"] + f["kv"] + card_lib.SERVE_HEADROOM > POOL:   # the native context's KV cache does not fit: serve what does
+    ctx = card_lib.fit_served_context(f, POOL)   # the native context's KV cache does not fit (or the row caps it): serve what does
+    if ctx:
         mem = POOL
-        ctx = card_lib.served_context(f["w"], f["kv"] / f["ctx"], POOL)
     v = lambda name, ex: {"name": name, **({"build": {}} if a.build else {}), **({"context": ctx} if ctx else {}),
                           **({"execution": ex} if ex else {})}
     ex_ctx = {"context_capacity": ctx, "pool_capacity": ctx} if ctx else {}
