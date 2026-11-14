@@ -47,7 +47,7 @@
       "4096"
      ],
      "double": [
-      "llm:sel\\w*_g_gemm_q4_k_swiglu_m256"
+      "*:sel\\w*_g_gemm_q4_k_swiglu_m256"
      ]
     },
     {
@@ -63,7 +63,7 @@
       "4096"
      ],
      "double": [
-      "llm:sel\\w*_g_gemm_q4_k_swiglu_m256"
+      "*:sel\\w*_g_gemm_q4_k_swiglu_m256"
      ]
     },
     {
