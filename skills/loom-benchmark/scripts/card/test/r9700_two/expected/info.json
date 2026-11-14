@@ -129,6 +129,7 @@
        "version": "llamacpp-vulkan/b12211"
       },
       "session": {
+       "aggregate": "median",
        "date": "2026-11-14",
        "metrics": {
         "decode": {
@@ -207,6 +208,7 @@
     },
     "sessions": [
      {
+      "aggregate": "median",
       "commands": [],
       "date": "2026-11-14",
       "metrics": {

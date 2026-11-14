@@ -126,6 +126,7 @@
     },
     "sessions": [
      {
+      "aggregate": "median",
       "commands": [
        "perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign"
       ],
@@ -265,6 +266,7 @@
       "source": "devlab-3003"
      },
      {
+      "aggregate": "median",
       "commands": [],
       "date": "2026-11-07",
       "metrics": {

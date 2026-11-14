@@ -37,8 +37,32 @@ METRICS = [
     ("spec_acceptance", "speculative decoding, drafted tokens accepted"),
 ]
 METRIC_KEYS = [k for k, _ in METRICS]
-# how a metric's per-run samples become the card value
-MEDIAN_METRICS = {"streams4"}
+# Sampling rule (methodology.md rule 5): every card value is the MEDIAN over sessions of each session's median sample. A fast model
+# (published or expected decode above FAST_DECODE_TPS tok/s: its rate is bimodal per serve session) gets SESSIONS_FAST sessions and
+# REPEAT_FAST samples per session of decode_2k, decode_32k and prefill_8k (perf.py --repeat-rows); the others SESSIONS sessions.
+FAST_DECODE_TPS, SESSIONS, SESSIONS_FAST, REPEAT_FAST = 100, 3, 6, 3
+
+
+def sampling_plan(decode_tps, fast_tps=FAST_DECODE_TPS):
+    """(sessions per 1-stream row, perf.py --repeat-rows) for a model whose published/expected decode rate is decode_tps (None: unknown = not fast)."""
+    return (SESSIONS_FAST, REPEAT_FAST) if (decode_tps or 0) > fast_tps else (SESSIONS, 1)
+
+
+def published_decode(slug, org="loom-fun"):
+    """The published card's Strix Halo decode tok/s of org/slug (None when it cannot be read)."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"https://huggingface.co/{org}/{slug}/resolve/main/info.json", timeout=30) as r:
+            info = json.load(r)
+    except Exception:  # noqa: BLE001
+        return None
+    perf = info.get("performance") or ((info.get("devices") or {}).get("strix-halo") or {}).get("performance") or {}
+    v = None
+    for s in perf.get("sessions", []):
+        v = (s["metrics"].get("decode") or {}).get("loom") or v
+    return v
+
+
 # card metric -> loom-roofline/roofline.py metric (the hardware ceiling). spec_acceptance has none.
 ROOFLINE_METRIC = {"decode": "decode_tps", "decode_2k": "decode_tps_2k", "decode_32k": "decode_tps_32k",
                    "prefill_1k": "prefill_1000", "prefill_2k": "prefill_2000", "prefill_8k": "prefill_8000",

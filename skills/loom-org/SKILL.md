@@ -223,8 +223,8 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
    (required: it is the only source of card performance) (`.github/devlab/perf.json`: card, memory_bytes, kit and llamacpp from `nightly-models.json`,
    llama_spec omitted = `matched`: llama.cpp gets the card's classified drafting choice (same method and drafter, its documented n-max;
    none if the classification says none; `../loom-benchmark/reference/methodology.md`), an explicit `llama_spec` only overrides it (`{drafter}` = the
-   card's drafter, `{hf:OWNER/REPO/FILE}` a Hub file, e.g. an MTP head the card doesn't ship); variant `{"name": "card"}`, steps `perf:card:2 perf:card:2:long c4:card llama@rocm.np1:2 llama@rocm.np1:2:long
-   llamac4@rocm.nodraft` (files `perf_llamacpp-rocm.np1_nN.jsonl`, `c4_llamacpp-rocm_nN.txt`); several cards go in one experiment, one job each with its own card fields), then
+   card's drafter, `{hf:OWNER/REPO/FILE}` a Hub file, e.g. an MTP head the card doesn't ship); variant `{"name": "card"}`, steps `perf:card:1` x3 (6 for a fast model, decode > ~100 tok/s: also job field `"repeat_rows": 3`, perf.py `--repeat-rows`), the same count of `perf:card:1:long`, `c4:card`, `llama@rocm.np1:3 llama@rocm.np1:3:long` (6 for a fast model)
+   `llamac4@rocm.nodraft` (every metric = the median over sessions of each session's median sample, methodology rule 5; `r9700_jobs.py` and `strix_ab_jobs.py` write exactly this) (files `perf_llamacpp-rocm.np1_nN.jsonl`, `c4_llamacpp-rocm_nN.txt`); several cards go in one experiment, one job each with its own card fields), then
    `make_info.py perf --loom-jsonl perf_card.jsonl --llama-jsonl perf_llamacpp_nN.jsonl --c4-loom c4_card.txt
    --c4-llama c4_llamacpp_nN.txt --package DIR --source-kind devlab --run ID --url JOB_URL --device JOB_DEVICE.json
    --hrx-loom JOB_HRX.json --baseline-version llamacpp-rocm/BUILD --baseline-args "$(cat llamacpp_args.txt)"

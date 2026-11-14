@@ -18,7 +18,7 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card"))
 import card_lib  # noqa: E402
-from make_info import metric_samples, acceptance_samples  # noqa: E402
+from make_info import loom_sessions, read_rows  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("out")
@@ -31,45 +31,12 @@ a = ap.parse_args()
 o = a.out
 
 
-def sessions(path):
-    """The JSON rows of a file split into serve sessions (devlab_perf.sh writes {"session_end": V} after each); a file without
-    markers (older runs): every row is its own session."""
-    rows, cur, marked = [], [], False
-    for line in open(path, encoding="utf-8"):
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        r = json.loads(line)
-        if "session_end" in r:
-            marked = True
-            if cur:
-                rows.append(cur)
-            cur = []
-        else:
-            cur.append(r)
-    if cur:
-        rows.append(cur)
-    return rows if marked else [[r] for s_ in rows for r in s_]
-
-
 def side(v, nd):
     """{metric: [per-session median]} and {metric: [per-session median acceptance]} of one package (user rule 2026-11-14 10:38:
-    each metric is decided on the median of the sessions; a session's value is the median of its samples)."""
-    p = os.path.join(o, f"perf_{v}.jsonl")
-    out, acc = {}, {}
-    for sess in sessions(p) if os.path.exists(p) else []:
-        for k, vals in metric_samples(sess).items():
-            out.setdefault(k, []).append(statistics.median(vals))
-        for k, vals in acceptance_samples(sess).items():
-            acc.setdefault(k, []).append(statistics.median(vals))
-    c4 = os.path.join(o, f"c4_{nd}.txt")
-    if os.path.exists(c4):
-        out["streams4"] = [statistics.median(x["agg_tps"] for x in sess if x.get("agg_tps"))
-                           for sess in sessions(c4) if any(x.get("agg_tps") for x in sess)]
-        for sess in sessions(c4):
-            a_ = [x["acceptance"] for x in sess if x.get("acceptance") is not None]
-            if a_:
-                acc.setdefault("streams4", []).append(statistics.median(a_))
+    each metric is decided on the median of the sessions; a session's value is the median of its samples). The same function
+    builds the cards' values (make_info.py perf)."""
+    p, c4 = os.path.join(o, f"perf_{v}.jsonl"), os.path.join(o, f"c4_{nd}.txt")
+    out, _, acc = loom_sessions(read_rows(p) if os.path.exists(p) else [], c4 if os.path.exists(c4) else None)
     return out, acc
 
 

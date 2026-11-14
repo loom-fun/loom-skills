@@ -22,11 +22,13 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card"))
+import card_lib  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("slugs", nargs="+")
 ap.add_argument("--gates", default="dev")
-ap.add_argument("--reps", type=int, default=None, help="serve sessions per side for the 1-stream rows (default: 3; 6 for a fast model, which also gets 3 perf.py runs per session)")
+ap.add_argument("--reps", type=int, default=None, help="serve sessions per side for the 1-stream rows (default: 3; 6 for a fast model, which also gets --repeat-rows 3)")
 ap.add_argument("--fast-tps", type=float, default=100, help="a model whose published Strix decode is above this gets 6 short-row sessions and 4 c4 sessions per side")
 ap.add_argument("--old-org", default="loom-fun")
 ap.add_argument("--new-org", default="loom-fun-staging")
@@ -37,21 +39,6 @@ a = ap.parse_args()
 
 models = {m["repo"].split("/")[-1]: m for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
 jobs = []
-
-
-def card_decode(slug):
-    """The published loom-fun card's Strix decode tok/s (None if unknown)."""
-    import urllib.request
-    try:
-        with urllib.request.urlopen(f"https://huggingface.co/{a.old_org}/{slug}/resolve/main/info.json", timeout=30) as r:
-            info = json.load(r)
-    except Exception:  # noqa: BLE001
-        return None
-    perf = info.get("performance") or ((info.get("devices") or {}).get("strix-halo") or {}).get("performance") or {}
-    v = None
-    for s in perf.get("sessions", []):
-        v = (s["metrics"].get("decode") or {}).get("loom") or v
-    return v
 
 
 def abba(k, start=0):
@@ -66,13 +53,13 @@ for slug in a.slugs:
     m = models[slug]
     old = f"{a.old_org}/{slug}"
     # a fast model's decode rate is bimodal per serve session (Qwen3-0.6B: ~297 or ~330 tok/s, both packages): more sessions per side
-    fast = (card_decode(slug) or 0) > a.fast_tps
-    n = a.reps or (6 if fast else 3)
-    nc = 4 if fast else 2
-    spp = 3 if fast else 1
+    dec = card_lib.published_decode(slug, a.old_org)
+    n, rr = card_lib.sampling_plan(dec, a.fast_tps)   # the sampling rule (methodology rule 5): fast: 6 sessions, 3 samples per session
+    n = a.reps or n
+    nc = 4 if rr > 1 else 2
     name = ("sab-" + slug.lower().replace(".", "-"))[:40 - len(a.suffix)] + a.suffix
     jobs.append({
-        "name": name, "runner": "strix", "card": f"{a.new_org}/{slug}", "memory_bytes": m["memory_bytes"],
+        "name": name, "runner": "strix", **({"repeat_rows": rr} if rr > 1 else {}), "card": f"{a.new_org}/{slug}", "memory_bytes": m["memory_bytes"],
         "kit": m["kit"], "llamacpp": m.get("llamacpp") or "b1374", "llamacpp_vulkan": "b12211",
         "variants": [{"name": "fun", "card": old}, {"name": "staging"},
                      {"name": "funnd", "card": old, "execution": {"draft_depth": 0}},
@@ -80,8 +67,9 @@ for slug in a.slugs:
         # every run in its own serve session, interleaved (ABBAAB...): a small model's decode rate is a property of the serve
         # session (Qwen3-0.6B: 297 or 345 tok/s for the same package in two sessions on one runner), so each side's mean
         # spans n sessions and neither side gets all the slow ones
-        # fast models: 3 perf.py runs per session (a session's value is the median of its samples: decode_2k, decode_32k, prefill_8k)
-        "steps": [f"perf:{v}:{spp}" for v in abba(n)] + [f"perf:{v}:{spp}:long" for v in abba(3, start=1)]
+        # fast models: "repeat_rows" 3 (perf.py --repeat-rows: decode_2k, decode_32k, prefill_8k measured 3 times per session; a
+        # session's value is the median of its samples), 6 sessions of each kind
+        "steps": [f"perf:{v}:1" for v in abba(n)] + [f"perf:{v}:1:long" for v in abba(n, start=1)]
                  + [f"c4:{v}nd" for v in abba(nc)] + ["textmatch:fun", "textmatch:staging",
                   "func:staging", "ktest:staging", *([f"gates:staging:{a.gates}"] if a.gates else []),
                   *([] if not a.baselines else [f"llama@rocm.np1:{a.llama_reps}", f"llama@rocm.np1:{a.llama_reps}:long", "llamac4@rocm.nodraft",

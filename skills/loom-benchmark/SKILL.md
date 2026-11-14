@@ -324,6 +324,12 @@ Rules:
   llama.cpp on the same runner (`loom-org` step 3). Local runs are for development, never card numbers, and a Loom
   number measured without the active wait is not comparable. A job's variant comparisons (`devlab-perf`,
   `devlab-experiment`) compare within that job only.
+- Sampling (`reference/methodology.md` rule 5): every metric is the median over sessions (rounds) of each session's
+  median sample, identical for Loom and llama.cpp (ROCm, Vulkan). A fast model (decode > ~100 tok/s) gets 6 sessions and
+  `perf.py --repeat-rows 3` (decode_2k, decode_32k, prefill_8k three times per session); the others 3 sessions of one
+  sample. `devlab_perf.sh` marks each session end in the log (`{"session_end": V}`) and the job's `repeat_rows` passes the
+  option; `make_info.py perf` aggregates and records `aggregate: "median"` on the session (older sessions are the mean of N
+  rounds and say so on the card).
 - Warm up after every restart. `perf.py` first sends its first timed request's own shape, untimed (the 300-token
   essay with another nonce: prefill, decode, drafting and first-use kernels all run once; a trivial "Say hi."
   left DevLab's short-prompt decode 51-60 % below another session's while 2k decode agreed), and `c4_steady.py`
