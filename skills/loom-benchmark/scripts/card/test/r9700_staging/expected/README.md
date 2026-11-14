@@ -28,12 +28,12 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 Serve on the AMD Radeon AI PRO R9700 (gfx1201, 32 GB):
 
 ```bash
-loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=34000000000
+loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed
 ```
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
-On the AMD Radeon AI PRO R9700, `--memory_bytes=34000000000` bounds the memory pool: this package serves up to 20,480 tokens per request there (its native context is 40,960); the package files are the same on every GPU.
+On the AMD Radeon AI PRO R9700, the package's preset sizes the memory pool (`--pool_backing=fixed` commits it up front): this package serves up to 20,480 tokens per request there (its native context is 40,960); the package files are the same on every GPU.
 
 ## Performance vs llama.cpp
 

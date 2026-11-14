@@ -13,44 +13,34 @@
    "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "fixed",
-     "build": {},
-     "serve_args": [
-      "--pool_backing=fixed"
-     ],
-     "memory_bytes": "none"
+     "name": "card"
     },
     {
      "name": "nodraft",
-     "build": {},
      "execution": {
       "draft_depth": 0
      }
     },
     {
-     "name": "fixednd",
+     "name": "elastic",
      "build": {},
-     "execution": {
-      "draft_depth": 0
-     },
-     "serve_args": [
-      "--pool_backing=fixed"
-     ],
-     "memory_bytes": "none"
+     "elastic": true
     }
    ],
    "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
     "perf:card:3:long",
-    "perf:fixed:3:long",
+    "perf:elastic:3:long",
     "c4:nodraft",
-    "c4:fixednd",
-    "func:fixed",
-    "gates:fixed:dev",
-    "llama@rocm.np1:3:long"
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   },
   {
@@ -62,44 +52,34 @@
    "memory_bytes_r9700": 5000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "fixed",
-     "build": {},
-     "serve_args": [
-      "--pool_backing=fixed"
-     ],
-     "memory_bytes": "none"
+     "name": "card"
     },
     {
      "name": "nodraft",
-     "build": {},
      "execution": {
       "draft_depth": 0
      }
     },
     {
-     "name": "fixednd",
+     "name": "elastic",
      "build": {},
-     "execution": {
-      "draft_depth": 0
-     },
-     "serve_args": [
-      "--pool_backing=fixed"
-     ],
-     "memory_bytes": "none"
+     "elastic": true
     }
    ],
    "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
     "perf:card:3:long",
-    "perf:fixed:3:long",
+    "perf:elastic:3:long",
     "c4:nodraft",
-    "c4:fixednd",
-    "func:fixed",
-    "gates:fixed:dev",
-    "llama@rocm.np1:3:long"
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   },
   {
@@ -111,44 +91,34 @@
    "memory_bytes_r9700": 25000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "fixed",
-     "build": {},
-     "serve_args": [
-      "--pool_backing=fixed"
-     ],
-     "memory_bytes": "none"
+     "name": "card"
     },
     {
      "name": "nodraft",
-     "build": {},
      "execution": {
       "draft_depth": 0
      }
     },
     {
-     "name": "fixednd",
+     "name": "elastic",
      "build": {},
-     "execution": {
-      "draft_depth": 0
-     },
-     "serve_args": [
-      "--pool_backing=fixed"
-     ],
-     "memory_bytes": "none"
+     "elastic": true
     }
    ],
    "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
     "perf:card:3:long",
-    "perf:fixed:3:long",
+    "perf:elastic:3:long",
     "c4:nodraft",
-    "c4:fixednd",
-    "func:fixed",
-    "gates:fixed:dev",
-    "llama@rocm.np1:3:long"
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   }
  ],
