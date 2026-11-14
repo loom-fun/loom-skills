@@ -29,15 +29,18 @@
  },
  {
   "slug": "bartowski-LFM3-1.7B-loom",
-  "w": 1454294080,
+  "w": 2448688192,
   "kv": 5905580032,
   "kv32": 738197504,
   "kvpp": 22528,
   "ctx": 262144,
   "mem": 13000000000,
-  "need": 9359874112.0,
+  "need": 10354268224.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 0
+  "n_exp": 0,
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
  },
  {
   "slug": "bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
@@ -222,15 +225,18 @@
  },
  {
   "slug": "ggml-org-LFM3-Omni-2B-loom",
-  "w": 1406829536,
+  "w": 2306851808,
   "kv": 2883584000,
   "kv32": 738197504,
   "kvpp": 22528,
   "ctx": 128000,
   "mem": 10000000000,
-  "need": 6290413536.0,
+  "need": 7190435808.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 0
+  "n_exp": 0,
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
  },
  {
   "slug": "ggml-org-Laguna-XS-2.1-loom",
@@ -355,15 +361,18 @@
  },
  {
   "slug": "ggml-org-gemma-3-1b-it-loom",
-  "w": 970537472,
+  "w": 1451194880,
   "kv": 872415232,
   "kv32": 872415232,
   "kvpp": 26624,
   "ctx": 32768,
   "mem": 7000000000,
-  "need": 3842952704.0,
+  "need": 4323610112.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 0
+  "n_exp": 0,
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
  },
  {
   "slug": "lmstudio-community-Ornith-1.0-35B-loom",
@@ -404,15 +413,18 @@
  },
  {
   "slug": "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
-  "w": 1402167392,
+  "w": 2201329760,
   "kv": 12884901888,
   "kv32": 3221225472,
   "kvpp": 98304,
   "ctx": 131072,
   "mem": 24000000000,
-  "need": 16287069280.0,
+  "need": 17086231648.0,
   "verdict": "fits (native ctx)",
-  "n_exp": 0
+  "n_exp": 0,
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
  },
  {
   "slug": "unsloth-Llama-3.2-3B-Instruct-loom",
