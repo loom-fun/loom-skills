@@ -1,15 +1,19 @@
 [
  {
   "slug": "InternScience-Sage-A1.5-loom",
-  "w": 30816005456,
+  "w": 27380630864,
   "kv": 5905580032,
   "kv32": 738197504,
   "kvpp": 22528,
   "ctx": 262144,
   "mem": 41000000000,
-  "need": 38721585488.0,
+  "need": 35286210896.0,
   "verdict": "fits (reduced ctx)",
-  "n_exp": 256
+  "n_exp": 256,
+  "ctx_cap": 196608,
+  "r9700_execution": {
+   "prefill_capacity": 2048
+  }
  },
  {
   "slug": "XHToken-Spark-X2.5-4B-loom",
@@ -84,15 +88,18 @@
  },
  {
   "slug": "bartowski-Ornith-1.5-35B-A3B-loom",
-  "w": 31421239070,
+  "w": 27969087262,
   "kv": 11811160064,
   "kv32": 1476395008,
   "kvpp": 45056,
   "ctx": 262144,
   "mem": 49000000000,
-  "need": 45232399134.0,
+  "need": 41780247326.0,
   "verdict": "fits (reduced ctx)",
-  "n_exp": 256
+  "n_exp": 256,
+  "r9700_execution": {
+   "prefill_capacity": 2048
+  }
  },
  {
   "slug": "bartowski-Ornith-1.5-9B-loom",
@@ -293,15 +300,19 @@
  },
  {
   "slug": "ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
-  "w": 21044452560,
+  "w": 19677915072,
   "kv": 30064771072,
   "kv32": 3758096384,
   "kvpp": 114688,
   "ctx": 262144,
   "mem": 62000000000,
-  "need": 53109223632.0,
+  "need": 51742686144.0,
   "verdict": "fits (reduced ctx)",
-  "n_exp": 128
+  "n_exp": 128,
+  "ctx_cap": 98304,
+  "r9700_execution": {
+   "prefill_capacity": 2048
+  }
  },
  {
   "slug": "ggml-org-Qwen3.6-27B-loom",
@@ -320,19 +331,18 @@
  },
  {
   "slug": "ggml-org-Qwen3.6-35B-A3B-loom",
-  "w": 26530410809,
+  "w": 26653577817,
   "kv": 11811160064,
   "kv32": 1476395008,
   "kvpp": 45056,
   "ctx": 262144,
   "mem": 48000000000,
-  "need": 40341570873.0,
+  "need": 40464737881.0,
   "verdict": "fits (reduced ctx)",
   "n_exp": 256,
   "r9700_execution": {
    "prefill_capacity": 2048
-  },
-  "ctx_cap": 65536
+  }
  },
  {
   "slug": "ggml-org-gemma-3-1b-it-loom",
@@ -520,15 +530,18 @@
  },
  {
   "slug": "unsloth-Qwen3.5-35B-A3B-loom",
-  "w": 31816395190,
+  "w": 27935661347,
   "kv": 11811160064,
   "kv32": 1476395008,
   "kvpp": 45056,
   "ctx": 262144,
   "mem": 49000000000,
-  "need": 45627555254.0,
+  "need": 41746821411.0,
   "verdict": "fits (reduced ctx)",
-  "n_exp": 256
+  "n_exp": 256,
+  "r9700_execution": {
+   "prefill_capacity": 2048
+  }
  },
  {
   "slug": "unsloth-Qwen3.5-4B-loom",
