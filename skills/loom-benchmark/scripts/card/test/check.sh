@@ -599,4 +599,8 @@ for p in glob.glob(sys.argv[3] + '/*/expected/README.md') + glob.glob(sys.argv[3
 sys.exit(bad)" "$C" "$tmp/flint" "$here" \
   && echo "OK   card text: caveats are short factual lines, rendered cards carry no narrative" \
   || { echo "FAIL card text: narrative in free text or in a rendered card"; bad=1; }
+# loom-dev's summarize_info.py (the website's reader, vendored in contract/ with its source commit) reads the golden cards
+py "$here/contract/run_contract.py" >"$tmp/contract.log" 2>&1 \
+  && echo "OK   contract: loom-dev summarize_info.py reads the golden loom-card/2 and loom-card/3 cards ($(grep -c '^OK' "$tmp/contract.log") checks)" \
+  || { cat "$tmp/contract.log"; echo "FAIL contract: loom-dev summarize_info.py cannot read the golden cards"; bad=1; }
 exit $bad
