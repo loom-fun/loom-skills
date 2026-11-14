@@ -49,6 +49,7 @@
 #            serve_args: extra loom-serve flags; execution: model.json overrides (every preset); double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
 #            {"name": "parked", "active_wait": false}: the card's programs served with the SDK's default completion wait
 #            (LOOM_ACTIVE_WAIT=0 in serve.sh) instead of the active wait every other variant gets.
+# Job/experiment "env": {"SKIP_NEEDLE": "1"}: environment for every step (gates.sh: no needle gates).
 # Job "thinking": off (default) | on: chat_template_kwargs.enable_thinking sent to BOTH engines in every step.
 # Steps S: ab:R[:on|off]        every variant in ONE loom-serve (small context), ab_decode.py R interleaved rounds
 #          perf:V:N[:long]      V served alone with its own settings: perf.py N times (+ --long)
@@ -102,6 +103,8 @@ vtag=$(q "print(j.get('llamacpp_vulkan') or e.get('llamacpp_vulkan') or '-')")
 vkv=$(q "print(j.get('vulkan_kv') or e.get('vulkan_kv') or 'auto')")
 lkv=$(q "print(j.get('llama_kv_rocm') or '')")   # ROCm llama.cpp KV pool tokens when 65536 does not fit the GPU (r9700_jobs.py sets it)
 RUNNER=$(q "print(j.get('runner') or e.get('runner') or 'strix')")
+# "env": {"SKIP_NEEDLE": "1"} on the experiment or a job: exported for every step (gates.sh switches; the job's wins)
+eval "$(q "import shlex; print('\n'.join(f'export {k}={shlex.quote(str(v))}' for k, v in {**(e.get('env') or {}), **(j.get('env') or {})}.items()))")"
 if [ "$RUNNER" = r9700 ]; then
   rm9=$(q "print(j.get('memory_bytes_r9700') or e.get('memory_bytes_r9700') or '')")
   if [ -n "$rm9" ]; then mem=$rm9; elif [ "$mem" -gt 34000000000 ]; then echo "r9700: memory_bytes $mem clamped to 34000000000 (the R9700 pool, card_lib.GPUS)"; mem=34000000000; fi
