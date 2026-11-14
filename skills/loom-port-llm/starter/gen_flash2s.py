@@ -37,6 +37,8 @@ HALF = 128                        # dims per wave
 NFH = HALF // 16                  # 16-dim fragments per wave (8)
 WPH = D // HALF                   # waves per query head (2, or 4 at head_dim 512)
 KT = 32 if D == 256 else 16       # keys per tile (head_dim 512: K and V^T of 32 keys exceed 64 KiB)
+if D == 256 and os.environ.get("FLASH2_KT256"):   # experiment: 16-key tiles at head_dim 256 (one workgroup can then hold all query heads of a KV head)
+    KT = int(os.environ["FLASH2_KT256"])
 KB = KT // 16                     # 16-key blocks per tile
 DP8 = D + 8                       # padded K row
 VTC = KT + 8                      # padded V^T row
@@ -45,6 +47,9 @@ VTC = KT + 8                      # padded V^T row
 # K/V itself (the staging is repeated per group; the score/softmax/output work is not).
 NG = next(n for n in (1, 2, 4) if G % n == 0 and (KT * DP8 * 2 + D * VTC * 2 + (WPH * G // n) * KB * 16 * 16 * 4 <= 65536
                                                   or WPH * G // n == 8))
+if D == 512 and os.environ.get("FLASH2_NG512"):   # experiment: query-head groups per KV head at head_dim 512 (more groups: fewer waves per workgroup, cheaper barriers)
+    NG = int(os.environ["FLASH2_NG512"])
+    assert G % NG == 0
 GW = G // NG                      # query heads per workgroup
 WAVES = WPH * GW
 LANES = 32 * WAVES
@@ -289,12 +294,12 @@ A(f'''  %zero8 = vector.constant 0.0 : vector<8xf32>
   %v_plane_delta = index.scale %plane_bytes_i, %pos_bytes : index, offset -> offset''')
 if WPH == 2:
     A(f'''  // S exchange slots: mine and my partner's (wave ^ 1).
-  %my_s = index.mul %wave, %c32 : index
+  %my_s = index.mul %wave, %c{32 if KB == 2 else 16} : index
   %partner_odd = index.cmp eq, %dim_half, %c0 : index
   %partner_add = scf.select %partner_odd, %c1, %c0 : index
   %partner_id_value = index.madd %head_in_group, %c2, %partner_add : index
   %partner_id = index.assume %partner_id_value [range(%partner_id_value, 0, {WAVES - 1})] : index
-  %their_s = index.mul %partner_id, %c32 : index
+  %their_s = index.mul %partner_id, %c{32 if KB == 2 else 16} : index
   %kb1 = index.constant 16 : index
   %my_s1 = index.add %my_s, %kb1 : index
   %their_s1 = index.add %their_s, %kb1 : index
@@ -525,9 +530,34 @@ R4 = os.environ.get("FLASH2_ARCH") == "rdna4"   # the gfx12 twin (flash2_rdna4.p
 if R4:
     from flash2_rdna4 import to_rdna4, twin_names
     text = to_rdna4(text)
+    if os.environ.get("FLASH2_ABL"):   # timing ablations (flash2_ablate.py), profiling only
+        from flash2_ablate import ablate
+        text = ablate(text, os.environ["FLASH2_ABL"])
+    if os.environ.get("FLASH2_SX", "1") == "1":   # S partials exchanged as the lanes' own vectors (flash2_trim.py); gfx12 twin only
+        from flash2_trim import sx
+        text = sx(text)
+    if os.environ.get("FLASH2_LAZY", "1") == "1":   # O^T rescale only when a column's max changed (flash2_trim.py); gfx12 twin only
+        from flash2_trim import lazy
+        text = lazy(text)
+    if os.environ.get("FLASH2_KVH", "1") == "1":   # loop-invariant half of the paged-KV lookup hoisted (flash2_trim.py); gfx12 twin only
+        from flash2_trim import kvhoist
+        text = kvhoist(text)
+    if os.environ.get("FLASH2_VTF", "1") == "1":   # flat-index V^T stores (flash2_trim.py); gfx12 twin only
+        from flash2_trim import vtflat
+        text = vtflat(text)
+    if os.environ.get("FLASH2_VP", "0") == "1":   # two keys per staging lane: one 32-bit V^T store per dim pair (flash2_vpack.py); gfx12 twin only
+        from flash2_vpack import vpack
+        text = vpack(text)
+    if os.environ.get("FLASH2_PF", "0") == "1":   # the next K/V tile's loads in flight during this tile's math (flash2_prefetch.py); gfx12 twin only
+        from flash2_prefetch import prefetch
+        text = prefetch(text)
 if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO:   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
-    text = peel_last_tile(text)
+    _hot = None
+    if R4 and os.environ.get("FLASH2_HOT", "1") == "1":   # gfx12 twin: the hot copy skips the validity / mask selects (flash2_trim.py)
+        from flash2_trim import hot as _trim_hot
+        _hot = lambda ls: _trim_hot(ls, D == 512)
+    text = peel_last_tile(text, _hot)
 if os.environ.get("FLASH2_ENTRY") == "bcast" and os.environ.get("FLASH2_ROLE") != "partial":   # experiment: the listed entry broadcast from lane 0
     _old = "  %entry32 = view.load %tiles_view[%entry_slot] : view<[%tokens]xi32> -> i32\n  %entry = index.cast %entry32 : i32 to index\n"
     assert _old in text, "entry load not found"
