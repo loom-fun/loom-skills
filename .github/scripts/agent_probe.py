@@ -130,6 +130,30 @@ def llama_phase():
 if LLAMA:
     llama_phase(); sys.exit(0)
 
+
+def rawtext():
+    """The reply's own whitespace: the template's whole system block (tools included) is sent as the system message and no
+    tools are declared, so the prompt tokens are the gate's and Loom returns the calls as plain content, bytes untouched."""
+    full = P.render_messages([SYS, {"role": "user", "content": "x"}], G.TOOLS, None)
+    head = full[:full.index("<|im_start|>user")]
+    sysblock = head[len("<|im_start|>system\n"):-len("<|im_end|>\n")]
+    print("=== rawtext: system block ends", repr(sysblock[-80:]))
+    for q in ("Now check Tokyo and London too, then tell me which of the three cities is warmest.",
+              "What's the weather in Paris and in Berlin? Use the tool for both.",
+              "Check the weather for Madrid, Rome and Oslo.",
+              "Get the weather for Cairo and Lima, then tell me which is warmer.",
+              "What is the weather in Sydney and in Toronto?"):
+        body = dict(model=model, messages=[{"role": "system", "content": sysblock}, {"role": "user", "content": q}],
+                    max_tokens=1024, temperature=0)
+        r = post(body).json()
+        if "error" in r:
+            print("  ERROR", r["error"]); continue
+        m = r["choices"][0]["message"]
+        print(f"  q={q[:40]!r} prompt_tokens={r['usage']['prompt_tokens']} reasoning_tail={(m.get('reasoning_content') or '')[-40:]!r}\n    content={m.get('content')!r}")
+
+
+rawtext()
+
 scenario("paris-one-call-control", None, 0, session="ctl", pin=True)
 scenario("tokyo-london plain", None, 1)
 scenario("tokyo-london named+pin", None, 1, session="tl", pin=True)
