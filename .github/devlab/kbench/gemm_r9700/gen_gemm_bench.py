@@ -25,7 +25,8 @@ ALL_SHAPES = [  # (fmt, mode, rows, K, N): the prefill GEMMs of Gemma-4-E2B (k15
     ("q4_k", "swiglu", 4096, 1536, 6144), ("q4_k", "store", 4096, 6144, 1536),
 ]
 
-NATIVE = {"dq2": R.q4k_m256_native, "sb": R.q4k_m256_sb}   # variants that swap the m256 q4_k twin for a native gfx12 kernel (no ablation transform)
+NATIVE = {"dq2": R.q4k_m256_native, "sb": R.q4k_m256_sb, "sbnb": lambda t: R.q4k_m256_sb(t, nb=True),
+          "sbsc": lambda t: R.q4k_m256_sb(t, sc=True), "sbnbsc": lambda t: R.q4k_m256_sb(t, nb=True, sc=True)}   # variants that swap the m256 q4_k twin for a native gfx12 kernel (no ablation transform)
 
 def kernel_text(text, name):
     m = re.search(r'kernel\.def (?:target\(@\w+\) )?export\("%s"\)' % re.escape(name), text)
@@ -35,7 +36,12 @@ def kernel_text(text, name):
 
 import re as _re
 def transform(tw, variant):
-    """Ablations of one twin kernel text (timing only, wrong results): nomma, nodq, nobar."""
+    """Ablations of one twin kernel text (timing only, wrong results): nomma, nodq, nobar, ablw (no per-step weight loads: the
+    carried raw values are reused), ablx (no per-step activation loads)."""
+    if variant == "ablw":
+        tw = _re.sub(r"^(\s*)(%nx_(?:pk|hdr)\w*) = vector\.load [^\n]*-> vector<4xi32>$", lambda m: "%s%s = vector.andi %s, %s : vector<4xi32>" % (m.group(1), m.group(2), "%cr_pk" if "pk" in m.group(2) else "%cr_hdr", "%cr_pk" if "pk" in m.group(2) else "%cr_hdr"), tw, flags=_re.M)
+    elif variant == "ablx":
+        tw = _re.sub(r"^(\s*)(%x_rawn1?_u\d) = vector\.load [^\n]*$", lambda m: "%s%s = vector.bitcast %%cr_x%s : vector<32xf16> to vector<32xf16>" % (m.group(1), m.group(2), "1" if "rawn1" in m.group(2) else ""), tw, flags=_re.M)
     if variant == "nomma":
         tw = _re.sub(r"^(\s*)(%\w+) = vector\.mma (%\w+), (%\w+), (%\w+) : vector<8xf16>, vector<8xf16>, vector<8xf32>$", r"\1\2 = vector.addf \5, \5 : vector<8xf32>", tw, flags=_re.M)
     elif variant == "nodq":
@@ -56,9 +62,13 @@ def build(variant=""):
             if big == "m256" and rows % 256: continue
             g = G.gemm_big(fmt, mode) if big == "m128" else G.gemm_big256(fmt, mode)
             tw = R.twin(g)
-            if variant in NATIVE and big == "m256" and fmt == "q4_k":
-                tw = NATIVE[variant](tw)
-            tw = transform(tw, variant)
+            nat, _, abl = variant.partition("_")
+            if nat in NATIVE:
+                if big != "m256": continue
+                tw = NATIVE[nat](tw)
+            elif abl == "" and variant not in ("", "nfast", "nomma", "nodq", "nobar", "ablw", "ablx"):
+                raise SystemExit("unknown variant " + variant)
+            tw = transform(tw, abl if nat in NATIVE else variant)
             m = re.search(r'export\("(\w+)"\)', tw); old = m.group(1)
             kn = f"k_{fmt}_{mode}_{big}_{rows}x{K}x{N}"
             tw = tw.replace(f'export("{old}") @{old}(', f'export("{kn}") @{kn}(')
@@ -138,10 +148,34 @@ check.case public @k_peak_case {
 check.benchmark<@k_peak_case> @k_peak_bm
 """
 
+def mix(nv, nw=8):
+    """k_mix<nv>: k_peak's WMMA loop with nv extra independent f16 vector FMAs (4 v_pk_fma_f16 each) per iteration: does VALU work overlap the matrix unit?"""
+    p = PEAK.replace("k_peak", "k_mix%d" % nv)
+    fm = "".join("    %%f{0}_n = vector.fmaf %%f{0}, %%a_c, %%b_c : vector<8xf16>\n".format(i % 4) if False else "" for i in range(0))
+    chains = "".join("%%f%d = %%a : vector<8xf16>, " % i for i in range(4))
+    # carried f16 chains appended to the loop carries
+    p = p.replace("%a0 = %init : vector<8xf32>,", "%a0 = %init : vector<8xf32>,", 1)
+    carry_decl = ", ".join("%%g%d = %%a : vector<8xf16>" % i for i in range(4))
+    ty = ", ".join(["vector<8xf16>"] * 4)
+    p = p.replace(") -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {",
+                  ", " + carry_decl + ") -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, " + ty + ") {", 1)
+    p = p.replace("%r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 = scf.for", "%r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7, %q0, %q1, %q2, %q3 = scf.for", 1)
+    body = ""
+    cur = ["%%g%d" % i for i in range(4)]
+    for n in range(nv):
+        c = n % 4
+        body += "    %%h%d_%d = vector.fmaf %s, %%b, %%a : vector<8xf16>\n" % (c, n, cur[c])
+        cur[c] = "%%h%d_%d" % (c, n)
+    p = p.replace("    scf.yield %n0,", body + "    scf.yield %n0,", 1)
+    p = p.replace("%n7 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>\n  }",
+                  "%n7, " + ", ".join(cur) + " : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, " + ty + "\n  }", 1)
+    p = p.replace("  %sum = vector.addf %s03, %s47 : vector<8xf32>", "  %sum0 = vector.addf %s03, %s47 : vector<8xf32>\n  %qq = vector.addf %q0, %q1 : vector<8xf16>\n  %qr = vector.addf %q2, %q3 : vector<8xf16>\n  %qs = vector.addf %qq, %qr : vector<8xf16>\n  %qx = vector.extf %qs : vector<8xf16> to vector<8xf32>\n  %sum = vector.addf %sum0, %qx : vector<8xf32>", 1)
+    return p
+
 HEAD = "amdgpu.target<gfx12-generic> @rdna4 {subgroup_size = 32}\n\n" + open(os.path.join(HERE, "gemm_helpers.loom")).read() + "\n"
 if __name__ == "__main__" and len(sys.argv) > 2:
     d = sys.argv[2]
     os.makedirs(d, exist_ok=True)
     for v in (sys.argv[3:] or ["base"]):
         v = "" if v == "base" else v
-        open(os.path.join(d, "bench%s.loom" % ("_" + v if v else "")), "w").write(HEAD + "\n".join(build(v)) + ("\n" + PEAK if not v else ""))
+        open(os.path.join(d, "bench%s.loom" % ("_" + v if v else "")), "w").write(HEAD + "\n".join(build(v)) + ("\n" + PEAK + "".join("\n" + mix(n) for n in (0, 8, 16, 32, 64)) if not v else ""))

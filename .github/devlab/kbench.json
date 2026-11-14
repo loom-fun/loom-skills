@@ -22,13 +22,27 @@
       "gen": "gemm_r9700/gen_gemm_bench.py",
       "gen_variants": [
         "base",
-        "dq2",
-        "sb"
+        "sb",
+        "sb_nodq",
+        "sb_nomma",
+        "sb_nobar",
+        "sb_ablw",
+        "sb_ablx",
+        "sbnb",
+        "sbsc",
+        "sbnbsc"
       ],
       "files": [
         "bench.loom",
-        "bench_dq2.loom",
-        "bench_sb.loom"
+        "bench_sb.loom",
+        "bench_sb_nodq.loom",
+        "bench_sb_nomma.loom",
+        "bench_sb_nobar.loom",
+        "bench_sb_ablw.loom",
+        "bench_sb_ablx.loom",
+        "bench_sbnb.loom",
+        "bench_sbsc.loom",
+        "bench_sbnbsc.loom"
       ],
       "config": [],
       "args": [
@@ -36,7 +50,7 @@
         "--batch-size=8",
         "--profile-final-batch=true"
       ],
-      "repeats": 3
+      "repeats": 2
     }
   ]
 }

@@ -157,7 +157,7 @@ def q4k_m256_native(t, unroll=False):
     return t
 
 
-def q4k_m256_sb(t):
+def q4k_m256_sb(t, nb=False, sc=False):
     """q4k_m256_native with the K loop unrolled by one superblock (4 steps of 64): the groups of each step are constants
     (no per-step group decode), the superblock header is loaded once per 4 steps and prefetched one superblock ahead."""
     t = q4k_m256_native(t)
@@ -178,31 +178,74 @@ def q4k_m256_sb(t):
     cur = ids[:]
     cx, cx1, chdr, cpk = "%cr_x", "%cr_x1", "%cr_hdr", "%cr_pk"
     B = ["    %kstep = index.mul %sb, %c4 : index",
+         "    %ksm1 = index.sub %k_steps, %c1 : index",
          "    %sb_add = index.scale %sb, %block_bytes : index, offset -> offset",
          "    %sb_bo = index.add %w_row_origin, %sb_add : offset",
          "    %sb_pay = index.add %sb_bo, %sixteen : offset",
          f"    %sb_wv = buffer.view {W}[%sb_pay] : buffer -> view<32xi32>"]
+    if sc:   # d*sc and dmin*m of the 8 groups as f16 vectors (one exact f16 product per value, the same rounding as f32 product + truncation)
+        B.append("""    %hh = vector.bitcast %cr_hdr : vector<4xi32> to vector<8xf16>
+    %d_h = vector.extract %hh[0] : vector<8xf16> -> f16
+    %dm_h = vector.extract %hh[1] : vector<8xf16> -> f16
+    %dm_neg = scalar.negf %dm_h : f16
+    %w0 = vector.extract %cr_hdr[1] : vector<4xi32> -> i32
+    %w1 = vector.extract %cr_hdr[2] : vector<4xi32> -> i32
+    %w2 = vector.extract %cr_hdr[3] : vector<4xi32> -> i32
+    %k3f = scalar.constant 1061109567 : i32
+    %k0f = scalar.constant 252645135 : i32
+    %k03 = scalar.constant 50529027 : i32
+    %s6 = scalar.constant 6 : i32
+    %s4 = scalar.constant 4 : i32
+    %sc_lo = scalar.andi %w0, %k3f : i32
+    %mn_lo = scalar.andi %w1, %k3f : i32
+    %w0_6 = scalar.shrui %w0, %s6 : i32
+    %w0_6m = scalar.andi %w0_6, %k03 : i32
+    %w0_h = scalar.shli %w0_6m, %s4 : i32
+    %w2_l = scalar.andi %w2, %k0f : i32
+    %sc_hi = scalar.ori %w2_l, %w0_h : i32
+    %w1_6 = scalar.shrui %w1, %s6 : i32
+    %w1_6m = scalar.andi %w1_6, %k03 : i32
+    %w1_h = scalar.shli %w1_6m, %s4 : i32
+    %w2_4 = scalar.shrui %w2, %s4 : i32
+    %w2_4m = scalar.andi %w2_4, %k0f : i32
+    %mn_hi = scalar.ori %w2_4m, %w1_h : i32
+    %scw = vector.from_elements %sc_lo, %sc_hi, %mn_lo, %mn_hi : vector<4xi32>
+    %scb = vector.bitcast %scw : vector<4xi32> to vector<16xi8>
+    %scf = vector.uitofp %scb : vector<16xi8> to vector<16xf16>
+    %sc_f = vector.slice %scf[0] : vector<16xf16> -> vector<8xf16>
+    %mn_f = vector.slice %scf[8] : vector<16xf16> -> vector<8xf16>
+    %dsp = vector.splat %d_h : vector<8xf16>
+    %dmp = vector.splat %dm_neg : vector<8xf16>
+    %S8 = vector.mulf %sc_f, %dsp : vector<8xf16>
+    %M8 = vector.mulf %mn_f, %dmp : vector<8xf16>""")
     for j in range(4):
         u = f"_u{j}"
+        if sc:
+            dec = "\n".join(f"    %{nm}{g}{u} = vector.extract %{M}8[{2 * j + g}] : vector<8xf16> -> f16" for g in (0, 1) for nm, M in (("sh", "S"), ("mh", "M")))
+            dec += "\n"
+        else:
+            dec = f"""    %s0{u}, %m0{u} = func.call @g_k_metadata({chdr}, %g0{u}) : (vector<4xi32>, index) -> (f32, f32)
+    %s1{u}, %m1{u} = func.call @g_k_metadata({chdr}, %g1{u}) : (vector<4xi32>, index) -> (f32, f32)
+"""
         B.append(f"""    vector.store {cx}, %x_stage_view[%x_stage_row, %x_stage_col] : vector<32xf16>, view<256x72xf16>
     vector.store {cx1}, %x_stage_view[%x_stage_row1, %x_stage_col] : vector<32xf16>, view<256x72xf16>
     %g0{u} = index.constant {2 * j} : index
     %g1{u} = index.constant {2 * j + 1} : index
-    %s0{u}, %m0{u} = func.call @g_k_metadata({chdr}, %g0{u}) : (vector<4xi32>, index) -> (f32, f32)
-    %s1{u}, %m1{u} = func.call @g_k_metadata({chdr}, %g1{u}) : (vector<4xi32>, index) -> (f32, f32)
-    %c4_i32{u} = scalar.constant 4 : i32
+{dec}    %c4_i32{u} = scalar.constant 4 : i32
     %sh4{u} = vector.splat %c4_i32{u} : vector<4xi32>
     %pk_lo{u} = vector.andi {cpk}, %nibble_mask : vector<4xi32>
     %pk_hs{u} = vector.shrui {cpk}, %sh4{u} : vector<4xi32>
     %pk_hi{u} = vector.andi %pk_hs{u}, %nibble_mask : vector<4xi32>""")
         for nm, g in (("lo", 0), ("hi", 1)):
-            B.append(f"""    %{nm}_bytes{u} = vector.bitcast %pk_{nm}{u} : vector<4xi32> to vector<16xi8>
-    %{nm}_codes{u} = vector.uitofp %{nm}_bytes{u} : vector<16xi8> to vector<16xf16>
-    %{nm}_scale_h{u} = scalar.fptrunc %s{g}{u} : f32 to f16
+            cvt = (f"""    %{nm}_scales{u} = vector.splat %sh{g}{u} : vector<16xf16>
+    %{nm}_minima{u} = vector.splat %mh{g}{u} : vector<16xf16>""" if sc else f"""    %{nm}_scale_h{u} = scalar.fptrunc %s{g}{u} : f32 to f16
     %{nm}_neg_min{u} = scalar.negf %m{g}{u} : f32
     %{nm}_neg_min_h{u} = scalar.fptrunc %{nm}_neg_min{u} : f32 to f16
     %{nm}_scales{u} = vector.splat %{nm}_scale_h{u} : vector<16xf16>
-    %{nm}_minima{u} = vector.splat %{nm}_neg_min_h{u} : vector<16xf16>
+    %{nm}_minima{u} = vector.splat %{nm}_neg_min_h{u} : vector<16xf16>""")
+            B.append(f"""    %{nm}_bytes{u} = vector.bitcast %pk_{nm}{u} : vector<4xi32> to vector<16xi8>
+    %{nm}_codes{u} = vector.uitofp %{nm}_bytes{u} : vector<16xi8> to vector<16xf16>
+{cvt}
     %dq_{nm}{u} = vector.fmaf %{nm}_codes{u}, %{nm}_scales{u}, %{nm}_minima{u} : vector<16xf16>
     vector.store %dq_{nm}{u}, %w_stage_view[%stage_row, %pk_{nm}_col] : vector<16xf16>, view<128x72xf16>""")
         B.append("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
@@ -223,19 +266,29 @@ def q4k_m256_sb(t):
     %nsb_wv = buffer.view {W}[%nsb_pay] : buffer -> view<32xi32>
     %nx_pk{u} = vector.load %nsb_wv[%pk_hw] : view<32xi32> -> vector<4xi32>""")
             nhdr, npk = f"%nx_hdr{u}", f"%nx_pk{u}"
-        B.append(f"""    %xc{u} = index.constant {j + 1} : index
-    %xn_step{u} = index.add %kstep, %xc{u} : index
-    %x_more{u} = index.cmp ult, %xn_step{u}, %k_steps : index
-    %x_rawn{u}, %x_rawn1{u} = scf.if %x_more{u} -> (vector<32xf16>, vector<32xf16>) {{
-      %x_ns{u} = index.assume %xn_step{u} [lt(%xn_step{u}, %k_steps)] : index
-      %x_ko{u} = index.mul %x_ns{u}, %c64 : index
-      %x_coln{u} = index.add %x_ko{u}, %x_stage_col : index
-      %xv{u} = vector.load %x_view[%x_row, %x_coln{u}] : view<[%rows]x[%k]xf16> -> vector<32xf16>
-      %xv1{u} = vector.load %x_view[%x_row1, %x_coln{u}] : view<[%rows]x[%k]xf16> -> vector<32xf16>
-      scf.yield %xv{u}, %xv1{u} : vector<32xf16>, vector<32xf16>
-    }} else {{
-      scf.yield {cx}, {cx1} : vector<32xf16>, vector<32xf16>
-    }}""")
+        if nb:
+            B.append(f"""    %xc{u} = index.constant {j + 1} : index
+    %xn_raw{u} = index.add %kstep, %xc{u} : index
+    %xn_step{u} = index.min %xn_raw{u}, %ksm1 : index
+    %x_ns{u} = index.assume %xn_step{u} [lt(%xn_step{u}, %k_steps)] : index
+    %x_ko{u} = index.mul %x_ns{u}, %c64 : index
+    %x_coln{u} = index.add %x_ko{u}, %x_stage_col : index
+    %x_rawn{u} = vector.load %x_view[%x_row, %x_coln{u}] : view<[%rows]x[%k]xf16> -> vector<32xf16>
+    %x_rawn1{u} = vector.load %x_view[%x_row1, %x_coln{u}] : view<[%rows]x[%k]xf16> -> vector<32xf16>""")
+        else:
+            B.append(f"""    %xc{u} = index.constant {j + 1} : index
+        %xn_step{u} = index.add %kstep, %xc{u} : index
+        %x_more{u} = index.cmp ult, %xn_step{u}, %k_steps : index
+        %x_rawn{u}, %x_rawn1{u} = scf.if %x_more{u} -> (vector<32xf16>, vector<32xf16>) {{
+          %x_ns{u} = index.assume %xn_step{u} [lt(%xn_step{u}, %k_steps)] : index
+          %x_ko{u} = index.mul %x_ns{u}, %c64 : index
+          %x_coln{u} = index.add %x_ko{u}, %x_stage_col : index
+          %xv{u} = vector.load %x_view[%x_row, %x_coln{u}] : view<[%rows]x[%k]xf16> -> vector<32xf16>
+          %xv1{u} = vector.load %x_view[%x_row1, %x_coln{u}] : view<[%rows]x[%k]xf16> -> vector<32xf16>
+          scf.yield %xv{u}, %xv1{u} : vector<32xf16>, vector<32xf16>
+        }} else {{
+          scf.yield {cx}, {cx1} : vector<32xf16>, vector<32xf16>
+        }}""")
         m = mma
         for d in sorted(defs, key=len, reverse=True):
             m = re.sub(re.escape(d) + r"\b", d + u, m)
