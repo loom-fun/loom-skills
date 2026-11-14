@@ -1,5 +1,5 @@
 {
- "_comment": "Ornith-1.0 agent gate with the near-tie whitespace rule (agent_golden.whitespace_ties) on the R9700",
+ "_comment": "Ornith-1.0 agent gate with the near-tie whitespace rule (agent_golden.whitespace_ties) on the R9700 (rerun on the republished chat-r9700 preset, context 262144)",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
