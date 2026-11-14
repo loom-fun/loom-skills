@@ -44,6 +44,7 @@ ap.add_argument("--draft", default=os.environ.get("DRAFT", "auto"), choices=["au
                      "weights); none: ordinary decoding (also SPEC=off). Draft settings are tuned by draft/tune.py (draft/README.md)")
 ap.add_argument("--draft-depth", type=int, default=int(os.environ.get("DRAFT_DEPTH", "0")) or None,
                 help="proposed tokens per verification step (1-7)")
+ap.add_argument("--sizing-json", default=None, help="write what loom-serve must hold resident (weights, workspace, recurrent state, KV bytes per position) to this file: the fit table's input")
 ap.add_argument("--model-id", default=None, help="model id clients send (visible ASCII, no spaces); default: slug of cfg name")
 a = ap.parse_args()
 
@@ -915,6 +916,12 @@ bench["generator"] = generator_stamp()
 json.dump(bench, open(os.path.join(pkg, "llm_config.json"), "w"), indent=1)
 kv = a.pool * kv_per_position
 need = weights_bytes + kv + workspace + 2 * a.rows * recurrent_bytes
+if a.sizing_json:
+    json.dump({"weights_bytes": weights_bytes, "workspace_bytes": workspace, "recurrent_bytes": 2 * a.rows * recurrent_bytes,
+               "scratch_bytes": max(0, workspace - 3 * 2**30),
+               "mmproj_bytes": os.path.getsize(cfg["vision"]["mmproj"]) if os.path.isfile((cfg.get("vision") or {}).get("mmproj") or "") else 0,
+               "kv_bytes_per_position": kv_per_position, "context": a.context, "native_context": native, "pool": a.pool,
+               "rows": a.rows, "draft": DRAFT["kind"] if DRAFT else None}, open(a.sizing_json, "w"), indent=1)
 print("package:", os.path.join(pkg, "model.json"), f"(model id {model_id!r})")
 print("speculative decoding:", f"{DRAFT['kind']} drafter, depth {DRAFT['depth']}" if DRAFT else "off")
 print(f"context {a.context} tokens (native {native}), KV pool {a.pool} positions = {kv / 2**30:.1f} GiB, weights {weights_bytes / 2**30:.1f} GiB"
