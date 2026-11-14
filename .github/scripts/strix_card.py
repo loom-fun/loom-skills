@@ -3,7 +3,7 @@
 (Loom + llama.cpp, as measured), one line saying the table was re-measured on this package within the band (make_info.py remeasure),
 and the dev gates + kernel tests the job ran on this package's Strix programs. No llama.cpp re-measure (user decision, phase 3).
 
-usage: strix_card.py SLUG --job JOB_ARTIFACT_DIR --cmp CMP.json --run RUN --work DIR [--first-cmp CMP1.json --first-run RUN1] [--upload]
+usage: strix_card.py SLUG --job JOB_ARTIFACT_DIR --cmp CMP.json --run RUN --work DIR [--first-cmp CMP1.json --first-run RUN1] [--gates-job DIR --gates-run RUN] [--upload]
 
 JOB_ARTIFACT_DIR / CMP.json / RUN: the passing run (the confirming re-run when there was one). Without --upload it builds, renders and
 checks the card in DIR/SLUG/out and runs the upload dry run; --upload publishes the card files (card-only, --parent-commit) to
@@ -44,6 +44,9 @@ ap.add_argument("--run", required=True)
 ap.add_argument("--work", required=True)
 ap.add_argument("--first-cmp", help="the first run's compare JSON (the ratchet: rows faster in both runs)")
 ap.add_argument("--first-run", help="the first run's Actions run id (with --first-cmp)")
+ap.add_argument("--gates-job", help="a later job of the same package that ran the kernel tests and gates (a gates-only job, e.g. after a tooling fix): "
+                "their evidence (device, run, time) comes from it instead of --job")
+ap.add_argument("--gates-run", help="that job's Actions run id (with --gates-job)")
 ap.add_argument("--upload", action="store_true")
 a = ap.parse_args()
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download  # noqa: E402
@@ -75,10 +78,19 @@ if a.first_cmp:
 src = ["--run", a.run, "--url", url, "--device", dev, "--hrx-loom", hrx, "--source-kind", "devlab"]
 run(PY, f"{C}/make_info.py", "remeasure", "--cmp", a.cmp, "--package", out, "--compared-repo", f"loom-fun/{slug}", "--compared-revision", rev,
     "--fetched-programs", fetched, *first, "--date", end[:10], *src, "-o", f"{W}/ev_rm.json")
-gates = [os.path.join(J, "gates_staging", "gates.json"), os.path.join(J, "ktest_staging.log")]
+GJ, gsrc, gend = J, src, end
+if a.gates_job:
+    GJ = os.path.abspath(a.gates_job)
+    gname = json.load(open(os.path.join(GJ, "summary.json")))["job"]
+    gjob = next(j for j in json.loads(run("gh", "run", "view", a.gates_run, "-R", GH, "--json", "jobs", capture=True))["jobs"] if j["name"] == gname)
+    gdev, ghrx = os.path.join(W, "gdev.json"), os.path.join(W, "ghrx.json")
+    run(PY, f"{C}/pull_devlab.py", "--identity", GJ, "--gpu", "strix-halo", "--device-out", gdev, "--hrx-out", ghrx)
+    gsrc = ["--run", a.gates_run, "--url", gjob["url"], "--device", gdev, "--hrx-loom", ghrx, "--source-kind", "devlab"]
+    gend = gjob["completedAt"]
+gates = [os.path.join(GJ, "gates_staging", "gates.json"), os.path.join(GJ, "ktest_staging.log")]
 gates = [g for g in gates if os.path.exists(g)]
 if gates:
-    run(PY, f"{C}/make_info.py", "gates", "--gpu", "strix-halo", "--time", end[:19], *gates, "--package", out, *src, "-o", f"{W}/ev_gates.json")
+    run(PY, f"{C}/make_info.py", "gates", "--gpu", "strix-halo", "--time", gend[:19], *gates, "--package", out, *gsrc, "-o", f"{W}/ev_gates.json")
     g = json.load(open(f"{W}/ev_gates.json"))
     g.pop("performance", None)   # the spec gate's acceptance session: the published Strix table stays as it is (spec_acceptance included)
     json.dump(g, open(f"{W}/ev_gates.json", "w"), indent=1)
