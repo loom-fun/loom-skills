@@ -134,6 +134,28 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class HoistTests(unittest.TestCase):
+    """hrx-loom 0.1.0 mis-verifies encoding values defined past 4 MiB: in a big file the encoding kernels come first."""
+
+    def big(self, n):
+        pad = lambda i: (f'kernel.def export("pad{i}") @pad{i}(%n: index) {{\n  %c = index.constant 1 : index\n'
+                         + "  // " + "x" * 1000 + "\n}\n")
+        enc = ('kernel.def export("enc") @enc(%n: index) {\n  %l = encoding.layout.strided [1, 72] : encoding<layout>\n}\n')
+        return "".join(pad(i) for i in range(n)) + enc
+
+    def test_big_file_hoists_encoding_kernel(self):
+        t = self.big(4000)
+        self.assertGreater(len(t), dual_target.ENCODING_LIMIT)
+        out = dual_target.hoist_encoding_kernels(t)
+        self.assertLess(out.index('export("enc")'), out.index('export("pad0")'))
+        self.assertEqual(sorted(out.split("\n")), sorted(t.split("\n")))
+        self.assertEqual(dual_target.hoist_encoding_kernels(out), out)
+
+    def test_small_file_unchanged(self):
+        t = self.big(10)
+        self.assertEqual(dual_target.hoist_encoding_kernels(t), t)
+
+
 class ApplyDirTests(unittest.TestCase):
     def test_cross_file_launch_fails_loudly(self):
         with tempfile.TemporaryDirectory() as d:

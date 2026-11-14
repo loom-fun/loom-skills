@@ -102,7 +102,7 @@ def sh(cmd, cwd, env=None, timeout=3600):
     return p.returncode, (p.stdout + p.stderr)
 
 
-def build(slug, pkgdir, work):
+def build(slug, pkgdir, work, rdna4="1"):
     """Rebuild slug's package into work/pkg with this checkout's kit. Returns (ok, message, program_dir)."""
     pcfg = json.load(open(f"{pkgdir}/llm_config.json"))
     os.makedirs(work, exist_ok=True)
@@ -132,11 +132,63 @@ def build(slug, pkgdir, work):
     cfg = json.load(open(fresh))
     cfg.update({k: v for k, v in pcfg.items() if k not in ("tensors", "generator")})
     json.dump(cfg, open(os.path.join(work, "cfg.json"), "w"), indent=1)
-    env = dict(os.environ, LOOM_RDNA4=os.environ.get("LOOM_RDNA4", "1"))
+    env = dict(os.environ, LOOM_RDNA4=rdna4)
     rc, out = sh([py, f"{kit}/build.py", "cfg.json", "pkg", "--tokenizer", f"{pkgdir}/tokenizer.json"], work, env)
     if rc:
         return False, "build.py: " + out.strip().splitlines()[-1][-250:], None
     return True, "", os.path.join(work, "pkg", "program")
+
+
+def kernel_blocks(text):
+    """{export name: (tag, text)} of a program file; a kernel's text runs to the next top-level declaration."""
+    out = {}
+    parts = re.split(r"(?m)^(?=\s*kernel\.def )", text)
+    for b in parts[1:]:
+        m = re.match(r'\s*kernel\.def (?:target\(@(\w+)\) )?(?:\w+ )?export\("([^"]+)"\)', b)
+        if not m:
+            continue
+        b = b[:b.index("\n}\n") + 3] if "\n}\n" in b else b   # up to the closing brace: trailing comments belong to the next
+        out[m.group(2)] = (m.group(1), re.sub(r" target\(@rdna3\)", "", b))
+    return out
+
+
+def structure_checks(prog, base_prog):
+    """Dual-target structure of a built program: every WMMA kernel (vector.mma) has a _rdna4 twin, the dual_target header is
+    present in every file with twins, and the programs equal a LOOM_RDNA4=0 build (base_prog) once twins and templates
+    are stripped (kernel text identical, same files). Returns (n_twins, [problems])."""
+    probs, twins = [], 0
+    files = sorted(glob.glob(prog + "/**/*.loom", recursive=True))
+    bfiles = sorted(glob.glob(base_prog + "/**/*.loom", recursive=True))
+    if [os.path.relpath(f, prog) for f in files] != [os.path.relpath(f, base_prog) for f in bfiles]:
+        probs.append("file set differs from LOOM_RDNA4=0 build")
+    for f in files:
+        rel = os.path.relpath(f, prog)
+        text = open(f).read()
+        ks = kernel_blocks(text)
+        tw = {k for k in ks if k.endswith("_rdna4")}
+        twins += len(tw)
+        for k, (tag, body) in ks.items():
+            if k.endswith("_rdna4"):
+                if k[:-6] not in ks:
+                    probs.append(f"{rel}:{k} twin without a gfx11 kernel")
+            elif "vector.mma" in body and k + "_rdna4" not in ks:
+                probs.append(f"{rel}:{k} WMMA kernel without a twin")
+        if tw and not ("target.decl @device" in text and "@rdna4" in text and "@rdna3" in text):
+            probs.append(f"{rel}: twins but no dual_target header")
+        bf = os.path.join(base_prog, rel)
+        if os.path.exists(bf):
+            bk = kernel_blocks(open(bf).read())
+            for k, (_, body) in bk.items():
+                if k not in ks:
+                    probs.append(f"{rel}:{k} missing from the dual build")
+                elif ks[k][1] != body:
+                    probs.append(f"{rel}:{k} differs from the LOOM_RDNA4=0 build")
+            extra = [k for k in ks if k not in bk and not k.endswith("_rdna4")]
+            if extra:
+                probs.append(f"{rel}: kernels not in the LOOM_RDNA4=0 build: {extra[:3]}")
+            if not tw and text != open(bf).read():
+                probs.append(f"{rel}: no twins but differs from the LOOM_RDNA4=0 build")
+    return twins, probs
 
 
 def compile_one(job):
@@ -204,6 +256,14 @@ def main():
         else:
             ks = sweep_program(prog, targets, a.jobs)
             results[s] = {"build": "ok", "kernels": ks}
+            ok0, msg0, prog0 = build(s, f"{a.pkgs}/{s}", w + "_base", "0")
+            if ok0:
+                results[s]["twins"], results[s]["structure"] = structure_checks(prog, prog0)
+            else:
+                results[s]["twins"], results[s]["structure"] = None, ["LOOM_RDNA4=0 build failed: " + msg0]
+            shutil.rmtree(w + "_base", ignore_errors=True)
+            if results[s]["structure"]:
+                print(f"{s}: STRUCTURE {results[s]['structure'][:3]}", flush=True)
             bad = sum(1 for v in ks.values() if any(r != "ok" for r in v.values()))
             print(f"{s}: {len(ks)} kernels, {bad} failing", flush=True)
         if not a.keep:
@@ -229,12 +289,14 @@ def main():
                 known = name in KNOWN_ROOT_ARTIFACTS and res.startswith(KNOWN_ROOT_ARTIFACTS[name])
                 fam[(family(name), scope, "known-root-artifact" if known else "", res)].append(f"{s}:{name}")
                 counted[("root_artifact" if known else scope)] += 1
+    sproblems = sum(1 for r in results.values() if r.get("structure"))
     table = []
     for (f, t, note, res), items in sorted(fam.items(), key=lambda x: (x[0][1] == "both", -len(x[1]), x[0])):
         table.append(dict(family=f, target=t, note=note, reason=res, count=len(items), examples=items[:3]))
     summary = {"packages": len(results), "build_failures": counted["build"],
                **{f"{t}_only_failures": counted[t] for t in targets}, "both_targets_failures": counted["both"],
-               "known_root_artifacts": counted["root_artifact"], "seconds": round(time.time() - t0)}
+               "known_root_artifacts": counted["root_artifact"], "structure_problems": sproblems,
+               "twins": sum(r.get("twins") or 0 for r in results.values()), "seconds": round(time.time() - t0)}
     json.dump({"summary": summary, "families": table, "packages": results}, open(a.out, "w"), indent=1)
     print(json.dumps(summary))
     print(f"{'count':>5}  {'fails on':8} family | reason   (fails on: one target only, or both)")

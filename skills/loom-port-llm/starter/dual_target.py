@@ -56,6 +56,41 @@ def twins(text):
     return sorted(k for k in syms if k + SUFFIX in syms)
 
 
+# hrx-loom 0.1.0 mis-verifies an `encoding.*` value (a strided layout used in a view type) defined beyond byte 4 MiB of
+# the program file (ENCODING/004 "not defined at this point", reported on an unrelated value). The twins grow a big
+# program past that (Laguna 5.0 -> 6.2 MB), so once a file is big its kernels that define encodings move ahead of the
+# others (the kernel slots keep their places; only the order of the kernels changes).
+ENCODING_LIMIT = 3 * 1024 * 1024
+
+
+def hoist_encoding_kernels(text):
+    """TEXT with the kernels that use `encoding.` ops first among the kernels (stable), when the file is big enough for
+    a definition to land past the 4 MiB mark; otherwise unchanged."""
+    if len(text) <= ENCODING_LIMIT:
+        return text
+    lines = text.split("\n")
+    spans, i = [], 0
+    while i < len(lines):
+        if KERNEL_DEF.match(lines[i]):
+            j = i
+            while lines[j] != "}":
+                j += 1
+            spans.append((i, j + 1))
+            i = j + 1
+        else:
+            i += 1
+    blocks = [lines[a:b] for a, b in spans]
+    order = [b for b in blocks if any(" = encoding." in l for l in b)] + \
+            [b for b in blocks if not any(" = encoding." in l for l in b)]
+    if order == blocks:
+        return text
+    out, pos = [], 0
+    for (a, b), blk in zip(spans, order):
+        out += lines[pos:a] + blk
+        pos = b
+    return "\n".join(out + lines[pos:])
+
+
 def apply(text, enable=None):
     """TEXT made dual-target; unchanged when it has no twin kernels (or the pass is off)."""
     if enable is None:
@@ -65,7 +100,7 @@ def apply(text, enable=None):
     tw = set(twins(text))
     if not tw:
         return text
-    lines = text.split("\n")
+    lines = hoist_encoding_kernels(text).split("\n")
     out, last_def_end = [], -1
     i = 0
     while i < len(lines):
