@@ -30,6 +30,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import sample_lib as L  # noqa: E402
+import fit_device  # noqa: E402
+registry = L.registry
 
 SUB_1B_BYTES = 0.9e9        # Q4_K_M weights below this: a sub-1B model (decode rows are noisy there, plan section 5)
 WIDE_RATIO = 2.0            # a stratum spans a wide shape range when hidden size or KV heads differ by this factor
@@ -71,10 +73,13 @@ class Fleet:
         return (self.fit.get(slug) or {}).get("w")
 
     def fits(self, slug, gpu):
-        if gpu != "radeon-r9700":
-            return True
-        v = (self.fit.get(slug) or {}).get("verdict")
-        return v is None or v.startswith("fits")
+        row = self.fit.get(slug)
+        if gpu == "radeon-r9700":   # the fit table is sized for the R9700: its own verdict
+            v = (row or {}).get("verdict")
+            return v is None or v.startswith("fits")
+        if row and "w" in row and registry.device(gpu).get("memory_bytes"):   # another GPU with a memory size: the same sizing against it
+            return fit_device.verdicts(gpu, [row])[0]["verdict"].startswith("fits")
+        return True
 
     def rows_with_baseline(self, slug, gpu):
         b = (self.baselines.get(slug) or {}).get(gpu)
@@ -248,7 +253,11 @@ def emit_jobs(plan_strata, outdir, sessions, refs=None):
         else:
             print(f"no A/B job generator for {gpu} yet (ab_jobs.py): {slugs}", file=sys.stderr)
             continue
-        exp = json.loads(subprocess.run(cmd, check=True, capture_output=True, text=True).stdout)
+        try:
+            exp = json.loads(subprocess.run(cmd, check=True, capture_output=True, text=True).stdout)
+        except subprocess.CalledProcessError as e:   # ab_jobs.py / strix_ab_jobs.py know only the devices with a job generator
+            print(f"no job file for {gpu}: {os.path.basename(cmd[1])} failed ({(e.stderr or '').strip().splitlines()[-1:] or e.returncode}); the plan above is the wave", file=sys.stderr)
+            continue
         exp["jobs"] = [filter_job(j, sorted(reps[j["card"].split("/")[-1]], key=L.ROWS.index), sessions) for j in exp["jobs"]]
         path = os.path.join(outdir, f"perf_{gpu}.json")
         json.dump(exp, open(path, "w"), indent=1)

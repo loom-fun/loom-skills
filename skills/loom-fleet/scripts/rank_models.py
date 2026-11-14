@@ -18,7 +18,7 @@ usage: rank_models.py [--top 50] [--max-gb 80] [--pages 4] [--trending-pages 2] 
 6. For the top entries, finds a plain (non-UD) Q4_K_M in the order ggml-org, unsloth, bartowski, lmstudio-community,
    the publisher's own GGUF repo, then any repo that counted; keeps it if its real size is <= --max-gb.
 
-The output is a draft. Review it by hand before acting on it (loom-org SKILL.md, "Pick the models").
+The output is a draft. Review it by hand before acting on it (loom-fleet reference/populate-org.md, "Step 0").
 """
 import argparse
 import collections

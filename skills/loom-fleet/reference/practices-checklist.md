@@ -2,7 +2,7 @@
 
 The proof that nothing the team learned depends on notes outside the repo. "Source" names the origin of the rule (campaign brief,
 architecture decisions, standing owner rules); "Where" is the file and section an agent on a fresh clone reads. Paths are relative to
-the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `skills/loom-improve/reference/`.
+the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `skills/loom-fleet/reference/`.
 
 ## Contents
 - Goals and measures

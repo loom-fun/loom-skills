@@ -693,7 +693,7 @@ def runs_of(key, sessions, c4_path):
 def cmd_perf(a):
     if a.source_kind not in PERF_SOURCE_KINDS:
         sys.exit(f"perf --source-kind {a.source_kind}: card performance comes only from AMD DevLab Dispatch "
-                 "(a devlab-perf job: loom-org SKILL.md step 3); measure locally only to develop")
+                 "(a devlab-perf job: loom-fleet reference/publish.md step 3); measure locally only to develop")
     if a.perf_log:
         loom_rows = perf_rows(a.perf_log, "loom", a.loom_label)
         llama_rows = perf_rows(a.perf_log, "llama", a.llama_label)

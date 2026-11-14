@@ -16,18 +16,18 @@ choosing the agent under test:
 npx skills add loom-fun/loom-skills --skill '*'
 ```
 
-Start a fresh agent session and invoke `loom-improve` directly:
-`/loom-improve` in Claude, `$loom-improve` in Codex, `/skill:loom-improve` in Pi.
-For Claude's plugin, use `/loom:loom-improve`.
+Start a fresh agent session and invoke `loom-fleet` directly:
+`/loom-fleet` in Claude, `$loom-fleet` in Codex, `/skill:loom-fleet` in Pi.
+For Claude's plugin, use `/loom:loom-fleet`.
 
-Ask the agent to run `loom-improve/scripts/kpi.py --help`, then the sibling
+Ask the agent to run `loom-fleet/scripts/kpi.py --help`, then the sibling
 `loom-port-llm/starter/kit_source.py --help`, using absolute paths from outside
 both skill directories. Both commands must exit zero. This checks skill loading
 and resource paths; it does not test GPU porting.
 
-For GPU validation, use `skills/loom-improve/trial_prompt.md` in a separate work
+For GPU validation, use `skills/loom-fleet/trial_prompt.md` in a separate work
 directory per agent. Record outcomes in
-[the trial ledger](../skills/loom-improve/reference/results.md).
+[the trial ledger](../skills/loom-fleet/reference/results.md).
 
 Verified on Windows (2026-11-10) with `skills` 1.7.6: Claude Code 2.1.302,
 Codex 0.167.0-alpha.3.2 and Pi 0.73.1 each loaded the npx-installed suite and

@@ -1,34 +1,12 @@
----
-name: loom-improve
-description: Improves the loom skills themselves (port, optimize, qualify, report) without regressing them - the KPIs (end-to-end wall clock, correctness vs llama.cpp in agentic use, decode/prefill speed), how to measure them with fresh-agent trials on a reference model suite, the improve-retest loop, subagent handling, and the rules that keep changes general. Use for "improve the loom skill at X", "make the loom skill faster/more reliable", "why did the skill take so long on model Y", any change to the skills in this repo, a targeted fix to one model, family, GPU or quant, or running a campaign (new GPU, many models, a refactor).
----
+# Measure skill quality with fresh-agent trials
 
-# Improve the loom skills
+Use when a change alters what an agent does with the skills (instructions, workflow, hints, a script's output) and you must show
+it helps without regressing. A scoped fix to one model or family is [targeted-fix.md](targeted-fix.md); this file is the measuring
+machinery behind it: KPIs, the reference suite, the loop, trials, quiet-GPU evaluation. Sections below are numbered 1-6.
 
-**Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
-absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
-In Claude Code, run `export LOOM_SKILL_DIR="${CLAUDE_SKILL_DIR}"` (the host substitutes the path).
-In Codex, Pi or another host, export `LOOM_SKILL_DIR` to the loaded file's directory. Use a
-shell-compatible absolute path (Git Bash on Windows). Rebind before using another skill's commands
-and in every new shell; it is not the working directory or SDK root. On Windows, use native `C:/...`
-paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
-or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
-
-The job: make `loom` (and its sub-skills) better at an end-to-end request, "get MODEL working on
-loom-serve, optimize it, and report vs llama.cpp", on models it has never seen, without making any
-KPI worse. This skill is evaluation-driven: measure a baseline first, change one thing, re-measure on
-the same models, and keep the change only if no KPI regressed (Anthropic's skill-authoring and agent
-eval guidance; sources at the end).
-
-## Which job? (read the file, do not improvise)
-
-| Request | Read |
-|---|---|
-| A narrow change to one model / family / GPU / quant (fix a regression, speed up one family, support one quant) | [reference/targeted-fix.md](reference/targeted-fix.md): route, declare scope, opt-in rule, fleet diff, sampled DevLab A/B, promotion |
-| A campaign: new GPU, many models, a refactor, regenerating the fleet | [reference/campaign.md](reference/campaign.md): roles, mailboxes, state files, DevLab rules, velocity; start with `scripts/campaign/new_campaign.sh` |
-| Why the repo is structured this way (layout, registries, T0-T3, guards) | [reference/architecture.md](reference/architecture.md) |
-| Where a campaign rule lives | [reference/practices-checklist.md](reference/practices-checklist.md) |
-| Improve the port/optimize/report skills against the KPIs | sections 1-4 below |
+The job: make `loom` (and its sub-skills) better at an end-to-end request, "get MODEL working on loom-serve, optimize it, and
+report vs llama.cpp", on models it has never seen, without making any KPI worse. Evaluation-driven: measure a baseline first,
+change one thing, re-measure on the same models, and keep the change only if no KPI regressed.
 
 ## 1. KPIs (all three, every time)
 
@@ -61,14 +39,14 @@ needs (section 3, step 5). Each model stresses something different; don't tune t
 
 Add a model when a user hits a failure none of these reproduce (a new architecture family, chat
 format, quant mix). Before trusting a new eval model, confirm a passing run is possible at all.
-Baselines to beat: `reference/results.md` (append every trial).
+Baselines to beat: `results.md` (append every trial).
 
 ## 3. The loop
 
 ```
 Progress:
 - [ ] 0. State the goal (which KPI, which models) and freeze a baseline snapshot
-- [ ] 1. Baseline trial(s) on the current skills (or reuse a row of reference/results.md for the same rev)
+- [ ] 1. Baseline trial(s) on the current skills (or reuse a row of results.md for the same rev)
 - [ ] 2. Profile: kpi.py summarize; read phases.log friction notes AND the agent's final report
 - [ ] 3. Rank causes by minutes (or by gate failures); pick the biggest general one
 - [ ] 4. Change the skills on a branch (one cause per change; prefer scripts over prose)
@@ -246,7 +224,7 @@ the prompt is near-deterministic for that model, or llama.cpp disagreeing with i
 - `"${LOOM_SKILL_DIR}/scripts/watch_trial.sh"`: trial watchdog (DONE / STALLED / TIMEOUT).
 - `"${LOOM_SKILL_DIR}/scripts/eval.sh"`: fixed quiet-GPU evaluation of a package (frozen gates + perf, one model at a time);
   `LEVEL=dev` re-checks in minutes when the trial's own finalize already ran `full`.
-- `reference/results.md`: every trial so far: the baselines to beat, and the lessons behind each rule.
+- `results.md`: every trial so far: the baselines to beat, and the lessons behind each rule.
 
 ## Sources
 
@@ -254,8 +232,3 @@ Anthropic: [Skill authoring best practices](https://platform.claude.com/docs/en/
 [Equipping agents with Agent Skills](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills),
 [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents),
 [How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system).
-
-## Mandate
-
-Declare the scope first, work only inside it, opt in by scope, run `fleet/scope_lint.py` before a PR, stop on
-out-of-mandate needs: `loom-kb/SKILL.md` ("Mandate rules").
