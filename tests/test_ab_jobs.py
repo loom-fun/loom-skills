@@ -5,8 +5,10 @@ import io
 import json
 import os
 import runpy
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -46,6 +48,14 @@ class StrixWrapper(unittest.TestCase):
 
 
 class R9700(unittest.TestCase):
+    def refs(self, obj):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        p = os.path.join(d, "refs.json")
+        with open(p, "w") as f:
+            json.dump(obj, f)
+        return p
+
     def jobs(self, *args):
         return json.loads(run_script("ab_jobs.py", ["--device", "radeon-r9700", "--fit", os.path.join(ROOT, ".github", "devlab", "r9700_fit.json"), *args]))
 
@@ -74,11 +84,7 @@ class R9700(unittest.TestCase):
 
     def test_sampling_plan_follows_old_org_not_the_pinned_ref(self):
         # an A/A against a staging revision still takes the fast-model plan from the published loom-fun decode rate
-        import tempfile
-        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
-            json.dump({FAST: {"old": f"loom-fun-staging/{FAST}@abc"}}, f)
-            f.flush()
-            j = self.jobs("--refs", f.name, FAST)["jobs"][0]
+        j = self.jobs("--refs", self.refs({FAST: {"old": f"loom-fun-staging/{FAST}@abc"}}), FAST)["jobs"][0]
         self.assertEqual(j["repeat_rows"], 3)
         self.assertEqual(j["steps"].count("perf:fun:1"), 6)
 
@@ -87,11 +93,7 @@ class R9700(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
 
     def test_refs_map_wins(self):
-        import tempfile
-        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
-            json.dump({SLOW: {"old": f"loom-fun-staging/{SLOW}@aaa", "new": f"loom-fun-staging/{SLOW}"}}, f)
-            f.flush()
-            j = self.jobs("--refs", f.name, SLOW)["jobs"][0]
+        j = self.jobs("--refs", self.refs({SLOW: {"old": f"loom-fun-staging/{SLOW}@aaa", "new": f"loom-fun-staging/{SLOW}"}}), SLOW)["jobs"][0]
         self.assertEqual(j["card"], f"loom-fun-staging/{SLOW}")
         self.assertEqual(j["variants"][0]["card"], f"loom-fun-staging/{SLOW}@aaa")
 
@@ -99,7 +101,8 @@ class R9700(unittest.TestCase):
 class DevlabPerf(unittest.TestCase):
     def test_syntax_and_card_pin(self):
         p = os.path.join(SCRIPTS, "devlab_perf.sh")
-        self.assertEqual(subprocess.run(["bash", "-n", p]).returncode, 0)
+        if os.name != "nt":   # a Windows checkout may hold CRLF line endings, which bash rejects (the script only runs on Linux runners)
+            self.assertEqual(subprocess.run(["bash", "-n", p]).returncode, 0)
         s = open(p).read()
         for needle in ("card_revision.txt", "card_revision_$v.txt", "want=${ref#*@}", "cap_pool"):
             self.assertIn(needle, s)
