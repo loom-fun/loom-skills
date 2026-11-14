@@ -2,7 +2,7 @@
 # Nightly correctness gates on one published loom-fun card: deterministic, no LLM agent and no skill run.
 # Fetches the latest card from Hugging Face, serves it, runs gates.sh (LEVEL=full by default) against the
 # llama.cpp reference build the card was measured with. Correctness gates only: a card's DevLab perf session comes
-# from a devlab-perf job (loom-org SKILL.md, step 3).
+# from a devlab-perf job (loom-fleet reference/publish.md step 3).
 # Run by .github/workflows/nightly-gates.yml (one matrix job per card); runs by hand on any Strix Halo:
 #
 #   [LEVEL=full|quick|dev|fast] [WORK=~/loom-nightly] .github/scripts/nightly_gates.sh loom-fun/<card-repo>

@@ -258,7 +258,7 @@ Rules that override the rate:
 The same ceilings go on every loom-fun model card: `roofline.py`'s `model_shape()`, `ceilings()`,
 `drafted_ceiling()` and `efficiency()` are what `loom-benchmark`'s `card/make_info.py roofline` calls, so a card's
 roofline column and this script never disagree. `EFF_DRAFTED` is `EFF` for speculative decoding (against
-`drafted_ceiling()`); `loom-org` flags a card whose metric falls below half of either.
+`drafted_ceiling()`); `loom-fleet` flags a card whose metric falls below half of either.
 
 
 Run `audit.py` from `bench/` before writing the report. It is the definition of

@@ -44,7 +44,7 @@ and a new architecture can need the newest release (no installed build knew `fli
 **Vulkan, the second baseline.** Every card also carries the official ggml-org llama.cpp Vulkan build (`b12211`,
 sha256-pinned in `data/llamacpp-vulkan.sha256`) next to the ROCm one: `LLAMACPP_BACKEND=vulkan fetch_llamacpp.sh DIR
 b12211` and `llamacpp_server.sh` (same variable) run the same server arguments, drafting settings and workloads as the
-ROCm baseline. It is measured only in `devlab-perf` jobs (`llama@vulkan:N`, `llamac4@vulkan` steps, `loom-org` step 3)
+ROCm baseline. It is measured only in `devlab-perf` jobs (`llama@vulkan:N`, `llamac4@vulkan` steps, `loom-fleet` publish.md step 3)
 and recorded with `make_info.py perf --backend vulkan` under `performance.baselines.vulkan`; the card renders it as one
 more column. It never feeds a card value, a guardrail or an `org_status` action. A setting Vulkan cannot run
 is a "not supported" cell with the reason (`baseline.differs`, rendered on the card), never swapped silently
@@ -76,7 +76,7 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
 
 | LEVEL | When | Gates | Cost |
 |---|---|---|---|
-| `dev` | **after each kept change** (loom-optimize, loom-improve) | consistency; agent tool loop (thinking on, and off when the template toggles it); goldens (cached) + compare on 12 short prompts + 1k/2k documents; vision on 2 images (with a projector); `spec` on 5–6 short requests (drafting packages); sampling (temperature 0 = greedy, seed reproduces) | Qwen3.8-27B (drafting, vision): 3.3 min cached, 5.5 min with the first reference fill; Bolt-E4B: 1.1 / 2.2 min |
+| `dev` | **after each kept change** (loom-optimize, loom-fleet) | consistency; agent tool loop (thinking on, and off when the template toggles it); goldens (cached) + compare on 12 short prompts + 1k/2k documents; vision on 2 images (with a projector); `spec` on 5–6 short requests (drafting packages); sampling (temperature 0 = greedy, seed reproduces) | Qwen3.8-27B (drafting, vision): 3.3 min cached, 5.5 min with the first reference fill; Bolt-E4B: 1.1 / 2.2 min |
 | `fast` | (kept for scripts that call it) | goldens + compare (20 short prompts + 1k–32k documents), consistency, vision on all 6 images | 1–3 min |
 | `quick` | nightly CI; a new port's first qualification (`qualify.sh`) | fast + `spec` (full request set), agent tool loop (thinking on, and off when the template toggles it), 200-draw sampling, native-context admission probe (seconds) | median 11 min, up to 42 min (audit) |
 | `full` | nightly CI; once on a new port's final build before its first card (`finalize.sh`) | quick (the same gates; the admission probe is in both) | as quick |
@@ -93,7 +93,7 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
   other feature lightly, so a feature that breaks outright still fails in minutes.
 - **Where it runs:** the dev machine's GPU is scarce and sequential, DevLab Dispatch is a large elastic pool.
   Locally: only what the inner loop needs. Long or deep checks and anything against published cards: DevLab CI.
-  Performance for a card comes only from a DevLab `devlab-perf` job (`loom-org`, "Performance: DevLab is the
+  Performance for a card comes only from a DevLab `devlab-perf` job (`loom-fleet` publish.md, "Performance: DevLab is the
   source"); local runs are for development.
 - `quick` and `full` run **nightly** on the published cards (`.github/workflows/nightly-gates.yml`, below), and
   by hand only once on a new port that has no card yet (qualify.sh / finalize.sh).
@@ -232,7 +232,7 @@ $T "$S/c4_steady.py" http://127.0.0.1:8160 4 --model <id>;  $T "$S/c4_steady.py"
 Rules:
 - A card's numbers come from one `devlab-perf` job: Loom (card programs, active wait: `serve.sh` serves
   `--device=amdgpu` as `amdgpu://?completion_spin_ns=4294967295`, `LOOM_ACTIVE_WAIT=0` opts out for A/B only) and
-  llama.cpp on the same runner (`loom-org` step 3). Local runs are for development, never card numbers, and a Loom
+  llama.cpp on the same runner (`loom-fleet` publish.md step 3). Local runs are for development, never card numbers, and a Loom
   number measured without the active wait is not comparable. A job's variant comparisons (`devlab-perf`,
   `devlab-experiment`) compare within that job only.
 - Sampling (`reference/methodology.md` rule 5): every metric is the median over sessions (rounds) of each session's

@@ -9,7 +9,7 @@
 - Declare the scope first (`skills/loom-kb/SKILL.md`, mandate rules); run `fleet/scope_lint.py --local` before opening the PR.
 - Tests: `python -m unittest discover -s tests` passes; add tests for what you build. Unless the task says otherwise, your change
   must not change any generated program or card: prove it with the fleet program diff (`fleet/README.md`).
-- NO local GPU. GPU work only on DevLab via the devlab-perf workflow (labels in `skills/loom-improve/reference/campaign.md`). Poll with
+- NO local GPU. GPU work only on DevLab via the devlab-perf workflow (labels in `skills/loom-fleet/reference/campaign.md`). Poll with
   one background loop, >= 120 s; never `gh run watch`.
 - Never message another agent and never use remote-session tools. Mailbox: append dated lines to `@DIR@/inbox/techlead.md` for
   questions and blockers (decide technical details yourself; ask only when blocked). Read `inbox/eng-<name>.md` between steps and

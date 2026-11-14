@@ -1,4 +1,4 @@
-"""Minimal Hugging Face Hub reads for the loom-org scripts: the user's token when present, retry on rate limits."""
+"""Minimal Hugging Face Hub reads for the loom-fleet scripts: the user's token when present, retry on rate limits."""
 import json
 import os
 import sys

@@ -21,7 +21,7 @@ One job per model, on ONE R9700 runner, exactly as skills/loom-benchmark/referen
     package's memory_bytes, at most card_lib.GPUS["radeon-r9700"]["memory_bytes"]; the GPU's whole pool for a reduced context). A model whose native context needs more KV cache than the pool holds after the weights is
     served at card_lib.served_context(...) tokens (variant "context"): the rows beyond it are refused by the server and
     skipped by perf.py (over_context), which the card shows as "doesn't fit". A model whose weights do not fit gets no job.
-Ingest with make_info.py perf ... --gpu radeon-r9700 --source-kind devlab (skills/loom-org/SKILL.md step 3).
+Ingest with make_info.py perf ... --gpu radeon-r9700 --source-kind devlab (skills/loom-fleet/reference/publish.md step 3).
 """
 import argparse
 import json

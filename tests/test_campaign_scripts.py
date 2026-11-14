@@ -1,4 +1,4 @@
-"""The campaign scaffolding of skills/loom-improve: new_campaign.sh, status.py, waitmail.sh, templates, doc links."""
+"""The campaign scaffolding of skills/loom-fleet: new_campaign.sh, status.py, waitmail.sh, templates, doc links."""
 import json
 import os
 import re
@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-IMPROVE = ROOT / "skills" / "loom-improve"
+IMPROVE = ROOT / "skills" / "loom-fleet"
 CAMP = IMPROVE / "scripts" / "campaign"
 
 

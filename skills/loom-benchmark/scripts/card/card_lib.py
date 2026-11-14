@@ -74,12 +74,12 @@ ROOFLINE_METRIC = {"decode": "decode_tps", "decode_2k": "decode_tps_2k", "decode
 # decode context (tokens of KV read per decoded token) and streams of the drafted rows: speculative decoding commits
 # several tokens per verify pass, so their ceiling is the pass rate x the expected tokens per pass
 DRAFTED_ROWS = {"decode": (0, 1), "decode_2k": (2000, 1), "decode_32k": (32000, 1), "streams4": (600, 4)}
-# Performance guardrails (loom-org org_status.py). Far from roofline (calibrated in loom-org SKILL.md, "Far from
+# Performance guardrails (loom-fleet org_status.py). Far from roofline (calibrated in loom-fleet reference/populate-org.md, "Far from
 # roofline: how the threshold was set"): Loom below FAR_FRACTION x the efficiency tuned Loom ports have demonstrated
 # for the metric kind
 FAR_FRACTION = 0.5
 # Card performance has one source: devlab-perf jobs on AMD DevLab Dispatch Strix Halo runners (Loom, served with the
-# active wait, and llama.cpp on the same runner, the published programs; loom-org SKILL.md step 3). Per metric the last
+# active wait, and llama.cpp on the same runner, the published programs; loom-fleet reference/publish.md step 3). Per metric the last
 # session that measured it is the card's value, judged against the roofline. spec_acceptance (drafted-token
 # acceptance) is a drafting statistic of model, drafter and text, not a timing; its session's programs_sha256 decides
 # whether it is stale like any other card value.
@@ -578,7 +578,7 @@ def stale_metrics(info, programs, kind=None, feats=None):
 
 
 def perf_flags(info, kind=None, feats=None, programs=None):
-    """The performance guardrails of one card (loom-org org_status.py).
+    """The performance guardrails of one card (loom-fleet org_status.py).
     far          {metric: [Loom / roofline, demonstrated efficiency]} where Loom's card value is below FAR_FRACTION x
                  the efficiency Loom ports have demonstrated for that kind of metric (info.json roofline)
     stale        {metric: programs measured} where the card value was measured on programs other than `programs`,
@@ -673,7 +673,7 @@ def gpu_view(info, gpu):
 
 
 def primary_gpu(info):
-    """The GPU a single-GPU reader (loom-org's org_status, the card's dashboards) reads: strix-halo when it has
+    """The GPU a single-GPU reader (loom-fleet org_status, the card's dashboards) reads: strix-halo when it has
     results, else the first GPU that has."""
     devs = info.get("devices") or {}
     for g in GPUS:
