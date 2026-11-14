@@ -8,7 +8,8 @@
 # KBENCH.json: {"sdk": (optional) "ci:ARTIFACT_ID" | version, default = install_loom.sh default, "repeats": N,
 #               "suites": [{"suite": name, "dir": "<dir under .github/devlab/kbench>", "files": ["a.loom", ...],
 #                           "config": ["k=v", ...] (--config=), "args": ["--measure=...", ...] (loom-benchmark flags),
-#                           "repeats": N (optional)}]}
+#                           "repeats": N (optional), "runner": "strix" (default) | "r9700" (workflow runs-on),
+#                           "gen": generator script under .github/devlab/kbench (run as `gen CHECKOUT RUNDIR VARIANT...`), "gen_variants": [...]}]}
 # Variant name = file name without "bench_" prefix / ".loom" ("bench.loom" is "base"). Benchmarks that read .npy
 # weights (check.file.read.npy path("w/x.npy")) that are not in the suite dir get random int8 weights of the
 # declared shape (timing-only A/B; they are generated once per runner, never committed).
@@ -33,6 +34,12 @@ LB=$root/.venv/bin/loom-benchmark
 
 # run dir: the suite's sources, plus generated weights
 cp -r "$src"/. "$D/run/"; cd "$D/run" || exit 1
+# a suite may generate its bench files from this checkout's starter: "gen": script under .github/devlab/kbench, "gen_variants": [...]
+gen=$(q "print(s.get('gen', ''))")
+if [ -n "$gen" ]; then
+  step "generate bench files: $gen $(q "print(' '.join(s.get('gen_variants', [])))")"
+  python3 "$here/.github/devlab/kbench/$gen" "$here" "$D/run" $(q "print(' '.join(s.get('gen_variants', [])))") || exit 1
+fi
 python3 - <<'PY' || exit 1
 import glob, os, re
 def u8_to_i8(b):  # random bytes mapped into -100..100
