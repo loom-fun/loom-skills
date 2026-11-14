@@ -19,6 +19,73 @@
    "steps": [
     "gates:card:dev"
    ]
+  },
+  {
+   "name": "flint-sweep2",
+   "card": "loom-fun-staging/ggml-org-Flint-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "variants": [
+    {
+     "name": "p43008",
+     "execution": {
+      "context_capacity": 43008,
+      "pool_capacity": 43008
+     }
+    },
+    {
+     "name": "p44032",
+     "execution": {
+      "context_capacity": 44032,
+      "pool_capacity": 44032
+     }
+    },
+    {
+     "name": "p45056",
+     "execution": {
+      "context_capacity": 45056,
+      "pool_capacity": 45056
+     }
+    },
+    {
+     "name": "p46080",
+     "execution": {
+      "context_capacity": 46080,
+      "pool_capacity": 46080
+     }
+    }
+   ],
+   "steps": [
+    "func:p43008",
+    "func:p44032",
+    "func:p45056",
+    "func:p46080"
+   ]
+  },
+  {
+   "name": "flint-full",
+   "card": "loom-fun-staging/ggml-org-Flint-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "llama_kv_rocm": 40960,
+   "variants": [
+    {
+     "name": "p40960",
+     "execution": {
+      "context_capacity": 40960,
+      "pool_capacity": 40960
+     }
+    }
+   ],
+   "steps": [
+    "func:p40960",
+    "gates:p40960:dev",
+    "perf:p40960:1:long"
+   ]
   }
  ],
  "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
