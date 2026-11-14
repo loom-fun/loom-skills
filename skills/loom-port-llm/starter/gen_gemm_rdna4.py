@@ -71,6 +71,40 @@ def twin(text):
     return t
 
 
+def f16out(twin_text):
+    """The `<K>_f16o_rdna4` kernel of a swiglu twin `<K>_rdna4`: the f32 result is stored as f16 (an f32 fragment stored into an f16
+    view narrows; no row scale: the down GEMM that reads it takes scale 1) and the kernel writes the scales its consumer reads:
+    scales_out[row] = (1, 1) for a live row (input scale != 0), (0, 0) for a dead row, from the tile's n-tile 0. It replaces
+    `<K>` + g_row_scale_f16[_live] of the f32 result (dual_target group, program.py): no f32 round trip and no second pass."""
+    old = re.search(r'kernel\.def target\(@rdna4\) export\("(\w+)"\)', twin_text).group(1)
+    assert old.endswith("_rdna4") and "swiglu" in old, old
+    new = old[:-len("_rdna4")] + "_f16o_rdna4"
+    t = twin_text.replace(f'export("{old}") @{old}(', f'export("{new}") @{new}(', 1)
+    assert t.count(", %y: buffer) {") == 1
+    t = t.replace(", %y: buffer) {", ", %y: buffer, %scales_out: buffer) {", 1)
+    assert t.count("%tile_offset = index.scale %tile_first, %four : index, offset -> offset") == 1
+    t = t.replace("%tile_offset = index.scale %tile_first, %four : index, offset -> offset", "%tile_offset = index.scale %tile_first, %two : index, offset -> offset")
+    t, n1 = re.subn(r"(view<\d+x\d+x)f32(, %y_layout>)", r"\1f16\2", t)
+    assert n1 >= 3, n1
+    live = "  %tile_live = scalar.cmpf one, %tile_any, %no_scale : f32\n"
+    assert t.count(live) == 1
+    t = t.replace(live, live + """  %so_view = buffer.view %scales_out[%origin] : buffer -> view<[%rows]x2xf32>
+  %so_n0 = index.cmp eq, %out_group, %c0 : index
+  %so_act = scalar.andi %so_n0, %skip_in : i1
+  scf.if %so_act {
+    %so_one = scalar.constant 1.0 : f32
+    %so_live = scalar.cmpf one, %tile_scale, %no_scale : f32
+    %so_val = scf.select %so_live, %so_one, %no_scale : f32
+    view.store %so_val, %so_view[%tile_row, %c0] : f32, view<[%rows]x2xf32>
+    view.store %so_val, %so_view[%tile_row, %c1] : f32, view<[%rows]x2xf32>
+  }
+""")
+    return t
+
+
+F16O = os.environ.get("GEMM_F16O", "")   # "swiglu": also emit the f16-output swiglu twins (used through program.py's groups)
+
+
 def with_twins(text):
     """text with `K_rdna4` appended right after every WMMA kernel K (no-op unless enabled())."""
     if not enabled():
@@ -83,5 +117,8 @@ def with_twins(text):
         if p.startswith("kernel.def "):
             k = kernel_text(p)
             if is_wmma(k):
-                out.append(twin(k).rstrip("\n") + "\n\n")
+                tw = twin(k)
+                out.append(tw.rstrip("\n") + "\n\n")
+                if "swiglu" in F16O and "swiglu" in k.split("\n", 1)[0]:
+                    out.append(f16out(tw).rstrip("\n") + "\n\n")
     return "".join(out)
