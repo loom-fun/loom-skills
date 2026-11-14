@@ -1,128 +1,11 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none Plus Strix A/B jobs (loom-fun programs vs staging, same runner) for the two models whose gfx11 text differs from loom-fun by main's generator drift.",
+ "_comment": "diagnostic: Glimmer context sizing on the R9700 (34 GB)",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-vl-4b-instruct-loom",
-   "card": "loom-fun-staging/unsloth-Qwen3-VL-4B-Instruct-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 194560,
-   "variants": [
-    {
-     "name": "card",
-     "context": 194560,
-     "execution": {
-      "context_capacity": 194560,
-      "pool_capacity": 194560
-     }
-    },
-    {
-     "name": "nodraft",
-     "context": 194560,
-     "execution": {
-      "context_capacity": 194560,
-      "pool_capacity": 194560,
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
-  },
-  {
-   "name": "unsloth-qwen3-vl-8b-instruct-loom",
-   "card": "loom-fun-staging/unsloth-Qwen3-VL-8B-Instruct-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 178176,
-   "variants": [
-    {
-     "name": "card",
-     "context": 178176,
-     "execution": {
-      "context_capacity": 178176,
-      "pool_capacity": 178176
-     }
-    },
-    {
-     "name": "nodraft",
-     "context": 178176,
-     "execution": {
-      "context_capacity": 178176,
-      "pool_capacity": 178176,
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
-  },
-  {
-   "name": "ggml-org-qwen2-5-vl-7b-instruct-loom",
-   "card": "loom-fun-staging/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 21000000000,
-   "variants": [
-    {
-     "name": "card"
-    },
-    {
-     "name": "nodraft",
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
-  },
-  {
-   "name": "ggml-org-muse-glimmer-30b-loom",
+   "name": "glimmer-ctx",
    "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
    "kit": "glimmer",
    "llamacpp": "b1375",
@@ -133,81 +16,35 @@
      "name": "card"
     },
     {
-     "name": "nodraft",
+     "name": "c32k",
+     "context": 32768,
      "execution": {
-      "draft_depth": 0
+      "context_capacity": 32768,
+      "pool_capacity": 32768
+     }
+    },
+    {
+     "name": "c48k",
+     "context": 49152,
+     "execution": {
+      "context_capacity": 49152,
+      "pool_capacity": 49152
+     }
+    },
+    {
+     "name": "c64k",
+     "context": 65536,
+     "execution": {
+      "context_capacity": 65536,
+      "pool_capacity": 65536
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
-  },
-  {
-   "name": "strix-ab-unsloth-qwen3-vl-4b-instruct-loo",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-Qwen3-VL-4B-Instruct-loom",
-   "memory_bytes": 56000000000,
-   "kit": null,
-   "llamacpp": "b1374",
-   "variants": [
-    {
-     "name": "fun",
-     "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom"
-    },
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "ab:4",
-    "perf:fun:3",
-    "perf:staging:3",
-    "c4:fun",
-    "c4:staging",
-    "textmatch:fun",
-    "textmatch:staging",
-    "func:staging",
-    "ktest:staging"
-   ]
-  },
-  {
-   "name": "strix-ab-ggml-org-muse-glimmer-30b-loom",
-   "runner": "strix",
-   "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
-   "memory_bytes": 44000000000,
-   "kit": "glimmer",
-   "llamacpp": "b1374",
-   "variants": [
-    {
-     "name": "fun",
-     "card": "loom-fun/ggml-org-Muse-Glimmer-30B-loom"
-    },
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "ab:4",
-    "perf:fun:3",
-    "perf:staging:3",
-    "c4:fun",
-    "c4:staging",
-    "textmatch:fun",
-    "textmatch:staging",
-    "func:staging",
-    "ktest:staging"
+    "func:c32k",
+    "func:c48k",
+    "func:c64k",
+    "gates:c64k:dev"
    ]
   }
  ],
