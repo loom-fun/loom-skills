@@ -23,26 +23,18 @@
       "gen_variants": [
         "base",
         "sb",
-        "sb_nodq",
-        "sb_nomma",
-        "sb_nobar",
-        "sb_ablw",
-        "sb_ablx",
-        "sbnb",
-        "sbsc",
-        "sbnbsc"
+        "sb_nox",
+        "sb_xhalf",
+        "sb_nowst",
+        "sb_nodq"
       ],
       "files": [
         "bench.loom",
         "bench_sb.loom",
-        "bench_sb_nodq.loom",
-        "bench_sb_nomma.loom",
-        "bench_sb_nobar.loom",
-        "bench_sb_ablw.loom",
-        "bench_sb_ablx.loom",
-        "bench_sbnb.loom",
-        "bench_sbsc.loom",
-        "bench_sbnbsc.loom"
+        "bench_sb_nox.loom",
+        "bench_sb_xhalf.loom",
+        "bench_sb_nowst.loom",
+        "bench_sb_nodq.loom"
       ],
       "config": [],
       "args": [
@@ -50,7 +42,7 @@
         "--batch-size=8",
         "--profile-final-batch=true"
       ],
-      "repeats": 2
+      "repeats": 3
     }
   ]
 }

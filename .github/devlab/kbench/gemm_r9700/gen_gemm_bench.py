@@ -18,6 +18,8 @@ SHAPES = [  # (see ALL_SHAPES for the full list)
     ("q4_k", "swiglu", 1024, 4096, 12288), ("q4_k", "store", 1024, 12288, 4096),
     ("q4_k", "swiglu", 1024, 1024, 3072), ("q4_k", "store", 1024, 3072, 1024),
 ]
+EXTRA = [("bf16", "store", 1024, 6144, 1536), ("bf16", "swiglu", 1024, 1536, 6144), ("bf16", "store", 1024, 12288, 4096),
+         ("q6_k", "store", 1024, 6144, 1536), ("q6_k", "store", 1024, 12288, 4096)]
 ALL_SHAPES = [  # (fmt, mode, rows, K, N): the prefill GEMMs of Gemma-4-E2B (k1536), Qwen3-8B (k4096) and Qwen3-0.6B (k1024)
     ("q4_k", "swiglu", 1024, 1536, 6144), ("q4_k", "store", 1024, 6144, 1536), ("q4_k", "store", 1024, 1536, 2048),
     ("q4_k", "swiglu", 1024, 4096, 12288), ("q4_k", "store", 1024, 12288, 4096), ("q4_k", "store", 1024, 4096, 4096),
@@ -38,7 +40,13 @@ import re as _re
 def transform(tw, variant):
     """Ablations of one twin kernel text (timing only, wrong results): nomma, nodq, nobar, ablw (no per-step weight loads: the
     carried raw values are reused), ablx (no per-step activation loads)."""
-    if variant == "ablw":
+    if variant == "nox":      # no activation staging at all (loads and LDS stores)
+        tw = _re.sub(r"^\s*vector\.store (?:%cr_x1?|%x_rawn1?_u\d), %x_stage_view\[[^\n]*\n", "", tw, flags=_re.M)
+    elif variant == "xhalf":  # the second activation row of each thread is not staged
+        tw = _re.sub(r"^\s*vector\.store (?:%cr_x1|%x_rawn1_u\d), %x_stage_view\[[^\n]*\n", "", tw, flags=_re.M)
+    elif variant == "nowst":  # no weight staging stores (dequantization and loads vanish with them)
+        tw = _re.sub(r"^\s*vector\.store %dq_(?:lo|hi)_u\d, %w_stage_view\[[^\n]*\n", "", tw, flags=_re.M)
+    elif variant == "ablw":
         tw = _re.sub(r"^(\s*)(%nx_(?:pk|hdr)\w*) = vector\.load [^\n]*-> vector<4xi32>$", lambda m: "%s%s = vector.andi %s, %s : vector<4xi32>" % (m.group(1), m.group(2), "%cr_pk" if "pk" in m.group(2) else "%cr_hdr", "%cr_pk" if "pk" in m.group(2) else "%cr_hdr"), tw, flags=_re.M)
     elif variant == "ablx":
         tw = _re.sub(r"^(\s*)(%x_rawn1?_u\d) = vector\.load [^\n]*$", lambda m: "%s%s = vector.bitcast %%cr_x%s : vector<32xf16> to vector<32xf16>" % (m.group(1), m.group(2), "1" if "rawn1" in m.group(2) else ""), tw, flags=_re.M)
@@ -57,7 +65,7 @@ def transform(tw, variant):
 
 def build(variant=""):
     out = []
-    for fmt, mode, rows, K, N in SHAPES:
+    for fmt, mode, rows, K, N in SHAPES + (EXTRA if not variant else []):
         for big in ("m128", "m256"):
             if big == "m256" and rows % 256: continue
             g = G.gemm_big(fmt, mode) if big == "m128" else G.gemm_big256(fmt, mode)
@@ -66,13 +74,13 @@ def build(variant=""):
             if nat in NATIVE:
                 if big != "m256": continue
                 tw = NATIVE[nat](tw)
-            elif abl == "" and variant not in ("", "nfast", "nomma", "nodq", "nobar", "ablw", "ablx"):
+            elif abl == "" and variant not in ("", "nfast", "nomma", "nodq", "nobar", "ablw", "ablx", "nox", "xhalf", "nowst"):
                 raise SystemExit("unknown variant " + variant)
             tw = transform(tw, abl if nat in NATIVE else variant)
             m = re.search(r'export\("(\w+)"\)', tw); old = m.group(1)
             kn = f"k_{fmt}_{mode}_{big}_{rows}x{K}x{N}"
             tw = tw.replace(f'export("{old}") @{old}(', f'export("{kn}") @{kn}(')
-            wb = N * K // 256 * 144
+            wb = N * K * 2 if fmt == "bf16" else N * K // 256 * (210 if fmt == "q6_k" else 144)
             two = mode == "swiglu"
             wdecl = f"  %w = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<{wb}xi8>\n"
             wargs, wtys = "%w", f"tensor<{wb}xi8>"
