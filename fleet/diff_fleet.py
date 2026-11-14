@@ -139,6 +139,9 @@ def json_diff(a, b, path=""):
                 out.append(f"{path}/{k}: removed")
             else:
                 out += json_diff(a[k], b[k], f"{path}/{k}")
+    elif isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+        for i, (x, y) in enumerate(zip(a, b)):
+            out += json_diff(x, y, f"{path}[{i}]")
     elif a != b:
         out.append(f"{path}: {json.dumps(a)[:60]} -> {json.dumps(b)[:60]}")
     return out

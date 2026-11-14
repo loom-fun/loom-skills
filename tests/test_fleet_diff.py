@@ -158,6 +158,10 @@ class DiffTests(unittest.TestCase):
             r = diff_fleet.report(d + "/b", d + "/h")
             self.assertEqual(r["models"]["m"]["model_json"], ["/presets/chat/execution/rows: 4 -> 8"])
 
+    def test_model_json_lists_are_compared_elementwise(self):
+        self.assertEqual(diff_fleet.json_diff({"f": [{"path": "a", "origin": "x"}]}, {"f": [{"path": "a", "origin": "y"}]}), [])
+        self.assertEqual(diff_fleet.json_diff({"f": [{"path": "a"}]}, {"f": [{"path": "b"}]}), ['/f[0]/path: "a" -> "b"'])
+
     def test_stratum(self):
         st = diff_fleet.strata({"arch": "qwen35moe", "heads": 16, "kv_heads": 2, "head_dim": 256, "drafter": {"kind": "dflash"}, "moe": 1},
                                "kernel.def @g_mv_q4_k_k1024_q8_r1(\nkernel.def @g_gemm_q6_k_store(\n")
