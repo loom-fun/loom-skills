@@ -1,0 +1,296 @@
+{
+ "name": "Qwen3-Coder-30B-A3B-Instruct",
+ "arch": "qwen3moe",
+ "gguf": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+ "hidden": 2048,
+ "layers": 48,
+ "heads": 32,
+ "kv_heads": 4,
+ "head_dim": 128,
+ "ffn": 6144,
+ "vocab": 151936,
+ "context_length": 262144,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 10000000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 151645,
+ "extra_eos_ids": [
+  151643
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "trim_content": false,
+  "think_open": "",
+  "think_close": "",
+  "history_think": "nonempty",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n",
+  "thinking": "never",
+  "thinking_default": false,
+  "starts_in_reasoning": false,
+  "think_end": "</think>",
+  "tools_function_only": true,
+  "tools_format": "xml",
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": true,
+  "tools_system_separator": "\n\n",
+  "tools_prefix": "# Tools\n\nYou have access to the following functions:\n\n<tools>",
+  "tools_suffix": "\n</tools>\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>",
+  "default_system_tools": "You are Qwen, a helpful AI assistant that can interact with a computer to solve tasks.\n\n",
+  "call_format": "qwen_xml",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "\n<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "attn_sinks": false,
+ "moe": {
+  "experts": 128,
+  "used": 8,
+  "ffn": 768,
+  "leading_dense": 0,
+  "gating": 1,
+  "norm_weights": true,
+  "scale": 1.0,
+  "probs_bias": false
+ },
+ "drafter": {
+  "gguf": "Qwen3-Coder-30B-A3B-DFlash-Q4_K_M.gguf",
+  "repo": "Anbeeld/Qwen3-Coder-30B-A3B-DFlash-GGUF",
+  "file": "Qwen3-Coder-30B-A3B-DFlash-Q4_K_M.gguf",
+  "kind": "dflash",
+  "depth": 1,
+  "ctx_max": 3500,
+  "occ_min": 2,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 59.54,
+    "rows": {
+     "work0": 72.75,
+     "work1": 72.79,
+     "work3": 72.98,
+     "work4": 71.76,
+     "long": 34.65,
+     "streams4": 183.89
+    },
+    "seconds": 86,
+    "baseline": "no-draft package",
+    "margin_llama": 1.063
+   },
+   {
+    "kind": "dflash",
+    "depth": 1,
+    "decode_tps": 53.31,
+    "rows": {
+     "work0": 70.02,
+     "work1": 91.46,
+     "work3": 97.6,
+     "work4": 96.53,
+     "long": 20.85,
+     "streams4": 184.42
+    },
+    "seconds": 88,
+    "margin_llama": 0.64,
+    "margin": 0.64,
+    "geomean": 0.99
+   },
+   {
+    "kind": "dflash",
+    "depth": 2,
+    "decode_tps": 45.37,
+    "rows": {
+     "work0": 53.12,
+     "work1": 89.47,
+     "work3": 95.32,
+     "work4": 101.37,
+     "long": 16.71,
+     "streams4": 185.32
+    },
+    "seconds": 92,
+    "margin_llama": 0.512,
+    "margin": 0.512,
+    "geomean": 0.84
+   },
+   {
+    "kind": "dflash",
+    "depth": 3,
+    "decode_tps": 49.32,
+    "rows": {
+     "work0": 59.65,
+     "work1": 114.0,
+     "work3": 128.18,
+     "work4": 137.3,
+     "long": 16.46,
+     "streams4": 186.67
+    },
+    "seconds": 87,
+    "margin_llama": 0.505,
+    "margin": 0.505,
+    "geomean": 0.871
+   },
+   {
+    "kind": "dflash",
+    "depth": 1,
+    "ctx_max": 3500,
+    "decode_tps": 66.88,
+    "rows": {
+     "work0": 70.09,
+     "work1": 91.44,
+     "work3": 97.39,
+     "work4": 96.44,
+     "long": 34.58,
+     "streams4": 187.2
+    },
+    "seconds": 85,
+    "margin": 1.061,
+    "margin_llama": 1.061,
+    "geomean": 1.179,
+    "checked": "ok (exact, concurrent)"
+   }
+  ]
+ },
+ "reference": {
+  "repo": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+  "revision": "f645ef40dc4c74b3eaf8d593546c7275bef1eebc",
+  "category": "A",
+  "score": 179.0,
+  "reasons": [
+   "same architecture (qwen3moe)",
+   "same family (qwen3-coder)",
+   "MoE routing (128 experts)",
+   "tool-call format qwen_xml",
+   "head_dim 128"
+  ],
+  "generator": {
+   "skills_commit": "c994c152cfc2cdb43cb012c2c08c4a9a09a240e6",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "none",
+    "depth": 0,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 61.11,
+      "rows": {
+       "work0": 75.79,
+       "work1": 75.73,
+       "work3": 75.89,
+       "work4": 75.09,
+       "long": 34.57,
+       "streams4": 188.43
+      },
+      "seconds": 89,
+      "baseline": "no-draft package",
+      "margin_llama": 1.067
+     },
+     {
+      "kind": "dflash",
+      "depth": 1,
+      "decode_tps": 49.3,
+      "rows": {
+       "work0": 70.4,
+       "work1": 91.75,
+       "work3": 97.93,
+       "work4": 97.14,
+       "long": 17.92,
+       "streams4": 187.59
+      },
+      "seconds": 96,
+      "margin_llama": 0.553,
+      "margin": 0.553,
+      "streams4_gated": 187.59,
+      "streams4_ungated": 142.81
+     },
+     {
+      "kind": "dflash",
+      "depth": 2,
+      "decode_tps": 42.68,
+      "rows": {
+       "work0": 52.87,
+       "work1": 89.13,
+       "work3": 94.92,
+       "work4": 101.29,
+       "long": 15.01,
+       "streams4": 188.92
+      },
+      "seconds": 101,
+      "margin_llama": 0.463,
+      "margin": 0.463,
+      "streams4_gated": 188.92,
+      "streams4_ungated": 95.41
+     },
+     {
+      "kind": "dflash",
+      "depth": 3,
+      "decode_tps": 42.88,
+      "rows": {
+       "work0": 59.83,
+       "work1": 114.51,
+       "work3": 128.89,
+       "work4": 138.34,
+       "long": 13.13,
+       "streams4": 188.67
+      },
+      "seconds": 101,
+      "margin_llama": 0.405,
+      "margin": 0.405,
+      "streams4_gated": 188.67,
+      "streams4_ungated": 107.44
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 35.87,
+      "rows": {
+       "work0": 50.48,
+       "work1": 53.73,
+       "work3": 70.15,
+       "work4": 78.01,
+       "long": 13.53,
+       "streams4": 191.78
+      },
+      "seconds": 105,
+      "margin_llama": 0.418,
+      "margin": 0.418,
+      "streams4_gated": 191.78,
+      "streams4_ungated": 87.38
+     }
+    ]
+   }
+  }
+ },
+ "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct"
+}

@@ -1,0 +1,377 @@
+{
+ "name": "Qwen3-30B-A3B-Instruct-2507",
+ "arch": "qwen3moe",
+ "gguf": "Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf",
+ "hidden": 2048,
+ "layers": 48,
+ "heads": 32,
+ "kv_heads": 4,
+ "head_dim": 128,
+ "ffn": 6144,
+ "vocab": 151936,
+ "context_length": 262144,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 10000000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 151645,
+ "extra_eos_ids": [
+  151643
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "trim_content": false,
+  "think_open": "<think>\n",
+  "think_close": "\n</think>\n\n",
+  "history_think": "nonempty",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n",
+  "thinking": "never",
+  "thinking_default": false,
+  "starts_in_reasoning": false,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": true,
+  "tools_system_separator": "\n\n",
+  "tools_prefix": "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>",
+  "tools_suffix": "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>",
+  "call_format": "hermes",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "attn_sinks": false,
+ "moe": {
+  "experts": 128,
+  "used": 8,
+  "ffn": 768,
+  "leading_dense": 0,
+  "gating": 1,
+  "norm_weights": true,
+  "scale": 1.0,
+  "probs_bias": false
+ },
+ "drafter": {
+  "gguf": "Qwen3-Coder-30B-A3B-DFlash-Q4_K_M.gguf",
+  "repo": "Anbeeld/Qwen3-Coder-30B-A3B-DFlash-GGUF",
+  "file": "Qwen3-Coder-30B-A3B-DFlash-Q4_K_M.gguf",
+  "kind": "none",
+  "depth": 0,
+  "ctx_max": 0,
+  "occ_min": 2,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 67.3,
+    "rows": {
+     "work0": 85.67,
+     "work1": 85.7,
+     "work3": 85.88,
+     "work4": 85.0,
+     "long": 36.3,
+     "streams4": 194.28
+    },
+    "seconds": 86,
+    "baseline": "no-draft package",
+    "margin_llama": 0.994
+   },
+   {
+    "kind": "dflash",
+    "depth": 2,
+    "decode_tps": 26.84,
+    "rows": {
+     "work0": 41.71,
+     "work1": 47.82,
+     "work3": 44.49,
+     "work4": 56.49,
+     "long": 9.88,
+     "streams4": 180.45
+    },
+    "seconds": 121,
+    "margin_llama": 0.271,
+    "margin": 0.271,
+    "streams4_gated": 180.45,
+    "streams4_ungated": 63.15
+   },
+   {
+    "kind": "dflash",
+    "depth": 3,
+    "decode_tps": 25.66,
+    "rows": {
+     "work0": 44.54,
+     "work1": 49.62,
+     "work3": 45.96,
+     "work4": 58.93,
+     "long": 8.81,
+     "streams4": 181.33
+    },
+    "seconds": 123,
+    "margin_llama": 0.241,
+    "margin": 0.241,
+    "streams4_gated": 181.33,
+    "streams4_ungated": 67.48
+   },
+   {
+    "kind": "dflash",
+    "depth": 5,
+    "decode_tps": 16.71,
+    "rows": {
+     "work0": 26.34,
+     "work1": 29.5,
+     "work3": 27.64,
+     "work4": 35.61,
+     "long": 6.13,
+     "streams4": 181.92
+    },
+    "seconds": 154,
+    "margin_llama": 0.168,
+    "margin": 0.168,
+    "streams4_gated": 181.92,
+    "streams4_ungated": 36.55
+   },
+   {
+    "kind": "dflash",
+    "depth": 1,
+    "decode_tps": 36.38,
+    "rows": {
+     "work0": 59.46,
+     "work1": 65.88,
+     "work3": 61.67,
+     "work4": 75.27,
+     "long": 13.17,
+     "streams4": 180.42
+    },
+    "seconds": 107,
+    "margin_llama": 0.361,
+    "margin": 0.361,
+    "streams4_gated": 180.42,
+    "streams4_ungated": 102.01
+   },
+   {
+    "kind": "ngram",
+    "depth": 2,
+    "decode_tps": 34.98,
+    "rows": {
+     "work0": 44.32,
+     "work1": 51.42,
+     "work3": 60.04,
+     "work4": 66.31,
+     "long": 14.45,
+     "streams4": 184.77
+    },
+    "seconds": 109,
+    "margin_llama": 0.396,
+    "margin": 0.396,
+    "streams4_gated": 184.77,
+    "streams4_ungated": 68.89
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 33.95,
+    "rows": {
+     "work0": 48.96,
+     "work1": 56.86,
+     "work3": 67.5,
+     "work4": 76.38,
+     "long": 12.29,
+     "streams4": 186.42
+    },
+    "seconds": 109,
+    "margin_llama": 0.337,
+    "margin": 0.337,
+    "streams4_gated": 186.42,
+    "streams4_ungated": 73.83
+   },
+   {
+    "kind": "ngram",
+    "depth": 5,
+    "decode_tps": 20.92,
+    "rows": {
+     "work0": 28.18,
+     "work1": 32.34,
+     "work3": 39.41,
+     "work4": 46.16,
+     "long": 7.96,
+     "streams4": 186.11
+    },
+    "seconds": 137,
+    "margin_llama": 0.218,
+    "margin": 0.218,
+    "streams4_gated": 186.11,
+    "streams4_ungated": 40.21
+   },
+   {
+    "kind": "ngram",
+    "depth": 1,
+    "decode_tps": 50.56,
+    "rows": {
+     "work0": 66.04,
+     "work1": 73.18,
+     "work3": 83.53,
+     "work4": 89.61,
+     "long": 21.3,
+     "streams4": 182.44
+    },
+    "seconds": 96,
+    "margin_llama": 0.584,
+    "margin": 0.584,
+    "streams4_gated": 182.44,
+    "streams4_ungated": 114.86
+   }
+  ]
+ },
+ "reference": {
+  "repo": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+  "revision": "1f563739c6e1be64fc17f922e8fc16d58aaf712d",
+  "category": "A",
+  "score": 179.0,
+  "reasons": [
+   "same architecture (qwen3moe)",
+   "same family (qwen3-2507)",
+   "MoE routing (128 experts)",
+   "tool-call format hermes",
+   "head_dim 128"
+  ],
+  "generator": {
+   "skills_commit": "73bb6b3b9d81edcbf301b789bd7e542871cba8e8",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [
+   "chat"
+  ],
+  "prior": {
+   "drafter": {
+    "kind": "none",
+    "depth": 0,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 73.15,
+      "rows": {
+       "work0": 85.7,
+       "work1": 85.67,
+       "work3": 85.76,
+       "work4": 84.96,
+       "long": 46.33,
+       "streams4": 185.04
+      },
+      "seconds": 58,
+      "margin_llama": 1.011
+     },
+     {
+      "kind": "dflash",
+      "depth": 3,
+      "decode_tps": 33.81,
+      "rows": {
+       "work0": 45.37,
+       "work1": 50.09,
+       "work3": 46.45,
+       "work4": 59.54,
+       "long": 14.8,
+       "streams4": 191.49
+      },
+      "seconds": 80,
+      "margin_llama": 0.412,
+      "margin": 0.412
+     },
+     {
+      "kind": "dflash",
+      "depth": 5,
+      "decode_tps": 21.09,
+      "rows": {
+       "work0": 26.46,
+       "work1": 29.53,
+       "work3": 27.63,
+       "work4": 35.61,
+       "long": 9.89,
+       "streams4": 179.6
+      },
+      "seconds": 105,
+      "margin_llama": 0.275,
+      "margin": 0.275
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 41.38,
+      "rows": {
+       "work0": 44.13,
+       "work1": 51.02,
+       "work3": 59.55,
+       "work4": 65.86,
+       "long": 21.46,
+       "streams4": 181.92
+      },
+      "seconds": 73,
+      "margin_llama": 0.525,
+      "margin": 0.525
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 42.35,
+      "rows": {
+       "work0": 49.46,
+       "work1": 57.12,
+       "work3": 67.67,
+       "work4": 76.72,
+       "long": 19.04,
+       "streams4": 185.51
+      },
+      "seconds": 71,
+      "margin_llama": 0.53,
+      "margin": 0.53
+     },
+     {
+      "kind": "ngram",
+      "depth": 5,
+      "decode_tps": 25.45,
+      "rows": {
+       "work0": 28.44,
+       "work1": 32.47,
+       "work3": 39.53,
+       "work4": 46.33,
+       "long": 11.96,
+       "streams4": 186.04
+      },
+      "seconds": 93,
+      "margin_llama": 0.333,
+      "margin": 0.333
+     }
+    ]
+   }
+  }
+ },
+ "model_id": "Qwen/Qwen3-30B-A3B-Instruct-2507"
+}

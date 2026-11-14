@@ -1,0 +1,192 @@
+{
+ "name": "Qwen2.5 32B Instruct",
+ "arch": "qwen2",
+ "gguf": "Qwen2.5-32B-Instruct-Q4_K_M.gguf",
+ "hidden": 5120,
+ "layers": 64,
+ "heads": 40,
+ "kv_heads": 8,
+ "head_dim": 128,
+ "ffn": 27648,
+ "vocab": 152064,
+ "context_length": 32768,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 1000000.0,
+ "rope_type": "neox",
+ "qk_norm": false,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 151645,
+ "extra_eos_ids": [
+  151643
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+  "trim_content": false,
+  "think_open": "",
+  "think_close": "",
+  "history_think": "nonempty",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n",
+  "thinking": "never",
+  "thinking_default": false,
+  "starts_in_reasoning": false,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": true,
+  "tools_system_separator": "\n\n",
+  "tools_prefix": "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>",
+  "tools_suffix": "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>",
+  "call_format": "hermes",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "attn_bias": [
+  "q",
+  "k",
+  "v"
+ ],
+ "attn_sinks": false,
+ "reference": {
+  "repo": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
+  "revision": "8c3bf8fc3821514e98320e7b5e5cbfa287aedc74",
+  "category": "A",
+  "score": 167.0,
+  "reasons": [
+   "same architecture (qwen2)",
+   "same family (qwen2.5)",
+   "tool-call format hermes",
+   "drafter type ngram"
+  ],
+  "generator": {
+   "skills_commit": "cfdbcf9b0bae1036515aa50c31039c80f0a30b90",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "ngram",
+    "depth": 1,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 10.48,
+      "rows": {
+       "work0": 11.51,
+       "work1": 11.51,
+       "work3": 11.51,
+       "work4": 11.46,
+       "long": 7.73,
+       "streams4": 44.18
+      },
+      "seconds": 352,
+      "baseline": "no-draft package",
+      "margin_llama": 0.991
+     },
+     {
+      "kind": "ngram",
+      "depth": 1,
+      "decode_tps": 11.76,
+      "rows": {
+       "work0": 11.83,
+       "work1": 13.24,
+       "work3": 13.38,
+       "work4": 16.27,
+       "long": 7.75,
+       "streams4": 44.02
+      },
+      "seconds": 339,
+      "margin_llama": 0.994,
+      "margin": 0.994,
+      "streams4_gated": 44.02,
+      "streams4_ungated": 42.61,
+      "geomean": 1.057,
+      "checked": "ok (exact, concurrent)"
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 11.9,
+      "rows": {
+       "work0": 11.85,
+       "work1": 13.94,
+       "work3": 13.95,
+       "work4": 18.7,
+       "long": 7.2,
+       "streams4": 44.21
+      },
+      "seconds": 336,
+      "margin_llama": 0.923,
+      "margin": 0.923,
+      "streams4_gated": 44.21,
+      "streams4_ungated": 30.45
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 11.6,
+      "rows": {
+       "work0": 11.88,
+       "work1": 14.14,
+       "work3": 14.14,
+       "work4": 19.57,
+       "long": 6.47,
+       "streams4": 44.06
+      },
+      "seconds": 337,
+      "margin_llama": 0.83,
+      "margin": 0.83,
+      "streams4_gated": 44.06,
+      "streams4_ungated": 30.43
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "ctx_max": 3500,
+      "decode_tps": 12.12,
+      "rows": {
+       "work0": 11.8,
+       "work1": 13.87,
+       "work3": 13.88,
+       "work4": 18.61,
+       "long": 7.69,
+       "streams4": 43.97
+      },
+      "seconds": 336,
+      "margin": 0.986,
+      "margin_llama": 0.986
+     }
+    ]
+   }
+  }
+ },
+ "model_id": "Qwen/Qwen2.5-32B-Instruct"
+}

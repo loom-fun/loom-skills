@@ -1,0 +1,323 @@
+{
+ "name": "Qwen3.6-27B",
+ "arch": "qwen35",
+ "gguf": "Qwen3.6-27B-Q4_K_M.gguf",
+ "hidden": 5120,
+ "layers": 64,
+ "heads": 24,
+ "kv_heads": 4,
+ "head_dim": 256,
+ "ffn": 17408,
+ "vocab": 248320,
+ "context_length": 262144,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 10000000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": "fused_q",
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 248046,
+ "extra_eos_ids": [
+  248044
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "trim_content": true,
+  "think_open": "<think>\n",
+  "think_close": "\n</think>\n\n",
+  "history_think": "always",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n<think>\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "thinking": "toggle",
+  "thinking_default": true,
+  "starts_in_reasoning": true,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": false,
+  "tools_prefix": "# Tools\n\nYou have access to the following functions:\n\n<tools>",
+  "tools_system_separator": "\n\n",
+  "tools_suffix": "\n</tools>\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>",
+  "call_format": "qwen_xml",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "rope_dims": 64,
+ "recurrent_layers": [
+  0,
+  1,
+  2,
+  4,
+  5,
+  6,
+  8,
+  9,
+  10,
+  12,
+  13,
+  14,
+  16,
+  17,
+  18,
+  20,
+  21,
+  22,
+  24,
+  25,
+  26,
+  28,
+  29,
+  30,
+  32,
+  33,
+  34,
+  36,
+  37,
+  38,
+  40,
+  41,
+  42,
+  44,
+  45,
+  46,
+  48,
+  49,
+  50,
+  52,
+  53,
+  54,
+  56,
+  57,
+  58,
+  60,
+  61,
+  62
+ ],
+ "gdn": {
+  "conv_kernel": 4,
+  "k_heads": 16,
+  "v_heads": 48,
+  "head_k": 128,
+  "inner": 6144,
+  "head_v": 128
+ },
+ "kv_layers": 16,
+ "ffn_norm_tensor": "post_attention_norm",
+ "attn_sinks": false,
+ "mrope": {
+  "sections": [
+   11,
+   11,
+   10,
+   0
+  ],
+  "interleaved": true
+ },
+ "vision": {
+  "mmproj": "mmproj-Qwen3.6-27B-BF16.gguf",
+  "family": "qwen3vl_merger",
+  "img_begin": "<|vision_start|>",
+  "img_end": "<|vision_end|>",
+  "mrope": true
+ },
+ "drafter": {
+  "gguf": "Qwen3.6-27B-DFlash-Q4_K_M.gguf",
+  "repo": "Anbeeld/Qwen3.6-27B-DFlash-GGUF",
+  "file": "Qwen3.6-27B-DFlash-Q4_K_M.gguf",
+  "kind": "dflash",
+  "depth": 3,
+  "ctx_max": 0,
+  "occ_min": 0,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 11.82,
+    "rows": {
+     "work0": 11.97,
+     "work1": 11.98,
+     "work3": 11.97,
+     "work4": 11.96,
+     "long": 11.26,
+     "streams4": 44.05
+    },
+    "seconds": 278,
+    "margin_llama": 0.607
+   },
+   {
+    "kind": "dflash",
+    "depth": 3,
+    "decode_tps": 27.73,
+    "rows": {
+     "work0": 25.99,
+     "work1": 35.7,
+     "work3": 31.82,
+     "work4": 37.73,
+     "long": 17.9,
+     "streams4": 59.86
+    },
+    "seconds": 204,
+    "margin_llama": 1.072,
+    "margin": 1.072,
+    "streams4_gated": 43.94,
+    "streams4_ungated": 59.86,
+    "occ_min": 0,
+    "checked": "ok (exact, concurrent)"
+   },
+   {
+    "kind": "dflash",
+    "depth": 5,
+    "decode_tps": 28.81,
+    "rows": {
+     "work0": 26.09,
+     "work1": 40.34,
+     "work3": 37.05,
+     "work4": 48.04,
+     "long": 15.97,
+     "streams4": 43.82
+    },
+    "seconds": 203,
+    "margin_llama": 0.889,
+    "margin": 0.889,
+    "streams4_gated": 43.82,
+    "streams4_ungated": 39.07
+   },
+   {
+    "kind": "dflash",
+    "depth": 7,
+    "decode_tps": 29.7,
+    "rows": {
+     "work0": 26.1,
+     "work1": 44.46,
+     "work3": 39.94,
+     "work4": 62.75,
+     "long": 15.02,
+     "streams4": 43.78
+    },
+    "seconds": 202,
+    "margin_llama": 0.888,
+    "margin": 0.888,
+    "streams4_gated": 43.78,
+    "streams4_ungated": 38.83
+   },
+   {
+    "kind": "dflash",
+    "depth": 2,
+    "decode_tps": 23.78,
+    "rows": {
+     "work0": 22.99,
+     "work1": 27.66,
+     "work3": 26.0,
+     "work4": 29.47,
+     "long": 17.17,
+     "streams4": 56.06
+    },
+    "seconds": 214,
+    "margin_llama": 1.028,
+    "margin": 1.028,
+    "streams4_gated": 43.88,
+    "streams4_ungated": 56.06,
+    "occ_min": 0
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 13.39,
+    "rows": {
+     "work0": 11.64,
+     "work1": 13.08,
+     "work3": 14.61,
+     "work4": 20.14,
+     "long": 10.78,
+     "streams4": 43.88
+    },
+    "seconds": 265,
+    "margin_llama": 0.591,
+    "margin": 0.591,
+    "streams4_gated": 43.88,
+    "streams4_ungated": 32.19
+   }
+  ]
+ },
+ "reference": {
+  "repo": "loom-fun/ggml-org-Qwen3.6-27B-loom",
+  "revision": "fcce31d4971595e9c024afd6f74f5f5af0608787",
+  "category": "A",
+  "score": 184.0,
+  "reasons": [
+   "same architecture (qwen35)",
+   "same family (qwen3.6)",
+   "recurrent hybrid layers",
+   "tool-call format qwen_xml",
+   "thinking switch",
+   "vision tower (qwen3vl_merger)",
+   "drafter type dflash",
+   "head_dim 256"
+  ],
+  "generator": {
+   "skills_commit": "221a948389a3555bcb40a1fb9a7b5efedbed0f7e",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "dflash",
+    "depth": 7,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 11.83,
+      "seconds": 97
+     },
+     {
+      "kind": "dflash",
+      "depth": 5,
+      "decode_tps": 35.93,
+      "seconds": 40
+     },
+     {
+      "kind": "dflash",
+      "depth": 7,
+      "decode_tps": 41.01,
+      "seconds": 36,
+      "checked": "ok (exact, concurrent)"
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 14.49,
+      "seconds": 83
+     }
+    ]
+   }
+  }
+ },
+ "model_id": "Qwen/Qwen3.6-27B"
+}

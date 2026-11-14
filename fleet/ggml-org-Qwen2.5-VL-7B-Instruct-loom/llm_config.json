@@ -1,0 +1,214 @@
+{
+ "name": "Qwen2.5 VL 7B Instruct",
+ "arch": "qwen2vl",
+ "gguf": "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+ "hidden": 3584,
+ "layers": 28,
+ "heads": 28,
+ "kv_heads": 4,
+ "head_dim": 128,
+ "ffn": 18944,
+ "vocab": 152064,
+ "context_length": 128000,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 1000000.0,
+ "rope_type": "neox",
+ "qk_norm": false,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 151645,
+ "extra_eos_ids": [
+  151643
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "You are a helpful assistant.",
+  "trim_content": false,
+  "think_open": "",
+  "think_close": "",
+  "history_think": "nonempty",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n",
+  "thinking": "never",
+  "thinking_default": false,
+  "starts_in_reasoning": false,
+  "think_end": "</think>",
+  "tools_prefix": "",
+  "tools_suffix": "",
+  "tool_line_prefix": "",
+  "tool_separator": "",
+  "tools_system_separator": "",
+  "tools_after_system": true,
+  "tools_function_only": true,
+  "call_format": "none",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "",
+  "call_separator": "",
+  "tool_turn_prefix": "",
+  "tool_item_prefix": "",
+  "tool_item_suffix": "",
+  "tool_turn_suffix": "",
+  "terminal": "<|im_end|>"
+ },
+ "attn_bias": [
+  "q",
+  "k",
+  "v"
+ ],
+ "attn_sinks": false,
+ "mrope": {
+  "sections": [
+   16,
+   24,
+   24,
+   0
+  ],
+  "interleaved": false
+ },
+ "vision": {
+  "mmproj": "mmproj-Qwen2.5-VL-7B-Instruct-f16.gguf",
+  "family": "qwen2.5vl_merger",
+  "img_begin": "<|vision_start|>",
+  "img_end": "<|vision_end|>",
+  "mrope": true
+ },
+ "reference": {
+  "repo": "loom-fun/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+  "revision": "6956a5542584b9e4a38261cdfa72db6da13c2cf7",
+  "category": "A",
+  "score": 162.0,
+  "reasons": [
+   "same architecture (qwen2vl)",
+   "same family (qwen2.5-vl)",
+   "vision tower (qwen2.5vl_merger)",
+   "drafter type ngram"
+  ],
+  "generator": {
+   "skills_commit": "d571bcbabe474e39099cdbfe12dc67259ada8e3b",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "ngram",
+    "depth": 1,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 43.97,
+      "rows": {
+       "work0": 47.08,
+       "work1": 47.15,
+       "work2": 47.01,
+       "work3": 47.22,
+       "work4": 46.83,
+       "long": 33.11,
+       "streams4": 176.29
+      },
+      "seconds": 95,
+      "baseline": "no-draft package",
+      "margin_llama": 1.035
+     },
+     {
+      "kind": "ngram",
+      "depth": 1,
+      "decode_tps": 51.43,
+      "rows": {
+       "work0": 53.62,
+       "work1": 56.93,
+       "work2": 50.67,
+       "work3": 61.7,
+       "work4": 66.39,
+       "long": 33.97,
+       "streams4": 179.17
+      },
+      "seconds": 89,
+      "margin_llama": 1.061,
+      "margin": 1.061,
+      "streams4_gated": 179.17,
+      "streams4_ungated": 173.43,
+      "geomean": 1.241,
+      "checked": "ok (exact, concurrent)"
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 49.15,
+      "rows": {
+       "work0": 54.0,
+       "work1": 58.03,
+       "work2": 50.41,
+       "work3": 64.54,
+       "work4": 72.82,
+       "long": 26.84,
+       "streams4": 179.07
+      },
+      "seconds": 89,
+      "margin_llama": 0.839,
+      "margin": 0.839,
+      "streams4_gated": 179.07,
+      "streams4_ungated": 130.59
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 48.63,
+      "rows": {
+       "work0": 53.46,
+       "work1": 58.41,
+       "work2": 49.86,
+       "work3": 65.69,
+       "work4": 76.55,
+       "long": 25.5,
+       "streams4": 176.5
+      },
+      "seconds": 90,
+      "margin_llama": 0.797,
+      "margin": 0.797,
+      "streams4_gated": 176.5,
+      "streams4_ungated": 127.0
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "ctx_max": 3500,
+      "decode_tps": 52.33,
+      "rows": {
+       "work0": 53.3,
+       "work1": 58.28,
+       "work2": 49.74,
+       "work3": 65.46,
+       "work4": 76.11,
+       "long": 33.11,
+       "streams4": 175.52
+      },
+      "seconds": 89,
+      "margin": 1.035,
+      "margin_llama": 1.035,
+      "geomean": 1.268
+     }
+    ]
+   }
+  }
+ },
+ "model_id": "Qwen/Qwen2.5-VL-7B-Instruct"
+}

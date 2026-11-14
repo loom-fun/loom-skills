@@ -1,0 +1,198 @@
+{
+ "name": "Mellum2.1 12B A2.5B Thinking",
+ "arch": "mellum",
+ "gguf": "Mellum2.1-12B-A2.5B-Thinking-Q4_K_M.gguf",
+ "hidden": 2304,
+ "layers": 28,
+ "heads": 32,
+ "kv_heads": 4,
+ "head_dim": 128,
+ "ffn": 7168,
+ "vocab": 98304,
+ "context_length": 131072,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 500000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 1024,
+ "sliding_layers": [
+  0,
+  1,
+  2,
+  4,
+  5,
+  6,
+  8,
+  9,
+  10,
+  12,
+  13,
+  14,
+  16,
+  17,
+  18,
+  20,
+  21,
+  22,
+  24,
+  25,
+  26
+ ],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 28,
+ "extra_eos_ids": [
+  0
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "trim_content": false,
+  "think_open": "<think>\n",
+  "think_close": "\n</think>\n\n",
+  "history_think": "nonempty",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n<think>\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "thinking": "toggle",
+  "thinking_default": true,
+  "starts_in_reasoning": true,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": true,
+  "tools_system_separator": "\n\n",
+  "tools_prefix": "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>",
+  "tools_suffix": "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>",
+  "call_format": "hermes",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "rope_scaling": {
+  "type": "yarn",
+  "factor": 16.0,
+  "orig_ctx": 8192,
+  "beta_fast": 32.0,
+  "beta_slow": 1.0,
+  "attn_factor": 1.0
+ },
+ "rope_scaling_swa": "none",
+ "rope_theta_swa": 500000.0,
+ "rope_dims_swa": 128,
+ "attn_sinks": false,
+ "moe": {
+  "experts": 64,
+  "used": 8,
+  "ffn": 896,
+  "leading_dense": 0,
+  "gating": 1,
+  "norm_weights": true,
+  "scale": 1.0,
+  "probs_bias": false
+ },
+ "reference": {
+  "repo": "loom-fun/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
+  "revision": "acff08f067c00527f4e28bceee6d01ccd6c04d88",
+  "category": "A",
+  "score": 185.0,
+  "reasons": [
+   "same architecture (mellum)",
+   "same family (mellum2.1-thinking)",
+   "MoE routing (64 experts)",
+   "sliding-window attention",
+   "tool-call format hermes",
+   "thinking switch",
+   "head_dim 128"
+  ],
+  "generator": {
+   "skills_commit": "2f1f1d53a272e86ff380400ca55f4bdeb746aa18",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "none",
+    "depth": 0,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 89.33,
+      "seconds": 16
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 68.11,
+      "seconds": 20
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 75.95,
+      "seconds": 19
+     },
+     {
+      "kind": "ngram",
+      "depth": 5,
+      "decode_tps": 50.4,
+      "seconds": 27
+     }
+    ]
+   }
+  }
+ },
+ "drafter": {
+  "kind": "none",
+  "depth": 0,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 89.53,
+    "seconds": 16
+   },
+   {
+    "kind": "ngram",
+    "depth": 2,
+    "decode_tps": 68.42,
+    "seconds": 20
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 75.74,
+    "seconds": 19
+   },
+   {
+    "kind": "ngram",
+    "depth": 5,
+    "decode_tps": 50.36,
+    "seconds": 27
+   }
+  ]
+ },
+ "model_id": "JetBrains/Mellum2.1-12B-A2.5B-Thinking"
+}

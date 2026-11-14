@@ -1,0 +1,343 @@
+{
+ "name": "Qwen3-4B-Instruct-2507",
+ "arch": "qwen3",
+ "gguf": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+ "hidden": 2560,
+ "layers": 36,
+ "heads": 32,
+ "kv_heads": 8,
+ "head_dim": 128,
+ "ffn": 9728,
+ "vocab": 151936,
+ "context_length": 262144,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 5000000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": false,
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": true,
+ "eos_id": 151645,
+ "extra_eos_ids": [
+  151643
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "trim_content": false,
+  "think_open": "<think>\n",
+  "think_close": "\n</think>\n\n",
+  "history_think": "nonempty",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n",
+  "thinking": "never",
+  "thinking_default": false,
+  "starts_in_reasoning": false,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": true,
+  "tools_system_separator": "\n\n",
+  "tools_prefix": "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>",
+  "tools_suffix": "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>",
+  "call_format": "hermes",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "attn_sinks": false,
+ "drafter": {
+  "gguf": "Qwen3-4B-DFlash.Q8_0.gguf",
+  "repo": "AtomicChat/Qwen3-4B-DFlash-GGUF",
+  "file": "Qwen3-4B-DFlash.Q8_0.gguf",
+  "kind": "none",
+  "depth": 0,
+  "ctx_max": 0,
+  "occ_min": 2,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 56.36,
+    "rows": {
+     "work0": 75.37,
+     "work1": 75.36,
+     "work3": 75.58,
+     "work4": 74.35,
+     "long": 28.17,
+     "streams4": 266.82
+    },
+    "seconds": 75,
+    "baseline": "no-draft package",
+    "margin_llama": 1.021
+   },
+   {
+    "kind": "dflash",
+    "depth": 2,
+    "decode_tps": 50.23,
+    "rows": {
+     "work0": 82.12,
+     "work1": 101.82,
+     "work3": 127.9,
+     "work4": 119.46,
+     "long": 16.3,
+     "streams4": 269.78
+    },
+    "seconds": 77,
+    "margin_llama": 0.591,
+    "margin": 0.591,
+    "streams4_gated": 269.78,
+    "streams4_ungated": 178.0
+   },
+   {
+    "kind": "dflash",
+    "depth": 3,
+    "decode_tps": 52.75,
+    "rows": {
+     "work0": 81.92,
+     "work1": 112.43,
+     "work3": 149.71,
+     "work4": 149.28,
+     "long": 16.58,
+     "streams4": 270.22
+    },
+    "seconds": 76,
+    "margin_llama": 0.601,
+    "margin": 0.601,
+    "streams4_gated": 270.22,
+    "streams4_ungated": 172.81
+   },
+   {
+    "kind": "dflash",
+    "depth": 5,
+    "decode_tps": 41.69,
+    "rows": {
+     "work0": 72.0,
+     "work1": 100.15,
+     "work3": 165.39,
+     "work4": 147.92,
+     "long": 12.01,
+     "streams4": 269.63
+    },
+    "seconds": 83,
+    "margin_llama": 0.435,
+    "margin": 0.435,
+    "streams4_gated": 269.63,
+    "streams4_ungated": 112.53
+   },
+   {
+    "kind": "dflash",
+    "depth": 3,
+    "ctx_max": 3500,
+    "decode_tps": 66.38,
+    "rows": {
+     "work0": 81.99,
+     "work1": 111.37,
+     "work3": 147.89,
+     "work4": 147.48,
+     "long": 24.63,
+     "streams4": 266.07
+    },
+    "seconds": 71,
+    "margin": 0.892,
+    "margin_llama": 0.892
+   },
+   {
+    "kind": "ngram",
+    "depth": 1,
+    "decode_tps": 62.01,
+    "rows": {
+     "work0": 80.25,
+     "work1": 86.12,
+     "work3": 100.59,
+     "work4": 103.46,
+     "long": 27.06,
+     "streams4": 275.96
+    },
+    "seconds": 72,
+    "margin_llama": 0.98,
+    "margin": 0.98,
+    "streams4_gated": 275.96,
+    "streams4_ungated": 232.57
+   },
+   {
+    "kind": "ngram",
+    "depth": 2,
+    "decode_tps": 56.35,
+    "rows": {
+     "work0": 77.07,
+     "work1": 86.05,
+     "work3": 107.88,
+     "work4": 109.08,
+     "long": 21.88,
+     "streams4": 276.59
+    },
+    "seconds": 74,
+    "margin_llama": 0.793,
+    "margin": 0.793,
+    "streams4_gated": 276.59,
+    "streams4_ungated": 180.81
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 56.67,
+    "rows": {
+     "work0": 76.28,
+     "work1": 86.14,
+     "work3": 112.29,
+     "work4": 114.11,
+     "long": 21.82,
+     "streams4": 275.52
+    },
+    "seconds": 74,
+    "margin_llama": 0.79,
+    "margin": 0.79,
+    "streams4_gated": 275.52,
+    "streams4_ungated": 176.86
+   },
+   {
+    "kind": "ngram",
+    "depth": 1,
+    "ctx_max": 3500,
+    "decode_tps": 58.57,
+    "rows": {
+     "work0": 78.24,
+     "work1": 83.28,
+     "work3": 97.46,
+     "work4": 99.77,
+     "long": 24.82,
+     "streams4": 265.79
+    },
+    "seconds": 74,
+    "margin": 0.899,
+    "margin_llama": 0.899
+   }
+  ]
+ },
+ "reference": {
+  "repo": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
+  "revision": "00b833b0082c4a01f60f7723b2855a6aa0df50cd",
+  "category": "A",
+  "score": 167.0,
+  "reasons": [
+   "same architecture (qwen3)",
+   "same family (qwen3-2507)",
+   "tool-call format hermes",
+   "head_dim 128"
+  ],
+  "generator": {
+   "skills_commit": "f90ea898e8eb1304bbacbc50e8ce8644b8bf083f",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [
+   "chat"
+  ],
+  "prior": {
+   "drafter": {
+    "kind": "none",
+    "depth": 0,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 64.89,
+      "rows": {
+       "work0": 78.48,
+       "work1": 78.73,
+       "work3": 78.48,
+       "work4": 77.57,
+       "long": 38.5,
+       "streams4": 279.48
+      },
+      "seconds": 36
+     },
+     {
+      "kind": "dflash",
+      "depth": 3,
+      "decode_tps": 67.94,
+      "rows": {
+       "work0": 82.33,
+       "work1": 111.46,
+       "work3": 147.97,
+       "work4": 147.58,
+       "long": 25.68,
+       "streams4": 269.61
+      },
+      "seconds": 36,
+      "margin": 0.667
+     },
+     {
+      "kind": "dflash",
+      "depth": 5,
+      "decode_tps": 56.03,
+      "rows": {
+       "work0": 70.56,
+       "work1": 97.54,
+       "work3": 161.0,
+       "work4": 144.24,
+       "long": 19.36,
+       "streams4": 269.75
+      },
+      "seconds": 40,
+      "margin": 0.503
+     },
+     {
+      "kind": "ngram",
+      "depth": 2,
+      "decode_tps": 65.86,
+      "rows": {
+       "work0": 74.88,
+       "work1": 82.71,
+       "work3": 103.62,
+       "work4": 104.52,
+       "long": 31.99,
+       "streams4": 270.2
+      },
+      "seconds": 36,
+      "margin": 0.831
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 65.32,
+      "rows": {
+       "work0": 74.54,
+       "work1": 82.35,
+       "work3": 107.52,
+       "work4": 109.69,
+       "long": 30.7,
+       "streams4": 267.52
+      },
+      "seconds": 36,
+      "margin": 0.797
+     }
+    ]
+   }
+  }
+ },
+ "model_id": "Qwen/Qwen3-4B-Instruct-2507"
+}

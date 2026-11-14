@@ -1,0 +1,31 @@
+{
+  "_doc": "Kernel family -> the card rows (and gates) a change to that block can move. First matching rule wins; `match` is a regex on the block symbol (twin suffix _rdna4 and the selN_ template prefix removed), `kind` the block kind (kernel, func, program, template, rodata, config, decl). `rows`: a list of row names, or \"all\" / \"decode\" / \"prefill\" / \"drafted_decode\" (the groups below). A rule that is not listed in `drafted_only` applies to every model; one that is applies only when the model drafts. `unmapped` is what a block no rule matches moves. This is DATA: tightening a rule narrows what a PR must sample; a PR that changes it needs the architecture kind (fleet/ is protected).",
+  "rows": ["decode", "decode_2k", "decode_32k", "prefill_1k", "prefill_2k", "prefill_8k", "prefill_16k", "prefill_32k", "streams4"],
+  "groups": {
+    "all": ["decode", "decode_2k", "decode_32k", "prefill_1k", "prefill_2k", "prefill_8k", "prefill_16k", "prefill_32k", "streams4"],
+    "decode": ["decode", "decode_2k", "decode_32k", "streams4"],
+    "prefill": ["prefill_1k", "prefill_2k", "prefill_8k", "prefill_16k", "prefill_32k"],
+    "drafted_decode": ["decode", "decode_2k", "decode_32k"],
+    "long_decode": ["decode_32k"],
+    "long_prefill": ["prefill_8k", "prefill_16k", "prefill_32k"]
+  },
+  "rules": [
+    {"id": "gemm", "kind": "kernel", "match": "^g_gemm_", "rows": "prefill", "why": "WMMA prefill GEMM"},
+    {"id": "flash2_deep", "kind": "kernel", "match": "^g\\w*_attention_flash2\\w*_deep", "rows": "long_prefill", "why": "deep-KV flash2 prefill attention"},
+    {"id": "flash2", "kind": "kernel", "match": "^g\\w*_attention_flash2", "rows": "prefill", "why": "flash2 prefill attention"},
+    {"id": "decode_attention", "kind": "kernel", "match": "^g\\w*_attention_(split|combine|fallback)", "rows": "decode", "why": "decode attention (split-K / fallback)"},
+    {"id": "gdn_prefill", "kind": "kernel", "match": "^g_gdn_recurrence_pf", "rows": "prefill", "why": "gated delta-net prefill recurrence"},
+    {"id": "gdn", "kind": "kernel", "match": "^g_gdn_", "rows": "all", "why": "gated delta-net layers run in every row"},
+    {"id": "moe", "kind": "kernel", "match": "^g_moe_", "rows": "all", "why": "MoE kernels serve prefill (grouped) and decode"},
+    {"id": "matvec", "kind": "kernel", "match": "^g_(mv|head_mv)_", "rows": "decode", "why": "decode matvec"},
+    {"id": "drafting", "kind": "kernel", "match": "^g_(dfl|mtp|as|spec)_", "rows": "drafted_decode", "drafted_only": true, "why": "drafter / verify kernels"},
+    {"id": "vision", "kind": "kernel", "match": "^v_", "rows": [], "gates": ["vision"], "why": "vision tower: image_input and the vision gate, no perf row"},
+    {"id": "elementwise", "kind": "kernel", "match": "^g_(post|qk|row|quant|embed|token|head_select|split|silu|add|bias|gate|ple|prep|sc|deepstack)", "rows": "all", "why": "shared per-layer elementwise/norm kernels"},
+    {"id": "program_verify", "kind": "program", "match": "^llm_(verify|mtp_|dflash_|as_)", "rows": "drafted_decode", "drafted_only": true, "why": "verify / propose command programs"},
+    {"id": "program_prep", "kind": "program", "match": "^llm_prep_", "rows": [], "why": "load-time weight preparation"},
+    {"id": "program", "kind": "program", "match": ".*", "rows": "all", "why": "command program"},
+    {"id": "template", "kind": "template", "match": "^g_gemm_|flash2", "rows": "prefill", "why": "target provider of a prefill kernel launch"},
+    {"id": "template_other", "kind": "template", "match": ".*", "rows": "decode", "why": "target provider of a decode kernel launch"}
+  ],
+  "unmapped": "all"
+}

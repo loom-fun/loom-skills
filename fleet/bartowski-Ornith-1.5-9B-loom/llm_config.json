@@ -1,0 +1,379 @@
+{
+ "name": "Ornith 1.5 9B",
+ "arch": "qwen35",
+ "gguf": "Ornith-1.5-9B-Q4_K_M.gguf",
+ "hidden": 4096,
+ "layers": 32,
+ "heads": 16,
+ "kv_heads": 4,
+ "head_dim": 256,
+ "ffn": 12288,
+ "vocab": 248320,
+ "context_length": 262144,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 10000000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": "fused_q",
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 248046,
+ "extra_eos_ids": [
+  248044
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "trim_content": true,
+  "think_open": "<think>\n",
+  "think_close": "\n</think>\n\n",
+  "history_think": "always",
+  "history_think_scope": "after_last_query",
+  "generation_prompt": "<|im_start|>assistant\n<think>\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "thinking": "toggle",
+  "thinking_default": true,
+  "starts_in_reasoning": true,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": false,
+  "tools_prefix": "# Tools\n\nYou have access to the following functions:\n\n<tools>",
+  "tools_system_separator": "\n\n",
+  "tools_suffix": "\n</tools>\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>",
+  "call_format": "qwen_xml",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "rope_dims": 64,
+ "recurrent_layers": [
+  0,
+  1,
+  2,
+  4,
+  5,
+  6,
+  8,
+  9,
+  10,
+  12,
+  13,
+  14,
+  16,
+  17,
+  18,
+  20,
+  21,
+  22,
+  24,
+  25,
+  26,
+  28,
+  29,
+  30
+ ],
+ "gdn": {
+  "conv_kernel": 4,
+  "k_heads": 16,
+  "v_heads": 32,
+  "head_k": 128,
+  "inner": 4096,
+  "head_v": 128
+ },
+ "kv_layers": 8,
+ "ffn_norm_tensor": "post_attention_norm",
+ "attn_sinks": false,
+ "mrope": {
+  "sections": [
+   11,
+   11,
+   10,
+   0
+  ],
+  "interleaved": true
+ },
+ "vision": {
+  "mmproj": "mmproj-Ornith-1.5-9B-f16.gguf",
+  "family": "qwen3vl_merger",
+  "img_begin": "<|vision_start|>",
+  "img_end": "<|vision_end|>",
+  "mrope": true
+ },
+ "drafter": {
+  "gguf": "Ornith-1.5-9B-DFlash-Q4_K_M.gguf",
+  "repo": "abenzerps/Ornith-1.5-9B-DFlash-GGUF",
+  "file": "Ornith-1.5-9B-DFlash-Q4_K_M.gguf",
+  "kind": "dflash",
+  "depth": 3,
+  "ctx_max": 0,
+  "occ_min": 0,
+  "tuned": [
+   {
+    "kind": "none",
+    "depth": 0,
+    "decode_tps": 38.16,
+    "rows": {
+     "work0": 39.49,
+     "work1": 39.46,
+     "work2": 39.82,
+     "work3": 39.51,
+     "work4": 39.41,
+     "long": 32.5,
+     "streams4": 143.63
+    },
+    "seconds": 97,
+    "baseline": "no-draft package",
+    "margin_llama": 0.784
+   },
+   {
+    "kind": "dflash",
+    "depth": 1,
+    "decode_tps": 46.88,
+    "rows": {
+     "work0": 46.14,
+     "work1": 51.77,
+     "work2": 52.73,
+     "work3": 54.12,
+     "work4": 53.87,
+     "long": 32.26,
+     "streams4": 140.48
+    },
+    "seconds": 91,
+    "margin_llama": 0.917,
+    "margin": 0.917,
+    "streams4_gated": 140.48,
+    "streams4_ungated": 138.18,
+    "geomean": 1.057
+   },
+   {
+    "kind": "dflash",
+    "depth": 2,
+    "decode_tps": 62.06,
+    "rows": {
+     "work0": 56.57,
+     "work1": 71.97,
+     "work2": 75.89,
+     "work3": 74.27,
+     "work4": 78.6,
+     "long": 38.84,
+     "streams4": 150.44
+    },
+    "seconds": 85,
+    "margin_llama": 1.125,
+    "margin": 1.125,
+    "streams4_gated": 140.9,
+    "streams4_ungated": 150.44,
+    "occ_min": 0,
+    "geomean": 1.377
+   },
+   {
+    "kind": "dflash",
+    "depth": 3,
+    "decode_tps": 70.91,
+    "rows": {
+     "work0": 61.73,
+     "work1": 89.95,
+     "work2": 93.42,
+     "work3": 97.81,
+     "work4": 96.54,
+     "long": 38.44,
+     "streams4": 159.19
+    },
+    "seconds": 81,
+    "margin_llama": 1.176,
+    "margin": 1.176,
+    "streams4_gated": 140.34,
+    "streams4_ungated": 159.19,
+    "occ_min": 0,
+    "geomean": 1.598,
+    "checked": "ok (exact, concurrent)"
+   },
+   {
+    "kind": "dflash",
+    "depth": 5,
+    "decode_tps": 68.25,
+    "rows": {
+     "work0": 54.03,
+     "work1": 92.46,
+     "work2": 95.51,
+     "work3": 103.84,
+     "work4": 106.19,
+     "long": 34.4,
+     "streams4": 139.15
+    },
+    "seconds": 83,
+    "margin_llama": 1.052,
+    "margin": 1.052,
+    "streams4_gated": 139.15,
+    "streams4_ungated": 106.15,
+    "geomean": 1.559
+   },
+   {
+    "kind": "ngram",
+    "depth": 3,
+    "decode_tps": 45.46,
+    "rows": {
+     "work0": 37.14,
+     "work1": 45.69,
+     "work2": 64.38,
+     "work3": 48.94,
+     "work4": 64.21,
+     "long": 31.61,
+     "streams4": 141.49
+    },
+    "seconds": 93,
+    "margin_llama": 0.738,
+    "margin": 0.738,
+    "streams4_gated": 141.49,
+    "streams4_ungated": 108.98
+   }
+  ]
+ },
+ "reference": {
+  "repo": "loom-fun/bartowski-Ornith-1.5-9B-loom",
+  "revision": "e25845015de04e2337ef8a42518233c6408572ab",
+  "category": "A",
+  "score": 184.0,
+  "reasons": [
+   "same architecture (qwen35)",
+   "same family (ornith-1.5)",
+   "recurrent hybrid layers",
+   "tool-call format qwen_xml",
+   "thinking switch",
+   "vision tower (qwen3vl_merger)",
+   "drafter type dflash",
+   "head_dim 256"
+  ],
+  "generator": {
+   "skills_commit": "c83b56e8bfef7abb2a5e392de0413387a3081cca",
+   "kit": null,
+   "hrx_loom": "0.1.0"
+  },
+  "kit_example": null,
+  "taken": [],
+  "differs": [],
+  "prior": {
+   "drafter": {
+    "kind": "dflash",
+    "depth": 3,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 37.96,
+      "rows": {
+       "work0": 38.62,
+       "work1": 38.63,
+       "work2": 39.01,
+       "work3": 38.62,
+       "work4": 38.62,
+       "long": 34.67,
+       "streams4": 140.16
+      },
+      "seconds": 90,
+      "margin_llama": 0.768
+     },
+     {
+      "kind": "dflash",
+      "depth": 3,
+      "decode_tps": 72.4,
+      "rows": {
+       "work0": 60.56,
+       "work1": 88.25,
+       "work2": 91.31,
+       "work3": 95.87,
+       "work4": 94.31,
+       "long": 43.4,
+       "streams4": 154.33
+      },
+      "seconds": 72,
+      "margin_llama": 1.204,
+      "margin": 1.204,
+      "streams4_gated": 138.1,
+      "streams4_ungated": 154.33,
+      "occ_min": 0,
+      "checked": "ok (exact, concurrent)"
+     },
+     {
+      "kind": "dflash",
+      "depth": 5,
+      "decode_tps": 69.29,
+      "rows": {
+       "work0": 53.76,
+       "work1": 92.05,
+       "work2": 95.0,
+       "work3": 103.65,
+       "work4": 105.96,
+       "long": 36.35,
+       "streams4": 139.89
+      },
+      "seconds": 74,
+      "margin_llama": 1.069,
+      "margin": 1.069,
+      "streams4_gated": 139.89,
+      "streams4_ungated": 104.43
+     },
+     {
+      "kind": "dflash",
+      "depth": 7,
+      "decode_tps": 72.39,
+      "rows": {
+       "work0": 54.33,
+       "work1": 97.59,
+       "work2": 114.21,
+       "work3": 125.26,
+       "work4": 125.97,
+       "long": 33.83,
+       "streams4": 139.9
+      },
+      "seconds": 72,
+      "margin_llama": 1.019,
+      "margin": 1.019,
+      "streams4_gated": 139.9,
+      "streams4_ungated": 98.29
+     },
+     {
+      "kind": "ngram",
+      "depth": 3,
+      "decode_tps": 47.31,
+      "rows": {
+       "work0": 37.6,
+       "work1": 46.26,
+       "work2": 65.04,
+       "work3": 49.48,
+       "work4": 64.93,
+       "long": 36.21,
+       "streams4": 142.44
+      },
+      "seconds": 83,
+      "margin_llama": 0.748,
+      "margin": 0.748,
+      "streams4_gated": 142.44,
+      "streams4_ungated": 104.76
+     }
+    ]
+   }
+  }
+ },
+ "model_id": "ornith-ai/Ornith-1.5-9B"
+}
