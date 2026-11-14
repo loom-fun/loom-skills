@@ -24,15 +24,13 @@
         "base",
         "dq2",
         "sb",
-        "sb_nodq",
-        "sb_nobar"
+        "sb_nodq"
       ],
       "files": [
         "bench.loom",
         "bench_dq2.loom",
         "bench_sb.loom",
-        "bench_sb_nodq.loom",
-        "bench_sb_nobar.loom"
+        "bench_sb_nodq.loom"
       ],
       "config": [],
       "args": [

@@ -256,10 +256,9 @@ and `GEMM_N_FASTEST` on) unless marked e2e (`devlab-perf`, same-job llama.cpp RO
   no fragment reads -55 %. The non-WMMA half of the kernel is dequant plus LDS traffic and is spread thin; no single piece is worth 15 %.
 - **Tried, kernel level (same run, 3 repeats): all within +-3 %.**
   - `dq2`: a thread stages the 16-value half of *both* nibble groups of its page (one 16-byte load instead of two 32-byte ones, one scale/min
-    decode per group instead of two): -9 % instructions per step; swiglu/store 0..-2 %; e2e (E2B at its R9700 preset, Qwen3-8B) +-1 %.
+    decode per group instead of two): -9 % instructions per step; store/swiglu +2..-2 %; e2e (E2B at its R9700 preset, Qwen3-8B) +-1 %.
   - `sb`: dq2 with the K loop unrolled by one superblock (constant groups, header once per four steps, prefetched a superblock ahead):
-    -31 % non-WMMA instructions per step (330 -> 227 besides the 64 WMMAs), kernel -1..-6 % in the best run and 0..-2 %
-    in the others. **In a model the swiglu kernel is 3x slower** (E2B 2k prefill -42 %, Qwen3-8B -47 %; the store kernel -3 %); the same kernel text
+    -31 % non-WMMA instructions per step (330 -> 227 besides the 64 WMMAs), store kernel -1..-7 % (three runs: -2.5, -6.6, -7, -1.5), swiglu kernel 0..-2 %. **In a model the swiglu kernel is 3x slower** (E2B 2k prefill -42 %, Qwen3-8B -47 %; the store kernel -3 %); the same kernel text
     is at parity in kbench with real Qwen3-0.6B weights, weights beyond the 64 MB MALL, 1k/2k/4k rows and the models' skip-padding wrapper, so
     the cause was not found (a fully unrolled short K loop after launch-argument specialization is the open suspect). Not for models.
   - packed f16 scale/min decode (`sc`), branch-free activation prefetch (`nb`): instruction counts -6 %, time +-5 %; with `nb`/`sc` the swiglu
