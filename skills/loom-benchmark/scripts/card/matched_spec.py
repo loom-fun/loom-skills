@@ -23,7 +23,8 @@ DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "dat
 
 def classification(repo):
     """The card's classification entry (choice, llama_spec, provenance...); KeyError when the repo is not classified."""
-    return json.load(open(DATA))[repo]
+    # the classification is per model, keyed loom-fun/NAME: a staging card (loom-fun-staging/NAME) has the same model's entry
+    return json.load(open(DATA))["loom-fun/" + repo.split("/")[-1]]
 
 
 def matched_spec(repo):
