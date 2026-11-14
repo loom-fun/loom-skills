@@ -1,0 +1,2 @@
+{"scope": "device/rdna4", "match": {}, "owner": "fixture",
+ "choices": [{"set": {"prefill.attn.flash2_trim": true}, "evidence": "fixture: a gfx12-twin-only choice"}]}

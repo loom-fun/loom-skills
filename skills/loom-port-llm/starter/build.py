@@ -83,6 +83,10 @@ if a.draft == "dflash" and not a.drafter:
 _tuned = cfg.get("drafter") or {}
 _depth = a.draft_depth or (_tuned.get("depth") if _tuned.get("kind") == a.draft else None) or 3   # draft/tune.py's choice
 DRAFT = {"kind": a.draft, "depth": max(1, min(7, _depth))} if a.draft != "none" else None
+# The model's generator choices (skills/loom-kb: registry defaults, scope.json rules, llm_config "choices"): resolved once, exported
+# as the environment gen_llm.py and its subprocesses read. A registered variable the caller set wins and marks the build dirty.
+import kb_choices  # noqa: E402
+RESOLVED = kb_choices.apply(cfg, DRAFT["kind"] if DRAFT else None)
 if DRAFT and DRAFT["kind"] == "dflash":
     sys.path.insert(0, os.path.join(HERE, "draft"))
     import gen_dflash  # noqa: E402
@@ -927,6 +931,9 @@ bench["draft"] = DRAFT
 # shows them; a kit made by apply_example.sh carries the commit in KIT_SOURCE.
 from kit_source import generator_stamp  # noqa: E402
 bench["generator"] = generator_stamp()
+if RESOLVED["dirty"]:   # registered choices the caller set in the environment: not reproducible from the knowledge base
+    bench["generator"]["dirty_choices"] = RESOLVED["dirty"]
+bench["resolved"] = {k: v for k, v in RESOLVED.items() if k != "dirty"}
 json.dump(bench, open(os.path.join(pkg, "llm_config.json"), "w"), indent=1)
 kv = a.pool * kv_per_position
 need = weights_bytes + kv + workspace + 2 * a.rows * recurrent_bytes

@@ -1,0 +1,2 @@
+{"scope": "arch/llm/moe", "match": {"facets": ["moe"]}, "owner": "fixture",
+ "choices": [{"set": {"decode.attn.kv_once.from_keys": 2000, "moe.decode.rows_per_wg": 4}, "evidence": "fixture: topology"}]}

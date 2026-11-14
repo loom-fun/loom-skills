@@ -1,0 +1,2 @@
+{"scope": "quant/q4_k", "match": {"quant": ["q4_k"]}, "owner": "fixture",
+ "choices": [{"set": {"decode.mv.wg_long": 512}, "evidence": "fixture: quant"}]}

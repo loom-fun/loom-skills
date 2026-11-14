@@ -1,0 +1,2 @@
+{"scope": "arch/llm", "match": {}, "owner": "fixture",
+ "choices": [{"set": {"decode.attn.kv_once.from_keys": 1000}, "evidence": "fixture: arch root"}]}

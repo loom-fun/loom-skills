@@ -193,7 +193,7 @@ def build(slug, pkgdir, work, extra=()):
     cfg = json.load(open(fresh))
     cfg.update({k: v for k, v in pcfg.items() if k not in ("tensors", "generator")})
     json.dump(cfg, open(os.path.join(work, "cfg.json"), "w"), indent=1)
-    env = dict(os.environ, LOOM_RDNA4=os.environ.get("LOOM_RDNA4", "1"))
+    env = dict(os.environ, LOOM_RDNA4=os.environ.get("LOOM_RDNA4", "1"), LOOM_KB_ROOT=os.environ.get("LOOM_KB_ROOT", os.path.join(HERE, "..", "loom-kb")))
     rc, out = sh([py, f"{kit}/build.py", "cfg.json", "pkg", "--tokenizer", f"{pkgdir}/tokenizer.json", *extra], work, env)
     if rc:
         return False, "build.py: " + out.strip().splitlines()[-1][-250:], None
