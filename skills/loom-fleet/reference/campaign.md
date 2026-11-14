@@ -151,6 +151,15 @@ next one (a new device row such as gfx1100, or a new model in an existing family
 files, measure the effort per stage against the recorded one, and list every manual step as a defect to automate. A campaign whose
 dry run is not cheaper than its predecessor is not finished.
 
+## Adding a device row (no new kernels)
+
+For a GPU whose ISA family exists (a discrete RDNA3 card shares gfx11-generic): copy `skills/loom-kb/device/<family>/<device>/device.json` + `README.md`
+of a sibling, mark every value not measured as spec, add the device to the family's `family.json` `devices`, and add it to `info_schema.json`
+(`devices` enum; a test checks it against the registry). Then: `build_fleet.py` + `diff_fleet.py` against the base must report 0 models touched;
+`fit_device.py DEVICE` gives which models fit; `new_device_impact.py DEVICE > impact.json; sample_plan.py impact.json --gpus DEVICE` gives the
+first measurement wave; `roofline.py --device DEVICE` gives ceilings. A runner needs its labels in `device.json`, the two workflow label tables
+(`devlab-perf.yml`, `devlab-kbench.yml`) and a job generator (`r9700_jobs.py` is R9700-only).
+
 ## Working style
 
 - Decide, don't escalate: pick the option you would recommend, finish, then report the outcome in a line or two.

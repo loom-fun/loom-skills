@@ -1,0 +1,50 @@
+{
+  "schema": "loom-kb/device/1",
+  "device": "radeon-rx7900xtx",
+  "order": 1,
+  "family": "rdna3",
+  "gfx": "gfx1100",
+  "aliases": [
+    "gfx1100",
+    "rx7900xtx",
+    "7900xtx"
+  ],
+  "name": "AMD Radeon RX 7900 XTX",
+  "short": "Radeon RX 7900 XTX",
+  "memory": "24 GB",
+  "memory_bytes": 24000000000,
+  "memory_note": "SPEC, not measured: 24 GB GDDR6; the pool loom-serve gets is a conservative decimal 24 GB until a runner reports it",
+  "card": {
+    "runner": "RX 7900 XTX",
+    "tag": "radeon-rx7900xtx",
+    "detect": {
+      "pattern": "7900 ?xtx|gfx1100",
+      "flags": "i"
+    },
+    "serve_args": []
+  },
+  "roofline": {
+    "default": "radeon-rx7900xtx",
+    "presets": {
+      "radeon-rx7900xtx": {
+        "name": "AMD Radeon RX 7900 XTX (gfx1100, 24 GB)",
+        "bw": 960000000000.0,
+        "flops": 123000000000000.0,
+        "note": "SPEC, not measured: GDDR6 20 Gbps, 384-bit = 960 GB/s peak; 96 CUs, 123 TFLOP/s dense f16 WMMA (AMD's spec). The bandwidth is the peak: a DevLab measurement would replace it (Strix: 216 of 256 peak)"
+      }
+    }
+  },
+  "runner": {
+    "key": "rx7900xtx",
+    "labels": [],
+    "note": "no DevLab runner known: no measurement is possible until one is registered; fill labels with its runner labels (and always include Linux)"
+  },
+  "preset_suffix": "-rx7900xtx",
+  "fit_table": null,
+  "prefill_flag": null,
+  "devlab_device_block": {
+    "cpu": "DevLab Dispatch runner {runner}",
+    "gpu": "AMD Radeon RX 7900 XTX (gfx1100)",
+    "os": "Linux"
+  }
+}
