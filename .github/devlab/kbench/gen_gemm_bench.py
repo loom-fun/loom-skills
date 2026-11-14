@@ -36,6 +36,10 @@ def transform(tw, variant):
     elif variant == "nodq":
         tw = tw.replace("  %origin = index.constant 0 : offset\n", "  %origin = index.constant 0 : offset\n  %zero16 = vector.constant 0.0 : vector<16xf16>\n", 1)
         tw = _re.sub(r"vector\.store %dq\w+, ", "vector.store %zero16, ", tw)
+    elif variant == "nfast":   # output-column tiles fastest (GEMM_N_FASTEST): consecutive workgroups share an activation row tile
+        tw = tw.replace("workgroups(%row_tiles, %out_tiles, %c1)", "workgroups(%out_tiles, %row_tiles, %c1)")
+        tw = tw.replace("  %row_group_id = kernel.workgroup.id<x> : index\n  %out_group_id = kernel.workgroup.id<y> : index",
+                        "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
     elif variant == "nobar":
         tw = _re.sub(r"^\s*kernel\.barrier<workgroup>[^\n]*\n", "", tw, flags=_re.M)
     return tw
@@ -130,5 +134,5 @@ HEAD = "amdgpu.target<gfx12-generic> @rdna4 {subgroup_size = 32}\n\n" + open(os.
 if __name__ == "__main__":
     d = sys.argv[1]
     os.makedirs(d, exist_ok=True)
-    for v in ["", "pipe"]:
+    for v in ["", "nfast"]:
         open(os.path.join(d, "bench%s.loom" % ("_" + v if v else "")), "w").write(HEAD + "\n".join(build(v)) + ("\n" + PEAK if not v else ""))
