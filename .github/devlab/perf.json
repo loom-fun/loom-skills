@@ -5,30 +5,91 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "stall06",
+   "name": "tune06",
    "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 30000000000,
+   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
      "name": "base",
      "build": {}
     },
     {
-     "name": "nocache",
-     "build": {},
-     "execution": {
-      "prefix_cache_capacity": 0,
-      "session_cache_capacity": 0
+     "name": "ts1",
+     "build": {
+      "FLASH2_TS": "1"
+     }
+    },
+    {
+     "name": "ts4",
+     "build": {
+      "FLASH2_TS": "4"
+     }
+    },
+    {
+     "name": "kt64",
+     "build": {
+      "FLASH2_KT": "64"
      }
     }
    ],
    "steps": [
-    "probe:base",
-    "probe:nocache",
-    "probe:base"
+    "perf:base:2",
+    "perf:base:1:long",
+    "perf:ts1:2",
+    "perf:ts1:1:long",
+    "perf:ts4:2",
+    "perf:ts4:1:long",
+    "perf:kt64:2",
+    "perf:kt64:1:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:1:long"
+   ]
+  },
+  {
+   "name": "tune4b",
+   "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 25000000000,
+   "variants": [
+    {
+     "name": "base",
+     "build": {}
+    },
+    {
+     "name": "ts2",
+     "build": {
+      "FLASH2_TS": "2"
+     }
+    },
+    {
+     "name": "deep8k",
+     "build": {
+      "FLASH2_TS_DEPTH": "8192"
+     }
+    },
+    {
+     "name": "deep4k",
+     "build": {
+      "FLASH2_TS_DEPTH": "4096"
+     }
+    }
+   ],
+   "steps": [
+    "perf:base:2",
+    "perf:base:1:long",
+    "perf:ts2:2",
+    "perf:ts2:1:long",
+    "perf:deep8k:2",
+    "perf:deep8k:1:long",
+    "perf:deep4k:2",
+    "perf:deep4k:1:long",
+    "llama@rocm.np1:2",
+    "llama@rocm.np1:1:long"
    ]
   }
  ],
