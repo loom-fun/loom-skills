@@ -104,8 +104,6 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 | `agent` | Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp | — not yet re-measured | ✅ pass ¹ |
 | `agent_think_off` | The tool-calling loop with thinking off | — not yet re-measured | ✅ pass ¹ |
 | `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | — not yet re-measured | ✅ pass ¹ |
-| `needle` | Needle-in-a-haystack prompt at up to half the context, compared with llama.cpp; over-capacity prompt refused | — not yet re-measured | ✅ pass ¹ |
-| `needle_full` | Needle-in-a-haystack prompt at the full context is served | — not yet re-measured | doesn't fit (needs more context than the 20,480 tokens this GPU serves) |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | — not yet re-measured | — not applicable |
 
 - ¹ [DevLab Dispatch run 9000001](https://github.com/loom-fun/loom-skills/actions/runs/9000001), LEVEL=quick, 2026-11-14; device TEST FIXTURE: made-up numbers, not a measurement, AMD Radeon AI PRO R9700S (gfx1201), Ubuntu 24.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`).

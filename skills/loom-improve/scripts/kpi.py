@@ -13,7 +13,7 @@ summarize prints one JSON object (and appends it to --log):
   manual_min      time in hand-work phases (port_* other than port itself, *_debug, *_chat)
   friction        number of `# ...` friction notes the agent logged (each one is a skill gap)
   gates           final gates.json: verdict, level, per-gate pass; audit verdict
-  quality         compare max_gap / bad prompts, agent turns ok/total, consistency, needle sizes served
+  quality         compare max_gap / bad prompts, agent turns ok/total, consistency, native context admitted
   perf            audit.json headline: per metric Loom, llama.cpp, margin (measurement quality noted)
 compare prints a KPI table with REGRESSION / improved / same per KPI and exits 1 on any regression:
   wall_min +10 % or more, any gate PASS -> FAIL, compare max_gap up by > 0.3, a gate that ran before
@@ -110,10 +110,9 @@ def summarize(trial, label, rev):
     if ag.get("turns"):
         t = ag["turns"]
         q["agent_ok"] = f"{sum(x['render_ok'] and x['reuse_ok'] and x['calls_ok'] for x in t)}/{len(t)}"
-    needles = (load(os.path.join(b, "needle.json"), {}) or {}).get("results", []) + \
-              (load(os.path.join(b, "needle_full.json"), {}) or {}).get("results", [])
-    if needles:
-        q["needle_max_served"] = max(r["n"] for r in needles if r.get("status") == 200) if any(r.get("status") == 200 for r in needles) else 0
+    adm = (load(os.path.join(b, "gates.json"), {}) or {}).get("context_admit")
+    if adm:
+        q["context_admitted"] = bool(adm.get("admitted"))
     out["quality"] = q
     out["perf"] = {r["metric"]: {"loom": r["loom"], "llama": r.get("llama_cpp"), "margin": r.get("margin")}
                    for r in audit.get("headline", [])}
@@ -136,7 +135,7 @@ def compare(a, b, noise=0.10, judge_perf=False):
         row("wall_min", wa, wb, "REGRESSION" if wb > wa * 1.10 else "improved" if wb < wa * 0.95 else "same")
     row("manual_min", a.get("manual_min"), b.get("manual_min"), "info")
     row("friction notes", a.get("friction"), b.get("friction"), "info")
-    alias = {"golden1": "golden", "golden2": "golden", "needle_full": "needle"}
+    alias = {"golden1": "golden", "golden2": "golden"}
     norm = lambda d: {alias.get(k, k): v for k, v in d.items()} if d else {}
     ga, gb = norm((a.get("gates") or {}).get("pass", {})), norm((b.get("gates") or {}).get("pass", {}))
     for k in sorted(set(ga) | set(gb)):

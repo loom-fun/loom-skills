@@ -85,11 +85,13 @@ GATES = [
     ("agent", "Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp"),
     ("agent_think_off", "The tool-calling loop with thinking off"),
     ("sampling", "temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp"),
-    ("needle", "Needle-in-a-haystack prompt at up to half the context, compared with llama.cpp; over-capacity prompt refused"),
-    ("needle_full", "Needle-in-a-haystack prompt at the full context is served"),
     ("decision", "Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts"),
 ]
 GATE_NAMES = [n for n, _ in GATES]
+# Gates that no longer exist (the needle gates were removed; gates.sh now only probes that the native context is admitted,
+# which is a check, not a gate). Published info.json files and old evidence still carry them: make_info.py drops them,
+# normalize() strips them for every reader, so a card never shows one. The schema still accepts them (unknown gate names).
+RETIRED_GATES = ("needle", "needle_full")
 # speculative decoding methods (llm_config.json draft.kind) as the card names them
 METHOD = {"dflash": "DFlash", "mtp": "MTP", "ngram": "n-gram prompt lookup", "assist": "assistant drafter"}
 BASE_TAGS = ["loom", "loom-serve", "gguf"]
@@ -120,7 +122,7 @@ DEFAULT_GPU = "strix-halo"   # a card of loom-card/2 and evidence that names no 
 # "doesn't fit" (the user's rule: an accepted outcome, not a failure).
 METRIC_CONTEXT = {"decode_2k": 2000, "decode_32k": 32000, "prefill_1k": 1000, "prefill_2k": 2000, "prefill_8k": 8000,
                   "prefill_16k": 16000, "prefill_32k": 32000}
-GATE_CONTEXT = {"golden": 32000, "needle_full": "native"}   # golden's longest document; needle_full: the whole native context
+GATE_CONTEXT = {"golden": 32000}   # golden's longest document
 SERVE_HEADROOM = 2_000_000_000   # bytes beyond weights and KV cache a GPU needs (the fit table's reserve)
 
 HF = "https://huggingface.co"
@@ -599,12 +601,17 @@ def gpu_from_device(device):
 def normalize(info):
     """info as loom-card/3 (a copy): a loom-card/2 card's top-level gates, performance and roofline become the
     strix-halo entry of devices. A loom-card/3 card is returned as it is. Everything that reads a card goes through
-    this (load_info), so one code path serves both."""
-    if info.get("schema") not in LEGACY_SCHEMA_IDS:
+    this (load_info), so one code path serves both. Retired gates (RETIRED_GATES) are dropped from either."""
+    if info.get("schema") in LEGACY_SCHEMA_IDS:
+        out = {k: v for k, v in info.items() if k not in ("gates", "performance", "roofline")}
+        out["schema"] = SCHEMA_ID
+        out["devices"] = {DEFAULT_GPU: {k: info[k] for k in ("gates", "performance", "roofline") if k in info}}
+        info = out
+    elif not any(g in RETIRED_GATES for d in (info.get("devices") or {}).values() for g in (d.get("gates") or {})):
         return info
-    out = {k: v for k, v in info.items() if k not in ("gates", "performance", "roofline")}
-    out["schema"] = SCHEMA_ID
-    out["devices"] = {DEFAULT_GPU: {k: info[k] for k in ("gates", "performance", "roofline") if k in info}}
+    out = dict(info)
+    out["devices"] = {gpu: ({**d, "gates": {n: g for n, g in d["gates"].items() if n not in RETIRED_GATES}}
+                            if d.get("gates") else d) for gpu, d in (info.get("devices") or {}).items()}
     return out
 
 

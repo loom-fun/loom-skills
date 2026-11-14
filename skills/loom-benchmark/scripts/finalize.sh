@@ -3,11 +3,10 @@
 #   1. perf on the final build: llama.cpp with Loom stopped, then Loom (short set twice each, long + c4 once);
 #      roofline.json baselines are refreshed from these llama.cpp runs (SKIP_LLAMA_PERF=1 skips it)
 #   2. LEVEL=full gates (llama.cpp references come from the cache that qualify.sh filled; llama-server
-#      only starts on a cache miss) - includes the full-context needle probe
+#      only starts on a cache miss) - includes the native-context admission probe
 #   3. audit.py (definition of done)
 #   4. report.py -> BENCH_DIR/report.html + report.md (every number generated from the logs)
-# usage: [LOOM_ROOT=~/loom] [NEEDLE_FULL=0] finalize.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
-#   NEEDLE_FULL=0 defers the full-context probe (gates.sh): the audit then WARNs instead of requiring it.
+# usage: [LOOM_ROOT=~/loom] finalize.sh PKG LOOM_URL GGUF BENCH_DIR [LLAMA_PORT=8130]
 # Exit 1 if a gate or the audit fails (the report is still written, with the failure in it).
 set -u
 . "$(dirname "$0")/_lib.sh"

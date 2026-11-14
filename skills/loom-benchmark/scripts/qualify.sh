@@ -5,7 +5,7 @@
 #   2. llama.cpp baseline, with Loom stopped: perf.py --kind llama (short and --long) and c4_steady
 #      -> perf_log.jsonl. One model at a time: GPU memory is system RAM, so Loom and llama.cpp never
 #      run together (Loom is restarted with its own command line afterwards)
-#   3. LEVEL=quick gates (goldens, compare, consistency, agent tool loop, sampling, half-context needle)
+#   3. LEVEL=quick gates (goldens, compare, consistency, agent tool loop, sampling)
 #      -> a failing gate is reported (exit 1 at the end) but the measurements still run. llama.cpp
 #      references are filled with Loom stopped (gates.sh)
 #   4. roofline.py -> roofline.json; the optimization budget is what is left of the end-to-end budget

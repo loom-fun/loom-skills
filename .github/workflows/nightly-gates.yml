@@ -1,6 +1,6 @@
 name: nightly-gates
 # The long correctness gates (gates.sh LEVEL=full: goldens up to 32k, every vision image, the full spec
-# request set, agent, 200-draw sampling, needle at half and full context) on the LATEST published loom-fun
+# request set, agent, 200-draw sampling, the native-context admission probe) on the LATEST published loom-fun
 # cards, one AMD DevLab Dispatch Strix Halo runner per card, in parallel. Deterministic: no LLM agent, no
 # skill run; each job fetches the card with loom-fetch, serves it and runs .github/scripts/nightly_gates.sh.
 # Correctness only: nightly-gates measures no performance. Every card performance number comes from a devlab-perf job (devlab-perf.yml).
@@ -75,8 +75,8 @@ jobs:
     name: gates (${{ matrix.slug }}, ${{ matrix.level }})
     # AMD DevLab's pool: `devlab-dispatch` opts in to the pool and `strix-halo` narrows it to gfx1151.
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
-    # LEVEL=full on a 27-30B card: ~1 h for the full-context needle alone, plus the half-context needle and
-    # (on a cold reference cache) the llama.cpp recordings.
+    # LEVEL=full on a 27-30B card: the goldens, vision, spec and agent gates and (on a cold reference cache) the
+    # llama.cpp recordings.
     timeout-minutes: 330
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}

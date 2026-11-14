@@ -7,8 +7,8 @@
 #                    background loop that will never fire looks exactly like this: a trial once sat
 #                    idle for 16 hours because the orchestrator only waited for a completion message)
 #   exit 3  TIMEOUT  MAX_MIN minutes since the watchdog started
-# STALL_MIN must exceed the longest silent step: a full-context needle prefill writes nothing for
-# minutes (a 261k prompt took ~11 min on a busy GPU), so keep it >= 20.
+# STALL_MIN must exceed the longest silent step: a long llama.cpp reference fill writes nothing for
+# minutes, so keep it >= 20.
 set -u
 dir=$1; stall=${2:-25}; max=${3:-240}; t0=$(date +%s)
 log=$dir/phases.log

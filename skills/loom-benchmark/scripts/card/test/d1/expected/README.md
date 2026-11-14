@@ -79,8 +79,6 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 | `agent` | Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp | — not applicable |
 | `agent_think_off` | The tool-calling loop with thinking off | — not applicable |
 | `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | — not applicable |
-| `needle` | Needle-in-a-haystack prompt at up to half the context, compared with llama.cpp; over-capacity prompt refused | — not applicable |
-| `needle_full` | Needle-in-a-haystack prompt at the full context is served | — not applicable |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | ✅ pass ¹ |
 
 - ¹ [loom-factory run 40842422037](https://github.com/loom-fun/loom-skills/actions/runs/40842422037), 2026-10-29; device not recorded; hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered).

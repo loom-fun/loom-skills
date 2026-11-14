@@ -82,13 +82,10 @@ AMD Radeon AI PRO R9700 (gfx1201, 32 GB): this package does not fit its 32 GB (i
 | `agent` | Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp | ✅ pass ² |
 | `agent_think_off` | The tool-calling loop with thinking off | ✅ pass ² |
 | `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | ✅ pass ² |
-| `needle` | Needle-in-a-haystack prompt at up to half the context, compared with llama.cpp; over-capacity prompt refused | ✅ pass ² |
-| `needle_full` | Needle-in-a-haystack prompt at the full context is served | ✅ pass ³ |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | — not applicable |
 
 - ¹ [DevLab Dispatch run 43376610754](https://github.com/loom-fun/loom-skills/actions/runs/43376610754), 2026-11-13; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 24.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`).
 - ² [DevLab Dispatch run 43376610754](https://github.com/loom-fun/loom-skills/actions/runs/43376610754), LEVEL=full, 2026-11-13; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 24.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`).
-- ³ [DevLab Dispatch run 42445355675](https://github.com/loom-fun/loom-skills/actions/runs/42445355675/job/128623039814), LEVEL=full, 2026-11-08; device not recorded; hrx-loom unknown.
 - Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.
 
 ## Files

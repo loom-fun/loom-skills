@@ -11,7 +11,7 @@
 #    "variants": [{"name": "card"},                                   (the card's own programs, as published)
 #                 {"name": "x", "build": {"ENV": "value", ...},       (rebuild: build.py with these env vars;
 #                  "build_args": ["--draft-depth", "3"],                 build_args are extra build.py flags)
-#                  "env": {"SKIP_NEEDLE": "1"},                          (exported for the steps; also allowed at the top level)
+#                  "env": {"NAME": "value"},                             (exported for the steps; also allowed at the top level)
 #                  "serve_args": ["--pool_backing=fixed"],              (extra loom-serve flags; memory_bytes "none" omits --memory_bytes)
 #                  "execution": {"draft_depth": 0},                    (model.json preset overrides)
 #                  "config": {"rope_theta": 10000},                     (generator config overrides for a rebuild:
@@ -21,8 +21,7 @@
 #        consistency:N:llama  the same with --pkg/--llama (the card's llama.cpp build): the gate's own verdict
 #        pairs:R         determinism.py --pairs: each prompt twice in a row (prefix-cache miss, then hit), R reps
 #        determinism:C:R determinism.py, R reps of each prompt with C requests in flight
-#        admit:N         admission only: a needle prompt of N tokens on a fresh server, admitted or refused (503), cancelled
-#        needle:N[:S]    one Loom-only needle probe of N tokens on the running server (read timeout S seconds): status, TTFT
+#        admit[:N]       admission only (ctx_admit.py): a prompt of N tokens (default: the native context) on a fresh server, admitted or refused (503), cancelled
 #        consdefer:N     consistency.py N times for cards whose GGUF and llama.cpp do not fit together: references deferred, filled with Loom stopped, runs re-judged
 #        ktest           the starter's kernel tests (make_kernel_tests.py + run_kernel_tests.sh) on the package
 #        probe           one request on a fresh server + GTT/free memory/status/dmesg (out/probe*.json, probe.txt)
@@ -42,7 +41,7 @@ q() { python3 -c "import json,sys; e=json.load(open('$exp')); v=next(v for v in 
 f() { q "print(v.get('$1', e.get('$1')) or '-')"; }
 repo=$(f card); mem=$(f memory_bytes); kit=$(f kit); tag=$(f llamacpp)
 steps=$(q "print(' '.join(v.get('steps') or e.get('steps') or ['consistency:20']))")
-# "env": {"SKIP_NEEDLE": "1"}: environment for the steps (gates.sh switches)
+# "env": {"NAME": "value"}: environment for the steps (gates.sh switches)
 eval "$(q "print(' '.join(f'export {k}={x!r}' for k, x in (v.get('env') or e.get('env') or {}).items()))")"
 echo "variant $name: $(q "print(json.dumps(v))")"
 
@@ -246,37 +245,12 @@ for s in $steps; do
       "$T" "$B/determinism.py" "$url" --model "$model" --pairs --reps "$p1" --log "$out/pairs.jsonl" > "$out/pairs.log" 2>&1
       cut -c1-400 "$out/pairs.log"; res[$s]=$(grep -c "a path gave two outputs" "$out/pairs.log")" prompts with a nondeterministic path, "$(grep -c "paths differ" "$out/pairs.log")" with hit != miss";;
     admit)
-      # Admission only: a needle prompt of N tokens on a fresh server; admitted (it runs) or refused (503), then cancelled
+      # Admission only: a prompt of p1 tokens (default: the native context) on a fresh server; admitted (it runs) or refused (503), then cancelled
       [ -f "$LOOM_SERVE_STATE/exp-$name.pid" ] && "$SV/stop.sh" "exp-$name" >/dev/null 2>&1
       step "serve (fresh)"; serve || { res[$s]=ERROR; continue; }
-      step "admit $p1"
-      res[$s]=$(cd "$B" && "$T" - "$pkg" "$url" "$model" "$p1" <<'EOF' 2> "$out/admit_$p1.err"
-import sys, threading, time
-import requests
-from bench_common import Package
-from needle import corpus, haystack
-pkg, url, model, n = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
-P = Package(pkg); ids = P.ids(corpus())
-while len(ids) < n:
-    ids = ids + ids
-prompt, _ = haystack(P, ids, n, 1)
-got = {}
-def post():
-    try:
-        with requests.post(url + "/v1/chat/completions", stream=True, timeout=600, json={
-                "model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 1024, "stream": True}) as r:
-            got["status"] = r.status_code; got["body"] = r.text[:200] if r.status_code != 200 else ""
-    except Exception as e:
-        got["error"] = str(e)[:200]
-threading.Thread(target=post, daemon=True).start()
-for _ in range(120):
-    time.sleep(1)
-    st = requests.get(url + "/v1/status").json()["data"][0]["loom"]["status"]
-    if "status" in got or st["active_requests"]:
-        break
-print("admitted" if st["active_requests"] else f"refused {got}")
-EOF
-);;
+      step "admit ${p1:-native context}"
+      "$T" "$B/ctx_admit.py" "$pkg" "$url" ${p1:+--tokens "$p1"} --out "$out/admit_${p1:-native}.json" > "$out/admit_${p1:-native}.log" 2>&1
+      res[$s]=$(tail -1 "$out/admit_${p1:-native}.log" | cut -c1-240);;
     gates)
       curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
       [ "$tag" != - ] || { echo "gates: EXPERIMENT.json has no llamacpp tag"; res[$s]=ERROR; continue; }
@@ -302,13 +276,6 @@ EOF
       curl -s "$url/v1/status" > "$out/probe_status.json"; head -c 600 "$out/probe_reply.json"; echo
       { echo "http $code"; echo "gtt_used $(cat /sys/class/drm/card*/device/mem_info_gtt_used 2>/dev/null | tr '\n' ' ')"; free -g | head -2; dmesg 2>/dev/null | tail -25; } >> "$out/probe.txt"; tail -12 "$out/probe.txt"
       res[$s]="http $code: $(head -c 160 "$out/probe_reply.json" | tr '\n' ' ')";;
-    needle)
-      curl -sf "$url/v1/models" >/dev/null || { step serve; serve || { res[$s]=ERROR; continue; }; }
-      step "needle $p1"
-      "$T" "$B/needle.py" "$pkg" "$url" --sizes "$p1" --probes 1 --no-over-capacity ${p2:+--timeout "$p2"} \
-        --out "$out/needle_$p1.json" > "$out/needle_$p1.log" 2>&1
-      res[$s]=$(grep -h "^OK\|^FAIL" "$out/needle_$p1.log" | tail -1 | cut -c1-240)
-      [ -n "${res[$s]}" ] || res[$s]=$(tail -1 "$out/needle_$p1.log" | cut -c1-240);;
     *) echo "unknown step $s"; res[$s]=ERROR;;
   esac
   echo "RESULT $name $s: ${res[$s]}"
