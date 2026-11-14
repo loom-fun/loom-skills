@@ -36,6 +36,8 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 
 On the AMD Radeon AI PRO R9700, `--memory_bytes=34000000000` bounds the memory pool: this package serves up to 20,480 tokens per request there (its native context is 40,960); the package files are the same on every GPU.
 
+On the AMD Radeon AI PRO R9700, the Quick start fetches the `chat-r9700` preset of `model.json`: the default preset with `prefill_capacity` 4,096 for its 32 GB. The programs, weights and tokenizer are the same.
+
 ## Performance vs llama.cpp
 
 ### Strix Halo (gfx1151)

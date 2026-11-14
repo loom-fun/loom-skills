@@ -527,6 +527,15 @@ def render(d):
             L += [f"On the {GPUS[g]['name']}, `--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}` bounds the memory pool: "
                   f"this package serves up to {sc:,} tokens per request there (its native context is {native:,}); "
                   "the package files are the same on every GPU.", ""]
+    for g in serving:   # a GPU's own preset: what it sets differently from the default preset (same programs, weights, tokenizer)
+        pr = gpu_preset(facts, g)
+        if pr and pr != facts["preset"] and g != DEFAULT_GPU:
+            pm = load_package(d)["model"]["presets"]
+            diff = {k: v for k, v in pm[pr]["execution"].items() if pm[next(iter(pm))]["execution"].get(k) != v}
+            if diff:
+                L += [f"On the {GPUS[g]['name']}, the Quick start fetches the `{pr}` preset of `model.json`: the default preset with "
+                      + ", ".join(f"`{k}` {v:,}" if isinstance(v, int) and not isinstance(v, bool) else f"`{k}` {v}" for k, v in sorted(diff.items()))
+                      + f" for its {GPUS[g]['memory'] or 'memory'}. The programs, weights and tokenizer are the same.", ""]
     for g in gpus:
         if info["devices"][g].get("state") == "unsupported":
             L += [gpu_line(info, g), ""]
