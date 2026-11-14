@@ -34,7 +34,7 @@ def direct(text, mode, kvh, d, partial, kwide=False):
     lds = mode == 3
     R = kvh * d
     pos_bytes = int(re.search(r"%pos_bytes = index\.constant (\d+) : offset", text).group(1))
-    HALF = 128   # dims per wave
+    HALF = int(__import__("os").environ.get("FLASH2_HALF", "128"))   # dims per wave
     m = re.search(r"^( *)scf\.if %st_live \{\n.*?^ *\}\n( *)kernel\.barrier<workgroup> scope\(workgroup\) ordering\(acq_rel\)\n", text, re.M | re.S)
     assert m, "flash2_direct: staging block not found"
     stage = m.group(0)
@@ -119,8 +119,10 @@ def direct(text, mode, kvh, d, partial, kwide=False):
     text = re.sub(r"^( *)%tf32 = index\.cast %tile_first : index to i32\n",
                   lambda mm: (mm.group(0) + f"{mm.group(1)}%par_i = index.rem %kt, %vd_c2 : index\n{mm.group(1)}%par_o = index.mul %par_i, %vd_cw : index\n"
                               f"{mm.group(1)}%wave_pv = index.add %wave, %par_o : index\n{mm.group(1)}%wave_p = index.assume %wave_pv [range(%wave_pv, 0, {2 * waves - 1})] : index\n"
-                              + "".join(f"{mm.group(1)}%sxp{j}_v = index.add %sx_hw{j if j else ''}, %par_o : index\n{mm.group(1)}%sxp{j} = index.assume %sxp{j}_v [range(%sxp{j}_v, 0, {2 * waves - 1})] : index\n" for j in range(4))), text, count=1, flags=re.M)
+                              + ("".join(f"{mm.group(1)}%sxp{j}_v = index.add %sx_hw{j if j else ''}, %par_o : index\n{mm.group(1)}%sxp{j} = index.assume %sxp{j}_v [range(%sxp{j}_v, 0, {2 * waves - 1})] : index\n" for j in range(4))
+                                 if "%sx_hw " in text else f"{mm.group(1)}%sxpp_v = index.add %partner_id, %par_o : index\n{mm.group(1)}%sxpp = index.assume %sxpp_v [range(%sxpp_v, 0, {2 * waves - 1})] : index\n")), text, count=1, flags=re.M)
     text = text.replace("%sx_view[%wave, %lane, %c0]", "%sx_view[%wave_p, %lane, %c0]")
+    text = text.replace("%sx_view[%partner_id, %lane, %c0]", "%sx_view[%sxpp, %lane, %c0]")
     for j in range(4):
         text = re.sub(rf"(%sp\d+_{j}(?:_pt)?) = vector\.load %sx_view\[%sx_hw{j if j else ''}, %lane, %c0\] : view<{waves}x32x8xf32>",
                       lambda mm: f"{mm.group(1)} = vector.load %sx_view[%sxp{j}, %lane, %c0] : view<{2 * waves}x32x8xf32>", text)

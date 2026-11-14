@@ -34,6 +34,8 @@ GATE_SIG = _c.get("attn_gate_act", "sigmoid") == "sigmoid"   # else the gate hol
 LAYERS = _c["layers"] - 1
 assert D in (256, 512) and not _c.get("attn_sinks"), "gen_flash2s: head_dim 256 or 512 without attention sinks"
 HALF = 128                        # dims per wave
+if D == 512 and os.environ.get("FLASH2_ARCH") == "rdna4" and os.environ.get("FLASH2_HALF"):   # gfx12 twin experiment: 256 dims per wave, two waves per head
+    HALF = int(os.environ["FLASH2_HALF"])
 NFH = HALF // 16                  # 16-dim fragments per wave (8)
 WPH = D // HALF                   # waves per query head (2, or 4 at head_dim 512)
 KT = 32 if D == 256 else 16       # keys per tile (head_dim 512: K and V^T of 32 keys exceed 64 KiB)

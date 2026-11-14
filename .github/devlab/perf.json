@@ -24,64 +24,23 @@
      }
     },
     {
-     "name": "d2",
+     "name": "h256",
      "build": {
+      "FLASH2_HALF": "256"
+     },
+     "build_args": [
+      "--prefill-r9700",
+      "4096"
+     ],
+     "config": {
+      "rdna4_f16_ffn": true
+     }
+    },
+    {
+     "name": "h256d2",
+     "build": {
+      "FLASH2_HALF": "256",
       "FLASH2_DIRECT": "2"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "config": {
-      "rdna4_f16_ffn": true
-     }
-    },
-    {
-     "name": "d3",
-     "build": {
-      "FLASH2_DIRECT": "3"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "config": {
-      "rdna4_f16_ffn": true
-     }
-    },
-    {
-     "name": "d2noqk",
-     "build": {
-      "FLASH2_DIRECT": "2",
-      "FLASH2_ABL": "noqk"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "config": {
-      "rdna4_f16_ffn": true
-     }
-    },
-    {
-     "name": "d2nopv",
-     "build": {
-      "FLASH2_DIRECT": "2",
-      "FLASH2_ABL": "nopv"
-     },
-     "build_args": [
-      "--prefill-r9700",
-      "4096"
-     ],
-     "config": {
-      "rdna4_f16_ffn": true
-     }
-    },
-    {
-     "name": "d2nosm",
-     "build": {
-      "FLASH2_DIRECT": "2",
-      "FLASH2_ABL": "nosm"
      },
      "build_args": [
       "--prefill-r9700",
@@ -93,22 +52,16 @@
     }
    ],
    "steps": [
-    "func:d2",
-    "ktest:d2",
-    "func:d3",
-    "ktest:d3",
+    "func:h256",
+    "ktest:h256",
+    "func:h256d2",
+    "ktest:h256d2",
     "perf:stack:3",
-    "perf:d2:3",
-    "perf:d3:3",
-    "perf:d2noqk:3",
-    "perf:d2nopv:3",
-    "perf:d2nosm:3",
+    "perf:h256:3",
+    "perf:h256d2:3",
     "perf:stack:3:long",
-    "perf:d2:3:long",
-    "perf:d3:3:long",
-    "perf:d2noqk:3:long",
-    "perf:d2nopv:3:long",
-    "perf:d2nosm:3:long"
+    "perf:h256:3:long",
+    "perf:h256d2:3:long"
    ]
   }
  ],

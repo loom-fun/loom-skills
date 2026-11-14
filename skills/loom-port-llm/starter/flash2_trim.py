@@ -17,6 +17,16 @@ import re
 
 def sx(text):
     m = re.search(r"%s_view = buffer\.view %s_tile\[%origin\] : buffer -> view<(\d+)x16xf32>", text)
+    if m and "%their_s" in text and "%part0_s" not in text and "%sp1 = " not in text:   # two waves per head (FLASH2_HALF=256), one key block: the partner's partial
+        waves = int(m.group(1)) // 16
+        text = text.replace(m.group(0), m.group(0) + f"\n  %sx_view = buffer.view %s_tile[%origin] : buffer -> view<{waves}x32x8xf32>"
+                            "", 1)
+        text, n1 = re.subn(r"vector\.fragment\.store<result> (%\w+), %s_view\[%my_s, %c0\] shape \[%c16, %c16\] : vector<8xf32>, view<\d+x16xf32>",
+                           lambda mm: f"vector.store {mm.group(1)}, %sx_view[%wave, %lane, %c0] : vector<8xf32>, view<{waves}x32x8xf32>", text)
+        text, n2 = re.subn(r"(%sp\d+(?:_pt)?) = vector\.fragment\.load<result> %s_view\[%their_s, %c0\] shape \[%c16, %c16\] : view<\d+x16xf32> -> vector<8xf32>",
+                           lambda mm: f"{mm.group(1)} = vector.load %sx_view[%partner_id, %lane, %c0] : view<{waves}x32x8xf32> -> vector<8xf32>", text)
+        assert n1 >= 1 and n2 >= 1, (n1, n2)
+        return text
     if not m or "%part3_s" not in text or "%part4_s" in text:
         return text
     rows = int(m.group(1))
