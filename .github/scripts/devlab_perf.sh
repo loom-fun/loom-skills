@@ -65,6 +65,7 @@
 #                               r9700_func.py: the same checks as the Windows red-team harness), out/func_V.json
 #          ktest:V              make_kernel_tests.py + run_kernel_tests.sh with V's kit
 #          gates:V:LEVEL        gates.sh against llama.cpp
+#            "elastic": true: on the R9700 serve with --memory_bytes (the elastic state backing) instead of the card's --pool_backing=fixed
 # Runner: "runner": "strix" (default) | "r9700" on the experiment or a job picks the DevLab runner (workflow runs-on). On the
 #   R9700 (gfx1201, 32 GB VRAM, 31 GB host RAM, no HIP headers, no Vulkan loader) this script installs libvulkan1 +
 #   mesa-vulkan-drivers (sudo -n apt-get), sets LOOM_MEMORY_CAP_GIB=34 (the budget is VRAM there, not host RAM: memcheck.sh
@@ -286,14 +287,21 @@ done
 serve_alone() { # serve_alone VARIANT
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
-  local aw sa rp; aw=$(qv "$1" "print(0 if v.get('active_wait') is False else 1)")
+  local aw sa rp vmem; aw=$(qv "$1" "print(0 if v.get('active_wait') is False else 1)")
   sa=$(qv "$1" "print(' '.join(v.get('serve_args') or []))")   # "serve_args": extra loom-serve flags
   # a package with a `<first preset>-r9700` preset (build.py --prefill-r9700) serves it on the R9700, as the card's R9700 Quick start does
   rp=""; [ "$RUNNER" = r9700 ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] + '-r9700' if p[0] + '-r9700' in p else '')" "$D/$1/pkg/model.json")
   if [ -z "$rp" ] && [ "$RUNNER" = r9700 ] && [ "$(q "print(j.get('require_preset_r9700') or '')")" = True ]; then
     echo "FAIL: the card has no <first>-r9700 preset (its fit row has r9700_execution): publish the package with it first"; return 1; fi
   if [ -n "$rp" ] && [[ "$sa" != *--preset=* ]]; then sa="--preset=$rp $sa"; fi
-  step "serve $1"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$mem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
+  vmem=$(qv "$1" "print(v.get('memory_bytes') or '$mem')")   # variant "memory_bytes": "none" with --pool_backing=fixed
+  # the R9700 is served as its card's Quick start serves it: card_lib.GPUS "serve_args" (--pool_backing=fixed, no --memory_bytes; the elastic
+  # backing's trim + compaction stalls the long-prefill rows), unless the variant brings its own serve_args/memory_bytes or is "elastic": true
+  if [ "$RUNNER" = r9700 ] && [[ "$sa" != *--pool_backing=* ]] && [ "$(qv "$1" "print(bool(v.get('elastic') or v.get('memory_bytes')))")" = False ]; then
+    sa="$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.gpu_serve_args('radeon-r9700')))" "$here/skills/loom-benchmark/scripts/card") $sa"
+    vmem=none
+  fi
+  step "serve $1"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null
 }
@@ -377,7 +385,13 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'mean', round(st.mean(v), 2) 
     probe)   # probe:V: stall_probe.py (when does a prefill stall? TTFT + GPU clocks per request)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "stall probe $p1"
+      # telemetry during the probe: /logz/stream (records, incl. the --heartbeat_ms snapshots) and /v1/observe; /metrics every 50 ms
+      curl -sN -H "X-Loom-Model: $cardid" "$url/logz/stream" > "$out/logz_$p1.txt" 2>&1 & lp1=$!
+      ( while true; do echo "T $(date +%s.%N)"; curl -s "$url/v1/sessions"; echo; curl -s "$url/v1/requests"; echo; sleep 0.1; done > "$out/sessions_$p1.txt" 2>&1 ) & lp2=$!
+      lp3=$lp2
       "$T" "$here/.github/scripts/stall_probe.py" "$url" "$cardid" "$out/probe_$p1.jsonl" > "$out/probe_$p1.log" 2>&1; tail -3 "$out/probe_$p1.log" | cut -c1-200
+      kill $lp1 $lp2 $lp3 2>/dev/null
+      cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/servelog_$p1.log" 2>/dev/null   # heartbeat telemetry (--heartbeat_ms=N in serve_args)
       res[$s]="$(wc -l < "$out/probe_$p1.jsonl") requests";;
     c4)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }

@@ -15,7 +15,9 @@ One job per model, on ONE R9700 runner, exactly as skills/loom-benchmark/referen
   * a package whose fit row has "r9700_execution" is served from its `<first>-r9700` preset (model.json, written by make_info.py build --fit);
     the job carries "require_preset_r9700": devlab_perf.sh fails unless the fetched card has that preset, so func, gates, perf and c4
     measure exactly what the card's R9700 Quick start serves.
-  * memory budget: what the card's rendered R9700 Quick start line passes as --memory_bytes (card_lib.gpu_memory: the
+  * serving: the R9700 is served as the card's Quick start serves it, --pool_backing=fixed (card_lib.GPUS serve_args; devlab_perf.sh adds it),
+    whose KV pool is the R9700 preset's pool_capacity (make_info build --fit caps it to the GPU). Below, the --memory_bytes budget is the llama.cpp
+    sizing and the elastic variant's: what the card's rendered R9700 Quick start line once passed as --memory_bytes (card_lib.gpu_memory: the
     package's memory_bytes, at most card_lib.GPUS["radeon-r9700"]["memory_bytes"]; the GPU's whole pool for a reduced context). A model whose native context needs more KV cache than the pool holds after the weights is
     served at card_lib.served_context(...) tokens (variant "context"): the rows beyond it are refused by the server and
     skipped by perf.py (over_context), which the card shows as "doesn't fit". A model whose weights do not fit gets no job.
