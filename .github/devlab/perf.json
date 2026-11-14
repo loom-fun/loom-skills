@@ -137,6 +137,48 @@
    ]
   },
   {
+   "name": "ggml-org-laguna-xs-2-1-loom",
+   "card": "loom-fun-staging/ggml-org-Laguna-XS-2.1-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 72704,
+   "variants": [
+    {
+     "name": "card",
+     "context": 72704,
+     "execution": {
+      "context_capacity": 72704,
+      "pool_capacity": 72704
+     }
+    },
+    {
+     "name": "nodraft",
+     "context": 72704,
+     "execution": {
+      "context_capacity": 72704,
+      "pool_capacity": 72704,
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
+  },
+  {
    "name": "strix-ab-mellum",
    "runner": "strix",
    "card": "loom-fun-staging/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
@@ -231,6 +273,34 @@
     {
      "name": "fun",
      "card": "loom-fun/ggml-org-LFM2.5-24B-A2B-loom"
+    },
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "ab:4",
+    "perf:fun:3",
+    "perf:staging:3",
+    "c4:fun",
+    "c4:staging",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "strix-ab-laguna",
+   "runner": "strix",
+   "card": "loom-fun-staging/ggml-org-Laguna-XS-2.1-loom",
+   "memory_bytes": 81000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/ggml-org-Laguna-XS-2.1-loom"
     },
     {
      "name": "staging"
