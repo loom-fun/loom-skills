@@ -69,7 +69,7 @@ for slug in a.slugs or sorted(models):
     else:
         verdict = "fits (native ctx)" if need <= POOL else "fits (reduced ctx)"
     row = {"slug": slug, "w": fixed, "kv": kv, "kv32": kvpp * 32768, "kvpp": kvpp, "ctx": ctx, "mem": models[slug].get("memory_bytes") or o.get("mem"),
-           "need": float(need), "verdict": verdict, "n_exp": o.get("n_exp", 0)}
+           "need": float(need), "verdict": verdict, "n_exp": o.get("n_exp", 0), **({"ctx_cap": o["ctx_cap"]} if o.get("ctx_cap") else {})}
     rows.append(row)
     reduced = lambda r, v: card_lib.served_context(r["w"], r["kv"] / r["ctx"], POOL) if r.get("kv") and v.startswith("fits (red") else None
     sc_old = reduced(o, o.get("verdict", "")) if o else None
