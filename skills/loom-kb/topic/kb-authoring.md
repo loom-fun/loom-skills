@@ -23,6 +23,8 @@
   `choices.py` may differ between the gfx11 kernel and its gfx12 twin in one build (a twin `K` / `K_rdna4`); the resolved value
   is then `{"rdna3": false, "rdna4": true}` and the generator of the twin reads `<ENV>__RDNA4` (`flash2_rdna4.twin_env`).
   Any other key needs a rule that covers every device it changes, else the resolver errors. Example: `arch/llm/moe/qwen3moe`.
+  A per_target key of a kernel that is shared today (no twin yet) works the same once its generator emits the twin where the two
+  values differ and nothing otherwise (`decode.attn.kv_once.d256` / `gen_llm.attention_twin`; example `model/ggml-org-Qwen3.6-35B-A3B-loom`).
 - Add a family: create `arch/llm/<topology>/<family>/{README.md,scope.json}`. Add a facet: `facet/<tag>/`.
   Add a topic: `topic/<name>.md`. Then run `python3 "${LOOM_SKILL_DIR}/kb.py" lint` (also in CI).
 - `kb.py lint` checks: SKILL.md <= 500 lines and frontmatter limits for every skill, node size and TOC, links,
