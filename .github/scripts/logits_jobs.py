@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """DevLab jobs of the logits campaign (loom-skills#736): the default-path A/B and the host-logits checks in ONE job per model.
 
-usage: logits_jobs.py --device DEVICE --ref REF [--bundle URL SHA256] [--no-gufo] [--no-ab] [--old-org loom-fun-staging] [ab_jobs.py options] SLUG... > .github/devlab/perf.json
+usage: logits_jobs.py --device DEVICE --ref REF [--bundle URL SHA256] [--no-gufo] [--no-logits] [--no-ab] [--old-org loom-fun-staging] [ab_jobs.py options] SLUG... > .github/devlab/perf.json
 
 ab_jobs.py's job (same runner, same settings, ABBA sessions) with the NEW side built from REF (a branch or commit with the logits-capable starter:
 variant "staging" = build.py of that ref with the card's own settings; "fun" = the OLD published package, default loom-fun-staging) and these steps added:
@@ -41,7 +41,7 @@ def build(a, ab_args):
                     v["build_args"] = extra
         keep = [s for s in j["steps"] if not a.no_ab or s.split(":")[0] in ("func", "ktest")]
         keep = [s for s in keep if not s.startswith("gates:") or not a.no_ab]
-        j["steps"] = keep + ["logits:staging"] + ([] if a.no_gufo else ["gufo:staging"])
+        j["steps"] = keep + ([] if a.no_logits else ["logits:staging"] + ([] if a.no_gufo else ["gufo:staging"]))
         if a.bundle:
             j["bundle"] = {"url": a.bundle[0], "sha256": a.bundle[1]}
     exp["_comment"] = f"logits campaign (logits_jobs.py): new side built from {a.ref}; " + exp["_comment"]
@@ -54,6 +54,7 @@ def main(argv=None):
     ap.add_argument("--ref", required=True, help="branch or commit holding the logits-capable starter (the new side is built from it)")
     ap.add_argument("--bundle", nargs=2, metavar=("URL", "SHA256"))
     ap.add_argument("--no-gufo", action="store_true")
+    ap.add_argument("--no-logits", action="store_true", help="neither logits nor gufo steps (the default-path A/B only)")
     ap.add_argument("--no-ab", action="store_true")
     ap.add_argument("--old-org", default="loom-fun-staging")
     a, rest = ap.parse_known_args(argv)
