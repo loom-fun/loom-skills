@@ -39,6 +39,18 @@
    "pass": true,
    "log": "gates_needle.log",
    "seconds": 153
+  },
+  "logits": {
+   "pass": true,
+   "detail": "128/128 steps, top-5 within 0.05",
+   "log": "logits_card.json",
+   "seconds": 40
+  },
+  "gufo": {
+   "pass": true,
+   "detail": "27/27 checks",
+   "log": "conformance_card.json",
+   "seconds": 90
   }
  }
 }
