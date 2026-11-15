@@ -1,47 +1,126 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, loom-fun-staging package (fun) vs loom-fun-staging package (staging), same prompts and settings; compare with strix_ab_compare.py",
+ "runner": "strix",
+ "memory_bytes": 41000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "sab-internscience-sage-a1-5-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/InternScience-Sage-A1.5-loom@7ccf8439cb76e669ece905f4a1f325e2fff01314",
+   "memory_bytes": 41000000000,
    "kit": null,
-   "llamacpp": "b1375",
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "staging"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "sab-lmstudio-community-gemma-4-26b-a4b-i",
+   "runner": "strix",
+   "card": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom@c0aa89f1224de73265bd1a4ff27bf1a332101283",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "sab-lmstudio-community-ornith-1-0-35b-lo",
+   "runner": "strix",
+   "card": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom@5c58f60a9485a3bc0dc5f519ec2d91198d6e9951",
+   "memory_bytes": 36000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "sab-nvidia-nvidia-nemotron-3-5-bolt-e4b-",
+   "runner": "strix",
+   "card": "loom-fun-staging/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@53baf350ac4ce3dc363c979e0194c2135a60936b",
+   "memory_bytes": 36000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "sab-unsloth-gemma-4-12b-it-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom@b50f88f5119e3aff7e35ec7fcfdd1cef9df06d30",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/InternScience-Sage-A1.5-loom@7ccf8439cb76e669ece905f4a1f325e2fff01314",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "llamacpp": "b1374"
 }
