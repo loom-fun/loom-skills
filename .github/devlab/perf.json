@@ -1,49 +1,47 @@
 {
- "_comment": "q38r9700 gemm: prefill chunk on the R9700 (prefill_capacity 1024 card vs 1536 vs 2048), ABBA, prefill 1k/2k and long (8k/16k/32k)",
- "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom",
- "memory_bytes": 34000000000,
- "kit": null,
- "llamacpp": "b1375",
+ "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
  "runner": "r9700",
+ "memory_bytes": 34000000000,
+ "llama_spec": "matched",
  "jobs": [
   {
-   "name": "q38-chunk",
+   "name": "unsloth-qwen3-0-6b-loom",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
      "name": "card",
-     "execution": {
-      "context_capacity": 65536,
-      "pool_capacity": 65536
-     }
+     "build": {}
     },
     {
-     "name": "c1536",
+     "name": "nodraft",
+     "build": {},
      "execution": {
-      "context_capacity": 65536,
-      "pool_capacity": 65536,
-      "prefill_capacity": 1536
-     }
-    },
-    {
-     "name": "c2048",
-     "execution": {
-      "context_capacity": 65536,
-      "pool_capacity": 65536,
-      "prefill_capacity": 2048
+      "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "perf:card:1",
-    "perf:c2048:1",
-    "perf:c1536:1",
-    "perf:c1536:1",
-    "perf:c2048:1",
-    "perf:card:1",
-    "perf:card:1:long",
-    "perf:c2048:1:long",
-    "perf:c1536:1:long"
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   }
- ]
+ ],
+ "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "kit": null,
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211"
 }

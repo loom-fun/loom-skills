@@ -40,3 +40,13 @@ and `GEMM_N_FASTEST` on) unless marked e2e (`devlab-perf`, same-job llama.cpp RO
 ## RDNA4 (gfx12) GEMM twins
 
 The gfx12 twins' kbench findings (what bounds them, what was tried, why int8 WMMA is not the answer) are in `device/rdna4`.
+
+## Qwen3.8-27B on the R9700 (q38r9700 campaign, suite `gemm_q38`, e2e `devlab-perf`)
+Prefill GEMM shapes of the 27B (hidden 5120, ffn 17408, gdn qkv 10240, attention q 12288, gate 6144, ssm_out/attn_out 6144 -> 5120), kernels as the model builds them:
+- m256 (1024 rows): q4_k store 123-126 TFLOP/s (17408x5120 126, 5120x10240 124, 5120x6144 124), q4_k swiglu 115, q6_k store 115-118, q8_0 store 129. At 2048 rows the same
+  kernels run 115-129 TFLOP/s (down 119, qkv 129): no tile-quantization tail at 1024 rows (4 x 40 = 160 workgroups on 64 slots), so a bigger chunk cannot gain GEMM time. m128 is 14-30 % slower than m256 everywhere.
+- Dequant bound (`nodq`, zero weights, an upper bound): -13..-24 % (q4_k -14..-24, q6_k -21..-22, q8_0 -13). The generated ISA of the q4_k m256 loop already uses the f16 magic-number
+  conversion (and 0x0f0f0f0f, `v_perm` with 0x6400 -> f16 1024+q, `v_pk_add` -1024, `v_pk_fma` scale/minimum): folding the -1024 into the fma bias is not exact in f16
+  (1024*s + m needs more than 11 bits; the rounding error is about half a quantization step), so the 3 ops per 2 values stay. Removing the pk_add would be ~2 % of the kernel at best.
+- Prefill chunk (`prefill_capacity`, execution override, context 65536 so the bigger chunk fits; 124928 context + chunk 2048 exhausts device memory): 1k/2k/8k/16k/32k tok/s
+  card (1024) 1547/1634 (ABBA 1521/1609), 1708, 1645, 1521; 1536: 1462/1628 (1457/1624), 1691, 1634, 1512; 2048: 1454/1627 (1445/1616), 1715, 1651, 1529. 1k loses 5-6 %, 2k ties, 8k-32k +-0.5 %: keep 1024.
