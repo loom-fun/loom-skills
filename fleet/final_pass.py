@@ -240,6 +240,7 @@ def cmd_prove(a):
         res = {"ref": ref, "head": head, "head_programs": head_prog, "new_programs": new_prog, "gpus": {}, "problems": []}
         # whole-package checks that do not depend on the GPU
         old_mj, new_mj = jload(os.path.join(snap, "model.json")), jload(os.path.join(new, "model.json"))
+        res["logits"] = bool(logits_keys(new_mj))   # a package without the capability (no llm.logits declared) gets no logits job
         _, p1 = patch_model_json(old_mj, new_mj)
         _, p2 = merge_llm_config(jload(os.path.join(snap, "llm_config.json")), jload(os.path.join(new, "llm_config.json")), ref)
         res["problems"] += p1 + p2
@@ -313,14 +314,15 @@ def cmd_package(a):
         if r.get("error") or not r.get("gpus"):
             print(f"{slug}: no proof, skipped")
             continue
-        if not any(g.get("equivalent") for g in r["gpus"].values() if g.get("applicable")) and any(g.get("applicable") for g in r["gpus"].values()):
-            print(f"{slug}: not equivalent on any GPU, skipped (see not_equivalent.md)")
+        bad = [x for x, g in r["gpus"].items() if g.get("applicable") and not g.get("equivalent")]
+        if bad:   # one GPU's rows would describe other programs: the model needs a measurement first, nothing of it is uploaded
+            print(f"{slug}: not equivalent on {', '.join(bad)}, skipped (see not_equivalent.md)")
             continue
         snap, new, out = (os.path.join(W, d, slug) for d in ("snap", "new", "pkg"))
         shutil.rmtree(out, ignore_errors=True)
         shutil.copytree(snap, out)
-        for f in os.listdir(os.path.join(new, "program")):
-            shutil.copy(os.path.join(new, "program", f), os.path.join(out, "program", f))
+        shutil.rmtree(os.path.join(out, "program"), ignore_errors=True)   # the new build's programs replace the old ones (a catalog package keeps subdirectories)
+        shutil.copytree(os.path.join(new, "program"), os.path.join(out, "program"))
         for f in (x for x in os.listdir(new) if x.endswith(".loom")):
             shutil.copy(os.path.join(new, f), os.path.join(out, f))
         mj, _ = patch_model_json(jload(os.path.join(snap, "model.json")), jload(os.path.join(new, "model.json")))
@@ -417,6 +419,13 @@ def cmd_card(a):
         print(f"{slug}: card built; {'; '.join(notes) or 'logits gates in'}; info.json changed: {', '.join(changed[:12])}{' ...' if len(changed) > 12 else ''}")
 
 
+def cmd_slugs(a):
+    """the models of the pass: --logits = equivalent everywhere and logits-capable (what regen.py plan --mode logits takes), else all uploadable"""
+    proofs = jload(os.path.join(os.path.abspath(a.work), "proofs.json"))
+    ok = [s for s, r in sorted(proofs.items()) if r.get("gpus") and all(g.get("equivalent") for g in r["gpus"].values() if g.get("applicable"))]
+    print(" ".join(s for s in ok if not a.logits or proofs[s].get("logits")))
+
+
 # ---------------------------------------------------------------- upload
 
 def cmd_upload(a):
@@ -451,7 +460,7 @@ def cmd_upload(a):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, fn in (("prove", cmd_prove), ("package", cmd_package), ("card", cmd_card), ("upload", cmd_upload)):
+    for name, fn in (("prove", cmd_prove), ("package", cmd_package), ("card", cmd_card), ("upload", cmd_upload), ("slugs", cmd_slugs)):
         p = sub.add_parser(name)
         p.add_argument("--work", required=True)
         p.add_argument("--slugs")
@@ -460,6 +469,8 @@ def main(argv=None):
             p.add_argument("--ref", required=True)
             p.add_argument("--all", action="store_true")
             p.add_argument("--jobs", type=int, default=3)
+        if name == "slugs":
+            p.add_argument("--logits", action="store_true")
         if name == "card":
             p.add_argument("--state", help="the regen.py logits-mode state with the collected jobs")
             p.add_argument("--proof-url")
