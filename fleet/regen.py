@@ -64,7 +64,7 @@ STATUS_STAGE = {"planned": "queued", "submitted": "queued", "queued": "queued", 
                 "skipped": "unsupported", "unsupported": "unsupported"}
 GPU_KEY = {"strix-halo": "strix", "radeon-r9700": "r9700"}   # status.json's per-GPU keys
 # the files a variant leaves in a job's output: ab = old "fun" and new "staging"; card = the single "card" (+ "nodraft")
-VARIANT = {"ab": ("staging", "stagingnd"), "card": ("card", "nodraft")}
+VARIANT = {"ab": ("staging", "stagingnd"), "card": ("card", "nodraft"), "logits": ("staging", "stagingnd")}
 
 
 def now():
@@ -168,11 +168,11 @@ def slug_of(job):
 
 def generator_cmd(st, device, slugs, suffix=""):
     d = st["opts"]
-    if st["mode"] == "ab":
+    if st["mode"] in ("ab", "logits"):   # logits: ab_jobs.py's job of the pinned staging package, steps cut down in gen_jobs
         cmd = [PY, os.path.join(SCRIPTS, "ab_jobs.py"), "--device", device, "--gates", d["gates"], "--new-org", d["new_org"], "--old-org", d["old_org"]]
         if d.get("refs"):
             cmd += ["--refs", d["refs"]]
-        if device != "strix-halo" and not d.get("no_baselines"):
+        if device != "strix-halo" and not d.get("no_baselines") and st["mode"] == "ab":
             cmd += ["--baselines"]
         if d.get("replicas", 1) > 1 and not suffix:
             cmd += ["--replicas", str(d["replicas"])]   # independent replicas of one submission: the ratchet's confirming run in parallel
@@ -209,8 +209,35 @@ def gen_jobs(st, device, slugs, suffix=""):
             j["name"] = f"{key[0]}c-{j['name']}"[:40 - len(suffix)] + suffix   # a card job per device: names differ across devices
         elif suffix and not j["name"].endswith(suffix) and not j.get("replica"):
             j["name"] = j["name"][:40 - len(suffix)] + suffix
+    if st["mode"] == "logits":
+        logits_steps(doc, st["opts"].get("bundle"))
     got = {slug_of(j) for j in doc["jobs"]}
     return doc, doc["jobs"], [s for s in slugs if s not in got]
+
+
+LOGITS_KEEP = ("func", "ktest")
+
+
+def logits_steps(doc, bundle):
+    """The final pass's job of a package: serve it, check it (func, ktest) and run the host-logits steps (logits:staging, gufo:staging) of
+    devlab_perf.sh. Functional checks only: no performance step (the card's rows carry over by stage equivalence, methodology rule 14)."""
+    for j in doc["jobs"]:
+        j["steps"] = [x for x in j["steps"] if x.split(":")[0] in LOGITS_KEEP and x.endswith(":staging")] + ["logits:staging", "gufo:staging"]
+        j["variants"] = [v for v in j["variants"] if v["name"] == "staging"]
+        if bundle:
+            j["bundle"] = {"url": bundle[0], "sha256": bundle[1]}
+
+
+def logits_verdict(d, e):
+    """Logits mode: func, ktest, logits and gufo ran on the package and none failed (a missing bundle is `not supported`, never a pass)."""
+    s = json.load(open(os.path.join(d, "summary.json"))).get("results", {})
+    need = [k for k in ("func:staging", "ktest:staging", "logits:staging", "gufo:staging") if k not in s]
+    bad = {k: v for k, v in s.items() if str(v).lower().startswith(("fail", "error", "not supported")) or "FAIL" in str(v)[:40]}
+    if bad:
+        return "hold", [f"{k}: {str(v)[:120]}" for k, v in bad.items()]
+    if need:
+        return "rerun", ["missing steps: " + ", ".join(need)]
+    return "promote", []
 
 
 def fleet_slugs():
@@ -237,7 +264,9 @@ def cmd_plan(a):
         die(f"unknown device {unknown}: {', '.join(card_lib.registry.devices())}")
     if a.new_org != STAGING_ORG:
         die(f"--new-org {a.new_org}: cards are measured and published on {STAGING_ORG} only")
-    if a.mode == "ab" and not a.no_pin:
+    if a.mode == "logits" and a.old is None:
+        old_org = a.new_org   # one package, checked: old == new in the pinned refs
+    if a.mode in ("ab", "logits") and not a.no_pin:
         # pin the new package of every slug to the staging revision it is measured at (the card the run measures is the card ingested)
         refs = {s: dict(e) for s, e in (refs or {}).items()}
         for s in slugs:
@@ -247,13 +276,13 @@ def cmd_plan(a):
     st = {"schema": "regen/1", "created": now(), "mode": a.mode, "work": work, "state": state_path,
           "opts": {"gates": a.gates, "new_org": a.new_org, "old_org": old_org, "batch": a.batch, "refs": None,
                    **({"replicas": a.replicas} if a.replicas > 1 else {}), **({"sequential": True} if a.sequential else {}),
-                   **({"no_baselines": True} if a.no_baselines else {})},
+                   **({"no_baselines": True} if a.no_baselines else {}), **({"bundle": a.bundle} if a.bundle else {})},
           "devices": devices, "batches": [], "jobs": {}, "log": []}
     for dev in devices:
         # per-device refs file. Where the device has no published table to compare with (anything but Strix Halo, whose old package is the
         # published loom-fun card) and no old package was named, the old package is the new revision itself: an A/A, the runner's own noise.
         dref = {s: dict(e) for s, e in refs.items()} if refs else None
-        if dref and dev != "strix-halo" and a.old is None:
+        if dref and (dev != "strix-halo" or a.mode == "logits") and a.old is None:
             for e in dref.values():
                 e.setdefault("old", e["new"])
         if dref:
@@ -516,6 +545,8 @@ def collect_one(st, name, e):
         decision, reasons, res = decide(st, name, e, paths)
         e["rows"] = {r: x["state"] for r, x in res["rows"].items()}
         e["improved"] = [r for r, x in res["rows"].items() if "improved" in x["verdicts"] and x["state"] != "rerun"]
+    elif mode == "logits":
+        decision, reasons = logits_verdict(d, e)
     else:
         decision, reasons = card_mode_verdict(d, e)
     e["decision"], e["reason"] = decision, "; ".join(reasons)
@@ -670,6 +701,8 @@ def ingest_strix(st, name, e, W):
 
 def cmd_ingest(a):
     st = State(a.state)
+    if st.d["mode"] == "logits":
+        die("a logits-mode state has no performance to ingest: fleet/final_pass.py card builds the final cards from it")
     todo = [(n, e) for n, e in st.jobs.items() if e["stage"] == "collected" and e.get("decision") == "promote"]
     # a model with a round-2 job: the second run ingests, the first is superseded
     todo = [(n, e) for n, e in todo if not e.get("rerun_of_me")]
@@ -795,7 +828,9 @@ def main(argv=None):
     p = sub.add_parser("plan")
     p.add_argument("slugs", nargs="*")
     p.add_argument("--device", action="append", required=True)
-    p.add_argument("--mode", choices=("ab", "card"), default="ab")
+    p.add_argument("--mode", choices=("ab", "card", "logits"), default="ab",
+                   help="logits: the final pass's functional job of a staging package (func, ktest, logits:staging, gufo:staging), no performance")
+    p.add_argument("--bundle", nargs=2, metavar=("URL", "SHA256"), help="logits mode: the Gufo bundle tarball the job fetches (devlab_perf.sh gufo_bundle)")
     p.add_argument("--all", action="store_true", help="every model of the fleet manifest (a device skips the ones that do not fit)")
     p.add_argument("--old", help="ORG of the old packages (default loom-fun) or a refs.json {slug: {old, new}} (card revisions pinned: org/repo@rev)")
     p.add_argument("--new-org", default=STAGING_ORG)
