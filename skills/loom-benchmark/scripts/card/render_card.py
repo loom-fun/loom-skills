@@ -472,8 +472,8 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
         within = (f"+-{round(rm['band'] * 100)} %" if len(bands) < 2 else
                   f"the per-row bands (methodology, {bands[0]:g}-{bands[-1]:g} %)")
         srcs = ", ".join(src_text(sources[sid]) for sid in (rm.get("first_source"), rm["source"]) if sid)
-        L.append(f"- {GPUS[g]['short']} re-measured on this package on {text(rm['date'])}: within {within} of the "
-                 + ("published" if imp else "these") + " values"
+        L.append(f"- {GPUS[g]['short']} re-measured on this package on {text(rm['date'])}: within {within} of "
+                 + ("the published" if imp else "these") + " values"
                  + (f" except {', '.join(imp)} (faster, confirmed in 2 runs; new values shown)" if imp else "")
                  + (f"{', and' if imp else ' except'}{exc[1:]} (not repeated in the same direction by the first run)" if exc else "")
                  + f" ({srcs}).")

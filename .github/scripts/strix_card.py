@@ -71,7 +71,8 @@ run(PY, f"{C}/pull_devlab.py", "--identity", J, "--gpu", "strix-halo", "--device
 first = []
 if a.first_cmp:
     fjobs = json.loads(run("gh", "run", "view", a.first_run, "-R", GH, "--json", "jobs", capture=True))["jobs"]
-    first = ["--first-cmp", a.first_cmp, "--first-run", a.first_run, "--first-url", next(j for j in fjobs if j["name"] == job_name)["url"]]
+    first = ["--first-cmp", a.first_cmp, "--first-run", a.first_run, "--first-url",
+             next(j for j in fjobs if j["name"] in (job_name, re.sub(r"-r\d+$", "", job_name)))["url"]]   # the first run's job has no -rN suffix
 src = ["--run", a.run, "--url", url, "--device", dev, "--hrx-loom", hrx, "--source-kind", "devlab"]
 run(PY, f"{C}/make_info.py", "remeasure", "--cmp", a.cmp, "--package", out, "--compared-repo", f"loom-fun/{slug}", "--compared-revision", rev,
     "--fetched-programs", fetched, *first, "--date", end[:10], *src, "-o", f"{W}/ev_rm.json")
@@ -101,7 +102,7 @@ txt = open(os.path.join(out, "README.md")).read()
 line = next((ln for ln in txt.splitlines() if "re-measured on this package" in ln), None)
 if not line:
     sys.exit(f"{slug}: no re-measure line in the README")
-if "not re-measured" in txt.split("### Strix Halo", 1)[-1].split("###", 1)[0]:
+if any(ln.startswith("|") and "not re-measured" in ln for ln in txt.split("### Strix Halo", 1)[-1].split("###", 1)[0].splitlines()):   # table cells only (the methodology bullet says llama.cpp is "not re-measured")
     sys.exit(f"{slug}: the Strix table is empty")
 run(PY, f"{C}/publish_package.py", "upload", out, "--repo", slug, "--org", "loom-fun-staging", "--card-only", "--dry-run")
 print(f"{slug}: card built ({line.strip()[:160]})")

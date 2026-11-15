@@ -869,13 +869,13 @@ def cmd_remeasure(a):
                 improved[k] = {"published": r2.get("card"), "loom": round((r1["new"] + r2["new"]) / 2, 1), "runs": [r1["new"], r2["new"]]}
         if slower:
             sys.exit(f"{a.cmp}: {', '.join(slower)} outside the band in both runs and not faster: refused (not within the band)")
-        if not improved:
-            sys.exit(f"{a.cmp}: out_of_margin names no card row")
+        # out of margin only by acceptance rows (informational, not card rows): a plain within-band re-measure
     elif x["verdict"] != "pass" or x.get("gate_failures"):
         sys.exit(f"{a.cmp}: verdict {x['verdict']} (out of band {x.get('out_of_band')}, gate failures {x.get('gate_failures')}): not within the band")
     # a confirming re-run (strix_ab_compare.py --prev) may pass with a metric outside the band in the opposite direction to the
     # first run: the card names it
-    exc = {k: m["ratio"] for k, m in x["metrics"].items() if m["status"] != "PASS" and k not in improved}
+    exc = {k: m["ratio"] for k, m in x["metrics"].items() if m["status"] != "PASS" and k not in improved
+           and not (x["verdict"] == "out_of_margin" and k.startswith("acceptance:"))}
     here = programs_sha256(a.package)
     if a.fetched_programs and a.fetched_programs != here:
         sys.exit(f"the run fetched programs {a.fetched_programs[:12]}, the package has {here[:12]}: re-run")
