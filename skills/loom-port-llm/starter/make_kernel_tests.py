@@ -498,7 +498,7 @@ cases.append(f"""check.case public @head_argmax {{
 # 3a''. logits export (loom-skills#736): the flagged selected span's full row lands in `outputs` at the 32768-byte region, bit-exact;
 # a selected span without the top_k flag and a flagged span beyond the slots export nothing. (Softcap models: the capped value, close.)
 LS, SLOTS = 3, 2
-lg = rng.standard_normal((LS, CH * 128)).astype(np.float32) * 5
+lg = np.random.default_rng(736).standard_normal((LS, CH * 128)).astype(np.float32) * 5   # its own generator: a draw from `rng` would shift every later case's inputs
 lg[:, cfg["vocab"]:] = -3.0e38                                       # padded columns, as g_head_mv writes them
 lm = np.zeros(4 + 9 * LS, np.int32); lm[0] = LS
 lm[4 + 6] = 1; lm[4 + 7] = (1 << 30) | 40                            # span 0: selected, export flag, k = 40
