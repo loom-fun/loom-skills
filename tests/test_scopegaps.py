@@ -132,7 +132,12 @@ class Route(unittest.TestCase):
         self.assertIn("model/unsloth-Qwen3-0.6B-loom/README.md", lines)
         self.assertLess(lines.index("facet/vision/README.md") if "facet/vision/README.md" in lines else 0, lines.index("model/unsloth-Qwen3-0.6B-loom/README.md"))
         self.assertIn('"exec.prefill_capacity": 4096', out)
-        none = subprocess.run([sys.executable, str(KB / "kb.py"), "route", "--model", SLUG, "--device", R9, "--relative"], capture_output=True, text=True, check=True).stdout
+        # a synthetic model (not a fleet model: a real one may get a node any day) matches no node
+        with tempfile.TemporaryDirectory() as d:
+            cfgp = Path(d, "llm_config.json")
+            cfgp.write_text(json.dumps(dict(CFG, slug="synthetic-no-node-loom")))
+            none = subprocess.run([sys.executable, str(KB / "kb.py"), "route", "--config", str(cfgp), "--slug", "synthetic-no-node-loom", "--device", R9, "--relative"],
+                                  capture_output=True, text=True, check=True).stdout
         self.assertNotIn("model/", "\n".join(l for l in none.splitlines() if not l.startswith("#")))
 
 

@@ -118,12 +118,16 @@ or a few selector nodes (`device/...`, `quant/...`, `arch/...`, `facet/...`); if
 ## 3 Prove which models it touches
 
 ```bash
-W=<work dir on disk, not /tmp>; PY=python3 (with gguf installed)
+W=<work dir on disk, not /tmp>; PY=$W/venv/bin/python   # python3 -m venv $W/venv && $W/venv/bin/pip install gguf numpy jinja2 pyyaml
+$PY fleet/preflight.py                                     # one error naming every missing package (build_fleet.py and scope_lint.py --local run it too)
 $PY fleet/build_fleet.py --ref origin/<integration branch> --out $W/base --jobs 12     # CPU only, both targets, ~2 min
 $PY fleet/build_fleet.py --tree .                          --out $W/head --jobs 12
 $PY fleet/diff_fleet.py $W/base $W/head --json $W/impact.json --md $W/impact.md
 $PY fleet/scope_lint.py --local --pr-body $W/pr_body.md --impact $W/impact.json   # checks files vs kind, leak, protected, registry, kb lint
 ```
+`build_fleet.py` exits 1 and prints `FAILED n model(s): ...` when any model fails to build; `diff_fleet.py` refuses (exit 1) a build
+dir that lacks a manifest model or whose `summary.json` records failures (`--models A,B` compares a subset). `scope_lint.py --local`
+lints HEAD plus uncommitted changes and new (non-ignored) files.
 The impact report lists per model the changed files, kernels, GPU target (gfx11 / gfx12 / both), card rows and the stratum
 signature. It must match the declared scope: a model outside it is a leak. Fix the scope rule (tighter `when`), not the lint. A
 change meant to alter nothing (refactor, docs, tooling) must show an empty diff: that is the invariant, see [campaign.md](campaign.md).

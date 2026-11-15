@@ -30,9 +30,9 @@ Checks (exit 1 and one precise message per violation):
               CHOICE / NOT / helper, needs architecture
   5 kb lint   `kb.py lint` (structure) on the head tree
 
---local: BASE = merge-base of HEAD with origin/refactor (else origin/r9700, else origin/main); HEAD = the working tree's HEAD; when
+--local: BASE = merge-base of HEAD with origin/refactor (else origin/r9700, else origin/main); HEAD = the working tree (HEAD plus uncommitted changes and new files); when
 a change can affect programs and no --impact is given, builds the fleet at both (CPU, ~2 min) with fleet/build_fleet.py.
-Stdlib only. Imports skills/loom-kb/resolve.py when the tree has it (the matcher of the router and the build), else a built-in
+Stdlib only (--local building the fleet needs gguf numpy jinja2 pyyaml: checked up front, fleet/preflight.py). Imports skills/loom-kb/resolve.py when the tree has it (the matcher of the router and the build), else a built-in
 copy of its documented match semantics.
 """
 import argparse
@@ -548,11 +548,35 @@ def local_base(repo):
     raise SystemExit("--local: none of origin/refactor, origin/r9700, origin/main exists; pass --base")
 
 
+def local_head(repo):
+    """HEAD with the uncommitted working-tree changes (tracked edits and new files that are not ignored) as one dangling commit,
+    so --local lints what would be committed; HEAD itself when the tree is clean."""
+    if not git(repo, "status", "--porcelain").strip():
+        return "HEAD"
+    idx = tempfile.mktemp(prefix="scope_lint_index_")
+    env = dict(os.environ, GIT_INDEX_FILE=idx, GIT_AUTHOR_NAME="scope-lint", GIT_AUTHOR_EMAIL="x@x", GIT_COMMITTER_NAME="scope-lint", GIT_COMMITTER_EMAIL="x@x")
+    try:
+        for cmd in (["read-tree", "HEAD"], ["add", "-A"]):
+            r = subprocess.run(["git", "-C", repo, *cmd], capture_output=True, text=True, env=env)
+            if r.returncode:
+                raise SystemExit(f"--local: git {cmd[0]}: {r.stderr.strip()}")
+        tree = subprocess.run(["git", "-C", repo, "write-tree"], capture_output=True, text=True, env=env, check=True).stdout.strip()
+        sha = subprocess.run(["git", "-C", repo, "commit-tree", tree, "-p", "HEAD", "-m", "scope-lint working tree"], capture_output=True, text=True, env=env, check=True).stdout.strip()
+    finally:
+        if os.path.exists(idx):
+            os.remove(idx)
+    print(f"--local: the working tree has uncommitted changes; linting them as {sha[:10]} on top of HEAD", file=sys.stderr)
+    return sha
+
+
 def build_impact(repo, base, out_dir):
     """Fleet impact of REPO's working tree against BASE (needs a python with gguf): returns the impact dict."""
     mb = git(repo, "merge-base", base, "HEAD").strip()
     bdir, hdir = os.path.join(out_dir, "base"), os.path.join(out_dir, "head")
     bf = os.path.join(repo, "fleet", "build_fleet.py")
+    sys.path.insert(0, os.path.join(repo, "fleet"))
+    import preflight   # noqa: E402  (the tools about to run need the same packages)
+    preflight.require()
     for cmd in ([sys.executable, bf, "--ref", mb, "--out", bdir], [sys.executable, bf, "--tree", repo, "--out", hdir]):
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=repo)
         if r.returncode:
@@ -580,7 +604,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     repo = os.path.abspath(a.repo)
     base = a.base or (local_base(repo) if a.local else None)
-    head = a.head or "HEAD"
+    head = a.head or (local_head(repo) if a.local else "HEAD")
     if not base:
         ap.error("--base is required (or --local)")
     text = a.scope_block if a.scope_block is not None else (Path(a.pr_body).read_text(encoding="utf-8") if a.pr_body else "")
