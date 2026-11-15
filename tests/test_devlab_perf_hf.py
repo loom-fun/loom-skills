@@ -16,6 +16,7 @@ def _fn():
     return "".join(lines)
 
 
+@unittest.skipIf(os.name == "nt", "devlab_perf.sh runs on the Linux DevLab runners only")
 class HfSub(unittest.TestCase):
     def test_cached_file_substituted(self):
         with tempfile.TemporaryDirectory() as w:
