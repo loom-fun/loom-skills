@@ -108,16 +108,28 @@ def build(a):
         n, rr = card_lib.sampling_plan(dec, a.fast_tps)   # the sampling rule (methodology rule 5): fast: 6 sessions, 3 samples per session
         n = a.reps or n
         nc = 4 if rr > 1 else 2
-        name = (dev["prefix"] + slug.lower().replace(".", "-"))[:40 - len(a.suffix)] + a.suffix
-        lr = a.llama_reps or (n if r9700 else 2)
-        steps = ([f"perf:{v}:1" for v in abba(n)] + [f"perf:{v}:1:long" for v in abba(n, start=1)]
-                 + [f"c4:{v}nd" for v in abba(nc)] + ["textmatch:fun", "textmatch:staging",
+        lr = a.llama_reps or (n if r9700 else 2)   # llama.cpp runs follow the full session count, not the sequential start
+        # --sequential (methodology.json "sequential"): a normal-speed model starts at 2+2 sessions and the job extends itself to 6+6 where a
+        # row's ratio lands within 2 points of its reject threshold (the "extend" step below); a fast model keeps its fixed 6 sessions
+        seq = a.sequential and rr == 1 and not a.reps
+        if seq:
+            n = card_lib.registry.methodology()["sequential"]["start_sessions_per_side"]
+        # --replica R (1-based): the R-th of --replicas independent runs of the same A/B, a job of its own (name suffix -rR from R=2) that a
+        # second runner takes; the ABBA order is rotated by R-1 pairs so the two replicas do not share a session order
+        replica = getattr(a, "replica", 1)   # set by build_replicas
+        rot = replica - 1
+        sfx = a.suffix + (f"-r{replica}" if replica > 1 else "")
+        name = (dev["prefix"] + slug.lower().replace(".", "-"))[:40 - len(sfx)] + sfx
+        ext = [f"extend:{card_lib.registry.methodology()['sequential']['extend_to']}:{n}:{rot}"] if seq else []
+        steps = ([f"perf:{v}:1" for v in abba(n, start=rot)] + [f"perf:{v}:1:long" for v in abba(n, start=1 + rot)]
+                 + [f"c4:{v}nd" for v in abba(nc, start=rot)] + ext + ["textmatch:fun", "textmatch:staging",
                   "func:staging", "ktest:staging", *([f"gates:staging:{a.gates}"] if a.gates else []),
                   *([] if not a.baselines else [f"llama@rocm.np1:{lr}", f"llama@rocm.np1:{lr}:long", "llamac4@rocm.nodraft",
                                                f"llama@vulkan.np1:{lr}", f"llama@vulkan.np1:{lr}:long", "llamac4@vulkan.perslot.nodraft"])])
         if not r9700:
             jobs.append({
-                "name": name, "runner": dev["runner"], **({"repeat_rows": rr} if rr > 1 else {}), "card": new, "memory_bytes": m["memory_bytes"],
+                "name": name, "runner": dev["runner"], **({"replica": replica} if replica > 1 else {}), **({"repeat_rows": rr} if rr > 1 else {}),
+                "card": new, "memory_bytes": m["memory_bytes"],
                 "kit": m["kit"], "llamacpp": m.get("llamacpp") or dev["llamacpp"], "llamacpp_vulkan": dev["vulkan"],
                 "variants": [{"name": "fun", "card": old}, {"name": "staging"},
                              {"name": "funnd", "card": old, "execution": {"draft_depth": 0}},
@@ -139,7 +151,7 @@ def build(a):
                                    "execution": {**o["execution"], **extra}}
         jobs.append({
             **{k: v for k, v in jf.items() if k == "llama_kv_rocm"},
-            "name": name, "runner": dev["runner"], **({"repeat_rows": rr} if rr > 1 else {}), "card": new,
+            "name": name, "runner": dev["runner"], **({"replica": replica} if replica > 1 else {}), **({"repeat_rows": rr} if rr > 1 else {}), "card": new,
             **{k: v for k, v in jf.items() if k != "llama_kv_rocm"}, "kit": m["kit"], "llamacpp": dev["llamacpp"], "llamacpp_vulkan": dev["vulkan"],
             "variants": [ov("fun", {}), nv("staging", ex_ctx), ov("funnd", {"draft_depth": 0}), nv("stagingnd", {**ex_ctx, "draft_depth": 0})],
             "steps": steps})
@@ -175,12 +187,30 @@ def parser(device=None):
     ap.add_argument("--baselines", action="store_true", help="also run the llama.cpp ROCm + Vulkan rows (off: the A/B compares Loom with Loom; no llama.cpp re-measure)")
     ap.add_argument("--llama-reps", type=int, default=None, help="llama.cpp runs per 1-stream row (default: 2 on Strix Halo; on the R9700 the Loom session count, as r9700_jobs.py)")
     ap.add_argument("--suffix", default="", help="appended to the job name (a confirming re-run: -r2)")
+    ap.add_argument("--replicas", type=int, default=1, help="independent runs of the A/B per model, all in this one perf.json: replica 1 is the job as before, "
+                    "replica R>1 the same job named ...-rR with its ABBA order rotated; a workflow run takes the jobs in parallel on different runners, "
+                    "so the ratchet's confirming run (promote_check.py, first = replica 1) costs no second queue wait. A targeted change: --replicas 2")
+    ap.add_argument("--sequential", action="store_true", help="methodology.json 'sequential': start at 2+2 sessions, the job extends itself to 6+6 where a "
+                    "row's ratio is within 2 points of its reject threshold (a step 'extend:TO:HAVE:ROT', devlab_perf.sh + ab_extend.py); a fast model keeps its 6")
     return ap
+
+
+def build_replicas(a):
+    """build(a) for replica 1 alone (--replicas 1: the document as before, byte for byte); more replicas append the other replicas' jobs
+    (same runner, perf.json order: all replica 1 jobs, then replica 2, ...) to the one document."""
+    a.replica = 1
+    doc = build(a)
+    for r in range(2, a.replicas + 1):
+        a.replica = r
+        doc["jobs"] += build(a)["jobs"]
+    if a.replicas > 1:
+        doc["_comment"] += f" {a.replicas} replicas per model (jobs ...-r2 ...): independent runs on different runners (the ratchet's confirming run)."
+    return doc
 
 
 def main(argv=None, device=None):
     a = parser(device).parse_args(argv)
-    json.dump(build(a), sys.stdout, indent=1)
+    json.dump(build_replicas(a), sys.stdout, indent=1)
     print()
 
 

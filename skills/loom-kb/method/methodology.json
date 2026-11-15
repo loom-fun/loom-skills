@@ -200,6 +200,7 @@
   "ratchet": {
     "rule": "promote a (model, GPU) package when every row >= baseline - band, gates pass, and greedy text matches or is a near-tie",
     "improvements": "reach a card only after 2 confirming runs",
+    "confirming_runs_note": "the 2 runs may be submitted together as concurrent replicas (ab_jobs.py --replicas 2: first = replica 1, confirming = replica 2) on different runners; promote_check.py records the runner names, and two runs on one runner are two session sets of one machine (said so, still two runs)",
     "store": "fleet/baselines.json"
   },
   "band_calibration_aa": {

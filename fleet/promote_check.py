@@ -5,7 +5,8 @@ usage: promote_check.py --model SLUG --gpu strix-halo|radeon-r9700 COMPARE.json 
                        [--baselines fleet/baselines.json] [--methodology M.json] [--near-tie] [--json OUT]
 
 COMPARE*.json: strix_ab_compare.py outputs of the same A/B (old = the published package, new = the HEAD build), oldest first;
-a second file is the confirming re-run. Decision, per methodology.json's ratchet rule:
+a second file is the confirming re-run, or the second replica of one submission (ab_jobs.py --replicas 2: the two runs executed concurrently
+on different runners; the first file = replica 1, the confirming = replica 2; the rule below is unchanged, only the wall time halves). Decision, per methodology.json's ratchet rule:
   promote           every row >= published - band, the gates pass, the greedy text matches (or is a near-tie: --near-tie), and no
                     improvement is waiting for confirmation
   improved-pending  nothing regressed, but a row improved by more than its band in fewer than `confirming_runs` (2) runs: the
@@ -87,8 +88,12 @@ def check(slug, gpu, compares, baselines=None, meth=None, near_tie=False, rows_o
             ratio = e["new"] / b[r]["value"]
             if ratio < 1 - 2 * meth["bands"][r][0]:
                 drift.append({"row": r, "new": e["new"], "baseline": b[r]["value"], "ratio": round(ratio, 3), "run": b[r].get("run")})
+    runners = [c.get("runner") for c in compares]
+    # the runs may be concurrent replicas (ab_jobs.py --replicas 2): record the runners; two runs on ONE runner are still two session sets,
+    # but they share that runner's state, so say so (methodology rule: the confirming run should be on a different runner)
+    same_runner = len(runners) > 1 and len(set(runners)) < len(runners) and all(runners)
     return {"model": slug, "gpu": gpu, "decision": decision, "reasons": reasons, "rows": rows, "baseline_drift": drift,
-            "bands": meth["source"]}
+            "bands": meth["source"], "runners": runners, "same_runner": same_runner}
 
 
 def main():
@@ -106,6 +111,8 @@ def main():
     print(f"{a.model} on {a.gpu}: {res['decision']}")
     for r in res["reasons"]:
         print("  ", r)
+    if len(res["runners"]) > 1:
+        print("   runs on: " + ", ".join(str(r) for r in res["runners"]) + ("  (the SAME runner: two session sets, not two machines)" if res["same_runner"] else ""))
     for d in res["baseline_drift"]:
         print(f"   baseline drift {d['row']}: {d['new']} vs published {d['baseline']} ({d['ratio']})")
     if a.json:

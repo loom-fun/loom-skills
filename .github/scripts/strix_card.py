@@ -47,6 +47,7 @@ ap.add_argument("--first-run", help="the first run's Actions run id (with --firs
 ap.add_argument("--gates-job", help="a later job of the same package that ran the kernel tests and gates (a gates-only job, e.g. after a tooling fix): "
                 "their evidence (device, run, time) comes from it instead of --job")
 ap.add_argument("--gates-run", help="that job's Actions run id (with --gates-job)")
+ap.add_argument("--accept-gate-failure", action="append", help="a failed gate a person accepted (e.g. ktest:staging); it stays failed on the card")
 ap.add_argument("--upload", action="store_true")
 a = ap.parse_args()
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download  # noqa: E402
@@ -79,7 +80,7 @@ if a.first_cmp:
              # the first run's job has no -rN suffix; ab_jobs truncates names to 40 characters, so the confirming job's stem is a prefix
 src = ["--run", a.run, "--url", url, "--device", dev, "--hrx-loom", hrx, "--source-kind", "devlab"]
 run(PY, f"{C}/make_info.py", "remeasure", "--cmp", a.cmp, "--package", out, "--compared-repo", f"loom-fun/{slug}", "--compared-revision", rev,
-    "--fetched-programs", fetched, *first, "--date", end[:10], *src, "-o", f"{W}/ev_rm.json")
+    "--fetched-programs", fetched, *first, *[x for g in (a.accept_gate_failure or []) for x in ("--accept-gate-failure", g)], "--date", end[:10], *src, "-o", f"{W}/ev_rm.json")
 GJ, gsrc, gend = J, src, end
 if a.gates_job:
     GJ = os.path.abspath(a.gates_job)

@@ -2,7 +2,9 @@
 """One command per campaign step: regenerate the cards of many models on one or more devices, resumable, state in one JSON file.
 
   regen.py plan    --device D [--device D2] [--mode ab|card] [--slugs S... | --all] [--old ORG|refs.json] [--batch N] --state S.json
-  regen.py submit  S.json [--dry-run] [--max-batches N]    experiment branch + perf.json + PR + label per batch (REST), R9700-class devices first
+                   [--replicas 2] [--sequential] [--no-baselines] [--priority]   a narrow change: confirming run as a parallel replica, 2+2 -> 6+6, no llama.cpp
+  regen.py submit  S.json [--dry-run] [--max-batches N] [--max-inflight N|auto]   experiment branch + perf.json + PR + label per batch (REST), priority
+                   batches and R9700-class devices first; --max-inflight sends a sweep in waves (default: all at once)
   regen.py poll    S.json                                  ONE poll of the runs (exit 0: nothing pending, 10: jobs pending); loop it every >= 120 s
   regen.py collect S.json                                  download each finished job into a fresh dir, compare, per-row verdicts
   regen.py rerun   S.json [--dry-run]                      confirming -r2 jobs for models whose verdict needs one, new batch (then: submit)
@@ -170,8 +172,12 @@ def generator_cmd(st, device, slugs, suffix=""):
         cmd = [PY, os.path.join(SCRIPTS, "ab_jobs.py"), "--device", device, "--gates", d["gates"], "--new-org", d["new_org"], "--old-org", d["old_org"]]
         if d.get("refs"):
             cmd += ["--refs", d["refs"]]
-        if device != "strix-halo":
+        if device != "strix-halo" and not d.get("no_baselines"):
             cmd += ["--baselines"]
+        if d.get("replicas", 1) > 1 and not suffix:
+            cmd += ["--replicas", str(d["replicas"])]   # independent replicas of one submission: the ratchet's confirming run in parallel
+        if d.get("sequential"):
+            cmd += ["--sequential"]   # 2+2 sessions, the job extends itself to 6+6 near a reject threshold
         if suffix:
             cmd += [f"--suffix={suffix}"]
     else:
@@ -201,7 +207,7 @@ def gen_jobs(st, device, slugs, suffix=""):
         j["runner"] = key
         if st["mode"] == "card":
             j["name"] = f"{key[0]}c-{j['name']}"[:40 - len(suffix)] + suffix   # a card job per device: names differ across devices
-        elif suffix and not j["name"].endswith(suffix):
+        elif suffix and not j["name"].endswith(suffix) and not j.get("replica"):
             j["name"] = j["name"][:40 - len(suffix)] + suffix
     got = {slug_of(j) for j in doc["jobs"]}
     return doc, doc["jobs"], [s for s in slugs if s not in got]
@@ -235,9 +241,13 @@ def cmd_plan(a):
         # pin the new package of every slug to the staging revision it is measured at (the card the run measures is the card ingested)
         refs = {s: dict(e) for s, e in (refs or {}).items()}
         for s in slugs:
-            refs.setdefault(s, {}).setdefault("new", f"{a.new_org}/{s}@{hf_head(f'{a.new_org}/{s}')}")
+            ent = refs.setdefault(s, {})
+            if "new" not in ent:
+                ent["new"] = f"{a.new_org}/{s}@{hf_head(f'{a.new_org}/{s}')}"
     st = {"schema": "regen/1", "created": now(), "mode": a.mode, "work": work, "state": state_path,
-          "opts": {"gates": a.gates, "new_org": a.new_org, "old_org": old_org, "batch": a.batch, "refs": None},
+          "opts": {"gates": a.gates, "new_org": a.new_org, "old_org": old_org, "batch": a.batch, "refs": None,
+                   **({"replicas": a.replicas} if a.replicas > 1 else {}), **({"sequential": True} if a.sequential else {}),
+                   **({"no_baselines": True} if a.no_baselines else {})},
           "devices": devices, "batches": [], "jobs": {}, "log": []}
     for dev in devices:
         # per-device refs file. Where the device has no published table to compare with (anything but Strix Halo, whose old package is the
@@ -260,12 +270,22 @@ def cmd_plan(a):
             bid = len(st["batches"])
             pj = os.path.join(work, "batches", f"{bid}.perf.json")
             json.dump(doc, open(pj, "w"), indent=1)
-            st["batches"].append({"id": bid, "device": dev, "perf": pj, "jobs": [j["name"] for j in jobs], "round": 1, "stage": "planned"})
+            st["batches"].append({"id": bid, "device": dev, "perf": pj, "jobs": [j["name"] for j in jobs], "round": 1, "stage": "planned",
+                                  **({"priority": True} if a.priority else {})})
+            first = {}
             for j in jobs:
                 e = (dref or {}).get(slug_of(j)) or {}
-                st["jobs"][j["name"]] = {"slug": slug_of(j), "device": dev, "batch": bid, "round": 1, "stage": "planned",
+                rep_no = j.get("replica", 1)
+                st["jobs"][j["name"]] = {"slug": slug_of(j), "device": dev, "batch": bid, "round": rep_no, "stage": "planned",
                                          "card": j["card"], "steps": len(j["steps"]),
                                          "aa": bool(e.get("old") and e.get("old") == e.get("new"))}   # old == new: the A/B shows noise only
+                if rep_no == 1:
+                    first[slug_of(j)] = j["name"]
+            for j in jobs:   # a replica is a confirming run submitted with the first: the same links `rerun` makes (prev, rerun_of_me)
+                if j.get("replica", 1) > 1:
+                    f = first[slug_of(j)]
+                    st["jobs"][j["name"]].update(prev=f, replica=j["replica"])
+                    st["jobs"][f]["rerun_of_me"] = j["name"]
     st["opts"]["refs"] = None
     os.makedirs(os.path.dirname(state_path) or ".", exist_ok=True)
     State.create(state_path, st).save()
@@ -307,16 +327,35 @@ def submit_batch(st, b, dry):
     st.save()
 
 
+def max_inflight(opt, device):
+    """The wave size for submit --max-inflight: None/0 = no cap (the default: all planned batches at once, as before), N, or 'auto' = the device's
+    runner count (device.json runner.concurrent_runners; a device without one is elastic: no cap)."""
+    if opt in (None, "0", 0):
+        return 0
+    if opt == "auto":
+        return int(card_lib.registry.device(device)["runner"].get("concurrent_runners") or 0)
+    return int(opt)
+
+
 def cmd_submit(a):
     st = State(a.state)
     todo = [b for b in st.d["batches"] if b["stage"] == "planned"]
-    todo.sort(key=lambda b: (device_order(b["device"]), b["id"]))   # R9700-class (few runners) first: their queue is the long one
+    todo.sort(key=lambda b: (not b.get("priority"), device_order(b["device"]), b["id"]))   # priority batches, then R9700-class (few runners): their queue is the long one
     if a.max_batches:
         todo = todo[:a.max_batches]
     if not todo:
         print("nothing to submit")
+    flying = {}   # device -> jobs of this state submitted and not yet finished (the wave in the queue)
+    for e in st.jobs.values():
+        if e["stage"] in ("submitted", "queued", "running"):
+            flying[e["device"]] = flying.get(e["device"], 0) + 1
     for b in todo:
+        cap = max_inflight(a.max_inflight, b["device"])
+        if cap and not b.get("priority") and flying.get(b["device"], 0) and flying.get(b["device"], 0) + len(b["jobs"]) > cap:
+            print(f"batch {b['id']} ({b['device']}, {len(b['jobs'])} jobs) waits for the next wave: {flying[b['device']]} in flight, cap {cap}")
+            continue
         submit_batch(st, b, a.dry_run)
+        flying[b["device"]] = flying.get(b["device"], 0) + len(b["jobs"])
 
 
 # ---------------------------------------------------------------- poll
@@ -400,6 +439,11 @@ def read(path, default=None):
         return default
 
 
+def prev_cmp(st, e):
+    """the compare of the first run (a round-2 job, or a replica) when it has one"""
+    return e.get("prev") and st.jobs[e["prev"]].get("cmp")
+
+
 def compare(st, name, e, d):
     """strix_ab_compare.py of an A/B job -> cmp.json; the round-2 compare reads --prev (the first run's)."""
     cmp = os.path.join(st.work, "cmp", f"{name}.json")
@@ -407,8 +451,8 @@ def compare(st, name, e, d):
     cmd = [PY, os.path.join(SCRIPTS, "strix_ab_compare.py"), d, "--json", cmp]
     if e["device"] == "strix-halo" and st.d["opts"]["old_org"] == "loom-fun":
         cmd += ["--fun-info", hf_file(f"{st.d['opts']['old_org']}/{e['slug']}", "info.json")]   # new vs the published card value too
-    if e.get("prev"):
-        cmd += ["--prev", st.jobs[e["prev"]]["cmp"]]
+    if prev_cmp(st, e):
+        cmd += ["--prev", prev_cmp(st, e)]
     sh(cmd)
     return cmp
 
@@ -468,7 +512,7 @@ def collect_one(st, name, e):
         return
     if mode == "ab":
         e["cmp"] = compare(st, name, e, d)
-        paths = ([st.jobs[e["prev"]]["cmp"]] if e.get("prev") else []) + [e["cmp"]]
+        paths = ([st.jobs[e["prev"]]["cmp"]] if prev_cmp(st, e) else []) + [e["cmp"]]
         decision, reasons, res = decide(st, name, e, paths)
         e["rows"] = {r: x["state"] for r, x in res["rows"].items()}
         e["improved"] = [r for r, x in res["rows"].items() if "improved" in x["verdicts"] and x["state"] != "rerun"]
@@ -493,6 +537,8 @@ def cmd_collect(a):
     for name, e in list(st.jobs.items()):
         if e["stage"] not in ("done", "failed"):
             continue
+        if e.get("prev") and st.jobs[e["prev"]]["stage"] in ("planned", "submitted", "queued", "running", "done", "failed"):
+            continue   # a replica is judged with its first run: that one is collected first
         collect_one(st, name, e)
         st.log(f"{e['slug']} {e['device']} r{e['round']}: {e['stage']} ({e.get('decision')}) {e.get('reason', '')[:140]}")
         st.save()
@@ -511,6 +557,10 @@ def cmd_rerun(a):
             want.setdefault(e["device"], []).append((name, e))
     if not want:
         print("no confirming runs needed")
+        return
+    if a.dry_run:
+        for dev, items in sorted(want.items(), key=lambda kv: device_order(kv[0])):
+            print(f"would queue a confirming batch ({dev}): {', '.join(e['slug'] for _, e in items)}")
         return
     for dev, items in sorted(want.items(), key=lambda kv: device_order(kv[0])):
         slugs = [e["slug"] for _, e in items]
@@ -603,6 +653,9 @@ def ingest_strix(st, name, e, W):
     on this package (make_info.py remeasure; strix_card.py is the recipe)."""
     run = e["run"]
     cmd = [PY, os.path.join(SCRIPTS, "strix_card.py"), e["slug"], "--job", e["dir"], "--cmp", e["cmp"], "--run", run, "--work", os.path.dirname(W)]
+    if e.get("prev"):   # the confirming run: strix_card.py takes rows faster in both runs onto the card (the ratchet)
+        first = st.jobs[e["prev"]]
+        cmd += ["--first-cmp", first["cmp"], "--first-run", first["run"]]
     r = sh(cmd, check=False)
     if r.returncode:
         raise RuntimeError((r.stdout + r.stderr)[-1500:])
@@ -635,6 +688,8 @@ def cmd_ingest(a):
             st.save()
             continue
         e.update(stage="ingested", card_dir=out, parent=parent, message=msg)
+        if str(e.get("reason", "")).startswith("ingest failed"):
+            e.pop("reason")   # a retried ingest that works leaves no stale failure text
         st.log(f"{e['slug']} {e['device']}: card built ({'full table' if full else 'Strix re-measure line'}) at {out}")
         st.save()
     if not todo:
@@ -702,10 +757,13 @@ def cmd_accept(a):
     for name, e in st.jobs.items():
         if e["slug"] in a.slug and e["stage"] == "needs_decision" and e.get("cmp") and "greedy text" in (e.get("reason") or ""):
             st.d["opts"]["near_tie"].append(e["slug"])
-            paths = ([st.jobs[e["prev"]]["cmp"]] if e.get("prev") else []) + [e["cmp"]]
+            paths = ([st.jobs[e["prev"]]["cmp"]] if prev_cmp(st, e) else []) + [e["cmp"]]
             decision, reasons, res = decide(st, name, e, paths)
             e["decision"], e["reason"] = decision, "; ".join(reasons)
-            e["stage"] = "collected" if decision == "promote" else "needs_decision"
+            if decision == "promote" or (decision in ("rerun", "improved-pending") and e["round"] == 1):
+                e["stage"] = "collected"     # round 1: `rerun` queues the confirming job, as collect does
+            else:
+                e["stage"] = "needs_decision"
             e["accepted"] = f"near-tie text accepted: {a.note}"
             st.log(f"{e['slug']} {e['device']}: near-tie accepted -> {e['stage']} ({decision})")
     st.save()
@@ -742,6 +800,12 @@ def main(argv=None):
     p.add_argument("--work", help="work directory (default: STATE.d next to the state file)")
     p.add_argument("--state", required=True)
     p.add_argument("--force", action="store_true")
+    p.add_argument("--replicas", type=int, default=1, help="ab mode: runs of the A/B per model in ONE submission (2 = the ratchet's confirming run as a parallel "
+                   "replica on another runner; collect decides on the pair). A targeted change: 2")
+    p.add_argument("--sequential", action="store_true", help="ab mode: 2+2 sessions, each job extends itself to 6+6 where a row is within 2 points of its reject threshold")
+    p.add_argument("--no-baselines", action="store_true", help="ab mode on a device with a memory pool: no llama.cpp re-measure (a targeted change compares Loom with Loom; "
+                   "about 40 percent of a small model's job)")
+    p.add_argument("--priority", action="store_true", help="the batches of this plan go to the head of the next submit wave and ignore --max-inflight (a targeted job, not a sweep)")
     p.set_defaults(fn=cmd_plan)
     for name, fn in (("submit", cmd_submit), ("poll", cmd_poll), ("collect", cmd_collect), ("rerun", cmd_rerun), ("ingest", cmd_ingest),
                      ("publish", cmd_publish), ("status", cmd_status), ("adopt", cmd_adopt), ("accept", cmd_accept)):
@@ -752,6 +816,8 @@ def main(argv=None):
             q.add_argument("--dry-run", action="store_true")
         if name == "submit":
             q.add_argument("--max-batches", type=int)
+            q.add_argument("--max-inflight", default=None, help="N jobs per device in the queue at once, or auto = the device's runner count: a sweep goes out in "
+                           "waves (call submit again as jobs finish), so a priority job queued meanwhile waits at most one wave. Default: no cap")
         if name == "status":
             q.add_argument("--status-json")
         if name == "accept":
