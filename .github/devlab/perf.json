@@ -1,46 +1,132 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "R9700 A/B (ab_jobs.py): per model one job on one R9700 runner, old package (fun) vs new package (staging), served as the new card's R9700 Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: none",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "rab-ggml-org-qwen2-5-vl-7b-instruct-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/ggml-org-Qwen2.5-VL-7B-Instruct-loom@e62c020449a8bed2256ba775d0323ed64454903f",
+   "memory_bytes_r9700": 21000000000,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "staging"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "rab-ggml-org-qwen3-1-7b-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/ggml-org-Qwen3-1.7B-loom@b039373a63625de5f43b84c3e51d59a1babe25d9",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 17000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "rab-ggml-org-qwen3-14b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/ggml-org-Qwen3-14B-loom@feeddc1fcc3041784aaf1489e2e5b392d2480329",
+   "memory_bytes_r9700": 31000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "rab-ggml-org-qwen3-4b-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom@deeae93296bfc20e2d0dbdcfb6636e24f598ae95",
+   "memory_bytes_r9700": 25000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "rab-ggml-org-qwen3-coder-30b-a3b-instruc",
+   "runner": "r9700",
+   "card": "loom-fun-staging/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom@89f09b8eb0ed3602ab25b5be486e53a8b0879ccc",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 94208,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "context": 94208
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/ggml-org-Qwen2.5-VL-7B-Instruct-loom@e62c020449a8bed2256ba775d0323ed64454903f",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
