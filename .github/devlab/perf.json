@@ -1,46 +1,144 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "R9700 A/B (ab_jobs.py): per model one job on one R9700 runner, old package (fun) vs new package (staging), served as the new card's R9700 Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: none",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "rab-bartowski-qwen2-5-1-5b-instruct-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/bartowski-Qwen2.5-1.5B-Instruct-loom@132cefd709bc4626da0f554f29a3a5f13c5640bf",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 8000000000,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "llama_kv_rocm": 40960,
+   "name": "rab-bartowski-qwen2-5-32b-instruct-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom@9480e082c5502dd4853bad0ed565e13bae5da530",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 24576,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
     {
-     "name": "nodraft",
-     "build": {},
+     "name": "staging",
+     "context": 24576,
      "execution": {
-      "draft_depth": 0
+      "context_capacity": 24576,
+      "pool_capacity": 24576
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "rab-bartowski-qwen2-5-7b-instruct-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/bartowski-Qwen2.5-7B-Instruct-loom@0517ced98d0b8dffef919f677ee7ea0992b426f0",
+   "memory_bytes_r9700": 15000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "rab-bartowski-qwen3-8-27b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom@141cdc1076398a96105f38410b336b088811f8ca",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 124928,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "context": 124928
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "rab-bartowski-spark-x2-6-4b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/bartowski-Spark-X2.6-4B-loom@3d3bd341976d8d20e2c2e02576141678b7ccb79e",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 194560,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "context": 194560,
+     "execution": {
+      "context_capacity": 194560,
+      "pool_capacity": 194560
+     }
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/bartowski-Qwen2.5-1.5B-Instruct-loom@132cefd709bc4626da0f554f29a3a5f13c5640bf",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
