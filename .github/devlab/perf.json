@@ -1,46 +1,115 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "R9700 A/B (ab_jobs.py): per model one job on one R9700 runner, old package (fun) vs new package (staging), served as the new card's R9700 Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: bartowski-Ornith-1.5-122B-loom",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "llama_kv_rocm": 36864,
+   "name": "rab-bartowski-nanbeige4-3-33b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/bartowski-Nanbeige4.3-33B-loom@978250b8029c21d299e93713fe714c6c2f138d87",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 37888,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
+     "name": "staging",
+     "context": 37888,
      "execution": {
-      "draft_depth": 0
+      "context_capacity": 37888,
+      "pool_capacity": 37888
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "rab-bartowski-ornith-1-5-35b-a3b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/bartowski-Ornith-1.5-35B-A3B-loom@1dd6063a1b0a15a400a15948fad944f9971bc293",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 55296,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "context": 55296
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "rab-bartowski-ornith-1-5-9b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/bartowski-Ornith-1.5-9B-loom@77d61bc8d88eb2ec4e625fcb9bfb57b2f35ae1c0",
+   "memory_bytes_r9700": 32000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "rab-bartowski-qwen2-5-0-5b-instruct-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom@11f5e0216d0d5d2b29cd621a6510c4e8be19cde8",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 5000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/bartowski-Nanbeige4.3-33B-loom@978250b8029c21d299e93713fe714c6c2f138d87",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
