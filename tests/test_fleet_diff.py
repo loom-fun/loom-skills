@@ -133,10 +133,44 @@ class DiffTests(unittest.TestCase):
         self.assertEqual(r["models"]["m1"]["gpus"], ["gfx11", "gfx12"])
         self.assertEqual(r["models"]["m1"]["rows"], ["decode", "decode_2k", "decode_32k", "streams4"])
 
-    def test_kernel_gaining_a_target_attribute_is_changed_not_removed(self):
+    def single_target(self):
+        """PROG as a single-target (gfx11 only) build: no tags, no templates, no declarations, no twin, plain launches."""
+        t = PROG.replace(" target(@rdna3) export", " export").replace("target.decl @device\namdgpu.target<gfx11-generic> @rdna3\n"
+                         "amdgpu.target<gfx12-generic> @rdna4\n\n", "")
+        t = t.replace("template.decl @sel3_g_gemm_q4_k_store(%rows: index)\ntemplate.def<@sel3_g_gemm_q4_k_store> target(@rdna3) {\n"
+                      "  kernel.launch @g_gemm_q4_k_store[1](%rows)\n}\n\n", "")
+        t = t.replace("command.program.def target(@device)", "command.program.def").replace(
+            "template.apply<@sel3_g_gemm_q4_k_store>(%t)", "kernel.launch @g_gemm_q4_k_store[%t]()")
+        t = t.replace('kernel.def target(@rdna4) export("g_gemm_q4_k_store_rdna4") @g_gemm_q4_k_store_rdna4(%rows: index) {\n  // body B\n}\n\n', "")
+        self.assertNotIn("rdna4", t.replace("@rdna4", ""))
+        return t
+
+    def test_target_tag_alone_is_not_a_change(self):
         base = PROG.replace('kernel.def target(@rdna3) export("g_gemm_q4_k_store")', 'kernel.def export("g_gemm_q4_k_store")')
-        r = self.run_diff(PROG, base_text=base)
-        self.assertEqual([(x["symbol"], x["status"]) for x in r["models"]["m1"]["blocks"]], [("g_gemm_q4_k_store", "changed")])
+        self.assertEqual(self.run_diff(PROG, base_text=base)["summary"]["touched"], 0)
+
+    def test_dual_target_machinery_is_not_a_gfx11_change(self):
+        """Tag, template.decl/def, target.decl and launches rewritten as template.apply of the same kernel normalize away; the gfx12 twin
+        that arrives with them is a gfx12 change only (finding 1 of the replays: a device/rdna4 row must not read as gfx11)."""
+        r = self.run_diff(PROG, base_text=self.single_target())
+        m = r["models"]["m1"]
+        self.assertEqual(m["gpus"], ["gfx12"])
+        self.assertEqual([(x["symbol"], x["target"]) for x in m["blocks"]], [("g_gemm_q4_k_store_rdna4", "gfx12")])
+        self.assertNotIn("m2", r["models"])
+
+    def test_comments_between_blocks_do_not_make_a_change(self):
+        """A column-0 comment moving to the next block when a block is inserted between them is not a program change."""
+        head = PROG.replace("func.def inline @g_helper", "// Helper: identity.\nfunc.def inline @g_helper")
+        self.assertEqual(self.run_diff(head)["summary"]["touched"], 0)
+
+    def test_a_real_launch_change_is_still_a_change(self):
+        r = self.run_diff(PROG.replace("kernel.launch @g_gemm_q4_k_store[1](%rows)", "kernel.launch @g_gemm_q4_k_store[2](%rows)"),
+                          base_text=PROG)
+        self.assertEqual(r["models"]["m1"]["gpus"], ["gfx11"])
+        # the program launches a different kernel than the base: a (shared) command-program change
+        t = self.single_target()
+        r = self.run_diff(PROG, base_text=t.replace("@g_gemm_q4_k_store[%t]()", "@g_mv_q4_k_k1024_q8_r1[%t]()"))
+        self.assertIn(("llm_advance", "both"), [(x["symbol"], x["target"]) for x in r["models"]["m1"]["blocks"]])
 
     def test_unmapped_block_moves_all_rows_and_drafting_is_drafted_only(self):
         r = self.run_diff(PROG.replace("func.return %x", "func.return %x /*y*/"))

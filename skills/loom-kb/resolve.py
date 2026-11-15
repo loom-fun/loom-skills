@@ -27,6 +27,12 @@ Precedence, later wins: registry default < device family (device/<fam>) < device
 < arch root->leaf (arch/...) < facet (facet/<tag>) < model (cfg["choices"]). Two matching nodes at the same level (same
 depth for arch) setting one key to different values for one model is an error (ResolveError).
 
+Per-target choices: a choice declared per_target=True may be set by a rule whose `when`/`match` devices name one family
+(a twin K / K_rdna4 in one dual-target build). Where the families end up with different values the resolved value is
+{"rdna3": false, "rdna4": true} (default value for a family no rule reaches); the base variable carries the build's first
+family (rdna3: the gfx11 kernel) and `<ENV>__RDNA4` the twin's value, which the generator of the twin applies
+(flash2_rdna4.twin_env). A rule that names no device sets every family, as before.
+
 Devices: a choice that cannot differ between the two targets of one dual-target build (not per_target) may only be set by
 a rule whose devices cover every device family the choice affects; otherwise ResolveError.
 
@@ -350,34 +356,57 @@ def resolve_full(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=
                 node_devs = [parts[-1]] if lvl in (LEVELS["device_family"], LEVELS["device"]) else []
                 rule_devs = list(when.get("devices", [])) or node_devs or list(m.get("devices", []))
                 _check_devices(c, rule_devs, env.families, family_of, where)
-                contrib.setdefault(k, []).append(((lvl, depth), scope, c.check(v), ent.get("evidence", "")))
+                fams = {family_of(d) for d in rule_devs} if (rule_devs and c.per_target) else None
+                contrib.setdefault(k, []).append(((lvl, depth), scope, c.check(v), ent.get("evidence", ""), fams))
     for k, v in (cfg.get("choices") or {}).items():
         c = ch.CHOICES.get(k)
         if c is None:
             raise ResolveError(f"model choices: unknown choice {k!r}")
         try:
-            contrib.setdefault(k, []).append(((LEVELS["model"], 0), "model", c.check(v), "llm_config.json choices"))
+            contrib.setdefault(k, []).append(((LEVELS["model"], 0), "model", c.check(v), "llm_config.json choices", None))
         except ValueError as e:
             raise ResolveError(f"model choices: {e}")
-    chosen = {}
-    for k, items in contrib.items():
+    def pick(k, items):
+        if not items:
+            return None
         top = max(i[0] for i in items)
         at_top = [i for i in items if i[0] == top]
         if len({repr(i[2]) for i in at_top}) > 1:
             raise ResolveError(f"{k}: conflicting values at one level for this model: " +
                                ", ".join(f"{i[1]}={i[2]!r}" for i in at_top))
-        chosen[k] = {"value": at_top[0][2], "from": at_top[0][1], "evidence": at_top[0][3]}
+        return {"value": at_top[0][2], "from": at_top[0][1], "evidence": at_top[0][3]}
+
+    chosen, by_family = {}, {}   # by_family: {key: {family: value}} for a per_target choice whose value differs between families
+    for k, items in contrib.items():
+        if ch.CHOICES[k].per_target and any(i[4] is not None for i in items):
+            per = {f: pick(k, [i for i in items if i[4] is None or f in i[4]]) for f in sorted(env.families)}
+            if len({repr(p and p["value"]) for p in per.values()}) > 1:
+                dflt = ch.CHOICES[k].default(cfg, {}, {"draft_kind": kind, "families": sorted(env.families)}, kit)
+                vals = {f: (p["value"] if p else dflt) for f, p in per.items()}
+                if len({repr(v) for v in vals.values()}) > 1:
+                    by_family[k] = vals
+                    chosen[k] = {"value": vals, "from": ", ".join(sorted({p["from"] for p in per.values() if p})),
+                                 "evidence": " | ".join(dict.fromkeys(p["evidence"] for p in per.values() if p))}
+                    continue
+        chosen[k] = pick(k, items)
     # effective values in registry order (cfg-driven defaults read the values resolved before them), then exports
     ctx = {"draft_kind": kind, "families": sorted(env.families)}
     values, exports = {}, {}
+    base = "rdna3" if "rdna3" in env.families else sorted(env.families)[0]
     for k, c in ch.CHOICES.items():
         dflt = c.default(cfg, values, ctx, kit)
-        v = chosen[k]["value"] if k in chosen else dflt
+        if k in by_family:   # the gfx11 kernel (the build's first family) carries the base variable, a twin its own <ENV>__<FAMILY>
+            v = by_family[k][base]
+        else:
+            v = chosen[k]["value"] if k in chosen else dflt
         values[k] = v
         if k in chosen and (c.kits is None or kit in c.kits):
             ev, dv = c.to_env(v), c.to_env(dflt)
             if ev != dv:
                 exports[c.env] = ev
+            for f, fv in sorted(by_family.get(k, {}).items()):
+                if f != base and c.to_env(fv) != ev:
+                    exports[f"{c.env}__{f.upper()}"] = c.to_env(fv) if c.to_env(fv) is not None else ""
     return {"scopes": [s for _, s in sorted(matched)], "choices": {k: chosen[k] for k in ch.CHOICES if k in chosen},
             "devices": sorted(env.families), "facets": facets, "env": dict(sorted(exports.items())), "values": values}
 

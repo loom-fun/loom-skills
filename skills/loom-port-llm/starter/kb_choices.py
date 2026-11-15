@@ -77,6 +77,9 @@ def apply(cfg, draft_kind, environ=None, kit=None, devices=None, kit_dir=HERE):
         want = c.to_env(res["values"][c.key])
         if environ[env] != (want if want is not None else ""):
             dirty.append(c.key)
+    for env in [e for e in environ if e.endswith("__RDNA4") and e[:-7] in ch.BY_ENV]:   # a per-target twin value set by the caller
+        if environ[env] != res["env"].get(env, environ.get(env[:-7], "")):
+            dirty.append(ch.BY_ENV[env[:-7]].key)
     for env, val in res["env"].items():
         if env in environ:
             continue   # the caller's value wins (and is listed in dirty when it differs)

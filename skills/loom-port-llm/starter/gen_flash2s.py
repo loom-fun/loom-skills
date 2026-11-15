@@ -584,7 +584,8 @@ if os.environ.get("FLASH2_NAME"):
 if R4 and not PARTIAL:
     text = twin_names(text)
 elif not R4 and not PARTIAL and os.environ.get("LOOM_RDNA4", "1") != "0":   # the gfx12 twins K_rdna4 (flash2_rdna4.py) follow the kernels
-    subprocess.run([sys.executable, os.path.abspath(__file__)], check=True, env=dict(os.environ, FLASH2_ARCH="rdna4", FLASH2_OUT=out_path + ".rdna4"))
+    from flash2_rdna4 import twin_env   # a per-target choice's twin value (<ENV>__RDNA4)
+    subprocess.run([sys.executable, os.path.abspath(__file__)], check=True, env=dict(twin_env(os.environ), FLASH2_ARCH="rdna4", FLASH2_OUT=out_path + ".rdna4"))
     text += open(out_path + ".rdna4").read()
     os.remove(out_path + ".rdna4")
 open(out_path, "w", newline="\n").write(text)

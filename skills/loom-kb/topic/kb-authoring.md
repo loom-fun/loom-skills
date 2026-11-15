@@ -16,6 +16,10 @@
   `sliding_window`, `layers` as `[lo, hi]`, `recurrent_kv`. Each arch value belongs to exactly one family node.
 - `choices` is empty unless the node sets model-affecting choices (see `choices.py`). A new choice is opt-in by
   scope: its legacy value is today's behaviour and only the models the node matches change.
+- A rule for one GPU family: `"when": {"devices": ["rdna3"]}` on a choice entry. Only a key declared `per_target=True` in
+  `choices.py` may differ between the gfx11 kernel and its gfx12 twin in one build (a twin `K` / `K_rdna4`); the resolved value
+  is then `{"rdna3": false, "rdna4": true}` and the generator of the twin reads `<ENV>__RDNA4` (`flash2_rdna4.twin_env`).
+  Any other key needs a rule that covers every device it changes, else the resolver errors. Example: `arch/llm/moe/qwen3moe`.
 - Add a family: create `arch/llm/<topology>/<family>/{README.md,scope.json}`. Add a facet: `facet/<tag>/`.
   Add a topic: `topic/<name>.md`. Then run `python3 "${LOOM_SKILL_DIR}/kb.py" lint` (also in CI).
 - `kb.py lint` checks: SKILL.md <= 500 lines and frontmatter limits for every skill, node size and TOC, links,

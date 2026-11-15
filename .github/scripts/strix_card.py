@@ -75,7 +75,8 @@ first = []
 if a.first_cmp:
     fjobs = json.loads(run("gh", "run", "view", a.first_run, "-R", GH, "--json", "jobs", capture=True))["jobs"]
     first = ["--first-cmp", a.first_cmp, "--first-run", a.first_run, "--first-url",
-             next(j for j in fjobs if j["name"] in (job_name, re.sub(r"-r\d+$", "", job_name)))["url"]]   # the first run's job has no -rN suffix
+             next(j for j in fjobs if j["name"] == job_name or j["name"].startswith(re.sub(r"-r\d+$", "", job_name)))["url"]]
+             # the first run's job has no -rN suffix; ab_jobs truncates names to 40 characters, so the confirming job's stem is a prefix
 src = ["--run", a.run, "--url", url, "--device", dev, "--hrx-loom", hrx, "--source-kind", "devlab"]
 run(PY, f"{C}/make_info.py", "remeasure", "--cmp", a.cmp, "--package", out, "--compared-repo", f"loom-fun/{slug}", "--compared-revision", rev,
     "--fetched-programs", fetched, *first, "--date", end[:10], *src, "-o", f"{W}/ev_rm.json")

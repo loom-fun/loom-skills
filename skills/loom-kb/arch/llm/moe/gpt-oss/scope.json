@@ -10,5 +10,13 @@
  "facets": [
   "moe"
  ],
- "choices": []
+ "choices": [
+  {
+   "when": {},
+   "set": {
+    "moe.decode.rows_per_wg": 8
+   },
+   "evidence": "gpt-oss-20b (4 experts x 2880 ffn): the #247 rule (aim ~3000 workgroups) picks R=2 (g_moe_gu/dn_mxfp4_k2880_r2); loom-fun's package ran R=8. Strix streams4 vs loom-fun 0.908 / 0.939 (runs 43633426669, 43646278564). Rule: R=8 restores the old expert matvecs (PR pending)."
+  }
+ ]
 }

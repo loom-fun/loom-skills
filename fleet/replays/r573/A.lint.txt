@@ -1,28 +1,28 @@
 exit 1
 ### Scope lint: FAIL
 kind `horizontal`; scopes `device/rdna4`; kernels `gemm`, `attention_prefill`; 7 file(s) changed.
-Program impact: 50 model(s) touched; leaked outside the declared scope: 50 (leak rate 100%).
+Program impact: 50 model(s) touched; leaked outside the declared scope: 31 (leak rate 62%).
 
 | rule | problem |
 |---|---|
 | protected | skills/loom-port-llm/starter/dual_target.py is a protected core file (twin / target machinery); changing it needs kind: architecture |
 | protected | skills/loom-port-llm/starter/kb_choices.py is a protected core file (starter copy of the choice reader); changing it needs kind: architecture |
 | registry | registry key 'target.rdna4_twins' changed (legacy); legacy/env/type/derive define today's behaviour; needs kind: architecture |
-- note: leak declared (every model gets gfx12 twin kernels appended to its programs (gfx11 text unchanged)): 50 of 50 model(s) outside the scope
-- leaked: `InternScience-Sage-A1.5-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules moe, unmapped, vision)
-- leaked: `XHToken-Spark-X2.5-4B-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules unmapped)
-- leaked: `bartowski-LFM3-1.7B-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules unmapped)
-- leaked: `bartowski-Mellum2.1-12B-A2.5B-Thinking-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules moe, unmapped)
-- leaked: `bartowski-MiniCPM-V-4.7-35B-A3B-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules moe, unmapped)
-- leaked: `bartowski-Nanbeige4.3-33B-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules unmapped)
-- leaked: `bartowski-Ornith-1.5-122B-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules moe, unmapped, vision)
-- leaked: `bartowski-Ornith-1.5-35B-A3B-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules moe, unmapped, vision)
-- leaked: `bartowski-Ornith-1.5-9B-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules matvec, unmapped, vision)
-- leaked: `bartowski-Qwen2.5-0.5B-Instruct-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules unmapped)
-- leaked: `bartowski-Qwen2.5-1.5B-Instruct-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules unmapped)
-- leaked: `bartowski-Qwen2.5-32B-Instruct-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules unmapped)
-- leaked: `bartowski-Qwen2.5-7B-Instruct-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules unmapped)
-- leaked: `bartowski-Qwen3.8-27B-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules unmapped, vision)
-- leaked: `bartowski-Spark-X2.6-4B-loom`: changes gfx11 programs; the declared device scope is rdna4; changes blocks outside the declared kernel families (rules unmapped)
+- note: leak declared (every model gets gfx12 twin kernels appended to its programs (gfx11 text unchanged)): 31 of 50 model(s) outside the scope
+- leaked: `InternScience-Sage-A1.5-loom`: changes blocks outside the declared kernel families (rules moe, vision)
+- leaked: `bartowski-Mellum2.1-12B-A2.5B-Thinking-loom`: changes blocks outside the declared kernel families (rules moe)
+- leaked: `bartowski-MiniCPM-V-4.7-35B-A3B-loom`: changes blocks outside the declared kernel families (rules moe)
+- leaked: `bartowski-Ornith-1.5-122B-loom`: changes blocks outside the declared kernel families (rules moe, vision)
+- leaked: `bartowski-Ornith-1.5-35B-A3B-loom`: changes blocks outside the declared kernel families (rules moe, vision)
+- leaked: `bartowski-Ornith-1.5-9B-loom`: changes blocks outside the declared kernel families (rules matvec, vision)
+- leaked: `bartowski-Qwen3.8-27B-loom`: changes blocks outside the declared kernel families (rules vision)
+- leaked: `ggml-org-Flint-loom`: changes blocks outside the declared kernel families (rules moe)
+- leaked: `ggml-org-LFM2.5-24B-A2B-loom`: changes blocks outside the declared kernel families (rules moe)
+- leaked: `ggml-org-Laguna-XS-2.1-loom`: changes blocks outside the declared kernel families (rules moe)
+- leaked: `ggml-org-Muse-Glimmer-30B-loom`: changes blocks outside the declared kernel families (rules vision)
+- leaked: `ggml-org-Qwen2.5-VL-7B-Instruct-loom`: changes blocks outside the declared kernel families (rules vision)
+- leaked: `ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom`: changes blocks outside the declared kernel families (rules moe)
+- leaked: `ggml-org-Qwen3.6-27B-loom`: changes blocks outside the declared kernel families (rules vision)
+- leaked: `ggml-org-Qwen3.6-35B-A3B-loom`: changes blocks outside the declared kernel families (rules moe, vision)
 - kb lint: kb lint: 0 error(s)
 

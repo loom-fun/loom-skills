@@ -252,7 +252,9 @@ CHOICE("prefill.attn.flash2_do", "int", None, "FLASH2_DO", kits=["gemma4"], dyna
 CHOICE("prefill.attn.flash512_do", "int", None, "FLASH512_DO", kits=["gemma4"], dynamic=True, doc="gemma4 kit: FLASH512_DO=256 runs the "
        "head_dim 512 global layers through gen_flash2.py's two output passes.", **_FL)
 CHOICE("prefill.attn.flash2_edge_zero", "bool", False, "FLASH2_EDGE_ZERO", doc="Zero-fill the edge tile instead of masking.", **_FL)
-CHOICE("prefill.attn.flash2_peel", "bool", True, "FLASH2_PEEL", doc="The masked path only in the last key tile (flash2_peel.py).", **_FL)
+CHOICE("prefill.attn.flash2_peel", "bool", True, "FLASH2_PEEL", per_target=True, from_pr="#771",
+       doc="The masked path only in the last key tile (flash2_peel.py). Per target: the gfx11 kernel and its gfx12 twin may differ "
+       "(FLASH2_PEEL, FLASH2_PEEL__RDNA4).", **_FL)
 CHOICE("prefill.attn.flash2_entry", "str", None, "FLASH2_ENTRY", dynamic=True, experiment=True,
        doc="plain | bcast: the listed entry broadcast from lane 0 (default bcast when NF > 8).", **_FL)
 CHOICE("prefill.attn.flash2_swa_twin", "str", None, "FLASH2_SWA_TWIN", dynamic=True,
