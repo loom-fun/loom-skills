@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
+      bundle: ${{ steps.pick.outputs.bundle }}   # {"extension": "OWNER/REPO@REV", "gufo": "OWNER/REPO@REV"} when a job asks for a Gufo bundle built in this run, else ""
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,10 +45,74 @@ jobs:
               assert r in labels, f"job {j['name']}: unknown runner {r!r} ({' | '.join(labels)})"
               inc.append({"job": j["name"], "labels": json.dumps(labels[r])})
           print("matrix=" + json.dumps({"include": inc}))
+          builds = {json.dumps(j["bundle"]["build"], sort_keys=True) for j in e["jobs"] if (j.get("bundle") or {}).get("build")}
+          assert len(builds) <= 1, f"jobs ask for different Gufo bundles to build: {sorted(builds)}"
+          print("bundle=" + (next(iter(builds)) if builds else ""))
           PY
 
-  run:
+  # The Gufo bundle (gufo + libloom_text_embed with their own loader, host logits steps `logits:V` / `gufo:V`) is built inside this run when a
+  # job says "bundle": {"build": {"extension": "loom-fun/loom-gufo-extension@REV", "gufo": "loom-fun/gufo@REV"}}: Nix in Docker on a hosted
+  # runner (validation/devlab/build_bundle.sh of the extension), the tarball cached by the two revisions and handed to the run jobs as an
+  # artifact. Nothing is uploaded to Hugging Face or a release.
+  bundle:
     needs: jobs
+    if: needs.jobs.outputs.bundle != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - id: spec
+        env:
+          SPEC: ${{ needs.jobs.outputs.bundle }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          b = json.loads(os.environ["SPEC"])
+          for k in ("extension", "gufo"):
+              repo, rev = b[k].split("@")
+              print(f"{k}_repo={repo}\n{k}_rev={rev}")
+          PY
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: bundle-out
+          key: gufo-bundle-${{ steps.spec.outputs.gufo_rev }}-${{ steps.spec.outputs.extension_rev }}
+      - uses: actions/checkout@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          repository: ${{ steps.spec.outputs.extension_repo }}
+          ref: ${{ steps.spec.outputs.extension_rev }}
+          path: ext
+      - uses: actions/checkout@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          repository: ${{ steps.spec.outputs.gufo_repo }}
+          ref: ${{ steps.spec.outputs.gufo_rev }}
+          path: gufo
+      - name: docker's storage on the big disk (the Nix store of the ROCm toolchain is tens of GB)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo systemctl stop docker docker.socket
+          sudo mkdir -p /mnt/docker
+          echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start docker
+          df -h /mnt
+      - name: build the bundle
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bundle-out
+          bash ext/validation/devlab/build_bundle.sh gufo bundle-out "gfx1151 gfx1201"
+          ls -l bundle-out
+      - run: |
+          cd bundle-out && ls *.tar.gz | wc -l | grep -qx 1 && sha256sum -c *.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gufo-bundle
+          path: bundle-out/*.tar.gz
+          retention-days: 7
+
+  run:
+    needs: [jobs, bundle]
+    if: always() && needs.jobs.result == 'success' && needs.bundle.result != 'cancelled'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.jobs.outputs.matrix) }}
@@ -66,6 +131,19 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: work dir
         run: mkdir -p "$RUNNER_TEMP/../devlab-perf" && echo "WORK=$(cd "$RUNNER_TEMP/../devlab-perf" && pwd)" >> "$GITHUB_ENV"
+      - name: Gufo bundle built in this run
+        if: needs.bundle.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: gufo-bundle
+          path: ${{ env.WORK }}/_gufo-bundle-dl
+      - name: unpack the bundle
+        if: needs.bundle.result == 'success'
+        run: |
+          d="$WORK/_gufo-bundle/ci"; rm -rf "$d"; mkdir -p "$d"
+          tar -xzf "$WORK"/_gufo-bundle-dl/*.tar.gz -C "$d" --strip-components=1
+          rm -rf "$WORK/_gufo-bundle-dl"
+          echo "GUFO_BUNDLE=$d" >> "$GITHUB_ENV"
       - name: "experiment: ${{ matrix.job }}"
         run: bash .github/scripts/devlab_perf.sh .github/devlab/perf.json "${{ matrix.job }}"
       - name: upload results

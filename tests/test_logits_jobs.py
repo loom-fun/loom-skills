@@ -37,6 +37,18 @@ class LogitsJobs(unittest.TestCase):
         self.assertIn("perf:fun:1", j["steps"])
         self.assertEqual(j["bundle"], {"url": "https://e/x.tgz", "sha256": "ab" * 32})
 
+    def test_bundle_is_built_in_the_run(self):
+        j = jobs("--device", "strix-halo", "--ref", "origin/x", "--bundle-build", "f822f2b", "b1e06141", SLUG)["jobs"][0]
+        self.assertEqual(j["bundle"], {"build": {"extension": "loom-fun/loom-gufo-extension@f822f2b", "gufo": "loom-fun/gufo@b1e06141"}})
+
+    def test_workflow_builds_and_hands_over_the_bundle(self):
+        import re
+        wf = open(os.path.join(ROOT, ".github", "workflows", "devlab-perf.yml")).read()
+        self.assertIn("build_bundle.sh", wf)
+        self.assertIn("name: gufo-bundle", wf)
+        self.assertIn("GUFO_BUNDLE=", wf)
+        self.assertNotRegex(wf, r"huggingface\.co.*upload|gh release")
+
     def test_r9700_rebuilds_the_device_preset(self):
         j = jobs("--device", "radeon-r9700", "--ref", "origin/x", "--no-gufo", "--no-ab", SLUG)["jobs"][0]
         v = {x["name"]: x for x in j["variants"]}

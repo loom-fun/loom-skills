@@ -68,7 +68,7 @@
 #                               r9700_func.py: the same checks as the Windows red-team harness), out/func_V.json
 #          logits:V[:N]         host logits readback (loom-skills#736): V's package through the Gufo bundle (loom-gufo-extension
 #                               validation/devlab/build_bundle.sh: gufo + libloom_text_embed.so with their own loader; $GUFO_BUNDLE, or job/
-#                               experiment "bundle": {"url": TARBALL, "sha256": H}), logits_check.py: embed_probe (argmax of every returned row ==
+#                               experiment "bundle": {"url": TARBALL, "sha256": H}; the devlab-perf workflow builds it in the run for a job with "bundle": {"build": {...}} and sets $GUFO_BUNDLE), logits_check.py: embed_probe (argmax of every returned row ==
 #                               the device's token), gufo's host-sampled logprobs vs llama.cpp (same GGUF, undrafted), greedy text unchanged by
 #                               the capability; logits_V.json (gate `logits`, make_info.py gates). N prompts (default 6). Without a bundle
 #                               the step is "not supported" (never replaced by another path).
