@@ -115,17 +115,24 @@ def verdict(checks, compared_max, llama_used):
 
 class EmbedLib:
     """libloom_text_embed.so at ABI 2 (loom-gufo-extension loom-embed): the calls this check needs.
-    ABI 2 adds options.logits, info.logits and row_logits; a span is flagged by the request key "logits": true (eng/logitsdesign/DESIGN.md section 5)."""
+    ABI 2 (open_ex, logits_info, row_logits); a span is flagged by the request key "logits": true (eng/logitsdesign/DESIGN.md section 5)."""
 
-    class Options(ctypes.Structure):
+    class Options(ctypes.Structure):   # loom_text_embed_options_t (ABI 1)
         _fields_ = [("model_path", ctypes.c_char_p), ("preset", ctypes.c_char_p), ("device_uri", ctypes.c_char_p),
-                    ("memory_bytes", ctypes.c_uint64), ("rows", ctypes.c_uint32), ("checkpoints", ctypes.c_uint32),
-                    ("logits", ctypes.c_uint32)]
+                    ("memory_bytes", ctypes.c_uint64), ("rows", ctypes.c_uint32), ("checkpoints", ctypes.c_uint32)]
+
+    class OptionsEx(ctypes.Structure):   # loom_text_embed_options_ex_t (ABI 2)
+        pass
+
+    class LogitsInfo(ctypes.Structure):   # loom_text_embed_logits_info_t
+        _fields_ = [("supported", ctypes.c_uint32), ("enabled", ctypes.c_uint32), ("width", ctypes.c_uint32), ("max_rows", ctypes.c_uint32)]
 
     def __init__(self, path):
         self.L = L = ctypes.CDLL(path)
         c, vp = ctypes, ctypes.c_void_p
-        L.loom_text_embed_open.argtypes = [c.POINTER(self.Options), c.POINTER(vp), c.c_char_p, c.c_size_t]
+        self.OptionsEx._fields_ = [("struct_size", c.c_uint32), ("base", self.Options), ("logits", c.c_uint32)]
+        L.loom_text_embed_open_ex.argtypes = [c.POINTER(self.OptionsEx), c.POINTER(vp), c.c_char_p, c.c_size_t]
+        L.loom_text_embed_logits_info.argtypes = [vp, c.POINTER(self.LogitsInfo)]
         L.loom_text_embed_error.restype = c.c_char_p
         L.loom_text_embed_error.argtypes = [vp]
         L.loom_text_embed_close.argtypes = [vp]
@@ -138,22 +145,27 @@ class EmbedLib:
         L.loom_text_embed_row_token.restype = c.c_int32
         L.loom_text_embed_row_is_eos.argtypes = [vp, c.c_uint32]
         L.loom_text_embed_row_end.argtypes = [vp, c.c_uint32]
-        L.loom_text_embed_row_reset.argtypes = [vp, c.c_uint32]
         L.loom_text_embed_chat_prepare.argtypes = [vp, c.c_char_p, c.c_size_t, c.POINTER(c.c_int32), c.c_size_t,
                                                    c.POINTER(c.c_size_t), c.POINTER(vp)]
         L.loom_text_embed_request_free.argtypes = [vp]
+        L.loom_text_embed_row_is_logit.argtypes = [vp, c.c_uint32]
         L.loom_text_embed_row_logits.argtypes = [vp, c.c_uint32, c.POINTER(c.c_float), c.c_size_t, c.POINTER(c.c_size_t)]
         self.h = None
 
     def open(self, package, logits, preset=None, rows=4, memory_bytes=0):
         c = ctypes
-        o = self.Options(os.path.join(package, "model.json").encode(), preset.encode() if preset else None, None,
-                         memory_bytes, rows, 0, 1 if logits else 0)
+        base = self.Options(os.path.join(package, "model.json").encode(), preset.encode() if preset else None, None, memory_bytes, rows, 0)
+        o = self.OptionsEx(c.sizeof(self.OptionsEx), base, 1 if logits else 0)
         err, h = c.create_string_buffer(512), c.c_void_p()
-        if self.L.loom_text_embed_open(c.byref(o), c.byref(h), err, len(err)):
+        if self.L.loom_text_embed_open_ex(c.byref(o), c.byref(h), err, len(err)):
             raise RuntimeError(f"embed open (logits={int(logits)}): {err.value.decode(errors='replace')}")
         self.h = h
         self.vocab = self.L.loom_text_embed_vocabulary_size(h)
+        info = self.LogitsInfo()
+        self.L.loom_text_embed_logits_info(h, c.byref(info))
+        self.width, self.supported, self.enabled = info.width, bool(info.supported), bool(info.enabled)
+        if logits and not (self.supported and self.enabled):
+            raise RuntimeError(f"embed open: logits capability not available (supported={self.supported} enabled={self.enabled})")
         return self
 
     def close(self):
@@ -172,12 +184,19 @@ class EmbedLib:
                            **({"logits": True} if flag else {})}).encode()   # the request key "logits": true flags the span
         n, req = c.c_size_t(), c.c_void_p()
         self._ok(self.L.loom_text_embed_chat_prepare(self.h, body, len(body), None, 0, c.byref(n), c.byref(req)), "chat_prepare")
+        self.L.loom_text_embed_request_free(req)   # the counting call's request
         ids = (c.c_int32 * n.value)()
+        req = c.c_void_p()
         self._ok(self.L.loom_text_embed_chat_prepare(self.h, body, len(body), ids, n.value, c.byref(n), c.byref(req)), "chat_prepare")
-        rc = self.L.loom_text_embed_row_begin(self.h, row, req, n.value + max_tokens + 1, 1)
-        if rc == 1:
-            raise RuntimeError("row_begin: no capacity")
-        self._ok(rc, "row_begin")
+        try:
+            rc = self.L.loom_text_embed_row_begin(self.h, row, req, n.value + max_tokens + 1, 1)
+            if rc == 1:
+                raise RuntimeError("row_begin: no capacity")
+            self._ok(rc, "row_begin")
+        finally:
+            self.L.loom_text_embed_request_free(req)
+        if bool(self.L.loom_text_embed_row_is_logit(self.h, row)) != bool(flag):
+            raise RuntimeError(f"row_is_logit disagrees with the request key (flag={flag})")
         return list(ids), ids, n.value
 
     def prefill(self, row, ids, n):
@@ -196,12 +215,10 @@ class EmbedLib:
         self.L.loom_text_embed_row_end(self.h, row)
 
     def row_logits(self, row):
-        """The logits row of the row's last selection (padded to the vocabulary's chunk multiple) as a list."""
+        """The full logits row of the row's pending selection: `width` floats (ids the head does not have are <= -1e38)."""
         c = ctypes
-        n = c.c_size_t()
-        self._ok(self.L.loom_text_embed_row_logits(self.h, row, None, 0, c.byref(n)), "row_logits (size)")
-        buf = (c.c_float * n.value)()
-        self._ok(self.L.loom_text_embed_row_logits(self.h, row, buf, n.value, c.byref(n)), "row_logits")
+        buf, n = (c.c_float * self.width)(), c.c_size_t()
+        self._ok(self.L.loom_text_embed_row_logits(self.h, row, buf, self.width, c.byref(n)), "row_logits")
         return list(buf)[:n.value]
 
 
