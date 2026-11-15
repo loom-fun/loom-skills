@@ -1,107 +1,47 @@
 {
- "_comment": "q38r9700 dflash: MTP vs DFlash2 drafting on R9700 (ABBA, perf:V:1 twice, long once) + llama.cpp dflash reference",
+ "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
  "runner": "r9700",
  "memory_bytes": 34000000000,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211",
- "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom",
- "kit": null,
- "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:z-lab/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf} --spec-draft-n-max 7 -ngld 99",
+ "llama_spec": "matched",
  "jobs": [
   {
-   "name": "dflash-r9700",
-   "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom",
+   "name": "unsloth-qwen3-0-6b-loom",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
    "kit": null,
    "llamacpp": "b1375",
-   "memory_bytes_r9700": 34000000000,
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "card",
+     "build": {}
     },
     {
-     "name": "mtp3",
+     "name": "nodraft",
      "build": {},
-     "context": 40960,
-     "build_args": [
-      "--draft",
-      "mtp",
-      "--draft-depth",
-      "3"
-     ]
-    },
-    {
-     "name": "df3",
-     "build": {},
-     "context": 40960,
-     "build_args": [
-      "--draft",
-      "dflash",
-      "--drafter",
-      "{hf:z-lab/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf}",
-      "--draft-depth",
-      "3"
-     ]
-    },
-    {
-     "name": "df4",
-     "build": {},
-     "context": 40960,
-     "build_args": [
-      "--draft",
-      "dflash",
-      "--drafter",
-      "{hf:z-lab/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf}",
-      "--draft-depth",
-      "4"
-     ]
-    },
-    {
-     "name": "df5",
-     "build": {},
-     "context": 40960,
-     "build_args": [
-      "--draft",
-      "dflash",
-      "--drafter",
-      "{hf:z-lab/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf}",
-      "--draft-depth",
-      "5"
-     ]
-    },
-    {
-     "name": "df7",
-     "build": {},
-     "context": 40960,
-     "build_args": [
-      "--draft",
-      "dflash",
-      "--drafter",
-      "{hf:z-lab/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf}",
-      "--draft-depth",
-      "7"
-     ]
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
-    "perf:card:1",
-    "perf:mtp3:1",
-    "perf:df3:1",
-    "perf:df4:1",
-    "perf:df5:1",
-    "perf:df7:1",
-    "perf:df7:1",
-    "perf:df5:1",
-    "perf:df4:1",
-    "perf:df3:1",
-    "perf:mtp3:1",
-    "perf:card:1",
-    "perf:card:1:long",
-    "perf:mtp3:1:long",
-    "perf:df3:1:long",
-    "perf:df4:1:long",
-    "perf:df5:1:long",
-    "perf:df7:1:long"
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   }
- ]
+ ],
+ "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "kit": null,
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211"
 }
