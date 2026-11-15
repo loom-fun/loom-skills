@@ -1,47 +1,121 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "kit2 pilot, logits + gufo (experiment PR, never merged): unsloth-Qwen3-0.6B-loom built from db8ee02ed0e811b191d2577a7ec2c24d3c76b168; func, ktest, logits:staging, gufo:staging on Strix Halo and Radeon R9700; the Gufo bundle is built in the run (pins .github/devlab/gufo_bundle.json)",
+ "memory_bytes": 17000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "sab-unsloth-qwen3-0-6b-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+   "memory_bytes": 17000000000,
    "kit": null,
-   "llamacpp": "b1375",
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom"
     },
     {
-     "name": "nodraft",
+     "name": "staging",
      "build": {},
+     "ref": "db8ee02ed0e811b191d2577a7ec2c24d3c76b168"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
      "execution": {
       "draft_depth": 0
      }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "db8ee02ed0e811b191d2577a7ec2c24d3c76b168"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@21ca66467ec32c96fb96e72fd650b614fcc6e54a",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "rab-unsloth-qwen3-0-6b-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 17000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+     "cap_pool": 267264,
+     "execution": {
+      "prefill_capacity": 4096
+     }
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "db8ee02ed0e811b191d2577a7ec2c24d3c76b168",
+     "build_args": [
+      "--prefill-device",
+      "radeon-r9700=4096"
+     ]
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+     "cap_pool": 267264,
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "db8ee02ed0e811b191d2577a7ec2c24d3c76b168",
+     "build_args": [
+      "--prefill-device",
+      "radeon-r9700=4096"
+     ]
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@21ca66467ec32c96fb96e72fd650b614fcc6e54a",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "llamacpp": "b1374"
 }
