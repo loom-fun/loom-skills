@@ -1,183 +1,46 @@
 {
- "_comment": "R9700 A/B (ab_jobs.py): per model one job on one R9700 runner, old package (fun) vs new package (staging), served as the new card's R9700 Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: none",
+ "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "llama_kv_rocm": 45056,
-   "name": "rab-ggml-org-muse-glimmer-30b-loom-k",
-   "runner": "r9700",
-   "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom@c3b7f783c87bfd079e3833c610337a84a708247a",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 32768,
-   "kit": "glimmer",
+   "name": "unsloth-qwen3-0-6b-loom",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "staging",
-     "context": 32768,
+     "name": "card",
+     "build": {}
+    },
+    {
+     "name": "nodraft",
+     "build": {},
      "execution": {
-      "context_capacity": 32768,
-      "pool_capacity": 32768
+      "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "name": "rab-ggml-org-qwen2-5-vl-7b-instruct-loom-k",
-   "runner": "r9700",
-   "card": "loom-fun-staging/ggml-org-Qwen2.5-VL-7B-Instruct-loom@6e063335db1ca66e0cdf22536440d73d4722298b",
-   "memory_bytes_r9700": 21000000000,
-   "kit": null,
-   "variants": [
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "name": "rab-unsloth-qwen3-vl-4b-instruct-loom-k",
-   "runner": "r9700",
-   "card": "loom-fun-staging/unsloth-Qwen3-VL-4B-Instruct-loom@903ae417b0987ff5cd0378a9c06f4200b2f6236a",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 187392,
-   "kit": null,
-   "variants": [
-    {
-     "name": "staging",
-     "context": 187392,
-     "execution": {
-      "context_capacity": 187392,
-      "pool_capacity": 187392
-     }
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "name": "rab-unsloth-qwen3-vl-8b-instruct-loom-k",
-   "runner": "r9700",
-   "card": "loom-fun-staging/unsloth-Qwen3-VL-8B-Instruct-loom@84cc2c4ddcb1f79d0df1fea5b726bb3db29b558b",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 165888,
-   "kit": null,
-   "variants": [
-    {
-     "name": "staging",
-     "context": 165888,
-     "execution": {
-      "context_capacity": 165888,
-      "pool_capacity": 165888
-     }
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "name": "sab-ggml-org-muse-glimmer-30b-loom-k",
-   "runner": "strix",
-   "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
-   "memory_bytes": 44000000000,
-   "kit": "glimmer",
-   "variants": [
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "name": "sab-ggml-org-qwen2-5-vl-7b-instruct-loom-k",
-   "runner": "strix",
-   "card": "loom-fun-staging/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
-   "memory_bytes": 21000000000,
-   "kit": null,
-   "variants": [
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "name": "sab-unsloth-qwen3-vl-4b-instruct-loom-k",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-Qwen3-VL-4B-Instruct-loom",
-   "memory_bytes": 56000000000,
-   "kit": null,
-   "variants": [
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "name": "sab-unsloth-qwen3-vl-8b-instruct-loom-k",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-Qwen3-VL-8B-Instruct-loom",
-   "memory_bytes": 59000000000,
-   "kit": null,
-   "variants": [
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "name": "sab-unsloth-qwen3-8-flash-next-loom-k",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom",
-   "memory_bytes": 100000000000,
-   "kit": "qwen4exp",
-   "variants": [
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   }
  ],
- "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom@c3b7f783c87bfd079e3833c610337a84a708247a",
+ "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
