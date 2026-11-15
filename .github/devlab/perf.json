@@ -344,6 +344,101 @@
     "func:staging",
     "ktest:staging"
    ]
+  },
+  {
+   "name": "sab-unsloth-qwen3-0-6b-loompre",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+   "memory_bytes": 17000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom"
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "c70ef0cb"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "c70ef0cb"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "rab-unsloth-qwen3-0-6b-loompre",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 17000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+     "cap_pool": 267264,
+     "execution": {
+      "prefill_capacity": 4096
+     }
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "c70ef0cb",
+     "build_args": [
+      "--prefill-device",
+      "radeon-r9700=4096"
+     ]
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+     "cap_pool": 267264,
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "c70ef0cb",
+     "build_args": [
+      "--prefill-device",
+      "radeon-r9700=4096"
+     ]
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging"
+   ]
   }
  ],
  "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
