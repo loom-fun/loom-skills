@@ -10,7 +10,10 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
 sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts"))
 import logits_check as lc  # noqa: E402
-from bench_common import near_tie  # noqa: E402
+try:
+    from bench_common import near_tie  # noqa: E402   (needs requests: not installed in the unit-test CI job)
+except ImportError:
+    near_tie = None
 
 V = 10
 
@@ -39,6 +42,7 @@ class Comparisons(unittest.TestCase):
         self.assertAlmostEqual(sum(__import__("math").exp(lp) for _, lp in top), 1.0, places=6)
         self.assertEqual(top[0][0], 2)
 
+    @unittest.skipIf(near_tie is None, "bench_common needs requests")
     def test_vs_llama(self):
         rows = [row(1, 2), row(3, 4)]
         mine = {i: lp for i, lp in lc.log_softmax_top(rows[0], V)}
