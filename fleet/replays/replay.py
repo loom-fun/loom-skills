@@ -14,6 +14,7 @@ A replay directory holds
 Output, next to the inputs: <V>.impact.md, <V>.impact.json (slimmed), <V>.lint.txt, <V>.plan.txt, <V>.summary.json
 (touched models, leak list, lint verdict, files edited, sampler representatives).
 Trees are built with fleet/build_fleet.py (CPU only) and cached by git tree id, so chained replays share builds.
+The guards under test (diff_fleet.py, scope_lint.py) are this checkout's, not the replayed tree's.
 Needs python with gguf (numpy). Stdlib otherwise.
 """
 import argparse
@@ -106,7 +107,7 @@ def commit_replay(name, meta, d, a):
     bout, hout = build(wt, bt, a.work, a.jobs), build(hwt, ht, a.work, a.jobs)
     os.makedirs(os.path.join(a.work, "json"), exist_ok=True)
     imp = os.path.join(a.work, "json", name + "-A.impact")
-    run([PY, os.path.join(hwt, "fleet", "diff_fleet.py"), bout, hout, "--json", imp + ".json", "--md", os.path.join(d, "A.impact.md")])
+    run([PY, os.path.join(REPO, "fleet", "diff_fleet.py"), bout, hout, "--json", imp + ".json", "--md", os.path.join(d, "A.impact.md")])
     impact = json.load(open(imp + ".json"))
     touched = sorted((impact.get("models") or {}))
     res = {"commit": c, "files_changed": changed, "dropped": dropped, "impact_models": touched}
@@ -206,7 +207,7 @@ def main():
             hout = build(wt, tree, a.work, a.jobs, tuple(meta.get("head_args", ())))
             os.makedirs(os.path.join(a.work, "json"), exist_ok=True)
             imp = os.path.join(a.work, "json", f"{a.name}-{key[:-6]}.impact")   # the JSON reports are big: kept out of the repo, the md stays
-            run([PY, os.path.join(wt, "fleet", "diff_fleet.py"), bout, hout, "--json", imp + ".json", "--md", os.path.join(d, key[:-6] + ".impact.md")])
+            run([PY, os.path.join(REPO, "fleet", "diff_fleet.py"), bout, hout, "--json", imp + ".json", "--md", os.path.join(d, key[:-6] + ".impact.md")])
             for fam in ("gfx11", "gfx12"):   # one GPU family's view (twins of the other family normalized away)
                 run([PY, os.path.join(wt, "fleet", "replay_impact.py"), bout, hout, "--family", fam, "--out", f"{imp}.{fam}.json"])
             built[key] = (wt, sha, imp)

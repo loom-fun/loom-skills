@@ -1,40 +1,11 @@
 exit 1
 ### Scope lint: FAIL
 kind `targeted`; scopes `device/rdna4`; kernels -; 1 file(s) changed.
-Program impact: 50 model(s) touched; leaked outside the declared scope: 50 (leak rate 100%).
+Program impact: 50 model(s) touched; leaked outside the declared scope: 1 (leak rate 2%).
 
 | rule | problem |
 |---|---|
-| leak | InternScience-Sage-A1.5-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | XHToken-Spark-X2.5-4B-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-LFM3-1.7B-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-Mellum2.1-12B-A2.5B-Thinking-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-MiniCPM-V-4.7-35B-A3B-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-Nanbeige4.3-33B-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-Ornith-1.5-122B-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-Ornith-1.5-35B-A3B-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-Ornith-1.5-9B-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-Qwen2.5-0.5B-Instruct-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-Qwen2.5-1.5B-Instruct-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-Qwen2.5-32B-Instruct-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-Qwen2.5-7B-Instruct-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-Qwen3.8-27B-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| leak | bartowski-Spark-X2.6-4B-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
-| ... | 35 more (all in the JSON report) |
-- leaked: `InternScience-Sage-A1.5-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `XHToken-Spark-X2.5-4B-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-LFM3-1.7B-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-Mellum2.1-12B-A2.5B-Thinking-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-MiniCPM-V-4.7-35B-A3B-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-Nanbeige4.3-33B-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-Ornith-1.5-122B-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-Ornith-1.5-35B-A3B-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-Ornith-1.5-9B-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-Qwen2.5-0.5B-Instruct-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-Qwen2.5-1.5B-Instruct-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-Qwen2.5-32B-Instruct-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-Qwen2.5-7B-Instruct-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-Qwen3.8-27B-loom`: changes gfx11 programs; the declared device scope is rdna4
-- leaked: `bartowski-Spark-X2.6-4B-loom`: changes gfx11 programs; the declared device scope is rdna4
+| leak | unsloth-gemma-4-E2B-it-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
+- leaked: `unsloth-gemma-4-E2B-it-loom`: changes gfx11 programs; the declared device scope is rdna4
 - kb lint: kb lint: 0 error(s)
 

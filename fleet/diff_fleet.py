@@ -19,6 +19,8 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import loomtext  # noqa: E402
 START = re.compile(r"^(kernel\.def|kernel\.decl|func\.def|func\.decl|command\.program\.def|command\.def|command\.decl|template\.def|"
                    r"template\.decl|global\.rodata\.def|config\.decl|config\.def|target\.decl|amdgpu\.target|type\.decl)\b")
 KINDS = {"kernel.def": "kernel", "kernel.decl": "kernel", "func.def": "func", "func.decl": "func", "command.program.def": "program",
@@ -32,11 +34,19 @@ FORMATS = ("q4_0", "q4_k", "q5_0", "q5_k", "q6_k", "q8_0", "mxfp4", "bf16", "f16
 IGNORED_JSON = ("origins", "origin")   # model.json: where the files came from, not what the programs do
 
 
+TOP_COMMENT = re.compile(r"^//.*\n?", re.M)   # column-0 comments sit between blocks: which block owns one shifts when blocks are inserted
+RDNA3_TAG = re.compile(r" target\(@(?:rdna3|device)\)")
+MACHINERY = ("template", "decl")   # block kinds the dual-target machinery adds (template.decl/def, target.decl, amdgpu.target)
+
+
 def norm(text):
-    return SEL.sub("@sel_", GENERATED.sub("", text)).rstrip() + "\n"
+    """The text without what does not run differently: generator and between-block comments, selector numbers and the `target(@rdna3)` / `target(@device)` tags (a gfx11
+    kernel that only gains the tag is not a gfx11 change)."""
+    text = TOP_COMMENT.sub("", GENERATED.sub("", text))
+    return RDNA3_TAG.sub("", SEL.sub("@sel_", text)).rstrip() + "\n"
 
 
-def blocks(text):
+def blocks(text, canon=None):
     """{(kind, symbol, template target or "", nth): (header target, normalized text)} of one program file."""
     lines = text.split("\n")
     starts = [i for i, l in enumerate(lines) if START.match(l)]
@@ -59,8 +69,19 @@ def blocks(text):
         key = (kind, sym, (tgt or "") if kind == "template" else "")   # a kernel that gains target(@rdna3) is changed, not removed
         k = seen.get(key, 0)
         seen[key] = k + 1
-        out[(kind, sym, key[2], k)] = (tgt, norm("\n".join(lines[a:e])))
+        body = "\n".join(lines[a:e])
+        if canon and kind == "program":
+            body = canon(body)   # template.apply of the selected kernel reads as the plain launch
+        out[(kind, sym, key[2], k)] = (tgt, norm(body))
     return out
+
+
+def canonicalizer(progs):
+    """Launch canonicalizer (loomtext) of one model's programs: template selection resolved for the gfx11 target."""
+    bl = []
+    for text in progs.values():
+        bl += [(k, h, b) for k, _, h, b in loomtext.split_blocks(text)]
+    return loomtext.launch_canonicalizer(bl, "rdna3")
 
 
 def block_target(kind, sym, tgt):
@@ -155,11 +176,12 @@ def diff_model(base, head, slug, rules):
     st = strata(cfg, text)
     drafted = st["draft"] != "none"
     files, changed, rows, gates, targets = [], [], set(), set(), set()
+    bcanon, hcanon = canonicalizer(bp), canonicalizer(hp)
     for f in sorted(set(bp) | set(hp)):
         if f not in bp or f not in hp:
             files.append(f"{f} ({'added' if f not in bp else 'removed'})")
-        a = blocks(bp[f]) if f in bp else {}
-        b = blocks(hp[f]) if f in hp else {}
+        a = blocks(bp[f], bcanon) if f in bp else {}
+        b = blocks(hp[f], hcanon) if f in hp else {}
         fch = False
         for key in sorted(set(a) | set(b)):
             if (a.get(key) or (0, 0))[1] == (b.get(key) or (1, 1))[1] and key in a and key in b:
@@ -167,6 +189,8 @@ def diff_model(base, head, slug, rules):
             fch = True
             kind, sym, _, _ = key
             status = "added" if key not in a else ("removed" if key not in b else "changed")
+            if status != "changed" and kind in MACHINERY:
+                continue   # templates / target declarations appearing or going away: the dual-target machinery, no program runs differently
             t = block_target(kind, sym, (b.get(key) or a.get(key))[0])
             r, g, rid = rows_for(rules, kind, sym, drafted)
             changed.append({"file": f, "kind": kind, "symbol": sym, "target": t, "status": status, "rule": rid, "rows": r, "gates": g})
