@@ -5,7 +5,7 @@
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "sab-unsloth-gpt-oss-20b-loom",
+   "name": "sab-unsloth-gpt-oss-20b-loom-r2",
    "runner": "strix",
    "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom@refactor-fixgptoss",
    "memory_bytes": 28000000000,
@@ -65,7 +65,7 @@
    ]
   },
   {
-   "name": "rab-unsloth-gpt-oss-20b-loom",
+   "name": "rab-unsloth-gpt-oss-20b-loom-r2",
    "runner": "r9700",
    "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom@refactor-fixgptoss",
    "memory_bytes_r9700": 28000000000,
