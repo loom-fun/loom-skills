@@ -124,6 +124,8 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 | `agent` | Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp | ✅ pass ² | ✅ pass ³ |
 | `agent_think_off` | The tool-calling loop with thinking off | ✅ pass ² | ✅ pass ³ |
 | `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | ✅ pass ² | ✅ pass ³ |
+| `logits` | Host logits readback (llm.logits on): at T=0 every returned row's argmax is the device's token, the top-k matches llama.cpp, greedy text is unchanged | ❌ no evidence | ❌ no evidence |
+| `gufo` | Gufo conformance through the embed layer: tool_choice, json_schema, min_p, penalties and logprobs served from the returned logits | ❌ no evidence | ❌ no evidence |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | — not applicable | — not applicable |
 
 - ¹ [DevLab Dispatch run 43376610754](https://github.com/loom-fun/loom-skills/actions/runs/43376610754), 2026-11-13; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 24.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`).

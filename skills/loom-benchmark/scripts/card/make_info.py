@@ -48,7 +48,8 @@ byte-identical files.
   make_info.py gates [--gpu GPU] FILE [FILE ...] [--time YYYY-MM-DDTHH:MM:SS] [--level L] [--spec-log F] [--package PKG]
                      [SOURCE] -o gates_evidence.json
       gates.sh's gates.json (verdicts, level, ts), a gates.out with its "GATES ..." line, or a kernel test
-      log ending in "N/M passed" (make_kernel_tests.py) -> gate evidence. The spec gate's "acceptance N% of M
+      log ending in "N/M passed" (make_kernel_tests.py) -> gate evidence. A gates JSON may give a per-gate "detail"
+      (logits_V.json, conformance_V.json of devlab_perf.sh: gates `logits` and `gufo`). The spec gate's "acceptance N% of M
       proposals" (gates_spec.log or gates.out next to the file, or --spec-log) -> the spec_acceptance metric, from a
       DevLab (or factory) source only, like every card performance value.
 
@@ -791,7 +792,7 @@ def gates_from_file(path, time, level):
         time = time or g.get("ts")
         level = level or g.get("level")
         for n, x in g.get("gates", {}).items():
-            src_gates.append((n, "pass" if x.get("pass") else "fail", None))
+            src_gates.append((n, "pass" if x.get("pass") else "fail", x.get("detail")))   # logits_V.json / conformance_V.json carry a detail
         return src_gates, time, level
     m = re.search(r"^GATES (PASS|FAIL) level=(\w+) \d+s (\{.*\})\s*$", text, re.M)
     if m:

@@ -113,6 +113,8 @@ GATES = [
     ("agent", "Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp"),
     ("agent_think_off", "The tool-calling loop with thinking off"),
     ("sampling", "temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp"),
+    ("logits", "Host logits readback (llm.logits on): at T=0 every returned row's argmax is the device's token, the top-k matches llama.cpp, greedy text is unchanged"),
+    ("gufo", "Gufo conformance through the embed layer: tool_choice, json_schema, min_p, penalties and logprobs served from the returned logits"),
     ("decision", "Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts"),
 ]
 GATE_NAMES = [n for n, _ in GATES]
@@ -496,6 +498,8 @@ def gate_applies(name, kind, feats):
         return name == "decision"
     if name == "decision":
         return False
+    if name in ("logits", "gufo"):   # the host logits readback is an LLM text feature (llm.logits)
+        return True
     if name == "vision":
         return feats["image_input"]["status"] == "yes"
     if name == "spec":
