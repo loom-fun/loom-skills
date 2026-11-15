@@ -1,47 +1,127 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, loom-fun-staging package (fun) vs loom-fun-staging package (staging), same prompts and settings; compare with strix_ab_compare.py",
+ "runner": "strix",
+ "memory_bytes": 31000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "sab-ggml-org-qwen3-14b-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/ggml-org-Qwen3-14B-loom@feeddc1fcc3041784aaf1489e2e5b392d2480329",
+   "memory_bytes": 31000000000,
    "kit": null,
-   "llamacpp": "b1375",
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "staging"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "sab-ggml-org-qwen3-4b-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom@deeae93296bfc20e2d0dbdcfb6636e24f598ae95",
+   "memory_bytes": 25000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "sab-ggml-org-qwen3-6-27b-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/ggml-org-Qwen3.6-27B-loom@0158aebce2c2c157a511e592b25ee6566f6a1c79",
+   "memory_bytes": 57000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "sab-ggml-org-qwen3-6-35b-a3b-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/ggml-org-Qwen3.6-35B-A3B-loom@448e7ce598cf0a469e919ec783c0a9cc017991fa",
+   "memory_bytes": 48000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
+  },
+  {
+   "name": "sab-ggml-org-qwen3-coder-30b-a3b-instruc",
+   "runner": "strix",
+   "card": "loom-fun-staging/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom@89f09b8eb0ed3602ab25b5be486e53a8b0879ccc",
+   "memory_bytes": 62000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging",
+    "gufo:staging"
+   ],
+   "bundle": {
+    "run": "43693058895"
+   }
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/ggml-org-Qwen3-14B-loom@feeddc1fcc3041784aaf1489e2e5b392d2480329",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "llamacpp": "b1374"
 }
