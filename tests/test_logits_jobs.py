@@ -59,7 +59,8 @@ class LogitsJobs(unittest.TestCase):
         sh = open(os.path.join(SCRIPTS, "devlab_perf.sh")).read()
         self.assertIn("    logits)", sh)
         self.assertIn("    gufo)", sh)
-        self.assertEqual(subprocess.run(["bash", "-n", os.path.join(SCRIPTS, "devlab_perf.sh")]).returncode, 0)
+        if os.name != "nt":   # CRLF checkouts / a different bash on Windows runners
+            self.assertEqual(subprocess.run(["bash", "-n", os.path.join(SCRIPTS, "devlab_perf.sh")]).returncode, 0)
 
 
 if __name__ == "__main__":
