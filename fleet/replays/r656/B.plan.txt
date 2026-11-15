@@ -1,0 +1,6 @@
+| GPU | stratum | members | rows | representatives |
+|---|---|---|---|---|
+| radeon-r9700 | arch=gemma4 hd=512 G=8 kv=<=2 draft=assist dense fam=attn_decode+attn_prefill+gemm+matvec+program+spec fmt=bf16+f16+q4_k+q8_0 | 1 | decode,decode_2k,decode_32k,prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k,streams4 | unsloth-gemma-4-E2B-it-loom (heaviest for the changed kernel) |
+| strix-halo | arch=gemma4 hd=512 G=8 kv=<=2 draft=assist dense fam=attn_decode+attn_prefill+gemm+matvec+program+spec fmt=bf16+q4_k+q8_0 | 1 | decode,decode_2k,decode_32k,prefill_1k,prefill_2k,prefill_8k,prefill_16k,prefill_32k,streams4 | unsloth-gemma-4-E2B-it-loom (heaviest for the changed kernel) |
+
+strata 2; touched model-GPU pairs 2; sampled 2; T1 canary ~0.82 runner-h vs full A/B of every touched model ~2.45 runner-h

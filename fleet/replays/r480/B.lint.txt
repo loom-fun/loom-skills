@@ -1,0 +1,6 @@
+exit 0
+### Scope lint: pass
+kind `targeted`; scopes `arch/llm/dense/gemma4`, `arch/llm/dense/spark2_5`, `arch/llm/dense/lfm3`; kernels -; 3 file(s) changed.
+Program impact: 7 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+- kb lint: kb lint: 0 error(s)
+

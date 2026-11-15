@@ -1,0 +1,52 @@
+## Fleet program diff: 1 of 51 models touched
+
+GPUs: gfx11, gfx12; rows that can move: decode, decode_2k, decode_32k, prefill_1k, prefill_2k, prefill_8k, prefill_16k, prefill_32k, streams4
+
+| model | files | blocks (+/-/~) | GPUs | rows | stratum |
+|---|---|---|---|---|---|
+| unsloth-gemma-4-E2B-it-loom | program/llm.loom | 51/27/20 | gfx11+gfx12 | decode, decode_2k, decode_32k, prefill_1k, prefill_2k, prefill_8k, prefill_16k, prefill_32k, streams4 | gemma4 hd512 kv<=2 assist dense |
+
+### Changed kernel families (models)
+
+- `func:g16d256_split_count`: 1 model(s)
+- `func:g16d512_split_count`: 1 model(s)
+- `func:g_f32_values`: 1 model(s)
+- `func:g_tile_uniform`: 1 model(s)
+- `func:gd256_split_count`: 1 model(s)
+- `func:gd512_split_count`: 1 model(s)
+- `kernel:g16d256_attention_split`: 1 model(s)
+- `kernel:g16d512_attention_split`: 1 model(s)
+- `kernel:g_attention_flash2`: 1 model(s)
+- `kernel:g_attention_flash2_dN`: 1 model(s)
+- `kernel:g_attention_flash2_dN_partial`: 1 model(s)
+- `kernel:g_attention_flash2_partial`: 1 model(s)
+- `kernel:g_gemm_q4_k_swiglu_f16o`: 1 model(s)
+- `kernel:g_gemm_q4_k_swiglu_mN_f16o`: 1 model(s)
+- `kernel:g_gemm_q8_0_swiglu_f16o`: 1 model(s)
+- `kernel:g_gemm_q8_0_swiglu_mN_f16o`: 1 model(s)
+- `kernel:g_mv_bf16_kN_rN`: 1 model(s)
+- `kernel:g_quant_q8`: 1 model(s)
+- `kernel:gd256_attention_split`: 1 model(s)
+- `kernel:gd512_attention_split`: 1 model(s)
+- `program:llm_advance`: 1 model(s)
+- `program:llm_as_propose`: 1 model(s)
+- `program:llm_verify`: 1 model(s)
+- `template:g_gemm_q4_k_swiglu`: 1 model(s)
+- `template:g_gemm_q4_k_swiglu_mN`: 1 model(s)
+- `template:g_gemm_q8_0_swiglu`: 1 model(s)
+- `template:g_gemm_q8_0_swiglu_mN`: 1 model(s)
+- `template:grp10_g_gemm_q4_k_swiglu_mN_f16o`: 1 model(s)
+- `template:grp11_g_gemm_q4_k_swiglu_mN_f16o`: 1 model(s)
+- `template:grp12_g_gemm_q4_k_swiglu_f16o`: 1 model(s)
+- `template:grp13_g_gemm_q8_0_swiglu_mN_f16o`: 1 model(s)
+- `template:grp14_g_gemm_q8_0_swiglu_mN_f16o`: 1 model(s)
+- `template:grp15_g_gemm_q8_0_swiglu_f16o`: 1 model(s)
+- `template:grp1_g_gemm_q4_k_swiglu_mN_f16o`: 1 model(s)
+- `template:grp2_g_gemm_q4_k_swiglu_mN_f16o`: 1 model(s)
+- `template:grp3_g_gemm_q4_k_swiglu_f16o`: 1 model(s)
+- `template:grp4_g_gemm_q4_k_swiglu_mN_f16o`: 1 model(s)
+- `template:grp5_g_gemm_q4_k_swiglu_mN_f16o`: 1 model(s)
+- `template:grp6_g_gemm_q4_k_swiglu_f16o`: 1 model(s)
+- `template:grp7_g_gemm_q4_k_swiglu_mN_f16o`: 1 model(s)
+- `template:grp8_g_gemm_q4_k_swiglu_mN_f16o`: 1 model(s)
+- `template:grp9_g_gemm_q4_k_swiglu_f16o`: 1 model(s)

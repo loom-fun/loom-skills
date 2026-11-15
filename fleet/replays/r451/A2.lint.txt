@@ -1,0 +1,26 @@
+exit 1
+### Scope lint: FAIL
+kind `targeted`; scopes `arch/llm/dense/qwen2vl`, `arch/llm/dense/llama`, `arch/llm/moe/flint`, `arch/llm/dense/qwen3`, `arch/llm/hybrid/qwen35`; kernels -; 2 file(s) changed.
+Program impact: 15 model(s) touched; leaked outside the declared scope: 7 (leak rate 47%).
+
+| rule | problem |
+|---|---|
+| protected | skills/loom-port-llm/starter/attn_rules.py is a protected core file (attention selection rules shared by all models); changing it needs kind: architecture |
+| registry | registry key 'decode.attn.kv_once.d256' changed (legacy); legacy/env/type/derive define today's behaviour; needs kind: architecture |
+| registry | registry key 'decode.attn.kv_once.drafted' changed (legacy); legacy/env/type/derive define today's behaviour; needs kind: architecture |
+| leak | InternScience-Sage-A1.5-loom: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Ornith-1.5-122B-loom: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Ornith-1.5-35B-A3B-loom: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | ggml-org-Laguna-XS-2.1-loom: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | ggml-org-Qwen3.6-35B-A3B-loom: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | unsloth-Qwen3.5-35B-A3B-loom: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35; narrow the change (or declare `leak:` with horizontal/architecture) |
+- leaked: `InternScience-Sage-A1.5-loom`: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35
+- leaked: `bartowski-Ornith-1.5-122B-loom`: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35
+- leaked: `bartowski-Ornith-1.5-35B-A3B-loom`: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35
+- leaked: `ggml-org-Laguna-XS-2.1-loom`: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35
+- leaked: `ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom`: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35
+- leaked: `ggml-org-Qwen3.6-35B-A3B-loom`: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35
+- leaked: `unsloth-Qwen3.5-35B-A3B-loom`: not matched by arch/llm/dense/qwen2vl, arch/llm/dense/llama, arch/llm/moe/flint, arch/llm/dense/qwen3, arch/llm/hybrid/qwen35
+- kb lint: kb lint: 0 error(s)
+

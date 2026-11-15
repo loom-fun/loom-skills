@@ -1,0 +1,20 @@
+diff --git a/skills/loom-kb/device/rdna4/scope.json b/skills/loom-kb/device/rdna4/scope.json
+new file mode 100644
+index 0000000..ee9d84b
+--- /dev/null
++++ b/skills/loom-kb/device/rdna4/scope.json
+@@ -0,0 +1,14 @@
++{
++ "scope": "device/rdna4",
++ "match": {},
++ "owner": "kb",
++ "choices": [
++  {
++   "when": {},
++   "set": {
++    "target.rdna4_twins": true
++   },
++   "evidence": "PR #573 / #574: gfx12 twins K_rdna4 of every prefill GEMM and flash kernel; gfx11 text unchanged (LOOM_RDNA4=0 byte-identical)"
++  }
++ ]
++}

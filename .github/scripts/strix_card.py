@@ -3,11 +3,14 @@
 (Loom + llama.cpp, as measured), one line saying the table was re-measured on this package within the band (make_info.py remeasure),
 and the dev gates + kernel tests the job ran on this package's Strix programs. No llama.cpp re-measure (user decision, phase 3).
 
-usage: strix_card.py SLUG --job JOB_ARTIFACT_DIR --cmp CMP.json --run RUN --work DIR [--upload]
+usage: strix_card.py SLUG --job JOB_ARTIFACT_DIR --cmp CMP.json --run RUN --work DIR [--first-cmp CMP1.json --first-run RUN1] [--upload]
 
 JOB_ARTIFACT_DIR / CMP.json / RUN: the passing run (the confirming re-run when there was one). Without --upload it builds, renders and
 checks the card in DIR/SLUG/out and runs the upload dry run; --upload publishes the card files (card-only, --parent-commit) to
 loom-fun-staging/SLUG.
+
+A confirming re-run whose verdict is out_of_margin only by rows FASTER than the card in both runs (the ratchet) is accepted with
+--first-cmp / --first-run (the first run): those rows show the mean of the two runs' medians, the rest keep the published values.
 """
 import argparse
 import json
@@ -39,6 +42,8 @@ ap.add_argument("--job", required=True)
 ap.add_argument("--cmp", required=True)
 ap.add_argument("--run", required=True)
 ap.add_argument("--work", required=True)
+ap.add_argument("--first-cmp", help="the first run's compare JSON (the ratchet: rows faster in both runs)")
+ap.add_argument("--first-run", help="the first run's Actions run id (with --first-cmp)")
 ap.add_argument("--upload", action="store_true")
 a = ap.parse_args()
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download  # noqa: E402
@@ -63,9 +68,15 @@ rev = re.search(r"resolve/([0-9a-f]{40})", json.dumps(json.load(open(os.path.joi
 fetched = open(os.path.join(J, "programs_sha256.txt")).read().strip()
 dev, hrx = os.path.join(W, "dev.json"), os.path.join(W, "hrx.json")
 run(PY, f"{C}/pull_devlab.py", "--identity", J, "--gpu", "strix-halo", "--device-out", dev, "--hrx-out", hrx)
+first = []
+if a.first_cmp:
+    fjobs = json.loads(run("gh", "run", "view", a.first_run, "-R", GH, "--json", "jobs", capture=True))["jobs"]
+    first = ["--first-cmp", a.first_cmp, "--first-run", a.first_run, "--first-url",
+             next(j for j in fjobs if j["name"] == job_name or j["name"].startswith(re.sub(r"-r\d+$", "", job_name)))["url"]]
+             # the first run's job has no -rN suffix; ab_jobs truncates names to 40 characters, so the confirming job's stem is a prefix
 src = ["--run", a.run, "--url", url, "--device", dev, "--hrx-loom", hrx, "--source-kind", "devlab"]
 run(PY, f"{C}/make_info.py", "remeasure", "--cmp", a.cmp, "--package", out, "--compared-repo", f"loom-fun/{slug}", "--compared-revision", rev,
-    "--fetched-programs", fetched, "--date", end[:10], *src, "-o", f"{W}/ev_rm.json")
+    "--fetched-programs", fetched, *first, "--date", end[:10], *src, "-o", f"{W}/ev_rm.json")
 gates = [os.path.join(J, "gates_staging", "gates.json"), os.path.join(J, "ktest_staging.log")]
 gates = [g for g in gates if os.path.exists(g)]
 if gates:
@@ -92,7 +103,7 @@ txt = open(os.path.join(out, "README.md")).read()
 line = next((ln for ln in txt.splitlines() if "re-measured on this package" in ln), None)
 if not line:
     sys.exit(f"{slug}: no re-measure line in the README")
-if "not re-measured" in txt.split("### Strix Halo", 1)[-1].split("###", 1)[0]:
+if any(ln.startswith("|") and "not re-measured" in ln for ln in txt.split("### Strix Halo", 1)[-1].split("###", 1)[0].splitlines()):   # table cells only (the methodology bullet says llama.cpp is "not re-measured")
     sys.exit(f"{slug}: the Strix table is empty")
 run(PY, f"{C}/publish_package.py", "upload", out, "--repo", slug, "--org", "loom-fun-staging", "--card-only", "--dry-run")
 print(f"{slug}: card built ({line.strip()[:160]})")

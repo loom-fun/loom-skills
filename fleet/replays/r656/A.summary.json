@@ -1,0 +1,33 @@
+{
+ "patch": "A.patch",
+ "files_edited": [
+  "fleet/unsloth-gemma-4-E2B-it-loom/llm_config.json"
+ ],
+ "lint_exit": 1,
+ "touched_by_family": {
+  "gfx11": 1,
+  "gfx12": 1
+ },
+ "impact_summary": {
+  "models": 51,
+  "touched": 1,
+  "gpus": [
+   "gfx11",
+   "gfx12"
+  ],
+  "rows": [
+   "decode",
+   "decode_2k",
+   "decode_32k",
+   "prefill_1k",
+   "prefill_2k",
+   "prefill_8k",
+   "prefill_16k",
+   "prefill_32k",
+   "streams4"
+  ]
+ },
+ "touched_models": [
+  "unsloth-gemma-4-E2B-it-loom"
+ ]
+}

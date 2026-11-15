@@ -1,0 +1,25 @@
+diff --git a/skills/loom-kb/arch/llm/dense/gemma4/scope.json b/skills/loom-kb/arch/llm/dense/gemma4/scope.json
+index c663149..fb45c88 100644
+--- a/skills/loom-kb/arch/llm/dense/gemma4/scope.json
++++ b/skills/loom-kb/arch/llm/dense/gemma4/scope.json
+@@ -10,5 +10,19 @@
+  "facets": [
+   "sliding-window"
+  ],
+- "choices": []
++ "choices": [
++  {
++   "when": {
++    "heads": 8,
++    "kv_heads": 1,
++    "devices": [
++     "rdna4"
++    ]
++   },
++   "set": {
++    "prefill.gemm.f16o_swiglu": true
++   },
++   "evidence": "PR #656 / #665 run 43576014176 / 43596459543: E2B (head_dim 512, 8 heads on 1 KV head) prefill +3..+19 % on the R9700 (f16-output swiglu group, flash twin trims, two-heads-per-wave d512 flash)"
++  }
++ ]
+ }

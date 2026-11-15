@@ -54,7 +54,7 @@ or a few selector nodes (`device/...`, `quant/...`, `arch/...`, `facet/...`); if
   The resolver applies it to the models that node matches and nowhere else; a model, GPU or quant it was not measured on keeps its
   old program byte for byte.
 - Never change a `legacy` value, a default in a generator, or a protected core file (`fleet/ownership.json` lists them) from a
-  targeted PR: that is an architecture PR. If the fix needs one, stop and report instead of working around it.
+  targeted PR: that is an architecture PR. A default lives twice (the generator's and the registry's `legacy`); `tests/test_choices.py::test_legacy_equals_the_generators_default` fails when they diverge. If the fix needs one, stop and report instead of working around it.
 - A key that changes a kernel shared by both targets of a dual-target package cannot differ per device inside one package: scope it by
   family or facet and say so, or implement it as a twin kernel (`K` / `K_rdna4`).
 - Prefer a regression fix by scope over a global revert: restrict the offending path to where it was measured good, keep it where it won.

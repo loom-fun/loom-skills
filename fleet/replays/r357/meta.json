@@ -1,0 +1,2 @@
+{"pr": "#357", "title": "Decode attention: load K/V once per KV head at long context (nodraft, head_dim 128)", "variants": ["A", "A2", "B"],
+ "intent": "K/V-once decode body for non-drafting head_dim 128 packages; measured on Qwen3-4B (kv8), siblings named: Qwen3-4B/8B, Qwen3-VL-4B/8B"}

@@ -1,0 +1,32 @@
+{
+ "patch": "B.patch",
+ "files_edited": [
+  "skills/loom-kb/arch/llm/moe/qwen35moe/scope.json"
+ ],
+ "lint_exit": 0,
+ "touched_by_family": {
+  "gfx11": 5,
+  "gfx12": 0
+ },
+ "impact_summary": {
+  "models": 51,
+  "touched": 5,
+  "gpus": [
+   "gfx11",
+   "gfx12"
+  ],
+  "rows": [
+   "decode",
+   "decode_2k",
+   "decode_32k",
+   "streams4"
+  ]
+ },
+ "touched_models": [
+  "InternScience-Sage-A1.5-loom",
+  "bartowski-Ornith-1.5-122B-loom",
+  "bartowski-Ornith-1.5-35B-A3B-loom",
+  "ggml-org-Qwen3.6-35B-A3B-loom",
+  "unsloth-Qwen3.5-35B-A3B-loom"
+ ]
+}

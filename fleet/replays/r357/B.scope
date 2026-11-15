@@ -1,0 +1,2 @@
+kind: targeted
+scopes: arch/llm/dense/qwen3, arch/llm/dense/qwen3vl

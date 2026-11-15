@@ -1,0 +1,26 @@
+diff --git a/skills/loom-kb/choices.py b/skills/loom-kb/choices.py
+index 92fa1a9..34a1cff 100644
+--- a/skills/loom-kb/choices.py
++++ b/skills/loom-kb/choices.py
+@@ -158,7 +158,7 @@ CHOICE("decode.attn.unroll", "int", 16, "ATTN_UNROLL", doc="Keys per decode-atte
+ CHOICE("decode.attn.butterfly", "bool", True, "ATTN_BFLY", doc="A block's key scores in one butterfly all-reduce.", **_DA)
+ CHOICE("decode.attn.paged", "bool", True, "ATTN_PAGED", doc="16-aligned key blocks, one page lookup each.", **_DA)
+ CHOICE("decode.attn.ilp", "int", 1, "ATTN_ILP", doc="Independent softmax chains per block (2, 4: no gain on Qwen3.8-27B at 32k).", **_DA)
+-CHOICE("decode.attn.kv_once", "bool", False, "ATTN_GQA", rows=["decode_32k", "decode_2k"],
++CHOICE("decode.attn.kv_once", "bool", True, "ATTN_GQA", rows=["decode_32k", "decode_2k"],
+        kernels=["g_attention_split"], from_pr="gqa_split",
+        doc="Decode split kernel (non-drafting, head_dim 128): K/V loaded once for the G query heads of a KV head; the per-head "
+            "body stays under decode.attn.kv_once.from_keys visible keys. Qwen3-4B decode_32k 24.5 -> 28.3 tok/s.")
+diff --git a/skills/loom-port-llm/starter/attn_rules.py b/skills/loom-port-llm/starter/attn_rules.py
+index 1c58aea..f1f21c6 100644
+--- a/skills/loom-port-llm/starter/attn_rules.py
++++ b/skills/loom-port-llm/starter/attn_rules.py
+@@ -9,7 +9,7 @@ ATTN_ILP = int(os.environ.get("ATTN_ILP", "1"))   # independent softmax chains p
+ # Decode split kernel (non-drafting packages): K/V loaded once for the G query heads of a KV head (gen_llm.gqa_split); the
+ # per-head body stays for contexts under ATTN_GQA_FROM visible keys. Nodraft Qwen3-4B (kv8, d128), same runner: decode_32k
+ # 24.5 -> 28.3 (+15 %), decode/2k/4 streams within noise. ATTN_GQA=0 keeps the per-head kernel.
+-ATTN_GQA = os.environ.get("ATTN_GQA", "0") == "1"
++ATTN_GQA = os.environ.get("ATTN_GQA", "1") == "1"
+ ATTN_GQA_FROM = int(os.environ.get("ATTN_GQA_FROM", "4096"))
+ # Drafting packages (verify spans, 1-token and ctx-gated epochs) carry the same K/V-once body: every token past ATTN_GQA_FROM keys
+ # reads each key once for its G heads, the tokens of a verify span re-read through the cache (the multi-token path below hands over
