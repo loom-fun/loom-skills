@@ -643,6 +643,11 @@ def ingest_full(st, name, e, W):
     build = [f"{S}/make_info.py", "build", out, "--org", st.d["opts"]["new_org"], "--gpus", ",".join(gpus)]
     if fit:
         build += ["--fit", os.path.join(ROOT, fit)]
+    # --from-info keeps only DevLab-measured sessions: another GPU's published table (Strix Halo's loom-fun numbers) would be dropped, so every
+    # other device's performance is taken from the head card as published
+    keep = [f"{g}=info_prev.json" for g, x in (prev.get("devices") or {}).items() if g != dev and (x or {}).get("performance")]
+    for spec in keep:
+        build += ["--perf-from", spec]
     run_tool(build + ["--memory-bytes", str(mem), "--from-info", "info_prev.json", "--evidence", *ev, "-o", "info_new.json"], W)
     shutil.copy(os.path.join(W, "info_new.json"), os.path.join(out, "info.json"))
     return out, hf_head(f"{st.d['opts']['new_org']}/{slug}"), (f"{card_lib.GPUS[dev]['runner']} results measured on this package (run {run})")

@@ -242,14 +242,14 @@ class CollectTest(Base):
 
 
 class IngestPublishTest(Base):
-    def ingested(self):
+    def ingested(self, prev_devices=None):
         self.collected()
         self.collect()
         calls = []
 
         def hf_snapshot(repo, rev, out):
             os.makedirs(out)
-            json.dump({"card": {"memory_bytes": 123}, "devices": {"strix-halo": {}}}, open(os.path.join(out, "info.json"), "w"))
+            json.dump({"card": {"memory_bytes": 123}, "devices": prev_devices or {"strix-halo": {}}}, open(os.path.join(out, "info.json"), "w"))
             open(os.path.join(out, "README.md"), "w").write("card")
             calls.append(("snapshot", repo, rev))
 
@@ -277,6 +277,15 @@ class IngestPublishTest(Base):
         self.assertEqual(build[build.index("--gpus") + 1], "strix-halo,radeon-r9700")   # the card's GPUs, registry order, plus this device
         e = st.jobs[JOB]
         self.assertEqual((e["stage"], e["parent"]), ("ingested", "p" * 40))
+
+    def test_ingest_of_one_device_keeps_the_other_devices_published_table(self):
+        _, calls = self.ingested({"strix-halo": {"performance": {"sessions": []}}})
+        build = next(c[1] for c in calls if c[0] == "tool" and "build" in c[1])
+        self.assertEqual([build[i + 1] for i, a in enumerate(build) if a == "--perf-from"], ["strix-halo=info_prev.json"])
+
+    def test_ingest_without_another_device_table_passes_no_perf_from(self):
+        _, calls = self.ingested({"strix-halo": {}})
+        self.assertNotIn("--perf-from", next(c[1] for c in calls if c[0] == "tool" and "build" in c[1]))
 
     def test_publish_dry_run_is_card_only_to_staging_with_the_parent(self):
         self.ingested()
