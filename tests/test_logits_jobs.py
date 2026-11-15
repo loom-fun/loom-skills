@@ -41,6 +41,16 @@ class LogitsJobs(unittest.TestCase):
         j = jobs("--device", "strix-halo", "--ref", "origin/x", "--bundle-build", "f822f2b", "b1e06141", SLUG)["jobs"][0]
         self.assertEqual(j["bundle"], {"build": {"extension": "loom-fun/loom-gufo-extension@f822f2b", "gufo": "loom-fun/gufo@b1e06141"}})
 
+    def test_bundle_of_an_earlier_run_is_reused(self):
+        j = jobs("--device", "strix-halo", "--ref", "origin/x", "--bundle-run", "43700000000", SLUG)["jobs"][0]
+        self.assertEqual(j["bundle"], {"run": "43700000000"})
+
+    def test_workflow_downloads_the_artifact_of_that_run(self):
+        wf = open(os.path.join(ROOT, ".github", "workflows", "devlab-perf.yml")).read()
+        for needle in ("bundle_run: ${{ steps.pick.outputs.bundle_run }}", "run-id: ${{ needs.jobs.outputs.bundle_run }}",
+                       "if: needs.bundle.result == 'success' || needs.jobs.outputs.bundle_run != ''", "retention-days: 30"):
+            self.assertIn(needle, wf)
+
     def test_bundle_pins_default(self):
         j = jobs("--device", "strix-halo", "--ref", "origin/x", SLUG)["jobs"][0]
         pins = json.load(open(os.path.join(ROOT, ".github", "devlab", "gufo_bundle.json")))

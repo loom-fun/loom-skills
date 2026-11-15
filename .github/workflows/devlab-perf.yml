@@ -26,6 +26,7 @@ jobs:
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
       bundle: ${{ steps.pick.outputs.bundle }}   # {"extension": "OWNER/REPO@REV", "gufo": "OWNER/REPO@REV"} when a job asks for a Gufo bundle built in this run, else ""
+      bundle_run: ${{ steps.pick.outputs.bundle_run }}   # the id of an earlier run whose `gufo-bundle` artifact the jobs reuse ("bundle": {"run": "ID"}), else ""
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,12 +49,17 @@ jobs:
           builds = {json.dumps(j["bundle"]["build"], sort_keys=True) for j in e["jobs"] if (j.get("bundle") or {}).get("build")}
           assert len(builds) <= 1, f"jobs ask for different Gufo bundles to build: {sorted(builds)}"
           print("bundle=" + (next(iter(builds)) if builds else ""))
+          runs = {str(j["bundle"]["run"]) for j in e["jobs"] if (j.get("bundle") or {}).get("run")}
+          assert len(runs) <= 1 and not (runs and builds), f"jobs ask for a bundle to build and/or reuse from different runs: {sorted(builds)} {sorted(runs)}"
+          assert all(r.isdigit() for r in runs), f"bundle run must be a run id: {sorted(runs)}"
+          print("bundle_run=" + (next(iter(runs)) if runs else ""))
           PY
 
   # The Gufo bundle (gufo + libloom_text_embed with their own loader, host logits steps `logits:V` / `gufo:V`) is built inside this run when a
   # job says "bundle": {"build": {"extension": "loom-fun/loom-gufo-extension@REV", "gufo": "loom-fun/gufo@REV"}}: Nix in Docker on a hosted
   # runner (validation/devlab/build_bundle.sh of the extension), the tarball cached by the two revisions and handed to the run jobs as an
-  # artifact. Nothing is uploaded to Hugging Face or a release.
+  # artifact. Nothing is uploaded to Hugging Face or a release. The build takes hours: later experiments for the same two revisions set
+  # "bundle": {"run": "RUN_ID"} instead (the id of the run that built it) and every job of theirs downloads that run's `gufo-bundle` artifact.
   bundle:
     needs: jobs
     if: needs.jobs.outputs.bundle != ''
@@ -108,7 +114,7 @@ jobs:
         with:
           name: gufo-bundle
           path: bundle-out/*.tar.gz
-          retention-days: 7
+          retention-days: 30   # other runs reuse it by run id (a bundle build takes hours)
 
   run:
     needs: [jobs, bundle]
@@ -137,8 +143,16 @@ jobs:
         with:
           name: gufo-bundle
           path: ${{ env.WORK }}/_gufo-bundle-dl
+      - name: Gufo bundle of an earlier run
+        if: needs.jobs.outputs.bundle_run != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: gufo-bundle
+          run-id: ${{ needs.jobs.outputs.bundle_run }}
+          github-token: ${{ github.token }}
+          path: ${{ env.WORK }}/_gufo-bundle-dl
       - name: unpack the bundle
-        if: needs.bundle.result == 'success'
+        if: needs.bundle.result == 'success' || needs.jobs.outputs.bundle_run != ''
         run: |
           d="$WORK/_gufo-bundle/ci"; rm -rf "$d"; mkdir -p "$d"
           tar -xzf "$WORK"/_gufo-bundle-dl/*.tar.gz -C "$d" --strip-components=1

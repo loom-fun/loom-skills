@@ -74,6 +74,21 @@ class LogitsMode(unittest.TestCase):
         regen.logits_steps(doc, {"build": {"extension": "loom-fun/loom-gufo-extension@x", "gufo": "loom-fun/gufo@y"}})
         self.assertEqual(doc["jobs"][0]["bundle"]["build"]["gufo"], "loom-fun/gufo@y")
 
+    def test_plan_defaults_to_the_pinned_bundle_and_can_reuse_a_run(self):
+        import argparse
+        pins = json.load(open(os.path.join(ROOT, ".github", "devlab", "gufo_bundle.json")))
+        ns = argparse.Namespace(bundle=None, bundle_build=None, bundle_run=None)
+        with tempfile.TemporaryDirectory() as d:
+            doc = {"jobs": []}
+            with mock.patch.object(regen, "gen_jobs", lambda st, dev, chunk: (doc, [], list(chunk))):
+                for run, want in ((None, {"build": {"extension": pins["extension"], "gufo": pins["gufo"]}}), ("43700000000", {"run": "43700000000"})):
+                    ns = argparse.Namespace(slugs=["x"], all=False, device=["strix-halo"], mode="logits", old=None, new_org="loom-fun-staging", gates="dev",
+                                            batch=8, no_pin=True, work=d, state=os.path.join(d, "s.json"), force=True, replicas=1, sequential=False,
+                                            no_baselines=False, priority=False, bundle=None, bundle_build=None, bundle_run=run)
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        regen.cmd_plan(ns)
+                    self.assertEqual(json.load(open(ns.state))["opts"]["bundle"], want)
+
     def verdict(self, results):
         with tempfile.TemporaryDirectory() as d:
             json.dump({"results": results}, open(os.path.join(d, "summary.json"), "w"))

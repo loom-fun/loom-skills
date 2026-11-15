@@ -273,12 +273,16 @@ def cmd_plan(a):
             ent = refs.setdefault(s, {})
             if "new" not in ent:
                 ent["new"] = f"{a.new_org}/{s}@{hf_head(f'{a.new_org}/{s}')}"
+    if a.mode == "logits" and not (a.bundle or a.bundle_build or a.bundle_run):   # the pinned bundle (.github/devlab/gufo_bundle.json), built in the run
+        pins = json.load(open(os.path.join(ROOT, ".github", "devlab", "gufo_bundle.json")))
+        a.bundle_build = [pins["extension"].split("@")[1], pins["gufo"].split("@")[1]]
     st = {"schema": "regen/1", "created": now(), "mode": a.mode, "work": work, "state": state_path,
           "opts": {"gates": a.gates, "new_org": a.new_org, "old_org": old_org, "batch": a.batch, "refs": None,
                    **({"replicas": a.replicas} if a.replicas > 1 else {}), **({"sequential": True} if a.sequential else {}),
                    **({"no_baselines": True} if a.no_baselines else {}), **({"bundle": a.bundle} if a.bundle else {}),
                    **({"bundle": {"build": {"extension": f"loom-fun/loom-gufo-extension@{a.bundle_build[0]}", "gufo": f"loom-fun/gufo@{a.bundle_build[1]}"}}}
-                      if a.bundle_build else {})},
+                      if a.bundle_build else {}),
+                   **({"bundle": {"run": a.bundle_run}} if a.bundle_run else {})},
           "devices": devices, "batches": [], "jobs": {}, "log": []}
     for dev in devices:
         # per-device refs file. Where the device has no published table to compare with (anything but Strix Halo, whose old package is the
@@ -835,6 +839,7 @@ def main(argv=None):
     p.add_argument("--mode", choices=("ab", "card", "logits"), default="ab",
                    help="logits: the final pass's functional job of a staging package (func, ktest, logits:staging, gufo:staging), no performance")
     p.add_argument("--bundle", nargs=2, metavar=("URL", "SHA256"), help="logits mode: the Gufo bundle tarball the job fetches (devlab_perf.sh gufo_bundle)")
+    p.add_argument("--bundle-run", help="logits mode: reuse the `gufo-bundle` artifact of this devlab-perf run (the run that built it: no build in this one)")
     p.add_argument("--bundle-build", nargs=2, metavar=("EXT_REV", "GUFO_REV"), help="logits mode: the devlab-perf run BUILDS the Gufo bundle "
                    "(loom-fun/loom-gufo-extension@EXT_REV, loom-fun/gufo@GUFO_REV; Nix in Docker on a hosted runner, cached by the two revisions)")
     p.add_argument("--all", action="store_true", help="every model of the fleet manifest (a device skips the ones that do not fit)")
