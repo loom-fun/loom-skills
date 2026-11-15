@@ -279,7 +279,15 @@ def package_facts(pkg_files, upstream=None):
             "output": model.get("model", {}).get("id", "").split("/")[-1] or None,
             "memory_bytes": execution.get("memory_bytes"),
             "generator": cfg.get("generator"), "serve": cfg.get("serve"), "sdk": cfg.get("sdk"),
+            "logits": declares_logits(model),   # model.json declares the host logits readback capability (llm.logits)
             "features": derive_features(model, cfg, kind, execution, srcs, spec, upstream)}
+
+
+def declares_logits(model):
+    """True when a model.json (any variant's service config) carries the `llm.logits` capability key (#736: its presence = the package supports it)."""
+    if isinstance(model, dict):
+        return "llm.logits" in model or any(declares_logits(v) for v in model.values())
+    return isinstance(model, list) and any(declares_logits(v) for v in model)
 
 
 def tool_calling(chat):
@@ -491,15 +499,15 @@ def derived_tags(features, gpus=(DEFAULT_GPU,)):
     return tags
 
 
-def gate_applies(name, kind, feats):
+def gate_applies(name, kind, feats, logits=True):
     if name in ("kernel_tests", "consistency"):
         return True
     if kind == "decision":
         return name == "decision"
     if name == "decision":
         return False
-    if name in ("logits", "gufo"):   # the host logits readback is an LLM text feature (llm.logits)
-        return True
+    if name in ("logits", "gufo"):   # the host logits readback is an LLM text feature (llm.logits): a package without the capability has none
+        return logits
     if name == "vision":
         return feats["image_input"]["status"] == "yes"
     if name == "spec":

@@ -36,7 +36,8 @@
       "source"
      ],
      "config": {
-      "llm.card": true
+      "llm.card": true,
+        "llm.logits": false
      },
      "parameters": {
       "model": {

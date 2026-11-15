@@ -319,7 +319,7 @@ def cmd_build(a):
                           + ("" if a.reset_performance else " not measured on DevLab"), file=sys.stderr)
                 st["baselines"] = json.loads(json.dumps(dev["performance"].get("baselines") or {}))
             for name, g in (dev.get("gates") or {}).items():   # a published gate has a date, not a time: later evidence that day wins
-                if name in RETIRED_GATES or not gate_applies(name, facts["kind"], facts["features"]):   # e.g. spec after drafting was turned off: shown n/a
+                if name in RETIRED_GATES or not gate_applies(name, facts["kind"], facts["features"], facts.get("logits", True)):   # e.g. spec after drafting was turned off: shown n/a
                     continue
                 st["gates"][name] = ((g.get("date") or "", -1), None, g)
             st["roofline"] = dev.get("roofline")

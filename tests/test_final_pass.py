@@ -98,5 +98,16 @@ class CarriedPrograms(unittest.TestCase):
 
 
 
+
+class LogitsCapability(unittest.TestCase):
+    def test_a_package_declares_the_capability_by_the_key_in_any_service_config(self):
+        sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card"))
+        import card_lib
+        self.assertTrue(card_lib.declares_logits({"variants": {"gguf": {"services": {"chat": {"config": {"llm.logits": False}}}}}}))
+        self.assertFalse(card_lib.declares_logits({"variants": {"gguf": {"services": {"chat": {"config": {"llm.card": True}}}}}}))
+        self.assertTrue(card_lib.gate_applies("logits", "chat", {}, True))
+        self.assertFalse(card_lib.gate_applies("gufo", "chat", {}, False))
+
+
 if __name__ == "__main__":
     unittest.main()

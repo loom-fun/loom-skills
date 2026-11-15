@@ -655,7 +655,7 @@ def render(d):
         if gt is None and beyond_context(gpu_view(info, g), name, gpu_context(info, g, native), native):
             return f"{FIT} (needs more context than the {gpu_context(info, g, native):,} tokens this GPU serves)"
         if gt is None:
-            return f"{NO} no evidence" if gate_applies(name, kind, feats) else f"{NA} not applicable"
+            return f"{NO} no evidence" if gate_applies(name, kind, feats, facts.get("logits", True)) else f"{NA} not applicable"
         key = (gt["source"], gt["level"], gt["date"])
         gsha = gt.get("programs_sha256")
         rmg = dev.get("remeasure") or {}

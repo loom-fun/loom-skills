@@ -217,7 +217,7 @@ def assess(repo, d):
         out["paused"] = True
     gates = info.get("gates") or {}
     for g in GATE_NAMES:
-        if not gate_applies(g, facts["kind"], facts["features"]):
+        if not gate_applies(g, facts["kind"], facts["features"], facts.get("logits", True)):
             continue
         ev = gates.get(g)
         if not ev:
