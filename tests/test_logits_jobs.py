@@ -30,12 +30,12 @@ def jobs(*args):
 
 class LogitsJobs(unittest.TestCase):
     def test_strix(self):
-        j = jobs("--device", "strix-halo", "--ref", "origin/x", "--embed", "https://e/x.tgz", "ab" * 32, SLUG)["jobs"][0]
+        j = jobs("--device", "strix-halo", "--ref", "origin/x", "--bundle", "https://e/x.tgz", "ab" * 32, SLUG)["jobs"][0]
         v = {x["name"]: x for x in j["variants"]}
         self.assertEqual((v["staging"]["ref"], v["stagingnd"]["ref"], "ref" in v["fun"], "build" in v["fun"]), ("origin/x", "origin/x", False, False))
         self.assertEqual(j["steps"][-2:], ["logits:staging", "gufo:staging"])
         self.assertIn("perf:fun:1", j["steps"])
-        self.assertEqual(j["embed"], {"url": "https://e/x.tgz", "sha256": "ab" * 32})
+        self.assertEqual(j["bundle"], {"url": "https://e/x.tgz", "sha256": "ab" * 32})
 
     def test_r9700_rebuilds_the_device_preset(self):
         j = jobs("--device", "radeon-r9700", "--ref", "origin/x", "--no-gufo", "--no-ab", SLUG)["jobs"][0]
@@ -46,6 +46,7 @@ class LogitsJobs(unittest.TestCase):
     def test_script_has_the_steps(self):
         sh = open(os.path.join(SCRIPTS, "devlab_perf.sh")).read()
         self.assertIn("    logits)", sh)
+        self.assertIn("    gufo)", sh)
         self.assertEqual(subprocess.run(["bash", "-n", os.path.join(SCRIPTS, "devlab_perf.sh")]).returncode, 0)
 
 

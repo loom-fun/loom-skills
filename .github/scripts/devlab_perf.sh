@@ -66,11 +66,14 @@
 #          determinism:V:C:R    determinism.py (issue #39's script, when present)
 #          func:V               V served alone: the functional checks the card claims (chat, tool calling, image input;
 #                               r9700_func.py: the same checks as the Windows red-team harness), out/func_V.json
-#          logits:V[:N]         host logits readback (loom-skills#736): V's package opened through libloom_text_embed with llm.logits on
-#                               (embed library: $LOOM_EMBED_LIB, or job/experiment "embed": {"url": TARBALL, "sha256": H} holding
-#                               lib/libloom_text_embed.so), logits_check.py: argmax of every returned row == the device's token, top-5 vs
-#                               llama.cpp (same GGUF, undrafted), greedy text unchanged by the capability; logits_V.json (gate `logits`,
-#                               make_info.py gates). N prompts (default 6). Without an embed library the step is "not supported".
+#          logits:V[:N]         host logits readback (loom-skills#736): V's package through the Gufo bundle (loom-gufo-extension
+#                               validation/devlab/build_bundle.sh: gufo + libloom_text_embed.so with their own loader; $GUFO_BUNDLE, or job/
+#                               experiment "bundle": {"url": TARBALL, "sha256": H}), logits_check.py: embed_probe (argmax of every returned row ==
+#                               the device's token), gufo's host-sampled logprobs vs llama.cpp (same GGUF, undrafted), greedy text unchanged by
+#                               the capability; logits_V.json (gate `logits`, make_info.py gates). N prompts (default 6). Without a bundle
+#                               the step is "not supported" (never replaced by another path).
+#          gufo:V               Gufo conformance on V's package served with --loom-logits=on (validation/devlab/run_conformance.sh: conformance.py
+#                               --logits + gufo's logits_check.py); conformance_V.json (gate `gufo`), the raw files in out/gufo_V/
 #          ktest:V              make_kernel_tests.py + run_kernel_tests.sh with V's kit
 #          gates:V:LEVEL        gates.sh against llama.cpp
 #            "elastic": true: on the R9700 serve with --memory_bytes (the elastic state backing) instead of the card's --pool_backing=fixed
@@ -337,18 +340,20 @@ serve_alone() { # serve_alone VARIANT
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null
 }
-embed_lib() {   # embed_lib -> exports LOOM_EMBED_LIB (the experiment's/job's "embed" tarball, fetched once per runner), or fails
-  [ -n "${LOOM_EMBED_LIB:-}" ] && [ -f "$LOOM_EMBED_LIB" ] && return 0
-  local u h d; u=$(q "print((j.get('embed') or e.get('embed') or {}).get('url') or '')"); h=$(q "print((j.get('embed') or e.get('embed') or {}).get('sha256') or '')")
+gufo_bundle() {   # gufo_bundle -> exports GUFO_BUNDLE (the experiment's/job's "bundle" tarball, fetched once per runner), or fails
+  [ -n "${GUFO_BUNDLE:-}" ] && [ -x "$GUFO_BUNDLE/run.sh" ] && return 0
+  local u h d; u=$(q "print((j.get('bundle') or e.get('bundle') or {}).get('url') or '')"); h=$(q "print((j.get('bundle') or e.get('bundle') or {}).get('sha256') or '')")
   [ -n "$u" ] && [ -n "$h" ] || return 1
-  d=$WORK/_embed/${h:0:12}
-  if [ ! -f "$d/lib/libloom_text_embed.so" ]; then
-    step "fetch embed library $u"; rm -rf "$d"; mkdir -p "$d"
-    curl -fsSL --retry 3 "$u" -o "$d.tgz" && [ "$(sha256sum "$d.tgz" | cut -d' ' -f1)" = "$h" ] && tar -xzf "$d.tgz" -C "$d" || { echo "FAIL: embed tarball $u (fetch, sha256 or untar)"; rm -rf "$d" "$d.tgz"; return 1; }
+  d=$WORK/_gufo-bundle/${h:0:12}
+  if [ ! -x "$d/run.sh" ]; then
+    step "fetch gufo bundle $u"; rm -rf "$d"; mkdir -p "$d"
+    curl -fsSL --retry 5 ${GH_TOKEN:+-H "Authorization: Bearer $GH_TOKEN"} "$u" -o "$d.tgz" && [ "$(sha256sum "$d.tgz" | cut -d' ' -f1)" = "$h" ] \
+      && tar -xzf "$d.tgz" -C "$d" --strip-components=1 || { echo "FAIL: gufo bundle $u (fetch, sha256 or untar)"; rm -rf "$d" "$d.tgz"; return 1; }
     rm -f "$d.tgz"
   fi
-  export LOOM_EMBED_LIB=$d/lib/libloom_text_embed.so EMBED_DIR=$d
+  export GUFO_BUNDLE=$d
 }
+free_gpu() { for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done; "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1; }
 LSPEC=""
 llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n-max overridden), restarted on change
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
@@ -510,20 +515,24 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'median', 
       grep -v "^PASS" "$out/ktest_$p1.log" | tail -15
       tot=$(grep -oE "^[0-9]+/[0-9]+ passed" "$out/ktest_$p1.log" | tail -1)
       res[$s]="$([ $rc = 0 ] && [ -n "$tot" ] && [ "${tot%%/*}" = "$(echo "${tot#*/}" | cut -d' ' -f1)" ] && echo PASS || echo FAIL) ($tot; $(grep -c '^SKIP' "$out/ktest_$p1.log") skipped)";;
-    logits)   # logits:V[:N_PROMPTS]  (loom-skills#736): V's package through the embed layer with llm.logits on, checked on this GPU
-      for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done   # the GPU is the embed handle's alone
-      "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
-      embed_lib || { echo '{"verdict": "NOT_SUPPORTED", "note": "no embed library on this job (set embed or LOOM_EMBED_LIB)", "gates": {}}' > "$out/logits_$p1.json"; res[$s]="not supported (no embed library)"; continue; }
+    logits)   # logits:V[:N_PROMPTS]  (loom-skills#736): V's package through the Gufo bundle with the logits capability on, checked on this GPU
+      free_gpu   # the GPU is the bundle's (and the undrafted llama.cpp reference's) alone
+      gufo_bundle || { echo '{"verdict": "NOT_SUPPORTED", "note": "no gufo bundle on this job (set bundle or GUFO_BUNDLE)", "gates": {}}' > "$out/logits_$p1.json"; res[$s]="not supported (no gufo bundle)"; continue; }
       LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR
       ( unset LLAMA_SPEC; "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 1 8192 | tail -1 ) || { res[$s]=ERROR; continue; }
-      lp=""; [ -n "$RDEV" ] && lp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] + sys.argv[2] if p[0] + sys.argv[2] in p else '')" "$D/$p1/pkg/model.json" "$RSUF")
-      [ -z "$lp" ] && lp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] if len(p) > 1 else '')" "$D/$p1/pkg/model.json")
-      step "logits $p1 (embed $LOOM_EMBED_LIB)"
-      "$T" "$here/.github/scripts/logits_check.py" "$D/$p1/pkg" "$out/logits_$p1.json" --lib "$LOOM_EMBED_LIB" --llama "$lurl" --prompts "${p2:-6}" \
-        ${lp:+--preset "$lp"} > "$out/logits_$p1.log" 2>&1; rc=$?
+      step "logits $p1 (bundle $GUFO_BUNDLE)"
+      "$T" "$here/.github/scripts/logits_check.py" "$D/$p1/pkg" "$out/logits_$p1.json" --bundle "$GUFO_BUNDLE" --llama "$lurl" --prompts "${p2:-6}" \
+        > "$out/logits_$p1.log" 2>&1; rc=$?
       tail -3 "$out/logits_$p1.log" | cut -c1-300
       "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
       res[$s]=$(grep -h "^LOGITS" "$out/logits_$p1.log" | tail -1 | cut -c1-300); [ -n "${res[$s]}" ] || res[$s]="ERROR rc=$rc";;
+    gufo)   # gufo:V  Gufo conformance on V's package (gufo run_conformance.sh: --loom-logits=on, conformance.py --logits, logits_check.py)
+      free_gpu
+      gufo_bundle || { echo '{"verdict": "NOT_SUPPORTED", "note": "no gufo bundle on this job (set bundle or GUFO_BUNDLE)", "gates": {}}' > "$out/conformance_$p1.json"; res[$s]="not supported (no gufo bundle)"; continue; }
+      step "gufo conformance $p1 (bundle $GUFO_BUNDLE)"
+      BUNDLE=$GUFO_BUNDLE "$GUFO_BUNDLE/validation/devlab/run_conformance.sh" "$D/$p1/pkg" "$out/gufo_$p1" 8181 > "$out/gufo_$p1.log" 2>&1; rc=$?
+      tail -4 "$out/gufo_$p1.log" | cut -c1-300
+      res[$s]=$("$T" "$here/.github/scripts/gufo_gate.py" "$out/gufo_$p1" "$out/conformance_$p1.json" "$rc" 2>&1 | tail -1 | cut -c1-300);;
     func)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "functional checks $p1"
