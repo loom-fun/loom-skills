@@ -51,6 +51,8 @@ class Comparisons(unittest.TestCase):
         # the same distance on a confident token is a problem
         n, probs = lc.check_vs_llama([[("A", -0.2)]], ["A"], [{"A": -1.5}], near_tie)
         self.assertTrue(probs and "tolerance 1.0" in probs[0])
+        # the worst measured tail (a MoE model, p~1e-3 on one side): 2.7 nats apart
+        self.assertEqual(lc.check_vs_llama([[("A", -0.2), ("b", -9.429)]], ["A"], [{"A": -0.2, "b": -6.744}], near_tie), (1, []))
         # a wrong row (a shifted slot): the second token several nats off where the mass is
         n, probs = lc.check_vs_llama([[("A", -0.2), ("b", -6.5)]], ["A"], [{"A": -0.2, "b": -1.9}], near_tie)
         self.assertTrue(probs)
@@ -68,7 +70,7 @@ class Comparisons(unittest.TestCase):
     def test_tail_tolerance_tiers(self):
         self.assertEqual(lc.tail_tol(-0.1, -0.2), 1.0)
         self.assertEqual(lc.tail_tol(-2.0, -3.2), 1.5)
-        self.assertEqual(lc.tail_tol(-7.0, -9.0), 2.5)
+        self.assertEqual(lc.tail_tol(-7.0, -9.0), 3.0)
         self.assertIsNone(lc.tail_tol(-10.4, -12.7))
 
     @unittest.skipUnless(hasattr(os, "killpg"), "process groups are POSIX")

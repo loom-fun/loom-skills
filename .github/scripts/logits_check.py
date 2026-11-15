@@ -43,9 +43,9 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "skills", "loom-benchmark", "s
 # Log-prob tolerance (nats) of a token both engines list, by the larger of the two probabilities (the golden's near-tie gap, 1.0, applies to the
 # confident tokens; the tail is graded by how much probability is there to be wrong about). Measured on the same GGUF through the two engines'
 # quantized matmuls (DevLab fleet sweep, both GPUs): small dense models differ by <= 0.7 nats on tokens below p=0.1; mid-size and MoE models by
-# 1.2 nats at p~0.1 (a routing flip changes the whole tail), 1.5-1.8 at p~1e-3 and up to 2.3 below 1e-4. A token below p=1e-4 on both sides
+# 1.2 nats at p~0.1 (a routing flip changes the whole tail), 1.5-2.7 at p~1e-3 and up to 2.9 below 1e-4. A token below p=1e-4 on both sides
 # carries no mass and is not compared. The gate still catches a wrong row (a shifted slot, a stale row): several nats on the top tokens.
-LOGPROB_TIERS = ((0.5, 1.0), (1e-2, 1.5), (1e-4, 2.5))    # (probability >=, tolerance in nats), tried in order
+LOGPROB_TIERS = ((0.5, 1.0), (1e-2, 1.5), (1e-4, 3.0))    # (probability >=, tolerance in nats), tried in order
 LOGPROB_TOL = LOGPROB_TIERS[0][1]
 TOPK = 5
 MIN_COMPARED = 8       # greedy steps compared against llama.cpp on at least one prompt before the gate can pass
