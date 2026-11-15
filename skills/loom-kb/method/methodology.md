@@ -69,7 +69,6 @@ two or three lines; if they disagree with this file, this file wins and the othe
 11. **Publishing.** `make_info.py build PKG -o PKG/info.json` (always `-o`), `publish_package.py upload ... --parent-commit SHA`,
     then fetch the live `info.json` and confirm the new session id (`performance.sessions[-1].source`) and the gates'
     `programs_sha256` equal the package's before saying "published". Publish partial progress; never fake a cell.
-
 12. **Cards for two GPUs** (`loom-card/3`: Strix Halo `strix-halo`, gfx1151; AMD Radeon AI PRO R9700 `radeon-r9700`, gfx1201, 32 GB).
     Every rule above holds per GPU: each GPU has its own table, measured in one job on one runner of that GPU (never compare or
     mix values across GPUs), its own llama.cpp ROCm and Vulkan baselines on that runner, its own roofline (`roofline.py --device`:
@@ -81,7 +80,6 @@ two or three lines; if they disagree with this file, this file wins and the othe
     line). A GPU without results for this package is `not_measured` (one factual line, no numbers copied from another package or
     program). Publishing goes to one org (`publish_package.py upload --org`, default `loom-fun`); the staging flow uses `--org
     loom-fun-staging` with the same repo names, and a card whose `info.json` repo is another org is refused.
-
 13. **A/B verdicts use a band per row** (`methodology.json` `rows`; same runner, ABBA, medians of sessions). A row PASSes when its new/old
     ratio is within the band; there is no geomean: a gain on one row never pays for a loss on another. Not the card's tie band (rule 7),
     which stays +-3 % on every row. Bands (+-, and the ratio below which a 2+2-session canary rejects):
@@ -95,6 +93,9 @@ two or three lines; if they disagree with this file, this file wins and the othe
     The bands were checked on true A/A pairs (same programs on both sides, `band_calibration_aa` in `methodology.json`): a row whose A/A
     spread exceeded its band in more than 5 % of pairs was widened (decode: 3 -> 3.5 %). A ratio within 2 points of its reject threshold extends 2+2 sessions to 6+6. `strix_ab_compare.py --band X` forces one flat band.
     Acceptance rows are informational: reported, never a rerun or out_of_margin verdict alone. The ratchet's two runs may be concurrent replicas of one submission (`ab_jobs.py --replicas 2`) on different runners (`promote_check.py` records the runner names; one runner twice = two session sets, said so); the rule is unchanged. `--sequential` extends 2+2 to 6+6 inside the job.
+14. **An unchanged default path keeps its evidence.** When `fleet/stage_equiv.py` proves a package's default-path stages identical to the measured
+    package's after canonicalization, `make_info.py equivalent` carries that GPU's performance rows (the card names the proof); any other change
+    re-measures. Host logits are the gates `logits` and `gufo` (`devlab_perf.sh` steps `logits:V`, `gufo:V`), never a performance row.
 
 Local qualification (`qualify.sh`, `llama_spec_tune.py`, `tune.py`) is a development loop: its tables guide the optimizer, are
 not card numbers, and may try configurations the card rule excludes. Audit a card with `matched_spec.rule_violations`.
