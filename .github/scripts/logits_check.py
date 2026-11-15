@@ -49,6 +49,16 @@ def special_key(key):
     return "" if key.startswith("<|") and key.endswith("|>") else key
 
 
+def best_by_key(pairs):
+    """{key: best log-prob}: tokens that print as the same text (several special or empty-text tokens) count by their best entry."""
+    out = {}
+    for key, lp in pairs:
+        key = special_key(key)
+        if key not in out or lp > out[key]:
+            out[key] = lp
+    return out
+
+
 def check_vs_llama(loom_tops, llama_keys, llama_tops, near_tie, tol=LOGPROB_TOL):
     """Compare Loom's per-step top lists with llama.cpp's greedy continuation of the same prompt.
     loom_tops: per generated step [(key, logprob)] best first (key: the token's text); llama_keys: llama.cpp's greedy token per
@@ -56,18 +66,17 @@ def check_vs_llama(loom_tops, llama_keys, llama_tops, near_tie, tol=LOGPROB_TOL)
     Returns (compared_steps, problems): stops at the first greedy divergence (judged as a near-tie, or a problem)."""
     compared, problems = 0, []
     llama_keys = [special_key(k) for k in llama_keys]
-    llama_tops = [{special_key(k): v for k, v in t.items()} for t in llama_tops]
-    loom_tops = [[(special_key(k), lp) for k, lp in t] for t in loom_tops]
+    llama_tops = [best_by_key(t.items()) for t in llama_tops]
     for k, (top, gkey, ltop) in enumerate(zip(loom_tops, llama_keys, llama_tops)):
         if not top:
             problems.append(f"step {k}: no top-logprobs")
             break
-        lkey = top[0][0]
+        lkey = special_key(top[0][0])
         if lkey != gkey:
             if not near_tie(ltop, gkey, lkey):
                 problems.append(f"step {k}: Loom top-1 {lkey!r} vs llama.cpp {gkey!r}, not a near-tie")
             break
-        for key, lp in top:
+        for key, lp in best_by_key(top).items():
             if key in ltop and abs(lp - ltop[key]) > tol:
                 problems.append(f"step {k}: token {key!r} logprob {lp:.3f} vs llama.cpp {ltop[key]:.3f}")
         compared += 1

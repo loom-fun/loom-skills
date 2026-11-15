@@ -37,6 +37,8 @@ class Comparisons(unittest.TestCase):
     def test_special_tokens_and_tail_tolerance(self):
         # llama.cpp prints the end-of-turn token as '', Gufo as the marker: the same token
         self.assertEqual(lc.check_vs_llama([[("<|im_end|>", -0.1)]], [""], [{"": -0.15}], near_tie), (1, []))
+        # several tokens print as '': the best entry of each side compares (Loom: the marker and an empty-text token)
+        self.assertEqual(lc.check_vs_llama([[("<|im_end|>", -1.02), ("", -8.5)]], [""], [{"": -1.03}], near_tie), (1, []))
         # tail tokens differ by up to ~0.7 nats between the engines' quantized matmuls: inside the tolerance
         self.assertEqual(lc.check_vs_llama([[("Paris", -0.1), ("A", -3.72)]], ["Paris"], [{"Paris": -0.12, "A": -3.25}], near_tie), (1, []))
 
