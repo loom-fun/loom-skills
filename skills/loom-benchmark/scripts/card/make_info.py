@@ -803,7 +803,9 @@ def gates_from_file(path, time, level):
     m = re.search(r"^(\d+)/(\d+) passed\s*$", text, re.M)
     if m:
         ok = m.group(1) == m.group(2)
-        return [("kernel_tests", "pass" if ok else "fail", f"{m.group(1)}/{m.group(2)}")], time, level
+        failed = re.findall(r"^FAIL (\S+)", text, re.M)
+        return [("kernel_tests", "pass" if ok else "fail",
+                 f"{m.group(1)}/{m.group(2)}" + (f"; failed: {', '.join(failed)}" if failed else ""))], time, level
     sys.exit(f"{path}: no gates.json, GATES line or 'N/M passed' line found")
 
 
@@ -871,6 +873,9 @@ def cmd_remeasure(a):
         if slower:
             sys.exit(f"{a.cmp}: {', '.join(slower)} outside the band in both runs and not faster: refused (not within the band)")
         # out of margin only by acceptance rows (informational, not card rows): a plain within-band re-measure
+    elif (x["verdict"] == "gate_fail" and x.get("gate_failures") and set(x["gate_failures"]) <= set(a.accept_gate_failure or [])
+          and all(k.startswith("acceptance:") for k in x.get("out_of_band") or [])):
+        pass   # every perf row within its band; the failed gates are named by the person who accepted them and stay in the card's gate table
     elif x["verdict"] != "pass" or x.get("gate_failures"):
         sys.exit(f"{a.cmp}: verdict {x['verdict']} (out of band {x.get('out_of_band')}, gate failures {x.get('gate_failures')}): not within the band")
     # a confirming re-run (strix_ab_compare.py --prev) may pass with a metric outside the band in the opposite direction to the
@@ -1129,6 +1134,8 @@ def main(argv=None):
     m.add_argument("--first-cmp", help="the first run's strix_ab_compare.py --json, when --cmp is the confirming re-run with verdict out_of_margin: "
                    "rows faster than the card in both runs get the mean of the two runs' medians as the card value")
     m.add_argument("--first-run", help="the first run's Actions run id (with --first-cmp)")
+    m.add_argument("--accept-gate-failure", action="append", help="a failed gate of the cmp (e.g. ktest:staging) a person accepted: the re-measure "
+                   "goes on the card (rows within the band) and the gate stays failed in the gate table")
     m.add_argument("--first-url", help="the first run's job URL (with --first-cmp)")
     add_source_args(m, "devlab")
     m.add_argument("-o", required=True)

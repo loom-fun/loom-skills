@@ -382,7 +382,9 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
 TH=$(q "print(j.get('thinking') or 'off')")   # chat_template_kwargs.enable_thinking sent to both engines
 echo "thinking: $TH (sent to both engines)"
 declare -A res
-for s in $steps; do
+queue=($steps); qi=0   # a queue, not a fixed list: the step extend:TO:HAVE:ROT appends sessions (ab_extend.py)
+while [ "$qi" -lt "${#queue[@]}" ]; do
+  s=${queue[$qi]}; qi=$((qi + 1))
   IFS=: read -r kind p1 p2 p3 <<< "$s"
   BK=rocm; bkt=; MODS=; case $kind in *@*) bkt=-${kind#*@}; BK=${kind#*@}; MODS=${BK#"${BK%%.*}"}; BK=${BK%%.*}; kind=${kind%@*};; esac   # llama@vulkan: the other backend's build
   [ "$BK" = rocm ] || [ "$vtag" != - ] || { echo "$s: set llamacpp_vulkan"; res[$s]=ERROR; continue; }
@@ -398,6 +400,10 @@ for s in $steps; do
       "$T" "$here/.github/scripts/ab_decode.py" "$url" "${ids[@]}" --rounds "$p1" --think "${p2:-$TH}" --log "$out/ab.jsonl" 2>&1 | tee "$out/ab.log"
       res[$s]=$(grep -c SUMMARY "$out/ab.log")" variants measured"
       "$SV/stop.sh" abserve >/dev/null 2>&1;;
+    extend)   # extend:TO:HAVE:ROT: methodology "sequential" (2+2 sessions -> 6+6 where a ratio is within 2 points of its reject threshold)
+      more=$("$T" "$here/.github/scripts/ab_extend.py" "$out" --to "$p1" --have "$p2" --rot "${p3:-0}" 2> "$out/extend.log"); cat "$out/extend.log"
+      queue+=($more); res[$s]="$(echo $more | wc -w) more sessions"
+      echo "$(echo "$more" | tr '\n' ' ')" > "$out/extended_steps.txt";;
     perf)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "perf $p1 x $p2 ${p3:-} (thinking $TH)"
@@ -506,7 +512,7 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'median', 
   esac
   echo "RESULT $job $s: ${res[$s]}"
 done
-for s in $steps; do echo "$s	${res[$s]:-}"; done > "$out/results.tsv"
+for s in "${queue[@]}"; do echo "$s	${res[$s]:-}"; done > "$out/results.tsv"
 "$T" - "$job" "$out" <<'EOF'
 import json, os, sys
 name, out = sys.argv[1:]
