@@ -49,17 +49,26 @@ class FrontKernel(unittest.TestCase):
     def test_geometry_and_history_carry(self):
         t = front_text()
         self.assertIn('kernel.def target(@rdna4) export("g_gdn_front_rdna4") @g_gdn_front_rdna4(%spans: index)', t)
-        self.assertIn("workgroups(%spans, %nblocks, %c1) workgroup_size(%cblock, %c1, %c1)", t)
+        self.assertIn("workgroups(%spans, %nblocks, %c1) workgroup_size(%c32, %c1, %c1)", t)    # one wave per 128-channel block
         self.assertIn("%nblocks = index.constant 80 : index", t)                    # 10240 channels / 128
-        self.assertIn("%f_0, %f_1, %f_2 = scf.for %base = [%c0 to %length step %cS](%p0 = %h0 : f32, %p1 = %h1 : f32, %p2 = %h2 : f32)", t)
-        self.assertEqual(len(re.findall(r"scalar\.fmaf %w\d, ", t)), 8 * 4)         # 8 steps x 4 taps
-        self.assertEqual(len(re.findall(r"view\.store %y\d, %out_view", t)), 8)
-        self.assertEqual(t.count("kernel.workgroup.reduce<addf> %sqv : vector<8xf32>"), 1)   # one reduction per tile of 8 steps
+        self.assertIn("%f_0, %f_1, %f_2 = scf.for %base = [%c0 to %length step %cS](%p0 = %h0 : vector<4xf32>, %p1 = %h1 : vector<4xf32>, %p2 = %h2 : vector<4xf32>)", t)
+        self.assertEqual(len(re.findall(r"scalar\.fmaf %w\d_\d, ", t)), 4 * 4 * 4)       # 4 steps x 4 channels x 4 taps (default tile 4)
+        self.assertEqual(len(re.findall(r"vector\.store %y\d, %out_view", t)), 4)
+        self.assertEqual(len(re.findall(r"kernel\.subgroup\.reduce<addf>", t)), 4)        # one wave reduction per step, no workgroup barrier
+        self.assertNotIn("workgroup.reduce", t)
+
+    def test_tile_is_a_parameter_and_loads_are_unconditional(self):
+        t8 = front_text(tile=8)
+        self.assertEqual(len(re.findall(r"scalar\.fmaf %w\d_\d, ", t8)), 8 * 4 * 4)
+        loop = t8[t8.index("scf.for %base"):]
+        loads = loop[:loop.index("scf.if %live0")]
+        self.assertEqual(loads.count("vector.load %qkv_view"), 8)
+        self.assertNotIn("scf.if", loads)                                            # no load sits under a branch
 
     def test_commit_is_guarded_by_publish(self):
         t = front_text()
         i = t.index("%publish = func.call @g_gdn_publish")
-        self.assertGreater(t.index("view.store %f_0, %new_view[0, %ch]"), i)
+        self.assertGreater(t.index("vector.store %f_0, %new_view[0, %ch0]"), i)
         self.assertLess(t.index("scf.yield"), i)                                    # the stores follow the tile loop
         G = gen_gdn.gdn_geometry(CFG)
         self.assertNotIn("g_gdn_publish", gen_gdn_front.front_kernel(G, 48, G["layer_bytes"], 1e-6))
