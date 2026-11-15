@@ -1,47 +1,76 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
+ "_comment": "q38r9700 gdnfuse: fused GDN front (conv + commit + qk_norm) vs base, ABBA, ktest, c4 undrafted, dev gates. Experiment: not for merge.",
+ "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom",
  "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "kit": null,
+ "llamacpp": "b1375",
+ "runner": "r9700",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "name": "gdnfuse-front",
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "base",
+     "build": {
+      "GDN_COPY_SPLIT__RDNA4": "8",
+      "PROPOSE_HEAD_ROWS": "81920",
+      "GDN_CHUNK": "1"
+     },
+     "context": 120832
     },
     {
-     "name": "nodraft",
-     "build": {},
+     "name": "new",
+     "build": {
+      "GDN_COPY_SPLIT__RDNA4": "8",
+      "PROPOSE_HEAD_ROWS": "81920",
+      "GDN_CHUNK": "1",
+      "GDN_FRONT": "1"
+     },
+     "context": 120832
+    },
+    {
+     "name": "nd_base",
+     "build": {
+      "GDN_COPY_SPLIT__RDNA4": "8",
+      "PROPOSE_HEAD_ROWS": "81920",
+      "GDN_CHUNK": "1"
+     },
+     "context": 120832,
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "nd_new",
+     "build": {
+      "GDN_COPY_SPLIT__RDNA4": "8",
+      "PROPOSE_HEAD_ROWS": "81920",
+      "GDN_CHUNK": "1",
+      "GDN_FRONT": "1"
+     },
+     "context": 120832,
      "execution": {
       "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "ktest:new",
+    "perf:base:1",
+    "perf:new:1",
+    "perf:new:1",
+    "perf:base:1",
+    "perf:base:1:long",
+    "perf:new:1:long",
+    "perf:new:1",
+    "perf:base:1",
+    "c4:nd_base",
+    "c4:nd_new",
+    "c4:nd_new",
+    "c4:nd_base",
+    "gates:new:dev",
+    "textmatch:new"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
