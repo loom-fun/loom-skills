@@ -1,47 +1,441 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, loom-fun-staging package (fun) vs loom-fun-staging package (staging), same prompts and settings; compare with strix_ab_compare.py",
+ "runner": "strix",
+ "memory_bytes": 81000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "sab-bartowski-nanbeige4-3-33b-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/bartowski-Nanbeige4.3-33B-loom@978250b8029c21d299e93713fe714c6c2f138d87",
+   "memory_bytes": 81000000000,
    "kit": null,
-   "llamacpp": "b1375",
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "staging"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-bartowski-qwen2-5-0-5b-instruct-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom@11f5e0216d0d5d2b29cd621a6510c4e8be19cde8",
+   "memory_bytes": 5000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-bartowski-qwen2-5-1-5b-instruct-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/bartowski-Qwen2.5-1.5B-Instruct-loom@132cefd709bc4626da0f554f29a3a5f13c5640bf",
+   "memory_bytes": 8000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-bartowski-qwen2-5-32b-instruct-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom@9480e082c5502dd4853bad0ed565e13bae5da530",
+   "memory_bytes": 50000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-bartowski-qwen2-5-7b-instruct-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/bartowski-Qwen2.5-7B-Instruct-loom@0517ced98d0b8dffef919f677ee7ea0992b426f0",
+   "memory_bytes": 15000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-bartowski-qwen3-8-27b-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom@141cdc1076398a96105f38410b336b088811f8ca",
+   "memory_bytes": 52000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-ggml-org-lfm3-omni-2b-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/ggml-org-LFM3-Omni-2B-loom@15372af8123266a730a4c257daf6411871c8a987",
+   "memory_bytes": 10000000000,
+   "kit": "lfm2moe",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-ggml-org-qwen2-5-vl-7b-instruct-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/ggml-org-Qwen2.5-VL-7B-Instruct-loom@e62c020449a8bed2256ba775d0323ed64454903f",
+   "memory_bytes": 21000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-ggml-org-qwen3-coder-30b-a3b-instruc",
+   "runner": "strix",
+   "card": "loom-fun-staging/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom@89f09b8eb0ed3602ab25b5be486e53a8b0879ccc",
+   "memory_bytes": 62000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-unsloth-qwen3-30b-a3b-instruct-2507-",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-Qwen3-30B-A3B-Instruct-2507-loom@2b050d1b09537ddd6de96fbaee8ecb541116cfb3",
+   "memory_bytes": 63000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-unsloth-qwen3-4b-instruct-2507-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-Qwen3-4B-Instruct-2507-loom@6a7accf4ca33a9c5f99b7ea7c567821fb29c4aa7",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-unsloth-qwen3-vl-4b-instruct-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-Qwen3-VL-4B-Instruct-loom@53eb74aeaf3e7bfeb7b74638bfbc7bb36f4fa25c",
+   "memory_bytes": 56000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-unsloth-qwen3-vl-8b-instruct-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-Qwen3-VL-8B-Instruct-loom@acd3c530c192a75fe8e69486a91c4ac165346608",
+   "memory_bytes": 59000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-unsloth-qwen3-5-0-8b-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3.5-0.8B-loom@2b1bcd77d0a85ecabfae0521f4fd5a4f8e0ff84d",
+   "memory_bytes": 9000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-unsloth-qwen3-5-2b-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3.5-2B-loom@d7a174ce76a6b09a373674998ea9fc1d4ac8d04b",
+   "memory_bytes": 10000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-unsloth-qwen3-5-4b-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-Qwen3.5-4B-loom@682f41ee8bfd9cf02485a64cb13bd5064169b9e2",
+   "memory_bytes": 28000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
+  },
+  {
+   "name": "sab-unsloth-qwen3-5-9b-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-Qwen3.5-9B-loom@41c188016fe2714836423a5f7db5e87314f3c20f",
+   "memory_bytes": 32000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "logits:staging"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@5bf28e3cce79e2071444c6456fca2ad6174f8c99",
+     "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
+    }
+   }
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/bartowski-Nanbeige4.3-33B-loom@978250b8029c21d299e93713fe714c6c2f138d87",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "llamacpp": "b1374"
 }
