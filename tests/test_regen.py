@@ -70,7 +70,10 @@ class Base(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
             shutil.copytree(os.path.join(DATA, "job_e2b"), d)
             return d
-        with mock.patch.object(regen, "download", download), contextlib.redirect_stdout(io.StringIO()):
+        info = os.path.join(self.tmp, "ref_info.json")      # the reference card of the runner guard (R9700 jobs read it): no results = not judged
+        json.dump({"schema": "loom-card/3", "devices": {}}, open(info, "w"))
+        with mock.patch.object(regen, "download", download), mock.patch.object(regen, "hf_file", lambda *a, **k: info), \
+                contextlib.redirect_stdout(io.StringIO()):
             regen.main(["collect", self.state])
         return regen.State(self.state)
 
@@ -195,7 +198,10 @@ class CollectTest(Base):
             s["results"]["gates:staging:dev"] = "GATES FAIL level=dev {'golden': 'FAIL'}"
             json.dump(s, open(os.path.join(d, "summary.json"), "w"))
             return d
-        with mock.patch.object(regen, "download", download), contextlib.redirect_stdout(io.StringIO()):
+        info = os.path.join(self.tmp, "ref_info.json")
+        json.dump({"schema": "loom-card/3", "devices": {}}, open(info, "w"))
+        with mock.patch.object(regen, "download", download), mock.patch.object(regen, "hf_file", lambda *a, **k: info), \
+                contextlib.redirect_stdout(io.StringIO()):
             regen.main(["collect", self.state])
         e = regen.State(self.state).jobs[JOB]
         self.assertEqual(e["stage"], "needs_decision")
