@@ -41,6 +41,12 @@ class LogitsJobs(unittest.TestCase):
         j = jobs("--device", "strix-halo", "--ref", "origin/x", "--bundle-build", "f822f2b", "b1e06141", SLUG)["jobs"][0]
         self.assertEqual(j["bundle"], {"build": {"extension": "loom-fun/loom-gufo-extension@f822f2b", "gufo": "loom-fun/gufo@b1e06141"}})
 
+    def test_bundle_pins_default(self):
+        j = jobs("--device", "strix-halo", "--ref", "origin/x", SLUG)["jobs"][0]
+        pins = json.load(open(os.path.join(ROOT, ".github", "devlab", "gufo_bundle.json")))
+        self.assertEqual(j["bundle"], {"build": {"extension": pins["extension"], "gufo": pins["gufo"]}})
+        self.assertNotIn("bundle", jobs("--device", "strix-halo", "--ref", "origin/x", "--no-logits", SLUG)["jobs"][0])
+
     def test_replicas(self):
         d = jobs("--device", "strix-halo", "--ref", "origin/x", "--replicas", "2", SLUG)["jobs"]
         self.assertEqual([j["name"] for j in d], ["sab-unsloth-qwen3-0-6b-loom", "sab-unsloth-qwen3-0-6b-loom-r2"])

@@ -9,7 +9,7 @@ variant "staging" = build.py of that ref with the card's own settings; "fun" = t
   gufo:staging     Gufo conformance on the new package (unless --no-gufo)
   --no-ab drops the perf/c4/textmatch steps (a logits-only pilot: func, ktest, logits, gufo).
 The new package's default path is judged by strix_ab_compare.py on the job exactly as for any A/B (+-1 % target: the per-row bands apply).
---bundle-build EXT_REV GUFO_REV: the Gufo bundle is BUILT in the devlab-perf run (workflow job `bundle`: loom-fun/loom-gufo-extension at EXT_REV, loom-fun/gufo at GUFO_REV, Nix in Docker), never hosted anywhere.
+--bundle-build EXT_REV GUFO_REV: (default: the pins of .github/devlab/gufo_bundle.json) the Gufo bundle is BUILT in the devlab-perf run (workflow job `bundle`: loom-fun/loom-gufo-extension at EXT_REV, loom-fun/gufo at GUFO_REV, Nix in Docker), never hosted anywhere.
 --bundle URL SHA256: a prebuilt Gufo bundle tarball (loom-gufo-extension validation/devlab/build_bundle.sh) the job fetches (devlab_perf.sh gufo_bundle).
 A model whose device preset differs from the default preset (fit row r9700_execution) is refused: a rebuild uses the default preset's settings.
 """
@@ -45,6 +45,9 @@ def build(a, ab_args):
         j["steps"] = keep + ([] if a.no_logits else ["logits:staging"] + ([] if a.no_gufo else ["gufo:staging"]))
         if a.bundle:
             j["bundle"] = {"url": a.bundle[0], "sha256": a.bundle[1]}
+        if not a.bundle and not a.bundle_build and not a.no_logits:   # the pinned bundle (.github/devlab/gufo_bundle.json), built in the run
+            pins = json.load(open(os.path.join(ab_jobs.ROOT, ".github", "devlab", "gufo_bundle.json")))
+            j["bundle"] = {"build": {"extension": pins["extension"], "gufo": pins["gufo"]}}
         if a.bundle_build:
             j["bundle"] = {"build": {"extension": f"loom-fun/loom-gufo-extension@{a.bundle_build[0]}", "gufo": f"loom-fun/gufo@{a.bundle_build[1]}"}}
     exp["_comment"] = f"logits campaign (logits_jobs.py): new side built from {a.ref}; " + exp["_comment"]
