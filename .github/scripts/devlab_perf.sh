@@ -11,7 +11,7 @@
 #   {"card": "loom-fun/<repo>", "memory_bytes": N, "kit": "gemma4" | null, "llamacpp": "b1368",
 #    "llama_spec": "matched" (default),   the llama.cpp servers' drafting = the card's own (see below); or an explicit override
 #                  "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF;
-#                                                                     {hf:OWNER/REPO/FILE}: that Hub file, e.g. a drafter llama.cpp loads and the card doesn't ship)
+#                                                                     {hf:OWNER/REPO/FILE}: that Hub file, e.g. a drafter llama.cpp loads and the card doesn't ship; also in build_args)
 #    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
 #   BENCHMARK RULE (skills/loom-benchmark/reference/methodology.md): one drafting choice per model, identical on Loom and llama.cpp (ROCm, Vulkan), from
 #   data/drafting_classification.json (MTP head in the GGUF > exact-model DFlash/assistant drafter > none; never ngram): "matched"
@@ -231,6 +231,16 @@ d=c.get('draft') or {}
 a += (['--draft', d['kind'], '--draft-depth', str(d['depth'])] if d.get('kind') else [])
 print(' '.join(a))")
 
+hf_sub() {   # hf_sub TEXT -> TEXT with each {hf:OWNER/REPO/FILE} replaced by that Hub file's path, fetched once per runner
+  local t=$1 h
+  for h in $(echo "$t" | grep -oE '\{hf:[^}]+\}' | sort -u); do
+    local f=${h#\{hf:}; f=${f%\}}; local dst=$WORK/hf/$f r=${f%/*}
+    [ -f "$dst" ] || { mkdir -p "${dst%/*}" && curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
+      "https://huggingface.co/${r}/resolve/main/${f##*/}" -o "$dst.part" && mv "$dst.part" "$dst"; } || { echo "FAIL: fetch $f" >&2; return 1; }
+    t=${t//"$h"/$dst}
+  done
+  printf '%s\n' "$t"
+}
 # 3. Packages: D/<variant>/pkg (+ D/<variant>/kit for kernel tests)
 declare -A KIT KBV
 kit_for() {   # kit_for VARIANT REF -> builds D/<variant>/kit from REF's starter (or this checkout); KBV[v]: REF's knowledge base (the build resolves its choices from it)
@@ -250,6 +260,7 @@ for v in $variants; do
   if [ "$(qv "$v" "print('build' in v)")" = True ]; then
     kit_for "$v" "$(qv "$v" "print(v.get('ref') or '')")" || exit 1
     extra=$(qv "$v" "print(' '.join(v.get('build_args') or []) + (f\" --context {v['context']} --pool {v['context']}\" if v.get('context') else ''))")   # "context": N = the served context of a reduced-context model (later flags win)
+    extra=$(hf_sub "$extra") || exit 1   # a build_args {hf:OWNER/REPO/FILE} (a Hub drafter the card does not ship)
     envs=$(qv "$v" "print(' '.join(f'{k}={x}' for k, x in (v.get('build') or {}).items()))")
     step "build $v: env $envs; build.py $cardargs $extra"
     # "config": generator-config overrides for this variant's rebuild (e.g. {"layers": 12}: a truncated model; the step
@@ -373,12 +384,7 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
     spec=$(echo "$spec" | sed -E "s/ ?--spec-draft-n-max [0-9]+//")
     [ "$1" = d ] || spec="$spec --spec-draft-n-max $1"
   fi
-  local h; for h in $(echo "$spec" | grep -oE '\{hf:[^}]+\}' | sort -u); do   # {hf:OWNER/REPO/FILE}, fetched once per runner
-    local f=${h#\{hf:}; f=${f%\}}; local dst=$WORK/hf/$f r=${f%/*}
-    [ -f "$dst" ] || { mkdir -p "${dst%/*}" && curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
-      "https://huggingface.co/${r}/resolve/main/${f##*/}" -o "$dst.part" && mv "$dst.part" "$dst"; } || { echo "FAIL: fetch $f"; return 1; }
-    spec=${spec//"$h"/$dst}
-  done
+  spec=$(hf_sub "$spec") || return 1   # {hf:OWNER/REPO/FILE}, fetched once per runner
   spec="$BK$MODS|$spec"   # the backend and its modifiers are part of what runs
   [ "$spec" = "$LSPEC" ] && curl -sf "$lurl/health" >/dev/null 2>&1 && return 0
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
