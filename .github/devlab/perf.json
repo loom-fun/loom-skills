@@ -1,28 +1,28 @@
 {
  "_comment": "Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, loom-fun package (fun) vs loom-fun-staging package (staging), same prompts and settings; compare with strix_ab_compare.py 2 replicas per model (jobs ...-r2 ...): independent runs on different runners (the ratchet's confirming run).",
  "runner": "strix",
- "memory_bytes": 100000000000,
+ "memory_bytes": 57000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "sab-unsloth-qwen3-8-flash-next-loom",
+   "name": "sab-ggml-org-qwen3-6-27b-loom",
    "runner": "strix",
-   "card": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom",
-   "memory_bytes": 100000000000,
-   "kit": "qwen4exp",
-   "llamacpp": "b1371",
+   "card": "loom-fun-staging/ggml-org-Qwen3.6-27B-loom",
+   "memory_bytes": 57000000000,
+   "kit": null,
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "fun",
-     "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom"
+     "card": "loom-fun/ggml-org-Qwen3.6-27B-loom"
     },
     {
      "name": "staging"
     },
     {
      "name": "funnd",
-     "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
+     "card": "loom-fun/ggml-org-Qwen3.6-27B-loom",
      "execution": {
       "draft_depth": 0
      }
@@ -59,25 +59,25 @@
    ]
   },
   {
-   "name": "sab-unsloth-qwen3-8-flash-next-loom-r2",
+   "name": "sab-ggml-org-qwen3-6-27b-loom-r2",
    "runner": "strix",
    "replica": 2,
-   "card": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom",
-   "memory_bytes": 100000000000,
-   "kit": "qwen4exp",
-   "llamacpp": "b1371",
+   "card": "loom-fun-staging/ggml-org-Qwen3.6-27B-loom",
+   "memory_bytes": 57000000000,
+   "kit": null,
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "fun",
-     "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom"
+     "card": "loom-fun/ggml-org-Qwen3.6-27B-loom"
     },
     {
      "name": "staging"
     },
     {
      "name": "funnd",
-     "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
+     "card": "loom-fun/ggml-org-Qwen3.6-27B-loom",
      "execution": {
       "draft_depth": 0
      }
@@ -114,7 +114,7 @@
    ]
   }
  ],
- "card": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom",
+ "card": "loom-fun-staging/ggml-org-Qwen3.6-27B-loom",
  "kit": null,
- "llamacpp": "b1371"
+ "llamacpp": "b1374"
 }
