@@ -1,5 +1,9 @@
 // KV geometry: @@PLANES@@ planes (K and V per attention layer) of pool x @@POS_BYTES@@ bytes (F16 KV heads x head_dim).
 // Recurrent slots: @@RECURRENT_BYTES@@ bytes each (gated delta-net state of every recurrent layer; 4 = none).
+// logits:begin
+config.def @llm.logits = false : i1
+// logits:end
+
 func.def @allocation(%records: buffer, %slot: index, %bytes: i64, %clear: i64) {
   %origin = index.constant 0 : offset
   %bounded = index.assume %slot [range(%slot, 0, 10)] : index
@@ -80,6 +84,20 @@ func.def public @llm_storage(%maximum: i64, %span_capacity: i64, %context: i64, 
   func.call @allocation(%allocations, %c3, %table_bytes, %c0_i64) : (buffer, index, i64, i64)
   func.call @allocation(%allocations, %c4, %token_bytes, %c0_i64) : (buffer, index, i64, i64)
   func.call @allocation(%allocations, %c5, %residual_bytes, %c0_i64) : (buffer, index, i64, i64)
+
+  // logits:begin
+  // Opt-in logits readback (card config llm.logits, default off; gen_llm.py g_logits_export): the outputs allocation also holds
+  // one full-vocabulary f32 row per slot (min(span_capacity, rows)) after the 8192-span token region. Spans hold at most 8192 tokens (4 B each).
+  %logits_on = config.get @llm.logits : i1
+  scf.if %logits_on {
+    %logit_region = scalar.constant @@LOGIT_REGION@@ : i64
+    %logit_row = scalar.constant @@LOGIT_ROW_BYTES@@ : i64
+    %logit_slots = scalar.minsi %span_capacity, %rows : i64
+    %logit_rows = scalar.muli %logit_slots, %logit_row : i64
+    %logit_total = scalar.addi %logit_region, %logit_rows : i64
+    func.call @allocation(%allocations, %c5, %logit_total, %c0_i64) : (buffer, index, i64, i64)
+  }
+  // logits:end
 
   %view_stride = index.constant 64 : offset
   %view_bytes = index.scale %row_count, %view_stride : index, offset -> offset

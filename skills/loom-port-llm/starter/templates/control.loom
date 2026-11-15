@@ -259,6 +259,11 @@ global.rodata.def @top_k_key = bytes("746f705f6b")
 
 global.rodata.def @seed_key = bytes("73656564")
 
+// logits:begin
+// "logits": true asks for this request's logits rows (loom-skills#736): bit 30 of the record's top_k (kernel g_logits_export).
+global.rodata.def @logits_key = bytes("6c6f67697473")
+// logits:end
+
 func.def public @request_defaults(%options: buffer) -> (buffer) {
   %origin = index.constant 0 : offset
   %bytes = index.constant 16 : offset
@@ -298,6 +303,12 @@ func.def public @request_options(%defaults: buffer, %request: buffer, %nonce: i6
   %top_p_key = global.load @top_p_key : buffer
   %top_k_key = global.load @top_k_key : buffer
   %seed_key = global.load @seed_key : buffer
+  // logits:begin
+  %logits_key = global.load @logits_key : buffer
+  %logits_flag = scalar.constant 1073741824 : i32
+  %logits_mask = scalar.constant 1073741823 : i32
+  %true_value = scalar.constant 4 : i64
+  // logits:end
   scf.for %i = [%c0 to %extent step %c1] {
     %key_begin = view.load %records[%i, 0] : view<[%extent]x5xi64> -> i64
     %key_length = view.load %records[%i, 1] : view<[%extent]x5xi64> -> i64
@@ -327,12 +338,30 @@ func.def public @request_options(%defaults: buffer, %request: buffer, %nonce: i6
         %value64 = func.call @parse_i64(%request, %value_begin, %value_length) : (buffer, i64, i64) -> (i64)
         %value = scalar.trunci %value64 : i64 to i32
         scf.if %is_top_k {
-          view.store %value, %view[2] : i32, view<4xi32>
+          // logits:begin
+          %old_top_k = view.load %view[2] : view<4xi32> -> i32
+          %kept_flag = scalar.andi %old_top_k, %logits_flag : i32
+          %k_bits = scalar.andi %value, %logits_mask : i32
+          %merged_k = scalar.ori %k_bits, %kept_flag : i32
+          view.store %merged_k, %view[2] : i32, view<4xi32>
+          // logits:end
         } else {
           view.store %value, %view[3] : i32, view<4xi32>
         }
       }
     }
+    // logits:begin
+    %is_true = scalar.cmpi eq, %value_type, %true_value : i64
+    scf.if %is_true {
+      %flag_key = func.call @json_key(%request, %key_begin, %key_length) : (buffer, i64, i64) -> (buffer)
+      %is_logits = func.call @equal(%flag_key, %logits_key) : (buffer, buffer) -> (i1)
+      scf.if %is_logits {
+        %current_top_k = view.load %view[2] : view<4xi32> -> i32
+        %flagged_top_k = scalar.ori %current_top_k, %logits_flag : i32
+        view.store %flagged_top_k, %view[2] : i32, view<4xi32>
+      }
+    }
+    // logits:end
   }
   func.return %record : buffer
 }

@@ -3593,6 +3593,15 @@ kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%token
 
 
 CHUNKS = (V + 127) // 128
+LOGITS_DEF = ("// Load-time capability (card config llm.logits, default off): export the logits rows of flagged spans (g_logits_export).\n"
+              "config.def @llm.logits = false : i1\n\n"
+              "// Rows of the logits region this stage may write (prepare.loom: min(spans, rows) under llm.logits).\n"
+              "config.def @llm.logit_slots = 0 : index\n\n") if os.environ.get("LLM_LOGITS", "1") != "0" else ""
+LOGITS_TAIL = ("  // Opt-in logits readback: folded away unless the card config sets llm.logits (default stages are identical without it).\n"
+               "  %logits_on = config.get @llm.logits : i1\n  scf.if %logits_on {\n"
+               "    %logit_slots = config.get @llm.logit_slots : index\n"
+               "    kernel.launch @g_logits_export[%spans](%spans, %logit_slots, %metadata, %logits, %outputs) : [index](index, index, buffer, buffer, buffer)\n  }\n"
+               ) if os.environ.get("LLM_LOGITS", "1") != "0" else ""
 
 
 def eos_text():
@@ -3885,6 +3894,77 @@ def mv_wide_tokens(fmt, kval, sw, n, mv_args):
             kernel.launch @{mv_name(fmt, kval, sw, n, 16, True)}[{n}, %t]{mv_args}
           }}
         }}""")
+
+LOGITS = os.environ.get("LLM_LOGITS", "1") != "0"   # choice feature.logits_export: the package carries the opt-in logits readback
+LOGITS_OFFSET = 32768        # byte offset of the logits region in the `outputs` allocation: after the 8192 span tokens (4 B each, the llm.spans bound)
+LOGITS_FLAG = 1 << 30        # bit 30 of a span's top_k: "export this span's logits row" (old packages read it as k = 64)
+
+
+def logits_export():
+    """Opt-in logits readback (loom-skills#736). Per selected span whose top_k carries bit 30, copy the full-vocabulary row
+    (CHUNKS * 128 f32; columns >= vocab are -3e38) from the transient %logits into the `outputs` allocation at
+    LOGITS_OFFSET + span * CHUNKS * 512 bytes (spans below the %slots argument: min(spans, rows)), where the host (the embed layer) downloads it after the epoch. Pure copy, no WMMA: no
+    rdna4 twin. With a logit softcap the row is the same capped value the sampler's candidates see. Launched only under the load-time
+    capability llm.logits, so the default stage compiles without it."""
+    sc = ""
+    if _SC:
+        sc = (f"      %sc_k = scalar.constant {float(_LS) / float(_SC)} : f32\n      %sc_y = scalar.mulf %x, %sc_k : f32\n      %sc_y2 = scalar.addf %sc_y, %sc_y : f32\n"
+              f"      %sc_e = scalar.expf<afn> %sc_y2 : f32\n      %sc_one = scalar.constant 1.0 : f32\n      %sc_two = scalar.constant 2.0 : f32\n"
+              f"      %sc_d = scalar.addf %sc_e, %sc_one : f32\n      %sc_q = scalar.divf %sc_two, %sc_d : f32\n      %sc_t = scalar.subf %sc_one, %sc_q : f32\n"
+              f"      %sc_cap = scalar.constant {float(_SC)} : f32\n      %sc_v = scalar.mulf %sc_t, %sc_cap : f32\n"
+              f"      %in_vocab = index.cmp ult, %column, %vocab : index\n      %value = scf.select %in_vocab, %sc_v, %x : f32\n")
+    value = "%value" if _SC else "%x"
+    return f"""
+kernel.def export("g_logits_export") @g_logits_export(%spans: index) {{
+  %c1 = index.constant 1 : index
+  %chunks = index.constant {CHUNKS} : index
+  %c128 = index.constant 128 : index
+  kernel.launch.config workgroups(%spans, %chunks, %c1) workgroup_size(%c128, %c1, %c1) : index
+}} launch(%spans_arg: index, %slots: index, %metadata: buffer, %logits: buffer, %outputs: buffer) {{
+  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %span_id = kernel.workgroup.id<x> : index
+  %span = index.assume %span_id [lt(%span_id, %spans)] : index
+  %chunk_id = kernel.workgroup.id<y> : index
+  %chunk = index.assume %chunk_id [range(%chunk_id, 0, {CHUNKS - 1})] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 127)] : index
+  %zero = index.constant 0 : offset
+  %c16 = index.constant 16 : offset
+  %c128 = index.constant 128 : index
+  %vocab = index.constant {V} : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %flag = scalar.constant {LOGITS_FLAG} : i32
+  %header = buffer.view %metadata[%zero] : buffer -> view<4xi32>
+  %count32 = view.load %header[0] : view<4xi32> -> i32
+  %count_bound = scalar.assume %count32 [range(%count32, 0, 8192)] : i32
+  %count = index.cast %count_bound : i32 to index
+  %live_span = index.cmp ult, %span, %count : index
+  scf.if %live_span {{
+    %packets = buffer.view %metadata[%c16] : buffer -> view<[%spans]x9xi32>
+    %flags = view.load %packets[%span, 6] : view<[%spans]x9xi32> -> i32
+    %bits = scalar.andi %flags, %c1_i32 : i32
+    %selected = scalar.cmpi ne, %bits, %c0_i32 : i32
+    %top_k = view.load %packets[%span, 7] : view<[%spans]x9xi32> -> i32
+    %wanted_bits = scalar.andi %top_k, %flag : i32
+    %wanted = scalar.cmpi ne, %wanted_bits, %c0_i32 : i32
+    %wanted_row = scalar.andi %selected, %wanted : i1
+    %has_slot = index.cmp ult, %span, %slots : index
+    %export = scalar.andi %wanted_row, %has_slot : i1
+    scf.if %export {{
+      %base = index.mul %chunk, %c128 : index
+      %column = index.add %base, %lane : index
+      %logit_view = buffer.view %logits[%zero] : buffer -> view<[%spans]x{CHUNKS * 128}xf32>
+      %x = view.load %logit_view[%span, %column] : view<[%spans]x{CHUNKS * 128}xf32> -> f32
+{sc}      %region = index.constant {LOGITS_OFFSET} : offset
+      %out_view = buffer.view %outputs[%region] : buffer -> view<[%spans]x{CHUNKS * 128}xf32>
+      view.store {value}, %out_view[%span, %column] : f32, view<[%spans]x{CHUNKS * 128}xf32>
+    }}
+  }}
+  kernel.return
+}}
+"""
+
 
 def head_mv(TG, fmt, iq=False, suffix=""):
     """Output head argmax: workgroup = 128 vocabulary rows x TG spans,
@@ -5006,7 +5086,7 @@ def model():
     hsize = tensor_bytes(head_name)
     esize = tensor_bytes("token_embd.weight")
     L_ = [f"""
-config.decl @llm.context : %value: index where [range(%value, 16, 262144)]
+{LOGITS_DEF}config.decl @llm.context : %value: index where [range(%value, 16, 262144)]
 
 config.decl @llm.spans : %value: index where [range(%value, 1, 8192)]
 
@@ -5259,7 +5339,7 @@ command.program.def public @llm_advance() launch(%weights: buffer, %residual: bu
     kernel.launch @g_head_mv_t4[%spans](%spans, %t, %metadata, %h, %head, %partials, %logits) : [index](index, index, buffer, buffer, view<{hsize}xi8>, buffer, buffer)
   }}
   kernel.launch @g_head_select[%spans](%spans, %metadata, %partials, %logits, %outputs) : [index](index, buffer, buffer, buffer, buffer)
-  command.return
+{LOGITS_TAIL}  command.return
 }}
 """)
     return "".join(L_), head_fmt
@@ -5403,6 +5483,8 @@ if __name__ == "__main__":
                                 + attention()[:-len(FALLBACK)] + (gate_heads() if HEAD_GATE else "")))
     if RECUR:
         parts.append(gdn_kernels(CFG, EPS))
+    if LOGITS:   # opt-in logits readback (the tail of @llm_advance launches it under the card config llm.logits)
+        parts.append(logits_export())
     if spec_kernels:
         parts.append(spec_kernels)
     if MIXED_FFN:   # GEGLU: gelu(gate) * up, on 4-value groups (bounds provable without the launch: kernel-testable)
