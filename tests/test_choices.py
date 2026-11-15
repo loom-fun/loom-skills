@@ -243,6 +243,67 @@ class Resolution(unittest.TestCase):
         r = resolve.resolve(cfg(), ("rdna4",), os.path.join(FIX, "pertarget"))
         self.assertEqual(r["env"]["MV_WG1"], "1024")
 
+    def test_per_target_rule_resolves_per_family(self):
+        """qwen3moe (undrafted): the flash2 peel is off for the gfx11 kernel only; its gfx12 twin keeps it (PR #771 evidence)."""
+        q = cfg(arch="qwen3moe", moe={"experts": 8})
+        r = resolve.resolve_full(q, ("rdna3", "rdna4"), KB, draft=None)
+        self.assertEqual(r["env"], {"FLASH2_PEEL": "0", "FLASH2_PEEL__RDNA4": "1"})
+        self.assertEqual(r["choices"]["prefill.attn.flash2_peel"]["value"], {"rdna3": False, "rdna4": True})
+        self.assertIs(r["values"]["prefill.attn.flash2_peel"], False)
+        self.assertEqual(resolve.resolve(q, ("rdna3",), KB, draft=None)["env"], {"FLASH2_PEEL": "0"})
+        self.assertEqual(resolve.resolve(q, ("rdna4",), KB, draft=None)["env"], {})
+        self.assertEqual(resolve.resolve(q, ("rdna3", "rdna4"), KB, draft="dflash")["env"], {})
+        self.assertEqual(resolve.resolve(cfg(), ("rdna3", "rdna4"), KB, draft=None)["env"], {})
+
+    def test_per_target_rdna4_rule_and_default(self):
+        """A rule for rdna4 only on a per_target key whose default is on: the base stays, the twin gets the value."""
+        kb = kb_copy("precedence")
+        os.makedirs(os.path.join(kb, "arch", "llm", "moe", "qwen3moe"), exist_ok=True)
+        json.dump({"scope": "arch/llm/moe/qwen3moe", "match": {"arch": ["qwen3moe"]}, "owner": "t", "choices": [
+            {"when": {"devices": ["rdna4"]}, "set": {"prefill.attn.flash2_peel": False}, "evidence": "t"},
+            {"when": {"devices": ["rdna3"]}, "set": {"prefill.attn.flash2_peel": True}, "evidence": "t"}]},
+            open(os.path.join(kb, "arch", "llm", "moe", "qwen3moe", "scope.json"), "w"))
+        r = resolve.resolve_full(cfg(arch="qwen3moe", moe={"experts": 8}), ("rdna3", "rdna4"), kb, draft=None)
+        self.assertEqual({k: v for k, v in r["env"].items() if "FLASH2_PEEL" in k}, {"FLASH2_PEEL__RDNA4": "0"})
+        self.assertEqual(r["choices"]["prefill.attn.flash2_peel"]["value"], {"rdna3": True, "rdna4": False})
+
+    def test_per_target_dirty_twin_variable(self):
+        os.environ.pop("LOOM_KB_ROOT", None)
+        q = cfg(arch="qwen3moe", moe={"experts": 8})
+        env = {}
+        self.assertEqual(kb_choices.apply(q, None, environ=env)["dirty"], [])
+        self.assertEqual(env["FLASH2_PEEL__RDNA4"], "1")
+        self.assertEqual(kb_choices.apply(q, None, environ={"FLASH2_PEEL__RDNA4": "0"})["dirty"], ["prefill.attn.flash2_peel"])
+
+    def test_twin_generator_reads_the_twin_value(self):
+        """gen_flash2.py: the gfx11 kernel takes FLASH2_PEEL, the K_rdna4 twin FLASH2_PEEL__RDNA4; unset = both as before."""
+        import subprocess
+        import shutil
+        tmp = tempfile.mkdtemp()
+        _TMP.append(tmp)
+        c = os.path.join(tmp, "c.json")
+        with open(c, "w") as f:
+            json.dump({"kv_heads": 4, "heads": 32, "head_dim": 128, "layers": 4}, f)
+
+        def gen(**kw):
+            out = os.path.join(tmp, "o.loom")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("FLASH2_")}
+            env.update(LLM_CONFIG=c, FLASH2_OUT=out, **kw)
+            subprocess.run([sys.executable, os.path.join(STARTER, "gen_flash2.py")], check=True, env=env, capture_output=True)
+            with open(out) as f:
+                t = f.read()
+            i = t.rindex("kernel.def", 0, t.index("target(@rdna4)") + 1)
+            return t[:i], t[i:]
+        legacy = gen()
+        g11_off, tw_on = gen(FLASH2_PEEL="0", FLASH2_PEEL__RDNA4="1")
+        g11_off2, tw_off = gen(FLASH2_PEEL="0")
+        self.assertEqual(g11_off, g11_off2)
+        self.assertEqual(tw_on, legacy[1])
+        self.assertNotEqual(tw_on, tw_off)
+        self.assertNotEqual(g11_off, legacy[0])
+        self.assertEqual(gen(FLASH2_PEEL="1")[0], legacy[0])
+        shutil.rmtree(tmp, ignore_errors=True)
+
     def test_bad_scope_files(self):
         self.assertTrue(any("unknown choice" in e for e in resolve.lint(os.path.join(FIX, "badkey"))))
         self.assertTrue(any("evidence" in e for e in resolve.lint(os.path.join(FIX, "noevidence"))))

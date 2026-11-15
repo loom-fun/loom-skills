@@ -57,3 +57,17 @@ def to_rdna4(text):
 def twin_names(text):
     """kernel.def export("K") @K( -> kernel.def target(@rdna4) export("K_rdna4") @K_rdna4(  (same launch signature)."""
     return re.sub(r'kernel\.def export\("(\w+)"\) @(\w+)\(', r'kernel.def target(@rdna4) export("\1_rdna4") @\2_rdna4(', text)
+
+
+def twin_env(environ):
+    """The environment of the generator run that emits the gfx12 twin. A per-target choice (loom-kb: per_target) whose value
+    differs between the families reaches the build as <ENV> (the gfx11 kernel) and <ENV>__RDNA4 (this twin): the twin's value
+    replaces the base variable ("" unsets it)."""
+    env = dict(environ)
+    for k in [k for k in env if k.endswith("__RDNA4")]:
+        v = env.pop(k)
+        if v == "":
+            env.pop(k[:-len("__RDNA4")], None)
+        else:
+            env[k[:-len("__RDNA4")]] = v
+    return env
