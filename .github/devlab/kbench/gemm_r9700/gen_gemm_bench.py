@@ -112,6 +112,7 @@ check.benchmark<@k_cold_{mode}_case> @k_cold_{mode}_{reps}x_bm
 """)
     return out
 
+NO_EXTRA = False   # gen_q38.py: no cold-weight / real-weight cases
 import subprocess, functools
 @functools.lru_cache(maxsize=None)
 def gen_kernels(fmts):
@@ -160,7 +161,7 @@ def build(variant=""):
             m = re.search(r'export\("(\w+)"\)', tw); old = m.group(1)
             kn = f"k_{fmt}_{mode}_{big}_{rows}x{K}x{N}"
             tw = tw.replace(f'export("{old}") @{old}(', f'export("{kn}") @{kn}(')
-            wb = N * K * 2 if fmt == "bf16" else N * K // 256 * (210 if fmt == "q6_k" else 144)
+            wb = N * K * 2 if fmt == "bf16" else N * K // 32 * 34 if fmt == "q8_0" else N * K // 256 * (210 if fmt == "q6_k" else 144)
             two = mode == "swiglu"
             wdecl = f"  %w = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<{wb}xi8>\n"
             wargs, wtys = "%w", f"tensor<{wb}xi8>"
@@ -180,7 +181,7 @@ def build(variant=""):
 }}
 check.benchmark<@{kn}_case> @{kn}_bm
 """)
-    if variant in ("", "sb") or variant in NATIVE:
+    if (variant in ("", "sb") or variant in NATIVE) and not NO_EXTRA:
         out += cold_cases(os.environ.get("KB_OUTDIR")) + real_cases()
     return out
 

@@ -2,50 +2,19 @@
   "repeats": 3,
   "suites": [
     {
-      "suite": "example",
-      "dir": "example",
-      "files": [
-        "bench.loom",
-        "bench_v4.loom"
-      ],
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ]
-    },
-    {
-      "suite": "gemm_r9700",
+      "suite": "gemm_q38",
       "runner": "r9700",
       "dir": "gemm_r9700",
-      "gen": "gemm_r9700/gen_gemm_bench.py",
+      "gen": "gemm_r9700/gen_q38.py",
       "gen_variants": [
         "base",
-        "dq2",
-        "sb",
-        "sb_nodq"
+        "nodq",
+        "nowst"
       ],
       "files": [
         "bench.loom",
-        "bench_dq2.loom",
-        "bench_sb.loom",
-        "bench_sb_nodq.loom"
-      ],
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ],
-      "repeats": 3
-    },
-    {
-      "suite": "e2b_small",
-      "runner": "r9700",
-      "dir": "e2b_small",
-      "files": [
-        "bench.loom"
+        "bench_nodq.loom",
+        "bench_nowst.loom"
       ],
       "config": [],
       "args": [
