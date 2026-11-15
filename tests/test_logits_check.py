@@ -1,5 +1,5 @@
-"""logits_check.py comparisons (no GPU): argmax vs the device token, llama.cpp top-5 within tolerance, default output unchanged,
-the verdict, and the not-supported path."""
+"""logits_check.py comparisons (no GPU): llama.cpp top-5 within tolerance, default output unchanged, embed_probe's line, the
+verdict, and the not-supported path."""
 import json
 import os
 import sys
@@ -15,58 +15,37 @@ try:
 except ImportError:
     near_tie = None
 
-V = 10
-
-
-def row(best, second=None, pad=True):
-    r = [-5.0] * V
-    r[best] = 3.0
-    if second is not None:
-        r[second] = 2.5
-    return r + ([-3e38] * 6 if pad else [])
-
 
 class Comparisons(unittest.TestCase):
-    def test_argmax(self):
-        self.assertEqual(lc.check_argmax(row(4), V, 4), (True, ""))
-        self.assertFalse(lc.check_argmax(row(4), V, 5)[0])
-        self.assertFalse(lc.check_argmax(row(4, pad=False), V + 3, 4)[0])           # short row
-        self.assertFalse(lc.check_argmax(row(4)[:V] + [9.0] * 6, V, 4)[0])           # unmasked padding
-        self.assertFalse(lc.check_argmax([float("nan")] + row(4)[1:], V, 4)[0])
-
-    def test_tie_goes_to_lowest_index(self):
-        self.assertEqual(lc.argmax([1.0, 1.0, 0.0], 3), 0)
-
-    def test_log_softmax_sums_to_one(self):
-        top = lc.log_softmax_top(row(2, 3), V, k=V)
-        self.assertAlmostEqual(sum(__import__("math").exp(lp) for _, lp in top), 1.0, places=6)
-        self.assertEqual(top[0][0], 2)
-
     @unittest.skipIf(near_tie is None, "bench_common needs requests")
     def test_vs_llama(self):
-        rows = [row(1, 2), row(3, 4)]
-        mine = {i: lp for i, lp in lc.log_softmax_top(rows[0], V)}
-        good = [dict(mine), {i: lp for i, lp in lc.log_softmax_top(rows[1], V)}]
-        self.assertEqual(lc.check_vs_llama(rows, V, [1, 3], good, near_tie), (2, []))
-        off = [{**mine, 1: mine[1] + 0.6}, good[1]]
-        n, probs = lc.check_vs_llama(rows, V, [1, 3], off, near_tie)
+        mine = [[("Paris", -0.1), ("The", -2.5)], [(".", -0.2), ("!", -2.0)]]
+        good = [{"Paris": -0.12, "The": -2.4}, {".": -0.25, "!": -2.1}]
+        self.assertEqual(lc.check_vs_llama(mine, ["Paris", "."], good, near_tie), (2, []))
+        off = [{"Paris": -0.12, "The": -3.5}, good[1]]       # a log-prob 1 nat away
+        n, probs = lc.check_vs_llama(mine, ["Paris", "."], off, near_tie)
         self.assertEqual(n, 2)
         self.assertTrue(probs and "step 0" in probs[0])
         # a divergence llama.cpp is confident about is a problem; a near-tie is not, and ends the comparison
-        confident = [{1: -0.01, 3: -6.0}]
-        n, probs = lc.check_vs_llama([row(3)], V, [1], confident, near_tie)
+        n, probs = lc.check_vs_llama([[("The", -0.1)]], ["Paris"], [{"Paris": -0.01, "The": -6.0}], near_tie)
         self.assertEqual(n, 0)
         self.assertTrue(probs)
-        tie = [{1: -0.6, 3: -0.9}]
-        self.assertEqual(lc.check_vs_llama([row(3)], V, [1], tie, near_tie), (0, []))
+        self.assertEqual(lc.check_vs_llama([[("The", -0.9)]], ["Paris"], [{"Paris": -0.6, "The": -0.9}], near_tie), (0, []))
+        self.assertTrue(lc.check_vs_llama([[]], ["Paris"], [{"Paris": -0.1}], near_tie)[1])   # no top-logprobs at all
 
     def test_default_unchanged(self):
-        self.assertEqual(lc.check_default_unchanged([1, 2, 3], [1, 2, 3], [1, 2, 3]), (True, ""))
-        self.assertIn("token 1", lc.check_default_unchanged([1, 2, 3], [1, 9, 3], [1, 2, 3])[1])
-        self.assertIn("flagged", lc.check_default_unchanged([1, 2, 3], [1, 2, 3], [1, 2, 4])[1])
+        self.assertEqual(lc.check_default_unchanged("Paris.", "Paris.", "Paris."), (True, ""))
+        self.assertIn("character 2", lc.check_default_unchanged("Paris.", "Pa!is.", "Paris.")[1])
+        self.assertIn("host path", lc.check_default_unchanged("Paris.", "Paris.", "Paris!")[1])
+
+    def test_probe_line(self):
+        self.assertEqual(lc.probe_check('{"opened": true, "failures": 0}'), (True, ""))
+        self.assertFalse(lc.probe_check('{"opened": true, "failures": 2}')[0])
+        self.assertIn("does not declare", lc.probe_check('{"opened": false, "error": "package does not declare llm.logits"}')[1])
+        self.assertFalse(lc.probe_check("segfault")[0])
 
     def test_verdict(self):
-        ok = [{"name": "argmax", "ok": True}]
+        ok = [{"name": "embed_probe", "ok": True}]
         self.assertTrue(lc.verdict(ok, 8, True)[0])
         self.assertFalse(lc.verdict(ok, 3, True)[0])        # too few steps compared with llama.cpp
         self.assertTrue(lc.verdict(ok, 0, False)[0])        # no llama.cpp reference asked for
@@ -74,18 +53,32 @@ class Comparisons(unittest.TestCase):
 
 
 class NotSupported(unittest.TestCase):
-    def test_without_a_library(self):
+    def test_without_a_bundle(self):
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "logits.json")
-            os.environ.pop("LOOM_EMBED_LIB", None)
+            os.environ.pop("GUFO_BUNDLE", None)
+
             class A:
-                package, lib, llama, steps, prompts, preset, rows, memory_bytes = "x", None, None, 1, 1, None, 1, 0
+                package, bundle, llama, steps, prompts, port = "x", os.path.join(d, "nobundle"), None, 1, 1, 8181
             A.out = out
             self.assertEqual(lc.run(A), 2)
-            j = json.load(open(out))
+            with open(out) as f:
+                j = json.load(f)
             self.assertEqual(j["verdict"], "NOT_SUPPORTED")
-            self.assertNotIn("logits", j["gates"])        # never a pass or a fail without the library
+            self.assertNotIn("logits", j["gates"])        # never a pass or a fail without the bundle
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GufoGate(unittest.TestCase):
+    def test_gate(self):
+        import gufo_gate
+        c = {"results": [{"check": "a", "status": "pass"}, {"check": "b", "status": "pass"}]}
+        lc = {"results": [{"check": "x", "status": "pass"}]}
+        self.assertEqual(gufo_gate.gate(c, lc, 0), (True, "2/2 conformance checks, 1/1 logits checks"))
+        self.assertFalse(gufo_gate.gate(c, lc, 1)[0])                                                # a script failed
+        self.assertFalse(gufo_gate.gate({"results": c["results"] + [{"check": "g", "status": "gap"}]}, lc, 0)[0])   # a gap is a miss with --logits
+        self.assertFalse(gufo_gate.gate(c, {"results": [{"check": "x", "status": "fail"}]}, 0)[0])
+        self.assertFalse(gufo_gate.gate(None, lc, 0)[0])
