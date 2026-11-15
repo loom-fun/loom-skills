@@ -34,7 +34,9 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "skills", "loom-benchmark", "scripts"))
 
-LOGPROB_TOL = 0.30     # nats: Loom's and llama.cpp's log-prob of a token both list (quantized matmul numerics differ)
+LOGPROB_TOL = 1.0      # nats, the golden's near-tie gap (bench_common.near_tie max_gap): Loom's and llama.cpp's log-prob of a token both list.
+#                        The same GGUF through the two engines' quantized matmuls differs by up to ~0.7 nats on tail tokens (DevLab, Qwen3-0.6B,
+#                        both GPUs: 0.3-0.66 on tokens below p=0.1); the gate catches a wrong row (a shifted slot, a stale row: several nats).
 TOPK = 5
 MIN_COMPARED = 8       # greedy steps compared against llama.cpp on at least one prompt before the gate can pass
 NOTHINK = {"chat_template_kwargs": {"enable_thinking": False}}
@@ -42,12 +44,20 @@ NOTHINK = {"chat_template_kwargs": {"enable_thinking": False}}
 
 # ---------------------------------------------------------------- comparisons (pure)
 
+def special_key(key):
+    """A special token's text as the two engines print it: llama.cpp prints '' for <|im_end|>, Gufo the marker: both are one key."""
+    return "" if key.startswith("<|") and key.endswith("|>") else key
+
+
 def check_vs_llama(loom_tops, llama_keys, llama_tops, near_tie, tol=LOGPROB_TOL):
     """Compare Loom's per-step top lists with llama.cpp's greedy continuation of the same prompt.
     loom_tops: per generated step [(key, logprob)] best first (key: the token's text); llama_keys: llama.cpp's greedy token per
     step; llama_tops: per step {key: logprob}. near_tie(top, gold, loom) -> bool (bench_common.near_tie).
     Returns (compared_steps, problems): stops at the first greedy divergence (judged as a near-tie, or a problem)."""
     compared, problems = 0, []
+    llama_keys = [special_key(k) for k in llama_keys]
+    llama_tops = [{special_key(k): v for k, v in t.items()} for t in llama_tops]
+    loom_tops = [[(special_key(k), lp) for k, lp in t] for t in loom_tops]
     for k, (top, gkey, ltop) in enumerate(zip(loom_tops, llama_keys, llama_tops)):
         if not top:
             problems.append(f"step {k}: no top-logprobs")
@@ -200,7 +210,8 @@ def run(a):
                 tops = [[(t["token"], t["logprob"]) for t in e.get("top_logprobs") or []] for e in lp]
                 n, problems = check_vs_llama(tops, lkeys, ltops, near_tie)
                 compared_max = max(compared_max, n)
-                checks.append({"name": "llama", "prompt": p[:40], "ok": not problems, "compared": n, "why": "; ".join(problems[:3])})
+                checks.append({"name": "llama", "prompt": p[:40], "ok": not problems, "compared": n, "why": "; ".join(problems[:3]),
+                               "sample": {"loom": tops[:4], "llama": [[k, sorted(t.items(), key=lambda kv: -kv[1])[:5]] for k, t in zip(lkeys[:4], ltops[:4])]}})
     finally:
         g.close()
     ok, bad = verdict(checks, compared_max, bool(a.llama))

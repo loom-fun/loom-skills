@@ -22,7 +22,7 @@ class Comparisons(unittest.TestCase):
         mine = [[("Paris", -0.1), ("The", -2.5)], [(".", -0.2), ("!", -2.0)]]
         good = [{"Paris": -0.12, "The": -2.4}, {".": -0.25, "!": -2.1}]
         self.assertEqual(lc.check_vs_llama(mine, ["Paris", "."], good, near_tie), (2, []))
-        off = [{"Paris": -0.12, "The": -3.5}, good[1]]       # a log-prob 1 nat away
+        off = [{"Paris": -0.12, "The": -4.5}, good[1]]       # a log-prob 2 nats away
         n, probs = lc.check_vs_llama(mine, ["Paris", "."], off, near_tie)
         self.assertEqual(n, 2)
         self.assertTrue(probs and "step 0" in probs[0])
@@ -32,6 +32,13 @@ class Comparisons(unittest.TestCase):
         self.assertTrue(probs)
         self.assertEqual(lc.check_vs_llama([[("The", -0.9)]], ["Paris"], [{"Paris": -0.6, "The": -0.9}], near_tie), (0, []))
         self.assertTrue(lc.check_vs_llama([[]], ["Paris"], [{"Paris": -0.1}], near_tie)[1])   # no top-logprobs at all
+
+    @unittest.skipIf(near_tie is None, "bench_common needs requests")
+    def test_special_tokens_and_tail_tolerance(self):
+        # llama.cpp prints the end-of-turn token as '', Gufo as the marker: the same token
+        self.assertEqual(lc.check_vs_llama([[("<|im_end|>", -0.1)]], [""], [{"": -0.15}], near_tie), (1, []))
+        # tail tokens differ by up to ~0.7 nats between the engines' quantized matmuls: inside the tolerance
+        self.assertEqual(lc.check_vs_llama([[("Paris", -0.1), ("A", -3.72)]], ["Paris"], [{"Paris": -0.12, "A": -3.25}], near_tie), (1, []))
 
     def test_default_unchanged(self):
         self.assertEqual(lc.check_default_unchanged("Paris.", "Paris.", "Paris."), (True, ""))
