@@ -20,6 +20,17 @@
     "exec.context_cap": 84992
    },
    "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged"
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna4"
+    ]
+   },
+   "set": {
+    "decode.attn.kv_once.d256": true
+   },
+   "evidence": "The drafted-qwen35moe rule (decode.attn.kv_once.d256=false, arch/llm/moe/qwen35moe) fixes decode_32k on both GPUs but costs this model R9700 decode_2k: 0.930 (run 43636425163) and 0.895 (run 43652305001, band 0.04) vs the staging package before the rule, while decode_32k gained +20..23 %. The gfx12 twin keeps the K/V-once body (the pre-rule R9700 programs, whose card numbers stay valid); the gfx11 kernel keeps the rule (Strix decode_32k 1.04 vs loom-fun, run 43631671557)."
   }
  ]
 }
