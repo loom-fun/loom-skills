@@ -192,6 +192,14 @@ def stop_group(p, grace=60):
     """SIGTERM the process group of p (started with start_new_session), SIGKILL after `grace` seconds, wait for p and for the group."""
     if p is None:
         return
+    if not hasattr(os, "killpg"):   # Windows: no process groups (the Gufo bundle runs on Linux runners only)
+        p.terminate()
+        try:
+            p.wait(grace)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait()
+        return
     pg = p.pid
     for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 30)):
         try:

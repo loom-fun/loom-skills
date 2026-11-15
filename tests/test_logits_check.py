@@ -71,6 +71,7 @@ class Comparisons(unittest.TestCase):
         self.assertEqual(lc.tail_tol(-7.0, -9.0), 2.5)
         self.assertIsNone(lc.tail_tol(-10.4, -12.7))
 
+    @unittest.skipUnless(hasattr(os, "killpg"), "process groups are POSIX")
     def test_stop_group(self):
         import subprocess
         import time
