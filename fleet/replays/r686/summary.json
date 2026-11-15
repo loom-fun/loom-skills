@@ -1,0 +1,91 @@
+{
+ "commit": "62520e2",
+ "files_changed": [
+  ".github/devlab/experiment.json",
+  ".github/scripts/devlab_experiment.sh",
+  ".github/scripts/devlab_perf.sh",
+  ".github/scripts/port_e2e.sh",
+  ".github/scripts/strix_ab_jobs.py",
+  ".github/workflows/nightly-gates.yml",
+  "README.md",
+  "docs/app.js",
+  "docs/index.html",
+  "skills/loom-benchmark/SKILL.md",
+  "skills/loom-benchmark/reference/methodology.md",
+  "skills/loom-benchmark/scripts/audit.py",
+  "skills/loom-benchmark/scripts/card/card_lib.py",
+  "skills/loom-benchmark/scripts/card/info_schema.json",
+  "skills/loom-benchmark/scripts/card/make_info.py",
+  "skills/loom-benchmark/scripts/card/test/check.sh",
+  "skills/loom-benchmark/scripts/card/test/d1/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/flint/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/flint/expected/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/flint/expected/info.json",
+  "skills/loom-benchmark/scripts/card/test/legacy/d1/README.md",
+  "skills/loom-benchmark/scripts/card/test/legacy/flint/README.md",
+  "skills/loom-benchmark/scripts/card/test/legacy/flint/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_exec/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_exec/expected/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_exec/expected/info.json",
+  "skills/loom-benchmark/scripts/card/test/r9700_none/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_none/expected/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_none/expected/info.json",
+  "skills/loom-benchmark/scripts/card/test/r9700_preset/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_preset/expected/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_preset/expected/info.json",
+  "skills/loom-benchmark/scripts/card/test/r9700_staging/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_staging/expected/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_staging/expected/info.json",
+  "skills/loom-benchmark/scripts/card/test/r9700_two/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_two/expected/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_two/expected/info.json",
+  "skills/loom-benchmark/scripts/ctx_admit.py",
+  "skills/loom-benchmark/scripts/finalize.sh",
+  "skills/loom-benchmark/scripts/gates.sh",
+  "skills/loom-benchmark/scripts/llamacpp_server.sh",
+  "skills/loom-benchmark/scripts/needle.py",
+  "skills/loom-benchmark/scripts/perf.py",
+  "skills/loom-benchmark/scripts/qualify.sh",
+  "skills/loom-benchmark/scripts/report.py",
+  "skills/loom-improve/SKILL.md",
+  "skills/loom-improve/scripts/kpi.py",
+  "skills/loom-improve/scripts/watch_trial.sh",
+  "skills/loom-optimize/SKILL.md",
+  "skills/loom-org/SKILL.md",
+  "skills/loom-port-llm/SKILL.md",
+  "skills/loom-port-llm/starter/draft/README.md",
+  "skills/loom-roofline/e2e_budget.py",
+  "tests/test_gate_scope.py"
+ ],
+ "dropped": [],
+ "impact_models": [],
+ "A": {
+  "lint_exit": 1,
+  "files": 55
+ },
+ "B": {
+  "parts": {
+   "architecture": {
+    "files": 3,
+    "lint_exit": 0
+   },
+   "card": {
+    "files": 24,
+    "lint_exit": 0
+   },
+   "docs": {
+    "files": 10,
+    "lint_exit": 0
+   },
+   "tooling": {
+    "files": 16,
+    "lint_exit": 0
+   },
+   "unclassified": {
+    "files": 2,
+    "lint_exit": 1
+   }
+  },
+  "lint_exit": 1
+ }
+}

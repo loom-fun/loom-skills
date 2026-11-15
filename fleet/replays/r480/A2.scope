@@ -1,0 +1,4 @@
+kind: horizontal
+scopes: arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+kernels: attention_prefill
+leak: the default changes the prefill flash kernel of every model with a flash2 kernel

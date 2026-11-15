@@ -1,0 +1,2 @@
+kind: targeted
+scopes: arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3

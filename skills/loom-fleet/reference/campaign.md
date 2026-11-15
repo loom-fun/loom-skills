@@ -11,6 +11,7 @@ Narrow changes inside a campaign are [targeted fixes](targeted-fix.md).
 - Branches, worktrees, PRs, review
 - The invariant
 - DevLab
+- Regenerating many cards: `fleet/regen.py`
 - Baselines, quant, models, gates
 - Publishing and reporting
 - Hygiene: disk, memory, gh
@@ -109,6 +110,16 @@ separately. Tools: `fleet/README.md`; process: [targeted-fix.md](targeted-fix.md
   one central poller, not one per agent. Queue wait on a runner pool (10+ min on the R9700) is normal: do not re-trigger.
   Download with `gh run download RUN -D FRESH_DIR` (a fresh directory each time; unzip collides).
 - Smoke tests use tight timeouts and log the server status endpoints while waiting, so a hang shows its cause.
+
+## Regenerating many cards: `fleet/regen.py`
+
+One command per step, state in one JSON file, resumable; no per-engineer helper scripts. `plan --device D [--mode ab|card] --all --state S.json`
+(`--mode card` for a NEW device: one card measurement per model, no old package, no A/B, about 0.6-0.75x the runner time of an A/B job; `ab` regenerates a device
+that has one) -> `submit` (experiment branch + `perf.json` + PR + label by REST; the device with the fewest runners first) -> `poll` in a >= 120 s
+loop -> `collect` (fresh dir per job, `strix_ab_compare.py`, ratchet verdict) -> `rerun` + `submit` (ONE confirming `-r2` job for a model whose
+verdict needs it) -> `ingest` (card from the job; Strix keeps the published table plus the re-measure line) -> `publish --dry-run` / `publish`
+(card-only, `loom-fun-staging`). A confirmed regression, failed gate or text difference stops that model in `needs_decision`; the rest go on
+(`accept` records a person's near-tie call). `status --status-json` writes `models.<slug>.<gpu>` for the dashboard. Time model: `fleet/README.md`.
 
 ## Baselines, quant, models, gates
 

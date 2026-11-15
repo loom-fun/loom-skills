@@ -1,0 +1,24 @@
+exit 1
+### Scope lint: FAIL
+kind `tooling`; scopes -; kernels -; 55 file(s) changed.
+Program impact: 0 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+
+| rule | problem |
+|---|---|
+| files | .github/devlab/experiment.json: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| protected | .github/workflows/nightly-gates.yml is a protected core file (CI workflows); changing it needs kind: architecture |
+| files | README.md: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| files | docs/app.js: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| files | docs/index.html: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| files | skills/loom-benchmark/SKILL.md: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| files | skills/loom-benchmark/reference/methodology.md: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| files | skills/loom-benchmark/scripts/card/card_lib.py: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| protected | skills/loom-benchmark/scripts/card/info_schema.json is a protected core file (card schema); changing it needs kind: architecture |
+| protected | skills/loom-benchmark/scripts/card/make_info.py is a protected core file (card schema producer); changing it needs kind: architecture |
+| files | skills/loom-benchmark/scripts/card/test/check.sh: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| files | skills/loom-benchmark/scripts/card/test/d1/expected/README.md: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| files | skills/loom-benchmark/scripts/card/test/flint/expected/README.md: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| files | skills/loom-benchmark/scripts/card/test/flint/expected/REPORT.md: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| files | skills/loom-benchmark/scripts/card/test/flint/expected/info.json: not allowed for kind tooling (a tooling PR may not change generators, kb data or cards) |
+| ... | 24 more (all in the JSON report) |
+

@@ -114,7 +114,8 @@ res = {"job": summ and json.load(open(os.path.join(o, "summary.json")))["job"], 
        "band": max(bands.values(), default=a.band if a.band is not None else registry.methodology()["default_band"]), "bands": bands, "metrics": metrics, "acceptance": acc, "text": text, "gates": gates, "gate_status": gate_status,
        "out_of_band": outs, "gate_failures": fails,
        "worst_metric": worst[1] if worst else None, "worst_ratio": worst[2] if worst else None,
-       "verdict": "gate_fail" if fails else ("rerun" if outs else "pass")}
+       # acceptance rows are informational (techlead 17:02, methodology): reported in out_of_band, never a reason to re-run
+       "verdict": "gate_fail" if fails else ("rerun" if any(not k.startswith("acceptance:") for k in outs) else "pass")}
 if a.prev:   # the stop rule: re-run once; still outside the band in the same direction = OUT OF MARGIN
     p = json.load(open(a.prev))
     def sides(x):
@@ -129,7 +130,7 @@ if a.prev:   # the stop rule: re-run once; still outside the band in the same di
     sp, sn = sides(p), sides(res)
     res["first_run"] = {"job": p["job"], "runner": p["runner"], "out_of_band": p["out_of_band"]}
     res["out_of_margin"] = sorted(k for k in sn if sp.get(k) == sn[k])
-    res["verdict"] = "gate_fail" if fails else ("out_of_margin" if res["out_of_margin"] else "pass")
+    res["verdict"] = "gate_fail" if fails else ("out_of_margin" if any(not k.startswith("acceptance:") for k in res["out_of_margin"]) else "pass")
 if a.json:
     json.dump(res, open(a.json, "w"), indent=1)
 print(f"{res['job']} on {res['runner']}: verdict {res['verdict']}  worst {res['worst_metric']} {res['worst_ratio']}")

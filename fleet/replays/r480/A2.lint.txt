@@ -1,0 +1,26 @@
+exit 1
+### Scope lint: FAIL
+kind `horizontal`; scopes `arch/llm/dense/gemma4`, `arch/llm/dense/spark2_5`, `arch/llm/dense/lfm3`; kernels `attention_prefill`; 3 file(s) changed.
+Program impact: 50 model(s) touched; leaked outside the declared scope: 40 (leak rate 80%).
+
+| rule | problem |
+|---|---|
+| registry | registry key 'prefill.attn.flash2_peel' changed (legacy); legacy/env/type/derive define today's behaviour; needs kind: architecture |
+- note: leak declared (the default changes the prefill flash kernel of every model with a flash2 kernel): 40 of 50 model(s) outside the scope
+- leaked: `InternScience-Sage-A1.5-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Mellum2.1-12B-A2.5B-Thinking-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-MiniCPM-V-4.7-35B-A3B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Nanbeige4.3-33B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Ornith-1.5-122B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Ornith-1.5-35B-A3B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Ornith-1.5-9B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Qwen2.5-0.5B-Instruct-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Qwen2.5-1.5B-Instruct-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Qwen2.5-32B-Instruct-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Qwen2.5-7B-Instruct-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `bartowski-Qwen3.8-27B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `ggml-org-Flint-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `ggml-org-LFM2.5-24B-A2B-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- leaked: `ggml-org-Laguna-XS-2.1-loom`: not matched by arch/llm/dense/gemma4, arch/llm/dense/spark2_5, arch/llm/dense/lfm3
+- kb lint: kb lint: 0 error(s)
+

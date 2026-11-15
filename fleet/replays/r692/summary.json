@@ -1,0 +1,23 @@
+{
+ "commit": "9319cc0",
+ "files_changed": [
+  ".github/scripts/devlab_perf.sh",
+  ".github/scripts/strix_ab_compare.py",
+  ".github/scripts/strix_ab_jobs.py"
+ ],
+ "dropped": [],
+ "impact_models": [],
+ "A": {
+  "lint_exit": 0,
+  "files": 3
+ },
+ "B": {
+  "parts": {
+   "tooling": {
+    "files": 3,
+    "lint_exit": 0
+   }
+  },
+  "lint_exit": 0
+ }
+}

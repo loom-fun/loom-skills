@@ -1,0 +1,14 @@
+| GPU | stratum | members | rows | representatives |
+|---|---|---|---|---|
+| radeon-r9700 | arch=flint hd=128 G=8 kv=4 draft=dflash moe fam=attn_decode fmt=- | 1 | decode,decode_2k,decode_32k,streams4 | ggml-org-Flint-loom (heaviest for the changed kernel) |
+| strix-halo | arch=flint hd=128 G=8 kv=4 draft=dflash moe fam=attn_decode fmt=- | 1 | decode,decode_2k,decode_32k,streams4 | ggml-org-Flint-loom (heaviest for the changed kernel) |
+| radeon-r9700 | arch=qwen35 hd=256 G=4 kv=4 draft=dflash dense fam=attn_decode fmt=- | 3 | decode,decode_2k,decode_32k,streams4 | bartowski-Ornith-1.5-9B-loom (heaviest for the changed kernel) |
+| strix-halo | arch=qwen35 hd=256 G=4 kv=4 draft=dflash dense fam=attn_decode fmt=- | 3 | decode,decode_2k,decode_32k,streams4 | bartowski-Ornith-1.5-9B-loom (heaviest for the changed kernel) |
+| radeon-r9700 | arch=qwen35 hd=256 G=6 kv=4 draft=dflash dense fam=attn_decode fmt=- | 1 | decode,decode_2k,decode_32k,streams4 | ggml-org-Qwen3.6-27B-loom (heaviest for the changed kernel) |
+| strix-halo | arch=qwen35 hd=256 G=6 kv=4 draft=dflash dense fam=attn_decode fmt=- | 1 | decode,decode_2k,decode_32k,streams4 | ggml-org-Qwen3.6-27B-loom (heaviest for the changed kernel) |
+| radeon-r9700 | arch=qwen35 hd=256 G=6 kv=4 draft=mtp dense fam=attn_decode fmt=- | 1 | decode,decode_2k,decode_32k,streams4 | bartowski-Qwen3.8-27B-loom (heaviest for the changed kernel) |
+| strix-halo | arch=qwen35 hd=256 G=6 kv=4 draft=mtp dense fam=attn_decode fmt=- | 1 | decode,decode_2k,decode_32k,streams4 | bartowski-Qwen3.8-27B-loom (heaviest for the changed kernel) |
+| radeon-r9700 | arch=qwen3 hd=128 G=4 kv=>=8 draft=dflash dense fam=attn_decode fmt=- | 2 | decode,decode_2k,decode_32k,streams4 | unsloth-Qwen3-8B-loom (heaviest for the changed kernel) |
+| strix-halo | arch=qwen3 hd=128 G=4 kv=>=8 draft=dflash dense fam=attn_decode fmt=- | 2 | decode,decode_2k,decode_32k,streams4 | unsloth-Qwen3-8B-loom (heaviest for the changed kernel) |
+
+strata 10; touched model-GPU pairs 16; sampled 10; T1 canary ~4.48 runner-h vs full A/B of every touched model ~17.34 runner-h

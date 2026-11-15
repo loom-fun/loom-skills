@@ -181,6 +181,8 @@ class T(unittest.TestCase):
     def test_tooling_and_card(self):
         self.r.write("scripts/x.py", "1\n")
         self.r.write("tests/test_x.py", "1\n")
+        self.r.write(".github/devlab/exp.json", "{}\n")
+        self.r.write("skills/loom-roofline/x.py", "1\n")
         self.r.commit()
         self.assertEqual(self.r.lint("kind: tooling\n", impact()).errors, [])
         self.assertEqual(rules(self.r.lint("kind: card\n", impact())), ["files"])

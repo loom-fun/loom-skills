@@ -1,0 +1,8 @@
+=== part kind tooling: 3 file(s), exit 0
+  .github/scripts/devlab_perf.sh
+  .github/scripts/strix_ab_compare.py
+  .github/scripts/strix_ab_jobs.py
+### Scope lint: pass
+kind `tooling`; scopes -; kernels -; 3 file(s) changed.
+Program impact: 0 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+

@@ -16,6 +16,7 @@ published model, without a GPU and without any weights.
 | `scope_lint.py` | `--base REF --pr-body FILE [--impact IMPACT.json]`: does a PR stay inside its `loom-scope` block (files per kind, scope leak, protected files, registry legacy values, kb lint); `--local` builds the impact itself |
 | `ownership.json` | protected core files, files each PR kind may change, kernel family -> files and rows_map rule ids (data; protected) |
 | `route_load.py` | instruction load: lines a port / optimize run reads per fleet model (routed files + workflow and kb SKILL.md) vs the pre-refactor set at `--base`; `--md`, `--json` |
+| `replays/` | measure 2: past PRs replayed through the guards (`replay.py NAME`, `mkpatches.py`, `summarize.py`); evidence per PR and `REPLAYS.md` |
 | `regen.py` | regenerate many cards, one command per step (`plan submit poll collect rerun ingest publish status accept adopt`), state in one JSON file; `--mode card` for a new device: no A/B |
 | `rows_map.json` | kernel family -> card rows / gates (data; first matching rule wins) |
 

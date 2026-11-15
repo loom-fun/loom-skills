@@ -1,0 +1,6 @@
+exit 0
+### Scope lint: pass
+kind `targeted`; scopes `arch/llm/dense/qwen3`, `arch/llm/dense/qwen3vl`; kernels -; 2 file(s) changed.
+Program impact: 6 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+- kb lint: kb lint: 0 error(s)
+
