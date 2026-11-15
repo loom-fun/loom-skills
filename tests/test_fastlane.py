@@ -94,8 +94,10 @@ class Sequential(unittest.TestCase):
 
     def test_devlab_perf_parses_and_has_the_extend_step(self):
         sh = os.path.join(SCRIPTS, "devlab_perf.sh")
-        subprocess.run(["bash", "-n", sh], check=True)
-        self.assertIn("extend)", open(sh).read())
+        if sys.platform != "win32":   # the runner's bash is a Linux one
+            subprocess.run(["bash", "-n", sh], check=True)
+        with open(sh, encoding="utf-8") as f:
+            self.assertIn("extend)", f.read())
 
 
 class Ratchet(unittest.TestCase):
