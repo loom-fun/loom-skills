@@ -357,6 +357,10 @@ CHOICE("hybrid.gdn.chunk", "bool", False, "GDN_CHUNK", devices=["rdna4"], rows=R
        from_pr="q38r9700 gdnpf",
        doc="gfx12 chunked (WY) gated delta-net prefill (gen_gdn_chunk.py): spans of 64+ tokens run g_gdn_chunk_rdna4 (f16 WMMA, f32 state), the "
            "sequential kernel's gfx12 twin the shorter ones; the gfx11 kernels do not change (128 x 128 heads only).")
+CHOICE("hybrid.gdn.front", "bool", False, "GDN_FRONT", devices=["rdna4"], rows=ROWS_DECODE + ROWS_STREAMS, kernels=["g_gdn_front_rdna4", "g_gdn_conv*", "g_gdn_qk_norm"],
+       from_pr="q38r9700 gdnfuse",
+       doc="gfx12 fused front of the gated delta-net chain (gen_gdn_front.py): g_gdn_conv + g_gdn_conv_commit + g_gdn_qk_norm are one launch "
+           "per layer and pass (verify and replay of a drafted step, decode, streams); the gfx11 kernels do not change (128-wide heads only).")
 
 # ======================================================================================================================
 # Speculative decoding (gen_llm.py, draft/)

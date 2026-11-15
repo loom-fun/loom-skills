@@ -572,6 +572,9 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
             assert "g_gdn_recurrence_rdna4" in twin
             ck = twin + "\n" + ck
         text = text + "\n" + ck
+    if front_mode(G):
+        from gen_gdn_front import front_kernel
+        text = text + "\n" + front_kernel(G, NG, LB, eps, guard_open, guard_close)
     return text
 
 
@@ -602,6 +605,20 @@ def chunk_mode(G):
     if G["DK"] != 128 or G["DV"] != 128 or G["HV"] % G["HK"] or not _row_lanes(G["DK"], G["DV"]):
         return None
     return "pf" if recurrence_pf(G) else "group"
+
+
+def front_mode(G):
+    """The gfx12 fused front (gen_gdn_front.py: g_gdn_conv + g_gdn_conv_commit + g_gdn_qk_norm in one launch of spans of any length): True when
+    env GDN_FRONT is on, the build keeps its gfx12 twins (LOOM_RDNA4) and the heads are 128 wide."""
+    if os.environ.get("GDN_FRONT", "") in ("", "0", "off", "no", "false") or os.environ.get("LOOM_RDNA4", "1").strip().lower() in ("", "0", "off", "no", "false"):
+        return False
+    return G["DK"] == 128 and G["C"] % 128 == 0
+
+
+def front_launch(i, layer_args="%metadata, %origins"):
+    """The gfx12 fused-front launch of layer i (text of one `kernel.launch`); LAYER_ARGS are the metadata and origins operands."""
+    return ("kernel.launch @g_gdn_front_rdna4[%spans](%t, %spans, %layer_" + str(i) + ", " + layer_args + ", %arena, %gq, %conv_" + str(i) +
+            ", %gs, %ginv) : [index](index, index, index, buffer, buffer, buffer, buffer, view<@CK@xf32>, buffer, buffer)")
 
 
 def _row_fits(DK, DV, rl, cw):

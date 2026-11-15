@@ -994,6 +994,61 @@ if cfg.get("recurrent_layers") and _chunk:
   check.return
 }}
 """)
+# 4d. g_gdn_front_rdna4 (gfx12 fused conv + history commit + q / k norms, gen_gdn_front.py) alone on four spans of one launch: a fresh 5-token span, an 11-token
+# span that continues the stored history of its reader slot (fork position), a 20-token span (three tiles of 8) whose reader is its own writer slot
+# (start != fork: the in-place case), and a 3-token speculative span (flag bit 4: nothing is published); one padding token no span owns stays untouched.
+if cfg.get("recurrent_layers"):
+    from gen_gdn import front_mode as _front_mode
+if cfg.get("recurrent_layers") and _front_mode(gdn_geometry(cfg)):
+    fspans = [(5, 0, 0, 0), (11, 7, 7, 0), (20, 9, 3, 0), (3, 4, 4, 4)]; ft = 40; fns = len(fspans)   # (length, start, fork, flags)
+    fx = rng.standard_normal((ft, C)).astype(np.float32)
+    farena = np.zeros(2 * fns * LB // 4, np.float32); fmeta = np.zeros(4 + 9 * fns, np.int32); fmeta[0] = fns
+    forig = np.zeros((fns, 5), np.int64); silu_e = np.zeros((ft, C), np.float32); inv_e = np.zeros((ft, 2 * HK), np.float32)
+    hoff = SB // 4
+    fhist = []   # (the span's last K - 1 inputs after it, whether it publishes, its writer slot)
+    ffirst = 0
+    for si, (L, p, fork, flags) in enumerate(fspans):
+        rd, wr = 2 * si * LB, (2 * si + 1) * LB
+        forig[si] = [rd, wr, 0, fork, 0]; fmeta[4 + 9 * si:4 + 9 * si + 7] = [L, p, 0, si, ffirst, 0, flags]
+        h0 = np.zeros((K - 1, C), np.float32) if p == 0 else rng.standard_normal((K - 1, C)).astype(np.float32)
+        slot = wr if p != fork else rd          # g_gdn_slots: the reader is the read slot at the fork position, else the row's own writer
+        farena[slot // 4 + hoff:slot // 4 + hoff + (K - 1) * C] = h0.reshape(-1)
+        full = np.concatenate([h0, fx[ffirst:ffirst + L]], 0)
+        cv = np.stack([(full[i:i + K] * conv_w.T).sum(0) for i in range(L)]); sl = cv / (1 + np.exp(-cv))
+        silu_e[ffirst:ffirst + L] = sl
+        fq, fk = sl[:, :HK * DK].reshape(L, HK, DK).astype(np.float64), sl[:, HK * DK:2 * HK * DK].reshape(L, HK, DK).astype(np.float64)
+        inv_e[ffirst:ffirst + L] = np.stack([1 / np.sqrt((fq ** 2).sum(-1) + eps), 1 / np.sqrt((fk ** 2).sum(-1) + eps)], -1).reshape(L, 2 * HK)
+        fhist.append((full[-(K - 1):], not flags & 4, wr))
+        ffirst += L
+    fexpect = farena.copy()
+    for hist, publishes, wr in fhist:
+        if publishes:
+            fexpect[wr // 4 + hoff:wr // 4 + hoff + (K - 1) * C] = hist.reshape(-1)
+    for n, a in [("gf_meta", fmeta), ("gf_orig", forig.reshape(-1).view(np.int32)), ("gf_arena", farena), ("gf_expect", fexpect), ("gf_x", fx),
+                 ("gf_silu", silu_e), ("gf_inv", inv_e)]:
+        save(n, a)
+    AT = f"tensor<{2 * fns * LB // 4}xf32>"; MT = f"tensor<{4 + 9 * fns}xi32>"; OT = f"tensor<{10 * fns}xi32>"
+    cases.append(f"""check.case public @gdn_front_spans {{
+  %t = check.literal value({ft}) : index
+  %spans = check.literal value({fns}) : index
+  %layer = check.literal value(0) : index
+  %meta = check.file.read.npy path("gf_meta.npy") : {MT}
+  %orig = check.file.read.npy path("gf_orig.npy") : {OT}
+  %arena = check.file.read.npy path("gf_arena.npy") : {AT}
+  %expect = check.file.read.npy path("gf_expect.npy") : {AT}
+  %x = check.file.read.npy path("gf_x.npy") : tensor<{ft}x{C}xf32>
+  %w = check.file.read.npy path("g_conv_w.npy") : tensor<{C * K}xf32>
+  %esilu = check.file.read.npy path("gf_silu.npy") : tensor<{ft}x{C}xf32>
+  %einv = check.file.read.npy path("gf_inv.npy") : tensor<{ft}x{2 * HK}xf32>
+  %silu = check.generate.fill value(0.0) : tensor<{ft}x{C}xf32>
+  %inv = check.generate.fill value(0.0) : tensor<{ft}x{2 * HK}xf32>
+  kernel.launch @g_gdn_front_rdna4[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x, %w, %silu, %inv) : [index](index, index, index, {MT}, {OT}, {AT}, tensor<{ft}x{C}xf32>, tensor<{C * K}xf32>, tensor<{ft}x{C}xf32>, tensor<{ft}x{2 * HK}xf32>)
+  check.expect.close actual(%silu) expected(%esilu) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{ft}x{C}xf32>
+  check.expect.close actual(%inv) expected(%einv) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{ft}x{2 * HK}xf32>
+  check.expect.close actual(%arena) expected(%expect) atol(1.0e-6) rtol(1.0e-6) nan(different) : {AT}
+  check.return
+}}
+""")
 # g_row_scale_f16 (the GEMM A operand): per-row power-of-two scale 2^-e, e = clamp(floor(log2 max|x|) - 13, 0, 100),
 # x16 = f16(x * scale); rows of very different magnitude, width = the FFN width (the widest the model uses).
 if os.environ.get("GEMM_TESTS", "1") == "1":

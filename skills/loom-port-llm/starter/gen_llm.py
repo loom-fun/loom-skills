@@ -15,7 +15,7 @@
 import json, math, os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate, chunk_mode  # noqa: E402
+from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate, chunk_mode, front_mode, front_launch  # noqa: E402
 
 CFG = json.load(open(os.environ.get("LLM_CONFIG") or sys.argv[1]))
 H = CFG["hidden"]; HG = H // 32          # hidden size, 32-value groups per hidden row
@@ -4725,15 +4725,20 @@ def gdn_layer(i, b, nm, sz, par):
         REC = REC + "\n  scf.if %gemm {\n  " + REC.replace("@g_gdn_recurrence[", "@g_gdn_recurrence_pf[") + "\n  }"
     elif chunk_mode(g) == "group":   # gfx12: spans of 64+ tokens run the chunked kernel (a gfx11 build launches nothing here: its kernel takes every span)
         REC = REC + "\n  scf.if %gemm {\n  // dual-group: rdna4 " + REC.strip().replace("@g_gdn_recurrence[", "@g_gdn_chunk_rdna4[") + "\n  // dual-group: end\n  }"
+    CHAIN = f"""  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_{i}, %metadata, %info, %origins, %arena, %gq, %conv_{i}, %gs) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, view<{C * K}xf32>, buffer)
+  kernel.launch @g_gdn_conv_commit[%spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gq) : [index](index, index, index, buffer, buffer, buffer, buffer)
+  kernel.launch @g_gdn_qk_norm[%t](%t, %gs, %ginv) : [index](index, buffer, buffer)
+"""
+    if front_mode(g):   # gfx12, decode-shaped epochs: one launch for the conv, the history commit and the q / k norms (gen_gdn_front.py); prefill epochs and gfx11 keep the three
+        CH4 = CHAIN.replace("\n  ", "\n    ").replace("  kernel.launch", "    kernel.launch", 1)
+        CHAIN = ("  scf.if %gemm {\n" + CH4 + "  } else {\n    // dual-group: rdna4 " + front_launch(i).replace("@CK@", str(C * K)) + "\n" +
+                 CH4 + "    // dual-group: end\n  }\n")
     T = P + [
         "  " + lin(fmt_of(nm("attn_qkv")), "%h", "%s_h", f"%wqkv_{i}", sz("attn_qkv"), "%gq", "%nH", "%nC", H) + "\n",
         "  " + lin(fmt_of(nm("attn_gate")), "%h", "%s_h", f"%wz_{i}", sz("attn_gate"), "%gz", "%nH", "%nVD", H) + "\n",
         "  " + lin_mv(fmt_of(nm("ssm_alpha")), "%h", f"%walpha_{i}", sz("ssm_alpha"), "%galpha", "%nHV", H) + "\n",
         "  " + lin_mv(fmt_of(nm("ssm_beta")), "%h", f"%wbeta_{i}", sz("ssm_beta"), "%gbeta", "%nHV", H) + "\n",
-        f"""  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_{i}, %metadata, %info, %origins, %arena, %gq, %conv_{i}, %gs) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, view<{C * K}xf32>, buffer)
-  kernel.launch @g_gdn_conv_commit[%spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gq) : [index](index, index, index, buffer, buffer, buffer, buffer)
-  kernel.launch @g_gdn_qk_norm[%t](%t, %gs, %ginv) : [index](index, buffer, buffer)
-{REC}
+        f"""{CHAIN}{REC}
   kernel.launch @g_gdn_norm_gate[%t](%t, %info, %graw, %ssm_norm_{i}, %gz, %o) : [index](index, buffer, buffer, view<{DV}xf32>, buffer, buffer)
   scf.if %gemm {{
     kernel.launch @g_row_scale_f16[%t](%t, %nVD, %o, %s_o, %o16) : [index](index, index, buffer, buffer, buffer)

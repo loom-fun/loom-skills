@@ -854,17 +854,27 @@ def verify_program(program, g):
     body = body.replace("%outsel_on = scalar.constant true : i1", "%outsel_on = scalar.constant false : i1")
     GDN = g["GDN"]
     if GDN:
+        from gen_gdn import front_mode, front_launch
         W = GDN["C"] + 2 * GDN["HV"]
         cap = (f"  %cap_token_bytes = index.constant {W * 4 * g['NG']} : offset\n"
                "  %cap_size = index.scale %t, %cap_token_bytes : index, offset -> offset\n"
                "  %capture = buffer.alloca<global> align(256) %cap_size : buffer\n")
         anchor = "  kernel.launch @g_token_info[%t]"
         body = body.replace(anchor, cap + anchor, 1)
-        out = []
+        out, in_group = [], False
         for line in body.split("\n"):
-            if line.startswith("  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_"):
+            front = line.startswith("    // dual-group: rdna4 kernel.launch @g_gdn_front_rdna4[")   # the gfx12 fused front (gen_gdn_front.py), in the else branch of `scf.if %gemm`: the capture goes before the whole if
+            if front:
+                in_group = True
+            elif line.startswith("    // dual-group: end"):
+                in_group = False
+            if front or (not in_group and line.startswith("  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_")):
                 layer = line.split("%layer_")[1].split(",")[0]
-                out.append(f"  scf.if %not_gated {{\n    kernel.launch @g_gdn_capture[%t](%t, %layer_{layer}, %gq, %galpha, %gbeta, %capture) : [index](index, index, buffer, buffer, buffer, buffer)\n  }}")
+                cap = f"  scf.if %not_gated {{\n    kernel.launch @g_gdn_capture[%t](%t, %layer_{layer}, %gq, %galpha, %gbeta, %capture) : [index](index, index, buffer, buffer, buffer, buffer)\n  }}"
+                if front:
+                    out.insert(max(k for k, l in enumerate(out) if l == "  scf.if %gemm {"), cap)
+                else:
+                    out.append(cap)
             out.append(line)
         body = "\n".join(out)
     # Generic recurrent replay (kits register it in gen_llm.MODEL_PARTS["replay"]; e.g. LFM2 short-conv,
@@ -933,11 +943,15 @@ def verify_program(program, g):
         tail += "  kernel.launch @g_token_info[%t](%t, %spans, %replay, %info) : [index](index, index, buffer, buffer)\n"
         C, HV, DV, K = GDN["C"], GDN["HV"], GDN["DV"], GDN["K"]
         for i, ordinal in g["gdn_layers"]:
+            front_open = front_close = ""
+            if front_mode(GDN):   # gfx12: the conv, the history commit and the q / k norms in one launch (gen_gdn_front.py)
+                front_open = "  // dual-group: rdna4 " + front_launch(i, "%replay, %origins").replace("@CK@", str(C * K)) + "\n"
+                front_close = "  // dual-group: end\n"
             tail += f"""  kernel.launch @g_gdn_restore[%t](%t, %layer_{i}, %gq, %galpha, %gbeta, %capture) : [index](index, index, buffer, buffer, buffer, buffer)
-  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_{i}, %replay, %info, %origins, %arena, %gq, %conv_{i}, %gs) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, view<{C * K}xf32>, buffer)
+{front_open}  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_{i}, %replay, %info, %origins, %arena, %gq, %conv_{i}, %gs) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, view<{C * K}xf32>, buffer)
   kernel.launch @g_gdn_conv_commit[%spans](%t, %spans, %layer_{i}, %replay, %origins, %arena, %gq) : [index](index, index, index, buffer, buffer, buffer, buffer)
   kernel.launch @g_gdn_qk_norm[%t](%t, %gs, %ginv) : [index](index, buffer, buffer)
-  kernel.launch @g_gdn_recurrence[%spans](%t, %spans, %layer_{i}, %replay, %origins, %arena, %gs, %ginv, %galpha, %gbeta, %ssm_a_{i}, %dt_bias_{i}, %graw) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, view<{HV}xf32>, view<{HV}xf32>, buffer)
+{front_close}  kernel.launch @g_gdn_recurrence[%spans](%t, %spans, %layer_{i}, %replay, %origins, %arena, %gs, %ginv, %galpha, %gbeta, %ssm_a_{i}, %dt_bias_{i}, %graw) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, view<{HV}xf32>, view<{HV}xf32>, buffer)
 """
     for spec, layers in replays:
         tail += f"  // ---- {spec['name']} replay over the accepted speculative inputs, published\n"
