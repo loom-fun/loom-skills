@@ -1,5 +1,5 @@
 {
- "_comment": "q38r9700 gdnfuse: fused GDN front (conv + commit + qk_norm) vs base, ABBA, ktest, c4 undrafted, dev gates. Experiment: not for merge.",
+ "_comment": "q38r9700 gdnfuse: fused GDN front (wave per 128 channels) vs base, tile 4/8, doubling, ABBA, ktest, c4, dev gates. Experiment: not for merge.",
  "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom",
  "memory_bytes": 34000000000,
  "kit": null,
@@ -7,7 +7,7 @@
  "runner": "r9700",
  "jobs": [
   {
-   "name": "gdnfuse-front",
+   "name": "gdnfuse-front2",
    "variants": [
     {
      "name": "base",
@@ -19,7 +19,7 @@
      "context": 120832
     },
     {
-     "name": "new",
+     "name": "new4",
      "build": {
       "GDN_COPY_SPLIT__RDNA4": "8",
       "PROPOSE_HEAD_ROWS": "81920",
@@ -27,6 +27,30 @@
       "GDN_FRONT": "1"
      },
      "context": 120832
+    },
+    {
+     "name": "new8",
+     "build": {
+      "GDN_COPY_SPLIT__RDNA4": "8",
+      "PROPOSE_HEAD_ROWS": "81920",
+      "GDN_CHUNK": "1",
+      "GDN_FRONT": "1",
+      "GDN_FRONT_TILE": "8"
+     },
+     "context": 120832
+    },
+    {
+     "name": "new4x2",
+     "build": {
+      "GDN_COPY_SPLIT__RDNA4": "8",
+      "PROPOSE_HEAD_ROWS": "81920",
+      "GDN_CHUNK": "1",
+      "GDN_FRONT": "1"
+     },
+     "context": 120832,
+     "double": [
+      "llm_verify:g_gdn_front_rdna4"
+     ]
     },
     {
      "name": "nd_base",
@@ -41,7 +65,7 @@
      }
     },
     {
-     "name": "nd_new",
+     "name": "nd_new4",
      "build": {
       "GDN_COPY_SPLIT__RDNA4": "8",
       "PROPOSE_HEAD_ROWS": "81920",
@@ -55,21 +79,25 @@
     }
    ],
    "steps": [
-    "ktest:new",
+    "ktest:new4",
     "perf:base:1",
-    "perf:new:1",
-    "perf:new:1",
+    "perf:new4:1",
+    "perf:new8:1",
+    "perf:new4x2:1",
+    "perf:new4x2:1",
+    "perf:new8:1",
+    "perf:new4:1",
     "perf:base:1",
     "perf:base:1:long",
-    "perf:new:1:long",
-    "perf:new:1",
+    "perf:new4:1:long",
+    "perf:new4:1",
     "perf:base:1",
     "c4:nd_base",
-    "c4:nd_new",
-    "c4:nd_new",
+    "c4:nd_new4",
+    "c4:nd_new4",
     "c4:nd_base",
-    "gates:new:dev",
-    "textmatch:new"
+    "gates:new4:dev",
+    "textmatch:new4"
    ]
   }
  ]
