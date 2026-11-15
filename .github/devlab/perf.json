@@ -26,48 +26,6 @@
    }
   },
   {
-   "name": "sab-bartowski-qwen2-5-32b-instruct-loom",
-   "runner": "strix",
-   "card": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom@9480e082c5502dd4853bad0ed565e13bae5da530",
-   "memory_bytes": 50000000000,
-   "kit": null,
-   "llamacpp": "b1374",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "logits:staging"
-   ],
-   "bundle": {
-    "run": "43693058895"
-   }
-  },
-  {
-   "name": "sab-xhtoken-spark-x2-5-4b-loom",
-   "runner": "strix",
-   "card": "loom-fun-staging/XHToken-Spark-X2.5-4B-loom@ee11255ea43e05baff8cb7db7af1efe59f157355",
-   "memory_bytes": 55000000000,
-   "kit": null,
-   "llamacpp": "b1374",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "staging"
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "logits:staging"
-   ],
-   "bundle": {
-    "run": "43693058895"
-   }
-  },
-  {
    "name": "rab-bartowski-mellum2-1-12b-a2-5b-thinki",
    "runner": "r9700",
    "card": "loom-fun-staging/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom@14e24a3bef42e426415f3c8f7efe370d65c2afda",
@@ -78,61 +36,6 @@
    "variants": [
     {
      "name": "staging"
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "logits:staging"
-   ],
-   "bundle": {
-    "run": "43693058895"
-   }
-  },
-  {
-   "llama_kv_rocm": 40960,
-   "name": "rab-bartowski-qwen2-5-32b-instruct-loom",
-   "runner": "r9700",
-   "card": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom@9480e082c5502dd4853bad0ed565e13bae5da530",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 24576,
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "staging",
-     "context": 24576,
-     "execution": {
-      "context_capacity": 24576,
-      "pool_capacity": 24576
-     }
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "logits:staging"
-   ],
-   "bundle": {
-    "run": "43693058895"
-   }
-  },
-  {
-   "name": "rab-xhtoken-spark-x2-5-4b-loom",
-   "runner": "r9700",
-   "card": "loom-fun-staging/XHToken-Spark-X2.5-4B-loom@ee11255ea43e05baff8cb7db7af1efe59f157355",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 195584,
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "staging",
-     "context": 195584,
-     "execution": {
-      "context_capacity": 195584,
-      "pool_capacity": 195584
-     }
     }
    ],
    "steps": [
