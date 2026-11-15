@@ -3594,10 +3594,13 @@ kernel.def export("g_attention_fallback_list") @g_attention_fallback_list(%token
 
 CHUNKS = (V + 127) // 128
 LOGITS_DEF = ("// Load-time capability (card config llm.logits, default off): export the logits rows of flagged spans (g_logits_export).\n"
-              "config.def @llm.logits = false : i1\n\n") if os.environ.get("LLM_LOGITS", "1") != "0" else ""
+              "config.def @llm.logits = false : i1\n\n"
+              "// Rows of the logits region this stage may write (prepare.loom: min(spans, rows) under llm.logits).\n"
+              "config.def @llm.logit_slots = 0 : index\n\n") if os.environ.get("LLM_LOGITS", "1") != "0" else ""
 LOGITS_TAIL = ("  // Opt-in logits readback: folded away unless the card config sets llm.logits (default stages are identical without it).\n"
                "  %logits_on = config.get @llm.logits : i1\n  scf.if %logits_on {\n"
-               "    kernel.launch @g_logits_export[%spans](%spans, %metadata, %logits, %outputs) : [index](index, buffer, buffer, buffer)\n  }\n"
+               "    %logit_slots = config.get @llm.logit_slots : index\n"
+               "    kernel.launch @g_logits_export[%spans](%spans, %logit_slots, %metadata, %logits, %outputs) : [index](index, index, buffer, buffer, buffer)\n  }\n"
                ) if os.environ.get("LLM_LOGITS", "1") != "0" else ""
 
 
@@ -3900,7 +3903,7 @@ LOGITS_FLAG = 1 << 30        # bit 30 of a span's top_k: "export this span's log
 def logits_export():
     """Opt-in logits readback (loom-skills#736). Per selected span whose top_k carries bit 30, copy the full-vocabulary row
     (CHUNKS * 128 f32; columns >= vocab are -3e38) from the transient %logits into the `outputs` allocation at
-    LOGITS_OFFSET + span * CHUNKS * 512 bytes, where the host (the embed layer) downloads it after the epoch. Pure copy, no WMMA: no
+    LOGITS_OFFSET + span * CHUNKS * 512 bytes (spans below the %slots argument: min(spans, rows)), where the host (the embed layer) downloads it after the epoch. Pure copy, no WMMA: no
     rdna4 twin. With a logit softcap the row is the same capped value the sampler's candidates see. Launched only under the load-time
     capability llm.logits, so the default stage compiles without it."""
     sc = ""
@@ -3917,7 +3920,7 @@ kernel.def export("g_logits_export") @g_logits_export(%spans: index) {{
   %chunks = index.constant {CHUNKS} : index
   %c128 = index.constant 128 : index
   kernel.launch.config workgroups(%spans, %chunks, %c1) workgroup_size(%c128, %c1, %c1) : index
-}} launch(%spans_arg: index, %metadata: buffer, %logits: buffer, %outputs: buffer) {{
+}} launch(%spans_arg: index, %slots: index, %metadata: buffer, %logits: buffer, %outputs: buffer) {{
   %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
   %span_id = kernel.workgroup.id<x> : index
   %span = index.assume %span_id [lt(%span_id, %spans)] : index
@@ -3945,7 +3948,9 @@ kernel.def export("g_logits_export") @g_logits_export(%spans: index) {{
     %top_k = view.load %packets[%span, 7] : view<[%spans]x9xi32> -> i32
     %wanted_bits = scalar.andi %top_k, %flag : i32
     %wanted = scalar.cmpi ne, %wanted_bits, %c0_i32 : i32
-    %export = scalar.andi %selected, %wanted : i1
+    %wanted_row = scalar.andi %selected, %wanted : i1
+    %has_slot = index.cmp ult, %span, %slots : index
+    %export = scalar.andi %wanted_row, %has_slot : i1
     scf.if %export {{
       %base = index.mul %chunk, %c128 : index
       %column = index.add %base, %lane : index

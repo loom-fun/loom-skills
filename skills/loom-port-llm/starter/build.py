@@ -831,7 +831,7 @@ for name in ("prepare", "control", "storage", "service"):
     if DRAFT:   # speculative decoding glue (draft/build_draft.py)
         text = {"prepare": lambda t: build_draft.patch_prepare(t, DRAFT, cfg), "storage": lambda t: build_draft.patch_storage(t, cfg, DRAFT),
                 "control": lambda t: build_draft.patch_control(t, cfg, DRAFT)}.get(name, lambda t: t)(text)
-    if name == "storage" and os.environ.get("LLM_LOGITS", "1") == "0":   # choice feature.logits_export off: no logits readback in the package
+    if name in ("storage", "control", "prepare") and os.environ.get("LLM_LOGITS", "1") == "0":   # choice feature.logits_export off: no logits readback in the package
         text = re.sub(r"(?s)\n?[ ]*// logits:begin\n.*?// logits:end\n", "\n", text)
     for k, v in subs.items():
         text = text.replace(k, v)
@@ -907,7 +907,7 @@ card = {
         "libraries": ["program/llm.loom"]}},
     "services": {"chat": {"kind": "text", "version": 1}},
     "variants": {"gguf": {"services": {"chat": {
-        "programs": ["source"], "config": {"llm.card": True},
+        "programs": ["source"], "config": {"llm.card": True, **({"llm.logits": False} if os.environ.get("LLM_LOGITS", "1") != "0" else {})},   # llm.logits: key present = the package supports the logits readback (feature.logits_export)
         "parameters": {"model": {"files": [{"path": f"parameter/{os.path.basename(p)}", "format": "gguf"} for p in GGUF_PARTS]}},
         "tokenizers": {"text": "tokenizer.json"}}}}},
     "presets": {"chat": {"service": "chat", "variant": "gguf", "programs": "source", "execution": {

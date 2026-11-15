@@ -1,5 +1,9 @@
 config.def @llm.card = false : i1
 
+// logits:begin
+config.def @llm.logits = false : i1
+// logits:end
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
@@ -28,6 +32,11 @@ global.rodata.def @spans_key = bytes("6c6c6d2e7370616e73")
 global.rodata.def @tokens_key = bytes("6c6c6d2e746f6b656e73")
 
 global.rodata.def @pool_key = bytes("6c6c6d2e706f6f6c")
+
+// logits:begin
+// "llm.logit_slots": the rows of the logits region a stage may write (min(spans, rows)), set only with the capability.
+global.rodata.def @logit_slots_key = bytes("6c6c6d2e6c6f6769745f736c6f7473")
+// logits:end
 
 // "weights.loom"
 global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
@@ -98,6 +107,10 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %spans_key = global.load @spans_key : buffer
   %tokens_key = global.load @tokens_key : buffer
   %pool_key = global.load @pool_key : buffer
+  // logits:begin
+  %logits_cfg = config.get @llm.logits : i1
+  %logit_slots_key = global.load @logit_slots_key : buffer
+  // logits:end
   %shape_view = buffer.view %shapes[%origin] : buffer -> view<[%count]x2xi64>
   %maximum, %span_capacity = scf.for %i = [%c0 to %count step %c1](%previous = %c0_i64 : i64, %previous_spans = %c0_i64 : i64) -> (i64, i64) {
     %tokens = view.load %shape_view[%i, 0] : view<[%count]x2xi64> -> i64
@@ -108,6 +121,12 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
     func.call @config_i64(%stage, %pool_key, %pool) : (i32, buffer, i64)
     func.call @config_i64(%stage, %tokens_key, %tokens) : (i32, buffer, i64)
     func.call @config_i64(%stage, %spans_key, %spans) : (i32, buffer, i64)
+    // logits:begin
+    scf.if %logits_cfg {
+      %logit_slots = scalar.minsi %spans, %rows : i64
+      func.call @config_i64(%stage, %logit_slots_key, %logit_slots) : (i32, buffer, i64)
+    }
+    // logits:end
     func.call @parameter(%stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
     view.store %stage, %stage_view[%i] : i32, view<[%count]xi32>
     %larger = scalar.cmpi ugt, %tokens, %previous : i64
