@@ -17,6 +17,13 @@
     "exec.prefill_capacity": 1024
    },
    "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged"
+  },
+  {
+   "when": {},
+   "set": {
+    "draft.propose.head_rows": 81920
+   },
+   "evidence": "MTP proposals read a Q4_0 copy of head rows [0, 81920) plus the added-token rows (0.2 GB per proposal round instead of the 1.04 GB Q6_K head; verification keeps the head). DevLab R9700 (phead experiment, MTP depth 3, medians of 2 interleaved sessions): decode 65.2 -> 71.8 tok/s, decode_2k 58.7 -> 64.8 (round 3), acceptance .541 -> .533; N sweep 32k..all rows: 67.2 / 69.0 (64k) / 71.8 (80k) / 70.9 (88k) / 70.4 (96k) / 69.4 (128k) / 68.7 (160k) / 66.9 (all rows, Q4_0). Strix Halo: decode 25.2 -> 28.1, decode_2k 24.1 -> 26.9."
   }
  ]
 }
