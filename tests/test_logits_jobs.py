@@ -45,6 +45,8 @@ class LogitsJobs(unittest.TestCase):
         j = jobs("--device", "strix-halo", "--ref", "origin/x", SLUG)["jobs"][0]
         pins = json.load(open(os.path.join(ROOT, ".github", "devlab", "gufo_bundle.json")))
         self.assertEqual(j["bundle"], {"build": {"extension": pins["extension"], "gufo": pins["gufo"]}})
+        import re
+        self.assertTrue(all(re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", pins[k]) for k in ("extension", "gufo")), "full commit ids: actions/checkout needs them")
         self.assertNotIn("bundle", jobs("--device", "strix-halo", "--ref", "origin/x", "--no-logits", SLUG)["jobs"][0])
 
     def test_replicas(self):

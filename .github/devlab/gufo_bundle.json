@@ -1,5 +1,5 @@
 {
- "_comment": "The Gufo bundle the logits:V / gufo:V steps run (built inside the devlab-perf run by its `bundle` job, never hosted). logits_jobs.py puts these pins on every job that has the steps; bump them here when loom-gufo-extension or gufo moves.",
- "extension": "loom-fun/loom-gufo-extension@6969dad",
- "gufo": "loom-fun/gufo@8943bd09"
+ "_comment": "The Gufo bundle the logits:V / gufo:V steps run (built inside the devlab-perf run by its `bundle` job, never hosted). logits_jobs.py puts these pins on every job that has the steps; bump them here (full 40-character commit ids: actions/checkout does not take short ones) when loom-gufo-extension or gufo moves.",
+ "extension": "loom-fun/loom-gufo-extension@6969dad1723be64f3581015b9de4d59bdd14c379",
+ "gufo": "loom-fun/gufo@8943bd092a1b5085f44f676bb329c6a39a68c347"
 }
