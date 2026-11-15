@@ -71,6 +71,8 @@ class LogitsMode(unittest.TestCase):
         self.assertEqual(j["steps"], ["func:staging", "ktest:staging", "logits:staging", "gufo:staging"])
         self.assertEqual([v["name"] for v in j["variants"]], ["staging"])
         self.assertEqual(j["bundle"], {"url": "http://b", "sha256": "abc"})
+        regen.logits_steps(doc, {"build": {"extension": "loom-fun/loom-gufo-extension@x", "gufo": "loom-fun/gufo@y"}})
+        self.assertEqual(doc["jobs"][0]["bundle"]["build"]["gufo"], "loom-fun/gufo@y")
 
     def verdict(self, results):
         with tempfile.TemporaryDirectory() as d:

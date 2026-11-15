@@ -224,8 +224,8 @@ def logits_steps(doc, bundle):
     for j in doc["jobs"]:
         j["steps"] = [x for x in j["steps"] if x.split(":")[0] in LOGITS_KEEP and x.endswith(":staging")] + ["logits:staging", "gufo:staging"]
         j["variants"] = [v for v in j["variants"] if v["name"] == "staging"]
-        if bundle:
-            j["bundle"] = {"url": bundle[0], "sha256": bundle[1]}
+        if bundle:   # a prebuilt tarball (URL, SHA256), or {"build": ...}: the devlab-perf run builds it (workflow job `bundle`), nothing is hosted
+            j["bundle"] = bundle if isinstance(bundle, dict) else {"url": bundle[0], "sha256": bundle[1]}
 
 
 def logits_verdict(d, e):
@@ -276,7 +276,9 @@ def cmd_plan(a):
     st = {"schema": "regen/1", "created": now(), "mode": a.mode, "work": work, "state": state_path,
           "opts": {"gates": a.gates, "new_org": a.new_org, "old_org": old_org, "batch": a.batch, "refs": None,
                    **({"replicas": a.replicas} if a.replicas > 1 else {}), **({"sequential": True} if a.sequential else {}),
-                   **({"no_baselines": True} if a.no_baselines else {}), **({"bundle": a.bundle} if a.bundle else {})},
+                   **({"no_baselines": True} if a.no_baselines else {}), **({"bundle": a.bundle} if a.bundle else {}),
+                   **({"bundle": {"build": {"extension": f"loom-fun/loom-gufo-extension@{a.bundle_build[0]}", "gufo": f"loom-fun/gufo@{a.bundle_build[1]}"}}}
+                      if a.bundle_build else {})},
           "devices": devices, "batches": [], "jobs": {}, "log": []}
     for dev in devices:
         # per-device refs file. Where the device has no published table to compare with (anything but Strix Halo, whose old package is the
@@ -831,6 +833,8 @@ def main(argv=None):
     p.add_argument("--mode", choices=("ab", "card", "logits"), default="ab",
                    help="logits: the final pass's functional job of a staging package (func, ktest, logits:staging, gufo:staging), no performance")
     p.add_argument("--bundle", nargs=2, metavar=("URL", "SHA256"), help="logits mode: the Gufo bundle tarball the job fetches (devlab_perf.sh gufo_bundle)")
+    p.add_argument("--bundle-build", nargs=2, metavar=("EXT_REV", "GUFO_REV"), help="logits mode: the devlab-perf run BUILDS the Gufo bundle "
+                   "(loom-fun/loom-gufo-extension@EXT_REV, loom-fun/gufo@GUFO_REV; Nix in Docker on a hosted runner, cached by the two revisions)")
     p.add_argument("--all", action="store_true", help="every model of the fleet manifest (a device skips the ones that do not fit)")
     p.add_argument("--old", help="ORG of the old packages (default loom-fun) or a refs.json {slug: {old, new}} (card revisions pinned: org/repo@rev)")
     p.add_argument("--new-org", default=STAGING_ORG)
