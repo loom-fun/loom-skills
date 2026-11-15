@@ -13,7 +13,7 @@
    "set": {
     "target.dual.select": "program"
    },
-   "evidence": "PENDING"
+   "evidence": "Llama-3.2-3B Strix prefill_1k 0.945/0.937 vs the published card from the per-launch dual-target selection (eng fixllama, run 43651872326: single-target build restores it). Program-level selection: Strix prefill_1k 0.997 (all rows 0.995-1.031), R9700 vs staging main all rows 0.998-1.006; HyperCLOVAX-1.5B Strix 0.982-1.013, R9700 0.998-1.006 (run 43655173096, experiment PR #762)."
   }
  ]
 }
