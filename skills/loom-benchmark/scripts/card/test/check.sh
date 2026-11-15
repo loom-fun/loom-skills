@@ -233,6 +233,32 @@ a = c.card_metrics(c.load_json(sys.argv[2]))['spec_acceptance'][0]['loom']; prin
   "$C" "$tmp/acc_old.json")
 [ "$got" = "$want" ] && echo "OK   flags: a DevLab spec gate's acceptance replaces a stale spec_acceptance (gates only: none)" \
   || { echo "FAIL flags: DevLab spec acceptance: $got, expected $want"; bad=1; }
+# equivalent default path (the logits campaign): a package whose programs changed but whose default-path stages are identical after
+# canonicalization (fleet/stage_equiv.py's proof) keeps the performance sessions measured on the old programs: no dagger, one card line
+# naming the old programs and the proof; a proof that says not equivalent is refused
+printf '%s' '{"equivalent": true, "tool": "fleet/stage_equiv.py", "summary": "52/52 default-path stages identical", "url": "https://example.invalid/proof/1"}' > "$tmp/proof.json"
+printf '%s' '{"equivalent": false}' > "$tmp/proof_no.json"
+old_sha=$(py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c; print(c.programs_sha256(sys.argv[2]))" "$C" "$F/pkg")
+py "$C/make_info.py" equivalent --gpu strix-halo --proof "$tmp/proof.json" --package "$tmp/rebuilt" --compared-programs "$old_sha" --date 2026-11-14 \
+  --source-kind local --device none --hrx-loom none -o "$tmp/ev_eq.json" 2>/dev/null
+mkdir -p "$tmp/eq" "$tmp/eq_no"; cp -r "$tmp/rebuilt/." "$tmp/eq/"; cp -r "$tmp/rebuilt/." "$tmp/eq_no/"
+py "$C/make_info.py" build "$tmp/eq" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint \
+  --evidence "$tmp/perf.json" "$tmp/ev_eq.json" -o "$tmp/eq/info.json" 2>/dev/null
+py "$C/make_info.py" build "$tmp/eq_no" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --output flint \
+  --evidence "$tmp/perf.json" -o "$tmp/eq_no/info.json" 2>/dev/null
+py "$C/render_card.py" "$tmp/eq" >/dev/null 2>&1; py "$C/render_card.py" "$tmp/eq_no" >/dev/null 2>&1
+py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+i, n = c.load_json(sys.argv[2] + '/info.json'), c.load_json(sys.argv[3] + '/info.json')
+p = c.programs_sha256(sys.argv[2]); assert c.validate(i) == [], c.validate(i)
+assert c.perf_flags(i, programs=p)['stale'] == {} and c.perf_flags(n, programs=p)['stale'], 'carry-over must clear exactly the stale flags'
+r = i['devices']['strix-halo']['remeasure']; assert r['result'] == 'identical' and r['band'] == 0 and r['proof']['url']
+t, tn = open(sys.argv[2] + '/README.md').read(), open(sys.argv[3] + '/README.md').read()
+assert 'is identical after canonicalization (52/52 default-path stages identical' in t and '\u2020' in tn
+assert '\u2020' not in t" "$C" "$tmp/eq" "$tmp/eq_no" \
+  && ! py "$C/make_info.py" equivalent --gpu strix-halo --proof "$tmp/proof_no.json" --package "$tmp/rebuilt" --compared-programs "$old_sha" \
+       --source-kind local --device none --hrx-loom none -o "$tmp/ev_eq_no.json" 2>/dev/null \
+  && echo "OK   equivalent: an identical default path carries the measured sessions (no stale mark, the proof on the card); not equivalent is refused" \
+  || { echo "FAIL equivalent: carry-over of measured sessions for an identical default path"; bad=1; }
 # a paused card (make_info.py build --from-info --next-steps --status paused): README.md is the same card with a final
 # "Next steps" section after everything else, org_status reports paused; without the fields nothing changes
 printf '%s\n' '- retry the agent gate on DevLab' '' 'measure `decode_32k` in a devlab-perf job' > "$tmp/next.txt"

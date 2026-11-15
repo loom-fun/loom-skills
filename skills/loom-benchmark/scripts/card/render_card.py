@@ -465,7 +465,12 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
         L.append(f"- {mark(i)} Measured {text(date)}; device {device_text(s['device'])}; hrx-loom {sdk_text(s['hrx_loom'])}; "
                  f"source: {src_text(s)}.")
     rm = view.get("remeasure")
-    if rm and rm["programs_sha256"] == here:   # a same-runner A/B of this package against the build the table measured
+    if rm and rm["programs_sha256"] == here and rm["result"] == "identical":   # the default-path stages equal the measured build's: no re-measure
+        pr = rm["proof"]
+        L.append(f"- {GPUS[g]['short']} performance measured on programs {short(rm['compared_programs'])}; the default path of this package "
+                 f"(sha256 {short(here)}) is identical after canonicalization ({pr['summary']}"
+                 + (f"; [proof]({pr['url']})" if pr.get("url") else "") + f"; checked {text(rm['date'])}).")
+    elif rm and rm["programs_sha256"] == here:   # a same-runner A/B of this package against the build the table measured
         exc = "".join(f", {k} {(r - 1) * 100:+.1f} %" for k, r in (rm.get("exceptions") or {}).items() if r)
         imp = rm.get("improved") or {}
         bands = sorted({round(b * 100, 1) for b in (rm.get("bands") or {}).values()})

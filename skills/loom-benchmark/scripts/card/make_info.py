@@ -53,6 +53,11 @@ byte-identical files.
       proposals" (gates_spec.log or gates.out next to the file, or --spec-log) -> the spec_acceptance metric, from a
       DevLab (or factory) source only, like every card performance value.
 
+  make_info.py equivalent --gpu GPU --proof PROOF.json --package PKG [--compared-programs SHA] [--proof-url U] [SOURCE] -o ev.json
+      fleet/stage_equiv.py proved this package's default-path stages identical (after canonicalization) to the build whose
+      sessions the card shows: those sessions stand for this package on GPU (remeasure block, result "identical", band 0, the
+      proof named on the card). Refused unless the proof says equivalent.
+
   make_info.py roofline [--gpu GPU] --package PKG [--gguf G] [--cfg cfg.json] [--acceptance A | --evidence EV.json ...] [--skills-commit SHA]
                         -o roofline_evidence.json
       The hardware ceiling of every card metric that has one (loom-roofline/roofline.py; needs the `gguf` Python
@@ -92,6 +97,7 @@ block (an older Loom-only sweep) is ignored. Unknown metric and gate names are k
 """
 import argparse
 import ast
+import datetime
 import json
 import os
 import re
@@ -908,6 +914,32 @@ def cmd_remeasure(a):
     print(f"wrote {a.o}: {a.gpu} within +-{x['band']:.0%}" + (f" except {', '.join(improved)} (faster in both runs)" if improved else "") + f" (worst {x.get('worst_metric')} {x.get('worst_ratio')}); programs {here[:12]} ~ {old[:12]}", file=sys.stderr)
 
 
+def cmd_equivalent(a):
+    """Evidence that this package's default-path stages are identical (after canonicalization: fleet/stage_equiv.py) to the build
+    whose performance sessions the card shows: those sessions stand for this package (the remeasure block with result
+    "identical", band 0, and the proof). Refused unless the proof says equivalent."""
+    a.gpu = a.gpu or DEFAULT_GPU
+    if not a.package:
+        sys.exit("equivalent: --package is required")
+    x = load_json(a.proof)
+    if x.get("equivalent") is not True:
+        sys.exit(f"{a.proof}: not equivalent: no carry-over")
+    here = programs_sha256(a.package)
+    old = a.compared_programs or x.get("compared_programs")
+    if not old:
+        sys.exit("equivalent: --compared-programs (programs_sha256 of the build the card's table measured) is required")
+    if old == here:
+        sys.exit("equivalent: the compared build has the same programs: nothing to carry over")
+    src = source_arg(a)
+    date = a.date or (a.time or "")[:10] or datetime.date.today().isoformat()
+    ev = {"evidence": EVIDENCE_ID, "gpu": a.gpu, "remeasure": {
+        "date": date, "source": src, "band": 0, "programs_sha256": here, "compared_programs": old, "result": "identical",
+        "proof": {"tool": x.get("tool") or "fleet/stage_equiv.py", "summary": x.get("summary") or "default-path stages identical after canonicalization",
+                  "url": a.proof_url or x.get("url")}}}
+    write_json(a.o, ev)
+    print(f"wrote {a.o}: {a.gpu} programs {here[:12]} carry the sessions measured on {old[:12]} (default path identical)", file=sys.stderr)
+
+
 # ---------------------------------------------------------------- roofline -> evidence
 
 def skills_checkout(path):
@@ -1132,8 +1164,16 @@ def main(argv=None):
     m.add_argument("--first-url", help="the first run's job URL (with --first-cmp)")
     add_source_args(m, "devlab")
     m.add_argument("-o", required=True)
+    e = sub.add_parser("equivalent", help="the package's default-path stages are identical to the build the card's table measured (fleet/stage_equiv.py): no re-measure")
+    e.add_argument("--proof", required=True, help="stage_equiv.py's JSON: {equivalent: true, tool, summary, url, compared_programs}")
+    e.add_argument("--compared-programs", help="programs_sha256 of the build the card's table measured")
+    e.add_argument("--proof-url", help="link to the proof's run")
+    e.add_argument("--date", help="YYYY-MM-DD of the proof")
+    e.add_argument("--time")
+    add_source_args(e, "local")
+    e.add_argument("-o", required=True)
     a = ap.parse_args(argv)
-    {"build": cmd_build, "perf": cmd_perf, "gates": cmd_gates, "roofline": cmd_roofline, "remeasure": cmd_remeasure}[a.cmd](a)
+    {"build": cmd_build, "equivalent": cmd_equivalent, "perf": cmd_perf, "gates": cmd_gates, "roofline": cmd_roofline, "remeasure": cmd_remeasure}[a.cmd](a)
 
 
 if __name__ == "__main__":
