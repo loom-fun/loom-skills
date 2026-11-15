@@ -1,7 +1,8 @@
 config.def @llm.card = false : i1
 
 // logits:begin
-config.def @llm.logits = false : i1
+// A declaration: the one definition (default false) is in llm.loom; a second config.def of the key links ambiguously (LINK/MATERIALIZE).
+config.decl @llm.logits : i1
 // logits:end
 
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)

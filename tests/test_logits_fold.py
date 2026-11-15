@@ -31,7 +31,7 @@ def norm(text):
     return re.sub(r"%\d+", "%N", text)
 
 
-@unittest.skipUnless(tool("loom-opt"), "loom-opt not found (set LOOM_OPT)")
+@unittest.skipUnless(tool("loom-opt") and tool("loom-link"), "loom-opt / loom-link not found (set LOOM_OPT, LOOM_LINK)")
 class LogitsFoldTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -97,9 +97,41 @@ class LogitsFoldTests(unittest.TestCase):
         res = self.stage_equiv(old, broken)
         self.assertEqual(res["status"], "FAIL")
 
+    def link(self, *extra):
+        names = sorted({m for f in self.program.glob("*.loom") for m in re.findall(r"^(?:func|command)\.def public @([\w]+)", f.read_text(), re.M)})
+        inputs = ["prepare.loom", "control.loom", "storage.loom", "service.loom"]
+        r = subprocess.run([tool("loom-link"), *inputs, "--library=llm.loom", "--mode=link", *[f"--root=@{n}" for n in names], *extra, "--to=text"],
+                           capture_output=True, text=True, cwd=self.program)
+        self.assertEqual(r.returncode, 0, r.stderr[-600:])
+        return r.stdout
+
+    def test_programs_link_as_the_runtime_links_them(self):
+        """The runtime links prepare/control/storage/service (inputs) with llm.loom (library) and the card config: a key defined in more than
+        one of them fails with `LINK/MATERIALIZE: exact link selection missed reachable source symbol` (hrx loom linker), which no per-file
+        tool shows. Both settings of the capability link, and the binding reaches the single definition."""
+        self.assertEqual(len(re.findall(r"^config\.def @llm\.logits\b", self.link("--config=llm.card=true"), re.M)), 1)
+        self.assertIn("config.def @llm.logits = true : i1", self.link("--config=llm.card=true", "--config=llm.logits=true"))
+        self.assertIn("config.def @llm.logits = false : i1", self.link("--config=llm.card=true", "--config=llm.logits=false"))
+
+    def test_fleet_link_check_tool(self):
+        sys.path.insert(0, str(ROOT / "fleet"))
+        import link_check
+        pkg = self.program.parent
+        self.assertEqual(link_check.check(tool("loom-link"), str(pkg)), ([], []))
+        saved = {n: (self.program / n).read_text() for n in ("storage.loom", "prepare.loom")}
+        try:
+            for n, t in saved.items():   # the first kit: the key defined in storage, prepare and llm.loom
+                (self.program / n).write_text(t.replace("config.decl @llm.logits : i1", "config.def @llm.logits = false : i1"))
+            bad, _ = link_check.check(tool("loom-link"), str(pkg))
+        finally:
+            for n, t in saved.items():
+                (self.program / n).write_text(t)
+        self.assertTrue(bad and "exact link selection" in bad[0], bad)   # the load-time failure of the first kit, caught offline
+
     def test_host_programs_carry_the_guard_and_the_request_key(self):
         storage = (self.program / "storage.loom").read_text()
-        self.assertIn("config.def @llm.logits = false : i1", storage)
+        self.assertIn("config.decl @llm.logits : i1", storage)
+        self.assertNotIn("config.def @llm.logits", storage + (self.program / "prepare.loom").read_text())   # one definition per key (llm.loom)
         self.assertIn("scf.if %logits_on", storage)
         self.assertIn("scalar.minsi %span_capacity, %rows", storage)                     # slots = min(span_capacity, rows)
         control = (self.program / "control.loom").read_text()

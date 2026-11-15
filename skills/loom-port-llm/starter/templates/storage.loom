@@ -1,7 +1,8 @@
 // KV geometry: @@PLANES@@ planes (K and V per attention layer) of pool x @@POS_BYTES@@ bytes (F16 KV heads x head_dim).
 // Recurrent slots: @@RECURRENT_BYTES@@ bytes each (gated delta-net state of every recurrent layer; 4 = none).
 // logits:begin
-config.def @llm.logits = false : i1
+// A declaration: the one definition (default false) is in llm.loom; a second config.def of the key links ambiguously (LINK/MATERIALIZE).
+config.decl @llm.logits : i1
 // logits:end
 
 func.def @allocation(%records: buffer, %slot: index, %bytes: i64, %clear: i64) {
