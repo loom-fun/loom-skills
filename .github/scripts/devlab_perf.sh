@@ -44,7 +44,8 @@
 #            "context": N: the served context of a reduced-context model on the R9700 (execution context_capacity / pool_capacity N;
 #            a rebuild also gets --context N --pool N); rows beyond it are refused by the server (HTTP 400) and skipped by perf.py.
 #            config: generator-config overrides for a rebuild (e.g. {"layers": 12}: timing only)
-#            build: build.py with these env vars (and extra flags); ref: build with that commit's starter;
+#            build: build.py with these env vars (and extra flags); ref: build with that commit's starter AND its knowledge base (skills/loom-kb:
+#            the choices the rebuild resolves; ab_jobs.py --base-ref/--head-ref --build writes fun/staging this way);
 # Job "require_preset_r9700": true (r9700_jobs.py, a package with a fit-row r9700_execution): serving fails unless the card has its <first>-r9700 preset.
 #            serve_args: extra loom-serve flags; execution: model.json overrides (every preset); double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
 #            {"name": "parked", "active_wait": false}: the card's programs served with the SDK's default completion wait
@@ -223,14 +224,14 @@ a += (['--draft', d['kind'], '--draft-depth', str(d['depth'])] if d.get('kind') 
 print(' '.join(a))")
 
 # 3. Packages: D/<variant>/pkg (+ D/<variant>/kit for kernel tests)
-declare -A KIT
-kit_for() {   # kit_for VARIANT REF -> builds D/<variant>/kit from REF's starter (or this checkout)
+declare -A KIT KBV
+kit_for() {   # kit_for VARIANT REF -> builds D/<variant>/kit from REF's starter (or this checkout); KBV[v]: REF's knowledge base (the build resolves its choices from it)
   local v=$1 ref=$2 PL=$SK/loom-port-llm
   if [ -n "$ref" ]; then
     git -C "$here" fetch -q origin "${ref#origin/}" 2>/dev/null
     rm -rf "$D/$v/src"; mkdir -p "$D/$v/src"
-    git -C "$here" archive "$ref" skills/loom-port-llm | tar -x -C "$D/$v/src" || { echo "FAIL: no $ref"; return 1; }
-    PL=$D/$v/src/skills/loom-port-llm; echo "starter from $ref ($(git -C "$here" log -1 --format=%h:%s "$ref" | cut -c1-80))"
+    git -C "$here" archive "$ref" skills/loom-port-llm skills/loom-kb | tar -x -C "$D/$v/src" || { echo "FAIL: no $ref"; return 1; }
+    PL=$D/$v/src/skills/loom-port-llm; KBV[$v]=$D/$v/src/skills/loom-kb; echo "starter from $ref ($(git -C "$here" log -1 --format=%h:%s "$ref" | cut -c1-80))"
   fi
   if [ "$kit" != - ]; then "$PL/reference/apply_example.sh" "$kit" "$D/$v/kit" | tail -1 >/dev/null || return 1
   else cp -r "$PL/starter" "$D/$v/kit"; fi
@@ -250,7 +251,7 @@ for v in $variants; do
 import json, sys
 c = json.load(open(sys.argv[1])); c.update(json.loads(sys.argv[3])); json.dump(c, open(sys.argv[2], "w"), indent=1)
 EOF2
-    ( cd "${KIT[$v]}" && env $envs "$T" build.py "$D/$v/cfg.json" "$pkg" --tokenizer "$card/tokenizer.json" --model-id "$cardid" $cardargs $extra ) > "$out/build_$v.log" 2>&1 \
+    ( cd "${KIT[$v]}" && env $envs ${KBV[$v]:+LOOM_KB_ROOT=${KBV[$v]}} "$T" build.py "$D/$v/cfg.json" "$pkg" --tokenizer "$card/tokenizer.json" --model-id "$cardid" $cardargs $extra ) > "$out/build_$v.log" 2>&1 \
       || { tail -30 "$out/build_$v.log"; echo "FAIL: build $v"; exit 1; }
     tail -3 "$out/build_$v.log"
   else

@@ -15,7 +15,10 @@ Scope nodes. Every `scope.json` under the KB root (skills/loom-kb/**) is a selec
      "owner": "...",
      "choices": [{"when": {"facets": ["drafted"], "devices": ["rdna4"]},   (optional, narrows the node's match)
                   "set": {"decode.attn.kv_once.d256": false}, "evidence": "run/PR link and numbers"}]}
-  match / when keys:  arch (GGUF arch, one or a list)  facets (all of)  not_facets (none of)  has / lacks (config keys that are / are
+  match / when keys:  slug / model_id (the package slug / the checkpoint id: one or a list; first-class model nodes, below)
+                      hidden, ffn, vocab, params_b (shape: a number or [lo, hi]; params_b = billions of parameters estimated from the
+                      shape, a bucket not a count)
+                      arch (GGUF arch, one or a list)  facets (all of)  not_facets (none of)  has / lacks (config keys that are / are
                       not set)  kv_heads, head_dim, heads, layers, sliding_window (a number, or [lo, hi] inclusive, null: open)
                       recurrent_kv (gated-delta-net hybrids)  quant (any tensor format of the model is one of)  devices (any of
                       the build's device families or device slugs). kb.py's matcher reads the same keys.
@@ -23,8 +26,15 @@ Scope nodes. Every `scope.json` under the KB root (skills/loom-kb/**) is a selec
   `match` holds for; built-in facets come from the config (derive_facets): drafted, draft-<kind>, mtp, vision, hybrid-gdn, moe,
   sliding-window, kv-le2, sinks, gated-attn, shortconv. `has: ["draft"]` sees the draft the build uses.
 
+Model nodes: `model/<slug>/scope.json` (+ README.md) with match {"slug": ["<slug>"]} (or "model_id") is the scope of ONE package; its
+rules read like any other node's (`when` narrows by device, facets, shape). The slug comes from the caller (resolve(..., slug=),
+build.py --slug, make_info.py's repo, fleet/<slug>) or cfg["slug"]; model_id comes from the config.
+
+Execution choices (choices.py exec.*): serving settings of one device's preset in model.json, not generator inputs. resolve() leaves
+them out (a build's "resolved" block and programs are what they were); device_execution(cfg, device) resolves them for ONE device.
+
 Precedence, later wins: registry default < device family (device/<fam>) < device (device/<fam>/<dev>) < quant (quant/<fmt>)
-< arch root->leaf (arch/...) < facet (facet/<tag>) < model (cfg["choices"]). Two matching nodes at the same level (same
+< arch root->leaf (arch/...) < facet (facet/<tag>) < model node (model/<slug>) < package override (cfg["choices"]). Two matching nodes at the same level (same
 depth for arch) setting one key to different values for one model is an error (ResolveError).
 
 Per-target choices: a choice declared per_target=True may be set by a rule whose `when`/`match` devices name one family
@@ -49,15 +59,21 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 AUTO = object()
-LEVELS = {"device_family": 1, "device": 2, "quant": 3, "arch": 4, "facet": 5, "model": 6}
-RANGE_KEYS = ("kv_heads", "head_dim", "heads", "layers", "sliding_window")
-MATCH_KEYS = {"arch", "facets", "not_facets", "has", "lacks", "recurrent_kv", "quant", "devices", *RANGE_KEYS}
+LEVELS = {"device_family": 1, "device": 2, "quant": 3, "arch": 4, "facet": 5, "model_node": 6, "model": 7}   # "model": cfg["choices"]
+RANGE_KEYS = ("kv_heads", "head_dim", "heads", "layers", "sliding_window", "hidden", "ffn", "vocab")
+LIST_KEYS = ("slug", "model_id")   # identity: one value or a list, any of
+MATCH_KEYS = {"arch", "facets", "not_facets", "has", "lacks", "recurrent_kv", "quant", "devices", "params_b", *LIST_KEYS, *RANGE_KEYS}
 NODE_KEYS = ("scope", "match", "owner", "choices", "doc", "facets", "also")
 FALLBACK_FAMILY = {"strix-halo": "rdna3", "gfx1151": "rdna3", "gfx1100": "rdna3", "radeon-r9700": "rdna4", "gfx1201": "rdna4"}
 
 
 class ResolveError(Exception):
     pass
+
+
+def _is_exec(c):
+    """An execution choice (exec.*): a registry without the attribute (an older choices.py) has none."""
+    return bool(getattr(c, "execution", False))
 
 
 def _load_choices(kb_root):
@@ -133,8 +149,9 @@ def quant_formats(cfg):
 class Env:
     """What a match is evaluated against."""
 
-    def __init__(self, cfg, facets, devices, family_of):
+    def __init__(self, cfg, facets, devices, family_of, slug=None):
         self.cfg, self.facets, self.devices, self.family_of = cfg, set(facets), devices, family_of
+        self.slug = slug or cfg.get("slug")
         self.formats = set(quant_formats(cfg))
         self.names = set(devices) | {family_of(d) for d in devices}
         self.families = {family_of(d) for d in devices}
@@ -146,6 +163,20 @@ def _num(spec, v):
     if isinstance(spec, list):
         return len(spec) == 2 and (spec[0] is None or v >= spec[0]) and (spec[1] is None or v <= spec[1])
     return v == spec
+
+
+def params_b(cfg):
+    """Billions of parameters estimated from the shape (attention + FFN per layer, experts counted, embeddings): a bucket for selecting a size
+    class, good to ~20 %; None when the config lacks the shape."""
+    try:
+        h, L, f, v = cfg["hidden"], cfg["layers"], cfg["ffn"], cfg["vocab"]
+        hd, nh, kv = cfg["head_dim"], cfg["heads"], cfg["kv_heads"]
+    except KeyError:
+        return None
+    moe = cfg.get("moe")
+    experts = (moe.get("experts") or 1) if isinstance(moe, dict) else 1
+    per = h * hd * (2 * nh + 2 * kv) + 3 * h * f * experts
+    return (L * per + (1 if cfg.get("tied_embeddings") else 2) * v * h) / 1e9
 
 
 def truthy(v):
@@ -166,6 +197,13 @@ def match(m, env, where="match"):
     for k in RANGE_KEYS:
         if k in m and not _num(m[k], cfg.get(k)):
             return False
+    if "params_b" in m and not _num(m["params_b"], params_b(cfg)):
+        return False
+    for k in LIST_KEYS:
+        if k in m:
+            have = env.slug if k == "slug" else cfg.get(k)
+            if have is None or have not in (m[k] if isinstance(m[k], list) else [m[k]]):
+                return False
     if not all(truthy(cfg.get(k)) for k in m.get("has", [])) or any(truthy(cfg.get(k)) for k in m.get("lacks", [])):
         return False
     if m.get("recurrent_kv") and not (cfg.get("kv_layers") and cfg.get("layers") and cfg["kv_layers"] < cfg["layers"]
@@ -192,7 +230,9 @@ def level_of(scope):
         return LEVELS["arch"], len(p)
     if p[0] == "facet" and len(p) == 2:
         return LEVELS["facet"], 0
-    raise ResolveError(f"scope {scope!r}: must be device/<family>[/<device>], quant/<fmt>, arch/<...> or facet/<tag>")
+    if p[0] == "model" and len(p) == 2:
+        return LEVELS["model_node"], 0
+    raise ResolveError(f"scope {scope!r}: must be device/<family>[/<device>], quant/<fmt>, arch/<...>, facet/<tag> or model/<slug>")
 
 
 def load_scopes(kb_root=None):
@@ -238,6 +278,8 @@ def validate_node(scope, node, ch):
     for k in node:
         if k not in NODE_KEYS:
             errs.append(f"{scope}: unknown key {k!r}")
+    if scope.startswith("model/") and not ({"slug", "model_id"} & set(node.get("match") or {})):
+        errs.append(f"{scope}: a model node must match an identity (match \"slug\" or \"model_id\")")
     try:
         match(node.get("match") or {}, Env({}, [], ["rdna3"], lambda d: d), f"{scope} match")
     except ResolveError as e:
@@ -302,14 +344,22 @@ def _check_devices(c, when_devices, build_families, family_of, where):
                            f"set it for the whole build or make it a twin (per_target)")
 
 
-def resolve(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=None):
+def resolve(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=None, slug=None):
     """The resolution of CFG (see the module docstring); resolve_full() adds the value of every registered choice."""
-    r = resolve_full(cfg, devices, kb_root, draft, kit)
+    r = resolve_full(cfg, devices, kb_root, draft, kit, slug)
     r.pop("values")
     return r
 
 
-def resolve_full(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=None):
+def device_execution(cfg, device, kb_root=None, draft=AUTO, slug=None):
+    """{key: {"value", "from", "evidence"}} of the execution choices (exec.*) that a scope sets for CFG on ONE device (a slug or a family);
+    empty when none does."""
+    r = resolve_full(cfg, (device,), kb_root, draft, None, slug, execution=True)
+    ch = choices_module(kb_root)
+    return {k: v for k, v in r["choices"].items() if _is_exec(ch.CHOICES[k])}
+
+
+def resolve_full(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=None, slug=None, execution=False):
     kb_root = os.path.abspath(kb_root or HERE)
     ch = choices_module(kb_root)
     idx = device_index(kb_root)
@@ -321,7 +371,7 @@ def resolve_full(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=
     facets = set(derive_facets(cfg, kind))
     for _ in range(4):   # facet nodes switch on by their own match; arch nodes imply facets (gemma3: sliding-window)
         before = len(facets)
-        e = Env(cfg, facets, devices, family_of)
+        e = Env(cfg, facets, devices, family_of, slug)
         for scope, node in nodes:
             lvl = level_of(scope)[0]
             if lvl == LEVELS["arch"] and node.get("facets") and match(node.get("match") or {}, e):
@@ -331,7 +381,7 @@ def resolve_full(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=
         if len(facets) == before:
             break
     facets = sorted(facets)
-    env = Env(cfg, facets, devices, family_of)
+    env = Env(cfg, facets, devices, family_of, slug)
     matched, contrib = [], {}
     for scope, node in nodes:
         errs = validate_node(scope, node, ch)
@@ -352,16 +402,21 @@ def resolve_full(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=
                 continue
             for k, v in ent["set"].items():
                 c = ch.CHOICES[k]
+                if _is_exec(c) and not execution:
+                    continue   # a serving setting of a device's preset: device_execution()
                 where = f"{scope} choices[{i}]"
                 node_devs = [parts[-1]] if lvl in (LEVELS["device_family"], LEVELS["device"]) else []
                 rule_devs = list(when.get("devices", [])) or node_devs or list(m.get("devices", []))
-                _check_devices(c, rule_devs, env.families, family_of, where)
+                if not _is_exec(c):
+                    _check_devices(c, rule_devs, env.families, family_of, where)
                 fams = {family_of(d) for d in rule_devs} if (rule_devs and c.per_target) else None
                 contrib.setdefault(k, []).append(((lvl, depth), scope, c.check(v), ent.get("evidence", ""), fams))
     for k, v in (cfg.get("choices") or {}).items():
         c = ch.CHOICES.get(k)
         if c is None:
             raise ResolveError(f"model choices: unknown choice {k!r}")
+        if _is_exec(c) and not execution:
+            continue
         try:
             contrib.setdefault(k, []).append(((LEVELS["model"], 0), "model", c.check(v), "llm_config.json choices", None))
         except ValueError as e:
@@ -400,7 +455,7 @@ def resolve_full(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=
         else:
             v = chosen[k]["value"] if k in chosen else dflt
         values[k] = v
-        if k in chosen and (c.kits is None or kit in c.kits):
+        if k in chosen and not _is_exec(c) and (c.kits is None or kit in c.kits):
             ev, dv = c.to_env(v), c.to_env(dflt)
             if ev != dv:
                 exports[c.env] = ev
@@ -411,9 +466,9 @@ def resolve_full(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=
             "devices": sorted(env.families), "facets": facets, "env": dict(sorted(exports.items())), "values": values}
 
 
-def effective(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=None):
+def effective(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=None, slug=None):
     """resolve_full() with every registered choice's value (defaults included) under "all"."""
-    r = resolve_full(cfg, devices, kb_root, draft, kit)
+    r = resolve_full(cfg, devices, kb_root, draft, kit, slug)
     ch = choices_module(kb_root)
     r["all"] = {k: {"value": r["values"][k], "from": r["choices"][k]["from"] if k in r["choices"] else "default",
                     "env": ch.CHOICES[k].env} for k in ch.CHOICES}
@@ -432,6 +487,8 @@ def main(argv=None):
     ap.add_argument("--device", action="append", help="device family or slug of the build (default: rdna3 and rdna4)")
     ap.add_argument("--kb-root", default=HERE)
     ap.add_argument("--kit", help="reference kit example the build uses (gemma4, lfm2moe, ...)")
+    ap.add_argument("--slug", help="the package slug (matched by model nodes: model/<slug>)")
+    ap.add_argument("--execution", action="store_true", help="print the execution choices (exec.*) of the one --device instead")
     ap.add_argument("--draft", default=None, help="draft kind (none for ordinary decoding); default: as built / auto")
     ap.add_argument("--all", action="store_true", help="every registered choice with its value")
     ap.add_argument("--lint", action="store_true", help="validate every scope.json (and resolve CONFIG if given)")
@@ -448,7 +505,13 @@ def main(argv=None):
     draft = AUTO if a.draft is None else (None if a.draft == "none" else a.draft)
     fn = effective if a.all else resolve
     try:
-        r = fn(cfg, tuple(a.device or ("rdna3", "rdna4")), a.kb_root, draft, a.kit)
+        if a.execution:
+            if not a.device or len(a.device) != 1:
+                ap.error("--execution needs exactly one --device")
+            json.dump(device_execution(cfg, a.device[0], a.kb_root, draft, a.slug), sys.stdout, indent=1)
+            print()
+            return 0
+        r = fn(cfg, tuple(a.device or ("rdna3", "rdna4")), a.kb_root, draft, a.kit, a.slug)
     except ResolveError as e:
         print(f"resolve: {e}", file=sys.stderr)
         return 2

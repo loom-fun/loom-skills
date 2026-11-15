@@ -22,6 +22,10 @@ Checks (exit 1 and one precise message per violation):
               A `device/...` scope also limits the GPU families the changed blocks may target.
   3 protected a protected core file changed without kind architecture (a horizontal PR may change a `families_ok` file that a
               declared family lists)
+  2b exec     the serving settings of a device's preset (exec.* choices: prefill chunk, context/pool caps ...) resolved for every fleet
+              model and device at base and head: each (model, device) that changes must be matched by the declared selector scopes and
+              lie inside the declared device scopes (a model node `model/<slug>` + `device/rdna4` is the targeted scope of a per-device
+              setting of one package); the changes are listed. No program changes, so the program leak check cannot see them.
   4 registry  choices.py: a removed key or a changed legacy / env / type / derive, or any change that is not the addition of a new
               CHOICE / NOT / helper, needs architecture
   5 kb lint   `kb.py lint` (structure) on the head tree
@@ -177,14 +181,14 @@ class Matcher:
         kind = self.r.draft_kind(cfg, self.r.AUTO) if draft is None else (None if draft == "none" else draft)
         return self.r.derive_facets(cfg, kind)
 
-    def node_matches(self, scope, cfg, facets, devices=("rdna3", "rdna4")):
+    def node_matches(self, scope, cfg, facets, devices=("rdna3", "rdna4"), slug=None):
         """True / False; raises ValueError when the node is unknown or invalid."""
         node = self.nodes.get(scope, "missing")
         if node == "missing":
             raise ValueError(f"scope {scope!r}: no scope.json under skills/loom-kb/{scope}")
         if node is None:
             raise ValueError(f"scope {scope!r}: scope.json is not JSON")
-        env = self.r.Env(cfg, facets, list(devices), self.family_of)
+        env = self.r.Env(cfg, facets, list(devices), self.family_of, slug)
         try:
             return bool(self.r.match(node.get("match") or {}, env, scope))
         except self.r.ResolveError as e:
@@ -275,6 +279,49 @@ def load_cfg(tree, slug):
         return None
     with open(p, encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def exec_changes(repo, mb, tree, matcher):
+    """[{model, device, before, after}]: the exec.* settings (choices.py `execution` choices) each fleet model resolves to on each registry
+    device, base (the merge-base's skills/loom-kb) against the tree's. Empty when the base has no execution choices."""
+    fleet = os.path.join(tree, "fleet")
+    if not os.path.isdir(fleet) or not hasattr(matcher.r, "device_execution"):
+        return []
+    work = tempfile.mkdtemp(prefix="scope_lint_base_")
+    try:
+        tar = subprocess.run(["git", "-C", repo, "archive", mb, "skills/loom-kb"], capture_output=True)
+        if tar.returncode:
+            return []
+        subprocess.run(["tar", "-x", "-C", work], input=tar.stdout, check=True)
+        bkb = os.path.join(work, "skills", "loom-kb")
+        if not os.path.isfile(os.path.join(bkb, "resolve.py")):
+            return []
+        sys.path.insert(0, bkb)
+        try:
+            br = load_module(os.path.join(bkb, "resolve.py"), "loom_kb_resolve_base_for_lint")
+        finally:
+            sys.path.remove(bkb)
+        if not hasattr(br, "device_execution"):
+            br = None   # a base without execution choices: everything it resolves is empty
+        devices = sorted({d for d, f in matcher.devdirs.items() if d != f})   # device slugs (device/<family>/<device>)
+        out = []
+        for slug in sorted(os.listdir(fleet)):
+            cfg = load_cfg(tree, slug)
+            if cfg is None:
+                continue
+            for dev in devices:
+                try:
+                    after = {k: v["value"] for k, v in matcher.r.device_execution(cfg, dev, matcher.kb, slug=slug).items()}
+                    before = {k: v["value"] for k, v in br.device_execution(cfg, dev, bkb, slug=slug).items()} if br else {}
+                except Exception as e:   # noqa: BLE001  (an invalid scope.json is reported by the kb lint and the resolver tests)
+                    out.append({"model": slug, "device": dev, "before": {}, "after": {}, "error": f"{type(e).__name__}: {e}"})
+                    continue
+                if before != after:
+                    out.append({"model": slug, "device": dev, "before": before, "after": after})
+        return out
+    finally:
+        import shutil
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def lint(repo, base, head, block, errs_in, impact=None, kb_lint=True, own=None, tree=None):
@@ -389,7 +436,7 @@ def lint(repo, base, head, block, errs_in, impact=None, kb_lint=True, own=None, 
                         ok = False
                         for node, extra in selectors:
                             try:
-                                hit = matcher.node_matches(node, cfg, facets) and set(extra) <= set(facets)
+                                hit = matcher.node_matches(node, cfg, facets, slug=slug) and set(extra) <= set(facets)
                             except ValueError as e:
                                 res.err("scope-block", str(e))
                                 hit = False
@@ -417,6 +464,39 @@ def lint(repo, base, head, block, errs_in, impact=None, kb_lint=True, own=None, 
         elif kind == "architecture" and models:
             res.notes.append(f"architecture PR: {len(models)} model(s) change")
     res.info["leak"] = leak
+    # 2b: serving settings of the devices' presets (exec.*): they change no program, so the fleet diff cannot show them
+    if any(p.startswith("skills/loom-kb/") and (p.endswith("scope.json") or p == choices_path or p.endswith("resolve.py")) for p in paths):
+        ex = exec_changes(repo, mb, tree, matcher)
+        res.info["exec_changed"] = ex
+        if ex:
+            ent = [parse_scope(s) for s in block["scopes"]]
+            dev_names = {n.split("/")[-1] for n, _ in ent if n.startswith("device/")}
+            dev_fams = {matcher.family_of(d) for d in dev_names}
+            selectors = [(n, f) for n, f in ent if not n.startswith("device/")]
+            scoped = kind in ("targeted", "horizontal") or (kind == "architecture" and block["scopes"])
+            for x in ex:
+                if "error" in x:
+                    res.err("exec", f"{x['model']} on {x['device']}: {x['error']}")
+                    continue
+                why = []
+                if scoped:
+                    cfg = load_cfg(tree, x["model"])
+                    if selectors:
+                        facets = matcher.facets(cfg, None)
+                        def hit(n, f):
+                            try:
+                                return matcher.node_matches(n, cfg, facets, slug=x["model"]) and set(f) <= set(facets)
+                            except ValueError:   # an unknown node: reported by the scope-block rule
+                                return False
+                        if not any(hit(n, f) for n, f in selectors):
+                            why.append("not matched by " + ", ".join(block["scopes"]))
+                    if dev_names and not ({x["device"], matcher.family_of(x["device"])} & (dev_names | dev_fams)):
+                        why.append(f"the declared device scope is {'/'.join(sorted(dev_names))}")
+                    if why and not (block["leak"] and kind in ("horizontal", "architecture")):
+                        res.err("exec", f"{x['model']} on {x['device']}: serving settings change ({x['before']} -> {x['after']}) but " + "; ".join(why))
+                elif kind in ("docs", "card", "tooling"):
+                    res.err("exec", f"kind {kind} must not change serving settings ({x['model']} on {x['device']})")
+            res.notes.append(f"serving settings (exec.*) change for {len({x['model'] for x in ex})} model(s) on {len({x['device'] for x in ex})} device(s)")
     # 5: kb lint
     if kb_lint:
         kb = os.path.join(tree, "skills", "loom-kb", "kb.py")
@@ -439,6 +519,9 @@ def markdown(res):
     if i.get("kind"):
         L.append(f"kind `{i['kind']}`; scopes {', '.join(f'`{s}`' for s in i.get('scopes', [])) or '-'}; "
                  f"kernels {', '.join(f'`{s}`' for s in i.get('kernels', [])) or '-'}; {len(i.get('files', []))} file(s) changed.")
+    for x in (i.get("exec_changed") or [])[:MAX_ROWS]:
+        if "error" not in x:
+            L.append(f"- serving settings: `{x['model']}` on `{x['device']}`: {x['before'] or '-'} -> {x['after'] or '-'}")
     lk = i.get("leak") or {}
     if "impact" in i:
         L.append(f"Program impact: {lk.get('touched', 0)} model(s) touched{' (no program input changed)' if i['impact'].get('note') else ''}; leaked outside the declared scope: {len(lk.get('leaked', []))} "

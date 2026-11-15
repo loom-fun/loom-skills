@@ -1,0 +1,141 @@
+{
+ "InternScience-Sage-A1.5-loom": {
+  "ctx_cap": 138240,
+  "r9700_execution": {
+   "context_capacity": 138240,
+   "pool_capacity": 138240,
+   "prefill_capacity": 2048
+  }
+ },
+ "bartowski-LFM3-1.7B-loom": {
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
+ },
+ "bartowski-MiniCPM-V-4.7-35B-A3B-loom": {
+  "ctx_cap": 262144,
+  "r9700_execution": {
+   "context_capacity": 262144,
+   "pool_capacity": 262144,
+   "prefill_capacity": 2048
+  }
+ },
+ "bartowski-Ornith-1.5-35B-A3B-loom": {
+  "ctx_cap": 55296,
+  "r9700_execution": {
+   "context_capacity": 55296,
+   "pool_capacity": 55296,
+   "prefill_capacity": 2048
+  }
+ },
+ "bartowski-Qwen2.5-0.5B-Instruct-loom": {
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
+ },
+ "bartowski-Qwen2.5-1.5B-Instruct-loom": {
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
+ },
+ "bartowski-Qwen2.5-32B-Instruct-loom": {
+  "ctx_cap": 24576
+ },
+ "bartowski-Qwen3.8-27B-loom": {
+  "r9700_execution": {
+   "prefill_capacity": 1024
+  }
+ },
+ "ggml-org-Flint-loom": {
+  "ctx_cap": 36864
+ },
+ "ggml-org-LFM3-Omni-2B-loom": {
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
+ },
+ "ggml-org-Muse-Glimmer-30B-loom": {
+  "ctx_cap": 32768
+ },
+ "ggml-org-Qwen3-1.7B-loom": {
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
+ },
+ "ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom": {
+  "ctx_cap": 94208,
+  "r9700_execution": {
+   "context_capacity": 94208,
+   "pool_capacity": 94208,
+   "prefill_capacity": 2048
+  }
+ },
+ "ggml-org-Qwen3.6-27B-loom": {
+  "r9700_execution": {
+   "prefill_capacity": 1024
+  }
+ },
+ "ggml-org-Qwen3.6-35B-A3B-loom": {
+  "ctx_cap": 84992,
+  "r9700_execution": {
+   "context_capacity": 84992,
+   "pool_capacity": 84992,
+   "prefill_capacity": 2048
+  }
+ },
+ "ggml-org-gemma-3-1b-it-loom": {
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
+ },
+ "lmstudio-community-Ornith-1.0-35B-loom": {
+  "ctx_cap": 262144,
+  "r9700_execution": {
+   "context_capacity": 262144,
+   "pool_capacity": 262144,
+   "prefill_capacity": 2048
+  }
+ },
+ "lmstudio-community-gemma-4-26B-A4B-it-loom": {
+  "ctx_cap": 26624,
+  "r9700_execution": {
+   "context_capacity": 26624,
+   "pool_capacity": 26624
+  }
+ },
+ "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom": {
+  "r9700_execution": {
+   "pool_capacity": 131072
+  }
+ },
+ "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom": {
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
+ },
+ "unsloth-Qwen3-0.6B-loom": {
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
+ },
+ "unsloth-Qwen3-30B-A3B-Instruct-2507-loom": {
+  "ctx_cap": 99328,
+  "r9700_execution": {
+   "context_capacity": 99328,
+   "pool_capacity": 99328
+  }
+ },
+ "unsloth-Qwen3.5-35B-A3B-loom": {
+  "ctx_cap": 56320,
+  "r9700_execution": {
+   "context_capacity": 56320,
+   "pool_capacity": 56320,
+   "prefill_capacity": 2048
+  }
+ },
+ "unsloth-gemma-4-E2B-it-loom": {
+  "r9700_execution": {
+   "prefill_capacity": 4096
+  }
+ }
+}

@@ -1,6 +1,6 @@
 ---
 name: loom-kb
-description: Router for the Loom knowledge base - which facts to read for a given model, GPU and task. Run `kb.py route` with a model config, GGUF or arch name plus device and topic, then read exactly the files it prints (device, quant, arch family, facets, topic). Use before porting, optimizing, benchmarking or rooflining any model, when asking "what is special about gemma4 / qwen35moe / flint", "which tricks apply to this model on the R9700", or when adding a model family, facet, device or scope rule to the knowledge base.
+description: Router for the Loom knowledge base - which facts to read for a given model, GPU and task. Run `kb.py route` with a model slug or config, GGUF or arch name plus device and topic, then read exactly the files it prints (device, quant, arch family, facets, topic). Use before porting, optimizing, benchmarking or rooflining any model, when asking "what is special about gemma4 / qwen35moe / flint", "which tricks apply to this model on the R9700", or when adding a model family, facet, device or scope rule to the knowledge base.
 ---
 
 # Loom knowledge base (router)
@@ -29,7 +29,7 @@ order, and nothing else from the knowledge base (an unknown arch, device or topi
 
 | Printed first to last | Holds |
 |---|---|
-| `device/...`, `quant/<fmt>/`, `arch/llm/...` (root, topology, family), `facet/<tag>/` | the selector nodes the model and device match: GPU family and device, quant formats, the one family, properties that cross families (drafted, vision, hybrid-gdn, moe, sliding-window, kv-le2, wide-head) |
+| `device/...`, `quant/<fmt>/`, `arch/llm/...` (root, topology, family), `facet/<tag>/`, `model/<slug>/` | the selector nodes the model and device match: GPU family and device, quant formats, the one family, properties that cross families (drafted, vision, hybrid-gdn, moe, sliding-window, kv-le2, wide-head), and the one package (`model/<slug>`, only when it has its own facts or settings) |
 | `<node>/README.md` | what is true of the node for every task |
 | `<node>/<topic>.md` | that node's facts for one task; printed only when the topic is requested |
 | `topic/<topic>.md` | the task's knowledge that applies to every model |

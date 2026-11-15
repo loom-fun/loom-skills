@@ -63,9 +63,9 @@ def kit_dir(skills, example, work):
     return kit
 
 
-def build_args(m, cfg_extra=()):
+def build_args(m, cfg_extra=(), slug=None):
     b = m["build"]
-    args = ["--tokenizer", "tokenizer_min.json", "--model-id", m["model_id"], "--memory-gib", MEMORY_GIB]
+    args = (["--slug", slug] if slug else []) + ["--tokenizer", "tokenizer_min.json", "--model-id", m["model_id"], "--memory-gib", MEMORY_GIB]
     for flag, key in (("--context", "context"), ("--pool", "pool"), ("--prefill", "prefill"), ("--rows", "rows"),
                       ("--max-tokens", "max_tokens"), ("--draft-depth", "draft_depth")):
         if b.get(key) is not None:
@@ -112,7 +112,7 @@ def build_one(slug, m, skills, out, rdna4, keep, real=None):
         kb = os.path.join(skills, "..", "loom-kb")   # the choices build.py resolves (a ref without the registry has none)
         if os.path.isdir(kb) and "LOOM_KB_ROOT" not in env:
             env["LOOM_KB_ROOT"] = os.path.abspath(kb)
-        rc, o = sh([sys.executable, os.path.join(kit, "build.py"), "cfg.json", "pkg"] + build_args(m), work, env)
+        rc, o = sh([sys.executable, os.path.join(kit, "build.py"), "cfg.json", "pkg"] + build_args(m, slug=slug if '"--slug"' in open(os.path.join(kit, "build.py")).read() else None), work, env)
         log.append(o)
         if rc:
             raise RuntimeError("build.py: " + o.strip().splitlines()[-1][-300:])

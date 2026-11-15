@@ -1,0 +1,25 @@
+{
+ "scope": "model/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+ "match": {
+  "slug": [
+   "bartowski-MiniCPM-V-4.7-35B-A3B-loom"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "when": {
+    "devices": [
+     "radeon-r9700"
+    ]
+   },
+   "set": {
+    "exec.prefill_capacity": 2048,
+    "exec.context_capacity": 262144,
+    "exec.pool_capacity": 262144,
+    "exec.context_cap": 262144
+   },
+   "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged"
+  }
+ ]
+}

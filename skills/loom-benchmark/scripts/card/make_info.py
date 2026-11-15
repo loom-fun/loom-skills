@@ -104,7 +104,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       HF, RETIRED_GATES, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
-                      SERVE_HEADROOM, registry)
+                      SERVE_HEADROOM, registry, fit_rows)
 
 
 # ---------------------------------------------------------------- sources
@@ -220,7 +220,7 @@ def fit_settings(verdict_path, repo, gpu="radeon-r9700"):   # gpu: any device wi
     repo's name. required_bytes is set (and nothing else) when the package does not fit the GPU's memory; memory_bytes
     and served_context only when the KV cache of the native context does not fit (the GPU's whole memory is the pool
     and bounds the context); all None when the native context fits."""
-    rows = load_json(verdict_path)
+    rows = list(fit_rows(verdict_path, gpu).values())   # the settings of the scope rules are part of each row
     name = repo.split("/")[-1]
     row = next((r for r in rows if r["slug"] == name), None)
     if row is None:
@@ -240,10 +240,11 @@ def fit_settings(verdict_path, repo, gpu="radeon-r9700"):   # gpu: any device wi
 
 
 def write_gpu_preset(pkg_dir, model, verdict_path, repo, ctx, gpu="radeon-r9700"):
-    """Add the `<first>-r9700` preset to the package's model.json from the fit row's "r9700_execution" (idempotent: the same
+    """Add the `<first>-r9700` preset to the package's model.json from the scope rules' exec.* settings for the device (card_lib.fit_rows
+    puts them on the fit row as "r9700_execution"; model nodes: skills/loom-kb/model/<slug>) (idempotent: the same
     settings give the same file); returns the execution the preset sets, or None when the row has no block (model.json is
     then left as it is, whatever presets a build gave it). The default preset, programs, weights and lock are untouched."""
-    row = next((r for r in load_json(verdict_path) if r["slug"] == repo.split("/")[-1]), None)
+    row = fit_rows(verdict_path, gpu).get(repo.split("/")[-1])   # the fit's sizing + the serving settings the scope rules give (exec.*)
     ex = gpu_preset_execution(row, ctx, gpu) or {}
     if ctx and "context_capacity" not in ex:   # a served context below the native one (fit ctx_cap or memory): the preset serves it
         ex.update(context_capacity=ctx, pool_capacity=min(ctx, ex.get("pool_capacity") or ctx))

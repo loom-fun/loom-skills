@@ -2,7 +2,7 @@
 """Same-runner A/B jobs for the devlab-perf workflow, on any registered device: write .github/devlab/perf.json for some models.
 
 usage: ab_jobs.py --device DEVICE (any registry device with a runner: strix-halo, radeon-r9700, ...) [--old-org ORG] [--new-org ORG] [--old-rev REV] [--new-rev REV] [--refs MAP.json]
-                  [--baselines] [--gates dev] [--reps N] [--suffix -r2] SLUG... > .github/devlab/perf.json
+                  [--base-ref GITREF --head-ref GITREF [--build]] [--baselines] [--gates dev] [--reps N] [--suffix -r2] SLUG... > .github/devlab/perf.json
 
 One job per model on ONE runner of the device: the old package (variant "fun") and the new package (variant "staging") served one
 after the other with the same prompts and settings, in an ABBA order so a runner's drift cancels:
@@ -17,6 +17,14 @@ Variant names stay fun (old) and staging (new), so strix_ab_compare.py reads eve
 Which package is "old" / "new": ORG/SLUG at main, or pinned to a card revision ORG/SLUG@REV (devlab_perf.sh fetches that commit and
 writes card_revision.txt / card_revision_fun.txt). --old-rev / --new-rev pin every slug; --refs MAP.json pins per slug:
   {"SLUG": {"old": "org/repo@rev", "new": "org/repo@rev"}}   (either key may be missing: the --old-org / --new-org default applies)
+--base-ref GITREF --head-ref GITREF: "old setting vs new setting" of a change to the repo. Each side's serving settings (the exec.* scope
+rules: model nodes, family and device nodes; the fit table's sizing) come from that git ref's own knowledge base and fit table, so a change
+that only moves a setting (a larger prefill chunk of one model on one device) is A/B'd as the two variants a real run would serve: the
+same card (--refs / --old-rev / --new-rev still pick it) with the base ref's execution on `fun` and the head ref's on `staging`, instead of
+both sides read from one table. --build also rebuilds each variant's programs from its ref (variant "build" + "ref": that commit's starter and
+its skills/loom-kb), for a change that moves programs as well. Without --build neither side needs the card to carry a device preset
+(require_preset_* is dropped: both variants carry their execution explicitly).
+
 An A/A run (a package against itself, e.g. old = staging@REV, new = staging at main) measures the runner's own noise.
 
 --device strix-halo: the Strix Halo runner (strix_ab_jobs.py is a wrapper with these defaults), the old card's --memory_bytes.
@@ -46,7 +54,10 @@ run and the job page; the new variant's files are perf_staging.jsonl / c4_stagin
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -86,10 +97,109 @@ def r9700_fields(slug, f, m, pool, gpu="radeon-r9700"):
     return got and got[:4]
 
 
+def snapshot(ref, slugs, dest):
+    """Export REF's skills/loom-kb, .github/devlab and the fleet configs of SLUGS into DEST (a git archive: no checkout, nothing of the
+    working tree); returns DEST. A slug the ref does not have has no config there (its serving settings are then the table's alone)."""
+    r = subprocess.run(["git", "-C", ROOT, "rev-parse", "--verify", "-q", ref + "^{commit}"], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit(f"{ref}: not a git revision of {ROOT}")
+    paths = ["skills/loom-kb", ".github/devlab"]
+    have = set(subprocess.run(["git", "-C", ROOT, "ls-tree", "--name-only", "-r", ref, "--", "fleet"], capture_output=True, text=True).stdout.split())
+    paths += [f"fleet/{s}/llm_config.json" for s in slugs if f"fleet/{s}/llm_config.json" in have]
+    tar = subprocess.run(["git", "-C", ROOT, "archive", ref, "--", *paths], capture_output=True)
+    if tar.returncode:
+        sys.exit(f"git archive {ref}: {tar.stderr.decode()[-300:]}")
+    subprocess.run(["tar", "-x", "-C", dest], input=tar.stdout, check=True)
+    return dest
+
+
+def settings_from_root(device, slug, root, models=None, fit_path=None):
+    """(job fields, new-variant execution, old-variant fields, served context) of SLUG on DEVICE from the checkout ROOT: its fit table's sizing
+    and its scope rules' serving settings (r9700_fields of that root's row), or None when the weights do not fit."""
+    models = models or {m["repo"].split("/")[-1]: m for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
+    pool = card_lib.GPUS[device]["memory_bytes"]
+    fit = card_lib.fit_rows(fit_path or os.path.join(root, card_lib.registry.fit_table(device)), device, root)
+    return r9700_fields(slug, fit[slug], models[slug], pool, device)
+
+
+def build_refs(a, dev, models, refs, steps_of):
+    """The jobs of --base-ref / --head-ref (see the module docstring): per slug, the two variants' serving settings from each ref."""
+    pool = card_lib.GPUS[a.device]["memory_bytes"]
+    key = card_lib.registry.device(a.device)["runner"]["key"]
+    NAME = card_lib.GPUS[a.device]["runner"]
+    jobs, skipped = [], []
+    work = tempfile.mkdtemp(prefix="ab_refs_", dir=os.environ.get("LOOM_WORK_DIR") or None)
+    try:
+        roots = {}
+        for side, gitref in (("base", a.base_ref), ("head", a.head_ref)):
+            os.makedirs(os.path.join(work, side))
+            roots[side] = snapshot(gitref, a.slugs, os.path.join(work, side))
+        for slug in a.slugs:
+            m = models[slug]
+            old = (refs.get(slug) or {}).get("old") or ref(a.old_org, slug, a.old_rev)
+            new = (refs.get(slug) or {}).get("new") or ref(a.new_org, slug, a.new_rev)
+            dec = card_lib.published_decode(slug, a.old_org)
+            n, rr = card_lib.sampling_plan(dec, a.fast_tps)
+            n = a.reps or n
+            nc = 4 if rr > 1 else 2
+            name = (dev["prefix"] + slug.lower().replace(".", "-"))[:40 - len(a.suffix)] + a.suffix
+            steps = steps_of(n, nc, a.llama_reps or (n if pool is not None else 2))
+
+            def variant(vname, card, execution, ref_, extra=None, o=None):
+                return {"name": vname, **({} if a.build else {"card": card}), **({"build": {}, "ref": ref_} if a.build else {}),
+                        **{k: v for k, v in (o or {}).items() if k != "execution"}, **({"execution": {**execution, **(extra or {})}} if (execution or extra) else {})}
+            if pool is None:   # Strix Halo: the package's own memory; only the scope rules' serving settings differ per ref
+                eb = {k: v for k, v in card_lib.scope_execution(slug, a.device, roots["base"]).items() if k in card_lib.EXEC_KEYS}
+                eh = {k: v for k, v in card_lib.scope_execution(slug, a.device, roots["head"]).items() if k in card_lib.EXEC_KEYS}
+                variants = [variant("fun", old, eb, a.base_ref), variant("staging", new, eh, a.head_ref),
+                            variant("funnd", old, eb, a.base_ref, {"draft_depth": 0}), variant("stagingnd", new, eh, a.head_ref, {"draft_depth": 0})]
+                jobs.append({"name": name, "runner": dev["runner"], **({"repeat_rows": rr} if rr > 1 else {}), "card": new, "memory_bytes": m["memory_bytes"],
+                             "kit": m["kit"], "llamacpp": m.get("llamacpp") or dev["llamacpp"], "llamacpp_vulkan": dev["vulkan"],
+                             "variants": variants, "steps": steps})
+                continue
+            sb = settings_from_root(a.device, slug, roots["base"], models, a.fit)
+            sh = settings_from_root(a.device, slug, roots["head"], models, a.fit)
+            if not sb or not sh:
+                skipped.append(slug)
+                continue
+            jf, _, o_h, _ = sh
+            o_b = sb[2]
+            variants = [variant("fun", old, o_b["execution"], a.base_ref, None, o_b), variant("staging", new, o_h["execution"], a.head_ref, None, o_h),
+                        variant("funnd", old, o_b["execution"], a.base_ref, {"draft_depth": 0}, o_b),
+                        variant("stagingnd", new, o_h["execution"], a.head_ref, {"draft_depth": 0}, o_h)]
+            jobs.append({**{k: v for k, v in jf.items() if k == "llama_kv_rocm"}, "name": name, "runner": dev["runner"],
+                         **({"repeat_rows": rr} if rr > 1 else {}), "card": new,
+                         **{k: v for k, v in jf.items() if k != "llama_kv_rocm" and k != f"require_preset_{key}"},
+                         "kit": m["kit"], "llamacpp": dev["llamacpp"], "llamacpp_vulkan": dev["vulkan"], "variants": variants, "steps": steps})
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return jobs, skipped, NAME
+
+
 def build(a):
     dev = DEVICES[a.device]
     refs = json.load(open(a.refs)) if a.refs else {}
     models = {m["repo"].split("/")[-1]: m for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
+
+    def steps_of(n, nc, lr):
+        return ([f"perf:{v}:1" for v in abba(n)] + [f"perf:{v}:1:long" for v in abba(n, start=1)]
+                + [f"c4:{v}nd" for v in abba(nc)] + ["textmatch:fun", "textmatch:staging",
+                 "func:staging", "ktest:staging", *([f"gates:staging:{a.gates}"] if a.gates else []),
+                 *([] if not a.baselines else [f"llama@rocm.np1:{lr}", f"llama@rocm.np1:{lr}:long", "llamac4@rocm.nodraft",
+                                              f"llama@vulkan.np1:{lr}", f"llama@vulkan.np1:{lr}:long", "llamac4@vulkan.perslot.nodraft"])])
+    if a.base_ref or a.head_ref:
+        if not (a.base_ref and a.head_ref):
+            sys.exit("--base-ref and --head-ref go together")
+        jobs, skipped, NAME = build_refs(a, dev, models, refs, steps_of)
+        if not jobs:
+            sys.exit("no job: " + (", ".join(skipped) + f" do not fit the {NAME}" if skipped else "no model given"))
+        pool = card_lib.GPUS[a.device]["memory_bytes"]
+        note = f"{NAME} A/B of {a.base_ref} (fun) against {a.head_ref} (staging) (ab_jobs.py --base-ref/--head-ref): each variant carries its ref's serving settings"
+        if pool is None:
+            return {"_comment": note, "runner": dev["runner"], "memory_bytes": jobs[0]["memory_bytes"], "llama_spec": "matched", "jobs": jobs,
+                    "card": jobs[0]["card"], "kit": None, "llamacpp": jobs[0]["llamacpp"]}
+        return {"_comment": note + f". Does not fit: {', '.join(skipped) or 'none'}", "runner": dev["runner"], "memory_bytes": pool, "llama_spec": "matched",
+                "jobs": jobs, "card": jobs[0]["card"], "kit": None, "llamacpp": dev["llamacpp"], "llamacpp_vulkan": dev["vulkan"]}
     pool = card_lib.GPUS[a.device]["memory_bytes"]
     r9700 = pool is not None   # a device with its own memory pool (the R9700's path: fit table, device preset); Strix Halo takes the package's
     NAME = card_lib.GPUS[a.device]["runner"]
@@ -97,7 +207,7 @@ def build(a):
         fit_path = a.fit or os.path.join(ROOT, card_lib.registry.fit_table(a.device))
         if not os.path.exists(fit_path):
             sys.exit(f"{fit_path}: no fit table for {a.device} (fit.py --device {a.device} writes it)")
-        fit = {r["slug"]: r for r in json.load(open(fit_path))}
+        fit = card_lib.fit_rows(fit_path, a.device)   # sizing + verdict from the table, the serving settings from the scope rules (exec.*)
     jobs, skipped = [], []
     for slug in a.slugs:
         m = models[slug]
@@ -109,12 +219,7 @@ def build(a):
         n = a.reps or n
         nc = 4 if rr > 1 else 2
         name = (dev["prefix"] + slug.lower().replace(".", "-"))[:40 - len(a.suffix)] + a.suffix
-        lr = a.llama_reps or (n if r9700 else 2)
-        steps = ([f"perf:{v}:1" for v in abba(n)] + [f"perf:{v}:1:long" for v in abba(n, start=1)]
-                 + [f"c4:{v}nd" for v in abba(nc)] + ["textmatch:fun", "textmatch:staging",
-                  "func:staging", "ktest:staging", *([f"gates:staging:{a.gates}"] if a.gates else []),
-                  *([] if not a.baselines else [f"llama@rocm.np1:{lr}", f"llama@rocm.np1:{lr}:long", "llamac4@rocm.nodraft",
-                                               f"llama@vulkan.np1:{lr}", f"llama@vulkan.np1:{lr}:long", "llamac4@vulkan.perslot.nodraft"])])
+        steps = steps_of(n, nc, a.llama_reps or (n if r9700 else 2))
         if not r9700:
             jobs.append({
                 "name": name, "runner": dev["runner"], **({"repeat_rows": rr} if rr > 1 else {}), "card": new, "memory_bytes": m["memory_bytes"],
@@ -171,6 +276,9 @@ def parser(device=None):
     ap.add_argument("--old-rev", help="pin the old card of every slug to this revision (ORG/SLUG@REV)")
     ap.add_argument("--new-rev", help="pin the new card of every slug to this revision")
     ap.add_argument("--refs", help='JSON {"SLUG": {"old": "org/repo@rev", "new": "org/repo@rev"}}: per-slug card references (win over the org/rev options)')
+    ap.add_argument("--base-ref", help="git revision of the old setting: its skills/loom-kb scope rules and fit table give the `fun` variants' serving settings (with --head-ref)")
+    ap.add_argument("--head-ref", help="git revision of the new setting (the `staging` variants'); e.g. HEAD of a branch whose rules moved a setting")
+    ap.add_argument("--build", action="store_true", help="with --base-ref/--head-ref: rebuild each variant's programs from its ref (variant build + ref) instead of serving the card")
     ap.add_argument("--fit", default=None, help="a device with a memory pool (radeon-r9700): its fit table (default: device.json fit_table)")
     ap.add_argument("--baselines", action="store_true", help="also run the llama.cpp ROCm + Vulkan rows (off: the A/B compares Loom with Loom; no llama.cpp re-measure)")
     ap.add_argument("--llama-reps", type=int, default=None, help="llama.cpp runs per 1-stream row (default: 2 on Strix Halo; on the R9700 the Loom session count, as r9700_jobs.py)")

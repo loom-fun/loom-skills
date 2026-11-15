@@ -14,6 +14,9 @@
 - A selector node has `scope.json`: `{"scope": <its path>, "match": {...}, "owner": "...", "facets": [...], "choices": []}`.
   `match` keys: `arch` (cfg arch / GGUF architecture names), `has` / `lacks` (cfg keys), `kv_heads`, `head_dim`,
   `sliding_window`, `layers` as `[lo, hi]`, `recurrent_kv`. Each arch value belongs to exactly one family node.
+- A package has its own node when it needs facts or settings no family or facet can express: `model/<slug>/{README.md,scope.json}`, `match`
+  `{"slug": [...]}` or `{"model_id": [...]}`; shape keys (`hidden`, `ffn`, `vocab`, `params_b`, ...) select a subset of a family instead
+  (loom-fleet reference `targeted-fix.md`, section "One model, one device").
 - `choices` is empty unless the node sets model-affecting choices (see `choices.py`). A new choice is opt-in by
   scope: its legacy value is today's behaviour and only the models the node matches change.
 - A rule for one GPU family: `"when": {"devices": ["rdna3"]}` on a choice entry. Only a key declared `per_target=True` in

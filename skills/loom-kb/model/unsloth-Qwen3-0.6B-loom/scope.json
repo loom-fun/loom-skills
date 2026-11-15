@@ -1,0 +1,22 @@
+{
+ "scope": "model/unsloth-Qwen3-0.6B-loom",
+ "match": {
+  "slug": [
+   "unsloth-Qwen3-0.6B-loom"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "when": {
+    "devices": [
+     "radeon-r9700"
+    ]
+   },
+   "set": {
+    "exec.prefill_capacity": 4096
+   },
+   "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged"
+  }
+ ]
+}

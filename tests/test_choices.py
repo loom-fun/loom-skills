@@ -79,7 +79,7 @@ class Inventory(unittest.TestCase):
         self.assertTrue(all(v.strip() for v in choices.NOT_CHOICES.values()))
 
     def test_inventory_counts(self):
-        self.assertEqual(len(choices.CHOICES) + len(choices.NOT_CHOICES), len(self.scan))
+        self.assertEqual(len(choices.BY_ENV) + len(choices.NOT_CHOICES), len(self.scan))
         self.assertGreater(len(choices.CHOICES), 60)
 
     def test_choice_declarations(self):
@@ -96,6 +96,8 @@ class Inventory(unittest.TestCase):
         """The registry's legacy value is what the generators do when the variable is unset."""
         bad = []
         for c in choices.CHOICES.values():
+            if c.execution:
+                continue   # no generator reads it
             lits = [d for (p, ln, kind, d) in self.scan[c.env] if kind in ("get", "set") and not p.endswith(".patch")]
             strs = {d for d in lits if isinstance(d, str) and d not in ("<expr>", "<helper>")}
             nones = [d for d in lits if d is None]

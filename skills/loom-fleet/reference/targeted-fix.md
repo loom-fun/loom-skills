@@ -6,6 +6,7 @@ Use this for "make X faster / fix Y on the R9700 / handle quant Z for the gemma4
 
 ## Contents
 - The checklist
+- One model, one device: model nodes and serving settings
 - 1 Route and declare
 - 2 Make the change opt-in by scope
 - 3 Prove which models it touches (fleet diff + scope lint)
@@ -27,6 +28,28 @@ Use this for "make X faster / fix Y on the R9700 / handle quant Z for the gemma4
 - [ ] 9. promote_check.py before any republish; improvements wait for a second confirming run
 - [ ] 10. PR with the loom-scope block, the impact table, the plan and the verdicts; publish to the staging org only
 ```
+
+## One model, one device: model nodes and serving settings
+
+The narrowest selector is one package: `skills/loom-kb/model/<slug>/{README.md,scope.json}` with `"match": {"slug": ["<slug>"]}` (or
+`model_id`, the checkpoint id). It wins over its family and facets and loses only to a package's own `llm_config.json["choices"]`
+(precedence in `resolve.py`). Its rules read like any node's. The slug reaches the resolver from `build.py --slug`, `make_info.py`, the fleet
+directory name or `kb.py route --model <slug>` (which also prints the node's README and the settings it gives each device). To take part of
+a family instead, put a `when`/`match` on the family node with the shape keys `hidden`, `ffn`, `vocab`, `layers`, `heads`, `kv_heads`,
+`head_dim` (a number or `[lo, hi]`) or `params_b` (billions of parameters estimated from the shape: a size bucket, good to about 20 %).
+
+Serving settings of one device's preset are `exec.*` choices, not generator knobs: `exec.prefill_capacity`, `exec.context_capacity`,
+`exec.pool_capacity`, `exec.rows`, `exec.draft_depth`, `exec.context_cap` (a measured limit on the served context). They change no program,
+so a build never sees them; `make_info.py build --fit` writes them into the device's `<first>-r9700` preset and `fit.py` sizes the package at
+them. Set them where measured, device-scoped:
+
+```json
+{"scope": "model/<slug>", "match": {"slug": ["<slug>"]}, "owner": "kb",
+ "choices": [{"when": {"devices": ["radeon-r9700"]}, "set": {"exec.prefill_capacity": 4096}, "evidence": "<A/B run or PR>"}]}
+```
+The fit table (`.github/devlab/<device>_fit.json`) holds sizing data only; never put a setting in it. `kind: targeted`, `scopes: model/<slug>,
+device/rdna4` is the declaration; `scope_lint` (rule `exec`) resolves every fleet model's settings at base and head and fails a change that
+reaches a model or device outside it. A `fit.py` re-run after the change refreshes `w` / `need` for the new chunk.
 
 ## 1 Route and declare
 
@@ -55,6 +78,8 @@ or a few selector nodes (`device/...`, `quant/...`, `arch/...`, `facet/...`); if
   old program byte for byte.
 - Never change a `legacy` value, a default in a generator, or a protected core file (`fleet/ownership.json` lists them) from a
   targeted PR: that is an architecture PR. A default lives twice (the generator's and the registry's `legacy`); `tests/test_choices.py::test_legacy_equals_the_generators_default` fails when they diverge. If the fix needs one, stop and report instead of working around it.
+- A per-device serving setting (prefill chunk, context or pool cap, rows, draft depth) is an `exec.*` choice on a model or family node with
+  `when: {"devices": [...]}` (section "One model, one device"), not a fit-table edit and not `kind: tooling`.
 - A key that changes a kernel shared by both targets of a dual-target package cannot differ per device inside one package: scope it by
   family or facet and say so, or implement it as a twin kernel (`K` / `K_rdna4`).
 - Prefer a regression fix by scope over a global revert: restrict the offending path to where it was measured good, keep it where it won.
@@ -93,6 +118,10 @@ python3 .github/scripts/ab_jobs.py --device radeon-r9700 --baselines --gates dev
 python3 .github/scripts/strix_ab_compare.py JOBDIR --json cmp.json         # one compare per job
 python3 fleet/verdict.py cmp.json --model SLUG --rows <affected rows>      # per-row verdicts against skills/loom-kb/method/methodology.json
 ```
+To compare an old setting with a new one that only exists as a change in the repo (a rule that moves `exec.*`, a scope rule that moves a kernel),
+name the two git revisions: `--base-ref REF --head-ref REF`. Each variant's serving settings (and with `--build` its programs and knowledge base)
+come from that revision's own `skills/loom-kb` and fit table, on the same card; no hand-patched job.
+
 Rules: old and new variants run in ONE job on ONE runner, ABBA ordered; the runner labels are in [campaign.md](campaign.md); each
 row is judged against its own band (`methodology.json`: bands, T1 reject thresholds, sessions, bimodal models), never a geomean
 that lets a gain pay for a loss; a row within 0.02 of a threshold is extended to 6+6 sessions; a bimodal model is compared within a

@@ -1,0 +1,22 @@
+{
+ "scope": "model/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+ "match": {
+  "slug": [
+   "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "when": {
+    "devices": [
+     "radeon-r9700"
+    ]
+   },
+   "set": {
+    "exec.pool_capacity": 131072
+   },
+   "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged"
+  }
+ ]
+}

@@ -5,7 +5,7 @@ build.py calls apply() once per build, before gen_llm.py starts; make_kernel_tes
 variants the model launches. With no scope.json setting anything for the model nothing is exported and every program is as
 the generators' own defaults make it.
 
-  apply(cfg, draft_kind, environ=os.environ, kit=None, devices=None)
+  apply(cfg, draft_kind, environ=os.environ, kit=None, devices=None, slug=None)   (slug: the package slug, matched by model nodes)
       resolves, exports into ENVIRON every choice whose environment spelling differs from the model's default, and returns the
       block build.py records in the package's llm_config.json["resolved"]:
         {"scopes", "choices": {key: {"value", "from", "evidence"}}, "devices", "facets", "env": {NAME: value}, "dirty": [keys]}
@@ -56,7 +56,7 @@ def kit_example(kit=HERE):
         return None
 
 
-def apply(cfg, draft_kind, environ=None, kit=None, devices=None, kit_dir=HERE):
+def apply(cfg, draft_kind, environ=None, kit=None, devices=None, kit_dir=HERE, slug=None):
     environ = os.environ if environ is None else environ
     root = find_kb_root(kit_dir)
     if root is None:
@@ -67,7 +67,7 @@ def apply(cfg, draft_kind, environ=None, kit=None, devices=None, kit_dir=HERE):
     if devices is None:
         devices = ("rdna3",) if environ.get("LOOM_RDNA4", "1").strip().lower() in OFF else ("rdna3", "rdna4")
     try:
-        res = rs.resolve_full(cfg, devices, root, draft_kind, kit)
+        res = rs.resolve_full(cfg, devices, root, draft_kind, kit, slug)
     except rs.ResolveError as e:
         sys.exit(f"choices: {e}")
     dirty = []

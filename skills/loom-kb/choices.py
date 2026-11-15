@@ -30,6 +30,8 @@ CHOICE(key, type, legacy, env=..., kernels=[...], rows=[...], devices=None, per_
   kit_legacy  {kit example: default} where a reference kit's patched generator defaults differently
   dynamic     the generator computes its default (legacy None): the unset case is "whatever the generator picks"
   experiment  an A/B switch kept for experiments; a scope may set it but no model ships it by default
+  execution   a serving setting of one (model, device) preset in model.json (exec.*): no environment variable, no generator, no
+              program changes; resolve.device_execution() reads it per device, make_info.py build writes the device preset from it
 """
 import re
 
@@ -48,20 +50,22 @@ FALSE_WORDS = ("", "0", "false", "no", "off", "none")
 class Choice:
     def __init__(self, key, type, legacy, env, kernels=(), rows=(), devices=None, per_target=False, from_pr=None, doc="",
                  enc=("1", "0"), derive=None, kits=None, kit_legacy=None, dynamic=False, experiment=False,
-                 generator_defaults=None):
+                 generator_defaults=None, execution=False):
         assert type in TYPES, (key, type)
-        assert key not in CHOICES and env not in BY_ENV, f"duplicate choice {key} / {env}"
+        assert key not in CHOICES and (env is None or env not in BY_ENV), f"duplicate choice {key} / {env}"
+        assert (env is None) == bool(execution), f"{key}: an execution choice has no environment variable (and only those)"
         assert re.fullmatch(r"[a-z0-9_]+(\.[a-z0-9_]+)+", key), key
         self.key, self.type, self.legacy, self.env = key, type, legacy, env
         self.kernels, self.rows, self.devices = list(kernels), list(rows), list(devices) if devices else None
         self.per_target, self.from_pr, self.doc, self.enc = per_target, from_pr, doc, enc
         self.derive, self.kits, self.kit_legacy = derive, kits, dict(kit_legacy or {})
-        self.dynamic, self.experiment = dynamic, experiment
+        self.dynamic, self.experiment, self.execution = dynamic, experiment, execution
         # strings (None: no default) the generators pass as the default of this variable; tests compare legacy to them
         self.generator_defaults = generator_defaults
         self.check(legacy) if legacy is not None else None
         CHOICES[key] = self
-        BY_ENV[env] = self
+        if env is not None:
+            BY_ENV[env] = self
 
     # -- values -------------------------------------------------------------------------------------------------
     def check(self, value):
@@ -99,11 +103,18 @@ class Choice:
     def as_dict(self):
         return {"key": self.key, "env": self.env, "type": self.type, "legacy": self.legacy, "kernels": self.kernels,
                 "rows": self.rows, "devices": self.devices, "per_target": self.per_target, "from_pr": self.from_pr,
-                "kits": self.kits, "dynamic": self.dynamic, "experiment": self.experiment, "doc": self.doc}
+                "kits": self.kits, "dynamic": self.dynamic, "experiment": self.experiment, "execution": self.execution,
+                "doc": self.doc}
 
 
 def CHOICE(key, type, legacy, env, **kw):
     return Choice(key, type, legacy, env, **kw)
+
+
+def EXEC(key, type, doc, rows=(), from_pr=None):
+    """An execution choice (see the module docstring): a per-(model, device) serving setting; legacy None = the preset keeps what the
+    package's default preset (or the device's fit) says."""
+    return Choice(key, type, None, None, rows=rows, execution=True, from_pr=from_pr, doc=doc)
 
 
 def NOT(reason, *envs):
@@ -149,6 +160,19 @@ CHOICE("target.rdna4_twins", "bool", True, "LOOM_RDNA4", kernels=["*_rdna4"], de
        from_pr="dual_target.py", enc=("1", "0"),
        doc="Emit the gfx12 twins K_rdna4 and the dual-target selection (LOOM_RDNA4=0: gfx11 programs only, byte-identical to the "
            "pre-dual generator).")
+
+# ======================================================================================================================
+# Execution settings of one (model, device) preset (model.json): resolved per device, never part of a program
+# ======================================================================================================================
+EXEC("exec.prefill_capacity", "int", "Prefill chunk (tokens) of the device's preset; a larger chunk takes more scratch beside the weights "
+     "(r9700 fit: 4096 for hidden <= 2048, 1024 for the 27B hybrids).", rows=ROWS_PREFILL, from_pr="#609 #617 #619 #630")
+EXEC("exec.context_capacity", "int", "Context tokens one request holds in the device's preset (below the native context where the "
+     "memory pool cannot hold the native KV).", rows=ROWS_ALL)
+EXEC("exec.pool_capacity", "int", "KV pool positions the device's preset commits (fixed state backing commits it eagerly).", rows=ROWS_ALL)
+EXEC("exec.rows", "int", "Concurrent rows (streams) of the device's preset.", rows=ROWS_STREAMS)
+EXEC("exec.draft_depth", "int", "Draft depth of the device's preset (0: undrafted).", rows=ROWS_DECODE)
+EXEC("exec.context_cap", "int", "A measured limit on the context the device serves (the retained prefix state of the 8k/16k rows leaves "
+     "no room for a longer request); lowers the fit's served context, which sets context_capacity and pool_capacity.", rows=ROWS_ALL)
 
 # ======================================================================================================================
 # Decode attention (attn_rules.py, gen_llm.py)
@@ -380,7 +404,7 @@ if __name__ == "__main__":
     import sys
     if "--list" in sys.argv:
         for c in CHOICES.values():
-            print(f"{c.key:48} {c.env:22} {c.type:5} {c.legacy!r}")
+            print(f"{c.key:48} {c.env or '-':22} {c.type:5} {c.legacy!r}")
     else:
         json.dump({"choices": [c.as_dict() for c in CHOICES.values()], "not_choices": NOT_CHOICES}, sys.stdout, indent=1)
         print()

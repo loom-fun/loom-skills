@@ -1,0 +1,25 @@
+{
+ "scope": "model/InternScience-Sage-A1.5-loom",
+ "match": {
+  "slug": [
+   "InternScience-Sage-A1.5-loom"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "when": {
+    "devices": [
+     "radeon-r9700"
+    ]
+   },
+   "set": {
+    "exec.prefill_capacity": 2048,
+    "exec.context_capacity": 138240,
+    "exec.pool_capacity": 138240,
+    "exec.context_cap": 138240
+   },
+   "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged"
+  }
+ ]
+}

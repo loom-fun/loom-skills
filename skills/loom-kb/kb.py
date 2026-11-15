@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """loom-kb: the knowledge-base router and structure lint (stdlib only).
 
-  kb.py route --config LLM_CONFIG.json | --gguf FILE | --arch A [--facets f1,f2]
+  kb.py route --model SLUG|LLM_CONFIG.json | --config LLM_CONFIG.json | --gguf FILE | --arch A [--facets f1,f2]
               [--device strix-halo|radeon-r9700|rdna3|rdna4|all] [--quant q4_k_m,...] [--topic t1,t2]
   kb.py lint  [--root REPO]      structure + duplicate lint of every skills/**/*.md (exit 1 on errors)
   kb.py dupes [--root REPO]      duplicate-paragraph count only (works on any checkout, e.g. an old ref)
   kb.py list                     valid devices, families, facets, topics
 
 `route` prints, one path per line and in reading order: device family README, device README, quant READMEs,
-the arch chain root -> leaf, facet READMEs, topic files; then a '# resolved choices' footer when resolve.py exists.
+the arch chain root -> leaf, facet READMEs, the model node (model/<slug>) when one matches, topic files; then a '# resolved choices' footer when resolve.py exists.
 A selector node may hold task files `<node>/<topic>.md` (e.g. facet/drafted/decode.md): printed right after the node's
 README when that topic is requested, so a node loads only the facts the task needs.
 """
@@ -69,6 +69,39 @@ def load_scopes(root=HERE):
                 node["topology"], node["name"] = parts[2], parts[3]
                 families.append(node)
     return families, facets
+
+
+def model_nodes(root=HERE):
+    """[(slug dir name, node)] for every model/<slug>/scope.json: the scope of ONE package (see resolve.py)."""
+    out = []
+    for path in sorted(Path(root).glob("model/*/scope.json")):
+        node = read_json(path)
+        node["dir"], node["rel"] = path.parent, path.parent.relative_to(root).as_posix()
+        out.append((path.parent.name, node))
+    return out
+
+
+def fleet_config(slug, root=HERE):
+    """The checked-in build input of a fleet model (fleet/<slug>/llm_config.json of the repo the KB sits in), or None."""
+    p = Path(root).resolve().parent.parent / "fleet" / slug / "llm_config.json"
+    return p if p.is_file() else None
+
+
+def matching_model_nodes(cfg, slug, devs, root=HERE):
+    """The model nodes whose match holds for CFG (read with resolve.py's matcher, the same one the resolution uses)."""
+    nodes = model_nodes(root)
+    if not nodes:
+        return []
+    sys.path.insert(0, str(root))
+    try:
+        import resolve  # noqa: PLC0415
+        idx = resolve.device_index(root)
+        env = resolve.Env(cfg, resolve.derive_facets(cfg, resolve.draft_kind(cfg)), list(devs) or ["rdna3", "rdna4"], lambda d: idx.get(d, d), slug)
+        return [n for _, n in nodes if resolve.match(n.get("match") or {}, env, n["rel"])]
+    except Exception:  # the router must not break on a registry error
+        return []
+    finally:
+        sys.path.pop(0)
 
 
 def topics(root=HERE):
@@ -202,7 +235,15 @@ def family_for(families, arch):
 def route(args, root=HERE):
     families, facet_nodes = load_scopes(root)
     valid_arch = sorted({a for f in families for a in f["match"].get("arch", [])})
-    cfg = None
+    cfg, slug = None, getattr(args, "slug", None)
+    if getattr(args, "model", None):   # a package slug (fleet/<slug>/llm_config.json) or an llm_config.json / package dir
+        if os.path.exists(args.model):
+            args.config = args.model
+        else:
+            fc = fleet_config(args.model, root)
+            if fc is None:
+                die(f"--model {args.model!r}: no such file and no fleet/{args.model}/llm_config.json; give --config instead")
+            args.config, slug = str(fc), args.model
     if args.config:
         cfg = load_cfg(args.config)
     elif args.gguf:
@@ -279,6 +320,9 @@ def route(args, root=HERE):
             extra = Path(extra)
             if extra.name == "README.md" or extra.stem in wanted_topics:
                 files.append(extra)
+    mnodes = matching_model_nodes(cfg, slug, chosen_devices or fam_list, root)
+    for n in mnodes:
+        node(Path(n["rel"]))
     for t in wanted_topics:
         files.append(Path("topic") / f"{t}.md")
 
@@ -291,19 +335,23 @@ def route(args, root=HERE):
             print((rel if args.relative else Path(root) / rel).as_posix())
     print(f"# arch {arch} -> {fam['rel']}; facets: {','.join(facets) or '-'}; "
           f"devices: {','.join(chosen_devices or fam_list) or '-'}; topics: {','.join(wanted_topics) or '-'}")
-    footer = resolve_footer(cfg, chosen_devices or fam_list, root)
+    footer = resolve_footer(cfg, chosen_devices or fam_list, root, slug)
     print("# resolved choices")
     print(footer)
     return 0
 
 
-def resolve_footer(cfg, devs, root):
+def resolve_footer(cfg, devs, root, slug=None):
     if not (Path(root) / "resolve.py").is_file():
         return "# (resolve.py not installed: no registered choices)"
     sys.path.insert(0, str(root))
     try:
         import resolve  # noqa: PLC0415  (lazy: owned by the registry)
-        out = resolve.resolve(cfg, devs)
+        out = resolve.resolve(cfg, devs, slug=slug)
+        for d in devs:   # the serving settings a scope sets for each device's preset (exec.*)
+            ex = resolve.device_execution(cfg, d, slug=slug)
+            if ex and isinstance(out, dict):
+                out.setdefault("execution", {})[d] = {k: v["value"] for k, v in ex.items()}
         text = out if isinstance(out, str) else json.dumps(out, indent=1, sort_keys=True, default=str)
         return "\n".join(l if l.startswith("#") else "# " + l for l in text.splitlines())   # comment lines: the file list stays parseable
     except Exception as exc:  # the router must not break on a registry error
@@ -532,6 +580,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="kb.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("route", help="print the node files to read")
+    r.add_argument("--model", help="a fleet package slug, or an llm_config.json / package dir (reads the model node model/<slug> too)")
+    r.add_argument("--slug", help="with --config: the package slug (matched by model nodes)")
     r.add_argument("--config", help="llm_config.json (or a package dir containing it)")
     r.add_argument("--gguf", help="a GGUF file (arch and shape read from its header)")
     r.add_argument("--arch", help="an arch name (cfg arch or GGUF general.architecture)")

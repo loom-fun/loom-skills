@@ -745,6 +745,57 @@ def fixed_pool_capacity(row, memory_bytes=None, gpu="radeon-r9700"):
     return max(0, int((mem - row["w"] - SERVE_HEADROOM) // row["kvpp"]) // 1024 * 1024)
 
 
+# --- the execution settings of a device's preset: scope.json rules (skills/loom-kb exec.* choices), not the fit table --------------
+REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
+EXEC_KEYS = ("prefill_capacity", "context_capacity", "pool_capacity", "rows", "draft_depth")   # model.json execution fields, in this order
+_RESOLVERS = {}
+
+
+def _resolver(kb_root):
+    kb_root = os.path.abspath(kb_root)
+    if kb_root not in _RESOLVERS:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("loom_kb_resolve_" + str(len(_RESOLVERS)), os.path.join(kb_root, "resolve.py"))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod
+        spec.loader.exec_module(mod)
+        _RESOLVERS[kb_root] = mod
+    return _RESOLVERS[kb_root]
+
+
+def scope_execution(slug, gpu, root=None, cfg=None):
+    """{"prefill_capacity": N, "context_capacity": N, ..., "context_cap": N} the scope.json rules (model nodes, family, facet ...) set for
+    SLUG's preset on device GPU, resolved from the checked-in build input fleet/<slug>/llm_config.json (or CFG) of the checkout ROOT (default:
+    this one; pass a git export of another ref to read that ref's rules). Empty when no rule sets one or the model is not in the fleet."""
+    root = os.path.abspath(root or REPO)
+    kb = os.path.join(root, "skills", "loom-kb")
+    if cfg is None:
+        p = os.path.join(root, "fleet", slug, "llm_config.json")
+        if not os.path.isfile(p) or not os.path.isfile(os.path.join(kb, "resolve.py")):
+            return {}
+        with open(p, encoding="utf-8") as f:
+            cfg = json.load(f)
+    got = _resolver(kb).device_execution(cfg, gpu, kb, slug=slug)
+    return {k[len("exec."):]: v["value"] for k, v in got.items()}
+
+
+def fit_rows(path, gpu, root=None):
+    """{slug: row} of a device's fit table (fit.py: sizing and verdict data) with the serving settings of the scope rules put back as the
+    row keys the readers know: "ctx_cap" (exec.context_cap) and "<runner key>_execution" (prefill_capacity, context_capacity, pool_capacity,
+    rows, draft_depth). A row that still carries such a block of its own (a table of a device without rules) keeps it unless a rule sets one."""
+    with open(path, encoding="utf-8") as f:
+        rows = {r["slug"]: dict(r) for r in json.load(f)}
+    xkey = registry.fit_execution_key(gpu)
+    for slug, row in rows.items():
+        got = scope_execution(slug, gpu, root)
+        if got.get("context_cap"):
+            row["ctx_cap"] = got["context_cap"]
+        ex = {k: got[k] for k in EXEC_KEYS if k in got}
+        if ex:
+            row[xkey] = ex
+    return rows
+
+
 def gpu_preset_name(model_or_presets, gpu="radeon-r9700"):
     """`<first preset><device preset suffix>` (`<first>-r9700`): the preset a package carries for a GPU when its serving settings differ
     from model.json's default preset (Strix Halo's). The suffix is the device's "preset_suffix" (device.json)."""

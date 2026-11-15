@@ -9,6 +9,6 @@ measured) whose roofline preset is `radeon-r9700s` (the card uses it: `roofline.
 - Serving: `--pool_backing=fixed` (`card.serve_args`): the elastic backing's trim + compaction after each session stalls the next long
   prefill; fixed backing commits the preset's `pool_capacity` eagerly.
 - Preset: `<first>-r9700` (`preset_suffix`; `build.py --prefill-r9700` = `--prefill-device radeon-r9700=N`, a larger prefill chunk, same programs); fit table
-  `.github/devlab/r9700_fit.json`. Runners `[self-hosted, devlab-dispatch, radeon-r9700]`, about 3 concurrent.
+  `.github/devlab/r9700_fit.json` (sizing data; the preset's settings are `exec.*` rules on `model/<slug>` nodes). Runners `[self-hosted, devlab-dispatch, radeon-r9700]`, about 3 concurrent.
 
 Data: `device.json`.

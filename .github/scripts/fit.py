@@ -17,11 +17,14 @@ windows included: that is what the pool allocates). Row fields (same as before):
   kv    KV bytes at ctx (the native context, at most the kernels' 262144)       kv32  KV bytes at 32768
   need  w + kv + card_lib.SERVE_HEADROOM       verdict  fits (native ctx) | fits (reduced ctx) | does not fit
   mem   the card's memory_bytes     n_exp  experts (kept from the previous table)     kvpp  KV bytes per position
-Optional, kept from the previous table (measured, never derived): "ctx_cap" (a measured limit on the served context) and
-"<runner key>_execution" ("r9700_execution") {"prefill_capacity": 2048, "draft_depth": ..., ...}: the execution settings the package needs on
-the device beyond its default preset's (the program scratch at the default prefill chunk does not fit beside the weights and the drafter, say).
-The package then carries a second preset `<first><preset suffix>` (`<first>-r9700`) in model.json (make_info.py build --fit writes it, the card's
-Quick start for the device fetches it, device_jobs.py measures it); this script sizes the package at that preset's prefill_capacity and rows.
+The table holds data only. The serving settings a package needs on the device beyond its default preset's (the program scratch at the default
+prefill chunk does not fit beside the weights and the drafter, say; a measured limit on the served context) are scope rules, not table
+columns: exec.prefill_capacity, exec.context_capacity, exec.pool_capacity, exec.rows, exec.draft_depth, exec.context_cap set on a model node
+(skills/loom-kb/model/<slug>/scope.json, `when: {"devices": ["radeon-r9700"]}`) or a family node. The package then carries a second preset
+`<first><preset suffix>` (`<first>-r9700`) in model.json (make_info.py build --fit writes it, the card's Quick start for the device fetches it,
+device_jobs.py measures it); this script sizes the package at that preset's prefill_capacity and rows. card_lib.fit_rows() puts the rules back
+on the row as "ctx_cap" and "<runner key>_execution" for the readers. A row of an older table that still has those keys keeps them while no rule
+sets one.
 A new device's table starts without these blocks (n_exp is seeded from another device's table: --seed).
 GGUFs may be header-only stubs (sparse files of the right size): only headers are read.
 --approx: no build; the verdicts of the fleet on DEVICE from the sizing columns of another table (--from, default the R9700's): `w` can be a little
@@ -104,7 +107,8 @@ def build_table(a):
         sizing = os.path.join(w, "sizing.json")
         os.makedirs(w, exist_ok=True)
         # a package with the device's execution block is served from its `<first><suffix>` preset: size the program scratch at that preset's prefill chunk and rows
-        rx = o.get(XKEY) or {}
+        rule = card_lib.scope_execution(slug, GPU)   # exec.* of the scope rules (model node, family ...)
+        rx = {k: rule[k] for k in card_lib.EXEC_KEYS if k in rule} or o.get(XKEY) or {}
         ok, msg, _ = sc.build(slug, f"{a.pkgs}/{slug}", w, ("--sizing-json", sizing,
                               *(("--prefill", str(rx["prefill_capacity"])) if rx.get("prefill_capacity") else ()),
                               *(("--rows", str(rx["rows"])) if rx.get("rows") else ())))
@@ -128,8 +132,8 @@ def build_table(a):
         else:
             verdict = "fits (native ctx)" if need <= POOL else "fits (reduced ctx)"
         row = {"slug": slug, "w": fixed, "kv": kv, "kv32": kvpp * 32768, "kvpp": kvpp, "ctx": ctx, "mem": models[slug].get("memory_bytes") or o.get("mem"),
-               "need": float(need), "verdict": verdict, "n_exp": o.get("n_exp", 0), **({"ctx_cap": o["ctx_cap"]} if o.get("ctx_cap") else {}),
-               **({XKEY: rx} if rx else {})}
+               "need": float(need), "verdict": verdict, "n_exp": o.get("n_exp", 0), **({"ctx_cap": o["ctx_cap"]} if o.get("ctx_cap") and "context_cap" not in rule else {}),
+               **({XKEY: rx} if rx and not any(k in rule for k in card_lib.EXEC_KEYS) else {})}
         rows.append(row)
         reduced = lambda r, v: card_lib.served_context(r["w"], r["kv"] / r["ctx"], POOL) if r.get("kv") and v.startswith("fits (red") else None
         sc_old = reduced(o, o.get("verdict", "")) if o.get("w") is not None else None

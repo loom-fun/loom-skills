@@ -39,6 +39,9 @@ ap.add_argument("--prefill-r9700", type=int, default=None, metavar="N",
                      "Qwen3-1.7B -2/+1/+11/+12/+18, but Qwen3-14B -8/-5/+1/+2/+6 (hidden size <= 2048 benefits). The first preset stays "
                      "the default (Strix Halo); the card's R9700 Quick start fetches `--preset=<preset>-r9700`. Same programs: only "
                      "model.json differs")
+ap.add_argument("--slug", default=None, metavar="SLUG",
+                help="the package's slug (the name of its repo): matched by the knowledge base's model nodes, skills/loom-kb/model/<slug> "
+                     "(default: cfg['slug']; without one only a node matching model_id applies)")
 ap.add_argument("--prefill-device", action="append", default=[], metavar="DEVICE=N",
                 help="--prefill-r9700 for any registry device (repeat): a preset `<preset><device preset suffix>` with prefill_capacity N "
                      "(default: cfg['prefill_capacity_device'] {device: N}); --prefill-r9700 N is --prefill-device radeon-r9700=N")
@@ -89,7 +92,7 @@ DRAFT = {"kind": a.draft, "depth": max(1, min(7, _depth))} if a.draft != "none" 
 # The model's generator choices (skills/loom-kb: registry defaults, scope.json rules, llm_config "choices"): resolved once, exported
 # as the environment gen_llm.py and its subprocesses read. A registered variable the caller set wins and marks the build dirty.
 import kb_choices  # noqa: E402
-RESOLVED = kb_choices.apply(cfg, DRAFT["kind"] if DRAFT else None)
+RESOLVED = kb_choices.apply(cfg, DRAFT["kind"] if DRAFT else None, slug=a.slug)
 if DRAFT and DRAFT["kind"] == "dflash":
     sys.path.insert(0, os.path.join(HERE, "draft"))
     import gen_dflash  # noqa: E402
