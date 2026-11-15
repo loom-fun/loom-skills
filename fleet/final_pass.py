@@ -162,11 +162,21 @@ def patch_model_json(old, new):
     return out, problems
 
 
+def same_but_path(old, new):
+    """two draft blocks equal except that OLD's gguf is a path ending in NEW's file name"""
+    if not (isinstance(old, dict) and isinstance(new, dict)) or old == new:
+        return False
+    return ({k: v for k, v in old.items() if k != "gguf"} == {k: v for k, v in new.items() if k != "gguf"}
+            and os.path.basename(str(old.get("gguf"))) == os.path.basename(str(new.get("gguf"))))
+
+
 def merge_llm_config(old, new, ref):
     """OLD (staging's llm_config.json) with the new build's "resolved" block and the generator stamped with REF; (merged, problems): anything else
     that differs between the two is a problem (a changed chat/serve setting is not a carried-over package)."""
     out = json.loads(json.dumps(old))
-    diff = sorted(k for k in set(old) | set(new) if k not in ("generator", "resolved") and old.get(k) != new.get(k))
+    if same_but_path(old.get("draft"), new.get("draft")):   # an older stamp kept the build machine's path of the drafter GGUF: the file name is the value
+        out["draft"] = new["draft"]
+    diff = sorted(k for k in set(old) | set(new) if k not in ("generator", "resolved") and out.get(k) != new.get(k))
     if "resolved" in new:
         out["resolved"] = new["resolved"]
     if "generator" in out:

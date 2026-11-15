@@ -56,6 +56,10 @@ class Helpers(unittest.TestCase):
         self.assertEqual((out["generator"]["skills_commit"], out["generator"]["dirty"], out["resolved"]), ("REF", False, {"scopes": []}))
         self.assertEqual(problems, [])
         self.assertTrue(fp.merge_llm_config(old, {"chat": {"a": 2}}, "REF")[1])
+        d_old = {"chat": 1, "draft": {"kind": "assist", "gguf": "/home/x/w/d.gguf"}}
+        out, problems = fp.merge_llm_config(d_old, {"chat": 1, "draft": {"kind": "assist", "gguf": "d.gguf"}}, "REF")
+        self.assertEqual((out["draft"]["gguf"], problems), ("d.gguf", []))
+        self.assertTrue(fp.merge_llm_config(d_old, {"chat": 1, "draft": {"kind": "assist", "gguf": "e.gguf"}}, "REF")[1])
 
 
 class LogitsMode(unittest.TestCase):
