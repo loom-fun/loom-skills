@@ -95,17 +95,21 @@ class Comparisons(unittest.TestCase):
             tok = Tok()
         self.assertEqual(lc.eog_keys(Pkg()), {"<eos>", "<end_of_turn>"})
 
-    def test_probe_near_ties(self):
-        # embed_probe's FAIL lines carry both exported logits: a device token within the golden's 1.0 nat of the row maximum is a tie
+    def test_probe_gaps(self):
+        # embed_probe compares the device's token with the row exported from the same logits: rounding makes an exact tie (gap 0), nothing more
         line = '{"opened": true, "width": 1000, "failures": 2}'
         err = ("FAIL x.c:1: step 10 row 1: argmax(row)=5 (12.250) but the device selected 7 (12.250)\n"
-               "FAIL x.c:1: step 12 row 0: argmax(row)=5 (12.250) but the device selected 9 (11.500)\n")
-        ok, why, ties = lc.probe_judge(line, err)
-        self.assertEqual((ok, why, ties), (True, "", [(10, 1, 0.0), (12, 0, 0.75)]))
+               "FAIL x.c:1: step 12 row 0: argmax(row)=5 (12.250) but the device selected 9 (12.220)\n")
+        ok, why, gaps, problems = lc.probe_judge(line, err)
+        self.assertEqual((ok, why, gaps, problems), (True, "", [(10, 1, 0.0), (12, 0, 0.03)], []))
         self.assertTrue(lc.probe_check(line, err)[0])
-        # a device token 3 nats below the maximum (a stale or shifted row), outside the row, or a failure of another kind: not a tie
-        far = "FAIL x.c:1: step 3 row 0: argmax(row)=5 (12.250) but the device selected 7 (9.000)\n"
-        self.assertIn("3.25 nats", lc.probe_judge('{"opened": true, "width": 1000, "failures": 1}', far)[1])
+        # a gap above the margin is a finding with step/row/gap (every gap is still recorded), not a pass
+        far = ("FAIL x.c:1: step 3 row 0: argmax(row)=5 (12.250) but the device selected 7 (12.000)\n"
+               "FAIL x.c:1: step 4 row 2: argmax(row)=5 (12.250) but the device selected 7 (12.250)\n")
+        ok, why, gaps, problems = lc.probe_judge('{"opened": true, "width": 1000, "failures": 2}', far)
+        self.assertFalse(ok)
+        self.assertIn("step 3 row 0: device token 0.250 nats below the row maximum", why)
+        self.assertEqual(gaps, [(3, 0, 0.25), (4, 2, 0.0)])
         out = "FAIL x.c:1: step 3 row 0: argmax(row)=5 (12.250) but the device selected 1000 (-1.000)\n"
         self.assertIn("outside the row", lc.probe_judge('{"opened": true, "width": 1000, "failures": 1}', out)[1])
         pad = "FAIL x.c:1: step 3 row 0: argmax 151900 is padding (vocabulary 151665)\n"
