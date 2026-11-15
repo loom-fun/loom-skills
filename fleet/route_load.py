@@ -3,14 +3,14 @@
 
 For each of the fleet configs x {port, optimize} x {strix-halo, radeon-r9700}:
   new  = lines of the files `kb.py route` prints for the task's topics + the workflow SKILL.md + loom-kb SKILL.md
-  old  = the pre-refactor set at --base (default origin/r9700): port-llm SKILL.md + loom-ir-cookbook + porting-notes
+  old  = the pre-refactor set at --base (default PRE_REFACTOR: r9700 before the refactor merge #850): port-llm SKILL.md + loom-ir-cookbook + porting-notes
          (+ vision.md for vision models); optimize SKILL.md + optimization-catalog
 Tasks: port = topics porting,kernels-ir; optimize-prefill / optimize-decode = the one metric being optimized, optimize-both
 = prefill,decode together (a run that also benchmarks or rooflines adds those SKILL.md files on both sides equally, so they
 are left out). The "all topics" column adds the on-demand topics a run reads only when it hits that need (program ABI, IR
 debugging, cfg review, starter reference; optimize-loop mechanics, roofline, concurrency, long-context): the worst case.
 
-    python3 fleet/route_load.py [--tree .] [--base origin/r9700] [--md OUT.md] [--json OUT.json]
+    python3 fleet/route_load.py [--tree .] [--base REF] [--md OUT.md] [--json OUT.json]
 """
 import argparse
 import contextlib
@@ -27,6 +27,7 @@ TASKS = {"port": "porting,kernels-ir", "optimize-prefill": "prefill", "optimize-
 EXTRA = {"port": "program-abi,ir-debug,cfg-review,starter", "optimize-prefill": "optimize-loop,roofline,concurrency,long-context",
          "optimize-decode": "optimize-loop,roofline,concurrency,long-context", "optimize-both": "optimize-loop,roofline,concurrency,long-context"}
 DEVICES = ("strix-halo", "radeon-r9700")
+PRE_REFACTOR = "10956463e1409abd8bbe22d1e37c4b57a7d44a48"   # r9700 before the refactor merge (#850): the last tree with the pre-refactor instruction set
 OLD = {
     "port": ["skills/loom-port-llm/SKILL.md", "skills/loom-port-llm/reference/loom-ir-cookbook.md",
              "skills/loom-port-llm/reference/porting-notes.md"],
@@ -63,7 +64,7 @@ def stats(vals):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tree", default=str(REPO))
-    ap.add_argument("--base", default="origin/r9700")
+    ap.add_argument("--base", default=PRE_REFACTOR)
     ap.add_argument("--md")
     ap.add_argument("--json")
     a = ap.parse_args(argv)

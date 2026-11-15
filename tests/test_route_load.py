@@ -1,4 +1,4 @@
-"""fleet/route_load.py: instruction load per fleet model (CPU only; needs origin/r9700 for the pre-refactor set)."""
+"""fleet/route_load.py: instruction load per fleet model (CPU only; needs the pre-refactor r9700 commit route_load.PRE_REFACTOR)."""
 import importlib.util
 import json
 import subprocess
@@ -13,7 +13,7 @@ spec.loader.exec_module(route_load)
 
 
 def base_ref():
-    for ref in ("origin/r9700", "r9700"):
+    for ref in (route_load.PRE_REFACTOR,):
         if subprocess.run(["git", "-C", str(REPO), "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0:
             return ref
     return None
