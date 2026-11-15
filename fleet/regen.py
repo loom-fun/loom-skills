@@ -609,6 +609,9 @@ def ingest_strix(st, name, e, W):
     on this package (make_info.py remeasure; strix_card.py is the recipe)."""
     run = e["run"]
     cmd = [PY, os.path.join(SCRIPTS, "strix_card.py"), e["slug"], "--job", e["dir"], "--cmp", e["cmp"], "--run", run, "--work", os.path.dirname(W)]
+    if e.get("prev"):   # the confirming run: strix_card.py takes rows faster in both runs onto the card (the ratchet)
+        first = st.jobs[e["prev"]]
+        cmd += ["--first-cmp", first["cmp"], "--first-run", first["run"]]
     r = sh(cmd, check=False)
     if r.returncode:
         raise RuntimeError((r.stdout + r.stderr)[-1500:])
@@ -641,6 +644,8 @@ def cmd_ingest(a):
             st.save()
             continue
         e.update(stage="ingested", card_dir=out, parent=parent, message=msg)
+        if str(e.get("reason", "")).startswith("ingest failed"):
+            e.pop("reason")   # a retried ingest that works leaves no stale failure text
         st.log(f"{e['slug']} {e['device']}: card built ({'full table' if full else 'Strix re-measure line'}) at {out}")
         st.save()
     if not todo:
