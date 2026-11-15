@@ -1,6 +1,11 @@
 {
   "schema": "loom-kb/methodology/1",
   "normative_text": "method/methodology.md",
+  "runner_guard": {
+    "max_old_vs_card": 0.10,
+    "rows": "decode and prefill rows (kind decode|prefill; not streams4)",
+    "verdict": "degraded_runner"
+  },
   "rows": {
     "decode": {
       "label": "decode tok/s, short prompt",

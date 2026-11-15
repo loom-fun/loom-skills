@@ -8,6 +8,7 @@ session's value being the median of its samples (user rule, 2026-11-14 10:38): o
 (skills/loom-kb/method/methodology.json: prefill_8k..32k 2 %, prefill_1k/2k 3 %, decode and decode_32k 3 %, decode_2k and streams4 4 %);
 --band X forces one flat band for every row. The result's "band" is the widest band applied (what "within +-band" on a card states), "bands" the per-row ones. Plus: greedy text (text_fun.json vs
 text_staging.json, per prompt), func / ktest / gates of the staging package (summary.json), and new vs the published loom-fun card value.
+Runner guard: an old-side decode/prefill row > 10 % off the card value (needs --fun-info) = degraded runner, verdict rerun.
 Exit 0 always; the verdict is in the JSON ("verdict": pass | rerun | gate_fail; with --prev FIRST.json: pass | out_of_margin | gate_fail).
 A missing metric (a step failed) counts as out of band: re-run.
 """
@@ -27,6 +28,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("out")
 ap.add_argument("--band", type=float, default=None, help="one flat band for every row (default: the per-row bands of methodology.json)")
 ap.add_argument("--fun-info", help="the published loom-fun info.json (card values)")
+ap.add_argument("--gpu", default="strix-halo", help="the GPU whose card values --fun-info is read for (R9700: the staging card)")
 ap.add_argument("--json")
 ap.add_argument("--prev", help="the first run's --json (this run is the confirming re-run): verdict out_of_margin when a metric is "
                 "outside the band in both runs in the same direction, else pass")
@@ -57,7 +59,7 @@ new, nacc = side("staging", "stagingnd")
 card = {}
 if a.fun_info:
     info = card_lib.load_info(a.fun_info)
-    card = {k: m.get("loom") for k, (m, _) in card_lib.card_metrics(card_lib.gpu_view(info, "strix-halo")).items()}
+    card = {k: m.get("loom") for k, (m, _) in card_lib.card_metrics(card_lib.gpu_view(info, a.gpu)).items()}
 
 metrics = {}
 for k in card_lib.METRIC_KEYS:
@@ -73,6 +75,7 @@ for k in card_lib.METRIC_KEYS:
     if card.get(k):
         e["card"] = card[k]
         e["new_vs_card"] = round(nv / card[k], 4) if nv else None
+        e["old_vs_card"] = round(ov / card[k], 4) if ov else None
     metrics[k] = e
 acc = {}
 for k in sorted(set(oacc) | set(nacc)):
@@ -110,15 +113,19 @@ def gate_ok(k, v):
     return v.startswith("GATES PASS")
 gate_status = {k: ("PASS" if gate_ok(k, v) else "FAIL") for k, v in gates.items()}
 
+# runner-health guard (methodology rule 13): the OLD side of a decode/prefill row more than 10 % off the published card value = a degraded
+# runner; both sides are unreliable, so the verdict is a rerun (never a pass, never a regression)
+guard = registry.methodology().get("runner_guard", {}).get("max_old_vs_card", 0.10)
+degraded = {k: e["old_vs_card"] for k, e in metrics.items() if k != "streams4" and e.get("old_vs_card") and abs(e["old_vs_card"] - 1) > guard}
 outs = [k for k, e in metrics.items() if e["status"] != "PASS"] + [f"acceptance:{k}" for k, e in acc.items() if e["status"] != "PASS"]
 fails = [k for k, s in gate_status.items() if s != "PASS"]
 worst = min(((abs(e["ratio"] - 1), k, e["ratio"]) for k, e in metrics.items() if e["ratio"]), default=None, key=lambda x: -x[0])
 res = {"job": summ and json.load(open(os.path.join(o, "summary.json")))["job"], "runner": open(os.path.join(o, "runner.txt")).read().strip() if os.path.exists(os.path.join(o, "runner.txt")) else None,
        "band": max(bands.values(), default=a.band if a.band is not None else registry.methodology()["default_band"]), "bands": bands, "metrics": metrics, "acceptance": acc, "text": text, "gates": gates, "gate_status": gate_status,
-       "out_of_band": outs, "gate_failures": fails, "gates_from": (json.load(open(os.path.join(a.gates_from, "summary.json")))["job"] if a.gates_from else None),
+       "out_of_band": outs, "gate_failures": fails, "degraded_runner": degraded, "runner_guard": guard, "gates_from": (json.load(open(os.path.join(a.gates_from, "summary.json")))["job"] if a.gates_from else None),
        "worst_metric": worst[1] if worst else None, "worst_ratio": worst[2] if worst else None,
        # acceptance rows are informational (techlead 17:02, methodology): reported in out_of_band, never a reason to re-run
-       "verdict": "gate_fail" if fails else ("rerun" if any(not k.startswith("acceptance:") for k in outs) else "pass")}
+       "verdict": "gate_fail" if fails else ("rerun" if degraded else "rerun" if any(not k.startswith("acceptance:") for k in outs) else "pass")}
 if a.prev:   # the stop rule: re-run once; still outside the band in the same direction = OUT OF MARGIN
     p = json.load(open(a.prev))
     def sides(x):
@@ -133,10 +140,12 @@ if a.prev:   # the stop rule: re-run once; still outside the band in the same di
     sp, sn = sides(p), sides(res)
     res["first_run"] = {"job": p["job"], "runner": p["runner"], "out_of_band": p["out_of_band"]}
     res["out_of_margin"] = sorted(k for k in sn if sp.get(k) == sn[k])
-    res["verdict"] = "gate_fail" if fails else ("out_of_margin" if any(not k.startswith("acceptance:") for k in res["out_of_margin"]) else "pass")
+    res["verdict"] = "gate_fail" if fails else ("rerun" if degraded else "out_of_margin" if any(not k.startswith("acceptance:") for k in res["out_of_margin"]) else "pass")
 if a.json:
     json.dump(res, open(a.json, "w"), indent=1)
 print(f"{res['job']} on {res['runner']}: verdict {res['verdict']}  worst {res['worst_metric']} {res['worst_ratio']}")
+if degraded:
+    print(f"DEGRADED RUNNER: old side vs published card {', '.join(f'{k} {v}' for k, v in degraded.items())} (> {guard:.0%} off): rerun, no regression or promotion verdict from this run")
 print(f"{'metric':14} {'old':>9} {'new':>9} {'new/old':>8} {'status':7} {'card':>9} {'new/card':>8}")
 for k, e in metrics.items():
     print(f"{k:14} {e['old'] or '-':>9} {e['new'] or '-':>9} {e['ratio'] or '-':>8} {e['status']:7} {e.get('card') or '-':>9} {e.get('new_vs_card') or '-':>8}")

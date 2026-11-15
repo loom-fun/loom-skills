@@ -156,3 +156,44 @@ class Ratchet(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RunnerGuard(unittest.TestCase):
+    def c(self, old_vs_card, ratios=None):
+        c = cmp(ratios or {"decode": 1.0, "prefill_8k": 1.0})
+        for r, e in c["metrics"].items():
+            e["card"] = round(e["old"] / old_vs_card.get(r, 1.0), 1)
+        return c
+
+    def test_degraded_old_side_is_a_rerun_not_a_regression(self):
+        c = self.c({"decode": 0.33}, {"decode": 0.7, "prefill_8k": 1.0})          # runner 3x slow on both sides
+        r = V.model_verdict(c, "m", None, METH)
+        self.assertEqual(r["verdict"], "degraded_runner")
+        self.assertEqual(list(r["degraded_runner"]), ["decode"])
+        self.assertEqual(P.check("m", "strix-halo", [c], None, METH)["decision"], "rerun")
+
+    def test_never_promotes(self):
+        c = self.c({"prefill_8k": 1.2}, {"decode": 1.0, "prefill_8k": 1.0})       # old 20 % above the card, ratio 1.0
+        self.assertEqual(V.model_verdict(c, "m", None, METH)["verdict"], "degraded_runner")
+        self.assertEqual(P.check("m", "strix-halo", [c], None, METH)["decision"], "rerun")
+
+    def test_within_ten_percent_is_healthy(self):
+        c = self.c({"decode": 0.92, "prefill_8k": 1.08})
+        self.assertEqual(V.model_verdict(c, "m", None, METH)["verdict"], "pass")
+        self.assertEqual(P.check("m", "strix-halo", [c], None, METH)["decision"], "promote")
+
+    def test_streams4_and_missing_card_are_not_judged(self):
+        c = self.c({"streams4": 0.5}, {"decode": 1.0, "streams4": 1.0})
+        self.assertEqual(V.model_verdict(c, "m", None, METH)["verdict"], "pass")
+        self.assertEqual(V.model_verdict(cmp({"decode": 1.0}), "m", None, METH)["verdict"], "pass")
+
+    def test_a_degraded_first_run_does_not_count_next_to_a_healthy_one(self):
+        bad = self.c({"decode": 0.5}, {"decode": 0.8, "prefill_8k": 1.0})
+        good = self.c({}, {"decode": 1.0, "prefill_8k": 1.0})
+        self.assertEqual(P.check("m", "strix-halo", [bad, good], None, METH)["decision"], "promote")
+
+    def test_gate_failure_still_holds(self):
+        c = self.c({"decode": 0.5})
+        c["gate_status"] = {"ktest:staging": "FAIL"}
+        self.assertEqual(V.model_verdict(c, "m", None, METH)["verdict"], "gate_fail")
+        self.assertEqual(P.check("m", "strix-halo", [c], None, METH)["decision"], "hold")

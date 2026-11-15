@@ -32,6 +32,7 @@ DEFAULT_BANDS = {
 }
 DEFAULT_BIMODAL = ["Qwen2.5-0.5B", "Qwen3-0.6B"]
 DEFAULT_RATCHET = {"confirming_runs": 2}
+DEFAULT_RUNNER_GUARD = 0.10
 
 
 def load_methodology(path=None):
@@ -40,7 +41,8 @@ def load_methodology(path=None):
     Accepted shapes for the per-row table: rows[row] = {band, reject|t1_reject}, or bands[row] = {...} / number."""
     path = path or os.path.join(ROOT, "skills", "loom-kb", "method", "methodology.json")
     bands = dict(DEFAULT_BANDS)
-    out = {"bands": bands, "bimodal": list(DEFAULT_BIMODAL), "ratchet": dict(DEFAULT_RATCHET), "source": "defaults"}
+    out = {"bands": bands, "bimodal": list(DEFAULT_BIMODAL), "ratchet": dict(DEFAULT_RATCHET), "runner_guard": DEFAULT_RUNNER_GUARD,
+           "source": "defaults"}
     if not os.path.exists(path):
         return out
     with open(path) as fh:
@@ -61,6 +63,9 @@ def load_methodology(path=None):
     bm = d.get("bimodal_models") or d.get("bimodal")
     if isinstance(bm, list):
         out["bimodal"] = [x if isinstance(x, str) else x.get("model", "") for x in bm]
+    rg = d.get("runner_guard")
+    if isinstance(rg, dict) and "max_old_vs_card" in rg:
+        out["runner_guard"] = float(rg["max_old_vs_card"])
     rt = d.get("ratchet")
     if isinstance(rt, dict):
         out["ratchet"].update(rt)
@@ -71,6 +76,21 @@ def load_methodology(path=None):
 
 def is_bimodal(slug, meth):
     return any(b and b.lower() in slug.lower() for b in meth["bimodal"])
+
+
+def degraded_rows(compare, meth=None):
+    """Runner-health guard (methodology rule 13): decode and prefill rows whose OLD side (the published package) deviates from the
+    published card value by more than the guard (10 %). {row: old/card}. A run with any is a degraded runner: both sides are
+    unreliable, so the verdict is a rerun, never a promotion and never a regression. Rows without a card value are not judged."""
+    meth = meth or load_methodology()
+    out = {}
+    for r, e in (compare.get("metrics") or {}).items():
+        if r == "streams4" or r not in meth["bands"]:
+            continue
+        old, card = e.get("old"), e.get("card")
+        if old and card and abs(old / card - 1) > meth["runner_guard"]:
+            out[r] = round(old / card, 3)
+    return out
 
 
 # ---- kernels -> families and rows ----------------------------------------------------------------------------------------

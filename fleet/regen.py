@@ -451,6 +451,8 @@ def compare(st, name, e, d):
     cmd = [PY, os.path.join(SCRIPTS, "strix_ab_compare.py"), d, "--json", cmp]
     if e["device"] == "strix-halo" and st.d["opts"]["old_org"] == "loom-fun":
         cmd += ["--fun-info", hf_file(f"{st.d['opts']['old_org']}/{e['slug']}", "info.json")]   # new vs the published card value too
+    elif e["device"] != "strix-halo":   # R9700: the old side IS the staging card; the runner guard compares it with that card's value
+        cmd += ["--fun-info", hf_file(f"{st.d['opts']['old_org']}/{e['slug']}", "info.json"), "--gpu", e["device"]]
     if prev_cmp(st, e):
         cmd += ["--prev", prev_cmp(st, e)]
     sh(cmd)

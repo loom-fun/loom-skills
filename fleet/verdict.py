@@ -12,6 +12,8 @@ Row verdicts (rows are judged one at a time, no geomean trading):
              different number of modes per side, or an out-of-band ratio between unimodal sides that a mode shift would explain);
              a change in the frequency of the slow mode is flagged, never a silent pass
   missing    the row has no value on a side
+Runner health (methodology rule 13): when the OLD side of a decode/prefill row deviates > 10 % from the published card value the
+runner is degraded: model verdict `degraded_runner` (a rerun; it hides row regressions and improvements, never a promotion).
 Model verdict = the worst row, also gate failures (gate_fail) and a changed greedy text (text_diff, near-tie review needed).
 The sampled verdict of a stratum is the worst member verdict (worst()).
 """
@@ -26,7 +28,7 @@ sys.path.insert(0, HERE)
 import sample_lib as L  # noqa: E402
 
 # worst first
-SEVERITY = ["gate_fail", "reject", "regressed", "text_diff", "flag", "missing", "pass", "improved"]
+SEVERITY = ["gate_fail", "degraded_runner", "reject", "regressed", "text_diff", "flag", "missing", "pass", "improved"]
 MODE_GAP = 0.06      # two modes of a bimodal model are ~10 % apart (plan section 5); sessions further apart than 6 % split
 
 
@@ -102,11 +104,15 @@ def model_verdict(compare, slug="", rows=None, meth=None):
     gates = [k for k, s in (compare.get("gate_status") or {}).items() if s != "PASS"]
     text = (compare.get("text") or {}).get("status")
     vs = [r["verdict"] for r in out.values()]
+    degraded = L.degraded_rows(compare, meth)
+    if degraded:
+        vs = ["degraded_runner"]        # both sides ran on a sick runner: no row verdict counts, none can promote or regress
     if gates:
         vs.append("gate_fail")
     if text == "DIFF":
         vs.append("text_diff")
-    return {"model": slug, "verdict": worst(vs), "rows": out, "gate_failures": gates, "text": text, "bimodal": bimodal}
+    return {"model": slug, "verdict": worst(vs), "rows": out, "gate_failures": gates, "text": text, "bimodal": bimodal,
+            "degraded_runner": degraded}
 
 
 def main():
@@ -124,6 +130,8 @@ def main():
     for r, v in res["rows"].items():
         print(f"  {r:12s} {v['verdict']:10s} ratio {v['ratio']}  band +-{v['band']}" + ("  EXTEND to 6+6 sessions" if v.get("extend") else "")
               + (f"  [{v['why']}]" if v.get("why") else ""))
+    if res["degraded_runner"]:
+        print("  DEGRADED RUNNER: old side vs published card " + ", ".join(f"{r} {x}" for r, x in res["degraded_runner"].items()) + " (> 10 % off): rerun")
     if res["gate_failures"]:
         print("  gate failures:", ", ".join(res["gate_failures"]))
     if a.json:

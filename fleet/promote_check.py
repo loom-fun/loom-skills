@@ -57,7 +57,13 @@ def row_decision(per_run, confirming):
 def check(slug, gpu, compares, baselines=None, meth=None, near_tie=False, rows_only=None):
     meth = meth or L.load_methodology()
     confirming = int(meth["ratchet"].get("confirming_runs", 2))
-    runs = [V.model_verdict(c, slug, rows_only, meth) for c in compares]
+    allruns = [V.model_verdict(c, slug, rows_only, meth) for c in compares]
+    runs = [x for x in allruns if not x["degraded_runner"]]     # a degraded runner's ratios count for nothing (rule 13)
+    if not runs:
+        return {"model": slug, "gpu": gpu, "decision": "hold" if allruns[-1]["gate_failures"] else "rerun", "rows": {}, "baseline_drift": [], "bands": meth["source"],
+                "reasons": ["degraded runner: old side vs published card " + ", ".join(f"{r} {x}" for r, x in allruns[-1]["degraded_runner"].items())
+                            + " (> 10 % off): rerun on another runner"], "runners": [c.get("runner") for c in compares], "same_runner": False,
+                "gate_failures": allruns[-1]["gate_failures"]}
     rows, reasons = {}, []
     for r in L.ROWS:
         per = [x["rows"][r] for x in runs if r in x["rows"]]
