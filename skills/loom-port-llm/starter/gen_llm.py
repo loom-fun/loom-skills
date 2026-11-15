@@ -2746,6 +2746,17 @@ def gqa_split(text, P, S):
     return text[:a] + k + text[b:]
 
 
+def attention_twin(dec, S):
+    """g_attention_split_rdna4: the gfx12 twin of the decode split kernel, emitted only where a per-target choice (loom-kb
+    per_target: ATTN_GQA_D256__RDNA4) makes its body differ from the gfx11 kernel `dec`; dual_target.py selects it on gfx12."""
+    if os.environ.get("LOOM_RDNA4", "1").strip().lower() in ("0", "off", "no", "false"):
+        return ""
+    a = 'kernel.def export("g_attention_split")'
+    t, _, _ = attention_text(S, "g", twin=True)
+    k = lambda x: x[x.index(a):x.index('kernel.def export("g_attention_combine")', x.index(a))]
+    return "\n" + twin_names(k(t)) if k(t) != k(dec) else ""
+
+
 def attention_text(S, P, twin=False):
     """Split-K causal GQA attention: workgroup (token, KV head, split) of 16
     waves, wave w = query head 16*kv + w, lane l = dims 4l..4l+3. Sliding
@@ -3062,6 +3073,8 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
   %c32 = index.constant 32 : index
   %cqh = index.constant {QH} : index
   kernel.launch.config workgroups(%count, %cqh, %c1) workgroup_size(%c32, %c1, %c1) : index""")
+    if P == "g" and not twin:   # the gfx12 twin of the split kernel where a per-target choice makes it differ (else nothing)
+        text += attention_twin(text, S)
     return text, split_l, combine_l
 
 
@@ -3441,18 +3454,7 @@ def attention():
     dec, _, _ = attention_text(64, "g")
     pre, split_l, combine_l = attention_text(16, "g16")
     count16 = pre[pre.index("// Splits for"):pre.index('kernel.def export("g16_attention_split")')]
-    return dec + "\n" + count16 + split_l + "\n" + combine_l + attention_twin(dec) + FALLBACK
-
-
-def attention_twin(dec):
-    """g_attention_split_rdna4: the gfx12 twin of the decode split kernel, emitted only where a per-target choice (loom-kb
-    per_target: ATTN_GQA_D256__RDNA4) makes its body differ from the gfx11 kernel `dec`; dual_target.py selects it on gfx12."""
-    if os.environ.get("LOOM_RDNA4", "1").strip().lower() in ("0", "off", "no", "false"):
-        return ""
-    a = 'kernel.def export("g_attention_split")'
-    t, _, _ = attention_text(64, "g", twin=True)
-    k = lambda x: x[x.index(a):x.index('kernel.def export("g_attention_combine")', x.index(a))]
-    return "\n" + twin_names(k(t)) if k(t) != k(dec) else ""
+    return dec + "\n" + count16 + split_l + "\n" + combine_l + FALLBACK
 
 
 FALLBACK = r"""
