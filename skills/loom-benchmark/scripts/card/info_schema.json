@@ -66,6 +66,8 @@
       "proof": {"type": "object", "required": ["tool", "summary"], "additionalProperties": false,
        "description": "result identical: the default-path stages of this package are identical to the compared build's after canonicalization (fleet/stage_equiv.py), so the performance sessions measured on compared_programs stand for this package without a re-measure; band is 0",
        "properties": {"tool": {"type": "string"}, "summary": {"type": "string"}, "url": {"type": ["string", "null"]}}},
+      "carried_programs": {"type": "array", "items": {"type": "string"}, "description": "result identical: the programs_sha256 of every build whose evidence (performance sessions, gates) the proof covers: compared_programs and, when that build was itself re-measured against the sessions' build, that one"},
+      "previous": {"type": "object", "description": "result identical: the re-measure block of the compared build (same keys), kept so the card still says how its table was re-measured"},
       "bands": {"type": "object", "additionalProperties": {"type": "number"}, "description": "the per-row bands (methodology.json) the comparison judged each row against"},
       "first_source": {"type": "string", "description": "improved: the source of the first of the two runs that confirmed the faster rows (source is the second)"},
       "improved": {"type": "object", "description": "rows faster than the published value in both runs: the card shows the mean of the two runs' medians for them, llama.cpp unchanged",

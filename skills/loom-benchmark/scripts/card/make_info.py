@@ -386,9 +386,15 @@ def cmd_build(a):
                 gst["gates"][g["name"]] = new
         if ev.get("remeasure"):   # make_info.py remeasure: a same-runner A/B of this package against the build the table shows
             mst = gpu_state(evidence_gpu(ev))
+            prev = mst["remeasure"]
             mst["remeasure"] = dict(ev["remeasure"], source=sources.add(ev["remeasure"]["source"]))
             if ev["remeasure"].get("first_source"):
                 mst["remeasure"]["first_source"] = sources.add(ev["remeasure"]["first_source"])
+            if ev["remeasure"]["result"] == "identical":   # the proof covers the build it compared with, and what that build's own re-measure stood for
+                chain = prev and prev["programs_sha256"] == ev["remeasure"]["compared_programs"]
+                mst["remeasure"]["carried_programs"] = [ev["remeasure"]["compared_programs"]] + ([prev["compared_programs"]] if chain else [])
+                if chain:   # the A/B that re-measured the compared build stays on the card
+                    mst["remeasure"]["previous"] = prev
         if ev.get("roofline"):
             rst = gpu_state(ev.get("gpu") or gpu_from_device({"name": ev["roofline"]["device"]["name"]}) or DEFAULT_GPU)
             rst["roofline"], rst["data"] = ev["roofline"], True
@@ -514,8 +520,11 @@ def cmd_build(a):
     used = {s["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])}
     used |= {b["session"]["source"] for d in devices.values() for b in ((d.get("performance") or {}).get("baselines") or {}).values()}
     used |= {g["source"] for d in devices.values() for g in (d.get("gates") or {}).values()}
-    used |= {d["remeasure"]["source"] for d in devices.values() if d.get("remeasure")}
-    used |= {d["remeasure"]["first_source"] for d in devices.values() if (d.get("remeasure") or {}).get("first_source")}
+    for d in devices.values():
+        r = d.get("remeasure")
+        while r:   # a chained re-measure (identical on top of a re-measured build) keeps its previous blocks' sources
+            used |= {r["source"]} | ({r["first_source"]} if r.get("first_source") else set())
+            r = r.get("previous")
     info["sources"] = {k: v for k, v in sources.by_id.items() if k in used}
     require_valid(info)
     out = dumps(info)

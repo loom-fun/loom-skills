@@ -359,6 +359,29 @@ def serve_command(info, facts, feats, gpu, output):
     return " ".join(serve)
 
 
+
+def remeasure_lines(rm, g, sources, on):
+    """The card lines about a same-runner A/B re-measure block (`on`: what was re-measured, "this package" or "programs SHA")."""
+    L = []
+    exc = "".join(f", {k} {(r - 1) * 100:+.1f} %" for k, r in (rm.get("exceptions") or {}).items() if r)
+    imp = rm.get("improved") or {}
+    bands = sorted({round(b * 100, 1) for b in (rm.get("bands") or {}).values()})
+    within = (f"+-{round(rm['band'] * 100)} %" if len(bands) < 2 else
+              f"the per-row bands (methodology, {bands[0]:g}-{bands[-1]:g} %)")
+    srcs = ", ".join(src_text(sources[sid]) for sid in (rm.get("first_source"), rm["source"]) if sid)
+    L.append(f"- {GPUS[g]['short']} re-measured on {on} on {text(rm['date'])}: within {within} of "
+             + ("the published" if imp else "these") + " values"
+             + (f" except {', '.join(imp)} (faster, confirmed in 2 runs; new values shown)" if imp else "")
+             + (f"{', and' if imp else ' except'}{exc[1:]} (not repeated in the same direction by the first run)" if exc else "")
+             + f" ({srcs}).")
+    if imp:
+        runs = ", ".join("%s %.1f and %.1f" % (k, *v["runs"][:2]) for k, v in imp.items())
+        was = ", ".join("%s %.1f" % (k, v["published"]) for k, v in imp.items() if v.get("published"))
+        L.append(f"- {', '.join(imp)}: the card value is the mean of the two re-measure runs' medians (each the median of "
+                 f"3 sessions; {runs}); the published value was {was}; llama.cpp values are as published (not re-measured).")
+    return L
+
+
 def perf_section(L, info, facts, feats, d, g, here, ctx):
     """One GPU's performance table, methodology and footnotes (appended to L). ctx: the tokens per request that GPU serves."""
     kind = facts["kind"]
@@ -470,23 +493,10 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
         L.append(f"- {GPUS[g]['short']} performance measured on programs {short(rm['compared_programs'])}; the default path of this package "
                  f"(sha256 {short(here)}) is identical after canonicalization ({pr['summary']}"
                  + (f"; [proof]({pr['url']})" if pr.get("url") else "") + f"; checked {text(rm['date'])}).")
+        if rm.get("previous"):   # the build compared with was itself re-measured against the table's: that stays said
+            L.extend(remeasure_lines(rm["previous"], g, sources, f"programs {short(rm['compared_programs'])}"))
     elif rm and rm["programs_sha256"] == here:   # a same-runner A/B of this package against the build the table measured
-        exc = "".join(f", {k} {(r - 1) * 100:+.1f} %" for k, r in (rm.get("exceptions") or {}).items() if r)
-        imp = rm.get("improved") or {}
-        bands = sorted({round(b * 100, 1) for b in (rm.get("bands") or {}).values()})
-        within = (f"+-{round(rm['band'] * 100)} %" if len(bands) < 2 else
-                  f"the per-row bands (methodology, {bands[0]:g}-{bands[-1]:g} %)")
-        srcs = ", ".join(src_text(sources[sid]) for sid in (rm.get("first_source"), rm["source"]) if sid)
-        L.append(f"- {GPUS[g]['short']} re-measured on this package on {text(rm['date'])}: within {within} of "
-                 + ("the published" if imp else "these") + " values"
-                 + (f" except {', '.join(imp)} (faster, confirmed in 2 runs; new values shown)" if imp else "")
-                 + (f"{', and' if imp else ' except'}{exc[1:]} (not repeated in the same direction by the first run)" if exc else "")
-                 + f" ({srcs}).")
-        if imp:
-            runs = ", ".join("%s %.1f and %.1f" % (k, *v["runs"][:2]) for k, v in imp.items())
-            was = ", ".join("%s %.1f" % (k, v["published"]) for k, v in imp.items() if v.get("published"))
-            L.append(f"- {', '.join(imp)}: the card value is the mean of the two re-measure runs' medians (each the median of "
-                     f"3 sessions; {runs}); the published value was {was}; llama.cpp values are as published (not re-measured).")
+        L.extend(remeasure_lines(rm, g, sources, "this package"))
     for b, x in extra.items():
         xb, xs = x["baseline"], x["session"]
         L.append(f"- {xnames[b]}: measured {text(xs['date'])}; source: {src_text(sources[xs['source']])}."
@@ -648,6 +658,9 @@ def render(d):
             return f"{NO} no evidence" if gate_applies(name, kind, feats) else f"{NA} not applicable"
         key = (gt["source"], gt["level"], gt["date"])
         gsha = gt.get("programs_sha256")
+        rmg = dev.get("remeasure") or {}
+        if gsha and gsha != here and gsha in rmg.get("carried_programs", []) and rmg.get("programs_sha256") == here and gt["status"] == "pass":
+            gsha = here   # the default path is proven identical to the build this pass ran on (the performance line says so)
         if gsha and gsha != here and gt["status"] == "pass":   # a pass on other programs says nothing about this package
             return (f"{UNKNOWN} not re-run on this package (the last pass was on a previous build, sha256 {short(gsha)}; "
                     f"the nightly gates re-run it)")

@@ -362,8 +362,8 @@ def build_card(W, slug, ref, state, proof_url=None):
         if g.get("equivalent") and not g.get("identical"):
             pj = os.path.join(cd, f"proof_{gpu}.json")
             jdump({"equivalent": True, "tool": "fleet/stage_equiv.py", "compared_programs": g["measured_programs"],
-                   "summary": (f"default-path stages identical after canonicalization (stage_equiv.py at {ref[:10]}, measured revision "
-                               f"{g['base_revision'][:10]}); storage/prepare/control differ only inside the logits blocks"), "url": proof_url}, pj)
+                   "summary": (f"fleet/stage_equiv.py at {ref[:10]} against the measured revision {g['base_revision'][:10]}; "
+                               f"storage, prepare and control differ only inside the logits blocks"), "url": proof_url}, pj)
             tool(f"{CARD}/make_info.py", "equivalent", "--gpu", gpu, "--proof", pj, "--package", pkg, "--source-kind", "local", "--device", "none",
                  "--hrx-loom", "none", "-o", os.path.join(cd, f"ev_eq_{gpu}.json"))
             ev.append(os.path.join(cd, f"ev_eq_{gpu}.json"))

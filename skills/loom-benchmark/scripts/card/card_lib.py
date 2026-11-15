@@ -572,7 +572,7 @@ def stale_metrics(info, programs, kind=None, feats=None):
     view = single(info)
     sessions = (view.get("performance") or {}).get("sessions", [])
     rm = view.get("remeasure") or {}
-    same = {programs} | ({rm["compared_programs"]} if rm.get("programs_sha256") == programs else set())   # a same-runner A/B within the band
+    same = {programs} | ({rm["compared_programs"], *rm.get("carried_programs", [])} if rm.get("programs_sha256") == programs else set())   # a same-runner A/B within the band, or identical stages
     out = {}
     for k, (_, i) in card_metrics(info).items():
         sha = sessions[i].get("programs_sha256")
