@@ -21,28 +21,18 @@
     {
      "name": "mtp3",
      "build": {},
+     "context": 40960,
      "build_args": [
       "--draft",
       "mtp",
       "--draft-depth",
       "3"
-     ],
-     "context": 124928
-    },
-    {
-     "name": "mtp4",
-     "build": {},
-     "build_args": [
-      "--draft",
-      "mtp",
-      "--draft-depth",
-      "4"
-     ],
-     "context": 124928
+     ]
     },
     {
      "name": "df3",
      "build": {},
+     "context": 40960,
      "build_args": [
       "--draft",
       "dflash",
@@ -50,12 +40,25 @@
       "{hf:z-lab/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf}",
       "--draft-depth",
       "3"
-     ],
-     "context": 83968
+     ]
+    },
+    {
+     "name": "df4",
+     "build": {},
+     "context": 40960,
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:z-lab/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf}",
+      "--draft-depth",
+      "4"
+     ]
     },
     {
      "name": "df5",
      "build": {},
+     "context": 40960,
      "build_args": [
       "--draft",
       "dflash",
@@ -63,12 +66,12 @@
       "{hf:z-lab/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf}",
       "--draft-depth",
       "5"
-     ],
-     "context": 83968
+     ]
     },
     {
      "name": "df7",
      "build": {},
+     "context": 40960,
      "build_args": [
       "--draft",
       "dflash",
@@ -76,31 +79,28 @@
       "{hf:z-lab/Qwen3.8-27B-DFlash2-GGUF/Qwen3.8-27B-DFlash2-Q4_K_M.gguf}",
       "--draft-depth",
       "7"
-     ],
-     "context": 83968
+     ]
     }
    ],
    "steps": [
     "perf:card:1",
     "perf:mtp3:1",
-    "perf:mtp4:1",
     "perf:df3:1",
+    "perf:df4:1",
     "perf:df5:1",
     "perf:df7:1",
     "perf:df7:1",
     "perf:df5:1",
+    "perf:df4:1",
     "perf:df3:1",
-    "perf:mtp4:1",
     "perf:mtp3:1",
     "perf:card:1",
     "perf:card:1:long",
     "perf:mtp3:1:long",
-    "perf:mtp4:1:long",
     "perf:df3:1:long",
+    "perf:df4:1:long",
     "perf:df5:1:long",
-    "perf:df7:1:long",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long"
+    "perf:df7:1:long"
    ]
   }
  ]
