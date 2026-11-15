@@ -524,7 +524,7 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'median', 
       LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR
       ( unset LLAMA_SPEC; "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 1 8192 | tail -1 ) || { res[$s]=ERROR; continue; }
       step "logits $p1 (bundle $GUFO_BUNDLE)"
-      "$T" "$here/.github/scripts/logits_check.py" "$D/$p1/pkg" "$out/logits_$p1.json" --bundle "$GUFO_BUNDLE" --llama "$lurl" --prompts "${p2:-6}" --preset "$(pkg_preset "$D/$p1/pkg/model.json")" \
+      "$T" "$here/.github/scripts/logits_check.py" "$D/$p1/pkg" "$out/logits_$p1.json" --bundle "$GUFO_BUNDLE" --llama "$lurl" --llama-stop "$B/llamacpp_server.sh --stop $LLAMA_PORT" --prompts "${p2:-6}" --preset "$(pkg_preset "$D/$p1/pkg/model.json")" \
         > "$out/logits_$p1.log" 2>&1; rc=$?
       tail -3 "$out/logits_$p1.log" | cut -c1-300
       "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1

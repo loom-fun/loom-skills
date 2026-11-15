@@ -42,6 +42,46 @@ class Comparisons(unittest.TestCase):
         # tail tokens differ by up to ~0.7 nats between the engines' quantized matmuls: inside the tolerance
         self.assertEqual(lc.check_vs_llama([[("Paris", -0.1), ("A", -3.72)]], ["Paris"], [{"Paris": -0.12, "A": -3.25}], near_tie), (1, []))
 
+    @unittest.skipIf(near_tie is None, "bench_common needs requests")
+    def test_measured_engine_differences(self):
+        # fleet sweep (DevLab): the same GGUF, tail log-probs 1.1-2.3 nats apart on mid-size/MoE models while top-1 agrees
+        top = [("A", -0.2), ("b", -3.727), ("c", -8.409), ("d", -12.702)]
+        ref = {"A": -0.25, "b": -4.763, "c": -7.309, "d": -10.357}      # 1.04 at p~0.02, 1.1 at p~7e-4, 2.3 at p~3e-5 (not compared)
+        self.assertEqual(lc.check_vs_llama([top], ["A"], [ref], near_tie), (1, []))
+        # the same distance on a confident token is a problem
+        n, probs = lc.check_vs_llama([[("A", -0.2)]], ["A"], [{"A": -1.5}], near_tie)
+        self.assertTrue(probs and "tolerance 1.0" in probs[0])
+        # a wrong row (a shifted slot): the second token several nats off where the mass is
+        n, probs = lc.check_vs_llama([[("A", -0.2), ("b", -6.5)]], ["A"], [{"A": -0.2, "b": -1.9}], near_tie)
+        self.assertTrue(probs)
+
+    @unittest.skipIf(near_tie is None, "bench_common needs requests")
+    def test_spellings(self):
+        # the end-of-sentence marker (fullwidth bars) is llama.cpp's ''; several tokens print '' and count by their best entry
+        eos = "<\uff5cend\u2581of\u2581sentence\uff5c>"
+        self.assertEqual(lc.check_vs_llama([[(eos, -0.00002), ("\n", -12.0)]], [""], [{"": -0.00002, "\n": -11.9}], near_tie), (1, []))
+        self.assertEqual(lc.best_by_key([("<|im_end|>", -0.0), ("<|text_end|>", -13.5)]), {"": -0.0})
+        # a sentencepiece vocabulary: Gufo prints 'are' where llama.cpp prints ' are'
+        self.assertEqual(lc.check_vs_llama([[("are", -0.19), ("is", -1.78)]], [" are"], [{" are": -0.18, " is": -1.76}], near_tie), (1, []))
+        self.assertEqual(lc.special_key(" "), " ")      # a whitespace-only token keeps its text
+
+    def test_tail_tolerance_tiers(self):
+        self.assertEqual(lc.tail_tol(-0.1, -0.2), 1.0)
+        self.assertEqual(lc.tail_tol(-2.0, -3.2), 1.5)
+        self.assertEqual(lc.tail_tol(-7.0, -9.0), 2.5)
+        self.assertIsNone(lc.tail_tol(-10.4, -12.7))
+
+    def test_stop_group(self):
+        import subprocess
+        import time
+        p = subprocess.Popen(["bash", "-c", "sleep 300 & wait"], start_new_session=True)   # a wrapper whose child holds the "GPU"
+        time.sleep(0.3)
+        t = time.time()
+        lc.stop_group(p, grace=10)
+        self.assertLess(time.time() - t, 8)
+        with self.assertRaises(ProcessLookupError):
+            os.killpg(p.pid, 0)
+
     def test_default_unchanged(self):
         self.assertEqual(lc.check_default_unchanged("Paris.", "Paris.", "Paris."), (True, ""))
         self.assertIn("character 2", lc.check_default_unchanged("Paris.", "Pa!is.", "Paris.")[1])
