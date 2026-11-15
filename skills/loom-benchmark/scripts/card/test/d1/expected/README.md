@@ -80,7 +80,6 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 | `agent_think_off` | The tool-calling loop with thinking off | — not applicable |
 | `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | — not applicable |
 | `logits` | Host logits readback (llm.logits on): at T=0 every returned row's argmax is the device's token, the top-k matches llama.cpp, greedy text is unchanged | — not applicable |
-| `gufo` | Gufo conformance through the embed layer: tool_choice, json_schema, min_p, penalties and logprobs served from the returned logits | — not applicable |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | ✅ pass ¹ |
 
 - ¹ [loom-factory run 40842422037](https://github.com/loom-fun/loom-skills/actions/runs/40842422037), 2026-10-29; device not recorded; hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered).

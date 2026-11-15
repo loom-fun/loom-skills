@@ -98,7 +98,7 @@ perf.py http://127.0.0.1:8431 loom --model flint --log loom.jsonl --no-campaign
 
 ### DevLab Dispatch run 3003, LEVEL=quick, 2026-11-06
 
-- Gates: `golden` pass, `compare` pass, `consistency` pass, `spec` pass, `agent` pass, `sampling` pass, `logits` pass (128/128 steps, top-5 within 0.05), `gufo` pass (27/27 checks).
+- Gates: `golden` pass, `compare` pass, `consistency` pass, `spec` pass, `agent` pass, `sampling` pass, `logits` pass (128/128 steps, top-5 within 0.05).
 - Device: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04.
 - Loom SDK: hrx-loom `0.1.0` (hrx-system `d01d1c1`).
 - Programs: sha256 `38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e`, the same as this repository's programs.

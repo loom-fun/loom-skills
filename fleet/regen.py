@@ -219,19 +219,20 @@ LOGITS_KEEP = ("func", "ktest")
 
 
 def logits_steps(doc, bundle):
-    """The final pass's job of a package: serve it, check it (func, ktest) and run the host-logits steps (logits:staging, gufo:staging) of
-    devlab_perf.sh. Functional checks only: no performance step (the card's rows carry over by stage equivalence, methodology rule 14)."""
+    """The final pass's job of a package: serve it, check it (func, ktest) and run the host-logits step (logits:staging) of devlab_perf.sh.
+    Functional checks only: no performance step (the card's rows carry over by stage equivalence, methodology rule 14). The Gufo
+    conformance step (gufo:staging) is not part of it: a card claims only the logits readback."""
     for j in doc["jobs"]:
-        j["steps"] = [x for x in j["steps"] if x.split(":")[0] in LOGITS_KEEP and x.endswith(":staging")] + ["logits:staging", "gufo:staging"]
+        j["steps"] = [x for x in j["steps"] if x.split(":")[0] in LOGITS_KEEP and x.endswith(":staging")] + ["logits:staging"]
         j["variants"] = [v for v in j["variants"] if v["name"] == "staging"]
         if bundle:   # a prebuilt tarball (URL, SHA256), or {"build": ...}: the devlab-perf run builds it (workflow job `bundle`), nothing is hosted
             j["bundle"] = bundle if isinstance(bundle, dict) else {"url": bundle[0], "sha256": bundle[1]}
 
 
 def logits_verdict(d, e):
-    """Logits mode: func, ktest, logits and gufo ran on the package and none failed (a missing bundle is `not supported`, never a pass)."""
+    """Logits mode: func, ktest and logits ran on the package and none failed (a missing bundle is `not supported`, never a pass)."""
     s = json.load(open(os.path.join(d, "summary.json"))).get("results", {})
-    need = [k for k in ("func:staging", "ktest:staging", "logits:staging", "gufo:staging") if k not in s]
+    need = [k for k in ("func:staging", "ktest:staging", "logits:staging") if k not in s]
     bad = {k: v for k, v in s.items() if str(v).lower().startswith(("fail", "error", "not supported")) or "FAIL" in str(v)[:40]}
     if bad:
         return "hold", [f"{k}: {str(v)[:120]}" for k, v in bad.items()]
@@ -837,7 +838,7 @@ def main(argv=None):
     p.add_argument("slugs", nargs="*")
     p.add_argument("--device", action="append", required=True)
     p.add_argument("--mode", choices=("ab", "card", "logits"), default="ab",
-                   help="logits: the final pass's functional job of a staging package (func, ktest, logits:staging, gufo:staging), no performance")
+                   help="logits: the final pass's functional job of a staging package (func, ktest, logits:staging), no performance")
     p.add_argument("--bundle", nargs=2, metavar=("URL", "SHA256"), help="logits mode: the Gufo bundle tarball the job fetches (devlab_perf.sh gufo_bundle)")
     p.add_argument("--bundle-run", help="logits mode: reuse the `gufo-bundle` artifact of this devlab-perf run (the run that built it: no build in this one)")
     p.add_argument("--bundle-build", nargs=2, metavar=("EXT_REV", "GUFO_REV"), help="logits mode: the devlab-perf run BUILDS the Gufo bundle "

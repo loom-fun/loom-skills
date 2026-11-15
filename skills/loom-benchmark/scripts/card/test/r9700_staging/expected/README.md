@@ -105,7 +105,6 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 | `agent_think_off` | The tool-calling loop with thinking off | — not yet re-measured | ✅ pass ¹ |
 | `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | — not yet re-measured | ✅ pass ¹ |
 | `logits` | Host logits readback (llm.logits on): at T=0 every returned row's argmax is the device's token, the top-k matches llama.cpp, greedy text is unchanged | — not yet re-measured | — not applicable |
-| `gufo` | Gufo conformance through the embed layer: tool_choice, json_schema, min_p, penalties and logprobs served from the returned logits | — not yet re-measured | — not applicable |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | — not yet re-measured | — not applicable |
 
 - ¹ [DevLab Dispatch run 9000001](https://github.com/loom-fun/loom-skills/actions/runs/9000001), LEVEL=quick, 2026-11-14; device TEST FIXTURE: made-up numbers, not a measurement, AMD Radeon AI PRO R9700S (gfx1201), Ubuntu 24.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`).

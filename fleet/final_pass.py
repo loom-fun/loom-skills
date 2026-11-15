@@ -341,11 +341,15 @@ def tool(*args, cwd=None):
     return r.stdout
 
 
+JOB_STAGES = ("collected", "ingested", "published", "needs_decision")   # a finished job: promoted, or held with its result in hand
+
+
 def job_of(state, slug, gpu):
-    for n, e in (state or {}).get("jobs", {}).items():
-        if e["slug"] == slug and e["device"] == gpu and e["stage"] in ("collected", "ingested", "published") and e.get("decision") == "promote":
-            return n, e
-    return None, None
+    """(name, entry) of the latest finished logits-mode job of the model on the GPU, whatever its verdict (a held job's card shows its
+    logits gate row, pass or the named gap, not "no logits job"); (None, None) when there is none."""
+    jobs = [(e.get("completed") or "", n, e) for n, e in (state or {}).get("jobs", {}).items()
+            if e["slug"] == slug and e["device"] == gpu and e["stage"] in JOB_STAGES and os.path.exists(os.path.join(e["dir"], "logits_staging.json"))]
+    return max(jobs, key=lambda j: j[:2])[1:] if jobs else (None, None)
 
 
 def changed_paths(a, b, prefix=""):
@@ -383,7 +387,8 @@ def build_card(W, slug, ref, state, proof_url=None):
         if e:
             d = e["dir"]
             tool(f"{CARD}/pull_devlab.py", "--identity", d, "--gpu", gpu, "--device-out", os.path.join(cd, f"dev_{gpu}.json"), "--hrx-out", os.path.join(cd, f"hrx_{gpu}.json"))
-            files = [f for f in (f"{d}/logits_staging.json", f"{d}/conformance_staging.json", f"{d}/ktest_staging.log") if os.path.exists(f)]
+            # the logits gate of the latest job; its kernel tests only when the whole job passed (a held job's other results are not the card's)
+            files = [f for f in (f"{d}/logits_staging.json", f"{d}/ktest_staging.log" if e.get("decision") == "promote" else "") if f and os.path.exists(f)]
             tool(f"{CARD}/make_info.py", "gates", "--gpu", gpu, "--time", (e.get("completed") or "")[:19], *files, "--package", pkg, "--source-kind", "devlab",
                  "--run", e["run"], "--url", e["job_url"], "--device", os.path.join(cd, f"dev_{gpu}.json"), "--hrx-loom", os.path.join(cd, f"hrx_{gpu}.json"),
                  "-o", os.path.join(cd, f"ev_gates_{gpu}.json"))

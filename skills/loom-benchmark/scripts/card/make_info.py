@@ -49,7 +49,7 @@ byte-identical files.
                      [SOURCE] -o gates_evidence.json
       gates.sh's gates.json (verdicts, level, ts), a gates.out with its "GATES ..." line, or a kernel test
       log ending in "N/M passed" (make_kernel_tests.py) -> gate evidence. A gates JSON may give a per-gate "detail"
-      (logits_V.json, conformance_V.json of devlab_perf.sh: gates `logits` and `gufo`). The spec gate's "acceptance N% of M
+      (logits_V.json of devlab_perf.sh: gate `logits`; a `gufo` gate in old evidence is dropped, card_lib.RETIRED_GATES). The spec gate's "acceptance N% of M
       proposals" (gates_spec.log or gates.out next to the file, or --spec-log) -> the spec_acceptance metric, from a
       DevLab (or factory) source only, like every card performance value.
 

@@ -48,11 +48,19 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "skills", "loom-benchmark", "s
 LOGPROB_TIERS = ((0.5, 1.0), (1e-2, 1.5), (1e-4, 3.0))    # (probability >=, tolerance in nats), tried in order
 LOGPROB_TOL = LOGPROB_TIERS[0][1]
 TOPK = 5
+NEAR_TIE_MARGIN = 1.0   # the golden's near-tie gap (bench_common.near_tie max_gap, nats): a device token this close to the row maximum is a tie
+DETAIL_MAX = 60         # card gate details are one short factual line (card_lib.text_errors)
 MIN_COMPARED = 8       # greedy steps compared against llama.cpp on at least one prompt before the gate can pass
 NOTHINK = {"chat_template_kwargs": {"enable_thinking": False}}
 
 
 # ---------------------------------------------------------------- comparisons (pure)
+
+def clip(text, n=DETAIL_MAX):
+    """text cut to n characters (a card's gate detail is one short line); the full reasons are in the checks."""
+    text = " ".join(text.split())
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
 
 SPECIAL = re.compile("^<[|\uff5c].+[|\uff5c]>$")   # <|im_end|>, <FULLWIDTH-BAR end of sentence FULLWIDTH-BAR>: the engines' spellings of special tokens
 
@@ -64,6 +72,34 @@ def special_key(key):
     if SPECIAL.match(key):
         return ""
     return key.lstrip(" ") or key
+
+
+def eog_keys(pkg):
+    """The texts the model's end markers print as: the chat's terminal and the tokenizer's end-of-generation ids (llm_config eos_id,
+    extra_eos_ids). llama.cpp prints '' for them whatever their spelling ('<turn|>', '<end_of_turn>', '</assistant>'): they are one token."""
+    out = {pkg.chat.get("terminal") or ""}
+    for i in [pkg.cfg.get("eos_id"), *(pkg.cfg.get("extra_eos_ids") or [])]:
+        if isinstance(i, int) and i >= 0:
+            out.add(pkg.tok.decode([i], skip_special_tokens=False))
+    return {k for k in out if k}
+
+
+def compare_key(key, eog=()):
+    """special_key, and one key ('') for the model's end markers and for whitespace-only tokens (Gufo prints a whitespace-only token
+    as '', llama.cpp keeps its text)."""
+    if key in eog or not key.strip():
+        return ""
+    return special_key(key)
+
+
+def merge_keys(pairs, eog=()):
+    """best_by_key under compare_key (end markers and whitespace-only tokens count by their best entry)."""
+    out = {}
+    for key, lp in pairs:
+        key = compare_key(key, eog)
+        if key not in out or lp > out[key]:
+            out[key] = lp
+    return out
 
 
 def tail_tol(a, b):
@@ -82,24 +118,26 @@ def best_by_key(pairs):
     return out
 
 
-def check_vs_llama(loom_tops, llama_keys, llama_tops, near_tie):
+def check_vs_llama(loom_tops, llama_keys, llama_tops, near_tie, eog=()):
     """Compare Loom's per-step top lists with llama.cpp's greedy continuation of the same prompt.
     loom_tops: per generated step [(key, logprob)] best first (key: the token's text); llama_keys: llama.cpp's greedy token per
-    step; llama_tops: per step {key: logprob}. near_tie(top, gold, loom) -> bool (bench_common.near_tie).
+    step; llama_tops: per step {key: logprob}. near_tie(top, gold, loom) -> bool (bench_common.near_tie). eog: the model's end-marker
+    texts (eog_keys): llama.cpp ends an answer with an empty/special token where Loom's top-1 is the template's end marker, which is the
+    same token, so they compare equal and their log-probs are compared like any other.
     Returns (compared_steps, problems): stops at the first greedy divergence (judged as a near-tie, or a problem)."""
     compared, problems = 0, []
-    llama_keys = [special_key(k) for k in llama_keys]
-    llama_tops = [best_by_key(t.items()) for t in llama_tops]
+    llama_keys = [compare_key(k, eog) for k in llama_keys]
+    llama_tops = [merge_keys(t.items(), eog) for t in llama_tops]
     for k, (top, gkey, ltop) in enumerate(zip(loom_tops, llama_keys, llama_tops)):
         if not top:
             problems.append(f"step {k}: no top-logprobs")
             break
-        lkey = special_key(top[0][0])
+        lkey = compare_key(top[0][0], eog)
         if lkey != gkey:
             if not near_tie(ltop, gkey, lkey):
                 problems.append(f"step {k}: Loom top-1 {lkey!r} vs llama.cpp {gkey!r}, not a near-tie")
             break
-        for key, lp in best_by_key(top).items():
+        for key, lp in merge_keys(top, eog).items():
             if key in ltop:
                 allowed = tail_tol(lp, ltop[key])
                 if allowed is not None and abs(lp - ltop[key]) > allowed:
@@ -121,17 +159,54 @@ def first_diff(a, b):
     return next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
 
 
-def probe_check(line):
-    """(ok, why) of embed_probe's one JSON line: opened, no failures."""
+PROBE_ARGMAX = re.compile(r"step (\d+) row (\d+): argmax\(row\)=(\d+) \((-?[\d.]+)\) but the device selected (-?\d+) \((-?[\d.]+)\)")
+
+
+def probe_ties(err, width, margin=NEAR_TIE_MARGIN):
+    """embed_probe's stderr FAIL lines judged by the golden near-tie rule: (ties, why). Every failure must be an 'argmax(row)=A (x) but the
+    device selected D (y)' line whose device token D is a valid row index with its exported logit y within `margin` of the row maximum x
+    (the device and the host's argmax broke a near-tie differently); ties = [(step, row, margin)]. Anything else (a padding hit, a row
+    that could not be read, a device token outside the row) is a failure: why names the first."""
+    ties = []
+    for line in err.splitlines():
+        if not line.startswith("FAIL "):
+            continue
+        m = PROBE_ARGMAX.search(line)
+        if not m:
+            return ties, f"embed_probe: {line.split(': ', 1)[-1][:120]}"
+        step, row, top, x, dev, y = int(m[1]), int(m[2]), int(m[3]), float(m[4]), int(m[5]), float(m[6])
+        if not 0 <= dev < width:
+            return ties, f"embed_probe: step {step} row {row}: device token {dev} outside the row"
+        gap = x - y
+        if gap > margin:
+            return ties, f"embed_probe: step {step} row {row}: device token {gap:.2f} nats below the row maximum (near-tie {margin})"
+        ties.append((step, row, round(gap, 4)))
+    return ties, ""
+
+
+def probe_judge(line, err="", margin=NEAR_TIE_MARGIN):
+    """(ok, why, ties) of embed_probe's one JSON line and its stderr: opened, and every failure a near-tie of the device token
+    (probe_ties); ties = [(step, row, margin)] the probe's argmax and the device token broke differently."""
     try:
         j = json.loads(line)
     except ValueError:
-        return False, f"embed_probe printed no JSON: {line[:120]!r}"
+        return False, f"embed_probe printed no JSON: {line[:120]!r}", []
     if not j.get("opened"):
-        return False, f"embed_probe: open failed: {j.get('error')}"
-    if j.get("failures", 1) != 0:
-        return False, f"embed_probe: {j.get('failures')} failure(s)"
-    return True, ""
+        return False, f"embed_probe: open failed: {j.get('error')}", []
+    n = j.get("failures", 1)
+    if n == 0:
+        return True, "", []
+    ties, why = probe_ties(err, j.get("width") or 0, margin)
+    if why:
+        return False, why, ties
+    if len(ties) != n:
+        return False, f"embed_probe: {n} failure(s), {len(ties)} judged near-ties (stderr incomplete)", ties
+    return True, "", ties
+
+
+def probe_check(line, err=""):
+    """(ok, why) of embed_probe's one JSON line: opened, no failures (or only near-ties of the device token, probe_judge)."""
+    return probe_judge(line, err)[:2]
 
 
 def verdict(checks, compared_max, llama_used):
@@ -240,6 +315,7 @@ def run(a):
         return 2
     from bench_common import PROMPTS, Package, near_tie
     pkg = Package(a.package)
+    eog = eog_keys(pkg)
     prompts = PROMPTS[:a.prompts]
     work = os.path.splitext(a.out)[0]
     checks, compared_max, stats = [], 0, {"steps": 0, "prompts": 0}
@@ -255,10 +331,13 @@ def run(a):
     preset_args = ["--loom-preset", a.preset] if a.preset else []   # a card with several presets needs one named
     # (a) the embed layer alone
     r = subprocess.run([os.path.join(bundle, "run-embed-probe.sh"), a.package, str(a.steps), "3", a.preset], capture_output=True, text=True, timeout=1800)
-    ok, why = probe_check((r.stdout.strip().splitlines() or [""])[-1])
-    checks.append({"name": "embed_probe", "ok": ok and r.returncode == 0, "why": why or (r.stderr.strip().splitlines() or [""])[-1][:200]})
+    ok, why, ties = probe_judge((r.stdout.strip().splitlines() or [""])[-1], r.stderr)
+    checks.append({"name": "embed_probe", "ok": ok and r.returncode in (0, 1), "why": why or ("" if ok else (r.stderr.strip().splitlines() or [""])[-1][:200]),
+                   "ties": ties, "max_tie_margin": max((t[2] for t in ties), default=0.0)})
     with open(work + ".embed_probe.json", "w") as f:
         f.write(r.stdout)
+    with open(work + ".embed_probe.err", "w") as f:   # the probe's FAIL lines carry the exported logits of every tie: the data the near-tie judge needs
+        f.write(r.stderr)
 
     # (c) capability off: the device path's text
     off = {}
@@ -281,7 +360,7 @@ def run(a):
             if a.llama:
                 lkeys, ltops = refs[p]
                 tops = [[(t["token"], t["logprob"]) for t in e.get("top_logprobs") or []] for e in lp]
-                n, problems = check_vs_llama(tops, lkeys, ltops, near_tie)
+                n, problems = check_vs_llama(tops, lkeys, ltops, near_tie, eog)
                 compared_max = max(compared_max, n)
                 checks.append({"name": "llama", "prompt": p[:40], "ok": not problems, "compared": n, "why": "; ".join(problems[:3]),
                                "sample": {"loom": tops[:4], "llama": [[k, sorted(t.items(), key=lambda kv: -kv[1])[:5]] for k, t in zip(lkeys[:4], ltops[:4])]}})
@@ -289,10 +368,11 @@ def run(a):
         g.close()
     ok, bad = verdict(checks, compared_max, bool(a.llama))
     n_ok = sum(1 for c in checks if c["ok"])
-    detail = (f"embed_probe argmax = device token; {stats['steps']} host-sampled steps on {stats['prompts']} prompts"
-              + (f", top-1 = llama.cpp's and top-{TOPK} within {LOGPROB_TIERS[0][1]}-{LOGPROB_TIERS[-1][1]} nats by probability over {compared_max}+ steps" if a.llama else "") + ", greedy text unchanged")
-    out.update({"verdict": "PASS" if ok else "FAIL", "checks": checks, "stats": stats,
-                "gates": {"logits": {"pass": ok, "detail": detail if ok else "; ".join(f"{b.get('name')}: {b.get('why')}" for b in bad)[:200]}}})
+    ties = sum(len(c.get("ties") or []) for c in checks)
+    margin = max((c.get("max_tie_margin", 0.0) for c in checks), default=0.0)
+    detail = clip("argmax = device token" + (f" ({ties} near-ties, max {margin:.2f} nats)" if ties else "") + (f"; top-{TOPK} = llama.cpp's" if a.llama else ""))
+    out.update({"verdict": "PASS" if ok else "FAIL", "checks": checks, "stats": {**stats, "near_ties": ties, "max_tie_margin": margin},
+                "gates": {"logits": {"pass": ok, "detail": detail if ok else clip("; ".join(f"{b.get('name')}: {b.get('why')}" for b in bad))}}})
     with open(a.out, "w") as f:
         json.dump(out, f, indent=1)
     print(f"LOGITS {out['verdict']} {n_ok}/{len(checks)} checks; {detail}")

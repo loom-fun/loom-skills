@@ -67,6 +67,57 @@ class Comparisons(unittest.TestCase):
         self.assertEqual(lc.check_vs_llama([[("are", -0.19), ("is", -1.78)]], [" are"], [{" are": -0.18, " is": -1.76}], near_tie), (1, []))
         self.assertEqual(lc.special_key(" "), " ")      # a whitespace-only token keeps its text
 
+    @unittest.skipIf(near_tie is None, "bench_common needs requests")
+    def test_end_markers_are_one_token(self):
+        # llama.cpp ends with '' where Loom's top-1 is the template's end marker (gemma-4 '<turn|>', gemma-3 '<end_of_turn>', Laguna '</assistant>')
+        for marker in ("<turn|>", "<end_of_turn>", "</assistant>"):
+            top = [[("Paris", -0.0), ], [(marker, -0.22), (".", -1.64)]]
+            ref = [{"Paris": -0.0}, {"": -0.217, ".": -1.636}]
+            self.assertTrue(lc.check_vs_llama(top, ["Paris", ""], ref, near_tie)[1])    # without the model's markers: a mismatch
+            self.assertEqual(lc.check_vs_llama(top, ["Paris", ""], ref, near_tie, eog={marker})[1], [])
+            self.assertEqual(lc.check_vs_llama(top, ["Paris", ""], ref, near_tie, eog={marker})[0], 2)
+        # an end marker where llama.cpp is confident of another token stays a problem; the marker's log-prob is compared like any other
+        n, probs = lc.check_vs_llama([[("<turn|>", -0.1)]], ["Paris"], [{"Paris": -0.01, "": -6.0}], near_tie, eog={"<turn|>"})
+        self.assertTrue(probs)
+        n, probs = lc.check_vs_llama([[("<turn|>", -0.1)]], [""], [{"": -2.5}], near_tie, eog={"<turn|>"})
+        self.assertTrue(probs and "tolerance" in probs[0])
+        # Gufo prints a whitespace-only token as '', llama.cpp keeps its text
+        self.assertEqual(lc.check_vs_llama([[("", -0.3)]], [" "], [{" ": -0.31}], near_tie), (1, []))
+
+    def test_eog_keys(self):
+        class Tok:
+            def decode(self, ids, skip_special_tokens=False):
+                return {1: "<eos>", 106: "<end_of_turn>"}[ids[0]]
+
+        class Pkg:
+            chat = {"terminal": "<end_of_turn>"}
+            cfg = {"eos_id": 1, "extra_eos_ids": [106]}
+            tok = Tok()
+        self.assertEqual(lc.eog_keys(Pkg()), {"<eos>", "<end_of_turn>"})
+
+    def test_probe_near_ties(self):
+        # embed_probe's FAIL lines carry both exported logits: a device token within the golden's 1.0 nat of the row maximum is a tie
+        line = '{"opened": true, "width": 1000, "failures": 2}'
+        err = ("FAIL x.c:1: step 10 row 1: argmax(row)=5 (12.250) but the device selected 7 (12.250)\n"
+               "FAIL x.c:1: step 12 row 0: argmax(row)=5 (12.250) but the device selected 9 (11.500)\n")
+        ok, why, ties = lc.probe_judge(line, err)
+        self.assertEqual((ok, why, ties), (True, "", [(10, 1, 0.0), (12, 0, 0.75)]))
+        self.assertTrue(lc.probe_check(line, err)[0])
+        # a device token 3 nats below the maximum (a stale or shifted row), outside the row, or a failure of another kind: not a tie
+        far = "FAIL x.c:1: step 3 row 0: argmax(row)=5 (12.250) but the device selected 7 (9.000)\n"
+        self.assertIn("3.25 nats", lc.probe_judge('{"opened": true, "width": 1000, "failures": 1}', far)[1])
+        out = "FAIL x.c:1: step 3 row 0: argmax(row)=5 (12.250) but the device selected 1000 (-1.000)\n"
+        self.assertIn("outside the row", lc.probe_judge('{"opened": true, "width": 1000, "failures": 1}', out)[1])
+        pad = "FAIL x.c:1: step 3 row 0: argmax 151900 is padding (vocabulary 151665)\n"
+        self.assertFalse(lc.probe_judge('{"opened": true, "width": 1000, "failures": 1}', pad)[0])
+        self.assertFalse(lc.probe_judge('{"opened": true, "width": 1000, "failures": 1}', "")[0])   # no stderr: nothing to judge
+        self.assertFalse(lc.probe_judge('{"opened": true, "width": 1000, "failures": 3}', err)[0])  # a failure not accounted for
+
+    def test_detail_is_one_short_line(self):
+        self.assertEqual(lc.clip("a" * 61), "a" * 59 + "…")
+        self.assertLessEqual(len(lc.clip("x: " + "why " * 40)), lc.DETAIL_MAX)
+        self.assertEqual(lc.clip("argmax = device token"), "argmax = device token")
+
     def test_tail_tolerance_tiers(self):
         self.assertEqual(lc.tail_tol(-0.1, -0.2), 1.0)
         self.assertEqual(lc.tail_tol(-2.0, -3.2), 1.5)
@@ -129,7 +180,7 @@ class GufoGate(unittest.TestCase):
         import gufo_gate
         c = {"results": [{"check": "a", "status": "pass"}, {"check": "b", "status": "pass"}]}
         lc = {"results": [{"check": "x", "status": "pass"}]}
-        self.assertEqual(gufo_gate.gate(c, lc, 0), (True, "2/2 conformance checks, 1/1 logits checks"))
+        self.assertEqual(gufo_gate.gate(c, lc, 0), (True, "2/2 conformance, 1/1 logits"))
         self.assertFalse(gufo_gate.gate(c, lc, 1)[0])                                                # a script failed
         self.assertFalse(gufo_gate.gate({"results": c["results"] + [{"check": "g", "status": "gap"}]}, lc, 0)[0])   # a gap is a miss with --logits
         self.assertFalse(gufo_gate.gate(c, {"results": [{"check": "x", "status": "fail"}]}, 0)[0])

@@ -28,9 +28,9 @@ def gate(conf, lc, rc):
     lpass = sum(r["status"] == "pass" for r in lres)
     ok = rc == 0 and n["fail"] == 0 and n["gap"] == 0 and lpass == len(lres) and bool(res) and bool(lres)
     if ok:
-        return True, f"{n['pass']}/{len(res)} conformance checks, {lpass}/{len(lres)} logits checks"
+        return True, f"{n['pass']}/{len(res)} conformance, {lpass}/{len(lres)} logits"
     bad = [r["check"] for r in res if r["status"] != "pass"] + [r["check"] for r in lres if r["status"] != "pass"]
-    return False, f"{n['pass']}/{len(res)} conformance ({n['fail']} fail, {n['gap']} gap), {lpass}/{len(lres)} logits; first: {', '.join(bad[:3])}"[:200]
+    return False, f"{n['pass']}/{len(res)} conformance, {lpass}/{len(lres)} logits; first: {', '.join(bad[:3])}"[:60]
 
 
 def main(argv):

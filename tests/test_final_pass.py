@@ -62,13 +62,30 @@ class Helpers(unittest.TestCase):
         self.assertTrue(fp.merge_llm_config(d_old, {"chat": 1, "draft": {"kind": "assist", "gguf": "e.gguf"}}, "REF")[1])
 
 
+class JobOf(unittest.TestCase):
+    def test_latest_finished_job_whatever_its_verdict(self):
+        with tempfile.TemporaryDirectory() as d:
+            def job(name, completed, stage, decision):
+                p = os.path.join(d, name)
+                os.makedirs(p)
+                open(os.path.join(p, "logits_staging.json"), "w").write("{}")
+                return {"slug": "m", "device": "g", "stage": stage, "decision": decision, "completed": completed, "dir": p}
+            state = {"jobs": {"a": job("a", "2026-11-15T09:00:00Z", "needs_decision", "hold"), "b": job("b", "2026-11-15T10:00:00Z", "needs_decision", "hold"),
+                              "c": job("c", "2026-11-15T11:00:00Z", "failed", "rerun")}}
+            self.assertEqual(fp.job_of(state, "m", "g")[0], "b")          # the held job counts; a failed job and an older one do not
+            self.assertEqual(fp.job_of(state, "m", "other"), (None, None))
+            self.assertEqual(fp.job_of(None, "m", "g"), (None, None))
+            os.remove(os.path.join(d, "b", "logits_staging.json"))         # no logits result: no job
+            self.assertEqual(fp.job_of(state, "m", "g")[0], "a")
+
+
 class LogitsMode(unittest.TestCase):
     def test_steps_are_cut_to_the_functional_job(self):
         doc = {"jobs": [{"steps": ["perf:fun:1", "perf:staging:1", "c4:funnd", "textmatch:fun", "func:staging", "ktest:staging", "gates:staging:dev"],
                          "variants": [{"name": "fun"}, {"name": "staging"}]}]}
         regen.logits_steps(doc, ["http://b", "abc"])
         j = doc["jobs"][0]
-        self.assertEqual(j["steps"], ["func:staging", "ktest:staging", "logits:staging", "gufo:staging"])
+        self.assertEqual(j["steps"], ["func:staging", "ktest:staging", "logits:staging"])
         self.assertEqual([v["name"] for v in j["variants"]], ["staging"])
         self.assertEqual(j["bundle"], {"url": "http://b", "sha256": "abc"})
         regen.logits_steps(doc, {"build": {"extension": "loom-fun/loom-gufo-extension@x", "gufo": "loom-fun/gufo@y"}})
@@ -94,12 +111,12 @@ class LogitsMode(unittest.TestCase):
             json.dump({"results": results}, open(os.path.join(d, "summary.json"), "w"))
             return regen.logits_verdict(d, {})[0]
 
-    def test_verdict_needs_all_four_steps_and_no_failure(self):
-        ok = {"func:staging": "PASS", "ktest:staging": "PASS (62/62)", "logits:staging": "LOGITS PASS", "gufo:staging": "GUFO PASS"}
+    def test_verdict_needs_all_three_steps_and_no_failure(self):
+        ok = {"func:staging": "PASS", "ktest:staging": "PASS (62/62)", "logits:staging": "LOGITS PASS"}
         self.assertEqual(self.verdict(ok), "promote")
-        self.assertEqual(self.verdict(dict(ok, **{"gufo:staging": "not supported (no gufo bundle)"})), "hold")
+        self.assertEqual(self.verdict(dict(ok, **{"logits:staging": "not supported (no gufo bundle)"})), "hold")
         self.assertEqual(self.verdict(dict(ok, **{"logits:staging": "FAIL argmax"})), "hold")
-        self.assertEqual(self.verdict({k: v for k, v in ok.items() if k != "gufo:staging"}), "rerun")
+        self.assertEqual(self.verdict({k: v for k, v in ok.items() if k != "logits:staging"}), "rerun")
 
 
 class CarriedPrograms(unittest.TestCase):
@@ -123,7 +140,9 @@ class LogitsCapability(unittest.TestCase):
         self.assertTrue(card_lib.declares_logits({"variants": {"gguf": {"services": {"chat": {"config": {"llm.logits": False}}}}}}))
         self.assertFalse(card_lib.declares_logits({"variants": {"gguf": {"services": {"chat": {"config": {"llm.card": True}}}}}}))
         self.assertTrue(card_lib.gate_applies("logits", "chat", {}, True))
-        self.assertFalse(card_lib.gate_applies("gufo", "chat", {}, False))
+        self.assertFalse(card_lib.gate_applies("logits", "chat", {}, False))
+        self.assertNotIn("gufo", card_lib.GATE_NAMES)      # a card claims the logits readback, not Gufo's conformance suite
+        self.assertIn("gufo", card_lib.RETIRED_GATES)      # old evidence carrying it is dropped
 
 
 if __name__ == "__main__":

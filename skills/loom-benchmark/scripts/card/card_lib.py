@@ -114,14 +114,14 @@ GATES = [
     ("agent_think_off", "The tool-calling loop with thinking off"),
     ("sampling", "temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp"),
     ("logits", "Host logits readback (llm.logits on): at T=0 every returned row's argmax is the device's token, the top-k matches llama.cpp, greedy text is unchanged"),
-    ("gufo", "Gufo conformance through the embed layer: tool_choice, json_schema, min_p, penalties and logprobs served from the returned logits"),
     ("decision", "Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts"),
 ]
 GATE_NAMES = [n for n, _ in GATES]
 # Gates that no longer exist (the needle gates were removed; gates.sh now only probes that the native context is admitted,
-# which is a check, not a gate). Published info.json files and old evidence still carry them: make_info.py drops them,
+# which is a check, not a gate; `gufo`, Gufo's conformance suite, is a test of another project's server that a card does not claim: only
+# the optional logits readback is). Published info.json files and old evidence still carry them: make_info.py drops them,
 # normalize() strips them for every reader, so a card never shows one. The schema still accepts them (unknown gate names).
-RETIRED_GATES = ("needle", "needle_full")
+RETIRED_GATES = ("needle", "needle_full", "gufo")
 # speculative decoding methods (llm_config.json draft.kind) as the card names them
 METHOD = {"dflash": "DFlash", "mtp": "MTP", "ngram": "n-gram prompt lookup", "assist": "assistant drafter"}
 BASE_TAGS = ["loom", "loom-serve", "gguf"]
@@ -506,7 +506,7 @@ def gate_applies(name, kind, feats, logits=True):
         return name == "decision"
     if name == "decision":
         return False
-    if name in ("logits", "gufo"):   # the host logits readback is an LLM text feature (llm.logits): a package without the capability has none
+    if name == "logits":   # the host logits readback is an LLM text feature (llm.logits): a package without the capability has none
         return logits
     if name == "vision":
         return feats["image_input"]["status"] == "yes"
