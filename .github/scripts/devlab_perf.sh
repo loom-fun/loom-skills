@@ -346,7 +346,7 @@ gufo_bundle() {   # gufo_bundle -> exports GUFO_BUNDLE (the experiment's/job's "
   d=$WORK/_gufo-bundle/${h:0:12}
   if [ ! -x "$d/run.sh" ]; then
     step "fetch gufo bundle $u"; rm -rf "$d"; mkdir -p "$d"
-    curl -fsSL --retry 5 ${GH_TOKEN:+-H "Authorization: Bearer $GH_TOKEN"} "$u" -o "$d.tgz" && [ "$(sha256sum "$d.tgz" | cut -d' ' -f1)" = "$h" ] \
+    curl -fsSL --retry 5 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} "$u" -o "$d.tgz" && [ "$(sha256sum "$d.tgz" | cut -d' ' -f1)" = "$h" ] \
       && tar -xzf "$d.tgz" -C "$d" --strip-components=1 || { echo "FAIL: gufo bundle $u (fetch, sha256 or untar)"; rm -rf "$d" "$d.tgz"; return 1; }
     rm -f "$d.tgz"
   fi
