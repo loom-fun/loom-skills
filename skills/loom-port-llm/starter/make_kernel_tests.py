@@ -495,6 +495,36 @@ cases.append(f"""check.case public @head_argmax {{
   check.return
 }}
 """)
+# 3a''. logits export (loom-skills#736): the flagged selected span's full row lands in `outputs` at the 32768-byte region, bit-exact;
+# a selected span without the top_k flag and an unselected flagged span export nothing. (Softcap models: the capped value, close.)
+LS = 2
+lg = rng.standard_normal((LS, CH * 128)).astype(np.float32) * 5
+lg[:, cfg["vocab"]:] = -3.0e38                                       # padded columns, as g_head_mv writes them
+lm = np.zeros(4 + 9 * LS, np.int32); lm[0] = LS
+lm[4 + 6] = 1; lm[4 + 7] = (1 << 30) | 40                            # span 0: selected, export flag, k = 40
+lm[4 + 9 + 6] = 1; lm[4 + 9 + 7] = 40                                # span 1: selected, no flag
+region = 32768 // 4
+exp_out = np.zeros(region + LS * CH * 128, np.float32)
+_sc = cfg.get("logit_softcap") or 0.0
+if _sc:
+    _ls = cfg.get("logit_scale") or 1.0
+    row = np.where(np.arange(CH * 128) < cfg["vocab"], _sc * np.tanh(lg[0] * (_ls / _sc)), lg[0])
+else:
+    row = lg[0]
+exp_out[region:region + CH * 128] = row
+for n, a in [("lx_meta", lm), ("lx_logits", lg), ("lx_out", exp_out)]:
+    save(n, a)
+cases.append(f"""check.case public @logits_export {{
+  %spans = check.literal value({LS}) : index
+  %meta = check.file.read.npy path("lx_meta.npy") : tensor<{lm.size}xi32>
+  %logits = check.file.read.npy path("lx_logits.npy") : tensor<{LS}x{CH * 128}xf32>
+  %expect = check.file.read.npy path("lx_out.npy") : tensor<{exp_out.size}xf32>
+  %out = check.generate.fill value(0.0) : tensor<{exp_out.size}xf32>
+  kernel.launch @g_logits_export[%spans](%spans, %meta, %logits, %out) : [index](index, tensor<{lm.size}xi32>, tensor<{LS}x{CH * 128}xf32>, tensor<{exp_out.size}xf32>)
+  check.expect.close actual(%out) expected(%expect) atol({"1.0e-3" if _sc else "0.0"}) rtol({"1.0e-3" if _sc else "0.0"}) nan(different) : tensor<{exp_out.size}xf32>
+  check.return
+}}
+""")
 # 3a'. multi-span int8 head: the 4/8/16-span kernels must give every span's logits and argmax partials bit-identical to
 # the 1-span kernel (verification rounds like decode); 16 and 12 live spans (a partial span group)
 if HEAD_Q8:

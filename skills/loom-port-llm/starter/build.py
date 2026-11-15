@@ -746,6 +746,7 @@ custom_chat = custom_chat if chat["call_format"] not in CALL_FORMATS and os.path
 subs = {
     "@@POS_BYTES@@": str(pos_bytes), "@@PLANES@@": str(2 * kv_layers), "@@BLOCK_BYTES@@": str(16 * pos_bytes),
     "@@RECURRENT_BYTES@@": str(recurrent_bytes or 4),
+    "@@LOGIT_REGION@@": "32768", "@@LOGIT_ROW_BYTES@@": str(((cfg["vocab"] + 127) // 128) * 512),   # gen_llm.LOGITS_OFFSET / CHUNKS * 512
     "@@MAX_CONTEXT@@": str(a.context), "@@TERMINAL@@": chat["terminal"], "@@HEX_TERMINAL@@": hx(chat["terminal"]),
     "@@HEX_UNSUPPORTED@@": hx(f"llm requires pooled epochs without MTP, at most 128 shapes and a context of at most {a.context}"),
     "@@HEX_NAME@@": hx(model_id),
@@ -830,6 +831,8 @@ for name in ("prepare", "control", "storage", "service"):
     if DRAFT:   # speculative decoding glue (draft/build_draft.py)
         text = {"prepare": lambda t: build_draft.patch_prepare(t, DRAFT, cfg), "storage": lambda t: build_draft.patch_storage(t, cfg, DRAFT),
                 "control": lambda t: build_draft.patch_control(t, cfg, DRAFT)}.get(name, lambda t: t)(text)
+    if name == "storage" and os.environ.get("LLM_LOGITS", "1") == "0":   # choice feature.logits_export off: no logits readback in the package
+        text = re.sub(r"(?s)\n?[ ]*// logits:begin\n.*?// logits:end\n", "\n", text)
     for k, v in subs.items():
         text = text.replace(k, v)
     assert "@@" not in text, (name, [l for l in text.splitlines() if "@@" in l])

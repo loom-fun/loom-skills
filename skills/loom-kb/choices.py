@@ -366,6 +366,10 @@ CHOICE("draft.ngram.max", "int", 4, "NGRAM_MAX", kernels=["g_ng_propose"], rows=
 CHOICE("draft.ngram.window", "int", 32768, "NGRAM_WINDOW", kernels=["g_ng_propose"], rows=ROWS_DECODE + ROWS_STREAMS,
        doc="History positions scanned per proposal.")
 
+CHOICE("feature.logits_export", "bool", True, "LLM_LOGITS", kernels=["g_logits_export"], rows=[], from_pr="loom-skills#736",
+       doc="The package carries the opt-in logits readback (g_logits_export, a card-config-guarded tail of @llm_advance, a guarded larger "
+           "outputs allocation). Off by default at load (card config llm.logits); False drops the code from the package.")
+
 # ======================================================================================================================
 # Not choices: everything else the generators and their tools read from the environment
 # ======================================================================================================================
