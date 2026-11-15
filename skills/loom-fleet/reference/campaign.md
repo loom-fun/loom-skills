@@ -121,6 +121,12 @@ verdict needs it) -> `ingest` (card from the job; Strix keeps the published tabl
 (card-only, `loom-fun-staging`). A confirmed regression, failed gate or text difference stops that model in `needs_decision`; the rest go on
 (`accept` records a person's near-tie call). `status --status-json` writes `models.<slug>.<gpu>` for the dashboard. Time model: `fleet/README.md`.
 
+**Escalation ladder for a new check or a fleet-wide change** (logits campaign: a 1-model pilot went straight to a 99-job sweep, and the sweep
+mostly found bugs in the checks themselves). (1) Offline: `fleet/stage_equiv.py` and `fleet/link_check.py` over the whole fleet build (the fold
+proof alone missed a package that did not link). (2) Pilot: one model, both GPUs, every new step. (3) Stratified sample across the axes the change
+or check depends on (tool dialect, vocab size, draft kind, dense/MoE, model size vs VRAM, GPU): `fleet/sample_plan.py`, one job per stratum.
+(4) The full per-model sweep only once the sample is clean. Each rung fixes what it finds before the next one starts.
+
 ## Baselines, quant, models, gates
 
 - **Baselines are apples to apples and out of the box**: llama.cpp at build defaults plus the standard flags, in the same job as Loom,
