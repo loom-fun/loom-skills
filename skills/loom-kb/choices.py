@@ -191,7 +191,7 @@ CHOICE("decode.attn.kv_once.from_keys", "int", 4096, "ATTN_GQA_FROM", rows=["dec
 CHOICE("decode.attn.kv_once.drafted", "bool", True, "ATTN_GQA_DRAFT", rows=["decode_32k"], kernels=["g_attention_split"],
        doc="Drafting packages carry the K/V-once body too (Flint 50.1 -> 57-61, Llama-3.1-8B 24.9 -> 29.7 at decode_32k). "
            "False: non-drafting packages only. Not with the segment path.")
-CHOICE("decode.attn.kv_once.d256", "bool", True, "ATTN_GQA_D256", rows=["decode_32k"], kernels=["g_attention_split"],
+CHOICE("decode.attn.kv_once.d256", "bool", True, "ATTN_GQA_D256", per_target=True, rows=["decode_32k"], kernels=["g_attention_split"],
        doc="head_dim 256 (qwen35 hybrids, 252 VGPRs) carries the K/V-once body in drafting packages too.")
 CHOICE("decode.attn.kv_once.block_keys", "int", 8, "ATTN_GQA_U", rows=["decode_32k"], kernels=["g_attention_split"],
        doc="Keys per block of the K/V-once body (Qwen3-30B-A3B kv4 35.2 -> 36.5 tok/s vs 16).")

@@ -17,6 +17,8 @@ ATTN_GQA_FROM = int(os.environ.get("ATTN_GQA_FROM", "4096"))
 # (8 KV heads, ngram d2) 24.9 -> 29.7. ATTN_GQA_DRAFT=0: nodraft only. Not with the segment path (<= 2 KV heads, gen_llm.seg_tokens).
 ATTN_GQA_DRAFT = os.environ.get("ATTN_GQA_DRAFT", "1") == "1"
 GQA_D256 = os.environ.get("ATTN_GQA_D256", "1") == "1"   # head_dim 256 (qwen35 hybrids, 252 VGPRs) carries the body in drafting packages too
+# per-target (loom-kb per_target): the gfx12 twin g_attention_split_rdna4 reads ATTN_GQA_D256__RDNA4 (unset = the same as the gfx11 kernel)
+GQA_D256_RDNA4 = os.environ.get("ATTN_GQA_D256__RDNA4", "1" if GQA_D256 else "0") == "1"
 ATTN_MT = int(os.environ.get("ATTN_MT", "4"))   # verify-span tokens per wave (gen_llm.multi_token_split)
 ATTN_MT_FROM = int(os.environ.get("ATTN_MT_FROM", "1024"))   # ... from this position on
 # The span path leaves one workgroup per (4 tokens, KV head, split), each running its tokens serially: with fewer KV
@@ -39,11 +41,11 @@ def ilp(U):
     return ATTN_ILP if U % ATTN_ILP == 0 else 1
 
 
-def gqa(draft_on, seg, d=128):
+def gqa(draft_on, seg, d=128, twin=False):
     """Does the decode split kernel carry the K/V-once body? Head_dim 128 nodraft packages, and drafting ones without the
     segment path (head_dim 256 too: GQA_D256)."""
     if d == 256:
-        return ATTN_GQA and draft_on and ATTN_GQA_DRAFT and GQA_D256 and not seg
+        return ATTN_GQA and draft_on and ATTN_GQA_DRAFT and (GQA_D256_RDNA4 if twin else GQA_D256) and not seg
     return d == 128 and ATTN_GQA and (not draft_on or (ATTN_GQA_DRAFT and not seg))
 
 

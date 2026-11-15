@@ -69,6 +69,7 @@ FFN_NORM = CFG.get("ffn_norm_tensor", "ffn_norm")
 # The R9700 (gfx12) prefill stack of #656 is opt-in per model (llm_config rdna4_f16_ffn, or GEMM_F16O=swiglu): the f16-output
 # swiglu group, the gen_flash2s.py flash-twin trims and the split-dims sliding twin; other packages keep the default twins.
 from gen_gemm_rdna4 import f16o_swiglu as _f16o_stack  # noqa: E402
+from flash2_rdna4 import twin_names  # noqa: E402  K -> K_rdna4 (target(@rdna4)) for the per-target decode attention twin
 if _f16o_stack(CFG):
     os.environ.setdefault("FLASH2_TRIM", "1")
     os.environ.setdefault("FLASH2_B", "2")    # gemma4 E2B head_dim 512 / 8 heads per KV head: the key-split two-heads-per-wave global-layer flash twin (flash2_b2.py)
@@ -2745,7 +2746,7 @@ def gqa_split(text, P, S):
     return text[:a] + k + text[b:]
 
 
-def attention_text(S, P):
+def attention_text(S, P, twin=False):
     """Split-K causal GQA attention: workgroup (token, KV head, split) of 16
     waves, wave w = query head 16*kv + w, lane l = dims 4l..4l+3. Sliding
     layers see the last 2048 positions (including the current one). The
@@ -3043,7 +3044,7 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
   kernel.return
 }}
 """
-    gqa_on = P == "g" and attn_rules.gqa(gen_draft.enabled(), seg_tokens(), D) and attn_rules.paged(U) and attn_rules.butterfly(U)
+    gqa_on = P == "g" and attn_rules.gqa(gen_draft.enabled(), seg_tokens(), D, twin) and attn_rules.paged(U) and attn_rules.butterfly(U)
     if gqa_on:
         text = gqa_split(text, P, S)
     if P == "g" and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans
@@ -3440,7 +3441,18 @@ def attention():
     dec, _, _ = attention_text(64, "g")
     pre, split_l, combine_l = attention_text(16, "g16")
     count16 = pre[pre.index("// Splits for"):pre.index('kernel.def export("g16_attention_split")')]
-    return dec + "\n" + count16 + split_l + "\n" + combine_l + FALLBACK
+    return dec + "\n" + count16 + split_l + "\n" + combine_l + attention_twin(dec) + FALLBACK
+
+
+def attention_twin(dec):
+    """g_attention_split_rdna4: the gfx12 twin of the decode split kernel, emitted only where a per-target choice (loom-kb
+    per_target: ATTN_GQA_D256__RDNA4) makes its body differ from the gfx11 kernel `dec`; dual_target.py selects it on gfx12."""
+    if os.environ.get("LOOM_RDNA4", "1").strip().lower() in ("0", "off", "no", "false"):
+        return ""
+    a = 'kernel.def export("g_attention_split")'
+    t, _, _ = attention_text(64, "g", twin=True)
+    k = lambda x: x[x.index(a):x.index('kernel.def export("g_attention_combine")', x.index(a))]
+    return "\n" + twin_names(k(t)) if k(t) != k(dec) else ""
 
 
 FALLBACK = r"""
