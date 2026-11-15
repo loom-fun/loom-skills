@@ -3,6 +3,7 @@
 The generated @llm_advance ends with a tail guarded by `config.get @llm.logits` (card config, default off). Command programs
 have no offline compile product, so the proof runs loom-opt's folding passes: with the capability off, the stage equals the same
 stage without the tail (SSA names renumbered); with it on, the export launch is the only difference."""
+import json
 import os
 import re
 import shutil
@@ -67,12 +68,48 @@ class LogitsFoldTests(unittest.TestCase):
         self.assertIn("kernel.launch @g_logits_export[", on)
         self.assertNotIn("kernel.launch @g_logits_export[", off)
 
-    def test_storage_and_control_only_gain_the_guard(self):
+    def stage_equiv(self, base_text, head_text):
+        sys.path.insert(0, str(ROOT / "fleet"))
+        import stage_equiv
+        dirs = []
+        for name, text in (("base", base_text), ("head", head_text)):
+            d = Path(self.tmp, "se", name, SLUG, "program")
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "llm.loom").write_text(text)
+            dirs.append(str(d.parent.parent))
+        return stage_equiv.check(SLUG, dirs[0], dirs[1], stage_equiv.ALLOWED_ADDED, False)
+
+    def test_stage_equiv_tool_passes_the_logits_additions(self):
+        text = (self.program / "llm.loom").read_text()
+        i = text.index('kernel.def export("g_logits_export")')
+        old = text[:i] + text[text.index("\n  kernel.return\n}\n", i) + len("\n  kernel.return\n}\n"):]
+        old = TAIL.sub("", old).replace("config.def @llm.logits = false : i1\n", "").replace("config.def @llm.logit_slots = 0 : index\n", "")
+        res = self.stage_equiv(old, text)
+        self.assertEqual(res["status"], "PASS", res["problems"])
+        self.assertTrue(res["shapes"]["decode"]["stages"])
+
+    def test_stage_equiv_tool_fails_a_changed_stage(self):
+        text = (self.program / "llm.loom").read_text()
+        broken = text.replace("%logits_on = config.get @llm.logits : i1", "%logits_on = scalar.constant true : i1")
+        self.assertNotEqual(broken, text)
+        i = text.index('kernel.def export("g_logits_export")')
+        old = TAIL.sub("", text[:i] + text[text.index("\n  kernel.return\n}\n", i) + len("\n  kernel.return\n}\n"):])
+        res = self.stage_equiv(old, broken)
+        self.assertEqual(res["status"], "FAIL")
+
+    def test_host_programs_carry_the_guard_and_the_request_key(self):
         storage = (self.program / "storage.loom").read_text()
         self.assertIn("config.def @llm.logits = false : i1", storage)
         self.assertIn("scf.if %logits_on", storage)
-        for name in ("control", "prepare", "service"):
-            self.assertNotIn("llm.logits", (self.program / f"{name}.loom").read_text())
+        self.assertIn("scalar.minsi %span_capacity, %rows", storage)                     # slots = min(span_capacity, rows)
+        control = (self.program / "control.loom").read_text()
+        self.assertIn('global.rodata.def @logits_key = bytes("6c6f67697473")', control)   # "logits": true -> bit 30 of top_k
+        self.assertIn("scalar.ori %current_top_k, %logits_flag", control)
+        prepare = (self.program / "prepare.loom").read_text()
+        self.assertIn("llm.logit_slots".encode().hex(), prepare)
+        self.assertNotIn("llm.logits", (self.program / "service.loom").read_text())
+        card = json.loads((self.program.parent / "model.json").read_text())
+        self.assertIs(card["variants"]["gguf"]["services"]["chat"]["config"]["llm.logits"], False)   # key present = supports logits
 
 
 if __name__ == "__main__":
