@@ -24,7 +24,7 @@ import ab_jobs  # noqa: E402
 
 
 def build(a, ab_args):
-    exp = ab_jobs.build(ab_jobs.parser(a.device).parse_args(ab_args))
+    exp = ab_jobs.build_replicas(ab_jobs.parser(a.device).parse_args(ab_args))   # --replicas N: N independent runs of the A/B (jobs ...-rR)
     for j in exp["jobs"]:
         extra = []
         if any(k.startswith("require_preset_") for k in j):   # the device preset: only a larger prefill chunk can be rebuilt (build.py --prefill-device)

@@ -41,6 +41,11 @@ class LogitsJobs(unittest.TestCase):
         j = jobs("--device", "strix-halo", "--ref", "origin/x", "--bundle-build", "f822f2b", "b1e06141", SLUG)["jobs"][0]
         self.assertEqual(j["bundle"], {"build": {"extension": "loom-fun/loom-gufo-extension@f822f2b", "gufo": "loom-fun/gufo@b1e06141"}})
 
+    def test_replicas(self):
+        d = jobs("--device", "strix-halo", "--ref", "origin/x", "--replicas", "2", SLUG)["jobs"]
+        self.assertEqual([j["name"] for j in d], ["sab-unsloth-qwen3-0-6b-loom", "sab-unsloth-qwen3-0-6b-loom-r2"])
+        self.assertTrue(all(any(v.get("ref") == "origin/x" for v in j["variants"]) and j["steps"][-1] == "gufo:staging" for j in d))
+
     def test_workflow_builds_and_hands_over_the_bundle(self):
         import re
         wf = open(os.path.join(ROOT, ".github", "workflows", "devlab-perf.yml")).read()
