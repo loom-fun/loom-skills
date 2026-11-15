@@ -10,17 +10,25 @@
    "name": "q38-chunk",
    "variants": [
     {
-     "name": "card"
+     "name": "card",
+     "execution": {
+      "context_capacity": 65536,
+      "pool_capacity": 65536
+     }
     },
     {
      "name": "c1536",
      "execution": {
+      "context_capacity": 65536,
+      "pool_capacity": 65536,
       "prefill_capacity": 1536
      }
     },
     {
      "name": "c2048",
      "execution": {
+      "context_capacity": 65536,
+      "pool_capacity": 65536,
       "prefill_capacity": 2048
      }
     }
