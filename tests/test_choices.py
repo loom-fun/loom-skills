@@ -306,6 +306,45 @@ class Resolution(unittest.TestCase):
         self.assertEqual(gen(FLASH2_PEEL="1")[0], legacy[0])
         shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_per_target_shared_kernel_d7_twin(self):
+        """decode.attn.kv_once.d256 is per_target: the D7 rule (drafted qwen35moe: off) plus a rule for one model on rdna4 only
+        (on) gives the gfx11 kernel ATTN_GQA_D256=0 and the gfx12 twin ATTN_GQA_D256__RDNA4=1; a build for one device or a
+        model without the rule exports what it always did."""
+        kb = kb_copy("precedence")
+        os.makedirs(os.path.join(kb, "model", "m"), exist_ok=True)
+        json.dump({"scope": "model/m", "match": {"slug": ["m"]}, "owner": "t", "choices": [
+            {"when": {"devices": ["rdna4"]}, "set": {"decode.attn.kv_once.d256": True}, "evidence": "t"}]},
+            open(os.path.join(kb, "model", "m", "scope.json"), "w"))
+        r = resolve.resolve_full(moe35(), ("rdna3", "rdna4"), kb, draft="dflash", slug="m")
+        self.assertEqual({k: v for k, v in r["env"].items() if "GQA_D256" in k}, {"ATTN_GQA_D256": "0", "ATTN_GQA_D256__RDNA4": "1"})
+        self.assertEqual(r["choices"]["decode.attn.kv_once.d256"]["value"], {"rdna3": False, "rdna4": True})
+        def d256(*devs, slug):
+            return {k: v for k, v in resolve.resolve(moe35(), devs, kb, draft="dflash", slug=slug)["env"].items() if "GQA_D256" in k}
+        self.assertEqual(d256("rdna3", slug="m"), {"ATTN_GQA_D256": "0"})
+        self.assertEqual(d256("rdna4", slug="m"), {})
+        self.assertEqual(d256("rdna3", "rdna4", slug="other"), {"ATTN_GQA_D256": "0"})
+
+    def test_real_kb_d7_model_rule_is_gfx12_only(self):
+        """The real knowledge base: the Qwen3.6-35B-A3B package keeps the K/V-once decode body on gfx12 (D7 costs it R9700 decode_2k)."""
+        slug = "ggml-org-Qwen3.6-35B-A3B-loom"
+        r = resolve.resolve_full(moe35(), ("rdna3", "rdna4"), KB, draft="dflash", slug=slug)
+        self.assertEqual({k: v for k, v in r["env"].items() if "GQA_D256" in k}, {"ATTN_GQA_D256": "0", "ATTN_GQA_D256__RDNA4": "1"})
+        self.assertEqual(resolve.resolve(moe35(), ("rdna3",), KB, draft="dflash", slug=slug)["env"], {"ATTN_GQA_D256": "0"})
+        self.assertEqual(resolve.resolve(moe35(), ("rdna4",), KB, draft="dflash", slug=slug)["env"], {})
+        self.assertEqual(resolve.resolve(moe35(), ("rdna3", "rdna4"), KB, draft="dflash", slug="unsloth-Qwen3.5-35B-A3B-loom")["env"], {"ATTN_GQA_D256": "0"})
+
+    def test_attn_rules_twin_reads_its_own_variable(self):
+        """attn_rules.gqa(..., twin=True) follows ATTN_GQA_D256__RDNA4; unset it follows ATTN_GQA_D256 (no twin text then)."""
+        import subprocess
+        code = ("import attn_rules as a; print(a.gqa(True, False, 256), a.gqa(True, False, 256, twin=True))")
+        def run(**kw):
+            env = {k: v for k, v in os.environ.items() if not k.startswith("ATTN_")}
+            env.update(kw)
+            return subprocess.run([sys.executable, "-c", code], cwd=STARTER, env=env, capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual(run(), ["True", "True"])
+        self.assertEqual(run(ATTN_GQA_D256="0"), ["False", "False"])
+        self.assertEqual(run(ATTN_GQA_D256="0", ATTN_GQA_D256__RDNA4="1"), ["False", "True"])
+
     def test_bad_scope_files(self):
         self.assertTrue(any("unknown choice" in e for e in resolve.lint(os.path.join(FIX, "badkey"))))
         self.assertTrue(any("evidence" in e for e in resolve.lint(os.path.join(FIX, "noevidence"))))
