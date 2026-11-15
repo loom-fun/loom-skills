@@ -1,0 +1,62 @@
+diff --git a/skills/loom-kb/arch/llm/dense/gemma4/scope.json b/skills/loom-kb/arch/llm/dense/gemma4/scope.json
+index c663149..2a7ed2e 100644
+--- a/skills/loom-kb/arch/llm/dense/gemma4/scope.json
++++ b/skills/loom-kb/arch/llm/dense/gemma4/scope.json
+@@ -10,5 +10,18 @@
+  "facets": [
+   "sliding-window"
+  ],
+- "choices": []
++ "choices": [
++  {
++   "when": {
++    "sliding_window": [
++     null,
++     512
++    ]
++   },
++   "set": {
++    "prefill.attn.flash2_peel": true
++   },
++   "evidence": "PR #480: Spark-X2.6 prefill +5..14 % vs main (devlab-perf same runner); recovers the #193/#213 loss of the six blocked cards (E2B, E4B, Bolt-E4B)"
++  }
++ ]
+ }
+diff --git a/skills/loom-kb/arch/llm/dense/lfm3/scope.json b/skills/loom-kb/arch/llm/dense/lfm3/scope.json
+index 777d3be..3b2bc30 100644
+--- a/skills/loom-kb/arch/llm/dense/lfm3/scope.json
++++ b/skills/loom-kb/arch/llm/dense/lfm3/scope.json
+@@ -9,5 +9,13 @@
+  "facets": [
+   "sliding-window"
+  ],
+- "choices": []
++ "choices": [
++  {
++   "when": {},
++   "set": {
++    "prefill.attn.flash2_peel": true
++   },
++   "evidence": "PR #480: Spark-X2.6 prefill +5..14 % vs main (devlab-perf same runner); recovers the #193/#213 loss of the six blocked cards (LFM3-1.7B)"
++  }
++ ]
+ }
+diff --git a/skills/loom-kb/arch/llm/dense/spark2_5/scope.json b/skills/loom-kb/arch/llm/dense/spark2_5/scope.json
+index 046559e..b2b2f74 100644
+--- a/skills/loom-kb/arch/llm/dense/spark2_5/scope.json
++++ b/skills/loom-kb/arch/llm/dense/spark2_5/scope.json
+@@ -9,5 +9,13 @@
+  "facets": [
+   "sliding-window"
+  ],
+- "choices": []
++ "choices": [
++  {
++   "when": {},
++   "set": {
++    "prefill.attn.flash2_peel": true
++   },
++   "evidence": "PR #480: Spark-X2.6 prefill +5..14 % vs main (devlab-perf same runner); recovers the #193/#213 loss of the six blocked cards (Spark-X2.5, X2.6)"
++  }
++ ]
+ }

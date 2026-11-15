@@ -934,6 +934,9 @@ def validate(info):
                 errs.append(f"{at}.performance.baselines.{b}.session.source: no source {x['session']['source']!r}")
         if dev.get("remeasure") and dev["remeasure"]["source"] not in ids:
             errs.append(f"{at}.remeasure.source: no source {dev['remeasure']['source']!r}")
+        fs = (dev.get("remeasure") or {}).get("first_source")
+        if fs and fs not in ids:
+            errs.append(f"{at}.remeasure.first_source: no source {fs!r}")
         for n, g in (dev.get("gates") or {}).items():
             if g["source"] not in ids:
                 errs.append(f"{at}.gates.{n}.source: no source {g['source']!r}")

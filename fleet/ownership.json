@@ -42,7 +42,7 @@
     "docs": {"allow": ["**/*.md", "docs/**"], "doc": "documentation only"},
     "card": {"allow": ["skills/loom-benchmark/scripts/card/**", "skills/loom-benchmark/scripts/machine_info.py",
                        "tests/test_card*.py", ".github/scripts/strix_card.py"], "doc": "card tooling and its tests"},
-    "tooling": {"allow": [".github/scripts/**", "scripts/**", "fleet/**", "tests/**", "skills/*/scripts/**", "skills/loom-optimize/*.py",
+    "tooling": {"allow": [".github/scripts/**", "scripts/**", "fleet/**", "tests/**", "skills/*/scripts/**", "skills/loom-optimize/*.py", "skills/loom-roofline/*.py", ".github/devlab/**",
                           "skills/loom-port-llm/*.py", "skills/loom-port-llm/port.sh", "skills/loom-demo-ui/**", "skills/loom-fleet/templates/**", "skills/loom-fleet/trial_prompt.md"],
                 "deny": ["skills/loom-benchmark/scripts/card/**"],
                 "doc": "scripts, CI helpers, fleet tools, tests (no starter generators, no kb data)"},

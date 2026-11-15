@@ -379,6 +379,8 @@ def cmd_build(a):
         if ev.get("remeasure"):   # make_info.py remeasure: a same-runner A/B of this package against the build the table shows
             mst = gpu_state(evidence_gpu(ev))
             mst["remeasure"] = dict(ev["remeasure"], source=sources.add(ev["remeasure"]["source"]))
+            if ev["remeasure"].get("first_source"):
+                mst["remeasure"]["first_source"] = sources.add(ev["remeasure"]["first_source"])
         if ev.get("roofline"):
             rst = gpu_state(ev.get("gpu") or gpu_from_device({"name": ev["roofline"]["device"]["name"]}) or DEFAULT_GPU)
             rst["roofline"], rst["data"] = ev["roofline"], True
@@ -481,6 +483,10 @@ def cmd_build(a):
                 d["roofline"] = st["roofline"]
             if st.get("remeasure") and st["remeasure"]["programs_sha256"] == programs_sha256(a.pkg):   # about this package only
                 d["remeasure"] = st["remeasure"]
+                for k, imp in (st["remeasure"].get("improved") or {}).items():   # confirmed faster in 2 runs: the card value is the runs' mean
+                    row = next((s["metrics"][k] for s in reversed(st["sessions"]) if k in s["metrics"]), None)
+                    if row is not None:
+                        row["loom"], row["loom_runs"] = imp["loom"], imp["runs"]
             cap = GPUS[gpu]["memory_bytes"]
             base_mem = facts["memory_bytes"] or card.get("memory_bytes")
             if cap and "memory_bytes" not in d and base_mem and base_mem > cap:
@@ -501,6 +507,7 @@ def cmd_build(a):
     used |= {b["session"]["source"] for d in devices.values() for b in ((d.get("performance") or {}).get("baselines") or {}).values()}
     used |= {g["source"] for d in devices.values() for g in (d.get("gates") or {}).values()}
     used |= {d["remeasure"]["source"] for d in devices.values() if d.get("remeasure")}
+    used |= {d["remeasure"]["first_source"] for d in devices.values() if (d.get("remeasure") or {}).get("first_source")}
     info["sources"] = {k: v for k, v in sources.by_id.items() if k in used}
     require_valid(info)
     out = dumps(info)
@@ -844,11 +851,31 @@ def cmd_remeasure(a):
     a.gpu = a.gpu or DEFAULT_GPU
     if not a.package:
         sys.exit("remeasure: --package (the package re-measured) is required")
-    if x["verdict"] != "pass" or x.get("gate_failures"):
+    improved = {}   # out of margin only by rows FASTER than the card in both runs (the ratchet): their new values go on the card
+    if x["verdict"] == "out_of_margin" and not x.get("gate_failures"):
+        if not a.first_cmp:
+            sys.exit(f"{a.cmp}: verdict out_of_margin: --first-cmp (the first run's comparison) is needed to confirm the rows are faster in both runs")
+        f = load_json(a.first_cmp)
+        if (x.get("first_run") or {}).get("job") != f.get("job"):
+            sys.exit(f"{a.first_cmp}: is not the first run {a.cmp} was compared with ({(x.get('first_run') or {}).get('job')})")
+        slower = []
+        for k in x["out_of_margin"]:
+            if k.startswith("acceptance:"):   # informational: not a card row
+                continue
+            r1, r2 = f["metrics"][k], x["metrics"][k]
+            if not (r1["ratio"] and r2["ratio"] and r1["ratio"] > 1 and r2["ratio"] > 1):
+                slower.append(k)
+            else:
+                improved[k] = {"published": r2.get("card"), "loom": round((r1["new"] + r2["new"]) / 2, 1), "runs": [r1["new"], r2["new"]]}
+        if slower:
+            sys.exit(f"{a.cmp}: {', '.join(slower)} outside the band in both runs and not faster: refused (not within the band)")
+        # out of margin only by acceptance rows (informational, not card rows): a plain within-band re-measure
+    elif x["verdict"] != "pass" or x.get("gate_failures"):
         sys.exit(f"{a.cmp}: verdict {x['verdict']} (out of band {x.get('out_of_band')}, gate failures {x.get('gate_failures')}): not within the band")
     # a confirming re-run (strix_ab_compare.py --prev) may pass with a metric outside the band in the opposite direction to the
     # first run: the card names it
-    exc = {k: m["ratio"] for k, m in x["metrics"].items() if m["status"] != "PASS"}
+    exc = {k: m["ratio"] for k, m in x["metrics"].items() if m["status"] != "PASS" and k not in improved
+           and not (x["verdict"] == "out_of_margin" and k.startswith("acceptance:"))}
     here = programs_sha256(a.package)
     if a.fetched_programs and a.fetched_programs != here:
         sys.exit(f"the run fetched programs {a.fetched_programs[:12]}, the package has {here[:12]}: re-run")
@@ -865,12 +892,19 @@ def cmd_remeasure(a):
     date = a.date or x.get("date")
     if not date:
         sys.exit("--date is required (the job's day)")
+    first_src = None
+    if improved:
+        if not (a.first_run and a.first_url):
+            sys.exit("remeasure: --first-run and --first-url (the first run's links) are required with improved rows")
+        first_src = dict(src, run=str(a.first_run), url=a.first_url)
     ev = {"evidence": EVIDENCE_ID, "gpu": a.gpu, "remeasure": {
-        "date": date, "source": src, "band": x["band"], "programs_sha256": here, "compared_programs": old, "result": "within",
+        "date": date, "source": src, "band": x["band"], "programs_sha256": here, "compared_programs": old,
+        "result": "improved" if improved else "within", **({"bands": x["bands"]} if x.get("bands") else {}),
+        **({"improved": improved, "first_source": first_src} if improved else {}),
         "worst_metric": x.get("worst_metric"), "worst_ratio": x.get("worst_ratio"),
         "ratios": {k: m["ratio"] for k, m in x["metrics"].items()}, **({"exceptions": exc} if exc else {})}}
     write_json(a.o, ev)
-    print(f"wrote {a.o}: {a.gpu} within +-{x['band']:.0%} (worst {x.get('worst_metric')} {x.get('worst_ratio')}); programs {here[:12]} ~ {old[:12]}", file=sys.stderr)
+    print(f"wrote {a.o}: {a.gpu} within +-{x['band']:.0%}" + (f" except {', '.join(improved)} (faster in both runs)" if improved else "") + f" (worst {x.get('worst_metric')} {x.get('worst_ratio')}); programs {here[:12]} ~ {old[:12]}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------- roofline -> evidence
@@ -1091,6 +1125,10 @@ def main(argv=None):
     m.add_argument("--compared-revision", help="its commit the job fetched (model_fun.json's document URL)")
     m.add_argument("--fetched-programs", help="programs_sha256 the job fetched for the package (programs_sha256.txt)")
     m.add_argument("--date", help="YYYY-MM-DD of the job")
+    m.add_argument("--first-cmp", help="the first run's strix_ab_compare.py --json, when --cmp is the confirming re-run with verdict out_of_margin: "
+                   "rows faster than the card in both runs get the mean of the two runs' medians as the card value")
+    m.add_argument("--first-run", help="the first run's Actions run id (with --first-cmp)")
+    m.add_argument("--first-url", help="the first run's job URL (with --first-cmp)")
     add_source_args(m, "devlab")
     m.add_argument("-o", required=True)
     a = ap.parse_args(argv)

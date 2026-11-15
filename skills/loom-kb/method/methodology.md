@@ -93,8 +93,8 @@ two or three lines; if they disagree with this file, this file wins and the othe
     - decode_2k, streams4: +-4 %, reject below 0.92
     <!-- /bands -->
     The bands were checked on true A/A pairs (same programs on both sides, `band_calibration_aa` in `methodology.json`): a row whose A/A
-    spread exceeded its band in more than 5 % of pairs was widened (decode: 3 -> 3.5 %).
-    A ratio within 2 points of its reject threshold extends 2+2 sessions to 6+6. `strix_ab_compare.py --band X` forces one flat band.
+    spread exceeded its band in more than 5 % of pairs was widened (decode: 3 -> 3.5 %). A ratio within 2 points of its reject threshold extends 2+2 sessions to 6+6. `strix_ab_compare.py --band X` forces one flat band.
+    Acceptance rows are informational: reported, never a rerun or out_of_margin verdict alone.
 
 Local qualification (`qualify.sh`, `llama_spec_tune.py`, `tune.py`) is a development loop: its tables guide the optimizer, are
 not card numbers, and may try configurations the card rule excludes. Audit a card with `matched_spec.rule_violations`.

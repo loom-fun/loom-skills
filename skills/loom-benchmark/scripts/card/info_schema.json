@@ -62,7 +62,12 @@
      "properties": {"date": {"type": "string"}, "source": {"type": "string"}, "band": {"type": "number"},
       "programs_sha256": {"type": "string", "description": "card_lib.programs_sha256 of the package re-measured (this repository's)"},
       "compared_programs": {"type": "string", "description": "programs_sha256 of the build compared with (the sessions shown)"},
-      "result": {"enum": ["within"]}, "worst_metric": {"type": ["string", "null"]}, "worst_ratio": {"type": ["number", "null"]},
+      "result": {"enum": ["within", "improved"]},
+      "bands": {"type": "object", "additionalProperties": {"type": "number"}, "description": "the per-row bands (methodology.json) the comparison judged each row against"},
+      "first_source": {"type": "string", "description": "improved: the source of the first of the two runs that confirmed the faster rows (source is the second)"},
+      "improved": {"type": "object", "description": "rows faster than the published value in both runs: the card shows the mean of the two runs' medians for them, llama.cpp unchanged",
+       "additionalProperties": {"type": "object", "required": ["loom", "runs"], "additionalProperties": false,
+        "properties": {"published": {"type": ["number", "null"]}, "loom": {"type": "number"}, "runs": {"type": "array", "items": {"type": "number"}}}}}, "worst_metric": {"type": ["string", "null"]}, "worst_ratio": {"type": ["number", "null"]},
       "ratios": {"type": "object", "additionalProperties": {"type": ["number", "null"]}},
       "exceptions": {"type": "object", "additionalProperties": {"type": ["number", "null"]}, "description": "metrics outside the band in this run whose confirming run did not repeat it in the same direction (the card names them)"}}},
       "performance": {

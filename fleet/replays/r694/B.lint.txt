@@ -1,0 +1,51 @@
+=== part kind architecture: 2 file(s), exit 0
+  skills/loom-benchmark/scripts/card/info_schema.json
+  skills/loom-benchmark/scripts/card/make_info.py
+### Scope lint: pass
+kind `architecture`; scopes -; kernels -; 2 file(s) changed.
+Program impact: 0 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+
+
+=== part kind card: 18 file(s), exit 0
+  skills/loom-benchmark/scripts/card/card_lib.py
+  skills/loom-benchmark/scripts/card/render_card.py
+  skills/loom-benchmark/scripts/card/test/check.sh
+  skills/loom-benchmark/scripts/card/test/flint/expected/README.md
+  skills/loom-benchmark/scripts/card/test/flint/expected/REPORT.md
+  skills/loom-benchmark/scripts/card/test/flint/expected/info.json
+  skills/loom-benchmark/scripts/card/test/r9700_exec/expected/README.md
+  skills/loom-benchmark/scripts/card/test/r9700_exec/expected/REPORT.md
+  skills/loom-benchmark/scripts/card/test/r9700_exec/expected/info.json
+  skills/loom-benchmark/scripts/card/test/r9700_preset/expected/README.md
+  skills/loom-benchmark/scripts/card/test/r9700_preset/expected/REPORT.md
+  skills/loom-benchmark/scripts/card/test/r9700_preset/expected/info.json
+  skills/loom-benchmark/scripts/card/test/r9700_staging/expected/README.md
+  skills/loom-benchmark/scripts/card/test/r9700_staging/expected/REPORT.md
+  skills/loom-benchmark/scripts/card/test/r9700_staging/expected/info.json
+  skills/loom-benchmark/scripts/card/test/r9700_two/expected/README.md
+  skills/loom-benchmark/scripts/card/test/r9700_two/expected/REPORT.md
+  skills/loom-benchmark/scripts/card/test/r9700_two/expected/info.json
+### Scope lint: pass
+kind `card`; scopes -; kernels -; 18 file(s) changed.
+Program impact: 0 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+
+
+=== part kind docs: 3 file(s), exit 0
+  skills/loom-benchmark/SKILL.md
+  skills/loom-benchmark/reference/methodology.md
+  skills/loom-org/SKILL.md
+### Scope lint: pass
+kind `docs`; scopes -; kernels -; 3 file(s) changed.
+Program impact: 0 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+
+
+=== part kind tooling: 5 file(s), exit 0
+  .github/scripts/devlab_perf.sh
+  .github/scripts/r9700_jobs.py
+  .github/scripts/strix_ab_compare.py
+  .github/scripts/strix_ab_jobs.py
+  skills/loom-benchmark/scripts/perf.py
+### Scope lint: pass
+kind `tooling`; scopes -; kernels -; 5 file(s) changed.
+Program impact: 0 model(s) touched; leaked outside the declared scope: 0 (leak rate 0%).
+

@@ -1,0 +1,11 @@
+exit 1
+### Scope lint: FAIL
+kind `targeted`; scopes `device/rdna4`; kernels -; 1 file(s) changed.
+Program impact: 50 model(s) touched; leaked outside the declared scope: 1 (leak rate 2%).
+
+| rule | problem |
+|---|---|
+| leak | unsloth-gemma-4-E2B-it-loom: changes gfx11 programs; the declared device scope is rdna4; narrow the change (or declare `leak:` with horizontal/architecture) |
+- leaked: `unsloth-gemma-4-E2B-it-loom`: changes gfx11 programs; the declared device scope is rdna4
+- kb lint: kb lint: 0 error(s)
+
