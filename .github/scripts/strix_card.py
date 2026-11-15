@@ -44,6 +44,7 @@ ap.add_argument("--run", required=True)
 ap.add_argument("--work", required=True)
 ap.add_argument("--first-cmp", help="the first run's compare JSON (the ratchet: rows faster in both runs)")
 ap.add_argument("--first-run", help="the first run's Actions run id (with --first-cmp)")
+ap.add_argument("--accept-gate-failure", action="append", help="a failed gate a person accepted (e.g. ktest:staging); it stays failed on the card")
 ap.add_argument("--upload", action="store_true")
 a = ap.parse_args()
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download  # noqa: E402
@@ -75,7 +76,7 @@ if a.first_cmp:
              next(j for j in fjobs if j["name"] in (job_name, re.sub(r"-r\d+$", "", job_name)))["url"]]   # the first run's job has no -rN suffix
 src = ["--run", a.run, "--url", url, "--device", dev, "--hrx-loom", hrx, "--source-kind", "devlab"]
 run(PY, f"{C}/make_info.py", "remeasure", "--cmp", a.cmp, "--package", out, "--compared-repo", f"loom-fun/{slug}", "--compared-revision", rev,
-    "--fetched-programs", fetched, *first, "--date", end[:10], *src, "-o", f"{W}/ev_rm.json")
+    "--fetched-programs", fetched, *first, *[x for g in (a.accept_gate_failure or []) for x in ("--accept-gate-failure", g)], "--date", end[:10], *src, "-o", f"{W}/ev_rm.json")
 gates = [os.path.join(J, "gates_staging", "gates.json"), os.path.join(J, "ktest_staging.log")]
 gates = [g for g in gates if os.path.exists(g)]
 if gates:
