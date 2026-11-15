@@ -782,12 +782,16 @@ def scope_execution(slug, gpu, root=None, cfg=None):
 def fit_rows(path, gpu, root=None):
     """{slug: row} of a device's fit table (fit.py: sizing and verdict data) with the serving settings of the scope rules put back as the
     row keys the readers know: "ctx_cap" (exec.context_cap) and "<runner key>_execution" (prefill_capacity, context_capacity, pool_capacity,
-    rows, draft_depth). A row that still carries such a block of its own (a table of a device without rules) keeps it unless a rule sets one."""
+    rows, draft_depth). A row that still carries such a block of its own (a table of a device without rules) keeps it unless a rule sets one.
+    ROOT: the checkout whose rules apply; default: this one when PATH is one of its own tables (.github/devlab/), else none (a table elsewhere,
+    e.g. a test fixture, is standalone data: pass root= to read this checkout's rules for it)."""
     with open(path, encoding="utf-8") as f:
         rows = {r["slug"]: dict(r) for r in json.load(f)}
     xkey = registry.fit_execution_key(gpu)
+    if root is None and os.path.realpath(path).startswith(os.path.join(REPO, ".github", "devlab") + os.sep):
+        root = REPO
     for slug, row in rows.items():
-        got = scope_execution(slug, gpu, root)
+        got = scope_execution(slug, gpu, root) if root else {}
         if got.get("context_cap"):
             row["ctx_cap"] = got["context_cap"]
         ex = {k: got[k] for k in EXEC_KEYS if k in got}

@@ -112,7 +112,7 @@ def main(argv=None, device=None, tool="device_jobs.py"):
     if not os.path.exists(fit_path):
         sys.exit(f"{fit_path}: no fit table for {GPU} (fit.py --device {GPU} writes it)")
     models = {m["repo"].split("/")[-1]: m for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
-    fit = card_lib.fit_rows(fit_path, GPU)   # sizing + verdict from the table, the serving settings from the scope rules (exec.*)
+    fit = card_lib.fit_rows(fit_path, GPU, ROOT)   # sizing + verdict from the table, the serving settings from the scope rules (exec.*)
     slugs = sorted(m for m in models if fit.get(m, {}).get("verdict", "").startswith("fits")) if a.all else a.slugs
     jobs = []
     skipped = sorted(m for m in models if not fit.get(m, {}).get("verdict", "").startswith("fits")) if a.all else []

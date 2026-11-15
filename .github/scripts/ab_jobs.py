@@ -207,7 +207,7 @@ def build(a):
         fit_path = a.fit or os.path.join(ROOT, card_lib.registry.fit_table(a.device))
         if not os.path.exists(fit_path):
             sys.exit(f"{fit_path}: no fit table for {a.device} (fit.py --device {a.device} writes it)")
-        fit = card_lib.fit_rows(fit_path, a.device)   # sizing + verdict from the table, the serving settings from the scope rules (exec.*)
+        fit = card_lib.fit_rows(fit_path, a.device, ROOT)   # sizing + verdict from the table, the serving settings from the scope rules (exec.*)
     jobs, skipped = [], []
     for slug in a.slugs:
         m = models[slug]
