@@ -1,47 +1,352 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "kit2 func-only check (experiment PR, never merged): packages built from the link fix; func + ktest, both GPUs",
+ "memory_bytes": 17000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "sab-unsloth-qwen3-0-6b-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+   "memory_bytes": 17000000000,
    "kit": null,
-   "llamacpp": "b1375",
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom"
     },
     {
-     "name": "nodraft",
+     "name": "staging",
      "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
      "execution": {
       "draft_depth": 0
      }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "sab-ggml-org-qwen3-4b-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
+   "memory_bytes": 25000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom"
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "sab-unsloth-qwen3-5-4b-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-Qwen3.5-4B-loom",
+   "memory_bytes": 28000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3.5-4B-loom"
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/unsloth-Qwen3.5-4B-loom",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "sab-unsloth-qwen3-5-0-8b-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3.5-0.8B-loom",
+   "memory_bytes": 9000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3.5-0.8B-loom"
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/unsloth-Qwen3.5-0.8B-loom",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "rab-unsloth-qwen3-0-6b-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 17000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+     "cap_pool": 267264,
+     "execution": {
+      "prefill_capacity": 4096
+     }
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4",
+     "build_args": [
+      "--prefill-device",
+      "radeon-r9700=4096"
+     ]
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+     "cap_pool": 267264,
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4",
+     "build_args": [
+      "--prefill-device",
+      "radeon-r9700=4096"
+     ]
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "rab-ggml-org-qwen3-4b-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
+   "memory_bytes_r9700": 25000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
+     "cap_pool": 166912,
+     "execution": {}
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
+     "cap_pool": 166912,
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "rab-unsloth-qwen3-5-4b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/unsloth-Qwen3.5-4B-loom",
+   "memory_bytes_r9700": 28000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3.5-4B-loom",
+     "cap_pool": 445440,
+     "execution": {}
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/unsloth-Qwen3.5-4B-loom",
+     "cap_pool": 445440,
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging"
+   ]
+  },
+  {
+   "name": "rab-unsloth-qwen3-5-0-8b-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3.5-0.8B-loom",
+   "memory_bytes_r9700": 9000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3.5-0.8B-loom",
+     "cap_pool": 2494464,
+     "execution": {}
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/unsloth-Qwen3.5-0.8B-loom",
+     "cap_pool": 2494464,
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build": {},
+     "ref": "a1552caf150d43298f7b9a8b396dd35bda9f13b4"
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging"
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "llamacpp": "b1374"
 }
