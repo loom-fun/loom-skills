@@ -42,7 +42,10 @@
   "ctx_cap": 24576
  },
  "bartowski-Qwen3.8-27B-loom": {
+  "ctx_cap": 120832,
   "r9700_execution": {
+   "context_capacity": 120832,
+   "pool_capacity": 120832,
    "prefill_capacity": 1024
   }
  },
