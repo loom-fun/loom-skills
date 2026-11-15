@@ -14,7 +14,7 @@ spec.loader.exec_module(route_load)
 
 def base_ref():
     for ref in (route_load.PRE_REFACTOR,):   # absent from a shallow CI checkout: the test then skips
-        if subprocess.run(["git", "-C", str(REPO), "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0:
+        if subprocess.run(["git", "-C", str(REPO), "cat-file", "-e", f"{ref}:skills/loom-port-llm/SKILL.md"], capture_output=True).returncode == 0:
             return ref
     return None
 
