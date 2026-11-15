@@ -140,15 +140,8 @@ class ExecLint(unittest.TestCase):
     """A per-device serving change is targeted with scope = the model node + the device."""
 
     def setUp(self):
-        self.r = Repo()
-        shutil.copy(KB / "choices.py", Path(self.r.d, "skills/loom-kb/choices.py"))
-        self.r.write("skills/loom-kb/device/rdna4/radeon-r9700/README.md", "# r9700\n")
-        self.r.write("skills/loom-kb/device/rdna3/strix-halo/README.md", "# strix\n")
-        for s in ("m-moe-plain", "m-dense"):
-            self.r.write(f"fleet/{s}/llm_config.json", json.dumps(dict(json.loads(Path(self.r.d, f"fleet/{s}/llm_config.json").read_text()), hidden=1024)))
-        self.r.commit("base2")
-        self.r.git("branch", "-f", "base", "HEAD")
-        self.r.git("checkout", "-q", "-B", "head")
+        self.r = Repo({"skills/loom-kb/choices.py": (KB / "choices.py").read_text(),   # the real registry (exec.* choices)
+                       "skills/loom-kb/device/rdna4/radeon-r9700/README.md": "# r9700\n", "skills/loom-kb/device/rdna3/strix-halo/README.md": "# strix\n"})
 
     def tearDown(self):
         self.r.close()

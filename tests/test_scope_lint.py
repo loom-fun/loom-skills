@@ -38,7 +38,8 @@ def impact(**models):
 
 
 class Repo:
-    def __init__(self):
+    def __init__(self, extra=None):
+        """EXTRA {path: text}: files of the base commit written over the defaults."""
         self.d = tempfile.mkdtemp(prefix="scope_lint_test_")
         self.write("fleet/ownership.json", json.dumps(OWN))
         self.write("skills/loom-kb/choices.py", CHOICES)
@@ -56,6 +57,8 @@ class Repo:
         self.write("skills/loom-port-llm/starter/attn_rules.py", "x = 1\n")
         self.write("skills/loom-port-llm/starter/gen_moe.py", "x = 1\n")
         self.write("README.md", "hi\n")
+        for rel, text in (extra or {}).items():
+            self.write(rel, text)
         self.git("init", "-q", "-b", "base")
         self.git("-c", "user.name=t", "-c", "user.email=t@t", "add", "-A")
         self.commit("base")
