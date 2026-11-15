@@ -1,0 +1,39 @@
+diff --git a/skills/loom-kb/choices.py b/skills/loom-kb/choices.py
+index 96494a3..6da82f1 100644
+--- a/skills/loom-kb/choices.py
++++ b/skills/loom-kb/choices.py
+@@ -252,7 +252,7 @@ CHOICE("prefill.attn.flash2_do", "int", None, "FLASH2_DO", kits=["gemma4"], dyna
+ CHOICE("prefill.attn.flash512_do", "int", None, "FLASH512_DO", kits=["gemma4"], dynamic=True, doc="gemma4 kit: FLASH512_DO=256 runs the "
+        "head_dim 512 global layers through gen_flash2.py's two output passes.", **_FL)
+ CHOICE("prefill.attn.flash2_edge_zero", "bool", False, "FLASH2_EDGE_ZERO", doc="Zero-fill the edge tile instead of masking.", **_FL)
+-CHOICE("prefill.attn.flash2_peel", "bool", True, "FLASH2_PEEL", doc="The masked path only in the last key tile (flash2_peel.py).", **_FL)
++CHOICE("prefill.attn.flash2_peel", "bool", False, "FLASH2_PEEL", doc="The masked path only in the last key tile (flash2_peel.py).", **_FL)
+ CHOICE("prefill.attn.flash2_entry", "str", None, "FLASH2_ENTRY", dynamic=True, experiment=True,
+        doc="plain | bcast: the listed entry broadcast from lane 0 (default bcast when NF > 8).", **_FL)
+ CHOICE("prefill.attn.flash2_swa_twin", "str", None, "FLASH2_SWA_TWIN", dynamic=True,
+diff --git a/skills/loom-port-llm/starter/gen_flash2.py b/skills/loom-port-llm/starter/gen_flash2.py
+index 67fae41..109dae2 100644
+--- a/skills/loom-port-llm/starter/gen_flash2.py
++++ b/skills/loom-port-llm/starter/gen_flash2.py
+@@ -693,7 +693,7 @@ R4 = os.environ.get("FLASH2_ARCH") == "rdna4"   # the gfx12 twin (flash2_rdna4.p
+ if R4:
+     from flash2_rdna4 import to_rdna4, twin_names
+     text = to_rdna4(text)
+-if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and NF <= 8:   # the masked path only in the last key tile (flash2_peel.py)
++if os.environ.get("FLASH2_PEEL", "0") == "1" and not EDGE_ZERO and NF <= 8:   # the masked path only in the last key tile (flash2_peel.py)
+     from flash2_peel import peel_last_tile
+     text = peel_last_tile(text)
+ # The listed tile's first token is a loaded value, which the compiler takes as lane-dependent; broadcasting it from lane 0 keeps the
+diff --git a/skills/loom-port-llm/starter/gen_flash2s.py b/skills/loom-port-llm/starter/gen_flash2s.py
+index fdb6e04..51e194b 100644
+--- a/skills/loom-port-llm/starter/gen_flash2s.py
++++ b/skills/loom-port-llm/starter/gen_flash2s.py
+@@ -562,7 +562,7 @@ if R4:
+     if not B_MODE == "2" and os.environ.get("FLASH2_PF", "0") == "1":   # the next K/V tile's loads in flight during this tile's math (flash2_prefetch.py); gfx12 twin only
+         from flash2_prefetch import prefetch
+         text = prefetch(text)
+-if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and B_MODE != "2":   # the masked path only in the last key tile (flash2_peel.py)
++if os.environ.get("FLASH2_PEEL", "0") == "1" and not EDGE_ZERO and B_MODE != "2":   # the masked path only in the last key tile (flash2_peel.py)
+     from flash2_peel import peel_last_tile
+     _hot = None
+     if R4 and os.environ.get("FLASH2_HOT", os.environ.get("FLASH2_TRIM", "0")) == "1":   # gfx12 twin: the hot copy skips the validity / mask selects (flash2_trim.py)

@@ -1,0 +1,4 @@
+kind: horizontal
+scopes: device/rdna4
+kernels: gemm, attention_prefill
+leak: every model gets gfx12 twin kernels appended to its programs (gfx11 text unchanged)

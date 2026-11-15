@@ -1,0 +1,33 @@
+exit 1
+### Scope lint: FAIL
+kind `targeted`; scopes `arch/llm/dense/qwen3`, `arch/llm/dense/qwen3vl`; kernels -; 2 file(s) changed.
+Program impact: 17 model(s) touched; leaked outside the declared scope: 11 (leak rate 65%).
+
+| rule | problem |
+|---|---|
+| protected | skills/loom-port-llm/starter/attn_rules.py is a protected core file (attention selection rules shared by all models); changing it needs kind: architecture |
+| registry | registry key 'decode.attn.kv_once' changed (legacy); legacy/env/type/derive define today's behaviour; needs kind: architecture |
+| leak | bartowski-LFM3-1.7B-loom: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Mellum2.1-12B-A2.5B-Thinking-loom: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Nanbeige4.3-33B-loom: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Qwen2.5-1.5B-Instruct-loom: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Qwen2.5-32B-Instruct-loom: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | bartowski-Qwen2.5-7B-Instruct-loom: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | ggml-org-LFM3-Omni-2B-loom: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | ggml-org-Qwen2.5-VL-7B-Instruct-loom: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | unsloth-Llama-3.2-3B-Instruct-loom: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl; narrow the change (or declare `leak:` with horizontal/architecture) |
+| leak | unsloth-Qwen3-30B-A3B-Instruct-2507-loom: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl; narrow the change (or declare `leak:` with horizontal/architecture) |
+- leaked: `bartowski-LFM3-1.7B-loom`: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl
+- leaked: `bartowski-Mellum2.1-12B-A2.5B-Thinking-loom`: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl
+- leaked: `bartowski-Nanbeige4.3-33B-loom`: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl
+- leaked: `bartowski-Qwen2.5-1.5B-Instruct-loom`: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl
+- leaked: `bartowski-Qwen2.5-32B-Instruct-loom`: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl
+- leaked: `bartowski-Qwen2.5-7B-Instruct-loom`: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl
+- leaked: `ggml-org-LFM3-Omni-2B-loom`: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl
+- leaked: `ggml-org-Qwen2.5-VL-7B-Instruct-loom`: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl
+- leaked: `rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom`: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl
+- leaked: `unsloth-Llama-3.2-3B-Instruct-loom`: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl
+- leaked: `unsloth-Qwen3-30B-A3B-Instruct-2507-loom`: not matched by arch/llm/dense/qwen3, arch/llm/dense/qwen3vl
+- kb lint: kb lint: 0 error(s)
+

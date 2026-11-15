@@ -1,0 +1,60 @@
+{
+ "commit": "1095646",
+ "files_changed": [
+  ".github/scripts/devlab_perf.sh",
+  ".github/scripts/r9700_jobs.py",
+  ".github/scripts/strix_ab_compare.py",
+  ".github/scripts/strix_ab_jobs.py",
+  "skills/loom-benchmark/SKILL.md",
+  "skills/loom-benchmark/reference/methodology.md",
+  "skills/loom-benchmark/scripts/card/card_lib.py",
+  "skills/loom-benchmark/scripts/card/info_schema.json",
+  "skills/loom-benchmark/scripts/card/make_info.py",
+  "skills/loom-benchmark/scripts/card/render_card.py",
+  "skills/loom-benchmark/scripts/card/test/check.sh",
+  "skills/loom-benchmark/scripts/card/test/flint/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/flint/expected/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/flint/expected/info.json",
+  "skills/loom-benchmark/scripts/card/test/r9700_exec/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_exec/expected/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_exec/expected/info.json",
+  "skills/loom-benchmark/scripts/card/test/r9700_preset/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_preset/expected/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_preset/expected/info.json",
+  "skills/loom-benchmark/scripts/card/test/r9700_staging/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_staging/expected/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_staging/expected/info.json",
+  "skills/loom-benchmark/scripts/card/test/r9700_two/expected/README.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_two/expected/REPORT.md",
+  "skills/loom-benchmark/scripts/card/test/r9700_two/expected/info.json",
+  "skills/loom-benchmark/scripts/perf.py",
+  "skills/loom-org/SKILL.md"
+ ],
+ "dropped": [],
+ "impact_models": [],
+ "A": {
+  "lint_exit": 1,
+  "files": 28
+ },
+ "B": {
+  "parts": {
+   "architecture": {
+    "files": 2,
+    "lint_exit": 0
+   },
+   "card": {
+    "files": 18,
+    "lint_exit": 0
+   },
+   "docs": {
+    "files": 3,
+    "lint_exit": 0
+   },
+   "tooling": {
+    "files": 5,
+    "lint_exit": 0
+   }
+  },
+  "lint_exit": 0
+ }
+}

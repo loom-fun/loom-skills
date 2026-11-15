@@ -1,0 +1,2 @@
+kind: targeted
+scopes: arch/llm/dense/qwen2vl+drafted, arch/llm/dense/llama+drafted, arch/llm/moe/flint+drafted, arch/llm/dense/qwen3+drafted, arch/llm/hybrid/qwen35+drafted

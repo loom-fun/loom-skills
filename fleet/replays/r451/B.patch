@@ -1,0 +1,116 @@
+diff --git a/skills/loom-kb/arch/llm/dense/llama/scope.json b/skills/loom-kb/arch/llm/dense/llama/scope.json
+index 3b3d5f3..3b530d8 100644
+--- a/skills/loom-kb/arch/llm/dense/llama/scope.json
++++ b/skills/loom-kb/arch/llm/dense/llama/scope.json
+@@ -7,5 +7,17 @@
+  },
+  "owner": "kb",
+  "facets": [],
+- "choices": []
++ "choices": [
++  {
++   "when": {
++    "facets": [
++     "drafted"
++    ]
++   },
++   "set": {
++    "decode.attn.kv_once.drafted": true
++   },
++   "evidence": "PR #451 run 43311788249: same-runner decode_32k vs main: Llama-3.1-8B +20 %"
++  }
++ ]
+ }
+diff --git a/skills/loom-kb/arch/llm/dense/qwen2vl/scope.json b/skills/loom-kb/arch/llm/dense/qwen2vl/scope.json
+index ab41432..2a66c7e 100644
+--- a/skills/loom-kb/arch/llm/dense/qwen2vl/scope.json
++++ b/skills/loom-kb/arch/llm/dense/qwen2vl/scope.json
+@@ -9,5 +9,17 @@
+  "facets": [
+   "vision"
+  ],
+- "choices": []
++ "choices": [
++  {
++   "when": {
++    "facets": [
++     "drafted"
++    ]
++   },
++   "set": {
++    "decode.attn.kv_once.drafted": true
++   },
++   "evidence": "PR #451 run 43311788249: same-runner decode_32k vs main: Qwen2.5-VL-7B +19 %"
++  }
++ ]
+ }
+diff --git a/skills/loom-kb/arch/llm/dense/qwen3/scope.json b/skills/loom-kb/arch/llm/dense/qwen3/scope.json
+index f0b3b1f..5fc8b4e 100644
+--- a/skills/loom-kb/arch/llm/dense/qwen3/scope.json
++++ b/skills/loom-kb/arch/llm/dense/qwen3/scope.json
+@@ -7,5 +7,17 @@
+  },
+  "owner": "kb",
+  "facets": [],
+- "choices": []
++ "choices": [
++  {
++   "when": {
++    "facets": [
++     "drafted"
++    ]
++   },
++   "set": {
++    "decode.attn.kv_once.drafted": true
++   },
++   "evidence": "PR #451 run 43311788249: same-runner decode_32k vs main: Qwen3-4B DFlash +6 %"
++  }
++ ]
+ }
+diff --git a/skills/loom-kb/arch/llm/hybrid/qwen35/scope.json b/skills/loom-kb/arch/llm/hybrid/qwen35/scope.json
+index ea33275..f80d21e 100644
+--- a/skills/loom-kb/arch/llm/hybrid/qwen35/scope.json
++++ b/skills/loom-kb/arch/llm/hybrid/qwen35/scope.json
+@@ -9,5 +9,18 @@
+  "facets": [
+   "hybrid-gdn"
+  ],
+- "choices": []
++ "choices": [
++  {
++   "when": {
++    "facets": [
++     "drafted"
++    ]
++   },
++   "set": {
++    "decode.attn.kv_once.drafted": true,
++    "decode.attn.kv_once.d256": true
++   },
++   "evidence": "PR #451 run 43311788249: same-runner decode_32k vs main: Qwen3.5-4B +9 %, Qwen3.5-9B +4 % (head_dim 256)"
++  }
++ ]
+ }
+diff --git a/skills/loom-kb/arch/llm/moe/flint/scope.json b/skills/loom-kb/arch/llm/moe/flint/scope.json
+index e8a8518..7456c21 100644
+--- a/skills/loom-kb/arch/llm/moe/flint/scope.json
++++ b/skills/loom-kb/arch/llm/moe/flint/scope.json
+@@ -9,5 +9,17 @@
+  "facets": [
+   "moe"
+  ],
+- "choices": []
++ "choices": [
++  {
++   "when": {
++    "facets": [
++     "drafted"
++    ]
++   },
++   "set": {
++    "decode.attn.kv_once.drafted": true
++   },
++   "evidence": "PR #451 run 43311788249: same-runner decode_32k vs main: Flint +5 %"
++  }
++ ]
+ }
