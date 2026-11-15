@@ -169,8 +169,9 @@ def run(a):
     work = os.path.splitext(a.out)[0]
     checks, compared_max, stats = [], 0, {"steps": 0, "prompts": 0}
 
+    preset_args = ["--loom-preset", a.preset] if a.preset else []   # a card with several presets needs one named
     # (a) the embed layer alone
-    r = subprocess.run([os.path.join(bundle, "run-embed-probe.sh"), a.package, str(a.steps), "3"], capture_output=True, text=True, timeout=1800)
+    r = subprocess.run([os.path.join(bundle, "run-embed-probe.sh"), a.package, str(a.steps), "3", a.preset], capture_output=True, text=True, timeout=1800)
     ok, why = probe_check((r.stdout.strip().splitlines() or [""])[-1])
     checks.append({"name": "embed_probe", "ok": ok and r.returncode == 0, "why": why or (r.stderr.strip().splitlines() or [""])[-1][:200]})
     with open(work + ".embed_probe.json", "w") as f:
@@ -178,14 +179,14 @@ def run(a):
 
     # (c) capability off: the device path's text
     off = {}
-    g = Gufo(bundle, a.package, a.port, False, work + ".gufo_off.log")
+    g = Gufo(bundle, a.package, a.port, False, work + ".gufo_off.log", extra=preset_args)
     try:
         for p in prompts:
             off[p] = g.chat(p, a.steps, False)[0]
     finally:
         g.close()
     # (b) + (c): capability on
-    g = Gufo(bundle, a.package, a.port, True, work + ".gufo_on.log")
+    g = Gufo(bundle, a.package, a.port, True, work + ".gufo_on.log", extra=preset_args)
     try:
         for p in prompts:
             dev, _ = g.chat(p, a.steps, False)
@@ -223,6 +224,7 @@ def main(argv=None):
     ap.add_argument("--steps", type=int, default=32)
     ap.add_argument("--prompts", type=int, default=6)
     ap.add_argument("--port", type=int, default=8181)
+    ap.add_argument("--preset", default="", help="the preset to open (required by a card with several: Strix = the first, the R9700 = <first>-r9700)")
     return run(ap.parse_args(argv))
 
 

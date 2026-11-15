@@ -315,6 +315,9 @@ EOF
   cp "$pkg/model.json" "$out/model_$v.json"; sha256sum "$pkg"/program/*.loom > "$out/programs_$v.sha256"
 done
 
+pkg_preset() {   # pkg_preset MODEL_JSON -> the preset this runner serves ("" for a card with one preset): the R9700's <first><suffix> when it has one, else the first
+  "$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); r=p[0] + sys.argv[3]; print((r if sys.argv[2] and r in p else p[0]) if len(p) > 1 else '')" "$1" "$RDEV" "$RSUF"
+}
 serve_alone() { # serve_alone VARIANT
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
@@ -521,7 +524,7 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'median', 
       LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR
       ( unset LLAMA_SPEC; "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" 1 8192 | tail -1 ) || { res[$s]=ERROR; continue; }
       step "logits $p1 (bundle $GUFO_BUNDLE)"
-      "$T" "$here/.github/scripts/logits_check.py" "$D/$p1/pkg" "$out/logits_$p1.json" --bundle "$GUFO_BUNDLE" --llama "$lurl" --prompts "${p2:-6}" \
+      "$T" "$here/.github/scripts/logits_check.py" "$D/$p1/pkg" "$out/logits_$p1.json" --bundle "$GUFO_BUNDLE" --llama "$lurl" --prompts "${p2:-6}" --preset "$(pkg_preset "$D/$p1/pkg/model.json")" \
         > "$out/logits_$p1.log" 2>&1; rc=$?
       tail -3 "$out/logits_$p1.log" | cut -c1-300
       "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
@@ -530,7 +533,8 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'median', 
       free_gpu
       gufo_bundle || { echo '{"verdict": "NOT_SUPPORTED", "note": "no gufo bundle on this job (set bundle or GUFO_BUNDLE)", "gates": {}}' > "$out/conformance_$p1.json"; res[$s]="not supported (no gufo bundle)"; continue; }
       step "gufo conformance $p1 (bundle $GUFO_BUNDLE)"
-      BUNDLE=$GUFO_BUNDLE "$GUFO_BUNDLE/validation/devlab/run_conformance.sh" "$D/$p1/pkg" "$out/gufo_$p1" 8181 > "$out/gufo_$p1.log" 2>&1; rc=$?
+      gp=$(pkg_preset "$D/$p1/pkg/model.json")
+      EXTRA_GUFO_ARGS="${gp:+--loom-preset $gp}" BUNDLE=$GUFO_BUNDLE "$GUFO_BUNDLE/validation/devlab/run_conformance.sh" "$D/$p1/pkg" "$out/gufo_$p1" 8181 > "$out/gufo_$p1.log" 2>&1; rc=$?
       tail -4 "$out/gufo_$p1.log" | cut -c1-300
       res[$s]=$("$T" "$here/.github/scripts/gufo_gate.py" "$out/gufo_$p1" "$out/conformance_$p1.json" "$rc" 2>&1 | tail -1 | cut -c1-300);;
     func)

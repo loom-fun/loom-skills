@@ -78,6 +78,26 @@ class LogitsJobs(unittest.TestCase):
         self.assertEqual(v["staging"]["build_args"], ["--prefill-device", "radeon-r9700=4096"])
         self.assertEqual([s.split(":")[0] for s in j["steps"]], ["func", "ktest", "logits"])
 
+    @unittest.skipIf(os.name == "nt", "bash script")
+    def test_pkg_preset_names_the_preset_a_gpu_serves(self):
+        """A card with several presets must be opened with one named (embed_probe, `gufo serve --loom-preset`): Strix its first, the R9700 `<first>-r9700`."""
+        import re, tempfile
+        sh = open(os.path.join(SCRIPTS, "devlab_perf.sh")).read()
+        fn = re.search(r"^pkg_preset\(\) \{.*?^\}$", sh, re.M | re.S).group(0)
+        with tempfile.TemporaryDirectory() as d:
+            for name, presets in (("two", ["chat", "chat-r9700"]), ("one", ["chat"]), ("first_only", ["chat", "other"])):
+                json.dump({"presets": {p: {} for p in presets}}, open(os.path.join(d, name + ".json"), "w"))
+
+            def run(model, rdev):
+                r = subprocess.run(["bash", "-c", f'T={sys.executable}; RDEV="{rdev}"; RSUF=-r9700; {fn}\npkg_preset {os.path.join(d, model)}.json'],
+                                   capture_output=True, text=True)
+                return r.stdout.strip()
+            self.assertEqual((run("two", ""), run("two", "radeon-r9700")), ("chat", "chat-r9700"))
+            self.assertEqual((run("one", ""), run("one", "radeon-r9700")), ("", ""))
+            self.assertEqual(run("first_only", "radeon-r9700"), "chat")
+        self.assertIn('--preset "$(pkg_preset', sh)
+        self.assertIn("EXTRA_GUFO_ARGS=", sh)
+
     def test_script_has_the_steps(self):
         sh = open(os.path.join(SCRIPTS, "devlab_perf.sh")).read()
         self.assertIn("    logits)", sh)
