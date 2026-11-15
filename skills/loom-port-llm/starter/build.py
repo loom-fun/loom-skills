@@ -31,7 +31,8 @@ ap.add_argument("--memory-gib", default="auto",
                      "benchmarks load one model at a time); 56 when RAM can't be read")
 ap.add_argument("--prefill", type=int, default=None,
                 help="prefill chunk (prefill_capacity), 1024-4096; default cfg['prefill_capacity'], else 4096 for MoE "
-                     "(fuller expert tiles: Flint 2k/8k/32k +22/+38/+28 %% vs 1024), else 1024")
+                     "(fuller expert tiles: Flint 2k/8k/32k +22/+38/+28 %% vs 1024), else 2048 with KV-shared layers (their pruned "
+                     "rows make padding free: gemma-4 E2B 1k/2k prefill +30/+10 %% vs 1024), else 1024")
 ap.add_argument("--rows", type=int, default=4, help="initial resident rows (grows on demand); c4 benchmarks need >= 4")
 ap.add_argument("--max-tokens", type=int, default=4096, help="default completion length when a request sets none")
 ap.add_argument("--temperature", type=float, default=0.0, help="default sampling temperature when a request sets none (0 = greedy)")
@@ -53,7 +54,7 @@ if (_cdir := catalog.find(HERE)):
     catalog.build(a, cfg, _cdir, a.tokenizer)
     sys.exit(0)
 if a.prefill is None:
-    a.prefill = cfg.get("prefill_capacity") or (4096 if cfg.get("moe") else 1024)
+    a.prefill = cfg.get("prefill_capacity") or (4096 if cfg.get("moe") else 2048 if cfg.get("kv_shared_from") else 1024)
 chat = cfg.get("chat")
 if not chat:
     sys.exit("config has no 'chat' block: fill it from the model's chat template first (chat_probe.py)")
