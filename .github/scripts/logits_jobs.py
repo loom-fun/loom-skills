@@ -28,7 +28,7 @@ def build(a, ab_args):
         extra = []
         if any(k.startswith("require_preset_") for k in j):   # the device preset: only a larger prefill chunk can be rebuilt (build.py --prefill-device)
             slug = j["card"].split("/")[-1]
-            fit = {r["slug"]: r for r in json.load(open(os.path.join(ab_jobs.ROOT, ab_jobs.card_lib.registry.fit_table(a.device))))}
+            fit = ab_jobs.card_lib.fit_rows(os.path.join(ab_jobs.ROOT, ab_jobs.card_lib.registry.fit_table(a.device)), a.device)   # with the scope rules' execution (exec.*) put back
             ex = (fit[slug].get(f"{ab_jobs.DEVICES[a.device]['runner']}_execution") or {})
             if set(ex) != {"prefill_capacity"}:
                 sys.exit(f"{j['name']}: the device preset sets {sorted(ex)}; a --build rebuild reproduces only prefill_capacity: publish the package and measure the card")
