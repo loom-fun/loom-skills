@@ -636,7 +636,7 @@ def render(d):
         for g in serving:
             L += ["<details>", f"<summary>{html.escape(GPUS[g]['name'], quote=False)} ({gpu_arch(g)})</summary>", "",
                   "```bash", *install, fetch_for(g), serve_command(info, facts, feats, g, output, bare), "```", ""]
-            for line in (served_context_line(g, True), preset_line(g, True)):
+            for line in (served_context_line(g, True),):   # B1: the served-context cap is the only sentence in a block
                 if line:
                     L += [line, ""]
             L += ["</details>", ""]

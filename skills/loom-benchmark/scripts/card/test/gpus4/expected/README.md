@@ -40,8 +40,6 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 
 On this GPU, the package's preset sizes the memory pool (`--pool_backing=fixed` commits it up front): this package serves up to 20,480 tokens per request (its native context is 40,960).
 
-On this GPU, the Quick start fetches the `chat-r9700` preset of `model.json`: the default preset with `context_capacity` 20,480, `pool_capacity` 20,480, `prefill_capacity` 2,048, `rows` 2 for its 32 GB. The programs, weights and tokenizer are the same.
-
 </details>
 
 <details>
@@ -55,8 +53,6 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 
 On this GPU, `--memory_bytes=15000000000` bounds the memory pool: this package serves up to 18,432 tokens per request (its native context is 40,960).
 
-On this GPU, the Quick start fetches the `chat-9070xt` preset of `model.json`: the default preset with `context_capacity` 18,432, `pool_capacity` 18,432, `prefill_capacity` 2,048, `rows` 2 for its 16 GB. The programs, weights and tokenizer are the same.
-
 </details>
 
 <details>
@@ -69,8 +65,6 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 ```
 
 On this GPU, `--memory_bytes=17000000000` bounds the memory pool: this package serves up to 16,384 tokens per request (its native context is 40,960).
-
-On this GPU, the Quick start fetches the `chat-gfx1150` preset of `model.json`: the default preset with `context_capacity` 16,384, `pool_capacity` 16,384, `prefill_capacity` 512 for its memory. The programs, weights and tokenizer are the same.
 
 </details>
 

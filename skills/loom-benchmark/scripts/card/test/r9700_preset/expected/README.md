@@ -38,8 +38,6 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 
 On this GPU, the package's preset sizes the memory pool (`--pool_backing=fixed` commits it up front): this package serves up to 20,480 tokens per request (its native context is 40,960).
 
-On this GPU, the Quick start fetches the `chat-r9700` preset of `model.json`: the default preset with `prefill_capacity` 4,096 for its 32 GB. The programs, weights and tokenizer are the same.
-
 </details>
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
