@@ -1,47 +1,60 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "mxfp4sota accept: MTP proposal block precision q4_0 (base) vs q8_0 vs bf16 as stored; iterate preset, ABBA. Evidence branch, not for merge.",
  "runner": "r9700",
  "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "card": "loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
+ "kit": null,
+ "llamacpp": "b1375",
+ "repeat_rows": 3,
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "accept-block",
+   "card": "loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
    "kit": null,
    "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "repeat_rows": 3,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "base",
+     "build": {},
+     "build_args": [
+      "--slug",
+      "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom"
+     ],
+     "context": 110592
     },
     {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "q8",
+     "build": {
+      "MTP_BLOCK_PREP": "q8_0"
+     },
+     "build_args": [
+      "--slug",
+      "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom"
+     ],
+     "context": 110592
+    },
+    {
+     "name": "bf16",
+     "build": {
+      "MTP_BLOCK_PREP": ""
+     },
+     "build_args": [
+      "--slug",
+      "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom"
+     ],
+     "context": 110592
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "smoke:base",
+    "perf:base:1:long",
+    "perf:q8:1:long",
+    "perf:bf16:1:long",
+    "perf:bf16:1:long",
+    "perf:q8:1:long",
+    "perf:base:1:long"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
