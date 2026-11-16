@@ -112,6 +112,27 @@ def hf_head(repo):
     return HfApi().model_info(repo).sha
 
 
+def new_sdk_pin(pin):
+    """True for a package pinned to the SDK this migration moves TO (SDK_NEW or one of its release candidates): every other pin, or none, is an
+    old card (0.1.0; Flash-Next's 0.2.0.dev0 CI build is its "previous" SDK)"""
+    base = SDK_NEW.split("rc")[0]   # works for SDK_NEW = "0.2.0rc1" and, after the final release, "0.2.0" alike
+    return bool(pin) and (pin == base or str(pin).startswith(base + "rc"))
+
+
+def old_sdk_revision(repo):
+    """the newest commit of REPO whose llm_config.json is not pinned to the new SDK (None if there is none)"""
+    from huggingface_hub import HfApi, hf_hub_download
+    from huggingface_hub.utils import EntryNotFoundError
+    for c in HfApi().list_repo_commits(repo):
+        try:
+            pin = (json.load(open(hf_hub_download(repo, "llm_config.json", revision=c.commit_id))).get("sdk") or {}).get("hrx_loom")
+        except EntryNotFoundError:   # a commit without llm_config.json (the repo's first commits) is not a package; any other error reaches plan's die
+            continue
+        if not new_sdk_pin(pin):
+            return c.commit_id
+    return None
+
+
 def hf_snapshot(repo, rev, out):
     from huggingface_hub import snapshot_download
     snapshot_download(repo, revision=rev, local_dir=out)
@@ -291,14 +312,21 @@ def cmd_plan(a):
     if a.mode == "logits" and a.old is None:
         old_org = a.new_org   # one package, checked: old == new in the pinned refs
     if a.mode == "sdk-ab":
-        # old = new = the staging repo's head at plan time (the card as published now; fleet/manifest.json staging.revision can lag it by
-        # card-only and program commits): the job's card, the old variant's package, and the revision the v0.2 package is published on top of
+        # old = the newest staging revision whose package is still on the OLD SDK (no pin or a 0.1.x pin in llm_config.json: the card as published
+        # before the migration; fleet/manifest.json staging.revision can lag it, and once a v0.2 package is uploaded the head is not it any more);
+        # new = the head at plan time (the job's card files and the revision the v0.2 package is published on top of)
         if a.old:
-            die("--mode sdk-ab takes its old package from the staging repo's head (no --old)")
+            die("--mode sdk-ab finds its old package in the staging repo's history (no --old)")
         refs = {}
         for s in slugs:
-            ref = f"{a.new_org}/{s}@{hf_head(f'{a.new_org}/{s}')}"
-            refs[s] = {"old": ref, "new": ref}
+            repo = f"{a.new_org}/{s}"
+            try:
+                head, old = hf_head(repo), old_sdk_revision(repo)
+            except Exception as x:   # one transient Hub failure: a clear message, not a traceback
+                die(f"{repo}: cannot resolve its revisions on the Hub ({x}); rerun plan")
+            if not old:
+                die(f"{repo}: no revision with an old-SDK package (pin other than {SDK_NEW}) in its history")
+            refs[s] = {"old": f"{repo}@{old}", "new": f"{repo}@{head}"}
     elif a.mode in ("ab", "logits") and not a.no_pin:
         # pin the new package of every slug to the staging revision it is measured at (the card the run measures is the card ingested)
         refs = {s: dict(e) for s, e in (refs or {}).items()}
@@ -519,7 +547,7 @@ def compare(st, name, e, d):
     cmp = os.path.join(st.work, "cmp", f"{name}.json")
     os.makedirs(os.path.dirname(cmp), exist_ok=True)
     cmd = [PY, os.path.join(SCRIPTS, "strix_ab_compare.py"), d, "--json", cmp]
-    if st.d["mode"] == "sdk-ab":   # the old side IS the staging card at the manifest revision: the runner guard compares it with that card's value on this device
+    if st.d["mode"] == "sdk-ab":   # the old side IS the staging card at its pinned (old-SDK) revision: the runner guard compares it with that card's value on this device
         rev = e["card"].split("@")[-1] if "@" in e["card"] else None
         cmd += ["--fun-info", hf_file(e["card"].split("@")[0], "info.json", rev), "--gpu", e["device"]]
     elif e["device"] == "strix-halo" and st.d["opts"]["old_org"] == "loom-fun":
@@ -588,18 +616,24 @@ def sdk_decide(st, name, e, cmp_path):
         reasons.append(f"greedy text differs from v0.1 on {t['prompts'] - t['identical']}/{t['prompts']} prompts (reported)")
     if cmp.get("degraded_runner"):
         return ("hold" if e["round"] > 1 else "rerun"), [f"degraded runner (old side off the card value): {cmp['degraded_runner']}"] + reasons, perf, rows
+    # decode, prefill and 4stream must be measured on both sides; only the long-context row may be absent on BOTH (beyond the context both serve
+    # on this device, e.g. a 32k row on a 32k card): that is "not measured", not missing. A failed perf step on both sides still reruns.
+    m = cmp.get("metrics") or {}
+    gone = [k for k, v in perf.items() if v is None and (k != "longctx" or (m.get(SDK_METRICS[k]) or {}).get("old") is not None)]
+    newonly = [k for k, v in perf.items() if v is None and (m.get(SDK_METRICS[k]) or {}).get("old") is None and (m.get(SDK_METRICS[k]) or {}).get("new") is not None]
+    if newonly:
+        reasons.append(f"served only on the new SDK (no old value to compare): {', '.join(newonly)}")
     prev = st.jobs[e["prev"]] if e.get("prev") else None
     if prev and prev.get("perf"):
         p1 = prev["perf"]
         both = {k: (p1[k], perf[k]) for k in perf if p1.get(k) is not None and perf[k] is not None and p1[k] < -SDK_REGRESSION * 100 and perf[k] < -SDK_REGRESSION * 100}
         perf = {k: (round((p1[k] + perf[k]) / 2, 1) if p1.get(k) is not None and perf[k] is not None else perf[k]) for k in perf}
+        if gone:   # the confirming run measured too little to decide: hold with the reason (never a promote on missing rows)
+            return "hold", [f"missing in the confirming run: {', '.join(gone)}"] + reasons, perf, rows
         if both:
             return "hold", [f"confirmed regression > {SDK_REGRESSION:.0%} in both runs: " + ", ".join(f"{k} {a:+.1f} % / {b:+.1f} %" for k, (a, b) in both.items())] + reasons, perf, rows
         return "promote", reasons, perf, rows
     slow = {k: v for k, v in perf.items() if v is not None and v < -SDK_REGRESSION * 100}
-    # a row neither side served (beyond the context both serve on this device, e.g. a 32k row on a 32k card) is not measured, not missing
-    m = cmp.get("metrics") or {}
-    gone = [k for k, v in perf.items() if v is None and (m.get(SDK_METRICS[k]) or {}).get("old") is not None]
     if slow or gone:
         return "rerun", ([f"slower than -{SDK_REGRESSION:.0%}: " + ", ".join(f"{k} {v:+.1f} %" for k, v in slow.items())] if slow else []) + \
             ([f"missing: {', '.join(gone)}"] if gone else []) + reasons, perf, rows
@@ -1069,7 +1103,7 @@ def main(argv=None):
     p.add_argument("slugs", nargs="*")
     p.add_argument("--device", action="append", required=True)
     p.add_argument("--mode", choices=("ab", "card", "logits", "sdk-ab"), default="ab",
-                   help="sdk-ab: the SDK migration's A/B per model and device (old = the manifest's staging card on its own SDK pin, 0.1.0 when pin-less; new = built from --base on 0.2.0; deltas per metric); logits: the final pass's functional job of a staging package (func, ktest, logits:staging), no performance")
+                   help="sdk-ab: the SDK migration's A/B per model and device (old = the newest old-SDK revision of the staging card on its own SDK pin, 0.1.0 when pin-less; new = built from --base on the new SDK; deltas per metric); logits: the final pass's functional job of a staging package (func, ktest, logits:staging), no performance")
     p.add_argument("--bundle", nargs=2, metavar=("URL", "SHA256"), help="logits mode: the Gufo bundle tarball the job fetches (devlab_perf.sh gufo_bundle)")
     p.add_argument("--bundle-run", help="logits mode: reuse the `gufo-bundle` artifact of this devlab-perf run (the run that built it: no build in this one)")
     p.add_argument("--bundle-build", nargs=2, metavar=("EXT_REV", "GUFO_REV"), help="logits mode: the devlab-perf run BUILDS the Gufo bundle "

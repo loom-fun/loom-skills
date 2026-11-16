@@ -3,7 +3,8 @@
 How a package and its generated card reach the Hub, how the card's evidence is filled on DevLab, and when a regenerated
 package may replace a published one. The sampled promotion check for targeted work (`fleet/promote_check.py`, the baseline
 store) is [targeted-fix.md](targeted-fix.md) section 5; the ratchet's design is in [architecture.md](architecture.md);
-`loom-benchmark/scripts/card/promote_staging.py` moves approved staging packages to their final repos on the owner's go-ahead.
+`loom-benchmark/scripts/card/promote_staging.py` moves approved staging packages to their final repos on the owner's go-ahead; for an SDK
+migration, first tag the production repos with the outgoing SDK version (`loom-migrate` SKILL.md step 6, `scripts/tag_org.py`).
 Which models need this work is [populate-org.md](populate-org.md).
 
 ## 2. Publish the initial result

@@ -38,5 +38,8 @@ Optimizations the release opens, with the evidence and the issue link.
 ## 10. Not applicable
 Changes in the release notes that do not touch this repo, with the reason (so the next reader need not re-check).
 
-## 11. Campaign evidence
+## 11. Promotion
+Before the staging cards go to production: `scripts/tag_org.py --org loom-fun --tag v<from>` (the outgoing cards stay addressable); after it, tag the new state `v<to>`.
+
+## 12. Campaign evidence
 Links: the campaign PRs, DevLab run ids, the published staging cards, the final report.
