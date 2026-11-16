@@ -1,46 +1,672 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "R9700 A/B (ab_jobs.py): per model one job on one R9700 runner, old package (fun) vs new package (staging), served as the new card's R9700 Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: bartowski-Ornith-1.5-122B-loom SDK A/B (--sdk-ab): fun = the published card on hrx-loom card, staging = the package built in the job on 0.2.0rc1.",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "rab-internscience-sage-a1-5-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/InternScience-Sage-A1.5-loom@916b1195e2704ecfc0e785d9b638ba6a78dd87a4",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 138240,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "fun",
+     "card": "loom-fun-staging/InternScience-Sage-A1.5-loom@916b1195e2704ecfc0e785d9b638ba6a78dd87a4",
+     "context": 138240,
+     "cap_pool": 204800,
+     "execution": {
+      "context_capacity": 138240,
+      "prefill_capacity": 2048
+     },
+     "sdk": "card"
     },
     {
-     "name": "nodraft",
-     "build": {},
+     "name": "staging",
+     "context": 138240,
+     "cap_pool": 204800,
      "execution": {
+      "context_capacity": 138240,
+      "prefill_capacity": 2048
+     },
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "1024"
+     ],
+     "sdk": "0.2.0rc1",
+     "require_preset_r9700": false
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/InternScience-Sage-A1.5-loom@916b1195e2704ecfc0e785d9b638ba6a78dd87a4",
+     "context": 138240,
+     "cap_pool": 204800,
+     "execution": {
+      "context_capacity": 138240,
+      "prefill_capacity": 2048,
       "draft_depth": 0
-     }
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "stagingnd",
+     "context": 138240,
+     "execution": {
+      "context_capacity": 138240,
+      "prefill_capacity": 2048,
+      "draft_depth": 0
+     },
+     "cap_pool": 204800,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "1024"
+     ],
+     "sdk": "0.2.0rc1",
+     "require_preset_r9700": false
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
     "llama@rocm.np1:3",
     "llama@rocm.np1:3:long",
     "llamac4@rocm.nodraft",
     "llama@vulkan.np1:3",
     "llama@vulkan.np1:3:long",
     "llamac4@vulkan.perslot.nodraft"
-   ]
+   ],
+   "sdk": "0.2.0rc1"
+  },
+  {
+   "name": "rab-xhtoken-spark-x2-5-4b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/XHToken-Spark-X2.5-4B-loom@b446975f597a22bacc459d58635f15832d8d3650",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 195584,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/XHToken-Spark-X2.5-4B-loom@b446975f597a22bacc459d58635f15832d8d3650",
+     "context": 195584,
+     "cap_pool": 195584,
+     "execution": {
+      "context_capacity": 195584,
+      "pool_capacity": 195584
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "staging",
+     "context": 195584,
+     "execution": {
+      "context_capacity": 195584,
+      "pool_capacity": 195584
+     },
+     "cap_pool": 195584,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "1024"
+     ],
+     "sdk": "0.2.0rc1"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/XHToken-Spark-X2.5-4B-loom@b446975f597a22bacc459d58635f15832d8d3650",
+     "context": 195584,
+     "cap_pool": 195584,
+     "execution": {
+      "context_capacity": 195584,
+      "pool_capacity": 195584,
+      "draft_depth": 0
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "stagingnd",
+     "context": 195584,
+     "execution": {
+      "context_capacity": 195584,
+      "pool_capacity": 195584,
+      "draft_depth": 0
+     },
+     "cap_pool": 195584,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "1024"
+     ],
+     "sdk": "0.2.0rc1"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ],
+   "sdk": "0.2.0rc1"
+  },
+  {
+   "name": "rab-bartowski-ornith-1-5-35b-a3b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/bartowski-Ornith-1.5-35B-A3B-loom@53d8cf9b7c74b65b1104472c51f91ba087ee52f9",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 55296,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/bartowski-Ornith-1.5-35B-A3B-loom@53d8cf9b7c74b65b1104472c51f91ba087ee52f9",
+     "context": 55296,
+     "cap_pool": 89088,
+     "execution": {
+      "context_capacity": 55296,
+      "prefill_capacity": 2048
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "staging",
+     "context": 55296,
+     "cap_pool": 89088,
+     "execution": {
+      "context_capacity": 55296,
+      "prefill_capacity": 2048
+     },
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "1024"
+     ],
+     "sdk": "0.2.0rc1",
+     "require_preset_r9700": false
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/bartowski-Ornith-1.5-35B-A3B-loom@53d8cf9b7c74b65b1104472c51f91ba087ee52f9",
+     "context": 55296,
+     "cap_pool": 89088,
+     "execution": {
+      "context_capacity": 55296,
+      "prefill_capacity": 2048,
+      "draft_depth": 0
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "stagingnd",
+     "context": 55296,
+     "execution": {
+      "context_capacity": 55296,
+      "prefill_capacity": 2048,
+      "draft_depth": 0
+     },
+     "cap_pool": 89088,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "1024"
+     ],
+     "sdk": "0.2.0rc1",
+     "require_preset_r9700": false
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ],
+   "sdk": "0.2.0rc1"
+  },
+  {
+   "name": "rab-bartowski-ornith-1-5-9b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/bartowski-Ornith-1.5-9B-loom@cba1738e95a15c54a7bfb90242de81af13229d95",
+   "memory_bytes_r9700": 32000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/bartowski-Ornith-1.5-9B-loom@cba1738e95a15c54a7bfb90242de81af13229d95",
+     "cap_pool": 380928,
+     "execution": {},
+     "sdk": "card"
+    },
+    {
+     "name": "staging",
+     "cap_pool": 380928,
+     "build": {},
+     "sdk": "0.2.0rc1"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/bartowski-Ornith-1.5-9B-loom@cba1738e95a15c54a7bfb90242de81af13229d95",
+     "cap_pool": 380928,
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "cap_pool": 380928,
+     "build": {},
+     "sdk": "0.2.0rc1"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ],
+   "sdk": "0.2.0rc1"
+  },
+  {
+   "name": "rab-bartowski-qwen2-5-0-5b-instruct-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom@688486e2cd80bc7f9364bf7673151e42fb6d3d40",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 5000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom@688486e2cd80bc7f9364bf7673151e42fb6d3d40",
+     "cap_pool": 2529280,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "staging",
+     "cap_pool": 2529280,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "build": {},
+     "sdk": "0.2.0rc1",
+     "require_preset_r9700": false
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom@688486e2cd80bc7f9364bf7673151e42fb6d3d40",
+     "cap_pool": 2529280,
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     },
+     "cap_pool": 2529280,
+     "build": {},
+     "sdk": "0.2.0rc1",
+     "require_preset_r9700": false
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "llama@rocm.np1:6",
+    "llama@rocm.np1:6:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:6",
+    "llama@vulkan.np1:6:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ],
+   "sdk": "0.2.0rc1"
+  },
+  {
+   "name": "rab-bartowski-qwen2-5-1-5b-instruct-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/bartowski-Qwen2.5-1.5B-Instruct-loom@2cd82c1688f00367729251e0fa7883f59a8aef6b",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 8000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/bartowski-Qwen2.5-1.5B-Instruct-loom@2cd82c1688f00367729251e0fa7883f59a8aef6b",
+     "cap_pool": 1049600,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "staging",
+     "cap_pool": 1049600,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "build": {},
+     "sdk": "0.2.0rc1",
+     "require_preset_r9700": false
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/bartowski-Qwen2.5-1.5B-Instruct-loom@2cd82c1688f00367729251e0fa7883f59a8aef6b",
+     "cap_pool": 1049600,
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     },
+     "cap_pool": 1049600,
+     "build": {},
+     "sdk": "0.2.0rc1",
+     "require_preset_r9700": false
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "llama@rocm.np1:6",
+    "llama@rocm.np1:6:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:6",
+    "llama@vulkan.np1:6:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ],
+   "sdk": "0.2.0rc1"
+  },
+  {
+   "llama_kv_rocm": 40960,
+   "name": "rab-bartowski-qwen2-5-32b-instruct-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom@daabdaa7868b8e2030b61ad9f5e4681ed3d6a4be",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 24576,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom@daabdaa7868b8e2030b61ad9f5e4681ed3d6a4be",
+     "context": 24576,
+     "cap_pool": 43008,
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "staging",
+     "context": 24576,
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576
+     },
+     "cap_pool": 43008,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "1024"
+     ],
+     "sdk": "0.2.0rc1"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom@daabdaa7868b8e2030b61ad9f5e4681ed3d6a4be",
+     "context": 24576,
+     "cap_pool": 43008,
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576,
+      "draft_depth": 0
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "stagingnd",
+     "context": 24576,
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576,
+      "draft_depth": 0
+     },
+     "cap_pool": 43008,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "1024"
+     ],
+     "sdk": "0.2.0rc1"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ],
+   "sdk": "0.2.0rc1"
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/InternScience-Sage-A1.5-loom@916b1195e2704ecfc0e785d9b638ba6a78dd87a4",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
