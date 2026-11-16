@@ -13,12 +13,17 @@
 # into every package it builds (llm_config.json "generator"), and a hash that tells a later build whether the
 # kit was edited since.
 set -euo pipefail
+# `python3` is the Microsoft Store stub in some Windows Git Bash installs: resolve a real one.
+py3=$(command -v python3 2>/dev/null || true)
+case "$py3" in ''|*WindowsApps*) py3= ;; esac
+[ -n "$py3" ] || py3=$(command -v python 2>/dev/null || true)
+[ -n "$py3" ] || { echo "STOP: no python3/python on PATH" >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
 name=${1%-example}; ex=$here/$name-example; kit=$2
 if [ "$name" = starter ]; then
   [ -e "$kit" ] && { echo "$kit exists; apply_example.sh starter only makes a new kit"; exit 2; }
   cp -r "$here/../starter" "$kit"
-  python3 "$kit/kit_source.py" write "$kit" --skills-dir "$here/.."
+  "$py3" "$kit/kit_source.py" write "$kit" --skills-dir "$here/.."
   echo "OK: $kit = starter"; exit 0
 fi
 [ -d "$ex" ] || { echo "no example '$1' (have: starter $(cd "$here" && ls -d *-example | tr '\n' ' '))"; exit 2; }
@@ -27,10 +32,10 @@ fi
   mkdir -p "$kit/$(dirname "$f")"; cp "$ex/$f" "$kit/$f"
 done
 [ ! -s "$ex/starter.patch" ] || patch -p1 --forward --no-backup-if-mismatch -s -d "$kit" < "$ex/starter.patch"
-python3 "$kit/kit_source.py" write "$kit" --example "$name" --skills-dir "$here/.."
+"$py3" "$kit/kit_source.py" write "$kit" --example "$name" --skills-dir "$here/.."
 if [ -n "${3:-}" ]; then
-  rev=$(mktemp); python3 "$here/../find_reference.py" example-cfg "$name" -o "$rev" || { rm -f "$rev"; exit 1; }
-  python3 - "$rev" "$3" <<'PY'
+  rev=$(mktemp); "$py3" "$here/../find_reference.py" example-cfg "$name" -o "$rev" || { rm -f "$rev"; exit 1; }
+  "$py3" - "$rev" "$3" <<'PY'
 import json, sys
 rev, cfg = json.load(open(sys.argv[1], encoding="utf-8")), json.load(open(sys.argv[2], encoding="utf-8"))
 cfg.update(rev)
