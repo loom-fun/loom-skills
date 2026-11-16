@@ -25,7 +25,7 @@ Narrow changes inside a campaign are [targeted fixes](targeted-fix.md).
 | PM (main session) | talks to the owner; relays instructions into inbox files; the only agent that asks the owner | review code, merge, spawn engineers |
 | Tech lead | owns the integration branch; designs, splits work, writes task files, spawns engineers, reviews and merges their PRs, merges the base in, runs regeneration and publishing, writes the final report, opens the final PR | wait for the owner's go-ahead on technical details |
 | Engineers | one task at a time in their own worktree; PR against the integration branch; read `notes/ENG_CONTRACT.md` and their task file first | open PRs into the base or another branch, publish outside the task |
-| Dashboarder | keeps the tracker artifact current from `status.json` + `log.md` (counts, log entries, ETA, scope changes together, not counts alone) | edit code or cards |
+| Dashboarder | keeps the tracker artifact current from `status.json` + `log.md` (counts, log entries, ETA, scope changes together, not counts alone); republishes only on an important change, at most hourly ("State files") | edit code or cards; republish on every change |
 
 Launch every subagent on the cheaper model tier (engineers, reviewers, dashboarder); the tech lead uses the strongest. Briefs for
 engineers are explicit and self-contained: they point at the files to read, never assume the conversation.
@@ -50,8 +50,11 @@ engineers are explicit and self-contained: they point at the files to read, neve
  "measures": {"m1": {"status": "", "evidence": ""}},
  "velocity": {"stages": {"<stage>": {"start": "", "end": "", "agent_hours": 0, "runner_hours": 0, "note": ""}}}}
 ```
-`python3 status.py --dir DIR set workstreams.guards.stage '"review"' workstreams.guards.pr 716`. The tracker artifact is refreshed with
-counts, the log, an ETA and scope changes after every merged PR or when the done count moves by 2 or more.
+`python3 status.py --dir DIR set workstreams.guards.stage '"review"' workstreams.guards.pr 716`. The tracker artifact is republished only when
+something important happens (a model or workstream changes stage or verdict, a PR merges, a regression or blocker appears, a scope change or an
+owner decision) and at most once per hour: diff against the last published state first and batch everything else into the next publish; the
+local HTML copy may update freely. Each publish carries counts, the log, an ETA and scope changes together. (The artifact service allows about
+200 publishes a day; a dashboarder that republished on every change burned that in under an hour.)
 
 ## Communication
 

@@ -15,7 +15,7 @@ effort of this campaign against the previous one (velocity, `status.json` "veloc
 - **Tech lead**: owns `@INTEGRATION@`, designs, splits work, spawns engineers, reviews and merges their PRs, merges the base in when
   needed, runs regeneration and publishing, writes the final report, opens the final PR into `@BASE@`.
 - **Engineers**: one task at a time, own worktree, PRs against `@INTEGRATION@` only.
-- **Dashboarder**: keeps the tracker artifact current from `status.json` + `log.md`; never edits code or cards.
+- **Dashboarder**: keeps the tracker artifact current from `status.json` + `log.md`; republishes only when something important changes (stage/verdict, merged PR, regression/blocker, scope or owner decision), at most once per hour, after a diff against the last published state; never edits code or cards.
 
 ## Communication (strict)
 - Mailboxes: `@DIR@/inbox/<name>.md` (techlead, dashboard, pm, eng-<id>): append a dated line to write. To wait for mail run ONE
