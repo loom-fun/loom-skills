@@ -1,47 +1,59 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "sdk020 ablation of the Strix small-model prefill regression: fun = v0.1 card on 0.1.0; staging = sdk020 kit on 0.2.0rc1; narrow = same kit with the v0.1 KV-pool bounds (branch sdk020-abl-narrow); park = staging with the parked (blocking) wait.",
+ "runner": "strix",
+ "memory_bytes": 17000000000,
  "llama_spec": "matched",
+ "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
+ "kit": null,
+ "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "abl-qwen3-0-6b",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
+   "memory_bytes": 17000000000,
    "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "llamacpp": "b1374",
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
+     "sdk": "card"
     },
     {
-     "name": "nodraft",
+     "name": "staging",
      "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "sdk": "0.2.0rc1"
+    },
+    {
+     "name": "narrow",
+     "build": {},
+     "ref": "origin/sdk020-abl-narrow",
+     "sdk": "0.2.0rc1"
+    },
+    {
+     "name": "park",
+     "build": {},
+     "active_wait": false,
+     "sdk": "0.2.0rc1"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:narrow:1",
+    "perf:park:1",
+    "perf:park:1",
+    "perf:narrow:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:narrow:1",
+    "perf:park:1"
+   ],
+   "sdk": "0.2.0rc1"
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
