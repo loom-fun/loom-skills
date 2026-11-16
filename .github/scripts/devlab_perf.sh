@@ -55,7 +55,7 @@
 # Steps S: ab:R[:on|off]        every variant in ONE loom-serve (small context), ab_decode.py R interleaved rounds
 #          perf:V:N[:long]      V served alone with its own settings: perf.py N times (+ --long); N runs = one session (its value: the median of
 #                               its samples); one run per session = perf:V:1 repeated (a round each). Job "repeat_rows": R (fast models: 3) adds --repeat-rows R
-#          profile:V[:LIST]     per-kernel device time of one prefill (pf2k, pf8k) and one drafted decode (dec): V served per scenario with --print_device_statistics
+#          profile:V[:LIST]     per-kernel device time of one prefill (pf1k, pf2k, pf8k; max_tokens 1) and one drafted decode (dec): V served per scenario with --print_device_statistics
 #                               (the HAL's per-function dispatch statistics at shutdown), profile_requests.py + profile_stats.py: out/profile_V_<scenario>.{md,json,serve.log}
 #          c4:V[:N]             c4_steady.py N (default 4) streams on V
 #          llama:N[:long|-][:M] llama.cpp (card build + llama_spec, n-max M) perf.py N times, llama_decode.py tokens/step
@@ -547,7 +547,7 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
 print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
-    profile)   # profile:V[:SCENARIOS] (comma list of probe,pf2k,pf8k,dec; default all but probe): V served alone per scenario with --print_device_statistics (the HAL's
+    profile)   # profile:V[:SCENARIOS] (comma list of probe,pf1k,pf2k,pf8k,dec; default all but probe): V served alone per scenario with --print_device_statistics (the HAL's
                # per-function dispatch statistics, printed at shutdown); one session per scenario, so each table holds only that scenario's requests
       for sc in $(echo "${p2:-pf2k,pf8k,dec}" | tr ',' ' '); do
         PROFILE_SA="--device_profiling_mode=dispatch-events,executable-metadata --device_profiling_flush_interval_ms=5 --print_device_statistics" serve_alone "$p1" || { res[$s]=ERROR; break; }

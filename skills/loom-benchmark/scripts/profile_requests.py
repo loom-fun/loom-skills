@@ -2,9 +2,10 @@
 """The requests of one profiled serve session (devlab_perf.sh step profile:V): the server runs with --print_device_statistics,
 so its per-kernel statistics cover exactly this script's requests (plus one tiny warm-up, which loads weights and runs first-use work).
 
-usage: profile_requests.py URL MODEL SCENARIO [--reps K] [--depth D] [--tokens N]
+usage: profile_requests.py URL MODEL SCENARIO [--reps K] [--depth D] [--tokens N] [--prefill-tokens N]
   probe   one tiny request (is the statistics output there at all?)
-  pf2k / pf8k   K fresh-nonce prompts of ~2000 / ~8000 tokens, max_tokens 2 (prefill only)
+  pf1k / pf2k / pf8k   K fresh-nonce prompts of ~1000 / ~2000 / ~8000 tokens, max_tokens 1 (the card's prefill = prompt_tokens / TTFT; no decode step
+          after the first token; --prefill-tokens 2 adds the second token's 1-token step)
   dec     one essay request (short prompt), N (default 400) tokens: a drafted decode, the counters give its verify steps
 Prints one JSON line: scenario, requests (prompt/completion tokens, ttft, decode tok/s), draft counter deltas."""
 import argparse
@@ -16,9 +17,10 @@ from bench_common import doc, server_draft_counters, stream, thinking_extra
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
 ap.add_argument("model")
-ap.add_argument("scenario", choices=["probe", "pf2k", "pf8k", "dec"])
+ap.add_argument("scenario", choices=["probe", "pf1k", "pf2k", "pf8k", "dec"])
 ap.add_argument("--reps", type=int, default=3)
 ap.add_argument("--tokens", type=int, default=400)
+ap.add_argument("--prefill-tokens", type=int, default=1)
 a = ap.parse_args()
 TH = thinking_extra("off")
 nonce = str(time.time())
@@ -36,10 +38,10 @@ out = {"scenario": a.scenario, "warmup": go(f"[warm-up {nonce}] Say hi.", 2)}
 if a.scenario != "probe":
     before = server_draft_counters(a.url)
     reqs = []
-    if a.scenario in ("pf2k", "pf8k"):
-        n = 2000 if a.scenario == "pf2k" else 8000
+    if a.scenario in ("pf1k", "pf2k", "pf8k"):
+        n = {"pf1k": 1000, "pf2k": 2000, "pf8k": 8000}[a.scenario]
         for i in range(a.reps):
-            reqs.append(go(f"[{nonce} {i}] Summarize this documentation in one sentence.\n\n" + doc(n), 2))
+            reqs.append(go(f"[{nonce} {i}] Summarize this documentation in one sentence.\n\n" + doc(n), a.prefill_tokens))
     else:
         reqs.append(go(f"[{nonce}] Write a detailed 300-word essay about the history of the printing press.", a.tokens))
     after = server_draft_counters(a.url)

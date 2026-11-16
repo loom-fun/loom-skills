@@ -42,7 +42,7 @@ def main():
     rows = parse(open(a.log, errors="replace").read())
     req = json.loads(open(a.requests).read().strip().splitlines()[-1])
     reqs = req.get("requests") or []
-    if req["scenario"] in ("pf2k", "pf8k"):
+    if req["scenario"] in ("pf1k", "pf2k", "pf8k"):
         toks = sum(r["prompt_tokens"] for r in reqs)   # the warm-up's few tokens are in the totals too (negligible vs thousands)
     else:
         toks = sum(r["completion_tokens"] for r in reqs)
