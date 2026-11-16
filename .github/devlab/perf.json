@@ -1,47 +1,371 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "R9700 rows on hrx-loom 0.2.0 for the RX 9070 XT perf-equivalence check: staging = the SDK campaign's R9700 variant (card settings) built and served on 0.2.0; el9070 = the same package served with the 9070 XT settings (elastic, --memory_bytes=15e9, 4 MiB state slabs), ABBA against staging; llama.cpp ROCm/Vulkan rows as the sweep.",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
+ "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom@512e9bb19d98b83a7c995a135e4c036c0ad0190e",
+ "kit": null,
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "r020-unsloth-qwen3-8b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/unsloth-Qwen3-8B-loom@6318d783577386bb9ebc8bbb5bad7b1d04ad11d9",
+   "memory_bytes_r9700": 29000000000,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "staging",
+     "cap_pool": 148480,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0"
     },
     {
-     "name": "nodraft",
-     "build": {},
+     "name": "stagingnd",
      "execution": {
       "draft_depth": 0
-     }
+     },
+     "cap_pool": 148480,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0"
+    },
+    {
+     "name": "el9070",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--state_slab_bytes=4mib"
+     ],
+     "execution": {}
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
+    "perf:staging:1",
+    "perf:el9070:1",
+    "perf:el9070:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:el9070:1:long",
+    "perf:el9070:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
     "llama@rocm.np1:3",
     "llama@rocm.np1:3:long",
     "llamac4@rocm.nodraft",
     "llama@vulkan.np1:3",
     "llama@vulkan.np1:3:long",
     "llamac4@vulkan.perslot.nodraft"
-   ]
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "r020-unsloth-qwen3-5-4b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/unsloth-Qwen3.5-4B-loom@2c1b47e9e64cd8c09ace39c2a6b7008f9599be62",
+   "memory_bytes_r9700": 28000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "cap_pool": 445440,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "cap_pool": 445440,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0"
+    },
+    {
+     "name": "el9070",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--state_slab_bytes=4mib"
+     ],
+     "execution": {
+      "context_capacity": 40960
+     }
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:el9070:1",
+    "perf:el9070:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:el9070:1:long",
+    "perf:el9070:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "r020-unsloth-qwen3-vl-4b-instruct-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/unsloth-Qwen3-VL-4B-Instruct-loom@903ae417b0987ff5cd0378a9c06f4200b2f6236a",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 187392,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "execution": {
+      "context_capacity": 187392,
+      "pool_capacity": 187392
+     },
+     "cap_pool": 187392,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "context_capacity": 187392,
+      "pool_capacity": 187392,
+      "draft_depth": 0
+     },
+     "cap_pool": 187392,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0"
+    },
+    {
+     "name": "el9070",
+     "execution": {
+      "context_capacity": 40960
+     },
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--state_slab_bytes=4mib"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:el9070:1",
+    "perf:el9070:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:el9070:1:long",
+    "perf:el9070:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "r020-unsloth-gemma-4-e4b-it-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/unsloth-gemma-4-E4B-it-loom@56d2a5f3983be461b4306b608bc23ac0a06d50f2",
+   "memory_bytes_r9700": 31000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "cap_pool": 230400,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "cap_pool": 230400,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0"
+    },
+    {
+     "name": "el9070",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--state_slab_bytes=4mib"
+     ],
+     "execution": {}
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:el9070:1",
+    "perf:el9070:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:el9070:1:long",
+    "perf:el9070:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "r020-unsloth-gpt-oss-20b-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/unsloth-gpt-oss-20b-loom@0510de3ecaeea5ffe4f0948f3b23eeb269ed37ce",
+   "memory_bytes_r9700": 28000000000,
+   "kit": "gpt-oss",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "cap_pool": 358400,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "cap_pool": 358400,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0"
+    },
+    {
+     "name": "el9070",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--state_slab_bytes=4mib"
+     ],
+     "execution": {
+      "prefill_capacity": 1024
+     }
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:el9070:1",
+    "perf:el9070:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:el9070:1:long",
+    "perf:el9070:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ],
+   "sdk": "0.2.0"
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "sdk": "0.2.0"
 }
