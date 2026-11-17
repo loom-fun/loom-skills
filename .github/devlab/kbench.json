@@ -3,26 +3,42 @@
   "sdk": "0.2.0",
   "suites": [
     {
-      "suite": "gdn_liveness",
+      "suite": "mxfp4_followup",
       "runner": "r9700",
-      "dir": "gdn_liveness",
-      "gen": "gdn_liveness/gen_bench.py",
+      "dir": "mxfp4_followup",
+      "gen": "mxfp4_followup/gen_bench.py",
       "gen_variants": [
         "base",
-        "shared",
-        "overlap"
+        "swp",
+        "packed_swp",
+        "gdn_bench",
+        "gdn_bench_shared",
+        "gdn_bench_overlap"
       ],
       "files": [
         "bench.loom",
-        "bench_shared.loom",
-        "bench_overlap.loom"
+        "bench_swp.loom",
+        "bench_packed_swp.loom",
+        "gdn_bench.loom",
+        "gdn_bench_shared.loom",
+        "gdn_bench_overlap.loom"
       ],
       "tests": [
-        "test.loom"
+        "test_swp.loom",
+        "test_packed_swp.loom",
+        "producer.loom",
+        "gdn_test.loom"
       ],
       "negative_tests": [
         {
           "file": "negative.loom",
+          "xfail": [
+            "@check_store_5120_zero_output=EXPECT/006",
+            "@check_store_5120_wrong_layout=EXPECT/006"
+          ]
+        },
+        {
+          "file": "gdn_negative.loom",
           "xfail": [
             "@zero_o_control=EXPECT/006",
             "@zero_arena_control=EXPECT/006"

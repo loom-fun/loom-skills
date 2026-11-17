@@ -43,6 +43,19 @@ class ActivationTiles(unittest.TestCase):
             self.assertNotIn('vector.fragment.load<lhs> %x_g8', tiled)
             self.assertIn('view<8xi8> -> vector<8xi8>', tiled)
 
+    def test_pipeline_preserves_original_matrix_accumulation_order(self):
+        # Compare arithmetic and the weight stream separately: lookahead may
+        # move loads across earlier MMAs, but it may not permute either stream.
+        with patch.dict(os.environ, {'GEMM_MXFP4S_A_TILED': '0'}, clear=True):
+            for mode in ['store', 'swiglu']:
+                base = G.gemm_mxfp4s_f8_m256(mode)
+                pipelined = G.gemm_mxfp4s_f8_m256(mode, swp=True)
+                packed = A.gemm(G.gemm_mxfp4s_f8_m256(mode, swp=mode=='store'))
+                for text in [pipelined, packed]:
+                    for operation in ['vector.mma ', 'fragment.load<rhs>']:
+                        select = lambda t: [l.strip() for l in t.splitlines() if operation in l]
+                        self.assertEqual(select(base), select(text))
+
     def test_resolved_rdna4_rule_activates_matching_consumers_and_producer(self):
         # Use the device-scoped exports from the actual build resolver.
         kb = Path(__file__).resolve().parents[1] / 'skills/loom-kb'
