@@ -21,15 +21,13 @@
   {
    "when": {
     "devices": [
-     "rdna3",
      "rdna4"
     ]
    },
    "set": {
-    "decode.attn.range_mask": true,
     "decode.attn.full_blocks": true
    },
-   "evidence": "#1145 full-block candidate: kernel run44170614219 exact13/13 cases and1.303\u21921.217ms; model ABBA ratchet pending."
+   "evidence": "R9700 kernel44170614219:13 exact cases,1.303\u21921.217ms; model44172014122+bounded44175206518 latest two ratios1.0272/1.0217 pass unchanged per-row mode guard and promotion ratchet. Nominal model gain is within band; final gates pending. Strix stays legacy."
   }
  ]
 }

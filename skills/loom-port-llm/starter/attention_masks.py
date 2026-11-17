@@ -2,26 +2,31 @@
 import os
 
 
-def full_blocks(text, name, unroll):
+def full_blocks(text, name, unroll, twin=False):
     """Bypass per-key predicates on wholly visible blocks; preserve edge arithmetic.
 
     ceil(lo/U)*U <= j < floor(hi/U)*U is equivalent to all U keys being live
     for an aligned block origin j. Clamp reversed full-block bounds to empty.
     The caller restricts this form to the measured ordinary hd64 decode body.
     """
-    if os.environ.get("ATTN_FULL_BLOCKS", "0") != "1":
+    from flash2_rdna4 import twin_env
+    env = twin_env(os.environ) if twin else os.environ
+    if env.get("ATTN_FULL_BLOCKS", "0") != "1":
         return text
-    assert os.environ.get("ATTN_RANGE_MASK", "0") == "1", "ATTN_FULL_BLOCKS requires ATTN_RANGE_MASK=1"
     a = text.index(f'kernel.def export("{name}")')
     end = "  kernel.return\n}"
     b = text.index(end, a) + len(end)
     kernel = text[a:b]
-    masks = [f"      %ok{i}_width = index.sub %hi_abs, %lo_abs : index\n"
-             f"      %ok{i}_delta = index.sub %key{i}_raw, %lo_abs : index\n"
-             f"      %ok{i} = index.cmp ult, %ok{i}_delta, %ok{i}_width : index\n" for i in range(unroll)]
-    for mask in masks:
-        assert kernel.count(mask) == 1, "full_blocks: per-key predicate anchor"
-        kernel = kernel.replace(mask, "", 1)
+    masks = []
+    for i in range(unroll):
+        legacy = (f"      %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index\n"
+                  f"      %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index\n"
+                  f"      %ok{i} = scalar.andi %okl{i}, %okh{i} : i1\n")
+        assert kernel.count(legacy) == 1, "full_blocks: per-key predicate anchor"
+        kernel = kernel.replace(legacy, "", 1)
+        masks.append(f"      %ok{i}_width = index.sub %hi_abs, %lo_abs : index\n"
+                     f"      %ok{i}_delta = index.sub %key{i}_raw, %lo_abs : index\n"
+                     f"      %ok{i} = index.cmp ult, %ok{i}_delta, %ok{i}_width : index\n")
     loop = "    %m_final, %l_final, %acc_final = scf.for %j"
     assert kernel.count(loop) == 1, "full_blocks: ordinary single-chain loop"
     bounds = f"""    %full_less = index.constant {unroll - 1} : index

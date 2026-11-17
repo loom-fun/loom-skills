@@ -2561,47 +2561,6 @@ def allreduce(vals, p, outs):
 # work in one wave measured ~3 % slower drafted decode at short context on Qwen3-8B). attn_rules.multi_token decides.
 
 
-def attention_range_mask(key, lo, hi, out, low, high, indent="      ", ordered=True):
-    """Validity of [lo, hi); the opt-in subtraction is modular unsigned index arithmetic.
-
-    Unordered inactive multi-token sentinels must become an empty interval before
-    subtracting. Other callers construct ordered split bounds. Keep the legacy
-    text exact so unmeasured packages remain byte-identical.
-    """
-    if os.environ.get("ATTN_RANGE_MASK", "0") != "1":
-        return (f"{indent}{low} = index.cmp uge, {key}, {lo} : index\n"
-                f"{indent}{high} = index.cmp ult, {key}, {hi} : index\n"
-                f"{indent}{out} = scalar.andi {low}, {high} : i1")
-    top = hi
-    text = ""
-    if not ordered:
-        top = out + "_top"
-        text = f"{indent}{top} = index.max {hi}, {lo} : index\n"
-    return (text + f"{indent}{out}_width = index.sub {top}, {lo} : index\n"
-            f"{indent}{out}_delta = index.sub {key}, {lo} : index\n"
-            f"{indent}{out} = index.cmp ult, {out}_delta, {out}_width : index")
-
-
-def attention_paged_range_masks(text):
-    """Rewrite the two paged scalar emitters after assembly, keeping kit patch anchors.
-
-    Kit patches specialize page layout in the same literal blocks; matching the
-    exact SSA triple leaves their source anchors stable and changes only masks.
-    """
-    if os.environ.get("ATTN_RANGE_MASK", "0") != "1":
-        return text
-    import re
-    pattern = (r"(?m)^( +)%okl(\d+) = index.cmp uge, %key\2_raw, %lo_abs : index\n"
-               r"\1%okh\2 = index.cmp ult, %key\2_raw, %hi_abs : index\n"
-               r"\1%ok\2 = scalar.andi %okl\2, %okh\2 : i1")
-
-    def emit(match):
-        indent, i = match.groups()
-        return attention_range_mask(f"%key{i}_raw", "%lo_abs", "%hi_abs", f"%ok{i}", f"%okl{i}", f"%okh{i}", indent)
-
-    return re.sub(pattern, emit, text)
-
-
 def multi_token_split(text, P, U, T, until=None):
     """`P`_attention_split with a multi-token path: when the T epoch tokens of this token's aligned group are live,
     of one row and at consecutive positions (a verify span), the group's first workgroup computes all T (one K/V
@@ -2739,7 +2698,9 @@ def multi_token_split(text, P, U, T, until=None):
     yields = []
     for j in range(T):
         for i in range(U):
-            m.append(f"""{attention_range_mask(f"%mkey{i}", f"%mt_lo{j}", f"%mt_hi{j}", f"%mok{j}_{i}", f"%mokl{j}_{i}", f"%mokh{j}_{i}", ordered=False)}
+            m.append(f"""      %mokl{j}_{i} = index.cmp uge, %mkey{i}, %mt_lo{j} : index
+      %mokh{j}_{i} = index.cmp ult, %mkey{i}, %mt_hi{j} : index
+      %mok{j}_{i} = scalar.andi %mokl{j}_{i}, %mokh{j}_{i} : i1
       %mprod{j}_{i} = vector.mulf %mt_q{j}, %mk{i} : {vt}
       %mpart{j}_{i} = vector.reduce<addf> %mprod{j}_{i}, %zero_f : {vt}, f32""")
         m.append(allreduce([f"%mpart{j}_{i}" for i in range(U)], f"mar{j}x", [f"%msr{j}_{i}" for i in range(U)]))
@@ -2892,7 +2853,7 @@ def gqa_split(text, P, S):
 
 def attention_twin(dec, S):
     """g_attention_split_rdna4: the gfx12 twin of the decode split kernel, emitted only where a per-target choice (loom-kb
-    per_target: ATTN_GQA_D256__RDNA4) makes its body differ from the gfx11 kernel `dec`; dual_target.py selects it on gfx12."""
+    per_target: ATTN_GQA_D256__RDNA4 or ATTN_FULL_BLOCKS__RDNA4) makes its body differ from the gfx11 kernel `dec`; dual_target.py selects it on gfx12."""
     if os.environ.get("LOOM_RDNA4", "1").strip().lower() in ("0", "off", "no", "false"):
         return ""
     a = 'kernel.def export("g_attention_split")'
@@ -3204,9 +3165,8 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
         text = gqa_split(text, P, S)
     if P == "g" and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans
         text = multi_token_split(text, P, U, ATTN_MT, attn_rules.ATTN_GQA_FROM - 1 if gqa_on else None)   # gqa body from visible = ATTN_GQA_FROM, i.e. position FROM - 1
-    text = attention_paged_range_masks(text)
     if P == "g" and D == 64 and pa and ILP == 1 and not gqa_on and not attn_rules.multi_token(U, KVH):
-        text = full_blocks(text, f"{P}_attention_split", U)
+        text = full_blocks(text, f"{P}_attention_split", U, twin=twin)
     if D != 128:
         text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
                 .replace("x32x4xf32", f"x32x{DL}xf32").replace("vector<4xf32>", f"vector<{DL}xf32>")
@@ -3356,7 +3316,9 @@ def attention_seg(split_text):
       %base_lo = func.call @g_kv_offset(%origins, %row, %anc_lo, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
       %base_hi = func.call @g_kv_offset(%origins, %row, %anc_hi, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
       %key = index.add %j, %lane : index
-{attention_range_mask("%key", "%lo_u", "%hi_u", "%ok_u", "%oku_l", "%oku_h")}
+      %oku_l = index.cmp uge, %key, %lo_u : index
+      %oku_h = index.cmp ult, %key, %hi_u : index
+      %ok_u = scalar.andi %oku_l, %oku_h : i1
       %anc = scf.select %upper, %anc_hi, %anc_lo : index
       %kbase = scf.select %upper, %base_hi, %base_lo : offset
       %key_c = scf.select %ok_u, %key, %anc : index
@@ -3379,7 +3341,9 @@ def attention_seg(split_text):
       %bb{k} = scalar.andi %bl{k}, %bh{k} : i1
       %use{k} = scalar.andi %bb{k}, %active_{k} : i1
       %nm{k}, %nl{k}, %al{k} = scf.if %use{k} -> (f32, f32, f32) {{
-{attention_range_mask("%key", f"%lo_{k}", f"%hi_{k}", f"%ok{k}", f"%okl{k}", f"%okh{k}", indent="        ")}
+        %okl{k} = index.cmp uge, %key, %lo_{k} : index
+        %okh{k} = index.cmp ult, %key, %hi_{k} : index
+        %ok{k} = scalar.andi %okl{k}, %okh{k} : i1
 {chr(10).join(dots)}
         %score{k} = scf.select %ok{k}, {prev}, %neg_big : f32
         %bmax{k} = kernel.subgroup.reduce<maxnumf> %score{k} : f32

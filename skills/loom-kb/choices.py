@@ -187,12 +187,9 @@ EXEC("exec.context_cap", "int", "A measured limit on the context the device serv
 # Decode attention (attn_rules.py, gen_llm.py)
 # ======================================================================================================================
 _DA = dict(kernels=["g_attention_split", "g_attention_combine"], rows=ROWS_DECODE + ROWS_STREAMS)
-CHOICE("decode.attn.full_blocks", "bool", False, "ATTN_FULL_BLOCKS", kernels=["g_attention_split"],
-       rows=ROWS_DECODE + ROWS_STREAMS, from_pr="1145",
-       doc="Ordinary paged hd64 decode: a uniform interior-block branch bypasses all per-key predicates; edges keep range_mask.")
-CHOICE("decode.attn.range_mask", "bool", False, "ATTN_RANGE_MASK", kernels=["*_attention_split*", "g_attention_seg"],
-       rows=ROWS_ALL, from_pr="1145",
-       doc="Opt-in unsigned interval mask for split attention; inactive reversed bounds are clamped empty.")
+CHOICE("decode.attn.full_blocks", "bool", False, "ATTN_FULL_BLOCKS", per_target=True, devices=["rdna4"],
+       kernels=["g_attention_split_rdna4"], rows=ROWS_DECODE + ROWS_STREAMS, from_pr="1145",
+       doc="Ordinary paged hd64 decode: bypass per-key masks on fully visible blocks; unsigned edge predicates preserve arithmetic.")
 CHOICE("decode.attn.unroll", "int", 16, "ATTN_UNROLL", doc="Keys per decode-attention block.", **_DA)
 CHOICE("decode.attn.butterfly", "bool", True, "ATTN_BFLY", doc="A block's key scores in one butterfly all-reduce.", **_DA)
 CHOICE("decode.attn.paged", "bool", True, "ATTN_PAGED", doc="16-aligned key blocks, one page lookup each.", **_DA)
