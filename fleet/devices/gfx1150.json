@@ -9,7 +9,7 @@
   "hrx_loom": "0.2.0",
   "note": "PyPI wheel, hrx-system 0cd370f2baaa; the package is the published card rebuilt with the sdk020 kit (devlab_perf.sh variant build {}) at LOOM_MEMORY_CAP_GIB=14"
  },
- "tool": "max_context: build.py fit at a 14 GiB budget (63488), confirmed by one 62227-token request that completes (next size: HTTP 400, server healthy); performance and gates: .github/scripts/devlab_perf.sh run locally inside `systemd-run --user -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS` (stock memlock, no preload) (steps func, gates dev, perf x2 + long x2, c4, llama.cpp ROCm b1374 and Vulkan b12211), 46 min",
+ "tool": "Evidence (perf, Vulkan baseline, gates, roofline): .github/scripts/devlab_perf.sh job unsloth-qwen3-5-4b-loom run on this laptop on a stock Ubuntu host (RLIMIT_MEMLOCK 8 MiB, no root, no LD_PRELOAD), the whole job inside `systemd-run --user -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS` (IREE's POSIX I/O backend), loom-serve in the default --parameter_mode=file; steps func, gates dev, perf x2 + long x2, c4, llama.cpp ROCm b1374 and Vulkan b12211 (46 min); ingested with make_info.py perf/gates/roofline --source-kind machine. --parameter_mode=preload (the card's serve flag) spot-checked afterwards on the same machine without the prefix: decode, prefill 1k/2k and streams4 within +-2 %. max_context: build.py fit at a 14 GiB budget (63488), confirmed by one 62227-token request that completes (next size: HTTP 400, server healthy)",
  "package": "loom-fun/unsloth-Qwen3.5-4B-loom@6e8e69042ec7, rebuilt for hrx-loom 0.2.0",
  "serve": {
   "device": "amdgpu://?completion_spin_ns=4294967295",

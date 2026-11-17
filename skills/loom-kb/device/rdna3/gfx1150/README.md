@@ -73,9 +73,9 @@ and the model stays `failed` (code 8) until restart. Measured with preload (Qwen
 | prefill 32k | 929 | 357 | 495 | 2369 |
 | 4 streams (no drafting) | 82.3 | 74.4 | 69.4 | 223.4 |
 
-func and the dev gates (consistency, spec, agent, golden, compare, vision, sampling) pass. Drafted acceptance 0.30 / 0.40 / 0.40.
+func and the dev gates (consistency, spec, agent, golden, compare, vision, sampling) pass. Drafted acceptance 0.327 / 0.418 / 0.392 (decode / decode @2k / decode @32k rows); the `spec` gate's acceptance 0.53.
 Loom leads llama.cpp ROCm by +43 % decode, +30 % at 32k, +42-160 % prefill (the gap widens with prompt length), +11 % with 4 streams. The io_uring and POSIX I/O backends give the same rows within 1-2 %.
 Absolute rates are ~0.36x Strix Halo, close to the compute ratio (16/40 CUs). hrx-loom 0.1.0 gave the same numbers within 1-3 %.
-Provenance and raw values: `fleet/devices/gfx1150.json`. Loom reaches 0.83-0.88 of the 96 GB/s decode roofline and 0.30-0.35 of the prefill one (card section).
+Provenance and raw values: `fleet/devices/gfx1150.json`. Achieved / roofline ceiling from the stored rows: decode 0.884 / 0.822 / 0.882 (short / 2k / 32k; single-pass ceilings at 96 GB/s, Loom drafts), prefill 0.301-0.361 (1k-32k), 4 streams 0.602. The roofline evidence's `efficiency` field is a different number: roofline.py's demonstrated fraction for the metric class (EFF, the far-from-roofline guardrail), not this ratio.
 
 Data: `device.json`; decode levers measured here: `decode.md`.
