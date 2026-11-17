@@ -1,34 +1,202 @@
 {
- "_comment": "Triage experiment (never merge): job-build slug fix (27B decode), Flash-Next image/spec diagnostics, gemma-4-E2B kernel tests, Ornith-122B moe_gemm_12 tolerance scan.",
- "runner": "strix",
- "memory_bytes": 52000000000,
+ "_comment": "Triage experiment (never merge): cache_target_bytes on the fixed-backing R9700 (Flint, Muse-Glimmer), job-build slug fix (27B, Q3.6-35B), gemma-4-E2B kernel tests.",
+ "runner": "r9700",
+ "memory_bytes": 34000000000,
  "llama_spec": "matched",
- "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom@95fea47972d347985857664d2fa877473a69914e",
+ "card": "loom-fun-staging/ggml-org-LFM2.5-24B-A2B-loom@addc36223add02bd80a14451c437e75a5c8c9102",
  "kit": null,
- "llamacpp": "b1374",
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "tri-27b-strix",
-   "runner": "strix",
-   "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom@95fea47972d347985857664d2fa877473a69914e",
-   "memory_bytes": 52000000000,
-   "kit": null,
-   "llamacpp": "b1374",
+   "llama_kv_rocm": 40960,
+   "name": "tri-flint-r9700",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/ggml-org-Flint-loom@f1118d6d3ae70eae243770d11d496f0fc500e381",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 36864,
+   "kit": "flint",
+   "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
-     "name": "fun",
-     "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom@4167fddcf04b05a2d64083c85032a1eb181ac689",
-     "sdk": "card"
-    },
-    {
      "name": "staging",
+     "execution": {
+      "context_capacity": 36864,
+      "pool_capacity": 36864
+     },
+     "cap_pool": 48128,
      "build": {},
      "build_args": [
       "--memory-gib",
       "4096"
      ],
-     "sdk": "0.2.0"
+     "sdk": "0.2.0",
+     "serve_args": [
+      "--heartbeat_ms=2000"
+     ]
+    },
+    {
+     "name": "c0",
+     "execution": {
+      "context_capacity": 36864,
+      "pool_capacity": 36864,
+      "cache_target_bytes": 0
+     },
+     "cap_pool": 48128,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0",
+     "serve_args": [
+      "--heartbeat_ms=2000"
+     ]
+    },
+    {
+     "name": "c512",
+     "execution": {
+      "context_capacity": 36864,
+      "pool_capacity": 36864,
+      "cache_target_bytes": 536870912
+     },
+     "cap_pool": 48128,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0",
+     "serve_args": [
+      "--heartbeat_ms=2000"
+     ]
+    }
+   ],
+   "steps": [
+    "diag:staging",
+    "diag:c0",
+    "diag:c512",
+    "func:c0",
+    "func:c512",
+    "gates:c0:dev",
+    "gates:c512:dev"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "llama_kv_rocm": 45056,
+   "name": "tri-glimmer-r9700",
+   "runner": "r9700",
+   "card": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom@cb8277fe40350c2729c68d4d84a4c865a3690b1b",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 32768,
+   "kit": "glimmer",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "execution": {
+      "context_capacity": 32768,
+      "pool_capacity": 32768
+     },
+     "cap_pool": 55296,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0",
+     "serve_args": [
+      "--heartbeat_ms=2000"
+     ]
+    },
+    {
+     "name": "c0",
+     "execution": {
+      "context_capacity": 32768,
+      "pool_capacity": 32768,
+      "cache_target_bytes": 0
+     },
+     "cap_pool": 55296,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0",
+     "serve_args": [
+      "--heartbeat_ms=2000"
+     ]
+    },
+    {
+     "name": "c512",
+     "execution": {
+      "context_capacity": 32768,
+      "pool_capacity": 32768,
+      "cache_target_bytes": 536870912
+     },
+     "cap_pool": 55296,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0",
+     "serve_args": [
+      "--heartbeat_ms=2000"
+     ]
+    }
+   ],
+   "steps": [
+    "diag:staging",
+    "diag:c0",
+    "diag:c512",
+    "func:c0",
+    "func:c512",
+    "gates:c0:dev",
+    "gates:c512:dev"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "tri-27b-r9700",
+   "runner": "r9700",
+   "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom@95fea47972d347985857664d2fa877473a69914e",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 120832,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom@4167fddcf04b05a2d64083c85032a1eb181ac689",
+     "context": 120832,
+     "cap_pool": 124928,
+     "execution": {
+      "context_capacity": 120832,
+      "prefill_capacity": 1024
+     },
+     "sdk": "card"
+    },
+    {
+     "name": "staging",
+     "cap_pool": 124928,
+     "execution": {
+      "context_capacity": 120832,
+      "prefill_capacity": 1024
+     },
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.2.0",
+     "require_preset_r9700": false
     }
    ],
    "steps": [
@@ -42,108 +210,85 @@
    "sdk": "0.2.0"
   },
   {
-   "name": "tri-fn-strix",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom@b36dcc87f84aa552ff6b76d534efb61474d805a9",
-   "memory_bytes": 100000000000,
-   "kit": "qwen4exp",
-   "llamacpp": "b1371",
+   "name": "tri-q36-r9700",
+   "runner": "r9700",
+   "card": "loom-fun-staging/ggml-org-Qwen3.6-35B-A3B-loom@8c2457deee29d836e8db239ef714d9f7d7aac36b",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 84992,
+   "kit": null,
+   "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
-     "name": "staging",
-     "build": {},
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
-     "sdk": "0.2.0",
-     "serve_args": [
-      "--heartbeat_ms=2000"
-     ]
+     "name": "fun",
+     "card": "loom-fun-staging/ggml-org-Qwen3.6-35B-A3B-loom@b2b4779116cacc0f89d45bd5728ab1cf0e41d473",
+     "context": 84992,
+     "cap_pool": 117760,
+     "execution": {
+      "context_capacity": 84992,
+      "prefill_capacity": 2048
+     },
+     "sdk": "card"
     },
     {
-     "name": "stagingc0",
+     "name": "staging",
+     "cap_pool": 117760,
+     "execution": {
+      "context_capacity": 84992,
+      "prefill_capacity": 2048
+     },
      "build": {},
      "build_args": [
       "--memory-gib",
       "4096"
      ],
      "sdk": "0.2.0",
-     "serve_args": [
-      "--heartbeat_ms=2000"
-     ],
-     "execution": {
-      "cache_target_bytes": 0
-     }
+     "require_preset_r9700": false
     }
    ],
    "steps": [
-    "diag:staging",
-    "diag:stagingc0"
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long"
    ],
    "sdk": "0.2.0"
   },
   {
-   "name": "tri-e2b-strix",
-   "runner": "strix",
+   "name": "tri-e2b-r9700",
+   "runner": "r9700",
    "repeat_rows": 3,
    "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom@65d9fe3ad7b855cbdaeebc7da8c80726843f3d7c",
-   "memory_bytes": 16000000000,
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 16000000000,
    "kit": "gemma4",
-   "llamacpp": "b1374",
+   "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "staging",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096
+     },
      "build": {},
      "build_args": [
       "--memory-gib",
       "4096"
      ],
-     "sdk": "0.2.0"
+     "sdk": "0.2.0",
+     "require_preset_r9700": false
     }
    ],
    "steps": [
     "ktest:staging"
-   ],
-   "sdk": "0.2.0"
-  },
-  {
-   "name": "tri-122b-strix",
-   "runner": "strix",
-   "card": "loom-fun-staging/bartowski-Ornith-1.5-122B-loom@0b0f6c673cb64b55556f0248d00052f9e1a3af4b",
-   "memory_bytes": 106000000000,
-   "kit": null,
-   "llamacpp": "b1374",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "tolx2",
-     "build": {
-      "MOE_GEMM_TOL_X": "2"
-     },
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
-     "sdk": "0.2.0"
-    },
-    {
-     "name": "tolx4",
-     "build": {
-      "MOE_GEMM_TOL_X": "4"
-     },
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
-     "sdk": "0.2.0"
-    }
-   ],
-   "steps": [
-    "ktest:tolx2",
-    "ktest:tolx4"
    ],
    "sdk": "0.2.0"
   }
