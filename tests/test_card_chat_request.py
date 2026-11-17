@@ -55,12 +55,15 @@ class ChatRequestTests(unittest.TestCase):
             with self.subTest(fixture=fixture), tempfile.TemporaryDirectory() as temp:
                 dest = Path(temp)
                 shutil.copytree(CARD / "test" / package, dest, dirs_exist_ok=True)
-                shutil.copy(CARD / "test" / fixture / "expected/info.json", dest / "info.json")
+                info = json.loads((CARD / "test" / fixture / "expected/info.json").read_text())
+                info["card"]["output"] = "my-output-folder"
+                (dest / "info.json").write_text(json.dumps(info))
                 with patch.dict(os.environ, {"LOOM_CARD_UPSTREAM": "none", "LOOM_DEVICE_RESULTS": "none"}):
                     text = renderer.render(str(dest))
                 blocks = re.findall(r"```bash\n(curl .*?)```", text, re.S)
                 self.assertEqual(len(blocks), requests)
                 if requests:
+                    self.assertIn("--model=my-output-folder", text)
                     model = json.loads((dest / "model.json").read_text())["model"]["id"]
                     for block in blocks:
                         self.assertEqual(request_body(["```bash", block, "```"])["model"], model)
