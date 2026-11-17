@@ -18,13 +18,14 @@ class Package:
  def ids(self,*_):return list(range(32))
 
 class ContextHarness(unittest.TestCase):
- def run_fixture(self,finish='stop',cache=3072,status=200,cold=True,active=4):
+ def run_fixture(self,finish='stop',cache=3072,status=200,cold=True,active=4,exception_at=None):
   with tempfile.TemporaryDirectory() as tmp:
    root=Path(tmp);dev=root/'fixture-gpu';dev.mkdir()
    (dev/'vendor').write_text('0x1002');(dev/'mem_info_vram_total').write_text(str(32*2**30));used=dev/'mem_info_vram_used';used.write_text(str(29*2**30))
    out=root/'out';posts=[]
    def post(url,json,**_):
     posts.append(json)
+    if len(posts)==exception_at:raise TimeoutError("fixture transport deadline")
     if cold and len(posts)==1:return Response(503,{'error':'fixture asynchronous cold load'})
     answer='Plants use sunlight. Chlorophyll captures light. Carbon dioxide supplies carbon. Plants release oxygen. Glucose stores energy. Water supplies hydrogen.\nCAPACITY-CEDAR-731'
     return Response(200,{'choices':[{'finish_reason':finish,'message':{'content':answer}}],'usage':{'prompt_tokens':3584,'completion_tokens':64,'prompt_tokens_details':{'cached_tokens':cache}}})
@@ -34,6 +35,8 @@ class ContextHarness(unittest.TestCase):
    with patch.object(sys,'argv',args),patch.dict(sys.modules,{'bench_common':mock}),patch.object(Path,'glob',return_value=iter([used])),patch.object(C,'requests',types.SimpleNamespace(post=post,get=get)),patch.object(C.time,'sleep',return_value=None):
     with contextlib.redirect_stdout(io.StringIO()):rc=C.main()
    d=json.loads((out/'result.json').read_text());attempts=json.loads((out/'near_first-attempts.json').read_text());memory=(out/'memory.jsonl').read_text()
+   artifacts={p.name:json.loads(p.read_text()) for p in out.glob('*.json')}
+   self.last_artifacts=artifacts
    return rc,d,posts,attempts,memory
 
  def test_sdk_cli_requires_actual_pinned_wheel_hash(self):
@@ -55,6 +58,18 @@ class ContextHarness(unittest.TestCase):
   self.assertGreater(len(posts[0]['messages'][0]['content']),15000)
   self.assertEqual(len(posts),7)  # retry + nearfirst/repeat + four realrequests
   self.assertTrue(d['near_repeat_exact']);self.assertTrue(d['c4_overlap_proved']);self.assertIn('fixture-gpu',memory)
+
+ def test_transport_errors_retain_near_and_c4_attempt_and_result(self):
+  for number in (1,4):
+   with self.subTest(request=number):
+    rc,d,*_=self.run_fixture(exception_at=number)
+    self.assertEqual(rc,1);self.assertFalse(d['passed'])
+    errors=[a for name,rows in self.last_artifacts.items() if name.endswith('-attempts.json') for a in rows if a.get('error')]
+    self.assertEqual(len(errors),1);self.assertEqual(errors[0]['status'],0)
+    self.assertEqual(errors[0]['error_type'],'TimeoutError');self.assertIn('time',errors[0])
+    reports=[v for k,v in self.last_artifacts.items() if not k.endswith('-attempts.json') and isinstance(v,dict) and v.get('error')]
+    self.assertEqual(len(reports),1);self.assertIn('request_sha256',reports[0])
+    self.assertEqual(len(d['checks']),6)
 
  def test_length_or_uncached_or_absent_status_cannot_pass(self):
   for kwargs in [{'finish':'length'},{'cache':0},{'status':503},{'active':3}]:

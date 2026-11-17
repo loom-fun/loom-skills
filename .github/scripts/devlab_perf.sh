@@ -820,8 +820,18 @@ PY
         res[$s]="ERROR: contextproof registration"; continue
       fi
       step "completed-context proof $p1 $p2 ${p3:-text}"
-      "$T" "$here/.github/scripts/context_completion_probe.py" "$D/$p1/pkg" "$url" "$out/contextproof_$p1" --scripts "$B" --context "$p2" --cold-first "${ctx_args[@]}" > "$out/contextproof_$p1.log" 2>&1
+      timeout --kill-after=10s 420s "$T" "$here/.github/scripts/context_completion_probe.py" "$D/$p1/pkg" "$url" "$out/contextproof_$p1" --scripts "$B" --context "$p2" --cold-first "${ctx_args[@]}" > "$out/contextproof_$p1.log" 2>&1
       ctx_rc=$?
+      # A hard deadline may kill Python before its finally block. Preserve the
+      # failed outcome alongside the independently streamed startup VRAM log.
+      if [[ ! -f "$out/contextproof_$p1/result.json" ]]; then
+        mkdir -p "$out/contextproof_$p1"
+        "$T" - "$out/contextproof_$p1/result.json" "$ctx_rc" <<'PY_CONTEXT_FAILURE'
+import json,sys,time
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps({'passed':False,'probe_exit_code':int(sys.argv[2]),'time':time.time(),'failure':'probe exited before result; inspect raw attempts, server and startup VRAM logs'})+'\n')
+PY_CONTEXT_FAILURE
+      fi
       "$SV/stop.sh" "perf-$p1" >/dev/null 2>&1
       cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/contextproof_$p1/server.log" 2>/dev/null
       kill "$ctx_monitor_pid" 2>/dev/null; wait "$ctx_monitor_pid" 2>/dev/null

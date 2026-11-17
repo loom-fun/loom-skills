@@ -52,7 +52,7 @@ def main():
     ap.add_argument('--cold-first',action='store_true',help='First successful generation is this near-cap request; retry only HTTP503 in the same server for at most300s, retaining every attempt.')
     ap.add_argument('--pin-primary',action='store_true')
     ap.add_argument('--concurrent',action='store_true')
-    ap.add_argument('--timeout',type=float,default=1800)
+    ap.add_argument('--timeout',type=float,default=120)
     a=ap.parse_args();out=Path(a.out);out.mkdir(parents=True,exist_ok=True)
     global requests
     if requests is None:
@@ -106,12 +106,19 @@ def main():
     def sample():
         while not stop.is_set():snapshot();stop.wait(0.25)
     thread=threading.Thread(target=sample,daemon=True);thread.start()
-    controls=[];responses=[]
+    controls=[];responses=[];failure=None
     def post(tag,payload):
         before=time.monotonic();attempts=[]
         while True:
-            r=requests.post(a.url+'/v1/chat/completions',json=payload,timeout=a.timeout)
-            attempt={'elapsed_s':time.monotonic()-before,'status':r.status_code}
+            try:
+                r=requests.post(a.url+'/v1/chat/completions',json=payload,timeout=a.timeout)
+            except Exception as error:
+                attempt={'elapsed_s':time.monotonic()-before,'time':time.time(),'status':0,'error_type':type(error).__name__,'error':str(error)}
+                attempts.append(attempt)
+                (out/(tag+'-attempts.json')).write_text(json.dumps(attempts,indent=2)+'\n')
+                item={'tag':tag,**attempt,'response':{},'request_sha256':hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()}
+                (out/(tag+'.json')).write_text(json.dumps(item,indent=2)+'\n');responses.append(item);return item
+            attempt={'elapsed_s':time.monotonic()-before,'time':time.time(),'status':r.status_code}
             if r.status_code!=200:attempt['body']=r.text
             attempts.append(attempt)
             (out/(tag+'-attempts.json')).write_text(json.dumps(attempts,indent=2)+'\n')
@@ -143,6 +150,9 @@ def main():
             with ThreadPoolExecutor(max_workers=4) as pool:
                 futures=[pool.submit(simultaneous,i,t) for i,t in enumerate(texts)]
                 for f in futures:f.result()
+    except Exception as error:
+        failure={'error_type':type(error).__name__,'error':str(error),'time':time.time()}
+        (out/'failure.json').write_text(json.dumps(failure,indent=2)+'\n')
     finally:
         stop.set();thread.join(timeout=10);snapshot()
         (out/'memory.jsonl').write_text(''.join(json.dumps(x)+'\n' for x in samples))
@@ -173,8 +183,9 @@ def main():
     memory_observed=any(x.get('status_http')==200 and x.get('vram_bytes') for x in samples)
     request_sampled_peak_bytes=max((n for sample in samples for n in sample.get('vram_bytes',{}).values()),default=0)
     overlap_ok=not a.concurrent or observed_active>=4
-    ok=memory_observed and overlap_ok and all(c['completed'] and c['quality'] and c['near_context'] for c in checks) and len(answers)==2 and answers[0]==answers[1] and repeat.get('cached_tokens',0)>0
-    result={'passed':ok,'context':a.context,'image':a.image,'concurrent':a.concurrent,'checks':checks,'near_repeat_exact':len(answers)==2 and answers[0]==answers[1],'memory_observed':memory_observed,'target_pci':target_pci,'target_total_bytes':target_total_bytes,'request_sampled_peak_bytes':request_sampled_peak_bytes,'request_sampled_min_headroom_bytes':target_total_bytes-request_sampled_peak_bytes,'observed_max_active':observed_active,'c4_overlap_proved':overlap_ok,'cold_first':a.cold_first,'limitations':'Light semantic capacity proof; standard numerical/vision gates and throughput comparisons are separate. Startup warmup behavior belongs to the caller and must be disclosed.'}
+    expected={'near_first','near_repeat'} | ({f'c4_{i}' for i in range(4)} if a.concurrent else set())
+    ok=failure is None and {c['tag'] for c in checks}==expected and memory_observed and overlap_ok and all(c['completed'] and c['quality'] and c['near_context'] for c in checks) and len(answers)==2 and answers[0]==answers[1] and repeat.get('cached_tokens',0)>0
+    result={'passed':ok,'failure':failure,'context':a.context,'image':a.image,'concurrent':a.concurrent,'checks':checks,'near_repeat_exact':len(answers)==2 and answers[0]==answers[1],'memory_observed':memory_observed,'target_pci':target_pci,'target_total_bytes':target_total_bytes,'request_sampled_peak_bytes':request_sampled_peak_bytes,'request_sampled_min_headroom_bytes':target_total_bytes-request_sampled_peak_bytes,'observed_max_active':observed_active,'c4_overlap_proved':overlap_ok,'cold_first':a.cold_first,'limitations':'Light semantic capacity proof; standard numerical/vision gates and throughput comparisons are separate. Startup warmup behavior belongs to the caller and must be disclosed.'}
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result));return 0 if ok else 1
 
 

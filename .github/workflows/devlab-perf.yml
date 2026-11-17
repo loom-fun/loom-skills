@@ -124,7 +124,7 @@ jobs:
       matrix: ${{ fromJSON(needs.jobs.outputs.matrix) }}
     name: ${{ matrix.job }}
     runs-on: ${{ fromJSON(matrix.labels) }}
-    timeout-minutes: 240
+    timeout-minutes: 30   # Isolated context experiment only; omit from generic harness PR.
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       GH_TOKEN: ${{ github.token }}
