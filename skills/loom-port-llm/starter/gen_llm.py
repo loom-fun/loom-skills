@@ -2581,6 +2581,26 @@ def attention_range_mask(key, lo, hi, out, low, high, indent="      ", ordered=T
             f"{indent}{out} = index.cmp ult, {out}_delta, {out}_width : index")
 
 
+def attention_paged_range_masks(text):
+    """Rewrite the two paged scalar emitters after assembly, keeping kit patch anchors.
+
+    Kit patches specialize page layout in the same literal blocks; matching the
+    exact SSA triple leaves their source anchors stable and changes only masks.
+    """
+    if os.environ.get("ATTN_RANGE_MASK", "0") != "1":
+        return text
+    import re
+    pattern = (r"(?m)^( +)%okl(\d+) = index.cmp uge, %key\2_raw, %lo_abs : index\n"
+               r"\1%okh\2 = index.cmp ult, %key\2_raw, %hi_abs : index\n"
+               r"\1%ok\2 = scalar.andi %okl\2, %okh\2 : i1")
+
+    def emit(match):
+        indent, i = match.groups()
+        return attention_range_mask(f"%key{i}_raw", "%lo_abs", "%hi_abs", f"%ok{i}", f"%okl{i}", f"%okh{i}", indent)
+
+    return re.sub(pattern, emit, text)
+
+
 def multi_token_split(text, P, U, T, until=None):
     """`P`_attention_split with a multi-token path: when the T epoch tokens of this token's aligned group are live,
     of one row and at consecutive positions (a verify span), the group's first workgroup computes all T (one K/V
@@ -2817,7 +2837,9 @@ def gqa_split(text, P, S):
     t.append("""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
     for i in range(U):
         t.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
-{attention_range_mask(f"%key{i}_raw", "%lo_abs", "%hi_abs", f"%ok{i}", f"%okl{i}", f"%okh{i}")}
+      %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
+      %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
+      %ok{i} = scalar.andi %okl{i}, %okh{i} : i1
       %kd{i} = index.constant {i * POS_BYTES} : offset
       %ko{i} = index.add %kb_off, %kd{i} : offset
       %kc{i} = buffer.view %arena[%ko{i}] : buffer -> view<{KVH}x32x4xf16>
@@ -2890,7 +2912,9 @@ def attention_text(S, P, twin=False):
         body.append(f"""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
     for i in range(U):
         body.append((f"""      %key{i}_raw = index.add %j, %c{i}u : index
-{attention_range_mask(f"%key{i}_raw", "%lo_abs", "%hi_abs", f"%ok{i}", f"%okl{i}", f"%okh{i}")}
+      %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
+      %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
+      %ok{i} = scalar.andi %okl{i}, %okh{i} : i1
       %kd{i} = index.constant {i * POS_BYTES} : offset
       %ko{i} = index.add %kb_off, %kd{i} : offset""" if pa else f"""      %key{i}_raw = index.add %j, %c{i}u : index
       %ok{i} = index.cmp ult, %key{i}_raw, %stop : index
@@ -3179,6 +3203,7 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
         text = gqa_split(text, P, S)
     if P == "g" and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans
         text = multi_token_split(text, P, U, ATTN_MT, attn_rules.ATTN_GQA_FROM - 1 if gqa_on else None)   # gqa body from visible = ATTN_GQA_FROM, i.e. position FROM - 1
+    text = attention_paged_range_masks(text)
     if D != 128:
         text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
                 .replace("x32x4xf32", f"x32x{DL}xf32").replace("vector<4xf32>", f"vector<{DL}xf32>")
