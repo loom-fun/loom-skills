@@ -21,6 +21,11 @@ loom-fetch https://huggingface.co/loom-fun/ggml-org-Flint-loom/resolve/main/mode
 loom-serve --model=flint/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
+- `--materialize=copy` puts copies of the fetched package files in the output directory.
+- `completion_spin_ns=4294967295` enables active waiting for GPU completions (uses CPU while GPU work is in flight); the card's performance measurements use this setting.
+- `--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.
+- `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
+
 In another terminal, send a request:
 
 ```bash
@@ -28,8 +33,6 @@ curl http://127.0.0.1:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model": "flint", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
-
-`--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
