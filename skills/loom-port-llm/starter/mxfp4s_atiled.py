@@ -7,11 +7,14 @@ and retains its original ascending-K WMMA order and arithmetic. No source copied
 import os
 import re
 
-from flash2_rdna4 import twin_env
-
 
 def enabled():
-    return twin_env(os.environ).get("GEMM_MXFP4S_A_TILED", "0").lower() not in ("", "0", "false", "no", "off")
+    value = os.environ.get("GEMM_MXFP4S_A_TILED", "0")
+    # These producer/consumer twins are emitted directly by the shared generator,
+    # rather than a child process with flash2_rdna4.twin_env already applied.
+    if "GEMM_MXFP4S_A_TILED__RDNA4" in os.environ:
+        value = os.environ["GEMM_MXFP4S_A_TILED__RDNA4"]
+    return value.lower() not in ("", "0", "false", "no", "off")
 
 
 def offset(row, col, width):
