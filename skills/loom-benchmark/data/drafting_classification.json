@@ -663,5 +663,41 @@
   "nmax_src": "no llama.cpp baseline: llama.cpp cannot read the safetensors checkpoint; the baseline engine is vLLM ROCm (vllm_spec, depth 3 as Loom's)",
   "baseline_engine": "none",
   "vllm_spec": "{\"method\": \"mtp\", \"num_speculative_tokens\": 3}"
+ },
+ "loom-fun/unsloth-gemma-4-31B-it-qat-loom": {
+  "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom",
+  "live_kind": "none",
+  "live_depth": 0,
+  "choice": "none",
+  "available": [
+   "assist"
+  ],
+  "provenance": [
+   "https://huggingface.co/unsloth/gemma-4-31B-it-qat-GGUF/blob/43cc1aeb31adf47ec06a854507ce552cd9862e6f/MTP/README.md",
+   "https://huggingface.co/z-lab/gemma-4-31B-it-DFlash/blob/eabd648301ce28583cc14757912e5e0f84e152e1/README.md"
+  ],
+  "evidence": "Target-only text release: an exact-QAT assistant is published, but this package does not implement it. The existing DFlash release declares the original non-QAT target; its QAT compatibility remains unqualified.",
+  "note": "The owner scoped new QAT assistant and vision support as separate follow-ups. Target-only baseline on both engines; assess existing DFlash independently before any adoption. This is not a claim that no QAT assistant is available.",
+  "llama_spec": "",
+  "llama_n_max": null,
+  "nmax_src": "target-only release"
+ },
+ "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom": {
+  "card": "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom",
+  "live_kind": "none",
+  "live_depth": 0,
+  "choice": "none",
+  "available": [
+   "assist"
+  ],
+  "provenance": [
+   "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF/blob/7b92b5b28818151e8669af2e45e88d6086f490dd/MTP/README.md",
+   "https://huggingface.co/z-lab/gemma-4-26B-A4B-it-DFlash/blob/77d4202772dfe50b2396ec7bac9cfffc7b9e7057/README.md"
+  ],
+  "evidence": "Target-only text release: an exact-QAT assistant is published, but this package does not implement it. The existing DFlash release declares the original non-QAT target; its QAT compatibility remains unqualified.",
+  "note": "The owner scoped new QAT assistant and vision support as separate follow-ups. Target-only baseline on both engines; assess existing DFlash independently before any adoption. This is not a claim that no QAT assistant is available.",
+  "llama_spec": "",
+  "llama_n_max": null,
+  "nmax_src": "target-only release"
  }
 }

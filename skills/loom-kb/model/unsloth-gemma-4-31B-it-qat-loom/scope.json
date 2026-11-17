@@ -1,0 +1,9 @@
+{
+ "scope": "model/unsloth-gemma-4-31B-it-qat-loom",
+ "match": {
+  "slug": [
+   "unsloth-gemma-4-31B-it-qat-loom"
+  ]
+ },
+ "owner": "kb"
+}
