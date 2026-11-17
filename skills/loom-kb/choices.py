@@ -298,7 +298,9 @@ CHOICE("prefill.gemm.mxfp4s_f8_kernel", "str", None, "GEMM_MXFP4S_F8_KERNEL", ke
            "(one 16-byte load per lane covers two K substeps: activations global_load_b128 with immediate offsets, weights ds_load_b128; both operands in the same permuted K "
            "order) and issue the next K pair's loads before this pair's WMMAs; the SwiGLU pair stays v1. lv: lane-vector without the pipelining (SwiGLU at 64-row waves); "
            "ws: wave-specialized (4 producer waves decode the next step into a second LDS buffer). kbench gemm_mxfp4s (R9700): lvs store -5..-6 % at 1024 rows, lv +3..7 %, ws +8..19 %. "
-           "narrow: M256 with half-width output tiles and eight accumulator fragments per wave; contiguous inputs and original K order, pending runtime proof.")
+           "narrow: M256 with half-width output tiles and eight accumulator fragments per wave; contiguous inputs and original K order, pending runtime proof. "
+           "fenced: full v1 tiles with compiler-only subgroup fences every four K16 groups, bounding hoisted activation lifetimes; fenced_swp additionally "
+           "prefetches the next fragment in store only. Same quantization and ascending-K accumulation; pending runtime proof.")
 CHOICE("prefill.attn.no_flash2", "bool", False, "NO_FLASH2", kernels=["*_attention_flash2*"], rows=ROWS_PREFILL, enc=("1", "0"),
        doc="No prefill flash attention (every token takes the listed split-K path).")
 CHOICE("prefill.gemm.off", "bool", False, "NO_GEMM", kernels=["g_gemm_*"], rows=ROWS_PREFILL, enc=("1", None), experiment=True,

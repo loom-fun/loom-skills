@@ -3,19 +3,23 @@
   "sdk": "0.2.0",
   "suites": [
     {
-      "suite": "mxfp4_narrow",
+      "suite": "mxfp4_fence",
       "runner": "r9700",
-      "dir": "mxfp4_narrow",
-      "gen": "mxfp4_narrow/gen_bench.py",
+      "dir": "mxfp4_fence",
+      "gen": "mxfp4_fence/gen_bench.py",
       "gen_variants": [
         "base",
         "narrow",
-        "narrow_swp"
+        "narrow_swp",
+        "fenced",
+        "fenced_swp"
       ],
       "files": [
         "bench.loom",
         "bench_narrow.loom",
-        "bench_narrow_swp.loom"
+        "bench_narrow_swp.loom",
+        "bench_fenced.loom",
+        "bench_fenced_swp.loom"
       ],
       "tests": [
         "test.loom"
@@ -24,8 +28,10 @@
         {
           "file": "negative.loom",
           "xfail": [
-            "@check_store_5120_256_zero_output=EXPECT/006",
-            "@check_swiglu_5120_256_zero_output=EXPECT/006"
+            "@check_store_5120_256_narrow_zero_output=EXPECT/006",
+            "@check_store_5120_256_fenced_zero_output=EXPECT/006",
+            "@check_swiglu_5120_256_narrow_zero_output=EXPECT/006",
+            "@check_swiglu_5120_256_fenced_zero_output=EXPECT/006"
           ]
         }
       ],

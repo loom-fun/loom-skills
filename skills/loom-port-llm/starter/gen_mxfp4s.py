@@ -31,6 +31,9 @@ def f8_enabled():
 # kernel designs of the fp8 GEMM (choice prefill.gemm.mxfp4s_f8_kernel, env GEMM_MXFP4S_F8_KERNEL): name -> (store kwargs, swiglu kwargs) of gemm_mxfp4s_f8_m256
 F8_KERNELS = {"v1": ({}, {}),
               "narrow": ({"tn": 64, "rf": 4, "cf": 2}, {"tn": 32, "rf": 4, "cf": 1}),
+              "narrow_swp": ({"tn": 64, "rf": 4, "cf": 2, "swp": True}, {"tn": 32, "rf": 4, "cf": 1, "swp": True}),
+              "fenced": ({"fence_k": 4}, {"fence_k": 4}),
+              "fenced_swp": ({"fence_k": 4, "swp": True}, {"fence_k": 4}),
               "lvs": ({"lv": True, "lvs": 1}, {}),     # ogemm: store GEMMs -5..-7 % at 1024 rows (kbench 43869957328, 43875719428); the SwiGLU pair keeps v1; on the card +1..1.6 % prefill but the consistency gate fails (device/rdna4/prefill.md)
               "lv": ({"lv": True}, {"lv": True, "rf": 4}),
               "ws": ({"ws": 4}, {"ws": 4})}
@@ -48,7 +51,7 @@ def mxfp4_f8_range(blocks_e):
     return lo, hi, MXFP4_F8_E_MIN <= lo and hi <= MXFP4_F8_E_MAX
 
 
-def gemm_mxfp4s_f8_m256(mode, prefix="g", order="pairs", a_direct=True, dbuf=False, kmult=1, rf=None, a_pf=False, nt=256, bm=None, tn=None, cf=None, swp=False, swz=False, pfa=0, yf16=False, pad=16, pair=False, lv=False, lvpf=0, lvs=False, ws=0):
+def gemm_mxfp4s_f8_m256(mode, prefix="g", order="pairs", a_direct=True, dbuf=False, kmult=1, rf=None, a_pf=False, nt=256, bm=None, tn=None, cf=None, swp=False, swz=False, pfa=0, yf16=False, pad=16, pair=False, lv=False, lvpf=0, lvs=False, ws=0, fence_k=0):
     """The 256 x 128 MXFP4 (split planes) prefill GEMM of gfx12 on fp8 WMMA (v_wmma_f32_16x16x16_fp8_bf8): fp8 e4m3 activations (the row-scale
     producers' x8, scales s8) times MXFP4 weights decoded to bf8 e5m2 in LDS, exactly (see MXFP4_F8 below). Weights: nibble plane
     %w [n, k/2] and scale plane %ws [n, k/32] (swiglu: %w, %ws, %w2, %ws2). y = acc * s8[row, 1].
@@ -59,7 +62,11 @@ def gemm_mxfp4s_f8_m256(mode, prefix="g", order="pairs", a_direct=True, dbuf=Fal
     the R9700 against the staged variant (a_direct=False). rf: 16-row activation fragments per wave (default 4 for store, 2 for swiglu: measured best, see
     device/rdna4/prefill.md); kmult 2 doubles the K step; nt 128 halves the workgroup; a_pf / dbuf are measured non-wins kept for the record.
     pair (store only): two projections of the same activation in one launch: output tiles [0, n / tn) multiply %w into %y, tiles
-    [n / tn, 2 n / tn) multiply %w2 into %y2 (both n rows; the skinny GDN alpha / beta projections, ab_f8 below)."""
+    [n / tn, 2 n / tn) multiply %w2 into %y2 (both n rows; the skinny GDN alpha / beta projections, ab_f8 below).
+    fence_k: bound compiler A-load lookahead to groups of this many K16 fragments. A subgroup buffer fence is a compiler scheduling
+    fence on SDK0.2.0/gfx12, with no hardware rendezvous/cache operation. Accumulation, addresses and tile geometry stay unchanged."""
+    if fence_k:
+        assert fence_k in (1, 2, 4) and a_direct and not (a_pf or lv or lvs or ws), "K-group fences require the direct original-K fragment path"
     if ws:   # the wave-specialized design (ws = producer waves)
         assert not pair
         return gemm_mxfp4s_f8_ws(mode, prefix, order, npw=ws, rf=rf, pad=pad, lvs=lvs)
@@ -383,6 +390,8 @@ def gemm_mxfp4s_f8_m256(mode, prefix="g", order="pairs", a_direct=True, dbuf=Fal
     if a_pf:
         A("    %k_next_a = index.assume %k_next [lt(%k_next, %k_steps)] : index\n    %kbn = index.mul %k_next_a, %c128 : index")
     def frag_loads(kk):
+        if fence_k and kk % fence_k == 0:
+            A("    buffer.fence scope(subgroup) ordering(acq_rel)")
         A(f"    %fk{kk} = index.constant {kk * 16} : index")
         for r in range(RF):
             if a_pf:
