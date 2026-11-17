@@ -6,7 +6,44 @@ those generators so eps, post norms, and quantizer rounding cannot drift.
 import re
 
 
-def kernel(norms, icodes, hidden):
+def _chunked_publication(hidden, size):
+    """Keep fewer conversion intermediates live; integer code sums remain exact."""
+    groups = hidden // 32
+    n=32//size
+    body='''    %q8_a = vector.absf %hv : vector<32xf32>
+    %q8_amax = vector.reduce<maxnumf> %q8_a, %q8_zero_f : vector<32xf32>, f32
+    %q8_d = scalar.divf %q8_amax, %q8_c127 : f32
+    %q8_nz = scalar.cmpf one, %q8_amax, %q8_zero_f : f32
+'''
+    body+=f'    %q8_dv = vector.splat %q8_d : vector<{size}xf32>\n    %q8_nzv = vector.splat %q8_nz : vector<{size}xi1>\n    %q8_z = vector.splatf 0.0 : vector<{size}xf32>\n    %q8_ones = vector.splati 1 : vector<{size}xi8>\n    %q8_izero = vector.splati 0 : vector<{size//4}xi32>\n'
+    for part in range(n):
+        for j in range(size):body+=f'    %q8_e{part}_{j} = vector.extract %hv[{part*size+j}] : vector<32xf32> -> f32\n'
+        elems=', '.join(f'%q8_e{part}_{j}' for j in range(size))
+        body+=f'''    %q8_v{part} = vector.from_elements {elems} : vector<{size}xf32>
+    %q8_sc{part} = vector.divf %q8_v{part}, %q8_dv : vector<{size}xf32>
+    %q8_rd{part} = vector.roundf %q8_sc{part} : vector<{size}xf32>
+    %q8_rs{part} = vector.select %q8_nzv, %q8_rd{part}, %q8_z : vector<{size}xf32>
+    %q8_q{part} = vector.fptosi %q8_rs{part} : vector<{size}xf32> to vector<{size}xi8>
+    %q8_qw{part} = vector.bitcast %q8_q{part} : vector<{size}xi8> to vector<{size//4}xi32>
+    %q8_c{part} = index.constant {part*size//4} : index
+    vector.store %q8_qw{part}, %q8_q_view[%token, %bl, %q8_c{part}] : vector<{size//4}xi32>, view<[%tokens]x{groups}x8xi32>
+    %q8_qs{part} = vector.dot4i<s8s8> %q8_q{part}, %q8_ones, %q8_izero : vector<{size}xi8>, vector<{size}xi8>, vector<{size//4}xi32>
+    %q8_sum{part} = vector.reduce<addi> %q8_qs{part}, %q8_zero_i : vector<{size//4}xi32>, i32
+'''
+    acc='%q8_sum0'
+    for part in range(1,n):
+        body+=f'    %q8_add{part} = scalar.addi {acc}, %q8_sum{part} : i32\n';acc=f'%q8_add{part}'
+    body+=f'''    %q8_qsf = scalar.sitofp {acc} : i32 to f32
+    %q8_dh = scalar.fptrunc %q8_d : f32 to f16
+    %q8_da = scalar.extf %q8_dh : f16 to f32
+    %q8_meta = vector.from_elements %q8_da, %q8_qsf : vector<2xf32>
+    vector.store %q8_meta, %q8_m_view[%token, %bl, %c0] : vector<2xf32>, view<[%tokens]x{groups}x2xf32>
+'''
+    return body
+
+
+def kernel(norms, icodes, hidden, publication_chunk=32):
+    assert publication_chunk in (8, 16, 32)
     assert hidden % 32 == 0 and 32 <= hidden <= 8192
     norm = re.search(r'kernel.def export\("g_post_add_norm"\).*?\n}\n', norms, re.S).group()
     quant = icodes[icodes.index('kernel.def export("g_quant_q8")'):]
@@ -30,6 +67,8 @@ def kernel(norms, icodes, hidden):
     # The original quantizer's dynamic view dimensions become the producer's
     # static groups and token count; this changes no address or stored value.
     body = body.replace('[%q8_rows]', '[%tokens]').replace('[%q8_groups]', str(groups))
+    if publication_chunk != 32:
+        body = _chunked_publication(hidden, publication_chunk)
     norm = norm.replace('g_post_add_norm', 'g_post_add_norm_q8')
     norm = norm.replace('%h: buffer)', '%h: buffer, %hq: buffer)')
     anchor = f'    vector.store %hv, %h_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{groups}x32xf32>\n'

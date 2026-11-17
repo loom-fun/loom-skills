@@ -1,0 +1,30 @@
+{
+  "sdk": "0.2.0",
+  "suites": [
+    {
+      "suite": "norm_q8_chunks_strix",
+      "runner": "strix",
+      "dir": "norm_q8",
+      "gen": "norm_q8/gen_bench.py",
+      "files": [
+        "bench_h1024_base.loom",
+        "bench_h1024_fused.loom",
+        "bench_h1024_chunk16.loom",
+        "bench_h1024_chunk8.loom"
+      ],
+      "tests": [
+        "test_h1024.loom",
+        "test_h1024_chunk16.loom",
+        "test_h1024_chunk8.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=64",
+        "--profile-final-batch=true"
+      ],
+      "repeats": 5,
+      "case_timing": true
+    }
+  ]
+}

@@ -33,6 +33,24 @@ class NormQ8(unittest.TestCase):
             self.assertNotIn('%q8_rows', fused)
             self.assertNotIn('%q8_groups', fused)
 
+    def test_chunked_publication_covers_the_same_q8_group(self):
+        for size in (8, 16):
+            body = gen_norm_q8._chunked_publication(1024, size)
+            # Each retained input is converted exactly once; no missing lanes.
+            inputs = [int(x) for x in re.findall(r'vector.extract %hv\[(\d+)\]', body)]
+            self.assertEqual(inputs, list(range(32)))
+            offsets = [int(x) for x in re.findall(r'%q8_c\d+ = index.constant (\d+)', body)]
+            words = [word for start in offsets for word in range(start, start + size // 4)]
+            self.assertEqual(words, list(range(8)))
+            # One shared32-value max/scale; partition only the elementwise path.
+            self.assertEqual(body.count('vector.reduce<maxnumf>'), 1)
+            self.assertEqual(body.count('scalar.divf'), 1)
+            self.assertEqual(body.count('vector.divf'), 32 // size)
+            self.assertEqual(body.count('vector.roundf'), 32 // size)
+            self.assertEqual(body.count('scalar.fptrunc'), 1)
+            # Reassociation is integer-only and cannot overflow signed32.
+            self.assertLess(32 * 127, 2 ** 31)
+
     def test_only_adjacent_matching_producer_is_fused(self):
         pair = ('    kernel.launch @g_post_add_norm[%t](%t, %y, %w, %x, %w2, %h) : [index](index, buffer, view<1024xf32>, buffer, view<1024xf32>, buffer)\n'
                 '    kernel.launch @g_quant_q8[%t, %nH](%t, %nH, %h, %hq) : [index, index](index, index, buffer, buffer)')

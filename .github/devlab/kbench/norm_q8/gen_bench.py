@@ -29,9 +29,9 @@ def launches(h, t, fused, suffix=''):
             f'  kernel.launch @k_quant[%t, %width](%t, %width, %h{suffix}, %q{suffix}) : [index, index](index, index, tensor<{n}xf32>, tensor<{n * 5 // 4}xi8>)\n')
 
 
-def module(hidden):
+def module(hidden, publication_chunk=32):
     norm, quant = sources(hidden)
-    return (norm + quant + gen_norm_q8.kernel(norm, quant, hidden)).replace('@g_post_add_norm_q8', '@k_fused').replace('export("g_post_add_norm_q8")', 'export("k_fused")').replace('@g_post_add_norm', '@k_norm').replace('export("g_post_add_norm")', 'export("k_norm")').replace('@g_quant_q8', '@k_quant').replace('export("g_quant_q8")', 'export("k_quant")')
+    return (norm + quant + gen_norm_q8.kernel(norm, quant, hidden, publication_chunk=publication_chunk)).replace('@g_post_add_norm_q8', '@k_fused').replace('export("g_post_add_norm_q8")', 'export("k_fused")').replace('@g_post_add_norm', '@k_norm').replace('export("g_post_add_norm")', 'export("k_norm")').replace('@g_quant_q8', '@k_quant').replace('export("g_quant_q8")', 'export("k_quant")')
 
 
 def case(h, rows, fused, test=False, zeros=False):
@@ -97,6 +97,13 @@ def main():
             (OUT / f'bench_h{h}_{"fused" if fused else "base"}.loom').write_text(s)
         tests = '\n'.join(case(h, t, True, test=True, zeros=z) for t, z in ((1,False),(4,False),(63,False),(1,True)))
         (OUT / f'test_h{h}.loom').write_text(kernels + tests)
+    # Bounded follow-up: only the small Strix shape; original files stay identical.
+    for chunk in (16, 8):
+        kernels = module(1024, publication_chunk=chunk)
+        timing = '\n'.join(case(1024, t, True) for t in (1, 4, 63))
+        tests = '\n'.join(case(1024, t, True, test=True, zeros=z) for t, z in ((1,False),(4,False),(63,False),(1,True)))
+        (OUT / f'bench_h1024_chunk{chunk}.loom').write_text(kernels + timing)
+        (OUT / f'test_h1024_chunk{chunk}.loom').write_text(kernels + tests)
 
 
 if __name__ == '__main__':
