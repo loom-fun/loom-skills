@@ -84,7 +84,7 @@ Drafting (rules 1-2); which configuration each row runs (3-6); reading the resul
     line). A GPU without results for this package is `not_measured` (one factual line, no numbers copied from another package or
     program). Publishing goes to one org (`publish_package.py upload --org`, default `loom-fun`); the staging flow uses `--org
     loom-fun-staging` with the same repo names, and a card whose `info.json` repo is another org is refused.
-13. **A/B verdicts use a band per row** (`methodology.json` `rows`; same runner, ABBA, medians of sessions; for unchanged inputs only to confirm a row that moved, rule 15). A row PASSes when its new/old
+13. **A/B verdicts use a band per row** (`methodology.json` `rows`; same runner, ABBA, medians of sessions; for unchanged inputs only to confirm a row that moved, rule 17). A row PASSes when its new/old
     ratio is within the band; there is no geomean: a gain on one row never pays for a loss on another. Not the card's tie band (rule 7),
     which stays +-3 % on every row. Bands (+-, and the ratio below which a 2+2-session canary rejects):
     <!-- bands -->
