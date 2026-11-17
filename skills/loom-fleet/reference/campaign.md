@@ -112,6 +112,9 @@ separately. Tools: `fleet/README.md`; process: [targeted-fix.md](targeted-fix.md
 - Wait with ONE background until-loop on `gh run view RUN --json status`, **no faster than every 120 s**; never `gh run watch`;
   one central poller, not one per agent. Queue wait on a runner pool (10+ min on the R9700) is normal: do not re-trigger.
   Download with `gh run download RUN -D FRESH_DIR` (a fresh directory each time; unzip collides).
+- Cancelling: a plain `gh run cancel` of a queued self-hosted matrix run can leave it queued or in progress for hours, holding the queue
+  (sdk020: 30 cancelled runs blocked the sweep) -> `gh api -X POST repos/OWNER/REPO/actions/runs/RUN/force-cancel`, then confirm with
+  `gh run list --status queued` and `--status in_progress` that nothing of yours is left.
 - Smoke tests use tight timeouts and log the server status endpoints while waiting, so a hang shows its cause.
 
 ## Regenerating many cards: `fleet/regen.py`

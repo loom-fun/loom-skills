@@ -840,6 +840,8 @@ def card_message(e, dev, run, loom_only, sdk):
         msg += f"; hrx-loom {SDK_NEW} vs the previous card on its own SDK pin (same job, ABBA): " + sdk_line(e)
     if e.get("accepted_regression"):   # a confirmed slowdown published as measured: the message names its explanation
         msg += "; confirmed slowdown published as measured: " + e["accepted_regression"].split(" (was:")[0]
+    if e.get("accepted_gate_failure"):   # kernel tests that failed: the card's gate table shows them failed; the message says why it was published
+        msg += "; " + e["accepted_gate_failure"]
     return msg
 
 
@@ -1210,6 +1212,77 @@ def cmd_accept_regression(a):
     print("accepted: " + (", ".join(done) or "nothing"))
 
 
+def _ktest_fail_only(e):
+    """the job's gate failures when they are kernel tests that RAN and failed some cases (summary FAIL + a "N/M passed" log with N < M), else (None, why)"""
+    fails = json.load(open(e["cmp"])).get("gate_failures") or [] if e.get("cmp") else []
+    if not fails or not all(f.startswith("ktest:") for f in fails):
+        return None, "not held by kernel tests alone (" + (", ".join(fails) or (e.get("reason") or "")[:120]) + ")"
+    s = json.load(open(os.path.join(e["dir"], "summary.json"))).get("results", {}) if e.get("dir") else {}
+    for f in fails:
+        log = os.path.join(e.get("dir") or "", f"ktest_{f.split(':', 1)[1]}.log")
+        m = re.findall(r"(\d+)/(\d+) passed", read(log, "")) if os.path.exists(log) else []
+        if not str(s.get(f, "")).startswith("FAIL") or not m or int(m[-1][0]) >= int(m[-1][1]):
+            return None, f"{f} did not run to a result (summary {str(s.get(f, ''))[:60]!r}, no 'N/M passed' failure in its log): the card could not show it"
+    return fails, ""
+
+
+def _decide_without(st, name, e, sdk_loom_first):
+    """the perf verdict of job e with its kernel-test hold removed (a temp copy of its cmp; the job's evidence is untouched)"""
+    tmp = e["cmp"] + ".accepted.json"
+    try:
+        json.dump(dict(json.load(open(e["cmp"])), gate_failures=[]), open(tmp, "w"))
+        if sdk_loom_first:
+            return sdk_loom_decide(st, name, e, tmp)
+        return sdk_decide(st, name, e, tmp, use_prev=st.d["mode"] == "sdk-ab")
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def cmd_accept_gate_failure(a):
+    """sdk-ab / sdk-loom: publish a model held ONLY by kernel tests that ran and failed some cases, which a person read and explained (e.g. the same case
+    failed on the previous SDK's card): the card is built from the job as it is, so its gate table shows the kernel tests as failed (no gate is loosened).
+    func and serving gates (func:*, gates:*) and kernel tests that did not run to a result are refused. The perf rows still get the usual verdict: a row
+    outside the band is confirmed first. sdk-loom: when the targeted ABBA job is the one held by the kernel tests, its verdict is settled the same way."""
+    st = State(a.state)
+    if st.d["mode"] not in SDK_MODES:
+        die("accept-gate-failure is for the SDK modes (sdk-ab, sdk-loom)")
+    done = []
+    for name, e in list(st.jobs.items()):
+        if e["slug"] not in a.slug or e["stage"] != "needs_decision" or (st.d["mode"] == "sdk-loom" and e.get("prev")):
+            continue
+        abba = next((x for x in st.jobs.values() if x.get("prev") == name), None) if st.d["mode"] == "sdk-loom" else None
+        held_by_abba = bool(abba) and "ABBA confirmation" in (e.get("reason") or "") and "gate failed" in (e.get("reason") or "")
+        job = abba if held_by_abba else e
+        fails, why = _ktest_fail_only(job)
+        if not fails:
+            print(f"{e['slug']} {e['device']}: {why}, not accepted")
+            continue
+        note = f"{', '.join(fails)} failed, published as failed: {a.note}"
+        e["accepted_gate_failure"] = note   # the first job is the one ingested: its card message names it
+        if held_by_abba:
+            decision, reasons, job["perf_abba"], job["rows_pct"] = _decide_without(st, [k for k, v in st.jobs.items() if v is abba][0], abba, False)
+            decision = "hold" if decision == "rerun" else decision
+            e.update(stage="collected")
+            sdk_loom_settle(st, abba, decision, reasons)
+        else:
+            decision, reasons, perf, rows = _decide_without(st, name, e, st.d["mode"] == "sdk-loom")
+            e["perf"], e["rows_pct"] = perf, rows
+            if st.d["mode"] == "sdk-loom":
+                e["perf_cross"] = dict(perf)
+            e["decision"], e["reason"] = decision, "; ".join(reasons)
+            if decision == "promote" or (decision in ("rerun", "confirm") and e["round"] == 1):
+                e["stage"] = "collected"
+            else:
+                e["stage"] = "needs_decision"
+                e["reason"] = ("still undecided after the confirming run: " if decision != "hold" else
+                               "confirmed regression / failed gate / text difference: ") + e["reason"]
+        st.log(f"{e['slug']} {e['device']}: kernel-test failure accepted ({', '.join(fails)}): {a.note} -> {e['stage']} ({e.get('decision')})")
+        done.append(f"{e['slug']} {e['device']} ({e.get('decision')})")
+    st.save()
+    print("accepted: " + (", ".join(done) or "nothing"))
+
+
 def cmd_adopt(a):
     st = State(a.state)
     jobs = gh_json(["run", "view", a.run, "-R", REPO, "--json", "jobs"])["jobs"]
@@ -1257,7 +1330,7 @@ def main(argv=None):
     p.set_defaults(fn=cmd_plan)
     for name, fn in (("submit", cmd_submit), ("poll", cmd_poll), ("collect", cmd_collect), ("rerun", cmd_rerun), ("ingest", cmd_ingest),
                      ("publish", cmd_publish), ("package", cmd_package), ("status", cmd_status), ("adopt", cmd_adopt), ("accept", cmd_accept),
-                     ("accept-regression", cmd_accept_regression)):
+                     ("accept-regression", cmd_accept_regression), ("accept-gate-failure", cmd_accept_gate_failure)):
         q = sub.add_parser(name)
         q.add_argument("state")
         q.set_defaults(fn=fn)
@@ -1269,7 +1342,7 @@ def main(argv=None):
                            "waves (call submit again as jobs finish), so a priority job queued meanwhile waits at most one wave. Default: no cap")
         if name == "status":
             q.add_argument("--status-json")
-        if name in ("accept", "accept-regression"):
+        if name in ("accept", "accept-regression", "accept-gate-failure"):
             q.add_argument("slug", nargs="+")
             q.add_argument("--note", required=True, help="what was read: e.g. 'hyphen vs space, log-prob gap < band'")
         if name == "adopt":
