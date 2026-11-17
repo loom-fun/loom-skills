@@ -606,7 +606,7 @@ class SdkLoomTest(Base):
         e = st.jobs[JOB]
         e.update(stage="needs_decision", reason="confirmed regression / failed gate / text difference: ABBA confirmation (job 1): slower than -3%: prefill -7.4 %",
                  confirm_rows=["prefill"], perf={"decode": 1.0, "prefill": -6.0, "longctx": 0.0, "4stream": 0.0})
-        st.jobs["abba"] = {**{k: v for k, v in e.items() if k not in ("perf", "confirm_rows")}, "slug": SLUG, "prev": JOB, "perf": {"decode": 0.5, "prefill": -7.4, "longctx": None, "4stream": 0.2}}
+        st.jobs["abba"] = {**{k: v for k, v in e.items() if k not in ("perf", "confirm_rows")}, "slug": SLUG, "prev": JOB, "perf_abba": {"decode": 0.5, "prefill": -7.4, "longctx": None, "4stream": 0.2}}
         st.save()
         with contextlib.redirect_stdout(io.StringIO()):
             regen.main(["accept-regression", self.state, SLUG, "--note", "U1: SDK runtime on Strix (notes/upstream.md)"])
@@ -634,6 +634,18 @@ class SdkLoomTest(Base):
         with contextlib.redirect_stdout(io.StringIO()):
             regen.main(["accept-regression", self.state, SLUG, "--note", "SDK"])
         self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "collected")
+
+    def test_card_message_per_mode_and_accepted_note(self):
+        e = {"perf": {"decode": 1.0, "prefill": -7.4, "longctx": 0.0, "4stream": 0.2}, "confirmed": {"prefill": -7.4},
+             "accepted_regression": "U1: SDK runtime (notes) (was: ...)"}
+        m = regen.card_message(e, "strix-halo", "9", True, True)
+        self.assertIn("another job, same runner type", m)
+        self.assertNotIn("own SDK pin", m)
+        self.assertIn("confirmed slowdown published as measured: U1: SDK runtime (notes)", m)
+        m = regen.card_message({k: v for k, v in e.items() if k != "confirmed"}, "strix-halo", "9", False, True)
+        self.assertIn("own SDK pin (same job, ABBA): decode", m)
+        self.assertIn("confirmed slowdown published as measured", m)
+        self.assertNotIn("confirmed slowdown", regen.card_message({"perf": e["perf"]}, "strix-halo", "9", False, True))
 
     def test_real_compare_marks_a_card_row_the_job_did_not_measure(self):
         """through .github/scripts/strix_ab_compare.py: a Loom-only job without the 32k rows vs a card that has them -> longctx is confirmed, not n/a"""

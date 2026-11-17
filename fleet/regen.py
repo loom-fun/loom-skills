@@ -829,6 +829,20 @@ def sdk_line(e):
     return ", ".join(f"{k} {v:+.1f} %" if v is not None else f"{k} n/a" for k, v in (e.get("perf") or {}).items())
 
 
+def card_message(e, dev, run, loom_only, sdk):
+    """the publish message of a card made from a job: where the numbers come from, the SDK delta line, an accepted slowdown's explanation"""
+    msg = f"{card_lib.GPUS[dev]['runner']} results measured on this package (run {run})"
+    if loom_only:
+        msg += (f"; hrx-loom {SDK_NEW} Loom rows vs the previous card's Loom rows (another job, same runner type): " + sdk_line(e)
+                + ("; confirmed by an ABBA job (same job): " + ", ".join(f"{k} {v:+.1f} %" for k, v in e["confirmed"].items()) if e.get("confirmed") else "")
+                + "; llama.cpp rows are the previous card's")
+    elif sdk:
+        msg += f"; hrx-loom {SDK_NEW} vs the previous card on its own SDK pin (same job, ABBA): " + sdk_line(e)
+    if e.get("accepted_regression"):   # a confirmed slowdown published as measured: the message names its explanation
+        msg += "; confirmed slowdown published as measured: " + e["accepted_regression"].split(" (was:")[0]
+    return msg
+
+
 def ingest_full(st, name, e, W):
     """The card's performance, gates and roofline of this device from the job (REGEN_RECIPE: ingest the NEW package)."""
     d, dev, slug = e["dir"], e["device"], e["slug"]
@@ -898,15 +912,7 @@ def ingest_full(st, name, e, W):
     run_tool(build + ["--memory-bytes", str(mem), "--from-info", "info_prev.json", *(["--reset-performance"] if loom_only else []), "--evidence", *ev,
                       "-o", "info_new.json"], W)
     shutil.copy(os.path.join(W, "info_new.json"), os.path.join(out, "info.json"))
-    msg = f"{card_lib.GPUS[dev]['runner']} results measured on this package (run {run})"
-    if loom_only:
-        msg += (f"; hrx-loom {SDK_NEW} Loom rows vs the previous card's Loom rows (another job, same runner type): " + sdk_line(e)
-                + ("; confirmed by an ABBA job (same job): " + ", ".join(f"{k} {v:+.1f} %" for k, v in e["confirmed"].items()) if e.get("confirmed") else "")
-                + "; llama.cpp rows are the previous card's")
-    if e.get("accepted_regression"):   # a confirmed slowdown published as measured: the message names its explanation
-        msg += "; confirmed slowdown published as measured: " + e["accepted_regression"].split(" (was:")[0]
-    elif sdk:
-        msg += f"; hrx-loom {SDK_NEW} vs the previous card on its own SDK pin (same job, ABBA): " + sdk_line(e)
+    msg = card_message(e, dev, run, loom_only, sdk)
     return out, hf_head(f"{st.d['opts']['new_org']}/{slug}"), msg
 
 
@@ -1192,10 +1198,10 @@ def cmd_accept_regression(a):
             print(f"{e['slug']} {e['device']}: not a confirmed perf regression, not accepted ({why[:120]})")
             continue
         if st.d["mode"] == "sdk-loom":   # the confirmed rows report the ABBA numbers (same job), as a promoted confirmation does
-            abba = next((j for j in st.jobs.values() if j.get("prev") == name and j.get("perf")), None)
+            abba = next((j for j in st.jobs.values() if j.get("prev") == name and j.get("perf_abba")), None)
             if abba:
                 rows = e.get("confirm_rows") or []
-                e["confirmed"] = {k: abba["perf"][k] for k in rows if abba["perf"].get(k) is not None}
+                e["confirmed"] = {k: abba["perf_abba"][k] for k in rows if abba["perf_abba"].get(k) is not None}
                 e["perf"] = {**(e.get("perf") or {}), **e["confirmed"]}
         e.update(stage="collected", decision="promote", accepted_regression=f"{a.note} (was: {why[:300]})")
         st.log(f"{e['slug']} {e['device']}: confirmed regression accepted for publishing: {a.note}")
