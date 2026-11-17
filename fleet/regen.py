@@ -13,6 +13,7 @@
   regen.py publish S.json [--dry-run]                      card-only upload to loom-fun-staging (never loom-fun/*)
   regen.py status  S.json [--status-json status.json]      table; with --status-json: models.<slug>.<gpu> = stage / verdict / run for the dashboard
   regen.py accept  S.json SLUG... --note TEXT              a person's call: greedy text differs only at a near-tie, decide again with that accepted
+  regen.py accept-regression S.json SLUG... --note TEXT   SDK modes: publish a CONFIRMED slowdown as measured (the note names its explanation)
   regen.py adopt   S.json --run RUN                        attach an already running / finished run to the state's jobs (by job name)
 
 Modes. sdk-ab: the SDK migration's A/B (ab_jobs.py --sdk-ab): per model and device ONE job, ABBA on one runner: variant "fun" = the published staging card
@@ -1168,6 +1169,31 @@ def cmd_accept(a):
     st.save()
 
 
+def cmd_accept_regression(a):
+    """sdk-ab / sdk-loom: publish a model whose slowdown was CONFIRMED (ABBA) with its own numbers, the regression explained (a note naming the
+    upstream write-up or the cause): the card shows the new SDK's measurement as it is (publish partial progress); the delta line keeps the
+    negative numbers. Only a confirmed perf regression is accepted: gate / func / ktest failures, degraded runners and package stops are not."""
+    st = State(a.state)
+    if st.d["mode"] not in SDK_MODES:
+        die("accept-regression is for the SDK modes (sdk-ab, sdk-loom)")
+    done = []
+    for name, e in st.jobs.items():
+        if e["slug"] not in a.slug or e["stage"] != "needs_decision":
+            continue
+        # the job whose rows go on the card: sdk-loom = the sweep job (not its ABBA confirmation); sdk-ab = the confirming round-2 job
+        if (e.get("prev") if st.d["mode"] == "sdk-loom" else e.get("rerun_of_me")):
+            continue
+        why = e.get("reason") or ""
+        if "slower than" not in why or any(x in why for x in ("gate failed", "degraded runner", "package:", "missing")):
+            print(f"{e['slug']} {e['device']}: not a confirmed perf regression, not accepted ({why[:120]})")
+            continue
+        e.update(stage="collected", decision="promote", accepted_regression=f"{a.note} (was: {why[:300]})")
+        st.log(f"{e['slug']} {e['device']}: confirmed regression accepted for publishing: {a.note}")
+        done.append(f"{e['slug']} {e['device']}")
+    st.save()
+    print("accepted: " + (", ".join(done) or "nothing"))
+
+
 def cmd_adopt(a):
     st = State(a.state)
     jobs = gh_json(["run", "view", a.run, "-R", REPO, "--json", "jobs"])["jobs"]
@@ -1214,7 +1240,8 @@ def main(argv=None):
     p.add_argument("--priority", action="store_true", help="the batches of this plan go to the head of the next submit wave and ignore --max-inflight (a targeted job, not a sweep)")
     p.set_defaults(fn=cmd_plan)
     for name, fn in (("submit", cmd_submit), ("poll", cmd_poll), ("collect", cmd_collect), ("rerun", cmd_rerun), ("ingest", cmd_ingest),
-                     ("publish", cmd_publish), ("package", cmd_package), ("status", cmd_status), ("adopt", cmd_adopt), ("accept", cmd_accept)):
+                     ("publish", cmd_publish), ("package", cmd_package), ("status", cmd_status), ("adopt", cmd_adopt), ("accept", cmd_accept),
+                     ("accept-regression", cmd_accept_regression)):
         q = sub.add_parser(name)
         q.add_argument("state")
         q.set_defaults(fn=fn)
@@ -1226,7 +1253,7 @@ def main(argv=None):
                            "waves (call submit again as jobs finish), so a priority job queued meanwhile waits at most one wave. Default: no cap")
         if name == "status":
             q.add_argument("--status-json")
-        if name == "accept":
+        if name in ("accept", "accept-regression"):
             q.add_argument("slug", nargs="+")
             q.add_argument("--note", required=True, help="what was read: e.g. 'hyphen vs space, log-prob gap < band'")
         if name == "adopt":

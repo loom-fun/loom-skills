@@ -601,6 +601,21 @@ class SdkLoomTest(Base):
                                             for k, r in vs_card.items()}, "gate_failures": gates or [], "degraded_runner": {}}, open(p, "w"))
         return p
 
+    def test_accept_regression_publishes_only_a_confirmed_slowdown(self):
+        st = self.plan_loom() if hasattr(self, "plan_loom") else self.plan("--mode", "sdk-loom")
+        e = st.jobs[JOB]
+        e.update(stage="needs_decision", reason="ABBA confirmation (job 1): slower than -3%: prefill -7.4 %")
+        st.save()
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-regression", self.state, SLUG, "--note", "U1: SDK runtime on Strix (notes/upstream.md)"])
+        e = regen.State(self.state).jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("collected", "promote"))
+        self.assertIn("U1", e["accepted_regression"])
+        st = regen.State(self.state); st.jobs[JOB].update(stage="needs_decision", reason="gate failed: ktest:staging"); st.save()
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-regression", self.state, SLUG, "--note", "x"])
+        self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "needs_decision")   # a gate failure is never accepted
+
     def test_real_compare_marks_a_card_row_the_job_did_not_measure(self):
         """through .github/scripts/strix_ab_compare.py: a Loom-only job without the 32k rows vs a card that has them -> longctx is confirmed, not n/a"""
         d = os.path.join(self.tmp, "job")
