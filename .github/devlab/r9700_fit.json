@@ -372,13 +372,13 @@
  },
  {
   "slug": "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
-  "w": 9138169379,
+  "w": 9686623779,
   "kv": 15569256448,
   "kv32": 3892314112,
   "kvpp": 118784,
   "ctx": 131072,
   "mem": 36000000000,
-  "need": 26707425827.0,
+  "need": 27255880227.0,
   "verdict": "fits (native ctx)",
   "n_exp": 0
  },
