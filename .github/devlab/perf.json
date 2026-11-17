@@ -1,47 +1,38 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
- "jobs": [
-  {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
-   "variants": [
+  "_comment": "NOT SUBMITTED. Optional bounded diagnostic only: fresh paired decode profiles of pinned losing fusion and base, no perf/gates/engines. Use only after lead coordination decision.",
+  "runner": "strix",
+  "memory_bytes": 9000000000,
+  "llama_spec": "matched",
+  "jobs": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+      "name": "profile-norm-q8-strix",
+      "runner": "strix",
+      "card": "loom-fun-staging/unsloth-Qwen3.5-0.8B-loom",
+      "memory_bytes": 9000000000,
+      "kit": null,
+      "llamacpp": "b1374",
+      "llamacpp_vulkan": "b12211",
+      "variants": [
+        {
+          "name": "fun",
+          "build": {},
+          "ref": "5f590bc2ff7864f7f9920c36f32b0d90cea8142f"
+        },
+        {
+          "name": "staging",
+          "build": {
+            "POST_ADD_Q8": "1"
+          },
+          "ref": "6782988a74cb7a646671e317b98199c22e9eb252"
+        }
+      ],
+      "steps": [
+        "profile:fun:dec",
+        "profile:staging:dec"
+      ]
     }
-   ],
-   "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
-  }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+  ],
+  "card": "loom-fun-staging/unsloth-Qwen3.5-0.8B-loom",
+  "kit": null,
+  "llamacpp": "b1374"
 }
