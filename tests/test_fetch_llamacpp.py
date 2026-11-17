@@ -57,7 +57,9 @@ class FetchLlamacppTests(unittest.TestCase):
             if override is not None:
                 env["LLAMACPP_HOME"] = cache.as_posix() if override else ""
             argv = [explicit.as_posix() if arg == "EXPLICIT" else arg for arg in args]
-            command = shell.bash_command('export PATH="$TEST_BIN:$PATH"; exec bash "$TEST_SCRIPT" "$@"')
+            command = shell.bash_command(
+                'if command -v cygpath >/dev/null; then TEST_BIN=$(cygpath -u "$TEST_BIN"); fi; '
+                'export PATH="$TEST_BIN:$PATH"; exec bash "$TEST_SCRIPT" "$@"')
             result = subprocess.run([*command, "fetch-test", *argv], env=env,
                                     text=True, capture_output=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
