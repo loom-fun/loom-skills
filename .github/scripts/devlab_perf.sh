@@ -682,6 +682,18 @@ print('vllm', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
       llama_up || { res[$s]=ERROR; continue; }
       "$T" "$B/text_match.py" compare "$lurl" "$out/text_$p1.json" --tokenizer "$card/tokenizer.json" --thinking "$TH" | tee "$out/textmatch_$p1.log"
       res[$s]=$(grep TEXT_MATCH "$out/textmatch_$p1.log" | cut -c1-200);;
+    pairs)   # Experiment-only exact prefix-cache miss/hit invariance.
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      "$T" "$B/determinism.py" "$url" --model "$cardid" --pairs --reps "${p2:-3}" --log "$out/pairs_$p1.jsonl" > "$out/pairs_$p1.log" 2>&1
+      rc=$?
+      bad=$(grep -c 'a path gave two outputs\|paths differ' "$out/pairs_$p1.log" || true)
+      cat "$out/pairs_$p1.log"
+      res[$s]="$([ "$rc" = 0 ] && [ "$bad" = 0 ] && echo PASS || echo FAIL) PREFIX_PAIRS $bad differences";;
+    fullctximage)   # Experiment-only completed image request within512 tokens of the served context.
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      "$T" "$here/.github/scripts/issue554_fullctx_image.py" "$D/$p1/pkg" "$url" --out "$out/fullctximage_$p1.json" > "$out/fullctximage_$p1.log" 2>&1
+      rc=$?; cat "$out/fullctximage_$p1.log"
+      res[$s]="$([ "$rc" = 0 ] && echo PASS || echo FAIL) $(grep '^FULLCTX_IMAGE' "$out/fullctximage_$p1.log" | tail -1)";;
     consistency)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       # as gates.sh runs it: --pkg and a llama.cpp reference (no drafting) to judge any divergence as a near-tie
