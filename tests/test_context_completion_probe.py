@@ -75,6 +75,7 @@ class ContextHarness(unittest.TestCase):
     self.assertEqual(len(reports),1);self.assertIn('request_sha256',reports[0])
     self.assertEqual(len(d['checks']),6)
 
+ @unittest.skipIf(os.name=="nt","Real SIGTERM handler delivery is POSIX/Linux DevLab behavior; Windows terminates the process")
  def test_sigterm_preserves_attempt_payload_memory_and_failed_result(self):
   rc,d,*_=self.run_fixture(interrupt_at=1)
   self.assertEqual(rc,1);self.assertFalse(d['passed'])
