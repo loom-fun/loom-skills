@@ -13,14 +13,17 @@
       The target is ORG/NAME: ORG is --org (default loom-fun), NAME the last part of --repo, so the same repo names go
       to another org (the staging flow: --org loom-fun-staging). The card's info.json "repo" must be that target (its
       Quick start fetches from it; make_info.py build --org writes it). --dry-run checks everything and lists what would
-      be uploaded and deleted, without a token or a network call.
+      be uploaded, without a token or a network call.
       Uploads OUT (with the card: README.md, info.json, REPORT.md made by make_info.py build + render_card.py)
-      and deletes repo files OUT no longer has (an in-place update of an older package leaves nothing stale;
-      .gitattributes stays). --card-only uploads just README.md, info.json and REPORT.md, and model.json when it differs from the repo's only in the R9700 preset (`<first>-r9700`, written by make_info.py build --fit from the fit row's "r9700_execution"; anything else differing is refused). --parent-commit SHA: the
+      and never deletes remote files: full uploads refuse extras absent locally; compose/preserve them first. --card-only uploads just README.md, info.json and REPORT.md, and model.json when it differs from the repo's only in the R9700 preset (`<first>-r9700`, written by make_info.py build --fit from the fit row's "r9700_execution"; anything else differing is refused). --parent-commit SHA (mandatory for an existing repo): the
       repo commit the card was built from (the revision whose info.json you re-read, e.g. `hf download` of it, or
       the Hub API's model sha): the upload fails if the repo has moved since (another worker published), instead
       of overwriting that card; re-read info.json and rebuild. Needs huggingface_hub and a write token (HF_TOKEN or
       ~/.cache/huggingface/token).
+      --init-new-repo explicitly creates an absent repo. A nonempty immutable seed SHA, seed-only files and
+      one-commit history are required; otherwise stop without uploading. The initial package upload uses that seed
+      as its server CAS parent. Writes print JSON {repo,parent_commit,commit,url} from the actual returned CommitInfo;
+      verify that pinned commit before reading latest HEAD separately.
 """
 import argparse
 import json
@@ -182,27 +185,62 @@ def cmd_upload(a):
         print(f"dry run: would upload {len(files)} files to https://huggingface.co/{a.repo}"
               + (" (card only)" if a.card_only else "") + ": " + ", ".join(files[:12]) + (" ..." if len(files) > 12 else ""))
         return
+    if bool(a.parent_commit) == bool(a.init_new_repo):
+        sys.exit("upload: provide exactly one of --parent-commit (existing repo) or --init-new-repo (absent repo)")
+    if a.parent_commit and not re.fullmatch(r"[0-9a-f]{40}", a.parent_commit):
+        sys.exit("--parent-commit must be an immutable 40 lowercase hex commit")
+    if a.card_only and a.init_new_repo:
+        sys.exit("--init-new-repo requires a complete package, not --card-only")
+    missing = [f for f in (CARD if a.card_only else ("model.json", "model.json.lock", "llm_config.json", *CARD))
+               if not os.path.isfile(os.path.join(a.out, f))]
+    if missing:
+        sys.exit(f"package files missing in {a.out}: {missing}")
+    if not a.card_only:
+        refuse_dirty(os.path.join(a.out, "llm_config.json"), a.allow_dirty)
     from huggingface_hub import HfApi
     api = HfApi()
-    api.create_repo(a.repo, repo_type="model", exist_ok=True)
+    parent = a.parent_commit
+    if a.init_new_repo:
+        from huggingface_hub.errors import RepositoryNotFoundError
+        try:
+            api.model_info(a.repo)
+        except RepositoryNotFoundError:
+            api.create_repo(a.repo, repo_type="model", exist_ok=False)
+        else:
+            sys.exit("--init-new-repo: repo already exists; review its parent and use --parent-commit")
+        try:
+            seed = api.model_info(a.repo, files_metadata=True)
+        except RepositoryNotFoundError:
+            sys.exit("new repo has no readable CAS seed; initialization stopped, no package uploaded")
+        parent = seed.sha
+        seed_files = {s.rfilename for s in seed.siblings}
+        if not isinstance(parent, str) or not re.fullmatch(r"[0-9a-f]{40}", parent) or seed_files - {".gitattributes"}:
+            sys.exit("new repo has no verifiable seed-only CAS parent; initialization stopped, no package uploaded")
+        commits = api.list_repo_commits(a.repo)
+        if len(commits) != 1 or commits[0].commit_id != parent:
+            sys.exit("new repo moved beyond its initial seed; initialization stopped, no package uploaded")
+        current = seed
+    else:
+        current = api.model_info(a.repo, files_metadata=True)
+        if current.sha != parent:
+            sys.exit(f"{a.repo}: target moved from reviewed {parent} to {current.sha}; refresh, recompose and recheck")
+    remote = {s.rfilename for s in current.siblings}
     if a.card_only:
         files = list(CARD) + card_model(a, api)
-        missing = [f for f in CARD if not os.path.isfile(os.path.join(a.out, f))]
-        if missing:
-            sys.exit(f"card files missing in {a.out}: {missing}")
-        strays = [f for f in api.list_repo_files(a.repo) if STRAY.match(f)]
-        api.upload_folder(repo_id=a.repo, folder_path=a.out, allow_patterns=files, delete_patterns=strays or None,
-                          commit_message=a.message or "Card", parent_commit=a.parent_commit)
-        print(f"card uploaded to https://huggingface.co/{a.repo}")
-        return
-    refuse_dirty(os.path.join(a.out, "llm_config.json"), a.allow_dirty)
-    for f in ("model.json", "model.json.lock", "llm_config.json", *CARD):
-        if not os.path.isfile(os.path.join(a.out, f)):
-            sys.exit(f"{f} missing in {a.out} (prepare, then make_info.py build + render_card.py)")
-    stale = [f for f in api.list_repo_files(a.repo) if f not in local and f != ".gitattributes"]
-    api.upload_folder(repo_id=a.repo, folder_path=a.out, delete_patterns=stale or None,
-                      commit_message=a.message or "Loom package and card", parent_commit=a.parent_commit)
-    print(f"uploaded https://huggingface.co/{a.repo} ({len(local)} files{'; removed ' + ', '.join(stale) if stale else ''})")
+    else:
+        extras = sorted(remote - local - {".gitattributes"})
+        if extras:
+            sys.exit(f"remote files absent locally: {extras}; compose/preserve them first, deletion is not supported")
+        files = None
+    # No retry and no delete_patterns: a CAS conflict must return to composition/review.
+    result = api.upload_folder(repo_id=a.repo, folder_path=a.out, allow_patterns=files,
+                               commit_message=a.message or ("Card" if a.card_only else "Loom package and card"),
+                               parent_commit=parent)
+    commit, url = getattr(result, "oid", None), getattr(result, "commit_url", None)
+    expected_url = f"{api.endpoint.rstrip('/')}/{a.repo}/commit/{commit}"
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit) or url != expected_url:
+        sys.exit("upload returned no valid commit receipt; write may have occurred, do not retry without reconciliation")
+    print(json.dumps({"repo": a.repo, "parent_commit": parent, "commit": commit, "url": url}, sort_keys=True))
 
 
 def main(argv=None):
@@ -221,6 +259,7 @@ def main(argv=None):
     u.add_argument("--allow-dirty", action="store_true", help="upload a package built with generator choices set in the environment")
     u.add_argument("--parent-commit", help="fail unless the repo's main is still this commit (the one the card was "
                    "built from): concurrent publishes fail instead of overwriting each other")
+    u.add_argument("--init-new-repo", action="store_true", help="explicitly create an absent repo; upload only with its verified seed commit as CAS parent")
     a = ap.parse_args(argv)
     {"prepare": cmd_prepare, "upload": cmd_upload}[a.cmd](a)
 
