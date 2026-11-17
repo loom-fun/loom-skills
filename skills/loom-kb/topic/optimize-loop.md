@@ -92,6 +92,9 @@ Doubling or skipping a kernel answers "what does this kernel cost" only when the
   kernel while the testbench rejects those case operations before dispatch. Generate the cases during CPU preflight
   and check their value-source operations too; keep the device correctness cases in the DevLab suite. A parse/compile
   pass is never recorded as a `loom-test` pass.
+  A workflow running a benchmark child through `tee` must enable pipefail (GitHub Actions: explicit `shell: bash`).
+  Default `bash -e` can report success when the child fails and `tee` succeeds; inspect every expected correctness
+  assertion and raw timing record before accepting a green workflow as evidence.
 - **Compile report.** `loom-compile ... --compile-report=details`: spills, register pressure, LDS, instruction mix, target capability rows.
   Use it to price a hand-written conversion or a prologue before wiring it (an integer-bit f32 -> e4m3 conversion measured 54 VALU
   against 21 for the SDK's per 4 values, and was dropped without a run).

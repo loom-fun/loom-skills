@@ -74,6 +74,7 @@ jobs:
       - name: work dir
         run: mkdir -p "$GITHUB_WORKSPACE/../devlab-kbench" && echo "WORK=$(cd "$GITHUB_WORKSPACE/../devlab-kbench" && pwd)" >> "$GITHUB_ENV"
       - name: "kbench: ${{ matrix.suite }}"
+        shell: bash
         run: bash .github/scripts/devlab_kbench.sh "${{ needs.suites.outputs.file }}" "${{ matrix.suite }}" | tee -a "$WORK/${{ matrix.suite }}.log"
       - name: summary
         if: always()
