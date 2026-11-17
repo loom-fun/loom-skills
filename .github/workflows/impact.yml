@@ -1,9 +1,8 @@
 name: impact
 
 # Every PR: what do its programs do to the fleet, and does it stay inside the mandate its `loom-scope` block declares?
-# Builds the 51 published models (programs only, CPU) at the base and at the PR head, diffs them (fleet/diff_fleet.py), runs the
-# scope lint (fleet/scope_lint.py) with the PR body, prints the sampled-test plan (fleet/sample_plan.py), and keeps ONE PR comment
-# up to date. The check fails on lint errors. No GPU, no weights.
+# Plans from changed inputs (never the author's claimed scope), then builds affected models at both revisions in parallel
+# CPU shards. Shared/unknown inputs keep full-fleet coverage; non-input PRs still run scope lint but build nothing.
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
@@ -17,7 +16,72 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      builds: ${{ steps.plan.outputs.builds }}
+      base: ${{ steps.plan.outputs.base }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select affected models and independent revision/shard jobs
+        id: plan
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: python3 fleet/impact_plan.py plan --base "origin/$BASE_REF" --out impact-plan.json --github-output "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: impact-plan
+          path: impact-plan.json
+          retention-days: 7
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.builds != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install CPU build dependencies
+        id: deps
+        run: |
+          python -m pip install --quiet gguf numpy jinja2 pyyaml tokenizers
+          echo "key=$(python -m pip freeze | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: ${{ runner.temp }}/impact/${{ matrix.side }}
+          key: impact-v1-py312-${{ matrix.key }}-${{ steps.deps.outputs.key }}
+      - name: Build this revision and model shard
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          BUILD_REF: ${{ matrix.ref }}
+          BUILD_SLUGS: ${{ matrix.slugs }}
+          BUILD_SIDE: ${{ matrix.side }}
+          BUILD_SHARD: ${{ matrix.shard }}
+        run: |
+          python fleet/build_fleet.py --ref "$BUILD_REF" --slugs "$BUILD_SLUGS" --out "$RUNNER_TEMP/impact/$BUILD_SIDE" --jobs 2
+          mv "$RUNNER_TEMP/impact/$BUILD_SIDE/summary.json" "$RUNNER_TEMP/impact/$BUILD_SIDE/summary-$BUILD_SHARD.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: impact-build-${{ matrix.side }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/impact
+          retention-days: 7
+
   impact:
+    needs: [plan, build]
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -27,35 +91,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install the build dependency (inspect_gguf.py, build.py)
-        run: python -m pip install --quiet gguf numpy jinja2 pyyaml tokenizers
-      - name: Merge base
-        id: mb
+      - name: Require a successful plan and every build shard
         env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: echo "sha=$(git merge-base "origin/$BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Base fleet build (cached per base commit and build tooling)
-        id: basecache
-        uses: actions/cache@v4
+          PLAN_RESULT: ${{ needs.plan.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          BUILD_COUNT: ${{ needs.plan.outputs.builds }}
+        run: |
+          test "$PLAN_RESULT" = success
+          if [ "$BUILD_COUNT" != 0 ]; then test "$BUILD_RESULT" = success; fi
+      - uses: actions/download-artifact@v4
         with:
-          path: ${{ runner.temp }}/impact/base
-          key: fleet-base-${{ steps.mb.outputs.sha }}-${{ hashFiles('fleet/build_fleet.py', 'fleet/gguf_stub.py', 'fleet/manifest.json') }}
-      - name: Fleet program diff (base vs head)
+          name: impact-plan
+          path: ${{ runner.temp }}/impact
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.builds != '0'
+        with:
+          pattern: impact-build-*
+          path: ${{ runner.temp }}/impact
+          merge-multiple: true
+      - name: Aggregate complete shards and diff the selected models
         id: diff
         run: |
           set -e
           t0=$(date +%s)
-          mkdir -p "$RUNNER_TEMP/impact"
-          base="${{ steps.mb.outputs.sha }}"
-          jobs=$(nproc)
-          if [ "${{ steps.basecache.outputs.cache-hit }}" != "true" ]; then
-            python fleet/build_fleet.py --ref "$base" --out "$RUNNER_TEMP/impact/base" --jobs "$jobs" > "$RUNNER_TEMP/impact/build_base.log" 2>&1 || { tail -30 "$RUNNER_TEMP/impact/build_base.log"; exit 1; }
-          fi
-          python fleet/build_fleet.py --tree . --out "$RUNNER_TEMP/impact/head" --jobs "$jobs" > "$RUNNER_TEMP/impact/build_head.log" 2>&1 || { tail -30 "$RUNNER_TEMP/impact/build_head.log"; exit 1; }
-          python fleet/diff_fleet.py "$RUNNER_TEMP/impact/base" "$RUNNER_TEMP/impact/head" --json "$RUNNER_TEMP/impact/impact.json" --md "$RUNNER_TEMP/impact/impact.md"
-          echo "base=$base" >> "$GITHUB_OUTPUT"
-          echo "base_cached=${{ steps.basecache.outputs.cache-hit }}" >> "$GITHUB_OUTPUT"
-          echo "build_seconds=$(( $(date +%s) - t0 ))" >> "$GITHUB_OUTPUT"
+          python fleet/impact_plan.py aggregate --plan "$RUNNER_TEMP/impact/impact-plan.json" --builds "$RUNNER_TEMP/impact" --out "$RUNNER_TEMP/impact"
+          echo "diff_seconds=$(( $(date +%s) - t0 ))" >> "$GITHUB_OUTPUT"
       - name: Scope lint
         id: lint
         env:
@@ -63,7 +123,7 @@ jobs:
         run: |
           printf '%s' "$PR_BODY" > "$RUNNER_TEMP/impact/body.md"
           set +e
-          python fleet/scope_lint.py --base "${{ steps.diff.outputs.base }}" --head HEAD --pr-body "$RUNNER_TEMP/impact/body.md" \
+          python fleet/scope_lint.py --base "${{ needs.plan.outputs.base }}" --head HEAD --pr-body "$RUNNER_TEMP/impact/body.md" \
             --impact "$RUNNER_TEMP/impact/impact.json" --json "$RUNNER_TEMP/impact/lint.json" --md "$RUNNER_TEMP/impact/lint.md"
           echo "rc=$?" >> "$GITHUB_OUTPUT"
           exit 0
@@ -74,8 +134,8 @@ jobs:
         continue-on-error: true   # forks cannot write comments
         env:
           GH_TOKEN: ${{ github.token }}
-          BUILD_SECONDS: ${{ steps.diff.outputs.build_seconds }}
-          BASE_CACHED: ${{ steps.diff.outputs.base_cached }}
+          DIFF_SECONDS: ${{ steps.diff.outputs.diff_seconds }}
+          BUILD_COUNT: ${{ needs.plan.outputs.builds }}
         run: |
           d="$RUNNER_TEMP/impact"
           {
@@ -93,7 +153,7 @@ jobs:
             echo '```'
             echo "</details>"
             echo
-            echo "_fleet build and diff: ${BUILD_SECONDS}s on the runner (base build cached: ${BASE_CACHED:-false})._"
+            echo "_CPU build shards: ${BUILD_COUNT}; aggregation and diff: ${DIFF_SECONDS}s. Coverage and selection rationale above._"
           } > "$d/comment.md"
           id=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" --paginate \
                  --jq '[.[] | select(.body | startswith("<!-- loom-impact -->"))][0].id // empty')
