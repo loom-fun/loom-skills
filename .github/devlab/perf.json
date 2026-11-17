@@ -1,10 +1,175 @@
 {
-  "_comment": "#1145 diagnostic after direct unsigned mask tied end-to-end. Profile actual long-context perf workloads with HAL dispatch statistics on unchanged exact base/candidate. Not a timing promotion run; no gates or reference engines.",
+  "_comment": "#1145 full-block kernel winner into end-to-end iterate. Same staging checkpoint both sides, production fast-model sampling classification fixed6 sessions and3 samples, two rotated ABBA replicas per GPU. SDK0.2.0 both variants. No gates or baseline engines.",
   "sdk": "0.2.0",
+  "llama_spec": "matched",
   "jobs": [
     {
-      "name": "mask1145-profile-r9700",
+      "name": "sab-bartowski-qwen2-5-0-5b-instruct-loom",
+      "runner": "strix",
+      "repeat_rows": 3,
+      "card": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom",
+      "memory_bytes": 5000000000,
+      "kit": null,
+      "llamacpp": "b1374",
+      "llamacpp_vulkan": "b12211",
+      "variants": [
+        {
+          "name": "fun",
+          "build": {},
+          "ref": "95917388f60240380ffa2941144a689f27e40d3c",
+          "sdk": "0.2.0"
+        },
+        {
+          "name": "staging",
+          "build": {},
+          "ref": "11a1811d12ac0d69758dc1b64b3c3d07dd12d3c2",
+          "sdk": "0.2.0"
+        },
+        {
+          "name": "funnd",
+          "build": {},
+          "ref": "95917388f60240380ffa2941144a689f27e40d3c",
+          "execution": {
+            "draft_depth": 0
+          },
+          "sdk": "0.2.0"
+        },
+        {
+          "name": "stagingnd",
+          "build": {},
+          "ref": "11a1811d12ac0d69758dc1b64b3c3d07dd12d3c2",
+          "execution": {
+            "draft_depth": 0
+          },
+          "sdk": "0.2.0"
+        }
+      ],
+      "steps": [
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:staging:1:long",
+        "perf:fun:1:long",
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "perf:staging:1:long",
+        "perf:fun:1:long",
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "perf:staging:1:long",
+        "perf:fun:1:long",
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "c4:funnd",
+        "c4:stagingnd",
+        "c4:stagingnd",
+        "c4:funnd",
+        "c4:funnd",
+        "c4:stagingnd",
+        "c4:stagingnd",
+        "c4:funnd",
+        "textmatch:fun",
+        "textmatch:staging",
+        "smoke:staging",
+        "ktest:staging"
+      ],
+      "sdk": "0.2.0"
+    },
+    {
+      "name": "sab-bartowski-qwen2-5-0-5b-instruct-l-r2",
+      "runner": "strix",
+      "replica": 2,
+      "repeat_rows": 3,
+      "card": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom",
+      "memory_bytes": 5000000000,
+      "kit": null,
+      "llamacpp": "b1374",
+      "llamacpp_vulkan": "b12211",
+      "variants": [
+        {
+          "name": "fun",
+          "build": {},
+          "ref": "95917388f60240380ffa2941144a689f27e40d3c",
+          "sdk": "0.2.0"
+        },
+        {
+          "name": "staging",
+          "build": {},
+          "ref": "11a1811d12ac0d69758dc1b64b3c3d07dd12d3c2",
+          "sdk": "0.2.0"
+        },
+        {
+          "name": "funnd",
+          "build": {},
+          "ref": "95917388f60240380ffa2941144a689f27e40d3c",
+          "execution": {
+            "draft_depth": 0
+          },
+          "sdk": "0.2.0"
+        },
+        {
+          "name": "stagingnd",
+          "build": {},
+          "ref": "11a1811d12ac0d69758dc1b64b3c3d07dd12d3c2",
+          "execution": {
+            "draft_depth": 0
+          },
+          "sdk": "0.2.0"
+        }
+      ],
+      "steps": [
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "perf:staging:1:long",
+        "perf:fun:1:long",
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "perf:staging:1:long",
+        "perf:fun:1:long",
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "perf:staging:1:long",
+        "perf:fun:1:long",
+        "c4:stagingnd",
+        "c4:funnd",
+        "c4:funnd",
+        "c4:stagingnd",
+        "c4:stagingnd",
+        "c4:funnd",
+        "c4:funnd",
+        "c4:stagingnd",
+        "textmatch:fun",
+        "textmatch:staging",
+        "smoke:staging",
+        "ktest:staging"
+      ],
+      "sdk": "0.2.0"
+    },
+    {
+      "name": "rab-bartowski-qwen2-5-0-5b-instruct-loom",
       "runner": "r9700",
+      "repeat_rows": 3,
       "card": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom",
       "memory_bytes_r9700": 5000000000,
       "kit": null,
@@ -14,37 +179,177 @@
         {
           "name": "fun",
           "build": {},
-          "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+          "ref": "95917388f60240380ffa2941144a689f27e40d3c",
           "cap_pool": 2529280,
           "execution": {
             "prefill_capacity": 4096
           },
-          "sdk": "0.2.0",
-          "serve_args": [
-            "--device_profiling_mode=dispatch-events,executable-metadata",
-            "--device_profiling_flush_interval_ms=5",
-            "--print_device_statistics"
-          ]
+          "sdk": "0.2.0"
         },
         {
           "name": "staging",
           "build": {},
-          "ref": "9b88b310094124d4d4041df6ea6882d7b6f06cea",
+          "ref": "11a1811d12ac0d69758dc1b64b3c3d07dd12d3c2",
           "cap_pool": 2529280,
           "execution": {
             "prefill_capacity": 4096
           },
-          "sdk": "0.2.0",
-          "serve_args": [
-            "--device_profiling_mode=dispatch-events,executable-metadata",
-            "--device_profiling_flush_interval_ms=5",
-            "--print_device_statistics"
-          ]
+          "sdk": "0.2.0"
+        },
+        {
+          "name": "funnd",
+          "build": {},
+          "ref": "95917388f60240380ffa2941144a689f27e40d3c",
+          "cap_pool": 2529280,
+          "execution": {
+            "prefill_capacity": 4096,
+            "draft_depth": 0
+          },
+          "sdk": "0.2.0"
+        },
+        {
+          "name": "stagingnd",
+          "build": {},
+          "ref": "11a1811d12ac0d69758dc1b64b3c3d07dd12d3c2",
+          "cap_pool": 2529280,
+          "execution": {
+            "prefill_capacity": 4096,
+            "draft_depth": 0
+          },
+          "sdk": "0.2.0"
         }
       ],
       "steps": [
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:staging:1:long",
         "perf:fun:1:long",
-        "perf:staging:1:long"
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "perf:staging:1:long",
+        "perf:fun:1:long",
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "perf:staging:1:long",
+        "perf:fun:1:long",
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "c4:funnd",
+        "c4:stagingnd",
+        "c4:stagingnd",
+        "c4:funnd",
+        "c4:funnd",
+        "c4:stagingnd",
+        "c4:stagingnd",
+        "c4:funnd",
+        "textmatch:fun",
+        "textmatch:staging",
+        "smoke:staging",
+        "ktest:staging"
+      ],
+      "sdk": "0.2.0"
+    },
+    {
+      "name": "rab-bartowski-qwen2-5-0-5b-instruct-l-r2",
+      "runner": "r9700",
+      "replica": 2,
+      "repeat_rows": 3,
+      "card": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom",
+      "memory_bytes_r9700": 5000000000,
+      "kit": null,
+      "llamacpp": "b1375",
+      "llamacpp_vulkan": "b12211",
+      "variants": [
+        {
+          "name": "fun",
+          "build": {},
+          "ref": "95917388f60240380ffa2941144a689f27e40d3c",
+          "cap_pool": 2529280,
+          "execution": {
+            "prefill_capacity": 4096
+          },
+          "sdk": "0.2.0"
+        },
+        {
+          "name": "staging",
+          "build": {},
+          "ref": "11a1811d12ac0d69758dc1b64b3c3d07dd12d3c2",
+          "cap_pool": 2529280,
+          "execution": {
+            "prefill_capacity": 4096
+          },
+          "sdk": "0.2.0"
+        },
+        {
+          "name": "funnd",
+          "build": {},
+          "ref": "95917388f60240380ffa2941144a689f27e40d3c",
+          "cap_pool": 2529280,
+          "execution": {
+            "prefill_capacity": 4096,
+            "draft_depth": 0
+          },
+          "sdk": "0.2.0"
+        },
+        {
+          "name": "stagingnd",
+          "build": {},
+          "ref": "11a1811d12ac0d69758dc1b64b3c3d07dd12d3c2",
+          "cap_pool": 2529280,
+          "execution": {
+            "prefill_capacity": 4096,
+            "draft_depth": 0
+          },
+          "sdk": "0.2.0"
+        }
+      ],
+      "steps": [
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:staging:1",
+        "perf:fun:1",
+        "perf:fun:1",
+        "perf:staging:1",
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "perf:staging:1:long",
+        "perf:fun:1:long",
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "perf:staging:1:long",
+        "perf:fun:1:long",
+        "perf:fun:1:long",
+        "perf:staging:1:long",
+        "perf:staging:1:long",
+        "perf:fun:1:long",
+        "c4:stagingnd",
+        "c4:funnd",
+        "c4:funnd",
+        "c4:stagingnd",
+        "c4:stagingnd",
+        "c4:funnd",
+        "c4:funnd",
+        "c4:stagingnd",
+        "textmatch:fun",
+        "textmatch:staging",
+        "smoke:staging",
+        "ktest:staging"
       ],
       "sdk": "0.2.0"
     }
