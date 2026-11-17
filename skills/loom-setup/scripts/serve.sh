@@ -46,7 +46,13 @@ if [ ${#models[@]} -gt 0 ] && [ -f "$(dirname "${models[0]#--model=}")/llm_confi
 fi
 [ "$mem" = none ] && [ -z "${memneed:-}" ] && [ -n "${LOOM_MEMNEED:-}" ] && [ "${LOOM_MEMNEED}" != none ] && memneed=$LOOM_MEMNEED   # caller's bound on what fixed backing commits (memcheck)
 memflag=(--memory_bytes=$mem); [ "$mem" != none ] || memflag=()   # MEMORY_BYTES=none: no cap (--pool_backing=fixed takes none)
-[ "$dev" != amdgpu ] || { [ "$mem" = none ] && [ -z "${memneed:-}" ]; } || "$(dirname "$0")/memcheck.sh" "${memneed:-$mem}" "loom-serve ${extra[*]:-} --memory_bytes=${mem}" || exit 1   # only budgets above the cap are checked
+case "$dev" in
+  amdgpu|amdgpu://*)
+    # Active waiting rewrites the bare driver to a URI before this guard.
+    if [ "$mem" != none ] || [ -n "${memneed:-}" ]; then
+      "$(dirname "$0")/memcheck.sh" "${memneed:-$mem}" "loom-serve ${extra[*]:-} --memory_bytes=${mem}" || exit 1
+    fi;;
+esac   # memcheck itself only checks budgets above the cap
 nohup "$bin/loom-serve" --device="$dev" --listen=127.0.0.1:$port "${memflag[@]}" "${waitflag[@]}" --workers=8 "${models[@]}" "${extra[@]}" > $state/$name.log 2>&1 &
 echo $! > $state/$name.pid; echo $port > $state/$name.port; start=$(date +%s)
 while kill -0 $(cat $state/$name.pid) 2>/dev/null; do
