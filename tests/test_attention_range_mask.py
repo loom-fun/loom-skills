@@ -13,10 +13,10 @@ SOURCE = ROOT / 'skills/loom-port-llm/starter/gen_llm.py'
 def generator_helper():
     # gen_llm has command-line generation side effects. Load this pure emitter alone.
     tree = ast.parse(SOURCE.read_text())
-    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'attention_range_mask')
+    fns = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ('attention_range_mask', 'attention_paged_range_masks')]
     ns = {'os': os}
-    exec(compile(ast.Module(body=[fn], type_ignores=[]), str(SOURCE), 'exec'), ns)
-    return ns['attention_range_mask']
+    exec(compile(ast.Module(body=fns, type_ignores=[]), str(SOURCE), 'exec'), ns)
+    return ns
 
 
 class AttentionRangeMask(unittest.TestCase):
@@ -55,7 +55,7 @@ class AttentionRangeMask(unittest.TestCase):
                     self.assertEqual(lo <= key < hi, ((key - lo) % (1 << bits)) < hi - lo)
 
     def test_emitter_legacy_and_unordered(self):
-        emit = generator_helper()
+        emit = generator_helper()['attention_range_mask']
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(emit('%key', '%lo', '%hi', '%ok', '%l', '%h'),
                              '      %l = index.cmp uge, %key, %lo : index\n'
@@ -80,3 +80,16 @@ class AttentionRangeMask(unittest.TestCase):
                 cfg = json.load(stream)
             result = resolve.resolve_full(cfg, slug=path.parent.name)
             self.assertEqual(result['values']['decode.attn.range_mask'], path.parent.name == target, path.parent.name)
+
+    def test_paged_rewrite_matches_only_exact_mask(self):
+        helpers = generator_helper()
+        emit, rewrite = helpers['attention_range_mask'], helpers['attention_paged_range_masks']
+        with patch.dict(os.environ, {}, clear=True):
+            before = emit('%key12_raw', '%lo_abs', '%hi_abs', '%ok12', '%okl12', '%okh12')
+            self.assertEqual(rewrite(before), before)
+        with patch.dict(os.environ, {'ATTN_RANGE_MASK': '1'}, clear=True):
+            after = rewrite(before)
+            self.assertEqual(after, emit('%key12_raw', '%lo_abs', '%hi_abs', '%ok12', '%okl12', '%okh12'))
+            self.assertEqual(rewrite(after), after)
+            unrelated = before.replace('%hi_abs', '%different_hi')
+            self.assertEqual(rewrite(unrelated), unrelated)
