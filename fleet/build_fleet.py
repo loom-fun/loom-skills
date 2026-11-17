@@ -62,6 +62,11 @@ def kit_dir(skills, example, work):
             raise RuntimeError("apply_example: " + out[-400:])
     else:
         shutil.copytree(os.path.join(skills, "starter"), kit)
+        source = os.path.join(kit, "kit_source.py")
+        if os.path.isfile(source):   # old refs before kit provenance existed remain buildable
+            rc, out = sh([sys.executable, source, "write", kit, "--skills-dir", skills], work)
+            if rc:
+                raise RuntimeError("kit_source: " + out[-400:])
     return kit
 
 
@@ -147,10 +152,11 @@ def build_one(slug, m, skills, out, rdna4, keep, real=None, with_gen=False):
                     open(d, "w", encoding="utf-8", newline="\n").write(normalize(open(s, encoding="utf-8").read()))
                 else:
                     shutil.copy(s, d)
-        # the build outputs the stamp of the kit's commit: not an input of any program
+        # Comparisons omit build metadata; package builds retain the authentic source/SDK stamp.
         p = os.path.join(dst, "llm_config.json")
         c = json.load(open(p))
-        c.pop("generator", None)
+        if not with_gen:
+            c.pop("generator", None)
         json.dump(unpath(c, work + os.sep), open(p, "w"), indent=1)
         open(os.path.join(dst, "build.log"), "w").write("\n".join(log))
         return slug, None, time.time() - t0
@@ -180,7 +186,7 @@ def main():
     ap.add_argument("--slugs", default="")
     ap.add_argument("--rdna4", default="1", choices=["0", "1"])
     ap.add_argument("--keep-work", action="store_true")
-    ap.add_argument("--with-gen", action="store_true", help="also keep the package's gen/ (generated helper kernels); default: programs only")
+    ap.add_argument("--with-gen", action="store_true", help="also keep gen/ and the authentic generator stamp for publication; default: programs only")
     ap.add_argument("--real", help="proof build: GGUFs from the HF cache and DIR/<slug>/tokenizer.json (full tokenizers) instead of stubs")
     a = ap.parse_args()
     preflight.require()

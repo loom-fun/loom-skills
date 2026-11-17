@@ -159,7 +159,11 @@ def main(argv=None, device=None, tool="device_jobs.py"):
             skipped.append(slug)   # the weights do not fit: no run (the card says "doesn't fit")
             continue
         jf, ex_ctx, _, ctx, preset = got
-        n, rr = card_lib.sampling_plan(card_lib.published_decode(slug, a.old_org), a.fast_tps)   # the one sampling rule, Loom and llama.cpp alike
+        try:
+            published = card_lib.published_decode(slug, a.old_org)
+        except card_lib.SamplingMetadataError as exc:
+            raise SystemExit(str(exc)) from None
+        n, rr = card_lib.sampling_plan(published, a.fast_tps)   # the one sampling rule, Loom and llama.cpp alike
         n = a.reps or n
         v = lambda name, ex: {"name": name, **({"build": {}} if a.build else {}), **({"context": ctx} if ctx else {}),
                               **({"execution": ex} if ex else {})}

@@ -408,7 +408,11 @@ def build_replicas(a):
 
 def main(argv=None, device=None):
     a = parser(device).parse_args(argv)
-    json.dump(build_replicas(a), sys.stdout, indent=1)
+    try:
+        document = build_replicas(a)
+    except card_lib.SamplingMetadataError as exc:
+        raise SystemExit(str(exc)) from None
+    json.dump(document, sys.stdout, indent=1)
     print()
 
 

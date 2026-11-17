@@ -201,7 +201,13 @@ def has_baseline_values(perf_metrics_):
     return any((m or {}).get("baseline") is not None for m in perf_metrics_)
 
 
-def methodology_other(base, spec, drafter, values, runs_c4, measured):
+def baseline_reuse_note(base, cross):
+    when = lambda ds: "; ".join(f"{text(d)} ({src_text(s)})" for d, s in ds)
+    return (f"- {base['name']} measured on {when(cross['llama'])}, Loom on {when([cross['loom']])}: same runner type, different jobs "
+            f"({base['name']} was not re-measured for this package).")
+
+
+def methodology_other(base, spec, drafter, values, runs_c4, measured, cross=None):
     """The methodology of a card whose baseline engine is not llama.cpp (a safetensors checkpoint llama.cpp cannot read): vLLM ROCm on the
     same runner, same requests, timed by the client on both engines; or no baseline at all (measured False) with the reason."""
     name = f"{base['name']} ROCm"
@@ -220,7 +226,8 @@ def methodology_other(base, spec, drafter, values, runs_c4, measured):
             draft = f"{loom_m}" + (f" ({drafter})" if drafter else "") + " on both engines" + f"; draft depth: Loom {spec[1]}, {base['name']} {n or 'default'} (each engine its own)"
         else:
             draft = f"Loom {loom_m + ' depth ' + str(spec[1]) if spec else 'no drafting'}; {name} {m or 'no drafting'} (NOT the same choice on both engines)"
-        out = [f"- Compared: Loom against {ver}; the same checkpoint, the same DevLab runner and job, the same prompts (llama.cpp cannot read a safetensors "
+        where = "DevLab runner type, different jobs" if cross else "DevLab runner and job"
+        out = [f"- Compared: Loom against {ver}; the same checkpoint, the same {where}, the same prompts (llama.cpp cannot read a safetensors "
                f"checkpoint); Loom served with the active wait. {values} (4 streams: median of {runs_c4}); both engines are timed by the client "
                "(first streamed token and the stream's token rate).",
                f"- Out of the box on both engines: Loom serves the preset shipped in this package; {name} runs its defaults plus only the server "
@@ -231,6 +238,8 @@ def methodology_other(base, spec, drafter, values, runs_c4, measured):
                "prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode. A margin within "
                f"+-{round(TIE_BAND * 100)} % (the measured same-runner noise) is a tie.",
                f"- {name} server arguments: " + (f"`{base['args']}`." if base.get("args") else "not recorded.")]
+        if cross:
+            out.insert(1, baseline_reuse_note(base, cross))
     if notes:
         out.append("- Not supported / not measured: " + "; ".join(notes) + ".")
     return out
@@ -242,7 +251,7 @@ def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cros
     cross: {"llama": [(date, source)], "loom": (date, source)} when the llama.cpp rows were measured in another job than the Loom rows (a Loom-only
     job; the row's baseline_from): the card says so instead of "the same job"."""
     if base["name"] != "llama.cpp":
-        return methodology_other(base, spec, drafter, values, runs_c4, measured)
+        return methodology_other(base, spec, drafter, values, runs_c4, measured, cross)
     vk = next((x["baseline"] for b, x in extra.items() if b == "vulkan"), None)
     engines = [(base["name"] + " ROCm", base)] + ([(base["name"] + " Vulkan", vk)] if vk else [])
     ver = ", ".join(f"{n} `{b['version']}`" if b.get("version") else f"{n} (build not recorded)" for n, b in engines)
@@ -275,9 +284,7 @@ def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cros
            "prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode. A margin within "
            f"+-{round(TIE_BAND * 100)} % (the measured same-runner noise) is a tie."]
     if cross:
-        when = lambda ds: "; ".join(f"{text(d)} ({src_text(s)})" for d, s in ds)
-        out.insert(1, f"- {base['name']} measured on {when(cross['llama'])}, Loom on {when([cross['loom']])}: same runner type, different jobs "
-                      f"({base['name']} was not re-measured for this package).")
+        out.insert(1, baseline_reuse_note(base, cross))
     for n, b in engines:
         out.append(f"- {n} server arguments: " + (f"`{b['args']}`." if b.get("args") else "not recorded."))
     ns = [u if u.startswith("Loom:") else f"{n}: {u}" for n, b in engines for u in (b.get("differs") or [])]

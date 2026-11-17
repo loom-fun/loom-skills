@@ -2,7 +2,6 @@
 full (the default, unchanged); the R9700 runner count comes from device.json."""
 import json
 import os
-import subprocess
 import sys
 import unittest
 
@@ -10,15 +9,15 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SCRIPTS = os.path.join(ROOT, ".github", "scripts")
 sys.path.insert(0, SCRIPTS)
 import job_presets  # noqa: E402
+from test_ab_jobs import run_script  # noqa: E402
 
 SLUG = "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom"
 R9 = "radeon-r9700"
 
 
 def gen(script, *args):
-    r = subprocess.run([sys.executable, os.path.join(SCRIPTS, script), "--device", R9, *args], capture_output=True, text=True, cwd=ROOT)
-    assert r.returncode == 0, r.stderr[-500:]
-    return json.loads(r.stdout)["jobs"][0]
+    # Preset tests use the existing synthetic-rate helper, never live metadata.
+    return json.loads(run_script(script, ["--device", R9, *args]))["jobs"][0]
 
 
 class Presets(unittest.TestCase):
