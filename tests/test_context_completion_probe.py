@@ -1,6 +1,6 @@
 """CPU mocked HTTP/sysfs checks of the capacity-proof harness, not GPU evidence."""
 from pathlib import Path
-import contextlib,io,importlib.util,json,sys,tempfile,types,unittest
+import os,signal,contextlib,io,importlib.util,json,sys,tempfile,types,unittest
 from unittest.mock import patch
 P=Path(__file__).resolve().parents[1]/".github/scripts"
 sp=importlib.util.spec_from_file_location('contextprobe',P/'context_completion_probe.py');C=importlib.util.module_from_spec(sp);sp.loader.exec_module(C)
@@ -18,13 +18,17 @@ class Package:
  def ids(self,*_):return list(range(32))
 
 class ContextHarness(unittest.TestCase):
- def run_fixture(self,finish='stop',cache=3072,status=200,cold=True,active=4,exception_at=None):
+ def run_fixture(self,finish='stop',cache=3072,status=200,cold=True,active=4,exception_at=None,interrupt_at=None):
   with tempfile.TemporaryDirectory() as tmp:
    root=Path(tmp);dev=root/'fixture-gpu';dev.mkdir()
    (dev/'vendor').write_text('0x1002');(dev/'mem_info_vram_total').write_text(str(32*2**30));used=dev/'mem_info_vram_used';used.write_text(str(29*2**30))
    out=root/'out';posts=[]
    def post(url,json,**_):
     posts.append(json)
+    if len(posts)==interrupt_at:
+     self.assertTrue((out/'memory.jsonl').read_text())
+     self.assertIn('payload',__import__('json').loads((out/'near_first-request.json').read_text()))
+     os.kill(os.getpid(),signal.SIGTERM)
     if len(posts)==exception_at:raise TimeoutError("fixture transport deadline")
     if cold and len(posts)==1:return Response(503,{'error':'fixture asynchronous cold load'})
     answer='Plants use sunlight. Chlorophyll captures light. Carbon dioxide supplies carbon. Plants release oxygen. Glucose stores energy. Water supplies hydrogen.\nCAPACITY-CEDAR-731'
@@ -70,6 +74,15 @@ class ContextHarness(unittest.TestCase):
     reports=[v for k,v in self.last_artifacts.items() if not k.endswith('-attempts.json') and isinstance(v,dict) and v.get('error')]
     self.assertEqual(len(reports),1);self.assertIn('request_sha256',reports[0])
     self.assertEqual(len(d['checks']),6)
+
+ def test_sigterm_preserves_attempt_payload_memory_and_failed_result(self):
+  rc,d,*_=self.run_fixture(interrupt_at=1)
+  self.assertEqual(rc,1);self.assertFalse(d['passed'])
+  self.assertEqual(d['failure']['error_type'],'ProbeInterrupted')
+  self.assertEqual(self.last_artifacts['near_first-attempts.json'][0]['status'],0)
+  self.assertIn('payload',self.last_artifacts['near_first-request.json'])
+  self.assertEqual(self.last_artifacts['failure.json']['error_type'],'ProbeInterrupted')
+  self.assertTrue(d['memory_observed'])
 
  def test_length_or_uncached_or_absent_status_cannot_pass(self):
   for kwargs in [{'finish':'length'},{'cache':0},{'status':503},{'active':3}]:

@@ -43,6 +43,10 @@ def check_sdk(root,pkg):
             'limitation':'PyPI install metadata may omit source SHA; the exact pinned wheel hash is required and checked.'}
 
 
+class ProbeInterrupted(InterruptedError):
+    pass
+
+
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('pkg');ap.add_argument('url');ap.add_argument('out')
@@ -93,22 +97,29 @@ def main():
     if len(vram)!=1:raise RuntimeError(f'expected one32GB AMD target VRAM counter, found {len(vram)}')
     target_pci=str(vram[0].parent.resolve())
     target_total_bytes=int((vram[0].parent/'mem_info_vram_total').read_text())
+    sample_lock=threading.Lock()
+    sample_file=out/'memory.jsonl'
+    sample_file.write_text('')
     def snapshot():
         d={'monotonic':time.monotonic(),'time':time.time()}
         try:
-            r=requests.get(a.url+'/v1/status',timeout=5);d['status_http']=r.status_code;d['status']=r.json()
+            r=requests.get(a.url+'/v1/status',timeout=2);d['status_http']=r.status_code;d['status']=r.json()
         except Exception as e:d['status_error']=str(e)
         d['vram_bytes']={}
         for path in vram:
             try:d['vram_bytes'][str(path.resolve())]=int(path.read_text())
             except OSError as e:d.setdefault('vram_errors',[]).append(str(e))
-        samples.append(d)
+        with sample_lock:
+            samples.append(d)
+            with sample_file.open('a') as stream:stream.write(json.dumps(d)+'\n')
     def sample():
         while not stop.is_set():snapshot();stop.wait(0.25)
+    snapshot()  # Durable initial telemetry exists before any request/control.
     thread=threading.Thread(target=sample,daemon=True);thread.start()
     controls=[];responses=[];failure=None
     def post(tag,payload):
         before=time.monotonic();attempts=[]
+        (out/(tag+'-request.json')).write_text(json.dumps({'time':time.time(),'payload':payload,'request_sha256':hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()},indent=2)+'\n')
         while True:
             try:
                 r=requests.post(a.url+'/v1/chat/completions',json=payload,timeout=a.timeout)
@@ -117,7 +128,9 @@ def main():
                 attempts.append(attempt)
                 (out/(tag+'-attempts.json')).write_text(json.dumps(attempts,indent=2)+'\n')
                 item={'tag':tag,**attempt,'response':{},'request_sha256':hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()}
-                (out/(tag+'.json')).write_text(json.dumps(item,indent=2)+'\n');responses.append(item);return item
+                (out/(tag+'.json')).write_text(json.dumps(item,indent=2)+'\n');responses.append(item)
+                if isinstance(error,ProbeInterrupted):raise
+                return item
             attempt={'elapsed_s':time.monotonic()-before,'time':time.time(),'status':r.status_code}
             if r.status_code!=200:attempt['body']=r.text
             attempts.append(attempt)
@@ -130,6 +143,9 @@ def main():
         except ValueError:d={'raw':r.text}
         item={'tag':tag,'elapsed_s':time.monotonic()-before,'status':r.status_code,'response':d,'request_sha256':hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()}
         (out/(tag+'.json')).write_text(json.dumps(item,indent=2)+'\n');responses.append(item);return item
+    def interrupt(*_):
+        raise ProbeInterrupted('context probe terminated by SIGTERM')
+    prior_sigterm=signal.signal(signal.SIGTERM,interrupt)
     try:
         if a.pin_primary:
             for endpoint,component in [('pin','primary'),('unpin','image')]:
@@ -154,8 +170,8 @@ def main():
         failure={'error_type':type(error).__name__,'error':str(error),'time':time.time()}
         (out/'failure.json').write_text(json.dumps(failure,indent=2)+'\n')
     finally:
-        stop.set();thread.join(timeout=10);snapshot()
-        (out/'memory.jsonl').write_text(''.join(json.dumps(x)+'\n' for x in samples))
+        stop.set();thread.join(timeout=3);snapshot()
+        signal.signal(signal.SIGTERM,prior_sigterm)
         (out/'controls.json').write_text(json.dumps(controls,indent=2)+'\n')
     checks=[];answers=[]
     for r in responses:
