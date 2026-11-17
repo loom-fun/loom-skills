@@ -17,8 +17,10 @@ cards. Never edit a rendered README by hand: change the data (make_info.py) or t
 import argparse
 import html
 import json
+import math
 import os
 import re
+import shlex
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -160,6 +162,18 @@ def margin(loom, base):
     return f"{round((loom / base - 1) * 100):+d} %"
 
 
+def margin_baseline(key, metric, base, extra):
+    """The displayed row's baseline; additional backends never replace its raw evidence."""
+    value = metric.get("baseline")
+    if base["name"] != "llama.cpp":
+        return value   # safetensors cards retain their vLLM baseline
+    vulkan = extra.get("vulkan") or {}
+    vk = ((vulkan.get("session") or {}).get("metrics") or {}).get(key, {}).get("baseline")
+    values = [v for v in (value, vk) if isinstance(v, (int, float)) and not isinstance(v, bool)
+              and math.isfinite(v) and v > 0]
+    return max(values, default=None)
+
+
 LLAMA_METHOD = {"draft-dflash": "DFlash", "draft-mtp": "MTP", "ngram-simple": "n-gram", "ngram-mod": "n-gram"}
 
 
@@ -187,7 +201,13 @@ def has_baseline_values(perf_metrics_):
     return any((m or {}).get("baseline") is not None for m in perf_metrics_)
 
 
-def methodology_other(base, spec, drafter, values, runs_c4, measured):
+def baseline_reuse_note(base, cross):
+    when = lambda ds: "; ".join(f"{text(d)} ({src_text(s)})" for d, s in ds)
+    return (f"- {base['name']} measured on {when(cross['llama'])}, Loom on {when([cross['loom']])}: same runner type, different jobs "
+            f"({base['name']} was not re-measured for this package).")
+
+
+def methodology_other(base, spec, drafter, values, runs_c4, measured, cross=None):
     """The methodology of a card whose baseline engine is not llama.cpp (a safetensors checkpoint llama.cpp cannot read): vLLM ROCm on the
     same runner, same requests, timed by the client on both engines; or no baseline at all (measured False) with the reason."""
     name = f"{base['name']} ROCm"
@@ -206,7 +226,8 @@ def methodology_other(base, spec, drafter, values, runs_c4, measured):
             draft = f"{loom_m}" + (f" ({drafter})" if drafter else "") + " on both engines" + f"; draft depth: Loom {spec[1]}, {base['name']} {n or 'default'} (each engine its own)"
         else:
             draft = f"Loom {loom_m + ' depth ' + str(spec[1]) if spec else 'no drafting'}; {name} {m or 'no drafting'} (NOT the same choice on both engines)"
-        out = [f"- Compared: Loom against {ver}; the same checkpoint, the same DevLab runner and job, the same prompts (llama.cpp cannot read a safetensors "
+        where = "DevLab runner type, different jobs" if cross else "DevLab runner and job"
+        out = [f"- Compared: Loom against {ver}; the same checkpoint, the same {where}, the same prompts (llama.cpp cannot read a safetensors "
                f"checkpoint); Loom served with the active wait. {values} (4 streams: median of {runs_c4}); both engines are timed by the client "
                "(first streamed token and the stream's token rate).",
                f"- Out of the box on both engines: Loom serves the preset shipped in this package; {name} runs its defaults plus only the server "
@@ -217,6 +238,8 @@ def methodology_other(base, spec, drafter, values, runs_c4, measured):
                "prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode. A margin within "
                f"+-{round(TIE_BAND * 100)} % (the measured same-runner noise) is a tie.",
                f"- {name} server arguments: " + (f"`{base['args']}`." if base.get("args") else "not recorded.")]
+        if cross:
+            out.insert(1, baseline_reuse_note(base, cross))
     if notes:
         out.append("- Not supported / not measured: " + "; ".join(notes) + ".")
     return out
@@ -228,7 +251,7 @@ def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cros
     cross: {"llama": [(date, source)], "loom": (date, source)} when the llama.cpp rows were measured in another job than the Loom rows (a Loom-only
     job; the row's baseline_from): the card says so instead of "the same job"."""
     if base["name"] != "llama.cpp":
-        return methodology_other(base, spec, drafter, values, runs_c4, measured)
+        return methodology_other(base, spec, drafter, values, runs_c4, measured, cross)
     vk = next((x["baseline"] for b, x in extra.items() if b == "vulkan"), None)
     engines = [(base["name"] + " ROCm", base)] + ([(base["name"] + " Vulkan", vk)] if vk else [])
     ver = ", ".join(f"{n} `{b['version']}`" if b.get("version") else f"{n} (build not recorded)" for n, b in engines)
@@ -261,9 +284,7 @@ def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cros
            "prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode. A margin within "
            f"+-{round(TIE_BAND * 100)} % (the measured same-runner noise) is a tie."]
     if cross:
-        when = lambda ds: "; ".join(f"{text(d)} ({src_text(s)})" for d, s in ds)
-        out.insert(1, f"- {base['name']} measured on {when(cross['llama'])}, Loom on {when([cross['loom']])}: same runner type, different jobs "
-                      f"({base['name']} was not re-measured for this package).")
+        out.insert(1, baseline_reuse_note(base, cross))
     for n, b in engines:
         out.append(f"- {n} server arguments: " + (f"`{b['args']}`." if b.get("args") else "not recorded."))
     ns = [u if u.startswith("Loom:") else f"{n}: {u}" for n, b in engines for u in (b.get("differs") or [])]
@@ -456,6 +477,47 @@ def serve_command(info, facts, feats, gpu, output, bare=False):
 
 
 
+def chat_request(model, feats):
+    """A copyable request using model.json's exact selector and supported reasoning controls."""
+    body = {"model": model["model"]["id"], "messages": [{"role": "user", "content": "Hello"}]}
+    thinking = feats.get("thinking") or {}
+    effort = feats.get("reasoning_effort") or {}
+    note = "In another terminal, send a request:"
+    if thinking.get("status") == "yes" and (thinking.get("value") or {}).get("mode") == "toggle":
+        body["chat_template_kwargs"] = {"enable_thinking": False}
+        note = "In another terminal, send a request (optional thinking is turned off):"
+    elif effort.get("status") == "yes":
+        levels = (effort.get("value") or {}).get("levels") or []
+        lowest = next((x for x in ("none", "minimal", "low", "medium", "high", "max") if x in levels), None)
+        if lowest:
+            body["reasoning_effort"] = lowest
+            note = f"In another terminal, send a request (`reasoning_effort` is set to `{lowest}`):"
+    payload = shlex.quote(json.dumps(body, ensure_ascii=True))
+    return [note, "", "```bash", "curl http://127.0.0.1:8080/v1/chat/completions \\",
+            "  -H 'Content-Type: application/json' \\", f"  -d {payload}", "```", ""]
+
+
+
+def quickstart_flag_notes(fetch, serve):
+    """Explain only the flags present in this GPU's emitted commands."""
+    args = shlex.split(fetch) + shlex.split(serve)
+    notes = []
+    if "--materialize=copy" in args:
+        notes.append("`--materialize=copy` puts copies of the fetched package files in the output directory.")
+    if any(a.startswith("--device=") and "completion_spin_ns=4294967295" in a for a in args):
+        notes.append("`completion_spin_ns=4294967295` enables active waiting for GPU completions (uses CPU while GPU work is in flight); the card's performance measurements use this setting.")
+    if "--pool_backing=fixed" in args:
+        notes.append("`--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.")
+    if any(a.startswith("--memory_bytes=") for a in args):
+        notes.append("`--memory_bytes` sets the serving memory budget for this GPU.")
+    for flag, kind in (("--state_slab_bytes", "state"), ("--weight_slab_bytes", "weight")):
+        if any(a.startswith(flag + "=") for a in args):
+            notes.append(f"`{flag}` sets the allocation slab size for {kind} memory.")
+    if PRELOAD_FLAG in args:
+        notes.append(f"`{PRELOAD_FLAG}` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.")
+    return ["- " + note for note in notes]
+
+
 def remeasure_lines(rm, g, sources, on):
     """The card lines about a same-runner A/B re-measure block (`on`: what was re-measured, "this package" or "programs SHA")."""
     L = []
@@ -498,7 +560,8 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
     # further llama.cpp backends (performance.baselines): one column each, after the roofline
     extra = {b: x for b, x in (perf.get("baselines") or {}).items()}
     xnames = {b: f"{x['baseline']['name']} {b.capitalize()}" for b, x in extra.items()}
-    L += [f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline "
+    margin_label = "margin vs best llama.cpp" if bname == "llama.cpp" else "margin"
+    L += [f"| metric | {bname} | Loom | {margin_label} | roofline | Loom % of roofline "
           + "".join(f"| {n} " for n in xnames.values()) + "|",
           "|---|---|---|---|---|---|" + "---|" * len(extra)]
 
@@ -529,7 +592,7 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
             cells = " | ".join([num(key, ceiling), pct(m.get('loom'), ceiling) + (f" {ABOVE}" if over100 else "")]
                                + [num(key, x['session']['metrics'].get(key, {}).get('baseline')) for x in extra.values()])
         L.append(f"| {label} | {num(key, m.get('baseline'))} | {loom} | "
-                 f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), m.get('baseline'))} | {cells} |")
+                 f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), margin_baseline(key, m, base, extra))} | {cells} |")
 
     def runs_of(keys, med):
         vals = set()
@@ -582,6 +645,10 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
                                                         has_baseline_values(m for m, _ in (shown[k] for k, _ in METRICS if k in shown))),
           (f"- Measured on {device_text(psrc['device'])}, a named machine (this GPU has no DevLab runner); both engines ran on it."
            if machine else f"- Measured on AMD DevLab Dispatch {GPUS[g]['runner']} runners (`devlab-perf` jobs); runners differ between sessions.")]
+    if bname == "llama.cpp":
+        L.append("- Margin vs best llama.cpp: (Loom / max(ROCm, Vulkan) - 1) × 100 %, using the available measured "
+                 "tokens/s for each row on this GPU. With only one valid backend, that backend is used; with neither, "
+                 "the margin is not measured. Raw backend values and their measurement sources are retained below and in the table.")
     if psrc:
         L.append(f"- Measured {text(sessions[primary]['date'])}; device {device_text(psrc['device'])}; "
                  f"hrx-loom {sdk_text(psrc['hrx_loom'])}; source: {src_text(psrc)}.")
@@ -712,21 +779,24 @@ def render(d):
             return None
         return ("On a stock host (8 MiB memlock) start loom-serve as `systemd-run --user --pty --same-dir -p SystemCallFilter=~io_uring_setup "
                 "-p SystemCallErrorNumber=ENOSYS loom-serve ...` (no root; IREE falls back to its POSIX proactor), or raise `ulimit -l`.")
+    request = chat_request(load_package(d)["model"], feats) if kind == "chat" else []
     if len(serving) == 1:
         L += ["## Quick start", "", "```bash", *install, fetch_for(serving[0]), serve_command(info, facts, feats, serving[0], output, bare), "```", ""]
+        L += quickstart_flag_notes(fetch_for(serving[0]), serve_command(info, facts, feats, serving[0], output, bare)) + [""]
         if stock_line(serving[0]):
             L += [stock_line(serving[0]), ""]
+        L += request
     else:   # one collapsed block per GPU, each self-contained: install, fetch with that GPU's preset, serve with that GPU's flags
         L += ["## Quick start", "", "Open your GPU and copy its commands.", ""]
         for g in serving:
             L += ["<details>", f"<summary>{html.escape(gpu_label(g), quote=False)}</summary>", "",
                   "```bash", *install, fetch_for(g), serve_command(info, facts, feats, g, output, bare), "```", ""]
-            for line in (served_context_line(g, True), stock_line(g)):   # B1: the served-context cap and the stock-host note are the only sentences in a block
+            L += quickstart_flag_notes(fetch_for(g), serve_command(info, facts, feats, g, output, bare)) + [""]
+            for line in (served_context_line(g, True), stock_line(g)):   # GPU-specific startup notes precede the request example
                 if line:
                     L += [line, ""]
+            L += request
             L += ["</details>", ""]
-    if any(PRELOAD_FLAG in serve_command(info, facts, feats, g, output, bare) for g in serving):
-        L += [f"`{PRELOAD_FLAG}` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.", ""]
     if release(pin):
         tag, whl, _ = release_wheel(pin)
         L += [f"hrx-loom {pin['hrx_loom']} is a pre-release published on its [GitHub release]({RELEASE_URL.replace('/download', '/tag')}/{tag}), "

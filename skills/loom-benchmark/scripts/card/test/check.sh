@@ -143,7 +143,7 @@ py "$C/make_info.py" build "$tmp/dlonly" --repo loom-fun/ggml-org-Flint-loom --g
   --evidence "$tmp/gates.json" "$tmp/perf_dl2.json" -o "$tmp/dlonly/info.json" 2>/dev/null
 py "$C/render_card.py" "$tmp/dlonly" 2>/dev/null
 py -c "import sys; r = open(sys.argv[1] + '/README.md').read()
-assert '| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline |\n' in r, 'header'
+assert '| metric | llama.cpp | Loom | margin vs best llama.cpp | roofline | Loom % of roofline |\n' in r, 'header'
 assert 'local ÷ DevLab' not in r and 'DevLab Loom' not in r, 'local columns'
 row = [l for l in r.splitlines() if l.startswith('| decode tok/s')][0]
 assert row.count('|') == 7 and '—' not in row.split('|')[2] and '—' not in row.split('|')[3] and '—' not in row.split('|')[4], row
@@ -509,6 +509,9 @@ for n in flint d1; do
   [ $n = d1 ] && cp "$here/legacy/d1/REPORT.md" "$tmp/legacy_$n/REPORT.md"
   py "$C/render_card.py" "$tmp/legacy_$n" 2>/dev/null
   for f in README.md REPORT.md; do
+    if [ "${UPDATE:-0}" = 1 ]; then
+      sed 's#card schema `loom-card/3`#card schema `loom-card/2`#; s#(schema `loom-card/3`)#(schema `loom-card/2`)#' "$tmp/legacy_$n/$f" > "$here/legacy/$n/$f"
+    fi
     sed 's#card schema `loom-card/2`#card schema `loom-card/3`#; s#(schema `loom-card/2`)#(schema `loom-card/3`)#' "$here/legacy/$n/$f" > "$tmp/legacy_$n.$f"
     cmp -s "$tmp/legacy_$n.$f" "$tmp/legacy_$n/$f" && echo "OK   legacy $n/$f: a loom-card/2 card renders as it did (schema string aside)" \
       || { echo "FAIL legacy $n/$f: a loom-card/2 card renders differently"; diff "$tmp/legacy_$n.$f" "$tmp/legacy_$n/$f" | head -20; bad=1; }

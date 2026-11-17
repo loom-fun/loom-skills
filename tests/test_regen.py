@@ -154,6 +154,10 @@ class SubmitPollTest(Base):
                                                          ("PUT", "contents/.github/devlab/perf.json"), ("POST", "pulls"), ("POST", "issues/77/labels")])
         self.assertEqual(seen[4][2]["base"], "r9700")   # plan --base: the experiment branch is cut from it and targets it
         self.assertIn("kind: tooling", seen[4][2]["body"])
+        import scope_lint
+        scope, errors = scope_lint.parse_block(seen[4][2]["body"])
+        self.assertEqual(errors, [])
+        self.assertEqual(scope["scopes"], [])   # tooling has no selector; "none" would name a nonexistent KB node
         self.assertEqual(seen[5][2], {"labels[]": "devlab-perf"})
         st = regen.State(self.state)
         self.assertEqual((st.jobs[JOB]["stage"], st.jobs[JOB]["pr"]), ("submitted", 77))
@@ -713,6 +717,8 @@ class SdkLoomTest(Base):
              "accepted_regression": "U1: SDK runtime (notes) (was: ...)"}
         m = regen.card_message(e, "strix-halo", "9", True, True)
         self.assertIn("another job, same runner type", m)
+        self.assertIn("baseline rows are the previous card's", m)   # sdk-loom also migrates safetensors cards whose baseline is vLLM
+        self.assertNotIn("llama.cpp", m)
         self.assertNotIn("own SDK pin", m)
         self.assertIn("confirmed slowdown published as measured: U1: SDK runtime (notes)", m)
         m = regen.card_message({k: v for k, v in e.items() if k != "confirmed"}, "strix-halo", "9", False, True)
@@ -1050,10 +1056,26 @@ class PackageTest(Base):
         open(os.path.join(d, "programs_sha256_staging.txt"), "w").write("e" * 64 + "\n")
         st.jobs[JOB]["dir"] = d
         st.save()
-        st, calls, out = self.run_package("--slugs", SLUG)
+        with mock.patch.object(regen, "package_one", wraps=regen.package_one) as package:
+            st, calls, out = self.run_package("--slugs", SLUG)
+        package.assert_not_called()   # the mismatch must stop before even snapshot/assembly, let alone upload
+        self.assertEqual(calls, [])
         self.assertIn("built programs eeeeeeeeeeee", out)
         self.assertEqual(st.jobs[JOB]["stage"], "needs_decision")
         self.assertFalse(st.jobs[JOB].get("package"))
+
+    def test_a_job_matching_the_canonical_programs_is_uploaded(self):
+        st = regen.State(self.state)
+        d = os.path.join(self.tmp, "jobdir")
+        os.makedirs(d)
+        open(os.path.join(d, "programs_sha256_staging.txt"), "w").write(self.want + "\n")
+        st.jobs[JOB]["dir"] = d
+        st.save()
+        with mock.patch.object(regen, "package_one", wraps=regen.package_one) as package:
+            st, calls, _ = self.run_package("--slugs", SLUG)
+        package.assert_called_once()
+        self.assertEqual(len([c for c in calls if "upload" in c]), 1)
+        self.assertEqual(st.jobs[JOB]["package"]["programs_sha256"], self.want)
 
     def test_a_weight_file_without_an_origin_is_refused(self):
         m = v01_model()
