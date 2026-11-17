@@ -211,6 +211,12 @@ $T "$S/sampling_check.py" $P http://127.0.0.1:8160 --llama http://127.0.0.1:8130
   `/v1/status`: admitted when the server answers 200 or shows an active request; refused on a 4xx/503. It then closes the
   connection and waits for the server to go idle (a server that keeps prefilling a cancelled request is flagged). Exit 1 on a
   refusal or no answer; the verdict goes to `context_admit.json` and `gates.json`.
+- **test_9070xt.py** (device data, not a gate): on a machine with a 16 GB Radeon RX 9070 XT (the R9700's gfx1201 chip with half the
+  memory; no DevLab runner), `$T "$S/test_9070xt.py" PKG --loom-root ROOT --weight-slab-bytes 64mib -o result.json` serves the package
+  elastic with the 9070 XT flags (`--memory_bytes=15000000000 --state_slab_bytes=4mib --parameter_mode=preload`; `--prefill-capacity N`
+  for a package whose prefill workspace does not fit) through a deployment document, finds the largest `context_capacity` that registers,
+  then the largest at which a fresh server completes one request of that full length and answers a sanity prompt correctly after it
+  (a wrong answer's text is recorded). The fleet's results: `fleet/devices/gfx1201-16gb.json` (`make_info.py devices fleet/devices` validates).
 
 ## 2. Performance
 

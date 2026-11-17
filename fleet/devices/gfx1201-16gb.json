@@ -1,0 +1,1176 @@
+{
+ "schema": "loom-device-results/1",
+ "device": "gfx1201-16gb",
+ "gpu": "gfx1201 16 GB class; measured on an AMD Radeon RX 9070 XT (Navi 48, gfx1201, 16 GB: 17.1 GB board, ~1.1-1.5 GB held by a desktop session)",
+ "same_programs_as": "radeon-r9700",
+ "share_section_with": null,
+ "preset": {
+  "always": false
+ },
+ "sdk": {
+  "hrx_loom": "0.2.0",
+  "note": "hrx-loom 0.2 registers a model only when the budget holds one full context_capacity: max_context is the context_capacity the 9070 XT preset carries"
+ },
+ "tool": "skills/loom-benchmark/scripts/test_9070xt.py: the largest context_capacity (multiples of 1024 up to the native context) at which a fresh server completes one request of that full length and then answers a sanity prompt correctly",
+ "package": "each card's package built from sdk020 on hrx-loom 0.2.0 (build.py --memory-gib 4096, as the SDK campaign builds it), its default preset with context_capacity overridden by a deployment document",
+ "serve": {
+  "device": "amdgpu://?completion_spin_ns=4294967295",
+  "pool_backing": "elastic",
+  "memory_bytes": 15000000000,
+  "state_slab_bytes": "4mib",
+  "weight_slab_bytes": "64mib (the default 1 GiB slab strands budget: +20-38 % context on 0.2.0, perf rows within +-3 % on 5 models)",
+  "parameter_mode": "preload: a stock Ubuntu host (8 MiB RLIMIT_MEMLOCK, Linux 7.0) cannot load any model in the default file mode or direct mode on 0.2.0 (the first request fails: io_uring 'buffer pin preparation failed (12)'); printed on cards. Alternative without it: systemd-run --user -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS loom-serve ..."
+ },
+ "provenance": {
+  "kind": "machine",
+  "run": null,
+  "url": null,
+  "device": {
+   "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+   "gpu": "AMD Radeon RX 9070 XT (gfx1201, 16 GB)",
+   "os": "Ubuntu 26.04.1 LTS, kernel 7.0.0-43-generic"
+  },
+  "hrx_loom": {
+   "version": "0.2.0"
+  }
+ },
+ "models": {
+  "InternScience-Sage-A1.5-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 22.6 GB, beyond a 16 GB card"
+  },
+  "XHToken-Spark-X2.5-4B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 75776,
+   "native_context": 262144
+  },
+  "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 19.8 GB, beyond a 16 GB card"
+  },
+  "bartowski-LFM3-1.7B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 262144,
+   "native_context": 262144
+  },
+  "bartowski-Mellum2.1-12B-A2.5B-Thinking-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 43008,
+   "native_context": 131072
+  },
+  "bartowski-MiniCPM-V-4.7-35B-A3B-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 22.3 GB, beyond a 16 GB card"
+  },
+  "bartowski-Nanbeige4.3-33B-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 20.8 GB, beyond a 16 GB card"
+  },
+  "bartowski-Ornith-1.5-35B-A3B-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 23.2 GB, beyond a 16 GB card"
+  },
+  "bartowski-Ornith-1.5-9B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 93184,
+   "native_context": 262144,
+   "note": "qwen35 hybrid: just above max_context the next answer is garbled, then the server crashes"
+  },
+  "bartowski-Qwen2.5-0.5B-Instruct-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 32768,
+   "native_context": 32768
+  },
+  "bartowski-Qwen2.5-1.5B-Instruct-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 32768,
+   "native_context": 32768
+  },
+  "bartowski-Qwen2.5-32B-Instruct-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 19.9 GB, beyond a 16 GB card"
+  },
+  "bartowski-Qwen2.5-7B-Instruct-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 32768,
+   "native_context": 32768
+  },
+  "bartowski-Qwen3.8-27B-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 18.4 GB, beyond a 16 GB card"
+  },
+  "bartowski-Spark-X2.6-4B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 75776,
+   "native_context": 262144
+  },
+  "ggml-org-Flint-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 23.6 GB, beyond a 16 GB card"
+  },
+  "ggml-org-LFM2.5-24B-A2B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 3072,
+   "native_context": 131072,
+   "execution": {
+    "prefill_capacity": 256
+   },
+   "note": "registers only with prefill_capacity 256; 3k context: marginal"
+  },
+  "ggml-org-LFM3-Omni-2B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 128000,
+   "native_context": 128000
+  },
+  "ggml-org-Laguna-XS-2.1-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 20.1 GB, beyond a 16 GB card"
+  },
+  "ggml-org-Muse-Glimmer-30B-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 24.7 GB, beyond a 16 GB card"
+  },
+  "ggml-org-Qwen2.5-VL-7B-Instruct-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 128000,
+   "native_context": 128000
+  },
+  "ggml-org-Qwen3-1.7B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 40960,
+   "native_context": 40960
+  },
+  "ggml-org-Qwen3-14B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 27648,
+   "native_context": 40960
+  },
+  "ggml-org-Qwen3-4B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 40960,
+   "native_context": 40960
+  },
+  "ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 18.3 GB, beyond a 16 GB card"
+  },
+  "ggml-org-Qwen3.6-27B-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 21.1 GB, beyond a 16 GB card"
+  },
+  "ggml-org-Qwen3.6-35B-A3B-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 21.9 GB, beyond a 16 GB card"
+  },
+  "ggml-org-gemma-3-1b-it-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 32768,
+   "native_context": 32768
+  },
+  "lmstudio-community-Ornith-1.0-35B-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 22.1 GB, beyond a 16 GB card"
+  },
+  "lmstudio-community-gemma-4-26B-A4B-it-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 17.1 GB, beyond a 16 GB card"
+  },
+  "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 35840,
+   "native_context": 131072
+  },
+  "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 131072,
+   "native_context": 131072
+  },
+  "unsloth-Llama-3.2-3B-Instruct-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 104448,
+   "native_context": 131072
+  },
+  "unsloth-Ornith-1.0-9B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 224256,
+   "native_context": 262144,
+   "note": "qwen35 hybrid: just above max_context the server crashes instead of refusing"
+  },
+  "unsloth-Qwen3-0.6B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 40960,
+   "native_context": 40960
+  },
+  "unsloth-Qwen3-30B-A3B-Instruct-2507-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 18.6 GB, beyond a 16 GB card"
+  },
+  "unsloth-Qwen3-4B-Instruct-2507-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 76800,
+   "native_context": 262144
+  },
+  "unsloth-Qwen3-8B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 36864,
+   "native_context": 40960,
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model card:parameter/Qwen3-8B-DFlash.Q8_0.gguf --spec-draft-n-max 15 -ngld 99 -c 40960 -np 1",
+       "differs": [
+        "llama.cpp ROCm -c 40960 (the R9700 card's 65536 with the drafter does not fit 16 GB)"
+       ],
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1375"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [
+        "devlab_perf.sh (local, RX 9070 XT): perf:ws64:1 ABBA, c4:ws64nd; llama@rocm.np1:3 (llama_kv_rocm 40960), llamac4@rocm.nodraft"
+       ],
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "acceptance": 0.352,
+         "baseline": 93.9,
+         "baseline_runs": [
+          93.25,
+          94.08,
+          93.86
+         ],
+         "loom": 164.2,
+         "loom_runs": [
+          164.27,
+          164.19
+         ]
+        },
+        "decode_2k": {
+         "acceptance": 0.363,
+         "baseline": 95.4,
+         "baseline_runs": [
+          95.42,
+          99.24,
+          93.03
+         ],
+         "loom": 129.4,
+         "loom_runs": [
+          129.01,
+          129.84
+         ]
+        },
+        "decode_32k": {
+         "acceptance": 0.0,
+         "baseline": 59.0,
+         "baseline_runs": [
+          58.95,
+          59.95,
+          58.93
+         ],
+         "loom": 56.5,
+         "loom_runs": [
+          56.38,
+          56.65
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 2972.2,
+         "baseline_runs": [
+          2969.5,
+          2972.2,
+          2972.5
+         ],
+         "loom": 4084.1,
+         "loom_runs": [
+          4085.5,
+          4082.6
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 4055.7,
+         "baseline_runs": [
+          4070.2,
+          4055.7,
+          4046.3
+         ],
+         "loom": 5317.4,
+         "loom_runs": [
+          5327.4,
+          5307.3
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 4078.3,
+         "baseline_runs": [
+          4090.3,
+          4078.3,
+          4074.3
+         ],
+         "loom": 5671.0,
+         "loom_runs": [
+          5677.5,
+          5664.5
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 2252.8,
+         "baseline_runs": [
+          2249.0,
+          2252.8,
+          2254.5
+         ],
+         "loom": 2629.4,
+         "loom_runs": [
+          2631.9,
+          2627.0
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 3569.5,
+         "baseline_runs": [
+          3568.3,
+          3569.5,
+          3570.4
+         ],
+         "loom": 5232.0,
+         "loom_runs": [
+          5234.7,
+          5229.3
+         ]
+        },
+        "streams4": {
+         "baseline": 265.6,
+         "baseline_runs": [
+          265.6,
+          265.9,
+          265.4
+         ],
+         "loom": 416.5,
+         "loom_runs": [
+          416.5,
+          416.2,
+          416.0,
+          417.6,
+          416.8,
+          416.5
+         ]
+        }
+       },
+       "programs_sha256": "ea9aebc58d058e4d9d1d0729f010ee6ebf384a678ec0ef2166bd8339b96adf80",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    }
+   ]
+  },
+  "unsloth-Qwen3-VL-4B-Instruct-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 76800,
+   "native_context": 262144,
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 -c 65536 -np 1",
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1375"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [
+        "devlab_perf.sh (local, RX 9070 XT): perf:ws64:1 x4 ABBA, perf:ws64:1:long x2, c4:ws64nd x2; llama@rocm.np1:3, llamac4@rocm.nodraft"
+       ],
+       "date": "2026-11-16",
+       "metrics": {
+        "decode": {
+         "baseline": 140.8,
+         "baseline_runs": [
+          140.85,
+          140.73,
+          140.75
+         ],
+         "loom": 182.2,
+         "loom_runs": [
+          182.48,
+          181.93
+         ]
+        },
+        "decode_2k": {
+         "baseline": 129.2,
+         "baseline_runs": [
+          129.22,
+          128.93,
+          129.36
+         ],
+         "loom": 151.7,
+         "loom_runs": [
+          151.78,
+          151.66
+         ]
+        },
+        "decode_32k": {
+         "baseline": 66.9,
+         "baseline_runs": [
+          66.87,
+          66.83,
+          66.95
+         ],
+         "loom": 71.7,
+         "loom_runs": [
+          71.66,
+          71.79
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 3990.1,
+         "baseline_runs": [
+          3984.4,
+          3992.3,
+          3990.1
+         ],
+         "loom": 5723.0,
+         "loom_runs": [
+          5698.0,
+          5748.0
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 6402.5,
+         "baseline_runs": [
+          6402.5,
+          6402.5,
+          6423.5
+         ],
+         "loom": 8898.0,
+         "loom_runs": [
+          9027.1,
+          8768.9
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 6334.9,
+         "baseline_runs": [
+          6334.9,
+          6321.8,
+          6340.4
+         ],
+         "loom": 9241.0,
+         "loom_runs": [
+          9268.6,
+          9213.4
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 2786.3,
+         "baseline_runs": [
+          2785.8,
+          2786.3,
+          2790.7
+         ],
+         "loom": 3669.8,
+         "loom_runs": [
+          3661.0,
+          3678.6
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 5154.9,
+         "baseline_runs": [
+          5170.3,
+          5154.9,
+          5148.6
+         ],
+         "loom": 7827.6,
+         "loom_runs": [
+          7824.3,
+          7830.8
+         ]
+        },
+        "streams4": {
+         "baseline": 390.0,
+         "baseline_runs": [
+          390.0,
+          390.1,
+          389.5
+         ],
+         "loom": 623.0,
+         "loom_runs": [
+          625.0,
+          625.6,
+          626.4,
+          623.8,
+          620.5,
+          620.2
+         ]
+        }
+       },
+       "programs_sha256": "d4227bec6789a6d5fcdc71ca1cdbb91b99271b7f2251fe505c461786cd370ba2",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    }
+   ]
+  },
+  "unsloth-Qwen3-VL-8B-Instruct-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 59392,
+   "native_context": 262144
+  },
+  "unsloth-Qwen3.5-0.8B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 262144,
+   "native_context": 262144
+  },
+  "unsloth-Qwen3.5-2B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 262144,
+   "native_context": 262144
+  },
+  "unsloth-Qwen3.5-35B-A3B-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 23.2 GB, beyond a 16 GB card"
+  },
+  "unsloth-Qwen3.5-4B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 151552,
+   "native_context": 262144,
+   "note": "qwen35 hybrid: 1-2 % above max_context a request completes and the next answer is garbled, just above that the server crashes (admission undercounts the recurrent state?)",
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model hf:AtomicChat/Qwen3.5-4B-DFlash-GGUF/Qwen3.5-4B-DFlash.Q8_0.gguf --spec-draft-n-max 7 -ngld 99 -c 65536 -np 1",
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1375"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [
+        "devlab_perf.sh (local, RX 9070 XT): perf:ws64:1 x4 ABBA, perf:ws64:1:long x2, c4:ws64nd x2; llama@rocm.np1:3, llamac4@rocm.nodraft"
+       ],
+       "date": "2026-11-16",
+       "metrics": {
+        "decode": {
+         "acceptance": 0.336,
+         "baseline": 94.6,
+         "baseline_runs": [
+          94.61,
+          94.61,
+          94.1
+         ],
+         "loom": 202.5,
+         "loom_runs": [
+          202.89,
+          202.16
+         ]
+        },
+        "decode_2k": {
+         "acceptance": 0.454,
+         "baseline": 107.6,
+         "baseline_runs": [
+          106.74,
+          107.6,
+          108.06
+         ],
+         "loom": 197.7,
+         "loom_runs": [
+          200.13,
+          195.24
+         ]
+        },
+        "decode_32k": {
+         "acceptance": 0.417,
+         "baseline": 101.1,
+         "baseline_runs": [
+          100.87,
+          101.11,
+          102.73
+         ],
+         "loom": 146.3,
+         "loom_runs": [
+          146.12,
+          146.48
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 5461.8,
+         "baseline_runs": [
+          5461.4,
+          5461.8,
+          5467.5
+         ],
+         "loom": 8073.1,
+         "loom_runs": [
+          8082.6,
+          8063.6
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 5134.4,
+         "baseline_runs": [
+          5082.1,
+          5135.4,
+          5134.4
+         ],
+         "loom": 8016.4,
+         "loom_runs": [
+          8038.4,
+          7994.4
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 5565.4,
+         "baseline_runs": [
+          5565.4,
+          5565.4,
+          5553.0
+         ],
+         "loom": 8526.0,
+         "loom_runs": [
+          8564.9,
+          8487.2
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 4850.8,
+         "baseline_runs": [
+          4843.2,
+          4850.8,
+          4856.3
+         ],
+         "loom": 6936.4,
+         "loom_runs": [
+          6972.0,
+          6900.7
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 5804.9,
+         "baseline_runs": [
+          5804.9,
+          5802.7,
+          5816.0
+         ],
+         "loom": 8609.7,
+         "loom_runs": [
+          8624.1,
+          8595.2
+         ]
+        },
+        "streams4": {
+         "baseline": 333.5,
+         "baseline_runs": [
+          333.5,
+          333.5,
+          334.5
+         ],
+         "loom": 542.2,
+         "loom_runs": [
+          544.4,
+          544.4,
+          543.6,
+          539.7,
+          540.4,
+          540.1
+         ]
+        }
+       },
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    }
+   ]
+  },
+  "unsloth-Qwen3.5-9B-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 87040,
+   "native_context": 262144,
+   "note": "qwen35 hybrid: just above max_context the next answer is garbled, then the server crashes"
+  },
+  "unsloth-gemma-4-12B-it-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 12288,
+   "native_context": 160768,
+   "note": "memory-bound: the R9700 serves 51200 at 32 GB"
+  },
+  "unsloth-gemma-4-31B-it-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "reason": "not run: the package's files are 19.2 GB, beyond a 16 GB card"
+  },
+  "unsloth-gemma-4-E2B-it-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 131072,
+   "native_context": 131072
+  },
+  "unsloth-gemma-4-E4B-it-loom": {
+   "fits": true,
+   "date": "2026-11-17",
+   "max_context": 73728,
+   "native_context": 131072,
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --spec-type draft-mtp --spec-draft-model card:parameter/gemma-4-E4B-it-assistant.Q8_0.gguf -ngld 99 -c 65536 -np 1",
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1375"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [
+        "devlab_perf.sh (local, RX 9070 XT): perf:ws64:1 x4 ABBA, perf:ws64:1:long x2, c4:ws64nd x2; llama@rocm.np1:3, llamac4@rocm.nodraft"
+       ],
+       "date": "2026-11-16",
+       "metrics": {
+        "decode": {
+         "acceptance": 0.287,
+         "baseline": 119.1,
+         "baseline_runs": [
+          119.09,
+          119.25,
+          118.66
+         ],
+         "loom": 195.0,
+         "loom_runs": [
+          194.93,
+          195.12
+         ]
+        },
+        "decode_2k": {
+         "acceptance": 0.355,
+         "baseline": 123.9,
+         "baseline_runs": [
+          127.34,
+          123.89,
+          119.97
+         ],
+         "loom": 200.9,
+         "loom_runs": [
+          198.97,
+          202.75
+         ]
+        },
+        "decode_32k": {
+         "acceptance": 0.313,
+         "baseline": 98.4,
+         "baseline_runs": [
+          98.56,
+          98.44,
+          97.56
+         ],
+         "loom": 141.6,
+         "loom_runs": [
+          142.86,
+          140.3
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 7007.5,
+         "baseline_runs": [
+          6997.2,
+          7007.5,
+          7026.6
+         ],
+         "loom": 8041.1,
+         "loom_runs": [
+          8019.6,
+          8062.5
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 7120.4,
+         "baseline_runs": [
+          7158.6,
+          7120.4,
+          7067.5
+         ],
+         "loom": 7717.3,
+         "loom_runs": [
+          7704.8,
+          7729.8
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 7961.3,
+         "baseline_runs": [
+          8004.7,
+          7961.3,
+          7930.3
+         ],
+         "loom": 8750.7,
+         "loom_runs": [
+          8768.1,
+          8733.2
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 5492.6,
+         "baseline_runs": [
+          5492.6,
+          5490.0,
+          5495.1
+         ],
+         "loom": 6550.0,
+         "loom_runs": [
+          6528.9,
+          6571.1
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 8073.0,
+         "baseline_runs": [
+          8073.0,
+          8067.6,
+          8077.0
+         ],
+         "loom": 8658.1,
+         "loom_runs": [
+          8657.1,
+          8659.1
+         ]
+        },
+        "streams4": {
+         "baseline": 306.8,
+         "baseline_runs": [
+          306.9,
+          306.8,
+          305.2
+         ],
+         "loom": 507.1,
+         "loom_runs": [
+          504.2,
+          503.2,
+          504.0,
+          509.6,
+          510.3,
+          512.2
+         ]
+        }
+       },
+       "programs_sha256": "b3056f70d482a668b6db4b205067838985d2a130934cf2c266fcb7efcc397109",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    }
+   ]
+  },
+  "unsloth-gpt-oss-20b-loom": {
+   "fits": true,
+   "date": "2026-11-16",
+   "max_context": 38912,
+   "native_context": 131072,
+   "execution": {
+    "prefill_capacity": 1024
+   },
+   "note": "does not register with the default prefill_capacity 4096; 1024 serves 38912 (prefill -8 to -12 % vs the R9700); 256 serves 59392 but prefill -33 to -36 %",
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 -c 65536 -np 1",
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1375"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [
+        "devlab_perf.sh (local, RX 9070 XT): perf:ws64:1 ABBA, perf:ws64:1:long, c4:ws64nd (prefill_capacity 1024); llama@rocm.np1:3, llamac4@rocm.nodraft"
+       ],
+       "date": "2026-11-16",
+       "metrics": {
+        "decode": {
+         "baseline": 147.4,
+         "baseline_runs": [
+          147.81,
+          147.33,
+          147.39
+         ],
+         "loom": 199.2,
+         "loom_runs": [
+          199.88,
+          198.56
+         ]
+        },
+        "decode_2k": {
+         "baseline": 143.6,
+         "baseline_runs": [
+          143.82,
+          143.62,
+          143.5
+         ],
+         "loom": 184.2,
+         "loom_runs": [
+          184.77,
+          183.54
+         ]
+        },
+        "decode_32k": {
+         "baseline": 121.6,
+         "baseline_runs": [
+          121.79,
+          121.62,
+          121.3
+         ],
+         "loom": 126.5,
+         "loom_runs": [
+          126.73,
+          126.26
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 5170.5,
+         "baseline_runs": [
+          5170.4,
+          5170.5,
+          5177.2
+         ],
+         "loom": 5959.6,
+         "loom_runs": [
+          5956.7,
+          5962.6
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 4939.6,
+         "baseline_runs": [
+          4939.6,
+          4944.3,
+          4916.8
+         ],
+         "loom": 5531.8,
+         "loom_runs": [
+          5538.0,
+          5525.5
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 5436.2,
+         "baseline_runs": [
+          5455.3,
+          5436.2,
+          5434.1
+         ],
+         "loom": 6091.3,
+         "loom_runs": [
+          6097.2,
+          6085.4
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 4413.9,
+         "baseline_runs": [
+          4411.5,
+          4413.9,
+          4420.2
+         ],
+         "loom": 4862.8,
+         "loom_runs": [
+          4857.1,
+          4868.4
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 5558.5,
+         "baseline_runs": [
+          5554.8,
+          5558.5,
+          5571.3
+         ],
+         "loom": 6378.1,
+         "loom_runs": [
+          6370.3,
+          6385.9
+         ]
+        },
+        "streams4": {
+         "baseline": 329.9,
+         "baseline_runs": [
+          329.9,
+          332.7,
+          323.5
+         ],
+         "loom": 364.5,
+         "loom_runs": [
+          365.3,
+          364.9,
+          364.0,
+          363.6,
+          364.2,
+          364.9
+         ]
+        }
+       },
+       "programs_sha256": "78444cb126f4644841287caa972f7aea81021f54ec0664f8f599918f392ce77e",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}
