@@ -1,0 +1,28 @@
+{
+  "sdk": "0.2.0",
+  "repeats": 5,
+  "suites": [
+    {
+      "suite": "mask1145_r9700",
+      "runner": "r9700",
+      "dir": "mask1145",
+      "gen": "mask1145/generate_data.py",
+      "gen_variants": [],
+      "files": [
+        "bench.loom",
+        "bench_interval.loom",
+        "bench_fullblock.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "case_timing": true,
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ]
+    }
+  ]
+}
