@@ -3,7 +3,7 @@
   "repeats": 5,
   "suites": [
     {
-      "suite": "verify555",
+      "suite": "verify555_v32",
       "runner": "strix",
       "dir": "verify555",
       "gen": "verify555/gen.py",
@@ -18,6 +18,30 @@
         "--measure=dispatch_complete",
         "--batch-size=2",
         "--profile-final-batch=true"
+      ],
+      "gen_variants": [
+        "v32"
+      ]
+    },
+    {
+      "suite": "verify555_k128v36",
+      "runner": "strix",
+      "dir": "verify555",
+      "gen": "verify555/gen.py",
+      "files": [
+        "bench_baseline.loom",
+        "bench_candidate.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=2",
+        "--profile-final-batch=true"
+      ],
+      "gen_variants": [
+        "k128v36"
       ]
     }
   ]

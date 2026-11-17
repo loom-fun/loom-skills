@@ -19,7 +19,15 @@ split='''func.def inline @g_split_count(%visible: index) -> (index) {
 '''
 (out/'prior_full.loom').write_text(common+'\n'+split+mod.kernel(128,8,4,4,1024,2048,0.08838834764831845).replace('vector.constant ', 'vector.splatf '))
 
+# Keep the archived baseline fixed; only the candidate changes its LDS padding.
+variant=sys.argv[3] if len(sys.argv)>3 else 'original'
+if variant != 'original':
+ (out/'baseline_fixed.loom').write_text((out/'prior_full.loom').read_text())
+ mod.DP8,mod.VTC={'v32':(136,32),'k128v36':(128,36)}[variant]
+ (out/'prior_full.loom').write_text(common+'\n'+split+mod.kernel(128,8,4,4,1024,2048,0.08838834764831845).replace('vector.constant ','vector.splatf '))
 subprocess.run([sys.executable,str(here/'stage_q.py'),str(out)],check=True)
+if variant != 'original':
+ (out/'prior_full.loom').write_text((out/'baseline_fixed.loom').read_text())
 rng=np.random.default_rng(555)
 # Deterministic inputs; exact partial comparison detects every arithmetic difference.
 ctx=32832
@@ -43,7 +51,7 @@ for t,p0 in [(1,32768),(3,32767),(4,32765),(5,32764),(8,32760)]:
  %arena = check.file.read.npy path("arena.npy") : tensor<2x{ctx}x8x128xf16>
 """
   for suffix in (['a','b'] if compare else ['a']):
-   kernel='baseline' if suffix=='a' and compare else which
+   kernel='k_baseline' if suffix=='a' and compare else 'k_'+which
    sentinel=42.0 if suffix=='b' else 0.0
    s+=f""" %pa{suffix} = check.generate.fill value({sentinel}) : tensor<{t*32*128*128}xf32>
  %pm{suffix} = check.generate.fill value({sentinel}) : tensor<{t*32*128*2}xf32>
@@ -55,8 +63,8 @@ for t,p0 in [(1,32768),(3,32767),(4,32765),(5,32764),(8,32760)]:
  cases.append(case('candidate',True))
  for variant,src in [('baseline','prior_full'),('candidate','stage_q')]:
   if t==4:
-   text=(out/f'{src}.loom').read_text().replace('g_attention_split_mma',variant)
+   text=(out/f'{src}.loom').read_text().replace('g_attention_split_mma','k_'+variant)
    (out/f'bench_{variant}.loom').write_text(text+case(variant)+f'check.benchmark<@case_{t}> @bench\n')
-a=(out/'prior_full.loom').read_text().replace('g_attention_split_mma','baseline')
-b=(out/'stage_q.loom').read_text();b=b[b.index('kernel.def export'):].replace('g_attention_split_mma','candidate')
+a=(out/'prior_full.loom').read_text().replace('g_attention_split_mma','k_baseline')
+b=(out/'stage_q.loom').read_text();b=b[b.index('kernel.def export'):].replace('g_attention_split_mma','k_candidate')
 (out/'test.loom').write_text(a+b+''.join(cases))
