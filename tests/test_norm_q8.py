@@ -1,5 +1,9 @@
 """The fused producer preserves Q8's ABI and only rewrites exact dataflow pairs."""
 import sys
+import re
+import runpy
+import tempfile
+from unittest.mock import patch
 import unittest
 from pathlib import Path
 
@@ -39,6 +43,24 @@ class NormQ8(unittest.TestCase):
         for bad in (pair.replace('%nH', '%nFF'), pair.replace('%nH, %h,', '%nH, %other,'),
                     pair.replace('    kernel.launch @g_quant', '    command.launch @other() : ()\n    kernel.launch @g_quant')):
             self.assertEqual(gen_norm_q8.wire(bad), (bad, 0))
+
+    def test_generated_cases_use_testbench_value_sources(self):
+        # loom-compile checks kernel IR, but does not execute/plan check.case.
+        # This is the testbench operation contract, not kernel scalar syntax.
+        generator = ROOT / '.github/devlab/kbench/norm_q8/gen_bench.py'
+        with tempfile.TemporaryDirectory() as out, patch.object(sys, 'argv', [str(generator), str(ROOT), out]):
+            bench = runpy.run_path(str(generator))
+            for rows in (1, 4, 63):
+                for correctness in (False, True):
+                    case = bench['case'](1024, rows, True, test=correctness)
+                    ops = re.findall(r'^  (?:%\w+ = )?([a-z]\w*\.[\w.]+)', case, re.M)
+                    supported = {'check.literal', 'check.file.read.npy', 'check.generate.fill',
+                                 'kernel.launch', 'check.expect.equal', 'check.expect.approximate', 'check.return'}
+                    self.assertTrue(set(ops) <= supported, set(ops) - supported)
+                    self.assertEqual(ops.count('check.literal'), 2)
+                    if correctness:
+                        self.assertEqual(ops.count('check.expect.equal'), 3)
+                        self.assertEqual(ops.count('check.expect.approximate'), 1)
 
     def test_prefill_branch_unchanged(self):
         text = '  scf.if %gemm {\n    kernel.launch @g_post_add_norm_rs_live[%t](...)\n  } else {\n  }'

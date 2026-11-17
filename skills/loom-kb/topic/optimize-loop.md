@@ -87,6 +87,11 @@ Doubling or skipping a kernel answers "what does this kernel cost" only when the
 - **Programs.** `loom-opt PKG/program/<file>.loom --pass=canonicalize > /dev/null` over every generated program file of every variant
   parses and type-checks the launches in about a minute on the CPU (TYPE / SYMBOL errors that otherwise surface on the runner; one wasted
   DevLab run, 43813833801). Command-program lowering itself is first seen on a GPU (topic `sdk`).
+- **Benchmark case planning is separate from kernel compilation.** Inside `check.case`, scalar inputs use
+  `check.literal value(N) : index`, not `index.constant` (nor `scalar.constant`). `loom-compile` can compile every
+  kernel while the testbench rejects those case operations before dispatch. Generate the cases during CPU preflight
+  and check their value-source operations too; keep the device correctness cases in the DevLab suite. A parse/compile
+  pass is never recorded as a `loom-test` pass.
 - **Compile report.** `loom-compile ... --compile-report=details`: spills, register pressure, LDS, instruction mix, target capability rows.
   Use it to price a hand-written conversion or a prologue before wiring it (an integer-bit f32 -> e4m3 conversion measured 54 VALU
   against 21 for the SDK's per 4 values, and was dropped without a run).
