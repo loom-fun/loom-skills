@@ -119,9 +119,9 @@ def cached_files(repo):
                    key=os.path.getmtime, reverse=True)
     for snap in snaps:
         for f in glob.glob(os.path.join(snap, "**", "*.gguf"), recursive=True):
-            rel = os.path.relpath(f, snap)
+            rel = os.path.relpath(f, snap).replace(chr(92), "/")
             if rel not in out and os.path.exists(f) and os.path.getsize(f) > (1 << 20):   # resolves (not a dangling link)
-                out[rel] = f
+                out[rel] = f.replace(chr(92), "/")
     return out
 
 
@@ -155,6 +155,7 @@ def main():
     ap.add_argument("--file", default=None)
     ap.add_argument("--stub", default=None, help="with --file: write the file's header-only sparse stub here (port.sh DRY_RUN)")
     a = ap.parse_args()
+    if a.file: a.file = a.file.replace(chr(92), "/")
     cached = cached_files(a.repo)
     if a.file and a.stub:
         tree = json.load(urllib.request.urlopen(f"https://huggingface.co/api/models/{a.repo}/tree/main?recursive=true", timeout=60))

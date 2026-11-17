@@ -49,6 +49,6 @@ if __name__ == "__main__":
     link.add_argument("source"); link.add_argument("target")
     args = parser.parse_args()
     if args.command == "from-log":
-        sys.stdout.write(str(from_log(args.log, args.filename)))
+        sys.stdout.write(str(from_log(args.log, args.filename)).replace(chr(92), "/"))
     else:
         link_checkpoint(args.source, args.target)
