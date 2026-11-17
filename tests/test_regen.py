@@ -947,7 +947,7 @@ class PackageTest(Base):
         self.want = regen.card_lib.programs_sha256(os.path.join(self.canon, SLUG))
         self.st = self.plan("--mode", "sdk-ab")
 
-    def run_package(self, *args, head="h" * 40, new_head="n" * 40, snap_programs=None):
+    def run_package(self, *args, head="a" * 40, new_head="d" * 40, snap_programs=None, upload_stdout=None):
         uploads = []
         heads = iter([head, new_head])
 
@@ -955,7 +955,12 @@ class PackageTest(Base):
             if cmd[0] == "git":   # the default --ref lookup
                 return subprocess.CompletedProcess(cmd, 1, "", "")
             uploads.append([str(c) for c in cmd])
-            return subprocess.CompletedProcess(cmd, 0, "dry run: would upload 12 files to https://huggingface.co/x", "")
+            repo = f"{regen.STAGING_ORG}/{SLUG}"
+            receipt = {"repo": repo, "parent_commit": head, "commit": "b" * 40,
+                       "url": f"https://huggingface.co/{repo}/commit/" + "b" * 40}
+            stdout = ("dry run: would upload 12 files to https://huggingface.co/x" if "--dry-run" in cmd
+                      else json.dumps(receipt) if upload_stdout is None else upload_stdout)
+            return subprocess.CompletedProcess(cmd, 0, stdout, "")
 
         def snapshot(repo, rev, out):
             uploads.append(["snapshot", repo, rev])
@@ -973,7 +978,7 @@ class PackageTest(Base):
         up = next(c for c in calls if "upload" in c)
         self.assertIn("--dry-run", up)
         self.assertEqual(up[up.index("--org") + 1], "loom-fun-staging")
-        self.assertEqual(up[up.index("--parent-commit") + 1], "h" * 40)   # the snapshot's revision
+        self.assertEqual(up[up.index("--parent-commit") + 1], "a" * 40)   # the snapshot's revision
         self.assertNotIn("--card-only", up)
         self.assertIn("hrx-loom 0.2.0", up[up.index("--message") + 1])
         self.assertIn(self.want, out)
@@ -999,7 +1004,8 @@ class PackageTest(Base):
         up = next(c for c in calls if "upload" in c)
         self.assertNotIn("--dry-run", up)
         pk = st.jobs[JOB]["package"]
-        self.assertEqual((pk["revision"], pk["programs_sha256"], pk["base"]), ("n" * 40, self.want, "c" * 40))
+        self.assertEqual((pk["revision"], pk["programs_sha256"], pk["base"]), ("b" * 40, self.want, "c" * 40))
+        self.assertEqual(pk["receipt"]["commit"], pk["revision"])   # later HEAD would be d*40
         st, calls, out = self.run_package("--slugs", SLUG)   # nothing left to do: no snapshot, no upload
         self.assertFalse(calls)
         self.assertIn("already published", out)
@@ -1011,7 +1017,27 @@ class PackageTest(Base):
         shutil.copytree(pkg, self.snap)   # the head now holds exactly that package
         st, calls, _ = self.run_package("--slugs", SLUG)
         self.assertFalse([c for c in calls if "upload" in c])
-        self.assertEqual(st.jobs[JOB]["package"]["revision"], "h" * 40)
+        self.assertEqual(st.jobs[JOB]["package"]["revision"], "a" * 40)
+
+    def test_missing_receipt_stops_after_one_upload_without_retry(self):
+        st, calls, out = self.run_package("--slugs", SLUG, upload_stdout="")
+        self.assertEqual(len([c for c in calls if "upload" in c]), 1)
+        self.assertEqual(st.jobs[JOB]["stage"], "needs_decision")
+        self.assertNotIn("package", st.jobs[JOB])
+        self.assertIn("write may have occurred; reconcile before retry", out)
+
+    def test_wrong_receipt_binding_stops_after_one_upload_without_retry(self):
+        repo = f"{regen.STAGING_ORG}/{SLUG}"
+        for field, wrong in (("repo", "other/model"), ("parent_commit", "e" * 40)):
+            with self.subTest(field=field):
+                receipt = {"repo": repo, "parent_commit": "a" * 40, "commit": "b" * 40,
+                           "url": f"https://huggingface.co/{repo}/commit/" + "b" * 40}
+                receipt[field] = wrong
+                st, calls, out = self.run_package("--slugs", SLUG, upload_stdout=json.dumps(receipt))
+                self.assertEqual(len([c for c in calls if "upload" in c]), 1)
+                self.assertEqual(st.jobs[JOB]["stage"], "needs_decision")
+                self.assertNotIn("package", st.jobs[JOB])
+                self.assertIn("returned commit receipt", out)
 
     def test_a_card_steps_gpu_preset_on_the_head_is_kept_and_compares_equal(self):
         st, calls, _ = self.run_package("--dry-run", "--slugs", SLUG)
@@ -1048,6 +1074,75 @@ class PackageTest(Base):
         self.assertEqual(st.jobs[JOB]["stage"], "needs_decision")
         self.assertIn("package", st.jobs[JOB]["reason"])
         self.assertFalse(st.jobs[JOB].get("package"))
+
+    def prefill_transition(self, measured=True):
+        for directory, value in ((self.snap, 1024), (os.path.join(self.canon, SLUG), 2048)):
+            path = os.path.join(directory, "model.json")
+            model = sdk_package.load(path)
+            model["presets"]["chat"]["execution"]["prefill_capacity"] = value
+            with open(path, "w") as f:
+                json.dump(model, f)
+        if measured:
+            st = regen.State(self.state)
+            d = os.path.join(self.tmp, "measured")
+            os.makedirs(d)
+            with open(os.path.join(d, "programs_sha256_staging.txt"), "w") as f:
+                f.write(self.want + "\n")
+            shutil.copyfile(os.path.join(self.canon, SLUG, "model.json"), os.path.join(d, "model_staging.json"))
+            st.jobs[JOB]["dir"] = d
+            st.save()
+            return d
+
+    def test_changed_prefill_is_still_refused_by_default(self):
+        self.prefill_transition()
+        st, calls, out = self.run_package("--slugs", SLUG)
+        self.assertIn("changed presets.chat.execution.prefill_capacity", out)
+        self.assertFalse([c for c in calls if "upload" in c])
+
+    def test_exact_prefill_transition_requires_measured_settings_and_preserves_origins(self):
+        self.prefill_transition()
+        st, calls, _ = self.run_package("--slugs", SLUG, "--prefill-transition", f"{SLUG}:chat:1024:2048")
+        self.assertEqual(len([c for c in calls if "upload" in c]), 1)
+        pkg = os.path.join(st.work, "package", SLUG, "pkg")
+        model = sdk_package.load(os.path.join(pkg, "model.json"))
+        self.assertEqual(model["presets"]["chat"]["execution"]["prefill_capacity"], 2048)
+        self.assertEqual(model["origins"], v01_model()["origins"])
+        self.assertEqual(open(os.path.join(pkg, "model.json.lock")).read(), "model.json.lock")
+
+    def test_prefill_transition_without_measurement_stops_before_snapshot(self):
+        self.prefill_transition(measured=False)
+        st, calls, out = self.run_package("--slugs", SLUG, "--prefill-transition", f"{SLUG}:chat:1024:2048")
+        self.assertIn("requires matching measured programs", out)
+        self.assertEqual(calls, [])
+
+    def test_prefill_transition_with_other_measured_execution_stops_before_snapshot(self):
+        d = self.prefill_transition()
+        path = os.path.join(d, "model_staging.json")
+        model = sdk_package.load(path)
+        model["presets"]["chat"]["execution"]["context_capacity"] = 8192
+        with open(path, "w") as f:
+            json.dump(model, f)
+        st, calls, out = self.run_package("--slugs", SLUG, "--prefill-transition", f"{SLUG}:chat:1024:2048")
+        self.assertIn("did not measure the canonical chat execution", out)
+        self.assertEqual(calls, [])
+
+    def test_prefill_transition_wrong_old_value_does_not_authorize_upload(self):
+        self.prefill_transition()
+        st, calls, out = self.run_package("--slugs", SLUG, "--prefill-transition", f"{SLUG}:chat:512:2048")
+        self.assertIn("expected 512->2048, found 1024->2048", out)
+        self.assertFalse([c for c in calls if "upload" in c])
+
+    def test_prefill_transition_does_not_allow_other_unmeasured_model_changes(self):
+        d = self.prefill_transition()
+        path = os.path.join(self.canon, SLUG, "model.json")
+        model = sdk_package.load(path)
+        model["presets"]["chat"]["execution"]["context_capacity"] = 8192
+        with open(path, "w") as f:
+            json.dump(model, f)
+        shutil.copyfile(path, os.path.join(d, "model_staging.json"))
+        st, calls, out = self.run_package("--slugs", SLUG, "--prefill-transition", f"{SLUG}:chat:1024:2048")
+        self.assertIn("changed presets.chat.execution.context_capacity", out)
+        self.assertFalse([c for c in calls if "upload" in c])
 
     def test_a_job_that_built_other_programs_stops_the_model(self):
         st = regen.State(self.state)

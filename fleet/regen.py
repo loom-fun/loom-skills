@@ -67,6 +67,7 @@ import card_lib  # noqa: E402
 import promote_check  # noqa: E402
 import sample_lib  # noqa: E402
 import sdk_package  # noqa: E402
+from publish_package import parse_upload_receipt  # noqa: E402
 
 try:
     import fcntl
@@ -1041,7 +1042,7 @@ def canonical_build(st, slugs, ref):
     return canon, sha
 
 
-def package_one(st, slug, canon, sha, dry, env):
+def package_one(st, slug, canon, sha, dry, env, prefill_changes=None):
     """One model: snapshot the staging repo, assemble the v0.2 package, upload it. -> {revision, programs_sha256, base} (revision None in a dry run)"""
     org = st.d["opts"]["new_org"]
     repo = f"{org}/{slug}"
@@ -1055,7 +1056,7 @@ def package_one(st, slug, canon, sha, dry, env):
     snap, out = os.path.join(W, "snap"), os.path.join(W, "pkg")
     hf_snapshot_small(repo, rev, snap)
     alts = {card_lib.gpu_preset_name(sdk_package.load(os.path.join(snap, "model.json")), g) for g in card_lib.GPUS if card_lib.GPUS[g].get("preset_suffix")}
-    changes = sdk_package.assemble(snap, os.path.join(canon, slug), out, alts)
+    changes = sdk_package.assemble(snap, os.path.join(canon, slug), out, alts, prefill_changes)
     got = card_lib.programs_sha256(out)
     if got != want:
         raise RuntimeError(f"assembled package programs {str(got)[:12]} differ from the canonical build's {want[:12]}")
@@ -1066,8 +1067,10 @@ def package_one(st, slug, canon, sha, dry, env):
            + (["--dry-run"] if dry else []), check=False, env=env)
     if r.returncode:
         raise RuntimeError(f"upload: {(r.stdout + r.stderr)[-400:]}")
-    print(f"{slug}: {r.stdout.strip().splitlines()[-1][:300]}\n   programs_sha256 {got}; model.json added by v0.2: {', '.join(p for _, p in changes) or 'nothing'}")
-    return {"revision": None if dry else hf_head(repo), "programs_sha256": got, "base": sha}
+    receipt = None if dry else parse_upload_receipt(r.stdout, repo, rev, (env or {}).get("HF_ENDPOINT"))
+    print(f"{slug}: {r.stdout.strip().splitlines()[-1][:300]}\n   programs_sha256 {got}; model.json changes: {', '.join(k + ' ' + p for k, p in changes) or 'nothing'}")
+    return {"revision": None if dry else receipt["commit"], "programs_sha256": got, "base": sha,
+            **({"receipt": receipt} if receipt else {})}
 
 
 def cmd_package(a):
@@ -1088,6 +1091,16 @@ def cmd_package(a):
         die(f"no job in the state for: {', '.join(missing)}")
     if not slugs:
         return print("nothing to package")
+    transitions = {}
+    for spec in a.prefill_transition:
+        try:
+            slug, preset, old, new_value = spec.split(":")
+            old, new_value = int(old), int(new_value)
+            if slug not in slugs or min(old, new_value) < 1 or old == new_value or preset in transitions.get(slug, {}):
+                raise ValueError()
+        except ValueError:
+            die("--prefill-transition requires a selected SLUG:PRESET:OLD:NEW with distinct positive values")
+        transitions.setdefault(slug, {})[preset] = (old, new_value)
     canon, sha = canonical_build(st, slugs, a.ref or ("origin/" + st.d["opts"]["base"] if resolve_ref("origin/" + st.d["opts"]["base"]) else st.d["opts"]["base"]))
     env = dict(os.environ, PATH=(LOOMBIN + os.pathsep if LOOMBIN else "") + os.environ["PATH"])
     for slug in slugs:
@@ -1105,7 +1118,20 @@ def cmd_package(a):
                 built = job_programs(e) if e["slug"] == slug else None
                 if built and built != want:
                     raise RuntimeError(f"the job {e['device']} built programs {built[:12]}, the canonical build of {sha[:10]} has {want[:12]} (the base moved since the job was submitted)")
-            res = package_one(st, slug, canon, sha, a.dry_run, env)
+                if e["slug"] == slug and slug in transitions:
+                    model_path = os.path.join(e.get("dir", ""), "model_staging.json")
+                    if not built or not os.path.isfile(model_path):
+                        raise RuntimeError("a prefill transition requires matching measured programs and model_staging.json for every selected job")
+                    measured = sdk_package.load(model_path)
+                    canonical = sdk_package.load(os.path.join(canon, slug, "model.json"))
+                    for preset in transitions[slug]:
+                        def execution(model):
+                            result = dict(model.get("presets", {}).get(preset, {}).get("execution", {}))
+                            result.pop("pool_capacity", None)
+                            return result
+                        if not execution(canonical) or execution(measured) != execution(canonical):
+                            raise RuntimeError(f"the job {e['device']} did not measure the canonical {preset} execution")
+            res = package_one(st, slug, canon, sha, a.dry_run, env, transitions.get(slug))
         except (RuntimeError, SystemExit, ValueError) as ex:
             print(f"{slug}: package stopped: {str(ex)[-400:]}")
             if not a.dry_run:
@@ -1431,6 +1457,8 @@ def main(argv=None):
         if name == "package":
             q.add_argument("--slugs", nargs="+", help="only these models, whatever their stage (default: the collected jobs that were promoted)")
             q.add_argument("--ref", help="the git ref the canonical build is made at (default: origin/<the state's base>)")
+            q.add_argument("--prefill-transition", action="append", default=[], metavar="SLUG:PRESET:OLD:NEW",
+                           help="explicit measured prefill change; every selected job must provide matching programs and preset execution")
     q = sub.add_parser("rerender")
     q.add_argument("--slugs", nargs="+")
     q.add_argument("--all", action="store_true", help="every model of the fleet manifest")
