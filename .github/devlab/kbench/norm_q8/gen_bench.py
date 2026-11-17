@@ -3,7 +3,6 @@
 import re
 import sys
 from pathlib import Path
-import numpy as np
 
 ROOT, OUT = Path(sys.argv[1]), Path(sys.argv[2])
 sys.path.insert(0, str(ROOT / 'skills/loom-port-llm/starter'))
@@ -36,6 +35,7 @@ def module(hidden):
 
 
 def case(h, rows, fused, test=False, zeros=False):
+    import numpy as np
     rng = np.random.default_rng(h + rows)
     n = h * rows
     qn = n * 5 // 4
@@ -48,6 +48,18 @@ def case(h, rows, fused, test=False, zeros=False):
     residual = x + y
     expected = residual / np.sqrt(np.mean(residual.astype(np.float64)**2, axis=1, keepdims=True) + 1e-6) * wn
     np.save(OUT / (name + '_expected.npy'), expected.astype(np.float32))
+    # File reads use flattened data because the kernel's ABI is raw buffers.
+    for k in ('x', 'y', 'expected'):
+        a = np.load(OUT / (name + '_' + k + '.npy'))
+        np.save(OUT / (name + '_' + k + '.npy'), a.reshape(-1))
+    return case_ir(h, rows, fused, test=test, zeros=zeros)
+
+
+def case_ir(h, rows, fused, test=False, zeros=False):
+    """Emit executable case operations without importing fixture dependencies."""
+    n = h * rows
+    qn = n * 5 // 4
+    name = f'h{h}_t{rows}' + ('_zero' if zeros else '')
     text = f'''check.case public @{name} {{
   %t = check.literal value({rows}) : index
   %width = check.literal value({h}) : index
@@ -58,10 +70,6 @@ def case(h, rows, fused, test=False, zeros=False):
   %h = check.generate.fill value(0.0) : tensor<{n}xf32>
   %q = check.generate.fill value(0) : tensor<{qn}xi8>
 '''
-    # File reads use flattened data because the kernel's ABI is raw buffers.
-    for k in ('x', 'y', 'expected'):
-        a = np.load(OUT / (name + '_' + k + '.npy'))
-        np.save(OUT / (name + '_' + k + '.npy'), a.reshape(-1))
     if test:
         text += f'''  %x2 = check.file.read.npy path("{name}_x.npy") : tensor<{n}xf32>
   %h2 = check.generate.fill value(0.0) : tensor<{n}xf32>

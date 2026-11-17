@@ -48,11 +48,11 @@ class NormQ8(unittest.TestCase):
         # loom-compile checks kernel IR, but does not execute/plan check.case.
         # This is the testbench operation contract, not kernel scalar syntax.
         generator = ROOT / '.github/devlab/kbench/norm_q8/gen_bench.py'
-        with tempfile.TemporaryDirectory() as out, patch.object(sys, 'argv', [str(generator), str(ROOT), out]):
+        with tempfile.TemporaryDirectory() as out, patch.object(sys, 'argv', [str(generator), str(ROOT), out]), patch.dict(sys.modules, {'numpy': None}):
             bench = runpy.run_path(str(generator))
             for rows in (1, 4, 63):
                 for correctness in (False, True):
-                    case = bench['case'](1024, rows, True, test=correctness)
+                    case = bench['case_ir'](1024, rows, True, test=correctness)
                     ops = re.findall(r'^  (?:%\w+ = )?([a-z]\w*\.[\w.]+)', case, re.M)
                     supported = {'check.literal', 'check.file.read.npy', 'check.generate.fill',
                                  'kernel.launch', 'check.expect.equal', 'check.expect.approximate', 'check.return'}
