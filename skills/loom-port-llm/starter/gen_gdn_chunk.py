@@ -28,7 +28,8 @@ SPAN_MIN = 64   # spans of at least this many tokens (the GEMM epoch shape) run 
 
 
 def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2):
-    from gen_gdn import kh_line
+    from gen_gdn import kh_line, _V_GROUPED
+    chk_def = "" if _V_GROUPED[0] else f"%chk = index.constant {G['HK']} : index\n  "   # kh_line's tiled form reads %chk; the grouped form needs none
     HK, HV, DK, DV, C, VD = G["HK"], G["HV"], G["DK"], G["DV"], G["C"], G["VD"]
     assert DK == 128 and DV == 128 and HV % HK == 0, "g_gdn_chunk_rdna4 is built for 128 x 128 heads (8 waves x 16 value columns)"
     NS = HV * DV * DK
@@ -332,7 +333,7 @@ kernel.def {tgt}export("g_gdn_chunk_rdna4") @g_gdn_chunk_rdna4(%spans: index) {{
   %zero8 = vector.splatf 0.0 : vector<8xf32>
   %zero16 = vector.splati 0 : vector<16xi32>
   %init = vector.fragment<init> %zero8 {SH} : vector<8xf32>
-  {kh_line()}
+  {chk_def}{kh_line()}
   %kh_off = index.mul %kh, %k_dk : index
   %kcol_base_v = index.constant {HK * DK} : index
   %kcol_base = index.add %kcol_base_v, %kh_off : index
