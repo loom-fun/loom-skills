@@ -1,0 +1,24 @@
+{
+  "sdk": "0.2.0",
+  "repeats": 5,
+  "suites": [
+    {
+      "suite": "verify555",
+      "runner": "strix",
+      "dir": "verify555",
+      "gen": "verify555/gen.py",
+      "files": [
+        "bench_baseline.loom",
+        "bench_candidate.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=2",
+        "--profile-final-batch=true"
+      ]
+    }
+  ]
+}
