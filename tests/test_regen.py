@@ -713,6 +713,8 @@ class SdkLoomTest(Base):
              "accepted_regression": "U1: SDK runtime (notes) (was: ...)"}
         m = regen.card_message(e, "strix-halo", "9", True, True)
         self.assertIn("another job, same runner type", m)
+        self.assertIn("baseline rows are the previous card's", m)   # sdk-loom also migrates safetensors cards whose baseline is vLLM
+        self.assertNotIn("llama.cpp", m)
         self.assertNotIn("own SDK pin", m)
         self.assertIn("confirmed slowdown published as measured: U1: SDK runtime (notes)", m)
         m = regen.card_message({k: v for k, v in e.items() if k != "confirmed"}, "strix-halo", "9", False, True)

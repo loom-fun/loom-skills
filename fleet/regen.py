@@ -838,7 +838,7 @@ def card_message(e, dev, run, loom_only, sdk):
     if loom_only:
         msg += (f"; hrx-loom {SDK_NEW} Loom rows vs the previous card's Loom rows (another job, same runner type): " + sdk_line(e)
                 + ("; confirmed by an ABBA job (same job): " + ", ".join(f"{k} {v:+.1f} %" for k, v in e["confirmed"].items()) if e.get("confirmed") else "")
-                + "; llama.cpp rows are the previous card's")
+                + "; baseline rows are the previous card's")
     elif sdk:
         msg += f"; hrx-loom {SDK_NEW} vs the previous card on its own SDK pin (same job, ABBA): " + sdk_line(e)
     if e.get("accepted_regression"):   # a confirmed slowdown published as measured: the message names its explanation
