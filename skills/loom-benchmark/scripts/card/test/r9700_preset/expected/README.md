@@ -25,6 +25,11 @@ loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resol
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
+- `--materialize=copy` puts copies of the fetched package files in the output directory.
+- `completion_spin_ns=4294967295` enables active waiting for GPU completions (uses CPU while GPU work is in flight); the card's performance measurements use this setting.
+- `--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.
+- `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
+
 In another terminal, send a request (optional thinking is turned off):
 
 ```bash
@@ -44,6 +49,11 @@ loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resol
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
+- `--materialize=copy` puts copies of the fetched package files in the output directory.
+- `completion_spin_ns=4294967295` enables active waiting for GPU completions (uses CPU while GPU work is in flight); the card's performance measurements use this setting.
+- `--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.
+- `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
+
 On this GPU, the package's preset sizes the memory pool (`--pool_backing=fixed` commits it up front): this package serves up to 20,480 tokens per request (its native context is 40,960).
 
 In another terminal, send a request (optional thinking is turned off):
@@ -55,8 +65,6 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 ```
 
 </details>
-
-`--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
