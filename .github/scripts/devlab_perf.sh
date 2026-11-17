@@ -284,6 +284,16 @@ kit_for() {   # kit_for VARIANT REF -> builds D/<variant>/kit from REF's starter
 }
 for v in $variants; do
   pkg=$D/$v/pkg; mkdir -p "$D/$v"
+  # U1 experiment: variant "catalog": URL of an hrx-loom-library model.json (+ "preset"), fetched with the variant's own SDK (an SDK-authored control)
+  curl_cat=$(qv "$v" "print(v.get('catalog') or '')")
+  if [ -n "$curl_cat" ]; then
+    sdk_root "$v" || { echo "FAIL: SDK of variant $v"; exit 1; }
+    step "catalog $v: $curl_cat (SDK root $SDKR)"
+    HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$SDKR/.venv/bin/loom-fetch" "$curl_cat" --preset="$(qv "$v" "print(v.get('preset') or '')")" --no-input --materialize=copy --cache "$WORK/fetch-cache-$v" --output="$pkg" > "$out/fetch_$v.log" 2>&1 \
+      || { tail "$out/fetch_$v.log"; echo "FAIL: loom-fetch $v"; exit 1; }
+    cp "$pkg/model.json" "$out/model_$v.json"; find "$pkg" -name '*.loom' | sort | xargs sha256sum > "$out/programs_$v.sha256"
+    continue
+  fi
   if [ "$(qv "$v" "print('build' in v)")" = True ]; then
     kit_for "$v" "$(qv "$v" "print(v.get('ref') or '')")" || exit 1
     extra=$(qv "$v" "print(' '.join(v.get('build_args') or []) + (f\" --context {v['context']}\" + (f\" --pool {v['context']}\" if '$POOLFLAG' == '1' else '') if v.get('context') else ''))")   # "context": N = the served context of a reduced-context model (later flags win)
@@ -374,6 +384,7 @@ serve_alone() { # serve_alone VARIANT
   # elsewhere (Strix) a package with several presets serves its first (the default), as the card's Strix Quick start fetches --preset=<first>
   [ -z "$rp" ] && [ -z "$RDEV" ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] if len(p) > 1 else '')" "$D/$1/pkg/model.json")
   if [ -n "$rp" ] && [[ "$sa" != *--preset=* ]]; then sa="--preset=$rp $sa"; fi
+  sa="$sa ${U1_SERVE_ARGS:-}"   # U1 experiment: the prof step's profiling flags
   vmem=$(qv "$1" "print(v.get('memory_bytes') or '$mem')")   # variant "memory_bytes": "none" with --pool_backing=fixed
   # the R9700 is served as its card's Quick start serves it: card_lib.GPUS "serve_args" (--pool_backing=fixed, no --memory_bytes; the elastic
   # backing's trim + compaction stalls the long-prefill rows), unless the variant brings its own serve_args/memory_bytes or is "elastic": true
@@ -484,6 +495,22 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
 print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
+    prof|wl)   # U1 experiment: prof:V:WORKLOAD:N (HAL dispatch statistics on) / wl:V:WORKLOAD:N (plain): u1_prof.py, then a graceful stop (statistics print at exit)
+      PA=""; [ "$kind" = prof ] && PA=$(q "print(j.get('prof_args') or '--device_profiling_mode=queue-events,dispatch-events,executable-metadata --print_device_statistics --device_profiling_flush_interval_ms=5')")
+      U1_SERVE_ARGS=$PA serve_alone "$p1" || { res[$s]=ERROR; echo "RESULT $job $s: ERROR"; continue; }
+      wl=$p2; if [[ $wl == asr ]]; then
+        [ -f "$D/short.pcm" ] || curl -fsSL --retry 3 https://raw.githubusercontent.com/ROCm/hrx-loom-library/4317508bf5adb251a284ea8dc4e5a24a11bd1c17/model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm -o "$D/short.pcm"
+        [ -f "$D/long.pcm" ] || for i in 1 2 3 4 5 6 7 8; do cat "$D/short.pcm"; done > "$D/long.pcm"   # 30.7 s (the model takes up to 40.96 s)
+        wl=asr:$D/long.pcm; fi
+      mid=$("$T" -c "import json; print(json.load(open('$D/$p1/pkg/model.json'))['model']['id'])")
+      tag=${kind}_${p1}_${p2}_${p3}
+      step "$kind $p1 $p2 x $p3 ($mid) $PA"
+      "$T" "$here/.github/scripts/u1_prof.py" "$url" "$mid" "$wl" "$p3" --log "$out/$tag.json" 2>&1 | tail -3
+      pid=$(cat "$LOOM_SERVE_STATE/perf-$p1.pid" 2>/dev/null); kill "$pid" 2>/dev/null
+      for i in $(seq 360); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+      kill -0 "$pid" 2>/dev/null && { echo "WARNING: perf-$p1 did not exit in 180 s (killed: no statistics)"; kill -9 "$pid"; }
+      rm -f "$LOOM_SERVE_STATE/perf-$p1.pid"; cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/$tag.log"
+      res[$s]="$(grep -c ' dispatch ' "$out/$tag.log") dispatch rows; $(grep -m1 -o 'dropped_records=[0-9]*' "$out/$tag.log")";;
     probe)   # probe:V: stall_probe.py (when does a prefill stall? TTFT + GPU clocks per request)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "stall probe $p1"
