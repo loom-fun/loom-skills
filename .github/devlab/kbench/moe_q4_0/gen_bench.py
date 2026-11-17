@@ -48,6 +48,84 @@ def load_gelu(kit):
     return scope['gelu_scalar'], scope['gelu_vectors']
 
 
+def dequant_bits_inputs():
+    """Every finite F16 scale, with all 16 codes in each distinct half-block."""
+    scale_bits = np.arange(65536, dtype=np.uint16)
+    scale_bits = scale_bits[(scale_bits & 0x7c00) != 0x7c00]
+    raw = np.empty((len(scale_bits), 18), np.uint8)
+    raw[:, :2] = scale_bits.astype('<u2').view(np.uint8).reshape(-1, 2)
+    codes = np.arange(16, dtype=np.uint8)
+    raw[:, 2:] = codes | ((15 - codes) << 4)
+    # F64 represents each finite F16 scale times an integer exactly. Round only
+    # once to F16, retaining signed zero, subnormals and overflow infinities.
+    with np.errstate(over='ignore'):
+        expected = dequant_reference(raw, (len(scale_bits), 32)).astype('<f2')
+    return raw.reshape(-1).view(np.int8), expected.reshape(-1).view(np.int16)
+
+
+def dequant_bits_case(out, target):
+    """Actual old/new snippets on GPU, compared as integer bits to CPU truth."""
+    import gen_gemm
+    import moe_q4_0
+    raw, expected = dequant_bits_inputs()
+    n = expected.size
+    halves = n // 16
+    assert halves % 64 == 0
+    np.save(out / 'dequant_bits_weights.npy', raw)
+    np.save(out / 'dequant_bits_expected.npy', expected)
+    gpu = 'gfx12-generic' if target == 'r9700' else 'gfx11-generic'
+    kernels = [f'amdgpu.target<{gpu}> @q40_bit_target {{subgroup_size = 32}}\n']
+    for name, snippet in [('old', gen_gemm.dequant16('q4_0', 'w', None, 'deq')),
+                          ('new', moe_q4_0.dequant16('w', 'deq'))]:
+        kernels.append(f'''kernel.def target(@q40_bit_target) @k_q40_bits_{name}() {{
+  %one = index.constant 1 : index
+  %groups = index.constant {halves // 64} : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+}} launch(%w: buffer, %y: buffer) {{
+  %c0 = index.constant 0 : index
+  %c2 = index.constant 2 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %block_bytes = index.constant 18 : offset
+  %origin = index.constant 0 : offset
+  %group = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %flat = index.madd %group, %c64, %thread : index
+  %half_index = index.assume %flat [range(%flat, 0, {halves - 1})] : index
+  %block = index.div %half_index, %c2 : index
+  %half = index.rem %half_index, %c2 : index
+  %w_row_origin = index.scale %block, %block_bytes : index, offset -> offset
+  %w_col = index.mul %half, %c16 : index
+{snippet}
+  %bits = vector.bitcast %deq : vector<16xf16> to vector<16xi16>
+  %yv = buffer.view %y[%origin] : buffer -> view<{n}xi16>
+  %yi = index.mul %half_index, %c16 : index
+  vector.store %bits, %yv[%yi] : vector<16xi16>, view<{n}xi16>
+  kernel.return
+}}
+''')
+    ty, wt = f'tensor<{n}xi16>', f'tensor<{raw.size}xi8>'
+    case = f'''check.case public @dequant_all_finite_scale_bits {{
+  %w = check.file.read.npy path("dequant_bits_weights.npy") : {wt}
+  %expected = check.file.read.npy path("dequant_bits_expected.npy") : {ty}
+  %old = check.generate.fill value(32767) : {ty}
+  %new = check.generate.fill value(32767) : {ty}
+  kernel.launch @k_q40_bits_old(%w, %old) : ({wt}, {ty})
+  kernel.launch @k_q40_bits_new(%w, %new) : ({wt}, {ty})
+  check.expect.equal actual(%old) expected(%expected) : {ty}
+  check.expect.equal actual(%new) expected(%expected) : {ty}
+  check.expect.equal actual(%new) expected(%old) : {ty}
+  check.return
+}}
+'''
+    return '\n'.join(kernels), case, {'case': 'dequant_all_finite_scale_bits',
+        'comparison': 'exact_i16_bits', 'finite_scales': len(raw) // 18,
+        'codes_per_half': 16, 'halves': 2, 'output_elements_per_path': n,
+        'sentinel_bits': 32767}
+
+
 def generate(root, out, target):
     root, out = Path(root).resolve(), Path(out).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -168,6 +246,10 @@ def generate(root, out, target):
                 f'  kernel.launch @k_moe_wscale[%t](%t, %ids, %wts, %scales) : [index](index, {ty["ids"]}, {ty["wts"]}, {ty["scales"]})\n'
                 f'  kernel.launch @k_moe_combine[%t](%t, %ys, %wts, %y) : [index](index, {ty["ys"]}, {ty["wts"]}, {yt})\n')
     case('expert_down_scale_combine',dict(ids=ids,scales=scales,wts=wts,ys=ys),body,ref)
+    bit_kernels, bit_case, bit_record = dequant_bits_case(out, target)
+    pre += bit_kernels
+    cases.append(bit_case)
+    records.append(bit_record)
     text=pre+'\n'.join(cases)
     # Explicit expected-failure controls share the same immutable references:
     # no-op output and swapped nibble halves both must reach EXPECT/006.

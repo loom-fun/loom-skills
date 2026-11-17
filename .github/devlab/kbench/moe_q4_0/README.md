@@ -12,6 +12,14 @@ expert tiles, and per-expert down scales before weighted combine. Eight
 experts retain nonzero expert offsets without allocating the full 128-expert
 model. Real-weight model kernel tests and end-to-end gates remain required.
 
+A tenth case executes the actual old F32-helper/F16-cast snippet and new F16
+staging snippet for all 63,488 finite F16 scale bit patterns. Both nibble
+halves contain all 16 codes, in different orders. Each path stores the F16
+result as I16 bits and must match the independently rounded CPU reference
+and the other path exactly, including signed zeros, subnormals, normal-range
+rounding boundaries and overflow infinities. This checks the GPU's DAZ/FTZ
+behavior directly; CPU multiplication equivalence alone cannot establish it.
+
 Output buffers begin at 42, so missing writes fail the reference check. Two
 separate negative modules deliberately omit the decode launch or swap Q4_0
 nibble halves; both must fail the approximate comparator with EXPECT/006,

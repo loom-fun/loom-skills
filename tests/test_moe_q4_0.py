@@ -3,6 +3,7 @@ import os
 import importlib.util
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -80,6 +81,29 @@ class Q40Experts(unittest.TestCase):
     def test_template_drift_fails_closed(self):
         with self.assertRaisesRegex(AssertionError, 'Q4_0 expert staging'):
             moe_q4_0.specialize_grouped('changed template', 'q4_0', 'store')
+
+    def test_gpu_bit_proof_covers_scale_extremes_and_actual_snippets(self):
+        path = STARTER.parents[2] / '.github/devlab/kbench/moe_q4_0/gen_bench.py'
+        spec = importlib.util.spec_from_file_location('q40_bits', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        raw, expected = module.dequant_bits_inputs()
+        blocks = raw.view(np.uint8).reshape(-1, 18)
+        scales = blocks[:, :2].copy().view(np.uint16).reshape(-1)
+        self.assertEqual(len(set(map(int, scales))), 63488)
+        self.assertFalse(np.any((scales & 0x7c00) == 0x7c00))
+        bits = expected.view(np.uint16)
+        for pattern in [0, 0x8000, 1, 0x8001, 0x400, 0x8400, 0x7c00, 0xfc00]:
+            self.assertTrue(np.any(bits == pattern), hex(pattern))
+        self.assertFalse(np.any(bits == 32767))  # no-write sentinel is never valid
+        for target in ['strix', 'r9700']:
+            with tempfile.TemporaryDirectory() as out:
+                kernels, case, record = module.dequant_bits_case(Path(out), target)
+                self.assertIn(gen_gemm.dequant16('q4_0', 'w', None, 'deq'), kernels)
+                self.assertIn(moe_q4_0.dequant16('w', 'deq'), kernels)
+                self.assertEqual(case.count('check.expect.equal'), 3)
+                self.assertNotIn('check.expect.approximate', case)
+                self.assertEqual(record['output_elements_per_path'], 63488 * 32)
 
 
 if __name__ == '__main__':
