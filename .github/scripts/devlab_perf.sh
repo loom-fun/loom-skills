@@ -712,6 +712,11 @@ print('vllm', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       "$T" "$B/text_match.py" save "$url" "$out/text_$p1.json" --model "$cardid" --tokenizer "$card/tokenizer.json" --thinking "$TH" | tail -1
       res[$s]="SAVED (exact A/B comparison in strix_ab_compare.py)";;
+    capacityaudit)   # Experiment-only intended native preset and actual fixed-backing audit.
+      if [ "$p2" = before ]; then serve_alone "$p1" || { res[$s]=ERROR; continue; }; fi
+      "$T" "$here/.github/scripts/issue554_capacity_audit.py" "$D/$p1/pkg" "$url" "$p2" --out "$out/capacity_$p1-$p2.json" > "$out/capacity_$p1-$p2.log" 2>&1
+      rc=$?; cat "$out/capacity_$p1-$p2.log"
+      res[$s]="$([ "$rc" = 0 ] && echo PASS || echo FAIL) actual-native-preset-fixed-backing";;
     occaudit)   # Experiment-only actual emitted ungated control and live counters.
       if [ "$p2" = before ]; then serve_alone "$p1" || { res[$s]=ERROR; continue; }; fi
       "$T" "$here/.github/scripts/issue554_occ_audit.py" "$D/$p1/pkg" "$url" "$p2" --out "$out/ungated_audit.json" > "$out/occaudit_${p2}.log" 2>&1
