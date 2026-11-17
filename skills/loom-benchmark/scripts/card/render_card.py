@@ -762,7 +762,8 @@ def render(d):
             if g in shared:
                 continue   # printed in its host's section
             members = [m for m, h in shared.items() if h == g]
-            L += [f"### {gpu_title(g)}" if not members else
+            measured = has_results(info["devices"][g]) and GPUS[g].get("measured_title")   # a class measured on one board: its table names that board
+            L += [f"### {measured or gpu_title(g)}" if not members else
                   f"### {GPUS[g]['short']} / {' / '.join(GPUS[m]['short'].removeprefix('Radeon ') for m in members)} "
                   f"({GPUS[g]['arch']}, {' / '.join([GPUS[g]['memory']] + [GPUS[m]['memory'] for m in members])})", ""]
             if has_results(info["devices"][g]):
@@ -1037,7 +1038,8 @@ def render_report(d):
         for g in gpus:
             if info["devices"][g].get("shares_section_with") in live:
                 continue   # its host's section holds the measurements (card: one shared section)
-            L += [f"## {GPUS[g]['name']} ({gpu_arch(g)})", ""]
+            measured = has_results(info["devices"][g]) and GPUS[g].get("measured_title")   # a class measured on one board: the report names that board
+            L += [f"## AMD {measured} ({gpu_arch(g)})" if measured else f"## {GPUS[g]['name']} ({gpu_arch(g)})", ""]
             if not has_results(info["devices"][g]):
                 L += [gpu_line(info, g), ""]
                 continue

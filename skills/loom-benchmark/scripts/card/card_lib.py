@@ -144,6 +144,8 @@ def _gpu_row(dev):
         row["preload_max_weight_bytes"] = c["preload_max_weight_bytes"]
     if c.get("title"):   # the card's section heading when it is not "<short> (<arch>, <memory>)"
         row["title"] = c["title"]
+    if c.get("measured_title"):   # the performance section heading when it shows measured results (the one board they were measured on, not the class)
+        row["measured_title"] = c["measured_title"]
     if dev.get("preset_suffix"):
         row["preset_suffix"] = dev["preset_suffix"]
     return row

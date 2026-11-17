@@ -28,6 +28,8 @@
       "--weight_slab_bytes=64mib"
     ],
     "title": "Radeon gfx1201, 16 GB (RX 9070 XT, RX 9070)",
+    "measured_title": "Radeon RX 9070 XT",
+    "measured_title_note": "the performance section heading when it shows measured results: every row was measured on one RX 9070 XT (not on an RX 9070), so the table names that board, not the class",
     "serve_args_note": "elastic backing; 4 MiB state slabs and 64 MiB weight slabs keep the 15 GB budget from being stranded in 64 MiB / 1 GiB commits",
     "preload_max_weight_bytes": null,
     "preload_note": "preload: --parameter_mode=preload (stock-host fix for ROCm/hrx-system#3332) on every package that fits the GPU (a stock Ubuntu host's 8 MiB memlock makes the default file mode fail at the first request): null = no weight limit, the host copy lives in system RAM, not in the 16 GB"

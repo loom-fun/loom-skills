@@ -183,6 +183,23 @@ class Cards(unittest.TestCase):
         self.assertNotIn("### Radeon gfx1201, 16 GB", golden)
         self.assertIn("| gate | description | Strix Halo | Radeon AI PRO R9700 / gfx1201 16 GB | Radeon 890M |", golden)
 
+    def test_measured_section_names_the_board(self):   # a class measured on one board: the table's heading is that board, never the class
+        d = fixture("gfx1201-16gb")
+        d["share_section_with"] = None
+        with open(os.path.join(TEST, "devices", "perf_rx9070xt.json"), encoding="utf-8") as f:
+            d["models"][SLUG]["evidence"] = [json.load(f)]
+        pkg, info, readme = self.build({"gfx1201-16gb": d})
+        perf = readme.split("## Performance")[1].split("## Features")[0]
+        self.assertIn("### Radeon RX 9070 XT\n", perf)
+        self.assertNotIn("### Radeon gfx1201, 16 GB", perf)
+        self.assertNotIn("RX 9070,", perf)
+        self.assertIn("| decode tok/s, short prompt |", perf.split("### Radeon RX 9070 XT")[1])
+        self.assertIn("<summary>Radeon gfx1201, 16 GB (RX 9070 XT, RX 9070)</summary>", readme)   # the Quick start serves the whole class
+        with open(os.path.join(pkg, "REPORT.md"), encoding="utf-8") as f:
+            report = f.read()
+        self.assertIn("## AMD Radeon RX 9070 XT (gfx1201, 16 GB)\n", report)
+        self.assertNotIn("16 GB class (RX 9070 XT, RX 9070)", report)
+
     def test_shared_without_a_host_section_is_own(self):   # the R9700 is not on the card: nothing to share
         _, info, readme = self.build({"gfx1201-16gb": fixture("gfx1201-16gb")}, gpus="strix-halo")
         self.assertNotIn("shares_section_with", info["devices"]["gfx1201-16gb"])
