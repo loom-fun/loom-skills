@@ -44,8 +44,23 @@ class SafetensorsCard(unittest.TestCase):
         lines = "\n".join(render_card.methodology(base, {}, ("mtp", 3), None, "Values are the median of 3 sessions", 3))
         self.assertIn("vLLM ROCm `vllm/0.18.0`", lines)
         self.assertIn("on both engines", lines)
+        self.assertIn("same DevLab runner and job", lines)
         self.assertNotIn("llama.cpp ROCm", lines)
         self.assertNotIn("GGUF", lines)
+
+    def test_reused_vllm_rows_name_their_original_job(self):
+        base = {"name": "vLLM", "version": "vllm/0.18.0", "args": None}
+        old = {"kind": "devlab", "run": "43920731237", "url": "https://example.com/old"}
+        new = {"kind": "devlab", "run": "44162729495", "url": "https://example.com/new"}
+        cross = {"llama": [("2026-11-16", old)], "loom": ("2026-11-17", new)}
+        lines = "\n".join(render_card.methodology(base, {}, None, None, "Values are the median of 3 sessions", 3, cross=cross))
+        self.assertIn("same DevLab runner type, different jobs", lines)
+        self.assertIn("vLLM was not re-measured for this package", lines)
+        self.assertIn("2026-11-16", lines)
+        self.assertIn("2026-11-17", lines)
+        self.assertIn("https://example.com/old", lines)
+        self.assertIn("https://example.com/new", lines)
+        self.assertNotIn("same DevLab runner and job", lines)
 
     def test_no_baseline_rows_say_so(self):
         base = {"name": "vLLM", "version": None, "args": None, "differs": ["not measured on this card yet"]}

@@ -5,12 +5,14 @@ Levers for 1-token and multi-token decode matvecs, attention and the head. Numbe
 ## Contents
 
 - Multi-token matrix-vector (`mv()` in gen_llm.py)
+- Planar Q8 activation ABI
 - Adaptive rows per workgroup (dense 4B-class decode: the biggest single win)
 - Fused 1-token QKV and paired-row gated FFN
 - Argmax head (`head_mv()`)
 - Split-K decode attention (`attention_text()`)
 - F16 KV
 - Did not help (decode)
+- Small-model RMSNorm + Q8 experiment (Qwen3.5-0.8B)
 
 ## Multi-token matrix-vector (`mv()` in gen_llm.py)
 
@@ -27,6 +29,13 @@ Levers for 1-token and multi-token decode matvecs, attention and the head. Numbe
   step %lanes]`). This bug produced garbage for hidden=1024 models.
 - **Q4_K folding.** `y = Σ_groups (d_g · dot(codes_g, x_g) − m_g · Σx_g)`. Σx_g is
   computed once per token.
+
+## Planar Q8 activation ABI
+
+The starter's `g_quant_q8` already publishes planar activations: int8 codes `[rows][width/32][32]`, followed at byte
+`rows*width` by F32 metadata `[rows][width/32][2]` (F16-rounded scale, exact code sum). Codes use the unrounded
+`max(abs(group))/127` scale. This is the representation in upstream `q8_1_planar.loom` at library v0.2.0
+(1fd6bd23); it is not a new weight format to repack. Producer fusion can reuse that ABI while preserving its rounding.
 
 ## Adaptive rows per workgroup (dense 4B-class decode: the biggest single win)
 
@@ -109,3 +118,27 @@ Levers for 1-token and multi-token decode matvecs, attention and the head. Numbe
 
 - **About 128 keys per decode-attention split.** Fewer splits under-filled the GPU
   at short context (−4 %).
+
+## Small-model RMSNorm + Q8 experiment (Qwen3.5-0.8B)
+
+Measured scope: hidden 1024, DevLab, SDK 0.2.0, issue #1106 (2026-11-17). No model rule or serving improvement was adopted.
+The experimental residual/RMSNorm producer retained its F32 result while publishing the existing planar Q8 ABI.
+
+- [Kernel A/B 44167771341](https://github.com/loom-fun/loom-skills/actions/runs/44167771341), e647a41f: all 12 exact/reference
+  cases passed. Complete-chain wall time fell 11.6–20.5% across nine width/row/device combinations over five interleaved
+  runs each. Sum HAL `dispatch_function` rows only; command-operation rows repeat their samples.
+- [Paired real-model Strix profile 44173422464](https://github.com/loom-fun/loom-skills/actions/runs/44173422464),
+  base 5f590bc2/head 6782988a, 400 tokens each: norm+quant time 160.705→191.198 ms; total device busy
+  1496.810→1528.090 ms. The producer bucket explains 97.5% of that increase. Exactly 47×401 norm/quant pairs fused;
+  all other kernel launch counts stayed equal. Fused latency was 6.131 us in the model versus 3.526 us in isolation.
+  This localizes a cost without establishing a register-pressure, cache, or scheduling cause.
+- [Serving A/B 44170483430](https://github.com/loom-fun/loom-skills/actions/runs/44170483430) emitted three sessions per
+  side and `repeat_rows=1`, below the fast-model rule of six sessions/three repeats. Its rates are diagnostic only,
+  never promotion evidence. Profile request wall time is also not a throughput verdict.
+- [Chunk-publication A/B 44174119125](https://github.com/loom-fun/loom-skills/actions/runs/44174119125), e226fc0f:
+  all 12 exact/reference cases passed. Chunk 8 versus fused 32 case medians were 2.586/2.631 us at one row and
+  2.592/2.659 us at four rows, with separated five-run ranges, but 5.187/4.990 us at 63 rows. Chunk 16 had no clear
+  all-shape gain. Lower VGPR use (132→104→96 for 32/16/8-value publication) did not prove a serving improvement.
+
+Revisit with a producer design that wins in the model and a verified fast-model session plan. Preserve the original path
+and numerical gates; a hot isolated kernel win does not justify enabling a model scope.

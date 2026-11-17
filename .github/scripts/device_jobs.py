@@ -127,7 +127,7 @@ def main(argv=None, device=None, tool="device_jobs.py"):
     ap.add_argument("--preset", choices=job_presets.PRESETS, default="full",
                     help="step list: full (default), iterate (no gates, smoke instead of func, no baseline engines: the loop of an optimization), final (func + ktest + gates once on the card variant)")
     ap.add_argument("--reps", type=int, default=None, help="serve sessions (= llama.cpp runs) per 1-stream row: default 3, 6 for a fast model (methodology rule 5)")
-    ap.add_argument("--fast-tps", type=float, default=card_lib.FAST_DECODE_TPS, help="a model whose published loom-fun (Strix) decode is above this is fast: 6 sessions, --repeat-rows 3")
+    ap.add_argument("--fast-tps", type=float, default=card_lib.FAST_DECODE_TPS, help="a model whose published loom-fun target-GPU decode is above this is fast: 6 sessions, --repeat-rows 3")
     ap.add_argument("--old-org", default="loom-fun", help="the org whose published cards give each model's decode rate")
     a = ap.parse_args(argv)
 
@@ -159,7 +159,11 @@ def main(argv=None, device=None, tool="device_jobs.py"):
             skipped.append(slug)   # the weights do not fit: no run (the card says "doesn't fit")
             continue
         jf, ex_ctx, _, ctx, preset = got
-        n, rr = card_lib.sampling_plan(card_lib.published_decode(slug, a.old_org), a.fast_tps)   # the one sampling rule, Loom and llama.cpp alike
+        try:
+            published = card_lib.published_decode(slug, a.old_org, gpu=a.device)
+        except card_lib.SamplingMetadataError as exc:
+            raise SystemExit(str(exc)) from None
+        n, rr = card_lib.sampling_plan(published, a.fast_tps)   # the one sampling rule, Loom and llama.cpp alike
         n = a.reps or n
         v = lambda name, ex: {"name": name, **({"build": {}} if a.build else {}), **({"context": ctx} if ctx else {}),
                               **({"execution": ex} if ex else {})}

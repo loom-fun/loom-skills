@@ -14,6 +14,7 @@ other metric and gate names; readers ignore names they don't know.
 """
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -52,19 +53,54 @@ def sampling_plan(decode_tps, fast_tps=FAST_DECODE_TPS):
     return (SESSIONS_FAST, REPEAT_FAST) if (decode_tps or 0) > fast_tps else (SESSIONS, 1)
 
 
-def published_decode(slug, org="loom-fun"):
-    """The published card's Strix Halo decode tok/s of org/slug (None when it cannot be read)."""
+class SamplingMetadataError(ValueError):
+    """Published sampling metadata was unavailable or invalid, not an absent row."""
+
+
+def published_decode(slug, org="loom-fun", gpu="strix-halo"):
+    """Published target-GPU decode rate; default Strix preserves existing callers.
+
+    None means a valid card without that target row. Legacy root performance is
+    a Strix-only fallback; never borrow another device's measurement.
+
+    Retrieval or malformed metadata must not silently select the smaller normal
+    plan. All job generators share this reader and propagate its failure.
+    """
     import urllib.request
+    url = f"https://huggingface.co/{org}/{slug}/resolve/main/info.json"
+
+    def obj(value, field):
+        if not isinstance(value, dict):
+            raise ValueError(f"{field} must be an object")
+        return value
+
     try:
-        with urllib.request.urlopen(f"https://huggingface.co/{org}/{slug}/resolve/main/info.json", timeout=30) as r:
-            info = json.load(r)
-    except Exception:  # noqa: BLE001
-        return None
-    perf = info.get("performance") or ((info.get("devices") or {}).get("strix-halo") or {}).get("performance") or {}
-    v = None
-    for s in perf.get("sessions", []):
-        v = (s["metrics"].get("decode") or {}).get("loom") or v
-    return v
+        with urllib.request.urlopen(url, timeout=30) as response:
+            info = obj(json.load(response), "info")
+        if info.get("schema") not in (SCHEMA_ID, *LEGACY_SCHEMA_IDS):
+            raise ValueError("unsupported or missing card schema")
+        devices = obj(info.get("devices", {}), "devices")
+        target = obj(devices.get(gpu, {}), f"devices.{gpu}")
+        if "performance" in target:
+            perf = obj(target["performance"], f"{gpu} performance")
+        else:
+            perf = obj(info.get("performance", {}), "legacy Strix performance") if gpu == "strix-halo" else {}
+        sessions = perf.get("sessions", [])
+        if not isinstance(sessions, list):
+            raise ValueError("performance.sessions must be a list")
+        value = None
+        for session in sessions:
+            metrics = obj(obj(session, "session").get("metrics", {}), "session.metrics")
+            row = metrics.get("decode")
+            rate = obj(row, "decode").get("loom") if row is not None else None
+            if rate is not None:
+                if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not math.isfinite(rate) or rate <= 0:
+                    raise ValueError("decode.loom must be a finite positive number")
+                value = rate
+        return value
+    except (OSError, ValueError, TypeError, OverflowError) as exc:
+        raise SamplingMetadataError(f"Cannot determine sampling for {gpu} from {url}: {exc}. "
+                                    "Retry metadata access; refusing to infer normal-speed sampling.") from exc
 
 
 # card metric -> loom-roofline/roofline.py metric (the hardware ceiling). spec_acceptance has none.

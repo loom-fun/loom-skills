@@ -16,6 +16,15 @@ Split-K decode attention, F16 KV and chunk shapes are in topics decode and prefi
   Qwen2.5-7B 4 KV 0 %, Flint 4 KV -15 %; Qwen2.5-1.5B 2 KV -6 %, Qwen2.5-0.5B head_dim 64 -27 %; gemma-3-1b 1 KV -17 %
   at 2k).
 
+## SDK 0.2.0: verify query tiling losses on Strix Halo
+
+Qwen3-4B geometry (32 query heads, 8 KV heads, head_dim 128), DevLab Strix Halo, 2026-11-17: five interleaved kernel rounds per variant at a four-token span near 32k. These are isolated kernel results, not end-to-end decode measurements.
+
+- Staging Q in 4 KiB LDS reduced WMMA registers 218 -> 168 but increased host time 5.43% ([initial run](https://github.com/loom-fun/loom-skills/actions/runs/44166215736)). Restoring LDS residency tier 6 by trimming V padding or K/V padding still lost 5.16% / 4.68%; each variant passed five exact partial tests ([follow-up](https://github.com/loom-fun/loom-skills/actions/runs/44170007939)). This parked WMMA control used 128 splits.
+- Against shipped scalar attention (64 splits, GQA 8-key blocks), a full-wave 2-head x 2-token tile lost 10.34% host time / 6.54% device-replay p50. Removing only the old short-span wrapper reduced registers 216 -> 144 but tied at 32k: host +2.36%, device p50 +0.76% ([same-job control](https://github.com/loom-fun/loom-skills/actions/runs/44172967060)). All 14 exact assertions passed, covering spans 1/3/4/5/8, the position-4095 GQA handover and a short-context case.
+
+Lower register counts or restored residency alone did not predict a win. No variant was adopted; no end-to-end or spec/consistency gate improvement is established, and these losses do not establish a current SDK blocker. Revisit with new profile evidence rather than repeating these configurations.
+
 ## DFlash v1 draft attention is split-K (`gen_dflash.DFL_SPLITS`)
 
 - **DFlash v1 draft attention is split-K** (`gen_dflash.DFL_SPLITS`, 32; windowed DFlash2 and conv drafters keep the

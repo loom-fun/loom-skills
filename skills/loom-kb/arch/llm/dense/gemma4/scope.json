@@ -10,5 +10,20 @@
  "facets": [
   "sliding-window"
  ],
- "choices": []
+ "choices": [
+  {
+   "when": {
+    "has": [
+     "kv_shared_from"
+    ],
+    "slug": [
+     "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom"
+    ]
+   },
+   "set": {
+    "prefill.prune_shared": true
+   },
+   "evidence": "Issue #554: corrected Bolt boundary preserves DFlash taps. E2B/E4B held after strict concurrent-output divergence; PRUNE_SHARED=1 remains experimental opt-in."
+  }
+ ]
 }

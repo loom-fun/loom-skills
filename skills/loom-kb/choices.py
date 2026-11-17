@@ -187,6 +187,9 @@ EXEC("exec.context_cap", "int", "A measured limit on the context the device serv
 # Decode attention (attn_rules.py, gen_llm.py)
 # ======================================================================================================================
 _DA = dict(kernels=["g_attention_split", "g_attention_combine"], rows=ROWS_DECODE + ROWS_STREAMS)
+CHOICE("decode.attn.full_blocks", "bool", False, "ATTN_FULL_BLOCKS", per_target=True, devices=["rdna4"],
+       kernels=["g_attention_split_rdna4"], rows=ROWS_DECODE + ROWS_STREAMS, from_pr="1145",
+       doc="Ordinary paged hd64 decode: bypass per-key masks on fully visible blocks; unsigned edge predicates preserve arithmetic.")
 CHOICE("decode.attn.unroll", "int", 16, "ATTN_UNROLL", doc="Keys per decode-attention block.", **_DA)
 CHOICE("decode.attn.butterfly", "bool", True, "ATTN_BFLY", doc="A block's key scores in one butterfly all-reduce.", **_DA)
 CHOICE("decode.attn.paged", "bool", True, "ATTN_PAGED", doc="16-aligned key blocks, one page lookup each.", **_DA)
@@ -306,6 +309,10 @@ CHOICE("prefill.post_add_row_scale", "bool", True, "POST_ADD_ROW_SCALE", kernels
        doc="Fused post-add + row scale.")
 CHOICE("prefill.live_row_skip", "bool", True, "LIVE_ROW_SKIP", rows=ROWS_PREFILL,
        doc="Rows with scale 0 skipped in the row-local post-attention kernels.")
+
+CHOICE("prefill.prune_shared", "bool", False, "PRUNE_SHARED", kits=["gemma4"], rows=ROWS_PREFILL,
+       kernels=["g_token_info_tail", "g_attention*", "g_gemm*"], from_pr=554,
+       doc="Gemma4 shared-KV layers retain only the last live row per span in prefill; verify stays complete.")
 
 # ----- prefill flash attention (gen_flash2.py, gen_flash2s.py, mv_rows.py) -----------------------------------------------
 _FL = dict(kernels=["*_attention_flash2*"], rows=ROWS_PREFILL)

@@ -89,12 +89,22 @@ def carry_over(pub, new):
     return m
 
 
-def assemble(snap, canon, out, alt_presets=()):
-    """snapshot dir + canonical build dir -> package dir OUT. Returns the model.json changes (added fields); raises ValueError for a change the
-    migration does not explain (a removed or changed field, a parameter file without an origin)."""
+def assemble(snap, canon, out, alt_presets=(), prefill_changes=None):
+    """Snapshot + canonical build -> OUT. A measured prefill transition may name exact old/new values per preset;
+    all other removed/changed fields remain errors. The caller validates measured execution before using that option."""
     pub, new = load(os.path.join(snap, "model.json")), load(os.path.join(canon, "model.json"))
     changes = model_changes(pub, new, alt_presets)
-    bad = [c for c in changes if c[0] != "added"]
+    approved = set()
+    for preset, (old, new_value) in (prefill_changes or {}).items():
+        before = pub.get("presets", {}).get(preset, {}).get("execution", {}).get("prefill_capacity")
+        after = new.get("presets", {}).get(preset, {}).get("execution", {}).get("prefill_capacity")
+        path = f"presets.{preset}.execution.prefill_capacity"
+        if (type(old) is not int or type(new_value) is not int or min(old, new_value) < 1
+                or old == new_value or (before, after) != (old, new_value)
+                or ("changed", path) not in changes):
+            raise ValueError(f"prefill transition {preset}: expected {old}->{new_value}, found {before}->{after}")
+        approved.add(("changed", path))
+    bad = [c for c in changes if c[0] != "added" and c not in approved]
     if bad:
         raise ValueError("model.json differs from the published one beyond the migration: " + ", ".join(f"{k} {p}" for k, p in bad))
     model = carry_over(pub, new)

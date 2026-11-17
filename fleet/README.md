@@ -13,6 +13,7 @@ published model, without a GPU and without any weights.
 | `st_stub.py` | `dump` an HF safetensors checkpoint (directory or repo, HTTP range reads of the headers) into `<slug>/safetensors/<file>.json.gz`: tensor table, config.json, generation_config, tokenizer_config, chat template, added tokens; `build_fleet.py` builds such a model with `inspect_safetensors.py` from the dump (manifest `files.<name>.kind: safetensors`) |
 | `add_model.py` | add or refresh a model from its package directory (reads only small files) |
 | `build_fleet.py` | `--ref REF` / `--tree PATH` `--out DIR`: programs-only build of the fleet, CPU only, both targets |
+| `impact_plan.py` | CI input-based selection, independent base/head CPU shards, and fail-closed aggregation; scope lint always runs |
 | `diff_fleet.py` | `BASE_DIR HEAD_DIR --json --md`: per model changed files, blocks, GPU target, card rows, strata, model.json |
 | `scope_lint.py` | `--base REF --pr-body FILE [--impact IMPACT.json]`: does a PR stay inside its `loom-scope` block (files per kind, scope leak, protected files, registry legacy values, kb lint); `--local` builds the impact itself |
 | `ownership.json` | protected core files, files each PR kind may change, kernel family -> files and rows_map rule ids (data; protected) |
@@ -77,6 +78,40 @@ stops a model without a package, with a package whose hash is not the job's, or 
 selection: collected, promoted jobs; `--slugs` takes named models in any stage. `--dry-run` runs everything but the upload (publish_package.py's own dry run)
 and changes no state.
 
+A validated optimization may intentionally change a preset's prefill chunk. Name that one transition explicitly:
+`regen.py package S.json --dry-run --slugs SLUG --ref MERGED_REF --prefill-transition SLUG:chat:1024:2048`.
+Every selected job must have a matching program digest and `model_staging.json` whose complete preset execution equals
+the canonical build. Assembly checks the exact published/canonical old/new values; context, rows, drafting, parameter
+origins and all other model-field guards remain unchanged. Omit the flag for ordinary SDK migrations. Review the
+complete assembled package and its card before uploading; do not substitute a programs-only directory for fit sizing.
+
 Time model (measured on this campaign's 86 DevLab jobs; new GPU, 35 fitting models, 3 runners, `--mode card`): about 12.8 runner-h, 6.3 h wall
 (3.8 h of it measuring), 1 engineer with about 2 h of active work. `--mode card` costs about 0.75x of an A/B job (0.6x for large models); a
 hand-run A/B regeneration of the same fleet needs about 15 engineer-h. The tests (tests/test_regen.py) run on a downloaded job of this campaign.
+
+## Impact CI cost and coverage
+
+The `impact` required check always runs scope lint, the independent serving-setting check,
+KB lint, and a sampled DevLab plan. It does not build programs for card rendering,
+documentation, test, or other explicitly identified non-build surfaces. Selection comes
+from the changed paths, never from the author's declared scope: a false scope must still
+fail lint. An edit confined to existing fleet configs/tokenizers/header dumps builds all
+owners of those inputs. Shared kit/KB changes (including reference examples), manifest
+or build-tool changes, and unknown paths conservatively build every model.
+
+`impact_plan.py` records selected models, unchanged inputs, and its reasons in the PR
+report. For build work it distributes models across up to four shards, with base and
+head revisions on independent runners (up to eight CPU jobs). Each shard still uses the
+builder's process pool, capped at two processes per runner; GPU/device subjobs are unnecessary because this check
+only generates both targets' programs on CPU. Exact caches include the immutable revision, target kit/KB
+trees, HEAD's fleet input/tool tree, selected model list, and installed dependency versions.
+Both revisions intentionally use HEAD's manifest/config/header inputs, matching
+`build_fleet.py --ref` semantics.
+
+The final `impact` job fails if planning or any build fails, any expected shard or model
+is absent, its revision/model set is wrong, or a HEAD model is skipped. Base-kit skips
+for newly introduced source formats remain visible as new models. Non-input PRs still
+fail for invalid/missing scope blocks and protected-file violations. No GPU correctness
+or performance gate is removed by this CPU optimization. When introducing a new build
+dependency outside the kit/KB/fleet trees, update the planner's explicit non-input contract
+and cache inputs, with a test, rather than extending the skip list implicitly.

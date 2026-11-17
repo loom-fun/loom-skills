@@ -28,7 +28,7 @@ FAST = "unsloth-Qwen3-0.6B-loom"
 
 def gen(args, tps=60.0):
     old = card_lib.published_decode
-    card_lib.published_decode = lambda slug, org="loom-fun": tps
+    card_lib.published_decode = lambda slug, org="loom-fun", gpu="strix-halo": tps
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):

@@ -24,7 +24,7 @@ FAST, SLOW = "unsloth-Qwen3-0.6B-loom", "ggml-org-Qwen3-4B-loom"
 def run_script(name, args):
     """stdout of .github/scripts/NAME ARGS with the published decode rates stubbed (no network): the 0.6B is fast, the rest are not."""
     old = (card_lib.published_decode, sys.argv)
-    card_lib.published_decode = lambda slug, org="loom-fun": 300.0 if "0.6B" in slug else 60.0
+    card_lib.published_decode = lambda slug, org="loom-fun", gpu="strix-halo": 300.0 if "0.6B" in slug else 60.0
     sys.argv = [name] + args
     buf = io.StringIO()
     try:
@@ -221,6 +221,19 @@ class DevlabPerfSdk(unittest.TestCase):
         self.assertIn("ensure 0.1.0 ", log)
         self.assertIn("ensure 0.2.0 ", log)
         self.assertTrue(os.path.exists(os.path.join(w, "out", "sdk_fun.json")))
+
+    def test_ci_sdk_selector_is_preserved_but_venv_path_has_no_colon(self):
+        out, log, w = self.run_sdk([{"name": "old", "sdk": "ci:13628412621"}],
+                                   'sdk_root old >/dev/null; echo "$SDKR"')
+        self.assertEqual(out, [f"{w}/loom-sdk-ci-13628412621"])
+        self.assertIn(f"ensure ci:13628412621 {w}/loom-sdk-ci-13628412621 ", log)
+
+    def test_job_ci_sdk_uses_install_selector_with_a_safe_venv_path(self):
+        with open(self.SCRIPT) as f:
+            install = next(line.strip() for line in f if line.lstrip().startswith('troot=$(LOOM_VERSION=$jsdk '))
+        out, log, w = self.run_sdk([], 'jsdk=ci:13628412621; ' + install + '; echo "$troot"')
+        self.assertEqual(out, [f"{w}/loom-sdk-ci-13628412621"])
+        self.assertIn(f"ensure ci:13628412621 {w}/loom-sdk-ci-13628412621 ", log)
 
     def test_card_variant_follows_the_pin_of_its_own_package(self):
         out, log, w = self.run_sdk([{"name": "old"}], 'sdk_root old >/dev/null; echo "$SDKR"')

@@ -359,7 +359,7 @@ def cmd_build(a):
         kind_of = lambda s: (old.get("sources") or {}).get(s["source"], {}).get("kind")
         for gpu, dev in old["devices"].items():
             st = gpu_state(gpu)
-            st["meta"] = {k: dev[k] for k in ("state", "required_bytes", "reason", "memory_bytes", "served_context") if k in dev}
+            st["meta"] = {k: dev[k] for k in ("state", "required_bytes", "reason", "memory_bytes", "served_context", "serve_args", "shares_section_with") if k in dev}
             st["data"] = "state" not in dev
             if dev.get("performance"):
                 st["baseline"] = dev["performance"]["baseline"]
