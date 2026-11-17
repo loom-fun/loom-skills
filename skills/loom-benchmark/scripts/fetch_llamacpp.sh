@@ -1,7 +1,7 @@
 #!/bin/bash
 # Download the latest lemonade-sdk/llamacpp-rocm release for this GPU (pre-approved source: no need
 # to ask the user). Idempotent: a release already unpacked is reused. Prints the build dir last.
-# usage: fetch_llamacpp.sh [DEST=~/llamacpp-rocm] [TAG=latest] [GFX=auto]
+# usage: fetch_llamacpp.sh [DEST=$LLAMACPP_HOME or ~/llamacpp-rocm] [TAG=latest] [GFX=auto]
 #   LLAMACPP_BACKEND=vulkan: the official ggml-org/llama.cpp Vulkan release TAG (bNNNN; GFX unused) instead, e.g.
 #   fetch_llamacpp.sh ~/llamacpp-vulkan b12211. The archive's sha256 must equal data/llamacpp-vulkan.sha256's pin
 #   (a tag without a pin: GitHub's asset digest); the build dir holds release.sha256. The Vulkan baseline
@@ -11,7 +11,7 @@
 # Run by qualify.sh before pick_llamacpp.sh, so the newest build always competes with the installed
 # ones (a new model architecture usually needs a recent build: no installed build knew `flint`).
 set -eu
-dest=${1:-$HOME/llamacpp-rocm}; tag=${2:-latest}; gfx=${3:-auto}
+dest=${1:-${LLAMACPP_HOME:-$HOME/llamacpp-rocm}}; tag=${2:-latest}; gfx=${3:-auto}
 if [ "$gfx" = auto ]; then
   gfx=$( (rocminfo 2>/dev/null || true) | grep -oE "gfx(9[0-9a-f]{2}|1[0-2][0-9a-f]{2})" | grep -v "^gfx000" | head -1)
   gfx=${gfx:-gfx1151}

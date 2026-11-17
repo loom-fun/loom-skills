@@ -1,4 +1,4 @@
-"""reference_cache.py: restore / merge / count of the committed vLLM reference store, and the committed store's own invariants."""
+"""reference_cache.py: restore / merge / count and committed reference-store invariants."""
 import io
 import json
 import os
@@ -75,14 +75,23 @@ class Committed(unittest.TestCase):
         fs = [f for f in os.listdir(rc.STORE) if f.endswith(".tgz")] if os.path.isdir(rc.STORE) else []
         self.assertTrue(fs, "the MXFP4 checkpoint's references are committed")
         for f in fs:
-            self.assertRegex(f, r"^[^_].*__.*__vllm-[0-9][0-9.]*\.tgz$")
+            self.assertRegex(f, r"^[^_].*__.*__(vllm-[0-9][0-9.]*|llama-b[0-9]+)\.tgz$")
             p = os.path.join(rc.STORE, f)
             self.assertLess(os.path.getsize(p), 5_000_000)   # a small tgz, not a model
             ents = rc._entries(p)
             self.assertGreater(rc.count(p), 10)
-            ref = json.loads(ents["reference.json"])
-            self.assertEqual(ref["engine"], "vllm")
-            self.assertEqual(f.split("__vllm-")[1][:-4], ref["version"])
+            if "__vllm-" in f:
+                ref = json.loads(ents["reference.json"])
+                self.assertEqual(ref["engine"], "vllm")
+                self.assertEqual(f.split("__vllm-")[1][:-4], ref["version"])
+            else:
+                # GGUF gates cache llama.cpp responses directly; only the
+                # vLLM shim emits a separate reference.json identity record.
+                for name, data in ents.items():
+                    if name.startswith("llama_cache/"):
+                        record = json.loads(data)
+                        self.assertIsInstance(record["tokens"], list)
+                        self.assertTrue(all(type(token) is int for token in record["tokens"]))
 
 
 if __name__ == "__main__":

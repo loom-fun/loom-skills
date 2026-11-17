@@ -20,13 +20,16 @@ loom-fetch https://huggingface.co/loom-fun/LiquidAI-d1-2B-loom/resolve/main/mode
 loom-serve --model=d1-2B-GGUF/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
-`--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
+- `--materialize=copy` puts copies of the fetched package files in the output directory.
+- `completion_spin_ns=4294967295` enables active waiting for GPU completions (uses CPU while GPU work is in flight); the card's performance measurements use this setting.
+- `--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.
+- `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
 The server listens on `127.0.0.1:8080` and answers SystemOne decision requests at `/v1/systemone`.
 
 ## Performance vs llama.cpp
 
-| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline |
+| metric | llama.cpp | Loom | margin vs best llama.cpp | roofline | Loom % of roofline |
 |---|---|---|---|---|---|
 | decode tok/s, short prompt | n/a | n/a | n/a | n/a | n/a |
 | decode tok/s, 2k context | n/a | n/a | n/a | n/a | n/a |
@@ -48,6 +51,7 @@ The server listens on `127.0.0.1:8080` and answers SystemOne decision requests a
 - Rows: decode = short-context decode; decode_2k / decode_32k = decode after a ~2k / ~32k-token context; prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode. A margin within +-3 % (the measured same-runner noise) is a tie.
 - llama.cpp ROCm server arguments: `-ngl 99 -np 4 -c 48000`.
 - Measured on AMD DevLab Dispatch Strix Halo runners (`devlab-perf` jobs); runners differ between sessions.
+- Margin vs best llama.cpp: (Loom / max(ROCm, Vulkan) - 1) × 100 %, using the available measured tokens/s for each row on this GPU. With only one valid backend, that backend is used; with neither, the margin is not measured. Raw backend values and their measurement sources are retained below and in the table.
 - Measured 2026-10-29; device not recorded; hrx-loom `0.1.0` (hrx-system `dd5ad00`, recovered); source: [loom-factory run 40842422037](https://github.com/loom-fun/loom-skills/actions/runs/40842422037).
 - Roofline: not computed.
 - — not measured; n/a not applicable.

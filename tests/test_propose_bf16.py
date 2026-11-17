@@ -78,7 +78,8 @@ class Programs(unittest.TestCase):
                          ("t_q8", {"PROPOSE_HEAD_PIECES": "0", "MTP_BLOCK_PREP": "q8_0", "PROPOSE_HEAD_ROWS": "81920", "MXFP4S_Q8": "0"})):
             out = os.path.join(cls.tmp.name, tag)
             p = subprocess.run([sys.executable, os.path.join(ROOT, "fleet", "build_fleet.py"), "--tree", ROOT, "--out", out, "--slugs", SLUG],
-                               capture_output=True, text=True, env=dict(os.environ, **env))
+                               # Isolate proposal preparation from the model's independent verified-head and GDN alpha/beta int8 choices.
+                               capture_output=True, text=True, env=dict(os.environ, VERIFY_HEAD_PREP="", GDN_AB_Q8="0", **env))
             if p.returncode:
                 raise AssertionError(p.stdout + p.stderr)
             cls.dirs[tag] = os.path.join(out, SLUG)
