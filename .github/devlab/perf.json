@@ -1,112 +1,80 @@
 {
- "_comment": "Issue554 full correctness once on confirmed R9700 E2B/E4B winners, candidate aa0ff8e0. Full gates plus exact prefix pairs/consistency and completed native-context text/image requests. One unchanged Spark-X2.6 flash2s full-gate canary. No perf/baseline remeasurement.",
+ "_comment": "Issue554 final-only Strix E2B/E4B: two independent complete perf replicas passed, E2B six sessions/repeat3, E4B normal class. Full gates once on unchanged programs, actual long-prefix hit/miss pairs, exact consistency review, completed native text/image contexts. No baseline/perf reruns.",
  "sdk": "0.2.0",
  "runner": "strix",
  "memory_bytes": 18000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "final-rab-unsloth-gemma-4-e2b-it-loom",
-   "runner": "r9700",
+   "name": "strix-final-sab-unsloth-gemma-4-e2b-it-loom",
+   "runner": "strix",
    "repeat_rows": 3,
    "card": "loom-fun/unsloth-gemma-4-E2B-it-loom@8e9e47b6783d57a325d7a47b54dce70999a90efb",
-   "memory_bytes_r9700": 18000000000,
+   "memory_bytes": 18000000000,
    "kit": "gemma4",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "staging",
-     "build": {},
-     "ref": "aa0ff8e0",
-     "cap_pool": 588800,
-     "execution": {
-      "prefill_capacity": 4096
-     },
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "2048"
-     ],
-     "serve_args": [
-      "--print_device_statistics"
-     ]
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:full",
-    "pairs:staging:3",
-    "consistency:staging:5",
-    "fullctx:staging",
-    "fullctximage:staging"
-   ],
-   "sdk": "0.2.0"
-  },
-  {
-   "name": "final-rab-unsloth-gemma-4-e4b-it-loom",
-   "runner": "r9700",
-   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom@1d1f17f3438cdc9c3d0fc83255c9c8f9a68d38f7",
-   "memory_bytes_r9700": 34000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "staging",
-     "build": {},
-     "ref": "aa0ff8e0",
-     "cap_pool": 230400,
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "2048"
-     ],
-     "serve_args": [
-      "--print_device_statistics"
-     ]
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:full",
-    "pairs:staging:3",
-    "consistency:staging:5",
-    "fullctx:staging",
-    "fullctximage:staging"
-   ],
-   "sdk": "0.2.0"
-  },
-  {
-   "name": "final-spark-flash2s-canary",
-   "runner": "strix",
-   "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
-   "kit": null,
-   "memory_bytes": 55000000000,
    "llamacpp": "b1374",
-   "sdk": "0.2.0",
+   "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "staging",
      "build": {},
-     "ref": "aa0ff8e0",
+     "ref": "0fecb576",
      "build_args": [
       "--memory-gib",
       "4096",
       "--prefill",
-      "1024"
+      "2048"
+     ],
+     "serve_args": [
+      "--print_device_statistics"
      ]
     }
    ],
    "steps": [
     "func:staging",
     "ktest:staging",
-    "gates:staging:full"
-   ]
+    "gates:staging:full",
+    "longpairs:staging",
+    "consistencyexact:staging:5",
+    "fullctx:staging",
+    "fullctximage:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "strix-final-sab-unsloth-gemma-4-e4b-it-loom",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom@1d1f17f3438cdc9c3d0fc83255c9c8f9a68d38f7",
+   "memory_bytes": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "0fecb576",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ],
+     "serve_args": [
+      "--print_device_statistics"
+     ]
+    }
+   ],
+   "steps": [
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:full",
+    "longpairs:staging",
+    "consistencyexact:staging:5",
+    "fullctx:staging",
+    "fullctximage:staging"
+   ],
+   "sdk": "0.2.0"
   }
  ]
 }

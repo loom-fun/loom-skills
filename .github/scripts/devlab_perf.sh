@@ -694,6 +694,20 @@ print('vllm', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
       "$T" "$here/.github/scripts/issue554_fullctx_image.py" "$D/$p1/pkg" "$url" --out "$out/fullctximage_$p1.json" > "$out/fullctximage_$p1.log" 2>&1
       rc=$?; cat "$out/fullctximage_$p1.log"
       res[$s]="$([ "$rc" = 0 ] && echo PASS || echo FAIL) $(grep '^FULLCTX_IMAGE' "$out/fullctximage_$p1.log" | tail -1)";;
+    longpairs)   # Experiment-only: require real cache hits beyond two prefill chunks.
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      "$T" "$here/.github/scripts/issue554_prefix_pairs.py" "$D/$p1/pkg" "$url" --out "$out/longpairs_$p1.json" > "$out/longpairs_$p1.log" 2>&1
+      rc=$?; cat "$out/longpairs_$p1.log"
+      res[$s]="$([ "$rc" = 0 ] && echo PASS || echo FAIL) real-prefix-cache-pairs";;
+    consistencyexact)   # Experiment-only exact criterion; no reference engine or near-tie allowance.
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      np=0
+      for i in $(seq 1 "${p2:-5}"); do
+        "$T" "$B/consistency.py" "$url" --model "$cardid" --pkg "$D/$p1/pkg" > "$out/exact_${p1}_$i.log" 2>&1
+        grep -q '^PASS$' "$out/exact_${p1}_$i.log" && np=$((np + 1))
+        cat "$out/exact_${p1}_$i.log"
+      done
+      res[$s]="EXACT $np/${p2:-5}";;
     consistency)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       # as gates.sh runs it: --pkg and a llama.cpp reference (no drafting) to judge any divergence as a near-tie
