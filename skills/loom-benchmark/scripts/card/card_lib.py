@@ -140,6 +140,8 @@ def _gpu_row(dev):
            "detect": re.compile(c["detect"]["pattern"], re.I if "i" in c["detect"].get("flags", "") else 0)}
     if c.get("serve_args"):
         row["serve_args"] = list(c["serve_args"])
+    if "preload_max_weight_bytes" in c:   # absent: the GPU is served as before; null: --parameter_mode=preload for every package; N: up to N weight bytes
+        row["preload_max_weight_bytes"] = c["preload_max_weight_bytes"]
     if dev.get("preset_suffix"):
         row["preset_suffix"] = dev["preset_suffix"]
     return row
@@ -280,7 +282,7 @@ def package_facts(pkg_files, upstream=None):
             "occ_min": int((cfg.get("drafter") or cfg.get("draft") or {}).get("occ_min") or 0),   # occupancy gate: streams >= occ_min run undrafted
             "name": re.sub(r"[-_]gguf$", "", ckpt["repo"].split("/")[-1], flags=re.I),
             "output": model.get("model", {}).get("id", "").split("/")[-1] or None,
-            "memory_bytes": execution.get("memory_bytes"),
+            "memory_bytes": execution.get("memory_bytes"), "weight_bytes": package_weight_bytes(model, lock),
             "generator": cfg.get("generator"), "serve": cfg.get("serve"), "sdk": cfg.get("sdk"),
             "logits": declares_logits(model),   # model.json declares the host logits readback capability (llm.logits)
             "features": derive_features(model, cfg, kind, execution, srcs, spec, upstream)}
@@ -748,15 +750,65 @@ def serves(info, gpu):
     return dev is not None and dev.get("state") != "unsupported" and (has_results(dev) or has_runner(gpu) or "serve_args" in dev)
 
 
-def info_serve_args(info, gpu):
-    """The loom-serve flags of a GPU on this card: the ones its devices entry records (a data file's, per model), else the GPU's own (GPUS)."""
+def info_serve_args(info, gpu, weight_bytes=None):
+    """The loom-serve flags of a GPU on this card: the ones its devices entry records (a data file's, per model: used as they are), else the
+    GPU's own for a package of weight_bytes (card_serve_args)."""
     dev = (info.get("devices") or {}).get(gpu) or {}
-    return list(dev["serve_args"]) if "serve_args" in dev else gpu_serve_args(gpu)
+    return list(dev["serve_args"]) if "serve_args" in dev else card_serve_args(gpu, weight_bytes)
 
 
 def gpu_serve_args(gpu):
     """The loom-serve flags a GPU is served with in place of --memory_bytes (card_lib.GPUS "serve_args"), [] when it takes the budget."""
     return list(GPUS[gpu].get("serve_args") or [])
+
+
+PRELOAD_FLAG = "--parameter_mode=preload"
+
+
+def preload_mode(gpu, weight_bytes):
+    """How a GPU loads a package's weights on the host (device.json card.preload_max_weight_bytes): "preload" (--parameter_mode=preload: the stock-host
+    fix for ROCm/hrx-system#3332, the host copy of the weights must fit beside the GPU's memory), "default" (the GPU has a limit and the package is
+    above it: the card says how to start on a stock host), or None (the GPU has no such field, or the weights are unknown: unchanged)."""
+    row = GPUS[gpu]
+    if "preload_max_weight_bytes" not in row:
+        return None
+    limit = row["preload_max_weight_bytes"]
+    if limit is None:
+        return "preload"
+    if not weight_bytes:
+        return None
+    return "preload" if weight_bytes <= limit else "default"
+
+
+def card_serve_args(gpu, weight_bytes=None):
+    """The loom-serve flags a package of weight_bytes (the parameter files' sizes: package_weight_bytes) is served with on a GPU, as its card's Quick
+    start prints them: the GPU's own flags plus --parameter_mode=preload where preload_mode says so."""
+    return gpu_serve_args(gpu) + ([PRELOAD_FLAG] if preload_mode(gpu, weight_bytes) == "preload" else [])
+
+
+def package_weight_bytes(model, lock):
+    """Bytes of every parameter file model.json loads (model, drafter, projector ...; each origin once), from model.json.lock sizes; None when a size is missing."""
+    locked = {f["origin"]: f.get("size") for f in (lock or {}).get("files", [])}
+    seen, total = set(), 0
+    for variant in model.get("variants", {}).values():
+        for service in variant.get("services", {}).values():
+            for param in service.get("parameters", {}).values():
+                for f in param.get("files", []):
+                    o = f.get("origin")
+                    if not o or o in seen:
+                        continue
+                    seen.add(o)
+                    if not isinstance(locked.get(o), int):
+                        return None
+                    total += locked[o]
+    return total or None
+
+
+def package_serve_args(gpu, pkg_dir):
+    """card_serve_args for the package in a directory (model.json + model.json.lock): what its card's Quick start serves it with on the GPU
+    (devlab_perf.sh serve_alone serves with the same flags). A package whose lock sizes are unknown has unknown weights: only a GPU with no weight limit preloads."""
+    pf = load_package(pkg_dir)
+    return card_serve_args(gpu, package_weight_bytes(pf["model"], pf["lock"]))
 
 
 def has_runner(gpu):

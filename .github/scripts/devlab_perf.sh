@@ -387,10 +387,12 @@ serve_alone() { # serve_alone VARIANT
   # every GPU is served as its card's Quick start serves it: the registry device's card.serve_args (card_lib.GPUS "serve_args": --pool_backing=fixed on the
   # R9700 and on Strix Halo, no --memory_bytes; the R9700's elastic trim + compaction stalls the long-prefill rows, hrx-loom 0.2.0's elastic backing
   # costs Strix prefill, notes u1_rootcause), unless the variant brings its own serve_args/memory_bytes or is "elastic": true (--memory_bytes on any GPU)
-  gsa=$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.gpu_serve_args(sys.argv[2])))" "$here/skills/loom-benchmark/scripts/card" "${RDEV:-strix-halo}") \
-    || { echo "FAIL: card_lib.gpu_serve_args(${RDEV:-strix-halo}) (the device's card serve flags)"; return 1; }
+  # (+ --parameter_mode=preload where the package's weights fit the GPU's host copy limit: card_lib.package_serve_args, from the package's own model.json.lock sizes)
+  gsa=$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.package_serve_args(sys.argv[2], sys.argv[3])))" "$here/skills/loom-benchmark/scripts/card" "${RDEV:-strix-halo}" "$D/$1/pkg") \
+    || { echo "FAIL: card_lib.package_serve_args(${RDEV:-strix-halo}) (the device's card serve flags)"; return 1; }
   local memneed=""
   if [ -n "$gsa" ] && [[ "$sa" != *--pool_backing=* ]] && [ "$(qv "$1" "print(bool(v.get('elastic') or v.get('memory_bytes')))")" = False ]; then
+    [[ "$sa" == *--parameter_mode=* ]] && gsa=$(printf '%s\n' $gsa | grep -v -- '^--parameter_mode=' | tr '\n' ' ')   # the variant's own parameter mode wins
     sa="$gsa $sa"
     memneed=$vmem   # the elastic budget bounds what fixed backing commits: serve.sh's memcheck still guards the host (Strix memory is host RAM)
     vmem=none

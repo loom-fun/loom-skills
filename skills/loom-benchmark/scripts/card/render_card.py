@@ -22,7 +22,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, gpu_preset, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
-                      TIMED, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, gpu_serve_args, info_serve_args, serves,
+                      TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, gpu_serve_args, info_serve_args, serves,
                       gpu_view, has_results, has_runner, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features)
 from matched_spec import TIE_BAND  # noqa: E402
@@ -383,7 +383,7 @@ def serve_command(info, facts, feats, gpu, output, bare=False):
     serve = ["loom-serve", f"--model={output}" if bare else f"--model={output}/model.json", "'--device=amdgpu://?completion_spin_ns=4294967295'"]
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
     memory = gpu_memory(info, facts["memory_bytes"], gpu)
-    gpu_serve = info_serve_args(info, gpu)   # the GPU's own flags (Strix Halo and R9700: --pool_backing=fixed; a fleet/devices entry's: its measured memory budget), which take no --memory_bytes either
+    gpu_serve = info_serve_args(info, gpu, facts.get("weight_bytes"))   # the GPU's own flags (Strix Halo and R9700: --pool_backing=fixed, + --parameter_mode=preload where the host copy fits; a fleet/devices entry's: its measured memory budget), which take no --memory_bytes either
     if gpu_serve or pkg_serve:
         serve += gpu_serve + [a for a in (pkg_serve or []) if a not in gpu_serve]   # e.g. --pool_backing=fixed, which takes no --memory_bytes
     elif memory:
@@ -620,7 +620,7 @@ def render(d):
         sc = info["devices"][g].get("served_context")
         if not sc:
             return None
-        gs = info_serve_args(info, g)
+        gs = info_serve_args(info, g, facts.get("weight_bytes"))
         bound = (f"the package's preset sizes the memory pool (`{gs[0]}` commits it up front)" if gs and gs[0].startswith("--pool_backing")
                  else f"`--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}` bounds the memory pool")
         if here:
@@ -639,17 +639,26 @@ def render(d):
         return (f"{'On this GPU' if here else 'On the ' + GPUS[g]['name']}, the Quick start fetches the `{pr}` preset of `model.json`: the default preset with "
                 + ", ".join(f"`{k}` {v:,}" if isinstance(v, int) and not isinstance(v, bool) else f"`{k}` {v}" for k, v in sorted(diff.items()))
                 + f" for its {GPUS[g]['memory'] or 'memory'}. The programs, weights and tokenizer are the same.")
+    def stock_line(g):   # a GPU whose host copy of the weights does not fit beside its memory keeps the default parameter mode (device.json card.preload_max_weight_bytes)
+        if preload_mode(g, facts.get("weight_bytes")) != "default" or "serve_args" in (info["devices"].get(g) or {}):
+            return None
+        return ("On a stock host (8 MiB memlock) start loom-serve as `systemd-run --user --pty --same-dir -p SystemCallFilter=~io_uring_setup "
+                "-p SystemCallErrorNumber=ENOSYS loom-serve ...` (no root; IREE falls back to its POSIX proactor), or raise `ulimit -l`.")
     if len(serving) == 1:
         L += ["## Quick start", "", "```bash", *install, fetch_for(serving[0]), serve_command(info, facts, feats, serving[0], output, bare), "```", ""]
+        if stock_line(serving[0]):
+            L += [stock_line(serving[0]), ""]
     else:   # one collapsed block per GPU, each self-contained: install, fetch with that GPU's preset, serve with that GPU's flags
         L += ["## Quick start", "", "Open your GPU and copy its commands.", ""]
         for g in serving:
             L += ["<details>", f"<summary>{html.escape(GPUS[g]['name'], quote=False)} ({gpu_arch(g)})</summary>", "",
                   "```bash", *install, fetch_for(g), serve_command(info, facts, feats, g, output, bare), "```", ""]
-            for line in (served_context_line(g, True),):   # B1: the served-context cap is the only sentence in a block
+            for line in (served_context_line(g, True), stock_line(g)):   # B1: the served-context cap and the stock-host note are the only sentences in a block
                 if line:
                     L += [line, ""]
             L += ["</details>", ""]
+    if any(PRELOAD_FLAG in serve_command(info, facts, feats, g, output, bare) for g in serving):
+        L += [f"`{PRELOAD_FLAG}` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.", ""]
     if release(pin):
         tag, whl, _ = release_wheel(pin)
         L += [f"hrx-loom {pin['hrx_loom']} is a pre-release published on its [GitHub release]({RELEASE_URL.replace('/download', '/tag')}/{tag}), "

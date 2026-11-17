@@ -77,11 +77,12 @@ class DeviceRegistry(unittest.TestCase):
         self.assertEqual({k: v for k, v in g["strix-halo"].items() if k != "detect"},
                          {"name": 'AMD Ryzen AI Max+ 395 "Strix Halo"', "short": "Strix Halo", "arch": "gfx1151", "memory": None,
                           "roofline": "strix-halo", "memory_bytes": None, "runner": "Strix Halo", "tag": "strix-halo",
-                          "serve_args": ["--pool_backing=fixed"]})   # Strix Halo is served like the R9700 (hrx-loom 0.2.0's elastic backing costs its prefill)
+                          "serve_args": ["--pool_backing=fixed"],
+                          "preload_max_weight_bytes": 40_000_000_000})   # Strix Halo is served like the R9700 (hrx-loom 0.2.0's elastic backing costs its prefill)
         self.assertEqual({k: v for k, v in g["radeon-r9700"].items() if k not in ("detect", "preset_suffix")},
                          {"name": "AMD Radeon AI PRO R9700", "short": "Radeon AI PRO R9700", "arch": "gfx1201", "memory": "32 GB",
                           "roofline": "radeon-r9700s", "memory_bytes": 34_000_000_000, "runner": "R9700", "tag": "radeon-r9700",
-                          "serve_args": ["--pool_backing=fixed"]})
+                          "serve_args": ["--pool_backing=fixed"], "preload_max_weight_bytes": None})
         self.assertEqual(g["radeon-r9700"]["preset_suffix"], "-r9700")
         self.assertEqual(card_lib.gpu_preset_name(["chat"]), "chat-r9700")
         self.assertEqual(card_lib.gpu_preset({"presets": ["chat", "chat-r9700"], "preset": "chat"}, "radeon-r9700"), "chat-r9700")

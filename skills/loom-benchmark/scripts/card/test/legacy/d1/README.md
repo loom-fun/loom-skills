@@ -17,8 +17,10 @@ A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `mo
 ```bash
 pipx install "hrx-loom[hf]"
 loom-fetch https://huggingface.co/loom-fun/LiquidAI-d1-2B-loom/resolve/main/model.json --materialize=copy --output=d1-2B-GGUF
-loom-serve --model=d1-2B-GGUF/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed
+loom-serve --model=d1-2B-GGUF/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
+
+`--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
 The server listens on `127.0.0.1:8080` and answers SystemOne decision requests at `/v1/systemone`.
 
