@@ -1,5 +1,5 @@
 {
- "_comment": "sdk020 U1 run 3 (never merge): state backing ablation (elastic default vs --pool_backing=fixed as the R9700 serves, vs 1 GiB state slabs), 0.6B, v0.1 card on 0.1.0 vs sdk020 package on 0.2.0, Strix Halo; per-request rates within each session.",
+ "_comment": "sdk020 U1 run 4 (never merge): elastic budget sweep (memory_bytes 6/17/40 GB) vs fixed backing, 0.6B, Strix Halo; per-request rates over 20 prefills per session.",
  "runner": "strix",
  "memory_bytes": 17000000000,
  "kit": null,
@@ -7,7 +7,7 @@
  "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
  "jobs": [
   {
-   "name": "u1b-qwen3-0-6b",
+   "name": "u1m-qwen3-0-6b",
    "runner": "strix",
    "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
    "memory_bytes": 17000000000,
@@ -29,13 +29,22 @@
      "sdk": "0.2.0"
     },
     {
-     "name": "funfx",
+     "name": "fun6",
      "same_as": "fun",
      "sdk": "card",
-     "serve_args": [
-      "--pool_backing=fixed"
-     ],
-     "memory_bytes": "none"
+     "memory_bytes": 6000000000
+    },
+    {
+     "name": "staging6",
+     "same_as": "staging",
+     "sdk": "0.2.0",
+     "memory_bytes": 6000000000
+    },
+    {
+     "name": "staging40",
+     "same_as": "staging",
+     "sdk": "0.2.0",
+     "memory_bytes": 40000000000
     },
     {
      "name": "stagingfx",
@@ -45,69 +54,33 @@
       "--pool_backing=fixed"
      ],
      "memory_bytes": "none"
-    },
-    {
-     "name": "funslab",
-     "same_as": "fun",
-     "sdk": "card",
-     "serve_args": [
-      "--state_slab_bytes=1gib"
-     ]
-    },
-    {
-     "name": "stagingslab",
-     "same_as": "staging",
-     "sdk": "0.2.0",
-     "serve_args": [
-      "--state_slab_bytes=1gib"
-     ]
     }
    ],
    "steps": [
-    "wl:fun:p1k:10",
-    "wl:staging:p1k:10",
-    "wl:staging:p1k:10",
-    "wl:fun:p1k:10",
-    "wl:fun:p2k:10",
-    "wl:staging:p2k:10",
-    "wl:staging:p2k:10",
-    "wl:fun:p2k:10",
+    "wl:fun:p1k:20",
+    "wl:staging:p1k:20",
+    "wl:staging:p1k:20",
+    "wl:fun:p1k:20",
     "wl:fun:dec:3",
     "wl:staging:dec:3",
     "wl:staging:dec:3",
     "wl:fun:dec:3",
-    "wl:funfx:p1k:10",
-    "wl:stagingfx:p1k:10",
-    "wl:stagingfx:p1k:10",
-    "wl:funfx:p1k:10",
-    "wl:funfx:p2k:10",
-    "wl:stagingfx:p2k:10",
-    "wl:stagingfx:p2k:10",
-    "wl:funfx:p2k:10",
-    "wl:funfx:dec:3",
+    "wl:fun6:p1k:20",
+    "wl:staging6:p1k:20",
+    "wl:staging6:p1k:20",
+    "wl:fun6:p1k:20",
+    "wl:fun6:dec:3",
+    "wl:staging6:dec:3",
+    "wl:staging6:dec:3",
+    "wl:fun6:dec:3",
+    "wl:staging40:p1k:20",
+    "wl:stagingfx:p1k:20",
+    "wl:stagingfx:p1k:20",
+    "wl:staging40:p1k:20",
+    "wl:staging40:dec:3",
     "wl:stagingfx:dec:3",
     "wl:stagingfx:dec:3",
-    "wl:funfx:dec:3",
-    "wl:funslab:p1k:10",
-    "wl:stagingslab:p1k:10",
-    "wl:stagingslab:p1k:10",
-    "wl:funslab:p1k:10",
-    "wl:funslab:p2k:10",
-    "wl:stagingslab:p2k:10",
-    "wl:stagingslab:p2k:10",
-    "wl:funslab:p2k:10",
-    "wl:funslab:dec:3",
-    "wl:stagingslab:dec:3",
-    "wl:stagingslab:dec:3",
-    "wl:funslab:dec:3",
-    "prof:funfx:p2k:2",
-    "prof:stagingfx:p2k:2",
-    "prof:stagingfx:p2k:10",
-    "prof:funfx:p2k:10",
-    "prof:funfx:dec:1",
-    "prof:stagingfx:dec:1",
-    "prof:stagingfx:dec:5",
-    "prof:funfx:dec:5"
+    "wl:staging40:dec:3"
    ]
   }
  ]
