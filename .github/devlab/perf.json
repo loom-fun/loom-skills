@@ -146,49 +146,6 @@
     "perf:fixed:1:long",
     "perf:card:1:long"
    ]
-  },
-  {
-   "name": "fx-strix-flashnext",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom",
-   "kit": "qwen4exp",
-   "memory_bytes": 100000000000,
-   "sdk": "0.2.0",
-   "variants": [
-    {
-     "name": "new",
-     "sdk": "0.2.0",
-     "build": {},
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ]
-    },
-    {
-     "name": "newfixed",
-     "sdk": "0.2.0",
-     "build": {},
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
-     "serve_args": [
-      "--pool_backing=fixed"
-     ],
-     "memory_bytes": "none"
-    }
-   ],
-   "steps": [
-    "func:newfixed",
-    "perf:new:1",
-    "perf:newfixed:1",
-    "perf:newfixed:1",
-    "perf:new:1",
-    "perf:new:1:long",
-    "perf:newfixed:1:long",
-    "perf:newfixed:1:long",
-    "perf:new:1:long"
-   ]
   }
  ]
 }
