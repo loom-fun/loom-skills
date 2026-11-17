@@ -6,19 +6,21 @@
   "gfx": "gfx1150",
   "aliases": [
     "gfx1150",
-    "strix-point"
+    "strix-point",
+    "radeon-890m",
+    "890m"
   ],
   "name": "AMD Radeon 890M",
   "short": "Radeon 890M",
   "memory": null,
   "memory_bytes": null,
-  "memory_note": "Strix Point APU (RDNA 3.5); an APU: shares system memory like Strix Halo; loom-serve takes the package's own budget unless fleet/devices/gfx1150.json says otherwise",
+  "memory_note": "Strix Point APU (RDNA 3.5): GPU memory is system RAM through GTT, half of RAM by default (15.08 GiB on a 32 GB laptop). loom-serve must stay inside the GTT: the per-model --memory_bytes is in fleet/devices/gfx1150.json serve_args (14e9 on 32 GB). No budget: the pool is sized to MemTotal and a long request fails on the device once the GTT is full",
   "card": {
     "runner": "gfx1150",
     "tag": "gfx1150",
     "order": 10,
     "detect": {
-      "pattern": "gfx1150|radeon 8[89]0m",
+      "pattern": "gfx1150|radeon 8[89]0m|strix ?point",
       "flags": "i"
     },
     "serve_args": []
@@ -28,9 +30,9 @@
     "presets": {
       "gfx1150": {
         "name": "AMD Radeon 890M (gfx1150)",
-        "bw": 120000000000.0,
+        "bw": 96000000000.0,
         "flops": 23800000000000.0,
-        "note": "SPEC, not measured: LPDDR5X-7500, 128-bit = 120 GB/s peak; 16 CUs x 512 x 2.9 GHz = 23.8 TFLOP/s dense f16 WMMA (AMD's spec). A measured bandwidth would replace the peak"
+        "note": "bw MEASURED: 96 GB/s streaming copy (256 MiB in + 256 MiB out, vector<4xf32>, gfx11-generic; time of 8 extra back-to-back launches, 2 runs: 96.2 / 95.2) on an HP OmniBook Ultra 14 (Ryzen AI 9 HX 375, LPDDR5X-7500 128-bit = 120 GB/s peak: 80 %), hrx-loom 0.2.0, 2026-11-16. Bandwidth is per laptop (a DDR5-5600 SODIMM model has 89.6 GB/s peak). flops SPEC: 16 CUs x 512 x 2.9 GHz = 23.8 TFLOP/s dense f16 WMMA"
       }
     }
   },

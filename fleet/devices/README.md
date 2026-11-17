@@ -60,6 +60,12 @@ the 16 GB class; below that -> not supported yet. The same rule is in `skills/lo
   is not measured yet.
 - `fits: false` or no entry for the model: the GPU does not appear on that card.
 
+## Host-dependent serve flags
+
+`serve_args` is what the card prints after `loom-serve`, so a flag a stock host needs belongs there. gfx1150:
+`--parameter_mode=preload` on a stock Ubuntu host (8 MiB locked memory), where hrx-loom 0.2.0's default parameter mode fails at the first
+request; the cause and the other fixes are in `skills/loom-kb/device/rdna3/gfx1150/README.md`.
+
 ## Filling a file
 
     # on the named machine, after the measurements (the same perf.py / gates.sh logs a DevLab job produces):

@@ -2,7 +2,7 @@
 """loom-kb: the knowledge-base router and structure lint (stdlib only).
 
   kb.py route --model SLUG|LLM_CONFIG.json | --config LLM_CONFIG.json | --gguf FILE | --arch A [--facets f1,f2]
-              [--device strix-halo|radeon-r9700|rdna3|rdna4|all] [--quant q4_k_m,...] [--topic t1,t2]
+              [--device strix-halo|gfx1150|radeon-r9700|rdna3|rdna4|all, or a gfx id/alias] [--quant q4_k_m,...] [--topic t1,t2]
   kb.py lint  [--root REPO]      structure + duplicate lint of every skills/**/*.md (exit 1 on errors)
   kb.py dupes [--root REPO]      duplicate-paragraph count only (works on any checkout, e.g. an old ref)
   kb.py list                     valid devices, families, facets, topics
@@ -116,6 +116,17 @@ def devices(root=HERE):
     for name, fam in FALLBACK_DEVICES.items():
         found.setdefault(name, fam)
     return found
+
+
+def device_aliases(root=HERE):
+    """-> {alias: device}: each device.json's gfx id and "aliases" (route --device gfx1150 = strix-point)."""
+    out = {}
+    for path in sorted(Path(root).glob("device/*/*/device.json")):
+        d = json.loads(path.read_text(encoding="utf-8"))
+        for a in [d.get("gfx")] + list(d.get("aliases", [])):
+            if a:
+                out.setdefault(a, path.parent.name)
+    return out
 
 
 def families_of_devices(root=HERE):
@@ -273,6 +284,9 @@ def route(args, root=HERE):
 
     devs = devices(root)
     sel = (args.device or "").strip()
+    if sel:
+        alias = device_aliases(root)
+        sel = ",".join(i if i in devs else alias.get(i, i) for i in sel.split(","))
     chosen_devices = []
     if sel:
         valid = sorted(devs) + families_of_devices(root) + ["all"]
@@ -586,7 +600,7 @@ def main(argv=None):
     r.add_argument("--gguf", help="a GGUF file (arch and shape read from its header)")
     r.add_argument("--arch", help="an arch name (cfg arch or GGUF general.architecture)")
     r.add_argument("--facets", help="extra facets, comma separated")
-    r.add_argument("--device", help="strix-halo | radeon-r9700 | rdna3 | rdna4 | all (comma separated)")
+    r.add_argument("--device", help="strix-halo | gfx1150 | radeon-r9700 | rdna3 | rdna4 | all, or an alias such as strix-point or 890m (comma separated)")
     r.add_argument("--quant", help="quant formats, comma separated (default: from the config)")
     r.add_argument("--topic", help="topics, comma separated (see `kb.py list`)")
     r.add_argument("--relative", action="store_true", help="print paths relative to the skill directory")
