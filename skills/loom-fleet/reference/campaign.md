@@ -27,10 +27,37 @@ Narrow changes inside a campaign are [targeted fixes](targeted-fix.md).
 | Engineers | one task at a time in their own worktree; PR against the integration branch; read `notes/ENG_CONTRACT.md` and their task file first | open PRs into the base or another branch, publish outside the task |
 | Dashboarder | keeps the tracker artifact current from `status.json` + `log.md` (counts, log entries, ETA, scope changes together, not counts alone); republishes only on an important change, at most hourly ("State files") | edit code or cards; republish on every change |
 
-Model tiers: the cheaper tier (sonnet) is the default for engineers, reviewers and the dashboarder; the strongest tier (opus) for tech leads and
-for design-heavy engineering (fused or persistent kernels, register/LDS budgets across fused stages, cross-workgroup sync, open-ended
-optimization). The task file's `Model:` line names the tier and the reason; a parallel cheaper-tier variant of a design is fine. Briefs for
-engineers are explicit and self-contained: they point at the files to read, never assume the conversation.
+## Model selection and dispatch
+
+Use two task-fit tiers, mapped to controls the current host actually exposes. The ordinary tier is the default for bounded implementation,
+documentation, routine reviews, dashboard updates, and bounded read-only research. The strongest available tier is for tech leads and
+for design-heavy or open-ended work, including fused or persistent kernels, register/LDS budgets across fused stages, cross-workgroup
+synchronization, and open-ended optimization. A campaign owner's explicit model or reasoning preference takes precedence; record the
+preference and how it shaped the choice. Map ordinary to a lower-cost-capable host option when the current catalog/control evidence
+identifies one; map strongest to the highest-capability host option when that evidence identifies one. If the host evidence does not establish
+the mapping, record it as unverified rather than guessing prices or ranks. An explicit owner preference overrides this mapping.
+
+At startup, resume, and before every delegation (including nested delegation), inspect the current host's model and reasoning controls and
+its current model catalog. Map the task tier to a concrete model the host lists, using the catalog's descriptions and applicable owner
+preferences; do not reuse stale model IDs or infer a price/quality hierarchy. Record the task tier, reason, concrete host model, and the
+control/catalog evidence used. If a host exposes no model control, state that the model is inherited or otherwise unverified and why. Do not
+claim an override was applied when it was not.
+
+Before each spawn, including nested delegation, check that this payload has its own tier, reason, host model, and requested supported
+controls; a parent brief does not satisfy a child's fields. Pass the selected model and any selected reasoning value the host supports on the
+actual dispatch call; do not invent unsupported arguments. If the host does not expose a needed control, disclose the fallback. If an override
+requires a fresh/no-history fork, provide that fork mode and a self-contained brief with the goal, scope, read-first files, constraints, and
+deliverables. Inherit the parent's selection only when its tier is recorded and matches the delegated task; otherwise select and pass a model
+explicitly. After each call, capture the accepted agent ID and dispatch result. Report the requested model separately from runtime identity:
+if the host does not expose runtime identity, mark it unverified. A failed or unavailable override is a disclosed fallback, not evidence of
+successful selection. On resume, re-check current controls and catalog, keep existing worker continuation/status records separate from the
+new-spawn queue, and never relaunch or interrupt useful in-flight work solely to retier it.
+
+Every task brief includes `Tier`, `Reason`, `Host model`, `Dispatch`, and `Verification`. `Dispatch` records the requested supported controls
+and the actual call/result, including unavailable controls; `Verification` records what the host confirmed or explicitly says `unverified`
+with the limitation. Engineer briefs are
+self-contained and point at the files to read; never assume the conversation. A parallel ordinary-tier variant of a design is fine only when
+the task makes that comparison useful and the lead can review it.
 
 ## State files (all in the campaign directory, all on disk, none in `/tmp`)
 

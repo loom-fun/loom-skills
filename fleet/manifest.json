@@ -1040,7 +1040,7 @@
     "preset": "chat",
     "context": 131072,
     "pool": 196608,
-    "prefill": 1024,
+    "prefill": 2048,
     "rows": 4,
     "max_tokens": 4096,
     "draft_depth": 3

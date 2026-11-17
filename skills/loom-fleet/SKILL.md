@@ -34,6 +34,8 @@ models, measuring skill quality, publishing. They share one machinery (the `loom
 Several jobs usually combine: a campaign runs targeted fixes, a populate loop publishes through publish.md, a skill fix is
 measured with skill-trials. Read only the files the request needs.
 
+For any campaign startup, delegation, or resume, read [reference/campaign.md](reference/campaign.md#model-selection-and-dispatch) before choosing or inheriting a model. Apply its tier mapping to current host controls and record actual dispatch evidence in the task brief.
+
 ## Scripts (run them, do not read them)
 
 | Script | Does |

@@ -17,6 +17,17 @@
     "exec.prefill_capacity": 4096
    },
    "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged"
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna4"
+    ]
+   },
+   "set": {
+    "decode.attn.full_blocks": true
+   },
+   "evidence": "R9700 kernel44170614219:13 exact cases,1.303\u21921.217ms; model44172014122+bounded44175206518 latest two ratios1.0272/1.0217 pass unchanged per-row mode guard and promotion ratchet. Nominal model gain is within band; final gates pending. Strix stays legacy."
   }
  ]
 }

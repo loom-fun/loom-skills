@@ -1,0 +1,78 @@
+{
+  "sdk": "0.2.0",
+  "repeats": 3,
+  "suites": [
+    {
+      "suite": "moe_q4_0_strix",
+      "runner": "strix",
+      "dir": "moe_q4_0",
+      "gen": "moe_q4_0/gen_bench.py",
+      "gen_variants": [
+        "strix"
+      ],
+      "files": [
+        "bench.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "case_timing": true,
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ],
+      "negative_tests": [
+        {
+          "file": "negative_no_write.loom",
+          "xfail": [
+            "@negative_no_write=EXPECT/006"
+          ]
+        },
+        {
+          "file": "negative_nibbles.loom",
+          "xfail": [
+            "@negative_nibble_order=EXPECT/006"
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "moe_q4_0_r9700",
+      "runner": "r9700",
+      "dir": "moe_q4_0",
+      "gen": "moe_q4_0/gen_bench.py",
+      "gen_variants": [
+        "r9700"
+      ],
+      "files": [
+        "bench.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "case_timing": true,
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ],
+      "negative_tests": [
+        {
+          "file": "negative_no_write.loom",
+          "xfail": [
+            "@negative_no_write=EXPECT/006"
+          ]
+        },
+        {
+          "file": "negative_nibbles.loom",
+          "xfail": [
+            "@negative_nibble_order=EXPECT/006"
+          ]
+        }
+      ]
+    }
+  ]
+}
