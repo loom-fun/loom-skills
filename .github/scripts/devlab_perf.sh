@@ -12,6 +12,7 @@
 #    "llama_spec": "matched" (default),   the llama.cpp servers' drafting = the card's own (see below); or an explicit override
 #                  "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF;
 #                                                                     {hf:OWNER/REPO/FILE}: that Hub file, e.g. a drafter llama.cpp loads and the card doesn't ship; also in build_args)
+#   Immutable external file: {hf:OWNER/REPO@40HEX/FILE#64HEXSHA256}; revision-specific cache, checksum checked on every use.
 #    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
 #   BENCHMARK RULE (skills/loom-benchmark/reference/methodology.md): one drafting choice per model, identical on Loom and llama.cpp (ROCm, Vulkan), from
 #   data/drafting_classification.json (MTP head in the GGUF > exact-model DFlash/assistant drafter > none; never ngram): "matched"
@@ -308,10 +309,32 @@ slug_arg() {   # slug_arg BUILD_PY CARD_REPO -> "--slug <repo name>" when that b
   grep -q -- '"--slug"' "$1" && echo "--slug ${2##*/}"
   return 0
 }
-hf_sub() {   # hf_sub TEXT -> TEXT with each {hf:OWNER/REPO/FILE} replaced by that Hub file's path, fetched once per runner
+hf_sub() {   # {hf:OWNER/REPO/FILE}, or immutable {hf:OWNER/REPO@40HEX/FILE#64HEXSHA256}; pinned cache bytes are always verified
   local t=$1 h
   for h in $(echo "$t" | grep -oE '\{hf:[^}]+\}' | sort -u); do
     local f=${h#\{hf:}; f=${f%\}}; local dst=$WORK/hf/$f r=${f%/*}
+    if [[ "$r" == *@* || "$f" == *#* ]]; then
+      local rev name digest actual part
+      if [[ ! "$f" =~ ^([A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*)@([0-9a-f]{40})/([A-Za-z0-9][A-Za-z0-9_.-]*)#([0-9a-f]{64})$ ]]; then
+        echo "FAIL: invalid pinned HF marker (need OWNER/REPO@40HEX/FILE#64HEXSHA256): $f" >&2; return 1
+      fi
+      r=${BASH_REMATCH[1]}; rev=${BASH_REMATCH[2]}; name=${BASH_REMATCH[3]}; digest=${BASH_REMATCH[4]}
+      dst=$WORK/hf-pinned/$r/$rev/$name
+      if [ ! -f "$dst" ]; then
+        mkdir -p "${dst%/*}" && part=$(mktemp "$dst.part.XXXXXX") || return 1
+        curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
+          "https://huggingface.co/$r/resolve/$rev/$name" -o "$part" || { rm -f "$part"; echo "FAIL: fetch $f" >&2; return 1; }
+        actual=$(sha256sum "$part") || { rm -f "$part"; return 1; }
+        if [ "${actual%% *}" != "$digest" ]; then
+          rm -f "$part"; echo "FAIL: checksum mismatch for pinned HF download $f" >&2; return 1
+        fi
+        mv "$part" "$dst" || return 1
+      else
+        actual=$(sha256sum "$dst") || return 1
+        [ "${actual%% *}" = "$digest" ] || { echo "FAIL: checksum mismatch for pinned HF cache $f" >&2; return 1; }
+      fi
+      t=${t//"$h"/$dst}; continue
+    fi
     [ -f "$dst" ] || { mkdir -p "${dst%/*}" && curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
       "https://huggingface.co/${r}/resolve/main/${f##*/}" -o "$dst.part" && mv "$dst.part" "$dst"; } || { echo "FAIL: fetch $f" >&2; return 1; }
     t=${t//"$h"/$dst}
