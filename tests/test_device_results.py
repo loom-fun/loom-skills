@@ -144,6 +144,17 @@ class Cards(unittest.TestCase):
         self.assertIn("### Radeon 890M (gfx1150)", readme)
         self.assertEqual(list(self.model(pkg)["presets"]), ["chat", "chat-gfx1150"])
 
+    def test_from_info_without_device_files_preserves_unmeasured_serve_metadata(self):
+        pkg, original, _ = self.build({"gfx1150": fixture("gfx1150")})
+        prior = os.path.join(pkg, "info.json")
+        result = make_info("build", pkg, "--from-info", prior, "--device-results", "none",
+                           "--upstream", "none", "--memory-bytes", "17000000000")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(prior, encoding="utf-8") as stream:
+            rebuilt = json.load(stream)
+        self.assertEqual(rebuilt["devices"]["gfx1150"], original["devices"]["gfx1150"])
+        self.assertEqual(rebuilt["sources"], original["sources"])
+
     def test_default_preset_reused_without_overrides(self):   # gfx1150 data that needs no other preset: `chat`
         d = fixture("gfx1150")
         d["models"][SLUG].pop("execution")
