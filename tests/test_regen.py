@@ -604,17 +604,36 @@ class SdkLoomTest(Base):
     def test_accept_regression_publishes_only_a_confirmed_slowdown(self):
         st = self.plan_loom() if hasattr(self, "plan_loom") else self.plan("--mode", "sdk-loom")
         e = st.jobs[JOB]
-        e.update(stage="needs_decision", reason="ABBA confirmation (job 1): slower than -3%: prefill -7.4 %")
+        e.update(stage="needs_decision", reason="confirmed regression / failed gate / text difference: ABBA confirmation (job 1): slower than -3%: prefill -7.4 %",
+                 confirm_rows=["prefill"], perf={"decode": 1.0, "prefill": -6.0, "longctx": 0.0, "4stream": 0.0})
+        st.jobs["abba"] = {**{k: v for k, v in e.items() if k not in ("perf", "confirm_rows")}, "slug": SLUG, "prev": JOB, "perf": {"decode": 0.5, "prefill": -7.4, "longctx": None, "4stream": 0.2}}
         st.save()
         with contextlib.redirect_stdout(io.StringIO()):
             regen.main(["accept-regression", self.state, SLUG, "--note", "U1: SDK runtime on Strix (notes/upstream.md)"])
         e = regen.State(self.state).jobs[JOB]
         self.assertEqual((e["stage"], e["decision"]), ("collected", "promote"))
         self.assertIn("U1", e["accepted_regression"])
+        self.assertEqual(e["perf"]["prefill"], -7.4)   # the ABBA number on the confirmed row
+        self.assertEqual(e["confirmed"], {"prefill": -7.4})
         st = regen.State(self.state); st.jobs[JOB].update(stage="needs_decision", reason="gate failed: ktest:staging"); st.save()
         with contextlib.redirect_stdout(io.StringIO()):
             regen.main(["accept-regression", self.state, SLUG, "--note", "x"])
         self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "needs_decision")   # a gate failure is never accepted
+
+    def test_accept_regression_sdk_ab_needs_both_runs_confirmed(self):
+        st = self.plan("--mode", "sdk-ab")
+        e = st.jobs[JOB]
+        e.update(stage="needs_decision", round=2, reason="confirmed regression / failed gate / text difference: still undecided after the confirming run: slower than -3%: decode -4.0 %")
+        st.save()
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-regression", self.state, SLUG, "--note", "x"])
+        self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "needs_decision")   # never confirmed
+        st = regen.State(self.state)
+        st.jobs[JOB].update(reason="confirmed regression / failed gate / text difference: confirmed regression > 3% in both runs: decode -4.0 % / -4.2 %")
+        st.save()
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-regression", self.state, SLUG, "--note", "SDK"])
+        self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "collected")
 
     def test_real_compare_marks_a_card_row_the_job_did_not_measure(self):
         """through .github/scripts/strix_ab_compare.py: a Loom-only job without the 32k rows vs a card that has them -> longctx is confirmed, not n/a"""
