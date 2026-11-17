@@ -30,14 +30,35 @@ def make_info(*args, env=None):
 
 class Schema(unittest.TestCase):
     def test_fixtures_validate(self):
-        for n in ("rx9070xt", "gfx1150"):
+        for n in ("gfx1201-16gb", "gfx1150"):
             self.assertEqual(card_lib.validate_device_results(fixture(n), n), [])
 
     def test_the_schema_file_is_the_one_cards_use(self):
         self.assertTrue(os.path.isfile(card_lib.DEVICE_SCHEMA_PATH))
 
+    def test_gfx1201_vram_classes(self):   # the class is the device: 32 GB radeon-r9700, 16 GB gfx1201-16gb; no product-named device
+        g = card_lib.GPUS
+        self.assertNotIn("radeon-rx9070xt", g)
+        self.assertEqual((g["radeon-r9700"]["memory"], g["gfx1201-16gb"]["memory"]), ("32 GB", "16 GB"))
+        self.assertEqual(g["radeon-r9700"]["arch"], g["gfx1201-16gb"]["arch"])
+        self.assertEqual(g["gfx1201-16gb"]["preset_suffix"], "-16gb")
+        self.assertEqual(g["radeon-r9700"]["preset_suffix"], "-r9700")
+        self.assertEqual(g["gfx1201-16gb"]["title"], "Radeon gfx1201, 16 GB (RX 9070 XT, RX 9070)")
+        self.assertEqual(g["gfx1201-16gb"]["serve_args"], ["--memory_bytes=15000000000", "--state_slab_bytes=4mib", "--weight_slab_bytes=64mib"])
+        self.assertEqual(g["gfx1201-16gb"]["preload_max_weight_bytes"], None)   # --parameter_mode=preload on every package
+        self.assertEqual(card_lib.gpu_from_device({"gpu": "AMD Radeon RX 9070 XT (gfx1201)"}), "gfx1201-16gb")   # not the R9700 that also says gfx1201
+        self.assertEqual(card_lib.gpu_from_device({"gpu": "AMD Radeon AI PRO R9700 (gfx1201)"}), "radeon-r9700")
+
+    def test_legacy_rx9070xt_file_is_read_as_the_16gb_class(self):
+        old = dict(fixture("gfx1201-16gb"), device="radeon-rx9070xt")
+        self.assertEqual(card_lib.validate_device_results(old, "rx9070xt.json"), [])
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "rx9070xt.json"), "w", encoding="utf-8") as f:
+                json.dump(old, f)
+            self.assertEqual(list(card_lib.load_device_results(d)), ["gfx1201-16gb"])
+
     def test_refusals(self):
-        d = fixture("rx9070xt")
+        d = fixture("gfx1201-16gb")
         bad = copy.deepcopy(d)
         bad["models"][SLUG]["max_context"] = None
         self.assertTrue(any("fits without max_context" in e for e in card_lib.validate_device_results(bad)))
@@ -61,11 +82,11 @@ class Schema(unittest.TestCase):
 
 class Order(unittest.TestCase):
     def test_card_order(self):
-        self.assertEqual([g for g in card_lib.GPU_ORDER if g != "radeon-rx7900xtx"], ["strix-halo", "radeon-r9700", "radeon-rx9070xt", "gfx1150"])
-        info = {"devices": {g: {"state": "not_measured"} for g in ("gfx1150", "radeon-rx9070xt", "strix-halo", "radeon-r9700")}}
-        self.assertEqual(card_lib.card_gpus(info), ["strix-halo", "radeon-r9700", "radeon-rx9070xt", "gfx1150"])
+        self.assertEqual([g for g in card_lib.GPU_ORDER if g != "radeon-rx7900xtx"], ["strix-halo", "radeon-r9700", "gfx1201-16gb", "gfx1150"])
+        info = {"devices": {g: {"state": "not_measured"} for g in ("gfx1150", "gfx1201-16gb", "strix-halo", "radeon-r9700")}}
+        self.assertEqual(card_lib.card_gpus(info), ["strix-halo", "radeon-r9700", "gfx1201-16gb", "gfx1150"])
         self.assertEqual(card_lib.derived_tags({"speculative_decoding": {"status": "no", "value": None}, "image_input": {"status": "no"}},
-                                               ("gfx1150", "radeon-rx9070xt", "strix-halo"))[-3:], ["strix-halo", "radeon-rx9070xt", "gfx1150"])
+                                               ("gfx1150", "gfx1201-16gb", "strix-halo"))[-3:], ["strix-halo", "gfx1201-16gb", "gfx1150"])
 
     def test_serves(self):
         self.assertTrue(card_lib.serves({"devices": {"gfx1150": {"state": "not_measured", "serve_args": []}}}, "gfx1150"))
@@ -104,13 +125,13 @@ class Cards(unittest.TestCase):
 
     def test_no_entry_no_gpu(self):   # a model the file does not list, or lists as not fitting, shows no trace of the GPU
         for repo in ("loom-fun/someone-Else-loom", f"loom-fun/{SLUG}"):
-            files = {"rx9070xt": fixture("rx9070xt")}
+            files = {"gfx1201-16gb": fixture("gfx1201-16gb")}
             if repo.endswith("Else-loom"):
-                files["rx9070xt"]["models"]["someone-Else-loom"] = {"fits": False, "date": "2026-11-16", "reason": "too big"}
+                files["gfx1201-16gb"]["models"]["someone-Else-loom"] = {"fits": False, "date": "2026-11-16", "reason": "too big"}
             else:
-                files["rx9070xt"]["models"][SLUG] = {"fits": False, "date": "2026-11-16", "reason": "too big"}
+                files["gfx1201-16gb"]["models"][SLUG] = {"fits": False, "date": "2026-11-16", "reason": "too big"}
             pkg, info, readme = self.build(files, repo=repo)
-            self.assertNotIn("radeon-rx9070xt", info["devices"])
+            self.assertNotIn("gfx1201-16gb", info["devices"])
             self.assertNotIn("9070", readme)
             self.assertEqual(list(self.model(pkg)["presets"]), ["chat"])
 
@@ -133,15 +154,15 @@ class Cards(unittest.TestCase):
         self.assertNotIn("served_context", info["devices"]["gfx1150"])
 
     def test_pypi_pin_quick_start(self):
-        d = fixture("rx9070xt")
+        d = fixture("gfx1201-16gb")
         d["share_section_with"] = None
-        pkg, info, readme = self.build({"rx9070xt": d}, sdk={"hrx_loom": "0.2.0", "source": "pypi"})
+        pkg, info, readme = self.build({"gfx1201-16gb": d}, sdk={"hrx_loom": "0.2.0", "source": "pypi"})
         qs = readme.split("## Quick start")[1].split("## Performance")[0]
-        self.assertEqual(qs.count('pipx install "hrx-loom[hf]==0.2.0"'), 3)   # Strix Halo, R9700, RX 9070 XT
+        self.assertEqual(qs.count('pipx install "hrx-loom[hf]==0.2.0"'), 3)   # Strix Halo, R9700, gfx1201 16 GB
         self.assertIn("Open your GPU and copy its commands.", qs)
         self.assertNotIn("pre-release", qs)
         self.assertNotIn("releases/download", qs)
-        self.assertIn(f"loom-fetch huggingface:loom-fun-staging/{SLUG}:chat-9070xt --materialize=copy --output=Qwen3-0.6B", qs)
+        self.assertIn(f"loom-fetch huggingface:loom-fun-staging/{SLUG}:chat-16gb --materialize=copy --output=Qwen3-0.6B", qs)
         self.assertNotIn("/model.json", qs)
         self.assertEqual(qs.count("<details>"), 3)
         self.assertEqual(qs.count("</details>"), 3)
@@ -150,22 +171,22 @@ class Cards(unittest.TestCase):
             self.assertIn("\n```\n\n", block)
 
     def test_sections(self):   # a GPU without a host section (or share_section_with absent) has its own section; the 4-GPU golden has the shared one
-        shared = fixture("rx9070xt")
+        shared = fixture("gfx1201-16gb")
         own = copy.deepcopy(shared)
         own["share_section_with"] = None
         for d in (shared, own):   # the R9700 has no results on this card: nothing to share
-            _, info, readme = self.build({"rx9070xt": d})
-            self.assertIn("### Radeon RX 9070 XT (gfx1201, 16 GB)", readme)
+            _, info, readme = self.build({"gfx1201-16gb": d})
+            self.assertIn("### Radeon gfx1201, 16 GB (RX 9070 XT, RX 9070)", readme)
         with open(os.path.join(TEST, "gpus4", "expected", "README.md"), encoding="utf-8") as f:
             golden = f.read()
-        self.assertIn("### Radeon AI PRO R9700 / RX 9070 XT (gfx1201, 32 GB / 16 GB)", golden)
-        self.assertNotIn("### Radeon RX 9070 XT", golden)
-        self.assertIn("| gate | description | Strix Halo | Radeon AI PRO R9700 / RX 9070 XT | Radeon 890M |", golden)
+        self.assertIn("### Radeon AI PRO R9700 / gfx1201 16 GB (gfx1201, 32 GB / 16 GB)", golden)
+        self.assertNotIn("### Radeon gfx1201, 16 GB", golden)
+        self.assertIn("| gate | description | Strix Halo | Radeon AI PRO R9700 / gfx1201 16 GB | Radeon 890M |", golden)
 
     def test_shared_without_a_host_section_is_own(self):   # the R9700 is not on the card: nothing to share
-        _, info, readme = self.build({"rx9070xt": fixture("rx9070xt")}, gpus="strix-halo")
-        self.assertNotIn("shares_section_with", info["devices"]["radeon-rx9070xt"])
-        self.assertIn("### Radeon RX 9070 XT (gfx1201, 16 GB)", readme)
+        _, info, readme = self.build({"gfx1201-16gb": fixture("gfx1201-16gb")}, gpus="strix-halo")
+        self.assertNotIn("shares_section_with", info["devices"]["gfx1201-16gb"])
+        self.assertIn("### Radeon gfx1201, 16 GB (RX 9070 XT, RX 9070)", readme)
 
 
 if __name__ == "__main__":

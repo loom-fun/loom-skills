@@ -27,7 +27,10 @@ class PreloadRule(unittest.TestCase):
         self.assertEqual(card_lib.card_serve_args("strix-halo", 40_000_000_001), ["--pool_backing=fixed"])
         self.assertEqual(card_lib.card_serve_args("strix-halo", None), ["--pool_backing=fixed"])   # unknown weights: unchanged
         self.assertEqual(card_lib.preload_mode("strix-halo", 70_000_000_000), "default")
-        for g in ("gfx1150", "radeon-rx9070xt", "radeon-rx7900xtx"):   # no field: unchanged
+        self.assertEqual(card_lib.preload_mode("gfx1201-16gb", 1), "preload")   # the 16 GB class: no weight limit, like the R9700
+        self.assertEqual(card_lib.card_serve_args("gfx1201-16gb", 14_000_000_000),
+                         ["--memory_bytes=15000000000", "--state_slab_bytes=4mib", "--weight_slab_bytes=64mib", PRE])
+        for g in ("gfx1150", "radeon-rx7900xtx"):   # no field: unchanged
             self.assertIsNone(card_lib.preload_mode(g, 1), g)
             self.assertEqual(card_lib.card_serve_args(g, 1), card_lib.gpu_serve_args(g))
 

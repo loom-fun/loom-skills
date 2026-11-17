@@ -1,7 +1,7 @@
 {
  "schema": "loom-device-results/1",
- "device": "radeon-rx9070xt",
- "gpu": "AMD Radeon RX 9070 XT (Navi 48, gfx1201, 16 GB): a test fixture, made-up numbers",
+ "device": "gfx1201-16gb",
+ "gpu": "gfx1201 16 GB class (RX 9070 XT, RX 9070): a test fixture, made-up numbers",
  "same_programs_as": "radeon-r9700",
  "share_section_with": "radeon-r9700",
  "preset": {"always": true},
@@ -11,8 +11,7 @@
    "fits": true,
    "date": "2026-11-16",
    "max_context": 18432,
-   "native_context": 40960,
-   "serve_args": ["--memory_bytes=15000000000", "--state_slab_bytes=4mib"]
+   "native_context": 40960
   },
   "other-Model-loom": {
    "fits": false,

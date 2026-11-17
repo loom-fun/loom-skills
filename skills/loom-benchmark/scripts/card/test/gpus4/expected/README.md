@@ -6,13 +6,13 @@ tags:
 - gguf
 - strix-halo
 - radeon-r9700
-- radeon-rx9070xt
+- gfx1201-16gb
 - gfx1150
 ---
 
 # Qwen3-0.6B (Q4_K_M) for AMD Loom
 
-A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `model.json` card) for the unmodified GGUF checkpoint [unsloth/Qwen3-0.6B-GGUF](https://huggingface.co/unsloth/Qwen3-0.6B-GGUF) (`Qwen3-0.6B-Q4_K_M.gguf`), for the AMD Ryzen AI Max+ 395 "Strix Halo", AMD Radeon AI PRO R9700, AMD Radeon RX 9070 XT and AMD Radeon 890M GPUs, generated with the [loom-skills](https://github.com/loom-fun/loom-skills) workflow. Learn more on the [Loom ecosystem website](https://loom-fun.github.io/loom-dev/).
+A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `model.json` card) for the unmodified GGUF checkpoint [unsloth/Qwen3-0.6B-GGUF](https://huggingface.co/unsloth/Qwen3-0.6B-GGUF) (`Qwen3-0.6B-Q4_K_M.gguf`), for the AMD Ryzen AI Max+ 395 "Strix Halo", AMD Radeon AI PRO R9700, AMD Radeon gfx1201 16 GB class (RX 9070 XT, RX 9070) and AMD Radeon 890M GPUs, generated with the [loom-skills](https://github.com/loom-fun/loom-skills) workflow. Learn more on the [Loom ecosystem website](https://loom-fun.github.io/loom-dev/).
 
 ## Quick start
 
@@ -43,12 +43,12 @@ On this GPU, the package's preset sizes the memory pool (`--pool_backing=fixed` 
 </details>
 
 <details>
-<summary>AMD Radeon RX 9070 XT (gfx1201, 16 GB)</summary>
+<summary>Radeon gfx1201, 16 GB (RX 9070 XT, RX 9070)</summary>
 
 ```bash
 pipx install "hrx-loom[hf]==0.1.0"
-loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --preset=chat-9070xt --materialize=copy --output=Qwen3-0.6B
-loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=15000000000 --state_slab_bytes=4mib
+loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --preset=chat-16gb --materialize=copy --output=Qwen3-0.6B
+loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=15000000000 --state_slab_bytes=4mib --weight_slab_bytes=64mib --parameter_mode=preload
 ```
 
 On this GPU, `--memory_bytes=15000000000` bounds the memory pool: this package serves up to 18,432 tokens per request (its native context is 40,960).
@@ -78,7 +78,7 @@ The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/comple
 
 AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are not yet re-measured.
 
-### Radeon AI PRO R9700 / RX 9070 XT (gfx1201, 32 GB / 16 GB)
+### Radeon AI PRO R9700 / gfx1201 16 GB (gfx1201, 32 GB / 16 GB)
 
 | metric | llama.cpp | Loom | margin | roofline | Loom % of roofline | llama.cpp Vulkan |
 |---|---|---|---|---|---|---|
@@ -109,7 +109,7 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 - doesn't fit (decode_32k, prefill_32k): the document is longer than the 20,480-token context this GPU serves; not expected to be measured, not a failure.
 - — not measured; n/a not applicable.
 
-The AMD Radeon RX 9070 XT shares this section: it runs the same programs, and the numbers above were measured on the AMD Radeon AI PRO R9700.
+The AMD Radeon gfx1201 16 GB class (RX 9070 XT, RX 9070) shares this section: it runs the same programs, and the numbers above were measured on the AMD Radeon AI PRO R9700.
 
 ### Radeon 890M (gfx1150)
 
@@ -152,13 +152,13 @@ The AMD Radeon RX 9070 XT shares this section: it runs the same programs, and th
 | image input | ? | not determined |
 | audio input / output | ? | not determined |
 | sampling | ✅ | `temperature`, `top_p`, `top_k`, `seed` |
-| context size | ✅ | 40,960 tokens per request; Radeon AI PRO R9700 up to 20,480 (its memory); Radeon RX 9070 XT up to 18,432 (its memory); Radeon 890M up to 16,384 (its memory) |
+| context size | ✅ | 40,960 tokens per request; Radeon AI PRO R9700 up to 20,480 (its memory); Radeon gfx1201 16 GB up to 18,432 (its memory); Radeon 890M up to 16,384 (its memory) |
 | concurrency | ✅ | 4 concurrent requests |
 | max output tokens | ✅ | 4,096 (preset `max_tokens`) |
 
 ## Correctness
 
-| gate | description | Strix Halo | Radeon AI PRO R9700 / RX 9070 XT | Radeon 890M |
+| gate | description | Strix Halo | Radeon AI PRO R9700 / gfx1201 16 GB | Radeon 890M |
 |---|---|---|---|---|
 | `kernel_tests` | Unit tests of the generated kernels against reference implementations | — not yet re-measured | ❌ no evidence | ❌ no evidence |
 | `golden` | llama.cpp reference recorded on the same GGUF: greedy tokens and top-5 log-probs, short prompts and 1k-32k documents | — not yet re-measured | ✅ pass ¹ | ✅ pass ² |

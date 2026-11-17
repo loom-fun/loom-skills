@@ -225,6 +225,18 @@
    "serve_args": [],
    "served_context": 16384
   },
+  "gfx1201-16gb": {
+   "memory_bytes": 15000000000,
+   "serve_args": [
+    "--memory_bytes=15000000000",
+    "--state_slab_bytes=4mib",
+    "--weight_slab_bytes=64mib",
+    "--parameter_mode=preload"
+   ],
+   "served_context": 18432,
+   "shares_section_with": "radeon-r9700",
+   "state": "not_measured"
+  },
   "radeon-r9700": {
    "gates": {
     "agent": {
@@ -506,16 +518,6 @@
     }
    },
    "served_context": 20480
-  },
-  "radeon-rx9070xt": {
-   "memory_bytes": 15000000000,
-   "serve_args": [
-    "--memory_bytes=15000000000",
-    "--state_slab_bytes=4mib"
-   ],
-   "served_context": 18432,
-   "shares_section_with": "radeon-r9700",
-   "state": "not_measured"
   },
   "strix-halo": {
    "state": "not_measured"

@@ -17,7 +17,7 @@
     "runner": "R9700",
     "tag": "radeon-r9700",
     "detect": {
-      "pattern": "r9700|gfx1201|radeon ai pro",
+      "pattern": "^(?!.*9070).*(r9700|gfx1201|radeon ai pro)",
       "flags": "i"
     },
     "serve_args": [

@@ -142,6 +142,8 @@ def _gpu_row(dev):
         row["serve_args"] = list(c["serve_args"])
     if "preload_max_weight_bytes" in c:   # absent: the GPU is served as before; null: --parameter_mode=preload for every package; N: up to N weight bytes
         row["preload_max_weight_bytes"] = c["preload_max_weight_bytes"]
+    if c.get("title"):   # the card's section heading when it is not "<short> (<arch>, <memory>)"
+        row["title"] = c["title"]
     if dev.get("preset_suffix"):
         row["preset_suffix"] = dev["preset_suffix"]
     return row
@@ -149,7 +151,7 @@ def _gpu_row(dev):
 
 GPUS = {k: _gpu_row(d) for k, d in registry.devices().items()}
 # The order a card shows its GPUs: device.json "card.order", else the registry's position (registry order puts gfx1150, a gfx11 device,
-# before the gfx12 ones; the card reads Strix Halo, R9700, RX 9070 XT, gfx1150).
+# before the gfx12 ones; the card reads Strix Halo, R9700, gfx1201 16 GB, gfx1150).
 GPU_ORDER = sorted(GPUS, key=lambda g: (registry.devices()[g]["card"].get("order", list(GPUS).index(g)), list(GPUS).index(g)))
 DEFAULT_GPU = "strix-halo"   # a card of loom-card/2 and evidence that names no GPU
 # The R9700 pool: the board reports 31.86 GiB (34.2 GB) of VRAM and the driver reserves part of it, so loom-serve gets
@@ -1092,7 +1094,7 @@ def require_valid(info, what="info.json"):
 
 
 # ---- per-device results files: fleet/devices/<name>.json (schema fleet/devices/device_results.schema.json, README.md there)
-# A GPU with no DevLab runner (RX 9070 XT, gfx1150) records, per model, whether it fits, the largest context it admits, how to serve
+# A GPU with no DevLab runner (the gfx1201 16 GB class, gfx1150) records, per model, whether it fits, the largest context it admits, how to serve
 # it and, when measured, evidence (make_info.py perf/gates output with a "machine" source). make_info.py build turns the entry of a card's
 # model into the card's devices entry, the GPU's preset and its evidence; a GPU shows only where its file has data for that card.
 DEVICE_RESULTS_ID = "loom-device-results/1"
@@ -1100,8 +1102,13 @@ DEVICE_RESULTS_DIR = os.path.join(REPO, "fleet", "devices")
 DEVICE_SCHEMA_PATH = os.path.join(DEVICE_RESULTS_DIR, "device_results.schema.json")
 
 
+LEGACY_DEVICE_IDS = {"radeon-rx9070xt": "gfx1201-16gb"}   # the RX 9070 XT file (fleet/devices/rx9070xt.json) is the 16 GB class's data: read as it
+
+
 def validate_device_results(doc, what="device results"):
     """Errors of one fleet/devices file against its schema, plus the rules the schema cannot say (empty: valid)."""
+    if doc.get("device") in LEGACY_DEVICE_IDS:
+        doc = dict(doc, device=LEGACY_DEVICE_IDS[doc["device"]])
     schema = load_json(DEVICE_SCHEMA_PATH)
     errs = _check(doc, schema, schema, what, [])
     if errs:
@@ -1150,6 +1157,7 @@ def load_device_results(directory=None):
         errs = validate_device_results(doc, name)
         if errs:
             raise SystemExit(f"{path} is not valid {DEVICE_RESULTS_ID}:\n  " + "\n  ".join(errs))
+        doc["device"] = LEGACY_DEVICE_IDS.get(doc["device"], doc["device"])
         if doc["device"] in out:
             raise SystemExit(f"{path}: device {doc['device']} is also in another file of {directory}")
         out[doc["device"]] = doc

@@ -8,13 +8,13 @@
  "additionalProperties": false,
  "properties": {
   "schema": {"const": "loom-device-results/1"},
-  "device": {"type": "string", "description": "The GPU id, a skills/loom-kb/device/<family>/<id> registry device (radeon-rx9070xt, gfx1150)"},
+  "device": {"type": "string", "description": "The GPU id, a skills/loom-kb/device/<family>/<id> registry device (gfx1201-16gb, gfx1150)"},
   "gpu": {"type": "string", "description": "The board as the session found it (name, die, memory), for readers of the file"},
-  "same_programs_as": {"type": ["string", "null"], "description": "A GPU whose programs and preset this one serves unchanged (radeon-rx9070xt: radeon-r9700); the GPU's preset is derived from that GPU's preset when the package has one"},
-  "share_section_with": {"type": ["string", "null"], "description": "A GPU whose performance section this one shares: the card prints one section headed with both names (\"Radeon AI PRO R9700 / RX 9070 XT\") and the entries here carry no evidence. null/absent: this GPU has its own section"},
+  "same_programs_as": {"type": ["string", "null"], "description": "A GPU whose programs and preset this one serves unchanged (gfx1201-16gb: radeon-r9700); the GPU's preset is derived from that GPU's preset when the package has one"},
+  "share_section_with": {"type": ["string", "null"], "description": "A GPU whose performance section this one shares: the card prints one section headed with both names (\"Radeon AI PRO R9700 / gfx1201 16 GB\") and the entries here carry no evidence. null/absent: this GPU has its own section"},
   "preset": {
    "type": "object", "additionalProperties": false,
-   "description": "When the GPU gets its own preset `<first><registry preset_suffix>` (chat-9070xt, chat-gfx1150), written into model.json by make_info.py build; the programs, weights and the other presets are never touched",
+   "description": "When the GPU gets its own preset `<first><registry preset_suffix>` (chat-16gb, chat-gfx1150), written into model.json by make_info.py build; the programs, weights and the other presets are never touched",
    "properties": {
     "always": {"type": "boolean", "description": "true: every model that fits gets the preset (context_capacity = its max_context). false/absent: only a model whose entry has `execution` overrides or whose max_context is below the base preset's context_capacity; every other model reuses the default preset"}
    }

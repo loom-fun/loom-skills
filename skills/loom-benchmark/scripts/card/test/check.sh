@@ -425,8 +425,8 @@ mkdir -p "$tmp/r9700_noexec"; cp -r "$R/pkg/." "$tmp/r9700_noexec/"
 py "$C/make_info.py" build "$tmp/r9700_noexec" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging "${R3[@]}" --memory-bytes 17000000000 \
   --gpus strix-halo,radeon-r9700 --fit "$R/fit_native.json" -o "$tmp/r9700_noexec/info.json" 2>/dev/null
 cmp -s "$tmp/r9700_noexec/model.json" "$R/pkg/model.json" && echo "OK   r9700 preset: a fit row without r9700_execution at native context leaves model.json alone" || { echo "FAIL r9700 preset: model.json changed without a block"; bad=1; }
-# ---- four GPUs (fleet/devices data files, fixture): Strix Halo and the R9700 as in r9700_exec, the RX 9070 XT (no DevLab runner; shares the
-# R9700's section; its preset chat-9070xt is the R9700's with context_capacity = its max context) and gfx1150 (no DevLab runner, a named machine:
+# ---- four GPUs (fleet/devices data files, fixture): Strix Halo and the R9700 as in r9700_exec, the gfx1201 16 GB class (no DevLab runner; shares the
+# R9700's section; its preset chat-16gb is the R9700's with context_capacity = its max context) and gfx1150 (no DevLab runner, a named machine:
 # its own performance section, its preset only because its entry overrides prefill_capacity). The fixture's numbers are made up.
 DV=$here/devices
 MSRC=(--package "$R/pkg" --source-kind machine --device "$DV/machine.json" --hrx-loom "$R/evidence/hrx_loom.json" --gpu gfx1150)
@@ -435,13 +435,13 @@ py "$C/make_info.py" perf --loom-jsonl "$R/evidence/loom.jsonl" --llama-jsonl "$
 py "$C/make_info.py" gates "$R/evidence/gates.json" "${MSRC[@]}" -o "$tmp/m_gates.json" 2>/dev/null
 mkdir -p "$tmp/dev4"
 py -c "import json, sys
-for n in ('rx9070xt', 'gfx1150'):
+for n in ('gfx1201-16gb', 'gfx1150'):
     d = json.load(open(sys.argv[1] + '/' + n + '.json'))
     if n == 'gfx1150':   # the named machine's session and gates ride in the entry
         d['models']['unsloth-Qwen3-0.6B-loom']['evidence'] = [json.load(open(sys.argv[2])), json.load(open(sys.argv[3]))]
     json.dump(d, open(sys.argv[4] + '/' + n + '.json', 'w'), indent=1)" "$DV" "$tmp/m_perf.json" "$tmp/m_gates.json" "$tmp/dev4"
 py "$C/make_info.py" devices "$tmp/dev4" > "$tmp/dev4.txt" 2>&1 \
-  && grep -q "gfx1150: 1 models, 1 fit, 1 with evidence" "$tmp/dev4.txt" && grep -q "radeon-rx9070xt: 2 models, 1 fit, 0 with evidence, shares the radeon-r9700 section" "$tmp/dev4.txt" \
+  && grep -q "gfx1150: 1 models, 1 fit, 1 with evidence" "$tmp/dev4.txt" && grep -q "gfx1201-16gb: 2 models, 1 fit, 0 with evidence, shares the radeon-r9700 section" "$tmp/dev4.txt" \
   && echo "OK   devices: the data files validate and summarize" || { echo "FAIL devices: $(cat "$tmp/dev4.txt")"; bad=1; }
 mkdir -p "$tmp/gpus4"; cp -r "$R/pkg/." "$tmp/gpus4/"
 py "$C/make_info.py" build "$tmp/gpus4" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging "${R3[@]}" --memory-bytes 17000000000 \
@@ -450,20 +450,20 @@ py "$C/make_info.py" build "$tmp/gpus4" --repo loom-fun/unsloth-Qwen3-0.6B-loom 
 py -c "import json, sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 d = sys.argv[2]; m = c.load_json(d + '/model.json'); old = c.load_json(sys.argv[3] + '/model.json'); i = c.load_json(d + '/info.json')
 assert c.validate(i) == [], c.validate(i)
-assert list(m['presets']) == ['chat', 'chat-r9700', 'chat-gfx1150', 'chat-9070xt'], list(m['presets'])
+assert list(m['presets']) == ['chat', 'chat-r9700', 'chat-gfx1150', 'chat-16gb'], list(m['presets'])
 assert m['presets']['chat'] == old['presets']['chat'] and {k: v for k, v in m.items() if k != 'presets'} == {k: v for k, v in old.items() if k != 'presets'}
-x, g, r = (m['presets'][n]['execution'] for n in ('chat-9070xt', 'chat-gfx1150', 'chat-r9700'))
-assert x == dict(r, context_capacity=18432, pool_capacity=18432), (x, r)   # the R9700 preset, context_capacity = the 9070 XT's max context (a v0.1 pool_capacity follows it)
+x, g, r = (m['presets'][n]['execution'] for n in ('chat-16gb', 'chat-gfx1150', 'chat-r9700'))
+assert x == dict(r, context_capacity=18432, pool_capacity=18432), (x, r)   # the R9700 preset, context_capacity = the 16 GB class's max context (a v0.1 pool_capacity follows it)
 assert g == dict(old['presets']['chat']['execution'], prefill_capacity=512, context_capacity=16384, pool_capacity=16384), g
-assert sorted(i['devices']) == sorted(['strix-halo', 'radeon-r9700', 'radeon-rx9070xt', 'gfx1150']), list(i['devices'])
+assert sorted(i['devices']) == sorted(['strix-halo', 'radeon-r9700', 'gfx1201-16gb', 'gfx1150']), list(i['devices'])
 dv = i['devices']
-assert dv['radeon-rx9070xt'] == {'state': 'not_measured', 'serve_args': ['--memory_bytes=15000000000', '--state_slab_bytes=4mib'], 'memory_bytes': 15000000000,
-                                 'served_context': 18432, 'shares_section_with': 'radeon-r9700'}, dv['radeon-rx9070xt']
+assert dv['gfx1201-16gb'] == {'state': 'not_measured', 'serve_args': ['--memory_bytes=15000000000', '--state_slab_bytes=4mib', '--weight_slab_bytes=64mib', '--parameter_mode=preload'], 'memory_bytes': 15000000000,
+                                 'served_context': 18432, 'shares_section_with': 'radeon-r9700'}, dv['gfx1201-16gb']
 assert dv['gfx1150']['served_context'] == 16384 and dv['gfx1150']['serve_args'] == [] and c.has_results(dv['gfx1150']) and dv['gfx1150']['gates']
 assert {s['kind'] for s in i['sources'].values() if s['device'] and 'gfx1150' in (s['device'].get('gpu') or '')} == {'machine'}
 assert all(c.serves(i, g) for g in dv)
-assert c.with_device_preset(m, 'radeon-rx9070xt', {'context_capacity': 18432}, 'chat-r9700') == m   # idempotent" "$C" "$tmp/gpus4" "$R/pkg" \
-  && echo "OK   gpus4: build adds the RX 9070 XT and gfx1150 entries, their presets (R9700-based, default untouched) and the machine evidence" \
+assert c.with_device_preset(m, 'gfx1201-16gb', {'context_capacity': 18432}, 'chat-r9700') == m   # idempotent" "$C" "$tmp/gpus4" "$R/pkg" \
+  && echo "OK   gpus4: build adds the gfx1201 16 GB class and gfx1150 entries, their presets (R9700-based, default untouched) and the machine evidence" \
   || { echo "FAIL gpus4: four-GPU info.json or presets are wrong"; bad=1; }
 # a hrx-loom 0.2.0 PyPI pin (llm_config.json "sdk": {"hrx_loom": "0.2.0", "source": "pypi"}): every GPU's block installs `hrx-loom[hf]==0.2.0` from PyPI (no
 # wheel URL, no pre-release note), fetches `huggingface:REPO:PRESET` and serves the package directory
@@ -472,7 +472,7 @@ py -c "import json, sys; p = sys.argv[1] + '/llm_config.json'; c = json.load(ope
 py "$C/render_card.py" "$tmp/gpus4_pypi" 2>/dev/null
 py -c "import sys; r = open(sys.argv[1] + '/README.md').read()
 assert r.count('pipx install \"hrx-loom[hf]==0.2.0\"') == 4 and r.count('<details>') == 4 == r.count('</details>'), r
-assert 'pre-release' not in r and 'releases/download' not in r and 'loom-fetch huggingface:loom-fun-staging/unsloth-Qwen3-0.6B-loom:chat-9070xt --materialize=copy' in r
+assert 'pre-release' not in r and 'releases/download' not in r and 'loom-fetch huggingface:loom-fun-staging/unsloth-Qwen3-0.6B-loom:chat-16gb --materialize=copy' in r
 assert \"loom-serve --model=Qwen3-0.6B '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=15000000000 --state_slab_bytes=4mib\" in r and '/model.json' not in r.split('## Performance')[0].split('loom-serve')[1]" "$tmp/gpus4_pypi" \
   && echo "OK   gpus4: a PyPI 0.2.0 pin installs hrx-loom[hf]==0.2.0 in every GPU's block, no pre-release note" \
   || { echo "FAIL gpus4: PyPI 0.2.0 Quick start"; bad=1; }
