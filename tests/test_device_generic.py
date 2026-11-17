@@ -56,10 +56,7 @@ class DeviceJobs(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)   # argparse: RX is not a choice (no runner, no pool fit table, no baselines)
 
     def test_r9700_card_job_of_a_safetensors_package(self):   # the measured context cap serves the preset, Loom steps only, no llama.cpp anywhere
-        r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "device_jobs.py"), "--device", R9, "--gates", "dev", "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom"],
-                           capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        doc = json.loads(r.stdout)
+        doc = json.loads(run("device_jobs.py", ["--device", R9, "--gates", "dev", "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom"]))
         (j,) = doc["jobs"]
         self.assertTrue(j["require_preset_r9700"])
         self.assertEqual(j["served_context"], 110592)   # exec.context_cap of the model node (measured with the MTP proposal copies: func passes on every runner)
@@ -73,7 +70,8 @@ class DeviceJobs(unittest.TestCase):
     def test_vllm_baseline_steps_where_the_reference_engine_exists(self):   # #875 (vllm_shim.py) merged: gates + the vLLM baseline steps
         from unittest import mock
         buf = io.StringIO()
-        with mock.patch.object(device_jobs, "reference_only", return_value=True), contextlib.redirect_stdout(buf):
+        with mock.patch.object(device_jobs, "reference_only", return_value=True), \
+                mock.patch.object(card_lib, "published_decode", return_value=60.0), contextlib.redirect_stdout(buf):
             device_jobs.main(["--device", R9, "--gates", "dev", "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom"])
         (j,) = json.loads(buf.getvalue())["jobs"]
         self.assertIn("gates:card:dev", j["steps"])
