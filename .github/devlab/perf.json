@@ -1,16 +1,260 @@
 {
- "_comment": "Issue554 final-only Strix E2B/E4B: two independent complete perf replicas passed, E2B six sessions/repeat3, E4B normal class. Full gates once on unchanged programs, actual long-prefix hit/miss pairs, exact consistency review, completed native text/image contexts. No baseline/perf reruns.",
- "sdk": "0.2.0",
- "runner": "strix",
- "memory_bytes": 18000000000,
+ "_comment": "Issue554 lead-approved bounded round: FOUR corrected Bolt/E4B R9700 confirmations at actual fast6 sessions/repeat3; ONE E2B R9700 SPEC_OCC_MIN0 exact-only diagnostic with real IR/hash/counter proof; ONE corrected Bolt Strix full-gate/prefix/context final. No other perf, full gate or reference repeats.",
+ "runner": "r9700",
+ "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "strix-final-sab-unsloth-gemma-4-e2b-it-loom",
-   "runner": "strix",
+   "name": "fast-rab-nvidia-nvidia-nemotron-3-5-bolt-e4b-",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@b6c3819f331f56b4fdbbd70db05239f82bef2791",
+   "memory_bytes_r9700": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 191488,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "0fecb576",
+     "cap_pool": 191488,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 191488,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "0fecb576",
+     "cap_pool": 191488,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "fast-rab-nvidia-nvidia-nemotron-3-5-bolt-e-r2",
+   "runner": "r9700",
+   "replica": 2,
+   "repeat_rows": 3,
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@b6c3819f331f56b4fdbbd70db05239f82bef2791",
+   "memory_bytes_r9700": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 191488,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "0fecb576",
+     "cap_pool": 191488,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 191488,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "0fecb576",
+     "cap_pool": 191488,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "e2b-ungated-exact-only",
+   "runner": "r9700",
    "repeat_rows": 3,
    "card": "loom-fun/unsloth-gemma-4-E2B-it-loom@8e9e47b6783d57a325d7a47b54dce70999a90efb",
-   "memory_bytes": 18000000000,
+   "memory_bytes_r9700": 18000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "build": {
+      "SPEC_OCC_MIN": "0"
+     },
+     "ref": "0fecb576",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "occaudit:staging:before",
+    "consistencyexact:staging:5",
+    "occaudit:staging:after"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "bolt-strix-final-once",
+   "runner": "strix",
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@b6c3819f331f56b4fdbbd70db05239f82bef2791",
+   "memory_bytes": 36000000000,
    "kit": "gemma4",
    "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
@@ -42,39 +286,219 @@
    "sdk": "0.2.0"
   },
   {
-   "name": "strix-final-sab-unsloth-gemma-4-e4b-it-loom",
-   "runner": "strix",
+   "name": "fast-rab-unsloth-gemma-4-e4b-it-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
    "card": "loom-fun/unsloth-gemma-4-E4B-it-loom@1d1f17f3438cdc9c3d0fc83255c9c8f9a68d38f7",
-   "memory_bytes": 34000000000,
+   "memory_bytes_r9700": 34000000000,
    "kit": "gemma4",
-   "llamacpp": "b1374",
+   "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 230400,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
     {
      "name": "staging",
      "build": {},
      "ref": "0fecb576",
+     "cap_pool": 230400,
      "build_args": [
       "--memory-gib",
       "4096",
       "--prefill",
       "2048"
-     ],
-     "serve_args": [
-      "--print_device_statistics"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 230400,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "0fecb576",
+     "cap_pool": 230400,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
      ]
     }
    ],
    "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:full",
-    "longpairs:staging",
-    "consistencyexact:staging:5",
-    "fullctx:staging",
-    "fullctximage:staging"
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "fast-rab-unsloth-gemma-4-e4b-it-loom-r2",
+   "runner": "r9700",
+   "replica": 2,
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom@1d1f17f3438cdc9c3d0fc83255c9c8f9a68d38f7",
+   "memory_bytes_r9700": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 230400,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "0fecb576",
+     "cap_pool": 230400,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 230400,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "0fecb576",
+     "cap_pool": 230400,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
    ],
    "sdk": "0.2.0"
   }
- ]
+ ],
+ "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+ "kit": null,
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211"
 }

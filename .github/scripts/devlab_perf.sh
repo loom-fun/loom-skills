@@ -708,6 +708,15 @@ print('vllm', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
         cat "$out/exact_${p1}_$i.log"
       done
       res[$s]="EXACT $np/${p2:-5}";;
+    textsave)   # Experiment-only exact A/B text files; no reference engine.
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      "$T" "$B/text_match.py" save "$url" "$out/text_$p1.json" --model "$cardid" --tokenizer "$card/tokenizer.json" --thinking "$TH" | tail -1
+      res[$s]="SAVED (exact A/B comparison in strix_ab_compare.py)";;
+    occaudit)   # Experiment-only actual emitted ungated control and live counters.
+      if [ "$p2" = before ]; then serve_alone "$p1" || { res[$s]=ERROR; continue; }; fi
+      "$T" "$here/.github/scripts/issue554_occ_audit.py" "$D/$p1/pkg" "$url" "$p2" --out "$out/ungated_audit.json" > "$out/occaudit_${p2}.log" 2>&1
+      rc=$?; cat "$out/occaudit_${p2}.log"
+      res[$s]="$([ "$rc" = 0 ] && echo PASS || echo FAIL) actual-program-counters";;
     consistency)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       # as gates.sh runs it: --pkg and a llama.cpp reference (no drafting) to judge any divergence as a near-tie
