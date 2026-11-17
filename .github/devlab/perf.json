@@ -1,8 +1,8 @@
 {
-  "_comment": "Four exact-QAT target-only discovery outcomes. Source package generator3fcbe5cf; immutable returned staging commits verified. No final qualification or performance claim. PR GPU label requires final lead dispatch review.",
+  "_comment": "Serving-only correction after discovery44199152114: real-weight ktests already passed all4 and are not repeated. Exact staged programs/weights unchanged. Let registry add fixed backing and clear physical budget while retaining LOOM_MEMNEED; explicit preload stays. Requires final lead dispatch review.",
   "jobs": [
     {
-      "name": "gemma-qat-31b-strix-discovery",
+      "name": "gemma-qat-31b-strix-serving",
       "runner": "strix",
       "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@417aa0158cf4f6ca260b405db00287116e5cc27f",
       "memory_bytes": 81000000000,
@@ -22,14 +22,12 @@
             "draft_depth": 0
           },
           "serve_args": [
-            "--pool_backing=fixed",
             "--parameter_mode=preload"
           ]
         }
       ],
       "steps": [
         "func:target",
-        "ktest:target",
         "gates:target:dev",
         "coldcapacity:target",
         "perf:target:1",
@@ -40,7 +38,7 @@
       }
     },
     {
-      "name": "gemma-qat-31b-r9700-discovery",
+      "name": "gemma-qat-31b-r9700-serving",
       "runner": "r9700",
       "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@417aa0158cf4f6ca260b405db00287116e5cc27f",
       "memory_bytes": 34000000000,
@@ -60,14 +58,12 @@
             "draft_depth": 0
           },
           "serve_args": [
-            "--pool_backing=fixed",
             "--parameter_mode=preload"
           ]
         }
       ],
       "steps": [
         "func:target",
-        "ktest:target",
         "gates:target:dev",
         "coldcapacity:target",
         "perf:target:1",
@@ -79,7 +75,7 @@
       "require_preset_r9700": true
     },
     {
-      "name": "gemma-qat-26b-strix-discovery",
+      "name": "gemma-qat-26b-strix-serving",
       "runner": "strix",
       "card": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom@0fa9e1a4e8f369b9e9a4eb5295749feaf42570f8",
       "memory_bytes": 81000000000,
@@ -99,14 +95,12 @@
             "draft_depth": 0
           },
           "serve_args": [
-            "--pool_backing=fixed",
             "--parameter_mode=preload"
           ]
         }
       ],
       "steps": [
         "func:target",
-        "ktest:target",
         "gates:target:dev",
         "coldcapacity:target",
         "perf:target:1",
@@ -117,7 +111,7 @@
       }
     },
     {
-      "name": "gemma-qat-26b-r9700-discovery",
+      "name": "gemma-qat-26b-r9700-serving",
       "runner": "r9700",
       "card": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom@0fa9e1a4e8f369b9e9a4eb5295749feaf42570f8",
       "memory_bytes": 34000000000,
@@ -137,14 +131,12 @@
             "draft_depth": 0
           },
           "serve_args": [
-            "--pool_backing=fixed",
             "--parameter_mode=preload"
           ]
         }
       ],
       "steps": [
         "func:target",
-        "ktest:target",
         "gates:target:dev",
         "coldcapacity:target",
         "perf:target:1",
