@@ -383,7 +383,7 @@ def serve_command(info, facts, feats, gpu, output, bare=False):
     serve = ["loom-serve", f"--model={output}" if bare else f"--model={output}/model.json", "'--device=amdgpu://?completion_spin_ns=4294967295'"]
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
     memory = gpu_memory(info, facts["memory_bytes"], gpu)
-    gpu_serve = info_serve_args(info, gpu)   # the GPU's own flags (R9700: --pool_backing=fixed; a fleet/devices entry's: its measured memory budget), which take no --memory_bytes either
+    gpu_serve = info_serve_args(info, gpu)   # the GPU's own flags (Strix Halo and R9700: --pool_backing=fixed; a fleet/devices entry's: its measured memory budget), which take no --memory_bytes either
     if gpu_serve or pkg_serve:
         serve += gpu_serve + [a for a in (pkg_serve or []) if a not in gpu_serve]   # e.g. --pool_backing=fixed, which takes no --memory_bytes
     elif memory:

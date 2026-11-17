@@ -19,7 +19,10 @@
       "pattern": "strix|8060s|gfx1151",
       "flags": "i"
     },
-    "serve_args": []
+    "serve_args": [
+      "--pool_backing=fixed"
+    ],
+    "serve_args_note": "fixed state backing: hrx-loom 0.2.0's default elastic backing costs Strix 5-8 % steady prefill and a 3-request ramp (small models most); fixed backing commits the preset's context_capacity KV and the weights eagerly, and the packages already cap context_capacity to what fits the Strix budget"
   },
   "roofline": {
     "default": "strix-halo",

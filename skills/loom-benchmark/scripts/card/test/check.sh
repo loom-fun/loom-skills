@@ -502,7 +502,7 @@ assert set(r['gates']) >= {'golden', 'agent'} and 'performance' in r and 'roofli
   "$C" "$tmp/r9700_two" "$tmp/r9700_none" "$tmp/r9700_staging" "$tmp/r_strix_info.json" \
   && echo "OK   r9700: the strix-halo entry is the loom-card/2 card unchanged; R9700 evidence, state and served context are recorded per GPU" \
   || { echo "FAIL r9700: two-GPU info.json is wrong"; bad=1; }
-# loom-card/2 reads as one GPU: the old cards render exactly as before (only the schema string of the Versions line moved)
+# loom-card/2 reads as one GPU: the old cards render as before (the schema string of the Versions line moved; the Strix Quick start serves --pool_backing=fixed)
 for n in flint d1; do
   mkdir -p "$tmp/legacy_$n"; cp -r "$F/pkg/." "$tmp/legacy_$n/" 2>/dev/null; [ $n = d1 ] && { rm -rf "$tmp/legacy_$n"; mkdir -p "$tmp/legacy_$n"; cp -r "$tmp/d1/." "$tmp/legacy_$n/"; }
   cp "$here/legacy/$n/info.json" "$tmp/legacy_$n/info.json"
