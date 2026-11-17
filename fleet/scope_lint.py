@@ -226,8 +226,10 @@ def validate_block(repo, block, errors=None, own=None, tree=None, matcher=None):
     tree = tree or repo
     matcher = matcher or Matcher(tree)
     for scope in block["scopes"]:
+        raw_node = scope.split("+", 1)[0]
         node, facets = parse_scope(scope)
-        if (not node or "//" in node or node.startswith("/") or node.endswith("/")
+        if (not raw_node or raw_node.startswith("/") or raw_node.endswith("/")
+                or not node or "//" in node
                 or any(not part for part in node.split("/"))):
             errors.append(f"scope {scope!r}: malformed selector path")
         elif not os.path.isdir(os.path.join(matcher.kb, node)):

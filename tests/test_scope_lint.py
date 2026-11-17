@@ -114,6 +114,10 @@ class T(unittest.TestCase):
         self.assertTrue(any("only for horizontal" in error for error in errors))
         self.assertTrue(any("malformed selector path" in error for error in SL.declaration_errors(
             self.r.d, "kind: targeted\nscopes: arch//llm\n", own=OWN, tree=self.r.d)))
+        for scope in ("/arch/llm/moe/qwen35moe", "arch/llm/moe/qwen35moe/"):
+            with self.subTest(scope=scope):
+                errors = SL.declaration_errors(self.r.d, f"kind: targeted\nscopes: {scope}\n", own=OWN, tree=self.r.d)
+                self.assertTrue(any("malformed selector path" in error for error in errors))
         self.assertTrue(SL.parse_block("kind: docs\nkind: card\n")[1])
 
     def test_invalid_declaration_stops_before_planning_matrix(self):
@@ -124,6 +128,17 @@ class T(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "unknown family 'attention'"):
                 PLAN.main(["plan", "--repo", self.r.d, "--base", "base", "--pr-body", str(body), "--out", str(output)])
         self.assertFalse(output.exists())
+
+    def test_boundary_slash_scopes_stop_before_planning_matrix(self):
+        output = Path(self.r.d, "plan.json")
+        for scope in ("/arch/llm/moe/qwen35moe", "arch/llm/moe/qwen35moe/"):
+            with self.subTest(scope=scope):
+                body = Path(self.r.d, "pr-body.md")
+                body.write_text(f"kind: targeted\nscopes: {scope}\n")
+                with mock.patch.object(PLAN, "make_plan", side_effect=AssertionError("matrix planning must not run")):
+                    with self.assertRaisesRegex(SystemExit, "malformed selector path"):
+                        PLAN.main(["plan", "--repo", self.r.d, "--base", "base", "--pr-body", str(body), "--out", str(output)])
+                self.assertFalse(output.exists())
 
     def test_empty_pr_body_file_is_invalid(self):
         body = Path(self.r.d, "empty-pr-body.md")
