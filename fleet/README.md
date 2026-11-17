@@ -78,6 +78,13 @@ stops a model without a package, with a package whose hash is not the job's, or 
 selection: collected, promoted jobs; `--slugs` takes named models in any stage. `--dry-run` runs everything but the upload (publish_package.py's own dry run)
 and changes no state.
 
+A validated optimization may intentionally change a preset's prefill chunk. Name that one transition explicitly:
+`regen.py package S.json --dry-run --slugs SLUG --ref MERGED_REF --prefill-transition SLUG:chat:1024:2048`.
+Every selected job must have a matching program digest and `model_staging.json` whose complete preset execution equals
+the canonical build. Assembly checks the exact published/canonical old/new values; context, rows, drafting, parameter
+origins and all other model-field guards remain unchanged. Omit the flag for ordinary SDK migrations. Review the
+complete assembled package and its card before uploading; do not substitute a programs-only directory for fit sizing.
+
 Time model (measured on this campaign's 86 DevLab jobs; new GPU, 35 fitting models, 3 runners, `--mode card`): about 12.8 runner-h, 6.3 h wall
 (3.8 h of it measuring), 1 engineer with about 2 h of active work. `--mode card` costs about 0.75x of an A/B job (0.6x for large models); a
 hand-run A/B regeneration of the same fleet needs about 15 engineer-h. The tests (tests/test_regen.py) run on a downloaded job of this campaign.

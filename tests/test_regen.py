@@ -1049,6 +1049,75 @@ class PackageTest(Base):
         self.assertIn("package", st.jobs[JOB]["reason"])
         self.assertFalse(st.jobs[JOB].get("package"))
 
+    def prefill_transition(self, measured=True):
+        for directory, value in ((self.snap, 1024), (os.path.join(self.canon, SLUG), 2048)):
+            path = os.path.join(directory, "model.json")
+            model = sdk_package.load(path)
+            model["presets"]["chat"]["execution"]["prefill_capacity"] = value
+            with open(path, "w") as f:
+                json.dump(model, f)
+        if measured:
+            st = regen.State(self.state)
+            d = os.path.join(self.tmp, "measured")
+            os.makedirs(d)
+            with open(os.path.join(d, "programs_sha256_staging.txt"), "w") as f:
+                f.write(self.want + "\n")
+            shutil.copyfile(os.path.join(self.canon, SLUG, "model.json"), os.path.join(d, "model_staging.json"))
+            st.jobs[JOB]["dir"] = d
+            st.save()
+            return d
+
+    def test_changed_prefill_is_still_refused_by_default(self):
+        self.prefill_transition()
+        st, calls, out = self.run_package("--slugs", SLUG)
+        self.assertIn("changed presets.chat.execution.prefill_capacity", out)
+        self.assertFalse([c for c in calls if "upload" in c])
+
+    def test_exact_prefill_transition_requires_measured_settings_and_preserves_origins(self):
+        self.prefill_transition()
+        st, calls, _ = self.run_package("--slugs", SLUG, "--prefill-transition", f"{SLUG}:chat:1024:2048")
+        self.assertEqual(len([c for c in calls if "upload" in c]), 1)
+        pkg = os.path.join(st.work, "package", SLUG, "pkg")
+        model = sdk_package.load(os.path.join(pkg, "model.json"))
+        self.assertEqual(model["presets"]["chat"]["execution"]["prefill_capacity"], 2048)
+        self.assertEqual(model["origins"], v01_model()["origins"])
+        self.assertEqual(open(os.path.join(pkg, "model.json.lock")).read(), "model.json.lock")
+
+    def test_prefill_transition_without_measurement_stops_before_snapshot(self):
+        self.prefill_transition(measured=False)
+        st, calls, out = self.run_package("--slugs", SLUG, "--prefill-transition", f"{SLUG}:chat:1024:2048")
+        self.assertIn("requires matching measured programs", out)
+        self.assertEqual(calls, [])
+
+    def test_prefill_transition_with_other_measured_execution_stops_before_snapshot(self):
+        d = self.prefill_transition()
+        path = os.path.join(d, "model_staging.json")
+        model = sdk_package.load(path)
+        model["presets"]["chat"]["execution"]["context_capacity"] = 8192
+        with open(path, "w") as f:
+            json.dump(model, f)
+        st, calls, out = self.run_package("--slugs", SLUG, "--prefill-transition", f"{SLUG}:chat:1024:2048")
+        self.assertIn("did not measure the canonical chat execution", out)
+        self.assertEqual(calls, [])
+
+    def test_prefill_transition_wrong_old_value_does_not_authorize_upload(self):
+        self.prefill_transition()
+        st, calls, out = self.run_package("--slugs", SLUG, "--prefill-transition", f"{SLUG}:chat:512:2048")
+        self.assertIn("expected 512->2048, found 1024->2048", out)
+        self.assertFalse([c for c in calls if "upload" in c])
+
+    def test_prefill_transition_does_not_allow_other_unmeasured_model_changes(self):
+        d = self.prefill_transition()
+        path = os.path.join(self.canon, SLUG, "model.json")
+        model = sdk_package.load(path)
+        model["presets"]["chat"]["execution"]["context_capacity"] = 8192
+        with open(path, "w") as f:
+            json.dump(model, f)
+        shutil.copyfile(path, os.path.join(d, "model_staging.json"))
+        st, calls, out = self.run_package("--slugs", SLUG, "--prefill-transition", f"{SLUG}:chat:1024:2048")
+        self.assertIn("changed presets.chat.execution.context_capacity", out)
+        self.assertFalse([c for c in calls if "upload" in c])
+
     def test_a_job_that_built_other_programs_stops_the_model(self):
         st = regen.State(self.state)
         d = os.path.join(self.tmp, "jobdir")

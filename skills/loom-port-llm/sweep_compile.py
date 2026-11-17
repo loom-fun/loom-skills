@@ -165,6 +165,12 @@ def sh(cmd, cwd, env=None, timeout=3600):
 def build(slug, pkgdir, work, extra=()):
     """Rebuild slug's package into work/pkg with this checkout's kit. Returns (ok, message, program_dir)."""
     pcfg = json.load(open(f"{pkgdir}/llm_config.json"))
+    model_path = os.path.join(pkgdir, "model.json")
+    model = {}
+    if os.path.isfile(model_path):
+        with open(model_path) as stream:
+            model = json.load(stream)
+    model_id = (model.get("model") or {}).get("id") or pcfg.get("model_id")
     os.makedirs(work, exist_ok=True)
     src = pcfg.get("source") or {}
     st = not pcfg.get("gguf") and src.get("kind") == "safetensors"   # an HF safetensors checkpoint: no GGUF to link, the inspector reads the header
@@ -199,7 +205,8 @@ def build(slug, pkgdir, work, extra=()):
     cfg.update({k: v for k, v in pcfg.items() if k not in ("tensors", "generator", "resolved")})
     json.dump(cfg, open(os.path.join(work, "cfg.json"), "w"), indent=1)
     env = dict(os.environ, LOOM_RDNA4=os.environ.get("LOOM_RDNA4", "1"), LOOM_KB_ROOT=os.environ.get("LOOM_KB_ROOT", os.path.join(HERE, "..", "loom-kb")))
-    rc, out = sh([py, f"{kit}/build.py", "cfg.json", "pkg", "--tokenizer", f"{pkgdir}/tokenizer.json", *extra], work, env)
+    identity = ["--slug", slug] + (["--model-id", model_id] if model_id else [])
+    rc, out = sh([py, f"{kit}/build.py", "cfg.json", "pkg", "--tokenizer", f"{pkgdir}/tokenizer.json", *extra, *identity], work, env)
     if rc:
         return False, "build.py: " + out.strip().splitlines()[-1][-250:], None
     return True, "", os.path.join(work, "pkg", "program")
