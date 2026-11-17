@@ -18,7 +18,7 @@ MANIFEST = {"models": {
 
 class SelectionTests(unittest.TestCase):
     def test_non_inputs_do_not_build_even_with_architecture_scope(self):
-        paths = ["README.md", "docs/index.html", "tests/test_card.py", ".github/workflows/impact.yml",
+        paths = ["fleet/impact_plan.py", "README.md", "docs/index.html", "tests/test_card.py", ".github/workflows/impact.yml",
                  "skills/loom-benchmark/scripts/card/render_card.py", "skills/loom-fleet/reference/campaign.md"]
         self.assertEqual(PLAN.select(paths, MANIFEST)[0], [])
 
@@ -35,7 +35,7 @@ class SelectionTests(unittest.TestCase):
     def test_shared_and_unknown_inputs_fall_back_to_full(self):
         for path in ("skills/loom-port-llm/starter/gen_llm.py", "skills/loom-port-llm/reference/gemma4-example/starter.patch",
                      "skills/loom-kb/model/alpha/scope.json", "skills/loom-kb/registry.py", "skills/loom-kb/device/rdna3/family.json",
-                     "fleet/manifest.json", "fleet/gguf_stub.py", "fleet/build_fleet.py", "future-module.py",
+                     "fleet/manifest.json", "fleet/gguf_stub.py", "fleet/build_fleet.py", "fleet/future-tool.py", "future-module.py",
                      "fleet/alpha/unknown-input.json", "fleet/new-model/llm_config.json"):
             with self.subTest(path=path):
                 self.assertEqual(PLAN.select(["fleet/alpha/llm_config.json", path], MANIFEST)[0], ["alpha", "beta"])

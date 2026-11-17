@@ -26,7 +26,9 @@ def non_input(path):
         return True
     if path.startswith((".github/", "tests/", "docs/", ".claude-plugin/")):
         return True
-    if path in ("LICENSE", "THIRD_PARTY_NOTICES.md", ".gitignore", "install.sh", "scripts/install_skills.py"):
+    # The impact planner is never imported by build_fleet.py, gguf_stub.py, or the kit.
+    # Keep this an exact exception: unknown fleet tools must still rebuild everything.
+    if path in ("LICENSE", "THIRD_PARTY_NOTICES.md", ".gitignore", "install.sh", "scripts/install_skills.py", "fleet/impact_plan.py"):
         return True
     # These sibling workflows/tools are not loaded by the programs-only builder.
     return path.startswith(tuple(f"skills/{name}/" for name in (
