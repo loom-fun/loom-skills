@@ -34,8 +34,17 @@ here=$(cd "$(dirname "$0")" && pwd); K=${KIT:-$here/starter}; S=$here/../loom-se
 # Windows installs, an existing Loom venv already holds the right one, and `py -3` knows where the
 # real interpreter lives. LOOM_PYTHON overrides the search.
 py_find() {  # $1: dir whose .venv may already provide an interpreter (may be empty)
-  for p in "${1:-}/.venv/Scripts/python.exe" "${1:-}/.venv/bin/python" "${LOOM_PYTHON:-}"; do
-    [ -n "$p" ] && [ -x "$p" ] && { printf '%s\n' "$p"; return 0; }
+  if [ -n "${1:-}" ]; then
+    for p in "$1/.venv/Scripts/python.exe" "$1/.venv/bin/python"; do
+      [ -x "$p" ] && { printf '%s\n' "$p"; return 0; }
+    done
+  fi
+  if [ -n "${LOOM_PYTHON:-}" ] && [ -x "$LOOM_PYTHON" ]; then printf '%s\n' "$LOOM_PYTHON"; return 0; fi
+  # Fall back to the interpreter's well-known install roots: a SYSTEM/GPO shell on Windows can have
+  # neither `python` nor `py` on PATH (verified on toth, a scheduled task running as SYSTEM).
+  for p in /c/Python3*/python.exe /c/Program\ Files/Python3*/python.exe \
+           /c/Users/*/AppData/Local/Programs/Python/Python3*/python.exe; do
+    [ -x "$p" ] && { printf '%s\n' "$p"; return 0; }
   done
   for c in python3 python py; do
     p=$(command -v "$c" 2>/dev/null || true); [ -n "$p" ] || continue
@@ -50,7 +59,7 @@ py_find() {  # $1: dir whose .venv may already provide an interpreter (may be em
   done
   return 1
 }
-PY=$(py_find "${root:-}") || { echo "STOP: no working python3/python found (WindowsApps stubs are skipped; set LOOM_PYTHON)" >&2; exit 4; }
+PY=$(py_find "${LOOM_ROOT:-${root:-}}") || { echo "STOP: no working python3/python found (WindowsApps stubs are skipped; set LOOM_PYTHON)" >&2; exit 4; }
 export LOOM_KB_ROOT=${LOOM_KB_ROOT:-$here/../loom-kb}   # the choices build.py resolves (a kit copy finds the knowledge base here)
 use_root() {   # the Loom install (SDK venv + tools venv) every later stage uses
   root=$1; bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts
