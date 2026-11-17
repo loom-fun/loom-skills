@@ -19,6 +19,14 @@ loom-fetch https://huggingface.co/loom-fun/unsloth-Qwen3-0.6B-loom/resolve/main/
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
+In another terminal, send a request (optional thinking is turned off):
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
+```
+
 `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
