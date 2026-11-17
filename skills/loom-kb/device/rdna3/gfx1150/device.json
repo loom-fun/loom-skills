@@ -24,12 +24,10 @@
       "flags": "i"
     },
     "serve_args": [],
-    "host_setup": {
-      "text": "Stock Ubuntu limits locked memory to 8 MiB, and loom-serve then fails every weight load after it reports ready (`buffer pin preparation failed`). Raise the limit once, then log out and back in; `ulimit -l` must print `unlimited`:",
-      "commands": [
-        "echo '* - memlock unlimited' | sudo tee /etc/security/limits.d/90-loom.conf"
-      ],
-      "note": "For services started by systemd also set DefaultLimitMEMLOCK=infinity in /etc/systemd/system.conf and /etc/systemd/user.conf. The memory budget (--memory_bytes) must fit the GPU's GTT, half of RAM by default (/sys/class/drm/card*/device/mem_info_gtt_total)."
+    "serve_prefix": {
+      "linux": "systemd-run --user --pty --same-dir -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS",
+      "text": "On a stock Ubuntu host (locked memory 8 MiB) loom-serve's io_uring weight loading pins 16 MiB staging buffers and fails after it reports ready; started under this prefix (no root) loom-serve finds io_uring unavailable and uses its POSIX I/O backend. A host with `ulimit -l unlimited` can drop the prefix.",
+      "evidence": "hrx-loom 0.2.0 (hrx-system v0.2.0 0cd370f): hal/driver/amd/gpu/device.c:1303-1308,1343-1350 (file staging 8 x 2 MiB, hard-coded), gpu/queue/file_staging.c:1557-1562 (registration whenever the proactor has CONCURRENT_BUFFER_REGISTRATION), fabric/memory.c:552-559 (a failed prepare_buffer fails the allocation), async/platform/io_uring/proactor_registration.c:323-366 (no ENOMEM fallback on this path; the RLIMIT_MEMLOCK fallback at 1086/1138 is register_slab only), async/proactor_platform.c:39-46 (POSIX proactor when io_uring is UNAVAILABLE)"
     }
   },
   "roofline": {

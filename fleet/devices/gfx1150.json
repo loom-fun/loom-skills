@@ -9,12 +9,12 @@
   "hrx_loom": "0.2.0",
   "note": "PyPI wheel, hrx-system 0cd370f2baaa; the package is the published card rebuilt with the sdk020 kit (devlab_perf.sh variant build {}) at LOOM_MEMORY_CAP_GIB=14"
  },
- "tool": "max_context: build.py fit at a 14 GiB budget (63488), confirmed by one 62227-token request that completes (next size: HTTP 400, server healthy); performance and gates: .github/scripts/devlab_perf.sh run locally (steps func, gates dev, perf x2 + long x2, c4, llama.cpp ROCm b1374 and Vulkan b12211), 46 min",
+ "tool": "max_context: build.py fit at a 14 GiB budget (63488), confirmed by one 62227-token request that completes (next size: HTTP 400, server healthy); performance and gates: .github/scripts/devlab_perf.sh run locally inside `systemd-run --user -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS` (stock memlock, no preload) (steps func, gates dev, perf x2 + long x2, c4, llama.cpp ROCm b1374 and Vulkan b12211), 46 min",
  "package": "loom-fun/unsloth-Qwen3.5-4B-loom@6e8e69042ec7, rebuilt for hrx-loom 0.2.0",
  "serve": {
   "device": "amdgpu://?completion_spin_ns=4294967295",
   "memory": "elastic backing, --memory_bytes inside the GTT (half of RAM by default)",
-  "host": "RLIMIT_MEMLOCK raised (see skills/loom-kb/device/rdna3/gfx1150 card.host_setup); these runs had no root and used an LD_PRELOAD that turns io_uring off (host I/O only)"
+  "host": "stock Ubuntu (RLIMIT_MEMLOCK 8 MiB, no root, no preload): loom-serve runs under the gfx1150 registry row's card.serve_prefix (systemd-run --user ... SystemCallFilter=~io_uring_setup), which makes hrx-loom use its POSIX I/O backend; every result below was measured that way"
  },
  "provenance": {
   "kind": "machine",
@@ -61,107 +61,107 @@
        "metrics": {
         "decode": {
          "acceptance": 0.327,
-         "baseline": 20.4,
+         "baseline": 21.7,
          "baseline_runs": [
-          19.93,
-          20.93
+          20.56,
+          22.87
          ],
          "loom": 31.1,
          "loom_runs": [
-          31.105
+          31.1
          ]
         },
         "decode_2k": {
-         "acceptance": 0.422,
-         "baseline": 24.1,
+         "acceptance": 0.418,
+         "baseline": 24.0,
          "baseline_runs": [
-          23.34,
-          24.81
+          24.32,
+          23.77
          ],
-         "loom": 28.4,
+         "loom": 28.2,
          "loom_runs": [
-          28.365000000000002
+          28.155
          ]
         },
         "decode_32k": {
-         "acceptance": 0.383,
-         "baseline": 16.1,
+         "acceptance": 0.392,
+         "baseline": 17.2,
          "baseline_runs": [
-          15.41,
-          16.84
+          17.43,
+          16.99
          ],
-         "loom": 21.9,
+         "loom": 22.4,
          "loom_runs": [
-          21.86
+          22.375
          ]
         },
         "prefill_16k": {
-         "baseline": 510.0,
+         "baseline": 497.2,
          "baseline_runs": [
-          509.7,
-          510.3
+          497.2,
+          497.2
          ],
-         "loom": 1026.9,
+         "loom": 1040.7,
          "loom_runs": [
-          1026.9
+          1040.65
          ]
         },
         "prefill_1k": {
-         "baseline": 702.0,
+         "baseline": 702.7,
          "baseline_runs": [
-          700.9,
-          703.1
+          704.2,
+          701.2
          ],
-         "loom": 994.7,
+         "loom": 995.5,
          "loom_runs": [
-          994.7
+          995.5
          ]
         },
         "prefill_2k": {
-         "baseline": 705.8,
+         "baseline": 703.4,
          "baseline_runs": [
-          707.1,
-          704.5
+          703.4,
+          703.4
          ],
-         "loom": 1018.0,
+         "loom": 1016.4,
          "loom_runs": [
-          1018.0
+          1016.4
          ]
         },
         "prefill_32k": {
-         "baseline": 361.6,
+         "baseline": 356.8,
          "baseline_runs": [
-          361.4,
-          361.8
+          357.1,
+          356.5
          ],
-         "loom": 914.2,
+         "loom": 929.2,
          "loom_runs": [
-          914.25
+          929.1500000000001
          ]
         },
         "prefill_8k": {
-         "baseline": 636.0,
+         "baseline": 624.7,
          "baseline_runs": [
-          636.4,
-          635.7
+          624.6,
+          624.7
          ],
-         "loom": 1010.8,
+         "loom": 1021.2,
          "loom_runs": [
-          1010.75
+          1021.25
          ]
         },
         "streams4": {
-         "baseline": 71.4,
+         "baseline": 74.4,
          "baseline_runs": [
-          74.0,
-          71.4,
-          66.4
+          74.4,
+          74.6,
+          73.1
          ],
-         "loom": 81.8,
+         "loom": 82.3,
          "loom_runs": [
-          82.0,
           81.8,
-          81.7
+          82.8,
+          82.3
          ]
         }
        },
@@ -217,67 +217,67 @@
        "date": "2026-11-16",
        "metrics": {
         "decode": {
-         "baseline": 20.8,
+         "baseline": 21.1,
          "baseline_runs": [
-          20.13,
-          21.49
+          21.11,
+          21.15
          ]
         },
         "decode_2k": {
-         "baseline": 23.0,
+         "baseline": 21.2,
          "baseline_runs": [
-          22.65,
-          23.42
+          21.55,
+          20.88
          ]
         },
         "decode_32k": {
-         "baseline": 14.4,
+         "baseline": 14.5,
          "baseline_runs": [
-          14.39,
-          14.35
+          14.84,
+          14.19
          ]
         },
         "prefill_16k": {
-         "baseline": 584.0,
+         "baseline": 583.4,
          "baseline_runs": [
-          583.3,
-          584.8
+          582.5,
+          584.2
          ]
         },
         "prefill_1k": {
-         "baseline": 615.1,
+         "baseline": 608.0,
          "baseline_runs": [
-          608.0,
-          622.2
+          596.0,
+          620.0
          ]
         },
         "prefill_2k": {
-         "baseline": 644.0,
+         "baseline": 640.5,
          "baseline_runs": [
-          643.5,
-          644.4
+          640.3,
+          640.6
          ]
         },
         "prefill_32k": {
-         "baseline": 495.6,
+         "baseline": 495.1,
          "baseline_runs": [
-          494.8,
-          496.3
+          494.5,
+          495.8
          ]
         },
         "prefill_8k": {
-         "baseline": 633.8,
+         "baseline": 631.5,
          "baseline_runs": [
-          632.9,
-          634.6
+          630.8,
+          632.3
          ]
         },
         "streams4": {
-         "baseline": 68.9,
+         "baseline": 69.4,
          "baseline_runs": [
-          68.7,
-          69.0,
-          68.9
+          69.4,
+          69.3,
+          69.5
          ]
         }
        },
@@ -323,7 +323,7 @@
         "url": null
        },
        "status": "pass",
-       "time": "2026-11-16T18:35:00Z"
+       "time": "2026-11-16T21:10:00Z"
       },
       {
        "detail": null,
@@ -349,7 +349,7 @@
         "url": null
        },
        "status": "pass",
-       "time": "2026-11-16T18:35:00Z"
+       "time": "2026-11-16T21:10:00Z"
       },
       {
        "detail": null,
@@ -375,7 +375,7 @@
         "url": null
        },
        "status": "pass",
-       "time": "2026-11-16T18:35:00Z"
+       "time": "2026-11-16T21:10:00Z"
       },
       {
        "detail": null,
@@ -401,7 +401,7 @@
         "url": null
        },
        "status": "pass",
-       "time": "2026-11-16T18:35:00Z"
+       "time": "2026-11-16T21:10:00Z"
       },
       {
        "detail": null,
@@ -427,7 +427,7 @@
         "url": null
        },
        "status": "pass",
-       "time": "2026-11-16T18:35:00Z"
+       "time": "2026-11-16T21:10:00Z"
       },
       {
        "detail": null,
@@ -453,7 +453,7 @@
         "url": null
        },
        "status": "pass",
-       "time": "2026-11-16T18:35:00Z"
+       "time": "2026-11-16T21:10:00Z"
       },
       {
        "detail": null,
@@ -479,7 +479,7 @@
         "url": null
        },
        "status": "pass",
-       "time": "2026-11-16T18:35:00Z"
+       "time": "2026-11-16T21:10:00Z"
       },
       {
        "detail": null,
@@ -505,7 +505,7 @@
         "url": null
        },
        "status": "pass",
-       "time": "2026-11-16T18:35:00Z"
+       "time": "2026-11-16T21:10:00Z"
       }
      ],
      "gpu": "gfx1150",
@@ -601,7 +601,7 @@
       "tool": {
        "script": "skills/loom-roofline/roofline.py",
        "sha256": "f0bb822790da2e463618a92c3e9b367b2bdb7794c5bb5312827542a3ae14796c",
-       "skills_commit": "823a380e3fa99aab073105521d58f96b8689280f"
+       "skills_commit": "0c531603d7b7e39a1304e9af4e7b7ec5e201b6fb"
       }
      }
     }
