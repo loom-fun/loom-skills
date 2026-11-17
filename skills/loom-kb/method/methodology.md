@@ -5,6 +5,13 @@ file (a test checks that the numbers stated here match it). Other skills link he
 two or three lines; if they disagree with this file, this file wins and the other text is a bug. Code: `scripts/card/matched_spec.py`
 (`TIE_BAND`, `outcome`, `tally`, `rule_violations`) and `data/drafting_classification.json`; tests: `scripts/card/test/check.sh`.
 
+## Contents
+
+- Drafting (one choice per model)
+- Which configuration each row runs
+- Reading the result
+- Card text and publishing (incl. rule 15: reuse stored measurements)
+
 ## Drafting (one choice per model)
 
 1. **One drafting choice per model, used by both Loom and llama.cpp (ROCm and Vulkan).** In order: an MTP head in the card's own
@@ -80,7 +87,7 @@ two or three lines; if they disagree with this file, this file wins and the othe
     line). A GPU without results for this package is `not_measured` (one factual line, no numbers copied from another package or
     program). Publishing goes to one org (`publish_package.py upload --org`, default `loom-fun`); the staging flow uses `--org
     loom-fun-staging` with the same repo names, and a card whose `info.json` repo is another org is refused.
-13. **A/B verdicts use a band per row** (`methodology.json` `rows`; same runner, ABBA, medians of sessions). A row PASSes when its new/old
+13. **A/B verdicts use a band per row** (`methodology.json` `rows`; same runner, ABBA, medians of sessions; for unchanged inputs only to confirm a row that moved, rule 15). A row PASSes when its new/old
     ratio is within the band; there is no geomean: a gain on one row never pays for a loss on another. Not the card's tie band (rule 7),
     which stays +-3 % on every row. Bands (+-, and the ratio below which a 2+2-session canary rejects):
     <!-- bands -->
@@ -95,6 +102,7 @@ two or three lines; if they disagree with this file, this file wins and the othe
     Acceptance rows are informational: reported, never a rerun or out_of_margin verdict alone. The ratchet's two runs may be concurrent replicas of one submission (`ab_jobs.py --replicas 2`) on different runners (`promote_check.py` records the runner names; one runner twice = two session sets, said so); the rule is unchanged. `--sequential` extends 2+2 to 6+6 inside the job. **Runner health:** an OLD side >10 % off the published card (Strix: loom-fun; R9700: staging) on any decode/prefill row (`runner_guard`) makes the run `degraded_runner` (compare verdict `rerun`): never a promotion or a regression; rerun on another runner.
 14. **An unchanged default path keeps its evidence.** When `fleet/stage_equiv.py` proves a package's default-path stages identical to the measured one's, `make_info.py equivalent` carries that GPU's performance rows (the card names the proof); any other change re-measures.
     Host logits are the gates `logits` and `gufo` (`devlab_perf.sh` steps `logits:V`, `gufo:V`), never a performance row. The `logits` gate's llama.cpp comparison follows the golden (`logits_check.py`): top-1 equal per step (a divergence is judged by `near_tie` and ends that prompt); the other top-5 tokens both engines list agree within a tolerance by probability (larger p >= 0.5: 1.0 nat, >= 0.01: 1.5, >= 1e-4: 3.0, below: not compared), tiers set from the measured differences of one GGUF through the two engines' quantized matmuls (small dense <= 0.7 nat; mid-size/MoE 1.2 at p~0.1, 2.7 at p~1e-3); token spellings are normalized (special tokens, a sentencepiece piece's leading space) and tokens that print alike count by their best entry; llama.cpp's references are recorded and its server stopped before Gufo loads.
+15. **Unchanged inputs keep their measurements (owner rule).** A stored row stays valid, and is reused, while every input it measured is unchanged, on the same GPU type (`strix-halo`, `radeon-r9700`, ...; any runner of that type): the model files (the GGUF, its drafter or MTP head, and for Loom the package programs), the engine binary (the llama.cpp build tag per backend, ROCm and Vulkan; the hrx-loom version), and the run configuration (llama.cpp server flags and drafting classification, Loom preset and wait mode). Never re-run a row only to have it "in the same job". An SDK or package change re-measures Loom only, never llama.cpp; a card reuses its stored llama.cpp rows; an old-vs-new A/B compares against the old package's stored rows and runs a same-runner ABBA job (rule 13) only to confirm a row that moved beyond its band (`methodology.json` `rows`). The card names each side's run and date, so a cross-job comparison is stated. Re-measure only when an input changed, the stored row came from a `degraded_runner`, or the row was never measured.
 
 Local qualification (`qualify.sh`, `llama_spec_tune.py`, `tune.py`) is a development loop: its tables guide the optimizer, are
 not card numbers, and may try configurations the card rule excludes. Audit a card with `matched_spec.rule_violations`.

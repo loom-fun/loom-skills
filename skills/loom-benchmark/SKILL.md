@@ -230,9 +230,12 @@ $T "$S/c4_steady.py" http://127.0.0.1:8160 4 --model <id>;  $T "$S/c4_steady.py"
 | c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding, after the untimed warm-up passes (rates in `warmup_agg_tps`). Use this for "N requests at once". A run in which a stream failed exits 1 and records nothing (`make_info.py` also skips a rate <= 0). |
 
 Rules:
-- A card's numbers come from one `devlab-perf` job: Loom (card programs, active wait: `serve.sh` serves
+- A card's numbers come from `devlab-perf` jobs: Loom (card programs, active wait: `serve.sh` serves
   `--device=amdgpu` as `amdgpu://?completion_spin_ns=4294967295`, `LOOM_ACTIVE_WAIT=0` opts out for A/B only) and
-  llama.cpp on the same runner (`loom-fleet` publish.md step 3). Local runs are for development, never card numbers, and a Loom
+  llama.cpp on the same runner type (`loom-fleet` publish.md step 3).
+- Stored rows are reused while their inputs are unchanged (methodology rule 15): a Loom-only change re-measures Loom only,
+  and the card names each side's run.
+- Local runs are for development, never card numbers, and a Loom
   number measured without the active wait is not comparable. A job's variant comparisons (`devlab-perf`,
   `devlab-experiment`) compare within that job only.
 - Sampling (`reference/methodology.md` rule 5): every metric is the median over sessions (rounds) of each session's

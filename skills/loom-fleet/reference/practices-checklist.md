@@ -102,6 +102,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | 54 | No models above 35B on a local machine | brief; owner rule | `campaign.md` "Baselines, quant, models, gates" |
 | 55 | No needle gates; keep the cheap admission probe; expensive gates nightly | brief; owner rules | `campaign.md` "Baselines, quant, models, gates"; `skills/loom-benchmark/SKILL.md` |
 | 56 | Speculative decoding on by default when the GGUF supports it; optimizer picks method and depth | owner rule | `campaign.md` "Baselines, quant, models, gates"; `skills/loom-kb/topic/spec-tuning.md` |
+| 57 | Reuse stored measurements when model files and engine binary are unchanged; re-measure only what changed | owner rule (2026-11-16) | `skills/loom-kb/method/methodology.md` rule 15; `campaign.md` "Baselines, quant, models, gates" |
 
 ## Publishing and reporting
 

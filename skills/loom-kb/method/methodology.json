@@ -180,7 +180,7 @@
     }
   },
   "baselines": {
-    "note": "llama.cpp builds every Loom-vs-llama.cpp comparison on that device uses (one pinned build per backend, same job as Loom)",
+    "note": "llama.cpp builds every Loom-vs-llama.cpp comparison on that device uses (one pinned build per backend; its stored rows are reused across jobs while the build and GGUF are unchanged, methodology rule 15)",
     "strix-halo": {
       "rocm": {
         "build": "per card (nightly-models.json llamacpp)",
