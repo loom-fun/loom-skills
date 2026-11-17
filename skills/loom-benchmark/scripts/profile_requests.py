@@ -9,6 +9,8 @@ usage: profile_requests.py URL MODEL SCENARIO [--reps K] [--depth D] [--tokens N
 Prints one JSON line: scenario, requests (prompt/completion tokens, ttft, decode tok/s), draft counter deltas."""
 import argparse
 import json
+import os
+from pathlib import Path
 import time
 
 from bench_common import doc, server_draft_counters, stream, thinking_extra
@@ -18,18 +20,61 @@ ap.add_argument("url")
 ap.add_argument("model")
 ap.add_argument("scenario", choices=["probe", "pf2k", "pf8k", "dec"])
 ap.add_argument("--reps", type=int, default=3)
-ap.add_argument("--tokens", type=int, default=400)
+ap.add_argument("--tokens", type=int, default=int(os.environ.get("LOOM_PROFILE_TOKENS", "400")))
+ap.add_argument("--literal-decode", action="store_true", default=os.environ.get("LOOM_PROFILE_LITERAL_DECODE") == "1",
+                help="profile perf.py's exact short-decode prompt without a nonce (diagnostic only)")
+ap.add_argument("--process-io", action="store_true", default=os.environ.get("LOOM_PROFILE_PROCESS_IO") == "1")
+ap.add_argument("--trace-gaps", action="store_true", default=os.environ.get("LOOM_PROFILE_TRACE_GAPS") == "1")
+ap.add_argument("--timeout", type=float, default=float(os.environ.get("LOOM_PROFILE_TIMEOUT", "300")),
+                help="per-request connect/read timeout in seconds")
 a = ap.parse_args()
 TH = thinking_extra("off")
 nonce = str(time.time())
 
 
+
+def process_snapshot():
+    """Best-effort counters of the one served process; diagnostic evidence, never a timing filter."""
+    snapshots = {}
+    state = os.environ.get("LOOM_SERVE_STATE")
+    if not a.process_io or not state:
+        return snapshots
+    for pid_file in Path(state).glob("perf-*.pid"):
+        try:
+            pid = int(pid_file.read_text().strip())
+            proc = Path("/proc") / str(pid)
+            counters = {key: int(value) for key, value in
+                        (line.split(":", 1) for line in (proc / "io").read_text().splitlines())}
+            # The executable name in parentheses may contain spaces.
+            fields = (proc / "stat").read_text().rsplit(")", 1)[1].split()
+            counters.update(minor_faults=int(fields[7]), major_faults=int(fields[9]))
+            snapshots[str(pid)] = counters
+        except (OSError, ValueError, IndexError):
+            continue
+    return snapshots
+
+
+def counter_delta(before, after):
+    return {pid: {key: value - before[pid].get(key, 0) for key, value in counters.items()}
+            for pid, counters in after.items() if pid in before}
+
+
 def go(content, n):
-    s = stream(a.url, a.model, [{"role": "user", "content": content}], n, extra=TH)
+    arrivals = []
+    process_before = process_snapshot()
+    s = stream(a.url, a.model, [{"role": "user", "content": content}], n, extra=TH, timeout=a.timeout,
+               on_token=arrivals.append if a.trace_gaps else None)
     if s["status"] != 200:
         raise SystemExit(f"HTTP {s['status']}: {s.get('error')}")
-    return {"prompt_tokens": s["prompt_tokens"], "completion_tokens": s["tokens"], "ttft_s": round(s["ttft"], 4),
+    result = {"prompt_tokens": s["prompt_tokens"], "completion_tokens": s["tokens"], "ttft_s": round(s["ttft"], 4),
             "decode_tps": s["decode_tps"] and round(s["decode_tps"], 2), "total_s": round(s["total"], 3)}
+    if a.process_io:
+        result["process_counter_delta"] = counter_delta(process_before, process_snapshot())
+    if a.trace_gaps:
+        gaps = [round(right - left, 6) for left, right in zip(arrivals, arrivals[1:])]
+        result["stream_chunk_gaps_s"] = gaps
+        result["max_stream_chunk_gap_s"] = max(gaps, default=0)
+    return result
 
 
 out = {"scenario": a.scenario, "warmup": go(f"[warm-up {nonce}] Say hi.", 2)}
@@ -41,7 +86,10 @@ if a.scenario != "probe":
         for i in range(a.reps):
             reqs.append(go(f"[{nonce} {i}] Summarize this documentation in one sentence.\n\n" + doc(n), 2))
     else:
-        reqs.append(go(f"[{nonce}] Write a detailed 300-word essay about the history of the printing press.", a.tokens))
+        essay = "Write a detailed 300-word essay about the history of the printing press."
+        content = essay if a.literal_decode else f"[{nonce}] {essay}"
+        out["prompt_mode"] = "literal-perf" if a.literal_decode else "nonce"
+        reqs.append(go(content, a.tokens))
     after = server_draft_counters(a.url)
     out["requests"] = reqs
     out["draft"] = {k: after.get(k, 0) - before.get(k, 0) for k in after}

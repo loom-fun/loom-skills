@@ -4,31 +4,41 @@
  "kit": "qwen4exp",
  "memory_bytes": 97000000000,
  "sdk": "0.2.0",
+ "env": {
+  "LOOM_PROFILE_LITERAL_DECODE": "1",
+  "LOOM_PROFILE_TRACE_GAPS": "1",
+  "LOOM_PROFILE_PROCESS_IO": "1",
+  "LOOM_PROFILE_TOKENS": "300",
+  "LOOM_PROFILE_TIMEOUT": "120"
+ },
  "jobs": [
   {
-   "name": "flashnext-1196-profile",
+   "name": "flashnext-1196-literal",
    "variants": [
     {
-     "name": "old",
-     "card": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom@b36dcc87f84aa552ff6b76d534efb61474d805a9"
+     "name": "currenta"
     },
     {
-     "name": "oldnew",
-     "card": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom@b36dcc87f84aa552ff6b76d534efb61474d805a9",
-     "sdk": "0.2.0"
+     "name": "oldabia",
+     "build": {
+      "VISION": "0"
+     }
     },
     {
-     "name": "new"
+     "name": "oldabib",
+     "build": {
+      "VISION": "0"
+     }
+    },
+    {
+     "name": "currentb"
     }
    ],
    "steps": [
-    "perf:old:1",
-    "perf:new:1",
-    "perf:new:1",
-    "perf:old:1",
-    "profile:old:dec,pf2k",
-    "profile:new:dec,pf2k",
-    "profile:oldnew:dec,pf2k"
+    "profile:currenta:dec",
+    "profile:oldabia:dec",
+    "profile:oldabib:dec",
+    "profile:currentb:dec"
    ]
   }
  ]
