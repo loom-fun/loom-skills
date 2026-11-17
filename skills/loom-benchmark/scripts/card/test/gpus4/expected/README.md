@@ -27,6 +27,19 @@ loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resol
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
+- `--materialize=copy` puts copies of the fetched package files in the output directory.
+- `completion_spin_ns=4294967295` enables active waiting for GPU completions (uses CPU while GPU work is in flight); the card's performance measurements use this setting.
+- `--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.
+- `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
+
+In another terminal, send a request (optional thinking is turned off):
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
+```
+
 </details>
 
 <details>
@@ -38,7 +51,20 @@ loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resol
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
+- `--materialize=copy` puts copies of the fetched package files in the output directory.
+- `completion_spin_ns=4294967295` enables active waiting for GPU completions (uses CPU while GPU work is in flight); the card's performance measurements use this setting.
+- `--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.
+- `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
+
 On this GPU, the package's preset sizes the memory pool (`--pool_backing=fixed` commits it up front): this package serves up to 20,480 tokens per request (its native context is 40,960).
+
+In another terminal, send a request (optional thinking is turned off):
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
+```
 
 </details>
 
@@ -51,7 +77,22 @@ loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resol
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=15000000000 --state_slab_bytes=4mib --weight_slab_bytes=64mib --parameter_mode=preload
 ```
 
+- `--materialize=copy` puts copies of the fetched package files in the output directory.
+- `completion_spin_ns=4294967295` enables active waiting for GPU completions (uses CPU while GPU work is in flight); the card's performance measurements use this setting.
+- `--memory_bytes` sets the serving memory budget for this GPU.
+- `--state_slab_bytes` sets the allocation slab size for state memory.
+- `--weight_slab_bytes` sets the allocation slab size for weight memory.
+- `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
+
 On this GPU, `--memory_bytes=15000000000` bounds the memory pool: this package serves up to 18,432 tokens per request (its native context is 40,960).
+
+In another terminal, send a request (optional thinking is turned off):
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
+```
 
 </details>
 
@@ -64,11 +105,21 @@ loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resol
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=17000000000
 ```
 
+- `--materialize=copy` puts copies of the fetched package files in the output directory.
+- `completion_spin_ns=4294967295` enables active waiting for GPU completions (uses CPU while GPU work is in flight); the card's performance measurements use this setting.
+- `--memory_bytes` sets the serving memory budget for this GPU.
+
 On this GPU, `--memory_bytes=17000000000` bounds the memory pool: this package serves up to 16,384 tokens per request (its native context is 40,960).
 
-</details>
+In another terminal, send a request (optional thinking is turned off):
 
-`--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
+```
+
+</details>
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
@@ -80,7 +131,7 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 
 ### Radeon AI PRO R9700 / gfx1201 16 GB (gfx1201, 32 GB / 16 GB)
 
-| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline | llama.cpp Vulkan |
+| metric | llama.cpp | Loom | margin vs best llama.cpp | roofline | Loom % of roofline | llama.cpp Vulkan |
 |---|---|---|---|---|---|---|
 | decode tok/s, short prompt | 781.9 | 1023.4 | +31 % | 1535.5 | 67 % | 744.4 |
 | decode tok/s, 2k context | 638.9 | 841.0 | +32 % | 967.5 | 87 % | 609.6 |
@@ -103,6 +154,7 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 - llama.cpp ROCm server arguments: `-ngl 99 -cram 0 -c 65536 -kvu -np 4`.
 - llama.cpp Vulkan server arguments: `-ngl 99 -cram 0 -c 65536 -kvu -np 4`.
 - Measured on AMD DevLab Dispatch R9700 runners (`devlab-perf` jobs); runners differ between sessions.
+- Margin vs best llama.cpp: (Loom / max(ROCm, Vulkan) - 1) × 100 %, using the available measured tokens/s for each row on this GPU. With only one valid backend, that backend is used; with neither, the margin is not measured. Raw backend values and their measurement sources are retained below and in the table.
 - Measured 2026-11-14; device TEST FIXTURE: made-up numbers, not a measurement, AMD Radeon AI PRO R9700S (gfx1201), Ubuntu 24.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: [DevLab Dispatch run 9000001](https://github.com/loom-fun/loom-skills/actions/runs/9000001).
 - llama.cpp Vulkan: measured 2026-11-14; source: [DevLab Dispatch run 9000001](https://github.com/loom-fun/loom-skills/actions/runs/9000001). Archive sha256 `aabbccd`.
 - Roofline: the hardware ceiling for this GGUF on AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz) at 600 GB/s and 77 TFLOP/s, from loom-roofline `roofline.py` (loom-skills `0123456`).
@@ -113,7 +165,7 @@ The AMD Radeon gfx1201 16 GB class (RX 9070 XT, RX 9070) shares this section: it
 
 ### Radeon 890M (gfx1150)
 
-| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline |
+| metric | llama.cpp | Loom | margin vs best llama.cpp | roofline | Loom % of roofline |
 |---|---|---|---|---|---|
 | decode tok/s, short prompt | 781.9 | 1023.4 | +31 % | — | — |
 | decode tok/s, 2k context | 638.9 | 841.0 | +32 % | — | — |
@@ -135,6 +187,7 @@ The AMD Radeon gfx1201 16 GB class (RX 9070 XT, RX 9070) shares this section: it
 - Rows: decode = short-context decode; decode_2k / decode_32k = decode after a ~2k / ~32k-token context; prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode. A margin within +-3 % (the measured same-runner noise) is a tie.
 - llama.cpp ROCm server arguments: `-ngl 99 -cram 0 -c 65536 -kvu -np 4`.
 - Measured on fixture lab host gfx1150-01 (AMD Ryzen AI 9 HX 370), AMD Radeon 890M (gfx1150), Ubuntu 24.04, a named machine (this GPU has no DevLab runner); both engines ran on it.
+- Margin vs best llama.cpp: (Loom / max(ROCm, Vulkan) - 1) × 100 %, using the available measured tokens/s for each row on this GPU. With only one valid backend, that backend is used; with neither, the margin is not measured. Raw backend values and their measurement sources are retained below and in the table.
 - Measured 2026-11-14; device fixture lab host gfx1150-01 (AMD Ryzen AI 9 HX 370), AMD Radeon 890M (gfx1150), Ubuntu 24.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: named-machine run.
 - Roofline: not computed.
 - doesn't fit (decode_32k, prefill_32k): the document is longer than the 16,384-token context this GPU serves; not expected to be measured, not a failure.
