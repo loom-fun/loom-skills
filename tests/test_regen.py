@@ -635,6 +635,35 @@ class SdkLoomTest(Base):
             regen.main(["accept-regression", self.state, SLUG, "--note", "SDK"])
         self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "collected")
 
+    def test_accept_gate_failure_only_kernel_tests(self):
+        st = self.plan_loom() if hasattr(self, "plan_loom") else self.plan("--mode", "sdk-loom")
+        e = st.jobs[JOB]
+        cmp = os.path.join(self.tmp, "cmp_gate.json")
+        metrics = {r: {"new": 100.0, "card": 100.0, "new_vs_card": 1.0} for r in regen.SDK_METRICS.values()}
+        json.dump({"gate_failures": ["ktest:staging"], "metrics": metrics}, open(cmp, "w"))
+        e.update(stage="needs_decision", decision="hold", cmp=cmp, reason="confirmed regression / failed gate / text difference: gate failed: ktest:staging")
+        st.save()
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-gate-failure", self.state, SLUG, "--note", "same case failed on the 0.1.0 card"])
+        e = regen.State(self.state).jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("collected", "promote"))
+        self.assertIn("ktest:staging failed, published as failed", e["accepted_gate_failure"])
+        self.assertEqual(json.load(open(cmp))["gate_failures"], ["ktest:staging"])   # the job's evidence is untouched: the card shows the failure
+        self.assertIn("published as failed", regen.card_message(e, "strix-halo", "9", True, True))
+        # a func / serving gate is never accepted
+        st = regen.State(self.state)
+        json.dump({"gate_failures": ["ktest:staging", "func:staging"], "metrics": metrics}, open(cmp, "w"))
+        st.jobs[JOB].update(stage="needs_decision", decision="hold"); st.save()
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-gate-failure", self.state, SLUG, "--note", "x"])
+        self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "needs_decision")
+        # perf rows outside the band still ask for the confirming job
+        json.dump({"gate_failures": ["ktest:staging"], "metrics": {**metrics, "prefill_8k": {"new": 90.0, "card": 100.0, "new_vs_card": 0.9}}}, open(cmp, "w"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-gate-failure", self.state, SLUG, "--note", "x"])
+        e = regen.State(self.state).jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("collected", "confirm"))
+
     def test_card_message_per_mode_and_accepted_note(self):
         e = {"perf": {"decode": 1.0, "prefill": -7.4, "longctx": 0.0, "4stream": 0.2}, "confirmed": {"prefill": -7.4},
              "accepted_regression": "U1: SDK runtime (notes) (was: ...)"}
