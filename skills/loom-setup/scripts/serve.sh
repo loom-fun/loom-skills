@@ -3,6 +3,7 @@
 # usage: VENV=~/loom/.venv serve.sh NAME PORT DEVICE MEMORY_BYTES MODEL_JSON [MODEL_JSON...] [-- extra loom-serve flags]
 #   DEVICE: amdgpu | 'xdna://0?columns=8' (NPU; add -- --pool_backing=fixed)
 #   MEMORY_BYTES: always set it (or `none` with -- --pool_backing=fixed, which sizes its pools itself) (e.g. 16000000000); it caps weights + KV pool + workspace.
+#   LOOM_MEMNEED=N with MEMORY_BYTES none: N bytes is what the fixed backing may commit; memcheck.sh checks it as it checks a budget.
 #   amdgpu gets ?completion_spin_ns=4294967295 (active wait): Loom's retire thread spins on the GPU's completion
 #   signal while work is in flight (one core, 0% when idle) instead of parking on the KFD interrupt. On Strix Halo
 #   firmware that keys the memory-fabric clocks to CPU activity (SMU 0x0a640600, BIOS 1.12: AMD DevLab), a parked
@@ -43,6 +44,7 @@ if [ ${#models[@]} -gt 0 ] && [ -f "$(dirname "${models[0]#--model=}")/llm_confi
     case " $pkgargs " in *" --pool_backing=fixed "*) echo "serve.sh: the package serves with $pkgargs (no --memory_bytes); committed ${pkgbytes:-unknown} bytes" >&2; mem=none; memneed=${pkgbytes:-};; esac
   fi
 fi
+[ "$mem" = none ] && [ -z "${memneed:-}" ] && [ -n "${LOOM_MEMNEED:-}" ] && [ "${LOOM_MEMNEED}" != none ] && memneed=$LOOM_MEMNEED   # caller's bound on what fixed backing commits (memcheck)
 memflag=(--memory_bytes=$mem); [ "$mem" != none ] || memflag=()   # MEMORY_BYTES=none: no cap (--pool_backing=fixed takes none)
 [ "$dev" != amdgpu ] || { [ "$mem" = none ] && [ -z "${memneed:-}" ]; } || "$(dirname "$0")/memcheck.sh" "${memneed:-$mem}" "loom-serve ${extra[*]:-} --memory_bytes=${mem}" || exit 1   # only budgets above the cap are checked
 nohup "$bin/loom-serve" --device="$dev" --listen=127.0.0.1:$port "${memflag[@]}" "${waitflag[@]}" --workers=8 "${models[@]}" "${extra[@]}" > $state/$name.log 2>&1 &

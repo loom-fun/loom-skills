@@ -30,7 +30,7 @@ builds cards the same way): nothing here is measured by the renderer.
 | `date` (required) | when `fits` and `max_context` were established |
 | `max_context` | tokens per request the GPU admits (required when `fits`). Below the native context: the card says `serves up to N tokens per request` and `served_context` is recorded |
 | `native_context` | informational |
-| `serve_args` | the `loom-serve` flags the Quick start prints for this GPU and model, e.g. `["--memory_bytes=15000000000", "--state_slab_bytes=4mib"]`. `[]`: the package's own memory budget (like Strix Halo). Absent: the GPU's registry flags |
+| `serve_args` | the `loom-serve` flags the Quick start prints for this GPU and model, e.g. `["--memory_bytes=15000000000", "--state_slab_bytes=4mib"]`. `[]`: the package's own memory budget (like gfx1150). Absent: the GPU's registry flags |
 | `execution` | preset overrides over the base preset (`prefill_capacity`, `context_capacity`, `rows`, `draft_depth`); written into the GPU's preset together with `context_capacity` = `max_context` |
 | `evidence` | when measured: `loom-card-evidence/2` documents of this GPU for this model, exactly what `make_info.py perf` / `gates` / `roofline` write, with a **`machine`** source (provenance: the named host, its device block and SDK). A performance session needs `--source-kind machine`; gates may use `machine` or `local` |
 | `note` | one factual line for file readers (not printed) |

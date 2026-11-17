@@ -387,14 +387,17 @@ serve_alone() { # serve_alone VARIANT
   # every GPU is served as its card's Quick start serves it: the registry device's card.serve_args (card_lib.GPUS "serve_args": --pool_backing=fixed on the
   # R9700 and on Strix Halo, no --memory_bytes; the R9700's elastic trim + compaction stalls the long-prefill rows, hrx-loom 0.2.0's elastic backing
   # costs Strix prefill, notes u1_rootcause), unless the variant brings its own serve_args/memory_bytes or is "elastic": true (--memory_bytes on any GPU)
-  gsa=$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.gpu_serve_args(sys.argv[2])))" "$here/skills/loom-benchmark/scripts/card" "${RDEV:-strix-halo}")
+  gsa=$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.gpu_serve_args(sys.argv[2])))" "$here/skills/loom-benchmark/scripts/card" "${RDEV:-strix-halo}") \
+    || { echo "FAIL: card_lib.gpu_serve_args(${RDEV:-strix-halo}) (the device's card serve flags)"; return 1; }
+  local memneed=""
   if [ -n "$gsa" ] && [[ "$sa" != *--pool_backing=* ]] && [ "$(qv "$1" "print(bool(v.get('elastic') or v.get('memory_bytes')))")" = False ]; then
     sa="$gsa $sa"
+    memneed=$vmem   # the elastic budget bounds what fixed backing commits: serve.sh's memcheck still guards the host (Strix memory is host RAM)
     vmem=none
   fi
   sdk_root "$1" || { echo "FAIL: SDK of variant $1"; return 1; }; local vroot=$SDKR
   export LOOM_ROOT=$vroot VENV=$vroot/.venv   # the variant's SDK serves it (and runs gates / kernel tests on it)
-  step "serve $1 (SDK root $vroot)"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
+  step "serve $1 (SDK root $vroot)"; LOOM_MEMNEED=$memneed LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null
 }
