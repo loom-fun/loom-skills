@@ -154,6 +154,19 @@ cleanup() {
   echo "devlab_perf.sh: servers stopped"
 }
 trap cleanup EXIT
+# PILOT (preload experiment): host limits of this runner + MemAvailable / loom-serve RSS every 2 s per variant (curvar), watchdog kills loom-serve below 4 GiB
+{ echo "uname -r: $(uname -r)"; echo "ulimit -l (RLIMIT_MEMLOCK, KiB): $(ulimit -l)"; ulimit -a; echo "host $(hostname)"; free -m; } > "$out/limits.txt" 2>&1
+echo "PILOT limits: $(uname -r) ulimit -l=$(ulimit -l) host $(hostname)"
+if [ "${PRELOAD_PILOT:-0}" = 1 ]; then
+  ( while :; do
+      ma=$(awk '/^MemAvailable/{print int($2/1024)}' /proc/meminfo); rss=0
+      for p in $(pgrep -f 'bin/loom-serve'); do r=$(awk '/^VmRSS/{print int($2/1024)}' /proc/$p/status 2>/dev/null); rss=$((rss + ${r:-0})); done
+      gtt=$(cat /sys/class/drm/card*/device/mem_info_gtt_used 2>/dev/null | awk '{s+=$1} END{print int(s/1048576)}'); vram=$(cat /sys/class/drm/card*/device/mem_info_vram_used 2>/dev/null | awk '{s+=$1} END{print int(s/1048576)}')
+      echo "$(date +%T) $(cat "$D/curvar" 2>/dev/null || echo -) $ma $rss $gtt $vram" >> "$out/memsamples.txt"
+      if [ "$ma" -lt 4096 ]; then echo "$(date +%T) WATCHDOG MemAvailable ${ma} MiB: killing loom-serve" >> "$out/memsamples.txt"; pkill -f 'bin/loom-serve'; fi
+      sleep 2; done ) &
+  SAMPLER=$!; trap 'kill $SAMPLER 2>/dev/null; cleanup' EXIT
+fi
 
 # 1. Loom SDK + tools venv: the SDK the card pins in its llm_config.json (ensure_sdk.sh), else the default
 step "Loom SDK"
@@ -391,6 +404,7 @@ serve_alone() { # serve_alone VARIANT
   fi
   sdk_root "$1" || { echo "FAIL: SDK of variant $1"; return 1; }; local vroot=$SDKR
   export LOOM_ROOT=$vroot VENV=$vroot/.venv   # the variant's SDK serves it (and runs gates / kernel tests on it)
+  echo "$1" > "$D/curvar"
   step "serve $1 (SDK root $vroot)"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null
