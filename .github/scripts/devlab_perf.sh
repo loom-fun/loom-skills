@@ -392,6 +392,7 @@ serve_alone() { # serve_alone VARIANT
     || { echo "FAIL: card_lib.package_serve_args(${RDEV:-strix-halo}) (the device's card serve flags)"; return 1; }
   local memneed=""
   if [ -n "$gsa" ] && [[ "$sa" != *--pool_backing=* ]] && [ "$(qv "$1" "print(bool(v.get('elastic') or v.get('memory_bytes')))")" = False ]; then
+    [[ "$sa" == *--parameter_mode=* ]] && gsa=$(printf '%s\n' $gsa | grep -v -- '^--parameter_mode=' | tr '\n' ' ')   # the variant's own parameter mode wins
     sa="$gsa $sa"
     memneed=$vmem   # the elastic budget bounds what fixed backing commits: serve.sh's memcheck still guards the host (Strix memory is host RAM)
     vmem=none

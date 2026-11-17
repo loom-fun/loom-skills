@@ -42,6 +42,7 @@ Everything the hand-run recipe did is a step here; only judgement stops a model 
 Run with a python that has huggingface_hub and gguf (the tools venv); GPU work only through the devlab-perf workflow (submit); no step uploads
 anywhere but loom-fun-staging, and `publish` without --dry-run is the only uploading step.
 """
+import difflib
 import argparse
 import base64
 import contextlib
@@ -1135,12 +1136,17 @@ def cmd_rerender(a):
     slugs = fleet_slugs() if a.all else a.slugs
     if not slugs:
         die("rerender needs --slugs S... or --all")
+    bad = [s for s in slugs if s not in set(fleet_slugs())]
+    if bad:
+        die(f"rerender: not fleet models: {' '.join(bad)}")
     work = os.path.abspath(a.work)
     env = dict(os.environ, PATH=LOOMBIN + os.pathsep + os.environ["PATH"])
     changed = failed = 0
     for slug in slugs:
         repo = f"{STAGING_ORG}/{slug}"
         d = os.path.join(work, slug)
+        if os.path.exists(d):
+            die(f"{d} exists: rerender works in a fresh --work directory (it deletes each card's folder when done)")
         try:
             head = hf_head(repo)
             hf_snapshot_small(repo, head, d)
@@ -1157,6 +1163,9 @@ def cmd_rerender(a):
             changed += 1
             if a.dry_run:
                 print(f"{slug}: would upload {', '.join(diff)}")
+                for f in diff:   # the changed lines, to review before the real run (template changes since the card was published come along)
+                    for ln in difflib.unified_diff((before[f] or "").splitlines(), (now_[f] or "").splitlines(), f"{f} (published)", f"{f} (rerendered)", n=0, lineterm=""):
+                        print("    " + ln[:220])
                 continue
             r = sh([PY, f"{CARD}/publish_package.py", "upload", d, "--repo", slug, "--org", STAGING_ORG, "--card-only", "--parent-commit", head,
                     "--message", "Card: serve line re-rendered (no re-measurement)"], check=False, env=env)
