@@ -1,47 +1,1107 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "Issue554 performance iteration: base1c503ee3 vs scoped pruning aa0ff8e0, canonical2048 base preset (existing R9700 E2B4096 execution preserved); two independent ABBA replicas on each GPU; no gates/baseline perf reruns. Full gates once on measured winner.",
+ "sdk": "0.2.0",
+ "runner": "strix",
+ "memory_bytes": 18000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
+   "name": "sab-nvidia-nvidia-nemotron-3-5-bolt-e4b-",
+   "runner": "strix",
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "memory_bytes": 36000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
     },
     {
-     "name": "nodraft",
+     "name": "staging",
      "build": {},
+     "ref": "aa0ff8e0",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
      "execution": {
       "draft_depth": 0
-     }
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "extend:6:2:0",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "sab-unsloth-gemma-4-e2b-it-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "memory_bytes": 18000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "sab-unsloth-gemma-4-e4b-it-loom",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "extend:6:2:0",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "sab-nvidia-nvidia-nemotron-3-5-bolt-e-r2",
+   "runner": "strix",
+   "replica": 2,
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "memory_bytes": 36000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "extend:6:2:1",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "sab-unsloth-gemma-4-e2b-it-loom-r2",
+   "runner": "strix",
+   "replica": 2,
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "memory_bytes": 18000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "sab-unsloth-gemma-4-e4b-it-loom-r2",
+   "runner": "strix",
+   "replica": 2,
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "extend:6:2:1",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "rab-nvidia-nvidia-nemotron-3-5-bolt-e4b-",
+   "runner": "r9700",
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "memory_bytes_r9700": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 191488,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 191488,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 191488,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 191488,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "extend:6:2:0",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "rab-unsloth-gemma-4-e2b-it-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "memory_bytes_r9700": 18000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "rab-unsloth-gemma-4-e4b-it-loom",
+   "runner": "r9700",
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes_r9700": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 230400,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 230400,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 230400,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 230400,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "extend:6:2:0",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "rab-nvidia-nvidia-nemotron-3-5-bolt-e-r2",
+   "runner": "r9700",
+   "replica": 2,
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "memory_bytes_r9700": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 191488,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 191488,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 191488,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 191488,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "extend:6:2:1",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "rab-unsloth-gemma-4-e2b-it-loom-r2",
+   "runner": "r9700",
+   "replica": 2,
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "memory_bytes_r9700": 18000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "rab-unsloth-gemma-4-e4b-it-loom-r2",
+   "runner": "r9700",
+   "replica": 2,
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes_r9700": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 230400,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 230400,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    },
+    {
+     "name": "funnd",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 230400,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "stagingnd",
+     "build": {},
+     "ref": "aa0ff8e0",
+     "cap_pool": 230400,
+     "execution": {
+      "draft_depth": 0
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "extend:6:2:1",
+    "textsave:fun",
+    "textsave:staging",
+    "smoke:staging",
+    "ktest:staging"
+   ],
+   "sdk": "0.2.0"
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
