@@ -3,10 +3,15 @@
 
   promote_staging.py [--work DIR] [--report REPORT.md] [--json REPORT.json] [--execute] SLUG... | --all
                     [--staging-revisions PINS.json]
+                    [--target-revisions TARGETS.json]
 
 PINS.json optionally freezes the source revisions: {"SLUG": "40 lowercase hex commit", ...}. It must cover exactly
 the requested slugs (including --all). Without it, sources use their current heads. Destination parents remain live
 reads and the execute-time parent-commit guard is unchanged.
+TARGETS.json uses the same exact immutable slug coverage. Execute requires it: the target must resolve to the
+reviewed pin and its live HEAD must still match before composition. Canonical releases supply BOTH maps.
+Remote extras are never deleted: missing local files fail review. Actual receipts name the returned commit;
+verify that pinned result before checking latest HEAD separately.
 
 Per repo (the same name in both orgs):
   1. fetch the requested staging commit (current head by default; every file but .gitattributes: the package is small, its weights are
@@ -50,21 +55,25 @@ def sha256(path):
     return h.hexdigest()
 
 
-def staging_revisions(path, slugs):
-    """Validate a complete immutable source manifest before any Hub request."""
+def revision_map(path, slugs, option):
+    """Validate an exact immutable manifest before any Hub request."""
     if path is None:
         return {}
     with open(path, encoding="utf-8") as f:
         pins = json.load(f)
     if not isinstance(pins, dict) or not pins:
-        raise ValueError("--staging-revisions: expected a nonempty slug-to-commit JSON object")
+        raise ValueError(f"{option}: expected a nonempty slug-to-commit JSON object")
     missing, extra = sorted(set(slugs) - pins.keys()), sorted(pins.keys() - set(slugs))
     if missing or extra:
-        raise ValueError(f"--staging-revisions: exact slug coverage required; missing={missing}, extra={extra}")
+        raise ValueError(f"{option}: exact slug coverage required; missing={missing}, extra={extra}")
     for slug, revision in pins.items():
         if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision):
-            raise ValueError(f"--staging-revisions: {slug}: expected an immutable 40 lowercase hex commit")
+            raise ValueError(f"{option}: {slug}: expected an immutable 40 lowercase hex commit")
     return pins
+
+
+def staging_revisions(path, slugs):
+    return revision_map(path, slugs, "--staging-revisions")
 
 
 def remote_files(api, repo, revision=None):
@@ -73,7 +82,7 @@ def remote_files(api, repo, revision=None):
         kwargs["revision"] = revision
     info = api.model_info(repo, **kwargs)
     if revision is not None and info.sha != revision:
-        raise ValueError(f"{repo}: requested staging revision {revision}, resolved {info.sha}: refusing promotion")
+        raise ValueError(f"{repo}: requested revision {revision}, resolved {info.sha}: refusing promotion")
     out = {}
     for s in info.siblings:
         lfs = s.lfs if isinstance(s.lfs, dict) else (vars(s.lfs) if s.lfs else None)
@@ -81,18 +90,27 @@ def remote_files(api, repo, revision=None):
     return info.sha, out
 
 
-def promote(api, slug, work, execute, staging_revision=None):
+def promote(api, slug, work, execute, staging_revision=None, target_revision=None):
+    if execute and target_revision is None:
+        raise ValueError("execute requires an explicitly reviewed target revision")
     from huggingface_hub import snapshot_download
     src, dst = f"{SRC}/{slug}", f"{DST}/{slug}"
     r = {"slug": slug, "staging": src, "target": dst}
     ssha, sfiles = remote_files(api, src, staging_revision)
     if staging_revision is not None:
         r["requested_staging_revision"] = staging_revision
-    try:
-        dsha, dfiles = remote_files(api, dst)
-    except Exception as e:  # noqa: BLE001
-        dsha, dfiles = None, {}
-        r["target_note"] = f"no {dst}: {type(e).__name__}"
+    if target_revision is not None:
+        r["requested_target_revision"] = target_revision
+        dsha, dfiles = remote_files(api, dst, target_revision)
+        live = api.model_info(dst).sha
+        if live != target_revision:
+            raise ValueError(f"{dst}: target moved from reviewed {target_revision} to {live}; recompose before promotion")
+    else:
+        try:
+            dsha, dfiles = remote_files(api, dst)
+        except Exception as e:  # noqa: BLE001
+            dsha, dfiles = None, {}
+            r["target_note"] = f"no {dst}: {type(e).__name__}"
     r["staging_commit"], r["target_commit"] = ssha, dsha
     out = os.path.join(work, slug, "out")
     shutil.rmtree(os.path.join(work, slug), ignore_errors=True)
@@ -151,7 +169,7 @@ def promote(api, slug, work, execute, staging_revision=None):
     dry = subprocess.run([py, os.path.join(HERE, "publish_package.py"), "upload", out, "--repo", slug, "--org", DST, "--dry-run"],
                          capture_output=True, text=True)
     r["dry_run"] = "pass" if dry.returncode == 0 else f"FAIL: {(dry.stdout + dry.stderr).strip()[-300:]}"
-    r["ok"] = r["render_check"] == "pass" and not left and r["dry_run"] == "pass"
+    r["ok"] = r["render_check"] == "pass" and not left and r["dry_run"] == "pass" and not ch["removed"]
     if execute:
         if not r["ok"]:
             r["executed"] = "skipped: checks failed"
@@ -159,7 +177,25 @@ def promote(api, slug, work, execute, staging_revision=None):
             cmd = [py, os.path.join(HERE, "publish_package.py"), "upload", out, "--repo", slug, "--org", DST,
                    "--message", f"Promote from {SRC}/{slug}@{ssha[:12]}"] + (["--parent-commit", dsha] if dsha else [])
             u = subprocess.run(cmd, capture_output=True, text=True)
-            r["executed"] = "uploaded" if u.returncode == 0 else f"FAIL: {(u.stdout + u.stderr).strip()[-300:]}"
+            if u.returncode:
+                r["executed"] = f"FAIL: {(u.stdout + u.stderr).strip()[-300:]}"
+            else:
+                try:
+                    receipt = json.loads(u.stdout)
+                    if not isinstance(receipt, dict):
+                        raise ValueError("receipt is not an object")
+                    commit = receipt.get("commit")
+                    if (receipt.get("repo") != dst or receipt.get("parent_commit") != dsha
+                            or not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit)
+                            or receipt.get("url") != f"{api.endpoint.rstrip('/')}/{dst}/commit/{commit}"):
+                        raise ValueError("receipt fields do not match the upload")
+                except (ValueError, KeyError, TypeError, AttributeError):
+                    r["executed"] = "FAIL: invalid/missing returned commit receipt; reconcile, do not retry"
+                else:
+                    r["receipt"] = receipt
+                    r["executed"] = "uploaded"
+            if r["executed"] != "uploaded":
+                r["ok"] = False
     return r
 
 
@@ -171,15 +207,19 @@ def main():
     ap.add_argument("--report", help="write a Markdown dry-run report here")
     ap.add_argument("--json", help="write the per-repo results as JSON here")
     ap.add_argument("--staging-revisions", help="JSON object mapping exactly the requested slugs to immutable 40 lowercase hex source commits")
+    ap.add_argument("--target-revisions", help="exact slug-to-reviewed-production-commit JSON; required with --execute")
     ap.add_argument("--execute", action="store_true", help="really upload to loom-fun (the user's call only)")
     a = ap.parse_args()
     if a.execute and os.environ.get("PROMOTE_CONFIRM") != DST:
         sys.exit("--execute publishes to loom-fun: set PROMOTE_CONFIRM=loom-fun (only on the user's say-so)")
+    if a.execute and not a.target_revisions:
+        ap.error("--execute requires --target-revisions; never adopt a new live parent for an old payload")
     slugs = a.slugs
     if a.all:
         slugs = [m["repo"].split("/")[-1] for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]]
     try:
         pins = staging_revisions(a.staging_revisions, slugs)
+        targets = revision_map(a.target_revisions, slugs, "--target-revisions")
     except (OSError, ValueError) as e:
         ap.error(str(e))
     from huggingface_hub import HfApi
@@ -187,7 +227,7 @@ def main():
     res = []
     for s in slugs:
         try:
-            res.append(promote(api, s, a.work, a.execute, pins.get(s)))
+            res.append(promote(api, s, a.work, a.execute, pins.get(s), targets.get(s)))
         except BaseException as e:  # noqa: BLE001
             res.append({"slug": s, "ok": False, "error": f"{type(e).__name__}: {e}"[:400]})
         x = res[-1]
