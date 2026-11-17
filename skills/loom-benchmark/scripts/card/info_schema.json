@@ -53,7 +53,8 @@
    "description": "What the card records for one GPU: measurements, gate evidence, roofline and how the package is served on it. A GPU without results carries a state.",
    "additionalProperties": false,
    "properties": {
-    "state": {"enum": ["not_measured", "unsupported"], "description": "not_measured: this package has no results on this GPU yet (the card says so and shows no numbers). unsupported: the package does not fit this GPU (required_bytes; the card says so). Absent: the GPU has results."},
+    "state": {"enum": ["not_measured", "unsupported", "not_a_target"], "description": "not_measured: this package has no results on this GPU yet (the card says so and shows no numbers). unsupported: the package does not fit this GPU (required_bytes; the card says so). not_a_target: the package's format has no fast path on this GPU's family, so it is not measured there (reason; the card says so). Absent: the GPU has results."},
+    "reason": {"type": "string", "description": "not_a_target only: why the GPU is not a target of this package"},
     "required_bytes": {"type": "integer", "description": "unsupported only: the memory the package needs on this GPU (weights, KV cache at the native context, headroom)"},
     "memory_bytes": {"type": "integer", "description": "loom-serve --memory_bytes on this GPU when it differs from the package value (model.json or card.memory_bytes): the GPU memory bounds the elastic pool"},
     "served_context": {"type": "integer", "description": "Tokens per request this GPU serves when its memory budget holds less KV cache than the native context needs; the same package serves it, --memory_bytes bounds the pool. Absent: the native context."},

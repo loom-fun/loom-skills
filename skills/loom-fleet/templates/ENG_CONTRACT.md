@@ -14,6 +14,8 @@
 - Never message another agent and never use remote-session tools. Mailbox: append dated lines to `@DIR@/inbox/techlead.md` for
   questions and blockers (decide technical details yourself; ask only when blocked). Read `inbox/eng-<name>.md` between steps and
   obey `HALT`. Append one line per notable event to `@DIR@/log.md`: `python3 @DIR@/status.py --dir @DIR@ log eng-<name> TEXT`.
+- Optimization work: every technique you measure (win or loss) gets a row in `@DIR@/notes/techniques.md` (loom-optimize step 8);
+  SDK limits you hit go to the KB topic `sdk`.
 - Publishing: only where your task says so (the staging org, never the production repos).
 - A denied action: do not retry; log it and move on. Watch MemAvailable; one build at a time unless told otherwise.
 - Finish: PR open + CI green + the task's "Done when" met, then a short final report: PR link, what changed, evidence, open issues.

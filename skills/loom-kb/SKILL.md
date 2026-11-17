@@ -35,7 +35,7 @@ order, and nothing else from the knowledge base (an unknown arch, device or topi
 | `topic/<topic>.md` | the task's knowledge that applies to every model |
 
 Topics are tasks: `porting`, `kernels-ir` (write kernels), `ir-debug`, `program-abi`, `cfg-review`, `starter` to port; `prefill`, `decode`,
-`optimize-loop`, `long-context`, `concurrency`, `speculative`, `spec-tuning`, `roofline` to optimize; `benchmark`, `org`, `kb-authoring`.
+`optimize-loop`, `long-context`, `concurrency`, `speculative`, `spec-tuning`, `roofline` to optimize; `sdk` (hrx-loom limits per SDK version, for kernel work); `benchmark`, `org`, `kb-authoring`.
 Name only the ones the work needs: the router prints a node's task file for each topic you name and nothing else.
 
 Adding or moving a fact, a family, a facet, a device or a topic: topic `kb-authoring` (`kb.py route --arch qwen3 --topic kb-authoring`).

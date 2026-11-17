@@ -17,3 +17,9 @@ the suite and the generator knobs are at commit b82a5cab of branch `q38r9700-ver
 - Not built: restore-free replay (the replay kernels reading the capture slots), fusing conv / conv_commit / qk_norm into the recurrence (~240 launches,
   ceiling ~1 ms = +2.5 % decode), delayed commit into the next step's front kernels (ninfer / Lucebox): each needs rewriting the GDN kernels to one bit-exact order
   and lifts only drafted decode.
+- Few-kernel / persistent verify step (MXFP4 27B, R9700, lane ostep; kbench `pstep_r9700`, e2e 43812485595): a software grid barrier (device-scope
+  atomics + `buffer.fence scope(device)` release/acquire, correct only with both fences) costs 1.3-1.9 us per phase, a back-to-back launch 0.6-0.7 us:
+  persistence buys nothing by itself. Persistent int8 matvecs tie at best (G=1024 workgroups); consumer prologues (rmsnorm / silu + q8 in the matvec)
+  lose 28-250 % because every workgroup re-reads the activation. Producer-in-epilogue (`decode.verify.fuse=swq`: gate + up of 32 rows per workgroup,
+  silu + q8 codes in the epilogue) is bit-exact and -4 % in kbench but ties end to end (157 us vs 2 x 79). Producers are 1.5 ms of a 35.7 ms step:
+  launch fusion is not the decode lever on gfx1201; the GDN state traffic (capture/restore + replay ~2.2 ms) and the proposals (3.3 ms) are.

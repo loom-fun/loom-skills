@@ -120,7 +120,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       HF, RETIRED_GATES, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
-                      SERVE_HEADROOM, registry, fit_rows, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args)
+                      SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args)
 
 
 # ---------------------------------------------------------------- sources
@@ -359,7 +359,7 @@ def cmd_build(a):
         kind_of = lambda s: (old.get("sources") or {}).get(s["source"], {}).get("kind")
         for gpu, dev in old["devices"].items():
             st = gpu_state(gpu)
-            st["meta"] = {k: dev[k] for k in ("state", "required_bytes", "memory_bytes", "served_context") if k in dev}
+            st["meta"] = {k: dev[k] for k in ("state", "required_bytes", "reason", "memory_bytes", "served_context") if k in dev}
             st["data"] = "state" not in dev
             if dev.get("performance"):
                 st["baseline"] = dev["performance"]["baseline"]
@@ -529,6 +529,10 @@ def cmd_build(a):
     for g in (a.gpus or "").split(",") if a.gpus else []:
         if g and g not in GPUS:
             sys.exit(f"--gpus {g}: not one of {', '.join(GPUS)}")
+    pcfg = os.path.join(a.pkg, "llm_config.json")
+    for g, why in non_targets(load_json(pcfg) if os.path.exists(pcfg) else {}).items():   # a format without a fast path on the device's family
+        if g in gpus and not G.get(g, {}).get("data"):
+            gpu_state(g)["meta"].update(state="not_a_target", reason=why)
 
     def gate_rows(gates):
         out = {}
@@ -564,6 +568,7 @@ def cmd_build(a):
         if has:
             d.pop("state", None)
             d.pop("required_bytes", None)
+            d.pop("reason", None)
             d["gates"] = gate_out.get(gpu) or {}
             if st["sessions"]:
                 d["performance"] = {"baseline": st["baseline"] or {"name": "llama.cpp", "version": None, "args": None},
@@ -889,7 +894,7 @@ def cmd_perf(a):
     if over and not extra:   # perf.py: the Loom server refused these documents as over its context (card_lib.over_context)
         session["over_context"] = over
     perf = {"session": session}
-    if a.baseline_version or a.baseline_args:
+    if a.baseline_version or a.baseline_args or a.baseline_name != "llama.cpp":   # another engine's name alone: no rows of it yet (--differs says why)
         perf["baseline"] = {"name": a.baseline_name, "version": baseline_version(a.baseline_version, a.backend) if a.baseline_version else None,
                             "args": a.baseline_args}
     if extra:
@@ -1156,11 +1161,12 @@ def cmd_roofline(a):
     dev = R.DEVICES[a.device]
     a.bw, a.flops = a.bw or dev["bw"], a.flops or dev["flops"]
     facts = package_facts(load_package(a.package))
-    gguf = a.gguf or cached_gguf(facts["checkpoint"])
-    if not gguf:
-        sys.exit(f"{facts['checkpoint']['file']} is not in the Hugging Face cache at the locked revision; pass --gguf")
     cfg_p = a.cfg or os.path.join(a.package, "llm_config.json")
     cfg = load_json(cfg_p) if os.path.exists(cfg_p) else {}
+    st = (cfg.get("source") or {}).get("kind") == "safetensors"   # an HF safetensors checkpoint: the shape comes from llm_config.json, not a GGUF header
+    gguf = None if st else (a.gguf or cached_gguf(facts["checkpoint"]))
+    if not gguf and not st:
+        sys.exit(f"{facts['checkpoint']['file']} is not in the Hugging Face cache at the locked revision; pass --gguf")
     info_p = os.path.join(a.package, "info.json")
     gpu = a.gpu or gpu_from_device({"name": dev["name"]}) or DEFAULT_GPU
     sessions = list(((gpu_view(load_info(info_p), gpu).get("performance") or {}).get("sessions") or [])
@@ -1184,7 +1190,13 @@ def cmd_roofline(a):
     if dirty and not a.skills_commit:
         tool["dirty"] = True
     skip = over_context({"performance": {"sessions": all_sessions}}, a.served_context or native_context(facts["features"]))
-    block = roofline_block(facts, R.model_shape(gguf, cfg), acc, R, a.bw, a.flops, tool, os.path.basename(gguf), row_acc, skip)
+    if st and "tensors" not in cfg:   # a published llm_config.json carries no tensor table: the checkpoint's header (HTTP range reads of the pinned revision)
+        sys.path.insert(0, os.path.join(rdir, "..", "loom-port-llm", "starter"))
+        import inspect_safetensors
+        src = inspect_safetensors.load_hf(cfg["source"]["repo"], cfg["source"]["revision"])
+        cfg = dict(cfg, tensors=inspect_safetensors.build_config(src, drop_chat=True)["tensors"])
+    shape = R.model_shape_from_config(cfg) if st else R.model_shape(gguf, cfg)
+    block = roofline_block(facts, shape, acc, R, a.bw, a.flops, tool, facts["checkpoint"]["file"] if st else os.path.basename(gguf), row_acc, skip)
     write_json(a.o, {"evidence": EVIDENCE_ID, "gpu": gpu, "roofline": block})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {r['ceiling']}" for k, r in block["metrics"].items())
           + "".join(f"; {k} acceptance {r['acceptance']} ({r['acceptance_from']})" for k, r in block["metrics"].items()

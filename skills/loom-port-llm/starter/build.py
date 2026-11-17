@@ -124,8 +124,13 @@ if DRAFT and DRAFT["kind"] == "assist":   # the Gemma-4 assistant reads the targ
     kv_per_position += 4
 sys.path.insert(0, HERE)
 from formats import memory_cap, split_parts  # noqa: E402
-GGUF_PARTS = split_parts(os.path.abspath(cfg["gguf"]))   # a split GGUF: every part is a parameter file
-weights_bytes = sum(os.path.getsize(p) for p in GGUF_PARTS)
+SAFETENSORS = (cfg.get("weights") or {}).get("format") == "safetensors" or bool(cfg.get("source", {}).get("kind") == "safetensors")
+if SAFETENSORS:   # an HF safetensors checkpoint (inspect_safetensors.py): the files are parameter files, tensors by HF key
+    GGUF_PARTS = [os.path.abspath(p) for p in (cfg.get("weights") or {}).get("files", [])]
+    weights_bytes = sum(os.path.getsize(p) for p in GGUF_PARTS) if GGUF_PARTS and all(os.path.exists(p) for p in GGUF_PARTS) else cfg["source"]["bytes"]
+else:
+    GGUF_PARTS = split_parts(os.path.abspath(cfg["gguf"]))   # a split GGUF: every part is a parameter file
+    weights_bytes = sum(os.path.getsize(p) for p in GGUF_PARTS)
 if DRAFT and DRAFT["kind"] in ("dflash", "assist"):
     weights_bytes += os.path.getsize(DRAFT["gguf"])
 if os.path.isfile((cfg.get("vision") or {}).get("mmproj") or ""):   # the image component's projector, while it encodes
@@ -186,6 +191,10 @@ env = dict(os.environ, LLM_CONFIG=os.path.abspath(a.config), LLM_OUT=gen, LLM_TO
            LLM_DRAFT=json.dumps(DRAFT))
 sys.path.insert(0, os.path.join(HERE, "draft"))
 import build_draft  # noqa: E402
+if DRAFT and cfg.get("recurrent_layers") and env.get("GDN_FOLD", "").strip().lower() not in ("", "0", "false", "no", "off"):
+    from gen_gdn import FOLD_SPANS  # noqa: E402
+    if a.rows > FOLD_SPANS:   # the fold banks hold FOLD_SPANS speculative spans (one per drafting row)
+        sys.exit(f"decode.spec.gdn_fold holds {FOLD_SPANS} drafting rows; --rows {a.rows} needs it off")
 subprocess.run([sys.executable, os.path.join(HERE, "gen_llm.py"), os.path.abspath(a.config)], check=True, env=env, stdout=subprocess.DEVNULL)
 os.replace(os.path.join(gen, "model.loom"), os.path.join(pkg, "program", "llm.loom"))
 # Load-time weight policies of drafting (draft/prep_weights.py): a BF16/F16 drafter as Q8_0, the proposals' Q4_0 head.
@@ -197,6 +206,9 @@ for f, k in (("draft_weights.loom", "policy"), ("head_weights.loom", "head_polic
         os.replace(os.path.join(gen, f), os.path.join(pkg, f))
         DRAFT[k] = f
         POLICIES.append(f)
+if os.path.exists(os.path.join(gen, "phead_main")):   # draft.propose.head_pieces: the proposal head's pieces are prepared by weights.loom
+    os.remove(os.path.join(gen, "phead_main"))
+    DRAFT["phead"] = "main"
 # The largest program's scratch at a prefill-sized invocation (a drafting hybrid's @llm_verify keeps every token's
 # gated delta-net inputs for the replay: 7 GB for 30 such layers at a 4096-token prefill), plus 3 GiB for the state
 # storage, slab rounding and the workspace's own rounding. A fixed 3 GiB alone refused such a card's full-context
@@ -827,7 +839,7 @@ for name in ("prepare", "control", "storage", "service"):
     if name == "control" and cfg.get("vision"):   # image input (vision/README.md)
         sys.path.insert(0, os.path.join(HERE, "vision"))
         import build_vision, encoder as vision_encoder
-        vision_cfg = vision_encoder.config(cfg["vision"]["mmproj"])
+        vision_cfg = vision_encoder.config_st(cfg["vision"]) if cfg["vision"].get("source") == "safetensors" else vision_encoder.config(cfg["vision"]["mmproj"])
         text = build_vision.patch_control(text, custom_chat, cfg["vision"], vision_cfg)
     if DRAFT:   # speculative decoding glue (draft/build_draft.py)
         text = {"prepare": lambda t: build_draft.patch_prepare(t, DRAFT, cfg), "storage": lambda t: build_draft.patch_storage(t, cfg, DRAFT),
@@ -838,7 +850,24 @@ for name in ("prepare", "control", "storage", "service"):
         text = text.replace(k, v)
     assert "@@" not in text, (name, [l for l in text.splitlines() if "@@" in l])
     open(os.path.join(pkg, "program", name + ".loom"), "w", encoding="utf-8", newline="\n").write(text)
-open(os.path.join(pkg, "weights.loom"), "w", encoding="utf-8", newline="\n").write(open(os.path.join(HERE, "templates", "weights.loom"), encoding="utf-8").read())
+# the weight policy: a safetensors checkpoint's bf16 norms / A_log / dt_bias / conv1d are converted to f32 at load (gen_llm.py writes it)
+_policy = os.path.join(gen, "weights.loom")
+open(os.path.join(pkg, "weights.loom"), "w", encoding="utf-8", newline="\n").write(
+    open(_policy if os.path.exists(_policy) else os.path.join(HERE, "templates", "weights.loom"), encoding="utf-8").read())
+VISION_POLICY = []
+if (cfg.get("vision") or {}).get("source") == "safetensors":   # the tower's bf16 biases / norms / positions are converted to f32 at load (vision/st_source.py)
+    sys.path.insert(0, os.path.join(HERE, "vision"))
+    import st_source
+    sys.path.insert(0, os.path.join(HERE, "draft"))
+    import prep_weights
+    _entries = {k_: ("bf16e", "f32_copy", n_) for k_, n_ in st_source.prepared(cfg["vision"]).items()}
+    if _entries:
+        open(os.path.join(pkg, "vision_weights.loom"), "w", encoding="utf-8", newline="\n").write(
+            prep_weights.policy(_entries, "the image tower's bf16 biases, norms and position table"))
+        VISION_POLICY = ["vision_weights.loom"]
+        _llm = os.path.join(pkg, "program", "llm.loom")   # the converter (its stage program is a root of the policy): the text generator emits it when it converts anything
+        if "llm_prep_bf16e_f32_copy" not in open(_llm, encoding="utf-8").read():
+            open(_llm, "a", encoding="utf-8", newline="\n").write("\n" + prep_weights.library({("bf16e", "f32_copy")}))
 
 # 3. Tokenizer. loom-serve strips *special* added tokens from decoded text; any
 # structural token the control program must see in the output (channel tags,
@@ -901,17 +930,17 @@ for part in GGUF_PARTS:
             sys.exit(f"cannot link {part} into {link} ({e}): enable Windows Developer Mode, or put the package on the GGUF's drive")
 card = {
     "schema_version": 1,
-    "model": {"id": model_id, "name": f"{cfg.get('name', 'llm')} (Loom port, GGUF)"},
+    "model": {"id": model_id, "name": f"{cfg.get('name', 'llm')} (Loom port, {'safetensors' if SAFETENSORS else 'GGUF'})"},
     "programs": {"source": {
         # llm_config.json rides as data so loom-fetch delivers it: a host that samples from the logits reads the
         # model's chat dialect (tool-call format, reasoning markers) from it for its grammars.
-        "inputs": [{"path": "program/prepare.loom", "data": ["weights.loom"] + POLICIES + ["llm_config.json"]},
+        "inputs": [{"path": "program/prepare.loom", "data": ["weights.loom"] + VISION_POLICY + POLICIES + ["llm_config.json"]},
                    "program/control.loom", "program/storage.loom", "program/service.loom"],
         "libraries": ["program/llm.loom"]}},
     "services": {"chat": {"kind": "text", "version": 1}},
     "variants": {"gguf": {"services": {"chat": {
         "programs": ["source"], "config": {"llm.card": True, **({"llm.logits": False} if os.environ.get("LLM_LOGITS", "1") != "0" else {})},   # llm.logits: key present = the package supports the logits readback (feature.logits_export)
-        "parameters": {"model": {"files": [{"path": f"parameter/{os.path.basename(p)}", "format": "gguf"} for p in GGUF_PARTS]}},
+        "parameters": {"model": {"files": [{"path": f"parameter/{os.path.basename(p)}", "format": "safetensors" if SAFETENSORS else "gguf"} for p in GGUF_PARTS]}},   # the variant key stays "gguf" (card tooling addresses it)
         "tokenizers": {"text": "tokenizer.json"}}}}},
     "presets": {"chat": {"service": "chat", "variant": "gguf", "programs": "source", "execution": {
         "rows": a.rows, "context_capacity": a.context,
@@ -922,6 +951,8 @@ if DRAFT:
     card["presets"]["chat"]["execution"] = build_draft.card_execution(ex, DRAFT)
     card = build_draft.card_drafter(card, pkg, DRAFT)
 if cfg.get("vision"):
+    if SAFETENSORS and cfg["vision"].get("source") == "safetensors":   # the tower is read from the checkpoint's own files
+        cfg["vision"] = dict(cfg["vision"], parameter_files=[os.path.basename(p) for p in GGUF_PARTS])
     card = build_vision.write_component(pkg, card, cfg["vision"], vision_cfg)
 import dual_target  # noqa: E402
 a.prefill_r9700 = a.prefill_r9700 or cfg.get("prefill_capacity_r9700")

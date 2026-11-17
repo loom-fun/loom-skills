@@ -218,6 +218,26 @@ def model_shape(gguf_path, cfg=None):
     return shape_of(meta, tensors, cfg)
 
 
+TENSOR_BYTES = {"bf16": 2.0, "f16": 2.0, "f32": 4.0, "mxfp4s": 17 / 32}   # bytes per element of a llm_config.json tensor type (mxfp4s: 4-bit nibbles + one E8M0 scale per 32)
+
+
+def model_shape_from_config(cfg):
+    """The same model shape for a package with no GGUF (a safetensors checkpoint): the tensor table and geometry of its llm_config.json
+    (internal GGUF-style names, shapes [in, out], type -> bytes per element). The next-token-prediction block (blk.L, L = layers) is a
+    drafter: like the drafter's passes, its weights are not counted (a verify pass and an undrafted decode read the trunk only)."""
+    L = int(cfg["layers"])
+    tensors = {}
+    for name, t in cfg["tensors"].items():
+        m = re.match(r"blk\.(\d+)\.", name)
+        if m and int(m.group(1)) >= L:
+            continue
+        bpe = TENSOR_BYTES.get(t["type"])
+        if bpe is None:
+            raise ValueError(f"{name}: tensor type {t['type']!r} has no byte size in roofline.TENSOR_BYTES")
+        tensors[name] = (int(math.prod(t["shape"]) * bpe), [int(x) for x in t["shape"]])
+    return shape_of({"general.architecture": cfg["arch"]}, tensors, cfg)
+
+
 def pass_bytes(m, tokens=1, ctx=0, streams=1):
     """Bytes one forward pass reads when it decodes `tokens` tokens at once (one per stream, or a verify pass):
     the weights once (MoE: the expected distinct experts those tokens route to) plus each stream's KV at ctx."""

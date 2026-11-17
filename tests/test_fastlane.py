@@ -185,7 +185,7 @@ class RegenReplicasAndWaves(test_regen.Base):
         self.assertEqual([b["stage"] for b in st.d["batches"]], ["planned", "submitted"])
 
     def test_max_inflight_auto_is_the_device_runner_count(self):
-        self.assertEqual(regen.max_inflight("auto", "radeon-r9700"), 3)
+        self.assertEqual(regen.max_inflight("auto", "radeon-r9700"), 8)
         self.assertEqual(regen.max_inflight("auto", "strix-halo"), 0)
         self.assertEqual(regen.max_inflight(None, "radeon-r9700"), 0)
         self.assertEqual(regen.max_inflight("4", "radeon-r9700"), 4)

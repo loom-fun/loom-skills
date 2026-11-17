@@ -1,6 +1,10 @@
 """Vision encoder plan for a GGUF mmproj: config from metadata + an ordered list of kernel launches.
 Backends render the plan into a loom-test check.case (whole-encoder test) or a command program (serving)."""
-import math, gguf, numpy as np
+import math
+try:   # the GGUF projector reader; a safetensors checkpoint (config_st) needs neither gguf nor numpy
+    import gguf
+except ImportError:
+    gguf = None
 import gen_vision as G
 
 FAMILIES = ("gemma4v", "qwen3vl_merger", "qwen2.5vl_merger", "muse-glimmer")
@@ -53,6 +57,15 @@ def config(path):
     c["out_row"] = c["out"] * (1 + len(c["deepstack"]))
     return c
 
+def config_st(vision):
+    """The encoder config of a safetensors checkpoint's tower: cfg["vision"] as inspect_safetensors.py wrote it (st_source.py).
+    The plan names tensors as the mmproj converter does; c["tensors"][name]["hf"] is the checkpoint key the program reads."""
+    c = dict(vision["config"])
+    c["family"] = vision["family"]
+    c["tensors"] = {n: dict(t) for n, t in vision["tensors"].items()}
+    c["hf"] = {n: t["hf"] for n, t in c["tensors"].items()}
+    return c
+
 def fmt_of(c, name):
     return GGML_FMT[c["tensors"][name]["type"]]
 
@@ -99,9 +112,10 @@ def build(c):
         return ("ln", w + ".weight", w + ".bias") if w + ".bias" in c["tensors"] else ("rmsw", w + ".weight", None)
     pk = p.k(G.pixels(c["mean"], c["std"], scale2=(fam == "gemma4v")))
     p.launch(pk, [S("n_pix")], [S("n_pix"), B("pix"), B("pixf")])
-    dual = "v.patch_embd.weight.1" in c["tensors"]; bias = "v.patch_embd.bias" in c["tensors"]
-    pe = p.k(G.patch_embed(P, E, fmt_of(c, "v.patch_embd.weight"), order, dual, bias))
-    p.launch(pe, [S("T")], [S("T"), S("gw"), S("img_w"), B("pixf"), W("v.patch_embd.weight")] + ([W("v.patch_embd.weight.1")] if dual else []) + ([W("v.patch_embd.bias")] if bias else []) + [B("h")])
+    hf3d = c.get("patch_layout") == "hf3d"   # the checkpoint's conv3d weight [E, 3, 2, P, P]: both temporal taps in one tensor
+    dual = hf3d or "v.patch_embd.weight.1" in c["tensors"]; bias = "v.patch_embd.bias" in c["tensors"]
+    pe = p.k(G.patch_embed(P, E, fmt_of(c, "v.patch_embd.weight"), order, dual, bias, layout="hf3d" if hf3d else "gguf"))
+    p.launch(pe, [S("T")], [S("T"), S("gw"), S("img_w"), B("pixf"), W("v.patch_embd.weight")] + ([W("v.patch_embd.weight.1")] if dual and not hf3d else []) + ([W("v.patch_embd.bias")] if bias else []) + [B("h")])
     if fam == "gemma4v":
         pk2 = p.k(G.pos_xy(E, c["pos_n"])); p.launch(pk2, [S("T")], [S("T"), S("gw"), W("v.position_embd.weight"), B("h")])
     elif "v.position_embd.weight" in c["tensors"]:

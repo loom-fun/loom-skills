@@ -63,6 +63,35 @@
     }
    }
   },
+  "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
+    "revision": "7cadcaa61a84d708ce67caefda32feccfa98548b"
+   },
+   "model_id": "qwen3.8-27b-mxfp4",
+   "kit": null,
+   "arch": "qwen35",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "pool": 327680,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "model.safetensors": {
+     "origin": "checkpoint",
+     "repo": "amd/Qwen3.8-27B-Quark-AWQ-MXFP4",
+     "revision": "93245f7c00f1a8964b66a97c6e02e2fd09080be4",
+     "path": "model.safetensors",
+     "size": 19798196184,
+     "dump": "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom/safetensors/model.safetensors.json.gz",
+     "kind": "safetensors"
+    }
+   }
+  },
   "bartowski-LFM3-1.7B-loom": {
    "staging": {
     "repo": "loom-fun-staging/bartowski-LFM3-1.7B-loom",

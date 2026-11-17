@@ -173,7 +173,7 @@ command.def public @vision_encode() launch(%weights: buffer, %input: buffer, %ou
             if kind == "W" and n not in wdecl:
                 var = "%w_" + n.replace(".", "_")
                 wdecl[n] = var
-                L.append(f'  {var} = command.parameter %weights, "{n}" : view<{c["tensors"][n]["bytes"]}xi8>')
+                L.append(f'  {var} = command.parameter %weights, "{c.get("hf", {}).get(n, n)}" : view<{c["tensors"][n]["bytes"]}xi8>')
     consts = {}
     def scalar(expr):
         """index SSA for a plan scalar expression."""
@@ -220,7 +220,7 @@ func.decl import("prepare") @memory_forecast(%root: buffer)
 
 global.rodata.def @vision_forecast_root = bytes("{hexs("vision_forecast_memory")}")
 global.rodata.def @vision_scope = bytes("{hexs("vision")}")
-global.rodata.def @vision_policy = bytes("{hexs("weights.loom")}")
+global.rodata.def @vision_policy = bytes("{hexs("vision_weights.loom" if c.get("hf") else "weights.loom")}")
 global.rodata.def @vision_name = bytes("{hexs(c["family"] + "-projector")}")
 global.rodata.def @vision_empty = bytes("")
 

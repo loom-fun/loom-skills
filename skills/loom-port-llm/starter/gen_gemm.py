@@ -28,18 +28,25 @@ FMT = {
     "iq3_s": dict(block_bytes=110, block_values=256),
     "f16": dict(block_bytes=64, block_values=32),
     "mxfp4": dict(block_bytes=17, block_values=32),
+    # MXFP4 split planes (safetensors, Quark): the kernel takes the nibble plane as %w (16 bytes per 32 values) and the E8M0
+    # scale plane as %ws (one byte per 32 values); @g_mxfp4s_values reads both.
+    "mxfp4s": dict(block_bytes=16, block_values=32),
     # BF16 (vendor drafters published only in BF16, used as-is): 16 values load directly, rounded to F16 for the MMA
     "bf16": dict(block_bytes=64, block_values=32),
     # F32 (small projections some quants keep unquantized, e.g. Gemma 3n/4 per-layer-input gate/proj): 16 values load
     # directly, rounded to F16 for the MMA
     "f32": dict(block_bytes=128, block_values=32),
 }
-HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16", "mxfp4"}
+HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16", "mxfp4", "mxfp4s"}
 
 def dequant16(fmt, w, view_name, out):
     """Loom snippet: dequantize 16 consecutive weights of row %w_row at column %w_col into F16 vector %{out}."""
     if fmt in HELPER:   # 16 consecutive weights = one half of a 32-value group from the shared value helper
         bv = FMT[fmt]["block_values"]
+        sc_setup = f"""      %{out}_sidx = index.madd %bounded_w_out_row, %blocks, %{out}_block : index
+      %{out}_sone = index.constant 1 : offset
+      %{out}_so = index.scale %{out}_sidx, %{out}_sone : index, offset -> offset
+""" if fmt == "mxfp4s" else ""
         return f'''
       %{out}_bv = index.constant {bv} : index
       %{out}_block = index.div %w_col, %{out}_bv : index
@@ -50,7 +57,7 @@ def dequant16(fmt, w, view_name, out):
       %{out}_half = index.div %{out}_in_group, %c16 : index
       %{out}_block_add = index.scale %{out}_block, %block_bytes : index, offset -> offset
       %{out}_block_origin = index.add %w_row_origin, %{out}_block_add : offset
-      %{out}_all = func.call @g_{fmt}_values(%{w}, %{out}_block_origin, %{out}_group) : (buffer, offset, index) -> (vector<32xf32>)
+{sc_setup}      %{out}_all = func.call @g_{fmt}_values(%{w}, {"%" + w + "s, " if fmt == "mxfp4s" else ""}%{out}_block_origin, {"%" + out + "_so, " if fmt == "mxfp4s" else ""}%{out}_group) : (buffer, {"buffer, " if fmt == "mxfp4s" else ""}offset, {"offset, " if fmt == "mxfp4s" else ""}index) -> (vector<32xf32>)
       %{out}_lo = vector.slice %{out}_all[0] : vector<32xf32> -> vector<16xf32>
       %{out}_hi = vector.slice %{out}_all[16] : vector<32xf32> -> vector<16xf32>
       %{out}_upper = index.cmp ne, %{out}_half, %c0 : index
@@ -287,7 +294,8 @@ def gemm(fmt, mode, fmt2=None):
     fmt2 = fmt2 if two_w and fmt2 not in (None, fmt) else None
     name = f"{PREFIX}_gemm_{fmt}_{mode}" if fmt2 is None else f"{PREFIX}_gemm_{fmt}_{fmt2}_{mode}"
     assert fmt2 is None or FMT[fmt2]["block_values"] in (32, 256), fmt2   # %c32 / %c256 below
-    wargs = "%w: buffer, %w2: buffer" if two_w else "%w: buffer"
+    wargs = "%w: buffer, %w2: buffer" if two_w else "%w: buffer" + (", %ws: buffer" if fmt == "mxfp4s" else "")
+    assert not (two_w and fmt == "mxfp4s"), "mxfp4s has no swiglu GEMM: gate and up are two projections and g_silu_mul"
     accs = ["g0", "g1", "u0", "u1"] if two_w else ["a0", "a1"]
     stages = ["w_stage", "w2_stage"] if two_w else ["w_stage"]
     k_min = 256 if 256 in (FMT[fmt]["block_values"], FMT[fmt2 or fmt]["block_values"]) else 64
@@ -1204,6 +1212,11 @@ if __name__ == "__main__":
             if fmt in HELPER:   # the 64-row tile kernel under the 128-row name (its dequant has no prefetchable load)
                 name = f"{PREFIX}_gemm_{fmt}_{mode}"
                 out.append(_rdna4.with_twins(post(gemm(fmt, mode)).replace(f'export("{name}") @{name}(', f'export("{name}_m128") @{name}_m128(')))
+                if fmt == "mxfp4s" and mode == "store":   # gfx12 fp8 WMMA kernels (gen_mxfp4s.fuse_mxfp4s_f8 launches them): the plain GEMM and its fused SwiGLU pair
+                    import gen_mxfp4s as _mx
+                    if _mx.f8_enabled():
+                        out.append(post(_mx.gemm_mxfp4s_f8_m256("store", PREFIX, **_mx.f8_kernel_kwargs("store"))))
+                        out.append(post(_mx.gemm_mxfp4s_f8_m256("swiglu", PREFIX, **_mx.f8_kernel_kwargs("swiglu"))))
             else:
                 out.append(_rdna4.with_twins(post(gemm_big(fmt, mode))))
                 if on256:

@@ -1,5 +1,5 @@
 """Tiny harness: write npy inputs + a check.case, run loom-test with given kernel source."""
-import os, json, subprocess, numpy as np
+import os, re, sys, json, subprocess, numpy as np
 VENV = os.environ.get("VENV", os.path.expanduser("~/loom/.venv"))
 BIN = os.path.join(VENV, "bin") if os.path.isdir(os.path.join(VENV, "bin")) else os.path.join(VENV, "Scripts")
 def ty(a):
@@ -24,11 +24,23 @@ class Case:
         s.lines.append(f"  check.expect.approximate actual({actual[0]}) expected({e[0]}) atol({atol:e}) rtol({rtol:e}) nan(different) : {actual[1]}, {e[1]}")
     def text(s): return f"check.case public @{s.name} {{\n" + "\n".join(s.lines) + "\n  check.return\n}\n"
 def run(src, cases, d):
-    open(os.path.join(d, "combined.loom"), "w").write(src + "\n" + "".join(c.text() for c in cases))
+    text = src + "\n" + "".join(c.text() for c in cases)
+    if "@rdna4" in text:   # the gfx12 twins (K_rdna4, target(@rdna4)) need dual_target's target declarations
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+        import dual_target
+        if "gfx12-generic" not in text:
+            text = dual_target.HEADER + text
+        if os.environ.get("VISION_TEST_RDNA4"):   # on a gfx12 device (R9700) every launch of a kernel with a twin goes to the twin
+            defined = set(re.findall(r"(?m)^kernel\.def\b[^\n]*?\s@([\w.]+)\(", text))
+            text = re.sub(r"(kernel\.launch @)([\w.]+)(?=\[)", lambda m: m.group(1) + (m.group(2) + "_rdna4" if m.group(2) + "_rdna4" in defined else m.group(2)), text)
+    open(os.path.join(d, "combined.loom"), "w").write(text)
     r = subprocess.run([os.path.join(BIN, "loom-test"), "combined.loom", "--device=amdgpu", "--file-output-root=."], cwd=d, capture_output=True, text=True)
     try: res = json.loads(r.stdout)
     except ValueError:
         print("COMPILE FAIL\n", "\n".join(l for l in (r.stderr + r.stdout).splitlines() if not l.startswith('{"format'))[-4000:]); return False
+    if not res.get("samples"):   # loom-test ran but reported no case: say why (a device error shows in stderr / the top-level keys)
+        print("FAIL NO SAMPLES from loom-test; keys", sorted(res), "\n", "\n".join(l for l in r.stderr.splitlines() if not l.startswith('{"format'))[-3000:], "\n", json.dumps({k: v for k, v in res.items() if k not in ("samples", "planning_issues")})[:800], "\n", "\n".join(json.dumps(i)[:400] for i in res.get("planning_issues", [])[:4]))
+        return False
     ok = True
     for smp in res["samples"]:
         f = smp["expectations"].get("failures", [])

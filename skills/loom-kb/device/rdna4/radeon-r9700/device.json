@@ -52,7 +52,7 @@
       "devlab-dispatch",
       "radeon-r9700"
     ],
-    "concurrent_runners": 3
+    "concurrent_runners": 8
   },
   "preset_suffix": "-r9700",
   "fit_table": ".github/devlab/r9700_fit.json",

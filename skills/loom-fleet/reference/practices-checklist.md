@@ -13,6 +13,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 - Methodology, baselines, quant, models, gates
 - Publishing and reporting
 - Hygiene
+- Optimization
 - SDK migrations
 - Rules that are project history, not practice
 
@@ -102,7 +103,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | 54 | No models above 35B on a local machine | brief; owner rule | `campaign.md` "Baselines, quant, models, gates" |
 | 55 | No needle gates; keep the cheap admission probe; expensive gates nightly | brief; owner rules | `campaign.md` "Baselines, quant, models, gates"; `skills/loom-benchmark/SKILL.md` |
 | 56 | Speculative decoding on by default when the GGUF supports it; optimizer picks method and depth | owner rule | `campaign.md` "Baselines, quant, models, gates"; `skills/loom-kb/topic/spec-tuning.md` |
-| 57 | Reuse stored measurements when model files and engine binary are unchanged; re-measure only what changed | owner rule (2026-11-16) | `skills/loom-kb/method/methodology.md` rule 15; `campaign.md` "Baselines, quant, models, gates" |
+| 57 | Reuse stored measurements when model files and engine binary are unchanged; re-measure only what changed | owner rule (2026-11-16) | `skills/loom-kb/method/methodology.md` rule 17; `campaign.md` "Baselines, quant, models, gates" |
 
 ## Publishing and reporting
 
@@ -122,13 +123,25 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | 63 | Watch MemAvailable and anonymous RSS; one build at a time; memory-capped scopes | brief; owner rule | `campaign.md` "Hygiene"; `skills/loom/SKILL.md` "Hard rules" |
 | 64 | Regenerable outputs stay out of commits; verify regeneration byte for byte | owner rule | `campaign.md` "Hygiene"; `targeted-fix.md` section 2 |
 
+## Optimization
+
+| # | Rule | Source | Where |
+|---|---|---|---|
+| 65 | Real profilers first (HAL per-dispatch device timestamps); doubling/ablation only as a cross-check, with its known distortions | owner rule | `skills/loom-optimize/SKILL.md` step 2; `skills/loom-kb/topic/optimize-loop.md` "Profiling", "Ablation: known distortions" |
+| 66 | Bucket budgets from the leader's number; judge the bucket, not each kernel | owner rule | `skills/loom-optimize/SKILL.md` steps 1 and 3 |
+| 67 | Fuse by default, un-fuse only where measured; price a design against its family's profiled share | owner rule | `skills/loom-optimize/SKILL.md` step 4; `skills/loom-kb/topic/optimize-loop.md` "Pricing a design" |
+| 68 | Perf-only iteration rounds, gates once on the winner, cached reference engines, A/B base pinned to a sha | owner rule | `skills/loom-optimize/SKILL.md` steps 6 and 7; `campaign.md` "DevLab" |
+| 69 | Cost = agent tokens + runner time only, never human effort; strongest model tier for design-heavy lanes, alternative designs in parallel | owner rule | `skills/loom-optimize/SKILL.md` "Cost model"; `campaign.md` "Roles", "Working style" |
+| 70 | Keep going past a losing design: a lane ends when every lever has a measured stop reason; stop rules with numbers | owner rule | `skills/loom-optimize/SKILL.md` "Keep going", "When to stop a metric" |
+| 71 | Every technique tried (win or loss) is a row of the technique log; facts go to the KB node; SDK limits to topic `sdk` | owner rule | `skills/loom-optimize/SKILL.md` step 8; `skills/loom-kb/topic/sdk.md` |
+
 ## SDK migrations
 
 | # | Rule | Source | Where |
 |---|---|---|---|
-| 65 | A new SDK release is migrated by one procedure with a version entry per adjacent pair: research first (release, migration table, upstream diff, the wheel), mechanical steps by idempotent script, fleet parse + link sweep, explained program diff, DevLab SDK A/B (old published card on the old SDK vs new package, ABBA, one job), staging publish | owner rule (sdk020) | `skills/loom-migrate/SKILL.md`; `skills/loom-migrate/versions/`; `scripts/sweep.py` |
-| 66 | Simplifications the release allows go in a ledger (landed or listed, measured when behavioural); optimizations it opens become issues with evidence, not work in the migration campaign | brief (sdk020) | `skills/loom-migrate/SKILL.md` steps 8 and 9 |
-| 67 | Every gotcha found is one line (symptom, cause, fix) in the version entry; a fresh agent migrates one card from the repo alone before the entry is final | brief (sdk020) | `skills/loom-migrate/versions/v0.1.0-to-v0.2.0.md` "Gotchas"; `skills/loom-migrate/SKILL.md` step 10 |
+| 72 | A new SDK release is migrated by one procedure with a version entry per adjacent pair: research first (release, migration table, upstream diff, the wheel), mechanical steps by idempotent script, fleet parse + link sweep, explained program diff, DevLab SDK A/B (old published card on the old SDK vs new package, ABBA, one job), staging publish | owner rule (sdk020) | `skills/loom-migrate/SKILL.md`; `skills/loom-migrate/versions/`; `scripts/sweep.py` |
+| 73 | Simplifications the release allows go in a ledger (landed or listed, measured when behavioural); optimizations it opens become issues with evidence, not work in the migration campaign | brief (sdk020) | `skills/loom-migrate/SKILL.md` steps 8 and 9 |
+| 74 | Every gotcha found is one line (symptom, cause, fix) in the version entry; a fresh agent migrates one card from the repo alone before the entry is final | brief (sdk020) | `skills/loom-migrate/versions/v0.1.0-to-v0.2.0.md` "Gotchas"; `skills/loom-migrate/SKILL.md` step 10 |
 
 ## Rules that are project history, not practice
 

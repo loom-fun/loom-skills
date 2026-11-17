@@ -24,15 +24,37 @@ shuffle sum), GDN_ROW_LANES=0 keeps the original 32-lane form.
 import os
 
 
+_V_GROUPED = [False, 1]
+
+
+def kh_line():
+    """The value head's key head. GGUF files hold the value heads tiled (llama.cpp's converter reorders them so ggml_repeat
+    broadcasts the key heads: value head h reads key head h % HK); an HF safetensors checkpoint keeps them grouped (value heads
+    h = r * k + j of key head k, repeat_interleave: key head h // (HV / HK)), which cfg gdn.v_order "grouped" reads natively
+    (no reordering of any weight)."""
+    if _V_GROUPED[0]:
+        return "%vratio = index.constant {RATIO} : index\n  %kh = index.div %vh, %vratio : index".replace("{RATIO}", str(_V_GROUPED[1]))
+    return "%kh = index.rem %vh, %chk : index"
+
+
 def gdn_geometry(cfg):
     g = cfg["gdn"]
+    _V_GROUPED[0] = g.get("v_order") == "grouped"
+    if _V_GROUPED[0]:
+        _V_GROUPED[1:] = [g["v_heads"] // g["k_heads"]]
     HK, HV, DK, DV, K = g["k_heads"], g["v_heads"], g["head_k"], g["head_v"], g["conv_kernel"]
     C = 2 * HK * DK + HV * DV
     state_bytes = HV * DV * DK * 4
     history_bytes = (K - 1) * C * 4
     layer_bytes = (state_bytes + history_bytes + 255) // 256 * 256
-    return dict(HK=HK, HV=HV, DK=DK, DV=DV, K=K, C=C, VD=HV * DV, state_bytes=state_bytes,
-                layer_bytes=layer_bytes, slot_bytes=layer_bytes * len(cfg["recurrent_layers"]))
+    NG = len(cfg["recurrent_layers"])
+    pend_base = pend_stride = pend_bytes = 0
+    if _defer_env() and _row_lanes(DK, DV):   # decode.spec.gdn_fold_defer: the slot also holds each layer's pending fold
+        pend_bytes = (PEND_HEAD + FOLD_W * (HK * DK + HV * DV + HV) * 4 + 255) // 256 * 256
+        pend_base, pend_stride = layer_bytes * NG, pend_bytes   # after every layer's state: the layer stride is that of the slot without it
+    return dict(HK=HK, HV=HV, DK=DK, DV=DV, K=K, C=C, VD=HV * DV, state_bytes=state_bytes, pend_base=pend_base, pend_stride=pend_stride,
+                pend_bytes=pend_bytes,
+                layer_bytes=layer_bytes, slot_bytes=(layer_bytes + pend_bytes) * NG)
 
 
 SLOT = r"""
@@ -427,7 +449,7 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
   %cdv = index.constant {DV} : index
   %chk = index.constant {HK} : index
   %column_offsets = vector.iota %c0 step %cdk : vector<4xindex>
-  %kh = index.rem %vh, %chk : index
+  {kh_line()}
   %kh_base = index.mul %kh, %cdk : index
   %q_row0 = index.add %kh_base, %lane : index
   %k_skip = index.constant {HK * DK} : index
@@ -562,6 +584,13 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
     text = "\n".join(T)
     if not RL and os.environ.get("GDN_PREFETCH", "1") not in ("", "0"):
         text = _prefetch_recurrence(text, RK)
+    fold = spec and fold_enabled(G)
+    if fold:   # GDN_FOLD: the verification variants and the fold launches (draft/gen_draft.verify_program)
+        main_class = "short" if recurrence_pf(G) else None
+        text += "\n" + FOLD_RANK + "\n" + _conv_bank(text, G, CU) + "\n" + _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, main_class, record=True)
+        text += "\n" + fold_kernels(G, NG, LB)
+        if defer_enabled(G):
+            text += "\n" + defer_kernels(G, NG)
     mode = chunk_mode(G)
     if mode:
         from gen_gdn_chunk import chunk_kernel
@@ -572,9 +601,669 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
             twin = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "short")
             twin = twin.replace('kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(', 'kernel.def target(@rdna4) export("g_gdn_recurrence_rdna4") @g_gdn_recurrence_rdna4(', 1)
             assert "g_gdn_recurrence_rdna4" in twin
+            if fold:
+                rt = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "short", record=True)
+                twin += "\n" + rt.replace('kernel.def export("g_gdn_recurrence_rec") @g_gdn_recurrence_rec(', 'kernel.def target(@rdna4) export("g_gdn_recurrence_rec_rdna4") @g_gdn_recurrence_rec_rdna4(', 1)
             ck = twin + "\n" + ck
         text = text + "\n" + ck
+    if fused_mode(G):   # gfx12 fused prefill (gen_gdn_fused.py): g_gdn_fa_rdna4 + g_gdn_fb_rdna4 replace conv .. norm_gate in GEMM-shape epochs
+        from gen_gdn_fused import fused_kernels
+        text = text + "\n" + fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close)
     return text
+
+
+def fused_mode(G):
+    """The two-launch fused gfx12 GDN prefill (choice prefill.gdn.fused2, env GDN_FUSED2): off unless the env says so, LOOM_RDNA4 is on and the
+    heads are 128 x 128 with a 4-tap conv."""
+    if os.environ.get("GDN_FUSED2", "") in ("", "0", "off", "no", "false") or os.environ.get("LOOM_RDNA4", "1") in ("", "0", "false", "no"):
+        return False
+    return G["DK"] == 128 and G["DV"] == 128 and G["K"] == 4 and G["HV"] % G["HK"] == 0
+
+
+FOLD_W = 8   # bank rows per speculative span of the fold factors: the verify width's bound (config @llm.width <= 8; g_spec_accept: span length 1..8)
+FOLD_SPANS = 32   # speculative spans per verification the banks hold (one per drafting row; build.py refuses GDN_FOLD with more rows). The banks are
+                  # sized min(spans, FOLD_SPANS) * FOLD_W rows: the runtime prepares @llm_verify for every packing shape, (1024, 1024) included,
+                  # so spans * FOLD_W rows would be 29 GB there (DevLab run 43821931908: RESOURCE_EXHAUSTED); this cap keeps the largest
+                  # verification scratch below the capture it replaces.
+
+PEND_HEAD = 256   # pending fold of a slot's layer (decode.spec.gdn_fold_defer): i32 step count, then [FOLD_W][HK*DK] keys, [FOLD_W][VD + HV] dk + decay
+
+FOLD_RANK = r"""
+// Rank of span `span` among the epoch's speculative spans (flag bit 4): its block of the fold banks (gen_gdn.fold_kernels).
+func.def inline @g_gdn_spec_rank(%metadata: buffer, %spans: index, %span: index) -> (index) {
+  %c16 = index.constant 16 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %packets = buffer.view %metadata[%c16] : buffer -> view<[%spans]x9xi32>
+  %four = scalar.constant 4 : i32
+  %zero32 = scalar.constant 0 : i32
+  %rank = scf.for %s = [%c0 to %span step %c1](%n = %c0 : index) -> (index) {
+    %sb = index.assume %s [lt(%s, %spans)] : index
+    %flags = view.load %packets[%sb, 6] : view<[%spans]x9xi32> -> i32
+    %bit = scalar.andi %flags, %four : i32
+    %is = scalar.cmpi ne, %bit, %zero32 : i32
+    %inc = scf.select %is, %c1, %c0 : index
+    %n1 = index.add %n, %inc : index
+    scf.yield %n1 : index
+  }
+  func.return %rank : index
+}
+"""
+
+
+def _rank_text(meta="%metadata", ok_extra=None):
+    """%rank (the span's speculative rank) and %rank_ok (speculative and rank < FOLD_SPANS) for the kernel's %span."""
+    return (f"  %rank_pub = func.call @g_gdn_publish({meta}, %spans, %span) : (buffer, index, index) -> (i1)\n"
+            "  %rank_true = scalar.constant true : i1\n"
+            "  %rank_spec = scalar.xori %rank_pub, %rank_true : i1\n"
+            f"  %rank = func.call @g_gdn_spec_rank({meta}, %spans, %span) : (buffer, index, index) -> (index)\n"
+            f"  %rank_cap = index.constant {FOLD_SPANS} : index\n"
+            "  %rank_in = index.cmp ult, %rank, %rank_cap : index\n"
+            "  %rank_ok = scalar.andi %rank_spec, %rank_in : i1\n")
+
+
+def fold_enabled(G=None):
+    """decode.spec.gdn_fold (GDN_FOLD): drafted verification records each step's fold factors instead of the replay inputs, and one launch
+    folds the accepted steps into every layer's state (fold_kernels; draft/gen_draft.verify_program). Needs the row-split recurrence."""
+    on = os.environ.get("GDN_FOLD", "").strip().lower() not in ("", "0", "false", "no", "off")
+    return on and (G is None or bool(_row_lanes(G["DK"], G["DV"])))
+
+
+def _defer_env():
+    return os.environ.get("GDN_FOLD_DEFER", "").strip().lower() not in ("", "0", "false", "no", "off") and \
+        os.environ.get("GDN_FOLD", "").strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def defer_enabled(G=None):
+    """decode.spec.gdn_fold_defer (GDN_FOLD_DEFER, needs GDN_FOLD): the fold of a drafted verification is not applied after acceptance;
+    the accepted steps' factors are stored in the writer slot as its pending fold (g_gdn_pend), and the next reader applies them:
+    the next verification's recurrence in registers (it also writes the folded state back), every other span (advance epochs,
+    publishing spans of a verification, forks from a retained slot) through g_gdn_flush + g_gdn_pend_clear at the program start.
+    One state read per drafted step instead of two (gen_gdn.defer_kernels)."""
+    return _defer_env() and (G is None or bool(G.get("pend_stride")))
+
+
+def _bank_view(name, buf, width, define_rows=True):
+    """`%{name}` = view<[%bank_rows]x{width}xf32> of layer %layer's block of a fold bank ([layer][rank * FOLD_W + step][width] f32);
+    define_rows: also define %bank_rows = min(%spans, FOLD_SPANS) * FOLD_W (once per kernel)."""
+    rows = (f"  %bank_rows_w = index.constant {FOLD_W} : index\n"
+            f"  %bank_rows_c = index.constant {FOLD_SPANS} : index\n"
+            f"  %bank_rows_s = index.min %spans, %bank_rows_c : index\n"
+            f"  %bank_rows = index.mul %bank_rows_s, %bank_rows_w : index\n") if define_rows else ""
+    return (rows + f"  %{name}_rb = index.constant {width * 4} : offset\n"
+            f"  %{name}_lb = index.scale %bank_rows, %{name}_rb : index, offset -> offset\n"
+            f"  %{name}_at = index.scale %layer, %{name}_lb : index, offset -> offset\n"
+            f"  %{name} = buffer.view %{buf}[%{name}_at] : buffer -> view<[%bank_rows]x{width}xf32>\n")
+
+
+def _bank_row(name, span, step, rows):
+    """%{name} = span * FOLD_W + step, clamped below `rows` (the store/load using it is guarded by step < FOLD_W)."""
+    return (f"  %{name}_w = index.constant {FOLD_W} : index\n"
+            f"  %{name}_s = index.mul {span}, %{name}_w : index\n"
+            f"  %{name}_v = index.add %{name}_s, {step} : index\n"
+            f"  %{name}_one = index.constant 1 : index\n"
+            f"  %{name}_max = index.sub {rows}, %{name}_one : index\n"
+            f"  %{name}_c = index.min %{name}_v, %{name}_max : index\n"
+            f"  %{name} = index.assume %{name}_c [range(%{name}_c, 0, 2147483646), lt(%{name}_c, {rows})] : index\n")
+
+
+def _conv_bank(text, G, CU):
+    """g_gdn_conv -> g_gdn_conv_bank (GDN_FOLD verification): the same outputs, plus each step's raw input (the conv history of the
+    fold) in %bankx and its key channels' output (the fold's k) in %bankk, at row span * FOLD_W + step (steps < FOLD_W)."""
+    C, K, HK, DK = G["C"], G["K"], G["HK"], G["DK"]
+    a, b = text.index('kernel.def export("g_gdn_conv")'), text.index("kernel.return\n}", text.index('kernel.def export("g_gdn_conv")'))
+    t = text[a:b + len("kernel.return\n}") + 1]
+
+    def sub(old, new):
+        nonlocal t
+        assert t.count(old) == 1, old[:60]
+        t = t.replace(old, new)
+    sub('kernel.def export("g_gdn_conv") @g_gdn_conv(', 'kernel.def export("g_gdn_conv_bank") @g_gdn_conv_bank(')
+    sub("%weight: buffer, %out: buffer) {", "%weight: buffer, %out: buffer, %bankx: buffer, %bankk: buffer) {")
+    rel = "    %rel = index.assume %rel_value [range(%rel_value, 0, 8191)] : index\n"
+    sub(rel, rel + "\n".join("  " + l for l in (_bank_view("bx_view", "bankx", C) + _bank_view("bk_view", "bankk", HK * DK, False)
+                                                  + _rank_text() + _bank_row("bank_row", "%rank", "%rel", "%bank_rows")).rstrip("\n").split("\n"))
+        + f"\n    %bank_cw = index.constant {FOLD_W} : index\n    %bank_rel = index.cmp ult, %rel, %bank_cw : index\n    %bank_ok = scalar.andi %bank_rel, %rank_ok : i1\n"
+        f"    %bank_k0 = index.constant {HK * DK} : index\n    %bank_k1 = index.constant {2 * HK * DK} : index\n")
+    stores = []
+    for u in range(CU):
+        sub(f"%val_u{u} = scf.if %cu{u}_in -> (f32) {{", f"%val_u{u}, %raw_u{u} = scf.if %cu{u}_in -> (f32, f32) {{")
+        sub(f"        scf.yield %silu_u{u} : f32\n      }} else {{\n        scf.yield %zero_f : f32\n      }}",
+            f"        scf.yield %silu_u{u}, %x{K - 1}_u{u} : f32, f32\n      }} else {{\n        scf.yield %zero_f, %zero_f : f32, f32\n      }}")
+        stores.append(f"""      %bk{u}_ok = scalar.andi %cu{u}_in, %bank_ok : i1
+      scf.if %bk{u}_ok {{
+        %bc{u} = index.assume %cu{u}_c [range(%cu{u}_c, 0, {C - 1})] : index
+        view.store %raw_u{u}, %bx_view[%bank_row, %bc{u}] : f32, view<[%bank_rows]x{C}xf32>
+        %bk{u}_ge = index.cmp uge, %bc{u}, %bank_k0 : index
+        %bk{u}_lt = index.cmp ult, %bc{u}, %bank_k1 : index
+        %bk{u}_isk = scalar.andi %bk{u}_ge, %bk{u}_lt : i1
+        scf.if %bk{u}_isk {{
+          %bkc{u}_v = index.sub %bc{u}, %bank_k0 : index
+          %bkc{u} = index.assume %bkc{u}_v [range(%bkc{u}_v, 0, {HK * DK - 1})] : index
+          view.store %val_u{u}, %bk_view[%bank_row, %bkc{u}] : f32, view<[%bank_rows]x{HK * DK}xf32>
+        }}
+      }}""")
+    last = f"        view.store %val_u{CU - 1}, %out_view[%token, %cs{CU - 1}] : f32, view<[%tokens]x{C}xf32>\n      }}\n"
+    sub(last, last + "\n".join(stores) + "\n")
+    return t
+
+
+def _record_rows(text, G, NG, CW, RL):
+    """g_gdn_recurrence -> g_gdn_recurrence_rec: the same arithmetic, plus each step's dk (per value column) and decay (per head) in
+    %bank, stored with the step's outputs (the RL-step batches: no store between the loop's loads)."""
+    VD, HV = G["VD"], G["HV"]
+    VC = f"vector<{CW}xf32>"
+
+    def sub(old, new, n=1):
+        nonlocal text
+        assert text.count(old) == n, (old[:60], text.count(old))
+        text = text.replace(old, new)
+    sub('kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(', 'kernel.def export("g_gdn_recurrence_rec") @g_gdn_recurrence_rec(')
+    sub("%dt_bias: buffer, %out: buffer) {", "%dt_bias: buffer, %out: buffer, %bank: buffer) {")
+    view = f"  %out_view = buffer.view %out[%zero] : buffer -> view<[%tokens]x{VD}xf32>\n"
+    sub(view, view + _bank_view("bd_view", "bank", VD + HV) + _rank_text())
+    head = [l for l in text.split("\n") if "= scf.for %step = [%c0 to %length step %c1i](" in l]
+    assert len(head) == 1
+    h = head[0]
+    assert h.endswith(f"%ob = %zero4 : {VC}) -> (" + h.split(") -> (")[1]) and h.endswith(f", {VC}) {{")
+    nh = h.replace(", %ob_unused = scf.for", ", %ob_unused, %db_unused, %gb_unused = scf.for", 1)
+    nh = nh.replace(f"%ob = %zero4 : {VC}) -> (", f"%ob = %zero4 : {VC}, %db = %zero4 : {VC}, %gb = %zero_f : f32) -> (", 1)
+    nh = nh[:-len(") {")] + f", {VC}, f32) {{"
+    sub(h, nh)
+    sel = f"    %ob_next = scf.select %ob_mine, %outv, %ob : {VC}\n"
+    sub(sel, sel + f"    %dkvec = vector.from_elements {', '.join(f'%dk{j}' for j in range(CW))} : {VC}\n"
+                   f"    %db_next = scf.select %ob_mine, %dkvec, %db : {VC}\n"
+                   f"    %gb_next = scf.select %ob_mine, %decay, %gb : f32\n")
+    st = f"        vector.store %ob_next, %out_view[%ob_row, %out_channel] : {VC}, view<[%tokens]x{VD}xf32>\n"
+    rec = (st + "        %rb_step = index.add %ob_step0, %r : index\n"
+           f"        %rb_cw = index.constant {FOLD_W} : index\n"
+           "        %rb_in = index.cmp ult, %rb_step, %rb_cw : index\n"
+           "        %rb_ok = scalar.andi %rb_in, %rank_ok : i1\n"
+           "        scf.if %rb_ok {\n"
+           + "\n".join("  " + l for l in _bank_row("rb_row", "%rank", "%rb_step", "%bank_rows").rstrip("\n").split("\n")) + "\n"
+           f"          vector.store %db_next, %bd_view[%rb_row, %out_channel] : {VC}, view<[%bank_rows]x{VD + HV}xf32>\n"
+           "          %rb_t0 = index.cmp eq, %tile, %c0 : index\n"
+           "          %rb_g0 = index.cmp eq, %cg, %c0 : index\n"
+           "          %rb_dw = scalar.andi %rb_t0, %rb_g0 : i1\n"
+           "          scf.if %rb_dw {\n"
+           f"            %rb_dc0 = index.constant {VD} : index\n"
+           "            %rb_dc1 = index.add %rb_dc0, %vh : index\n"
+           f"            %rb_dc = index.assume %rb_dc1 [range(%rb_dc1, {VD}, {VD + HV - 1})] : index\n"
+           f"            view.store %gb_next, %bd_view[%rb_row, %rb_dc] : f32, view<[%bank_rows]x{VD + HV}xf32>\n"
+           "          }\n"
+           "        }\n")
+    sub(st, rec)
+    y = [l for l in text.split("\n") if l.startswith("    scf.yield ") and "%ob_next : " in l]
+    assert len(y) == 1
+    sub(y[0], y[0].replace(", %ob_next : ", ", %ob_next, %db_next, %gb_next : ", 1) + f", {VC}, f32")
+    return text
+
+
+def fold_kernels(G, NG, LB):
+    """The fold of a drafted verification (GDN_FOLD), one launch each for all layers after g_spec_accept:
+    g_gdn_fold: every speculative span's accepted steps applied to its state, S = decay S + k dk^T per step, from the factors
+    g_gdn_recurrence_rec recorded and the raw keys g_gdn_conv_bank kept: the replay recurrence's arithmetic per state element
+    (mulf, then fmaf), so the published state is bit-identical to the replay's. Workgroup: (layer, value head, 32 columns), 256 lanes
+    of 4 key rows x 8 columns per pass. g_gdn_fold_hist: the conv history (the last K-1 pre-conv inputs) from g_gdn_conv_bank's raw
+    inputs, as g_gdn_conv_commit over the accepted length. Spans and lengths come from the committed packet (length = consumed),
+    speculative spans from the epoch's metadata (flag bit 4). Launch shape [spans, layers]: layers = the model's gated delta-net layers
+    (a kernel test folds layer 0 alone)."""
+    HK, HV, DK, DV, K, C, VD, SB = G["HK"], G["HV"], G["DK"], G["DV"], G["K"], G["C"], G["VD"], G["state_bytes"]
+    NS = HV * DV * DK
+    assert DK == 128 and DV % 32 == 0
+    CB = DV // 32   # 32-column blocks per head: 8 columns per pass x NP passes
+    span_head = f"""  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %span = index.assume %span_id [lt(%span_id, %spans)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %zero_f = scalar.constant 0.0 : f32
+  %active, %length, %start32, %row, %first = func.call @g_gdn_span(%committed, %spans, %span) : (buffer, index, index) -> (i1, index, i32, index, index)
+  %publish = func.call @g_gdn_publish(%metadata, %spans, %span) : (buffer, index, index) -> (i1)
+  %true = scalar.constant true : i1
+  %spec = scalar.xori %publish, %true : i1
+  %mine_s = scalar.andi %active, %spec : i1
+  %rank = func.call @g_gdn_spec_rank(%metadata, %spans, %span) : (buffer, index, index) -> (index)
+  %rank_cap = index.constant {FOLD_SPANS} : index
+  %rank_in = index.cmp ult, %rank, %rank_cap : index
+  %mine = scalar.andi %mine_s, %rank_in : i1
+"""
+    NP = 4   # 8-column passes per workgroup: every pass's state is loaded before the step loop, stored after it
+    loads, stores, dks, upd = [], [], [], []
+    for p in range(NP):
+        loads.append(f"""    %b{p}_o = index.constant {8 * p} : index
+    %b{p}_c = index.add %colbase, %b{p}_o : index
+    %b{p} = index.assume %b{p}_c [range(%b{p}_c, 0, {DV - 1})] : index
+    %hb{p} = index.add %head_cols, %b{p} : index
+    %dc{p} = index.assume %hb{p} [range(%hb{p}, 0, {VD - 1})] : index
+    %si{p}_r = index.mul %hb{p}, %c128 : index
+    %si{p}_v = index.add %si{p}_r, %a4 : index
+    %si{p} = index.assume %si{p}_v [range(%si{p}_v, 0, {NS - 4})] : index
+    %s{p}_0 = scf.if %fresh -> (vector<4xf32>) {{
+      scf.yield %zero_v : vector<4xf32>
+    }} else {{
+      %s{p}_l = vector.load %state_view[%si{p}] : view<{NS}xf32> -> vector<4xf32>
+      scf.yield %s{p}_l : vector<4xf32>
+    }}""")
+        dks.append(f"      %dk{p} = view.load %bd_view[%br, %dc{p}] : view<[%bank_rows]x{VD + HV}xf32> -> f32")
+        upd.append(f"""      %dkv{p} = vector.splat %dk{p} : vector<4xf32>
+      %sd{p} = vector.mulf %s{p}, %decay_vector : vector<4xf32>
+      %n{p} = vector.fmaf %kv, %dkv{p}, %sd{p} : vector<4xf32>""")
+        stores.append(f"    vector.store %s{p}_f, %next_view[%si{p}] : vector<4xf32>, view<{NS}xf32>")
+    V4 = ", ".join(["vector<4xf32>"] * NP)
+    steps = f"""    %{"_f, %".join(f"s{p}" for p in range(NP))}_f = scf.for %step = [%c0 to %length step %c1]({", ".join(f"%s{p} = %s{p}_0 : vector<4xf32>" for p in range(NP))}) -> ({V4}) {{
+{chr(10).join("    " + l for l in _bank_row("br", "%rank", "%step", "%bank_rows").rstrip(chr(10)).split(chr(10)))}
+      %kv = vector.load %bk_view[%br, %krow] : view<[%bank_rows]x{HK * DK}xf32> -> vector<4xf32>
+{chr(10).join(dks)}
+      %dec = view.load %bd_view[%br, %dcol] : view<[%bank_rows]x{VD + HV}xf32> -> f32
+      %decay_vector = vector.splat %dec : vector<4xf32>
+{chr(10).join(upd)}
+      scf.yield {", ".join(f"%n{p}" for p in range(NP))} : {V4}
+    }}"""
+    passes = loads + [steps] + stores
+    fold = f"""
+// Fold of a drafted verification (gen_gdn.fold_kernels): the accepted steps of every speculative span into each layer's state.
+kernel.def export("g_gdn_fold") @g_gdn_fold(%spans: index, %layers: index) {{
+  %c1 = index.constant 1 : index
+  %blocks = index.constant {HV * CB} : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%blocks, %layers, %spans) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %spans_arg: index, %metadata: buffer, %committed: buffer, %origins: buffer, %arena: buffer, %bankk: buffer, %bankd: buffer) {{
+  %block_id = kernel.workgroup.id<x> : index
+  %block = index.assume %block_id [range(%block_id, 0, {HV * CB - 1})] : index
+  %layer_id = kernel.workgroup.id<y> : index
+  %layer = index.assume %layer_id [range(%layer_id, 0, 65534)] : index
+  %span_id = kernel.workgroup.id<z> : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+{span_head}  scf.if %mine {{
+    %layer_stride = index.constant {LB} : offset
+    %layer_bytes = index.scale %layer, %layer_stride : index, offset -> offset
+    %reader, %writer, %fresh = func.call @g_gdn_slots(%origins, %row, %start32, %layer_bytes) : (buffer, index, i32, offset) -> (offset, offset, i1)
+    %state_view = buffer.view %arena[%reader] : buffer -> view<{NS}xf32>
+    %next_view = buffer.view %arena[%writer] : buffer -> view<{NS}xf32>
+{_bank_view("bk_view", "bankk", HK * DK)}{_bank_view("bd_view", "bankd", VD + HV, False)}
+    %ccb = index.constant {CB} : index
+    %vh_v = index.div %block, %ccb : index
+    %vh = index.assume %vh_v [range(%vh_v, 0, {HV - 1})] : index
+    %cblk_v = index.rem %block, %ccb : index
+    %cblk = index.assume %cblk_v [range(%cblk_v, 0, {CB - 1})] : index
+    %chk = index.constant {HK} : index
+    {kh_line()}
+    %c4 = index.constant 4 : index
+    %c32 = index.constant 32 : index
+    %c128 = index.constant {DK} : index
+    %cdv = index.constant {DV} : index
+    %quad_v = index.rem %lane, %c32 : index
+    %quad = index.assume %quad_v [range(%quad_v, 0, 31)] : index
+    %a4_v = index.mul %quad, %c4 : index
+    %a4 = index.assume %a4_v [range(%a4_v, 0, {DK - 4})] : index
+    %sub_v = index.div %lane, %c32 : index
+    %sub = index.assume %sub_v [range(%sub_v, 0, 7)] : index
+    %cb32 = index.mul %cblk, %c32 : index
+    %colbase = index.add %cb32, %sub : index
+    %head_cols = index.mul %vh, %cdv : index
+    %kh_rows = index.mul %kh, %c128 : index
+    %krow_v = index.add %kh_rows, %a4 : index
+    %krow = index.assume %krow_v [range(%krow_v, 0, {HK * DK - 4})] : index
+    %dcol_c = index.constant {VD} : index
+    %dcol_v = index.add %dcol_c, %vh : index
+    %dcol = index.assume %dcol_v [range(%dcol_v, {VD}, {VD + HV - 1})] : index
+    %zero_v = vector.splat %zero_f : vector<4xf32>
+{chr(10).join(passes)}
+  }}
+  kernel.return
+}}
+"""
+    # conv history: the last K-1 inputs of [old history, accepted raw inputs]
+    reads, writes = [], []
+    for k in range(K - 1):
+        need = K - 1 - k
+        reads.append(f"""      %need{k} = index.constant {need} : index
+      %has{k} = index.cmp uge, %length, %need{k} : index
+      %val{k} = scf.if %has{k} -> (f32) {{
+        %st{k} = index.sub %length, %need{k} : index
+{chr(10).join("    " + l for l in _bank_row(f"hr{k}", "%rank", f"%st{k}", "%bank_rows").rstrip(chr(10)).split(chr(10)))}
+        %v{k} = view.load %bx_view[%hr{k}, %ch] : view<[%bank_rows]x{C}xf32> -> f32
+        scf.yield %v{k} : f32
+      }} else {{
+        %o{k} = scf.if %fresh -> (f32) {{
+          scf.yield %zero_f : f32
+        }} else {{
+          %hk{k}a = index.constant {k} : index
+          %hk{k}b = index.add %hk{k}a, %length : index
+          %hk{k} = index.assume %hk{k}b [range(%hk{k}b, 0, {K - 2})] : index
+          %hv{k} = view.load %old_view[%hk{k}, %ch] : view<{K - 1}x{C}xf32> -> f32
+          scf.yield %hv{k} : f32
+        }}
+        scf.yield %o{k} : f32
+      }}""")
+        writes.append(f"      view.store %val{k}, %new_view[{k}, %ch] : f32, view<{K - 1}x{C}xf32>")
+    HCB = (C + 255) // 256
+    hist = f"""
+kernel.def export("g_gdn_fold_hist") @g_gdn_fold_hist(%spans: index, %layers: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  %cblocks = index.constant {HCB} : index
+  kernel.launch.config workgroups(%spans, %cblocks, %layers) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %spans_arg: index, %metadata: buffer, %committed: buffer, %origins: buffer, %arena: buffer, %bankx: buffer) {{
+  %span_id = kernel.workgroup.id<x> : index
+  %cblk_id = kernel.workgroup.id<y> : index
+  %layer_id = kernel.workgroup.id<z> : index
+  %layer = index.assume %layer_id [range(%layer_id, 0, 65534)] : index
+  %thread_id = kernel.workitem.id<x> : index
+  %thread = index.assume %thread_id [range(%thread_id, 0, 255)] : index
+{span_head}  scf.if %mine {{
+    %layer_stride = index.constant {LB} : offset
+    %layer_bytes = index.scale %layer, %layer_stride : index, offset -> offset
+    %reader, %writer, %fresh = func.call @g_gdn_slots(%origins, %row, %start32, %layer_bytes) : (buffer, index, i32, offset) -> (offset, offset, i1)
+    %history_skip = index.constant {SB} : offset
+    %old_at = index.add %reader, %history_skip : offset
+    %new_at = index.add %writer, %history_skip : offset
+    %old_view = buffer.view %arena[%old_at] : buffer -> view<{K - 1}x{C}xf32>
+    %new_view = buffer.view %arena[%new_at] : buffer -> view<{K - 1}x{C}xf32>
+{_bank_view("bx_view", "bankx", C)}    %c256 = index.constant 256 : index
+    %cC = index.constant {C} : index
+    %cblk_off = index.mul %cblk_id, %c256 : index
+    %c = index.add %thread, %cblk_off : index
+    %inside = index.cmp ult, %c, %cC : index
+    scf.if %inside {{
+      %ch = index.assume %c [range(%c, 0, {C - 1})] : index
+{chr(10).join(reads)}
+{chr(10).join(writes)}
+    }}
+  }}
+  kernel.return
+}}
+"""
+    return fold + hist
+
+
+def _pend_views(G, which, pre):
+    """Views of the pending fold of layer %layer of the span's `which` ("reader" / "writer") slot (the block after every layer's state):
+    %{pre}_hdr (view<4xi32>: [0] = steps), %{pre}_k [FOLD_W][HK*DK] keys, %{pre}_d [FOLD_W][VD + HV] dk per value column + decay per head."""
+    HK, DK, VD, HV, PB, PS = G["HK"], G["DK"], G["VD"], G["HV"], G["pend_base"], G["pend_stride"]
+    return (f"  %{pre}_z = index.constant 0 : offset\n"
+            f"  %{pre}_rb, %{pre}_wb, %{pre}_fr = func.call @g_gdn_slots(%origins, %row, %start32, %{pre}_z) : (buffer, index, i32, offset) -> (offset, offset, i1)\n"
+            f"  %{pre}_lb = index.constant {PS} : offset\n"
+            f"  %{pre}_lo = index.scale %layer, %{pre}_lb : index, offset -> offset\n"
+            f"  %{pre}_pb = index.constant {PB} : offset\n"
+            f"  %{pre}_a0 = index.add %{pre}_{which[0]}b, %{pre}_pb : offset\n"
+            f"  %{pre}_at = index.add %{pre}_a0, %{pre}_lo : offset\n"
+            f"  %{pre}_hdr = buffer.view %arena[%{pre}_at] : buffer -> view<4xi32>\n"
+            f"  %{pre}_k_off = index.constant {PEND_HEAD} : offset\n"
+            f"  %{pre}_k_at = index.add %{pre}_at, %{pre}_k_off : offset\n"
+            f"  %{pre}_k = buffer.view %arena[%{pre}_k_at] : buffer -> view<{FOLD_W}x{HK * DK}xf32>\n"
+            f"  %{pre}_d_off = index.constant {PEND_HEAD + FOLD_W * HK * DK * 4} : offset\n"
+            f"  %{pre}_d_at = index.add %{pre}_at, %{pre}_d_off : offset\n"
+            f"  %{pre}_d = buffer.view %arena[%{pre}_d_at] : buffer -> view<{FOLD_W}x{VD + HV}xf32>\n")
+
+
+def _defer_rows(text, G, CW, RL):
+    """g_gdn_recurrence_rec under decode.spec.gdn_fold_defer: the reader slot's pending fold (the previous verification's accepted
+    steps) is applied to the state in registers first, S = fma(k, dk, S * decay) per step, g_gdn_fold's op order (bit-identical to
+    the eager fold), and a speculative span writes that folded state to its writer slot (its pending fold is replaced after
+    acceptance by g_gdn_pend). Publishing spans find no pending fold: g_gdn_flush ran at the program start."""
+    HK, DK, VD, HV = G["HK"], G["DK"], G["VD"], G["HV"]
+    RPL = DK // RL
+    NS = HV * G["DV"] * DK
+    VR = f"vector<{RPL}xf32>"
+    J = range(CW)
+
+    def sub(old, new):
+        nonlocal text
+        assert text.count(old) == 1, (old[:60], text.count(old))
+        text = text.replace(old, new)
+    anchor = f"  %a = view.load %a_view[%vh] : view<{HV}xf32> -> f32\n"
+    V = ", ".join([VR] * CW)
+    # the folded-state write is non-temporal: it is read again only by the next verification; written through the caches it slowed the
+    # next weight matvecs by ~0.35 ms per drafted step (R9700 profile, defold exp4/exp5)
+    nt = " {cache_scope = device, cache_temporal = non_temporal}"
+    code = (_pend_views(G, "reader", "dfr")
+            + "  %dfr_zero32 = scalar.constant 0 : i32\n"
+            "  %dfr_n32 = scf.if %fresh -> (i32) {\n    scf.yield %dfr_zero32 : i32\n  } else {\n"
+            "    %dfr_l = view.load %dfr_hdr[0] : view<4xi32> -> i32\n    scf.yield %dfr_l : i32\n  }\n"
+            f"  %dfr_nb = scalar.assume %dfr_n32 [range(%dfr_n32, 0, {FOLD_W})] : i32\n"
+            "  %dfr_n = index.cast %dfr_nb : i32 to index\n"
+            f"  %dfr_dc_c = index.constant {VD} : index\n  %dfr_dc_v = index.add %dfr_dc_c, %vh : index\n"
+            f"  %dfr_dc = index.assume %dfr_dc_v [range(%dfr_dc_v, {VD}, {VD + HV - 1})] : index\n"
+            + "".join(f"  %dfr_c{j} = index.assume %sc{j} [range(%sc{j}, 0, {VD - 1})] : index\n" for j in J)
+            + f"  {', '.join(f'%pinit{j}' for j in J)} = scf.for %dfr_p = [%c0 to %dfr_n step %c1i]({', '.join(f'%dfr_s{j} = %init{j} : {VR}' for j in J)}) -> ({V}) {{\n"
+            f"    %dfr_pb = index.assume %dfr_p [range(%dfr_p, 0, {FOLD_W - 1})] : index\n"
+            f"    %dfr_kv = vector.load %dfr_k[%dfr_pb, %q_row] : view<{FOLD_W}x{HK * DK}xf32> -> {VR}\n"
+            f"    %dfr_dec = view.load %dfr_d[%dfr_pb, %dfr_dc] : view<{FOLD_W}x{VD + HV}xf32> -> f32\n"
+            f"    %dfr_decv = vector.splat %dfr_dec : {VR}\n"
+            + "".join(f"    %dfr_dk{j} = view.load %dfr_d[%dfr_pb, %dfr_c{j}] : view<{FOLD_W}x{VD + HV}xf32> -> f32\n"
+                      f"    %dfr_dkv{j} = vector.splat %dfr_dk{j} : {VR}\n"
+                      f"    %dfr_sd{j} = vector.mulf %dfr_s{j}, %dfr_decv : {VR}\n"
+                      f"    %dfr_n{j} = vector.fmaf %dfr_kv, %dfr_dkv{j}, %dfr_sd{j} : {VR}\n" for j in J)
+            + f"    scf.yield {', '.join(f'%dfr_n{j}' for j in J)} : {V}\n  }}\n"
+            "  scf.if %rank_spec {\n"
+            + "".join(f"    vector.store %pinit{j}, %next_view[%si{j}]{nt} : {VR}, view<{NS}xf32>\n" for j in J)
+            + "  }\n")
+    sub(anchor, code + anchor)
+    for j in J:
+        sub(f"%s{j} = %init{j} : {VR}", f"%s{j} = %pinit{j} : {VR}")
+    return text
+
+
+def defer_kernels(G, NG):
+    """decode.spec.gdn_fold_defer (defer_enabled): the pending fold of a slot's layer = the accepted steps of its last drafted
+    verification, applied by the slot's next reader.
+    g_gdn_pend (after g_spec_accept, in place of g_gdn_fold): each speculative span's accepted steps' factors (rows of the verify banks)
+    into its writer slot's pending block, and the step count (0 when nothing was accepted: the verification already wrote the folded
+    state there). Launch [spans, layers, FOLD_W].
+    g_gdn_flush (program start, @llm_advance and @llm_verify): every live publishing span's reader slot with a pending fold gets it
+    applied in place (g_gdn_fold's op order; a slot read by several spans is flushed by the first). Launch [spans, layers, 1].
+    g_gdn_pend_clear (right after): those reader slots' and every live publishing span's writer slot's step count = 0 (a writer is
+    republished whole by the span). Launch [spans, layers]."""
+    HK, HV, DK, DV, VD, NS, LB = G["HK"], G["HV"], G["DK"], G["DV"], G["VD"], G["HV"] * G["DV"] * G["DK"], G["layer_bytes"]
+    KW, DW = HK * DK, VD + HV
+    assert KW % 4 == 0 and DW % 4 == 0 and NS % (4 * 256 * 8) == 0
+    head = """  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %span = index.assume %span_id [lt(%span_id, %spans)] : index
+  %layer = index.assume %layer_id [range(%layer_id, 0, 65534)] : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c256 = index.constant 256 : index
+  %zero32 = scalar.constant 0 : i32
+  %true = scalar.constant true : i1
+  %active, %length, %start32, %row, %first = func.call @g_gdn_span(%metadata, %spans, %span) : (buffer, index, index) -> (i1, index, i32, index, index)
+  %publish = func.call @g_gdn_publish(%metadata, %spans, %span) : (buffer, index, index) -> (i1)
+  %layer_stride = index.constant {LB} : offset
+  %layer_bytes = index.scale %layer, %layer_stride : index, offset -> offset
+""".replace("{LB}", str(LB))
+
+    def copy(src, dst, width, row_src):
+        n4 = width // 4
+        return f"""      %{dst}_n4 = index.constant {n4} : index
+      scf.for %{dst}_i = [%lane to %{dst}_n4 step %c256] {{
+        %{dst}_ib = index.assume %{dst}_i [range(%{dst}_i, 0, {n4 - 1})] : index
+        %{dst}_e = index.mul %{dst}_ib, %c4 : index
+        %{dst}_eb = index.assume %{dst}_e [range(%{dst}_e, 0, {width - 4})] : index
+        %{dst}_v = vector.load %{src}[{row_src}, %{dst}_eb] : view<[%bank_rows]x{width}xf32> -> vector<4xf32>
+        vector.store %{dst}_v, %{dst}[%step, %{dst}_eb] : vector<4xf32>, view<{FOLD_W}x{width}xf32>
+      }}
+"""
+    pend = f"""
+// decode.spec.gdn_fold_defer: the accepted steps' fold factors of every speculative span into its writer slot's pending fold (gen_gdn.defer_kernels).
+kernel.def export("g_gdn_pend") @g_gdn_pend(%spans: index, %layers: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  %steps = index.constant {FOLD_W} : index
+  kernel.launch.config workgroups(%spans, %layers, %steps) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %spans_arg: index, %metadata: buffer, %committed: buffer, %origins: buffer, %arena: buffer, %bankk: buffer, %bankd: buffer) {{
+  %span_id = kernel.workgroup.id<x> : index
+  %layer_id = kernel.workgroup.id<y> : index
+  %step_id = kernel.workgroup.id<z> : index
+  %step = index.assume %step_id [range(%step_id, 0, {FOLD_W - 1})] : index
+  %lane_id = kernel.workitem.id<x> : index
+{head}  %spec = scalar.xori %publish, %true : i1
+  %mine = scalar.andi %active, %spec : i1
+  scf.if %mine {{
+    %cactive, %clength, %cstart32, %crow, %cfirst = func.call @g_gdn_span(%committed, %spans, %span) : (buffer, index, index) -> (i1, index, i32, index, index)
+    %rank = func.call @g_gdn_spec_rank(%metadata, %spans, %span) : (buffer, index, index) -> (index)
+    %rank_cap = index.constant {FOLD_SPANS} : index
+    %rank_in = index.cmp ult, %rank, %rank_cap : index
+    %ok = scalar.andi %cactive, %rank_in : i1
+    %fw = index.constant {FOLD_W} : index
+    %clen = index.min %clength, %fw : index
+    %n = scf.select %ok, %clen, %c0 : index
+    %reader, %writer, %fresh = func.call @g_gdn_slots(%origins, %row, %start32, %layer_bytes) : (buffer, index, i32, offset) -> (offset, offset, i1)
+{chr(10).join("  " + l for l in _pend_views(G, "writer", "pw").rstrip(chr(10)).split(chr(10)))}
+    %s0 = index.cmp eq, %step, %c0 : index
+    %l0 = index.cmp eq, %lane, %c0 : index
+    %first_lane = scalar.andi %s0, %l0 : i1
+    scf.if %first_lane {{
+      %n_i = index.cast %n : index to i32
+      view.store %n_i, %pw_hdr[0] : i32, view<4xi32>
+    }}
+    %in = index.cmp ult, %step, %n : index
+    scf.if %in {{
+{chr(10).join("    " + l for l in (_bank_view("bk_view", "bankk", KW) + _bank_view("bd_view", "bankd", DW, False) + _bank_row("br", "%rank", "%step", "%bank_rows")).rstrip(chr(10)).split(chr(10)))}
+{copy("bk_view", "pw_k", KW, "%br")}{copy("bd_view", "pw_d", DW, "%br")}    }}
+  }}
+  kernel.return
+}}
+"""
+    Z = 1   # one workgroup per (span, layer): the empty launch of every advance epoch stays small; a pending fold (once per turn) loops over the layer
+    per = NS // (4 * 256 * Z)   # vec4 slots per lane
+    flush = f"""
+// The reader slot's base (g_gdn_slots without the layer) as i64, to compare spans' readers.
+func.def inline @g_gdn_reader64(%origins: buffer, %row: index, %start32: i32) -> (i64) {{
+  %record_stride = index.constant 40 : offset
+  %bounded_row = index.assume %row [range(%row, 0, 2147483646)] : index
+  %record_offset = index.scale %bounded_row, %record_stride : index, offset -> offset
+  %records = buffer.view %origins[%record_offset] : buffer -> view<5xi64>
+  %read64 = view.load %records[0] : view<5xi64> -> i64
+  %write64 = view.load %records[1] : view<5xi64> -> i64
+  %fork64 = view.load %records[3] : view<5xi64> -> i64
+  %start64 = scalar.extui %start32 : i32 to i64
+  %at_fork = scalar.cmpi eq, %start64, %fork64 : i64
+  %reader64 = scf.select %at_fork, %read64, %write64 : i64
+  func.return %reader64 : i64
+}}
+
+// decode.spec.gdn_fold_defer: a live publishing span's reader slot with a pending fold gets it applied in place (gen_gdn.defer_kernels).
+kernel.def export("g_gdn_flush") @g_gdn_flush(%spans: index, %layers: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  %parts = index.constant {Z} : index
+  kernel.launch.config workgroups(%spans, %layers, %parts) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %spans_arg: index, %metadata: buffer, %origins: buffer, %arena: buffer) {{
+  %span_id = kernel.workgroup.id<x> : index
+  %layer_id = kernel.workgroup.id<y> : index
+  %part_id = kernel.workgroup.id<z> : index
+  %part = index.assume %part_id [range(%part_id, 0, {Z - 1})] : index
+  %lane_id = kernel.workitem.id<x> : index
+{head}  %mine = scalar.andi %active, %publish : i1
+  scf.if %mine {{
+    %reader, %writer, %fresh = func.call @g_gdn_slots(%origins, %row, %start32, %layer_bytes) : (buffer, index, i32, offset) -> (offset, offset, i1)
+    %stale = scalar.xori %fresh, %true : i1
+    scf.if %stale {{
+{chr(10).join("    " + l for l in _pend_views(G, "reader", "pf").rstrip(chr(10)).split(chr(10)))}
+      %n32 = view.load %pf_hdr[0] : view<4xi32> -> i32
+      %nb = scalar.assume %n32 [range(%n32, 0, {FOLD_W})] : i32
+      %n = index.cast %nb : i32 to index
+      %has = index.cmp ugt, %n, %c0 : index
+      scf.if %has {{
+        // the first live publishing span reading this slot flushes it
+        %reader64 = func.call @g_gdn_reader64(%origins, %row, %start32) : (buffer, index, i32) -> (i64)
+        %dup = scf.for %o = [%c0 to %span step %c1](%d = %false_init : i1) -> (i1) {{
+          %ob = index.assume %o [lt(%o, %spans)] : index
+          %oa, %ol, %os32, %orow, %of = func.call @g_gdn_span(%metadata, %spans, %ob) : (buffer, index, index) -> (i1, index, i32, index, index)
+          %op = func.call @g_gdn_publish(%metadata, %spans, %ob) : (buffer, index, index) -> (i1)
+          %or64 = func.call @g_gdn_reader64(%origins, %orow, %os32) : (buffer, index, i32) -> (i64)
+          %olive = scalar.andi %oa, %op : i1
+          %ozero = scalar.cmpi eq, %os32, %zero32 : i32
+          %ostale = scalar.xori %ozero, %true : i1
+          %oread = scalar.andi %olive, %ostale : i1
+          %osame = scalar.cmpi eq, %or64, %reader64 : i64
+          %ohit = scalar.andi %oread, %osame : i1
+          %d1 = scalar.ori %d, %ohit : i1
+          scf.yield %d1 : i1
+        }}
+        %go = scalar.xori %dup, %true : i1
+        scf.if %go {{
+          %state_view = buffer.view %arena[%reader] : buffer -> view<{NS}xf32>
+          %cdk = index.constant {DK} : index
+          %cdv = index.constant {DV} : index
+          %chk = index.constant {HK} : index
+          %per = index.constant {per} : index
+          %part_base = index.constant {per * 256} : index
+          %pb = index.mul %part, %part_base : index
+          scf.for %it = [%c0 to %per step %c1] {{
+            %iw = index.mul %it, %c256 : index
+            %i0 = index.add %pb, %iw : index
+            %i = index.add %i0, %lane : index
+            %e_v = index.mul %i, %c4 : index
+            %e = index.assume %e_v [range(%e_v, 0, {NS - 4})] : index
+            %col_v = index.div %e, %cdk : index
+            %col = index.assume %col_v [range(%col_v, 0, {VD - 1})] : index
+            %a4_v = index.rem %e, %cdk : index
+            %a4 = index.assume %a4_v [range(%a4_v, 0, {DK - 4})] : index
+            %vh_v = index.div %col, %cdv : index
+            %vh = index.assume %vh_v [range(%vh_v, 0, {HV - 1})] : index
+            {kh_line()}
+            %kb = index.mul %kh, %cdk : index
+            %krow_v = index.add %kb, %a4 : index
+            %krow = index.assume %krow_v [range(%krow_v, 0, {KW - 4})] : index
+            %dcol_c = index.constant {VD} : index
+            %dcol_v = index.add %dcol_c, %vh : index
+            %dcol = index.assume %dcol_v [range(%dcol_v, {VD}, {DW - 1})] : index
+            %s0 = vector.load %state_view[%e] : view<{NS}xf32> -> vector<4xf32>
+            %sf = scf.for %p = [%c0 to %n step %c1](%s = %s0 : vector<4xf32>) -> (vector<4xf32>) {{
+              %pp = index.assume %p [range(%p, 0, {FOLD_W - 1})] : index
+              %kv = vector.load %pf_k[%pp, %krow] : view<{FOLD_W}x{KW}xf32> -> vector<4xf32>
+              %dk = view.load %pf_d[%pp, %col] : view<{FOLD_W}x{DW}xf32> -> f32
+              %dec = view.load %pf_d[%pp, %dcol] : view<{FOLD_W}x{DW}xf32> -> f32
+              %dkv = vector.splat %dk : vector<4xf32>
+              %decay_vector = vector.splat %dec : vector<4xf32>
+              %sd = vector.mulf %s, %decay_vector : vector<4xf32>
+              %nx = vector.fmaf %kv, %dkv, %sd : vector<4xf32>
+              scf.yield %nx : vector<4xf32>
+            }}
+            vector.store %sf, %state_view[%e] : vector<4xf32>, view<{NS}xf32>
+          }}
+        }}
+      }}
+    }}
+  }}
+  kernel.return
+}}
+""".replace("%false_init", "%false_c").replace("  %true = scalar.constant true : i1\n", "  %true = scalar.constant true : i1\n  %false_c = scalar.constant false : i1\n", 1)
+    clear = f"""
+// decode.spec.gdn_fold_defer: after g_gdn_flush, the flushed reader slots' and the live publishing spans' writer slots' pending step count = 0.
+kernel.def export("g_gdn_pend_clear") @g_gdn_pend_clear(%spans: index, %layers: index) {{
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%spans, %layers, %c1) workgroup_size(%c32, %c1, %c1) : index
+}} launch(%tokens_arg: index, %spans_arg: index, %metadata: buffer, %origins: buffer, %arena: buffer) {{
+  %span_id = kernel.workgroup.id<x> : index
+  %layer_id = kernel.workgroup.id<y> : index
+  %lane_id = kernel.workitem.id<x> : index
+{head.replace("[range(%lane_id, 0, 255)]", "[range(%lane_id, 0, 31)]")}  %l0 = index.cmp eq, %lane, %c0 : index
+  %live = scalar.andi %active, %publish : i1
+  %mine = scalar.andi %live, %l0 : i1
+  scf.if %mine {{
+    %reader, %writer, %fresh = func.call @g_gdn_slots(%origins, %row, %start32, %layer_bytes) : (buffer, index, i32, offset) -> (offset, offset, i1)
+{chr(10).join("  " + l for l in _pend_views(G, "writer", "cw").rstrip(chr(10)).split(chr(10)))}
+    view.store %zero32, %cw_hdr[0] : i32, view<4xi32>
+    %stale = scalar.xori %fresh, %true : i1
+    scf.if %stale {{
+{chr(10).join("    " + l for l in _pend_views(G, "reader", "cr").rstrip(chr(10)).split(chr(10)))}
+      view.store %zero32, %cr_hdr[0] : i32, view<4xi32>
+    }}
+  }}
+  kernel.return
+}}
+"""
+    return pend + flush + clear
 
 
 PF_SPAN = 64   # spans of at least this many tokens (the GEMM epoch shape) run the prefill form
@@ -621,7 +1310,7 @@ def _row_lanes(DK, DV):
     return 0
 
 
-def _recurrence_rows(G, NG, LB, RL, CW, guard_open, guard_close, span_class=None):
+def _recurrence_rows(G, NG, LB, RL, CW, guard_open, guard_close, span_class=None, record=False):
     """g_gdn_recurrence, row-split form: a 32-lane workgroup owns CW * (32 / RL) value columns of one head; each
     group of RL lanes owns CW columns and lane r of the group the key rows [r * DK / RL, (r + 1) * DK / RL) of
     them (DK / RL * CW state values in registers). S^T k and S^T q are per-lane dot products over the lane's
@@ -630,7 +1319,9 @@ def _recurrence_rows(G, NG, LB, RL, CW, guard_open, guard_close, span_class=None
     the token's decay/beta are computed once per workgroup. The step's inputs are loaded one step ahead and the
     outputs stored in RL-step batches (lane r keeps step r's CW outputs), so no global store sits between the
     loop's loads. Same arithmetic per state element as the 32-lane form; the sums are ordered differently.
-    GDN_ROW_LANES (default 16) / GDN_COLS (default 2) pick RL / CW."""
+    GDN_ROW_LANES (default 16) / GDN_COLS (default 2) pick RL / CW.
+    record=True: g_gdn_recurrence_rec, which also writes each step's fold factors to %bank (fold_kernels): the update scalar
+    dk = beta (v - decay S^T k) / |k| per value column and the decay per head, at row span * FOLD_W + step (steps < FOLD_W)."""
     HK, HV, DK, DV, C, VD = G["HK"], G["HV"], G["DK"], G["DV"], G["C"], G["VD"]
     RPL, CPW = DK // RL, CW * (32 // RL)
     VC = f"vector<{CW}xf32>"
@@ -691,7 +1382,7 @@ def _recurrence_rows(G, NG, LB, RL, CW, guard_open, guard_close, span_class=None
   %in_class = index.cmp {cmp_}, %length, %cpf_len : index
   %mine = scalar.andi %active, %in_class : i1
 """
-    return f"""
+    text = f"""
 kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
   %c1 = index.constant 1 : index
   %heads = index.constant {HV} : index
@@ -744,7 +1435,7 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
   %cg_value = index.div %lane, %crl : index
   %cg = index.assume %cg_value [range(%cg_value, 0, {32 // RL - 1})] : index
   %row_off = index.mul %r, %crpl : index
-  %kh = index.rem %vh, %chk : index
+  {kh_line()}
   %kh_base = index.mul %kh, %cdk : index
   %q_row_value = index.add %kh_base, %row_off : index
   %q_row = index.assume %q_row_value [range(%q_row_value, 0, {HK * DK - RPL})] : index
@@ -818,6 +1509,12 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
   kernel.return
 }}
 """
+    if record:
+        text = _record_rows(text, G, NG, CW, RL)
+        if defer_enabled(G):
+            text = _defer_rows(text, G, CW, RL)
+    return text
+
 
 def _prefetch_recurrence(text, RK):
     """Software-pipeline g_gdn_recurrence: the step's inputs (q, k, v, the norms, alpha, beta) don't depend on

@@ -66,7 +66,7 @@ Order matters: each step's proof is the next step's precondition. Big outputs go
 5. **GPU proof on DevLab** (never the local GPU; `loom-fleet` `reference/campaign.md` "DevLab"). Smoke first: serve, one chat, one tool
    call, per representative (a dense small model, a hybrid/recurrent one, a vision one, and one other GPU family), with tight timeouts.
    Then the SDK A/B: `fleet/regen.py plan --mode sdk-ab`: per model one job in which the *published old card on the old SDK* and the
-   *new package on the new SDK* run ABBA on the same runner, metrics decode / prefill / long-context / 4-stream, same gates. Per methodology rule 15 the default is cheaper: measure only the new package (Loom rows + gates), compare with the old card's stored rows, and run this ABBA job only for a model whose row moved beyond its band; llama.cpp is never re-run. The
+   *new package on the new SDK* run ABBA on the same runner, metrics decode / prefill / long-context / 4-stream, same gates. Per methodology rule 17 the default is cheaper: measure only the new package (Loom rows + gates), compare with the old card's stored rows, and run this ABBA job only for a model whose row moved beyond its band; llama.cpp is never re-run. The
    ratchet: a regression over 3 % on a metric triggers one confirming rerun, then a decision with the numbers. Poll >= 120 s with one loop.
    When the old card and llama.cpp are already measured and unchanged, `--mode sdk-loom` is the cheaper sweep: Loom only on the new SDK, deltas
    against the old card's Loom rows, ONE targeted ABBA job only for a row outside +-3 % (`fleet/README.md` "SDK A/B"); the card then says
@@ -97,7 +97,7 @@ Order matters: each step's proof is the next step's precondition. Big outputs go
 | Program ABI | server fails to load: export signature mismatch, missing export role, record validation | release notes "source ABI" rows, the fixture programs in the SDK tree and library at the new tag, `sweep.py` link (partly) | edit the templates/emitters; the fixture is the reference; a GPU smoke is the proof |
 | Card schema | `unknown model field 'X'` at serve; readers raise `KeyError` | diff of the card parser/validator between tags; every card key the repo writes or reads (grep) | drop or rename the key in writers and tolerate absence in readers |
 | Install and pin | wheel not where it was (PyPI vs release asset), catalog tag, pin schema | the release page, `pip download`, `loom.json` of the catalog | installer source, pin stamping, card Quick start, CI install steps |
-| Device runtime | numbers move, kernel A/B not comparable, a device selector disappears | notes "runtime" rows, the loom-test/benchmark driver, completion/wait policy | re-measure the Loom side (llama.cpp rows stay, rule 15); keep explicit tuning flags until an A/B shows they are redundant |
+| Device runtime | numbers move, kernel A/B not comparable, a device selector disappears | notes "runtime" rows, the loom-test/benchmark driver, completion/wait policy | re-measure the Loom side (llama.cpp rows stay, rule 17); keep explicit tuning flags until an A/B shows they are redundant |
 | Request semantics | gates that send a field get a different answer (400 became ignored; a null means default) | the server's request decoder diff | adjust gates and integrations; note what silently changed |
 
 A change can sit in two classes (a pool-size change is card schema *and* program bounds). Record both.
@@ -115,7 +115,7 @@ A new pair gets its own `rewrite_<from>_<to>.py` beside these and a row here; ke
 ## Rules that hold in every migration
 
 - Pin the exact SDK version everywhere (cards, CI, installers); a stable release comes from PyPI (record the wheel sha256); a pre-release comes from the GitHub release asset, checked against the release's `SHA256SUMS`, because it is not on PyPI. When the stable release lands after a candidate, diff `candidate..stable` and re-run the offline proofs (sweep, link check) before re-pinning.
-- Baselines for the perf delta are the *published old card's stored rows* (methodology rule 15); a same-runner ABBA job (old card on the old SDK vs new package) only confirms a row that moved beyond its band.
+- Baselines for the perf delta are the *published old card's stored rows* (methodology rule 17); a same-runner ABBA job (old card on the old SDK vs new package) only confirms a row that moved beyond its band.
 - Do not change a model's programs beyond the migration. A speedup found along the way is an opportunity issue.
 - Old published cards keep working on the old SDK: a package with no pin means the old version, explicitly.
 - Upstream bugs go to the upstream notes and the owner; do not file them in the SDK's repos yourself.

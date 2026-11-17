@@ -8,11 +8,13 @@ exactly the tokens Loom's control program produces. Run llama-server with the
 same GGUF the Loom package uses. llama.cpp ROCm is not bit-deterministic across
 runs at near-ties: record a second golden (OUT2.json) and pass it to compare.py
 with --alt so a prompt where llama.cpp disagrees with itself is not called a FAIL.
+The committed reference store keeps that second recording itself (same request, salt bench_common.ALT_SALT_TEXT), taken by a different job
+(REFERENCE_ALT=record, gates.sh): compare.py reads it from the cache as its on-demand re-recording, with no engine load.
 """
 import argparse
 import json
 
-from bench_common import PROMPTS, Package, doc, llama_greedy
+from bench_common import PROMPTS, Package, alt_record, doc, llama_greedy, record_alt_greedy
 
 ap = argparse.ArgumentParser()
 ap.add_argument("package")
@@ -40,7 +42,9 @@ for prompt, n_predict in items:
     if "tokens" not in r:  # e.g. the prompt exceeds the server's context: skip, don't crash
         print(f"SKIP {len(ids)} prompt tokens: {str(r)[:200]}", flush=True)
         continue
-    out.append({"prompt": prompt, "prompt_tokens": len(ids), "ids": gen, "text": r["content"],
+    if alt_record():   # REFERENCE_ALT=record: the store's second recording of this request (compare.py: the alt rule)
+        record_alt_greedy(a.llama, ids, n_predict, pkg)
+    out.append({"prompt": prompt, "prompt_tokens": len(ids), "n_predict": n_predict, "ids": gen, "text": r["content"],
                 "top": [[(t["id"], t["logprob"]) for t in x["top_logprobs"]] for x in cp]})
     print(f"{len(ids):6d} prompt tokens -> {len(gen):3d} {r['content'][:60]!r}", flush=True)
 json.dump(out, open(a.out, "w"))

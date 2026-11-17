@@ -9,9 +9,11 @@ check that applies passed; OUT.json = {"checks": {name: {"ok", "detail"}}, "verd
 import argparse
 import base64
 import json
+import os
 import struct
 import sys
 import time
+import urllib.error
 import urllib.request
 import zlib
 
@@ -31,6 +33,8 @@ if a.info:
         features = {k: v.get("status") for k, v in feats.items()}
     except (OSError, ValueError):
         pass
+LOAD_WAIT = float(os.environ.get("R9700_FUNC_LOAD_WAIT", 300))   # seconds a not-yet-loaded model may answer 503 "unavailable"
+RETRY_S = float(os.environ.get("R9700_FUNC_RETRY_S", 5))
 NOTHINK = {"chat_template_kwargs": {"enable_thinking": False}}
 R = {"model": a.model, "claimed": features, "checks": {}}
 
@@ -39,8 +43,19 @@ def chat(messages, max_tokens=256, **extra):
     body = {"model": a.model, "messages": messages, "max_tokens": max_tokens, "temperature": 0, **extra}
     req = urllib.request.Request(a.url + "/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=900) as r:
-        return json.loads(r.read())
+    # a server that has just started answers 503 "model is unavailable" until the model (and the image component, read lazily from a cold
+    # disk on a fresh runner) is loaded: that is readiness, not a failure. Wait for it (at most LOAD_WAIT s); any other error, or a model
+    # that never becomes available, fails the check with the server's own message.
+    deadline = time.time() + LOAD_WAIT
+    while True:
+        try:
+            with urllib.request.urlopen(req, timeout=900) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code != 503 or time.time() > deadline or b"unavailable" not in (body_ := e.read()):
+                e.msg = f"{e.msg}: {body_[:300].decode('utf-8', 'replace')}"
+                raise
+            time.sleep(RETRY_S)
 
 
 def check(name, fn):

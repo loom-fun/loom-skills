@@ -239,7 +239,7 @@ Rules:
 - A card's numbers come from `devlab-perf` jobs: Loom (card programs, active wait: `serve.sh` serves
   `--device=amdgpu` as `amdgpu://?completion_spin_ns=4294967295`, `LOOM_ACTIVE_WAIT=0` opts out for A/B only) and
   llama.cpp on the same runner type (`loom-fleet` publish.md step 3).
-- Stored rows are reused while their inputs are unchanged (methodology rule 15): a Loom-only change re-measures Loom only,
+- Stored rows are reused while their inputs are unchanged (methodology rule 17): a Loom-only change re-measures Loom only,
   and the card names each side's run.
 - Local runs are for development, never card numbers, and a Loom
   number measured without the active wait is not comparable. A job's variant comparisons (`devlab-perf`,

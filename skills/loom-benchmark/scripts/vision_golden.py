@@ -124,6 +124,8 @@ def request(url, model, durl, question, tokens, llama=False):
 
 _BOS = {}
 def adds_bos(gguf_path):
+    if not gguf_path:   # a safetensors package (vLLM reference): the HF tokenizer's add_bos is not modelled; Qwen-family: none
+        return False
     if gguf_path not in _BOS:
         import gguf
         f = gguf.GGUFReader(gguf_path).fields.get("tokenizer.ggml.add_bos_token")
@@ -131,9 +133,8 @@ def adds_bos(gguf_path):
     return _BOS[gguf_path]
 
 
-def reference(pkg, llama, durl, question, tokens, salt="", server=None):
-    """llama.cpp: the package's rendering + the image, greedy, top-5 log-probs by id (server: a SERVER_VARIANTS name)."""
-    from bench_common import GREEDY, llama_completion
+def reference_body(pkg, durl, question, tokens, server=None):
+    from bench_common import GREEDY
     prompt = pkg.render_messages([{"role": "user", "content": MARKER + question}], enable_thinking=False)
     bos = (pkg.chat or {}).get("bos", "")
     if bos and prompt.startswith(bos) and adds_bos(pkg.cfg["gguf"]):   # llama.cpp tokenizes prompt_string with BOS
@@ -142,7 +143,13 @@ def reference(pkg, llama, durl, question, tokens, salt="", server=None):
                 n_predict=tokens, n_probs=5, return_tokens=True)
     if server:
         body["_server"] = server
-    return llama_completion(llama, body, pkg, salt)
+    return body
+
+
+def reference(pkg, llama, durl, question, tokens, salt="", server=None):
+    """llama.cpp: the package's rendering + the image, greedy, top-5 log-probs by id (server: a SERVER_VARIANTS name)."""
+    from bench_common import llama_completion
+    return llama_completion(llama, reference_body(pkg, durl, question, tokens, server), pkg, salt)
 
 
 def prefill_view(pkg, llama, durl, question, prefix_ids, n_prompt, server=None):
@@ -233,13 +240,19 @@ def main():
         if unknown:
             raise SystemExit(f"unknown --cases {unknown}; have {sorted(items)}")
         items = {k: items[k] for k in want}
+    from bench_common import ALT_SALT_VISION, alt_record, cached, record_alt
     for name, (durl, q, size) in items.items():   # all references first: with LLAMA_DEFER they are queued
         refs[name] = reference(pkg, a.llama, durl, q, a.tokens)
+        if alt_record():   # REFERENCE_ALT=record: the store's second recording of this case (the re-recording below reads it from the cache)
+            record_alt(a.llama, reference_body(pkg, durl, q, a.tokens), pkg, ALT_SALT_VISION, f" ({name})")
     if any(r.get("_pending") for r in refs.values()):
         print("VISION_RESULT " + json.dumps({"verdict": "PENDING", "pending": sum(bool(r.get("_pending")) for r in refs.values())}))
         return 0
+    if alt_record():   # a recording job: the references are all this run is for
+        print("VISION_RESULT " + json.dumps({"verdict": "RECORDED", "cases": len(items)}))
+        return 0
     model = requests.get(a.url + "/v1/models", timeout=30).json()["data"][0]["id"]
-    bad = []; rows = []
+    bad = []; rows = []; alt_decided = []; alt_stored = [n for n, (d, q, _) in items.items() if cached(reference_body(pkg, d, q, a.tokens), pkg, ALT_SALT_VISION)]
     for name, (durl, q, size) in items.items():
         got = request(a.url, model, durl, q, a.tokens)
         def views_for(ref):   # llama.cpp's prefill views (default numerics, image encoder on the CPU) after the reference's tokens
@@ -247,20 +260,21 @@ def main():
             return lambda prefix: [v for v in (prefill_view(pkg, a.llama, durl, q, prefix, n, srv) for srv in (None, "cpu-encoder")) if v]
         st, detail = judge(pkg, refs[name], got, views_for(refs[name]))
         if st == "FAIL" and not got.get("error"):
-            for what, extra in (("re-recording", {"salt": "2"}), ("recording with its image encoder on the CPU", {"server": "cpu-encoder"})):
+            for what, extra in (("re-recording", {"salt": ALT_SALT_VISION}), ("recording with its image encoder on the CPU", {"server": "cpu-encoder"})):
                 alt = reference(pkg, a.llama, durl, q, a.tokens, **extra)
                 if alt.get("_pending"):
                     continue
                 st2, d2 = judge(pkg, alt, got, views_for(alt))
                 if st2 == "PASS":
                     st, detail = "PASS", f"{d2} (matches llama.cpp's {what}; plain recording: {detail})"
+                    alt_decided.append(name)
                     break
         print(f"{st} {name} {size}: {detail}", flush=True)
         rows.append({"case": name, "status": st, "detail": detail, "loom": got.get("reasoning", "") + got.get("content", ""),
                      "llama": refs[name].get("content", "")})
         if st == "FAIL":
             bad.append(name)
-    print("VISION_RESULT " + json.dumps({"verdict": "FAIL" if bad else "PASS", "cases": len(rows), "failed": bad}))
+    print("VISION_RESULT " + json.dumps({"verdict": "FAIL" if bad else "PASS", "cases": len(rows), "failed": bad, "alt_stored": alt_stored, "alt_decided": alt_decided}))
     json.dump(rows, open("vision_golden.json", "w"), indent=1)
     sys.exit(1 if bad else 0)
 

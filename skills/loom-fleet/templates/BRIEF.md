@@ -8,7 +8,7 @@ TODO one paragraph: the owner's goal in their words (new GPU, new models, a refa
 
 ## How success is measured (each needs written evidence in the final report)
 TODO numbered measures. Always include: results equal or better than the published ones on a supermajority of metrics, and the
-effort of this campaign against the previous one (velocity, `status.json` "velocity").
+cost of this campaign (agent tokens, runner-hours) against the previous one (velocity, `status.json` "velocity").
 
 ## Roles
 - **PM** (main session): talks to the owner only; relays instructions into inbox files. Not a reviewer.

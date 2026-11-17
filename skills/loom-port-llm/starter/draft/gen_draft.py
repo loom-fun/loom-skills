@@ -331,18 +331,29 @@ kernel.def export("g_spec_rmsnorm") @g_spec_rmsnorm(%tokens: index) {{
   kernel.return
 }}
 """)
-    if g["GDN"]:
-        G = g["GDN"]
-        C, HV, NG = G["C"], G["HV"], g["NG"]
-        W = C + 2 * HV
-        for name, save in (("g_gdn_capture", True), ("g_gdn_restore", False)):
-            body = []
-            for src, off, n in (("qkv", 0, C), ("alpha", C, HV), ("beta", C + HV, HV)):
-                lv = f"view<[%tokens]x{n}xf32>"
-                ld = f"%{src}_v[%token, %c]" if save else "%cap_v[%cc]"
-                st = "%cap_v[%cc]" if save else f"%{src}_v[%token, %c]"
-                lt, stt = (lv, "view<[%cap_rows]xf32>") if save else ("view<[%cap_rows]xf32>", lv)
-                body.append(f"""  %{src}_v = buffer.view %{src}[%zero] : buffer -> {lv}
+    from gen_gdn import fold_enabled
+    if g["GDN"] and not fold_enabled(g["GDN"]):   # the fold (decode.spec.gdn_fold) needs no capture / restore
+        T.append(gdn_copy_kernels(g["GDN"], g["NG"]))
+    for W in sorted({w for r in g.get("replay", []) for _, w in r["buffers"]}):
+        T.append(replay_kernels(W))
+    if DRAFT and DRAFT.get("kind") == "mtp":
+        T.append(mtp_kernels(g))
+    return "\n".join(T)
+
+
+def gdn_copy_kernels(G, NG):
+    """g_gdn_capture / g_gdn_restore (+ their gfx12 copy-split twins): a drafted verification's replay inputs, [layer][token][qkv C | alpha HV | beta HV] f32."""
+    T = []
+    C, HV = G["C"], G["HV"]
+    W = C + 2 * HV
+    for name, save in (("g_gdn_capture", True), ("g_gdn_restore", False)):
+        body = []
+        for src, off, n in (("qkv", 0, C), ("alpha", C, HV), ("beta", C + HV, HV)):
+            lv = f"view<[%tokens]x{n}xf32>"
+            ld = f"%{src}_v[%token, %c]" if save else "%cap_v[%cc]"
+            st = "%cap_v[%cc]" if save else f"%{src}_v[%token, %c]"
+            lt, stt = (lv, "view<[%cap_rows]xf32>") if save else ("view<[%cap_rows]xf32>", lv)
+            body.append(f"""  %{src}_v = buffer.view %{src}[%zero] : buffer -> {lv}
   %{src}_n = index.constant {n} : index
   %{src}_off = index.constant {off} : index
   scf.for %{src}_c = [%lane to %{src}_n step %c256] {{
@@ -353,7 +364,7 @@ kernel.def export("g_spec_rmsnorm") @g_spec_rmsnorm(%tokens: index) {{
     %v = view.load {ld} : {lt} -> f32
     view.store %v, {st} : f32, {stt}
   }}""")
-            T.append(f"""
+        T.append(f"""
 // Gated delta-net replay inputs: [layer][token][qkv C | alpha HV | beta HV] f32.
 kernel.def export("{name}") @{name}(%tokens: index) {{
   %c1 = index.constant 1 : index
@@ -380,12 +391,8 @@ kernel.def export("{name}") @{name}(%tokens: index) {{
   kernel.return
 }}
 """)
-            if copy_split() > 1 and os.environ.get("LOOM_RDNA4", "1").strip().lower() not in ("0", "off", "no", "false"):
-                T.append(copy_split_twin(T[-1], name, copy_split()))
-    for W in sorted({w for r in g.get("replay", []) for _, w in r["buffers"]}):
-        T.append(replay_kernels(W))
-    if DRAFT and DRAFT.get("kind") == "mtp":
-        T.append(mtp_kernels(g))
+        if copy_split() > 1 and os.environ.get("LOOM_RDNA4", "1").strip().lower() not in ("0", "off", "no", "false"):
+            T.append(copy_split_twin(T[-1], name, copy_split()))
     return "\n".join(T)
 
 
@@ -805,10 +812,27 @@ def _with_taps(program, g):
     return program
 
 
+def _defer_flush(program, g):
+    """decode.spec.gdn_fold_defer: before the trunk, every live publishing span's reader slot gets its pending fold applied and the
+    pending counts of its reader and writer are cleared (gen_gdn.defer_kernels). @llm_verify inherits it from the advance body; its
+    speculative spans apply the pending fold in their recurrence instead."""
+    from gen_gdn import defer_enabled
+    if not (g and g.get("GDN") and defer_enabled(g["GDN"])):
+        return program
+    anchor = "  kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info)"
+    at = program.index(anchor, program.index(ADVANCE_SIG))
+    flush = (f"  // ---- gated delta-net: pending folds of the publishing spans' reader slots applied (decode.spec.gdn_fold_defer)\n"
+             f"  %gflush_layers = index.constant {g['NG']} : index\n"
+             "  kernel.launch @g_gdn_flush[%spans, %gflush_layers](%t, %spans, %metadata, %origins, %arena) : [index, index](index, index, buffer, buffer, buffer)\n"
+             "  kernel.launch @g_gdn_pend_clear[%spans, %gflush_layers](%t, %spans, %metadata, %origins, %arena) : [index, index](index, index, buffer, buffer, buffer)\n")
+    return program[:at] + flush + program[at:]
+
+
 def advance_program(program, g=None):
     """Ordinary epochs. MTP: the final normalized hidden rows stay in the `residual` allocation. DFlash: the
     trunk keeps its own hidden rows and captures the drafter's feature taps into that allocation."""
     assert ADVANCE_SIG in program and H_ALLOCA in program
+    program = _defer_flush(program, g)
     if first_binding() == "%features":
         return _with_taps(program.replace(ADVANCE_SIG, ADVANCE_SIG.replace("%residual: buffer", "%features: buffer")), g)
     return program.replace(ADVANCE_SIG, ADVANCE_SIG.replace("%residual: buffer", "%h: buffer")).replace(H_ALLOCA, "", 1)
@@ -841,6 +865,51 @@ def copy_split_twin(text, name, spl):
     return t
 
 
+def gdn_capture(body):
+    """Verify program: capture each gated delta-net layer's pre-conv inputs (%gq, %galpha, %gbeta) for the replay, before its 2-space
+    g_gdn_conv launch, or at a `// gdn-capture: %layer_N` marker (gen_llm's fused GDN prefill puts one at the head of its GEMM branch,
+    whose conv launches are indented: a verify epoch can pack another request's prompt rows with the speculative spans, t >= 64)."""
+    out = []
+    for line in body.split("\n"):
+        mk = re.match(r"^( *)// gdn-capture: %layer_(\w+)$", line)
+        if line.startswith("  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_") or mk:
+            layer, ind = (mk.group(2), mk.group(1)) if mk else (line.split("%layer_")[1].split(",")[0], "  ")
+            out.append(f"{ind}scf.if %not_gated {{\n{ind}  kernel.launch @g_gdn_capture[%t](%t, %layer_{layer}, %gq, %galpha, %gbeta, %capture) : [index](index, index, buffer, buffer, buffer, buffer)\n{ind}}}")
+        out.append(line)
+    return "\n".join(out)
+
+
+def drop_fused_gdn(body):
+    """decode.spec.gdn_fold, @llm_verify: drop gen_llm's fused GDN GEMM branch (prefill.gdn.fused2) and keep its chain branch for every epoch.
+    A verify epoch can pack another request's prompt rows with the speculative spans (t >= 64, the GEMM branch); the fused pair records no
+    fold factors and runs a 4-token span in the 32-token chunk form, so the speculative spans' fold would be wrong there. The chain records
+    them (g_gdn_conv_bank, g_gdn_recurrence_rec: the sequential kernel of decode) and chunks the prompt spans of 64+ tokens. @llm_advance
+    (every prompt-only epoch) keeps the fused pair. %gs is sized for the chain (the fused workspace slots are not needed here)."""
+    out, skip, close, n = [], False, None, 0
+    for line in body.split("\n"):
+        m = re.match(r"^  // gdn-(fused|chain|fused-end): %layer_(\w+)$", line)
+        if m and m.group(1) == "fused":
+            skip, n = True, n + 1
+            continue
+        if m and m.group(1) == "chain":
+            assert skip, line
+            skip = False
+            continue
+        if m:   # fused-end: the else branch's closing brace is the previous line
+            assert out and out[-1] == "  }", out[-1:]
+            out.pop()
+            continue
+        if not skip:
+            out.append(line)
+    assert not skip
+    body = "\n".join(out)
+    if n:
+        own = "  %gs = buffer.alloca<global> align(256) %gs_size : buffer"
+        assert body.count(own) == 1 and "%gs_size_own = " in body
+        body = body.replace(own, "  %gs = buffer.alloca<global> align(256) %gs_size_own : buffer")
+    return body
+
+
 def verify_program(program, g):
     body, _ = _split_head(advance_program(program, g))
     body = body[body.index("command.def public @llm_advance()"):]   # config decls are emitted once (advance)
@@ -856,20 +925,46 @@ def verify_program(program, g):
     # every drafted token feeds the head: no last-layer output-row selection (gen_llm.last_out_select)
     body = body.replace("%outsel_on = scalar.constant true : i1", "%outsel_on = scalar.constant false : i1")
     GDN = g["GDN"]
-    if GDN:
+    from gen_gdn import fold_enabled, defer_enabled, FOLD_W, FOLD_SPANS
+    fold = bool(GDN) and fold_enabled(GDN)
+    if fold:
+        # decode.spec.gdn_fold: no capture / restore / replay. The verification's conv keeps each speculative step's raw input and key
+        # (g_gdn_conv_bank), its recurrence each step's update factors (g_gdn_recurrence_rec); after acceptance one g_gdn_fold launch
+        # applies the accepted steps to every layer's state and one g_gdn_fold_hist launch commits the conv histories (gen_gdn.fold_kernels).
+        # Banks: [layer][rank * FOLD_W + step][width] f32 (rank among the epoch's speculative spans), min(spans, FOLD_SPANS) * FOLD_W rows.
+        banks = ""
+        for name, width in (("x", GDN["C"]), ("k", GDN["HK"] * GDN["DK"]), ("d", GDN["VD"] + GDN["HV"])):
+            banks += (f"  %gbank{name}_row = index.constant {width * 4 * g['NG']} : offset\n"
+                      f"  %gbank{name}_size = index.scale %gbank_rows, %gbank{name}_row : index, offset -> offset\n"
+                      f"  %gbank{name} = buffer.alloca<global> align(256) %gbank{name}_size : buffer\n")
+        anchor = "  kernel.launch @g_token_info[%t]"
+        body = body.replace(anchor, f"  %gbank_w = index.constant {FOLD_W} : index\n  %gbank_cap = index.constant {FOLD_SPANS} : index\n"
+                            "  %gbank_s = index.min %spans, %gbank_cap : index\n  %gbank_rows = index.mul %gbank_s, %gbank_w : index\n" + banks + anchor, 1)
+        body = drop_fused_gdn(body)
+        out, nconv, nrec = [], 0, 0
+        for line in body.split("\n"):
+            if line.startswith("  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_"):
+                head, types = line.split(") : [index](")
+                line = head.replace("@g_gdn_conv[", "@g_gdn_conv_bank[", 1) + ", %gbankx, %gbankk) : [index](" + types[:-1] + ", buffer, buffer)"
+                nconv += 1
+            elif line.startswith("  kernel.launch @g_gdn_recurrence[%spans](%t, %spans, %layer_"):
+                head, types = line.split(") : [index](")
+                line = head.replace("@g_gdn_recurrence[", "@g_gdn_recurrence_rec[", 1) + ", %gbankd) : [index](" + types[:-1] + ", buffer)"
+                nrec += 1
+            out.append(line)
+        assert nconv == nrec == len(g["gdn_layers"]), (nconv, nrec)
+        body = "\n".join(out)
+        # every GDN state update left in the verification records fold factors (or takes only 64+-token spans: chunk / pf kernels)
+        for k in ("@g_gdn_conv[", "@g_gdn_recurrence[", "@g_gdn_fa_rdna4[", "@g_gdn_fb_rdna4["):
+            assert k not in body, k
+    elif GDN:
         W = GDN["C"] + 2 * GDN["HV"]
         cap = (f"  %cap_token_bytes = index.constant {W * 4 * g['NG']} : offset\n"
                "  %cap_size = index.scale %t, %cap_token_bytes : index, offset -> offset\n"
                "  %capture = buffer.alloca<global> align(256) %cap_size : buffer\n")
         anchor = "  kernel.launch @g_token_info[%t]"
         body = body.replace(anchor, cap + anchor, 1)
-        out = []
-        for line in body.split("\n"):
-            if line.startswith("  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_"):
-                layer = line.split("%layer_")[1].split(",")[0]
-                out.append(f"  scf.if %not_gated {{\n    kernel.launch @g_gdn_capture[%t](%t, %layer_{layer}, %gq, %galpha, %gbeta, %capture) : [index](index, index, buffer, buffer, buffer, buffer)\n  }}")
-            out.append(line)
-        body = "\n".join(out)
+        body = gdn_capture(body)
     # Generic recurrent replay (kits register it in gen_llm.MODEL_PARTS["replay"]; e.g. LFM2 short-conv,
     # reference/lfm2moe-example/gen_sconv.py): {"name", "match": prefix of the trunk launch that reads the
     # span's inputs, "buffers": [(ssa, f32 width per token)], "replay": f(layer) -> text}. The buffers are
@@ -931,7 +1026,13 @@ def verify_program(program, g):
   kernel.launch @g_spec_accept(%spans, %rows, %t, %metadata, %tokens, %predictions, %results, %committed, %replay) : (index, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
 """
     replay_at = len(tail)
-    if GDN:
+    if fold:
+        tail += "  // ---- gated delta-net fold: the accepted steps of the speculative spans into every layer's state and conv history\n"
+        tail += f"  %gfold_layers = index.constant {g['NG']} : index\n"
+        fk = "g_gdn_pend" if defer_enabled(GDN) else "g_gdn_fold"   # deferred: the accepted factors become the writer slot's pending fold
+        tail += f"  kernel.launch @{fk}[%spans, %gfold_layers](%t, %spans, %metadata, %committed, %origins, %arena, %gbankk, %gbankd) : [index, index](index, index, buffer, buffer, buffer, buffer, buffer, buffer)\n"
+        tail += "  kernel.launch @g_gdn_fold_hist[%spans, %gfold_layers](%t, %spans, %metadata, %committed, %origins, %arena, %gbankx) : [index, index](index, index, buffer, buffer, buffer, buffer, buffer)\n"
+    elif GDN:
         tail += "  // ---- gated delta-net replay: conv + recurrence over the accepted speculative inputs, published\n"
         tail += "  kernel.launch @g_token_info[%t](%t, %spans, %replay, %info) : [index](index, index, buffer, buffer)\n"
         C, HV, DV, K = GDN["C"], GDN["HV"], GDN["DV"], GDN["K"]

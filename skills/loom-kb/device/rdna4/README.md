@@ -9,6 +9,11 @@ exists here: `flash2_b2`, `trim`, `vpack`, `prefetch`, `f16o_fuse`. Devices: `ra
 
 Data: `family.json`.
 
+Profiling on gfx1201 (kbench run 43803638485, hrx-loom 0.1.0): per-dispatch device timestamps work (`profile_replay`, `--print_device_statistics`
+with `dispatch-events`); hardware counters, counter-ranges, device metrics and executable traces are UNIMPLEMENTED (`profile.c:636`);
+`--compile-report=details` works (`matrix_fp8/bf8_native_kind` unscaled, `matrix_fp4_native_kind` none: no native MXFP4 matrix op on gfx12).
+Recipe: topic `optimize-loop`, "Profiling".
+
 Measurements on the 16 GB class (`gfx1201-16gb`, a Radeon RX 9070 XT, hrx-loom 0.2.0). The R9700's packages run unchanged (same
 chip, same programs); per model only the context differs: `fleet/devices/gfx1201-16gb.json` (32 of the 50 R9700 cards fit), by `loom-benchmark`
 `test_9070xt.py` (hrx-loom 0.2.0, 2026-11-17, a desktop machine). Serving (the registry's card serve_args), elastic backing:

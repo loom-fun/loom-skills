@@ -98,7 +98,9 @@ class AbiTests(unittest.TestCase):
     def test_weights_import_carries_a_key_range(self):
         t = (STARTER / "draft" / "prep_weights.py").read_text()
         self.assertIn("@input(%source: i32, %key: buffer, %key_offset: i64, %key_length: i64, %offset: i64, %length: i64, %alignment: i64)", t)
-        self.assertIn("@input(%source, %key, %zero, %key_length, %zero, %length, %align)", t)
+        self.assertIn("@input(%source, {prev_src}, %zero, %key_length, {", t)   # the first range
+        self.assertIn("@input(%source, {prev_src}, %zero, %key_length, %off2_{N}, %len2_{N}, %align)", t)   # the bf16r second range
+        self.assertNotRegex(t, r"@input\(%source, [^)]*%length, %align\) : \(i32, buffer, i64, i64, i64\)")
 
     def test_gdn_and_short_conv_guard_the_token_too(self):
         for p in (STARTER / "gen_gdn.py", ROOT / "skills/loom-port-llm/reference/lfm2moe-example/gen_sconv.py"):

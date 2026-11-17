@@ -1,0 +1,13 @@
+{
+ "scope": "facet/quark",
+ "match": {
+  "has": [
+   "quark"
+  ]
+ },
+ "owner": "kb",
+ "choices": [],
+ "also": [
+  "quant/mxfp4s/README.md"
+ ]
+}

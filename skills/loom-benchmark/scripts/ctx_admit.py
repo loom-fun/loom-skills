@@ -6,7 +6,9 @@ memory budget below the context). The request is then cancelled (the connection 
 script waits for the server to go idle again: no long prefill, no generation. Seconds, not the many minutes a full-context
 prefill takes. A card must not claim a context its server refuses.
 
-usage: ctx_admit.py PKG LOOM_URL [--out FILE] [--wait 120] [--tokens N]   (--tokens: a prompt of N tokens instead of the native context)
+usage: ctx_admit.py PKG LOOM_URL [--out FILE] [--wait 120] [--tokens N] [--complete [SECONDS]]
+(--tokens: a prompt of N tokens instead of the native context; --complete: do not cancel, wait for the one-token answer of the full prefill
+(default 1800 s) and print "COMPLETED ..." or the failure: a full-context request that really finishes, not only one that starts)
 Prints "ADMITTED n tokens (...)" or "REFUSED n tokens: HTTP ...". Exit status 1 on a refusal or no answer.
 """
 import argparse
@@ -28,6 +30,7 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--tokens", type=int, default=None, help="prompt tokens (default: the native context minus the answer)")
     ap.add_argument("--wait", type=float, default=120, help="seconds to wait for an admission or a refusal")
+    ap.add_argument("--complete", type=float, nargs="?", const=1800, default=None, help="wait this long (default 1800 s) for the request to finish instead of cancelling it")
     a = ap.parse_args()
     P = Package(a.pkg)
     card = json.load(open(os.path.join(a.pkg, "model.json")))
@@ -51,6 +54,9 @@ def main():
             got["status"] = r.status_code
             if r.status_code != 200:
                 got["body"] = r.text[:200]
+            elif a.complete is not None:
+                got["text"] = "".join(x.decode("utf-8", "replace") for x in r.iter_lines() if x)
+                got["finished"] = time.time()
         except Exception as e:  # the connection closed below
             got.setdefault("error", str(e)[:200])
 
@@ -66,6 +72,16 @@ def main():
         if running:
             break
     admitted = got.get("status") == 200 or (running and "status" not in got)
+    if admitted and a.complete is not None:   # the full-context request must finish: a non-empty answer within the wait
+        while "finished" not in got and "error" not in got and time.time() - t0 < a.complete:
+            time.sleep(2)
+        ok = "finished" in got and '"finish_reason"' in got.get("text", "") and "error" not in got
+        msg = (f"COMPLETED {n} tokens of a {context}-token context in {got['finished'] - t0:.0f}s" if ok else
+               f"NOT COMPLETED {n} tokens of a {context}-token context after {time.time() - t0:.0f}s: {got.get('error') or got.get('text', '')[:200] or 'no answer'}")
+        print(msg, flush=True)
+        if a.out:
+            json.dump({"admitted": True, "completed": ok, "tokens": n, "context": context, "detail": msg}, open(a.out, "w"), indent=1)
+        sys.exit(0 if ok else 1)
     # Cancel: closing the connection makes the server drop the request; then it must go idle again (no long prefill).
     idle = True
     if "resp" in got:

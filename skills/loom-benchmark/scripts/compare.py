@@ -11,6 +11,8 @@ the gate is about *where* divergences happen, not whether:
          among llama.cpp's own views of that position <= 1.0 plus their spread capped at 0.5, or a view that
          ranks Loom's token and not llama.cpp's; bench_common.llama_views)
   FAIL   any divergence with a large gap, or a token outside every view's top list
+A prompt the first recording fails is scored against the second recording (the store's, salt bench_common.ALT_SALT_TEXT; else recorded on
+demand); one it passes only there has "alt_decided" in compare.json and counts in the summary.
 (Two llama.cpp builds disagree with each other in the same way.) A mild long-context RoPE error (base 5e5 vs
 1e6) is below this bar's resolution: llama.cpp's own views disagree that much there.
 """
@@ -20,7 +22,7 @@ import time
 
 import requests
 
-from bench_common import Package, exact_gaps, gap_noise, llama_greedy, llama_views, near_tie
+from bench_common import ALT_SALT_TEXT, Package, cached, greedy_body, exact_gaps, gap_noise, llama_greedy, llama_views, near_tie
 
 ap = argparse.ArgumentParser()
 ap.add_argument("package")
@@ -129,8 +131,10 @@ for g in json.load(open(a.golden)):
         if n2 > n:
             g, n, gap, near = alt[g["prompt"]], n2, gap2, near2
     ids_p = pkg.ids(pkg.render(g["prompt"]))
-    if not near and a.llama and g["prompt"] not in alt:  # on-demand second recording of this prompt only
-        r2, _, cp = llama_greedy(a.llama, ids_p, len(g["ids"]), pkg, "rec2")
+    near_first, alt_decided = near, False
+    alt_stored = bool(a.llama) and cached(greedy_body(ids_p, g.get("n_predict", len(g["ids"]))), pkg, ALT_SALT_TEXT)
+    if not near and a.llama and g["prompt"] not in alt:  # the second recording of this prompt: the store's (a cache hit), else recorded on demand
+        r2, _, cp = llama_greedy(a.llama, ids_p, g.get("n_predict", len(g["ids"])), pkg, ALT_SALT_TEXT)
         if "tokens" in r2:
             g2 = strip_ws_after_think({"prompt": g["prompt"], "prompt_tokens": len(ids_p), "ids": r2["tokens"],
                                        "top": [[(t["id"], t["logprob"]) for t in x["top_logprobs"]] for x in cp]})
@@ -140,6 +144,7 @@ for g in json.load(open(a.golden)):
             better_gap = isinstance(gap2, float) and (isinstance(gap, str) or gap2 < gap)
             if n2 > n or (n2 == n and (better_gap or near2)):
                 g, n, gap, near = g2, n2, gap2, near2
+                alt_decided = near and not near_first
     noise, top = None, dict((int(i), lp) for i, lp in g["top"][n]) if n < min(len(got), len(g["top"])) else {}
     if not near and a.llama and top:
         # Judged again with llama.cpp's own views of the divergence (bench_common.llama_views), on its own
@@ -154,15 +159,16 @@ for g in json.load(open(a.golden)):
     full = n >= min(len(gold), len(got)) and (extended and len(got) >= len(gold) or abs(len(got) - len(gold)) <= 1)
     bad = not near
     rows.append({"prompt": g["prompt"][:80], "prompt_tokens": g.get("prompt_tokens"), "golden_tokens": len(gold), "matched": n,
-                 "full_match": full, "divergence_gap": gap, "noise": noise, "bad": bad, "seconds": round(time.perf_counter() - t0, 2), "loom_text": text[:160]})
-    print(f"{g.get('prompt_tokens', 0):6d} {n:3d}/{len(gold):3d} gap={gap if not isinstance(gap, float) else round(gap, 3)} {'BAD ' if bad else ''}{g['prompt'][:50]!r}", flush=True)
+                 "full_match": full, "divergence_gap": gap, "noise": noise, "bad": bad, "alt_stored": alt_stored, "alt_decided": alt_decided, "seconds": round(time.perf_counter() - t0, 2), "loom_text": text[:160]})
+    print(f"{g.get('prompt_tokens', 0):6d} {n:3d}/{len(gold):3d} gap={gap if not isinstance(gap, float) else round(gap, 3)} {'BAD ' if bad else ''}{'ALT-DECIDED ' if alt_decided else ''}{g['prompt'][:50]!r}", flush=True)
 json.dump(rows, open(a.out, "w"), indent=1)
 gaps = [r["divergence_gap"] for r in rows if isinstance(r["divergence_gap"], float)]
 summary = {"prompts": len(rows), "full_match": sum(r["full_match"] for r in rows),
            "median_matched": sorted(r["matched"] for r in rows)[len(rows) // 2],
-           "max_gap": round(max(gaps), 3) if gaps else 0.0, "bad": sum(r["bad"] for r in rows)}
+           "max_gap": round(max(gaps), 3) if gaps else 0.0, "bad": sum(r["bad"] for r in rows),
+           "alt_stored": sum(bool(r.get("alt_stored")) for r in rows), "alt_decided": sum(bool(r.get("alt_decided")) for r in rows)}
 summary["verdict"] = "PASS" if summary["bad"] == 0 else "FAIL"
 print(json.dumps(summary))
 from campaign import log_gate, run_audit
-log_gate("compare", summary["verdict"], golden=a.golden, **{k: summary[k] for k in ("prompts", "full_match", "max_gap", "bad")})
+log_gate("compare", summary["verdict"], golden=a.golden, **{k: summary[k] for k in ("prompts", "full_match", "max_gap", "bad", "alt_stored", "alt_decided")})
 run_audit()

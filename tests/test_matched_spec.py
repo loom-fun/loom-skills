@@ -12,11 +12,12 @@ CARDS = json.load(open(DATA))
 
 class ClassificationTests(unittest.TestCase):
     def test_all_cards_classified_and_no_ngram(self):
-        self.assertEqual(len(CARDS), 51)
+        nightly = json.load(open(ROOT / ".github/nightly-models.json"))["models"]
+        self.assertEqual(set(CARDS), {m["repo"] for m in nightly})   # one entry per nightly card
         for repo, e in CARDS.items():
             self.assertIn(e["choice"], ("mtp", "dflash", "assist", "none"), repo)
             self.assertNotIn("ngram", e["llama_spec"], repo)
-            self.assertEqual(bool(e["llama_spec"]), e["choice"] != "none", repo)
+            self.assertEqual(bool(e["llama_spec"]), e["choice"] != "none" and e.get("baseline_engine") != "none", repo)   # a safetensors card has no llama.cpp baseline
             if e["choice"] != "none":
                 self.assertTrue(e["provenance"], repo)   # a drafter without a public upstream is no drafter
 

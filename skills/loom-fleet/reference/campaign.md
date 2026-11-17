@@ -27,7 +27,9 @@ Narrow changes inside a campaign are [targeted fixes](targeted-fix.md).
 | Engineers | one task at a time in their own worktree; PR against the integration branch; read `notes/ENG_CONTRACT.md` and their task file first | open PRs into the base or another branch, publish outside the task |
 | Dashboarder | keeps the tracker artifact current from `status.json` + `log.md` (counts, log entries, ETA, scope changes together, not counts alone); republishes only on an important change, at most hourly ("State files") | edit code or cards; republish on every change |
 
-Launch every subagent on the cheaper model tier (engineers, reviewers, dashboarder); the tech lead uses the strongest. Briefs for
+Model tiers: the cheaper tier (sonnet) is the default for engineers, reviewers and the dashboarder; the strongest tier (opus) for tech leads and
+for design-heavy engineering (fused or persistent kernels, register/LDS budgets across fused stages, cross-workgroup sync, open-ended
+optimization). The task file's `Model:` line names the tier and the reason; a parallel cheaper-tier variant of a design is fine. Briefs for
 engineers are explicit and self-contained: they point at the files to read, never assume the conversation.
 
 ## State files (all in the campaign directory, all on disk, none in `/tmp`)
@@ -41,6 +43,7 @@ engineers are explicit and self-contained: they point at the files to read, neve
 | `log.md` | everyone (`status.py log WHO TEXT`) | append-only, one line per event: `YYYY-MM-DD HH:MM who: what` |
 | `inbox/<name>.md` | the writers | mailboxes: `techlead`, `pm`, `dashboard`, `eng-<id>` |
 | `notes/` | tech lead | `ENG_CONTRACT.md`, `task_<id>.md` per engineer, recipes |
+| `notes/techniques.md` | everyone (append) | optimization campaigns: one row per technique tried, win or loss (`loom-optimize` step 8); input to the skill and KB updates at the end |
 | `eng/<id>/`, `wt/<id>/` | engineers | big outputs and worktrees (see Hygiene) |
 
 `status.json`:
@@ -100,8 +103,10 @@ separately. Tools: `fleet/README.md`; process: [targeted-fix.md](targeted-fix.md
   GPU** (it is scarce, sequential and shared). Where it must be decided locally, keep the local GPU busy only with agent-in-the-loop
   work, never idle waiting on DevLab; local and DevLab work are decoupled.
 - Runner labels: Strix Halo `[strix-halo, devlab-dispatch, Linux, self-hosted]` (always include `Linux`); Radeon R9700
-  `[self-hosted, devlab-dispatch, radeon-r9700]` (about 3 concurrent runners, 31 GB host RAM, no HIP headers). Other devices: the
-  `runner.labels` field of `skills/loom-kb/device/<family>/<device>/device.json`.
+  `[self-hosted, devlab-dispatch, radeon-r9700]` (31 GB host RAM, no HIP headers). The runner count of a device is
+  `runner.concurrent_runners` in its `device.json` (the R9700: 8, measured 2026-11-16 over 156 jobs: 5.6 busy on average, queue median
+  1 min, p90 20 min; the runners are not the bottleneck, a job's own length is). Other devices: the `runner.labels` field of
+  `skills/loom-kb/device/<family>/<device>/device.json`.
 - Iterate by labelling a draft PR: `devlab-perf` (workflow `devlab-perf.yml`, jobs from `.github/devlab/perf.json`), `devlab-debug`,
   `nightly-gates`. Labels and base changes go through the REST API (`gh pr edit` fails in this repo; re-adding a present label
   fires no event, so remove then add): `gh api -X POST repos/loom-fun/loom-skills/issues/N/labels -f 'labels[]=devlab-perf'`.
@@ -116,6 +121,35 @@ separately. Tools: `fleet/README.md`; process: [targeted-fix.md](targeted-fix.md
   (sdk020: 30 cancelled runs blocked the sweep) -> `gh api -X POST repos/OWNER/REPO/actions/runs/RUN/force-cancel`, then confirm with
   `gh run list --status queued` and `--status in_progress` that nothing of yours is left.
 - Smoke tests use tight timeouts and log the server status endpoints while waiting, so a hang shows its cause.
+- **Job anatomy and the iteration rule.** Measured on 156 R9700 jobs (2026-11-16), a typical 95-minute experiment job is: setup + the 3
+  builds 2.5 min (3 %), func 15 min (16 %), ktest 1 min (1 %), perf 9 min (10 %), gates against the vLLM reference about 70 min (72 %),
+  including a gate of the unchanged base every time. Cost-wise a round is almost all gates, so:
+  - **Iterate on perf only.** An optimization round runs the `iterate` preset (`ab_jobs.py` / `device_jobs.py --preset iterate`,
+    `.github/scripts/job_presets.py`): build + ktest + perf + c4 (+ the A/B text match), no gates, and `smoke:V` (one served chat request:
+    the model loads and answers) instead of func. About 15 minutes instead of 95.
+  - **Gates once, on the winner.** Only the change that is going to merge gets the `final` preset: func + ktest + `gates:V:dev` once on the
+    new variant, no perf (the iterations measured it) and the unchanged base variant is not built or gated (a base that already passed is
+    never gated again). Hand-written experiment files follow the same two shapes. `full` (the generators' default; `regen.py` always uses it,
+    a card needs every step) stays for card regeneration.
+  - **Reference engines are invariant inputs: cached, not loaded** (methodology rule 16; the vLLM baseline rows are measured at campaign
+    start and in the final card job only, iteration rounds never run vLLM or llama.cpp). A package's gates restore the references recorded
+    once per engine version + checkpoint revision + request from the committed `.github/devlab/reference_cache/<org>__<repo>__<ENGINE>.tgz`
+    (`vllm-<VERSION>` for a safetensors package, `llama-<BUILD>` for a GGUF card)
+    (`skills/loom-benchmark/scripts/reference_cache.py`), so a gate run whose requests are all cached never starts vLLM (the job line
+    says `references: N cached before gates, 0 recorded in this job, vLLM loaded: no`). A request that is not cached (a new prompt set,
+    a new checkpoint revision, a changed vision case) is recorded by that job as before; add its `gates_V/llama_cache.tgz` to the store
+    with `reference_cache.py merge --repo ORG/REPO --engine ENGINE TGZ` in the same PR. Job field `"reference_cache": "none"` forces a cold
+    recording.
+    The store is one coherent first recording plus a second, independent one: vLLM's answer to the same request varies between jobs (28 of 101
+    keys recorded in different jobs of this campaign differ in their tokens, mostly late near-tie flips), so `merge` only ever adds keys, never
+    replaces one, and the store is not a union of every job's tgz. The second recording is the store's form of the `--alt` / golden2 rule: the same
+    request under another salt (`bench_common.ALT_SALT_TEXT` "rec2" for golden/compare, `ALT_SALT_VISION` "2" for vision), taken by a DIFFERENT job
+    (job `env` `"REFERENCE_ALT": "record"`: gates.sh then runs only golden + vision, requests a second recording only for keys that were in the store
+    when the job started, and the job's `llama_cache.tgz` is merged). `compare.py` and `vision_golden.py` score a prompt/case the first recording
+    fails against the second one (a cache hit, no engine load), no threshold or near-tie change; `compare.json` rows carry `alt_decided`, the
+    summary counts them, and the vision result lists the cases. A fixed pair of recordings also makes the gate deterministic. Agent-turn requests contain Loom's own earlier replies: a change that alters
+    Loom's text creates new keys (a miss, recorded by that job); a change that keeps the text identical never misses. The consistency gate asks the reference only to diagnose a concurrent-vs-alone mismatch (scheduling-dependent), so a mismatch
+    is the one case in which a gate run on a cached store still loads vLLM.
 
 ## Regenerating many cards: `fleet/regen.py`
 
@@ -139,7 +173,7 @@ or check depends on (tool dialect, vocab size, draft kind, dense/MoE, model size
   with the package's drafting config on every row (4 streams: both off); no per-model sweeps, no best-of-configs mixing. Loom tuning
   counts only when baked into the package preset. Full rules: `skills/loom-benchmark/reference/methodology.md` and
   `skills/loom-kb/method/methodology.md`.
-- **Reuse stored measurements when nothing they measured changed** (methodology rule 15): same model files and same engine binary
+- **Reuse stored measurements when nothing they measured changed** (methodology rule 17): same model files and same engine binary
   (llama.cpp build, hrx-loom version) on the same GPU type means the stored rows stand. An SDK migration re-measures Loom only; llama.cpp
   and the old card are never re-run except a targeted ABBA confirmation of a row outside its band.
 - **Quant**: plain Q4_K_M from the HF cache; never switch to another quant on your own, never download a GGUF that is cached under any
@@ -174,7 +208,7 @@ or check depends on (tool dialect, vocab size, draft kind, dense/MoE, model size
 Every campaign records `status.json` "velocity": per stage start, end, agent-hours, runner-hours and the note on what was automated or
 reused. The goal is that campaign N+1 costs clearly less than campaign N, so each campaign ends with a **dry run** of a realistic
 next one (a new device row such as gfx1100, or a new model in an existing family): perform it on a branch using only the repo's
-files, measure the effort per stage against the recorded one, and list every manual step as a defect to automate. A campaign whose
+files, measure the cost per stage (agent tokens, runner-hours) against the recorded one, and list every manual step as a defect to automate. A campaign whose
 dry run is not cheaper than its predecessor is not finished.
 
 ## Adding a device row (no new kernels)
@@ -192,6 +226,9 @@ preset suffix. Once a runner exists: fill `runner.labels` (include Linux) and `r
 
 ## Working style
 
+- **Cost model: agent tokens and DevLab runner-hours are the only currencies.** Never estimate or weigh human implementation effort or
+  complexity in briefs, task files, reports or decisions: agents write the code. Default to the most aggressive design (full fusion,
+  alternative designs in parallel); spend runner time carefully (kernel-level checks first, one batched end-to-end job per round).
 - Decide, don't escalate: pick the option you would recommend, finish, then report the outcome in a line or two.
 - When the owner cites an external project, engine or performance claim, find it (clone the repo into an on-disk work directory, read
   its benchmark docs and kernels) and answer with specifics before asking them for details.

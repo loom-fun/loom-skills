@@ -15,9 +15,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import gguf_stub  # noqa: E402
+import st_stub  # noqa: E402
 
 HF = os.path.expanduser(os.environ.get("HF_HUB_CACHE", "~/.cache/huggingface/hub"))
-DROP = ("tensors", "generator", "draft", "resolved")   # outputs of a build (build.py rewrites them), not inputs
+DROP = ("tensors", "generator", "draft", "resolved", "weights")   # outputs of a build (build.py rewrites them), not inputs
 
 
 def origin_file(lock, origin):
@@ -41,13 +42,20 @@ def entry(slug, pkg, staging_revision=None, refresh=False, root=None):
     name = "chat" if "chat" in presets else next(iter(presets))
     ex = presets[name]["execution"]
     out = os.path.join(root, "fleet", slug)
-    os.makedirs(f"{out}/gguf", exist_ok=True)
+    os.makedirs(f"{out}/gguf", exist_ok=True)   # (a safetensors model's dump goes to <slug>/safetensors/)
     files = {}
     for f in lock["files"]:
-        if f["origin"].endswith("tokenizer.json") or not f["origin"].endswith(".gguf"):
+        if f["origin"].endswith("tokenizer.json") or not f["origin"].endswith((".gguf", ".safetensors")):
             continue
         repo, rev, path, key = origin_file(lock, f["origin"])
         base = os.path.basename(path)
+        if path.endswith(".safetensors"):   # an HF safetensors checkpoint: its header + config dump (st_stub.py), not a GGUF stub
+            dump = f"{slug}/safetensors/{base}.json.gz"
+            dp = os.path.join(root, "fleet", dump)
+            if refresh or not os.path.exists(dp):
+                st_stub.save(st_stub.dump(repo, rev), dp)
+            files[base] = {"origin": key, "repo": repo, "revision": rev, "path": path, "size": f["size"], "dump": dump, "kind": "safetensors"}
+            continue
         dump = f"{slug}/gguf/{base}.json.gz"
         dp = os.path.join(root, "fleet", dump)
         if refresh or not os.path.exists(dp):
@@ -55,6 +63,8 @@ def entry(slug, pkg, staging_revision=None, refresh=False, root=None):
             assert d["size"] == f["size"], (base, d["size"], f["size"])
             gguf_stub.save(d, dp)
         files[base] = {"origin": key, "repo": repo, "revision": rev, "path": path, "size": f["size"], "dump": dump}
+    if not os.listdir(f"{out}/gguf"):   # a safetensors model has none
+        os.rmdir(f"{out}/gguf")
     # tokenizer: the programs read only the added tokens' content and id (gen_llm.py stop_restore)
     tok = json.load(open(f"{pkg}/tokenizer.json", encoding="utf-8"))
     json.dump({"added_tokens": [{"content": t["content"], "id": t["id"]} for t in tok.get("added_tokens", [])]},

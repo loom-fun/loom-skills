@@ -196,6 +196,23 @@ class DiffTests(unittest.TestCase):
         self.assertEqual(diff_fleet.json_diff({"f": [{"path": "a", "origin": "x"}]}, {"f": [{"path": "a", "origin": "y"}]}), [])
         self.assertEqual(diff_fleet.json_diff({"f": [{"path": "a"}]}, {"f": [{"path": "b"}]}), ['/f[0]/path: "a" -> "b"'])
 
+    def test_a_model_the_base_kit_cannot_build_is_new_not_an_error(self):
+        # build_fleet.py --ref skips a model whose source path (safetensors) the ref's kit does not have; the diff calls it new
+        with tempfile.TemporaryDirectory() as t:
+            base, head = Path(t) / "base", Path(t) / "head"
+            self.pkg(base, "old", PROG); self.pkg(head, "old", PROG)
+            self.pkg(head, "newst", PROG, cfg={"arch": "qwen35", "heads": 24, "kv_heads": 4, "head_dim": 256})
+            (base / "summary.json").write_text(json.dumps({"failures": {}, "skipped": {"newst": "skipped"}}))
+            rep = diff_fleet.report(str(base), str(head))
+            self.assertEqual(rep["untouched"], ["old"])
+            self.assertTrue(rep["models"]["newst"]["new_model"])
+            self.assertEqual(rep["models"]["newst"]["stratum"]["arch"], "qwen35")
+            self.assertEqual(diff_fleet.check_complete(str(base), ["old", "newst"]), [])   # skipped is not "incomplete"
+            self.assertIn("new model", diff_fleet.markdown(rep))
+            # without the skip record a missing model is still an error
+            (base / "summary.json").write_text(json.dumps({"failures": {}}))
+            self.assertEqual(diff_fleet.report(str(base), str(head))["models"]["newst"], {"error": "present in only one build"})
+
     def test_stratum(self):
         st = diff_fleet.strata({"arch": "qwen35moe", "heads": 16, "kv_heads": 2, "head_dim": 256, "drafter": {"kind": "dflash"}, "moe": 1},
                                "kernel.def @g_mv_q4_k_k1024_q8_r1(\nkernel.def @g_gemm_q6_k_store(\n")

@@ -190,6 +190,18 @@ class Package:
         return text
 
 
+def reference_identity(cfg):
+    """Cache identity of a safetensors package's reference: its checkpoint repo@revision (llm_config.json "source"), or None
+    for a GGUF package. The reference engine of such a package is vLLM (vllm_shim.py, a llama-server look-alike), the
+    cached answers depend on the checkpoint revision and the request, not on the Loom build or the machine."""
+    if os.environ.get("REFERENCE_CHECKPOINT"):   # a vLLM reference forced on a GGUF package (adapter checks on small models)
+        return f"safetensors:{os.environ['REFERENCE_CHECKPOINT']}@{os.environ.get('VLLM_REVISION', '')}"
+    src = cfg.get("source") or {}
+    if src.get("kind") != "safetensors":
+        return None
+    return f"safetensors:{src.get('repo', '')}@{src.get('revision', '')}"
+
+
 def _gguf_fingerprint(path):
     """Identity of a GGUF without hashing gigabytes: name, size and the first 4 MiB."""
     if not path or not os.path.exists(path):
@@ -207,6 +219,62 @@ _FP = {}
 SERVER_VARIANTS = {"cpu-encoder": "--no-mmproj-offload"}   # the image encoder on the CPU, not offloaded to the GPU
 
 
+def ref_key(body, pkg=None, salt=""):
+    """The cache key of a reference request (llama_completion): GGUF fingerprint or checkpoint identity + engine build + body + salt."""
+    gguf = pkg.cfg.get("gguf") if pkg is not None else os.environ.get("LLAMA_GGUF")
+    ident = reference_identity(pkg.cfg) if pkg is not None else os.environ.get("REFERENCE_IDENTITY")
+    if ident:   # a safetensors checkpoint (the vLLM reference): no GGUF file to fingerprint
+        _FP[gguf] = ident
+    elif gguf not in _FP:
+        _FP[gguf] = _gguf_fingerprint(gguf)
+    return hashlib.sha256(json.dumps({"gguf": _FP[gguf], "build": os.environ.get("LLAMA_CACHE_BUILD") or os.environ.get("LLAMACPP_DIR", ""),
+                                      "body": body, "salt": salt}, sort_keys=True).encode()).hexdigest()
+
+
+# The second, independent recording of a reference (the store keeps two where the engine is not run-to-run deterministic: vLLM answers differ
+# across jobs for ~28 % of the keys; llama.cpp flips near-ties). Same request, another salt; recorded by a DIFFERENT job than the first
+# (REFERENCE_ALT=record, see alt_record), used by compare.py (text) and vision_golden.py (images) as the existing --alt / re-recording rule.
+ALT_SALT_TEXT = "rec2"
+ALT_SALT_VISION = "2"
+
+
+def alt_record():
+    """REFERENCE_ALT=record: this job records the second recording of every request whose first recording was in the store when the job started."""
+    return os.environ.get("REFERENCE_ALT") == "record"
+
+
+def stored_at_start(key):
+    """Was this key in the cache before the job recorded anything? (gates.sh lists them in $REFERENCE_STORED_KEYS when REFERENCE_ALT is set.)
+    A second recording taken in the job that took the first is not independent, so it is not taken."""
+    f = os.environ.get("REFERENCE_STORED_KEYS")
+    if not f or not os.path.exists(f):
+        return False
+    global _STORED
+    if _STORED is None:
+        _STORED = set(open(f).read().split())
+    return key in _STORED
+
+
+_STORED = None
+
+
+def cached(body, pkg=None, salt=""):
+    """Is this reference request already in the cache ($LLAMA_CACHE)? (never requests anything)"""
+    k = ref_key(body, pkg, salt)
+    return os.path.exists(os.path.join(os.environ.get("LLAMA_CACHE", "llama_cache"), k[:2], k + ".json"))
+
+
+def record_alt(url, body, pkg, salt, what=""):
+    """In an alt-recording job: request the second recording (salt) of `body` when its first recording came from the store; True when requested."""
+    if not alt_record():
+        return False
+    if not stored_at_start(ref_key(body, pkg, "")):
+        print(f"       alt recording skipped{what}: its first recording is not in the store (recorded in this job: not independent)", flush=True)
+        return False
+    llama_completion(url, body, pkg, salt)
+    return True
+
+
 def llama_completion(url, body, pkg=None, salt="", timeout=7200):
     """llama.cpp /completion with a persistent on-disk cache.
 
@@ -222,10 +290,8 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
     `url` and $LLAMA_START is set, that command is run once to start llama-server.
     """
     gguf = pkg.cfg.get("gguf") if pkg is not None else os.environ.get("LLAMA_GGUF")
-    if gguf not in _FP:
-        _FP[gguf] = _gguf_fingerprint(gguf)
-    key = hashlib.sha256(json.dumps({"gguf": _FP[gguf], "build": os.environ.get("LLAMA_CACHE_BUILD") or os.environ.get("LLAMACPP_DIR", ""),
-                                     "body": body, "salt": salt}, sort_keys=True).encode()).hexdigest()
+    ident = reference_identity(pkg.cfg) if pkg is not None else os.environ.get("REFERENCE_IDENTITY")
+    key = ref_key(body, pkg, salt)
     d = os.environ.get("LLAMA_CACHE", "llama_cache")
     path = os.path.join(d, key[:2], key + ".json")
     if os.path.exists(path):
@@ -236,7 +302,7 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
     defer = os.environ.get("LLAMA_DEFER")
     if defer:
         with open(defer, "a") as f:
-            f.write(json.dumps({"key": key, "gguf": gguf, "body": body, "salt": salt}) + "\n")
+            f.write(json.dumps({"key": key, "gguf": gguf, "identity": ident, "body": body, "salt": salt}) + "\n")
         return {"_suspect": "deferred: answered by llama_fill.py, then the gate re-runs", "_pending": True,
                 "content": "", "completion_probabilities": []}
     variant = body.get("_server")   # SERVER_VARIANTS: only llama_fill.py starts such a server; a running one cannot be switched
@@ -297,11 +363,20 @@ def _micro_batched(url, req, mb, timeout):
 GREEDY = {"temperature": 0, "cache_prompt": False, "repeat_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0}
 
 
+def greedy_body(ids, n_predict, n_probs=5, **extra):
+    return dict(GREEDY, prompt=ids, n_predict=n_predict, n_probs=n_probs, return_tokens=True, **extra)
+
+
+def record_alt_greedy(url, ids, n_predict, pkg):
+    """golden.py in an alt-recording job: the second recording of this golden request (compare.py reads it as ALT_SALT_TEXT)."""
+    return record_alt(url, greedy_body(ids, n_predict), pkg, ALT_SALT_TEXT, f" ({len(ids)} prompt tokens)")
+
+
 def llama_greedy(url, ids, n_predict, pkg, salt="", n_probs=5, **extra):
     """Greedy llama.cpp continuation of prompt ids -> (response, generated ids, aligned top lists).
     completion_probabilities omits byte-fallback tokens (emoji, partial UTF-8), so the ids come from
     `tokens` and the top-n lists are trusted only while they line up with them. `extra`: more request fields."""
-    r = llama_completion(url, dict(GREEDY, prompt=ids, n_predict=n_predict, n_probs=n_probs, return_tokens=True, **extra), pkg, salt)
+    r = llama_completion(url, greedy_body(ids, n_predict, n_probs, **extra), pkg, salt)
     cp = r.get("completion_probabilities", [])
     gen = r.get("tokens") or [x["id"] for x in cp]
     k = next((i for i, x in enumerate(cp) if i >= len(gen) or x["id"] != gen[i]), len(cp))

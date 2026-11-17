@@ -1,0 +1,116 @@
+{
+ "family": "qwen35",
+ "doc": "HF Qwen3_5 (Qwen3.5 / Qwen3.8 dense hybrids: gated delta-net + attention layers, optional MTP block) -> the starter's internal (GGUF-style) tensor names. Each entry: internal name -> HF key, with per-tensor load-time preparation `prep` (bf16 -> f32 elementwise, st_prep ops: copy | add1 | negexp). A tensor with no `prep` is read as stored: bf16 matrices as bf16, U8 nibble + weight_scale pairs as mxfp4s by the producer convention (hf_names/quark.json). Values of MXFP4 tensors are never changed.",
+ "architectures": ["Qwen3_5ForConditionalGeneration", "Qwen3_5ForCausalLM", "Qwen3_5TextModel"],
+ "arch": "qwen35",
+ "text_config": "text_config",
+ "config": {
+  "hidden": "hidden_size", "layers": "num_hidden_layers", "heads": "num_attention_heads", "kv_heads": "num_key_value_heads",
+  "head_dim": "head_dim", "ffn": "intermediate_size", "context_length": "max_position_embeddings", "rms_eps": "rms_norm_eps",
+  "rope_theta": "rope_parameters.rope_theta"
+ },
+ "vocab_from": "token_embd.weight",
+ "rope_dims": {"head_dim": "head_dim", "factor": "rope_parameters.partial_rotary_factor"},
+ "layer_types": "layer_types",
+ "recurrent_type": "linear_attention",
+ "gdn": {"conv_kernel": "linear_conv_kernel_dim", "k_heads": "linear_num_key_heads", "v_heads": "linear_num_value_heads",
+         "head_k": "linear_key_head_dim", "head_v": "linear_value_head_dim", "v_order": "grouped"},
+ "mrope": {"sections": "rope_parameters.mrope_section", "interleaved": "rope_parameters.mrope_interleaved", "pad_to": 4},
+ "mtp_layers": "mtp_num_hidden_layers",
+ "fixed": {"rope_type": "neox", "qk_norm": true, "attn_gate": "fused_q", "post_norms": false, "ffn_norm_tensor": "post_attention_norm",
+           "attn_sinks": false, "embed_norm": false, "embed_scale": null, "sliding_window": 0, "sliding_layers": [], "nope_layers": []},
+ "tied_embeddings_key": "tie_word_embeddings",
+ "global": {
+  "token_embd.weight": {"hf": "model.language_model.embed_tokens.weight"},
+  "output.weight": {"hf": "lm_head.weight"},
+  "output_norm.weight": {"hf": "model.language_model.norm.weight", "prep": "add1"}
+ },
+ "layer": {
+  "prefix": "model.language_model.layers.{i}.",
+  "common": {
+   "attn_norm.weight": {"hf": "input_layernorm.weight", "prep": "add1"},
+   "post_attention_norm.weight": {"hf": "post_attention_layernorm.weight", "prep": "add1"},
+   "ffn_gate.weight": {"hf": "mlp.gate_proj.weight"},
+   "ffn_up.weight": {"hf": "mlp.up_proj.weight"},
+   "ffn_down.weight": {"hf": "mlp.down_proj.weight"}
+  },
+  "full_attention": {
+   "attn_q.weight": {"hf": "self_attn.q_proj.weight"},
+   "attn_k.weight": {"hf": "self_attn.k_proj.weight"},
+   "attn_v.weight": {"hf": "self_attn.v_proj.weight"},
+   "attn_output.weight": {"hf": "self_attn.o_proj.weight"},
+   "attn_q_norm.weight": {"hf": "self_attn.q_norm.weight", "prep": "add1"},
+   "attn_k_norm.weight": {"hf": "self_attn.k_norm.weight", "prep": "add1"}
+  },
+  "linear_attention": {
+   "attn_qkv.weight": {"hf": "linear_attn.in_proj_qkv.weight"},
+   "attn_gate.weight": {"hf": "linear_attn.in_proj_z.weight"},
+   "ssm_alpha.weight": {"hf": "linear_attn.in_proj_a.weight"},
+   "ssm_beta.weight": {"hf": "linear_attn.in_proj_b.weight"},
+   "ssm_out.weight": {"hf": "linear_attn.out_proj.weight"},
+   "ssm_conv1d.weight": {"hf": "linear_attn.conv1d.weight", "prep": "copy", "shape": ["conv_kernel", "conv_channels"]},
+   "ssm_a": {"hf": "linear_attn.A_log", "prep": "negexp"},
+   "ssm_dt.bias": {"hf": "linear_attn.dt_bias", "prep": "copy"},
+   "ssm_norm.weight": {"hf": "linear_attn.norm.weight", "prep": "copy"}
+  }
+ },
+ "mtp": {
+  "block": "mtp.layers.{j}.",
+  "global": {
+   "nextn.eh_proj.weight": {"hf": "mtp.fc.weight"},
+   "nextn.enorm.weight": {"hf": "mtp.pre_fc_norm_embedding.weight", "prep": "add1"},
+   "nextn.hnorm.weight": {"hf": "mtp.pre_fc_norm_hidden.weight", "prep": "add1"},
+   "nextn.shared_head_norm.weight": {"hf": "mtp.norm.weight", "prep": "add1"}
+  },
+  "layer": "full_attention_with_common"
+ },
+ "vision": {
+  "doc": "The image tower (HF model.visual.*, bf16, excluded from the Quark quantization) -> the internal names the GGUF mmproj uses (llama.cpp's clip converter, qwen3vl_merger), so the encoder plan (vision/encoder.py) is shared. Matrices are read natively as bf16 (llama.cpp rounds them to f16; the native read is closer to the checkpoint); biases, norms and the position table are f32 in the mmproj, so they are prepared copies (bf16 -> f32 at load, op copy); the conv3d patch embedding is read natively from its HF layout [E, 3, T=2, P, P] (kernel layout hf3d: the converter's patch_embd.weight / .1 are the two temporal taps).",
+  "family": "qwen3vl_merger", "config": "vision_config", "prefix": "model.visual.",
+  "img_begin": "<|vision_start|>", "img_end": "<|vision_end|>",
+  "eps": 1e-06,
+  "preprocess_defaults": {"image_mean": [0.5, 0.5, 0.5], "image_std": [0.5, 0.5, 0.5]},
+  "config_keys": {"patch": "patch_size", "E": "hidden_size", "NH": "num_heads", "ffn": "intermediate_size", "layers": "depth",
+                  "out": "out_hidden_size", "merge": "spatial_merge_size", "pos_n": "num_position_embeddings", "act": "hidden_act",
+                  "temporal": "temporal_patch_size", "deepstack": "deepstack_visual_indexes"},
+  "acts": {"gelu_pytorch_tanh": "gelu_tanh", "silu": "silu"},
+  "patch_embed": {"weight": "patch_embed.proj.weight", "bias": "patch_embed.proj.bias"},
+  "global": {
+   "v.position_embd.weight": {"hf": "pos_embed.weight", "prep": "copy"},
+   "v.post_ln.weight": {"hf": "merger.norm.weight", "prep": "copy"},
+   "v.post_ln.bias": {"hf": "merger.norm.bias", "prep": "copy"},
+   "mm.0.weight": {"hf": "merger.linear_fc1.weight"},
+   "mm.0.bias": {"hf": "merger.linear_fc1.bias", "prep": "copy"},
+   "mm.2.weight": {"hf": "merger.linear_fc2.weight"},
+   "mm.2.bias": {"hf": "merger.linear_fc2.bias", "prep": "copy"}
+  },
+  "block": {
+   "prefix": "blocks.{i}.",
+   "tensors": {
+    "ln1.weight": {"hf": "norm1.weight", "prep": "copy"}, "ln1.bias": {"hf": "norm1.bias", "prep": "copy"},
+    "ln2.weight": {"hf": "norm2.weight", "prep": "copy"}, "ln2.bias": {"hf": "norm2.bias", "prep": "copy"},
+    "attn_qkv.weight": {"hf": "attn.qkv.weight"}, "attn_qkv.bias": {"hf": "attn.qkv.bias", "prep": "copy"},
+    "attn_out.weight": {"hf": "attn.proj.weight"}, "attn_out.bias": {"hf": "attn.proj.bias", "prep": "copy"},
+    "ffn_up.weight": {"hf": "mlp.linear_fc1.weight"}, "ffn_up.bias": {"hf": "mlp.linear_fc1.bias", "prep": "copy"},
+    "ffn_down.weight": {"hf": "mlp.linear_fc2.weight"}, "ffn_down.bias": {"hf": "mlp.linear_fc2.bias", "prep": "copy"}
+   }
+  },
+  "deepstack": {
+   "prefix": "deepstack_merger_list.{k}.",
+   "tensors": {
+    "norm.weight": {"hf": "norm.weight", "prep": "copy"}, "norm.bias": {"hf": "norm.bias", "prep": "copy"},
+    "fc1.weight": {"hf": "linear_fc1.weight"}, "fc1.bias": {"hf": "linear_fc1.bias", "prep": "copy"},
+    "fc2.weight": {"hf": "linear_fc2.weight"}, "fc2.bias": {"hf": "linear_fc2.bias", "prep": "copy"}
+   }
+  }
+ },
+ "semantics": {
+  "rmsnorm": "(1 + w) * x / rms(x) (vLLM GemmaRMSNorm): every norm weight except linear_attn.norm.weight is stored zero-centred; the GGUF converter writes w + 1, here the prepare step adds 1 (op add1). linear_attn.norm is a plain gated RMSNorm weight (copy).",
+  "A_log": "GGUF stores ssm_a = -exp(A_log) as f32 (op negexp).",
+  "v_heads": "HF keeps the value heads grouped by key head (value head h reads key head h // (HV/HK), repeat_interleave); llama.cpp's converter reorders to tiled (h % HK) for ggml_repeat. The starter reads the HF order natively (cfg gdn.v_order grouped, gen_gdn.kh_line): no weight is permuted.",
+  "conv1d": "HF [C, 1, K] bf16 == GGUF [C rows of K] f32 after a bf16 -> f32 copy.",
+  "q_proj": "[heads * 2 * head_dim, hidden]: per head [query | gate] (attn_output_gate), the same packing as the GGUF's attn_q (cfg attn_gate fused_q).",
+  "rope": "partial rotary (0.25 * head_dim = 64 of 256 dims), neox pairs, theta 1e7; mrope_section [11, 11, 10] interleaved only matters for image positions.",
+  "mtp": "mtp.fc = eh_proj over concat(enorm(embed), hnorm(hidden)); mtp.norm = the head norm of the MTP block (nextn.shared_head_norm); one full-attention block with a dense FFN. All bf16 in the Quark export (kept as bf16 matrices)."
+ }
+}

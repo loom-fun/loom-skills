@@ -51,6 +51,8 @@ loom_up() {
   local f; f=$(grep -lx "$loom_port" "$state"/*.port 2>/dev/null | head -1); [ -n "$f" ] && name=$(basename "$f" .port)
   [ -n "${loom_name:-}" ] && name=$loom_name
   mkdir -p "$state"
+  # the VRAM of the process that was just stopped (the reference engine of the fill) must be released before the weights load
+  bash "$(dirname "${BASH_SOURCE[0]}")/wait_vram.sh" "loom restart ($name)" 1024 180 "$state/vram_restarts.log"
   # exec: the background subshell becomes loom-serve, so no shell is left holding the caller's stdout
   # (`qualify.sh ... | tail` otherwise never ends: the subshell kept the pipe open while it waited) and $! is
   # the server's own PID.
@@ -67,6 +69,8 @@ loom_up() {
         pid=$(ss -ltnpH "sport = :$loom_port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
         echo "$pid" > "$state/$name.pid"
       fi
+      # ready = registration; the weights load on the first request and every request is refused until then: wait for the first answer
+      "$T" "$(dirname "${BASH_SOURCE[0]}")/wait_model.py" "$url" --wait 300 || { echo "loom-serve restarted but the model did not load"; return 1; }
       echo "[one model at a time] loom-serve back on :$loom_port (pid $pid)"; loom_argv=(); return 0
     fi
     sleep 1

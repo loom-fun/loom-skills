@@ -34,6 +34,15 @@ SKIP = re.compile(r"^(parameter(/.*)?|.*\.gguf|model_target\.json|model_d\d+\.js
 CARD = ("README.md", "info.json", "REPORT.md")
 
 
+def fetch_supports(loom_fetch, flag):
+    """Whether this loom-fetch lists FLAG in its --help (hrx-loom 0.1.0 has no --quiet and rejects it); unknown = not supported."""
+    try:
+        r = subprocess.run([loom_fetch, "--help"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return flag in (r.stdout + r.stderr)
+
+
 def hf_origin(path):
     """(repo, revision, snapshot dir, file) of a file inside the Hugging Face cache, else None."""
     # Follow the link chain (package -> work dir -> snapshots/REV/file -> blobs/SHA) and stop at the snapshot entry:
@@ -108,10 +117,13 @@ def cmd_prepare(a):
         if isinstance(d, dict) and isinstance(d.get(k), str):
             d[k] = os.path.basename(d[k])
     base(cfg, "gguf"); base(cfg.get("vision"), "mmproj")
+    if isinstance(cfg.get("weights"), dict):   # a safetensors package (inspect_safetensors.py): the file names only
+        cfg["weights"] = {"format": cfg["weights"]["format"], "files": [os.path.basename(p) for p in cfg["weights"]["files"]]}
     for k in ("draft", "drafter", "assistant", "mtp"):
         base(cfg.get(k), "gguf")
     json.dump(cfg, open(cfgp, "w", encoding="utf-8"), indent=1)
-    cmd = [a.loom_fetch, os.path.join(out, "model.json"), "--update-lock", "--all-variants", "--no-input", "--quiet",
+    cmd = [a.loom_fetch, os.path.join(out, "model.json"), "--update-lock", "--all-variants", "--no-input",
+           *(["--quiet"] if fetch_supports(a.loom_fetch, "--quiet") else []),
            *[f"--origin={n}={r}" for n, r in roots.items()]]
     subprocess.run(cmd, check=True)
     lock = json.load(open(os.path.join(out, "model.json.lock"), encoding="utf-8"))

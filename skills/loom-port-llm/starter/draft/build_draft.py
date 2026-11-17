@@ -55,7 +55,7 @@ def root_sources(cfg, draft):
     head = [] if cfg.get("tied_embeddings") else ["model"]
     if draft["kind"] == "mtp":
         wsrc = ["model"] * (1 + 6 + (2 if cfg.get("qk_norm") else 0))
-        if draft.get("head_policy"):   # PROPOSE_HEAD_ROWS: propose = [embedding, NextN block, the head's Q4_0 copy]; no head root
+        if draft.get("head_policy") or draft.get("phead") == "main":   # PROPOSE_HEAD_ROWS: propose = [embedding, NextN block, the head's Q4_0 copy]; no head root
             return ["model", "model", "phead"], wsrc
         return ["model"] + head + ["model"], wsrc
     if draft["kind"] == "ngram":   # prompt lookup reads no weights
@@ -64,15 +64,15 @@ def root_sources(cfg, draft):
         return ["model", "draft"], []
     # "phead": the target's head once more, through its load-time Q4_0 policy (head_weights.loom, prep_weights.py)
     # With "phead" the proposals never read the head root, so an untied head is not bound (gen_dflash.py: same rule).
-    if draft.get("head_policy"):
+    if draft.get("head_policy") or draft.get("phead") == "main":
         return ["model", "draft", "draft", "phead"], ["draft", "draft"]
     return ["model"] + head + ["draft", "draft"], ["draft", "draft"]
 
 
-def _bind(stage, sources, draft_policy=False):
+def _bind(stage, sources, draft_policy=False, head_policy=True):
     """Bind each parameter root; the drafter's roots use its own weight policy (draft_weights.loom) when it has one,
     the proposals' head root ("phead") the target checkpoint through head_weights.loom."""
-    pol = lambda src: "%head_policy" if src == "phead" else "%draft_policy" if src != "model" and draft_policy else "%policy"
+    pol = lambda src: ("%head_policy" if head_policy else "%policy") if src == "phead" else "%draft_policy" if src != "model" and draft_policy else "%policy"
     return "".join(f"      %{stage}_b{i} = scalar.constant {i} : i32\n"
                    f"      func.call @parameter(%{stage}, %{stage}_b{i}, %c0_source, {'%checkpoint' if src in ('model', 'phead') else '%draft_source'}, {pol(src)}) : (i32, i32, i32, i32, buffer)\n"
                    for i, src in enumerate(sources))
@@ -196,7 +196,7 @@ global.rodata.def @draft_scope = bytes("{hx("draft")}")
       func.call @config_i64(%pstage, %width_key, %width) : (i32, buffer, i64)
       func.call @config_i64(%pstage, %epoch_spans_key, %span_capacity) : (i32, buffer, i64)
       func.call @config_i64(%pstage, %epoch_tokens_key, %maximum) : (i32, buffer, i64)
-{_bind("pstage", psrc, bool(draft.get("policy")))}
+{_bind("pstage", psrc, bool(draft.get("policy")), bool(draft.get("head_policy")))}
       %initial = index.cmp eq, %level, %c0 : index
       %next_first = scf.select %initial, %pstage, %first : i32
       scf.yield %next_first : i32
@@ -219,7 +219,7 @@ global.rodata.def @draft_scope = bytes("{hx("draft")}")
       func.call @config_i64(%wstage, %pool_key, %pool) : (i32, buffer, i64)
       func.call @config_i64(%wstage, %tokens_key, %tokens) : (i32, buffer, i64)
       func.call @config_i64(%wstage, %spans_key, %spans) : (i32, buffer, i64)
-{_bind("wstage", wsrc, bool(draft.get("policy")))}
+{_bind("wstage", wsrc, bool(draft.get("policy")), bool(draft.get("head_policy")))}
       view.store %wstage, %warm_view[%i] : i32, view<[%count]xi32>
 {gate_fill}    }}
     %draft_at = index.constant {PROPOSE_FIRST} : offset
