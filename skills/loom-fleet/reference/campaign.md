@@ -33,7 +33,9 @@ Use two task-fit tiers, mapped to controls the current host actually exposes. Th
 documentation, routine reviews, dashboard updates, and bounded read-only research. The strongest available tier is for tech leads and
 for design-heavy or open-ended work, including fused or persistent kernels, register/LDS budgets across fused stages, cross-workgroup
 synchronization, and open-ended optimization. A campaign owner's explicit model or reasoning preference takes precedence; record the
-preference and how it shaped the choice. Use catalog descriptions and available controls without guessing prices or a universal quality rank.
+preference and how it shaped the choice. Map ordinary to a lower-cost-capable host option when the current catalog/control evidence
+identifies one; map strongest to the highest-capability host option when that evidence identifies one. If the host evidence does not establish
+the mapping, record it as unverified rather than guessing prices or ranks. An explicit owner preference overrides this mapping.
 
 At startup, resume, and before every delegation (including nested delegation), inspect the current host's model and reasoning controls and
 its current model catalog. Map the task tier to a concrete model the host lists, using the catalog's descriptions and applicable owner
