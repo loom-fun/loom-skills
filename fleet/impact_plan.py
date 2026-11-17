@@ -81,6 +81,19 @@ def make_plan(repo, base, head="HEAD", shards=4):
             "matrix": {"include": include}, "builds": len(include)}
 
 
+def validate_pr_scope(repo, body_path):
+    """Fail before planning builds when a PR scope declaration is malformed or unknown."""
+    # scope_lint owns the grammar, selector matcher, facet list, and kernel-family registry.
+    sys.path.insert(0, str(HERE))
+    try:
+        import scope_lint
+    finally:
+        sys.path.remove(str(HERE))
+    errors = scope_lint.declaration_errors(repo, Path(body_path).read_text(encoding="utf-8"))
+    if errors:
+        raise SystemExit("invalid loom-scope declaration:\n" + "\n".join(f"- {error}" for error in errors))
+
+
 def aggregate(plan, builds, output):
     # Import only for aggregation; the planner has no numpy/GGUF or SDK dependencies.
     sys.path.insert(0, str(HERE))
@@ -129,7 +142,7 @@ def aggregate(plan, builds, output):
     return report
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     plan = sub.add_parser("plan")
@@ -137,14 +150,17 @@ def main():
     plan.add_argument("--base", required=True)
     plan.add_argument("--head", default="HEAD")
     plan.add_argument("--shards", type=int, default=4)
+    plan.add_argument("--pr-body", help="optional PR body to validate before creating a build matrix")
     plan.add_argument("--out", required=True)
     plan.add_argument("--github-output")
     finish = sub.add_parser("aggregate")
     finish.add_argument("--plan", required=True)
     finish.add_argument("--builds", required=True)
     finish.add_argument("--out", required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.command == "plan":
+        if args.pr_body:
+            validate_pr_scope(args.repo, args.pr_body)
         result = make_plan(args.repo, args.base, args.head, args.shards)
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(json.dumps(result, indent=2) + "\n")
