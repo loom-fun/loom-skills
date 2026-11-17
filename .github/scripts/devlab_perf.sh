@@ -594,6 +594,12 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'median', 
       fa=(); grep -q '"vision"' "$card/llm_config.json" && fa+=(--vision)
       "$T" "$here/.github/scripts/r9700_func.py" "$url" "$cardid" "$out/func_$p1.json" ${fa[@]+"${fa[@]}"} $([ -f "$out/info_card.json" ] && echo --info "$out/info_card.json") 2>&1 | tee "$out/func_$p1.log"
       res[$s]=$(tail -1 "$out/func_$p1.log");;
+    diag)   # triage experiment only: status/models/chat/image answers with their error bodies + device memory counters
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "diagnostics $p1"
+      "$T" "$here/.github/scripts/triage_diag.py" "$url" "$cardid" "$out/diag_$p1.json" 2>&1 | tee "$out/diag_$p1.log"
+      cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/servelog_diag_$p1.log" 2>/dev/null
+      res[$s]=$(tail -1 "$out/diag_$p1.log" | cut -c1-300);;
     gates)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag

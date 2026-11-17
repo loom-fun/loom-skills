@@ -2331,6 +2331,7 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1" and os.environ.get
     def exp_deq(name, e):
         tt = T[name]; return dequantize(np.asarray(tt.data)[e], tt.tensor_type).reshape(int(tt.shape[1]), int(tt.shape[0])).astype(np.float64)
     seen7 = set()
+    _TX = float(os.environ.get("MOE_GEMM_TOL_X", "1"))   # triage experiment only: the grouped-GEMM tolerance scale
     for li in range(M7["leading_dense"], cfg["layers"]):
         b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower()
         fg = T[b + "ffn_gate_exps.weight"].tensor_type.name.lower(); fu = T[b + "ffn_up_exps.weight"].tensor_type.name.lower()
@@ -2391,8 +2392,8 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1" and os.environ.get
   %ys = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
   kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %ti, %rm, %x, %s, %wg, %wu, %act) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t7}x{H}xf16>, tensor<{t7}x2xf32>, {gt7}, {ut7}, tensor<{mr}x{FE7}xf32>)
   kernel.launch @g_moe_gdn_{fd}_k{FE7}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %ti, %rm, %a16, %sr, %wd, %ys) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE7}xf16>, tensor<{mr}x2xf32>, {dt7}, tensor<{mr}x{H}xf32>)
-  check.expect.close actual(%act) expected(%eact) atol({0.15 * float(np.abs(act_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{FE7}xf32>
-  check.expect.close actual(%ys) expected(%eys) atol({0.05 * float(np.abs(ys_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{H}xf32>
+  check.expect.close actual(%act) expected(%eact) atol({_TX * 0.15 * float(np.abs(act_ref).mean()):.3g}) rtol({_TX * 5.0e-2:.3g}) nan(different) : tensor<{mr}x{FE7}xf32>
+  check.expect.close actual(%ys) expected(%eys) atol({_TX * 0.05 * float(np.abs(ys_ref).mean()):.3g}) rtol({_TX * 5.0e-2:.3g}) nan(different) : tensor<{mr}x{H}xf32>
   check.return
 }}
 """)
