@@ -544,6 +544,26 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/unsloth-gemma-4-31B-it-qat-loom",
+   "slug": "gemma-4-31b-it-qat",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "features": [
+    "thinking-toggle"
+   ]
+  },
+  {
+   "repo": "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom",
+   "slug": "gemma-4-26b-a4b-it-qat",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "features": [
+    "thinking-toggle"
+   ]
   }
  ]
 }

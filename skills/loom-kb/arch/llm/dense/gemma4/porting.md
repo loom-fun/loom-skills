@@ -43,3 +43,22 @@ Lessons the agent paid for:
   the template rewrote is not required to be reused).
   Likewise for templates whose thinking-off generation prompt adds an empty thought channel (Gemma 4
   12B/26B): the template does not render it in history, so the next turn re-prefills from there.
+
+## Gemma4 QAT target packages
+
+The exact Unsloth31B and26B-A4B QAT releases use Q4_0/F32 target tensors even though
+their upstream filenames end in `UD-Q4_K_XL`. The dense31B path uses existingQ4_0
+matrix kernels; the26B-A4B path additionally needs Q4_0 expert decode and grouped
+prefill. Expert staging preserves the signed half-scale and centered nibble codes.
+
+Baseline scope is text/chat/tools with thinking toggle, target-only. Existing
+non-QAT packages and their evidence are separate. Exact QAT assistants are published
+but require per-layer KV metadata, discovery and format support; vision also needs
+QAT-specific integration. Neither is advertised as implemented by these registrations.
+Existing non-QAT DFlash needs independent compatibility assessment and qualification.
+
+Initial fleet sizing is a CPU-generated input, not measured device fit or native
+context support. Device-specific settings and four model/device qualification records
+must come from the exact QAT weights before final publication. Cold host/device peaks,
+completed full-limit requests and structured over-limit rejection are required; keep
+sampled memory counters separate and distinguish served context from native context.
