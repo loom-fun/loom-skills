@@ -1299,7 +1299,7 @@
  def gdn_layer(i, b, nm, sz, par):
      """Gated delta-net token mixer of layer i: h -> o (VD wide), then o16 for the output GEMM."""
      g = GDN
-@@ -5403,6 +5738,83 @@
+@@ -5403,6 +5738,91 @@
      return (head + sizes + "  scf.if %outsel {\n" + gather + comp + scatter + "  } else {\n" + tail + "  }\n")
  
  
@@ -1366,6 +1366,14 @@
 +              "%fallback_count = buffer.alloca", "@g_attention_fallback_list[%t](%t, %info, %flash_tiles, %fallback_list, %fallback_count)")
 +    if a < 0 or m < 0 or any(n not in text[a:m] for n in needed):
 +        raise ValueError("shared-KV pruning: llm_advance prologue or first shared layer not found")
++    # DFlash consumes every row at its feature taps, including shared-KV layers. Keep those rows through
++    # the last actual capture; only subsequent shared layers have no non-output consumer.
++    tap = text.rfind("kernel.launch @g_dfl_tap[", a, b)
++    if tap >= m:
++        after = re.search(r"\n  // ---- layer \d+\b", text[tap:b])
++        if after is None:   # the last layer is tapped: every layer's rows are needed
++            return text
++        m = tap + after.start() + 1
 +    tail = re.sub(r"%(info|flash_tiles|fallback_list|fallback_count)(?![\w])", r"%\1_t", text[m:b])
 +    pre = """  // KV-shared layers: only the rows the head reads (see prune_shared_rows)
 +  %info_t = buffer.alloca<global> align(256) %info_size : buffer

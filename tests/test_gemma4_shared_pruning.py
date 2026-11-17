@@ -53,6 +53,24 @@ class SharedPruningTests(unittest.TestCase):
         self.assertEqual(out.count('kernel.def export("g_token_info_tail")'), 1)
         self.assertIn("@g_attention_fallback_list[%t](%t, %info_t,", owner)
 
+    def test_dflash_taps_keep_all_feature_rows(self):
+        source = self.module()
+        source = source.replace("\n}\ncommand.def public @llm_verify", "\n  // ---- layer 16 shared\n%info\n"
+                                "  kernel.launch @g_dfl_tap[%t](%t, %slot, %x, %features)\n"
+                                "  // ---- layer 17 shared\n%info\n}\ncommand.def public @llm_verify", 1)
+        with patch.dict(os.environ, {"PRUNE_SHARED": "1"}):
+            out = self.ns["prune_shared_rows"](source)
+        kept, pruned = out.split("  // ---- layer 17 shared", 1)
+        self.assertIn("layer 16 shared\n%info\n  kernel.launch @g_dfl_tap", kept)
+        self.assertIn("layer 15 shared\n%info %info_size %info_other", kept)
+        self.assertIn("\n%info_t\n}", pruned)
+        self.assertLess(kept.index("@g_dfl_tap[%t]"), kept.index("// KV-shared layers:"))
+
+    def test_final_layer_tap_leaves_program_unchanged(self):
+        source = self.module().replace("\n}\ncommand.def public @llm_verify", "\n  kernel.launch @g_dfl_tap[%t](%t, %slot, %x, %features)\n}\ncommand.def public @llm_verify", 1)
+        with patch.dict(os.environ, {"PRUNE_SHARED": "1"}):
+            self.assertEqual(self.ns["prune_shared_rows"](source), source)
+
     def test_opt_out_and_unshared_models_are_identical(self):
         source = self.module()
         with patch.dict(os.environ, {"PRUNE_SHARED": "0"}):
