@@ -2,9 +2,14 @@
 """Promote loom-fun-staging cards to loom-fun: the staging repo's files, with the card rewritten for its new org.
 
   promote_staging.py [--work DIR] [--report REPORT.md] [--json REPORT.json] [--execute] SLUG... | --all
+                    [--staging-revisions PINS.json]
+
+PINS.json optionally freezes the source revisions: {"SLUG": "40 lowercase hex commit", ...}. It must cover exactly
+the requested slugs (including --all). Without it, sources use their current heads. Destination parents remain live
+reads and the execute-time parent-commit guard is unchanged.
 
 Per repo (the same name in both orgs):
-  1. fetch the staging repo at its current commit (every file but .gitattributes: the package is small, its weights are
+  1. fetch the requested staging commit (current head by default; every file but .gitattributes: the package is small, its weights are
      fetched from their origins by loom-fetch);
   2. the publish-time org rewrite: info.json "repo" -> loom-fun/NAME, then render_card.py regenerates README.md and REPORT.md
      (Quick start URLs, links) from it, and render_card.py --check verifies them; no file may still name loom-fun-staging;
@@ -45,8 +50,30 @@ def sha256(path):
     return h.hexdigest()
 
 
-def remote_files(api, repo):
-    info = api.model_info(repo, files_metadata=True)
+def staging_revisions(path, slugs):
+    """Validate a complete immutable source manifest before any Hub request."""
+    if path is None:
+        return {}
+    with open(path, encoding="utf-8") as f:
+        pins = json.load(f)
+    if not isinstance(pins, dict) or not pins:
+        raise ValueError("--staging-revisions: expected a nonempty slug-to-commit JSON object")
+    missing, extra = sorted(set(slugs) - pins.keys()), sorted(pins.keys() - set(slugs))
+    if missing or extra:
+        raise ValueError(f"--staging-revisions: exact slug coverage required; missing={missing}, extra={extra}")
+    for slug, revision in pins.items():
+        if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision):
+            raise ValueError(f"--staging-revisions: {slug}: expected an immutable 40 lowercase hex commit")
+    return pins
+
+
+def remote_files(api, repo, revision=None):
+    kwargs = {"files_metadata": True}
+    if revision is not None:
+        kwargs["revision"] = revision
+    info = api.model_info(repo, **kwargs)
+    if revision is not None and info.sha != revision:
+        raise ValueError(f"{repo}: requested staging revision {revision}, resolved {info.sha}: refusing promotion")
     out = {}
     for s in info.siblings:
         lfs = s.lfs if isinstance(s.lfs, dict) else (vars(s.lfs) if s.lfs else None)
@@ -54,11 +81,13 @@ def remote_files(api, repo):
     return info.sha, out
 
 
-def promote(api, slug, work, execute):
+def promote(api, slug, work, execute, staging_revision=None):
     from huggingface_hub import snapshot_download
     src, dst = f"{SRC}/{slug}", f"{DST}/{slug}"
     r = {"slug": slug, "staging": src, "target": dst}
-    ssha, sfiles = remote_files(api, src)
+    ssha, sfiles = remote_files(api, src, staging_revision)
+    if staging_revision is not None:
+        r["requested_staging_revision"] = staging_revision
     try:
         dsha, dfiles = remote_files(api, dst)
     except Exception as e:  # noqa: BLE001
@@ -141,6 +170,7 @@ def main():
     ap.add_argument("--work", required=True, help="a scratch dir (on disk) for the rewritten repos")
     ap.add_argument("--report", help="write a Markdown dry-run report here")
     ap.add_argument("--json", help="write the per-repo results as JSON here")
+    ap.add_argument("--staging-revisions", help="JSON object mapping exactly the requested slugs to immutable 40 lowercase hex source commits")
     ap.add_argument("--execute", action="store_true", help="really upload to loom-fun (the user's call only)")
     a = ap.parse_args()
     if a.execute and os.environ.get("PROMOTE_CONFIRM") != DST:
@@ -148,12 +178,16 @@ def main():
     slugs = a.slugs
     if a.all:
         slugs = [m["repo"].split("/")[-1] for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]]
+    try:
+        pins = staging_revisions(a.staging_revisions, slugs)
+    except (OSError, ValueError) as e:
+        ap.error(str(e))
     from huggingface_hub import HfApi
     api = HfApi()
     res = []
     for s in slugs:
         try:
-            res.append(promote(api, s, a.work, a.execute))
+            res.append(promote(api, s, a.work, a.execute, pins.get(s)))
         except BaseException as e:  # noqa: BLE001
             res.append({"slug": s, "ok": False, "error": f"{type(e).__name__}: {e}"[:400]})
         x = res[-1]
