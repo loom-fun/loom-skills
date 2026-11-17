@@ -7,7 +7,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 STARTER = Path(__file__).resolve().parents[1] / 'skills/loom-port-llm/starter'
 sys.path.insert(0, str(STARTER))
@@ -17,6 +20,7 @@ import moe_q4_0
 
 
 class Q40Experts(unittest.TestCase):
+    @unittest.skipIf(np is None, 'numpy not installed (numeric qualification uses the tools environment)')
     def test_half_multiply_matches_reference_for_every_finite_scale(self):
         # Independent exhaustive numerical check: every finite half scale and all
         # 16 centered codes. The reference widens before multiply, then rounds.
@@ -61,6 +65,7 @@ class Q40Experts(unittest.TestCase):
                 base = gen_gemm.gemm(fmt, mode)
                 self.assertEqual(base, moe_q4_0.specialize_grouped(base, fmt, mode))
 
+    @unittest.skipUnless(np is not None and importlib.util.find_spec('gguf'), 'numpy and gguf not installed')
     def test_independent_reference_matches_ggml_bytes(self):
         from gguf import GGMLQuantizationType
         from gguf.quants import dequantize
@@ -82,6 +87,7 @@ class Q40Experts(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'Q4_0 expert staging'):
             moe_q4_0.specialize_grouped('changed template', 'q4_0', 'store')
 
+    @unittest.skipIf(np is None, 'numpy not installed (numeric qualification uses the tools environment)')
     def test_gpu_bit_proof_covers_scale_extremes_and_actual_snippets(self):
         path = STARTER.parents[2] / '.github/devlab/kbench/moe_q4_0/gen_bench.py'
         spec = importlib.util.spec_from_file_location('q40_bits', path)
