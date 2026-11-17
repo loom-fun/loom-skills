@@ -2560,6 +2560,27 @@ def allreduce(vals, p, outs):
 # work in one wave measured ~3 % slower drafted decode at short context on Qwen3-8B). attn_rules.multi_token decides.
 
 
+def attention_range_mask(key, lo, hi, out, low, high, indent="      ", ordered=True):
+    """Validity of [lo, hi); the opt-in subtraction is modular unsigned index arithmetic.
+
+    Unordered inactive multi-token sentinels must become an empty interval before
+    subtracting. Other callers construct ordered split bounds. Keep the legacy
+    text exact so unmeasured packages remain byte-identical.
+    """
+    if os.environ.get("ATTN_RANGE_MASK", "0") != "1":
+        return (f"{indent}{low} = index.cmp uge, {key}, {lo} : index\n"
+                f"{indent}{high} = index.cmp ult, {key}, {hi} : index\n"
+                f"{indent}{out} = scalar.andi {low}, {high} : i1")
+    top = hi
+    text = ""
+    if not ordered:
+        top = out + "_top"
+        text = f"{indent}{top} = index.max {hi}, {lo} : index\n"
+    return (text + f"{indent}{out}_width = index.sub {top}, {lo} : index\n"
+            f"{indent}{out}_delta = index.sub {key}, {lo} : index\n"
+            f"{indent}{out} = index.cmp ult, {out}_delta, {out}_width : index")
+
+
 def multi_token_split(text, P, U, T, until=None):
     """`P`_attention_split with a multi-token path: when the T epoch tokens of this token's aligned group are live,
     of one row and at consecutive positions (a verify span), the group's first workgroup computes all T (one K/V
@@ -2697,9 +2718,7 @@ def multi_token_split(text, P, U, T, until=None):
     yields = []
     for j in range(T):
         for i in range(U):
-            m.append(f"""      %mokl{j}_{i} = index.cmp uge, %mkey{i}, %mt_lo{j} : index
-      %mokh{j}_{i} = index.cmp ult, %mkey{i}, %mt_hi{j} : index
-      %mok{j}_{i} = scalar.andi %mokl{j}_{i}, %mokh{j}_{i} : i1
+            m.append(f"""{attention_range_mask(f"%mkey{i}", f"%mt_lo{j}", f"%mt_hi{j}", f"%mok{j}_{i}", f"%mokl{j}_{i}", f"%mokh{j}_{i}", ordered=False)}
       %mprod{j}_{i} = vector.mulf %mt_q{j}, %mk{i} : {vt}
       %mpart{j}_{i} = vector.reduce<addf> %mprod{j}_{i}, %zero_f : {vt}, f32""")
         m.append(allreduce([f"%mpart{j}_{i}" for i in range(U)], f"mar{j}x", [f"%msr{j}_{i}" for i in range(U)]))
@@ -2798,9 +2817,7 @@ def gqa_split(text, P, S):
     t.append("""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
     for i in range(U):
         t.append(f"""      %key{i}_raw = index.add %j, %c{i}u : index
-      %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
-      %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
-      %ok{i} = scalar.andi %okl{i}, %okh{i} : i1
+{attention_range_mask(f"%key{i}_raw", "%lo_abs", "%hi_abs", f"%ok{i}", f"%okl{i}", f"%okh{i}")}
       %kd{i} = index.constant {i * POS_BYTES} : offset
       %ko{i} = index.add %kb_off, %kd{i} : offset
       %kc{i} = buffer.view %arena[%ko{i}] : buffer -> view<{KVH}x32x4xf16>
@@ -2873,9 +2890,7 @@ def attention_text(S, P, twin=False):
         body.append(f"""      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)""")
     for i in range(U):
         body.append((f"""      %key{i}_raw = index.add %j, %c{i}u : index
-      %okl{i} = index.cmp uge, %key{i}_raw, %lo_abs : index
-      %okh{i} = index.cmp ult, %key{i}_raw, %hi_abs : index
-      %ok{i} = scalar.andi %okl{i}, %okh{i} : i1
+{attention_range_mask(f"%key{i}_raw", "%lo_abs", "%hi_abs", f"%ok{i}", f"%okl{i}", f"%okh{i}")}
       %kd{i} = index.constant {i * POS_BYTES} : offset
       %ko{i} = index.add %kb_off, %kd{i} : offset""" if pa else f"""      %key{i}_raw = index.add %j, %c{i}u : index
       %ok{i} = index.cmp ult, %key{i}_raw, %stop : index
@@ -3313,9 +3328,7 @@ def attention_seg(split_text):
       %base_lo = func.call @g_kv_offset(%origins, %row, %anc_lo, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
       %base_hi = func.call @g_kv_offset(%origins, %row, %anc_hi, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
       %key = index.add %j, %lane : index
-      %oku_l = index.cmp uge, %key, %lo_u : index
-      %oku_h = index.cmp ult, %key, %hi_u : index
-      %ok_u = scalar.andi %oku_l, %oku_h : i1
+{attention_range_mask("%key", "%lo_u", "%hi_u", "%ok_u", "%oku_l", "%oku_h")}
       %anc = scf.select %upper, %anc_hi, %anc_lo : index
       %kbase = scf.select %upper, %base_hi, %base_lo : offset
       %key_c = scf.select %ok_u, %key, %anc : index
@@ -3338,9 +3351,7 @@ def attention_seg(split_text):
       %bb{k} = scalar.andi %bl{k}, %bh{k} : i1
       %use{k} = scalar.andi %bb{k}, %active_{k} : i1
       %nm{k}, %nl{k}, %al{k} = scf.if %use{k} -> (f32, f32, f32) {{
-        %okl{k} = index.cmp uge, %key, %lo_{k} : index
-        %okh{k} = index.cmp ult, %key, %hi_{k} : index
-        %ok{k} = scalar.andi %okl{k}, %okh{k} : i1
+{attention_range_mask("%key", f"%lo_{k}", f"%hi_{k}", f"%ok{k}", f"%okl{k}", f"%okh{k}", indent="        ")}
 {chr(10).join(dots)}
         %score{k} = scf.select %ok{k}, {prev}, %neg_big : f32
         %bmax{k} = kernel.subgroup.reduce<maxnumf> %score{k} : f32
