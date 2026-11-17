@@ -258,6 +258,10 @@ d=c.get('draft') or {}
 a += (['--draft', d['kind'], '--draft-depth', str(d['depth'])] if d.get('kind') else [])
 print(' '.join(a))")
 
+slug_arg() {   # slug_arg BUILD_PY CARD_REPO -> "--slug <repo name>" when that build.py takes one (a kit without it has no slug-matched choices), else nothing
+  grep -q -- '"--slug"' "$1" && echo "--slug ${2##*/}"
+  return 0
+}
 hf_sub() {   # hf_sub TEXT -> TEXT with each {hf:OWNER/REPO/FILE} replaced by that Hub file's path, fetched once per runner
   local t=$1 h
   for h in $(echo "$t" | grep -oE '\{hf:[^}]+\}' | sort -u); do
@@ -297,7 +301,10 @@ for v in $variants; do
 import json, sys
 c = json.load(open(sys.argv[1])); c.update(json.loads(sys.argv[3])); json.dump(c, open(sys.argv[2], "w"), indent=1)
 EOF2
-    ( cd "${KIT[$v]}" && env $envs ${KBV[$v]:+LOOM_KB_ROOT=${KBV[$v]}} "$T" build.py "$D/$v/cfg.json" "$pkg" --tokenizer "$card/tokenizer.json" --model-id "$cardid" $cardargs $extra ) > "$out/build_$v.log" 2>&1 \
+    # the package's slug (the card's repo name) selects the knowledge base's slug-matched model nodes, as fleet/build_fleet.py's canonical build does:
+    # without it a model's program-level choices (e.g. Qwen3.6-35B-A3B decode.attn.kv_once.d256 on rdna4) are missing and the programs differ from the published ones
+    slugarg=$(slug_arg "${KIT[$v]}/build.py" "$repo")
+    ( cd "${KIT[$v]}" && env $envs ${KBV[$v]:+LOOM_KB_ROOT=${KBV[$v]}} "$T" build.py "$D/$v/cfg.json" "$pkg" $slugarg --tokenizer "$card/tokenizer.json" --model-id "$cardid" $cardargs $extra ) > "$out/build_$v.log" 2>&1 \
       || { tail -30 "$out/build_$v.log"; echo "FAIL: build $v"; exit 1; }
     tail -3 "$out/build_$v.log"
   else
@@ -587,6 +594,12 @@ print('llamacpp$bkt n-max $nm', k, [x.get(k) for x in r if x.get(k)], 'median', 
       fa=(); grep -q '"vision"' "$card/llm_config.json" && fa+=(--vision)
       "$T" "$here/.github/scripts/r9700_func.py" "$url" "$cardid" "$out/func_$p1.json" ${fa[@]+"${fa[@]}"} $([ -f "$out/info_card.json" ] && echo --info "$out/info_card.json") 2>&1 | tee "$out/func_$p1.log"
       res[$s]=$(tail -1 "$out/func_$p1.log");;
+    diag)   # triage experiment only: status/models/chat/image answers with their error bodies + device memory counters
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "diagnostics $p1"
+      "$T" "$here/.github/scripts/triage_diag.py" "$url" "$cardid" "$out/diag_$p1.json" 2>&1 | tee "$out/diag_$p1.log"
+      cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/servelog_diag_$p1.log" 2>/dev/null
+      res[$s]=$(tail -1 "$out/diag_$p1.log" | cut -c1-300);;
     gates)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag
