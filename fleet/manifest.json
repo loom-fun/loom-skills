@@ -1701,7 +1701,7 @@
     "preset": "chat",
     "context": 131072,
     "pool": 196608,
-    "prefill": 2048,
+    "prefill": 1024,
     "rows": 4,
     "max_tokens": 4096,
     "draft_depth": 2
@@ -1745,7 +1745,7 @@
     "preset": "chat",
     "context": 131072,
     "pool": 196608,
-    "prefill": 2048,
+    "prefill": 1024,
     "rows": 4,
     "max_tokens": 4096,
     "draft_depth": 3

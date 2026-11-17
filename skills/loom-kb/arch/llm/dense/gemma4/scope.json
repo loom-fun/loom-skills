@@ -15,12 +15,15 @@
    "when": {
     "has": [
      "kv_shared_from"
+    ],
+    "slug": [
+     "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom"
     ]
    },
    "set": {
     "prefill.prune_shared": true
    },
-   "evidence": "Issue #554: shared-KV E2B/E4B/Bolt prefill pruning; opt-out PRUNE_SHARED=0."
+   "evidence": "Issue #554: corrected Bolt boundary preserves DFlash taps. E2B/E4B held after strict concurrent-output divergence; PRUNE_SHARED=1 remains experimental opt-in."
   }
  ]
 }

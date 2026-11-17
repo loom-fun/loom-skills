@@ -95,12 +95,14 @@ class SharedPruningTests(unittest.TestCase):
     def test_chunk_default_and_explicit_overrides(self):
         tree = ast.parse((PORT / "starter/build.py").read_text())
         node = next(n for n in tree.body if isinstance(n, ast.If) and ast.unparse(n.test) == "a.prefill is None")
-        for arch, shared, moe, explicit, configured, expected in (
-            ("gemma4", 15, False, None, None, 2048), ("gemma4", None, False, None, None, 1024),
-            ("qwen3", 15, False, None, None, 1024), ("gemma4", None, True, None, None, 4096),
-            ("gemma4", 15, False, 1024, None, 1024), ("gemma4", 15, False, None, 4096, 4096)):
+        for arch, shared, moe, adopted, explicit, configured, expected in (
+            ("gemma4", 15, False, True, None, None, 2048), ("gemma4", 15, False, False, None, None, 1024),
+            ("gemma4", None, False, True, None, None, 1024), ("qwen3", 15, False, True, None, None, 1024),
+            ("gemma4", None, True, False, None, None, 4096), ("gemma4", 15, False, True, 1024, None, 1024),
+            ("gemma4", 15, False, False, None, 4096, 4096)):
             args = type("Args", (), {"prefill": explicit})()
-            ns = {"a": args, "cfg": {"arch": arch, "kv_shared_from": shared, "moe": moe, "prefill_capacity": configured}}
+            ns = {"a": args, "cfg": {"arch": arch, "kv_shared_from": shared, "moe": moe, "prefill_capacity": configured},
+                  "RESOLVED": {"choices": {"prefill.prune_shared": {"value": adopted}}}}
             exec(compile(ast.Module(body=[node], type_ignores=[]), "build", "exec"), ns)
             self.assertEqual(args.prefill, expected)
 

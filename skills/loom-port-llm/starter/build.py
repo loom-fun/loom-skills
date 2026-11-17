@@ -66,8 +66,6 @@ import catalog  # noqa: E402  (a kit with a catalog package: hand-written progra
 if (_cdir := catalog.find(HERE)):
     catalog.build(a, cfg, _cdir, a.tokenizer)
     sys.exit(0)
-if a.prefill is None:
-    a.prefill = cfg.get("prefill_capacity") or (4096 if cfg.get("moe") else 2048 if cfg.get("arch") == "gemma4" and cfg.get("kv_shared_from") else 1024)
 chat = cfg.get("chat")
 if not chat:
     sys.exit("config has no 'chat' block: fill it from the model's chat template first (chat_probe.py)")
@@ -94,6 +92,9 @@ DRAFT = {"kind": a.draft, "depth": max(1, min(7, _depth))} if a.draft != "none" 
 # as the environment gen_llm.py and its subprocesses read. A registered variable the caller set wins and marks the build dirty.
 import kb_choices  # noqa: E402
 RESOLVED = kb_choices.apply(cfg, DRAFT["kind"] if DRAFT else None, slug=a.slug)
+if a.prefill is None:
+    _prune_shared = RESOLVED["choices"].get("prefill.prune_shared", {}).get("value", False)
+    a.prefill = cfg.get("prefill_capacity") or (4096 if cfg.get("moe") else 2048 if cfg.get("arch") == "gemma4" and cfg.get("kv_shared_from") and _prune_shared else 1024)
 if DRAFT and DRAFT["kind"] == "dflash":
     sys.path.insert(0, os.path.join(HERE, "draft"))
     import gen_dflash  # noqa: E402
