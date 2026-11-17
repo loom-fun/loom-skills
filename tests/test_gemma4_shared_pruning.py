@@ -66,6 +66,12 @@ class SharedPruningTests(unittest.TestCase):
         self.assertIn("\n%info_t\n}", pruned)
         self.assertLess(kept.index("@g_dfl_tap[%t]"), kept.index("// KV-shared layers:"))
 
+    def test_missing_dflash_capture_fails_closed(self):
+        source = self.module().replace("@llm_advance()", "@llm_advance() launch(%features: buffer)", 1)
+        with patch.dict(os.environ, {"PRUNE_SHARED": "1"}):
+            with self.assertRaisesRegex(ValueError, "DFlash feature capture"):
+                self.ns["prune_shared_rows"](source)
+
     def test_final_layer_tap_leaves_program_unchanged(self):
         source = self.module().replace("\n}\ncommand.def public @llm_verify", "\n  kernel.launch @g_dfl_tap[%t](%t, %slot, %x, %features)\n}\ncommand.def public @llm_verify", 1)
         with patch.dict(os.environ, {"PRUNE_SHARED": "1"}):

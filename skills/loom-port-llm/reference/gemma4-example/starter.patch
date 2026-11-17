@@ -1299,7 +1299,7 @@
  def gdn_layer(i, b, nm, sz, par):
      """Gated delta-net token mixer of layer i: h -> o (VD wide), then o16 for the output GEMM."""
      g = GDN
-@@ -5403,6 +5738,91 @@
+@@ -5403,6 +5738,93 @@
      return (head + sizes + "  scf.if %outsel {\n" + gather + comp + scatter + "  } else {\n" + tail + "  }\n")
  
  
@@ -1369,6 +1369,8 @@
 +    # DFlash consumes every row at its feature taps, including shared-KV layers. Keep those rows through
 +    # the last actual capture; only subsequent shared layers have no non-output consumer.
 +    tap = text.rfind("kernel.launch @g_dfl_tap[", a, b)
++    if "%features: buffer" in text[a:text.index("\n", a)] and tap < 0:
++        raise ValueError("shared-KV pruning: DFlash feature capture not found")
 +    if tap >= m:
 +        after = re.search(r"\n  // ---- layer \d+\b", text[tap:b])
 +        if after is None:   # the last layer is tapped: every layer's rows are needed
