@@ -23,9 +23,9 @@ def metadata(rate):
 
 
 class SamplingMetadata(unittest.TestCase):
-    def load(self, value):
+    def load(self, value, gpu="strix-halo"):
         with mock.patch('urllib.request.urlopen', return_value=io.BytesIO(json.dumps(value).encode())):
-            return card_lib.published_decode(SLUG)
+            return card_lib.published_decode(SLUG, gpu=gpu)
 
     def test_transport_and_json_failure_stop_before_plan_output(self):
         for failure in (URLError('offline'), HTTPError('url', 503, 'unavailable', {}, None), TimeoutError('timed out')):
@@ -77,3 +77,34 @@ class SamplingMetadata(unittest.TestCase):
         self.assertEqual(job['repeat_rows'], 3)
         self.assertEqual(job['steps'].count('perf:fun:1'), 6)
         self.assertFalse(any(s.startswith('extend:') for s in job['steps']))
+
+    def test_actual_target_gpu_controls_classification(self):
+        card = metadata(60.0)
+        card['devices']['radeon-r9700'] = metadata(300.0)['devices']['strix-halo']
+        # A current nested row takes precedence over any old root representation.
+        card['performance'] = metadata(900.0)['devices']['strix-halo']['performance']
+        self.assertEqual(card_lib.sampling_plan(self.load(card)), (3, 1))
+        self.assertEqual(card_lib.sampling_plan(self.load(card, 'radeon-r9700')), (6, 3))
+
+    def test_legacy_rate_is_never_invented_for_another_gpu(self):
+        legacy = {'schema': card_lib.LEGACY_SCHEMA_IDS[0],
+                  'performance': metadata(300.0)['devices']['strix-halo']['performance']}
+        self.assertEqual(self.load(legacy), 300.0)
+        self.assertIsNone(self.load(legacy, 'radeon-r9700'))
+        self.assertIsNone(self.load(metadata(300.0), 'radeon-r9700'))
+
+    def test_job_generators_use_the_target_gpu_rate(self):
+        card = metadata(60.0)
+        card['devices']['radeon-r9700'] = metadata(300.0)['devices']['strix-halo']
+        for main, gpu, sessions, repeats in ((ab_jobs.main, 'strix-halo', 3, 1),
+                                             (ab_jobs.main, 'radeon-r9700', 6, 3),
+                                             (device_jobs.main, 'radeon-r9700', 6, 3)):
+            with self.subTest(generator=main.__module__, gpu=gpu):
+                output = io.StringIO()
+                with mock.patch('urllib.request.urlopen', return_value=io.BytesIO(json.dumps(card).encode())), \
+                        contextlib.redirect_stdout(output):
+                    main(['--device', gpu, '--preset', 'iterate', SLUG])
+                job, = json.loads(output.getvalue())['jobs']
+                variant = 'fun' if main is ab_jobs.main else 'card'
+                self.assertEqual(job['steps'].count(f'perf:{variant}:1'), sessions)
+                self.assertEqual(job.get('repeat_rows', 1), repeats)
