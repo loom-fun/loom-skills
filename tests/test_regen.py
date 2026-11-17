@@ -888,6 +888,19 @@ class PackageTest(Base):
         self.assertFalse([c for c in calls if "upload" in c])
         self.assertEqual(st.jobs[JOB]["package"]["revision"], "h" * 40)
 
+    def test_a_card_steps_gpu_preset_on_the_head_is_kept_and_compares_equal(self):
+        st, calls, _ = self.run_package("--dry-run", "--slugs", SLUG)
+        pkg = os.path.join(st.work, "package", SLUG, "pkg")
+        m = json.load(open(os.path.join(pkg, "model.json")))
+        first = next(iter(m["presets"]))
+        m["presets"][first + "-r9700"] = dict(m["presets"][first], execution={**m["presets"][first].get("execution", {}), "context_capacity": 4096})
+        json.dump(m, open(os.path.join(pkg, "model.json"), "w"), indent=1)   # the R9700 card step added its preset to the head
+        shutil.rmtree(self.snap)
+        shutil.copytree(pkg, self.snap)
+        st, calls, _ = self.run_package("--dry-run", "--slugs", SLUG)
+        out = json.load(open(os.path.join(st.work, "package", SLUG, "pkg", "model.json")))
+        self.assertIn(first + "-r9700", out["presets"])   # carried over, not stripped by a re-upload
+
     def test_same_programs_but_another_sdk_pin_is_uploaded(self):
         # the head holds the canonical programs but an older llm_config.json pin (a package re-pinned from a pre-release): upload, not "already"
         shutil.rmtree(os.path.join(self.snap, "program"))

@@ -98,6 +98,10 @@ def assemble(snap, canon, out, alt_presets=()):
     if bad:
         raise ValueError("model.json differs from the published one beyond the migration: " + ", ".join(f"{k} {p}" for k, p in bad))
     model = carry_over(pub, new)
+    for k in alt_presets:   # the per-GPU presets the card step wrote (make_info.py build --fit / device files) stay: they are the card's, not the build's
+        if k in (pub.get("presets") or {}) and k not in (model.get("presets") or {}):
+            model.setdefault("presets", {})[k] = copy.deepcopy(pub["presets"][k])
+            (model["presets"][k].get("execution") or {}).pop("pool_capacity", None)
     shutil.rmtree(out, ignore_errors=True)
     shutil.copytree(snap, out, ignore=shutil.ignore_patterns(".cache"))
     for d in PROGRAM_FILES:
