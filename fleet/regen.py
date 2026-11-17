@@ -13,6 +13,7 @@
   regen.py publish S.json [--dry-run]                      card-only upload to loom-fun-staging (never loom-fun/*)
   regen.py status  S.json [--status-json status.json]      table; with --status-json: models.<slug>.<gpu> = stage / verdict / run for the dashboard
   regen.py accept  S.json SLUG... --note TEXT              a person's call: greedy text differs only at a near-tie, decide again with that accepted
+  regen.py accept-regression S.json SLUG... --note TEXT   SDK modes: publish a CONFIRMED slowdown as measured (the note names its explanation)
   regen.py adopt   S.json --run RUN                        attach an already running / finished run to the state's jobs (by job name)
 
 Modes. sdk-ab: the SDK migration's A/B (ab_jobs.py --sdk-ab): per model and device ONE job, ABBA on one runner: variant "fun" = the published staging card
@@ -828,6 +829,20 @@ def sdk_line(e):
     return ", ".join(f"{k} {v:+.1f} %" if v is not None else f"{k} n/a" for k, v in (e.get("perf") or {}).items())
 
 
+def card_message(e, dev, run, loom_only, sdk):
+    """the publish message of a card made from a job: where the numbers come from, the SDK delta line, an accepted slowdown's explanation"""
+    msg = f"{card_lib.GPUS[dev]['runner']} results measured on this package (run {run})"
+    if loom_only:
+        msg += (f"; hrx-loom {SDK_NEW} Loom rows vs the previous card's Loom rows (another job, same runner type): " + sdk_line(e)
+                + ("; confirmed by an ABBA job (same job): " + ", ".join(f"{k} {v:+.1f} %" for k, v in e["confirmed"].items()) if e.get("confirmed") else "")
+                + "; llama.cpp rows are the previous card's")
+    elif sdk:
+        msg += f"; hrx-loom {SDK_NEW} vs the previous card on its own SDK pin (same job, ABBA): " + sdk_line(e)
+    if e.get("accepted_regression"):   # a confirmed slowdown published as measured: the message names its explanation
+        msg += "; confirmed slowdown published as measured: " + e["accepted_regression"].split(" (was:")[0]
+    return msg
+
+
 def ingest_full(st, name, e, W):
     """The card's performance, gates and roofline of this device from the job (REGEN_RECIPE: ingest the NEW package)."""
     d, dev, slug = e["dir"], e["device"], e["slug"]
@@ -897,13 +912,7 @@ def ingest_full(st, name, e, W):
     run_tool(build + ["--memory-bytes", str(mem), "--from-info", "info_prev.json", *(["--reset-performance"] if loom_only else []), "--evidence", *ev,
                       "-o", "info_new.json"], W)
     shutil.copy(os.path.join(W, "info_new.json"), os.path.join(out, "info.json"))
-    msg = f"{card_lib.GPUS[dev]['runner']} results measured on this package (run {run})"
-    if loom_only:
-        msg += (f"; hrx-loom {SDK_NEW} Loom rows vs the previous card's Loom rows (another job, same runner type): " + sdk_line(e)
-                + ("; confirmed by an ABBA job (same job): " + ", ".join(f"{k} {v:+.1f} %" for k, v in e["confirmed"].items()) if e.get("confirmed") else "")
-                + "; llama.cpp rows are the previous card's")
-    elif sdk:
-        msg += f"; hrx-loom {SDK_NEW} vs the previous card on its own SDK pin (same job, ABBA): " + sdk_line(e)
+    msg = card_message(e, dev, run, loom_only, sdk)
     return out, hf_head(f"{st.d['opts']['new_org']}/{slug}"), msg
 
 
@@ -1168,6 +1177,39 @@ def cmd_accept(a):
     st.save()
 
 
+def cmd_accept_regression(a):
+    """sdk-ab / sdk-loom: publish a model whose slowdown was CONFIRMED (ABBA) with its own numbers, the regression explained (a note naming the
+    upstream write-up or the cause): the card shows the new SDK's measurement as it is (publish partial progress); the delta line keeps the
+    negative numbers. Only a confirmed perf regression is accepted: gate / func / ktest failures, degraded runners and package stops are not."""
+    st = State(a.state)
+    if st.d["mode"] not in SDK_MODES:
+        die("accept-regression is for the SDK modes (sdk-ab, sdk-loom)")
+    done = []
+    for name, e in st.jobs.items():
+        if e["slug"] not in a.slug or e["stage"] != "needs_decision":
+            continue
+        # the job whose rows go on the card: sdk-loom = the sweep job (not its ABBA confirmation); sdk-ab = the confirming round-2 job
+        if (e.get("prev") if st.d["mode"] == "sdk-loom" else e.get("rerun_of_me")):
+            continue
+        why = e.get("reason") or ""
+        # the hold reasons that mean "a slowdown was CONFIRMED": sdk-loom = its ABBA confirmation was slower; sdk-ab = both runs were slower
+        confirmed = ("ABBA confirmation" in why and "slower than" in why) if st.d["mode"] == "sdk-loom" else ("confirmed regression > " in why)
+        if not confirmed or any(x in why for x in ("gate failed", "degraded runner", "package:", "missing", "undecided")):
+            print(f"{e['slug']} {e['device']}: not a confirmed perf regression, not accepted ({why[:120]})")
+            continue
+        if st.d["mode"] == "sdk-loom":   # the confirmed rows report the ABBA numbers (same job), as a promoted confirmation does
+            abba = next((j for j in st.jobs.values() if j.get("prev") == name and j.get("perf_abba")), None)
+            if abba:
+                rows = e.get("confirm_rows") or []
+                e["confirmed"] = {k: abba["perf_abba"][k] for k in rows if abba["perf_abba"].get(k) is not None}
+                e["perf"] = {**(e.get("perf") or {}), **e["confirmed"]}
+        e.update(stage="collected", decision="promote", accepted_regression=f"{a.note} (was: {why[:300]})")
+        st.log(f"{e['slug']} {e['device']}: confirmed regression accepted for publishing: {a.note}")
+        done.append(f"{e['slug']} {e['device']}")
+    st.save()
+    print("accepted: " + (", ".join(done) or "nothing"))
+
+
 def cmd_adopt(a):
     st = State(a.state)
     jobs = gh_json(["run", "view", a.run, "-R", REPO, "--json", "jobs"])["jobs"]
@@ -1214,7 +1256,8 @@ def main(argv=None):
     p.add_argument("--priority", action="store_true", help="the batches of this plan go to the head of the next submit wave and ignore --max-inflight (a targeted job, not a sweep)")
     p.set_defaults(fn=cmd_plan)
     for name, fn in (("submit", cmd_submit), ("poll", cmd_poll), ("collect", cmd_collect), ("rerun", cmd_rerun), ("ingest", cmd_ingest),
-                     ("publish", cmd_publish), ("package", cmd_package), ("status", cmd_status), ("adopt", cmd_adopt), ("accept", cmd_accept)):
+                     ("publish", cmd_publish), ("package", cmd_package), ("status", cmd_status), ("adopt", cmd_adopt), ("accept", cmd_accept),
+                     ("accept-regression", cmd_accept_regression)):
         q = sub.add_parser(name)
         q.add_argument("state")
         q.set_defaults(fn=fn)
@@ -1226,7 +1269,7 @@ def main(argv=None):
                            "waves (call submit again as jobs finish), so a priority job queued meanwhile waits at most one wave. Default: no cap")
         if name == "status":
             q.add_argument("--status-json")
-        if name == "accept":
+        if name in ("accept", "accept-regression"):
             q.add_argument("slug", nargs="+")
             q.add_argument("--note", required=True, help="what was read: e.g. 'hyphen vs space, log-prob gap < band'")
         if name == "adopt":
