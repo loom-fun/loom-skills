@@ -189,10 +189,12 @@ step "Loom SDK"
 curl -fsSL --retry 3 "https://huggingface.co/$repo/resolve/$([[ $repo_ref == *@* ]] && echo "${repo_ref#*@}" || echo main)/llm_config.json" -o "$out/llm_config.json" || { echo "FAIL: no llm_config.json in $repo"; exit 1; }
 ROOT_BASE=${LOOM_ROOT:-$WORK/loom}
 root=$("$SV/ensure_sdk.sh" "$ROOT_BASE" "$out/llm_config.json" 2> "$out/install.log") || { tail "$out/install.log"; exit 1; }   # the job card's own SDK (loom-fetch of the card)
+# Explicit CI pins contain a colon, which uv rejects in a venv path (PATH separator).
+# Keep the selector intact for installation and normalize only the directory name.
 # job "sdk": the tools' SDK differs from the card's pin (an old card on 0.1.0 next to a package built here on 0.2.0): install.log is that SDK's
 jsdk=$(q "print(j.get('sdk') or e.get('sdk') or 'card')"); troot=$root
 if [ "$jsdk" != card ]; then
-  troot=$(LOOM_VERSION=$jsdk "$SV/ensure_sdk.sh" "$WORK/loom-sdk-$jsdk" "" 2> "$out/install.log") || { tail "$out/install.log"; echo "FAIL: SDK $jsdk"; exit 1; }
+  troot=$(LOOM_VERSION=$jsdk "$SV/ensure_sdk.sh" "$WORK/loom-sdk-${jsdk//:/-}" "" 2> "$out/install.log") || { tail "$out/install.log"; echo "FAIL: SDK $jsdk"; exit 1; }
 fi
 export LOOM_ROOT=$troot VENV=$troot/.venv; T=$troot/.tools/bin/python
 echo "SDK roots: tools $troot (job sdk $jsdk); job card $root"
@@ -201,7 +203,7 @@ sdk_root() {   # sdk_root VARIANT -> SDKR = the root of the SDK the variant is s
   local v=$1 s r; SDKR=
   [ -n "${SDKROOT[$v]:-}" ] && { SDKR=${SDKROOT[$v]}; return 0; }
   s=$(qv "$v" "print(v.get('sdk') or 'card')")
-  if [ "$s" != card ]; then r=$(LOOM_VERSION=$s "$SV/ensure_sdk.sh" "$WORK/loom-sdk-$s" "" 2> "$out/install_$v.log") || { tail -5 "$out/install_$v.log" >&2; return 1; }
+  if [ "$s" != card ]; then r=$(LOOM_VERSION=$s "$SV/ensure_sdk.sh" "$WORK/loom-sdk-${s//:/-}" "" 2> "$out/install_$v.log") || { tail -5 "$out/install_$v.log" >&2; return 1; }
   elif [ "$(qv "$v" "print('build' in v)")" = True ]; then r=$troot
   else r=$("$SV/ensure_sdk.sh" "$ROOT_BASE" "$D/$v/pkg/llm_config.json" 2> "$out/install_$v.log") || { tail -5 "$out/install_$v.log" >&2; return 1; }; fi
   SDKROOT[$v]=$r; SDKR=$r; cp "$r/loom-install.json" "$out/sdk_$v.json" 2>/dev/null
