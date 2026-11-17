@@ -32,7 +32,7 @@ class FetchPreset(unittest.TestCase):
         self.assertFalse(missing_preset("loom-fetch https://huggingface.co/o/r/resolve/main/model.json --preset=chat --output=x"))
 
     def test_every_golden_fetch_line_names_its_preset(self):
-        files = glob.glob(os.path.join(GOLDENS, "*", "expected", "README.md")) + glob.glob(os.path.join(GOLDENS, "legacy", "*", "README.md"))
+        files = glob.glob(os.path.join(GOLDENS, "*", "expected", "README.md")) + glob.glob(os.path.join(GOLDENS, "legacy", "*", "README.md")) + glob.glob(os.path.join(GOLDENS, "*", "repo", "README.md"))
         seen = 0
         for f in files:
             text = open(f, encoding="utf-8").read()

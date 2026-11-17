@@ -278,11 +278,12 @@ def cmd_publish(a):
         f.write("\n")
     subprocess.run([a.loom_fetch, card_path, "--update-lock", "--all-variants", "--no-input", "--quiet"],
                    check=True)
-    # loom-fetch picks the only preset by itself. Shared materialization fails on Windows; copy works everywhere.
+    # Always name the preset (a preset added later must not break this command: loom-fetch refuses a multi-preset card without one).
+    # Shared materialization fails on Windows; copy works everywhere.
     presets = list(model.get("presets", {}))
     install = model["model"]["id"].split("/")[-1]
     fetch_args = [f"{HF}/{a.target}/resolve/main/model.json",
-                  *([f"--preset={presets[0]}"] if len(presets) > 1 else []), "--materialize=copy"]
+                  f"--preset={presets[0]}", "--materialize=copy"]
     # No --memory_bytes: the default elastic pool has no limit, and any fixed value is a guess per machine.
     serve_args = ["'--device=amdgpu://?completion_spin_ns=4294967295'"]  # active wait keeps the fabric clocks up (loom-setup serve.sh)
     fetch = " ".join(["loom-fetch", *fetch_args, f"--output={install}"])
