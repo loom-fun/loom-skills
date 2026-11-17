@@ -79,7 +79,8 @@ class AttentionRangeMask(unittest.TestCase):
             with path.open() as stream:
                 cfg = json.load(stream)
             result = resolve.resolve_full(cfg, slug=path.parent.name)
-            self.assertEqual(result['values']['decode.attn.range_mask'], path.parent.name == target, path.parent.name)
+            for key in ('decode.attn.range_mask', 'decode.attn.full_blocks'):
+                self.assertEqual(result['values'][key], path.parent.name == target, (path.parent.name, key))
 
     def test_paged_rewrite_matches_only_exact_mask(self):
         helpers = generator_helper()

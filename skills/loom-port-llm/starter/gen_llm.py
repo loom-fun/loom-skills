@@ -17,6 +17,7 @@ import json, math, os, subprocess, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate, chunk_mode, fused_mode  # noqa: E402
 from formats import SPLIT, SCALE_DIV  # noqa: E402
+from attention_masks import full_blocks  # noqa: E402
 
 CFG = json.load(open(os.environ.get("LLM_CONFIG") or sys.argv[1]))
 H = CFG["hidden"]; HG = H // 32          # hidden size, 32-value groups per hidden row
@@ -3204,6 +3205,8 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
     if P == "g" and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans
         text = multi_token_split(text, P, U, ATTN_MT, attn_rules.ATTN_GQA_FROM - 1 if gqa_on else None)   # gqa body from visible = ATTN_GQA_FROM, i.e. position FROM - 1
     text = attention_paged_range_masks(text)
+    if P == "g" and D == 64 and pa and ILP == 1 and not gqa_on and not attn_rules.multi_token(U, KVH):
+        text = full_blocks(text, f"{P}_attention_split", U)
     if D != 128:
         text = (text.replace("x32x4xf16", f"x32x{DL}xf16").replace("vector<4xf16>", f"vector<{DL}xf16>")
                 .replace("x32x4xf32", f"x32x{DL}xf32").replace("vector<4xf32>", f"vector<{DL}xf32>")

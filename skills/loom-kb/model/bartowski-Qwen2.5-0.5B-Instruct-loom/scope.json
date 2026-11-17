@@ -26,9 +26,10 @@
     ]
    },
    "set": {
-    "decode.attn.range_mask": true
+    "decode.attn.range_mask": true,
+    "decode.attn.full_blocks": true
    },
-   "evidence": "#1145 candidate; opt-in limited to the dual-GPU representative pending DevLab ABBA ratchet."
+   "evidence": "#1145 full-block candidate: kernel run44170614219 exact13/13 cases and1.303\u21921.217ms; model ABBA ratchet pending."
   }
  ]
 }
